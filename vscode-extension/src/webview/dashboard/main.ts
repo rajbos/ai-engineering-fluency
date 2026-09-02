@@ -1,6 +1,6 @@
 // Import shared utilities
 import { BUTTONS } from "../shared/buttonConfig";
-import { createButton, el } from "../shared/domUtils";
+import { createButton, el, setHtml } from "../shared/domUtils";
 import { escapeHtml, formatCost, formatNumber, formatCompact, setCompactNumbers } from "../shared/formatUtils";
 import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
@@ -8,6 +8,8 @@ import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
 import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import type { ModelUsage } from "../shared/types";
+import { registerMessageHandler } from "../shared/messageHandler";
+import { initializeWebviewLocalization, setCurrentLanguage } from "../shared/localization";
 
 interface UserSummary {
   userId: string;
@@ -77,9 +79,16 @@ declare global {
 }
 
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = getWindowData<DashboardStats>('__INITIAL_DASHBOARD__');
+const initialData = getWindowData<DashboardStats & { localization?: Record<string, string> }>('__INITIAL_DASHBOARD__');
 console.log("[CopilotTokenTracker] dashboard webview loaded");
-console.log("[CopilotTokenTracker] initialData:", initialData);
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+	console.log("[CopilotTokenTracker] Dashboard localization initialized for language:", language);
+}
 
 /** Active backend config, set once from __DASHBOARD_CONFIG__ during bootstrap. */
 let currentConfig: DashboardConfig | null = null;
@@ -182,6 +191,7 @@ function renderShell(root: HTMLElement, stats: DashboardStats): void {
     createButton(BUTTONS["btn-details"]),
     createButton(BUTTONS["btn-chart"]),
     createButton(BUTTONS["btn-usage"]),
+    createButton(BUTTONS["btn-efficiency"]),
     createButton(BUTTONS["btn-environmental"]),
     createButton(BUTTONS["btn-diagnostics"]),
     createButton(BUTTONS["btn-maturity"]),
@@ -460,7 +470,7 @@ function buildFluencyDetailPanel(member: TeamMemberStats): HTMLElement {
       for (const tip of cat.tips) {
         const tipEl = document.createElement("div");
         tipEl.className = "fluency-tip";
-        tipEl.innerHTML = renderTipHtml(tip);
+        setHtml(tipEl, renderTipHtml(tip));
         tipsSection.append(tipEl);
       }
       card.append(tipsSection);
@@ -593,6 +603,7 @@ function showTeamServerView(url: string): void {
     createButton(BUTTONS["btn-details"]),
     createButton(BUTTONS["btn-chart"]),
     createButton(BUTTONS["btn-usage"]),
+    createButton(BUTTONS["btn-efficiency"]),
     createButton(BUTTONS["btn-environmental"]),
     createButton(BUTTONS["btn-diagnostics"]),
     createButton(BUTTONS["btn-maturity"]),
@@ -633,14 +644,16 @@ function wireButtons(): void {
   document.getElementById("btn-environmental")?.addEventListener("click", () => {
     vscode.postMessage({ command: "showEnvironmental" });
   });
+  document.getElementById("btn-efficiency")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "showEfficiency" });
+  });
 
   // Note: No dashboard button handler - users are already on the dashboard
   wireExtensionPointButtons(vscode);
 }
 
 // Listen for messages from the extension
-window.addEventListener("message", (event) => {
-  const message = event.data;
+registerMessageHandler((message: any) => {
   switch (message.command) {
     case "dashboardData":
       console.log(

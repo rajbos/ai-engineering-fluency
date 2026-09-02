@@ -1,14 +1,15 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { readFileSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { createRequire } from 'module';
 import {
 	encodeSession, decodeSession, makeClaims,
 	COOKIE_NAME, OAUTH_STATE_COOKIE, SESSION_MAX_AGE,
 } from '../session.js';
 import {
 	getUserById, getUserByGithubId, getUploadsForUser, upsertUser,
-	getAdminUserSummaries, getAdminDailyTotals,
+	getAdminUserSummaries, getAdminDailyTotals, isConfiguredAdminLogin,
 	type UploadRow, type UserRow, type UserUsageSummary, type AdminDailyRow,
 } from '../db.js';
 import { OAUTH_STATE_MAX_AGE_SECONDS } from '../config.js';
@@ -22,14 +23,51 @@ const DEPLOY_SHA    = process.env.DEPLOY_SHA    ?? 'unknown';
 const DEPLOY_BRANCH = process.env.DEPLOY_BRANCH ?? 'unknown';
 const DEPLOY_DATE   = process.env.DEPLOY_DATE   ?? 'unknown';
 
-// Load Chart.js UMD bundle once at startup — copied to dist/ by esbuild.js
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const _chartJsCode: string = (() => {
+// Load Chart.js UMD bundle once at startup.
+// Bundled build: esbuild.js copies it next to dist/server.js.
+// Library build: locate chart.js through Node's own resolution, since a downstream
+// server consuming this package has its own dist/ layout and may run from any cwd.
+
+/**
+ * Resolve chart.js's UMD bundle via Node module resolution.
+ *
+ * chart.js ships an `exports` map that refuses both `chart.js/dist/*` and
+ * `chart.js/package.json`, so neither can be resolved directly. The package root
+ * *is* resolvable though, so we resolve that and walk to its sibling UMD file.
+ * Resolution starts from this module's location, which means it finds chart.js
+ * whether it is a direct dependency or hoisted into a parent node_modules — and,
+ * unlike a cwd-based guess, it does not depend on where the process was started.
+ */
+function resolveChartJsUmd(): string | undefined {
 	try {
-		return readFileSync(join(__dirname, 'chart.min.js'), 'utf-8');
+		const require_ = createRequire(__filename);
+		// e.g. <root>/node_modules/chart.js/dist/chart.cjs → <root>/node_modules/chart.js/dist
+		return join(dirname(require_.resolve('chart.js')), 'chart.umd.min.js');
 	} catch {
-		return '/* chart.js not bundled — run npm run build in sharing-server/ */';
+		return undefined;
 	}
+}
+
+const _chartJsCode: string = (() => {
+	const candidates = [
+		process.env.CHART_JS_PATH,
+		join(__dirname, 'chart.min.js'),
+		join(__dirname, '..', 'chart.min.js'),
+		resolveChartJsUmd(),
+	].filter((p): p is string => Boolean(p));
+
+	for (const candidate of candidates) {
+		try {
+			return readFileSync(candidate, 'utf-8');
+		} catch { /* try next candidate */ }
+	}
+	console.warn(
+		'[dashboard] Chart.js not found — charts will not render. ' +
+		'Run `npm run build` in sharing-server/, or if you are consuming this package as a ' +
+		'library, install the optional peer dependency (`npm install chart.js`) or point ' +
+		'CHART_JS_PATH at a chart.umd.min.js file.',
+	);
+	return '/* chart.js not found — see the server log for how to provide it */';
 })();
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -116,6 +154,7 @@ dashboard.get('/auth/github/callback', async (c) => {
 	if (allowedOrg) {
 		// Prefer a server-side PAT (already SSO-authorized) so the user's OAuth token
 		// doesn't need read:org or SAML SSO authorization.
+		const usingServerToken = Boolean(process.env.GITHUB_ORG_CHECK_TOKEN);
 		const checkToken = process.env.GITHUB_ORG_CHECK_TOKEN || accessToken;
 		try {
 			const memberRes = await fetch(`https://api.github.com/orgs/${allowedOrg}/members/${userData.login}`, {
@@ -127,9 +166,27 @@ dashboard.get('/auth/github/callback', async (c) => {
 				signal: AbortSignal.timeout(10_000),
 			});
 			if (memberRes.status !== 204) {
-				return c.html(errorPage(`Access denied: you are not a member of the "${allowedOrg}" organization.`), 403);
+				// Distinguish "genuinely not a member" (404) from "the check itself is
+				// broken" (401/403 — typically an expired/invalid GITHUB_ORG_CHECK_TOKEN,
+				// or a user token lacking read:org/SSO authorization when no server PAT
+				// is configured). Both cases otherwise look identical to the end user.
+				const brokenCheck = memberRes.status === 401 || memberRes.status === 403;
+				console.error(
+					`[auth/callback] Org membership check for '${userData.login}' in '${allowedOrg}' returned ` +
+					`${memberRes.status} (using ${usingServerToken ? 'GITHUB_ORG_CHECK_TOKEN' : "the user's own token"}).` +
+					(brokenCheck ? ` Likely cause: ${usingServerToken ? 'GITHUB_ORG_CHECK_TOKEN is invalid/expired — rotate it' : "the user's token lacks read:org scope or SSO authorization"}.` : ''),
+				);
+				let adminDetail = '';
+				if (isConfiguredAdminLogin(userData.login)) {
+					adminDetail = brokenCheck
+						? ` (Admin diagnostic: the membership check itself failed with HTTP ${memberRes.status} — ` +
+						  `${usingServerToken ? 'GITHUB_ORG_CHECK_TOKEN is likely invalid or expired. Rotate it.' : "your token likely lacks read:org scope or SSO authorization for this org."})`
+						: ` (Admin diagnostic: the membership check returned HTTP ${memberRes.status} — not a member, per GitHub.)`;
+				}
+				return c.html(errorPage(`Access denied: you are not a member of the "${allowedOrg}" organization.${adminDetail}`), 403);
 			}
-		} catch {
+		} catch (err) {
+			console.error(`[auth/callback] Org membership check for '${userData.login}' in '${allowedOrg}' failed with a network/timeout error:`, err);
 			return c.html(errorPage('Unable to verify organization membership. Please try again.'), 502);
 		}
 	}
@@ -268,7 +325,7 @@ function layout(title: string, body: string): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${h(title)} — Copilot Token Tracker</title>
+<title>${h(title)} — AI Engineering Fluency</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -277,7 +334,8 @@ function layout(title: string, body: string): string {
   /* ── Header ── */
   .header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 24px;
     display: flex; align-items: center; gap: 12px; }
-  .header h1 { margin: 0; font-size: 1.1rem; color: #58a6ff; }
+  .header h1 { margin: 0; font-size: 1.1rem; color: #58a6ff; display: flex; align-items: center; gap: 8px; }
+  .header-icon { height: 32px; width: auto; display: block; }
   .header .spacer { flex: 1; }
   .header a { color: #8b949e; text-decoration: none; font-size: 0.875rem; }
   .header a:hover { color: #e6edf3; }
@@ -434,7 +492,7 @@ function loginPage(): string {
   </p>` : '';
 
 	return layout('Sign In', `
-<div class="header"><h1>🤖 Copilot Token Tracker Sharing</h1></div>
+<div class="header"><h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"> Sharing</h1></div>
 <div class="content" style="text-align:center; margin-top: 80px; align-items:center">
   <h2 style="color:#e6edf3">Sign in to view your usage dashboard</h2>
   <p style="color:#8b949e">Your data is linked to your GitHub account. No account creation needed.</p>
@@ -983,7 +1041,7 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
 
 	return layout(`${user.github_login}'s Dashboard`, `
 <div class="header">
-  <h1>🤖 Copilot Token Tracker</h1>
+  <h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"></h1>
   <span class="spacer"></span>
   ${fluencyBadgeHtml}
   ${isAdmin ? `<a href="/admin" style="margin-left:8px;color:#e3b341">Admin Dashboard</a><span style="margin-left:8px;color:#e6edf3;font-size:0.875rem;font-weight:600">My Dashboard</span>` : ''}
@@ -1351,7 +1409,7 @@ function adminDashboardPage(
 
 	return layout('Admin Dashboard', `
 <div class="header">
-  <h1>🤖 Copilot Token Tracker</h1>
+  <h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"></h1>
   <span class="spacer"></span>
   <span style="color:#e6edf3;font-size:0.875rem;font-weight:600">Admin Dashboard</span>
   <a href="/dashboard" style="margin-left:8px">My Dashboard</a>
@@ -1374,7 +1432,7 @@ var ADMIN_CHART_DATA = ${safeJson(chartData)};
 
 function errorPage(message: string): string {
 	return layout('Error', `
-<div class="header"><h1>🤖 Copilot Token Tracker Sharing</h1></div>
+<div class="header"><h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"> Sharing</h1></div>
 <div class="content" style="text-align:center; margin-top:80px; align-items:center">
   <h2 style="color:#e6edf3">Something went wrong</h2>
   <p style="color:#8b949e">${h(message)}</p>

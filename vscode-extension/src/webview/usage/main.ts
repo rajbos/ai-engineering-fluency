@@ -1,9 +1,12 @@
 // Usage Analysis webview
-import { el } from '../shared/domUtils';
+import { el, setHtml } from '../shared/domUtils';
+import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
-import { escapeHtml, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
+import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -11,9 +14,17 @@ import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
+import { getModelBillingProvider } from '../../../../src/chartDataBuilder';
 import { getLongContextInfo } from '../../../../src/tokenEstimation';
-import type { ModelPricing } from '../../../../src/types';
+import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold } from '../../../../src/modelEfficiency';
+import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
+import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
+import { billingExtGroupCostsHtml } from './billingCoverage';
+import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
+import { isSwitchableTab } from './switchableTabs';
+import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from './modelLeaderboard';
+import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -47,6 +58,7 @@ type UsageAnalysisPeriod = {
 		switchCount: number;
 	};
 	contextWindow?: ContextWindowStats;
+	modelEfficiency?: ModelEfficiencyUsage;
 };
 
 type TodaySessionSummary = {
@@ -68,7 +80,9 @@ type TodaySessionSummary = {
 	contextWindowLimit?: number;
 	contextReachedTokens?: number;
 	durationMs?: number;
+	activeDurationMs?: number;
 	workspace?: string;
+	subAgentCalls?: number;
 };
 
 type InsightSeverity = 'tip' | 'opportunity' | 'celebration';
@@ -86,17 +100,77 @@ type EvaluatedInsight = {
 	allowToast?: boolean;
 };
 
-type CopilotApiBalance = {
-	/** Monthly budget in USD (entitlement / 100). */
-	budgetUsd: number;
-	/** Monthly budget in AI Credits (budgetUsd * 100). */
-	budgetAiCredits: number;
-	/** Remaining AI Credits from the API quota snapshot. */
-	remainingAiCredits: number;
-	/** AI Credits consumed across all channels (IDE, web, cloud agent, review agent). */
-	usedAiCredits: number;
-	/** Percentage of budget still available. */
-	pctAvailable: number;
+// ── Correction-moment types ─────────────────────────────────────────────────
+// These mirror the interfaces in src/types.ts (CorrectionMoment etc.) and must
+// be kept in sync manually — the webview bundle cannot import them directly.
+
+type CorrectionMomentType = 'user-correction' | 'edit-retry' | 'edit-self-correction' | 'tool-error' | 'agent-self-correction';
+
+type CorrectionMoment = {
+	type: CorrectionMomentType;
+	turnNumber: number;
+	timestamp: string | null;
+	snippet: string;
+	tool?: string;
+	file?: string;
+	retried?: boolean;
+	matchedPattern?: string;
+};
+
+type CorrectionCounts = {
+	userCorrections: number;
+	editRetries: number;
+	editSelfCorrections: number;
+	toolErrors: number;
+	toolErrorsRetried: number;
+	agentSelfCorrections: number;
+};
+
+type CorrectionSessionEntry = {
+	file: string;
+	title?: string | null;
+	lastInteraction?: string | null;
+	moments: CorrectionMoment[];
+	totalMoments?: number;
+};
+
+type CorrectionRepoGroup = {
+	repository: string;
+	sessions: CorrectionSessionEntry[];
+	counts: CorrectionCounts;
+	sessionsWithMoments: number;
+};
+
+type CorrectionReport = {
+	sessionsPerRepo: number;
+	repos: CorrectionRepoGroup[];
+	counts: CorrectionCounts;
+	sessionsWithMoments: number;
+};
+
+// ── Repeated-task types ─────────────────────────────────────────────────────
+// Mirror the interfaces in src/types.ts (RepeatedTaskReport etc.) — keep in
+// sync manually; the webview bundle cannot import them directly.
+
+type RepeatedTaskSessionRef = {
+	file: string;
+	title?: string | null;
+	lastInteraction?: string | null;
+	repository?: string;
+};
+
+type RepeatedTaskCluster = {
+	representativePrompt: string;
+	sessionCount: number;
+	repositories: string[];
+	sessions: RepeatedTaskSessionRef[];
+	sharedKeywords: string[];
+};
+
+type RepeatedTaskReport = {
+	minClusterSize: number;
+	sessionsScanned: number;
+	clusters: RepeatedTaskCluster[];
 };
 
 type UsageAnalysisStats = {
@@ -112,8 +186,15 @@ type UsageAnalysisStats = {
 	currentWorkspacePaths?: string[];
 	suppressedUnknownTools?: string[];
 	todaySessions?: TodaySessionSummary[];
+	recentSessions?: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] };
 	use24HourTime?: boolean;
+	/** When true (default), rows tagged "auto" are hidden from the Tool Usage tables so only intentional tool calls are shown. */
+	hideAutomaticToolCalls?: boolean;
 	insights?: EvaluatedInsight[];
+	/** Correction-moment report: per-repo, over each repo's most recent sessions. Null when no moments were detected. */
+	correctionReport?: CorrectionReport | null;
+	/** Repeated-task candidates (skill suggestions). Null when no repeated task was found. */
+	repeatedTasks?: RepeatedTaskReport | null;
 	curationAnalysis?: ToolCurationAnalysis | null;
 	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
 	sessionColumnSettings?: { enabledColumns?: string[] };
@@ -264,6 +345,9 @@ interface UsageWebviewState {
 }
 
 const vscode = acquireVsCodeApi<UsageWebviewState>();
+const notifyUsageWebviewReady = createUsageWebviewReadyNotifier(
+	(message) => vscode.postMessage(message),
+);
 const curationTraceOnceKeys = new Set<string>();
 
 /** Collapsed state of the "About This Dashboard" info box, restored from webview state. */
@@ -283,15 +367,28 @@ function traceCurationOnce(key: string, stage: string, details?: Record<string, 
 	traceCuration(stage, details);
 }
 
-type InitialUsageData = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null; missedPotential?: MissedPotentialWorkspace[]; worktreeScanRoots?: string[] };
+type WorktreeBackgroundScanData = { scannedAt: string; totalBytes: number; worktreeCount: number; worktrees: unknown[] };
+type InitialUsageData = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null; missedPotential?: MissedPotentialWorkspace[]; worktreeScanRoots?: string[]; localization?: Record<string, string>; worktreeBackgroundScan?: WorktreeBackgroundScanData | null };
 const initialData = getWindowData<InitialUsageData>('__INITIAL_USAGE__');
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 let hygieneMatrixState: WorkspaceCustomizationMatrix | null = null;
 const repoAnalysisState = new Map<string, RepoAnalysisRecord>();
+/** Paths with an in-flight hygiene analysis; drives the disabled/secondary "Analyzing…" button state. */
+const repoAnalysisInFlight = new Set<string>();
 let selectedRepoPath: string | null = null;
 let isSwitchingRepository = false;
 let isBatchAnalysisInProgress = false;
+/** True while the single "Analyze Repo for Best Practices" analysis (no workspace matrix) runs. */
+let isSingleRepoAnalysisInProgress = false;
 let currentWorkspacePaths: string[] = [];
 let activeTab = 'activity';
+let pendingTabAnchor: string | null = null;
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentInsights: EvaluatedInsight[] = [];
 // Persisted across stats refreshes so the curation section doesn't disappear
@@ -331,7 +428,14 @@ type WorktreeScanStatus = {
 
 // Worktree discovery tab state
 let worktreeRoots: string[] = initialData?.worktreeScanRoots ? [...initialData.worktreeScanRoots] : [];
-let worktreeResults: WorktreeResult[] = [];
+let worktreeResults: WorktreeResult[] = initialData?.worktreeBackgroundScan
+	? initialData.worktreeBackgroundScan.worktrees.map(sanitizeWorktreeResult)
+	: [];
+// Set when worktreeResults reflects the once-daily background scan rather than a live/manual
+// scan the user just ran — used to show a "found automatically" banner instead of empty state.
+let worktreeBackgroundScanMeta: { scannedAt: string; totalBytes: number } | null = initialData?.worktreeBackgroundScan
+	? { scannedAt: initialData.worktreeBackgroundScan.scannedAt, totalBytes: initialData.worktreeBackgroundScan.totalBytes }
+	: null;
 let worktreeScanInProgress = false;
 let worktreeScanStatus: WorktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
 let worktreeScanError: string | null = null;
@@ -441,7 +545,7 @@ function renderUsageLoadingState(initialMessage = 'Loading usage analysis...'): 
 		return `<div class="${cls}" id="${s.id}"><span class="ul-ico">${ico}</span><span class="ul-lbl">${escapeHtml(s.label)}</span><span class="ul-cnt" id="${s.id}-cnt"></span></div>`;
 	}).join('');
 
-	root.innerHTML = `${USAGE_LOADING_CSS}
+	setHtml(root, `${USAGE_LOADING_CSS}
 <div id="usage-loading-wrap">
   <div id="usage-loading-card">
     <div id="ul-header">
@@ -458,7 +562,7 @@ function renderUsageLoadingState(initialMessage = 'Loading usage analysis...'): 
     <div id="ul-track"><div id="ul-fill" class="ul-indeterminate"></div></div>
     <div id="ul-steps">${stepsHtml}</div>
   </div>
-</div>`;
+</div>`);
 }
 
 function _ulSetDone(id: string): void {
@@ -466,7 +570,7 @@ function _ulSetDone(id: string): void {
 	if (!el) { return; }
 	el.className = 'ul-step ul-done';
 	const ico = el.querySelector('.ul-ico');
-	if (ico) { ico.innerHTML = '<span class="ul-pop">✓</span>'; }
+	if (ico) { setHtml(ico, '<span class="ul-pop">✓</span>'); }
 }
 
 function _ulSetActive(id: string): void {
@@ -474,7 +578,7 @@ function _ulSetActive(id: string): void {
 	if (!el) { return; }
 	el.className = 'ul-step ul-active';
 	const ico = el.querySelector('.ul-ico');
-	if (ico) { ico.innerHTML = '<span class="ul-spin">↻</span>'; }
+	if (ico) { setHtml(ico, '<span class="ul-spin">↻</span>'); }
 }
 
 function _ulSetCnt(id: string, text: string): void {
@@ -563,7 +667,7 @@ function showLoadError(message: string): void {
 	container.style.cssText = 'padding: 32px; text-align: center; font-size: 14px;';
 	const icon = document.createElement('div');
 	icon.style.cssText = 'font-size: 24px; margin-bottom: 12px;';
-	icon.innerHTML = statusBadgeHtml('❌', 'Error');
+	setHtml(icon, statusBadgeHtml('❌', 'Error'));
 	const msg = document.createElement('div');
 	msg.style.cssText = 'color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;';
 	msg.textContent = message;
@@ -596,6 +700,8 @@ type RepoPrInfo = {
   aiAuthoredPrs: number;
   aiReviewRequestedPrs: number;
   aiDetails: RepoPrDetail[];
+  userAuthoredPrs?: number;
+  userMergedPrs?: number;
   error?: string;
 };
 
@@ -603,30 +709,7 @@ type RepoPrStatsResult = {
   repos: RepoPrInfo[];
   authenticated: boolean;
   since: string;
-};
-
-type AgentRepoSummary = {
-  owner: string;
-  repo: string;
-  /** Pre-validated safe https URL for this repo. */
-  repoUrl: string;
-  totalTasks: number;
-  totalSessions: number;
-  totalCredits: number;
-  tasksScanned: number;
-  tasksTotal: number;
-  partial: boolean;
   error?: string;
-};
-
-type AgentSessionsResult = {
-  repos: AgentRepoSummary[];
-  totalTasks: number;
-  totalSessions: number;
-  totalCredits: number;
-  authenticated: boolean;
-  since: string;
-  fetchedAt: string;
 };
 
 const EFFORT_DISPLAY_NAMES: Record<string, string> = {
@@ -637,7 +720,7 @@ function getEffortDisplayName(level: string): string {
 	return EFFORT_DISPLAY_NAMES[level] ?? level;
 }
 
-import { resolveGuidMcpToolName, isGuidMcpTool } from '../../../../src/utils/toolUtils';
+import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool } from '../../../../src/utils/toolUtils';
 
 // Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
 const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
@@ -648,7 +731,7 @@ function lookupToolName(id: string): string {
 	if (!TOOL_NAME_MAP) {
 		return id;
 	}
-	return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? id;
+	return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? resolveMcpFamilyToolName(id) ?? id;
 }
 
 function lookupMcpToolName(id: string): string {
@@ -668,6 +751,12 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 	Object.entries(stats.today.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.last30Days.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.month.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
+	// Also collect MCP server names — the "By Server" tables render them through the
+	// same friendly-name lookup, so an unmapped server name (e.g. `ccd_session`)
+	// would otherwise show raw without ever being flagged as missing.
+	Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
+	Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
+	Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
 	// Also collect all general tool calls so non-MCP tools without friendly names are caught
 	Object.entries(stats.today.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.last30Days.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
@@ -675,8 +764,11 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 
 	const suppressed = new Set<string>(stats.suppressedUnknownTools ?? []);
 	
-	// Filter to only unknown tools (not a key in the map, case-insensitively) and not suppressed
-	return Array.from(allTools).filter(tool => !TOOL_NAME_MAP?.[tool] && !TOOL_NAME_MAP?.[tool.toLowerCase()] && !isGuidMcpTool(tool) && !suppressed.has(tool)).sort();
+	// Filter to only unknown tools (not a key in the map, case-insensitively, and not
+	// resolvable via a known GUID/family pattern) and not suppressed. Tools resolved via
+	// isMcpFamilyResolvedTool are a recognized MCP tool under a new server-registration
+	// spelling (see issue #1760) — they shouldn't generate another "add missing name" report.
+	return Array.from(allTools).filter(tool => !TOOL_NAME_MAP?.[tool] && !TOOL_NAME_MAP?.[tool.toLowerCase()] && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
 }
 
 function createMcpToolIssueUrl(unknownTools: string[]): string {
@@ -709,6 +801,7 @@ const MODE_BAR_CONFIGS: readonly ModeBarConfig[] = [
 { label: '\u{1F4CB} Plan Mode',   key: 'plan',        gradient: 'linear-gradient(90deg, #f59e0b, #fbbf24)' },
 { label: '\u26A1 Custom Agent',   key: 'customAgent', gradient: 'linear-gradient(90deg, #ec4899, #f472b6)' },
 { label: '\u{1F5A5}\uFE0F CLI',   key: 'cli',         gradient: 'linear-gradient(90deg, #06b6d4, #22d3ee)' },
+{ label: '\u2728 Copilot App',    key: 'cliApp',      gradient: 'linear-gradient(90deg, #6366f1, #818cf8)' },
 ];
 
 /** Renders a single horizontal bar item for the mode usage chart. */
@@ -723,9 +816,9 @@ return `
 
 /** Renders the full bar-chart column for a single time period's mode usage. */
 function renderModeBarChart(modeUsage: ModeUsage, title: string): string {
-const total = modeUsage.ask + modeUsage.edit + modeUsage.agent + modeUsage.plan + modeUsage.customAgent + modeUsage.cli;
+const total = modeUsage.ask + modeUsage.edit + modeUsage.agent + modeUsage.plan + modeUsage.customAgent + modeUsage.cli + (modeUsage.cliApp ?? 0);
 const bars = MODE_BAR_CONFIGS
-.map(({ label, key, gradient }) => renderModeBarItem(label, modeUsage[key], total, gradient))
+.map(({ label, key, gradient }) => renderModeBarItem(label, modeUsage[key] ?? 0, total, gradient))
 .join('');
 return `
 <div>
@@ -965,13 +1058,18 @@ function renderMissedPotential(stats: UsageAnalysisStats): string {
     `;
 }
 
-function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameResolver: (id: string) => string = lookupToolName): string {
-	const sortedTools = Object.entries(byTool)
+function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameResolver: (id: string) => string = lookupToolName, applyAutoFilter = false): string {
+	const entries = applyAutoFilter && hideAutomaticToolCalls
+		? Object.entries(byTool).filter(([tool]) => !AUTOMATIC_TOOL_SET_WV.has(tool.toLowerCase()))
+		: Object.entries(byTool);
+	const sortedTools = entries
 		.sort(([, a], [, b]) => b - a)
 		.slice(0, limit);
 
 	if (sortedTools.length === 0) {
-		return '<div style="color: var(--text-muted);">No tools used yet</div>';
+		return applyAutoFilter && hideAutomaticToolCalls
+			? '<div style="color: var(--text-muted);">No purposeful tools used yet (automatic tool calls are hidden)</div>'
+			: '<div style="color: var(--text-muted);">No tools used yet</div>';
 	}
 
 	    const rows = sortedTools.map(([tool, count], idx) => {
@@ -1004,11 +1102,11 @@ function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameRes
 }
 
 // --- Recent Sessions table with sortable, toggleable columns ---
-type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'durationMs' | 'lastActivity';
-type SessionsLookback = 'today' | '7' | '30';
+type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'durationMs' | 'lastActivity' | 'subAgentCalls';
+type SessionsLookback = Period;
 
 /** Optional (toggleable) session table columns. Title is always shown and is not part of this set. */
-type SessionColumnId = 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'models' | 'durationMs' | 'lastActivity';
+type SessionColumnId = 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'models' | 'durationMs' | 'lastActivity' | 'subAgentCalls';
 
 type SessionColumnDef = {
 	id: SessionColumnId;
@@ -1024,6 +1122,9 @@ type SessionColumnDef = {
 const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 	{ id: 'interactions', label: 'Turns', sortKey: 'interactions', align: 'right', render: s => ({ html: formatNumber(s.interactions) }) },
 	{ id: 'toolCalls', label: 'Tools', sortKey: 'toolCalls', align: 'right', render: s => ({ html: formatNumber(s.toolCalls) }) },
+	{ id: 'subAgentCalls', label: 'Sub-Agents', sortKey: 'subAgentCalls', align: 'right', render: s => s.subAgentCalls
+		? { html: formatNumber(s.subAgentCalls), title: `${s.subAgentCalls} sub-agent tool call${s.subAgentCalls === 1 ? '' : 's'} detected in this session` }
+		: { html: '—', title: 'No sub-agent calls detected in this session' } },
 	{ id: 'inputTokens', label: 'Input', sortKey: 'inputTokens', align: 'right', render: s => ({ html: formatNumber(s.inputTokens) }) },
 	{ id: 'outputTokens', label: 'Output', sortKey: 'outputTokens', align: 'right', render: s => ({ html: formatNumber(s.outputTokens) }) },
 	{ id: 'thinkingTokens', label: 'Thinking', sortKey: 'thinkingTokens', align: 'right', render: s => ({ html: formatNumber(s.thinkingTokens) }) },
@@ -1033,7 +1134,11 @@ const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 	{ id: 'editor', label: 'Editor', sortKey: 'editor', align: 'left', render: s => ({ html: escapeHtml(s.editor || 'unknown') }) },
 	{ id: 'workspace', label: 'Workspace', sortKey: 'workspace', align: 'left', cellStyle: 'max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const workspace = escapeHtml(s.workspace || '—'); return { html: workspace, title: workspace }; } },
 	{ id: 'models', label: 'Models', align: 'left', cellStyle: 'font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—'; return { html: models, title: models }; } },
-	{ id: 'durationMs', label: 'Duration', sortKey: 'durationMs', align: 'right', cellStyle: 'white-space:nowrap;', render: s => ({ html: formatDurationShort(s.durationMs) }) },
+	{ id: 'durationMs', label: 'Duration', sortKey: 'durationMs', align: 'right', cellStyle: 'white-space:nowrap;', render: s => {
+		const net = s.activeDurationMs ?? s.durationMs;
+		const wallLabel = s.durationMs !== undefined ? `Wall time: ${formatDurationShort(s.durationMs)}` : undefined;
+		return { html: formatDurationShort(net), ...(wallLabel ? { title: wallLabel } : {}) };
+	} },
 	{
 		id: 'lastActivity', label: 'Last Active', sortKey: 'lastActivity', align: 'right', cellStyle: 'white-space:nowrap;',
 		render: s => ({
@@ -1052,11 +1157,13 @@ let sessionSortColumn: SessionSortColumn = 'interactions';
 let sessionSortDirection: 'asc' | 'desc' = 'desc';
 let cachedTodaySessions: TodaySessionSummary[] = [];
 let use24HourTime = true;
+/** When true (default), the Tool Usage tables hide rows tagged "auto" so purposeful tool calls stand out. */
+let hideAutomaticToolCalls = true;
 // Lookback selector state: "today" renders the summaries bundled with updateStats;
 // longer windows are lazily requested from the extension host and cached here.
 let sessionsLookback: SessionsLookback = 'today';
 let latestTodaySessions: TodaySessionSummary[] = [];
-const recentSessionsCache: { [days: string]: TodaySessionSummary[] } = {};
+const recentSessionsCache: { [period: string]: TodaySessionSummary[] } = {};
 /** Which optional columns are currently visible. Title (and the row number) are always shown. */
 let enabledSessionColumns: Set<SessionColumnId> = new Set(ALL_SESSION_COLUMN_IDS);
 
@@ -1073,7 +1180,8 @@ const _todaySessionColumnComparators: Partial<Record<SessionSortColumn, (a: Toda
 	title: (a, b) => (a.title || '').localeCompare(b.title || ''),
 	editor: (a, b) => (a.editor || '').localeCompare(b.editor || ''),
 	workspace: (a, b) => (a.workspace || '').localeCompare(b.workspace || ''),
-	durationMs: (a, b) => (a.durationMs ?? -1) - (b.durationMs ?? -1),
+	durationMs: (a, b) => (a.activeDurationMs ?? a.durationMs ?? -1) - (b.activeDurationMs ?? b.durationMs ?? -1),
+	subAgentCalls: (a, b) => (a.subAgentCalls ?? 0) - (b.subAgentCalls ?? 0),
 	lastActivity: (a, b) => (a.lastActivity || '').localeCompare(b.lastActivity || ''),
 };
 
@@ -1186,9 +1294,9 @@ function setupSessionsTableSort(): void {
 			sessionSortDirection = 'desc';
 		}
 		const container = document.getElementById('sessions-table-container');
-		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
+		if (container) { setHtml(container, buildSessionsTableHtml(cachedTodaySessions)); }
 	});
-	setupSessionsLookbackSelector();
+	renderSessionsLookbackSelector();
 	setupSessionColumnsMenu();
 }
 
@@ -1209,7 +1317,7 @@ function setupSessionColumnsMenu(): void {
 		if (!columnId) { return; }
 		if (checkbox.checked) { enabledSessionColumns.add(columnId); } else { enabledSessionColumns.delete(columnId); }
 		const container = document.getElementById('sessions-table-container');
-		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
+		if (container) { setHtml(container, buildSessionsTableHtml(cachedTodaySessions)); }
 		saveSessionColumnSettings();
 	});
 	// Attached once ever (not per re-render) and re-queries the live menu element on
@@ -1223,15 +1331,22 @@ function setupSessionColumnsMenu(): void {
 	}
 }
 
-function setupSessionsLookbackSelector(): void {
-	const select = document.getElementById('sessions-lookback') as HTMLSelectElement | null;
-	if (!select) { return; }
-	select.value = sessionsLookback;
-	select.addEventListener('change', () => {
-		const value = select.value;
-		sessionsLookback = (value === '7' || value === '30') ? value : 'today';
-		refreshSessionsPanelBody();
+function renderSessionsLookbackSelector(): void {
+	const wrapper = document.getElementById('sessions-lookback-wrapper');
+	if (!wrapper) { return; }
+	wrapper.replaceChildren();
+	const { wrapper: selectorWrapper } = createPeriodSelector({
+		id: 'sessions-lookback',
+		selected: sessionsLookback,
+		disabled: ['allTime'],
+		disabledTitle: 'All-time sessions are not loaded yet',
+		label: '',
+		onChange: (value) => {
+			sessionsLookback = value as Period;
+			refreshSessionsPanelBody();
+		},
 	});
+	wrapper.append(selectorWrapper);
 	// A full re-render may have restored a non-today lookback whose data was
 	// rendered from cache already; if the cache is empty, request it now.
 	if (sessionsLookback !== 'today' && !recentSessionsCache[sessionsLookback]) {
@@ -1244,27 +1359,38 @@ function refreshSessionsPanelBody(): void {
 	const body = document.getElementById('sessions-panel-body');
 	if (!body) { return; }
 	if (sessionsLookback === 'today') {
-		body.innerHTML = renderTodaySessionsTable(latestTodaySessions);
+		setHtml(body, renderTodaySessionsTable(latestTodaySessions));
 		return;
 	}
 	const cached = recentSessionsCache[sessionsLookback];
 	if (cached) {
-		body.innerHTML = renderTodaySessionsTable(cached);
+		setHtml(body, renderTodaySessionsTable(cached));
 		return;
 	}
-	body.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${sessionsLookback} days…</div>`;
-	vscode.postMessage({ command: 'loadRecentSessions', days: Number(sessionsLookback) });
+	setHtml(body, `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}…</div>`);
+	vscode.postMessage({ command: 'loadRecentSessions', period: sessionsLookback });
 }
 
 function handleRecentSessionsLoaded(message: any): void {
-	const days = Number(message.days);
-	if (days !== 7 && days !== 30) { return; }
+	const period = message.period as Period;
+	if (!period) { return; }
 	const sessions = Array.isArray(message.sessions)
 		? message.sessions.filter((s: any) => s && typeof s === 'object' && typeof s.interactions === 'number') as TodaySessionSummary[]
 		: [];
-	recentSessionsCache[String(days)] = sessions;
-	if (sessionsLookback === String(days)) {
+	recentSessionsCache[period] = sessions;
+	if (sessionsLookback === period) {
 		refreshSessionsPanelBody();
+	}
+}
+
+function replaceRecentSessionsCache(raw: unknown): void {
+	for (const period of RECENT_SESSION_PERIODS) {
+		delete recentSessionsCache[period];
+	}
+	const buckets = sanitizeRecentSessionBuckets(raw);
+	if (!buckets) { return; }
+	for (const period of RECENT_SESSION_PERIODS) {
+		recentSessionsCache[period] = buckets[period] as TodaySessionSummary[];
 	}
 }
 
@@ -1290,6 +1416,7 @@ function sanitizeModeUsage(mode: any): ModeUsage {
 		plan: coerceNumber(m.plan),
 		customAgent: coerceNumber(m.customAgent),
 		cli: coerceNumber(m.cli),
+		cliApp: coerceNumber(m.cliApp),
 	};
 }
 
@@ -1360,6 +1487,7 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 			...(p.modelSwitching ?? {}),
 		},
 		thinkingEffortUsage: p.thinkingEffortUsage,
+		modelEfficiency: p.modelEfficiency,
 	};
 }
 
@@ -1379,6 +1507,108 @@ function sanitizeInsights(rawInsights: any[]): EvaluatedInsight[] {
 		}));
 }
 
+const CORRECTION_MOMENT_TYPES: CorrectionMomentType[] = ['user-correction', 'edit-retry', 'edit-self-correction', 'tool-error', 'agent-self-correction'];
+
+function sanitizeCorrectionMoment(raw: any): CorrectionMoment | null {
+	if (!raw || typeof raw !== 'object') { return null; }
+	if (!CORRECTION_MOMENT_TYPES.includes(raw.type) || typeof raw.snippet !== 'string') { return null; }
+	return {
+		type: raw.type,
+		turnNumber: typeof raw.turnNumber === 'number' ? raw.turnNumber : 0,
+		timestamp: typeof raw.timestamp === 'string' ? raw.timestamp : null,
+		snippet: raw.snippet,
+		tool: typeof raw.tool === 'string' ? raw.tool : undefined,
+		file: typeof raw.file === 'string' ? raw.file : undefined,
+		retried: raw.retried === true ? true : undefined,
+		matchedPattern: typeof raw.matchedPattern === 'string' ? raw.matchedPattern : undefined,
+	};
+}
+
+function sanitizeCorrectionCounts(raw: any): CorrectionCounts {
+	const num = (v: unknown): number => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : 0);
+	return {
+		userCorrections: num(raw?.userCorrections),
+		editRetries: num(raw?.editRetries),
+		editSelfCorrections: num(raw?.editSelfCorrections),
+		toolErrors: num(raw?.toolErrors),
+		toolErrorsRetried: num(raw?.toolErrorsRetried),
+		agentSelfCorrections: num(raw?.agentSelfCorrections),
+	};
+}
+
+function sanitizeCorrectionSession(raw: any): CorrectionSessionEntry | null {
+	if (!raw || typeof raw !== 'object' || typeof raw.file !== 'string' || !Array.isArray(raw.moments)) { return null; }
+	const moments = raw.moments.map(sanitizeCorrectionMoment).filter((m: CorrectionMoment | null): m is CorrectionMoment => m !== null);
+	if (moments.length === 0) { return null; }
+	return {
+		file: raw.file,
+		title: typeof raw.title === 'string' ? raw.title : null,
+		lastInteraction: typeof raw.lastInteraction === 'string' ? raw.lastInteraction : null,
+		moments,
+		totalMoments: typeof raw.totalMoments === 'number' && isFinite(raw.totalMoments)
+			? Math.max(moments.length, raw.totalMoments)
+			: moments.length,
+	};
+}
+
+function sanitizeCorrectionRepoGroup(raw: any): CorrectionRepoGroup | null {
+	if (!raw || typeof raw !== 'object' || typeof raw.repository !== 'string' || !Array.isArray(raw.sessions)) { return null; }
+	const sessions = raw.sessions.map(sanitizeCorrectionSession).filter((s: CorrectionSessionEntry | null): s is CorrectionSessionEntry => s !== null);
+	if (sessions.length === 0) { return null; }
+	return {
+		repository: raw.repository,
+		sessions,
+		counts: sanitizeCorrectionCounts(raw.counts),
+		sessionsWithMoments: typeof raw.sessionsWithMoments === 'number' ? raw.sessionsWithMoments : sessions.length,
+	};
+}
+
+function sanitizeCorrectionReport(raw: any): CorrectionReport | null {
+	if (!raw || typeof raw !== 'object' || !Array.isArray(raw.repos)) { return null; }
+	const repos = raw.repos.map(sanitizeCorrectionRepoGroup).filter((r: CorrectionRepoGroup | null): r is CorrectionRepoGroup => r !== null);
+	if (repos.length === 0) { return null; }
+	return {
+		sessionsPerRepo: typeof raw.sessionsPerRepo === 'number' ? raw.sessionsPerRepo : 25,
+		repos,
+		counts: sanitizeCorrectionCounts(raw.counts),
+		sessionsWithMoments: typeof raw.sessionsWithMoments === 'number' ? raw.sessionsWithMoments : repos.reduce((n: number, g: CorrectionRepoGroup) => n + g.sessionsWithMoments, 0),
+	};
+}
+
+function sanitizeRepeatedTaskCluster(raw: any): RepeatedTaskCluster | null {
+	if (!raw || typeof raw !== 'object') { return null; }
+	if (typeof raw.representativePrompt !== 'string' || typeof raw.sessionCount !== 'number' || !Array.isArray(raw.sessions)) { return null; }
+	const sessions: RepeatedTaskSessionRef[] = raw.sessions
+		.filter((s: any) => s && typeof s === 'object' && typeof s.file === 'string')
+		.map((s: any): RepeatedTaskSessionRef => ({
+			file: s.file,
+			title: typeof s.title === 'string' ? s.title : null,
+			lastInteraction: typeof s.lastInteraction === 'string' ? s.lastInteraction : null,
+			repository: typeof s.repository === 'string' ? s.repository : undefined,
+		}));
+	if (sessions.length === 0) { return null; }
+	return {
+		representativePrompt: raw.representativePrompt,
+		// Derive from the sanitized session list so the UI count can never
+		// disagree with it (and NaN/float counts are impossible).
+		sessionCount: sessions.length,
+		repositories: Array.isArray(raw.repositories) ? raw.repositories.filter((r: unknown) => typeof r === 'string') : [],
+		sessions,
+		sharedKeywords: Array.isArray(raw.sharedKeywords) ? raw.sharedKeywords.filter((k: unknown) => typeof k === 'string') : [],
+	};
+}
+
+function sanitizeRepeatedTaskReport(raw: any): RepeatedTaskReport | null {
+	if (!raw || typeof raw !== 'object' || !Array.isArray(raw.clusters)) { return null; }
+	const clusters = raw.clusters.map(sanitizeRepeatedTaskCluster).filter((c: RepeatedTaskCluster | null): c is RepeatedTaskCluster => c !== null);
+	if (clusters.length === 0) { return null; }
+	return {
+		minClusterSize: typeof raw.minClusterSize === 'number' ? raw.minClusterSize : 2,
+		sessionsScanned: typeof raw.sessionsScanned === 'number' ? raw.sessionsScanned : 0,
+		clusters,
+	};
+}
+
 function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null {
 	if (!rawCa || typeof rawCa !== 'object') { return null; }
 	const ca = rawCa as Partial<ToolCurationAnalysis>;
@@ -1394,6 +1624,28 @@ function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null 
 			: { totalTokens: 0, byServer: {} },
 		recommendations: Array.isArray(ca.recommendations) ? ca.recommendations : [],
 	};
+}
+
+/** Sanitize the optional correction/repeated-task reports onto the stats object. */
+function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void {
+	sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
+	sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
+}
+
+function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
+	if (Array.isArray(raw.todaySessions)) {
+		sanitized.todaySessions = raw.todaySessions.filter(
+			(session: any) => session && typeof session === 'object' && typeof session.interactions === 'number'
+		) as TodaySessionSummary[];
+	}
+	const recentSessions = sanitizeRecentSessionBuckets(raw.recentSessions);
+	if (recentSessions) {
+		sanitized.recentSessions = recentSessions as {
+			last7: TodaySessionSummary[];
+			last30: TodaySessionSummary[];
+			currentMonth: TodaySessionSummary[];
+		};
+	}
 }
 
 function sanitizeStats(raw: any): UsageAnalysisStats | null {
@@ -1434,17 +1686,14 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			) as MissedPotentialWorkspace[];
 		}
 
-		// Pass-through todaySessions (array of session summary objects)
-		if (Array.isArray(raw.todaySessions)) {
-			sanitized.todaySessions = raw.todaySessions.filter(
-				(s: any) => s && typeof s === 'object' && typeof s.interactions === 'number'
-			) as TodaySessionSummary[];
-		}
+		applySessionSummaries(sanitized, raw);
 
 		// Sanitize insights
 		if (Array.isArray(raw.insights)) {
 			sanitized.insights = sanitizeInsights(raw.insights);
 		}
+
+		sanitizeOptionalReports(sanitized, raw);
 
 		// Pass through curationAnalysis (already structured server-side).
 		// Normalize required array/object fields so rendering paths don't throw on partial payloads.
@@ -1460,6 +1709,12 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			traceCurationOnce('sanitize-no-curation', 'sanitizeStats.curation.missing');
 		}
 
+		// Pass through the Copilot API quota balance and current-month billing costs.
+		// Without this, periodic updateStats refreshes rebuild the stats object without
+		// these fields, so the "Copilot Billing Coverage" section disappears after the
+		// first refresh even though the extension still has the data.
+		applyBillingFields(sanitized, raw);
+
 		return sanitized;
 	} catch (error) {
 		traceCurationOnce('sanitize-error', 'sanitizeStats.error', {
@@ -1471,17 +1726,17 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 
 function updateWorktreeControls(): void {
 	const controlsEl = document.getElementById("worktree-controls");
-	if (controlsEl) { controlsEl.innerHTML = renderWorktreeControls(); }
+	if (controlsEl) { setHtml(controlsEl, renderWorktreeControls()); }
 }
 
 function updateWorktreeResults(): void {
 	const resultsEl = document.getElementById("worktree-results");
-	if (resultsEl) { resultsEl.innerHTML = renderWorktreeResults(); }
+	if (resultsEl) { setHtml(resultsEl, renderWorktreeResults()); }
 }
 
 function updateWorktreeProgressArea(): void {
 	const el = document.getElementById("worktree-progress-area");
-	if (el) { el.innerHTML = renderWorktreeProgress(); }
+	if (el) { setHtml(el, renderWorktreeProgress()); }
 }
 
 function scheduleWorktreeResultsRender(): void {
@@ -1508,6 +1763,7 @@ function startWorktreeScan(): void {
 	if (worktreeRoots.length === 0 || worktreeScanInProgress || worktreeCleanupInProgress) { return; }
 	worktreeScanInProgress = true;
 	worktreeResults = [];
+	worktreeBackgroundScanMeta = null;
 	worktreeScanError = null;
 	worktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
 	worktreeCleanupLog = [];
@@ -1836,6 +2092,21 @@ function handleWorktreeScanCancelled(): void {
 	updateWorktreeControls();
 }
 
+/**
+ * Populates the Worktrees tab from the once-daily background scan (see extension.ts
+ * `postWorktreeBackgroundResults`), sent either in the initial payload or live when the
+ * notification's "Show Me" action reveals an already-open panel. Ignored while a live/manual
+ * scan or cleanup is in flight so it can't clobber what the user is actively watching.
+ */
+function handleWorktreeBackgroundResults(message: any): void {
+	if (worktreeScanInProgress || worktreeCleanupInProgress) { return; }
+	const worktrees = Array.isArray(message.worktrees) ? message.worktrees : [];
+	worktreeResults = worktrees.map(sanitizeWorktreeResult);
+	worktreeBackgroundScanMeta = { scannedAt: String(message.scannedAt ?? ""), totalBytes: numField(message.totalBytes) };
+	updateWorktreeControls();
+	updateWorktreeResults();
+}
+
 /** Dispatches worktree-tab messages via static, literal command comparisons (no dynamic method lookup). */
 const _worktreeMessageHandlers: Record<string, (message: any) => void> = {
 	worktreeRootPicked: handleWorktreeRootPicked,
@@ -1853,6 +2124,7 @@ const _worktreeMessageHandlers: Record<string, (message: any) => void> = {
 	worktreeDeleted: handleWorktreeDeleted,
 	worktreeScanComplete: () => handleWorktreeScanComplete(),
 	worktreeScanCancelled: () => handleWorktreeScanCancelled(),
+	worktreeBackgroundResults: handleWorktreeBackgroundResults,
 	cleanupDeclined: () => handleCleanupDeclined(),
 	cleanupStarted: handleCleanupStarted,
 	cleanupWorktreeResult: handleCleanupWorktreeResult,
@@ -1898,30 +2170,13 @@ function setupTabs(): void {
 	});
 }
 
-function toSafeNumber(value: unknown): number {
-	const n = Number(value);
-	return Number.isFinite(n) && n >= 0 ? n : 0;
-}
-
-function toSafeHttpUrl(value: unknown): string {
-	const raw = typeof value === 'string' ? value.trim() : '';
-	try {
-		const parsed = new URL(raw);
-		if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-			return parsed.toString();
-		}
-	} catch {
-		// Ignore invalid URL and fall back to placeholder.
-	}
-	return '#';
-}
-
 function sanitizeRepoPrStatsData(input: unknown): RepoPrStatsResult {
 	const src = (input && typeof input === 'object') ? (input as Record<string, unknown>) : {};
 	const repos = Array.isArray(src.repos) ? src.repos : [];
 	return {
 		authenticated: Boolean(src.authenticated),
 		since: typeof src.since === 'string' || typeof src.since === 'number' ? src.since : Date.now(),
+		error: typeof src.error === 'string' ? escapeHtml(src.error) : undefined,
 		repos: repos.map((repo) => {
 			const r = (repo && typeof repo === 'object') ? (repo as Record<string, unknown>) : {};
 			const aiDetails = Array.isArray(r.aiDetails) ? r.aiDetails : [];
@@ -1933,6 +2188,8 @@ function sanitizeRepoPrStatsData(input: unknown): RepoPrStatsResult {
 				totalPrs: toSafeNumber(r.totalPrs),
 				aiAuthoredPrs: toSafeNumber(r.aiAuthoredPrs),
 				aiReviewRequestedPrs: toSafeNumber(r.aiReviewRequestedPrs),
+				userAuthoredPrs: toSafeNumber(r.userAuthoredPrs),
+				userMergedPrs: toSafeNumber(r.userMergedPrs),
 				aiDetails: aiDetails.map((d) => {
 					const detail = (d && typeof d === 'object') ? (d as Record<string, unknown>) : {};
 					const validAiTypes = ['copilot', 'claude', 'openai', 'other-ai'] as const;
@@ -1956,8 +2213,57 @@ function sanitizeRepoPrStatsData(input: unknown): RepoPrStatsResult {
 	} as RepoPrStatsResult;
 }
 
+/** Display label per detected AI agent type, used in the PR detail list. */
+const AI_PR_LABEL: Record<string, string> = {
+	copilot: '🤖 Copilot',
+	claude: '🧠 Claude',
+	openai: '✨ Codex',
+	'other-ai': '🤖 AI',
+};
+
+/** Renders one repository row of the Repository PRs table. */
+function renderRepoPrRow(r: RepoPrInfo, cell: string, cellCenter: string): string {
+	const repoLink = `<a href="${escapeHtml(r.repoUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${escapeHtml(r.owner)}/${escapeHtml(r.repo)}</a>`;
+	if (r.error) {
+		return `<tr>
+			<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
+			<td colspan="4" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${escapeHtml(r.error)}</td>
+		</tr>`;
+	}
+	// Collapsible detail list
+	let detailsHtml = '';
+	if (r.aiDetails.length > 0) {
+		const items = r.aiDetails.map(d =>
+			`<li><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d.number} ${escapeHtml(d.title)}</a> — ${AI_PR_LABEL[d.aiType] ?? escapeHtml(String(d.aiType))} (${d.role === 'author' ? 'authored' : 'review requested'})</li>`
+		).join('');
+		detailsHtml = `
+			<details style="margin-top:4px; font-size:11px;">
+				<summary style="cursor:pointer; color:var(--text-secondary);">Show ${r.aiDetails.length} detail(s)</summary>
+				<ul style="margin:4px 0 0 16px; padding:0; list-style:disc;">${items}</ul>
+			</details>`;
+	}
+	const yours = (r.userAuthoredPrs ?? 0) > 0
+		? `<span style="font-weight:600;">${r.userMergedPrs ?? 0} / ${r.userAuthoredPrs}</span>`
+		: '0';
+	return `<tr>
+		<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${detailsHtml}</td>
+		<td style="${cellCenter} font-weight:600;">${r.totalPrs}</td>
+		<td style="${cellCenter}">${yours}</td>
+		<td style="${cellCenter}">${r.aiAuthoredPrs > 0 ? `<span style="font-weight:600;">${r.aiAuthoredPrs}</span>` : '0'}</td>
+		<td style="${cellCenter}">${r.aiReviewRequestedPrs > 0 ? `<span style="font-weight:600;">${r.aiReviewRequestedPrs}</span>` : '0'}</td>
+	</tr>`;
+}
+
 function renderReposPrContent(data: RepoPrStatsResult): string {
 	const sinceDate = escapeHtml(new Date(data.since).toLocaleDateString());
+	if (data.error) {
+		return `
+			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
+				<strong>⚠️ Failed to load repository PR activity</strong><br/>
+				${data.error}<br/>
+				Switch to another tab and back to retry — details are in the extension Output channel.
+			</div>`;
+	}
 	if (!data.authenticated) {
 		return `
 			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
@@ -1972,44 +2278,11 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 			</div>`;
 	}
 
-	const aiLabel: Record<string, string> = {
-		copilot: '🤖 Copilot',
-		claude: '🧠 Claude',
-		openai: '✨ Codex',
-		'other-ai': '🤖 AI',
-	};
-
 	// Cell style shared across data rows — matches the customization matrix look
 	const cell = 'padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);';
 	const cellCenter = `${cell} text-align: center;`;
 
-	const rows = data.repos.map((r) => {
-		const repoLink = `<a href="${escapeHtml(r.repoUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${escapeHtml(r.owner)}/${escapeHtml(r.repo)}</a>`;
-		if (r.error) {
-			return `<tr>
-				<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
-				<td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${escapeHtml(r.error)}</td>
-			</tr>`;
-		}
-		// Collapsible detail list
-		let detailsHtml = '';
-		if (r.aiDetails.length > 0) {
-			const items = r.aiDetails.map(d =>
-				`<li><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d.number} ${escapeHtml(d.title)}</a> — ${aiLabel[d.aiType] ?? escapeHtml(String(d.aiType))} (${d.role === 'author' ? 'authored' : 'review requested'})</li>`
-			).join('');
-			detailsHtml = `
-				<details style="margin-top:4px; font-size:11px;">
-					<summary style="cursor:pointer; color:var(--text-secondary);">Show ${r.aiDetails.length} detail(s)</summary>
-					<ul style="margin:4px 0 0 16px; padding:0; list-style:disc;">${items}</ul>
-				</details>`;
-		}
-		return `<tr>
-			<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${detailsHtml}</td>
-			<td style="${cellCenter} font-weight:600;">${r.totalPrs}</td>
-			<td style="${cellCenter}">${r.aiAuthoredPrs > 0 ? `<span style="font-weight:600;">${r.aiAuthoredPrs}</span>` : '0'}</td>
-			<td style="${cellCenter}">${r.aiReviewRequestedPrs > 0 ? `<span style="font-weight:600;">${r.aiReviewRequestedPrs}</span>` : '0'}</td>
-		</tr>`;
-	}).join('');
+	const rows = data.repos.map((r) => renderRepoPrRow(r, cell, cellCenter)).join('');
 
 	return `
 		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
@@ -2022,6 +2295,7 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 					<tr>
 						<th style="text-align:left; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;">📂 Repository</th>
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;">PRs</th>
+						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="PRs you opened yourself, shown as merged / opened. Work driven by a local AI assistant lands here, not under Cloud Agent Authored.">🚢 Yours (merged / opened)</th>
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="PRs where the PR author's GitHub login matches a known AI agent (e.g. copilot-swe-agent, claude-code-action, openai-code-agent)">🤖 Cloud Agent Authored</th>
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="Open PRs where an AI agent was listed as a requested reviewer">👁 Copilot Review Agent requested†</th>
 					</tr>
@@ -2037,42 +2311,11 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 		</div>`;
 }
 
-/** Sanitize agent sessions data received from the extension host — escapes all string fields at
- *  the trust boundary so render functions can interpolate them directly into innerHTML safely. */
-function sanitizeAgentSessionsData(input: unknown): AgentSessionsResult {
-	const src = (input && typeof input === 'object') ? (input as Record<string, unknown>) : {};
-	const repos = Array.isArray(src.repos) ? src.repos : [];
-	return {
-		authenticated: Boolean(src.authenticated),
-		since: typeof src.since === 'string' ? escapeHtml(src.since) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-		fetchedAt: typeof src.fetchedAt === 'string' ? src.fetchedAt : '',
-		totalTasks: toSafeNumber(src.totalTasks),
-		totalSessions: toSafeNumber(src.totalSessions),
-		totalCredits: toSafeNumber(src.totalCredits),
-		repos: repos.map((repo) => {
-			const r = (repo && typeof repo === 'object') ? (repo as Record<string, unknown>) : {};
-			const owner = escapeHtml(typeof r.owner === 'string' ? r.owner : '');
-			const repoName = escapeHtml(typeof r.repo === 'string' ? r.repo : '');
-			return {
-				owner,
-				repo: repoName,
-				repoUrl: toSafeHttpUrl(`https://github.com/${owner}/${repoName}`),
-				totalTasks: toSafeNumber(r.totalTasks),
-				totalSessions: toSafeNumber(r.totalSessions),
-				totalCredits: toSafeNumber(r.totalCredits),
-				tasksScanned: toSafeNumber(r.tasksScanned),
-				tasksTotal: toSafeNumber(r.tasksTotal),
-				partial: Boolean(r.partial),
-				error: typeof r.error === 'string' ? escapeHtml(r.error) : undefined,
-			};
-		}),
-	};
-}
-
-function updateReposPrPanel(data: RepoPrStatsResult): void {
+/** Renders the repository PR panel. Returns false when the target container isn't in the DOM yet. */
+function updateReposPrPanel(data: RepoPrStatsResult): boolean {
 	const container = document.querySelector('#repos-pr-content');
-	if (!container) { return; }
-	container.innerHTML = `
+	if (!container) { return false; }
+	setHtml(container, `
 		<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>
 		<div class="section-subtitle">
 			PRs from the last 30 days across your known repositories, showing how many were <strong>authored by cloud agents</strong>
@@ -2080,33 +2323,69 @@ function updateReposPrPanel(data: RepoPrStatsResult): void {
 			or had an AI agent requested as a reviewer.
 		</div>
 		${renderReposPrContent(data)}
-	`;
+	`);
+	return true;
 }
 
 // ---------------------------------------------------------------------------
 // Cloud Agent Sessions tab
 // ---------------------------------------------------------------------------
 
+/** Label for one repo row: a link for real repos, a plain label for the "no repository" bucket. */
+function agentRepoLabelHtml(r: AgentRepoSummary): string {
+  const mono = "font-family:'Courier New',monospace; font-size:12px;";
+  if (r.unassigned) {
+    return `<span style="${mono} color:var(--text-secondary);" title="Tasks the agents API reported without a repository — typically ad-hoc sessions started from cloud chat">no repository (cloud chat)</span>`;
+  }
+  const link = `<a href="${r.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); ${mono}">${r.owner}/${r.repo}</a>`;
+  const accountOnly = r.discovery === 'account'
+    ? ` <span title="Found through your account-wide agent tasks — this repo is not open in any workspace folder" style="color:var(--text-muted); font-size:10px;">(not in workspace)</span>`
+    : '';
+  return `${link}${accountOnly}`;
+}
+
 function buildAgentSessionRows(data: AgentSessionsResult, cell: string, cellCenter: string): string {
   return data.repos.map((r) => {
     // r.owner, r.repo, r.repoUrl and r.error are pre-sanitized by sanitizeAgentSessionsData
-    const repoLink = `<a href="${r.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${r.owner}/${r.repo}</a>`;
+    const label = agentRepoLabelHtml(r);
     if (r.error) {
       return `<tr>
-        <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
+        <td style="${cell}">${label}</td>
         <td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${r.error}</td>
       </tr>`;
     }
     const partialNote = r.partial
       ? ` <span title="Showing ${r.tasksScanned} of ${r.tasksTotal} tasks — capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${r.tasksScanned}/${r.tasksTotal} tasks scanned)</span>`
       : '';
+    const credits = r.totalCredits > 0
+      ? r.totalCredits.toFixed(1)
+      : r.totalPremiumRequests > 0 ? `${r.totalPremiumRequests.toFixed(1)} PR` : '—';
     return `<tr>
-      <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${partialNote}</td>
+      <td style="${cell}">${label}${partialNote}</td>
       <td style="${cellCenter} font-weight:600;">${r.totalTasks}</td>
       <td style="${cellCenter} font-weight:600;">${r.totalSessions}</td>
-      <td style="${cellCenter}">${r.totalCredits > 0 ? r.totalCredits.toFixed(1) : '—'}</td>
+      <td style="${cellCenter}">${credits}</td>
     </tr>`;
   }).join('');
+}
+
+/**
+ * Freshness line for the snapshot. The data is fetched at most once an hour, by whichever VS Code
+ * window holds the agent-tasks lock, so the panel always says how old what it shows is.
+ */
+function agentSnapshotFreshnessHtml(data: AgentSessionsResult): string {
+  const box = 'margin-bottom:12px; padding:8px 10px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:11px; color:var(--text-secondary);';
+  if (!data.fetchedAt) {
+    return `<div style="${box}">🕒 <strong>Not fetched yet.</strong> The snapshot is refreshed hourly by the main VS Code window — it will appear here once that first refresh completes.</div>`;
+  }
+  const fetchedMs = Date.parse(data.fetchedAt);
+  const nextRefresh = Number.isFinite(fetchedMs)
+    ? new Date(fetchedMs + data.refreshIntervalMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : 'unknown';
+  return `<div style="${box}">
+    🕒 Updated <strong>${escapeHtml(getTimeSince(data.fetchedAt))}</strong> · next refresh after ${escapeHtml(nextRefresh)}.
+    Cached and refreshed at most once an hour, by a single VS Code window, to keep GitHub API usage low.
+  </div>`;
 }
 
 function renderAgentSessionsContent(data: AgentSessionsResult): string {
@@ -2118,9 +2397,9 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 			</div>`;
 	}
 	if (data.repos.length === 0) {
-		return `
+		return `${agentSnapshotFreshnessHtml(data)}
 			<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
-				No GitHub repositories detected in your workspace folders.
+				No cloud agent tasks found — neither in your workspace repositories nor anywhere else in your account.
 			</div>`;
 	}
 
@@ -2133,32 +2412,42 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 			acc.tasks += r.totalTasks;
 			acc.sessions += r.totalSessions;
 			acc.credits += r.totalCredits;
+			acc.premiumRequests += r.totalPremiumRequests;
 		}
 		return acc;
-	}, { tasks: 0, sessions: 0, credits: 0 });
+	}, { tasks: 0, sessions: 0, credits: 0, premiumRequests: 0 });
 
 	const hasPartial = data.repos.some(r => r.partial && !r.error);
-
 	const rows = buildAgentSessionRows(data, cell, cellCenter);
+	const tile = 'background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;';
 
 	return `
+		${agentSnapshotFreshnessHtml(data)}
 		<div style="margin-bottom:12px; display:flex; gap:24px; flex-wrap:wrap;">
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.tasks}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Tasks</div>
 			</div>
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.sessions}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Sessions</div>
 			</div>
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.credits > 0 ? summaryTotals.credits.toFixed(1) : '—'}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">AI Credits</div>
 			</div>
+			${summaryTotals.premiumRequests > 0 ? `
+			<div style="${tile}">
+				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.premiumRequests.toFixed(1)}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;" title="Sessions that ran before the June 2026 switch to AI credits are billed in premium requests">Premium Requests</div>
+			</div>` : ''}
 		</div>
 		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
 			Showing cloud-agent sessions from ${sinceDate} to now.
-			${hasPartial ? '<strong>Note:</strong> Some repos were capped at 50 tasks — totals may be lower bounds. ' : ''}
+			${hasPartial ? '<strong>Note:</strong> Some repos were capped — totals are lower bounds. ' : ''}
+			${data.accountTasksAvailable
+				? ''
+				: `<strong>Account-wide tasks unavailable:</strong> ${data.accountTasksError ?? 'the /agents/tasks endpoint could not be read'} — only workspace repositories are shown.`}
 		</div>
 		<div class="customization-matrix-container">
 			<table class="customization-matrix" style="width:100%; border-collapse:collapse;">
@@ -2175,14 +2464,16 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 		</div>
 		<div style="margin-top:8px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:8px;">
 			ℹ️ <strong>No double-counting:</strong> These are cloud agent sessions only. CLI/remote sessions and local IDE chat sessions (shown in "My Activity") are excluded.<br/>
+			ℹ️ <strong>Two sources:</strong> your workspace repositories (which also surface tasks other people started there) plus your account-wide agent tasks, which cover repos you don't have open and ad-hoc cloud chat sessions. Tasks seen in both are counted once.<br/>
 			ℹ️ <strong>Action minutes</strong> (GitHub Actions compute used by the agent) are not shown here — they require additional per-branch API calls.
 		</div>`;
 }
 
-function updateAgentSessionsPanel(data: AgentSessionsResult): void {
+/** Renders the cloud agent panel. Returns false when the target container isn't in the DOM yet. */
+function updateAgentSessionsPanel(data: AgentSessionsResult): boolean {
 	const container = document.querySelector('#agent-sessions-content');
-	if (!container) { return; }
-	container.innerHTML = `
+	if (!container) { return false; }
+	setHtml(container, `
 		<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>
 		<div class="section-subtitle">
 			Cloud agent tasks and sessions from the last 30 days. Each <strong>task</strong> is a user request to the agent;
@@ -2190,7 +2481,8 @@ function updateAgentSessionsPanel(data: AgentSessionsResult): void {
 			<strong>CLI/remote sessions are excluded</strong> — they are separate from these cloud agent sessions.
 		</div>
 		${renderAgentSessionsContent(data)}
-	`;
+	`);
+	return true;
 }
 
 function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | null): string {
@@ -2414,7 +2706,7 @@ function buildHealthTabPanelHtml(customizationHtml: string, stats: UsageAnalysis
 				</div>
 				${hygieneMatrixState && hygieneMatrixState.workspaces && hygieneMatrixState.workspaces.length > 0 ? `
 					<div style="margin-bottom: 12px;">
-						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${hygieneMatrixState.workspaces.length})</vscode-button>
+						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;" ${isBatchAnalysisInProgress ? 'disabled="true" appearance="secondary"' : ''}>${isBatchAnalysisInProgress ? 'Analyzing All...' : `Analyze All Repositories (${hygieneMatrixState.workspaces.length})`}</vscode-button>
 					</div>
 					<div id="repo-list-pane-container" class="repo-hygiene-pane">
 						<div class="repo-hygiene-pane-header">📁 Repository List</div>
@@ -2425,7 +2717,7 @@ function buildHealthTabPanelHtml(customizationHtml: string, stats: UsageAnalysis
 						<div id="repo-details-pane" class="repo-hygiene-pane-body"></div>
 					</div>
 				` : `
-					<vscode-button id="btn-analyse-repo">Analyze Repo for Best Practices</vscode-button>
+					<vscode-button id="btn-analyse-repo" ${isSingleRepoAnalysisInProgress ? 'disabled="true" appearance="secondary"' : ''}>${isSingleRepoAnalysisInProgress ? 'Analyzing...' : 'Analyze Repo for Best Practices'}</vscode-button>
 					<div id="repo-analysis-results" class="repo-hygiene-results" style="margin-top: 12px;"></div>
 				`}
 			</div>
@@ -2811,19 +3103,25 @@ function buildCurationSectionHtml(curation: ToolCurationAnalysis | null | undefi
 }
 
 function buildReposAndAgentTabPanelsHtml(): string {
+	const repoLoadingMessage = repoPrStatsLoaded
+		? 'Fetching repository PRs…'
+		: 'Loading… (sign in with GitHub to see data)';
+	const agentLoadingMessage = agentSessionsLoaded
+		? 'Loading cloud agent snapshot…'
+		: 'Loading… (sign in with GitHub to see data)';
 	return `
 		<div id="tab-panel-repos" class="tab-panel"${activeTab !== 'repos' ? ' style="display:none"' : ''}>
 			<div class="section" id="repos-pr-content">
 				<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>
 				<div class="section-subtitle">PRs from the last 30 days across your known repositories — authored or reviewed by AI agents.</div>
-				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading… (sign in with GitHub to see data)</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">${repoLoadingMessage}</div>
 			</div>
 		</div>
 		<div id="tab-panel-agent" class="tab-panel"${activeTab !== 'agent' ? ' style="display:none"' : ''}>
 			<div class="section" id="agent-sessions-content">
 				<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>
 				<div class="section-subtitle">Cloud agent tasks and sessions from the last 30 days, fetched from the GitHub API.</div>
-				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading… (sign in with GitHub to see data)</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">${agentLoadingMessage}</div>
 			</div>
 		</div>`;
 }
@@ -2943,6 +3241,157 @@ function buildInsightsTabPanelHtml(insights: EvaluatedInsight[]): string {
 		</div>`;
 }
 
+// ── Corrections tab ─────────────────────────────────────────────────────────
+
+/** Badge with the number of sessions carrying correction moments (empty when none). */
+function correctionsCountBadgeHtml(report: CorrectionReport | null): string {
+	if (!report || report.sessionsWithMoments === 0) { return ''; }
+	return ` <span style="background:rgba(251,191,36,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${report.sessionsWithMoments}</span>`;
+}
+
+/** Corrections tab-bar button (extracted to keep buildUsageRootHtml under the complexity limit). */
+function correctionsTabButtonHtml(report: CorrectionReport | null): string {
+	return `<button class="tab-button ${activeTab === 'corrections' ? 'active' : ''}" data-tab="corrections"><span class="codicon codicon-debug-restart"></span> Corrections${correctionsCountBadgeHtml(report)}</button>`;
+}
+
+// ── Skill suggestions (repeated tasks) ──────────────────────────────────────
+
+function buildRepeatedTaskSessionLinkHtml(session: RepeatedTaskSessionRef): string {
+	const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
+	const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
+	const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : '';
+	const repo = session.repository ? ` · ${session.repository}` : '';
+	return `<div style="font-size:11px; color:var(--text-secondary); padding:2px 0; overflow-wrap:anywhere;">${escapeHtml(title)}${escapeHtml(dateLabel ? ` · ${dateLabel}` : '')}${escapeHtml(repo)}</div>`;
+}
+
+function buildRepeatedTaskClusterHtml(cluster: RepeatedTaskCluster): string {
+	const keywords = cluster.sharedKeywords.length > 0
+		? `<div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">${cluster.sharedKeywords.map(k => `<span style="font-size:10px; padding:1px 7px; border-radius:8px; background:var(--bg-tertiary); color:var(--text-secondary);">${escapeHtml(k)}</span>`).join('')}</div>`
+		: '';
+	return `
+		<div style="margin-top:10px; padding:12px 14px; border-radius:8px; background:var(--bg-tertiary); border:1px solid var(--border-color, transparent);">
+			<div style="display:flex; align-items:flex-start; gap:10px;">
+				<span style="flex-shrink:0; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222,128,0.5); color:var(--text-primary); white-space:nowrap;">${cluster.sessionCount}× repeated</span>
+				<div style="flex:1; min-width:0; font-size:12px; color:var(--text-primary); font-style:italic; overflow-wrap:anywhere;">&ldquo;${escapeHtml(cluster.representativePrompt)}&rdquo;</div>
+			</div>
+			${keywords}
+			<details style="margin-top:8px;">
+				<summary style="font-size:11px; color:var(--text-secondary); cursor:pointer;">Sessions (${cluster.sessions.length})</summary>
+				<div style="margin-top:4px;">${cluster.sessions.map(buildRepeatedTaskSessionLinkHtml).join('')}</div>
+			</details>
+		</div>`;
+}
+
+/** "Skill suggestions" section for the Tools & Integrations tab (empty string when no candidates). */
+function buildSkillSuggestionsSectionHtml(report: RepeatedTaskReport | null): string {
+	if (!report || report.clusters.length === 0) { return ''; }
+	return `
+		<div class="section">
+			<div class="section-title"><span>🧩</span><span>Skill Suggestions</span></div>
+			<div class="section-subtitle">
+				Tasks you keep prompting for across sessions (first prompt per session, ${report.sessionsScanned} sessions scanned).
+				A repeated task is a good candidate for a reusable skill, prompt file, or custom agent.
+			</div>
+			${report.clusters.map(buildRepeatedTaskClusterHtml).join('')}
+		</div>`;
+}
+
+const CORRECTION_TYPE_META: Record<CorrectionMomentType, { label: string; color: string }> = {
+	'user-correction': { label: 'You corrected the agent', color: 'rgba(251,191,36,0.85)' },
+	'tool-error': { label: 'Tool failed', color: 'rgba(248,113,113,0.85)' },
+	'edit-retry': { label: 'Edit retry', color: 'rgba(251,146,60,0.85)' },
+	'edit-self-correction': { label: 'Edit self-correction', color: 'rgba(251,146,60,0.85)' },
+	'agent-self-correction': { label: 'Agent caught itself', color: 'rgba(96,165,250,0.85)' },
+};
+
+function buildCorrectionMomentHtml(moment: CorrectionMoment): string {
+	const meta = CORRECTION_TYPE_META[moment.type] ?? { label: moment.type, color: 'rgba(148,163,184,0.85)' };
+	const time = moment.timestamp ? new Date(moment.timestamp) : null;
+	const timeLabel = time && !isNaN(time.getTime()) ? time.toLocaleString() : '';
+	const detail = moment.type === 'tool-error'
+		? `tool \`${moment.tool ?? '?'}\`${moment.retried ? ' — retried shortly after' : ''}`
+		: (moment.matchedPattern ? `matched ${moment.matchedPattern}` : '');
+	return `
+		<div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--bg-tertiary);">
+			<span style="flex-shrink:0; font-size:10px; font-weight:700; letter-spacing:0.03em; padding:2px 8px; border-radius:10px; border:1px solid ${meta.color}; color:var(--text-primary); background:${meta.color.replace('0.85', '0.12')}; white-space:nowrap;">${escapeHtml(meta.label)}</span>
+			<div style="flex:1; min-width:0;">
+				<div style="font-size:12px; color:var(--text-primary); opacity:0.9; overflow-wrap:anywhere;">${escapeHtml(moment.snippet)}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:3px;">
+					turn ${moment.turnNumber}${detail ? ` · ${escapeHtml(detail)}` : ''}${timeLabel ? ` · ${escapeHtml(timeLabel)}` : ''}
+				</div>
+			</div>
+		</div>`;
+}
+
+function buildCorrectionSessionHtml(session: CorrectionSessionEntry): string {
+	const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
+	const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
+	const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : '';
+	const totalMoments = session.totalMoments ?? session.moments.length;
+	const truncatedLabel = totalMoments > session.moments.length
+		? ` · showing ${session.moments.length} of ${totalMoments} moments`
+		: '';
+	return `
+		<div style="margin:10px 0 4px; padding:10px 12px; background:var(--bg-tertiary); border-radius:6px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-primary); overflow-wrap:anywhere;">
+				${escapeHtml(title)}${dateLabel || truncatedLabel ? ` <span style="font-weight:400; color:var(--text-secondary);">${dateLabel ? `· ${escapeHtml(dateLabel)}` : ''}${escapeHtml(truncatedLabel)}</span>` : ''}
+			</div>
+			${session.moments.map(buildCorrectionMomentHtml).join('')}
+		</div>`;
+}
+
+function buildCorrectionsTabPanelHtml(report: CorrectionReport | null): string {
+	if (!report || report.repos.length === 0) {
+		return `
+		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
+			<div class="section">
+				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
+				<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
+				<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+					✨ No correction moments detected in your recent sessions — nice and smooth!
+				</div>
+			</div>
+		</div>`;
+	}
+
+	const c = report.counts;
+	const chip = (n: number, label: string): string => n > 0
+		? `<span style="font-size:11px; padding:2px 10px; border-radius:10px; background:var(--bg-tertiary); color:var(--text-primary);">${n} ${escapeHtml(label)}</span>`
+		: '';
+	const summaryChips = [
+		chip(c.userCorrections, 'user corrections'),
+		chip(c.toolErrors, 'tool errors'),
+		chip(c.editRetries, 'edit retries'),
+		chip(c.editSelfCorrections, 'edit self-corrections'),
+		chip(c.agentSelfCorrections, 'agent self-corrections'),
+	].filter(Boolean).join(' ');
+
+	const repoSections = report.repos.map(repo => `
+		<div style="margin-top:18px;">
+			<div style="font-size:12px; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
+				${escapeHtml(repo.repository)}
+				<span style="font-weight:400; color:var(--text-secondary);">— ${repo.sessionsWithMoments} session${repo.sessionsWithMoments !== 1 ? 's' : ''} with moments</span>
+			</div>
+			${repo.sessions.map(buildCorrectionSessionHtml).join('')}
+		</div>`).join('');
+
+	return `
+		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
+			<div class="section">
+				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
+				<div class="section-subtitle">
+					Moments where the agent corrected itself after an error, or you had to correct the agent —
+					heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions with detected moments —
+					sessions without corrections are not listed. Summary counts include all detected moments; long sessions show a capped detail sample.
+					Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
+				</div>
+				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">${summaryChips}</div>
+				${repoSections}
+			</div>
+		</div>`;
+}
+
+
 function updateTabButtonCount(insights: EvaluatedInsight[]): void {
 	const tabButton = document.querySelector<HTMLButtonElement>('.tab-button[data-tab="insights"]');
 	if (!tabButton) { return; }
@@ -2951,7 +3400,7 @@ function updateTabButtonCount(insights: EvaluatedInsight[]): void {
 		? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${newCount}</span>`
 		: '';
 	const titleOnly = '<span class="codicon codicon-lightbulb"></span> Insights';
-	tabButton.innerHTML = titleOnly + badgeHtml;
+	setHtml(tabButton, titleOnly + badgeHtml);
 }
 
 function refreshInsightsPanel(insights: EvaluatedInsight[]): void {
@@ -2977,7 +3426,7 @@ function refreshInsightsPanel(insights: EvaluatedInsight[]): void {
 		</div>`
 		: '';
 
-	container.innerHTML = forYouSection + allSection;
+	setHtml(container, forYouSection + allSection);
 	wireInsightCardButtons();
 	updateTabButtonCount(insights);
 }
@@ -3104,15 +3553,17 @@ function buildUsageRootHtml(
 				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent"><span class="codicon codicon-cloud"></span> Cloud Agent</button>
 				<button class="tab-button ${activeTab === 'worktrees' ? 'active' : ''}" data-tab="worktrees"><span class="codicon codicon-git-branch"></span> Worktrees</button>
 				<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insights ?? []).filter(i => i.status === 'new').length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter(i => i.status === 'new').length}</span>` : ''}</button>
+				${correctionsTabButtonHtml(stats.correctionReport ?? null)}
 			</div>
 
-			${buildSessionsTabPanelHtml(stats)}
-			${buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs)}
-			${buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allHighCostModels, allLowCostModels, allMediumCostModels, allUnknownModels)}
-			${buildHealthTabPanelHtml(customizationHtml, stats)}
-			${buildReposAndAgentTabPanelsHtml()}
-			${buildWorktreesTabPanelHtml()}
-			${buildInsightsTabPanelHtml(stats.insights ?? [])}
+			${safeSectionHtml('Recent Sessions', () => buildSessionsTabPanelHtml(stats))}
+			${safeSectionHtml('My Activity', () => buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs))}
+			${safeSectionHtml('Tools & Integrations', () => buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allHighCostModels, allLowCostModels, allMediumCostModels, allUnknownModels))}
+			${safeSectionHtml('Workspace Health', () => buildHealthTabPanelHtml(customizationHtml, stats))}
+			${safeSectionHtml('Repository PRs & Cloud Agent', () => buildReposAndAgentTabPanelsHtml())}
+			${safeSectionHtml('Worktrees', () => buildWorktreesTabPanelHtml())}
+			${safeSectionHtml('Insights', () => buildInsightsTabPanelHtml(stats.insights ?? []))}
+			${safeSectionHtml('Corrections', () => buildCorrectionsTabPanelHtml(stats.correctionReport ?? null))}
 			<div class="footer">
 				Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} · Updates every 5 minutes
 			</div>
@@ -3179,6 +3630,15 @@ function renderWorktreeProgress(): string {
 	return _renderWorktreeScanningProgress(s, seconds);
 }
 
+/** Banner noting that the visible results came from the once-daily automatic scan, not one the user just ran. */
+function renderWorktreeBackgroundScanBanner(): string {
+	if (!worktreeBackgroundScanMeta || worktreeScanInProgress || worktreeResults.length === 0) { return ""; }
+	const when = escapeHtml(new Date(worktreeBackgroundScanMeta.scannedAt).toLocaleString());
+	const size = formatFileSize(worktreeBackgroundScanMeta.totalBytes);
+	const count = worktreeResults.length;
+	return `<div class="info-box" style="margin-top: 12px;"><div>🌳 Found automatically by the daily background scan: ${size} across ${count} worktree${count === 1 ? "" : "s"}, last checked ${when}. Scan again for the latest.</div></div>`;
+}
+
 function renderWorktreeControls(): string {
 	return `
     <div class="section">
@@ -3199,6 +3659,7 @@ function renderWorktreeControls(): string {
         <button class="button" id="btn-scan-worktrees" ${worktreeScanInProgress || worktreeCleanupInProgress || worktreeRoots.length === 0 ? "disabled" : ""}>🔍 Scan for Worktrees</button>
         ${worktreeScanInProgress ? '<button class="button secondary" id="btn-cancel-worktree-scan">✕ Cancel</button>' : ""}
       </div>
+      ${renderWorktreeBackgroundScanBanner()}
       ${worktreeScanError ? `<div class="info-box" style="margin-top: 12px; border-color: #d97706; background: rgba(217,119,6,0.08);"><div>⚠️ ${escapeHtml(worktreeScanError)}</div></div>` : ""}
       <div id="worktree-progress-area">${renderWorktreeProgress()}</div>
     </div>`;
@@ -3410,6 +3871,16 @@ function buildWorktreesTabPanelHtml(): string {
     </div>`;
 }
 
+/** Summary banner above the Recent Sessions table highlighting sub-agent usage in the selected period. */
+function buildSubAgentSummaryHtml(sessions: TodaySessionSummary[]): string {
+	const sessionsWithSubAgents = sessions.filter(s => (s.subAgentCalls ?? 0) > 0).length;
+	if (sessionsWithSubAgents === 0) { return ''; }
+	const totalCalls = sessions.reduce((sum, s) => sum + (s.subAgentCalls ?? 0), 0);
+	return `<div style="margin-top:8px; font-size:12px; color:var(--text-secondary);" title="Sessions that delegated work to sub-agents (task/read_agent/write_agent/list_agents, runSubagent, delegate_*, …)">
+		🤖 <strong>${sessionsWithSubAgents}</strong> session${sessionsWithSubAgents === 1 ? '' : 's'} used sub-agents (${formatNumber(totalCalls)} sub-agent call${totalCalls === 1 ? '' : 's'}) in this period
+	</div>`;
+}
+
 function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 	// Guard against silent host updates that omit todaySessions (e.g. a stale payload
 	// shape): keep showing the last known sessions instead of clearing the table.
@@ -3419,20 +3890,18 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 	const cachedForLookback = sessionsLookback === 'today' ? latestTodaySessions : recentSessionsCache[sessionsLookback];
 	const bodyHtml = cachedForLookback
 		? renderTodaySessionsTable(cachedForLookback)
-		: `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${sessionsLookback} days…</div>`;
+		: `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}…</div>`;
+	const subAgentBanner = cachedForLookback ? buildSubAgentSummaryHtml(cachedForLookback) : '';
 	return `
 		<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
 			<div class="section">
 				<div class="section-title" style="display:flex; align-items:center; gap:8px;">
 					<span>📋</span><span>Recent Sessions</span>
-					<select id="sessions-lookback" style="margin-left:auto; font-size:12px; padding:2px 6px; background:var(--vscode-dropdown-background, var(--bg-secondary)); color:var(--vscode-dropdown-foreground, var(--text-primary)); border:1px solid var(--border-subtle); border-radius:4px;">
-						<option value="today"${sessionsLookback === 'today' ? ' selected' : ''}>Today</option>
-						<option value="7"${sessionsLookback === '7' ? ' selected' : ''}>Last 7 days</option>
-						<option value="30"${sessionsLookback === '30' ? ' selected' : ''}>Last 30 days</option>
-					</select>
+					<span id="sessions-lookback-wrapper" style="margin-left:auto;"></span>
 					${buildSessionColumnsMenuHtml()}
 				</div>
 				<div class="section-subtitle">Individual session breakdown for the selected period — sorted by number of interactions (most active first).</div>
+				${subAgentBanner}
 				<div id="sessions-panel-body" style="margin-top: 12px;">
 					${bodyHtml}
 				</div>
@@ -3440,11 +3909,38 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 		</div>`;
 }
 
-function _billingApiBalanceHtml(api: CopilotApiBalance): string {
-	const pct = formatFixed(api.pctAvailable, 1);
+/** Renders the "GitHub Copilot API (all channels)" gauge as three segments: usage this
+ *  extension can account for locally ("tracked here"), usage the API reports but this
+ *  extension has no local session data for ("other devices/cloud" — e.g. a different PC,
+ *  a VDI, WSL, web chat, cloud agent, or review agent), and whatever budget remains.
+ *  `copilotCostUsd` is the extension's locally-tracked GitHub Copilot spend for the
+ *  current month; it is clamped so a bar never renders more than 100% even if local
+ *  tracking briefly overshoots the API snapshot (e.g. due to refresh timing). */
+function _billingApiBalanceHtml(api: CopilotApiBalance, copilotCostUsd: number): string {
+	const apiUsedUsd = api.usedAiCredits * 0.01;
+	const trackedUsd = Math.max(0, Math.min(copilotCostUsd, apiUsedUsd));
+	const gapUsd = Math.max(0, apiUsedUsd - trackedUsd);
+	const budgetUsd = api.budgetUsd;
+	const trackedPct = budgetUsd > 0 ? Math.min(100, (trackedUsd / budgetUsd) * 100) : 0;
+	const gapPct = budgetUsd > 0 ? Math.min(100 - trackedPct, (gapUsd / budgetUsd) * 100) : 0;
+	const totalUsedPct = trackedPct + gapPct;
 	const usedPct = formatFixed(100 - api.pctAvailable, 1);
-	const barFill = Math.min(100 - api.pctAvailable, 100);
-	const barColor = barFill > 90 ? 'var(--error-color, #f14c4c)' : barFill > 75 ? 'var(--warning-color, #cca700)' : 'var(--accent-color, #4d9cf8)';
+	const pct = formatFixed(api.pctAvailable, 1);
+	const severityColor = totalUsedPct > 90 ? 'var(--error-color, #f14c4c)' : totalUsedPct > 75 ? 'var(--warning-color, #cca700)' : 'var(--accent-color, #4d9cf8)';
+	const trackedSegment = trackedPct > 0
+		? `<div style="height:100%; width:${formatFixed(trackedPct, 4)}%; background:${severityColor};"></div>`
+		: '';
+	// The "other usage" segment is hatched (striped) rather than solid — same severity
+	// color, but visually flagged as usage this device can't confirm the source of.
+	const gapSegment = gapPct > 0
+		? `<div title="Usage the API reports but this device has no local session data for" style="height:100%; width:${formatFixed(gapPct, 4)}%; background:${severityColor}; background-image:repeating-linear-gradient(135deg, rgba(0,0,0,0.35) 0px, rgba(0,0,0,0.35) 3px, transparent 3px, transparent 6px);"></div>`
+		: '';
+	const legend = gapPct > 0
+		? `<div style="display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:var(--text-secondary); margin-top:6px;">
+				<span><span style="display:inline-block; width:9px; height:9px; border-radius:2px; background:${severityColor}; margin-right:4px; vertical-align:middle;"></span>Tracked here (${formatFixed(trackedPct, 1)}%)</span>
+				<span><span style="display:inline-block; width:9px; height:9px; border-radius:2px; background:${severityColor}; background-image:repeating-linear-gradient(135deg, rgba(0,0,0,0.35) 0px, rgba(0,0,0,0.35) 2px, transparent 2px, transparent 4px); margin-right:4px; vertical-align:middle;"></span>Other devices/cloud (${formatFixed(gapPct, 1)}%)</span>
+			</div>`
+		: '';
 	return `
 		<div style="margin-bottom:12px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">GitHub Copilot API (all channels)</div>
@@ -3465,42 +3961,13 @@ function _billingApiBalanceHtml(api: CopilotApiBalance): string {
 			<div style="margin-bottom:4px; font-size:11px; color:var(--text-secondary); display:flex; justify-content:space-between;">
 				<span>${usedPct}% used</span><span>${pct}% available</span>
 			</div>
-			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden;">
-				<div style="height:100%; width:100%; background:${barColor}; border-radius:4px; transform-origin:left; transform:scaleX(${formatFixed(barFill / 100, 4)});"></div>
+			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden; display:flex;">
+				${trackedSegment}${gapSegment}
 			</div>
+			${legend}
 			<div style="font-size:11px; color:var(--text-muted); margin-top:6px;">
 				1 AI Credit = $0.01 · Budget = $${formatFixed(api.budgetUsd, 2)}/month
 			</div>
-		</div>`;
-}
-
-function _billingExtGroupCostsHtml(groupCosts: Record<string, number>): string {
-	const totalCostUsd = Object.values(groupCosts).reduce((s, v) => s + v, 0);
-	const rows = Object.entries(groupCosts)
-		.sort(([, a], [, b]) => b - a)
-		.map(([group, cost]) => `
-			<tr>
-				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(group)}</td>
-				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
-			</tr>`).join('');
-	return `
-		<div style="margin-bottom:12px;">
-			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Extension tracked (this calendar month, IDE sessions only)</div>
-			<table style="width:100%; border-collapse:collapse; border:1px solid var(--border-subtle); border-radius:6px; overflow:hidden;">
-				<thead>
-					<tr style="background:var(--bg-tertiary);">
-						<th style="padding:6px 8px; text-align:left; font-size:11px; color:var(--text-secondary); font-weight:600;">Provider</th>
-						<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>
-					</tr>
-				</thead>
-				<tbody>${rows}</tbody>
-				<tfoot>
-					<tr style="border-top:1px solid var(--border-color);">
-						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>
-						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary); text-align:right;">$${formatFixed(totalCostUsd, 2)}</td>
-					</tr>
-				</tfoot>
-			</table>
 		</div>`;
 }
 
@@ -3546,14 +4013,14 @@ function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 	const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s, v) => s + v, 0) : 0;
 	const nonCopilotCostUsd = totalCostUsd - copilotCostUsd;
 
-	const apiHtml = api ? _billingApiBalanceHtml(api) : '';
-	const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts) : '';
+	const apiHtml = api ? _billingApiBalanceHtml(api, copilotCostUsd) : '';
+	const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? billingExtGroupCostsHtml(groupCosts, api) : '';
 	const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
 
 	return `
 		<div class="section">
-			<div class="section-title"><span>💳</span><span>Copilot Billing Coverage</span></div>
-			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs.</div>
+			<div class="section-title"><span>💳</span><span>AI Billing Coverage</span></div>
+			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs, alongside estimated costs from other AI providers.</div>
 			${apiHtml}
 			${extHtml}
 			${deltaHtml}
@@ -3568,26 +4035,35 @@ function buildActivityTabPanelHtml(
 	todayTotalRefs: number,
 	last30DaysTotalRefs: number,
 ): string {
-	const modelCostHtml = buildModelCostSectionHtml(stats);
-	const billingComparisonHtml = buildBillingComparisonSectionHtml(stats);
+	// Each section is built through safeSectionHtml so a bug in one section (e.g. a data
+	// shape it doesn't expect) renders an inline error card for that section only, instead of
+	// throwing out of this template literal and blanking the entire Activity tab.
+	const modelCostHtml = safeSectionHtml('Model Cost', () => buildModelCostSectionHtml(stats));
+	const billingComparisonHtml = safeSectionHtml('AI Billing Coverage', () => buildBillingComparisonSectionHtml(stats));
+	const modeUsageHtml = safeSectionHtml('Interaction Modes', () => `
+			<div class="section" id="section-interaction-modes">
+				<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
+				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), Agent (autonomous tasks), Plan, Custom Agent, CLI (terminal), or Copilot App (desktop-app CLI sessions)</div>
+				<div class="two-column">
+					${renderModeBarChart(stats.today.modeUsage, '📅 Today')}
+					${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')}
+				</div>
+			</div>`);
+	const contextRefsHtml = safeSectionHtml('Context References', () => buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs));
+	const modelEfficiencyHtml = safeSectionHtml('Model Efficiency', () => buildModelEfficiencySectionHtml(stats));
+	const contextWindowHtml = safeSectionHtml('Context Window', () => buildContextWindowSectionHtml(stats));
 	return `
 		<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
 			${sessionsSummaryHtml}
 			${billingComparisonHtml}
 			<!-- Mode Usage Section -->
-			<div class="section">
-				<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
-				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
-				<div class="two-column">
-					${renderModeBarChart(stats.today.modeUsage, '📅 Today')}
-					${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')}
-				</div>
-			</div>
-			${buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
+			${modeUsageHtml}
+			${contextRefsHtml}
 			${multiModelHtml}
 			${modelCostHtml}
+			${modelEfficiencyHtml}
 			${thinkingEffortHtml}
-			${buildContextWindowSectionHtml(stats)}
+			${contextWindowHtml}
 		</div>`;
 }
 
@@ -3904,6 +4380,372 @@ function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
 	`;
 }
 
+// --- Local model leaderboard ---
+
+type EfficiencyPeriodKey = 'today' | 'last30Days' | 'month';
+type EfficiencyMetricKey = 'cost' | 'outputTokens' | 'toolSteps';
+type EfficiencyBubbleMetricKey = 'calls' | EfficiencyMetricKey;
+type EfficiencyColorMode = 'vendor' | 'model';
+type EfficiencyRow = { model: string; counters: ModelEfficiencyCounters; rates: ReturnType<typeof deriveModelEfficiencyRates> };
+type EfficiencySortColumn = 'model' | 'calls' | 'oneShotRate' | 'retryRate' | 'selfCorrectionRate' | 'costPerCall' | 'outputTokensPerCall' | 'toolCallsPerCall' | 'cacheHitRate';
+
+const EFFICIENCY_PERIOD_TO_DATA_KEY: Partial<Record<Period, EfficiencyPeriodKey>> = {
+	today: 'today',
+	last30: 'last30Days',
+	currentMonth: 'month',
+};
+
+let efficiencySelectedPeriod: Period = 'last30';
+let efficiencyPeriod: EfficiencyPeriodKey = 'last30Days';
+let efficiencyMetric: EfficiencyMetricKey = 'cost';
+let efficiencyBubbleMetric: EfficiencyBubbleMetricKey = 'calls';
+let efficiencyColorMode: EfficiencyColorMode = 'vendor';
+let efficiencySortColumn: EfficiencySortColumn = 'calls';
+let efficiencySortDirection: 'asc' | 'desc' = 'desc';
+let cachedModelEfficiency: Partial<Record<EfficiencyPeriodKey, ModelEfficiencyUsage | undefined>> = {};
+let efficiencyFilterLowUsage = true;
+
+type EfficiencyColumnDef = {
+	sortKey: EfficiencySortColumn;
+	label: string;
+	title: string;
+	sortValue: (row: EfficiencyRow) => number | string | null;
+	render: (row: EfficiencyRow, totalCalls: number) => string;
+};
+
+type EfficiencyMetricDef = {
+	key: EfficiencyMetricKey;
+	label: string;
+	axisLabel: string;
+	value: (row: EfficiencyRow) => number | null;
+	format: (value: number | null) => string;
+};
+
+type EfficiencyBubbleMetricDef = {
+	key: EfficiencyBubbleMetricKey;
+	label: string;
+	value: (row: EfficiencyRow) => number | null;
+	format: (value: number | null) => string;
+};
+
+/** Format a per-unit USD cost with enough precision for inexpensive local turns. */
+function formatUnitCost(value: number | null): string {
+	if (value === null) { return '—'; }
+	return value >= 0.01 ? formatCost(value) : `$${value.toFixed(3)}`;
+}
+
+function formatRatePercent(value: number | null): string {
+	return value === null ? '—' : formatPercent(value * 100);
+}
+
+function formatPerTurn(value: number | null): string {
+	return value === null ? '—' : formatFixed(value, 1);
+}
+
+const EFFICIENCY_METRICS: EfficiencyMetricDef[] = [
+	{ key: 'cost', label: 'Cost', axisLabel: 'Average cost per turn', value: row => row.rates.costPerCall, format: formatUnitCost },
+	{ key: 'outputTokens', label: 'Output tokens', axisLabel: 'Average output tokens per turn', value: row => row.rates.outputTokensPerCall, format: value => value === null ? '—' : formatCompact(Math.round(value)) },
+	{ key: 'toolSteps', label: 'Tool steps', axisLabel: 'Average tool steps per turn', value: row => row.rates.toolCallsPerCall, format: formatPerTurn },
+];
+
+const EFFICIENCY_BUBBLE_METRICS: EfficiencyBubbleMetricDef[] = [
+	{ key: 'calls', label: 'Local use', value: row => row.counters.calls, format: value => `${formatNumber(value ?? 0)} turns` },
+	...EFFICIENCY_METRICS.map(({ key, label, value, format }) => ({ key, label, value, format })),
+];
+
+function buildLocalUsageCell(row: EfficiencyRow, totalCalls: number): string {
+	const share = totalCalls > 0 ? row.counters.calls / totalCalls : 0;
+	return `<div class="model-use-cell">
+		<div class="model-use-track" aria-hidden="true"><span style="width:${Math.max(2, share * 100).toFixed(1)}%"></span></div>
+		<strong>${formatRatePercent(share)}</strong>
+		<span>${formatNumber(row.counters.calls)} turns</span>
+	</div>`;
+}
+
+const EFFICIENCY_COLUMN_DEFS: EfficiencyColumnDef[] = [
+	{ sortKey: 'model', label: 'Model', title: 'Model identifier', sortValue: row => row.model, render: row => escapeHtml(getModelDisplayName(row.model)) },
+	{ sortKey: 'calls', label: 'Local use', title: 'Share of user-request turns attributed to this model', sortValue: row => row.counters.calls, render: buildLocalUsageCell },
+	{ sortKey: 'oneShotRate', label: 'One-shot', title: 'Share of edit turns completed without retries or self-corrections', sortValue: row => row.rates.oneShotRate, render: row => formatRatePercent(row.rates.oneShotRate) },
+	{ sortKey: 'retryRate', label: 'Retries/edit', title: 'Average immediate same-file retries per edit turn', sortValue: row => row.rates.retryRate, render: row => formatPerTurn(row.rates.retryRate) },
+	{ sortKey: 'selfCorrectionRate', label: 'Self-corr/edit', title: 'Average re-edits after intervening tool calls per edit turn', sortValue: row => row.rates.selfCorrectionRate, render: row => formatPerTurn(row.rates.selfCorrectionRate) },
+	{ sortKey: 'costPerCall', label: 'Avg cost', title: 'Average estimated provider cost per user-request turn', sortValue: row => row.rates.costPerCall, render: row => formatUnitCost(row.rates.costPerCall) },
+	{ sortKey: 'outputTokensPerCall', label: 'Out tok', title: 'Average output tokens per user-request turn', sortValue: row => row.rates.outputTokensPerCall, render: row => row.rates.outputTokensPerCall === null ? '—' : formatCompact(Math.round(row.rates.outputTokensPerCall)) },
+	{ sortKey: 'toolCallsPerCall', label: 'Steps', title: 'Average tool invocations per user-request turn', sortValue: row => row.rates.toolCallsPerCall, render: row => formatPerTurn(row.rates.toolCallsPerCall) },
+	{ sortKey: 'cacheHitRate', label: 'Cache hit', title: 'Cache-read share of input tokens', sortValue: row => row.rates.cacheHitRate, render: row => formatRatePercent(row.rates.cacheHitRate) },
+];
+
+function getEfficiencySortIndicator(column: EfficiencySortColumn): string {
+	if (efficiencySortColumn !== column) { return ''; }
+	return efficiencySortDirection === 'desc' ? ' ▼' : ' ▲';
+}
+
+function compareEfficiencyRows(a: EfficiencyRow, b: EfficiencyRow, column: EfficiencyColumnDef): number {
+	const av = column.sortValue(a);
+	const bv = column.sortValue(b);
+	if (av === null && bv === null) { return 0; }
+	if (av === null) { return 1; }
+	if (bv === null) { return -1; }
+	const cmp = typeof av === 'string' || typeof bv === 'string'
+		? String(av).localeCompare(String(bv))
+		: av - bv;
+	return efficiencySortDirection === 'desc' ? -cmp : cmp;
+}
+
+function buildEfficiencyRows(usage: ModelEfficiencyUsage): EfficiencyRow[] {
+	const rows = Object.entries(usage).map(([model, counters]) => ({ model, counters, rates: deriveModelEfficiencyRates(counters) }));
+	const column = EFFICIENCY_COLUMN_DEFS.find(item => item.sortKey === efficiencySortColumn) ?? EFFICIENCY_COLUMN_DEFS[1];
+	return rows.sort((a, b) => compareEfficiencyRows(a, b, column));
+}
+
+function filterLowUsageRows(rows: EfficiencyRow[], usage: ModelEfficiencyUsage): { rows: EfficiencyRow[]; hiddenNote: string } {
+	if (!efficiencyFilterLowUsage) { return { rows, hiddenNote: '' }; }
+	const threshold = computeEfficiencyLowUsageThreshold(usage);
+	if (threshold === null) { return { rows, hiddenNote: '' }; }
+	const filtered = rows.filter(row => row.counters.calls > threshold);
+	const hiddenCount = rows.length - filtered.length;
+	const noun = hiddenCount === 1 ? 'model' : 'models';
+	const turnNoun = threshold === 1 ? 'turn' : 'turns';
+	const hiddenNote = hiddenCount > 0 ? `${hiddenCount} low-usage ${noun} hidden (≤${threshold} ${turnNoun})` : '';
+	return { rows: filtered, hiddenNote };
+}
+
+const MODEL_COLOR_VARS = ['--stage-1-color', '--stage-2-color', '--stage-3-color', '--stage-4-color', '--success-fg', '--warning-fg', '--link-color'];
+const PROVIDER_COLOR_VARS: Record<string, string> = {
+	Anthropic: '--warning-fg',
+	OpenAI: '--success-fg',
+	Google: '--stage-3-color',
+	'Mistral AI': '--stage-2-color',
+	xAI: '--stage-4-color',
+	Alibaba: '--stage-1-color',
+	Microsoft: '--link-color',
+};
+
+function getColorForKey(key: string): string {
+	let hash = 0;
+	for (let i = 0; i < key.length; i++) { hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0; }
+	return `var(${MODEL_COLOR_VARS[Math.abs(hash) % MODEL_COLOR_VARS.length]})`;
+}
+
+function getEfficiencyColor(model: string): string {
+	if (efficiencyColorMode === 'model') { return getColorForKey(model); }
+	const provider = getModelBillingProvider(model);
+	const colorVar = PROVIDER_COLOR_VARS[provider];
+	return colorVar ? `var(${colorVar})` : getColorForKey(provider);
+}
+
+function formatMetricTick(metric: EfficiencyMetricDef, value: number): string {
+	if (metric.key === 'cost') { return formatUnitCost(value); }
+	if (metric.key === 'outputTokens') { return formatCompact(Math.round(value)); }
+	return formatFixed(value, 1);
+}
+
+function buildEfficiencyGrid(metric: EfficiencyMetricDef, maxX: number): string {
+	const vertical = [0, 0.25, 0.5, 0.75, 1].map(fraction => {
+		const x = 76 + fraction * 760;
+		return `<line x1="${x}" y1="24" x2="${x}" y2="286"></line><text x="${x}" y="310" text-anchor="middle">${escapeHtml(formatMetricTick(metric, maxX * fraction))}</text>`;
+	}).join('');
+	const horizontal = [0, 0.25, 0.5, 0.75, 1].map(fraction => {
+		const y = 286 - fraction * 262;
+		return `<line x1="76" y1="${y}" x2="836" y2="${y}"></line><text x="64" y="${y + 4}" text-anchor="end">${Math.round(fraction * 100)}%</text>`;
+	}).join('');
+	return `<g class="efficiency-grid">${vertical}${horizontal}</g>`;
+}
+
+function buildEfficiencyPoint(
+	row: EfficiencyRow,
+	metric: EfficiencyMetricDef,
+	bubbleMetric: EfficiencyBubbleMetricDef,
+	maxX: number,
+	maxBubbleValue: number,
+	labelPlacement: BubbleLabelPlacement,
+): string {
+	const value = metric.value(row) ?? 0;
+	const bubbleValue = bubbleMetric.value(row) ?? 0;
+	const rate = row.rates.oneShotRate ?? 0;
+	const x = 76 + (value / maxX) * 760;
+	const y = 286 - rate * 262;
+	const radius = scaleBubbleRadius(bubbleValue, maxBubbleValue);
+	const color = getEfficiencyColor(row.model);
+	const rawLabel = getModelDisplayName(row.model);
+	const label = escapeHtml(rawLabel);
+	const aria = `${rawLabel}: ${formatRatePercent(rate)} one-shot edit rate, ${metric.format(value)} ${metric.axisLabel.toLowerCase()}, bubble sized by ${bubbleMetric.label.toLowerCase()}: ${bubbleMetric.format(bubbleValue)}`;
+	return `<g class="efficiency-point" style="--model-color:${color}" tabindex="0" role="img" aria-label="${escapeHtml(aria)}">
+		<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${radius.toFixed(1)}"><title>${escapeHtml(aria)}</title></circle>
+		<text x="${labelPlacement.x.toFixed(1)}" y="${labelPlacement.y.toFixed(1)}" text-anchor="${labelPlacement.textAnchor}">${label}</text>
+	</g>`;
+}
+
+function buildEfficiencyColorLegendHtml(rows: EfficiencyRow[]): string {
+	if (efficiencyColorMode !== 'vendor') { return ''; }
+	const providers = [...new Set(rows.map(row => getModelBillingProvider(row.model)))].sort();
+	const items = providers.map(provider => {
+		const model = rows.find(row => getModelBillingProvider(row.model) === provider)?.model ?? '';
+		return `<span class="efficiency-legend-item" style="--model-color:${getEfficiencyColor(model)}"><span aria-hidden="true"></span>${escapeHtml(provider)}</span>`;
+	}).join('');
+	return `<div class="efficiency-vendor-legend" aria-label="Model vendor colors">${items}</div>`;
+}
+
+function buildEfficiencyChartHtml(rows: EfficiencyRow[]): string {
+	const metric = EFFICIENCY_METRICS.find(item => item.key === efficiencyMetric) ?? EFFICIENCY_METRICS[0];
+	const bubbleMetric = EFFICIENCY_BUBBLE_METRICS.find(item => item.key === efficiencyBubbleMetric) ?? EFFICIENCY_BUBBLE_METRICS[0];
+	const chartRows = rows.filter(row => row.rates.oneShotRate !== null && metric.value(row) !== null)
+		.sort((a, b) => b.counters.calls - a.counters.calls).slice(0, 12);
+	if (chartRows.length === 0) {
+		return '<div class="model-leaderboard-empty"><strong>No comparable edit data yet.</strong><span>The chart appears after local sessions record both a model and structured edit turns.</span></div>';
+	}
+	const maxX = Math.max(...chartRows.map(row => metric.value(row) ?? 0), 0.0001) * 1.08;
+	const maxBubbleValue = Math.max(...chartRows.map(row => bubbleMetric.value(row) ?? 0), 0);
+	const labelInputs = chartRows.map(row => {
+		const value = metric.value(row) ?? 0;
+		const bubbleValue = bubbleMetric.value(row) ?? 0;
+		return {
+			x: 76 + (value / maxX) * 760,
+			y: 286 - (row.rates.oneShotRate ?? 0) * 262,
+			radius: scaleBubbleRadius(bubbleValue, maxBubbleValue),
+			label: getModelDisplayName(row.model),
+		};
+	});
+	const labelPlacements = placeBubbleLabels(labelInputs, { left: 76, right: 836, top: 24, bottom: 286 });
+	const points = chartRows.map((row, index) =>
+		buildEfficiencyPoint(row, metric, bubbleMetric, maxX, maxBubbleValue, labelPlacements[index])
+	).join('');
+	return `<div class="efficiency-chart-wrap">
+		<svg class="efficiency-chart" viewBox="0 0 900 350" role="img" aria-label="One-shot edit rate compared with ${escapeHtml(metric.axisLabel.toLowerCase())}; bubble size represents ${escapeHtml(bubbleMetric.label.toLowerCase())}">
+			${buildEfficiencyGrid(metric, maxX)}
+			<text class="efficiency-axis-title" x="456" y="344" text-anchor="middle">${escapeHtml(metric.axisLabel)}</text>
+			<text class="efficiency-axis-title" x="17" y="155" text-anchor="middle" transform="rotate(-90 17 155)">One-shot edit rate</text>
+			<text class="efficiency-chart-hint" x="836" y="17" text-anchor="end">higher is better ↑</text>
+			${points}
+		</svg>
+	</div>${buildEfficiencyColorLegendHtml(chartRows)}`;
+}
+
+function buildChartControlsHtml(): string {
+	const buttons = EFFICIENCY_METRICS.map(metric =>
+		`<button class="efficiency-metric-button${metric.key === efficiencyMetric ? ' active' : ''}" type="button" data-eff-metric="${metric.key}" aria-pressed="${metric.key === efficiencyMetric}">${metric.label}</button>`
+	).join('');
+	const bubbleOptions = EFFICIENCY_BUBBLE_METRICS.map(metric =>
+		`<option value="${metric.key}"${metric.key === efficiencyBubbleMetric ? ' selected' : ''}>${metric.label}</option>`
+	).join('');
+	const colorOptions = [
+		{ value: 'vendor', label: 'Vendor' },
+		{ value: 'model', label: 'Model' },
+	].map(option => `<option value="${option.value}"${option.value === efficiencyColorMode ? ' selected' : ''}>${option.label}</option>`).join('');
+	return `<div class="efficiency-chart-controls">
+		<div class="efficiency-control"><span>X-axis</span><div class="efficiency-metric-selector" role="group" aria-label="Efficiency comparison metric">${buttons}</div></div>
+		<label class="efficiency-control"><span>Bubble size</span><select id="eff-bubble-metric">${bubbleOptions}</select></label>
+		<label class="efficiency-control"><span>Color by</span><select id="eff-color-mode">${colorOptions}</select></label>
+	</div>`;
+}
+
+function buildEfficiencyTableHtml(rows: EfficiencyRow[], totalCalls: number): string {
+	const tableRows = rows.map(row => {
+		const cells = EFFICIENCY_COLUMN_DEFS.map(column => `<td>${column.render(row, totalCalls)}</td>`).join('');
+		return `<tr style="--model-color:${getEfficiencyColor(row.model)}">${cells}</tr>`;
+	}).join('');
+	const headers = EFFICIENCY_COLUMN_DEFS.map(column =>
+		`<th class="sortable" data-eff-sort="${column.sortKey}" title="${column.title}">${column.label}${getEfficiencySortIndicator(column.sortKey)}</th>`
+	).join('');
+	return `<div class="model-leaderboard-table-wrap"><table class="model-leaderboard-table"><thead><tr>${headers}</tr></thead><tbody>${tableRows}</tbody></table></div>`;
+}
+
+function buildModelEfficiencyContentHtml(): string {
+	const usage = cachedModelEfficiency[efficiencyPeriod];
+	if (!usage || Object.keys(usage).length === 0) {
+		return '<div class="model-leaderboard-empty"><strong>No per-model efficiency data for this period.</strong><span>Run local agent sessions with model and tool-call metadata, then refresh the dashboard.</span></div>';
+	}
+	const allRows = buildEfficiencyRows(usage);
+	const totalCalls = allRows.reduce((sum, row) => sum + row.counters.calls, 0);
+	const filtered = filterLowUsageRows(allRows, usage);
+	const note = filtered.hiddenNote ? `<span class="model-leaderboard-filter-note">${filtered.hiddenNote}</span>` : '';
+	return `<div class="efficiency-chart-header"><div><strong>Efficiency frontier</strong><span>One-shot edit rate is a local quality proxy, not a benchmark pass rate.</span></div>${buildChartControlsHtml()}</div>
+		${buildEfficiencyChartHtml(filtered.rows)}
+		<div class="model-leaderboard-heading"><div><strong>Most used models locally</strong><span>Ranked by your local turns; all averages use the same selected period.</span></div>${note}</div>
+		${buildEfficiencyTableHtml(filtered.rows, totalCalls)}`;
+}
+
+function buildModelEfficiencySectionHtml(stats: UsageAnalysisStats): string {
+	cachedModelEfficiency = { today: stats.today.modelEfficiency, last30Days: stats.last30Days.modelEfficiency, month: stats.month.modelEfficiency };
+	return `<div class="section" id="section-model-efficiency">
+		<div class="section-title"><span>🎯</span><span>Local Model Leaderboard</span></div>
+		<div class="section-subtitle">Compare the models in your own sessions by local usage, one-shot edits, cost, output tokens, and tool steps. Exactness depends on what each editor records; missing structured data is shown as unavailable rather than estimated.</div>
+		<div class="model-leaderboard-controls">
+			<span id="model-efficiency-period-selector"></span>
+			<label class="model-leaderboard-filter" title="Show only models above the 25th-percentile local turn count.">
+				<input type="checkbox" id="eff-filter-low-usage"${efficiencyFilterLowUsage ? ' checked' : ''}>
+				Hide low-usage models
+			</label>
+		</div>
+		<div id="model-efficiency-content">${buildModelEfficiencyContentHtml()}</div>
+	</div>`;
+}
+
+function renderModelEfficiencyPeriodSelector(): void {
+	const wrapper = document.getElementById('model-efficiency-period-selector');
+	if (!wrapper) { return; }
+	wrapper.replaceChildren();
+	const { wrapper: selectorWrapper } = createPeriodSelector({
+		selected: efficiencySelectedPeriod,
+		disabled: ['last7', 'last90', 'allTime'],
+		disabledTitle: 'Not available for model efficiency',
+		label: '',
+		onChange: (value) => {
+			const dataKey = EFFICIENCY_PERIOD_TO_DATA_KEY[value as Period];
+			if (!dataKey) { return; }
+			efficiencySelectedPeriod = value as Period;
+			efficiencyPeriod = dataKey;
+			rerenderModelEfficiencyContent();
+		},
+	});
+	wrapper.append(selectorWrapper);
+}
+
+function rerenderModelEfficiencyContent(): void {
+	const content = document.getElementById('model-efficiency-content');
+	if (content) { setHtml(content, buildModelEfficiencyContentHtml()); }
+}
+
+function handleEfficiencySortClick(th: HTMLElement): void {
+	const column = th.getAttribute('data-eff-sort') as EfficiencySortColumn | null;
+	if (!column) { return; }
+	if (efficiencySortColumn === column) {
+		efficiencySortDirection = efficiencySortDirection === 'desc' ? 'asc' : 'desc';
+	} else {
+		efficiencySortColumn = column;
+		efficiencySortDirection = column === 'model' ? 'asc' : 'desc';
+	}
+	rerenderModelEfficiencyContent();
+}
+
+/** Wires sortable headers, chart controls, and the low-usage filter. */
+function setupModelEfficiencySection(): void {
+	const section = document.getElementById('section-model-efficiency');
+	if (!section) { return; }
+	section.addEventListener('click', (event) => {
+		const target = event.target as HTMLElement;
+		const header = target.closest<HTMLElement>('th[data-eff-sort]');
+		if (header) { handleEfficiencySortClick(header); return; }
+		const metric = target.closest<HTMLButtonElement>('button[data-eff-metric]')?.dataset.effMetric as EfficiencyMetricKey | undefined;
+		if (metric && EFFICIENCY_METRICS.some(item => item.key === metric)) {
+			efficiencyMetric = metric;
+			rerenderModelEfficiencyContent();
+		}
+	});
+	section.addEventListener('change', (event) => {
+		const target = event.target as HTMLInputElement | HTMLSelectElement;
+		if (target.id === 'eff-filter-low-usage') {
+			efficiencyFilterLowUsage = (target as HTMLInputElement).checked;
+			rerenderModelEfficiencyContent();
+		} else if (target.id === 'eff-bubble-metric' && EFFICIENCY_BUBBLE_METRICS.some(item => item.key === target.value)) {
+			efficiencyBubbleMetric = target.value as EfficiencyBubbleMetricKey;
+			rerenderModelEfficiencyContent();
+		} else if (target.id === 'eff-color-mode' && (target.value === 'vendor' || target.value === 'model')) {
+			efficiencyColorMode = target.value;
+			rerenderModelEfficiencyContent();
+		}
+	});
+}
+
 function buildToolsTabPanelHtml(
 	stats: UsageAnalysisStats,
 	allToolKeys: string[],
@@ -3919,27 +4761,27 @@ function buildToolsTabPanelHtml(
 			<!-- Tool Calls Section -->
 			<div class="section">
 				<div class="section-title"><span>🔧</span><span>Tool Usage</span></div>
-				<div class="section-subtitle">Functions and tools invoked by Copilot during interactions</div>
+				<div class="section-subtitle">Functions and tools invoked by Copilot during interactions${hideAutomaticToolCalls ? ' (automatic tool calls hidden — disable "Hide Automatic Tool Calls" in settings to show them)' : ''}</div>
 				<div class="three-column">
 					<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.today.toolCalls.total)}</div>
-						${renderToolsTable(unionFill(stats.today.toolCalls.byTool, allToolKeys), 10)}
+						${renderToolsTable(unionFill(stats.today.toolCalls.byTool, allToolKeys), 10, lookupToolName, true)}
 					</div>
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.last30Days.toolCalls.total)}</div>
-							${renderToolsTable(unionFill(stats.last30Days.toolCalls.byTool, allToolKeys), 10)}
+							${renderToolsTable(unionFill(stats.last30Days.toolCalls.byTool, allToolKeys), 10, lookupToolName, true)}
 						</div>
 					</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.month.toolCalls.total)}</div>
-							${renderToolsTable(unionFill(stats.month.toolCalls.byTool, allToolKeys), 10)}
+							${renderToolsTable(unionFill(stats.month.toolCalls.byTool, allToolKeys), 10, lookupToolName, true)}
 						</div>
 					</div>
 				</div>
@@ -3947,6 +4789,7 @@ function buildToolsTabPanelHtml(
 
 			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
 			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
+			${buildSkillSuggestionsSectionHtml(stats.repeatedTasks ?? null)}
 			<!-- Multi-Model Usage Section -->
 			<div class="section">
 				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
@@ -3960,12 +4803,32 @@ function buildToolsTabPanelHtml(
 		</div>`;
 }
 
-function renderLayout(stats: UsageAnalysisStats): void {
-	const root = document.getElementById('root');
-	if (!root) {
-		return;
+/**
+ * Assigns the full dashboard HTML to `root`, isolating any failure that escapes the
+ * per-section/per-tab safeSectionHtml wrapping in buildUsageRootHtml. On failure, falls back
+ * to a minimal error state with a reload button instead of leaving the page on stale/blank
+ * content. Returns true on success, false if the fallback error state was shown instead.
+ */
+function assignUsageRootHtml(root: HTMLElement, build: () => string): boolean {
+	try {
+		setHtml(root, build());
+		return true;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.error(`[usage-webview] renderLayout failed: ${message}`);
+		setHtml(root, `<div style="padding: 32px; text-align: center; font-size: 14px;">
+			<div style="color: var(--vscode-foreground); opacity: 0.7; margin-bottom: 12px;">⚠️ Something went wrong rendering the dashboard.</div>
+			${createRefreshButton().outerHTML}
+		</div>`);
+		return false;
 	}
+}
 
+/**
+ * Syncs module-level UI state (hygiene matrix, workspace paths, curation analysis cache) from
+ * a fresh stats payload, and resolves the customization matrix to use for this render.
+ */
+function syncRenderLayoutState(stats: UsageAnalysisStats): WorkspaceCustomizationMatrix | null {
 	// customizationMatrix is passed as an extra field on the stats object alongside the typed fields
 	type StatsWithMatrix = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null };
 	const matrix =
@@ -3988,12 +4851,24 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	} else {
 		traceCurationOnce('render-no-curation-update', 'renderLayout.curation.notProvidedInUpdate');
 	}
+	return matrix;
+}
 
-	const customizationHtml = buildCustomizationSectionHtml(matrix);
+function renderLayout(stats: UsageAnalysisStats): void {
+	const root = document.getElementById('root');
+	if (!root) {
+		return;
+	}
+
+	const matrix = syncRenderLayoutState(stats);
+	const customizationHtml = safeSectionHtml('Workspace Customization', () => buildCustomizationSectionHtml(matrix));
+	// buildUsageAllKeysSets and the context-ref totals are cheap, pure aggregations over
+	// already-validated stats — not worth isolating individually. buildUsageRootHtml (and each
+	// tab/section within it) is isolated via safeSectionHtml / assignUsageRootHtml below.
 	const allKeys = buildUsageAllKeysSets(stats);
 	const todayTotalRefs = getTotalContextRefs(stats.today.contextReferences);
 	const last30DaysTotalRefs = getTotalContextRefs(stats.last30Days.contextReferences);
-	const thinkingEffortHtml = buildThinkingEffortSectionHtml(stats);
+	const thinkingEffortHtml = safeSectionHtml('Thinking Effort', () => buildThinkingEffortSectionHtml(stats));
 	const sessionsSummaryHtml = `
 		<!-- Summary Section -->
 		<div class="section">
@@ -4006,7 +4881,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 			</div>
 		</div>`;
 
-	root.innerHTML = buildUsageRootHtml(
+	const rendered = assignUsageRootHtml(root, () => buildUsageRootHtml(
 		stats,
 		customizationHtml,
 		'',
@@ -4021,7 +4896,8 @@ function renderLayout(stats: UsageAnalysisStats): void {
 		allKeys.allLowCostModels,
 		allKeys.allMediumCostModels,
 		allKeys.allUnknownModels,
-	);
+	));
+	if (!rendered) { return; }
 
 	wireNavigationButtons();
 	wireAboutInfoToggle();
@@ -4029,11 +4905,19 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	wireCurationButtons();
 	renderRepositoryHygienePanels();
 	setupTabs();
+	setupModelEfficiencySection();
+	renderModelEfficiencyPeriodSelector();
+	renderSessionsLookbackSelector();
 	setupWorktreesHandlers();
 	wireCopyButtons();
 	// Initialize currentInsights from the stats and wire card buttons
 	currentInsights = stats.insights ?? [];
 	wireInsightCardButtons();
+	scrollToPendingTabAnchor();
+	// The GitHub activity containers only exist now. Re-announce readiness so the extension
+	// replays any PR / cloud-agent state that was posted while the DOM had no place to put it.
+	restoreGitHubActivityPanels(repoPrStatsData, agentSessionsData, updateReposPrPanel, updateAgentSessionsPanel);
+	notifyUsageWebviewReady('layout-rendered');
 }
 
 /** Wires up the collapsible "About This Dashboard" info box; the collapsed state is persisted via webview state. */
@@ -4081,29 +4965,39 @@ function wireNavigationButtons(): void {
 	document.getElementById('btn-environmental')?.addEventListener('click', () => {
 		vscode.postMessage({ command: 'showEnvironmental' });
 	});
+	document.getElementById('btn-efficiency')?.addEventListener('click', () => {
+		vscode.postMessage({ command: 'showEfficiency' });
+	});
 	wireExtensionPointButtons(vscode);
 }
 
 /** Wires up repository hygiene analysis buttons and pane click handlers. */
+function setButtonAnalyzingState(btn: (HTMLElement & { disabled: boolean }) | null, analyzingText: string): void {
+	if (!btn) { return; }
+	btn.disabled = true;
+	btn.textContent = analyzingText;
+	btn.setAttribute('appearance', 'secondary');
+}
+
 function wireRepositoryButtons(): void {
 	document.getElementById('btn-analyse-repo')?.addEventListener('click', () => {
 		const btn = document.getElementById('btn-analyse-repo') as HTMLElement & { disabled: boolean };
-		if (btn) {
-			btn.disabled = true;
-			btn.textContent = 'Analyzing...';
-		}
+		isSingleRepoAnalysisInProgress = true;
+		setButtonAnalyzingState(btn, 'Analyzing...');
 		vscode.postMessage({ command: 'analyseRepository' });
 	});
 
 	document.getElementById('btn-analyse-all')?.addEventListener('click', () => {
 		const btn = document.getElementById('btn-analyse-all') as HTMLElement & { disabled: boolean };
-		if (btn) {
-			btn.disabled = true;
-			btn.textContent = 'Analyzing All...';
-		}
+		setButtonAnalyzingState(btn, 'Analyzing All...');
 		isBatchAnalysisInProgress = true;
 		isSwitchingRepository = true;
 		selectedRepoPath = null;
+		for (const ws of hygieneMatrixState?.workspaces ?? []) {
+			if (!ws.workspacePath.startsWith('<unresolved:')) {
+				repoAnalysisInFlight.add(ws.workspacePath);
+			}
+		}
 		renderRepositoryHygienePanels();
 		vscode.postMessage({ command: 'analyseAllRepositories' });
 	});
@@ -4122,9 +5016,9 @@ function wireRepositoryButtons(): void {
 			return;
 		}
 		if (action === 'analyze') {
-			(actionButton as HTMLElement & { disabled: boolean }).disabled = true;
-			actionButton.textContent = 'Analyzing...';
+			repoAnalysisInFlight.add(workspacePath);
 			isBatchAnalysisInProgress = false;
+			renderRepositoryHygienePanels();
 			vscode.postMessage({ command: 'analyseRepository', workspacePath });
 		}
 	});
@@ -4164,17 +5058,17 @@ function handleUpdateStats(message: any): void {
 	if (typeof message.data?.use24HourTime === 'boolean') {
 		use24HourTime = message.data.use24HourTime;
 	}
+	if (typeof message.data?.hideAutomaticToolCalls === 'boolean') {
+		hideAutomaticToolCalls = message.data.hideAutomaticToolCalls;
+	}
 	const sanitized = sanitizeStats(message.data);
 	if (sanitized) {
 		_ulLoadingActive = false;
-		// New stats invalidate any lazily-loaded lookback data; it is re-requested on demand.
-		delete recentSessionsCache['7'];
-		delete recentSessionsCache['30'];
+		// CLI-backed hosts include all buckets; VS Code omits them and keeps using lazy loading.
+		replaceRecentSessionsCache(sanitized.recentSessions);
 		renderLayout(sanitized);
 		setupSessionsTableSort();
 		renderRepositoryHygienePanels();
-		if (repoPrStatsData) { updateReposPrPanel(repoPrStatsData); }
-		if (agentSessionsData) { updateAgentSessionsPanel(agentSessionsData); }
 	} else {
 		traceCurationOnce('update-invalid-sanitized', 'handleUpdateStats.sanitizeReturnedNull');
 		showLoadError('Received invalid data from the extension. Try refreshing.');
@@ -4217,14 +5111,23 @@ function handleHighlightUnknownTools(): void {
 function handleRepoPrStatsLoaded(data: any): void {
 	repoPrStatsData = sanitizeRepoPrStatsData(data);
 	if (!repoPrStatsData.authenticated) { repoPrStatsLoaded = false; }
-	updateReposPrPanel(repoPrStatsData);
+	// Only the failure is worth a log line: a successful render is visible in the panel, but a
+	// payload that arrives and renders nothing looks identical to one that never arrived.
+	if (!updateReposPrPanel(repoPrStatsData)) {
+		traceToHost('repoPrStatsLoaded.notRendered', {
+			repos: repoPrStatsData.repos.length,
+			authenticated: repoPrStatsData.authenticated,
+		});
+	}
 }
 
 function handleAgentSessionsLoaded(data: any): void {
 	if (!data || typeof data !== 'object') { return; }
 	agentSessionsData = sanitizeAgentSessionsData(data);
 	if (!agentSessionsData.authenticated) { agentSessionsLoaded = false; }
-	updateAgentSessionsPanel(agentSessionsData);
+	if (!updateAgentSessionsPanel(agentSessionsData)) {
+		traceToHost('agentSessionsLoaded.notRendered', { authenticated: agentSessionsData.authenticated });
+	}
 }
 
 function handleUpdateInsights(rawInsights: unknown): void {
@@ -4250,15 +5153,31 @@ function handleLoadingStateMessage(message: any): boolean {
 	return false;
 }
 
-function handleExtensionMessage(message: any): void {
-	if (handleLoadingStateMessage(message)) { return; }
+/** Handles repository hygiene analysis messages. Returns true when the command was handled. */
+function handleRepoAnalysisMessage(message: any): boolean {
 	switch (message.command) {
 		case 'repoAnalysisResults':
-			displayRepoAnalysisResults(message.data, message.workspacePath); break;
+			try {
+				displayRepoAnalysisResults(message.data, message.workspacePath);
+			} catch (err) {
+				console.error('Failed to render repo analysis results', err);
+				displayRepoAnalysisError(err instanceof Error ? err.message : String(err), message.workspacePath);
+			}
+			return true;
 		case 'repoAnalysisError':
-			displayRepoAnalysisError(message.error, message.workspacePath); break;
+			displayRepoAnalysisError(message.error, message.workspacePath);
+			return true;
 		case 'repoAnalysisBatchComplete':
-			handleBatchAnalysisComplete(); break;
+			handleBatchAnalysisComplete();
+			return true;
+	}
+	return false;
+}
+
+function handleExtensionMessage(message: any): void {
+	if (handleLoadingStateMessage(message)) { return; }
+	if (handleRepoAnalysisMessage(message)) { return; }
+	switch (message.command) {
 		case 'updateStats':
 			handleUpdateStats(message); break;
 		case 'toolSuppressed':
@@ -4287,19 +5206,71 @@ function handleExtensionMessage(message: any): void {
 }
 
 function handleSwitchTab(message: any): void {
-	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${String(message.tab)}"]`);
+	const tab = String(message.tab);
+	// Ignore unknown tabs entirely: a bogus name must not blank the dashboard, and only
+	// allowlisted names may be interpolated into the selector below.
+	if (!isSwitchableTab(tab)) { return; }
+	// Persist the requested tab in module state, not just the DOM: while the webview is in
+	// its loading state the tab bar doesn't exist, so btn.click() below silently no-ops and
+	// the later renderLayout would land on the default tab — swallowing e.g. the worktree
+	// notification's "Show Me" action. With activeTab set, the eventual render honors it.
+	activeTab = tab;
+	pendingTabAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
+	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${tab}"]`);
 	btn?.click();
-	if (message.anchor) {
-		const anchor = document.getElementById(String(message.anchor));
-		if (anchor) {
-			// Use setTimeout to let the tab panel become visible before scrolling
-			setTimeout(() => anchor.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-		}
+	scrollToPendingTabAnchor();
+}
+
+function scrollToPendingTabAnchor(): void {
+	if (!pendingTabAnchor) { return; }
+	const anchor = document.getElementById(pendingTabAnchor);
+	if (anchor) {
+		pendingTabAnchor = null;
+		setTimeout(() => anchor.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
 	}
 }
 
 // Listen for messages from the extension
-registerMessageHandler<any>((message) => { handleExtensionMessage(message); });
+let _traceBudget = 20;
+function traceToHost(stage: string, details: Record<string, unknown>): void {
+	// Bounded so a chatty session can't flood the Output channel.
+	if (_traceBudget <= 0) { return; }
+	_traceBudget--;
+	vscode.postMessage({ command: 'usageWebviewTrace', stage, details });
+}
+
+registerMessageHandler<any>((message) => {
+	// An exception thrown here escapes the listener uncaught and is only visible in the
+	// webview devtools, which nobody has open — the panel just silently stays on "Loading…".
+	// Report it back to the extension so it lands in the Output channel instead.
+	try {
+		handleExtensionMessage(message);
+	} catch (err) {
+		traceToHost('handleExtensionMessage.threw', {
+			command: String(message?.command ?? ''),
+			error: err instanceof Error ? err.message : String(err),
+		});
+	}
+}, (event) => {
+	// Tripwire for the failure that made every panel hang on "Loading…": the source-trust
+	// check silently discarding real extension messages. Bounded by the trace budget, and
+	// silent unless the trust model breaks again on some future host build.
+	traceToHost('message-rejected-untrusted', {
+		command: String((event as any)?.data?.command ?? '(none)'),
+		origin: event.origin,
+		ownOrigin: location.origin,
+		href: String(location.href).slice(0, 120),
+	});
+});
+// Uncaught errors in a webview are invisible without devtools open; surface them in the
+// extension's Output channel instead.
+window.addEventListener('error', (event) => {
+	traceToHost('window.error', { message: String(event.message).slice(0, 200) });
+});
+window.addEventListener('unhandledrejection', (event: any) => {
+	traceToHost('unhandledRejection', { reason: String(event?.reason).slice(0, 200) });
+});
+notifyUsageWebviewReady('listener-registered');
 
 function getWorkspaceName(workspacePath: string): string {
 	const workspace = hygieneMatrixState?.workspaces.find((ws) => ws.workspacePath === workspacePath);
@@ -4427,7 +5398,7 @@ function buildCheckRowElement(check: RepoHygieneCheck): HTMLElement {
 	checkRow.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;');
 	const icon = el('span');
 	icon.setAttribute('style', 'flex-shrink: 0; padding-top: 1px;');
-	icon.innerHTML = statusBadgeHtml(emoji);
+	setHtml(icon, statusBadgeHtml(emoji));
 	const weight = el('span');
 	weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
 	weight.textContent = `+${toFiniteNumber(check?.weight)}`;
@@ -4583,16 +5554,19 @@ function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: any[], has
 			<div style="${colStyles.sessions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Sessions</div>
 			<div style="${colStyles.interactions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Interactions</div>
 			<div style="${colStyles.score} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Score</div>
-			<div style="width: 80px; flex-shrink: 0;"></div>
+			<div style="width: 110px; flex-shrink: 0;"></div>
 		</div>
 	`;
-	listPane.innerHTML = headerHtml + visibleWorkspaces.map((ws, idx) => {
+	setHtml(listPane, headerHtml + visibleWorkspaces.map((ws, idx) => {
 		const record = repoAnalysisState.get(ws.workspacePath);
+		const inFlight = repoAnalysisInFlight.has(ws.workspacePath);
 		const hasResult = !!record?.data?.summary;
 		const scoreLabel = getScoreLabel(ws.workspacePath);
-		const buttonLabel = hasResult ? 'Details' : 'Analyze';
-		const buttonAction = hasResult ? 'details' : 'analyze';
+		const buttonLabel = inFlight ? 'Analyzing…' : hasResult ? 'Details' : 'Analyze';
+		const buttonAction = hasResult && !inFlight ? 'details' : 'analyze';
 		const isCurrentSelection = selectedRepoPath === ws.workspacePath && hasSelectedRepository;
+		const buttonDisabled = inFlight || isCurrentSelection;
+		const buttonAppearance = inFlight ? ' appearance="secondary"' : '';
 		const sessions = Number(ws.sessionCount) || 0;
 		const interactions = Number(ws.interactionCount) || 0;
 		return `
@@ -4605,12 +5579,12 @@ function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: any[], has
 				<div style="${colStyles.sessions}">${sessions}</div>
 				<div style="${colStyles.interactions}">${interactions}</div>
 				<div style="${colStyles.score}">${escapeHtml(scoreLabel)}</div>
-				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${isCurrentSelection ? 'disabled="true"' : ''} style="min-width: 80px; flex-shrink: 0;">
+				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${buttonDisabled ? 'disabled="true"' : ''}${buttonAppearance} style="width: 110px; flex-shrink: 0;">
 					${buttonLabel}
 				</vscode-button>
 			</div>
 		`;
-	}).join('');
+	}).join(''));
 }
 
 function renderRepoDetailSuccess(detailsPane: HTMLElement, record: any, workspaceName: string): void {
@@ -4666,7 +5640,7 @@ function renderRepositoryHygienePanels(): void {
 	}
 
 	if (record?.error) {
-		detailsPane.innerHTML = `
+		setHtml(detailsPane, `
 			<div style="padding: 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px;">
 				<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
 					<div style="font-size: 11px; color: #fca5a5;">Repository: ${escapeHtml(workspaceName)}</div>
@@ -4675,11 +5649,11 @@ function renderRepositoryHygienePanels(): void {
 				<div style="font-size: 12px; font-weight: 600; color: #ef4444; margin-bottom: 4px;">❌ Analysis Failed</div>
 				<div style="font-size: 11px; color: #fca5a5;">${escapeHtml(record.error)}</div>
 			</div>
-		`;
+		`);
 		return;
 	}
 
-	detailsPane.innerHTML = `
+	setHtml(detailsPane, `
 		<div style="padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
 			<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
 				<div style="font-size: 12px; color: var(--text-secondary);">Repository: <span style="color: var(--text-primary); font-weight: 600; font-family: 'Courier New', monospace;">${escapeHtml(workspaceName)}</span></div>
@@ -4687,11 +5661,12 @@ function renderRepositoryHygienePanels(): void {
 			</div>
 			<div style="font-size: 11px; color: var(--text-muted);">No analysis data yet. Click Analyze in the list.</div>
 		</div>
-	`;
+	`);
 }
 
 function displayRepoAnalysisResults(data: RepoAnalysisData, workspacePath?: string): void {
 	if (workspacePath) {
+		repoAnalysisInFlight.delete(workspacePath);
 		repoAnalysisState.set(workspacePath, { data, error: undefined });
 		if (!isBatchAnalysisInProgress) {
 			selectedRepoPath = workspacePath;
@@ -4703,8 +5678,10 @@ function displayRepoAnalysisResults(data: RepoAnalysisData, workspacePath?: stri
 
 	const btn = document.getElementById('btn-analyse-repo') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
+		isSingleRepoAnalysisInProgress = false;
 		btn.disabled = false;
 		btn.textContent = 'Analyze Repo for Best Practices';
+		btn.removeAttribute('appearance');
 	}
 
 	const resultsHost = document.getElementById('repo-analysis-results');
@@ -4719,6 +5696,7 @@ function displayRepoAnalysisResults(data: RepoAnalysisData, workspacePath?: stri
 
 function displayRepoAnalysisError(error: string, workspacePath?: string): void {
 	if (workspacePath) {
+		repoAnalysisInFlight.delete(workspacePath);
 		repoAnalysisState.set(workspacePath, { data: undefined, error });
 		if (!isBatchAnalysisInProgress) {
 			selectedRepoPath = workspacePath;
@@ -4730,18 +5708,20 @@ function displayRepoAnalysisError(error: string, workspacePath?: string): void {
 
 	const btn = document.getElementById('btn-analyse-repo') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
+		isSingleRepoAnalysisInProgress = false;
 		btn.disabled = false;
 		btn.textContent = 'Analyze Repo for Best Practices';
+		btn.removeAttribute('appearance');
 	}
 
 	const resultsHost = document.getElementById('repo-analysis-results');
 	if (resultsHost) {
-		resultsHost.innerHTML = `
+		setHtml(resultsHost, `
 			<div style="padding: 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; margin-bottom: 12px;">
 				<div style="font-size: 12px; font-weight: 600; color: #ef4444; margin-bottom: 4px;">❌ Analysis Failed</div>
 				<div style="font-size: 11px; color: #fca5a5;">${escapeHtml(error)}</div>
 			</div>
-		`;
+		`);
 	}
 }
 
@@ -4749,12 +5729,14 @@ function handleBatchAnalysisComplete(): void {
 	isBatchAnalysisInProgress = false;
 	isSwitchingRepository = true;
 	selectedRepoPath = null;
+	repoAnalysisInFlight.clear();
 	renderRepositoryHygienePanels();
 
 	// Re-enable the "Analyze All" button
 	const btn = document.getElementById('btn-analyse-all') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
 		btn.disabled = false;
+		btn.removeAttribute('appearance');
 		const matrix = initialData?.customizationMatrix as WorkspaceCustomizationMatrix | undefined;
 		const count = matrix?.workspaces?.length || 0;
 		btn.textContent = `Analyze All Repositories (${count})`;
@@ -4787,6 +5769,8 @@ async function bootstrap(): Promise<void> {
 	}
 	setFormatLocale(initialData.locale);
 	use24HourTime = initialData.use24HourTime !== false;
+	hideAutomaticToolCalls = initialData.hideAutomaticToolCalls !== false;
+	replaceRecentSessionsCache(initialData.recentSessions);
 	const savedColumns = initialData.sessionColumnSettings?.enabledColumns;
 	if (Array.isArray(savedColumns)) {
 		const valid = savedColumns.filter((c): c is SessionColumnId => (ALL_SESSION_COLUMN_IDS as string[]).includes(c));

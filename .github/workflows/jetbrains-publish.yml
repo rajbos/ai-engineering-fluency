@@ -43,13 +43,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -57,7 +57,7 @@ jobs:
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build and bundle Windows executable
         working-directory: cli
@@ -84,13 +84,13 @@ jobs:
     runs-on: macos-15   # pinned Apple Silicon runner (M-series); do not use macos-latest (label shifts)
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -98,7 +98,7 @@ jobs:
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build production bundle
         working-directory: cli
@@ -134,13 +134,13 @@ jobs:
     runs-on: macos-15-intel   # Intel (x64) macOS runner; macos-13 is no longer available
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -148,7 +148,7 @@ jobs:
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build production bundle
         working-directory: cli
@@ -183,13 +183,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -197,7 +197,7 @@ jobs:
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build production bundle
         working-directory: cli
@@ -231,13 +231,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
           cache: 'npm'
@@ -245,7 +245,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: vscode-extension
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build webview bundles
         working-directory: vscode-extension
@@ -270,20 +270,20 @@ jobs:
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Java 21 (Temurin)
-        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
           java-version: '21'
           distribution: 'temurin'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       - name: Download all build artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -298,15 +298,17 @@ jobs:
           mkdir -p cli/dist vscode-extension/dist/webview
 
           # CLI binaries (sql-wasm.wasm is the same on all platforms; one copy suffices)
-          # Note: artifact paths preserve the source directory structure
-          cp artifacts/cli-windows/cli/dist/copilot-token-tracker.exe      cli/dist/
-          cp artifacts/cli-windows/cli/dist/sql-wasm.wasm                  cli/dist/
-          cp artifacts/cli-macos-arm64/cli/dist/copilot-token-tracker-macos-arm64  cli/dist/
-          cp artifacts/cli-macos-x64/cli/dist/copilot-token-tracker-macos-x64      cli/dist/
-          cp artifacts/cli-linux/cli/dist/copilot-token-tracker-linux       cli/dist/
+          # Note: actions/upload-artifact strips the common leading directory of the
+          # listed paths, so files land flat at the artifact root (not under cli/dist/).
+          cp artifacts/cli-windows/copilot-token-tracker.exe      cli/dist/
+          cp artifacts/cli-windows/sql-wasm.wasm                  cli/dist/
+          cp artifacts/cli-macos-arm64/copilot-token-tracker-macos-arm64  cli/dist/
+          cp artifacts/cli-macos-x64/copilot-token-tracker-macos-x64      cli/dist/
+          cp artifacts/cli-linux/copilot-token-tracker-linux       cli/dist/
 
-          # Webview JS bundles (built by vscode-extension)
-          cp artifacts/webview-bundles/vscode-extension/dist/webview/*  vscode-extension/dist/webview/
+          # Webview JS bundles (built by vscode-extension; also flattened at upload)
+          # -r because the bundle includes the codicons/ subdirectory
+          cp -r artifacts/webview-bundles/*  vscode-extension/dist/webview/
 
           # Make unix binaries executable
           chmod +x cli/dist/copilot-token-tracker-macos-arm64 cli/dist/copilot-token-tracker-macos-x64 cli/dist/copilot-token-tracker-linux
@@ -361,22 +363,34 @@ jobs:
       - name: Assert all CLI bundles are present in the ZIP
         run: |
           ZIP=$(find jetbrains-plugin/build/distributions/ -name "*.zip" | head -1)
+          # The plugin ZIP only contains the plugin's lib/*.jar files at its top level.
+          # Gradle's `sourceSets.main.resources` bundling packs our CLI/webview assets
+          # *inside* the main plugin jar (so the plugin can load them via the
+          # classloader), not as loose files in the outer ZIP. So we must inspect the
+          # nested jar's entries, not the outer ZIP's.
+          WORKDIR=$(mktemp -d)
+          unzip -q "$ZIP" -d "$WORKDIR"
+          JAR=$(find "$WORKDIR" -name "*.jar" ! -name "*-searchableOptions.jar" | head -1)
+          if [ -z "$JAR" ]; then
+            echo "❌ Could not find the plugin's main jar inside $ZIP"
+            exit 1
+          fi
           MISSING=()
           for ENTRY in \
             "cli-bundle/win-x64/copilot-token-tracker.exe" \
             "cli-bundle/darwin-arm64/copilot-token-tracker" \
             "cli-bundle/darwin-x64/copilot-token-tracker" \
             "cli-bundle/linux-x64/copilot-token-tracker"; do
-            if ! unzip -l "$ZIP" | grep -q "$ENTRY"; then
+            if ! unzip -l "$JAR" | grep -q "$ENTRY"; then
               MISSING+=("$ENTRY")
             fi
           done
           if [ ${#MISSING[@]} -gt 0 ]; then
-            echo "❌ Missing CLI bundle entries in plugin ZIP:"
+            echo "❌ Missing CLI bundle entries in plugin jar ($JAR):"
             for M in "${MISSING[@]}"; do echo "  - $M"; done
             exit 1
           fi
-          echo "✅ All CLI bundles present in plugin ZIP"
+          echo "✅ All CLI bundles present in plugin jar"
 
       - name: Publish to JetBrains Marketplace
         # Publish on tag push, or on workflow_dispatch when explicitly requested

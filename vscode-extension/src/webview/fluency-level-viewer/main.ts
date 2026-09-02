@@ -1,10 +1,12 @@
 // Fluency Level Viewer webview
 import { buttonHtml } from '../shared/buttonConfig';
+import { setHtml } from '../shared/domUtils';
 import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import type { CategoryLevelData } from '../shared/types';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -21,7 +23,14 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 };
 
 const vscode = acquireVsCodeApi();
-const initialData = getWindowData<FluencyLevelData>('__INITIAL_FLUENCY_LEVEL_DATA__');
+const initialData = getWindowData<FluencyLevelData & { localization?: Record<string, string> }>('__INITIAL_FLUENCY_LEVEL_DATA__');
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 
 let selectedCategoryIndex = 0;
 
@@ -105,7 +114,7 @@ function renderLayout(data: FluencyLevelData): void {
 
 	const selectedCategory = data.categories[selectedCategoryIndex];
 
-	root.innerHTML = `
+	setHtml(root, `
 		<style>${styles}</style>
 		<div class="container">
 			<div class="header">
@@ -146,7 +155,7 @@ function renderLayout(data: FluencyLevelData): void {
 				📊 Scoring Guide &middot; ${data.categories.length} categories &middot; 4 stages each
 			</div>
 		</div>
-	`;
+	`);
 
 	wireNavButtons(data);
 }

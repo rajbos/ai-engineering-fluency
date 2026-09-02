@@ -14,6 +14,7 @@ import * as os from 'os';
 import { Worker } from 'worker_threads';
 import type { ModelUsage } from './types';
 import { CopilotCliStoreAccess } from './copilotCliStore';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 
 /** Per-session usage aggregated from OTel `chat <model>` spans. */
 export interface CopilotCliOtelSessionUsage {
@@ -98,7 +99,9 @@ function accumulateOtelChatSpanUsage(index: Map<string, CopilotCliOtelSessionUsa
 		index.set(sessionId, { modelUsage: {}, actualTokens: 0, cacheReadTokens: 0, nanoAiu: 0 });
 	}
 	const entry = index.get(sessionId)!;
-	if (!entry.modelUsage[usage.model]) { entry.modelUsage[usage.model] = { inputTokens: 0, outputTokens: 0 }; }
+	// Untrusted `model` string read from OTel span attributes — see protoGuard.ts.
+	if (isUnsafeObjectKey(usage.model)) { return; }
+	if (!entry.modelUsage[usage.model]) { entry.modelUsage[usage.model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	const modelEntry = entry.modelUsage[usage.model];
 
 	// gen_ai.usage.input_tokens is already the total (uncached + cache creation + cache read),

@@ -28,7 +28,8 @@ export {
 	normalizePathForComparison,
 	normalizePathForDedup,
 	normalizePathSeparators,
-	normalizeToRepoRoot
+	normalizeToRepoRoot,
+	getRepoNameFromWorkspacePath
 } from './utils/pathUtils';
 
 
@@ -475,6 +476,10 @@ function detectToolEditorFromRootPath(lower: string): string | undefined {
 	// marker must be checked before the generic VS Code family matches.
 	if (lower.includes('saoudrizwan.claude-dev')) { return 'Cline'; }
 	if (lower.includes('opencode')) { return 'OpenCode'; }
+	// Hermes Agent's root is <HERMES_HOME> (Windows: %LOCALAPPDATA%/hermes, else ~/.hermes).
+	// 'hermes' doesn't collide with 'copilot'/'code'/'cursor', but checked here alongside
+	// the other CLI-tool root markers for consistency.
+	if (lower.includes('hermes')) { return 'Hermes'; }
 	// OpenAI Codex CLI home (~/.codex). The dot-prefix keeps this from colliding with
 	// the generic 'code' substring checks further down ('.codex' never matches '/code/'
 	// or endsWith('code')), but it must still run before isVSCodeRoot for clarity.
@@ -620,14 +625,58 @@ export function isMcpTool(toolName: string): boolean {
 /**
  * Normalize an MCP tool name so that equivalent tools from different servers
  * (local stdio vs remote) are counted under a single canonical key in "By Tool" views.
- * Maps mcp_github_github_<action> → mcp_io_github_git_<action>.
+ *
+ * Each rule maps a known equivalent prefix to a canonical prefix. Rules are
+ * evaluated in order; the first match wins.
+ */
+const MCP_NORMALIZATION_RULES: readonly [string, string][] = [
+	// GitHub MCP (remote / server-name variants → local stdio form).
+	['mcp_github_github_', 'mcp_io_github_git_'],
+	['github-mcp-server-', 'mcp_io_github_git_'],
+	['mcp_github_mcp_s2_', 'mcp_io_github_git_'],
+	['mcp_github_mcp_se_', 'mcp_io_github_git_'],
+	['mcp.github.github.', 'mcp.io.github.git.'],
+
+	// Context7 / UPS docs.
+	['mcp__plugin_context7_context7__', 'context7-'],
+	['mcp__context7__', 'context7-'],
+	['mcp_context7_', 'context7-'],
+	['mcp_io_github_ups_', 'context7-'],
+
+	// Playwright MCP.
+	['mcp__microsoft_playwright-mcp__', 'microsoft_playwright-mcp-'],
+	['mcp__playwright__', 'microsoft_playwright-mcp-'],
+	['mcp_playwright_', 'microsoft_playwright-mcp-'],
+	['mcp_microsoft_pla_', 'microsoft_playwright-mcp-'],
+
+	// Tavily MCP.
+	['mcp_tavily-mcp_', 'io_github_tavily-ai_tavily-mcp-'],
+	['mcp_tavily_', 'io_github_tavily-ai_tavily-mcp-'],
+
+	// Claude Browser MCP.
+	['mcp__claude-in-chrome__', 'mcp__claude_browser__'],
+	['mcp__Claude_Browser__', 'mcp__claude_browser__'],
+];
+
+/**
+ * Normalize an MCP tool name so that equivalent tools from different servers
+ * (local stdio vs remote) are counted under a single canonical key in "By Tool" views.
+ *
+ * Known equivalent prefix families that collapse to a single canonical form:
+ * - GitHub MCP: mcp_github_github_, mcp_io_github_git_, github-mcp-server-,
+ *   mcp_github_mcp_s2_, mcp_github_mcp_se_, mcp.github.github., mcp.io.github.git.
+ * - Context7: context7-, mcp_context7_, mcp__context7__, mcp__plugin_context7_context7__,
+ *   mcp_io_github_ups_
+ * - Playwright: mcp_microsoft_pla_, microsoft_playwright-mcp-, mcp__playwright__,
+ *   mcp_playwright_, mcp__microsoft_playwright-mcp__
+ * - Tavily: mcp_tavily-mcp_, io_github_tavily-ai_tavily-mcp-, mcp_tavily_
+ * - Claude Browser: mcp__claude-in-chrome__, mcp__claude_browser__, mcp__Claude_Browser__
  */
 export function normalizeMcpToolName(toolName: string): string {
-	if (toolName.startsWith('mcp_github_github_')) {
-		return 'mcp_io_github_git_' + toolName.substring('mcp_github_github_'.length);
-	}
-	if (toolName.startsWith('mcp.github.github.')) {
-		return 'mcp.io.github.git.' + toolName.substring('mcp.github.github.'.length);
+	for (const [prefix, canonicalPrefix] of MCP_NORMALIZATION_RULES) {
+		if (toolName.startsWith(prefix)) {
+			return canonicalPrefix + toolName.substring(prefix.length);
+		}
 	}
 	return toolName;
 }
@@ -898,6 +947,27 @@ export function resolveWorkspaceFolderFromSessionPath(sessionFilePath: string, w
 	}
 }
 
+/**
+ * Best-effort workspace display name for a session summary. Prefers an explicit
+ * workspace folder path cached on the session, then the repository name, then
+ * workspaceStorage folder resolution. Returns undefined when attribution is
+ * unavailable.
+ */
+export function resolveSessionWorkspaceName(
+	sessionData: { workspaceFolderPath?: string; repository?: string },
+	sessionFilePath: string,
+	workspaceIdToFolderCache?: Map<string, string | undefined>
+): string | undefined {
+	if (sessionData.workspaceFolderPath) { return path.basename(sessionData.workspaceFolderPath); }
+	if (sessionData.repository) { return sessionData.repository; }
+	if (!workspaceIdToFolderCache) { return undefined; }
+	try {
+		const workspaceFolder = resolveWorkspaceFolderFromSessionPath(sessionFilePath, workspaceIdToFolderCache);
+		if (workspaceFolder) { return path.basename(workspaceFolder); }
+	} catch { /* attribution is optional */ }
+	return undefined;
+}
+
 // ── Editor-detection private predicates ──────────────────────────────────────
 
 /** Returns true for Gemini CLI session paths (`.gemini/tmp/.../chats/session-*.jsonl`). */
@@ -1006,6 +1076,11 @@ export function detectClaudeCodeEditorVariant(filePath: string): string {
  */
 function detectCliAgentStoreFromPath(lowerPath: string): string | undefined {
 	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
+	// Hermes Agent's virtual path scheme is <HERMES_HOME>/state.db#<session_id>. HERMES_HOME
+	// itself never contains 'code'/'copilot'/'cursor' (Windows: %LOCALAPPDATA%/hermes, else
+	// ~/.hermes), but the check is placed here alongside the other DB-backed CLI adapters for
+	// consistency and to keep it ahead of any future generic substring matches.
+	if (lowerPath.includes('hermes/state.db#')) { return 'Hermes'; }
 	// Devin CLI virtual paths: <...>/devin/cli/sessions.db#<id>. Checked here (not merely
 	// the generic 'devin' substring match in detectIDEEditorSource) so it always wins over
 	// the desktop app's devin:// scheme / Windsurf family checks, which are handled earlier
@@ -1040,6 +1115,7 @@ function detectToolEditorFromPath(
 	const globalStorageEditor = detectGlobalStorageEditorFromPath(lowerPath);
 	if (globalStorageEditor) { return globalStorageEditor; }
 	if (lowerPath.includes('/.continue/sessions/')) { return 'Continue'; }
+	if (lowerPath.includes('/claude-code-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (lowerPath.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (lowerPath.includes('/.claude/projects/')) { return detectClaudeCodeEditorVariant(filePath); }
 	if (lowerPath.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
@@ -1077,7 +1153,8 @@ function detectVSCodeVariantFromPath(lowerPath: string): string | undefined {
  * Note: 'Claude Code' and 'Claude Desktop' share the same ~/.claude/projects/ directory
  * and are distinguished by the `entrypoint` field inside the session file, not the path
  * (see detectClaudeCodeEditorVariant). 'Claude Desktop Cowork' is a separate, unrelated
- * feature (local-agent-mode-sessions) and is still detected purely by path.
+ * feature (claude-code-sessions, formerly local-agent-mode-sessions) and is still
+ * detected purely by path.
  */
 export function getEditorTypeFromPath(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
 	const lowerPath = normalizePathForComparison(filePath);

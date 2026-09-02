@@ -176,3 +176,133 @@ export function createEmptyTaskClassificationResult(): TaskClassificationResult 
 		turnCount: 0,
 	};
 }
+
+/**
+ * Task classification — buckets a session into a single dominant task category
+ * using keyword + tool-usage heuristics (issue #1650).
+ */
+import type { SessionUsageAnalysis, ChatTurn } from './types';
+
+/** Adapter-agnostic input for `classifySessionTask()`. */
+export interface TaskClassificationInput {
+	toolNames: string[];
+	terminalCommands?: string[];
+	userText?: string;
+}
+
+const EDIT_TOOL_PATTERN = /edit|write|create_?file|replace_?string|str_replace|apply_?patch|patch/i;
+const READ_TOOL_PATTERN = /read_?file|grep_?search|file_?search|search|glob|list_dir|websearch|fetch/i;
+const TERMINAL_TOOL_PATTERN = /terminal|bash|shell|run_?command/i;
+const PLANNING_TOOL_PATTERN = /todo|task[-_]?create|enterplanmode|\bplan\b/i;
+export const DELEGATION_TOOL_PATTERN = /^(task|agent|read_agent|write_agent|list_agents|create_session|open_pr_session|open_issue_session|fork_session)$|subagent|sub[-_]?agent|agent[-_]?spawn|spawn[-_]?(task|agent)|delegate/i;
+
+export function countDelegationToolCalls(byTool: Record<string, number>): number {
+	let total = 0;
+	for (const [tool, count] of Object.entries(byTool)) {
+		if (DELEGATION_TOOL_PATTERN.test(tool)) { total += count; }
+	}
+	return total;
+}
+const TEST_TOOL_PATTERN = /run_?tests?|pytest|vitest|jest/i;
+const GIT_KEYWORD_PATTERN = /\bgit\s+(push|commit|merge|pull|rebase|checkout|clone)\b/i;
+const BUILD_KEYWORD_PATTERN = /\b(npm\s+run\s+build|docker\s+(build|run|compose)|pm2|webpack|esbuild|make\s+build|deploy(ment)?)\b/i;
+const TEST_KEYWORD_PATTERN = /\b(pytest|vitest|jest|npm\s+(run\s+)?test|go\s+test|dotnet\s+test|mocha)\b/i;
+const DEBUG_KEYWORD_PATTERN = /\b(fix(ing|ed)?|bug|error|debug(ging)?|broken|crash(ing|ed)?|fail(ing|ed|ure)?|issue)\b/i;
+const REFACTOR_KEYWORD_PATTERN = /\b(refactor(ing)?|rename|simplify|restructure|clean\s?up)\b/i;
+const FEATURE_KEYWORD_PATTERN = /\b(add|create|implement|build|new feature)\b/i;
+const PLANNING_KEYWORD_PATTERN = /\b(plan|roadmap|outline|todo list|task list)\b/i;
+const BRAINSTORM_KEYWORD_PATTERN = /\b(brainstorm|what if|design|explore ideas?|thinking about)\b/i;
+
+interface ClassificationSignals {
+	hasToolCalls: boolean;
+	hasEditTools: boolean;
+	hasReadTools: boolean;
+	hasTerminalTools: boolean;
+	hasPlanningTools: boolean;
+	hasDelegationTools: boolean;
+	hasTestTools: boolean;
+	terminalText: string;
+	userText: string;
+}
+
+function deriveSignals(input: TaskClassificationInput): ClassificationSignals {
+	const toolNames = (input.toolNames ?? []).map(t => t.toLowerCase());
+	return {
+		hasToolCalls: toolNames.length > 0,
+		hasEditTools: toolNames.some(t => EDIT_TOOL_PATTERN.test(t)),
+		hasReadTools: toolNames.some(t => READ_TOOL_PATTERN.test(t)),
+		hasTerminalTools: toolNames.some(t => TERMINAL_TOOL_PATTERN.test(t)),
+		hasPlanningTools: toolNames.some(t => PLANNING_TOOL_PATTERN.test(t)),
+		hasDelegationTools: toolNames.some(t => DELEGATION_TOOL_PATTERN.test(t)),
+		hasTestTools: toolNames.some(t => TEST_TOOL_PATTERN.test(t)),
+		terminalText: (input.terminalCommands ?? []).join(' ').toLowerCase(),
+		userText: (input.userText ?? '').toLowerCase(),
+	};
+}
+
+function classifyByToolAndTerminalSignals(s: ClassificationSignals): TaskCategory | null {
+	if (GIT_KEYWORD_PATTERN.test(s.terminalText)) { return 'Git Ops'; }
+	if (BUILD_KEYWORD_PATTERN.test(s.terminalText)) { return 'Build/Deploy'; }
+	if (TEST_KEYWORD_PATTERN.test(s.terminalText) || s.hasTestTools) { return 'Testing'; }
+	if (s.hasDelegationTools) { return 'Delegation'; }
+	if (s.hasPlanningTools) { return 'Planning'; }
+	return null;
+}
+
+function classifyByActivityKeywords(s: ClassificationSignals): TaskCategory | null {
+	if (!s.hasToolCalls) { return null; }
+	if (DEBUG_KEYWORD_PATTERN.test(s.userText)) { return 'Debugging'; }
+	if (REFACTOR_KEYWORD_PATTERN.test(s.userText)) { return 'Refactoring'; }
+	if (FEATURE_KEYWORD_PATTERN.test(s.userText)) { return 'Feature Dev'; }
+	return null;
+}
+
+function classifyByFallback(s: ClassificationSignals): TaskCategory {
+	if (!s.hasEditTools && PLANNING_KEYWORD_PATTERN.test(s.userText)) { return 'Planning'; }
+	if (s.hasToolCalls && s.hasReadTools && !s.hasEditTools && !s.hasTerminalTools) { return 'Exploration'; }
+	if (s.hasEditTools) { return 'Coding'; }
+	if ((!s.hasToolCalls || s.hasReadTools) && BRAINSTORM_KEYWORD_PATTERN.test(s.userText)) { return 'Brainstorming'; }
+	if (!s.hasToolCalls) { return 'Conversation'; }
+	return 'Coding';
+}
+
+export function classifySessionTask(input: TaskClassificationInput): TaskCategory {
+	const signals = deriveSignals(input);
+	return classifyByToolAndTerminalSignals(signals) ?? classifyByActivityKeywords(signals) ?? classifyByFallback(signals);
+}
+
+export function buildClassificationInputFromUsageAnalysis(
+	usageAnalysis: Pick<SessionUsageAnalysis, 'toolCalls'> & Partial<Pick<SessionUsageAnalysis, 'mcpTools'>> | undefined,
+	userText?: string | null
+): TaskClassificationInput {
+	const toolNames = usageAnalysis ? Object.keys(usageAnalysis.toolCalls?.byTool ?? {}) : [];
+	const mcpToolNames = usageAnalysis?.mcpTools ? Object.keys(usageAnalysis.mcpTools.byTool ?? {}) : [];
+	return { toolNames: [...toolNames, ...mcpToolNames], userText: userText ?? undefined };
+}
+
+export function buildClassificationInputFromChatTurns(turns: ChatTurn[]): TaskClassificationInput {
+	const toolNames: string[] = [];
+	const terminalCommands: string[] = [];
+	const userTextParts: string[] = [];
+	for (const turn of turns) {
+		if (turn.userMessage) { userTextParts.push(turn.userMessage); }
+		for (const tc of turn.toolCalls ?? []) {
+			toolNames.push(tc.toolName);
+			if (tc.arguments && TERMINAL_TOOL_PATTERN.test(tc.toolName.toLowerCase())) {
+				terminalCommands.push(tc.arguments);
+			}
+		}
+	}
+	return { toolNames, terminalCommands, userText: userTextParts.join(' ') };
+}
+
+export default {
+	classifySessionTask,
+	buildClassificationInputFromUsageAnalysis,
+	buildClassificationInputFromChatTurns,
+	countDelegationToolCalls,
+	classifySessionTurns,
+	classifyTurn,
+	createEmptyTaskClassificationResult,
+};
+

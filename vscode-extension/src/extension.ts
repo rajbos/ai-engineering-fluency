@@ -5,10 +5,16 @@ import * as path from 'path';
 import * as os from 'os';
 import * as childProcess from 'child_process';
 
+// Localization support (key-based resolver over package.nls*.json — see l10n.ts
+// for why vscode.l10n.t() cannot be used directly with key-based strings)
+import { t as l10nT } from './l10n';
+const l10n = { t: l10nT };
+
 // --- JSON data files ---
 import tokenEstimatorsData from '../../src/tokenEstimators.json';
 import modelPricingData from '../../src/modelPricing.json';
 import toolNamesData from '../../src/toolNames.json';
+import builtinCommandDescriptionsData from '../../src/builtinCommandDescriptions.json';
 import automaticToolsData from '../../src/automaticTools.json';
 import customizationPatternsData from '../../src/customizationPatterns.json';
 import copilotPlansData from './copilotPlans.json';
@@ -21,6 +27,7 @@ import * as loadingHtml from './loadingHtml';
 import type {
   TokenUsageStats,
   ModelUsage,
+  ModelId,
   ModelPricing,
   EditorUsage,
   RepositoryUsage,
@@ -28,6 +35,7 @@ import type {
   DetailedStats,
   DailyTokenStats,
   ChartDataPayload,
+  ChartTimeWindow,
   SessionFileCache,
   DailyRollupEntry,
   CustomizationFileEntry,
@@ -49,6 +57,8 @@ import type {
   WorkspaceCustomizationRow,
   WorkspaceCustomizationMatrix,
   UsageAnalysisPeriod,
+  AgenticTrendPoint,
+  DarkFactoryReport,
   SessionFileDetails,
   PromptTokenDetail,
   ActualUsage,
@@ -61,7 +71,27 @@ import type {
   EvaluatedInsight,
   InsightStateBag,
   ToolCurationAnalysis,
+  CorrectionCounts,
+  CorrectionReport,
+  CorrectionRepoGroup,
+  CorrectionSessionEntry,
+  RepeatedTaskReport,
 } from '../../src/types';
+import { getTimeWindowStartDate, getTimeWindowStartDayKey } from '../../src/timeWindows';
+
+// --- Correction-moment detection (per-repo report over recent sessions) ---
+import {
+  createEmptyCorrectionCounts as _createEmptyCorrectionCounts,
+  mergeCorrectionCounts as _mergeCorrectionCounts,
+  summarizeCorrectionMoments as _summarizeCorrectionMoments,
+} from '../../src/correctionDetection';
+
+// --- Repeated-task detection (skill candidates from recurring prompts) ---
+import {
+  detectRepeatedTasks as _detectRepeatedTasks,
+  MIN_CLUSTER_SIZE as _MIN_CLUSTER_SIZE,
+  type RepeatedTaskInput as _RepeatedTaskInput,
+} from '../../src/repeatedTasks';
 
 // --- Tool curation ---
 import {
@@ -71,6 +101,7 @@ import {
   buildMcpEntriesFromSettings as _buildMcpEntriesFromSettings,
   discoverSkillEntries as _discoverSkillEntries,
   analyzeToolCuration as _analyzeToolCuration,
+  findSkillDescriptionInWorkspaces as _findSkillDescriptionInWorkspaces,
 } from '../../src/toolCuration';
 
 // --- Insights engine ---
@@ -82,13 +113,23 @@ import {
   isToastAllowed as _isToastAllowed,
 } from './insightsEngine';
 
+// --- Worktree background scan (once-daily, leader-only disk-usage scan) ---
+import {
+  shouldRunDailyWorktreeScan as _shouldRunDailyWorktreeScan,
+  shouldNotifyWorktreeFindings as _shouldNotifyWorktreeFindings,
+  formatBytesForNotification as _formatBytesForNotification,
+  sumWorktreeBytes as _sumWorktreeBytes,
+  type WorktreeBackgroundScanResult,
+} from './worktreeBackgroundScan';
+import { scanWorktreeRootsWithTimeout as _scanWorktreeRootsWithTimeout } from './worktreeScan';
+
 // --- Ecosystem adapter types & helpers ---
 import type { OpenCodeDataAccess } from '../../src/opencode';
 import type { CrushDataAccess } from '../../src/crush';
 import type { VisualStudioDataAccess } from '../../src/visualstudio';
 import type { ContinueDataAccess } from '../../src/continue';
 import type { ClaudeCodeDataAccess } from '../../src/claudecode';
-import type { ClaudeDesktopCoworkDataAccess } from '../../src/claudedesktop';
+import type { ClaudeDesktopDataAccess } from '../../src/claudedesktop';
 import type { MistralVibeDataAccess } from '../../src/mistralvibe';
 import type { GeminiCliDataAccess } from '../../src/geminicli';
 import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
@@ -97,11 +138,13 @@ import { getEcosystemDisplayName } from '../../src/ecosystemAdapter';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import { CopilotAppDataAccess, type SessionContextWindow } from './copilotAppData';
 import { PiDataAccess } from '../../src/pi';
+import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
-import { createWakeupGate } from './utils/promises';
+import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout } from './utils/promises';
+import { WebviewMessageReplay } from './webviewMessageReplay';
 
 // --- Session parsing & token estimation ---
 import {
@@ -141,15 +184,40 @@ import {
   trackEnhancedMetrics as _trackEnhancedMetrics,
   analyzeSessionUsage as _analyzeSessionUsage,
   getModelUsageFromSession as _getModelUsageFromSession,
+  mergeModelEfficiencyTokens as _mergeModelEfficiencyTokens,
   type UsageAnalysisDeps,
 } from '../../src/usageAnalysis';
 import { createEmptyTaskClassificationResult } from '../../src/taskClassification';
+import {
+  accumulateDailyModelTokens as _accumulateDailyModelTokens,
+  accumulateDailyModelCounters as _accumulateDailyModelCounters,
+  buildSessionEfficiencyAttribution as _buildSessionEfficiencyAttribution,
+} from '../../src/modelEfficiency';
+
+// --- Efficiency analysis ---
+import {
+  buildEfficiencyTrends as _buildEfficiencyTrends,
+  buildSkillUsageTrends as _buildSkillUsageTrends,
+  computeCostAttribution as _computeCostAttribution,
+  computeEfficiencyDeltas as _computeEfficiencyDeltas,
+  computeSkillImpact as _computeSkillImpact,
+  listComparableModels as _listComparableModels,
+  computeValueSignals as _computeValueSignals,
+  splitTrailingWindows as _splitTrailingWindows,
+  type EfficiencySessionInput,
+  type EfficiencyViewData,
+  type ModelDailyInput,
+  type PeriodVolumeTotals,
+} from '../../src/efficiencyAnalysis';
+
+import { scanDarkFactoryReadiness } from './darkFactoryService';
 
 // --- Maturity & fluency scoring ---
 import {
   getFluencyLevelData as _getFluencyLevelData,
   calculateFluencyScoreForTeamMember as _calculateFluencyScoreForTeamMember,
   calculateMaturityScores as _calculateMaturityScores,
+  STAGE_THRESHOLDS,
 } from '../../src/maturityScoring';
 
 // --- Workspace helpers ---
@@ -170,19 +238,24 @@ import {
   detectEditorSource as _detectEditorSource,
   parseGitRemoteUrl as _parseGitRemoteUrl,
   extractRepositoryFromContentReferences as _extractRepositoryFromContentReferences,
+  resolveSessionWorkspaceName as _resolveSessionWorkspaceName,
   isMcpTool as _isMcpTool,
   normalizeMcpToolName as _normalizeMcpToolName,
   extractMcpServerName as _extractMcpServerName,
   normalizePath as _normalizePath,
   normalizePathForDedup as _normalizePathForDedup,
   normalizeToRepoRoot as _normalizeToRepoRoot,
+  getRepoNameFromWorkspacePath as _getRepoNameFromWorkspacePath,
 } from '../../src/workspaceHelpers';
 
 // --- Chart building ---
 import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from '../../src/chartDataBuilder';
 
+// --- Task classification ---
+import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDelegationToolCalls } from '../../src/taskClassification';
+
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, type SessionAggregateInput } from '../../src/statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, computeFallbackDailyRollup as _computeFallbackDailyRollup, type SessionAggregateInput } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -198,7 +271,17 @@ import {
 	type RepoPrInfo,
 	type RepoPrStatsResult,
 } from './githubPrService';
-import { fetchAgentSessionsForRepo } from './agentSessionsService';
+import { collectAgentSessions } from './agentSessionsService';
+import {
+	AGENT_TASKS_CACHE_SCHEMA_VERSION,
+	AGENT_TASKS_REFRESH_INTERVAL_MS,
+	canServeAgentTasksSnapshot,
+	getAgentTasksCachePath,
+	isAgentTasksEnvelopeUsable,
+	readAgentTasksSnapshot,
+	writeAgentTasksSnapshot,
+} from './agentTasksCache';
+import { getConfiguredGitHubEnterpriseUri, getGitHubAuthProviderId } from './githubApiConfig';
 
 // --- View regression ---
 import {
@@ -222,8 +305,9 @@ import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
-import { isGuidMcpTool } from '../../src/utils/toolUtils';
+import { isGuidMcpTool, isMcpFamilyResolvedTool } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
+import { buildRecentSessionBuckets as bucketRecentSessions } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
 import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
 
@@ -274,6 +358,11 @@ export function tooltipSecondaryPeriod(
 
 // ── extension.ts module-level helpers ────────────────────────────────────────
 
+/** Type guard for the social platforms supported by `shareTextToSocialPlatform`. */
+function isSharePlatform(value: unknown): value is 'linkedin' | 'bluesky' | 'mastodon' {
+	return value === 'linkedin' || value === 'bluesky' || value === 'mastodon';
+}
+
 /**
  * Groups per-editor model usage into billing groups (e.g. "GitHub Copilot", "Anthropic").
  * Extracted as a module-level function to keep `computeBillingGroupCosts` complexity low.
@@ -314,27 +403,9 @@ function _cifjlProcessEvent(event: any): number {
 function _scdlBuildFromBreakdown(modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>): ModelUsage {
 	const modelUsage: ModelUsage = {};
 	for (const [model, bd] of Object.entries(modelBreakdown)) {
-		modelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
+		modelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, sessions: 0, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
 	}
 	return modelUsage;
-}
-
-function _scdlDistributeToDays(
-	dailyRollups: Record<string, DailyRollupEntry>,
-	supplementModelUsage: ModelUsage
-): Record<string, DailyRollupEntry> | undefined {
-	const totalDayInteractions = Object.values(dailyRollups).reduce((s, dr) => s + dr.interactions, 0);
-	if (totalDayInteractions <= 0) { return undefined; }
-	const result: Record<string, DailyRollupEntry> = {};
-	for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
-		const fraction = dayRollup.interactions / totalDayInteractions;
-		const dayModelUsage: ModelUsage = {};
-		for (const [model, usage] of Object.entries(supplementModelUsage)) {
-			dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}) };
-		}
-		result[dayKey] = { ...dayRollup, modelUsage: dayModelUsage };
-	}
-	return result;
 }
 
 /** One Copilot CLI session where OTel export data was found, for the diagnostics "OTel Delta" tab. */
@@ -380,9 +451,15 @@ interface WorktreeScanResult {
 	bytes: number;
 }
 
+type UsageAnalysisTab = 'activity' | 'tools' | 'health' | 'worktrees' | 'insights' | 'corrections';
+
 class CopilotTokenTracker implements vscode.Disposable {
-	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 60; // Add task-category classification fields to session cache and chart rollups
+	// Cache version - increment this when making changes that require cache invalidation.
+	// The merged task-classification + chart-state work changes cached session metadata and
+	// daily rollup contracts, so invalidate older entries to force a clean rebuild.
+	private static readonly CACHE_VERSION = 70;
+	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
+	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -399,6 +476,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private worktreeScanId: number = 0;
 	// Incremented on each cleanup start/cancel; an in-flight cleanup loop checks this to stop early
 	private worktreeCleanupId: number = 0;
+	// Incremented on each background worktree scan start/dispose; the in-flight drip scan checks this to stop early
+	private backgroundWorktreeScanId: number = 0;
+	// True while a daily background worktree scan is in flight in this window, to avoid starting a second one concurrently
+	private backgroundWorktreeScanRunning: boolean = false;
+	private static readonly WORKTREE_BG_SCAN_STARTED_KEY = 'worktrees.backgroundScan.startedAt';
+	private static readonly WORKTREE_BG_SCAN_RESULT_KEY = 'worktrees.backgroundScan.result';
+	private static readonly WORKTREE_BG_SCAN_NOTIFIED_BYTES_KEY = 'worktrees.backgroundScan.lastNotifiedBytes';
 	private logViewerPanel?: vscode.WebviewPanel;
 	private logViewerSessionFilePath: string = '';
 	private logViewerCurrentData?: SessionLogData;
@@ -407,10 +491,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public visualStudio!: VisualStudioDataAccess;
 	private continue_!: ContinueDataAccess;
 	private claudeCode!: ClaudeCodeDataAccess;
-	private claudeDesktopCowork!: ClaudeDesktopCoworkDataAccess;
+	private claudeDesktop!: ClaudeDesktopDataAccess;
 	private mistralVibe!: MistralVibeDataAccess;
 	private geminiCli!: GeminiCliDataAccess;
 	public windsurf!: WindsurfDataAccess;
+	private hermes!: HermesDataAccess;
 	private ecosystems!: IEcosystemAdapter[];
 	private cacheManager!: CacheManager;
 	private hookManager!: HookManager;
@@ -467,10 +552,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private detailsPanel: vscode.WebviewPanel | undefined;
 	private chartPanel: vscode.WebviewPanel | undefined;
 	private analysisPanel: vscode.WebviewPanel | undefined;
+	/** Incremented per created analysis panel so logs can distinguish a stale panel from the live one. */
+	private _analysisPanelSeq = 0;
+	private analysisWebviewReady = false;
+	private readonly analysisMessageReplay = new WebviewMessageReplay(
+		(message) => this.analysisPanel?.webview.postMessage(message) ?? false,
+		2_000,
+		(error) => this.warn(`Usage Analysis message delivery failed: ${error}`),
+	);
+	private pendingAnalysisNavigation: { tab: UsageAnalysisTab; anchor?: string } | undefined;
 	private maturityPanel: vscode.WebviewPanel | undefined;
 	private dashboardPanel: vscode.WebviewPanel | undefined;
 	private fluencyLevelViewerPanel: vscode.WebviewPanel | undefined;
 	private environmentalPanel: vscode.WebviewPanel | undefined;
+	private efficiencyPanel: vscode.WebviewPanel | undefined;
+	/** Memoized per-session efficiency inputs; cleared wherever the daily/usage stat caches are. */
+	private lastEfficiencySessionInputs: EfficiencySessionInput[] | undefined;
 	private outputChannel!: vscode.OutputChannel;
 	private lastDetailedStats: DetailedStats | undefined;
 	private lastDailyStats: DailyTokenStats[] | undefined;
@@ -479,9 +576,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Last period selected by the user in the chart view; restored on next open. */
 	private lastChartPeriod: 'day' | 'week' | 'month' = 'day';
 	/** Last view selected by the user in the chart view; restored on next open. */
-	private lastChartView: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task' = 'total';
+	private lastChartView: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task' | 'taskCategory' = 'total';
 	private lastChartMetric: 'tokens' | 'output' | 'cost' | 'sessions' = 'tokens';
-	private lastChartSplit: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' = 'total';
+	private lastChartSplit: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' | 'taskCategory' = 'total';
+	private lastChartTimeWindow: ChartTimeWindow = 'last30';
 	private lastUsageAnalysisStats: UsageAnalysisStats | undefined;
 	private lastDashboardData: any | undefined;
 	/** Insight engine: persisted state for all surfaced insights. */
@@ -511,6 +609,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// In-flight updateTokenStats promise — coalesces concurrent callers onto the same run
 	private _updateTokenStatsInFlight: Promise<DetailedStats | undefined> | undefined;
+	// Timed-out preloads continue in the background; skip duplicate work until their cache entries settle.
+	private readonly _deferredSessionPreloadFiles = new Set<string>();
+	private _deferredSessionPreloadCount = 0;
+	private _deferredSessionRefreshTimer: NodeJS.Timeout | undefined;
+	private _updateTokenStatsStartedAt: number | undefined;
 
 	// --- Multi-window refresh coordination ---
 	// When several VS Code/Codium windows are open, only the window that holds the
@@ -520,8 +623,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// window still shows fresh data (the "hybrid" freshness policy).
 	private static readonly FOLLOWER_MISS_BUDGET = 25;
 	// Bounded retry chain a follower uses to pick up the leader's snapshot when it
-	// started before any snapshot existed (cold simultaneous start).
-	private static readonly FOLLOWER_RESYNC_MAX_RETRIES = 4;
+	// started before any snapshot existed (cold simultaneous start). Must cover a
+	// worst-case cold-boot leader parse: with an empty cache the leader can need
+	// several minutes to parse thousands of session files before it publishes.
+	// 24 × 15s = 6 minutes of coverage; without this the follower shows partial
+	// (near-zero) stats until the 5-minute periodic refresh happens to fire.
+	private static readonly FOLLOWER_RESYNC_MAX_RETRIES = 24;
 	private static readonly FOLLOWER_RESYNC_DELAY_MS = 15 * 1000;
 	private _followerResyncTimer: NodeJS.Timeout | undefined;
 	private _refreshHeartbeat: NodeJS.Timeout | undefined;
@@ -543,6 +650,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Last computed customization matrix for usage analysis (typed)
 	private _lastCustomizationMatrix?: WorkspaceCustomizationMatrix;
 	private _lastMissedPotential?: MissedPotentialWorkspace[];
+	// Per-skill, per-editor invocation counts for the last-30-days window (Skill Usage tab).
+	// Accumulated per session in aggregateSessionFileIntoStats, reset at the top of each refresh.
+	private _skillCallsByEditorAccum: Map<string, Map<string, number>> = new Map();
+	private _lastSkillCallsByEditor?: Record<string, Record<string, number>>;
+	// Distinct workspace folder paths each skill was invoked from (last 30 days), used to
+	// backfill descriptions for skills whose repo isn't the one currently open (see
+	// findSkillDescriptionInWorkspaces).
+	private _skillWorkspacePathsAccum: Map<string, Set<string>> = new Map();
 
 	// Model pricing data - loaded from modelPricing.json
 	// Reference: OpenAI API Pricing (https://openai.com/api/pricing/) - Retrieved December 2025
@@ -578,8 +693,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Cached PR stats result for the repos tab
 	private _lastRepoPrStats?: RepoPrStatsResult;
 
-	// Cached cloud agent sessions result for the cloud agent tab
+	// Cached cloud agent sessions result for the cloud agent tab (mirrors the shared snapshot on disk)
 	private _lastAgentSessionsData?: AgentSessionsResult;
+
+	// True while this window is refreshing the shared cloud-agent snapshot from the GitHub API
+	private _agentSessionsRefreshInFlight = false;
 
 	// Tool name mapping - loaded from toolNames.json for friendly display names
 	private toolNameMap: { [key: string]: string } = toolNamesData as { [key: string]: string };
@@ -680,6 +798,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		});
 		await Promise.all(workers);
 		return results;
+	}
+
+	private sleep(ms: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
 	/**
@@ -784,6 +906,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			showMaturity:           () => this.showMaturity(),
 			showDashboard:          () => this.showDashboard(),
 			showEnvironmental:      () => this.showEnvironmental(),
+			showEfficiency:         () => this.showEfficiency(),
 			showFluencyLevelViewer: () => this.showFluencyLevelViewer(),
 			openFile:               () => {
 				if (typeof message.path === 'string' && message.path) {
@@ -804,6 +927,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 				if (picked) { await vscode.window.showTextDocument(vscode.Uri.file(picked.fsPath)); }
 			},
 			searchMcpExtensions:    () => vscode.commands.executeCommand('workbench.extensions.search', '@tag:mcp'),
+			'workbench.extensions.action.showExtensions': () =>
+				vscode.commands.executeCommand('workbench.extensions.action.showExtensions'),
 			openAgentPlugins:       () => {
 				// Open the Extensions view filtered to agent plugins. When a plugin name
 				// is provided the query becomes "@agentPlugins <name>" so the user lands
@@ -1008,6 +1133,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.localRegressionSampleDataDir = '';
 		this.sessionDiscovery.clearCache();
 		this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = undefined;
+		this.lastEfficiencySessionInputs = undefined;
 		const results: LocalViewRegressionResult[] = [];
 		let dataSourceLabel = 'local session data';
 		try {
@@ -1025,6 +1151,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.localRegressionSampleDataDir = previousSampleDir;
 			this.sessionDiscovery.clearCache();
 			this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = this.lastDashboardData = undefined;
+			this.lastEfficiencySessionInputs = undefined;
 		}
 		await this.reportLocalViewRegressionResults(results, dataSourceLabel);
 	}
@@ -1161,6 +1288,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.lastFullDailyStats = undefined;
 			this.lastUsageAnalysisStats = undefined;
 			this.lastDashboardData = undefined;
+			this.lastEfficiencySessionInputs = undefined;
 
 			this.log(`Cache cleared successfully. Removed ${cacheSize} entries.`);
 			vscode.window.showInformationMessage('Cache cleared successfully. Reloading statistics...');
@@ -1228,10 +1356,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.continue_ = dataAccess.continue_;
 		this.visualStudio = dataAccess.visualStudio;
 		this.claudeCode = dataAccess.claudeCode;
-		this.claudeDesktopCowork = dataAccess.claudeDesktopCowork;
+		this.claudeDesktop = dataAccess.claudeDesktop;
 		this.mistralVibe = dataAccess.mistralVibe;
 		this.geminiCli = dataAccess.geminiCli;
 		this.windsurf = new WindsurfDataAccess(extensionUri, (m) => this.log(m));
+		this.hermes = dataAccess.hermes;
 		this.ecosystems = buildAdapterRegistry({
 			...dataAccess,
 			estimateTokens: (t, m) => this.estimateTokensFromText(t, m),
@@ -1264,13 +1393,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 			} catch { /* Ignore git errors in dev mode */ }
 			this.initializeCrashDebugLog(context);
 		}
-		this.outputChannel = vscode.window.createOutputChannel('AI Engineering Fluency');
+		this.outputChannel = vscode.window.createOutputChannel(l10n.t('outputChannelName'));
 		context.subscriptions.push(this.outputChannel);
 		this.log('Constructor called');
 		const version = context.extension.packageJSON?.version ?? 'unknown';
 		const mode = context.extensionMode === vscode.ExtensionMode.Development ? 'Development'
 			: context.extensionMode === vscode.ExtensionMode.Test ? 'Test' : 'Production';
-		let startupInfo = `\uD83D\uDE80 AI Engineering Fluency v${version} [${mode}] (cache v${CopilotTokenTracker.CACHE_VERSION})`;
+		let startupInfo = l10n.t('startupInfo', version, mode, CopilotTokenTracker.CACHE_VERSION);
 		if (context.extensionMode === vscode.ExtensionMode.Development) {
 			try {
 				const sha = childProcess.execSync('git rev-parse --short HEAD', {
@@ -1312,9 +1441,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private setupGitHubAuthListener(context: vscode.ExtensionContext): void {
 		context.subscriptions.push(
 			vscode.authentication.onDidChangeSessions(async (e) => {
-				if (e.provider.id !== 'github') { return; }
+				const authProviderId = getGitHubAuthProviderId();
+				if (e.provider.id !== authProviderId) { return; }
 				if (this._githubSignedOutByUser) { return; }
-				const session = await vscode.authentication.getSession('github', ['read:user'], { createIfNone: false });
+				const session = await vscode.authentication.getSession(authProviderId, ['read:user'], { silent: true });
 				if (session) {
 					this.githubSession = session;
 					await this.context.globalState.update('github.authenticated', true);
@@ -1332,15 +1462,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private initializeStatusBar(): void {
 		this.statusBarItem = vscode.window.createStatusBarItem('ai-engineering-fluency', vscode.StatusBarAlignment.Right, 102);
-		this.statusBarItem.name = "AI Engineering Fluency";
-		this.setStatusBarText("$(loading~spin) AI Fluency: Loading...");
-		this.statusBarItem.tooltip = "AI Engineering Fluency — daily and 30-day token usage - Click to open details";
+		this.statusBarItem.name = l10n.t("statusBar.name");
+		this.setStatusBarText(l10n.t("statusBar.loadingText"));
+		this.statusBarItem.tooltip = l10n.t("statusBar.tooltip");
 		this.statusBarItem.command = 'aiEngineeringFluency.showDetails';
 		this.statusBarItem.show();
 
 		// Separate insights badge — hidden until there are new insights
 		this.insightsStatusBarItem = vscode.window.createStatusBarItem('ai-engineering-fluency-insights', vscode.StatusBarAlignment.Right, 101);
-		this.insightsStatusBarItem.name = "AI Engineering Fluency — Insights";
+		this.insightsStatusBarItem.name = l10n.t("statusBar.nameInsights");
 		this.insightsStatusBarItem.command = 'aiEngineeringFluency.openInsightsTab';
 		// starts hidden; shown in refreshStatusBarInsightBadge when count > 0
 
@@ -1386,6 +1516,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this.startBackendSyncAfterInitialAnalysis();
 				await this.checkAndShowOnboarding();
 				await this.showFluencyScoreNewsBanner();
+				await this.showEfficiencyTabNewsBanner();
 				await this.showUnknownMcpToolsBanner();
 			} catch (error) {
 				this.error('Error in initial update:', error);
@@ -1444,25 +1575,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		switch (action) {
 			case 'welcome': {
+				const message = l10n.t('onboarding.welcome.message');
+				const openFluencyScore = l10n.t('onboarding.welcome.openFluencyScore');
+				const learnMore = l10n.t('onboarding.welcome.learnMore');
 				const choice = await vscode.window.showInformationMessage(
-					'AI Engineering Fluency tracks your GitHub Copilot usage — token counts, cost estimates, and fluency scores based on how you interact with AI tools.',
-					'Open Fluency Score',
-					'Learn More',
+					message,
+					openFluencyScore,
+					learnMore,
 				);
 				await this.context.globalState.update('hasSeenOnboarding', true);
-				if (choice === 'Open Fluency Score') {
+				if (choice === openFluencyScore) {
 					await this.showMaturity();
-				} else if (choice === 'Learn More') {
+				} else if (choice === learnMore) {
 					await vscode.env.openExternal(vscode.Uri.parse('https://github.com/rajbos/ai-engineering-fluency#supported-editors'));
 				}
 				break;
 			}
 			case 'diagnostics': {
+				const message = l10n.t('onboarding.diagnostics.message');
+				const openDiagnostics = l10n.t('onboarding.diagnostics.openDiagnostics');
 				const choice = await vscode.window.showWarningMessage(
-					'AI Engineering Fluency: session files could not be found. Open Diagnostics to investigate.',
-					'Open Diagnostics',
+					message,
+					openDiagnostics,
 				);
-				if (choice === 'Open Diagnostics') {
+				if (choice === openDiagnostics) {
 					await this.showDiagnosticReport();
 				}
 				break;
@@ -1504,10 +1640,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (openCount < 5) {
 			return;
 		}
-		const open = 'Open Fluency Score';
-		const dismiss = 'Dismiss';
+		const message = l10n.t('news.fluencyScoreBanner.message');
+		const open = l10n.t('news.fluencyScoreBanner.open');
+		const dismiss = l10n.t('news.fluencyScoreBanner.dismiss');
 		const choice = await vscode.window.showInformationMessage(
-			'🎯 New: AI Engineering Fluency Score dashboard — track how deeply your team uses GitHub Copilot across 6 categories and 4 stages.',
+			message,
 			open,
 			dismiss
 		);
@@ -1517,18 +1654,45 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	/**
+	 * Shows a one-time popup pointing users at the new Efficiency view. Fires once per
+	 * install: the dismissed flag is set immediately so the notification never reappears,
+	 * even if the user ignores it. Can be cleared from Diagnostics > Debug for re-testing.
+	 */
+	private async showEfficiencyTabNewsBanner(): Promise<void> {
+		const dismissedKey = 'news.efficiencyTab.v1.dismissed';
+		if (this.context.globalState.get<boolean>(dismissedKey)) {
+			return;
+		}
+		await this.context.globalState.update(dismissedKey, true);
+		const message = l10n.t('news.efficiencyTabBanner.message');
+		const open = l10n.t('news.efficiencyTabBanner.open');
+		const choice = await vscode.window.showInformationMessage(
+			message,
+			open
+		);
+		if (choice === open) {
+			await this.showEfficiency();
+		}
+	}
+
 	private getUnknownMcpToolsFromStats(stats: UsageAnalysisStats): string[] {
 		const allTools = new Set<string>();
 		Object.keys(stats.today.mcpTools.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.last30Days.mcpTools.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.month.mcpTools.byTool).forEach(tool => allTools.add(tool));
+		// MCP server names are rendered through the same friendly-name lookup in the
+		// "By Server" tables, so include them in the missing-name detection too.
+		Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
+		Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
+		Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
 		Object.keys(stats.today.toolCalls.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.last30Days.toolCalls.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.month.toolCalls.byTool).forEach(tool => allTools.add(tool));
 		const suppressed = new Set<string>(
 			vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', [])
 		);
-		return Array.from(allTools).filter(tool => !this.toolNameMap[tool] && !this.toolNameMap[tool.toLowerCase()] && !isGuidMcpTool(tool) && !suppressed.has(tool)).sort();
+		return Array.from(allTools).filter(tool => !this.toolNameMap[tool] && !this.toolNameMap[tool.toLowerCase()] && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
 	}
 
 	private async showUnknownMcpToolsBanner(): Promise<void> {
@@ -1548,8 +1712,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (unknownTools.length === 0) {
 			return;
 		}
-		const open = 'Open Usage Analysis';
-		const dismiss = 'Dismiss';
+		const open = l10n.t('button.openUsageAnalysis');
+		const dismiss = l10n.t('button.dismiss');
 		const choice = await vscode.window.showInformationMessage(
 			`🔌 Found ${unknownTools.length} tool${unknownTools.length > 1 ? 's' : ''} without friendly names. Help improve the extension by reporting them.`,
 
@@ -1558,10 +1722,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		);
 		await this.context.globalState.update(dismissedKey, packageJson.version);
 		if (choice === open) {
-			await this.showUsageAnalysis();
-			setTimeout(() => {
-				this.analysisPanel?.webview.postMessage({ command: 'highlightUnknownTools' });
-			}, 500);
+			await this.showUsageAnalysisOnToolsTab('unknown-mcp-tools-section');
 		}
 	}
 
@@ -1618,7 +1779,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.insightsStatusBarItem.text = `💡 ${label}`;
 			const tooltip = new vscode.MarkdownString();
 			tooltip.isTrusted = false;
-			tooltip.appendMarkdown(`**AI Fluency Insights** — ${label} waiting for you\n\n`);
+			tooltip.appendMarkdown(`**${l10n.t('aiFluencyInsights')}** — ${label} waiting for you\n\n`);
 			if (this._topInsightTitle) {
 				tooltip.appendMarkdown(`${this._topInsightTitle}\n\n`);
 			}
@@ -1643,7 +1804,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		try {
 			this.log('Attempting GitHub authentication...');
 			const session = await vscode.authentication.getSession(
-				'github',
+				getGitHubAuthProviderId(),
 				['read:user'],
 				{ createIfNone: true }
 			);
@@ -1683,10 +1844,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 				since.setDate(since.getDate() - 30);
 				const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 				this._lastRepoPrStats = result;
-				this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
-				const agentResult: AgentSessionsResult = { repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, authenticated: false, since: since.toISOString(), fetchedAt: new Date().toISOString() };
-				this._lastAgentSessionsData = agentResult;
-				this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: agentResult });
+				await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
+				await this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			}
 		} catch (error) {
 			this.error('Failed to sign out from GitHub:', error);
@@ -1734,19 +1893,38 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		const since = new Date();
 		since.setDate(since.getDate() - 30);
+		this.log('🔎 Loading repository PR stats (last 30 days)…');
+		try {
+			await this.collectAndPublishRepoPrStats(since);
+		} catch (err) {
+			// Guarantee a post-back on every failure path — otherwise the webview stays on
+			// "Loading…" forever and dispatch() dedup silently swallows every retry.
+			// publish() routes through analysisMessageReplay, which retains the payload and
+			// tolerates the panel being disposed mid-flight (postMessage on a disposed webview
+			// resolves false instead of throwing).
+			this.error('Failed to load repository PR stats', err);
+			const result: RepoPrStatsResult = {
+				repos: [], authenticated: !this._githubSignedOutByUser, since: since.toISOString(),
+				error: err instanceof Error ? err.message : String(err),
+			};
+			this._lastRepoPrStats = result;
+			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
+		}
+	}
 
+	private async collectAndPublishRepoPrStats(since: Date): Promise<void> {
 		if (this._githubSignedOutByUser) {
 			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 			this._lastRepoPrStats = result;
-			this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
 			return;
 		}
 
-		const session = await vscode.authentication.getSession('github', ['read:user'], { createIfNone: false });
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 		if (!session) {
 			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 			this._lastRepoPrStats = result;
-			this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
 			return;
 		}
 
@@ -1758,103 +1936,235 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		const workspacePaths = this._buildWorkspacePaths();
-		const repos = discoverGitHubRepos(workspacePaths);
-		this.analysisPanel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: 0 });
+		const discoveryStart = Date.now();
+		const repos = await discoverGitHubRepos(workspacePaths, getConfiguredGitHubEnterpriseUri());
+		this.log(`🔎 Discovered ${repos.length} GitHub repo(s) across ${workspacePaths.length} workspace path(s) in ${((Date.now() - discoveryStart) / 1000).toFixed(1)}s`);
+		await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsProgress', total: repos.length, done: 0 });
 
 		const results: RepoPrInfo[] = [];
 		for (let i = 0; i < repos.length; i++) {
 			const { owner, repo } = repos[i];
+			this.log(`🔎 Fetching PRs for ${owner}/${repo} (${i + 1}/${repos.length})…`);
 			const { prs, error } = await fetchRepoPrs(owner, repo, session.accessToken, since);
-			const stats = this.collectAiPrStats(prs, error);
+			this.log(`🔎 Fetched ${prs.length} PR(s) for ${owner}/${repo}${error ? ` — ${error}` : ''}`);
+			const stats = this.collectAiPrStats(prs, error, session.account.label);
 			results.push({ owner, repo, repoUrl: `https://github.com/${owner}/${repo}`, ...stats, error });
-			this.analysisPanel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: i + 1 });
+			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsProgress', total: repos.length, done: i + 1 });
 		}
 
 		const result: RepoPrStatsResult = { repos: results, authenticated: true, since: since.toISOString() };
 		this._lastRepoPrStats = result;
-		this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+		const { delivered, wasReady } = await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
+		this.log(`🔎 Repository PR stats posted for ${results.length} repo(s) (delivered=${delivered}, webviewReady=${wasReady}, ${this._describeAnalysisPanel()})`);
 	}
 
-	private collectAiPrStats(prs: any[], error: any): { totalPrs: number; aiAuthoredPrs: number; aiReviewRequestedPrs: number; aiDetails: RepoPrDetail[] } {
+	/** Classify one PR, pushing any AI detail rows and returning its contribution to the counters. */
+	private classifyPr(pr: any, login: string | undefined, aiDetails: RepoPrDetail[]): { aiAuthored: number; aiReviewRequested: number; userAuthored: number; userMerged: number } {
+		const author = pr.user?.login ?? '';
+		const authorAi = detectAiType(pr.user);
+		let aiAuthored = 0;
+		if (authorAi) {
+			aiAuthored = 1;
+			aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: authorAi, role: 'author' });
+		}
+		let aiReviewRequested = 0;
+		for (const reviewer of (pr.requested_reviewers ?? [])) {
+			const reviewerAi = detectAiType(reviewer);
+			if (reviewerAi) {
+				aiReviewRequested++;
+				aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: reviewerAi, role: 'reviewer-requested' });
+			}
+		}
+		const isUser = !!login && author.toLowerCase() === login;
+		return {
+			aiAuthored,
+			aiReviewRequested,
+			userAuthored: isUser ? 1 : 0,
+			userMerged: isUser && pr.merged_at ? 1 : 0,
+		};
+	}
+
+	private collectAiPrStats(prs: any[], error: any, userLogin?: string): { totalPrs: number; aiAuthoredPrs: number; aiReviewRequestedPrs: number; aiDetails: RepoPrDetail[]; userAuthoredPrs?: number; userMergedPrs?: number } {
 		let totalPrs = 0;
 		let aiAuthoredPrs = 0;
 		let aiReviewRequestedPrs = 0;
+		let userAuthoredPrs = 0;
+		let userMergedPrs = 0;
 		const aiDetails: RepoPrDetail[] = [];
+		const login = userLogin?.toLowerCase();
 		if (!error) {
 			totalPrs = prs.length;
 			for (const pr of prs) {
-				const authorAi = detectAiType(pr.user?.login ?? '');
-				if (authorAi) {
-					aiAuthoredPrs++;
-					aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: authorAi, role: 'author' });
-				}
-				for (const reviewer of (pr.requested_reviewers ?? [])) {
-					const reviewerAi = detectAiType(reviewer.login ?? '');
-					if (reviewerAi) {
-						aiReviewRequestedPrs++;
-						aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: reviewerAi, role: 'reviewer-requested' });
-					}
-				}
+				const c = this.classifyPr(pr, login, aiDetails);
+				aiAuthoredPrs += c.aiAuthored;
+				aiReviewRequestedPrs += c.aiReviewRequested;
+				userAuthoredPrs += c.userAuthored;
+				userMergedPrs += c.userMerged;
 			}
 		}
-		return { totalPrs, aiAuthoredPrs, aiReviewRequestedPrs, aiDetails };
+		return login
+			? { totalPrs, aiAuthoredPrs, aiReviewRequestedPrs, aiDetails, userAuthoredPrs, userMergedPrs }
+			: { totalPrs, aiAuthoredPrs, aiReviewRequestedPrs, aiDetails };
+	}
+
+	/** Window the cloud-agent snapshot covers: the last 30 days, matching the other GitHub panels. */
+	private agentSessionsSince(): Date {
+		const since = new Date();
+		since.setDate(since.getDate() - 30);
+		return since;
+	}
+
+	/** Path of the cross-window cloud-agent snapshot shared by every window of this VS Code edition. */
+	private agentTasksCachePath(): string {
+		return getAgentTasksCachePath(this.context.globalStorageUri.fsPath, this.cacheManager.getCacheIdentifier());
+	}
+
+	/** An empty snapshot — `fetchedAt: ''` marks "never fetched", which the panel renders as pending. */
+	private buildEmptyAgentSessionsResult(since: Date, authenticated: boolean): AgentSessionsResult {
+		return {
+			repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, totalPremiumRequests: 0,
+			authenticated, since: since.toISOString(), fetchedAt: '',
+			accountTasksAvailable: false, partial: false,
+		};
 	}
 
 	/**
-	 * Load Copilot cloud agent session stats for all discovered GitHub repos and send to the analysis panel.
-	 * Only cloud-agent sessions are counted — CLI/remote sessions that share the same task API are excluded
-	 * so they are not double-counted with the chat-session data already shown in "My Activity".
+	 * Remember and push a snapshot to the analysis panel, if one is open. The refresh interval is
+	 * stamped on here so the panel can show when the next refresh is due without duplicating the
+	 * cache policy.
+	 */
+	private async publishAgentSessions(result: AgentSessionsResult): Promise<void> {
+		const stamped: AgentSessionsResult = { ...result, refreshIntervalMs: AGENT_TASKS_REFRESH_INTERVAL_MS };
+		this._lastAgentSessionsData = stamped;
+		const { delivered, wasReady } = await this.analysisMessageReplay.publish('agentSessions', { command: 'agentSessionsLoaded', data: stamped });
+		this.log(`🤖 Cloud agent snapshot posted (${stamped.repos.length} repo(s), delivered=${delivered}, webviewReady=${wasReady})`);
+	}
+
+	/**
+	 * Show Copilot cloud agent session stats in the analysis panel.
+	 *
+	 * This never calls GitHub itself: it serves the shared hourly snapshot (see `agentTasksCache.ts`)
+	 * so opening the tab is instant and costs no API calls, then asks for a refresh, which only
+	 * happens if the snapshot is stale *and* this window wins the agent-tasks lock.
 	 */
 	private async loadAgentSessions(): Promise<void> {
 		if (!this.analysisPanel) { return; }
+		const since = this.agentSessionsSince();
+		this.log('🤖 Loading cloud agent sessions…');
+		try {
+			await this.collectAndPublishAgentSessions(since);
+		} catch (err) {
+			// Guarantee a post-back on every failure path so the webview never hangs on "Loading…".
+			this.error('Failed to load cloud agent sessions', err);
+			await this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, !this._githubSignedOutByUser));
+		}
+	}
 
-		const since = new Date();
-		since.setDate(since.getDate() - 30);
-
+	private async collectAndPublishAgentSessions(since: Date): Promise<void> {
 		if (this._githubSignedOutByUser) {
-			const result: AgentSessionsResult = { repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, authenticated: false, since: since.toISOString(), fetchedAt: new Date().toISOString() };
-			this._lastAgentSessionsData = result;
-			this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: result });
+			await this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			return;
 		}
 
-		const session = await vscode.authentication.getSession('github', ['read:user'], { createIfNone: false });
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 		if (!session) {
-			const result: AgentSessionsResult = { repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, authenticated: false, since: since.toISOString(), fetchedAt: new Date().toISOString() };
-			this._lastAgentSessionsData = result;
-			this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: result });
+			await this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			return;
 		}
-
 		if (!this.githubSession) {
 			this.githubSession = session;
 			await this.context.globalState.update('github.authenticated', true);
 			await this.context.globalState.update('github.username', session.account.label);
 		}
 
-		const workspacePaths = this._buildWorkspacePaths();
-		const repos = discoverGitHubRepos(workspacePaths);
-		this.analysisPanel.webview.postMessage({ command: 'agentSessionsProgress', total: repos.length, done: 0 });
-
-		const repoResults = [];
-		for (let i = 0; i < repos.length; i++) {
-			const { owner, repo } = repos[i];
-			const summary = await fetchAgentSessionsForRepo(owner, repo, session.accessToken, since);
-			repoResults.push(summary);
-			this.analysisPanel.webview.postMessage({ command: 'agentSessionsProgress', total: repos.length, done: i + 1 });
+		await this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, true));
+		const snapshot = await _withTimeout(
+			readAgentTasksSnapshot(this.agentTasksCachePath()),
+			10_000,
+			'Reading the cloud agent snapshot',
+		);
+		if (isAgentTasksEnvelopeUsable(snapshot, since)) {
+			await this.publishAgentSessions(snapshot!.data);
 		}
 
-		const result: AgentSessionsResult = {
-			repos: repoResults,
-			totalTasks: repoResults.reduce((s, r) => s + r.totalTasks, 0),
-			totalSessions: repoResults.reduce((s, r) => s + r.totalSessions, 0),
-			totalCredits: repoResults.reduce((s, r) => s + r.totalCredits, 0),
-			authenticated: true,
-			since: since.toISOString(),
-			fetchedAt: new Date().toISOString(),
-		};
-		this._lastAgentSessionsData = result;
-		this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: result });
+		void this.maybeRefreshAgentSessions().catch((err) => {
+			this.warn(`Cloud agent refresh scheduling failed: ${err}`);
+		});
+	}
+
+	/**
+	 * Refresh the cloud-agent snapshot from the GitHub API, if it is due.
+	 *
+	 * Collecting it costs one task-list call per repo plus one detail call per task, so it is
+	 * deliberately rationed: at most once every AGENT_TASKS_REFRESH_INTERVAL_MS, and only in the
+	 * window that wins the agent-tasks lock — the other windows read that window's snapshot from
+	 * global storage instead of repeating the calls. Runs on extension start and on every cache
+	 * refresh cycle (both leader-gated), plus whenever the Cloud Agent tab is opened.
+	 */
+	private async maybeRefreshAgentSessions(): Promise<void> {
+		if (this._agentSessionsRefreshInFlight || this._githubSignedOutByUser) { return; }
+		const since = this.agentSessionsSince();
+		const cachePath = this.agentTasksCachePath();
+		if (canServeAgentTasksSnapshot(await readAgentTasksSnapshot(cachePath), since, Date.now())) { return; }
+
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+		if (!session) { return; }
+
+		let acquired = false;
+		try { acquired = await this.cacheManager.acquireAgentTasksLock(); }
+		catch (err) { this.warn(`Failed to acquire agent tasks lock: ${err}`); }
+		if (!acquired) {
+			this.log('⏭️ Cloud agent refresh skipped — another window is refreshing the shared snapshot');
+			return;
+		}
+
+		this._agentSessionsRefreshInFlight = true;
+		// Heartbeat the lock: a slow API pass must not look stale to another window, which would
+		// let it start the same collection in parallel.
+		const heartbeat = setInterval(() => { void this.cacheManager.renewAgentTasksLock(); }, 60 * 1000);
+		try {
+			await this.refreshAgentSessionsSnapshot(session.accessToken, since, cachePath);
+		} catch (err) {
+			this.warn(`Cloud agent session refresh failed: ${err}`);
+		} finally {
+			clearInterval(heartbeat);
+			this._agentSessionsRefreshInFlight = false;
+			try { await this.cacheManager.releaseAgentTasksLock(); }
+			catch (err) { this.warn(`Failed to release agent tasks lock: ${err}`); }
+		}
+	}
+
+	/**
+	 * Collect the snapshot and publish it, combining the workspace repos (which also surface tasks
+	 * other people started there) with the account-wide task list (tasks started on github.com in
+	 * repos that aren't checked out here, and ad-hoc cloud chat tasks with no repository at all).
+	 */
+	private async refreshAgentSessionsSnapshot(token: string, since: Date, cachePath: string): Promise<void> {
+		const workspaceRepos = await discoverGitHubRepos(this._buildWorkspacePaths(), getConfiguredGitHubEnterpriseUri());
+		this.log(`🤖 Refreshing cloud agent snapshot (${workspaceRepos.length} workspace repo(s) + account-wide tasks)`);
+
+		const result = await collectAgentSessions({
+			token,
+			since,
+			workspaceRepos,
+			onProgress: (done, total) => {
+				void this.analysisMessageReplay.publish('agentSessions', { command: 'agentSessionsProgress', total, done });
+			},
+		});
+
+		try {
+			await writeAgentTasksSnapshot(cachePath, {
+				schemaVersion: AGENT_TASKS_CACHE_SCHEMA_VERSION,
+				fetchedAt: result.fetchedAt,
+				since: result.since,
+				data: result,
+			});
+		} catch (err) {
+			this.warn(`Failed to write cloud agent snapshot: ${err}`);
+		}
+
+		this.log(`🤖 Cloud agent snapshot: ${result.repos.length} repo(s), ${result.totalTasks} task(s), ${result.totalCredits.toFixed(1)} credits`);
+		await this.publishAgentSessions(result);
 	}
 
 	/** Collect workspace paths from the customization matrix and currently open VS Code workspace folders. */
@@ -1891,9 +2201,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 				return;
 			}
 
-			// Always try silently — never prompt. This picks up sessions from Copilot
-			// or other extensions that already authenticated the user with GitHub.
-			const session = await vscode.authentication.getSession('github', ['read:user'], { createIfNone: false });
+			// Always try silently — never prompt (silent: true suppresses the Accounts-menu
+			// sign-in badge). This picks up sessions from Copilot or other extensions that
+			// already authenticated the user with GitHub, without nagging users who never
+			// intend to sign in here.
+			const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 			if (session) {
 				this.githubSession = session;
 				this.log(`✅ GitHub session found for ${session.account.label}`);
@@ -1936,6 +2248,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (isOrgPlan) {
 			await this.loadAndLogEnterpriseInfo();
 		}
+
+		// The plan info above may have populated a new Copilot plan quota / budget
+		// (via captureQuotaEntitlement). The status bar tooltip flyout is only rebuilt
+		// during token refreshes, so refresh it now so the freshly-fetched budget shows
+		// up immediately after sign-in instead of only on the next 5-minute refresh.
+		if (this.lastDetailedStats) {
+		this.refreshBudgetDependentUi();
+	}
+	}
+
+	/** Rebuilds the status bar tooltip flyout (and its background color) from the last
+	 *  computed stats so a budget change — e.g. picked up from the Copilot plan quota
+	 *  right after GitHub sign-in — is reflected without waiting for the next refresh.
+	 *  No-op until the first stats computation has produced a tooltip to update. */
+	private refreshBudgetDependentUi(): void {
+		const stats = this.lastDetailedStats;
+		if (!stats) { return; }
+		this.updateStatusBarBackgroundColor(stats);
+		this.statusBarItem.tooltip = this.buildTooltipMarkdown(stats);
 	}
 
 	private logCopilotPlanResult(planResult: { planInfo?: any; statusCode?: number; error?: string }): boolean {
@@ -2146,11 +2477,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return this._updateTokenStatsInFlight;
 		}
 
+		const startedAt = Date.now();
+		this._updateTokenStatsStartedAt = startedAt;
 		this._updateTokenStatsInFlight = this._runUpdateTokenStats(silent);
 		try {
 			return await this._updateTokenStatsInFlight;
 		} finally {
 			this._updateTokenStatsInFlight = undefined;
+			if (this._updateTokenStatsStartedAt === startedAt) {
+				this._updateTokenStatsStartedAt = undefined;
+			}
 		}
 	}
 
@@ -2175,6 +2511,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const preloaded: SessionFilePreload[] = [];
 		let processed = 0;
 		const CONCURRENCY = 20;
+		this._deferredSessionPreloadCount = 0;
 
 		// Event-driven wakeups: workers that find the queue empty park on the gate
 		// instead of polling on a timer, avoiding pointless wake-ups while discovery runs.
@@ -2231,13 +2568,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return { sessionFiles, preloaded: [] };
 		}
 
-		this.log(`📊 Analyzed ${sessionFiles.length} session file(s)`);
-		this.log(`📦 Preloaded ${preloaded.length}/${sessionFiles.length} session file(s) within date range in ${((Date.now() - analyzeStartMs) / 1000).toFixed(1)}s`);
+		this.logPreloadSessionFileSummary(sessionFiles, preloaded, analyzeStartMs);
 
 		// Defer expired-cache cleanup to avoid blocking discovery/workers startup
 		void Promise.resolve().then(() => this.cacheManager.clearExpiredCache());
 
 		return { sessionFiles, preloaded };
+	}
+
+	private logPreloadSessionFileSummary(sessionFiles: string[], preloaded: SessionFilePreload[], analyzeStartMs: number): void {
+		this.log(`📊 Analyzed ${sessionFiles.length} session file(s)`);
+		this.log(`📦 Preloaded ${preloaded.length}/${sessionFiles.length} session file(s) within date range in ${((Date.now() - analyzeStartMs) / 1000).toFixed(1)}s`);
+		if (this._deferredSessionPreloadCount > 0) {
+			this.warn(`⏳ Deferred ${this._deferredSessionPreloadCount} slow session parse(s) to the background`);
+		}
 	}
 
 	/**
@@ -2247,12 +2591,57 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * for the same file means the process died while processing it.
 	 */
 	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
+		if (this._deferredSessionPreloadFiles.has(sessionFile)) {
+			this.debugCrashLog(`deferred ${sessionFile}`);
+			return;
+		}
 		this.debugCrashLog(`start ${sessionFile}`);
+		const processing = this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
+		const operation = `Parsing session "${sessionFile}"`;
 		try {
-			await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
+			await _withTimeout(processing, CopilotTokenTracker.SESSION_PRELOAD_TIMEOUT_MS, operation);
 			this.debugCrashLog(`done  ${sessionFile}`);
 		} catch (e) {
+			if (e instanceof _TimeoutError) {
+				this.debugCrashLog(`deferred ${sessionFile}`);
+				this._deferredSessionPreloadCount++;
+				this.deferSessionPreloadRefresh(sessionFile, processing);
+				return;
+			}
 			this.debugCrashLog(`error ${sessionFile}: ${e}`);
+		}
+	}
+
+	/**
+	 * Keeps a timed-out preload alive without holding the initial statistics pass. Once every
+	 * deferred parse has filled its cache entry, a single refresh incorporates those results.
+	 */
+	private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>): void {
+		this._deferredSessionPreloadFiles.add(sessionFile);
+		void processing
+			.then(() => this.debugCrashLog(`done(background)  ${sessionFile}`))
+			.catch(error => this.debugCrashLog(`error(background) ${sessionFile}: ${error}`))
+			.finally(() => {
+				this._deferredSessionPreloadFiles.delete(sessionFile);
+				if (this._deferredSessionPreloadFiles.size === 0) {
+					this.scheduleDeferredSessionRefresh();
+				}
+			});
+	}
+
+	private scheduleDeferredSessionRefresh(): void {
+		if (this._deferredSessionRefreshTimer || this._disposed) { return; }
+		this._deferredSessionRefreshTimer = setTimeout(() => {
+			this._deferredSessionRefreshTimer = undefined;
+			if (this._disposed) { return; }
+			if (this._updateTokenStatsInFlight) {
+				void this._updateTokenStatsInFlight.finally(() => this.scheduleDeferredSessionRefresh());
+				return;
+			}
+			void this.updateTokenStats(true, true);
+		}, 0);
+		if (typeof this._deferredSessionRefreshTimer.unref === 'function') {
+			this._deferredSessionRefreshTimer.unref();
 		}
 	}
 
@@ -2310,6 +2699,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			editorSource: this.detectEditorSource(sessionFile),
 			title: sessionData.title,
 			repository: sessionData.repository,
+			...(sessionData.subAgentCalls ? { subAgentCalls: sessionData.subAgentCalls } : {}),
 			...(sessionData.modelUsage && Object.keys(sessionData.modelUsage).length > 0 ? { modelUsage: sessionData.modelUsage } : {}),
 		};
 		this.enrichDetailsWithEditorInfo(sessionFile, details);
@@ -2336,12 +2726,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		catch (err) { this.warn(`Failed to acquire refresh lock, proceeding as leader: ${err}`); isLeader = true; }
 		this.startRefreshHeartbeat(isLeader);
 
+		// Piggyback the once-daily background worktree scan on the same leader election: only
+		// the window that won this refresh's leader lock may start it, and it runs detached
+		// (drip-throttled, can take far longer than this refresh cycle) so it never blocks it.
+		// The hourly cloud-agent snapshot refresh rides along for the same reason: it is leader-only
+		// GitHub API work that must not hold up the parse, and this also gives it a run at startup.
+		if (isLeader) {
+			void this.maybeStartBackgroundWorktreeScan();
+			void this.maybeRefreshAgentSessions();
+		}
+
 		try {
 			return await this._runRefreshCore(silent, isLeader);
 		} catch (error) {
 			this.error('Error updating token stats:', error);
-			this.setStatusBarText('$(error) Token Error');
-			this.statusBarItem.tooltip = 'Error calculating token usage';
+			this.setStatusBarText(l10n.t('statusBar.tokenError'));
+			this.statusBarItem.tooltip = l10n.t('statusBar.errorTooltip');
 			return undefined;
 		} finally {
 			this.stopRefreshHeartbeat();
@@ -2371,6 +2771,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		);
 		const missBudget = isLeader ? undefined : { remaining: CopilotTokenTracker.FOLLOWER_MISS_BUDGET };
 		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget);
+		if (!isLeader && preloaded.length < sessionFiles.length) {
+			this.log(`Follower with cold cache: stats below are partial (${preloaded.length}/${sessionFiles.length} files within date range parsed within the follower budget). Will resync once the leader publishes its snapshot.`);
+		}
 		try {
 			await this.storeDiscoveredEditorsAndNotify(discoveredEditorSet);
 		} catch (error) {
@@ -2483,7 +2886,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// changes, to avoid needless status-bar relayout on every callback.
 				if (percentage !== lastPercentage) {
 					lastPercentage = percentage;
-					this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
+					this.setStatusBarText(l10n.t('statusBar.analyzingLogs', percentage.toString()));
 				}
 			}
 			if (!parsingStepNotified) {
@@ -2531,7 +2934,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private updateStatusBarAndTooltip(detailedStats: DetailedStats): void {
 		this._lastDetailedStats = detailedStats;
 		if (detailedStats.today.sessions === 0 && detailedStats.last30Days.sessions === 0) {
-			this.setStatusBarText('$(symbol-numeric) No session data yet');
+			this.setStatusBarText(l10n.t('statusBar.noSessionData'));
 		} else {
 			this.setStatusBarText(this.buildStatusBarText(detailedStats));
 		}
@@ -2677,22 +3080,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const tooltip = new vscode.MarkdownString();
 		tooltip.isTrusted = true;
 		tooltip.supportThemeIcons = false;
-		tooltip.appendMarkdown('#### AI Engineering Fluency');
+		tooltip.appendMarkdown(`#### ${l10n.t('tooltip.title')}`);
 		tooltip.appendMarkdown('\n---\n');
 		const secondaryPeriod = tooltipSecondaryPeriod(this.getStatusBarShowTokensSetting(), this.getStatusBarShowCostSetting());
 		const secondaryStats = secondaryPeriod === 'currentMonth' ? detailedStats.month : detailedStats.last30Days;
-		const secondaryLabel = secondaryPeriod === 'currentMonth' ? 'Current Month' : 'Last 30 Days';
+		const secondaryLabel = secondaryPeriod === 'currentMonth' ? l10n.t('tooltip.currentMonthLabel') : l10n.t('tooltip.last30DaysLabel');
 		// Trailing &nbsp; padding on the "Today" column widens it a bit, giving the two
 		// value columns visual breathing room without VS Code table cell CSS to lean on.
 		const pad = (cell: string) => `${cell}&nbsp;&nbsp;&nbsp;&nbsp;`;
 		const grams = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} grams`;
 		const liters = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} liters`;
-		tooltip.appendMarkdown(`|  | 📅 Today | 📊 ${secondaryLabel} |\n|---|---|---|\n`);
-		tooltip.appendMarkdown(`| Tokens : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${secondaryStats.tokens.toLocaleString()} |\n`);
-		tooltip.appendMarkdown(`| GitHub Copilot cost : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
-		tooltip.appendMarkdown(`| All providers cost : | ${pad(`$ ${this.sumBillingGroupCosts(detailedStats.today.billingGroupCosts).toFixed(2)}`)} | $ ${this.sumBillingGroupCosts(secondaryStats.billingGroupCosts).toFixed(2)} |\n`);
-		tooltip.appendMarkdown(`| CO₂ estimated : | ${pad(grams(detailedStats.today.co2))} | ${grams(secondaryStats.co2)} |\n`);
-		tooltip.appendMarkdown(`| Water estimated : | ${pad(liters(detailedStats.today.waterUsage))} | ${liters(secondaryStats.waterUsage)} |\n`);
+		tooltip.appendMarkdown(`|  | 📅 ${l10n.t('tooltip.todayLabel')} | 📊 ${secondaryLabel} |\n|:---|:---|:---|\n`);
+		tooltip.appendMarkdown(`| ${l10n.t('tooltip.tokensLabel')} : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${secondaryStats.tokens.toLocaleString()} |\n`);
+		tooltip.appendMarkdown(`| ${l10n.t('tooltip.copilotCostLabel')} : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
+		tooltip.appendMarkdown(`| ${l10n.t('tooltip.allProvidersCostLabel')} : | ${pad(`$ ${this.sumBillingGroupCosts(detailedStats.today.billingGroupCosts).toFixed(2)}`)} | $ ${this.sumBillingGroupCosts(secondaryStats.billingGroupCosts).toFixed(2)} |\n`);
+		tooltip.appendMarkdown(`| ${l10n.t('tooltip.co2Label')} : | ${pad(grams(detailedStats.today.co2))} | ${grams(secondaryStats.co2)} |\n`);
+		tooltip.appendMarkdown(`| ${l10n.t('tooltip.waterLabel')} : | ${pad(liters(detailedStats.today.waterUsage))} | ${liters(secondaryStats.waterUsage)} |\n`);
 		tooltip.appendMarkdown('\n---\n');
 		this.appendProviderCostSection(tooltip, detailedStats);
 		return tooltip;
@@ -2712,19 +3115,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const providers = Object.keys(monthCosts).sort((a, b) => (monthCosts[b] ?? 0) - (monthCosts[a] ?? 0));
 		if (providers.length === 0) { return; }
 		const totalCost = this.sumBillingGroupCosts(monthCosts);
-		tooltip.appendMarkdown(`💰 Costs by Provider — Current Month  \n`);
+		tooltip.appendMarkdown(`💰 ${l10n.t('tooltip.costsByProvider')}  \n`);
 		tooltip.appendMarkdown(`|  |  |  |\n|---|---|---|\n`);
 		const { budget, source } = this.getEffectiveMonthlyBudgetWithSource();
 		if (budget > 0) {
-			const copilotCost = monthCosts['GitHub Copilot'] ?? 0;
-			const ratio = copilotCost / budget;
-			const color = ratio >= 0.9 ? '#EF5350' : ratio >= 0.75 ? '#FFA726' : '#4CAF50';
-			const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildBarSvg(ratio, color))})`;
-			// Budget row first, then a sub-header row labelling the section below, so the
-			// "these bars are a different scale" context sits right where it's needed
-			// instead of a footnote read only after the bars already look confusing.
-			tooltip.appendMarkdown(`| 🎯 Copilot Budget | $${copilotCost.toFixed(2)} / $${budget.toFixed(2)} | ${barCell} |\n`);
-			tooltip.appendMarkdown(`| **Share of total spend** |  |  |\n`);
+			this.appendCopilotBudgetRow(tooltip, monthCosts['GitHub Copilot'] ?? 0, budget);
+			tooltip.appendMarkdown(`| **${l10n.t('tooltip.shareOfTotalSpend')}** |  |  |\n`);
 		}
 		for (const provider of providers) {
 			const cost = monthCosts[provider] ?? 0;
@@ -2733,8 +3129,50 @@ class CopilotTokenTracker implements vscode.Disposable {
 			tooltip.appendMarkdown(`| ${provider} | $${cost.toFixed(2)} | ${barCell} |\n`);
 		}
 		if (budget > 0) {
-			tooltip.appendMarkdown(`\n*Budget from ${source}*\n`);
+			tooltip.appendMarkdown(`\n*${l10n.t('tooltip.budgetFromSource', source)}*\n`);
 		}
+	}
+
+	/** Appends the "🎯 Copilot Budget" gauge row (and, when applicable, an untracked-usage
+	 *  sub-row). The API balance (when available) reports usage across all channels — other
+	 *  PCs/VDIs, WSL, web chat, cloud agent, review agent — not just this device's local
+	 *  session logs. The gap between that total and our local copilotCost is usage we can't
+	 *  attribute to a tracked session, so it gets its own hatched bar segment instead of
+	 *  silently inflating (or understating) the "tracked" portion. */
+	private appendCopilotBudgetRow(tooltip: vscode.MarkdownString, copilotCost: number, budget: number): void {
+		const apiBalance = this._buildCopilotApiBalance();
+		const apiUsedUsd = apiBalance ? apiBalance.usedAiCredits * 0.01 : 0;
+		const gapUsd = apiBalance ? Math.max(0, apiUsedUsd - copilotCost) : 0;
+		const trackedRatio = copilotCost / budget;
+		const gapRatio = gapUsd / budget;
+		const totalRatio = trackedRatio + gapRatio;
+		const color = totalRatio >= 0.9 ? '#EF5350' : totalRatio >= 0.75 ? '#FFA726' : '#4CAF50';
+		const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildTwoSegmentBarSvg(trackedRatio, gapRatio, color))})`;
+		// Budget row first, then a sub-header row labelling the section below, so the
+		// "these bars are a different scale" context sits right where it's needed
+		// instead of a footnote read only after the bars already look confusing.
+		tooltip.appendMarkdown(`| 🎯 Copilot Budget | $${copilotCost.toFixed(2)} / $${budget.toFixed(2)} | ${barCell} |\n`);
+		if (gapUsd > 0.005) {
+			tooltip.appendMarkdown(`| &nbsp;&nbsp;↳ untracked (other devices/cloud) | $${gapUsd.toFixed(2)} |  |\n`);
+		}
+	}
+
+	/** Generates a small SVG progress bar with two fill segments sharing one color: a solid
+	 *  segment for locally-tracked usage, and a diagonally-hatched segment for usage the
+	 *  Copilot API reports but this device has no local session data for (other devices,
+	 *  WSL, web chat, cloud agent, review agent). Ratios are 0–1 fractions of the bar width;
+	 *  the remainder is left as unfilled track. */
+	private buildTwoSegmentBarSvg(trackedRatio: number, gapRatio: number, fillColor: string): string {
+		const W = 130, H = 12, R = 4;
+		const clampedTracked = Math.max(0, Math.min(1, trackedRatio));
+		const clampedGap = Math.max(0, Math.min(1 - clampedTracked, gapRatio));
+		const trackedW = Math.round(clampedTracked * W);
+		const gapW = Math.round(clampedGap * W);
+		const pctLabel = `${Math.round((clampedTracked + clampedGap) * 100)}%`;
+		const segments = gapW > 0
+			? `<rect x="0" y="1" width="${trackedW}" height="${H - 2}" fill="${fillColor}"/><rect x="${trackedW}" y="1" width="${gapW}" height="${H - 2}" fill="url(#gapHatch)"/>`
+			: `<rect x="0" y="1" width="${trackedW}" height="${H - 2}" fill="${fillColor}"/>`;
+		return `<svg xmlns="http://www.w3.org/2000/svg" width="${W + 36}" height="${H}"><defs><pattern id="gapHatch" width="4" height="4" patternTransform="rotate(45)" patternUnits="userSpaceOnUse"><rect width="4" height="4" fill="${fillColor}"/><line x1="0" y1="0" x2="0" y2="4" stroke="#000" stroke-opacity="0.35" stroke-width="2"/></pattern><clipPath id="barClip"><rect x="0" y="1" width="${W}" height="${H - 2}" rx="${R}"/></clipPath></defs><rect x="0" y="1" width="${W}" height="${H - 2}" rx="${R}" fill="#444"/><g clip-path="url(#barClip)">${segments}</g><text x="${W + 4}" y="${H - 1}" font-family="sans-serif" font-size="9" fill="#ccc">${pctLabel}</text></svg>`;
 	}
 
 	/** Generates a small SVG progress bar with the given fill ratio (0–1) and color. */
@@ -2790,6 +3228,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 				},
 			});
 		} else {
+			this.analysisWebviewReady = false;
+			this.analysisMessageReplay.markNotReady();
 			this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, analysisStats);
 		}
 	}
@@ -2848,6 +3288,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const ctx = {
 			today: stats.today,
 			last30Days: stats.last30Days,
+			month: stats.month,
+			lastMonth: stats.lastMonth,
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
 		};
@@ -2880,8 +3322,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._lastInsightNudgeAt = now;
 		await this.context.globalState.update('insights.lastNudgeAt', now);
 
-		const view = 'Open Insights tab';
-		const dismiss = 'Dismiss';
+		const view = l10n.t('button.openInsightsTab');
+		const dismiss = l10n.t('button.dismiss');
 		const choice = await vscode.window.showInformationMessage(
 			`💡 ${toastCandidate.title}`,
 			view,
@@ -2906,10 +3348,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const ctx = {
 			today: stats.today,
 			last30Days: stats.last30Days,
+			month: stats.month,
+			lastMonth: stats.lastMonth,
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
 			todaySessions: stats.todaySessions,
 			curationAnalysis: stats.curationAnalysis ?? null,
+			repeatedTasks: stats.repeatedTasks ?? null,
 		};
 		return _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
 	}
@@ -2940,7 +3385,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				if (r.mtime >= todayStart.getTime()) { todayTokens += r.tokens; }
 			}
 		} catch (error) {
-			this.error('Error calculating token usage:', error);
+			this.error(l10n.t('error.calculatingTokenUsage'), error);
 		}
 
 		return {
@@ -3063,6 +3508,27 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return result;
 	}
 
+	private buildSinglePeriodStats(acc: ReturnType<typeof makePeriodAccumulator>): PeriodStats {
+		const co2 = (acc.tokens / 1000) * this.co2Per1kTokens;
+		const copilotCost = acc.exactCopilotCostDollars + this.calculateEstimatedCost(acc.modelUsageNoExact, 'copilot');
+		return {
+			tokens: acc.tokens, thinkingTokens: acc.thinkingTokens,
+			estimatedTokens: acc.estimatedTokens, actualTokens: acc.actualTokens,
+			sessions: acc.sessions,
+			avgInteractionsPerSession: acc.sessions > 0 ? Math.round(acc.interactions / acc.sessions) : 0,
+			avgTokensPerSession: acc.sessions > 0 ? Math.round(acc.tokens / acc.sessions) : 0,
+			modelUsage: acc.modelUsage, editorUsage: acc.editorUsage,
+			co2, treesEquivalent: co2 / this.co2AbsorptionPerTreePerYear,
+			waterUsage: (acc.tokens / 1000) * this.waterUsagePer1kTokens,
+			estimatedCost: this.calculateEstimatedCost(acc.modelUsage),
+			estimatedCostCopilot: copilotCost,
+			billingGroupCosts: this.computeBillingGroupCosts(acc.editorModelUsage, copilotCost),
+			editorModelUsage: acc.editorModelUsage,
+			...(acc.cachedTokens > 0 ? { cachedTokens: acc.cachedTokens } : {}),
+			...(acc.subAgentSessions > 0 ? { subAgentSessions: acc.subAgentSessions } : {})
+		};
+	}
+
 	private buildDetailedStatsResult(
 		todayStats: ReturnType<typeof makePeriodAccumulator>,
 		monthStats: ReturnType<typeof makePeriodAccumulator>,
@@ -3070,71 +3536,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		last30DaysStats: ReturnType<typeof makePeriodAccumulator>,
 		now: Date
 	): DetailedStats {
-		const todayCo2 = (todayStats.tokens / 1000) * this.co2Per1kTokens;
-		const monthCo2 = (monthStats.tokens / 1000) * this.co2Per1kTokens;
-		const lastMonthCo2 = (lastMonthStats.tokens / 1000) * this.co2Per1kTokens;
-		const last30DaysCo2 = (last30DaysStats.tokens / 1000) * this.co2Per1kTokens;
-		const todayWater = (todayStats.tokens / 1000) * this.waterUsagePer1kTokens;
-		const monthWater = (monthStats.tokens / 1000) * this.waterUsagePer1kTokens;
-		const lastMonthWater = (lastMonthStats.tokens / 1000) * this.waterUsagePer1kTokens;
-		const last30DaysWater = (last30DaysStats.tokens / 1000) * this.waterUsagePer1kTokens;
-		const todayCopilotCost = todayStats.exactCopilotCostDollars + this.calculateEstimatedCost(todayStats.modelUsageNoExact, 'copilot');
-		const monthCopilotCost = monthStats.exactCopilotCostDollars + this.calculateEstimatedCost(monthStats.modelUsageNoExact, 'copilot');
-		const lastMonthCopilotCost = lastMonthStats.exactCopilotCostDollars + this.calculateEstimatedCost(lastMonthStats.modelUsageNoExact, 'copilot');
-		const last30DaysCopilotCost = last30DaysStats.exactCopilotCostDollars + this.calculateEstimatedCost(last30DaysStats.modelUsageNoExact, 'copilot');
 		return {
-			today: {
-				tokens: todayStats.tokens, thinkingTokens: todayStats.thinkingTokens,
-				estimatedTokens: todayStats.estimatedTokens, actualTokens: todayStats.actualTokens,
-				sessions: todayStats.sessions,
-				avgInteractionsPerSession: todayStats.sessions > 0 ? Math.round(todayStats.interactions / todayStats.sessions) : 0,
-				avgTokensPerSession: todayStats.sessions > 0 ? Math.round(todayStats.tokens / todayStats.sessions) : 0,
-				modelUsage: todayStats.modelUsage, editorUsage: todayStats.editorUsage,
-				co2: todayCo2, treesEquivalent: todayCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: todayWater, estimatedCost: this.calculateEstimatedCost(todayStats.modelUsage),
-				estimatedCostCopilot: todayCopilotCost,
-				billingGroupCosts: this.computeBillingGroupCosts(todayStats.editorModelUsage, todayCopilotCost),
-				...(todayStats.cachedTokens > 0 ? { cachedTokens: todayStats.cachedTokens } : {})
-			},
-			month: {
-				tokens: monthStats.tokens, thinkingTokens: monthStats.thinkingTokens,
-				estimatedTokens: monthStats.estimatedTokens, actualTokens: monthStats.actualTokens,
-				sessions: monthStats.sessions,
-				avgInteractionsPerSession: monthStats.sessions > 0 ? Math.round(monthStats.interactions / monthStats.sessions) : 0,
-				avgTokensPerSession: monthStats.sessions > 0 ? Math.round(monthStats.tokens / monthStats.sessions) : 0,
-				modelUsage: monthStats.modelUsage, editorUsage: monthStats.editorUsage,
-				co2: monthCo2, treesEquivalent: monthCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: monthWater, estimatedCost: this.calculateEstimatedCost(monthStats.modelUsage),
-				estimatedCostCopilot: monthCopilotCost,
-				billingGroupCosts: this.computeBillingGroupCosts(monthStats.editorModelUsage, monthCopilotCost),
-				...(monthStats.cachedTokens > 0 ? { cachedTokens: monthStats.cachedTokens } : {})
-			},
-			lastMonth: {
-				tokens: lastMonthStats.tokens, thinkingTokens: lastMonthStats.thinkingTokens,
-				estimatedTokens: lastMonthStats.estimatedTokens, actualTokens: lastMonthStats.actualTokens,
-				sessions: lastMonthStats.sessions,
-				avgInteractionsPerSession: lastMonthStats.sessions > 0 ? Math.round(lastMonthStats.interactions / lastMonthStats.sessions) : 0,
-				avgTokensPerSession: lastMonthStats.sessions > 0 ? Math.round(lastMonthStats.tokens / lastMonthStats.sessions) : 0,
-				modelUsage: lastMonthStats.modelUsage, editorUsage: lastMonthStats.editorUsage,
-				co2: lastMonthCo2, treesEquivalent: lastMonthCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: lastMonthWater, estimatedCost: this.calculateEstimatedCost(lastMonthStats.modelUsage),
-				estimatedCostCopilot: lastMonthCopilotCost,
-				billingGroupCosts: this.computeBillingGroupCosts(lastMonthStats.editorModelUsage, lastMonthCopilotCost),
-				...(lastMonthStats.cachedTokens > 0 ? { cachedTokens: lastMonthStats.cachedTokens } : {})
-			},
-			last30Days: {
-				tokens: last30DaysStats.tokens, thinkingTokens: last30DaysStats.thinkingTokens,
-				estimatedTokens: last30DaysStats.estimatedTokens, actualTokens: last30DaysStats.actualTokens,
-				sessions: last30DaysStats.sessions,
-				avgInteractionsPerSession: last30DaysStats.sessions > 0 ? Math.round(last30DaysStats.interactions / last30DaysStats.sessions) : 0,
-				avgTokensPerSession: last30DaysStats.sessions > 0 ? Math.round(last30DaysStats.tokens / last30DaysStats.sessions) : 0,
-				modelUsage: last30DaysStats.modelUsage, editorUsage: last30DaysStats.editorUsage,
-				co2: last30DaysCo2, treesEquivalent: last30DaysCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: last30DaysWater, estimatedCost: this.calculateEstimatedCost(last30DaysStats.modelUsage),
-				estimatedCostCopilot: last30DaysCopilotCost,
-				billingGroupCosts: this.computeBillingGroupCosts(last30DaysStats.editorModelUsage, last30DaysCopilotCost),
-				...(last30DaysStats.cachedTokens > 0 ? { cachedTokens: last30DaysStats.cachedTokens } : {})
-			},
+			today: this.buildSinglePeriodStats(todayStats),
+			month: this.buildSinglePeriodStats(monthStats),
+			lastMonth: this.buildSinglePeriodStats(lastMonthStats),
+			last30Days: this.buildSinglePeriodStats(last30DaysStats),
 			lastUpdated: now
 		};
 	}
@@ -3161,8 +3567,37 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.compactNumbers', true);
 	}
 
+	/**
+	 * Get localization strings for webviews based on the current VS Code language.
+	 * This provides localized button labels and other UI strings for webview panels.
+	 */
+	private getWebviewLocalization(): Record<string, string> {
+		const language = vscode.env.language;
+		
+		// Return navigation button labels and other webview-localizable strings
+		return {
+			// Navigation button labels
+			'nav.btnRefresh': l10n.t('nav.btnRefresh'),
+			'nav.btnDetails': l10n.t('nav.btnDetails'),
+			'nav.btnChart': l10n.t('nav.btnChart'),
+			'nav.btnUsage': l10n.t('nav.btnUsage'),
+			'nav.btnDiagnostics': l10n.t('nav.btnDiagnostics'),
+			'nav.btnMaturity': l10n.t('nav.btnMaturity'),
+			'nav.btnDashboard': l10n.t('nav.btnDashboard'),
+			'nav.btnLevelViewer': l10n.t('nav.btnLevelViewer'),
+			'nav.btnEnvironmental': l10n.t('nav.btnEnvironmental'),
+			'nav.btnEfficiency': l10n.t('nav.btnEfficiency'),
+			// Current language for reference
+			'__language__': language
+		};
+	}
+
 	private getUse24HourTimeSetting(): boolean {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.use24HourTime', true);
+	}
+
+	private getHideAutomaticToolCallsSetting(): boolean {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.hideAutomaticToolCalls', true);
 	}
 
 	private getStatusBarShowTokensSetting(): StatusBarDisplaySetting {
@@ -3234,15 +3669,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private buildCostParts(show: StatusBarDisplaySetting, stats: DetailedStats): string[] {
 		const fmt = (v: number) => `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+		const totalCost = (period: PeriodStats) => {
+			const billingTotal = this.sumBillingGroupCosts(period.billingGroupCosts);
+			return billingTotal > 0 || period.billingGroupCosts ? billingTotal : (period.estimatedCostCopilot ?? 0);
+		};
 		const parts: string[] = [];
 		if (show === 'today' || show === 'both' || show === 'todayAndCurrentMonth') {
-			parts.push(fmt(stats.today.estimatedCostCopilot ?? 0));
+			parts.push(fmt(totalCost(stats.today)));
 		}
 		if (show === 'last30days' || show === 'both') {
-			parts.push(fmt(stats.last30Days.estimatedCostCopilot ?? 0));
+			parts.push(fmt(totalCost(stats.last30Days)));
 		}
 		if (show === 'currentMonth' || show === 'todayAndCurrentMonth') {
-			parts.push(fmt(stats.month.estimatedCostCopilot ?? 0));
+			parts.push(fmt(totalCost(stats.month)));
 		}
 		return parts;
 	}
@@ -3259,7 +3698,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			parts.push(`$(credit-card) ${this.buildCostParts(showCost, stats).join(' | ')}`);
 		}
 
-		return parts.length > 0 ? parts.join('  ') : `$(symbol-numeric) AI Fluency`;
+        return parts.length > 0 ? parts.join('  ') : `$(symbol-numeric) ${l10n.t('statusBar.defaultText')}`;
 	}
 
 	private refreshOpenPanelsForSettingChange(): void {
@@ -3277,6 +3716,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		if (this.chartPanel && (this.lastFullDailyStats || this.lastDailyStats)) {
 			this.chartPanel.webview.html = this.getChartHtml(this.chartPanel.webview, this.lastFullDailyStats ?? this.lastDailyStats!);
+		}
+		if (this.analysisPanel && this.lastUsageAnalysisStats) {
+			void this.analysisPanel.webview.postMessage({ command: 'updateStats', data: this._buildAnalysisUpdateData(this.lastUsageAnalysisStats) });
 		}
 	}
 
@@ -3338,9 +3780,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, dayRollup.taskCategoryShares, dayRollup.primaryTaskCategory);
 			if (!lastDayKey || dayKey > lastDayKey) { lastDayKey = dayKey; }
 		}
-		if (lastDayKey && (sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
-			const locEntry = dailyStatsMap.get(lastDayKey)!;
-			this.addLocToDailyEntry(locEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
+		if (lastDayKey) {
+			// Session-level signals (turn counters, duration, LOC) describe the whole
+			// session and cannot be split per day, so they land on the last active day —
+			// the same convention the LOC attribution below already uses.
+			this.addModelEfficiencyToDailyEntry(dailyStatsMap.get(lastDayKey)!, sessionData);
+			if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
+				this.addLocToDailyEntry(dailyStatsMap.get(lastDayKey)!, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
+			}
 		}
 	}
 
@@ -3352,14 +3799,38 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (dateKey < cutoffUtcStartKey) { return; }
 		const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dateKey);
 		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategoryShares, sessionData.taskCategory);
+		this.addModelEfficiencyToDailyEntry(dailyEntry, sessionData);
 		if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
 			this.addLocToDailyEntry(dailyEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
 		}
 	}
 
+	/**
+	 * Folds one session's per-model efficiency signals into the day entry, so the
+	 * Efficiency view can compare models over arbitrary time windows. Session-level
+	 * duration/LOC/apply counts are split across the session's models by token share.
+	 */
+	private addModelEfficiencyToDailyEntry(entry: DailyTokenStats, sessionData: SessionFileCache): void {
+		if (!sessionData.usageAnalysis?.modelEfficiency && Object.keys(sessionData.modelUsage).length === 0) { return; }
+		if (!entry.modelEfficiency) { entry.modelEfficiency = {}; }
+		_accumulateDailyModelCounters(entry.modelEfficiency, _buildSessionEfficiencyAttribution(sessionData));
+	}
+
 	private getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dateKey: string): DailyTokenStats {
 		if (!dailyStatsMap.has(dateKey)) {
-			dailyStatsMap.set(dateKey, { date: dateKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {}, taskCategoryTokens: {}, taskCategorySessions: {}, taskCategoryModelUsage: {} });
+			dailyStatsMap.set(dateKey, {
+				date: dateKey,
+				tokens: 0,
+				sessions: 0,
+				interactions: 0,
+				modelUsage: {},
+				editorUsage: {},
+				repositoryUsage: {},
+				taskCategoryTokens: {},
+				taskCategorySessions: {},
+				taskCategoryModelUsage: {},
+				taskCategoryUsage: {},
+			});
 		}
 		return dailyStatsMap.get(dateKey)!;
 	}
@@ -3384,9 +3855,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 		entry.repositoryUsage[repository].tokens += tokens;
 		entry.repositoryUsage[repository].sessions += 1;
 		addModelUsage(entry.modelUsage, modelUsage);
+		for (const model of Object.keys(modelUsage)) {
+			entry.modelUsage[model]!.sessions += 1;
+		}
+		if (!entry.modelEfficiency) { entry.modelEfficiency = {}; }
+		_accumulateDailyModelTokens(entry.modelEfficiency, modelUsage, this.modelPricing);
 		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 		addModelUsage(entry.editorModelUsage[editorType], modelUsage);
+		for (const model of Object.keys(modelUsage)) {
+			entry.editorModelUsage[editorType][model]!.sessions += 1;
+		}
 		this.addTaskCategoryToDailyEntry(entry, tokens, modelUsage, taskCategoryShares, primaryTaskCategory);
 	}
 
@@ -3411,6 +3890,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 			entry.taskCategorySessions[cat] = (entry.taskCategorySessions[cat] || 0) + share;
 			if (!entry.taskCategoryModelUsage[cat]) { entry.taskCategoryModelUsage[cat] = {}; }
 			addModelUsage(entry.taskCategoryModelUsage[cat]!, this.scaledModelUsage(modelUsage, share));
+		}
+		if (primaryTaskCategory) {
+			if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
+			if (!entry.taskCategoryUsage[primaryTaskCategory]) {
+				entry.taskCategoryUsage[primaryTaskCategory] = { tokens: 0, sessions: 0 };
+			}
+			entry.taskCategoryUsage[primaryTaskCategory].tokens += tokens;
+			entry.taskCategoryUsage[primaryTaskCategory].sessions += 1;
 		}
 	}
 
@@ -3488,14 +3975,28 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const unresolvedWorkspaceInteractionCounts = new Map<string, number>();
 		this._workspaceIdToFolderCache.clear();
 		this._customizationFilesCache.clear();
+		this._skillCallsByEditorAccum = new Map();
+		this._skillWorkspacePathsAccum = new Map();
+		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
+		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
+		let correctionReport: CorrectionReport | undefined;
+		let repeatedTasks: RepeatedTaskReport | undefined;
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
 			const periods = { todayStats, last30DaysStats, monthStats, lastMonthStats, todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey };
 			const wsMaps = { workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts };
 			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
+			recentSessions = this.buildRecentSessionBuckets(usageResults, now);
+			correctionReport = this.buildCorrectionReport(usageResults);
+			repeatedTasks = this.buildRepeatedTaskReport(usageResults);
+			this._lastSkillCallsByEditor = {};
+			for (const [skillName, byEditor] of this._skillCallsByEditorAccum) {
+				this._lastSkillCallsByEditor[skillName] = Object.fromEntries(byEditor);
+			}
 			this.deduplicateWorkspacePaths(workspaceSessionCounts, workspaceInteractionCounts);
 			this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts);
 			await this.enrichMultiAgentParentCount(usageResults, last30DaysStats, last30DaysUtcStartKey);
+			agenticDailyTrend = await this._computeAgenticDailyTrend(usageResults, last30DaysUtcStartKey);
 			await this.enrichContextWindowFromAppData(usageResults, periods, todaySessionsList);
 		} catch (error) {
 			this.error('Error calculating usage analysis stats:', error);
@@ -3511,7 +4012,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			customizationMatrix: this._lastCustomizationMatrix,
 			missedPotential: this._lastMissedPotential || [],
 			todaySessions: todaySessionsList.sort((a, b) => b.interactions - a.interactions),
+			recentSessions,
+			correctionReport,
+			repeatedTasks,
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats),
+			agenticDailyTrend,
 		};
 		this.lastUsageAnalysisStats = stats;
 		return stats;
@@ -3696,34 +4201,128 @@ class CopilotTokenTracker implements vscode.Disposable {
 		};
 	}
 
+	/** Splits usage results (within the last-30-days window) into Copilot CLI uuids and Hermes session ids, along with each id's day key (for daily trend bucketing). */
+	private _collectMultiAgentCandidateIds(
+		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		last30DaysUtcStartKey: string,
+	): { cliUuids: string[]; hermesIds: string[]; dayByCliUuid: Map<string, string>; dayByHermesId: Map<string, string> } {
+		const cliUuids: string[] = [];
+		const hermesIds: string[] = [];
+		const dayByCliUuid = new Map<string, string>();
+		const dayByHermesId = new Map<string, string>();
+		for (const r of usageResults) {
+			if (!r) { continue; }
+			const lastActivityKey = this.computeLastActivityKey(r.sessionData, r.mtime);
+			if (lastActivityKey < last30DaysUtcStartKey) { continue; }
+			const uuid = this.extractCopilotCliUuid(r.sessionFile);
+			if (uuid) { cliUuids.push(uuid); dayByCliUuid.set(uuid, lastActivityKey); continue; }
+			if (this.hermes.isHermesSessionFile(r.sessionFile)) {
+				const id = this.hermes.getSessionId(r.sessionFile);
+				if (id) { hermesIds.push(id); dayByHermesId.set(id, lastActivityKey); }
+			}
+		}
+		return { cliUuids, hermesIds, dayByCliUuid, dayByHermesId };
+	}
+
+	/** Counts Copilot CLI sessions (from data.db hierarchy) with 2+ direct child workspaces. */
+	private async _countCliMultiAgentParents(cliUuids: string[]): Promise<number> {
+		if (cliUuids.length === 0) { return 0; }
+		try {
+			const hierarchy = await this.copilotAppData.getSessionHierarchy(cliUuids);
+			let count = 0;
+			for (const uuid of cliUuids) {
+				const node = hierarchy.get(uuid);
+				if (node && node.totalChildCount >= STAGE_THRESHOLDS.agentic.multiAgentMinChildren) { count++; }
+			}
+			return count;
+		} catch {
+			return 0; /* optional enrichment — suppress */
+		}
+	}
+
 	/**
-	 * Query data.db for multi-agent parent count and set it on the period.
-	 * A session counts as a "multi-agent parent" when it has 2+ direct child workspaces.
-	 * Errors are swallowed — this is optional enrichment only.
+	 * Query data.db (Copilot CLI) and Hermes's state.db for multi-agent parent counts and
+	 * set the combined total on the period. A session counts as a "multi-agent parent" when
+	 * it has 2+ direct children (child workspaces for Copilot CLI; `source='subagent'` rows
+	 * pointing back via `parent_session_id` for Hermes). Errors are swallowed — optional enrichment only.
 	 */
 	private async enrichMultiAgentParentCount(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
 		last30DaysStats: UsageAnalysisPeriod,
 		last30DaysUtcStartKey: string,
 	): Promise<void> {
-		const uuids: string[] = [];
-		for (const r of usageResults) {
-			if (!r) { continue; }
-			const lastActivityKey = this.computeLastActivityKey(r.sessionData, r.mtime);
-			if (lastActivityKey < last30DaysUtcStartKey) { continue; }
-			const uuid = this.extractCopilotCliUuid(r.sessionFile);
-			if (uuid) { uuids.push(uuid); }
+		const { cliUuids, hermesIds } = this._collectMultiAgentCandidateIds(usageResults, last30DaysUtcStartKey);
+		let count = await this._countCliMultiAgentParents(cliUuids);
+		if (hermesIds.length > 0) {
+			try {
+				count += await this.hermes.getMultiAgentParentCount(hermesIds);
+			} catch { /* optional enrichment — suppress */ }
 		}
-		if (uuids.length === 0) { return; }
-		try {
-			const hierarchy = await this.copilotAppData.getSessionHierarchy(uuids);
-			let count = 0;
-			for (const uuid of uuids) {
+		if (count > 0) { last30DaysStats.multiAgentParentSessions = count; }
+	}
+
+	/** Buckets multi-agent-parent counts (CLI + Hermes) per day into `byDay`. Shared by `_computeAgenticDailyTrend`. */
+	private async _bucketMultiAgentParentsByDay(
+		cliUuids: string[],
+		hermesIds: string[],
+		dayByCliUuid: Map<string, string>,
+		dayByHermesId: Map<string, string>,
+		byDay: Map<string, { multiAgentParentSessions: number; delegationSessions: number }>,
+	): Promise<void> {
+		const getEntry = (day: string) => {
+			let entry = byDay.get(day);
+			if (!entry) { entry = { multiAgentParentSessions: 0, delegationSessions: 0 }; byDay.set(day, entry); }
+			return entry;
+		};
+		const threshold = STAGE_THRESHOLDS.agentic.multiAgentMinChildren;
+		if (cliUuids.length > 0) {
+			const hierarchy = await this.copilotAppData.getSessionHierarchy(cliUuids);
+			for (const uuid of cliUuids) {
 				const node = hierarchy.get(uuid);
-				if (node && node.totalChildCount >= 2) { count++; }
+				const day = dayByCliUuid.get(uuid);
+				if (node && node.totalChildCount >= threshold && day) { getEntry(day).multiAgentParentSessions++; }
 			}
-			if (count > 0) { last30DaysStats.multiAgentParentSessions = count; }
-		} catch { /* optional enrichment — suppress */ }
+		}
+		if (hermesIds.length > 0) {
+			const childCounts = await this.hermes.getChildCounts(hermesIds);
+			for (const id of hermesIds) {
+				const childCount = childCounts.get(id) ?? 0;
+				const day = dayByHermesId.get(id);
+				if (childCount >= threshold && day) { getEntry(day).multiAgentParentSessions++; }
+			}
+		}
+	}
+
+	/**
+	 * Builds the daily "Multi-Agent Usage" trend (last ~30 days) shown as a sparkline on the
+	 * Fluency dashboard's Agentic category card. Each day combines two independent signals:
+	 * multi-agent-parent sessions (data.db/Hermes hierarchy, 2+ children) and delegation
+	 * sessions (adapter-agnostic tool-name classification). Errors are swallowed — optional
+	 * enrichment only, absent from the payload when it fails or there is no signal.
+	 */
+	private async _computeAgenticDailyTrend(
+		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		last30DaysUtcStartKey: string,
+	): Promise<AgenticTrendPoint[] | undefined> {
+		try {
+			const { cliUuids, hermesIds, dayByCliUuid, dayByHermesId } = this._collectMultiAgentCandidateIds(usageResults, last30DaysUtcStartKey);
+			const byDay = new Map<string, { multiAgentParentSessions: number; delegationSessions: number }>();
+			await this._bucketMultiAgentParentsByDay(cliUuids, hermesIds, dayByCliUuid, dayByHermesId, byDay);
+			for (const r of usageResults) {
+				if (!r || r.sessionData.taskCategory !== 'Delegation') { continue; }
+				const day = this.computeLastActivityKey(r.sessionData, r.mtime);
+				if (day < last30DaysUtcStartKey) { continue; }
+				const entry = byDay.get(day) ?? { multiAgentParentSessions: 0, delegationSessions: 0 };
+				entry.delegationSessions++;
+				byDay.set(day, entry);
+			}
+			if (byDay.size === 0) { return undefined; }
+			return Array.from(byDay.entries())
+				.map(([date, v]) => ({ date, ...v }))
+				.sort((a, b) => a.date.localeCompare(b.date));
+		} catch {
+			return undefined; /* optional enrichment — suppress */
+		}
 	}
 
 	/** The usage periods whose date range contains the given UTC activity key. */
@@ -3854,30 +4453,69 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Build session summaries for a lookback window (last 7/30 days) and send them
-	 * to the analysis panel. Used by the "Recent Sessions" tab lookback selector;
-	 * the default "Today" view keeps using the summaries bundled with updateStats.
+	 * Build session summaries for a lookback window and send them to the analysis panel.
+	 * Used by the "Recent Sessions" tab lookback selector; the default "Today" view
+	 * keeps using the summaries bundled with updateStats.
 	 */
-	private async loadRecentSessions(days: number): Promise<void> {
+	private async loadRecentSessions(period: ChartTimeWindow): Promise<void> {
 		if (!this.analysisPanel) { return; }
-		const lookbackDays = days === 30 ? 30 : 7;
-		const now = new Date();
-		const windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - lookbackDays);
-		const windowStartKey = toLocalDayKey(windowStart);
-		const sessions: TodaySessionSummary[] = [];
+		if (period === 'today' || period === 'allTime') { return; }
+		// Serve from the main analysis's already-parsed sessions (like Today) instead of
+		// re-walking the whole session corpus per period switch; guarantee a post-back on
+		// every path (including errors) so the webview never hangs on "Loading...".
+		let sessions: TodaySessionSummary[] = [];
 		try {
-			const { results } = await this.loadUsageSessionFiles(undefined, windowStart.getTime());
-			for (const r of results) {
-				if (!r || r.sessionData.interactions === 0) { continue; }
-				if (this.computeLastActivityKey(r.sessionData, r.mtime) < windowStartKey) { continue; }
-				const analysis = r.sessionData.usageAnalysis || this.buildDefaultSessionAnalysis();
-				sessions.push(this.collectTodaySessionInfo(r.sessionData, r.sessionFile, analysis, r.sessionData.interactions, r.mtime));
+			if (period === 'last90') {
+				const now = new Date();
+				const start = getTimeWindowStartDate(period, now);
+				if (!start) {
+					throw new Error(`Cannot load recent sessions for time window "${period}"`);
+				}
+				const { results } = await this.loadUsageSessionFiles(undefined, start.getTime());
+				sessions = this.buildRecentSessionBucket(results, getTimeWindowStartDayKey(period, now));
+			} else {
+				const stats = this.lastUsageAnalysisStats ?? await this.calculateUsageAnalysisStats(true);
+				sessions = stats.recentSessions?.[period] ?? [];
 			}
 		} catch (error) {
 			this.error('Error loading recent sessions:', error);
 		}
-		sessions.sort((a, b) => b.interactions - a.interactions);
-		this.analysisPanel.webview.postMessage({ command: 'recentSessionsLoaded', days: lookbackDays, sessions });
+		this.analysisPanel.webview.postMessage({ command: 'recentSessionsLoaded', period, sessions });
+	}
+
+	/**
+	 * Buckets already-parsed session results into last7 / last30 / currentMonth summaries,
+	 * once per analysis calculation, so the Recent Sessions tab can serve any period from
+	 * memory instead of re-parsing the whole session corpus on every period switch.
+	 */
+	private buildRecentSessionBuckets(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		now: Date
+	): { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } {
+		return bucketRecentSessions(this.buildRecentSessionItems(results), now);
+	}
+
+	private buildRecentSessionBucket(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		startKey: string
+	): TodaySessionSummary[] {
+		return this.buildRecentSessionItems(results)
+			.filter(it => it.activityKey >= startKey)
+			.map(it => it.value);
+	}
+
+	private buildRecentSessionItems(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
+	): { activityKey: string; interactions: number; value: TodaySessionSummary }[] {
+		const items: { activityKey: string; interactions: number; value: TodaySessionSummary }[] = [];
+		for (const r of results) {
+			if (!r || r.sessionData.interactions === 0) { continue; }
+			const analysis = r.sessionData.usageAnalysis || this.buildDefaultSessionAnalysis();
+			const value = this.collectTodaySessionInfo(r.sessionData, r.sessionFile, analysis, r.sessionData.interactions, r.mtime);
+			items.push({ activityKey: this.computeLastActivityKey(r.sessionData, r.mtime), interactions: r.sessionData.interactions, value });
+		}
+		items.sort((a, b) => b.interactions - a.interactions);
+		return items;
 	}
 
 	private computeLastActivityKey(sessionData: SessionFileCache, mtime: number): string {
@@ -3886,6 +4524,100 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		const lastActivity = sessionData.lastInteraction ? new Date(sessionData.lastInteraction) : new Date(mtime);
 		return toLocalDayKey(lastActivity);
+	}
+
+	/** Maximum number of sessions with detected correction moments listed per repository. */
+	private static readonly CORRECTION_SCAN_SESSIONS_PER_REPO = 25;
+
+	/** Derive a short `owner/repo` display name from a git remote URL (falls back to the raw value). */
+	private repoDisplayName(repository: string): string {
+		const m = repository.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
+		return m ? m[1] : repository;
+	}
+
+	/**
+	 * Build the correction-moment report from already-parsed session results:
+	 * sessions are first filtered to those carrying detected correction moments,
+	 * then the 25 most recent of those are kept per repository.
+	 * Moments come from the cached per-session usage analysis, so this is a
+	 * pure in-memory regrouping — no extra parsing. Returns undefined when no
+	 * session carried any moments.
+	 */
+	private buildCorrectionReport(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
+	): CorrectionReport | undefined {
+		const byRepo = new Map<string, { sessionFile: string; sessionData: SessionFileCache; mtime: number }[]>();
+		for (const r of results) {
+			const moments = r?.sessionData.usageAnalysis?.correctionMoments;
+			if (!r || !moments || moments.length === 0) { continue; }
+			const repo = this.repoDisplayName(r.sessionData.repository || '(unknown)');
+			if (!byRepo.has(repo)) { byRepo.set(repo, []); }
+			byRepo.get(repo)!.push(r);
+		}
+		if (byRepo.size === 0) { return undefined; }
+
+		const repos: CorrectionRepoGroup[] = [];
+		const totals = _createEmptyCorrectionCounts();
+		let sessionsWithMoments = 0;
+		for (const [repository, entries] of [...byRepo.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+			entries.sort((a, b) => b.mtime - a.mtime);
+			const selectedEntries = entries.slice(0, CopilotTokenTracker.CORRECTION_SCAN_SESSIONS_PER_REPO);
+			const sessions: CorrectionSessionEntry[] = selectedEntries
+				.map(e => ({
+					file: e.sessionFile,
+					title: e.sessionData.title ?? null,
+					lastInteraction: e.sessionData.lastInteraction ?? null,
+					moments: e.sessionData.usageAnalysis!.correctionMoments!,
+					totalMoments: this.correctionMomentCount(
+						e.sessionData.usageAnalysis!.correctionCounts
+							?? _summarizeCorrectionMoments(e.sessionData.usageAnalysis!.correctionMoments!)
+					),
+				}));
+			const counts = _createEmptyCorrectionCounts();
+			for (const entry of selectedEntries) {
+				const analysis = entry.sessionData.usageAnalysis!;
+				_mergeCorrectionCounts(counts, analysis.correctionCounts ?? _summarizeCorrectionMoments(analysis.correctionMoments!));
+			}
+			_mergeCorrectionCounts(totals, counts);
+			sessionsWithMoments += sessions.length;
+			repos.push({ repository, sessions, counts, sessionsWithMoments: sessions.length });
+		}
+		return { sessionsPerRepo: CopilotTokenTracker.CORRECTION_SCAN_SESSIONS_PER_REPO, repos, counts: totals, sessionsWithMoments };
+	}
+
+	private correctionMomentCount(counts: CorrectionCounts): number {
+		return counts.userCorrections + counts.editRetries + counts.editSelfCorrections
+			+ counts.toolErrors + counts.agentSelfCorrections;
+	}
+
+	/**
+	 * Build the repeated-task report from already-parsed session results:
+	 * cluster the first user prompt of every scanned session (across all
+	 * repositories) into tasks the user keeps prompting for manually —
+	 * candidates for a reusable skill or prompt file. Pure in-memory
+	 * clustering over cached prompts; returns undefined when no cluster
+	 * reaches the minimum size.
+	 */
+	private buildRepeatedTaskReport(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
+	): RepeatedTaskReport | undefined {
+		const inputs: _RepeatedTaskInput[] = [];
+		for (const r of results) {
+			const prompt = r?.sessionData.usageAnalysis?.firstUserPrompt;
+			if (!r || !prompt) { continue; }
+			inputs.push({
+				prompt,
+				session: {
+					file: r.sessionFile,
+					title: r.sessionData.title ?? null,
+					lastInteraction: r.sessionData.lastInteraction ?? new Date(r.mtime).toISOString(),
+					repository: r.sessionData.repository ? this.repoDisplayName(r.sessionData.repository) : undefined,
+				},
+			});
+		}
+		const clusters = _detectRepeatedTasks(inputs);
+		if (clusters.length === 0) { return undefined; }
+		return { minClusterSize: _MIN_CLUSTER_SIZE, sessionsScanned: inputs.length, clusters };
 	}
 
 	private _resolveSessionModelTokens(sessionData: SessionFileCache, modelUsage: ModelUsage): { inputTok: number; outputTok: number; cachedTok: number } {
@@ -3907,7 +4639,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	): TodaySessionSummary {
 		const modelUsage = sessionData.modelUsage || {};
 		const { inputTok, outputTok, cachedTok } = this._resolveSessionModelTokens(sessionData, modelUsage);
+		// Wall-clock duration (includes idle gaps between turns) — kept for reference/future use.
 		const durationMs = computeSessionDurationMs(sessionData.firstInteraction, sessionData.lastInteraction);
+		// Net/active duration (excludes idle gaps between turns) — this is what's shown as "Duration".
+		const activeDurationMs = analysis.sessionDuration?.activeDurationMs;
 		const workspace = this.resolveSessionWorkspaceName(sessionData, sessionFile);
 		return {
 			title: sessionData.title || null, filePath: sessionFile, interactions,
@@ -3921,23 +4656,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(sessionData.maxRequestInputTokens ? { maxRequestInputTokens: sessionData.maxRequestInputTokens } : {}),
 			...(sessionData.contextTier ? { contextTier: sessionData.contextTier } : {}),
 			...(durationMs !== undefined ? { durationMs } : {}),
+			...(activeDurationMs !== undefined ? { activeDurationMs } : {}),
 			...(workspace ? { workspace } : {}),
+			...(sessionData.subAgentCalls ? { subAgentCalls: sessionData.subAgentCalls } : {}),
 		};
 	}
 
 	/**
-	 * Best-effort workspace name for a session summary. Uses the repository name
-	 * already cached on the session data, falling back to the workspaceStorage
-	 * folder resolution (cached per workspace id). Returns undefined when
+	 * Best-effort workspace name for a session summary. Prefers the workspace
+	 * folder path already cached on the session data, then the repository name,
+	 * then workspaceStorage folder resolution. Returns undefined when
 	 * attribution is unavailable.
 	 */
 	private resolveSessionWorkspaceName(sessionData: SessionFileCache, sessionFile: string): string | undefined {
-		if (sessionData.repository) { return sessionData.repository; }
-		try {
-			const workspaceFolder = _resolveWorkspaceFolderFromSessionPath(sessionFile, this._workspaceIdToFolderCache);
-			if (workspaceFolder) { return path.basename(workspaceFolder); }
-		} catch { /* attribution is optional */ }
-		return undefined;
+		return _resolveSessionWorkspaceName(sessionData, sessionFile, this._workspaceIdToFolderCache);
 	}
 
 	private _mergeCodeWorkspaceCustomizationFiles(norm: string): CustomizationFileEntry[] {
@@ -3991,6 +4723,66 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	/** Increments `period.delegationSessions` when the session was classified as `Delegation` (see `taskClassification.ts`). */
+	private _incrementDelegationSessions(period: UsageAnalysisPeriod, sessionData: SessionFileCache): void {
+		if (sessionData.taskCategory !== 'Delegation') { return; }
+		period.delegationSessions = (period.delegationSessions ?? 0) + 1;
+	}
+
+	/**
+	 * Accumulate this session's skill invocations into `_skillCallsByEditorAccum`
+	 * (skillName -> editorSource -> count), powering the Skill Usage tab's per-editor
+	 * breakdown/filter. Only resolves editorSource when there's actually a skill call to
+	 * attribute, since `detectEditorSource` does path-based work best skipped otherwise.
+	 */
+	private _accumulateSkillCallsByEditor(sessionFile: string, analysis: SessionUsageAnalysis, workspaceFolderPath?: string): void {
+		const byName = analysis.skillCalls?.byName;
+		if (!byName) { return; }
+		const entries = Object.entries(byName);
+		if (entries.length === 0) { return; }
+		const editorSource = this.detectEditorSource(sessionFile);
+		for (const [skillName, count] of entries) {
+			let byEditor = this._skillCallsByEditorAccum.get(skillName);
+			if (!byEditor) { byEditor = new Map(); this._skillCallsByEditorAccum.set(skillName, byEditor); }
+			byEditor.set(editorSource, (byEditor.get(editorSource) || 0) + count);
+			if (workspaceFolderPath) {
+				let paths = this._skillWorkspacePathsAccum.get(skillName);
+				if (!paths) { paths = new Set(); this._skillWorkspacePathsAccum.set(skillName, paths); }
+				paths.add(workspaceFolderPath);
+			}
+		}
+	}
+
+	/**
+	 * Skill name -> description, for the Skill Usage tab. Three tiers, in order:
+	 * 1. `curationAnalysis.availableTools` (populated by `discoverSkillEntries()`, scoped to
+	 *    the currently open workspace(s)).
+	 * 2. For an invoked skill still missing a description — e.g. one invoked from a repo
+	 *    that isn't open right now — a targeted lookup in that skill's own historical
+	 *    workspace path(s) via `findSkillDescriptionInWorkspaces()`.
+	 * 3. `builtinCommandDescriptions.json` — many "skills" invoked via a bare `/name` are
+	 *    actually the CLI's own built-in commands (e.g. Copilot CLI's `/model`, `/login`),
+	 *    baked into the binary with no SKILL.md anywhere to find. This static, hand-curated
+	 *    list (sourced from Claude Code's and Copilot CLI's official docs) is the last resort.
+	 */
+	private _buildSkillDescriptions(): Record<string, string> {
+		const descriptions: Record<string, string> = {};
+		for (const t of this.lastUsageAnalysisStats?.curationAnalysis?.availableTools ?? []) {
+			if (t.source === 'skill' && t.description) { descriptions[t.name] = t.description; }
+		}
+		const builtins = builtinCommandDescriptionsData as { [key: string]: string };
+		for (const skillName of this._skillCallsByEditorAccum.keys()) {
+			if (descriptions[skillName]) { continue; }
+			const workspacePaths = this._skillWorkspacePathsAccum.get(skillName);
+			const found = workspacePaths && workspacePaths.size > 0
+				? _findSkillDescriptionInWorkspaces(skillName, workspacePaths)
+				: undefined;
+			if (found) { descriptions[skillName] = found; }
+			else if (builtins[skillName]) { descriptions[skillName] = builtins[skillName]; }
+		}
+		return descriptions;
+	}
+
 	private aggregateSessionFileIntoStats(
 		r: { sessionFile: string; sessionData: SessionFileCache; mtime: number },
 		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; lastMonthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string; lastMonthUtcStartKey: string; lastMonthUtcEndKey: string },
@@ -4010,24 +4802,33 @@ class CopilotTokenTracker implements vscode.Disposable {
 			periods.last30DaysStats.sessions++;
 			this.mergeUsageAnalysis(periods.last30DaysStats, analysis);
 			this._mergeContextWindowStats(periods.last30DaysStats, sessionData);
+			_mergeModelEfficiencyTokens(periods.last30DaysStats, sessionData.modelUsage, this.modelPricing);
+			this._incrementDelegationSessions(periods.last30DaysStats, sessionData);
 			this.trackWorkspaceForSession(sessionFile, interactions,
 				wsMaps.workspaceSessionCounts, wsMaps.workspaceInteractionCounts,
 				wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts);
+			this._accumulateSkillCallsByEditor(sessionFile, analysis, sessionData.workspaceFolderPath);
 		}
 		if (lastActivityUtcKey >= periods.monthUtcStartKey) {
 			periods.monthStats.sessions++;
 			this.mergeUsageAnalysis(periods.monthStats, analysis);
 			this._mergeContextWindowStats(periods.monthStats, sessionData);
+			_mergeModelEfficiencyTokens(periods.monthStats, sessionData.modelUsage, this.modelPricing);
+			this._incrementDelegationSessions(periods.monthStats, sessionData);
 		}
 		if (inLastMonth) {
 			periods.lastMonthStats.sessions++;
 			this.mergeUsageAnalysis(periods.lastMonthStats, analysis);
 			this._mergeContextWindowStats(periods.lastMonthStats, sessionData);
+			_mergeModelEfficiencyTokens(periods.lastMonthStats, sessionData.modelUsage, this.modelPricing);
+			this._incrementDelegationSessions(periods.lastMonthStats, sessionData);
 		}
 		if (lastActivityUtcKey === periods.todayUtcKey) {
 			periods.todayStats.sessions++;
 			this.mergeUsageAnalysis(periods.todayStats, analysis);
 			this._mergeContextWindowStats(periods.todayStats, sessionData);
+			_mergeModelEfficiencyTokens(periods.todayStats, sessionData.modelUsage, this.modelPricing);
+			this._incrementDelegationSessions(periods.todayStats, sessionData);
 			todaySessionsList.push(this.collectTodaySessionInfo(sessionData, sessionFile, analysis, interactions, mtime));
 		}
 	}
@@ -4409,8 +5210,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		lastInteraction: string | null;
 		dailyInteractions: { [localDayKey: string]: number };
 		dailyFractions?: Record<string, number>;
+		workspacePath?: string;
 	}> {
 		let title: string | undefined;
+		let workspacePath: string | undefined;
 		const timestamps: number[] = [];
 		const requestTimestamps: number[] = [];
 
@@ -4422,6 +5225,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 				return { ...meta, dailyInteractions: {}, ...(dailyFractions ? { dailyFractions } : {}) };
 			}
 
+			// Some adapters discover files they do not handle (e.g. Copilot CLI events.jsonl).
+			// Ask them for workspace attribution before falling back to generic parsing.
+			workspacePath = await this.findWorkspacePathForDiscoveredPath(sessionFile);
+
 			// Handle Windsurf virtual sessions
 			if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
 				return this.extractWindsurfSessionMetadata(sessionFile);
@@ -4429,7 +5236,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
 			if (_isUuidPointerFile(fileContent)) {
-				return { title, firstInteraction: null, lastInteraction: null, dailyInteractions: {} };
+				return { title, firstInteraction: null, lastInteraction: null, dailyInteractions: {}, workspacePath };
 			}
 
 			const isJsonlContent = sessionFile.endsWith('.jsonl') || _isJsonlContent(fileContent);
@@ -4456,7 +5263,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 			dailyInteractions[dayKey] = (dailyInteractions[dayKey] || 0) + 1;
 		}
 
-		return { title, firstInteraction, lastInteraction, dailyInteractions };
+		return { title, firstInteraction, lastInteraction, dailyInteractions, workspacePath };
+	}
+
+	/**
+	 * Ask any discoverable ecosystem adapter that does *not* handle this file whether
+	 * it can still supply a workspace directory path for it. Used for files like
+	 * Copilot CLI events.jsonl that are discovered by an adapter but parsed generically.
+	 */
+	private async findWorkspacePathForDiscoveredPath(sessionFile: string): Promise<string | undefined> {
+		for (const eco of this.ecosystems) {
+			if (eco.handles(sessionFile)) { continue; }
+			if (typeof eco.getWorkspacePathForDiscoveredPath !== 'function') { continue; }
+			try {
+				const cwd = await eco.getWorkspacePathForDiscoveredPath(sessionFile);
+				if (cwd) { return cwd; }
+			} catch { /* adapter failed; try next */ }
+		}
+		return undefined;
 	}
 
 	private extractMetadataFromJsonl(lines: string[]): { title: string | undefined; timestamps: number[]; requestTimestamps: number[] } {
@@ -4568,15 +5392,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.extractSessionMetadata(sessionFilePath, preloadedContent, preloadedParsedJson),
 		]);
 
-		const { dailyRollups, totalInteractions } = this.computeDailyRollups(sessionMeta, tokenResult, modelUsage, interactions, usageAnalysis);
-		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
-		const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = this.resolveAndApplyDebugLog(tokenResult, debugLogTokens, modelUsage, dailyRollups, totalInteractions);
+// Reconcile the per-model breakdown to the session total. Different sources estimate
+// these independently (e.g. event-based CLI sessions derive actualTokens from real
+// output via a ratio, while modelUsage derives input from accumulated message content),
+// which can make Input+Output exceed Total in the details view.
+// `||` (not `??`): actualTokens is 0 — never undefined — when no exact usage exists,
+// so `??` would target 0 and silently skip reconciliation for estimated sessions.
+const reconciledModelUsage = reconcileModelUsageToActualTokens(modelUsage, tokenResult.actualTokens || tokenResult.tokens);
+const { dailyRollups, totalInteractions } = this.computeDailyRollups(sessionMeta, tokenResult, reconciledModelUsage, interactions, usageAnalysis);
+const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
+const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = this.resolveAndApplyDebugLog(tokenResult, debugLogTokens, reconciledModelUsage, dailyRollups);
 
-		await this.applyWindsurfBreakdown(sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
+await this.applyWindsurfBreakdown(sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
 
-		const sessionData = this.buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups, cached);
-		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
-		return sessionData;
+const sessionData = this.buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups, cached);
+this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
+return sessionData;
 	}
 
 	/**
@@ -4586,26 +5417,26 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * input/output/cached tokens, models and cost instead of zeros.
 	 */
 	private async applyWindsurfBreakdown(
-		sessionFilePath: string,
-		resolvedModelUsage: ModelUsage,
-		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
-		usageAnalysis: SessionUsageAnalysis
+sessionFilePath: string,
+resolvedModelUsage: ModelUsage,
+dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
+usageAnalysis: SessionUsageAnalysis
 	): Promise<void> {
-		if (!this.windsurf.isWindsurfSessionFile(sessionFilePath)) { return; }
-		const session = await this.windsurf.resolveSession(sessionFilePath);
-		if (!session) { return; }
-		if (session.modelUsage && Object.keys(session.modelUsage).length > 0) {
-			for (const [model, usage] of Object.entries(session.modelUsage)) {
-				resolvedModelUsage[model] = { ...usage };
-			}
-			// Windsurf has a single activity day; mirror the model usage onto its rollup
-			// so per-day model/cost aggregation matches the session totals.
-			for (const day of Object.keys(dailyRollups)) {
-				dailyRollups[day].modelUsage = session.modelUsage;
-				if (session.cachedTokens) { dailyRollups[day].cachedReadTokens = session.cachedTokens; }
-			}
-		}
-		if (session.toolCalls) { usageAnalysis.toolCalls = session.toolCalls; }
+if (!this.windsurf.isWindsurfSessionFile(sessionFilePath)) { return; }
+const session = await this.windsurf.resolveSession(sessionFilePath);
+if (!session) { return; }
+if (session.modelUsage && Object.keys(session.modelUsage).length > 0) {
+	for (const [model, usage] of Object.entries(session.modelUsage)) {
+		resolvedModelUsage[model] = { ...usage };
+	}
+	// Windsurf has a single activity day; mirror the model usage onto its rollup
+	// so per-day model/cost aggregation matches the session totals.
+	for (const day of Object.keys(dailyRollups)) {
+		dailyRollups[day].modelUsage = session.modelUsage;
+		if (session.cachedTokens) { dailyRollups[day].cachedReadTokens = session.cachedTokens; }
+	}
+}
+if (session.toolCalls) { usageAnalysis.toolCalls = session.toolCalls; }
 	}
 
 	private async preloadSessionFileContent(sessionFilePath: string): Promise<{ preloadedContent: string | undefined; preloadedParsedJson: any | undefined }> {
@@ -4670,7 +5501,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		mtime: number,
 		fileSize: number,
 		usageAnalysis: SessionUsageAnalysis,
-		sessionMeta: { title?: string; firstInteraction: string | null; lastInteraction: string | null },
+		sessionMeta: { title?: string; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string },
 		resolvedActualTokens: number | undefined,
 		finalCacheReadTokens: number | undefined,
 		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number } | null | undefined,
@@ -4680,12 +5511,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const copilotNanoAiu = debugLogTokens?.copilotNanoAiu ?? tokenResult.copilotNanoAiu ?? 0;
 		const copilotExactCostDollars = copilotNanoAiu > 0 ? copilotNanoAiu * NANO_AIU_TO_DOLLARS : undefined;
 		const optionals = this.buildOptionalSessionFields(tokenResult, debugLogTokens, finalCacheReadTokens, copilotExactCostDollars, dailyRollups, usageAnalysis);
+		// Classified once per session (not per-render) using tool names from usageAnalysis and the
+		// already-extracted session title — see src/taskClassification.ts for the heuristic + rationale.
+		const taskCategory = classifySessionTask(buildClassificationInputFromUsageAnalysis(usageAnalysis, sessionMeta.title));
+		// Counted once per session from the same tool-name data as the task classification;
+		// powers the sub-agent badge/counters in the sessions list, details and diagnostics views.
+		// MCP tools are included because some ecosystems spawn sub-agents via MCP
+		// (e.g. Claude Desktop's mcp__ccd_session__spawn_task).
+		const subAgentCalls = countDelegationToolCalls(usageAnalysis?.toolCalls?.byTool ?? {})
+			+ countDelegationToolCalls(usageAnalysis?.mcpTools?.byTool ?? {});
 		return {
 			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
 			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
 			lastInteraction: sessionMeta.lastInteraction, actualTokens: resolvedActualTokens,
-			taskCategory: usageAnalysis.taskClassification?.primaryCategory,
+			taskCategory: usageAnalysis.taskClassification?.primaryCategory ?? taskCategory,
 			taskCategoryShares: usageAnalysis.taskClassification?.categoryShares,
+			...(subAgentCalls > 0 ? { subAgentCalls } : {}),
+			// Persist workspace attribution from the adapter so the Recent Sessions list can
+			// show it without requiring a separate getSessionFileDetails() parse pass.
+			...(sessionMeta.workspacePath ? { workspaceFolderPath: sessionMeta.workspacePath } : {}),
 			// Repository is discovered separately by getSessionFileDetails() (via content-reference
 			// git-root lookup) and is not recomputed here. Without preserving it, every cache-miss
 			// rebuild of this entry (e.g. an actively-edited session whose file keeps changing)
@@ -4713,8 +5557,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// partial (e.g. some requests lack a `model` attribute), so Input+Output
 		// never drifts from Total — see reconcileModelUsageToTotal for why.
 		const supplementModelUsage = reconcileModelUsageToTotal(breakdownUsage, debugLogTokens.inputTokens, debugLogTokens.outputTokens);
+		// Redistribute to days via the shared helper, which also re-syncs each day's
+		// actualTokens to the debug-log-sized usage — see distributeModelUsageToDays.
 		const supplementDailyRollups = cached.dailyRollups
-			? (_scdlDistributeToDays(cached.dailyRollups, supplementModelUsage) ?? cached.dailyRollups)
+			? (distributeModelUsageToDays(cached.dailyRollups, supplementModelUsage) ?? cached.dailyRollups)
 			: cached.dailyRollups;
 		const supplemented: SessionFileCache = {
 			...cached, modelUsage: supplementModelUsage, dailyRollups: supplementDailyRollups,
@@ -4789,74 +5635,81 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 
-	private computeDailyRollups(
-		sessionMeta: { firstInteraction: string | null; dailyInteractions: { [localDayKey: string]: number }; dailyFractions?: Record<string, number> },
-		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
-		modelUsage: ModelUsage,
-		interactions: number,
-		usageAnalysis: SessionUsageAnalysis
-	): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
-		const totalNanoAiu = tokenResult.copilotNanoAiu ?? 0;
-		const taskCategoryShares = usageAnalysis.taskClassification?.categoryShares as TaskCategoryBreakdown | undefined;
-		const primaryTaskCategory = usageAnalysis.taskClassification?.primaryCategory as TaskCategory | undefined;
+private computeDailyRollups(
+	sessionMeta: { firstInteraction: string | null; lastInteraction: string | null; dailyInteractions: { [localDayKey: string]: number }; dailyFractions?: Record<string, number> },
+	tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
+	modelUsage: ModelUsage,
+	interactions: number,
+	usageAnalysis: SessionUsageAnalysis
+): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
+	const totalNanoAiu = tokenResult.copilotNanoAiu ?? 0;
+	const taskCategoryShares = usageAnalysis.taskClassification?.categoryShares as TaskCategoryBreakdown | undefined;
+	const primaryTaskCategory = usageAnalysis.taskClassification?.primaryCategory as TaskCategory | undefined;
 
-		// Prefer pre-computed fractions from ecosystem adapters (e.g. getDailyFractions()),
-		// which have accurate per-request timestamps. Fall back to dailyInteractions counts.
-		if (sessionMeta.dailyFractions && Object.keys(sessionMeta.dailyFractions).length > 0) {
-			return this.computeRollupsFromFractions(sessionMeta.dailyFractions, tokenResult, modelUsage, interactions, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
-		}
-
-		const dailyInteractionMap = sessionMeta.dailyInteractions;
-		const totalInteractions = Object.values(dailyInteractionMap).reduce((a, b) => a + b, 0);
-		if (totalInteractions > 0) {
-			return this.computeRollupsFromInteractionCounts(dailyInteractionMap, tokenResult, modelUsage, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
-		}
-
-		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
-		this.computeFallbackDailyRollup(
-			dailyRollups,
-			sessionMeta.firstInteraction,
-			tokenResult,
-			modelUsage,
-			interactions,
-			taskCategoryShares,
-			primaryTaskCategory
-		);
-		return { dailyRollups, totalInteractions };
+	// Prefer pre-computed fractions from ecosystem adapters (e.g. getDailyFractions()),
+	// which have accurate per-request timestamps. Fall back to dailyInteractions counts.
+	if (sessionMeta.dailyFractions && Object.keys(sessionMeta.dailyFractions).length > 0) {
+		return this.computeRollupsFromFractions(sessionMeta.dailyFractions, tokenResult, modelUsage, interactions, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
 	}
 
-	private computeFallbackDailyRollup(
-		dailyRollups: { [localDayKey: string]: DailyRollupEntry },
-		firstInteraction: string | null,
-		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number },
-		modelUsage: ModelUsage,
-		interactions: number,
-		taskCategoryShares?: TaskCategoryBreakdown,
-		primaryTaskCategory?: TaskCategory
-	): void {
-		if (!tokenResult.tokens || !firstInteraction) { return; }
-		try {
-			const interactionDate = new Date(firstInteraction);
-			if (isNaN(interactionDate.getTime())) { return; }
-			const dayKey = toLocalDayKey(interactionDate);
-			const dayModelUsage = this.scaledModelUsage(modelUsage, 1);
-			dailyRollups[dayKey] = {
-				tokens: tokenResult.tokens,
-				actualTokens: tokenResult.actualTokens || 0,
-				thinkingTokens: tokenResult.thinkingTokens || 0,
-				cachedReadTokens: 0,
-				interactions: Math.max(1, interactions),
-				modelUsage: dayModelUsage,
-				...(taskCategoryShares ? { taskCategoryShares } : {}),
-				...(primaryTaskCategory ? { primaryTaskCategory } : {}),
-			};
-		} catch { /* ignore */ }
+	const dailyInteractionMap = sessionMeta.dailyInteractions;
+	const totalInteractions = Object.values(dailyInteractionMap).reduce((a, b) => a + b, 0);
+	if (totalInteractions > 0) {
+		return this.computeRollupsFromInteractionCounts(dailyInteractionMap, tokenResult, modelUsage, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
 	}
 
+	// Last-resort fallback for adapters/formats with no per-request timestamps at all
+	// (e.g. Claude Desktop, which has no getDailyFractions()). Bucket the whole session
+	// under its *last* activity day, not its first: a multi-day session (started days ago,
+	// still active today) must show up as "today"'s activity, matching the mtime-based
+	// fallback the CLI uses (see extractDailyFractions) and the lastInteraction-based
+	// fallback aggregatePeriodStats itself uses when dailyRollups is absent. Using
+	// firstInteraction here silently buried all subsequent days' activity — including
+	// "today" — under the session's start date, making Today/Details show 0.
+	const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
+	this.computeFallbackDailyRollup(
+		dailyRollups,
+		sessionMeta.lastInteraction ?? sessionMeta.firstInteraction,
+		tokenResult,
+		modelUsage,
+		interactions,
+		taskCategoryShares,
+		primaryTaskCategory
+	);
+	return { dailyRollups, totalInteractions };
+}
+
+private computeFallbackDailyRollup(
+	dailyRollups: { [localDayKey: string]: DailyRollupEntry },
+	lastInteraction: string | null,
+	tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number },
+	modelUsage: ModelUsage,
+	interactions: number,
+	taskCategoryShares?: TaskCategoryBreakdown,
+	primaryTaskCategory?: TaskCategory
+): void {
+	if (!tokenResult.tokens || !lastInteraction) { return; }
+	try {
+		const interactionDate = new Date(lastInteraction);
+		if (isNaN(interactionDate.getTime())) { return; }
+		const dayKey = toLocalDayKey(interactionDate);
+		const dayModelUsage = this.scaledModelUsage(modelUsage, 1);
+		dailyRollups[dayKey] = {
+			tokens: tokenResult.tokens,
+			actualTokens: tokenResult.actualTokens || 0,
+			thinkingTokens: tokenResult.thinkingTokens || 0,
+			cachedReadTokens: 0,
+			interactions: Math.max(1, interactions),
+			modelUsage: dayModelUsage,
+			...(taskCategoryShares ? { taskCategoryShares } : {}),
+			...(primaryTaskCategory ? { primaryTaskCategory } : {}),
+		};
+	} catch { /* ignore */ }
+}
 	private scaledModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
 		const dayModelUsage: ModelUsage = {};
 		for (const [model, usage] of Object.entries(modelUsage)) {
-			dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}), ...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * fraction) } : {}) };
+			dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}), ...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * fraction) } : {}), sessions: 0 };
 		}
 		return dayModelUsage;
 	}
@@ -4865,8 +5718,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tokenResult: { tokens: number; actualTokens?: number; cacheReadTokens?: number },
 		debugLogTokens: { inputTokens: number; outputTokens: number; cachedTokens?: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined,
 		modelUsage: ModelUsage,
-		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
-		totalInteractions: number
+		dailyRollups: { [utcDayKey: string]: DailyRollupEntry }
 	): { resolvedActualTokens: number | undefined; finalCacheReadTokens: number | undefined; resolvedModelUsage: ModelUsage } {
 		const resolvedActualTokens = (debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0)
 			? debugLogTokens.inputTokens + debugLogTokens.outputTokens
@@ -4879,7 +5731,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this.backfillDailyRollupCacheTokens(dailyRollups, finalCacheReadTokens);
 
-		const resolvedModelUsage = this.applyDebugLogModelBreakdown(modelUsage, debugLogTokens, dailyRollups, totalInteractions);
+		const resolvedModelUsage = this.applyDebugLogModelBreakdown(modelUsage, debugLogTokens, dailyRollups);
 		return { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage };
 	}
 
@@ -4900,11 +5752,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private applyDebugLogModelBreakdown(modelUsage: ModelUsage, debugLogTokens: { inputTokens: number; outputTokens: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined, dailyRollups: { [utcDayKey: string]: DailyRollupEntry }, totalInteractions: number): ModelUsage {
+	private applyDebugLogModelBreakdown(modelUsage: ModelUsage, debugLogTokens: { inputTokens: number; outputTokens: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined, dailyRollups: { [utcDayKey: string]: DailyRollupEntry }): ModelUsage {
 		if (!debugLogTokens || debugLogTokens.inputTokens + debugLogTokens.outputTokens === 0) { return modelUsage; }
 		const breakdownUsage: ModelUsage = {};
 		for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
-			breakdownUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
+			breakdownUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}), sessions: 0 };
 		}
 		// Reconcile against the debug log's own totals even when the breakdown is
 		// missing or partial (e.g. some requests lack a `model` attribute), so
@@ -4914,9 +5766,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 			debugLogTokens.inputTokens,
 			debugLogTokens.outputTokens,
 		);
-		for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
-			const fraction = totalInteractions > 0 ? dayRollup.interactions / totalInteractions : 1;
-			dailyRollups[dayKey].modelUsage = this.scaledModelUsage(resolvedModelUsage, fraction);
+		// Redistribute to days AND re-sync each day's actualTokens — the rollups were
+		// built from the (smaller) session-file estimate, and period stats derive
+		// "Total tokens" from rollup actualTokens but "Input/Output" from rollup
+		// modelUsage. Leaving the old day totals in place makes Input exceed Total.
+		const redistributed = distributeModelUsageToDays(dailyRollups, resolvedModelUsage);
+		if (redistributed) {
+			for (const [dayKey, dayRollup] of Object.entries(redistributed)) {
+				dailyRollups[dayKey] = dayRollup;
+			}
 		}
 		return resolvedModelUsage;
 	}
@@ -5032,6 +5890,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return undefined;
 		}
 
+		// Cache entries written before repository extraction was attempted need one full
+		// re-parse to backfill the field. Key this off `repositoryResolved`, NOT off
+		// `repository === undefined` — the latter is also the correct, permanent value for
+		// sessions that genuinely have no resolvable repository, and treating it as "needs
+		// reparse" forced a full re-parse (including costly JSONL delta reconstruction and
+		// ecosystem adapter calls) on every single Diagnostics reload, forever, for any
+		// repo-less .jsonl session.
+		if (sessionFile.endsWith('.jsonl') && !cached.repositoryResolved) {
+			return undefined;
+		}
+
 		// Use the cached lastInteraction from session content directly.
 		// Do NOT fall back to file mtime here: mtime is updated whenever VS Code writes the
 		// session file (e.g. finalising a session just after midnight), which would shift
@@ -5053,6 +5922,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			title: cached.title,
 			repository: cached.repository,
 			workspacePath: cached.workspaceFolderPath,
+			subAgentCalls: cached.subAgentCalls,
 			...(cached.modelUsage && Object.keys(cached.modelUsage).length > 0 ? { modelUsage: cached.modelUsage } : {}),
 		};
 
@@ -5075,6 +5945,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *   (the only other code path that computes it) — this is what caused the Model
 	 *   Usage diagnostics tab to show data for only a handful of editors.
 	 */
+	/** Resolve the sub-agent call count for a cache update: fresh count from just-parsed details, else the previously cached value. */
+	private resolveSubAgentCallsForCacheUpdate(details: SessionFileDetails, existingCache: SessionFileCache | undefined): number {
+		return details.toolCalls ? countDelegationToolCalls(details.toolCalls.byTool) : (existingCache?.subAgentCalls ?? 0);
+	}
+
 	private async updateCacheWithSessionDetails(
 		sessionFile: string,
 		stat: fs.Stats,
@@ -5087,6 +5962,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details.tokens = resolved.actualTokens || resolved.tokens || 0;
 		const resolvedModelUsage = modelUsage && Object.keys(modelUsage).length > 0 ? modelUsage : (existingCache?.modelUsage || {});
 		if (Object.keys(resolvedModelUsage).length > 0) { details.modelUsage = resolvedModelUsage; }
+		// Prefer a fresh count from the just-parsed details; otherwise keep the cached value.
+		const subAgentCalls = this.resolveSubAgentCallsForCacheUpdate(details, existingCache);
+		if (subAgentCalls > 0) { details.subAgentCalls = subAgentCalls; }
 
 		const cacheEntry: SessionFileCache = {
 			tokens: resolved.tokens,
@@ -5107,7 +5985,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			lastInteraction: details.lastInteraction,
 			title: details.title,
 			repository: details.repository,
+			// This function only runs after a full parse, which always attempts repository
+			// extraction — so `repository` above is the definitive result (possibly undefined
+			// because none was found), not "not yet checked". See SessionFileCache.repositoryResolved.
+			repositoryResolved: true,
 			workspaceFolderPath: this.resolveCachedWorkspacePath(details, existingCache),
+			...(subAgentCalls > 0 ? { subAgentCalls } : {}),
 		};
 
 		cacheEntry.usageAnalysis!.contextReferences = details.contextReferences;
@@ -5171,7 +6054,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const stat = existingStat ?? await this.statSessionFile(sessionFile);
 
 		const cachedDetails = await this.getSessionFileDetailsFromCache(sessionFile, stat);
-		if (cachedDetails && !(cachedDetails.repository === undefined && sessionFile.endsWith('.jsonl'))) {
+		if (cachedDetails) {
 			this._cacheHits++;
 			return cachedDetails;
 		}
@@ -5246,7 +6129,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details.interactions = interactionCount;
 		details.editorRoot = eco.getEditorRoot(sessionFile);
 		details.editorName = getEcosystemDisplayName(eco, sessionFile);
-		if (meta.workspacePath) { details.repository = path.basename(meta.workspacePath); details.workspacePath = meta.workspacePath; }
+		if (meta.workspacePath) {
+			// Prefer the ecosystem's authoritative repository (e.g. Copilot CLI's DB "owner/repo"
+			// column). Only fall back to deriving a name from the path when it's absent, and use a
+			// worktree-aware derivation so app-store worktree paths resolve to the repo folder
+			// instead of the transient worktree name.
+			details.repository = meta.repository || _getRepoNameFromWorkspacePath(meta.workspacePath);
+			details.workspacePath = meta.workspacePath;
+		}
 		await this.updateCacheWithSessionDetails(sessionFile, stat, details, tokenResult, modelUsage);
 		return details;
 	}
@@ -6033,7 +6923,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Create a small webview panel
 		this.detailsPanel = vscode.window.createWebviewPanel(
 			'copilotTokenDetails',
-			'AI Engineering Fluency',
+			l10n.t('aiEngineeringFluency'),
 			{
 				viewColumn: vscode.ViewColumn.One,
 				preserveFocus: true
@@ -6078,8 +6968,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!stats) {
 			this.log('No cached stats — showing loading screen while calculating...');
 			this._detailsPanelIsLoading = true;
-			this.statusBarItem.tooltip = 'AI Engineering Fluency — loading in panel…';
-			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview);
+			this.statusBarItem.tooltip = l10n.t('statusBar.loadingInPanel');
+			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview, this._updateTokenStatsStartedAt ?? Date.now());
 
 			stats = await this.updateTokenStats();
 
@@ -6157,6 +7047,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...stats,
 			backendConfigured: this.isBackendConfigured(),
 			compactNumbers: this.getCompactNumbersSetting(),
+			localization: this.getWebviewLocalization(),
 		};
 		const initialData = JSON.stringify(dataWithBackend).replace(/</g, '\\u003c');
 
@@ -6218,6 +7109,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (await this.dispatchSharedCommand(message)) { return; }
 			if (message.command === 'refresh') { await this.dispatch('refresh:chart', () => this.refreshChartPanel()); }
 			if (message.command === 'setPeriodPreference') { this.setChartPeriodPreference(message.period); }
+			if (message.command === 'setTimeWindowPreference') { this.setChartTimeWindowPreference(message.timeWindow); }
 			if (message.command === 'setViewPreference') { this.setChartViewPreference(message); }
 		});
 
@@ -6230,20 +7122,31 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.chartPanel = undefined;
 		});
 
-		// If we only have 30-day data, compute the full year in the background and push an update
+		// If we only have 30-day data, compute the full year in the background and push an update.
+		// This must NOT be awaited here: showChart() is wrapped in dispatch()'s in-flight guard, which
+		// only releases the 'showChart' key once this function returns. Awaiting the (potentially long)
+		// full-year calculation would keep that key locked — if the user closes the panel and reopens it
+		// before the calculation finishes, the reopen would be silently dropped as "already in flight".
 		if (!hasFullData) {
-			const fullStats = await this.calculateDailyStats();
-			if (this.chartPanel) {
-				void this.chartPanel.webview.postMessage({
-					command: 'updateChartData',
-					data: { ...this.buildChartData(fullStats), periodsReady: true, compactNumbers: this.getCompactNumbersSetting() }
-				});
-			}
+			void (async () => {
+				const fullStats = await this.calculateDailyStats();
+				if (this.chartPanel) {
+					void this.chartPanel.webview.postMessage({
+						command: 'updateChartData',
+						data: { ...this.buildChartData(fullStats), periodsReady: true, compactNumbers: this.getCompactNumbersSetting() }
+					});
+				}
+			})();
 		}
 	}
 
 	private setChartPeriodPreference(period: string): void {
 		if (period === 'day' || period === 'week' || period === 'month') { this.lastChartPeriod = period; }
+	}
+
+	private setChartTimeWindowPreference(timeWindow: string): void {
+		const valid: ChartTimeWindow[] = ['today', 'last7', 'last30', 'last90', 'currentMonth', 'allTime'];
+		if (valid.includes(timeWindow as ChartTimeWindow)) { this.lastChartTimeWindow = timeWindow as ChartTimeWindow; }
 	}
 
 	private setChartViewPreference(message: any): void {
@@ -6268,7 +7171,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: true },
 			{ enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
 		);
-		this.log('✅ Usage Analysis dashboard created successfully');
+		this.analysisWebviewReady = false;
+		this.analysisMessageReplay.markNotReady();
+		this._analysisPanelSeq++;
+		this.log(`✅ Usage Analysis dashboard created successfully (panel #${this._analysisPanelSeq})`);
 		this.analysisPanel.webview.onDidReceiveMessage(async (message) => {
 			if (this.handleLocalViewRegressionMessage(message)) { return; }
 			if (await this.dispatchSharedCommand(message)) { return; }
@@ -6276,19 +7182,63 @@ class CopilotTokenTracker implements vscode.Disposable {
 		});
 		this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, this.lastUsageAnalysisStats ?? null);
 		if (!this.lastUsageAnalysisStats) { void this.loadAnalysisStatsInBackground(this.analysisPanel); }
-		this.analysisPanel.onDidDispose(() => { this.log('📊 Usage Analysis dashboard closed'); this.analysisPanel = undefined; });
+		this.analysisPanel.onDidDispose(() => {
+			this.log('📊 Usage Analysis dashboard closed');
+			this.analysisPanel = undefined;
+			this.analysisWebviewReady = false;
+			this.analysisMessageReplay.markNotReady();
+			this.pendingAnalysisNavigation = undefined;
+		});
 	}
 
-	/** Opens the Usage Analysis panel and immediately activates the Insights tab. */
+	private async flushPendingAnalysisNavigation(): Promise<void> {
+		const panel = this.analysisPanel;
+		const navigation = this.pendingAnalysisNavigation;
+		if (!panel || !this.analysisWebviewReady || !navigation) { return; }
+		const delivered = await panel.webview.postMessage({ command: 'switchTab', ...navigation });
+		if (delivered && this.pendingAnalysisNavigation === navigation) {
+			this.pendingAnalysisNavigation = undefined;
+		}
+	}
+
+	private async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string): Promise<void> {
+		this.pendingAnalysisNavigation = { tab, ...(anchor ? { anchor } : {}) };
+		await this.showUsageAnalysis();
+		this.analysisPanel?.reveal(vscode.ViewColumn.One, false);
+		await this.flushPendingAnalysisNavigation();
+	}
+
+	/** Opens the Usage Analysis panel and activates the Insights tab. */
 	public async showUsageAnalysisOnInsightsTab(): Promise<void> {
-		await this.showUsageAnalysis();
-		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'insights' });
+		await this.showUsageAnalysisOnTab('insights');
 	}
 
-	/** Opens the Usage Analysis panel and immediately activates the Tools & Integration tab. */
-	public async showUsageAnalysisOnToolsTab(): Promise<void> {
-		await this.showUsageAnalysis();
-		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'tools', anchor: 'section-tool-curation' });
+	/** Opens the Usage Analysis panel and activates the Tools & Integrations tab. */
+	public async showUsageAnalysisOnToolsTab(anchor = 'section-tool-curation'): Promise<void> {
+		await this.showUsageAnalysisOnTab('tools', anchor);
+	}
+
+	/** Opens the Usage Analysis panel and activates the Activity tab. */
+	public async showUsageAnalysisOnActivityTab(anchor = 'section-interaction-modes'): Promise<void> {
+		await this.showUsageAnalysisOnTab('activity', anchor);
+	}
+
+	public async showUsageAnalysisOnHealthTab(): Promise<void> {
+		await this.showUsageAnalysisOnTab('health');
+	}
+
+	public async showUsageAnalysisOnCorrectionsTab(): Promise<void> {
+		await this.showUsageAnalysisOnTab('corrections');
+	}
+
+	public async showUsageAnalysisOnModelEfficiency(): Promise<void> {
+		await this.showUsageAnalysisOnTab('activity', 'section-model-efficiency');
+	}
+
+	/** Opens the Usage Analysis panel, pushes the latest background worktree scan findings, and activates the Worktrees tab. */
+	public async showUsageAnalysisOnWorktreesTab(): Promise<void> {
+		await this.showUsageAnalysisOnTab('worktrees');
+		this.postWorktreeBackgroundResults();
 	}
 
 	private async _handleSuppressUnknownTool(toolName: string): Promise<void> {
@@ -6332,8 +7282,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 			},
 			loadRepoPrStats: () => this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats()),
 			loadAgentSessions: () => this.dispatch('loadAgentSessions', () => this.loadAgentSessions()),
-			loadRecentSessions: (message) => this.dispatch('loadRecentSessions', () => this.loadRecentSessions(Number(message.days))),
+			loadRecentSessions: (message) => this.dispatch(`loadRecentSessions:${message.period}`, () => this.loadRecentSessions(message.period as ChartTimeWindow)),
 			openSessionFile: (message) => this._handleOpenSessionFile(message),
+			usageWebviewReady: async (message) => {
+				this.analysisWebviewReady = true;
+				const reason = typeof message.reason === 'string' ? message.reason : 'unknown';
+				const hasContainers = Boolean(message.hasGitHubActivityContainers);
+				const replayed = await this.analysisMessageReplay.markReady();
+				this.log(`📨 Usage Analysis webview ready (${reason}, containers=${hasContainers}); replayed: ${replayed.length ? replayed.join(', ') : 'nothing buffered'}`);
+				await this.flushPendingAnalysisNavigation();
+			},
+			usageWebviewTrace: (message) => {
+				this.log(`📨 Usage Analysis webview trace: ${message.stage} ${JSON.stringify(message.details ?? {})}`);
+			},
 			insightAction: (message) => this.dispatch(`insightAction:${message.id ?? ''}`, () => this.handleInsightAction(message)),
 			traceUsageCuration: (message) => this._logTraceCuration(message),
 			saveSessionColumnSettings: (message) => this.dispatch('saveSessionColumnSettings', () =>
@@ -6349,9 +7310,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		};
 	}
 
+	/** Describes the analysis panel's identity/visibility so delivery logs can be told apart from "posted into the void". */
+	private _describeAnalysisPanel(): string {
+		const panel = this.analysisPanel;
+		if (!panel) { return 'panel=none'; }
+		return `panel=#${this._analysisPanelSeq} visible=${panel.visible} active=${panel.active} htmlLen=${panel.webview.html.length}`;
+	}
+
 	private async handleAnalysisMessage(message: any): Promise<void> {
 		const handler = this._getAnalysisMessageHandlers()[message.command];
-		if (handler) { await handler(message); }
+		if (!handler) {
+			// Silently dropping unknown commands hides real wiring bugs (a webview posting a
+			// command nobody registered looks exactly like a webview posting nothing at all).
+			this.log(`📨 Usage Analysis: no handler for webview command '${String(message?.command ?? '(none)')}'`);
+			return;
+		}
+		await handler(message);
 	}
 
 	private async handleInsightAction(message: any): Promise<void> {
@@ -6403,9 +7377,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			currentWorkspacePaths: workspacePaths,
 			todaySessions: analysisStats.todaySessions || [],
 			insights: this.buildCurrentInsights(analysisStats),
+			correctionReport: analysisStats.correctionReport ?? null,
+			repeatedTasks: analysisStats.repeatedTasks ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
 			copilotApiBalance: this._buildCopilotApiBalance(),
 			monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
+			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
 		};
 	}
 
@@ -6524,6 +7501,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private async runRepoHygieneAnalysis(workspacePath?: string): Promise<any> {
+		this.ensureWorkspaceTrustedForGitAccess();
 		const workspaceRoot = this.resolveWorkspaceRoot(workspacePath);
 		const { branchName, repoName } = this.getGitRepoInfo(workspaceRoot);
 		const fileTree = await this.getWorkspaceFileTree(workspaceRoot);
@@ -6614,14 +7592,45 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const model = models[0];
 		this.log(`🤖 Using Copilot model: ${model.id} for repository analysis`);
 		const cts = new vscode.CancellationTokenSource();
+		// Hard cap so a hung model request can't leave the webview stuck on "Analyzing…" forever.
+		const timeoutMs = 120_000;
+		const timer = setTimeout(() => cts.cancel(), timeoutMs);
 		try {
 			const response = await model.sendRequest([vscode.LanguageModelChatMessage.User(prompt)], {}, cts.token);
 			let fullResponse = '';
 			for await (const chunk of response.text) { fullResponse += chunk; }
+			// Clear the timer before the cancellation check so a request that finished
+			// streaming just as the timer fired isn't reported as a timeout.
+			clearTimeout(timer);
+			if (cts.token.isCancellationRequested) {
+				throw new Error(`Copilot model request timed out after ${timeoutMs / 1000}s`);
+			}
 			this.log(`📋 Copilot analysis response length: ${fullResponse.length} characters`);
 			return fullResponse;
+		} catch (error) {
+			if (cts.token.isCancellationRequested) {
+				throw new Error(`Copilot model request timed out after ${timeoutMs / 1000}s. Please try again.`);
+			}
+			throw error;
 		} finally {
+			clearTimeout(timer);
 			cts.dispose();
+		}
+	}
+
+	/**
+	 * Repository hygiene analysis runs `git` (via child_process.execSync) and scans files
+	 * inside the workspace folder, so it must not run in untrusted or virtual workspaces
+	 * (see package.json `capabilities.untrustedWorkspaces`/`virtualWorkspaces`, both "limited").
+	 * This check runs fresh on every invocation (no cached result), so it automatically
+	 * reflects the current trust state — including right after the user grants trust.
+	 */
+	private ensureWorkspaceTrustedForGitAccess(): void {
+		if (!vscode.workspace.isTrusted) {
+			throw new Error('Repository hygiene analysis requires a trusted workspace because it runs git commands and reads workspace files. Grant workspace trust to enable it.');
+		}
+		if (vscode.workspace.workspaceFolders?.some(folder => folder.uri.scheme !== 'file')) {
+			throw new Error('Repository hygiene analysis is not available for virtual workspaces because it requires local git and filesystem access.');
 		}
 	}
 
@@ -6937,7 +7946,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const nonce = getNonce();
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'logviewer.js'));
 
-		const initialData = JSON.stringify({ ...logData, compactNumbers: this.getCompactNumbersSetting() }).replace(/</g, '\\u003c');
+		const initialData = JSON.stringify({ ...logData, compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }).replace(/</g, '\\u003c');
 
 		return `<!DOCTYPE html>
 		<html lang="en">
@@ -7012,8 +8021,31 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		categories: { category: string; icon: string; stage: number; evidence: string[]; tips: string[] }[];
 		period: UsageAnalysisPeriod;
 		lastUpdated: string;
+		agenticTrend?: AgenticTrendPoint[];
 	}> {
 		return _calculateMaturityScores(this._lastCustomizationMatrix, (useCache) => this.calculateUsageAnalysisStats(useCache, preloaded), useCache, this._copilotPlanResolved?.isMCPEnabled);
+	}
+
+	/**
+	 * Run the Dark Factory readiness scan over the repositories in this workspace.
+	 *
+	 * Filesystem-only plus the pull-request statistics the Usage Analysis view has
+	 * already fetched, so opening the Fluency Score view issues no extra GitHub
+	 * calls. A failure here must never take the whole view down — the section is
+	 * simply omitted and the reason logged.
+	 */
+	private runDarkFactoryScan(): DarkFactoryReport | undefined {
+		try {
+			const openFolders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+			return scanDarkFactoryReadiness({
+				workspacePaths: [...openFolders, ...this._buildWorkspacePaths()],
+				prStats: this._lastRepoPrStats,
+				enterpriseUri: getConfiguredGitHubEnterpriseUri(),
+			});
+		} catch (err) {
+			this.warn(`Dark Factory readiness scan failed: ${err}`);
+			return undefined;
+		}
 	}
 
 	public async showMaturity(): Promise<void> {
@@ -7023,14 +8055,14 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const maturityData = await this.calculateMaturityScores(true);
 		const isDebugMode = this.context.extensionMode === vscode.ExtensionMode.Development;
 		this.maturityPanel = vscode.window.createWebviewPanel(
-			'copilotMaturity', 'AI Engineering Fluency Score',
+			'copilotMaturity', l10n.t('pptxTitle'),
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: true },
 			{ enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
 		);
 		const dismissedTips = await this.getDismissedFluencyTips();
 		const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
 		this.maturityPanel.webview.onDidReceiveMessage(async (message) => { await this.handleMaturityMessage(message); });
-		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks() });
+		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks(), darkFactory: this.runDarkFactoryScan() });
 		this.maturityPanel.onDidDispose(() => { this.log('🎯 Copilot Fluency Score dashboard closed'); this.maturityPanel = undefined; });
 	}
 
@@ -7042,10 +8074,8 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			searchMcpExtensions: () => this.dispatch('searchMcpExtensions', () => vscode.commands.executeCommand('workbench.extensions.search', '@tag:mcp')),
 			shareToIssue: () => this.dispatch('shareToIssue', () => this.maturityHandleShareToIssue()),
 			resetDismissedTips: () => this.dispatch('resetDismissedTips', async () => { await this.resetDismissedFluencyTips(); await this.refreshMaturityPanel(); }),
-			shareToLinkedIn: () => this.dispatch('shareToLinkedIn', () => this.shareToSocialMedia('linkedin')),
-			shareToBluesky: () => this.dispatch('shareToBluesky', () => this.shareToSocialMedia('bluesky')),
-			shareToMastodon: () => this.dispatch('shareToMastodon', () => this.shareToSocialMedia('mastodon')),
 			downloadChartImage: () => this.dispatch('downloadChartImage', () => this.downloadChartImage()),
+			shareToSocialFailed: async () => { vscode.window.showErrorMessage('Failed to generate share card image.'); },
 		};
 		if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
 		await this.handleMaturityConditionalMessage(message);
@@ -7054,11 +8084,18 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	private async handleMaturityConditionalMessage(message: any): Promise<void> {
 		switch (message.command) {
 			case 'dismissTips': if (message.category) { await this.dispatch('dismissTips', async () => { await this.dismissFluencyTips(message.category); await this.refreshMaturityPanel(); }); } break;
+			case 'installHook': if (message.hookId) { await this.maturityHandleInstallHook(message.hookId); } break;
+			case 'uninstallHook': if (message.hookId) { await this.maturityHandleUninstallHook(message.hookId); } break;
+			default: await this.handleMaturityExportCommand(message); break;
+		}
+	}
+
+	private async handleMaturityExportCommand(message: any): Promise<void> {
+		switch (message.command) {
 			case 'saveChartImage': if (message.data) { await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data)); } break;
 			case 'exportPdf': if (message.data) { await this.dispatch('exportPdf', () => this.exportFluencyScorePdf(message.data)); } break;
 			case 'exportPptx': if (message.data) { await this.dispatch('exportPptx', () => this.exportFluencyScorePptx(message.data)); } break;
-			case 'installHook': if (message.hookId) { await this.maturityHandleInstallHook(message.hookId); } break;
-			case 'uninstallHook': if (message.hookId) { await this.maturityHandleUninstallHook(message.hookId); } break;
+			case 'shareToSocial': if (message.dataUrl && isSharePlatform(message.platform)) { await this.dispatch('shareToSocial', () => this.maturityHandleShareToSocial(message.platform, message.dataUrl)); } break;
 		}
 	}
 
@@ -7095,7 +8132,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			const evidenceList = c.evidence.length > 0 ? c.evidence.map(e => `- ✅ ${e}`).join('\n') : '- No significant activity detected';
 			return `<h2>${c.icon} ${c.category} — Stage ${c.stage}</h2>\n\n${evidenceList}`;
 		}).join('\n\n');
-		const body = `<h2>AI Engineering Fluency Score Feedback</h2>\n\n**Overall Stage:** ${scores.overallLabel}\n\n${categorySections}\n\n<h2>Feedback</h2>\n<!-- Describe your feedback or suggestion here -->\n`;
+		const body = `<h2>${l10n.t('fluencyScoreFeedbackTitle')}</h2>\n\n**Overall Stage:** ${scores.overallLabel}\n\n${categorySections}\n\n<h2>Feedback</h2>\n<!-- Describe your feedback or suggestion here -->\n`;
 		const issueUrl = `https://github.com/rajbos/ai-engineering-fluency/issues/new?title=${encodeURIComponent('Fluency Score Feedback')}&body=${encodeURIComponent(body)}&labels=${encodeURIComponent('fluency-score')}`;
 		await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
 	}
@@ -7110,7 +8147,7 @@ private async refreshMaturityPanel(): Promise<void> {
 	const dismissedTips = await this.getDismissedFluencyTips();
 	const isDebugMode = this.context.extensionMode === vscode.ExtensionMode.Development;
 	const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
-	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks() });
+	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks(), darkFactory: this.runDarkFactoryScan() });
 	this.log('✅ Copilot Fluency Score dashboard refreshed');
 }
 
@@ -7133,28 +8170,11 @@ private async resetDismissedFluencyTips(): Promise<void> {
 }
 
 /**
- * Share Copilot Fluency Score to social media platforms
+ * Copies `shareText` to the clipboard and opens the given social platform's compose/share page
+ * in the browser, so the user can paste it in. Used by the diagnostics Share Card view.
  */
-private async shareToSocialMedia(platform: 'linkedin' | 'bluesky' | 'mastodon'): Promise<void> {
-	const scores = await this.calculateMaturityScores();
-	const marketplaceUrl = 'https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency';
-	const hashtag = '#CopilotFluencyScore';
-	
-	// Build share text with stats
-	const categoryScores = scores.categories.map(c => `${c.icon} ${c.category}: Stage ${c.stage}`).join('\n');
-	
-	const shareText = `🎯 My AI Engineering Fluency Score
-
-Overall: ${scores.overallLabel}
-
-${categoryScores}
-
-Track your Copilot usage and level up your AI-assisted development skills!
-
-Get the extension: ${marketplaceUrl}
-
-${hashtag}`;
-
+private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' | 'bluesky' | 'mastodon'): Promise<void> {
+    const marketplaceUrl = 'https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency';
     switch (platform) {
       case "linkedin": {
         // LinkedIn share URL - opens in browser for user to add their own commentary
@@ -7211,8 +8231,60 @@ ${hashtag}`;
         break;
       }
     }
+  }
 
-    this.log(`Shared fluency score to ${platform}`);
+  /**
+   * Saves the generated share-card image to a temp file, copies the caption to the clipboard,
+   * and opens the chosen social platform so the user can paste and attach the image.
+   */
+  private async maturityHandleShareToSocial(platform: 'linkedin' | 'bluesky' | 'mastodon', dataUrl: string): Promise<void> {
+    const base64Match = dataUrl.match(/^data:image\/png;base64,(.+)$/);
+    if (!base64Match) {
+      void vscode.window.showErrorMessage('Failed to process share card image.');
+      return;
+    }
+
+    let platformUrl: string;
+    const marketplaceUrl = 'https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency';
+    switch (platform) {
+      case 'linkedin':
+        platformUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(marketplaceUrl)}`;
+        break;
+      case 'bluesky':
+        platformUrl = 'https://bsky.app/intent/compose';
+        break;
+      case 'mastodon': {
+        const instance = await vscode.window.showInputBox({
+          prompt: 'Enter your Mastodon instance (e.g., mastodon.social)',
+          placeHolder: 'mastodon.social',
+          value: 'mastodon.social',
+        });
+        if (!instance) { return; }
+        platformUrl = `https://${instance}/share`;
+        break;
+      }
+      default:
+        platformUrl = marketplaceUrl;
+    }
+
+    const fileName = `ai-engineering-fluency-share-${Date.now()}.png`;
+    const filePath = path.join(os.tmpdir(), fileName);
+    const uri = vscode.Uri.file(filePath);
+    const buffer = Buffer.from(base64Match[1], 'base64');
+    await vscode.workspace.fs.writeFile(uri, buffer);
+
+    const shareText = l10n.t('shareText');
+    await vscode.env.clipboard.writeText(shareText);
+    await vscode.env.openExternal(vscode.Uri.parse(platformUrl));
+
+    const selection = await vscode.window.showInformationMessage(
+      'Share card image saved and caption copied to clipboard.',
+      'Open Image',
+    );
+    if (selection === 'Open Image') {
+      void vscode.env.openExternal(uri);
+    }
+    this.log(`Shared fluency score card to ${platform}`);
   }
 
   /**
@@ -7287,7 +8359,7 @@ ${hashtag}`;
 
   private pdfAddPage(pdf: any, imgData: string, pageIndex: number, totalPages: number, pageWidth: number, pageHeight: number, margin: number): void {
     pdf.setFontSize(8); pdf.setTextColor(128, 128, 128);
-    pdf.text(`AI Engineering Fluency Score Report - Page ${pageIndex + 1} of ${totalPages}`, margin, 7);
+    pdf.text(l10n.t('pdfReportTitle', (pageIndex + 1).toString(), totalPages.toString()), margin, 7);
     pdf.text(new Date().toLocaleDateString(), pageWidth - margin, 7, { align: "right" });
     const availW = pageWidth - 2 * margin;
     const availH = pageHeight - 2 * margin - 5;
@@ -7297,7 +8369,7 @@ ${hashtag}`;
     const x = margin + (availW - drawW) / 2; const y = margin + 5 + (availH - drawH) / 2;
     pdf.addImage(imgData, "PNG", x, y, drawW, drawH);
     pdf.setFontSize(8); pdf.setTextColor(128, 128, 128);
-    pdf.text("Generated by AI Engineering Fluency Extension", pageWidth / 2, pageHeight - 5, { align: "center" });
+    pdf.text(l10n.t('pdfGeneratedBy'), pageWidth / 2, pageHeight - 5, { align: "center" });
   }
 
   private async exportFluencyScorePptx(images: { label: string; dataUrl: string }[]): Promise<void> {
@@ -7307,8 +8379,8 @@ ${hashtag}`;
       const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file("copilot-fluency-score.pptx"), filters: { "PowerPoint Presentation": ["pptx"] }, title: "Export Fluency Score as PowerPoint" });
       if (!uri) { return; }
       const pptx = new PptxGenJS();
-      pptx.layout = "LAYOUT_WIDE"; pptx.author = "AI Engineering Fluency";
-      pptx.subject = "AI Engineering Fluency Score Report"; pptx.title = "AI Engineering Fluency Score";
+      pptx.layout = "LAYOUT_WIDE"; pptx.author = l10n.t('pptxAuthor');
+      pptx.subject = l10n.t('pptxSubject'); pptx.title = l10n.t('pptxTitle');
       const slideW = 13.33; const slideH = 7.5;
       const maxW = slideW - 0.8; const maxH = slideH - 1.0;
       for (const img of images) { this.pptxAddImageSlide(pptx, img.dataUrl, slideW, slideH, maxW, maxH); }
@@ -7344,7 +8416,7 @@ ${hashtag}`;
     const { w: imgW, h: imgH } = this.pptxGetImageSize(dataUrl, maxW, maxH);
     const x = (slideW - imgW) / 2; const y = (slideH - 1.0 - imgH) / 2 + 0.1;
     slide.addImage({ data: dataUrl, x, y, w: imgW, h: imgH });
-    slide.addText("Generated by AI Engineering Fluency Extension", { x: 0, y: 7.0, w: 13.33, h: 0.4, fontSize: 8, color: "808080", align: "center" });
+    slide.addText(l10n.t('pptxGeneratedBy'), { x: 0, y: 7.0, w: 13.33, h: 0.4, fontSize: 8, color: "808080", align: "center" });
   }
 
   public async showFluencyLevelViewer(): Promise<void> {
@@ -7445,6 +8517,7 @@ ${hashtag}`;
     const dataWithBackend = {
       ...data,
       backendConfigured: this.isBackendConfigured(),
+      localization: this.getWebviewLocalization(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -7485,9 +8558,12 @@ ${hashtag}`;
       }[];
       period: UsageAnalysisPeriod;
       lastUpdated: string;
+      agenticTrend?: AgenticTrendPoint[];
       dismissedTips?: string[];
       isDebugMode?: boolean;
       installedHooks?: string[];
+      /** Per-repository Dark Factory readiness scan; omitted when the scan could not run. */
+      darkFactory?: DarkFactoryReport;
       fluencyLevels?: Array<{
         category: string;
         icon: string;
@@ -7509,6 +8585,7 @@ ${hashtag}`;
     const dataWithBackend = {
       ...data,
       backendConfigured: this.isBackendConfigured(),
+      localization: this.getWebviewLocalization(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -7522,7 +8599,7 @@ ${hashtag}`;
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
 			${getCodiconStylesheetTag(webview, this.extensionUri)}
-			<title>AI Engineering Fluency Score</title>
+			<title>${l10n.t('pptxTitle')}</title>
 		</head>
 		<body>
 			<div id="root"></div>
@@ -7534,6 +8611,246 @@ ${hashtag}`;
 		</body>
 		</html>`;
   }
+
+	// ── Efficiency view ───────────────────────────────────────────────
+
+	/**
+	 * Opens the Efficiency panel: weekly ratio trends, month-over-month deltas,
+	 * cost-change attribution (volume vs. efficiency vs. model mix), and value signals.
+	 */
+	public async showEfficiency(): Promise<void> {
+		this.log('⚡ Opening Efficiency view');
+
+		// Already open — just reveal it. Recomputing here would make re-focusing the
+		// tab as slow as a cold open; the Refresh button is the way to get new data.
+		if (this.efficiencyPanel) {
+			this.efficiencyPanel.reveal();
+			this.log('⚡ Efficiency view revealed (already exists)');
+			return;
+		}
+
+		// Create the panel before computing anything so the tab appears immediately,
+		// then swap the loading screen for the rendered view once the data is ready.
+		this.efficiencyPanel = vscode.window.createWebviewPanel(
+			'copilotEfficiency', 'AI Efficiency Trends',
+			{ viewColumn: vscode.ViewColumn.One, preserveFocus: true },
+			// `media` is needed for the shared loading screen's icon; `dist/webview` for the view bundle.
+			{
+				enableScripts: true,
+				retainContextWhenHidden: true,
+				localResourceRoots: [
+					vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview'),
+					vscode.Uri.joinPath(this.extensionUri, 'media'),
+				],
+			}
+		);
+		this.efficiencyPanel.webview.onDidReceiveMessage(async (message) => {
+			if (this.handleLocalViewRegressionMessage(message)) { return; }
+			if (await this.dispatchSharedCommand(message)) { return; }
+			if (message.command === 'refresh') { await this.dispatch('refresh:efficiency', () => this.refreshEfficiencyPanel()); }
+		});
+		this.efficiencyPanel.onDidDispose(() => { this.log('⚡ Efficiency view closed'); this.efficiencyPanel = undefined; });
+
+		const panel = this.efficiencyPanel;
+		panel.webview.html = this.getLoadingHtml(panel.webview);
+		void panel.webview.postMessage({ command: 'loadingStep', step: 'computing' });
+
+		// Build the data in the background rather than awaiting it here: showEfficiency() is
+		// wrapped in dispatch()'s in-flight guard, which only releases the 'showEfficiency' key
+		// once this function returns. Awaiting the (potentially long) data build would keep that
+		// key locked — if the user closes the panel and reopens it before the build finishes, the
+		// reopen would be silently dropped as "already in flight" (same fix as showChart above).
+		void (async () => {
+			const data = await this.buildEfficiencyViewData();
+			// The user may have closed the panel while the data was being computed.
+			if (this.efficiencyPanel !== panel) { return; }
+			panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
+			this.log('⚡ Efficiency view rendered');
+		})();
+	}
+
+	private async refreshEfficiencyPanel(): Promise<void> {
+		if (!this.efficiencyPanel) { return; }
+		this.log('🔄 Refreshing Efficiency view');
+		const data = await this.buildEfficiencyViewData(true);
+		this.efficiencyPanel.webview.html = this.getEfficiencyHtml(this.efficiencyPanel.webview, data);
+	}
+
+	/** Maps one cached session to the pure-module input shape for efficiency trends. */
+	private toEfficiencySessionInput(sessionData: SessionFileCache, mtime: number): EfficiencySessionInput {
+		const dayKey = this.computeLastActivityKey(sessionData, mtime);
+		const ua = sessionData.usageAnalysis;
+		let editTurns = 0, retries = 0;
+		for (const c of Object.values(ua?.modelEfficiency ?? {})) { editTurns += c.editTurns; retries += c.retries; }
+		const skillCalls = ua?.skillCalls?.byName && Object.keys(ua.skillCalls.byName).length > 0
+			? ua.skillCalls.byName
+			: undefined;
+		return {
+			dayKey,
+			activeDurationMs: ua?.sessionDuration?.activeDurationMs,
+			editTurns,
+			retries,
+			applies: ua?.applyUsage?.totalApplies,
+			codeBlocks: ua?.applyUsage?.totalCodeBlocks,
+			interactions: sessionData.interactions,
+			totalTokens: sessionData.actualTokens ?? sessionData.tokens,
+			skillCalls,
+		};
+	}
+
+	/**
+	 * Collect per-session inputs (duration, retries, apply usage, skill calls) for the
+	 * trailing trend weeks.
+	 *
+	 * This walks every session file in the window, which is the most expensive part of
+	 * building the Efficiency view, so the result is memoized alongside the other
+	 * `last*` stat caches and invalidated by the same paths.
+	 */
+	private async collectEfficiencySessionInputs(weeksBack = 12, useCache = true): Promise<EfficiencySessionInput[]> {
+		if (useCache && this.lastEfficiencySessionInputs) {
+			this.log('⚡ [Efficiency] Using cached session inputs');
+			return this.lastEfficiencySessionInputs;
+		}
+		const now = new Date();
+		const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - weeksBack * 7);
+		const inputs: EfficiencySessionInput[] = [];
+		try {
+			const { results } = await this.loadUsageSessionFiles(undefined, cutoff.getTime());
+			for (const r of results) {
+				if (!r || r.sessionData.interactions === 0) { continue; }
+				inputs.push(this.toEfficiencySessionInput(r.sessionData, r.mtime));
+			}
+			this.lastEfficiencySessionInputs = inputs;
+		} catch (error) {
+			this.error('Error collecting efficiency session inputs:', error);
+		}
+		return inputs;
+	}
+
+	/** Sums token/session/cost totals for the daily entries within one calendar month (YYYY-MM). */
+	private monthVolumeTotals(dailyStats: DailyTokenStats[], monthKey: string): PeriodVolumeTotals {
+		let tokens = 0, sessions = 0, estimatedCost = 0;
+		for (const day of dailyStats) {
+			if (day.date.slice(0, 7) !== monthKey) { continue; }
+			tokens += day.tokens;
+			sessions += day.sessions;
+			estimatedCost += this.calculateEstimatedCost(day.modelUsage, 'copilot');
+		}
+		return { tokens, sessions, estimatedCost };
+	}
+
+	/**
+	 * Trims the daily stats down to the per-model slice the Models tab needs, over
+	 * the last year so month-vs-month comparisons have history to draw on. Days
+	 * without per-model data are dropped to keep the webview payload small.
+	 */
+	private buildModelDailyPayload(dailyStats: DailyTokenStats[], now: Date): ModelDailyInput[] {
+		const cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+		const cutoffKey = toLocalDayKey(cutoff);
+		const payload: ModelDailyInput[] = [];
+		for (const day of dailyStats) {
+			if (day.date < cutoffKey || !day.modelEfficiency || Object.keys(day.modelEfficiency).length === 0) { continue; }
+			payload.push({
+				date: day.date,
+				modelEfficiency: day.modelEfficiency,
+				...(day.taskCategoryUsage ? { taskCategoryUsage: day.taskCategoryUsage } : {}),
+			});
+		}
+		return payload;
+	}
+
+	private async buildEfficiencyViewData(forceRecalc = false): Promise<EfficiencyViewData> {
+		const now = new Date();
+		const dailyStats = (!forceRecalc && this.lastFullDailyStats) ? this.lastFullDailyStats : await this.calculateDailyStats();
+		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
+		const sessionInputs = await this.collectEfficiencySessionInputs(12, !forceRecalc);
+		const deps = {
+			calculateEstimatedCost: (mu: ModelUsage, src: 'provider' | 'copilot') => this.calculateEstimatedCost(mu, src),
+			now,
+		};
+		const weekly = _buildEfficiencyTrends(dailyStats, sessionInputs, deps);
+		const modelDaily = this.buildModelDailyPayload(dailyStats, now);
+		const skillTrends = _buildSkillUsageTrends(sessionInputs, deps);
+		const skillImpact = _computeSkillImpact(sessionInputs);
+		const { prevDays, curDays } = _splitTrailingWindows(dailyStats, now);
+		const attribution = _computeCostAttribution(prevDays, curDays, deps);
+		const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+		const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+		const lastMonthKey = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
+		const deltas = _computeEfficiencyDeltas(
+			usage.month, usage.lastMonth,
+			this.monthVolumeTotals(dailyStats, monthKey),
+			this.monthVolumeTotals(dailyStats, lastMonthKey),
+		);
+		const curCost = curDays.reduce((s, d) => s + this.calculateEstimatedCost(d.modelUsage, 'copilot'), 0);
+		const curLoc = curDays.reduce((s, d) => s + (d.linesAdded ?? 0) + (d.linesRemoved ?? 0), 0);
+		const prStats = this._lastRepoPrStats?.authenticated ? this._lastRepoPrStats : undefined;
+		const sumRepos = (pick: (r: RepoPrInfo) => number | undefined): number | null =>
+			prStats ? prStats.repos.reduce((s, r) => s + (pick(r) ?? 0), 0) : null;
+		const value = _computeValueSignals({
+			userPrs: sumRepos(r => r.userAuthoredPrs),
+			mergedPrs: sumRepos(r => r.userMergedPrs),
+			aiPrs: sumRepos(r => r.aiAuthoredPrs),
+			prsSince: prStats?.since ?? null,
+			periodCost: curCost,
+			applyUsage: usage.last30Days.applyUsage,
+			linesChanged: curLoc,
+			now,
+		});
+		return {
+			weekly,
+			hasLoc: weekly.some(w => w.loc > 0),
+			hasDuration: weekly.some(w => w.activeMinutesPerSession !== null),
+			hasRetry: weekly.some(w => w.retryRate !== null),
+			hasApply: weekly.some(w => w.applyRate !== null),
+			attribution,
+			attributionWindows: { prev: 'previous 30 days', cur: 'last 30 days' },
+			deltas,
+			deltaWindows: {
+				prev: lastMonthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+				cur: `${now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} (to date)`,
+			},
+			value,
+			skillTrends,
+			skillImpact,
+			hasSkills: skillTrends.totalCalls > 0,
+			modelDaily,
+			hasModelComparison: _listComparableModels(modelDaily).filter(m => m.sampleSufficient).length >= 2,
+			lastUpdated: now.toISOString(),
+			backendConfigured: this.isBackendConfigured(),
+			compactNumbers: this.getCompactNumbersSetting(),
+			isDebugMode: this.context.extensionMode === vscode.ExtensionMode.Development,
+		};
+	}
+
+	private getEfficiencyHtml(webview: vscode.Webview, data: EfficiencyViewData): string {
+		const nonce = getNonce();
+		const scriptUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'efficiency.js'),
+		);
+		const dataWithLocalization = {
+			...data,
+			localization: this.getWebviewLocalization(),
+		};
+		const initialData = JSON.stringify(dataWithLocalization).replace(/</g, '\\u003c');
+		return `<!DOCTYPE html>
+		<html lang="en">
+		<head>
+			<meta charset="UTF-8" />
+			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+			${buildCspMeta(webview, nonce)}
+			${getCodiconStylesheetTag(webview, this.extensionUri)}
+			<title>AI Efficiency Trends</title>
+		</head>
+		<body>
+			<div id="root"></div>
+			<script nonce="${nonce}">window.__INITIAL_EFFICIENCY__ = ${initialData};</script>
+			${this.getJsonConfigScript(nonce)}
+			${this.extensionPointButtonsScript(nonce)}
+			<script nonce="${nonce}" src="${scriptUri}"></script>
+		</body>
+		</html>`;
+	}
 
   /**
    * Opens the Team Dashboard panel showing personal and team usage comparison.
@@ -7825,7 +9142,7 @@ ${hashtag}`;
     personalData.totalInteractions += ids.interactions;
     personalData.devices.add(ids.machineId);
     personalData.workspaces.add(ids.workspaceId);
-    addModelUsage(personalData.modelUsage, { [ids.model]: { inputTokens: ids.inputTokens, outputTokens: ids.outputTokens } });
+    addModelUsage(personalData.modelUsage, { [ids.model]: { inputTokens: ids.inputTokens, outputTokens: ids.outputTokens, sessions: 0 } });
   }
 
   private updateTeamData(entity: any, ids: any, teamMemberKey: string, userMap: Map<string, any>, userFluencyMap: Map<string, any>): void {
@@ -8024,7 +9341,7 @@ ${hashtag}`;
     const backendConfig = this.getDashboardBackendConfig();
 
     const dataWithBackend = data
-      ? { ...data, backendConfigured: this.isBackendConfigured(), compactNumbers: this.getCompactNumbersSetting() }
+      ? { ...data, backendConfigured: this.isBackendConfigured(), compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }
       : undefined;
     const initialDataScript = dataWithBackend
       ? `<script nonce="${nonce}">window.__INITIAL_DASHBOARD__ = ${JSON.stringify(dataWithBackend).replace(/</g, "\\u003c")};</script>`
@@ -8086,7 +9403,7 @@ ${hashtag}`;
     return '';
   }
 
-  private getLoadingHtml(webview: vscode.Webview): string {
+  private getLoadingHtml(webview: vscode.Webview, startedAtMs: number = Date.now()): string {
     const nonce = getNonce();
     const iconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'robot-icon.png'));
     return `<!DOCTYPE html>
@@ -8095,13 +9412,13 @@ ${hashtag}`;
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 ${buildCspMeta(webview, nonce)}
-<title>AI Engineering Fluency — Loading</title>
+<title>${l10n.t('htmlTitleLoading')}</title>
 <style>
 ${this.getLoadingHtmlCssBase()}
 ${this.getLoadingHtmlCssSteps()}
 </style>
 </head>
-${this.getLoadingHtmlBody(nonce, iconUri.toString())}
+${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
 </html>`;
   }
 
@@ -8113,8 +9430,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     return loadingHtml.getLoadingHtmlCssSteps();
   }
 
-  private getLoadingHtmlBody(nonce: string, iconUri?: string): string {
-    return loadingHtml.getLoadingHtmlBody(nonce, iconUri);
+  private getLoadingHtmlBody(nonce: string, iconUri?: string, startedAtMs: number = Date.now()): string {
+    return loadingHtml.getLoadingHtmlBody(nonce, iconUri, startedAtMs);
   }
 
   private getDetailsHtml(
@@ -8129,6 +9446,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     const sortSettings = this.context.globalState.get('details.sortSettings', {
       editor: { key: 'name', dir: 'asc' },
       model: { key: 'name', dir: 'asc' },
+      excludedProviders: [],
     });
     const dataWithBackend = {
       ...stats,
@@ -8136,6 +9454,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       sortSettings,
       compactNumbers: this.getCompactNumbersSetting(),
       copilotPlan: this._copilotPlanResolved,
+      localization: this.getWebviewLocalization(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -8149,7 +9468,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
 			${getCodiconStylesheetTag(webview, this.extensionUri)}
-			<title>AI Engineering Fluency</title>
+			<title>${l10n.t('htmlTitle')}</title>
 		</head>
 		<body>
 			<div id="root"></div>
@@ -8179,7 +9498,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
   }
 
   private buildDiagReportHeader(report: string[]): void {
-    report.push("=".repeat(70)); report.push("AI Engineering Fluency - Diagnostic Report"); report.push("=".repeat(70)); report.push("");
+    report.push("=".repeat(70)); report.push(l10n.t('diagnosticReportTitle')); report.push("=".repeat(70)); report.push("");
   }
 
   private buildDiagReportExtensionInfo(report: string[]): void {
@@ -8299,7 +9618,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       if (sessionFiles.length > 0) { await this.appendSessionFileListing(report, sessionFiles); }
       else { this.appendNoSessionFilesMessage(report); }
       report.push("");
-    } catch (error) { report.push(`Error calculating token usage statistics: ${error}`); report.push(""); }
+    } catch (error) { report.push(l10n.t('error.calculatingTokenUsageStatistics') + `: ${error}`); report.push(""); }
   }
 
   private buildDiagReportFooter(report: string[]): void {
@@ -8378,12 +9697,29 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         if (typeof message.key === 'string' && typeof message.value === 'number') { await this.dispatch('setDebugCounter:diagnostics', () => this.diagHandleSetDebugCounter(message.key, message.value)); } break;
       case "setDebugFlag":
         if (typeof message.key === 'string' && typeof message.value === 'boolean') { await this.dispatch('setDebugFlag:diagnostics', () => this.diagHandleSetDebugFlag(message.key, message.value)); } break;
+      case "copyText":
+        if (typeof message.text === 'string') { await this.dispatch('copyText:diagnostics', () => this.diagHandleCopyText(message.text)); } break;
+      case "shareCardToSocial":
+        if (typeof message.text === 'string' && isSharePlatform(message.platform)) {
+          await this.dispatch('shareCardToSocial:diagnostics', () => this.diagHandleShareCardToSocial(message.text, message.platform));
+        }
+        break;
     }
   }
 
   private async diagHandleCopyReport(): Promise<void> {
     await vscode.env.clipboard.writeText(this.lastDiagnosticReport);
     vscode.window.showInformationMessage("Diagnostic report copied to clipboard");
+  }
+
+  private async diagHandleCopyText(text: string): Promise<void> {
+    await vscode.env.clipboard.writeText(text);
+    vscode.window.showInformationMessage("Summary copied to clipboard");
+  }
+
+  private async diagHandleShareCardToSocial(text: string, platform: 'linkedin' | 'bluesky' | 'mastodon'): Promise<void> {
+    await this.shareTextToSocialPlatform(text, platform);
+    this.log(`Shared Share Card to ${platform}`);
   }
 
   private async diagHandleOpenIssue(): Promise<void> {
@@ -8445,8 +9781,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       await vscode.commands.executeCommand("aiEngineeringFluency.configureBackend");
     } catch {
       void (async () => {
-        const choice = await vscode.window.showInformationMessage('Backend configuration is available in settings. Search for "AI Engineering Fluency: Backend" in settings.', "Open Settings");
-        if (choice === "Open Settings") { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend"); }
+        const openSettings = l10n.t('button.openSettings');
+        const choice = await vscode.window.showInformationMessage(l10n.t('backendConfigMessage'), openSettings);
+        if (choice === openSettings) { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend"); }
       })();
     }
   }
@@ -8456,8 +9793,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       await vscode.commands.executeCommand("aiEngineeringFluency.configureTeamServer");
     } catch {
       void (async () => {
-        const choice = await vscode.window.showInformationMessage('Team Server configuration is available in settings. Search for "AI Engineering Fluency: Backend" in settings.', "Open Settings");
-        if (choice === "Open Settings") { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend.sharingServer"); }
+        const openSettings = l10n.t('button.openSettings');
+        const choice = await vscode.window.showInformationMessage(l10n.t('teamServerConfigMessage'), openSettings);
+        if (choice === openSettings) { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend.sharingServer"); }
       })();
     }
   }
@@ -8483,6 +9821,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     await this.context.globalState.update('extension.unknownMcpOpenCount', 0);
     await this.context.globalState.update('news.fluencyScoreBanner.v1.dismissed', false);
     await this.context.globalState.update('news.unknownMcpTools.dismissedVersion', undefined);
+    await this.context.globalState.update('news.efficiencyTab.v1.dismissed', false);
     vscode.window.showInformationMessage('Debug counters and dismissed flags have been reset.');
     await this.showDiagnosticReport();
   }
@@ -8541,8 +9880,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
   }
 
   /** Merge one file's per-model usage entries into the running aggregate. */
-  private static mergeModelUsageEntry(aggregated: ModelUsage, model: string, usage: ModelUsage[string]): void {
-    if (!aggregated[model]) { aggregated[model] = { inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0 }; }
+  private static mergeModelUsageEntry(aggregated: ModelUsage, model: string, usage: ModelUsage[ModelId]): void {
+    if (!aggregated[model]) { aggregated[model] = { inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0, sessions: 0 }; }
     const agg = aggregated[model];
     agg.inputTokens += usage.inputTokens || 0;
     agg.outputTokens += usage.outputTokens || 0;
@@ -8718,37 +10057,44 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 
     // Phase 1 — fast discovery: locate worktrees and report each with cheap git metadata only
     // (size and push status are left pending and filled in during phase 2).
-    const discovered: WorktreeScanResult[] = [];
-    for (const root of rootPaths) {
-      if (!isActive()) { return; }
-      let isDirectory = false;
-      try { isDirectory = (await fs.promises.stat(root)).isDirectory(); } catch { isDirectory = false; }
-      if (!isDirectory) {
-        send({ command: "worktreeScanRootSkipped", root, reason: "Path does not exist or is not a directory" });
-        continue;
-      }
-
-      send({ command: "worktreeScanRootStarted", root });
-      const gitMarkers: string[] = [];
-      // Report folder-walk progress (throttled) so the user sees activity on large roots
-      // long before the first worktree is found.
-      let dirsScanned = 0;
-      let lastWalkPost = 0;
-      const onDir = (): void => {
-        dirsScanned++;
-        const now = Date.now();
-        if (now - lastWalkPost >= 200) {
-          lastWalkPost = now;
-          send({ command: "worktreeScanWalkProgress", root, dirsScanned, markersFound: gitMarkers.length, elapsedMs: now - startTime });
+    const discovered = await _scanWorktreeRootsWithTimeout<WorktreeScanResult>({
+      roots: rootPaths,
+      isActive,
+      scanRoot: async (root, isRootActive) => {
+        let isDirectory = false;
+        try { isDirectory = (await fs.promises.stat(root)).isDirectory(); } catch { isDirectory = false; }
+        if (!isRootActive()) { return []; }
+        if (!isDirectory) {
+          send({ command: "worktreeScanRootSkipped", root, reason: "Path does not exist or is not a directory" });
+          return [];
         }
-      };
-      await this.findGitMarkerFiles(root, excludeDirs, gitMarkers, isActive, onDir);
-      if (!isActive()) { return; }
-      send({ command: "worktreeScanRootMarkersFound", root, count: gitMarkers.length });
 
-      discovered.push(...await this.discoverWorktreesFromMarkers(gitMarkers, root, isActive, send, startTime));
-      if (!isActive()) { return; }
-    }
+        send({ command: "worktreeScanRootStarted", root });
+        const gitMarkers: string[] = [];
+        // Report folder-walk progress (throttled) so the user sees activity on large roots
+        // long before the first worktree is found.
+        let dirsScanned = 0;
+        let lastWalkPost = 0;
+        const onDir = (): void => {
+          if (!isRootActive()) { return; }
+          dirsScanned++;
+          const now = Date.now();
+          if (now - lastWalkPost >= 200) {
+            lastWalkPost = now;
+            send({ command: "worktreeScanWalkProgress", root, dirsScanned, markersFound: gitMarkers.length, elapsedMs: now - startTime });
+          }
+        };
+        await this.findGitMarkerFiles(root, excludeDirs, gitMarkers, isRootActive, onDir);
+        if (!isRootActive()) { return []; }
+        send({ command: "worktreeScanRootMarkersFound", root, count: gitMarkers.length });
+
+        return this.discoverWorktreesFromMarkers(gitMarkers, root, isRootActive, send, startTime);
+      },
+      onRootError: (root, error) => {
+        send({ command: "worktreeScanRootSkipped", root, reason: error.message });
+      },
+    });
+    if (!isActive()) { return; }
 
     // Phase 2 — background enrichment: compute disk size and push status concurrently and
     // patch each row as results arrive, so discovery is not blocked by these slow operations.
@@ -8756,6 +10102,105 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     if (!isActive()) { return; }
 
     send({ command: "worktreeScanComplete", totalWorktrees: discovered.length, elapsedMs: Date.now() - startTime });
+  }
+
+  /**
+   * Starts the once-daily background worktree scan if it's due and this window is the current
+   * refresh leader. A no-op most of the time (cheap timestamp check); when it does run, it runs
+   * detached from the caller so it never blocks the cache refresh that gated it.
+   */
+  private async maybeStartBackgroundWorktreeScan(): Promise<void> {
+    if (this.backgroundWorktreeScanRunning) { return; }
+    const startedAt = this.context.globalState.get<string>(CopilotTokenTracker.WORKTREE_BG_SCAN_STARTED_KEY);
+    if (!_shouldRunDailyWorktreeScan(startedAt, Date.now())) { return; }
+    const rootPaths = this.buildInitialWorktreeRoots();
+    if (rootPaths.length === 0) { return; }
+
+    this.backgroundWorktreeScanRunning = true;
+    const scanId = ++this.backgroundWorktreeScanId;
+    await this.context.globalState.update(CopilotTokenTracker.WORKTREE_BG_SCAN_STARTED_KEY, new Date().toISOString());
+    this.log(`🌳 Starting daily background worktree scan across ${rootPaths.length} root(s)`);
+    try {
+      await this.runBackgroundWorktreeScan(rootPaths, scanId);
+    } catch (err) {
+      this.warn(`Background worktree scan failed: ${err}`);
+    } finally {
+      this.backgroundWorktreeScanRunning = false;
+    }
+  }
+
+  /**
+   * Drip-scans the given roots at low concurrency with pacing delays between each worktree, so
+   * the scan can run unattended over the course of the day without contending with foreground
+   * disk activity. Reuses the same discovery/enrichment helpers as the interactive Worktrees tab
+   * scan, just with no webview to stream progress to and much gentler throttling.
+   */
+  private async runBackgroundWorktreeScan(rootPaths: string[], scanId: number): Promise<void> {
+    const excludeDirs = new Set(["node_modules", ".git", ".hg", ".svn", "packages", "vendor"]);
+    const isActive = () => scanId === this.backgroundWorktreeScanId;
+    const noop = () => { /* no webview open for this scan — findings are persisted instead */ };
+    const startTime = Date.now();
+
+    const discovered: WorktreeScanResult[] = [];
+    for (const root of rootPaths) {
+      if (!isActive()) { return; }
+      let isDirectory = false;
+      try { isDirectory = (await fs.promises.stat(root)).isDirectory(); } catch { isDirectory = false; }
+      if (!isDirectory) { continue; }
+
+      const gitMarkers: string[] = [];
+      await this.findGitMarkerFiles(root, excludeDirs, gitMarkers, isActive);
+      if (!isActive()) { return; }
+
+      discovered.push(...await this.discoverWorktreesFromMarkers(gitMarkers, root, isActive, noop, startTime, { concurrency: 1, throttleMs: 200 }));
+      if (!isActive()) { return; }
+      await this.sleep(500);
+    }
+
+    await this.enrichWorktrees(discovered, isActive, noop, startTime, { concurrency: 1, throttleMs: 400 });
+    if (!isActive()) { return; }
+
+    await this.finishBackgroundWorktreeScan(discovered);
+  }
+
+  /** Persists the completed background scan and decides whether to surface a findings notification. */
+  private async finishBackgroundWorktreeScan(discovered: WorktreeScanResult[]): Promise<void> {
+    const totalBytes = _sumWorktreeBytes(discovered);
+    const result: WorktreeBackgroundScanResult = {
+      scannedAt: new Date().toISOString(),
+      totalBytes,
+      worktreeCount: discovered.length,
+      worktrees: discovered,
+    };
+    await this.context.globalState.update(CopilotTokenTracker.WORKTREE_BG_SCAN_RESULT_KEY, result);
+    this.postWorktreeBackgroundResults();
+
+    const lastNotifiedBytes = this.context.globalState.get<number>(CopilotTokenTracker.WORKTREE_BG_SCAN_NOTIFIED_BYTES_KEY);
+    if (_shouldNotifyWorktreeFindings(totalBytes, lastNotifiedBytes)) {
+      await this.context.globalState.update(CopilotTokenTracker.WORKTREE_BG_SCAN_NOTIFIED_BYTES_KEY, totalBytes);
+      this.showWorktreeFindingsNotification(totalBytes, discovered.length);
+    }
+    this.log(`🌳 Background worktree scan complete: ${discovered.length} worktree(s), ${_formatBytesForNotification(totalBytes)}`);
+  }
+
+  /** Native notification pointing the user at the Worktrees tab findings. Fire-and-forget. */
+  private showWorktreeFindingsNotification(totalBytes: number, count: number): void {
+    const sizeLabel = _formatBytesForNotification(totalBytes);
+    void (async () => {
+      const choice = await vscode.window.showInformationMessage(
+        `We found ${sizeLabel} of data hidden in ${count} git worktree${count === 1 ? "" : "s"} that might no longer be needed.`,
+        "Show Me",
+      );
+      if (choice === "Show Me") { await this.showUsageAnalysisOnWorktreesTab(); }
+    })();
+  }
+
+  /** Sends the persisted background scan result to the Usage Analysis webview, if it's open. */
+  private postWorktreeBackgroundResults(): void {
+    if (!this.analysisPanel) { return; }
+    const result = this.context.globalState.get<WorktreeBackgroundScanResult>(CopilotTokenTracker.WORKTREE_BG_SCAN_RESULT_KEY);
+    if (!result) { return; }
+    void this.analysisPanel.webview.postMessage({ command: "worktreeBackgroundResults", ...result });
   }
 
   /**
@@ -8768,7 +10213,10 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     isActive: () => boolean,
     send: (msg: Record<string, unknown>) => void,
     startTime: number,
+    options?: { concurrency?: number; throttleMs?: number },
   ): Promise<WorktreeScanResult[]> {
+    const concurrency = options?.concurrency ?? 8;
+    const throttleMs = options?.throttleMs ?? 0;
     const foundRoots: string[] = [];
     const worktreeRoots: string[] = [];
     let checked = 0;
@@ -8789,7 +10237,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       if (!isActive()) { return; }
       discovered.push(result);
       send({ command: "worktreeFound", worktree: result });
-    }, 8);
+      if (throttleMs) { await this.sleep(throttleMs); }
+    }, concurrency);
     return discovered;
   }
 
@@ -8802,7 +10251,10 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     isActive: () => boolean,
     send: (msg: Record<string, unknown>) => void,
     startTime: number,
+    options?: { concurrency?: number; throttleMs?: number },
   ): Promise<void> {
+    const concurrency = options?.concurrency ?? 4;
+    const throttleMs = options?.throttleMs ?? 0;
     const total = worktrees.length;
     if (total === 0) { return; }
     send({ command: "worktreeEnrichStarted", total, elapsedMs: Date.now() - startTime });
@@ -8815,6 +10267,11 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         this.getWorktreePushedStatus(worktreePath),
       ]);
       if (!isActive()) { return; }
+      // Patch the caller's own objects (not just the webview, which tracks its own copy from
+      // the message below) so callers without a webview — the background scan — still end up
+      // with fully-enriched results in `worktrees` once this resolves.
+      const target = worktrees.find((w) => w.path === worktreePath);
+      if (target) { target.files = stats.files; target.folders = stats.folders; target.bytes = stats.bytes; target.pushed = pushed; }
       enriched++;
       send({ command: "worktreeEnriched", path: worktreePath, files: stats.files, folders: stats.folders, bytes: stats.bytes, pushed });
       const now = Date.now();
@@ -8822,7 +10279,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         lastPost = now;
         send({ command: "worktreeEnrichProgress", enriched, total, elapsedMs: now - startTime });
       }
-    }, 4);
+      if (throttleMs) { await this.sleep(throttleMs); }
+    }, concurrency);
   }
 
 
@@ -9360,6 +10818,31 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
   }
 
   /**
+   * Computes Backend Storage + GitHub Auth status and posts it to the webview immediately.
+   * These are cheap relative to the stats/usage-analysis/report pipeline, so sending them early
+   * lets the Settings > Backend Storage tab populate right away instead of showing a "not
+   * available" placeholder for the several seconds the rest of diagnostics load takes.
+   * Returns the computed values so the caller can reuse them in the final diagnosticDataLoaded message.
+   */
+  private async sendBackendStorageInfoEarly(
+    panel: vscode.WebviewPanel,
+  ): Promise<{ backendStorageInfo: any; githubAuthStatus: { authenticated: boolean; username?: string } }> {
+    const backendStorageInfo = await this.getBackendStorageInfo();
+    this.log(
+      `Backend storage info retrieved: azure.enabled=${backendStorageInfo.azure?.enabled}, azure.configured=${backendStorageInfo.azure?.isConfigured}, teamServer.enabled=${backendStorageInfo.teamServer?.enabled}, teamServer.configured=${backendStorageInfo.teamServer?.isConfigured}`,
+    );
+    const githubAuthStatus = this.getGitHubAuthStatus();
+    if (this.isPanelOpen(panel)) {
+      panel.webview.postMessage({
+        command: "backendStorageInfoLoaded",
+        backendStorageInfo,
+        githubAuth: githubAuthStatus,
+      });
+    }
+    return { backendStorageInfo, githubAuthStatus };
+  }
+
+  /**
    * Load all diagnostic data in the background and update the webview progressively.
    */
   private async loadDiagnosticDataInBackground(
@@ -9371,6 +10854,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       if (this._sessionRestorePromise) {
         await this._sessionRestorePromise;
       }
+
+      const { backendStorageInfo, githubAuthStatus } = await this.sendBackendStorageInfoEarly(panel);
 
       if (!this.lastDetailedStats) {
         this.log(
@@ -9393,12 +10878,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       const sessionFileData = await this.getSessionFilePreviewData(sessionFiles);
       const sessionFolders = this.buildSessionFolderData(sessionFiles);
       const candidatePaths = this.sessionDiscovery.getDiagnosticCandidatePaths();
-      const backendStorageInfo = await this.getBackendStorageInfo();
-      this.log(
-        `Backend storage info retrieved: azure.enabled=${backendStorageInfo.azure?.enabled}, azure.configured=${backendStorageInfo.azure?.isConfigured}, teamServer.enabled=${backendStorageInfo.teamServer?.enabled}, teamServer.configured=${backendStorageInfo.teamServer?.isConfigured}`,
-      );
-
-      const githubAuthStatus = this.getGitHubAuthStatus();
       const otelComparison = await this.tryComputeCopilotCliOtelComparison(sessionFiles);
 
       if (!this.isPanelOpen(panel)) {
@@ -9418,6 +10897,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         backendStorageInfo,
         githubAuth: githubAuthStatus,
         toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
+        skillCallStats: this.lastUsageAnalysisStats?.last30Days?.skillCalls ?? null,
+        skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
+        skillDescriptions: this._buildSkillDescriptions(),
         toolFamilies: getToolFamilies(),
         otelComparison,
       });
@@ -9794,17 +11276,31 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 
   private async scanFolderFile(full: string, ctx: { results: Array<{ file: string; size: number; modified: string; interactions: number; tokens: number; actualTokens: number }>; totalScanned: number; parseErrors: number }): Promise<void> {
     ctx.totalScanned++;
-    let stat: fs.Stats;
-    try { stat = await fs.promises.stat(full); } catch { ctx.parseErrors++; return; }
-    let content: string;
-    try { content = await fs.promises.readFile(full, "utf8"); } catch {
+    // Open once and stat/read the same file handle (not the path) so the file
+    // can't change between the size/mtime check and the read (TOCTOU race).
+    let handle: fs.promises.FileHandle;
+    try {
+      handle = await fs.promises.open(full, "r");
+    } catch {
       ctx.parseErrors++;
-      ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions: 0, tokens: 0, actualTokens: 0 });
       return;
     }
-    const interactions = await this.countInteractionsInSession(full, content);
-    const tokenResult = await this.estimateTokensFromSession(full, content);
-    ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions, tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens });
+    try {
+      const stat = await handle.stat();
+      let content: string;
+      try {
+        content = await handle.readFile("utf8");
+      } catch {
+        ctx.parseErrors++;
+        ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions: 0, tokens: 0, actualTokens: 0 });
+        return;
+      }
+      const interactions = await this.countInteractionsInSession(full, content);
+      const tokenResult = await this.estimateTokensFromSession(full, content);
+      ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions, tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens });
+    } finally {
+      await handle.close();
+    }
   }
 
   /**
@@ -9815,13 +11311,17 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     const settings = this.backend?.getSettings();
     const azureSettings = this.extractAzureStorageSettings(settings, config);
     const teamSettings = this.extractTeamServerSettings(settings, azureSettings.sharingProfile);
-    const lastSyncAt = this.context.globalState.get<number>("backend.lastSyncAt");
-    const lastSyncTime = lastSyncAt ? new Date(lastSyncAt).toISOString() : null;
+    // Azure Storage and the Team Server sync independently of each other, so each tracks its
+    // own "last successful sync" timestamp rather than sharing a single value.
+    const azureLastSyncAt = this.context.globalState.get<number>("backend.azureLastSyncAt");
+    const azureLastSyncTime = azureLastSyncAt ? new Date(azureLastSyncAt).toISOString() : null;
+    const teamLastSyncAt = this.context.globalState.get<number>("backend.sharingServerLastSyncAt");
+    const teamLastSyncTime = teamLastSyncAt ? new Date(teamLastSyncAt).toISOString() : null;
     const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
     const workspaceIds = this.extractWorkspaceIdsFromFiles(sessionFiles);
     return {
-      azure: { ...azureSettings, isConfigured: settings ? this.backend!.isConfigured(settings) : false, lastSyncTime: azureSettings.enabled ? lastSyncTime : null, deviceCount: workspaceIds.size, sessionCount: sessionFiles.length, recordCount: null },
-      teamServer: { ...teamSettings, isConfigured: teamSettings.enabled && !!teamSettings.endpointUrl, lastSyncTime: teamSettings.enabled ? lastSyncTime : null, sessionCount: sessionFiles.length },
+      azure: { ...azureSettings, isConfigured: settings ? this.backend!.isConfigured(settings) : false, lastSyncTime: azureSettings.enabled ? azureLastSyncTime : null, deviceCount: workspaceIds.size, sessionCount: sessionFiles.length, recordCount: null },
+      teamServer: { ...teamSettings, isConfigured: teamSettings.enabled && !!teamSettings.endpointUrl, lastSyncTime: teamSettings.enabled ? teamLastSyncTime : null, sessionCount: sessionFiles.length },
     };
   }
 
@@ -9886,6 +11386,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       unknownMcpOpenCount: this.context.globalState.get<number>('extension.unknownMcpOpenCount') ?? 0,
       fluencyBannerDismissed: this.context.globalState.get<boolean>('news.fluencyScoreBanner.v1.dismissed') ?? false,
       unknownMcpDismissedVersion: this.context.globalState.get<string>('news.unknownMcpTools.dismissedVersion') ?? '',
+      efficiencyTabBannerDismissed: this.context.globalState.get<boolean>('news.efficiencyTab.v1.dismissed') ?? false,
     };
 
     const initialData = JSON.stringify({
@@ -9895,7 +11396,11 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       displaySettings: { showTokens: this.getStatusBarShowTokensSetting(), showCost: this.getStatusBarShowCostSetting(), monthlyBudget: this.getMonthlyBudgetSetting() },
       quotaEntitlements: this._copilotQuotaEntitlements,
       toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
+      skillCallStats: this.lastUsageAnalysisStats?.last30Days?.skillCalls ?? null,
+      skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
+      skillDescriptions: this._buildSkillDescriptions(),
       toolFamilies: getToolFamilies(),
+      localization: this.getWebviewLocalization(),
     }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
@@ -9982,7 +11487,17 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "chart.js"),
     );
 
-    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod, initialView: this.lastChartView, initialMetric: this.lastChartMetric, initialSplit: this.lastChartSplit, monthlyBudget: this.getEffectiveMonthlyBudget() };
+    const chartData = { 
+      ...this.buildChartData(dailyStats), 
+      periodsReady, 
+      initialPeriod: this.lastChartPeriod, 
+      initialTimeWindow: this.lastChartTimeWindow, 
+      initialView: this.lastChartView, 
+      initialMetric: this.lastChartMetric, 
+      initialSplit: this.lastChartSplit, 
+      monthlyBudget: this.getEffectiveMonthlyBudget(),
+      localization: this.getWebviewLocalization()
+    };
 
     const initialData = JSON.stringify(chartData).replace(/</g, "\\u003c");
 
@@ -9993,7 +11508,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
 			${getCodiconStylesheetTag(webview, this.extensionUri)}
-			<title>AI Engineering Fluency — Chart</title>
+			<title>${l10n.t('htmlTitleChart')}</title>
 		</head>
 		<body>
 			<div id="root"></div>
@@ -10049,12 +11564,15 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       suppressedUnknownTools,
       todaySessions: stats.todaySessions || [],
       use24HourTime: this.getUse24HourTimeSetting(),
+      hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
       insights: this.buildCurrentInsights(stats),
       curationAnalysis: stats.curationAnalysis ?? null,
       sessionColumnSettings,
       copilotApiBalance: this._buildCopilotApiBalance(),
       monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
       worktreeScanRoots: this.buildInitialWorktreeRoots(),
+      localization: this.getWebviewLocalization(),
+      worktreeBackgroundScan: this.context.globalState.get<WorktreeBackgroundScanResult>(CopilotTokenTracker.WORKTREE_BG_SCAN_RESULT_KEY) ?? null,
     }).replace(/</g, "\\u003c");
   }
 
@@ -10094,10 +11612,16 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     if (this.updateInterval) {
       clearInterval(this.updateInterval);
     }
+    // Stop any in-flight background worktree scan from doing further disk I/O once disposed.
+    this.backgroundWorktreeScanId++;
     this.stopRefreshHeartbeat();
     if (this._followerResyncTimer) {
       clearTimeout(this._followerResyncTimer);
       this._followerResyncTimer = undefined;
+    }
+    if (this._deferredSessionRefreshTimer) {
+      clearTimeout(this._deferredSessionRefreshTimer);
+      this._deferredSessionRefreshTimer = undefined;
     }
     // Release the refresh leader lock if this window held it, so another window can
     // take over promptly instead of waiting for the stale-lock timeout.
@@ -10259,21 +11783,22 @@ async function checkForLegacyExtensionConflict(context: vscode.ExtensionContext)
   if (context.globalState.get<boolean>(key, false)) {
     return;
   }
+  const removeOldExtension = l10n.t('button.removeOldExtension');
+  const dismiss = l10n.t('button.dismiss');
   const choice = await vscode.window.showWarningMessage(
-    'Cleanup needed: the old "copilot-token-tracker" extension is still installed alongside this one. ' +
-    'Keep "AI Engineering Fluency" (this extension) and remove the old one — it has been disabled automatically.',
-    'Remove Old Extension',
-    'Dismiss'
+    l10n.t('cleanupWarning') + l10n.t('cleanupMessage'),
+    removeOldExtension,
+    dismiss
   );
-  if (choice === 'Remove Old Extension') {
+  if (choice === removeOldExtension) {
     try {
       await vscode.commands.executeCommand('workbench.extensions.uninstallExtension', LEGACY_EXTENSION_ID);
     } catch {
       vscode.window.showInformationMessage(
-        'To finish cleanup: open Extensions (Ctrl+Shift+X), search for "copilot-token-tracker", and uninstall it. Keep "AI Engineering Fluency".'
+        l10n.t('cleanupMessage2')
       );
     }
-  } else if (choice === 'Dismiss') {
+  } else if (choice === dismiss) {
     // Only suppress on explicit Dismiss — closing with ✕ shows again next startup.
     await context.globalState.update(key, true);
   }
@@ -10375,6 +11900,13 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
       await tokenTracker.showEnvironmental();
     },
   );
+  const showEfficiencyCommand = vscode.commands.registerCommand(
+    "aiEngineeringFluency.showEfficiency",
+    async () => {
+      tokenTracker.log("Show efficiency trends command called");
+      await tokenTracker.showEfficiency();
+    },
+  );
   const openMcpJsonCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.openMcpJson",
     async () => {
@@ -10382,7 +11914,24 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
       await tokenTracker.openMcpJson();
     },
   );
-  context.subscriptions.push(showMaturityCommand, showDashboardCommand, showEnvironmentalCommand, openMcpJsonCommand);
+  context.subscriptions.push(showMaturityCommand, showDashboardCommand, showEnvironmentalCommand, showEfficiencyCommand, openMcpJsonCommand);
+}
+
+function registerUsageNavigationCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
+  const commands: Array<[string, string, () => Promise<void>]> = [
+    ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", () => tokenTracker.showUsageAnalysisOnInsightsTab()],
+    ["aiEngineeringFluency.openToolsTab", "Open Tools tab command called", () => tokenTracker.showUsageAnalysisOnToolsTab()],
+    ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
+    ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
+    ["aiEngineeringFluency.openCorrectionsTab", "Open Corrections tab command called", () => tokenTracker.showUsageAnalysisOnCorrectionsTab()],
+    ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
+  ];
+  context.subscriptions.push(...commands.map(([id, logMessage, handler]) =>
+    vscode.commands.registerCommand(id, async () => {
+      tokenTracker.log(logMessage);
+      await handler();
+    })
+  ));
 }
 
 function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
@@ -10391,7 +11940,7 @@ function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: Co
     async () => {
       tokenTracker.log("Refresh command called");
       await tokenTracker.updateTokenStats();
-      vscode.window.showInformationMessage("AI Engineering Fluency data refreshed");
+      vscode.window.showInformationMessage(l10n.t('dataRefreshed'));
     },
   );
 
@@ -10419,23 +11968,8 @@ function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: Co
     },
   );
 
-  const openInsightsTabCommand = vscode.commands.registerCommand(
-    "aiEngineeringFluency.openInsightsTab",
-    async () => {
-      tokenTracker.log("Open Insights tab command called");
-      await tokenTracker.showUsageAnalysisOnInsightsTab();
-    },
-  );
-
-  const openToolsTabCommand = vscode.commands.registerCommand(
-    "aiEngineeringFluency.openToolsTab",
-    async () => {
-      tokenTracker.log("Open Tools tab command called");
-      await tokenTracker.showUsageAnalysisOnToolsTab();
-    },
-  );
-
-  context.subscriptions.push(refreshCommand, showDetailsCommand, showChartCommand, showUsageAnalysisCommand, openInsightsTabCommand, openToolsTabCommand);
+  context.subscriptions.push(refreshCommand, showDetailsCommand, showChartCommand, showUsageAnalysisCommand);
+  registerUsageNavigationCommands(context, tokenTracker);
   registerSecondaryViewCommands(context, tokenTracker);
 }
 

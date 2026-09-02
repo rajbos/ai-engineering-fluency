@@ -135,6 +135,9 @@
     <PackageReference Include="Community.VisualStudio.Toolkit" Version="17.0.76.303" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <!-- Pinned to override vulnerable transitive versions pulled in via the VS SDK (Dependabot alerts #138-150) -->
+    <PackageReference Include="MessagePack" Version="2.5.301" />
+    <PackageReference Include="Microsoft.IO.Redist" Version="6.0.1" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="'$(VSToolsPath)' != ''" />

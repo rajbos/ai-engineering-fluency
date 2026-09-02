@@ -106,9 +106,34 @@ export function getBackendSettings(): BackendSettings {
 	};
 }
 
+/** Whether the Azure Table Storage backend has all required fields filled in. */
+export function isAzureBackendConfigured(settings: BackendSettings): boolean {
+	return !!(settings.subscriptionId && settings.resourceGroup && settings.storageAccount && settings.aggTable);
+}
+
+/** Whether the self-hosted Team Server (sharing server) backend is enabled and has an endpoint URL. */
+export function isSharingServerConfigured(settings: BackendSettings): boolean {
+	return !!(settings.sharingServerEnabled && settings.sharingServerEndpointUrl);
+}
+
+/**
+ * Legacy single-backend check, keyed off the `backend.backend` selector. Used only for
+ * Azure Table Storage read paths (dashboard/status-bar stats queries) that inherently
+ * require Azure credentials and cannot fall back to the sharing server for reads.
+ */
 export function isBackendConfigured(settings: BackendSettings): boolean {
 	if (settings.backend === 'sharingServer') {
-		return !!(settings.sharingServerEndpointUrl);
+		return isSharingServerConfigured(settings);
 	}
-	return !!(settings.subscriptionId && settings.resourceGroup && settings.storageAccount && settings.aggTable);
+	return isAzureBackendConfigured(settings);
+}
+
+/**
+ * Whether *either* backend is configured. Azure Storage and the Team Server are independent
+ * sync targets — a user may enable one, the other, or both at the same time — so sync
+ * scheduling (starting the timer, running a sync pass, backfilling) must not require both,
+ * nor gate on which one happens to be selected as the "primary" `backend.backend` value.
+ */
+export function isAnyBackendConfigured(settings: BackendSettings): boolean {
+	return isAzureBackendConfigured(settings) || isSharingServerConfigured(settings);
 }

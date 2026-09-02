@@ -159,6 +159,62 @@ export class SyncService {
 	}
 
 	/**
+	 * Determine whether the sync timer is allowed to start, logging the reason when it isn't.
+	 */
+	private _canStartSyncTimer(settings: BackendSettings, isConfigured: boolean): boolean {
+		const sharingPolicy = computeBackendSharingPolicy({
+			enabled: settings.enabled,
+			profile: settings.sharingProfile,
+			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
+		});
+		if (!sharingPolicy.allowCloudSync) {
+			this.deps.logger.log(`Backend sync: not starting timer (cloud sync disabled, profile: ${settings.sharingProfile})`);
+			return false;
+		}
+		if (!isConfigured) {
+			this.deps.logger.log('Backend sync: not starting timer (backend not configured)');
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Handle a failed periodic (timer-driven) sync: track consecutive failures,
+	 * surface a user-facing warning/error at the relevant thresholds, and stop
+	 * the timer once failures exceed {@link MAX_CONSECUTIVE_FAILURES}.
+	 */
+	private _handleTimerSyncFailure(e: unknown): void {
+		const err = e as { message?: string } | undefined;
+		this.deps.logger.warn(`Backend sync timer failed: ${err?.message ?? e}`);
+		this.consecutiveFailures++;
+
+		// Show user-facing warning after first few failures
+		if (this.consecutiveFailures === 3) {
+			vscode.window.showWarningMessage(
+				'Backend sync is experiencing issues. Check the output panel for details.',
+				'Show Output'
+			).then(choice => {
+				if (choice === 'Show Output') {
+					// User can manually open output panel via command palette
+				}
+			});
+		}
+
+		if (this.consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
+			this.deps.logger.warn(`Backend sync: stopping timer after ${this.MAX_CONSECUTIVE_FAILURES} consecutive failures`);
+			vscode.window.showErrorMessage(
+				'Backend sync stopped after repeated failures. Check your Azure configuration.',
+				'Configure Backend'
+			).then(choice => {
+				if (choice === 'Configure Backend') {
+					vscode.commands.executeCommand('aiEngineeringFluency.configureBackend');
+				}
+			});
+			this.stopTimer();
+		}
+	}
+
+	/**
 	 * Start the background sync timer if backend is enabled.
 	 * @param settings - Backend settings to check if sync should be enabled
 	 * @param isConfigured - Whether the backend is fully configured
@@ -166,51 +222,13 @@ export class SyncService {
 	startTimerIfEnabled(settings: BackendSettings, isConfigured: boolean): void {
 		try {
 			this.stopTimer();
-			const sharingPolicy = computeBackendSharingPolicy({
-				enabled: settings.enabled,
-				profile: settings.sharingProfile,
-				shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
-			});
-			if (!sharingPolicy.allowCloudSync || !isConfigured) {
-				if (!sharingPolicy.allowCloudSync) {
-					this.deps.logger.log(`Backend sync: not starting timer (cloud sync disabled, profile: ${settings.sharingProfile})`);
-				} else if (!isConfigured) {
-					this.deps.logger.log('Backend sync: not starting timer (backend not configured)');
-				}
+			if (!this._canStartSyncTimer(settings, isConfigured)) {
 				return;
 			}
 			const intervalMs = BACKEND_SYNC_MIN_INTERVAL_MS;
 			this.deps.logger.log(`Backend sync: starting timer with interval ${intervalMs}ms (${intervalMs / 60000} minutes)`);
 			this.backendSyncInterval = setInterval(() => {
-				this.syncToBackendStore(false, settings, isConfigured).catch((e) => {
-					this.deps.logger.warn(`Backend sync timer failed: ${e?.message ?? e}`);
-					this.consecutiveFailures++;
-					
-					// Show user-facing warning after first few failures
-					if (this.consecutiveFailures === 3) {
-						vscode.window.showWarningMessage(
-							'Backend sync is experiencing issues. Check the output panel for details.',
-							'Show Output'
-						).then(choice => {
-							if (choice === 'Show Output') {
-								// User can manually open output panel via command palette
-							}
-						});
-					}
-					
-					if (this.consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
-						this.deps.logger.warn(`Backend sync: stopping timer after ${this.MAX_CONSECUTIVE_FAILURES} consecutive failures`);
-						vscode.window.showErrorMessage(
-							'Backend sync stopped after repeated failures. Check your Azure configuration.',
-							'Configure Backend'
-						).then(choice => {
-							if (choice === 'Configure Backend') {
-								vscode.commands.executeCommand('aiEngineeringFluency.configureBackend');
-							}
-						});
-						this.stopTimer();
-					}
-				});
+				this.syncToBackendStore(false, settings, isConfigured).catch((e) => this._handleTimerSyncFailure(e));
 			}, intervalMs);
 			// Immediate initial sync (forced to ensure settings changes take effect)
 			this.syncToBackendStore(true, settings, isConfigured).catch((e) => {
@@ -762,7 +780,7 @@ return this.buildDayModelInteractionsFromJson(content, fileMtimeMs, startMs, ses
 			agentModeCount: Math.round((analysis.modeUsage.agent || 0) * ratio),
 			planModeCount: Math.round((analysis.modeUsage.plan || 0) * ratio),
 			customAgentModeCount: Math.round((analysis.modeUsage.customAgent || 0) * ratio),
-			cliModeCount: Math.round((analysis.modeUsage.cli || 0) * ratio)
+			cliModeCount: Math.round(((analysis.modeUsage.cli || 0) + (analysis.modeUsage.cliApp || 0)) * ratio)
 		};
 	}
 
@@ -1300,7 +1318,7 @@ return true;
 		if (!sharingPolicy.allowCloudSync) {
 			this.deps.logger.log(`Backend sync: skipping (sharing policy does not allow cloud sync, profile: ${settings.sharingProfile})`);
 		} else if (!isConfigured) {
-			this.deps.logger.log('Backend sync: skipping (backend not configured - missing storage account, subscription, or resource group)');
+			this.deps.logger.log('Backend sync: skipping (neither Azure Storage nor Team Server is configured)');
 		}
 	}
 
@@ -1314,6 +1332,7 @@ return true;
 		return false;
 	}
 
+	/** Updates the shared "last sync attempt" marker used only for the throttle check above. */
 	private async tryUpdateLastSyncAt(): Promise<void> {
 		try {
 			await this.deps.context?.globalState.update('backend.lastSyncAt', Date.now());
@@ -1322,13 +1341,51 @@ return true;
 		}
 	}
 
-	private async handleAzureSyncError(e: unknown, settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<void> {
-		const secretsToRedact = await this.credentialService.getBackendSecretsToRedactForError(settings);
-		this.deps.logger.warn(`Backend sync: ${safeStringifyError(e, secretsToRedact)}`);
-		if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
-			try { await this.syncToSharingServer(settings, sharingPolicy); }
-			catch (ssErr: unknown) { this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`); }
+	/** Updates the Azure-Storage-specific "last successful sync" marker shown in its own status panel. */
+	private async tryUpdateAzureLastSyncAt(): Promise<void> {
+		try {
+			await this.deps.context?.globalState.update('backend.azureLastSyncAt', Date.now());
+		} catch (e) {
+			this.deps.logger.warn(`Backend sync: failed to update azure lastSyncAt: ${e}`);
 		}
+	}
+
+	/** Updates the Team-Server-specific "last successful sync" marker shown in its own status panel. */
+	private async tryUpdateSharingServerLastSyncAt(): Promise<void> {
+		try {
+			await this.deps.context?.globalState.update('backend.sharingServerLastSyncAt', Date.now());
+		} catch (e) {
+			this.deps.logger.warn(`Backend sync: failed to update sharing server lastSyncAt: ${e}`);
+		}
+	}
+
+	/** Runs the Azure Table Storage sync in isolation, logging (but not throwing) on failure. */
+	private async runAzureSyncIndependently(settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<void> {
+		try {
+			await this.performAzureTableSync(settings, sharingPolicy);
+		} catch (e: unknown) {
+			const secretsToRedact = await this.credentialService.getBackendSecretsToRedactForError(settings);
+			this.deps.logger.warn(`Backend sync: ${safeStringifyError(e, secretsToRedact)}`);
+		}
+	}
+
+	/** Runs the Team Server (sharing server) sync in isolation, logging (but not throwing) on failure. */
+	private async runSharingServerSyncIndependently(settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<void> {
+		try {
+			await this.syncToSharingServer(settings, sharingPolicy);
+			await this.tryUpdateSharingServerLastSyncAt();
+		} catch (ssErr: unknown) {
+			this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`);
+		}
+	}
+
+	/** Builds a composite lock identifier covering whichever backend(s) are configured for this sync pass. */
+	private buildSyncLockTarget(azureConfigured: boolean, sharingConfigured: boolean, settings: BackendSettings): string {
+		const targets = [
+			azureConfigured ? `azure:${settings.storageAccount}` : null,
+			sharingConfigured ? `share:${settings.sharingServerEndpointUrl}` : null,
+		].filter((t): t is string => !!t);
+		return targets.join('|');
 	}
 
 	private async doSyncToBackendStore(force: boolean, settings: BackendSettings, isConfigured: boolean): Promise<void> {
@@ -1343,22 +1400,28 @@ return true;
 			return;
 		}
 		if (await this.checkSyncThrottle(force)) { return; }
-		const serverUrl = settings.backend === 'sharingServer' ? settings.sharingServerEndpointUrl : settings.storageAccount;
-		if (!await this.acquireSyncLock(settings.backend, serverUrl)) {
+
+		// Azure Storage and the Team Server are independent sync targets: either, both, or
+		// neither may be configured at any time, and each must run — and report its own
+		// success/failure and "last sync" timestamp — without the other affecting it.
+		const azureConfigured = !!(settings.subscriptionId && settings.resourceGroup && settings.storageAccount && settings.aggTable);
+		const sharingConfigured = !!(settings.sharingServerEnabled && settings.sharingServerEndpointUrl);
+		if (!azureConfigured && !sharingConfigured) {
+			this.deps.logger.log('Backend sync: skipping (neither Azure Storage nor Team Server is configured)');
+			return;
+		}
+
+		const lockTarget = this.buildSyncLockTarget(azureConfigured, sharingConfigured, settings);
+		if (!await this.acquireSyncLock(settings.backend, lockTarget)) {
 			this.deps.logger.log('Backend sync: skipping (another VS Code window is currently syncing to the same server)');
 			return;
 		}
 		this.backendSyncInProgress = true;
 		try {
-			if (settings.backend === 'sharingServer') {
-				await this.syncToSharingServer(settings, sharingPolicy);
-				await this.tryUpdateLastSyncAt();
-				this.consecutiveFailures = 0;
-				return;
-			}
-			await this.performAzureTableSync(settings, sharingPolicy);
-		} catch (e: unknown) {
-			await this.handleAzureSyncError(e, settings, sharingPolicy);
+			await this.tryUpdateLastSyncAt();
+			if (azureConfigured) { await this.runAzureSyncIndependently(settings, sharingPolicy); }
+			if (sharingConfigured) { await this.runSharingServerSyncIndependently(settings, sharingPolicy); }
+			this.consecutiveFailures = 0;
 		} finally {
 			this.backendSyncInProgress = false;
 			await this.releaseSyncLock(settings.backend);
@@ -1458,7 +1521,6 @@ return true;
 		const creds = await this.credentialService.getBackendDataPlaneCredentials(settings);
 		if (!creds) {
 			this.deps.logger.warn('Backend sync: skipping (credentials not available - check authentication mode and secrets)');
-			await this.tryUpdateLastSyncAt();
 			return;
 		}
 		await this.dataPlaneService.ensureTableExists(settings, creds.tableCredential);
@@ -1486,15 +1548,10 @@ return true;
 			this.deps.logger.log(`Backend sync: ${successCount} entities synced successfully`);
 		}
 
-		this.consecutiveFailures = 0;
-		await this.tryUpdateLastSyncAt();
+		await this.tryUpdateAzureLastSyncAt();
 		this.deps.logger.log('Backend sync: completed');
 
 		if (blobUploadNeeded && this.blobUploadService) { await this.performBlobUploadIfNeeded(settings, creds, sessionFiles); }
-		if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
-			try { await this.syncToSharingServer(settings, sharingPolicy); }
-			catch (ssErr: unknown) { this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`); }
-		}
 	}
 
 	/**
@@ -1597,6 +1654,7 @@ return true;
 			this.deps.logger.log,
 			this.deps.logger.warn,
 		);
+		await this.tryUpdateSharingServerLastSyncAt();
 	}
 
 	/**

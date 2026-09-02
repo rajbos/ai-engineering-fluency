@@ -1,6 +1,30 @@
 import type { ButtonConfig } from './buttonConfig';
 
 /**
+ * Sanctioned escape hatch for writing HTML markup into the DOM in webview code.
+ *
+ * TRUST CONTRACT: this function performs NO sanitization itself. Every caller is responsible
+ * for ensuring `html` has already had all untrusted values run through `escapeHtml()` /
+ * `escapeAttr()` (from `formatUtils`) before being interpolated — session titles, tool names,
+ * model names, file paths, and any other value ultimately sourced from AI-agent session log
+ * files are attacker-influenceable (a malicious repo or a prompt-injected agent can shape them)
+ * and must never reach here unescaped.
+ *
+ * This wrapper exists so that direct `.innerHTML =` / `.outerHTML =` assignment,
+ * `insertAdjacentHTML()`, and `document.write()` can be banned repo-wide by the
+ * `no-restricted-syntax` ESLint rule in `eslint.config.mjs`, funnelling every markup write in
+ * the webviews through this single audited call site. No-ops if `el` is missing so existing
+ * `if (el) { el.innerHTML = ...; }` guards can migrate to `setHtml(el, ...)` unchanged.
+ */
+export function setHtml(el: Element | null | undefined, html: string): void {
+	if (!el) {
+		return;
+	}
+	// eslint-disable-next-line no-restricted-syntax -- sanctioned wrapper; see trust contract in the doc comment above.
+	el.innerHTML = html;
+}
+
+/**
  * Creates an HTML element with optional className and textContent.
  */
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {

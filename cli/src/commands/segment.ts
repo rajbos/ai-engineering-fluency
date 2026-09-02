@@ -64,12 +64,66 @@ function writeSegmentCache(entry: SegmentCacheFile): void {
 	}
 }
 
+/** Structured JSON payload emitted by `--json`. Same fields whether served from cache or freshly computed. */
+export function buildJsonPayload(entry: SegmentCacheFile, cached: boolean): string {
+	return JSON.stringify({
+		today: entry.todayTokens,
+		month: entry.thisMonthTokens,
+		last30Days: entry.last30DaysTokens,
+		todayFormatted: formatTokens(entry.todayTokens),
+		monthFormatted: formatTokens(entry.thisMonthTokens),
+		last30DaysFormatted: formatTokens(entry.last30DaysTokens),
+		formatted: entry.formatted,
+		updatedAt: entry.updatedAt,
+		cached,
+	});
+}
+
+interface SegmentOptions {
+	ttl?: string;
+	refresh?: boolean;
+	hideZero?: boolean;
+	json?: boolean;
+}
+
+/** Write the final segment output (JSON or formatted string), unless --hide-zero suppresses it. */
+function emitSegment(entry: SegmentCacheFile, options: SegmentOptions, cached: boolean): void {
+	if (options.hideZero && entry.todayTokens === 0 && entry.last30DaysTokens === 0) {
+		return;
+	}
+	process.stdout.write(options.json ? buildJsonPayload(entry, cached) : entry.formatted);
+}
+
+/** Discover session files and compute today/month/30d token totals (cache-miss path). */
+async function computeSegmentEntry(): Promise<SegmentCacheFile> {
+	const files = await discoverSessionFiles();
+	let todayTokens = 0;
+	let thisMonthTokens = 0;
+	let last30DaysTokens = 0;
+
+	if (files.length > 0) {
+		const stats = await calculateDetailedStats(files);
+		todayTokens = stats.today.tokens;
+		thisMonthTokens = stats.month.tokens;
+		last30DaysTokens = stats.last30Days.tokens;
+	}
+
+	return {
+		updatedAt: new Date().toISOString(),
+		formatted: `${formatTokens(todayTokens)} today · ${formatTokens(thisMonthTokens)} month · ${formatTokens(last30DaysTokens)} 30d`,
+		todayTokens,
+		thisMonthTokens,
+		last30DaysTokens,
+	};
+}
+
 export const segmentCommand = new Command('segment')
 	.description('Output a compact token usage string for use in oh-my-posh prompt segments')
 	.option('--ttl <minutes>', `Segment cache TTL in minutes (default: ${DEFAULT_TTL_MINUTES})`, `${DEFAULT_TTL_MINUTES}`)
 	.option('--refresh', 'Force refresh — bypass the segment output cache')
 	.option('--hide-zero', 'Output nothing when both today and 30-day token counts are zero')
-	.action(async (options) => {
+	.option('--json', 'Output structured JSON (today/month/30d token counts) instead of the formatted string. Uses the same fast cache as the default output — recommended for custom prompt hooks (e.g. the PowerShell pre-prompt hook) instead of the uncached `usage --json` command.')
+	.action(async (options: SegmentOptions) => {
 		const parsedTtl = Number(options.ttl);
 		const ttl = Number.isFinite(parsedTtl) && parsedTtl >= 0 ? parsedTtl : DEFAULT_TTL_MINUTES;
 
@@ -77,48 +131,14 @@ export const segmentCommand = new Command('segment')
 		if (!options.refresh) {
 			const cached = readSegmentCache(ttl);
 			if (cached) {
-				if (options.hideZero && cached.todayTokens === 0 && cached.last30DaysTokens === 0) {
-					return;
-				}
-				process.stdout.write(cached.formatted);
+				emitSegment(cached, options, true);
 				return;
 			}
 		}
 
 		// Cache miss — discover files and compute stats
 		// (The preAction hook in cli.ts has already loaded the session file cache)
-		const files = await discoverSessionFiles();
-		let todayTokens = 0;
-		let thisMonthTokens = 0;
-		let last30DaysTokens = 0;
-
-		if (files.length > 0) {
-			const stats = await calculateDetailedStats(files);
-			todayTokens = stats.today.tokens;
-			thisMonthTokens = stats.month.tokens;
-			last30DaysTokens = stats.last30Days.tokens;
-		}
-
-		if (options.hideZero && todayTokens === 0 && last30DaysTokens === 0) {
-			writeSegmentCache({
-				updatedAt: new Date().toISOString(),
-				formatted: '',
-				todayTokens,
-				thisMonthTokens,
-				last30DaysTokens,
-			});
-			return;
-		}
-
-		const formatted = `${formatTokens(todayTokens)} today · ${formatTokens(thisMonthTokens)} month · ${formatTokens(last30DaysTokens)} 30d`;
-
-		writeSegmentCache({
-			updatedAt: new Date().toISOString(),
-			formatted,
-			todayTokens,
-			thisMonthTokens,
-			last30DaysTokens,
-		});
-
-		process.stdout.write(formatted);
+		const entry = await computeSegmentEntry();
+		writeSegmentCache(entry);
+		emitSegment(entry, options, false);
 	});

@@ -130,6 +130,29 @@ test('startTimerIfEnabled starts timer when configured and cloud sync is allowed
 	svc.dispose();
 });
 
+test('startTimerIfEnabled logs the cloud-sync-disabled reason when the profile forbids cloud sync', () => {
+	const logs: string[] = [];
+	const svc = makeService({ log: (m) => logs.push(m) });
+	svc.startTimerIfEnabled(
+		{ enabled: true, sharingProfile: 'off', shareWorkspaceMachineNames: false } as any,
+		true
+	);
+	assert.ok(logs.some(m => m.includes('cloud sync disabled') && m.includes('off')));
+	svc.dispose();
+});
+
+test('startTimerIfEnabled logs the not-configured reason when cloud sync is allowed but backend is unconfigured', () => {
+	const logs: string[] = [];
+	const svc = makeService({ log: (m) => logs.push(m) });
+	svc.startTimerIfEnabled(
+		{ enabled: true, sharingProfile: 'soloFull', shareWorkspaceMachineNames: false } as any,
+		false
+	);
+	assert.ok(logs.some(m => m.includes('backend not configured')));
+	assert.ok(!logs.some(m => m.includes('cloud sync disabled')));
+	svc.dispose();
+});
+
 test('stopTimer is idempotent', () => {
 	const svc = makeService();
 	svc.stopTimer();
@@ -927,6 +950,8 @@ test('syncToBackendStore skips when credentials are not available', async () => 
 		enabled: true,
 		sharingProfile: 'soloFull',
 		shareWorkspaceMachineNames: false,
+		subscriptionId: 'sub1',
+		resourceGroup: 'rg1',
 		storageAccount: 'sa1',
 		aggTable: 'usageAgg',
 		datasetId: 'ds1',
@@ -984,6 +1009,8 @@ test('syncToBackendStore completes full sync flow with mocked services', async (
 			enabled: true,
 			sharingProfile: 'soloFull',
 			shareWorkspaceMachineNames: false,
+			subscriptionId: 'sub1',
+			resourceGroup: 'rg1',
 			storageAccount: 'sa1',
 			aggTable: 'usageAgg',
 			datasetId: 'ds1',
@@ -1041,6 +1068,8 @@ test('syncToBackendStore logs warning when upsertEntitiesBatch has errors', asyn
 			enabled: true,
 			sharingProfile: 'soloFull',
 			shareWorkspaceMachineNames: false,
+			subscriptionId: 'sub1',
+			resourceGroup: 'rg1',
 			storageAccount: 'sa1',
 			aggTable: 'usageAgg',
 			datasetId: 'ds1',
@@ -1079,6 +1108,8 @@ test('syncToBackendStore handles ensureTableExists or validateAccess failure gra
 		enabled: true,
 		sharingProfile: 'soloFull',
 		shareWorkspaceMachineNames: false,
+		subscriptionId: 'sub1',
+		resourceGroup: 'rg1',
 		storageAccount: 'sa1',
 		aggTable: 'usageAgg',
 		datasetId: 'ds1',
@@ -1147,6 +1178,102 @@ test('syncToBackendStore still attempts sharing server sync when Azure sync fail
 	assert.ok(
 		logs.some(m => m.includes('Sharing server upload: skipping')),
 		`Expected sharing server sync attempt even after Azure failure. Logs: ${logs.join('\n')}`
+	);
+});
+
+test('syncToBackendStore tracks Azure and Team Server "last sync" independently — a successful sharing-server sync updates only its own timestamp when Azure fails', async () => {
+	const globalState = new Map<string, unknown>();
+	const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-lock-test-'));
+	const mockContext = {
+		globalState: {
+			get: (key: string) => globalState.get(key),
+			update: async (key: string, value: unknown) => { globalState.set(key, value); },
+		},
+		globalStorageUri: { fsPath: lockDir },
+	} as unknown as vscode.ExtensionContext;
+	const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+	const svc = new SyncService(
+		makeDeps({
+			context: mockContext,
+			getGithubToken: () => 'fake-token',
+			getCopilotSessionFiles: async () => [],
+		}),
+		{
+			getBackendDataPlaneCredentials: async () => ({
+				tableCredential: {},
+				blobCredential: {},
+				secretsToRedact: [],
+			}),
+			getBackendSecretsToRedactForError: async () => [],
+		} as any,
+		{
+			ensureTableExists: async () => { throw new Error('Azure connection failed'); },
+			validateAccess: async () => {},
+			createTableClient: () => ({}),
+			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
+		} as any,
+		undefined,
+		BackendUtility,
+		sharingServerSvc as any,
+	);
+	await svc.syncToBackendStore(true, {
+		enabled: true,
+		backend: 'storageTables',
+		sharingProfile: 'teamAnonymized',
+		shareWorkspaceMachineNames: false,
+		storageAccount: 'sa1',
+		subscriptionId: 'sub1',
+		resourceGroup: 'rg1',
+		aggTable: 'usageAgg',
+		eventsTable: 'usageEvents',
+		lookbackDays: 7,
+		sharingServerEnabled: true,
+		sharingServerEndpointUrl: 'https://test-sharing-server/',
+		shareWithTeam: false,
+		userIdentityMode: 'pseudonymous',
+		userId: '',
+		userIdMode: 'alias',
+		datasetId: 'default',
+		shareConsentAt: '',
+		includeMachineBreakdown: false,
+		blobUploadEnabled: false,
+		blobContainerName: '',
+		blobUploadFrequencyHours: 24,
+		blobCompressFiles: true,
+		authMode: 'entraId',
+	} as any, true);
+	assert.ok(globalState.get('backend.sharingServerLastSyncAt'), 'Team Server sync succeeded and should update its own lastSync marker');
+	assert.equal(globalState.get('backend.azureLastSyncAt'), undefined, 'Azure sync failed and must NOT update the Azure-specific lastSync marker');
+	fs.rmSync(lockDir, { recursive: true, force: true });
+});
+
+test('uploadFluencyScoreToSharingServer updates the Team Server lastSync marker on success', async () => {
+	const globalState = new Map<string, unknown>();
+	const mockContext = {
+		globalState: {
+			get: (key: string) => globalState.get(key),
+			update: async (key: string, value: unknown) => { globalState.set(key, value); },
+		},
+	} as unknown as vscode.ExtensionContext;
+	const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+	const svc = new SyncService(
+		makeDeps({
+			context: mockContext,
+			getGithubToken: () => 'fake-token',
+		}),
+		{} as any,
+		{} as any,
+		undefined,
+		BackendUtility,
+		sharingServerSvc as any,
+	);
+	await svc.uploadFluencyScoreToSharingServer({
+		sharingServerEnabled: true,
+		sharingServerEndpointUrl: 'https://test-sharing-server/',
+	} as any, { overallStage: 'exploring' });
+	assert.ok(
+		globalState.get('backend.sharingServerLastSyncAt'),
+		'A successful fluency-score upload is a real Team Server sync and must update its own lastSync marker'
 	);
 });
 
@@ -1221,6 +1348,30 @@ test('acquireSyncLock breaks stale lock', async () => {
 		assert.equal(acquired, true);
 
 		// Lock should be from our session now
+		const content = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+		assert.equal(content.sessionId, vscode.env.sessionId);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('acquireSyncLock breaks corrupt (empty) lock file', async () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
+	try {
+		const lockPath = path.join(dir, 'backend_sync.lock');
+		// A writer killed between atomic create and content write leaves a
+		// 0-byte lock; unparseable content must be treated as stale or the
+		// lock blocks every sync attempt forever.
+		fs.writeFileSync(lockPath, '');
+
+		const mockContext = {
+			globalStorageUri: { fsPath: dir },
+		};
+		const svc = makeService({ context: mockContext as any });
+
+		const acquired = await (svc as any).acquireSyncLock();
+		assert.equal(acquired, true, 'empty lock must be treated as stale');
+
 		const content = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
 		assert.equal(content.sessionId, vscode.env.sessionId);
 	} finally {

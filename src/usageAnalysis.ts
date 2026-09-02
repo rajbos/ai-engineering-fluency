@@ -3,6 +3,7 @@
  * Analysis and aggregation functions extracted from CopilotTokenTracker.
  */
 import * as fs from 'fs';
+import * as path from 'path';
 import type {
 	SessionUsageAnalysis,
 	ToolCallUsage,
@@ -28,6 +29,15 @@ import {
 	TASK_CATEGORIES,
 } from './taskClassification';
 import {
+	computeEfficiencyFromTurns,
+	jsonRequestToToolCalls,
+	mergeModelEfficiency,
+	applyModelUsageToEfficiency,
+	type EfficiencyTurn,
+} from './modelEfficiency';
+import { detectCorrectionAnalysis, mergeCorrectionCounts, summarizeCorrectionMoments } from './correctionDetection';
+import { MAX_PROMPT_LENGTH } from './repeatedTasks';
+import {
 	applyDelta,
 	isJsonlContent,
 	isUuidPointerFile,
@@ -41,7 +51,16 @@ import {
 	buildReasoningEffortTimeline,
 	extractResponseItemText,
 } from './tokenEstimation';
+
+/** Store the session's first user prompt (truncated) for repeated-task detection. */
+function _setFirstUserPrompt(analysis: SessionUsageAnalysis, prompt: string | undefined | null): void {
+	if (analysis.firstUserPrompt || !prompt || !prompt.trim()) { return; }
+	analysis.firstUserPrompt = prompt.trim().slice(0, MAX_PROMPT_LENGTH);
+}
 import { extractCopilotCliSessionId, getCopilotCliExactUsage } from './copilotCliOtel';
+import { isCopilotAppClientName } from './copilotCliStore';
+import { readTextFileWithSizeGuard } from './utils/safeFileRead';
+import { pathExists } from './utils/fsAsync';
 import { getModelBillingProvider } from './chartDataBuilder';
 import {
 	getModeType,
@@ -50,10 +69,11 @@ import {
 	extractMcpServerName,
 	normalizePathForComparison,
 } from './workspaceHelpers';
-import { isJetBrainsSessionPath } from './adapters/adapterPredicates';
+import { isCopilotCliSessionPath, isJetBrainsSessionPath } from './adapters/adapterPredicates';
 import { detectJetBrainsModeFromContent, type JetBrainsMode } from './jetbrains';
 import type { IEcosystemAdapter } from './ecosystemAdapter';
 import { isAnalyzable } from './ecosystemAdapter';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 
 
 // ---------------------------------------------------------------------------
@@ -830,7 +850,60 @@ function processDeltaSessionAnalysis(
 	_pdsaExtractModelSwitching(deps, sessionState, requests, analysis);
 	_pdsaExtractThinkingEffort(lines, requests, analysis);
 	_asuFinalizeTaskClassification(analysis, taskTurns);
+	_applyJsonRequestsEfficiency(requests, _pdsaGetSessionDefaultModel(sessionState), deps.modelPricing, analysis);
 	deriveConversationPatterns(analysis);
+}
+
+/** Session-level default model of a plain JSON Copilot Chat session. */
+function _jsonSessionDefaultModel(parsed: ParsedSessionJson): string {
+	return (parsed.selectedModel?.identifier || parsed.selectedModel?.metadata?.id || 'unknown').replace(/^copilot\//, '');
+}
+
+/**
+ * Compute per-model efficiency counters (issue #1649) from JSON/delta session
+ * requests and attach them to the analysis when any request produced a turn.
+ * Also runs correction-moment detection over the same turns — requests carry
+ * the user message text and response items needed for it.
+ */
+function _applyJsonRequestsEfficiency(
+	requests: SessionRequestRaw[],
+	defaultModel: string,
+	modelPricing: { [key: string]: ModelPricing },
+	analysis: SessionUsageAnalysis
+): void {
+	const turns: EfficiencyTurn[] = [];
+	for (const req of requests) {
+		if (!req) { continue; }
+		turns.push({
+			model: _pdsaGetReqModel(req, defaultModel, modelPricing),
+			toolCalls: jsonRequestToToolCalls(req),
+			userMessage: typeof req.message?.text === 'string' ? req.message.text : undefined,
+			assistantResponse: _jsonRequestAssistantText(req),
+			timestamp: typeof req.timestamp === 'number' ? new Date(req.timestamp).toISOString() : null,
+		});
+	}
+	if (turns.length === 0) { return; }
+	analysis.modelEfficiency = computeEfficiencyFromTurns(turns);
+	_setFirstUserPrompt(analysis, turns.find(t => t.userMessage)?.userMessage);
+	_setCorrectionDetection(analysis, turns);
+}
+
+function _setCorrectionDetection(analysis: SessionUsageAnalysis, turns: EfficiencyTurn[]): void {
+	const detection = detectCorrectionAnalysis(turns);
+	if (detection.moments.length === 0) { return; }
+	analysis.correctionMoments = detection.moments;
+	analysis.correctionCounts = detection.counts;
+}
+
+/** Concatenate the non-thinking text of a JSON request's response items (correction detection only). */
+function _jsonRequestAssistantText(req: SessionRequestRaw): string | undefined {
+	if (!Array.isArray(req.response)) { return undefined; }
+	let text = '';
+	for (const item of req.response) {
+		const { text: itemText, isThinking } = extractResponseItemText(item);
+		if (itemText && !isThinking) { text += itemText; }
+	}
+	return text || undefined;
 }
 
 // --- processJsonSessionRequests helpers ---
@@ -901,7 +974,7 @@ function _pjsrProcessRequest(
  * Populates mode usage, context references, and tool/MCP invocations.
  */
 function processJsonSessionRequests(
-	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
+	deps: Pick<UsageAnalysisDeps, 'toolNameMap' | 'modelPricing'>,
 	sessionContent: ParsedSessionJson,
 	analysis: SessionUsageAnalysis
 ): void {
@@ -911,6 +984,12 @@ function processJsonSessionRequests(
 		_pjsrProcessRequest(deps, requestRaw as SessionRequestRaw, sessionContent, analysis, taskTurns);
 	}
 	_asuFinalizeTaskClassification(analysis, taskTurns);
+	_applyJsonRequestsEfficiency(
+		sessionContent.requests as SessionRequestRaw[],
+		_jsonSessionDefaultModel(sessionContent),
+		deps.modelPricing,
+		analysis
+	);
 }
 
 /**
@@ -1206,6 +1285,41 @@ function _muaMergeEnhancedMetrics(period: UsageAnalysisPeriod, analysis: Session
 		period.agentTypes.other += analysis.agentTypes.other;
 	}
 	_muaMergeThinkingEffort(period, analysis);
+	_muaMergeModelEfficiency(period, analysis);
+}
+
+/** Merge a session's per-model efficiency counters (issue #1649) into the period aggregate. */
+function _muaMergeModelEfficiency(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.modelEfficiency) { return; }
+	if (!period.modelEfficiency) { period.modelEfficiency = {}; }
+	mergeModelEfficiency(period.modelEfficiency, analysis.modelEfficiency);
+}
+
+/** Merge a session's mode usage counters (incl. the optional Copilot App cliApp split) into the period aggregate. */
+function _muaMergeModeUsage(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	period.modeUsage.ask += analysis.modeUsage.ask;
+	period.modeUsage.edit += analysis.modeUsage.edit;
+	period.modeUsage.agent += analysis.modeUsage.agent;
+	period.modeUsage.plan += analysis.modeUsage.plan;
+	period.modeUsage.customAgent += analysis.modeUsage.customAgent;
+	period.modeUsage.cli += analysis.modeUsage.cli;
+	period.modeUsage.cliApp = (period.modeUsage.cliApp ?? 0) + (analysis.modeUsage.cliApp ?? 0);
+}
+
+/**
+ * Fold one session's per-model token usage (and estimated provider cost) into a
+ * period's model efficiency aggregate (issue #1649). Called by consumers that
+ * already hold the session's cached ModelUsage, so no extra session parsing is
+ * needed. Safe to call for sessions that produced no turn-derived counters.
+ */
+export function mergeModelEfficiencyTokens(
+	period: UsageAnalysisPeriod,
+	modelUsage: ModelUsage | undefined,
+	modelPricing: { [key: string]: ModelPricing }
+): void {
+	if (!modelUsage || Object.keys(modelUsage).length === 0) { return; }
+	if (!period.modelEfficiency) { period.modelEfficiency = {}; }
+	applyModelUsageToEfficiency(period.modelEfficiency, modelUsage, modelPricing);
 }
 
 /**
@@ -1222,12 +1336,7 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 			period.toolCalls.outputTokensByTool[tool] = (period.toolCalls.outputTokensByTool[tool] || 0) + tokens;
 		}
 	}
-	period.modeUsage.ask += analysis.modeUsage.ask;
-	period.modeUsage.edit += analysis.modeUsage.edit;
-	period.modeUsage.agent += analysis.modeUsage.agent;
-	period.modeUsage.plan += analysis.modeUsage.plan;
-	period.modeUsage.customAgent += analysis.modeUsage.customAgent;
-	period.modeUsage.cli += analysis.modeUsage.cli;
+	_muaMergeModeUsage(period, analysis);
 	_muaMergeContextRefs(period, analysis);
 	period.mcpTools.total += analysis.mcpTools.total;
 	for (const [server, count] of Object.entries(analysis.mcpTools.byServer)) {
@@ -1236,9 +1345,29 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	for (const [tool, count] of Object.entries(analysis.mcpTools.byTool)) {
 		period.mcpTools.byTool[tool] = (period.mcpTools.byTool[tool] || 0) + count;
 	}
+	if (analysis.skillCalls) {
+		if (!period.skillCalls) { period.skillCalls = { total: 0, byName: {} }; }
+		period.skillCalls.total += analysis.skillCalls.total;
+		for (const [name, count] of Object.entries(analysis.skillCalls.byName)) {
+			period.skillCalls.byName[name] = (period.skillCalls.byName[name] || 0) + count;
+		}
+	}
 	_muaMergeModelSwitching(period, analysis);
 	_muaMergeEnhancedMetrics(period, analysis);
 	_muaMergeTaskCategories(period, analysis);
+	_muaMergeCorrections(period, analysis);
+}
+
+/** Fold a session's correction moments into the period's aggregated counters. */
+function _muaMergeCorrections(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.correctionMoments || analysis.correctionMoments.length === 0) { return; }
+	if (!period.corrections) {
+		period.corrections = { userCorrections: 0, editRetries: 0, editSelfCorrections: 0, toolErrors: 0, toolErrorsRetried: 0, agentSelfCorrections: 0, sessionsWithMoments: 0, sessionsWithUserCorrections: 0 };
+	}
+	const counts = analysis.correctionCounts ?? summarizeCorrectionMoments(analysis.correctionMoments);
+	mergeCorrectionCounts(period.corrections, counts);
+	period.corrections.sessionsWithMoments++;
+	if (counts.userCorrections > 0) { period.corrections.sessionsWithUserCorrections!++; }
 }
 
 /** @internal lookup table for analyzeContextReferences */
@@ -1929,6 +2058,18 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 }
 
 /**
+ * Increment `analysis.skillCalls` for `skillName`, lazily initializing the bucket.
+ * Shared low-level helper — every adapter capable of resolving a specific skill/command
+ * name from its own session format (whatever that format's representation looks like)
+ * funnels through this one function, so `skillCalls` stays consistent across editors.
+ */
+export function addSkillCall(analysis: SessionUsageAnalysis, skillName: string): void {
+	if (!analysis.skillCalls) { analysis.skillCalls = { total: 0, byName: {} }; }
+	analysis.skillCalls.total++;
+	analysis.skillCalls.byName[skillName] = (analysis.skillCalls.byName[skillName] || 0) + 1;
+}
+
+/**
  * Create an empty SessionUsageAnalysis object, used as the baseline for adapter analyzeUsage() implementations.
  */
 export function createEmptySessionUsageAnalysis(): SessionUsageAnalysis {
@@ -1938,6 +2079,7 @@ export function createEmptySessionUsageAnalysis(): SessionUsageAnalysis {
 		contextReferences: createEmptyContextRefs(),
 		mcpTools: { total: 0, byServer: {}, byTool: {} },
 		taskClassification: createEmptyTaskClassificationResult(),
+		skillCalls: { total: 0, byName: {} },
 		modelSwitching: {
 			uniqueModels: [],
 			modelCount: 0,
@@ -1970,9 +2112,23 @@ type AsuCliState = {
 	defaultEffort: string | null;
 	requestCount: number;
 	effortByRequest: { [effort: string]: number };
-	pendingToolCalls: Map<string, { toolName: string; args: Record<string, string> }>;
+	pendingToolCalls: Map<string, { toolName: string; args: Record<string, string>; effCall?: EfficiencyTurn['toolCalls'][number] }>;
 	editedFilePaths: Set<string>;
+	/** Per-user-turn tool-call sequences for model efficiency metrics (issue #1649). */
+	efficiencyTurns: EfficiencyTurn[];
 };
+
+/** Append a tool call to the current (or an implicit first) efficiency turn. */
+function _asuAppendEfficiencyToolCall(cliState: AsuCliState, toolName: string, args: Record<string, string> | undefined): EfficiencyTurn['toolCalls'][number] {
+	let turn = cliState.efficiencyTurns[cliState.efficiencyTurns.length - 1];
+	if (!turn) {
+		turn = { model: cliState.defaultModel, toolCalls: [] };
+		cliState.efficiencyTurns.push(turn);
+	}
+	const call: EfficiencyTurn['toolCalls'][number] = { toolName, arguments: args ? JSON.stringify(args) : undefined };
+	turn.toolCalls.push(call);
+	return call;
+}
 
 /** Check if the first JSONL line indicates a delta-based VS Code incremental format. */
 function _asuIsDeltaBased(lines: string[]): boolean {
@@ -2127,17 +2283,63 @@ export function analyzeCliAttachments(attachments: unknown, refs: ContextReferen
 	}
 }
 
+/**
+ * Resolve a user-typed slash invocation from Copilot CLI's plain-text `user.message` content
+ * (e.g. `/graphify`, `/chronicle standup`). Unlike Claude Code (which wraps explicit
+ * invocations in `<command-message>`/`<command-name>` tags), Copilot CLI's raw command is
+ * the literal message text — no wrapper. Deliberately agnostic (no allowlist), matching
+ * any registered skill/command name, not just a hardcoded few.
+ */
+export function extractInvokedSkillNameFromPlainText(content: unknown): string | null {
+	if (typeof content !== 'string') { return null; }
+	const m = content.trim().match(/^\/([a-zA-Z0-9_-]+)(?:\s|$)/);
+	return m ? m[1] : null;
+}
+
+function _asuCorrectionUserMessage(event: any): string | undefined {
+	const content = event.data?.content;
+	if (typeof content !== 'string') { return undefined; }
+	const source = event.data?.source;
+	const generated = (typeof source === 'string' && (source.startsWith('skill-') || source.startsWith('agent-')))
+		|| /^\s*<(?:skill-context|cross_session_message|system_(?:notification|reminder))\b/i.test(content);
+	return generated ? undefined : content;
+}
+
+/** Create the efficiency turn for a user.message event (with human text for correction detection). */
+function _asuCreateEfficiencyTurn(event: any, cliState: AsuCliState): EfficiencyTurn {
+	return {
+		model: event.model || cliState.defaultModel,
+		toolCalls: [],
+		userMessage: _asuCorrectionUserMessage(event),
+		timestamp: typeof event.timestamp === 'string' ? event.timestamp : null,
+	};
+}
+
 /** Handle Copilot CLI events (session.start, session.model_change, user.message). */
- 
+
 function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis, jetBrainsMode: JetBrainsMode | null): void {
 	if (event.type === 'session.start' && event.data) { _asuHandleSessionStartEvent(event.data as Record<string, unknown>, cliState); }
 	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') { cliState.defaultModel = event.data.newModel; }
+	_asuAccumulateAssistantText(event, cliState);
 	if (event.type === 'user.message') {
 		cliState.requestCount++;
 		const effort = typeof event.data?.reasoningEffort === 'string' ? event.data.reasoningEffort : cliState.defaultEffort;
 		if (effort) { cliState.effortByRequest[effort] = (cliState.effortByRequest[effort] || 0) + 1; }
+		cliState.efficiencyTurns.push(_asuCreateEfficiencyTurn(event, cliState));
 		analyzeCliAttachments(event.data?.attachments, analysis.contextReferences);
 		_asuHandleUserMessageMode(jetBrainsMode, analysis);
+		const skillName = extractInvokedSkillNameFromPlainText(event.data?.content);
+		if (skillName) { addSkillCall(analysis, skillName); }
+	}
+}
+
+/** Accumulate assistant.message response text onto the current turn (correction detection only). */
+function _asuAccumulateAssistantText(event: any, cliState: AsuCliState): void {
+	if (event.type !== 'assistant.message') { return; }
+	const content = event.data?.content;
+	const turn = cliState.efficiencyTurns[cliState.efficiencyTurns.length - 1];
+	if (typeof content === 'string' && content && turn) {
+		turn.assistantResponse = (turn.assistantResponse ?? '') + content;
 	}
 }
 
@@ -2178,11 +2380,19 @@ function _asuCollectTaskTurnFromEvent(event: any, currentTurn: TaskTurnSignal | 
 }
 
 /** Handle tool.call / tool.result / tool.execution_start events. */
- 
+
 function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
 	if (event.type !== 'tool.call' && event.type !== 'tool.result' && event.type !== 'tool.execution_start') { return; }
 	const toolName = event.data?.toolName || event.toolName || 'unknown';
 	recordToolOrMcpInvocation(toolName, analysis, toolNameMap);
+	// Copilot CLI wraps autonomous skill invocations behind a generic "skill" tool call
+	// (lowercase, unlike Claude Code's "Skill") — only tool.execution_start is confirmed to
+	// carry `arguments.skill`; gate on that exact event type to avoid any risk of the other
+	// two event types (tool.call/tool.result, an older/parallel schema) double-counting.
+	if (event.type === 'tool.execution_start' && toolName === 'skill') {
+		const skillName = event.data?.arguments?.skill;
+		if (typeof skillName === 'string' && skillName.trim()) { addSkillCall(analysis, skillName.trim()); }
+	}
 }
 
 /** Handle mcp.tool.call events and events with data.mcpServer set. */
@@ -2223,7 +2433,8 @@ function _asuEnsureEditScope(analysis: SessionUsageAnalysis): void {
 function _asuHandleToolStart(event: any, cliState: AsuCliState): void {
 	const { toolCallId, toolName, arguments: args } = event.data ?? {};
 	if (toolCallId && toolName) {
-		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {} });
+		const effCall = _asuAppendEfficiencyToolCall(cliState, toolName, args);
+		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {}, effCall });
 	}
 }
 
@@ -2263,6 +2474,7 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 	const pending = toolCallId ? cliState.pendingToolCalls.get(toolCallId) : undefined;
 	if (toolCallId) { cliState.pendingToolCalls.delete(toolCallId); }
 	if (!pending) { return; }
+	_asuMarkEffCallError(pending, success);
 	if (success && (pending.toolName === 'edit' || pending.toolName === 'create')) {
 		_asuApplyToolLoc(pending, cliState, analysis);
 	}
@@ -2274,12 +2486,16 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 	analysis.toolCalls.outputTokensByTool[pending.toolName] = (analysis.toolCalls.outputTokensByTool[pending.toolName] || 0) + tokens;
 }
 
+/** Mark the efficiency tool call of a completed call as failed (correction detection). */
+function _asuMarkEffCallError(pending: { toolName: string; args: Record<string, string>; effCall?: EfficiencyTurn['toolCalls'][number] }, success: unknown): void {
+	if (success === false && pending.effCall) { pending.effCall.isError = true; }
+}
+
 /** Handle tool.execution_start / tool.execution_complete for CLI LOC tracking. */
 function _asuHandleCliLocEvent(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
 	if (event.type === 'tool.execution_start') { _asuHandleToolStart(event, cliState); }
 	else if (event.type === 'tool.execution_complete') { _asuHandleToolComplete(event, cliState, analysis); }
 }
-
 /** Finalize editScope file counts from accumulated CLI tool LOC state. */
 function _asuApplyCliLocToEditScope(cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
 	if (cliState.editedFilePaths.size === 0) { return; }
@@ -2323,7 +2539,7 @@ async function _asuProcessNonDeltaJsonl(
 	const modeState: AsuModeState = { sessionMode: 'ask' };
 	const cliState: AsuCliState = {
 		defaultModel: 'unknown', defaultEffort: null, requestCount: 0, effortByRequest: {},
-		pendingToolCalls: new Map(), editedFilePaths: new Set(),
+		pendingToolCalls: new Map(), editedFilePaths: new Set(), efficiencyTurns: [],
 	};
 	const isJetBrains = isJetBrainsSessionPath(sessionFile);
 	const jetBrainsMode: JetBrainsMode | null = isJetBrains ? detectJetBrainsModeFromContent(fileContent) : null;
@@ -2342,6 +2558,11 @@ async function _asuProcessNonDeltaJsonl(
 	_asuApplyCliLocToEditScope(cliState, analysis);
 	_asuApplyCliThinkingEffort(cliState, analysis);
 	_asuFinalizeTaskClassification(analysis, taskTurns);
+	if (cliState.efficiencyTurns.length > 0) {
+		analysis.modelEfficiency = computeEfficiencyFromTurns(cliState.efficiencyTurns);
+		_setFirstUserPrompt(analysis, cliState.efficiencyTurns.find(t => t.userMessage)?.userMessage);
+		_setCorrectionDetection(analysis, cliState.efficiencyTurns);
+	}
 	await calculateModelSwitching(deps, sessionFile, analysis, fileContent);
 	// Track LOC/edit metrics for CLI sessions (delta path already handles this above)
 	await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
@@ -2382,6 +2603,52 @@ async function _asuProcessJsonUsage(
 }
 
 /**
+ * Compute model efficiency counters (issue #1649) for an ecosystem adapter's
+ * session from its buildTurns output, unless the adapter's analyzeUsage
+ * already provided them. Efficiency is optional — never fail analysis over it.
+ */
+async function _addTurnEfficiencyFromAdapter(eco: IEcosystemAdapter, sessionFile: string, analysis: SessionUsageAnalysis): Promise<void> {
+	if (analysis.modelEfficiency && analysis.correctionMoments && analysis.correctionCounts && analysis.firstUserPrompt) { return; }
+	if (!eco.buildTurns) { return; }
+	try {
+		const { turns } = await eco.buildTurns(sessionFile);
+		if (!analysis.modelEfficiency) {
+			const eff = computeEfficiencyFromTurns(turns);
+			if (Object.keys(eff).length > 0) { analysis.modelEfficiency = eff; }
+		}
+		if (!analysis.correctionMoments) {
+			_setCorrectionDetection(analysis, turns);
+		}
+		_setFirstUserPrompt(analysis, turns.find(t => t.userMessage)?.userMessage);
+	} catch { /* efficiency and correction moments are optional */ }
+}
+
+/**
+ * Copilot CLI sessions started via the Copilot desktop app record
+ * `client_name: github/autopilot` in the workspace.yaml sitting next to their
+ * events.jsonl. Break those interactions out of `modeUsage.cli` into
+ * `modeUsage.cliApp` so views can distinguish app-hosted sessions from plain
+ * terminal CLI usage. Runs after conversation patterns are derived so the
+ * per-session turn totals are unaffected by the split.
+ *
+ * Scoped to Copilot CLI session-state paths only: other JSONL ecosystems
+ * (Claude Code, OpenCode, …) never carry a workspace.yaml, and probing for one
+ * would log noisy open errors via readTextFileWithSizeGuard.
+ */
+async function _asuApplyCopilotAppSplit(sessionFile: string, analysis: SessionUsageAnalysis): Promise<void> {
+	if (analysis.modeUsage.cli === 0 || !isCopilotCliSessionPath(sessionFile)) { return; }
+	const yamlPath = path.join(path.dirname(sessionFile), 'workspace.yaml');
+	if (!await pathExists(yamlPath)) { return; }
+	const content = await readTextFileWithSizeGuard(yamlPath, 'usageAnalysis');
+	if (content === undefined) { return; }
+	const clientMatch = content.match(/^client_name:\s*(.+)$/m);
+	if (clientMatch && isCopilotAppClientName(clientMatch[1].trim())) {
+		analysis.modeUsage.cliApp = analysis.modeUsage.cli;
+		analysis.modeUsage.cli = 0;
+	}
+}
+
+/**
  * Analyze a session file for usage patterns (tool calls, modes, context references, MCP tools)
  */
 export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: string, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<SessionUsageAnalysis> {
@@ -2392,6 +2659,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 		if (eco && isAnalyzable(eco)) {
 			const result = await eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
 			if (!result.taskClassification) { result.taskClassification = createEmptyTaskClassificationResult(); }
+			await _addTurnEfficiencyFromAdapter(eco, sessionFile, result);
 			return result;
 		}
 		if (sessionFile.startsWith('windsurf://') || sessionFile.startsWith('devin://')) {
@@ -2412,6 +2680,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 	}
 	if (!analysis.taskClassification) { analysis.taskClassification = createEmptyTaskClassificationResult(); }
 
+	await _asuApplyCopilotAppSplit(sessionFile, analysis);
 	return analysis;
 }
 
@@ -2461,7 +2730,9 @@ function accumulateSubAgentTokenUsage(
 		const subAgent = extractSubAgentData(responseItem);
 		if (subAgent) {
 			const saModel = subAgent.modelName || baseModel;
-			if (!modelUsage[saModel]) { modelUsage[saModel] = { inputTokens: 0, outputTokens: 0 }; }
+			// Untrusted `modelName` string from parsed session JSON — see protoGuard.ts.
+			if (isUnsafeObjectKey(saModel)) { continue; }
+			if (!modelUsage[saModel]) { modelUsage[saModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 			if (subAgent.prompt) { modelUsage[saModel].inputTokens += estimateTokensFromText(subAgent.prompt, saModel, tokenEstimators); }
 			if (subAgent.result) { modelUsage[saModel].outputTokens += estimateTokensFromText(subAgent.result, saModel, tokenEstimators); }
 		}
@@ -2482,7 +2753,10 @@ type GmusJsonlState = {
 type CliShutdownMetricsEntry = { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } };
 
 function _gmusApplyMetricEntry(modelName: string, usage: NonNullable<CliShutdownMetricsEntry['usage']>, dest: ModelUsage): void {
-	if (!dest[modelName]) { dest[modelName] = { inputTokens: 0, outputTokens: 0 }; }
+	// Untrusted `modelName` key from a parsed modelMetrics JSON object (JSON.parse
+	// creates own "__proto__" properties, so Object.entries can yield it) — see protoGuard.ts.
+	if (isUnsafeObjectKey(modelName)) { return; }
+	if (!dest[modelName]) { dest[modelName] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	dest[modelName].inputTokens += typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
 	dest[modelName].outputTokens += typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
 	const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
@@ -2579,7 +2853,9 @@ function _gmusProcessJsonlLine(event: any, state: GmusJsonlState, modelUsage: Mo
 	}
 	_gmusUpdateDefaultModelFromEvent(event, state);
 	const model = event.data?.model || event.model || state.defaultModel;
-	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+	// Untrusted `model` string from parsed session JSONL — see protoGuard.ts.
+	if (isUnsafeObjectKey(model)) { return; }
+	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	if (!state.isDeltaBased) { _gmusProcessCliEventLine(event, model, state, modelUsage, deps); }
 }
 
@@ -2624,7 +2900,9 @@ function _gmusProcessDeltaRequest(request: SessionRequestRaw, defaultModel: stri
 	} else if (request.result?.details) {
 		requestModel = getModelFromRequest(request, deps.modelPricing);
 	}
-	if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0 }; }
+	// Untrusted `modelId` string from parsed session JSON — see protoGuard.ts.
+	if (isUnsafeObjectKey(requestModel)) { return; }
+	if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	if (!tryExtractExactTokenUsage(request, requestModel, modelUsage)) {
 		_gmusEstimateDeltaRequestTokens(request, requestModel, modelUsage, deps);
 	}
@@ -2651,7 +2929,9 @@ function _gmusDeltaFallbackExtraction(lines: string[], state: GmusJsonlState, mo
 		if (request.result?.usage || (typeof request.result?.promptTokens === 'number') || (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number')) { continue; }
 		let requestModel = state.defaultModel;
 		if (request.modelId) { requestModel = request.modelId.replace(/^copilot\//, ''); }
-		if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0 }; }
+		// Untrusted `modelId` string from parsed session JSON — see protoGuard.ts.
+		if (isUnsafeObjectKey(requestModel)) { continue; }
+		if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 		modelUsage[requestModel].inputTokens += extracted.promptTokens;
 		modelUsage[requestModel].outputTokens += extracted.outputTokens;
 	}
@@ -2664,7 +2944,7 @@ function _gmusBuildEstimatedCliUsage(state: GmusJsonlState, modelUsage: ModelUsa
 	const estimatedUsage: ModelUsage = {};
 	for (const [m, realOutput] of Object.entries(state.cliRealOutputByModel!)) {
 		const accumulatedInput = modelUsage[m]?.inputTokens ?? 0;
-		estimatedUsage[m] = { inputTokens: Math.round(accumulatedInput * contextFactor), outputTokens: realOutput };
+		estimatedUsage[m] = { inputTokens: Math.round(accumulatedInput * contextFactor), outputTokens: realOutput, sessions: 0 };
 	}
 	return estimatedUsage;
 }
@@ -2697,7 +2977,9 @@ function _gmusProcessJsonRequestEstimate(request: SessionRequestRaw, model: stri
 /** Process a single JSON-format session request, accumulating its token usage. */
 function _gmusProcessJsonRequest(request: SessionRequestRaw, modelUsage: ModelUsage, deps: GmusDeps): void {
 	const model = getModelFromRequest(request, deps.modelPricing);
-	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+	// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+	if (isUnsafeObjectKey(model)) { return; }
+	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	if (!tryExtractExactTokenUsage(request, model, modelUsage)) { _gmusProcessJsonRequestEstimate(request, model, modelUsage, deps); }
 	if (request.response && Array.isArray(request.response)) {
 		accumulateSubAgentTokenUsage(request.response as ResponseItemRaw[], model, modelUsage, deps.tokenEstimators);

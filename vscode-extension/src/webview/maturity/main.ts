@@ -1,12 +1,16 @@
 // Maturity Score webview
 import { navButtonsHtml } from '../shared/buttonConfig';
 import type { ContextReferenceUsage } from '../shared/contextRefUtils';
-import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
+import { setHtml } from '../shared/domUtils';
+import { escapeHtml, markdownToHtml, safeSectionHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import { buildDarkFactorySectionHtml } from './darkFactorySection';
+import type { DarkFactoryReport } from '../../../../src/types';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage, CategoryLevelData } from '../shared/types';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 
 type UsageAnalysisPeriod = {
 	sessions: number;
@@ -32,17 +36,26 @@ type CategoryScore = {
 	tips: string[];      // suggestions to reach next stage
 };
 
+type AgenticTrendPoint = {
+	date: string;
+	multiAgentParentSessions: number;
+	delegationSessions: number;
+};
+
 type MaturityData = {
 	overallStage: number;
 	overallLabel: string;
 	categories: CategoryScore[];
 	period: UsageAnalysisPeriod;
 	lastUpdated: string;
+	agenticTrend?: AgenticTrendPoint[];
 	dismissedTips?: string[];
 	isDebugMode?: boolean;
 	fluencyLevels?: CategoryLevelData[];
 	backendConfigured?: boolean;
 	installedHooks?: string[];
+	/** Per-repository Dark Factory readiness scan; absent when the scan could not run. */
+	darkFactory?: DarkFactoryReport;
 };
 
 // Maps a category name to the hook id that provides a session reminder for it
@@ -59,7 +72,14 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 };
 
 const vscode = acquireVsCodeApi();
-const initialData = getWindowData<MaturityData>('__INITIAL_MATURITY__');
+const initialData = getWindowData<MaturityData & { localization?: Record<string, string> }>('__INITIAL_MATURITY__');
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 
 // ── Demo mode state ─────────────────────────────────────────────────────
 
@@ -70,7 +90,9 @@ let demoPanelExpanded = false; // Hidden by default
 // ── Radar chart SVG ────────────────────────────────────────────────────
 
 function renderRadarChart(categories: CategoryScore[], overallStage: number): string {
-	const cx = 325, cy = 325, maxR = 150;
+	// Content extends maxR + 35 (label radius) + ~20 (label text) above/below
+	// center, so a 650x410 viewBox wraps it tightly without empty bands.
+	const cx = 325, cy = 205, maxR = 150;
 	const n = categories.length;
 	const angleStep = (2 * Math.PI) / n;
 	// Start from top (- PI/2)
@@ -135,7 +157,7 @@ function renderRadarChart(categories: CategoryScore[], overallStage: number): st
 		return `<text x="${cx + 4}" y="${cy - r + 3}" class="radar-ring-label" font-size="9">${ringLabelNames[level]}</text>`;
 	}).join('');
 
-	return `<svg viewBox="0 0 650 650" class="radar-svg" xmlns="http://www.w3.org/2000/svg">
+	return `<svg viewBox="0 0 650 410" class="radar-svg" xmlns="http://www.w3.org/2000/svg">
 		${rings}
 		${axes}
 		<polygon points="${dataPoints}" fill="${polyFill}" stroke="${polyStroke}" stroke-width="2" />
@@ -153,6 +175,47 @@ function stageColor(stage: number): string {
 		case 4: return '#22d3ee';
 		default: return '#666';
 	}
+}
+
+// ── Multi-Agent Usage sparkline ────────────────────────────────────────
+
+/** Renders a small inline SVG sparkline of daily multi-agent-parent + delegation sessions, for the Agentic category card. */
+function renderAgenticSparkline(trend: AgenticTrendPoint[] | undefined): string {
+	if (!trend || trend.length === 0) { return ''; }
+	const totalSessions = trend.reduce((sum, p) => sum + p.multiAgentParentSessions + p.delegationSessions, 0);
+	if (totalSessions === 0) { return ''; }
+
+	const width = 260, height = 46, padding = 4;
+	const maxVal = Math.max(1, ...trend.map(p => p.multiAgentParentSessions + p.delegationSessions));
+	const n = trend.length;
+	const stepX = n > 1 ? (width - padding * 2) / (n - 1) : 0;
+	const toY = (v: number) => height - padding - (v / maxVal) * (height - padding * 2);
+
+	const linePoints = (values: number[]) =>
+		values.map((v, i) => `${(padding + i * stepX).toFixed(1)},${toY(v).toFixed(1)}`).join(' ');
+
+	const totalPoints = linePoints(trend.map(p => p.multiAgentParentSessions + p.delegationSessions));
+	const parentPoints = linePoints(trend.map(p => p.multiAgentParentSessions));
+
+	const first = escapeHtml(trend[0].date);
+	const last = escapeHtml(trend[n - 1].date);
+
+	return `
+    <div class="agentic-sparkline" style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a2a30;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <span style="font-size: 11px; font-weight: 600; color: #999;">📈 Multi-Agent Usage (last ${n} days)</span>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" xmlns="http://www.w3.org/2000/svg">
+        <polyline points="${totalPoints}" fill="none" stroke="#22d3ee" stroke-width="2" />
+        <polyline points="${parentPoints}" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="3,2" />
+      </svg>
+      <div style="display: flex; justify-content: space-between; font-size: 9px; color: #666;">
+        <span>${first}</span>
+        <span style="color:#22d3ee;">— total</span>
+        <span style="color:#a78bfa;">┄ multi-agent parents</span>
+        <span>${last}</span>
+      </div>
+    </div>`;
 }
 
 
@@ -335,6 +398,7 @@ function buildCategoryCard(
   ` : '';
 
   const hookButton = buildHookReminderButton(cat.category, cat.tips.length, data.installedHooks ?? []);
+  const sparklineHtml = cat.category === 'Agentic' ? renderAgenticSparkline(data.agenticTrend) : '';
 
   return `
     <div class="category-card">
@@ -347,6 +411,7 @@ function buildCategoryCard(
         <div class="category-progress-fill" style="width: ${progressPct}%; background: ${color};"></div>
       </div>
       <ul class="evidence-list">${evidenceHtml || '<li class="evidence-item"><span class="evidence-icon">-</span><span>No significant activity detected</span></li>'}</ul>
+      ${sparklineHtml}
       ${!tipsAreDismissed && cat.tips.length > 0 ? `
         <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a2a30;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -433,6 +498,7 @@ function buildMaturityRootHtml(
         </div>
       </div>
       <div class="category-grid">${categoryCards}</div>
+      ${safeSectionHtml('Dark Factory Readiness', () => buildDarkFactorySectionHtml(data.darkFactory))}
       <div class="footer">
         <span class="footer-info">Based on last 30 days of activity &middot; Last updated: ${new Date(data.lastUpdated).toLocaleString()} &middot; Updates every 5 minutes</span>
         ${dismissedTips.length > 0 ? `<button id="btn-reset-tips" class="reset-tips-btn" title="Show all dismissed improvement suggestions again">🔄 Reset Dismissed Tips</button>` : ''}
@@ -452,8 +518,11 @@ function handlePngExport(): void {
   if (!svgEl) { return; }
 
   const clone = svgEl.cloneNode(true) as SVGSVGElement;
-  clone.setAttribute('width', '1100');
-  clone.setAttribute('height', '1100');
+  const vb = (svgEl.getAttribute('viewBox') || '0 0 650 410').split(/\s+/).map(Number);
+  const exportWidth = 1100;
+  const exportHeight = Math.round(exportWidth * ((vb[3] || 410) / (vb[2] || 650)));
+  clone.setAttribute('width', String(exportWidth));
+  clone.setAttribute('height', String(exportHeight));
   const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   bg.setAttribute('width', '100%');
   bg.setAttribute('height', '100%');
@@ -466,11 +535,11 @@ function handlePngExport(): void {
   const img = new Image();
   img.onload = () => {
     const canvas = document.createElement('canvas');
-    canvas.width = 1100;
-    canvas.height = 1100;
+    canvas.width = exportWidth;
+    canvas.height = exportHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) { return; }
-    ctx.drawImage(img, 0, 0, 1100, 1100);
+    ctx.drawImage(img, 0, 0, exportWidth, exportHeight);
     const dataUrl = canvas.toDataURL('image/png');
     vscode.postMessage({ command: 'saveChartImage', data: dataUrl });
   };
@@ -494,7 +563,7 @@ async function handleScreenshotExport(command: 'exportPdf' | 'exportPptx'): Prom
 
   const titleEl = document.createElement('div');
   titleEl.style.cssText = 'text-align:center;margin-bottom:20px;';
-  titleEl.innerHTML = `<div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">AI Engineering Fluency Score</div><div style="font-size:16px;color:#b8b8c8;">Report &middot; ${new Date().toLocaleDateString()}</div>`;
+  setHtml(titleEl, `<div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">AI Engineering Fluency Score</div><div style="font-size:16px;color:#b8b8c8;">Report &middot; ${new Date().toLocaleDateString()}</div>`);
   coverContainer.appendChild(titleEl);
 
   if (stageBanner) { coverContainer.appendChild(stageBanner.cloneNode(true)); }
@@ -527,6 +596,42 @@ async function handleScreenshotExport(command: 'exportPdf' | 'exportPptx'): Prom
   vscode.postMessage({ command, data: images });
 }
 
+async function handleShareToSocial(platform: 'linkedin' | 'bluesky' | 'mastodon'): Promise<void> {
+  const data = initialData;
+  if (!data) { return; }
+
+  const html2canvasModule = await import('html2canvas');
+  const html2canvas = (html2canvasModule.default ?? html2canvasModule) as unknown as (element: HTMLElement, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
+
+  const card = document.createElement('div');
+  card.style.cssText = 'position:absolute;left:-9999px;top:0;width:1200px;height:630px;background:#1b1b1e;border-radius:16px;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
+
+  const stageColors = ['#93c5fd', '#a78bfa', '#3b82f6', '#22d3ee'];
+  const stageColor = stageColors[data.overallStage - 1] || '#58a6ff';
+
+  setHtml(card, `
+    <div style="text-align:center;color:#fff;padding:48px;">
+      <div style="font-size:28px;margin-bottom:12px;">🎯 AI Engineering Fluency Score</div>
+      <div style="font-size:14px;color:#b8b8c8;margin-bottom:32px;text-transform:uppercase;letter-spacing:2px;">Overall AI Engineering Fluency</div>
+      <div style="font-size:56px;font-weight:800;color:${stageColor};margin-bottom:12px;">${escapeHtml(data.overallLabel)}</div>
+      <div style="font-size:20px;color:#b8b8c8;margin-bottom:40px;">${escapeHtml(STAGE_DESCRIPTIONS[data.overallStage] || '')}</div>
+      <div style="font-size:22px;font-weight:700;color:#58a6ff;margin-bottom:8px;">#AIEngineeringFluency</div>
+      <div style="font-size:14px;color:#7a7a8a;">Track your AI usage with AI Engineering Fluency</div>
+    </div>
+  `);
+
+  document.body.appendChild(card);
+  try {
+    const canvas = await html2canvas(card, { backgroundColor: '#1b1b1e', scale: 2, useCORS: true, width: 1200, height: 630 });
+    const dataUrl = canvas.toDataURL('image/png');
+    vscode.postMessage({ command: 'shareToSocial', platform, dataUrl });
+  } catch {
+    vscode.postMessage({ command: 'shareToSocialFailed', platform });
+  } finally {
+    document.body.removeChild(card);
+  }
+}
+
 function wireMaturityNavButtons(): void {
   document.getElementById('btn-refresh')?.addEventListener('click', () => { vscode.postMessage({ command: 'refresh' }); });
   document.getElementById('btn-level-viewer-inline')?.addEventListener('click', () => { vscode.postMessage({ command: 'showFluencyLevelViewer' }); });
@@ -536,6 +641,7 @@ function wireMaturityNavButtons(): void {
   document.getElementById('btn-diagnostics')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDiagnostics' }); });
   document.getElementById('btn-dashboard')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDashboard' }); });
   document.getElementById('btn-environmental')?.addEventListener('click', () => { vscode.postMessage({ command: 'showEnvironmental' }); });
+  document.getElementById('btn-efficiency')?.addEventListener('click', () => { vscode.postMessage({ command: 'showEfficiency' }); });
   wireExtensionPointButtons(vscode);
 }
 
@@ -558,9 +664,9 @@ function wireMaturityActionButtons(): void {
     });
   });
   document.getElementById('btn-reset-tips')?.addEventListener('click', () => { vscode.postMessage({ command: 'resetDismissedTips' }); });
-  document.getElementById('btn-share-linkedin')?.addEventListener('click', () => { vscode.postMessage({ command: 'shareToLinkedIn' }); });
-  document.getElementById('btn-share-bluesky')?.addEventListener('click', () => { vscode.postMessage({ command: 'shareToBluesky' }); });
-  document.getElementById('btn-share-mastodon')?.addEventListener('click', () => { vscode.postMessage({ command: 'shareToMastodon' }); });
+  document.getElementById('btn-share-linkedin')?.addEventListener('click', () => { void handleShareToSocial('linkedin'); });
+  document.getElementById('btn-share-bluesky')?.addEventListener('click', () => { void handleShareToSocial('bluesky'); });
+  document.getElementById('btn-share-mastodon')?.addEventListener('click', () => { void handleShareToSocial('mastodon'); });
 }
 
 function wireExportHandlers(): void {
@@ -606,7 +712,7 @@ function renderLayout(data: MaturityData): void {
     buildCategoryCard(cat, catIdx, dismissedTips, Boolean(useDemoCards), data)
   ).join('');
 
-  root.innerHTML = buildMaturityRootHtml(data, categoryCards, dismissedTips);
+  setHtml(root, buildMaturityRootHtml(data, categoryCards, dismissedTips));
 
   wireMaturityNavButtons();
   wireMaturityActionButtons();

@@ -8,7 +8,7 @@ For each model in the source:
   - Updates `inputCostPerMillion`, `outputCostPerMillion`,
     `cachedInputCostPerMillion` and `cacheCreationCostPerMillion` from the
     source's `pricing` block (direct provider/API pricing) when it differs
-  - Updates the `multiplier` and `tier` fields for existing models
+  - Updates the `tier` field for existing models
   - Updates `copilotPricing.releaseStatus` when that block already exists
   - Adds entries for previously unknown models, using the source's `pricing`
     block when available; falls back to a $0.00 stub (flagged for manual
@@ -236,15 +236,6 @@ def main() -> int:
                     )
                     pricing_changed = True
 
-            # Only update multiplier when the source has an actual value.
-            if multiplier_paid is not None and entry.get("multiplier") != multiplier_paid:
-                old = format_float(entry.get("multiplier", "?"))
-                entry["multiplier"] = multiplier_paid
-                field_updates.append(
-                    f"  ~ {existing_key}: multiplier {old} → {format_float(multiplier_paid)}"
-                )
-                pricing_changed = True
-
             # Update tier when we have a definitive value and it differs.
             current_tier = entry.get("tier", "unknown")
             if current_tier != new_tier and new_tier != "unknown":
@@ -280,7 +271,6 @@ def main() -> int:
                 "outputCostPerMillion": source_pricing.get("outputCostPerMillion", 0.00),
                 "category": category,
                 "tier": infer_tier(stub_multiplier),
-                "multiplier": stub_multiplier,
                 "displayNames": [display_name],
             }
             if "cachedInputCostPerMillion" in source_pricing:
@@ -292,7 +282,7 @@ def main() -> int:
             flag = "" if has_pricing else " ⚠️ pricing requires manual verification"
             new_models.append(
                 f"  + {normalized} ({display_name}, "
-                f"provider={provider}, multiplier={format_float(stub_multiplier)}){flag}"
+                f"provider={provider}, tier={infer_tier(stub_multiplier)}){flag}"
             )
             pricing_changed = True
 

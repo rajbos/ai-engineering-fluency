@@ -34,6 +34,7 @@ import type {
 import { parseJetBrainsPartition, type JetBrainsParsedSession, type JetBrainsToolCall, type JetBrainsTurn } from '../jetbrains';
 import { normalizePath } from '../utils/pathUtils';
 import { pathExists } from '../utils/fsAsync';
+import { readTextFileWithSizeGuard } from '../utils/safeFileRead';
 
 /** Returns the canonical JetBrains Copilot session directory (~/.copilot/jb). */
 export function getJetBrainsSessionDir(): string {
@@ -69,7 +70,8 @@ export class JetBrainsAdapter implements IEcosystemAdapter, IDiscoverableEcosyst
 	 */
 	private async parsePartition(sessionFile: string): Promise<JetBrainsParsedSession | null> {
 		try {
-			const content = await fs.promises.readFile(sessionFile, 'utf8');
+			const content = await readTextFileWithSizeGuard(sessionFile, 'jetbrainsAdapter');
+			if (content === undefined) { return null; }
 			return parseJetBrainsPartition(content);
 		} catch {
 			return null;

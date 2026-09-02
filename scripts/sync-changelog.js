@@ -42,6 +42,42 @@ const TEST_RELEASES = [
   }
 ];
 
+// The only GitHub owner/repo this script is ever meant to talk to. Kept as
+// hardcoded constants (not read from a file) so the values actually embedded
+// in outbound GitHub API requests never carry file-derived data — see
+// getGitHubOwnerRepo() below for why this matters.
+const EXPECTED_OWNER = 'rajbos';
+const EXPECTED_REPO = 'ai-engineering-fluency';
+
+/**
+ * Read package.json and confirm its `repository.url` field points at the
+ * expected GitHub repo, then return the hardcoded EXPECTED_OWNER/EXPECTED_REPO
+ * constants — not the strings extracted from package.json.
+ *
+ * This script only ever needs to call the GitHub API for this one repo, so
+ * package.json is used purely as a sanity check, never as the source of the
+ * values embedded in outbound requests (and the `gh api` command line).
+ * Returning the file-derived strings directly would mean file content flows
+ * into a network request/shell command; returning the hardcoded constants
+ * instead — after validating they match — avoids that entirely, regardless of
+ * what package.json happens to contain.
+ */
+function getGitHubOwnerRepo() {
+  const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const repoUrl = packageJson.repository?.url || '';
+  const match = repoUrl.match(/github\.com[\/:]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/);
+  if (!match) {
+    throw new Error('Could not extract repository information from package.json');
+  }
+  const [, owner, repo] = match;
+  if (owner !== EXPECTED_OWNER || repo !== EXPECTED_REPO) {
+    throw new Error(
+      `package.json repository (${owner}/${repo}) does not match the expected ${EXPECTED_OWNER}/${EXPECTED_REPO}; refusing to use it`
+    );
+  }
+  return { owner: EXPECTED_OWNER, repo: EXPECTED_REPO };
+}
+
 async function fetchGitHubReleases() {
   if (TEST_MODE) {
     console.log('🧪 Using test data (--test mode)...');
@@ -51,12 +87,7 @@ async function fetchGitHubReleases() {
   // Try GitHub CLI first (use `gh api` which supports the full release body field)
   try {
     execSync('gh --version', { stdio: 'ignore' });
-    // Extract repo slug from package.json for the gh api path
-    const pkgForCli = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-    const repoUrlForCli = pkgForCli.repository?.url || '';
-    const matchForCli = repoUrlForCli.match(/github\.com[\/:](.+?)\/(.+?)(?:\.git)?$/);
-    if (!matchForCli) throw new Error('Could not extract repository info from package.json');
-    const [, ownerCli, repoCli] = matchForCli;
+    const { owner: ownerCli, repo: repoCli } = getGitHubOwnerRepo();
     console.log('📡 Fetching GitHub releases using GitHub CLI (gh api)...');
     const releasesJson = execSync(
       `gh api repos/${ownerCli}/${repoCli}/releases?per_page=50`,
@@ -86,14 +117,7 @@ async function fetchGitHubReleases() {
   }
   
   // Extract repository info from package.json
-  const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-  const repoUrl = packageJson.repository?.url || '';
-  const match = repoUrl.match(/github\.com[\/:](.+?)\/(.+?)(?:\.git)?$/);
-  if (!match) {
-    throw new Error('Could not extract repository information from package.json');
-  }
-  
-  const [, owner, repo] = match;
+  const { owner, repo } = getGitHubOwnerRepo();
   console.log(`📡 Fetching releases for ${owner}/${repo} using GitHub API...`);
   
   return new Promise((resolve, reject) => {
@@ -205,18 +229,20 @@ async function syncReleaseNotes() {
 async function writeChangelog(changelogPath, releases) {
   console.log(`\n📝 Updating ${changelogPath} (${releases.length} releases)...`);
 
-  // Ensure the directory exists
+  // Ensure the directory exists (idempotent — no need to check first, which
+  // would leave a check-then-create race window).
   const dir = path.dirname(changelogPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  fs.mkdirSync(dir, { recursive: true });
 
-  // Read current file (or start fresh)
+  // Read current file (or start fresh). Attempt the read directly instead of
+  // checking existence first, avoiding a TOCTOU race between the check and
+  // the read.
   let changelog = '';
-  if (fs.existsSync(changelogPath)) {
+  try {
     changelog = fs.readFileSync(changelogPath, 'utf8');
     console.log(`📖 Reading existing ${changelogPath}`);
-  } else {
+  } catch (err) {
+    if (err.code !== 'ENOENT') { throw err; }
     console.log(`📝 ${changelogPath} does not exist, creating new file`);
   }
   

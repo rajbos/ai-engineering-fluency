@@ -1,0 +1,236 @@
+{
+  "weekly": [
+    {
+      "weekKey": "2026-02-01",
+      "label": "Week 1",
+      "sessions": 22,
+      "tokens": 1180000,
+      "cost": 18.4,
+      "loc": 2400,
+      "interactions": 170,
+      "tokensPerSession": 53636,
+      "turnsPerSession": 7.7,
+      "costPerKloc": 7.67
+    },
+    {
+      "weekKey": "2026-02-02",
+      "label": "Week 2",
+      "sessions": 25,
+      "tokens": 1270000,
+      "cost": 16.8,
+      "loc": 2660,
+      "interactions": 192,
+      "tokensPerSession": 50800,
+      "turnsPerSession": 7.7,
+      "costPerKloc": 6.32
+    },
+    {
+      "weekKey": "2026-02-03",
+      "label": "Week 3",
+      "sessions": 28,
+      "tokens": 1360000,
+      "cost": 15.2,
+      "loc": 2920,
+      "interactions": 214,
+      "tokensPerSession": 48571,
+      "turnsPerSession": 7.6,
+      "costPerKloc": 5.21
+    },
+    {
+      "weekKey": "2026-02-04",
+      "label": "Week 4",
+      "sessions": 31,
+      "tokens": 1450000,
+      "cost": 13.6,
+      "loc": 3180,
+      "interactions": 236,
+      "tokensPerSession": 46774,
+      "turnsPerSession": 7.6,
+      "costPerKloc": 4.28
+    },
+    {
+      "weekKey": "2026-02-05",
+      "label": "Week 5",
+      "sessions": 34,
+      "tokens": 1540000,
+      "cost": 12,
+      "loc": 3440,
+      "interactions": 258,
+      "tokensPerSession": 45294,
+      "turnsPerSession": 7.6,
+      "costPerKloc": 3.49
+    },
+    {
+      "weekKey": "2026-02-06",
+      "label": "Week 6",
+      "sessions": 37,
+      "tokens": 1630000,
+      "cost": 10.4,
+      "loc": 3700,
+      "interactions": 280,
+      "tokensPerSession": 44054,
+      "turnsPerSession": 7.6,
+      "costPerKloc": 2.81
+    }
+  ],
+  "hasLoc": true,
+  "hasDuration": false,
+  "hasRetry": false,
+  "hasApply": true,
+  "attribution": {
+    "prev": {
+      "cost": 52.3,
+      "sessions": 64,
+      "tokens": 3900000,
+      "tokensPerSession": 60938,
+      "dollarsPerMTokens": 13.41
+    },
+    "cur": {
+      "cost": 41.8,
+      "sessions": 73,
+      "tokens": 4450000,
+      "tokensPerSession": 60959,
+      "dollarsPerMTokens": 9.39
+    },
+    "deltaCost": -10.5,
+    "volumeEffect": 7.35,
+    "efficiencyEffect": -12.6,
+    "mixEffect": -5.25,
+    "modelShifts": [
+      {
+        "model": "claude-sonnet-4.5",
+        "deltaShare": 0.18
+      },
+      {
+        "model": "gpt-4o",
+        "deltaShare": -0.11
+      }
+    ]
+  },
+  "attributionWindows": {
+    "prev": "Jan 12 – Feb 8",
+    "cur": "Feb 9 – Mar 8"
+  },
+  "deltas": [
+    {
+      "id": "costPerKloc",
+      "label": "Cost per 1K lines",
+      "description": "Estimated spend for every thousand lines changed.",
+      "prev": 7.66,
+      "cur": 5.06,
+      "unit": "usd",
+      "goodDirection": "down",
+      "deltaPct": -33.9,
+      "improved": true
+    },
+    {
+      "id": "tokensPerSession",
+      "label": "Tokens per session",
+      "description": "Average context consumed per session.",
+      "prev": 60937,
+      "cur": 60958,
+      "unit": "count",
+      "goodDirection": "down",
+      "deltaPct": 0.03,
+      "improved": false
+    },
+    {
+      "id": "turnsPerSession",
+      "label": "Turns per session",
+      "description": "Back-and-forth needed to finish a task.",
+      "prev": 7.7,
+      "cur": 7.6,
+      "unit": "count",
+      "goodDirection": "down",
+      "deltaPct": -1.3,
+      "improved": true
+    }
+  ],
+  "deltaWindows": {
+    "prev": "Jan 12 – Feb 8",
+    "cur": "Feb 9 – Mar 8"
+  },
+  "value": {
+    "userPrs": 18,
+    "mergedPrs": 14,
+    "aiPrs": 3,
+    "prsSince": "2026-02-14T00:00:00.000Z",
+    "prsPerWeek": 3.5,
+    "costPerMergedPr": 2.99,
+    "applyRate": 0.62,
+    "appliedBlocks": 186,
+    "totalBlocks": 300,
+    "locPerDollar": 352.6,
+    "linesChanged": 14740,
+    "periodCost": 41.8
+  },
+  "skillTrends": {
+    "weeks": [
+      {
+        "weekKey": "2026-02-01",
+        "label": "Week 1",
+        "byCanonicalSkill": {
+          "graphify": 2,
+          "code-review": 1
+        },
+        "totalCalls": 3
+      },
+      {
+        "weekKey": "2026-02-02",
+        "label": "Week 2",
+        "byCanonicalSkill": {
+          "graphify": 3,
+          "code-review": 2
+        },
+        "totalCalls": 5
+      },
+      {
+        "weekKey": "2026-02-03",
+        "label": "Week 3",
+        "byCanonicalSkill": {
+          "graphify": 4,
+          "code-review": 3
+        },
+        "totalCalls": 7
+      },
+      {
+        "weekKey": "2026-02-04",
+        "label": "Week 4",
+        "byCanonicalSkill": {
+          "graphify": 5,
+          "code-review": 1
+        },
+        "totalCalls": 6
+      },
+      {
+        "weekKey": "2026-02-05",
+        "label": "Week 5",
+        "byCanonicalSkill": {
+          "graphify": 6,
+          "code-review": 2
+        },
+        "totalCalls": 8
+      },
+      {
+        "weekKey": "2026-02-06",
+        "label": "Week 6",
+        "byCanonicalSkill": {
+          "graphify": 7,
+          "code-review": 3
+        },
+        "totalCalls": 10
+      }
+    ],
+    "topSkills": [
+      "graphify",
+      "code-review"
+    ],
+    "totalCalls": 34
+  },
+  "skillImpact": [],
+  "hasSkills": true,
+  "lastUpdated": "2026-03-14T09:30:00.000Z",
+  "backendConfigured": false,
+  "compactNumbers": false,
+  "isDebugMode": false
+}

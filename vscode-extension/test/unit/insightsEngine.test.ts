@@ -394,3 +394,423 @@ test('large-context-window-unused: does NOT fire when the context actually excee
 	assert.equal(results.find(i => i.id === LC_UNUSED_ID), undefined, 'window was genuinely used past the threshold');
 	assert.ok(results.find(i => i.id === LC_CROSSED_ID), 'crossed/tier warning applies instead');
 });
+
+// ---------------------------------------------------------------------------
+// model-edit-retries insight tests (issue #1649)
+// ---------------------------------------------------------------------------
+
+const RETRIES_ID = 'model-edit-retries';
+
+function effCounters(retries: number, editTurns: number) {
+	return {
+		calls: editTurns, editTurns, oneShotEditTurns: Math.max(0, editTurns - retries),
+		retries, selfCorrections: 0, editToolCalls: editTurns + retries,
+		inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0,
+	};
+}
+
+function makeRetryCtx(modelEfficiency: NonNullable<UsageAnalysisPeriod['modelEfficiency']>): InsightContext {
+	const ctx = makeCtx();
+	ctx.last30Days.modelEfficiency = modelEfficiency;
+	return ctx;
+}
+
+test('model-edit-retries: insight exists in INSIGHT_CATALOG', () => {
+	const def = INSIGHT_CATALOG.find(d => d.id === RETRIES_ID);
+	assert.ok(def, 'model-edit-retries should be in INSIGHT_CATALOG');
+	assert.equal(def!.severity, 'tip');
+	assert.equal(def!.category, 'agentic');
+});
+
+test('model-edit-retries: does NOT fire without model efficiency data', () => {
+	const results = evaluateInsights(makeCtx(), {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRIES_ID), undefined);
+});
+
+test('model-edit-retries: does NOT fire when models have too few edit turns', () => {
+	// High rate but only 5 edit turns — below the 10-turn minimum
+	const ctx = makeRetryCtx({ 'gpt-4o': effCounters(4, 5) });
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRIES_ID), undefined);
+});
+
+test('model-edit-retries: fires when a single model has a high retry rate', () => {
+	const ctx = makeRetryCtx({ 'gpt-4o': effCounters(10, 20) }); // 0.5 retries/edit
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === RETRIES_ID);
+	assert.ok(insight, 'should fire at 0.5 retries per edit turn');
+	assert.ok(insight!.body.includes('10 retries across 20 edit turns'), `body should carry the counts, got: ${insight!.body}`);
+});
+
+test('model-edit-retries: does NOT fire for a single model with a modest retry rate', () => {
+	const ctx = makeRetryCtx({ 'gpt-4o': effCounters(6, 20) }); // 0.3 retries/edit, no comparison model
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRIES_ID), undefined);
+});
+
+test('model-edit-retries: fires on a clear gap between two models and names both', () => {
+	const ctx = makeRetryCtx({
+		'model-worst': effCounters(6, 20),  // 0.3 retries/edit
+		'model-best': effCounters(1, 20),   // 0.05 retries/edit
+	});
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === RETRIES_ID);
+	assert.ok(insight, 'should fire when the worst model retries 2x+ more than the best');
+	assert.ok(insight!.body.includes('model-worst'), 'body should name the high-retry model');
+	assert.ok(insight!.body.includes('model-best'), 'body should name the comparison model');
+});
+
+test('model-edit-retries: does NOT fire when models retry at similar modest rates', () => {
+	const ctx = makeRetryCtx({
+		'model-a': effCounters(6, 20),  // 0.3
+		'model-b': effCounters(5, 20),  // 0.25 — no 2x gap, neither >= 0.5
+	});
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRIES_ID), undefined);
+});
+
+test('model-edit-retries: action opens the model efficiency section', () => {
+	const ctx = makeRetryCtx({ 'gpt-4o': effCounters(10, 20) });
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === RETRIES_ID);
+	assert.equal(insight!.actionCommand, 'aiEngineeringFluency.openModelEfficiency');
+});
+
+// ---------------------------------------------------------------------------
+// multi-agent-orchestration / subagent-delegation insight tests
+// ---------------------------------------------------------------------------
+
+const MULTI_AGENT_ID = 'multi-agent-orchestration';
+const SUBAGENT_DELEGATION_ID = 'subagent-delegation';
+
+test('multi-agent-orchestration: fires when multiAgentParentSessions >= 3', () => {
+	const ctx = makeCtx();
+	(ctx.last30Days as UsageAnalysisPeriod & { multiAgentParentSessions?: number }).multiAgentParentSessions = 3;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === MULTI_AGENT_ID);
+	assert.ok(insight, 'should fire at 3 multi-agent parent sessions');
+	assert.ok(insight!.body.includes('3'));
+});
+
+test('multi-agent-orchestration: does NOT fire below threshold', () => {
+	const ctx = makeCtx();
+	(ctx.last30Days as UsageAnalysisPeriod & { multiAgentParentSessions?: number }).multiAgentParentSessions = 2;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === MULTI_AGENT_ID), undefined);
+});
+
+test('subagent-delegation: fires when delegationSessions >= 5 and no multi-agent hierarchy signal', () => {
+	const ctx = makeCtx();
+	(ctx.last30Days as UsageAnalysisPeriod & { delegationSessions?: number }).delegationSessions = 5;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === SUBAGENT_DELEGATION_ID);
+	assert.ok(insight, 'should fire at 5 delegation sessions');
+	assert.ok(insight!.body.includes('5'));
+});
+
+test('subagent-delegation: does NOT fire below threshold', () => {
+	const ctx = makeCtx();
+	(ctx.last30Days as UsageAnalysisPeriod & { delegationSessions?: number }).delegationSessions = 4;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === SUBAGENT_DELEGATION_ID), undefined);
+});
+
+test('subagent-delegation: does NOT fire when multi-agent-orchestration already covers the signal', () => {
+	const ctx = makeCtx();
+	const period = ctx.last30Days as UsageAnalysisPeriod & { delegationSessions?: number; multiAgentParentSessions?: number };
+	period.delegationSessions = 5;
+	period.multiAgentParentSessions = 3;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === SUBAGENT_DELEGATION_ID), undefined, 'should defer to the richer multi-agent-orchestration insight');
+	assert.ok(results.find(i => i.id === MULTI_AGENT_ID), 'multi-agent-orchestration should still fire');
+});
+
+// ---------------------------------------------------------------------------
+// Efficiency trend insight tests
+// ---------------------------------------------------------------------------
+
+const LEANER_ID = 'trend-leaner-sessions';
+const HEAVIER_ID = 'trend-sessions-getting-heavier';
+const RETRY_PRICE_ID = 'retry-price-mismatch';
+
+function periodWithTurns(sessions: number, avgTurns: number): UsageAnalysisPeriod {
+	const p = emptyPeriod();
+	p.sessions = sessions;
+	p.conversationPatterns = { multiTurnSessions: sessions, singleTurnSessions: 0, avgTurnsPerSession: avgTurns, maxTurnsInSession: avgTurns };
+	return p;
+}
+
+test('trend-leaner-sessions: fires when turns/session drops >=15% month over month', () => {
+	const ctx = makeCtx();
+	ctx.lastMonth = periodWithTurns(20, 10);
+	ctx.month = periodWithTurns(15, 7);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === LEANER_ID);
+	assert.ok(insight, 'should fire on a 30% drop in turns per session');
+	assert.ok(insight!.body.includes('7.0'));
+});
+
+test('trend-leaner-sessions: does NOT fire on a small drop', () => {
+	const ctx = makeCtx();
+	ctx.lastMonth = periodWithTurns(20, 10);
+	ctx.month = periodWithTurns(15, 9.5);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LEANER_ID), undefined);
+});
+
+test('trend-leaner-sessions: does NOT fire without month periods in context', () => {
+	const ctx = makeCtx();
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LEANER_ID), undefined);
+});
+
+test('trend-leaner-sessions: does NOT fire when retry rate regressed alongside the drop', () => {
+	const ctx = makeCtx();
+	ctx.lastMonth = periodWithTurns(20, 10);
+	ctx.lastMonth.modelEfficiency = { m: { calls: 20, editTurns: 20, oneShotEditTurns: 19, retries: 1, selfCorrections: 0, editToolCalls: 20, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 } };
+	ctx.month = periodWithTurns(15, 7);
+	ctx.month.modelEfficiency = { m: { calls: 20, editTurns: 20, oneShotEditTurns: 10, retries: 10, selfCorrections: 0, editToolCalls: 20, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 } };
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LEANER_ID), undefined, 'a 10x retry regression should suppress the celebration');
+});
+
+test('trend-sessions-getting-heavier: fires when turns/session rises >=25%', () => {
+	const ctx = makeCtx();
+	ctx.lastMonth = periodWithTurns(20, 6);
+	ctx.month = periodWithTurns(15, 9);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.ok(results.find(i => i.id === HEAVIER_ID));
+});
+
+test('trend-sessions-getting-heavier: does NOT fire below the sample-size floor', () => {
+	const ctx = makeCtx();
+	ctx.lastMonth = periodWithTurns(20, 6);
+	ctx.month = periodWithTurns(5, 9);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === HEAVIER_ID), undefined);
+});
+
+test('retry-price-mismatch: fires when the priciest model retries most', () => {
+	const ctx = makeCtx();
+	// gpt-5 ($10/M output) retries heavily; gpt-5-mini ($2/M) barely retries.
+	ctx.last30Days.modelEfficiency = {
+		'gpt-5': { calls: 30, editTurns: 30, oneShotEditTurns: 15, retries: 15, selfCorrections: 0, editToolCalls: 45, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 },
+		'gpt-5-mini': { calls: 30, editTurns: 30, oneShotEditTurns: 28, retries: 2, selfCorrections: 0, editToolCalls: 32, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 },
+	};
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === RETRY_PRICE_ID);
+	assert.ok(insight, 'should fire on a 7.5x retry gap with a 5x price gap');
+	assert.ok(insight!.body.includes('5.0'), 'body should mention the price ratio');
+});
+
+test('retry-price-mismatch: does NOT fire when the cheap model retries most', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modelEfficiency = {
+		'gpt-5-mini': { calls: 30, editTurns: 30, oneShotEditTurns: 15, retries: 15, selfCorrections: 0, editToolCalls: 45, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 },
+		'gpt-5': { calls: 30, editTurns: 30, oneShotEditTurns: 28, retries: 2, selfCorrections: 0, editToolCalls: 32, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 },
+	};
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRY_PRICE_ID), undefined, 'worst retrier is the cheaper model — no mismatch');
+});
+
+test('retry-price-mismatch: does NOT fire with a single model', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modelEfficiency = {
+		'gpt-5': { calls: 30, editTurns: 30, oneShotEditTurns: 15, retries: 15, selfCorrections: 0, editToolCalls: 45, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 },
+	};
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRY_PRICE_ID), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// mode-diversity-low insight tests
+// ---------------------------------------------------------------------------
+
+const MODE_DIVERSITY_ID = 'mode-diversity-low';
+
+test('mode-diversity-low: fires when usage is mostly Ask mode', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 18;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === MODE_DIVERSITY_ID);
+	assert.ok(insight, 'should fire when ask dominates mode interactions');
+	assert.ok(insight!.body.includes('mostly use Ask mode'));
+});
+
+test('mode-diversity-low: has an action button opening the Interaction Modes view', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 18;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === MODE_DIVERSITY_ID);
+	assert.ok(insight);
+	assert.equal(insight!.actionLabel, 'View Interaction Modes');
+	assert.equal(insight!.actionCommand, 'aiEngineeringFluency.openActivityTab');
+});
+
+test('mode-diversity-low: does NOT fire for CLI-heavy users (CLI counts as agentic usage)', () => {
+	const ctx = makeCtx();
+	// Mirrors a heavy Copilot CLI user: few in-editor Ask interactions, mostly CLI.
+	ctx.last30Days.modeUsage.ask = 268;
+	ctx.last30Days.modeUsage.cli = 1123;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === MODE_DIVERSITY_ID), undefined);
+});
+
+test('mode-diversity-low: does NOT fire when Copilot App CLI usage dominates (cliApp)', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 100;
+	ctx.last30Days.modeUsage.cliApp = 300;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === MODE_DIVERSITY_ID), undefined);
+});
+
+test('mode-diversity-low: does NOT fire when Plan/Custom Agent usage is significant', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 40;
+	ctx.last30Days.modeUsage.plan = 30;
+	ctx.last30Days.modeUsage.customAgent = 30;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === MODE_DIVERSITY_ID), undefined,
+		'plan and custom-agent interactions count as agentic — no false "haven\'t tried Agent mode" claim');
+});
+
+test('mode-diversity-low: fires with "haven\'t tried Agent mode" body when no agentic usage at all', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 10;
+	ctx.last30Days.modeUsage.edit = 8;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === MODE_DIVERSITY_ID);
+	assert.ok(insight, 'should fire when there is no agent/CLI usage and enough interactions');
+	assert.ok(insight!.body.includes('haven\'t tried Agent mode'));
+});
+
+test('mode-diversity-low: still fires when agentic share is small', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 90;
+	ctx.last30Days.modeUsage.agent = 5;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === MODE_DIVERSITY_ID);
+	assert.ok(insight, 'should fire when agentic interactions are under 15% of mode interactions');
+});
+
+test('mode-diversity-low: does NOT fire with too little data', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.sessions = 5;
+	ctx.last30Days.modeUsage.ask = 5;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === MODE_DIVERSITY_ID), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// corrections insights tests
+// ---------------------------------------------------------------------------
+
+function emptyCorrections() {
+	return { userCorrections: 0, editRetries: 0, editSelfCorrections: 0, toolErrors: 0, toolErrorsRetried: 0, agentSelfCorrections: 0, sessionsWithMoments: 0 };
+}
+
+test('corrections-user-pushback: fires at >= 3 user corrections', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.corrections = { ...emptyCorrections(), userCorrections: 3, sessionsWithMoments: 9, sessionsWithUserCorrections: 2 };
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === 'corrections-user-pushback');
+	assert.ok(insight, 'should fire at the threshold');
+	assert.match(insight.body, /3 times/);
+	assert.match(insight.body, /across 2 sessions/);
+	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openCorrectionsTab');
+});
+
+test('corrections-user-pushback: does NOT fire below the threshold or without data', () => {
+	const below = makeCtx();
+	below.last30Days.corrections = { ...emptyCorrections(), userCorrections: 2, sessionsWithMoments: 1 };
+	assert.equal(evaluateInsights(below, {}, 7, null).find(i => i.id === 'corrections-user-pushback'), undefined);
+	assert.equal(evaluateInsights(makeCtx(), {}, 7, null).find(i => i.id === 'corrections-user-pushback'), undefined);
+});
+
+test('corrections-tool-errors: fires at >= 5 tool errors', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.corrections = { ...emptyCorrections(), toolErrors: 5, toolErrorsRetried: 4, sessionsWithMoments: 3 };
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.ok(results.find(i => i.id === 'corrections-tool-errors'), 'should fire at the threshold');
+});
+
+test('corrections-tool-errors: fires on edit retry volume even without tool errors', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.corrections = { ...emptyCorrections(), editRetries: 7, editSelfCorrections: 3, sessionsWithMoments: 4 };
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.ok(results.find(i => i.id === 'corrections-tool-errors'), 'edit retries + self-corrections >= 10 should fire');
+});
+
+test('corrections-tool-errors: does NOT fire on low volume or missing data', () => {
+	const low = makeCtx();
+	low.last30Days.corrections = { ...emptyCorrections(), toolErrors: 4, editRetries: 4, sessionsWithMoments: 2 };
+	assert.equal(evaluateInsights(low, {}, 7, null).find(i => i.id === 'corrections-tool-errors'), undefined);
+	assert.equal(evaluateInsights(makeCtx(), {}, 7, null).find(i => i.id === 'corrections-tool-errors'), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// repeated-task-skill-candidate insight tests
+// ---------------------------------------------------------------------------
+
+function rtReport(maxClusterSize: number) {
+	return {
+		minClusterSize: 2,
+		sessionsScanned: 20,
+		clusters: [{
+			representativePrompt: 'run the tests and fix the failures',
+			sessionCount: maxClusterSize,
+			repositories: ['o/r1'],
+			sessions: [],
+			sharedKeywords: ['run', 'tests', 'fix', 'failures'],
+		}],
+	};
+}
+
+test('repeated-task-skill-candidate: fires when a cluster reaches 3 sessions', () => {
+	const ctx = makeCtx();
+	ctx.repeatedTasks = rtReport(3);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === 'repeated-task-skill-candidate');
+	assert.ok(insight, 'should fire at sessionCount = 3');
+	assert.match(insight.body, /3 sessions/);
+	assert.match(insight.body, /run the tests/);
+	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openToolsTab');
+});
+
+test('insight navigation actions target their destination tabs and sections', () => {
+	const missingInstructions = makeCtx();
+	missingInstructions.missedPotential = [{
+		workspaceName: 'repo',
+		workspacePath: 'C:\\repo',
+		sessionCount: 3,
+		interactionCount: 10,
+		nonCopilotFiles: [],
+	}];
+	assert.equal(
+		evaluateInsights(missingInstructions, {}, 7, null).find(i => i.id === 'missing-instructions')?.actionCommand,
+		'aiEngineeringFluency.openHealthTab',
+	);
+
+	const corrections = makeCtx();
+	corrections.last30Days.corrections = { ...emptyCorrections(), userCorrections: 3, sessionsWithMoments: 2 };
+	assert.equal(
+		evaluateInsights(corrections, {}, 7, null).find(i => i.id === 'corrections-user-pushback')?.actionCommand,
+		'aiEngineeringFluency.openCorrectionsTab',
+	);
+
+	corrections.last30Days.corrections = { ...emptyCorrections(), toolErrors: 5, sessionsWithMoments: 2 };
+	assert.equal(
+		evaluateInsights(corrections, {}, 7, null).find(i => i.id === 'corrections-tool-errors')?.actionCommand,
+		'aiEngineeringFluency.openCorrectionsTab',
+	);
+});
+
+test('repeated-task-skill-candidate: does NOT fire below 3 sessions or without data', () => {
+	const below = makeCtx();
+	below.repeatedTasks = rtReport(2);
+	assert.equal(evaluateInsights(below, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
+	assert.equal(evaluateInsights(makeCtx(), {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
+	const empty = makeCtx();
+	empty.repeatedTasks = { minClusterSize: 2, sessionsScanned: 20, clusters: [] };
+	assert.equal(evaluateInsights(empty, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
+});

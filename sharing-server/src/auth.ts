@@ -176,6 +176,7 @@ export async function validateGitHubToken(token: string): Promise<UserRow | null
 async function checkOrgMembership(userToken: string, username: string, org: string): Promise<boolean> {
 	// Prefer a server-side PAT (already SSO-authorized) so the user's OAuth token
 	// doesn't need read:org or SAML SSO authorization.
+	const usingServerToken = Boolean(process.env.GITHUB_ORG_CHECK_TOKEN);
 	const checkToken = process.env.GITHUB_ORG_CHECK_TOKEN || userToken;
 	try {
 		const res = await fetch(`https://api.github.com/orgs/${org}/members/${username}`, {
@@ -186,9 +187,36 @@ async function checkOrgMembership(userToken: string, username: string, org: stri
 			},
 			signal: AbortSignal.timeout(10_000),
 		});
-		return res.status === 204;
-	} catch {
+		if (res.status === 204) return true;
+		logOrgMembershipFailure(username, org, res.status, usingServerToken);
 		return false;
+	} catch (err) {
+		console.error(`[auth] Org membership check for '${username}' in '${org}' failed with a network/timeout error:`, err);
+		return false;
+	}
+}
+
+/**
+ * Logs the reason an org membership check came back negative, distinguishing
+ * "the user genuinely isn't a member" (404) from "the check itself is broken"
+ * (401/403 — usually an expired/invalid GITHUB_ORG_CHECK_TOKEN, or a user
+ * token missing read:org/SSO authorization when no server PAT is configured).
+ * Without this, both cases produce the exact same "not a member" outcome,
+ * which is impossible to diagnose from the outside.
+ */
+function logOrgMembershipFailure(username: string, org: string, status: number, usingServerToken: boolean): void {
+	if (status === 404) {
+		console.info(`[auth] Org membership check: '${username}' is not a member of '${org}' (404).`);
+	} else if (status === 401 || status === 403) {
+		console.error(
+			`[auth] Org membership check for '${username}' in '${org}' returned ${status} — the ` +
+			`${usingServerToken ? 'GITHUB_ORG_CHECK_TOKEN' : "user's own"} token appears invalid/expired or lacks permission. ` +
+			(usingServerToken
+				? 'Rotate GITHUB_ORG_CHECK_TOKEN.'
+				: "The user's token may need read:org scope or SSO authorization for this org."),
+		);
+	} else {
+		console.warn(`[auth] Org membership check for '${username}' in '${org}' returned unexpected status ${status}.`);
 	}
 }
 

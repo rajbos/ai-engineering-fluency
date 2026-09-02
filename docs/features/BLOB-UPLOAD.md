@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Copilot Token Tracker extension can upload your local GitHub Copilot session log files to Azure Blob Storage. This enables:
+The AI Engineering Fluency extension can upload your local GitHub Copilot session log files to Azure Blob Storage. This enables:
 
 1. **Team Collaboration**: Share session logs with your team for analysis and learning
 2. **Persistent Storage**: Keep logs beyond local VS Code storage limits
@@ -100,7 +100,7 @@ No additional configuration needed - extension uses same credentials as backend 
 
 If using shared key authentication:
 
-1. Run command: "Copilot Token Tracker: Set Backend Storage Shared Key"
+1. Run command: "AI Engineering Fluency: Set Backend Storage Shared Key"
 2. Enter your storage account access key
 3. Key is stored securely in VS Code SecretStorage
 
@@ -270,7 +270,7 @@ If operating in the EU or with EU users:
 
 **View logs:**
 1. Open Output panel: View → Output
-2. Select "Copilot Token Tracker" from dropdown
+2. Select "AI Engineering Fluency" from dropdown
 3. Look for "Blob upload:" messages
 
 **Common issues:**
@@ -395,7 +395,7 @@ Not currently. All session files found locally are uploaded (subject to frequenc
 ## Next Steps
 
 1. Review [Backend Setup Guide](backend.md) for initial Azure configuration
-2. Test upload with manual sync: "Copilot Token Tracker: Configure Backend"
+2. Test upload with manual sync: "AI Engineering Fluency: Configure Backend"
 3. Set up coding agent environment variables for workflow access
 4. Configure lifecycle policies to manage storage costs
 5. Review uploaded files in Azure Portal → Storage accounts → Containers

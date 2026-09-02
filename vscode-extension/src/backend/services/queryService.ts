@@ -309,7 +309,7 @@ export class QueryService {
 		acc.totalTokens += tokens;
 		acc.totalInteractions += rollup.interactions;
 		if (!acc.modelUsage[rollup.model]) {
-			acc.modelUsage[rollup.model] = { inputTokens: 0, outputTokens: 0 };
+			acc.modelUsage[rollup.model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 		}
 		acc.modelUsage[rollup.model].inputTokens += rollup.inputTokens;
 		acc.modelUsage[rollup.model].outputTokens += rollup.outputTokens;

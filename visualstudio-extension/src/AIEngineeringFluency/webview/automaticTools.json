@@ -75,6 +75,7 @@
   "tool_replay",
   "copilot_toolReplay",
   "tool_search",
+  "tool_search_tool",
 
   "get_task_output",
   "get_output_window_logs",
@@ -101,6 +102,7 @@
   "copilot_switchAgent",
 
   "bash",
+  "chmod",
 
   "vscode_editFile_internal",
   "vscode_fetchWebPage_internal",
@@ -121,6 +123,7 @@
   "clarify_requirements",
   "get_tests",
   "ide-get_diagnostics",
+  "mcp__ide__getDiagnostics",
   "plan",
   "signal_plan_ready",
   "update_plan_progress",

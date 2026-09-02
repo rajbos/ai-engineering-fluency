@@ -696,6 +696,34 @@ export function discoverSkillEntries(
 	return entries;
 }
 
+/**
+ * Look up one skill's description directly in a set of candidate workspace folders,
+ * without a full `discoverSkillEntries()` scan.
+ *
+ * Skill *usage* is aggregated from session history across every workspace a skill was
+ * ever invoked from, but `discoverSkillEntries()` only sees the workspace folder(s)
+ * currently open in the editor — so a skill invoked from a repo that isn't open right
+ * now would otherwise show no description even though its SKILL.md still exists on disk.
+ * This does a handful of direct file-existence checks (no directory scanning) against
+ * each candidate workspace's known skill-dir conventions, so it's cheap enough to call
+ * per-skill as a targeted fallback.
+ */
+export function findSkillDescriptionInWorkspaces(skillName: string, workspaceFolderPaths: Iterable<string>): string | undefined {
+	for (const folder of workspaceFolderPaths) {
+		for (const relDir of WORKSPACE_SKILL_DIRS) {
+			const skillMdPath = path.join(folder, ...relDir.split('/'), skillName, 'SKILL.md');
+			try {
+				if (!fs.existsSync(skillMdPath)) { continue; }
+				const desc = extractDescriptionFromSkillContent(fs.readFileSync(skillMdPath, 'utf-8'));
+				if (desc) { return desc; }
+			} catch {
+				// try the next candidate
+			}
+		}
+	}
+	return undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Core curation analysis
 // ---------------------------------------------------------------------------
@@ -717,6 +745,12 @@ function buildUsedCounts(usagePeriod: UsageAnalysisPeriod): Record<string, numbe
 	}
 	for (const [tool, count] of Object.entries(usagePeriod.mcpTools.byTool)) {
 		counts[tool] = (counts[tool] ?? 0) + count;
+	}
+	// Skills are invoked behind a generic wrapper tool call on some editors (e.g. Claude
+	// Code's "Skill" tool), so the real skill name only ever shows up here, never in
+	// toolCalls.byTool. Without this, every discovered skill looks permanently unused.
+	for (const [name, count] of Object.entries(usagePeriod.skillCalls?.byName ?? {})) {
+		counts[name] = (counts[name] ?? 0) + count;
 	}
 	return counts;
 }

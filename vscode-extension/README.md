@@ -194,7 +194,7 @@ To enable log file uploads:
 }
 ```
 
-See [Blob Upload Guide](https://github.com/rajbos/ai-engineering-fluency/blob/main/docs/BLOB-UPLOAD.md) for detailed setup instructions and security considerations.
+See [Blob Upload Guide](https://github.com/rajbos/ai-engineering-fluency/blob/main/docs/features/BLOB-UPLOAD.md) for detailed setup instructions and security considerations.
 
 ### Authentication
 

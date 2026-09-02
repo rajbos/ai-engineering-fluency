@@ -7,6 +7,7 @@ import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
 import { withErrorRecovery } from '../utils/errors';
 import { pathExists } from '../utils/fsAsync';
+import { readTextFileWithSizeGuard } from '../utils/safeFileRead';
 
 export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'opencode';
@@ -76,7 +77,10 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 			return this.openCode.readOpenCodeDbSession(sessionId);
 		}
 		return withErrorRecovery(
-			async () => JSON.parse(await fs.promises.readFile(sessionFile, 'utf8')),
+			async () => {
+				const content = await readTextFileWithSizeGuard(sessionFile, 'openCodeAdapter');
+				return content === undefined ? null : JSON.parse(content);
+			},
 			null,
 			`openCodeAdapter getMeta readFile(${sessionFile})`
 		);

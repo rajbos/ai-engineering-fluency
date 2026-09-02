@@ -2,9 +2,23 @@ name: Bootstrap Sharing Server Terraform State
 
 # One-off, manually-triggered workflow. Creates the storage account + blob
 # container that sharing-server-deploy.yml uses as its Terraform remote state
-# backend. Run this once per environment (e.g. after migrating to a new Azure
-# subscription/tenant) before pointing TF_STATE_* variables at it — the main
-# deploy workflow's `terraform init` will fail until this backend exists.
+# backend, inside an EXISTING resource group. Run this once per environment
+# (e.g. after migrating to a new Azure subscription/tenant/region) before
+# pointing TF_STATE_* variables at it — the main deploy workflow's
+# `terraform init` will fail until this backend exists.
+#
+# PREREQUISITE (manual, outside this workflow): the resource group named by
+# `resource_group_name` must already exist in the target region, with this
+# repo's GitHub Actions service principal granted the Contributor role on it.
+# The SP intentionally only has resource-group-scoped permissions, so it
+# cannot create the resource group itself — only someone with broader
+# (subscription-level) access can. To migrate an environment to a new region:
+#   1. az group create -n <rg-name> -l <new-region>
+#   2. az role assignment create --assignee <sp-app-id> --role Contributor \
+#        --scope /subscriptions/<sub-id>/resourceGroups/<rg-name>
+#   3. Re-run this workflow with the new `resource_group_name`/`location`.
+#   4. Update the environment's TF_STATE_* GitHub variables to the new
+#      storage account name output below, then re-run the main deploy.
 #
 # Uses local Terraform state (see sharing-server/infra/bootstrap/main.tf) since
 # it can't depend on the backend it's creating. Re-running this after the
@@ -21,13 +35,13 @@ on:
           - production
         required: true
       resource_group_name:
-        description: 'Existing Azure resource group to create the state storage account in'
+        description: 'Existing Azure resource group (created manually beforehand) to create the state storage account in'
         type: string
         required: true
       location:
-        description: 'Azure region'
+        description: 'Expected Azure region of the resource group (e.g. francecentral) — validated, not used to create anything'
         type: string
-        default: 'westeurope'
+        required: true
 
 permissions:
   contents: read
@@ -49,12 +63,12 @@ jobs:
       TF_VAR_location:            ${{ inputs.location }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
@@ -78,6 +92,7 @@ jobs:
             echo "| \`TF_STATE_RESOURCE_GROUP\` | \`$(terraform output -raw resource_group_name)\` |"
             echo "| \`TF_STATE_STORAGE_ACCOUNT\` | \`$(terraform output -raw storage_account_name)\` |"
             echo "| \`TF_STATE_CONTAINER\` | \`$(terraform output -raw container_name)\` |"
+            echo "| _(resource group region)_ | \`$(terraform output -raw location)\` |"
             echo ""
             echo "Set these as environment-scoped variables on the \`${{ inputs.environment }}\` GitHub Environment, then re-run the deploy workflow."
           } >> "$GITHUB_STEP_SUMMARY"

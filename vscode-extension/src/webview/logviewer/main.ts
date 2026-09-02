@@ -1,5 +1,6 @@
 // Log Viewer webview - displays session file details and chat turns
 import { ContextReferenceUsage, getTotalContextRefs, getImplicitContextRefs, getExplicitContextRefs, getContextRefsSummary } from '../shared/contextRefUtils';
+import { setHtml } from '../shared/domUtils';
 import { escapeHtml, formatCompact, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
@@ -7,6 +8,7 @@ import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 
 // ── Type definitions ──────────────────────────────────────────────────────────
 
@@ -161,9 +163,16 @@ interface Window { __INITIAL_LOGDATA__?: SessionLogData; }
 }
 
 const vscode = acquireVsCodeApi();
-const initialData = getWindowData<SessionLogData>('__INITIAL_LOGDATA__');
+const initialData = getWindowData<SessionLogData & { localization?: Record<string, string> }>('__INITIAL_LOGDATA__');
 
-import { resolveGuidMcpToolName } from '../../../../src/utils/toolUtils';
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
+
+import { resolveGuidMcpToolName, resolveMcpFamilyToolName } from '../../../../src/utils/toolUtils';
 
 // Tool name map is injected by the extension host as window.__TOOL_NAMES__
 const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
@@ -185,7 +194,7 @@ function lookupToolName(id: string): string {
 if (!TOOL_NAME_MAP) {
 return id;
 }
-return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? id;
+return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? resolveMcpFamilyToolName(id) ?? id;
 }
 
 function getEffortDisplayName(level: string): string {
@@ -1357,7 +1366,7 @@ function renderLayout(data: SessionLogData): void {
 		modeSubLabel: modeStats.modeSubLabel,
 	};
 
-	root.innerHTML = `
+	setHtml(root, `
 <style>${themeStyles}</style>
 <style>${styles}</style>
 
@@ -1387,7 +1396,7 @@ ${data.turns.length > 0
 
 
 </div>
-`;
+`);
 
 	wireUpEventHandlers();
 }

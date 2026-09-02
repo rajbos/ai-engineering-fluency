@@ -199,8 +199,8 @@ test('getModelUsage attributes snapshot deltas to the model active at each snaps
 	const harness = createHarness();
 	try {
 		const usage = await harness.access.getModelUsage(harness.rolloutPath);
-		assert.deepEqual(usage['gpt-5.4'], { inputTokens: 1000, outputTokens: 200 });
-		assert.deepEqual(usage['gpt-5.4-codex'], { inputTokens: 2000, outputTokens: 300 });
+		assert.deepEqual(usage['gpt-5.4'], { inputTokens: 1000, outputTokens: 200, sessions: 0 });
+		assert.deepEqual(usage['gpt-5.4-codex'], { inputTokens: 2000, outputTokens: 300, sessions: 0 });
 	} finally {
 		harness.cleanup();
 	}
@@ -239,7 +239,7 @@ test('DB-only virtual threads expose tokens_used, metadata and a single interact
 		assert.equal(tokens.tokens, 4200);
 		assert.equal(await harness.access.countInteractions(vp), 1);
 		const usage = await harness.access.getModelUsage(vp);
-		assert.deepEqual(usage['gpt-5.4-codex'], { inputTokens: 4200, outputTokens: 0 });
+		assert.deepEqual(usage['gpt-5.4-codex'], { inputTokens: 4200, outputTokens: 0, sessions: 0 });
 		const meta = await harness.access.getMeta(vp);
 		assert.equal(meta.title, 'Refactor auth');
 		assert.equal(meta.workspacePath, 'C:\\repo\\other');

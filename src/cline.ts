@@ -32,6 +32,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ModelUsage } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePathForComparison } from './workspaceHelpers';
 import { toLocalDayKey } from './utils/dayKeys';
 import { getVSCodeUserPaths } from './adapters/copilotChatAdapter';
@@ -166,21 +167,28 @@ export class ClineDataAccess {
 
 	/** Read and parse the session's ui_messages.json (mtime-cached). */
 	async readUiMessages(sessionFilePath: string): Promise<ClineUiMessage[]> {
-		let stat: fs.Stats;
+		// Open once and stat/read the same file handle (not the path) so the file
+		// can't change between the mtime check and the read (TOCTOU race).
+		let handle: fs.promises.FileHandle;
 		try {
-			stat = await fs.promises.stat(sessionFilePath);
+			handle = await fs.promises.open(sessionFilePath, 'r');
 		} catch {
 			return [];
 		}
-		const cached = this._uiMessagesCache.get(sessionFilePath);
-		if (cached && cached.mtimeMs === stat.mtimeMs) { return cached.parsed; }
-		let parsed: ClineUiMessage[] = [];
 		try {
-			const raw = JSON.parse(await fs.promises.readFile(sessionFilePath, 'utf8'));
-			if (Array.isArray(raw)) { parsed = raw; }
-		} catch { /* unreadable/corrupt file — treat as empty */ }
-		this._uiMessagesCache.set(sessionFilePath, { mtimeMs: stat.mtimeMs, parsed });
-		return parsed;
+			const stat = await handle.stat();
+			const cached = this._uiMessagesCache.get(sessionFilePath);
+			if (cached && cached.mtimeMs === stat.mtimeMs) { return cached.parsed; }
+			let parsed: ClineUiMessage[] = [];
+			try {
+				const raw = JSON.parse(await handle.readFile('utf8'));
+				if (Array.isArray(raw)) { parsed = raw; }
+			} catch { /* unreadable/corrupt file — treat as empty */ }
+			this._uiMessagesCache.set(sessionFilePath, { mtimeMs: stat.mtimeMs, parsed });
+			return parsed;
+		} finally {
+			await handle.close();
+		}
 	}
 
 	/**
@@ -291,8 +299,10 @@ export class ClineDataAccess {
 	}
 
 	private addRequestToModelUsage(usage: ModelUsage, model: string, inputTokens: number, outputTokens: number, cacheReads: number, cacheWrites: number): void {
+		// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+		if (isUnsafeObjectKey(model)) { return; }
 		if (!usage[model]) {
-			usage[model] = { inputTokens: 0, outputTokens: 0 };
+			usage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 		}
 		usage[model].inputTokens += inputTokens;
 		usage[model].outputTokens += outputTokens;

@@ -3,8 +3,12 @@ import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import { createPeriodSelector, PERIOD_LABELS } from '../shared/periodSelector';
 import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
 import { createViewStateManager } from '../shared/viewState';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import type { ChartTimeWindow } from '../../../../src/types';
+import { getTimeWindowStartDayKey, getTimeWindowStartMonthKey } from '../../../../src/timeWindows';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -22,11 +26,16 @@ type RepositoryDataset = ModelDataset & { fullRepo?: string };
 
 type ChartPeriodData = {
 	labels: string[];
+	periodKeys?: string[];
 	tokensData: number[];
 	sessionsData: number[];
 	modelDatasets: ModelDataset[];
 	editorDatasets: EditorDataset[];
 	repositoryDatasets: RepositoryDataset[];
+	taskCategoryDatasets?: ModelDataset[];
+	taskCategoryTokenDatasets?: ModelDataset[];
+	taskCategorySessionDatasets?: ModelDataset[];
+	taskCategoryCostDatasets?: ModelDataset[];
 	periodCount: number;
 	totalTokens: number;
 	totalSessions: number;
@@ -45,9 +54,11 @@ type ChartPeriodData = {
 	avgLocPerPeriod?: number;
 	editorCostDatasets?: ModelDataset[];
 	billingGroupCostDatasets?: ModelDataset[];
-	taskCategoryTokenDatasets?: ModelDataset[];
-	taskCategorySessionDatasets?: ModelDataset[];
-	taskCategoryCostDatasets?: ModelDataset[];
+	modelCostDatasets?: ModelDataset[];
+	modelSessionsDatasets?: ModelDataset[];
+	editorSessionsDatasets?: ModelDataset[];
+	providerSessionsDatasets?: ModelDataset[];
+	providerTokensDatasets?: ModelDataset[];
 };
 
 type ChartPeriod = import('./projectionUtils').ChartPeriod;
@@ -72,9 +83,10 @@ type InitialChartData = {
 	periodsReady?: boolean;
 	hasLocData?: boolean;
 	initialPeriod?: ChartPeriod;
-	initialView?: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task';
+	initialTimeWindow?: ChartTimeWindow;
+	initialView?: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task' | 'taskCategory';
 	initialMetric?: 'tokens' | 'output' | 'cost' | 'sessions';
-	initialSplit?: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task';
+	initialSplit?: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' | 'taskCategory';
 	monthlyBudget?: number;
 	periods?: {
 		day: ChartPeriodData;
@@ -93,7 +105,14 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
 
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = getWindowData<InitialChartData>('__INITIAL_CHART__');
+const initialData = getWindowData<InitialChartData & { localization?: Record<string, string> }>('__INITIAL_CHART__');
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 
 let chart: ChartInstance | undefined;
 let Chart: ChartConstructor | undefined;
@@ -106,8 +125,9 @@ async function loadChartModule(): Promise<void> {
 	Chart = mod.default;
 }
 let currentMetric: 'tokens' | 'output' | 'cost' | 'sessions' = 'tokens';
-let currentSplit: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' = 'total';
+let currentSplit: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' | 'taskCategory' = 'total';
 let currentPeriod: ChartPeriod = 'day';
+let currentTimeWindow: ChartTimeWindow = 'last30';
 // Stores state to restore after a background data update re-initializes the chart
 let pendingMetric: typeof currentMetric | null = null;
 let pendingSplit: typeof currentSplit | null = null;
@@ -118,23 +138,128 @@ let currentDisplayMode: DisplayMode = 'actual';
 
 type ChartWebviewState = {
 	period: ChartPeriod;
+	timeWindow: ChartTimeWindow;
 	metric: 'tokens' | 'output' | 'cost' | 'sessions';
-	split: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task';
+	split: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' | 'taskCategory';
 	displayMode: DisplayMode;
+	/** Whether the per-editor breakdown cards under the Summary section are collapsed. */
+	editorListCollapsed: boolean;
 	/** @deprecated Use metric + split instead. Kept for migration of old saved state. */
-	view?: 'total' | 'model' | 'editor' | 'repository' | 'cost';
+	view?: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task' | 'taskCategory';
 };
 
 const chartState = createViewStateManager<ChartWebviewState>(vscode, {
 	period: 'day',
+	timeWindow: 'last30',
 	metric: 'tokens',
 	split: 'total',
 	displayMode: 'actual',
+	editorListCollapsed: false,
 });
 
+let editorListCollapsed = false;
+
 function saveWebviewState(): void {
-	chartState.save({ period: currentPeriod, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode });
+	chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode, editorListCollapsed });
 }
+
+function sliceByIndices<T>(arr: T[] | undefined, indices: number[]): T[] | undefined {
+	if (!arr) { return undefined; }
+	return indices.map(i => arr[i]);
+}
+
+function sliceDatasetsByIndices(datasets: object[] | undefined, indices: number[]): object[] | undefined {
+	if (!datasets) { return undefined; }
+	return datasets.map(ds => {
+		const d = ds as { data: number[] };
+		return { ...d, data: indices.map(i => d.data[i]) };
+	});
+}
+
+function getFilterStartKey(timeWindow: ChartTimeWindow, periodType: ChartPeriod, now: Date): string {
+	return periodType === 'month'
+		? getTimeWindowStartMonthKey(timeWindow, now)
+		: getTimeWindowStartDayKey(timeWindow, now);
+}
+
+function buildCoreFilteredPeriod(period: ChartPeriodData, indices: number[]): ChartPeriodData {
+	const totalTokens = indices.reduce((sum, i) => sum + period.tokensData[i], 0);
+	const totalSessions = indices.reduce((sum, i) => sum + period.sessionsData[i], 0);
+	const costData = sliceByIndices(period.costData, indices) as number[];
+	const totalCost = costData.reduce((a, b) => a + b, 0);
+	return {
+		labels: indices.map(i => period.labels[i]),
+		periodKeys: indices.map(i => period.periodKeys[i]),
+		tokensData: indices.map(i => period.tokensData[i]),
+		sessionsData: indices.map(i => period.sessionsData[i]),
+		modelDatasets: sliceDatasetsByIndices(period.modelDatasets, indices) as ModelDataset[],
+		editorDatasets: sliceDatasetsByIndices(period.editorDatasets, indices) as EditorDataset[],
+		repositoryDatasets: sliceDatasetsByIndices(period.repositoryDatasets, indices) as RepositoryDataset[],
+		periodCount: indices.length,
+		totalTokens,
+		totalSessions,
+		avgPerPeriod: indices.length > 0 ? Math.round(totalTokens / indices.length) : 0,
+		costData,
+		totalCost,
+		avgCostPerPeriod: indices.length > 0 ? totalCost / indices.length : 0,
+	};
+}
+
+function copyFilteredLocFields(source: ChartPeriodData, target: ChartPeriodData, indices: number[]): void {
+	const locData = sliceByIndices(source.locData, indices);
+	const linesAddedData = sliceByIndices(source.linesAddedData, indices);
+	const linesRemovedData = sliceByIndices(source.linesRemovedData, indices);
+
+	if (locData) { target.locData = locData as number[]; }
+	if (linesAddedData) { target.linesAddedData = linesAddedData as number[]; }
+	if (linesRemovedData) { target.linesRemovedData = linesRemovedData as number[]; }
+	if (source.totalLinesAdded !== undefined) { target.totalLinesAdded = (linesAddedData as number[] ?? []).reduce((a, b) => a + b, 0); }
+	if (source.totalLinesRemoved !== undefined) { target.totalLinesRemoved = (linesRemovedData as number[] ?? []).reduce((a, b) => a + b, 0); }
+	if (source.avgLocPerPeriod !== undefined) {
+		target.avgLocPerPeriod = locData && locData.length > 0 ? (locData as number[]).reduce((a, b) => a + b, 0) / locData.length : 0;
+	}
+}
+
+function copyFilteredDatasetFields(source: ChartPeriodData, target: ChartPeriodData, indices: number[]): void {
+	const datasetFields: Array<{ key: keyof ChartPeriodData; source: object[] | undefined }> = [
+		{ key: 'languageDatasets', source: source.languageDatasets },
+		{ key: 'locEditorDatasets', source: source.locEditorDatasets },
+		{ key: 'locRepositoryDatasets', source: source.locRepositoryDatasets },
+		{ key: 'editorCostDatasets', source: source.editorCostDatasets },
+		{ key: 'billingGroupCostDatasets', source: source.billingGroupCostDatasets },
+		{ key: 'modelCostDatasets', source: source.modelCostDatasets },
+		{ key: 'modelSessionsDatasets', source: source.modelSessionsDatasets },
+		{ key: 'editorSessionsDatasets', source: source.editorSessionsDatasets },
+		{ key: 'providerSessionsDatasets', source: source.providerSessionsDatasets },
+		{ key: 'providerTokensDatasets', source: source.providerTokensDatasets },
+		{ key: 'taskCategoryDatasets', source: source.taskCategoryDatasets },
+	];
+	for (const { key, source: ds } of datasetFields) {
+		if (ds) { (target as Record<string, object[]>)[key] = sliceDatasetsByIndices(ds, indices) as object[]; }
+	}
+}
+
+function copyFilteredOptionalFields(source: ChartPeriodData, target: ChartPeriodData, indices: number[]): void {
+	copyFilteredLocFields(source, target, indices);
+	copyFilteredDatasetFields(source, target, indices);
+}
+
+function filterPeriodByTimeWindow(period: ChartPeriodData, timeWindow: ChartTimeWindow, periodType: ChartPeriod): ChartPeriodData {
+	if (timeWindow === 'last30' && periodType === 'day') {
+		return period;
+	}
+	const startKey = getFilterStartKey(timeWindow, periodType, new Date());
+	const indices: number[] = [];
+	for (let i = 0; i < period.periodKeys.length; i++) {
+		if (period.periodKeys[i] >= startKey) { indices.push(i); }
+	}
+	if (indices.length === 0) { return period; }
+
+	const filtered = buildCoreFilteredPeriod(period, indices);
+	copyFilteredOptionalFields(period, filtered, indices);
+	return filtered;
+}
+
 const ROLLING_WINDOW: Record<ChartPeriod, number> = { day: 7, week: 4, month: 3 };
 
 function computeRollingAverage(data: number[], window: number): number[] {
@@ -151,11 +276,29 @@ function getRollingLabel(): string {
 	return `${w}-${unit} rolling avg`;
 }
 
+function getSessionsChartTitle(): string {
+	switch (currentSplit) {
+		case 'model': return 'Sessions by Model';
+		case 'editor': return 'Sessions by Editor';
+		case 'provider': return 'Sessions by Provider';
+		default: {
+			let title = 'Sessions';
+			if (currentDisplayMode === 'rolling') { title += ` (${getRollingLabel()})`; }
+			return title;
+		}
+	}
+}
+
 function getChartTitle(): string {
 	const periodMeta = PERIOD_LABELS[currentPeriod];
+	if (currentMetric === 'sessions') {
+		return getSessionsChartTitle();
+	}
 	if (currentMetric === 'cost') {
 		let titleText: string;
-		if (currentSplit === 'editor') {
+		if (currentSplit === 'model') {
+			titleText = periodMeta.costTitle.replace('Est. Cost', 'Est. Cost by Model');
+		} else if (currentSplit === 'editor') {
 			titleText = periodMeta.costTitle.replace('Est. Cost', 'Est. Cost by Editor');
 		} else if (currentSplit === 'provider') {
 			titleText = periodMeta.costTitle.replace('Est. Cost', 'Est. Cost by Provider');
@@ -180,39 +323,46 @@ function getChartTitle(): string {
 	return titleText;
 }
 
-/** Returns period data for the current period, falling back to legacy flat fields. */
-function getActivePeriodData(data: InitialChartData): ChartPeriodData {
-	if (data.periods) {
-		return data.periods[currentPeriod];
-	}
-	// Fallback for backward compat (no periods field)
-	return {
-		labels: data.labels,
-		tokensData: data.tokensData,
-		sessionsData: data.sessionsData,
-		modelDatasets: data.modelDatasets,
-		editorDatasets: data.editorDatasets,
-		repositoryDatasets: data.repositoryDatasets,
-		periodCount: data.dailyCount,
-		totalTokens: data.totalTokens,
-		totalSessions: data.totalSessions,
-		avgPerPeriod: data.avgTokensPerDay,
-		costData: [],
-		totalCost: 0,
-		avgCostPerPeriod: 0,
-	};
+function getAggregationIndicator(): string {
+	return PERIOD_LABELS[currentPeriod].aggregationLabel;
 }
 
-const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countLabel: string; avgLabel: string; costTitle: string; avgCostLabel: string; outputTitle: string; avgLocLabel: string; sessionsTitle: string; avgSessionsLabel: string }> = {
-	day:   { title: 'Token Usage – Last 30 Days',  footer: 'Day-by-day token usage for the last 30 days',   countLabel: 'Total Days',   avgLabel: 'Avg Tokens / Day',   costTitle: 'Est. Cost – Last 30 Days',  avgCostLabel: 'Avg Cost / Day',   outputTitle: 'Lines of Code – Last 30 Days',  avgLocLabel: 'Avg Lines / Day', sessionsTitle: 'Sessions – Last 30 Days', avgSessionsLabel: 'Avg Sessions / Day'   },
-	week:  { title: 'Token Usage – Last 6 Weeks',  footer: 'Week-by-week token usage for the last 6 weeks', countLabel: 'Total Weeks',  avgLabel: 'Avg Tokens / Week',  costTitle: 'Est. Cost – Last 6 Weeks',  avgCostLabel: 'Avg Cost / Week',  outputTitle: 'Lines of Code – Last 6 Weeks',  avgLocLabel: 'Avg Lines / Week', sessionsTitle: 'Sessions – Last 6 Weeks', avgSessionsLabel: 'Avg Sessions / Week'  },
-	month: { title: 'Token Usage – Last 12 Months', footer: 'Monthly token usage for the last 12 months',   countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', costTitle: 'Est. Cost – Last 12 Months', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code – Last 12 Months', avgLocLabel: 'Avg Lines / Month', sessionsTitle: 'Sessions – Last 12 Months', avgSessionsLabel: 'Avg Sessions / Month' },
+/** Returns period data for the current period, falling back to legacy flat fields. */
+function getActivePeriodData(data: InitialChartData): ChartPeriodData {
+	let period: ChartPeriodData;
+	if (data.periods) {
+		period = data.periods[currentPeriod];
+	} else {
+		period = {
+			labels: data.labels,
+			periodKeys: data.labels,
+			tokensData: data.tokensData,
+			sessionsData: data.sessionsData,
+			modelDatasets: data.modelDatasets,
+			editorDatasets: data.editorDatasets,
+			repositoryDatasets: data.repositoryDatasets,
+			periodCount: data.dailyCount,
+			totalTokens: data.totalTokens,
+			totalSessions: data.totalSessions,
+			avgPerPeriod: data.avgTokensPerDay,
+			costData: [],
+			totalCost: 0,
+			avgCostPerPeriod: 0,
+		};
+	}
+	return filterPeriodByTimeWindow(period, currentTimeWindow, currentPeriod);
+}
+
+const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countLabel: string; avgLabel: string; aggregationLabel: string; costTitle: string; avgCostLabel: string; outputTitle: string; avgLocLabel: string; sessionsTitle: string; avgSessionsLabel: string }> = {
+	day:   { title: 'Token Usage – Last 30 Days', footer: 'Day-by-day token usage for the last 30 days', countLabel: 'Total Days', avgLabel: 'Avg Tokens / Day', aggregationLabel: 'Aggregated by Day', costTitle: 'Est. Cost – Last 30 Days', avgCostLabel: 'Avg Cost / Day', outputTitle: 'Lines of Code – Last 30 Days', avgLocLabel: 'Avg Lines / Day', sessionsTitle: 'Sessions – Last 30 Days', avgSessionsLabel: 'Avg Sessions / Day' },
+	week:  { title: 'Token Usage – Last 6 Weeks', footer: 'Week-by-week token usage for the last 6 weeks', countLabel: 'Total Weeks', avgLabel: 'Avg Tokens / Week', aggregationLabel: 'Aggregated by Week', costTitle: 'Est. Cost – Last 6 Weeks', avgCostLabel: 'Avg Cost / Week', outputTitle: 'Lines of Code – Last 6 Weeks', avgLocLabel: 'Avg Lines / Week', sessionsTitle: 'Sessions – Last 6 Weeks', avgSessionsLabel: 'Avg Sessions / Week' },
+	month: { title: 'Token Usage – Last 12 Months', footer: 'Monthly token usage for the last 12 months', countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', aggregationLabel: 'Aggregated by Month', costTitle: 'Est. Cost – Last 12 Months', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code – Last 12 Months', avgLocLabel: 'Avg Lines / Month', sessionsTitle: 'Sessions – Last 12 Months', avgSessionsLabel: 'Avg Sessions / Month' },
 };
 
 function isComboSupported(metric: string, split: string): boolean {
-	if (metric === 'cost') { return split === 'total' || split === 'editor' || split === 'provider' || split === 'task'; }
-	if (metric === 'output') { return split !== 'model' && split !== 'provider' && split !== 'task'; }
-	if (metric === 'sessions') { return split === 'total' || split === 'task'; }
+	if (metric === 'sessions') { return split === 'total' || split === 'model' || split === 'editor' || split === 'provider' || split === 'task'; }
+	if (metric === 'cost') { return split === 'total' || split === 'model' || split === 'editor' || split === 'provider' || split === 'task'; }
+	if (metric === 'output') { return split !== 'model' && split !== 'provider' && split !== 'task' && split !== 'taskCategory'; }
 	return split !== 'language' && split !== 'provider';
 }
 
@@ -266,23 +416,48 @@ function buildSummaryCards(periodData: ChartPeriodData, periodMeta: typeof PERIO
 
 function buildPeriodToggles(periodsReady: boolean): HTMLElement {
 	const periodToggles = el('div', 'period-controls');
-	const dayBtn = el('button', `toggle${currentPeriod === 'day' ? ' active' : ''}`, '📅 Day');
+	const label = el('span', 'period-controls-label', 'Aggregate by');
+	const dayBtn = el('button', `toggle${currentPeriod === 'day' ? ' active' : ''}`, 'Day');
 	dayBtn.id = 'period-day';
-	const weekBtn = el('button', `toggle${currentPeriod === 'week' ? ' active' : ''}`, periodsReady ? '🗓️ Week' : '🗓️ Week ⌛');
+	dayBtn.title = 'Aggregate data by day';
+	const weekBtn = el('button', `toggle${currentPeriod === 'week' ? ' active' : ''}`, 'Week');
 	weekBtn.id = 'period-week';
-	const monthBtn = el('button', `toggle${currentPeriod === 'month' ? ' active' : ''}`, periodsReady ? '📆 Month' : '📆 Month ⌛');
+	weekBtn.title = 'Aggregate data by week';
+	const monthBtn = el('button', `toggle${currentPeriod === 'month' ? ' active' : ''}`, 'Month');
 	monthBtn.id = 'period-month';
+	monthBtn.title = 'Aggregate data by month';
 	if (!periodsReady) {
-		(weekBtn as HTMLButtonElement).disabled = true; weekBtn.title = 'Loading historical data…';
-		(monthBtn as HTMLButtonElement).disabled = true; monthBtn.title = 'Loading historical data…';
+		(weekBtn as HTMLButtonElement).disabled = true; weekBtn.title = 'Loading historical data for weekly aggregation…';
+		(monthBtn as HTMLButtonElement).disabled = true; monthBtn.title = 'Loading historical data for monthly aggregation…';
 	}
-	periodToggles.append(dayBtn, weekBtn, monthBtn);
+	periodToggles.append(label, dayBtn, weekBtn, monthBtn);
 	return periodToggles;
 }
 
-function buildChartControls(data: InitialChartData): HTMLElement {
-	const toggles = el('div', 'chart-controls');
-	const metricGroup = el('div', 'control-group');
+function buildTimeWindowControl(data: InitialChartData): HTMLElement {
+	const periodsReady = data.periodsReady !== false;
+	const group = el('div', 'control-group');
+	const { wrapper } = createPeriodSelector({
+		id: 'time-window-select',
+		selected: currentTimeWindow,
+		disabled: periodsReady ? [] : ['last90', 'allTime'],
+		disabledTitle: 'Full history is still loading',
+		label: 'Time window:',
+		onChange: (value) => { void switchTimeWindow(value as ChartTimeWindow, data); },
+	});
+	wrapper.classList.add('chart-time-window');
+	group.append(wrapper);
+	if (!periodsReady) {
+		const loadingNote = el('span', 'loading-note', 'Loading history…');
+		loadingNote.title = 'Full history is still loading. "Last 90 days", "All time", and weekly/monthly aggregation are not available yet.';
+		group.append(loadingNote);
+	}
+	return group;
+}
+
+function buildMetricControl(data: InitialChartData): HTMLElement {
+	const group = el('div', 'control-group');
+	group.append(el('span', 'control-label', 'Metric:'));
 	const tokensBtn = el('button', `toggle${currentMetric === 'tokens' ? ' active' : ''}`, 'Tokens');
 	tokensBtn.id = 'metric-tokens';
 	const outputBtn = el('button', `toggle${currentMetric === 'output' ? ' active' : ''}${!data.hasLocData ? ' dim' : ''}`, '✏️ Output');
@@ -290,27 +465,57 @@ function buildChartControls(data: InitialChartData): HTMLElement {
 	if (!data.hasLocData) { outputBtn.title = 'No edit data available yet (VS Code edit/agent sessions only)'; }
 	const costBtn = el('button', `toggle${currentMetric === 'cost' ? ' active' : ''}`, '💰 Cost');
 	costBtn.id = 'metric-cost';
-	const sessionsBtn = el('button', `toggle${currentMetric === 'sessions' ? ' active' : ''}`, 'Sessions');
+	const sessionsBtn = el('button', `toggle${currentMetric === 'sessions' ? ' active' : ''}`, '📊 Sessions');
 	sessionsBtn.id = 'metric-sessions';
-	metricGroup.append(tokensBtn, outputBtn, costBtn, sessionsBtn);
-	const splitGroup = el('div', 'control-group');
+	group.append(tokensBtn, outputBtn, costBtn, sessionsBtn);
+	return group;
+}
+
+function buildSplitControl(): HTMLElement {
+	const group = el('div', 'control-group');
+	group.append(el('span', 'control-label', 'Split:'));
 	const mkSplit = (id: string, split: string, label: string) => {
 		const supported = isComboSupported(currentMetric, split);
-		const btn = el('button', `toggle${currentSplit === split ? ' active' : ''}${!supported ? ' disabled' : ''}`, label);
+		const btn = el('button', `toggle${(currentSplit === split || (currentSplit === 'taskCategory' && split === 'task')) ? ' active' : ''}${!supported ? ' disabled' : ''}`, label);
 		btn.id = id;
 		if (!supported) { (btn as HTMLButtonElement).disabled = true; btn.title = `Not available for ${currentMetric} metric`; }
 		return btn;
 	};
-	splitGroup.append(mkSplit('split-total', 'total', 'Total'), mkSplit('split-model', 'model', 'By Model'),
-		mkSplit('split-editor', 'editor', 'By Editor'), mkSplit('split-provider', 'provider', '🏷️ By Provider'),
-		mkSplit('split-repository', 'repository', 'By Repository'), mkSplit('split-language', 'language', 'By Language'), mkSplit('split-task', 'task', 'By Task'));
+	group.append(
+		mkSplit('split-total', 'total', 'Total'),
+		mkSplit('split-model', 'model', 'By Model'),
+		mkSplit('split-editor', 'editor', 'By Editor'),
+		mkSplit('split-provider', 'provider', '🏷️ By Provider'),
+		mkSplit('split-repository', 'repository', 'By Repository'),
+		mkSplit('split-language', 'language', 'By Language'),
+		mkSplit('split-task', 'task', 'By Task')
+	);
+	return group;
+}
+
+function buildRollingControl(): HTMLElement {
+	const group = el('div', 'control-group');
 	const rollingApplicable = currentSplit === 'total' && currentMetric !== 'output';
 	const rollingBtn = el('button', `toggle${currentDisplayMode === 'rolling' ? ' active' : ''}${rollingApplicable ? '' : ' hidden'}`, '📈 Rolling Avg');
 	rollingBtn.id = 'view-rolling';
-	const rollingGroup = el('div', 'control-group');
-	rollingGroup.append(rollingBtn);
-	toggles.append(metricGroup, el('div', 'control-group-separator'), splitGroup, el('div', 'control-group-separator'), rollingGroup);
-	return toggles;
+	group.append(rollingBtn);
+	return group;
+}
+
+function buildChartControls(data: InitialChartData): HTMLElement {
+	const controls = el('div', 'chart-controls');
+
+	const scopeRow = el('div', 'chart-controls-row scope-row');
+	scopeRow.append(buildTimeWindowControl(data), el('div', 'control-group-separator'), buildPeriodToggles(data.periodsReady !== false), el('div', 'control-group-separator'), buildRollingControl());
+
+	const metricRow = el('div', 'chart-controls-row metric-row');
+	metricRow.append(buildMetricControl(data));
+
+	const splitRow = el('div', 'chart-controls-row split-row');
+	splitRow.append(buildSplitControl());
+
+	controls.append(scopeRow, metricRow, splitRow);
+	return controls;
 }
 
 function renderLayout(data: InitialChartData): void {
@@ -324,10 +529,10 @@ function renderLayout(data: InitialChartData): void {
 	const periodMeta = PERIOD_LABELS[currentPeriod];
 	const summarySection = el('div', 'section');
 	summarySection.append(iconHeading('h3', 'graph', 'Summary'), buildSummaryCards(periodData, periodMeta));
-	const editorCards = buildEditorCards(data.editorTotalsMap);
-	if (editorCards) { summarySection.append(editorCards); }
+	const editorSection = buildEditorSection(data.editorTotalsMap);
+	if (editorSection) { summarySection.append(editorSection); }
 	const chartSectionHeader = el('div', 'chart-section-header');
-	chartSectionHeader.append(iconHeading('h3', 'graph-line', 'Charts'), buildPeriodToggles(data.periodsReady !== false));
+	chartSectionHeader.append(iconHeading('h3', 'graph-line', 'Charts'));
 	const canvasWrap = el('div', 'canvas-wrap');
 	const canvas = document.createElement('canvas'); canvas.id = 'token-chart'; canvasWrap.append(canvas);
 	const heatmapContainer = el('div', 'heatmap-container hidden');
@@ -337,7 +542,7 @@ function renderLayout(data: InitialChartData): void {
 	const chartSection = el('div', 'section');
 	chartSection.append(chartSectionHeader, chartShell);
 	const footer = el('div', 'footer',
-		`${periodMeta.footer}\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`);
+		`${periodMeta.footer} (${periodMeta.aggregationLabel})\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`);
 	footer.id = 'chart-footer';
 	const container = el('div', 'container');
 	container.append(buildChartHeader(data), summarySection, chartSection, footer);
@@ -359,6 +564,7 @@ function buildEditorCards(editorTotals: Record<string, number>): HTMLElement | n
 		return null;
 	}
 	const wrap = el('div', 'cards');
+	wrap.id = 'editor-cards';
 	entries.forEach(([editor, tokens]) => {
 		const card = buildCard(`editor-${editor}`, editor, formatCompact(tokens));
 		// JetBrains only persists user messages + assistant text in its JSONL
@@ -379,6 +585,27 @@ function buildEditorCards(editorTotals: Record<string, number>): HTMLElement | n
 	return wrap;
 }
 
+/** Builds the "By Editor" breakdown as a collapsible section: a toggle header plus the card grid. The collapsed state is persisted via webview state so it survives restarts. */
+function buildEditorSection(editorTotals: Record<string, number>): HTMLElement | null {
+	const cards = buildEditorCards(editorTotals);
+	if (!cards) { return null; }
+	if (editorListCollapsed) { cards.classList.add('hidden'); }
+
+	const header = el('div', 'editor-section-header');
+	const toggle = el('button', 'editor-list-toggle');
+	toggle.id = 'editor-list-toggle';
+	toggle.setAttribute('aria-expanded', String(!editorListCollapsed));
+	toggle.setAttribute('aria-controls', 'editor-cards');
+	toggle.title = editorListCollapsed ? 'Show per-editor breakdown' : 'Hide per-editor breakdown';
+	const chevron = el('span', 'editor-list-chevron', editorListCollapsed ? '▸' : '▾');
+	toggle.append(chevron, document.createTextNode(' By Editor'));
+	header.append(toggle);
+
+	const section = el('div', 'editor-section');
+	section.append(header, cards);
+	return section;
+}
+
 function updateSummaryCards(data: InitialChartData): void {
 	const periodData = getActivePeriodData(data);
 	const periodMeta = PERIOD_LABELS[currentPeriod];
@@ -394,35 +621,53 @@ function updateSummaryCards(data: InitialChartData): void {
 		if (valueEl) { valueEl.textContent = value; }
 	};
 
-	updateCard('card-period-count', periodMeta.countLabel, periodData.periodCount.toLocaleString());
+updateCard('card-period-count', periodMeta.countLabel, periodData.periodCount.toLocaleString());
 
-	if (currentMetric === 'cost') {
-		updateCard('card-total-tokens', 'Total Cost (est.)', `$${periodData.totalCost.toFixed(2)}`);
-		updateCard('card-avg-tokens', periodMeta.avgCostLabel, `$${periodData.avgCostPerPeriod.toFixed(2)}`);
-	} else if (currentMetric === 'output') {
-		const totalLines = (periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0);
-		updateCard('card-total-tokens', 'Total Lines (AI)', totalLines.toLocaleString());
-		updateCard('card-avg-tokens', periodMeta.avgLocLabel, Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString());
-	} else if (currentMetric === 'sessions') {
-		updateCard('card-total-tokens', 'Total Sessions', periodData.totalSessions.toLocaleString());
-		updateCard('card-avg-tokens', periodMeta.avgSessionsLabel, Math.round(periodData.totalSessions / Math.max(1, periodData.periodCount)).toLocaleString());
-	} else {
-		updateCard('card-total-tokens', 'Total Tokens', formatCompact(periodData.totalTokens));
-		updateCard('card-avg-tokens', periodMeta.avgLabel, formatCompact(periodData.avgPerPeriod));
-	}
+if (currentMetric === 'cost') {
+	updateCard('card-total-tokens', 'Total Cost (est.)', `$${periodData.totalCost.toFixed(2)}`);
+	updateCard('card-avg-tokens', periodMeta.avgCostLabel, `$${periodData.avgCostPerPeriod.toFixed(2)}`);
+} else if (currentMetric === 'output') {
+	const totalLines = (periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0);
+	updateCard('card-total-tokens', 'Total Lines (AI)', totalLines.toLocaleString());
+	updateCard('card-avg-tokens', periodMeta.avgLocLabel, Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString());
+} else if (currentMetric === 'sessions') {
+	updateCard('card-total-tokens', 'Total Sessions', periodData.totalSessions.toLocaleString());
+	updateCard('card-avg-tokens', periodMeta.avgSessionsLabel, Math.round(periodData.totalSessions / Math.max(1, periodData.periodCount)).toLocaleString());
+} else {
+	updateCard('card-total-tokens', 'Total Tokens', formatCompact(periodData.totalTokens));
+	updateCard('card-avg-tokens', periodMeta.avgLabel, formatCompact(periodData.avgPerPeriod));
+}
 
-	updateCard('card-total-sessions', null, periodData.totalSessions.toLocaleString());
+updateCard('card-total-sessions', null, periodData.totalSessions.toLocaleString());
 
 	const title = document.getElementById('chart-title');
 	if (title) { title.textContent = getChartTitle(); }
 
 	const footer = document.getElementById('chart-footer');
 	if (footer) {
-		footer.textContent = `${periodMeta.footer}\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`;
+		footer.textContent = `${periodMeta.footer} (${periodMeta.aggregationLabel})\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`;
 	}
 }
 
+/** Wires up the collapsible "By Editor" breakdown toggle; the collapsed state is persisted via webview state so it survives restarts. */
+function wireEditorListToggle(): void {
+	const toggle = document.getElementById('editor-list-toggle');
+	const cards = document.getElementById('editor-cards');
+	if (!toggle || !cards) { return; }
+	const chevron = toggle.querySelector('.editor-list-chevron');
+	toggle.addEventListener('click', () => {
+		editorListCollapsed = !editorListCollapsed;
+		cards.classList.toggle('hidden', editorListCollapsed);
+		toggle.setAttribute('aria-expanded', String(!editorListCollapsed));
+		toggle.title = editorListCollapsed ? 'Show per-editor breakdown' : 'Hide per-editor breakdown';
+		if (chevron) { chevron.textContent = editorListCollapsed ? '▸' : '▾'; }
+		chartState.patch({ editorListCollapsed });
+	});
+}
+
 function wireInteractions(data: InitialChartData): void {
+	wireEditorListToggle();
+
 	const refresh = document.getElementById('btn-refresh');
 	refresh?.addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
 
@@ -443,6 +688,9 @@ function wireInteractions(data: InitialChartData): void {
 
 	const environmental = document.getElementById('btn-environmental');
 	environmental?.addEventListener('click', () => vscode.postMessage({ command: 'showEnvironmental' }));
+
+	const efficiency = document.getElementById('btn-efficiency');
+	efficiency?.addEventListener('click', () => vscode.postMessage({ command: 'showEfficiency' }));
 
 	wireExtensionPointButtons(vscode);
 
@@ -549,6 +797,14 @@ async function switchPeriod(period: ChartPeriod, data: InitialChartData): Promis
 	chart = new Chart(ctx, createConfig(data));
 }
 
+function clampSplitForMetric(metric: typeof currentMetric): void {
+	const normalizedSplit = currentSplit === 'taskCategory' ? 'task' : currentSplit;
+	if (metric === 'cost' && normalizedSplit !== 'model' && normalizedSplit !== 'editor' && normalizedSplit !== 'provider' && normalizedSplit !== 'task') { currentSplit = 'total'; return; }
+	if (metric === 'output' && (normalizedSplit === 'model' || normalizedSplit === 'provider' || normalizedSplit === 'task')) { currentSplit = 'total'; return; }
+	if (metric === 'tokens' && normalizedSplit === 'language') { currentSplit = 'total'; return; }
+	if (metric === 'sessions' && normalizedSplit !== 'total' && normalizedSplit !== 'model' && normalizedSplit !== 'editor' && normalizedSplit !== 'provider' && normalizedSplit !== 'task') { currentSplit = 'total'; }
+}
+
 async function switchMetric(metric: typeof currentMetric, data: InitialChartData): Promise<void> {
 	if (currentMetric === metric) { return; }
 	currentSplit = getPreferredSplitForMetric(metric, currentSplit);
@@ -569,27 +825,44 @@ async function switchMetric(metric: typeof currentMetric, data: InitialChartData
 	await reinitChart(data);
 }
 
+async function switchTimeWindow(timeWindow: ChartTimeWindow, data: InitialChartData): Promise<void> {
+	if (currentTimeWindow === timeWindow) { return; }
+	currentTimeWindow = timeWindow;
+	vscode.postMessage({ command: 'setTimeWindowPreference', timeWindow });
+	saveWebviewState();
+	updateSummaryCards(data);
+	await reinitChart(data);
+}
+
 function getPreferredSplitForMetric(metric: typeof currentMetric, split: typeof currentSplit): typeof currentSplit {
+	const normalized = split === 'taskCategory' ? 'task' : split;
 	if (metric === 'cost') {
-		return (split === 'editor' || split === 'provider' || split === 'task') ? split : 'total';
+		return (normalized === 'editor' || normalized === 'provider' || normalized === 'task') ? normalized : 'total';
 	}
 	if (metric === 'output') {
-		return (split === 'model' || split === 'provider' || split === 'task') ? 'total' : split;
+		return (normalized === 'model' || normalized === 'provider' || normalized === 'task') ? 'total' : normalized;
 	}
 	if (metric === 'tokens') {
-		return split === 'language' ? 'total' : split;
+		return normalized === 'language' ? 'total' : normalized;
 	}
 	if (metric === 'sessions') {
-		return (split === 'total' || split === 'task') ? split : 'total';
+		return (normalized === 'total' || normalized === 'model' || normalized === 'editor' || normalized === 'provider' || normalized === 'task') ? normalized : 'total';
 	}
-	return split;
+	return normalized;
 }
 
 function isSplitSupported(metric: typeof currentMetric, split: typeof currentSplit): boolean {
-	return (metric === 'cost' && (split === 'total' || split === 'editor' || split === 'provider' || split === 'task')) ||
-		(metric === 'output' && split !== 'model' && split !== 'provider' && split !== 'task') ||
-		(metric === 'sessions' && (split === 'total' || split === 'task')) ||
-		(metric === 'tokens' && split !== 'language' && split !== 'provider');
+	const normalized = split === 'taskCategory' ? 'task' : split;
+	if (metric === 'sessions') {
+		return normalized === 'total' || normalized === 'model' || normalized === 'editor' || normalized === 'provider' || normalized === 'task';
+	}
+	if (metric === 'cost') {
+		return normalized === 'total' || normalized === 'model' || normalized === 'editor' || normalized === 'provider' || normalized === 'task';
+	}
+	if (metric === 'output') {
+		return normalized !== 'model' && normalized !== 'provider' && normalized !== 'task' && normalized !== 'taskCategory';
+	}
+	return normalized !== 'language' && normalized !== 'provider';
 }
 
 async function reinitChart(data: InitialChartData): Promise<void> {
@@ -654,10 +927,11 @@ function setActiveMetric(metric: typeof currentMetric): void {
 }
 
 function setActiveSplit(split: typeof currentSplit): void {
+	const normalized = split === 'taskCategory' ? 'task' : split;
 	(['split-total', 'split-model', 'split-editor', 'split-repository', 'split-language', 'split-provider', 'split-task'] as const).forEach(id => {
 		const btn = document.getElementById(id);
 		if (!btn) { return; }
-		btn.classList.toggle('active', id === `split-${split}`);
+		btn.classList.toggle('active', id === `split-${normalized}`);
 	});
 }
 
@@ -719,15 +993,74 @@ function getChartColors(): ChartColors {
 	};
 }
 
-function buildBaseOptions(c: ChartColors) {
+function buildBaseOptions(c: ChartColors, periodsReady: boolean) {
+	const title = !periodsReady && (currentTimeWindow === 'last90' || currentTimeWindow === 'allTime')
+		? `${PERIOD_LABELS[currentTimeWindow]} (loading history…)`
+		: PERIOD_LABELS[currentTimeWindow];
 	return {
 		responsive: true, maintainAspectRatio: false,
 		interaction: { mode: 'index' as const, intersect: false },
 		plugins: {
+			title: { display: true, text: title, color: c.textColor, font: { size: 14, weight: 'bold' }, padding: { top: 4, bottom: 12 } },
 			legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 12 } } },
 			tooltip: { backgroundColor: c.bgColor, titleColor: c.textColor, bodyColor: c.textColor, borderColor: c.borderColor, borderWidth: 1, padding: 10, displayColors: true }
 		},
 		scales: { x: { grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } } } as const
+	};
+}
+
+function resolveSessionsDatasets(view: string, period: ChartPeriodData): ModelDataset[] | undefined {
+	if (view === 'sessions-model') { return period.modelSessionsDatasets ?? period.modelDatasets; }
+	if (view === 'sessions-editor') { return period.editorSessionsDatasets ?? period.editorDatasets; }
+	if (view === 'sessions-provider') { return period.providerSessionsDatasets ?? period.billingGroupCostDatasets ?? []; }
+	return undefined;
+}
+
+function buildSessionsTotalDataset(period: ChartPeriodData): any {
+	const isRolling = currentDisplayMode === 'rolling';
+	return {
+		label: isRolling ? getRollingLabel() : 'Sessions',
+		data: isRolling ? computeRollingAverage(period.sessionsData, ROLLING_WINDOW[currentPeriod]) : period.sessionsData,
+		backgroundColor: isRolling ? 'rgba(137, 180, 250, 0.15)' : 'rgba(137, 180, 250, 0.7)',
+		borderColor: 'rgba(137, 180, 250, 1)',
+		borderWidth: isRolling ? 2 : 1,
+		borderRadius: isRolling ? undefined : 4,
+		type: isRolling ? 'line' as const : undefined,
+		tension: isRolling ? 0.4 : undefined,
+		fill: isRolling ? false : undefined
+	};
+}
+
+function buildSessionsProjectionDataset(period: ChartPeriodData): any | null {
+	const lastIdx = period.sessionsData.length - 1;
+	if (lastIdx < 0) { return null; }
+	const projExtra = computeProjectionExtra(period.sessionsData[lastIdx], getCurrentPeriodFraction(currentPeriod));
+	if (projExtra === null) { return null; }
+	return {
+		label: PROJECTION_LABELS[currentPeriod],
+		data: period.sessionsData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0),
+		backgroundColor: 'rgba(137, 180, 250, 0.25)',
+		borderColor: 'rgba(137, 180, 250, 0.5)',
+		borderWidth: 1
+	};
+}
+
+function buildSessionsViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const datasets = resolveSessionsDatasets(view, period);
+	const isStacked = !!datasets;
+	const isRolling = !isStacked && currentDisplayMode === 'rolling';
+	const projDs = !isStacked && !isRolling ? buildSessionsProjectionDataset(period) : null;
+	const showLegend = isStacked || !!projDs;
+	const stackAxes = isStacked || !!projDs;
+	const seriesDatasets = isStacked ? datasets as ModelDataset[] : [buildSessionsTotalDataset(period), ...(projDs ? [projDs] : [])];
+	return {
+		type: 'bar' as const,
+		data: { labels: period.labels, datasets: seriesDatasets as any },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { display: showLegend, position: 'top' as const, labels: { color: c.textColor, font: { size: 12 } } }, tooltip: { ...baseOptions.plugins.tooltip, callbacks: { label: (ctx: any) => ` ${ctx.dataset.label}: ${Number(ctx.parsed.y).toLocaleString()} sessions` } } },
+			scales: { x: { stacked: stackAxes, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+				y: { stacked: stackAxes, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } }
+			}
+		}
 	};
 }
 
@@ -824,6 +1157,35 @@ function buildCostProviderViewConfig(period: ChartPeriodData, baseOptions: Retur
 
 function buildCostEditorViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
 	const datasets = (period.editorCostDatasets ?? []) as ModelDataset[];
+	return {
+		type: 'bar' as const,
+		data: { labels: period.labels, datasets: datasets as any },
+		options: {
+			...baseOptions,
+			plugins: {
+				...baseOptions.plugins,
+				legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } },
+				tooltip: {
+					...baseOptions.plugins.tooltip,
+					callbacks: {
+						label: (ctx: any) => ` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toFixed(4)}`,
+						footer: (items: any[]) => {
+							const total = items.reduce((sum: number, i: any) => sum + (Number(i.parsed.y) || 0), 0);
+							return `Total: $${total.toFixed(4)}`;
+						}
+					}
+				}
+			},
+			scales: {
+				x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+				y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (USD)', color: c.textColor, font: { size: 12, weight: 'bold' as const } } }
+			}
+		}
+	} as ChartConfig;
+}
+
+function buildCostModelViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const datasets = (period.modelCostDatasets ?? []) as ModelDataset[];
 	return {
 		type: 'bar' as const,
 		data: { labels: period.labels, datasets: datasets as any },
@@ -1033,7 +1395,15 @@ function refreshHeatmapView(data: InitialChartData): void {
 }
 
 function buildStackedViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
-	const datasets = view === 'model' ? period.modelDatasets : view === 'repository' ? period.repositoryDatasets : period.editorDatasets;
+	const datasets = view === 'model'
+		? period.modelDatasets
+		: view === 'repository'
+			? period.repositoryDatasets
+			: view === 'task' || view === 'taskCategory'
+				? (period.taskCategoryDatasets ?? period.taskCategoryTokenDatasets ?? [])
+				: view === 'provider'
+					? (period.providerTokensDatasets ?? [])
+					: period.editorDatasets;
 	const lastIdx = period.tokensData.length - 1;
 	const projExtra = lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
 	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0), backgroundColor: 'rgba(200, 200, 200, 0.25)', borderColor: 'rgba(200, 200, 200, 0.5)', borderWidth: 1 }] : [];
@@ -1052,24 +1422,50 @@ function buildStackedViewConfig(view: string, period: ChartPeriodData, baseOptio
 	};
 }
 
+function resolveTokensView(split: typeof currentSplit): string {
+	if (split === 'model') { return 'model'; }
+	if (split === 'editor') { return 'editor'; }
+	if (split === 'repository') { return 'repository'; }
+	if (split === 'task' || split === 'taskCategory') { return 'task'; }
+	if (split === 'provider') { return 'provider'; }
+	return 'total';
+}
+
+function resolveCostView(split: typeof currentSplit): string {
+	if (split === 'model') { return 'cost-model'; }
+	if (split === 'editor') { return 'cost-editor'; }
+	if (split === 'provider') { return 'cost-provider'; }
+	if (split === 'task' || split === 'taskCategory') { return 'cost-task'; }
+	return 'cost';
+}
+
+function resolveSessionsView(split: typeof currentSplit): string {
+	if (split === 'model') { return 'sessions-model'; }
+	if (split === 'editor') { return 'sessions-editor'; }
+	if (split === 'provider') { return 'sessions-provider'; }
+	if (split === 'task' || split === 'taskCategory') { return 'sessions-task'; }
+	return 'sessions';
+}
+
 function resolveChartView(metric: typeof currentMetric, split: typeof currentSplit): string {
-	const byMetric: Record<typeof currentMetric, Partial<Record<typeof currentSplit, string>>> = {
-		tokens: { total: 'total', model: 'model', editor: 'editor', repository: 'repository', task: 'task' },
-		cost: { total: 'cost', editor: 'cost-editor', provider: 'cost-provider', task: 'cost-task' },
-		sessions: { total: 'sessions-total', task: 'sessions-task' },
-		output: {},
-	};
-	if (metric === 'output') { return `output-${split}`; }
-	return byMetric[metric][split] ?? 'total';
+	const normalized = split === 'taskCategory' ? 'task' : split;
+	if (metric === 'output') { return `output-${normalized}`; }
+	if (metric === 'sessions') { return resolveSessionsView(normalized); }
+	if (metric === 'tokens') { return resolveTokensView(normalized); }
+	if (metric === 'cost') { return resolveCostView(normalized); }
+	return `output-${normalized}`;
 }
 
 function createConfig(data: InitialChartData): ChartConfig {
 	const period = getActivePeriodData(data);
 	const view = resolveChartView(currentMetric, currentSplit);
 	const c = getChartColors();
-	const baseOptions = buildBaseOptions(c);
+	const periodsReady = data.periodsReady !== false;
+	const baseOptions = buildBaseOptions(c, periodsReady);
+	if (view.startsWith('sessions')) { return buildSessionsViewConfig(view, period, baseOptions, c); }
 	if (view === 'total') { return buildTotalViewConfig(period, baseOptions, c); }
 	if (view === 'cost') { return buildCostViewConfig(period, baseOptions, c, data.monthlyBudget ?? 0); }
+	if (view === 'cost-model') { return buildCostModelViewConfig(period, baseOptions, c); }
 	if (view === 'cost-editor') { return buildCostEditorViewConfig(period, baseOptions, c); }
 	if (view === 'cost-provider') { return buildCostProviderViewConfig(period, baseOptions, c); }
 	if (view === 'cost-task') { return buildTaskCategoryViewConfig(period, baseOptions, c, 'cost'); }
@@ -1085,10 +1481,13 @@ type MetricSplit = { metric: typeof currentMetric; split: typeof currentSplit };
 
 function migrateViewKey(view: string): MetricSplit {
 	const map: Record<string, MetricSplit> = {
-		total: { metric: 'tokens', split: 'total' }, model: { metric: 'tokens', split: 'model' },
-		editor: { metric: 'tokens', split: 'editor' }, repository: { metric: 'tokens', split: 'repository' },
+		total: { metric: 'tokens', split: 'total' },
+		model: { metric: 'tokens', split: 'model' },
+		editor: { metric: 'tokens', split: 'editor' },
+		repository: { metric: 'tokens', split: 'repository' },
 		cost: { metric: 'cost', split: 'total' },
 		task: { metric: 'tokens', split: 'task' },
+		taskCategory: { metric: 'tokens', split: 'task' },
 	};
 	return map[view] ?? { metric: 'tokens', split: 'total' };
 }
@@ -1119,10 +1518,29 @@ function applySavedChartState(saved: ChartWebviewState): void {
 function restoreChartState(initialData: InitialChartData): void {
 	const saved = chartState.restore();
 	if (!vscode.getState()) {
-		applyInitialChartState(initialData);
+		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
+		if (initialData.initialTimeWindow) { currentTimeWindow = initialData.initialTimeWindow; }
+		if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
+		if (initialData.initialSplit) {
+			currentSplit = initialData.initialSplit === 'taskCategory' ? 'task' : initialData.initialSplit;
+		} else if (initialData.initialView) {
+			const m = migrateViewKey(initialData.initialView);
+			currentMetric = m.metric; currentSplit = m.split;
+		}
 		return;
 	}
-	applySavedChartState(saved);
+	currentPeriod = saved.period ?? 'day';
+	currentTimeWindow = saved.timeWindow ?? 'last30';
+	currentDisplayMode = saved.displayMode ?? 'actual';
+	editorListCollapsed = saved.editorListCollapsed ?? false;
+	if (saved.view && !saved.metric) {
+		const m = migrateViewKey(saved.view);
+		currentMetric = m.metric;
+		currentSplit = m.split;
+	} else {
+		currentMetric = saved.metric ?? 'tokens';
+		currentSplit = saved.split === 'taskCategory' ? 'task' : (saved.split ?? 'total');
+	}
 }
 
 async function bootstrap(): Promise<void> {

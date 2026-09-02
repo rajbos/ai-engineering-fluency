@@ -30,13 +30,14 @@ import { KiroCliAdapter } from '../../../src/adapters/kiroCliAdapter';
 import { DevinCliAdapter } from '../../../src/adapters/devinCliAdapter';
 import { ClineAdapter } from '../../../src/adapters/clineAdapter';
 import { CodexCliAdapter } from '../../../src/adapters/codexCliAdapter';
+import { HermesAdapter } from '../../../src/adapters/hermesAdapter';
 
 import { OpenCodeDataAccess } from '../../../src/opencode';
 import { CrushDataAccess } from '../../../src/crush';
 import { ContinueDataAccess } from '../../../src/continue';
 import { EclipseDataAccess } from '../../../src/eclipse';
 import { ClaudeCodeDataAccess } from '../../../src/claudecode';
-import { ClaudeDesktopCoworkDataAccess } from '../../../src/claudedesktop';
+import { ClaudeDesktopDataAccess } from '../../../src/claudedesktop';
 import { VisualStudioDataAccess } from '../../../src/visualstudio';
 import { MistralVibeDataAccess } from '../../../src/mistralvibe';
 import { GeminiCliDataAccess } from '../../../src/geminicli';
@@ -46,6 +47,7 @@ import { KiroCliDataAccess } from '../../../src/kirocli';
 import { DevinCliDataAccess } from '../../../src/devinCli';
 import { ClineDataAccess } from '../../../src/cline';
 import { CodexCliDataAccess } from '../../../src/codexcli';
+import { HermesDataAccess } from '../../../src/hermes';
 
 // Stub functions for adapters requiring callbacks
 const noopEstimateTokens = (_text: string, _model?: string) => 0;
@@ -58,7 +60,7 @@ const crushDA = new CrushDataAccess(null as any);
 const continueDA = new ContinueDataAccess();
 const eclipseDA = new EclipseDataAccess();
 const claudeCodeDA = new ClaudeCodeDataAccess();
-const claudeDesktopDA = new ClaudeDesktopCoworkDataAccess();
+const claudeDesktopDA = new ClaudeDesktopDataAccess();
 const visualStudioDA = new VisualStudioDataAccess();
 const mistralVibeDA = new MistralVibeDataAccess();
 const geminiCliDA = new GeminiCliDataAccess();
@@ -68,6 +70,7 @@ const kiroCliDA = new KiroCliDataAccess();
 const devinCliDA = new DevinCliDataAccess();
 const clineDA = new ClineDataAccess();
 const codexCliDA = new CodexCliDataAccess();
+const hermesDA = new HermesDataAccess();
 
 const openCodeAdapter = new OpenCodeAdapter(openCodeDA);
 const crushAdapter = new CrushAdapter(crushDA);
@@ -86,6 +89,7 @@ const kiroCliAdapter = new KiroCliAdapter(kiroCliDA);
 const devinCliAdapter = new DevinCliAdapter(devinCliDA);
 const clineAdapter = new ClineAdapter(clineDA);
 const codexCliAdapter = new CodexCliAdapter(codexCliDA);
+const hermesAdapter = new HermesAdapter(hermesDA);
 
 const allAdapters: IEcosystemAdapter[] = [
     openCodeAdapter, crushAdapter, continueAdapter, eclipseAdapter,
@@ -93,17 +97,18 @@ const allAdapters: IEcosystemAdapter[] = [
     copilotChatAdapter, copilotCliAdapter, antigravityAdapter, kiroAdapter, kiroCliAdapter, devinCliAdapter,
     clineAdapter,
     codexCliAdapter,
+    hermesAdapter,
 ];
 
 // ---------------------------------------------------------------------------
 // isDiscoverable type guard
 // ---------------------------------------------------------------------------
 
-test('isDiscoverable: returns true for all 17 adapters', () => {
+test('isDiscoverable: returns true for all 18 adapters', () => {
     for (const adapter of allAdapters) {
         assert.ok(isDiscoverable(adapter), `Expected ${adapter.id} to be discoverable`);
     }
-    assert.equal(allAdapters.length, 17);
+    assert.equal(allAdapters.length, 18);
 });
 
 test('isDiscoverable: returns false for plain IEcosystemAdapter without discover()', () => {
@@ -139,6 +144,7 @@ test('adapter IDs are stable lowercase identifiers', () => {
     assert.equal(kiroCliAdapter.id, 'kirocli');
     assert.equal(devinCliAdapter.id, 'devincli');
     assert.equal(clineAdapter.id, 'cline');
+    assert.equal(hermesAdapter.id, 'hermes');
 });
 
 // ---------------------------------------------------------------------------
@@ -423,7 +429,7 @@ test('VisualStudioAdapter.getCandidatePaths: returns VS log dir and SSMS session
 test('getEditorRoot: all adapters return non-empty string', () => {
     const dummyFile = '/dummy/path/session.json';
     for (const adapter of allAdapters) {
-        // claudedesktop is Windows/macOS only; getCoworkBaseDir() returns '' on Linux
+        // claudedesktop is Windows/macOS only; getDesktopSessionDirs() returns [] on Linux
         if (adapter.id === 'claudedesktop' && os.platform() === 'linux') { continue; }
         const root = adapter.getEditorRoot(dummyFile);
         assert.ok(typeof root === 'string' && root.length > 0, `${adapter.id}: getEditorRoot should return non-empty string`);
@@ -507,7 +513,7 @@ test('getCandidatePaths paths are consistent with discover candidatePaths', asyn
 // extractClaudeSlashCommand — slash command detection
 // ---------------------------------------------------------------------------
 
-import { extractClaudeSlashCommand } from '../../../src/adapters/claudeCodeAdapter';
+import { extractClaudeSlashCommand, extractSkillName, extractInvokedSkillName } from '../../../src/adapters/claudeCodeAdapter';
 
 test('extractClaudeSlashCommand: returns command name for allowed slash commands', () => {
     assert.equal(extractClaudeSlashCommand('/review'), 'review');
@@ -542,6 +548,60 @@ test('extractClaudeSlashCommand: handles array content blocks', () => {
 test('extractClaudeSlashCommand: ignores slash commands not at the start', () => {
     assert.equal(extractClaudeSlashCommand('some text\n/review'), null);
     assert.equal(extractClaudeSlashCommand('prefix /review'), null);
+});
+
+// ---------------------------------------------------------------------------
+// extractSkillName — agnostic Skill tool_use unwrapping (any skill, not an allowlist)
+// ---------------------------------------------------------------------------
+
+test('extractSkillName: resolves the skill name from a Skill tool_use input', () => {
+    assert.equal(extractSkillName('Skill', { skill: 'graphify' }), 'graphify');
+    assert.equal(extractSkillName('Skill', { skill: 'sync-host-views' }), 'sync-host-views');
+});
+
+test('extractSkillName: trims whitespace around the skill name', () => {
+    assert.equal(extractSkillName('Skill', { skill: '  graphify  ' }), 'graphify');
+});
+
+test('extractSkillName: returns null for non-Skill tool names', () => {
+    assert.equal(extractSkillName('Bash', { skill: 'graphify' }), null);
+    assert.equal(extractSkillName('Read', {}), null);
+});
+
+test('extractSkillName: returns null for missing or malformed input.skill', () => {
+    assert.equal(extractSkillName('Skill', {}), null);
+    assert.equal(extractSkillName('Skill', undefined), null);
+    assert.equal(extractSkillName('Skill', null), null);
+    assert.equal(extractSkillName('Skill', { skill: '' }), null);
+    assert.equal(extractSkillName('Skill', { skill: '   ' }), null);
+    assert.equal(extractSkillName('Skill', { skill: 123 }), null);
+});
+
+// ---------------------------------------------------------------------------
+// extractInvokedSkillName — user-typed slash invocation (<command-name> tag),
+// a completely different representation from the Skill tool_use path above.
+// ---------------------------------------------------------------------------
+
+test('extractInvokedSkillName: resolves the skill name from a <command-name> tag (string content)', () => {
+    const content = '<command-message>graphify</command-message>\n<command-name>/graphify</command-name>';
+    assert.equal(extractInvokedSkillName(content), 'graphify');
+});
+
+test('extractInvokedSkillName: resolves any command name agnostically, no allowlist', () => {
+    assert.equal(extractInvokedSkillName('<command-name>/some-random-skill</command-name>'), 'some-random-skill');
+    assert.equal(extractInvokedSkillName('<command-name>/code-review</command-name>'), 'code-review');
+});
+
+test('extractInvokedSkillName: handles array content blocks', () => {
+    const content = [{ type: 'text', text: '<command-message>graphify</command-message>\n<command-name>/graphify</command-name>' }];
+    assert.equal(extractInvokedSkillName(content), 'graphify');
+});
+
+test('extractInvokedSkillName: returns null when no <command-name> tag is present', () => {
+    assert.equal(extractInvokedSkillName('just a normal user message'), null);
+    assert.equal(extractInvokedSkillName(''), null);
+    assert.equal(extractInvokedSkillName(null), null);
+    assert.equal(extractInvokedSkillName(undefined), null);
 });
 
 // ---------------------------------------------------------------------------
@@ -673,6 +733,61 @@ test('ClaudeDesktopAdapter.buildTurns: unique requestIds across turns sum correc
         assert.equal(turns[0].actualUsage?.completionTokens, 20);
         assert.equal(turns[1].actualUsage?.promptTokens, 150);
         assert.equal(turns[1].actualUsage?.completionTokens, 25);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// ClaudeDesktopAdapter.analyzeUsage — Skill tool_use -> skillCalls
+// (Claude Desktop Cowork shares Claude Code's Skill tool wrapper convention.)
+// ---------------------------------------------------------------------------
+
+const desktopAdapterCtx = { modelPricing: {}, toolNameMap: {} };
+
+test('ClaudeDesktopAdapter.analyzeUsage: unwraps Skill tool_use into skillCalls.byName', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cowork-test-'));
+    const sessionFile = path.join(tmpDir, 'session.jsonl');
+    try {
+        const events = [
+            {
+                type: 'assistant', requestId: 'req_skill',
+                message: {
+                    role: 'assistant', model: 'claude-sonnet-4-6', stop_reason: 'tool_use',
+                    content: [{ type: 'tool_use', id: 'toolu_1', name: 'Skill', input: { skill: 'graphify' } }],
+                },
+            },
+        ];
+        fs.writeFileSync(sessionFile, events.map(e => JSON.stringify(e)).join('\n'));
+
+        const result = await claudeDesktopAdapter.analyzeUsage(sessionFile, desktopAdapterCtx);
+        assert.equal(result.skillCalls?.byName['graphify'], 1);
+        assert.equal(result.skillCalls?.total, 1);
+        // Additive (Option C): the raw "Skill" wrapper tool call is still counted as-is, unchanged.
+        assert.equal(result.toolCalls.byTool['Skill'], 1);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('ClaudeDesktopAdapter.analyzeUsage: does not record skillCalls for non-Skill tool calls', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cowork-test-'));
+    const sessionFile = path.join(tmpDir, 'session.jsonl');
+    try {
+        const events = [
+            {
+                type: 'assistant', requestId: 'req_bash',
+                message: {
+                    role: 'assistant', model: 'claude-sonnet-4-6', stop_reason: 'tool_use',
+                    content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }],
+                },
+            },
+        ];
+        fs.writeFileSync(sessionFile, events.map(e => JSON.stringify(e)).join('\n'));
+
+        const result = await claudeDesktopAdapter.analyzeUsage(sessionFile, desktopAdapterCtx);
+        assert.equal(result.skillCalls?.total ?? 0, 0);
+        assert.equal(result.toolCalls.byTool['Bash'], 1);
     } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }

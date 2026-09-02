@@ -26,7 +26,7 @@ import { getModelUsageFromSession } from '../../../src/usageAnalysis';
 import tokenEstimatorsData from '../../../src/tokenEstimators.json';
 import modelPricingData from '../../../src/modelPricing.json';
 
-import { processSessionFile } from '../helpers';
+import { calculateUsageAnalysisStats, processSessionFile } from '../helpers';
 import { disableCache } from '../cliCache';
 
 const tokenEstimators: { [key: string]: number } = tokenEstimatorsData.estimators;
@@ -98,4 +98,15 @@ test('CLI processSessionFile reports model attribution for delta-format sessions
 	assert.equal(data!.modelUsage['claude-sonnet-4.5']?.inputTokens, 80);
 	assert.equal(data!.modelUsage['claude-sonnet-4.5']?.outputTokens, 25);
 	assert.ok(data!.tokens > 0, 'token counts should come from estimateTokensFromJsonlSession');
+});
+
+test('CLI usage analysis includes recent-session buckets for thin IDE hosts', async () => {
+	disableCache();
+
+	const stats = await calculateUsageAnalysisStats([FIXTURE_PATH]);
+
+	assert.equal(stats.recentSessions?.last7.length, 1);
+	assert.equal(stats.recentSessions?.last30.length, 1);
+	assert.equal(stats.recentSessions?.currentMonth.length, 1);
+	assert.equal(stats.recentSessions?.last7[0].filePath, FIXTURE_PATH);
 });

@@ -35,6 +35,20 @@ async function main() {
     console.warn('WARNING: chart.js not found — charts will not render in the dashboard');
   }
 
+  // Copy the dashboard header icon into the dist folder so it is served from /icon.png
+  const iconSrc = path.join(__dirname, 'images', 'icon.png');
+  const iconDstDir = path.join(distDir, 'images');
+  if (!fs.existsSync(iconDstDir)) {
+    fs.mkdirSync(iconDstDir, { recursive: true });
+  }
+  const iconDst = path.join(iconDstDir, 'icon.png');
+  if (fs.existsSync(iconSrc)) {
+    fs.copyFileSync(iconSrc, iconDst);
+    console.log('Copied icon to dist/images/icon.png');
+  } else {
+    console.warn('WARNING: icon not found — dashboard header will not show the logo');
+  }
+
   console.log(`Sharing server built (${production ? 'production' : 'development'})`);
 }
 

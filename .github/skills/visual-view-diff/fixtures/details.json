@@ -1,0 +1,305 @@
+{
+  "today": {
+    "tokens": 1284500,
+    "thinkingTokens": 96300,
+    "estimatedTokens": 402100,
+    "actualTokens": 882400,
+    "sessions": 24,
+    "avgInteractionsPerSession": 7.5,
+    "avgTokensPerSession": 53520,
+    "modelUsage": {
+      "claude-sonnet-4.5": {
+        "inputTokens": 410000,
+        "outputTokens": 96000
+      },
+      "gpt-4o": {
+        "inputTokens": 288000,
+        "outputTokens": 61000
+      },
+      "gemini-2.5-pro": {
+        "inputTokens": 302500,
+        "outputTokens": 127000
+      }
+    },
+    "editorUsage": {
+      "VS Code": {
+        "tokens": 720000,
+        "sessions": 13
+      },
+      "Claude Code": {
+        "tokens": 380500,
+        "sessions": 7
+      },
+      "Copilot CLI": {
+        "tokens": 184000,
+        "sessions": 4
+      }
+    },
+    "editorModelUsage": {
+      "VS Code": {
+        "gpt-4o": {
+          "inputTokens": 288000,
+          "outputTokens": 61000
+        },
+        "claude-sonnet-4.5": {
+          "inputTokens": 250000,
+          "outputTokens": 51000
+        }
+      },
+      "Claude Code": {
+        "claude-sonnet-4.5": {
+          "inputTokens": 160000,
+          "outputTokens": 45000
+        }
+      },
+      "Copilot CLI": {
+        "gemini-2.5-pro": {
+          "inputTokens": 302500,
+          "outputTokens": 127000
+        }
+      }
+    },
+    "co2": 4.82,
+    "treesEquivalent": 0.21,
+    "waterUsage": 1.94,
+    "estimatedCost": 3.47,
+    "estimatedCostCopilot": 2.18,
+    "cachedTokens": 214000,
+    "billingGroupCosts": {
+      "GitHub Copilot": 2.18,
+      "Anthropic": 0.86,
+      "Google": 0.43
+    },
+    "subAgentSessions": 3
+  },
+  "month": {
+    "tokens": 15414000,
+    "thinkingTokens": 1155600,
+    "estimatedTokens": 4825200,
+    "actualTokens": 10588800,
+    "sessions": 288,
+    "avgInteractionsPerSession": 7.5,
+    "avgTokensPerSession": 53520,
+    "modelUsage": {
+      "claude-sonnet-4.5": {
+        "inputTokens": 4920000,
+        "outputTokens": 1152000
+      },
+      "gpt-4o": {
+        "inputTokens": 3456000,
+        "outputTokens": 732000
+      },
+      "gemini-2.5-pro": {
+        "inputTokens": 3630000,
+        "outputTokens": 1524000
+      }
+    },
+    "editorUsage": {
+      "VS Code": {
+        "tokens": 8640000,
+        "sessions": 156
+      },
+      "Claude Code": {
+        "tokens": 4566000,
+        "sessions": 84
+      },
+      "Copilot CLI": {
+        "tokens": 2208000,
+        "sessions": 48
+      }
+    },
+    "editorModelUsage": {
+      "VS Code": {
+        "gpt-4o": {
+          "inputTokens": 3456000,
+          "outputTokens": 732000
+        },
+        "claude-sonnet-4.5": {
+          "inputTokens": 3000000,
+          "outputTokens": 612000
+        }
+      },
+      "Claude Code": {
+        "claude-sonnet-4.5": {
+          "inputTokens": 1920000,
+          "outputTokens": 540000
+        }
+      },
+      "Copilot CLI": {
+        "gemini-2.5-pro": {
+          "inputTokens": 3630000,
+          "outputTokens": 1524000
+        }
+      }
+    },
+    "co2": 57.84,
+    "treesEquivalent": 2.52,
+    "waterUsage": 23.28,
+    "estimatedCost": 41.64,
+    "estimatedCostCopilot": 26.160000000000004,
+    "cachedTokens": 2568000,
+    "billingGroupCosts": {
+      "GitHub Copilot": 26.160000000000004,
+      "Anthropic": 10.32,
+      "Google": 5.16
+    },
+    "subAgentSessions": 36
+  },
+  "lastMonth": {
+    "tokens": 11560500,
+    "thinkingTokens": 866700,
+    "estimatedTokens": 3618900,
+    "actualTokens": 7941600,
+    "sessions": 216,
+    "avgInteractionsPerSession": 7.5,
+    "avgTokensPerSession": 53520,
+    "modelUsage": {
+      "claude-sonnet-4.5": {
+        "inputTokens": 3690000,
+        "outputTokens": 864000
+      },
+      "gpt-4o": {
+        "inputTokens": 2592000,
+        "outputTokens": 549000
+      },
+      "gemini-2.5-pro": {
+        "inputTokens": 2722500,
+        "outputTokens": 1143000
+      }
+    },
+    "editorUsage": {
+      "VS Code": {
+        "tokens": 6480000,
+        "sessions": 117
+      },
+      "Claude Code": {
+        "tokens": 3424500,
+        "sessions": 63
+      },
+      "Copilot CLI": {
+        "tokens": 1656000,
+        "sessions": 36
+      }
+    },
+    "editorModelUsage": {
+      "VS Code": {
+        "gpt-4o": {
+          "inputTokens": 2592000,
+          "outputTokens": 549000
+        },
+        "claude-sonnet-4.5": {
+          "inputTokens": 2250000,
+          "outputTokens": 459000
+        }
+      },
+      "Claude Code": {
+        "claude-sonnet-4.5": {
+          "inputTokens": 1440000,
+          "outputTokens": 405000
+        }
+      },
+      "Copilot CLI": {
+        "gemini-2.5-pro": {
+          "inputTokens": 2722500,
+          "outputTokens": 1143000
+        }
+      }
+    },
+    "co2": 43.38,
+    "treesEquivalent": 1.89,
+    "waterUsage": 17.46,
+    "estimatedCost": 31.23,
+    "estimatedCostCopilot": 19.62,
+    "cachedTokens": 1926000,
+    "billingGroupCosts": {
+      "GitHub Copilot": 19.62,
+      "Anthropic": 7.74,
+      "Google": 3.87
+    },
+    "subAgentSessions": 27
+  },
+  "last30Days": {
+    "tokens": 14129500,
+    "thinkingTokens": 1059300,
+    "estimatedTokens": 4423100,
+    "actualTokens": 9706400,
+    "sessions": 264,
+    "avgInteractionsPerSession": 7.5,
+    "avgTokensPerSession": 53520,
+    "modelUsage": {
+      "claude-sonnet-4.5": {
+        "inputTokens": 4510000,
+        "outputTokens": 1056000
+      },
+      "gpt-4o": {
+        "inputTokens": 3168000,
+        "outputTokens": 671000
+      },
+      "gemini-2.5-pro": {
+        "inputTokens": 3327500,
+        "outputTokens": 1397000
+      }
+    },
+    "editorUsage": {
+      "VS Code": {
+        "tokens": 7920000,
+        "sessions": 143
+      },
+      "Claude Code": {
+        "tokens": 4185500,
+        "sessions": 77
+      },
+      "Copilot CLI": {
+        "tokens": 2024000,
+        "sessions": 44
+      }
+    },
+    "editorModelUsage": {
+      "VS Code": {
+        "gpt-4o": {
+          "inputTokens": 3168000,
+          "outputTokens": 671000
+        },
+        "claude-sonnet-4.5": {
+          "inputTokens": 2750000,
+          "outputTokens": 561000
+        }
+      },
+      "Claude Code": {
+        "claude-sonnet-4.5": {
+          "inputTokens": 1760000,
+          "outputTokens": 495000
+        }
+      },
+      "Copilot CLI": {
+        "gemini-2.5-pro": {
+          "inputTokens": 3327500,
+          "outputTokens": 1397000
+        }
+      }
+    },
+    "co2": 53.02,
+    "treesEquivalent": 2.31,
+    "waterUsage": 21.34,
+    "estimatedCost": 38.17,
+    "estimatedCostCopilot": 23.98,
+    "cachedTokens": 2354000,
+    "billingGroupCosts": {
+      "GitHub Copilot": 23.98,
+      "Anthropic": 9.459999999999999,
+      "Google": 4.7299999999999995
+    },
+    "subAgentSessions": 33
+  },
+  "lastUpdated": "2026-03-14T09:30:00.000Z",
+  "backendConfigured": false,
+  "compactNumbers": false,
+  "copilotPlan": {
+    "planId": "business",
+    "planName": "Business",
+    "monthlyAiCreditsUsd": 20,
+    "monthlyPremiumRequests": 300,
+    "isMCPEnabled": true
+  },
+  "sortSettings": {}
+}

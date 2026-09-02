@@ -24,12 +24,13 @@ import type {
 	CandidatePath,
 	UsageAnalysisAdapterContext,
 } from '../ecosystemAdapter';
-import { CopilotCliStoreAccess, isMicrosoftScoutCwd } from '../copilotCliStore';
+import { CopilotCliStoreAccess, isMicrosoftScoutCwd, isCopilotAppClientName } from '../copilotCliStore';
 import { getCopilotCliExactUsage } from '../copilotCliOtel';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
 import { normalizePath } from '../utils/pathUtils';
 import { pathExists } from '../utils/fsAsync';
+import { readTextFileWithSizeGuard } from '../utils/safeFileRead';
 
 /** Returns the canonical Copilot CLI session-state directory (~/.copilot/session-state). */
 export function getCopilotCliSessionStateDir(): string {
@@ -44,22 +45,30 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	private readonly store = new CopilotCliStoreAccess();
 	/** UUIDs of sessions discovered to have been created by Microsoft Scout. */
 	private readonly _scoutSessionIds = new Set<string>();
+	/**
+	 * UUIDs of sessions whose workspace.yaml records `client_name: github/autopilot`,
+	 * meaning they were started via the Copilot desktop app (which wraps the CLI)
+	 * rather than the plain terminal CLI (`client_name: github/cli`, or absent on
+	 * older sessions predating this field).
+	 */
+	private readonly _appSessionIds = new Set<string>();
 
 	/**
 	 * Returns the per-session display name.
 	 * Sessions whose cwd is under Documents\Microsoft Scout are shown as
 	 * "MS Scout (Copilot CLI)" to distinguish them from regular CLI sessions.
+	 * Sessions started via the Copilot desktop app are shown as "Copilot CLI (App)".
 	 */
 	getDisplayName(sessionFile: string): string {
 		// DB virtual path: session-store.db#<uuid>
 		const sessionId = this.store.getSessionId(sessionFile);
-		if (sessionId && this._scoutSessionIds.has(sessionId)) {
-			return 'MS Scout (Copilot CLI)';
-		}
 		// events.jsonl path: ~/.copilot/session-state/<uuid>/events.jsonl
 		const eventsUuid = path.basename(path.dirname(sessionFile));
-		if (eventsUuid && this._scoutSessionIds.has(eventsUuid)) {
+		if ((sessionId && this._scoutSessionIds.has(sessionId)) || (eventsUuid && this._scoutSessionIds.has(eventsUuid))) {
 			return 'MS Scout (Copilot CLI)';
+		}
+		if ((sessionId && this._appSessionIds.has(sessionId)) || (eventsUuid && this._appSessionIds.has(eventsUuid))) {
+			return 'Copilot CLI (App)';
 		}
 		return 'Copilot CLI';
 	}
@@ -67,15 +76,32 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	/**
 	 * Called for files that were *discovered* by this adapter but not *handled*
 	 * (i.e. events.jsonl files, which are parsed by the JSONL fallback parser).
-	 * Returns 'MS Scout (Copilot CLI)' when the session UUID was marked as Scout
-	 * during discover(), undefined otherwise.
+	 * Returns 'MS Scout (Copilot CLI)' or 'Copilot CLI (App)' when the session UUID
+	 * was marked as such during discover(), undefined otherwise.
 	 */
 	getDisplayNameForDiscoveredPath(sessionFile: string): string | undefined {
 		const eventsUuid = path.basename(path.dirname(sessionFile));
 		if (eventsUuid && this._scoutSessionIds.has(eventsUuid)) {
 			return 'MS Scout (Copilot CLI)';
 		}
+		if (eventsUuid && this._appSessionIds.has(eventsUuid)) {
+			return 'Copilot CLI (App)';
+		}
 		return undefined;
+	}
+
+	/**
+	 * Read workspace.yaml next to a discovered events.jsonl file and return its
+	 * cwd value. This supplies workspace attribution for worktree CLI sessions
+	 * without changing the handles() contract.
+	 */
+	async getWorkspacePathForDiscoveredPath(sessionFile: string): Promise<string | undefined> {
+		const yamlPath = path.join(path.dirname(sessionFile), 'workspace.yaml');
+		const content = await readTextFileWithSizeGuard(yamlPath, 'copilotCliAdapter');
+		if (content === undefined) { return undefined; }
+		const match = content.match(/^cwd:\s*(.+)$/m);
+		const cwd = match?.[1]?.trim();
+		return cwd || undefined;
 	}
 
 	/**
@@ -132,7 +158,7 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		return exact?.modelUsage ?? {};
 	}
 
-	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
+	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string; repository?: string }> {
 		if (this.store.isCliStoreSession(sessionFile)) {
 			const session = await this.store.readSession(sessionFile);
 			if (!session) { return { title: undefined, firstInteraction: null, lastInteraction: null }; }
@@ -140,8 +166,8 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 				title: session.summary ?? undefined,
 				firstInteraction: session.created_at,
 				lastInteraction: session.updated_at,
-				// workspacePath is intentionally absent for NULL-repository sessions
-				// so callers can detect the no-workspace case via its absence.
+				workspacePath: session.cwd ?? undefined,
+				repository: session.repository ?? undefined,
 			};
 		}
 		return { title: undefined, firstInteraction: null, lastInteraction: null };
@@ -181,7 +207,14 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		if (!this.store.isCliStoreSession(sessionFile)) { return analysis; }
 		const turns = await this.store.getTurns(sessionFile);
 		// Each user turn counts as one CLI interaction; no model/tool data available in the schema.
-		analysis.modeUsage.cli = turns.filter(t => t.user_message !== null).length;
+		const cliCount = turns.filter(t => t.user_message !== null).length;
+		const sessionId = this.store.getSessionId(sessionFile);
+		if (sessionId && this._appSessionIds.has(sessionId)) {
+			// Copilot desktop app session — broken out from terminal CLI usage.
+			analysis.modeUsage.cliApp = cliCount;
+		} else {
+			analysis.modeUsage.cli = cliCount;
+		}
 		return analysis;
 	}
 
@@ -194,18 +227,22 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 
 	/**
 	 * Reads workspace.yaml from a UUID session directory and adds the UUID to
-	 * _scoutSessionIds if the cwd indicates a Microsoft Scout session.
+	 * _scoutSessionIds if the cwd indicates a Microsoft Scout session, and/or to
+	 * _appSessionIds if client_name indicates the Copilot desktop app.
 	 * Silently ignores missing or unreadable files.
 	 */
 	private async _tryMarkScoutFromWorkspaceYaml(uuidDir: string, uuid: string): Promise<void> {
 		const yamlPath = path.join(uuidDir, 'workspace.yaml');
-		try {
-			const content = await fs.promises.readFile(yamlPath, 'utf8');
-			const match = content.match(/^cwd:\s*(.+)$/m);
-			if (match && isMicrosoftScoutCwd(match[1].trim())) {
-				this._scoutSessionIds.add(uuid);
-			}
-		} catch { /* workspace.yaml may not exist */ }
+		const content = await readTextFileWithSizeGuard(yamlPath, 'copilotCliAdapter');
+		if (content === undefined) { return; }
+		const cwdMatch = content.match(/^cwd:\s*(.+)$/m);
+		if (cwdMatch && isMicrosoftScoutCwd(cwdMatch[1].trim())) {
+			this._scoutSessionIds.add(uuid);
+		}
+		const clientMatch = content.match(/^client_name:\s*(.+)$/m);
+		if (clientMatch && isCopilotAppClientName(clientMatch[1].trim())) {
+			this._appSessionIds.add(uuid);
+		}
 	}
 
 	getCandidatePaths(): CandidatePath[] {
@@ -286,10 +323,15 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 			const dbOnlySessions = await this.store.discoverNewSessionsWithCwd(knownUuids);
 			if (dbOnlySessions.length > 0) {
 				log(`📄 Found ${dbOnlySessions.length} chat-only session(s) in Copilot CLI session-store.db`);
-				for (const { id, cwd } of dbOnlySessions) {
+				await Promise.all(dbOnlySessions.map(async ({ id, cwd }) => {
 					if (isMicrosoftScoutCwd(cwd)) {
 						this._scoutSessionIds.add(id);
 					}
+					// Chat-only sessions still get a session-state/<uuid>/ dir with workspace.yaml
+					// (just no events.jsonl), so client_name (app vs. terminal CLI) is still detectable.
+					await this._tryMarkScoutFromWorkspaceYaml(path.join(root, id), id);
+				}));
+				for (const { id } of dbOnlySessions) {
 					sessionFiles.push(this.store.virtualPath(id));
 				}
 			}

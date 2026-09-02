@@ -50,6 +50,7 @@ import {
 import { isCopilotChatNonSessionFile } from './adapterPredicates';
 import { normalizePath } from '../utils/pathUtils';
 import { pathExists } from '../utils/fsAsync';
+import { readTextFileWithSizeGuard } from '../utils/safeFileRead';
 
 /** VS Code variants probed across all platforms. */
 const VSCODE_VARIANTS = [
@@ -256,7 +257,10 @@ export class CopilotChatAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 
 	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
 		try {
-			const content = await fs.promises.readFile(sessionFile, 'utf8');
+			const content = await readTextFileWithSizeGuard(sessionFile, 'copilotChatAdapter');
+			if (content === undefined) {
+				return { tokens: 0, thinkingTokens: 0, actualTokens: 0 };
+			}
 			if (isUuidPointerFile(content)) {
 				return { tokens: 0, thinkingTokens: 0, actualTokens: 0 };
 			}

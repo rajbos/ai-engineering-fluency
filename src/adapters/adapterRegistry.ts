@@ -20,7 +20,7 @@ import { ContinueDataAccess } from '../continue';
 import { EclipseDataAccess } from '../eclipse';
 import { VisualStudioDataAccess } from '../visualstudio';
 import { ClaudeCodeDataAccess } from '../claudecode';
-import { ClaudeDesktopCoworkDataAccess } from '../claudedesktop';
+import { ClaudeDesktopDataAccess } from '../claudedesktop';
 import { MistralVibeDataAccess } from '../mistralvibe';
 import { GeminiCliDataAccess } from '../geminicli';
 import { AntigravityDataAccess } from '../antigravity';
@@ -31,6 +31,7 @@ import { KiroCliDataAccess } from '../kirocli';
 import { DevinCliDataAccess } from '../devinCli';
 import { ClineDataAccess } from '../cline';
 import { CodexCliDataAccess } from '../codexcli';
+import { HermesDataAccess } from '../hermes';
 
 import { OpenCodeAdapter } from './openCodeAdapter';
 import { CrushAdapter } from './crushAdapter';
@@ -52,6 +53,7 @@ import { KiroCliAdapter } from './kiroCliAdapter';
 import { DevinCliAdapter } from './devinCliAdapter';
 import { ClineAdapter } from './clineAdapter';
 import { CodexCliAdapter } from './codexCliAdapter';
+import { HermesAdapter } from './hermesAdapter';
 
 /** Data-access instances and callbacks required to build the adapter registry. */
 export interface AdapterRegistryDeps {
@@ -61,7 +63,7 @@ continue_: ContinueDataAccess;
 eclipse: EclipseDataAccess;
 visualStudio: VisualStudioDataAccess;
 claudeCode: ClaudeCodeDataAccess;
-claudeDesktopCowork: ClaudeDesktopCoworkDataAccess;
+claudeDesktop: ClaudeDesktopDataAccess;
 mistralVibe: MistralVibeDataAccess;
 geminiCli: GeminiCliDataAccess;
 antigravity: AntigravityDataAccess;
@@ -72,6 +74,7 @@ kiroCli: KiroCliDataAccess;
 devinCli: DevinCliDataAccess;
 cline: ClineDataAccess;
 codexCli: CodexCliDataAccess;
+hermes: HermesDataAccess;
 /** Estimates token count from raw text for a given model. */
 estimateTokens: (text: string, model?: string) => number;
 /** Returns true when the tool name identifies an MCP server tool. */
@@ -104,7 +107,7 @@ continue_: new ContinueDataAccess(),
 eclipse: new EclipseDataAccess(),
 visualStudio: new VisualStudioDataAccess(),
 claudeCode: new ClaudeCodeDataAccess(),
-claudeDesktopCowork: new ClaudeDesktopCoworkDataAccess(),
+claudeDesktop: new ClaudeDesktopDataAccess(),
 mistralVibe: new MistralVibeDataAccess(),
 geminiCli: new GeminiCliDataAccess(),
 antigravity: new AntigravityDataAccess(),
@@ -115,6 +118,7 @@ kiroCli: new KiroCliDataAccess(),
 devinCli: new DevinCliDataAccess(),
 cline: new ClineDataAccess(),
 codexCli: new CodexCliDataAccess(),
+hermes: new HermesDataAccess(),
 };
 }
 
@@ -132,7 +136,7 @@ new VisualStudioAdapter(deps.visualStudio, deps.estimateTokens),
 new ContinueAdapter(deps.continue_),
 new EclipseAdapter(deps.eclipse),
 new ClaudeDesktopAdapter(
-deps.claudeDesktopCowork,
+deps.claudeDesktop,
 deps.isMcpTool,
 deps.extractMcpServerName,
 deps.estimateTokens
@@ -154,6 +158,7 @@ new DevinCliAdapter(deps.devinCli),
 // must win before the discovery-only Copilot Chat adapter below.
 new ClineAdapter(deps.cline),
 new CodexCliAdapter(deps.codexCli),
+new HermesAdapter(deps.hermes),
 // Copilot Chat / CLI adapters: discovery-only. Their handles() returns
 // false so processSessionFile() falls through to the shared parser path
 // for VS Code Copilot Chat and CLI files. See issue #654.

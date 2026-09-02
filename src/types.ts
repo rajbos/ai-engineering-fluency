@@ -17,8 +17,14 @@ export interface TokenUsageStats {
   lastUpdated: Date;
 }
 
+/**
+ * A model identifier string as returned by the AI provider (e.g. "gpt-4o", "claude-sonnet-4-5").
+ * May be "unknown" when the model could not be determined from the session data.
+ */
+export type ModelId = string;
+
 export interface ModelUsage {
-  [modelName: string]: {
+  [modelName: ModelId]: {
     inputTokens: number;    // total input tokens (uncached + cached reads + cache creation)
     outputTokens: number;
     cachedReadTokens?: number;     // portion of inputTokens that were cache reads (billed at reduced rate)
@@ -31,6 +37,9 @@ export interface ModelUsage {
      * the standard `cacheCreationCostPerMillion` (5-minute) rate.
      */
     cacheCreation1hTokens?: number;
+    thinkingTokens?: number;
+    /** Number of sessions that used this model in the aggregated period. */
+    sessions: number;
   };
 }
 
@@ -68,7 +77,6 @@ export interface ModelPricing {
   cacheCreation1hCostPerMillion?: number; // cost per million cache-creation tokens, 1-hour TTL (e.g. 6.0 for Claude Sonnet 4)
   category?: string;
   tier?: "standard" | "premium" | "unknown";
-  multiplier?: number;
   displayNames?: string[];
   /**
    * GitHub Copilot AI-Credit per-token pricing (1 credit = $0.01).
@@ -132,6 +140,14 @@ export interface PeriodStats {
    * rates for all others.
    */
   billingGroupCosts?: Record<string, number>;
+  /**
+   * Per-editor model usage breakdown for this period — mirrors `DailyTokenStats.editorModelUsage`.
+   * Lets consumers (e.g. the Details webview) determine which billing group(s) an editor or
+   * model belongs to, so the "Usage by Editor"/"Model Usage" lists can be filtered by provider.
+   */
+  editorModelUsage?: { [editor: string]: ModelUsage };
+  /** Number of sessions in this period that delegated work to sub-agents (had 1+ sub-agent tool calls; see `SessionFileCache.subAgentCalls`). Absent when zero. */
+  subAgentSessions?: number;
 }
 
 export interface DetailedStats {
@@ -162,11 +178,58 @@ export interface DailyTokenStats {
    * model usage aggregated from all sessions of that editor type on that day.
    */
   editorModelUsage?: { [editor: string]: ModelUsage };
+  /** Per-task-category token/session breakdown for this day, keyed by `TaskCategory` (e.g. "Coding", "Debugging"). */
+  taskCategoryUsage?: { [category: string]: { tokens: number; sessions: number } };
+  /**
+   * Per-model efficiency counters for this day — the time-sliceable form of
+   * {@link ModelEfficiencyUsage} that powers model-vs-model comparisons.
+   * Absent when no session on this day carried per-model efficiency data.
+   */
+  modelEfficiency?: DailyModelEfficiency;
 }
+
+/**
+ * One model's efficiency counters for a single day, extending the per-session
+ * {@link ModelEfficiencyCounters} with the session-level signals that have to be
+ * *attributed* to a model rather than measured per model (duration, lines of
+ * code, apply-button usage). For sessions that used several models these are
+ * split by the model's share of the session's tokens.
+ */
+export interface DailyModelEfficiencyEntry extends ModelEfficiencyCounters {
+  /** Sessions that used this model at all. A 2-model session adds 1 to both models. */
+  sessions: number;
+  /**
+   * Token-weighted "session equivalents" — a 2-model session splits 1.0 between
+   * its models. This is the honest denominator for per-session ratios, since
+   * `sessions` deliberately over-counts multi-model sessions.
+   */
+  sessionShare: number;
+  /** Net active session time attributed to this model (token-weighted), in ms. */
+  activeDurationMs: number;
+  /** Sessions that contributed to `activeDurationMs` (token-weighted). */
+  durationSessionShare: number;
+  /** Lines added attributed to this model (token-weighted). */
+  linesAdded: number;
+  /** Lines removed attributed to this model (token-weighted). */
+  linesRemoved: number;
+  /** Apply-button uses attributed to this model (token-weighted). */
+  applies: number;
+  /** Code blocks shown attributed to this model (token-weighted). */
+  codeBlocks: number;
+}
+
+export interface DailyModelEfficiency {
+  [modelName: string]: DailyModelEfficiencyEntry;
+}
+
+/** Time-window selector options available in the Chart view. */
+export type ChartTimeWindow = 'today' | 'last7' | 'last30' | 'last90' | 'currentMonth' | 'allTime';
 
 /** Aggregated data for one time window (day/week/month) in the chart. */
 export interface ChartPeriodData {
   labels: string[];
+  /** ISO date keys for each bar, used for time-window filtering. Day=YYYY-MM-DD, week=Monday YYYY-MM-DD, month=YYYY-MM. */
+  periodKeys: string[];
   tokensData: number[];
   sessionsData: number[];
   modelDatasets: object[];
@@ -206,9 +269,28 @@ export interface ChartPeriodData {
    * Copilot group uses AI-Credit pricing; all others use direct provider pricing.
    */
   billingGroupCostDatasets?: object[];
+  /** Token datasets split by task category (e.g. "Coding", "Debugging", "Testing") — one stacked-bar dataset per category. */
+  taskCategoryDatasets?: object[];
+  /** Task-token datasets split by category. */
   taskCategoryTokenDatasets?: object[];
+  /** Task-session datasets split by category. */
   taskCategorySessionDatasets?: object[];
+  /** Task-cost datasets split by category. */
   taskCategoryCostDatasets?: object[];
+  /**
+   * Cost datasets split by model — one dataset per top model (by total cost), plus an
+   * "Other models" dataset for the remainder. Each model's usage is priced using the
+   * correct pricing source per editor it was used from.
+   */
+  modelCostDatasets?: object[];
+  /** Session-count datasets split by model — one stacked-bar dataset per model. */
+  modelSessionsDatasets?: object[];
+  /** Session-count datasets split by editor — one stacked-bar dataset per editor. */
+  editorSessionsDatasets?: object[];
+  /** Session-count datasets split by billing provider — one stacked-bar dataset per provider group. */
+  providerSessionsDatasets?: object[];
+  /** Token datasets split by billing provider — one stacked-bar dataset per provider group. */
+  providerTokensDatasets?: object[];
 }
 
 /** Shape of the data payload sent to the chart webview (via window.__INITIAL_CHART__ or postMessage). */
@@ -221,6 +303,7 @@ export interface ChartDataPayload {
   editorTotalsMap: Record<string, number>;
   repositoryDatasets: object[];
   repositoryTotalsMap: Record<string, number>;
+  taskCategoryDatasets?: object[];
   dailyCount: number;
   totalTokens: number;
   avgTokensPerDay: number;
@@ -269,6 +352,13 @@ export interface SessionFileCache {
   lastInteraction?: string | null; // ISO timestamp of last interaction
   title?: string; // Session title (customTitle from session file)
   repository?: string; // Git remote origin URL for the session's workspace
+  /**
+   * True once a full parse has attempted repository extraction for this cache entry.
+   * `repository` can legitimately stay undefined afterward (e.g. no resolvable repo) —
+   * this flag is what distinguishes "resolved to nothing" from "never attempted", so a
+   * repo-less session doesn't get re-parsed on every single cache read forever.
+   */
+  repositoryResolved?: boolean;
   workspaceFolderPath?: string; // Full local path to the workspace folder (optional)
   thinkingTokens?: number; // Estimated thinking/reasoning tokens
   actualTokens?: number; // Actual token count from LLM API usage data (when available)
@@ -277,6 +367,8 @@ export interface SessionFileCache {
   debugLogInputTokens?: number; // Input token total from debug log (sum across all llm_request events)
   debugLogOutputTokens?: number; // Output token total from debug log (sum across all llm_request events)
   debugLogChecked?: boolean; // Sentinel: true means we already looked for a debug log and found none
+  /** Number of sub-agent/delegation tool calls in this session (Copilot CLI `task`/`read_agent`/`write_agent`/`list_agents`, Claude Code `Task`, `runSubagent`, `delegate_*`, …), via `countDelegationToolCalls()`. Absent when zero. */
+  subAgentCalls?: number;
   /** Exact GitHub Copilot billing for this session in USD (from session.shutdown.totalNanoAiu or debug log copilotUsageNanoAiu). */
   copilotExactCostDollars?: number;
   /** Number of session.truncation events where messages were removed (breaking prompt cache). 0 or absent means no truncation. */
@@ -323,6 +415,9 @@ export interface SessionUsageAnalysis {
   modeUsage: ModeUsage;
   contextReferences: ContextReferenceUsage;
   mcpTools: McpToolUsage;
+  /** Agent-skill invocation counts for this session. See {@link SkillCallUsage}. */
+  skillCalls?: SkillCallUsage;
+  /** Aggregated task-classification result for this session. */
   taskClassification: TaskClassificationResult;
   modelSwitching: {
     uniqueModels: string[];
@@ -351,6 +446,26 @@ export interface SessionUsageAnalysis {
   sessionDuration?: SessionDurationData;
   conversationPatterns?: ConversationPatterns;
   agentTypes?: AgentTypeUsage;
+  /**
+   * Per-model efficiency counters derived from this session's structured tool-call
+   * data. Absent when the session format carries no per-turn tool-call detail.
+   * Token/cost fields are zero here — they are folded in at aggregation time.
+   */
+  modelEfficiency?: ModelEfficiencyUsage;
+  /**
+   * Correction moments detected in this session's conversation (see
+   * src/correctionDetection.ts). Absent when the session format carries no
+   * per-turn detail or no moments were found.
+   */
+  correctionMoments?: CorrectionMoment[];
+  /** Complete correction counts; unlike correctionMoments, these are not detail-capped. */
+  correctionCounts?: CorrectionCounts;
+  /**
+   * The session's first user prompt (truncated), captured for repeated-task
+   * detection (see src/repeatedTasks.ts). Absent when the session format
+   * carries no user-message text.
+   */
+  firstUserPrompt?: string;
 }
 
 export interface ToolCallUsage {
@@ -366,6 +481,7 @@ export interface ModeUsage {
   plan: number; // Plan mode interactions (built-in plan agent)
   customAgent: number; // Custom agent mode interactions (.agent.md files)
   cli: number; // CLI tool interactions (Copilot CLI, Claude Code, OpenCode, Crush, Mistral Vibe)
+  cliApp?: number; // Subset of CLI interactions: Copilot CLI sessions started via the Copilot desktop app (client_name: github/autopilot), broken out from `cli`
 }
 
 export interface ContextReferenceUsage {
@@ -396,6 +512,183 @@ export interface McpToolUsage {
   total: number;
   byServer: { [serverName: string]: number };
   byTool: { [toolName: string]: number };
+}
+
+/**
+ * Agent-skill invocation counts (e.g. Claude Code's `Skill` tool unwrapped to the
+ * actual skill name from `input.skill`). Adapter-agnostic — populated only by
+ * adapters whose session format can resolve a specific skill name from a wrapper
+ * tool call; absent/empty for adapters where skill/prompt invocation leaves no
+ * distinguishable session-log signal.
+ */
+export interface SkillCallUsage {
+  total: number;
+  byName: { [skillName: string]: number };
+}
+
+/**
+ * Per-model efficiency counters (issue #1649).
+ *
+ * Turn-derived counters (calls/editTurns/oneShotEditTurns/retries/selfCorrections)
+ * are computed per session from structured tool-call data where available
+ * (Copilot Chat JSON, Copilot CLI JSONL, and every ecosystem adapter with buildTurns).
+ * Token/cost fields are folded in separately at aggregation time from each
+ * session's ModelUsage so no extra session parsing is needed.
+ *
+ * A "call" is one user-request turn — the closest unit comparable across all
+ * supported editors (one agentic turn may span multiple underlying API calls).
+ */
+export interface ModelEfficiencyCounters {
+  /** User-request turns attributed to this model. */
+  calls: number;
+  /** Tool invocations across those turns. Used as the local equivalent of agent steps. */
+  toolCalls?: number;
+  /** Turns containing at least one file-edit tool call. */
+  editTurns: number;
+  /** Edit turns with no retries and no self-corrections. */
+  oneShotEditTurns: number;
+  /** Repeat edit calls immediately following an edit to the same file (failed edit retried). */
+  retries: number;
+  /** Repeat edits to a file already edited in the same turn with other tool calls in between (model checked, then corrected itself). */
+  selfCorrections: number;
+  /** Total file-edit tool calls attributed to this model. */
+  editToolCalls: number;
+  /** Total input tokens (incl. cache reads/creation). Folded in from ModelUsage at aggregation time. */
+  inputTokens: number;
+  /** Total output tokens. Folded in from ModelUsage at aggregation time. */
+  outputTokens: number;
+  /** Cache-read portion of inputTokens. Folded in from ModelUsage at aggregation time. */
+  cachedReadTokens: number;
+  /** Estimated cost in USD (provider/API rates). Folded in at aggregation time. */
+  cost: number;
+}
+
+export interface ModelEfficiencyUsage {
+  [modelName: string]: ModelEfficiencyCounters;
+}
+
+// ---------------------------------------------------------------------------
+// Correction moments (see src/correctionDetection.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Kinds of correction moments detected in a session conversation:
+ * - `user-correction`       — a user message correcting the agent ("no, that's wrong", "revert", ...)
+ * - `edit-retry`            — a repeat edit to a file whose immediately preceding tool call was an
+ *                             edit to the same file (failed edit retried right away)
+ * - `edit-self-correction`  — a repeat edit to a file already edited in the same turn with other
+ *                             tool calls in between (the model checked, then corrected itself)
+ * - `tool-error`            — a tool call that failed (where the format records success/failure);
+ *                             `retried` is true when the same tool was called again later
+ * - `agent-self-correction` — an assistant message admitting or fixing a mistake ("my mistake",
+ *                             "let me fix", "you're right", ...)
+ */
+export type CorrectionMomentType =
+  | 'user-correction'
+  | 'edit-retry'
+  | 'edit-self-correction'
+  | 'tool-error'
+  | 'agent-self-correction';
+
+/** One detected correction moment within a session. */
+export interface CorrectionMoment {
+  type: CorrectionMomentType;
+  /** 1-based user-turn index within the session. */
+  turnNumber: number;
+  timestamp: string | null;
+  /** Short excerpt (capped length) providing context for the moment. */
+  snippet: string;
+  /** Tool name for `tool-error` moments. */
+  tool?: string;
+  /** Target file for `edit-retry` / `edit-self-correction` moments. */
+  file?: string;
+  /** For `tool-error`: the same tool was called again later in the session. */
+  retried?: boolean;
+  /** Label of the heuristic pattern that matched (pattern-based types only). */
+  matchedPattern?: string;
+}
+
+/** Aggregated correction-moment counters (per session, repo, or period). */
+export interface CorrectionCounts {
+  userCorrections: number;
+  editRetries: number;
+  editSelfCorrections: number;
+  toolErrors: number;
+  toolErrorsRetried: number;
+  agentSelfCorrections: number;
+}
+
+/** Period-level correction counters plus the number of sessions that had any moment. */
+export interface CorrectionPeriodCounts extends CorrectionCounts {
+  sessionsWithMoments: number;
+  /** Sessions containing at least one user-correction moment. */
+  sessionsWithUserCorrections?: number;
+}
+
+/** One session's entry in the correction report. */
+export interface CorrectionSessionEntry {
+  file: string;
+  title?: string | null;
+  lastInteraction?: string | null;
+  moments: CorrectionMoment[];
+  /** Complete count before correctionMoments is detail-capped. */
+  totalMoments?: number;
+}
+
+/** Correction moments for one repository, over its most recent sessions. */
+export interface CorrectionRepoGroup {
+  repository: string;
+  sessions: CorrectionSessionEntry[];
+  counts: CorrectionCounts;
+  sessionsWithMoments: number;
+}
+
+/**
+ * Report of correction moments across repositories, each limited to its most
+ * recent sessions (see `sessionsPerRepo`). Built from cached per-session
+ * `SessionUsageAnalysis.correctionMoments`.
+ */
+export interface CorrectionReport {
+  sessionsPerRepo: number;
+  repos: CorrectionRepoGroup[];
+  counts: CorrectionCounts;
+  sessionsWithMoments: number;
+}
+
+// ---------------------------------------------------------------------------
+// Repeated tasks (see src/repeatedTasks.ts)
+// ---------------------------------------------------------------------------
+
+/** Reference to one session in a repeated-task cluster. */
+export interface RepeatedTaskSessionRef {
+  file: string;
+  title?: string | null;
+  lastInteraction?: string | null;
+  repository?: string;
+}
+
+/**
+ * A group of sessions whose first user prompts are similar enough to describe
+ * the same task — a candidate for a reusable skill, prompt file, or agent.
+ */
+export interface RepeatedTaskCluster {
+  /** The cluster's most recent prompt, truncated for display. */
+  representativePrompt: string;
+  sessionCount: number;
+  /** Repositories (short owner/repo names) the cluster's sessions belong to. */
+  repositories: string[];
+  /** Most recent session first. */
+  sessions: RepeatedTaskSessionRef[];
+  /** Tokens shared by every prompt in the cluster (display hint). */
+  sharedKeywords: string[];
+}
+
+/** Repeated-task candidates across all scanned sessions. */
+export interface RepeatedTaskReport {
+  minClusterSize: number;
+  /** Sessions that carried a usable first user prompt. */
+  sessionsScanned: number;
+  clusters: RepeatedTaskCluster[];
 }
 
 export interface EditScopeUsage {
@@ -500,10 +793,14 @@ export interface TodaySessionSummary {
   contextWindowLimit?: number;
   /** Last known context fill in tokens (Copilot CLI, from data.db context_current_tokens). */
   contextReachedTokens?: number;
-  /** Session duration in milliseconds (last interaction − first interaction). Absent when not derivable. */
+  /** Wall-clock session duration in milliseconds (last interaction − first interaction), including idle gaps between turns. Absent when not derivable. Kept for reference/future use; prefer `activeDurationMs` for display. */
   durationMs?: number;
+  /** Net ("active") session duration in milliseconds: sum of merged [requestTimestamp, requestTimestamp+totalElapsed] windows, excluding idle gaps between turns. This is the value shown as "Duration" in the Recent Sessions list. Absent when not derivable. */
+  activeDurationMs?: number;
   /** Workspace/repository name the session belongs to. Absent when attribution is unavailable. */
   workspace?: string;
+  /** Number of sub-agent/delegation tool calls detected in this session (see `SessionFileCache.subAgentCalls`). Absent when zero. */
+  subAgentCalls?: number;
 }
 
 export interface UsageAnalysisStats {
@@ -518,8 +815,41 @@ lastUpdated: Date;
 customizationMatrix?: WorkspaceCustomizationMatrix;
 missedPotential?: MissedPotentialWorkspace[];
 todaySessions?: TodaySessionSummary[];
+/**
+ * Per-period session summaries for the "Recent Sessions" lookback selector, bucketed from
+ * the already-parsed sessions the main analysis walks. Lets the host serve last7/last30/
+ * currentMonth instantly instead of re-parsing the whole session corpus per period switch.
+ */
+recentSessions?: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] };
 /** Optional tool curation analysis (VS Code only; absent in CLI/VS/JetBrains). */
 curationAnalysis?: ToolCurationAnalysis | null;
+/**
+ * Daily-bucketed multi-agent/delegation usage over the trailing ~30 days, for the
+ * "Multi-Agent Usage" sparkline on the Fluency dashboard. Absent when no sessions
+ * with multi-agent signals were found in the window.
+ */
+agenticDailyTrend?: AgenticTrendPoint[];
+/**
+ * Correction moments per repository over its most recent sessions
+ * (default 25). Absent when no moments were detected.
+ */
+correctionReport?: CorrectionReport;
+/**
+ * Repeated-task candidates: clusters of sessions whose first user prompts
+ * describe the same task (see src/repeatedTasks.ts). Absent when no
+ * cluster reached the minimum size.
+ */
+repeatedTasks?: RepeatedTaskReport;
+}
+
+/** One day's worth of multi-agent/delegation signal, used to render a trend sparkline. */
+export interface AgenticTrendPoint {
+  /** UTC date key, e.g. "2024-06-01". */
+  date: string;
+  /** Sessions that day with 2+ direct children (data.db/Hermes hierarchy). */
+  multiAgentParentSessions: number;
+  /** Sessions that day classified as `Delegation` by `classifySessionTask()`. */
+  delegationSessions: number;
 }
 
 /** Matrix types used for Usage Analysis customization matrix */
@@ -540,12 +870,154 @@ export interface WorkspaceCustomizationMatrix {
   workspacesWithIssues: number;
 }
 
+// ── Dark Factory readiness ────────────────────────────────────────────────
+//
+// A per-repository readiness scan over the dark factory maturity ladder
+// (see src/darkFactoryReadiness.ts). The unit of assessment is always a
+// repository — a product line — and never a person. The scan reports which
+// governance and evidence controls a repository has; it never certifies that
+// a team is ready to run without humans.
+
+/**
+ * State of one control. `unknown` is a first-class outcome: it means the scan
+ * could not determine the state (no GitHub token, a denied API call, or a
+ * control whose absence is not observable), and it must never be collapsed
+ * into either `present` or `absent`.
+ */
+export type DarkFactoryControlState = 'present' | 'absent' | 'unknown';
+
+/** Where a control's state comes from. */
+export type DarkFactoryControlTier =
+  /** Observable from the checked-out files alone, no authentication needed. */
+  | 'filesystem'
+  /** Only observable through the GitHub API (rulesets, protection rules, enablement). */
+  | 'api'
+  /** Presence is observable from files, but absence is not — those resolve to `unknown`. */
+  | 'hybrid'
+  /** A written policy or decision; never machine-detectable. */
+  | 'governance';
+
+/** How much weight the detection of a control carries. */
+export type DarkFactoryEvidenceKind =
+  /** An unambiguous file or API fact. */
+  | 'direct'
+  /** A pattern match that produces a candidate, not a verdict. */
+  | 'heuristic'
+  /** Not detectable by any scan; always reported as unknown. */
+  | 'not-scannable';
+
+/** One control in the catalogue (`src/darkFactoryControls.json`). */
+export interface DarkFactoryControlDefinition {
+  id: string;
+  /** Ladder stage this control belongs to (1–4). */
+  stage: number;
+  label: string;
+  tier: DarkFactoryControlTier;
+  evidence: DarkFactoryEvidenceKind;
+  /** Why the control matters on the ladder. */
+  why: string;
+  /** What to do when it is absent. */
+  remediation: string;
+  /** When true, a missing filesystem signal resolves to `unknown` rather than `absent`. */
+  unknownWhenAbsent?: boolean;
+  /** Explains why absence is not observable for this control. */
+  unknownReason?: string;
+}
+
+/** One stage of the ladder as described in the catalogue. */
+export interface DarkFactoryStageDefinition {
+  stage: number;
+  name: string;
+  summary: string;
+}
+
+/** A control's assessed state, with the detail needed to render it honestly. */
+export interface DarkFactoryControlResult extends DarkFactoryControlDefinition {
+  state: DarkFactoryControlState;
+  /** Short human-readable justification, e.g. the path that matched. */
+  detail?: string;
+}
+
+/** Whether a stage's controls are all satisfied, definitely not, or unverifiable. */
+export type DarkFactoryStageVerdict =
+  /** Every control is present. */
+  | 'attained'
+  /** At least one control is absent — this stage is not reached. */
+  | 'blocked'
+  /** No control is absent, but at least one could not be determined. */
+  | 'indeterminate';
+
+/** Per-stage assessment for one repository. */
+export interface DarkFactoryStageResult {
+  stage: number;
+  name: string;
+  summary: string;
+  verdict: DarkFactoryStageVerdict;
+  /** Control ids that are present. */
+  present: string[];
+  /** Control ids that are absent — the specific things blocking this stage. */
+  missing: string[];
+  /** Control ids whose state could not be determined. */
+  unknown: string[];
+}
+
+/** An anti-pattern the scan detected in a repository. */
+export interface DarkFactoryFinding {
+  id: string;
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  /** What was observed that triggered this finding. */
+  detail: string;
+}
+
+/** The readiness report for a single repository. */
+export interface DarkFactoryRepoReport {
+  /** Display name for the repository (its folder name). */
+  name: string;
+  /** Absolute path scanned. */
+  repoRoot: string;
+  /** `owner/repo` when the origin remote could be resolved. */
+  nameWithOwner?: string;
+  /**
+   * Highest stage whose controls are *all* confirmed present. This is a lower
+   * bound: unknowns never lift it.
+   */
+  confirmedStage: number;
+  /**
+   * Highest stage that nothing observed rules out — unknowns treated
+   * optimistically. This is an upper bound, never a claim.
+   */
+  ceilingStage: number;
+  /** True when every control resolved to `present` or `absent`. */
+  fullyEvidenced: boolean;
+  /** Number of controls whose state could not be determined. */
+  unknownCount: number;
+  stages: DarkFactoryStageResult[];
+  controls: DarkFactoryControlResult[];
+  findings: DarkFactoryFinding[];
+}
+
+/** The readiness report across all scanned repositories. */
+export interface DarkFactoryReport {
+  /** ISO timestamp of the scan. */
+  scannedAt: string;
+  /** True when GitHub API signals were included; false when the API tier was skipped. */
+  apiSignalsIncluded: boolean;
+  /** Highest stage the ladder can assess at all — stage 5 is never awarded. */
+  maxAssessableStage: number;
+  repos: DarkFactoryRepoReport[];
+  /** Repositories found but not scanned because the per-scan cap was reached. */
+  skippedRepoCount: number;
+}
+
 export interface UsageAnalysisPeriod {
   sessions: number;
   toolCalls: ToolCallUsage;
   modeUsage: ModeUsage;
   contextReferences: ContextReferenceUsage;
   mcpTools: McpToolUsage;
+  /** Aggregated agent-skill invocation counts across the period's sessions. See {@link SkillCallUsage}. */
+  skillCalls?: SkillCallUsage;
   modelSwitching: ModelSwitchingAnalysis;
   repositories: string[]; // Unique repositories worked in during this period
   repositoriesWithCustomization: string[]; // Repos with copilot-instructions.md or agents.md
@@ -567,12 +1039,33 @@ export interface UsageAnalysisPeriod {
    */
   multiAgentParentSessions?: number;
   /**
+   * Number of sessions in this period classified as `Delegation` by `classifySessionTask()`
+   * (tool calls matching subagent/delegate patterns — Copilot CLI/Claude Code Task tool,
+   * Hermes subagent source, etc.). A second, adapter-agnostic signal for sub-agent usage,
+   * complementary to `multiAgentParentSessions` (which requires data.db/JSONL hierarchy data).
+   * Populated during session caching; absent (undefined) when no such sessions exist.
+   */
+  delegationSessions?: number;
+  /**
    * Context-window usage aggregated across the period's sessions.
    * Absent when no session in the period carried context-size data.
    */
   contextWindow?: ContextWindowStats;
+  /** Weighted task-category session totals for the period. */
   taskCategoryPrimarySessions?: Partial<Record<TaskCategory, number>>;
   taskCategoryWeightedSessions?: Partial<Record<TaskCategory, number>>;
+  /**
+   * Per-model efficiency metrics aggregated across the period's sessions
+   * (issue #1649). Absent when no session in the period carried
+   * efficiency counters or per-model token usage.
+   */
+  modelEfficiency?: ModelEfficiencyUsage;
+  /**
+   * Aggregated correction-moment counters across the period's sessions
+   * (folded in by mergeUsageAnalysis from each session's correctionMoments).
+   * Absent when no session in the period carried moments.
+   */
+  corrections?: CorrectionPeriodCounts;
 }
 
 /** Aggregated context-window usage for one usage-analysis period. */
@@ -622,6 +1115,8 @@ export interface SessionFileDetails {
    * children fall outside the loaded 14-day diagnostic window.
    */
   totalChildCount?: number;
+  /** Number of sub-agent/delegation tool calls detected in this session (from cache; see `SessionFileCache.subAgentCalls`). Absent when zero/unknown. */
+  subAgentCalls?: number;
   // Per-model input/output/cached token breakdown.
   // Populated for all sessions where cached ModelUsage is available; always
   // present for Windsurf (derived from trajectory steps via the gRPC API).
@@ -714,6 +1209,9 @@ export interface SessionLogData {
 
 export type AgentSessionSource = 'cloud-agent' | 'cli-remote' | 'unknown';
 
+/** Where a repository row came from: workspace git remotes, the account-wide task list, or both. */
+export type AgentRepoDiscovery = 'workspace' | 'account' | 'both';
+
 export interface AgentRepoSummary {
   owner: string;
   repo: string;
@@ -721,14 +1219,20 @@ export interface AgentRepoSummary {
   totalTasks: number;
   /** Total cloud-agent sessions across all scanned tasks. */
   totalSessions: number;
-  /** Sum of usage.credits for all cloud-agent sessions (0 when unavailable). */
+  /** Sum of session usage in whole AI credits for all cloud-agent sessions (0 when unavailable). */
   totalCredits: number;
+  /** Sum of premium requests for sessions billed before the June 2026 switch to AI credits. */
+  totalPremiumRequests: number;
   /** How many tasks we fetched full session details for. */
   tasksScanned: number;
   /** Total tasks found in the list API response (before the detail-fetch cap). */
   tasksTotal: number;
   /** True when the detail-fetch cap was reached — totals are conservative lower bounds. */
   partial: boolean;
+  /** How this repo was found. `account`-only rows are not open in any workspace folder. */
+  discovery: AgentRepoDiscovery;
+  /** True for the synthetic bucket of account tasks the API reported without a repository. */
+  unassigned?: boolean;
   error?: string;
 }
 
@@ -737,9 +1241,19 @@ export interface AgentSessionsResult {
   totalTasks: number;
   totalSessions: number;
   totalCredits: number;
+  totalPremiumRequests: number;
   authenticated: boolean;
   since: string;
+  /** When the snapshot was fetched from GitHub; empty string when it has never been fetched. */
   fetchedAt: string;
+  /** True when the account-wide `/agents/tasks` listing succeeded (false → workspace repos only). */
+  accountTasksAvailable: boolean;
+  /** Why the account-wide listing was skipped or failed, when it was. */
+  accountTasksError?: string;
+  /** True when the task-detail budget was exhausted — totals are lower bounds. */
+  partial: boolean;
+  /** How often the snapshot is refreshed, so the UI can say when the next refresh is due. */
+  refreshIntervalMs?: number;
 }
 
 // Local summary type for customization files (mirrors webview/shared/contextRefUtils.ts)

@@ -34,6 +34,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import type { ModelUsage } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePathForComparison } from './workspaceHelpers';
 import { toLocalDayKey } from './utils/dayKeys';
 
@@ -214,22 +215,29 @@ export class KiroDataAccess {
 	}
 
 	private async readExecutionFile(filePath: string): Promise<any | null> {
-		let stat: fs.Stats;
+		// Open once and stat/read the same file handle (not the path) so the file
+		// can't change between the mtime check and the read (TOCTOU race).
+		let handle: fs.promises.FileHandle;
 		try {
-			stat = await fs.promises.stat(filePath);
+			handle = await fs.promises.open(filePath, 'r');
 		} catch {
 			return null;
 		}
-		const cached = this._executionRecordCache.get(filePath);
-		if (cached && cached.mtimeMs === stat.mtimeMs) { return cached.parsed; }
-		let parsed: any | null = null;
 		try {
-			parsed = JSON.parse(await fs.promises.readFile(filePath, 'utf8'));
-		} catch {
-			parsed = null;
+			const stat = await handle.stat();
+			const cached = this._executionRecordCache.get(filePath);
+			if (cached && cached.mtimeMs === stat.mtimeMs) { return cached.parsed; }
+			let parsed: any | null = null;
+			try {
+				parsed = JSON.parse(await handle.readFile('utf8'));
+			} catch {
+				parsed = null;
+			}
+			this._executionRecordCache.set(filePath, { mtimeMs: stat.mtimeMs, parsed });
+			return parsed;
+		} finally {
+			await handle.close();
 		}
-		this._executionRecordCache.set(filePath, { mtimeMs: stat.mtimeMs, parsed });
-		return parsed;
 	}
 
 	/** Convert a raw execution JSON into a KiroExecutionRecord with token estimates. */
@@ -377,7 +385,7 @@ export class KiroDataAccess {
 		const records = await this.readExecutionRecordsForSession(sessionFilePath);
 		if (records.length > 0) {
 			const model = await this.getSessionModelTitle(sessionFilePath);
-			const usage: ModelUsage = { [model]: { inputTokens: 0, outputTokens: 0 } };
+			const usage: ModelUsage = { [model]: { inputTokens: 0, outputTokens: 0, sessions: 0 } };
 			for (const record of records) {
 				usage[model].inputTokens += record.inputTokens;
 				usage[model].outputTokens += record.outputTokens;
@@ -394,7 +402,8 @@ export class KiroDataAccess {
 			if (!Array.isArray(item.promptLogs)) { continue; }
 			for (const log of item.promptLogs) {
 				const title = (log.modelTitle as string) || (log.completionOptions?.model as string);
-				if (title) { return title; }
+				// Untrusted title from parsed session JSON, later used as an object key — see protoGuard.ts.
+				if (title && !isUnsafeObjectKey(title)) { return title; }
 			}
 		}
 		return 'agent';
@@ -409,8 +418,10 @@ export class KiroDataAccess {
 			if (!Array.isArray(item.promptLogs)) { continue; }
 			for (const log of item.promptLogs) {
 				const model: string = (log.modelTitle as string) || (log.completionOptions?.model as string) || 'unknown';
+				// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+				if (isUnsafeObjectKey(model)) { continue; }
 				if (!modelUsage[model]) {
-					modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+					modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 				}
 				modelUsage[model].inputTokens += this.estimateTokens((log.prompt as string) || '');
 				modelUsage[model].outputTokens += this.estimateTokens((log.completion as string) || '');

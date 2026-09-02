@@ -21,6 +21,7 @@ import * as os from 'os';
 import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
 import { toLocalDayKey } from './utils/dayKeys';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 
 // Access SqlJsStatic and Database via the globally declared initSqlJs namespace
 // (made available by the /// <reference types="sql.js" /> directive above).
@@ -45,6 +46,15 @@ export interface CliStoreSession {
 export function isMicrosoftScoutCwd(cwd: string | null | undefined): boolean {
 	if (!cwd) { return false; }
 	return cwd.replace(/\\/g, '/').toLowerCase().includes('/microsoft scout');
+}
+
+/**
+ * Returns true when a session's workspace.yaml `client_name` value indicates it was
+ * started via the Copilot desktop app (which wraps the CLI process), as opposed to the
+ * plain terminal CLI (`github/cli`) or an older session predating this field.
+ */
+export function isCopilotAppClientName(clientName: string | null | undefined): boolean {
+	return clientName === 'github/autopilot';
 }
 
 export interface CliStoreTurn {
@@ -504,7 +514,9 @@ export class CopilotCliStoreAccess {
 
 	/** Merge a single usage event into the per-model accumulator (cache fields only when > 0). */
 	private addUsageEventToModelUsage(modelUsage: ModelUsage, event: UsageEventRow): void {
-		if (!modelUsage[event.model]) { modelUsage[event.model] = { inputTokens: 0, outputTokens: 0 }; }
+		// Untrusted `model` string read from session-store.db rows — see protoGuard.ts.
+		if (isUnsafeObjectKey(event.model)) { return; }
+		if (!modelUsage[event.model]) { modelUsage[event.model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 		const usage = modelUsage[event.model];
 		usage.inputTokens += event.inputTokens;
 		usage.outputTokens += event.outputTokens;

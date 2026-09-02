@@ -4,8 +4,55 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- New "Skill Suggestions" section in the Usage Analysis Tools & Integrations tab: clusters the first prompt of each session to find tasks you keep prompting for manually (candidates for a reusable skill or prompt file), plus a new insight when a task repeats across 3+ sessions
+- New "Corrections" tab in the Usage Analysis view: surfaces moments where the agent corrected itself after an error (failed tool calls, immediate edit retries, verbal self-corrections) or you had to correct the agent, grouped per repository over its 25 most recent sessions with detected moments
+- New insights that fire when user corrections or tool-error/edit-retry volume in the last 30 days is high, pointing to the Corrections tab
+- Group models from user-configured custom endpoints (BYOK) under their own provider group (e.g. `Mistral (Custom)`) in the Details "Cost by Provider" panel and the provider charts, instead of lumping them into "GitHub Copilot"/"Other"
+- Show only the model part of a three-part custom-endpoint model ID (`customendpoint/Mistral/mistral-medium-latest` → `mistral-medium-latest`), and estimate its cost from that model's pricing entry
+
+## [0.17.2] - 2026-08-17
+
+### Features
+- 2 additional friendly tool names from community issue #1823 (#1824)
+
 ### Bug Fixes
+- Recognize Copilot App's `<repo>.worktrees` worktree layout in path/repo detection (#1827)
+- Fix Recent Sessions view stuck on "Loading..." for non-Today periods (#1826)
+- Fix initial scan showing 0 tokens for today on cold boot with multiple windows and stale refresh-lock recycling (#1825, #1822)
+
+### Chores
+- Sync latest model data (#1796)
+
+## [0.17.1] - 2026-07-31
+
+### Bug Fixes
+- Fix Efficiency view stuck 'already in flight' after close+reopen (#1797)
+- Fix Today stats showing 0 for multi-day adapter sessions with ongoing activity (#1797)
+
+## [0.17.0] - 2026-07-30
+
+### Features
+- Efficiency view: are you working more efficiently with AI over time, plus a one-time notification popup pointing users to it (#1791, #1794)
+- Cost by Model and Tokens by Provider chart splits (#1781)
+- Collapsible By Editor breakdown in Chart view summary (#1785)
+- Detect agent-skill usage across Claude Code, Claude Desktop, and Copilot CLI (#1778)
+- Show untracked Copilot usage in the API budget bar (#1783)
+- 3 additional friendly tool names from community issue #1787 (#1788)
+- Model Efficiency section in Usage Analysis: per-model one-shot edit rate, retry rate, self-correction rate, cost per turn, cost per edit, output tokens per turn, and cache hit rate, with sortable columns and period switcher (#1649)
+- Insight card that flags models with high edit-retry rates and compares them against your best-performing model (#1649)
+- GitHub API requests (PR stats, cloud-agent sessions, Copilot plan info) now honor VS Code's `github-enterprise.uri` setting, so they target a GHE.com or GitHub Enterprise Server host instead of always hitting github.com — matching where the user actually signed in
+
+### Bug Fixes
+- Fix `Other` row sorting into the top-N list in Usage by Editor/Models tables (#1786)
+- Fix Diagnostics reload being much slower than the initial extension load (#1784)
 - Claude Code: attribute multi-day session tokens to the day each turn actually occurred instead of collapsing everything onto the session's start day, and discover subagent/workflow transcripts under `<sessionId>/subagents/**` that were previously silently excluded (#1608)
+
+### Security
+- Fix open code-scanning alerts, including a log injection issue sanitized inline (#77-98) (#1790)
+
+### Maintenance
+- Decompose `deleteEntitiesForUserDataset` into focused private helpers (#1777)
 
 ## [0.13.0] - 2026-07-11
 

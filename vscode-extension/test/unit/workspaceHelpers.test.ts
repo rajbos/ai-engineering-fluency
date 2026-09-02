@@ -15,6 +15,7 @@ import {
     normalizePathForDedup,
     fileUriToPath,
     parseWorkspaceStorageJsonFile,
+    resolveSessionWorkspaceName,
 } from '../../../src/workspaceHelpers';
 
 // ---------------------------------------------------------------------------
@@ -159,6 +160,72 @@ test('normalizeMcpToolName: mcp.github.github. prefix maps to mcp.io.github.git.
     assert.equal(
         normalizeMcpToolName('mcp.github.github.list_issues'),
         'mcp.io.github.git.list_issues'
+    );
+});
+
+test('normalizeMcpToolName: github-mcp-server- prefix maps to mcp_io_github_git_', () => {
+    assert.equal(
+        normalizeMcpToolName('github-mcp-server-list_issues'),
+        'mcp_io_github_git_list_issues'
+    );
+});
+
+test('normalizeMcpToolName: mcp_github_mcp_s2_ prefix maps to mcp_io_github_git_', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_github_mcp_s2_issue_read'),
+        'mcp_io_github_git_issue_read'
+    );
+});
+
+test('normalizeMcpToolName: context7 prefix variants normalize to context7-', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_context7_query-docs'),
+        'context7-query-docs'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp__context7__query-docs'),
+        'context7-query-docs'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp_io_github_ups_resolve-library-id'),
+        'context7-resolve-library-id'
+    );
+});
+
+test('normalizeMcpToolName: playwright prefix variants normalize to microsoft_playwright-mcp-', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_playwright_browser_click'),
+        'microsoft_playwright-mcp-browser_click'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp__microsoft_playwright-mcp__browser_click'),
+        'microsoft_playwright-mcp-browser_click'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp_microsoft_pla_browser_click'),
+        'microsoft_playwright-mcp-browser_click'
+    );
+});
+
+test('normalizeMcpToolName: tavily prefix variants normalize to io_github_tavily-ai_tavily-mcp-', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_tavily_tavily_search'),
+        'io_github_tavily-ai_tavily-mcp-tavily_search'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp_tavily-mcp_tavily_search'),
+        'io_github_tavily-ai_tavily-mcp-tavily_search'
+    );
+});
+
+test('normalizeMcpToolName: claude browser prefix variants normalize to mcp__claude_browser__', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp__claude-in-chrome__navigate'),
+        'mcp__claude_browser__navigate'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp__Claude_Browser__navigate'),
+        'mcp__claude_browser__navigate'
     );
 });
 
@@ -423,6 +490,10 @@ test('getEditorTypeFromPath: detects Claude Desktop Cowork', () => {
         assert.equal(getEditorTypeFromPath('/home/user/AppData/Local/Packages/Claude_pzs/LocalCache/Roaming/claude/local-agent-mode-sessions/session.jsonl'), 'Claude Desktop Cowork');
 });
 
+test('getEditorTypeFromPath: detects Claude Desktop Cowork from renamed claude-code-sessions dir', () => {
+        assert.equal(getEditorTypeFromPath('/home/user/AppData/Local/Packages/Claude_pzs/LocalCache/Roaming/claude/claude-code-sessions/app/machine/local_abc/.claude/projects/hash/session.jsonl'), 'Claude Desktop Cowork');
+});
+
 test('getEditorTypeFromPath: returns Unknown for unrecognized paths', () => {
         assert.equal(getEditorTypeFromPath('/tmp/random/file.json'), 'Unknown');
 });
@@ -480,6 +551,7 @@ test('detectEditorSource: detects Visual Studio', () => {
 
 test('detectEditorSource: detects Claude Desktop Cowork', () => {
         assert.equal(detectEditorSource('/home/user/.config/local-agent-mode-sessions/session.json'), 'Claude Desktop Cowork');
+        assert.equal(detectEditorSource('/home/user/.config/claude-code-sessions/session.json'), 'Claude Desktop Cowork');
 });
 
 test('detectEditorSource: detects Crush', () => {
@@ -1719,4 +1791,52 @@ test('parseCodeWorkspaceFolders: returns empty array when folders key is missing
     } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+});
+
+// ── resolveSessionWorkspaceName ──────────────────────────────────────────
+
+test('resolveSessionWorkspaceName: prefers workspaceFolderPath over repository', () => {
+    const workspaceFolderPath = nodePath.join('C:', 'Users', 'me', 'code', 'my-project');
+    const name = resolveSessionWorkspaceName(
+        { workspaceFolderPath, repository: 'owner/repo' },
+        nodePath.join('C:', 'Users', 'me', '.copilot', 'session-store.db#session-id')
+    );
+    assert.equal(name, 'my-project');
+});
+
+test('resolveSessionWorkspaceName: falls back to repository when workspaceFolderPath is absent', () => {
+    const name = resolveSessionWorkspaceName(
+        { repository: 'owner/repo' },
+        'some-session.jsonl'
+    );
+    assert.equal(name, 'owner/repo');
+});
+
+test('resolveSessionWorkspaceName: falls back to workspaceStorage resolution', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-rsws-'));
+    try {
+        const workspaceFolder = nodePath.join(tmpDir, 'my-vscode-project');
+        fs.mkdirSync(workspaceFolder, { recursive: true });
+        const workspaceStorage = nodePath.join(tmpDir, 'workspaceStorage', 'wsid123');
+        fs.mkdirSync(workspaceStorage, { recursive: true });
+        fs.writeFileSync(
+            nodePath.join(workspaceStorage, 'workspace.json'),
+            JSON.stringify({ folder: workspaceFolder }),
+            'utf8'
+        );
+        const sessionFile = nodePath.join(workspaceStorage, 'chatSessions', 'session.json');
+        const cache = new Map<string, string | undefined>();
+        const name = resolveSessionWorkspaceName({}, sessionFile, cache);
+        assert.equal(name, 'my-vscode-project');
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('resolveSessionWorkspaceName: returns undefined when no attribution is available', () => {
+    const name = resolveSessionWorkspaceName(
+        {},
+        '/home/user/.claude/projects/hash/session.jsonl'
+    );
+    assert.equal(name, undefined);
 });

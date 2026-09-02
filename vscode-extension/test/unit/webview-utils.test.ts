@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { getModelDisplayName } from '../../../src/webview/shared/modelUtils';
+import { getModelDisplayName, parseCustomProviderModel, getCustomProviderGroup, isCustomProviderGroup } from '../../../src/webview/shared/modelUtils';
 import {
 	setFormatLocale,
 	getEditorIcon,
@@ -12,7 +12,9 @@ import {
 	formatCost,
 	formatDurationShort,
 	formatFileSize,
+	getTimeSince,
 	escapeHtml,
+	safeSectionHtml,
 	markdownToHtml,
 	STAGE_LABELS,
 	STAGE_DESCRIPTIONS
@@ -33,15 +35,96 @@ test('getModelDisplayName: returns raw model ID for unknown models', () => {
 });
 
 test('getModelDisplayName: decodes URI-encoded segments in unknown model IDs', () => {
-	assert.equal(
-		getModelDisplayName('unify-chat-provider/OpenCode%20Go%20(Anthropic%20Messages)/qwen3.7-max'),
-		'unify-chat-provider/OpenCode Go (Anthropic Messages)/qwen3.7-max'
-	);
 	assert.equal(getModelDisplayName('provider/Model%20Name'), 'provider/Model Name');
 });
 
 test('getModelDisplayName: returns raw ID when URI decoding fails (malformed percent)', () => {
 	assert.equal(getModelDisplayName('bad%2model'), 'bad%2model');
+});
+
+test('getModelDisplayName: drops the custom-endpoint prefix and provider name', () => {
+	// Only the model part is shown — the provider name becomes its own provider group.
+	assert.equal(getModelDisplayName('customendpoint/Mistral/MistralMedium3.5'), 'MistralMedium3.5');
+	assert.equal(
+		getModelDisplayName('unify-chat-provider/OpenCode%20Go%20(Anthropic%20Messages)/qwen3.7-max'),
+		'qwen3.7-max'
+	);
+});
+
+test('getModelDisplayName: resolves the friendly name of a custom-endpoint model part', () => {
+	assert.equal(getModelDisplayName('customendpoint/Mistral/gpt-4o'), 'GPT-4o');
+});
+
+test('getModelDisplayName: resolves dash-separated version ids to the dotted pricing key', () => {
+	assert.equal(getModelDisplayName('claude-opus-4-8'), 'Claude Opus 4.8');
+	assert.equal(getModelDisplayName('claude-sonnet-4-6'), 'Claude Sonnet 4.6');
+	assert.equal(getModelDisplayName('claude-haiku-4-5-20251001'), 'Claude Haiku 4.5 (2025-10-01)');
+});
+
+test('getModelDisplayName: resolves org-UUID-prefixed catalog ids to the friendly name of the model part', () => {
+	assert.equal(
+		getModelDisplayName('83a386ed-9f05-4fd9-83d4-f453d20c994c/mistral-medium-latest'),
+		'Mistral Medium 3.5'
+	);
+	assert.equal(
+		getModelDisplayName('83a386ed-9f05-4fd9-83d4-f453d20c994c/codestral-latest'),
+		'Codestral'
+	);
+	assert.equal(
+		getModelDisplayName('83a386ed-9f05-4fd9-83d4-f453d20c994c/devstral-latest'),
+		'Devstral 2'
+	);
+});
+
+test('getModelDisplayName: strips the org-UUID prefix for unknown catalog models', () => {
+	assert.equal(
+		getModelDisplayName('83a386ed-9f05-4fd9-83d4-f453d20c994c/some-private-model'),
+		'some-private-model'
+	);
+});
+
+// ── parseCustomProviderModel ────────────────────────────────────────────
+
+test('parseCustomProviderModel: splits a three-part custom-endpoint ID', () => {
+	assert.deepEqual(parseCustomProviderModel('customendpoint/Mistral/mistral-medium-latest'), {
+		source: 'customendpoint',
+		providerName: 'Mistral',
+		modelId: 'mistral-medium-latest'
+	});
+});
+
+test('parseCustomProviderModel: URI-decodes each part', () => {
+	assert.deepEqual(parseCustomProviderModel('unify-chat-provider/OpenCode%20Go/qwen3.7-max'), {
+		source: 'unify-chat-provider',
+		providerName: 'OpenCode Go',
+		modelId: 'qwen3.7-max'
+	});
+});
+
+test('parseCustomProviderModel: returns undefined unless there are exactly three non-empty parts', () => {
+	assert.equal(parseCustomProviderModel('gpt-4o'), undefined);
+	assert.equal(parseCustomProviderModel('provider/Model%20Name'), undefined);
+	assert.equal(parseCustomProviderModel('customendpoint//mistral-medium-latest'), undefined);
+	assert.equal(parseCustomProviderModel('a/b/c/d'), undefined);
+	assert.equal(parseCustomProviderModel(''), undefined);
+});
+
+// ── getCustomProviderGroup / isCustomProviderGroup ──────────────────────
+
+test('getCustomProviderGroup: names the group after the user-chosen provider', () => {
+	assert.equal(getCustomProviderGroup('customendpoint/Mistral/mistral-medium-latest'), 'Mistral (Custom)');
+	assert.equal(getCustomProviderGroup('unify-chat-provider/OpenCode%20Go/qwen3.7-max'), 'OpenCode Go (Custom)');
+});
+
+test('getCustomProviderGroup: returns undefined for regular model IDs', () => {
+	assert.equal(getCustomProviderGroup('gpt-4o'), undefined);
+	assert.equal(getCustomProviderGroup('provider/Model%20Name'), undefined);
+});
+
+test('isCustomProviderGroup: recognizes only custom provider groups', () => {
+	assert.equal(isCustomProviderGroup('Mistral (Custom)'), true);
+	assert.equal(isCustomProviderGroup('Mistral AI'), false);
+	assert.equal(isCustomProviderGroup('GitHub Copilot'), false);
 });
 
 // ── formatDurationShort ─────────────────────────────────────────────────
@@ -158,6 +241,57 @@ test('escapeHtml: neutralises a script injection attempt', () => {
 	assert.equal(result, '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
 });
 
+// ── safeSectionHtml ───────────────────────────────────────────────────────
+
+test('safeSectionHtml: returns the builder output when it succeeds', () => {
+	const result = safeSectionHtml('My Section', () => '<div>ok</div>');
+	assert.equal(result, '<div>ok</div>');
+});
+
+test('safeSectionHtml: catches a thrown error and renders a fallback card instead', () => {
+	const errors: string[] = [];
+	const result = safeSectionHtml('Model Efficiency', () => {
+		throw new Error('boom');
+	}, (m) => errors.push(m));
+
+	assert.ok(result.includes('Model Efficiency'));
+	assert.ok(result.includes("couldn't be displayed"));
+	assert.equal(errors.length, 1);
+	assert.ok(errors[0].includes('Model Efficiency'));
+	assert.ok(errors[0].includes('boom'));
+});
+
+test('safeSectionHtml: handles non-Error throws (e.g. a thrown string)', () => {
+	const errors: string[] = [];
+	const result = safeSectionHtml('Weird Section', () => {
+		// eslint-disable-next-line @typescript-eslint/no-throw-literal
+		throw 'not an Error instance';
+	}, (m) => errors.push(m));
+
+	assert.ok(result.includes('Weird Section'));
+	assert.ok(errors[0].includes('not an Error instance'));
+});
+
+test('safeSectionHtml: escapes the label in the fallback card to avoid HTML injection', () => {
+	const result = safeSectionHtml('<img src=x onerror=alert(1)>', () => {
+		throw new Error('boom');
+	}, () => { /* noop */ });
+
+	assert.ok(!result.includes('<img src=x'));
+	assert.ok(result.includes('&lt;img'));
+});
+
+test('safeSectionHtml: one failing section does not affect independently built sections', () => {
+	const sectionA = safeSectionHtml('Section A', () => '<div>a-ok</div>', () => { /* noop */ });
+	const sectionB = safeSectionHtml('Section B', () => { throw new Error('section B broke'); }, () => { /* noop */ });
+	const sectionC = safeSectionHtml('Section C', () => '<div>c-ok</div>', () => { /* noop */ });
+
+	const page = `${sectionA}${sectionB}${sectionC}`;
+	assert.ok(page.includes('a-ok'));
+	assert.ok(page.includes('c-ok'));
+	assert.ok(page.includes('Section B'));
+});
+
 // ── markdownToHtml ──────────────────────────────────────────────────────
 
 test('markdownToHtml: converts markdown link to anchor tag', () => {
@@ -230,4 +364,22 @@ test('formatFileSize: scales into PB and caps there', () => {
 test('formatFileSize: rejects negative and non-finite values', () => {
 	assert.equal(formatFileSize(-1), 'N/A');
 	assert.equal(formatFileSize(NaN), 'N/A');
+});
+
+// ── getTimeSince ────────────────────────────────────────────────────────
+
+test('getTimeSince: returns "Unknown" for invalid timestamps instead of NaN text', () => {
+	assert.equal(getTimeSince('not-a-date'), 'Unknown');
+	assert.equal(getTimeSince(''), 'Unknown');
+});
+
+test('getTimeSince: returns "Just now" for future timestamps', () => {
+	assert.equal(getTimeSince(new Date(Date.now() + 60_000).toISOString()), 'Just now');
+});
+
+test('getTimeSince: formats seconds, minutes, hours and days', () => {
+	assert.equal(getTimeSince(new Date(Date.now() - 5_000).toISOString()), '5 seconds ago');
+	assert.equal(getTimeSince(new Date(Date.now() - 3 * 60_000).toISOString()), '3 minutes ago');
+	assert.equal(getTimeSince(new Date(Date.now() - 2 * 3_600_000).toISOString()), '2 hours ago');
+	assert.equal(getTimeSince(new Date(Date.now() - 4 * 86_400_000).toISOString()), '4 days ago');
 });

@@ -164,7 +164,7 @@ For broader session-level caveats (multiple bullet points), use the `editorNote:
 | Sessions discovered but tokens show 0 | Check the adapter's `getTokens()` — it may be missing or not returning early; confirm the underlying data-access method actually extracts text from the right fields |
 | Virtual paths fail `fs.promises.stat()` | Implement `stat()` on the adapter to resolve virtual paths to the real backing DB/file path (see `getBackingPath()` in `CrushAdapter`) |
 | Discovery loop finds 0 sessions even though the file/DB exists | Verify the project/workspace registry reader returns the correct data directory (not just the project's working-directory path) and that the joined path matches the actual file on disk |
-| ESLint/complexity warnings appear after `npm run compile` even though there are 0 errors | `npm run compile` runs `tsc && eslint && esbuild` — ESLint enforces a max complexity of 15 (`sonarjs/cognitive-complexity`, `complexity`). Extract small helper methods proactively instead of chaining ternaries or nesting loops; don't treat 0 *errors* as "done" — re-run compile and check for warnings too |
+| ESLint/complexity warnings appear after `npm --prefix vscode-extension run validate` even though there are 0 errors | `npm --prefix vscode-extension run validate` runs type-checking, ESLint, and esbuild — ESLint enforces a max complexity of 15 (`sonarjs/cognitive-complexity`, `complexity`). Extract small helper methods proactively instead of chaining ternaries or nesting loops; don't treat 0 *errors* as "done" — re-run validation and check for warnings too |
 | `test/unit/ecosystemAdapters.test.ts` fails after adding an adapter | The adapter count assertion (`assert.equal(allAdapters.length, N)`) is hardcoded — bump it and add the new adapter's `id` assertion (Step 7) |
 
 ---
@@ -180,7 +180,7 @@ For broader session-level caveats (multiple bullet points), use the `editorNote:
 - [ ] `test/unit/ecosystemAdapters.test.ts` — adapter added to `allAdapters`, count bumped, `id` assertion added
 - [ ] (Optional) `webview/diagnostics/main.ts` + `styles.css` — dedicated badge class/colour, only if the generic fallback isn't distinctive enough
 - [ ] (Optional) `webview/logviewer/main.ts` — `ESTIMATED_TOKENS_NOTES` entry if the editor doesn't persist actual token counts
-- [ ] `npm run compile` passes with **0 errors and 0 warnings** (not just 0 errors — check for complexity/lint warnings on new code)
+- [ ] `npm --prefix vscode-extension run validate` passes with **0 errors and 0 warnings** (not just 0 errors — check for complexity/lint warnings on new code)
 - [ ] CLI build (`cd cli && npm run build`) succeeds, since it shares the same adapter registry
 - [ ] `node cli/dist/cli.js diagnostics` shows the new editor's candidate path as `yes` (exists) with non-zero file/session/token counts — this is the fastest end-to-end confidence check
 - [ ] Sessions appear in the session list with the correct editor name and icon

@@ -4,6 +4,7 @@ import * as path from 'path';
 
 import {
 	fileUriToPath,
+	getRepoNameFromWorkspacePath,
 	hasWindowsDriveSegment,
 	normalizePath,
 	normalizePathForDedup,
@@ -171,3 +172,75 @@ test('normalizeToRepoRoot: ignores an unrelated "worktrees" folder without the .
 		'/home/me/repos/proj/worktrees/foo'
 	);
 });
+
+test('normalizeToRepoRoot: strips Copilot App "<repo>.worktrees" sibling folder (Windows)', () => {
+	assert.equal(
+		normalizeToRepoRoot('C:\\Users\\me\\repos\\rajbos\\proj.worktrees\\copilot-worktree-2026-02-07T20-38-48'),
+		'C:\\Users\\me\\repos\\rajbos\\proj'
+	);
+});
+
+test('normalizeToRepoRoot: strips Copilot App "<repo>.worktrees" sibling folder (POSIX)', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/rajbos/proj.worktrees/copilot-worktree-2026-02-07T20-38-48'),
+		'/home/me/repos/rajbos/proj'
+	);
+});
+
+test('normalizeToRepoRoot: strips trailing sub-path below a "<repo>.worktrees" worktree name', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/rajbos/proj.worktrees/copilot-worktree-abc/src/app'),
+		'/home/me/repos/rajbos/proj'
+	);
+});
+
+// getRepoNameFromWorkspacePath tests
+test('getRepoNameFromWorkspacePath: app-store worktree resolves to the repo folder, not the worktree name', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('C:\\Users\\me\\.copilot\\copilot-worktrees\\ai-engineering-fluency\\rajbos-supreme-carnival'),
+		'ai-engineering-fluency'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: app-store worktree with an owner sub-segment', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('C:\\Users\\me\\.copilot\\copilot-worktrees\\authority-contribution-scraper\\rajbos\\huskiest-oleta'),
+		'authority-contribution-scraper'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: app-store worktree with a posix path', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('/home/me/.copilot/copilot-worktrees/github-copilot-token-usage/rajbos-covetable-youlanda'),
+		'github-copilot-token-usage'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: user-repo copilot-worktrees layout resolves to the repo before the marker', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('C:\\Users\\me\\repos\\proj\\copilot-worktrees\\session-123'),
+		'proj'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: claude worktree layout resolves to the repo before the marker', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('/home/me/repos/proj/.claude/worktrees/feature-x'),
+		'proj'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: plain repo path returns its basename', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('C:\\Users\\me\\repos\\my-repo'),
+		'my-repo'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: Copilot App "<repo>.worktrees" layout resolves to the repo, not the worktree name', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('C:\\Users\\me\\repos\\rajbos\\proj.worktrees\\copilot-worktree-2026-02-07T20-38-48'),
+		'proj'
+	);
+});
+

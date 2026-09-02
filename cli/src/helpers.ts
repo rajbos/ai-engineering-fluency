@@ -20,7 +20,9 @@ import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { parseJetBrainsPartition } from '../../src/jetbrains';
 import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
+import { reconcileModelUsageToActualTokens } from '../../src/statsHelpers';
 import { withErrorRecovery } from '../../src/utils/errors';
+import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 import { ENVIRONMENTAL } from './constants';
@@ -354,6 +356,12 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 				}
 			}
 
+			// Reconcile the per-model breakdown to the session total so Input+Output never
+			// exceeds Total in CLI reports. Event-based sessions (Copilot CLI without exact
+			// usage, JetBrains, …) derive actualTokens from real output while modelUsage
+			// derives input from accumulated message content; those heuristics can diverge.
+			fileModelUsage = reconcileModelUsageToActualTokens(fileModelUsage, actualTokens || tokens);
+
 			// Count interactions from JSONL
 			const lines = content.trim().split('\n');
 			for (const line of lines) {
@@ -393,7 +401,7 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 			if (Object.keys(debugLogTokens.modelBreakdown).length > 0) {
 				fileModelUsage = {};
 				for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
-					fileModelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
+					fileModelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, sessions: 0, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
 				}
 			}
 		}
@@ -533,6 +541,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 	const monthPeriod = createEmptyUsageAnalysisPeriod();
 	const lastMonthPeriod = createEmptyUsageAnalysisPeriod();
 	const todaySessions: TodaySessionSummary[] = [];
+	const recentSessionItems: RecentSessionBucketItem<TodaySessionSummary>[] = [];
 
 	for (const file of sessionFiles) {
 		try {
@@ -544,6 +553,38 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 			}
 
 			const analysis = await analyzeSessionUsage(deps, file);
+			let sessionSummary: TodaySessionSummary | undefined;
+			const data = modified >= last30DaysStart ? await processSessionFile(file) : undefined;
+			if (data && data.interactions > 0) {
+				let inputTokens = 0, outputTokens = 0, cachedTokens = 0;
+				for (const usage of Object.values(data.modelUsage)) {
+					inputTokens += usage.inputTokens;
+					outputTokens += usage.outputTokens;
+					cachedTokens += usage.cachedReadTokens ?? 0;
+				}
+				sessionSummary = {
+					title: null,
+					filePath: file,
+					interactions: data.interactions,
+					toolCalls: analysis.toolCalls.total,
+					inputTokens,
+					outputTokens,
+					thinkingTokens: data.thinkingTokens ?? 0,
+					cachedTokens,
+					totalTokens: data.tokens,
+					estimatedCost: calculateEstimatedCost(data.modelUsage, modelPricing),
+					editor: data.editorSource,
+					models: Object.keys(data.modelUsage),
+					lastActivity: data.lastModified.toISOString(),
+					...(analysis.sessionDuration?.totalDurationMs !== undefined ? { durationMs: analysis.sessionDuration.totalDurationMs } : {}),
+					...(analysis.sessionDuration?.activeDurationMs !== undefined ? { activeDurationMs: analysis.sessionDuration.activeDurationMs } : {}),
+				};
+				recentSessionItems.push({
+					activityKey: toLocalDayKey(data.lastModified),
+					interactions: data.interactions,
+					value: sessionSummary,
+				});
+			}
 
 			if (modified >= last30DaysStart) {
 				mergeUsageAnalysis(last30DaysPeriod, analysis);
@@ -556,32 +597,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 			if (modified >= todayStart) {
 				mergeUsageAnalysis(todayPeriod, analysis);
 				todayPeriod.sessions++;
-				// Build per-session summary for the Today's Sessions tab.
-				// processSessionFile uses the shared LRU cache so the file isn't re-read on disk.
-				const data = await processSessionFile(file);
-				if (data && data.interactions > 0) {
-					let inputTokens = 0, outputTokens = 0, cachedTokens = 0;
-					for (const usage of Object.values(data.modelUsage)) {
-						inputTokens += usage.inputTokens;
-						outputTokens += usage.outputTokens;
-						cachedTokens += usage.cachedReadTokens ?? 0;
-					}
-					todaySessions.push({
-						title: null,
-						filePath: file,
-						interactions: data.interactions,
-						toolCalls: analysis.toolCalls.total,
-						inputTokens,
-						outputTokens,
-						thinkingTokens: data.thinkingTokens ?? 0,
-						cachedTokens,
-						totalTokens: data.tokens,
-						estimatedCost: calculateEstimatedCost(data.modelUsage, modelPricing),
-						editor: data.editorSource,
-						models: Object.keys(data.modelUsage),
-						lastActivity: data.lastModified.toISOString(),
-					});
-				}
+				if (sessionSummary) { todaySessions.push(sessionSummary); }
 			}
 			if (modified >= lastMonthStart && modified < monthStart) {
 				mergeUsageAnalysis(lastMonthPeriod, analysis);
@@ -599,6 +615,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 		lastMonth: lastMonthPeriod,
 		lastUpdated: now,
 		todaySessions: todaySessions.sort((a, b) => b.interactions - a.interactions),
+		recentSessions: buildRecentSessionBuckets(recentSessionItems, now),
 	};
 }
 
@@ -646,7 +663,7 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 				dailyEntry.sessions++;
 				for (const [model, usage] of Object.entries(data.modelUsage)) {
 					if (!dailyEntry.modelUsage[model]) {
-						dailyEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+						dailyEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 					}
 					dailyEntry.modelUsage[model].inputTokens += Math.round(usage.inputTokens * fraction);
 					dailyEntry.modelUsage[model].outputTokens += Math.round(usage.outputTokens * fraction);
@@ -666,7 +683,7 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 				if (!dailyEntry.editorModelUsage) { dailyEntry.editorModelUsage = {}; }
 				if (!dailyEntry.editorModelUsage[editor]) { dailyEntry.editorModelUsage[editor] = {}; }
 				for (const [model, usage] of Object.entries(data.modelUsage)) {
-					if (!dailyEntry.editorModelUsage[editor][model]) { dailyEntry.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0 }; }
+					if (!dailyEntry.editorModelUsage[editor][model]) { dailyEntry.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 					dailyEntry.editorModelUsage[editor][model].inputTokens += Math.round(usage.inputTokens * fraction);
 					dailyEntry.editorModelUsage[editor][model].outputTokens += Math.round(usage.outputTokens * fraction);
 				}
@@ -681,7 +698,7 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 			allEntry.sessions++;
 			for (const [model, usage] of Object.entries(data.modelUsage)) {
 				if (!allEntry.modelUsage[model]) {
-					allEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+					allEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 				}
 				allEntry.modelUsage[model].inputTokens += Math.round(usage.inputTokens * fraction);
 				allEntry.modelUsage[model].outputTokens += Math.round(usage.outputTokens * fraction);
@@ -701,7 +718,7 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 			if (!allEntry.editorModelUsage) { allEntry.editorModelUsage = {}; }
 			if (!allEntry.editorModelUsage[editor]) { allEntry.editorModelUsage[editor] = {}; }
 			for (const [model, usage] of Object.entries(data.modelUsage)) {
-				if (!allEntry.editorModelUsage[editor][model]) { allEntry.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0 }; }
+				if (!allEntry.editorModelUsage[editor][model]) { allEntry.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 				allEntry.editorModelUsage[editor][model].inputTokens += Math.round(usage.inputTokens * fraction);
 				allEntry.editorModelUsage[editor][model].outputTokens += Math.round(usage.outputTokens * fraction);
 			}

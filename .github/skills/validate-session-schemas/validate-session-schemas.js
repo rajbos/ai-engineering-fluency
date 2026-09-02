@@ -256,18 +256,24 @@ function discoverOpenCode() {
       const { DatabaseSync } = require('node:sqlite');
       const db = new DatabaseSync(dbPath);
       const sessions = db.prepare('SELECT id, time_updated FROM session ORDER BY time_updated DESC').all();
-      for (const session of sessions) {
-        const messages = db.prepare(
-          'SELECT data FROM message WHERE session_id = ? ORDER BY time_created ASC'
-        ).all(session.id);
-        if (messages.length === 0) { continue; }
-        const tmpPath = path.join(os.tmpdir(), `oc-dbses-${session.id}.jsonl`);
-        fs.writeFileSync(tmpPath, messages.map((m) => m.data).join('\n'), 'utf8');
-        // Stamp the temp file's mtime with the session's last-updated time so
-        // the recency filter (--days) works correctly.
-        const mtime = new Date(session.time_updated);
-        if (!isNaN(mtime.getTime())) { try { fs.utimesSync(tmpPath, mtime, mtime); } catch { /* ignore */ } }
-        files.push(tmpPath);
+      if (sessions.length > 0) {
+        // Create a fresh, collision-resistant temp directory (rather than
+        // writing predictably-named files straight into the shared OS temp
+        // dir) so another local user can't pre-create/symlink our output path.
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-dbses-'));
+        for (const session of sessions) {
+          const messages = db.prepare(
+            'SELECT data FROM message WHERE session_id = ? ORDER BY time_created ASC'
+          ).all(session.id);
+          if (messages.length === 0) { continue; }
+          const tmpPath = path.join(tmpDir, `${session.id}.jsonl`);
+          fs.writeFileSync(tmpPath, messages.map((m) => m.data).join('\n'), 'utf8');
+          // Stamp the temp file's mtime with the session's last-updated time so
+          // the recency filter (--days) works correctly.
+          const mtime = new Date(session.time_updated);
+          if (!isNaN(mtime.getTime())) { try { fs.utimesSync(tmpPath, mtime, mtime); } catch { /* ignore */ } }
+          files.push(tmpPath);
+        }
       }
       db.close();
     } catch { /* node:sqlite unavailable or DB locked — fall back to JSON files only */ }

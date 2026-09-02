@@ -83,7 +83,6 @@ Contains pricing information for AI models, including input and output token cos
       "cacheCreationCostPerMillion": 2.1875,
       "category": "Model category",
       "tier": "standard|premium|unknown",
-      "multiplier": 1,
       "copilotPricing": {
         "inputCostPerMillion": 1.75,
         "cachedInputCostPerMillion": 0.175,

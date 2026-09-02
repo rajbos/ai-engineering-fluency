@@ -10,6 +10,38 @@ permissions:
   contents: read
 
 jobs:
+  # Deterministic guard against "new source logic without test changes" — the
+  # class of finding the agent-review Test Expert agent would otherwise have to
+  # catch with an LLM. Fails the PR when production source under
+  # vscode-extension/src/, cli/src/ or src/ changes without any test file
+  # changing too. Escape hatch: put [skip-test-check] in the PR body.
+  test-coverage-check:
+    name: Test coverage companion check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: Harden the runner (Block all outbound calls except allowed)
+      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+      with:
+        egress-policy: block
+        allowed-endpoints: >
+          github.com:443
+          productionresultssa*.blob.core.windows.net:443
+          results-receiver.actions.githubusercontent.com:443
+
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+
+    - name: Check source changes come with test changes
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+      shell: bash
+      run: bash .github/workflows/scripts/check-test-coverage.sh
+
   build:
     runs-on: ubuntu-latest
     
@@ -20,7 +52,7 @@ jobs:
     
     steps:
     - name: Harden the runner (Block all outbound calls except allowed)
-      uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
       with:
         egress-policy: block
         # Allowlist inferred from the harden-runner audit output of the 10 most
@@ -40,10 +72,10 @@ jobs:
           www.powershellgallery.com:443
 
     - name: Checkout code
-      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Setup Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
@@ -51,11 +83,15 @@ jobs:
         
     - name: Install dependencies
       working-directory: vscode-extension
-      run: npm ci
+      run: npm ci --ignore-scripts
       
     - name: Validate JSON files
       working-directory: vscode-extension
       run: npm run lint:json
+
+    - name: Validate localization files
+      working-directory: vscode-extension
+      run: npm run lint:l10n
       
     - name: Run linting
       working-directory: vscode-extension
@@ -138,7 +174,7 @@ jobs:
     
     steps:
     - name: Harden the runner (Block all outbound calls except allowed)
-      uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
       with:
         egress-policy: block
         # Allowlist inferred from the harden-runner audit output of the sampled
@@ -151,10 +187,10 @@ jobs:
           results-receiver.actions.githubusercontent.com:443
 
     - name: Checkout code
-      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       
     - name: Setup Node.js
-      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version-file: '.nvmrc'
         cache: 'npm'
@@ -162,7 +198,7 @@ jobs:
         
     - name: Install dependencies
       working-directory: vscode-extension
-      run: npm ci
+      run: npm ci --ignore-scripts
       
     - name: Package extension
       working-directory: vscode-extension
@@ -171,6 +207,10 @@ jobs:
     - name: Create VSIX package
       working-directory: vscode-extension
       run: npx vsce package
+
+    - name: Validate localization bundle in VSIX
+      working-directory: vscode-extension
+      run: npm run validate:l10n -- --vsix "$(find . -maxdepth 1 -name 'ai-engineering-fluency-*.vsix' | head -n 1)"
       
     - name: Upload VSIX package
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

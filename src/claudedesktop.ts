@@ -2,16 +2,23 @@
  * Claude Desktop Cowork data access layer.
  * Handles reading session data from Claude Desktop's Cowork (local agent mode) feature.
  *
- * Cowork sessions are stored at:
- *   Windows: %LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\local-agent-mode-sessions\
- *   macOS:   ~/Library/Application Support/Claude/local-agent-mode-sessions/
+ * Cowork sessions are stored under the Claude Desktop config dir:
+ *   Windows: %LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\
+ *   macOS:   ~/Library/Application Support/Claude/
+ * in a session subdirectory that was RENAMED by the desktop app:
+ *   current: claude-code-sessions\         (since ~Aug 2026)
+ *   legacy:  local-agent-mode-sessions\    (still read for older installs)
  *
- * Directory structure:
+ * Directory structure (both names):
  *   <base>/<app-uuid>/<machine-uuid>/local_<session-id>.json        — session metadata (title, timestamps, model)
  *   <base>/<app-uuid>/<machine-uuid>/local_<session-id>/
  *     .claude/projects/<hash>/<uuid>.jsonl                          — JSONL conversation + token data
  *     audit.jsonl                                                   — SKIP: HMAC audit trail, no usage data
  *     agent/                                                        — SKIP: background ditto sub-sessions
+ *
+ * Note: newer desktop versions may store only the metadata .json files here and write
+ * the actual transcripts to the shared ~/.claude/projects/ directory (linked via the
+ * metadata's cliSessionId) — those are picked up by the Claude Code adapter instead.
  *
  * ── JSONL FORMAT ────────────────────────────────────────────────────────────────────────────────
  *
@@ -58,19 +65,27 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { normalizeClaudeModelId } from './claudecode';
-import type { ModelUsage } from './types';
+import type { ModelUsage, ModelId } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePathForComparison, normalizePath } from './workspaceHelpers';
 
 /** Package name for the Claude Desktop Windows Store app. */
 const CLAUDE_DESKTOP_PACKAGE = 'Claude_pzs8sxrjxfjjc';
 
-export class ClaudeDesktopCoworkDataAccess {
+/**
+ * Session directory names used by the Claude Desktop app, newest first.
+ * The app renamed 'local-agent-mode-sessions' to 'claude-code-sessions';
+ * both are read so older installs keep working.
+ */
+const CLAUDE_DESKTOP_SESSION_DIR_NAMES = ['claude-code-sessions', 'local-agent-mode-sessions'] as const;
+
+export class ClaudeDesktopDataAccess {
 
 	/**
-	 * Get the Claude Desktop Cowork sessions base directory.
+	 * Get the Claude Desktop config directory that holds the session subdirectories.
 	 * Returns an empty string on unsupported platforms (Linux).
 	 */
-	getCoworkBaseDir(): string {
+	private getDesktopConfigDir(): string {
 		const platform = os.platform();
 		if (platform === 'win32') {
 			const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
@@ -80,8 +95,7 @@ export class ClaudeDesktopCoworkDataAccess {
 				CLAUDE_DESKTOP_PACKAGE,
 				'LocalCache',
 				'Roaming',
-				'Claude',
-				'local-agent-mode-sessions'
+				'Claude'
 			);
 		}
 		if (platform === 'darwin') {
@@ -89,39 +103,62 @@ export class ClaudeDesktopCoworkDataAccess {
 				os.homedir(),
 				'Library',
 				'Application Support',
-				'Claude',
-				'local-agent-mode-sessions'
+				'Claude'
 			);
 		}
 		return '';
 	}
 
 	/**
-	 * Check if a file path is a Claude Desktop Cowork session file.
-	 * Cowork session files live inside local-agent-mode-sessions/ and end with .jsonl.
+	 * Get all candidate Claude Desktop session base directories (newest naming first,
+	 * legacy 'local-agent-mode-sessions' last). Empty on unsupported platforms.
 	 */
-	isCoworkSessionFile(filePath: string): boolean {
-		const normalized = normalizePathForComparison(filePath);
-		return normalized.includes('/local-agent-mode-sessions/') && normalized.endsWith('.jsonl');
+	getDesktopSessionDirs(): string[] {
+		const configDir = this.getDesktopConfigDir();
+		if (!configDir) { return []; }
+		return CLAUDE_DESKTOP_SESSION_DIR_NAMES.map(name => path.join(configDir, name));
 	}
 
 	/**
-	 * Get all Cowork session JSONL file paths.
+	 * Resolve which session base directory a session file belongs to. Falls back to
+	 * the first (current-naming) candidate when the file matches none.
+	 */
+	getSessionDirForFile(filePath: string): string {
+		const normalized = normalizePathForComparison(filePath);
+		for (const dir of this.getDesktopSessionDirs()) {
+			if (normalized.startsWith(normalizePathForComparison(dir))) { return dir; }
+		}
+		return this.getDesktopSessionDirs()[0] ?? '';
+	}
+
+	/**
+	 * Check if a file path is a Claude Desktop Cowork session file.
+	 * Cowork session files live inside claude-code-sessions/ (current) or
+	 * local-agent-mode-sessions/ (legacy) and end with .jsonl.
+	 */
+	isDesktopSessionFile(filePath: string): boolean {
+		const normalized = normalizePathForComparison(filePath);
+		return CLAUDE_DESKTOP_SESSION_DIR_NAMES.some(name => normalized.includes(`/${name}/`))
+			&& normalized.endsWith('.jsonl');
+	}
+
+	/**
+	 * Get all Cowork session JSONL file paths across every candidate session directory.
 	 * Walks the nested directory structure: <base>/<app>/<machine>/<session>/.claude/projects/<hash>/<uuid>.jsonl
 	 */
-	async getCoworkSessionFiles(): Promise<string[]> {
-		const baseDir = this.getCoworkBaseDir();
-		if (!baseDir) { return []; }
-		try {
-			await fs.promises.access(baseDir);
-		} catch {
-			return [];
-		}
+	async getDesktopSessionFiles(): Promise<string[]> {
 		const results: string[] = [];
-		try {
-			await this.walkForJsonlFiles(baseDir, results, 0, 8);
-		} catch {
-			// Ignore top-level errors
+		for (const baseDir of this.getDesktopSessionDirs()) {
+			try {
+				await fs.promises.access(baseDir);
+			} catch {
+				continue;
+			}
+			try {
+				await this.walkForJsonlFiles(baseDir, results, 0, 8);
+			} catch {
+				// Ignore top-level errors
+			}
 		}
 		return results;
 	}
@@ -158,7 +195,7 @@ export class ClaudeDesktopCoworkDataAccess {
 	 * Parse all JSONL events from a Cowork session file.
 	 * Public so extension.ts can use it for log viewer turn building.
 	 */
-	async readCoworkEvents(sessionFilePath: string): Promise<any[]> {
+	async readDesktopSessionEvents(sessionFilePath: string): Promise<any[]> {
 		try {
 			const content = await fs.promises.readFile(sessionFilePath, 'utf8');
 			const lines = content.trim().split('\n');
@@ -181,13 +218,13 @@ export class ClaudeDesktopCoworkDataAccess {
 	 * Get token counts from a Cowork session.
 	 * Uses actual Anthropic API counts; de-duplicates by requestId using only final events.
 	 */
-	async getTokensFromCoworkSession(sessionFilePath: string): Promise<{ tokens: number; thinkingTokens: number }> {
-		const events = await this.readCoworkEvents(sessionFilePath);
+	async getTokensFromDesktopSession(sessionFilePath: string): Promise<{ tokens: number; thinkingTokens: number }> {
+		const events = await this.readDesktopSessionEvents(sessionFilePath);
 		let totalInputTokens = 0;
 		let totalOutputTokens = 0;
 		const seenRequestIds = new Set<string>();
 		for (const event of events) {
-			const counts = this.extractCoworkEventTokens(event, seenRequestIds);
+			const counts = this.extractDesktopEventTokens(event, seenRequestIds);
 			if (!counts) { continue; }
 			totalInputTokens += counts.inputTokens;
 			totalOutputTokens += counts.outputTokens;
@@ -195,7 +232,7 @@ export class ClaudeDesktopCoworkDataAccess {
 		return { tokens: totalInputTokens + totalOutputTokens, thinkingTokens: 0 };
 	}
 
-	private computeCoworkTokenCounts(usage: any): { inputTokens: number; outputTokens: number; cacheCreation: number; cachedRead: number; cacheCreation1h: number } {
+	private computeDesktopTokenCounts(usage: any): { inputTokens: number; outputTokens: number; cacheCreation: number; cachedRead: number; cacheCreation1h: number } {
 		const cacheCreation = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
 		// Split out the 1-hour TTL portion of cache-creation tokens (billed at a higher
 		// rate than the default 5-minute TTL) — see calculateEstimatedCost() in tokenEstimation.ts.
@@ -208,7 +245,7 @@ export class ClaudeDesktopCoworkDataAccess {
 		return { inputTokens, outputTokens, cacheCreation, cachedRead, cacheCreation1h };
 	}
 
-	private extractCoworkEventTokens(event: any, seenRequestIds: Set<string>): { inputTokens: number; outputTokens: number } | null {
+	private extractDesktopEventTokens(event: any, seenRequestIds: Set<string>): { inputTokens: number; outputTokens: number } | null {
 		if (event.type !== 'assistant') { return null; }
 		const usage = event.message?.usage;
 		if (!usage) { return null; }
@@ -218,15 +255,15 @@ export class ClaudeDesktopCoworkDataAccess {
 			if (seenRequestIds.has(requestId)) { return null; }
 			seenRequestIds.add(requestId);
 		}
-		const { inputTokens, outputTokens } = this.computeCoworkTokenCounts(usage);
+		const { inputTokens, outputTokens } = this.computeDesktopTokenCounts(usage);
 		return { inputTokens, outputTokens };
 	}
 
 	/**
 	 * Count user interactions in a Cowork session.
 	 */
-	async countCoworkInteractions(sessionFilePath: string): Promise<number> {
-		const events = await this.readCoworkEvents(sessionFilePath);
+	async countDesktopSessionInteractions(sessionFilePath: string): Promise<number> {
+		const events = await this.readDesktopSessionEvents(sessionFilePath);
 		let count = 0;
 		for (const event of events) {
 			if (event.type === 'user' && !event.isSidechain && event.message?.role === 'user') {
@@ -247,27 +284,29 @@ export class ClaudeDesktopCoworkDataAccess {
 	/**
 	 * Get per-model token usage from a Cowork session.
 	 */
-	async getCoworkModelUsage(sessionFilePath: string): Promise<ModelUsage> {
-		const events = await this.readCoworkEvents(sessionFilePath);
+	async getDesktopSessionModelUsage(sessionFilePath: string): Promise<ModelUsage> {
+		const events = await this.readDesktopSessionEvents(sessionFilePath);
 		const modelUsage: ModelUsage = {};
 		const seenRequestIds = new Set<string>();
 		for (const event of events) {
-			this.processCoworkEventModelUsage(event, seenRequestIds, modelUsage);
+			this.processDesktopEventModelUsage(event, seenRequestIds, modelUsage);
 		}
 		return modelUsage;
 	}
 
-	private processCoworkEventModelUsage(event: any, seenRequestIds: Set<string>, modelUsage: ModelUsage): void {
+	private processDesktopEventModelUsage(event: any, seenRequestIds: Set<string>, modelUsage: ModelUsage): void {
 		if (event.type !== 'assistant') { return; }
 		const usage = event.message?.usage;
 		if (!usage) { return; }
-		if (!this.shouldCountCoworkRequest(event, seenRequestIds)) { return; }
+		if (!this.shouldCountDesktopRequest(event, seenRequestIds)) { return; }
 		const model = normalizeClaudeModelId(event.message?.model || 'unknown');
-		if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
-		this.applyCoworkTokenCounts(modelUsage[model], usage);
+		// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+		if (isUnsafeObjectKey(model)) { return; }
+		if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
+		this.applyDesktopTokenCounts(modelUsage[model], usage);
 	}
 
-	private shouldCountCoworkRequest(event: any, seenRequestIds: Set<string>): boolean {
+	private shouldCountDesktopRequest(event: any, seenRequestIds: Set<string>): boolean {
 		const requestId = event.requestId;
 		if (!requestId) { return true; }
 		if (!event.message?.stop_reason) { return false; }
@@ -276,8 +315,8 @@ export class ClaudeDesktopCoworkDataAccess {
 		return true;
 	}
 
-	private applyCoworkTokenCounts(entry: ModelUsage[string], usage: any): void {
-		const { inputTokens, outputTokens, cacheCreation, cachedRead, cacheCreation1h } = this.computeCoworkTokenCounts(usage);
+	private applyDesktopTokenCounts(entry: ModelUsage[ModelId], usage: any): void {
+		const { inputTokens, outputTokens, cacheCreation, cachedRead, cacheCreation1h } = this.computeDesktopTokenCounts(usage);
 		entry.inputTokens += inputTokens;
 		entry.outputTokens += outputTokens;
 		if (cacheCreation > 0) { entry.cacheCreationTokens = (entry.cacheCreationTokens ?? 0) + cacheCreation; }
@@ -288,8 +327,9 @@ export class ClaudeDesktopCoworkDataAccess {
 	/**
 	 * Derive the metadata JSON file path from a Cowork session JSONL path.
 	 *
-	 * Structure: .../local-agent-mode-sessions/<app>/<machine>/local_<id>/.claude/.../<uuid>.jsonl
-	 * Metadata:  .../local-agent-mode-sessions/<app>/<machine>/local_<id>.json
+	 * Structure: .../<session-base>/<app>/<machine>/local_<id>/.claude/.../<uuid>.jsonl
+	 * Metadata:  .../<session-base>/<app>/<machine>/local_<id>.json
+	 * where <session-base> is claude-code-sessions (current) or local-agent-mode-sessions (legacy).
 	 */
 	private getMetadataPathFromJsonl(jsonlPath: string): string | null {
 		const normalized = normalizePath(jsonlPath);
@@ -309,7 +349,7 @@ export class ClaudeDesktopCoworkDataAccess {
 	 * Read session metadata (title, timestamps, cwd) for a Cowork session.
 	 * The metadata comes from the sibling .json file alongside the session directory.
 	 */
-	async getCoworkSessionMeta(sessionFilePath: string): Promise<{
+	async getDesktopSessionMeta(sessionFilePath: string): Promise<{
 		title?: string;
 		firstInteraction?: string;
 		lastInteraction?: string;

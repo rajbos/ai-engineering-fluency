@@ -26,7 +26,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { ModelUsage } from './types';
+import type { ModelUsage, ModelId } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePath } from './utils/pathUtils';
 
 export class PiDataAccess {
@@ -206,13 +207,15 @@ const inputTokens = typeof usage.input === 'number' ? usage.input : 0;
 const outputTokens = typeof usage.output === 'number' ? usage.output : 0;
 if (inputTokens + outputTokens === 0) { return; }
 const model: string = msg.model || 'unknown';
-if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+if (isUnsafeObjectKey(model)) { return; }
+if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 modelUsage[model].inputTokens += inputTokens;
 modelUsage[model].outputTokens += outputTokens;
 this.accumulateCacheTokens(usage, modelUsage[model]);
 }
 
-private accumulateCacheTokens(usage: any, entry: ModelUsage[string]): void {
+private accumulateCacheTokens(usage: any, entry: ModelUsage[ModelId]): void {
 const cacheRead = typeof usage.cacheRead === 'number' ? usage.cacheRead : 0;
 const cacheWrite = typeof usage.cacheWrite === 'number' ? usage.cacheWrite : 0;
 if (cacheRead > 0) { entry.cachedReadTokens = (entry.cachedReadTokens ?? 0) + cacheRead; }
@@ -277,15 +280,16 @@ return { tokens, interactions, modelUsage: modelUsageWithInteractions, timestamp
 private buildModelUsageWithInteractions(
 modelUsage: ModelUsage,
 interactions: number
-): { [key: string]: { inputTokens: number; outputTokens: number; interactions?: number } } {
+): { [key: string]: { inputTokens: number; outputTokens: number; sessions: number; interactions?: number } } {
 const totalUsageTokens = Object.values(modelUsage).reduce((sum, u) => sum + u.inputTokens + u.outputTokens, 0);
-const result: { [key: string]: { inputTokens: number; outputTokens: number; interactions?: number } } = {};
+const result: { [key: string]: { inputTokens: number; outputTokens: number; sessions: number; interactions?: number } } = {};
 for (const [model, usage] of Object.entries(modelUsage)) {
 const modelTotal = usage.inputTokens + usage.outputTokens;
 const fraction = totalUsageTokens > 0 ? modelTotal / totalUsageTokens : 0;
 result[model] = {
 inputTokens: usage.inputTokens,
 outputTokens: usage.outputTokens,
+sessions: usage.sessions,
 interactions: Math.round(interactions * fraction),
 };
 }

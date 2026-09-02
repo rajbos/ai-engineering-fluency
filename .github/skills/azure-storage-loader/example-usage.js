@@ -18,7 +18,7 @@
  *   node example-usage.js mycopilotusage 2026-01-01 2026-01-31
  */
 
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -33,6 +33,21 @@ if (args.length < 3) {
 
 const [storageAccount, startDate, endDate] = args;
 
+// Validate CLI args before they reach a subprocess call — Azure storage account
+// names are 3-24 lowercase alphanumeric characters, and dates must be ISO
+// (YYYY-MM-DD). Rejecting anything else prevents shell metacharacters or
+// other unexpected content from influencing the command that gets run.
+const STORAGE_ACCOUNT_PATTERN = /^[a-z0-9]{3,24}$/;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+if (!STORAGE_ACCOUNT_PATTERN.test(storageAccount)) {
+	console.error(`Error: invalid storage account name "${storageAccount}" (expected 3-24 lowercase letters/digits)`);
+	process.exit(1);
+}
+if (!DATE_PATTERN.test(startDate) || !DATE_PATTERN.test(endDate)) {
+	console.error('Error: start-date and end-date must be in YYYY-MM-DD format');
+	process.exit(1);
+}
+
 console.log('Azure Storage Loader - Example Usage');
 console.log('=====================================\n');
 
@@ -41,11 +56,15 @@ console.log('Step 1: Loading data from Azure Storage...');
 console.log(`  Storage Account: ${storageAccount}`);
 console.log(`  Date Range: ${startDate} to ${endDate}\n`);
 
-const tempFile = path.join(os.tmpdir(), `usage-data-${Date.now()}.json`);
+// Use a freshly created, collision-resistant temp directory rather than a
+// predictably-named file directly in the shared OS temp dir.
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-data-'));
+const tempFile = path.join(tempDir, 'usage-data.json');
 
 try {
-	execSync(
-		`node load-table-data.js --storageAccount ${storageAccount} --startDate ${startDate} --endDate ${endDate} --output ${tempFile}`,
+	execFileSync(
+		'node',
+		['load-table-data.js', '--storageAccount', storageAccount, '--startDate', startDate, '--endDate', endDate, '--output', tempFile],
 		{ stdio: 'inherit' }
 	);
 
@@ -144,8 +163,9 @@ try {
 			});
 	}
 
-	// Clean up temp file
+	// Clean up temp file/dir
 	fs.unlinkSync(tempFile);
+	fs.rmdirSync(tempDir);
 
 	console.log('\n✅ Analysis complete!\n');
 	console.log('Next steps:');
@@ -157,9 +177,12 @@ try {
 
 } catch (error) {
 	console.error('\nError:', error.message);
-	// Clean up temp file if it exists
+	// Clean up temp file/dir if they exist
 	if (fs.existsSync(tempFile)) {
 		fs.unlinkSync(tempFile);
+	}
+	if (fs.existsSync(tempDir)) {
+		fs.rmdirSync(tempDir);
 	}
 	process.exit(1);
 }

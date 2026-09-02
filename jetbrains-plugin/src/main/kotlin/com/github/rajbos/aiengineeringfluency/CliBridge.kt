@@ -1,11 +1,9 @@
 package com.github.rajbos.aiengineeringfluency
 
-import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.extensions.PluginId
-import com.intellij.openapi.util.SystemInfo
 import com.intellij.util.io.createDirectories
+import com.intellij.util.system.OS
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -174,8 +172,13 @@ object CliBridge {
 
     /** Plugin version string, used to version the extraction directory so upgrades don't reuse stale binaries. */
     private val pluginVersion: String by lazy {
-        PluginManagerCore.getPlugin(PluginId.getId("com.github.rajbos.ai-engineering-fluency"))
-            ?.version
+        // Version is baked into a classpath resource at build time (see the
+        // generatePluginVersionFile task in build.gradle.kts). Reading the
+        // version from the plugin descriptor would require PluginManagerCore
+        // APIs that the Marketplace verifier flags as internal.
+        CliBridge::class.java.getResourceAsStream("/plugin-version.txt")
+            ?.bufferedReader()?.use { it.readText().trim() }
+            ?.takeIf { it.isNotBlank() }
             ?: "unknown"
     }
 
@@ -185,7 +188,7 @@ object CliBridge {
             cachedExePath?.let { return it }
 
             val osDir = osBundleDir()
-            val exeName = if (SystemInfo.isWindows) "copilot-token-tracker.exe" else "copilot-token-tracker"
+            val exeName = if (OS.CURRENT == OS.Windows) "copilot-token-tracker.exe" else "copilot-token-tracker"
             val resourcePrefix = "/cli-bundle/$osDir"
 
             // Include plugin version in the path so each upgrade extracts a fresh copy
@@ -197,7 +200,7 @@ object CliBridge {
             // sql-wasm.wasm sits next to the binary; loaded at runtime by the CLI.
             copyResourceIfPresent("$resourcePrefix/sql-wasm.wasm", targetDir.resolve("sql-wasm.wasm"))
 
-            if (!SystemInfo.isWindows) {
+            if (OS.CURRENT != OS.Windows) {
                 exePath.toFile().setExecutable(true, /* ownerOnly = */ false)
             }
 
@@ -243,10 +246,10 @@ object CliBridge {
     }
 
     private fun osBundleDir(): String = when {
-        SystemInfo.isWindows -> "win-x64"
-        SystemInfo.isMac -> if (isArm64Runtime()) "darwin-arm64" else "darwin-x64"
-        SystemInfo.isLinux -> "linux-x64"
-        else -> throw IllegalStateException("Unsupported OS: ${SystemInfo.OS_NAME}")
+        OS.CURRENT == OS.Windows -> "win-x64"
+        OS.CURRENT == OS.macOS -> if (isArm64Runtime()) "darwin-arm64" else "darwin-x64"
+        OS.CURRENT == OS.Linux -> "linux-x64"
+        else -> throw IllegalStateException("Unsupported OS: ${OS.CURRENT}")
     }
 
     /**

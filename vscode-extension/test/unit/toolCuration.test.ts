@@ -11,6 +11,7 @@ import {
 	buildMcpEntriesFromJson,
 	buildMcpEntriesFromSettings,
 	discoverSkillEntries,
+	findSkillDescriptionInWorkspaces,
 	analyzeToolCuration,
 	extractDescriptionFromSkillContent,
 	type RuntimeToolInfo,
@@ -409,6 +410,44 @@ test('discoverSkillEntries: discovers skills from .github/skills/', () => {
 		assert.equal(result[0].source, 'skill');
 		assert.ok(result[0].description.includes('Does something useful'));
 	});
+});
+
+// ---------------------------------------------------------------------------
+// findSkillDescriptionInWorkspaces — historical-workspace fallback lookup
+// ---------------------------------------------------------------------------
+
+test('findSkillDescriptionInWorkspaces: finds a skill description in a candidate workspace not currently open', () => {
+	const tmpDir = mkTmpDir('ctt-skills-historical-');
+	writeSkill(path.join(tmpDir, '.claude', 'skills'), 'sync-host-views', 'Keep host views in sync');
+
+	const result = findSkillDescriptionInWorkspaces('sync-host-views', [tmpDir]);
+
+	assert.equal(result, 'Keep host views in sync');
+});
+
+test('findSkillDescriptionInWorkspaces: checks all WORKSPACE_SKILL_DIRS conventions', () => {
+	const tmpDir = mkTmpDir('ctt-skills-historical-');
+	writeSkill(path.join(tmpDir, '.github', 'skills'), 'copilot-log-analysis', 'Analyze Copilot session logs');
+
+	const result = findSkillDescriptionInWorkspaces('copilot-log-analysis', [tmpDir]);
+
+	assert.equal(result, 'Analyze Copilot session logs');
+});
+
+test('findSkillDescriptionInWorkspaces: tries each candidate workspace in order until one matches', () => {
+	const tmpA = mkTmpDir('ctt-skills-historical-a-');
+	const tmpB = mkTmpDir('ctt-skills-historical-b-');
+	writeSkill(path.join(tmpB, '.claude', 'skills'), 'git-workflow', 'Automate the git workflow');
+
+	const result = findSkillDescriptionInWorkspaces('git-workflow', [tmpA, tmpB]);
+
+	assert.equal(result, 'Automate the git workflow');
+});
+
+test('findSkillDescriptionInWorkspaces: returns undefined when no candidate workspace has the skill', () => {
+	const tmpDir = mkTmpDir('ctt-skills-historical-');
+	assert.equal(findSkillDescriptionInWorkspaces('nonexistent-skill', [tmpDir]), undefined);
+	assert.equal(findSkillDescriptionInWorkspaces('nonexistent-skill', []), undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -917,6 +956,26 @@ test('analyzeToolCuration: flags unused skill with refine recommendation', () =>
 	const rec = result.recommendations.find(r => r.type === 'refine-skill');
 	assert.ok(rec, 'should have a refine-skill recommendation');
 	assert.equal(rec?.target, 'stale-skill');
+});
+
+test('analyzeToolCuration: a skill invoked via skillCalls.byName is NOT flagged as unused', () => {
+	// Regression test: Claude Code (and other wrapper-tool editors) never put the
+	// real skill name in toolCalls.byTool — only in skillCalls.byName. Before this
+	// was wired up, every discovered skill looked permanently unused regardless of
+	// real usage.
+	const available = [
+		{ name: 'graphify', description: 'Knowledge graph skill', source: 'skill' as const, skillPath: '.claude/skills/graphify/SKILL.md' },
+	];
+	const period: UsageAnalysisPeriod = {
+		...emptyPeriod(),
+		skillCalls: { total: 3, byName: { graphify: 3 } },
+	};
+
+	const result = analyzeToolCuration(available, period, 30);
+
+	assert.equal(result.unusedTools.length, 0);
+	assert.equal(result.recommendations.filter(r => r.type === 'refine-skill').length, 0);
+	assert.ok(result.usedTools.some(t => t.name === 'graphify' && t.count === 3));
 });
 
 test('analyzeToolCuration: includes windowDays in result', () => {

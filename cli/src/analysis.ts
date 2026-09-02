@@ -7,6 +7,7 @@
  */
 import { calculateEstimatedCost } from '../../src/tokenEstimation';
 import { normalizePathForComparison, detectClaudeCodeEditorVariant } from '../../src/workspaceHelpers';
+import { getCustomProviderGroup } from '../../src/webview/shared/modelUtils';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import type { ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../src/types';
 export type { PeriodStats, UsageAnalysisPeriod } from '../../src/types';
@@ -61,7 +62,7 @@ export interface DailyEntry {
 const COPILOT_EDITOR_NAMES = new Set([
 	'VS Code', 'VS Code Insiders', 'VS Code Exploration',
 	'VS Code Server', 'VS Code Server (Insiders)', 'VSCodium',
-	'Visual Studio', 'JetBrains', 'Copilot CLI', 'MS Scout (Copilot CLI)',
+	'Visual Studio', 'JetBrains', 'Copilot CLI', 'Copilot CLI (App)', 'MS Scout (Copilot CLI)',
 ]);
 
 const MODEL_PROVIDER_PREFIXES: Array<[string, string]> = [
@@ -79,12 +80,17 @@ function getPricingSourceForEditor(editor: string): 'provider' | 'copilot' {
 }
 
 function getModelBillingProvider(modelId: string): string {
+	const customGroup = getCustomProviderGroup(modelId);
+	if (customGroup) { return customGroup; }
 	const id = modelId.toLowerCase();
 	const match = MODEL_PROVIDER_PREFIXES.find(([prefix]) => id.startsWith(prefix));
 	return match ? match[1] : 'Other';
 }
 
+/** Custom endpoints (BYOK) bill the user's own provider, so they keep their own group on Copilot surfaces too. */
 function getBillingGroup(editor: string, modelId: string): string {
+	const customGroup = getCustomProviderGroup(modelId);
+	if (customGroup) { return customGroup; }
 	return COPILOT_EDITOR_NAMES.has(editor) ? 'GitHub Copilot' : getModelBillingProvider(modelId);
 }
 
@@ -116,6 +122,7 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/.kiro/sessions/cli/')) { return 'Kiro CLI'; }
 	if (normalized.includes('/kiro.kiroagent/workspace-sessions/')) { return 'Kiro'; }
 	if (normalized.includes('/.continue/sessions/')) { return 'Continue'; }
+	if (normalized.includes('/claude-code-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (normalized.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (normalized.includes('/.claude/projects/')) { return detectClaudeCodeEditorVariant(filePath); }
 	if (normalized.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
@@ -188,7 +195,7 @@ export function aggregateIntoPeriod(period: PeriodStats, data: SessionData, frac
 	// Merge model usage proportionally
 	for (const [model, usage] of Object.entries(data.modelUsage)) {
 		if (!period.modelUsage[model]) {
-			period.modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+			period.modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 		}
 		period.modelUsage[model].inputTokens += Math.round(usage.inputTokens * fraction);
 		period.modelUsage[model].outputTokens += Math.round(usage.outputTokens * fraction);
@@ -369,7 +376,7 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 				for (const [editor, mu] of Object.entries(e.editorModelUsage)) {
 					for (const [modelId, usage] of Object.entries(mu)) {
 						if (getBillingGroup(editor, modelId) !== group) { continue; }
-						if (!grouped[modelId]) { grouped[modelId] = { inputTokens: 0, outputTokens: 0 }; }
+						if (!grouped[modelId]) { grouped[modelId] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 						grouped[modelId].inputTokens += usage.inputTokens;
 						grouped[modelId].outputTokens += usage.outputTokens;
 					}
@@ -390,7 +397,7 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 					for (const [editor, mu] of Object.entries(e.editorModelUsage)) {
 						for (const [modelId, usage] of Object.entries(mu)) {
 							if (getBillingGroup(editor, modelId) !== group) { continue; }
-							if (!grouped[modelId]) { grouped[modelId] = { inputTokens: 0, outputTokens: 0 }; }
+							if (!grouped[modelId]) { grouped[modelId] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 							grouped[modelId].inputTokens += usage.inputTokens;
 							grouped[modelId].outputTokens += usage.outputTokens;
 						}
@@ -408,7 +415,7 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 		target.tokens += src.tokens;
 		target.sessions += src.sessions;
 		for (const [m, u] of Object.entries(src.modelUsage)) {
-			if (!target.modelUsage[m]) { target.modelUsage[m] = { inputTokens: 0, outputTokens: 0 }; }
+			if (!target.modelUsage[m]) { target.modelUsage[m] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 			target.modelUsage[m].inputTokens += u.inputTokens;
 			target.modelUsage[m].outputTokens += u.outputTokens;
 			if (u.cachedReadTokens !== undefined) {
@@ -428,7 +435,7 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 			for (const [editor, mu] of Object.entries(src.editorModelUsage)) {
 				if (!target.editorModelUsage[editor]) { target.editorModelUsage[editor] = {}; }
 				for (const [model, u] of Object.entries(mu)) {
-					if (!target.editorModelUsage[editor][model]) { target.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0 }; }
+					if (!target.editorModelUsage[editor][model]) { target.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 					target.editorModelUsage[editor][model].inputTokens += u.inputTokens;
 					target.editorModelUsage[editor][model].outputTokens += u.outputTokens;
 				}

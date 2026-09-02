@@ -5,6 +5,7 @@
 import type { ModelUsage, ModelPricing, ContextReferenceUsage, TokenEstimator } from './types';
 import { toLocalDayKey } from './utils/dayKeys';
 import type { CopilotCliOtelSessionUsage } from './copilotCliOtel';
+import { getModelLookupCandidates } from './webview/shared/modelUtils';
 
 /** Minimum request shape needed by getModelFromRequest. */
 interface ModelRequestSource {
@@ -504,7 +505,7 @@ function _ejtsAccumulateModelMetrics(modelName: string, metrics: ShutdownModelMe
 	state.cliActualTokens += input + output;
 	state.cliCacheReadTokens += cacheRead;
 	if (!state.cliShutdownModelUsage![modelName]) {
-		state.cliShutdownModelUsage![modelName] = { inputTokens: 0, outputTokens: 0 };
+		state.cliShutdownModelUsage![modelName] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 	}
 	state.cliShutdownModelUsage![modelName].inputTokens += input;
 	state.cliShutdownModelUsage![modelName].outputTokens += output;
@@ -1121,18 +1122,17 @@ export function applyDelta(state: unknown, delta: unknown): unknown {
 }
 
 export function getModelTier(modelId: string, modelPricing: { [key: string]: ModelPricing } = {}): 'standard' | 'premium' | 'unknown' {
-	// Determine tier based on multiplier: 0 = standard, >0 = premium
-	// Look up from modelPricing.json
-	const pricingInfo = modelPricing[modelId];
-	if (pricingInfo && typeof pricingInfo.multiplier === 'number') {
-		return pricingInfo.multiplier === 0 ? 'standard' : 'premium';
+	// Look up the explicit `tier` field from modelPricing.json.
+	const pricingInfo = _lookupModelPricing(modelId, modelPricing);
+	if (pricingInfo?.tier) {
+		return pricingInfo.tier;
 	}
 
 	// Fallback: try to match partial model names
 	for (const [key, value] of Object.entries(modelPricing)) {
 		if (modelId.includes(key) || key.includes(modelId)) {
-			if (typeof value.multiplier === 'number') {
-				return value.multiplier === 0 ? 'standard' : 'premium';
+			if (value.tier) {
+				return value.tier;
 			}
 		}
 	}
@@ -1172,7 +1172,7 @@ export interface LongContextInfo {
  * parseable threshold — i.e. the model is billed at a single (default) rate.
  */
 export function getLongContextInfo(modelId: string, modelPricing: { [key: string]: ModelPricing } = {}): LongContextInfo | null {
-	let pricing: ModelPricing | undefined = modelPricing[modelId];
+	let pricing: ModelPricing | undefined = _lookupModelPricing(modelId, modelPricing);
 	if (!pricing) {
 		const id = modelId.toLowerCase();
 		for (const [key, value] of Object.entries(modelPricing)) {
@@ -1191,27 +1191,42 @@ export function getLongContextInfo(modelId: string, modelPricing: { [key: string
 }
 
 function _costBucketFromPricing(pricing: ModelPricing): 'low' | 'medium' | 'high' | 'unknown' {
-	const costPerM = pricing.copilotPricing?.inputCostPerMillion ?? null;
+	// Prefer the Copilot AI-Credit rate; fall back to the direct provider/API rate.
+	const costPerM = pricing.copilotPricing?.inputCostPerMillion ?? pricing.inputCostPerMillion ?? null;
 	if (costPerM !== null) {
 		if (costPerM < 2) { return 'low'; }
 		if (costPerM < 5) { return 'medium'; }
-		return 'high';
-	}
-	if (typeof pricing.multiplier === 'number') {
-		if (pricing.multiplier === 0) { return 'low'; }
-		if (pricing.multiplier <= 1) { return 'medium'; }
 		return 'high';
 	}
 	return 'unknown';
 }
 
 export function getModelCostBucket(modelId: string, modelPricing: { [key: string]: ModelPricing } = {}): 'low' | 'medium' | 'high' | 'unknown' {
-	const pricingInfo = modelPricing[modelId];
+	const pricingInfo = _lookupModelPricing(modelId, modelPricing);
 	if (pricingInfo) { return _costBucketFromPricing(pricingInfo); }
 	for (const [key, value] of Object.entries(modelPricing)) {
 		if (modelId.includes(key) || key.includes(modelId)) { return _costBucketFromPricing(value); }
 	}
 	return 'unknown';
+}
+
+/**
+ * Resolves the pricing entry for a raw model id by trying the normalized
+ * candidates from getModelLookupCandidates — handles `copilot/` prefixes,
+ * custom-endpoint ids (`customendpoint/<provider>/<model id>`), org-scoped
+ * Copilot catalog ids (`<uuid>/<model id>`), and dash/dot version variants
+ * (`claude-opus-4-8` → `claude-opus-4.8`).
+ * Returns undefined when no candidate has a pricing entry.
+ */
+function _lookupModelPricing(
+	model: string,
+	modelPricing: { [key: string]: ModelPricing }
+): ModelPricing | undefined {
+	for (const candidate of getModelLookupCandidates(model)) {
+		const entry = modelPricing[candidate];
+		if (entry) { return entry; }
+	}
+	return undefined;
 }
 
 /**
@@ -1253,7 +1268,9 @@ export function calculateEstimatedCost(
 	for (const [model, usage] of Object.entries(modelUsage)) {
 		// No pricing entry → model still appears in usage breakdowns (via modelUsage)
 		// but contributes $0 to cost. Do NOT fall back to another model's rates.
-		const baseEntry = modelPricing[model];
+		// Prefixed/variant ids (custom endpoints, org-UUID catalog ids, dash/dot
+		// version variants) are priced by their resolved canonical id.
+		const baseEntry = _lookupModelPricing(model, modelPricing);
 		if (!baseEntry) {
 			continue;
 		}

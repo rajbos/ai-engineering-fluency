@@ -6,7 +6,9 @@
  */
 
 import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage, DailyRollupEntry } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { toLocalDayKey } from './utils/dayKeys';
+import { getCustomProviderGroup } from './webview/shared/modelUtils';
 
 /**
  * Editor display names that bill through GitHub Copilot's AI-Credit system.
@@ -16,7 +18,7 @@ import { toLocalDayKey } from './utils/dayKeys';
 export const COPILOT_EDITOR_NAMES = new Set([
 	'VS Code', 'VS Code Insiders', 'VS Code Exploration',
 	'VS Code Server', 'VS Code Server (Insiders)', 'VSCodium',
-	'Visual Studio', 'JetBrains', 'Copilot CLI', 'MS Scout (Copilot CLI)',
+	'Visual Studio', 'JetBrains', 'Copilot CLI', 'Copilot CLI (App)', 'MS Scout (Copilot CLI)',
 ]);
 
 /**
@@ -50,7 +52,10 @@ export function computeSessionDurationMs(firstInteraction: string | null | undef
  */
 export function addModelUsage(target: ModelUsage, source: ModelUsage): void {
 for (const [model, usage] of Object.entries(source)) {
-if (!target[model]) { target[model] = { inputTokens: 0, outputTokens: 0 }; }
+// Defense in depth: a source built from parsed JSON can carry an own "__proto__"
+// key (e.g. via a computed property) — see protoGuard.ts.
+if (isUnsafeObjectKey(model)) { continue; }
+if (!target[model]) { target[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 target[model].inputTokens += usage.inputTokens;
 target[model].outputTokens += usage.outputTokens;
 if (usage.cachedReadTokens !== undefined) {
@@ -58,6 +63,12 @@ target[model].cachedReadTokens = (target[model].cachedReadTokens ?? 0) + usage.c
 }
 if (usage.cacheCreationTokens !== undefined) {
 target[model].cacheCreationTokens = (target[model].cacheCreationTokens ?? 0) + usage.cacheCreationTokens;
+}
+if (usage.thinkingTokens !== undefined) {
+target[model].thinkingTokens = (target[model].thinkingTokens ?? 0) + usage.thinkingTokens;
+}
+if (usage.sessions !== undefined) {
+target[model].sessions = (target[model].sessions ?? 0) + usage.sessions;
 }
 }
 }
@@ -99,13 +110,143 @@ export function reconcileModelUsageToTotal(modelUsage: ModelUsage, targetInputTo
 			inputTokens, outputTokens,
 			...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * inputScale) } : {}),
 			...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * inputScale) } : {}),
+			...(usage.sessions !== undefined ? { sessions: usage.sessions } : { sessions: 0 }),
 		};
 	}
 	const residualInput = targetInputTokens - scaledInputTotal;
 	const residualOutput = targetOutputTokens - scaledOutputTotal;
 	if (residualInput !== 0 || residualOutput !== 0) {
-		const unknown = result.unknown ?? { inputTokens: 0, outputTokens: 0 };
+		const unknown = result.unknown ?? { inputTokens: 0, outputTokens: 0, sessions: 0 };
 		result.unknown = { ...unknown, inputTokens: unknown.inputTokens + residualInput, outputTokens: unknown.outputTokens + residualOutput };
+	}
+	return result;
+}
+
+/**
+ * Reconciles a per-model usage breakdown so its input+output total matches an
+ * authoritative session total (e.g. `actualTokens` from a debug log, OTel export,
+ * or ecosystem adapter).
+ *
+ * This is needed when the breakdown source and the total source use different
+ * estimation methods — for example, event-based CLI sessions estimate the session
+ * total from real output via an input:output ratio, while the per-model breakdown
+ * estimates input from accumulated message content scaled by a context-growth factor.
+ * In sessions with large user content but small model output, the breakdown input
+ * can exceed the session total, causing the details view to show "Input tokens" >
+ * "Total tokens".
+ *
+ * Output counts are treated as authoritative when they do not already exceed the
+ * total (the output value usually comes from real API counts); otherwise both input
+ * and output are scaled proportionally. Any residual from rounding is swept into the
+ * existing `unknown` bucket by `reconcileModelUsageToTotal`.
+ */
+export function reconcileModelUsageToActualTokens(modelUsage: ModelUsage, actualTokens: number): ModelUsage {
+	if (actualTokens <= 0) { return modelUsage; }
+	const currentInput = Object.values(modelUsage).reduce((s, u) => s + u.inputTokens, 0);
+	const currentOutput = Object.values(modelUsage).reduce((s, u) => s + u.outputTokens, 0);
+	const currentTotal = currentInput + currentOutput;
+	if (currentTotal === 0) {
+		return Object.keys(modelUsage).length === 0
+			? { unknown: { inputTokens: actualTokens, outputTokens: 0, sessions: 0 } }
+			: modelUsage;
+	}
+	if (currentTotal === actualTokens) { return modelUsage; }
+
+	if (currentOutput > 0 && currentOutput <= actualTokens) {
+		// Preserve the (presumably real) output counts and scale input to fit.
+		return reconcileModelUsageToTotal(modelUsage, actualTokens - currentOutput, currentOutput);
+	}
+
+	// Proportional scaling of both input and output to the actual total.
+	const inputTarget = Math.round(actualTokens * (currentInput / currentTotal));
+	const outputTarget = actualTokens - inputTarget;
+	return reconcileModelUsageToTotal(modelUsage, inputTarget, outputTarget);
+}
+
+/** Sum of input + output tokens across all models in a usage map. */
+export function sumModelUsageTokens(modelUsage: ModelUsage): number {
+	return Object.values(modelUsage).reduce((s, u) => s + u.inputTokens + u.outputTokens, 0);
+}
+
+/** Scale every token field of a usage map by `fraction` (used for per-day distribution). */
+function scaleModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
+	const scaled: ModelUsage = {};
+	for (const [model, usage] of Object.entries(modelUsage)) {
+		scaled[model] = {
+			inputTokens: Math.round(usage.inputTokens * fraction),
+			outputTokens: Math.round(usage.outputTokens * fraction),
+			...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}),
+			...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * fraction) } : {}),
+			sessions: 0,
+		};
+	}
+	return scaled;
+}
+
+/**
+ * Last-resort single-day rollup for sessions with no per-request timestamps at all
+ * (e.g. an ecosystem adapter with no `getDailyFractions()`, such as Claude Desktop).
+ * Buckets the whole session's tokens/interactions under one day, keyed by
+ * `activityTimestamp` (mutates `dailyRollups` in place).
+ *
+ * Callers must pass the session's *last* known activity timestamp (falling back to
+ * the first, only if no last timestamp is available) — never `firstInteraction` alone.
+ * A multi-day session (started days ago, still active today) must show up as
+ * "today"'s activity; bucketing by first-interaction silently buries all
+ * subsequent days — including "today" — under the session's start date, making
+ * Today/Details period stats show 0 despite real recent activity.
+ */
+export function computeFallbackDailyRollup(
+	dailyRollups: Record<string, DailyRollupEntry>,
+	activityTimestamp: string | null,
+	tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number },
+	modelUsage: ModelUsage,
+	interactions: number,
+): void {
+	if (!tokenResult.tokens || !activityTimestamp) { return; }
+	try {
+		const interactionDate = new Date(activityTimestamp);
+		if (isNaN(interactionDate.getTime())) { return; }
+		const dayKey = toLocalDayKey(interactionDate);
+		const dayModelUsage = scaleModelUsage(modelUsage, 1);
+		dailyRollups[dayKey] = {
+			tokens: tokenResult.tokens,
+			actualTokens: tokenResult.actualTokens || 0,
+			thinkingTokens: tokenResult.thinkingTokens || 0,
+			cachedReadTokens: 0,
+			interactions: Math.max(1, interactions),
+			modelUsage: dayModelUsage,
+		};
+	} catch { /* ignore */ }
+}
+
+/**
+ * Distributes a session-level model usage breakdown across the session's daily
+ * rollups, weighted by each day's interaction count, and re-syncs each day's
+ * `actualTokens` to that day's distributed input+output total.
+ *
+ * Re-syncing `actualTokens` is the critical part: period stats derive "Total
+ * tokens" from each rollup's `actualTokens`/`tokens` but "Input/Output tokens"
+ * from the rollup's `modelUsage`. When a debug log upgrades the per-model
+ * breakdown to (much larger) exact API totals, leaving the rollup's token
+ * counts at their old session-file estimate makes Input exceed Total in every
+ * period view. Setting `actualTokens` from the same distributed usage keeps
+ * the two sources consistent by construction.
+ *
+ * Returns undefined when the rollups have no interactions to weight by
+ * (callers should keep their existing rollups in that case).
+ */
+export function distributeModelUsageToDays(
+	dailyRollups: Record<string, DailyRollupEntry>,
+	sessionModelUsage: ModelUsage,
+): Record<string, DailyRollupEntry> | undefined {
+	const totalInteractions = Object.values(dailyRollups).reduce((s, dr) => s + dr.interactions, 0);
+	if (totalInteractions <= 0) { return undefined; }
+	const result: Record<string, DailyRollupEntry> = {};
+	for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
+		const fraction = dayRollup.interactions / totalInteractions;
+		const dayModelUsage = scaleModelUsage(sessionModelUsage, fraction);
+		result[dayKey] = { ...dayRollup, modelUsage: dayModelUsage, actualTokens: sumModelUsageTokens(dayModelUsage) };
 	}
 	return result;
 }
@@ -243,9 +384,20 @@ function _apsBumpDailyEntry(entry: DailyTokenStats, tokens: number, interactions
 	entry.repositoryUsage[repository].tokens += tokens;
 	entry.repositoryUsage[repository].sessions += 1;
 	addModelUsage(entry.modelUsage, modelUsage);
+	for (const model of Object.keys(modelUsage)) {
+		// addModelUsage skips unsafe keys, so they have no entry here — see protoGuard.ts.
+		if (isUnsafeObjectKey(model)) { continue; }
+		if (!entry.modelUsage[model].sessions) { entry.modelUsage[model].sessions = 0; }
+		entry.modelUsage[model].sessions += 1;
+	}
 	if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 	if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 	addModelUsage(entry.editorModelUsage[editorType], modelUsage);
+	for (const model of Object.keys(modelUsage)) {
+		if (isUnsafeObjectKey(model)) { continue; }
+		if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
+		entry.editorModelUsage[editorType][model].sessions += 1;
+	}
 }
 
 function _apsBumpPeriod(acc: PeriodAccumulator, f: ApsDayFields, freshSession: boolean): void {
@@ -355,9 +507,9 @@ function _apsProcessFallbackSession(sessionInput: SessionAggregateInput, ranges:
 		const entry = _apsGetOrCreateDailyEntry(accs.dailyStatsMap, lastActivityUtcKey);
 		_apsProcessFallback30Days(entry, f, sessionInput, repository, accs);
 	}
-	
+
 	_apsProcessFallbackPeriods(lastActivityUtcKey, ranges, accs, f);
-	
+
 	return false;
 }
 
@@ -390,6 +542,8 @@ editorModelUsage: { [editor: string]: ModelUsage };
 exactCopilotCostDollars: number;
 /** Model usage for Copilot-surface sessions that do NOT have exact nanoAiu billing data (used as fallback for Copilot cost estimate). Non-Copilot surfaces (Claude Code, Gemini CLI, …) are excluded — they bill their own provider. */
 modelUsageNoExact: ModelUsage;
+/** Number of sessions in this period with 1+ sub-agent tool calls (`SessionFileCache.subAgentCalls`). */
+subAgentSessions: number;
 }
 
 /** Result returned by `aggregatePeriodStats`. */
@@ -417,6 +571,7 @@ editorUsage: {},
 editorModelUsage: {},
 exactCopilotCostDollars: 0,
 modelUsageNoExact: {},
+subAgentSessions: 0,
 };
 }
 
@@ -441,9 +596,36 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 	if (!entry.repositoryUsage[repository]) { entry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
 	entry.repositoryUsage[repository].tokens += tokens; entry.repositoryUsage[repository].sessions += 1;
 	addModelUsage(entry.modelUsage, modelUsage);
+	for (const model of Object.keys(modelUsage)) {
+		// addModelUsage skips unsafe keys, so they have no entry here — see protoGuard.ts.
+		if (isUnsafeObjectKey(model)) { continue; }
+		if (!entry.modelUsage[model].sessions) { entry.modelUsage[model].sessions = 0; }
+		entry.modelUsage[model].sessions += 1;
+	}
 	if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 	if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 	addModelUsage(entry.editorModelUsage[editorType], modelUsage);
+	for (const model of Object.keys(modelUsage)) {
+		if (isUnsafeObjectKey(model)) { continue; }
+		if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
+		entry.editorModelUsage[editorType][model].sessions += 1;
+	}
+}
+
+/**
+ * Drops models served by a user-configured custom endpoint (BYOK) from a model-usage map.
+ * Those requests go straight to the user's own endpoint with their own key, so they are
+ * billed by that provider and must stay out of the GitHub Copilot cost estimate — they are
+ * reported under their own provider group instead.
+ */
+function withoutCustomEndpointModels(modelUsage: ModelUsage): ModelUsage {
+	const entries = Object.entries(modelUsage);
+	if (!entries.some(([model]) => getCustomProviderGroup(model))) { return modelUsage; }
+	const filtered: ModelUsage = {};
+	for (const [model, usage] of entries) {
+		if (!getCustomProviderGroup(model)) { filtered[model] = usage; }
+	}
+	return filtered;
 }
 
 function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: number, actual: number, thinking: number, cached: number, interactions: number, countSession: boolean, editorType: string, modelUsage: ModelUsage, copilotExactCostDollars?: number): void {
@@ -460,7 +642,7 @@ function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: num
 		// Only Copilot surfaces feed the Copilot cost-estimate fallback; sessions from
 		// other tools (Claude Code, Gemini CLI, …) bill their own provider and would
 		// otherwise inflate the estimated GitHub Copilot spend.
-		addModelUsage(acc.modelUsageNoExact, modelUsage);
+		addModelUsage(acc.modelUsageNoExact, withoutCustomEndpointModels(modelUsage));
 	}
 }
 
@@ -490,6 +672,18 @@ function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLas
 	}
 }
 
+/** Flags tracking which periods a session has already been counted into (rollup path), or should be counted into (fallback path). */
+type SubAgentPeriodFlags = { today: boolean; month: boolean; lastMonth: boolean; last30Days: boolean };
+
+/** Counts a session with sub-agent tool calls once into each period accumulator it participated in. */
+function bumpSubAgentSessions(sessionData: SessionFileCache, acc: PeriodAccumulators, flags: SubAgentPeriodFlags): void {
+	if ((sessionData.subAgentCalls ?? 0) <= 0) { return; }
+	if (flags.today) { acc.todayStats.subAgentSessions += 1; }
+	if (flags.month) { acc.monthStats.subAgentSessions += 1; }
+	if (flags.lastMonth) { acc.lastMonthStats.subAgentSessions += 1; }
+	if (flags.last30Days) { acc.last30DaysStats.subAgentSessions += 1; }
+}
+
 function processRollupPath(input: SessionAggregateInput, acc: PeriodAccumulators, dates: UtcDateRanges, dailyStatsMap: Map<string, DailyTokenStats>): boolean {
 	const { editorType, sessionData } = input;
 	const repository = sessionData.repository || 'Unknown';
@@ -502,7 +696,14 @@ function processRollupPath(input: SessionAggregateInput, acc: PeriodAccumulators
 		const locDay = dayKeys.filter(k => k >= dates.last30DaysUtcStartKey).pop();
 		if (locDay) { const locEntry = dailyStatsMap.get(locDay); if (locEntry) { attributeLocToDay(locEntry, sessionData, editorType, repository); } }
 	}
+	bumpSubAgentSessions(sessionData, acc, { today: flags.addedToToday, month: flags.addedToMonth, lastMonth: flags.addedToLastMonth, last30Days: flags.addedToLast30Days });
 	return !flags.addedToLast30Days && !flags.addedToLastMonth;
+}
+
+/** Computes sub-agent period flags for the fallback path, which attributes the whole session to its last-activity day. */
+function subAgentFlagsForFallback(lastActivityUtcKey: string, dates: UtcDateRanges, inLast30Days: boolean, inLastMonth: boolean): SubAgentPeriodFlags {
+	const inMonth = lastActivityUtcKey >= dates.monthUtcStartKey;
+	return { today: lastActivityUtcKey === dates.todayUtcKey, month: inMonth, lastMonth: !inMonth && inLastMonth, last30Days: inLast30Days };
 }
 
 function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulators, dates: UtcDateRanges, dailyStatsMap: Map<string, DailyTokenStats>): boolean {
@@ -532,6 +733,8 @@ function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulato
 	} else if (inLastMonth) {
 		accumulatePeriod(acc.lastMonthStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage, sessionData.copilotExactCostDollars);
 	}
+	// Fallback path attributes the whole session to its last-activity day; mirror that for the sub-agent counter.
+	bumpSubAgentSessions(sessionData, acc, subAgentFlagsForFallback(lastActivityUtcKey, dates, inLast30Days, inLastMonth));
 	return false;
 }
 

@@ -1,9 +1,34 @@
 {
-  "name": "@rajbos/copilot-sharing-server",
+  "name": "@rajbos/ai-engineering-fluency-sharing-server",
   "version": "0.1.0",
-  "description": "Self-hosted sharing server for GitHub Copilot Token Tracker — accepts daily usage uploads from VS Code via GitHub OAuth tokens",
+  "description": "Self-hosted sharing server for AI Engineering Fluency — accepts daily usage uploads from VS Code via GitHub OAuth tokens",
   "license": "MIT",
   "author": "RobBos",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./db": {
+      "types": "./lib/db.d.ts",
+      "default": "./lib/db.js"
+    },
+    "./auth": {
+      "types": "./lib/auth.d.ts",
+      "default": "./lib/auth.js"
+    },
+    "./session": {
+      "types": "./lib/session.d.ts",
+      "default": "./lib/session.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "README.md"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rajbos/ai-engineering-fluency.git",
@@ -12,6 +37,8 @@
   "scripts": {
     "build": "node esbuild.js",
     "build:production": "node esbuild.js --production",
+    "build:lib": "tsc -p tsconfig.lib.json",
+    "prepack": "npm run build:lib",
     "start": "node --env-file=.env dist/server.js",
     "dev": "node --env-file=.env --watch dist/server.js",
     "serve": "node esbuild.js && node --env-file=.env --watch dist/server.js",
@@ -21,13 +48,21 @@
     "test": "node esbuild.tests.js && node --test \"out/test/*.test.js\""
   },
   "dependencies": {
-    "@hono/node-server": "^2.0.8",
-    "hono": "^4.12.30"
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.5"
+  },
+  "peerDependencies": {
+    "chart.js": "^4.4.7"
+  },
+  "peerDependenciesMeta": {
+    "chart.js": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.4.0",
     "chart.js": "^4.4.7",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "typescript": "^5.8.0"
   },
   "engines": {

@@ -37,6 +37,14 @@ export interface IEcosystemAdapter {
 	 */
 	getDisplayNameForDiscoveredPath?(sessionFile: string): string | undefined;
 	/**
+	 * Returns the workspace directory path for a session file that this adapter
+	 * *discovered* but does not *handle* (handles() returns false). Return
+	 * undefined when no workspace is known. Lets adapters like CopilotCli supply
+	 * cwd metadata for events.jsonl files that are parsed by the generic JSONL
+	 * path, instead of forcing handles() to claim them.
+	 */
+	getWorkspacePathForDiscoveredPath?(sessionFile: string): Promise<string | undefined>;
+	/**
 	 * When true, backend sync is skipped for sessions handled by this adapter
 	 * (e.g. Visual Studio binary MessagePack sessions cannot be synced).
 	 */
@@ -68,12 +76,15 @@ export interface IEcosystemAdapter {
 	/**
 	 * Extract session metadata.
 	 * workspacePath is the raw cwd / workspace directory path if known by this ecosystem.
+	 * repository is the authoritative repository identifier (e.g. "owner/repo") when the
+	 * ecosystem records it directly, preferred over deriving a name from workspacePath.
 	 */
 	getMeta(sessionFile: string): Promise<{
 		title: string | undefined;
 		firstInteraction: string | null;
 		lastInteraction: string | null;
 		workspacePath?: string;
+		repository?: string;
 	}>;
 
 	/**
