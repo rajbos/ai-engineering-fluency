@@ -314,10 +314,11 @@ Some dependencies (like `@vscode/webview-ui-toolkit`) declare peer dependencies 
 
 ### Project Structure
 
-- **All extension logic** is in `src/extension.ts` in the `CopilotTokenTracker` class
-- **Data files** are in JSON format: `tokenEstimators.json`, `modelPricing.json`, `toolNames.json`
-- **Webview code** is in `src/webview/` organized by feature
-- **See `src/README.md`** for detailed guidance on updating JSON data files
+- **All extension logic** is in `vscode-extension/src/extension.ts` in the `CopilotTokenTracker` class
+- **Shared code** (session parsing, token estimation, adapters) lives in the repo-root `src/` folder and is consumed by both the VS Code extension and the CLI
+- **Data files** are in JSON format in the repo-root `src/` folder: `tokenEstimators.json`, `modelPricing.json`, `toolNames.json`
+- **Webview code** is in `vscode-extension/src/webview/` organized by feature
+- **See the repo-root `src/README.md`** for detailed guidance on updating JSON data files
 
 ### Development Principles
 

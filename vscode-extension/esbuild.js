@@ -37,7 +37,15 @@ async function main() {
 		platform: 'node',
 		outfile: 'dist/extension.js',
 		external: ['vscode'],
+		// Shared sources in <repo>/src sit outside this package, so make sure
+		// bare imports still resolve against this project's node_modules.
+		nodePaths: [path.join(__dirname, 'node_modules')],
 		logLevel: 'silent',
+		// Polyfill import.meta.url so ESM packages that use createRequire(import.meta.url)
+		// work correctly when bundled as CJS (esbuild otherwise sets import.meta to {}).
+		// The banner defines a __importMetaUrl variable; define wires import.meta.url to it.
+		banner: { js: 'var __importMetaUrl = require("url").pathToFileURL(__filename).href;' },
+		define: { 'import.meta.url': '__importMetaUrl' },
 		plugins: [esbuildProblemMatcherPlugin],
 	});
 
@@ -51,7 +59,10 @@ async function main() {
 			logviewer: 'src/webview/logviewer/main.ts',
 			maturity: 'src/webview/maturity/main.ts',
 			dashboard: 'src/webview/dashboard/main.ts',
-			'fluency-level-viewer': 'src/webview/fluency-level-viewer/main.ts',				environmental: 'src/webview/environmental/main.ts',		},
+			'fluency-level-viewer': 'src/webview/fluency-level-viewer/main.ts',
+			environmental: 'src/webview/environmental/main.ts',
+			efficiency: 'src/webview/efficiency/main.ts',
+		},
 		bundle: true,
 		format: 'iife',
 		minify: production,
@@ -61,6 +72,7 @@ async function main() {
 		outdir: 'dist/webview',
 		entryNames: '[name]',
 		external: ['vscode'],
+		nodePaths: [path.join(__dirname, 'node_modules')],
 		logLevel: 'silent',
 		plugins: [esbuildProblemMatcherPlugin],
 		loader: { '.css': 'text' },
@@ -74,15 +86,32 @@ async function main() {
 		await webviewCtx.dispose();
 	}
 
-	// Copy JSON config files to dist/webview/ so the VS extension can read them as runtime sidecars
+	// Copy JSON config files to dist/webview/ so the VS extension can read them as runtime sidecars.
+	// These live in the shared <repo>/src folder.
 	const jsonConfigFiles = ['tokenEstimators.json', 'modelPricing.json', 'toolNames.json', 'automaticTools.json'];
 	const webviewDistDir = path.join(__dirname, 'dist', 'webview');
 	fs.mkdirSync(webviewDistDir, { recursive: true });
 	for (const file of jsonConfigFiles) {
-		const jsonSrc = path.join(__dirname, 'src', file);
+		const jsonSrc = path.join(__dirname, '..', 'src', file);
 		const jsonDst = path.join(webviewDistDir, file);
 		if (fs.existsSync(jsonSrc)) {
 			fs.copyFileSync(jsonSrc, jsonDst);
+		}
+	}
+
+	// Copy the codicon font (icon font VS Code itself uses) into dist/webview/codicons/ so
+	// webview panels can load it via webview.asWebviewUri() and render `.codicon-*` icons.
+	// Placed under dist/webview because most panels restrict localResourceRoots to that folder.
+	const codiconsSrcDir = path.join(__dirname, 'node_modules', '@vscode', 'codicons', 'dist');
+	const codiconsDstDir = path.join(webviewDistDir, 'codicons');
+	if (fs.existsSync(codiconsSrcDir)) {
+		fs.mkdirSync(codiconsDstDir, { recursive: true });
+		for (const file of ['codicon.css', 'codicon.ttf']) {
+			const codiconSrc = path.join(codiconsSrcDir, file);
+			const codiconDst = path.join(codiconsDstDir, file);
+			if (fs.existsSync(codiconSrc)) {
+				fs.copyFileSync(codiconSrc, codiconDst);
+			}
 		}
 	}
 
@@ -94,16 +123,13 @@ async function main() {
 		fs.copyFileSync(wasmSrc, wasmDst);
 	}
 
-	// Copy VS Code Webview UI Toolkit to dist/ for webview usage
+	// Copy vscode-elements bundle to dist/ for webview usage (configPanel loads it at runtime via URI)
 	const toolkitDir = path.join(__dirname, 'dist', 'toolkit');
 	if (!fs.existsSync(toolkitDir)) {
 		fs.mkdirSync(toolkitDir, { recursive: true });
 	}
-	const toolkitSrc = path.join(__dirname, 'node_modules', '@vscode', 'webview-ui-toolkit', 'dist');
-	// Use minified version in production, regular version in development
-	const toolkitFile = production ? 'toolkit.min.js' : 'toolkit.js';
-	const src = path.join(toolkitSrc, toolkitFile);
-	const dst = path.join(toolkitDir, 'toolkit.js'); // Always name it toolkit.js for consistent loading
+	const src = path.join(__dirname, 'node_modules', '@vscode-elements', 'elements', 'dist', 'bundled.js');
+	const dst = path.join(toolkitDir, 'toolkit.js');
 	if (fs.existsSync(src)) {
 		fs.copyFileSync(src, dst);
 	}

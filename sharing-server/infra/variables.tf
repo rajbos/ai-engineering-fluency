@@ -3,12 +3,6 @@ variable "resource_group_name" {
   type        = string
 }
 
-variable "location" {
-  description = "Azure region (e.g. westeurope)"
-  type        = string
-  default     = "westeurope"
-}
-
 variable "app_name" {
   description = "Container app name — sharing-server-prod (main) or sharing-test-<slug> (branch)"
   type        = string

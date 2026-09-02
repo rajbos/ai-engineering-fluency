@@ -12,7 +12,7 @@ import {
 	calculateUsageAnalysisStats,
 	buildCustomizationMatrix,
 } from '../helpers';
-import { calculateMaturityScores } from '../../../vscode-extension/src/maturityScoring';
+import { calculateMaturityScores } from '../../../src/maturityScoring';
 import { shouldOutputJson } from '../commandUtils';
 import {
 	createEmptyDetailsPayload,
@@ -23,6 +23,15 @@ import {
 	createUsageAnalysisPayload,
 	createFluencyPayload,
 } from './payloads';
+import {
+	createEmptyCurationPayload,
+	createCurationPayload,
+} from './curation';
+import {
+	buildMcpEntriesFromJson,
+	discoverSkillEntries,
+	analyzeToolCuration,
+} from '../../../src/toolCuration';
 
 export const allCommand = new Command('all')
 	.description('Output all view data in a single JSON response (for Visual Studio extension)')
@@ -42,6 +51,7 @@ export const allCommand = new Command('all')
 				chart:   createEmptyChartPayload(now),
 				usage:   createEmptyUsageAnalysisPayload(now),
 				fluency: createEmptyFluencyPayload(),
+				curation: createEmptyCurationPayload(),
 			};
 			process.stdout.write(JSON.stringify(empty));
 			return;
@@ -74,11 +84,21 @@ export const allCommand = new Command('all')
 		);
 		const fluencyPayload = createFluencyPayload(scores);
 
+		// Build curation payload — uses mcp.json + skills from cwd (no vscode.lm.tools in CLI).
+		const cwd = process.cwd();
+		const mcpEntries = buildMcpEntriesFromJson([cwd]);
+		const skillEntries = discoverSkillEntries([cwd]);
+		const availableTools = [...mcpEntries, ...skillEntries];
+		const curationPayload = availableTools.length > 0
+			? createCurationPayload(analyzeToolCuration(availableTools, usageStats.last30Days, 30))
+			: createEmptyCurationPayload();
+
 		const payload = {
 			details: detailsPayload,
 			chart:   chartPayload,
 			usage:   usagePayload,
 			fluency: fluencyPayload,
+			curation: curationPayload,
 		};
 
 		process.stdout.write(JSON.stringify(payload));

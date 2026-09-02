@@ -4,13 +4,15 @@ import * as path from 'path';
 
 import {
 	fileUriToPath,
+	getRepoNameFromWorkspacePath,
 	hasWindowsDriveSegment,
 	normalizePath,
 	normalizePathForDedup,
+	normalizeToRepoRoot,
 	splitNormalizedPath,
 	stripWindowsDriveUriPrefix,
 	toPlatformPath
-} from '../../src/utils/pathUtils';
+} from '../../../src/utils/pathUtils';
 
 // normalizePath tests
 test('normalizePath: converts backslashes to forward slashes', () => {
@@ -116,3 +118,129 @@ test('hasWindowsDriveSegment: on win32 returns false for non-drive segment', () 
 test('hasWindowsDriveSegment: on win32 returns false for undefined segment', () => {
 	assert.equal(hasWindowsDriveSegment(undefined, 'win32'), false);
 });
+
+// normalizeToRepoRoot - strips agent-worktree segments up to the repo root
+test('normalizeToRepoRoot: strips Windows .claude/worktrees segment', () => {
+	assert.equal(
+		normalizeToRepoRoot('C:\\Users\\me\\repos\\proj\\.claude\\worktrees\\feature-x'),
+		'C:\\Users\\me\\repos\\proj'
+	);
+});
+
+test('normalizeToRepoRoot: strips POSIX .claude/worktrees segment', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/proj/.claude/worktrees/feature-x'),
+		'/home/me/repos/proj'
+	);
+});
+
+test('normalizeToRepoRoot: strips copilot-worktrees segment', () => {
+	assert.equal(
+		normalizeToRepoRoot('C:\\Users\\me\\repos\\proj\\copilot-worktrees\\session-123'),
+		'C:\\Users\\me\\repos\\proj'
+	);
+});
+
+test('normalizeToRepoRoot: strips trailing sub-path below the worktree name', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/proj/.claude/worktrees/feature-x/src/app'),
+		'/home/me/repos/proj'
+	);
+});
+
+test('normalizeToRepoRoot: is case-insensitive for the marker segments', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/proj/Copilot-Worktrees/session-123'),
+		'/home/me/repos/proj'
+	);
+});
+
+test('normalizeToRepoRoot: returns a plain repo path unchanged', () => {
+	assert.equal(
+		normalizeToRepoRoot('C:\\Users\\me\\repos\\proj'),
+		'C:\\Users\\me\\repos\\proj'
+	);
+});
+
+test('normalizeToRepoRoot: does not strip when the marker has no leading repo prefix', () => {
+	assert.equal(normalizeToRepoRoot('copilot-worktrees/session-123'), 'copilot-worktrees/session-123');
+});
+
+test('normalizeToRepoRoot: ignores an unrelated "worktrees" folder without the .claude parent', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/proj/worktrees/foo'),
+		'/home/me/repos/proj/worktrees/foo'
+	);
+});
+
+test('normalizeToRepoRoot: strips Copilot App "<repo>.worktrees" sibling folder (Windows)', () => {
+	assert.equal(
+		normalizeToRepoRoot('C:\\Users\\me\\repos\\rajbos\\proj.worktrees\\copilot-worktree-2026-02-07T20-38-48'),
+		'C:\\Users\\me\\repos\\rajbos\\proj'
+	);
+});
+
+test('normalizeToRepoRoot: strips Copilot App "<repo>.worktrees" sibling folder (POSIX)', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/rajbos/proj.worktrees/copilot-worktree-2026-02-07T20-38-48'),
+		'/home/me/repos/rajbos/proj'
+	);
+});
+
+test('normalizeToRepoRoot: strips trailing sub-path below a "<repo>.worktrees" worktree name', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/rajbos/proj.worktrees/copilot-worktree-abc/src/app'),
+		'/home/me/repos/rajbos/proj'
+	);
+});
+
+// getRepoNameFromWorkspacePath tests
+test('getRepoNameFromWorkspacePath: app-store worktree resolves to the repo folder, not the worktree name', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('C:\\Users\\me\\.copilot\\copilot-worktrees\\ai-engineering-fluency\\rajbos-supreme-carnival'),
+		'ai-engineering-fluency'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: app-store worktree with an owner sub-segment', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('C:\\Users\\me\\.copilot\\copilot-worktrees\\authority-contribution-scraper\\rajbos\\huskiest-oleta'),
+		'authority-contribution-scraper'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: app-store worktree with a posix path', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('/home/me/.copilot/copilot-worktrees/github-copilot-token-usage/rajbos-covetable-youlanda'),
+		'github-copilot-token-usage'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: user-repo copilot-worktrees layout resolves to the repo before the marker', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('C:\\Users\\me\\repos\\proj\\copilot-worktrees\\session-123'),
+		'proj'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: claude worktree layout resolves to the repo before the marker', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('/home/me/repos/proj/.claude/worktrees/feature-x'),
+		'proj'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: plain repo path returns its basename', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('C:\\Users\\me\\repos\\my-repo'),
+		'my-repo'
+	);
+});
+
+test('getRepoNameFromWorkspacePath: Copilot App "<repo>.worktrees" layout resolves to the repo, not the worktree name', () => {
+	assert.equal(
+		getRepoNameFromWorkspacePath('C:\\Users\\me\\repos\\rajbos\\proj.worktrees\\copilot-worktree-2026-02-07T20-38-48'),
+		'proj'
+	);
+});
+

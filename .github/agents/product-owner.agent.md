@@ -47,10 +47,10 @@ Explore the repository thoroughly before forming opinions. Cover at minimum:
 - Check `cli/src/` to understand how the CLI reuses and diverges from the extension
 - Note: the `vscode-extension/src/extension.ts` is large. Look for God-class symptoms — methods that should be their own module
 - Scan for `TODO`, `FIXME`, `HACK`, and `@ts-ignore` / `any` uses as debt signals
-- Check `vscode-extension/src/README.md` and `docs/FLUENCY-LEVELS.md` for documented design decisions
+- Check `src/README.md` and `docs/FLUENCY-LEVELS.md` for documented design decisions
 
 ### Test Coverage
-- Look at `vscode-extension/src/test/` — understand what is covered and what is absent
+- Look at `vscode-extension/test/` — understand what is covered and what is absent
 - Identify the most complex or critical logic that lacks tests
 - Coverage should be "reasonable" — prioritise behaviour that is load-bearing or hard to debug, not trivially simple code
 

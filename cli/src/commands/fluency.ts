@@ -5,7 +5,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { discoverSessionFiles, calculateUsageAnalysisStats, fmt, buildCustomizationMatrix } from '../helpers';
 import { ProgressTracker } from '../progress';
-import { calculateMaturityScores } from '../../../vscode-extension/src/maturityScoring';
+import { calculateMaturityScores } from '../../../src/maturityScoring';
 import { shouldOutputJson } from '../commandUtils';
 import { createFluencyPayload } from './payloads';
 
@@ -117,7 +117,7 @@ export const fluencyCommand = new Command('fluency')
 		console.log(chalk.dim('─'.repeat(55)));
 		console.log(`  Sessions analyzed:       ${chalk.bold(fmt(p.sessions))}`);
 
-		const totalInteractions = p.modeUsage.ask + p.modeUsage.edit + p.modeUsage.agent + p.modeUsage.cli;
+		const totalInteractions = p.modeUsage.ask + p.modeUsage.edit + p.modeUsage.agent + p.modeUsage.cli + (p.modeUsage.cliApp ?? 0);
 		console.log(`  Total interactions:      ${chalk.bold(fmt(totalInteractions))}`);
 
 		if (p.modeUsage.ask > 0) {
@@ -131,6 +131,9 @@ export const fluencyCommand = new Command('fluency')
 		}
 		if (p.modeUsage.cli > 0) {
 			console.log(`    CLI:                   ${fmt(p.modeUsage.cli)}`);
+		}
+		if ((p.modeUsage.cliApp ?? 0) > 0) {
+			console.log(`    Copilot App (CLI):     ${fmt(p.modeUsage.cliApp!)}`);
 		}
 		if (p.toolCalls.total > 0) {
 			console.log(`  Tool calls:              ${fmt(p.toolCalls.total)}`);

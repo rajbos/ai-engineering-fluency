@@ -1,6 +1,6 @@
-# Copilot Token Usage — Sharing Server
+# AI Engineering Fluency — Sharing Server
 
-A self-hosted API server + web dashboard that makes sharing Copilot token usage data
+A self-hosted API server + web dashboard that makes sharing AI Engineering Fluency data
 across a team dramatically easier. No Azure account required — anyone with Docker can
 host it in minutes.
 
@@ -27,7 +27,7 @@ no new consent required.
 
 1. Go to **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**
 2. Fill in:
-   - **Application name**: `Copilot Token Tracker`
+   - **Application name**: `AI Engineering Fluency`
    - **Homepage URL**: `https://your-server.example.com`
    - **Authorization callback URL**: `https://your-server.example.com/auth/github/callback`
 3. Copy the **Client ID** and generate a **Client Secret**
@@ -83,7 +83,7 @@ In VS Code settings (JSON):
 }
 ```
 
-Or search for **Copilot Token Tracker: Backend** in the Settings UI and fill in the fields.
+Or search for **AI Engineering Fluency: Backend** in the Settings UI and fill in the fields.
 
 That's it. The extension will start uploading data automatically. No authentication
 prompt — it reuses your existing GitHub session.
@@ -216,6 +216,72 @@ uploads are safe and idempotent.
 |---|---|
 | Per IP (all requests) | 200 requests / minute |
 | Per user (uploads) | 100 upload requests / hour |
+
+## Extending this server
+
+This server is also published as a library so you can build a customised server on top of
+it without forking. Import `createApp` and `startServer`, mount your own routes and
+register your own tables:
+
+```ts
+import {
+	createApp,
+	startServer,
+	registerSchemaExtension,
+	requireBearerAuth,
+	getDb,
+} from '@rajbos/ai-engineering-fluency-sharing-server';
+import { Hono } from 'hono';
+
+// Runs before the first getDb(), so the table exists at startup.
+registerSchemaExtension('my-metrics', (db) => {
+	db.exec(`CREATE TABLE IF NOT EXISTS my_metrics (
+		id           INTEGER PRIMARY KEY,
+		user_id      INTEGER NOT NULL REFERENCES users(id),
+		dataset_id   TEXT NOT NULL DEFAULT 'default',
+		day          TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		machine_id   TEXT NOT NULL,
+		metrics_json TEXT NOT NULL,
+		UNIQUE(user_id, dataset_id, day, workspace_id, machine_id)
+	)`);
+});
+
+const routes = new Hono();
+routes.post('/upload', requireBearerAuth, async (c) => {
+	const user = c.get('user');
+	// … store rows for user.id …
+	return c.json({ ok: true });
+});
+
+const app = createApp({
+	healthExtra: () => ({ edition: 'my-company' }),
+	extend: (a) => a.route('/api/mine', routes),
+});
+
+await startServer(app);
+```
+
+### Extension points
+
+| Export | Purpose |
+|---|---|
+| `createApp({ extend })` | Register routes **before** the built-in ones. Because Hono matches in registration order, this also lets you override a built-in path. |
+| `createApp({ healthExtra })` | Merge extra fields into `/health`. |
+| `createApp({ mountApi, mountDashboard })` | Opt out of the built-in route groups. |
+| `registerSchemaExtension(name, fn)` | Add tables/indexes/migrations. Call before the first `getDb()`. |
+| `requireBearerAuth` | Authenticate with the same GitHub token as `/api/upload`, so your rows share the same `user_id`. |
+| `startServer(app, opts)` | Backup/restore, DB init with retry, periodic backup, graceful shutdown. |
+
+### Guidance
+
+- **Add tables, don't widen `usage_uploads`.** Keeping downstream tables separate means
+  core migrations and your migrations never conflict.
+- **Join on `(user_id, dataset_id, day, workspace_id, machine_id)`** — the natural rollup
+  key — and use a `LEFT JOIN`, since upload ordering between clients is not guaranteed.
+- **Upsert on that key** so a re-upload of the same day replaces rather than duplicates.
+- **Reuse `requireBearerAuth`.** A separate auth scheme would produce a different
+  `user_id` and make the two datasets impossible to join.
 
 ## Security
 

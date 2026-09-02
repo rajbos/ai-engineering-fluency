@@ -12,7 +12,7 @@ import {
 	isConflictError,
 	isRetryableError,
 	isNetworkError
-} from '../../src/utils/azureErrorClassifier';
+} from '../../../src/utils/azureErrorClassifier';
 
 // Test HTTP_STATUS constants
 test('HTTP_STATUS constants have correct values', () => {

@@ -6,7 +6,7 @@ import chalk from 'chalk';
 import * as path from 'path';
 import { discoverSessionFiles, getDiagnosticPaths, processSessionFile, effectiveTokens, fmt, formatTokens } from '../helpers';
 import { ProgressTracker } from '../progress';
-import { normalizePathSeparators } from '../../../vscode-extension/src/workspaceHelpers';
+import { normalizePathSeparators } from '../../../src/workspaceHelpers';
 
 interface LocationStats {
 	label: string;

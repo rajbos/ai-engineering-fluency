@@ -1,0 +1,575 @@
+/**
+ * CopilotCliStoreAccess — reads session metadata from ~/.copilot/session-store.db.
+ *
+ * The Copilot CLI persists all sessions (both worktree-backed and chat-only) in a
+ * central SQLite database at ~/.copilot/session-store.db. Worktree sessions also
+ * produce an events.jsonl file under ~/.copilot/session-state/<uuid>/; chat-only
+ * sessions (started without any project open, repository IS NULL) exist only in
+ * the database.
+ *
+ * Virtual path scheme: <absolute-path-to-db>#<session-uuid>
+ * Example (Windows): C:\Users\alice\.copilot\session-store.db#3ee22c56-...
+ * Example (Unix):    /home/alice/.copilot/session-store.db#3ee22c56-...
+ *
+ * The '#' character acts as a separator identical to the pattern used by Crush
+ * (crush.db#<uuid>) and OpenCode (opencode.db#ses_<id>).
+ */
+/// <reference types="sql.js" />
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import initSqlJs from 'sql.js';
+import type { ModelUsage } from './types';
+import { toLocalDayKey } from './utils/dayKeys';
+import { isUnsafeObjectKey } from './utils/protoGuard';
+
+// Access SqlJsStatic and Database via the globally declared initSqlJs namespace
+// (made available by the /// <reference types="sql.js" /> directive above).
+type SqlJsStatic = initSqlJs.SqlJsStatic;
+type SqlDatabase = initSqlJs.Database;
+type SqlValue = initSqlJs.SqlValue;
+
+export interface CliStoreSession {
+	id: string;
+	cwd: string | null;
+	repository: string | null;
+	branch: string | null;
+	summary: string | null;
+	created_at: string | null;
+	updated_at: string | null;
+}
+
+/**
+ * Returns true when the session's cwd indicates it was created by Microsoft Scout.
+ * Scout stores sessions under Documents\Microsoft Scout (or Documents/Microsoft Scout).
+ */
+export function isMicrosoftScoutCwd(cwd: string | null | undefined): boolean {
+	if (!cwd) { return false; }
+	return cwd.replace(/\\/g, '/').toLowerCase().includes('/microsoft scout');
+}
+
+/**
+ * Returns true when a session's workspace.yaml `client_name` value indicates it was
+ * started via the Copilot desktop app (which wraps the CLI process), as opposed to the
+ * plain terminal CLI (`github/cli`) or an older session predating this field.
+ */
+export function isCopilotAppClientName(clientName: string | null | undefined): boolean {
+	return clientName === 'github/autopilot';
+}
+
+export interface CliStoreTurn {
+	session_id: string;
+	turn_index: number;
+	user_message: string | null;
+	assistant_response: string | null;
+	timestamp: string | null;
+}
+
+export function isCliStoreSession(obj: unknown): obj is CliStoreSession {
+	if (typeof obj !== 'object' || obj === null) { return false; }
+	const r = obj as Record<string, unknown>;
+	return typeof r['id'] === 'string'
+		&& (r['cwd'] === null || typeof r['cwd'] === 'string')
+		&& (r['repository'] === null || typeof r['repository'] === 'string')
+		&& (r['branch'] === null || typeof r['branch'] === 'string')
+		&& (r['summary'] === null || typeof r['summary'] === 'string')
+		&& (r['created_at'] === null || typeof r['created_at'] === 'string')
+		&& (r['updated_at'] === null || typeof r['updated_at'] === 'string');
+}
+
+export function isCliStoreTurn(obj: unknown): obj is CliStoreTurn {
+	if (typeof obj !== 'object' || obj === null) { return false; }
+	const r = obj as Record<string, unknown>;
+	return typeof r['session_id'] === 'string'
+		&& typeof r['turn_index'] === 'number'
+		&& (r['user_message'] === null || typeof r['user_message'] === 'string')
+		&& (r['assistant_response'] === null || typeof r['assistant_response'] === 'string')
+		&& (r['timestamp'] === null || typeof r['timestamp'] === 'string');
+}
+
+/** One parsed row from the `assistant_usage_events` billing table. */
+type UsageEventRow = {
+	model: string;
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	nanoAiu: number;
+};
+
+type CliStoreDbCacheEntry = { db: SqlDatabase; mtimeMs: number; size: number };
+type CliStoreSessionsCacheEntry = { mtimeMs: number; size: number; byId: Map<string, CliStoreSession> };
+type CliStoreTurnCountsCacheEntry = { mtimeMs: number; size: number; byId: Map<string, number> };
+
+export class CopilotCliStoreAccess {
+	private _sqlJsModule: SqlJsStatic | null = null;
+	private _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
+	private _initSqlJsFn: typeof initSqlJs;
+	private _dbCache: Map<string, CliStoreDbCacheEntry> = new Map();
+	private _dbCacheInflight: Map<string, Promise<SqlDatabase | null>> = new Map();
+	// Bulk-loaded caches keyed by dbPath, invalidated on the same mtime/size basis
+	// as _dbCache. Populated by a single query over ALL sessions/turns instead of
+	// one query per session — see getSessionsMap()/getTurnCountsMap() for why.
+	private _sessionsCache: Map<string, CliStoreSessionsCacheEntry> = new Map();
+	private _sessionsCacheInflight: Map<string, Promise<Map<string, CliStoreSession>>> = new Map();
+	private _turnCountsCache: Map<string, CliStoreTurnCountsCacheEntry> = new Map();
+	private _turnCountsCacheInflight: Map<string, Promise<Map<string, number>>> = new Map();
+
+	constructor(initSqlJsFn?: typeof initSqlJs) {
+		this._initSqlJsFn = initSqlJsFn ?? initSqlJs;
+	}
+
+	dispose(): void {
+		for (const entry of this._dbCache.values()) {
+			try { entry.db.close(); } catch { /* ignore */ }
+		}
+		this._dbCache.clear();
+		this._dbCacheInflight.clear();
+		this._sessionsCache.clear();
+		this._sessionsCacheInflight.clear();
+		this._turnCountsCache.clear();
+		this._turnCountsCacheInflight.clear();
+		this._sqlJsInitPromise = null;
+	}
+
+	private closeDb(db: SqlDatabase): void {
+		try { db.close(); } catch { /* ignore */ }
+	}
+
+	private isMissingFileError(error: unknown): boolean {
+		const code = (error as NodeJS.ErrnoException)?.code;
+		return code === 'ENOENT' || code === 'ENOTDIR';
+	}
+
+	private async statDb(dbPath: string): Promise<fs.Stats | null> {
+		try {
+			return await fs.promises.stat(dbPath);
+		} catch (error) {
+			if (this.isMissingFileError(error) && this._dbCache.has(dbPath)) {
+				this.closeDb(this._dbCache.get(dbPath)!.db);
+				this._dbCache.delete(dbPath);
+			}
+			return null;
+		}
+	}
+
+	private isCachedDbCurrent(dbPath: string, stats: fs.Stats): boolean {
+		const entry = this._dbCache.get(dbPath);
+		return !!entry && entry.mtimeMs === stats.mtimeMs && entry.size === stats.size;
+	}
+
+	private getDbCacheKey(dbPath: string, stats: fs.Stats): string {
+		return `${dbPath}:${stats.mtimeMs}:${stats.size}`;
+	}
+
+	private sameDbStats(left: fs.Stats, right: fs.Stats): boolean {
+		return left.mtimeMs === right.mtimeMs && left.size === right.size;
+	}
+
+	private async refreshDb(dbPath: string, stats: fs.Stats): Promise<SqlDatabase | null> {
+		let db: SqlDatabase;
+		try {
+			const SQL = await this.initSqlJs();
+			const buffer = await fs.promises.readFile(dbPath);
+			db = new SQL.Database(buffer);
+		} catch {
+			return this._dbCache.get(dbPath)?.db ?? null;
+		}
+
+		const currentStats = await this.statDb(dbPath);
+		if (!currentStats || !this.sameDbStats(stats, currentStats)) {
+			this.closeDb(db);
+			return this._dbCache.get(dbPath)?.db ?? null;
+		}
+
+		const existing = this._dbCache.get(dbPath);
+		if (existing) { this.closeDb(existing.db); }
+		this._dbCache.set(dbPath, { db, mtimeMs: stats.mtimeMs, size: stats.size });
+		return db;
+	}
+
+	/**
+	 * Returns a cached SQL.Database instance for the session-store.db path,
+	 * re-opening only when the file's mtime or size changes.
+	 *
+	 * Uses single-flight deduplication to prevent concurrent callers from each
+	 * re-reading the DB file and leaving instances unclosed.
+	 */
+	private async getDb(dbPath: string): Promise<SqlDatabase | null> {
+		const stats = await this.statDb(dbPath);
+		if (!stats) { return this._dbCache.get(dbPath)?.db ?? null; }
+
+		if (this.isCachedDbCurrent(dbPath, stats)) {
+			return this._dbCache.get(dbPath)!.db;
+		}
+
+		const cacheKey = this.getDbCacheKey(dbPath, stats);
+		const inflight = this._dbCacheInflight.get(cacheKey);
+		if (inflight) { return inflight; }
+
+		const createDbPromise = this.refreshDb(dbPath, stats);
+		this._dbCacheInflight.set(cacheKey, createDbPromise);
+		try {
+			return await createDbPromise;
+		} finally {
+			if (this._dbCacheInflight.get(cacheKey) === createDbPromise) {
+				this._dbCacheInflight.delete(cacheKey);
+			}
+		}
+	}
+
+	/** Absolute path to ~/.copilot/session-store.db. */
+	getDbPath(): string {
+		return path.join(os.homedir(), '.copilot', 'session-store.db');
+	}
+
+	/** Build a virtual session path for the given session UUID. */
+	virtualPath(sessionId: string): string {
+		return `${this.getDbPath()}#${sessionId}`;
+	}
+
+	/** Returns true if the path is a session-store virtual path. */
+	isCliStoreSession(filePath: string): boolean {
+		return filePath.includes('session-store.db#');
+	}
+
+	/** Extract the real DB file path from a virtual session path. */
+	getDbPathFromVirtual(virtualPath: string): string {
+		const idx = virtualPath.indexOf('session-store.db#');
+		if (idx === -1) { return virtualPath; }
+		return virtualPath.substring(0, idx + 'session-store.db'.length);
+	}
+
+	/** Extract the session UUID from a virtual session path. */
+	getSessionId(virtualPath: string): string | null {
+		const idx = virtualPath.indexOf('session-store.db#');
+		if (idx === -1) { return null; }
+		const id = virtualPath.substring(idx + 'session-store.db#'.length);
+		return id || null;
+	}
+
+	/**
+	 * Returns a cached id → session map for the whole DB, populated by a single
+	 * bulk query instead of one query per session.
+	 *
+	 * Why this matters: readSession()/stat()/countTurns() used to run a
+	 * `WHERE id = ?` (or `WHERE session_id = ?`) query per call. sql.js has no
+	 * index on these columns, so each lookup is a full table scan. Calling that
+	 * once per session while iterating N sessions (e.g. during diagnostics file
+	 * discovery/sorting) is O(N) scans of an O(N)-row table — O(N²) overall,
+	 * which is what made the Diagnostics screen feel "ages" slow once a user
+	 * accumulated a few thousand Copilot CLI chat sessions. One bulk query up
+	 * front turns this into O(N) total.
+	 */
+	private async getSessionsMap(dbPath: string): Promise<Map<string, CliStoreSession>> {
+		const stats = await this.statDb(dbPath);
+		if (!stats) { return this._sessionsCache.get(dbPath)?.byId ?? new Map(); }
+
+		const cached = this._sessionsCache.get(dbPath);
+		if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) {
+			return cached.byId;
+		}
+
+		const cacheKey = `${dbPath}:${stats.mtimeMs}:${stats.size}`;
+		const inflight = this._sessionsCacheInflight.get(cacheKey);
+		if (inflight) { return inflight; }
+
+		const loadPromise = (async () => {
+			const db = await this.getDb(dbPath);
+			const byId = new Map<string, CliStoreSession>();
+			if (db) {
+				try {
+					const result = db.exec('SELECT id, cwd, repository, branch, summary, created_at, updated_at FROM sessions');
+					if (result.length > 0) {
+						const cols = result[0].columns;
+						for (const row of result[0].values) {
+							const obj: Record<string, unknown> = {};
+							cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
+							if (isCliStoreSession(obj)) { byId.set(obj.id, obj); }
+						}
+					}
+				} catch { /* leave byId empty on query failure */ }
+			}
+			this._sessionsCache.set(dbPath, { mtimeMs: stats.mtimeMs, size: stats.size, byId });
+			return byId;
+		})();
+		this._sessionsCacheInflight.set(cacheKey, loadPromise);
+		try {
+			return await loadPromise;
+		} finally {
+			if (this._sessionsCacheInflight.get(cacheKey) === loadPromise) {
+				this._sessionsCacheInflight.delete(cacheKey);
+			}
+		}
+	}
+
+	/** Returns a cached session_id → turn count map for the whole DB, populated by a single GROUP BY query. */
+	private async getTurnCountsMap(dbPath: string): Promise<Map<string, number>> {
+		const stats = await this.statDb(dbPath);
+		if (!stats) { return this._turnCountsCache.get(dbPath)?.byId ?? new Map(); }
+
+		const cached = this._turnCountsCache.get(dbPath);
+		if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) {
+			return cached.byId;
+		}
+
+		const cacheKey = `${dbPath}:${stats.mtimeMs}:${stats.size}`;
+		const inflight = this._turnCountsCacheInflight.get(cacheKey);
+		if (inflight) { return inflight; }
+
+		const loadPromise = (async () => {
+			const db = await this.getDb(dbPath);
+			const byId = new Map<string, number>();
+			if (db) {
+				try {
+					const result = db.exec('SELECT session_id, COUNT(*) FROM turns GROUP BY session_id');
+					if (result.length > 0) {
+						for (const row of result[0].values) {
+							byId.set(row[0] as string, (row[1] as number) || 0);
+						}
+					}
+				} catch { /* leave byId empty on query failure */ }
+			}
+			this._turnCountsCache.set(dbPath, { mtimeMs: stats.mtimeMs, size: stats.size, byId });
+			return byId;
+		})();
+		this._turnCountsCacheInflight.set(cacheKey, loadPromise);
+		try {
+			return await loadPromise;
+		} finally {
+			if (this._turnCountsCacheInflight.get(cacheKey) === loadPromise) {
+				this._turnCountsCacheInflight.delete(cacheKey);
+			}
+		}
+	}
+
+	/**
+	 * Stat a virtual session-store.db session path.
+	 *
+	 * IMPORTANT: this must NOT simply return `fs.stat()` on the shared .db file —
+	 * every chat-only session would then report an identical, always-very-recent
+	 * mtime (whenever the DB was last touched by *any* session), making hundreds
+	 * of unrelated sessions look like the most recently modified files on disk.
+	 * That starved out every other editor from mtime-sorted/capped file lists
+	 * (e.g. the Diagnostics screen's session cache). Instead, use this session's
+	 * own `updated_at` column so each virtual session gets its real, distinct mtime.
+	 */
+	async stat(virtualPath: string): Promise<fs.Stats> {
+		const dbPath = this.getDbPathFromVirtual(virtualPath);
+		const sessionId = this.getSessionId(virtualPath);
+		const baseStats = await fs.promises.stat(dbPath);
+		const session = sessionId ? (await this.getSessionsMap(dbPath)).get(sessionId) : undefined;
+		const updatedAt = session?.updated_at ? new Date(session.updated_at) : null;
+		if (!updatedAt || Number.isNaN(updatedAt.getTime())) { return baseStats; }
+		Object.defineProperty(baseStats, 'mtime', { value: updatedAt, writable: false });
+		return baseStats;
+	}
+
+	/** Lazily initialise and cache the sql.js WASM module. */
+	async initSqlJs(): Promise<SqlJsStatic> {
+		if (this._sqlJsModule) { return this._sqlJsModule; }
+		if (!this._sqlJsInitPromise) {
+			this._sqlJsInitPromise = (async () => {
+				const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
+				let wasmBinary: Uint8Array | undefined;
+				try {
+					wasmBinary = await fs.promises.readFile(wasmPath);
+				} catch { /* WASM file not present — proceed without pre-loaded binary */ }
+				const module = await this._initSqlJsFn(wasmBinary ? { wasmBinary: wasmBinary.buffer as ArrayBuffer } : undefined);
+				this._sqlJsModule = module;
+				return module;
+			})().catch(err => {
+				this._sqlJsInitPromise = null;
+				throw err;
+			});
+		}
+		return this._sqlJsInitPromise;
+	}
+
+	/**
+	 * Discover all session IDs in the DB whose UUIDs are NOT in `knownUuids`.
+	 * These are sessions that exist only in the DB (no events.jsonl on disk).
+	 * Returned in descending updated_at order (most recent first).
+	 */
+	async discoverNewSessions(knownUuids: Set<string>): Promise<string[]> {
+		const dbPath = this.getDbPath();
+		const db = await this.getDb(dbPath);
+		if (!db) { return []; }
+		try {
+			const result = db.exec('SELECT id FROM sessions ORDER BY updated_at DESC');
+			if (result.length === 0) { return []; }
+			return result[0].values
+				.map(row => row[0] as string)
+				.filter(id => !knownUuids.has(id));
+		} catch {
+			return [];
+		}
+	}
+
+	/**
+	 * Discover all session IDs and their cwd values, excluding `knownUuids`.
+	 * Used to identify Microsoft Scout sessions at discovery time.
+	 */
+	async discoverNewSessionsWithCwd(knownUuids: Set<string>): Promise<{ id: string; cwd: string | null }[]> {
+		const dbPath = this.getDbPath();
+		const db = await this.getDb(dbPath);
+		if (!db) { return []; }
+		try {
+			const result = db.exec('SELECT id, cwd FROM sessions ORDER BY updated_at DESC');
+			if (result.length === 0) { return []; }
+			return result[0].values
+				.filter(row => !knownUuids.has(row[0] as string))
+				.map(row => ({ id: row[0] as string, cwd: (row[1] as string | null) ?? null }));
+		} catch {
+			return [];
+		}
+	}
+
+	/** Read session metadata for a virtual session path. Uses the bulk-loaded sessions map (see getSessionsMap()). */
+	async readSession(virtualPath: string): Promise<CliStoreSession | null> {
+		const dbPath = this.getDbPathFromVirtual(virtualPath);
+		const sessionId = this.getSessionId(virtualPath);
+		if (!sessionId) { return null; }
+		const byId = await this.getSessionsMap(dbPath);
+		return byId.get(sessionId) ?? null;
+	}
+
+	/** Read all turns for a session, ordered by turn_index. */
+	async getTurns(virtualPath: string): Promise<CliStoreTurn[]> {
+		const dbPath = this.getDbPathFromVirtual(virtualPath);
+		const sessionId = this.getSessionId(virtualPath);
+		if (!sessionId) { return []; }
+		const db = await this.getDb(dbPath);
+		if (!db) { return []; }
+		try {
+			const result = db.exec(
+				'SELECT session_id, turn_index, user_message, assistant_response, timestamp FROM turns WHERE session_id = ? ORDER BY turn_index ASC',
+				[sessionId],
+			);
+			if (result.length === 0) { return []; }
+			const cols = result[0].columns;
+			const turns: CliStoreTurn[] = [];
+			for (const row of result[0].values) {
+				const obj: Record<string, unknown> = {};
+				cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
+				if (isCliStoreTurn(obj)) {
+					turns.push(obj);
+				}
+			}
+			return turns;
+		} catch {
+			return [];
+		}
+	}
+
+	/** Count turns (user interactions) for a session. Uses the bulk-loaded turn-counts map (see getTurnCountsMap()). */
+	async countTurns(virtualPath: string): Promise<number> {
+		const dbPath = this.getDbPathFromVirtual(virtualPath);
+		const sessionId = this.getSessionId(virtualPath);
+		if (!sessionId) { return 0; }
+		const byId = await this.getTurnCountsMap(dbPath);
+		return byId.get(sessionId) ?? 0;
+	}
+
+	/**
+	 * Returns exact per-model token/cost usage from the `assistant_usage_events`
+	 * billing table for a session UUID. Returns null when the table is missing,
+	 * the session has no rows, or the DB cannot be read.
+	 *
+	 * `input_tokens` already includes cache-write creation tokens, matching the
+	 * `inputTokens` meaning used elsewhere. `cache_read_tokens` is tracked
+	 * separately and exposed as `cachedReadTokens`; `cache_write_tokens` is
+	 * exposed as `cacheCreationTokens`. `total_nano_aiu` is summed to
+	 * `nanoAiu` so callers can compute exact dollar cost.
+	 */
+	async getSessionUsage(sessionId: string): Promise<{ modelUsage: ModelUsage; actualTokens: number; cacheReadTokens: number; nanoAiu: number } | null> {
+		const dbPath = this.getDbPath();
+		const db = await this.getDb(dbPath);
+		if (!db) { return null; }
+		try {
+			const result = db.exec(
+				'SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_nano_aiu FROM assistant_usage_events WHERE session_id = ?',
+				[sessionId],
+			);
+			if (!result.length) { return null; }
+			return this.aggregateUsageEvents(result[0].columns, result[0].values);
+		} catch {
+			return null;
+		}
+	}
+
+	/** Parse one `assistant_usage_events` row into a typed record, defaulting non-numeric fields to 0. */
+	private parseUsageEventRow(cols: string[], row: SqlValue[]): UsageEventRow {
+		const obj: Record<string, unknown> = {};
+		cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
+		return {
+			model: typeof obj.model === 'string' ? obj.model : 'unknown',
+			inputTokens: typeof obj.input_tokens === 'number' ? obj.input_tokens : 0,
+			outputTokens: typeof obj.output_tokens === 'number' ? obj.output_tokens : 0,
+			cacheReadTokens: typeof obj.cache_read_tokens === 'number' ? obj.cache_read_tokens : 0,
+			cacheWriteTokens: typeof obj.cache_write_tokens === 'number' ? obj.cache_write_tokens : 0,
+			nanoAiu: typeof obj.total_nano_aiu === 'number' ? obj.total_nano_aiu : 0,
+		};
+	}
+
+	/** Merge a single usage event into the per-model accumulator (cache fields only when > 0). */
+	private addUsageEventToModelUsage(modelUsage: ModelUsage, event: UsageEventRow): void {
+		// Untrusted `model` string read from session-store.db rows — see protoGuard.ts.
+		if (isUnsafeObjectKey(event.model)) { return; }
+		if (!modelUsage[event.model]) { modelUsage[event.model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
+		const usage = modelUsage[event.model];
+		usage.inputTokens += event.inputTokens;
+		usage.outputTokens += event.outputTokens;
+		if (event.cacheReadTokens > 0) { usage.cachedReadTokens = (usage.cachedReadTokens ?? 0) + event.cacheReadTokens; }
+		if (event.cacheWriteTokens > 0) { usage.cacheCreationTokens = (usage.cacheCreationTokens ?? 0) + event.cacheWriteTokens; }
+	}
+
+	/** Aggregate billing rows into totals; null when every counter is zero (treated as "no billing data"). */
+	private aggregateUsageEvents(cols: string[], rows: SqlValue[][]): { modelUsage: ModelUsage; actualTokens: number; cacheReadTokens: number; nanoAiu: number } | null {
+		const modelUsage: ModelUsage = {};
+		let actualTokens = 0;
+		let cacheReadTokens = 0;
+		let nanoAiu = 0;
+		for (const row of rows) {
+			const event = this.parseUsageEventRow(cols, row);
+			this.addUsageEventToModelUsage(modelUsage, event);
+			actualTokens += event.inputTokens + event.outputTokens;
+			cacheReadTokens += event.cacheReadTokens;
+			nanoAiu += event.nanoAiu;
+		}
+		if (actualTokens === 0 && cacheReadTokens === 0 && nanoAiu === 0) { return null; }
+		return { modelUsage, actualTokens, cacheReadTokens, nanoAiu };
+	}
+
+	/**
+	 * Returns per-local-day fractions for accurate session attribution.
+	 * Uses turn timestamps when available; falls back to a single entry at
+	 * the session's updated_at date.
+	 */
+	async getDailyFractions(virtualPath: string): Promise<Record<string, number>> {
+		const turns = await this.getTurns(virtualPath);
+		const counts: Record<string, number> = {};
+		let total = 0;
+		for (const turn of turns) {
+			if (!turn.timestamp) { continue; }
+			try {
+				const dateKey = toLocalDayKey(new Date(turn.timestamp));
+				counts[dateKey] = (counts[dateKey] || 0) + 1;
+				total++;
+			} catch { /* skip malformed timestamp */ }
+		}
+		if (total === 0) {
+			// Fallback: use session updated_at
+			const session = await this.readSession(virtualPath);
+			const fallbackDate = session?.updated_at
+				? toLocalDayKey(new Date(session.updated_at))
+				: toLocalDayKey(new Date());
+			return { [fallbackDate]: 1.0 };
+		}
+		const fractions: Record<string, number> = {};
+		for (const [day, count] of Object.entries(counts)) {
+			fractions[day] = count / total;
+		}
+		return fractions;
+	}
+}

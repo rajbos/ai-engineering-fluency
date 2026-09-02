@@ -8,7 +8,7 @@ import { ResourceManagementClient } from '@azure/arm-resources';
 import { StorageManagementClient } from '@azure/arm-storage';
 import { SubscriptionClient } from '@azure/arm-resources-subscriptions';
 import { TableServiceClient } from '@azure/data-tables';
-import { safeStringifyError, isAzurePolicyDisallowedError, isStorageLocalAuthDisallowedByPolicyError } from '../../utils/errors';
+import { safeStringifyError, isAzurePolicyDisallowedError, isStorageLocalAuthDisallowedByPolicyError } from '../../../../src/utils/errors';
 import { getAzureTableStorageEndpoint } from '../../utils/azureEndpoints';
 import type { BackendAuthMode, BackendSettings } from '../settings';
 import { validateTeamAlias, type BackendUserIdentityMode } from '../identity';
@@ -202,11 +202,28 @@ export class AzureResourceService {
 		authMode: BackendAuthMode
 	): Promise<string | null> {
 		const storageMgmt = new StorageManagementClient(credential, subscriptionId);
+		const saNames = await this._listStorageAccountNames(storageMgmt, resourceGroup);
+
+		const saPick = await this._promptStorageAccountChoice(saNames);
+		if (!saPick) { return null; }
+		if (!saPick.createNew) { return saPick.label; }
+
+		const newAccount = await this._promptNewStorageAccountDetails(location);
+		if (!newAccount) { return null; }
+
+		return this._createStorageAccount(storageMgmt, resourceGroup, newAccount.name, newAccount.location, authMode, saNames);
+	}
+
+	private async _listStorageAccountNames(storageMgmt: StorageManagementClient, resourceGroup: string): Promise<string[]> {
 		const saNames: string[] = [];
 		for await (const sa of storageMgmt.storageAccounts.listByResourceGroup(resourceGroup)) {
 			if (sa.name) { saNames.push(sa.name); }
 		}
 		saNames.sort();
+		return saNames;
+	}
+
+	private async _promptStorageAccountChoice(saNames: string[]): Promise<{ createNew: boolean; label: string } | null> {
 		const saPick = await vscode.window.showQuickPick(
 			[
 				{ label: '$(add) Create new storage account…', description: '' },
@@ -215,8 +232,10 @@ export class AzureResourceService {
 			{ title: 'Step 6 of 7: Choose Storage Account' }
 		);
 		if (!saPick) { return null; }
-		if (!saPick.label.includes('Create new storage account')) { return saPick.label; }
+		return { createNew: saPick.label.includes('Create new storage account'), label: saPick.label };
+	}
 
+	private async _promptNewStorageAccountDetails(location: string): Promise<{ name: string; location: string } | null> {
 		const RESERVED_NAMES = ['microsoft', 'azure', 'windows', 'test', 'prod', 'admin'];
 		const name = await vscode.window.showInputBox({
 			title: 'Step 6 of 7: New Storage Account Name',
@@ -237,6 +256,17 @@ export class AzureResourceService {
 		);
 		if (!loc) { return null; }
 
+		return { name, location: loc };
+	}
+
+	private async _createStorageAccount(
+		storageMgmt: StorageManagementClient,
+		resourceGroup: string,
+		name: string,
+		loc: string,
+		authMode: BackendAuthMode,
+		saNames: string[]
+	): Promise<string | null> {
 		const createStorageAccountParams = {
 			location: loc,
 			sku: { name: 'Standard_LRS' },
@@ -410,7 +440,7 @@ export class AzureResourceService {
 		}
 	}
 
-	private async _saveConfigAndActivate(
+	private async _persistBackendConfig(
 		config: vscode.WorkspaceConfiguration,
 		subscriptionId: string,
 		rgResult: ResourceGroupResult,
@@ -433,8 +463,14 @@ export class AzureResourceService {
 		await config.update('backend.userIdentityMode', profile.userIdentityMode, vscode.ConfigurationTarget.Global);
 		await config.update('backend.authMode', authMode, vscode.ConfigurationTarget.Global);
 		await config.update('backend.enabled', true, vscode.ConfigurationTarget.Global);
+	}
 
-		const finalSettings = this.deps.getSettings();
+	/**
+	 * Verifies data-plane credentials and access. Returns false if activation should stop here
+	 * (either because no Storage Shared Key is set yet, or validation failed) — in both cases
+	 * the appropriate user-facing message and fallback side effects have already been handled.
+	 */
+	private async _activateDataPlaneAccess(finalSettings: BackendSettings): Promise<boolean> {
 		try {
 			const creds = await this.credentialService.getBackendDataPlaneCredentials(finalSettings);
 			if (!creds) {
@@ -443,33 +479,56 @@ export class AzureResourceService {
 				);
 				this.deps.startTimerIfEnabled();
 				await this.deps.updateTokenStats?.();
-				return;
+				return false;
 			}
 			await this.dataPlaneService.ensureTableExists(finalSettings, creds.tableCredential);
 			await this.dataPlaneService.validateAccess(finalSettings, creds.tableCredential);
+			return true;
 		} catch (e: unknown) {
 			vscode.window.showErrorMessage(`Backend sync configured, but access validation failed: ${safeStringifyError(e)}`);
-			return;
+			return false;
 		}
+	}
 
-		if (tableConfig.createEvents.startsWith('Yes')) {
-			try {
-				const creds = await this.credentialService.getBackendDataPlaneCredentials(finalSettings);
-				if (creds) {
-					const endpoint = getAzureTableStorageEndpoint(finalSettings.storageAccount);
-					const serviceClient = new TableServiceClient(endpoint, creds.tableCredential as any);
-					await serviceClient.createTable(finalSettings.eventsTable);
-					this.deps.log(`Created optional events table: ${finalSettings.eventsTable}`);
-				}
-			} catch (e) {
-				this.deps.log(`Optional events table creation failed (non-blocking): ${safeStringifyError(e)}`);
+	private async _createOptionalEventsTable(finalSettings: BackendSettings, tableConfig: TableConfig): Promise<void> {
+		if (!tableConfig.createEvents.startsWith('Yes')) { return; }
+		try {
+			const creds = await this.credentialService.getBackendDataPlaneCredentials(finalSettings);
+			if (creds) {
+				const endpoint = getAzureTableStorageEndpoint(finalSettings.storageAccount);
+				const serviceClient = new TableServiceClient(endpoint, creds.tableCredential as any);
+				await serviceClient.createTable(finalSettings.eventsTable);
+				this.deps.log(`Created optional events table: ${finalSettings.eventsTable}`);
 			}
+		} catch (e) {
+			this.deps.log(`Optional events table creation failed (non-blocking): ${safeStringifyError(e)}`);
 		}
+	}
 
+	private async _finalizeBackendActivation(): Promise<void> {
 		this.deps.startTimerIfEnabled();
 		await this.deps.syncToBackendStore(true);
 		await this.deps.updateTokenStats?.();
 		vscode.window.showInformationMessage('Backend sync configured. Initial sync completed (or queued).');
+	}
+
+	private async _saveConfigAndActivate(
+		config: vscode.WorkspaceConfiguration,
+		subscriptionId: string,
+		rgResult: ResourceGroupResult,
+		storageAccount: string,
+		tableConfig: TableConfig,
+		authMode: BackendAuthMode,
+		profile: SharingProfileResult
+	): Promise<void> {
+		await this._persistBackendConfig(config, subscriptionId, rgResult, storageAccount, tableConfig, authMode, profile);
+
+		const finalSettings = this.deps.getSettings();
+		if (!await this._activateDataPlaneAccess(finalSettings)) { return; }
+
+		await this._createOptionalEventsTable(finalSettings, tableConfig);
+
+		await this._finalizeBackendActivation();
 	}
 
 	/**

@@ -13,7 +13,7 @@
  *      baseline ("knownFields"). These are candidates for new features /
  *      better token attribution. New fields WARN by default (do not fail).
  *
- * Source of truth for supported platforms: vscode-extension/src/adapters/
+ * Source of truth for supported platforms: src/adapters/
  * adapterRegistry.ts. This skill covers the file-based JSON/JSONL ecosystems
  * that have schema docs under docs/logFilesSchema/. DB / binary ecosystems
  * (Crush sqlite, Visual Studio MessagePack, Continue, Mistral Vibe, Claude
@@ -161,7 +161,7 @@ function xdgDataHome() {
 
 // ---------------------------------------------------------------------------
 // Per-platform discovery. Each returns an array of absolute file paths.
-// Paths mirror the adapters under vscode-extension/src/adapters/.
+// Paths mirror the adapters under src/adapters/.
 // ---------------------------------------------------------------------------
 
 const HOME = os.homedir();
@@ -240,9 +240,45 @@ function discoverAntigravity() {
 }
 
 function discoverOpenCode() {
-  const root = path.join(xdgDataHome(), 'opencode', 'storage', 'session');
+  const dataDir = path.join(xdgDataHome(), 'opencode');
   const files = [];
-  walkFiles(root, (n) => n.startsWith('ses_') && n.endsWith('.json'), files, 4);
+
+  // Legacy JSON file sessions
+  const sessionDir = path.join(dataDir, 'storage', 'session');
+  walkFiles(sessionDir, (n) => n.startsWith('ses_') && n.endsWith('.json'), files, 4);
+
+  // Current SQLite DB sessions (opencode.db): extract message data blobs into
+  // temp JSONL files so the framework can analyse schema and detect recency.
+  const dbPath = path.join(dataDir, 'opencode.db');
+  const dbStat = statOrNull(dbPath);
+  if (dbStat && dbStat.size > 0) {
+    try {
+      const { DatabaseSync } = require('node:sqlite');
+      const db = new DatabaseSync(dbPath);
+      const sessions = db.prepare('SELECT id, time_updated FROM session ORDER BY time_updated DESC').all();
+      if (sessions.length > 0) {
+        // Create a fresh, collision-resistant temp directory (rather than
+        // writing predictably-named files straight into the shared OS temp
+        // dir) so another local user can't pre-create/symlink our output path.
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-dbses-'));
+        for (const session of sessions) {
+          const messages = db.prepare(
+            'SELECT data FROM message WHERE session_id = ? ORDER BY time_created ASC'
+          ).all(session.id);
+          if (messages.length === 0) { continue; }
+          const tmpPath = path.join(tmpDir, `${session.id}.jsonl`);
+          fs.writeFileSync(tmpPath, messages.map((m) => m.data).join('\n'), 'utf8');
+          // Stamp the temp file's mtime with the session's last-updated time so
+          // the recency filter (--days) works correctly.
+          const mtime = new Date(session.time_updated);
+          if (!isNaN(mtime.getTime())) { try { fs.utimesSync(tmpPath, mtime, mtime); } catch { /* ignore */ } }
+          files.push(tmpPath);
+        }
+      }
+      db.close();
+    } catch { /* node:sqlite unavailable or DB locked — fall back to JSON files only */ }
+  }
+
   return files;
 }
 

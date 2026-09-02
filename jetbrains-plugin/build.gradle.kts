@@ -10,10 +10,19 @@
 // `prepareBundledAssets` task below (or by the root build.ps1 orchestrator).
 
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
 
 plugins {
-    kotlin("jvm") version "2.4.0"
-    id("org.jetbrains.intellij.platform") version "2.16.0"
+    // Pinned below CodeQL's Kotlin version ceiling: CodeQL (bundle 2.26.1, used by
+    // codeql-action v4.37.3 in .github/workflows/codeql.yml) only supports Kotlin
+    // versions up to 2.4.0 — 2.4.10 fails extraction with "Kotlin version 2.4.10
+    // is too recent". Bump back to 2.4.10+ once CodeQL adds support for it.
+    kotlin("jvm") version "2.4.10"
+    id("org.jetbrains.intellij.platform") version "2.18.1"
 }
 
 group = providers.gradleProperty("pluginGroup").get()
@@ -28,6 +37,14 @@ repositories {
 
 kotlin {
     jvmToolchain(21)
+    compilerOptions {
+        // Generate real JVM default methods instead of delegating bridges in
+        // implementing classes. Without this, every Kotlin class implementing a
+        // Java interface with default methods (e.g. ToolWindowFactory) emits
+        // explicit calls to those defaults — which the Marketplace verifier
+        // counts as usages of deprecated/experimental platform APIs.
+        freeCompilerArgs.add("-Xjvm-default=all")
+    }
 }
 
 dependencies {
@@ -45,7 +62,7 @@ dependencies {
         testFramework(TestFrameworkType.Platform)
     }
 
-    testImplementation(platform("org.junit:junit-bom:6.1.0"))
+    testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("org.opentest4j:opentest4j:1.3.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -85,6 +102,29 @@ intellijPlatform {
 // user's OS isn't covered.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Writes the plugin version into a classpath resource so runtime code can read
+// it without touching PluginManagerCore (flagged as internal API by the
+// Marketplace verifier). A typed task keeps this configuration-cache safe.
+abstract class GenerateVersionFileTask : DefaultTask() {
+    @get:Input
+    abstract val pluginVersion: Property<String>
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val dir = outputDir.get().asFile
+        dir.mkdirs()
+        dir.resolve("plugin-version.txt").writeText(pluginVersion.get())
+    }
+}
+
+val generatePluginVersionFile by tasks.registering(GenerateVersionFileTask::class) {
+    pluginVersion.set(providers.gradleProperty("pluginVersion"))
+    outputDir.set(layout.buildDirectory.dir("generated/plugin-version"))
+}
+
 val prepareBundledAssets by tasks.registering(Copy::class) {
     description = "Copy webview bundles, vscode-shim, and CLI binaries into plugin resources."
     group = "build"
@@ -98,7 +138,7 @@ val prepareBundledAssets by tasks.registering(Copy::class) {
     }
 
     // 2. The vscode-shim that fakes acquireVsCodeApi() — same file the VS extension uses.
-    from("$repoRoot/visualstudio-extension/src/CopilotTokenTracker/WebBridge") {
+    from("$repoRoot/visualstudio-extension/src/AIEngineeringFluency/WebBridge") {
         include("vscode-shim.js")
         into("webview")
     }
@@ -134,6 +174,7 @@ sourceSets {
     main {
         resources {
             srcDir(prepareBundledAssets)
+            srcDir(generatePluginVersionFile)
         }
     }
 }

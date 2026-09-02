@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { CacheManager } from '../../src/cacheManager';
-import type { SessionFileCache } from '../../src/types';
+import type { SessionFileCache } from '../../../src/types';
 import { createMockMemento } from './vscode-test-helpers';
 
 function makeManager(dir: string, cacheVersion = 1): CacheManager {
@@ -130,6 +130,23 @@ test('writeSharedSnapshot merges with existing snapshot without regressing newer
 	assert.equal(entries!['/b.json'].mtime, 3000, 'follower\'s extra /b.json must be added');
 });
 
+test('writeSharedSnapshot caps the shared snapshot at 20000 newest entries', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	for (let i = 0; i < 20_050; i++) {
+		writer.setCachedSessionData(`/file${i}.json`, entry(i), 10);
+	}
+	await writer.writeSharedSnapshot();
+
+	const entries = await writer.readSharedSnapshot();
+	assert.ok(entries);
+	assert.equal(Object.keys(entries!).length, 20_000, 'snapshot should keep only the newest 20000 entries');
+	assert.equal(entries!['/file0.json'], undefined, 'oldest snapshot entry should be pruned');
+	assert.equal(entries!['/file49.json'], undefined, 'entries outside the newest 20000 should be pruned');
+	assert.equal(entries!['/file50.json']?.mtime, 50, 'newest retained window should start at entry 50');
+	assert.equal(entries!['/file20049.json']?.mtime, 20049, 'newest entry should be retained');
+});
+
 test('refresh lock: acquire then release; renew only when owned', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
@@ -150,6 +167,65 @@ test('refresh lock and cache lock are independent files', async () => {
 	await m.releaseCacheLock();
 });
 
+// Windows reuses PIDs aggressively: after a reboot a leftover lock file can point
+// at a PID now owned by an unrelated process. The stale-lock check must not trust
+// a live PID whose image is not a VS Code/Electron host.
+test('refresh lock: breaks stale lock owned by a recycled non-host PID (win32)', { skip: process.platform !== 'win32' }, async () => {
+	const dir = tmpDir();
+	const holder = makeManager(dir);
+	assert.equal(await holder.acquireRefreshLock(), true);
+
+	// Simulate a reboot: overwrite the lock with a fresh timestamp but point the
+	// PID at cmd.exe, which is alive and guaranteed not to be an editor host.
+	const lockPath = holder.getRefreshLockPath();
+	const cmdPid: number = (require('node:child_process') as typeof import('node:child_process'))
+		.spawn('cmd.exe', ['/c', 'ping -n 30 127.0.0.1 >nul'], { windowsHide: true }).pid!;
+	try {
+		fs.writeFileSync(lockPath, JSON.stringify({ sessionId: 'old-session', pid: cmdPid, timestamp: Date.now() }));
+		const fresh = makeManager(dir);
+		assert.equal(await fresh.acquireRefreshLock(), true, 'recycled non-host PID must be treated as stale');
+		await fresh.releaseRefreshLock();
+	} finally {
+		try { process.kill(cmdPid); } catch { /* already exited */ }
+	}
+});
+
+// A writer killed between the atomic create and the content write leaves a
+// 0-byte (or otherwise unparseable) lock behind. JSON.parse throwing used to be
+// swallowed by the same catch that handles "owner deleted the file", so the
+// corrupt lock blocked every acquire attempt forever and forced all windows
+// into follower mode.
+test('refresh lock: breaks corrupt (empty) lock file left by a crashed writer', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	fs.writeFileSync(m.getRefreshLockPath(), '');
+	assert.equal(await m.acquireRefreshLock(), true, 'empty lock must be treated as stale');
+	const content = JSON.parse(fs.readFileSync(m.getRefreshLockPath(), 'utf-8'));
+	assert.equal(typeof content.timestamp, 'number', 'lock must be rewritten with valid content');
+	await m.releaseRefreshLock();
+});
+
+test('refresh lock: breaks lock file with invalid JSON or missing fields', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	fs.writeFileSync(m.getRefreshLockPath(), '{not json');
+	assert.equal(await m.acquireRefreshLock(), true, 'invalid JSON lock must be treated as stale');
+	await m.releaseRefreshLock();
+
+	fs.writeFileSync(m.getRefreshLockPath(), JSON.stringify({ sessionId: 'old-session' }));
+	assert.equal(await m.acquireRefreshLock(), true, 'lock without timestamp must be treated as stale');
+	await m.releaseRefreshLock();
+});
+
+test('cache lock: breaks corrupt (empty) lock file', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	fs.writeFileSync(m.getCacheLockPath(), '');
+	assert.equal(await m.acquireCacheLock(), true, 'empty cache lock must be treated as stale');
+	await m.releaseCacheLock();
+});
+
 // ---------------------------------------------------------------------------
 // loadCacheFromStorage (disk-based)
 // ---------------------------------------------------------------------------
@@ -161,11 +237,19 @@ test('loadCacheFromStorage: loads entries from existing snapshot', async () => {
 	writer.setCachedSessionData('/b.json', entry(2000), 20);
 	await writer.writeSharedSnapshot();
 
-	const reader = makeManager(dir);
+	const logs: string[] = [];
+	const context: any = {
+		extensionMode: 1,
+		globalStorageUri: { fsPath: dir },
+		globalState: createMockMemento(),
+	};
+	const reader = new CacheManager(context, { log: (m: string) => logs.push(m), warn: () => {}, error: () => {} }, 1);
 	await reader.loadCacheFromStorage();
 	assert.equal(reader.cache.size, 2, 'should load both entries');
 	assert.equal(reader.cache.get('/a.json')?.mtime, 1000);
 	assert.equal(reader.cache.get('/b.json')?.mtime, 2000);
+	assert.ok(logs.some(l => /Loaded 2 cached session files from disk snapshot \(prod\) in \d+ms/.test(l)),
+		'should log load duration');
 });
 
 test('loadCacheFromStorage: starts with empty cache when no snapshot exists', async () => {

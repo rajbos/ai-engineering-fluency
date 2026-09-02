@@ -6,28 +6,31 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import chalk from 'chalk';
-import { SessionDiscovery } from '../../vscode-extension/src/sessionDiscovery';
-import { buildAdapterRegistry, createDataAccessInstances } from '../../vscode-extension/src/adapters';
-import type { IEcosystemAdapter } from '../../vscode-extension/src/ecosystemAdapter';
-import { isMcpTool, extractMcpServerName } from '../../vscode-extension/src/workspaceHelpers';
-import { resolveFileUri } from '../../vscode-extension/src/workspacePathResolver';
-import { parseSessionFileContent } from '../../vscode-extension/src/sessionParser';
-import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost, extractAllTokensFromDebugLog } from '../../vscode-extension/src/tokenEstimation';
-import { extractDailyFractions } from '../../vscode-extension/src/dailyAttribution';
-import { toLocalDayKey } from '../../vscode-extension/src/utils/dayKeys';
-import { isJetBrainsSessionPath } from '../../vscode-extension/src/adapters/adapterPredicates';
-import { parseJetBrainsPartition } from '../../vscode-extension/src/jetbrains';
-import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix } from '../../vscode-extension/src/types';
-import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../vscode-extension/src/usageAnalysis';
-import { withErrorRecovery } from '../../vscode-extension/src/utils/errors';
+import { SessionDiscovery } from '../../src/sessionDiscovery';
+import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
+import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
+import { isMcpTool, extractMcpServerName } from '../../src/workspaceHelpers';
+import { resolveFileUri } from '../../src/workspacePathResolver';
+import { parseSessionFileContent } from '../../src/sessionParser';
+import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost, extractAllTokensFromDebugLog } from '../../src/tokenEstimation';
+import { extractCopilotCliSessionId, getCopilotCliExactUsage } from '../../src/copilotCliOtel';
+import { extractDailyFractions } from '../../src/dailyAttribution';
+import { toLocalDayKey } from '../../src/utils/dayKeys';
+import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
+import { parseJetBrainsPartition } from '../../src/jetbrains';
+import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
+import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
+import { reconcileModelUsageToActualTokens } from '../../src/statsHelpers';
+import { withErrorRecovery } from '../../src/utils/errors';
+import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 import { ENVIRONMENTAL } from './constants';
 
 // Import JSON data files
-import tokenEstimatorsData from '../../vscode-extension/src/tokenEstimators.json';
-import modelPricingData from '../../vscode-extension/src/modelPricing.json';
-import toolNamesData from '../../vscode-extension/src/toolNames.json';
+import tokenEstimatorsData from '../../src/tokenEstimators.json';
+import modelPricingData from '../../src/modelPricing.json';
+import toolNamesData from '../../src/toolNames.json';
 
 // Pure analysis helpers from analysis.ts
 import {
@@ -319,7 +322,8 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 		let fileModelUsage: ModelUsage = {};
 
 		if (isJsonl) {
-			const result = estimateTokensFromJsonlSession(content);
+			const exactUsage = extractCopilotCliSessionId(filePath) ? await getCopilotCliExactUsage(filePath) : null;
+			const result = estimateTokensFromJsonlSession(content, exactUsage);
 			// Prefer actualTokens (from session.shutdown modelMetrics) over estimated tokens,
 			// matching VS Code's logic: actualTokens > 0 ? actualTokens : estimatedTokens
 			tokens = result.actualTokens > 0 ? result.actualTokens : result.tokens;
@@ -351,6 +355,12 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 					fileModelUsage = { [modelKey]: { inputTokens: jbResult.tokens, outputTokens: 0 } };
 				}
 			}
+
+			// Reconcile the per-model breakdown to the session total so Input+Output never
+			// exceeds Total in CLI reports. Event-based sessions (Copilot CLI without exact
+			// usage, JetBrains, …) derive actualTokens from real output while modelUsage
+			// derives input from accumulated message content; those heuristics can diverge.
+			fileModelUsage = reconcileModelUsageToActualTokens(fileModelUsage, actualTokens || tokens);
 
 			// Count interactions from JSONL
 			const lines = content.trim().split('\n');
@@ -391,7 +401,7 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 			if (Object.keys(debugLogTokens.modelBreakdown).length > 0) {
 				fileModelUsage = {};
 				for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
-					fileModelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
+					fileModelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, sessions: 0, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
 				}
 			}
 		}
@@ -530,6 +540,8 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 	const last30DaysPeriod = createEmptyUsageAnalysisPeriod();
 	const monthPeriod = createEmptyUsageAnalysisPeriod();
 	const lastMonthPeriod = createEmptyUsageAnalysisPeriod();
+	const todaySessions: TodaySessionSummary[] = [];
+	const recentSessionItems: RecentSessionBucketItem<TodaySessionSummary>[] = [];
 
 	for (const file of sessionFiles) {
 		try {
@@ -541,6 +553,38 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 			}
 
 			const analysis = await analyzeSessionUsage(deps, file);
+			let sessionSummary: TodaySessionSummary | undefined;
+			const data = modified >= last30DaysStart ? await processSessionFile(file) : undefined;
+			if (data && data.interactions > 0) {
+				let inputTokens = 0, outputTokens = 0, cachedTokens = 0;
+				for (const usage of Object.values(data.modelUsage)) {
+					inputTokens += usage.inputTokens;
+					outputTokens += usage.outputTokens;
+					cachedTokens += usage.cachedReadTokens ?? 0;
+				}
+				sessionSummary = {
+					title: null,
+					filePath: file,
+					interactions: data.interactions,
+					toolCalls: analysis.toolCalls.total,
+					inputTokens,
+					outputTokens,
+					thinkingTokens: data.thinkingTokens ?? 0,
+					cachedTokens,
+					totalTokens: data.tokens,
+					estimatedCost: calculateEstimatedCost(data.modelUsage, modelPricing),
+					editor: data.editorSource,
+					models: Object.keys(data.modelUsage),
+					lastActivity: data.lastModified.toISOString(),
+					...(analysis.sessionDuration?.totalDurationMs !== undefined ? { durationMs: analysis.sessionDuration.totalDurationMs } : {}),
+					...(analysis.sessionDuration?.activeDurationMs !== undefined ? { activeDurationMs: analysis.sessionDuration.activeDurationMs } : {}),
+				};
+				recentSessionItems.push({
+					activityKey: toLocalDayKey(data.lastModified),
+					interactions: data.interactions,
+					value: sessionSummary,
+				});
+			}
 
 			if (modified >= last30DaysStart) {
 				mergeUsageAnalysis(last30DaysPeriod, analysis);
@@ -553,6 +597,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 			if (modified >= todayStart) {
 				mergeUsageAnalysis(todayPeriod, analysis);
 				todayPeriod.sessions++;
+				if (sessionSummary) { todaySessions.push(sessionSummary); }
 			}
 			if (modified >= lastMonthStart && modified < monthStart) {
 				mergeUsageAnalysis(lastMonthPeriod, analysis);
@@ -569,6 +614,8 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 		month: monthPeriod,
 		lastMonth: lastMonthPeriod,
 		lastUpdated: now,
+		todaySessions: todaySessions.sort((a, b) => b.interactions - a.interactions),
+		recentSessions: buildRecentSessionBuckets(recentSessionItems, now),
 	};
 }
 
@@ -616,7 +663,7 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 				dailyEntry.sessions++;
 				for (const [model, usage] of Object.entries(data.modelUsage)) {
 					if (!dailyEntry.modelUsage[model]) {
-						dailyEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+						dailyEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 					}
 					dailyEntry.modelUsage[model].inputTokens += Math.round(usage.inputTokens * fraction);
 					dailyEntry.modelUsage[model].outputTokens += Math.round(usage.outputTokens * fraction);
@@ -633,6 +680,13 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 				}
 				dailyEntry.editorUsage[editor].tokens += tokForDay;
 				dailyEntry.editorUsage[editor].sessions++;
+				if (!dailyEntry.editorModelUsage) { dailyEntry.editorModelUsage = {}; }
+				if (!dailyEntry.editorModelUsage[editor]) { dailyEntry.editorModelUsage[editor] = {}; }
+				for (const [model, usage] of Object.entries(data.modelUsage)) {
+					if (!dailyEntry.editorModelUsage[editor][model]) { dailyEntry.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
+					dailyEntry.editorModelUsage[editor][model].inputTokens += Math.round(usage.inputTokens * fraction);
+					dailyEntry.editorModelUsage[editor][model].outputTokens += Math.round(usage.outputTokens * fraction);
+				}
 			}
 
 			// Full history map: always add regardless of age (used for weekly/monthly charts)
@@ -644,7 +698,7 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 			allEntry.sessions++;
 			for (const [model, usage] of Object.entries(data.modelUsage)) {
 				if (!allEntry.modelUsage[model]) {
-					allEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+					allEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 				}
 				allEntry.modelUsage[model].inputTokens += Math.round(usage.inputTokens * fraction);
 				allEntry.modelUsage[model].outputTokens += Math.round(usage.outputTokens * fraction);
@@ -661,6 +715,13 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 			}
 			allEntry.editorUsage[editor].tokens += tokForDay;
 			allEntry.editorUsage[editor].sessions++;
+			if (!allEntry.editorModelUsage) { allEntry.editorModelUsage = {}; }
+			if (!allEntry.editorModelUsage[editor]) { allEntry.editorModelUsage[editor] = {}; }
+			for (const [model, usage] of Object.entries(data.modelUsage)) {
+				if (!allEntry.editorModelUsage[editor][model]) { allEntry.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
+				allEntry.editorModelUsage[editor][model].inputTokens += Math.round(usage.inputTokens * fraction);
+				allEntry.editorModelUsage[editor][model].outputTokens += Math.round(usage.outputTokens * fraction);
+			}
 		}
 	}
 

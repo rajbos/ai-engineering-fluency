@@ -1,6 +1,7 @@
 import * as https from 'https';
 import * as childProcess from 'child_process';
-import { GITHUB_API_HOSTNAME, GITHUB_API_USER_AGENT, GITHUB_API_ACCEPT_V3, GITHUB_API_VERSION } from './githubApiConfig';
+import { getGitHubApiEndpoints, GITHUB_API_USER_AGENT, GITHUB_API_ACCEPT_V3, GITHUB_API_VERSION } from './githubApiConfig';
+import { withTimeout } from './utils/promises';
 
 export type RepoPrDetail = {
 	number: number;
@@ -18,6 +19,15 @@ export type RepoPrInfo = {
 	aiAuthoredPrs: number;
 	aiReviewRequestedPrs: number;
 	aiDetails: RepoPrDetail[];
+	/**
+	 * PRs in the window authored by the signed-in user. Distinct from
+	 * `aiAuthoredPrs`, which only counts PRs opened by AI bot accounts
+	 * (cloud agents) — work driven by a local AI assistant is authored by
+	 * the human and lands here instead. Absent when the user login is unknown.
+	 */
+	userAuthoredPrs?: number;
+	/** Subset of `userAuthoredPrs` that has been merged. */
+	userMergedPrs?: number;
 	error?: string;
 };
 
@@ -25,6 +35,8 @@ export type RepoPrStatsResult = {
 	repos: RepoPrInfo[];
 	authenticated: boolean;
 	since: string; // ISO date string
+	/** Set when the collection itself failed (not a per-repo error) — the panel shows this instead of hanging on "Loading…". */
+	error?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -76,11 +88,12 @@ export type CopilotPlanResult = { planInfo?: CopilotPlanInfo; statusCode?: numbe
 
 /** Internal low-level fetcher for the copilot_internal/user endpoint. */
 function fetchCopilotPlanInfoPage(token: string): Promise<CopilotPlanResult> {
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: '/copilot_internal/user',
+				hostname,
+				path: `${restPathPrefix}/copilot_internal/user`,
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
@@ -159,11 +172,12 @@ export type CopilotTokenEndpointResult = { info?: CopilotTokenEndpointInfo; stat
 
 /** Internal low-level fetcher for the copilot_internal/v2/token endpoint. */
 function fetchCopilotTokenEndpointInfoPage(token: string): Promise<CopilotTokenEndpointResult> {
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: '/copilot_internal/v2/token',
+				hostname,
+				path: `${restPathPrefix}/copilot_internal/v2/token`,
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
@@ -235,11 +249,12 @@ function fetchUserEnterprisesPage(token: string): Promise<UserEnterprisesResult>
 	const query = JSON.stringify({
 		query: '{ viewer { enterprises(first: 10, membershipType: ALL) { nodes { slug name } } } }',
 	});
+	const { hostname, graphQlPath } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: '/graphql',
+				hostname,
+				path: graphQlPath,
 				method: 'POST',
 				headers: {
 					Authorization: `Bearer ${token}`,
@@ -311,11 +326,12 @@ export function fetchEnterprisePremiumBudgets(
 
 function fetchEnterprisePremiumBudgetsPage(enterpriseSlug: string, username: string, token: string): Promise<EnterpriseBudgetResult> {
 	const params = new URLSearchParams({ user: username, budgetTarget: 'premium_req' });
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: `/enterprises/${encodeURIComponent(enterpriseSlug)}/settings/billing/budgets?${params}`,
+				hostname,
+				path: `${restPathPrefix}/enterprises/${encodeURIComponent(enterpriseSlug)}/settings/billing/budgets?${params}`,
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
@@ -354,13 +370,148 @@ function fetchEnterprisePremiumBudgetsPage(enterpriseSlug: string, username: str
 	});
 }
 
-/** Detect which AI system a GitHub login belongs to, or null if not an AI bot. */
-export function detectAiType(login: string): RepoPrDetail['aiType'] | null {
-	const l = login.toLowerCase();
-	if (l.includes('copilot')) { return 'copilot'; }
-	if (l.includes('claude') || l.includes('anthropic')) { return 'claude'; }
-	if (l.includes('openai') || l.includes('codex')) { return 'openai'; }
+/**
+ * Recognized AI bot/App login substrings, mapped to the `aiType` the dashboard reports.
+ * Extend this list as new AI coding agents or custom GitHub Apps are identified — each
+ * entry is matched as a case-insensitive substring against the bot's login. Order matters:
+ * the first match wins, so put more specific patterns first if a login could plausibly
+ * match more than one entry.
+ */
+const KNOWN_BOT_LOGIN_PATTERNS: ReadonlyArray<{ pattern: string; aiType: NonNullable<RepoPrDetail['aiType']> }> = [
+	{ pattern: 'copilot', aiType: 'copilot' },
+	{ pattern: 'claude', aiType: 'claude' },
+	{ pattern: 'anthropic', aiType: 'claude' },
+	{ pattern: 'openai', aiType: 'openai' },
+	{ pattern: 'codex', aiType: 'openai' },
+];
+
+/**
+ * Detect which AI system authored or was requested to review a PR, from the GitHub user
+ * object on the REST payload (`pr.user`, or one entry of `pr.requested_reviewers`).
+ *
+ * **What this can see**: any account GitHub itself marks as automated — `type: 'Bot'` on the
+ * REST payload, or (as a secondary signal, since some App-driven accounts have historically
+ * omitted `type`) a login ending in the `[bot]` suffix GitHub Apps conventionally use. A bot
+ * whose login matches a known pattern (Copilot, Claude/Anthropic, OpenAI/Codex) is attributed
+ * to that specific `aiType`. A bot that doesn't match any known pattern — e.g. an enterprise's
+ * own custom GitHub App fronting an internal agent — is still counted as AI via `'other-ai'`
+ * rather than silently falling through to "human". Gating on `type === 'Bot'` (instead of the
+ * old login-substring-only check) also removes the false-positive side: a human account whose
+ * login happens to contain "copilot", "claude" or "openai" (e.g. `copilotpilot`, `claudia-dev`,
+ * an org named `openai-research-partners`) has `type: 'User'` and is correctly left unclassified.
+ *
+ * **What this cannot see**: AI coding work driven locally (Claude Code, Copilot agent mode in
+ * the IDE, etc.) and pushed under the human's own GitHub account. That PR is authored by a real
+ * `User`, not a `Bot`, and is indistinguishable from manual work by this function alone — see
+ * `RepoPrInfo.userAuthoredPrs` and `detectCoAuthorAiType` below for the `Co-authored-by:`
+ * trailer signal that can recover it (as a separate, opt-in enrichment, not part of this check).
+ */
+export function detectAiType(user: { login?: string; type?: string } | null | undefined): RepoPrDetail['aiType'] | null {
+	const login = (user?.login ?? '').toLowerCase();
+	const isBot = user?.type === 'Bot' || login.endsWith('[bot]');
+	if (!isBot) { return null; }
+	for (const { pattern, aiType } of KNOWN_BOT_LOGIN_PATTERNS) {
+		if (login.includes(pattern)) { return aiType; }
+	}
+	return 'other-ai';
+}
+
+// ---------------------------------------------------------------------------
+// Co-authored-by trailer detection (locally-driven agent work)
+// ---------------------------------------------------------------------------
+
+/** Matches one `Co-authored-by: Name <email>` git trailer line (case-insensitive), capturing the email. */
+const CO_AUTHOR_TRAILER_PATTERN = /^co-authored-by:.*<([^>]+)>/gim;
+
+/**
+ * Known co-author email patterns that identify AI-authored commits, mapped to the existing
+ * `aiType` union. Extend alongside `KNOWN_BOT_LOGIN_PATTERNS` as new tools are identified.
+ * Claude Code stamps `Co-Authored-By: Claude <noreply@anthropic.com>`; GitHub's coding agent
+ * and Copilot agent mode stamp the bot's own `users.noreply.github.com` address.
+ */
+const KNOWN_CO_AUTHOR_EMAIL_PATTERNS: ReadonlyArray<{ pattern: string; aiType: NonNullable<RepoPrDetail['aiType']> }> = [
+	{ pattern: '@anthropic.com', aiType: 'claude' },
+	{ pattern: 'copilot-swe-agent', aiType: 'copilot' },
+	{ pattern: 'copilot@users.noreply.github.com', aiType: 'copilot' },
+	{ pattern: '@openai.com', aiType: 'openai' },
+];
+
+/**
+ * Detect an AI co-author from a PR's commit messages, via `Co-authored-by:` trailers. This is
+ * the signal that can attribute locally-driven agent work (Claude Code, Copilot agent mode) —
+ * work `detectAiType` cannot see because it lands under the human's own GitHub account.
+ *
+ * Deliberately **not** wired into `fetchRepoPrs` / any bulk aggregation path: getting commit
+ * messages requires a `GET .../pulls/{number}/commits` request per PR (there is no bulk
+ * endpoint), and `fetchRepoPrs` already caps at up to 500 PRs/repo per refresh — calling this
+ * for every PR would multiply that into up to 500 extra requests per repo per refresh. Callers
+ * that want this signal must fetch commit messages (e.g. via `fetchPrCommitMessages` below) for
+ * a deliberately bounded set of PRs (e.g. only the signed-in user's own PRs in the current
+ * window) rather than from the bulk path.
+ */
+export function detectCoAuthorAiType(commitMessages: string[]): RepoPrDetail['aiType'] | null {
+	for (const message of commitMessages) {
+		for (const match of message.matchAll(CO_AUTHOR_TRAILER_PATTERN)) {
+			const email = match[1].toLowerCase();
+			for (const { pattern, aiType } of KNOWN_CO_AUTHOR_EMAIL_PATTERNS) {
+				if (email.includes(pattern)) { return aiType; }
+			}
+		}
+	}
 	return null;
+}
+
+/**
+ * Fetch the commit messages for a single PR (`GET /pulls/{number}/commits`), for use with
+ * `detectCoAuthorAiType`. One HTTP request per call — see that function's doc comment for why
+ * this is not called from the bulk `fetchRepoPrs` path.
+ */
+export function fetchPrCommitMessages(
+	owner: string,
+	repo: string,
+	prNumber: number,
+	token: string,
+	fetcher: (owner: string, repo: string, prNumber: number, token: string) => Promise<{ messages: string[]; statusCode?: number; error?: string }> = fetchPrCommitMessagesPage,
+): Promise<{ messages: string[]; statusCode?: number; error?: string }> {
+	return fetcher(owner, repo, prNumber, token);
+}
+
+function fetchPrCommitMessagesPage(owner: string, repo: string, prNumber: number, token: string): Promise<{ messages: string[]; statusCode?: number; error?: string }> {
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
+	return new Promise((resolve) => {
+		const req = https.request(
+			{
+				hostname,
+				path: `${restPathPrefix}/repos/${owner}/${repo}/pulls/${prNumber}/commits?per_page=100`,
+				headers: {
+					Authorization: `Bearer ${token}`,
+					'User-Agent': GITHUB_API_USER_AGENT,
+					Accept: GITHUB_API_ACCEPT_V3,
+				},
+			},
+			(res) => {
+				let data = '';
+				res.on('data', (chunk) => (data += chunk));
+				res.on('end', () => {
+					try {
+						const parsed = JSON.parse(data);
+						if (!Array.isArray(parsed)) {
+							resolve({ messages: [], statusCode: res.statusCode, error: parsed.message ?? 'Unexpected API response' });
+						} else {
+							resolve({ messages: parsed.map((c: any) => c?.commit?.message ?? '').filter(Boolean), statusCode: res.statusCode });
+						}
+					} catch (e) {
+						resolve({ messages: [], statusCode: res.statusCode, error: String(e) });
+					}
+				});
+			},
+		);
+		req.on('error', (e) => resolve({ messages: [], error: e.message }));
+		req.setTimeout(15000, () => {
+			req.destroy(new Error('Request timed out after 15 s'));
+		});
+		req.end();
+	});
 }
 
 /** Fetch a single page of PRs from GitHub REST API. */
@@ -370,11 +521,12 @@ export function fetchRepoPrsPage(
 	token: string,
 	page: number,
 ): Promise<{ prs: any[]; statusCode?: number; error?: string }> {
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: `/repos/${owner}/${repo}/pulls?state=all&per_page=100&sort=created&direction=desc&page=${page}`,
+				hostname,
+				path: `${restPathPrefix}/repos/${owner}/${repo}/pulls?state=all&per_page=100&sort=created&direction=desc&page=${page}`,
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
@@ -412,18 +564,42 @@ function buildFetchRepoPrsError(statusCode: number | undefined, error: string | 
 	return error ?? 'Unknown error';
 }
 
+type RepoPrPageResult = { prs: any[]; statusCode?: number; error?: string };
+
+async function fetchRepoPrsPageWithinTimeout(
+	fetchPage: (owner: string, repo: string, token: string, page: number) => Promise<RepoPrPageResult>,
+	owner: string,
+	repo: string,
+	token: string,
+	page: number,
+	pageTimeoutMs: number,
+): Promise<RepoPrPageResult> {
+	try {
+		return await withTimeout(
+			fetchPage(owner, repo, token, page),
+			pageTimeoutMs,
+			`Fetching PRs for ${owner}/${repo} page ${page}`,
+		);
+	} catch (error) {
+		return { prs: [], error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
 /** Fetch all PRs from the last 30 days for a repo, paginating as needed. */
 export async function fetchRepoPrs(
 	owner: string,
 	repo: string,
 	token: string,
 	since: Date,
-	fetchPage: (owner: string, repo: string, token: string, page: number) => Promise<{ prs: any[]; statusCode?: number; error?: string }> = fetchRepoPrsPage,
+	fetchPage: (owner: string, repo: string, token: string, page: number) => Promise<RepoPrPageResult> = fetchRepoPrsPage,
+	pageTimeoutMs = 20_000,
 ): Promise<{ prs: any[]; error?: string }> {
 	const allPrs: any[] = [];
 	const MAX_PAGES = 5; // Cap at 500 PRs per repo
 	for (let page = 1; page <= MAX_PAGES; page++) {
-		const { prs, statusCode, error } = await fetchPage(owner, repo, token, page);
+		const { prs, statusCode, error } = await fetchRepoPrsPageWithinTimeout(
+			fetchPage, owner, repo, token, page, pageTimeoutMs,
+		);
 		if (error) { return { prs: allPrs, error: buildFetchRepoPrsError(statusCode, error) }; }
 		if (prs.length === 0) { break; }
 		for (const pr of prs) {
@@ -435,31 +611,110 @@ export async function fetchRepoPrs(
 	return { prs: allPrs };
 }
 
+/** Maximum number of concurrent `git remote` probes during repo discovery. */
+const DISCOVERY_CONCURRENCY = 8;
+
+/** Anchored matcher for the scp-like remote form `git@host:owner/repo(.git)` (a `/` separator after the host is also accepted). */
+const SCP_LIKE_REMOTE_PATTERN = /^git@([^:/]+)[:/]([^/]+)\/([^/\s]+?)(?:\.git)?$/i;
+
+/** Collect the accepted GitHub hosts: github.com plus an optional enterprise host. */
+export function buildGitHubHosts(enterpriseUri?: string): Set<string> {
+	const hosts = new Set<string>(['github.com']);
+	if (enterpriseUri) {
+		try {
+			const enterpriseHost = new URL(enterpriseUri).host.toLowerCase();
+			if (enterpriseHost) { hosts.add(enterpriseHost); }
+		} catch { /* ignore invalid URI — fall back to github.com only */ }
+	}
+	return hosts;
+}
+
+/** Strip a trailing `.git` suffix from a repo name, matching git's own remote handling. */
+function stripGitSuffix(repo: string): string {
+	return repo.toLowerCase().endsWith('.git') ? repo.slice(0, -'.git'.length) : repo;
+}
+
+/**
+ * Extract owner/repo from a git remote URL when its host is one of `hosts`.
+ * Accepts the remote forms git actually produces for GitHub hosts:
+ * https://host/o/r(.git), ssh://git@host/o/r and the scp-like git@host:o/r.
+ * Parsed with `new URL()` where possible (no unanchored host regex) with an
+ * anchored fallback for the scp-like form, which is not a valid URL.
+ */
+export function parseGitHubRemote(remote: string, hosts: Set<string>): { owner: string; repo: string } | undefined {
+	try {
+		const url = new URL(remote);
+		if ((url.protocol === 'https:' || url.protocol === 'http:' || url.protocol === 'ssh:') && hosts.has(url.host.toLowerCase())) {
+			const segments = url.pathname.split('/').filter((segment) => segment.length > 0);
+			if (segments.length === 2) {
+				return { owner: segments[0], repo: stripGitSuffix(segments[1]) };
+			}
+		}
+		return undefined;
+	} catch {
+		// Not a URL — fall through to the scp-like form below.
+	}
+	const match = SCP_LIKE_REMOTE_PATTERN.exec(remote);
+	if (match && hosts.has(match[1].toLowerCase())) {
+		return { owner: match[2], repo: match[3] };
+	}
+	return undefined;
+}
+
+/**
+ * Read the `origin` remote of one path, resolving to undefined on any failure. Async with a
+ * hard timeout — unlike execSync this never blocks the extension host, which matters when the
+ * customization matrix contributes hundreds of workspace paths (a sync probe per path would
+ * freeze the host for minutes and leave every webview stuck on "Loading…").
+ */
+function getGitRemoteOrigin(cwd: string): Promise<string | undefined> {
+	return new Promise((resolve) => {
+		childProcess.execFile(
+			'git', ['remote', 'get-url', 'origin'],
+			{ cwd, encoding: 'utf8', timeout: 3000, windowsHide: true },
+			(error, stdout) => resolve(error ? undefined : String(stdout ?? '').trim()),
+		);
+	});
+}
+
 /**
  * Discover GitHub repos from workspace paths using git remote.
  * Deduplicates by owner/repo so each GitHub repo is only fetched once.
+ *
+ * Always matches github.com remotes; when `enterpriseUri` is configured (the
+ * `github-enterprise.uri` setting), remotes on that host (e.g. a `tenant.ghe.com`
+ * or on-prem GitHub Enterprise Server) are recognized too.
+ *
+ * Probes run with bounded concurrency so a large workspace-path list costs the
+ * slowest handful of `git` calls rather than the sum of all of them.
  */
-export function discoverGitHubRepos(workspacePaths: string[]): { owner: string; repo: string }[] {
+export async function discoverGitHubRepos(workspacePaths: string[], enterpriseUri?: string): Promise<{ owner: string; repo: string }[]> {
+	const gitHubHosts = buildGitHubHosts(enterpriseUri);
+	const uniquePaths = [...new Set(workspacePaths)];
+	const remotes = new Array<string | undefined>(uniquePaths.length);
+	let nextIndex = 0;
+	const worker = async (): Promise<void> => {
+		while (nextIndex < uniquePaths.length) {
+			const i = nextIndex++;
+			try {
+				remotes[i] = await getGitRemoteOrigin(uniquePaths[i]);
+			} catch {
+				remotes[i] = undefined; // Not a git repo or no remote — skip
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(DISCOVERY_CONCURRENCY, uniquePaths.length) }, worker));
+
 	const seen = new Set<string>();
 	const repos: { owner: string; repo: string }[] = [];
-	for (const workspacePath of workspacePaths) {
-		try {
-			const remote = childProcess.execSync('git remote get-url origin', {
-				cwd: workspacePath,
-				encoding: 'utf8',
-				timeout: 3000,
-				stdio: ['pipe', 'pipe', 'pipe'],
-			}).trim();
-			// Only process github.com remotes
-			const match = remote.match(/github\.com[:/]([^/]+)\/([^/\s]+?)(?:\.git)?$/i);
-			if (!match) { continue; }
-			const key = `${match[1]}/${match[2]}`.toLowerCase();
-			if (seen.has(key)) { continue; }
-			seen.add(key);
-			repos.push({ owner: match[1], repo: match[2] });
-		} catch {
-			// Not a git repo or no remote — skip
-		}
+	for (const remote of remotes) {
+		if (!remote) { continue; }
+		const parsed = parseGitHubRemote(remote, gitHubHosts);
+		if (!parsed) { continue; }
+		const key = `${parsed.owner}/${parsed.repo}`.toLowerCase();
+		if (seen.has(key)) { continue; }
+		seen.add(key);
+		repos.push(parsed);
 	}
 	return repos;
 }

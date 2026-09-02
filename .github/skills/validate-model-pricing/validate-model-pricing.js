@@ -5,7 +5,7 @@
  * Discovers recent AI-coding session log files and Copilot Chat debug logs on
  * the local machine, extracts every model ID that was actually used, then
  * cross-references the collected IDs against the keys in
- * vscode-extension/src/modelPricing.json.
+ * src/modelPricing.json.
  *
  * Two result buckets:
  *   UNKNOWN       — model found in a log file, but NO key in modelPricing.json.
@@ -557,7 +557,7 @@ async function main() {
   console.log(`Summary: ${totalFiles} files scanned, ${allFoundModels.size} unique model IDs found`);
   console.log(`  ${matchedModels.length} matched pricing entries, ${unknownModels.length} unknown (no pricing entry), ${unusedModels.length} unused locally`);
   if (unknownModels.length > 0) {
-    console.log(`\n  Tip: add entries for unknown models to vscode-extension/src/modelPricing.json`);
+    console.log(`\n  Tip: add entries for unknown models to src/modelPricing.json`);
     console.log(`       and re-run this skill to confirm coverage.`);
   }
 }

@@ -12,7 +12,8 @@ const DEFAULT_CLEAR_WIDTH = 50;
  * Uses a carriage return so the cursor stays on the same line.
  */
 export function clearLine(width = DEFAULT_CLEAR_WIDTH): void {
-	process.stdout.write('\r' + ' '.repeat(width) + '\r');
+	// Clamp to zero — String.repeat throws a RangeError for negative counts.
+	process.stdout.write('\r' + ' '.repeat(Math.max(0, width)) + '\r');
 }
 
 /**

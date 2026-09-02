@@ -1,6 +1,6 @@
-import type { TokenEstimator } from '../../types';
+import type { TokenEstimator } from '../../../../src/types';
 import { EDITOR_ICON_MAP as _EDITOR_ICON_MAP, getEditorIconByName } from '../../editorIcons';
-import { getWindowData } from './dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 
 const _estimatorsData = getWindowData<{ estimators: Record<string, number> }>('__TOKEN_ESTIMATORS__');
 const tokenEstimators: Record<string, TokenEstimator> = _estimatorsData?.estimators ?? {};
@@ -113,6 +113,33 @@ export function escapeHtml(text: string): string {
 }
 
 /**
+ * Runs a section-html builder and isolates failures so one broken section can never blank
+ * out an entire page render. If `builder` throws, the error is logged (via `onError`, e.g.
+ * `console.error`) and a small inline error card is returned in its place instead of letting
+ * the exception propagate up through the surrounding template literal (which would otherwise
+ * abort the whole `root.innerHTML` assignment and leave every other section stuck on stale or
+ * blank content).
+ */
+export function safeSectionHtml(
+	label: string,
+	builder: () => string,
+	onError: (message: string) => void = (m) => console.error(m),
+): string {
+	try {
+		return builder();
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		onError(`[usage-webview] Section "${label}" failed to render: ${message}`);
+		return `<div class="section" style="border-color: rgba(239, 68, 68, 0.3);">
+			<div class="section-title"><span>⚠️</span><span>${escapeHtml(label)}</span></div>
+			<div style="color: var(--text-secondary); font-size: 12px; padding: 8px 0;">
+				This section couldn't be displayed due to an unexpected error. Other sections are unaffected — try refreshing the dashboard.
+			</div>
+		</div>`;
+	}
+}
+
+/**
  * Formats a byte count as a human-readable file size string.
  */
 export function formatFileSize(bytes: number): string {
@@ -123,10 +150,37 @@ export function formatFileSize(bytes: number): string {
 	if (numericBytes < 1024) {
 		return `${numericBytes} B`;
 	}
-	if (numericBytes < 1024 * 1024) {
-		return `${(numericBytes / 1024).toFixed(1)} KB`;
+	// Scale through binary units, picking the largest that keeps the value >= 1.
+	const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+	let value = numericBytes / 1024;
+	let unitIndex = 0;
+	while (value >= 1024 && unitIndex < units.length - 1) {
+		value /= 1024;
+		unitIndex++;
 	}
-	return `${(numericBytes / (1024 * 1024)).toFixed(2)} MB`;
+	// Keep KB at 1 decimal (small, noisy); MB and up at 2 decimals.
+	const decimals = unitIndex === 0 ? 1 : 2;
+	return `${value.toFixed(decimals)} ${units[unitIndex]}`;
+}
+
+/**
+ * Formats a duration in milliseconds as a short string like "12m" or "1h 04m".
+ * Returns "—" when the value is missing, non-finite, or negative.
+ */
+export function formatDurationShort(durationMs?: number): string {
+	if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0) {
+		return '—';
+	}
+	const totalMinutes = Math.round(durationMs / 60000);
+	if (totalMinutes < 1) {
+		return '<1m';
+	}
+	if (totalMinutes < 60) {
+		return `${totalMinutes}m`;
+	}
+	const hours = Math.floor(totalMinutes / 60);
+	const minutes = totalMinutes % 60;
+	return `${hours}h ${String(minutes).padStart(2, '0')}m`;
 }
 
 /**
@@ -136,6 +190,9 @@ export function getTimeSince(isoString: string): string {
 	try {
 		const now = Date.now();
 		const then = new Date(isoString).getTime();
+		if (!Number.isFinite(then)) {
+			return 'Unknown';
+		}
 		const diffMs = now - then;
 
 		if (diffMs < 0) {

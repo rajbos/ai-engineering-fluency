@@ -24,7 +24,9 @@ Two caches work together:
 
 > **Method 2 (env vars) warning:** Do **not** add a `"cache"` block to the env var segment in your OMP theme. OMP's segment cache stores the rendered string for the full duration — so if `Set-PoshContext` updates `$env:COPILOT_TOKENS_TODAY`, the prompt still shows the stale cached value until the OMP cache expires. Since `Set-PoshContext` already controls the refresh rate, the OMP cache only adds extra staleness here without any benefit.
 
-A session parsing run (cache miss) typically takes < 1 second.
+A session parsing run (cache miss) typically takes < 1 second, but **can take tens of seconds or more** on a machine with a large amount of accumulated session history, since a cache miss still re-parses every session file before returning. Always use `segment` (not `usage`, which has no output cache at all — see the warning below) and never call the CLI synchronously from something that runs on every prompt/shell start; [Method 2](#method-2-powershell-pre-prompt-hook--recommended) below reads from a local cache file instantly and refreshes it in a detached background process instead.
+
+> ⚠️ **Don't use `usage --json` for a prompt hook.** `usage` (unlike `segment`) has no output cache — it re-discovers and re-aggregates every session file on **every single call**. An earlier version of the Method 2 hook script called `usage --json` synchronously, which made every new terminal or profile reload hang for 45-80+ seconds on a machine with substantial session history. Use `segment --json` (see [Options Reference](#options-reference)) together with the background-refresh pattern in [`posh-hook.ps1`](./posh-hook.ps1) instead.
 
 ---
 
@@ -102,7 +104,18 @@ Open your theme JSON (or YAML/TOML) and add the following to a `segments` array 
 
 Use this if `{{ cmd }}` is not supported in your OMP version, or if you want more control over the output.
 
-### Step 1: Add the hook to your PowerShell profile
+> This hook never calls the CLI synchronously — it reads the last known values from a small on-disk cache file (instant) and refreshes that cache in a fully detached background process whenever it's stale. See the comment header in [`posh-hook.ps1`](./posh-hook.ps1) for why this matters: an earlier version of this hook called the uncached `usage --json` command directly, which could hang shell startup for 45-80+ seconds on machines with a lot of session history.
+
+### Step 1: Copy both files next to your PowerShell profile
+
+Copy [`Update-PoshContextCache.ps1`](./Update-PoshContextCache.ps1) into the same folder as your `$PROFILE` (the hook locates it via `$PSScriptRoot`, so it must sit next to the profile file itself, not just anywhere on `PATH`):
+
+```powershell
+# Find your profile's folder and copy the background-refresh worker there
+Copy-Item .\Update-PoshContextCache.ps1 -Destination (Split-Path $PROFILE.CurrentUserCurrentHost -Parent)
+```
+
+### Step 2: Add the hook to your PowerShell profile
 
 Copy the function from [`posh-hook.ps1`](./posh-hook.ps1) into your `$PROFILE`:
 
@@ -124,7 +137,7 @@ Without this, the segment shows empty values on the first prompt after every new
 
 Save the file.
 
-### Step 2: Add the environment-variable segment to your theme
+### Step 3: Add the environment-variable segment to your theme
 
 ```json
 {
@@ -138,7 +151,7 @@ Save the file.
 }
 ```
 
-The hook updates `$env:COPILOT_TOKENS_TODAY`, `$env:COPILOT_TOKENS_MONTH`, and `$env:COPILOT_TOKENS_30D` at most once every 5 minutes.
+The hook updates `$env:COPILOT_TOKENS_TODAY`, `$env:COPILOT_TOKENS_MONTH`, and `$env:COPILOT_TOKENS_30D` at most once every 5 minutes, from a background process that never blocks your prompt.
 
 ---
 
@@ -196,6 +209,10 @@ Options:
   --ttl <minutes>   Segment cache TTL in minutes (default: 5)
   --refresh         Force refresh — bypass the segment output cache
   --hide-zero       Output nothing when both token counts are zero
+  --json            Output structured JSON (today/month/30d, raw + formatted) instead of
+                     the formatted string. Uses the same fast cache — use this (not
+                     `usage --json`) if you need per-field values, e.g. for a custom
+                     prompt hook like posh-hook.ps1.
   --no-cache        Also bypass the underlying session file cache
   -h, --help        Show help
 ```
@@ -276,6 +293,7 @@ oh-my-posh init pwsh --config "$env:TEMP\test.omp.json" | Invoke-Expression
 | Prompt shows stale data even after refresh | OMP `cache` block on a Method 2 env var segment | **Remove** the `"cache"` block from the env var segment — OMP caches the rendered string, bypassing env var updates from `Set-PoshContext` |
 | Icon shows as a box / `?` | Not using a Nerd Font | Replace `\uec1e` with `🤖` or remove the icon |
 | Prompt slows down | OMP cache not set (Method 1 only) | Add `"cache": {"duration": "5m", "strategy": "session"}` to the `{{ cmd }}` segment |
+| New terminal / profile reload hangs for 45s+ | Method 2 hook calling `usage --json` synchronously (old version) | Update to the current [`posh-hook.ps1`](./posh-hook.ps1) + [`Update-PoshContextCache.ps1`](./Update-PoshContextCache.ps1), which read from a cache file and refresh in a detached background process instead |
 
 ---
 

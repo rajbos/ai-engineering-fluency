@@ -1,12 +1,16 @@
 // Diagnostics Report webview with tabbed interface
-import { buttonHtml } from "../shared/buttonConfig";
+import { navButtonsHtml } from "../shared/buttonConfig";
+import { setHtml } from "../shared/domUtils";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
 import { escapeHtml, formatFileSize, getTimeSince, getEditorIcon } from "../shared/formatUtils";
+import { createPeriodSelector, PERIOD_LABELS, type Period } from "../shared/periodSelector";
 import { createViewStateManager } from "../shared/viewState";
 // CSS imported as text via esbuild
 import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
-import { getWindowData } from "../shared/dataLoader";
+import { getWindowData } from "../../../../src/webview/shared/dataLoader";
+import { registerMessageHandler } from "../shared/messageHandler";
+import { initializeWebviewLocalization, setCurrentLanguage } from "../shared/localization";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
@@ -40,8 +44,21 @@ type SessionFileDetails = {
   parentInfo?: { uuid: string; name: string; sessionFile?: string } | null;
   childInfo?: Array<{ uuid: string; name: string; sessionFile?: string }>;
   totalChildCount?: number;
+  /** Sub-agent/delegation tool calls detected in this session (from cache). Absent when zero/unknown. */
+  subAgentCalls?: number;
   /** Per-model input/output token breakdown (when model attribution data is available). */
   modelUsage?: { [model: string]: { inputTokens: number; outputTokens: number } };
+};
+
+type ModelUsageRow = {
+  model: string;
+  sessionCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedReadTokens: number;
+  cacheCreationTokens: number;
+  cacheCreation1hTokens: number;
+  estimatedCost: number;
 };
 
 type CacheInfo = {
@@ -87,6 +104,7 @@ type GlobalStateCounters = {
   unknownMcpOpenCount: number;
   fluencyBannerDismissed: boolean;
   unknownMcpDismissedVersion: string;
+  efficiencyTabBannerDismissed: boolean;
 };
 
 type GitHubAuthStatus = {
@@ -113,6 +131,28 @@ type QuotaEntitlements = {
   completions?: number;
 };
 
+type CopilotCliOtelComparisonSession = {
+  file: string;
+  sessionId: string;
+  baselineTokens: number;
+  otelTokens: number;
+  delta: number;
+  models: string[];
+  lastActivity: string | null;
+};
+
+type CopilotCliOtelComparison = {
+  otelDirExists: boolean;
+  otelFileCount: number;
+  otelSessionsIndexed: number;
+  sessionsChecked: number;
+  sessionsMatched: number;
+  totalBaselineTokens: number;
+  totalOtelTokens: number;
+  deltaTokens: number;
+  sessions: CopilotCliOtelComparisonSession[];
+};
+
 type DiagnosticsData = {
   report: string;
   sessionFiles: { file: string; size: number; modified: string }[];
@@ -127,7 +167,13 @@ type DiagnosticsData = {
   displaySettings?: DisplaySettings;
   quotaEntitlements?: QuotaEntitlements;
   toolCallStats?: { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } } | null;
+  skillCallStats?: { total: number; byName: { [key: string]: number } } | null;
+  /** Per-skill, per-editor invocation counts (skillName -> editorSource -> count), for the Skill Usage tab's editor filter. */
+  skillCallsByEditor?: { [skillName: string]: { [editorSource: string]: number } } | null;
+  /** Skill name -> description, sourced from discovered SKILL.md frontmatter. */
+  skillDescriptions?: { [skillName: string]: string };
   toolFamilies?: ToolFamilyConfig[];
+  otelComparison?: CopilotCliOtelComparison | null;
 };
 
 type ToolFamilyConfig = {
@@ -138,9 +184,14 @@ type ToolFamilyConfig = {
   description?: string;
 };
 
+type OtelDeltaPeriod = "all" | "today" | "yesterday" | "week" | "month";
+
 type DiagnosticsViewState = {
   activeTab?: string;
   activeSubtab?: string;
+  otelDeltaPeriod?: OtelDeltaPeriod;
+  shareCardPeriod?: Period;
+  skillUsageEditorFilter?: string;
 };
 
 type FolderFileResult = {
@@ -159,12 +210,29 @@ declare function acquireVsCodeApi<TState = DiagnosticsViewState>(): {
 };
 
 const vscode = acquireVsCodeApi<DiagnosticsViewState>();
-const initialData = getWindowData<DiagnosticsData>('__INITIAL_DIAGNOSTICS__');
+const initialData = getWindowData<DiagnosticsData & { localization?: Record<string, string> }>('__INITIAL_DIAGNOSTICS__');
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 
 const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   activeTab: undefined,
   activeSubtab: undefined,
+  otelDeltaPeriod: "all",
+  shareCardPeriod: "last14",
+  skillUsageEditorFilter: "all",
 });
+
+let currentOtelComparison: CopilotCliOtelComparison | null | undefined;
+let currentOtelDeltaPeriod: OtelDeltaPeriod = diagState.restore().otelDeltaPeriod ?? "all";
+
+// Periods offered by the Share Card's period selector, in display order.
+const SHARE_CARD_PERIOD_ORDER: Period[] = ["last7", "last14", "last30", "last90", "allTime"];
+let currentShareCardPeriod: Period = diagState.restore().shareCardPeriod ?? "last14";
 
 // Sorting and filtering state
 let currentSortColumn: "lastInteraction" | "size" | "tokens" | "interactions" | "contextRefs" = "lastInteraction";
@@ -179,11 +247,18 @@ let toolSortColumn: "tool" | "calls" | "total" | "avg" = "avg";
 let toolSortDir: "asc" | "desc" = "desc";
 let storedToolFamilies: ToolFamilyConfig[] | undefined;
 
+// Skill usage tab state
+let currentSkillCallStats: DiagnosticsData['skillCallStats'];
+let currentSkillCallsByEditor: DiagnosticsData['skillCallsByEditor'];
+let currentSkillDescriptions: DiagnosticsData['skillDescriptions'];
+let skillUsageEditorFilter: string = diagState.restore().skillUsageEditorFilter ?? "all";
+
 // Render state (promoted to module level so all setup functions can be top-level)
 let storedDetailedFiles: SessionFileDetails[] = [];
 let isLoading = true;
 let currentBackendInfo: BackendStorageInfo | undefined;
 let currentGithubAuth: GitHubAuthStatus | undefined;
+let currentModelUsageTimeRange = "all";
 
 function removeSessionFilesSection(reportText: string): string {
   return reportText.replace(SESSION_FILES_SECTION_REGEX, "");
@@ -285,9 +360,12 @@ function buildCandidatePathsElement(
   description.style.cssText = "color: #999; font-size: 12px; margin: 4px 0 8px 0;";
   description.textContent = "These are all the paths the extension checks for session files. Paths marked with ✅ exist on this system.";
   container.appendChild(description);
+  const tableContainer = document.createElement("div");
+  tableContainer.className = "table-container";
+  container.appendChild(tableContainer);
   const table = document.createElement("table");
   table.className = "session-table";
-  container.appendChild(table);
+  tableContainer.appendChild(table);
   const thead = document.createElement("thead");
   const headerRow = document.createElement("tr");
   for (const text of ["Status", "Source", "Path"]) {
@@ -419,34 +497,33 @@ function compareSessionFiles(a: SessionFileDetails, b: SessionFileDetails): numb
   return currentSortDirection === "desc" ? bNum - aNum : aNum - bNum;
 }
 
-function sortSessionFiles(files: SessionFileDetails[]): SessionFileDetails[] {
-  const sorted = [...files].sort(compareSessionFiles);
-
-  // After sorting, group each child session immediately after its parent.
-  // Children whose parent is not in the list stay in their sorted position.
-  const byFile = new Map<string, SessionFileDetails>();
-  for (const f of sorted) { byFile.set(f.file, f); }
-
+function groupChildrenAfterParents(
+  sorted: SessionFileDetails[],
+  byFile: Map<string, SessionFileDetails>,
+): SessionFileDetails[] {
   const placed = new Set<string>();
   const result: SessionFileDetails[] = [];
-
   for (const f of sorted) {
-    if (placed.has(f.file)) { continue; } // already emitted as a child of an earlier parent
+    if (placed.has(f.file)) { continue; }
     result.push(f);
     placed.add(f.file);
-    // Emit any children of this session immediately after it
-    if (f.childInfo && f.childInfo.length > 0) {
-      for (const childRef of f.childInfo) {
-        if (!childRef.sessionFile) { continue; }
-        const childDetails = byFile.get(childRef.sessionFile);
-        if (childDetails && !placed.has(childDetails.file)) {
-          result.push(childDetails);
-          placed.add(childDetails.file);
-        }
+    for (const childRef of f.childInfo ?? []) {
+      if (!childRef.sessionFile) { continue; }
+      const childDetails = byFile.get(childRef.sessionFile);
+      if (childDetails && !placed.has(childDetails.file)) {
+        result.push(childDetails);
+        placed.add(childDetails.file);
       }
     }
   }
   return result;
+}
+
+function sortSessionFiles(files: SessionFileDetails[]): SessionFileDetails[] {
+  const sorted = [...files].sort(compareSessionFiles);
+  const byFile = new Map<string, SessionFileDetails>();
+  for (const f of sorted) { byFile.set(f.file, f); }
+  return groupChildrenAfterParents(sorted, byFile);
 }
 
 function getSortIndicator(column: typeof currentSortColumn): string {
@@ -459,16 +536,20 @@ function getSortIndicator(column: typeof currentSortColumn): string {
 function getEditorStats(files: SessionFileDetails[]): {
   [key: string]: { count: number; interactions: number };
 } {
-  const stats: { [key: string]: { count: number; interactions: number } } = {};
+  // Use a Map keyed by (attacker-influenceable) editor name instead of a plain
+  // object, so a crafted session file with an editor name like "__proto__"
+  // can't pollute Object.prototype.
+  const stats = new Map<string, { count: number; interactions: number }>();
   for (const sf of files) {
-    const editor = sf.editorSource || "Unknown";
-    if (!stats[editor]) {
-      stats[editor] = { count: 0, interactions: 0 };
+    const editor = sf.editorName || sf.editorSource || "Unknown";
+    if (!stats.has(editor)) {
+      stats.set(editor, { count: 0, interactions: 0 });
     }
-    stats[editor].count++;
-    stats[editor].interactions += sf.interactions;
+    const entry = stats.get(editor)!;
+    entry.count++;
+    entry.interactions += sf.interactions;
   }
-  return stats;
+  return Object.fromEntries(stats);
 }
 
 function safeText(value: unknown): string {
@@ -491,7 +572,7 @@ function getUnattributedTokens(sf: SessionFileDetails): number {
 }
 
 function applySessionFilters(detailedFiles: SessionFileDetails[]): FilteredSessionResult {
-  let filteredFiles = currentEditorFilter ? detailedFiles.filter((sf) => sf.editorSource === currentEditorFilter) : detailedFiles;
+  let filteredFiles = currentEditorFilter ? detailedFiles.filter((sf) => (sf.editorName || sf.editorSource) === currentEditorFilter) : detailedFiles;
   if (currentContextRefFilter) {
     filteredFiles = filteredFiles.filter((sf) => { const value = sf.contextReferences[currentContextRefFilter!]; return typeof value === "number" && value > 0; });
   }
@@ -535,6 +616,13 @@ function buildSessionSummaryCardsHtml(filteredFiles: SessionFileDetails[], allFi
   <div class="filter-options"><label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? 'checked' : ''}>Hide sessions with 0 interactions${zeroInteractionCount > 0 ? `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` : ''}</label>${unattributedCheckbox}</div>`;
 }
 
+/** Badge for sessions with detected sub-agent tool calls. */
+function buildSubAgentBadgeHtml(sf: SessionFileDetails): string {
+  if (!sf.subAgentCalls || sf.subAgentCalls <= 0) { return ''; }
+  const label = sf.subAgentCalls === 1 ? '1 sub-agent tool call' : `${sf.subAgentCalls} sub-agent tool calls`;
+  return `<span class="session-hierarchy-badge" title="${label} detected in this session">🤖 ${sf.subAgentCalls} Sub-Agent${sf.subAgentCalls === 1 ? '' : 's'}</span>`;
+}
+
 function buildHierarchyBadgesHtml(sf: SessionFileDetails): string {
   let html = '';
   if (sf.parentInfo) {
@@ -549,6 +637,7 @@ function buildHierarchyBadgesHtml(sf: SessionFileDetails): string {
     const label = count === 1 ? '1 child session' : `${count} child sessions`;
     html += `<span class="session-hierarchy-badge hierarchy-children" title="${label}">↓ ${count} ${count === 1 ? 'Child' : 'Children'}</span>`;
   }
+  html += buildSubAgentBadgeHtml(sf);
   return html ? `<div class="session-hierarchy-badges">${html}</div>` : '';
 }
 
@@ -580,7 +669,7 @@ function renderSessionTable(
   detailedFiles: SessionFileDetails[],
   isLoading: boolean = false,
 ): string {
-  if (isLoading) { return `<div class="loading-state"><div class="loading-spinner">⏳</div><div class="loading-text">Loading session files...</div><div class="loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>`; }
+  if (isLoading) { return `<div class="loading-state"><div class="loading-spinner">⏳</div><div class="loading-text">Loading session files...</div><div class="loading-subtext" id="session-loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>`; }
   if (detailedFiles.length === 0) { return '<p style="color: #999;">No session files with activity in the last 14 days.</p>'; }
   const editorStats = getEditorStats(detailedFiles);
   const editors = Object.keys(editorStats).sort();
@@ -632,8 +721,112 @@ function flagRow(key: string, label: string, value: boolean): string {
     </tr>`;
 }
 
+/** Rolling lookback (in days) for each period the Share Card period selector offers. Periods absent from
+ * this map (e.g. "allTime") are treated as "no filtering". */
+const SHARE_CARD_PERIOD_DAYS: Partial<Record<Period, number>> = { last7: 7, last14: 14, last30: 30, last90: 90 };
+
+/** Returns the sessions from `detailedFiles` whose last interaction falls within `period` (allTime = no filtering). */
+function filterFilesByShareCardPeriod(detailedFiles: SessionFileDetails[], period: Period, now: Date = new Date()): SessionFileDetails[] {
+  const days = SHARE_CARD_PERIOD_DAYS[period];
+  if (days === undefined) { return detailedFiles; } // allTime (or any unmapped period): no filtering
+  const cutoff = new Date(now);
+  cutoff.setDate(cutoff.getDate() - days);
+  return detailedFiles.filter((sf) => {
+    if (!sf.lastInteraction) { return false; }
+    const activity = new Date(sf.lastInteraction);
+    return !Number.isNaN(activity.getTime()) && activity >= cutoff && activity <= now;
+  });
+}
+
+/** Lowercase, human-readable phrase describing a Share Card period, for use mid-sentence. */
+function shareCardPeriodPhrase(period: Period): string {
+  return period === "allTime" ? "of all time" : `in the ${PERIOD_LABELS[period].toLowerCase()}`;
+}
+
+/** Builds the plain-text version of the share summary, used by the "Copy Summary Text" button. */
+function buildShareSummaryText(
+  editors: string[],
+  editorStats: Record<string, { count: number; interactions: number }>,
+  totalSessions: number,
+  totalInteractions: number,
+  totalTokens: number,
+  period: Period,
+): string {
+  const editorList = editors
+    .map((editor) => `${getEditorIcon(editor)} ${editor} (${editorStats[editor].count})`)
+    .join(", ");
+  return `My AI Coding Toolbox — ${editors.length} editor${editors.length === 1 ? "" : "s"} detected: ${editorList}. ` +
+    `${totalSessions} sessions, ${totalInteractions} interactions, ${formatTokenCount(totalTokens)} tokens ${shareCardPeriodPhrase(period)}. #AIEngineeringFluency`;
+}
+
+/** Renders a screenshot-friendly "Share Card" tab summarizing the detected editors — meant to be
+ * shared in social media posts, mirroring the visual style of the startup loading screen. */
+function renderShareCardTab(detailedFiles: SessionFileDetails[], isLoadingSessions: boolean = false): string {
+  if (isLoadingSessions) {
+    return `<div id="tab-share" class="tab-content">
+      <div class="info-box">
+        <div class="info-box-title">📸 Share Card</div>
+        <div>A snapshot of your AI coding toolbox — screenshot this card to share your editor mix on social media.</div>
+      </div>
+      <div class="loading-state"><div class="loading-spinner">⏳</div><div class="loading-text">Loading session files...</div><div class="loading-subtext" id="share-loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>
+    </div>`;
+  }
+  if (detailedFiles.length === 0) {
+    return `<div id="tab-share" class="tab-content">
+      <div class="info-box">
+        <div class="info-box-title">📸 Share Card</div>
+        <div>No session activity found yet. Once you have some AI coding sessions, a shareable summary card will appear here.</div>
+      </div>
+    </div>`;
+  }
+  const period = currentShareCardPeriod;
+  const filteredFiles = filterFilesByShareCardPeriod(detailedFiles, period);
+  const editorStats = getEditorStats(filteredFiles);
+  const editors = Object.keys(editorStats).sort((a, b) => editorStats[b].count - editorStats[a].count);
+  const totalSessions = filteredFiles.length;
+  const totalInteractions = filteredFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
+  const totalTokens = filteredFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
+  const pills = editors
+    .map((editor) => `<div class="share-pill"><span>${getEditorIcon(editor)}</span><span>${escapeHtml(editor)}</span><span class="share-pill-count">${editorStats[editor].count}</span></div>`)
+    .join("");
+  const emptyPeriodNotice = totalSessions === 0
+    ? `<div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">No session activity in this period. Try a wider range.</div>`
+    : "";
+  return `<div id="tab-share" class="tab-content">
+    <div class="info-box">
+      <div class="info-box-title">📸 Share Card</div>
+      <div>A snapshot of your AI coding toolbox — screenshot this card to share your editor mix on social media.</div>
+    </div>
+    <div class="share-card-controls" style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 12px; color: var(--text-muted);">Period:</span>
+      <span id="share-card-period-selector"></span>
+    </div>
+    <div class="share-card">
+      <div class="share-badge">🤖 AI Engineering Fluency</div>
+      <div class="share-title">My AI Coding Toolbox</div>
+      <div class="share-subtitle">${escapeHtml(PERIOD_LABELS[period])} · ${editors.length} editor${editors.length === 1 ? "" : "s"} detected</div>
+      <div class="share-pills">${pills}</div>
+      <div class="share-stats">
+        <div class="share-stat"><div class="share-stat-value">${totalSessions}</div><div class="share-stat-label">Sessions</div></div>
+        <div class="share-stat"><div class="share-stat-value">${totalInteractions}</div><div class="share-stat-label">Interactions</div></div>
+        <div class="share-stat"><div class="share-stat-value" title="${totalTokens.toLocaleString()} tokens">${formatTokenCount(totalTokens)}</div><div class="share-stat-label">Tokens</div></div>
+        <div class="share-stat"><div class="share-stat-value">${editors.length}</div><div class="share-stat-label">Editors</div></div>
+      </div>
+    </div>
+    ${emptyPeriodNotice}
+    <div class="button-group" style="margin-top: 12px;">
+      <button class="button secondary" id="btn-copy-share-summary"><span>📋</span><span>Copy Summary Text</span></button>
+    </div>
+    <div class="share-buttons" style="margin-top: 12px;">
+      <button id="btn-share-card-linkedin" class="share-btn share-btn-linkedin"><span class="share-btn-icon">💼</span><span>Share on LinkedIn</span></button>
+      <button id="btn-share-card-bluesky" class="share-btn share-btn-bluesky"><span class="share-btn-icon">🦋</span><span>Share on Bluesky</span></button>
+      <button id="btn-share-card-mastodon" class="share-btn share-btn-mastodon"><span class="share-btn-icon">🐘</span><span>Share on Mastodon</span></button>
+    </div>
+  </div>`;
+}
+
 function renderDebugTab(counters: GlobalStateCounters | undefined): string {
-  const c = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: '' };
+  const c = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: '', efficiencyTabBannerDismissed: false };
   return `
     <div id="tab-debug" class="tab-content">
       <div class="info-box">
@@ -650,6 +843,7 @@ function renderDebugTab(counters: GlobalStateCounters | undefined): string {
         <table><tbody>
           ${flagRow('news.fluencyScoreBanner.v1.dismissed', 'news.fluencyScoreBanner.v1.dismissed', c.fluencyBannerDismissed)}
           ${stringRow('news.unknownMcpTools.dismissedVersion', 'news.unknownMcpTools.dismissedVersion', c.unknownMcpDismissedVersion)}
+          ${flagRow('news.efficiencyTab.v1.dismissed', 'news.efficiencyTab.v1.dismissed', c.efficiencyTabBannerDismissed)}
         </tbody></table>
         <div style="margin-top: 16px;">
           <button class="button secondary" id="btn-reset-debug-counters"><span>🔄</span><span>Reset All Counters &amp; Dismissed Flags</span></button>
@@ -778,13 +972,7 @@ function renderBackendStoragePanel(
     return `
       <div class="info-box">
         <div class="info-box-title">☁️ Backend Storage</div>
-        <div>Backend storage information is not available. This may be a temporary issue.</div>
-        <div class="button-group" style="margin-top: 12px;">
-          <button class="button" id="btn-configure-backend">
-            <span>🔧</span>
-            <span>Configure Backend</span>
-          </button>
-        </div>
+        <div>⏳ Loading backend storage status...</div>
       </div>
     `;
   }
@@ -814,7 +1002,7 @@ function renderFolderAnalyzerTab(): string {
       </div>
     </div>
     <div class="section">
-      <div class="section-title">📁 Folder Selection</div>
+      <div class="section-title"><span class="codicon codicon-folder-opened"></span><span>Folder Selection</span></div>
       <div class="folder-input-row">
         <input
           type="text"
@@ -830,15 +1018,15 @@ function renderFolderAnalyzerTab(): string {
         </label>
         <select id="tool-type-select" class="tool-type-select">
           <option value="auto">🔍 Auto-detect (all JSON / JSONL files)</option>
+          <option value="antigravity">🚀 Antigravity (.jsonl only)</option>
+          <option value="claude-code">🟣 Claude Code (.jsonl only)</option>
+          <option value="claude-desktop">🖥️ Claude Desktop</option>
+          <option value="continue">⚡ Continue</option>
           <option value="copilot-chat">💙 GitHub Copilot Chat (VS Code)</option>
           <option value="copilot-cli">🤖 GitHub Copilot CLI</option>
-          <option value="claude-code">🟣 Claude Code (.jsonl only)</option>
           <option value="gemini-cli">💎 Gemini CLI (.jsonl only)</option>
-          <option value="antigravity">🚀 Antigravity (.jsonl only)</option>
-          <option value="continue">⚡ Continue</option>
-          <option value="opencode">🟢 OpenCode (JSON format only — DB not supported)</option>
           <option value="mistral-vibe">🔥 Mistral Vibe</option>
-          <option value="claude-desktop">🖥️ Claude Desktop</option>
+          <option value="opencode">🟢 OpenCode (JSON format only — DB not supported)</option>
         </select>
       </div>
       <div style="margin-top: 16px;">
@@ -907,7 +1095,7 @@ function renderFolderAnalysisResults(
 
   return `
     <div class="section" style="margin-top: 0;">
-      <div class="section-title">📊 Analysis Results</div>
+      <div class="section-title"><span class="codicon codicon-graph"></span><span>Analysis Results</span></div>
       ${truncatedWarning}
       <div class="summary-cards">
         <div class="summary-card">
@@ -949,6 +1137,186 @@ function renderFolderAnalysisResults(
             <tbody>${tableRows}</tbody>
           </table>
         </div>`}
+    </div>`;
+}
+
+const MODEL_USAGE_PERIOD_ORDER: Period[] = ["allTime", "lastMonth", "currentMonth", "thisWeek", "today"];
+const MODEL_USAGE_PERIOD_TO_TIME_RANGE: Record<string, string> = {
+  today: "today",
+  thisWeek: "week",
+  currentMonth: "month",
+  lastMonth: "lastMonth",
+  allTime: "all",
+  yesterday: "yesterday",
+};
+const MODEL_USAGE_TIME_RANGE_TO_PERIOD: Record<string, string> = {
+  today: "today",
+  week: "thisWeek",
+  month: "currentMonth",
+  lastMonth: "lastMonth",
+  all: "allTime",
+  yesterday: "yesterday",
+};
+
+function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessions: boolean = false): string {
+  const editorStats = getEditorStats(detailedFiles);
+  const editorOptions = Object.keys(editorStats).sort()
+    .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
+    .join("");
+  const statusText = isLoadingSessions ? "⏳ Loading sessions…" : "";
+  return `
+    <div class="info-box">
+      <div class="info-box-title">🧮 Model Usage Breakdown</div>
+      <div>
+        Aggregates the exact per-model token usage and estimated cost the dashboard uses,
+        for a single editor or across all of them. Handy for spotting model/pricing
+        mismatches behind an unexpected cost total (e.g. tokens attributed to the wrong model tier).
+        Updates automatically when you change the editor or time range below.
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">🎯 Select Editor &amp; Time Range</div>
+      <div class="folder-input-row">
+        <select id="model-usage-editor-select" class="tool-type-select" ${isLoadingSessions ? "disabled" : ""}>
+          <option value="all">🌐 All Editors</option>
+          ${editorOptions}
+        </select>
+        <span id="model-usage-time-selector"></span>
+        <span id="model-usage-status" style="font-size: 12px; color: var(--text-muted);">${escapeHtml(statusText)}</span>
+      </div>
+    </div>
+    <div id="model-usage-results"></div>
+  `;
+}
+
+function renderModelUsageTimeSelector(disabled: boolean = false): void {
+  const wrapper = document.getElementById("model-usage-time-selector");
+  if (!wrapper) { return; }
+  wrapper.replaceChildren();
+  const selectedPeriod = MODEL_USAGE_TIME_RANGE_TO_PERIOD[currentModelUsageTimeRange] ?? "allTime";
+  const { select } = createPeriodSelector({
+    id: "model-usage-time-select",
+    selected: selectedPeriod,
+    periods: MODEL_USAGE_PERIOD_ORDER,
+    extraOptions: [{ value: "yesterday", label: "Yesterday" }],
+    label: "",
+    onChange: (value) => {
+      const timeRange = MODEL_USAGE_PERIOD_TO_TIME_RANGE[value];
+      if (!timeRange) { return; }
+      currentModelUsageTimeRange = timeRange;
+      triggerModelUsageAnalysis();
+    },
+  });
+  select.disabled = disabled;
+  wrapper.append(select);
+}
+
+function buildModelUsageTableRow(row: ModelUsageRow, showCache1h: boolean): string {
+  const sessionCountTitle = escapeHtml(`${row.sessionCount} session(s)`);
+  const inputTokensTitle = escapeHtml(`${row.inputTokens.toLocaleString()} tokens`);
+  const outputTokensTitle = escapeHtml(`${row.outputTokens.toLocaleString()} tokens`);
+  const cacheCreationTokensTitle = escapeHtml(`${row.cacheCreationTokens.toLocaleString()} tokens`);
+  const cacheCreation1hTokensTitle = escapeHtml(`${row.cacheCreation1hTokens.toLocaleString()} tokens`);
+  const cachedReadTokensTitle = escapeHtml(`${row.cachedReadTokens.toLocaleString()} tokens`);
+
+  return `
+    <tr>
+      <td>${escapeHtml(row.model)}</td>
+      <td title="${sessionCountTitle}">${row.sessionCount.toLocaleString()}</td>
+      <td title="${inputTokensTitle}">${formatTokenCount(row.inputTokens)}</td>
+      <td title="${outputTokensTitle}">${formatTokenCount(row.outputTokens)}</td>
+      <td title="${cacheCreationTokensTitle}">${formatTokenCount(row.cacheCreationTokens)}</td>
+      ${showCache1h ? `<td title="${cacheCreation1hTokensTitle}">${formatTokenCount(row.cacheCreation1hTokens)}</td>` : ""}
+      <td title="${cachedReadTokensTitle}">${formatTokenCount(row.cachedReadTokens)}</td>
+      <td>$${row.estimatedCost.toFixed(2)}</td>
+    </tr>`;
+}
+
+function buildModelUsageExplanation(fileCount: number, filesWithUsage: number): string {
+  const missing = fileCount - filesWithUsage;
+  if (missing <= 0) { return ""; }
+  return `
+    <div class="info-box" style="margin-top: 12px;">
+      <div class="info-box-title">ℹ️ ${missing} session(s) have no per-model data</div>
+      <div>
+        This is often expected, not a bug. Common causes: chat-only sessions stored in a
+        database with no model/token columns (e.g. Copilot CLI's session-store.db), older
+        or truncated session logs written before an editor started recording per-model
+        attribution, or sessions that never made a model-backed request (e.g. empty/aborted
+        chats).
+      </div>
+    </div>`;
+}
+
+const TIME_RANGE_LABELS: Record<string, string> = {
+  all: "All Time",
+  lastMonth: "Last Month",
+  month: "Current Month",
+  week: "This Week",
+  today: "Today",
+  yesterday: "Yesterday",
+};
+
+function renderModelUsageResults(
+  editor: string,
+  fileCount: number,
+  filesWithUsage: number,
+  rows: ModelUsageRow[],
+  totalCost: number,
+  supportsCache1h: boolean = true,
+  timeRange: string = "all",
+): string {
+  const editorLabel = editor === "all" ? "All Editors" : editor;
+  const timeLabel = TIME_RANGE_LABELS[timeRange] || "All Time";
+  const scopeLabel = timeRange === "all" ? editorLabel : `${editorLabel} — ${timeLabel}`;
+  if (rows.length === 0) {
+    return `
+      <div class="section" style="margin-top: 0;">
+        <div style="padding: 32px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 36px; margin-bottom: 12px;">📭</div>
+          <div style="font-size: 14px;">No per-model usage data found for ${escapeHtml(scopeLabel)}.</div>
+          <div style="font-size: 12px; margin-top: 8px;">${fileCount} session file(s) matched, ${filesWithUsage} had model attribution data.</div>
+        </div>
+      </div>
+      ${buildModelUsageExplanation(fileCount, filesWithUsage)}`;
+  }
+  const tableRows = rows.map((r) => buildModelUsageTableRow(r, supportsCache1h)).join("");
+  return `
+    <div class="section" style="margin-top: 0;">
+      <div class="section-title">📊 Results — ${escapeHtml(scopeLabel)}</div>
+      <div class="summary-cards">
+        <div class="summary-card">
+          <div class="summary-label">📄 Session Files</div>
+          <div class="summary-value">${fileCount}</div>
+          <div style="font-size: 11px; color: var(--text-muted);">${filesWithUsage} with model data</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">🧩 Models</div>
+          <div class="summary-value">${rows.length}</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">💰 Est. Total Cost</div>
+          <div class="summary-value">$${totalCost.toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="table-container" style="margin-top: 12px; max-height: 420px;">
+        <table class="session-table">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Sessions</th>
+              <th>Input</th>
+              <th>Output</th>
+              <th>Cache Create</th>
+              ${supportsCache1h ? "<th>Cache Create (1h)</th>" : ""}
+              <th>Cache Read</th>
+              <th>Est. Cost</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+      ${buildModelUsageExplanation(fileCount, filesWithUsage)}
     </div>`;
 }
 
@@ -1046,9 +1414,13 @@ function buildSessionFoldersElement(folders: SessionFolder[]): HTMLElement {
   heading.textContent = "Main Session Folders (by editor root):";
   container.appendChild(heading);
 
+  const tableContainer = document.createElement("div");
+  tableContainer.className = "table-container";
+  container.appendChild(tableContainer);
+
   const table = document.createElement("table");
   table.className = "session-table";
-  container.appendChild(table);
+  tableContainer.appendChild(table);
 
   const thead = document.createElement("thead");
   table.appendChild(thead);
@@ -1146,6 +1518,56 @@ function activateTab(tabId: string): boolean {
     return true;
   }
   return false;
+}
+
+/** Which group tab (Diagnostics / Research / Settings) each leaf tab lives under. */
+const TAB_GROUPS: Record<string, string[]> = {
+  diagnostics: ["report", "sessions", "cache", "path-analyzer"],
+  research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta"],
+  settings: ["display", "backend", "github", "debug"],
+};
+
+function groupOfTab(tabId: string): string {
+  for (const [group, tabs] of Object.entries(TAB_GROUPS)) {
+    if (tabs.includes(tabId)) { return group; }
+  }
+  return "diagnostics";
+}
+
+/** The first leaf tab in a group that actually has a rendered button (handles the conditional Debug tab). */
+function firstAvailableTabInGroup(groupId: string): string | undefined {
+  return TAB_GROUPS[groupId]?.find((id) => document.querySelector(`.tab[data-tab="${id}"]`));
+}
+
+/** Shows the leaf tab bar for the given group and hides the others; does not change which leaf tab is active. */
+function activateGroup(groupId: string): boolean {
+  const groupButton = document.querySelector(`.group-tab[data-group="${groupId}"]`);
+  const leafBar = document.querySelector(`.leaf-tabs[data-group="${groupId}"]`);
+  if (!groupButton || !leafBar) { return false; }
+
+  document.querySelectorAll(".group-tab").forEach((b) => b.classList.remove("active"));
+  document.querySelectorAll<HTMLElement>(".leaf-tabs").forEach((b) => { b.style.display = "none"; });
+
+  groupButton.classList.add("active");
+  (leafBar as HTMLElement).style.display = "flex";
+  return true;
+}
+
+function setupGroupHandlers(): void {
+  document.querySelectorAll(".group-tab").forEach((button) => {
+    button.addEventListener("click", () => {
+      const groupId = (button as HTMLElement).getAttribute("data-group");
+      if (!groupId || !activateGroup(groupId)) { return; }
+
+      const activeTabInGroup = document.querySelector(`.leaf-tabs[data-group="${groupId}"] .tab.active`);
+      if (!activeTabInGroup) {
+        const nextTab = firstAvailableTabInGroup(groupId);
+        if (nextTab && activateTab(nextTab)) {
+          diagState.patch({ activeTab: nextTab });
+        }
+      }
+    });
+  });
 }
 
 function setupSortHandlers(): void {
@@ -1296,7 +1718,7 @@ function setupSubtabHandlers(): void {
 function reRenderTable(): void {
   const container = document.getElementById("session-table-container");
   if (container) {
-    container.innerHTML = renderSessionTable(storedDetailedFiles, isLoading);
+    setHtml(container, renderSessionTable(storedDetailedFiles, isLoading));
     if (!isLoading) {
       setupSortHandlers();
       setupEditorFilterHandlers();
@@ -1316,9 +1738,9 @@ function reRenderToolAnalysisTable(): void {
     const baselineRaw = table.getAttribute("data-baseline");
     const baseline = baselineRaw ? parseFloat(baselineRaw) : NaN;
     const tbody = table.querySelector("tbody");
-    if (tbody) { tbody.innerHTML = renderToolAnalysisRows(rows, baseline); }
+    if (tbody) { setHtml(tbody, renderToolAnalysisRows(rows, baseline)); }
     const thead = table.querySelector("thead");
-    if (thead) { thead.innerHTML = toolAnalysisTheadHtml(); }
+    if (thead) { setHtml(thead, toolAnalysisTheadHtml()); }
   });
   setupToolAnalysisSortHandlers();
 }
@@ -1437,16 +1859,16 @@ function setupFolderAnalyzerHandlers(): void {
     const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
     if (btn) {
       btn.disabled = true;
-      btn.innerHTML = "<span>⏳</span><span>Analyzing…</span>";
+      setHtml(btn, "<span>⏳</span><span>Analyzing…</span>");
     }
 
     const resultsDiv = document.getElementById("folder-analysis-results");
     if (resultsDiv) {
-      resultsDiv.innerHTML = `
+      setHtml(resultsDiv, `
           <div class="analyzer-loading">
             <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
             <span>Scanning files…</span>
-          </div>`;
+          </div>`);
     }
 
     vscode.postMessage({
@@ -1457,6 +1879,56 @@ function setupFolderAnalyzerHandlers(): void {
   });
 }
 
+function triggerModelUsageAnalysis(): void {
+  const select = document.getElementById("model-usage-editor-select") as HTMLSelectElement | null;
+  if (!select || select.disabled) { return; }
+  const editor = select.value || "all";
+  const timeRange = currentModelUsageTimeRange || "all";
+
+  const resultsDiv = document.getElementById("model-usage-results");
+  if (resultsDiv) {
+    setHtml(resultsDiv, `
+        <div class="analyzer-loading">
+          <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+          <span>Aggregating model usage…</span>
+        </div>`);
+  }
+
+  vscode.postMessage({ command: "analyzeModelUsage", editor, timeRange });
+}
+
+function setupModelUsageHandlers(): void {
+  document.getElementById("model-usage-editor-select")?.addEventListener("change", () => {
+    triggerModelUsageAnalysis();
+  });
+}
+
+function handleModelUsageResult(message: DiagMessage): void {
+  const resultsDiv = document.getElementById("model-usage-results");
+  if (!resultsDiv) { return; }
+  if (typeof message.timeRange === "string" && message.timeRange) {
+    currentModelUsageTimeRange = message.timeRange;
+    renderModelUsageTimeSelector(false);
+  }
+  if (message.stillLoading) {
+    setHtml(resultsDiv, `
+      <div class="info-box" style="margin-top: 12px;">
+        <div class="info-box-title">⏳ Still loading session files</div>
+        <div>Session files are still being scanned in the background. Wait a moment (watch the "Session Files" tab count) and try again.</div>
+      </div>`);
+    return;
+  }
+  setHtml(resultsDiv, renderModelUsageResults(
+    String(message.editor || "all"),
+    Number(message.fileCount || 0),
+    Number(message.filesWithUsage || 0),
+    (message.rows || []) as ModelUsageRow[],
+    Number(message.totalCost || 0),
+    message.supportsCache1h !== false,
+    String(message.timeRange || "all"),
+  ));
+}
+
 function setupTabHandlers(): void {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -1464,6 +1936,10 @@ function setupTabHandlers(): void {
 
       if (tabId && activateTab(tabId)) {
         diagState.patch({ activeTab: tabId });
+        if (tabId === "model-usage") {
+          const resultsDiv = document.getElementById("model-usage-results");
+          if (resultsDiv && !resultsDiv.innerHTML.trim()) { triggerModelUsageAnalysis(); }
+        }
       }
     });
   });
@@ -1471,7 +1947,7 @@ function setupTabHandlers(): void {
 
 function handleClearCacheClick(target: HTMLElement): void {
   target.style.background = "#d97706";
-  target.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+  setHtml(target, "<span>⏳</span><span>Clearing...</span>");
   if (target instanceof HTMLButtonElement) {
     target.disabled = true;
   }
@@ -1506,8 +1982,14 @@ function handleGlobalClickEvent(event: MouseEvent): void {
   if (target.id === "btn-clear-cache" || target.id === "btn-clear-cache-tab") {
     handleClearCacheClick(target);
   }
+  if (target.id === "btn-reset-insights" || target.id === "btn-reset-insights-tab") {
+    vscode.postMessage({ command: "resetInsightsState" });
+  }
   if (target.id === "btn-reset-debug-counters") {
     vscode.postMessage({ command: "resetDebugCounters" });
+  }
+  if (target.id === "btn-reset-discovered-editors") {
+    vscode.postMessage({ command: "resetDiscoveredEditors" });
   }
   if (target.classList.contains("debug-counter-set")) {
     handleDebugCounterSetClick(target);
@@ -1558,13 +2040,77 @@ function wireNavButtons(): void {
     ?.addEventListener("click", () =>
       vscode.postMessage({ command: "showEnvironmental" }),
     );
+  document
+    .getElementById("btn-efficiency")
+    ?.addEventListener("click", () =>
+      vscode.postMessage({ command: "showEfficiency" }),
+    );
   wireExtensionPointButtons(vscode);
+}
+
+/** Renders the Share Card's period dropdown into its placeholder span, reusing the shared period-selector
+ * component for visual/state consistency with the other period selectors in this webview (e.g. Model Usage). */
+function renderShareCardPeriodSelector(): void {
+  const wrapper = document.getElementById("share-card-period-selector");
+  if (!wrapper) { return; }
+  wrapper.replaceChildren();
+  const { select } = createPeriodSelector({
+    id: "share-card-period-select",
+    selected: currentShareCardPeriod,
+    periods: SHARE_CARD_PERIOD_ORDER,
+    label: "",
+    onChange: (value) => {
+      currentShareCardPeriod = value as Period;
+      diagState.patch({ shareCardPeriod: currentShareCardPeriod });
+      reRenderShareCard();
+    },
+  });
+  wrapper.append(select);
+}
+
+/** Builds the current Share Card's plain-text summary from live filtered session data, for both
+ * the "Copy Summary Text" button and the social share buttons. */
+function buildCurrentShareSummaryText(): string {
+  const filteredFiles = filterFilesByShareCardPeriod(storedDetailedFiles, currentShareCardPeriod);
+  const editorStats = getEditorStats(filteredFiles);
+  const editors = Object.keys(editorStats).sort((a, b) => editorStats[b].count - editorStats[a].count);
+  const totalSessions = filteredFiles.length;
+  const totalInteractions = filteredFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
+  const totalTokens = filteredFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
+  return buildShareSummaryText(editors, editorStats, totalSessions, totalInteractions, totalTokens, currentShareCardPeriod);
+}
+
+/** Wires the "Copy Summary Text" button, social share buttons, and period selector on the Share
+ * Card tab. Re-run after `reRenderShareCard()` replaces the tab's markup, since these elements are recreated. */
+function setupShareSummaryButtonHandler(): void {
+  renderShareCardPeriodSelector();
+  document.getElementById("btn-copy-share-summary")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "copyText", text: buildCurrentShareSummaryText() });
+  });
+  const socialPlatforms: Array<{ id: string; platform: "linkedin" | "bluesky" | "mastodon" }> = [
+    { id: "btn-share-card-linkedin", platform: "linkedin" },
+    { id: "btn-share-card-bluesky", platform: "bluesky" },
+    { id: "btn-share-card-mastodon", platform: "mastodon" },
+  ];
+  for (const { id, platform } of socialPlatforms) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      vscode.postMessage({ command: "shareCardToSocial", platform, text: buildCurrentShareSummaryText() });
+    });
+  }
+}
+
+/** Re-renders the Share Card tab once session files have finished loading, since it is
+ * initially rendered with an empty file list before the async load completes. */
+function reRenderShareCard(): void {
+  replaceTabContent("share", renderShareCardTab(storedDetailedFiles), setupShareSummaryButtonHandler);
 }
 
 function setupButtonHandlers(): void {
   document.getElementById("btn-copy")?.addEventListener("click", () => {
     vscode.postMessage({ command: "copyReport" });
   });
+
+  setupShareSummaryButtonHandler();
 
   document.getElementById("btn-issue")?.addEventListener("click", () => {
     vscode.postMessage({ command: "openIssue" });
@@ -1576,7 +2122,7 @@ function setupButtonHandlers(): void {
     ) as HTMLButtonElement | null;
     if (btn) {
       btn.style.background = "#d97706";
-      btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+      setHtml(btn, "<span>⏳</span><span>Clearing...</span>");
       btn.disabled = true;
     }
     updateCacheNumbers();
@@ -1591,7 +2137,7 @@ function setupButtonHandlers(): void {
       ) as HTMLButtonElement | null;
       if (btn) {
         btn.style.background = "#d97706";
-        btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+        setHtml(btn, "<span>⏳</span><span>Clearing...</span>");
         btn.disabled = true;
       }
       updateCacheNumbers();
@@ -1625,7 +2171,7 @@ function handleBackendStorageSection(message: DiagMessage): void {
   if (!backendTabContent) { return; }
   const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
   const previousSubtab = activeSubtabEl?.getAttribute("data-subtab") ?? diagState.restore().activeSubtab;
-  backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+  setHtml(backendTabContent, renderBackendStoragePanel(currentBackendInfo, currentGithubAuth));
   setupBackendButtonHandlers();
   setupSubtabHandlers();
   if (previousSubtab) {
@@ -1667,48 +2213,116 @@ function handleCandidatePathsSection(message: DiagMessage): void {
   }
 }
 
+/**
+ * Replaces a tab's content element with freshly rendered HTML, preserving its active state.
+ * Security contract: `newContent` is built entirely by this file's own render*() functions
+ * from structured (non-HTML) data sent by the extension host over postMessage — every
+ * interpolated string field is passed through escapeHtml(), and every numeric field through
+ * an explicit Number() cast, before being placed into a template literal. Never pass raw
+ * message field values into this function directly.
+ */
+function replaceTabContent(tabId: string, newContent: string, onReplaced?: () => void): void {
+  const tabContent = document.getElementById(`tab-${tabId}`);
+  if (!tabContent) { return; }
+  const wasActive = tabContent.classList.contains("active");
+  const temp = document.createElement('div');
+  setHtml(temp, newContent);
+  const newTab = temp.firstElementChild as HTMLElement | null;
+  if (!newTab) { return; }
+  if (wasActive) { newTab.classList.add("active"); }
+  tabContent.replaceWith(newTab);
+  onReplaced?.();
+}
+
+function handleGithubAuthSection(message: DiagMessage): void {
+  if (message.githubAuth === undefined) { return; }
+  const githubTabContent = document.getElementById("tab-github");
+  if (githubTabContent) {
+    setHtml(githubTabContent, renderGitHubAuthPanel(message.githubAuth));
+    setupGitHubAuthHandlers();
+  }
+}
+
+function handleToolAnalysisSection(message: DiagMessage): void {
+  if (message.toolFamilies) { storedToolFamilies = message.toolFamilies as ToolFamilyConfig[]; }
+  if (message.toolCallStats === undefined) { return; }
+  const newContent = renderToolAnalysisTab(message.toolCallStats as DiagnosticsData['toolCallStats'], storedToolFamilies);
+  replaceTabContent("tool-analysis", newContent, setupToolAnalysisSortHandlers);
+}
+
+/** Re-renders the Skill Usage tab body from the cached data + current editor filter, preserving active/tab state. */
+function rerenderSkillUsageTab(): void {
+  replaceTabContent(
+    "skill-usage",
+    renderSkillUsageTab(currentSkillCallStats, currentSkillCallsByEditor, currentSkillDescriptions, skillUsageEditorFilter),
+    setupSkillUsageFilterHandler
+  );
+}
+
+function setupSkillUsageFilterHandler(): void {
+  document.querySelectorAll<HTMLElement>(".skill-usage-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const editor = chip.getAttribute("data-editor");
+      if (!editor) { return; }
+      skillUsageEditorFilter = editor;
+      diagState.patch({ skillUsageEditorFilter: editor });
+      rerenderSkillUsageTab();
+    });
+  });
+}
+
+function handleSkillUsageSection(message: DiagMessage): void {
+  if (message.skillCallStats !== undefined) { currentSkillCallStats = message.skillCallStats as DiagnosticsData['skillCallStats']; }
+  if (message.skillCallsByEditor !== undefined) { currentSkillCallsByEditor = message.skillCallsByEditor as DiagnosticsData['skillCallsByEditor']; }
+  if (message.skillDescriptions !== undefined) { currentSkillDescriptions = message.skillDescriptions as DiagnosticsData['skillDescriptions']; }
+  if (message.skillCallStats === undefined) { return; }
+  rerenderSkillUsageTab();
+}
+
+/** Re-renders the OTel Delta tab body from currentOtelComparison + currentOtelDeltaPeriod, preserving active/tab state. */
+function rerenderOtelDeltaTab(): void {
+  replaceTabContent("otel-delta", renderOtelDeltaTab(currentOtelComparison, currentOtelDeltaPeriod), setupOtelDeltaPeriodHandler);
+}
+
+function setupOtelDeltaPeriodHandler(): void {
+  const select = document.getElementById("otel-delta-period") as HTMLSelectElement | null;
+  if (!select) { return; }
+  select.addEventListener("change", () => {
+    currentOtelDeltaPeriod = select.value as OtelDeltaPeriod;
+    diagState.patch({ otelDeltaPeriod: currentOtelDeltaPeriod });
+    rerenderOtelDeltaTab();
+  });
+}
+
+function handleOtelComparisonSection(message: DiagMessage): void {
+  if (message.otelComparison === undefined) { return; }
+  currentOtelComparison = message.otelComparison as DiagnosticsData['otelComparison'];
+  rerenderOtelDeltaTab();
+}
+
 function handleDiagnosticDataLoaded(message: DiagMessage): void {
   handleDiagnosticReport(message);
   handleBackendStorageSection(message);
   handleSessionFoldersSection(message);
   handleCandidatePathsSection(message);
-  if (message.githubAuth !== undefined) {
-    const githubTabContent = document.getElementById("tab-github");
-    if (githubTabContent) {
-      githubTabContent.innerHTML = renderGitHubAuthPanel(message.githubAuth);
-      setupGitHubAuthHandlers();
-    }
-  }
-  if (message.toolFamilies) { storedToolFamilies = message.toolFamilies as ToolFamilyConfig[]; }
-  if (message.toolCallStats !== undefined) {
-    const toolAnalysisTab = document.getElementById("tab-tool-analysis");
-    if (toolAnalysisTab) {
-      const wasActive = toolAnalysisTab.classList.contains("active");
-      const newContent = renderToolAnalysisTab(message.toolCallStats as DiagnosticsData['toolCallStats'], storedToolFamilies);
-      const temp = document.createElement('div');
-      temp.innerHTML = newContent;
-      const newTab = temp.firstElementChild as HTMLElement | null;
-      if (newTab) {
-        if (wasActive) { newTab.classList.add("active"); }
-        toolAnalysisTab.replaceWith(newTab);
-        setupToolAnalysisSortHandlers();
-      }
-    }
-  }
+  handleGithubAuthSection(message);
+  handleToolAnalysisSection(message);
+  handleSkillUsageSection(message);
+  handleOtelComparisonSection(message);
 }
 
 function handleGithubAuthUpdated(message: DiagMessage): void {
   currentGithubAuth = message.githubAuth;
   const githubTabContent = document.getElementById("tab-github");
   if (githubTabContent) {
-    githubTabContent.innerHTML = renderGitHubAuthPanel(currentGithubAuth);
+    setHtml(githubTabContent, renderGitHubAuthPanel(currentGithubAuth));
     setupGitHubAuthHandlers();
   }
   const backendTabContent = document.getElementById("tab-backend");
   if (backendTabContent && currentBackendInfo) {
     const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
     const previousSubtab = activeSubtabEl?.getAttribute("data-subtab");
-    backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+    setHtml(backendTabContent, renderBackendStoragePanel(currentBackendInfo, currentGithubAuth));
     setupBackendButtonHandlers();
     setupSubtabHandlers();
     if (previousSubtab) {
@@ -1724,10 +2338,10 @@ function handleDiagnosticDataError(message: DiagMessage): void {
     const errorDiv = document.createElement("div");
     errorDiv.style.cssText =
       "color: #ff6b6b; padding: 20px; text-align: center;";
-    errorDiv.innerHTML = `
-<h3>⚠️ Error Loading Diagnostic Data</h3>
+    setHtml(errorDiv, `
+<h3><span class="codicon codicon-warning"></span> Error Loading Diagnostic Data</h3>
 <p>${escapeHtml(message.error || "Unknown error")}</p>
-`;
+`);
     rootEl.insertBefore(errorDiv, rootEl.firstChild);
   }
 }
@@ -1810,6 +2424,7 @@ function sanitizeSessionFileItem(item: unknown): SessionFileDetails {
     parentInfo: sanitizeParentInfo(sf),
     childInfo: sanitizeChildInfo(sf),
     totalChildCount: sf.totalChildCount === null || sf.totalChildCount === undefined ? undefined : Number(sf.totalChildCount),
+    subAgentCalls: sf.subAgentCalls === null || sf.subAgentCalls === undefined ? undefined : Number(sf.subAgentCalls),
   } as SessionFileDetails;
 }
 
@@ -1818,6 +2433,23 @@ function sanitizeDetailedSessionFiles(input: unknown): SessionFileDetails[] {
     return [];
   }
   return input.map(sanitizeSessionFileItem);
+}
+
+function handleSessionFilesLoadProgress(message: DiagMessage): void {
+  const processed = Number(message.processed || 0);
+  const total = Number(message.total || 0);
+  const progressText = total > 0 ? `Analyzing files… (${processed} / ${total})` : "Analyzing files…";
+
+  const sessionSubtext = document.getElementById("session-loading-subtext");
+  if (sessionSubtext) { sessionSubtext.textContent = progressText; }
+
+  const shareSubtext = document.getElementById("share-loading-subtext");
+  if (shareSubtext) { shareSubtext.textContent = progressText; }
+
+  const modelUsageStatus = document.getElementById("model-usage-status");
+  if (modelUsageStatus) {
+    modelUsageStatus.textContent = total > 0 ? `⏳ Loading sessions… (${processed}/${total})` : "⏳ Loading sessions…";
+  }
 }
 
 function handleSessionFilesLoaded(message: DiagMessage): void {
@@ -1829,7 +2461,23 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
     sessionsTab.textContent = `📁 Session Files (${storedDetailedFiles.length})`;
   }
 
+  const modelUsageSelect = document.getElementById("model-usage-editor-select") as HTMLSelectElement | null;
+  if (modelUsageSelect) {
+    const editorStats = getEditorStats(storedDetailedFiles);
+    const editorOptions = Object.keys(editorStats).sort()
+      .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
+      .join("");
+    setHtml(modelUsageSelect, `<option value="all">🌐 All Editors</option>${editorOptions}`);
+    modelUsageSelect.disabled = false;
+  }
+  renderModelUsageTimeSelector(false);
+  const modelUsageStatus = document.getElementById("model-usage-status");
+  if (modelUsageStatus) { modelUsageStatus.textContent = ""; }
+
+  triggerModelUsageAnalysis();
+
   reRenderTable();
+  reRenderShareCard();
 }
 
 function handleCacheCleared(): void {
@@ -1841,23 +2489,23 @@ function handleCacheCleared(): void {
   ) as HTMLButtonElement | null;
   if (btnReport) {
     btnReport.style.background = "#2d6a4f";
-    btnReport.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
+    setHtml(btnReport, "<span>✅</span><span>Cache Cleared</span>");
     btnReport.disabled = false;
   }
   if (btnTab) {
     btnTab.style.background = "#2d6a4f";
-    btnTab.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
+    setHtml(btnTab, "<span>✅</span><span>Cache Cleared</span>");
     btnTab.disabled = false;
   }
 
   setTimeout(() => {
     if (btnReport) {
       btnReport.style.background = "";
-      btnReport.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
+      setHtml(btnReport, "<span>🗑️</span><span>Clear Cache</span>");
     }
     if (btnTab) {
       btnTab.style.background = "";
-      btnTab.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
+      setHtml(btnTab, "<span>🗑️</span><span>Clear Cache</span>");
     }
   }, 2000);
 }
@@ -1893,39 +2541,42 @@ function handleFolderAnalysisResult(message: DiagMessage): void {
   const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
   if (btn) {
     btn.disabled = false;
-    btn.innerHTML = "<span>🔍</span><span>Analyze</span>";
+    setHtml(btn, "<span>🔍</span><span>Analyze</span>");
   }
   const resultsDiv = document.getElementById("folder-analysis-results");
   if (resultsDiv) {
     if (message.error) {
-      resultsDiv.innerHTML = `
+      setHtml(resultsDiv, `
         <div class="info-box" style="border-color: #d97706; background: rgba(217,119,6,0.08); margin-top: 12px;">
           <div class="info-box-title">⚠️ Analysis Error</div>
           <div>${escapeHtml(message.error)}</div>
-        </div>`;
+        </div>`);
     } else {
-      resultsDiv.innerHTML = renderFolderAnalysisResults(
+      setHtml(resultsDiv, renderFolderAnalysisResults(
         message.files || [],
         message.totalScanned || 0,
         message.parseErrors || 0,
         message.truncated || false,
         escapeHtml(String(message.folderPath || "")),
-      );
+      ));
     }
   }
 }
 
 function setupMessageHandlers(): void {
-  window.addEventListener("message", (event) => {
-    const message = event.data as DiagMessage;
+  registerMessageHandler((message: DiagMessage) => {
     if (message.command === "diagnosticDataLoaded") {
       handleDiagnosticDataLoaded(message);
+    } else if (message.command === "backendStorageInfoLoaded") {
+      handleBackendStorageSection(message);
     } else if (message.command === "githubAuthUpdated") {
       handleGithubAuthUpdated(message);
     } else if (message.command === "diagnosticDataError") {
       handleDiagnosticDataError(message);
     } else if (message.command === "sessionFilesLoaded" && message.detailedSessionFiles) {
       handleSessionFilesLoaded(message);
+    } else if (message.command === "sessionFilesLoadProgress") {
+      handleSessionFilesLoadProgress(message);
     } else if (message.command === "cacheCleared") {
       handleCacheCleared();
     } else if (message.command === "cacheRefreshed") {
@@ -1934,6 +2585,8 @@ function setupMessageHandlers(): void {
       handleFolderPicked(message);
     } else if (message.command === "folderAnalysisResult") {
       handleFolderAnalysisResult(message);
+    } else if (message.command === "modelUsageResult") {
+      handleModelUsageResult(message);
     }
   });
 }
@@ -1990,7 +2643,10 @@ Cache is stored in VS Code's global state (extension storage) and includes:
 Clearing the cache will force the extension to re-read and re-analyze all session files on the next update.
 This can help resolve issues with stale or incorrect data.
 </p>
+<div class="button-group" style="margin-top: 8px;">
 <button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>Clear Cache</span></button>
+<button class="button secondary" id="btn-reset-insights-tab"><span>💡</span><span>Reset Insights Dismissals</span></button>
+</div>
 </div>
 </div>
 </div>`;
@@ -2017,6 +2673,22 @@ ${
   return `<div class="backend-card">
 <h4>📊 API Quota Information</h4>
 ${quotaContent}
+</div>`;
+}
+
+function renderEditorDiscoveryCardHtml(): string {
+  return `<div class="backend-card">
+<h4>🆕 Editor Discovery Notifications</h4>
+<p>
+The extension remembers which editors it has already seen so each editor triggers a discovery notification only once.
+Use this reset to clear that memory and start tracking from scratch.
+</p>
+<div class="button-group">
+<button class="button secondary" id="btn-reset-discovered-editors">
+<span>♻️</span>
+<span>Reset Discovered Editors</span>
+</button>
+</div>
 </div>`;
 }
 
@@ -2078,6 +2750,7 @@ ${
 }
 </div>
 ${renderQuotaCardHtml(data)}
+${renderEditorDiscoveryCardHtml()}
 <div class="backend-card">
 <h4>🔢 Number Formatting</h4>
 <p>
@@ -2129,7 +2802,7 @@ function renderToolRow(r: ToolAnalysisRow, builtInBaseline: number): string {
   let ratioHtml = '<td class="tool-ratio">—</td>';
   if (!r.isBuiltIn && !isNaN(builtInBaseline) && builtInBaseline > 0 && r.calls > 0) {
     const ratio = (r.totalTokens / r.calls) / builtInBaseline;
-    const pct = Math.round(ratio * 100);
+    const pct = Number(Math.round(ratio * 100)) || 0;
     const cls = ratio < 0.85 ? 'ratio-better' : ratio > 1.15 ? 'ratio-worse' : 'ratio-neutral';
     ratioHtml = `<td class="tool-ratio ${cls}" title="${pct}% of built-in average">${pct}%</td>`;
   } else if (r.isBuiltIn) {
@@ -2231,6 +2904,243 @@ ${sectionsHtml}
 </div>`;
 }
 
+/** Sum every editor's count for one skill's byEditor map. */
+function _sumSkillEditorCounts(byEditor: { [editorSource: string]: number } | undefined): number {
+  return Object.values(byEditor ?? {}).reduce((s, n) => s + n, 0);
+}
+
+/** Build the "All" + per-editor filter chip row, with each chip's own total invocation count. */
+function _renderSkillUsageFilterPanel(
+  skillCallsByEditor: DiagnosticsData['skillCallsByEditor'],
+  totalAll: number,
+  activeFilter: string
+): string {
+  const editorTotals = new Map<string, number>();
+  for (const byEditor of Object.values(skillCallsByEditor ?? {})) {
+    for (const [editor, count] of Object.entries(byEditor)) {
+      editorTotals.set(editor, (editorTotals.get(editor) ?? 0) + count);
+    }
+  }
+  const editors = [...editorTotals.entries()].sort((a, b) => b[1] - a[1]);
+  if (editors.length === 0) { return ''; }
+  const allChip = `<button class="skill-usage-chip${activeFilter === 'all' ? ' active' : ''}" data-editor="all">All <span class="skill-usage-chip-count">${formatTokenCount(totalAll)}</span></button>`;
+  const editorChips = editors.map(([editor, count]) =>
+    `<button class="skill-usage-chip${activeFilter === editor ? ' active' : ''}" data-editor="${escapeHtml(editor)}">${escapeHtml(editor)} <span class="skill-usage-chip-count">${formatTokenCount(count)}</span></button>`
+  ).join('');
+  return `<div class="skill-usage-filter-panel">${allChip}${editorChips}</div>`;
+}
+
+/**
+ * Renders per-skill invocation counts (e.g. Claude Code's `/graphify`, custom SKILL.md
+ * workflows) over the last 30 days, filterable by editor. Adapter-agnostic by design —
+ * populated only for editors whose session logs expose a distinguishable skill name
+ * (currently Claude Code, Claude Desktop, and Copilot CLI); other editors show the empty
+ * state until their format is mapped.
+ */
+function renderSkillUsageTab(
+  skillCallStats: DiagnosticsData['skillCallStats'],
+  skillCallsByEditor: DiagnosticsData['skillCallsByEditor'],
+  skillDescriptions: DiagnosticsData['skillDescriptions'],
+  editorFilter: string = 'all'
+): string {
+  const byName = skillCallStats?.byName ?? {};
+  if (Object.keys(byName).length === 0) {
+    return `<div id="tab-skill-usage" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">🧩 Skill Usage</div>
+<div>Tracks how often each agent skill (e.g. a <code>/skill-name</code> invocation or another editor's <code>SKILL.md</code> workflow) was invoked over the last 30 days. No skill invocations have been recorded yet. Skill usage is currently detected for Claude Code, Claude Desktop, and Copilot CLI sessions — support for other editors depends on whether their session logs expose a distinguishable skill name.</div>
+</div>
+</div>`;
+  }
+  const totalAll = Object.values(byName).reduce((s, n) => s + n, 0);
+  const filterPanel = _renderSkillUsageFilterPanel(skillCallsByEditor, totalAll, editorFilter);
+  const rows = Object.keys(byName)
+    .map(name => ({
+      name,
+      count: editorFilter === 'all' ? byName[name] : (skillCallsByEditor?.[name]?.[editorFilter] ?? 0),
+      description: skillDescriptions?.[name] ?? '',
+    }))
+    .filter(r => r.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const shownTotal = rows.reduce((s, r) => s + r.count, 0);
+  const bodyRows = rows
+    .map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="skill-usage-description">${r.description ? escapeHtml(r.description) : '<span class="hint">—</span>'}</td><td>${formatTokenCount(r.count)}</td></tr>`)
+    .join('');
+  const scopeLabel = editorFilter === 'all' ? 'across all editors' : `for ${escapeHtml(editorFilter)}`;
+  return `<div id="tab-skill-usage" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">🧩 Skill Usage</div>
+<div>${formatTokenCount(shownTotal)} skill invocation(s) across ${rows.length} skill(s) ${scopeLabel} in the last 30 days. Currently detected for Claude Code / Claude Desktop / Copilot CLI sessions.</div>
+</div>
+${filterPanel}
+<table class="session-table skill-usage-table">
+<thead><tr><th>Skill</th><th>Description</th><th>Invocations</th></tr></thead>
+<tbody>${bodyRows}</tbody>
+</table>
+</div>`;
+}
+
+function renderOtelDeltaSetupNotice(comparison: CopilotCliOtelComparison | null | undefined): string {
+  if (comparison && comparison.otelSessionsIndexed > 0) { return ''; }
+  const dirStatus = comparison?.otelDirExists
+    ? `The export directory exists but no session data has been indexed from it yet (${Number(comparison.otelFileCount)} file(s) found).`
+    : `No <code>~/.copilot/otel</code> directory was found — the export isn't enabled yet.`;
+  return `<div class="info-box">
+<div class="info-box-title">📡 Copilot CLI OpenTelemetry Export Not Detected</div>
+<div>
+${dirStatus} Enabling it lets this extension read <strong>exact</strong> token counts (input, output, cache) straight from Copilot CLI instead of estimating them from ratios.<br/><br/>
+Set these three environment variables before starting a Copilot CLI session, then run a session and reopen this tab:
+<pre style="margin-top:8px;">COPILOT_OTEL_ENABLED=true
+COPILOT_OTEL_EXPORTER_TYPE=file
+COPILOT_OTEL_FILE_EXPORTER_PATH=~/.copilot/otel/copilot-otel.jsonl</pre>
+See <code>docs/COPILOT-CLI-OTEL-EXPORT.md</code> in the repo for full setup steps (Windows/PowerShell and Unix shells) and how to verify it's working.
+</div>
+</div>`;
+}
+
+/** Formats a signed token delta as e.g. "+12.3K" / "-4.0K" / "0", with a class for coloring. */
+function formatTokenDelta(rawDelta: number): { text: string; cssClass: string } {
+  const delta = Number(rawDelta) || 0;
+  if (delta === 0) { return { text: '0', cssClass: '' }; }
+  const sign = delta > 0 ? '+' : '-';
+  const cssClass = delta > 0 ? 'otel-delta-positive' : 'otel-delta-negative';
+  return { text: `${sign}${formatTokenCount(Math.abs(delta))}`, cssClass };
+}
+
+/** Local (not UTC) start-of-day, for comparing a session's lastActivity against "today"/"yesterday". */
+function startOfLocalDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function otelSessionMatchesPeriod(lastActivity: string | null, period: OtelDeltaPeriod, now: Date): boolean {
+  if (period === "all") { return true; }
+  if (!lastActivity) { return false; }
+  const activity = new Date(lastActivity);
+  if (Number.isNaN(activity.getTime())) { return false; }
+  const today = startOfLocalDay(now);
+  const activityDay = startOfLocalDay(activity);
+  if (period === "today") { return activityDay.getTime() === today.getTime(); }
+  if (period === "yesterday") {
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return activityDay.getTime() === yesterday.getTime();
+  }
+  if (period === "week") {
+    const weekStart = new Date(today);
+    weekStart.setDate(weekStart.getDate() - 6); // rolling 7 days including today
+    return activity >= weekStart && activity <= now;
+  }
+  // month: current calendar month to date
+  return activity.getFullYear() === now.getFullYear() && activity.getMonth() === now.getMonth() && activity <= now;
+}
+
+/** Filters an OTel comparison to sessions matching the given period, recomputing the aggregate totals from the subset. */
+function filterOtelComparisonByPeriod(comparison: CopilotCliOtelComparison, period: OtelDeltaPeriod): CopilotCliOtelComparison {
+  if (period === "all") { return comparison; }
+  const now = new Date();
+  const sessions = comparison.sessions.filter(s => otelSessionMatchesPeriod(s.lastActivity, period, now));
+  const totalBaselineTokens = sessions.reduce((sum, s) => sum + s.baselineTokens, 0);
+  const totalOtelTokens = sessions.reduce((sum, s) => sum + s.otelTokens, 0);
+  return {
+    ...comparison,
+    sessions,
+    sessionsMatched: sessions.length,
+    totalBaselineTokens,
+    totalOtelTokens,
+    deltaTokens: totalOtelTokens - totalBaselineTokens,
+  };
+}
+
+const OTEL_DELTA_PERIOD_LABELS: Record<OtelDeltaPeriod, string> = {
+  all: "All Time", today: "Today", yesterday: "Yesterday", week: "This Week", month: "This Month",
+};
+
+function renderOtelDeltaPeriodSelector(period: OtelDeltaPeriod): string {
+  const options = (Object.keys(OTEL_DELTA_PERIOD_LABELS) as OtelDeltaPeriod[])
+    .map(p => `<option value="${p}"${p === period ? ' selected' : ''}>${OTEL_DELTA_PERIOD_LABELS[p]}</option>`)
+    .join('');
+  return `<div class="otel-delta-period-row">
+<label for="otel-delta-period">Show:</label>
+<select id="otel-delta-period" class="otel-delta-period-select">${options}</select>
+</div>`;
+}
+
+function renderOtelDeltaSummaryCards(comparison: CopilotCliOtelComparison): string {
+  const delta = formatTokenDelta(comparison.deltaTokens);
+  const sessionsMatched = Number(comparison.sessionsMatched) || 0;
+  const totalBaselineTokens = Number(comparison.totalBaselineTokens) || 0;
+  const totalOtelTokens = Number(comparison.totalOtelTokens) || 0;
+  const deltaTokens = Number(comparison.deltaTokens) || 0;
+  return `<div class="summary-cards">
+<div class="summary-card">
+<div class="summary-label">📡 Sessions With OTel Data</div>
+<div class="summary-value">${sessionsMatched.toLocaleString()}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">📊 Previous Estimate (Total)</div>
+<div class="summary-value" title="${totalBaselineTokens.toLocaleString()} tokens">${formatTokenCount(totalBaselineTokens)}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">🎯 OTel Exact (Total)</div>
+<div class="summary-value" title="${totalOtelTokens.toLocaleString()} tokens">${formatTokenCount(totalOtelTokens)}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">Δ Delta</div>
+<div class="summary-value ${delta.cssClass}" title="${deltaTokens.toLocaleString()} tokens">${delta.text}</div>
+</div>
+</div>`;
+}
+
+function renderOtelDeltaSessionRows(sessions: CopilotCliOtelComparisonSession[]): string {
+  return sessions.map(s => {
+    const delta = formatTokenDelta(s.delta);
+    const shortId = escapeHtml(String(s.sessionId ?? '').slice(0, 8));
+    const models = escapeHtml((Array.isArray(s.models) ? s.models : []).map(m => String(m)).join(', ') || '—');
+    const baselineTokens = Number(s.baselineTokens) || 0;
+    const otelTokens = Number(s.otelTokens) || 0;
+    return `<tr>
+<td title="${escapeHtml(String(s.sessionId ?? ''))}"><code>${shortId}</code></td>
+<td>${models}</td>
+<td title="${baselineTokens.toLocaleString()} tokens">${formatTokenCount(baselineTokens)}</td>
+<td title="${otelTokens.toLocaleString()} tokens">${formatTokenCount(otelTokens)}</td>
+<td class="${delta.cssClass}" title="${(Number(s.delta) || 0).toLocaleString()} tokens">${delta.text}</td>
+</tr>`;
+  }).join('');
+}
+
+function renderOtelDeltaTab(comparison: CopilotCliOtelComparison | null | undefined, period: OtelDeltaPeriod = currentOtelDeltaPeriod): string {
+  const setupNotice = renderOtelDeltaSetupNotice(comparison);
+  if (!comparison || comparison.sessionsMatched === 0) {
+    return `<div id="tab-otel-delta" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">📡 OTel vs. Estimated Token Counts</div>
+<div>Compares the token counts this extension estimates for Copilot CLI sessions against exact counts read from Copilot CLI's OpenTelemetry export, when available.</div>
+</div>
+${setupNotice}
+</div>`;
+  }
+  const filtered = filterOtelComparisonByPeriod(comparison, period);
+  const tableOrEmpty = filtered.sessions.length > 0
+    ? `<table class="session-table">
+<thead><tr><th>Session</th><th>Model(s)</th><th>Previous Estimate</th><th>OTel Exact</th><th>Delta</th></tr></thead>
+<tbody>${renderOtelDeltaSessionRows(filtered.sessions)}</tbody>
+</table>`
+    : `<div class="info-box">No Copilot CLI sessions with OTel data in this period. Try a wider range.</div>`;
+  return `<div id="tab-otel-delta" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">📡 OTel vs. Estimated Token Counts</div>
+<div>
+Compares the token counts this extension would normally estimate for each Copilot CLI session against the exact counts read from Copilot CLI's OpenTelemetry file export. A positive delta means OTel revealed usage the estimate missed entirely (e.g. chat-only sessions, which previously reported 0 tokens); near-zero deltas mean the estimate already had exact numbers from a session.shutdown event.<br/>
+Checked ${(Number(comparison.sessionsChecked) || 0).toLocaleString()} Copilot CLI session(s) found locally; ${(Number(comparison.otelSessionsIndexed) || 0).toLocaleString()} session(s) are present in the OTel export.
+</div>
+</div>
+${setupNotice}
+${renderOtelDeltaPeriodSelector(period)}
+${renderOtelDeltaSummaryCards(filtered)}
+${tableOrEmpty}
+</div>`;
+}
+
 function buildDiagReportTabHtml(escapedReport: string): string {
   return `<div id="tab-report" class="tab-content active">
 <div class="info-box">
@@ -2245,6 +3155,7 @@ code or conversation content. You can safely share this report when reporting is
 <button class="button" id="btn-copy"><span>📋</span><span>Copy to Clipboard</span></button>
 <button class="button secondary" id="btn-issue"><span>🐛</span><span>Open GitHub Issue</span></button>
 <button class="button secondary" id="btn-clear-cache"><span>🗑️</span><span>Clear Cache</span></button>
+<button class="button secondary" id="btn-reset-insights"><span>💡</span><span>Reset Insights Dismissals</span></button>
 </div>
 <div class="report-content">${escapedReport}</div>
 </div>`;
@@ -2265,38 +3176,45 @@ function buildDiagRootHtml(
 <span class="header-title">Diagnostic Report</span>
 </div>
 <div class="button-row">
-${buttonHtml("btn-refresh")}
-${buttonHtml("btn-details")}
-${buttonHtml("btn-chart")}
-${buttonHtml("btn-usage")}
-${buttonHtml("btn-environmental")}
-${buttonHtml("btn-maturity")}
-${data?.backendConfigured ? buttonHtml("btn-dashboard") : ""}
+${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 </div>
 </div>
 
-<div class="tabs">
+<div class="tabs group-tabs">
+<button class="group-tab active" data-group="diagnostics">🩺 Diagnostics</button>
+<button class="group-tab" data-group="research">🔬 Research</button>
+<button class="group-tab" data-group="settings">⚙️ Settings</button>
+</div>
+
+<div class="tabs leaf-tabs" data-group="diagnostics" style="display: flex;">
 <button class="tab active" data-tab="report">📋 Report</button>
 <button class="tab" data-tab="sessions">📁 Session Files (${detailedFiles.length})</button>
 <button class="tab" data-tab="cache">💾 Cache</button>
+<button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
+<button class="tab" data-tab="share">📸 Share Card</button>
+</div>
+
+<div class="tabs leaf-tabs" data-group="research" style="display: none;">
+<button class="tab" data-tab="model-usage">🧮 Model Usage</button>
+<button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
+<button class="tab" data-tab="skill-usage">🧩 Skill Usage</button>
+<button class="tab" data-tab="otel-delta">📡 OTel Delta</button>
+</div>
+
+<div class="tabs leaf-tabs" data-group="settings" style="display: none;">
+<button class="tab" data-tab="display">⚙️ Display</button>
 <button class="tab" data-tab="backend">☁️ Backend Storage</button>
 <button class="tab" data-tab="github">🔑 GitHub Auth</button>
-<button class="tab" data-tab="display">⚙️ Settings</button>
-<button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
-<button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
 ${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' : ''}
 </div>
 
 ${buildDiagReportTabHtml(escapedReport)}
 
 <div id="tab-sessions" class="tab-content">
-<div class="info-box">
-<div class="info-box-title">📁 Session File Analysis</div>
-<div>
+<div class="info-box"><div class="info-box-title">📁 Session File Analysis</div><div>
 This tab shows session files with activity in the last 14 days from all detected editors. </br>
 Click on an editor panel to filter, click column headers to sort, and click a file name to open it.
-</div>
-</div>
+</div></div>
 <div id="session-table-container">${renderSessionTable(detailedFiles, detailedFiles.length === 0)}</div>
 </div>
 
@@ -2313,7 +3231,13 @@ ${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
 <div id="tab-path-analyzer" class="tab-content">
 ${renderFolderAnalyzerTab()}
 </div>
+${renderShareCardTab(detailedFiles, isLoading)}
+<div id="tab-model-usage" class="tab-content">
+${renderModelUsageTab(detailedFiles, isLoading)}
+</div>
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
+${renderSkillUsageTab(data.skillCallStats, data.skillCallsByEditor, data.skillDescriptions, skillUsageEditorFilter)}
+${renderOtelDeltaTab(data.otelComparison)}
 </div>
 `;
 }
@@ -2330,14 +3254,18 @@ function renderLayout(data: DiagnosticsData): void {
   isLoading = detailedFiles.length === 0;
   currentBackendInfo = data.backendStorageInfo;
   currentGithubAuth = data.githubAuth;
+  currentOtelComparison = data.otelComparison;
   if (data.toolFamilies) { storedToolFamilies = data.toolFamilies; }
+  currentSkillCallStats = data.skillCallStats;
+  currentSkillCallsByEditor = data.skillCallsByEditor;
+  currentSkillDescriptions = data.skillDescriptions;
 
   const reportIsLoading = data.report === LOADING_PLACEHOLDER;
   const escapedReport = reportIsLoading
     ? LOADING_MESSAGE.trim()
     : removeSessionFilesSection(escapeHtml(data.report));
 
-  root.innerHTML = buildDiagRootHtml(data, detailedFiles, escapedReport);
+  setHtml(root, buildDiagRootHtml(data, detailedFiles, escapedReport));
 
   // Render session folders via DOM API (XSS-safe, no innerHTML)
   const sessionFolders = groupSessionFolders(data.sessionFolders || []);
@@ -2351,6 +3279,7 @@ function renderLayout(data: DiagnosticsData): void {
 
   setupMessageHandlers();
   setupTabHandlers();
+  setupGroupHandlers();
   setupSortHandlers();
   setupEditorFilterHandlers();
   setupContextRefFilterHandlers();
@@ -2362,23 +3291,29 @@ function renderLayout(data: DiagnosticsData): void {
   setupStorageLinkHandlers();
   setupGitHubAuthHandlers();
   setupFolderAnalyzerHandlers();
+  setupModelUsageHandlers();
+  renderModelUsageTimeSelector(isLoading);
   setupButtonHandlers();
   setupDisplaySettingHandlers();
   setupToolAnalysisSortHandlers();
+  setupSkillUsageFilterHandler();
+  setupOtelDeltaPeriodHandler();
 
   const savedState = diagState.restore();
-  if (savedState?.activeTab && !activateTab(savedState.activeTab)) {
+  let restoredTab = "report";
+  if (savedState?.activeTab && activateTab(savedState.activeTab)) {
+    restoredTab = savedState.activeTab;
+  } else {
     activateTab("report");
   }
+  activateGroup(groupOfTab(restoredTab));
 
   if (savedState?.activeSubtab) {
     activateSubtab(savedState.activeSubtab);
   }
 }
 async function bootstrap(): Promise<void> {
-  const { provideVSCodeDesignSystem, vsCodeButton } =
-    await import("@vscode/webview-ui-toolkit");
-  provideVSCodeDesignSystem().register(vsCodeButton());
+  await import('@vscode-elements/elements/dist/vscode-button/index.js');
 
   if (!initialData) {
     const root = document.getElementById("root");

@@ -13,8 +13,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { PiAdapter } from '../../src/adapters/piAdapter';
-import { PiDataAccess } from '../../src/pi';
+import { PiAdapter } from '../../../src/adapters/piAdapter';
+import { PiDataAccess } from '../../../src/pi';
 
 // ---------------------------------------------------------------------------
 // helpers

@@ -21,6 +21,7 @@ Track your GitHub Copilot token usage and AI Fluency across VS Code, Visual Stud
 - Gemini CLI (Google)
 - Claude Desktop Cowork (Anthropic)
 - Mistral Vibe
+- Kiro IDE + Kiro CLI (AWS)
 - Visual Studio + GitHub Copilot
 
 <p align="left">
@@ -38,6 +39,7 @@ Track your GitHub Copilot token usage and AI Fluency across VS Code, Visual Stud
   <img src="assets/tool-logos/claude.png" alt="Claude" title="Claude" height="30" />&nbsp;
   <img src="assets/tool-logos/gemini.svg" alt="Gemini" title="Gemini" height="30" />&nbsp;
   <img src="assets/tool-logos/mistral.png" alt="Mistral" title="Mistral" height="30" />&nbsp;
+  <img src="assets/tool-logos/kiro.svg" alt="Kiro" title="Kiro" height="30" />&nbsp;
   <img src="assets/tool-logos/visual-studio.svg" alt="Visual Studio" title="Visual Studio" height="30" />
 </p>
 

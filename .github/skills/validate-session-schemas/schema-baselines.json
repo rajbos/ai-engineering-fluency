@@ -1,7 +1,7 @@
 {
   "_comment": "Baselines for the validate-session-schemas skill. Two independent concepts: 'contracts' = the small hand-maintained set of fields our parsers actually depend on (drift detection); never auto-updated. 'knownFields' = the last-known observed field set per platform; refreshed with --update-baseline. New observed fields = observed - knownFields, surfaced as 'NEW' (potential information we could start using). Field-path notation: a.b nested, arr[] array items, arr[].c field inside array items, kind/type are the JSONL event discriminators.",
   "version": "1.0",
-  "lastUpdated": "2026-05-30",
+  "lastUpdated": "2026-06-21",
   "platforms": {
     "copilot-chat": {
       "displayName": "VS Code Copilot Chat",
@@ -271,14 +271,55 @@
             "id"
           ],
           "desc": "OpenCode ses_*.json metadata files carry an id."
+        },
+        {
+          "format": "jsonl",
+          "require": [
+            "role"
+          ],
+          "desc": "OpenCode DB message data blobs (JSONL temp files from opencode.db) each carry a role field."
         }
       ],
       "knownFields": [
+        "agent",
+        "cost",
+        "finish",
         "id",
-        "title",
-        "version",
+        "mode",
+        "model",
+        "model.modelID",
+        "model.providerID",
+        "model.variant",
+        "modelID",
+        "parentID",
+        "path",
+        "path.cwd",
+        "path.root",
+        "providerID",
+        "role",
+        "summary",
+        "summary.diffs",
+        "summary.diffs[]",
+        "summary.diffs[].additions",
+        "summary.diffs[].deletions",
+        "summary.diffs[].file",
+        "summary.diffs[].patch",
+        "summary.diffs[].status",
+        "time",
+        "time.completed",
         "time.created",
-        "time.updated"
+        "time.updated",
+        "title",
+        "tokens",
+        "tokens.cache",
+        "tokens.cache.read",
+        "tokens.cache.write",
+        "tokens.input",
+        "tokens.output",
+        "tokens.reasoning",
+        "tokens.total",
+        "variant",
+        "version"
       ]
     }
   }

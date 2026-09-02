@@ -9,9 +9,14 @@ import type {
 	MissedPotentialWorkspace,
 	WorkspaceCustomizationMatrix,
 	TodaySessionSummary,
-} from './types';
-import toolNamesData from './toolNames.json';
-import { resolveGuidMcpToolName } from './utils/toolUtils';
+	ToolCurationAnalysis,
+	RepeatedTaskReport,
+} from '../../src/types';
+import toolNamesData from '../../src/toolNames.json';
+import modelPricingData from '../../src/modelPricing.json';
+import { resolveGuidMcpToolName, resolveMcpFamilyToolName } from '../../src/utils/toolUtils';
+import { getLongContextInfo, type LongContextInfo } from '../../src/tokenEstimation';
+import type { ModelPricing } from '../../src/types';
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -23,13 +28,17 @@ const TOOL_NAME_MAP: Record<string, string> = toolNamesData as Record<string, st
  * Returns a human-friendly display name for an MCP tool ID.
  * 1. Exact match in toolNames.json
  * 2. GUID-keyed MCP pattern (e.g. M365 Connector)
- * 3. Parse mcp__<server>__<tool> → "Server: Tool Name"
- * 4. Fall back to the raw ID
+ * 3. Known MCP family (GitHub/Playwright/Context7/Tavily/Claude Browser) + known action,
+ *    regardless of server-registration prefix (see issue #1760)
+ * 4. Parse mcp__<server>__<tool> → "Server: Tool Name"
+ * 5. Fall back to the raw ID
  */
 function friendlyToolName(id: string): string {
 	if (TOOL_NAME_MAP[id]) { return TOOL_NAME_MAP[id]; }
 	const guid = resolveGuidMcpToolName(id);
 	if (guid) { return guid; }
+	const family = resolveMcpFamilyToolName(id);
+	if (family) { return family; }
 	// Parse mcp__ServerName__tool_name → "Server Name: Tool Name"
 	const mcpMatch = /^mcp__([^_][^_]*)__(.+)$/.exec(id);
 	if (mcpMatch) {
@@ -81,6 +90,179 @@ function manualCompactCount(p: UsageAnalysisPeriod): number {
 	return p.toolCalls.byTool['__slash__compact'] ?? 0;
 }
 
+// ── Long-context pricing tier helpers ──────────────────────────────────────
+const MODEL_PRICING = modelPricingData.pricing as { [key: string]: ModelPricing };
+
+/** Human-friendly model name from the pricing catalog, falling back to the raw id. */
+function modelDisplayName(id: string): string {
+	const names = MODEL_PRICING[id]?.displayNames;
+	return names && names.length > 0 ? names[0] : id;
+}
+
+// ── Model efficiency (edit retries) helpers ────────────────────────────────
+
+/** Minimum edit turns before a model's retry rate is considered meaningful. */
+const RETRY_INSIGHT_MIN_EDIT_TURNS = 10;
+
+/** Models with enough edit turns to compare, ranked worst (highest retry rate) first. */
+function rankModelsByEditRetries(p: UsageAnalysisPeriod): { model: string; retries: number; editTurns: number; retryRate: number }[] {
+	return Object.entries(p.modelEfficiency ?? {})
+		.filter(([, c]) => c.editTurns >= RETRY_INSIGHT_MIN_EDIT_TURNS)
+		.map(([model, c]) => ({ model, retries: c.retries, editTurns: c.editTurns, retryRate: c.retries / c.editTurns }))
+		.sort((a, b) => b.retryRate - a.retryRate);
+}
+
+// ── Month-over-month trend helpers ─────────────────────────────────────────
+
+/** Minimum sessions in a period before its per-session ratios are trusted for trend insights. */
+const TREND_MIN_SESSIONS = 10;
+
+/** Average turns per session for a period, or null when the sample is too small. */
+function trendTurnsPerSession(p: UsageAnalysisPeriod | undefined): number | null {
+	if (!p || p.sessions < TREND_MIN_SESSIONS || !p.conversationPatterns) { return null; }
+	return p.conversationPatterns.avgTurnsPerSession;
+}
+
+/** Aggregate edit-retry rate for a period, or null when there are too few edit turns. */
+function trendRetryRate(p: UsageAnalysisPeriod | undefined): number | null {
+	if (!p) { return null; }
+	let retries = 0;
+	let editTurns = 0;
+	for (const c of Object.values(p.modelEfficiency ?? {})) {
+		retries += c.retries;
+		editTurns += c.editTurns;
+	}
+	return editTurns >= RETRY_INSIGHT_MIN_EDIT_TURNS ? retries / editTurns : null;
+}
+
+/** Output price per million tokens from the pricing catalog, or null when unknown. */
+function modelOutputPricePerMillion(id: string): number | null {
+	return MODEL_PRICING[id]?.outputCostPerMillion ?? null;
+}
+
+/**
+ * Best/worst retry-rate models with a price mismatch: the worst-retrying model
+ * both retries ≥2× as often and costs ≥1.5× as much per output token as the best.
+ */
+function findRetryPriceMismatch(p: UsageAnalysisPeriod): { worst: { model: string; retryRate: number }; best: { model: string; retryRate: number }; priceRatio: number } | null {
+	const ranked = rankModelsByEditRetries(p);
+	if (ranked.length < 2) { return null; }
+	const worst = ranked[0];
+	const best = ranked[ranked.length - 1];
+	if (best.retryRate <= 0 ? worst.retryRate < 0.25 : worst.retryRate < best.retryRate * 2) { return null; }
+	const worstPrice = modelOutputPricePerMillion(worst.model);
+	const bestPrice = modelOutputPricePerMillion(best.model);
+	if (worstPrice === null || bestPrice === null || bestPrice <= 0) { return null; }
+	const priceRatio = worstPrice / bestPrice;
+	if (priceRatio < 1.5) { return null; }
+	return { worst, best, priceRatio };
+}
+
+/** A today-session paired with the long-context tier info of its cheapest-threshold model. */
+interface SessionLongContextStatus {
+	session: TodaySessionSummary;
+	info: LongContextInfo;
+	model: string;
+}
+
+/**
+ * Resolve the long-context pricing tier for a session's models.
+ * When a session used multiple tiered models, the smallest threshold wins
+ * (conservative: the first line the session could have crossed).
+ */
+function _sessionLongContextStatus(s: TodaySessionSummary): SessionLongContextStatus | null {
+	let best: SessionLongContextStatus | null = null;
+	for (const model of s.models) {
+		const info = getLongContextInfo(model, MODEL_PRICING);
+		if (info && (!best || info.thresholdTokens < best.info.thresholdTokens)) {
+			best = { session: s, info, model };
+		}
+	}
+	return best;
+}
+
+/** True when a session ran in an explicitly non-default Copilot CLI context tier. */
+function _isNonDefaultTier(s: TodaySessionSummary): boolean {
+	return !!s.contextTier && s.contextTier !== 'default';
+}
+
+/**
+ * True when a session selected a non-default (larger) context window but its
+ * observed context fill never needed it: the fill stayed within the model's
+ * default-tier threshold, or — when the model has no tiered pricing — under
+ * 60% of the selected window.
+ */
+function _qualifiesWindowUnused(s: TodaySessionSummary): boolean {
+	if (!_isNonDefaultTier(s)) { return false; }
+	const reached = s.contextReachedTokens;
+	if (typeof reached !== 'number' || reached <= 0) { return false; }
+	const tier = _sessionLongContextStatus(s);
+	if (tier) { return reached <= tier.info.thresholdTokens; }
+	return !!s.contextWindowLimit && reached <= s.contextWindowLimit * 0.6;
+}
+
+/** The fullest session today that selected a large window it never needed. */
+function _windowUnusedToday(ctx: InsightContext): TodaySessionSummary | null {
+	let fullest: TodaySessionSummary | null = null;
+	for (const s of ctx.todaySessions ?? []) {
+		if (!_qualifiesWindowUnused(s)) { continue; }
+		if (!fullest || (s.contextReachedTokens ?? 0) > (fullest.contextReachedTokens ?? 0)) {
+			fullest = s;
+		}
+	}
+	return fullest;
+}
+
+/** The session that crossed its model's long-context threshold today, if any (largest request wins). */
+function _longContextCrossedToday(ctx: InsightContext): SessionLongContextStatus | null {
+	let worst: SessionLongContextStatus | null = null;
+	for (const s of ctx.todaySessions ?? []) {
+		const status = _sessionLongContextStatus(s);
+		if (!status) { continue; }
+		if ((s.maxRequestInputTokens ?? 0) > status.info.thresholdTokens
+			&& (!worst || (s.maxRequestInputTokens ?? 0) > (worst.session.maxRequestInputTokens ?? 0))) {
+			worst = status;
+		}
+	}
+	return worst;
+}
+
+/** The largest request today (by per-request input tokens) among sessions using a tiered model. */
+function _largestTieredRequestToday(ctx: InsightContext): SessionLongContextStatus | null {
+	let largest: SessionLongContextStatus | null = null;
+	for (const s of ctx.todaySessions ?? []) {
+		if (!(s.maxRequestInputTokens && s.maxRequestInputTokens > 0)) { continue; }
+		const status = _sessionLongContextStatus(s);
+		if (!status) { continue; }
+		if (!largest || s.maxRequestInputTokens > (largest.session.maxRequestInputTokens ?? 0)) {
+			largest = status;
+		}
+	}
+	return largest;
+}
+
+/**
+ * Human-readable "how much repo fits in the default tier" estimate derived
+ * from the threshold: ~4 characters per token, ~40 characters per source line.
+ */
+function _describeDefaultTierCapacity(thresholdTokens: number): string {
+	const mb = (thresholdTokens * 4) / (1024 * 1024);
+	const lines = Math.round(thresholdTokens / 10 / 1000);
+	return `roughly ${mb.toFixed(1)} MB of code (≈${lines}K lines) — the largest slice of a repo that fits in one request at default pricing`;
+}
+
+function autoModelUsageRatio(p: UsageAnalysisPeriod): number {
+	return p.modelSwitching.totalSessions > 0 ? p.modelSwitching.autoSessions / p.modelSwitching.totalSessions : 0;
+}
+
+function usesOnlyDefaultModelSet(p: UsageAnalysisPeriod): boolean {
+	const uniqueCount = new Set([...p.modelSwitching.standardModels, ...p.modelSwitching.premiumModels, ...p.modelSwitching.lowCostModels, ...p.modelSwitching.mediumCostModels, ...p.modelSwitching.highCostModels]).size;
+	return uniqueCount <= 1
+		&& (p.modelSwitching.autoSessions ?? 0) === 0
+		&& (p.modelSwitching.foundryWindowsSessions ?? 0) === 0
+		&& (p.modelSwitching.unknownProviderSessions ?? 0) === 0;
+}
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -92,9 +274,17 @@ export type InsightStatus = 'new' | 'seen' | 'dismissed' | 'snoozed' | 'done';
 export interface InsightContext {
 	today: UsageAnalysisPeriod;
 	last30Days: UsageAnalysisPeriod;
+	/** Current calendar month-to-date — enables month-over-month trend insights. */
+	month?: UsageAnalysisPeriod;
+	/** Previous full calendar month — enables month-over-month trend insights. */
+	lastMonth?: UsageAnalysisPeriod;
 	missedPotential: MissedPotentialWorkspace[];
 	customizationMatrix?: WorkspaceCustomizationMatrix | null;
 	todaySessions?: TodaySessionSummary[];
+	/** Optional — populated when tool-curation analysis has run. */
+	curationAnalysis?: ToolCurationAnalysis | null;
+	/** Optional — populated when repeated-task detection found candidates. */
+	repeatedTasks?: RepeatedTaskReport | null;
 }
 
 export interface InsightState {
@@ -131,8 +321,8 @@ interface InsightDefinition {
 	severity: InsightSeverity;
 	title: string;
 	buildBody: (ctx: InsightContext) => string;
-	actionLabel?: string;
-	actionCommand?: string;
+	actionLabel?: string | ((ctx: InsightContext) => string);
+	actionCommand?: string | ((ctx: InsightContext) => string);
 	/** Returns true when this insight is applicable given the current context. */
 	appliesTo: (ctx: InsightContext) => boolean;
 	/** Higher weight → surfaced earlier when multiple insights apply. */
@@ -169,10 +359,56 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 				`Adding one gives Copilot project-specific context, reducing back-and-forth and improving response quality.`;
 		},
 		actionLabel: 'View Workspace Health',
-		actionCommand: 'aiEngineeringFluency.showUsageAnalysis',
+		actionCommand: 'aiEngineeringFluency.openHealthTab',
 		appliesTo: (ctx) => ctx.missedPotential.length > 0,
 		weight: 90,
 		allowToast: true,
+	},
+	{
+		id: 'auto-model-efficiency',
+		category: 'customization',
+		severity: 'tip',
+		title: '⚡ Use the Auto model more often for cost-sensitive work',
+		buildBody: (ctx) => {
+			const ratio = Math.round(autoModelUsageRatio(ctx.last30Days) * 100);
+			return ratio > 0
+				? `Auto is only ${ratio}% of your model-switching sessions in the last 30 days. When you are optimizing for cost or speed, Auto can choose a better fit without you having to manage model selection manually.`
+				: `You have not used the Auto model in the last 30 days. When you are optimizing for cost or speed, Auto can choose a better fit without you having to manage model selection manually.`;
+		},
+		appliesTo: (ctx) => {
+			if (ctx.last30Days.sessions < 10) { return false; }
+			const ratio = autoModelUsageRatio(ctx.last30Days);
+			return ratio < 0.25 && ctx.last30Days.modelSwitching.totalSessions > 0;
+		},
+		weight: 82,
+	},
+	{
+		id: 'foundry-local-models',
+		category: 'customization',
+		severity: 'celebration',
+		title: '🧠 Nice use of Microsoft Foundry on Windows models',
+		buildBody: (ctx) => {
+			const sessions = ctx.last30Days.modelSwitching.foundryWindowsSessions ?? 0;
+			return `You used Microsoft Foundry on Windows / local models in ${sessions} session${sessions === 1 ? '' : 's'} in the last 30 days. Local models are great when you want more private, on-device or offline-friendly workflows.`;
+		},
+		appliesTo: (ctx) => (ctx.last30Days.modelSwitching.foundryWindowsSessions ?? 0) > 0,
+		weight: 88,
+	},
+	{
+		id: 'explore-model-providers',
+		category: 'customization',
+		severity: 'tip',
+		title: '🧩 Try more model providers from the Marketplace',
+		buildBody: (ctx) => {
+			return `You have mostly used the same default model so far. The VS Code Marketplace has model-provider extensions that can add more choices for different tasks, budgets, and privacy needs.`;
+		},
+		actionLabel: 'Open Extensions',
+		actionCommand: 'workbench.extensions.action.showExtensions',
+		appliesTo: (ctx) => {
+			if (ctx.last30Days.sessions < 10) { return false; }
+			return usesOnlyDefaultModelSet(ctx.last30Days);
+		},
+		weight: 80,
 	},
 
 	// ── Context ─────────────────────────────────────────────────────────────
@@ -345,21 +581,31 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		severity: 'tip',
 		title: '🔀 Explore more Copilot modes',
 		buildBody: (ctx) => {
-			const sessions = ctx.last30Days.sessions;
 			const m = ctx.last30Days.modeUsage;
-			if ((m.ask ?? 0) > 0.85 * sessions) {
+			const ask = m.ask ?? 0;
+			const agentic = (m.agent ?? 0) + (m.plan ?? 0) + (m.customAgent ?? 0) + (m.cli ?? 0) + (m.cliApp ?? 0);
+			const total = ask + (m.edit ?? 0) + agentic;
+			if (total > 0 && ask > 0.85 * total) {
 				return 'You mostly use Ask mode. Try Agent mode for making code changes directly — it can edit files, run terminal commands, and iterate across your whole codebase autonomously.';
 			}
 			return 'You haven\'t tried Agent mode yet. It handles multi-step tasks autonomously — great for refactoring, adding tests, or implementing features.';
 		},
 		appliesTo: (ctx) => {
-			const sessions = ctx.last30Days.sessions;
-			if (sessions < 10) { return false; }
+			if (ctx.last30Days.sessions < 10) { return false; }
 			const m = ctx.last30Days.modeUsage;
-			if ((m.agent ?? 0) > 0.85 * sessions) { return false; }
-			return (m.ask ?? 0) > 0.85 * sessions
-				|| ((m.agent ?? 0) === 0 && sessions >= 15);
+			const ask = m.ask ?? 0;
+			// Agent, Plan and Custom Agent modes and CLI interactions (terminal or
+			// Copilot desktop app) are autonomous agent-mode-style usage — count them
+			// as agentic, not as "ask-only".
+			const agentic = (m.agent ?? 0) + (m.plan ?? 0) + (m.customAgent ?? 0) + (m.cli ?? 0) + (m.cliApp ?? 0);
+			const total = ask + (m.edit ?? 0) + agentic;
+			if (total < 10) { return false; }
+			if (agentic > 0.15 * total) { return false; }
+			return ask > 0.85 * total
+				|| (agentic === 0 && total >= 15);
 		},
+		actionLabel: 'View Interaction Modes',
+		actionCommand: 'aiEngineeringFluency.openActivityTab',
 		weight: 50,
 	},
 
@@ -693,6 +939,109 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		weight: 45,
 	},
 
+	// ── Model efficiency (edit retries, issue #1649) ──────────────────────────
+	{
+		id: 'model-edit-retries',
+		category: 'agentic',
+		severity: 'tip',
+		title: '🔁 Some of your models retry edits often',
+		buildBody: (ctx) => {
+			const ranked = rankModelsByEditRetries(ctx.last30Days);
+			const worst = ranked[0];
+			const best = ranked.length >= 2 ? ranked[ranked.length - 1] : undefined;
+			const intro = `${modelDisplayName(worst.model)} averaged ${worst.retryRate.toFixed(1)} edit retries per edit turn over the last 30 days ` +
+				`(${worst.retries} retries across ${worst.editTurns} edit turns).`;
+			if (best && best.retryRate < worst.retryRate / 2) {
+				return `${intro} ${modelDisplayName(best.model)} managed ${best.retryRate.toFixed(1)} on comparable work — ` +
+					`a model that lands its edits first try is often cheaper overall, even at a higher per-token price. ` +
+					`Compare them side by side in the Model Efficiency table.`;
+			}
+			return `${intro} Frequent retries usually mean failed edits being reattempted. ` +
+				`Compare your models in the Model Efficiency table, or give the model more context (attach the relevant files) before asking for edits.`;
+		},
+		actionLabel: 'View Model Efficiency',
+		actionCommand: 'aiEngineeringFluency.openModelEfficiency',
+		appliesTo: (ctx) => {
+			const ranked = rankModelsByEditRetries(ctx.last30Days);
+			if (ranked.length === 0) { return false; }
+			const worst = ranked[0];
+			const best = ranked[ranked.length - 1];
+			// Surface either an absolutely high retry rate, or a clear gap between models.
+			return worst.retryRate >= 0.5
+				|| (ranked.length >= 2 && worst.retryRate >= 0.25 && worst.retryRate >= best.retryRate * 2);
+		},
+		weight: 50,
+	},
+
+	// ── Efficiency trends (month over month) ──────────────────────────────────
+	{
+		id: 'trend-leaner-sessions',
+		category: 'trend',
+		severity: 'celebration',
+		title: '📉 Your sessions are getting leaner',
+		buildBody: (ctx) => {
+			const prev = trendTurnsPerSession(ctx.lastMonth)!;
+			const cur = trendTurnsPerSession(ctx.month)!;
+			const pct = Math.round(((prev - cur) / prev) * 100);
+			return `You averaged ${cur.toFixed(1)} turns per session this month, down ${pct}% from ${prev.toFixed(1)} last month — ` +
+				`less back-and-forth to get to a usable result. See the Efficiency view for the full trend and what is driving it.`;
+		},
+		actionLabel: 'Open Efficiency view',
+		actionCommand: 'aiEngineeringFluency.showEfficiency',
+		appliesTo: (ctx) => {
+			const prev = trendTurnsPerSession(ctx.lastMonth);
+			const cur = trendTurnsPerSession(ctx.month);
+			if (prev === null || cur === null || prev <= 0) { return false; }
+			const retryPrev = trendRetryRate(ctx.lastMonth);
+			const retryCur = trendRetryRate(ctx.month);
+			// Celebrate only when quality did not regress alongside the drop in turns.
+			const retryOk = retryPrev === null || retryCur === null || retryCur <= retryPrev * 1.1;
+			return (prev - cur) / prev >= 0.15 && retryOk;
+		},
+		weight: 65,
+		allowToast: true,
+	},
+	{
+		id: 'trend-sessions-getting-heavier',
+		category: 'trend',
+		severity: 'opportunity',
+		title: '📈 Sessions are taking more turns than last month',
+		buildBody: (ctx) => {
+			const prev = trendTurnsPerSession(ctx.lastMonth)!;
+			const cur = trendTurnsPerSession(ctx.month)!;
+			const pct = Math.round(((cur - prev) / prev) * 100);
+			return `You are averaging ${cur.toFixed(1)} turns per session this month, up ${pct}% from ${prev.toFixed(1)} last month. ` +
+				`More turns can mean harder tasks — or prompts that need more context up front. ` +
+				`The Efficiency view's Cost Attribution tab shows whether this is also driving your cost up.`;
+		},
+		actionLabel: 'Open Efficiency view',
+		actionCommand: 'aiEngineeringFluency.showEfficiency',
+		appliesTo: (ctx) => {
+			const prev = trendTurnsPerSession(ctx.lastMonth);
+			const cur = trendTurnsPerSession(ctx.month);
+			if (prev === null || cur === null || prev <= 0) { return false; }
+			return (cur - prev) / prev >= 0.25;
+		},
+		weight: 58,
+	},
+	{
+		id: 'retry-price-mismatch',
+		category: 'trend',
+		severity: 'tip',
+		title: '💸 Your priciest model is also retrying the most',
+		buildBody: (ctx) => {
+			const mismatch = findRetryPriceMismatch(ctx.last30Days)!;
+			return `${modelDisplayName(mismatch.worst.model)} retried ${mismatch.worst.retryRate.toFixed(1)} times per edit turn over the last 30 days — ` +
+				`while costing ~${mismatch.priceRatio.toFixed(1)}× as much per output token as ${modelDisplayName(mismatch.best.model)} ` +
+				`(${mismatch.best.retryRate.toFixed(1)} retries per edit turn on comparable work). ` +
+				`For edit-heavy tasks, switching models could improve both quality and cost at once.`;
+		},
+		actionLabel: 'Open Efficiency view',
+		actionCommand: 'aiEngineeringFluency.showEfficiency',
+		appliesTo: (ctx) => findRetryPriceMismatch(ctx.last30Days) !== null,
+		weight: 55,
+	},
+
 	// ── Code application habits ───────────────────────────────────────────────
 	{
 		id: 'low-apply-rate',
@@ -766,6 +1115,22 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		allowToast: true,
 	},
 
+	// ── Sub-agent delegation (tool-call based, no hierarchy data required) ────
+	{
+		id: 'subagent-delegation',
+		category: 'agentic',
+		severity: 'celebration',
+		title: '🧩 You\'re delegating work to sub-agents!',
+		buildBody: (ctx) => {
+			const n = ctx.last30Days.delegationSessions!;
+			return `You've delegated work to sub-agents/Task tools in ${n} sessions over the last 30 days. ` +
+				`Breaking work into focused delegated tasks is a strong AI-engineering habit — it keeps each agent's context tight and lets you parallelize independent pieces of work.`;
+		},
+		appliesTo: (ctx) => (ctx.last30Days.delegationSessions ?? 0) >= 5 && (ctx.last30Days.multiAgentParentSessions ?? 0) < 3,
+		weight: 32,
+		allowToast: true,
+	},
+
 	// ── Edit scope ───────────────────────────────────────────────────────────
 	{
 		id: 'single-file-edits-only',
@@ -808,6 +1173,237 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		weight: 75,
 		allowToast: true,
 	},
+	{
+		id: 'long-context-pricing-crossed',
+		category: 'context',
+		severity: 'opportunity',
+		title: '💸 A request crossed into long-context pricing today',
+		buildBody: (ctx) => {
+			const crossed = _longContextCrossedToday(ctx);
+			if (crossed) {
+				const { session, info, model } = crossed;
+				const ratio = info.defaultInputCostPerMillion > 0
+					? (info.longContextInputCostPerMillion / info.defaultInputCostPerMillion).toFixed(1)
+					: null;
+				const rateNote = ratio
+					? ` ($${info.defaultInputCostPerMillion.toFixed(2)} → $${info.longContextInputCostPerMillion.toFixed(2)} per 1M input tokens, ${ratio}× more)`
+					: '';
+				return `Your largest request today sent ${formatTokensShort(session.maxRequestInputTokens ?? 0)} input tokens to ${model} — above its ${formatTokensShort(info.thresholdTokens)} default-tier threshold, so it was billed at long-context rates${rateNote}. ` +
+					`The default tier fits ${_describeDefaultTierCapacity(info.thresholdTokens)}. ` +
+					`Trim attached context, use \`/compact\`, or split work into focused sessions to stay under the line.`;
+			}
+			const tiered = (ctx.todaySessions ?? []).find(s => _isNonDefaultTier(s) && !_qualifiesWindowUnused(s));
+			return `A session today ran in the "${tiered?.contextTier}" context tier instead of the default tier. ` +
+				`Non-default tiers unlock a larger context window but bill input tokens at long-context rates once requests exceed the model's default-tier threshold. ` +
+				`Switch back to the default tier for routine work to keep costs down.`;
+		},
+		appliesTo: (ctx) => {
+			// Tier-only sessions whose window usage proves the big window was
+			// never needed are handled by large-context-window-unused instead.
+			return _longContextCrossedToday(ctx) !== null
+				|| (ctx.todaySessions ?? []).some(s => _isNonDefaultTier(s) && !_qualifiesWindowUnused(s));
+		},
+		weight: 74,
+		allowToast: true,
+	},
+	{
+		id: 'large-context-window-unused',
+		category: 'context',
+		severity: 'tip',
+		title: '🗜️ You selected a large context window you never needed',
+		buildBody: (ctx) => {
+			const s = _windowUnusedToday(ctx);
+			if (!s) { return ''; }
+			const reached = s.contextReachedTokens ?? 0;
+			const tier = _sessionLongContextStatus(s);
+			const limitNote = s.contextWindowLimit ? ` (${formatTokensShort(s.contextWindowLimit)}-token window)` : '';
+			const comparison = tier
+				? `stayed within the ${formatTokensShort(tier.info.thresholdTokens)} default-tier threshold for ${tier.model}`
+				: `only used ${Math.round((reached / (s.contextWindowLimit || reached)) * 100)}% of the selected window`;
+			return `A session today ran in the "${s.contextTier}" context tier${limitNote}, but its context only reached ${formatTokensShort(reached)} tokens — it ${comparison}. ` +
+				`The default tier would have covered this work at cheaper input rates. ` +
+				`Save the larger tiers for tasks that genuinely need huge context (whole-repo analysis, very long documents), and stay on the default tier for everything else.`;
+		},
+		appliesTo: (ctx) => _windowUnusedToday(ctx) !== null,
+		weight: 52,
+	},
+	{
+		id: 'long-context-headroom',
+		category: 'context',
+		severity: 'tip',
+		title: '📐 Your requests are approaching the long-context price line',
+		buildBody: (ctx) => {
+			const largest = _largestTieredRequestToday(ctx);
+			if (!largest) { return ''; }
+			const { session, info, model } = largest;
+			const max = session.maxRequestInputTokens ?? 0;
+			const pct = Math.round((max / info.thresholdTokens) * 100);
+			return `Your largest request today reached ${formatTokensShort(max)} input tokens — ${pct}% of the ${formatTokensShort(info.thresholdTokens)} default-tier window for ${model}. ` +
+				`Above that threshold GitHub bills long-context rates ($${info.defaultInputCostPerMillion.toFixed(2)} → $${info.longContextInputCostPerMillion.toFixed(2)} per 1M input tokens). ` +
+				`At ~4 characters per token, the default tier fits ${_describeDefaultTierCapacity(info.thresholdTokens)}. ` +
+				`Keep requests under the line with focused context, \`/compact\`, or a fresh chat per task.`;
+		},
+		appliesTo: (ctx) => {
+			// Don't double up with the crossed insight.
+			if (_longContextCrossedToday(ctx) !== null) { return false; }
+			const largest = _largestTieredRequestToday(ctx);
+			if (!largest) { return false; }
+			const max = largest.session.maxRequestInputTokens ?? 0;
+			return max >= largest.info.thresholdTokens * 0.7 && max <= largest.info.thresholdTokens;
+		},
+		weight: 48,
+	},
+
+	// ── Tool Curation ─────────────────────────────────────────────────────────
+	{
+		id: 'unused-mcp-servers',
+		category: 'tools',
+		severity: 'opportunity',
+		title: '🔌 MCP servers with no recent usage are adding prompt overhead',
+		buildBody: (ctx) => {
+			const unused = ctx.curationAnalysis?.underusedMcpServers.filter(s => s.usedToolCount === 0) ?? [];
+			const names = unused.slice(0, 3).map(s => `"${s.server}"`).join(', ');
+			const extra = unused.length > 3 ? ` (+${unused.length - 3} more)` : '';
+			const tokens = ctx.curationAnalysis?.estimatedPromptBloat.totalTokens ?? 0;
+			const tokenNote = tokens > 0 ? ` (est. ~${tokens.toLocaleString()} extra context tokens per interaction)` : '';
+			const hasExtensionServers = unused.some(s => s.extensionId);
+			const hasFileServers = unused.some(s => !s.extensionId);
+			let howToDisable: string;
+			if (hasExtensionServers && hasFileServers) {
+				howToDisable = `Open \`.vscode/mcp.json\` to remove file-configured servers, and review the Extensions view to disable or uninstall MCP-providing extensions you no longer need.`;
+			} else if (hasExtensionServers) {
+				howToDisable = `These servers come from installed extensions. Disable or uninstall the contributing extension to reclaim prompt budget. (VS Code does not expose chat tool picker state to extensions, so servers you have already deselected in the picker may still show up here.)`;
+			} else {
+				howToDisable = `Open \`.vscode/mcp.json\` to remove or comment out the unused server entries.`;
+			}
+			return `${unused.length} MCP server${unused.length > 1 ? 's' : ''} (${names}${extra}) ` +
+				`${unused.length > 1 ? 'have' : 'has'} not been used in the last ${ctx.curationAnalysis?.windowDays ?? 30} days${tokenNote}. ` +
+				`Each registered MCP server adds tool-description context to every prompt, even when its tools are never invoked. ` +
+				howToDisable;
+		},
+		actionLabel: (ctx) => {
+			const unused = ctx.curationAnalysis?.underusedMcpServers.filter(s => s.usedToolCount === 0) ?? [];
+			const allExtension = unused.length > 0 && unused.every(s => s.extensionId);
+			return allExtension ? 'Manage MCP Extensions' : 'Open mcp.json';
+		},
+		actionCommand: (ctx) => {
+			const unused = ctx.curationAnalysis?.underusedMcpServers.filter(s => s.usedToolCount === 0) ?? [];
+			const allExtension = unused.length > 0 && unused.every(s => s.extensionId);
+			return allExtension ? 'searchMcpExtensions' : 'aiEngineeringFluency.openMcpJson';
+		},
+		appliesTo: (ctx) => {
+			if (!ctx.curationAnalysis) { return false; }
+			return ctx.curationAnalysis.underusedMcpServers.some(s => s.usedToolCount === 0);
+		},
+		weight: 70,
+	},
+	{
+		id: 'high-prompt-bloat',
+		category: 'tools',
+		severity: 'opportunity',
+		title: '💡 Unused tools are adding significant prompt overhead',
+		buildBody: (ctx) => {
+			const tokens = ctx.curationAnalysis?.estimatedPromptBloat.totalTokens ?? 0;
+			const unusedCount = ctx.curationAnalysis?.unusedTools.length ?? 0;
+			return `Your unused tools are adding an estimated ~${tokens.toLocaleString()} extra tokens to every prompt. ` +
+				`${unusedCount} tool${unusedCount !== 1 ? 's' : ''} (MCP servers and/or skills) ${unusedCount !== 1 ? 'were' : 'was'} not used in the last ${ctx.curationAnalysis?.windowDays ?? 30} days but ${unusedCount !== 1 ? 'are' : 'is'} still injected into each interaction. ` +
+				`Removing or disabling them can meaningfully reduce your prompt size, lower latency, and cut costs.`;
+		},
+		actionLabel: 'View Tool Curation',
+		actionCommand: 'aiEngineeringFluency.openToolsTab',
+		appliesTo: (ctx) => {
+			if (!ctx.curationAnalysis) { return false; }
+			return ctx.curationAnalysis.estimatedPromptBloat.totalTokens > 2500;
+		},
+		weight: 65,
+	},
+	{
+		id: 'stale-skills',
+		category: 'customization',
+		severity: 'tip',
+		title: '📚 Some skills haven\'t been used recently',
+		buildBody: (ctx) => {
+			const stale = ctx.curationAnalysis?.unusedTools.filter(t => t.source === 'skill') ?? [];
+			const names = stale.slice(0, 3).map(s => `"${s.name}"`).join(', ');
+			const extra = stale.length > 3 ? ` (+${stale.length - 3} more)` : '';
+			return `${stale.length} skill file${stale.length > 1 ? 's' : ''} (${names}${extra}) ` +
+				`${stale.length > 1 ? 'were' : 'was'} not invoked in the last ${ctx.curationAnalysis?.windowDays ?? 30} days. ` +
+				`Unused skills still occupy space in instruction-file contexts. ` +
+				`Consider updating their descriptions so Copilot selects them more reliably, or remove skills that are no longer needed.`;
+		},
+		actionLabel: 'View Tool Curation',
+		actionCommand: 'aiEngineeringFluency.openToolsTab',
+		appliesTo: (ctx) => {
+			if (!ctx.curationAnalysis) { return false; }
+			const stale = ctx.curationAnalysis.unusedTools.filter(t => t.source === 'skill');
+			return stale.length >= 1;
+		},
+		weight: 40,
+	},
+
+	// ── Corrections ─────────────────────────────────────────────────────────
+	{
+		id: 'corrections-user-pushback',
+		category: 'customization',
+		severity: 'opportunity',
+		title: '🔁 You had to correct the agent repeatedly',
+		buildBody: (ctx) => {
+			const c = ctx.last30Days.corrections;
+			const count = c?.userCorrections ?? 0;
+			const sessions = c?.sessionsWithUserCorrections ?? Math.min(count, c?.sessionsWithMoments ?? 0);
+			return `In the last 30 days you corrected the agent ${count} time${count !== 1 ? 's' : ''} across ${sessions} session${sessions !== 1 ? 's' : ''} ` +
+				`(messages like "no, that's wrong" or "not what I asked"). Recurring corrections often mean the agent is missing project conventions — ` +
+				`capturing them in \`copilot-instructions.md\` or an \`AGENTS.md\` file can prevent the same mistakes. ` +
+				`See the Corrections tab for the exact moments.`;
+		},
+		actionLabel: 'View Corrections',
+		actionCommand: 'aiEngineeringFluency.openCorrectionsTab',
+		appliesTo: (ctx) => (ctx.last30Days.corrections?.userCorrections ?? 0) >= 3,
+		weight: 70,
+	},
+	{
+		id: 'corrections-tool-errors',
+		category: 'tools',
+		severity: 'tip',
+		title: '🛠️ The agent is hitting repeated tool failures',
+		buildBody: (ctx) => {
+			const c = ctx.last30Days.corrections;
+			const errors = c?.toolErrors ?? 0;
+			const editRetries = (c?.editRetries ?? 0) + (c?.editSelfCorrections ?? 0);
+			return `The agent hit ${errors} failed tool call${errors !== 1 ? 's' : ''} and re-edited a file it had just edited ${editRetries} time${editRetries !== 1 ? 's' : ''} ` +
+				`in the last 30 days. These self-correction loops burn tokens and time. ` +
+				`The Corrections tab shows which tools and files are involved — a recurring failure on the same tool is worth investigating.`;
+		},
+		actionLabel: 'View Corrections',
+		actionCommand: 'aiEngineeringFluency.openCorrectionsTab',
+		appliesTo: (ctx) => {
+			const c = ctx.last30Days.corrections;
+			if (!c) { return false; }
+			return c.toolErrors >= 5 || (c.editRetries + c.editSelfCorrections) >= 10;
+		},
+		weight: 55,
+	},
+	{
+		id: 'repeated-task-skill-candidate',
+		category: 'customization',
+		severity: 'opportunity',
+		title: '🧩 You keep prompting for the same task — make it a skill',
+		buildBody: (ctx) => {
+			const top = ctx.repeatedTasks?.clusters[0];
+			const count = top?.sessionCount ?? 0;
+			const prompt = top?.representativePrompt ?? '';
+			const more = (ctx.repeatedTasks?.clusters.length ?? 1) - 1;
+			return `You started ${count} sessions with a similar prompt: "${prompt}". ` +
+				`Turning a repeated task like this into a skill or prompt file saves you from re-explaining it and makes the outcome more consistent. ` +
+				(more > 0
+					? `${more} more repeated task${more !== 1 ? 's' : ''} found — see Tools & Integrations → Skill Suggestions.`
+					: `See Tools & Integrations → Skill Suggestions for details.`);
+		},
+		actionLabel: 'View Skill Suggestions',
+		actionCommand: 'aiEngineeringFluency.openToolsTab',
+		appliesTo: (ctx) => (ctx.repeatedTasks?.clusters[0]?.sessionCount ?? 0) >= 3,
+		weight: 60,
+	},
 ];
 
 // ---------------------------------------------------------------------------
@@ -834,8 +1430,8 @@ export function evaluateInsights(
 				severity: def.severity,
 				title: def.title,
 				body: def.buildBody(ctx),
-				actionLabel: def.actionLabel,
-				actionCommand: def.actionCommand,
+				actionLabel: typeof def.actionLabel === 'function' ? def.actionLabel(ctx) : def.actionLabel,
+				actionCommand: typeof def.actionCommand === 'function' ? def.actionCommand(ctx) : def.actionCommand,
 				status,
 				allowToast: def.allowToast,
 			};

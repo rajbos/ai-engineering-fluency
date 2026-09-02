@@ -1,13 +1,14 @@
 // Environmental Impact webview
-import { el, createButton } from '../shared/domUtils';
-import { BUTTONS } from '../shared/buttonConfig';
+import { el, createButton, iconHeading } from '../shared/domUtils';
+import { getNavButtons } from '../shared/buttonConfig';
 import { formatFixed, formatNumber, formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
-import { getWindowData } from '../shared/dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 
 // --- Analogy constants ---
 /** Average EU petrol car CO₂ emissions per km (grams) */
@@ -61,7 +62,14 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
 
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = getWindowData<EnvironmentalStats>('__INITIAL_ENVIRONMENTAL__');
+const initialData = getWindowData<EnvironmentalStats & { localization?: Record<string, string> }>('__INITIAL_ENVIRONMENTAL__');
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 
 function calculateProjection(last30DaysValue: number): number {
 	return (last30DaysValue / 30) * 365.25;
@@ -142,17 +150,7 @@ function render(stats: EnvironmentalStats): void {
 	const title = el('div', 'title', '🌿 Environmental Impact');
 
 	const buttonRow = el('div', 'button-row');
-	buttonRow.append(
-		createButton(BUTTONS['btn-refresh']),
-		createButton(BUTTONS['btn-details']),
-		createButton(BUTTONS['btn-chart']),
-		createButton(BUTTONS['btn-usage']),
-		createButton(BUTTONS['btn-diagnostics']),
-		createButton(BUTTONS['btn-maturity']),
-	);
-	if (stats.backendConfigured) {
-		buttonRow.append(createButton(BUTTONS['btn-dashboard']));
-	}
+	buttonRow.append(...getNavButtons('btn-environmental', !!stats.backendConfigured).map(config => createButton(config)));
 	header.append(title, buttonRow);
 
 	const footer = el('div', 'footer', `Last updated: ${lastUpdated.toLocaleString()} · Updates every 5 minutes`);
@@ -207,8 +205,7 @@ function buildImpactCards(
 	projectedTrees: number
 ): HTMLElement {
 	const section = el('div', 'section');
-	const heading = el('h3');
-	heading.textContent = '🌍 Impact at a Glance';
+	const heading = iconHeading('h3', 'globe', 'Impact at a Glance');
 	section.append(heading);
 
 	const intro = el('p', 'section-intro');
@@ -257,8 +254,7 @@ function buildImpactCards(
 
 function buildEstimatesSection(): HTMLElement {
 	const section = el('div', 'section');
-	const heading = el('h3');
-	heading.textContent = '💡 Calculation & Estimates';
+	const heading = iconHeading('h3', 'lightbulb', 'Calculation & Estimates');
 	section.append(heading);
 
 	const notes = document.createElement('ul');
@@ -292,6 +288,7 @@ function wireButtons(): void {
 	document.getElementById('btn-diagnostics')?.addEventListener('click', () => vscode.postMessage({ command: 'showDiagnostics' }));
 	document.getElementById('btn-maturity')?.addEventListener('click', () => vscode.postMessage({ command: 'showMaturity' }));
 	document.getElementById('btn-dashboard')?.addEventListener('click', () => vscode.postMessage({ command: 'showDashboard' }));
+	document.getElementById('btn-efficiency')?.addEventListener('click', () => vscode.postMessage({ command: 'showEfficiency' }));
 	wireExtensionPointButtons(vscode);
 }
 
@@ -302,8 +299,7 @@ registerMessageHandler<{ command: string; data?: EnvironmentalStats }>((message)
 });
 
 async function bootstrap(): Promise<void> {
-	const { provideVSCodeDesignSystem, vsCodeButton } = await import('@vscode/webview-ui-toolkit');
-	provideVSCodeDesignSystem().register(vsCodeButton());
+	await import('@vscode-elements/elements/dist/vscode-button/index.js');
 
 	if (initialData) {
 		render(initialData);

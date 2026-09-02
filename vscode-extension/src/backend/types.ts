@@ -4,8 +4,8 @@
 
 // Import shared cache/model types from the root types module so all consumers
 // stay in sync with a single source of truth.
-import type { ModelUsage } from '../types';
-export type { SessionFileCache, DailyRollupEntry, ModelUsage } from '../types';
+import type { ModelUsage } from '../../../src/types';
+export type { SessionFileCache, DailyRollupEntry, ModelUsage } from '../../../src/types';
 
 /**
  * Daily rollup value (aggregated stats for a day).

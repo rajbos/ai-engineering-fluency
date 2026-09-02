@@ -12,6 +12,17 @@ export const TOKEN_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 /** How long (ms) an invalid/rejected token is cached (negative cache). */
 export const NEGATIVE_CACHE_TTL_MS = 60 * 1000; // 1 minute
 
+/**
+ * Maximum number of entries in each in-memory auth/rate-limit map
+ * (token cache, negative cache, upload rate map, IP rate map).
+ * Caps memory growth when an attacker rotates tokens or spoofed IPs;
+ * oldest entries are evicted first once the cap is reached.
+ */
+export const AUTH_MAP_MAX_ENTRIES = 10_000;
+
+/** How often (ms) expired entries are swept from the auth/rate-limit maps. */
+export const AUTH_MAP_SWEEP_INTERVAL_MS = 60 * 1000; // 1 minute
+
 // ── Rate Limits ───────────────────────────────────────────────────────────────
 
 /** Maximum upload requests allowed per user per UPLOAD_RATE_WINDOW_MS. */

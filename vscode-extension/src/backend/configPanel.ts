@@ -383,12 +383,11 @@ function buildProfileDetailsHtml(): string {
 
 function buildToolkitScriptTag(nonce: string, toolkitUri: string): string {
 	return `	<script type="module" nonce="${nonce}">
-		// Register toolkit components before main script runs
+		// Import vscode-elements bundle — components auto-register on import
 		try {
-			const { provideVSCodeDesignSystem, vsCodeButton, vsCodeBadge } = await import(${safeJsonForInlineScript(toolkitUri)});
-			provideVSCodeDesignSystem().register(vsCodeButton(), vsCodeBadge());
+			await import(${safeJsonForInlineScript(toolkitUri)});
 		} catch (error) {
-			console.warn('Failed to load VS Code Webview UI Toolkit:', error);
+			console.warn('Failed to load vscode-elements toolkit:', error);
 		}
 		// Signal that toolkit registration is complete (or has failed)
 		window.__toolkitReady = true;

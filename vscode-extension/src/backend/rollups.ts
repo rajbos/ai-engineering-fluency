@@ -4,7 +4,7 @@
  */
 
 import type { DailyRollupValue } from './types';
-import { isObject } from '../utils/typeGuards';
+import { isObject } from '../../../src/utils/typeGuards';
 
 /**
  * Key identifying a unique daily rollup (dimensions).

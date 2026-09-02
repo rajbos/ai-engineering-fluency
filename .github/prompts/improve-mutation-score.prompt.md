@@ -52,13 +52,13 @@ Map compiled JS paths back to TypeScript sources:
 
 | Compiled path | TypeScript source |
 |---|---|
-| `out/src/tokenEstimation.js` | `vscode-extension/src/tokenEstimation.ts` |
-| `out/src/sessionParser.js` | `vscode-extension/src/sessionParser.ts` |
-| `out/src/workspaceHelpers.js` | `vscode-extension/src/workspaceHelpers.ts` |
-| `out/src/claudecode.js` | `vscode-extension/src/claudecode.ts` |
-| `out/src/utils/dayKeys.js` | `vscode-extension/src/utils/dayKeys.ts` |
-| `out/src/utils/errors.js` | `vscode-extension/src/utils/errors.ts` |
-| `out/src/utils/html.js` | `vscode-extension/src/utils/html.ts` |
+| `out/src/tokenEstimation.js` | `src/tokenEstimation.ts` |
+| `out/src/sessionParser.js` | `src/sessionParser.ts` |
+| `out/src/workspaceHelpers.js` | `src/workspaceHelpers.ts` |
+| `out/src/claudecode.js` | `src/claudecode.ts` |
+| `out/src/utils/dayKeys.js` | `src/utils/dayKeys.ts` |
+| `out/src/utils/errors.js` | `src/utils/errors.ts` |
+| `out/vscode-extension/src/utils/html.js` | `vscode-extension/src/utils/html.ts` |
 
 For unmapped paths, infer the TypeScript path by replacing `out/` with `vscode-extension/` and `.js` with `.ts`.
 
@@ -123,7 +123,7 @@ Body (Markdown):
 
 ## Recommended mutants to kill
 
-### `vscode-extension/src/<file>.ts`
+### `src/<file>.ts` (or `vscode-extension/src/<file>.ts`)
 
 - **Line N — `<mutatorName>`**: `<description>`
   - Why it matters: <one sentence>

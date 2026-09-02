@@ -25,6 +25,23 @@ Trigger this agent when:
 
 MCP tools follow predictable naming patterns. The raw tool identifier encodes the MCP server origin and the action:
 
+### How Each Client Encodes MCP Tool IDs
+
+Different AI clients build tool IDs from the *user-configured server name* in different ways. Recognizing the client format is step zero before matching prefixes:
+
+| Client | Format | Example |
+|---|---|---|
+| VS Code (Copilot Chat) | `mcp_<server>_<tool>` — server name **truncated to 13 characters** | `mcp_github_mcp_se_get_me` (server `github_mcp_server`) |
+| Copilot CLI | `<server>-<tool>` — full server name, dash separator | `github-mcp-server-get_me` |
+| Claude Code | `mcp__<server>__<tool>` — double underscores | `mcp__ide__getDiagnostics` |
+
+Critical implications:
+
+1. **The prefix is the user's config key, not a canonical server ID.** The same server appears under arbitrary prefixes depending on how each user named it in their `mcp.json` (e.g., Context7 has been seen as `context7-`, `mcp_context73_`, and `mcp_io_github_ups_`). Duplicate registrations of the same server may get a numeric suffix (`context7` → `context73`).
+2. **VS Code truncates the server name to exactly 13 characters.** Every observed VS Code prefix confirms this: `github_mcp_se`(rver), `home-assistan`(t), `microsoft_pla`(ywright), `oraios_serena`, `github_github`, `io_github_git`, `io_github_ups`(tash), `github-code-s`(canning), `mcpsamples_aw`. A prefix that looks garbled is usually just a truncated server name — mentally restore the missing characters to identify the server.
+3. **The prefix does NOT reliably indicate local vs. remote.** A VS Code prefix like `mcp_github_mcp_se_` only tells you the user named their server `github_mcp_server` — it could be a local Docker container or the remote hosted endpoint. Only use `(Local)` / `(Remote)` display suffixes for prefixes where the transport is actually known (see table below); otherwise use the plain server name (e.g., `GitHub MCP: Get Me`).
+4. **Identify the server by its tool actions, not just the prefix.** When a prefix is ambiguous, compare the action names (`get_me`, `resolve-library-id`, `browser_snapshot`, …) against the tool lists of well-known servers to confirm which server it is.
+
 ### Prefix Patterns (raw identifier → display prefix)
 
 | Raw Prefix | Display Prefix | Source Repository |
@@ -37,7 +54,13 @@ MCP tools follow predictable naming patterns. The raw tool identifier encodes th
 | `mcp_gitkraken_` | `GitKraken MCP:` | GitKraken (no public MCP server repo; tools come from the GitKraken VS Code extension) |
 | `mcp_oraios_serena_` | `Serena:` | [oraios/serena](https://github.com/oraios/serena) |
 | `mcp_microsoft_pla_` | `Playwright MCP:` | [microsoft/playwright-mcp](https://github.com/microsoft/playwright-mcp) |
+| `mcp__microsoft_playwright-mcp__` | `Playwright MCP:` | [microsoft/playwright-mcp](https://github.com/microsoft/playwright-mcp) (Claude Code naming) |
 | `mcp_io_github_ups_` | `Context7 MCP:` | [upstash/context7](https://github.com/upstash/context7) |
+| `context7-` or `mcp_context7*_` | `Context7 MCP:` | [upstash/context7](https://github.com/upstash/context7) (user-named server; numeric suffix = duplicate registration) |
+| `github-mcp-server-` | `GitHub MCP:` | [github/github-mcp-server](https://github.com/github/github-mcp-server) (Copilot CLI naming; transport unknown) |
+| `mcp_github_mcp_se_` | `GitHub MCP:` | [github/github-mcp-server](https://github.com/github/github-mcp-server) (VS Code, user-named `github_mcp_server`, truncated; transport unknown) |
+| `atlassian-` | `Atlassian MCP:` | [Atlassian Remote MCP Server](https://support.atlassian.com/rovo/docs/getting-started-with-the-atlassian-remote-mcp-server/) (Copilot CLI naming) |
+| `mcp_home-assistan_` | `Home Assistant MCP:` | [Home Assistant MCP integration](https://www.home-assistant.io/integrations/mcp_server/) (truncated `home-assistant`) |
 
 ### How to Generate a Friendly Name
 
@@ -126,8 +149,6 @@ When adding a new tool to `toolNames.json`, also determine if it belongs in `aut
 - Keep related tool variants together (e.g., all variants of `read_file`)
 - **Case-insensitive deduplication**: Before adding a tool ID, check if a differently-cased variant (e.g., lowercase equivalent) is already in the array. If `grep` is already there, do **not** add `Grep`. Only add a capitalized variant if the lowercase form is absent.
 
-
-
 ### Style Rules
 
 - Use leading comma style: `,"new_tool": "Friendly Name"`
@@ -136,14 +157,21 @@ When adding a new tool to `toolNames.json`, also determine if it belongs in `aut
 - Insert new non-MCP entries alphabetically or near logically related tools
 - Never remove existing entries
 - **Case-insensitive deduplication**: Before adding a new tool ID, check whether a lowercase (or differently-cased) variant already exists. If `grep` is already mapped, do **not** add `Grep`. If `tool_search` is already mapped, do **not** add `ToolSearch`. The lookup code handles exact-match only, so capitalized variants do map differently — but if both would resolve to the *exact same friendly name*, skip the duplicate. Only add a capitalized variant when it has a meaningfully different name or the lowercase form does not exist at all.
+- **Canonical deduplication**: Tool IDs can arrive in many equivalent forms (different MCP server registrations or separator styles). Before adding a new ID, run `.github/scripts/toolnames_utils.py` and check whether the new ID normalizes to the same canonical key as an existing entry. If it does, **do not add it** — the existing entry already covers it. Common equivalent families include:
+  - GitHub MCP: `mcp_github_github_*` ↔ `mcp_io_github_git_*` ↔ `github-mcp-server-*` ↔ `mcp_github_mcp_s2_*` ↔ `mcp_github_mcp_se_*`
+  - Context7: `context7-*` ↔ `mcp_context7_*` ↔ `mcp__context7__*` ↔ `mcp_io_github_ups_*`
+  - Playwright: `mcp_microsoft_pla_*` ↔ `mcp_playwright_*` ↔ `mcp__playwright__*` ↔ `microsoft_playwright-mcp-*`
+  - Tavily: `mcp_tavily_*` ↔ `mcp_tavily-mcp_*` ↔ `io_github_tavily-ai_tavily-mcp-*`
+  - Claude Browser: `mcp__claude-in-chrome__*` ↔ `mcp__claude_browser__*` ↔ `mcp__Claude_Browser__*`
+- **Family-pattern auto-resolution (no entry needed at all)**: For the five families above, `resolveMcpFamilyToolName` in `src/utils/toolUtils.ts` (mirrored in `.github/scripts/toolnames_utils.py` as `resolve_mcp_family_tool_name`) already recognizes *any* server-registration prefix as long as the id contains the family keyword (`github`, `playwright`, `context7`, `tavily`, `claude_browser`/`claude-in-chrome`) and ends in one of that family's known action names — regardless of how the specific MCP client/user spelled the server segment (see "How Each Client Encodes MCP Tool IDs" above). This is what stops a brand-new prefix spelling from generating another "unknown tool" report or PR. **Before adding a new entry for a GitHub/Playwright/Context7/Tavily/Claude Browser tool, run `find_matches_for_new_tool` from `toolnames_utils.py` — if `family_equivalent` is non-empty, do not add it**, the tool already resolves and is already excluded from unknown-tool detection. Only add a literal `toolNames.json` entry when the tool is a genuinely new action name for that family (the upstream MCP server added a new tool) — and when you do, also add the action to the `actions` set in both `resolveMcpFamilyToolName` and `resolve_mcp_family_tool_name` so future prefix variants of that new action resolve automatically too.
 
 ### Validation
 
 After editing `src/toolNames.json`:
 
-1. Run `npm run compile` to verify ESLint + build passes
+1. Run `npm --prefix vscode-extension run validate` to verify type-checking, ESLint, and the build pass
 2. Ensure the JSON is valid (no trailing commas, proper quoting)
-3. Run tests with `npm run test:node` to confirm nothing is broken
+3. Run tests with `npm --prefix vscode-extension run test:node` to confirm nothing is broken
 
 ## Upstream Sync Reference
 
@@ -189,5 +217,5 @@ This is already handled by `workspaceHelpers.ts` (`detectToolEditorFromPath`, `d
 - [ ] Generate friendly names following the conventions above
 - [ ] Add entries to `src/toolNames.json` in the correct location
 - [ ] For each new tool, decide if it is **automatic** or **intentional** — add automatic tools to `src/automaticTools.json`
-- [ ] Run `npm run compile` to validate
-- [ ] Run `npm run test:node` to confirm tests pass
+- [ ] Run `npm --prefix vscode-extension run validate`
+- [ ] Run `npm --prefix vscode-extension run test:node` to confirm tests pass

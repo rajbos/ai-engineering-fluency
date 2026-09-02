@@ -32,3 +32,24 @@ export function buildCspMeta(webview: vscode.Webview, nonce: string): string {
 	].join('; ');
 	return `<meta http-equiv="Content-Security-Policy" content="${csp}" />`;
 }
+
+/**
+ * Builds the `<link>` tag that loads the codicon font stylesheet (`@vscode/codicons`) into a
+ * webview, so `<span class="codicon codicon-*"></span>` icons render correctly.
+ *
+ * The stylesheet + font file are copied to `dist/webview/codicons/` by esbuild.js. The `id`
+ * matches the id `@vscode-elements/elements`' own `<vscode-icon>` component looks for
+ * (`vscode-codicon-stylesheet`), so this single link also covers any vscode-elements icons.
+ * The webview's existing CSP (`style-src`/`font-src` allow `webview.cspSource`) already permits
+ * loading this stylesheet and its `@font-face` font from the extension's own resource root.
+ *
+ * @param webview - The VS Code Webview instance (used to resolve a loadable resource URI)
+ * @param extensionUri - The extension's root Uri (provides the base path to `dist/webview`)
+ * @returns A `<link rel="stylesheet">` HTML element string
+ */
+export function getCodiconStylesheetTag(webview: vscode.Webview, extensionUri: vscode.Uri): string {
+	const href = webview.asWebviewUri(
+		vscode.Uri.joinPath(extensionUri, 'dist', 'webview', 'codicons', 'codicon.css')
+	);
+	return `<link id="vscode-codicon-stylesheet" rel="stylesheet" href="${href}" />`;
+}

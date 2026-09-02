@@ -42,6 +42,20 @@ export interface SessionHierarchyNode {
 	totalChildCount: number;
 }
 
+/**
+ * Context-window state for one session from the data.db `sessions` table.
+ * All fields are null when the column is unset for that session.
+ */
+export interface SessionContextWindow {
+	uuid: string;
+	/** Copilot CLI context tier (e.g. "default"); null when not recorded. */
+	contextTier: string | null;
+	/** Last known context fill in tokens (context_current_tokens). */
+	contextReachedTokens: number | null;
+	/** Selected input-token window limit (context_input_token_limit). */
+	contextWindowLimit: number | null;
+}
+
 export class CopilotAppDataAccess {
 	private _sqlJsModule: SqlJsStatic | null = null;
 
@@ -98,6 +112,54 @@ export class CopilotAppDataAccess {
 		} catch {
 			return result;
 		}
+	}
+
+	/**
+	 * Read per-session context-window state (tier, current fill, selected limit)
+	 * from the `sessions` table for the given events.jsonl session UUIDs.
+	 *
+	 * Returns an empty map when data.db does not exist, the schema lacks the
+	 * context columns, or any error occurs — all errors are suppressed.
+	 */
+	async getSessionContextInfo(sessionUuids: string[]): Promise<Map<string, SessionContextWindow>> {
+		const result = new Map<string, SessionContextWindow>();
+		if (sessionUuids.length === 0) { return result; }
+
+		const dbPath = this.getDbPath();
+		if (!fs.existsSync(dbPath)) { return result; }
+
+		try {
+			const SQL = await this.initSqlJs();
+			const buffer = fs.readFileSync(dbPath);
+			const db = new SQL.Database(buffer);
+			try {
+				const ph = sessionUuids.map(() => '?').join(', ');
+				const res = db.exec(
+					`SELECT id, context_tier, context_current_tokens, context_input_token_limit
+					 FROM sessions WHERE id IN (${ph})`,
+					sessionUuids,
+				);
+				for (const row of res.length > 0 ? res[0].values : []) {
+					const node = this._toContextWindowNode(row as (string | number | null)[]);
+					if (node) { result.set(node.uuid, node); }
+				}
+			} finally {
+				db.close();
+			}
+		} catch { /* optional enrichment — suppress */ }
+		return result;
+	}
+
+	/** Map one sessions-table row to a SessionContextWindow (null when the id is malformed). */
+	private _toContextWindowNode(row: (string | number | null)[]): SessionContextWindow | null {
+		const [uuid, tier, reached, limit] = row;
+		if (typeof uuid !== 'string') { return null; }
+		return {
+			uuid,
+			contextTier: typeof tier === 'string' && tier ? tier : null,
+			contextReachedTokens: typeof reached === 'number' && reached > 0 ? reached : null,
+			contextWindowLimit: typeof limit === 'number' && limit > 0 ? limit : null,
+		};
 	}
 
 	private _buildHierarchyFromDb(

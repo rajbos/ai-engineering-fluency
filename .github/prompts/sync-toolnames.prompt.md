@@ -16,7 +16,11 @@ Scan `microsoft/vscode-copilot-chat` repo for model-facing tool identifiers, com
      - `export enum ContributedToolName { ... }` (string literal values)
    - Ignore TypeScript keys (enum member names). Only collect the **string values** (the model-facing tool names).
 3. In *this* repo, load the existing mapping file `src/toolNames.json`. Treat its top-level keys as the set of already-known tool IDs.
-4. Compute `missing = (upstreamToolIds - existingMappingKeys)`.
+4. Normalize and deduplicate before computing missing:
+   - Use the helper at `.github/scripts/toolnames_utils.py` (or replicate its canonicalization rules) to canonicalize both upstream tool IDs and existing mapping keys.
+   - Equivalent forms (e.g. `mcp_github_github_*` ↔ `mcp_io_github_git_*` ↔ `github-mcp-server-*`, `context7-*` ↔ `mcp_context7_*`, Playwright/Tavily/Claude Browser prefix variants) must collapse to the same canonical key.
+   - Compute `missing = upstream IDs whose canonical form is not already present in the existing mapping`.
+   - Skip any upstream ID whose generated friendly name already exists as a value in `toolNames.json`.
    - Deduplicate.
    - Sort ascending (stable, locale-insensitive).
 5. For each missing tool ID, generate a default friendly name:

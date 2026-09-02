@@ -30,16 +30,13 @@
 	font-weight: 600;
 }
 
-.button-row {
-	display: flex;
-	gap: 8px;
-}
+
 
 .debug-badge {
 	display: inline-block;
 	padding: 4px 10px;
 	background: rgba(255, 152, 0, 0.2);
-	color: #ff9800;
+	color: var(--warning-fg);
 	border-radius: 12px;
 	font-size: 11px;
 	font-weight: 600;
@@ -48,8 +45,8 @@
 }
 
 .info-box {
-	background: rgba(3, 102, 214, 0.1);
-	border: 1px solid rgba(3, 102, 214, 0.3);
+	background: color-mix(in srgb, var(--link-color) 10%, transparent);
+	border: 1px solid color-mix(in srgb, var(--link-color) 30%, transparent);
 	border-radius: 6px;
 	padding: 12px 16px;
 	margin-bottom: 20px;
@@ -60,7 +57,7 @@
 .info-box-title {
 	font-weight: 600;
 	margin-bottom: 6px;
-	color: #3b82f6;
+	color: var(--link-color);
 }
 
 .category-selector {

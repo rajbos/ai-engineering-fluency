@@ -4,8 +4,8 @@ import {
     calculateFluencyScoreForTeamMember,
     calculateMaturityScores,
     getFluencyLevelData,
-} from '../../src/maturityScoring';
-import type { UsageAnalysisStats, UsageAnalysisPeriod, WorkspaceCustomizationMatrix } from '../../src/types';
+} from '../../../src/maturityScoring';
+import type { UsageAnalysisStats, UsageAnalysisPeriod, WorkspaceCustomizationMatrix } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -28,6 +28,8 @@ function emptyFd() {
         lowCostModels: new Set<string>(), mediumCostModels: new Set<string>(), highCostModels: new Set<string>(),
         multiFileEdits: 0, filesPerEditSum: 0, filesPerEditCount: 0,
         editsAgentCount: 0, workspaceAgentCount: 0,
+        autoSessions: 0, foundryWindowsSessions: 0, unknownProviderSessions: 0,
+        selectedModelExtensions: new Set<string>(), unknownProviderModels: new Set<string>(),
         repositories: new Set<string>(), repositoriesWithCustomization: new Set<string>(),
         applyRateSum: 0, applyRateCount: 0,
         multiTurnSessions: 0, turnsPerSessionSum: 0, turnsPerSessionCount: 0,
@@ -54,11 +56,13 @@ function emptyPeriod(): UsageAnalysisPeriod {
             standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0,
             lowCostModels: [], mediumCostModels: [], highCostModels: [], mixedCostSessions: 0,
             lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0,
+            autoSessions: 0, foundryWindowsSessions: 0, unknownProviderSessions: 0,
+            selectedModelExtensions: [], unknownProviderModels: [],
         },
         repositories: [], repositoriesWithCustomization: [],
         editScope: { singleFileEdits: 0, multiFileEdits: 0, totalEditedFiles: 0, avgFilesPerSession: 0 },
         applyUsage: { totalApplies: 0, totalCodeBlocks: 0, applyRate: 0 },
-        sessionDuration: { totalDurationMs: 0, avgDurationMs: 0, avgFirstProgressMs: 0, avgTotalElapsedMs: 0, avgWaitTimeMs: 0 },
+        sessionDuration: { totalDurationMs: 0, avgDurationMs: 0, avgFirstProgressMs: 0, avgTotalElapsedMs: 0, avgWaitTimeMs: 0, activeDurationMs: 0 },
         conversationPatterns: { multiTurnSessions: 0, singleTurnSessions: 0, avgTurnsPerSession: 0, maxTurnsInSession: 0 },
         agentTypes: { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 },
     };
@@ -118,6 +122,15 @@ test('PE: 100 interactions + agent + model switching reaches Stage 4', () => {
     fd.mixedTierSessions = 1;
     const pe = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Prompt Engineering')!;
     assert.equal(pe.stage, 4);
+});
+
+test('PE: Auto-heavy usage boosts Prompt Engineering', () => {
+    const fd = emptyFd();
+    fd.sessionCount = 10;
+    fd.autoSessions = 8;
+    const pe = calculateFluencyScoreForTeamMember(fd, 10).categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.ok(pe.stage >= 3, `expected PE >= 3 with heavy Auto usage, got ${pe.stage}`);
+    assert.ok(pe.tips.every(t => !t.toLowerCase().includes('auto model')), 'should not nudge frequent Auto users');
 });
 
 test('PE: avgTurns >= 3 boosts to at least Stage 2', () => {
@@ -527,6 +540,40 @@ test('calculateMaturityScores: AG multiAgentParentSessions=3 → Stage 4', async
     const result = await calculateMaturityScores(undefined, async () => stats);
     const ag = result.categories.find(c => c.category === 'Agentic')!;
     assert.equal(ag.stage, 4);
+});
+
+test('calculateMaturityScores: AG delegationSessions=2 → Stage 3', async () => {
+    const stats = emptyStats();
+    stats.last30Days.delegationSessions = 2;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.ok(ag.stage >= 3, `expected AG >= 3 with 2 delegation sessions, got ${ag.stage}`);
+    assert.ok(ag.evidence.some(e => e.includes('delegated work to sub-agents')), 'evidence should mention sub-agent delegation');
+});
+
+test('calculateMaturityScores: AG delegationSessions=5 → Stage 4', async () => {
+    const stats = emptyStats();
+    stats.last30Days.delegationSessions = 5;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.equal(ag.stage, 4);
+});
+
+test('calculateMaturityScores: AG delegationSessions=1 → no booster (below threshold)', async () => {
+    const stats = emptyStats();
+    stats.last30Days.delegationSessions = 1;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.ok(!ag.evidence.some(e => e.includes('delegated work to sub-agents')));
+});
+
+test('calculateMaturityScores: AG delegation tool-call volume adds evidence with avg per session', async () => {
+    const stats = emptyStats();
+    stats.last30Days.delegationSessions = 2;
+    stats.last30Days.toolCalls.byTool = { subagent: 4, delegate_task: 2, edit_file: 10 };
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.ok(ag.evidence.some(e => e.includes('sub-agent/delegate tool calls executed') && e.includes('avg 3.0 per delegating session')));
 });
 
 test('calculateMaturityScores: AG editsAgent sessions provide evidence', async () => {
@@ -972,6 +1019,24 @@ test('CU (team): Stage 3 with uncustomized repos → "add to remaining" tip', ()
     const cu = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Customization')!;
     assert.equal(cu.stage, 3);
     assert.ok(cu.tips.some((t: string) => t.includes('remaining')), 'tip should mention remaining repos');
+});
+
+test('CU (team): Foundry/local model usage promotes customization', () => {
+    const fd = emptyFd();
+    fd.foundryWindowsSessions = 3;
+    fd.sessionCount = 3;
+    const cu = calculateFluencyScoreForTeamMember(fd, 3).categories.find(c => c.category === 'Customization')!;
+    assert.ok(cu.stage >= 2, `expected Customization >= 2 with Foundry/local usage, got ${cu.stage}`);
+    assert.ok(cu.tips.some((t: string) => t.toLowerCase().includes('foundry') || t.toLowerCase().includes('local models')), 'tips should mention Foundry/local models');
+});
+
+test('CU (team): unknown provider usage promotes customization', () => {
+    const fd = emptyFd();
+    fd.unknownProviderSessions = 2;
+    fd.unknownProviderModels = new Set(['phi-4-mini']);
+    const cu = calculateFluencyScoreForTeamMember(fd, 2).categories.find(c => c.category === 'Customization')!;
+    assert.ok(cu.stage >= 2, `expected Customization >= 2 with unknown provider usage, got ${cu.stage}`);
+    assert.ok(cu.tips.some((t: string) => t.toLowerCase().includes('marketplace') || t.toLowerCase().includes('providers')), 'tip should mention more providers');
 });
 
 // ---------------------------------------------------------------------------

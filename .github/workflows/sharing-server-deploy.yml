@@ -3,6 +3,12 @@ name: Deploy Sharing Server
 # Triggers on any push that touches the sharing server or this workflow file.
 # main  → production environment  (sharing-server-prod)
 # branch → testing environment    (sharing-test-<slug><hash>)
+#
+# NOTE: on.push.paths cannot compute a diff for the first push of a new branch
+# (the event's `before` SHA is all zeros), so GitHub triggers this workflow for
+# every new branch regardless of paths. The `changes` job below re-checks with
+# a real git diff and skips the whole deploy pipeline when the sharing server
+# is untouched.
 on:
   push:
     branches: ["**"]
@@ -29,10 +35,61 @@ permissions:
   contents: read
 
 jobs:
+  # ── Verify the push actually changed sharing-server files ────────────────────
+  # Guards against the new-branch path-filter gap described in the header note.
+  changes:
+    name: Check for sharing-server changes
+    runs-on: ubuntu-latest
+    outputs:
+      deploy: ${{ steps.diff.outputs.deploy }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Diff changed paths against the push base
+        id: diff
+        env:
+          EVENT_NAME:     ${{ github.event_name }}
+          BEFORE:         ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "Manual dispatch — deploying." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          BASE="$BEFORE"
+          if [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            # New branch or rewritten history: compare against the merge-base with the default branch
+            BASE=$(git merge-base "origin/${DEFAULT_BRANCH:-main}" HEAD || true)
+          fi
+          if [[ -z "$BASE" ]]; then
+            # No base determinable — fail open so a real change is never skipped
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "Could not determine a diff base — deploying to be safe." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if git diff --name-only "$BASE" HEAD | grep -qE '^(sharing-server/|\.github/workflows/sharing-server-deploy\.yml)'; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "No sharing-server changes between \`${BASE}\` and \`${GITHUB_SHA}\` — skipping deployment." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # ── Compute environment metadata ─────────────────────────────────────────────
   setup:
     name: Compute deployment environment
     runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
     outputs:
       app_name:           ${{ steps.env.outputs.app_name }}
       state_key:          ${{ steps.env.outputs.state_key }}
@@ -42,7 +99,7 @@ jobs:
       allow_custom_domain: ${{ steps.env.outputs.allow_custom_domain }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
@@ -90,11 +147,65 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
+  # ── Type-check, unit tests & library build ───────────────────────────────────
+  # The server is also consumed as an npm library by downstream servers, so a broken
+  # lib/ build must fail here rather than at publish time.
+  test:
+    name: Type-check & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: 'npm'
+          cache-dependency-path: sharing-server/package-lock.json
+
+      - name: Install dependencies
+        working-directory: sharing-server
+        run: npm ci --ignore-scripts
+
+      - name: Type-check
+        working-directory: sharing-server
+        run: npm run check-types
+
+      - name: Run unit tests
+        working-directory: sharing-server
+        run: npm test
+
+      - name: Build library (lib/)
+        working-directory: sharing-server
+        run: npm run build:lib
+
+      - name: Verify the published entry point loads
+        working-directory: sharing-server
+        run: |
+          node -e "
+            const api = require('./lib/index.js');
+            for (const name of ['createApp', 'startServer', 'registerSchemaExtension', 'requireBearerAuth', 'getDb']) {
+              if (typeof api[name] !== 'function') {
+                throw new Error('Missing export: ' + name);
+              }
+            }
+            if (typeof api.createApp().fetch !== 'function') {
+              throw new Error('createApp() did not return a Hono app');
+            }
+            console.log('Package entry point OK');
+          "
+
   # ── Build & push container image to GHCR ─────────────────────────────────────
   build:
     name: Build & push container image
     runs-on: ubuntu-latest
-    needs: setup
+    needs: [setup, test]
     permissions:
       contents: read
       packages: write
@@ -102,18 +213,18 @@ jobs:
       image: ${{ steps.image-ref.outputs.image }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -121,7 +232,7 @@ jobs:
 
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/copilot-sharing-server
           tags: |
@@ -135,7 +246,7 @@ jobs:
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: sharing-server
           push: true
@@ -167,20 +278,22 @@ jobs:
       url:  ${{ steps.app-url.outputs.url }}
     permissions:
       contents: read
+      id-token: write # required to request the OIDC token for Azure federated login
     # ARM_* env vars are read by both the AzureRM Terraform backend and provider.
+    # Auth is via OIDC federated credentials (no client secret).
     env:
       ARM_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_CLIENT_SECRET:   ${{ secrets.AZURE_CLIENT_SECRET }}
       ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC:        "true"
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check Azure credentials
         id: prereqs
@@ -206,6 +319,17 @@ jobs:
             -backend-config="container_name=${{ vars.TF_STATE_CONTAINER }}" \
             -backend-config="key=${{ needs.setup.outputs.state_key }}"
 
+      # Azure CLI login (OIDC federated credential) — needed by the `az containerapp`
+      # calls below for custom domain/cert reconciliation. Terraform itself
+      # authenticates separately via ARM_USE_OIDC and does not need this login.
+      - name: Azure Login
+        if: steps.prereqs.outputs.configured == 'true'
+        uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c # v3.0.2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Reconcile custom domain Terraform state
         # Custom domains (and their managed certs) are only meaningful on stable, long-lived
         # environments (production). Per-branch testing environments each get a unique ACA FQDN
@@ -215,7 +339,6 @@ jobs:
         working-directory: sharing-server/infra
         env:
           TF_VAR_resource_group_name:    ${{ vars.AZURE_RESOURCE_GROUP }}
-          TF_VAR_location:               ${{ vars.AZURE_LOCATION || 'westeurope' }}
           TF_VAR_app_name:               ${{ needs.setup.outputs.app_name }}
           TF_VAR_container_image:        ${{ needs.build.outputs.image }}
           TF_VAR_github_client_id:       ${{ secrets.SHARING_GITHUB_CLIENT_ID }}
@@ -227,9 +350,6 @@ jobs:
           TF_VAR_min_replicas:           ${{ needs.setup.outputs.min_replicas }}
           TF_VAR_custom_domain:          ${{ vars.SHARING_CUSTOM_DOMAIN }}
         run: |
-          az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID" --output none
-          az account set --subscription "$ARM_SUBSCRIPTION_ID"
-
           ENV_NAME="${TF_VAR_app_name}-env"
           EXPECTED_CERT_NAME="sharing-cert"
 
@@ -288,8 +408,9 @@ jobs:
               # and triggers another 60-minute wait).
               echo "Cert '$EXPECTED_CERT_NAME' found in Azure but not in TF state. Importing..."
               if terraform import 'azurerm_container_app_environment_managed_certificate.this[0]' "$AZURE_CERT_ID"; then
-                # Drop stale custom-domain state so cert_binding re-runs to re-bind.
-                terraform state rm 'azurerm_container_app_custom_domain.this[0]' 2>/dev/null || true
+                # Drop stale cert-binding state so it re-runs to re-bind (hostname
+                # registration is untouched here since we didn't delete the hostname).
+                terraform state rm 'null_resource.cert_binding[0]' 2>/dev/null || true
                 echo "Import done. Terraform will rebind the cert without recreating it."
               else
                 # Import failed; delete the Azure cert so apply doesn't hit "already exists".
@@ -302,7 +423,11 @@ jobs:
                   --name "$ENV_NAME" \
                   --resource-group "$TF_VAR_resource_group_name" \
                   --certificate "$EXPECTED_CERT_NAME" --yes 2>/dev/null || true
-                terraform state rm 'azurerm_container_app_custom_domain.this[0]' 2>/dev/null || true
+                # Hostname was deleted above, so hostname_registration must also be
+                # dropped from state or Terraform will (wrongly) believe it's still
+                # registered and skip re-adding it before the cert create call.
+                terraform state rm 'null_resource.hostname_registration[0]' 2>/dev/null || true
+                terraform state rm 'null_resource.cert_binding[0]' 2>/dev/null || true
                 terraform state rm 'azurerm_container_app_environment_managed_certificate.this[0]' 2>/dev/null || true
                 echo "Cleanup done. Terraform will create cert and domain binding from scratch."
               fi
@@ -329,8 +454,12 @@ jobs:
                   --certificate "$AZURE_CERT_NAME" --yes 2>/dev/null || true
               fi
 
-              # Remove stale TF state entries so Terraform creates fresh resources
-              terraform state rm 'azurerm_container_app_custom_domain.this[0]' 2>/dev/null || true
+              # Remove stale TF state entries so Terraform creates fresh resources.
+              # Hostname was deleted above, so hostname_registration must also be
+              # dropped from state or Terraform will (wrongly) believe it's still
+              # registered and skip re-adding it before the cert create call.
+              terraform state rm 'null_resource.hostname_registration[0]' 2>/dev/null || true
+              terraform state rm 'null_resource.cert_binding[0]' 2>/dev/null || true
               terraform state rm 'azurerm_container_app_environment_managed_certificate.this[0]' 2>/dev/null || true
               echo "Cleanup done. Terraform will create cert and domain binding from scratch."
             fi
@@ -341,7 +470,6 @@ jobs:
         working-directory: sharing-server/infra
         env:
           TF_VAR_resource_group_name: ${{ vars.AZURE_RESOURCE_GROUP }}
-          TF_VAR_location:            ${{ vars.AZURE_LOCATION || 'westeurope' }}
           TF_VAR_app_name:            ${{ needs.setup.outputs.app_name }}
           TF_VAR_container_image:     ${{ needs.build.outputs.image }}
           TF_VAR_github_client_id:    ${{ secrets.SHARING_GITHUB_CLIENT_ID }}
@@ -362,7 +490,6 @@ jobs:
         working-directory: sharing-server/infra
         env:
           TF_VAR_resource_group_name: ${{ vars.AZURE_RESOURCE_GROUP }}
-          TF_VAR_location:            ${{ vars.AZURE_LOCATION || 'westeurope' }}
           TF_VAR_app_name:            ${{ needs.setup.outputs.app_name }}
           TF_VAR_container_image:     ${{ needs.build.outputs.image }}
           TF_VAR_github_client_id:    ${{ secrets.SHARING_GITHUB_CLIENT_ID }}

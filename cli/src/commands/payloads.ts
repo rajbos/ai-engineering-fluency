@@ -5,7 +5,7 @@
  * construction so that the `all` command (which bundles every view into one
  * response) and the individual commands stay in sync automatically.
  */
-import type { DetailedStats, UsageAnalysisStats, UsageAnalysisPeriod } from '../../../vscode-extension/src/types';
+import type { DetailedStats, UsageAnalysisStats, UsageAnalysisPeriod } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Empty-state payloads (returned when no session files are discovered)

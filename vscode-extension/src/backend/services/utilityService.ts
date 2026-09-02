@@ -5,7 +5,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { fileUriToPath, normalizePath } from '../../workspaceHelpers';
+import { fileUriToPath, normalizePath } from '../../../../src/workspaceHelpers';
 import {
 	CODE_WORKSPACE_EXTENSION,
 	DAY_KEY_REGEX,

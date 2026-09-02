@@ -15,7 +15,8 @@ import {
     normalizePathForDedup,
     fileUriToPath,
     parseWorkspaceStorageJsonFile,
-} from '../../src/workspaceHelpers';
+    resolveSessionWorkspaceName,
+} from '../../../src/workspaceHelpers';
 
 // ---------------------------------------------------------------------------
 // getModeType
@@ -162,6 +163,72 @@ test('normalizeMcpToolName: mcp.github.github. prefix maps to mcp.io.github.git.
     );
 });
 
+test('normalizeMcpToolName: github-mcp-server- prefix maps to mcp_io_github_git_', () => {
+    assert.equal(
+        normalizeMcpToolName('github-mcp-server-list_issues'),
+        'mcp_io_github_git_list_issues'
+    );
+});
+
+test('normalizeMcpToolName: mcp_github_mcp_s2_ prefix maps to mcp_io_github_git_', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_github_mcp_s2_issue_read'),
+        'mcp_io_github_git_issue_read'
+    );
+});
+
+test('normalizeMcpToolName: context7 prefix variants normalize to context7-', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_context7_query-docs'),
+        'context7-query-docs'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp__context7__query-docs'),
+        'context7-query-docs'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp_io_github_ups_resolve-library-id'),
+        'context7-resolve-library-id'
+    );
+});
+
+test('normalizeMcpToolName: playwright prefix variants normalize to microsoft_playwright-mcp-', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_playwright_browser_click'),
+        'microsoft_playwright-mcp-browser_click'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp__microsoft_playwright-mcp__browser_click'),
+        'microsoft_playwright-mcp-browser_click'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp_microsoft_pla_browser_click'),
+        'microsoft_playwright-mcp-browser_click'
+    );
+});
+
+test('normalizeMcpToolName: tavily prefix variants normalize to io_github_tavily-ai_tavily-mcp-', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_tavily_tavily_search'),
+        'io_github_tavily-ai_tavily-mcp-tavily_search'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp_tavily-mcp_tavily_search'),
+        'io_github_tavily-ai_tavily-mcp-tavily_search'
+    );
+});
+
+test('normalizeMcpToolName: claude browser prefix variants normalize to mcp__claude_browser__', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp__claude-in-chrome__navigate'),
+        'mcp__claude_browser__navigate'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp__Claude_Browser__navigate'),
+        'mcp__claude_browser__navigate'
+    );
+});
+
 test('normalizeMcpToolName: other tool names pass through unchanged', () => {
     assert.equal(normalizeMcpToolName('mcp_io_github_git_list_issues'), 'mcp_io_github_git_list_issues');
     assert.equal(normalizeMcpToolName('editFiles'), 'editFiles');
@@ -251,14 +318,35 @@ test('getEditorNameFromRoot: opencode path returns OpenCode', () => {
 test('getEditorNameFromRoot: .gemini path returns Gemini CLI', () => {
     assert.equal(getEditorNameFromRoot('/home/user/.gemini'), 'Gemini CLI');
 });
+
+test('getEditorNameFromRoot: .devin path returns Devin', () => {
+    assert.equal(getEditorNameFromRoot('/home/user/.devin'), 'Devin');
+});
+
+test('getEditorNameFromRoot: devin-desktop install path returns Devin (not misclassified as Copilot CLI)', () => {
+    // Devin bundles the 'codeium.windsurf' extension and a plugin id that does NOT
+    // contain 'copilot', so this mainly guards against future substring collisions.
+    assert.equal(getEditorNameFromRoot('C:\\Users\\user\\AppData\\Local\\Programs\\devin-desktop'), 'Devin');
+});
+
+test('getEditorNameFromRoot: Devin CLI config dir returns "Devin CLI" (distinct from the desktop app)', () => {
+    assert.equal(getEditorNameFromRoot('C:\\Users\\user\\AppData\\Roaming\\devin\\cli'), 'Devin CLI');
+    assert.equal(getEditorNameFromRoot('/home/user/.local/share/devin/cli'), 'Devin CLI');
+});
+
+test('getEditorNameFromRoot: Codex CLI home (~/.codex) returns "Codex CLI", not VS Code', () => {
+    assert.equal(getEditorNameFromRoot('C:\\Users\\user\\.codex'), 'Codex CLI');
+    assert.equal(getEditorNameFromRoot('/home/user/.codex'), 'Codex CLI');
+});
 // ── Mutation-killing tests ──────────────────────────────────────────────
 
 import {
         extractWorkspaceIdFromSessionPath,
         globToRegExp,
         getEditorTypeFromPath,
-        detectEditorSource
-} from '../../src/workspaceHelpers';
+        detectEditorSource,
+        detectClaudeCodeEditorVariant
+} from '../../../src/workspaceHelpers';
 
 // ── extractWorkspaceIdFromSessionPath ───────────────────────────────────
 
@@ -329,6 +417,54 @@ test('getEditorTypeFromPath: detects Claude Code', () => {
         assert.equal(getEditorTypeFromPath('/home/user/.claude/projects/hash/session.jsonl'), 'Claude Code');
 });
 
+test('detectClaudeCodeEditorVariant: returns Claude Desktop for entrypoint claude-desktop', () => {
+        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const projectsDir = nodePath.join(dir, '.claude', 'projects', 'hash');
+        fs.mkdirSync(projectsDir, { recursive: true });
+        const file = nodePath.join(projectsDir, 'session.jsonl');
+        fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-desktop', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+        try {
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Desktop');
+                assert.equal(getEditorTypeFromPath(file), 'Claude Desktop');
+        } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+        }
+});
+
+test('detectClaudeCodeEditorVariant: returns Claude Code CLI for entrypoint cli', () => {
+        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const file = nodePath.join(dir, 'session.jsonl');
+        fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'cli', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+        try {
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code CLI');
+        } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+        }
+});
+
+test('detectClaudeCodeEditorVariant: returns Claude Code for any other entrypoint (e.g. VS Code extension)', () => {
+        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const file = nodePath.join(dir, 'session.jsonl');
+        fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-vscode', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+        try {
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code');
+        } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+        }
+});
+
+test('detectClaudeCodeEditorVariant: defaults to Claude Code when file is missing or has no entrypoint', () => {
+        assert.equal(detectClaudeCodeEditorVariant('/nonexistent/path/session.jsonl'), 'Claude Code');
+        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const file = nodePath.join(dir, 'session.jsonl');
+        fs.writeFileSync(file, JSON.stringify({ type: 'queue-operation', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+        try {
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code');
+        } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+        }
+});
+
 test('getEditorTypeFromPath: detects Cursor', () => {
         assert.equal(getEditorTypeFromPath('/home/user/Cursor/User/workspaceStorage/abc/chatSessions/session.json'), 'Cursor');
 });
@@ -352,6 +488,10 @@ test('getEditorTypeFromPath: detects Gemini CLI', () => {
 
 test('getEditorTypeFromPath: detects Claude Desktop Cowork', () => {
         assert.equal(getEditorTypeFromPath('/home/user/AppData/Local/Packages/Claude_pzs/LocalCache/Roaming/claude/local-agent-mode-sessions/session.jsonl'), 'Claude Desktop Cowork');
+});
+
+test('getEditorTypeFromPath: detects Claude Desktop Cowork from renamed claude-code-sessions dir', () => {
+        assert.equal(getEditorTypeFromPath('/home/user/AppData/Local/Packages/Claude_pzs/LocalCache/Roaming/claude/claude-code-sessions/app/machine/local_abc/.claude/projects/hash/session.jsonl'), 'Claude Desktop Cowork');
 });
 
 test('getEditorTypeFromPath: returns Unknown for unrecognized paths', () => {
@@ -385,6 +525,22 @@ test('detectEditorSource: detects Windsurf', () => {
         assert.equal(detectEditorSource('/home/user/.config/Windsurf/User/workspaceStorage/abc/session.json'), 'Windsurf');
 });
 
+test('detectEditorSource: detects Devin (Cognition Labs fork/rebrand of Windsurf)', () => {
+        assert.equal(detectEditorSource('/home/user/.devin/User/workspaceStorage/abc/session.json'), 'Devin');
+});
+
+test('detectEditorSource: detects Devin CLI virtual sessions.db paths (distinct from the desktop app)', () => {
+        const p = 'C:\\Users\\alice\\AppData\\Roaming\\devin\\cli\\sessions.db#sess-abc123';
+        assert.equal(detectEditorSource(p), 'Devin CLI');
+});
+
+test('detectEditorSource: detects Codex CLI rollout files and virtual thread paths (not VS Code, despite the "code" substring)', () => {
+        const rollout = 'C:\\Users\\alice\\.codex\\sessions\\2026\\03\\19\\rollout-2026-03-19T12-00-00-019d0233-2d86-7c21-b13a-8fa9578d3a0d.jsonl';
+        assert.equal(detectEditorSource(rollout), 'Codex CLI');
+        const virtual = '/home/alice/.codex/state_5.sqlite#019d0233-2d86-7c21-b13a-8fa9578d3a0d';
+        assert.equal(detectEditorSource(virtual), 'Codex CLI');
+});
+
 test('detectEditorSource: detects VSCodium', () => {
         assert.equal(detectEditorSource('/home/user/.config/VSCodium/User/workspaceStorage/abc/session.json'), 'VSCodium');
 });
@@ -395,6 +551,7 @@ test('detectEditorSource: detects Visual Studio', () => {
 
 test('detectEditorSource: detects Claude Desktop Cowork', () => {
         assert.equal(detectEditorSource('/home/user/.config/local-agent-mode-sessions/session.json'), 'Claude Desktop Cowork');
+        assert.equal(detectEditorSource('/home/user/.config/claude-code-sessions/session.json'), 'Claude Desktop Cowork');
 });
 
 test('detectEditorSource: detects Crush', () => {
@@ -562,7 +719,7 @@ test('extractMcpServerName: GUID-keyed MCP tool returns "Claude MCP"', () => {
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as nodePath from 'node:path';
-import { scanWorkspaceCustomizationFiles } from '../../src/workspaceHelpers';
+import { scanWorkspaceCustomizationFiles } from '../../../src/workspaceHelpers';
 
 test('scanWorkspaceCustomizationFiles: returns empty array for non-existent dir', () => {
 const result = scanWorkspaceCustomizationFiles('/does/not/exist/xyz123');
@@ -804,6 +961,14 @@ test('getEditorTypeFromPath: detects Crush', () => {
     assert.equal(getEditorTypeFromPath('/home/user/.crush/crush.db#session-id'), 'Crush');
 });
 
+test('getEditorTypeFromPath: detects Cline (not VS Code) despite /Code/User/ in path', () => {
+    assert.equal(getEditorTypeFromPath('C:\\Users\\user\\AppData\\Roaming\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\tasks\\1782681302220\\ui_messages.json'), 'Cline');
+});
+
+test('getEditorTypeFromPath: detects Cline (not Cursor) when hosted in Cursor', () => {
+    assert.equal(getEditorTypeFromPath('/home/user/.config/Cursor/User/globalStorage/saoudrizwan.claude-dev/tasks/1782681302220/ui_messages.json'), 'Cline');
+});
+
 // ── detectEditorSource: missing editor types ───────────────────────────────
 
 test('detectEditorSource: detects Continue', () => {
@@ -823,6 +988,10 @@ test('detectEditorSource: detects OpenCode via callback', () => {
     assert.equal(detectEditorSource('/home/user/.local/share/opencode/opencode.db#ses_abc', isOpenCode), 'OpenCode');
 });
 
+test('detectEditorSource: detects Cline (not VS Code) despite Code in path', () => {
+    assert.equal(detectEditorSource('C:\\Users\\user\\AppData\\Roaming\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\tasks\\1782681302220\\ui_messages.json'), 'Cline');
+});
+
 // ── getEditorNameFromRoot: missing editor types ────────────────────────────
 
 test('getEditorNameFromRoot: Mistral Vibe path returns Mistral Vibe', () => {
@@ -839,6 +1008,10 @@ test('getEditorNameFromRoot: VS Code Exploration path returns VS Code Exploratio
 
 test('getEditorNameFromRoot: VSCodium path returns VSCodium', () => {
     assert.equal(getEditorNameFromRoot('C:\\Users\\user\\AppData\\Roaming\\VSCodium'), 'VSCodium');
+});
+
+test('getEditorNameFromRoot: Cline storage root returns Cline (not VS Code)', () => {
+    assert.equal(getEditorNameFromRoot('C:\\Users\\user\\AppData\\Roaming\\Code\\User\\globalStorage\\saoudrizwan.claude-dev'), 'Cline');
 });
 
 
@@ -863,7 +1036,7 @@ import {
     resolveExactWorkspacePath,
     extractRepositoryFromContentReferences,
     resolveWorkspaceFolderFromSessionPath,
-} from '../../src/workspaceHelpers';
+} from '../../../src/workspaceHelpers';
 
 test('escapeRegexSpecials: escapes dot', () => {
     assert.equal(escapeRegexSpecials('.'), '\\.');
@@ -1273,6 +1446,22 @@ test('getEditorTypeFromPath: windsurf:// URI returns Windsurf', () => {
     assert.equal(getEditorTypeFromPath('windsurf://some/path/session.json'), 'Windsurf');
 });
 
+test('getEditorTypeFromPath: devin:// URI returns Devin', () => {
+    assert.equal(getEditorTypeFromPath('devin://trajectory/session.json'), 'Devin');
+});
+
+test('getEditorTypeFromPath: Devin CLI sessions.db virtual path returns "Devin CLI"', () => {
+    const p = 'C:\\Users\\alice\\AppData\\Roaming\\devin\\cli\\sessions.db#sess-abc123';
+    assert.equal(getEditorTypeFromPath(p), 'Devin CLI');
+});
+
+test('getEditorTypeFromPath: Codex CLI rollout and virtual thread paths return "Codex CLI"', () => {
+    const rollout = 'C:\\Users\\alice\\.codex\\archived_sessions\\2026\\03\\19\\rollout-2026-03-19T12-00-00-019d0233-2d86-7c21-b13a-8fa9578d3a0d.jsonl';
+    assert.equal(getEditorTypeFromPath(rollout), 'Codex CLI');
+    const virtual = 'C:\\Users\\alice\\.codex\\state_5.sqlite#019d0233-2d86-7c21-b13a-8fa9578d3a0d';
+    assert.equal(getEditorTypeFromPath(virtual), 'Codex CLI');
+});
+
 test('getEditorTypeFromPath: isGeminiCliPath requires all three conditions (missing /chats/session-)', () => {
     // Has /.gemini/tmp/ and ends with .jsonl, but NO /chats/session- -> NOT Gemini CLI
     const path = '/home/user/.gemini/tmp/project/other/file.jsonl';
@@ -1305,6 +1494,15 @@ test('getEditorTypeFromPath: Windows path with .copilot\\jb returns JetBrains', 
 
 test('detectEditorSource: windsurf:// URI returns Windsurf', () => {
     assert.equal(detectEditorSource('windsurf://some/path'), 'Windsurf');
+});
+
+test('detectEditorSource: devin:// URI returns Devin', () => {
+    assert.equal(detectEditorSource('devin://trajectory/abc123'), 'Devin');
+});
+
+test('detectEditorSource: Devin CLI sessions.db virtual path is not misclassified as VS Code or Devin desktop', () => {
+    const p = '/home/alice/.local/share/devin/cli/sessions.db#sess-abc123';
+    assert.equal(detectEditorSource(p), 'Devin CLI');
 });
 
 test('detectEditorSource: isGeminiCliPath requires all three conditions', () => {
@@ -1502,4 +1700,143 @@ test('globToRegExp: case-insensitive flag set correctly', () => {
     const reInsensitive = globToRegExp('*.ts', true);
     assert.ok(!reSensitive.flags.includes('i'));
     assert.ok(reInsensitive.flags.includes('i'));
+});
+
+// ---------------------------------------------------------------------------
+// parseCodeWorkspaceFolders
+// ---------------------------------------------------------------------------
+
+import { parseCodeWorkspaceFolders } from '../../../src/workspaceHelpers';
+
+test('parseCodeWorkspaceFolders: returns empty array for non-existent path', () => {
+    const result = parseCodeWorkspaceFolders('/does/not/exist/code-workspace');
+    assert.deepEqual(result, []);
+});
+
+test('parseCodeWorkspaceFolders: returns empty array for non-code-workspace path', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pcwf-'));
+    try {
+        const tmpFile = nodePath.join(tmpDir, 'not-a-workspace.json');
+        fs.writeFileSync(tmpFile, '{}', 'utf8');
+        const result = parseCodeWorkspaceFolders(tmpFile);
+        assert.deepEqual(result, []);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('parseCodeWorkspaceFolders: returns folders from valid .code-workspace with path entries', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pcwf-'));
+    try {
+        const folder1 = nodePath.join(tmpDir, 'repo1');
+        const folder2 = nodePath.join(tmpDir, 'repo2');
+        fs.mkdirSync(folder1, { recursive: true });
+        fs.mkdirSync(folder2, { recursive: true });
+        const wsFile = nodePath.join(tmpDir, 'test.code-workspace');
+        fs.writeFileSync(wsFile, JSON.stringify({
+            folders: [
+                { path: folder1 },
+                { path: folder2 },
+            ],
+        }), 'utf8');
+        const result = parseCodeWorkspaceFolders(wsFile);
+        // should resolve both folders via realpathSync.native
+        assert.equal(result.length, 2);
+        assert.ok(result.some(p => nodePath.basename(p) === 'repo1'));
+        assert.ok(result.some(p => nodePath.basename(p) === 'repo2'));
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('parseCodeWorkspaceFolders: handles file:// URI entries', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pcwf-'));
+    try {
+        const folder = nodePath.join(tmpDir, 'my-project');
+        fs.mkdirSync(folder, { recursive: true });
+        const wsFile = nodePath.join(tmpDir, 'test.code-workspace');
+        const fileUri = 'file://' + (process.platform === 'win32' ? '/' + folder.replace(/\\/g, '/') : folder);
+        fs.writeFileSync(wsFile, JSON.stringify({
+            folders: [
+                { uri: fileUri },
+            ],
+        }), 'utf8');
+        const result = parseCodeWorkspaceFolders(wsFile);
+        assert.equal(result.length, 1);
+        assert.ok(result[0].endsWith('my-project'));
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('parseCodeWorkspaceFolders: returns empty array for invalid JSON', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pcwf-'));
+    try {
+        const wsFile = nodePath.join(tmpDir, 'bad.code-workspace');
+        fs.writeFileSync(wsFile, 'not-json', 'utf8');
+        const result = parseCodeWorkspaceFolders(wsFile);
+        assert.deepEqual(result, []);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('parseCodeWorkspaceFolders: returns empty array when folders key is missing', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pcwf-'));
+    try {
+        const wsFile = nodePath.join(tmpDir, 'no-folders.code-workspace');
+        fs.writeFileSync(wsFile, JSON.stringify({ settings: {} }), 'utf8');
+        const result = parseCodeWorkspaceFolders(wsFile);
+        assert.deepEqual(result, []);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+// ── resolveSessionWorkspaceName ──────────────────────────────────────────
+
+test('resolveSessionWorkspaceName: prefers workspaceFolderPath over repository', () => {
+    const workspaceFolderPath = nodePath.join('C:', 'Users', 'me', 'code', 'my-project');
+    const name = resolveSessionWorkspaceName(
+        { workspaceFolderPath, repository: 'owner/repo' },
+        nodePath.join('C:', 'Users', 'me', '.copilot', 'session-store.db#session-id')
+    );
+    assert.equal(name, 'my-project');
+});
+
+test('resolveSessionWorkspaceName: falls back to repository when workspaceFolderPath is absent', () => {
+    const name = resolveSessionWorkspaceName(
+        { repository: 'owner/repo' },
+        'some-session.jsonl'
+    );
+    assert.equal(name, 'owner/repo');
+});
+
+test('resolveSessionWorkspaceName: falls back to workspaceStorage resolution', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-rsws-'));
+    try {
+        const workspaceFolder = nodePath.join(tmpDir, 'my-vscode-project');
+        fs.mkdirSync(workspaceFolder, { recursive: true });
+        const workspaceStorage = nodePath.join(tmpDir, 'workspaceStorage', 'wsid123');
+        fs.mkdirSync(workspaceStorage, { recursive: true });
+        fs.writeFileSync(
+            nodePath.join(workspaceStorage, 'workspace.json'),
+            JSON.stringify({ folder: workspaceFolder }),
+            'utf8'
+        );
+        const sessionFile = nodePath.join(workspaceStorage, 'chatSessions', 'session.json');
+        const cache = new Map<string, string | undefined>();
+        const name = resolveSessionWorkspaceName({}, sessionFile, cache);
+        assert.equal(name, 'my-vscode-project');
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('resolveSessionWorkspaceName: returns undefined when no attribution is available', () => {
+    const name = resolveSessionWorkspaceName(
+        {},
+        '/home/user/.claude/projects/hash/session.jsonl'
+    );
+    assert.equal(name, undefined);
 });

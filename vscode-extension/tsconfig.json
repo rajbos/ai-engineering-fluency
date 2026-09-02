@@ -7,8 +7,14 @@
 			"DOM"
 		],
 		"sourceMap": true,
-		"rootDir": "src",
 		"strict": true,   /* enable all strict type-checking options */
+		/* Shared sources live in ../src (repo root). They resolve the 'vscode' module
+		   types from this project's node_modules via the mapping below. */
+		"paths": {
+			"vscode": ["./node_modules/@types/vscode/index.d.ts"],
+			"@msgpack/msgpack": ["./node_modules/@msgpack/msgpack/dist.esm/index.d.ts"],
+			"tslib": ["./node_modules/tslib/tslib.d.ts"]
+		},
 		"resolveJsonModule": true,  /* Enable importing .json files */
 		"esModuleInterop": true,  /* Enable interop between CommonJS and ES modules */
 		/* Additional Checks */

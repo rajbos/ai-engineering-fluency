@@ -5,8 +5,8 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { discoverSessionFiles, calculateDetailedStats, fmt, formatTokens, modelPricing } from '../helpers';
 import { ProgressTracker } from '../progress';
-import type { PeriodStats, ModelUsage } from '../../../vscode-extension/src/types';
-import { getModelTier } from '../../../vscode-extension/src/tokenEstimation';
+import type { PeriodStats, ModelUsage } from '../../../src/types';
+import { getModelTier } from '../../../src/tokenEstimation';
 import { shouldOutputJson } from '../commandUtils';
 import { createDetailsPayload } from './payloads';
 

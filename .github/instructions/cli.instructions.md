@@ -4,14 +4,14 @@ applyTo: "cli/**"
 
 # CLI — Architecture & Integration Guide
 
-The CLI (`cli/`) is a standalone command-line tool that **shares the session discovery and data access classes** from `vscode-extension/src/` but has its own aggregation pipeline. It is built with TypeScript and bundled via `cli/esbuild.js` into `cli/dist/cli.js`.
+The CLI (`cli/`) is a standalone command-line tool that **shares the session discovery and data access classes** from the repo-root `src/` folder but has its own aggregation pipeline. It is built with TypeScript and bundled via `cli/esbuild.js` into `cli/dist/cli.js`.
 
 ## Key Files
 
-- **`cli/src/helpers.ts`**: Shared helper functions — session discovery, file processing, stats aggregation. Imports all data access classes from `vscode-extension/src/`.
+- **`cli/src/helpers.ts`**: Shared helper functions — session discovery, file processing, stats aggregation. Imports all data access classes from `src/`.
 - **`cli/src/commands/`**: One file per sub-command (`stats`, `usage`, `environmental`, `fluency`, `diagnostics`).
-- **`cli/esbuild.js`**: Build script. Copies JSON data files from `vscode-extension/src/` to a temp location before bundling, then removes them.
-- **`cli/tsconfig.json`**: `paths` alias points to `../vscode-extension/src/*`.
+- **`cli/esbuild.js`**: Build script. Copies JSON data files from `src/` to a temp location before bundling, then removes them.
+- **`cli/tsconfig.json`**: `paths` alias points to `../src/*`.
 
 ## Developer Workflow
 
@@ -29,15 +29,15 @@ Or from the repo root:
 
 ## Adding a New Editor / Data Source
 
-When adding support for a new editor or data source, wire it into **both** `vscode-extension/src/` (see `.github/instructions/vscode-extension.instructions.md`) **and** this CLI.
+When adding support for a new editor or data source, wire it into **both** the shared `src/` folder (see `.github/instructions/vscode-extension.instructions.md`) **and** this CLI.
 
-> **Adapter architecture (issue #654)**: The CLI shares the adapter classes from `vscode-extension/src/adapters/` via `buildAdapterRegistry` and `createDataAccessInstances` in `vscode-extension/src/adapters/adapterRegistry.ts`. Currently 11 adapters are registered: OpenCode, Crush, Continue, ClaudeCode, ClaudeDesktop, VisualStudio, MistralVibe, GeminiCli, **CopilotChat**, **CopilotCli**, **JetBrains**. The Copilot and JetBrains adapters own discovery but their `handles()` returns `false`, so `processSessionFile()` falls through to the existing per-format helpers (JSONL/JSON parsing) for those files. Order matters — register Copilot/JetBrains adapters **last**.
+> **Adapter architecture (issue #654)**: The CLI shares the adapter classes from `src/adapters/` via `buildAdapterRegistry` and `createDataAccessInstances` in `src/adapters/adapterRegistry.ts`. Currently 11 adapters are registered: OpenCode, Crush, Continue, ClaudeCode, ClaudeDesktop, VisualStudio, MistralVibe, GeminiCli, **CopilotChat**, **CopilotCli**, **JetBrains**. The Copilot and JetBrains adapters own discovery but their `handles()` returns `false`, so `processSessionFile()` falls through to the existing per-format helpers (JSONL/JSON parsing) for those files. Order matters — register Copilot/JetBrains adapters **last**.
 
 ### CLI Files to Update
 
 | File | What to add |
 |---|---|
-| `vscode-extension/src/adapters/adapterRegistry.ts` | Concrete import + instantiation in `createDataAccessInstances` + registry entry in `buildAdapterRegistry` |
+| `src/adapters/adapterRegistry.ts` | Concrete import + instantiation in `createDataAccessInstances` + registry entry in `buildAdapterRegistry` |
 | `cli/src/helpers.ts` | Detection, stat routing, `processSessionFile()` branch, `calculateUsageAnalysisStats()` deps only — **no longer needs per-adapter imports or instantiation** |
 | `cli/src/commands/stats.ts` | Add entry to `getEditorDisplayName()` |
 | `cli/src/commands/usage.ts` | No change needed — uses shared helpers |
@@ -45,7 +45,7 @@ When adding support for a new editor or data source, wire it into **both** `vsco
 
 ### Integration Points in `cli/src/helpers.ts`
 
-Data-access instantiation is centralised in `vscode-extension/src/adapters/adapterRegistry.ts`
+Data-access instantiation is centralised in `src/adapters/adapterRegistry.ts`
 via `createDataAccessInstances`. To add a new editor, update only that file for instantiation.
 Then in `cli/src/helpers.ts` add only the routing/processing hooks:
 
@@ -56,7 +56,7 @@ Then in `cli/src/helpers.ts` add only the routing/processing hooks:
 
 ### Checklist
 
-- [ ] `vscode-extension/src/adapters/adapterRegistry.ts` — concrete import, `createDataAccessInstances` entry, `buildAdapterRegistry` entry
+- [ ] `src/adapters/adapterRegistry.ts` — concrete import, `createDataAccessInstances` entry, `buildAdapterRegistry` entry
 - [ ] `cli/src/helpers.ts` — detection, stat routing, processSessionFile block, usageAnalysis deps
 - [ ] `cli/src/commands/stats.ts` — `getEditorDisplayName()` entry
 - [ ] `cli/README.md` — "Data Sources" section updated
