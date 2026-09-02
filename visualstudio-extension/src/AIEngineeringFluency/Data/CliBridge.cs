@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace AIEngineeringFluency.Data
@@ -95,10 +96,14 @@ namespace AIEngineeringFluency.Data
 
                 var usageTask = RunGetUsageStatsAsync();
                 _inflightUsageTask = usageTask;
-                _ = usageTask.ContinueWith(_ =>
-                {
-                    lock (_usageLock) { _inflightUsageTask = null; }
-                });
+                _ = usageTask.ContinueWith(
+                    _ =>
+                    {
+                        lock (_usageLock) { _inflightUsageTask = null; }
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.None,
+                    TaskScheduler.Default);
 
                 return usageTask;
             }
@@ -176,10 +181,14 @@ namespace AIEngineeringFluency.Data
 
                 var task = RunGetAllDataAsync();
                 _inflightAllTask = task;
-                _ = task.ContinueWith(_ =>
-                {
-                    lock (_allLock) { _inflightAllTask = null; }
-                });
+                _ = task.ContinueWith(
+                    _ =>
+                    {
+                        lock (_allLock) { _inflightAllTask = null; }
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.None,
+                    TaskScheduler.Default);
 
                 return task;
             }
