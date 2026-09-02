@@ -210,18 +210,48 @@ function _asuExtractToolNamesFromRequest(request: SessionRequestRaw): string[] {
 
 function _asuFinalizeTaskClassification(analysis: SessionUsageAnalysis, turns: TaskTurnSignal[]): void {
 	analysis.taskClassification = turns.length > 0 ? classifySessionTurns(turns) : createEmptyTaskClassificationResult();
-	if (analysis.modeUsage.plan > 0 && analysis.modeUsage.plan >= analysis.modeUsage.agent && analysis.modeUsage.plan >= analysis.modeUsage.edit) {
+
+	const shares = analysis.taskClassification.categoryShares;
+	const planMin = (analysis.modeUsage.plan > 0 && analysis.modeUsage.plan >= analysis.modeUsage.agent && analysis.modeUsage.plan >= analysis.modeUsage.edit) ? 0.6 : 0;
+	const delegationMin = analysis.modeUsage.customAgent > 0
+		? Math.min(1, analysis.modeUsage.customAgent / Math.max(1, analysis.taskClassification.turnCount))
+		: 0;
+
+	// Apply mode-based biases.
+	if (planMin > 0) {
 		analysis.taskClassification.primaryCategory = 'Planning';
-		analysis.taskClassification.categoryShares['Planning'] = Math.max(analysis.taskClassification.categoryShares['Planning'], 0.6);
+		shares['Planning'] = Math.max(shares['Planning'], planMin);
 	}
-	if (analysis.modeUsage.customAgent > 0) {
-		analysis.taskClassification.categoryShares['Delegation'] = Math.max(
-			analysis.taskClassification.categoryShares['Delegation'],
-			Math.min(1, analysis.modeUsage.customAgent / Math.max(1, analysis.taskClassification.turnCount))
-		);
-		if (analysis.taskClassification.categoryShares['Delegation'] >= analysis.taskClassification.categoryShares[analysis.taskClassification.primaryCategory]) {
-			analysis.taskClassification.primaryCategory = 'Delegation';
+	if (delegationMin > 0) {
+		shares['Delegation'] = Math.max(shares['Delegation'], delegationMin);
+	}
+
+	// Renormalize so shares sum to 1 while preserving the minimums.
+	const minSum = (planMin > 0 ? planMin : 0) + (delegationMin > 0 ? delegationMin : 0);
+	if (minSum >= 1) {
+		for (const category of TASK_CATEGORIES) {
+			shares[category] = category === 'Planning' ? planMin / minSum : category === 'Delegation' ? delegationMin / minSum : 0;
 		}
+	} else {
+		let freeSum = 0;
+		for (const category of TASK_CATEGORIES) {
+			const base = category === 'Planning' ? planMin : category === 'Delegation' ? delegationMin : 0;
+			freeSum += Math.max(0, shares[category] - base);
+		}
+		const remaining = 1 - minSum;
+		if (freeSum > 0) {
+			for (const category of TASK_CATEGORIES) {
+				const base = category === 'Planning' ? planMin : category === 'Delegation' ? delegationMin : 0;
+				const extra = Math.max(0, shares[category] - base);
+				shares[category] = base + extra * (remaining / freeSum);
+			}
+		} else {
+			shares[analysis.taskClassification.primaryCategory] = (shares[analysis.taskClassification.primaryCategory] || 0) + remaining;
+		}
+	}
+
+	if (delegationMin > 0 && shares['Delegation'] >= shares[analysis.taskClassification.primaryCategory]) {
+		analysis.taskClassification.primaryCategory = 'Delegation';
 	}
 }
 
