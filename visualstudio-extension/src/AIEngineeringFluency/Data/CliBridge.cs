@@ -98,7 +98,7 @@ namespace AIEngineeringFluency.Data
                 _ = usageTask.ContinueWith(_ =>
                 {
                     lock (_usageLock) { _inflightUsageTask = null; }
-                }, System.Threading.Tasks.TaskContinuationOptions.ExecuteSynchronously);
+                });
 
                 return usageTask;
             }
@@ -179,7 +179,7 @@ namespace AIEngineeringFluency.Data
                 _ = task.ContinueWith(_ =>
                 {
                     lock (_allLock) { _inflightAllTask = null; }
-                }, System.Threading.Tasks.TaskContinuationOptions.ExecuteSynchronously);
+                });
 
                 return task;
             }
