@@ -130,6 +130,29 @@ test('startTimerIfEnabled starts timer when configured and cloud sync is allowed
 	svc.dispose();
 });
 
+test('startTimerIfEnabled logs the cloud-sync-disabled reason when the profile forbids cloud sync', () => {
+	const logs: string[] = [];
+	const svc = makeService({ log: (m) => logs.push(m) });
+	svc.startTimerIfEnabled(
+		{ enabled: true, sharingProfile: 'off', shareWorkspaceMachineNames: false } as any,
+		true
+	);
+	assert.ok(logs.some(m => m.includes('cloud sync disabled') && m.includes('off')));
+	svc.dispose();
+});
+
+test('startTimerIfEnabled logs the not-configured reason when cloud sync is allowed but backend is unconfigured', () => {
+	const logs: string[] = [];
+	const svc = makeService({ log: (m) => logs.push(m) });
+	svc.startTimerIfEnabled(
+		{ enabled: true, sharingProfile: 'soloFull', shareWorkspaceMachineNames: false } as any,
+		false
+	);
+	assert.ok(logs.some(m => m.includes('backend not configured')));
+	assert.ok(!logs.some(m => m.includes('cloud sync disabled')));
+	svc.dispose();
+});
+
 test('stopTimer is idempotent', () => {
 	const svc = makeService();
 	svc.stopTimer();

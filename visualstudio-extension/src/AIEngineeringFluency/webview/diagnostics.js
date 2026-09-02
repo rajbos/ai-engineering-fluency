@@ -1587,7 +1587,13 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
   };
   var currentLocalization = { ...DEFAULT_LOCALIZATION };
   function initializeWebviewLocalization(localization) {
-    currentLocalization = { ...DEFAULT_LOCALIZATION, ...localization };
+    const resolved = {};
+    for (const [key, value] of Object.entries(localization)) {
+      if (typeof value === "string" && value !== key) {
+        resolved[key] = value;
+      }
+    }
+    currentLocalization = { ...DEFAULT_LOCALIZATION, ...resolved };
   }
   function localize(key) {
     return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
@@ -1824,6 +1830,9 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     try {
       const now = Date.now();
       const then = new Date(isoString).getTime();
+      if (!Number.isFinite(then)) {
+        return "Unknown";
+      }
       const diffMs = now - then;
       if (diffMs < 0) {
         return "Just now";
@@ -3400,9 +3409,12 @@ border: 1px solid #1f6feb;
 `;
 
   // src/webview/shared/messageHandler.ts
+  function isTrustedWebviewMessageSource(source, currentWindow) {
+    return source === null || source === currentWindow;
+  }
   function registerMessageHandler(handler) {
     window.addEventListener("message", (event) => {
-      if (event.source !== window) {
+      if (!isTrustedWebviewMessageSource(event.source, window)) {
         return;
       }
       handler(event.data);

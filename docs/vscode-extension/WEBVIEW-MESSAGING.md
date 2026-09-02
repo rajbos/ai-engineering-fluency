@@ -47,11 +47,17 @@ extension → webview message. Observed in VS Code Insiders (`1.10x`), on a docu
 ```
 
 The real boundary is **`event.origin`**, which VS Code stamps with the webview's own
-`vscode-webview://<id>` origin. `isTrustedWebviewMessageSource(source, window, origin)`:
+`vscode-webview://<id>` origin. `isTrustedWebviewMessageSource(source, window, origin)` applies
+two rules, in order:
 
-1. accepts a source it can positively identify as this window (`null`/`undefined`/`window`/
-   `parent`/`top`), then
-2. falls back to requiring `origin` to match one of this document's own origins.
+1. Trust a source that is one of this document's own self-references: `null` or `undefined`
+   (no source attached), `window`, `parent`, or `top`. In a top-level webview the last three
+   are all `window`, so this rule really means "the message did not come from somewhere else".
+2. Otherwise the source is an object we cannot identify, so fall back to the origin: trust it
+   only when `origin` is present **and** matches one of this document's own origins. An
+   unidentified source with no origin is rejected.
+
+Rule 2 is the branch VS Code's own relayed messages take.
 
 Own origins are collected from **both** `location.origin` and the scheme+host parsed out of
 `location.href`. `location.origin` alone is not enough: an engine that does not register
@@ -59,9 +65,26 @@ Own origins are collected from **both** `location.origin` and the scheme+host pa
 matches the concrete origin on the event. (jsdom does exactly this, so the tests would pass
 against a check that is broken in production — and vice versa.)
 
-A same-origin child frame would also pass this check. That is acceptable because every panel
-serves `default-src 'none'` with **no `frame-src`**, so it cannot embed a frame at all. When no
-origin is supplied, an unidentifiable source is still rejected outright.
+A same-origin child frame would also satisfy rule 2. That is acceptable because every panel
+serves `default-src 'none'` with **no `frame-src`**, so it cannot embed a frame at all.
+
+### Why this holds across hosts
+
+The check never hardcodes `vscode-webview:` or any other scheme — it compares the event's origin
+against whatever origin *this document* was served from. So it adapts to whatever the host uses,
+and the two rules between them cover both webview topologies:
+
+- **Desktop (and Insiders)**, where the webview document is the *top* frame: `parent`/`top` are
+  `window`, VS Code relays from an internal object that matches none of the self-references, and
+  the message carries the document's own origin — so rule 2 accepts it. This is the case that
+  was broken.
+- **A nested host** (VS Code Web / `vscode.dev`, where the webview is an iframe inside a host
+  frame on a different origin): the relaying context *is* `parent`, so rule 1 accepts it before
+  the origin is ever consulted.
+
+Whichever shape a future host build uses, it has to either come from a frame we can identify as
+ourselves or carry our own origin. If a host ever manages neither, the failure is no longer
+silent — the `message-rejected-untrusted` tripwire below fires with the observed origin.
 
 ## Why the failure was invisible
 
@@ -151,9 +174,13 @@ Kept deliberately quiet — these should produce **no output** on a healthy run:
 | `handleExtensionMessage.threw` | The handler threw. Otherwise only visible in webview devtools, which nobody has open. |
 | `window.error` / `unhandledRejection` | Uncaught webview errors, forwarded to the Output channel. |
 
-All are bounded by a shared trace budget so a chatty session cannot flood the log. The host
-also logs unhandled webview commands (`no handler for webview command '…'`), because a webview
-posting a command nobody registered looks exactly like a webview posting nothing.
+All are bounded by a shared trace budget (20) so a chatty session cannot flood the log. Note
+that every trace above fires only on a *failure* — `message-rejected-untrusted` is wired to
+`registerMessageHandler`'s `onUntrustedMessage` callback, not to message receipt — so normal
+high-frequency updates never consume the budget. If you see the budget exhausted, something is
+genuinely wrong. The host also logs unhandled webview commands (`no handler for webview command
+'…'`), because a webview posting a command nobody registered looks exactly like a webview
+posting nothing.
 
 ## Tests
 
@@ -163,7 +190,7 @@ catches the class of bug described above — the trust check and the readiness h
 correct in isolation and only fail in combination with a real host.
 
 The regression case that matters is `postFromHostFrame`, which dispatches a message with an
-unidentifiable `event.source` and the document's own origin — VS Code's actual delivery shape.
+unidentified `event.source` and the document's own origin — VS Code's actual delivery shape.
 Verify any change to the trust model by neutering the fix and confirming these tests fail.
 
 jsdom gotchas when extending the harness:

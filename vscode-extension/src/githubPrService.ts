@@ -604,7 +604,7 @@ const DISCOVERY_CONCURRENCY = 8;
 const SCP_LIKE_REMOTE_PATTERN = /^git@([^:/]+)[:/]([^/]+)\/([^/\s]+?)(?:\.git)?$/i;
 
 /** Collect the accepted GitHub hosts: github.com plus an optional enterprise host. */
-function buildGitHubHosts(enterpriseUri?: string): Set<string> {
+export function buildGitHubHosts(enterpriseUri?: string): Set<string> {
 	const hosts = new Set<string>(['github.com']);
 	if (enterpriseUri) {
 		try {
@@ -627,7 +627,7 @@ function stripGitSuffix(repo: string): string {
  * Parsed with `new URL()` where possible (no unanchored host regex) with an
  * anchored fallback for the scp-like form, which is not a valid URL.
  */
-function parseGitHubRemote(remote: string, hosts: Set<string>): { owner: string; repo: string } | undefined {
+export function parseGitHubRemote(remote: string, hosts: Set<string>): { owner: string; repo: string } | undefined {
 	try {
 		const url = new URL(remote);
 		if ((url.protocol === 'https:' || url.protocol === 'http:' || url.protocol === 'ssh:') && hosts.has(url.host.toLowerCase())) {

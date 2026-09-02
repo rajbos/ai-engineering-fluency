@@ -14,11 +14,18 @@
  * "Loading…" forever with nothing in the Output channel.
  *
  * `event.origin` is the actual boundary, and VS Code stamps relayed messages with the
- * webview's own `vscode-webview://<id>` origin. So: accept a source we can positively
- * identify as ourselves, otherwise fall back to requiring a same-origin message. A
- * same-origin child frame would also pass, but these webviews serve a CSP of
- * `default-src 'none'` with no `frame-src`, so they cannot embed a frame at all; when no
- * origin is supplied we still reject unidentifiable sources outright.
+ * webview's own `vscode-webview://<id>` origin. The implemented rule is, in order:
+ *
+ *   1. Trust a source that is one of this document's own self-references — `null` or
+ *      `undefined` (no source attached), `window`, `parent`, or `top`. In a top-level webview
+ *      the last three are all `window`, so this is really "the message did not come from
+ *      somewhere else".
+ *   2. Otherwise the source is some other object we cannot identify, so fall back to the
+ *      origin: trust it only when `origin` is present *and* matches one of this document's
+ *      own origins. An unidentified source with no origin is rejected.
+ *
+ * A same-origin child frame would also satisfy rule 2, but these webviews serve a CSP of
+ * `default-src 'none'` with no `frame-src`, so they cannot embed a frame at all.
  */
 type MessageHandler<T> = (message: T) => void;
 
@@ -43,16 +50,21 @@ function collectOwnOrigins(currentWindow: Window): string[] {
 }
 
 export function isTrustedWebviewMessageSource(
-    source: MessageEventSource | null,
+    source: MessageEventSource | null | undefined,
     currentWindow: Window,
     origin?: string,
 ): boolean {
+    // Rule 1: a self-reference — no source attached, or this very window.
     if (source === null || source === undefined || source === currentWindow) {
         return true;
     }
+    // Still rule 1: in a top-level webview these are `currentWindow`; the comparison only
+    // widens trust if this document ever ends up nested.
     if (source === currentWindow.parent || source === currentWindow.top) {
         return true;
     }
+    // Rule 2: an unidentified source is trusted only on a matching origin. This is the branch
+    // VS Code's own relayed messages take.
     return Boolean(origin) && collectOwnOrigins(currentWindow).includes(origin as string);
 }
 

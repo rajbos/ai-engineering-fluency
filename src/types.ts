@@ -221,7 +221,7 @@ export interface DailyModelEfficiency {
 }
 
 /** Time-window selector options available in the Chart view. */
-export type ChartTimeWindow = 'today' | 'last7' | 'last30' | 'currentMonth' | 'allTime';
+export type ChartTimeWindow = 'today' | 'last7' | 'last30' | 'last90' | 'currentMonth' | 'allTime';
 
 /** Aggregated data for one time window (day/week/month) in the chart. */
 export interface ChartPeriodData {
@@ -856,6 +856,146 @@ export interface WorkspaceCustomizationMatrix {
   workspaces: WorkspaceCustomizationRow[];
   totalWorkspaces: number;
   workspacesWithIssues: number;
+}
+
+// ── Dark Factory readiness ────────────────────────────────────────────────
+//
+// A per-repository readiness scan over the dark factory maturity ladder
+// (see src/darkFactoryReadiness.ts). The unit of assessment is always a
+// repository — a product line — and never a person. The scan reports which
+// governance and evidence controls a repository has; it never certifies that
+// a team is ready to run without humans.
+
+/**
+ * State of one control. `unknown` is a first-class outcome: it means the scan
+ * could not determine the state (no GitHub token, a denied API call, or a
+ * control whose absence is not observable), and it must never be collapsed
+ * into either `present` or `absent`.
+ */
+export type DarkFactoryControlState = 'present' | 'absent' | 'unknown';
+
+/** Where a control's state comes from. */
+export type DarkFactoryControlTier =
+  /** Observable from the checked-out files alone, no authentication needed. */
+  | 'filesystem'
+  /** Only observable through the GitHub API (rulesets, protection rules, enablement). */
+  | 'api'
+  /** Presence is observable from files, but absence is not — those resolve to `unknown`. */
+  | 'hybrid'
+  /** A written policy or decision; never machine-detectable. */
+  | 'governance';
+
+/** How much weight the detection of a control carries. */
+export type DarkFactoryEvidenceKind =
+  /** An unambiguous file or API fact. */
+  | 'direct'
+  /** A pattern match that produces a candidate, not a verdict. */
+  | 'heuristic'
+  /** Not detectable by any scan; always reported as unknown. */
+  | 'not-scannable';
+
+/** One control in the catalogue (`src/darkFactoryControls.json`). */
+export interface DarkFactoryControlDefinition {
+  id: string;
+  /** Ladder stage this control belongs to (1–4). */
+  stage: number;
+  label: string;
+  tier: DarkFactoryControlTier;
+  evidence: DarkFactoryEvidenceKind;
+  /** Why the control matters on the ladder. */
+  why: string;
+  /** What to do when it is absent. */
+  remediation: string;
+  /** When true, a missing filesystem signal resolves to `unknown` rather than `absent`. */
+  unknownWhenAbsent?: boolean;
+  /** Explains why absence is not observable for this control. */
+  unknownReason?: string;
+}
+
+/** One stage of the ladder as described in the catalogue. */
+export interface DarkFactoryStageDefinition {
+  stage: number;
+  name: string;
+  summary: string;
+}
+
+/** A control's assessed state, with the detail needed to render it honestly. */
+export interface DarkFactoryControlResult extends DarkFactoryControlDefinition {
+  state: DarkFactoryControlState;
+  /** Short human-readable justification, e.g. the path that matched. */
+  detail?: string;
+}
+
+/** Whether a stage's controls are all satisfied, definitely not, or unverifiable. */
+export type DarkFactoryStageVerdict =
+  /** Every control is present. */
+  | 'attained'
+  /** At least one control is absent — this stage is not reached. */
+  | 'blocked'
+  /** No control is absent, but at least one could not be determined. */
+  | 'indeterminate';
+
+/** Per-stage assessment for one repository. */
+export interface DarkFactoryStageResult {
+  stage: number;
+  name: string;
+  summary: string;
+  verdict: DarkFactoryStageVerdict;
+  /** Control ids that are present. */
+  present: string[];
+  /** Control ids that are absent — the specific things blocking this stage. */
+  missing: string[];
+  /** Control ids whose state could not be determined. */
+  unknown: string[];
+}
+
+/** An anti-pattern the scan detected in a repository. */
+export interface DarkFactoryFinding {
+  id: string;
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  /** What was observed that triggered this finding. */
+  detail: string;
+}
+
+/** The readiness report for a single repository. */
+export interface DarkFactoryRepoReport {
+  /** Display name for the repository (its folder name). */
+  name: string;
+  /** Absolute path scanned. */
+  repoRoot: string;
+  /** `owner/repo` when the origin remote could be resolved. */
+  nameWithOwner?: string;
+  /**
+   * Highest stage whose controls are *all* confirmed present. This is a lower
+   * bound: unknowns never lift it.
+   */
+  confirmedStage: number;
+  /**
+   * Highest stage that nothing observed rules out — unknowns treated
+   * optimistically. This is an upper bound, never a claim.
+   */
+  ceilingStage: number;
+  /** True when every control resolved to `present` or `absent`. */
+  fullyEvidenced: boolean;
+  /** Number of controls whose state could not be determined. */
+  unknownCount: number;
+  stages: DarkFactoryStageResult[];
+  controls: DarkFactoryControlResult[];
+  findings: DarkFactoryFinding[];
+}
+
+/** The readiness report across all scanned repositories. */
+export interface DarkFactoryReport {
+  /** ISO timestamp of the scan. */
+  scannedAt: string;
+  /** True when GitHub API signals were included; false when the API tier was skipped. */
+  apiSignalsIncluded: boolean;
+  /** Highest stage the ladder can assess at all — stage 5 is never awarded. */
+  maxAssessableStage: number;
+  repos: DarkFactoryRepoReport[];
+  /** Repositories found but not scanned because the per-scan cap was reached. */
+  skippedRepoCount: number;
 }
 
 export interface UsageAnalysisPeriod {

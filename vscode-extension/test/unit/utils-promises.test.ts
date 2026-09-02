@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { createWakeupGate, withTimeout } from '../../src/utils/promises';
+import { createWakeupGate, TimeoutError, withTimeout } from '../../src/utils/promises';
 
 test('createWakeupGate: signal resolves all currently parked waiters', async () => {
 	const gate = createWakeupGate();
@@ -81,6 +81,19 @@ test('withTimeout: resolves when the promise settles in time', async () => {
 test('withTimeout: rejects with a descriptive error when it times out', async () => {
 	await assert.rejects(
 		withTimeout(new Promise(() => { /* never settles */ }), 10, 'slow op'),
-		/slow op timed out after 10ms/,
+		(error: Error) => error instanceof TimeoutError && error.message === 'slow op timed out after 10ms',
 	);
+});
+
+test('withTimeout: does not cancel work that can be deferred after a timeout', async () => {
+	let resolveWork: ((value: string) => void) | undefined;
+	const work = new Promise<string>((resolve) => { resolveWork = resolve; });
+
+	await assert.rejects(
+		withTimeout(work, 10, 'deferred session'),
+		/deferred session timed out after 10ms/,
+	);
+
+	resolveWork?.('cached');
+	assert.equal(await work, 'cached');
 });

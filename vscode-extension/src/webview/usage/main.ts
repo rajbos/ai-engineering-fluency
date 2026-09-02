@@ -6,6 +6,7 @@ import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRef
 import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -22,7 +23,7 @@ import { applyBillingFields, type CopilotApiBalance } from './billingStatsSaniti
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
-import { scaleBubbleRadius } from './modelLeaderboard';
+import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from './modelLeaderboard';
 import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
@@ -185,6 +186,7 @@ type UsageAnalysisStats = {
 	currentWorkspacePaths?: string[];
 	suppressedUnknownTools?: string[];
 	todaySessions?: TodaySessionSummary[];
+	recentSessions?: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] };
 	use24HourTime?: boolean;
 	/** When true (default), rows tagged "auto" are hidden from the Tool Usage tables so only intentional tool calls are shown. */
 	hideAutomaticToolCalls?: boolean;
@@ -1381,6 +1383,17 @@ function handleRecentSessionsLoaded(message: any): void {
 	}
 }
 
+function replaceRecentSessionsCache(raw: unknown): void {
+	for (const period of RECENT_SESSION_PERIODS) {
+		delete recentSessionsCache[period];
+	}
+	const buckets = sanitizeRecentSessionBuckets(raw);
+	if (!buckets) { return; }
+	for (const period of RECENT_SESSION_PERIODS) {
+		recentSessionsCache[period] = buckets[period] as TodaySessionSummary[];
+	}
+}
+
 function unionFill(map: { [key: string]: number }, keys: string[]): { [key: string]: number } {
 	const result: { [key: string]: number } = { ...map };
 	for (const k of keys) {
@@ -1619,6 +1632,22 @@ function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void 
 	sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
 }
 
+function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
+	if (Array.isArray(raw.todaySessions)) {
+		sanitized.todaySessions = raw.todaySessions.filter(
+			(session: any) => session && typeof session === 'object' && typeof session.interactions === 'number'
+		) as TodaySessionSummary[];
+	}
+	const recentSessions = sanitizeRecentSessionBuckets(raw.recentSessions);
+	if (recentSessions) {
+		sanitized.recentSessions = recentSessions as {
+			last7: TodaySessionSummary[];
+			last30: TodaySessionSummary[];
+			currentMonth: TodaySessionSummary[];
+		};
+	}
+}
+
 function sanitizeStats(raw: any): UsageAnalysisStats | null {
 	if (!raw || typeof raw !== 'object') {
 		traceCurationOnce('sanitize-invalid-root', 'sanitizeStats.invalidRoot');
@@ -1657,12 +1686,7 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			) as MissedPotentialWorkspace[];
 		}
 
-		// Pass-through todaySessions (array of session summary objects)
-		if (Array.isArray(raw.todaySessions)) {
-			sanitized.todaySessions = raw.todaySessions.filter(
-				(s: any) => s && typeof s === 'object' && typeof s.interactions === 'number'
-			) as TodaySessionSummary[];
-		}
+		applySessionSummaries(sanitized, raw);
 
 		// Sanitize insights
 		if (Array.isArray(raw.insights)) {
@@ -4533,6 +4557,7 @@ function buildEfficiencyPoint(
 	bubbleMetric: EfficiencyBubbleMetricDef,
 	maxX: number,
 	maxBubbleValue: number,
+	labelPlacement: BubbleLabelPlacement,
 ): string {
 	const value = metric.value(row) ?? 0;
 	const bubbleValue = bubbleMetric.value(row) ?? 0;
@@ -4541,13 +4566,12 @@ function buildEfficiencyPoint(
 	const y = 286 - rate * 262;
 	const radius = scaleBubbleRadius(bubbleValue, maxBubbleValue);
 	const color = getEfficiencyColor(row.model);
-	const labelY = y < 46 ? y + 18 : y - 10;
 	const rawLabel = getModelDisplayName(row.model);
 	const label = escapeHtml(rawLabel);
 	const aria = `${rawLabel}: ${formatRatePercent(rate)} one-shot edit rate, ${metric.format(value)} ${metric.axisLabel.toLowerCase()}, bubble sized by ${bubbleMetric.label.toLowerCase()}: ${bubbleMetric.format(bubbleValue)}`;
 	return `<g class="efficiency-point" style="--model-color:${color}" tabindex="0" role="img" aria-label="${escapeHtml(aria)}">
 		<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${radius.toFixed(1)}"><title>${escapeHtml(aria)}</title></circle>
-		<text x="${(x + radius + 4).toFixed(1)}" y="${labelY.toFixed(1)}">${label}</text>
+		<text x="${labelPlacement.x.toFixed(1)}" y="${labelPlacement.y.toFixed(1)}" text-anchor="${labelPlacement.textAnchor}">${label}</text>
 	</g>`;
 }
 
@@ -4571,7 +4595,20 @@ function buildEfficiencyChartHtml(rows: EfficiencyRow[]): string {
 	}
 	const maxX = Math.max(...chartRows.map(row => metric.value(row) ?? 0), 0.0001) * 1.08;
 	const maxBubbleValue = Math.max(...chartRows.map(row => bubbleMetric.value(row) ?? 0), 0);
-	const points = chartRows.map(row => buildEfficiencyPoint(row, metric, bubbleMetric, maxX, maxBubbleValue)).join('');
+	const labelInputs = chartRows.map(row => {
+		const value = metric.value(row) ?? 0;
+		const bubbleValue = bubbleMetric.value(row) ?? 0;
+		return {
+			x: 76 + (value / maxX) * 760,
+			y: 286 - (row.rates.oneShotRate ?? 0) * 262,
+			radius: scaleBubbleRadius(bubbleValue, maxBubbleValue),
+			label: getModelDisplayName(row.model),
+		};
+	});
+	const labelPlacements = placeBubbleLabels(labelInputs, { left: 76, right: 836, top: 24, bottom: 286 });
+	const points = chartRows.map((row, index) =>
+		buildEfficiencyPoint(row, metric, bubbleMetric, maxX, maxBubbleValue, labelPlacements[index])
+	).join('');
 	return `<div class="efficiency-chart-wrap">
 		<svg class="efficiency-chart" viewBox="0 0 900 350" role="img" aria-label="One-shot edit rate compared with ${escapeHtml(metric.axisLabel.toLowerCase())}; bubble size represents ${escapeHtml(bubbleMetric.label.toLowerCase())}">
 			${buildEfficiencyGrid(metric, maxX)}
@@ -4649,7 +4686,7 @@ function renderModelEfficiencyPeriodSelector(): void {
 	wrapper.replaceChildren();
 	const { wrapper: selectorWrapper } = createPeriodSelector({
 		selected: efficiencySelectedPeriod,
-		disabled: ['last7', 'allTime'],
+		disabled: ['last7', 'last90', 'allTime'],
 		disabledTitle: 'Not available for model efficiency',
 		label: '',
 		onChange: (value) => {
@@ -5027,10 +5064,8 @@ function handleUpdateStats(message: any): void {
 	const sanitized = sanitizeStats(message.data);
 	if (sanitized) {
 		_ulLoadingActive = false;
-		// New stats invalidate any lazily-loaded lookback data; it is re-requested on demand.
-		for (const key of Object.keys(recentSessionsCache)) {
-			delete recentSessionsCache[key];
-		}
+		// CLI-backed hosts include all buckets; VS Code omits them and keeps using lazy loading.
+		replaceRecentSessionsCache(sanitized.recentSessions);
 		renderLayout(sanitized);
 		setupSessionsTableSort();
 		renderRepositoryHygienePanels();
@@ -5735,6 +5770,7 @@ async function bootstrap(): Promise<void> {
 	setFormatLocale(initialData.locale);
 	use24HourTime = initialData.use24HourTime !== false;
 	hideAutomaticToolCalls = initialData.hideAutomaticToolCalls !== false;
+	replaceRecentSessionsCache(initialData.recentSessions);
 	const savedColumns = initialData.sessionColumnSettings?.enabledColumns;
 	if (Array.isArray(savedColumns)) {
 		const valid = savedColumns.filter((c): c is SessionColumnId => (ALL_SESSION_COLUMN_IDS as string[]).includes(c));

@@ -80,7 +80,7 @@ function Build-VsCode {
     Push-Location "$PSScriptRoot/vscode-extension"
     try {
         switch ($Target) {
-            'build'   { Ensure-NpmDeps .; npm run compile }
+            'build'   { Ensure-NpmDeps .; npm run validate }
             'package' { Ensure-NpmDeps .; npm run package; npx vsce package }
             'test'    { Ensure-NpmDeps .; npm run test:node }
             'clean'   { Remove-Item -Recurse -Force dist, out -ErrorAction SilentlyContinue }

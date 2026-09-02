@@ -58,6 +58,7 @@ import type {
   WorkspaceCustomizationMatrix,
   UsageAnalysisPeriod,
   AgenticTrendPoint,
+  DarkFactoryReport,
   SessionFileDetails,
   PromptTokenDetail,
   ActualUsage,
@@ -76,6 +77,7 @@ import type {
   CorrectionSessionEntry,
   RepeatedTaskReport,
 } from '../../src/types';
+import { getTimeWindowStartDate, getTimeWindowStartDayKey } from '../../src/timeWindows';
 
 // --- Correction-moment detection (per-repo report over recent sessions) ---
 import {
@@ -140,7 +142,7 @@ import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
-import { createWakeupGate, withTimeout } from './utils/promises';
+import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout } from './utils/promises';
 import { WebviewMessageReplay } from './webviewMessageReplay';
 
 // --- Session parsing & token estimation ---
@@ -205,6 +207,8 @@ import {
   type ModelDailyInput,
   type PeriodVolumeTotals,
 } from '../../src/efficiencyAnalysis';
+
+import { scanDarkFactoryReadiness } from './darkFactoryService';
 
 // --- Maturity & fluency scoring ---
 import {
@@ -301,6 +305,7 @@ import { ConfirmationMessages } from './backend/ui/messages';
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
 import { isGuidMcpTool, isMcpFamilyResolvedTool } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
+import { buildRecentSessionBuckets as bucketRecentSessions } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
 import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
 
@@ -449,6 +454,8 @@ type UsageAnalysisTab = 'activity' | 'tools' | 'health' | 'worktrees' | 'insight
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
 	private static readonly CACHE_VERSION = 69; // uncapped correction counts and generated-message filtering
+	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
+	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -598,6 +605,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// In-flight updateTokenStats promise — coalesces concurrent callers onto the same run
 	private _updateTokenStatsInFlight: Promise<DetailedStats | undefined> | undefined;
+	// Timed-out preloads continue in the background; skip duplicate work until their cache entries settle.
+	private readonly _deferredSessionPreloadFiles = new Set<string>();
+	private _deferredSessionPreloadCount = 0;
+	private _deferredSessionRefreshTimer: NodeJS.Timeout | undefined;
+	private _updateTokenStatsStartedAt: number | undefined;
 
 	// --- Multi-window refresh coordination ---
 	// When several VS Code/Codium windows are open, only the window that holds the
@@ -1913,8 +1925,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		} catch (err) {
 			// Guarantee a post-back on every failure path — otherwise the webview stays on
 			// "Loading…" forever and dispatch() dedup silently swallows every retry.
-			// Post via the captured panel: this.analysisPanel may have been disposed mid-flight
-			// (postMessage on a disposed webview resolves false instead of throwing).
+			// publish() routes through analysisMessageReplay, which retains the payload and
+			// tolerates the panel being disposed mid-flight (postMessage on a disposed webview
+			// resolves false instead of throwing).
 			this.error('Failed to load repository PR stats', err);
 			const result: RepoPrStatsResult = {
 				repos: [], authenticated: !this._githubSignedOutByUser, since: since.toISOString(),
@@ -2091,7 +2104,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		await this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, true));
-		const snapshot = await withTimeout(
+		const snapshot = await _withTimeout(
 			readAgentTasksSnapshot(this.agentTasksCachePath()),
 			10_000,
 			'Reading the cloud agent snapshot',
@@ -2490,11 +2503,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return this._updateTokenStatsInFlight;
 		}
 
+		const startedAt = Date.now();
+		this._updateTokenStatsStartedAt = startedAt;
 		this._updateTokenStatsInFlight = this._runUpdateTokenStats(silent);
 		try {
 			return await this._updateTokenStatsInFlight;
 		} finally {
 			this._updateTokenStatsInFlight = undefined;
+			if (this._updateTokenStatsStartedAt === startedAt) {
+				this._updateTokenStatsStartedAt = undefined;
+			}
 		}
 	}
 
@@ -2519,6 +2537,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const preloaded: SessionFilePreload[] = [];
 		let processed = 0;
 		const CONCURRENCY = 20;
+		this._deferredSessionPreloadCount = 0;
 
 		// Event-driven wakeups: workers that find the queue empty park on the gate
 		// instead of polling on a timer, avoiding pointless wake-ups while discovery runs.
@@ -2575,13 +2594,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return { sessionFiles, preloaded: [] };
 		}
 
-		this.log(`📊 Analyzed ${sessionFiles.length} session file(s)`);
-		this.log(`📦 Preloaded ${preloaded.length}/${sessionFiles.length} session file(s) within date range in ${((Date.now() - analyzeStartMs) / 1000).toFixed(1)}s`);
+		this.logPreloadSessionFileSummary(sessionFiles, preloaded, analyzeStartMs);
 
 		// Defer expired-cache cleanup to avoid blocking discovery/workers startup
 		void Promise.resolve().then(() => this.cacheManager.clearExpiredCache());
 
 		return { sessionFiles, preloaded };
+	}
+
+	private logPreloadSessionFileSummary(sessionFiles: string[], preloaded: SessionFilePreload[], analyzeStartMs: number): void {
+		this.log(`📊 Analyzed ${sessionFiles.length} session file(s)`);
+		this.log(`📦 Preloaded ${preloaded.length}/${sessionFiles.length} session file(s) within date range in ${((Date.now() - analyzeStartMs) / 1000).toFixed(1)}s`);
+		if (this._deferredSessionPreloadCount > 0) {
+			this.warn(`⏳ Deferred ${this._deferredSessionPreloadCount} slow session parse(s) to the background`);
+		}
 	}
 
 	/**
@@ -2591,12 +2617,57 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * for the same file means the process died while processing it.
 	 */
 	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
+		if (this._deferredSessionPreloadFiles.has(sessionFile)) {
+			this.debugCrashLog(`deferred ${sessionFile}`);
+			return;
+		}
 		this.debugCrashLog(`start ${sessionFile}`);
+		const processing = this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
+		const operation = `Parsing session "${sessionFile}"`;
 		try {
-			await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
+			await _withTimeout(processing, CopilotTokenTracker.SESSION_PRELOAD_TIMEOUT_MS, operation);
 			this.debugCrashLog(`done  ${sessionFile}`);
 		} catch (e) {
+			if (e instanceof _TimeoutError) {
+				this.debugCrashLog(`deferred ${sessionFile}`);
+				this._deferredSessionPreloadCount++;
+				this.deferSessionPreloadRefresh(sessionFile, processing);
+				return;
+			}
 			this.debugCrashLog(`error ${sessionFile}: ${e}`);
+		}
+	}
+
+	/**
+	 * Keeps a timed-out preload alive without holding the initial statistics pass. Once every
+	 * deferred parse has filled its cache entry, a single refresh incorporates those results.
+	 */
+	private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>): void {
+		this._deferredSessionPreloadFiles.add(sessionFile);
+		void processing
+			.then(() => this.debugCrashLog(`done(background)  ${sessionFile}`))
+			.catch(error => this.debugCrashLog(`error(background) ${sessionFile}: ${error}`))
+			.finally(() => {
+				this._deferredSessionPreloadFiles.delete(sessionFile);
+				if (this._deferredSessionPreloadFiles.size === 0) {
+					this.scheduleDeferredSessionRefresh();
+				}
+			});
+	}
+
+	private scheduleDeferredSessionRefresh(): void {
+		if (this._deferredSessionRefreshTimer || this._disposed) { return; }
+		this._deferredSessionRefreshTimer = setTimeout(() => {
+			this._deferredSessionRefreshTimer = undefined;
+			if (this._disposed) { return; }
+			if (this._updateTokenStatsInFlight) {
+				void this._updateTokenStatsInFlight.finally(() => this.scheduleDeferredSessionRefresh());
+				return;
+			}
+			void this.updateTokenStats(true, true);
+		}, 0);
+		if (typeof this._deferredSessionRefreshTimer.unref === 'function') {
+			this._deferredSessionRefreshTimer.unref();
 		}
 	}
 
@@ -4369,8 +4440,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// every path (including errors) so the webview never hangs on "Loading...".
 		let sessions: TodaySessionSummary[] = [];
 		try {
-			const stats = this.lastUsageAnalysisStats ?? await this.calculateUsageAnalysisStats(true);
-			sessions = stats.recentSessions?.[period as 'last7' | 'last30' | 'currentMonth'] ?? [];
+			if (period === 'last90') {
+				const now = new Date();
+				const start = getTimeWindowStartDate(period, now);
+				if (!start) {
+					throw new Error(`Cannot load recent sessions for time window "${period}"`);
+				}
+				const { results } = await this.loadUsageSessionFiles(undefined, start.getTime());
+				sessions = this.buildRecentSessionBucket(results, getTimeWindowStartDayKey(period, now));
+			} else {
+				const stats = this.lastUsageAnalysisStats ?? await this.calculateUsageAnalysisStats(true);
+				sessions = stats.recentSessions?.[period] ?? [];
+			}
 		} catch (error) {
 			this.error('Error loading recent sessions:', error);
 		}
@@ -4386,9 +4467,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
 		now: Date
 	): { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } {
-		const last7Key = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7));
-		const last30Key = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30));
-		const monthKey = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), 1));
+		return bucketRecentSessions(this.buildRecentSessionItems(results), now);
+	}
+
+	private buildRecentSessionBucket(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		startKey: string
+	): TodaySessionSummary[] {
+		return this.buildRecentSessionItems(results)
+			.filter(it => it.activityKey >= startKey)
+			.map(it => it.value);
+	}
+
+	private buildRecentSessionItems(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
+	): { activityKey: string; interactions: number; value: TodaySessionSummary }[] {
 		const items: { activityKey: string; interactions: number; value: TodaySessionSummary }[] = [];
 		for (const r of results) {
 			if (!r || r.sessionData.interactions === 0) { continue; }
@@ -4397,13 +4490,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			items.push({ activityKey: this.computeLastActivityKey(r.sessionData, r.mtime), interactions: r.sessionData.interactions, value });
 		}
 		items.sort((a, b) => b.interactions - a.interactions);
-		const buckets = { last7: [] as TodaySessionSummary[], last30: [] as TodaySessionSummary[], currentMonth: [] as TodaySessionSummary[] };
-		for (const it of items) {
-			if (it.activityKey >= last7Key) { buckets.last7.push(it.value); }
-			if (it.activityKey >= last30Key) { buckets.last30.push(it.value); }
-			if (it.activityKey >= monthKey) { buckets.currentMonth.push(it.value); }
-		}
-		return buckets;
+		return items;
 	}
 
 	private computeLastActivityKey(sessionData: SessionFileCache, mtime: number): string {
@@ -6806,7 +6893,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('No cached stats — showing loading screen while calculating...');
 			this._detailsPanelIsLoading = true;
 			this.statusBarItem.tooltip = l10n.t('statusBar.loadingInPanel');
-			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview);
+			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview, this._updateTokenStatsStartedAt ?? Date.now());
 
 			stats = await this.updateTokenStats();
 
@@ -6982,7 +7069,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private setChartTimeWindowPreference(timeWindow: string): void {
-		const valid: ChartTimeWindow[] = ['today', 'last7', 'last30', 'currentMonth', 'allTime'];
+		const valid: ChartTimeWindow[] = ['today', 'last7', 'last30', 'last90', 'currentMonth', 'allTime'];
 		if (valid.includes(timeWindow as ChartTimeWindow)) { this.lastChartTimeWindow = timeWindow as ChartTimeWindow; }
 	}
 
@@ -7860,6 +7947,28 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		return _calculateMaturityScores(this._lastCustomizationMatrix, (useCache) => this.calculateUsageAnalysisStats(useCache, preloaded), useCache, this._copilotPlanResolved?.isMCPEnabled);
 	}
 
+	/**
+	 * Run the Dark Factory readiness scan over the repositories in this workspace.
+	 *
+	 * Filesystem-only plus the pull-request statistics the Usage Analysis view has
+	 * already fetched, so opening the Fluency Score view issues no extra GitHub
+	 * calls. A failure here must never take the whole view down — the section is
+	 * simply omitted and the reason logged.
+	 */
+	private runDarkFactoryScan(): DarkFactoryReport | undefined {
+		try {
+			const openFolders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+			return scanDarkFactoryReadiness({
+				workspacePaths: [...openFolders, ...this._buildWorkspacePaths()],
+				prStats: this._lastRepoPrStats,
+				enterpriseUri: getConfiguredGitHubEnterpriseUri(),
+			});
+		} catch (err) {
+			this.warn(`Dark Factory readiness scan failed: ${err}`);
+			return undefined;
+		}
+	}
+
 	public async showMaturity(): Promise<void> {
 		this.log('🎯 Opening Copilot Fluency Score dashboard');
 		await this.context.globalState.update('fluencyScore.everOpened', true);
@@ -7874,7 +7983,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const dismissedTips = await this.getDismissedFluencyTips();
 		const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
 		this.maturityPanel.webview.onDidReceiveMessage(async (message) => { await this.handleMaturityMessage(message); });
-		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks() });
+		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks(), darkFactory: this.runDarkFactoryScan() });
 		this.maturityPanel.onDidDispose(() => { this.log('🎯 Copilot Fluency Score dashboard closed'); this.maturityPanel = undefined; });
 	}
 
@@ -7959,7 +8068,7 @@ private async refreshMaturityPanel(): Promise<void> {
 	const dismissedTips = await this.getDismissedFluencyTips();
 	const isDebugMode = this.context.extensionMode === vscode.ExtensionMode.Development;
 	const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
-	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks() });
+	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks(), darkFactory: this.runDarkFactoryScan() });
 	this.log('✅ Copilot Fluency Score dashboard refreshed');
 }
 
@@ -8374,6 +8483,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       dismissedTips?: string[];
       isDebugMode?: boolean;
       installedHooks?: string[];
+      /** Per-repository Dark Factory readiness scan; omitted when the scan could not run. */
+      darkFactory?: DarkFactoryReport;
       fluencyLevels?: Array<{
         category: string;
         icon: string;
@@ -9213,7 +9324,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     return '';
   }
 
-  private getLoadingHtml(webview: vscode.Webview): string {
+  private getLoadingHtml(webview: vscode.Webview, startedAtMs: number = Date.now()): string {
     const nonce = getNonce();
     const iconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'robot-icon.png'));
     return `<!DOCTYPE html>
@@ -9228,7 +9339,7 @@ ${this.getLoadingHtmlCssBase()}
 ${this.getLoadingHtmlCssSteps()}
 </style>
 </head>
-${this.getLoadingHtmlBody(nonce, iconUri.toString())}
+${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
 </html>`;
   }
 
@@ -9240,8 +9351,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     return loadingHtml.getLoadingHtmlCssSteps();
   }
 
-  private getLoadingHtmlBody(nonce: string, iconUri?: string): string {
-    return loadingHtml.getLoadingHtmlBody(nonce, iconUri);
+  private getLoadingHtmlBody(nonce: string, iconUri?: string, startedAtMs: number = Date.now()): string {
+    return loadingHtml.getLoadingHtmlBody(nonce, iconUri, startedAtMs);
   }
 
   private getDetailsHtml(
@@ -11428,6 +11539,10 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     if (this._followerResyncTimer) {
       clearTimeout(this._followerResyncTimer);
       this._followerResyncTimer = undefined;
+    }
+    if (this._deferredSessionRefreshTimer) {
+      clearTimeout(this._deferredSessionRefreshTimer);
+      this._deferredSessionRefreshTimer = undefined;
     }
     // Release the refresh leader lock if this window held it, so another window can
     // take over promptly instead of waiting for the stale-lock timeout.

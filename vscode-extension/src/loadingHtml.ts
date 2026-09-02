@@ -67,7 +67,7 @@ export function getLoadingHtmlCssSteps(): string {
 .pop { animation: pop-in 0.35s ease both; }`;
 }
 
-export function getLoadingHtmlBody(nonce: string, iconUri?: string): string {
+export function getLoadingHtmlBody(nonce: string, iconUri?: string, startedAtMs: number = Date.now()): string {
 	const badgeIcon = iconUri
 		? `<img src="${iconUri}" alt="" width="20" height="20" style="vertical-align:middle;margin-right:6px;border-radius:3px;" />`
 		: '🤖 ';
@@ -102,22 +102,24 @@ export function getLoadingHtmlBody(nonce: string, iconUri?: string): string {
     </div>
 </div>
 <script nonce="${nonce}">
-${getLoadingHtmlScript()}
+${getLoadingHtmlScript(startedAtMs)}
 </script>
 </body>`;
 }
 
-export function getLoadingHtmlScript(): string {
+export function getLoadingHtmlScript(startedAtMs: number = Date.now()): string {
 	return `(function () {
-    var t0 = Date.now();
+    var t0 = ${Math.floor(startedAtMs)};
     var EDITORS = [];
     var editorsSeen = 0;
-    setInterval(function () {
+    function updateElapsed() {
         var s = Math.floor((Date.now() - t0) / 1000);
         var el = document.getElementById('badge-elapsed');
         if (!el) return;
         if (s < 60) { el.textContent = s + 's'; } else { el.textContent = Math.floor(s / 60) + 'm ' + (s % 60) + 's'; }
-    }, 1000);
+    }
+    updateElapsed();
+    setInterval(updateElapsed, 1000);
     function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function setDone(id) {
         var el = document.getElementById(id); if (!el) return;

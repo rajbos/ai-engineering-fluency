@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-08-16",
+    "lastUpdated": "2026-08-30",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -424,7 +424,7 @@
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "displayNames": [
-        "Claude Sonnet 4.6 (alternate format)"
+        "Claude Sonnet 4.6"
       ],
       "copilotPricing": {
         "inputCostPerMillion": 3.0,
@@ -978,6 +978,15 @@
         "Devstral Medium"
       ]
     },
+    "devstral-latest": {
+      "inputCostPerMillion": 0.4,
+      "outputCostPerMillion": 2.0,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "displayNames": [
+        "Devstral 2"
+      ]
+    },
     "pixtral-large-2411": {
       "inputCostPerMillion": 2.0,
       "outputCostPerMillion": 6.0,
@@ -1127,14 +1136,14 @@
       "cacheCreationCostPerMillion": 0.25
     },
     "gpt-5.6-sol": {
-      "inputCostPerMillion": 5.0,
-      "outputCostPerMillion": 30.0,
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 10.0,
       "category": "GPT-5 models",
       "tier": "standard",
       "displayNames": [
         "GPT-5.6 Sol"
       ],
-      "cachedInputCostPerMillion": 0.5,
+      "cachedInputCostPerMillion": 0.2,
       "copilotPricing": {
         "inputCostPerMillion": 5.0,
         "cachedInputCostPerMillion": 0.5,
@@ -1148,7 +1157,7 @@
           "threshold": "> 272K"
         }
       },
-      "cacheCreationCostPerMillion": 6.25
+      "cacheCreationCostPerMillion": 2.5
     },
     "gpt-5.6-terra": {
       "inputCostPerMillion": 2.0,
@@ -1224,15 +1233,6 @@
         "Grok 4.6"
       ],
       "cachedInputCostPerMillion": 0.5
-    },
-    "these-models": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
-      "category": "xAI Grok models",
-      "tier": "standard",
-      "displayNames": [
-        "these models"
-      ]
     },
     "mai-code-1.1-flash": {
       "inputCostPerMillion": 0.2,
