@@ -18,7 +18,6 @@
 import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
-  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -63,15 +62,21 @@ const resolvedModels = new Set();
 
 function scrapeResolvedModel(beforeFiles) {
   try {
-    const newFile = readdirSync(cliLogDir).find((f) => !beforeFiles.has(f));
-    if (!newFile) {
-      return undefined;
+    // A single CLI call can emit more than one log file, so scan every new one
+    // and delete them all — leaving strays behind would grow unboundedly across
+    // the run, and reading only the first could miss the file with the model.
+    const newFiles = readdirSync(cliLogDir).filter((f) => !beforeFiles.has(f));
+    let resolved;
+    for (const file of newFiles) {
+      const logPath = path.join(cliLogDir, file);
+      try {
+        resolved ??= readFileSync(logPath, "utf-8").match(/"model":\s*"([^"]+)"/)?.[1];
+      } catch {
+        // Unreadable log file — keep going, the next one may still have it.
+      }
+      rmSync(logPath, { force: true });
     }
-    const logPath = path.join(cliLogDir, newFile);
-    const content = readFileSync(logPath, "utf-8");
-    rmSync(logPath, { force: true });
-    const match = content.match(/"model":\s*"([^"]+)"/);
-    return match?.[1];
+    return resolved;
   } catch {
     return undefined; // Best-effort only — never let log scraping break the eval run.
   }
@@ -89,7 +94,15 @@ function copilotCliProvider() {
     model: modelName,
     async complete(prompt) {
       const started = Date.now();
-      const beforeFiles = new Set(readdirSync(cliLogDir));
+      // Snapshot the log dir so scrapeResolvedModel can tell which files this
+      // call produced. Guarded because a throw here would abort the whole run
+      // (see the ProviderResult error note below) for a purely cosmetic stat.
+      let beforeFiles = new Set();
+      try {
+        beforeFiles = new Set(readdirSync(cliLogDir));
+      } catch {
+        // Log dir unreadable — scraping degrades to the placeholder model name.
+      }
       const args = [
         "--yes",
         "@github/copilot",
@@ -193,24 +206,27 @@ function escapeHtml(value) {
 // `eval-*` followed by a slash, because that sequence closes the comment early.
 function collectFailingAssertions(skillDir) {
   const failures = [];
-  if (!existsSync(skillDir)) {
+  // Read first and handle the failure, rather than checking existence and then
+  // reading: the check-then-use pattern is a TOCTOU race (CodeQL
+  // js/file-system-race) and needs the same error handling anyway.
+  let entries;
+  try {
+    entries = readdirSync(skillDir, { withFileTypes: true });
+  } catch {
     return failures;
   }
-  for (const entry of readdirSync(skillDir, { withFileTypes: true })) {
+  for (const entry of entries) {
     if (!entry.isDirectory() || !entry.name.startsWith("eval-")) {
       continue;
     }
     const evalDir = path.join(skillDir, entry.name);
     for (const mode of ["with_skill", "without_skill"]) {
       const gradingPath = path.join(evalDir, mode, "grading.json");
-      if (!existsSync(gradingPath)) {
-        continue;
-      }
       let grading;
       try {
         grading = JSON.parse(readFileSync(gradingPath, "utf-8"));
       } catch {
-        continue;
+        continue; // Missing (mode never ran) or malformed — nothing to report.
       }
       for (const r of grading.assertion_results ?? []) {
         if (!r.passed) {
@@ -269,9 +285,18 @@ function buildSuggestion(skillDir, benchmark) {
   };
 }
 
-if (result.reportPath && existsSync(result.reportPath)) {
-  let html = readFileSync(result.reportPath, "utf-8");
+// Read the report rather than checking existence and then reading it: the
+// check-then-use pattern is a TOCTOU race (CodeQL js/file-system-race), and a
+// missing report is already an expected case (the run may have failed before
+// the renderer got to it).
+let html;
+try {
+  html = result.reportPath ? readFileSync(result.reportPath, "utf-8") : undefined;
+} catch {
+  html = undefined;
+}
 
+if (html !== undefined) {
   // Model count + name stat, so it's obvious at a glance how many distinct
   // models this run actually evaluated with (today always 1: same model for
   // target and judge) and which one, without hunting for the separate
