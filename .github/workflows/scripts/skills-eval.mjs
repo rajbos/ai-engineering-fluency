@@ -16,7 +16,7 @@
 //   - EVAL_WORKSPACE      artifact output dir (default ./agent-skills-workspace)
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -113,6 +113,152 @@ const result = await evaluateSkills({
   onEvent: consoleReporter(),
 });
 
+// target and judge are always this same driver's single `modelName` today —
+// there is no multi-model matrix. Computed as a de-duplicated set (rather than
+// hardcoded to 1) so this stays correct if target/judge ever diverge.
+const modelsUsed = Array.from(new Set([modelName, modelName]));
+
+// ── Per-skill "suggested next step" (report only) ───────────────────────────
+// agent-skills-eval's own HTML report (report.js, vendored via npm — not ours
+// to edit) shows pass/fail data but no actionable guidance. We post-process
+// the generated index.html below to inject a data-driven suggestion box per
+// skill, computed from the same grading.json/benchmark.json files the report
+// itself reads.
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Scans `<skillDir>/eval-*/{with_skill,without_skill}/grading.json` for failed assertions. */
+function collectFailingAssertions(skillDir) {
+  const failures = [];
+  if (!existsSync(skillDir)) {
+    return failures;
+  }
+  for (const entry of readdirSync(skillDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith("eval-")) {
+      continue;
+    }
+    const evalDir = path.join(skillDir, entry.name);
+    for (const mode of ["with_skill", "without_skill"]) {
+      const gradingPath = path.join(evalDir, mode, "grading.json");
+      if (!existsSync(gradingPath)) {
+        continue;
+      }
+      let grading;
+      try {
+        grading = JSON.parse(readFileSync(gradingPath, "utf-8"));
+      } catch {
+        continue;
+      }
+      for (const r of grading.assertion_results ?? []) {
+        if (!r.passed) {
+          failures.push({ evalSlug: entry.name, mode, text: r.text, evidence: r.evidence });
+        }
+      }
+    }
+  }
+  return failures;
+}
+
+/**
+ * Builds a concrete, data-driven "what to do next" suggestion for one skill,
+ * prioritizing the most actionable signal available:
+ *   1. A concrete failing assertion (with judge evidence) in with_skill mode.
+ *   2. Both modes at 100% with zero delta — the eval isn't discriminating.
+ *   3. with_skill scoring worse than without_skill — the skill may be actively
+ *      confusing the model.
+ *   4. Otherwise, no action needed this run.
+ */
+function buildSuggestion(skillDir, benchmark) {
+  const withSkillFailures = collectFailingAssertions(skillDir).filter((f) => f.mode === "with_skill");
+  if (withSkillFailures.length > 0) {
+    const f = withSkillFailures[0];
+    return {
+      cls: "bad",
+      text:
+        `Judge FAILED an assertion in with_skill / ${f.evalSlug}: "${f.text}" ` +
+        `— evidence: "${f.evidence}". Add explicit guidance to SKILL.md covering this gap, then re-run.`,
+    };
+  }
+  const rs = benchmark?.run_summary;
+  if (rs?.without_skill && rs.delta) {
+    if (rs.with_skill.pass_rate.mean === 1 && rs.without_skill.pass_rate.mean === 1 && rs.delta.pass_rate === 0) {
+      return {
+        cls: "warn",
+        text:
+          "Both with_skill and without_skill scored 100% (Δ 0.0pp) — this eval isn't discriminating; " +
+          "the model already answers correctly without the skill. Write harder assertions that require " +
+          "skill-specific facts (exact paths, line numbers, function names) not inferable from general repo knowledge.",
+      };
+    }
+    if (rs.delta.pass_rate < 0) {
+      return {
+        cls: "bad",
+        text:
+          `with_skill scored lower than without_skill (Δ ${(rs.delta.pass_rate * 100).toFixed(1)}pp) — ` +
+          "the skill's instructions may be actively confusing the model here. Review the failing assertions " +
+          "above and correct the relevant SKILL.md section.",
+      };
+    }
+  }
+  return {
+    cls: "ok",
+    text: "No failing assertions this run, and the skill matches or outperforms the baseline — no action needed.",
+  };
+}
+
+if (result.reportPath && existsSync(result.reportPath)) {
+  let html = readFileSync(result.reportPath, "utf-8");
+
+  // Model count stat, so it's obvious at a glance how many distinct models
+  // this run actually evaluated with (today always 1: same model for target
+  // and judge).
+  html = html.replace(
+    '<div class="totals">',
+    `<div class="totals">\n      <div class="stat"><span class="label">models evaluated</span><span class="value">${modelsUsed.length}</span></div>`
+  );
+
+  // Suggestion box styling — appended alongside the report's own <style>
+  // block rather than editing it, since report.js is vendored via npm.
+  html = html.replace(
+    "</head>",
+    `  <style>
+  .suggestion { margin: 10px 0 0; padding: 10px 12px; border-radius: 6px; font-size: 13px; border-left: 4px solid var(--border); }
+  .suggestion.ok { border-left-color: var(--ok); background: var(--ok-bg); }
+  .suggestion.warn { border-left-color: var(--warn); background: var(--warn-bg); }
+  .suggestion.bad { border-left-color: var(--bad); background: var(--bad-bg); }
+  </style>
+</head>`
+  );
+
+  for (const s of result.skills) {
+    const skillDir = path.dirname(s.benchmarkPath);
+    let benchmark;
+    try {
+      benchmark = JSON.parse(readFileSync(s.benchmarkPath, "utf-8"));
+    } catch {
+      benchmark = undefined;
+    }
+    const suggestion = buildSuggestion(skillDir, benchmark);
+    const anchorIdx = html.indexOf(`id="skill-${s.slug}"`);
+    if (anchorIdx === -1) {
+      continue;
+    }
+    const evalsIdx = html.indexOf('<div class="evals">', anchorIdx);
+    if (evalsIdx === -1) {
+      continue;
+    }
+    const box = `<div class="suggestion ${suggestion.cls}"><strong>Suggested next step:</strong> ${escapeHtml(suggestion.text)}</div>\n      `;
+    html = html.slice(0, evalsIdx) + box + html.slice(evalsIdx);
+  }
+
+  writeFileSync(result.reportPath, html, "utf-8");
+}
+
 // ── GitHub Actions step summary ──────────────────────────────────────────────
 // Report runner-relative paths: the absolute /home/runner/... paths are
 // meaningless once the job is gone, so point at the artifact contents instead.
@@ -140,6 +286,7 @@ const lines = [
   "## Agent Skills Eval (weekly, Copilot CLI)",
   "",
   `- Skills with evals: **${result.skills.length}**`,
+  `- Model(s) evaluated: **${modelsUsed.length}** (\`${modelsUsed.join("`, `")}\`) — same model used for target and judge`,
   `- Runs passed: **${result.passed}** · failed: **${result.failed}**`,
   `- Artifact \`agent-skills-eval-workspace\` → \`${workspaceRel}\` (raw prompts, outputs, gradings)`,
   ...(reportInWorkspaceArtifact
