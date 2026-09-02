@@ -258,9 +258,16 @@ function buildSuggestion(skillDir, benchmark) {
         `— evidence: "${f.evidence}". Add explicit guidance to SKILL.md covering this gap, then re-run.`,
     };
   }
+  // Every field below is optional-chained: benchmark.json's shape isn't
+  // contractually guaranteed by the SDK, and a missing/renamed field here must
+  // fall through to the safe "ok" default rather than throw and fail the
+  // workflow after the (potentially ~10 minute) eval has already run.
   const rs = benchmark?.run_summary;
-  if (rs?.without_skill && rs.delta) {
-    if (rs.with_skill.pass_rate.mean === 1 && rs.without_skill.pass_rate.mean === 1 && rs.delta.pass_rate === 0) {
+  const withMean = rs?.with_skill?.pass_rate?.mean;
+  const withoutMean = rs?.without_skill?.pass_rate?.mean;
+  const deltaPassRate = rs?.delta?.pass_rate;
+  if (withMean !== undefined && withoutMean !== undefined && deltaPassRate !== undefined) {
+    if (withMean === 1 && withoutMean === 1 && deltaPassRate === 0) {
       return {
         cls: "warn",
         text:
@@ -269,11 +276,11 @@ function buildSuggestion(skillDir, benchmark) {
           "skill-specific facts (exact paths, line numbers, function names) not inferable from general repo knowledge.",
       };
     }
-    if (rs.delta.pass_rate < 0) {
+    if (deltaPassRate < 0) {
       return {
         cls: "bad",
         text:
-          `with_skill scored lower than without_skill (Δ ${(rs.delta.pass_rate * 100).toFixed(1)}pp) — ` +
+          `with_skill scored lower than without_skill (Δ ${(deltaPassRate * 100).toFixed(1)}pp) — ` +
           "the skill's instructions may be actively confusing the model here. Review the failing assertions " +
           "above and correct the relevant SKILL.md section.",
       };
@@ -366,11 +373,20 @@ if (process.env.GITHUB_OUTPUT && result.reportPath) {
   appendFileSync(process.env.GITHUB_OUTPUT, `report-dir=${path.dirname(result.reportPath)}\n`);
 }
 
+// Backtick-escape each model name so a workflow_dispatch COPILOT_MODEL input
+// (or an unexpected value scraped from the CLI log) can't break out of the
+// Markdown code span it's rendered in below.
+const modelNamesForSummary = modelsUsed.map((m) => m.replace(/`/g, "'")).join("`, `");
+// The "same model used for target and judge" note is only true while a single
+// model backs both roles — keep it conditional so it can't go stale if this
+// ever becomes a real multi-model matrix (modelsUsed.length > 1).
+const modelSummaryNote = modelsUsed.length === 1 ? " — same model used for target and judge" : "";
+
 const lines = [
   "## Agent Skills Eval (weekly, Copilot CLI)",
   "",
   `- Skills with evals: **${result.skills.length}**`,
-  `- Model(s) evaluated: **${modelsUsed.length}** (\`${modelsUsed.join("`, `")}\`) — same model used for target and judge`,
+  `- Model(s) evaluated: **${modelsUsed.length}** (\`${modelNamesForSummary}\`)${modelSummaryNote}`,
   `- Runs passed: **${result.passed}** · failed: **${result.failed}**`,
   `- Artifact \`agent-skills-eval-workspace\` → \`${workspaceRel}\` (raw prompts, outputs, gradings)`,
   ...(reportInWorkspaceArtifact
