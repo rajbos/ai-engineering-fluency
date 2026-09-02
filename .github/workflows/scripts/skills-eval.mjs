@@ -16,7 +16,16 @@
 //   - EVAL_WORKSPACE      artifact output dir (default ./agent-skills-workspace)
 
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -38,6 +47,36 @@ const judgeModel = modelName;
 const skillsRoot = process.env.SKILLS_ROOT || ".github/skills";
 const workspace = process.env.EVAL_WORKSPACE || "./agent-skills-workspace";
 
+// ── Resolving the *actual* model name ────────────────────────────────────────
+// When COPILOT_MODEL is unset, `modelName` above is just the placeholder
+// string "copilot-cli-default" — it does not say which real model (e.g. a
+// specific GPT/Claude variant) the CLI picked. The CLI itself doesn't have a
+// flag that prints "the model I'd use" without actually running a prompt, but
+// every call — explicit --model or not — logs a `"model": "<name>"` field in
+// its wire-level debug log. So each CLI invocation below runs with
+// `--log-level debug --log-dir <scratch dir>`, and the log is scraped for
+// that field right after the call, giving us the real resolved model name
+// even when the CLI was left to pick its own default. Log files are deleted
+// immediately after scraping to avoid piling up disk usage across the run.
+const cliLogDir = mkdtempSync(path.join(os.tmpdir(), "copilot-cli-logs-"));
+const resolvedModels = new Set();
+
+function scrapeResolvedModel(beforeFiles) {
+  try {
+    const newFile = readdirSync(cliLogDir).find((f) => !beforeFiles.has(f));
+    if (!newFile) {
+      return undefined;
+    }
+    const logPath = path.join(cliLogDir, newFile);
+    const content = readFileSync(logPath, "utf-8");
+    rmSync(logPath, { force: true });
+    const match = content.match(/"model":\s*"([^"]+)"/);
+    return match?.[1];
+  } catch {
+    return undefined; // Best-effort only — never let log scraping break the eval run.
+  }
+}
+
 /**
  * Provider that completes prompts by running the Copilot CLI once per call.
  * Locked down for untrusted-ish prompt content: no tool approvals are granted
@@ -50,6 +89,7 @@ function copilotCliProvider() {
     model: modelName,
     async complete(prompt) {
       const started = Date.now();
+      const beforeFiles = new Set(readdirSync(cliLogDir));
       const args = [
         "--yes",
         "@github/copilot",
@@ -66,6 +106,10 @@ function copilotCliProvider() {
         "--deny-tool",
         "url",
         "--secret-env-vars=GH_TOKEN,COPILOT_GITHUB_TOKEN,GITHUB_TOKEN",
+        "--log-level",
+        "debug",
+        "--log-dir",
+        cliLogDir,
       ];
       if (process.env.COPILOT_MODEL) {
         args.push("--model", process.env.COPILOT_MODEL);
@@ -84,13 +128,15 @@ function copilotCliProvider() {
           : `exit code ${run.status}: ${(run.stderr || "").trim().slice(0, 2000)}`;
         console.error(`copilot CLI call failed after ${latencyMs}ms — ${detail}`);
       }
+      const resolvedModel = scrapeResolvedModel(beforeFiles) || modelName;
+      resolvedModels.add(resolvedModel);
       // On failure, return a ProviderResult with `error` set rather than
       // throwing: the framework's run-eval replaces the output with
       // "ERROR: <error>" so the judge fails the case closed, whereas a throw
       // would abort the entire evaluation run.
       return {
         provider: "copilot-cli",
-        model: modelName,
+        model: resolvedModel,
         output,
         latencyMs,
         inputTokens: 0,
@@ -117,11 +163,16 @@ const result = await evaluateSkills({
   onEvent: consoleReporter(),
 });
 
-// The target and judge are both driven by this script's single model today, so
-// this set has one entry. Deriving it from the two values actually passed to
-// evaluateSkills (rather than hardcoding 1) keeps the count honest if they ever
-// diverge into a real multi-model matrix.
-const modelsUsed = Array.from(new Set([targetModel, judgeModel]));
+// The target and judge are both driven by this script's single Copilot CLI
+// provider today, so this set has one entry in practice. It's built from the
+// models actually resolved by each CLI call (scraped from its debug log, see
+// scrapeResolvedModel above) rather than the requested `modelName`, so a run
+// left on the CLI's own default reports the real model (e.g. "claude-sonnet-5")
+// instead of the opaque "copilot-cli-default" placeholder. Falls back to
+// modelName if scraping failed for every call (e.g. no calls were made).
+const modelsUsed = resolvedModels.size > 0 ? Array.from(resolvedModels) : [modelName];
+
+rmSync(cliLogDir, { recursive: true, force: true });
 
 // ── Per-skill "suggested next step" (report only) ───────────────────────────
 // agent-skills-eval's own HTML report (report.js, vendored via npm — not ours
