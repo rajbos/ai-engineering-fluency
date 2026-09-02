@@ -1714,6 +1714,29 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       modelId: decodeSegment(parts[2])
     };
   }
+  var UUID_PREFIX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\//i;
+  function getModelLookupCandidates(model) {
+    const candidates = [];
+    const add = (id) => {
+      if (id && !candidates.includes(id)) {
+        candidates.push(id);
+      }
+    };
+    const addWithVersionVariant = (id) => {
+      add(id);
+      add(id.replace(/(\d+)-(\d+)(?=-|$)/, "$1.$2"));
+    };
+    const base = model.replace(/^copilot\//, "");
+    addWithVersionVariant(base);
+    const custom = parseCustomProviderModel(base);
+    if (custom) {
+      addWithVersionVariant(custom.modelId);
+    }
+    if (UUID_PREFIX.test(base)) {
+      addWithVersionVariant(base.replace(UUID_PREFIX, ""));
+    }
+    return candidates;
+  }
   function getCustomProviderGroup(model) {
     const parsed = parseCustomProviderModel(model);
     return parsed ? `${parsed.providerName}${CUSTOM_PROVIDER_SUFFIX}` : void 0;
@@ -1722,12 +1745,17 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     return group.endsWith(CUSTOM_PROVIDER_SUFFIX);
   }
   function getModelDisplayName(model) {
-    if (_modelNames[model]) {
-      return _modelNames[model];
+    for (const candidate of getModelLookupCandidates(model)) {
+      if (_modelNames[candidate]) {
+        return _modelNames[candidate];
+      }
     }
     const custom = parseCustomProviderModel(model);
     if (custom) {
-      return _modelNames[custom.modelId] ?? custom.modelId;
+      return custom.modelId;
+    }
+    if (UUID_PREFIX.test(model)) {
+      return model.replace(UUID_PREFIX, "");
     }
     return decodeSegment(model);
   }
@@ -1895,7 +1923,13 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
   };
   var currentLocalization = { ...DEFAULT_LOCALIZATION };
   function initializeWebviewLocalization(localization) {
-    currentLocalization = { ...DEFAULT_LOCALIZATION, ...localization };
+    const resolved = {};
+    for (const [key, value] of Object.entries(localization)) {
+      if (typeof value === "string" && value !== key) {
+        resolved[key] = value;
+      }
+    }
+    currentLocalization = { ...DEFAULT_LOCALIZATION, ...resolved };
   }
   function localize(key) {
     return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
@@ -2360,9 +2394,12 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   var styles_default = "body {\n	margin: 0;\n	background: var(--bg-primary);\n	color: var(--text-primary);\n	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n}\n\n.container {\n	padding: 16px;\n	display: flex;\n	flex-direction: column;\n	gap: 14px;\n	max-width: 1200px;\n	margin: 0 auto;\n}\n\n.header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	gap: 12px;\n	padding-bottom: 4px;\n}\n\n.header-left {\n	display: flex;\n	flex-direction: column;\n	gap: 4px;\n}\n\n.title {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n.plan-badge {\n	display: inline-flex;\n	align-items: center;\n	gap: 4px;\n	align-self: flex-start;\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 999px;\n	padding: 2px 10px;\n	font-size: 11px;\n	color: var(--text-secondary);\n	cursor: help;\n}\n\n.provider-panel-hint {\n	color: var(--text-secondary);\n	font-size: 11px;\n	margin: -4px 0 10px;\n}\n\n.provider-cards {\n	display: grid;\n	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));\n	gap: 10px;\n	text-align: center;\n}\n\n.provider-card {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n	text-align: center;\n	cursor: pointer;\n	transition: background-color 0.1s ease, opacity 0.1s ease;\n}\n\n.provider-card:hover {\n	background: var(--list-hover-bg);\n}\n\n.provider-card-excluded {\n	opacity: 0.45;\n}\n\n.provider-card-total {\n	cursor: default;\n	border-style: dashed;\n}\n\n.provider-card-total:hover {\n	background: var(--bg-secondary);\n}\n\n.provider-card-label {\n	color: var(--text-secondary);\n	font-size: 11px;\n	margin-bottom: 6px;\n}\n\n.provider-card-value {\n	color: var(--text-primary);\n	font-size: 18px;\n	font-weight: 700;\n}\n\n.provider-card-sub {\n	color: var(--text-secondary);\n	font-size: 10px;\n	margin-top: 4px;\n}\n\n.no-data-row td {\n	text-align: center;\n	color: var(--text-secondary);\n	font-size: 12px;\n	padding: 14px;\n	font-style: italic;\n}\n\n.sections {\n	display: flex;\n	flex-direction: column;\n	gap: 16px;\n}\n\n.section {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n}\n\n.section h3 {\n	margin: 0 0 10px;\n	font-size: 14px;\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	color: var(--text-primary);\n	letter-spacing: 0.2px;\n}\n\n.stats-table {\n	width: 100%;\n	border-collapse: collapse;\n	table-layout: fixed;\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 8px;\n	overflow: hidden;\n}\n\n.stats-table thead {\n	background: var(--list-hover-bg);\n}\n\n.stats-table th,\n.stats-table td {\n	padding: 10px 12px;\n	border-bottom: 1px solid var(--border-subtle);\n	vertical-align: middle;\n}\n\n.stats-table th {\n	text-align: left;\n	color: var(--text-secondary);\n	font-weight: 700;\n	font-size: 12px;\n	letter-spacing: 0.1px;\n}\n\n.stats-table td {\n	color: var(--text-primary);\n	font-size: 12px;\n}\n\n.stats-table th.align-right,\n.stats-table td.align-right {\n	text-align: right;\n}\n\n.stats-table tr.group-row td {\n	background: var(--list-hover-bg);\n	color: var(--text-secondary);\n	font-size: 12px;\n	font-weight: 700;\n	text-transform: uppercase;\n	letter-spacing: 1px;\n	padding: 8px 12px;\n	border-top: 1px solid var(--border-color);\n	border-bottom: 1px solid var(--border-color);\n}\n\n/* First group sits right under the table header, no extra top rule needed */\n.stats-table tbody tr.group-row:first-child td {\n	border-top: none;\n}\n\n.metric-label {\n	display: inline-flex;\n	align-items: center;\n	gap: 6px;\n	font-weight: 600;\n}\n\n.period-header {\n	display: flex;\n	align-items: center;\n	gap: 4px;\n	color: var(--text-secondary);\n}\n\n.align-right .period-header {\n	justify-content: flex-end;\n}\n\n.value-right {\n	text-align: right;\n}\n\n.muted {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 4px;\n}\n\n.notes {\n	margin: 4px 0 0;\n	padding-left: 16px;\n	color: var(--text-secondary);\n}\n\n.notes li {\n	margin: 4px 0;\n	line-height: 1.4;\n}\n\n.footer {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 6px;\n}\n\n.empty-state {\n	display: flex;\n	flex-direction: column;\n	gap: 12px;\n	padding: 20px;\n}\n\n.empty-state-title {\n	font-size: 15px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n.empty-state-description {\n	color: var(--text-secondary);\n	font-size: 13px;\n	line-height: 1.5;\n	margin: 0;\n}\n\n.empty-state-steps {\n	margin: 0;\n	padding-left: 20px;\n	color: var(--text-secondary);\n	font-size: 13px;\n	line-height: 1.6;\n}\n\n.empty-state-steps li {\n	margin: 4px 0;\n}\n\n.empty-state-note {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 6px;\n	padding: 10px 14px;\n	color: var(--text-secondary);\n	font-size: 12px;\n	line-height: 1.5;\n}\n";
 
   // src/webview/shared/messageHandler.ts
+  function isTrustedWebviewMessageSource(source, currentWindow) {
+    return source === null || source === currentWindow;
+  }
   function registerMessageHandler(handler) {
     window.addEventListener("message", (event) => {
-      if (event.source !== window) {
+      if (!isTrustedWebviewMessageSource(event.source, window)) {
         return;
       }
       handler(event.data);
@@ -2414,8 +2451,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     if (customGroup) {
       return customGroup;
     }
-    const id = modelId.toLowerCase();
-    const match = MODEL_PROVIDER_PREFIXES.find(([prefix]) => id.startsWith(prefix));
+    const match = getModelLookupCandidates(modelId).flatMap((candidate) => MODEL_PROVIDER_PREFIXES.filter(([prefix]) => candidate.toLowerCase().startsWith(prefix))).at(0);
     return match ? match[1] : "Other";
   }
   function getBillingGroup(editor, modelId) {

@@ -49,13 +49,14 @@ The entire extension's logic is contained within the `CopilotTokenTracker` class
 ## Developer Workflow
 
 - **Setup**: Run `npm install` inside `vscode-extension/` to install dependencies.
-- **Build**: Run `npm run compile` from `vscode-extension/` to lint and build the extension using `esbuild`. The output is a single file: `vscode-extension/dist/extension.js`.
+- **Build**: Run `npm run compile` from `vscode-extension/` to build the extension using `esbuild`. The output is a single file: `vscode-extension/dist/extension.js`.
+- **Validation**: Run `npm run validate` to type-check, lint, and build the extension.
 - **Watch Mode**: For active development, use `npm run watch` from `vscode-extension/`. This will automatically recompile the extension on file changes.
-- **Testing/Debugging (human developers only)**: Press `F5` in VS Code to open the Extension Development Host. This will launch a new VS Code window with the extension running. `console.log` statements from `vscode-extension/src/extension.ts` will appear in the Developer Tools console of this new window (Help > Toggle Developer Tools). **AI agents must never do this** — see "Never launch a real editor/IDE instance" in the root `.github/copilot-instructions.md`. Use `npm run compile` and `npm run test:node` / `npm run test:coverage` to validate changes instead.
+- **Testing/Debugging (human developers only)**: Press `F5` in VS Code to open the Extension Development Host. This will launch a new VS Code window with the extension running. `console.log` statements from `vscode-extension/src/extension.ts` will appear in the Developer Tools console of this new window (Help > Toggle Developer Tools). **AI agents must never do this** — see "Never launch a real editor/IDE instance" in the root `.github/copilot-instructions.md`. Use `npm run validate` and `npm run test:node` / `npm run test:coverage` to validate changes instead.
 
-**Important build guidance:** After making changes to source code or related files (TypeScript, JavaScript, JSON, or other code files used by the extension), always run both `npm ci` and then `npm run compile` from `vscode-extension/` to validate that the project still builds and lints cleanly before opening a pull request or releasing. Also run the unit tests with `npm run test:node` to catch any regressions. You do not need to run the full compile step for documentation-only changes (Markdown files), but you should run it after any edits that touch source, configuration, or JSON data files.
+**Important build guidance:** After making changes to source code or related files (TypeScript, JavaScript, JSON, or other code files used by the extension), always run both `npm ci` and then `npm run validate` from `vscode-extension/` to validate that the project still builds and lints cleanly before opening a pull request or releasing. Also run the unit tests with `npm run test:node` to catch any regressions. You do not need to run the full validation step for documentation-only changes (Markdown files), but you should run it after any edits that touch source, configuration, or JSON data files.
 
-**Zero warnings policy:** `npm run compile` must report `0 problems (0 errors, 0 warnings)`. ESLint warnings count as failures — do not leave new warnings in the codebase. If `compile` outputs `✖ N problems`, fix all of them before committing.
+**Zero warnings policy:** `npm run validate` must report `0 problems (0 errors, 0 warnings)`. ESLint warnings count as failures — do not leave new warnings in the codebase. If validation outputs `✖ N problems`, fix all of them before committing.
 
 **Always use `npm ci` (not `npm install`) when validating a build** — `npm ci` installs from the lockfile exactly, mirroring what CI does, and will catch any dependency drift. Use `npm install` only when intentionally adding or updating packages.
 
@@ -304,7 +305,7 @@ To maintain a consistent, VS Code-native look across all webview panels (Details
 - **Checklist for PRs touching webviews**:
   - Ensure the toolkit is registered before creating `vscode-button` elements.
   - Keep navigation command names unchanged so `extension.ts` handlers continue to work.
-  - Run `npm run compile` and verify TypeScript and ESLint pass.
+  - Run `npm run validate` and verify TypeScript and ESLint pass.
   - Visually compare the header with the Details and other panels to confirm parity.
 
 ## Webview State Persistence
@@ -405,4 +406,3 @@ Current adapter set (9):
 - [ ] Also update the CLI side — see `.github/instructions/cli.instructions.md`
 
 **`handles()` for CopilotChat/Cli currently returns `false`**: discovery is owned by the adapters, but per-session parsing is still routed through the existing fallback path in `extension.ts` (`countInteractionsInSession`, `estimateTokensFromSession`, `getSessionFileDataCached`). A future PR can flip `handles()` to use the exported `isCopilotChatSessionPath` / `isCopilotCliSessionPath` predicates once the JSON parser helpers are extracted from `extension.ts`. When you flip `handles()`, also fix `_detectEditorSource(filePath, (p) => !!this.findEcosystem(p))` at extension.ts:~3224 — the predicate must check `?.id === 'opencode'` (or use `getEditorTypeFromPath` convention) so that VS Code paths are still labeled "VS Code", not "OpenCode".
-

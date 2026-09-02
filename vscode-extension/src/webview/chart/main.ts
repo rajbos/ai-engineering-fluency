@@ -3,10 +3,12 @@ import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
-import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
+import { createPeriodSelector, PERIOD_LABELS } from '../shared/periodSelector';
 import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
 import { createViewStateManager } from '../shared/viewState';
 import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import type { ChartTimeWindow } from '../../../../src/types';
+import { getTimeWindowStartDayKey, getTimeWindowStartMonthKey } from '../../../../src/timeWindows';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -56,7 +58,6 @@ type ChartPeriodData = {
 };
 
 type ChartPeriod = import('./projectionUtils').ChartPeriod;
-type ChartTimeWindow = Period;
 
 type InitialChartData = {
 	labels: string[];
@@ -158,42 +159,6 @@ function saveWebviewState(): void {
 	chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode, editorListCollapsed });
 }
 
-function getWindowStartDate(timeWindow: ChartTimeWindow, now: Date): string {
-	const y = now.getFullYear();
-	const m = now.getMonth();
-	const d = now.getDate();
-	switch (timeWindow) {
-		case 'today':
-			return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-		case 'last7': {
-			const start = new Date(y, m, d - 6);
-			return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
-		}
-		case 'last30': {
-			const start = new Date(y, m, d - 29);
-			return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
-		}
-		case 'currentMonth':
-			return `${y}-${String(m + 1).padStart(2, '0')}-01`;
-		case 'allTime':
-			return '0000-00-00';
-	}
-}
-
-function getWindowStartMonth(timeWindow: ChartTimeWindow, now: Date): string {
-	if (timeWindow === 'allTime') {
-		return '0000-00';
-	}
-	const y = now.getFullYear();
-	const m = now.getMonth();
-	if (timeWindow === 'currentMonth') {
-		return `${y}-${String(m + 1).padStart(2, '0')}`;
-	}
-	// For today/last7/last30, include the current month and previous month if needed.
-	const start = new Date(y, m, timeWindow === 'today' ? 1 : timeWindow === 'last7' ? -5 : -29);
-	return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`;
-}
-
 function sliceByIndices<T>(arr: T[] | undefined, indices: number[]): T[] | undefined {
 	if (!arr) { return undefined; }
 	return indices.map(i => arr[i]);
@@ -208,7 +173,9 @@ function sliceDatasetsByIndices(datasets: object[] | undefined, indices: number[
 }
 
 function getFilterStartKey(timeWindow: ChartTimeWindow, periodType: ChartPeriod, now: Date): string {
-	return periodType === 'month' ? getWindowStartMonth(timeWindow, now) : getWindowStartDate(timeWindow, now);
+	return periodType === 'month'
+		? getTimeWindowStartMonthKey(timeWindow, now)
+		: getTimeWindowStartDayKey(timeWindow, now);
 }
 
 function buildCoreFilteredPeriod(period: ChartPeriodData, indices: number[]): ChartPeriodData {
@@ -463,7 +430,7 @@ function buildTimeWindowControl(data: InitialChartData): HTMLElement {
 	const { wrapper } = createPeriodSelector({
 		id: 'time-window-select',
 		selected: currentTimeWindow,
-		disabled: periodsReady ? [] : ['allTime'],
+		disabled: periodsReady ? [] : ['last90', 'allTime'],
 		disabledTitle: 'Full history is still loading',
 		label: 'Time window:',
 		onChange: (value) => { void switchTimeWindow(value as ChartTimeWindow, data); },
@@ -472,7 +439,7 @@ function buildTimeWindowControl(data: InitialChartData): HTMLElement {
 	group.append(wrapper);
 	if (!periodsReady) {
 		const loadingNote = el('span', 'loading-note', 'Loading history…');
-		loadingNote.title = 'Full history is still loading. "All time" and weekly/monthly aggregation are not available yet.';
+		loadingNote.title = 'Full history is still loading. "Last 90 days", "All time", and weekly/monthly aggregation are not available yet.';
 		group.append(loadingNote);
 	}
 	return group;
@@ -976,7 +943,7 @@ function getChartColors(): ChartColors {
 }
 
 function buildBaseOptions(c: ChartColors, periodsReady: boolean) {
-	const title = !periodsReady && currentTimeWindow === 'allTime'
+	const title = !periodsReady && (currentTimeWindow === 'last90' || currentTimeWindow === 'allTime')
 		? `${PERIOD_LABELS[currentTimeWindow]} (loading history…)`
 		: PERIOD_LABELS[currentTimeWindow];
 	return {
@@ -1455,4 +1422,3 @@ registerMessageHandler((message) => {
 		renderLayout(message.data as InitialChartData);
 	}
 });
-

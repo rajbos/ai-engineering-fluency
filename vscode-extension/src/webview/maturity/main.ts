@@ -2,8 +2,10 @@
 import { navButtonsHtml } from '../shared/buttonConfig';
 import type { ContextReferenceUsage } from '../shared/contextRefUtils';
 import { setHtml } from '../shared/domUtils';
-import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
+import { escapeHtml, markdownToHtml, safeSectionHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import { buildDarkFactorySectionHtml } from './darkFactorySection';
+import type { DarkFactoryReport } from '../../../../src/types';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage, CategoryLevelData } from '../shared/types';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -52,6 +54,8 @@ type MaturityData = {
 	fluencyLevels?: CategoryLevelData[];
 	backendConfigured?: boolean;
 	installedHooks?: string[];
+	/** Per-repository Dark Factory readiness scan; absent when the scan could not run. */
+	darkFactory?: DarkFactoryReport;
 };
 
 // Maps a category name to the hook id that provides a session reminder for it
@@ -494,6 +498,7 @@ function buildMaturityRootHtml(
         </div>
       </div>
       <div class="category-grid">${categoryCards}</div>
+      ${safeSectionHtml('Dark Factory Readiness', () => buildDarkFactorySectionHtml(data.darkFactory))}
       <div class="footer">
         <span class="footer-info">Based on last 30 days of activity &middot; Last updated: ${new Date(data.lastUpdated).toLocaleString()} &middot; Updates every 5 minutes</span>
         ${dismissedTips.length > 0 ? `<button id="btn-reset-tips" class="reset-tips-btn" title="Show all dismissed improvement suggestions again">🔄 Reset Dismissed Tips</button>` : ''}

@@ -80,9 +80,8 @@ function buildWebviews(checkoutRoot, label) {
 	}
 
 	console.log(`\n▶ Building webview bundles (${label})…`);
-	// esbuild only — `npm run compile` would also run tsc and eslint, which are
-	// irrelevant to how a view looks and would fail the baseline build for
-	// reasons that have nothing to do with this comparison.
+	// Invoke esbuild directly because baseline revisions may still define
+	// `npm run compile` as a combined type-check, lint, and bundle command.
 	run(process.execPath, ['esbuild.js'], extensionDir);
 }
 

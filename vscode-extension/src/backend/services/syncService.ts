@@ -159,6 +159,62 @@ export class SyncService {
 	}
 
 	/**
+	 * Determine whether the sync timer is allowed to start, logging the reason when it isn't.
+	 */
+	private _canStartSyncTimer(settings: BackendSettings, isConfigured: boolean): boolean {
+		const sharingPolicy = computeBackendSharingPolicy({
+			enabled: settings.enabled,
+			profile: settings.sharingProfile,
+			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
+		});
+		if (!sharingPolicy.allowCloudSync) {
+			this.deps.logger.log(`Backend sync: not starting timer (cloud sync disabled, profile: ${settings.sharingProfile})`);
+			return false;
+		}
+		if (!isConfigured) {
+			this.deps.logger.log('Backend sync: not starting timer (backend not configured)');
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Handle a failed periodic (timer-driven) sync: track consecutive failures,
+	 * surface a user-facing warning/error at the relevant thresholds, and stop
+	 * the timer once failures exceed {@link MAX_CONSECUTIVE_FAILURES}.
+	 */
+	private _handleTimerSyncFailure(e: unknown): void {
+		const err = e as { message?: string } | undefined;
+		this.deps.logger.warn(`Backend sync timer failed: ${err?.message ?? e}`);
+		this.consecutiveFailures++;
+
+		// Show user-facing warning after first few failures
+		if (this.consecutiveFailures === 3) {
+			vscode.window.showWarningMessage(
+				'Backend sync is experiencing issues. Check the output panel for details.',
+				'Show Output'
+			).then(choice => {
+				if (choice === 'Show Output') {
+					// User can manually open output panel via command palette
+				}
+			});
+		}
+
+		if (this.consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
+			this.deps.logger.warn(`Backend sync: stopping timer after ${this.MAX_CONSECUTIVE_FAILURES} consecutive failures`);
+			vscode.window.showErrorMessage(
+				'Backend sync stopped after repeated failures. Check your Azure configuration.',
+				'Configure Backend'
+			).then(choice => {
+				if (choice === 'Configure Backend') {
+					vscode.commands.executeCommand('aiEngineeringFluency.configureBackend');
+				}
+			});
+			this.stopTimer();
+		}
+	}
+
+	/**
 	 * Start the background sync timer if backend is enabled.
 	 * @param settings - Backend settings to check if sync should be enabled
 	 * @param isConfigured - Whether the backend is fully configured
@@ -166,51 +222,13 @@ export class SyncService {
 	startTimerIfEnabled(settings: BackendSettings, isConfigured: boolean): void {
 		try {
 			this.stopTimer();
-			const sharingPolicy = computeBackendSharingPolicy({
-				enabled: settings.enabled,
-				profile: settings.sharingProfile,
-				shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
-			});
-			if (!sharingPolicy.allowCloudSync || !isConfigured) {
-				if (!sharingPolicy.allowCloudSync) {
-					this.deps.logger.log(`Backend sync: not starting timer (cloud sync disabled, profile: ${settings.sharingProfile})`);
-				} else if (!isConfigured) {
-					this.deps.logger.log('Backend sync: not starting timer (backend not configured)');
-				}
+			if (!this._canStartSyncTimer(settings, isConfigured)) {
 				return;
 			}
 			const intervalMs = BACKEND_SYNC_MIN_INTERVAL_MS;
 			this.deps.logger.log(`Backend sync: starting timer with interval ${intervalMs}ms (${intervalMs / 60000} minutes)`);
 			this.backendSyncInterval = setInterval(() => {
-				this.syncToBackendStore(false, settings, isConfigured).catch((e) => {
-					this.deps.logger.warn(`Backend sync timer failed: ${e?.message ?? e}`);
-					this.consecutiveFailures++;
-					
-					// Show user-facing warning after first few failures
-					if (this.consecutiveFailures === 3) {
-						vscode.window.showWarningMessage(
-							'Backend sync is experiencing issues. Check the output panel for details.',
-							'Show Output'
-						).then(choice => {
-							if (choice === 'Show Output') {
-								// User can manually open output panel via command palette
-							}
-						});
-					}
-					
-					if (this.consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
-						this.deps.logger.warn(`Backend sync: stopping timer after ${this.MAX_CONSECUTIVE_FAILURES} consecutive failures`);
-						vscode.window.showErrorMessage(
-							'Backend sync stopped after repeated failures. Check your Azure configuration.',
-							'Configure Backend'
-						).then(choice => {
-							if (choice === 'Configure Backend') {
-								vscode.commands.executeCommand('aiEngineeringFluency.configureBackend');
-							}
-						});
-						this.stopTimer();
-					}
-				});
+				this.syncToBackendStore(false, settings, isConfigured).catch((e) => this._handleTimerSyncFailure(e));
 			}, intervalMs);
 			// Immediate initial sync (forced to ensure settings changes take effect)
 			this.syncToBackendStore(true, settings, isConfigured).catch((e) => {

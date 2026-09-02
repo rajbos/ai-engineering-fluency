@@ -1,0 +1,288 @@
+{
+  "description": "Dark Factory readiness control catalogue. Each control is one governance or evidence capability a repository either has, does not have, or that this scan cannot see. Stages follow the software-development dark factory maturity ladder and are assessed per repository (a product line), never per person and never for a whole enterprise.",
+  "lastUpdated": "2026-09-01",
+  "maxAssessableStage": 4,
+  "stages": [
+    {
+      "stage": 0,
+      "name": "Manual / fragmented",
+      "summary": "Human coding with inconsistent repositories and releases. The outcome sought here is visibility, not autonomy."
+    },
+    {
+      "stage": 1,
+      "name": "Standardized software delivery",
+      "summary": "Trunk-oriented delivery, reliable tests, infrastructure as code, observability and service ownership. Nothing above this stage is trustworthy without it."
+    },
+    {
+      "stage": 2,
+      "name": "AI-assisted engineers",
+      "summary": "Developers remain the authors. Repository-level instructions steer assistants; AI policy and telemetry boundaries are written down."
+    },
+    {
+      "stage": 3,
+      "name": "Agent-delegated, human-reviewed",
+      "summary": "Small bounded work packages with strong review discipline. An agent may branch, implement, test and open a pull request, but cannot approve or merge its own work."
+    },
+    {
+      "stage": 4,
+      "name": "Spec-driven autonomous team",
+      "summary": "Versioned specifications, acceptance scenarios, independent evaluators, risk classification and progressive delivery. Humans approve intent and outcomes, not every line."
+    },
+    {
+      "stage": 5,
+      "name": "Bounded dark factory",
+      "summary": "Mature domain, executable intent, hidden holdouts, automated rollback and explicit legal accountability. A completely human-free merge path is not the current native GitHub model, and none of its defining evidence is machine-detectable — this scan never awards stage 5."
+    }
+  ],
+  "controls": [
+    {
+      "id": "ci-workflows",
+      "stage": 1,
+      "label": "CI workflows",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Automated delivery has to exist before anything can be delegated to an agent.",
+      "remediation": "Add at least one GitHub Actions workflow under .github/workflows/."
+    },
+    {
+      "id": "ci-test-execution",
+      "stage": 1,
+      "label": "Tests executed in CI",
+      "tier": "filesystem",
+      "evidence": "heuristic",
+      "why": "A green build is only evidence when the build actually runs tests.",
+      "remediation": "Run the test suite from a workflow step so every change is validated."
+    },
+    {
+      "id": "reusable-workflows",
+      "stage": 1,
+      "label": "Reusable workflows",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Shared delivery definitions are what make a product line consistent rather than per-repository folklore.",
+      "remediation": "Call a shared workflow with `uses: owner/repo/.github/workflows/file.yml@ref`."
+    },
+    {
+      "id": "codeowners",
+      "stage": 1,
+      "label": "CODEOWNERS",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Service ownership has to be explicit before review can be held to anyone.",
+      "remediation": "Add a CODEOWNERS file in .github/, the repository root, or docs/."
+    },
+    {
+      "id": "dependabot",
+      "stage": 1,
+      "label": "Dependabot configuration",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Supply-chain currency is part of reliable delivery, not an AI feature.",
+      "remediation": "Add .github/dependabot.yml."
+    },
+    {
+      "id": "devcontainer",
+      "stage": 1,
+      "label": "Reproducible dev environment",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Agents and humans need the same reproducible environment for a result to transfer between them.",
+      "remediation": "Add a .devcontainer/ configuration."
+    },
+    {
+      "id": "infrastructure-as-code",
+      "stage": 1,
+      "label": "Infrastructure as code",
+      "tier": "filesystem",
+      "evidence": "heuristic",
+      "why": "Environments that are clicked together by hand cannot be rebuilt or rolled back automatically.",
+      "remediation": "Describe the environment in Terraform, Bicep, Pulumi, Helm or Kubernetes manifests."
+    },
+    {
+      "id": "code-scanning",
+      "stage": 1,
+      "label": "Code scanning",
+      "tier": "hybrid",
+      "evidence": "direct",
+      "why": "Static analysis is one of the few automated checks that keeps meaning when a machine wrote the code.",
+      "remediation": "Enable CodeQL — either the default setup or a .github/workflows/codeql.yml workflow.",
+      "unknownWhenAbsent": true,
+      "unknownReason": "CodeQL default setup leaves no file in the repository, so a missing workflow does not mean scanning is off."
+    },
+    {
+      "id": "branch-protection",
+      "stage": 1,
+      "label": "Branch protection or rulesets",
+      "tier": "api",
+      "evidence": "direct",
+      "why": "Without an enforced target branch, every control above it is advisory.",
+      "remediation": "Protect the default branch with a ruleset that requires status checks."
+    },
+    {
+      "id": "artifact-attestations",
+      "stage": 1,
+      "label": "Artifact attestations",
+      "tier": "hybrid",
+      "evidence": "direct",
+      "why": "Provenance is the evidence that the artefact you shipped is the artefact CI built.",
+      "remediation": "Use actions/attest-build-provenance in the release workflow.",
+      "unknownWhenAbsent": true,
+      "unknownReason": "Attestations can be produced by workflows this scan cannot read, or by a shared reusable workflow."
+    },
+    {
+      "id": "copilot-instructions",
+      "stage": 2,
+      "label": "Repository instructions",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Assistants need the repository's own conventions written down, not inferred.",
+      "remediation": "Add .github/copilot-instructions.md."
+    },
+    {
+      "id": "agent-instructions",
+      "stage": 2,
+      "label": "Agent instructions (AGENTS.md / CLAUDE.md)",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Cross-vendor agent instructions keep guidance in one place rather than per tool.",
+      "remediation": "Add AGENTS.md (and mirror it for other agents where needed)."
+    },
+    {
+      "id": "scoped-instructions",
+      "stage": 2,
+      "label": "Path-scoped instructions",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "A monolithic instruction file stops scaling once a repository has distinct subsystems.",
+      "remediation": "Add .github/instructions/*.instructions.md scoped with applyTo globs."
+    },
+    {
+      "id": "ai-policy",
+      "stage": 2,
+      "label": "AI usage policy and telemetry boundaries",
+      "tier": "governance",
+      "evidence": "not-scannable",
+      "why": "The paper is explicit that AI adoption needs a stated policy and telemetry boundaries, and that individual performance scoring is out of bounds.",
+      "remediation": "Write down the AI usage policy, what telemetry is collected, and that it is never used to score individuals."
+    },
+    {
+      "id": "custom-agents",
+      "stage": 3,
+      "label": "Custom agents",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Bounded work packages need agents with a defined remit, not one general-purpose agent.",
+      "remediation": "Define agents under .github/agents/."
+    },
+    {
+      "id": "agent-skills",
+      "stage": 3,
+      "label": "Agent skills",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Repeatable procedures belong in a skill so every run does the same thing.",
+      "remediation": "Add .github/skills/<name>/SKILL.md for the procedures agents keep repeating."
+    },
+    {
+      "id": "mcp-configuration",
+      "stage": 3,
+      "label": "Declared MCP servers",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Tool access an agent is given has to be declared in the repository to be reviewable.",
+      "remediation": "Declare the MCP servers the repository's agents may use in .vscode/mcp.json or .mcp.json."
+    },
+    {
+      "id": "agent-authored-pull-requests",
+      "stage": 3,
+      "label": "Agent-authored pull requests",
+      "tier": "api",
+      "evidence": "direct",
+      "why": "Delegation is only real once agents are actually opening pull requests in this repository.",
+      "remediation": "Delegate a bounded work package to a coding agent and let it open a draft pull request."
+    },
+    {
+      "id": "human-review-enforced",
+      "stage": 3,
+      "label": "Human review enforced on merge",
+      "tier": "api",
+      "evidence": "direct",
+      "why": "The stage-3 boundary is that an agent can propose but cannot approve or merge its own work.",
+      "remediation": "Require pull request reviews from someone other than the author on the protected branch."
+    },
+    {
+      "id": "issue-forms",
+      "stage": 4,
+      "label": "Issue Forms as an intent queue",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Structured intent is what makes a work package specifiable rather than a paragraph of prose.",
+      "remediation": "Add .github/ISSUE_TEMPLATE/*.yml Issue Forms capturing intent, constraints and acceptance criteria."
+    },
+    {
+      "id": "versioned-specifications",
+      "stage": 4,
+      "label": "Versioned specifications",
+      "tier": "filesystem",
+      "evidence": "heuristic",
+      "why": "Spec-driven work needs specifications that are reviewed and versioned like code.",
+      "remediation": "Keep specifications under specs/ or docs/specs/ in the repository."
+    },
+    {
+      "id": "executable-acceptance",
+      "stage": 4,
+      "label": "Executable acceptance scenarios",
+      "tier": "filesystem",
+      "evidence": "heuristic",
+      "why": "Acceptance has to be executable for an evaluator to be independent of the implementer.",
+      "remediation": "Express acceptance scenarios as executable tests (for example .feature files or an acceptance test suite)."
+    },
+    {
+      "id": "independent-evaluator-agent",
+      "stage": 4,
+      "label": "Independent evaluator agents",
+      "tier": "filesystem",
+      "evidence": "heuristic",
+      "why": "The implementation agent must not own the acceptance oracle it is judged by.",
+      "remediation": "Define separate review, test or security agents under .github/agents/, distinct from the implementation agent."
+    },
+    {
+      "id": "agentic-workflows",
+      "stage": 4,
+      "label": "Agentic workflows",
+      "tier": "filesystem",
+      "evidence": "direct",
+      "why": "Autonomy that runs on a schedule or an event has to be defined in the repository to be governed.",
+      "remediation": "Define agentic workflows in .github/workflows/ so their triggers and permissions are reviewable."
+    },
+    {
+      "id": "deployment-environments",
+      "stage": 4,
+      "label": "Deployment environments declared",
+      "tier": "hybrid",
+      "evidence": "direct",
+      "why": "Progressive delivery needs named environments before it can have gates.",
+      "remediation": "Declare `environment:` on the deploying job.",
+      "unknownWhenAbsent": true,
+      "unknownReason": "Environments can be deployed to from a reusable workflow this scan cannot read."
+    },
+    {
+      "id": "environment-protection-rules",
+      "stage": 4,
+      "label": "Environment protection rules",
+      "tier": "api",
+      "evidence": "direct",
+      "why": "A named environment without required reviewers or wait timers gates nothing.",
+      "remediation": "Add required reviewers or a wait timer to the production environment."
+    },
+    {
+      "id": "risk-classification",
+      "stage": 4,
+      "label": "Documented risk classification",
+      "tier": "governance",
+      "evidence": "not-scannable",
+      "why": "Autonomy is permitted per risk class, so the risk classes have to exist and be written down.",
+      "remediation": "Classify the repository's change types by risk and state which classes may be handled autonomously."
+    }
+  ]
+}
