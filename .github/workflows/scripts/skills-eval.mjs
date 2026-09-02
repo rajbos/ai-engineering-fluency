@@ -114,12 +114,23 @@ const result = await evaluateSkills({
 });
 
 // ── GitHub Actions step summary ──────────────────────────────────────────────
+// Report runner-relative paths: the absolute /home/runner/... paths are
+// meaningless once the job is gone, so point at the artifact contents instead.
+const rel = (p) => (p ? path.relative(process.cwd(), p).split(path.sep).join("/") : undefined);
+const workspaceRel = rel(result.workspaceRoot);
+const reportRel = rel(result.reportPath);
+
 const lines = [
   "## Agent Skills Eval (weekly, Copilot CLI)",
   "",
   `- Skills with evals: **${result.skills.length}**`,
   `- Runs passed: **${result.passed}** · failed: **${result.failed}**`,
-  `- Artifacts: \`${result.workspaceRoot}\`${result.reportPath ? ` · report: \`${result.reportPath}\`` : ""}`,
+  `- Artifact \`agent-skills-eval-workspace\` → \`${workspaceRel}\` (raw prompts, outputs, gradings)`,
+  ...(reportRel
+    ? [
+        `- Artifact \`agent-skills-eval-report\` → HTML report (\`${reportRel}\` in the workspace artifact); download and open \`index.html\` in a browser`,
+      ]
+    : ["- No HTML report was generated for this run."]),
   "",
   "| Skill | Evals | Pass rate |",
   "|---|---|---|",
