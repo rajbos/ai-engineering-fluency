@@ -124,6 +124,14 @@ const reportInWorkspaceArtifact = result.reportPath
   ? path.relative(result.workspaceRoot, result.reportPath).split(path.sep).join("/")
   : undefined;
 
+// Hand the report directory to the workflow so it can be uploaded as a flat,
+// report-only artifact. upload-artifact roots an artifact at the non-glob
+// prefix of its `path`, so passing the concrete report directory (rather than a
+// glob spanning the workspace) is what puts index.html at the artifact root.
+if (process.env.GITHUB_OUTPUT && result.reportPath) {
+  appendFileSync(process.env.GITHUB_OUTPUT, `report-dir=${path.dirname(result.reportPath)}\n`);
+}
+
 const lines = [
   "## Agent Skills Eval (weekly, Copilot CLI)",
   "",
@@ -132,7 +140,7 @@ const lines = [
   `- Artifact \`agent-skills-eval-workspace\` → \`${workspaceRel}\` (raw prompts, outputs, gradings)`,
   ...(reportInWorkspaceArtifact
     ? [
-        "- Artifact `agent-skills-eval-report` → the HTML report on its own; download it and open `index.html` in a browser",
+        "- Artifact `agent-skills-eval-report` → the HTML report on its own; download it and open `index.html` at the artifact root",
         `- The same report is also inside \`agent-skills-eval-workspace\` at \`${reportInWorkspaceArtifact}\``,
       ]
     : ["- No HTML report was generated for this run."]),
