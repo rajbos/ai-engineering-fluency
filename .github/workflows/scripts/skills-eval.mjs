@@ -214,12 +214,13 @@ function buildSuggestion(skillDir, benchmark) {
 if (result.reportPath && existsSync(result.reportPath)) {
   let html = readFileSync(result.reportPath, "utf-8");
 
-  // Model count stat, so it's obvious at a glance how many distinct models
-  // this run actually evaluated with (today always 1: same model for target
-  // and judge).
+  // Model count + name stat, so it's obvious at a glance how many distinct
+  // models this run actually evaluated with (today always 1: same model for
+  // target and judge) and which one, without hunting for the separate
+  // target/judge line in the header meta.
   html = html.replace(
     '<div class="totals">',
-    `<div class="totals">\n      <div class="stat"><span class="label">models evaluated</span><span class="value">${modelsUsed.length}</span></div>`
+    `<div class="totals">\n      <div class="stat"><span class="label">models evaluated</span><span class="value">${modelsUsed.length}</span><span class="muted" style="display:block;margin-top:2px;">${escapeHtml(modelsUsed.join(", "))}</span></div>`
   );
 
   // Suggestion box styling — appended alongside the report's own <style>
