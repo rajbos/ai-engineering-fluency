@@ -3242,6 +3242,22 @@ ${renderOtelDeltaTab(data.otelComparison)}
 `;
 }
 
+/**
+ * `backendStorageInfoLoaded` is sent by the host *before* diagnosticDataLoaded (see
+ * sendBackendStorageInfoEarly in extension.ts) so the Backend Storage tab can populate before
+ * the rest of diagnostics finishes loading. Since the message listener is registered before
+ * renderLayout() runs (see setupMessageHandlers() call site), that early message can legitimately
+ * arrive first and already have set currentBackendInfo/currentGithubAuth. Prefer that over the
+ * (possibly stale/placeholder) value baked into the initial bootstrap payload, so the first paint
+ * doesn't silently discard already-received state, and persist the resolved values back to the
+ * module-level state so later handlers keep seeing the same data.
+ */
+function resolveEarlyBackendState(data: DiagnosticsData): Pick<DiagnosticsData, "backendStorageInfo" | "githubAuth"> {
+  currentBackendInfo = currentBackendInfo ?? data.backendStorageInfo;
+  currentGithubAuth = currentGithubAuth ?? data.githubAuth;
+  return { backendStorageInfo: currentBackendInfo, githubAuth: currentGithubAuth };
+}
+
 function renderLayout(data: DiagnosticsData): void {
   const root = document.getElementById("root");
   if (!root) {
@@ -3252,8 +3268,7 @@ function renderLayout(data: DiagnosticsData): void {
   const detailedFiles = data.detailedSessionFiles || [];
   storedDetailedFiles = detailedFiles;
   isLoading = detailedFiles.length === 0;
-  currentBackendInfo = data.backendStorageInfo;
-  currentGithubAuth = data.githubAuth;
+  const earlyBackendState = resolveEarlyBackendState(data);
   currentOtelComparison = data.otelComparison;
   if (data.toolFamilies) { storedToolFamilies = data.toolFamilies; }
   currentSkillCallStats = data.skillCallStats;
@@ -3265,7 +3280,7 @@ function renderLayout(data: DiagnosticsData): void {
     ? LOADING_MESSAGE.trim()
     : removeSessionFilesSection(escapeHtml(data.report));
 
-  setHtml(root, buildDiagRootHtml(data, detailedFiles, escapedReport));
+  setHtml(root, buildDiagRootHtml({ ...data, ...earlyBackendState }, detailedFiles, escapedReport));
 
   // Render session folders via DOM API (XSS-safe, no innerHTML)
   const sessionFolders = groupSessionFolders(data.sessionFolders || []);
@@ -3277,7 +3292,6 @@ function renderLayout(data: DiagnosticsData): void {
     }
   }
 
-  setupMessageHandlers();
   setupTabHandlers();
   setupGroupHandlers();
   setupSortHandlers();
@@ -3324,5 +3338,13 @@ async function bootstrap(): Promise<void> {
   }
   renderLayout(initialData);
 }
+
+// Registered synchronously at module load — NOT inside renderLayout() — so the listener is
+// live before bootstrap()'s dynamic import resolves. The host sends `backendStorageInfoLoaded`
+// as early as possible (see sendBackendStorageInfoEarly in extension.ts) specifically to beat
+// the slower `diagnosticDataLoaded` message; if that early message arrived before the listener
+// existed it would be silently dropped (individual handlers are already defensive about a
+// missing container/tab, so registering early adds no risk).
+setupMessageHandlers();
 
 void bootstrap();

@@ -1,17 +1,42 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import type * as http from 'node:http';
+import { EventEmitter } from 'node:events';
 import {
 	collectAgentSessions,
 	detectSessionSource,
 	fetchAgentSessionsForRepo,
 	readSessionUsage,
 	requestGitHubJson,
+	requestGitHubJsonTransport,
 	resolveTaskRepo,
 	type AgentRepoSummary,
 	type FetchAccountTaskPageFn,
 	type FetchTaskPageFn,
 	type FetchTaskDetailFn,
 } from '../../src/agentSessionsService';
+
+/**
+ * Minimal stand-in for `http.ClientRequest`, exercising exactly the surface
+ * `attachRequestFailureHandling` (see `src/githubApiConfig.ts`) touches. Lets a test drive the
+ * real request-creation code path in `agentSessionsService.ts` end-to-end without a live network
+ * call. `requestGitHubJsonTransport` accepts an injectable `requestFn` (defaulting to the real
+ * `https.request`) for exactly this purpose — Node's built-in module exports are non-configurable
+ * in current versions, so monkey-patching `https.request` directly is not viable here.
+ */
+class FakeClientRequest extends EventEmitter {
+	private timeoutCallback?: () => void;
+	setTimeout(_ms: number, cb: () => void): this {
+		this.timeoutCallback = cb;
+		return this;
+	}
+	destroy(err?: Error): this {
+		if (err) { this.emit('error', err); }
+		return this;
+	}
+	end(): this { return this; }
+	fireTimeout(): void { this.timeoutCallback?.(); }
+}
 
 // ---------------------------------------------------------------------------
 // detectSessionSource — pure function, no I/O
@@ -59,6 +84,33 @@ test('requestGitHubJson: stops waiting when the transport never settles', async 
 	const hangingTransport = async (): Promise<never> => new Promise(() => {});
 	const result = await requestGitHubJson('/agents/tasks', 'token', hangingTransport, 5);
 	assert.match(result.error ?? '', /GitHub API request \/agents\/tasks timed out/);
+});
+
+// ---------------------------------------------------------------------------
+// requestGitHubJson (default transport) — end-to-end through the real
+// `https.request` wiring, verifying it reports a genuine transport failure
+// distinctly from a socket-inactivity timeout (PR #1919 follow-up item 1: the
+// mislabelled GitHub request timeout — see docs/vscode-extension/WEBVIEW-MESSAGING.md).
+// ---------------------------------------------------------------------------
+
+test('requestGitHubJsonTransport: a genuine connection error is reported with its real code, not as a timeout', async () => {
+	const req = new FakeClientRequest();
+	const fakeRequestFn = (() => req) as unknown as typeof http.request;
+	const promise = requestGitHubJsonTransport('/agents/tasks', 'token', fakeRequestFn);
+	req.emit('error', Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }));
+	const result = await promise;
+	assert.match(result.error ?? '', /^Connection failed after \d+(\.\d+)?s \(ECONNRESET\): read ECONNRESET$/);
+	assert.doesNotMatch(result.error ?? '', /timed out|inactivity/i);
+});
+
+test('requestGitHubJsonTransport: a socket-inactivity timeout is reported with the real elapsed time, not the configured limit', async () => {
+	const req = new FakeClientRequest();
+	const fakeRequestFn = (() => req) as unknown as typeof http.request;
+	const promise = requestGitHubJsonTransport('/agents/tasks', 'token', fakeRequestFn);
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	req.fireTimeout();
+	const result = await promise;
+	assert.match(result.error ?? '', /^No response for \d+(\.\d+)?s \(socket inactivity limit 15s\)$/);
 });
 
 test('fetchAgentSessionsForRepo: returns empty result when task list is empty', async () => {

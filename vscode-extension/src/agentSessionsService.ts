@@ -1,5 +1,5 @@
 import * as https from 'https';
-import { getGitHubApiEndpoints, buildGitHubApiHeaders } from './githubApiConfig';
+import { getGitHubApiEndpoints, buildGitHubApiHeaders, attachRequestFailureHandling } from './githubApiConfig';
 import { withTimeout } from './utils/promises';
 import type {
 	AgentRepoDiscovery,
@@ -85,11 +85,21 @@ export type FetchAccountTaskDetailFn = (taskId: string, token: string) => Promis
 export type GitHubJsonResult = { body?: any; statusCode?: number; error?: string };
 type GitHubJsonTransport = (path: string, token: string) => Promise<GitHubJsonResult>;
 
-/** GET a GitHub REST path and parse the JSON body, mapping transport/HTTP errors into the result. */
-function requestGitHubJsonTransport(path: string, token: string): Promise<GitHubJsonResult> {
+/**
+ * GET a GitHub REST path and parse the JSON body, mapping transport/HTTP errors into the result.
+ * Exported (rather than kept private like the rest of this module's low-level fetchers) so tests
+ * can inject a fake `requestFn` and drive the real request-creation code path end-to-end without
+ * a live network call, matching the pattern in `githubPrService.ts`'s `fetchRepoPrsPage`.
+ * @param requestFn Injectable request factory for testing; defaults to the real HTTPS implementation.
+ */
+export function requestGitHubJsonTransport(
+	path: string,
+	token: string,
+	requestFn: typeof https.request = https.request,
+): Promise<GitHubJsonResult> {
 	return new Promise((resolve) => {
 		const { hostname, restPathPrefix } = getGitHubApiEndpoints();
-		const req = https.request(
+		const req = requestFn(
 			{ hostname, path: `${restPathPrefix}${path}`, headers: buildGitHubApiHeaders(token) },
 			(res) => {
 				let data = '';
@@ -108,8 +118,7 @@ function requestGitHubJsonTransport(path: string, token: string): Promise<GitHub
 				});
 			},
 		);
-		req.on('error', (e) => resolve({ error: e.message }));
-		req.setTimeout(15000, () => { req.destroy(new Error('Request timed out')); });
+		attachRequestFailureHandling(req, 15000, (message) => resolve({ error: message }));
 		req.end();
 	});
 }

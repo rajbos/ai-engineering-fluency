@@ -4,7 +4,31 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as childProcess from 'node:child_process';
-import { detectAiType, detectCoAuthorAiType, fetchPrCommitMessages, fetchRepoPrs, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
+import type * as http from 'node:http';
+import { EventEmitter } from 'node:events';
+import { detectAiType, detectCoAuthorAiType, fetchPrCommitMessages, fetchRepoPrs, fetchRepoPrsPage, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
+
+/**
+ * Minimal stand-in for `http.ClientRequest`, exercising exactly the surface
+ * `attachRequestFailureHandling` (see `src/githubApiConfig.ts`) touches. Lets a test drive the
+ * real request-creation code path in `githubPrService.ts` end-to-end without a live network call.
+ * `fetchRepoPrsPage` accepts an injectable `requestFn` (defaulting to the real `https.request`) for
+ * exactly this purpose — Node's built-in module exports are non-configurable in current versions,
+ * so monkey-patching `https.request` directly is not viable here.
+ */
+class FakeClientRequest extends EventEmitter {
+	private timeoutCallback?: () => void;
+	setTimeout(_ms: number, cb: () => void): this {
+		this.timeoutCallback = cb;
+		return this;
+	}
+	destroy(err?: Error): this {
+		if (err) { this.emit('error', err); }
+		return this;
+	}
+	end(): this { return this; }
+	fireTimeout(): void { this.timeoutCallback?.(); }
+}
 
 // ---------------------------------------------------------------------------
 // detectAiType — pure function, no I/O
@@ -223,6 +247,35 @@ test('fetchRepoPrs: stops waiting when a page fetch never settles', async () => 
 	const { prs, error } = await fetchRepoPrs('owner', 'repo', 'token', since, hangingFetchPage, 5);
 	assert.deepEqual(prs, []);
 	assert.match(error ?? '', /Fetching PRs for owner\/repo page 1 timed out/);
+});
+
+// ---------------------------------------------------------------------------
+// fetchRepoPrsPage — end-to-end through the real `https.request` wiring,
+// verifying it reports a genuine transport failure distinctly from a
+// socket-inactivity timeout (PR #1919 follow-up item 1: the mislabelled
+// GitHub request timeout — see docs/vscode-extension/WEBVIEW-MESSAGING.md).
+// ---------------------------------------------------------------------------
+
+test('fetchRepoPrsPage: a genuine connection error is reported with its real code, not as a timeout', async () => {
+	const req = new FakeClientRequest();
+	const fakeRequestFn = (() => req) as unknown as typeof http.request;
+	const promise = fetchRepoPrsPage('owner', 'repo', 'token', 1, fakeRequestFn);
+	req.emit('error', Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }));
+	const { prs, error } = await promise;
+	assert.deepEqual(prs, []);
+	assert.match(error ?? '', /^Connection failed after \d+(\.\d+)?s \(ECONNRESET\): read ECONNRESET$/);
+	assert.doesNotMatch(error ?? '', /timed out|inactivity/i);
+});
+
+test('fetchRepoPrsPage: a socket-inactivity timeout is reported with the real elapsed time, not the configured limit', async () => {
+	const req = new FakeClientRequest();
+	const fakeRequestFn = (() => req) as unknown as typeof http.request;
+	const promise = fetchRepoPrsPage('owner', 'repo', 'token', 1, fakeRequestFn);
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	req.fireTimeout();
+	const { prs, error } = await promise;
+	assert.deepEqual(prs, []);
+	assert.match(error ?? '', /^No response for \d+(\.\d+)?s \(socket inactivity limit 15s\)$/);
 });
 
 // ---------------------------------------------------------------------------
