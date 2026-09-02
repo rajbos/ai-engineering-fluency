@@ -23,6 +23,7 @@ import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
 import { scaleBubbleRadius } from './modelLeaderboard';
+import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -342,6 +343,9 @@ interface UsageWebviewState {
 }
 
 const vscode = acquireVsCodeApi<UsageWebviewState>();
+const notifyUsageWebviewReady = createUsageWebviewReadyNotifier(
+	(message) => vscode.postMessage(message),
+);
 const curationTraceOnceKeys = new Set<string>();
 
 /** Collapsed state of the "About This Dashboard" info box, restored from webview state. */
@@ -2283,9 +2287,10 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 		</div>`;
 }
 
-function updateReposPrPanel(data: RepoPrStatsResult): void {
+/** Renders the repository PR panel. Returns false when the target container isn't in the DOM yet. */
+function updateReposPrPanel(data: RepoPrStatsResult): boolean {
 	const container = document.querySelector('#repos-pr-content');
-	if (!container) { return; }
+	if (!container) { return false; }
 	setHtml(container, `
 		<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>
 		<div class="section-subtitle">
@@ -2295,6 +2300,7 @@ function updateReposPrPanel(data: RepoPrStatsResult): void {
 		</div>
 		${renderReposPrContent(data)}
 	`);
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -2439,9 +2445,10 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 		</div>`;
 }
 
-function updateAgentSessionsPanel(data: AgentSessionsResult): void {
+/** Renders the cloud agent panel. Returns false when the target container isn't in the DOM yet. */
+function updateAgentSessionsPanel(data: AgentSessionsResult): boolean {
 	const container = document.querySelector('#agent-sessions-content');
-	if (!container) { return; }
+	if (!container) { return false; }
 	setHtml(container, `
 		<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>
 		<div class="section-subtitle">
@@ -2451,6 +2458,7 @@ function updateAgentSessionsPanel(data: AgentSessionsResult): void {
 		</div>
 		${renderAgentSessionsContent(data)}
 	`);
+	return true;
 }
 
 function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | null): string {
@@ -3071,19 +3079,25 @@ function buildCurationSectionHtml(curation: ToolCurationAnalysis | null | undefi
 }
 
 function buildReposAndAgentTabPanelsHtml(): string {
+	const repoLoadingMessage = repoPrStatsLoaded
+		? 'Fetching repository PRs…'
+		: 'Loading… (sign in with GitHub to see data)';
+	const agentLoadingMessage = agentSessionsLoaded
+		? 'Loading cloud agent snapshot…'
+		: 'Loading… (sign in with GitHub to see data)';
 	return `
 		<div id="tab-panel-repos" class="tab-panel"${activeTab !== 'repos' ? ' style="display:none"' : ''}>
 			<div class="section" id="repos-pr-content">
 				<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>
 				<div class="section-subtitle">PRs from the last 30 days across your known repositories — authored or reviewed by AI agents.</div>
-				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading… (sign in with GitHub to see data)</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">${repoLoadingMessage}</div>
 			</div>
 		</div>
 		<div id="tab-panel-agent" class="tab-panel"${activeTab !== 'agent' ? ' style="display:none"' : ''}>
 			<div class="section" id="agent-sessions-content">
 				<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>
 				<div class="section-subtitle">Cloud agent tasks and sessions from the last 30 days, fetched from the GitHub API.</div>
-				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading… (sign in with GitHub to see data)</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">${agentLoadingMessage}</div>
 			</div>
 		</div>`;
 }
@@ -4863,6 +4877,10 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	currentInsights = stats.insights ?? [];
 	wireInsightCardButtons();
 	scrollToPendingTabAnchor();
+	// The GitHub activity containers only exist now. Re-announce readiness so the extension
+	// replays any PR / cloud-agent state that was posted while the DOM had no place to put it.
+	restoreGitHubActivityPanels(repoPrStatsData, agentSessionsData, updateReposPrPanel, updateAgentSessionsPanel);
+	notifyUsageWebviewReady('layout-rendered');
 }
 
 /** Wires up the collapsible "About This Dashboard" info box; the collapsed state is persisted via webview state. */
@@ -5016,8 +5034,6 @@ function handleUpdateStats(message: any): void {
 		renderLayout(sanitized);
 		setupSessionsTableSort();
 		renderRepositoryHygienePanels();
-		if (repoPrStatsData) { updateReposPrPanel(repoPrStatsData); }
-		if (agentSessionsData) { updateAgentSessionsPanel(agentSessionsData); }
 	} else {
 		traceCurationOnce('update-invalid-sanitized', 'handleUpdateStats.sanitizeReturnedNull');
 		showLoadError('Received invalid data from the extension. Try refreshing.');
@@ -5060,14 +5076,23 @@ function handleHighlightUnknownTools(): void {
 function handleRepoPrStatsLoaded(data: any): void {
 	repoPrStatsData = sanitizeRepoPrStatsData(data);
 	if (!repoPrStatsData.authenticated) { repoPrStatsLoaded = false; }
-	updateReposPrPanel(repoPrStatsData);
+	// Only the failure is worth a log line: a successful render is visible in the panel, but a
+	// payload that arrives and renders nothing looks identical to one that never arrived.
+	if (!updateReposPrPanel(repoPrStatsData)) {
+		traceToHost('repoPrStatsLoaded.notRendered', {
+			repos: repoPrStatsData.repos.length,
+			authenticated: repoPrStatsData.authenticated,
+		});
+	}
 }
 
 function handleAgentSessionsLoaded(data: any): void {
 	if (!data || typeof data !== 'object') { return; }
 	agentSessionsData = sanitizeAgentSessionsData(data);
 	if (!agentSessionsData.authenticated) { agentSessionsLoaded = false; }
-	updateAgentSessionsPanel(agentSessionsData);
+	if (!updateAgentSessionsPanel(agentSessionsData)) {
+		traceToHost('agentSessionsLoaded.notRendered', { authenticated: agentSessionsData.authenticated });
+	}
 }
 
 function handleUpdateInsights(rawInsights: unknown): void {
@@ -5171,8 +5196,46 @@ function scrollToPendingTabAnchor(): void {
 }
 
 // Listen for messages from the extension
-registerMessageHandler<any>((message) => { handleExtensionMessage(message); });
-vscode.postMessage({ command: 'usageWebviewReady' });
+let _traceBudget = 20;
+function traceToHost(stage: string, details: Record<string, unknown>): void {
+	// Bounded so a chatty session can't flood the Output channel.
+	if (_traceBudget <= 0) { return; }
+	_traceBudget--;
+	vscode.postMessage({ command: 'usageWebviewTrace', stage, details });
+}
+
+registerMessageHandler<any>((message) => {
+	// An exception thrown here escapes the listener uncaught and is only visible in the
+	// webview devtools, which nobody has open — the panel just silently stays on "Loading…".
+	// Report it back to the extension so it lands in the Output channel instead.
+	try {
+		handleExtensionMessage(message);
+	} catch (err) {
+		traceToHost('handleExtensionMessage.threw', {
+			command: String(message?.command ?? ''),
+			error: err instanceof Error ? err.message : String(err),
+		});
+	}
+}, (event) => {
+	// Tripwire for the failure that made every panel hang on "Loading…": the source-trust
+	// check silently discarding real extension messages. Bounded by the trace budget, and
+	// silent unless the trust model breaks again on some future host build.
+	traceToHost('message-rejected-untrusted', {
+		command: String((event as any)?.data?.command ?? '(none)'),
+		origin: event.origin,
+		ownOrigin: location.origin,
+		href: String(location.href).slice(0, 120),
+	});
+});
+// Uncaught errors in a webview are invisible without devtools open; surface them in the
+// extension's Output channel instead.
+window.addEventListener('error', (event) => {
+	traceToHost('window.error', { message: String(event.message).slice(0, 200) });
+});
+window.addEventListener('unhandledrejection', (event: any) => {
+	traceToHost('unhandledRejection', { reason: String(event?.reason).slice(0, 200) });
+});
+notifyUsageWebviewReady('listener-registered');
 
 function getWorkspaceName(workspacePath: string): string {
 	const workspace = hygieneMatrixState?.workspaces.find((ws) => ws.workspacePath === workspacePath);
