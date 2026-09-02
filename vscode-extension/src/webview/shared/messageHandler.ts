@@ -50,7 +50,7 @@ function collectOwnOrigins(currentWindow: Window): string[] {
 }
 
 export function isTrustedWebviewMessageSource(
-    source: MessageEventSource | null,
+    source: MessageEventSource | null | undefined,
     currentWindow: Window,
     origin?: string,
 ): boolean {

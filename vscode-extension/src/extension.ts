@@ -1895,8 +1895,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		} catch (err) {
 			// Guarantee a post-back on every failure path — otherwise the webview stays on
 			// "Loading…" forever and dispatch() dedup silently swallows every retry.
-			// Post via the captured panel: this.analysisPanel may have been disposed mid-flight
-			// (postMessage on a disposed webview resolves false instead of throwing).
+			// publish() routes through analysisMessageReplay, which retains the payload and
+			// tolerates the panel being disposed mid-flight (postMessage on a disposed webview
+			// resolves false instead of throwing).
 			this.error('Failed to load repository PR stats', err);
 			const result: RepoPrStatsResult = {
 				repos: [], authenticated: !this._githubSignedOutByUser, since: since.toISOString(),
