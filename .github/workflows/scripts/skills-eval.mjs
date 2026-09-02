@@ -31,6 +31,10 @@ const { evaluateSkills, consoleReporter } = await import(
 );
 
 const modelName = process.env.COPILOT_MODEL || "copilot-cli-default";
+// Kept as separate names so the model count reported below is derived from the
+// values actually handed to evaluateSkills, rather than assumed to be 1.
+const targetModel = modelName;
+const judgeModel = modelName;
 const skillsRoot = process.env.SKILLS_ROOT || ".github/skills";
 const workspace = process.env.EVAL_WORKSPACE || "./agent-skills-workspace";
 
@@ -104,8 +108,8 @@ const result = await evaluateSkills({
   root: skillsRoot,
   workspace,
   baseline: true,
-  target: { model: modelName, provider },
-  judge: { model: modelName, provider },
+  target: { model: targetModel, provider },
+  judge: { model: judgeModel, provider },
   concurrency: 1,
   workspaceLayout: "iteration",
   report: true,
@@ -113,10 +117,11 @@ const result = await evaluateSkills({
   onEvent: consoleReporter(),
 });
 
-// target and judge are always this same driver's single `modelName` today —
-// there is no multi-model matrix. Computed as a de-duplicated set (rather than
-// hardcoded to 1) so this stays correct if target/judge ever diverge.
-const modelsUsed = Array.from(new Set([modelName, modelName]));
+// The target and judge are both driven by this script's single model today, so
+// this set has one entry. Deriving it from the two values actually passed to
+// evaluateSkills (rather than hardcoding 1) keeps the count honest if they ever
+// diverge into a real multi-model matrix.
+const modelsUsed = Array.from(new Set([targetModel, judgeModel]));
 
 // ── Per-skill "suggested next step" (report only) ───────────────────────────
 // agent-skills-eval's own HTML report (report.js, vendored via npm — not ours
@@ -132,7 +137,9 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-/** Scans `<skillDir>/eval-*/{with_skill,without_skill}/grading.json` for failed assertions. */
+// Scans `<skillDir>/eval-<slug>/<mode>/grading.json` for failed assertions.
+// NB: a line comment on purpose — a JSDoc block here cannot contain the glob
+// `eval-*` followed by a slash, because that sequence closes the comment early.
 function collectFailingAssertions(skillDir) {
   const failures = [];
   if (!existsSync(skillDir)) {
