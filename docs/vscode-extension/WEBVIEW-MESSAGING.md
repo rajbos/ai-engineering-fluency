@@ -67,6 +67,24 @@ against a check that is broken in production — and vice versa.)
 A same-origin child frame would also satisfy rule 2. That is acceptable because every panel
 serves `default-src 'none'` with **no `frame-src`**, so it cannot embed a frame at all.
 
+### Why this holds across hosts
+
+The check never hardcodes `vscode-webview:` or any other scheme — it compares the event's origin
+against whatever origin *this document* was served from. So it adapts to whatever the host uses,
+and the two rules between them cover both webview topologies:
+
+- **Desktop (and Insiders)**, where the webview document is the *top* frame: `parent`/`top` are
+  `window`, VS Code relays from an internal object that matches none of the self-references, and
+  the message carries the document's own origin — so rule 2 accepts it. This is the case that
+  was broken.
+- **A nested host** (VS Code Web / `vscode.dev`, where the webview is an iframe inside a host
+  frame on a different origin): the relaying context *is* `parent`, so rule 1 accepts it before
+  the origin is ever consulted.
+
+Whichever shape a future host build uses, it has to either come from a frame we can identify as
+ourselves or carry our own origin. If a host ever manages neither, the failure is no longer
+silent — the `message-rejected-untrusted` tripwire below fires with the observed origin.
+
 ## Why the failure was invisible
 
 Four separate things all reported success while the panel was dead:
@@ -128,9 +146,13 @@ Kept deliberately quiet — these should produce **no output** on a healthy run:
 | `handleExtensionMessage.threw` | The handler threw. Otherwise only visible in webview devtools, which nobody has open. |
 | `window.error` / `unhandledRejection` | Uncaught webview errors, forwarded to the Output channel. |
 
-All are bounded by a shared trace budget so a chatty session cannot flood the log. The host
-also logs unhandled webview commands (`no handler for webview command '…'`), because a webview
-posting a command nobody registered looks exactly like a webview posting nothing.
+All are bounded by a shared trace budget (20) so a chatty session cannot flood the log. Note
+that every trace above fires only on a *failure* — `message-rejected-untrusted` is wired to
+`registerMessageHandler`'s `onUntrustedMessage` callback, not to message receipt — so normal
+high-frequency updates never consume the budget. If you see the budget exhausted, something is
+genuinely wrong. The host also logs unhandled webview commands (`no handler for webview command
+'…'`), because a webview posting a command nobody registered looks exactly like a webview
+posting nothing.
 
 ## Tests
 
