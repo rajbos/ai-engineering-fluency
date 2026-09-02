@@ -118,7 +118,11 @@ const result = await evaluateSkills({
 // meaningless once the job is gone, so point at the artifact contents instead.
 const rel = (p) => (p ? path.relative(process.cwd(), p).split(path.sep).join("/") : undefined);
 const workspaceRel = rel(result.workspaceRoot);
-const reportRel = rel(result.reportPath);
+// Path of the report inside the workspace artifact, whose contents are stored
+// relative to the workspace root (e.g. `iteration-1/report/index.html`).
+const reportInWorkspaceArtifact = result.reportPath
+  ? path.relative(result.workspaceRoot, result.reportPath).split(path.sep).join("/")
+  : undefined;
 
 const lines = [
   "## Agent Skills Eval (weekly, Copilot CLI)",
@@ -126,9 +130,10 @@ const lines = [
   `- Skills with evals: **${result.skills.length}**`,
   `- Runs passed: **${result.passed}** · failed: **${result.failed}**`,
   `- Artifact \`agent-skills-eval-workspace\` → \`${workspaceRel}\` (raw prompts, outputs, gradings)`,
-  ...(reportRel
+  ...(reportInWorkspaceArtifact
     ? [
-        `- Artifact \`agent-skills-eval-report\` → HTML report (\`${reportRel}\` in the workspace artifact); download and open \`index.html\` in a browser`,
+        "- Artifact `agent-skills-eval-report` → the HTML report on its own; download it and open `index.html` in a browser",
+        `- The same report is also inside \`agent-skills-eval-workspace\` at \`${reportInWorkspaceArtifact}\``,
       ]
     : ["- No HTML report was generated for this run."]),
   "",
