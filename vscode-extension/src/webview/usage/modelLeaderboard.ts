@@ -50,17 +50,35 @@ function createLabelPlacement(
 	};
 }
 
+const STACK_SLOTS = 5;
+const STACK_STEP = LABEL_HEIGHT + 3;
+
+/**
+ * Vertical offsets to try beside a bubble, ordered by preference. Beyond the immediate
+ * above/below slots this keeps stepping further away, so tightly clustered bubbles (which
+ * only have a couple of pixels between them) can still find a free row instead of settling
+ * for a placement that overlaps an already-placed label.
+ */
+function getStackedSideOffsets(input: BubbleLabelInput, bounds: BubbleLabelBounds): number[] {
+	const preferBelowFirst = input.y < (bounds.top + bounds.bottom) / 2;
+	const offsets: number[] = [];
+	for (let step = 0; step < STACK_SLOTS; step++) {
+		const below = input.y + 18 + step * STACK_STEP;
+		const above = input.y - 10 - step * STACK_STEP;
+		offsets.push(...(preferBelowFirst ? [below, above] : [above, below]));
+	}
+	return offsets;
+}
+
 function getLabelCandidates(input: BubbleLabelInput, bounds: BubbleLabelBounds): BubbleLabelPlacement[] {
 	const right = input.x + input.radius + LABEL_GAP;
 	const left = input.x - input.radius - LABEL_GAP;
 	const above = input.y - input.radius - 6;
 	const below = input.y + input.radius + LABEL_HEIGHT;
-	const sideY = input.y < bounds.top + 22 ? [input.y + 18, input.y - 10] : [input.y - 10, input.y + 18];
+	const stackedOffsets = getStackedSideOffsets(input, bounds);
 	return [
-		createLabelPlacement(input, right, sideY[0], 'start'),
-		createLabelPlacement(input, right, sideY[1], 'start'),
-		createLabelPlacement(input, left, sideY[0], 'end'),
-		createLabelPlacement(input, left, sideY[1], 'end'),
+		...stackedOffsets.map(y => createLabelPlacement(input, right, y, 'start')),
+		...stackedOffsets.map(y => createLabelPlacement(input, left, y, 'end')),
 		createLabelPlacement(input, input.x, above, 'middle'),
 		createLabelPlacement(input, input.x, below, 'middle'),
 	];
