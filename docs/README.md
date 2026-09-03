@@ -1,7 +1,7 @@
 ---
 title: Documentation Index
 created: 2026-01-19
-updated: 2026-07-12
+updated: 2026-09-03
 status: active
 type: reference
 tags: [documentation, index]
@@ -92,3 +92,4 @@ Implementation notes and decisions captured during development sessions.
 | [adr/IMPLEMENTATION-SUMMARY-SOCIAL-SHARE.md](adr/IMPLEMENTATION-SUMMARY-SOCIAL-SHARE.md) | Social media share feature implementation summary |
 | [adr/FLUENCY-DATA-IMPLEMENTATION.md](adr/FLUENCY-DATA-IMPLEMENTATION.md) | Fluency data cloud upload — gap analysis and plan |
 | [adr/PR_SUMMARY.md](adr/PR_SUMMARY.md) | PR summary: comprehensive light theme support |
+| [adr/COPILOT-OTEL-DASHBOARD-REVIEW.md](adr/COPILOT-OTEL-DASHBOARD-REVIEW.md) | Review of petender/GitHubCopilotDashboard — VS Code Chat OTel export as an exact-token data source |
