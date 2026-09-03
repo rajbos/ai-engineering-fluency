@@ -16,7 +16,7 @@ import { registerMessageHandler } from '../shared/messageHandler';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import { getModelBillingProvider } from '../../../../src/chartDataBuilder';
 import { getLongContextInfo } from '../../../../src/tokenEstimation';
-import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold } from '../../../../src/modelEfficiency';
+import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold, computeLongTailModels } from '../../../../src/modelEfficiency';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
@@ -4404,6 +4404,8 @@ let efficiencySortColumn: EfficiencySortColumn = 'calls';
 let efficiencySortDirection: 'asc' | 'desc' = 'desc';
 let cachedModelEfficiency: Partial<Record<EfficiencyPeriodKey, ModelEfficiencyUsage | undefined>> = {};
 let efficiencyFilterLowUsage = true;
+/** Whether the collapsed "Other models" long-tail group is expanded. Persists across re-renders. */
+let efficiencyOtherModelsOpen = false;
 
 type EfficiencyColumnDef = {
 	sortKey: EfficiencySortColumn;
@@ -4638,15 +4640,32 @@ function buildChartControlsHtml(): string {
 	</div>`;
 }
 
-function buildEfficiencyTableHtml(rows: EfficiencyRow[], totalCalls: number): string {
-	const tableRows = rows.map(row => {
+function buildEfficiencyTableRowsHtml(rows: EfficiencyRow[], totalCalls: number): string {
+	return rows.map(row => {
 		const cells = EFFICIENCY_COLUMN_DEFS.map(column => `<td>${column.render(row, totalCalls)}</td>`).join('');
 		return `<tr style="--model-color:${getEfficiencyColor(row.model)}">${cells}</tr>`;
 	}).join('');
-	const headers = EFFICIENCY_COLUMN_DEFS.map(column =>
+}
+
+function buildEfficiencyTableHeadersHtml(): string {
+	return EFFICIENCY_COLUMN_DEFS.map(column =>
 		`<th class="sortable" data-eff-sort="${column.sortKey}" title="${column.title}">${column.label}${getEfficiencySortIndicator(column.sortKey)}</th>`
 	).join('');
-	return `<div class="model-leaderboard-table-wrap"><table class="model-leaderboard-table"><thead><tr>${headers}</tr></thead><tbody>${tableRows}</tbody></table></div>`;
+}
+
+function buildEfficiencyTableHtml(rows: EfficiencyRow[], totalCalls: number, longTailModels: Set<string>): string {
+	const mainRows = longTailModels.size > 0 ? rows.filter(row => !longTailModels.has(row.model)) : rows;
+	const otherRows = longTailModels.size > 0 ? rows.filter(row => longTailModels.has(row.model)) : [];
+	const headers = buildEfficiencyTableHeadersHtml();
+	const table = `<div class="model-leaderboard-table-wrap"><table class="model-leaderboard-table"><thead><tr>${headers}</tr></thead><tbody>${buildEfficiencyTableRowsHtml(mainRows, totalCalls)}</tbody></table></div>`;
+	if (otherRows.length === 0) { return table; }
+	const otherCalls = otherRows.reduce((sum, row) => sum + row.counters.calls, 0);
+	const otherShare = totalCalls > 0 ? otherCalls / totalCalls : 0;
+	const otherTable = `<div class="model-leaderboard-table-wrap"><table class="model-leaderboard-table"><thead><tr>${headers}</tr></thead><tbody>${buildEfficiencyTableRowsHtml(otherRows, totalCalls)}</tbody></table></div>`;
+	return `${table}<details class="model-leaderboard-other" id="model-leaderboard-other"${efficiencyOtherModelsOpen ? ' open' : ''}>
+		<summary>Other models (${otherRows.length}, ${formatRatePercent(otherShare)} of turns)</summary>
+		${otherTable}
+	</details>`;
 }
 
 function buildModelEfficiencyContentHtml(): string {
@@ -4658,10 +4677,12 @@ function buildModelEfficiencyContentHtml(): string {
 	const totalCalls = allRows.reduce((sum, row) => sum + row.counters.calls, 0);
 	const filtered = filterLowUsageRows(allRows, usage);
 	const note = filtered.hiddenNote ? `<span class="model-leaderboard-filter-note">${filtered.hiddenNote}</span>` : '';
+	const filteredUsage: ModelEfficiencyUsage = Object.fromEntries(filtered.rows.map(row => [row.model, row.counters]));
+	const longTailModels = computeLongTailModels(filteredUsage);
 	return `<div class="efficiency-chart-header"><div><strong>Efficiency frontier</strong><span>One-shot edit rate is a local quality proxy, not a benchmark pass rate.</span></div>${buildChartControlsHtml()}</div>
 		${buildEfficiencyChartHtml(filtered.rows)}
 		<div class="model-leaderboard-heading"><div><strong>Most used models locally</strong><span>Ranked by your local turns; all averages use the same selected period.</span></div>${note}</div>
-		${buildEfficiencyTableHtml(filtered.rows, totalCalls)}`;
+		${buildEfficiencyTableHtml(filtered.rows, totalCalls, longTailModels)}`;
 }
 
 function buildModelEfficiencySectionHtml(stats: UsageAnalysisStats): string {
@@ -4721,6 +4742,15 @@ function handleEfficiencySortClick(th: HTMLElement): void {
 function setupModelEfficiencySection(): void {
 	const section = document.getElementById('section-model-efficiency');
 	if (!section) { return; }
+	// The "Other models" <details> is recreated on every re-render (sort, filter toggle, etc.),
+	// which would otherwise always snap back to collapsed. `toggle` doesn't bubble, so listen
+	// during the capture phase to catch it regardless of which re-rendered element raises it.
+	section.addEventListener('toggle', (event) => {
+		const target = event.target as HTMLElement;
+		if (target.id === 'model-leaderboard-other') {
+			efficiencyOtherModelsOpen = (target as HTMLDetailsElement).open;
+		}
+	}, true);
 	section.addEventListener('click', (event) => {
 		const target = event.target as HTMLElement;
 		const header = target.closest<HTMLElement>('th[data-eff-sort]');

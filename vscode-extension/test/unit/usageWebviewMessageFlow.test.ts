@@ -52,6 +52,22 @@ function emptyPeriod(): Record<string, unknown> {
 	};
 }
 
+function emptyModelEfficiencyCounters(calls: number): Record<string, unknown> {
+	return {
+		calls, toolCalls: 0, editTurns: 0, oneShotEditTurns: 0, retries: 0, selfCorrections: 0,
+		editToolCalls: 0, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0,
+	};
+}
+
+/** Local usage counts mirroring a real long-tail leaderboard: a clear cliff after the 4th model. */
+function longTailModelEfficiency(): Record<string, unknown> {
+	const counts: Record<string, number> = {
+		kimi: 309, sol: 144, sonnet5: 120, opus5: 82,
+		unknown: 20, hydrafusion: 16, mistralMedium: 14, sonnet46: 12, terra: 12, maiCode: 11,
+	};
+	return Object.fromEntries(Object.entries(counts).map(([model, calls]) => [model, emptyModelEfficiencyCounters(calls)]));
+}
+
 function buildStats(): Record<string, unknown> {
 	return {
 		today: emptyPeriod(),
@@ -67,6 +83,13 @@ function buildStats(): Record<string, unknown> {
 		currentWorkspacePaths: [],
 		insights: [],
 	};
+}
+
+/** `buildStats()` with a long-tail "Most used models locally" dataset for `last30Days`. */
+function buildStatsWithLongTailModelEfficiency(): Record<string, unknown> {
+	const stats = buildStats();
+	stats.last30Days = { ...(stats.last30Days as Record<string, unknown>), modelEfficiency: longTailModelEfficiency() };
+	return stats;
 }
 
 interface Harness {
@@ -294,4 +317,45 @@ test('a throwing message handler is reported to the host instead of failing sile
 	const trace = harness.posted.find((m) => m.command === 'usageWebviewTrace' && m.stage === 'handleExtensionMessage.threw');
 	assert.ok(trace, 'a render exception must surface in the extension Output channel');
 	assert.equal(trace.details.command, 'repoPrStatsLoaded');
+});
+
+test('collapses the long-tail of the local model leaderboard into a closed "Other models" group', async () => {
+	const harness = await bootWebview(buildStatsWithLongTailModelEfficiency());
+
+	const wraps = harness.window.document.querySelectorAll('.model-leaderboard-table-wrap');
+	assert.equal(wraps.length, 2, 'expects a main table plus one collapsed "other models" table');
+
+	const details = harness.window.document.getElementById('model-leaderboard-other');
+	assert.ok(details, 'expects a collapsible "Other models" group in the DOM');
+	assert.equal(details.open, false, 'the group must be collapsed by default');
+	// The default "hide low-usage models" filter drops the 3 lowest-call models (Q1 threshold)
+	// first, leaving 7; the long tail is then everything after the cliff among those 7.
+	assert.match(details.querySelector('summary').textContent, /Other models \(3,/, 'expects the 3 remaining long-tail models grouped');
+
+	const mainRows = wraps[0].querySelectorAll('tbody tr');
+	assert.equal(mainRows.length, 4, 'the 4 models before the cliff stay in the main table');
+
+	const otherRows = details.querySelectorAll('tbody tr');
+	assert.equal(otherRows.length, 3, 'the 3 models after the cliff move into the other-models table');
+});
+
+test('remembers the "Other models" open state across a leaderboard re-render', async () => {
+	const harness = await bootWebview(buildStatsWithLongTailModelEfficiency());
+
+	const details = harness.window.document.getElementById('model-leaderboard-other');
+	assert.equal(details.open, false);
+
+	// Open it, mirroring what a real click on <summary> does, then dispatch the `toggle` event
+	// the webview listens for (capture phase, since `toggle` does not bubble).
+	details.open = true;
+	details.dispatchEvent(new harness.window.Event('toggle'));
+
+	// Sorting re-renders just the leaderboard content, recreating the <details> element from
+	// scratch; without persisted state it would always snap back to collapsed.
+	const modelHeader = harness.window.document.querySelector('th[data-eff-sort="model"]');
+	modelHeader.click();
+
+	const detailsAfterSort = harness.window.document.getElementById('model-leaderboard-other');
+	assert.ok(detailsAfterSort, 'expects the "Other models" group to still exist after sorting');
+	assert.equal(detailsAfterSort.open, true, 'the open state must survive the re-render');
 });
