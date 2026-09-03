@@ -1258,4 +1258,6 @@
   ,"archive_session": "Archive Session"
   ,"reply_and_resolve_review_thread": "Reply And Resolve Review Thread"
   ,"save_session_automation": "Save Session Automation"
+  ,"MCP": "{'run_workflow': 'Playwright MCP: Run Workflow'}"
+  ,"run_workflow": "Run Workflow"
 }
