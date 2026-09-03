@@ -948,6 +948,23 @@ export function resolveWorkspaceFolderFromSessionPath(sessionFilePath: string, w
 }
 
 /**
+ * Resolves a session file's workspace folder for cross-editor workspace attribution
+ * (e.g. the Copilot Customization Files health matrix). `resolveWorkspaceFolderFromSessionPath`
+ * only understands VS Code's `workspaceStorage/<id>` layout, so non-VS Code editors
+ * (Copilot CLI, JetBrains, Claude Code, etc.) never resolve through it and would otherwise
+ * be silently dropped instead of counted or surfaced as "Unresolved". Falls back to a
+ * workspace/cwd path already resolved onto the session data (e.g. Copilot CLI's
+ * `workspace.yaml` `cwd` or `session-store.db` `cwd` column) when the VS Code lookup fails.
+ */
+export function resolveWorkspaceFolderWithFallback(
+	sessionFilePath: string,
+	workspaceIdToFolderCache: Map<string, string | undefined>,
+	fallbackWorkspacePath?: string
+): string | undefined {
+	return resolveWorkspaceFolderFromSessionPath(sessionFilePath, workspaceIdToFolderCache) ?? fallbackWorkspacePath;
+}
+
+/**
  * Best-effort workspace display name for a session summary. Prefers an explicit
  * workspace folder path cached on the session, then the repository name, then
  * workspaceStorage folder resolution. Returns undefined when attribution is
