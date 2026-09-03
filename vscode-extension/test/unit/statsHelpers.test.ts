@@ -464,6 +464,38 @@ assert.equal(result.last30DaysStats.tokens, 120);
 assert.equal(result.skippedCount, 0);
 });
 
+test('aggregatePeriodStats: rollup path – populates taskCategoryUsage on the daily entry (regression: chart By Task week/month bug)', () => {
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+taskCategory: 'Coding',
+dailyRollups: {
+'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryUsage, { Coding: { tokens: 120, sessions: 1 } });
+});
+
+test('aggregatePeriodStats: fallback path – populates taskCategoryUsage on the daily entry (regression: chart By Task week/month bug)', () => {
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-14T10:00:00.000Z').getTime(),
+lastInteraction: '2025-03-14T10:00:00.000Z',
+sessionData: makeSession({ tokens: 50, taskCategory: 'Debugging' }),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-14');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryUsage, { Debugging: { tokens: 50, sessions: 1 } });
+});
+
 test('aggregatePeriodStats: rollup path – counts sub-agent sessions once per period', () => {
 const ranges = makeRanges('2025-03-15');
 const withSubAgents: SessionAggregateInput = {
