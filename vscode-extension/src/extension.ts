@@ -7568,7 +7568,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			'.eslintrc', 'eslint.config', '.prettierrc', 'prettier.config',
 			'tsconfig.json', 'jsconfig.json', 'package.json', 'Makefile',
 			'Dockerfile', 'docker-compose', '.github/workflows', '.devcontainer',
-			'LICENSE', '.nvmrc', '.node-version'
+			'LICENSE', '.nvmrc', '.node-version', 'README'
 		];
 
 		try {
