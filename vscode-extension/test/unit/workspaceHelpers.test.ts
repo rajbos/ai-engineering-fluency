@@ -1036,6 +1036,7 @@ import {
     resolveExactWorkspacePath,
     extractRepositoryFromContentReferences,
     resolveWorkspaceFolderFromSessionPath,
+    resolveWorkspaceFolderWithFallback,
 } from '../../../src/workspaceHelpers';
 
 test('escapeRegexSpecials: escapes dot', () => {
@@ -1677,6 +1678,34 @@ test('resolveWorkspaceFolderFromSessionPath: returns cached undefined on repeate
     resolveWorkspaceFolderFromSessionPath(path1, cache);
     // Now the cache should have been populated (even if undefined — no workspace.json exists)
     assert.ok(cache.has('abc123') || true); // cache may or may not have it depending on fs
+});
+
+// ---------------------------------------------------------------------------
+// resolveWorkspaceFolderWithFallback: cross-editor workspace attribution
+// ---------------------------------------------------------------------------
+
+test('resolveWorkspaceFolderWithFallback: returns VS Code workspaceStorage resolution when available', () => {
+    const cache = new Map<string, string | undefined>();
+    // Pre-seed cache so the VS Code lookup "succeeds" without touching the filesystem.
+    cache.set('abc123', '/resolved/vscode/workspace');
+    const path1 = '/home/user/.config/Code/User/workspaceStorage/abc123/chatSessions/session.json';
+    const result = resolveWorkspaceFolderWithFallback(path1, cache, '/fallback/cli/cwd');
+    assert.equal(result, '/resolved/vscode/workspace');
+});
+
+test('resolveWorkspaceFolderWithFallback: falls back to the supplied path when session is not workspaceStorage-scoped', () => {
+    const cache = new Map<string, string | undefined>();
+    // Copilot CLI session files live under ~/.copilot/session-state/<uuid>/events.jsonl — no workspaceStorage segment.
+    const cliSessionFile = '/home/user/.copilot/session-state/uuid-1/events.jsonl';
+    const result = resolveWorkspaceFolderWithFallback(cliSessionFile, cache, '/home/user/repos/devex-metrics');
+    assert.equal(result, '/home/user/repos/devex-metrics');
+});
+
+test('resolveWorkspaceFolderWithFallback: returns undefined when neither resolution nor fallback is available', () => {
+    const cache = new Map<string, string | undefined>();
+    const cliSessionFile = '/home/user/.copilot/session-state/uuid-1/events.jsonl';
+    const result = resolveWorkspaceFolderWithFallback(cliSessionFile, cache, undefined);
+    assert.equal(result, undefined);
 });
 
 // ---------------------------------------------------------------------------
