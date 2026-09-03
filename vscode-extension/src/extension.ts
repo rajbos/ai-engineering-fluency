@@ -7206,6 +7206,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 			deleteWorktree: (message) => this.dispatch('deleteWorktree:analysis', () => this.diagHandleDeleteWorktree(message)),
 			cleanupPushedWorktrees: (message) => this.dispatch('cleanupPushedWorktrees:analysis', () => this.diagHandleCleanupPushedWorktrees(message)),
 			cancelCleanupPushedWorktrees: () => this.dispatch('cancelCleanupPushedWorktrees:analysis', () => this.diagHandleCancelCleanupPushedWorktrees()),
+			// The webview posts this when navigator.clipboard rejects (no permission,
+			// no focus). Without a handler the copy button just silently stays on
+			// "Copy" and the user has no idea the path never reached the clipboard.
+			copyFailed: async (message) => {
+				const failedPath = typeof message.path === 'string' ? message.path : '';
+				this.log(`📋 Clipboard write failed from the Usage Analysis webview${failedPath ? ` for ${failedPath}` : ''}`);
+				const choice = await vscode.window.showWarningMessage(
+					l10n.t('usage.copyFailed'),
+					...(failedPath ? [l10n.t('usage.copyFailed.retry')] : [])
+				);
+				if (choice) { await vscode.env.clipboard.writeText(failedPath); }
+			},
 		};
 	}
 

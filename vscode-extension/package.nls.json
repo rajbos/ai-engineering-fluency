@@ -194,5 +194,8 @@
 
   "insights.enabled": "Enable personalized AI usage insights and nudges in the Usage Analysis dashboard and status bar.",
   "insights.toastsEnabled": "Show occasional toast notifications for high-value insights",
-  "insights.cadenceDays": "Minimum number of days between insight toast notifications"
+  "insights.cadenceDays": "Minimum number of days between insight toast notifications",
+
+  "usage.copyFailed": "Could not copy the path to the clipboard.",
+  "usage.copyFailed.retry": "Copy Again"
 }
