@@ -407,6 +407,12 @@ jobs:
               "  Claude Code IDs look like mcp__<server>__<tool>.",
               "- Tool IDs without any MCP prefix: just Title Case the words.",
               '- Never output placeholder text like "Tool Name Not Found" or "Unknown".',
+              "- Every value must be a plain string, never a nested JSON object or array.",
+              '  WRONG: {"MCP": {"run_workflow": "Playwright MCP: Run Workflow"}}',
+              '  RIGHT: {"MCP_run_workflow": "Playwright MCP: Run Workflow"}',
+              "  If a tool ID looks like it could describe multiple actions, pick the",
+              "  single best display name for that exact ID as given — do not invent",
+              "  sub-keys or restructure the input.",
               "",
               "EXISTING MAPPINGS (follow these patterns):",
               sample_lines,
@@ -414,7 +420,9 @@ jobs:
               "INPUT:",
               tool_ids_json,
               "",
-              "OUTPUT: JSON object only, no explanation.",
+              "OUTPUT: a flat JSON object only, no explanation. Every key must be exactly",
+              "one of the INPUT tool IDs (same spelling), and every value a plain string",
+              "with no braces, brackets, or quotes of its own.",
           ])
 
           payload = {
