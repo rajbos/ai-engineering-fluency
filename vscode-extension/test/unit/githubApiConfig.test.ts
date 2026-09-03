@@ -111,8 +111,8 @@ test('getGitHubAuthProviderId: returns "github-enterprise" for an on-prem GitHub
 // ---------------------------------------------------------------------------
 // attachRequestFailureHandling — distinguishes socket-inactivity timeouts from
 // genuine transport failures, and reports real elapsed time rather than the
-// configured limit (see docs/vscode-extension/WEBVIEW-MESSAGING.md background:
-// PR #1919 follow-up item 1 — the mislabelled GitHub request timeout).
+// configured limit (PR #1919 follow-up item 1 — the mislabelled GitHub
+// request timeout).
 // ---------------------------------------------------------------------------
 
 test('attachRequestFailureHandling: reports a genuine connection error with its real code and message, not as a timeout', () => {

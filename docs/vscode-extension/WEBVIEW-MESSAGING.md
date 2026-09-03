@@ -231,3 +231,12 @@ disposing) a button after a panel's HTML had already been generated left that pa
 it was closed and reopened — this used to be a permanent limitation of the inline-only delivery
 path; it is fixed now that host → webview messaging works.
 
+Some panels call `wireExtensionPointButtons` after every render, not just once at bootstrap (the
+chart panel does this on every `updateChartData`). `registerMessageHandler` has no
+dispose/dedupe of its own, so a naive re-run would add another `window` `message` listener on
+every refresh — leaking handlers and processing each future `extensionPointButtonsUpdated`
+update once per accumulated listener. `wireExtensionPointButtons` tracks a
+`window.__extensionPointButtonsListenerRegistered__` flag on the ambient `window` itself (not a
+module-level variable, so a test harness that swaps in a fresh `window` per case still gets a
+fresh registration) and only attaches the listener the first time it runs for a given window.
+

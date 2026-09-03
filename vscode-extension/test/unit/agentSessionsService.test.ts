@@ -90,7 +90,7 @@ test('requestGitHubJson: stops waiting when the transport never settles', async 
 // requestGitHubJson (default transport) — end-to-end through the real
 // `https.request` wiring, verifying it reports a genuine transport failure
 // distinctly from a socket-inactivity timeout (PR #1919 follow-up item 1: the
-// mislabelled GitHub request timeout — see docs/vscode-extension/WEBVIEW-MESSAGING.md).
+// mislabelled GitHub request timeout).
 // ---------------------------------------------------------------------------
 
 test('requestGitHubJsonTransport: a genuine connection error is reported with its real code, not as a timeout', async () => {

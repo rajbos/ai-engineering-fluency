@@ -253,7 +253,7 @@ test('fetchRepoPrs: stops waiting when a page fetch never settles', async () => 
 // fetchRepoPrsPage — end-to-end through the real `https.request` wiring,
 // verifying it reports a genuine transport failure distinctly from a
 // socket-inactivity timeout (PR #1919 follow-up item 1: the mislabelled
-// GitHub request timeout — see docs/vscode-extension/WEBVIEW-MESSAGING.md).
+// GitHub request timeout).
 // ---------------------------------------------------------------------------
 
 test('fetchRepoPrsPage: a genuine connection error is reported with its real code, not as a timeout', async () => {

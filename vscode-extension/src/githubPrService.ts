@@ -278,7 +278,7 @@ function fetchUserEnterprisesPage(token: string): Promise<UserEnterprisesResult>
 					} catch (e) {
 						resolve({ error: String(e) });
 					}
-					});
+				});
 			},
 		);
 		attachRequestFailureHandling(req, 15000, (message) => resolve({ error: message }));

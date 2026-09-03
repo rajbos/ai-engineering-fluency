@@ -121,3 +121,25 @@ test('wireExtensionPointButtons: no .button-row element is a silent no-op, not a
 
 	assert.doesNotThrow(() => wireExtensionPointButtons({ postMessage: () => {} }));
 });
+
+test('wireExtensionPointButtons: calling it again on the same window (e.g. a re-render) does not register a second message listener', () => {
+	// Some panels call wireExtensionPointButtons after every render that rebuilds .button-row
+	// (e.g. the chart panel, on every `updateChartData`). registerMessageHandler has no
+	// dispose/dedupe of its own, so a naive re-run would add another `window` "message" listener
+	// on every refresh -- leaking handlers and processing each future update once per
+	// accumulated listener. The fix tracks a flag on `window` itself, which is why this test
+	// reuses one jsdom window across two calls instead of setupDom's usual fresh-window-per-test.
+	const { window } = setupDom([{ id: 'alpha', label: 'Alpha' }]);
+	let messageListenerCount = 0;
+	const originalAddEventListener = window.addEventListener.bind(window);
+	window.addEventListener = (type: string, ...rest: unknown[]) => {
+		if (type === 'message') { messageListenerCount++; }
+		return originalAddEventListener(type, ...rest);
+	};
+
+	wireExtensionPointButtons({ postMessage: () => {} });
+	wireExtensionPointButtons({ postMessage: () => {} });
+	wireExtensionPointButtons({ postMessage: () => {} });
+
+	assert.equal(messageListenerCount, 1);
+});

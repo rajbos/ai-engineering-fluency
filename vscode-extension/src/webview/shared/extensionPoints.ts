@@ -8,6 +8,7 @@ interface ExtensionPointButtonData {
 declare global {
   interface Window {
     __EXTENSION_POINT_BUTTONS__?: ExtensionPointButtonData[];
+    __extensionPointButtonsListenerRegistered__?: boolean;
   }
 }
 
@@ -59,12 +60,20 @@ function renderExtensionPointButtons(
  * rather than only ever reflecting the button list that existed at HTML-generation time (the
  * `window.__EXTENSION_POINT_BUTTONS__` inline bootstrap only ever captures a snapshot).
  *
- * Call this after every render that rebuilds the button row.
+ * Call this after every render that rebuilds the button row: some panels re-render on every data
+ * refresh, but `registerMessageHandler` has no dispose/dedupe of its own, so this function tracks
+ * a `window.__extensionPointButtonsListenerRegistered__` flag on the ambient `window` and only
+ * registers the listener the first time it is called for a given window — otherwise every
+ * refresh would add another `window` listener, leaking handlers and processing each future
+ * update once per accumulated listener.
  */
 export function wireExtensionPointButtons(
   vscodeApi: { postMessage: (message: unknown) => void },
 ): void {
   renderExtensionPointButtons(vscodeApi, window.__EXTENSION_POINT_BUTTONS__ ?? []);
+
+  if (window.__extensionPointButtonsListenerRegistered__) { return; }
+  window.__extensionPointButtonsListenerRegistered__ = true;
 
   registerMessageHandler<{ command?: string; buttons?: ExtensionPointButtonData[] }>((message) => {
     if (message?.command === 'extensionPointButtonsUpdated' && Array.isArray(message.buttons)) {
