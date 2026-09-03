@@ -151,6 +151,23 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - Recency window and per-platform limits (`--days`, `--max`, `--platform`), CI-friendly exit codes, and `--json` output
 - Per-platform statuses (`PASS`, `DRIFT`, `NO_FILES`, `NO_RECENT_FILES`, `INCONCLUSIVE`) plus a "Not validated" list for DB/binary formats so coverage is never overstated
 
+### discover-debug-log-schema
+
+**Purpose**: Enumerate the real schema of VS Code Copilot Chat's debug logs from files on the current machine, and verify the exact-AIU billing contract the extension depends on is still intact.
+
+**Use this skill when:**
+- After a Copilot Chat update that may have changed the debug log format
+- Exact costs look wrong, or have silently become estimates
+- Looking for event types and fields we could start using (we parse `llm_request` only; `request_start` / `request_end` are ignored)
+- Updating `docs/logFilesSchema/vscode-chat-debug-log-format.md`
+
+**Contents:**
+- `discover-debug-log-schema.js` — dependency-free Node.js scanner over `workspaceStorage/*/<ext-folder>/debug-logs/*/main.jsonl` across every VS Code variant and all four extension-folder spellings
+- Contract check on the five `llm_request` attrs `src/tokenEstimation.ts` reads (`inputTokens`, `outputTokens`, `cachedTokens`, `model`, `copilotUsageNanoAiu`) — a rename of the last one silently downgrades exact billing to estimates, and nothing else catches it
+- Per-type field inventory marked `PARSED`/`IGNORED` and `*` for fields the repo actually consumes
+- `--days`, `--max`, `--include-examples`, `--json`; exit `0` intact / no logs, `1` drift, `2` bad usage
+- Field **values withheld by default** — these logs contain prompts and file paths
+
 ### validate-model-pricing
 
 **Purpose**: Find all model IDs referenced in local AI-coding session log files and debug logs, then compare them against the keys in `src/modelPricing.json`.

@@ -85,6 +85,7 @@ this is meant to prevent.
 |---|---|---|
 | `editor-data` | `npm run check:editor-data` | an editor that stopped producing readable sessions |
 | `session-schemas` | `node .github/skills/validate-session-schemas/validate-session-schemas.js` | a log format that drifted |
+| `debug-log-schema` | `node .github/skills/discover-debug-log-schema/discover-debug-log-schema.js` | VS Code Chat debug-log drift silently turning exact billing into estimates |
 | `editor-names` | `node .github/skills/validate-editor-names/validate-editor-names.js` | CLI and extension disagreeing on an editor's name |
 | `app-db` | `node .github/skills/validate-app-db-schema/validate-schema.js` | `data.db` schema drift |
 | `model-pricing` | `node .github/skills/validate-model-pricing/validate-model-pricing.js` | a model with no pricing entry (advisory) |
