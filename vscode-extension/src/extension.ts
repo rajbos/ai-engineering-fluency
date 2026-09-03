@@ -865,9 +865,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	public registerExtensionPointButton(button: ExtensionPointButton, handler: () => void | Promise<void>): { dispose(): void } {
 		this._extensionPointButtons.set(button.id, { config: button, handler });
+		this.broadcastExtensionPointButtons();
 		return {
 			dispose: () => {
 				this._extensionPointButtons.delete(button.id);
+				this.broadcastExtensionPointButtons();
 			},
 		};
 	}
@@ -875,6 +877,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private extensionPointButtonsScript(nonce: string): string {
 		const data = [...this._extensionPointButtons.values()].map(e => ({ id: e.config.id, label: e.config.label }));
 		return `<script nonce="${nonce}">window.__EXTENSION_POINT_BUTTONS__ = ${JSON.stringify(data)};</script>`;
+	}
+
+	/**
+	 * Pushes the current extension-point button list to every open webview panel so a button
+	 * registered — or disposed — by a companion extension after a panel's HTML was already
+	 * generated still shows up (or disappears) live. The inline `window.__EXTENSION_POINT_BUTTONS__`
+	 * bootstrap only ever captures a snapshot taken at HTML-generation time, so panels that were
+	 * already open need this message-based follow-up. See `wireExtensionPointButtons` in
+	 * `src/webview/shared/extensionPoints.ts`, which reconciles its button row idempotently.
+	 */
+	private broadcastExtensionPointButtons(): void {
+		const data = [...this._extensionPointButtons.values()].map(e => ({ id: e.config.id, label: e.config.label }));
+		const panels = [
+			this.analysisPanel,
+			this.detailsPanel,
+			this.chartPanel,
+			this.dashboardPanel,
+			this.diagnosticsPanel,
+			this.maturityPanel,
+			this.fluencyLevelViewerPanel,
+			this.environmentalPanel,
+			this.efficiencyPanel,
+		];
+		for (const panel of panels) {
+			if (panel && this.isPanelOpen(panel)) {
+				void panel.webview.postMessage({ command: 'extensionPointButtonsUpdated', buttons: data });
+			}
+		}
 	}
 
 	private async handleExtensionPointAction(buttonId: string): Promise<boolean> {

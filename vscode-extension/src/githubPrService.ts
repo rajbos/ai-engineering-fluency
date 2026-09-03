@@ -1,6 +1,6 @@
 import * as https from 'https';
 import * as childProcess from 'child_process';
-import { getGitHubApiEndpoints, GITHUB_API_USER_AGENT, GITHUB_API_ACCEPT_V3, GITHUB_API_VERSION } from './githubApiConfig';
+import { getGitHubApiEndpoints, GITHUB_API_USER_AGENT, GITHUB_API_ACCEPT_V3, GITHUB_API_VERSION, attachRequestFailureHandling } from './githubApiConfig';
 import { withTimeout } from './utils/promises';
 
 export type RepoPrDetail = {
@@ -122,10 +122,7 @@ function fetchCopilotPlanInfoPage(token: string): Promise<CopilotPlanResult> {
 				});
 			},
 		);
-		req.on('error', (e) => resolve({ error: e.message }));
-		req.setTimeout(15000, () => {
-			req.destroy(new Error('Request timed out after 15 s'));
-		});
+		attachRequestFailureHandling(req, 15000, (message) => resolve({ error: message }));
 		req.end();
 	});
 }
@@ -208,10 +205,7 @@ function fetchCopilotTokenEndpointInfoPage(token: string): Promise<CopilotTokenE
 				});
 			},
 		);
-		req.on('error', (e) => resolve({ error: e.message }));
-		req.setTimeout(15000, () => {
-			req.destroy(new Error('Request timed out after 15 s'));
-		});
+		attachRequestFailureHandling(req, 15000, (message) => resolve({ error: message }));
 		req.end();
 	});
 }
@@ -287,10 +281,7 @@ function fetchUserEnterprisesPage(token: string): Promise<UserEnterprisesResult>
 				});
 			},
 		);
-		req.on('error', (e) => resolve({ error: e.message }));
-		req.setTimeout(15000, () => {
-			req.destroy(new Error('Request timed out after 15 s'));
-		});
+		attachRequestFailureHandling(req, 15000, (message) => resolve({ error: message }));
 		req.write(query);
 		req.end();
 	});
@@ -362,10 +353,7 @@ function fetchEnterprisePremiumBudgetsPage(enterpriseSlug: string, username: str
 				});
 			},
 		);
-		req.on('error', (e) => resolve({ error: e.message }));
-		req.setTimeout(15000, () => {
-			req.destroy(new Error('Request timed out after 15 s'));
-		});
+		attachRequestFailureHandling(req, 15000, (message) => resolve({ error: message }));
 		req.end();
 	});
 }
@@ -506,24 +494,25 @@ function fetchPrCommitMessagesPage(owner: string, repo: string, prNumber: number
 				});
 			},
 		);
-		req.on('error', (e) => resolve({ messages: [], error: e.message }));
-		req.setTimeout(15000, () => {
-			req.destroy(new Error('Request timed out after 15 s'));
-		});
+		attachRequestFailureHandling(req, 15000, (message) => resolve({ messages: [], error: message }));
 		req.end();
 	});
 }
 
-/** Fetch a single page of PRs from GitHub REST API. */
+/**
+ * Fetch a single page of PRs from GitHub REST API.
+ * @param requestFn Injectable request factory for testing; defaults to the real HTTPS implementation.
+ */
 export function fetchRepoPrsPage(
 	owner: string,
 	repo: string,
 	token: string,
 	page: number,
+	requestFn: typeof https.request = https.request,
 ): Promise<{ prs: any[]; statusCode?: number; error?: string }> {
 	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
-		const req = https.request(
+		const req = requestFn(
 			{
 				hostname,
 				path: `${restPathPrefix}/repos/${owner}/${repo}/pulls?state=all&per_page=100&sort=created&direction=desc&page=${page}`,
@@ -550,10 +539,7 @@ export function fetchRepoPrsPage(
 				});
 			},
 		);
-		req.on('error', (e) => resolve({ prs: [], error: e.message }));
-		req.setTimeout(15000, () => {
-			req.destroy(new Error('Request timed out after 15 s'));
-		});
+		attachRequestFailureHandling(req, 15000, (message) => resolve({ prs: [], error: message }));
 		req.end();
 	});
 }
