@@ -26,6 +26,16 @@ const MAX_TASKS_DETAIL_PER_REPO = 50;
 export const MAX_TASK_DETAILS_PER_REFRESH = 200;
 
 /**
+ * Maximum number of `GET /repositories/{id}` lookups per refresh, used to resolve the bare
+ * `repository.id` the account-wide listing returns into an `owner/repo` pair. Each distinct
+ * repository ID costs one call regardless of how many tasks reference it, so this is a much
+ * smaller cap than the task-detail one — a very active account still touches only a handful of
+ * distinct repos per pass. IDs left over after the cap fall back into the "no repository" bucket
+ * for this pass and are retried on the next hourly refresh.
+ */
+export const MAX_REPO_ID_LOOKUPS_PER_REFRESH = 50;
+
+/**
  * Detect whether an agent session came from the GitHub Copilot cloud agent or a CLI/remote session.
  *
  * Heuristic from the agents API:
@@ -81,6 +91,8 @@ export type FetchTaskDetailFn = (
 ) => Promise<TaskDetailResult>;
 
 export type FetchAccountTaskDetailFn = (taskId: string, token: string) => Promise<TaskDetailResult>;
+
+export type FetchRepositoryByIdFn = (id: number, token: string) => Promise<{ owner: string; repo: string } | undefined>;
 
 export type GitHubJsonResult = { body?: any; statusCode?: number; error?: string };
 type GitHubJsonTransport = (path: string, token: string) => Promise<GitHubJsonResult>;
@@ -191,6 +203,22 @@ export async function fetchAccountAgentTaskDetail(taskId: string, token: string)
 	return toTaskDetailResult(await requestGitHubJson(`/agents/tasks/${encodeURIComponent(taskId)}`, token));
 }
 
+/**
+ * Resolve a bare repository ID (as returned by the account-wide `/agents/tasks` listing, which only
+ * guarantees `repository.id`) to an `owner/repo` pair via `GET /repositories/{id}`. Any signed-in
+ * user can call this endpoint for a public or accessible repo; it returns undefined on any failure
+ * (private repo the token can't see, deleted repo, transport error) so the caller can fall back to
+ * the "no repository" bucket instead of failing the whole pass.
+ */
+export async function fetchRepositoryById(id: number, token: string): Promise<{ owner: string; repo: string } | undefined> {
+	const { body, error } = await requestGitHubJson(`/repositories/${id}`, token);
+	if (error || !body || typeof body !== 'object') { return undefined; }
+	return splitFullName(body.full_name)
+		?? (typeof body.owner?.login === 'string' && body.owner.login && typeof body.name === 'string' && body.name
+			? { owner: body.owner.login, repo: body.name }
+			: undefined);
+}
+
 // ---------------------------------------------------------------------------
 // Session usage parsing
 // ---------------------------------------------------------------------------
@@ -264,12 +292,16 @@ function repoFromRepositoryObject(repository: any, task: any): { owner: string; 
 }
 
 /**
- * Resolve the repository a task belongs to.
+ * Resolve the repository a task belongs to from the fields already on the task object.
  *
- * The published schema only guarantees `repository.id`, while the live API returns richer repo
- * objects, so every known spelling is tried before falling back to parsing the task's URLs.
- * Returns undefined for tasks with no repository — e.g. ad-hoc sessions started from cloud chat
- * before a repo is picked — which are grouped into their own bucket.
+ * The live API returns richer repo objects on the repo-scoped listing, so every known spelling is
+ * tried before falling back to parsing the task's URLs. Returns undefined when none of those are
+ * present — most notably, the account-wide `/agents/tasks` listing only guarantees
+ * `repository.id` (a bare numeric ID, no owner/name/URL at all), which this function cannot turn
+ * into an `owner/repo` pair by itself. Callers that need to resolve that case should read
+ * `repositoryIdFromTask()` and look the ID up with `fetchRepositoryById()`. Also returns undefined
+ * for tasks with no repository at all — e.g. ad-hoc sessions started from cloud chat before a repo
+ * is picked — which are grouped into their own bucket.
  */
 export function resolveTaskRepo(task: any): { owner: string; repo: string } | undefined {
 	const repository = task?.repository;
@@ -278,6 +310,12 @@ export function resolveTaskRepo(task: any): { owner: string; repo: string } | un
 		if (resolved) { return resolved; }
 	}
 	return repoFromUrl(task?.html_url);
+}
+
+/** Read the bare numeric repository ID off a task, if present — see `resolveTaskRepo()`. */
+export function repositoryIdFromTask(task: any): number | undefined {
+	const id = task?.repository?.id;
+	return typeof id === 'number' && Number.isFinite(id) ? id : undefined;
 }
 
 /** Stable map key for a repository summary; account tasks with no repo share the empty key. */
@@ -446,8 +484,11 @@ export interface CollectAgentSessionsOptions {
 	fetchAccountTaskPage?: FetchAccountTaskPageFn;
 	fetchTaskDetail?: FetchTaskDetailFn;
 	fetchAccountTaskDetail?: FetchAccountTaskDetailFn;
+	fetchRepositoryById?: FetchRepositoryByIdFn;
 	/** Cap on task-detail calls for this pass (default MAX_TASK_DETAILS_PER_REFRESH). */
 	maxTaskDetails?: number;
+	/** Cap on repository-ID lookups for this pass (default MAX_REPO_ID_LOOKUPS_PER_REFRESH). */
+	maxRepoIdLookups?: number;
 	/** Reports coarse progress (list calls + detail calls) so the panel can show a bar. */
 	onProgress?: (done: number, total: number) => void;
 }
@@ -530,6 +571,62 @@ async function collectWorkspaceTasks(
 	}
 }
 
+/**
+ * Resolve the tasks whose repository could not be read from the task object directly (the
+ * account-wide listing typically only returns a bare `repository.id`) by looking that ID up
+ * through `GET /repositories/{id}`. Distinct IDs are looked up once and cached for the whole pass,
+ * since many tasks in the same repo share one ID, and the lookup count is capped to bound API
+ * usage — IDs left over stay unresolved for this pass and land in the "no repository" bucket.
+ */
+async function resolveRepositoryIds(
+	tasks: any[],
+	options: CollectAgentSessionsOptions,
+): Promise<Map<number, { owner: string; repo: string } | undefined>> {
+	const fetchRepoById = options.fetchRepositoryById ?? fetchRepositoryById;
+	const maxLookups = options.maxRepoIdLookups ?? MAX_REPO_ID_LOOKUPS_PER_REFRESH;
+
+	const unresolvedIds = new Set<number>();
+	for (const task of tasks) {
+		if (resolveTaskRepo(task)) { continue; }
+		const id = repositoryIdFromTask(task);
+		if (id !== undefined) { unresolvedIds.add(id); }
+	}
+
+	const idsToFetch = [...unresolvedIds].slice(0, maxLookups);
+	const idCache = new Map<number, { owner: string; repo: string } | undefined>();
+	const CONCURRENCY = 5;
+	for (let i = 0; i < idsToFetch.length; i += CONCURRENCY) {
+		const batch = idsToFetch.slice(i, i + CONCURRENCY);
+		const results = await Promise.all(batch.map(id => fetchRepoById(id, options.token)));
+		batch.forEach((id, index) => idCache.set(id, results[index]));
+	}
+	return idCache;
+}
+
+/** Resolve one account-listing task's repo: its own fields first, then the ID-lookup cache. */
+function resolveAccountTaskRepo(
+	task: any,
+	idCache: Map<number, { owner: string; repo: string } | undefined>,
+): { owner: string; repo: string } | undefined {
+	const resolved = resolveTaskRepo(task);
+	if (resolved) { return resolved; }
+	const id = repositoryIdFromTask(task);
+	return id !== undefined ? idCache.get(id) : undefined;
+}
+
+/**
+ * Key an account-listing task should be filed under. Falls back to an already-known candidate's
+ * key when the account object itself can't be resolved (bare-ID lookup failed or was capped), so a
+ * task already attributed to a repo via the workspace listing doesn't spawn a spurious empty
+ * "no repository" row.
+ */
+function accountTaskKey(
+	resolved: { owner: string; repo: string } | undefined,
+	existingCandidate: AgentTaskCandidate | undefined,
+): string {
+	return repoKey(resolved?.owner ?? '', resolved?.repo ?? '') || existingCandidate?.key || '';
+}
+
 /** List the authenticated user's tasks across all repositories, adding any repos not seen yet. */
 async function collectAccountTasks(
 	options: CollectAgentSessionsOptions,
@@ -543,12 +640,14 @@ async function collectAccountTasks(
 	);
 	if (error) { return { available: false, error: describeTaskFetchError(statusCode) }; }
 
+	const idCache = await resolveRepositoryIds(tasks, options);
+
 	for (const task of tasks) {
-		const resolved = resolveTaskRepo(task);
-		const key = repoKey(resolved?.owner ?? '', resolved?.repo ?? '');
+		const existingCandidate = candidates.get(task.id);
+		const resolved = resolveAccountTaskRepo(task, idCache);
+		const key = accountTaskKey(resolved, existingCandidate);
 		upsertRow(rows, key, resolved?.owner ?? '', resolved?.repo ?? '', 'account');
-		const existing = candidates.get(task.id);
-		if (existing) { continue; }
+		if (existingCandidate) { continue; }
 		candidates.set(task.id, { id: task.id, key, owner: resolved?.owner, repo: resolved?.repo, sortAt: taskSortAt(task) });
 	}
 	return { available: true };
@@ -600,6 +699,11 @@ function sortRepoRows(rows: AgentRepoSummary[]): AgentRepoSummary[] {
  * the workspace's git remotes (which also surface tasks other people started in those repos) and
  * the account-wide `/agents/tasks` listing (which surfaces tasks started from github.com in repos
  * that aren't checked out locally, plus ad-hoc cloud chat tasks with no repository at all).
+ *
+ * The account-wide listing only guarantees a bare `repository.id` on each task, so those are
+ * resolved to `owner/repo` via `GET /repositories/{id}` (capped, cached per distinct ID for the
+ * pass) before rows are built — otherwise every account-only task would wrongly land in the "no
+ * repository" bucket even though it belongs to a real repo.
  *
  * Tasks are deduplicated by ID across both listings, so a task visible in both is counted once.
  * The number of task-detail calls is capped: the newest tasks are detailed first and any repo with

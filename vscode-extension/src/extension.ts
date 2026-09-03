@@ -225,6 +225,7 @@ import {
   parseWorkspaceStorageJsonFile as _parseWorkspaceStorageJsonFile,
   extractWorkspaceIdFromSessionPath as _extractWorkspaceIdFromSessionPath,
   resolveWorkspaceFolderFromSessionPath as _resolveWorkspaceFolderFromSessionPath,
+  resolveWorkspaceFolderWithFallback as _resolveWorkspaceFolderWithFallback,
   globToRegExp as _globToRegExp,
   resolveExactWorkspacePath as _resolveExactWorkspacePath,
   scanWorkspaceCustomizationFiles as _scanWorkspaceCustomizationFiles,
@@ -4701,11 +4702,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private trackWorkspaceForSession(
 		sessionFile: string, interactions: number,
 		sessionCounts: Map<string, number>, interactionCounts: Map<string, number>,
-		unresolvedIds: Set<string>, unresolvedCounts: Map<string, number>
+		unresolvedIds: Set<string>, unresolvedCounts: Map<string, number>,
+		fallbackWorkspacePath?: string
 	): void {
 		const workspaceId = _extractWorkspaceIdFromSessionPath(sessionFile);
 		try {
-			const workspaceFolder = _resolveWorkspaceFolderFromSessionPath(sessionFile, this._workspaceIdToFolderCache);
+			// Prefer VS Code's workspaceStorage-based resolution (covers Copilot Chat sessions).
+			// Non-VS Code editors (Copilot CLI, JetBrains, Claude Code, etc.) don't live under a
+			// "workspaceStorage" folder, so fall back to the workspace/cwd path already resolved
+			// onto sessionData (e.g. Copilot CLI's workspace.yaml `cwd` or session-store.db `cwd`)
+			// so those workspaces still show up in the Copilot Customization Files health matrix.
+			const workspaceFolder = _resolveWorkspaceFolderWithFallback(sessionFile, this._workspaceIdToFolderCache, fallbackWorkspacePath);
 			if (workspaceFolder) {
 				const norm = path.normalize(workspaceFolder);
 				sessionCounts.set(norm, (sessionCounts.get(norm) || 0) + 1);
@@ -4806,7 +4813,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this._incrementDelegationSessions(periods.last30DaysStats, sessionData);
 			this.trackWorkspaceForSession(sessionFile, interactions,
 				wsMaps.workspaceSessionCounts, wsMaps.workspaceInteractionCounts,
-				wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts);
+				wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts,
+				sessionData.workspaceFolderPath);
 			this._accumulateSkillCallsByEditor(sessionFile, analysis, sessionData.workspaceFolderPath);
 		}
 		if (lastActivityUtcKey >= periods.monthUtcStartKey) {
@@ -7677,7 +7685,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			'.eslintrc', 'eslint.config', '.prettierrc', 'prettier.config',
 			'tsconfig.json', 'jsconfig.json', 'package.json', 'Makefile',
 			'Dockerfile', 'docker-compose', '.github/workflows', '.devcontainer',
-			'LICENSE', '.nvmrc', '.node-version'
+			'LICENSE', '.nvmrc', '.node-version', 'README'
 		];
 
 		try {

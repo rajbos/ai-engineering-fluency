@@ -50,10 +50,23 @@ counted once. Repositories found only through the account listing are labelled *
 If the account-wide listing fails (for example, a token without the "Agent tasks" permission), the
 tab degrades to the workspace repositories and says so.
 
+### Resolving the account-wide listing's bare repository ID
+
+The account-wide `/agents/tasks` listing does **not** return an `owner/repo`, a `full_name`, or an
+`html_url` for a task's repository — only `repository: { id: <number> }`. Without a further lookup,
+every task from this listing would incorrectly land in the "no repository" bucket even when it
+clearly belongs to a real repo.
+
+`collectAgentSessions()` resolves this by calling `GET /repositories/{id}` for each distinct
+repository ID it can't otherwise resolve, before building any rows. The result is cached per ID for
+the pass (many tasks in the same repo share one ID) and the number of lookups is capped
+(`MAX_REPO_ID_LOOKUPS_PER_REFRESH`) to bound API usage; any IDs left over stay unresolved for this
+pass and are retried on the next hourly refresh.
+
 ## Cost control: one hourly snapshot, one window
 
-Collecting the data costs one list call per repository, one for the account, and one detail call
-per task, so it is deliberately rationed:
+Collecting the data costs one list call per repository, one for the account, one repository-ID
+lookup per distinct unresolved repo, and one detail call per task, so it is deliberately rationed:
 
 - **Cached on disk** in the extension's global storage
   (`agenttasks_<cacheId>.snapshot.json`), shared by every VS Code window of that edition —
