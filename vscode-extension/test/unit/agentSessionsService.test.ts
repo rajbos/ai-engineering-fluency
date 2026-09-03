@@ -5,10 +5,12 @@ import {
 	detectSessionSource,
 	fetchAgentSessionsForRepo,
 	readSessionUsage,
+	repositoryIdFromTask,
 	requestGitHubJson,
 	resolveTaskRepo,
 	type AgentRepoSummary,
 	type FetchAccountTaskPageFn,
+	type FetchRepositoryByIdFn,
 	type FetchTaskPageFn,
 	type FetchTaskDetailFn,
 } from '../../src/agentSessionsService';
@@ -286,6 +288,21 @@ test('resolveTaskRepo: returns undefined for a task with no resolvable repositor
 });
 
 // ---------------------------------------------------------------------------
+// repositoryIdFromTask — the bare numeric ID the account-wide listing guarantees
+// ---------------------------------------------------------------------------
+
+test('repositoryIdFromTask: reads a numeric repository.id', () => {
+	assert.equal(repositoryIdFromTask({ repository: { id: 42 } }), 42);
+});
+
+test('repositoryIdFromTask: returns undefined when there is no usable ID', () => {
+	assert.equal(repositoryIdFromTask({ repository: { full_name: 'octo/demo' } }), undefined);
+	assert.equal(repositoryIdFromTask({ repository: { id: 'not-a-number' } }), undefined);
+	assert.equal(repositoryIdFromTask({}), undefined);
+	assert.equal(repositoryIdFromTask(undefined), undefined);
+});
+
+// ---------------------------------------------------------------------------
 // collectAgentSessions — workspace repos merged with the account-wide task list
 // ---------------------------------------------------------------------------
 
@@ -326,6 +343,105 @@ test('collectAgentSessions: finds account tasks in repos that are not open in th
 	assert.equal(result.repos[0].repo, 'remote-repo');
 	assert.equal(result.repos[0].discovery, 'account');
 	assert.equal(result.totalCredits, 4);
+});
+
+/** Task as the account-wide listing typically returns it: only a bare `repository.id`. */
+function makeAccountTaskWithRepoId(id: string, repoId: number, updatedAt = '2026-08-01T00:00:00Z'): any {
+	return {
+		id, name: `Task ${id}`, state: 'completed', updated_at: updatedAt, created_at: updatedAt,
+		repository: { id: repoId },
+	};
+}
+
+test('collectAgentSessions: resolves a bare repository.id via GET /repositories/{id}', async () => {
+	const accountPage = firstPageOnly([makeAccountTaskWithRepoId('a1', 555)]);
+	const lookedUp: number[] = [];
+	const fetchRepositoryById: FetchRepositoryByIdFn = async (id) => {
+		lookedUp.push(id);
+		return id === 555 ? { owner: 'octo', repo: 'byid' } : undefined;
+	};
+	const result = await collectAgentSessions({
+		token: 'token',
+		since: SINCE,
+		workspaceRepos: [],
+		fetchTaskPage: NO_TASKS,
+		fetchAccountTaskPage: async ({ page, archived }) => (archived ? { tasks: [] } : accountPage(page)),
+		fetchTaskDetail: async () => ({ sessions: [makeSession('cloud-model', 3)] }),
+		fetchAccountTaskDetail: async () => ({ sessions: [] }),
+		fetchRepositoryById,
+	});
+
+	assert.deepEqual(lookedUp, [555]);
+	assert.equal(result.repos.length, 1);
+	assert.equal(result.repos[0].owner, 'octo');
+	assert.equal(result.repos[0].repo, 'byid');
+	assert.ok(!result.repos[0].unassigned);
+	assert.equal(result.repos[0].discovery, 'account');
+	assert.equal(result.totalCredits, 3);
+});
+
+test('collectAgentSessions: dedups repository-ID lookups across tasks sharing the same repo', async () => {
+	const accountPage = firstPageOnly([
+		makeAccountTaskWithRepoId('a1', 777, '2026-08-01T00:00:00Z'),
+		makeAccountTaskWithRepoId('a2', 777, '2026-08-02T00:00:00Z'),
+	]);
+	let lookups = 0;
+	const fetchRepositoryById: FetchRepositoryByIdFn = async () => { lookups++; return { owner: 'octo', repo: 'shared-by-id' }; };
+	const result = await collectAgentSessions({
+		token: 'token',
+		since: SINCE,
+		workspaceRepos: [],
+		fetchTaskPage: NO_TASKS,
+		fetchAccountTaskPage: async ({ page, archived }) => (archived ? { tasks: [] } : accountPage(page)),
+		fetchTaskDetail: async () => ({ sessions: [] }),
+		fetchAccountTaskDetail: async () => ({ sessions: [] }),
+		fetchRepositoryById,
+	});
+
+	assert.equal(lookups, 1, 'one lookup per distinct repository ID, not per task');
+	assert.equal(result.repos.length, 1);
+	assert.equal(result.repos[0].tasksTotal, 2);
+});
+
+test('collectAgentSessions: a task whose repository-ID lookup fails still lands in the "no repository" bucket', async () => {
+	const accountPage = firstPageOnly([makeAccountTaskWithRepoId('a1', 999)]);
+	const result = await collectAgentSessions({
+		token: 'token',
+		since: SINCE,
+		workspaceRepos: [],
+		fetchTaskPage: NO_TASKS,
+		fetchAccountTaskPage: async ({ page, archived }) => (archived ? { tasks: [] } : accountPage(page)),
+		fetchTaskDetail: async () => ({ sessions: [] }),
+		fetchAccountTaskDetail: async () => ({ sessions: [] }),
+		fetchRepositoryById: async () => undefined,
+	});
+
+	assert.equal(result.repos.length, 1);
+	assert.equal(result.repos[0].unassigned, true);
+});
+
+test('collectAgentSessions: repository-ID lookups are capped, leaving the rest in the "no repository" bucket', async () => {
+	const tasks = [
+		makeAccountTaskWithRepoId('a1', 1),
+		makeAccountTaskWithRepoId('a2', 2),
+		makeAccountTaskWithRepoId('a3', 3),
+	];
+	const accountPage = firstPageOnly(tasks);
+	const result = await collectAgentSessions({
+		token: 'token',
+		since: SINCE,
+		workspaceRepos: [],
+		maxRepoIdLookups: 2,
+		fetchTaskPage: NO_TASKS,
+		fetchAccountTaskPage: async ({ page, archived }) => (archived ? { tasks: [] } : accountPage(page)),
+		fetchTaskDetail: async () => ({ sessions: [] }),
+		fetchAccountTaskDetail: async () => ({ sessions: [] }),
+		fetchRepositoryById: async (id) => ({ owner: 'octo', repo: `repo-${id}` }),
+	});
+
+	const resolvedRepos = result.repos.filter(r => !r.unassigned);
+	assert.equal(resolvedRepos.length, 2, 'only the first two distinct IDs are looked up');
+	assert.ok(result.repos.some(r => r.unassigned), 'the ID left over falls back to the unassigned bucket');
 });
 
 test('collectAgentSessions: a task in both listings is detailed once and marked as seen from both', async () => {
