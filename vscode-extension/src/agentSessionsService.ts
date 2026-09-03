@@ -614,6 +614,19 @@ function resolveAccountTaskRepo(
 	return id !== undefined ? idCache.get(id) : undefined;
 }
 
+/**
+ * Key an account-listing task should be filed under. Falls back to an already-known candidate's
+ * key when the account object itself can't be resolved (bare-ID lookup failed or was capped), so a
+ * task already attributed to a repo via the workspace listing doesn't spawn a spurious empty
+ * "no repository" row.
+ */
+function accountTaskKey(
+	resolved: { owner: string; repo: string } | undefined,
+	existingCandidate: AgentTaskCandidate | undefined,
+): string {
+	return repoKey(resolved?.owner ?? '', resolved?.repo ?? '') || existingCandidate?.key || '';
+}
+
 /** List the authenticated user's tasks across all repositories, adding any repos not seen yet. */
 async function collectAccountTasks(
 	options: CollectAgentSessionsOptions,
@@ -630,11 +643,11 @@ async function collectAccountTasks(
 	const idCache = await resolveRepositoryIds(tasks, options);
 
 	for (const task of tasks) {
+		const existingCandidate = candidates.get(task.id);
 		const resolved = resolveAccountTaskRepo(task, idCache);
-		const key = repoKey(resolved?.owner ?? '', resolved?.repo ?? '');
+		const key = accountTaskKey(resolved, existingCandidate);
 		upsertRow(rows, key, resolved?.owner ?? '', resolved?.repo ?? '', 'account');
-		const existing = candidates.get(task.id);
-		if (existing) { continue; }
+		if (existingCandidate) { continue; }
 		candidates.set(task.id, { id: task.id, key, owner: resolved?.owner, repo: resolved?.repo, sortAt: taskSortAt(task) });
 	}
 	return { available: true };

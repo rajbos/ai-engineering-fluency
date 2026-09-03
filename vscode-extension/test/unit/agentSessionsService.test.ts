@@ -465,6 +465,29 @@ test('collectAgentSessions: a task in both listings is detailed once and marked 
 	assert.equal(result.totalTasks, 1);
 });
 
+test('collectAgentSessions: a shared task whose account-listing repo-ID lookup fails does not spawn a spurious "no repository" row', async () => {
+	// Same task ID appears in both listings: the workspace listing resolves it via `owner`/`repo`
+	// filters, but the account-wide object only carries a bare repository ID whose lookup fails.
+	const workspaceTask = makeAccountTask('shared', undefined, '2026-08-01T00:00:00Z');
+	const accountTask = makeAccountTaskWithRepoId('shared', 4242, '2026-08-01T00:00:00Z');
+	const result = await collectAgentSessions({
+		token: 'token',
+		since: SINCE,
+		workspaceRepos: [{ owner: 'octo', repo: 'demo' }],
+		fetchTaskPage: async ({ page, archived }) => (!archived && page === 1 ? { tasks: [workspaceTask] } : { tasks: [] }),
+		fetchAccountTaskPage: async ({ page, archived }) => (!archived && page === 1 ? { tasks: [accountTask] } : { tasks: [] }),
+		fetchTaskDetail: async () => ({ sessions: [makeSession('cloud-model', 6)] }),
+		fetchAccountTaskDetail: async () => ({ sessions: [] }),
+		fetchRepositoryById: async () => undefined,
+	});
+
+	assert.equal(result.repos.length, 1, 'the failed account-side lookup must not create a second, unassigned row');
+	assert.equal(result.repos[0].owner, 'octo');
+	assert.equal(result.repos[0].repo, 'demo');
+	assert.equal(result.repos[0].discovery, 'both');
+	assert.equal(result.repos[0].tasksTotal, 1);
+});
+
 test('collectAgentSessions: tasks with no repository land in their own bucket, detailed by ID', async () => {
 	let byIdCalls = 0;
 	const result = await collectAgentSessions({
