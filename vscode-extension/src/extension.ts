@@ -7157,14 +7157,19 @@ private computeFallbackDailyRollup(
 		if (valid.includes(timeWindow as ChartTimeWindow)) { this.lastChartTimeWindow = timeWindow as ChartTimeWindow; }
 	}
 
+	private normalizeLegacyChartPreference<T extends string>(value: string | undefined, validValues: readonly T[]): T | undefined {
+		if (typeof value !== 'string') { return undefined; }
+		const normalized = value === 'taskCategory' ? 'task' : value;
+		return (validValues as readonly string[]).includes(normalized) ? (normalized as T) : undefined;
+	}
+
 	private setChartViewPreference(message: any): void {
-		const v = message.view;
-		const validViews = new Set(['total', 'model', 'editor', 'repository', 'cost', 'task']);
+		const v = this.normalizeLegacyChartPreference(message.view, ['total', 'model', 'editor', 'repository', 'cost', 'task']);
 		const validMetrics = new Set(['tokens', 'output', 'cost', 'sessions']);
-		const validSplits = new Set(['total', 'model', 'editor', 'repository', 'language', 'provider', 'task']);
-		if (typeof v === 'string' && validViews.has(v)) { this.lastChartView = v as typeof this.lastChartView; }
+		const split = this.normalizeLegacyChartPreference(message.split, ['total', 'model', 'editor', 'repository', 'language', 'provider', 'task']);
+		if (v) { this.lastChartView = v as typeof this.lastChartView; }
 		if (typeof message.metric === 'string' && validMetrics.has(message.metric)) { this.lastChartMetric = message.metric as typeof this.lastChartMetric; }
-		if (typeof message.split === 'string' && validSplits.has(message.split)) { this.lastChartSplit = message.split as typeof this.lastChartSplit; }
+		if (split) { this.lastChartSplit = split as typeof this.lastChartSplit; }
 	}
 
 	public async showUsageAnalysis(): Promise<void> {
@@ -11500,9 +11505,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       periodsReady, 
       initialPeriod: this.lastChartPeriod, 
       initialTimeWindow: this.lastChartTimeWindow, 
-      initialView: this.lastChartView, 
+      initialView: this.normalizeLegacyChartPreference(this.lastChartView, ['total', 'model', 'editor', 'repository', 'cost', 'task']) ?? 'total', 
       initialMetric: this.lastChartMetric, 
-      initialSplit: this.lastChartSplit, 
+      initialSplit: this.normalizeLegacyChartPreference(this.lastChartSplit, ['total', 'model', 'editor', 'repository', 'language', 'provider', 'task']) ?? 'total', 
       monthlyBudget: this.getEffectiveMonthlyBudget(),
       localization: this.getWebviewLocalization()
     };
