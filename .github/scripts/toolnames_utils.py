@@ -89,6 +89,32 @@ def _normalize_friendly_name(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
 
 
+# A friendly display name is a short human-readable label (e.g. "Playwright
+# MCP: Run Workflow") and should never contain JSON/dict structural
+# characters. Seeing one usually means a generator accidentally serialized a
+# nested object instead of a plain string — e.g. PR #1930 added
+# "MCP": "{'run_workflow': 'Playwright MCP: Run Workflow'}" because the SLM
+# used by add-toolnames-with-slm returned a nested object for that tool ID
+# and the code stringified it with str() instead of rejecting it.
+_JSON_FRAGMENT_RE = re.compile(r"[{}\[\]]")
+
+
+def looks_like_json_fragment(value: str) -> bool:
+    """Flag friendly-name strings that look like a stray JSON/dict fragment."""
+    return bool(_JSON_FRAGMENT_RE.search(value))
+
+
+def find_invalid_friendly_names(
+    tool_names: dict[str, str]
+) -> list[tuple[str, str]]:
+    """Return (tool_id, friendly) pairs whose friendly name is JSON-like."""
+    return [
+        (tool_id, friendly)
+        for tool_id, friendly in tool_names.items()
+        if looks_like_json_fragment(friendly)
+    ]
+
+
 # Known MCP tool families: keyed by a display prefix, matched by (a) a keyword
 # appearing anywhere in the (normalized) tool id and (b) the id ending in one
 # of the family's known action names. This mirrors src/utils/toolUtils.ts's
@@ -310,6 +336,12 @@ def find_new_duplicate_groups(
     return new_strict, new_canonical
 
 
+def _print_invalid_friendly_names(invalid: list[tuple[str, str]]) -> None:
+    print(f"\nFound {len(invalid)} entr{'y' if len(invalid) == 1 else 'ies'} with a JSON-like friendly name:")
+    for tool_id, friendly in sorted(invalid):
+        print(f"  {tool_id!r} -> {friendly!r}")
+
+
 def _print_report(
     strict_duplicates: dict[str, list[tuple[str, str]]],
     canonical_equivalents: dict[str, list[tuple[str, str]]]
@@ -355,15 +387,23 @@ def main() -> int:
     else:
         strict_duplicates, canonical_equivalents = find_duplicate_groups(tool_names)
 
-    if not strict_duplicates and not canonical_equivalents:
+    # Unlike duplicates, a JSON-like friendly name is never legitimate, so it
+    # always fails the build — even if it was already present at the base
+    # commit — rather than only when newly introduced.
+    invalid_friendly_names = find_invalid_friendly_names(tool_names)
+
+    if not strict_duplicates and not canonical_equivalents and not invalid_friendly_names:
         print("No duplicate-like entries found.")
         return 0
 
     _print_report(strict_duplicates, canonical_equivalents)
+    if invalid_friendly_names:
+        _print_invalid_friendly_names(invalid_friendly_names)
 
-    # Treat strict duplicates as a failing condition for CI; canonical
-    # equivalents are surfaced but do not fail the build on their own.
-    return 1 if strict_duplicates else 0
+    # Treat strict duplicates and JSON-like friendly names as failing
+    # conditions for CI; canonical equivalents are surfaced but do not fail
+    # the build on their own.
+    return 1 if (strict_duplicates or invalid_friendly_names) else 0
 
 
 if __name__ == "__main__":
