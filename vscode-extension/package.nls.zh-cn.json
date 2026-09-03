@@ -196,5 +196,8 @@
 
   "insights.enabled": "在使用分析仪表板和状态栏中启用个性化 AI 使用洞察和提醒。",
   "insights.toastsEnabled": "显示偶尔的高价值洞察通知",
-  "insights.cadenceDays": "洞察通知之间的最少天数"
+  "insights.cadenceDays": "洞察通知之间的最少天数",
+
+  "usage.copyFailed": "无法将路径复制到剪贴板。",
+  "usage.copyFailed.retry": "重新复制"
 }

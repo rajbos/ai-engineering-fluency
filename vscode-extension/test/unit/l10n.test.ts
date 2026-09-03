@@ -97,3 +97,31 @@ test('l10n: dialog button and insights status bar keys resolve in zh-cn', () => 
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: clipboard-failure keys resolve in English', () => {
+	// Added with the `copyFailed` handler: before it existed the webview posted
+	// this and nothing on the extension side listened, so a failed copy was
+	// completely silent.
+	const expected: Record<string, string> = {
+		'usage.copyFailed': 'Could not copy the path to the clipboard.',
+		'usage.copyFailed.retry': 'Copy Again',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: clipboard-failure keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'usage.copyFailed': '无法将路径复制到剪贴板。',
+			'usage.copyFailed.retry': '重新复制',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
