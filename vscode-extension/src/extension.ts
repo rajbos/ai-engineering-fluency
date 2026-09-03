@@ -3242,17 +3242,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!this.analysisPanel) { return; }
 		const analysisStats = await this.calculateUsageAnalysisStats(false, preloaded);
 		if (silent) {
+			// Reuse the same payload builder as the full-refresh paths (_buildAnalysisUpdateData)
+			// so every field the webview renders (correctionReport, repeatedTasks, curationAnalysis, …)
+			// stays populated on periodic silent refreshes instead of being dropped and blanking
+			// tabs that were already showing data (see the Corrections tab going empty while the
+			// insight card still reports accurate counts).
 			void this.analysisPanel.webview.postMessage({
 				command: 'updateStats',
-				data: {
-					today: analysisStats.today, last30Days: analysisStats.last30Days, month: analysisStats.month, lastMonth: analysisStats.lastMonth,
-					locale: analysisStats.locale, customizationMatrix: analysisStats.customizationMatrix || null,
-					missedPotential: analysisStats.missedPotential || [],
-					todaySessions: analysisStats.todaySessions || [],
-					lastUpdated: analysisStats.lastUpdated.toISOString(), backendConfigured: this.isBackendConfigured(),
-					currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
-					insights: this.buildCurrentInsights(analysisStats),
-				},
+				data: this._buildAnalysisUpdateData(analysisStats),
 			});
 		} else {
 			this.analysisWebviewReady = false;
