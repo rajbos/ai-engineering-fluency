@@ -50,6 +50,23 @@ test('placeBubbleLabels: separates labels for neighboring bubbles', () => {
 	}
 });
 
+test('placeBubbleLabels: separates labels for near-overlapping bubbles clustered in a corner', () => {
+	// Regression test: bubbles this close together (nearly touching, all near the
+	// top-left corner) used to run out of usable label slots and overlap.
+	const bubbles = [
+		{ x: 245, y: 40, radius: 8, label: 'GPT-5.6 Terra' },
+		{ x: 248, y: 40, radius: 12, label: 'GPT-5.6 Sol' },
+		{ x: 300, y: 40, radius: 6, label: 'Claude Fable 5' },
+	];
+	const placements = placeBubbleLabels(bubbles, { left: 76, right: 836, top: 24, bottom: 286 });
+
+	for (let i = 0; i < placements.length; i++) {
+		for (let j = i + 1; j < placements.length; j++) {
+			assert.equal(labelsOverlap(placements[i], placements[j]), false);
+		}
+	}
+});
+
 test('placeBubbleLabels: keeps long labels inside the chart bounds', () => {
 	const bounds = { left: 76, right: 836, top: 24, bottom: 286 };
 	const [placement] = placeBubbleLabels([
