@@ -14,12 +14,13 @@ This skill analyzes repository structure and configuration to identify hygiene i
 
 ## Overview
 
-The skill performs 16 automated checks across 4 categories:
+The skill performs 17 automated checks across 5 categories:
 
 - **Version Control**: Git setup, ignore files, environment templates
 - **Code Quality**: Linters, formatters, type safety configuration
 - **CI/CD & Automation**: Continuous integration, standard scripts, task runners
 - **Environment**: Dev containers, Docker, runtime version pinning
+- **Documentation**: Root README file
 
 Each check has a weight (2-5) indicating its importance. The skill returns a structured JSON report with:
 
@@ -152,6 +153,16 @@ Each check has a weight (2-5) indicating its importance. The skill returns a str
 - **Description**: License file clarifies usage rights for contributors and agents
 - **Paths**: \`['LICENSE', 'LICENSE.md', 'LICENCE']\`
 
+### Category: Documentation (Weight: 5/76 total)
+
+#### 17. README File
+- **ID**: \`readme\`
+- **Weight**: 5 (Critical)
+- **Type**: File check
+- **Description**: README describes project purpose, setup, and usage for contributors and agents
+- **Paths**: \`['README.md', 'README', 'readme.md']\` (repository root only — check the file tree provided, do not assume it is missing just because it is not the first entry)
+- **Hint**: \`touch README.md  # describe project purpose, setup, and usage\`
+
 ## Total Weights: 81 points
 - Version Control: 13 points (16%)
 - Code Quality: 17 points (21%)
@@ -163,7 +174,7 @@ Each check has a weight (2-5) indicating its importance. The skill returns a str
 
 Return a structured JSON object with:
 - summary: Overall scores and category breakdowns
-- checks: Array of 16 check results (id, category, label, status, weight, found, detail, hint)
+- checks: Array of 17 check results (id, category, label, status, weight, found, detail, hint)
 - recommendations: Prioritized action items (priority, category, action, weight, impact)
 - metadata: Scan version, timestamp, repository info
 
