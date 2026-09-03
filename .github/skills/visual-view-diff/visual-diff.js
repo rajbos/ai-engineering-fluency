@@ -65,6 +65,38 @@ function resolveBaseRef(requested) {
 	);
 }
 
+/**
+ * Warns when the baseline is probably not what the caller thinks it is.
+ *
+ * On a shallow clone `origin/main` can be dozens of commits behind, and the
+ * merge base then lands on a much older tree — so half the views come back
+ * "changed" for reasons that have nothing to do with the change under review.
+ * The run is still useful, but only if you know that is what you are looking
+ * at, so say so rather than printing a wall of confident-looking diffs.
+ */
+function warnIfBaselineLooksStale(base) {
+	let shallow = false;
+	try {
+		shallow = git(['rev-parse', '--is-shallow-repository']) === 'true';
+	} catch {
+		return;
+	}
+	if (!shallow) {
+		return;
+	}
+	let behind = '';
+	try {
+		behind = ` (${git(['rev-list', '--count', `${base.sha}..HEAD`])} commit(s) from HEAD)`;
+	} catch {
+		/* best effort */
+	}
+	console.warn(
+		`\n⚠️  This is a shallow clone, so ${base.ref} may be far behind its real tip${behind}.` +
+		`\n   Views can show as changed because the baseline is old, not because your change touched them.` +
+		`\n   Run \`git fetch --unshallow\` for a trustworthy comparison, or pass --base <ref> explicitly.\n`,
+	);
+}
+
 function buildWebviews(checkoutRoot, label) {
 	const extensionDir = path.join(checkoutRoot, 'vscode-extension');
 	const nodeModules = path.join(extensionDir, 'node_modules');
@@ -100,6 +132,7 @@ function main() {
 
 	const base = resolveBaseRef(typeof args.base === 'string' ? args.base : undefined);
 	console.log(`Baseline: ${base.sha.slice(0, 12)} (merge base with ${base.ref})`);
+	warnIfBaselineLooksStale(base);
 
 	const baselineDir = path.join(outRoot, 'baseline');
 	const currentDir = path.join(outRoot, 'current');

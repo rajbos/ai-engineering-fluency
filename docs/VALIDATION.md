@@ -171,6 +171,15 @@ which is why it is not the default.
 `.github/skills/visual-view-diff/views.config.json` — the same registry the
 visual diff uses, so a view added for one is picked up by both.
 
+### A note on the visual diff's baseline
+
+`visual:diff` compares against the merge base with `origin/main`. **On a shallow
+clone that ref can be dozens of commits behind its real tip**, and the baseline
+then lands on a much older tree — so half the views come back "changed" for
+reasons unrelated to the change under review. The script warns when it detects
+this; run `git fetch --unshallow` (or pass `--base <ref>`) for a comparison you
+can trust. The CI job checks out with `fetch-depth: 0` for the same reason.
+
 ## What CI runs
 
 | Job | Checks |
