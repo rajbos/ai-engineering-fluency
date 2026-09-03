@@ -41,6 +41,14 @@ class LooksLikeJsonFragmentTests(unittest.TestCase):
     def test_allows_names_with_parentheses_and_colons(self) -> None:
         self.assertFalse(looks_like_json_fragment("GitHub MCP (Local): Get Commit"))
 
+    def test_flags_non_string_values_instead_of_raising(self) -> None:
+        # A backstop check must not crash on unexpected input (e.g. a nested
+        # dict that slipped past an earlier validation step) — it should
+        # treat it as invalid, not raise TypeError.
+        for value in [{"run_workflow": "Playwright MCP: Run Workflow"}, ["a", "b"], None, 42]:
+            with self.subTest(value=value):
+                self.assertTrue(looks_like_json_fragment(value))
+
 
 class FindInvalidFriendlyNamesTests(unittest.TestCase):
     def test_returns_only_invalid_entries(self) -> None:

@@ -99,8 +99,19 @@ def _normalize_friendly_name(name: str) -> str:
 _JSON_FRAGMENT_RE = re.compile(r"[{}\[\]]")
 
 
-def looks_like_json_fragment(value: str) -> bool:
-    """Flag friendly-name strings that look like a stray JSON/dict fragment."""
+def looks_like_json_fragment(value: Any) -> bool:
+    """Flag friendly-name values that are invalid as a display name.
+
+    A friendly name must be a plain string; a value that is itself a dict or
+    list (e.g. a nested object the SLM returned without being str()-ed) is
+    just as invalid as a string containing stray JSON structural characters,
+    so both are treated as "looks like JSON" rather than raising a
+    TypeError. This keeps callers — especially the final backstop before
+    writing to toolNames.json — safe even if an earlier validation step is
+    bypassed or a future caller passes untrusted data straight through.
+    """
+    if not isinstance(value, str):
+        return True
     return bool(_JSON_FRAGMENT_RE.search(value))
 
 
