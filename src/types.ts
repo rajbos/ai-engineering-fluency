@@ -480,8 +480,10 @@ export interface ModeUsage {
   agent: number; // Agent mode interactions (standard agent mode)
   plan: number; // Plan mode interactions (built-in plan agent)
   customAgent: number; // Custom agent mode interactions (.agent.md files)
-  cli: number; // CLI tool interactions (Copilot CLI, Claude Code, OpenCode, Crush, Mistral Vibe)
+  cli: number; // CLI tool interactions (Copilot CLI, Claude Code CLI, OpenCode, Crush, Mistral Vibe, Hermes, Pi, …)
   cliApp?: number; // Subset of CLI interactions: Copilot CLI sessions started via the Copilot desktop app (client_name: github/autopilot), broken out from `cli`
+  claudeDesktop?: number; // Claude Code sessions launched from the standalone Claude Desktop app (entrypoint: 'claude-desktop'), broken out of `cli` so terminal usage isn't inflated by desktop-app usage
+  claudeVsCode?: number; // Claude Code sessions running inside an IDE, e.g. the VS Code extension (entrypoint: 'claude-vscode' or any non-CLI/non-desktop value), broken out of `cli` for the same reason
 }
 
 export interface ContextReferenceUsage {

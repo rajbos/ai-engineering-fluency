@@ -2036,25 +2036,79 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     return NAV_ORDER.filter((id) => id !== "btn-dashboard" || backendConfigured).map((id) => ({ ...BUTTONS[id], active: id === activeView }));
   }
 
-  // src/webview/shared/extensionPoints.ts
-  function wireExtensionPointButtons(vscodeApi) {
-    const buttons = window.__EXTENSION_POINT_BUTTONS__ ?? [];
-    if (buttons.length === 0) {
-      return;
+  // src/webview/shared/messageHandler.ts
+  function collectOwnOrigins(currentWindow) {
+    const origins = [];
+    const origin = currentWindow.location?.origin;
+    if (origin && origin !== "null") {
+      origins.push(origin);
     }
+    const href = currentWindow.location?.href;
+    const derived = href ? /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href) : null;
+    if (derived && !origins.includes(derived[0])) {
+      origins.push(derived[0]);
+    }
+    return origins;
+  }
+  function isTrustedWebviewMessageSource(source, currentWindow, origin) {
+    if (source === null || source === void 0 || source === currentWindow) {
+      return true;
+    }
+    if (source === currentWindow.parent || source === currentWindow.top) {
+      return true;
+    }
+    return Boolean(origin) && collectOwnOrigins(currentWindow).includes(origin);
+  }
+  function registerMessageHandler(handler, onUntrustedMessage) {
+    window.addEventListener("message", (event) => {
+      if (!isTrustedWebviewMessageSource(event.source, window, event.origin)) {
+        onUntrustedMessage?.(event);
+        return;
+      }
+      handler(event.data);
+    });
+  }
+
+  // src/webview/shared/extensionPoints.ts
+  function buttonElementId(id) {
+    return `ext-point-${id}`;
+  }
+  function renderExtensionPointButtons(vscodeApi, buttons) {
     const buttonRow = document.querySelector(".button-row");
     if (!buttonRow) {
       return;
     }
+    const desiredIds = new Set(buttons.map((b3) => b3.id));
+    for (const existing of Array.from(buttonRow.querySelectorAll('[id^="ext-point-"]'))) {
+      const id = existing.id.slice("ext-point-".length);
+      if (!desiredIds.has(id)) {
+        existing.remove();
+      }
+    }
     for (const btn of buttons) {
+      if (document.getElementById(buttonElementId(btn.id))) {
+        continue;
+      }
       const el2 = document.createElement("vscode-button");
-      el2.id = `ext-point-${btn.id}`;
+      el2.id = buttonElementId(btn.id);
       el2.textContent = btn.label;
       el2.addEventListener("click", () => {
         vscodeApi.postMessage({ command: "extensionPointAction", buttonId: btn.id });
       });
       buttonRow.append(el2);
     }
+  }
+  function wireExtensionPointButtons(vscodeApi) {
+    renderExtensionPointButtons(vscodeApi, window.__EXTENSION_POINT_BUTTONS__ ?? []);
+    if (window.__extensionPointButtonsListenerRegistered__) {
+      return;
+    }
+    window.__extensionPointButtonsListenerRegistered__ = true;
+    registerMessageHandler((message) => {
+      if (message?.command === "extensionPointButtonsUpdated" && Array.isArray(message.buttons)) {
+        renderExtensionPointButtons(vscodeApi, message.buttons);
+      }
+    });
   }
 
   // src/webview/shared/theme.css
@@ -2392,19 +2446,6 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
 
   // src/webview/details/styles.css
   var styles_default = "body {\n	margin: 0;\n	background: var(--bg-primary);\n	color: var(--text-primary);\n	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n}\n\n.container {\n	padding: 16px;\n	display: flex;\n	flex-direction: column;\n	gap: 14px;\n	max-width: 1200px;\n	margin: 0 auto;\n}\n\n.header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	gap: 12px;\n	padding-bottom: 4px;\n}\n\n.header-left {\n	display: flex;\n	flex-direction: column;\n	gap: 4px;\n}\n\n.title {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n.plan-badge {\n	display: inline-flex;\n	align-items: center;\n	gap: 4px;\n	align-self: flex-start;\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 999px;\n	padding: 2px 10px;\n	font-size: 11px;\n	color: var(--text-secondary);\n	cursor: help;\n}\n\n.provider-panel-hint {\n	color: var(--text-secondary);\n	font-size: 11px;\n	margin: -4px 0 10px;\n}\n\n.provider-cards {\n	display: grid;\n	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));\n	gap: 10px;\n	text-align: center;\n}\n\n.provider-card {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n	text-align: center;\n	cursor: pointer;\n	transition: background-color 0.1s ease, opacity 0.1s ease;\n}\n\n.provider-card:hover {\n	background: var(--list-hover-bg);\n}\n\n.provider-card-excluded {\n	opacity: 0.45;\n}\n\n.provider-card-total {\n	cursor: default;\n	border-style: dashed;\n}\n\n.provider-card-total:hover {\n	background: var(--bg-secondary);\n}\n\n.provider-card-label {\n	color: var(--text-secondary);\n	font-size: 11px;\n	margin-bottom: 6px;\n}\n\n.provider-card-value {\n	color: var(--text-primary);\n	font-size: 18px;\n	font-weight: 700;\n}\n\n.provider-card-sub {\n	color: var(--text-secondary);\n	font-size: 10px;\n	margin-top: 4px;\n}\n\n.no-data-row td {\n	text-align: center;\n	color: var(--text-secondary);\n	font-size: 12px;\n	padding: 14px;\n	font-style: italic;\n}\n\n.sections {\n	display: flex;\n	flex-direction: column;\n	gap: 16px;\n}\n\n.section {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n}\n\n.section h3 {\n	margin: 0 0 10px;\n	font-size: 14px;\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	color: var(--text-primary);\n	letter-spacing: 0.2px;\n}\n\n.stats-table {\n	width: 100%;\n	border-collapse: collapse;\n	table-layout: fixed;\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 8px;\n	overflow: hidden;\n}\n\n.stats-table thead {\n	background: var(--list-hover-bg);\n}\n\n.stats-table th,\n.stats-table td {\n	padding: 10px 12px;\n	border-bottom: 1px solid var(--border-subtle);\n	vertical-align: middle;\n}\n\n.stats-table th {\n	text-align: left;\n	color: var(--text-secondary);\n	font-weight: 700;\n	font-size: 12px;\n	letter-spacing: 0.1px;\n}\n\n.stats-table td {\n	color: var(--text-primary);\n	font-size: 12px;\n}\n\n.stats-table th.align-right,\n.stats-table td.align-right {\n	text-align: right;\n}\n\n.stats-table tr.group-row td {\n	background: var(--list-hover-bg);\n	color: var(--text-secondary);\n	font-size: 12px;\n	font-weight: 700;\n	text-transform: uppercase;\n	letter-spacing: 1px;\n	padding: 8px 12px;\n	border-top: 1px solid var(--border-color);\n	border-bottom: 1px solid var(--border-color);\n}\n\n/* First group sits right under the table header, no extra top rule needed */\n.stats-table tbody tr.group-row:first-child td {\n	border-top: none;\n}\n\n.metric-label {\n	display: inline-flex;\n	align-items: center;\n	gap: 6px;\n	font-weight: 600;\n}\n\n.period-header {\n	display: flex;\n	align-items: center;\n	gap: 4px;\n	color: var(--text-secondary);\n}\n\n.align-right .period-header {\n	justify-content: flex-end;\n}\n\n.value-right {\n	text-align: right;\n}\n\n.muted {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 4px;\n}\n\n.notes {\n	margin: 4px 0 0;\n	padding-left: 16px;\n	color: var(--text-secondary);\n}\n\n.notes li {\n	margin: 4px 0;\n	line-height: 1.4;\n}\n\n.footer {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 6px;\n}\n\n.empty-state {\n	display: flex;\n	flex-direction: column;\n	gap: 12px;\n	padding: 20px;\n}\n\n.empty-state-title {\n	font-size: 15px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n.empty-state-description {\n	color: var(--text-secondary);\n	font-size: 13px;\n	line-height: 1.5;\n	margin: 0;\n}\n\n.empty-state-steps {\n	margin: 0;\n	padding-left: 20px;\n	color: var(--text-secondary);\n	font-size: 13px;\n	line-height: 1.6;\n}\n\n.empty-state-steps li {\n	margin: 4px 0;\n}\n\n.empty-state-note {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 6px;\n	padding: 10px 14px;\n	color: var(--text-secondary);\n	font-size: 12px;\n	line-height: 1.5;\n}\n";
-
-  // src/webview/shared/messageHandler.ts
-  function isTrustedWebviewMessageSource(source, currentWindow) {
-    return source === null || source === currentWindow;
-  }
-  function registerMessageHandler(handler) {
-    window.addEventListener("message", (event) => {
-      if (!isTrustedWebviewMessageSource(event.source, window)) {
-        return;
-      }
-      handler(event.data);
-    });
-  }
 
   // ../src/statsHelpers.ts
   var COPILOT_EDITOR_NAMES = /* @__PURE__ */ new Set([

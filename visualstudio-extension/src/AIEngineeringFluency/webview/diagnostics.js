@@ -1732,25 +1732,79 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     return node;
   }
 
-  // src/webview/shared/extensionPoints.ts
-  function wireExtensionPointButtons(vscodeApi) {
-    const buttons = window.__EXTENSION_POINT_BUTTONS__ ?? [];
-    if (buttons.length === 0) {
-      return;
+  // src/webview/shared/messageHandler.ts
+  function collectOwnOrigins(currentWindow) {
+    const origins = [];
+    const origin = currentWindow.location?.origin;
+    if (origin && origin !== "null") {
+      origins.push(origin);
     }
+    const href = currentWindow.location?.href;
+    const derived = href ? /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href) : null;
+    if (derived && !origins.includes(derived[0])) {
+      origins.push(derived[0]);
+    }
+    return origins;
+  }
+  function isTrustedWebviewMessageSource(source, currentWindow, origin) {
+    if (source === null || source === void 0 || source === currentWindow) {
+      return true;
+    }
+    if (source === currentWindow.parent || source === currentWindow.top) {
+      return true;
+    }
+    return Boolean(origin) && collectOwnOrigins(currentWindow).includes(origin);
+  }
+  function registerMessageHandler(handler, onUntrustedMessage) {
+    window.addEventListener("message", (event) => {
+      if (!isTrustedWebviewMessageSource(event.source, window, event.origin)) {
+        onUntrustedMessage?.(event);
+        return;
+      }
+      handler(event.data);
+    });
+  }
+
+  // src/webview/shared/extensionPoints.ts
+  function buttonElementId(id) {
+    return `ext-point-${id}`;
+  }
+  function renderExtensionPointButtons(vscodeApi, buttons) {
     const buttonRow = document.querySelector(".button-row");
     if (!buttonRow) {
       return;
     }
+    const desiredIds = new Set(buttons.map((b3) => b3.id));
+    for (const existing of Array.from(buttonRow.querySelectorAll('[id^="ext-point-"]'))) {
+      const id = existing.id.slice("ext-point-".length);
+      if (!desiredIds.has(id)) {
+        existing.remove();
+      }
+    }
     for (const btn of buttons) {
+      if (document.getElementById(buttonElementId(btn.id))) {
+        continue;
+      }
       const el2 = document.createElement("vscode-button");
-      el2.id = `ext-point-${btn.id}`;
+      el2.id = buttonElementId(btn.id);
       el2.textContent = btn.label;
       el2.addEventListener("click", () => {
         vscodeApi.postMessage({ command: "extensionPointAction", buttonId: btn.id });
       });
       buttonRow.append(el2);
     }
+  }
+  function wireExtensionPointButtons(vscodeApi) {
+    renderExtensionPointButtons(vscodeApi, window.__EXTENSION_POINT_BUTTONS__ ?? []);
+    if (window.__extensionPointButtonsListenerRegistered__) {
+      return;
+    }
+    window.__extensionPointButtonsListenerRegistered__ = true;
+    registerMessageHandler((message) => {
+      if (message?.command === "extensionPointButtonsUpdated" && Array.isArray(message.buttons)) {
+        renderExtensionPointButtons(vscodeApi, message.buttons);
+      }
+    });
   }
 
   // src/editorIcons.ts
@@ -1868,7 +1922,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     thisWeek: "This week",
     allTime: "All time"
   };
-  var CANONICAL_PERIODS = ["today", "last7", "last30", "currentMonth", "allTime"];
+  var CANONICAL_PERIODS = ["today", "last7", "last30", "last90", "currentMonth", "allTime"];
   function setOptionSelected(option, value, selected) {
     if (value === selected) {
       option.selected = true;
@@ -3406,19 +3460,143 @@ border: 1px solid #1f6feb;
 	to { transform: rotate(360deg); }
 }
 
+.ttft-chart-wrap {
+	margin-top: 16px;
+}
+
+.ttft-chart {
+	width: 100%;
+	height: auto;
+	display: block;
+}
+
+.ttft-gridline {
+	stroke: var(--border-color);
+	stroke-width: 1;
+	stroke-dasharray: 2 3;
+}
+
+.ttft-axis-label {
+	fill: var(--text-muted);
+	font-size: 10px;
+}
+
+.ttft-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	margin-top: 8px;
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.ttft-legend-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	cursor: pointer;
+	user-select: none;
+}
+
+.ttft-legend-item.ttft-hidden {
+	opacity: 0.4;
+	text-decoration: line-through;
+}
+
+.ttft-series.ttft-hidden {
+	display: none;
+}
+
+.ttft-legend-swatch {
+	width: 10px;
+	height: 10px;
+	border-radius: 2px;
+	display: inline-block;
+}
+
 `;
 
-  // src/webview/shared/messageHandler.ts
-  function isTrustedWebviewMessageSource(source, currentWindow) {
-    return source === null || source === currentWindow;
+  // ../src/webview/shared/modelUtils.ts
+  var _pricingData = getWindowData("__MODEL_PRICING__");
+  var _modelNames = {};
+  for (const [modelId, pricing] of Object.entries(_pricingData?.pricing ?? {})) {
+    if (pricing.displayNames && pricing.displayNames.length > 0) {
+      _modelNames[modelId] = pricing.displayNames[0];
+    }
   }
-  function registerMessageHandler(handler) {
-    window.addEventListener("message", (event) => {
-      if (!isTrustedWebviewMessageSource(event.source, window)) {
-        return;
+  function decodeSegment(segment) {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  }
+  function parseCustomProviderModel(model) {
+    const parts = model.split("/");
+    if (parts.length !== 3 || parts.some((part) => part.trim() === "")) {
+      return void 0;
+    }
+    return {
+      source: decodeSegment(parts[0]),
+      providerName: decodeSegment(parts[1]),
+      modelId: decodeSegment(parts[2])
+    };
+  }
+  var UUID_PREFIX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\//i;
+  function getModelLookupCandidates(model) {
+    const candidates = [];
+    const add = (id) => {
+      if (id && !candidates.includes(id)) {
+        candidates.push(id);
       }
-      handler(event.data);
-    });
+    };
+    const addWithVersionVariant = (id) => {
+      add(id);
+      add(id.replace(/(\d+)-(\d+)(?=-|$)/, "$1.$2"));
+    };
+    const base = model.replace(/^copilot\//, "");
+    addWithVersionVariant(base);
+    const custom = parseCustomProviderModel(base);
+    if (custom) {
+      addWithVersionVariant(custom.modelId);
+    }
+    if (UUID_PREFIX.test(base)) {
+      addWithVersionVariant(base.replace(UUID_PREFIX, ""));
+    }
+    return candidates;
+  }
+  function getModelDisplayName(model) {
+    for (const candidate of getModelLookupCandidates(model)) {
+      if (_modelNames[candidate]) {
+        return _modelNames[candidate];
+      }
+    }
+    const custom = parseCustomProviderModel(model);
+    if (custom) {
+      return custom.modelId;
+    }
+    if (UUID_PREFIX.test(model)) {
+      return model.replace(UUID_PREFIX, "");
+    }
+    return decodeSegment(model);
+  }
+
+  // ../src/tokenEstimation.ts
+  var NANO_AIU_TO_DOLLARS = 1 / 1e11;
+
+  // ../src/chartDataBuilder.ts
+  var MODEL_COLORS = [
+    { bg: "rgba(54, 162, 235, 0.6)", border: "rgba(54, 162, 235, 1)" },
+    { bg: "rgba(255, 99, 132, 0.6)", border: "rgba(255, 99, 132, 1)" },
+    { bg: "rgba(75, 192, 192, 0.6)", border: "rgba(75, 192, 192, 1)" },
+    { bg: "rgba(153, 102, 255, 0.6)", border: "rgba(153, 102, 255, 1)" },
+    { bg: "rgba(255, 159, 64, 0.6)", border: "rgba(255, 159, 64, 1)" },
+    { bg: "rgba(255, 205, 86, 0.6)", border: "rgba(255, 205, 86, 1)" },
+    { bg: "rgba(201, 203, 207, 0.6)", border: "rgba(201, 203, 207, 1)" },
+    { bg: "rgba(100, 181, 246, 0.6)", border: "rgba(100, 181, 246, 1)" }
+  ];
+  function getModelColor(index) {
+    return MODEL_COLORS[index % MODEL_COLORS.length];
   }
 
   // src/webview/shared/contextRefUtils.ts
@@ -3459,10 +3637,13 @@ border: 1px solid #1f6feb;
   // src/webview/diagnostics/main.ts
   var LOADING_PLACEHOLDER = "Loading...";
   var SESSION_FILES_SECTION_REGEX = /Session File Locations \(first 20\):[\s\S]*?(?=\n\s*\n|={70})/;
-  var LOADING_MESSAGE = `\u23F3 Loading diagnostic data...
-
-This may take a few moments depending on the number of session files.
-The view will automatically update when data is ready.`;
+  var LOADING_MESSAGE = `<div class="analyzer-loading" style="flex-direction:column;align-items:flex-start;gap:6px;">
+<div style="display:flex;align-items:center;gap:10px;">
+<span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+<span>\u23F3 Loading diagnostic data\u2026</span>
+</div>
+<div id="report-loading-subtext" style="font-size:12px;color:var(--text-muted);">Scanning session files\u2026</div>
+</div>`;
   var vscode = acquireVsCodeApi();
   var initialData = getWindowData("__INITIAL_DIAGNOSTICS__");
   if (initialData?.localization) {
@@ -3475,10 +3656,14 @@ The view will automatically update when data is ready.`;
     activeSubtab: void 0,
     otelDeltaPeriod: "all",
     shareCardPeriod: "last14",
-    skillUsageEditorFilter: "all"
+    skillUsageEditorFilter: "all",
+    ttftGranularity: "day",
+    ttftScanRange: "14d"
   });
   var currentOtelComparison;
   var currentOtelDeltaPeriod = diagState.restore().otelDeltaPeriod ?? "all";
+  var currentTtftGranularity = diagState.restore().ttftGranularity ?? "day";
+  var currentTtftScanRange = diagState.restore().ttftScanRange ?? "14d";
   var SHARE_CARD_PERIOD_ORDER = ["last7", "last14", "last30", "last90", "allTime"];
   var currentShareCardPeriod = diagState.restore().shareCardPeriod ?? "last14";
   var currentSortColumn = "lastInteraction";
@@ -4632,7 +4817,7 @@ ${authenticated ? `
   }
   var TAB_GROUPS = {
     diagnostics: ["report", "sessions", "cache", "path-analyzer"],
-    research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta"],
+    research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta", "ttft"],
     settings: ["display", "backend", "github", "debug"]
   };
   function groupOfTab(tabId) {
@@ -5003,6 +5188,11 @@ ${authenticated ? `
             const resultsDiv = document.getElementById("model-usage-results");
             if (resultsDiv && !resultsDiv.innerHTML.trim()) {
               triggerModelUsageAnalysis();
+            }
+          } else if (tabId === "ttft") {
+            const resultsDiv = document.getElementById("ttft-results");
+            if (resultsDiv && !resultsDiv.innerHTML.trim()) {
+              triggerTtftAnalysis();
             }
           }
         }
@@ -5502,6 +5692,14 @@ ${authenticated ? `
     if (shareSubtext) {
       shareSubtext.textContent = progressText;
     }
+    const reportSubtext = document.getElementById("report-loading-subtext");
+    if (reportSubtext) {
+      reportSubtext.textContent = progressText;
+    }
+    const ttftLoadingStatus = document.getElementById("ttft-loading-status");
+    if (ttftLoadingStatus) {
+      ttftLoadingStatus.textContent = progressText;
+    }
     const modelUsageStatus = document.getElementById("model-usage-status");
     if (modelUsageStatus) {
       modelUsageStatus.textContent = total > 0 ? `\u23F3 Loading sessions\u2026 (${processed}/${total})` : "\u23F3 Loading sessions\u2026";
@@ -5527,6 +5725,10 @@ ${authenticated ? `
       modelUsageStatus.textContent = "";
     }
     triggerModelUsageAnalysis();
+    const ttftResultsDiv = document.getElementById("ttft-results");
+    if (ttftResultsDiv && ttftResultsDiv.innerHTML.trim()) {
+      triggerTtftAnalysis();
+    }
     reRenderTable();
     reRenderShareCard();
   }
@@ -5645,6 +5847,8 @@ ${authenticated ? `
         handleFolderAnalysisResult(message);
       } else if (message.command === "modelUsageResult") {
         handleModelUsageResult(message);
+      } else if (message.command === "ttftResult") {
+        handleTtftResult(message);
       }
     });
   }
@@ -6144,6 +6348,235 @@ ${renderOtelDeltaSummaryCards(filtered)}
 ${tableOrEmpty}
 </div>`;
   }
+  var TTFT_GRANULARITY_LABELS = { day: "Day", week: "Week", month: "Month" };
+  var TTFT_SCAN_RANGE_LABELS = {
+    "14d": "Last 14 days",
+    "30d": "Last 30 days",
+    "90d": "Last 90 days",
+    "180d": "Last 6 months",
+    "365d": "Last year",
+    "all": "All time"
+  };
+  function formatTtftSeconds(seconds) {
+    return seconds >= 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds * 1e3)}ms`;
+  }
+  function renderTtftGranularitySelector(granularity) {
+    const options = Object.keys(TTFT_GRANULARITY_LABELS).map((g2) => `<option value="${g2}"${g2 === granularity ? " selected" : ""}>${TTFT_GRANULARITY_LABELS[g2]}</option>`).join("");
+    return `<div class="otel-delta-period-row">
+<label for="ttft-granularity">Bucket by:</label>
+<select id="ttft-granularity" class="otel-delta-period-select">${options}</select>
+</div>`;
+  }
+  function renderTtftScanRangeSelector(range) {
+    const options = Object.keys(TTFT_SCAN_RANGE_LABELS).map((r6) => `<option value="${r6}"${r6 === range ? " selected" : ""}>${TTFT_SCAN_RANGE_LABELS[r6]}</option>`).join("");
+    return `<div class="otel-delta-period-row">
+<label for="ttft-scan-range">Scan session files from:</label>
+<select id="ttft-scan-range" class="otel-delta-period-select">${options}</select>
+</div>`;
+  }
+  var TTFT_CHART_WIDTH = 760;
+  var TTFT_CHART_HEIGHT = 220;
+  var TTFT_CHART_PAD_LEFT = 48;
+  var TTFT_CHART_PAD_RIGHT = 32;
+  var TTFT_CHART_PAD_TOP = 12;
+  var TTFT_CHART_PAD_BOTTOM = 28;
+  function renderTtftChartSvg(buckets, series) {
+    if (buckets.length === 0 || series.length === 0) {
+      return "";
+    }
+    const innerW = TTFT_CHART_WIDTH - TTFT_CHART_PAD_LEFT - TTFT_CHART_PAD_RIGHT;
+    const innerH = TTFT_CHART_HEIGHT - TTFT_CHART_PAD_TOP - TTFT_CHART_PAD_BOTTOM;
+    const allValues = series.flatMap((s4) => s4.data.filter((v2) => v2 !== null));
+    const maxValue = allValues.length > 0 ? Math.max(...allValues) : 1;
+    const yMax = (maxValue || 1) * 1.15;
+    const xStep = buckets.length > 1 ? innerW / (buckets.length - 1) : 0;
+    const xAt = (i6) => TTFT_CHART_PAD_LEFT + i6 * xStep;
+    const yAt = (v2) => TTFT_CHART_PAD_TOP + innerH - v2 / yMax * innerH;
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f3) => {
+      const value = yMax * f3;
+      const y3 = yAt(value);
+      return `<line x1="${TTFT_CHART_PAD_LEFT}" y1="${y3.toFixed(1)}" x2="${TTFT_CHART_WIDTH - TTFT_CHART_PAD_RIGHT}" y2="${y3.toFixed(1)}" class="ttft-gridline" />
+<text x="${TTFT_CHART_PAD_LEFT - 6}" y="${(y3 + 3).toFixed(1)}" class="ttft-axis-label" text-anchor="end">${escapeHtml(formatTtftSeconds(value))}</text>`;
+    }).join("");
+    const labelEvery = Math.max(1, Math.ceil(buckets.length / 8));
+    const xLabels = buckets.map((b3, i6) => {
+      if (i6 % labelEvery !== 0 && i6 !== buckets.length - 1) {
+        return "";
+      }
+      const anchor = i6 === buckets.length - 1 ? "end" : i6 === 0 ? "start" : "middle";
+      return `<text x="${xAt(i6).toFixed(1)}" y="${TTFT_CHART_HEIGHT - 8}" class="ttft-axis-label" text-anchor="${anchor}">${escapeHtml(b3.label)}</text>`;
+    }).join("");
+    const paths = series.map((s4, idx) => {
+      const color = getModelColor(idx);
+      let d3 = "";
+      let drawing = false;
+      s4.data.forEach((v2, i6) => {
+        if (v2 === null) {
+          drawing = false;
+          return;
+        }
+        const x2 = xAt(i6).toFixed(1);
+        const y3 = yAt(v2).toFixed(1);
+        d3 += drawing ? ` L ${x2} ${y3}` : `${d3 ? " " : ""}M ${x2} ${y3}`;
+        drawing = true;
+      });
+      const dots = s4.data.map((v2, i6) => v2 === null ? "" : `<circle cx="${xAt(i6).toFixed(1)}" cy="${yAt(v2).toFixed(1)}" r="2.5" fill="${color.border}" />`).join("");
+      return `<g class="ttft-series" data-model="${escapeHtml(s4.model)}"><path d="${d3}" fill="none" stroke="${color.border}" stroke-width="2" />${dots}</g>`;
+    }).join("");
+    const legend = series.map((s4, idx) => {
+      const color = getModelColor(idx);
+      const name = escapeHtml(getModelDisplayName(s4.model));
+      return `<span class="ttft-legend-item" data-model="${escapeHtml(s4.model)}" role="button" tabindex="0" aria-pressed="false" title="Click to hide/show ${name}"><span class="ttft-legend-swatch" style="background:${color.border}"></span>${name}</span>`;
+    }).join("");
+    return `<div class="ttft-chart-wrap">
+<svg viewBox="0 0 ${TTFT_CHART_WIDTH} ${TTFT_CHART_HEIGHT}" class="ttft-chart" role="img" aria-label="Average time to first token per model over time">
+${yTicks}
+${xLabels}
+${paths}
+</svg>
+<div class="ttft-legend">${legend}</div>
+</div>`;
+  }
+  function renderTtftBucketTableRows(buckets) {
+    return buckets.slice().reverse().map((b3) => `<tr>
+<td>${escapeHtml(b3.label)}</td>
+<td>${escapeHtml(formatTtftSeconds(b3.avgSeconds))}</td>
+<td>${b3.count.toLocaleString()}</td>
+</tr>`).join("");
+  }
+  function renderTtftResults(granularity, buckets, series, sampleCount, fileCount) {
+    if (sampleCount === 0) {
+      return `<div class="info-box">
+<div class="info-box-title">\u{1F4ED} No TTFT data found</div>
+<div>
+Checked ${fileCount.toLocaleString()} session file(s) in the selected range; none had a debug log
+with a populated <code>attrs.ttft</code>. Try widening "Scan session files from" above, but also
+check VS Code's <b>GitHub \u203A Copilot \u203A Chat \u203A Agent Debug Log \u203A File Logging: Enabled</b> setting
+(Experimental) \u2014 it's off by default, and this data only exists for sessions that ran while it
+was on (a window reload is needed after enabling it).
+</div>
+</div>`;
+    }
+    const overallAvg = buckets.reduce((sum, b3) => sum + b3.avgSeconds * b3.count, 0) / Math.max(1, sampleCount);
+    return `<div class="summary-cards">
+<div class="summary-card">
+<div class="summary-label">\u23F1\uFE0F Overall Avg TTFT</div>
+<div class="summary-value">${escapeHtml(formatTtftSeconds(overallAvg))}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">\u{1F9E9} Models Shown</div>
+<div class="summary-value">${series.length}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">\u{1F4CA} Samples</div>
+<div class="summary-value">${sampleCount.toLocaleString()}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">\u{1F4C4} Session Files Checked</div>
+<div class="summary-value">${fileCount.toLocaleString()}</div>
+</div>
+</div>
+${renderTtftChartSvg(buckets, series)}
+<div class="table-container" style="margin-top: 12px; max-height: 320px;">
+<table class="session-table">
+<thead><tr><th>${TTFT_GRANULARITY_LABELS[granularity]}</th><th>Avg TTFT</th><th>Samples</th></tr></thead>
+<tbody>${renderTtftBucketTableRows(buckets)}</tbody>
+</table>
+</div>`;
+  }
+  function renderTtftTab() {
+    return `<div id="tab-ttft" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">\u23F1\uFE0F Time to First Token</div>
+<div>
+How long a chat model takes to start streaming a response, averaged per model over time.
+Read from VS Code Copilot Chat's own debug log (<code>attrs.ttft</code> on <code>llm_request</code>
+events) \u2014 the same file this extension already reads for exact per-session billing. This only
+exists for sessions that ran while VS Code's experimental <b>GitHub \u203A Copilot \u203A Chat \u203A Agent Debug
+Log \u203A File Logging: Enabled</b> setting was on (off by default, requires a window reload after
+enabling) \u2014 nothing in this extension's own settings. The unit isn't documented upstream, so
+values are auto-detected as seconds or milliseconds by magnitude.
+</div>
+</div>
+${renderTtftGranularitySelector(currentTtftGranularity)}
+${renderTtftScanRangeSelector(currentTtftScanRange)}
+<div id="ttft-results"></div>
+</div>`;
+  }
+  function triggerTtftAnalysis() {
+    const resultsDiv = document.getElementById("ttft-results");
+    if (resultsDiv) {
+      setHtml(resultsDiv, `
+        <div class="analyzer-loading">
+          <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+          <span>Scanning debug logs for TTFT\u2026</span>
+        </div>`);
+    }
+    vscode.postMessage({ command: "analyzeTtft", granularity: currentTtftGranularity, scanRange: currentTtftScanRange });
+  }
+  function setupTtftHandlers() {
+    document.getElementById("ttft-granularity")?.addEventListener("change", (e7) => {
+      currentTtftGranularity = e7.target.value;
+      diagState.patch({ ttftGranularity: currentTtftGranularity });
+      triggerTtftAnalysis();
+    });
+    document.getElementById("ttft-scan-range")?.addEventListener("change", (e7) => {
+      currentTtftScanRange = e7.target.value;
+      diagState.patch({ ttftScanRange: currentTtftScanRange });
+      triggerTtftAnalysis();
+    });
+    const resultsDiv = document.getElementById("ttft-results");
+    const toggleTtftModel = (item) => {
+      const model = item.dataset.model;
+      if (!model) {
+        return;
+      }
+      const hidden = item.classList.toggle("ttft-hidden");
+      item.setAttribute("aria-pressed", String(hidden));
+      document.querySelectorAll(".ttft-series").forEach((el2) => {
+        if (el2.dataset.model === model) {
+          el2.classList.toggle("ttft-hidden", hidden);
+        }
+      });
+    };
+    resultsDiv?.addEventListener("click", (e7) => {
+      const item = e7.target?.closest(".ttft-legend-item");
+      if (item) {
+        toggleTtftModel(item);
+      }
+    });
+    resultsDiv?.addEventListener("keydown", (e7) => {
+      if (e7.key !== "Enter" && e7.key !== " ") {
+        return;
+      }
+      const item = e7.target?.closest(".ttft-legend-item");
+      if (item) {
+        e7.preventDefault();
+        toggleTtftModel(item);
+      }
+    });
+  }
+  function handleTtftResult(message) {
+    const resultsDiv = document.getElementById("ttft-results");
+    if (!resultsDiv) {
+      return;
+    }
+    if (message.stillLoading) {
+      setHtml(resultsDiv, `
+        <div class="analyzer-loading">
+          <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+          <span id="ttft-loading-status">Waiting for session files to finish loading\u2026</span>
+        </div>`);
+      return;
+    }
+    setHtml(resultsDiv, renderTtftResults(
+      message.granularity || currentTtftGranularity,
+      message.buckets || [],
+      message.series || [],
+      Number(message.sampleCount || 0),
+      Number(message.fileCount || 0)
+    ));
+  }
   function buildDiagReportTabHtml(escapedReport) {
     return `<div id="tab-report" class="tab-content active">
 <div class="info-box">
@@ -6163,21 +6596,8 @@ code or conversation content. You can safely share this report when reporting is
 <div class="report-content">${escapedReport}</div>
 </div>`;
   }
-  function buildDiagRootHtml(data, detailedFiles, escapedReport) {
+  function renderTabBars(data, detailedFiles) {
     return `
-<style>${theme_default}</style>
-<style>${styles_default}</style>
-<div class="container">
-<div class="header">
-<div class="header-left">
-<span class="header-icon">\u{1F50D}</span>
-<span class="header-title">Diagnostic Report</span>
-</div>
-<div class="button-row">
-${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
-</div>
-</div>
-
 <div class="tabs group-tabs">
 <button class="group-tab active" data-group="diagnostics">\u{1FA7A} Diagnostics</button>
 <button class="group-tab" data-group="research">\u{1F52C} Research</button>
@@ -6197,6 +6617,7 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 <button class="tab" data-tab="tool-analysis">\u{1F527} Tool Analysis</button>
 <button class="tab" data-tab="skill-usage">\u{1F9E9} Skill Usage</button>
 <button class="tab" data-tab="otel-delta">\u{1F4E1} OTel Delta</button>
+<button class="tab" data-tab="ttft">\u23F1\uFE0F TTFT</button>
 </div>
 
 <div class="tabs leaf-tabs" data-group="settings" style="display: none;">
@@ -6204,7 +6625,24 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 <button class="tab" data-tab="backend">\u2601\uFE0F Backend Storage</button>
 <button class="tab" data-tab="github">\u{1F511} GitHub Auth</button>
 ${data.isDebugMode ? '<button class="tab" data-tab="debug">\u{1F41B} Debug</button>' : ""}
+</div>`;
+  }
+  function buildDiagRootHtml(data, detailedFiles, escapedReport) {
+    return `
+<style>${theme_default}</style>
+<style>${styles_default}</style>
+<div class="container">
+<div class="header">
+<div class="header-left">
+<span class="header-icon">\u{1F50D}</span>
+<span class="header-title">Diagnostic Report</span>
 </div>
+<div class="button-row">
+${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
+</div>
+</div>
+
+${renderTabBars(data, detailedFiles)}
 
 ${buildDiagReportTabHtml(escapedReport)}
 
@@ -6236,8 +6674,14 @@ ${renderModelUsageTab(detailedFiles, isLoading)}
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
 ${renderSkillUsageTab(data.skillCallStats, data.skillCallsByEditor, data.skillDescriptions, skillUsageEditorFilter)}
 ${renderOtelDeltaTab(data.otelComparison)}
+${renderTtftTab()}
 </div>
 `;
+  }
+  function resolveEarlyBackendState(data) {
+    currentBackendInfo = currentBackendInfo ?? data.backendStorageInfo;
+    currentGithubAuth = currentGithubAuth ?? data.githubAuth;
+    return { backendStorageInfo: currentBackendInfo, githubAuth: currentGithubAuth };
   }
   function renderLayout(data) {
     const root = document.getElementById("root");
@@ -6247,8 +6691,7 @@ ${renderOtelDeltaTab(data.otelComparison)}
     const detailedFiles = data.detailedSessionFiles || [];
     storedDetailedFiles = detailedFiles;
     isLoading = detailedFiles.length === 0;
-    currentBackendInfo = data.backendStorageInfo;
-    currentGithubAuth = data.githubAuth;
+    const earlyBackendState = resolveEarlyBackendState(data);
     currentOtelComparison = data.otelComparison;
     if (data.toolFamilies) {
       storedToolFamilies = data.toolFamilies;
@@ -6258,7 +6701,7 @@ ${renderOtelDeltaTab(data.otelComparison)}
     currentSkillDescriptions = data.skillDescriptions;
     const reportIsLoading = data.report === LOADING_PLACEHOLDER;
     const escapedReport = reportIsLoading ? LOADING_MESSAGE.trim() : removeSessionFilesSection(escapeHtml(data.report));
-    setHtml(root, buildDiagRootHtml(data, detailedFiles, escapedReport));
+    setHtml(root, buildDiagRootHtml({ ...data, ...earlyBackendState }, detailedFiles, escapedReport));
     const sessionFolders = groupSessionFolders(data.sessionFolders || []);
     if (sessionFolders.length > 0) {
       const reportTab = document.getElementById("tab-report");
@@ -6267,7 +6710,6 @@ ${renderOtelDeltaTab(data.otelComparison)}
         reportContent.insertAdjacentElement("afterend", buildSessionFoldersElement(sessionFolders));
       }
     }
-    setupMessageHandlers();
     setupTabHandlers();
     setupGroupHandlers();
     setupSortHandlers();
@@ -6288,6 +6730,7 @@ ${renderOtelDeltaTab(data.otelComparison)}
     setupToolAnalysisSortHandlers();
     setupSkillUsageFilterHandler();
     setupOtelDeltaPeriodHandler();
+    setupTtftHandlers();
     const savedState = diagState.restore();
     let restoredTab = "report";
     if (savedState?.activeTab && activateTab(savedState.activeTab)) {
@@ -6311,6 +6754,7 @@ ${renderOtelDeltaTab(data.otelComparison)}
     }
     renderLayout(initialData);
   }
+  setupMessageHandlers();
   void bootstrap();
 })();
 /*! Bundled license information:

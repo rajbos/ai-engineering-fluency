@@ -453,6 +453,15 @@ namespace AIEngineeringFluency.ToolWindow
                             break;
                         }
 
+                        // Diagnostic/handshake-only messages posted by the shared VS Code webview bundles.
+                        // The VS Code host consumes these (readiness signalling, extension-point telemetry);
+                        // the Visual Studio host has no equivalent surface, so they are intentionally no-ops
+                        // here rather than falling through to the "unknown command" warning below.
+                        case "usageWebviewReady":
+                        case "usageWebviewTrace":
+                        case "extensionPointAction":
+                            break;
+
                         default:
                             Utilities.OutputLogger.LogWarning($"Unknown WebMessage command: {cmd}");
                             break;

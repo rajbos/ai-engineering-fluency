@@ -1295,7 +1295,7 @@ function _muaMergeModelEfficiency(period: UsageAnalysisPeriod, analysis: Session
 	mergeModelEfficiency(period.modelEfficiency, analysis.modelEfficiency);
 }
 
-/** Merge a session's mode usage counters (incl. the optional Copilot App cliApp split) into the period aggregate. */
+/** Merge a session's mode usage counters (incl. the optional cliApp/claudeDesktop/claudeVsCode splits) into the period aggregate. */
 function _muaMergeModeUsage(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
 	period.modeUsage.ask += analysis.modeUsage.ask;
 	period.modeUsage.edit += analysis.modeUsage.edit;
@@ -1304,6 +1304,8 @@ function _muaMergeModeUsage(period: UsageAnalysisPeriod, analysis: SessionUsageA
 	period.modeUsage.customAgent += analysis.modeUsage.customAgent;
 	period.modeUsage.cli += analysis.modeUsage.cli;
 	period.modeUsage.cliApp = (period.modeUsage.cliApp ?? 0) + (analysis.modeUsage.cliApp ?? 0);
+	period.modeUsage.claudeDesktop = (period.modeUsage.claudeDesktop ?? 0) + (analysis.modeUsage.claudeDesktop ?? 0);
+	period.modeUsage.claudeVsCode = (period.modeUsage.claudeVsCode ?? 0) + (analysis.modeUsage.claudeVsCode ?? 0);
 }
 
 /**

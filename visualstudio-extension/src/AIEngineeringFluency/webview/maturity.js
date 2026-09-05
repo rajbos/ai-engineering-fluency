@@ -9546,6 +9546,20 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
   function escapeHtml(text) {
     return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
   }
+  function safeSectionHtml(label, builder, onError = (m2) => console.error(m2)) {
+    try {
+      return builder();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      onError(`[usage-webview] Section "${label}" failed to render: ${message}`);
+      return `<div class="section" style="border-color: rgba(239, 68, 68, 0.3);">
+			<div class="section-title"><span>\u26A0\uFE0F</span><span>${escapeHtml(label)}</span></div>
+			<div style="color: var(--text-secondary); font-size: 12px; padding: 8px 0;">
+				This section couldn't be displayed due to an unexpected error. Other sections are unaffected \u2014 try refreshing the dashboard.
+			</div>
+		</div>`;
+    }
+  }
   function markdownToHtml(text) {
     let escaped = escapeHtml(text);
     escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
@@ -9564,25 +9578,508 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     4: "Strategic, advanced use leveraging the full AI ecosystem"
   };
 
-  // src/webview/shared/extensionPoints.ts
-  function wireExtensionPointButtons(vscodeApi) {
-    const buttons = window.__EXTENSION_POINT_BUTTONS__ ?? [];
-    if (buttons.length === 0) {
-      return;
+  // src/webview/shared/messageHandler.ts
+  function collectOwnOrigins(currentWindow) {
+    const origins = [];
+    const origin = currentWindow.location?.origin;
+    if (origin && origin !== "null") {
+      origins.push(origin);
     }
+    const href = currentWindow.location?.href;
+    const derived = href ? /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href) : null;
+    if (derived && !origins.includes(derived[0])) {
+      origins.push(derived[0]);
+    }
+    return origins;
+  }
+  function isTrustedWebviewMessageSource(source, currentWindow, origin) {
+    if (source === null || source === void 0 || source === currentWindow) {
+      return true;
+    }
+    if (source === currentWindow.parent || source === currentWindow.top) {
+      return true;
+    }
+    return Boolean(origin) && collectOwnOrigins(currentWindow).includes(origin);
+  }
+  function registerMessageHandler(handler, onUntrustedMessage) {
+    window.addEventListener("message", (event) => {
+      if (!isTrustedWebviewMessageSource(event.source, window, event.origin)) {
+        onUntrustedMessage?.(event);
+        return;
+      }
+      handler(event.data);
+    });
+  }
+
+  // src/webview/shared/extensionPoints.ts
+  function buttonElementId(id) {
+    return `ext-point-${id}`;
+  }
+  function renderExtensionPointButtons(vscodeApi, buttons) {
     const buttonRow = document.querySelector(".button-row");
     if (!buttonRow) {
       return;
     }
+    const desiredIds = new Set(buttons.map((b3) => b3.id));
+    for (const existing of Array.from(buttonRow.querySelectorAll('[id^="ext-point-"]'))) {
+      const id = existing.id.slice("ext-point-".length);
+      if (!desiredIds.has(id)) {
+        existing.remove();
+      }
+    }
     for (const btn of buttons) {
+      if (document.getElementById(buttonElementId(btn.id))) {
+        continue;
+      }
       const el = document.createElement("vscode-button");
-      el.id = `ext-point-${btn.id}`;
+      el.id = buttonElementId(btn.id);
       el.textContent = btn.label;
       el.addEventListener("click", () => {
         vscodeApi.postMessage({ command: "extensionPointAction", buttonId: btn.id });
       });
       buttonRow.append(el);
     }
+  }
+  function wireExtensionPointButtons(vscodeApi) {
+    renderExtensionPointButtons(vscodeApi, window.__EXTENSION_POINT_BUTTONS__ ?? []);
+    if (window.__extensionPointButtonsListenerRegistered__) {
+      return;
+    }
+    window.__extensionPointButtonsListenerRegistered__ = true;
+    registerMessageHandler((message) => {
+      if (message?.command === "extensionPointButtonsUpdated" && Array.isArray(message.buttons)) {
+        renderExtensionPointButtons(vscodeApi, message.buttons);
+      }
+    });
+  }
+
+  // ../src/darkFactoryControls.json
+  var darkFactoryControls_default = {
+    description: "Dark Factory readiness control catalogue. Each control is one governance or evidence capability a repository either has, does not have, or that this scan cannot see. Stages follow the software-development dark factory maturity ladder and are assessed per repository (a product line), never per person and never for a whole enterprise.",
+    lastUpdated: "2026-09-01",
+    maxAssessableStage: 4,
+    stages: [
+      {
+        stage: 0,
+        name: "Manual / fragmented",
+        summary: "Human coding with inconsistent repositories and releases. The outcome sought here is visibility, not autonomy."
+      },
+      {
+        stage: 1,
+        name: "Standardized software delivery",
+        summary: "Trunk-oriented delivery, reliable tests, infrastructure as code, observability and service ownership. Nothing above this stage is trustworthy without it."
+      },
+      {
+        stage: 2,
+        name: "AI-assisted engineers",
+        summary: "Developers remain the authors. Repository-level instructions steer assistants; AI policy and telemetry boundaries are written down."
+      },
+      {
+        stage: 3,
+        name: "Agent-delegated, human-reviewed",
+        summary: "Small bounded work packages with strong review discipline. An agent may branch, implement, test and open a pull request, but cannot approve or merge its own work."
+      },
+      {
+        stage: 4,
+        name: "Spec-driven autonomous team",
+        summary: "Versioned specifications, acceptance scenarios, independent evaluators, risk classification and progressive delivery. Humans approve intent and outcomes, not every line."
+      },
+      {
+        stage: 5,
+        name: "Bounded dark factory",
+        summary: "Mature domain, executable intent, hidden holdouts, automated rollback and explicit legal accountability. A completely human-free merge path is not the current native GitHub model, and none of its defining evidence is machine-detectable \u2014 this scan never awards stage 5."
+      }
+    ],
+    controls: [
+      {
+        id: "ci-workflows",
+        stage: 1,
+        label: "CI workflows",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Automated delivery has to exist before anything can be delegated to an agent.",
+        remediation: "Add at least one GitHub Actions workflow under .github/workflows/."
+      },
+      {
+        id: "ci-test-execution",
+        stage: 1,
+        label: "Tests executed in CI",
+        tier: "filesystem",
+        evidence: "heuristic",
+        why: "A green build is only evidence when the build actually runs tests.",
+        remediation: "Run the test suite from a workflow step so every change is validated."
+      },
+      {
+        id: "reusable-workflows",
+        stage: 1,
+        label: "Reusable workflows",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Shared delivery definitions are what make a product line consistent rather than per-repository folklore.",
+        remediation: "Call a shared workflow with `uses: owner/repo/.github/workflows/file.yml@ref`."
+      },
+      {
+        id: "codeowners",
+        stage: 1,
+        label: "CODEOWNERS",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Service ownership has to be explicit before review can be held to anyone.",
+        remediation: "Add a CODEOWNERS file in .github/, the repository root, or docs/."
+      },
+      {
+        id: "dependabot",
+        stage: 1,
+        label: "Dependabot configuration",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Supply-chain currency is part of reliable delivery, not an AI feature.",
+        remediation: "Add .github/dependabot.yml."
+      },
+      {
+        id: "devcontainer",
+        stage: 1,
+        label: "Reproducible dev environment",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Agents and humans need the same reproducible environment for a result to transfer between them.",
+        remediation: "Add a .devcontainer/ configuration."
+      },
+      {
+        id: "infrastructure-as-code",
+        stage: 1,
+        label: "Infrastructure as code",
+        tier: "filesystem",
+        evidence: "heuristic",
+        why: "Environments that are clicked together by hand cannot be rebuilt or rolled back automatically.",
+        remediation: "Describe the environment in Terraform, Bicep, Pulumi, Helm or Kubernetes manifests."
+      },
+      {
+        id: "code-scanning",
+        stage: 1,
+        label: "Code scanning",
+        tier: "hybrid",
+        evidence: "direct",
+        why: "Static analysis is one of the few automated checks that keeps meaning when a machine wrote the code.",
+        remediation: "Enable CodeQL \u2014 either the default setup or a .github/workflows/codeql.yml workflow.",
+        unknownWhenAbsent: true,
+        unknownReason: "CodeQL default setup leaves no file in the repository, so a missing workflow does not mean scanning is off."
+      },
+      {
+        id: "branch-protection",
+        stage: 1,
+        label: "Branch protection or rulesets",
+        tier: "api",
+        evidence: "direct",
+        why: "Without an enforced target branch, every control above it is advisory.",
+        remediation: "Protect the default branch with a ruleset that requires status checks."
+      },
+      {
+        id: "artifact-attestations",
+        stage: 1,
+        label: "Artifact attestations",
+        tier: "hybrid",
+        evidence: "direct",
+        why: "Provenance is the evidence that the artefact you shipped is the artefact CI built.",
+        remediation: "Use actions/attest-build-provenance in the release workflow.",
+        unknownWhenAbsent: true,
+        unknownReason: "Attestations can be produced by workflows this scan cannot read, or by a shared reusable workflow."
+      },
+      {
+        id: "copilot-instructions",
+        stage: 2,
+        label: "Repository instructions",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Assistants need the repository's own conventions written down, not inferred.",
+        remediation: "Add .github/copilot-instructions.md."
+      },
+      {
+        id: "agent-instructions",
+        stage: 2,
+        label: "Agent instructions (AGENTS.md / CLAUDE.md)",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Cross-vendor agent instructions keep guidance in one place rather than per tool.",
+        remediation: "Add AGENTS.md (and mirror it for other agents where needed)."
+      },
+      {
+        id: "scoped-instructions",
+        stage: 2,
+        label: "Path-scoped instructions",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "A monolithic instruction file stops scaling once a repository has distinct subsystems.",
+        remediation: "Add .github/instructions/*.instructions.md scoped with applyTo globs."
+      },
+      {
+        id: "ai-policy",
+        stage: 2,
+        label: "AI usage policy and telemetry boundaries",
+        tier: "governance",
+        evidence: "not-scannable",
+        why: "The paper is explicit that AI adoption needs a stated policy and telemetry boundaries, and that individual performance scoring is out of bounds.",
+        remediation: "Write down the AI usage policy, what telemetry is collected, and that it is never used to score individuals."
+      },
+      {
+        id: "custom-agents",
+        stage: 3,
+        label: "Custom agents",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Bounded work packages need agents with a defined remit, not one general-purpose agent.",
+        remediation: "Define agents under .github/agents/."
+      },
+      {
+        id: "agent-skills",
+        stage: 3,
+        label: "Agent skills",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Repeatable procedures belong in a skill so every run does the same thing.",
+        remediation: "Add .github/skills/<name>/SKILL.md for the procedures agents keep repeating."
+      },
+      {
+        id: "mcp-configuration",
+        stage: 3,
+        label: "Declared MCP servers",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Tool access an agent is given has to be declared in the repository to be reviewable.",
+        remediation: "Declare the MCP servers the repository's agents may use in .vscode/mcp.json or .mcp.json."
+      },
+      {
+        id: "agent-authored-pull-requests",
+        stage: 3,
+        label: "Agent-authored pull requests",
+        tier: "api",
+        evidence: "direct",
+        why: "Delegation is only real once agents are actually opening pull requests in this repository.",
+        remediation: "Delegate a bounded work package to a coding agent and let it open a draft pull request."
+      },
+      {
+        id: "human-review-enforced",
+        stage: 3,
+        label: "Human review enforced on merge",
+        tier: "api",
+        evidence: "direct",
+        why: "The stage-3 boundary is that an agent can propose but cannot approve or merge its own work.",
+        remediation: "Require pull request reviews from someone other than the author on the protected branch."
+      },
+      {
+        id: "issue-forms",
+        stage: 4,
+        label: "Issue Forms as an intent queue",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Structured intent is what makes a work package specifiable rather than a paragraph of prose.",
+        remediation: "Add .github/ISSUE_TEMPLATE/*.yml Issue Forms capturing intent, constraints and acceptance criteria."
+      },
+      {
+        id: "versioned-specifications",
+        stage: 4,
+        label: "Versioned specifications",
+        tier: "filesystem",
+        evidence: "heuristic",
+        why: "Spec-driven work needs specifications that are reviewed and versioned like code.",
+        remediation: "Keep specifications under specs/ or docs/specs/ in the repository."
+      },
+      {
+        id: "executable-acceptance",
+        stage: 4,
+        label: "Executable acceptance scenarios",
+        tier: "filesystem",
+        evidence: "heuristic",
+        why: "Acceptance has to be executable for an evaluator to be independent of the implementer.",
+        remediation: "Express acceptance scenarios as executable tests (for example .feature files or an acceptance test suite)."
+      },
+      {
+        id: "independent-evaluator-agent",
+        stage: 4,
+        label: "Independent evaluator agents",
+        tier: "filesystem",
+        evidence: "heuristic",
+        why: "The implementation agent must not own the acceptance oracle it is judged by.",
+        remediation: "Define separate review, test or security agents under .github/agents/, distinct from the implementation agent."
+      },
+      {
+        id: "agentic-workflows",
+        stage: 4,
+        label: "Agentic workflows",
+        tier: "filesystem",
+        evidence: "direct",
+        why: "Autonomy that runs on a schedule or an event has to be defined in the repository to be governed.",
+        remediation: "Define agentic workflows in .github/workflows/ so their triggers and permissions are reviewable."
+      },
+      {
+        id: "deployment-environments",
+        stage: 4,
+        label: "Deployment environments declared",
+        tier: "hybrid",
+        evidence: "direct",
+        why: "Progressive delivery needs named environments before it can have gates.",
+        remediation: "Declare `environment:` on the deploying job.",
+        unknownWhenAbsent: true,
+        unknownReason: "Environments can be deployed to from a reusable workflow this scan cannot read."
+      },
+      {
+        id: "environment-protection-rules",
+        stage: 4,
+        label: "Environment protection rules",
+        tier: "api",
+        evidence: "direct",
+        why: "A named environment without required reviewers or wait timers gates nothing.",
+        remediation: "Add required reviewers or a wait timer to the production environment."
+      },
+      {
+        id: "risk-classification",
+        stage: 4,
+        label: "Documented risk classification",
+        tier: "governance",
+        evidence: "not-scannable",
+        why: "Autonomy is permitted per risk class, so the risk classes have to exist and be written down.",
+        remediation: "Classify the repository's change types by risk and state which classes may be handled autonomously."
+      }
+    ]
+  };
+
+  // ../src/darkFactoryReadiness.ts
+  var CATALOGUE = darkFactoryControls_default;
+  var DARK_FACTORY_CONTROLS = CATALOGUE.controls;
+  var DARK_FACTORY_STAGES = CATALOGUE.stages;
+  var MAX_ASSESSABLE_STAGE = CATALOGUE.maxAssessableStage;
+  var DARK_FACTORY_DISCLAIMER = "This scan reports the controls a repository has, per repository and never per person. It does not certify that anything is ready to run without human review.";
+  function nextStageToClose(report) {
+    return report.stages.find((s4) => s4.stage > report.confirmedStage);
+  }
+
+  // src/webview/maturity/darkFactorySection.ts
+  var VERDICT_PRESENTATION = {
+    attained: { label: "Attained", modifier: "df-verdict-attained" },
+    blocked: { label: "Blocked", modifier: "df-verdict-blocked" },
+    indeterminate: { label: "Unverified", modifier: "df-verdict-unverified" }
+  };
+  var SEVERITY_ICONS = {
+    high: "\u{1F534}",
+    medium: "\u{1F7E1}",
+    low: "\u{1F7E2}"
+  };
+  function controlsById(controls, ids) {
+    return ids.map((id) => controls.find((control) => control.id === id)).filter((control) => control !== void 0);
+  }
+  function buildBandHtml(repo) {
+    if (repo.fullyEvidenced) {
+      return `<div class="df-band df-band-complete">
+			<span class="df-band-stage">Stage ${repo.confirmedStage}</span>
+			<span class="df-band-note">every control observed</span>
+		</div>`;
+    }
+    const ceiling = repo.ceilingStage > repo.confirmedStage ? `<span class="df-band-note">up to Stage ${repo.ceilingStage} unverified &middot; ${repo.unknownCount} control(s) not checked</span>` : `<span class="df-band-note">${repo.unknownCount} control(s) not checked</span>`;
+    return `<div class="df-band">
+		<span class="df-band-stage">Stage ${repo.confirmedStage} confirmed</span>
+		${ceiling}
+	</div>`;
+  }
+  function buildControlItemHtml(control, secondLine) {
+    const heuristic = control.evidence === "heuristic" ? ' <span class="df-heuristic" title="Detected by pattern matching \u2014 a candidate, not a verdict">heuristic</span>' : "";
+    return `<li>
+		<span class="df-control-label">${escapeHtml(control.label)}</span>${heuristic}
+		<span class="df-control-detail">${escapeHtml(secondLine)}</span>
+	</li>`;
+  }
+  function buildBlockersHtml(stage, controls) {
+    if (stage.missing.length === 0) {
+      return "";
+    }
+    const items = controlsById(controls, stage.missing).map((control) => buildControlItemHtml(control, control.remediation)).join("");
+    return `<div class="df-block">
+		<div class="df-block-title">Missing for Stage ${stage.stage} &mdash; ${escapeHtml(stage.name)}</div>
+		<ul class="df-control-list">${items}</ul>
+	</div>`;
+  }
+  function buildUnknownsHtml(stage, controls) {
+    if (stage.unknown.length === 0) {
+      return "";
+    }
+    const items = controlsById(controls, stage.unknown).map((control) => buildControlItemHtml(control, control.detail ?? "State could not be determined.")).join("");
+    return `<div class="df-block df-block-unknown">
+		<div class="df-block-title">Could not check for Stage ${stage.stage}</div>
+		<ul class="df-control-list">${items}</ul>
+	</div>`;
+  }
+  function buildStageChipsHtml(repo) {
+    const chips = repo.stages.map((stage) => {
+      const presentation = VERDICT_PRESENTATION[stage.verdict];
+      const title = `${stage.name} \u2014 ${stage.summary}`;
+      return `<span class="df-chip ${presentation.modifier}" title="${escapeHtml(title)}">
+			<span class="df-chip-stage">${stage.stage}</span>${escapeHtml(presentation.label)}
+		</span>`;
+    }).join("");
+    return `<div class="df-chips">${chips}</div>`;
+  }
+  function buildFindingsHtml(findings) {
+    if (findings.length === 0) {
+      return "";
+    }
+    const items = findings.map((finding) => `<li>
+		<span class="df-finding-title">${SEVERITY_ICONS[finding.severity]} ${escapeHtml(finding.title)}</span>
+		<span class="df-control-detail">${escapeHtml(finding.detail)}</span>
+	</li>`).join("");
+    return `<div class="df-block df-block-findings">
+		<div class="df-block-title">Anti-patterns detected</div>
+		<ul class="df-control-list">${items}</ul>
+	</div>`;
+  }
+  function buildRepoCardHtml(repo) {
+    const nextStage = nextStageToClose(repo);
+    const identity = repo.nameWithOwner ? `<span class="df-repo-owner">${escapeHtml(repo.nameWithOwner)}</span>` : `<span class="df-repo-owner df-repo-owner-unknown">local repository &mdash; no GitHub remote resolved</span>`;
+    return `<div class="df-repo-card">
+		<div class="df-repo-head">
+			<span class="df-repo-name">${escapeHtml(repo.name)}</span>
+			${identity}
+		</div>
+		${buildBandHtml(repo)}
+		${buildStageChipsHtml(repo)}
+		${nextStage ? buildBlockersHtml(nextStage, repo.controls) : ""}
+		${nextStage ? buildUnknownsHtml(nextStage, repo.controls) : ""}
+		${buildFindingsHtml(repo.findings)}
+	</div>`;
+  }
+  function buildEvidenceNoticeHtml(report) {
+    const apiNote = report.apiSignalsIncluded ? "Pull-request evidence from the Usage Analysis view is included." : "No GitHub API evidence was available, so rulesets, required reviews, environment protection and scanning enablement are all reported as unchecked rather than missing.";
+    const skippedCount = report.skippedRepoCount;
+    const skipped = skippedCount > 0 ? ` ${skippedCount} further ${skippedCount === 1 ? "repository was" : "repositories were"} found but not scanned in this run.` : "";
+    return `<div class="df-notice">${apiNote}${skipped}</div>`;
+  }
+  function buildDarkFactorySectionHtml(report) {
+    if (!report) {
+      return "";
+    }
+    const body = report.repos.length === 0 ? `<div class="df-empty">No git repositories were found in this workspace, so there is nothing to assess. This scan reads repositories, never people.</div>` : report.repos.map(buildRepoCardHtml).join("");
+    return `
+		<div class="df-section">
+			<div class="df-section-head">
+				<span class="df-section-icon">\u{1F3ED}</span>
+				<span class="df-section-title">Dark Factory Readiness</span>
+				<span class="df-section-badge">per repository</span>
+			</div>
+			<div class="info-box">
+				<div class="info-box-title">\u{1F4CB} What this measures</div>
+				<div>
+					A dark factory is a governed, observable production system &mdash; humans specify intent, constraints, risk and
+					evidence of success while agents implement and validate. This section reports which of those governance and
+					evidence controls each repository in your workspace actually has, and the specific ones blocking the next stage.
+					<br><br>
+					<strong>It never tells you that you are ready to go dark.</strong> A green build from an unbounded agent is weak
+					evidence. ${escapeHtml(DARK_FACTORY_DISCLAIMER)} Stage 5 (a bounded dark factory) is never awarded: its
+					defining evidence is not machine-detectable.
+				</div>
+			</div>
+			${buildEvidenceNoticeHtml(report)}
+			${body}
+			<div class="df-footer">Scanned ${escapeHtml(new Date(report.scannedAt).toLocaleString())} &middot; Stages 1&ndash;${report.maxAssessableStage} are assessable; Stage 5 is not.</div>
+		</div>
+	`;
   }
 
   // src/webview/shared/theme.css
@@ -10860,6 +11357,225 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
 	margin-bottom: 6px;
 }
 
+
+/* \u2500\u2500 Dark Factory readiness section \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+   Rendered as its own block, visually separate from the personal fluency
+   cards above it: this ladder scores repositories, not people. */
+
+.df-section {
+	margin-top: 32px;
+	padding-top: 24px;
+	border-top: 2px solid var(--border-color);
+}
+
+.df-section-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+
+.df-section-icon {
+	font-size: 22px;
+}
+
+.df-section-title {
+	font-size: 18px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.df-section-badge {
+	font-size: 11px;
+	font-weight: 600;
+	padding: 2px 8px;
+	border-radius: 10px;
+	background: var(--badge-bg);
+	color: var(--badge-fg);
+}
+
+.df-notice {
+	font-size: 12px;
+	color: var(--text-secondary);
+	margin-bottom: 16px;
+	padding: 8px 12px;
+	border-left: 3px solid var(--border-color);
+	background: var(--bg-tertiary);
+}
+
+.df-empty {
+	font-size: 13px;
+	color: var(--text-secondary);
+	padding: 16px;
+	background: var(--bg-tertiary);
+	border-radius: 6px;
+}
+
+.df-repo-card {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	padding: 16px;
+	margin-bottom: 14px;
+}
+
+.df-repo-head {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-bottom: 10px;
+}
+
+.df-repo-name {
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.df-repo-owner {
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.df-repo-owner-unknown {
+	font-style: italic;
+	color: var(--text-muted);
+}
+
+.df-band {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+
+.df-band-stage {
+	font-size: 20px;
+	font-weight: 800;
+	color: var(--text-primary);
+}
+
+.df-band-note {
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.df-band-complete .df-band-note {
+	color: var(--success-fg);
+}
+
+.df-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 14px;
+}
+
+.df-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11px;
+	font-weight: 600;
+	padding: 3px 10px;
+	border-radius: 12px;
+	border: 1px solid var(--border-color);
+	color: var(--text-secondary);
+	background: var(--bg-secondary);
+}
+
+.df-chip-stage {
+	font-weight: 800;
+	color: var(--text-primary);
+}
+
+.df-verdict-attained {
+	border-color: var(--success-fg);
+	color: var(--success-fg);
+}
+
+.df-verdict-blocked {
+	border-color: var(--error-fg);
+	color: var(--error-fg);
+}
+
+.df-verdict-unverified {
+	border-color: var(--warning-fg);
+	color: var(--warning-fg);
+}
+
+.df-block {
+	margin-top: 12px;
+	padding: 10px 12px;
+	border-radius: 6px;
+	background: var(--bg-secondary);
+	border-left: 3px solid var(--error-fg);
+}
+
+.df-block-unknown {
+	border-left-color: var(--warning-fg);
+}
+
+.df-block-findings {
+	border-left-color: var(--error-fg);
+}
+
+.df-block-title {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--text-primary);
+	margin-bottom: 8px;
+}
+
+.df-control-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.df-control-list li {
+	margin-bottom: 8px;
+}
+
+.df-control-list li:last-child {
+	margin-bottom: 0;
+}
+
+.df-control-label {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.df-finding-title {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.df-control-detail {
+	display: block;
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-top: 2px;
+}
+
+.df-heuristic {
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	color: var(--text-muted);
+	margin-left: 6px;
+}
+
+.df-footer {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 8px;
+}
 `;
 
   // src/webview/maturity/main.ts
@@ -11217,6 +11933,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
         </div>
       </div>
       <div class="category-grid">${categoryCards}</div>
+      ${safeSectionHtml("Dark Factory Readiness", () => buildDarkFactorySectionHtml(data.darkFactory))}
       <div class="footer">
         <span class="footer-info">Based on last 30 days of activity &middot; Last updated: ${new Date(data.lastUpdated).toLocaleString()} &middot; Updates every 5 minutes</span>
         ${dismissedTips.length > 0 ? `<button id="btn-reset-tips" class="reset-tips-btn" title="Show all dismissed improvement suggestions again">\u{1F504} Reset Dismissed Tips</button>` : ""}

@@ -16341,25 +16341,79 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     }).format(value);
   }
 
-  // src/webview/shared/extensionPoints.ts
-  function wireExtensionPointButtons(vscodeApi) {
-    const buttons = window.__EXTENSION_POINT_BUTTONS__ ?? [];
-    if (buttons.length === 0) {
-      return;
+  // src/webview/shared/messageHandler.ts
+  function collectOwnOrigins(currentWindow) {
+    const origins = [];
+    const origin = currentWindow.location?.origin;
+    if (origin && origin !== "null") {
+      origins.push(origin);
     }
+    const href = currentWindow.location?.href;
+    const derived = href ? /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href) : null;
+    if (derived && !origins.includes(derived[0])) {
+      origins.push(derived[0]);
+    }
+    return origins;
+  }
+  function isTrustedWebviewMessageSource(source, currentWindow, origin) {
+    if (source === null || source === void 0 || source === currentWindow) {
+      return true;
+    }
+    if (source === currentWindow.parent || source === currentWindow.top) {
+      return true;
+    }
+    return Boolean(origin) && collectOwnOrigins(currentWindow).includes(origin);
+  }
+  function registerMessageHandler(handler, onUntrustedMessage) {
+    window.addEventListener("message", (event) => {
+      if (!isTrustedWebviewMessageSource(event.source, window, event.origin)) {
+        onUntrustedMessage?.(event);
+        return;
+      }
+      handler(event.data);
+    });
+  }
+
+  // src/webview/shared/extensionPoints.ts
+  function buttonElementId(id) {
+    return `ext-point-${id}`;
+  }
+  function renderExtensionPointButtons(vscodeApi, buttons) {
     const buttonRow = document.querySelector(".button-row");
     if (!buttonRow) {
       return;
     }
+    const desiredIds = new Set(buttons.map((b3) => b3.id));
+    for (const existing of Array.from(buttonRow.querySelectorAll('[id^="ext-point-"]'))) {
+      const id = existing.id.slice("ext-point-".length);
+      if (!desiredIds.has(id)) {
+        existing.remove();
+      }
+    }
     for (const btn of buttons) {
+      if (document.getElementById(buttonElementId(btn.id))) {
+        continue;
+      }
       const el2 = document.createElement("vscode-button");
-      el2.id = `ext-point-${btn.id}`;
+      el2.id = buttonElementId(btn.id);
       el2.textContent = btn.label;
       el2.addEventListener("click", () => {
         vscodeApi.postMessage({ command: "extensionPointAction", buttonId: btn.id });
       });
       buttonRow.append(el2);
     }
+  }
+  function wireExtensionPointButtons(vscodeApi) {
+    renderExtensionPointButtons(vscodeApi, window.__EXTENSION_POINT_BUTTONS__ ?? []);
+    if (window.__extensionPointButtonsListenerRegistered__) {
+      return;
+    }
+    window.__extensionPointButtonsListenerRegistered__ = true;
+    registerMessageHandler((message) => {
+      if (message?.command === "extensionPointButtonsUpdated" && Array.isArray(message.buttons)) {
+        renderExtensionPointButtons(vscodeApi, message.buttons);
+      }
+    });
   }
 
   // src/webview/shared/periodSelector.ts
@@ -16374,7 +16428,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     thisWeek: "This week",
     allTime: "All time"
   };
-  var CANONICAL_PERIODS = ["today", "last7", "last30", "currentMonth", "allTime"];
+  var CANONICAL_PERIODS = ["today", "last7", "last30", "last90", "currentMonth", "allTime"];
   function setOptionSelected(option, value, selected) {
     if (value === selected) {
       option.selected = true;
@@ -16479,6 +16533,41 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
         return next;
       }
     };
+  }
+
+  // ../src/timeWindows.ts
+  var ROLLING_WINDOW_DAYS = {
+    today: 1,
+    last7: 7,
+    last30: 30,
+    last90: 90
+  };
+  function getTimeWindowStartDate(timeWindow, now) {
+    if (timeWindow === "allTime") {
+      return null;
+    }
+    if (timeWindow === "currentMonth") {
+      return new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+    const days = ROLLING_WINDOW_DAYS[timeWindow];
+    if (days === void 0) {
+      return null;
+    }
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() - days + 1);
+  }
+  function getTimeWindowStartDayKey(timeWindow, now) {
+    const start = getTimeWindowStartDate(timeWindow, now);
+    if (!start) {
+      return "0000-00-00";
+    }
+    return [
+      start.getFullYear(),
+      String(start.getMonth() + 1).padStart(2, "0"),
+      String(start.getDate()).padStart(2, "0")
+    ].join("-");
+  }
+  function getTimeWindowStartMonthKey(timeWindow, now) {
+    return timeWindow === "allTime" ? "0000-00" : getTimeWindowStartDayKey(timeWindow, now).slice(0, 7);
   }
 
   // src/webview/shared/theme.css
@@ -16817,19 +16906,6 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   // src/webview/chart/styles.css
   var styles_default = "body {\n	margin: 0;\n	background: var(--bg-primary);\n	color: var(--text-primary);\n	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n}\n\n.container {\n	padding: 16px;\n	display: flex;\n	flex-direction: column;\n	gap: 32px;\n	max-width: 1200px;\n	margin: 0 auto;\n}\n\n.header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	gap: 12px;\n	padding-bottom: 4px;\n}\n\n.header-left {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n}\n\n.header-icon {\n	font-size: 20px;\n}\n\n.header-title {\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n	text-align: left;\n}\n\n\n\n.section {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 16px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n	text-align: center;\n}\n\n.section h3 {\n	margin: 0 0 10px;\n	font-size: 14px;\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	color: var(--text-primary);\n	letter-spacing: 0.2px;\n	text-align: left;\n}\n\n.cards {\n	display: grid;\n	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));\n	gap: 10px;\n	text-align: center;\n}\n\n.cards + .cards {\n	margin-top: 16px;\n}\n\n.editor-section {\n	margin-top: 16px;\n}\n\n.editor-section-header {\n	display: flex;\n	justify-content: flex-start;\n}\n\n.editor-list-toggle {\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	background: none;\n	border: none;\n	cursor: pointer;\n	padding: 0 0 8px;\n	margin: 0;\n	font-size: 13px;\n	font-weight: 600;\n	color: var(--text-primary);\n}\n\n.editor-list-toggle:hover {\n	color: var(--text-secondary);\n}\n\n.editor-list-chevron {\n	font-size: 10px;\n	color: var(--text-secondary);\n}\n\n.card {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 8px;\n	padding: 12px;\n	box-shadow: 0 2px 6px var(--shadow-color);\n	text-align: center;\n}\n\n.card-label {\n	color: var(--text-secondary);\n	font-size: 11px;\n	margin-bottom: 6px;\n}\n\n.card-value {\n	color: var(--text-primary);\n	font-size: 18px;\n	font-weight: 700;\n}\n\n.card-sub {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 2px;\n}\n\n.chart-section-header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	margin-bottom: 10px;\n}\n\n.chart-section-header h3 {\n	margin: 0;\n}\n\n.chart-shell {	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 2px 8px var(--shadow-color);\n	text-align: center;\n}\n\n.chart-controls {\n	display: flex;\n	flex-direction: column;\n	gap: 10px;\n	margin-bottom: 12px;\n}\n\n.chart-controls-row {\n	display: flex;\n	flex-wrap: wrap;\n	align-items: center;\n	gap: 10px;\n	justify-content: flex-start;\n	padding-bottom: 10px;\n	border-bottom: 1px solid var(--border-subtle);\n}\n\n.chart-controls-row:last-child {\n	padding-bottom: 0;\n	border-bottom: none;\n}\n\n.control-group {\n	display: flex;\n	gap: 4px;\n	align-items: center;\n}\n\n.control-label {\n	font-size: 11px;\n	color: var(--text-secondary);\n}\n\n.loading-note {\n	font-size: 11px;\n	color: var(--text-secondary);\n	margin-left: 4px;\n	white-space: nowrap;\n}\n\n.control-group-separator {\n	width: 1px;\n	height: 20px;\n	background: var(--border-subtle);\n	margin: 0 4px;\n	flex-shrink: 0;\n}\n\n.period-controls {\n	display: flex;\n	gap: 4px;\n	align-items: center;\n}\n\n.period-controls-label {\n	font-size: 11px;\n	color: var(--text-secondary);\n	margin-right: 4px;\n}\n\n.period-controls .toggle {\n	padding: 6px 10px;\n}\n\n.toggle {\n	background: var(--button-secondary-bg);\n	border: 1px solid var(--border-subtle);\n	color: var(--text-primary);\n	padding: 6px 12px;\n	border-radius: 6px;\n	font-size: 12px;\n	cursor: pointer;\n	transition: all 0.15s ease;\n	min-height: 30px;\n	display: inline-flex;\n	align-items: center;\n	justify-content: center;\n}\n\n.toggle.active {\n	background: var(--button-bg);\n	border-color: var(--button-bg);\n	color: var(--button-fg);\n}\n\n.toggle:hover {\n	background: var(--button-secondary-hover-bg);\n}\n\n.toggle.active:hover {\n	background: var(--button-hover-bg);\n}\n\n.toggle:disabled {\n	opacity: 0.45;\n	cursor: not-allowed;\n}\n\n.toggle:disabled:hover {\n	background: var(--button-secondary-bg);\n}\n\n.canvas-wrap {\n	position: relative;\n	height: 420px;\n}\n\n.footer {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 6px;\n	text-align: center;\n}\n\n.footer em {\n	color: var(--text-secondary);\n}\n\n.hidden {\n	display: none !important;\n}\n\n.toggle.dim {\n	opacity: 0.6;\n}\n\n.toggle.disabled {\n	opacity: 0.45;\n	cursor: not-allowed;\n}\n\n.toggle.disabled:hover {\n	background: var(--button-secondary-bg);\n}\n\n.time-window-select {\n	background: var(--button-secondary-bg);\n	border: 1px solid var(--border-subtle);\n	color: var(--text-primary);\n	border-radius: 6px;\n	padding: 6px 10px;\n	font-size: 12px;\n	cursor: pointer;\n	outline: none;\n	min-height: 30px;\n}\n\n.time-window-select:focus {\n	border-color: var(--button-bg);\n}\n\n.time-window-select option {\n	background: var(--bg-secondary);\n	color: var(--text-primary);\n}\n\n/* Language Heatmap */\n.heatmap-container {\n	position: relative;\n	min-height: 420px;\n	overflow: auto;\n}\n\n.heatmap-wrap {\n	width: 100%;\n	min-height: 380px;\n	display: flex;\n	flex-direction: column;\n	padding-top: 8px;\n}\n\n.heatmap-empty {\n	flex: 1;\n	display: flex;\n	align-items: center;\n	justify-content: center;\n	color: var(--text-muted);\n	font-size: 13px;\n	min-height: 380px;\n}\n\n.heatmap-table {\n	border-collapse: separate;\n	border-spacing: 3px;\n	width: 100%;\n	table-layout: fixed;\n}\n\n.heatmap-lang-header {\n	width: 72px;\n	min-width: 72px;\n}\n\n.heatmap-date-header {\n	height: 56px;\n	vertical-align: bottom;\n	padding: 0 0 2px 0;\n	text-align: center;\n}\n\n.heatmap-date-header span {\n	display: block;\n	writing-mode: vertical-lr;\n	transform: rotate(180deg);\n	white-space: nowrap;\n	font-size: 10px;\n	color: var(--text-primary);\n	font-weight: 500;\n	opacity: 0.85;\n	max-height: 54px;\n	overflow: hidden;\n	margin: 0 auto;\n}\n\n.heatmap-lang-label {\n	text-align: right;\n	padding-right: 8px;\n	font-size: 11px;\n	color: var(--text-secondary);\n	white-space: nowrap;\n	overflow: hidden;\n	text-overflow: ellipsis;\n	max-width: 72px;\n	height: 22px;\n}\n\n.heatmap-data-cell {\n	border-radius: 3px;\n	cursor: default;\n	height: 22px;\n	transition: opacity 0.1s ease;\n}\n\n.heatmap-data-cell:hover {\n	opacity: 0.75;\n	outline: 1px solid rgba(34, 197, 94, 0.7);\n	outline-offset: -1px;\n}\n";
 
-  // src/webview/shared/messageHandler.ts
-  function isTrustedWebviewMessageSource(source, currentWindow) {
-    return source === null || source === currentWindow;
-  }
-  function registerMessageHandler(handler) {
-    window.addEventListener("message", (event) => {
-      if (!isTrustedWebviewMessageSource(event.source, window)) {
-        return;
-      }
-      handler(event.data);
-    });
-  }
-
   // src/webview/chart/main.ts
   var vscode = acquireVsCodeApi();
   var initialData = getWindowData("__INITIAL_CHART__");
@@ -16867,39 +16943,6 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   function saveWebviewState() {
     chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode, editorListCollapsed });
   }
-  function getWindowStartDate(timeWindow, now) {
-    const y3 = now.getFullYear();
-    const m2 = now.getMonth();
-    const d3 = now.getDate();
-    switch (timeWindow) {
-      case "today":
-        return `${y3}-${String(m2 + 1).padStart(2, "0")}-${String(d3).padStart(2, "0")}`;
-      case "last7": {
-        const start = new Date(y3, m2, d3 - 6);
-        return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
-      }
-      case "last30": {
-        const start = new Date(y3, m2, d3 - 29);
-        return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
-      }
-      case "currentMonth":
-        return `${y3}-${String(m2 + 1).padStart(2, "0")}-01`;
-      case "allTime":
-        return "0000-00-00";
-    }
-  }
-  function getWindowStartMonth(timeWindow, now) {
-    if (timeWindow === "allTime") {
-      return "0000-00";
-    }
-    const y3 = now.getFullYear();
-    const m2 = now.getMonth();
-    if (timeWindow === "currentMonth") {
-      return `${y3}-${String(m2 + 1).padStart(2, "0")}`;
-    }
-    const start = new Date(y3, m2, timeWindow === "today" ? 1 : timeWindow === "last7" ? -5 : -29);
-    return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}`;
-  }
   function sliceByIndices(arr, indices) {
     if (!arr) {
       return void 0;
@@ -16916,7 +16959,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     });
   }
   function getFilterStartKey(timeWindow, periodType, now) {
-    return periodType === "month" ? getWindowStartMonth(timeWindow, now) : getWindowStartDate(timeWindow, now);
+    return periodType === "month" ? getTimeWindowStartMonthKey(timeWindow, now) : getTimeWindowStartDayKey(timeWindow, now);
   }
   function buildCoreFilteredPeriod(period, indices) {
     const totalTokens = indices.reduce((sum, i6) => sum + period.tokensData[i6], 0);
@@ -17059,6 +17102,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     if (currentMetric === "output") {
       return periodMeta.outputTitle;
     }
+    if (currentMetric === "sessions") {
+      return periodMeta.sessionsTitle;
+    }
     let titleText = periodMeta.title;
     if (currentDisplayMode === "rolling" && currentSplit === "total") {
       titleText += ` (${getRollingLabel()})`;
@@ -17090,21 +17136,21 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     return filterPeriodByTimeWindow(period, currentTimeWindow, currentPeriod);
   }
   var PERIOD_LABELS2 = {
-    day: { title: "Token Usage", footer: "Day-by-day token usage", countLabel: "Total Days", avgLabel: "Avg Tokens / Day", aggregationLabel: "Aggregated by Day", costTitle: "Est. Cost", avgCostLabel: "Avg Cost / Day", outputTitle: "Lines of Code", avgLocLabel: "Avg Lines / Day" },
-    week: { title: "Token Usage", footer: "Week-by-week token usage", countLabel: "Total Weeks", avgLabel: "Avg Tokens / Week", aggregationLabel: "Aggregated by Week", costTitle: "Est. Cost", avgCostLabel: "Avg Cost / Week", outputTitle: "Lines of Code", avgLocLabel: "Avg Lines / Week" },
-    month: { title: "Token Usage", footer: "Monthly token usage", countLabel: "Total Months", avgLabel: "Avg Tokens / Month", aggregationLabel: "Aggregated by Month", costTitle: "Est. Cost", avgCostLabel: "Avg Cost / Month", outputTitle: "Lines of Code", avgLocLabel: "Avg Lines / Month" }
+    day: { title: "Token Usage \u2013 Last 30 Days", footer: "Day-by-day token usage for the last 30 days", countLabel: "Total Days", avgLabel: "Avg Tokens / Day", aggregationLabel: "Aggregated by Day", costTitle: "Est. Cost \u2013 Last 30 Days", avgCostLabel: "Avg Cost / Day", outputTitle: "Lines of Code \u2013 Last 30 Days", avgLocLabel: "Avg Lines / Day", sessionsTitle: "Sessions \u2013 Last 30 Days", avgSessionsLabel: "Avg Sessions / Day" },
+    week: { title: "Token Usage \u2013 Last 6 Weeks", footer: "Week-by-week token usage for the last 6 weeks", countLabel: "Total Weeks", avgLabel: "Avg Tokens / Week", aggregationLabel: "Aggregated by Week", costTitle: "Est. Cost \u2013 Last 6 Weeks", avgCostLabel: "Avg Cost / Week", outputTitle: "Lines of Code \u2013 Last 6 Weeks", avgLocLabel: "Avg Lines / Week", sessionsTitle: "Sessions \u2013 Last 6 Weeks", avgSessionsLabel: "Avg Sessions / Week" },
+    month: { title: "Token Usage \u2013 Last 12 Months", footer: "Monthly token usage for the last 12 months", countLabel: "Total Months", avgLabel: "Avg Tokens / Month", aggregationLabel: "Aggregated by Month", costTitle: "Est. Cost \u2013 Last 12 Months", avgCostLabel: "Avg Cost / Month", outputTitle: "Lines of Code \u2013 Last 12 Months", avgLocLabel: "Avg Lines / Month", sessionsTitle: "Sessions \u2013 Last 12 Months", avgSessionsLabel: "Avg Sessions / Month" }
   };
   function isComboSupported(metric, split) {
     if (metric === "sessions") {
-      return split === "total" || split === "model" || split === "editor" || split === "provider";
+      return split === "total" || split === "model" || split === "editor" || split === "provider" || split === "task";
     }
     if (metric === "cost") {
-      return split === "total" || split === "model" || split === "editor" || split === "provider";
+      return split === "total" || split === "model" || split === "editor" || split === "provider" || split === "task";
     }
     if (metric === "output") {
-      return split !== "model" && split !== "provider" && split !== "taskCategory";
+      return split !== "model" && split !== "provider" && split !== "task" && split !== "taskCategory";
     }
-    return split !== "language";
+    return split !== "language" && split !== "provider";
   }
   function buildChartHeader(data) {
     const header = el("div", "header");
@@ -17117,39 +17163,36 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     header.append(headerLeft, buttons);
     return header;
   }
-  function getSummaryTotal(periodData) {
-    switch (currentMetric) {
-      case "cost":
-        return { label: "Total Cost (est.)", value: `$${periodData.totalCost.toFixed(2)}` };
-      case "output":
-        return { label: "Total Lines (AI)", value: ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString() };
-      case "sessions":
-        return { label: "Total Sessions", value: periodData.totalSessions.toLocaleString() };
-      default:
-        return { label: "Total Tokens", value: formatCompact(periodData.totalTokens) };
+  function getSummaryValues(periodData, periodMeta) {
+    if (currentMetric === "cost") {
+      return { totalLabel: "Total Cost (est.)", totalValue: `$${periodData.totalCost.toFixed(2)}`, avgLabel: periodMeta.avgCostLabel, avgValue: `$${periodData.avgCostPerPeriod.toFixed(2)}` };
     }
-  }
-  function getSummaryAverage(periodData, periodMeta) {
-    switch (currentMetric) {
-      case "cost":
-        return { label: periodMeta.avgCostLabel, value: `$${periodData.avgCostPerPeriod.toFixed(2)}` };
-      case "output":
-        return { label: periodMeta.avgLocLabel, value: Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString() };
-      case "sessions":
-        return { label: `Avg Sessions / ${periodMeta.countLabel.replace("Total ", "")}`, value: Math.round(periodData.totalSessions / (periodData.periodCount || 1)).toLocaleString() };
-      default:
-        return { label: periodMeta.avgLabel, value: formatCompact(periodData.avgPerPeriod) };
+    if (currentMetric === "output") {
+      return {
+        totalLabel: "Total Lines (AI)",
+        totalValue: ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString(),
+        avgLabel: periodMeta.avgLocLabel,
+        avgValue: Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString()
+      };
     }
+    if (currentMetric === "sessions") {
+      return {
+        totalLabel: "Total Sessions",
+        totalValue: periodData.totalSessions.toLocaleString(),
+        avgLabel: periodMeta.avgSessionsLabel,
+        avgValue: Math.round(periodData.totalSessions / Math.max(1, periodData.periodCount)).toLocaleString()
+      };
+    }
+    return { totalLabel: "Total Tokens", totalValue: formatCompact(periodData.totalTokens), avgLabel: periodMeta.avgLabel, avgValue: formatCompact(periodData.avgPerPeriod) };
   }
   function buildSummaryCards(periodData, periodMeta) {
-    const total = getSummaryTotal(periodData);
-    const average = getSummaryAverage(periodData, periodMeta);
+    const { totalLabel, totalValue, avgLabel, avgValue } = getSummaryValues(periodData, periodMeta);
     const cards = el("div", "cards");
     cards.id = "summary-cards";
     cards.append(
       buildCard("card-period-count", periodMeta.countLabel, periodData.periodCount.toLocaleString()),
-      buildCard("card-total-tokens", total.label, total.value),
-      buildCard("card-avg-tokens", average.label, average.value),
+      buildCard("card-total-tokens", totalLabel, totalValue),
+      buildCard("card-avg-tokens", avgLabel, avgValue),
       buildCard("card-total-sessions", "Total Sessions", periodData.totalSessions.toLocaleString())
     );
     return cards;
@@ -17181,7 +17224,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     const { wrapper } = createPeriodSelector({
       id: "time-window-select",
       selected: currentTimeWindow,
-      disabled: periodsReady ? [] : ["allTime"],
+      disabled: periodsReady ? [] : ["last90", "allTime"],
       disabledTitle: "Full history is still loading",
       label: "Time window:",
       onChange: (value) => {
@@ -17192,7 +17235,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     group.append(wrapper);
     if (!periodsReady) {
       const loadingNote = el("span", "loading-note", "Loading history\u2026");
-      loadingNote.title = 'Full history is still loading. "All time" and weekly/monthly aggregation are not available yet.';
+      loadingNote.title = 'Full history is still loading. "Last 90 days", "All time", and weekly/monthly aggregation are not available yet.';
       group.append(loadingNote);
     }
     return group;
@@ -17217,24 +17260,26 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   function buildSplitControl() {
     const group = el("div", "control-group");
     group.append(el("span", "control-label", "Split:"));
-    const mkSplit = (id, split, label) => {
+    const mkSplit = (id, split, label, tooltip) => {
       const supported = isComboSupported(currentMetric, split);
-      const btn = el("button", `toggle${currentSplit === split ? " active" : ""}${!supported ? " disabled" : ""}`, label);
+      const btn = el("button", `toggle${currentSplit === split || currentSplit === "taskCategory" && split === "task" ? " active" : ""}${!supported ? " disabled" : ""}`, label);
       btn.id = id;
       if (!supported) {
         btn.disabled = true;
         btn.title = `Not available for ${currentMetric} metric`;
+      } else if (tooltip) {
+        btn.title = tooltip;
       }
       return btn;
     };
     group.append(
       mkSplit("split-total", "total", "Total"),
-      mkSplit("split-model", "model", "By Model"),
-      mkSplit("split-editor", "editor", "By Editor"),
+      mkSplit("split-model", "model", "By Model", "Click a model name in the chart legend to hide its data; click it again to show it."),
+      mkSplit("split-editor", "editor", "By Editor", "Click an editor name in the chart legend to hide its data; click it again to show it."),
       mkSplit("split-provider", "provider", "\u{1F3F7}\uFE0F By Provider"),
       mkSplit("split-repository", "repository", "By Repository"),
       mkSplit("split-language", "language", "By Language"),
-      mkSplit("split-taskcategory", "taskCategory", "By Task")
+      mkSplit("split-task", "task", "By Task")
     );
     return group;
   }
@@ -17376,10 +17421,20 @@ Updates automatically every 5 minutes.`
       }
     };
     updateCard("card-period-count", periodMeta.countLabel, periodData.periodCount.toLocaleString());
-    const total = getSummaryTotal(periodData);
-    const average = getSummaryAverage(periodData, periodMeta);
-    updateCard("card-total-tokens", total.label, total.value);
-    updateCard("card-avg-tokens", average.label, average.value);
+    if (currentMetric === "cost") {
+      updateCard("card-total-tokens", "Total Cost (est.)", `$${periodData.totalCost.toFixed(2)}`);
+      updateCard("card-avg-tokens", periodMeta.avgCostLabel, `$${periodData.avgCostPerPeriod.toFixed(2)}`);
+    } else if (currentMetric === "output") {
+      const totalLines = (periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0);
+      updateCard("card-total-tokens", "Total Lines (AI)", totalLines.toLocaleString());
+      updateCard("card-avg-tokens", periodMeta.avgLocLabel, Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString());
+    } else if (currentMetric === "sessions") {
+      updateCard("card-total-tokens", "Total Sessions", periodData.totalSessions.toLocaleString());
+      updateCard("card-avg-tokens", periodMeta.avgSessionsLabel, Math.round(periodData.totalSessions / Math.max(1, periodData.periodCount)).toLocaleString());
+    } else {
+      updateCard("card-total-tokens", "Total Tokens", formatCompact(periodData.totalTokens));
+      updateCard("card-avg-tokens", periodMeta.avgLabel, formatCompact(periodData.avgPerPeriod));
+    }
     updateCard("card-total-sessions", null, periodData.totalSessions.toLocaleString());
     const title = document.getElementById("chart-title");
     if (title) {
@@ -17459,7 +17514,7 @@ Updates automatically every 5 minutes.`;
       { id: "split-repository", split: "repository" },
       { id: "split-language", split: "language" },
       { id: "split-provider", split: "provider" },
-      { id: "split-taskcategory", split: "taskCategory" }
+      { id: "split-task", split: "task" }
     ];
     splitButtons.forEach(({ id, split }) => {
       const btn = document.getElementById(id);
@@ -17532,28 +17587,11 @@ Updates automatically every 5 minutes.`;
     }
     chart = new Chart2(ctx, createConfig(data));
   }
-  function clampSplitForMetric(metric) {
-    if (metric === "cost" && currentSplit !== "model" && currentSplit !== "editor" && currentSplit !== "provider") {
-      currentSplit = "total";
-      return;
-    }
-    if (metric === "output" && currentSplit === "model") {
-      currentSplit = "total";
-      return;
-    }
-    if (metric === "tokens" && currentSplit === "language") {
-      currentSplit = "total";
-      return;
-    }
-    if (metric === "sessions" && currentSplit !== "total" && currentSplit !== "model" && currentSplit !== "editor" && currentSplit !== "provider") {
-      currentSplit = "total";
-    }
-  }
   async function switchMetric(metric, data) {
     if (currentMetric === metric) {
       return;
     }
-    clampSplitForMetric(metric);
+    currentSplit = getPreferredSplitForMetric(metric, currentSplit);
     currentMetric = metric;
     const rollingApplicable = currentSplit === "total" && metric !== "output";
     if (!rollingApplicable) {
@@ -17582,11 +17620,34 @@ Updates automatically every 5 minutes.`;
     updateSummaryCards(data);
     await reinitChart(data);
   }
-  function isSplitSupported(metric, split) {
-    if (metric === "sessions") {
-      return split === "total" || split === "model" || split === "editor" || split === "provider";
+  function getPreferredSplitForMetric(metric, split) {
+    const normalized = split === "taskCategory" ? "task" : split;
+    if (metric === "cost") {
+      return normalized === "editor" || normalized === "provider" || normalized === "task" ? normalized : "total";
     }
-    return metric === "cost" && (split === "total" || split === "model" || split === "editor" || split === "provider") || metric === "output" && split !== "model" && split !== "provider" && split !== "taskCategory" || metric === "tokens" && split !== "language";
+    if (metric === "output") {
+      return normalized === "model" || normalized === "provider" || normalized === "task" ? "total" : normalized;
+    }
+    if (metric === "tokens") {
+      return normalized === "language" ? "total" : normalized;
+    }
+    if (metric === "sessions") {
+      return normalized === "total" || normalized === "model" || normalized === "editor" || normalized === "provider" || normalized === "task" ? normalized : "total";
+    }
+    return normalized;
+  }
+  function isSplitSupported(metric, split) {
+    const normalized = split === "taskCategory" ? "task" : split;
+    if (metric === "sessions") {
+      return normalized === "total" || normalized === "model" || normalized === "editor" || normalized === "provider" || normalized === "task";
+    }
+    if (metric === "cost") {
+      return normalized === "total" || normalized === "model" || normalized === "editor" || normalized === "provider" || normalized === "task";
+    }
+    if (metric === "output") {
+      return normalized !== "model" && normalized !== "provider" && normalized !== "task" && normalized !== "taskCategory";
+    }
+    return normalized !== "language" && normalized !== "provider";
   }
   async function reinitChart(data) {
     refreshHeatmapView(data);
@@ -17670,12 +17731,13 @@ Updates automatically every 5 minutes.`;
     });
   }
   function setActiveSplit(split) {
-    ["split-total", "split-model", "split-editor", "split-repository", "split-language", "split-provider", "split-taskcategory"].forEach((id) => {
+    const normalized = split === "taskCategory" ? "task" : split;
+    ["split-total", "split-model", "split-editor", "split-repository", "split-language", "split-provider", "split-task"].forEach((id) => {
       const btn = document.getElementById(id);
       if (!btn) {
         return;
       }
-      btn.classList.toggle("active", id === `split-${split}`);
+      btn.classList.toggle("active", id === `split-${normalized}`);
     });
   }
   function updateSplitButtonStates() {
@@ -17686,7 +17748,7 @@ Updates automatically every 5 minutes.`;
       { id: "split-repository", split: "repository" },
       { id: "split-language", split: "language" },
       { id: "split-provider", split: "provider" },
-      { id: "split-taskcategory", split: "taskCategory" }
+      { id: "split-task", split: "task" }
     ];
     splits.forEach(({ id, split }) => {
       const btn = document.getElementById(id);
@@ -17744,7 +17806,7 @@ Updates automatically every 5 minutes.`;
     };
   }
   function buildBaseOptions(c4, periodsReady) {
-    const title = !periodsReady && currentTimeWindow === "allTime" ? `${PERIOD_LABELS2[currentTimeWindow]} (loading history\u2026)` : PERIOD_LABELS2[currentTimeWindow];
+    const title = !periodsReady && (currentTimeWindow === "last90" || currentTimeWindow === "allTime") ? `${PERIOD_LABELS2[currentTimeWindow]} (loading history\u2026)` : PERIOD_LABELS2[currentTimeWindow];
     return {
       responsive: true,
       maintainAspectRatio: false,
@@ -18006,6 +18068,48 @@ Updates automatically every 5 minutes.`;
       }
     };
   }
+  function buildSessionsTotalViewConfig(period, baseOptions, c4) {
+    const isRolling = currentDisplayMode === "rolling";
+    const sessionsData = isRolling ? computeRollingAverage(period.sessionsData, ROLLING_WINDOW[currentPeriod]) : period.sessionsData;
+    const rollingLabel = getRollingLabel();
+    return {
+      type: "bar",
+      data: { labels: period.labels, datasets: [{ label: isRolling ? rollingLabel : "Sessions", data: sessionsData, backgroundColor: "rgba(255, 99, 132, 0.6)", borderColor: "rgba(255, 99, 132, 1)", borderWidth: 1, type: isRolling ? "line" : void 0, tension: isRolling ? 0.4 : void 0, fill: isRolling ? false : void 0 }] },
+      options: {
+        ...baseOptions,
+        scales: {
+          x: { stacked: true, grid: { color: c4.gridColor }, ticks: { color: c4.textColor, font: { size: 11 } } },
+          y: { stacked: true, type: "linear", display: true, position: "left", grid: { color: c4.gridColor }, ticks: { color: c4.textColor, font: { size: 11 }, callback: (value) => Number(value).toLocaleString() }, title: { display: true, text: "Sessions", color: c4.textColor, font: { size: 12, weight: "bold" } } }
+        }
+      }
+    };
+  }
+  function buildTaskCategoryViewConfig(period, baseOptions, c4, metric) {
+    const datasets = metric === "cost" ? period.taskCategoryCostDatasets ?? [] : metric === "sessions" ? period.taskCategorySessionDatasets ?? [] : period.taskCategoryTokenDatasets ?? [];
+    const yAxisTitle = metric === "cost" ? "Estimated Cost (USD)" : metric === "sessions" ? "Sessions" : "Tokens";
+    const valueFormatter = metric === "cost" ? (value) => `$${Number(value).toFixed(2)}` : (value) => Number(value).toLocaleString();
+    return {
+      type: "bar",
+      data: { labels: period.labels, datasets },
+      options: {
+        ...baseOptions,
+        plugins: {
+          ...baseOptions.plugins,
+          legend: { position: "top", labels: { color: c4.textColor, font: { size: 11 } } },
+          tooltip: {
+            ...baseOptions.plugins.tooltip,
+            callbacks: {
+              label: (ctx) => ` ${ctx.dataset.label}: ${metric === "cost" ? `$${Number(ctx.parsed.y).toFixed(4)}` : Number(ctx.parsed.y).toLocaleString()}`
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, grid: { color: c4.gridColor }, ticks: { color: c4.textColor, font: { size: 11 } } },
+          y: { stacked: true, type: "linear", display: true, position: "left", grid: { color: c4.gridColor }, ticks: { color: c4.textColor, font: { size: 11 }, callback: (value) => valueFormatter(Number(value)) }, title: { display: true, text: yAxisTitle, color: c4.textColor, font: { size: 12, weight: "bold" } } }
+        }
+      }
+    };
+  }
   function getHeatmapColor(value, maxValue) {
     if (maxValue === 0 || value === 0) {
       return "rgba(128, 128, 128, 0.06)";
@@ -18102,7 +18206,7 @@ Updates automatically every 5 minutes.`;
     }
   }
   function buildStackedViewConfig(view, period, baseOptions, c4) {
-    const datasets = view === "model" ? period.modelDatasets : view === "repository" ? period.repositoryDatasets : view === "taskCategory" ? period.taskCategoryDatasets ?? [] : view === "provider" ? period.providerTokensDatasets ?? [] : period.editorDatasets;
+    const datasets = view === "model" ? period.modelDatasets : view === "repository" ? period.repositoryDatasets : view === "task" || view === "taskCategory" ? period.taskCategoryDatasets ?? period.taskCategoryTokenDatasets ?? [] : view === "provider" ? period.providerTokensDatasets ?? [] : period.editorDatasets;
     const lastIdx = period.tokensData.length - 1;
     const projExtra = lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
     const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.tokensData.map((_2, i6) => i6 === lastIdx ? Math.round(projExtra) : 0), backgroundColor: "rgba(200, 200, 200, 0.25)", borderColor: "rgba(200, 200, 200, 0.5)", borderWidth: 1 }] : [];
@@ -18142,8 +18246,8 @@ Updates automatically every 5 minutes.`;
     if (split === "repository") {
       return "repository";
     }
-    if (split === "taskCategory") {
-      return "taskCategory";
+    if (split === "task" || split === "taskCategory") {
+      return "task";
     }
     if (split === "provider") {
       return "provider";
@@ -18160,6 +18264,9 @@ Updates automatically every 5 minutes.`;
     if (split === "provider") {
       return "cost-provider";
     }
+    if (split === "task" || split === "taskCategory") {
+      return "cost-task";
+    }
     return "cost";
   }
   function resolveSessionsView(split) {
@@ -18172,19 +18279,26 @@ Updates automatically every 5 minutes.`;
     if (split === "provider") {
       return "sessions-provider";
     }
+    if (split === "task" || split === "taskCategory") {
+      return "sessions-task";
+    }
     return "sessions";
   }
   function resolveChartView(metric, split) {
+    const normalized = split === "taskCategory" ? "task" : split;
+    if (metric === "output") {
+      return `output-${normalized}`;
+    }
     if (metric === "sessions") {
-      return resolveSessionsView(split);
+      return resolveSessionsView(normalized);
     }
     if (metric === "tokens") {
-      return resolveTokensView(split);
+      return resolveTokensView(normalized);
     }
     if (metric === "cost") {
-      return resolveCostView(split);
+      return resolveCostView(normalized);
     }
-    return `output-${split}`;
+    return `output-${normalized}`;
   }
   function createConfig(data) {
     const period = getActivePeriodData(data);
@@ -18210,8 +18324,20 @@ Updates automatically every 5 minutes.`;
     if (view === "cost-provider") {
       return buildCostProviderViewConfig(period, baseOptions, c4);
     }
+    if (view === "cost-task") {
+      return buildTaskCategoryViewConfig(period, baseOptions, c4, "cost");
+    }
+    if (view === "sessions-total") {
+      return buildSessionsTotalViewConfig(period, baseOptions, c4);
+    }
+    if (view === "sessions-task") {
+      return buildTaskCategoryViewConfig(period, baseOptions, c4, "sessions");
+    }
     if (view.startsWith("output-")) {
       return buildOutputViewConfig(view, period, baseOptions, c4);
+    }
+    if (view === "task") {
+      return buildTaskCategoryViewConfig(period, baseOptions, c4, "tokens");
     }
     return buildStackedViewConfig(view, period, baseOptions, c4);
   }
@@ -18221,7 +18347,9 @@ Updates automatically every 5 minutes.`;
       model: { metric: "tokens", split: "model" },
       editor: { metric: "tokens", split: "editor" },
       repository: { metric: "tokens", split: "repository" },
-      cost: { metric: "cost", split: "total" }
+      cost: { metric: "cost", split: "total" },
+      task: { metric: "tokens", split: "task" },
+      taskCategory: { metric: "tokens", split: "task" }
     };
     return map3[view] ?? { metric: "tokens", split: "total" };
   }
@@ -18238,7 +18366,7 @@ Updates automatically every 5 minutes.`;
         currentMetric = initialData2.initialMetric;
       }
       if (initialData2.initialSplit) {
-        currentSplit = initialData2.initialSplit;
+        currentSplit = initialData2.initialSplit === "taskCategory" ? "task" : initialData2.initialSplit;
       } else if (initialData2.initialView) {
         const m2 = migrateViewKey(initialData2.initialView);
         currentMetric = m2.metric;
@@ -18246,9 +18374,9 @@ Updates automatically every 5 minutes.`;
       }
       return;
     }
-    currentPeriod = saved.period;
+    currentPeriod = saved.period ?? "day";
     currentTimeWindow = saved.timeWindow ?? "last30";
-    currentDisplayMode = saved.displayMode;
+    currentDisplayMode = saved.displayMode ?? "actual";
     editorListCollapsed = saved.editorListCollapsed ?? false;
     if (saved.view && !saved.metric) {
       const m2 = migrateViewKey(saved.view);
@@ -18256,7 +18384,7 @@ Updates automatically every 5 minutes.`;
       currentSplit = m2.split;
     } else {
       currentMetric = saved.metric ?? "tokens";
-      currentSplit = saved.split ?? "total";
+      currentSplit = saved.split === "taskCategory" ? "task" : saved.split ?? "total";
     }
   }
   async function bootstrap() {
