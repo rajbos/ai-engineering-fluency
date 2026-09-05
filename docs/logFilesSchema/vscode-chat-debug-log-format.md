@@ -1,7 +1,7 @@
 ---
 title: VS Code Copilot Chat Debug Log Format
 created: 2026-09-03
-updated: 2026-09-03
+updated: 2026-09-05
 status: active
 type: reference
 tags: [copilot-chat, vscode, debug-log, aiu, billing, schema]
@@ -31,11 +31,41 @@ VSCodium, Cursor, and the `.vscode-server*` remote roots) — see
 
 ## Format
 
-JSON-lines. Each line is one event object with a `type` and an `attrs` payload.
+JSON-lines. Verified against a real machine's logs (270 files, 10 sampled, 1,726 lines) via the
+[`discover-debug-log-schema`](../../.github/skills/discover-debug-log-schema/SKILL.md) skill.
+Every line shares a common envelope, then a `type`-specific `attrs` payload:
 
-**This project currently reads exactly one event type: `llm_request`.** Other types are known
-to exist (`request_start` and `request_end` appear in our own test fixtures) but are parsed by
-nothing — see [What we do not read](#what-we-do-not-read).
+| Field | Type | Meaning |
+|---|---|---|
+| `type` | string | Event type — see the table below |
+| `sid` | string | Session id |
+| `spanId` | string | This event's span id |
+| `parentSpanId` | string | Parent span id (absent on some root-level events) |
+| `ts` | number | Timestamp |
+| `dur` | number | **Duration of this span** — present on every event type, not just `llm_request` |
+| `status` | string | Outcome (e.g. success/error) |
+| `name` | string | Human-readable span name |
+| `attrs` | object | Type-specific payload, below |
+
+Eleven event types were observed. **This project currently reads exactly one: `llm_request`.**
+Everything else is parsed by nothing:
+
+| Type | Records (sample) | Read by this repo? |
+|---|---|---|
+| `llm_request` | 278 | **Yes** — the only one |
+| `tool_call` | 300 | No |
+| `generic` | 286 | No |
+| `turn_start` / `turn_end` | 268 each | No |
+| `agent_response` | 264 | No |
+| `session_start` | 16 | No |
+| `hook` | 18 | No |
+| `user_message` | 12 | No |
+| `discovery` | 10 | No |
+| `child_session_ref` | 6 | No |
+
+An earlier version of this page guessed the ignored types were named `request_start` /
+`request_end`, sourced from a comment in this repo's own test fixtures rather than a real log.
+**That was wrong** — no such types exist. The table above is the verified list.
 
 ### `llm_request`
 
@@ -54,6 +84,34 @@ sums these `attrs`:
 
 Events without a `model` still contribute to the totals; they are just excluded from the
 per-model breakdown.
+
+**Also present on every `llm_request` record and read by nothing:** `attrs.ttft`
+(time-to-first-token, populated on all 278/278 sampled records — real per-call latency, no OTel
+export needed), `attrs.debugName`, `attrs.responseId`, `attrs.maxTokens`, `attrs.temperature` /
+`attrs.topP` (only on calls where set), and `attrs.userRequest` / `attrs.inputMessages` /
+`attrs.requestOptions` / `attrs.requestShape` / `attrs.systemPromptFile` / `attrs.toolsFile`
+(prompt/response content and shape — treat as sensitive, see
+[Privacy of a real log](#privacy-of-a-real-log)).
+
+### Other event types worth knowing about
+
+Not parsed by this repo, but real and worth designing toward:
+
+- **`tool_call`** — one per tool invocation, with `dur` (latency), `status`, `attrs.args`,
+  `attrs.result`, and `attrs.error` (present on 2/300 sampled — real failures). This is
+  full tool-latency-and-outcome data, the debug-log equivalent of the OTel export's
+  `execute_tool` spans and `copilot_chat.tool.call.duration` metric — already here, no export
+  needed.
+- **`turn_start` / `turn_end`** — bracket one agent turn via a shared `attrs.turnId`; each also
+  carries its own `dur`.
+- **`agent_response`** — the assistant's response per turn; `attrs.reasoning` is present on
+  72/264 sampled records (reasoning-model turns).
+- **`session_start`** — `attrs.copilotVersion` / `attrs.vscodeVersion`. Useful as a
+  schema-version signal: a future schema change would likely correlate with a version bump here.
+- **`child_session_ref`** — links a subagent/subtask log back to its parent via
+  `attrs.childSessionId` and `attrs.childLogFile`.
+- **`hook`**, **`user_message`**, **`discovery`**, **`generic`** — hook execution, the raw user
+  prompt, and lower-signal telemetry-shaped records.
 
 ## The AI Unit billing path
 
@@ -103,16 +161,32 @@ disabled. The optional OTLP/file export is the same data on a different transpor
 That is why this log carries AI Units at all, and why it needs no setup from the user — which
 is the property that makes it the right source for this project.
 
+## Privacy of a real log
+
+Confirmed by running the discovery skill: `llm_request.attrs.userRequest` and
+`.inputMessages`, `agent_response.attrs.response`, and `user_message.attrs.content` carry raw
+prompt and response text. `tool_call.attrs.args` / `.result` carry tool arguments and output,
+which routinely include file contents and paths. Treat any `--include-examples` output, or
+this file itself, as sensitive — never paste it into an issue, PR, or chat without redacting
+first.
+
 ## What we do not read
 
-Our parser matches `type === 'llm_request'` and discards every other line. Known-present
-types we ignore include `request_start` and `request_end`. If those carry timings, per-call
-latency would be derivable with no user configuration — **unverified**; nobody has looked at a
-real log to find out.
+Our parser matches `type === 'llm_request'` and discards every other line — ten other event
+types, per [Format](#format) above, none of them parsed by anything in this repo.
 
-Run the [`discover-debug-log-schema`](../../.github/skills/discover-debug-log-schema/SKILL.md)
-skill on a machine with real sessions to enumerate every event type and field this format
-actually contains, and update this page from what it reports.
+This was **unverified** until run against a real machine: the earlier version of this page
+guessed at event type names from a stale test-fixture comment rather than a real log, and
+guessed wrong (see the correction in [Format](#format)). Running
+[`discover-debug-log-schema`](../../.github/skills/discover-debug-log-schema/SKILL.md) is what
+turned "unverified" into the verified table above — re-run it after a Copilot Chat update to
+catch drift, and to see whether new event types have appeared.
+
+The clearest opportunity in what's ignored: `llm_request.attrs.ttft` and `tool_call`'s
+`dur`/`status` give real latency and tool-outcome data with **zero user configuration** —
+the debug log already carries what the OTel export's `time_to_first_token` and
+`tool.call.duration` metrics would add. A future feature only needs a parser for two more
+event types, not a new data source.
 
 ## Drift risk
 
