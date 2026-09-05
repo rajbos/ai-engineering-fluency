@@ -319,6 +319,8 @@ test('marks HydraFusion sessions in the recent sessions list', async () => {
 	assert.match(row.textContent, /12\.5K/);
 	assert.match(row.textContent, /1\.5M/);
 	assert.match(row.textContent, /\$12\.35/);
+	const costCell = [...row.cells].find(cell => cell.textContent === '$12.35');
+	assert.equal(costCell?.title, '$12.3450');
 });
 
 test('renders cloud agent session results', async () => {

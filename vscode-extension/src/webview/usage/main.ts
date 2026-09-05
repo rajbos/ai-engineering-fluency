@@ -1138,7 +1138,9 @@ const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 	{ id: 'thinkingTokens', label: 'Thinking', sortKey: 'thinkingTokens', align: 'right', render: s => formatCompactSessionNumber(s.thinkingTokens) },
 	{ id: 'cachedTokens', label: 'Cached', sortKey: 'cachedTokens', align: 'right', render: s => formatCompactSessionNumber(s.cachedTokens) },
 	{ id: 'totalTokens', label: 'Total', sortKey: 'totalTokens', align: 'right', render: s => formatCompactSessionNumber(s.totalTokens) },
-	{ id: 'estimatedCost', label: 'Cost', sortKey: 'estimatedCost', align: 'right', render: s => ({ html: s.estimatedCost > 0 ? formatCost(s.estimatedCost) : '—' }) },
+	{ id: 'estimatedCost', label: 'Cost', sortKey: 'estimatedCost', align: 'right', render: s => s.estimatedCost > 0
+		? { html: formatCost(s.estimatedCost), title: `$${s.estimatedCost.toFixed(4)}` }
+		: { html: '—' } },
 	{ id: 'editor', label: 'Editor', sortKey: 'editor', align: 'left', render: s => ({ html: escapeHtml(s.editor || 'unknown') }) },
 	{ id: 'workspace', label: 'Workspace', sortKey: 'workspace', align: 'left', cellStyle: 'max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const workspace = escapeHtml(s.workspace || '—'); return { html: workspace, title: workspace }; } },
 	{ id: 'models', label: 'Models', align: 'left', cellStyle: 'font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—'; return { html: models, title: models }; } },
