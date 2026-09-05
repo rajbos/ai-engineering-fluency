@@ -168,12 +168,18 @@
 .attr-bars { margin: 8px 0 18px 0; }
 .attr-bar-row {
 	display: grid;
-	grid-template-columns: 190px 1fr 90px;
+	grid-template-columns: 230px 1fr 120px;
 	align-items: center;
 	gap: 10px;
 	margin-bottom: 8px;
 }
 .attr-bar-label { font-size: 0.88em; text-align: right; }
+.attr-bar-detail,
+.attr-bar-effect {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.78em;
+	margin-top: 2px;
+}
 .attr-bar-track {
 	position: relative;
 	height: 20px;
@@ -194,6 +200,22 @@
 .attr-bar-fill.pos { background: var(--vscode-charts-red, #fb7185); }
 .attr-bar-fill.neg { background: var(--vscode-charts-green, #4ade80); }
 .attr-bar-value { font-size: 0.88em; font-variant-numeric: tabular-nums; }
+.attr-waterfall {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 18px;
+	margin: -8px 0 14px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.82em;
+}
+.attr-waterfall span:not(:last-child)::after {
+	content: '→';
+	margin-left: 18px;
+}
+.attr-waterfall b {
+	color: var(--vscode-foreground);
+	font-variant-numeric: tabular-nums;
+}
 
 .attr-shift-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
 .attr-shift-table th, .attr-shift-table td {

@@ -8,6 +8,7 @@ import {
 	computeSkillImpact,
 	computeEfficiencyDeltas,
 	computeValueSignals,
+	getTrailingWindowBoundaries,
 	splitTrailingWindows,
 	computeModelPeriodMetrics,
 	listComparableModels,
@@ -247,6 +248,19 @@ test('splitTrailingWindows: partitions days into trailing and previous 30-day wi
 	const { prevDays, curDays } = splitTrailingWindows(days, NOW);
 	assert.deepEqual(curDays.map(d => d.date).sort(), ['2026-06-16', '2026-07-15']);
 	assert.deepEqual(prevDays.map(d => d.date).sort(), ['2026-05-17', '2026-06-15']);
+});
+
+test('getTrailingWindowBoundaries: returns adjacent inclusive 30-day ranges', () => {
+	const boundaries = getTrailingWindowBoundaries(NOW);
+	assert.deepEqual(
+		[
+			boundaries.prevStart,
+			boundaries.prevEnd,
+			boundaries.curStart,
+			boundaries.curEnd,
+			].map(d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`),
+		['2026-05-17', '2026-06-15', '2026-06-16', '2026-07-15'],
+	);
 });
 
 // ── computeEfficiencyDeltas ──────────────────────────────────────────────────

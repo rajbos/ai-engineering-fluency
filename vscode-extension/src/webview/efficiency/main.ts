@@ -245,15 +245,15 @@ function renderDeltasTab(d: EfficiencyViewData): string {
 		<div class="delta-grid">${cards}</div>`;
 }
 
-function attrBar(label: string, value: number, maxAbs: number, explain: string): string {
+function attrBar(label: string, detail: string, value: number, maxAbs: number, explain: string): string {
 	const widthPct = maxAbs > 0 ? Math.min(50, (Math.abs(value) / maxAbs) * 50) : 0;
 	const side = value >= 0 ? `left: 50%; width: ${widthPct}%;` : `right: 50%; width: ${widthPct}%;`;
 	const cls = value >= 0 ? 'pos' : 'neg';
 	return `
 		<div class="attr-bar-row" title="${escapeHtml(explain)}">
-			<div class="attr-bar-label">${escapeHtml(label)}</div>
+			<div class="attr-bar-label">${escapeHtml(label)}<div class="attr-bar-detail">${escapeHtml(detail)}</div></div>
 			<div class="attr-bar-track"><div class="attr-bar-mid"></div><div class="attr-bar-fill ${cls}" style="${side}"></div></div>
-			<div class="attr-bar-value">${fmtMoney(value)}</div>
+			<div class="attr-bar-value">${fmtMoney(value)}<div class="attr-bar-effect">estimated cost effect</div></div>
 		</div>`;
 }
 
@@ -263,10 +263,12 @@ function renderAttributionTab(d: EfficiencyViewData): string {
 		return `<p class="eff-section-note">Not enough data to decompose the cost change — both compared windows need at least one session with token data.</p>`;
 	}
 	const maxAbs = Math.max(Math.abs(a.volumeEffect), Math.abs(a.efficiencyEffect), Math.abs(a.mixEffect), 0.01);
+	const afterVolume = a.prev.cost + a.volumeEffect;
+	const afterEfficiency = afterVolume + a.efficiencyEffect;
 	const shifts = a.modelShifts.length === 0 ? '' : `
 		<h3>Model mix movement</h3>
 		<table class="attr-shift-table">
-			<thead><tr><th>Model</th><th class="num">${escapeHtml(capitalizeFirst(d.attributionWindows.prev))}</th><th class="num">${escapeHtml(capitalizeFirst(d.attributionWindows.cur))}</th><th class="num">Shift</th></tr></thead>
+			<thead><tr><th>Model</th><th class="num">${escapeHtml(d.attributionWindows.prevRange)}</th><th class="num">${escapeHtml(d.attributionWindows.curRange)}</th><th class="num">Shift</th></tr></thead>
 			<tbody>
 				${a.modelShifts.map(s => `
 					<tr>
@@ -278,16 +280,17 @@ function renderAttributionTab(d: EfficiencyViewData): string {
 			</tbody>
 		</table>`;
 	return `
-		<p class="eff-section-note">Why did your estimated cost change from ${escapeHtml(d.attributionWindows.prev)} to ${escapeHtml(d.attributionWindows.cur)}? The change decomposes exactly into three effects: <b>volume</b> (you used AI more or less), <b>session efficiency</b> (each session consumed more or fewer tokens), and <b>model mix</b> (your blended price per token changed by switching models). Green bars reduce cost; red bars increase it.</p>
+		<p class="eff-section-note">The periods are adjacent, not overlapping: ${escapeHtml(capitalizeFirst(d.attributionWindows.prev))} is <b>${escapeHtml(d.attributionWindows.prevRange)}</b>; ${escapeHtml(d.attributionWindows.cur)} is <b>${escapeHtml(d.attributionWindows.curRange)}</b>. Each bar is a <b>what-if dollar amount</b>, not a session count: starting from the earlier cost, the factors are applied in order. Green reduces estimated cost; red increases it.</p>
 		<div class="attr-summary">
-			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.prev))}</div><div class="stat-value">$${a.prev.cost.toFixed(2)}</div><div class="stat-sub">${a.prev.sessions} sessions · ${formatCompact(a.prev.tokens)} tokens</div></div>
-			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.cur))}</div><div class="stat-value">$${a.cur.cost.toFixed(2)}</div><div class="stat-sub">${a.cur.sessions} sessions · ${formatCompact(a.cur.tokens)} tokens</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.prev))}</div><div class="stat-value">$${a.prev.cost.toFixed(2)}</div><div class="stat-sub">${escapeHtml(d.attributionWindows.prevRange)} · ${a.prev.sessions} sessions · ${formatCompact(a.prev.tokens)} tokens</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.cur))}</div><div class="stat-value">$${a.cur.cost.toFixed(2)}</div><div class="stat-sub">${escapeHtml(d.attributionWindows.curRange)} · ${a.cur.sessions} sessions · ${formatCompact(a.cur.tokens)} tokens</div></div>
 			<div class="attr-stat"><div class="stat-label">Change</div><div class="stat-value">${fmtMoney(a.deltaCost)}</div><div class="stat-sub">blended rate ${a.prev.dollarsPerMTokens.toFixed(2)} → ${a.cur.dollarsPerMTokens.toFixed(2)} $/M tokens</div></div>
 		</div>
+		<div class="attr-waterfall"><span>Starting cost <b>$${a.prev.cost.toFixed(2)}</b></span><span>After session count <b>$${afterVolume.toFixed(2)}</b></span><span>After session size <b>$${afterEfficiency.toFixed(2)}</b></span><span>After model mix <b>$${a.cur.cost.toFixed(2)}</b></span></div>
 		<div class="attr-bars">
-			${attrBar('Volume (session count)', a.volumeEffect, maxAbs, `Session count went from ${a.prev.sessions} to ${a.cur.sessions}.`)}
-			${attrBar('Session efficiency (tokens/session)', a.efficiencyEffect, maxAbs, `Tokens per session went from ${Math.round(a.prev.tokensPerSession)} to ${Math.round(a.cur.tokensPerSession)}.`)}
-			${attrBar('Model mix ($/token)', a.mixEffect, maxAbs, `Blended price went from ${a.prev.dollarsPerMTokens.toFixed(2)} to ${a.cur.dollarsPerMTokens.toFixed(2)} $/M tokens.`)}
+			${attrBar('Volume (session count)', `${a.prev.sessions.toLocaleString()} → ${a.cur.sessions.toLocaleString()} sessions`, a.volumeEffect, maxAbs, `Session count went from ${a.prev.sessions} to ${a.cur.sessions}.`)}
+			${attrBar('Session size (tokens/session)', `${formatCompact(a.prev.tokensPerSession)} → ${formatCompact(a.cur.tokensPerSession)} tokens/session`, a.efficiencyEffect, maxAbs, `Tokens per session went from ${Math.round(a.prev.tokensPerSession)} to ${Math.round(a.cur.tokensPerSession)}.`)}
+			${attrBar('Model mix ($/token)', `$${a.prev.dollarsPerMTokens.toFixed(2)} → $${a.cur.dollarsPerMTokens.toFixed(2)} /M tokens`, a.mixEffect, maxAbs, `Blended price went from ${a.prev.dollarsPerMTokens.toFixed(2)} to ${a.cur.dollarsPerMTokens.toFixed(2)} $/M tokens.`)}
 		</div>
 		${shifts}`;
 }
