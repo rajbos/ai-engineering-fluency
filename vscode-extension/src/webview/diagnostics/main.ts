@@ -10,16 +10,29 @@ import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
 import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import { registerMessageHandler } from "../shared/messageHandler";
+import { getModelColor } from "../../../../src/chartDataBuilder";
+import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
 import { initializeWebviewLocalization, setCurrentLanguage } from "../shared/localization";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
 const SESSION_FILES_SECTION_REGEX =
   /Session File Locations \(first 20\):[\s\S]*?(?=\n\s*\n|={70})/;
-const LOADING_MESSAGE = `⏳ Loading diagnostic data...
-
-This may take a few moments depending on the number of session files.
-The view will automatically update when data is ready.`;
+/**
+ * Live-updating loading state for the Report tab, shown while `data.report` is still the
+ * LOADING_PLACEHOLDER. `#report-loading-subtext` is updated in place by
+ * handleSessionFilesLoadProgress() as the background scan streams processed/total counts —
+ * unlike the old plain-text LOADING_MESSAGE, this always reflects real progress instead of
+ * sitting static until the whole report is ready. handleDiagnosticReport() wipes this out
+ * (via .textContent =) the moment the real report arrives, so there's nothing to clean up.
+ */
+const LOADING_MESSAGE = `<div class="analyzer-loading" style="flex-direction:column;align-items:flex-start;gap:6px;">
+<div style="display:flex;align-items:center;gap:10px;">
+<span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+<span>⏳ Loading diagnostic data…</span>
+</div>
+<div id="report-loading-subtext" style="font-size:12px;color:var(--text-muted);">Scanning session files…</div>
+</div>`;
 
 import {
   ContextReferenceUsage,
@@ -185,6 +198,7 @@ type ToolFamilyConfig = {
 };
 
 type OtelDeltaPeriod = "all" | "today" | "yesterday" | "week" | "month";
+type TtftGranularity = "day" | "week" | "month";
 
 type DiagnosticsViewState = {
   activeTab?: string;
@@ -192,6 +206,7 @@ type DiagnosticsViewState = {
   otelDeltaPeriod?: OtelDeltaPeriod;
   shareCardPeriod?: Period;
   skillUsageEditorFilter?: string;
+  ttftGranularity?: TtftGranularity;
 };
 
 type FolderFileResult = {
@@ -225,10 +240,12 @@ const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   otelDeltaPeriod: "all",
   shareCardPeriod: "last14",
   skillUsageEditorFilter: "all",
+  ttftGranularity: "day",
 });
 
 let currentOtelComparison: CopilotCliOtelComparison | null | undefined;
 let currentOtelDeltaPeriod: OtelDeltaPeriod = diagState.restore().otelDeltaPeriod ?? "all";
+let currentTtftGranularity: TtftGranularity = diagState.restore().ttftGranularity ?? "day";
 
 // Periods offered by the Share Card's period selector, in display order.
 const SHARE_CARD_PERIOD_ORDER: Period[] = ["last7", "last14", "last30", "last90", "allTime"];
@@ -1523,7 +1540,7 @@ function activateTab(tabId: string): boolean {
 /** Which group tab (Diagnostics / Research / Settings) each leaf tab lives under. */
 const TAB_GROUPS: Record<string, string[]> = {
   diagnostics: ["report", "sessions", "cache", "path-analyzer"],
-  research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta"],
+  research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta", "ttft"],
   settings: ["display", "backend", "github", "debug"],
 };
 
@@ -1939,6 +1956,9 @@ function setupTabHandlers(): void {
         if (tabId === "model-usage") {
           const resultsDiv = document.getElementById("model-usage-results");
           if (resultsDiv && !resultsDiv.innerHTML.trim()) { triggerModelUsageAnalysis(); }
+        } else if (tabId === "ttft") {
+          const resultsDiv = document.getElementById("ttft-results");
+          if (resultsDiv && !resultsDiv.innerHTML.trim()) { triggerTtftAnalysis(); }
         }
       }
     });
@@ -2446,6 +2466,12 @@ function handleSessionFilesLoadProgress(message: DiagMessage): void {
   const shareSubtext = document.getElementById("share-loading-subtext");
   if (shareSubtext) { shareSubtext.textContent = progressText; }
 
+  const reportSubtext = document.getElementById("report-loading-subtext");
+  if (reportSubtext) { reportSubtext.textContent = progressText; }
+
+  const ttftLoadingStatus = document.getElementById("ttft-loading-status");
+  if (ttftLoadingStatus) { ttftLoadingStatus.textContent = progressText; }
+
   const modelUsageStatus = document.getElementById("model-usage-status");
   if (modelUsageStatus) {
     modelUsageStatus.textContent = total > 0 ? `⏳ Loading sessions… (${processed}/${total})` : "⏳ Loading sessions…";
@@ -2475,6 +2501,13 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
   if (modelUsageStatus) { modelUsageStatus.textContent = ""; }
 
   triggerModelUsageAnalysis();
+
+  // Only re-run TTFT if the user already opened that tab (or changed granularity) while
+  // files were still loading — its results div would be non-empty in that case (holding
+  // either the initial spinner or the "still loading" notice). A user who never opened the
+  // tab has an empty div here, and TTFT stays lazy for them as designed.
+  const ttftResultsDiv = document.getElementById("ttft-results");
+  if (ttftResultsDiv && ttftResultsDiv.innerHTML.trim()) { triggerTtftAnalysis(); }
 
   reRenderTable();
   reRenderShareCard();
@@ -2587,6 +2620,8 @@ function setupMessageHandlers(): void {
       handleFolderAnalysisResult(message);
     } else if (message.command === "modelUsageResult") {
       handleModelUsageResult(message);
+    } else if (message.command === "ttftResult") {
+      handleTtftResult(message);
     }
   });
 }
@@ -3141,6 +3176,200 @@ ${tableOrEmpty}
 </div>`;
 }
 
+// --- TTFT (time to first token) tab -----------------------------------------------------
+
+type TtftBucketView = { key: string; label: string; avgSeconds: number; count: number };
+type TtftModelSeriesView = { model: string; data: (number | null)[] };
+
+const TTFT_GRANULARITY_LABELS: Record<TtftGranularity, string> = { day: "Day", week: "Week", month: "Month" };
+
+/** Values arrive already normalized to seconds (see extractTtftSamplesFromDebugLog); this only picks the more readable unit for display. */
+function formatTtftSeconds(seconds: number): string {
+  return seconds >= 10 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds * 1000)}ms`;
+}
+
+function renderTtftGranularitySelector(granularity: TtftGranularity): string {
+  const options = (Object.keys(TTFT_GRANULARITY_LABELS) as TtftGranularity[])
+    .map(g => `<option value="${g}"${g === granularity ? ' selected' : ''}>${TTFT_GRANULARITY_LABELS[g]}</option>`)
+    .join('');
+  return `<div class="otel-delta-period-row">
+<label for="ttft-granularity">Bucket by:</label>
+<select id="ttft-granularity" class="otel-delta-period-select">${options}</select>
+</div>`;
+}
+
+const TTFT_CHART_WIDTH = 760;
+const TTFT_CHART_HEIGHT = 220;
+const TTFT_CHART_PAD_LEFT = 48;
+const TTFT_CHART_PAD_RIGHT = 12;
+const TTFT_CHART_PAD_TOP = 12;
+const TTFT_CHART_PAD_BOTTOM = 28;
+
+/** Renders one SVG line chart with one path per model series, breaking the line across buckets where a model has no samples (null) rather than interpolating over the gap. */
+function renderTtftChartSvg(buckets: TtftBucketView[], series: TtftModelSeriesView[]): string {
+  if (buckets.length === 0 || series.length === 0) { return ''; }
+  const innerW = TTFT_CHART_WIDTH - TTFT_CHART_PAD_LEFT - TTFT_CHART_PAD_RIGHT;
+  const innerH = TTFT_CHART_HEIGHT - TTFT_CHART_PAD_TOP - TTFT_CHART_PAD_BOTTOM;
+  const allValues = series.flatMap(s => s.data.filter((v): v is number => v !== null));
+  const maxValue = allValues.length > 0 ? Math.max(...allValues) : 1;
+  const yMax = (maxValue || 1) * 1.15;
+  const xStep = buckets.length > 1 ? innerW / (buckets.length - 1) : 0;
+  const xAt = (i: number) => TTFT_CHART_PAD_LEFT + i * xStep;
+  const yAt = (v: number) => TTFT_CHART_PAD_TOP + innerH - (v / yMax) * innerH;
+
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map(f => {
+    const value = yMax * f;
+    const y = yAt(value);
+    return `<line x1="${TTFT_CHART_PAD_LEFT}" y1="${y.toFixed(1)}" x2="${TTFT_CHART_WIDTH - TTFT_CHART_PAD_RIGHT}" y2="${y.toFixed(1)}" class="ttft-gridline" />
+<text x="${TTFT_CHART_PAD_LEFT - 6}" y="${(y + 3).toFixed(1)}" class="ttft-axis-label" text-anchor="end">${escapeHtml(formatTtftSeconds(value))}</text>`;
+  }).join('');
+
+  // Thin out x-axis labels so they don't overlap when there are many buckets.
+  const labelEvery = Math.max(1, Math.ceil(buckets.length / 8));
+  const xLabels = buckets.map((b, i) => {
+    if (i % labelEvery !== 0 && i !== buckets.length - 1) { return ''; }
+    return `<text x="${xAt(i).toFixed(1)}" y="${TTFT_CHART_HEIGHT - 8}" class="ttft-axis-label" text-anchor="middle">${escapeHtml(b.label)}</text>`;
+  }).join('');
+
+  const paths = series.map((s, idx) => {
+    const color = getModelColor(idx);
+    let d = '';
+    let drawing = false;
+    s.data.forEach((v, i) => {
+      if (v === null) { drawing = false; return; }
+      const x = xAt(i).toFixed(1);
+      const y = yAt(v).toFixed(1);
+      d += drawing ? ` L ${x} ${y}` : `${d ? ' ' : ''}M ${x} ${y}`;
+      drawing = true;
+    });
+    const dots = s.data.map((v, i) => v === null ? '' : `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt(v).toFixed(1)}" r="2.5" fill="${color.border}" />`).join('');
+    return `<path d="${d}" fill="none" stroke="${color.border}" stroke-width="2" />${dots}`;
+  }).join('');
+
+  const legend = series.map((s, idx) => {
+    const color = getModelColor(idx);
+    return `<span class="ttft-legend-item"><span class="ttft-legend-swatch" style="background:${color.border}"></span>${escapeHtml(getModelDisplayName(s.model))}</span>`;
+  }).join('');
+
+  return `<div class="ttft-chart-wrap">
+<svg viewBox="0 0 ${TTFT_CHART_WIDTH} ${TTFT_CHART_HEIGHT}" class="ttft-chart" role="img" aria-label="Average time to first token per model over time">
+${yTicks}
+${xLabels}
+${paths}
+</svg>
+<div class="ttft-legend">${legend}</div>
+</div>`;
+}
+
+function renderTtftBucketTableRows(buckets: TtftBucketView[]): string {
+  return buckets.slice().reverse().map(b => `<tr>
+<td>${escapeHtml(b.label)}</td>
+<td>${escapeHtml(formatTtftSeconds(b.avgSeconds))}</td>
+<td>${b.count.toLocaleString()}</td>
+</tr>`).join('');
+}
+
+function renderTtftResults(granularity: TtftGranularity, buckets: TtftBucketView[], series: TtftModelSeriesView[], sampleCount: number, fileCount: number): string {
+  if (sampleCount === 0) {
+    return `<div class="info-box">
+<div class="info-box-title">📭 No TTFT data found</div>
+<div>
+Checked ${fileCount.toLocaleString()} session file(s) locally; none had a debug log with a
+populated <code>attrs.ttft</code>. This is expected if you haven't used VS Code Copilot Chat
+recently — the debug log is only written while a chat session is active, and its retention is
+controlled by VS Code, not this extension. See
+<code>docs/logFilesSchema/vscode-chat-debug-log-format.md</code> for where this data comes from.
+</div>
+</div>`;
+  }
+  const overallAvg = buckets.reduce((sum, b) => sum + b.avgSeconds * b.count, 0) / Math.max(1, sampleCount);
+  return `<div class="summary-cards">
+<div class="summary-card">
+<div class="summary-label">⏱️ Overall Avg TTFT</div>
+<div class="summary-value">${escapeHtml(formatTtftSeconds(overallAvg))}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">🧩 Models Shown</div>
+<div class="summary-value">${series.length}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">📊 Samples</div>
+<div class="summary-value">${sampleCount.toLocaleString()}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">📄 Session Files Checked</div>
+<div class="summary-value">${fileCount.toLocaleString()}</div>
+</div>
+</div>
+${renderTtftChartSvg(buckets, series)}
+<div class="table-container" style="margin-top: 12px; max-height: 320px;">
+<table class="session-table">
+<thead><tr><th>${TTFT_GRANULARITY_LABELS[granularity]}</th><th>Avg TTFT</th><th>Samples</th></tr></thead>
+<tbody>${renderTtftBucketTableRows(buckets)}</tbody>
+</table>
+</div>`;
+}
+
+function renderTtftTab(): string {
+  return `<div id="tab-ttft" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">⏱️ Time to First Token</div>
+<div>
+How long a chat model takes to start streaming a response, averaged per model over time.
+Read from VS Code Copilot Chat's own debug log (<code>attrs.ttft</code> on <code>llm_request</code>
+events) — the same always-on file this extension already reads for exact per-session billing.
+No setup required; this is whatever VS Code has written locally, for however long it happens to
+have kept it. The unit isn't documented upstream, so values are auto-detected as seconds or
+milliseconds by magnitude — see <code>docs/logFilesSchema/vscode-chat-debug-log-format.md</code>.
+</div>
+</div>
+${renderTtftGranularitySelector(currentTtftGranularity)}
+<div id="ttft-results"></div>
+</div>`;
+}
+
+function triggerTtftAnalysis(): void {
+  const resultsDiv = document.getElementById("ttft-results");
+  if (resultsDiv) {
+    setHtml(resultsDiv, `
+        <div class="analyzer-loading">
+          <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+          <span>Scanning debug logs for TTFT…</span>
+        </div>`);
+  }
+  vscode.postMessage({ command: "analyzeTtft", granularity: currentTtftGranularity });
+}
+
+function setupTtftHandlers(): void {
+  document.getElementById("ttft-granularity")?.addEventListener("change", (e) => {
+    currentTtftGranularity = (e.target as HTMLSelectElement).value as TtftGranularity;
+    diagState.patch({ ttftGranularity: currentTtftGranularity });
+    triggerTtftAnalysis();
+  });
+}
+
+function handleTtftResult(message: DiagMessage): void {
+  const resultsDiv = document.getElementById("ttft-results");
+  if (!resultsDiv) { return; }
+  if (message.stillLoading) {
+    setHtml(resultsDiv, `
+        <div class="analyzer-loading">
+          <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+          <span id="ttft-loading-status">Waiting for session files to finish loading…</span>
+        </div>`);
+    // No manual retry needed: handleSessionFilesLoaded() re-triggers this analysis as soon
+    // as the background scan completes, since this results div is now non-empty.
+    return;
+  }
+  setHtml(resultsDiv, renderTtftResults(
+    (message.granularity || currentTtftGranularity) as TtftGranularity,
+    (message.buckets || []) as TtftBucketView[],
+    (message.series || []) as TtftModelSeriesView[],
+    Number(message.sampleCount || 0),
+    Number(message.fileCount || 0),
+  ));
+}
+
 function buildDiagReportTabHtml(escapedReport: string): string {
   return `<div id="tab-report" class="tab-content active">
 <div class="info-box">
@@ -3158,6 +3387,39 @@ code or conversation content. You can safely share this report when reporting is
 <button class="button secondary" id="btn-reset-insights"><span>💡</span><span>Reset Insights Dismissals</span></button>
 </div>
 <div class="report-content">${escapedReport}</div>
+</div>`;
+}
+
+/** The three group-tab bars (Diagnostics / Research / Settings) atop the diagnostics panel. */
+function renderTabBars(data: DiagnosticsData, detailedFiles: SessionFileDetails[]): string {
+  return `
+<div class="tabs group-tabs">
+<button class="group-tab active" data-group="diagnostics">🩺 Diagnostics</button>
+<button class="group-tab" data-group="research">🔬 Research</button>
+<button class="group-tab" data-group="settings">⚙️ Settings</button>
+</div>
+
+<div class="tabs leaf-tabs" data-group="diagnostics" style="display: flex;">
+<button class="tab active" data-tab="report">📋 Report</button>
+<button class="tab" data-tab="sessions">📁 Session Files (${detailedFiles.length})</button>
+<button class="tab" data-tab="cache">💾 Cache</button>
+<button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
+<button class="tab" data-tab="share">📸 Share Card</button>
+</div>
+
+<div class="tabs leaf-tabs" data-group="research" style="display: none;">
+<button class="tab" data-tab="model-usage">🧮 Model Usage</button>
+<button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
+<button class="tab" data-tab="skill-usage">🧩 Skill Usage</button>
+<button class="tab" data-tab="otel-delta">📡 OTel Delta</button>
+<button class="tab" data-tab="ttft">⏱️ TTFT</button>
+</div>
+
+<div class="tabs leaf-tabs" data-group="settings" style="display: none;">
+<button class="tab" data-tab="display">⚙️ Display</button>
+<button class="tab" data-tab="backend">☁️ Backend Storage</button>
+<button class="tab" data-tab="github">🔑 GitHub Auth</button>
+${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' : ''}
 </div>`;
 }
 
@@ -3180,33 +3442,7 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 </div>
 </div>
 
-<div class="tabs group-tabs">
-<button class="group-tab active" data-group="diagnostics">🩺 Diagnostics</button>
-<button class="group-tab" data-group="research">🔬 Research</button>
-<button class="group-tab" data-group="settings">⚙️ Settings</button>
-</div>
-
-<div class="tabs leaf-tabs" data-group="diagnostics" style="display: flex;">
-<button class="tab active" data-tab="report">📋 Report</button>
-<button class="tab" data-tab="sessions">📁 Session Files (${detailedFiles.length})</button>
-<button class="tab" data-tab="cache">💾 Cache</button>
-<button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
-<button class="tab" data-tab="share">📸 Share Card</button>
-</div>
-
-<div class="tabs leaf-tabs" data-group="research" style="display: none;">
-<button class="tab" data-tab="model-usage">🧮 Model Usage</button>
-<button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
-<button class="tab" data-tab="skill-usage">🧩 Skill Usage</button>
-<button class="tab" data-tab="otel-delta">📡 OTel Delta</button>
-</div>
-
-<div class="tabs leaf-tabs" data-group="settings" style="display: none;">
-<button class="tab" data-tab="display">⚙️ Display</button>
-<button class="tab" data-tab="backend">☁️ Backend Storage</button>
-<button class="tab" data-tab="github">🔑 GitHub Auth</button>
-${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' : ''}
-</div>
+${renderTabBars(data, detailedFiles)}
 
 ${buildDiagReportTabHtml(escapedReport)}
 
@@ -3238,6 +3474,7 @@ ${renderModelUsageTab(detailedFiles, isLoading)}
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
 ${renderSkillUsageTab(data.skillCallStats, data.skillCallsByEditor, data.skillDescriptions, skillUsageEditorFilter)}
 ${renderOtelDeltaTab(data.otelComparison)}
+${renderTtftTab()}
 </div>
 `;
 }
@@ -3312,6 +3549,7 @@ function renderLayout(data: DiagnosticsData): void {
   setupToolAnalysisSortHandlers();
   setupSkillUsageFilterHandler();
   setupOtelDeltaPeriodHandler();
+  setupTtftHandlers();
 
   const savedState = diagState.restore();
   let restoredTab = "report";

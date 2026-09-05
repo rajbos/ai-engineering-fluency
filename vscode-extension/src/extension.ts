@@ -163,8 +163,10 @@ import {
   extractSubAgentData as _extractSubAgentData,
   buildReasoningEffortTimeline as _buildReasoningEffortTimeline,
   extractAllTokensFromDebugLog as _extractAllTokensFromDebugLog,
+  extractTtftSamplesFromDebugLog as _extractTtftSamplesFromDebugLog,
   extractResponseItemText as _extractResponseItemText,
   NANO_AIU_TO_DOLLARS,
+  type TtftSample,
 } from '../../src/tokenEstimation';
 import { SessionDiscovery } from '../../src/sessionDiscovery';
 
@@ -247,10 +249,14 @@ import {
   normalizePathForDedup as _normalizePathForDedup,
   normalizeToRepoRoot as _normalizeToRepoRoot,
   getRepoNameFromWorkspacePath as _getRepoNameFromWorkspacePath,
+  resolveDebugLogCandidatePaths as _resolveDebugLogCandidatePaths,
 } from '../../src/workspaceHelpers';
 
 // --- Chart building ---
 import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from '../../src/chartDataBuilder';
+
+// --- Time-to-first-token analysis ---
+import { buildTtftBuckets as _buildTtftBuckets, buildTtftModelSeries as _buildTtftModelSeries, type TtftGranularity } from '../../src/ttftAnalysis';
 
 // --- Task classification ---
 import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDelegationToolCalls } from '../../src/taskClassification';
@@ -6887,20 +6893,9 @@ private computeFallbackDailyRollup(
 	 * `llm_request` event to give true totals for agent-mode multi-call sessions.
 	 */
 	private async readTokensFromDebugLog(sessionFilePath: string): Promise<{ inputTokens: number; outputTokens: number; cachedTokens: number; modelTurns: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>; copilotNanoAiu: number; maxRequestInputTokens: number } | null> {
-		const norm = _normalizePath(sessionFilePath);
-		const sessionId = path.basename(sessionFilePath, path.extname(sessionFilePath));
-		// Only process UUID-named session files (e.g. e84b3e82-c1fb-43de-8f52-367f4c74826a)
-		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
-			return null;
-		}
-		// Derive the workspaceStorage/<hash> directory from the session file path
-		const wsHashMatch = norm.match(/^(.*\/workspaceStorage\/[^/]+)\//);
-		if (!wsHashMatch) { return null; }
-		const workspaceHashDir = sessionFilePath.substring(0, wsHashMatch[1].length);
-
-		const extensionFolders = ['GitHub.copilot-chat', 'github.copilot-chat', 'GitHub.copilot', 'github.copilot'];
-		for (const extFolder of extensionFolders) {
-			const debugLogPath = path.join(workspaceHashDir, extFolder, 'debug-logs', sessionId, 'main.jsonl');
+		const candidatePaths = _resolveDebugLogCandidatePaths(sessionFilePath);
+		if (!candidatePaths) { return null; }
+		for (const debugLogPath of candidatePaths) {
 			try {
 				const content = await fs.promises.readFile(debugLogPath, 'utf8');
 				const result = _extractAllTokensFromDebugLog(content);
@@ -6908,6 +6903,37 @@ private computeFallbackDailyRollup(
 			} catch { /* file doesn't exist or can't be read — try next variant */ }
 		}
 		return null;
+	}
+
+	/** Reads and extracts TTFT samples from one session's debug log, trying each candidate path. Returns null when the session has no debug log or none of its llm_request events carry attrs.ttft. */
+	private async readTtftSamplesForSessionFile(sessionFilePath: string): Promise<TtftSample[] | null> {
+		const candidatePaths = _resolveDebugLogCandidatePaths(sessionFilePath);
+		if (!candidatePaths) { return null; }
+		for (const debugLogPath of candidatePaths) {
+			try {
+				const content = await fs.promises.readFile(debugLogPath, 'utf8');
+				const samples = _extractTtftSamplesFromDebugLog(content);
+				if (samples.length > 0) { return samples; }
+			} catch { /* file doesn't exist or can't be read — try next variant */ }
+		}
+		return null;
+	}
+
+	/**
+	 * Collects TTFT samples across many sessions' debug logs, bounding concurrency so a
+	 * large session count doesn't open hundreds of file handles at once. Sessions with no
+	 * debug log (non-VS-Code-Chat editors, or Chat sessions predating this file) resolve to
+	 * null immediately with no I/O — see resolveDebugLogCandidatePaths in workspaceHelpers.ts.
+	 */
+	private async collectTtftSamples(files: SessionFileDetails[]): Promise<TtftSample[]> {
+		const all: TtftSample[] = [];
+		const CONCURRENCY = 20;
+		for (let i = 0; i < files.length; i += CONCURRENCY) {
+			const batch = files.slice(i, i + CONCURRENCY);
+			const results = await Promise.all(batch.map(f => this.readTtftSamplesForSessionFile(f.file)));
+			for (const r of results) { if (r) { all.push(...r); } }
+		}
+		return all;
 	}
 
 	private extractPerRequestUsageFromRawLines(lines: string[]): Map<number, { promptTokens: number; outputTokens: number }> {
@@ -9725,6 +9751,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       pickFolder: () => this.dispatch('pickFolder:diagnostics', () => this.diagHandlePickFolder()),
       analyzeFolder: () => this.dispatch('analyzeFolder:diagnostics', () => this.diagHandleAnalyzeFolder(message)),
       analyzeModelUsage: () => this.dispatch('analyzeModelUsage:diagnostics', () => this.diagHandleAnalyzeModelUsage(message)),
+      analyzeTtft: () => this.dispatch('analyzeTtft:diagnostics', () => this.diagHandleAnalyzeTtft(message)),
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
     await this.handleDiagnosticConditionalCommand(message);
@@ -10067,6 +10094,38 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       rows,
       totalCost,
       supportsCache1h,
+    });
+  }
+
+  /**
+   * Computes time-to-first-token averages (overall and per model) bucketed by day/week/month,
+   * for the Research > TTFT diagnostics tab. Reads every already-discovered session's debug
+   * log fresh on each request rather than persisting samples in the session cache — TTFT is
+   * a Research-tab curiosity, not something the dashboard's cost/token numbers depend on, so
+   * it doesn't warrant a session-cache schema change. See collectTtftSamples() for the scan
+   * and docs/logFilesSchema/vscode-chat-debug-log-format.md for what attrs.ttft is and isn't.
+   */
+  private async diagHandleAnalyzeTtft(message: any): Promise<void> {
+    const granularity: TtftGranularity = message?.granularity === 'week' || message?.granularity === 'month' ? message.granularity : 'day';
+    if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
+
+    if (!this.diagnosticsHasLoadedFiles) {
+      this.diagnosticsPanel.webview.postMessage({ command: 'ttftResult', granularity, buckets: [], series: [], sampleCount: 0, fileCount: 0, stillLoading: true });
+      return;
+    }
+
+    const files = this.diagnosticsCachedFiles;
+    const samples = await this.collectTtftSamples(files);
+    const buckets = _buildTtftBuckets(samples, granularity);
+    const series = _buildTtftModelSeries(buckets);
+
+    this.diagnosticsPanel.webview.postMessage({
+      command: 'ttftResult',
+      granularity,
+      buckets: buckets.map(b => ({ key: b.key, label: b.label, avgSeconds: b.avgSeconds, count: b.count })),
+      series,
+      sampleCount: samples.length,
+      fileCount: files.length,
     });
   }
 
