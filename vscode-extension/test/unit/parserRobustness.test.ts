@@ -26,7 +26,7 @@ import { AntigravityDataAccess } from '../../../src/antigravity';
 import { OpenCodeDataAccess } from '../../../src/opencode';
 import { parseJetBrainsPartition } from '../../../src/jetbrains';
 import { CopilotChatAdapter } from '../../../src/adapters/copilotChatAdapter';
-import { MAX_SESSION_FILE_BYTES } from '../../../src/utils/safeFileRead';
+import { MAX_SESSION_FILE_BYTES, readTextFileWithSizeGuard, readTextFileWithSizeGuardSync } from '../../../src/utils/safeFileRead';
 import { isUnsafeObjectKey } from '../../../src/utils/protoGuard';
 import { ContinueDataAccess } from '../../../src/continue';
 import { KiroDataAccess } from '../../../src/kiro';
@@ -175,6 +175,18 @@ test('CopilotChatAdapter: file over the size cap is skipped', async () => {
 		const result = await adapter.getTokens(file);
 		assert.equal(result.tokens, 0);
 		assert.equal(result.actualTokens, 0);
+	} finally {
+		rm(tmpDir);
+	}
+});
+
+test('safeFileRead: rejects OS temp directory paths before opening', async () => {
+	const tmpDir = mkTmpDir('safe-read-');
+	try {
+		const file = path.join(tmpDir, 'session.jsonl');
+		fs.writeFileSync(file, '{"ok":true}\n', 'utf8');
+		assert.equal(await readTextFileWithSizeGuard(file, 'temp-dir-guard'), undefined);
+		assert.equal(readTextFileWithSizeGuardSync(file, 'temp-dir-guard'), undefined);
 	} finally {
 		rm(tmpDir);
 	}
