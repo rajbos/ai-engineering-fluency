@@ -183,6 +183,14 @@ def main() -> int:
         if not search.strip():
             print(f"  skip (empty search): {file_path}", file=sys.stderr)
             continue
+        if replace.strip() == "NO_EDITS":
+            # The model sometimes misuses the whole-response abstention sentinel
+            # (see INSTRUCTIONS) as the REPLACE text of an individual edit block
+            # instead of abstaining entirely. Applying it verbatim would corrupt
+            # the file with a bare "NO_EDITS" token, so treat it as an abstention
+            # for this edit rather than a real replacement.
+            print(f"  skip (replacement is bare NO_EDITS sentinel): {file_path}", file=sys.stderr)
+            continue
 
         result = apply_edit(file_path, search, replace)
         print(f"  {result}: {file_path}", file=sys.stderr)
