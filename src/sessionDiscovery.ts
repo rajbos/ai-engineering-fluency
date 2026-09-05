@@ -177,29 +177,20 @@ export class SessionDiscovery {
 		}
 	}
 
-	/** Collect deduplicated files from adapter results, calling onBatch for each new batch. */
-	private collectAdapterFiles(
-		results: PromiseSettledResult<{ sessionFiles: string[] }>[],
-		adapters: IEcosystemAdapter[],
+	/** Dedup a single adapter's files against `seen`, appending new ones to `allDeduped` and emitting `onBatch`. */
+	private addDedupedBatch(
+		files: string[],
 		seen: Set<string>,
 		allDeduped: string[],
 		onBatch?: (files: string[]) => void,
 	): void {
-		for (let i = 0; i < results.length; i++) {
-			const result = results[i];
-			if (result.status === 'rejected') {
-				this.deps.warn(`Could not discover ${adapters[i].displayName} sessions: ${result.reason}`);
-				this._lastDiscoveryHadError = true;
-				continue;
-			}
-			const batch: string[] = [];
-			for (const f of result.value.sessionFiles) {
-				const key = normalizePathForDedup(f);
-				if (seen.has(key)) { continue; }
-				seen.add(key); batch.push(f);
-			}
-			if (batch.length > 0) { allDeduped.push(...batch); if (onBatch) { onBatch(batch); } }
+		const batch: string[] = [];
+		for (const f of files) {
+			const key = normalizePathForDedup(f);
+			if (seen.has(key)) { continue; }
+			seen.add(key); batch.push(f);
 		}
+		if (batch.length > 0) { allDeduped.push(...batch); if (onBatch) { onBatch(batch); } }
 	}
 
 	/** Collect deduplicated Windsurf session files and add them to allDeduped. */
@@ -220,16 +211,42 @@ export class SessionDiscovery {
 		}
 	}
 
+	/**
+	 * Runs every discoverable adapter concurrently and pushes each adapter's
+	 * files into `onBatch` the instant *that adapter* resolves — not after the
+	 * slowest one finishes. This matters because some adapters do genuinely
+	 * heavyweight first-run work (e.g. CursorAdapter lazily initializes a
+	 * sql.js/WASM module and reads Cursor's entire global state.vscdb into
+	 * memory). Waiting for `Promise.allSettled()` across *all* adapters before
+	 * emitting any batch would starve the streaming worker pool in
+	 * `_preloadSessionFiles` — it would sit idle until Cursor (or any other
+	 * slow adapter) completes, even though every other adapter finished
+	 * quickly. Awaiting each adapter's own promise independently lets fast
+	 * adapters' files start parsing immediately while slow ones keep running.
+	 */
 	private async discoverFromAdapters(onBatch?: (files: string[]) => void): Promise<string[]> {
 		const seen = new Set<string>();
 		const allDeduped: string[] = [];
 		const discoveryStartMs = Date.now();
 		const discoverableAdapters = this.deps.ecosystems.filter(isDiscoverable);
 		this.deps.log(`🔍 Searching for session files via ${discoverableAdapters.length} discoverable ecosystem adapter(s) (parallel)`);
-		const results = await Promise.allSettled(discoverableAdapters.map(eco => eco.discover(this.deps.log)));
-		this.collectAdapterFiles(results, discoverableAdapters, seen, allDeduped, onBatch);
-		await this.collectWindsurfFiles(seen, allDeduped, onBatch);
-		const dupCount = results.reduce((n, r) => n + (r.status === 'fulfilled' ? r.value.sessionFiles.length : 0), 0) - allDeduped.length;
+
+		let totalRaw = 0;
+		const adapterTasks = discoverableAdapters.map(eco =>
+			eco.discover(this.deps.log).then(
+				result => {
+					totalRaw += result.sessionFiles.length;
+					this.addDedupedBatch(result.sessionFiles, seen, allDeduped, onBatch);
+				},
+				error => {
+					this.deps.warn(`Could not discover ${eco.displayName} sessions: ${error}`);
+					this._lastDiscoveryHadError = true;
+				}
+			)
+		);
+		await Promise.all([...adapterTasks, this.collectWindsurfFiles(seen, allDeduped, onBatch)]);
+
+		const dupCount = totalRaw - allDeduped.length;
 		if (dupCount > 0) { this.deps.log(`🧹 Deduplicated ${dupCount} duplicate session path(s)`); }
 		this.deps.log(`✨ Total: ${allDeduped.length} session file(s) discovered in ${((Date.now() - discoveryStartMs) / 1000).toFixed(1)}s`);
 		if (allDeduped.length === 0) { this.deps.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?'); }
