@@ -11,6 +11,7 @@ import customizationPatternsData from './customizationPatterns.json';
 import { resolveFileUri } from './workspacePathResolver';
 import {
 	fileUriToPath,
+	getRepoNameFromWorkspacePath,
 	hasWindowsDriveSegment,
 	normalizePath,
 	normalizePathForComparison,
@@ -999,12 +1000,12 @@ export function resolveSessionWorkspaceName(
 	sessionFilePath: string,
 	workspaceIdToFolderCache?: Map<string, string | undefined>
 ): string | undefined {
-	if (sessionData.workspaceFolderPath) { return path.basename(sessionData.workspaceFolderPath); }
+	if (sessionData.workspaceFolderPath) { return getRepoNameFromWorkspacePath(sessionData.workspaceFolderPath); }
 	if (sessionData.repository) { return sessionData.repository; }
 	if (!workspaceIdToFolderCache) { return undefined; }
 	try {
 		const workspaceFolder = resolveWorkspaceFolderFromSessionPath(sessionFilePath, workspaceIdToFolderCache);
-		if (workspaceFolder) { return path.basename(workspaceFolder); }
+		if (workspaceFolder) { return getRepoNameFromWorkspacePath(workspaceFolder); }
 	} catch { /* attribution is optional */ }
 	return undefined;
 }
