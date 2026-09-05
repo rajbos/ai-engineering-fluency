@@ -317,6 +317,42 @@ test('accepts payloads relayed the way VS Code actually delivers them', async ()
 	assert.ok(rendered?.includes('ai-engineering-fluency'), `expected the repo table, got: ${rendered}`);
 });
 
+test('marks HydraFusion sessions in the recent sessions list', async () => {
+	const stats = buildStats();
+	const hydraFusionSession = {
+		title: 'HydraFusion task',
+		filePath: 'session.jsonl',
+		interactions: 12500,
+		toolCalls: 1500,
+		inputTokens: 1500000,
+		outputTokens: 12000,
+		thinkingTokens: 2000,
+		cachedTokens: 30000,
+		totalTokens: 1544000,
+		estimatedCost: 12.345,
+		editor: 'VS Code',
+		models: ['hydrafusion'],
+		lastActivity: '2026-08-31T12:00:00.000Z',
+	};
+	stats.todaySessions = [
+		hydraFusionSession,
+		{ ...hydraFusionSession, title: 'Unrelated task', models: ['unrelated-hydrafusion'] },
+	];
+	const harness = await bootWebview(stats);
+
+	const badges = harness.window.document.querySelectorAll('.hydrafusion-session-badge');
+	assert.equal(badges.length, 1, 'only the HydraFusion model identifier should be marked');
+	const badge = badges[0];
+	assert.ok(badge, 'expects a marker for HydraFusion sessions');
+	assert.equal(badge.textContent, 'HydraFusion');
+	const row = harness.window.document.querySelector('.sessions-table tbody tr');
+	assert.match(row.textContent, /12\.5K/);
+	assert.match(row.textContent, /1\.5M/);
+	assert.match(row.textContent, /\$12\.35/);
+	const costCell = [...row.cells].find(cell => cell.textContent === '$12.35');
+	assert.equal(costCell?.title, '$12.3450');
+});
+
 test('renders cloud agent session results', async () => {
 	const harness = await bootWebview(buildStats());
 
