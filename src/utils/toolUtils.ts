@@ -154,3 +154,56 @@ export function resolveMcpFamilyToolName(id: string): string | undefined {
 export function isMcpFamilyResolvedTool(id: string): boolean {
 	return resolveMcpFamilyToolName(id) !== undefined;
 }
+
+/**
+ * Insert underscores at camelCase/PascalCase word boundaries, e.g.
+ * "ListAgents" -> "List_Agents" and "HTTPServer" -> "HTTP_Server".
+ *
+ * Different hosts report the same underlying tool under different naming
+ * conventions — one client's `ListAgents` is another's `list_agents` (see
+ * issue #1942) — so splitting camelCase before lowercasing/folding
+ * separators lets `canonicalizeToolId` treat both spellings as the same id.
+ *
+ * Mirrors `_camel_to_snake()` in `.github/scripts/toolnames_utils.py`.
+ * Keep the two in sync if either changes.
+ */
+function camelToSnake(value: string): string {
+	return value
+		.replace(/(?<=[a-z0-9])(?=[A-Z])/g, '_')
+		.replace(/(?<=[A-Z])(?=[A-Z][a-z])/g, '_');
+}
+
+/**
+ * Canonical form of a tool ID for equivalence comparisons: camelCase-split,
+ * lowercased, then `.`/`-` folded to `_`.
+ *
+ * Mirrors a simplified form of `canonicalize_tool_id()` in
+ * `.github/scripts/toolnames_utils.py` — that script's MCP-prefix collision
+ * rules aren't duplicated here since prefix variants for known MCP tool
+ * families are already handled by `resolveMcpFamilyToolName` above.
+ */
+export function canonicalizeToolId(id: string): string {
+	return camelToSnake(id).toLowerCase().replace(/[.-]/g, '_');
+}
+
+/**
+ * Look up a tool ID's friendly name in a toolNames.json-shaped map, trying
+ * progressively looser matches: exact key, case-insensitive key, then a
+ * canonicalized (camelCase/separator-normalized) key. The canonical fallback
+ * recognizes e.g. `ListAgents` as the same tool as an existing `list_agents`
+ * entry without needing a duplicate entry for every casing/separator variant
+ * a host might use (see issue #1942).
+ *
+ * Returns `undefined` when none of those match, so callers can fall back to
+ * GUID/MCP-family resolution or flag the tool as unknown.
+ */
+export function lookupKnownToolName(id: string, toolNameMap: Record<string, string>): string | undefined {
+	if (toolNameMap[id]) { return toolNameMap[id]; }
+	const lower = id.toLowerCase();
+	if (toolNameMap[lower]) { return toolNameMap[lower]; }
+	const canonicalId = canonicalizeToolId(id);
+	for (const key of Object.keys(toolNameMap)) {
+		if (canonicalizeToolId(key) === canonicalId) { return toolNameMap[key]; }
+	}
+	return undefined;
+}
