@@ -289,7 +289,7 @@ test('accepts payloads relayed the way VS Code actually delivers them', async ()
 
 test('marks HydraFusion sessions in the recent sessions list', async () => {
 	const stats = buildStats();
-	stats.todaySessions = [{
+	const hydraFusionSession = {
 		title: 'HydraFusion task',
 		filePath: 'session.jsonl',
 		interactions: 12500,
@@ -303,10 +303,16 @@ test('marks HydraFusion sessions in the recent sessions list', async () => {
 		editor: 'VS Code',
 		models: ['hydrafusion'],
 		lastActivity: '2026-08-31T12:00:00.000Z',
-	}];
+	};
+	stats.todaySessions = [
+		hydraFusionSession,
+		{ ...hydraFusionSession, title: 'Unrelated task', models: ['unrelated-hydrafusion'] },
+	];
 	const harness = await bootWebview(stats);
 
-	const badge = harness.window.document.querySelector('.hydrafusion-session-badge');
+	const badges = harness.window.document.querySelectorAll('.hydrafusion-session-badge');
+	assert.equal(badges.length, 1, 'only the HydraFusion model identifier should be marked');
+	const badge = badges[0];
 	assert.ok(badge, 'expects a marker for HydraFusion sessions');
 	assert.equal(badge.textContent, 'HydraFusion');
 	const row = harness.window.document.querySelector('.sessions-table tbody tr');

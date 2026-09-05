@@ -13,7 +13,7 @@ import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
-import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
+import { getModelDisplayName, getModelLookupCandidates } from '../../../../src/webview/shared/modelUtils';
 import { getModelBillingProvider } from '../../../../src/chartDataBuilder';
 import { getLongContextInfo } from '../../../../src/tokenEstimation';
 import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold, computeLongTailModels } from '../../../../src/modelEfficiency';
@@ -1123,6 +1123,10 @@ function formatCompactSessionNumber(value: number): { html: string; title: strin
 	return { html: formatCompact(value), title: formatNumber(value) };
 }
 
+function isHydraFusionModel(model: string): boolean {
+	return getModelLookupCandidates(model).some(candidate => candidate.toLowerCase() === 'hydrafusion');
+}
+
 const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 	{ id: 'interactions', label: 'Turns', sortKey: 'interactions', align: 'right', render: s => formatCompactSessionNumber(s.interactions) },
 	{ id: 'toolCalls', label: 'Tools', sortKey: 'toolCalls', align: 'right', render: s => formatCompactSessionNumber(s.toolCalls) },
@@ -1218,7 +1222,7 @@ function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
 	const rows = sorted.map((s, idx) => {
 		const title = escapeHtml(s.title || 'Untitled session');
 		const filePath = escapeHtml(s.filePath || '');
-		const hydraFusionBadge = s.models.some(model => model.toLowerCase().includes('hydrafusion'))
+		const hydraFusionBadge = s.models.some(isHydraFusionModel)
 			? '<span class="hydrafusion-session-badge" title="This session used HydraFusion" style="display:inline-block; margin-right:4px; padding:1px 5px; border:1px solid var(--vscode-badge-background, var(--accent-color)); border-radius:999px; background:var(--vscode-badge-background, var(--accent-color)); color:var(--vscode-badge-foreground, var(--bg-primary)); font-size:10px; font-weight:600; line-height:14px; vertical-align:middle;">HydraFusion</span>'
 			: '';
 		const optionalCells = visibleColumns.map(col => {
