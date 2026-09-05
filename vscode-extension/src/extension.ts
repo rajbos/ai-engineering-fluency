@@ -10720,7 +10720,12 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     }
   }
 
-  /** Parses the bulk-cleanup message into its candidate list and optional repo scope label. */
+  /**
+   * Parses the bulk-cleanup message into its candidate list and optional repo scope label.
+   * `scopeRepoLabel` is only trusted (and returned) when it matches every parsed candidate's
+   * `repoLabel` — a mismatched or mixed-repo list falls back to unscoped wording rather than
+   * letting the confirmation dialog claim a narrower scope than what will actually be deleted.
+   */
   private _parseCleanupPushedWorktreesMessage(message: any): { candidates: Array<{ path: string; branch: string; repoLabel: string }>; scopeRepoLabel?: string } {
     const candidates: Array<{ path: string; branch: string; repoLabel: string }> = Array.isArray(message?.worktrees)
       ? message.worktrees
@@ -10731,7 +10736,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
           repoLabel: typeof w.repoLabel === "string" && w.repoLabel ? w.repoLabel : "",
         }))
       : [];
-    const scopeRepoLabel: string | undefined = typeof message?.repoLabel === "string" && message.repoLabel ? message.repoLabel : undefined;
+    const requestedScope: string | undefined = typeof message?.repoLabel === "string" && message.repoLabel ? message.repoLabel : undefined;
+    const scopeRepoLabel = requestedScope && candidates.every((c) => c.repoLabel === requestedScope) ? requestedScope : undefined;
     return { candidates, scopeRepoLabel };
   }
 

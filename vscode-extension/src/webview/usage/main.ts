@@ -3739,18 +3739,24 @@ function worktreeSizeText(worktrees: WorktreeResult[]): string {
 }
 
 /**
- * A repository's summary row (Repository | Worktrees | Size) plus a details row that holds the
- * per-worktree table. The details row is hidden unless the repo is in worktreeExpandedRepos.
+ * Repo-scoped "Clean up (N)" button shown in each repository's summary row. Takes the repo's
+ * already-sliced worktree list (the caller already has it) rather than re-filtering the entire
+ * `worktreeResults` array per repo row — that would be an O(repoCount × worktreeCount) rescan on
+ * every render.
  */
-/** Repo-scoped "Clean up (N)" button shown in each repository's summary row. */
-function buildWorktreeRepoCleanupButtonHtml(repoLabel: string): string {
-	const pushedCount = getCleanupCandidates(repoLabel).length;
+function buildWorktreeRepoCleanupButtonHtml(repoLabel: string, worktrees: WorktreeResult[]): string {
+	const pushedCount = worktrees.filter((w) => w.pushed === "yes" && !isWorktreePending(w)).length;
 	const disabled = worktreeCleanupInProgress || worktreeCleanupConfirmPending || worktreeScanInProgress || pushedCount === 0;
 	return `<button type="button" class="button secondary worktree-repo-cleanup-btn" data-repo="${encodeURIComponent(repoLabel)}"
     title="Remove this repository's pushed worktrees via git worktree remove (asks for confirmation)" ${disabled ? "disabled" : ""}
     >🧹 Clean up (${pushedCount})</button>`;
 }
 
+/**
+ * A repository's summary row (Repository | Worktrees | Size | Actions) plus a details row that
+ * holds the per-worktree table. The details row is hidden unless the repo is in
+ * worktreeExpandedRepos.
+ */
 function buildWorktreeRepoRowsHtml(repoLabel: string, worktrees: WorktreeResult[]): string {
 	const expanded = worktreeExpandedRepos.has(repoLabel);
 	const caret = expanded ? "▼" : "▶";
@@ -3759,7 +3765,7 @@ function buildWorktreeRepoRowsHtml(repoLabel: string, worktrees: WorktreeResult[
     <td><span class="worktree-caret">${caret}</span> ${escapeHtml(repoLabel)}</td>
     <td>${worktrees.length}</td>
     <td>${worktreeSizeText(worktrees)}</td>
-    <td class="worktree-repo-actions">${buildWorktreeRepoCleanupButtonHtml(repoLabel)}</td>
+    <td class="worktree-repo-actions">${buildWorktreeRepoCleanupButtonHtml(repoLabel, worktrees)}</td>
   </tr>`;
 	const detailsRow = `<tr class="worktree-repo-details" data-repo="${repoAttr}"${expanded ? "" : ' style="display: none;"'}>
     <td colspan="4">${buildWorktreeDetailsTableHtml(worktrees)}</td>
