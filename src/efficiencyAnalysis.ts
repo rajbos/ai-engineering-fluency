@@ -333,13 +333,23 @@ export function computeCostAttribution(
 	};
 }
 
+/** Inclusive calendar-day boundaries for the two adjacent 30-day attribution windows. */
+export function getTrailingWindowBoundaries(now: Date): { prevStart: Date; prevEnd: Date; curStart: Date; curEnd: Date } {
+	const dayAtOffset = (offset: number): Date => new Date(now.getFullYear(), now.getMonth(), now.getDate() - offset);
+	return {
+		prevStart: dayAtOffset(59),
+		prevEnd: dayAtOffset(30),
+		curStart: dayAtOffset(29),
+		curEnd: dayAtOffset(0),
+	};
+}
+
 /** Splits daily stats into [previous 30 days, trailing 30 days] windows relative to `now`. */
 export function splitTrailingWindows(dailyStats: DailyTokenStats[], now: Date): { prevDays: DailyTokenStats[]; curDays: DailyTokenStats[] } {
-	const curStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
-	const prevStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 59);
-	const curStartKey = fmtKey(curStart);
-	const prevStartKey = fmtKey(prevStart);
-	const nowKey = fmtKey(now);
+	const boundaries = getTrailingWindowBoundaries(now);
+	const curStartKey = fmtKey(boundaries.curStart);
+	const prevStartKey = fmtKey(boundaries.prevStart);
+	const nowKey = fmtKey(boundaries.curEnd);
 	const prevDays: DailyTokenStats[] = [];
 	const curDays: DailyTokenStats[] = [];
 	for (const day of dailyStats) {
@@ -1243,8 +1253,8 @@ export interface EfficiencyViewData {
 	/** True when any week has apply-rate data. */
 	hasApply: boolean;
 	attribution: CostAttribution | null;
-	/** Human labels for the compared attribution windows. */
-	attributionWindows: { prev: string; cur: string };
+	/** Human labels and inclusive calendar-date ranges for the compared attribution windows. */
+	attributionWindows: { prev: string; cur: string; prevRange: string; curRange: string };
 	deltas: EfficiencyDelta[];
 	/** Human labels for the delta card periods. */
 	deltaWindows: { prev: string; cur: string };

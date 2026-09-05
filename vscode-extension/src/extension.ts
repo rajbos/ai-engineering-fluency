@@ -205,6 +205,7 @@ import {
   computeSkillImpact as _computeSkillImpact,
   listComparableModels as _listComparableModels,
   computeValueSignals as _computeValueSignals,
+  getTrailingWindowBoundaries as _getTrailingWindowBoundaries,
   splitTrailingWindows as _splitTrailingWindows,
   type EfficiencySessionInput,
   type EfficiencyViewData,
@@ -8902,6 +8903,10 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		const skillTrends = _buildSkillUsageTrends(sessionInputs, deps);
 		const skillImpact = _computeSkillImpact(sessionInputs);
 		const { prevDays, curDays } = _splitTrailingWindows(dailyStats, now);
+		const attributionBoundaries = _getTrailingWindowBoundaries(now);
+		const formatAttributionDate = (date: Date): string => date.toLocaleDateString('en-US', {
+			month: 'short', day: 'numeric', year: 'numeric',
+		});
 		const attribution = _computeCostAttribution(prevDays, curDays, deps);
 		const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 		const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -8933,7 +8938,12 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			hasRetry: weekly.some(w => w.retryRate !== null),
 			hasApply: weekly.some(w => w.applyRate !== null),
 			attribution,
-			attributionWindows: { prev: 'previous 30 days', cur: 'last 30 days' },
+			attributionWindows: {
+				prev: 'previous 30 days',
+				cur: 'last 30 days',
+				prevRange: `${formatAttributionDate(attributionBoundaries.prevStart)}–${formatAttributionDate(attributionBoundaries.prevEnd)}`,
+				curRange: `${formatAttributionDate(attributionBoundaries.curStart)}–${formatAttributionDate(attributionBoundaries.curEnd)}`,
+			},
 			deltas,
 			deltaWindows: {
 				prev: lastMonthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
