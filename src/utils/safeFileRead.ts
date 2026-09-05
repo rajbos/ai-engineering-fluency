@@ -17,7 +17,13 @@ import * as path from 'path';
 export const MAX_SESSION_FILE_BYTES = 100 * 1024 * 1024; // 100 MB
 
 function isPathInsideSystemTempDir(filePath: string): boolean {
-	const tempRoot = path.resolve(os.tmpdir());
+	const tempRoot = (() => {
+		try {
+			return fs.realpathSync(os.tmpdir());
+		} catch {
+			return path.resolve(os.tmpdir());
+		}
+	})();
 	const resolvedPath = (() => {
 		try {
 			return fs.realpathSync(filePath);

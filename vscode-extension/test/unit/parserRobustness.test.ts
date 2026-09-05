@@ -182,12 +182,26 @@ test('CopilotChatAdapter: file over the size cap is skipped', async () => {
 
 test('safeFileRead: rejects OS temp directory paths before opening', async () => {
 	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'safe-read-'));
+	const symlinkDir = path.join(path.dirname(tmpDir), `safe-read-link-${Date.now()}`);
 	try {
-		const file = path.join(tmpDir, 'session.jsonl');
-		fs.writeFileSync(file, '{"ok":true}\n', 'utf8');
+		try {
+			fs.symlinkSync(tmpDir, symlinkDir, process.platform === 'win32' ? 'junction' : 'dir');
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException)?.code;
+			if (code === 'EPERM' || code === 'EACCES' || code === 'ENOTSUP') {
+				return;
+			}
+			throw err;
+		}
+		const file = path.join(symlinkDir, 'session.jsonl');
 		assert.equal(await readTextFileWithSizeGuard(file, 'temp-dir-guard'), undefined);
 		assert.equal(readTextFileWithSizeGuardSync(file, 'temp-dir-guard'), undefined);
 	} finally {
+		try {
+			fs.rmSync(symlinkDir, { force: true, recursive: true });
+		} catch {
+			// noop: symlink dir may already be cleaned up or unsupported on this platform
+		}
 		rm(tmpDir);
 	}
 });
