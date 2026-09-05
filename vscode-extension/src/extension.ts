@@ -304,7 +304,7 @@ import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
-import { isGuidMcpTool, isMcpFamilyResolvedTool } from '../../src/utils/toolUtils';
+import { isGuidMcpTool, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
@@ -1719,7 +1719,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const suppressed = new Set<string>(
 			vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', [])
 		);
-		return Array.from(allTools).filter(tool => !this.toolNameMap[tool] && !this.toolNameMap[tool.toLowerCase()] && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
+		return Array.from(allTools).filter(tool => !lookupKnownToolName(tool, this.toolNameMap) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
 	}
 
 	private async showUnknownMcpToolsBanner(): Promise<void> {
