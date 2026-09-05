@@ -10,20 +10,38 @@
  * still bounding worst-case memory use for a single file.
  */
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 
 /** Maximum number of bytes read from a single untrusted session-log file. */
 export const MAX_SESSION_FILE_BYTES = 100 * 1024 * 1024; // 100 MB
 
-function isPathInsideSystemTempDir(filePath: string): boolean {
-	const tempRoot = (() => {
+function getSystemTempRoots(): string[] {
+	const envRoots = [
+		process.env.TMPDIR,
+		process.env.TMP,
+		process.env.TEMP,
+		process.env.WINDIR ? path.join(process.env.WINDIR, 'Temp') : undefined,
+	].filter((value): value is string => Boolean(value && value.trim().length > 0));
+
+	const fallbackRoots = [
+		'/tmp',
+		'/var/tmp',
+		'C:\\Windows\\Temp',
+		'C:\\Temp',
+	];
+
+	const roots = new Set<string>();
+	for (const root of [...envRoots, ...fallbackRoots]) {
 		try {
-			return fs.realpathSync(os.tmpdir());
+			roots.add(fs.realpathSync(root));
 		} catch {
-			return path.resolve(os.tmpdir());
+			roots.add(path.resolve(root));
 		}
-	})();
+	}
+	return [...roots];
+}
+
+function isPathInsideSystemTempDir(filePath: string): boolean {
 	const resolvedPath = (() => {
 		try {
 			return fs.realpathSync(filePath);
@@ -31,8 +49,14 @@ function isPathInsideSystemTempDir(filePath: string): boolean {
 			return path.resolve(filePath);
 		}
 	})();
-	const relative = path.relative(tempRoot, resolvedPath);
-	return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+
+	for (const tempRoot of getSystemTempRoots()) {
+		const relative = path.relative(tempRoot, resolvedPath);
+		if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+			return true;
+		}
+	}
+	return false;
 }
 
 /**
