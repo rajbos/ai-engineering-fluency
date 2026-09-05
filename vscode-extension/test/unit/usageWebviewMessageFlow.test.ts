@@ -92,6 +92,36 @@ function buildStatsWithLongTailModelEfficiency(): Record<string, unknown> {
 	return stats;
 }
 
+function buildStatsWithCorrections(): Record<string, unknown> {
+	return {
+		...buildStats(),
+		correctionReport: {
+			sessionsPerRepo: 25,
+			sessionsWithMoments: 1,
+			counts: {
+				userCorrections: 1, editRetries: 0, editSelfCorrections: 0,
+				toolErrors: 1, toolErrorsRetried: 1, agentSelfCorrections: 0,
+			},
+			repos: [{
+				repository: 'acme/web-app',
+				sessionsWithMoments: 1,
+				counts: {
+					userCorrections: 1, editRetries: 0, editSelfCorrections: 0,
+					toolErrors: 1, toolErrorsRetried: 1, agentSelfCorrections: 0,
+				},
+				sessions: [{
+					file: '/sessions/example.jsonl',
+					title: 'Correcting the build',
+					moments: [
+						{ type: 'user-correction', turnNumber: 2, timestamp: '2026-08-01T12:00:00.000Z', snippet: 'No, use the existing endpoint.', matchedPattern: 'no' },
+						{ type: 'tool-error', turnNumber: 3, timestamp: '2026-08-01T12:01:00.000Z', snippet: 'Tool failed: edit', tool: 'edit', retried: true },
+					],
+				}],
+			}],
+		},
+	};
+}
+
 interface Harness {
 	window: any;
 	posted: any[];
@@ -358,4 +388,26 @@ test('remembers the "Other models" open state across a leaderboard re-render', a
 	const detailsAfterSort = harness.window.document.getElementById('model-leaderboard-other');
 	assert.ok(detailsAfterSort, 'expects the "Other models" group to still exist after sorting');
 	assert.equal(detailsAfterSort.open, true, 'the open state must survive the re-render');
+});
+
+test('filters corrections by type and opens the selected session turn', async () => {
+	const harness = await bootWebview(buildStatsWithCorrections());
+	harness.window.document.querySelector('.tab-button[data-tab="corrections"]')?.click();
+
+	const userCorrection = harness.window.document.querySelector('button[data-correction-filter="user-correction"]');
+	assert.ok(userCorrection, 'expects a user-corrections filter pill');
+	userCorrection.click();
+
+	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 1);
+	assert.match(harness.text('.correction-moment') ?? '', /^You corrected the agent No, use the existing endpoint\. turn 2 · matched no/);
+	assert.equal(
+		harness.window.document.querySelector('button[data-correction-filter="user-correction"]')?.getAttribute('aria-pressed'),
+		'true',
+	);
+	harness.window.document.querySelector('button.correction-moment')?.click();
+	harness.window.document.querySelector('button.correction-moment')?.click();
+	const message = harness.posted.at(-1);
+	assert.equal(message.command, 'openSessionFile');
+	assert.equal(message.file, '/sessions/example.jsonl');
+	assert.equal(message.turnNumber, 2);
 });

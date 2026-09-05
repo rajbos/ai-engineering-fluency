@@ -391,6 +391,8 @@ let activeTab = 'activity';
 let pendingTabAnchor: string | null = null;
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentInsights: EvaluatedInsight[] = [];
+let activeCorrectionFilter: CorrectionMomentType | null = null;
+let currentCorrectionReport: CorrectionReport | null = null;
 // Persisted across stats refreshes so the curation section doesn't disappear
 // when a periodic updateStats message omits curationAnalysis.
 let currentCurationAnalysis: ToolCurationAnalysis | null = null;
@@ -3304,7 +3306,7 @@ const CORRECTION_TYPE_META: Record<CorrectionMomentType, { label: string; color:
 	'agent-self-correction': { label: 'Agent caught itself', color: 'rgba(96,165,250,0.85)' },
 };
 
-function buildCorrectionMomentHtml(moment: CorrectionMoment): string {
+function buildCorrectionMomentHtml(moment: CorrectionMoment, sessionFile: string): string {
 	const meta = CORRECTION_TYPE_META[moment.type] ?? { label: moment.type, color: 'rgba(148,163,184,0.85)' };
 	const time = moment.timestamp ? new Date(moment.timestamp) : null;
 	const timeLabel = time && !isNaN(time.getTime()) ? time.toLocaleString() : '';
@@ -3312,7 +3314,7 @@ function buildCorrectionMomentHtml(moment: CorrectionMoment): string {
 		? `tool \`${moment.tool ?? '?'}\`${moment.retried ? ' — retried shortly after' : ''}`
 		: (moment.matchedPattern ? `matched ${moment.matchedPattern}` : '');
 	return `
-		<div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--bg-tertiary);">
+		<button type="button" class="correction-moment" data-correction-file="${escapeHtml(sessionFile)}" data-correction-turn="${moment.turnNumber}" title="Open this turn in the session log viewer" style="display:flex; width:100%; gap:10px; align-items:flex-start; padding:8px 0; border:0; border-bottom:1px solid var(--bg-tertiary); background:none; color:inherit; cursor:pointer; text-align:left;">
 			<span style="flex-shrink:0; font-size:10px; font-weight:700; letter-spacing:0.03em; padding:2px 8px; border-radius:10px; border:1px solid ${meta.color}; color:var(--text-primary); background:${meta.color.replace('0.85', '0.12')}; white-space:nowrap;">${escapeHtml(meta.label)}</span>
 			<div style="flex:1; min-width:0;">
 				<div style="font-size:12px; color:var(--text-primary); opacity:0.9; overflow-wrap:anywhere;">${escapeHtml(moment.snippet)}</div>
@@ -3320,10 +3322,10 @@ function buildCorrectionMomentHtml(moment: CorrectionMoment): string {
 					turn ${moment.turnNumber}${detail ? ` · ${escapeHtml(detail)}` : ''}${timeLabel ? ` · ${escapeHtml(timeLabel)}` : ''}
 				</div>
 			</div>
-		</div>`;
+		</button>`;
 }
 
-function buildCorrectionSessionHtml(session: CorrectionSessionEntry): string {
+function buildCorrectionSessionHtml(session: CorrectionSessionEntry, moments: CorrectionMoment[]): string {
 	const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
 	const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
 	const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : '';
@@ -3336,7 +3338,7 @@ function buildCorrectionSessionHtml(session: CorrectionSessionEntry): string {
 			<div style="font-size:12px; font-weight:600; color:var(--text-primary); overflow-wrap:anywhere;">
 				${escapeHtml(title)}${dateLabel || truncatedLabel ? ` <span style="font-weight:400; color:var(--text-secondary);">${dateLabel ? `· ${escapeHtml(dateLabel)}` : ''}${escapeHtml(truncatedLabel)}</span>` : ''}
 			</div>
-			${session.moments.map(buildCorrectionMomentHtml).join('')}
+			${moments.map(moment => buildCorrectionMomentHtml(moment, session.file)).join('')}
 		</div>`;
 }
 
@@ -3355,25 +3357,39 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null): string {
 	}
 
 	const c = report.counts;
-	const chip = (n: number, label: string): string => n > 0
-		? `<span style="font-size:11px; padding:2px 10px; border-radius:10px; background:var(--bg-tertiary); color:var(--text-primary);">${n} ${escapeHtml(label)}</span>`
+	const chip = (n: number, label: string, type: CorrectionMomentType): string => n > 0
+		? `<button type="button" data-correction-filter="${type}" aria-pressed="${activeCorrectionFilter === type}" style="font-size:11px; padding:2px 10px; border-radius:10px; border:1px solid ${activeCorrectionFilter === type ? 'var(--vscode-focusBorder)' : 'transparent'}; background:${activeCorrectionFilter === type ? 'var(--vscode-button-secondaryBackground)' : 'var(--bg-tertiary)'}; color:var(--text-primary); cursor:pointer;">${n} ${escapeHtml(label)}</button>`
 		: '';
 	const summaryChips = [
-		chip(c.userCorrections, 'user corrections'),
-		chip(c.toolErrors, 'tool errors'),
-		chip(c.editRetries, 'edit retries'),
-		chip(c.editSelfCorrections, 'edit self-corrections'),
-		chip(c.agentSelfCorrections, 'agent self-corrections'),
+		chip(c.userCorrections, 'user corrections', 'user-correction'),
+		chip(c.toolErrors, 'tool errors', 'tool-error'),
+		chip(c.editRetries, 'edit retries', 'edit-retry'),
+		chip(c.editSelfCorrections, 'edit self-corrections', 'edit-self-correction'),
+		chip(c.agentSelfCorrections, 'agent self-corrections', 'agent-self-correction'),
 	].filter(Boolean).join(' ');
 
-	const repoSections = report.repos.map(repo => `
+	const repoSections = report.repos.map(repo => {
+		const sessions = repo.sessions
+			.map(session => ({
+				session,
+				moments: activeCorrectionFilter
+					? session.moments.filter(moment => moment.type === activeCorrectionFilter)
+					: session.moments,
+			}))
+			.filter(({ moments }) => moments.length > 0);
+		if (sessions.length === 0) { return ''; }
+		return `
 		<div style="margin-top:18px;">
 			<div style="font-size:12px; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
 				${escapeHtml(repo.repository)}
-				<span style="font-weight:400; color:var(--text-secondary);">— ${repo.sessionsWithMoments} session${repo.sessionsWithMoments !== 1 ? 's' : ''} with moments</span>
+				<span style="font-weight:400; color:var(--text-secondary);">— ${sessions.length} session${sessions.length !== 1 ? 's' : ''} with moments</span>
 			</div>
-			${repo.sessions.map(buildCorrectionSessionHtml).join('')}
-		</div>`).join('');
+			${sessions.map(({ session, moments }) => buildCorrectionSessionHtml(session, moments)).join('')}
+		</div>`;
+	}).join('');
+	const emptyFilteredState = activeCorrectionFilter && !repoSections
+		? `<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">No ${CORRECTION_TYPE_META[activeCorrectionFilter].label.toLowerCase()} moments are available in this detail sample.</div>`
+		: '';
 
 	return `
 		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
@@ -3387,8 +3403,39 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null): string {
 				</div>
 				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">${summaryChips}</div>
 				${repoSections}
+				${emptyFilteredState}
 			</div>
 		</div>`;
+}
+
+function wireCorrectionInteractions(): void {
+	const panel = document.getElementById('tab-panel-corrections');
+	if (!panel) { return; }
+	panel.addEventListener('click', (event) => {
+		const target = event.target as HTMLElement;
+		const filterButton = target.closest<HTMLButtonElement>('button[data-correction-filter]');
+		if (filterButton) {
+			const filter = filterButton.getAttribute('data-correction-filter');
+			if (!filter || !CORRECTION_MOMENT_TYPES.includes(filter as CorrectionMomentType)) { return; }
+			activeCorrectionFilter = activeCorrectionFilter === filter ? null : filter as CorrectionMomentType;
+			renderCorrectionsPanel();
+			return;
+		}
+		const moment = target.closest<HTMLButtonElement>('button.correction-moment');
+		if (!moment) { return; }
+		const file = moment.getAttribute('data-correction-file');
+		const turnNumber = Number(moment.getAttribute('data-correction-turn'));
+		if (file && Number.isSafeInteger(turnNumber) && turnNumber > 0) {
+			vscode.postMessage({ command: 'openSessionFile', file, turnNumber });
+		}
+	});
+}
+
+function renderCorrectionsPanel(): void {
+	const panel = document.getElementById('tab-panel-corrections');
+	if (!panel) { return; }
+	setHtml(panel, buildCorrectionsTabPanelHtml(currentCorrectionReport));
+	wireCorrectionInteractions();
 }
 
 
@@ -4891,6 +4938,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	}
 
 	const matrix = syncRenderLayoutState(stats);
+	currentCorrectionReport = stats.correctionReport ?? null;
 	const customizationHtml = safeSectionHtml('Workspace Customization', () => buildCustomizationSectionHtml(matrix));
 	// buildUsageAllKeysSets and the context-ref totals are cheap, pure aggregations over
 	// already-validated stats — not worth isolating individually. buildUsageRootHtml (and each
@@ -4940,6 +4988,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	renderSessionsLookbackSelector();
 	setupWorktreesHandlers();
 	wireCopyButtons();
+	wireCorrectionInteractions();
 	// Initialize currentInsights from the stats and wire card buttons
 	currentInsights = stats.insights ?? [];
 	wireInsightCardButtons();

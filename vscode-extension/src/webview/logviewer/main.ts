@@ -159,11 +159,11 @@ getState: () => TState | undefined;
 };
 
 declare global {
-interface Window { __INITIAL_LOGDATA__?: SessionLogData; }
+interface Window { __INITIAL_LOGDATA__?: SessionLogData & { focusedTurnNumber?: number; }; }
 }
 
 const vscode = acquireVsCodeApi();
-const initialData = getWindowData<SessionLogData & { localization?: Record<string, string> }>('__INITIAL_LOGDATA__');
+const initialData = getWindowData<SessionLogData & { focusedTurnNumber?: number; localization?: Record<string, string> }>('__INITIAL_LOGDATA__');
 
 // Initialize localization for webview
 if (initialData?.localization) {
@@ -1399,6 +1399,19 @@ ${data.turns.length > 0
 `);
 
 	wireUpEventHandlers();
+	focusRequestedTurn(data as SessionLogData & { focusedTurnNumber?: number; });
+}
+
+function focusRequestedTurn(data: SessionLogData & { focusedTurnNumber?: number; }): void {
+	const turnNumber = data.focusedTurnNumber;
+	if (typeof turnNumber !== 'number' || !Number.isSafeInteger(turnNumber) || turnNumber < 1) { return; }
+	const turnCard = document.querySelector<HTMLElement>(`.turn-card[data-turn="${turnNumber}"]`);
+	if (!turnCard) { return; }
+	turnCard.classList.add('turn-card-focused');
+	turnCard.setAttribute('tabindex', '-1');
+	turnCard.focus({ preventScroll: true });
+	turnCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	setTimeout(() => turnCard.classList.remove('turn-card-focused'), 2_000);
 }
 
 async function bootstrap(): Promise<void> {
