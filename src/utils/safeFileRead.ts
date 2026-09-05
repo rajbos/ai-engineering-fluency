@@ -15,7 +15,14 @@ import * as path from 'path';
 /** Maximum number of bytes read from a single untrusted session-log file. */
 export const MAX_SESSION_FILE_BYTES = 100 * 1024 * 1024; // 100 MB
 
+/** Memoized result of {@link getSystemTempRoots}; computed lazily on first use. */
+let cachedSystemTempRoots: string[] | undefined;
+
 function getSystemTempRoots(): string[] {
+	if (cachedSystemTempRoots) {
+		return cachedSystemTempRoots;
+	}
+
 	const envRoots = [
 		process.env.TMPDIR,
 		process.env.TMP,
@@ -23,12 +30,12 @@ function getSystemTempRoots(): string[] {
 		process.env.WINDIR ? path.join(process.env.WINDIR, 'Temp') : undefined,
 	].filter((value): value is string => Boolean(value && value.trim().length > 0));
 
-	const fallbackRoots = [
-		'/tmp',
-		'/var/tmp',
-		'C:\\Windows\\Temp',
-		'C:\\Temp',
-	];
+	// Only add platform-appropriate fallback roots: POSIX-style paths are
+	// meaningless on win32 (and vice versa) and, worse, path.resolve() would
+	// silently reinterpret them as CWD-relative paths on the "wrong" platform.
+	const fallbackRoots = process.platform === 'win32'
+		? ['C:\\Windows\\Temp', 'C:\\Temp']
+		: ['/tmp', '/var/tmp'];
 
 	const roots = new Set<string>();
 	for (const root of [...envRoots, ...fallbackRoots]) {
@@ -38,7 +45,8 @@ function getSystemTempRoots(): string[] {
 			roots.add(path.resolve(root));
 		}
 	}
-	return [...roots];
+	cachedSystemTempRoots = [...roots];
+	return cachedSystemTempRoots;
 }
 
 function isPathInsideSystemTempDir(filePath: string): boolean {
