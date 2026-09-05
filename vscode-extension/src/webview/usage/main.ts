@@ -802,6 +802,8 @@ const MODE_BAR_CONFIGS: readonly ModeBarConfig[] = [
 { label: '\u26A1 Custom Agent',   key: 'customAgent', gradient: 'linear-gradient(90deg, #ec4899, #f472b6)' },
 { label: '\u{1F5A5}\uFE0F CLI',   key: 'cli',         gradient: 'linear-gradient(90deg, #06b6d4, #22d3ee)' },
 { label: '\u2728 Copilot App',    key: 'cliApp',      gradient: 'linear-gradient(90deg, #6366f1, #818cf8)' },
+{ label: '\u{1F5A5}\uFE0F Claude Desktop', key: 'claudeDesktop', gradient: 'linear-gradient(90deg, #d97706, #f59e0b)' },
+{ label: '\u{1F9E9} Claude (VS Code)', key: 'claudeVsCode', gradient: 'linear-gradient(90deg, #ea580c, #fb923c)' },
 ];
 
 /** Renders a single horizontal bar item for the mode usage chart. */
@@ -816,7 +818,7 @@ return `
 
 /** Renders the full bar-chart column for a single time period's mode usage. */
 function renderModeBarChart(modeUsage: ModeUsage, title: string): string {
-const total = modeUsage.ask + modeUsage.edit + modeUsage.agent + modeUsage.plan + modeUsage.customAgent + modeUsage.cli + (modeUsage.cliApp ?? 0);
+const total = modeUsage.ask + modeUsage.edit + modeUsage.agent + modeUsage.plan + modeUsage.customAgent + modeUsage.cli + (modeUsage.cliApp ?? 0) + (modeUsage.claudeDesktop ?? 0) + (modeUsage.claudeVsCode ?? 0);
 const bars = MODE_BAR_CONFIGS
 .map(({ label, key, gradient }) => renderModeBarItem(label, modeUsage[key] ?? 0, total, gradient))
 .join('');
@@ -1417,6 +1419,8 @@ function sanitizeModeUsage(mode: any): ModeUsage {
 		customAgent: coerceNumber(m.customAgent),
 		cli: coerceNumber(m.cli),
 		cliApp: coerceNumber(m.cliApp),
+		claudeDesktop: coerceNumber(m.claudeDesktop),
+		claudeVsCode: coerceNumber(m.claudeVsCode),
 	};
 }
 
@@ -4043,7 +4047,7 @@ function buildActivityTabPanelHtml(
 	const modeUsageHtml = safeSectionHtml('Interaction Modes', () => `
 			<div class="section" id="section-interaction-modes">
 				<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
-				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), Agent (autonomous tasks), Plan, Custom Agent, CLI (terminal), or Copilot App (desktop-app CLI sessions)</div>
+				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), Agent (autonomous tasks), Plan, Custom Agent, CLI (terminal), Copilot App (desktop-app CLI sessions), Claude Desktop, or Claude (VS Code)</div>
 				<div class="two-column">
 					${renderModeBarChart(stats.today.modeUsage, '📅 Today')}
 					${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')}

@@ -1796,25 +1796,79 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     }).format(value);
   }
 
-  // src/webview/shared/extensionPoints.ts
-  function wireExtensionPointButtons(vscodeApi) {
-    const buttons = window.__EXTENSION_POINT_BUTTONS__ ?? [];
-    if (buttons.length === 0) {
-      return;
+  // src/webview/shared/messageHandler.ts
+  function collectOwnOrigins(currentWindow) {
+    const origins = [];
+    const origin = currentWindow.location?.origin;
+    if (origin && origin !== "null") {
+      origins.push(origin);
     }
+    const href = currentWindow.location?.href;
+    const derived = href ? /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href) : null;
+    if (derived && !origins.includes(derived[0])) {
+      origins.push(derived[0]);
+    }
+    return origins;
+  }
+  function isTrustedWebviewMessageSource(source, currentWindow, origin) {
+    if (source === null || source === void 0 || source === currentWindow) {
+      return true;
+    }
+    if (source === currentWindow.parent || source === currentWindow.top) {
+      return true;
+    }
+    return Boolean(origin) && collectOwnOrigins(currentWindow).includes(origin);
+  }
+  function registerMessageHandler(handler, onUntrustedMessage) {
+    window.addEventListener("message", (event) => {
+      if (!isTrustedWebviewMessageSource(event.source, window, event.origin)) {
+        onUntrustedMessage?.(event);
+        return;
+      }
+      handler(event.data);
+    });
+  }
+
+  // src/webview/shared/extensionPoints.ts
+  function buttonElementId(id) {
+    return `ext-point-${id}`;
+  }
+  function renderExtensionPointButtons(vscodeApi, buttons) {
     const buttonRow = document.querySelector(".button-row");
     if (!buttonRow) {
       return;
     }
+    const desiredIds = new Set(buttons.map((b3) => b3.id));
+    for (const existing of Array.from(buttonRow.querySelectorAll('[id^="ext-point-"]'))) {
+      const id = existing.id.slice("ext-point-".length);
+      if (!desiredIds.has(id)) {
+        existing.remove();
+      }
+    }
     for (const btn of buttons) {
+      if (document.getElementById(buttonElementId(btn.id))) {
+        continue;
+      }
       const el2 = document.createElement("vscode-button");
-      el2.id = `ext-point-${btn.id}`;
+      el2.id = buttonElementId(btn.id);
       el2.textContent = btn.label;
       el2.addEventListener("click", () => {
         vscodeApi.postMessage({ command: "extensionPointAction", buttonId: btn.id });
       });
       buttonRow.append(el2);
     }
+  }
+  function wireExtensionPointButtons(vscodeApi) {
+    renderExtensionPointButtons(vscodeApi, window.__EXTENSION_POINT_BUTTONS__ ?? []);
+    if (window.__extensionPointButtonsListenerRegistered__) {
+      return;
+    }
+    window.__extensionPointButtonsListenerRegistered__ = true;
+    registerMessageHandler((message) => {
+      if (message?.command === "extensionPointButtonsUpdated" && Array.isArray(message.buttons)) {
+        renderExtensionPointButtons(vscodeApi, message.buttons);
+      }
+    });
   }
 
   // src/webview/shared/theme.css
@@ -2152,19 +2206,6 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
 
   // src/webview/environmental/styles.css
   var styles_default = "body {\n	margin: 0;\n	background: var(--bg-primary);\n	color: var(--text-primary);\n	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n}\n\n.container {\n	padding: 16px;\n	display: flex;\n	flex-direction: column;\n	gap: 14px;\n	max-width: 1200px;\n	margin: 0 auto;\n}\n\n.header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	gap: 12px;\n	padding-bottom: 4px;\n}\n\n.title {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n\n\n.sections {\n	display: flex;\n	flex-direction: column;\n	gap: 16px;\n}\n\n.section {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n}\n\n.section h3 {\n	margin: 0 0 10px;\n	font-size: 14px;\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	color: var(--text-primary);\n	letter-spacing: 0.2px;\n}\n\n/* --- Metric cards --- */\n.metric-cards {\n	display: flex;\n	flex-direction: column;\n	gap: 16px;\n}\n\n.metric-card {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 8px;\n	padding: 14px 16px;\n}\n\n.metric-card-header {\n	display: flex;\n	align-items: center;\n	gap: 7px;\n	margin-bottom: 12px;\n}\n\n.metric-card-icon {\n	font-size: 16px;\n	line-height: 1;\n}\n\n.metric-card-label {\n	font-size: 13px;\n	font-weight: 700;\n	color: var(--text-primary);\n	text-transform: uppercase;\n	letter-spacing: 0.4px;\n}\n\n.metric-primary-value {\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n	padding: 6px 0 10px;\n	border-bottom: 1px solid var(--border-subtle);\n	margin-bottom: 8px;\n}\n\n.analogy-grid {\n	display: grid;\n	grid-template-columns: repeat(4, 1fr);\n	gap: 16px;\n}\n\n.analogy-col {\n	display: flex;\n	flex-direction: column;\n	gap: 6px;\n}\n\n.analogy-col-header {\n	font-size: 11px;\n	font-weight: 700;\n	color: var(--text-secondary);\n	text-transform: uppercase;\n	letter-spacing: 0.5px;\n	padding-bottom: 5px;\n	border-bottom: 1px solid var(--border-subtle);\n	margin-bottom: 2px;\n}\n\n.analogy-item {\n	display: flex;\n	align-items: baseline;\n	gap: 6px;\n	font-size: 12px;\n	color: var(--text-primary);\n	line-height: 1.5;\n}\n\n.analogy-icon {\n	flex-shrink: 0;\n	width: 20px;\n	text-align: center;\n	font-size: 13px;\n}\n\n.notes {\n	margin: 4px 0 0;\n	padding-left: 16px;\n	color: var(--text-secondary);\n}\n\n.notes li {\n	margin: 4px 0;\n	line-height: 1.4;\n}\n\n.footer {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 6px;\n}\n\n.section-intro {\n	color: var(--text-secondary);\n	font-size: 12px;\n	margin: 0 0 10px;\n	line-height: 1.5;\n}\n";
-
-  // src/webview/shared/messageHandler.ts
-  function isTrustedWebviewMessageSource(source, currentWindow) {
-    return source === null || source === currentWindow;
-  }
-  function registerMessageHandler(handler) {
-    window.addEventListener("message", (event) => {
-      if (!isTrustedWebviewMessageSource(event.source, window)) {
-        return;
-      }
-      handler(event.data);
-    });
-  }
 
   // src/webview/environmental/main.ts
   var CO2_GRAMS_PER_CAR_KM = 120;

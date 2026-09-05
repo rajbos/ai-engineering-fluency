@@ -1938,25 +1938,79 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     }
   }
 
-  // src/webview/shared/extensionPoints.ts
-  function wireExtensionPointButtons(vscodeApi) {
-    const buttons = window.__EXTENSION_POINT_BUTTONS__ ?? [];
-    if (buttons.length === 0) {
-      return;
+  // src/webview/shared/messageHandler.ts
+  function collectOwnOrigins(currentWindow) {
+    const origins = [];
+    const origin = currentWindow.location?.origin;
+    if (origin && origin !== "null") {
+      origins.push(origin);
     }
+    const href = currentWindow.location?.href;
+    const derived = href ? /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href) : null;
+    if (derived && !origins.includes(derived[0])) {
+      origins.push(derived[0]);
+    }
+    return origins;
+  }
+  function isTrustedWebviewMessageSource(source, currentWindow, origin) {
+    if (source === null || source === void 0 || source === currentWindow) {
+      return true;
+    }
+    if (source === currentWindow.parent || source === currentWindow.top) {
+      return true;
+    }
+    return Boolean(origin) && collectOwnOrigins(currentWindow).includes(origin);
+  }
+  function registerMessageHandler(handler, onUntrustedMessage) {
+    window.addEventListener("message", (event) => {
+      if (!isTrustedWebviewMessageSource(event.source, window, event.origin)) {
+        onUntrustedMessage?.(event);
+        return;
+      }
+      handler(event.data);
+    });
+  }
+
+  // src/webview/shared/extensionPoints.ts
+  function buttonElementId(id) {
+    return `ext-point-${id}`;
+  }
+  function renderExtensionPointButtons(vscodeApi, buttons) {
     const buttonRow = document.querySelector(".button-row");
     if (!buttonRow) {
       return;
     }
+    const desiredIds = new Set(buttons.map((b3) => b3.id));
+    for (const existing of Array.from(buttonRow.querySelectorAll('[id^="ext-point-"]'))) {
+      const id = existing.id.slice("ext-point-".length);
+      if (!desiredIds.has(id)) {
+        existing.remove();
+      }
+    }
     for (const btn of buttons) {
+      if (document.getElementById(buttonElementId(btn.id))) {
+        continue;
+      }
       const el2 = document.createElement("vscode-button");
-      el2.id = `ext-point-${btn.id}`;
+      el2.id = buttonElementId(btn.id);
       el2.textContent = btn.label;
       el2.addEventListener("click", () => {
         vscodeApi.postMessage({ command: "extensionPointAction", buttonId: btn.id });
       });
       buttonRow.append(el2);
     }
+  }
+  function wireExtensionPointButtons(vscodeApi) {
+    renderExtensionPointButtons(vscodeApi, window.__EXTENSION_POINT_BUTTONS__ ?? []);
+    if (window.__extensionPointButtonsListenerRegistered__) {
+      return;
+    }
+    window.__extensionPointButtonsListenerRegistered__ = true;
+    registerMessageHandler((message) => {
+      if (message?.command === "extensionPointButtonsUpdated" && Array.isArray(message.buttons)) {
+        renderExtensionPointButtons(vscodeApi, message.buttons);
+      }
+    });
   }
 
   // src/webview/usage/recentSessionsSanitizer.ts
@@ -2862,6 +2916,26 @@ body {
 	background: var(--model-color);
 }
 
+.model-leaderboard-other {
+	margin-top: 8px;
+}
+
+.model-leaderboard-other > summary {
+	cursor: pointer;
+	user-select: none;
+	font-size: 12px;
+	color: var(--text-secondary);
+	padding: 4px 0;
+}
+
+.model-leaderboard-other > summary:hover {
+	color: var(--link-color);
+}
+
+.model-leaderboard-other[open] > summary {
+	margin-bottom: 6px;
+}
+
 .model-use-cell {
 	display: grid;
 	grid-template-columns: 82px 42px auto;
@@ -3453,19 +3527,6 @@ background: var(--bg-tertiary);
 }
 `;
 
-  // src/webview/shared/messageHandler.ts
-  function isTrustedWebviewMessageSource(source, currentWindow) {
-    return source === null || source === currentWindow;
-  }
-  function registerMessageHandler(handler) {
-    window.addEventListener("message", (event) => {
-      if (!isTrustedWebviewMessageSource(event.source, window)) {
-        return;
-      }
-      handler(event.data);
-    });
-  }
-
   // ../src/webview/shared/modelUtils.ts
   var _pricingData = getWindowData("__MODEL_PRICING__");
   var _modelNames = {};
@@ -3608,6 +3669,27 @@ background: var(--bg-tertiary);
       return null;
     }
     return calls[Math.floor((calls.length - 1) * 0.25)];
+  }
+  function computeLongTailModels(usage) {
+    const ranked = Object.entries(usage).map(([model, counters]) => ({ model, calls: counters.calls })).sort((a3, b3) => b3.calls - a3.calls);
+    let cutoffIndex = -1;
+    let smallestRatio = 1;
+    for (let i6 = 1; i6 < ranked.length; i6++) {
+      const previousCalls = ranked[i6 - 1].calls;
+      if (previousCalls <= 0) {
+        continue;
+      }
+      const ratio = ranked[i6].calls / previousCalls;
+      if (ratio < smallestRatio) {
+        smallestRatio = ratio;
+        cutoffIndex = i6;
+      }
+    }
+    const tailLength = cutoffIndex === -1 ? 0 : ranked.length - cutoffIndex;
+    if (cutoffIndex === -1 || smallestRatio >= 0.5 || tailLength < 2) {
+      return /* @__PURE__ */ new Set();
+    }
+    return new Set(ranked.slice(cutoffIndex).map((entry) => entry.model));
   }
 
   // ../src/chartDataBuilder.ts
@@ -3866,17 +3948,27 @@ background: var(--bg-tertiary);
       bounds: { left, right: left + width, top: y3 - 10, bottom: y3 - 10 + LABEL_HEIGHT }
     };
   }
+  var STACK_SLOTS = 5;
+  var STACK_STEP = LABEL_HEIGHT + 3;
+  function getStackedSideOffsets(input, bounds) {
+    const preferBelowFirst = input.y < (bounds.top + bounds.bottom) / 2;
+    const offsets = [];
+    for (let step = 0; step < STACK_SLOTS; step++) {
+      const below = input.y + 18 + step * STACK_STEP;
+      const above = input.y - 10 - step * STACK_STEP;
+      offsets.push(...preferBelowFirst ? [below, above] : [above, below]);
+    }
+    return offsets;
+  }
   function getLabelCandidates(input, bounds) {
     const right = input.x + input.radius + LABEL_GAP;
     const left = input.x - input.radius - LABEL_GAP;
     const above = input.y - input.radius - 6;
     const below = input.y + input.radius + LABEL_HEIGHT;
-    const sideY = input.y < bounds.top + 22 ? [input.y + 18, input.y - 10] : [input.y - 10, input.y + 18];
+    const stackedOffsets = getStackedSideOffsets(input, bounds);
     return [
-      createLabelPlacement(input, right, sideY[0], "start"),
-      createLabelPlacement(input, right, sideY[1], "start"),
-      createLabelPlacement(input, left, sideY[0], "end"),
-      createLabelPlacement(input, left, sideY[1], "end"),
+      ...stackedOffsets.map((y3) => createLabelPlacement(input, right, y3, "start")),
+      ...stackedOffsets.map((y3) => createLabelPlacement(input, left, y3, "end")),
       createLabelPlacement(input, input.x, above, "middle"),
       createLabelPlacement(input, input.x, below, "middle")
     ];
@@ -3908,6 +4000,31 @@ background: var(--bg-tertiary);
       placed.push(best);
     }
     return placed;
+  }
+
+  // src/webview/usage/readiness.ts
+  function createUsageWebviewReadyNotifier(postMessage, hasContainers = defaultHasGitHubActivityContainers) {
+    return (reason) => {
+      postMessage({
+        command: "usageWebviewReady",
+        reason,
+        hasGitHubActivityContainers: hasContainers()
+      });
+    };
+  }
+  function defaultHasGitHubActivityContainers() {
+    if (typeof document === "undefined") {
+      return false;
+    }
+    return Boolean(document.querySelector("#repos-pr-content") && document.querySelector("#agent-sessions-content"));
+  }
+  function restoreGitHubActivityPanels(repoData, agentData, renderRepo, renderAgent) {
+    if (repoData) {
+      renderRepo(repoData);
+    }
+    if (agentData) {
+      renderAgent(agentData);
+    }
   }
 
   // ../src/utils/toolUtils.ts
@@ -4059,6 +4176,28 @@ background: var(--bg-tertiary);
   function isMcpFamilyResolvedTool(id) {
     return resolveMcpFamilyToolName(id) !== void 0;
   }
+  function camelToSnake(value) {
+    return value.replace(/(?<=[a-z0-9])(?=[A-Z])/g, "_").replace(/(?<=[A-Z])(?=[A-Z][a-z])/g, "_");
+  }
+  function canonicalizeToolId(id) {
+    return camelToSnake(id).toLowerCase().replace(/[.-]/g, "_");
+  }
+  function lookupKnownToolName(id, toolNameMap) {
+    if (toolNameMap[id]) {
+      return toolNameMap[id];
+    }
+    const lower = id.toLowerCase();
+    if (toolNameMap[lower]) {
+      return toolNameMap[lower];
+    }
+    const canonicalId = canonicalizeToolId(id);
+    for (const key of Object.keys(toolNameMap)) {
+      if (canonicalizeToolId(key) === canonicalId) {
+        return toolNameMap[key];
+      }
+    }
+    return void 0;
+  }
 
   // src/webview/usage/main.ts
   function statusBadgeHtml(status, label) {
@@ -4073,6 +4212,9 @@ background: var(--bg-tertiary);
     }
   }
   var vscode = acquireVsCodeApi();
+  var notifyUsageWebviewReady = createUsageWebviewReadyNotifier(
+    (message) => vscode.postMessage(message)
+  );
   var curationTraceOnceKeys = /* @__PURE__ */ new Set();
   var aboutCollapsed = vscode.getState()?.aboutCollapsed ?? false;
   function traceCuration(stage, details) {
@@ -4375,7 +4517,7 @@ background: var(--bg-tertiary);
     if (!TOOL_NAME_MAP) {
       return id;
     }
-    return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? resolveMcpFamilyToolName(id) ?? id;
+    return lookupKnownToolName(id, TOOL_NAME_MAP) ?? resolveGuidMcpToolName(id) ?? resolveMcpFamilyToolName(id) ?? id;
   }
   function lookupMcpToolName(id) {
     const full = lookupToolName(id);
@@ -4397,7 +4539,7 @@ background: var(--bg-tertiary);
     Object.entries(stats.last30Days.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
     Object.entries(stats.month.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
     const suppressed = new Set(stats.suppressedUnknownTools ?? []);
-    return Array.from(allTools).filter((tool) => !TOOL_NAME_MAP?.[tool] && !TOOL_NAME_MAP?.[tool.toLowerCase()] && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
+    return Array.from(allTools).filter((tool) => !(TOOL_NAME_MAP && lookupKnownToolName(tool, TOOL_NAME_MAP)) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
   }
   function createMcpToolIssueUrl(unknownTools) {
     const repoUrl = "https://github.com/rajbos/ai-engineering-fluency";
@@ -4422,7 +4564,9 @@ Please add friendly names for these tools to improve the user experience.`
     { label: "\u{1F4CB} Plan Mode", key: "plan", gradient: "linear-gradient(90deg, #f59e0b, #fbbf24)" },
     { label: "\u26A1 Custom Agent", key: "customAgent", gradient: "linear-gradient(90deg, #ec4899, #f472b6)" },
     { label: "\u{1F5A5}\uFE0F CLI", key: "cli", gradient: "linear-gradient(90deg, #06b6d4, #22d3ee)" },
-    { label: "\u2728 Copilot App", key: "cliApp", gradient: "linear-gradient(90deg, #6366f1, #818cf8)" }
+    { label: "\u2728 Copilot App", key: "cliApp", gradient: "linear-gradient(90deg, #6366f1, #818cf8)" },
+    { label: "\u{1F5A5}\uFE0F Claude Desktop", key: "claudeDesktop", gradient: "linear-gradient(90deg, #d97706, #f59e0b)" },
+    { label: "\u{1F9E9} Claude (VS Code)", key: "claudeVsCode", gradient: "linear-gradient(90deg, #ea580c, #fb923c)" }
   ];
   function renderModeBarItem(label, count, total, gradient) {
     const pct = total > 0 ? count / total * 100 : 0;
@@ -4433,7 +4577,7 @@ Please add friendly names for these tools to improve the user experience.`
 </div>`;
   }
   function renderModeBarChart(modeUsage, title) {
-    const total = modeUsage.ask + modeUsage.edit + modeUsage.agent + modeUsage.plan + modeUsage.customAgent + modeUsage.cli + (modeUsage.cliApp ?? 0);
+    const total = modeUsage.ask + modeUsage.edit + modeUsage.agent + modeUsage.plan + modeUsage.customAgent + modeUsage.cli + (modeUsage.cliApp ?? 0) + (modeUsage.claudeDesktop ?? 0) + (modeUsage.claudeVsCode ?? 0);
     const bars = MODE_BAR_CONFIGS.map(({ label, key, gradient }) => renderModeBarItem(label, modeUsage[key] ?? 0, total, gradient)).join("");
     return `
 <div>
@@ -4963,7 +5107,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
       plan: coerceNumber2(m2.plan),
       customAgent: coerceNumber2(m2.customAgent),
       cli: coerceNumber2(m2.cli),
-      cliApp: coerceNumber2(m2.cliApp)
+      cliApp: coerceNumber2(m2.cliApp),
+      claudeDesktop: coerceNumber2(m2.claudeDesktop),
+      claudeVsCode: coerceNumber2(m2.claudeVsCode)
     };
   }
   function sanitizeContextRefs(refs) {
@@ -5822,7 +5968,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
   function updateReposPrPanel(data) {
     const container = document.querySelector("#repos-pr-content");
     if (!container) {
-      return;
+      return false;
     }
     setHtml(container, `
 		<div class="section-title"><span>\u{1F916}</span><span>AI Activity in Repository PRs</span></div>
@@ -5833,6 +5979,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 		</div>
 		${renderReposPrContent(data)}
 	`);
+    return true;
   }
   function agentRepoLabelHtml(r6) {
     const mono = "font-family:'Courier New',monospace; font-size:12px;";
@@ -5951,7 +6098,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
   function updateAgentSessionsPanel(data) {
     const container = document.querySelector("#agent-sessions-content");
     if (!container) {
-      return;
+      return false;
     }
     setHtml(container, `
 		<div class="section-title"><span>\u{1F916}</span><span>Copilot Cloud Agent Sessions</span></div>
@@ -5962,6 +6109,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 		</div>
 		${renderAgentSessionsContent(data)}
 	`);
+    return true;
   }
   function buildCustomizationSectionHtml(matrix) {
     if (!matrix || !matrix.workspaces || matrix.workspaces.length === 0) {
@@ -6562,19 +6710,21 @@ ${_renderMultiModelMixedCostSessions(switching)}
     }
   }
   function buildReposAndAgentTabPanelsHtml() {
+    const repoLoadingMessage = repoPrStatsLoaded ? "Fetching repository PRs\u2026" : "Loading\u2026 (sign in with GitHub to see data)";
+    const agentLoadingMessage = agentSessionsLoaded ? "Loading cloud agent snapshot\u2026" : "Loading\u2026 (sign in with GitHub to see data)";
     return `
 		<div id="tab-panel-repos" class="tab-panel"${activeTab !== "repos" ? ' style="display:none"' : ""}>
 			<div class="section" id="repos-pr-content">
 				<div class="section-title"><span>\u{1F916}</span><span>AI Activity in Repository PRs</span></div>
 				<div class="section-subtitle">PRs from the last 30 days across your known repositories \u2014 authored or reviewed by AI agents.</div>
-				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading\u2026 (sign in with GitHub to see data)</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">${repoLoadingMessage}</div>
 			</div>
 		</div>
 		<div id="tab-panel-agent" class="tab-panel"${activeTab !== "agent" ? ' style="display:none"' : ""}>
 			<div class="section" id="agent-sessions-content">
 				<div class="section-title"><span>\u{1F916}</span><span>Copilot Cloud Agent Sessions</span></div>
 				<div class="section-subtitle">Cloud agent tasks and sessions from the last 30 days, fetched from the GitHub API.</div>
-				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading\u2026 (sign in with GitHub to see data)</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">${agentLoadingMessage}</div>
 			</div>
 		</div>`;
   }
@@ -7361,7 +7511,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const modeUsageHtml = safeSectionHtml("Interaction Modes", () => `
 			<div class="section" id="section-interaction-modes">
 				<div class="section-title"><span>\u{1F3AF}</span><span>Interaction Modes</span></div>
-				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), Agent (autonomous tasks), Plan, Custom Agent, CLI (terminal), or Copilot App (desktop-app CLI sessions)</div>
+				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), Agent (autonomous tasks), Plan, Custom Agent, CLI (terminal), Copilot App (desktop-app CLI sessions), Claude Desktop, or Claude (VS Code)</div>
 				<div class="two-column">
 					${renderModeBarChart(stats.today.modeUsage, "\u{1F4C5} Today")}
 					${renderModeBarChart(stats.last30Days.modeUsage, "\u{1F4CA} Last 30 Days")}
@@ -7672,6 +7822,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
   var efficiencySortDirection = "desc";
   var cachedModelEfficiency = {};
   var efficiencyFilterLowUsage = true;
+  var efficiencyOtherModelsOpen = false;
   function formatUnitCost(value) {
     if (value === null) {
       return "\u2014";
@@ -7875,15 +8026,32 @@ ${_renderMultiModelMixedCostSessions(switching)}
 		<label class="efficiency-control"><span>Color by</span><select id="eff-color-mode">${colorOptions}</select></label>
 	</div>`;
   }
-  function buildEfficiencyTableHtml(rows, totalCalls) {
-    const tableRows = rows.map((row) => {
+  function buildEfficiencyTableRowsHtml(rows, totalCalls) {
+    return rows.map((row) => {
       const cells = EFFICIENCY_COLUMN_DEFS.map((column) => `<td>${column.render(row, totalCalls)}</td>`).join("");
       return `<tr style="--model-color:${getEfficiencyColor(row.model)}">${cells}</tr>`;
     }).join("");
-    const headers = EFFICIENCY_COLUMN_DEFS.map(
+  }
+  function buildEfficiencyTableHeadersHtml() {
+    return EFFICIENCY_COLUMN_DEFS.map(
       (column) => `<th class="sortable" data-eff-sort="${column.sortKey}" title="${column.title}">${column.label}${getEfficiencySortIndicator(column.sortKey)}</th>`
     ).join("");
-    return `<div class="model-leaderboard-table-wrap"><table class="model-leaderboard-table"><thead><tr>${headers}</tr></thead><tbody>${tableRows}</tbody></table></div>`;
+  }
+  function buildEfficiencyTableHtml(rows, totalCalls, longTailModels) {
+    const mainRows = longTailModels.size > 0 ? rows.filter((row) => !longTailModels.has(row.model)) : rows;
+    const otherRows = longTailModels.size > 0 ? rows.filter((row) => longTailModels.has(row.model)) : [];
+    const headers = buildEfficiencyTableHeadersHtml();
+    const table = `<div class="model-leaderboard-table-wrap"><table class="model-leaderboard-table"><thead><tr>${headers}</tr></thead><tbody>${buildEfficiencyTableRowsHtml(mainRows, totalCalls)}</tbody></table></div>`;
+    if (otherRows.length === 0) {
+      return table;
+    }
+    const otherCalls = otherRows.reduce((sum, row) => sum + row.counters.calls, 0);
+    const otherShare = totalCalls > 0 ? otherCalls / totalCalls : 0;
+    const otherTable = `<div class="model-leaderboard-table-wrap"><table class="model-leaderboard-table"><thead><tr>${headers}</tr></thead><tbody>${buildEfficiencyTableRowsHtml(otherRows, totalCalls)}</tbody></table></div>`;
+    return `${table}<details class="model-leaderboard-other" id="model-leaderboard-other"${efficiencyOtherModelsOpen ? " open" : ""}>
+		<summary>Other models (${otherRows.length}, ${formatRatePercent(otherShare)} of turns)</summary>
+		${otherTable}
+	</details>`;
   }
   function buildModelEfficiencyContentHtml() {
     const usage = cachedModelEfficiency[efficiencyPeriod];
@@ -7894,10 +8062,12 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const totalCalls = allRows.reduce((sum, row) => sum + row.counters.calls, 0);
     const filtered = filterLowUsageRows(allRows, usage);
     const note = filtered.hiddenNote ? `<span class="model-leaderboard-filter-note">${filtered.hiddenNote}</span>` : "";
+    const filteredUsage = Object.fromEntries(filtered.rows.map((row) => [row.model, row.counters]));
+    const longTailModels = computeLongTailModels(filteredUsage);
     return `<div class="efficiency-chart-header"><div><strong>Efficiency frontier</strong><span>One-shot edit rate is a local quality proxy, not a benchmark pass rate.</span></div>${buildChartControlsHtml()}</div>
 		${buildEfficiencyChartHtml(filtered.rows)}
 		<div class="model-leaderboard-heading"><div><strong>Most used models locally</strong><span>Ranked by your local turns; all averages use the same selected period.</span></div>${note}</div>
-		${buildEfficiencyTableHtml(filtered.rows, totalCalls)}`;
+		${buildEfficiencyTableHtml(filtered.rows, totalCalls, longTailModels)}`;
   }
   function buildModelEfficiencySectionHtml(stats) {
     cachedModelEfficiency = { today: stats.today.modelEfficiency, last30Days: stats.last30Days.modelEfficiency, month: stats.month.modelEfficiency };
@@ -7961,6 +8131,12 @@ ${_renderMultiModelMixedCostSessions(switching)}
     if (!section) {
       return;
     }
+    section.addEventListener("toggle", (event) => {
+      const target = event.target;
+      if (target.id === "model-leaderboard-other") {
+        efficiencyOtherModelsOpen = target.open;
+      }
+    }, true);
     section.addEventListener("click", (event) => {
       const target = event.target;
       const header = target.closest("th[data-eff-sort]");
@@ -8124,6 +8300,8 @@ ${_renderMultiModelMixedCostSessions(switching)}
     currentInsights = stats.insights ?? [];
     wireInsightCardButtons();
     scrollToPendingTabAnchor();
+    restoreGitHubActivityPanels(repoPrStatsData, agentSessionsData, updateReposPrPanel, updateAgentSessionsPanel);
+    notifyUsageWebviewReady("layout-rendered");
   }
   function wireAboutInfoToggle() {
     const toggle = document.getElementById("about-info-toggle");
@@ -8273,12 +8451,6 @@ ${_renderMultiModelMixedCostSessions(switching)}
       renderLayout(sanitized);
       setupSessionsTableSort();
       renderRepositoryHygienePanels();
-      if (repoPrStatsData) {
-        updateReposPrPanel(repoPrStatsData);
-      }
-      if (agentSessionsData) {
-        updateAgentSessionsPanel(agentSessionsData);
-      }
     } else {
       traceCurationOnce("update-invalid-sanitized", "handleUpdateStats.sanitizeReturnedNull");
       showLoadError("Received invalid data from the extension. Try refreshing.");
@@ -8328,7 +8500,12 @@ ${_renderMultiModelMixedCostSessions(switching)}
     if (!repoPrStatsData.authenticated) {
       repoPrStatsLoaded = false;
     }
-    updateReposPrPanel(repoPrStatsData);
+    if (!updateReposPrPanel(repoPrStatsData)) {
+      traceToHost("repoPrStatsLoaded.notRendered", {
+        repos: repoPrStatsData.repos.length,
+        authenticated: repoPrStatsData.authenticated
+      });
+    }
   }
   function handleAgentSessionsLoaded(data) {
     if (!data || typeof data !== "object") {
@@ -8338,7 +8515,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
     if (!agentSessionsData.authenticated) {
       agentSessionsLoaded = false;
     }
-    updateAgentSessionsPanel(agentSessionsData);
+    if (!updateAgentSessionsPanel(agentSessionsData)) {
+      traceToHost("agentSessionsLoaded.notRendered", { authenticated: agentSessionsData.authenticated });
+    }
   }
   function handleUpdateInsights(rawInsights) {
     if (!Array.isArray(rawInsights)) {
@@ -8447,10 +8626,38 @@ ${_renderMultiModelMixedCostSessions(switching)}
       setTimeout(() => anchor.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     }
   }
+  var _traceBudget = 20;
+  function traceToHost(stage, details) {
+    if (_traceBudget <= 0) {
+      return;
+    }
+    _traceBudget--;
+    vscode.postMessage({ command: "usageWebviewTrace", stage, details });
+  }
   registerMessageHandler((message) => {
-    handleExtensionMessage(message);
+    try {
+      handleExtensionMessage(message);
+    } catch (err) {
+      traceToHost("handleExtensionMessage.threw", {
+        command: String(message?.command ?? ""),
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+  }, (event) => {
+    traceToHost("message-rejected-untrusted", {
+      command: String(event?.data?.command ?? "(none)"),
+      origin: event.origin,
+      ownOrigin: location.origin,
+      href: String(location.href).slice(0, 120)
+    });
   });
-  vscode.postMessage({ command: "usageWebviewReady" });
+  window.addEventListener("error", (event) => {
+    traceToHost("window.error", { message: String(event.message).slice(0, 200) });
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    traceToHost("unhandledRejection", { reason: String(event?.reason).slice(0, 200) });
+  });
+  notifyUsageWebviewReady("listener-registered");
   function getWorkspaceName(workspacePath) {
     const workspace = hygieneMatrixState?.workspaces.find((ws) => ws.workspacePath === workspacePath);
     return workspace?.workspaceName || workspacePath;

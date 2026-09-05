@@ -983,6 +983,69 @@ test('ClaudeCodeAdapter.analyzeUsage: a user-typed slash invocation (<command-na
 	}
 });
 
+// ----- ClaudeCodeAdapter.analyzeUsage: modeUsage bucketing by entrypoint variant -----
+
+test('ClaudeCodeAdapter.analyzeUsage: entrypoint "cli" counts toward modeUsage.cli', async () => {
+	const events = [
+		{ type: 'user', isSidechain: false, entrypoint: 'cli', message: { role: 'user', content: 'hello' } },
+	];
+	const filePath = createTempSession(events);
+	try {
+		const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+		assert.equal(result.modeUsage.cli, 1);
+		assert.equal(result.modeUsage.claudeDesktop ?? 0, 0);
+		assert.equal(result.modeUsage.claudeVsCode ?? 0, 0);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
+test('ClaudeCodeAdapter.analyzeUsage: entrypoint "claude-desktop" counts toward modeUsage.claudeDesktop, not cli', async () => {
+	const events = [
+		{ type: 'user', isSidechain: false, entrypoint: 'claude-desktop', message: { role: 'user', content: 'hello' } },
+	];
+	const filePath = createTempSession(events);
+	try {
+		const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+		assert.equal(result.modeUsage.claudeDesktop, 1);
+		assert.equal(result.modeUsage.cli, 0);
+		assert.equal(result.modeUsage.claudeVsCode ?? 0, 0);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
+test('ClaudeCodeAdapter.analyzeUsage: entrypoint "claude-vscode" counts toward modeUsage.claudeVsCode, not cli', async () => {
+	const events = [
+		{ type: 'user', isSidechain: false, entrypoint: 'claude-vscode', message: { role: 'user', content: 'hello' } },
+	];
+	const filePath = createTempSession(events);
+	try {
+		const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+		assert.equal(result.modeUsage.claudeVsCode, 1);
+		assert.equal(result.modeUsage.cli, 0);
+		assert.equal(result.modeUsage.claudeDesktop ?? 0, 0);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
+test('ClaudeCodeAdapter.analyzeUsage: multiple user turns in a claude-desktop session all count under claudeDesktop', async () => {
+	const events = [
+		{ type: 'user', isSidechain: false, entrypoint: 'claude-desktop', message: { role: 'user', content: 'first' } },
+		{ type: 'assistant', message: { id: 'm1', model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: 'ok' }] } },
+		{ type: 'user', isSidechain: false, message: { role: 'user', content: 'second' } },
+	];
+	const filePath = createTempSession(events);
+	try {
+		const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+		assert.equal(result.modeUsage.claudeDesktop, 2);
+		assert.equal(result.modeUsage.cli, 0);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
 // ----- getClaudeCodeDailyFractions (issue #1608, root cause A) -----
 
 test('getClaudeCodeDailyFractions: splits usage by each assistant event day, weighted by tokens', async () => {

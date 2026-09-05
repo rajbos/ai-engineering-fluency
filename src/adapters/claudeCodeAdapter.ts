@@ -298,9 +298,13 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		const analysis = createEmptySessionUsageAnalysis();
 		const events = await readClaudeCodeEventsForAnalysis(sessionFile);
 		const models: string[] = [];
+		// Claude Code (terminal CLI), the standalone Claude Desktop app, and the Claude Code VS
+		// Code extension all write to the same ~/.claude/projects/ format, so user-turn interactions
+		// are bucketed into the matching modeUsage field instead of always landing in `cli`.
+		const modeBucket = this.resolveModeBucket(sessionFile);
 		for (const event of events) {
 			if (event.type === 'user' && event.message?.role === 'user' && !event.isSidechain) {
-				this.processUserEvent(event, analysis);
+				this.processUserEvent(event, analysis, modeBucket);
 			} else if (event.type === 'assistant') {
 				this.processAssistantEvent(event, analysis, ctx, models);
 			} else if (event.type === 'system' && event.subtype === 'compact_boundary') {
@@ -320,8 +324,26 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		}
 	}
 
-	private processUserEvent(event: any, analysis: import('../types').SessionUsageAnalysis): void {
-		analysis.modeUsage.cli++;
+	/**
+	 * Resolve which `modeUsage` field a session's user-turn interactions should be counted
+	 * under, based on the `entrypoint` variant `detectClaudeCodeEditorVariant` detects:
+	 * terminal CLI usage stays in the generic `cli` bucket, while the standalone Claude
+	 * Desktop app and IDE-embedded usage (e.g. the VS Code extension) get their own buckets
+	 * so terminal CLI counts aren't inflated by non-terminal Claude Code surfaces.
+	 */
+	private resolveModeBucket(sessionFile: string): 'cli' | 'claudeDesktop' | 'claudeVsCode' {
+		const variant = detectClaudeCodeEditorVariant(sessionFile);
+		if (variant === 'Claude Code CLI') { return 'cli'; }
+		if (variant === 'Claude Desktop') { return 'claudeDesktop'; }
+		return 'claudeVsCode';
+	}
+
+	private processUserEvent(event: any, analysis: import('../types').SessionUsageAnalysis, modeBucket: 'cli' | 'claudeDesktop' | 'claudeVsCode'): void {
+		if (modeBucket === 'cli') {
+			analysis.modeUsage.cli++;
+		} else {
+			analysis.modeUsage[modeBucket] = (analysis.modeUsage[modeBucket] ?? 0) + 1;
+		}
 		const cmd = extractClaudeSlashCommand(event.message?.content);
 		if (cmd) {
 			const key = `__slash__${cmd}`;

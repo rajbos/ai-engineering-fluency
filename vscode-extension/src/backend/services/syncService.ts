@@ -780,7 +780,7 @@ return this.buildDayModelInteractionsFromJson(content, fileMtimeMs, startMs, ses
 			agentModeCount: Math.round((analysis.modeUsage.agent || 0) * ratio),
 			planModeCount: Math.round((analysis.modeUsage.plan || 0) * ratio),
 			customAgentModeCount: Math.round((analysis.modeUsage.customAgent || 0) * ratio),
-			cliModeCount: Math.round(((analysis.modeUsage.cli || 0) + (analysis.modeUsage.cliApp || 0)) * ratio)
+			cliModeCount: Math.round(((analysis.modeUsage.cli || 0) + (analysis.modeUsage.cliApp || 0) + (analysis.modeUsage.claudeDesktop || 0) + (analysis.modeUsage.claudeVsCode || 0)) * ratio)
 		};
 	}
 

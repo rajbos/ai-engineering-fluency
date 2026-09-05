@@ -28,8 +28,10 @@ The dashboard tracks these interaction modes:
 - **✏️ Edit Mode**: Interactions where Copilot directly edits your code inline using the edits agent (triggered via inline edit UI or commands)
 - **🤖 Agent Mode**: Autonomous task execution where Copilot operates as an independent agent in the chat panel
 - **📋 Plan Mode / ⚡ Custom Agent**: Plan-mode and custom-agent (.agent.md) interactions
-- **🖥️ CLI**: Interactions in terminal-based agent CLIs (Copilot CLI, Claude Code, OpenCode, etc.)
+- **🖥️ CLI**: Interactions in terminal-based agent CLIs (Copilot CLI, Claude Code CLI, OpenCode, Crush, Mistral Vibe, Hermes, Pi, etc.)
 - **✨ Copilot App**: Subset of Copilot CLI usage — sessions started via the Copilot desktop app (detected from `client_name: github/autopilot` in the session's `workspace.yaml`), broken out from terminal CLI usage
+- **🖥️ Claude Desktop**: Claude Code sessions launched from the standalone Claude Desktop app (detected via the session's `entrypoint` field), broken out from terminal CLI usage
+- **🧩 Claude (VS Code)**: Claude Code sessions running inside an IDE, e.g. the VS Code extension (also detected via `entrypoint`), broken out from terminal CLI usage
 
 **Data Source**: 
 - JSON files: 
