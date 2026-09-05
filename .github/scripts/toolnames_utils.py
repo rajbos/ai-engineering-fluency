@@ -50,6 +50,22 @@ def _normalize_separators(value: str) -> str:
     return value.replace(".", "_").replace("-", "_")
 
 
+def _camel_to_snake(value: str) -> str:
+    """Insert underscores at camelCase/PascalCase word boundaries.
+
+    Different hosts report the same underlying tool under different naming
+    conventions — e.g. one client's `ListAgents` is another's `list_agents`
+    (see issue #1942). This inserts an underscore before a capital letter
+    that follows a lowercase letter or digit ("ListAgents" -> "List_Agents"),
+    and also splits a run of capitals followed by a lowercase letter
+    ("HTTPServer" -> "HTTP_Server"), so a later `.lower()` collapses both
+    naming conventions to the same snake_case form.
+    """
+    value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", value)
+    value = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", value)
+    return value
+
+
 def _compile_prefix_pattern(prefix: str) -> re.Pattern[str]:
     """Build a regex that also matches numeric-suffixed collision variants.
 
@@ -80,8 +96,8 @@ def canonicalize_tool_id(tool_id: str) -> str:
         match = pattern.match(lowered)
         if match:
             action = tool_id[match.end():]
-            return replacement + _normalize_separators(action)
-    return _normalize_separators(tool_id)
+            return replacement + _normalize_separators(_camel_to_snake(action)).lower()
+    return _normalize_separators(_camel_to_snake(tool_id)).lower()
 
 
 def _normalize_friendly_name(name: str) -> str:
