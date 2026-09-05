@@ -180,7 +180,7 @@ test('CopilotChatAdapter: file over the size cap is skipped', async () => {
 	}
 });
 
-test('safeFileRead: rejects OS temp directory paths before opening', async () => {
+NO_EDITS
 	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'safe-read-'));
 	const symlinkDir = path.join(path.dirname(tmpDir), `safe-read-link-${Date.now()}`);
 	try {
@@ -206,7 +206,7 @@ test('safeFileRead: rejects OS temp directory paths before opening', async () =>
 	}
 });
 
-test('safeFileRead: temp-root detection result stays stable after memoization', async () => {
+NO_EDITS
 	const tempFile = path.join(os.tmpdir(), `safe-read-stable-${Date.now()}.jsonl`);
 	try {
 		fs.writeFileSync(tempFile, '{"kind":2}', 'utf8');
