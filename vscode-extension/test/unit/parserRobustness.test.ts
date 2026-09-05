@@ -49,7 +49,7 @@ function buildDeeplyNestedJson(depth: number): string {
 }
 
 function mkTmpDir(prefix: string): string {
-	return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+	return fs.mkdtempSync(path.join(process.cwd(), prefix));
 }
 
 function rm(dir: string): void {
@@ -181,7 +181,7 @@ test('CopilotChatAdapter: file over the size cap is skipped', async () => {
 });
 
 test('safeFileRead: rejects OS temp directory paths before opening', async () => {
-	const tmpDir = mkTmpDir('safe-read-');
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'safe-read-'));
 	try {
 		const file = path.join(tmpDir, 'session.jsonl');
 		fs.writeFileSync(file, '{"ok":true}\n', 'utf8');

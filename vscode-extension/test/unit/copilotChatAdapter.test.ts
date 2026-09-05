@@ -181,7 +181,7 @@ test('CopilotChatAdapter.getCandidatePaths: includes every VS Code variant', () 
 // ---------------------------------------------------------------------------
 
 test('CopilotChatAdapter: safe-default methods return zero values', async () => {
-    const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cca-defaults-'));
+    const tmp = await fs.promises.mkdtemp(path.join(process.cwd(), 'cca-defaults-'));
     const file = path.join(tmp, 'session.json');
     await fs.promises.writeFile(file, '{"requests":[]}');
     try {
@@ -208,7 +208,7 @@ test('CopilotChatAdapter.discover: finds sessions in all three workspaceStorage 
     // indirectly: this test asserts shape and that empty homedir layouts
     // don't crash. The full integration assertion lives in
     // ecosystemAdapters.test.ts (discover returns DiscoveryResult shape).
-    const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cca-discover-'));
+    const tmp = await fs.promises.mkdtemp(path.join(process.cwd(), 'cca-discover-'));
     t.after(async () => { await fs.promises.rm(tmp, { recursive: true, force: true }); });
 
     const messages: string[] = [];
@@ -228,7 +228,7 @@ test('CopilotChatAdapter.discover: candidatePaths matches getCandidatePaths()', 
 });
 
 test('CopilotChatAdapter.discover: finds session files in debug-logs directory', async (t) => {
-    const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cca-debuglogs-'));
+    const tmp = await fs.promises.mkdtemp(path.join(process.cwd(), 'cca-debuglogs-'));
     t.after(async () => { await fs.promises.rm(tmp, { recursive: true, force: true }); });
 
     // Build a minimal fake VS Code user layout with a debug-logs directory
@@ -244,7 +244,7 @@ test('CopilotChatAdapter.discover: finds session files in debug-logs directory',
 });
 
 test('CopilotChatAdapter.discover: finds session files in transcripts directory (Copilot Chat ≥ v0.51.0)', async (t) => {
-    const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cca-transcripts-'));
+    const tmp = await fs.promises.mkdtemp(path.join(process.cwd(), 'cca-transcripts-'));
     t.after(async () => { await fs.promises.rm(tmp, { recursive: true, force: true }); });
 
     // Build a minimal fake VS Code user layout with a transcripts directory

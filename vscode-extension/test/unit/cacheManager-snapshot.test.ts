@@ -20,7 +20,7 @@ function makeManager(dir: string, cacheVersion = 1): CacheManager {
 }
 
 function tmpDir(): string {
-	return fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-snapshot-test-'));
+	return fs.mkdtempSync(path.join(process.cwd(), 'ctt-snapshot-test-'));
 }
 
 function entry(mtime: number, tokens = 100): SessionFileCache {

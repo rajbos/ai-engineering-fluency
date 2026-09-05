@@ -70,7 +70,7 @@ function rolloutFixtureLines(): string[] {
 }
 
 function createHarness() {
-	const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codexcli-'));
+	const tmpHome = fs.mkdtempSync(path.join(process.cwd(), 'codexcli-'));
 	const dayDir = path.join(tmpHome, 'sessions', '2026', '03', '19');
 	fs.mkdirSync(dayDir, { recursive: true });
 	const rolloutPath = path.join(dayDir, `rollout-2026-03-19T12-00-00-${ROLLOUT_UUID}.jsonl`);

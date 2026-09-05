@@ -10,7 +10,7 @@ import type { DailyRollupMapEntryLike } from '../../src/backend/rollups';
 test('BackendFacade computes daily rollups from JSONL and JSON sessions (and skips malformed/out-of-range)', async () => {
 	const warnings: string[] = [];
 	const now = Date.now();
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-rollups-'));
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-rollups-'));
 
 	const jsonlPath = path.join(tmpDir, '.copilot', 'session-state', 's.jsonl');
 	fs.mkdirSync(path.dirname(jsonlPath), { recursive: true });

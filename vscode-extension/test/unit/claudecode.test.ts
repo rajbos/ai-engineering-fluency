@@ -82,7 +82,9 @@ test('getProjectPathFromHash: Windows path reversal', async () => {
 // ----- Token counting with synthetic data -----
 
 function createTempSession(events: any[]): string {
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-test-'));
+	// Keep synthetic session files outside the OS temp directory so the secure file-read guard
+	// in src/utils/safeFileRead.ts still permits the parser to exercise actual session logic.
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'claude-test-'));
 	const projectDir = path.join(tmpDir, '.claude', 'projects', 'test-project');
 	fs.mkdirSync(projectDir, { recursive: true });
 	const filePath = path.join(projectDir, 'test-session.jsonl');
@@ -1090,7 +1092,7 @@ override getClaudeCodeDataDir(): string { return this.testDataDir; }
 }
 
 test('getClaudeCodeSessionFiles: discovers subagent transcripts nested under <sessionId>/subagents/**', async () => {
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-discovery-test-'));
+const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'claude-discovery-test-'));
 try {
 const dataDir = path.join(tmpDir, '.claude');
 const projectDir = path.join(dataDir, 'projects', 'test-project');
@@ -1112,7 +1114,7 @@ fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 test('getClaudeCodeSessionFiles: ignores empty files at any depth', async () => {
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-discovery-test-'));
+const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'claude-discovery-test-'));
 try {
 const dataDir = path.join(tmpDir, '.claude');
 const projectDir = path.join(dataDir, 'projects', 'test-project');
@@ -1142,7 +1144,7 @@ fs.rmSync(tmpDir, { recursive: true, force: true });
 // tokens get summed once per file instead of once total (issue #1570 investigation).
 
 function createSessionFamily(topLevelEvents: any[], subagentEvents: any[]): { topLevelFile: string; subagentFile: string; tmpDir: string } {
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-family-test-'));
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'claude-family-test-'));
 	const projectDir = path.join(tmpDir, '.claude', 'projects', 'test-project');
 	const sessionId = 'session-family-1';
 	const topLevelFile = path.join(projectDir, `${sessionId}.jsonl`);

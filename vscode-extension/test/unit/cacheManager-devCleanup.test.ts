@@ -36,7 +36,7 @@ function writeAged(dir: string, name: string, ageMs: number): void {
 }
 
 test('cleanupStaleDevCacheFiles: removes dev cache/lock files older than 24h', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-dev-cleanup-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-dev-cleanup-'));
 	writeAged(dir, 'cache_dev-aaaaaaaa.snapshot.json', 25 * 60 * 60 * 1000);
 	writeAged(dir, 'refresh_dev-bbbbbbbb.lock', 48 * 60 * 60 * 1000);
 
@@ -47,7 +47,7 @@ test('cleanupStaleDevCacheFiles: removes dev cache/lock files older than 24h', a
 });
 
 test('cleanupStaleDevCacheFiles: leaves recent dev cache/lock files untouched', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-dev-cleanup-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-dev-cleanup-'));
 	writeAged(dir, 'cache_dev-cccccccc.snapshot.json', 60 * 1000); // 1 minute old
 
 	const manager = makeDevManager(dir);
@@ -57,7 +57,7 @@ test('cleanupStaleDevCacheFiles: leaves recent dev cache/lock files untouched', 
 });
 
 test('cleanupStaleDevCacheFiles: leaves non-dev files (e.g. prod snapshot) untouched', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-dev-cleanup-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-dev-cleanup-'));
 	writeAged(dir, 'cache_prod.snapshot.json', 48 * 60 * 60 * 1000);
 	writeAged(dir, 'cache_dev-dddddddd.snapshot.json', 48 * 60 * 60 * 1000);
 
@@ -68,7 +68,7 @@ test('cleanupStaleDevCacheFiles: leaves non-dev files (e.g. prod snapshot) untou
 });
 
 test('cleanupStaleDevCacheFiles: no-op in production mode', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-dev-cleanup-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-dev-cleanup-'));
 	writeAged(dir, 'cache_dev-eeeeeeee.snapshot.json', 48 * 60 * 60 * 1000);
 
 	const manager = makeProdManager(dir);
@@ -78,7 +78,7 @@ test('cleanupStaleDevCacheFiles: no-op in production mode', async () => {
 });
 
 test('cleanupStaleDevCacheFiles: no-op when globalStorage directory does not exist', async () => {
-	const dir = path.join(os.tmpdir(), 'ctt-dev-cleanup-missing-' + Date.now());
+	const dir = path.join(process.cwd(), 'ctt-dev-cleanup-missing-' + Date.now());
 	const manager = makeDevManager(dir);
 	await assert.doesNotReject(manager.cleanupStaleDevCacheFiles());
 });

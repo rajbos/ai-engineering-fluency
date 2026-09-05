@@ -462,7 +462,7 @@ test('fetchEnterprisePremiumBudgets: returns empty array when no budgets configu
 
 /** Create a temp dir with a git repo whose `origin` remote is `remoteUrl`. */
 function makeGitRepoWithRemote(remoteUrl: string): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'discover-gh-repos-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'discover-gh-repos-'));
 	childProcess.execSync('git init -q', { cwd: dir });
 	childProcess.execSync(`git remote add origin ${remoteUrl}`, { cwd: dir });
 	return dir;
@@ -520,9 +520,9 @@ test('discoverGitHubRepos: matches an on-prem GitHub Enterprise Server remote vi
 
 test('discoverGitHubRepos: skips non-git and missing paths without throwing', async () => {
 	const dir = makeGitRepoWithRemote('https://github.com/rajbos/ai-engineering-fluency.git');
-	const notARepo = fs.mkdtempSync(path.join(os.tmpdir(), 'discover-gh-notrepo-'));
+	const notARepo = fs.mkdtempSync(path.join(process.cwd(), 'discover-gh-notrepo-'));
 	try {
-		const repos = await discoverGitHubRepos([notARepo, path.join(os.tmpdir(), 'does-not-exist-xyz'), dir]);
+		const repos = await discoverGitHubRepos([notARepo, path.join(process.cwd(), 'does-not-exist-xyz'), dir]);
 		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'ai-engineering-fluency' }]);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });

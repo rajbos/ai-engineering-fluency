@@ -38,7 +38,7 @@ const contract = requireFromHere(
 
 /** Writes `source` to a throwaway .ts file and returns its path. */
 function fixture(source: string): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'contract-fixture-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'contract-fixture-'));
 	const file = path.join(dir, 'fixture.ts');
 	fs.writeFileSync(file, source);
 	return file;

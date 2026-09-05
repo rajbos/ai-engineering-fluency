@@ -14,7 +14,7 @@ type HarnessOptions = {
 };
 
 function createHarness(options: HarnessOptions = {}) {
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crush-cache-'));
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'crush-cache-'));
 	const crushDir = path.join(tmpDir, '.crush');
 	fs.mkdirSync(crushDir, { recursive: true });
 	const dbPath = path.join(crushDir, 'crush.db');
@@ -210,7 +210,7 @@ test('Crush DB cache does not install a DB if the file changes during refresh', 
 test('Crush DB cache maintains independent caches for different DB paths', async () => {
 	const harness = createHarness();
 	// Create a second project DB
-	const tmpDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'crush-cache2-'));
+	const tmpDir2 = fs.mkdtempSync(path.join(process.cwd(), 'crush-cache2-'));
 	try {
 		const crushDir2 = path.join(tmpDir2, '.crush');
 		fs.mkdirSync(crushDir2, { recursive: true });

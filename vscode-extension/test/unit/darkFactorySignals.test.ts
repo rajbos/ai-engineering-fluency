@@ -19,7 +19,7 @@ import {
 
 /** Create a throwaway directory tree from a map of relative path → file content. */
 function makeRepo(files: Record<string, string>): string {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dark-factory-'));
+	const root = fs.mkdtempSync(path.join(process.cwd(), 'dark-factory-'));
 	for (const [relative, content] of Object.entries(files)) {
 		const target = path.join(root, relative);
 		fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -341,7 +341,7 @@ test('facts: agent file names are collected for the evaluator check', () => {
 });
 
 test('collectDarkFactoryFileSignals: a non-existent path yields observations rather than throwing', () => {
-	const missing = path.join(os.tmpdir(), 'dark-factory-does-not-exist-xyz');
+	const missing = path.join(process.cwd(), 'dark-factory-does-not-exist-xyz');
 	const { observations, facts } = collectDarkFactoryFileSignals(missing);
 	assert.equal(observations['ci-workflows'].state, 'absent');
 	assert.deepEqual(facts.agentFileNames, []);

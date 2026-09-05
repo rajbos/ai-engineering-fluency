@@ -17,7 +17,7 @@ test('Backend cache integration: uses cached data when available', async () => {
 	const warnings: string[] = [];
 	const logs: string[] = [];
 	const now = Date.now();
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-cache-test-'));
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-cache-test-'));
 
 	const sessionFile = path.join(tmpDir, 'test.json');
 	fs.writeFileSync(
@@ -86,7 +86,7 @@ test('Backend cache integration: falls back to parsing on cache miss', async () 
 	const warnings: string[] = [];
 	const logs: string[] = [];
 	const now = Date.now();
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-cache-miss-'));
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-cache-miss-'));
 
 	const sessionFile = path.join(tmpDir, 'test.json');
 	fs.writeFileSync(
@@ -144,7 +144,7 @@ test('Backend cache integration: validates cached data and rejects invalid struc
 	const warnings: string[] = [];
 	const logs: string[] = [];
 	const now = Date.now();
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-cache-validation-'));
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-cache-validation-'));
 
 	// Create a session file with at least one request to trigger per-model validation
 	const sessionFile = path.join(tmpDir, 'test.json');
@@ -215,7 +215,7 @@ test('Backend cache integration: counts interactions only once for multi-model f
 	const warnings: string[] = [];
 	const logs: string[] = [];
 	const now = Date.now();
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-cache-multimodel-'));
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-cache-multimodel-'));
 
 	// Create session file with requests for each model - the code requires parsing requests
 	// to determine day/model combinations, then uses cache for token counts
@@ -295,7 +295,7 @@ test('Backend cache integration: handles cache errors gracefully', async () => {
 	const warnings: string[] = [];
 	const logs: string[] = [];
 	const now = Date.now();
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-cache-error-'));
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-cache-error-'));
 
 	const sessionFile = path.join(tmpDir, 'test.json');
 	fs.writeFileSync(

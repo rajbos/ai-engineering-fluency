@@ -418,7 +418,7 @@ test('getEditorTypeFromPath: detects Claude Code', () => {
 });
 
 test('detectClaudeCodeEditorVariant: returns Claude Desktop for entrypoint claude-desktop', () => {
-        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const dir = fs.mkdtempSync(nodepath.join(process.cwd(), 'claude-variant-'));
         const projectsDir = nodePath.join(dir, '.claude', 'projects', 'hash');
         fs.mkdirSync(projectsDir, { recursive: true });
         const file = nodePath.join(projectsDir, 'session.jsonl');
@@ -432,7 +432,7 @@ test('detectClaudeCodeEditorVariant: returns Claude Desktop for entrypoint claud
 });
 
 test('detectClaudeCodeEditorVariant: returns Claude Code CLI for entrypoint cli', () => {
-        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const dir = fs.mkdtempSync(nodepath.join(process.cwd(), 'claude-variant-'));
         const file = nodePath.join(dir, 'session.jsonl');
         fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'cli', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
         try {
@@ -443,7 +443,7 @@ test('detectClaudeCodeEditorVariant: returns Claude Code CLI for entrypoint cli'
 });
 
 test('detectClaudeCodeEditorVariant: returns Claude Code for any other entrypoint (e.g. VS Code extension)', () => {
-        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const dir = fs.mkdtempSync(nodepath.join(process.cwd(), 'claude-variant-'));
         const file = nodePath.join(dir, 'session.jsonl');
         fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-vscode', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
         try {
@@ -455,7 +455,7 @@ test('detectClaudeCodeEditorVariant: returns Claude Code for any other entrypoin
 
 test('detectClaudeCodeEditorVariant: defaults to Claude Code when file is missing or has no entrypoint', () => {
         assert.equal(detectClaudeCodeEditorVariant('/nonexistent/path/session.jsonl'), 'Claude Code');
-        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const dir = fs.mkdtempSync(nodepath.join(process.cwd(), 'claude-variant-'));
         const file = nodePath.join(dir, 'session.jsonl');
         fs.writeFileSync(file, JSON.stringify({ type: 'queue-operation', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
         try {
@@ -727,7 +727,7 @@ assert.deepEqual(result, []);
 });
 
 test('scanWorkspaceCustomizationFiles: detects copilot-instructions.md as copilot category', () => {
-const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-test-'));
+const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-test-'));
 try {
 const githubDir = nodePath.join(tmpDir, '.github');
 fs.mkdirSync(githubDir);
@@ -742,7 +742,7 @@ fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 test('scanWorkspaceCustomizationFiles: detects .cursorrules as non-copilot category', () => {
-const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-test-'));
+const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-test-'));
 try {
 fs.writeFileSync(nodePath.join(tmpDir, '.cursorrules'), '# Cursor rules');
 const result = scanWorkspaceCustomizationFiles(tmpDir);
@@ -755,7 +755,7 @@ fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 test('scanWorkspaceCustomizationFiles: detects .claude/settings.json as non-copilot (not CLAUDE.md)', () => {
-const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-test-'));
+const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-test-'));
 try {
 // CLAUDE.md should NOT appear as non-copilot (it is Copilot-compatible)
 fs.writeFileSync(nodePath.join(tmpDir, 'CLAUDE.md'), '# Claude instructions');
@@ -776,7 +776,7 @@ fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 test('scanWorkspaceCustomizationFiles: detects opencode.json as non-copilot', () => {
-const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-test-'));
+const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-test-'));
 try {
 fs.writeFileSync(nodePath.join(tmpDir, 'opencode.json'), '{}');
 const result = scanWorkspaceCustomizationFiles(tmpDir);
@@ -793,7 +793,7 @@ fs.rmSync(tmpDir, { recursive: true, force: true });
 // ---------------------------------------------------------------------------
 
 test('parseWorkspaceStorageJsonFile: returns undefined for null JSON content', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-pwsjf-'));
     try {
         const tmpFile = nodePath.join(tmpDir, 'workspace.json');
         fs.writeFileSync(tmpFile, 'null', 'utf8');
@@ -805,7 +805,7 @@ test('parseWorkspaceStorageJsonFile: returns undefined for null JSON content', (
 });
 
 test('parseWorkspaceStorageJsonFile: returns undefined for array JSON content', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-pwsjf-'));
     try {
         const tmpFile = nodePath.join(tmpDir, 'workspace.json');
         fs.writeFileSync(tmpFile, '["item1", "item2"]', 'utf8');
@@ -820,7 +820,7 @@ test('parseWorkspaceStorageJsonFile: returns undefined for empty jsonPath', () =
 });
 
 test('parseWorkspaceStorageJsonFile: returns path from valid object', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-pwsjf-'));
     try {
         const tmpFile = nodePath.join(tmpDir, 'workspace.json');
         // Use a file:// URI as the value so vscode.Uri.parse can resolve it
@@ -1220,7 +1220,7 @@ test('resolveExactWorkspacePath: returns undefined when workspace does not exist
 });
 
 test('resolveExactWorkspacePath: case-sensitive returns path when file exists', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-rexwp-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-rexwp-'));
     try {
         const subDir = nodePath.join(tmpDir, 'src');
         fs.mkdirSync(subDir);
@@ -1234,7 +1234,7 @@ test('resolveExactWorkspacePath: case-sensitive returns path when file exists', 
 });
 
 test('resolveExactWorkspacePath: case-sensitive returns undefined when file not found', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-rexwp-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-rexwp-'));
     try {
         const result = resolveExactWorkspacePath(tmpDir, 'missing.ts', false);
         assert.equal(result, undefined);
@@ -1244,7 +1244,7 @@ test('resolveExactWorkspacePath: case-sensitive returns undefined when file not 
 });
 
 test('resolveExactWorkspacePath: case-insensitive returns undefined for missing file', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-rexwp-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-rexwp-'));
     try {
         const result = resolveExactWorkspacePath(tmpDir, 'missing.ts', true);
         assert.equal(result, undefined);
@@ -1254,7 +1254,7 @@ test('resolveExactWorkspacePath: case-insensitive returns undefined for missing 
 });
 
 test('resolveExactWorkspacePath: case-insensitive finds exact match directly', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-rexwp-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-rexwp-'));
     try {
         fs.writeFileSync(nodePath.join(tmpDir, 'file.ts'), '');
         const result = resolveExactWorkspacePath(tmpDir, 'file.ts', true);
@@ -1274,7 +1274,7 @@ test('parseWorkspaceStorageJsonFile: returns undefined for non-array candidateKe
 });
 
 test('parseWorkspaceStorageJsonFile: skips non-string key values, returns first string', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-pwsjf-'));
     try {
         const tmpFile = nodePath.join(tmpDir, 'workspace.json');
         // 'folder' key is a number — skip it; 'path' key is a string — return it
@@ -1287,7 +1287,7 @@ test('parseWorkspaceStorageJsonFile: skips non-string key values, returns first 
 });
 
 test('parseWorkspaceStorageJsonFile: returns plain path string as-is (not file:// URI)', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-pwsjf-'));
     try {
         const tmpFile = nodePath.join(tmpDir, 'workspace.json');
         fs.writeFileSync(tmpFile, JSON.stringify({ folder: '/home/user/myproject' }), 'utf8');
@@ -1299,7 +1299,7 @@ test('parseWorkspaceStorageJsonFile: returns plain path string as-is (not file:/
 });
 
 test('parseWorkspaceStorageJsonFile: returns undefined when all keys are missing', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-pwsjf-'));
     try {
         const tmpFile = nodePath.join(tmpDir, 'workspace.json');
         fs.writeFileSync(tmpFile, JSON.stringify({ other: 'value' }), 'utf8');
@@ -1315,7 +1315,7 @@ test('parseWorkspaceStorageJsonFile: returns undefined when all keys are missing
 // ---------------------------------------------------------------------------
 
 test('scanWorkspaceCustomizationFiles: file with mtime 200 days ago has isStale=true', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-stale-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-stale-'));
     try {
         const githubDir = nodePath.join(tmpDir, '.github');
         fs.mkdirSync(githubDir);
@@ -1333,7 +1333,7 @@ test('scanWorkspaceCustomizationFiles: file with mtime 200 days ago has isStale=
 });
 
 test('scanWorkspaceCustomizationFiles: freshly created file has isStale=false', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-stale-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-stale-'));
     try {
         const githubDir = nodePath.join(tmpDir, '.github');
         fs.mkdirSync(githubDir);
@@ -1353,7 +1353,7 @@ test('scanWorkspaceCustomizationFiles: freshly created file has isStale=false', 
 // ---------------------------------------------------------------------------
 
 test('scanWorkspaceCustomizationFiles: detects SKILL.md via oneLevel scan', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-skill-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-skill-'));
     try {
         const skillDir = nodePath.join(tmpDir, '.github', 'skills', 'myskill');
         fs.mkdirSync(skillDir, { recursive: true });
@@ -1368,7 +1368,7 @@ test('scanWorkspaceCustomizationFiles: detects SKILL.md via oneLevel scan', () =
 });
 
 test('scanWorkspaceCustomizationFiles: SKILL.md displayName is the skill folder name', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-skill-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-skill-'));
     try {
         const skillDir = nodePath.join(tmpDir, '.github', 'skills', 'my-skill');
         fs.mkdirSync(skillDir, { recursive: true });
@@ -1388,7 +1388,7 @@ test('scanWorkspaceCustomizationFiles: SKILL.md displayName is the skill folder 
 // ---------------------------------------------------------------------------
 
 test('scanWorkspaceCustomizationFiles: detects agent.md via recursive scan', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-agent-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-agent-'));
     try {
         const agentDir = nodePath.join(tmpDir, '.github', 'agents');
         fs.mkdirSync(agentDir, { recursive: true });
@@ -1403,7 +1403,7 @@ test('scanWorkspaceCustomizationFiles: detects agent.md via recursive scan', () 
 });
 
 test('scanWorkspaceCustomizationFiles: deduplicates by absolute path', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-dedup-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-dedup-'));
     try {
         const githubDir = nodePath.join(tmpDir, '.github');
         fs.mkdirSync(githubDir);
@@ -1421,7 +1421,7 @@ test('scanWorkspaceCustomizationFiles: deduplicates by absolute path', () => {
 // ---------------------------------------------------------------------------
 
 test('scanWorkspaceCustomizationFiles: returned entry has expected fields', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-fields-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-fields-'));
     try {
         const githubDir = nodePath.join(tmpDir, '.github');
         fs.mkdirSync(githubDir);
@@ -1743,7 +1743,7 @@ test('parseCodeWorkspaceFolders: returns empty array for non-existent path', () 
 });
 
 test('parseCodeWorkspaceFolders: returns empty array for non-code-workspace path', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pcwf-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-pcwf-'));
     try {
         const tmpFile = nodePath.join(tmpDir, 'not-a-workspace.json');
         fs.writeFileSync(tmpFile, '{}', 'utf8');
@@ -1755,7 +1755,7 @@ test('parseCodeWorkspaceFolders: returns empty array for non-code-workspace path
 });
 
 test('parseCodeWorkspaceFolders: returns folders from valid .code-workspace with path entries', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pcwf-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-pcwf-'));
     try {
         const folder1 = nodePath.join(tmpDir, 'repo1');
         const folder2 = nodePath.join(tmpDir, 'repo2');
@@ -1779,7 +1779,7 @@ test('parseCodeWorkspaceFolders: returns folders from valid .code-workspace with
 });
 
 test('parseCodeWorkspaceFolders: handles file:// URI entries', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pcwf-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-pcwf-'));
     try {
         const folder = nodePath.join(tmpDir, 'my-project');
         fs.mkdirSync(folder, { recursive: true });
@@ -1799,7 +1799,7 @@ test('parseCodeWorkspaceFolders: handles file:// URI entries', () => {
 });
 
 test('parseCodeWorkspaceFolders: returns empty array for invalid JSON', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pcwf-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-pcwf-'));
     try {
         const wsFile = nodePath.join(tmpDir, 'bad.code-workspace');
         fs.writeFileSync(wsFile, 'not-json', 'utf8');
@@ -1811,7 +1811,7 @@ test('parseCodeWorkspaceFolders: returns empty array for invalid JSON', () => {
 });
 
 test('parseCodeWorkspaceFolders: returns empty array when folders key is missing', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pcwf-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-pcwf-'));
     try {
         const wsFile = nodePath.join(tmpDir, 'no-folders.code-workspace');
         fs.writeFileSync(wsFile, JSON.stringify({ settings: {} }), 'utf8');
@@ -1842,7 +1842,7 @@ test('resolveSessionWorkspaceName: falls back to repository when workspaceFolder
 });
 
 test('resolveSessionWorkspaceName: falls back to workspaceStorage resolution', () => {
-    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-rsws-'));
+    const tmpDir = fs.mkdtempSync(nodepath.join(process.cwd(), 'wh-rsws-'));
     try {
         const workspaceFolder = nodePath.join(tmpDir, 'my-vscode-project');
         fs.mkdirSync(workspaceFolder, { recursive: true });

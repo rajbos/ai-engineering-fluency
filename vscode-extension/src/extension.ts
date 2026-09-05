@@ -8320,7 +8320,11 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     }
 
     const fileName = `ai-engineering-fluency-share-${Date.now()}.png`;
-    const filePath = path.join(os.tmpdir(), fileName);
+    const tempDir = this.context.globalStorageUri
+      ? vscode.Uri.joinPath(this.context.globalStorageUri, 'share-cards')
+      : vscode.Uri.file(path.join(this.context.extensionPath, '.tmp', 'share-cards'));
+    await vscode.workspace.fs.createDirectory(tempDir);
+    const filePath = path.join(tempDir.fsPath, fileName);
     const uri = vscode.Uri.file(filePath);
     const buffer = Buffer.from(base64Match[1], 'base64');
     await vscode.workspace.fs.writeFile(uri, buffer);

@@ -12,7 +12,7 @@ type HarnessOptions = {
 };
 
 function createHarness(options: HarnessOptions = {}) {
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-cache-'));
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'opencode-cache-'));
 	const dbPath = path.join(tmpDir, 'opencode.db');
 	const opened: Array<{ content: string; closed: boolean }> = [];
 	let openAttempts = 0;

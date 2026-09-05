@@ -204,7 +204,7 @@ test('ClaudeCodeAdapter.handles: rejects ~/.claude/stats-cache.json', () => {
 });
 
 test('ClaudeCodeAdapter.getDisplayName: returns Claude Desktop for entrypoint claude-desktop', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-adapter-'));
+    const dir = fs.mkdtempSync(path.join(process.cwd(), 'claude-adapter-'));
     const projectsDir = path.join(dir, '.claude', 'projects', 'hash');
     fs.mkdirSync(projectsDir, { recursive: true });
     const file = path.join(projectsDir, 'session.jsonl');
@@ -217,7 +217,7 @@ test('ClaudeCodeAdapter.getDisplayName: returns Claude Desktop for entrypoint cl
 });
 
 test('ClaudeCodeAdapter.getDisplayName: returns Claude Code CLI for entrypoint cli', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-adapter-'));
+    const dir = fs.mkdtempSync(path.join(process.cwd(), 'claude-adapter-'));
     const projectsDir = path.join(dir, '.claude', 'projects', 'hash');
     fs.mkdirSync(projectsDir, { recursive: true });
     const file = path.join(projectsDir, 'session.jsonl');
@@ -609,7 +609,7 @@ test('extractInvokedSkillName: returns null when no <command-name> tag is presen
 // ---------------------------------------------------------------------------
 
 test('ClaudeDesktopAdapter.buildTurns: counts tokens once per requestId (dedup split content blocks)', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cowork-test-'));
+    const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'cowork-test-'));
     const sessionFile = path.join(tmpDir, 'session.jsonl');
     try {
         // Simulate Cowork JSONL: one API call (req_001) split into two events —
@@ -652,7 +652,7 @@ test('ClaudeDesktopAdapter.buildTurns: counts tokens once per requestId (dedup s
 });
 
 test('ClaudeDesktopAdapter.buildTurns: collects tool calls from all content-block events of same requestId', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cowork-test-'));
+    const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'cowork-test-'));
     const sessionFile = path.join(tmpDir, 'session.jsonl');
     try {
         // One API call (req_001) split into 3 events: thinking, tool_use A, tool_use B
@@ -701,7 +701,7 @@ test('ClaudeDesktopAdapter.buildTurns: collects tool calls from all content-bloc
 });
 
 test('ClaudeDesktopAdapter.buildTurns: unique requestIds across turns sum correctly', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cowork-test-'));
+    const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'cowork-test-'));
     const sessionFile = path.join(tmpDir, 'session.jsonl');
     try {
         // Two user turns, each with one API call (no duplicates)
@@ -746,7 +746,7 @@ test('ClaudeDesktopAdapter.buildTurns: unique requestIds across turns sum correc
 const desktopAdapterCtx = { modelPricing: {}, toolNameMap: {} };
 
 test('ClaudeDesktopAdapter.analyzeUsage: unwraps Skill tool_use into skillCalls.byName', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cowork-test-'));
+    const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'cowork-test-'));
     const sessionFile = path.join(tmpDir, 'session.jsonl');
     try {
         const events = [
@@ -771,7 +771,7 @@ test('ClaudeDesktopAdapter.analyzeUsage: unwraps Skill tool_use into skillCalls.
 });
 
 test('ClaudeDesktopAdapter.analyzeUsage: does not record skillCalls for non-Skill tool calls', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cowork-test-'));
+    const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'cowork-test-'));
     const sessionFile = path.join(tmpDir, 'session.jsonl');
     try {
         const events = [

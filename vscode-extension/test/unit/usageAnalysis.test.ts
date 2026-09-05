@@ -2517,7 +2517,7 @@ test('analyzeSessionUsage: CLI session.model_change event is processed without e
 
 function writeCliSessionFixture(t: test.TestContext, clientName: string): string {
     // The split only applies under ~/.copilot/session-state/, so mirror that layout.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cliapp-split-'));
+    const dir = fs.mkdtempSync(path.join(process.cwd(), 'cliapp-split-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const sessionDir = path.join(dir, '.copilot', 'session-state', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
     fs.mkdirSync(sessionDir, { recursive: true });

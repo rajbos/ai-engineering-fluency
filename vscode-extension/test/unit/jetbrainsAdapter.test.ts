@@ -93,7 +93,7 @@ test('JetBrainsAdapter: safe-default methods return zero values for unreadable f
 });
 
 test('JetBrainsAdapter: parses a real partition file and returns common output', async (t) => {
-	const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'jb-parse-'));
+	const tmpDir = await fs.promises.mkdtemp(path.join(process.cwd(), 'jb-parse-'));
 	t.after(async () => { await fs.promises.rm(tmpDir, { recursive: true, force: true }); });
 	const file = path.join(tmpDir, 'partition-1.jsonl');
 	const events = [
@@ -129,7 +129,7 @@ test('JetBrainsAdapter: parses a real partition file and returns common output',
 // ---------------------------------------------------------------------------
 
 test('JetBrainsAdapter.discover: finds non-empty partition-{n}.jsonl files in conversation subdirs', async (t) => {
-	const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'jb-home-'));
+	const tmpHome = await fs.promises.mkdtemp(path.join(process.cwd(), 'jb-home-'));
 	const jbDir = path.join(tmpHome, '.copilot', 'jb');
 
 	const originalHome = process.env.HOME;
