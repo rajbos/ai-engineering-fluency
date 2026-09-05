@@ -464,15 +464,18 @@ function buildMetricControl(data: InitialChartData): HTMLElement {
 function buildSplitControl(): HTMLElement {
 	const group = el('div', 'control-group');
 	group.append(el('span', 'control-label', 'Split:'));
-	const mkSplit = (id: string, split: string, label: string) => {
+	const mkSplit = (id: string, split: string, label: string, tooltip?: string) => {
 		const supported = isComboSupported(currentMetric, split);
 		const btn = el('button', `toggle${currentSplit === split ? ' active' : ''}${!supported ? ' disabled' : ''}`, label);
 		btn.id = id;
 		if (!supported) { (btn as HTMLButtonElement).disabled = true; btn.title = `Not available for ${currentMetric} metric`; }
+		else if (tooltip) { btn.title = tooltip; }
 		return btn;
 	};
-	group.append(mkSplit('split-total', 'total', 'Total'), mkSplit('split-model', 'model', 'By Model'),
-		mkSplit('split-editor', 'editor', 'By Editor'), mkSplit('split-provider', 'provider', '🏷️ By Provider'),
+	group.append(mkSplit('split-total', 'total', 'Total'),
+		mkSplit('split-model', 'model', 'By Model', 'Click a model name in the chart legend to hide its data; click it again to show it.'),
+		mkSplit('split-editor', 'editor', 'By Editor', 'Click an editor name in the chart legend to hide its data; click it again to show it.'),
+		mkSplit('split-provider', 'provider', '🏷️ By Provider'),
 		mkSplit('split-repository', 'repository', 'By Repository'), mkSplit('split-language', 'language', 'By Language'),
 		mkSplit('split-taskcategory', 'taskCategory', 'By Task'));
 	return group;

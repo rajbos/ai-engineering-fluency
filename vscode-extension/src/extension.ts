@@ -256,6 +256,16 @@ import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceFor
 // --- Time-to-first-token analysis ---
 import { buildTtftBuckets as _buildTtftBuckets, buildTtftModelSeries as _buildTtftModelSeries, type TtftGranularity } from '../../src/ttftAnalysis';
 
+/** How far back the Research > TTFT tab's scan-range picker looks for session files; 'all' skips the mtime filter entirely. */
+type TtftScanRange = '14d' | '30d' | '90d' | '180d' | '365d' | 'all';
+const TTFT_SCAN_RANGE_DAYS: Record<Exclude<TtftScanRange, 'all'>, number> = { '14d': 14, '30d': 30, '90d': 90, '180d': 180, '365d': 365 };
+/** Resolves a scan-range picker value to a lookback window in ms, or null for 'all' (no mtime filter). */
+function ttftScanRangeToMs(range: unknown): number | null {
+	if (range === 'all') { return null; }
+	const key = (typeof range === 'string' && range in TTFT_SCAN_RANGE_DAYS) ? (range as Exclude<TtftScanRange, 'all'>) : '14d';
+	return TTFT_SCAN_RANGE_DAYS[key] * 24 * 60 * 60 * 1000;
+}
+
 // --- Task classification ---
 import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDelegationToolCalls, type TaskCategory } from '../../src/taskClassification';
 
@@ -473,6 +483,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private diagnosticsHasLoadedFiles: boolean = false;
 	// Cache of the last loaded detailed session files for diagnostics view
 	private diagnosticsCachedFiles: SessionFileDetails[] = [];
+	// Full, unfiltered session file paths from the last diagnostics load (no 14-day/500-file cap) —
+	// the TTFT scan-range picker filters this list itself instead of relying on diagnosticsCachedFiles.
+	private diagnosticsAllSessionFiles: string[] = [];
 	// Cache of the last diagnostic report text for copy/issue operations
 	private lastDiagnosticReport: string = '';
 	// Incremented on each worktree scan start/cancel; in-flight scans check this to stop early
@@ -1315,6 +1328,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Reset diagnostics loaded flag so the diagnostics view will reload files
 			this.diagnosticsHasLoadedFiles = false;
 			this.diagnosticsCachedFiles = [];
+			this.diagnosticsAllSessionFiles = [];
 			// Clear cached computed stats so details panel doesn't show stale data
 			this.lastDetailedStats = undefined;
 			this.lastDailyStats = undefined;
@@ -6818,16 +6832,36 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * large session count doesn't open hundreds of file handles at once. Sessions with no
 	 * debug log (non-VS-Code-Chat editors, or Chat sessions predating this file) resolve to
 	 * null immediately with no I/O — see resolveDebugLogCandidatePaths in workspaceHelpers.ts.
+	 *
+	 * Scans `diagnosticsAllSessionFiles` — the full, unfiltered discovery list — rather than
+	 * `diagnosticsCachedFiles`, which is capped to the last 14 days / 500 files for the rest of
+	 * the Diagnostics screen. That cap silently hid real `attrs.ttft` data that exists on disk
+	 * but is older than 14 days; `scanRangeMs` (null = all time) lets the tab's own picker widen
+	 * the search instead. Debug-log-shaped candidates are found cheaply first (no I/O — a path
+	 * check), then only those are stat'd for the range filter.
 	 */
-	private async collectTtftSamples(files: SessionFileDetails[]): Promise<TtftSample[]> {
+	private async collectTtftSamples(scanRangeMs: number | null): Promise<{ samples: TtftSample[]; fileCount: number }> {
+		const candidates = this.diagnosticsAllSessionFiles.filter(f => _resolveDebugLogCandidatePaths(f) !== undefined);
+		let inRange = candidates;
+		if (scanRangeMs !== null) {
+			const cutoff = Date.now() - scanRangeMs;
+			const withStats = await Promise.all(candidates.map(async (file) => {
+				try {
+					const stat = await fs.promises.stat(file);
+					return stat.mtimeMs >= cutoff ? file : null;
+				} catch { return null; }
+			}));
+			inRange = withStats.filter((f): f is string => f !== null);
+		}
+
 		const all: TtftSample[] = [];
 		const CONCURRENCY = 20;
-		for (let i = 0; i < files.length; i += CONCURRENCY) {
-			const batch = files.slice(i, i + CONCURRENCY);
-			const results = await Promise.all(batch.map(f => this.readTtftSamplesForSessionFile(f.file)));
+		for (let i = 0; i < inRange.length; i += CONCURRENCY) {
+			const batch = inRange.slice(i, i + CONCURRENCY);
+			const results = await Promise.all(batch.map(f => this.readTtftSamplesForSessionFile(f)));
 			for (const r of results) { if (r) { all.push(...r); } }
 		}
-		return all;
+		return { samples: all, fileCount: inRange.length };
 	}
 
 	private extractPerRequestUsageFromRawLines(lines: string[]): Map<number, { promptTokens: number; outputTokens: number }> {
@@ -9981,14 +10015,18 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
 
   /**
    * Computes time-to-first-token averages (overall and per model) bucketed by day/week/month,
-   * for the Research > TTFT diagnostics tab. Reads every already-discovered session's debug
-   * log fresh on each request rather than persisting samples in the session cache — TTFT is
-   * a Research-tab curiosity, not something the dashboard's cost/token numbers depend on, so
-   * it doesn't warrant a session-cache schema change. See collectTtftSamples() for the scan
-   * and docs/logFilesSchema/vscode-chat-debug-log-format.md for what attrs.ttft is and isn't.
+   * for the Research > TTFT diagnostics tab. Reads every session's debug log fresh on each
+   * request rather than persisting samples in the session cache — TTFT is a Research-tab
+   * curiosity, not something the dashboard's cost/token numbers depend on, so it doesn't
+   * warrant a session-cache schema change. The scan range comes from the tab's own picker
+   * (default 14 days, up to "all time") rather than the Diagnostics screen's 14-day/500-file
+   * discovery cap, which would otherwise silently hide real `attrs.ttft` data on older sessions.
+   * See collectTtftSamples() for the scan and docs/logFilesSchema/vscode-chat-debug-log-format.md
+   * for what attrs.ttft is and isn't.
    */
   private async diagHandleAnalyzeTtft(message: any): Promise<void> {
     const granularity: TtftGranularity = message?.granularity === 'week' || message?.granularity === 'month' ? message.granularity : 'day';
+    const scanRangeMs = ttftScanRangeToMs(message?.scanRange);
     if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
 
     if (!this.diagnosticsHasLoadedFiles) {
@@ -9996,8 +10034,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       return;
     }
 
-    const files = this.diagnosticsCachedFiles;
-    const samples = await this.collectTtftSamples(files);
+    const { samples, fileCount } = await this.collectTtftSamples(scanRangeMs);
     const buckets = _buildTtftBuckets(samples, granularity);
     const series = _buildTtftModelSeries(buckets);
 
@@ -10007,7 +10044,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       buckets: buckets.map(b => ({ key: b.key, label: b.label, avgSeconds: b.avgSeconds, count: b.count })),
       series,
       sampleCount: samples.length,
-      fileCount: files.length,
+      fileCount,
     });
   }
 
@@ -10872,6 +10909,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       this.lastDiagnosticReport = report;
 
       const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+      this.diagnosticsAllSessionFiles = sessionFiles;
       const sessionFileData = await this.getSessionFilePreviewData(sessionFiles);
       const sessionFolders = this.buildSessionFolderData(sessionFiles);
       const candidatePaths = this.sessionDiscovery.getDiagnosticCandidatePaths();
