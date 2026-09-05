@@ -5,6 +5,8 @@ import {
 	shouldNotifyWorktreeFindings,
 	formatBytesForNotification,
 	sumWorktreeBytes,
+	parseCleanupPushedWorktreesMessage,
+	buildCleanupConfirmTitle,
 	WORKTREE_BACKGROUND_SCAN_INTERVAL_MS,
 	WORKTREE_SCAN_NOTIFY_MIN_BYTES,
 } from '../../src/worktreeBackgroundScan';
@@ -154,4 +156,86 @@ test('scanWorktreeRootsWithTimeout: invalidates a timed-out root callback', asyn
 	});
 
 	assert.equal(isBlockedRootActive?.(), false);
+});
+
+// ---------------------------------------------------------------------------
+// parseCleanupPushedWorktreesMessage
+// ---------------------------------------------------------------------------
+
+test('parseCleanupPushedWorktreesMessage: parses candidates and an unscoped message', () => {
+	const result = parseCleanupPushedWorktreesMessage({
+		worktrees: [
+			{ path: '/repo-a/wt1', branch: 'feature-1', repoLabel: 'repo-a' },
+			{ path: '/repo-b/wt1', branch: 'feature-2', repoLabel: 'repo-b' },
+		],
+	});
+	assert.deepEqual(result.candidates, [
+		{ path: '/repo-a/wt1', branch: 'feature-1', repoLabel: 'repo-a' },
+		{ path: '/repo-b/wt1', branch: 'feature-2', repoLabel: 'repo-b' },
+	]);
+	assert.equal(result.scopeRepoLabel, undefined);
+});
+
+test('parseCleanupPushedWorktreesMessage: trusts repoLabel scope when every candidate matches', () => {
+	const result = parseCleanupPushedWorktreesMessage({
+		repoLabel: 'repo-a',
+		worktrees: [
+			{ path: '/repo-a/wt1', branch: 'feature-1', repoLabel: 'repo-a' },
+			{ path: '/repo-a/wt2', branch: 'feature-2', repoLabel: 'repo-a' },
+		],
+	});
+	assert.equal(result.scopeRepoLabel, 'repo-a');
+	assert.equal(result.candidates.length, 2);
+});
+
+test('parseCleanupPushedWorktreesMessage: falls back to unscoped when the candidate list is mixed-repo', () => {
+	// A stale/mismatched webview state could send a repoLabel scope alongside worktrees from a
+	// different (or multiple) repos; the confirmation dialog must not claim a narrower scope
+	// than what is actually about to be deleted.
+	const result = parseCleanupPushedWorktreesMessage({
+		repoLabel: 'repo-a',
+		worktrees: [
+			{ path: '/repo-a/wt1', branch: 'feature-1', repoLabel: 'repo-a' },
+			{ path: '/repo-b/wt1', branch: 'feature-2', repoLabel: 'repo-b' },
+		],
+	});
+	assert.equal(result.scopeRepoLabel, undefined);
+	assert.equal(result.candidates.length, 2);
+});
+
+test('parseCleanupPushedWorktreesMessage: falls back to unscoped when no candidate matches the requested repoLabel', () => {
+	const result = parseCleanupPushedWorktreesMessage({
+		repoLabel: 'repo-a',
+		worktrees: [{ path: '/repo-b/wt1', branch: 'feature-2', repoLabel: 'repo-b' }],
+	});
+	assert.equal(result.scopeRepoLabel, undefined);
+});
+
+test('parseCleanupPushedWorktreesMessage: filters out entries with a missing/blank path', () => {
+	const result = parseCleanupPushedWorktreesMessage({
+		worktrees: [
+			{ path: '  ', branch: 'x', repoLabel: 'repo-a' },
+			{ branch: 'x', repoLabel: 'repo-a' },
+			{ path: '/repo-a/wt1', branch: 'feature-1', repoLabel: 'repo-a' },
+		],
+	});
+	assert.deepEqual(result.candidates, [{ path: '/repo-a/wt1', branch: 'feature-1', repoLabel: 'repo-a' }]);
+});
+
+test('parseCleanupPushedWorktreesMessage: a non-array/missing worktrees list yields no candidates', () => {
+	assert.deepEqual(parseCleanupPushedWorktreesMessage({}).candidates, []);
+	assert.deepEqual(parseCleanupPushedWorktreesMessage({ worktrees: 'not-an-array' }).candidates, []);
+});
+
+// ---------------------------------------------------------------------------
+// buildCleanupConfirmTitle
+// ---------------------------------------------------------------------------
+
+test('buildCleanupConfirmTitle: unscoped, singular vs. plural count', () => {
+	assert.equal(buildCleanupConfirmTitle(1, undefined), 'Clean up 1 pushed worktree?');
+	assert.equal(buildCleanupConfirmTitle(3, undefined), 'Clean up 3 pushed worktrees?');
+});
+
+test('buildCleanupConfirmTitle: names the repository when scoped', () => {
+	assert.equal(buildCleanupConfirmTitle(2, 'repo-a'), 'Clean up 2 pushed worktrees in "repo-a"?');
 });

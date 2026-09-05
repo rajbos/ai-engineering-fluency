@@ -119,6 +119,8 @@ import {
   shouldNotifyWorktreeFindings as _shouldNotifyWorktreeFindings,
   formatBytesForNotification as _formatBytesForNotification,
   sumWorktreeBytes as _sumWorktreeBytes,
+  parseCleanupPushedWorktreesMessage as _parseCleanupPushedWorktreesMessage,
+  buildCleanupConfirmTitle as _buildCleanupConfirmTitle,
   type WorktreeBackgroundScanResult,
 } from './worktreeBackgroundScan';
 import { scanWorktreeRootsWithTimeout as _scanWorktreeRootsWithTimeout } from './worktreeScan';
@@ -10721,33 +10723,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
   }
 
   /**
-   * Parses the bulk-cleanup message into its candidate list and optional repo scope label.
-   * `scopeRepoLabel` is only trusted (and returned) when it matches every parsed candidate's
-   * `repoLabel` — a mismatched or mixed-repo list falls back to unscoped wording rather than
-   * letting the confirmation dialog claim a narrower scope than what will actually be deleted.
-   */
-  private _parseCleanupPushedWorktreesMessage(message: any): { candidates: Array<{ path: string; branch: string; repoLabel: string }>; scopeRepoLabel?: string } {
-    const candidates: Array<{ path: string; branch: string; repoLabel: string }> = Array.isArray(message?.worktrees)
-      ? message.worktrees
-        .filter((w: any) => w && typeof w.path === "string" && w.path.trim())
-        .map((w: any) => ({
-          path: String(w.path).trim(),
-          branch: typeof w.branch === "string" && w.branch ? w.branch : "?",
-          repoLabel: typeof w.repoLabel === "string" && w.repoLabel ? w.repoLabel : "",
-        }))
-      : [];
-    const requestedScope: string | undefined = typeof message?.repoLabel === "string" && message.repoLabel ? message.repoLabel : undefined;
-    const scopeRepoLabel = requestedScope && candidates.every((c) => c.repoLabel === requestedScope) ? requestedScope : undefined;
-    return { candidates, scopeRepoLabel };
-  }
-
-  /** Confirmation prompt title, naming the repository when the cleanup is scoped to one. */
-  private _buildCleanupConfirmTitle(count: number, scopeRepoLabel?: string): string {
-    const scopeText = scopeRepoLabel ? ` in "${scopeRepoLabel}"` : "";
-    return `Clean up ${count} pushed worktree${count === 1 ? "" : "s"}${scopeText}?`;
-  }
-
-  /**
    * Bulk-deletes worktrees the caller believes are fully pushed, one at a time. Unlike the
    * single-worktree delete flow, this NEVER force-deletes: if a worktree turns out to have
    * uncommitted/untracked changes or unpushed commits (re-checked live, not trusted from the
@@ -10760,7 +10735,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    * confirmation wording to name that repository — the deletion logic is identical either way.
    */
   private async diagHandleCleanupPushedWorktrees(message: any): Promise<void> {
-    const { candidates, scopeRepoLabel } = this._parseCleanupPushedWorktreesMessage(message);
+    const { candidates, scopeRepoLabel } = _parseCleanupPushedWorktreesMessage(message);
 
     if (!this.analysisPanel || !this.isPanelOpen(this.analysisPanel)) { return; }
     const panel = this.analysisPanel;
@@ -10771,7 +10746,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     }
 
     const choice = await vscode.window.showWarningMessage(
-      this._buildCleanupConfirmTitle(candidates.length, scopeRepoLabel),
+      _buildCleanupConfirmTitle(candidates.length, scopeRepoLabel),
       {
         modal: true,
         detail: 'Removes worktrees whose commits are already pushed to a remote, using "git worktree remove". Any worktree found to have uncommitted, untracked, or unpushed changes is automatically skipped (never force-deleted) and the cleanup continues with the rest.',
