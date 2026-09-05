@@ -206,6 +206,21 @@ test('safeFileRead: rejects OS temp directory paths before opening', async () =>
 	}
 });
 
+test('safeFileRead: temp-root detection result stays stable after memoization', async () => {
+	// Use mkdtempSync (not a predictable path.join(os.tmpdir(), ...) name) so the
+	// directory itself is created securely; only the file within it is used here.
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'safe-read-stable-'));
+	try {
+		const tempFile = path.join(tmpDir, 'session.jsonl');
+		fs.writeFileSync(tempFile, '{"kind":2}', 'utf8');
+		assert.equal(await readTextFileWithSizeGuard(tempFile, 'temp-stable-first'), undefined);
+		assert.equal(await readTextFileWithSizeGuard(tempFile, 'temp-stable-second'), undefined);
+		assert.equal(readTextFileWithSizeGuardSync(tempFile, 'temp-stable-sync'), undefined);
+	} finally {
+		rm(tmpDir);
+	}
+});
+
 // ---------------------------------------------------------------------------
 // JetBrains
 // ---------------------------------------------------------------------------
