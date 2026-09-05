@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-08-30",
+    "lastUpdated": "2026-09-05",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -1136,14 +1136,14 @@
       "cacheCreationCostPerMillion": 0.25
     },
     "gpt-5.6-sol": {
-      "inputCostPerMillion": 2.0,
-      "outputCostPerMillion": 10.0,
+      "inputCostPerMillion": 4.0,
+      "outputCostPerMillion": 20.0,
       "category": "GPT-5 models",
       "tier": "standard",
       "displayNames": [
         "GPT-5.6 Sol"
       ],
-      "cachedInputCostPerMillion": 0.2,
+      "cachedInputCostPerMillion": 0.4,
       "copilotPricing": {
         "inputCostPerMillion": 5.0,
         "cachedInputCostPerMillion": 0.5,
@@ -1157,7 +1157,7 @@
           "threshold": "> 272K"
         }
       },
-      "cacheCreationCostPerMillion": 2.5
+      "cacheCreationCostPerMillion": 5.0
     },
     "gpt-5.6-terra": {
       "inputCostPerMillion": 2.0,
@@ -1253,6 +1253,38 @@
         "Kimi K3"
       ],
       "cachedInputCostPerMillion": 0.3
+    },
+    "claude-fable-5.1": {
+      "inputCostPerMillion": 10.0,
+      "outputCostPerMillion": 50.0,
+      "category": "Claude models (Anthropic)",
+      "tier": "standard",
+      "displayNames": [
+        "Claude Fable 5.1"
+      ],
+      "cachedInputCostPerMillion": 0.25,
+      "cacheCreationCostPerMillion": 12.5
+    },
+    "gpt-6-astra": {
+      "inputCostPerMillion": 10.0,
+      "outputCostPerMillion": 50.0,
+      "category": "OpenAI models",
+      "tier": "standard",
+      "displayNames": [
+        "GPT-6 Astra"
+      ],
+      "cachedInputCostPerMillion": 1.0,
+      "cacheCreationCostPerMillion": 12.5
+    },
+    "gemini-3.8-flash": {
+      "inputCostPerMillion": 0.75,
+      "outputCostPerMillion": 3.75,
+      "category": "Google Gemini models",
+      "tier": "standard",
+      "displayNames": [
+        "Gemini 3.8 Flash"
+      ],
+      "cachedInputCostPerMillion": 0.075
     }
   }
 }

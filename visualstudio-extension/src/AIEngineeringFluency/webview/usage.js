@@ -7511,7 +7511,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const modeUsageHtml = safeSectionHtml("Interaction Modes", () => `
 			<div class="section" id="section-interaction-modes">
 				<div class="section-title"><span>\u{1F3AF}</span><span>Interaction Modes</span></div>
-				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), Agent (autonomous tasks), Plan, Custom Agent, CLI (terminal), Copilot App (desktop-app CLI sessions), Claude Desktop, or Claude (VS Code)</div>
+				<div class="section-subtitle">How you're using AI assistants: Ask (chat), Edit (code edits), Agent (autonomous tasks), Plan, Custom Agent, CLI (terminal), Copilot App (desktop-app CLI sessions), Claude Desktop, or Claude (VS Code)</div>
 				<div class="two-column">
 					${renderModeBarChart(stats.today.modeUsage, "\u{1F4C5} Today")}
 					${renderModeBarChart(stats.last30Days.modeUsage, "\u{1F4CA} Last 30 Days")}
