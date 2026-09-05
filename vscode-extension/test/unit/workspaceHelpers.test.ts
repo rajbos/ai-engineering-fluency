@@ -2,6 +2,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {
     getModeType,
@@ -1834,6 +1835,15 @@ test('resolveSessionWorkspaceName: prefers workspaceFolderPath over repository',
     assert.equal(name, 'my-project');
 });
 
+test('resolveSessionWorkspaceName: app-store worktree workspaceFolderPath resolves to the repo, not the worktree name', () => {
+    const workspaceFolderPath = path.join('C:', 'Users', 'me', '.copilot', 'copilot-worktrees', 'my-repo', 'rajbos-bookish-engine');
+    const name = resolveSessionWorkspaceName(
+        { workspaceFolderPath },
+        path.join('C:', 'Users', 'me', '.copilot', 'session-store.db#session-id')
+    );
+    assert.equal(name, 'my-repo');
+});
+
 test('resolveSessionWorkspaceName: falls back to repository when workspaceFolderPath is absent', () => {
     const name = resolveSessionWorkspaceName(
         { repository: 'owner/repo' },
@@ -1843,7 +1853,10 @@ test('resolveSessionWorkspaceName: falls back to repository when workspaceFolder
 });
 
 test('resolveSessionWorkspaceName: falls back to workspaceStorage resolution', () => {
-    const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'wh-rsws-'));
+    // Use the OS temp dir (not process.cwd()) so this stays hermetic even when the test
+    // suite itself runs from inside a "copilot-worktrees" checkout, which would otherwise
+    // make getRepoNameFromWorkspacePath collapse the synthetic path to the real repo name.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wh-rsws-'));
     try {
         const workspaceFolder = path.join(tmpDir, 'my-vscode-project');
         fs.mkdirSync(workspaceFolder, { recursive: true });
