@@ -206,6 +206,22 @@ test('safeFileRead: rejects OS temp directory paths before opening', async () =>
 	}
 });
 
+test('safeFileRead: temp-root detection result stays stable after memoization', async () => {
+	const tempFile = path.join(os.tmpdir(), `safe-read-stable-${Date.now()}.jsonl`);
+	try {
+		fs.writeFileSync(tempFile, '{"kind":2}', 'utf8');
+		assert.equal(await readTextFileWithSizeGuard(tempFile, 'temp-stable-first'), undefined);
+		assert.equal(await readTextFileWithSizeGuard(tempFile, 'temp-stable-second'), undefined);
+		assert.equal(readTextFileWithSizeGuardSync(tempFile, 'temp-stable-sync'), undefined);
+	} finally {
+		try {
+			fs.rmSync(tempFile, { force: true });
+		} catch {
+			// ignore cleanup failures
+		}
+	}
+});
+
 // ---------------------------------------------------------------------------
 // JetBrains
 // ---------------------------------------------------------------------------
