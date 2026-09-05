@@ -1665,7 +1665,7 @@ test('resolveWorkspaceFolderFromSessionPath: returns undefined for non-workspace
     assert.equal(result, undefined);
 });
 
-test('resolveWorkspaceFolderFromSessionPath: returns undefined for empty path', () => {
+test('resolveWorkspaceFolderWithFallback: returns VS Code workspaceStorage resolution when available', () => {
     const cache = new Map<string, string | undefined>();
     const result = resolveWorkspaceFolderFromSessionPath('', cache);
     assert.equal(result, undefined);
