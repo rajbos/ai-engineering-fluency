@@ -3274,7 +3274,7 @@ function renderTtftChartSvg(buckets: TtftBucketView[], series: TtftModelSeriesVi
   const legend = series.map((s, idx) => {
     const color = getModelColor(idx);
     const name = escapeHtml(getModelDisplayName(s.model));
-    return `<span class="ttft-legend-item" data-model="${escapeHtml(s.model)}" role="button" tabindex="0" title="Click to hide/show ${name}"><span class="ttft-legend-swatch" style="background:${color.border}"></span>${name}</span>`;
+    return `<span class="ttft-legend-item" data-model="${escapeHtml(s.model)}" role="button" tabindex="0" aria-pressed="false" title="Click to hide/show ${name}"><span class="ttft-legend-swatch" style="background:${color.border}"></span>${name}</span>`;
   }).join('');
 
   return `<div class="ttft-chart-wrap">
@@ -3384,6 +3384,7 @@ function setupTtftHandlers(): void {
     const model = item.dataset.model;
     if (!model) { return; }
     const hidden = item.classList.toggle("ttft-hidden");
+    item.setAttribute("aria-pressed", String(hidden));
     document.querySelectorAll(".ttft-series").forEach((el) => {
       if ((el as HTMLElement).dataset.model === model) { (el as HTMLElement).classList.toggle("ttft-hidden", hidden); }
     });

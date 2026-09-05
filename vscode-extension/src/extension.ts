@@ -264,7 +264,7 @@ const TTFT_SCAN_RANGE_DAYS: Record<Exclude<TtftScanRange, 'all'>, number> = { '1
 /** Resolves a scan-range picker value to a lookback window in ms, or null for 'all' (no mtime filter). */
 function ttftScanRangeToMs(range: unknown): number | null {
 	if (range === 'all') { return null; }
-	const key = (typeof range === 'string' && range in TTFT_SCAN_RANGE_DAYS) ? (range as Exclude<TtftScanRange, 'all'>) : '14d';
+	const key = (typeof range === 'string' && Object.prototype.hasOwnProperty.call(TTFT_SCAN_RANGE_DAYS, range)) ? (range as Exclude<TtftScanRange, 'all'>) : '14d';
 	return TTFT_SCAN_RANGE_DAYS[key] * 24 * 60 * 60 * 1000;
 }
 
@@ -6948,20 +6948,25 @@ private computeFallbackDailyRollup(
 	 */
 	private async collectTtftSamples(scanRangeMs: number | null): Promise<{ samples: TtftSample[]; fileCount: number }> {
 		const candidates = this.diagnosticsAllSessionFiles.filter(f => _resolveDebugLogCandidatePaths(f) !== undefined);
+		const CONCURRENCY = 20;
 		let inRange = candidates;
 		if (scanRangeMs !== null) {
 			const cutoff = Date.now() - scanRangeMs;
-			const withStats = await Promise.all(candidates.map(async (file) => {
-				try {
-					const stat = await fs.promises.stat(file);
-					return stat.mtimeMs >= cutoff ? file : null;
-				} catch { return null; }
-			}));
+			const withStats: (string | null)[] = [];
+			for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+				const batch = candidates.slice(i, i + CONCURRENCY);
+				const results = await Promise.all(batch.map(async (file) => {
+					try {
+						const stat = await fs.promises.stat(file);
+						return stat.mtimeMs >= cutoff ? file : null;
+					} catch { return null; }
+				}));
+				withStats.push(...results);
+			}
 			inRange = withStats.filter((f): f is string => f !== null);
 		}
 
 		const all: TtftSample[] = [];
-		const CONCURRENCY = 20;
 		for (let i = 0; i < inRange.length; i += CONCURRENCY) {
 			const batch = inRange.slice(i, i + CONCURRENCY);
 			const results = await Promise.all(batch.map(f => this.readTtftSamplesForSessionFile(f)));
