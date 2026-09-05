@@ -122,7 +122,7 @@ function chatSpan(sessionId: string, overrides: Record<string, unknown> = {}): s
  * don't leak state into each other.
  */
 async function withHomedir<T>(t: import('node:test').TestContext, fn: (homeDir: string) => Promise<T>): Promise<T | undefined> {
-	const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-otel-test-'));
+	const homeDir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-otel-test-'));
 	const originalHome = process.env.HOME;
 	const originalUserProfile = process.env.USERPROFILE;
 	process.env.HOME = homeDir;

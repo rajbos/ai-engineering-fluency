@@ -20,7 +20,7 @@ const TEMP_ROOTS: string[] = [];
 
 /** Create a throwaway repository whose `origin` remote is `remoteUrl` (when given). */
 function makeRepo(files: Record<string, string>, remoteUrl?: string): string {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'df-service-'));
+	const root = fs.mkdtempSync(path.join(process.cwd(), 'df-service-'));
 	TEMP_ROOTS.push(root);
 	const all: Record<string, string> = {
 		'.git/config': remoteUrl ? `[remote "origin"]\n\turl = ${remoteUrl}\n` : '[core]\n',
@@ -36,7 +36,7 @@ function makeRepo(files: Record<string, string>, remoteUrl?: string): string {
 
 /** A plain directory that is not a git repository. */
 function makePlainDir(): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'df-plain-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'df-plain-'));
 	TEMP_ROOTS.push(dir);
 	return dir;
 }
@@ -65,7 +65,7 @@ const FIXED_NOW = () => new Date('2026-09-01T12:00:00.000Z');
 test('selectRepoRoots: keeps git repositories and drops everything else', () => {
 	const repo = makeRepo({});
 	const plain = makePlainDir();
-	const { roots, skipped } = selectRepoRoots([plain, repo, path.join(os.tmpdir(), 'df-missing-xyz')]);
+	const { roots, skipped } = selectRepoRoots([plain, repo, path.join(process.cwd(), 'df-missing-xyz')]);
 	assert.deepEqual(roots, [repo]);
 	assert.equal(skipped, 0);
 });

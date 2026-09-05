@@ -86,7 +86,7 @@ function makeServiceWithServices(
  * Returns { filePath, cleanup }.
  */
 function createTempFile(content: string, ext = '.json'): { filePath: string; cleanup: () => void } {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-test-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'sync-test-'));
 	// Mimics a workspaceStorage path so extractWorkspaceIdFromSessionPath returns a proper ID
 	const wsDir = path.join(dir, 'workspaceStorage', 'test-ws-id', 'chatSessions');
 	fs.mkdirSync(wsDir, { recursive: true });
@@ -1183,7 +1183,7 @@ test('syncToBackendStore still attempts sharing server sync when Azure sync fail
 
 test('syncToBackendStore tracks Azure and Team Server "last sync" independently — a successful sharing-server sync updates only its own timestamp when Azure fails', async () => {
 	const globalState = new Map<string, unknown>();
-	const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-lock-test-'));
+	const lockDir = fs.mkdtempSync(path.join(process.cwd(), 'sync-lock-test-'));
 	const mockContext = {
 		globalState: {
 			get: (key: string) => globalState.get(key),
@@ -1287,7 +1287,7 @@ test('acquireSyncLock succeeds when no context is provided', async () => {
 });
 
 test('acquireSyncLock creates lock file and releaseSyncLock removes it', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'lock-test-'));
 	try {
 		const mockContext = {
 			globalStorageUri: { fsPath: dir },
@@ -1308,7 +1308,7 @@ test('acquireSyncLock creates lock file and releaseSyncLock removes it', async (
 });
 
 test('acquireSyncLock returns false when lock is held by another session', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'lock-test-'));
 	try {
 		const lockPath = path.join(dir, 'backend_sync.lock');
 		// Write a lock file from a different session that is recent
@@ -1330,7 +1330,7 @@ test('acquireSyncLock returns false when lock is held by another session', async
 });
 
 test('acquireSyncLock breaks stale lock', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'lock-test-'));
 	try {
 		const lockPath = path.join(dir, 'backend_sync.lock');
 		// Write a lock file that is stale (older than SYNC_LOCK_STALE_MS)
@@ -1356,7 +1356,7 @@ test('acquireSyncLock breaks stale lock', async () => {
 });
 
 test('acquireSyncLock breaks corrupt (empty) lock file', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'lock-test-'));
 	try {
 		const lockPath = path.join(dir, 'backend_sync.lock');
 		// A writer killed between atomic create and content write leaves a
@@ -1380,7 +1380,7 @@ test('acquireSyncLock breaks corrupt (empty) lock file', async () => {
 });
 
 test('acquireSyncLock returns false when same server URL is locked by another session', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'lock-test-'));
 	try {
 		const lockPath = path.join(dir, 'backend_sync.lock');
 		fs.writeFileSync(lockPath, JSON.stringify({
@@ -1400,7 +1400,7 @@ test('acquireSyncLock returns false when same server URL is locked by another se
 });
 
 test('acquireSyncLock returns true when lock is held for a different server URL', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'lock-test-'));
 	try {
 		const lockPath = path.join(dir, 'backend_sync.lock');
 		// Simulate VS Code stable holding the lock for server A

@@ -2,8 +2,7 @@
  * Shared type definitions for the Copilot Token Tracker extension.
  * Extracted from extension.ts to reduce file size and improve reusability.
  */
-
-import type { TaskCategory } from './taskClassification';
+import type { TaskCategory, TaskCategoryBreakdown, TaskClassificationResult } from './taskClassification';
 
 /**
  * Character-to-token ratio for a specific AI model.
@@ -167,6 +166,9 @@ export interface DailyTokenStats {
   modelUsage: ModelUsage;
   editorUsage: EditorUsage;
   repositoryUsage: RepositoryUsage;
+  taskCategoryTokens?: Partial<Record<TaskCategory, number>>;
+  taskCategorySessions?: Partial<Record<TaskCategory, number>>;
+  taskCategoryModelUsage?: Partial<Record<TaskCategory, ModelUsage>>;
   languageUsage?: LanguageUsage;
   linesAdded?: number;
   linesRemoved?: number;
@@ -267,6 +269,14 @@ export interface ChartPeriodData {
    * Copilot group uses AI-Credit pricing; all others use direct provider pricing.
    */
   billingGroupCostDatasets?: object[];
+  /** Token datasets split by task category (e.g. "Coding", "Debugging", "Testing") — one stacked-bar dataset per category. */
+  taskCategoryDatasets?: object[];
+  /** Task-token datasets split by category. */
+  taskCategoryTokenDatasets?: object[];
+  /** Task-session datasets split by category. */
+  taskCategorySessionDatasets?: object[];
+  /** Task-cost datasets split by category. */
+  taskCategoryCostDatasets?: object[];
   /**
    * Cost datasets split by model — one dataset per top model (by total cost), plus an
    * "Other models" dataset for the remainder. Each model's usage is priced using the
@@ -281,8 +291,6 @@ export interface ChartPeriodData {
   providerSessionsDatasets?: object[];
   /** Token datasets split by billing provider — one stacked-bar dataset per provider group. */
   providerTokensDatasets?: object[];
-  /** Token datasets split by task category (e.g. "Coding", "Debugging", "Testing") — one stacked-bar dataset per category. */
-  taskCategoryDatasets?: object[];
 }
 
 /** Shape of the data payload sent to the chart webview (via window.__INITIAL_CHART__ or postMessage). */
@@ -325,6 +333,8 @@ export interface DailyRollupEntry {
   cachedReadTokens?: number;
   interactions: number;
   modelUsage: ModelUsage;
+  taskCategoryShares?: TaskCategoryBreakdown;
+  primaryTaskCategory?: TaskCategory;
   /** Per-day share of the session's exact Copilot billing (in USD). Set when session has nanoAiu data. */
   copilotExactCostDollars?: number;
 }
@@ -336,6 +346,8 @@ export interface SessionFileCache {
   mtime: number; // file modification time as timestamp
   size?: number; // file size in bytes (optional for backward compatibility)
   usageAnalysis?: SessionUsageAnalysis; // New analysis data
+  taskCategory?: TaskCategory;
+  taskCategoryShares?: TaskCategoryBreakdown;
   firstInteraction?: string | null; // ISO timestamp of first interaction
   lastInteraction?: string | null; // ISO timestamp of last interaction
   title?: string; // Session title (customTitle from session file)
@@ -367,8 +379,6 @@ export interface SessionFileCache {
   maxRequestInputTokens?: number;
   /** Copilot CLI context tier from session.start/resume/model_change events (e.g. "default"). */
   contextTier?: string;
-  /** Dominant task category for this session (e.g. "Coding", "Debugging"), computed once via `classifySessionTask()`. */
-  taskCategory?: TaskCategory;
   /** Per-UTC-day token/interaction breakdown (keyed by YYYY-MM-DD UTC). Used for consistent daily stats. */
   dailyRollups?: { [utcDayKey: string]: DailyRollupEntry };
   linesAdded?: number;
@@ -407,6 +417,8 @@ export interface SessionUsageAnalysis {
   mcpTools: McpToolUsage;
   /** Agent-skill invocation counts for this session. See {@link SkillCallUsage}. */
   skillCalls?: SkillCallUsage;
+  /** Aggregated task-classification result for this session. */
+  taskClassification: TaskClassificationResult;
   modelSwitching: {
     uniqueModels: string[];
     modelCount: number;
@@ -1039,6 +1051,9 @@ export interface UsageAnalysisPeriod {
    * Absent when no session in the period carried context-size data.
    */
   contextWindow?: ContextWindowStats;
+  /** Weighted task-category session totals for the period. */
+  taskCategoryPrimarySessions?: Partial<Record<TaskCategory, number>>;
+  taskCategoryWeightedSessions?: Partial<Record<TaskCategory, number>>;
   /**
    * Per-model efficiency metrics aggregated across the period's sessions
    * (issue #1649). Absent when no session in the period carried

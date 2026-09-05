@@ -17,7 +17,7 @@ import { EclipseDataAccess } from '../../../src/eclipse';
 const eclipse = new EclipseDataAccess();
 
 function createTempSession(session: unknown): string {
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'eclipse-test-'));
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'eclipse-test-'));
 	const conversationsDir = path.join(tmpDir, '.metadata', '.plugins', 'com.microsoft.copilot.eclipse.core', 'conversations', 'testuser');
 	fs.mkdirSync(conversationsDir, { recursive: true });
 	const filePath = path.join(conversationsDir, 'conv-1.json');

@@ -228,7 +228,7 @@ test('tryResolveWorkspaceNameFromSessionPath returns undefined for non-workspace
 });
 
 test('tryResolveWorkspaceNameFromSessionPath resolves name from workspace.json with file:// URI', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'util-ws-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'util-ws-'));
 	const wsDir = path.join(dir, 'workspaceStorage', 'ws-id-123', 'chatSessions');
 	const metaDir = path.join(dir, 'workspaceStorage', 'ws-id-123');
 	fs.mkdirSync(wsDir, { recursive: true });
@@ -244,7 +244,7 @@ test('tryResolveWorkspaceNameFromSessionPath resolves name from workspace.json w
 });
 
 test('tryResolveWorkspaceNameFromSessionPath resolves from meta.json if workspace.json is absent', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'util-meta-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'util-meta-'));
 	const wsDir = path.join(dir, 'workspaceStorage', 'ws-id-456', 'chatSessions');
 	const metaDir = path.join(dir, 'workspaceStorage', 'ws-id-456');
 	fs.mkdirSync(wsDir, { recursive: true });
@@ -260,7 +260,7 @@ test('tryResolveWorkspaceNameFromSessionPath resolves from meta.json if workspac
 });
 
 test('tryResolveWorkspaceNameFromSessionPath strips .code-workspace extension', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'util-codews-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'util-codews-'));
 	const wsDir = path.join(dir, 'workspaceStorage', 'ws-id-789', 'chatSessions');
 	const metaDir = path.join(dir, 'workspaceStorage', 'ws-id-789');
 	fs.mkdirSync(wsDir, { recursive: true });
@@ -276,7 +276,7 @@ test('tryResolveWorkspaceNameFromSessionPath strips .code-workspace extension', 
 });
 
 test('tryResolveWorkspaceNameFromSessionPath returns undefined when no metadata files exist', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'util-nows-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'util-nows-'));
 	const wsDir = path.join(dir, 'workspaceStorage', 'ws-id-000', 'chatSessions');
 	fs.mkdirSync(wsDir, { recursive: true });
 	const sessionFile = path.join(wsDir, 'session.json');
@@ -290,7 +290,7 @@ test('tryResolveWorkspaceNameFromSessionPath returns undefined when no metadata 
 });
 
 test('tryResolveWorkspaceNameFromSessionPath handles plain path (non-URI)', async () => {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'util-plain-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'util-plain-'));
 	const wsDir = path.join(dir, 'workspaceStorage', 'ws-id-plain', 'chatSessions');
 	const metaDir = path.join(dir, 'workspaceStorage', 'ws-id-plain');
 	fs.mkdirSync(wsDir, { recursive: true });

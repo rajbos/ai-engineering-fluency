@@ -185,8 +185,9 @@ export class CursorDataAccess {
 		if (walSize === 0) { return null; }
 		try {
 			const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
-			const tmpDir = os.tmpdir();
-			const tmpDb = path.join(tmpDir, `cursor-wal-${Date.now()}.db`);
+			const tmpDir = path.join(os.homedir(), '.copilot', 'tmp');
+			fs.mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
+			const tmpDb = path.join(tmpDir, `cursor-wal-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
 			const tmpWal = tmpDb + '-wal';
 			const tmpShm = tmpDb + '-shm';
 			const shmPath = dbPath + '-shm';

@@ -288,6 +288,8 @@ export function createEmptyUsageAnalysisPeriod(): UsageAnalysisPeriod {
 			workspaceAgent: 0,
 			other: 0,
 		},
+		taskCategoryPrimarySessions: {},
+		taskCategoryWeightedSessions: {},
 	};
 }
 

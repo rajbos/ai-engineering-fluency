@@ -8,7 +8,7 @@ import { DevinCliDataAccess } from '../../../src/devinCli';
 const SESSION_ID = 'sess-abc123';
 
 function createHarness() {
-	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'devincli-'));
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'devincli-'));
 	const dbPath = path.join(tmpDir, 'sessions.db');
 	const virtualPath = `${dbPath}#${SESSION_ID}`;
 	fs.writeFileSync(dbPath, 'stub');

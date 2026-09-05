@@ -26,7 +26,7 @@ import type { UsageAnalysisPeriod } from '../../../src/types';
 
 const _tmpDirs: string[] = [];
 function mkTmpDir(prefix: string): string {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), prefix));
 	_tmpDirs.push(dir);
 	return dir;
 }
