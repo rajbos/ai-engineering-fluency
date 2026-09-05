@@ -3119,8 +3119,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Trailing &nbsp; padding on the "Today" column widens it a bit, giving the two
 		// value columns visual breathing room without VS Code table cell CSS to lean on.
 		const pad = (cell: string) => `${cell}&nbsp;&nbsp;&nbsp;&nbsp;`;
-		const grams = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} grams`;
-		const liters = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} liters`;
+		// Hide decimals once the value reaches 1000+ so large totals stay readable.
+		const grams = (n: number) => `${n.toLocaleString(undefined, Math.abs(n) >= 1000 ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 2, maximumFractionDigits: 2 })} grams`;
+		const liters = (n: number) => `${n.toLocaleString(undefined, Math.abs(n) >= 1000 ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 3, maximumFractionDigits: 3 })} liters`;
 		tooltip.appendMarkdown(`|  | 📅 ${l10n.t('tooltip.todayLabel')} | 📊 ${secondaryLabel} |\n|:---|:---|:---|\n`);
 		tooltip.appendMarkdown(`| ${l10n.t('tooltip.tokensLabel')} : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${secondaryStats.tokens.toLocaleString()} |\n`);
 		tooltip.appendMarkdown(`| ${l10n.t('tooltip.copilotCostLabel')} : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
