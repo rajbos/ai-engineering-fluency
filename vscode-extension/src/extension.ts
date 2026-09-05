@@ -10720,15 +10720,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     }
   }
 
-  /**
-   * Bulk-deletes worktrees the caller believes are fully pushed, one at a time. Unlike the
-   * single-worktree delete flow, this NEVER force-deletes: if a worktree turns out to have
-   * uncommitted/untracked changes or unpushed commits (re-checked live, not trusted from the
-   * webview's possibly-stale list), it is skipped and the loop moves on to the next one. The
-   * OS-level directory-removal fallback (for git-for-windows junction/long-path failures) still
-   * applies, since that is not a safety bypass — the dirty-tree check already passed by then.
-   */
-  private async diagHandleCleanupPushedWorktrees(message: any): Promise<void> {
+  /** Parses the bulk-cleanup message into its candidate list and optional repo scope label. */
+  private _parseCleanupPushedWorktreesMessage(message: any): { candidates: Array<{ path: string; branch: string; repoLabel: string }>; scopeRepoLabel?: string } {
     const candidates: Array<{ path: string; branch: string; repoLabel: string }> = Array.isArray(message?.worktrees)
       ? message.worktrees
         .filter((w: any) => w && typeof w.path === "string" && w.path.trim())
@@ -10738,6 +10731,30 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
           repoLabel: typeof w.repoLabel === "string" && w.repoLabel ? w.repoLabel : "",
         }))
       : [];
+    const scopeRepoLabel: string | undefined = typeof message?.repoLabel === "string" && message.repoLabel ? message.repoLabel : undefined;
+    return { candidates, scopeRepoLabel };
+  }
+
+  /** Confirmation prompt title, naming the repository when the cleanup is scoped to one. */
+  private _buildCleanupConfirmTitle(count: number, scopeRepoLabel?: string): string {
+    const scopeText = scopeRepoLabel ? ` in "${scopeRepoLabel}"` : "";
+    return `Clean up ${count} pushed worktree${count === 1 ? "" : "s"}${scopeText}?`;
+  }
+
+  /**
+   * Bulk-deletes worktrees the caller believes are fully pushed, one at a time. Unlike the
+   * single-worktree delete flow, this NEVER force-deletes: if a worktree turns out to have
+   * uncommitted/untracked changes or unpushed commits (re-checked live, not trusted from the
+   * webview's possibly-stale list), it is skipped and the loop moves on to the next one. The
+   * OS-level directory-removal fallback (for git-for-windows junction/long-path failures) still
+   * applies, since that is not a safety bypass — the dirty-tree check already passed by then.
+   *
+   * `message.repoLabel` is optional: when present, the webview has already filtered `worktrees`
+   * down to a single repository's row (its own "Clean up" button), and this only changes the
+   * confirmation wording to name that repository — the deletion logic is identical either way.
+   */
+  private async diagHandleCleanupPushedWorktrees(message: any): Promise<void> {
+    const { candidates, scopeRepoLabel } = this._parseCleanupPushedWorktreesMessage(message);
 
     if (!this.analysisPanel || !this.isPanelOpen(this.analysisPanel)) { return; }
     const panel = this.analysisPanel;
@@ -10748,7 +10765,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     }
 
     const choice = await vscode.window.showWarningMessage(
-      `Clean up ${candidates.length} pushed worktree${candidates.length === 1 ? "" : "s"}?`,
+      this._buildCleanupConfirmTitle(candidates.length, scopeRepoLabel),
       {
         modal: true,
         detail: 'Removes worktrees whose commits are already pushed to a remote, using "git worktree remove". Any worktree found to have uncommitted, untracked, or unpushed changes is automatically skipped (never force-deleted) and the cleanup continues with the rest.',
