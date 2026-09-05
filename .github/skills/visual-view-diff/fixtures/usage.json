@@ -870,5 +870,55 @@
       "delegationSessions": 3
     }
   ],
-  "worktreeScanRoots": []
+  "worktreeScanRoots": [],
+  "correctionReport": {
+    "sessionsPerRepo": 25,
+    "sessionsWithMoments": 1,
+    "counts": {
+      "userCorrections": 1,
+      "editRetries": 0,
+      "editSelfCorrections": 0,
+      "toolErrors": 1,
+      "toolErrorsRetried": 1,
+      "agentSelfCorrections": 0
+    },
+    "repos": [
+      {
+        "repository": "acme/web-app",
+        "sessionsWithMoments": 1,
+        "counts": {
+          "userCorrections": 1,
+          "editRetries": 0,
+          "editSelfCorrections": 0,
+          "toolErrors": 1,
+          "toolErrorsRetried": 1,
+          "agentSelfCorrections": 0
+        },
+        "sessions": [
+          {
+            "file": "/sessions/example.jsonl",
+            "title": "Correcting the build",
+            "lastInteraction": "2026-03-14T09:30:00.000Z",
+            "moments": [
+              {
+                "type": "user-correction",
+                "turnNumber": 2,
+                "timestamp": "2026-03-14T09:20:00.000Z",
+                "snippet": "No, use the existing endpoint.",
+                "matchedPattern": "no"
+              },
+              {
+                "type": "tool-error",
+                "turnNumber": 3,
+                "timestamp": "2026-03-14T09:25:00.000Z",
+                "snippet": "Tool failed: edit",
+                "tool": "edit",
+                "retried": true
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }

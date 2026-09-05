@@ -7378,8 +7378,11 @@ private computeFallbackDailyRollup(
 
 	private async _handleOpenSessionFile(message: any): Promise<void> {
 		if (!message.file) { return; }
+		const turnNumber = typeof message.turnNumber === 'number' && Number.isSafeInteger(message.turnNumber) && message.turnNumber > 0
+			? message.turnNumber
+			: undefined;
 		await this.dispatch('openSessionFile:analysis', async () => {
-			try { await this.showLogViewer(message.file); }
+			try { await this.showLogViewer(message.file, turnNumber); }
 			catch { vscode.window.showErrorMessage('Could not open log viewer: ' + message.file); }
 		});
 	}
@@ -7853,7 +7856,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 	}
 
-	public async showLogViewer(sessionFilePath: string): Promise<void> {
+	public async showLogViewer(sessionFilePath: string, focusedTurnNumber?: number): Promise<void> {
 		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
 			const trajectoryId = this.windsurf.extractTrajectoryId(sessionFilePath);
 			const pbPath = path.join(os.homedir(), '.codeium', 'windsurf', 'cascade', `${trajectoryId}.pb`);
@@ -7877,7 +7880,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: false },
 			{ enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
 		);
-		this.logViewerPanel.webview.html = this.getLogViewerHtml(this.logViewerPanel.webview, logData);
+		this.logViewerPanel.webview.html = this.getLogViewerHtml(this.logViewerPanel.webview, logData, focusedTurnNumber);
 		this.logViewerPanel.webview.onDidReceiveMessage(async (message) => { await this.handleLogViewerMessage(message); });
 		this.logViewerPanel.onDidDispose(() => { this.logViewerPanel = undefined; });
 	}
@@ -8070,11 +8073,11 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 	}
 
-	private getLogViewerHtml(webview: vscode.Webview, logData: SessionLogData): string {
+	private getLogViewerHtml(webview: vscode.Webview, logData: SessionLogData, focusedTurnNumber?: number): string {
 		const nonce = getNonce();
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'logviewer.js'));
 
-		const initialData = JSON.stringify({ ...logData, compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }).replace(/</g, '\\u003c');
+		const initialData = JSON.stringify({ ...logData, focusedTurnNumber, compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }).replace(/</g, '\\u003c');
 
 		return `<!DOCTYPE html>
 		<html lang="en">
