@@ -221,7 +221,7 @@ test('CopilotCliAdapter.getMeta: omits workspacePath when DB cwd is null', async
 // ---------------------------------------------------------------------------
 
 test('CopilotCliAdapter.getWorkspacePathForDiscoveredPath: reads cwd from workspace.yaml', async (t) => {
-    const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cli-ws-'));
+    const tmpHome = await fs.promises.mkdtemp(path.join(process.cwd(), 'cli-ws-'));
     const stateDir = path.join(tmpHome, '.copilot', 'session-state');
     const uuid = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
     const uuidDir = path.join(stateDir, uuid);
@@ -241,7 +241,7 @@ test('CopilotCliAdapter.getWorkspacePathForDiscoveredPath: reads cwd from worksp
 });
 
 test('CopilotCliAdapter.getWorkspacePathForDiscoveredPath: returns undefined when workspace.yaml is missing', async (t) => {
-    const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cli-ws-missing-'));
+    const tmpHome = await fs.promises.mkdtemp(path.join(process.cwd(), 'cli-ws-missing-'));
     const stateDir = path.join(tmpHome, '.copilot', 'session-state');
     const uuid = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
     const uuidDir = path.join(stateDir, uuid);
@@ -265,7 +265,7 @@ test('CopilotCliAdapter.getWorkspacePathForDiscoveredPath: returns undefined whe
 test('CopilotCliAdapter.discover: finds flat .json/.jsonl AND uuid subdir events.jsonl', async (t) => {
     // Redirect ~/.copilot/session-state to a tmpdir by overriding HOME/USERPROFILE
     // (os.homedir() consults these env vars on each call).
-    const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cli-home-'));
+    const tmpHome = await fs.promises.mkdtemp(path.join(process.cwd(), 'cli-home-'));
     const stateDir = path.join(tmpHome, '.copilot', 'session-state');
     await fs.promises.mkdir(stateDir, { recursive: true });
 
@@ -309,7 +309,7 @@ test('CopilotCliAdapter.discover: finds flat .json/.jsonl AND uuid subdir events
 });
 
 test('CopilotCliAdapter.discover: marks sessions with Scout workspace.yaml cwd as Scout', async (t) => {
-    const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cli-home-scout-'));
+    const tmpHome = await fs.promises.mkdtemp(path.join(process.cwd(), 'cli-home-scout-'));
     const stateDir = path.join(tmpHome, '.copilot', 'session-state');
     await fs.promises.mkdir(stateDir, { recursive: true });
 
@@ -357,7 +357,7 @@ test('CopilotCliAdapter.discover: marks sessions with Scout workspace.yaml cwd a
 });
 
 test('CopilotCliAdapter.discover: marks sessions with client_name: github/autopilot workspace.yaml as App', async (t) => {
-    const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cli-home-app-'));
+    const tmpHome = await fs.promises.mkdtemp(path.join(process.cwd(), 'cli-home-app-'));
     const stateDir = path.join(tmpHome, '.copilot', 'session-state');
     await fs.promises.mkdir(stateDir, { recursive: true });
 
@@ -409,7 +409,7 @@ test('CopilotCliAdapter.discover: returns empty result when session-state dir do
     // Redirect HOME to an empty tmpdir so neither session-state/ nor session-store.db
     // exist. This avoids loading sql.js WASM (which causes a Windows UV handle assertion
     // on forced process exit) while still verifying that discover() handles missing dirs.
-    const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cli-home-empty-'));
+    const tmpHome = await fs.promises.mkdtemp(path.join(process.cwd(), 'cli-home-empty-'));
     const originalHome = process.env.HOME;
     const originalUserProfile = process.env.USERPROFILE;
     process.env.HOME = tmpHome;

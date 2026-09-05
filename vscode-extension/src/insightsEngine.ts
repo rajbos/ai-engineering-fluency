@@ -14,7 +14,7 @@ import type {
 } from '../../src/types';
 import toolNamesData from '../../src/toolNames.json';
 import modelPricingData from '../../src/modelPricing.json';
-import { resolveGuidMcpToolName, resolveMcpFamilyToolName } from '../../src/utils/toolUtils';
+import { resolveGuidMcpToolName, resolveMcpFamilyToolName, lookupKnownToolName } from '../../src/utils/toolUtils';
 import { getLongContextInfo, type LongContextInfo } from '../../src/tokenEstimation';
 import type { ModelPricing } from '../../src/types';
 
@@ -26,7 +26,7 @@ const TOOL_NAME_MAP: Record<string, string> = toolNamesData as Record<string, st
 
 /**
  * Returns a human-friendly display name for an MCP tool ID.
- * 1. Exact match in toolNames.json
+ * 1. Exact, case-insensitive, or canonicalized (camelCase/separator) match in toolNames.json
  * 2. GUID-keyed MCP pattern (e.g. M365 Connector)
  * 3. Known MCP family (GitHub/Playwright/Context7/Tavily/Claude Browser) + known action,
  *    regardless of server-registration prefix (see issue #1760)
@@ -34,7 +34,8 @@ const TOOL_NAME_MAP: Record<string, string> = toolNamesData as Record<string, st
  * 5. Fall back to the raw ID
  */
 function friendlyToolName(id: string): string {
-	if (TOOL_NAME_MAP[id]) { return TOOL_NAME_MAP[id]; }
+	const known = lookupKnownToolName(id, TOOL_NAME_MAP);
+	if (known) { return known; }
 	const guid = resolveGuidMcpToolName(id);
 	if (guid) { return guid; }
 	const family = resolveMcpFamilyToolName(id);

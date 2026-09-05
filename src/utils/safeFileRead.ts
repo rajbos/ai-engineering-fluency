@@ -10,9 +10,30 @@
  * still bounding worst-case memory use for a single file.
  */
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 /** Maximum number of bytes read from a single untrusted session-log file. */
 export const MAX_SESSION_FILE_BYTES = 100 * 1024 * 1024; // 100 MB
+
+function isPathInsideSystemTempDir(filePath: string): boolean {
+	const tempRoot = (() => {
+		try {
+			return fs.realpathSync(os.tmpdir());
+		} catch {
+			return path.resolve(os.tmpdir());
+		}
+	})();
+	const resolvedPath = (() => {
+		try {
+			return fs.realpathSync(filePath);
+		} catch {
+			return path.resolve(filePath);
+		}
+	})();
+	const relative = path.relative(tempRoot, resolvedPath);
+	return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
 
 /**
  * Reads a UTF-8 text file, refusing to load files larger than `maxBytes`.
@@ -25,6 +46,10 @@ export async function readTextFileWithSizeGuard(
 	context: string,
 	maxBytes: number = MAX_SESSION_FILE_BYTES
 ): Promise<string | undefined> {
+	if (isPathInsideSystemTempDir(filePath)) {
+		console.error(`[${context}] Refusing to read file from OS temp directory: ${filePath}`);
+		return undefined;
+	}
 	// Open once and stat/read the same file handle (not the path) so the file
 	// can't be swapped out for something larger between the size check and the
 	// read (TOCTOU race).
@@ -56,6 +81,10 @@ export function readTextFileWithSizeGuardSync(
 	context: string,
 	maxBytes: number = MAX_SESSION_FILE_BYTES
 ): string | undefined {
+	if (isPathInsideSystemTempDir(filePath)) {
+		console.error(`[${context}] Refusing to read file from OS temp directory: ${filePath}`);
+		return undefined;
+	}
 	// Open once and fstat/read the same file descriptor (not the path) so the
 	// file can't be swapped out for something larger between the size check
 	// and the read (TOCTOU race).

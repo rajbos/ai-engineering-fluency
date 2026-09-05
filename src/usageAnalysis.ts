@@ -23,6 +23,12 @@ import type {
 	LanguageUsage,
 } from './types';
 import {
+	classifySessionTurns,
+	createEmptyTaskClassificationResult,
+	type TaskTurnSignal,
+	TASK_CATEGORIES,
+} from './taskClassification';
+import {
 	computeEfficiencyFromTurns,
 	jsonRequestToToolCalls,
 	mergeModelEfficiency,
@@ -31,12 +37,6 @@ import {
 } from './modelEfficiency';
 import { detectCorrectionAnalysis, mergeCorrectionCounts, summarizeCorrectionMoments } from './correctionDetection';
 import { MAX_PROMPT_LENGTH } from './repeatedTasks';
-
-/** Store the session's first user prompt (truncated) for repeated-task detection. */
-function _setFirstUserPrompt(analysis: SessionUsageAnalysis, prompt: string | undefined | null): void {
-	if (analysis.firstUserPrompt || !prompt || !prompt.trim()) { return; }
-	analysis.firstUserPrompt = prompt.trim().slice(0, MAX_PROMPT_LENGTH);
-}
 import {
 	applyDelta,
 	isJsonlContent,
@@ -51,6 +51,12 @@ import {
 	buildReasoningEffortTimeline,
 	extractResponseItemText,
 } from './tokenEstimation';
+
+/** Store the session's first user prompt (truncated) for repeated-task detection. */
+function _setFirstUserPrompt(analysis: SessionUsageAnalysis, prompt: string | undefined | null): void {
+	if (analysis.firstUserPrompt || !prompt || !prompt.trim()) { return; }
+	analysis.firstUserPrompt = prompt.trim().slice(0, MAX_PROMPT_LENGTH);
+}
 import { extractCopilotCliSessionId, getCopilotCliExactUsage } from './copilotCliOtel';
 import { isCopilotAppClientName } from './copilotCliStore';
 import { readTextFileWithSizeGuard } from './utils/safeFileRead';
@@ -196,6 +202,123 @@ toolName?: string;
 };
 model?: string;
 toolName?: string;
+}
+
+function _asuExtractMessageTextFromRequest(request: SessionRequestRaw): string {
+	if (typeof request.message?.text === 'string' && request.message.text.trim()) { return request.message.text; }
+	if (Array.isArray(request.message?.parts)) {
+		return request.message.parts
+			.map(p => typeof p?.text === 'string' ? p.text : '')
+			.filter(Boolean)
+			.join('\n')
+			.trim();
+	}
+	return '';
+}
+
+function _asuExtractToolNamesFromRequest(request: SessionRequestRaw): string[] {
+	if (!Array.isArray(request.response)) { return []; }
+	const tools: string[] = [];
+	for (const responseItemRaw of request.response as ResponseItemRaw[]) {
+		if (!responseItemRaw) { continue; }
+		if (responseItemRaw.kind !== 'toolInvocationSerialized' && responseItemRaw.kind !== 'prepareToolInvocation') { continue; }
+		const toolName = responseItemRaw.toolId || responseItemRaw.toolName || responseItemRaw.invocationMessage?.toolName || responseItemRaw.toolSpecificData?.kind || 'unknown';
+		tools.push(toolName);
+	}
+	return tools;
+}
+
+interface TaskClassificationBias {
+	planMin: number;
+	delegationMin: number;
+}
+
+function _asuGetTaskClassificationBias(analysis: SessionUsageAnalysis): TaskClassificationBias {
+	const planMin = (analysis.modeUsage.plan > 0 && analysis.modeUsage.plan >= analysis.modeUsage.agent && analysis.modeUsage.plan >= analysis.modeUsage.edit) ? 0.6 : 0;
+	const delegationMin = analysis.modeUsage.customAgent > 0
+		? Math.min(1, analysis.modeUsage.customAgent / Math.max(1, analysis.taskClassification.turnCount))
+		: 0;
+	return { planMin, delegationMin };
+}
+
+function _asuGetBaseTaskClassificationShare(category: string, bias: TaskClassificationBias): number {
+	if (category === 'Planning') { return bias.planMin; }
+	if (category === 'Delegation') { return bias.delegationMin; }
+	return 0;
+}
+
+function _asuApplyTaskClassificationBias(analysis: SessionUsageAnalysis, shares: Record<string, number>, bias: TaskClassificationBias): void {
+	if (bias.planMin > 0) {
+		analysis.taskClassification.primaryCategory = 'Planning';
+		shares['Planning'] = Math.max(shares['Planning'], bias.planMin);
+	}
+	if (bias.delegationMin > 0) {
+		shares['Delegation'] = Math.max(shares['Delegation'], bias.delegationMin);
+	}
+}
+
+function _asuNormalizeTaskClassificationShares(analysis: SessionUsageAnalysis, shares: Record<string, number>, bias: TaskClassificationBias): void {
+	const minSum = bias.planMin + bias.delegationMin;
+	if (minSum >= 1) {
+		for (const category of TASK_CATEGORIES) {
+			shares[category] = category === 'Planning' ? bias.planMin / minSum : category === 'Delegation' ? bias.delegationMin / minSum : 0;
+		}
+		return;
+	}
+
+	let freeSum = 0;
+	for (const category of TASK_CATEGORIES) {
+		const base = _asuGetBaseTaskClassificationShare(category, bias);
+		freeSum += Math.max(0, shares[category] - base);
+	}
+	const remaining = 1 - minSum;
+	if (freeSum > 0) {
+		for (const category of TASK_CATEGORIES) {
+			const base = _asuGetBaseTaskClassificationShare(category, bias);
+			const extra = Math.max(0, shares[category] - base);
+			shares[category] = base + extra * (remaining / freeSum);
+		}
+		return;
+	}
+
+	shares[analysis.taskClassification.primaryCategory] = (shares[analysis.taskClassification.primaryCategory] || 0) + remaining;
+}
+
+function _asuFinalizeTaskClassificationPrimaryCategory(analysis: SessionUsageAnalysis, shares: Record<string, number>, delegationMin: number): void {
+	if (delegationMin > 0 && shares['Delegation'] >= shares[analysis.taskClassification.primaryCategory]) {
+		analysis.taskClassification.primaryCategory = 'Delegation';
+	}
+}
+
+function _asuFinalizeTaskClassification(analysis: SessionUsageAnalysis, turns: TaskTurnSignal[]): void {
+	analysis.taskClassification = turns.length > 0 ? classifySessionTurns(turns) : createEmptyTaskClassificationResult();
+
+	const shares = analysis.taskClassification.categoryShares;
+	const bias = _asuGetTaskClassificationBias(analysis);
+	_asuApplyTaskClassificationBias(analysis, shares, bias);
+	_asuNormalizeTaskClassificationShares(analysis, shares, bias);
+	_asuFinalizeTaskClassificationPrimaryCategory(analysis, shares, bias.delegationMin);
+}
+
+function _asuEnsureTaskCategoryMaps(period: UsageAnalysisPeriod): void {
+	if (!period.taskCategoryPrimarySessions) {
+		period.taskCategoryPrimarySessions = {};
+	}
+	if (!period.taskCategoryWeightedSessions) {
+		period.taskCategoryWeightedSessions = {};
+	}
+}
+
+function _muaMergeTaskCategories(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	_asuEnsureTaskCategoryMaps(period);
+	const primary = analysis.taskClassification?.primaryCategory ?? 'Conversation';
+	period.taskCategoryPrimarySessions![primary] = (period.taskCategoryPrimarySessions![primary] || 0) + 1;
+	const shares = analysis.taskClassification?.categoryShares;
+	for (const category of TASK_CATEGORIES) {
+		const share = shares?.[category] ?? 0;
+		if (share <= 0) { continue; }
+		period.taskCategoryWeightedSessions![category] = (period.taskCategoryWeightedSessions![category] || 0) + share;
+	}
 }
 
 type SelectedModelMetadataRaw = {
@@ -610,7 +733,8 @@ function _pdsaProcessRequest(
 	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
 	request: SessionRequestRaw,
 	sessionModeType: string,
-	analysis: SessionUsageAnalysis
+	analysis: SessionUsageAnalysis,
+	taskTurns: TaskTurnSignal[]
 ): void {
 	if (!request.requestId) { return; }
 	incrementModeUsage(sessionModeType, analysis.modeUsage);
@@ -620,6 +744,11 @@ function _pdsaProcessRequest(
 	}
 	analyzeRequestContext(request, analysis.contextReferences);
 	_pdsaProcessResponses(request, analysis, deps.toolNameMap);
+	const turn: TaskTurnSignal = {
+		messageText: _asuExtractMessageTextFromRequest(request),
+		toolNames: _asuExtractToolNamesFromRequest(request),
+	};
+	taskTurns.push(turn);
 }
 
 function _pdsaGetReqModel(req: SessionRequestRaw, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): string {
@@ -698,6 +827,7 @@ function processDeltaSessionAnalysis(
 	lines: string[],
 	analysis: SessionUsageAnalysis
 ): void {
+	const taskTurns: TaskTurnSignal[] = [];
 	const sessionModeType = sessionState.inputState?.mode
 		? getModeType(sessionState.inputState.mode)
 		: 'ask';
@@ -714,11 +844,12 @@ function processDeltaSessionAnalysis(
 
 	const requests = (sessionState.requests ?? []) as SessionRequestRaw[];
 	for (const request of requests) {
-		_pdsaProcessRequest(deps, request, sessionModeType, analysis);
+		_pdsaProcessRequest(deps, request, sessionModeType, analysis, taskTurns);
 	}
 
 	_pdsaExtractModelSwitching(deps, sessionState, requests, analysis);
 	_pdsaExtractThinkingEffort(lines, requests, analysis);
+	_asuFinalizeTaskClassification(analysis, taskTurns);
 	_applyJsonRequestsEfficiency(requests, _pdsaGetSessionDefaultModel(sessionState), deps.modelPricing, analysis);
 	deriveConversationPatterns(analysis);
 }
@@ -818,7 +949,8 @@ function _pjsrProcessRequest(
 	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
 	request: SessionRequestRaw,
 	sessionContent: ParsedSessionJson,
-	analysis: SessionUsageAnalysis
+	analysis: SessionUsageAnalysis,
+	taskTurns: TaskTurnSignal[]
 ): void {
 	const requestMode = _pjsrDetermineMode(request, sessionContent);
 	if (requestMode === 'agent') { analysis.modeUsage.agent++; }
@@ -831,6 +963,10 @@ function _pjsrProcessRequest(
 			_pjsrProcessResponseItem(responseItemRaw, analysis, deps);
 		}
 	}
+	taskTurns.push({
+		messageText: _asuExtractMessageTextFromRequest(request),
+		toolNames: _asuExtractToolNamesFromRequest(request),
+	});
 }
 
 /**
@@ -838,14 +974,22 @@ function _pjsrProcessRequest(
  * Populates mode usage, context references, and tool/MCP invocations.
  */
 function processJsonSessionRequests(
-	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
+	deps: Pick<UsageAnalysisDeps, 'toolNameMap' | 'modelPricing'>,
 	sessionContent: ParsedSessionJson,
 	analysis: SessionUsageAnalysis
 ): void {
 	if (!sessionContent.requests || !Array.isArray(sessionContent.requests)) { return; }
+	const taskTurns: TaskTurnSignal[] = [];
 	for (const requestRaw of sessionContent.requests) {
-		_pjsrProcessRequest(deps, requestRaw as SessionRequestRaw, sessionContent, analysis);
+		_pjsrProcessRequest(deps, requestRaw as SessionRequestRaw, sessionContent, analysis, taskTurns);
 	}
+	_asuFinalizeTaskClassification(analysis, taskTurns);
+	_applyJsonRequestsEfficiency(
+		sessionContent.requests as SessionRequestRaw[],
+		_jsonSessionDefaultModel(sessionContent),
+		deps.modelPricing,
+		analysis
+	);
 }
 
 /**
@@ -1210,6 +1354,7 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	}
 	_muaMergeModelSwitching(period, analysis);
 	_muaMergeEnhancedMetrics(period, analysis);
+	_muaMergeTaskCategories(period, analysis);
 	_muaMergeCorrections(period, analysis);
 }
 
@@ -1933,6 +2078,7 @@ export function createEmptySessionUsageAnalysis(): SessionUsageAnalysis {
 		modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
 		contextReferences: createEmptyContextRefs(),
 		mcpTools: { total: 0, byServer: {}, byTool: {} },
+		taskClassification: createEmptyTaskClassificationResult(),
 		skillCalls: { total: 0, byName: {} },
 		modelSwitching: {
 			uniqueModels: [],
@@ -2197,6 +2343,42 @@ function _asuAccumulateAssistantText(event: any, cliState: AsuCliState): void {
 	}
 }
 
+function _asuExtractCliUserMessageText(event: any): string {
+	if (typeof event?.data?.content === 'string' && event.data.content.trim()) { return event.data.content; }
+	if (typeof event?.data?.message === 'string' && event.data.message.trim()) { return event.data.message; }
+	if (typeof event?.content === 'string' && event.content.trim()) { return event.content; }
+	return '';
+}
+
+function _asuExtractShellCommandFromArgs(args: unknown): string | undefined {
+	if (!args || typeof args !== 'object') { return undefined; }
+	const argObj = args as Record<string, unknown>;
+	const keys = ['command', 'cmd', 'script'];
+	for (const key of keys) {
+		const val = argObj[key];
+		if (typeof val === 'string' && val.trim()) { return val; }
+	}
+	return undefined;
+}
+
+function _asuCollectTaskTurnFromEvent(event: any, currentTurn: TaskTurnSignal | null, taskTurns: TaskTurnSignal[]): TaskTurnSignal | null {
+	let nextTurn = currentTurn;
+	if (event.type === 'user.message') {
+		if (nextTurn) { taskTurns.push(nextTurn); }
+		nextTurn = { messageText: _asuExtractCliUserMessageText(event), toolNames: [], shellCommands: [] };
+	}
+	if (event.type !== 'tool.call' && event.type !== 'tool.execution_start' && event.type !== 'tool.result') { return nextTurn; }
+	const toolName = event.data?.toolName || event.toolName || 'unknown';
+	if (!nextTurn) { nextTurn = { toolNames: [], shellCommands: [] }; }
+	nextTurn.toolNames = nextTurn.toolNames ?? [];
+	nextTurn.toolNames.push(toolName);
+	const shellCmd = _asuExtractShellCommandFromArgs(event.data?.arguments);
+	if (!shellCmd) { return nextTurn; }
+	nextTurn.shellCommands = nextTurn.shellCommands ?? [];
+	nextTurn.shellCommands.push(shellCmd);
+	return nextTurn;
+}
+
 /** Handle tool.call / tool.result / tool.execution_start events. */
 
 function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
@@ -2353,6 +2535,7 @@ async function _asuProcessNonDeltaJsonl(
 	fileContent: string,
 	analysis: SessionUsageAnalysis
 ): Promise<void> {
+	const taskTurns: TaskTurnSignal[] = [];
 	const modeState: AsuModeState = { sessionMode: 'ask' };
 	const cliState: AsuCliState = {
 		defaultModel: 'unknown', defaultEffort: null, requestCount: 0, effortByRequest: {},
@@ -2360,17 +2543,21 @@ async function _asuProcessNonDeltaJsonl(
 	};
 	const isJetBrains = isJetBrainsSessionPath(sessionFile);
 	const jetBrainsMode: JetBrainsMode | null = isJetBrains ? detectJetBrainsModeFromContent(fileContent) : null;
+	let currentTurn: TaskTurnSignal | null = null;
 
 	for (const line of lines) {
 		if (!line.trim()) { continue; }
 		try {
 			const event = JSON.parse(line);
+			currentTurn = _asuCollectTaskTurnFromEvent(event, currentTurn, taskTurns);
 			_asuProcessJsonlEvent(event, analysis, modeState, cliState, jetBrainsMode, deps.toolNameMap);
 		} catch { /* skip malformed lines */ }
 	}
+	if (currentTurn) { taskTurns.push(currentTurn); }
 
 	_asuApplyCliLocToEditScope(cliState, analysis);
 	_asuApplyCliThinkingEffort(cliState, analysis);
+	_asuFinalizeTaskClassification(analysis, taskTurns);
 	if (cliState.efficiencyTurns.length > 0) {
 		analysis.modelEfficiency = computeEfficiencyFromTurns(cliState.efficiencyTurns);
 		_setFirstUserPrompt(analysis, cliState.efficiencyTurns.find(t => t.userMessage)?.userMessage);
@@ -2380,6 +2567,39 @@ async function _asuProcessNonDeltaJsonl(
 	// Track LOC/edit metrics for CLI sessions (delta path already handles this above)
 	await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
 	deriveConversationPatterns(analysis);
+}
+
+async function _asuProcessJsonlUsage(
+	deps: UsageAnalysisDeps,
+	sessionFile: string,
+	fileContent: string,
+	analysis: SessionUsageAnalysis
+): Promise<void> {
+	const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
+	if (_asuIsDeltaBased(lines)) {
+		_asuReconstructAndProcessDeltaState(deps, lines, analysis);
+		await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
+		if (!analysis.taskClassification) { analysis.taskClassification = createEmptyTaskClassificationResult(); }
+		return;
+	}
+	await _asuProcessNonDeltaJsonl(deps, sessionFile, lines, fileContent, analysis);
+}
+
+async function _asuProcessJsonUsage(
+	deps: UsageAnalysisDeps,
+	sessionFile: string,
+	fileContent: string,
+	preloadedParsedJson: unknown,
+	analysis: SessionUsageAnalysis
+): Promise<void> {
+	const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
+	if (!isParsedSessionJson(parsed)) {
+		deps.warn(`Unexpected session format in ${sessionFile}`);
+		return;
+	}
+	processJsonSessionRequests(deps, parsed, analysis);
+	await calculateModelSwitching(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
+	await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
 }
 
 /**
@@ -2437,11 +2657,13 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 	try {
 		const eco = deps.ecosystems.find(e => e.handles(sessionFile));
 		if (eco && isAnalyzable(eco)) {
-			const ecoAnalysis = await eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
-			await _addTurnEfficiencyFromAdapter(eco, sessionFile, ecoAnalysis);
-			return ecoAnalysis;
+			const result = await eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
+			if (!result.taskClassification) { result.taskClassification = createEmptyTaskClassificationResult(); }
+			await _addTurnEfficiencyFromAdapter(eco, sessionFile, result);
+			return result;
 		}
 		if (sessionFile.startsWith('windsurf://') || sessionFile.startsWith('devin://')) {
+			analysis.taskClassification = createEmptyTaskClassificationResult();
 			return analysis;
 		}
 
@@ -2449,28 +2671,14 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
 
 		if (isJsonl) {
-			const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
-			if (_asuIsDeltaBased(lines)) {
-				_asuReconstructAndProcessDeltaState(deps, lines, analysis);
-				// Also track enhanced metrics (edit scope / LOC data) from the reconstructed requests
-				await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
-				return analysis;
-			}
-			await _asuProcessNonDeltaJsonl(deps, sessionFile, lines, fileContent, analysis);
+			await _asuProcessJsonlUsage(deps, sessionFile, fileContent, analysis);
 		} else {
-			const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			if (!isParsedSessionJson(parsed)) {
-				deps.warn(`Unexpected session format in ${sessionFile}`);
-				return analysis;
-			}
-			processJsonSessionRequests(deps, parsed, analysis);
-			_applyJsonRequestsEfficiency((parsed.requests ?? []) as SessionRequestRaw[], _jsonSessionDefaultModel(parsed), deps.modelPricing, analysis);
-			await calculateModelSwitching(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
-			await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
+			await _asuProcessJsonUsage(deps, sessionFile, fileContent, preloadedParsedJson, analysis);
 		}
 	} catch (error) {
 		deps.warn(`Error analyzing session usage from ${sessionFile}: ${error}`);
 	}
+	if (!analysis.taskClassification) { analysis.taskClassification = createEmptyTaskClassificationResult(); }
 
 	await _asuApplyCopilotAppSplit(sessionFile, analysis);
 	return analysis;
@@ -2830,4 +3038,3 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 	}
 	return modelUsage;
 }
-

@@ -20,7 +20,7 @@ import {
 	toPlatformPath
 } from './utils/pathUtils';
 import { withErrorRecoverySync } from './utils/errors';
-import { isGuidMcpTool } from './utils/toolUtils';
+import { isGuidMcpTool, lookupKnownToolName } from './utils/toolUtils';
 
 export {
 	fileUriToPath,
@@ -715,7 +715,7 @@ export function normalizeMcpToolName(toolName: string): string {
  */
 export function extractMcpServerName(toolName: string, toolNameMap: { [key: string]: string } = {}): string {
 	// First, try to get the display name from toolNames.json and extract the server part
-	const displayName = toolNameMap[toolName] ?? toolNameMap[toolName.toLowerCase()];
+	const displayName = lookupKnownToolName(toolName, toolNameMap);
 	if (displayName && displayName.includes(':')) {
 		// Extract the part before the colon (e.g., "GitHub MCP" from "GitHub MCP: Issue Read")
 		return displayName.split(':')[0].trim();

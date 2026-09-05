@@ -19,7 +19,7 @@ function makeFixture(opts?: {
     uiMessages?: any[];
     taskHistory?: any[];
 }): { root: string; sessionFile: string; storageDir: string } {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cline-test-'));
+    const root = fs.mkdtempSync(path.join(process.cwd(), 'cline-test-'));
     const storageDir = path.join(root, 'Code', 'User', 'globalStorage', 'saoudrizwan.claude-dev');
     const taskDir = path.join(storageDir, 'tasks', TASK_ID);
     fs.mkdirSync(taskDir, { recursive: true });

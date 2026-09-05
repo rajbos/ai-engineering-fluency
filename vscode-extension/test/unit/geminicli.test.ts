@@ -9,7 +9,7 @@ import { GeminiCliDataAccess, normalizeGeminiModelId } from '../../../src/gemini
 const geminiCli = new GeminiCliDataAccess();
 
 function createTempGeminiSession(records: unknown[], projectBucket = 'demo-project'): string {
-	const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-cli-test-'));
+	const tmpRoot = fs.mkdtempSync(path.join(process.cwd(), 'gemini-cli-test-'));
 	const chatsDir = path.join(tmpRoot, '.gemini', 'tmp', projectBucket, 'chats');
 	fs.mkdirSync(chatsDir, { recursive: true });
 	const sessionFile = path.join(chatsDir, 'session-2026-05-03T15-01-ee37b453.jsonl');

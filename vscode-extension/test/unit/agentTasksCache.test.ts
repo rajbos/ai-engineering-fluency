@@ -125,7 +125,7 @@ test('getAgentTasksCachePath: keeps dev and prod snapshots apart', () => {
 });
 
 test('writeAgentTasksSnapshot/readAgentTasksSnapshot: round-trips the snapshot', async () => {
-	const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agenttasks-'));
+	const dir = await fs.promises.mkdtemp(path.join(process.cwd(), 'agenttasks-'));
 	const filePath = getAgentTasksCachePath(path.join(dir, 'nested'), 'prod');
 	const envelope = makeEnvelope({ data: makeResult({ totalCredits: 43.4, totalTasks: 2 }) });
 
@@ -138,7 +138,7 @@ test('writeAgentTasksSnapshot/readAgentTasksSnapshot: round-trips the snapshot',
 });
 
 test('readAgentTasksSnapshot: missing or corrupt files read as undefined, never throw', async () => {
-	const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agenttasks-'));
+	const dir = await fs.promises.mkdtemp(path.join(process.cwd(), 'agenttasks-'));
 	const missing = path.join(dir, 'nope.json');
 	const corrupt = path.join(dir, 'corrupt.json');
 	await fs.promises.writeFile(corrupt, '{ this is not json', 'utf8');

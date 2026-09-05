@@ -22,6 +22,7 @@ import {
     extractInvokedSkillNameFromPlainText,
     type UsageAnalysisDeps,
 } from '../../../src/usageAnalysis';
+import { createEmptyTaskClassificationResult } from '../../../src/taskClassification';
 import type {
     UsageAnalysisPeriod,
     SessionUsageAnalysis,
@@ -47,6 +48,7 @@ function emptyAnalysis(): SessionUsageAnalysis {
         modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
         contextReferences: emptyRefs(),
         mcpTools: { total: 0, byServer: {}, byTool: {} },
+        taskClassification: createEmptyTaskClassificationResult(),
         modelSwitching: {
             uniqueModels: [], modelCount: 0, switchCount: 0,
             tiers: { standard: [], premium: [], unknown: [] },
@@ -84,6 +86,8 @@ function emptyPeriod(): UsageAnalysisPeriod {
         sessionDuration: { totalDurationMs: 0, avgDurationMs: 0, avgFirstProgressMs: 0, avgTotalElapsedMs: 0, avgWaitTimeMs: 0, activeDurationMs: 0 },
         conversationPatterns: { multiTurnSessions: 0, singleTurnSessions: 0, avgTurnsPerSession: 0, maxTurnsInSession: 0 },
         agentTypes: { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 },
+        taskCategoryPrimarySessions: {},
+        taskCategoryWeightedSessions: {},
     };
 }
 
@@ -232,6 +236,48 @@ test('mergeUsageAnalysis: accumulates context reference counts', () => {
     assert.equal(period.contextReferences.file, 6);
     assert.equal(period.contextReferences.workspace, 4);
     assert.equal(period.contextReferences.codebase, 2);
+});
+
+test('mergeUsageAnalysis: aggregates task-category primary and weighted sessions', () => {
+    const period = emptyPeriod();
+    const a1 = emptyAnalysis();
+    a1.taskClassification.primaryCategory = 'Coding';
+    a1.taskClassification.categoryShares = {
+    	Coding: 0.75,
+    	Testing: 0.25,
+    	Debugging: 0,
+    	'Feature Dev': 0,
+    	Refactoring: 0,
+    	Exploration: 0,
+    	Planning: 0,
+    	Delegation: 0,
+    	'Git Ops': 0,
+    	'Build/Deploy': 0,
+    	Brainstorming: 0,
+    	Conversation: 0,
+    };
+    const a2 = emptyAnalysis();
+    a2.taskClassification.primaryCategory = 'Testing';
+    a2.taskClassification.categoryShares = {
+    	Coding: 0.2,
+    	Testing: 0.8,
+    	Debugging: 0,
+    	'Feature Dev': 0,
+    	Refactoring: 0,
+    	Exploration: 0,
+    	Planning: 0,
+    	Delegation: 0,
+    	'Git Ops': 0,
+    	'Build/Deploy': 0,
+    	Brainstorming: 0,
+    	Conversation: 0,
+    };
+    mergeUsageAnalysis(period, a1);
+    mergeUsageAnalysis(period, a2);
+    assert.equal(period.taskCategoryPrimarySessions?.Coding, 1);
+    assert.equal(period.taskCategoryPrimarySessions?.Testing, 1);
+    assert.ok(Math.abs((period.taskCategoryWeightedSessions?.Coding ?? 0) - 0.95) < 1e-9);
+    assert.ok(Math.abs((period.taskCategoryWeightedSessions?.Testing ?? 0) - 1.05) < 1e-9);
 });
 
 test('mergeUsageAnalysis: accumulates code context line counts', () => {
@@ -2471,7 +2517,7 @@ test('analyzeSessionUsage: CLI session.model_change event is processed without e
 
 function writeCliSessionFixture(t: test.TestContext, clientName: string): string {
     // The split only applies under ~/.copilot/session-state/, so mirror that layout.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cliapp-split-'));
+    const dir = fs.mkdtempSync(path.join(process.cwd(), 'cliapp-split-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const sessionDir = path.join(dir, '.copilot', 'session-state', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
     fs.mkdirSync(sessionDir, { recursive: true });
@@ -3448,4 +3494,45 @@ test('calculateModelSwitching: delta JSONL kind=2 requests event with result.det
     await calculateModelSwitching(deps, '/tmp/test.jsonl', analysis, content);
     // getModelFromRequest falls back to 'gpt-4' when no display name match
     assert.ok(analysis.modelSwitching.totalRequests >= 1, 'request with result.details should be counted');
+});
+
+test('analyzeSessionUsage: non-delta JSONL classifies testing from shell command', async () => {
+    const content = [
+    	JSON.stringify({ type: 'user.message', data: { content: 'run tests' } }),
+    	JSON.stringify({ type: 'tool.execution_start', data: { toolName: 'bash', arguments: { command: 'npm test' }, toolCallId: '1' } }),
+    	JSON.stringify({ type: 'tool.execution_complete', data: { toolCallId: '1', success: true, result: { content: 'ok' } } }),
+    ].join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    assert.equal(result.taskClassification.primaryCategory, 'Testing');
+    assert.ok((result.taskClassification.categoryShares.Testing ?? 0) > 0);
+});
+
+test('analyzeSessionUsage: delta JSONL classifies coding from edit tool use', async () => {
+    const req = {
+    	requestId: 'r1',
+    	message: { text: 'implement this change' },
+    	response: [{ kind: 'toolInvocationSerialized', toolName: 'edit' }],
+    	result: { promptTokens: 10, outputTokens: 5 },
+    };
+    const line0 = JSON.stringify({ kind: 0, v: { version: 3, inputState: { mode: 'agent' }, requests: [req] } });
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', line0);
+    assert.equal(result.taskClassification.primaryCategory, 'Coding');
+    assert.equal(result.taskClassification.turnCount, 1);
+});
+
+test('analyzeSessionUsage: plan mode biases primary category to Planning', async () => {
+    const req = {
+    	requestId: 'r1',
+    	message: { text: 'create a plan' },
+    	result: { promptTokens: 10, outputTokens: 5 },
+    };
+    const line0 = JSON.stringify({
+    	kind: 0,
+    	v: { version: 3, inputState: { mode: { kind: 'agent', id: 'file:///workspace/plan-agent/Plan.agent.md' } }, requests: [req] }
+    });
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', line0);
+    assert.equal(result.taskClassification.primaryCategory, 'Planning');
 });

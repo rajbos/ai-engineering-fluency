@@ -26,7 +26,7 @@ import { AntigravityDataAccess } from '../../../src/antigravity';
 import { OpenCodeDataAccess } from '../../../src/opencode';
 import { parseJetBrainsPartition } from '../../../src/jetbrains';
 import { CopilotChatAdapter } from '../../../src/adapters/copilotChatAdapter';
-import { MAX_SESSION_FILE_BYTES } from '../../../src/utils/safeFileRead';
+import { MAX_SESSION_FILE_BYTES, readTextFileWithSizeGuard, readTextFileWithSizeGuardSync } from '../../../src/utils/safeFileRead';
 import { isUnsafeObjectKey } from '../../../src/utils/protoGuard';
 import { ContinueDataAccess } from '../../../src/continue';
 import { KiroDataAccess } from '../../../src/kiro';
@@ -49,7 +49,7 @@ function buildDeeplyNestedJson(depth: number): string {
 }
 
 function mkTmpDir(prefix: string): string {
-	return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+	return fs.mkdtempSync(path.join(process.cwd(), prefix));
 }
 
 function rm(dir: string): void {
@@ -176,6 +176,32 @@ test('CopilotChatAdapter: file over the size cap is skipped', async () => {
 		assert.equal(result.tokens, 0);
 		assert.equal(result.actualTokens, 0);
 	} finally {
+		rm(tmpDir);
+	}
+});
+
+test('safeFileRead: rejects OS temp directory paths before opening', async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'safe-read-'));
+	const symlinkDir = path.join(path.dirname(tmpDir), `safe-read-link-${Date.now()}`);
+	try {
+		try {
+			fs.symlinkSync(tmpDir, symlinkDir, process.platform === 'win32' ? 'junction' : 'dir');
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException)?.code;
+			if (code === 'EPERM' || code === 'EACCES' || code === 'ENOTSUP') {
+				return;
+			}
+			throw err;
+		}
+		const file = path.join(symlinkDir, 'session.jsonl');
+		assert.equal(await readTextFileWithSizeGuard(file, 'temp-dir-guard'), undefined);
+		assert.equal(readTextFileWithSizeGuardSync(file, 'temp-dir-guard'), undefined);
+	} finally {
+		try {
+			fs.rmSync(symlinkDir, { force: true, recursive: true });
+		} catch {
+			// noop: symlink dir may already be cleaned up or unsupported on this platform
+		}
 		rm(tmpDir);
 	}
 });

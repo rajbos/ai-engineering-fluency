@@ -19,7 +19,7 @@ function makeManager(dir: string): CacheManager {
 }
 
 function makeDirAndManager(): { dir: string; manager: CacheManager; logs: string[] } {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-lock-test-'));
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-lock-test-'));
 	const logs: string[] = [];
 	const context: any = {
 		extensionMode: 1,
