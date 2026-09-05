@@ -18,10 +18,21 @@ import { initializeWebviewLocalization, setCurrentLanguage } from "../shared/loc
 const LOADING_PLACEHOLDER = "Loading...";
 const SESSION_FILES_SECTION_REGEX =
   /Session File Locations \(first 20\):[\s\S]*?(?=\n\s*\n|={70})/;
-const LOADING_MESSAGE = `⏳ Loading diagnostic data...
-
-This may take a few moments depending on the number of session files.
-The view will automatically update when data is ready.`;
+/**
+ * Live-updating loading state for the Report tab, shown while `data.report` is still the
+ * LOADING_PLACEHOLDER. `#report-loading-subtext` is updated in place by
+ * handleSessionFilesLoadProgress() as the background scan streams processed/total counts —
+ * unlike the old plain-text LOADING_MESSAGE, this always reflects real progress instead of
+ * sitting static until the whole report is ready. handleDiagnosticReport() wipes this out
+ * (via .textContent =) the moment the real report arrives, so there's nothing to clean up.
+ */
+const LOADING_MESSAGE = `<div class="analyzer-loading" style="flex-direction:column;align-items:flex-start;gap:6px;">
+<div style="display:flex;align-items:center;gap:10px;">
+<span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+<span>⏳ Loading diagnostic data…</span>
+</div>
+<div id="report-loading-subtext" style="font-size:12px;color:var(--text-muted);">Scanning session files…</div>
+</div>`;
 
 import {
   ContextReferenceUsage,
@@ -2455,6 +2466,12 @@ function handleSessionFilesLoadProgress(message: DiagMessage): void {
   const shareSubtext = document.getElementById("share-loading-subtext");
   if (shareSubtext) { shareSubtext.textContent = progressText; }
 
+  const reportSubtext = document.getElementById("report-loading-subtext");
+  if (reportSubtext) { reportSubtext.textContent = progressText; }
+
+  const ttftLoadingStatus = document.getElementById("ttft-loading-status");
+  if (ttftLoadingStatus) { ttftLoadingStatus.textContent = progressText; }
+
   const modelUsageStatus = document.getElementById("model-usage-status");
   if (modelUsageStatus) {
     modelUsageStatus.textContent = total > 0 ? `⏳ Loading sessions… (${processed}/${total})` : "⏳ Loading sessions…";
@@ -2484,6 +2501,13 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
   if (modelUsageStatus) { modelUsageStatus.textContent = ""; }
 
   triggerModelUsageAnalysis();
+
+  // Only re-run TTFT if the user already opened that tab (or changed granularity) while
+  // files were still loading — its results div would be non-empty in that case (holding
+  // either the initial spinner or the "still loading" notice). A user who never opened the
+  // tab has an empty div here, and TTFT stays lazy for them as designed.
+  const ttftResultsDiv = document.getElementById("ttft-results");
+  if (ttftResultsDiv && ttftResultsDiv.innerHTML.trim()) { triggerTtftAnalysis(); }
 
   reRenderTable();
   reRenderShareCard();
@@ -3329,10 +3353,12 @@ function handleTtftResult(message: DiagMessage): void {
   if (!resultsDiv) { return; }
   if (message.stillLoading) {
     setHtml(resultsDiv, `
-      <div class="info-box" style="margin-top: 12px;">
-        <div class="info-box-title">⏳ Still loading session files</div>
-        <div>Session files are still being scanned in the background. Wait a moment (watch the "Session Files" tab count) and try again.</div>
-      </div>`);
+        <div class="analyzer-loading">
+          <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+          <span id="ttft-loading-status">Waiting for session files to finish loading…</span>
+        </div>`);
+    // No manual retry needed: handleSessionFilesLoaded() re-triggers this analysis as soon
+    // as the background scan completes, since this results div is now non-empty.
     return;
   }
   setHtml(resultsDiv, renderTtftResults(
