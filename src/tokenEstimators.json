@@ -92,6 +92,8 @@
     "grok-4.6": 0.25,
     "mai-code-1.1-flash": 0.25,
     "kimi-k3": 0.25,
-    "claude-fable-5.1": 0.24
+    "claude-fable-5.1": 0.24,
+    "gpt-6-astra": 0.25,
+    "gemini-3.8-flash": 0.25
   }
 }
