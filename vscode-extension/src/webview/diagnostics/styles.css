@@ -1117,3 +1117,46 @@ border: 1px solid #1f6feb;
 	to { transform: rotate(360deg); }
 }
 
+.ttft-chart-wrap {
+	margin-top: 16px;
+}
+
+.ttft-chart {
+	width: 100%;
+	height: auto;
+	display: block;
+}
+
+.ttft-gridline {
+	stroke: var(--border-color);
+	stroke-width: 1;
+	stroke-dasharray: 2 3;
+}
+
+.ttft-axis-label {
+	fill: var(--text-muted);
+	font-size: 10px;
+}
+
+.ttft-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	margin-top: 8px;
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.ttft-legend-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.ttft-legend-swatch {
+	width: 10px;
+	height: 10px;
+	border-radius: 2px;
+	display: inline-block;
+}
+

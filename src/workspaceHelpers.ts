@@ -124,6 +124,30 @@ export function extractWorkspaceIdFromSessionPath(sessionFilePath: string): stri
 	}
 }
 
+const DEBUG_LOG_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Extension-folder spellings Copilot Chat's debug-logs directory has shipped under. */
+const DEBUG_LOG_EXTENSION_FOLDERS = ['GitHub.copilot-chat', 'github.copilot-chat', 'GitHub.copilot', 'github.copilot'];
+
+/**
+ * Returns the ordered list of candidate `main.jsonl` debug-log paths for a VS Code Copilot
+ * Chat session file — callers try each in order and use the first one that exists. Returns
+ * undefined for any session file that isn't UUID-named inside a `workspaceStorage/<hash>`
+ * folder, the only shape that has a debug log (see
+ * docs/logFilesSchema/vscode-chat-debug-log-format.md).
+ *
+ * Single source of truth for this path shape: shared by readTokensFromDebugLog() (one
+ * session) and the TTFT bulk scan (many sessions) in extension.ts.
+ */
+export function resolveDebugLogCandidatePaths(sessionFilePath: string): string[] | undefined {
+	const norm = normalizePath(sessionFilePath);
+	const sessionId = path.basename(sessionFilePath, path.extname(sessionFilePath));
+	if (!DEBUG_LOG_SESSION_ID_RE.test(sessionId)) { return undefined; }
+	const wsHashMatch = norm.match(/^(.*\/workspaceStorage\/[^/]+)\//);
+	if (!wsHashMatch) { return undefined; }
+	const workspaceHashDir = sessionFilePath.substring(0, wsHashMatch[1].length);
+	return DEBUG_LOG_EXTENSION_FOLDERS.map(extFolder => path.join(workspaceHashDir, extFolder, 'debug-logs', sessionId, 'main.jsonl'));
+}
+
 /** Escape all regex special characters in a literal string fragment. */
 export function escapeRegexSpecials(pattern: string): string {
 	return pattern.replace(/([.+^=!:${}()|[\]\\])/g, '\\$1');

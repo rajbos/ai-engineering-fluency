@@ -85,12 +85,17 @@ sums these `attrs`:
 Events without a `model` still contribute to the totals; they are just excluded from the
 per-model breakdown.
 
-**Also present on every `llm_request` record and read by nothing:** `attrs.ttft`
-(time-to-first-token, populated on all 278/278 sampled records — real per-call latency, no OTel
-export needed), `attrs.debugName`, `attrs.responseId`, `attrs.maxTokens`, `attrs.temperature` /
-`attrs.topP` (only on calls where set), and `attrs.userRequest` / `attrs.inputMessages` /
-`attrs.requestOptions` / `attrs.requestShape` / `attrs.systemPromptFile` / `attrs.toolsFile`
-(prompt/response content and shape — treat as sensitive, see
+**`attrs.ttft`** (time-to-first-token, populated on all 278/278 sampled records — real per-call
+latency, no OTel export needed) is now read: `extractTtftSamplesFromDebugLog()` in
+[tokenEstimation.ts](../../src/tokenEstimation.ts) extracts one `TtftSample` per event with a
+model, a timestamp, and a `ttft`, and the Diagnostics Report's **Research > TTFT** tab shows
+day/week/month averages with a trendline per model — see
+[TTFT-TRENDS.md](../features/TTFT-TRENDS.md).
+
+Still present and read by nothing: `attrs.debugName`, `attrs.responseId`, `attrs.maxTokens`,
+`attrs.temperature` / `attrs.topP` (only on calls where set), and `attrs.userRequest` /
+`attrs.inputMessages` / `attrs.requestOptions` / `attrs.requestShape` / `attrs.systemPromptFile`
+/ `attrs.toolsFile` (prompt/response content and shape — treat as sensitive, see
 [Privacy of a real log](#privacy-of-a-real-log)).
 
 ### Other event types worth knowing about
@@ -182,11 +187,16 @@ guessed wrong (see the correction in [Format](#format)). Running
 turned "unverified" into the verified table above — re-run it after a Copilot Chat update to
 catch drift, and to see whether new event types have appeared.
 
-The clearest opportunity in what's ignored: `llm_request.attrs.ttft` and `tool_call`'s
-`dur`/`status` give real latency and tool-outcome data with **zero user configuration** —
-the debug log already carries what the OTel export's `time_to_first_token` and
-`tool.call.duration` metrics would add. A future feature only needs a parser for two more
-event types, not a new data source.
+`llm_request.attrs.ttft` is the one exception: a second function,
+`extractTtftSamplesFromDebugLog()`, reads that same event type for TTFT (see
+[TTFT-TRENDS.md](../features/TTFT-TRENDS.md)) — token extraction and TTFT extraction are two
+separate passes over the same lines, not a shared accumulator, since a missing TTFT has no
+meaningful zero value to fold into a token total.
+
+The remaining opportunity is `tool_call`'s `dur`/`status`/`attrs.error` — real tool latency and
+outcome data with **zero user configuration**, the debug-log equivalent of the OTel export's
+`execute_tool` spans and `copilot_chat.tool.call.duration` metric. A future feature only needs
+a parser for one more event type, not a new data source.
 
 ## Drift risk
 
@@ -208,6 +218,7 @@ update to confirm the five attributes above are still present.
 
 ## References
 
+- [TTFT-TRENDS.md](../features/TTFT-TRENDS.md) — the Research > TTFT diagnostics tab built on `attrs.ttft`
 - [`discover-debug-log-schema` skill](../../.github/skills/discover-debug-log-schema/SKILL.md) — enumerate this format from real logs
 - [COPILOT-CLI-OTEL-EXPORT.md](../COPILOT-CLI-OTEL-EXPORT.md) — the CLI's OTel export and its `nano_aiu`
 - [VSCODE-VARIANTS.md](VSCODE-VARIANTS.md) — which VS Code roots are searched

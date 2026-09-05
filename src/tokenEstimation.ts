@@ -811,6 +811,68 @@ function _eatdlProcessEvent(event: unknown, state: EatdlState): void {
 	}
 }
 
+/** One time-to-first-token observation extracted from an `llm_request` debug-log event. */
+export interface TtftSample {
+	/** Event timestamp, normalized to epoch milliseconds — see normalizeDebugLogTimestampMs. */
+	tsMs: number;
+	model: string;
+	/** Time to first token, normalized to seconds — see normalizeTtftSeconds. */
+	ttftSeconds: number;
+}
+
+/**
+ * VS Code's Copilot Chat debug log does not document its `ts` unit. A real timestamp in
+ * seconds stays under 1e10 until the year 2286; a real timestamp in milliseconds is already
+ * past 1e12 today. That gap is wide enough to tell the two apart reliably by magnitude alone,
+ * so this normalizes either convention to milliseconds without needing to assume one.
+ */
+function normalizeDebugLogTimestampMs(ts: number): number {
+	return ts < 1e12 ? ts * 1000 : ts;
+}
+
+/**
+ * `attrs.ttft`'s unit is undocumented too. A real time-to-first-token is realistically
+ * between ~0.05s and ~60s; the same call stored in milliseconds would read 50-60,000. The
+ * threshold below treats anything under 100 as seconds — a 100+ second TTFT would be a very
+ * different bug to report on than a units mismatch — normalizing either convention to seconds.
+ * See docs/logFilesSchema/vscode-chat-debug-log-format.md for why this is a magnitude
+ * heuristic rather than a documented unit.
+ */
+function normalizeTtftSeconds(ttft: number): number {
+	return ttft < 100 ? ttft : ttft / 1000;
+}
+
+/**
+ * Extracts one `TtftSample` per `llm_request` event that carries a model, a timestamp, and
+ * `attrs.ttft`. Events missing any of the three are skipped rather than defaulted to 0/'' —
+ * unlike token totals, a missing TTFT has no meaningful zero value to average in.
+ */
+/** Parses one debug-log line into a TtftSample, or null if it's not a usable llm_request event. */
+function _parseTtftSampleLine(line: string): TtftSample | null {
+	if (!line.trim()) { return null; }
+	try {
+		const event = JSON.parse(line);
+		if (event?.type !== 'llm_request') { return null; }
+		const attrs = event.attrs as Record<string, unknown> | undefined;
+		const ttft = typeof attrs?.ttft === 'number' ? attrs.ttft : undefined;
+		const model = typeof attrs?.model === 'string' && attrs.model ? attrs.model : undefined;
+		const ts = typeof event.ts === 'number' ? event.ts : undefined;
+		if (ttft === undefined || model === undefined || ts === undefined) { return null; }
+		return { tsMs: normalizeDebugLogTimestampMs(ts), model, ttftSeconds: normalizeTtftSeconds(ttft) };
+	} catch {
+		return null;
+	}
+}
+
+export function extractTtftSamplesFromDebugLog(content: string): TtftSample[] {
+	const samples: TtftSample[] = [];
+	for (const line of content.split(/\r?\n/)) {
+		const sample = _parseTtftSampleLine(line);
+		if (sample) { samples.push(sample); }
+	}
+	return samples;
+}
+
 export function extractAllTokensFromDebugLog(content: string): {
 	inputTokens: number;
 	outputTokens: number;

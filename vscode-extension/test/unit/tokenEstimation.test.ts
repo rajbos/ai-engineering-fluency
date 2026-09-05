@@ -2184,3 +2184,63 @@ test('getLongContextInfo: returns null for models without a longContext block', 
 	assert.equal(getLongContextInfo('unknown-model', pricing), null);
 	assert.equal(getLongContextInfo('anything', {}), null);
 });
+
+// ── extractTtftSamplesFromDebugLog ──────────────────────────────────────
+
+import { extractTtftSamplesFromDebugLog } from '../../../src/tokenEstimation';
+
+test('extractTtftSamplesFromDebugLog: extracts one sample per llm_request event with ttft, model, and ts', () => {
+	const lines = [
+		JSON.stringify({ type: 'llm_request', ts: 1_780_000_000_000, attrs: { model: 'claude-sonnet-5', ttft: 0.45 } }),
+		JSON.stringify({ type: 'llm_request', ts: 1_780_000_005_000, attrs: { model: 'gpt-5', ttft: 1.2 } }),
+	].join('\n');
+	const samples = extractTtftSamplesFromDebugLog(lines);
+	assert.equal(samples.length, 2);
+	assert.equal(samples[0].model, 'claude-sonnet-5');
+	assert.equal(samples[0].ttftSeconds, 0.45);
+	assert.equal(samples[0].tsMs, 1_780_000_000_000);
+	assert.equal(samples[1].model, 'gpt-5');
+});
+
+test('extractTtftSamplesFromDebugLog: ignores non-llm_request events and events missing ttft/model/ts', () => {
+	const lines = [
+		JSON.stringify({ type: 'turn_start', ts: 1_780_000_000_000, attrs: { turnId: 'a' } }),
+		JSON.stringify({ type: 'llm_request', ts: 1_780_000_000_000, attrs: { model: 'claude-sonnet-5' } }), // no ttft
+		JSON.stringify({ type: 'llm_request', ts: 1_780_000_000_000, attrs: { ttft: 0.3 } }), // no model
+		JSON.stringify({ type: 'llm_request', attrs: { model: 'claude-sonnet-5', ttft: 0.3 } }), // no ts
+		JSON.stringify({ type: 'llm_request', ts: 1_780_000_000_000, attrs: { model: 'claude-sonnet-5', ttft: 0.3 } }), // valid
+	].join('\n');
+	const samples = extractTtftSamplesFromDebugLog(lines);
+	assert.equal(samples.length, 1);
+	assert.equal(samples[0].ttftSeconds, 0.3);
+});
+
+test('extractTtftSamplesFromDebugLog: skips invalid JSON lines and blank lines without crashing', () => {
+	const lines = [
+		JSON.stringify({ type: 'llm_request', ts: 1_780_000_000_000, attrs: { model: 'gpt-5', ttft: 0.5 } }),
+		'',
+		'not valid json {{{',
+		JSON.stringify({ type: 'llm_request', ts: 1_780_000_001_000, attrs: { model: 'gpt-5', ttft: 0.6 } }),
+	].join('\n');
+	const samples = extractTtftSamplesFromDebugLog(lines);
+	assert.equal(samples.length, 2);
+});
+
+test('extractTtftSamplesFromDebugLog: normalizes a seconds-magnitude ts (unix seconds) up to milliseconds', () => {
+	// 1780000000 (10 digits, ~year 2026 in seconds) vs. the ms equivalent 1780000000000.
+	const lines = JSON.stringify({ type: 'llm_request', ts: 1_780_000_000, attrs: { model: 'gpt-5', ttft: 0.5 } });
+	const samples = extractTtftSamplesFromDebugLog(lines);
+	assert.equal(samples[0].tsMs, 1_780_000_000_000);
+});
+
+test('extractTtftSamplesFromDebugLog: normalizes a milliseconds-magnitude ttft down to seconds', () => {
+	// 450 only makes sense as milliseconds (450 seconds would be a 7.5-minute TTFT).
+	const lines = JSON.stringify({ type: 'llm_request', ts: 1_780_000_000_000, attrs: { model: 'gpt-5', ttft: 450 } });
+	const samples = extractTtftSamplesFromDebugLog(lines);
+	assert.equal(samples[0].ttftSeconds, 0.45);
+});
+
+test('extractTtftSamplesFromDebugLog: returns an empty array for content with no llm_request events', () => {
+	assert.deepEqual(extractTtftSamplesFromDebugLog(''), []);
+	assert.deepEqual(extractTtftSamplesFromDebugLog(JSON.stringify({ type: 'session_start', attrs: {} })), []);
+});
