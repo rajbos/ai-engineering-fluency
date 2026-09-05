@@ -97,3 +97,47 @@ export function formatBytesForNotification(bytes: number): string {
 export function sumWorktreeBytes(worktrees: { bytes: number }[]): number {
 	return worktrees.reduce((sum, w) => sum + (w.bytes > 0 ? w.bytes : 0), 0);
 }
+
+/** One candidate worktree parsed out of a `cleanupPushedWorktrees` webview message. */
+export interface CleanupWorktreeCandidate {
+	path: string;
+	branch: string;
+	repoLabel: string;
+}
+
+/** Result of parsing a `cleanupPushedWorktrees` webview message. */
+export interface ParsedCleanupPushedWorktreesMessage {
+	candidates: CleanupWorktreeCandidate[];
+	scopeRepoLabel?: string;
+}
+
+/**
+ * Parses the bulk-cleanup message into its candidate list and optional repo scope label.
+ * `scopeRepoLabel` is only trusted (and returned) when it matches every parsed candidate's
+ * `repoLabel` — a mismatched or mixed-repo list falls back to unscoped (`undefined`) rather than
+ * letting the confirmation dialog claim a narrower scope than what will actually be deleted.
+ *
+ * Pulled out of `CopilotTokenTracker.diagHandleCleanupPushedWorktrees` in `extension.ts` so this
+ * parsing/validation logic is unit-testable without needing a full extension host instance,
+ * following the same pattern as the rest of this module.
+ */
+export function parseCleanupPushedWorktreesMessage(message: any): ParsedCleanupPushedWorktreesMessage {
+	const candidates: CleanupWorktreeCandidate[] = Array.isArray(message?.worktrees)
+		? message.worktrees
+			.filter((w: any) => w && typeof w.path === "string" && w.path.trim())
+			.map((w: any) => ({
+				path: String(w.path).trim(),
+				branch: typeof w.branch === "string" && w.branch ? w.branch : "?",
+				repoLabel: typeof w.repoLabel === "string" && w.repoLabel ? w.repoLabel : "",
+			}))
+		: [];
+	const requestedScope: string | undefined = typeof message?.repoLabel === "string" && message.repoLabel ? message.repoLabel : undefined;
+	const scopeRepoLabel = requestedScope && candidates.every((c) => c.repoLabel === requestedScope) ? requestedScope : undefined;
+	return { candidates, scopeRepoLabel };
+}
+
+/** Confirmation prompt title, naming the repository when the cleanup is scoped to one. */
+export function buildCleanupConfirmTitle(count: number, scopeRepoLabel?: string): string {
+	const scopeText = scopeRepoLabel ? ` in "${scopeRepoLabel}"` : "";
+	return `Clean up ${count} pushed worktree${count === 1 ? "" : "s"}${scopeText}?`;
+}

@@ -1777,19 +1777,21 @@ function startWorktreeScan(): void {
 }
 
 /**
- * Kicks off the bulk "clean up pushed worktrees" flow. The actual confirmation is a native
- * VS Code modal shown by the extension (see diagHandleCleanupPushedWorktrees) — this only sends
- * the candidate list and waits for cleanupStarted/cleanupDeclined to know the outcome.
+ * Kicks off the "clean up pushed worktrees" flow. The actual confirmation is a native VS Code
+ * modal shown by the extension (see diagHandleCleanupPushedWorktrees) — this only sends the
+ * candidate list and waits for cleanupStarted/cleanupDeclined to know the outcome. Pass
+ * `repoLabel` to scope the cleanup to one repository's row; omit it for the global card.
  */
-function startWorktreeCleanup(): void {
+function startWorktreeCleanup(repoLabel?: string): void {
 	if (worktreeCleanupInProgress || worktreeCleanupConfirmPending || worktreeScanInProgress) { return; }
-	const targets = getCleanupCandidates();
+	const targets = getCleanupCandidates(repoLabel);
 	if (targets.length === 0) { return; }
 	worktreeCleanupConfirmPending = true;
 	updateWorktreeResults();
 	vscode.postMessage({
 		command: "cleanupPushedWorktrees",
 		worktrees: targets.map((w) => ({ path: w.path, branch: w.branch, repoLabel: w.repoLabel })),
+		repoLabel,
 	});
 }
 
@@ -1816,6 +1818,12 @@ function _handleWorktreeActionButtonClick(target: HTMLElement): boolean {
 	}
 	if (target.id === "btn-cancel-cleanup") {
 		vscode.postMessage({ command: "cancelCleanupPushedWorktrees" });
+		return true;
+	}
+	const repoCleanupBtn = target.closest(".worktree-repo-cleanup-btn") as HTMLElement | null;
+	if (repoCleanupBtn) {
+		const repo = decodeURIComponent(repoCleanupBtn.getAttribute("data-repo") || "");
+		if (repo) { startWorktreeCleanup(repo); }
 		return true;
 	}
 	return false;
@@ -3735,8 +3743,23 @@ function worktreeSizeText(worktrees: WorktreeResult[]): string {
 }
 
 /**
- * A repository's summary row (Repository | Worktrees | Size) plus a details row that holds the
- * per-worktree table. The details row is hidden unless the repo is in worktreeExpandedRepos.
+ * Repo-scoped "Clean up (N)" button shown in each repository's summary row. Takes the repo's
+ * already-sliced worktree list (the caller already has it) rather than re-filtering the entire
+ * `worktreeResults` array per repo row — that would be an O(repoCount × worktreeCount) rescan on
+ * every render.
+ */
+function buildWorktreeRepoCleanupButtonHtml(repoLabel: string, worktrees: WorktreeResult[]): string {
+	const pushedCount = worktrees.filter((w) => w.pushed === "yes" && !isWorktreePending(w)).length;
+	const disabled = worktreeCleanupInProgress || worktreeCleanupConfirmPending || worktreeScanInProgress || pushedCount === 0;
+	return `<button type="button" class="button secondary worktree-repo-cleanup-btn" data-repo="${encodeURIComponent(repoLabel)}"
+    title="Remove this repository's pushed worktrees via git worktree remove (asks for confirmation)" ${disabled ? "disabled" : ""}
+    >🧹 Clean up (${pushedCount})</button>`;
+}
+
+/**
+ * A repository's summary row (Repository | Worktrees | Size | Actions) plus a details row that
+ * holds the per-worktree table. The details row is hidden unless the repo is in
+ * worktreeExpandedRepos.
  */
 function buildWorktreeRepoRowsHtml(repoLabel: string, worktrees: WorktreeResult[]): string {
 	const expanded = worktreeExpandedRepos.has(repoLabel);
@@ -3746,9 +3769,10 @@ function buildWorktreeRepoRowsHtml(repoLabel: string, worktrees: WorktreeResult[
     <td><span class="worktree-caret">${caret}</span> ${escapeHtml(repoLabel)}</td>
     <td>${worktrees.length}</td>
     <td>${worktreeSizeText(worktrees)}</td>
+    <td class="worktree-repo-actions">${buildWorktreeRepoCleanupButtonHtml(repoLabel, worktrees)}</td>
   </tr>`;
 	const detailsRow = `<tr class="worktree-repo-details" data-repo="${repoAttr}"${expanded ? "" : ' style="display: none;"'}>
-    <td colspan="3">${buildWorktreeDetailsTableHtml(worktrees)}</td>
+    <td colspan="4">${buildWorktreeDetailsTableHtml(worktrees)}</td>
   </tr>`;
 	return summaryRow + detailsRow;
 }
@@ -3775,9 +3799,14 @@ function compareWorktreeGroups(a: [string, WorktreeResult[]], b: [string, Worktr
 	return diff !== 0 ? dir * diff : a[0].localeCompare(b[0]);
 }
 
-/** Worktrees eligible for the bulk cleanup: known to be pushed and already enriched. */
-function getCleanupCandidates(): WorktreeResult[] {
-	return worktreeResults.filter((w) => w.pushed === "yes" && !isWorktreePending(w));
+/**
+ * Worktrees eligible for a cleanup: known to be pushed and already enriched. Pass `repoLabel`
+ * to scope the candidates to a single repository (used by each repo row's own "Clean up"
+ * button); omit it for the global "Clean Up" card that spans every repository.
+ */
+function getCleanupCandidates(repoLabel?: string): WorktreeResult[] {
+	return worktreeResults.filter((w) =>
+		w.pushed === "yes" && !isWorktreePending(w) && (repoLabel === undefined || w.repoLabel === repoLabel));
 }
 
 /** The cleanup trigger, rendered as its own card inside the hero summary-cards row (to the right of Worktrees/Repositories/Total Size). */
@@ -3853,6 +3882,7 @@ function renderWorktreeResults(): string {
         <th class="sortable" data-wt-sort="repo">Repository${getWorktreeSortIndicator("repo")}</th>
         <th class="sortable" data-wt-sort="count">Worktrees${getWorktreeSortIndicator("count")}</th>
         <th class="sortable" data-wt-sort="size">Size${getWorktreeSortIndicator("size")}</th>
+        <th>Actions</th>
       </tr></thead>
       <tbody>${repoRows}</tbody>
     </table>

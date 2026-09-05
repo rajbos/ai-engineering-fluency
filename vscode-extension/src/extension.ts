@@ -119,6 +119,8 @@ import {
   shouldNotifyWorktreeFindings as _shouldNotifyWorktreeFindings,
   formatBytesForNotification as _formatBytesForNotification,
   sumWorktreeBytes as _sumWorktreeBytes,
+  parseCleanupPushedWorktreesMessage as _parseCleanupPushedWorktreesMessage,
+  buildCleanupConfirmTitle as _buildCleanupConfirmTitle,
   type WorktreeBackgroundScanResult,
 } from './worktreeBackgroundScan';
 import { scanWorktreeRootsWithTimeout as _scanWorktreeRootsWithTimeout } from './worktreeScan';
@@ -10737,17 +10739,13 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    * webview's possibly-stale list), it is skipped and the loop moves on to the next one. The
    * OS-level directory-removal fallback (for git-for-windows junction/long-path failures) still
    * applies, since that is not a safety bypass — the dirty-tree check already passed by then.
+   *
+   * `message.repoLabel` is optional: when present, the webview has already filtered `worktrees`
+   * down to a single repository's row (its own "Clean up" button), and this only changes the
+   * confirmation wording to name that repository — the deletion logic is identical either way.
    */
   private async diagHandleCleanupPushedWorktrees(message: any): Promise<void> {
-    const candidates: Array<{ path: string; branch: string; repoLabel: string }> = Array.isArray(message?.worktrees)
-      ? message.worktrees
-        .filter((w: any) => w && typeof w.path === "string" && w.path.trim())
-        .map((w: any) => ({
-          path: String(w.path).trim(),
-          branch: typeof w.branch === "string" && w.branch ? w.branch : "?",
-          repoLabel: typeof w.repoLabel === "string" && w.repoLabel ? w.repoLabel : "",
-        }))
-      : [];
+    const { candidates, scopeRepoLabel } = _parseCleanupPushedWorktreesMessage(message);
 
     if (!this.analysisPanel || !this.isPanelOpen(this.analysisPanel)) { return; }
     const panel = this.analysisPanel;
@@ -10758,7 +10756,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     }
 
     const choice = await vscode.window.showWarningMessage(
-      `Clean up ${candidates.length} pushed worktree${candidates.length === 1 ? "" : "s"}?`,
+      _buildCleanupConfirmTitle(candidates.length, scopeRepoLabel),
       {
         modal: true,
         detail: 'Removes worktrees whose commits are already pushed to a remote, using "git worktree remove". Any worktree found to have uncommitted, untracked, or unpushed changes is automatically skipped (never force-deleted) and the cleanup continues with the rest.',

@@ -1113,3 +1113,13 @@ background: var(--bg-tertiary);
 	color: var(--text-muted);
 	flex: 1;
 }
+
+.worktree-repo-actions {
+	white-space: nowrap;
+}
+
+.worktree-repo-cleanup-btn {
+	font-size: 12px;
+	padding: 4px 10px;
+	font-weight: normal;
+}
