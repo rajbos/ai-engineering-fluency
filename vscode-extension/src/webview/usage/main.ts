@@ -45,6 +45,14 @@ type ContextWindowStats = {
 	maxReachedWindowLimit?: number;
 };
 
+type AutomaticCompactionStats = {
+	total: number;
+	bySource: {
+		copilotCli: number;
+		claude: number;
+	};
+};
+
 type UsageAnalysisPeriod = {
 	sessions: number;
 	toolCalls: ToolCallUsage;
@@ -178,6 +186,7 @@ type UsageAnalysisStats = {
 	last30Days: UsageAnalysisPeriod;
 	month: UsageAnalysisPeriod;
 	lastMonth: UsageAnalysisPeriod;
+	autoCompactionsLast7Days?: AutomaticCompactionStats;
 	locale?: string;
 	lastUpdated: string;
 	customizationMatrix?: WorkspaceCustomizationMatrix | null;
@@ -4158,6 +4167,28 @@ function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined): stri
 	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow;
 }
 
+function renderAutomaticCompactions(stats: AutomaticCompactionStats | undefined): string {
+	if (!stats) { return ''; }
+	const sources: Array<[string, number]> = [
+		['GitHub Copilot CLI', stats.bySource.copilotCli],
+		['Claude', stats.bySource.claude],
+	];
+	const entries = sources.filter(([, count]) => count > 0)
+		.map(([source, count]) => `${escapeHtml(source)} ×${formatNumber(count)}`);
+	const breakdown = entries.length > 0
+		? entries.join(', ')
+		: 'No automatic compactions detected';
+	return `
+		<div class="automatic-compactions-card${stats.total > 0 ? ' automatic-compactions-card--active' : ''}"
+			title="Automatic compactions remove earlier messages to fit the context window and can affect response quality.">
+			<div>
+				<div class="automatic-compactions-label">↩ Automatic compactions (last 7 days)</div>
+				<div class="automatic-compactions-detail">${breakdown}</div>
+			</div>
+			<div class="automatic-compactions-value">${formatNumber(stats.total)}</div>
+		</div>`;
+}
+
 /**
  * Bottom-of-tab section: largest request per period vs the long-context
  * pricing threshold, fullest CLI window, and context tiers used.
@@ -4184,6 +4215,7 @@ function buildContextWindowSectionHtml(stats: UsageAnalysisStats): string {
 					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow)}
 				</div>
 			</div>
+			${renderAutomaticCompactions(stats.autoCompactionsLast7Days)}
 			${bar}
 		</div>`;
 }

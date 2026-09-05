@@ -77,6 +77,41 @@ body {
 	margin-bottom: 12px;
 }
 
+.automatic-compactions-card {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin: 0 0 14px;
+	padding: 10px 12px;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	background: var(--list-hover-bg);
+}
+
+.automatic-compactions-card--active {
+	border-color: var(--warning-color, #cca700);
+}
+
+.automatic-compactions-label {
+	font-size: 13px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.automatic-compactions-detail {
+	margin-top: 2px;
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.automatic-compactions-value {
+	font-size: 24px;
+	font-weight: 700;
+	color: var(--text-primary);
+	font-variant-numeric: tabular-nums;
+}
+
 .stats-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

@@ -42,15 +42,18 @@ function emptyPeriod(): UsageAnalysisPeriod {
 function makeCtx(overrides?: { autoCompact?: number; manualCompact?: number }): InsightContext {
 	const last30Days = emptyPeriod();
 	last30Days.sessions = 20;
-	if (overrides?.autoCompact) {
-		last30Days.toolCalls.byTool['__auto_compact__'] = overrides.autoCompact;
-	}
 	if (overrides?.manualCompact) {
 		last30Days.toolCalls.byTool['__slash__compact'] = overrides.manualCompact;
 	}
 	return {
 		today: emptyPeriod(),
 		last30Days,
+		...(overrides?.autoCompact !== undefined ? {
+			autoCompactionsLast7Days: {
+				total: overrides.autoCompact,
+				bySource: { copilotCli: overrides.autoCompact, claude: 0 },
+			},
+		} : {}),
 		missedPotential: [],
 	};
 }
@@ -66,28 +69,28 @@ test('auto-compaction-pattern: insight exists in INSIGHT_CATALOG', () => {
 	assert.ok(def, 'auto-compaction-pattern should be in INSIGHT_CATALOG');
 });
 
-test('auto-compaction-pattern: does NOT fire when __auto_compact__ is absent', () => {
+test('auto-compaction-pattern: does NOT fire when seven-day data is absent', () => {
 	const ctx = makeCtx();
 	const results = evaluateInsights(ctx, {}, 7, null);
 	const insight = results.find(i => i.id === AUTO_COMPACT_ID);
 	assert.equal(insight, undefined);
 });
 
-test('auto-compaction-pattern: does NOT fire when __auto_compact__ = 1 (below threshold)', () => {
-	const ctx = makeCtx({ autoCompact: 1 });
+test('auto-compaction-pattern: does NOT fire at five weekly compactions', () => {
+	const ctx = makeCtx({ autoCompact: 5 });
 	const results = evaluateInsights(ctx, {}, 7, null);
 	const insight = results.find(i => i.id === AUTO_COMPACT_ID);
 	assert.equal(insight, undefined);
 });
 
-test('auto-compaction-pattern: fires when __auto_compact__ = 2 (threshold)', () => {
-	const ctx = makeCtx({ autoCompact: 2 });
+test('auto-compaction-pattern: fires at six weekly compactions', () => {
+	const ctx = makeCtx({ autoCompact: 6 });
 	const results = evaluateInsights(ctx, {}, 7, null);
 	const insight = results.find(i => i.id === AUTO_COMPACT_ID);
-	assert.ok(insight, 'insight should fire at count = 2');
+	assert.ok(insight, 'insight should fire at count = 6');
 });
 
-test('auto-compaction-pattern: fires when __auto_compact__ > 2', () => {
+test('auto-compaction-pattern: fires above the weekly threshold', () => {
 	const ctx = makeCtx({ autoCompact: 7 });
 	const results = evaluateInsights(ctx, {}, 7, null);
 	const insight = results.find(i => i.id === AUTO_COMPACT_ID);
@@ -95,11 +98,23 @@ test('auto-compaction-pattern: fires when __auto_compact__ > 2', () => {
 });
 
 test('auto-compaction-pattern: body includes auto-compact count', () => {
-	const ctx = makeCtx({ autoCompact: 3 });
+	const ctx = makeCtx({ autoCompact: 6 });
 	const results = evaluateInsights(ctx, {}, 7, null);
 	const insight = results.find(i => i.id === AUTO_COMPACT_ID);
 	assert.ok(insight);
-	assert.ok(insight!.body.includes('3'), 'body should mention the count (3)');
+	assert.ok(insight!.body.includes('6'), 'body should mention the count (6)');
+});
+
+test('auto-compaction-pattern: names all contributing session formats', () => {
+	const ctx = makeCtx();
+	ctx.autoCompactionsLast7Days = {
+		total: 6,
+		bySource: { copilotCli: 4, claude: 2 },
+	};
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === AUTO_COMPACT_ID);
+	assert.ok(insight);
+	assert.match(insight.body, /GitHub Copilot CLI: 4/);
+	assert.match(insight.body, /Claude: 2/);
 });
 
 test('auto-compaction-pattern: has severity=opportunity', () => {
@@ -118,7 +133,7 @@ test('auto-compaction-pattern: has category=consistency', () => {
 });
 
 test('auto-compaction-pattern: body mentions /compact and /new', () => {
-	const ctx = makeCtx({ autoCompact: 2 });
+	const ctx = makeCtx({ autoCompact: 6 });
 	const results = evaluateInsights(ctx, {}, 7, null);
 	const insight = results.find(i => i.id === AUTO_COMPACT_ID);
 	assert.ok(insight);
