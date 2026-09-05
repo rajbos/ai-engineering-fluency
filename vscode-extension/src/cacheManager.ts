@@ -92,29 +92,34 @@ export class CacheManager {
 	 * Generate a cache identifier based on VS Code extension mode.
 	 * VS Code editions (stable vs insiders) already have separate globalState storage,
 	 * so we only need to distinguish between production and development (debug) mode.
-	 * In development mode, each VS Code window gets a unique cache identifier using
-	 * the session ID, preventing the Extension Development Host from sharing/fighting
-	 * with the main dev window's cache. Each such session's snapshot/lock files are
-	 * orphaned once that window closes — see cleanupStaleDevCacheFiles(), which is
-	 * responsible for reclaiming them.
+	 * The identifier is stable across Extension Development Host launches (it is not
+	 * derived from vscode.env.sessionId, which changes every F5/debug run and every
+	 * fresh worktree). This lets consecutive debug sessions reuse the same on-disk
+	 * snapshot instead of re-parsing all session files from scratch every time, while
+	 * still keeping debug-mode data isolated from the 'prod' snapshot used by real
+	 * installs. Cache invalidation across debug runs is driven by content, not
+	 * identity: a schemaVersion/cacheVersion mismatch (see loadCacheFromStorage) still
+	 * clears the cache whenever the on-disk shape or parsing logic actually changes.
+	 * Concurrent debug windows (e.g. multiple worktrees debugged at once) share this
+	 * identifier safely via the same leader-election/lock coordination used for
+	 * multiple production windows — see acquireRefreshLock().
 	 */
 	getCacheIdentifier(): string {
 		if (this.context.extensionMode === vscode.ExtensionMode.Development) {
-			// Use a short hash of the session ID to keep the key short but unique per window
-			const sessionId = vscode.env.sessionId;
-			const hash = sessionId.substring(0, 8);
-			return `dev-${hash}`;
+			return 'dev';
 		}
 		return 'prod';
 	}
 
 	/**
-	 * Deletes dev-mode cache/lock files left behind by previous Extension Development
-	 * Host sessions (getCacheIdentifier() mints a new dev-<hash> identifier per launch,
-	 * so every past debug session's snapshot is orphaned once that window closes).
-	 * Only touches files older than STALE_DEV_CACHE_AGE_MS, so the current and any
-	 * still-running sessions' files are never at risk. Best-effort: failures (e.g. a
-	 * file locked by another window) are swallowed, not surfaced.
+	 * Deletes legacy per-session dev-mode cache/lock files (e.g. `cache_dev-<hash>.snapshot.json`)
+	 * left behind by older versions of the extension, which used to mint a new dev-<hash>
+	 * identifier per Extension Development Host launch — orphaning every past debug session's
+	 * snapshot once that window closed. getCacheIdentifier() now returns a stable 'dev'
+	 * identifier, so no new files matching this legacy pattern are created; this cleanup only
+	 * reclaims leftovers from before that change. Only touches files older than
+	 * STALE_DEV_CACHE_AGE_MS, so the current and any still-running sessions' files are never at
+	 * risk. Best-effort: failures (e.g. a file locked by another window) are swallowed, not surfaced.
 	 */
 	async cleanupStaleDevCacheFiles(): Promise<void> {
 		if (this.context.extensionMode !== vscode.ExtensionMode.Development) { return; }

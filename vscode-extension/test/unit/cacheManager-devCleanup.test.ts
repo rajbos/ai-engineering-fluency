@@ -35,6 +35,21 @@ function writeAged(dir: string, name: string, ageMs: number): void {
 	fs.utimesSync(filePath, past, past);
 }
 
+test('getCacheIdentifier: returns a stable "dev" id in Development mode, independent of vscode.env.sessionId', () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-dev-cleanup-'));
+	const manager = makeDevManager(dir);
+	assert.equal(manager.getCacheIdentifier(), 'dev');
+	// Calling it again (simulating a later debug relaunch with a different session) must
+	// still return the same identifier so the on-disk snapshot is reused, not orphaned.
+	assert.equal(manager.getCacheIdentifier(), 'dev');
+});
+
+test('getCacheIdentifier: returns "prod" in production mode', () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctt-dev-cleanup-'));
+	const manager = makeProdManager(dir);
+	assert.equal(manager.getCacheIdentifier(), 'prod');
+});
+
 test('cleanupStaleDevCacheFiles: removes dev cache/lock files older than 24h', async () => {
 	const dir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-dev-cleanup-'));
 	writeAged(dir, 'cache_dev-aaaaaaaa.snapshot.json', 25 * 60 * 60 * 1000);
