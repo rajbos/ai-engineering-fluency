@@ -14,6 +14,14 @@ for VS Code Copilot Chat sessions. It is undocumented by Microsoft, load-bearing
 every "exact cost" number the extension shows on that surface, and — until this page —
 described nowhere in this repo.
 
+**This file is only fully populated when an off-by-default, experimental VS Code setting is
+enabled** — see [Why this file exists at all](#why-this-file-exists-at-all) and
+[Gated by an experimental setting](#gated-by-an-experimental-setting). Confirmed on a real
+machine: 41 of 45 sampled `debug-logs/<sessionId>/main.jsonl` files contained only a
+`session_start` line — no `llm_request`, no `tool_call`, nothing this repo reads — while 4
+older ones had the full event set. Same VS Code version, same extension, same machine; the
+only variable is whether that setting was on at the time.
+
 ## Location
 
 ```
@@ -157,14 +165,41 @@ They do.
 
 ## Why this file exists at all
 
-VS Code Copilot Chat instruments itself with OpenTelemetry. The debug log is that
-instrumentation's always-on serialization: per
+VS Code Copilot Chat instruments itself with OpenTelemetry. Per
 [upstream's monitoring docs](https://github.com/microsoft/vscode-copilot-chat/blob/main/docs/monitoring/agent_monitoring.md),
 the SDK's internal tracing *"is always active for the debug panel"* even when OTel export is
-disabled. The optional OTLP/file export is the same data on a different transport.
+disabled — but "always active for the debug panel" describes the in-memory/UI tracing behind
+VS Code's Chat Debug view, not what gets persisted to `main.jsonl` on disk. Those are two
+separate code paths, and only file persistence needs the setting below.
 
-That is why this log carries AI Units at all, and why it needs no setup from the user — which
-is the property that makes it the right source for this project.
+## Gated by an experimental setting
+
+A real machine's Settings UI shows this as its own toggle:
+
+> **GitHub › Copilot › Chat › Agent Debug Log › File Logging: Enabled** *(Experimental,
+> Advanced)* — "Enable agent debug logging: write chat debug events (tool calls, LLM requests,
+> token usage, errors) to JSONL files for the debug ... window reload to take effect."
+
+This is **off by default**. Related settings on the same machine: `Flush Interval Ms` (4000 —
+how often buffered entries are flushed to disk), `Max Retained Session Logs` (50 — oldest
+session-log directories are pruned past this), `Max Session Log Size MB` (100 — older entries
+in one file are truncated past this size). None of these are settings this project defines or
+controls; they belong to the Copilot Chat extension itself, are undocumented by Microsoft (no
+known stable setting ID — found only by searching "agent debug log" in VS Code's Settings UI),
+and can change or disappear without notice since they're marked Experimental.
+
+`session_start` is written to `main.jsonl` regardless of this setting — that part of the
+unconditional "debug panel" tracing does reach disk. Everything this repo actually reads
+(`llm_request` for tokens/billing/TTFT) requires the setting to have been on **and a window
+reload to have happened since** at the time the session ran. A user toggling it on mid-session
+won't see it take effect until they reload the window; sessions before that reload keep
+logging `session_start` only.
+
+Practical upshot: **do not assume every VS Code Copilot Chat session has exact billing or TTFT
+data.** Whether a given session's debug log is fully populated depends entirely on whether this
+setting happened to be on (and the window had been reloaded) during that session — which this
+project has no way to detect in advance, only after the fact by checking whether `llm_request`
+lines exist.
 
 ## Privacy of a real log
 
@@ -194,9 +229,10 @@ separate passes over the same lines, not a shared accumulator, since a missing T
 meaningful zero value to fold into a token total.
 
 The remaining opportunity is `tool_call`'s `dur`/`status`/`attrs.error` — real tool latency and
-outcome data with **zero user configuration**, the debug-log equivalent of the OTel export's
-`execute_tool` spans and `copilot_chat.tool.call.duration` metric. A future feature only needs
-a parser for one more event type, not a new data source.
+outcome data with **no new data source or export to wire up**, the debug-log equivalent of the
+OTel export's `execute_tool` spans and `copilot_chat.tool.call.duration` metric — subject to
+the same experimental File Logging setting gating everything else in this file. A future
+feature only needs a parser for one more event type.
 
 ## Drift risk
 

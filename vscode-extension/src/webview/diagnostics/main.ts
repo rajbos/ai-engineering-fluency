@@ -199,6 +199,7 @@ type ToolFamilyConfig = {
 
 type OtelDeltaPeriod = "all" | "today" | "yesterday" | "week" | "month";
 type TtftGranularity = "day" | "week" | "month";
+type TtftScanRange = "14d" | "30d" | "90d" | "180d" | "365d" | "all";
 
 type DiagnosticsViewState = {
   activeTab?: string;
@@ -207,6 +208,7 @@ type DiagnosticsViewState = {
   shareCardPeriod?: Period;
   skillUsageEditorFilter?: string;
   ttftGranularity?: TtftGranularity;
+  ttftScanRange?: TtftScanRange;
 };
 
 type FolderFileResult = {
@@ -241,11 +243,13 @@ const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   shareCardPeriod: "last14",
   skillUsageEditorFilter: "all",
   ttftGranularity: "day",
+  ttftScanRange: "14d",
 });
 
 let currentOtelComparison: CopilotCliOtelComparison | null | undefined;
 let currentOtelDeltaPeriod: OtelDeltaPeriod = diagState.restore().otelDeltaPeriod ?? "all";
 let currentTtftGranularity: TtftGranularity = diagState.restore().ttftGranularity ?? "day";
+let currentTtftScanRange: TtftScanRange = diagState.restore().ttftScanRange ?? "14d";
 
 // Periods offered by the Share Card's period selector, in display order.
 const SHARE_CARD_PERIOD_ORDER: Period[] = ["last7", "last14", "last30", "last90", "allTime"];
@@ -3182,6 +3186,14 @@ type TtftBucketView = { key: string; label: string; avgSeconds: number; count: n
 type TtftModelSeriesView = { model: string; data: (number | null)[] };
 
 const TTFT_GRANULARITY_LABELS: Record<TtftGranularity, string> = { day: "Day", week: "Week", month: "Month" };
+const TTFT_SCAN_RANGE_LABELS: Record<TtftScanRange, string> = {
+  "14d": "Last 14 days",
+  "30d": "Last 30 days",
+  "90d": "Last 90 days",
+  "180d": "Last 6 months",
+  "365d": "Last year",
+  "all": "All time",
+};
 
 /** Values arrive already normalized to seconds (see extractTtftSamplesFromDebugLog); this only picks the more readable unit for display. */
 function formatTtftSeconds(seconds: number): string {
@@ -3198,10 +3210,20 @@ function renderTtftGranularitySelector(granularity: TtftGranularity): string {
 </div>`;
 }
 
+function renderTtftScanRangeSelector(range: TtftScanRange): string {
+  const options = (Object.keys(TTFT_SCAN_RANGE_LABELS) as TtftScanRange[])
+    .map(r => `<option value="${r}"${r === range ? ' selected' : ''}>${TTFT_SCAN_RANGE_LABELS[r]}</option>`)
+    .join('');
+  return `<div class="otel-delta-period-row">
+<label for="ttft-scan-range">Scan session files from:</label>
+<select id="ttft-scan-range" class="otel-delta-period-select">${options}</select>
+</div>`;
+}
+
 const TTFT_CHART_WIDTH = 760;
 const TTFT_CHART_HEIGHT = 220;
 const TTFT_CHART_PAD_LEFT = 48;
-const TTFT_CHART_PAD_RIGHT = 12;
+const TTFT_CHART_PAD_RIGHT = 32;
 const TTFT_CHART_PAD_TOP = 12;
 const TTFT_CHART_PAD_BOTTOM = 28;
 
@@ -3224,11 +3246,14 @@ function renderTtftChartSvg(buckets: TtftBucketView[], series: TtftModelSeriesVi
 <text x="${TTFT_CHART_PAD_LEFT - 6}" y="${(y + 3).toFixed(1)}" class="ttft-axis-label" text-anchor="end">${escapeHtml(formatTtftSeconds(value))}</text>`;
   }).join('');
 
-  // Thin out x-axis labels so they don't overlap when there are many buckets.
+  // Thin out x-axis labels so they don't overlap when there are many buckets. The first/last
+  // labels are anchored inward (start/end instead of middle) so they render within the
+  // viewBox instead of overflowing past its edges and getting clipped.
   const labelEvery = Math.max(1, Math.ceil(buckets.length / 8));
   const xLabels = buckets.map((b, i) => {
     if (i % labelEvery !== 0 && i !== buckets.length - 1) { return ''; }
-    return `<text x="${xAt(i).toFixed(1)}" y="${TTFT_CHART_HEIGHT - 8}" class="ttft-axis-label" text-anchor="middle">${escapeHtml(b.label)}</text>`;
+    const anchor = i === buckets.length - 1 ? 'end' : i === 0 ? 'start' : 'middle';
+    return `<text x="${xAt(i).toFixed(1)}" y="${TTFT_CHART_HEIGHT - 8}" class="ttft-axis-label" text-anchor="${anchor}">${escapeHtml(b.label)}</text>`;
   }).join('');
 
   const paths = series.map((s, idx) => {
@@ -3243,12 +3268,13 @@ function renderTtftChartSvg(buckets: TtftBucketView[], series: TtftModelSeriesVi
       drawing = true;
     });
     const dots = s.data.map((v, i) => v === null ? '' : `<circle cx="${xAt(i).toFixed(1)}" cy="${yAt(v).toFixed(1)}" r="2.5" fill="${color.border}" />`).join('');
-    return `<path d="${d}" fill="none" stroke="${color.border}" stroke-width="2" />${dots}`;
+    return `<g class="ttft-series" data-model="${escapeHtml(s.model)}"><path d="${d}" fill="none" stroke="${color.border}" stroke-width="2" />${dots}</g>`;
   }).join('');
 
   const legend = series.map((s, idx) => {
     const color = getModelColor(idx);
-    return `<span class="ttft-legend-item"><span class="ttft-legend-swatch" style="background:${color.border}"></span>${escapeHtml(getModelDisplayName(s.model))}</span>`;
+    const name = escapeHtml(getModelDisplayName(s.model));
+    return `<span class="ttft-legend-item" data-model="${escapeHtml(s.model)}" role="button" tabindex="0" aria-pressed="false" title="Click to hide/show ${name}"><span class="ttft-legend-swatch" style="background:${color.border}"></span>${name}</span>`;
   }).join('');
 
   return `<div class="ttft-chart-wrap">
@@ -3274,11 +3300,11 @@ function renderTtftResults(granularity: TtftGranularity, buckets: TtftBucketView
     return `<div class="info-box">
 <div class="info-box-title">📭 No TTFT data found</div>
 <div>
-Checked ${fileCount.toLocaleString()} session file(s) locally; none had a debug log with a
-populated <code>attrs.ttft</code>. This is expected if you haven't used VS Code Copilot Chat
-recently — the debug log is only written while a chat session is active, and its retention is
-controlled by VS Code, not this extension. See
-<code>docs/logFilesSchema/vscode-chat-debug-log-format.md</code> for where this data comes from.
+Checked ${fileCount.toLocaleString()} session file(s) in the selected range; none had a debug log
+with a populated <code>attrs.ttft</code>. Try widening "Scan session files from" above, but also
+check VS Code's <b>GitHub › Copilot › Chat › Agent Debug Log › File Logging: Enabled</b> setting
+(Experimental) — it's off by default, and this data only exists for sessions that ran while it
+was on (a window reload is needed after enabling it).
 </div>
 </div>`;
   }
@@ -3317,13 +3343,15 @@ function renderTtftTab(): string {
 <div>
 How long a chat model takes to start streaming a response, averaged per model over time.
 Read from VS Code Copilot Chat's own debug log (<code>attrs.ttft</code> on <code>llm_request</code>
-events) — the same always-on file this extension already reads for exact per-session billing.
-No setup required; this is whatever VS Code has written locally, for however long it happens to
-have kept it. The unit isn't documented upstream, so values are auto-detected as seconds or
-milliseconds by magnitude — see <code>docs/logFilesSchema/vscode-chat-debug-log-format.md</code>.
+events) — the same file this extension already reads for exact per-session billing. This only
+exists for sessions that ran while VS Code's experimental <b>GitHub › Copilot › Chat › Agent Debug
+Log › File Logging: Enabled</b> setting was on (off by default, requires a window reload after
+enabling) — nothing in this extension's own settings. The unit isn't documented upstream, so
+values are auto-detected as seconds or milliseconds by magnitude.
 </div>
 </div>
 ${renderTtftGranularitySelector(currentTtftGranularity)}
+${renderTtftScanRangeSelector(currentTtftScanRange)}
 <div id="ttft-results"></div>
 </div>`;
 }
@@ -3337,7 +3365,7 @@ function triggerTtftAnalysis(): void {
           <span>Scanning debug logs for TTFT…</span>
         </div>`);
   }
-  vscode.postMessage({ command: "analyzeTtft", granularity: currentTtftGranularity });
+  vscode.postMessage({ command: "analyzeTtft", granularity: currentTtftGranularity, scanRange: currentTtftScanRange });
 }
 
 function setupTtftHandlers(): void {
@@ -3345,6 +3373,30 @@ function setupTtftHandlers(): void {
     currentTtftGranularity = (e.target as HTMLSelectElement).value as TtftGranularity;
     diagState.patch({ ttftGranularity: currentTtftGranularity });
     triggerTtftAnalysis();
+  });
+  document.getElementById("ttft-scan-range")?.addEventListener("change", (e) => {
+    currentTtftScanRange = (e.target as HTMLSelectElement).value as TtftScanRange;
+    diagState.patch({ ttftScanRange: currentTtftScanRange });
+    triggerTtftAnalysis();
+  });
+  const resultsDiv = document.getElementById("ttft-results");
+  const toggleTtftModel = (item: HTMLElement) => {
+    const model = item.dataset.model;
+    if (!model) { return; }
+    const hidden = item.classList.toggle("ttft-hidden");
+    item.setAttribute("aria-pressed", String(hidden));
+    document.querySelectorAll(".ttft-series").forEach((el) => {
+      if ((el as HTMLElement).dataset.model === model) { (el as HTMLElement).classList.toggle("ttft-hidden", hidden); }
+    });
+  };
+  resultsDiv?.addEventListener("click", (e) => {
+    const item = (e.target as HTMLElement)?.closest(".ttft-legend-item") as HTMLElement | null;
+    if (item) { toggleTtftModel(item); }
+  });
+  resultsDiv?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") { return; }
+    const item = (e.target as HTMLElement)?.closest(".ttft-legend-item") as HTMLElement | null;
+    if (item) { e.preventDefault(); toggleTtftModel(item); }
   });
 }
 

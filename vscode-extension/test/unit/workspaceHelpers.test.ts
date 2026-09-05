@@ -1882,21 +1882,21 @@ import { resolveDebugLogCandidatePaths } from '../../../src/workspaceHelpers';
 const TTFT_SESSION_ID = 'e84b3e82-c1fb-43de-8f52-367f4c74826a';
 
 test('resolveDebugLogCandidatePaths: returns one candidate per known extension-folder spelling', () => {
-    const sessionFile = nodePath.join('home', 'user', 'workspaceStorage', 'abc123', 'chatSessions', `${TTFT_SESSION_ID}.json`);
+    const sessionFile = path.join('home', 'user', 'workspaceStorage', 'abc123', 'chatSessions', `${TTFT_SESSION_ID}.json`);
     const candidates = resolveDebugLogCandidatePaths(sessionFile);
     assert.ok(candidates);
     assert.equal(candidates!.length, 4);
-    assert.ok(candidates!.every(p => p.includes(TTFT_SESSION_ID) && p.endsWith(nodePath.join('debug-logs', TTFT_SESSION_ID, 'main.jsonl'))));
+    assert.ok(candidates!.every(p => p.includes(TTFT_SESSION_ID) && p.endsWith(path.join('debug-logs', TTFT_SESSION_ID, 'main.jsonl'))));
     assert.ok(candidates!.some(p => p.includes('GitHub.copilot-chat')));
     assert.ok(candidates!.some(p => p.includes('github.copilot-chat')));
 });
 
 test('resolveDebugLogCandidatePaths: returns undefined for a non-UUID session file', () => {
-    const sessionFile = nodePath.join('home', 'user', 'workspaceStorage', 'abc123', 'chatSessions', 'not-a-uuid.json');
+    const sessionFile = path.join('home', 'user', 'workspaceStorage', 'abc123', 'chatSessions', 'not-a-uuid.json');
     assert.equal(resolveDebugLogCandidatePaths(sessionFile), undefined);
 });
 
 test('resolveDebugLogCandidatePaths: returns undefined for a UUID-named file outside workspaceStorage', () => {
-    const sessionFile = nodePath.join('home', 'user', '.copilot', 'session-state', `${TTFT_SESSION_ID}.jsonl`);
+    const sessionFile = path.join('home', 'user', '.copilot', 'session-state', `${TTFT_SESSION_ID}.jsonl`);
     assert.equal(resolveDebugLogCandidatePaths(sessionFile), undefined);
 });

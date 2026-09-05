@@ -1151,6 +1151,17 @@ border: 1px solid #1f6feb;
 	display: inline-flex;
 	align-items: center;
 	gap: 5px;
+	cursor: pointer;
+	user-select: none;
+}
+
+.ttft-legend-item.ttft-hidden {
+	opacity: 0.4;
+	text-decoration: line-through;
+}
+
+.ttft-series.ttft-hidden {
+	display: none;
 }
 
 .ttft-legend-swatch {
