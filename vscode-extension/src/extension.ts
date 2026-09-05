@@ -163,8 +163,10 @@ import {
   extractSubAgentData as _extractSubAgentData,
   buildReasoningEffortTimeline as _buildReasoningEffortTimeline,
   extractAllTokensFromDebugLog as _extractAllTokensFromDebugLog,
+  extractTtftSamplesFromDebugLog as _extractTtftSamplesFromDebugLog,
   extractResponseItemText as _extractResponseItemText,
   NANO_AIU_TO_DOLLARS,
+  type TtftSample,
 } from '../../src/tokenEstimation';
 import { SessionDiscovery } from '../../src/sessionDiscovery';
 
@@ -247,10 +249,24 @@ import {
   normalizePathForDedup as _normalizePathForDedup,
   normalizeToRepoRoot as _normalizeToRepoRoot,
   getRepoNameFromWorkspacePath as _getRepoNameFromWorkspacePath,
+  resolveDebugLogCandidatePaths as _resolveDebugLogCandidatePaths,
 } from '../../src/workspaceHelpers';
 
 // --- Chart building ---
 import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from '../../src/chartDataBuilder';
+
+// --- Time-to-first-token analysis ---
+import { buildTtftBuckets as _buildTtftBuckets, buildTtftModelSeries as _buildTtftModelSeries, type TtftGranularity } from '../../src/ttftAnalysis';
+
+/** How far back the Research > TTFT tab's scan-range picker looks for session files; 'all' skips the mtime filter entirely. */
+type TtftScanRange = '14d' | '30d' | '90d' | '180d' | '365d' | 'all';
+const TTFT_SCAN_RANGE_DAYS: Record<Exclude<TtftScanRange, 'all'>, number> = { '14d': 14, '30d': 30, '90d': 90, '180d': 180, '365d': 365 };
+/** Resolves a scan-range picker value to a lookback window in ms, or null for 'all' (no mtime filter). */
+function ttftScanRangeToMs(range: unknown): number | null {
+	if (range === 'all') { return null; }
+	const key = (typeof range === 'string' && Object.prototype.hasOwnProperty.call(TTFT_SCAN_RANGE_DAYS, range)) ? (range as Exclude<TtftScanRange, 'all'>) : '14d';
+	return TTFT_SCAN_RANGE_DAYS[key] * 24 * 60 * 60 * 1000;
+}
 
 // --- Task classification ---
 import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDelegationToolCalls } from '../../src/taskClassification';
@@ -471,6 +487,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private diagnosticsHasLoadedFiles: boolean = false;
 	// Cache of the last loaded detailed session files for diagnostics view
 	private diagnosticsCachedFiles: SessionFileDetails[] = [];
+	// Full, unfiltered session file paths from the last diagnostics load (no 14-day/500-file cap) —
+	// the TTFT scan-range picker filters this list itself instead of relying on diagnosticsCachedFiles.
+	private diagnosticsAllSessionFiles: string[] = [];
 	// Cache of the last diagnostic report text for copy/issue operations
 	private lastDiagnosticReport: string = '';
 	// Incremented on each worktree scan start/cancel; in-flight scans check this to stop early
@@ -1313,6 +1332,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Reset diagnostics loaded flag so the diagnostics view will reload files
 			this.diagnosticsHasLoadedFiles = false;
 			this.diagnosticsCachedFiles = [];
+			this.diagnosticsAllSessionFiles = [];
 			// Clear cached computed stats so details panel doesn't show stale data
 			this.lastDetailedStats = undefined;
 			this.lastDailyStats = undefined;
@@ -6887,20 +6907,9 @@ private computeFallbackDailyRollup(
 	 * `llm_request` event to give true totals for agent-mode multi-call sessions.
 	 */
 	private async readTokensFromDebugLog(sessionFilePath: string): Promise<{ inputTokens: number; outputTokens: number; cachedTokens: number; modelTurns: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>; copilotNanoAiu: number; maxRequestInputTokens: number } | null> {
-		const norm = _normalizePath(sessionFilePath);
-		const sessionId = path.basename(sessionFilePath, path.extname(sessionFilePath));
-		// Only process UUID-named session files (e.g. e84b3e82-c1fb-43de-8f52-367f4c74826a)
-		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {
-			return null;
-		}
-		// Derive the workspaceStorage/<hash> directory from the session file path
-		const wsHashMatch = norm.match(/^(.*\/workspaceStorage\/[^/]+)\//);
-		if (!wsHashMatch) { return null; }
-		const workspaceHashDir = sessionFilePath.substring(0, wsHashMatch[1].length);
-
-		const extensionFolders = ['GitHub.copilot-chat', 'github.copilot-chat', 'GitHub.copilot', 'github.copilot'];
-		for (const extFolder of extensionFolders) {
-			const debugLogPath = path.join(workspaceHashDir, extFolder, 'debug-logs', sessionId, 'main.jsonl');
+		const candidatePaths = _resolveDebugLogCandidatePaths(sessionFilePath);
+		if (!candidatePaths) { return null; }
+		for (const debugLogPath of candidatePaths) {
 			try {
 				const content = await fs.promises.readFile(debugLogPath, 'utf8');
 				const result = _extractAllTokensFromDebugLog(content);
@@ -6908,6 +6917,62 @@ private computeFallbackDailyRollup(
 			} catch { /* file doesn't exist or can't be read — try next variant */ }
 		}
 		return null;
+	}
+
+	/** Reads and extracts TTFT samples from one session's debug log, trying each candidate path. Returns null when the session has no debug log or none of its llm_request events carry attrs.ttft. */
+	private async readTtftSamplesForSessionFile(sessionFilePath: string): Promise<TtftSample[] | null> {
+		const candidatePaths = _resolveDebugLogCandidatePaths(sessionFilePath);
+		if (!candidatePaths) { return null; }
+		for (const debugLogPath of candidatePaths) {
+			try {
+				const content = await fs.promises.readFile(debugLogPath, 'utf8');
+				const samples = _extractTtftSamplesFromDebugLog(content);
+				if (samples.length > 0) { return samples; }
+			} catch { /* file doesn't exist or can't be read — try next variant */ }
+		}
+		return null;
+	}
+
+	/**
+	 * Collects TTFT samples across many sessions' debug logs, bounding concurrency so a
+	 * large session count doesn't open hundreds of file handles at once. Sessions with no
+	 * debug log (non-VS-Code-Chat editors, or Chat sessions predating this file) resolve to
+	 * null immediately with no I/O — see resolveDebugLogCandidatePaths in workspaceHelpers.ts.
+	 *
+	 * Scans `diagnosticsAllSessionFiles` — the full, unfiltered discovery list — rather than
+	 * `diagnosticsCachedFiles`, which is capped to the last 14 days / 500 files for the rest of
+	 * the Diagnostics screen. That cap silently hid real `attrs.ttft` data that exists on disk
+	 * but is older than 14 days; `scanRangeMs` (null = all time) lets the tab's own picker widen
+	 * the search instead. Debug-log-shaped candidates are found cheaply first (no I/O — a path
+	 * check), then only those are stat'd for the range filter.
+	 */
+	private async collectTtftSamples(scanRangeMs: number | null): Promise<{ samples: TtftSample[]; fileCount: number }> {
+		const candidates = this.diagnosticsAllSessionFiles.filter(f => _resolveDebugLogCandidatePaths(f) !== undefined);
+		const CONCURRENCY = 20;
+		let inRange = candidates;
+		if (scanRangeMs !== null) {
+			const cutoff = Date.now() - scanRangeMs;
+			const withStats: (string | null)[] = [];
+			for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+				const batch = candidates.slice(i, i + CONCURRENCY);
+				const results = await Promise.all(batch.map(async (file) => {
+					try {
+						const stat = await fs.promises.stat(file);
+						return stat.mtimeMs >= cutoff ? file : null;
+					} catch { return null; }
+				}));
+				withStats.push(...results);
+			}
+			inRange = withStats.filter((f): f is string => f !== null);
+		}
+
+		const all: TtftSample[] = [];
+		for (let i = 0; i < inRange.length; i += CONCURRENCY) {
+			const batch = inRange.slice(i, i + CONCURRENCY);
+			const results = await Promise.all(batch.map(f => this.readTtftSamplesForSessionFile(f)));
+			for (const r of results) { if (r) { all.push(...r); } }
+		}
+		return { samples: all, fileCount: inRange.length };
 	}
 
 	private extractPerRequestUsageFromRawLines(lines: string[]): Map<number, { promptTokens: number; outputTokens: number }> {
@@ -9725,6 +9790,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       pickFolder: () => this.dispatch('pickFolder:diagnostics', () => this.diagHandlePickFolder()),
       analyzeFolder: () => this.dispatch('analyzeFolder:diagnostics', () => this.diagHandleAnalyzeFolder(message)),
       analyzeModelUsage: () => this.dispatch('analyzeModelUsage:diagnostics', () => this.diagHandleAnalyzeModelUsage(message)),
+      analyzeTtft: () => this.dispatch('analyzeTtft:diagnostics', () => this.diagHandleAnalyzeTtft(message)),
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
     await this.handleDiagnosticConditionalCommand(message);
@@ -10067,6 +10133,41 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       rows,
       totalCost,
       supportsCache1h,
+    });
+  }
+
+  /**
+   * Computes time-to-first-token averages (overall and per model) bucketed by day/week/month,
+   * for the Research > TTFT diagnostics tab. Reads every session's debug log fresh on each
+   * request rather than persisting samples in the session cache — TTFT is a Research-tab
+   * curiosity, not something the dashboard's cost/token numbers depend on, so it doesn't
+   * warrant a session-cache schema change. The scan range comes from the tab's own picker
+   * (default 14 days, up to "all time") rather than the Diagnostics screen's 14-day/500-file
+   * discovery cap, which would otherwise silently hide real `attrs.ttft` data on older sessions.
+   * See collectTtftSamples() for the scan and docs/logFilesSchema/vscode-chat-debug-log-format.md
+   * for what attrs.ttft is and isn't.
+   */
+  private async diagHandleAnalyzeTtft(message: any): Promise<void> {
+    const granularity: TtftGranularity = message?.granularity === 'week' || message?.granularity === 'month' ? message.granularity : 'day';
+    const scanRangeMs = ttftScanRangeToMs(message?.scanRange);
+    if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
+
+    if (!this.diagnosticsHasLoadedFiles) {
+      this.diagnosticsPanel.webview.postMessage({ command: 'ttftResult', granularity, buckets: [], series: [], sampleCount: 0, fileCount: 0, stillLoading: true });
+      return;
+    }
+
+    const { samples, fileCount } = await this.collectTtftSamples(scanRangeMs);
+    const buckets = _buildTtftBuckets(samples, granularity);
+    const series = _buildTtftModelSeries(buckets);
+
+    this.diagnosticsPanel.webview.postMessage({
+      command: 'ttftResult',
+      granularity,
+      buckets: buckets.map(b => ({ key: b.key, label: b.label, avgSeconds: b.avgSeconds, count: b.count })),
+      series,
+      sampleCount: samples.length,
+      fileCount,
     });
   }
 
@@ -10931,6 +11032,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       this.lastDiagnosticReport = report;
 
       const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+      this.diagnosticsAllSessionFiles = sessionFiles;
       const sessionFileData = await this.getSessionFilePreviewData(sessionFiles);
       const sessionFolders = this.buildSessionFolderData(sessionFiles);
       const candidatePaths = this.sessionDiscovery.getDiagnosticCandidatePaths();
