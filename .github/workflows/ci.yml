@@ -110,6 +110,13 @@ jobs:
     - name: Run type checking
       working-directory: vscode-extension
       run: npm run check-types
+
+    # Neither the compiler nor the unit suite can see the webview<->host
+    # postMessage wiring, so a button posting a command nobody handles ships
+    # green. This fails the build on it instead.
+    - name: Validate webview message contract
+      working-directory: vscode-extension
+      run: npm run check:contract
       
     - name: Compile extension
       working-directory: vscode-extension
@@ -218,3 +225,79 @@ jobs:
         name: vsix-package
         path: 'vscode-extension/*.vsix'
         retention-days: 30
+
+  # The UI half of the review. Everything above proves the code compiles and the
+  # logic is right; nothing above can tell whether a control still works or what
+  # the panels now look like. This job clicks every control in every panel, and
+  # renders the panels next to the merge base so a reviewer can see the change
+  # rather than infer it from a diff of CSS.
+  ui-checks:
+    name: Webview UI checks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+      with:
+        egress-policy: audit
+
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        # The visual diff builds the merge base in a temporary worktree, which
+        # needs real history rather than a shallow clone.
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: '24.x'
+        cache: 'npm'
+        cache-dependency-path: vscode-extension/package-lock.json
+
+    - name: Install dependencies
+      working-directory: vscode-extension
+      run: npm ci --ignore-scripts
+
+    # Playwright is deliberately not a dependency of the extension - it is
+    # tooling, not shipped code - so the harness looks for a global install.
+    - name: Install Playwright Chromium
+      run: |
+        npm install -g playwright@1.56.0
+        npx --yes playwright@1.56.0 install --with-deps chromium
+
+    - name: Compile webview bundles
+      working-directory: vscode-extension
+      run: npm run compile
+
+    - name: Interaction smoke (click every control)
+      working-directory: vscode-extension
+      run: npm run check:interaction
+
+    - name: Visual view diff vs merge base
+      id: visual
+      # A visual change is usually intended, so this reports rather than gates;
+      # the report and the images are the deliverable for the reviewer.
+      continue-on-error: true
+      run: node .github/skills/visual-view-diff/visual-diff.js --theme both
+
+    - name: Publish visual diff to the job summary
+      if: always()
+      shell: bash
+      run: |
+        if [ -f visual-output/diff/report.md ]; then
+          cat visual-output/diff/report.md >> "$GITHUB_STEP_SUMMARY"
+        else
+          echo "No visual diff report was produced." >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Upload before/after/diff screenshots
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: webview-screenshots
+        path: |
+          visual-output/baseline/
+          visual-output/current/
+          visual-output/diff/
+        retention-days: 14

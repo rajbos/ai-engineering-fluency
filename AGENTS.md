@@ -164,6 +164,34 @@ Do not enter retry loops trying to capture terminal output. These patterns waste
 
 5. **Write output to the workspace (not `/tmp/`).** If you must capture output to a file, write it inside the workspace where `read_file` can reliably access it.
 
+## Webview changes must be validated by clicking, not by reading
+
+The `postMessage` wire between a webview panel and the extension host is untyped
+by construction, and a `<button>` nobody attached a listener to is
+indistinguishable from a working one in the source. Two checks close that gap —
+run both after any change under `vscode-extension/src/webview/**` or to a panel's
+message handling in `extension.ts`:
+
+```bash
+cd vscode-extension
+npm run check:contract      # every posted message has a handler on the other side
+npm run check:interaction   # clicks every control in every panel, headlessly
+```
+
+`check:contract` also runs in CI and as a unit test, so a regression fails the
+normal suite. `check:interaction` renders the real bundles headlessly via the
+`visual-view-diff` harness — it never opens an editor window, so it is safe for
+agents to run (see "Never Launch a Real Editor/IDE Instance" above).
+
+**Adding a new webview panel means adding it to
+`.github/skills/visual-view-diff/views.config.json`**, with a fixture capturing
+its `__INITIAL_*__` payload. That one registry feeds the visual diff, the CI
+screenshots and the interaction crawl — a view missing from it is silently
+unvalidated by all three.
+
+The full picture of what each check catches, and the one-command release
+preflight, is in [docs/VALIDATION.md](docs/VALIDATION.md).
+
 ## Localization changes require test coverage
 
 When adding or changing runtime localization keys (entries in `vscode-extension/package.nls.json` / `package.nls.zh-cn.json` consumed via the `l10n.t()` helper in `vscode-extension/src/l10n.ts`), add unit tests in `vscode-extension/test/unit/l10n.test.ts` asserting the new keys resolve to their expected English text (and zh-CN translation where one exists). PR review flags localization changes that ship without this coverage.

@@ -20,9 +20,10 @@ complete-looking panel with zero messages delivered. Every asynchronous tab (Rep
 Cloud Agent) then hangs on its "Loading…" placeholder. If you are debugging a stuck panel,
 verify the message path explicitly — do not infer it from the fact that the page has content.
 
-Extension-point buttons contributed by companion extensions use the inline path too
-(`window.__EXTENSION_POINT_BUTTONS__`), so they were never affected by messaging bugs. See
-[External integrations](#external-integrations).
+Extension-point buttons contributed by companion extensions use the inline path for first paint
+(`window.__EXTENSION_POINT_BUTTONS__`), so the trust-check bug never hid a button's *initial*
+appearance. Live updates to already-open panels (register/dispose after the panel's HTML was
+generated) now travel over the message path too — see [External integrations](#external-integrations).
 
 ## Trust model: origin, not source identity
 
@@ -135,6 +136,33 @@ already in hand is visually lost on the next refresh.
 A payload that arrives with no container to render into posts a `…​.notRendered` trace, since
 "arrived but rendered nothing" is otherwise indistinguishable from "never arrived".
 
+### A registered-but-late listener is still a lost message
+
+The usage panel registers its listener synchronously at module evaluation, before any `await`.
+The diagnostics panel (`src/webview/diagnostics/main.ts`) did not: `setupMessageHandlers()` used
+to run from *inside* `renderLayout()`, which only runs after `bootstrap()`'s
+`await import('@vscode-elements/...')` resolves. The host deliberately posts
+`backendStorageInfoLoaded` as early as possible (`sendBackendStorageInfoEarly()`, ahead of the
+slower `diagnosticDataLoaded`) specifically to beat this kind of gap — so a real dynamic-import
+delay could drop it entirely. The fix is the same rule as the two-phase readiness handshake
+above: **register the listener before any async work, not after it.**
+
+A second, compounding bug meant fixing the listener alone was not enough: `renderLayout()`
+unconditionally overwrote the module's `currentBackendInfo`/`currentGithubAuth` state from its
+own (possibly stale placeholder, e.g. `backendStorageInfo: null` on first open) `data`
+parameter — silently clobbering a value already captured by an earlier message. The general
+lesson: a later render pass must *merge with*, not *overwrite*, state that an earlier message
+already populated — the same class of bug `restoreGitHubActivityPanels(...)` exists to prevent
+for the usage panel. See `resolveEarlyBackendState()` and its call site in `renderLayout()`, and
+`test/unit/diagnosticsWebviewMessageFlow.test.ts` for a harness that deterministically reproduces
+the race (dispatching a message synchronously right after `window.eval(bundle)`, before the
+pending dynamic-import microtask resolves).
+
+This particular race was bounded, not a permanent hang: `diagnosticDataLoaded` (sent later, after
+the full async chain) resends the same fields and re-applies them once `tab-backend` exists. It
+still cost a real "send early" optimization silently, which is why it was worth fixing and
+testing even though nothing visibly hung.
+
 ## Diagnostics that ship
 
 Kept deliberately quiet — these should produce **no output** on a healthy run:
@@ -183,20 +211,32 @@ Companion extensions acquire the public API via
 `src/extensionPoints.ts`) and call `registerButton(...)` to add a navigation button to every
 panel's toolbar.
 
-That contribution does **not** use host → webview messaging:
+Button *data* reaches an already-open panel through **two** paths now:
 
-- Button *data* is injected inline at HTML-generation time via
-  `window.__EXTENSION_POINT_BUTTONS__` (`extensionPointButtonsScript`).
-- Button *clicks* travel webview → host (`extensionPointAction`), the opposite direction, which
-  was never broken.
+- **Inline bootstrap**, for the first paint: `window.__EXTENSION_POINT_BUTTONS__`
+  (`extensionPointButtonsScript`), a snapshot taken at HTML-generation time.
+- **Messages**, for anything that happens after that: `registerExtensionPointButton` calls
+  `broadcastExtensionPointButtons()` on every register/dispose, posting
+  `{ command: 'extensionPointButtonsUpdated', buttons }` to every currently open panel.
 
-So companion buttons kept working throughout, and the messaging fix does not change their
-behaviour. The one real constraint is a consequence of the inline path:
+Button *clicks* still travel webview → host (`extensionPointAction`), the opposite direction,
+which was never broken.
 
-> **A button only appears in panels whose HTML was generated after `registerButton` was
-> called.** `registerExtensionPointButton` mutates the map but does not refresh open panels.
+`wireExtensionPointButtons` (`src/webview/shared/extensionPoints.ts`) reconciles `.button-row`
+against whichever list it was given — id-diffing rather than unconditionally appending — so a
+button already on screen from the inline bootstrap is left alone when the same button also
+arrives via `extensionPointButtonsUpdated`, and disposing a button removes its element from a
+panel that is already open. Without that reconciliation, a companion extension registering (or
+disposing) a button after a panel's HTML had already been generated left that panel stale until
+it was closed and reopened — this used to be a permanent limitation of the inline-only delivery
+path; it is fixed now that host → webview messaging works.
 
-In practice a companion extension must register during `activate()`, before the user opens a
-panel. Registering later — or disposing a button — leaves already-open panels stale until they
-are regenerated. Now that host → webview messaging actually works, pushing button updates to
-open panels has become possible; it is not implemented.
+Some panels call `wireExtensionPointButtons` after every render, not just once at bootstrap (the
+chart panel does this on every `updateChartData`). `registerMessageHandler` has no
+dispose/dedupe of its own, so a naive re-run would add another `window` `message` listener on
+every refresh — leaking handlers and processing each future `extensionPointButtonsUpdated`
+update once per accumulated listener. `wireExtensionPointButtons` tracks a
+`window.__extensionPointButtonsListenerRegistered__` flag on the ambient `window` itself (not a
+module-level variable, so a test harness that swaps in a fresh `window` per case still gets a
+fresh registration) and only attaches the listener the first time it runs for a given window.
+
