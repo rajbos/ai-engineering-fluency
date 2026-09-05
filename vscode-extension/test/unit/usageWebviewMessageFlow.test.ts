@@ -287,6 +287,34 @@ test('accepts payloads relayed the way VS Code actually delivers them', async ()
 	assert.ok(rendered?.includes('ai-engineering-fluency'), `expected the repo table, got: ${rendered}`);
 });
 
+test('marks HydraFusion sessions in the recent sessions list', async () => {
+	const stats = buildStats();
+	stats.todaySessions = [{
+		title: 'HydraFusion task',
+		filePath: 'session.jsonl',
+		interactions: 12500,
+		toolCalls: 1500,
+		inputTokens: 1500000,
+		outputTokens: 12000,
+		thinkingTokens: 2000,
+		cachedTokens: 30000,
+		totalTokens: 1544000,
+		estimatedCost: 12.345,
+		editor: 'VS Code',
+		models: ['hydrafusion'],
+		lastActivity: '2026-08-31T12:00:00.000Z',
+	}];
+	const harness = await bootWebview(stats);
+
+	const badge = harness.window.document.querySelector('.hydrafusion-session-badge');
+	assert.ok(badge, 'expects a marker for HydraFusion sessions');
+	assert.equal(badge.textContent, 'HydraFusion');
+	const row = harness.window.document.querySelector('.sessions-table tbody tr');
+	assert.match(row.textContent, /12\.5K/);
+	assert.match(row.textContent, /1\.5M/);
+	assert.match(row.textContent, /\$12\.35/);
+});
+
 test('renders cloud agent session results', async () => {
 	const harness = await bootWebview(buildStats());
 
