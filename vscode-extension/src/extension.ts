@@ -3349,6 +3349,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			last30Days: stats.last30Days,
 			month: stats.month,
 			lastMonth: stats.lastMonth,
+			autoCompactionsLast7Days: stats.autoCompactionsLast7Days,
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
 		};
@@ -3409,6 +3410,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			last30Days: stats.last30Days,
 			month: stats.month,
 			lastMonth: stats.lastMonth,
+			autoCompactionsLast7Days: stats.autoCompactionsLast7Days,
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
 			todaySessions: stats.todaySessions,
@@ -4040,12 +4042,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
 		let correctionReport: CorrectionReport | undefined;
 		let repeatedTasks: RepeatedTaskReport | undefined;
+		let autoCompactionsLast7Days: UsageAnalysisStats['autoCompactionsLast7Days'];
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
 			const periods = { todayStats, last30DaysStats, monthStats, lastMonthStats, todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey };
 			const wsMaps = { workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts };
 			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
 			recentSessions = this.buildRecentSessionBuckets(usageResults, now);
+			autoCompactionsLast7Days = this.buildAutoCompactionStats(usageResults, now);
 			correctionReport = this.buildCorrectionReport(usageResults);
 			repeatedTasks = this.buildRepeatedTaskReport(usageResults);
 			this._lastSkillCallsByEditor = {};
@@ -4076,6 +4080,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			repeatedTasks,
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats),
 			agenticDailyTrend,
+			autoCompactionsLast7Days,
 		};
 		this.lastUsageAnalysisStats = stats;
 		return stats;
@@ -4561,6 +4566,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return this.buildRecentSessionItems(results)
 			.filter(it => it.activityKey >= startKey)
 			.map(it => it.value);
+	}
+
+	/**
+	 * Aggregate the two explicit automatic-compaction signals emitted by supported
+	 * session formats without exposing them as regular tool calls.
+	 */
+	private buildAutoCompactionStats(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		now: Date,
+	): NonNullable<UsageAnalysisStats['autoCompactionsLast7Days']> {
+		const startKey = getTimeWindowStartDayKey('last7', now);
+		const bySource = { copilotCli: 0, claude: 0 };
+		for (const result of results) {
+			if (!result || this.computeLastActivityKey(result.sessionData, result.mtime) < startKey) { continue; }
+			bySource.copilotCli += result.sessionData.truncationCount ?? 0;
+			bySource.claude += result.sessionData.usageAnalysis?.toolCalls.byTool['__auto_compact__'] ?? 0;
+		}
+		return { total: bySource.copilotCli + bySource.claude, bySource };
 	}
 
 	private buildRecentSessionItems(
@@ -7500,6 +7523,7 @@ private computeFallbackDailyRollup(
 		return {
 			today: analysisStats.today, last30Days: analysisStats.last30Days,
 			month: analysisStats.month, lastMonth: analysisStats.lastMonth,
+			autoCompactionsLast7Days: analysisStats.autoCompactionsLast7Days,
 			locale: analysisStats.locale,
 			customizationMatrix: analysisStats.customizationMatrix || null,
 			missedPotential: analysisStats.missedPotential || [],
@@ -11732,6 +11756,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       last30Days: stats.last30Days,
       month: stats.month,
       lastMonth: stats.lastMonth,
+      autoCompactionsLast7Days: stats.autoCompactionsLast7Days,
       locale: detectedLocale,
       customizationMatrix: stats.customizationMatrix || null,
       missedPotential: stats.missedPotential || [],

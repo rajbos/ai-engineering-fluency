@@ -6,6 +6,7 @@
  */
 import type {
 	UsageAnalysisPeriod,
+	AutomaticCompactionStats,
 	MissedPotentialWorkspace,
 	WorkspaceCustomizationMatrix,
 	TodaySessionSummary,
@@ -279,6 +280,8 @@ export interface InsightContext {
 	month?: UsageAnalysisPeriod;
 	/** Previous full calendar month — enables month-over-month trend insights. */
 	lastMonth?: UsageAnalysisPeriod;
+	/** Automatic context compactions recorded during the trailing seven days. */
+	autoCompactionsLast7Days?: AutomaticCompactionStats;
 	missedPotential: MissedPotentialWorkspace[];
 	customizationMatrix?: WorkspaceCustomizationMatrix | null;
 	todaySessions?: TodaySessionSummary[];
@@ -332,9 +335,19 @@ interface InsightDefinition {
 }
 
 // ---------------------------------------------------------------------------
-/** Count of auto-compaction events in a period (Claude Code / Desktop only). */
-function autoCompactCount(p: UsageAnalysisPeriod): number {
-	return p.toolCalls.byTool['__auto_compact__'] ?? 0;
+/** Count of automatic compactions across all supported session formats in the trailing week. */
+function autoCompactCount(ctx: InsightContext): number {
+	return ctx.autoCompactionsLast7Days?.total ?? 0;
+}
+
+function autoCompactBreakdown(stats: AutomaticCompactionStats): string {
+	const sources: Array<[string, number]> = [
+		['GitHub Copilot CLI', stats.bySource.copilotCli],
+		['Claude', stats.bySource.claude],
+	];
+	return sources.filter(([, count]) => count > 0)
+		.map(([source, count]) => `${source}: ${count}`)
+		.join('; ');
 }
 
 // Starter catalog
@@ -906,14 +919,15 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		id: 'auto-compaction-pattern',
 		category: 'consistency',
 		severity: 'opportunity',
-		title: '⚠️ Claude Code is auto-compacting your sessions',
+		title: '⚠️ Your sessions are auto-compacting frequently',
 		buildBody: (ctx) => {
-			const n = autoCompactCount(ctx.last30Days);
-			return `Claude Code hit the context window limit and auto-compacted ${n} session${n !== 1 ? 's' : ''} in the last 30 days. ` +
+			const stats = ctx.autoCompactionsLast7Days!;
+			const n = autoCompactCount(ctx);
+			return `Your sessions automatically compacted ${n} time${n !== 1 ? 's' : ''} in the last 7 days (${autoCompactBreakdown(stats)}). ` +
 				`Auto-compaction means earlier context was lost without your control — you may have noticed replies suddenly lacking earlier detail. ` +
-				`To avoid this: start a fresh chat (\`/new\`) when switching tasks, and use \`/compact\` yourself before the window fills.`;
+				`To avoid this: start a fresh chat (\`/new\`) when switching tasks, and use \`/compact\` yourself in Claude before the window fills.`;
 		},
-		appliesTo: (ctx) => autoCompactCount(ctx.last30Days) >= 2,
+		appliesTo: (ctx) => autoCompactCount(ctx) > 5,
 		weight: 65,
 		allowToast: true,
 	},

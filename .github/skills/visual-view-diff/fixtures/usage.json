@@ -831,6 +831,13 @@
     "multiAgentParentSessions": 27,
     "delegationSessions": 45
   },
+  "autoCompactionsLast7Days": {
+    "total": 6,
+    "bySource": {
+      "copilotCli": 4,
+      "claude": 2
+    }
+  },
   "locale": "en-US",
   "lastUpdated": "2026-03-14T09:30:00.000Z",
   "agenticDailyTrend": [
