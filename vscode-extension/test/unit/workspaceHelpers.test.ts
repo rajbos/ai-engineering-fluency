@@ -1844,6 +1844,67 @@ test('resolveSessionWorkspaceName: app-store worktree workspaceFolderPath resolv
     assert.equal(name, 'my-repo');
 });
 
+// Regression coverage for the exact bug class fixed here: resolveSessionWorkspaceName must
+// route every workspaceFolderPath through the worktree-aware getRepoNameFromWorkspacePath(),
+// not a plain path.basename(). Each of these mirrors a layout already covered by
+// utils-pathUtils.test.ts's getRepoNameFromWorkspacePath suite so a future revert to
+// path.basename() fails broadly, not just for a single naming convention.
+const worktreeWorkspaceFolderPathCases: { name: string; workspaceFolderPath: string; expected: string }[] = [
+    {
+        name: 'app-store worktree with an owner sub-segment',
+        workspaceFolderPath: path.join('C:', 'Users', 'me', '.copilot', 'copilot-worktrees', 'my-repo', 'owner-org', 'rajbos-bookish-engine'),
+        expected: 'my-repo',
+    },
+    {
+        name: 'user-repo copilot-worktrees layout (repo before the marker)',
+        workspaceFolderPath: path.join('C:', 'Users', 'me', 'repos', 'my-repo', 'copilot-worktrees', 'session-123'),
+        expected: 'my-repo',
+    },
+    {
+        name: 'claude worktree layout',
+        workspaceFolderPath: path.join('C:', 'Users', 'me', 'repos', 'my-repo', '.claude', 'worktrees', 'feature-x'),
+        expected: 'my-repo',
+    },
+    {
+        name: 'Copilot App "<repo>.worktrees" layout',
+        workspaceFolderPath: path.join('C:', 'Users', 'me', 'repos', 'my-repo.worktrees', 'copilot-worktree-2026-02-07T20-38-48'),
+        expected: 'my-repo',
+    },
+];
+for (const { name, workspaceFolderPath, expected } of worktreeWorkspaceFolderPathCases) {
+    test(`resolveSessionWorkspaceName: ${name} resolves to the repo, not the worktree name`, () => {
+        const resolvedName = resolveSessionWorkspaceName(
+            { workspaceFolderPath },
+            path.join('C:', 'Users', 'me', '.copilot', 'session-store.db#session-id')
+        );
+        assert.equal(resolvedName, expected);
+    });
+}
+
+test('resolveSessionWorkspaceName: workspaceStorage-resolved worktree path also collapses to the repo name', () => {
+    // Proves the *other* call site this fix touched: when VS Code's workspaceStorage
+    // resolution succeeds (rather than falling back to workspaceFolderPath), the resolved
+    // folder must still go through getRepoNameFromWorkspacePath(), not path.basename().
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wh-rsws-wt-'));
+    try {
+        const workspaceFolder = path.join(tmpDir, '.copilot', 'copilot-worktrees', 'my-repo', 'rajbos-bookish-engine');
+        fs.mkdirSync(workspaceFolder, { recursive: true });
+        const workspaceStorage = path.join(tmpDir, 'workspaceStorage', 'wsid456');
+        fs.mkdirSync(workspaceStorage, { recursive: true });
+        fs.writeFileSync(
+            path.join(workspaceStorage, 'workspace.json'),
+            JSON.stringify({ folder: workspaceFolder }),
+            'utf8'
+        );
+        const sessionFile = path.join(workspaceStorage, 'chatSessions', 'session.json');
+        const cache = new Map<string, string | undefined>();
+        const name = resolveSessionWorkspaceName({}, sessionFile, cache);
+        assert.equal(name, 'my-repo');
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
 test('resolveSessionWorkspaceName: falls back to repository when workspaceFolderPath is absent', () => {
     const name = resolveSessionWorkspaceName(
         { repository: 'owner/repo' },
