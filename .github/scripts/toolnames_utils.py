@@ -50,6 +50,22 @@ def _normalize_separators(value: str) -> str:
     return value.replace(".", "_").replace("-", "_")
 
 
+def _camel_to_snake(value: str) -> str:
+    """Insert underscores at camelCase/PascalCase word boundaries.
+
+    Different hosts report the same underlying tool under different naming
+    conventions — e.g. one client's `ListAgents` is another's `list_agents`
+    (see issue #1942). This inserts an underscore before a capital letter
+    that follows a lowercase letter or digit ("ListAgents" -> "List_Agents"),
+    and also splits a run of capitals followed by a lowercase letter
+    ("HTTPServer" -> "HTTP_Server"), so a later `.lower()` collapses both
+    naming conventions to the same snake_case form.
+    """
+    value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", value)
+    value = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", value)
+    return value
+
+
 def _compile_prefix_pattern(prefix: str) -> re.Pattern[str]:
     """Build a regex that also matches numeric-suffixed collision variants.
 
@@ -80,13 +96,50 @@ def canonicalize_tool_id(tool_id: str) -> str:
         match = pattern.match(lowered)
         if match:
             action = tool_id[match.end():]
-            return replacement + _normalize_separators(action)
-    return _normalize_separators(tool_id)
+            return replacement + _normalize_separators(_camel_to_snake(action)).lower()
+    return _normalize_separators(_camel_to_snake(tool_id)).lower()
 
 
 def _normalize_friendly_name(name: str) -> str:
     """Normalize a friendly name so trivial spacing/casing differences match."""
     return re.sub(r"\s+", " ", name.strip().lower())
+
+
+# A friendly display name is a short human-readable label (e.g. "Playwright
+# MCP: Run Workflow") and should never contain JSON/dict structural
+# characters. Seeing one usually means a generator accidentally serialized a
+# nested object instead of a plain string — e.g. PR #1930 added
+# "MCP": "{'run_workflow': 'Playwright MCP: Run Workflow'}" because the SLM
+# used by add-toolnames-with-slm returned a nested object for that tool ID
+# and the code stringified it with str() instead of rejecting it.
+_JSON_FRAGMENT_RE = re.compile(r"[{}\[\]]")
+
+
+def looks_like_json_fragment(value: Any) -> bool:
+    """Flag friendly-name values that are invalid as a display name.
+
+    A friendly name must be a plain string; a value that is itself a dict or
+    list (e.g. a nested object the SLM returned without being str()-ed) is
+    just as invalid as a string containing stray JSON structural characters,
+    so both are treated as "looks like JSON" rather than raising a
+    TypeError. This keeps callers — especially the final backstop before
+    writing to toolNames.json — safe even if an earlier validation step is
+    bypassed or a future caller passes untrusted data straight through.
+    """
+    if not isinstance(value, str):
+        return True
+    return bool(_JSON_FRAGMENT_RE.search(value))
+
+
+def find_invalid_friendly_names(
+    tool_names: dict[str, str]
+) -> list[tuple[str, str]]:
+    """Return (tool_id, friendly) pairs whose friendly name is JSON-like."""
+    return [
+        (tool_id, friendly)
+        for tool_id, friendly in tool_names.items()
+        if looks_like_json_fragment(friendly)
+    ]
 
 
 # Known MCP tool families: keyed by a display prefix, matched by (a) a keyword
@@ -310,6 +363,12 @@ def find_new_duplicate_groups(
     return new_strict, new_canonical
 
 
+def _print_invalid_friendly_names(invalid: list[tuple[str, str]]) -> None:
+    print(f"\nFound {len(invalid)} entr{'y' if len(invalid) == 1 else 'ies'} with a JSON-like friendly name:")
+    for tool_id, friendly in sorted(invalid):
+        print(f"  {tool_id!r} -> {friendly!r}")
+
+
 def _print_report(
     strict_duplicates: dict[str, list[tuple[str, str]]],
     canonical_equivalents: dict[str, list[tuple[str, str]]]
@@ -355,15 +414,23 @@ def main() -> int:
     else:
         strict_duplicates, canonical_equivalents = find_duplicate_groups(tool_names)
 
-    if not strict_duplicates and not canonical_equivalents:
+    # Unlike duplicates, a JSON-like friendly name is never legitimate, so it
+    # always fails the build — even if it was already present at the base
+    # commit — rather than only when newly introduced.
+    invalid_friendly_names = find_invalid_friendly_names(tool_names)
+
+    if not strict_duplicates and not canonical_equivalents and not invalid_friendly_names:
         print("No duplicate-like entries found.")
         return 0
 
     _print_report(strict_duplicates, canonical_equivalents)
+    if invalid_friendly_names:
+        _print_invalid_friendly_names(invalid_friendly_names)
 
-    # Treat strict duplicates as a failing condition for CI; canonical
-    # equivalents are surfaced but do not fail the build on their own.
-    return 1 if strict_duplicates else 0
+    # Treat strict duplicates and JSON-like friendly names as failing
+    # conditions for CI; canonical equivalents are surfaced but do not fail
+    # the build on their own.
+    return 1 if (strict_duplicates or invalid_friendly_names) else 0
 
 
 if __name__ == "__main__":

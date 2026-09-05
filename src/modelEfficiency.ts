@@ -489,3 +489,32 @@ export function computeEfficiencyLowUsageThreshold(usage: ModelEfficiencyUsage):
 	if (calls.length < 4) { return null; }
 	return calls[Math.floor((calls.length - 1) * 0.25)];
 }
+
+/**
+ * Detects a natural "long tail" cutoff in per-model local usage and returns the names of the
+ * models that fall after it, so the UI can collapse them into an "Other models" group.
+ *
+ * Ranks models by call count (descending) and finds the steepest proportional drop between two
+ * consecutive models. Everything at or after that drop is treated as the tail, but only when the
+ * drop is a genuine cliff (usage falls to less than half) and at least two models remain in the
+ * tail — otherwise usage tapers off gradually and no grouping is applied (empty set returned).
+ */
+export function computeLongTailModels(usage: ModelEfficiencyUsage): Set<string> {
+	const ranked = Object.entries(usage)
+		.map(([model, counters]) => ({ model, calls: counters.calls }))
+		.sort((a, b) => b.calls - a.calls);
+	let cutoffIndex = -1;
+	let smallestRatio = 1;
+	for (let i = 1; i < ranked.length; i++) {
+		const previousCalls = ranked[i - 1].calls;
+		if (previousCalls <= 0) { continue; }
+		const ratio = ranked[i].calls / previousCalls;
+		if (ratio < smallestRatio) {
+			smallestRatio = ratio;
+			cutoffIndex = i;
+		}
+	}
+	const tailLength = cutoffIndex === -1 ? 0 : ranked.length - cutoffIndex;
+	if (cutoffIndex === -1 || smallestRatio >= 0.5 || tailLength < 2) { return new Set(); }
+	return new Set(ranked.slice(cutoffIndex).map(entry => entry.model));
+}

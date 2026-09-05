@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool } from '../../../src/utils/toolUtils';
+import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, canonicalizeToolId, lookupKnownToolName } from '../../../src/utils/toolUtils';
 
 // ── resolveGuidMcpToolName ───────────────────────────────────────────────────
 
@@ -135,4 +135,45 @@ test('resolveMcpFamilyToolName: resolves Microsoft Learn docs tools under a mixe
 test('resolveMcpFamilyToolName: resolves GitHub get_label under an unseen server alias', () => {
 	assert.equal(resolveMcpFamilyToolName('mcp_github_mcp_s13be_get_label'), 'GitHub MCP: Get Label');
 	assert.equal(resolveMcpFamilyToolName('mcp_github_mcp_s13be_issue_write'), 'GitHub MCP: Issue Write');
+});
+
+// ── canonicalizeToolId ───────────────────────────────────────────────────────
+// Regression coverage for issue #1942: "ListAgents" (PascalCase, as reported
+// by one host) should canonicalize the same as an existing "list_agents"
+// entry, mirroring canonicalize_tool_id() in .github/scripts/toolnames_utils.py.
+
+test('canonicalizeToolId: PascalCase matches snake_case', () => {
+	assert.equal(canonicalizeToolId('ListAgents'), canonicalizeToolId('list_agents'));
+});
+
+test('canonicalizeToolId: camelCase matches snake_case', () => {
+	assert.equal(canonicalizeToolId('readFile'), canonicalizeToolId('read_file'));
+});
+
+test('canonicalizeToolId: acronym run splits before the trailing word', () => {
+	assert.equal(canonicalizeToolId('HTTPServer'), canonicalizeToolId('http_server'));
+});
+
+test('canonicalizeToolId: plain snake_case is unchanged', () => {
+	assert.equal(canonicalizeToolId('list_agents'), 'list_agents');
+});
+
+// ── lookupKnownToolName ──────────────────────────────────────────────────────
+
+test('lookupKnownToolName: returns exact match', () => {
+	assert.equal(lookupKnownToolName('list_agents', { list_agents: 'List Agents' }), 'List Agents');
+});
+
+test('lookupKnownToolName: returns case-insensitive match', () => {
+	assert.equal(lookupKnownToolName('List_Agents', { list_agents: 'List Agents' }), 'List Agents');
+});
+
+test('lookupKnownToolName: returns canonicalized match for a PascalCase id', () => {
+	// The exact scenario from issue #1942: a host reports "ListAgents" but
+	// toolNames.json only has the snake_case "list_agents" entry.
+	assert.equal(lookupKnownToolName('ListAgents', { list_agents: 'List Agents' }), 'List Agents');
+});
+
+test('lookupKnownToolName: returns undefined when nothing matches', () => {
+	assert.equal(lookupKnownToolName('totally_unknown_tool', { list_agents: 'List Agents' }), undefined);
 });

@@ -304,7 +304,7 @@ import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
-import { isGuidMcpTool, isMcpFamilyResolvedTool } from '../../src/utils/toolUtils';
+import { isGuidMcpTool, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
@@ -865,9 +865,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	public registerExtensionPointButton(button: ExtensionPointButton, handler: () => void | Promise<void>): { dispose(): void } {
 		this._extensionPointButtons.set(button.id, { config: button, handler });
+		this.broadcastExtensionPointButtons();
 		return {
 			dispose: () => {
 				this._extensionPointButtons.delete(button.id);
+				this.broadcastExtensionPointButtons();
 			},
 		};
 	}
@@ -875,6 +877,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private extensionPointButtonsScript(nonce: string): string {
 		const data = [...this._extensionPointButtons.values()].map(e => ({ id: e.config.id, label: e.config.label }));
 		return `<script nonce="${nonce}">window.__EXTENSION_POINT_BUTTONS__ = ${JSON.stringify(data)};</script>`;
+	}
+
+	/**
+	 * Pushes the current extension-point button list to every open webview panel so a button
+	 * registered — or disposed — by a companion extension after a panel's HTML was already
+	 * generated still shows up (or disappears) live. The inline `window.__EXTENSION_POINT_BUTTONS__`
+	 * bootstrap only ever captures a snapshot taken at HTML-generation time, so panels that were
+	 * already open need this message-based follow-up. See `wireExtensionPointButtons` in
+	 * `src/webview/shared/extensionPoints.ts`, which reconciles its button row idempotently.
+	 */
+	private broadcastExtensionPointButtons(): void {
+		const data = [...this._extensionPointButtons.values()].map(e => ({ id: e.config.id, label: e.config.label }));
+		const panels = [
+			this.analysisPanel,
+			this.detailsPanel,
+			this.chartPanel,
+			this.dashboardPanel,
+			this.diagnosticsPanel,
+			this.maturityPanel,
+			this.fluencyLevelViewerPanel,
+			this.environmentalPanel,
+			this.efficiencyPanel,
+		];
+		for (const panel of panels) {
+			if (panel && this.isPanelOpen(panel)) {
+				void panel.webview.postMessage({ command: 'extensionPointButtonsUpdated', buttons: data });
+			}
+		}
 	}
 
 	private async handleExtensionPointAction(buttonId: string): Promise<boolean> {
@@ -1689,7 +1719,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const suppressed = new Set<string>(
 			vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', [])
 		);
-		return Array.from(allTools).filter(tool => !this.toolNameMap[tool] && !this.toolNameMap[tool.toLowerCase()] && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
+		return Array.from(allTools).filter(tool => !lookupKnownToolName(tool, this.toolNameMap) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
 	}
 
 	private async showUnknownMcpToolsBanner(): Promise<void> {
@@ -3212,17 +3242,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!this.analysisPanel) { return; }
 		const analysisStats = await this.calculateUsageAnalysisStats(false, preloaded);
 		if (silent) {
+			// Reuse the same payload builder as the full-refresh paths (_buildAnalysisUpdateData)
+			// so every field the webview renders (correctionReport, repeatedTasks, curationAnalysis, …)
+			// stays populated on periodic silent refreshes instead of being dropped and blanking
+			// tabs that were already showing data (see the Corrections tab going empty while the
+			// insight card still reports accurate counts).
 			void this.analysisPanel.webview.postMessage({
 				command: 'updateStats',
-				data: {
-					today: analysisStats.today, last30Days: analysisStats.last30Days, month: analysisStats.month, lastMonth: analysisStats.lastMonth,
-					locale: analysisStats.locale, customizationMatrix: analysisStats.customizationMatrix || null,
-					missedPotential: analysisStats.missedPotential || [],
-					todaySessions: analysisStats.todaySessions || [],
-					lastUpdated: analysisStats.lastUpdated.toISOString(), backendConfigured: this.isBackendConfigured(),
-					currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
-					insights: this.buildCurrentInsights(analysisStats),
-				},
+				data: this._buildAnalysisUpdateData(analysisStats),
 			});
 		} else {
 			this.analysisWebviewReady = false;
@@ -7206,6 +7233,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 			deleteWorktree: (message) => this.dispatch('deleteWorktree:analysis', () => this.diagHandleDeleteWorktree(message)),
 			cleanupPushedWorktrees: (message) => this.dispatch('cleanupPushedWorktrees:analysis', () => this.diagHandleCleanupPushedWorktrees(message)),
 			cancelCleanupPushedWorktrees: () => this.dispatch('cancelCleanupPushedWorktrees:analysis', () => this.diagHandleCancelCleanupPushedWorktrees()),
+			// The webview posts this when navigator.clipboard rejects (no permission,
+			// no focus). Without a handler the copy button just silently stays on
+			// "Copy" and the user has no idea the path never reached the clipboard.
+			copyFailed: async (message) => {
+				const failedPath = typeof message.path === 'string' ? message.path : '';
+				this.log(`📋 Clipboard write failed from the Usage Analysis webview${failedPath ? ` for ${failedPath}` : ''}`);
+				const choice = await vscode.window.showWarningMessage(
+					l10n.t('usage.copyFailed'),
+					...(failedPath ? [l10n.t('usage.copyFailed.retry')] : [])
+				);
+				if (choice) { await vscode.env.clipboard.writeText(failedPath); }
+			},
 		};
 	}
 
@@ -7576,7 +7615,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			'.eslintrc', 'eslint.config', '.prettierrc', 'prettier.config',
 			'tsconfig.json', 'jsconfig.json', 'package.json', 'Makefile',
 			'Dockerfile', 'docker-compose', '.github/workflows', '.devcontainer',
-			'LICENSE', '.nvmrc', '.node-version'
+			'LICENSE', '.nvmrc', '.node-version', 'README'
 		];
 
 		try {

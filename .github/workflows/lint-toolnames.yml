@@ -14,12 +14,14 @@ on:
     paths:
       - "src/toolNames.json"
       - ".github/scripts/toolnames_utils.py"
+      - ".github/scripts/test_toolnames_utils.py"
       - ".github/workflows/lint-toolnames.yml"
   push:
     branches: [main]
     paths:
       - "src/toolNames.json"
       - ".github/scripts/toolnames_utils.py"
+      - ".github/scripts/test_toolnames_utils.py"
       - ".github/workflows/lint-toolnames.yml"
   workflow_dispatch:
 
@@ -47,6 +49,9 @@ jobs:
           # is actually present locally for the `git show` diff below;
           # the default shallow depth=1 checkout only fetches the head commit.
           fetch-depth: 0
+
+      - name: Run toolnames_utils unit tests
+        run: python3 .github/scripts/test_toolnames_utils.py -v
 
       - name: Check for duplicate-like entries
         id: check

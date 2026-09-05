@@ -6,6 +6,7 @@
  */
 
 import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage, DailyRollupEntry } from './types';
+import type { TaskCategory } from './taskClassification';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { toLocalDayKey } from './utils/dayKeys';
 import { getCustomProviderGroup } from './webview/shared/modelUtils';
@@ -584,12 +585,12 @@ interface PeriodAccumulators {
 
 function getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dayKey: string): DailyTokenStats {
 	if (!dailyStatsMap.has(dayKey)) {
-		dailyStatsMap.set(dayKey, { date: dayKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
+		dailyStatsMap.set(dayKey, { date: dayKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {}, taskCategoryUsage: {} });
 	}
 	return dailyStatsMap.get(dayKey)!;
 }
 
-function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: ModelUsage): void {
+function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: ModelUsage, taskCategory?: TaskCategory): void {
 	entry.tokens += tokens; entry.sessions += 1; entry.interactions += interactions;
 	if (!entry.editorUsage[editorType]) { entry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
 	entry.editorUsage[editorType].tokens += tokens; entry.editorUsage[editorType].sessions += 1;
@@ -609,6 +610,12 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 		if (isUnsafeObjectKey(model)) { continue; }
 		if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
 		entry.editorModelUsage[editorType][model].sessions += 1;
+	}
+	if (taskCategory) {
+		if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
+		if (!entry.taskCategoryUsage[taskCategory]) { entry.taskCategoryUsage[taskCategory] = { tokens: 0, sessions: 0 }; }
+		entry.taskCategoryUsage[taskCategory].tokens += tokens;
+		entry.taskCategoryUsage[taskCategory].sessions += 1;
 	}
 }
 
@@ -646,7 +653,7 @@ function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: num
 	}
 }
 
-function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLast30Days: boolean; addedToMonth: boolean; addedToLastMonth: boolean; addedToToday: boolean }, acc: PeriodAccumulators, dates: UtcDateRanges, editorType: string, dailyStatsMap: Map<string, DailyTokenStats>, repository: string): void {
+function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLast30Days: boolean; addedToMonth: boolean; addedToLastMonth: boolean; addedToToday: boolean }, acc: PeriodAccumulators, dates: UtcDateRanges, editorType: string, dailyStatsMap: Map<string, DailyTokenStats>, repository: string, taskCategory?: TaskCategory): void {
 	const inLast30Days = dayKey >= dates.last30DaysUtcStartKey;
 	const inLastMonth = dayKey >= dates.lastMonthUtcStartKey && dayKey <= dates.lastMonthUtcEndKey;
 	if (!inLast30Days && !inLastMonth) { return; }
@@ -655,7 +662,7 @@ function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLas
 	const cached = dayRollup.cachedReadTokens ?? 0;
 	if (inLast30Days) {
 		const entry = getOrCreateDailyEntry(dailyStatsMap, dayKey);
-		addToDailyEntry(entry, dayTokens, dayInteractions, editorType, repository, dayRollup.modelUsage);
+		addToDailyEntry(entry, dayTokens, dayInteractions, editorType, repository, dayRollup.modelUsage, taskCategory);
 		accumulatePeriod(acc.last30DaysStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToLast30Days, editorType, dayRollup.modelUsage, dayRollup.copilotExactCostDollars);
 		flags.addedToLast30Days = true;
 	}
@@ -689,7 +696,7 @@ function processRollupPath(input: SessionAggregateInput, acc: PeriodAccumulators
 	const repository = sessionData.repository || 'Unknown';
 	const flags = { addedToLast30Days: false, addedToMonth: false, addedToLastMonth: false, addedToToday: false };
 	for (const [dayKey, dayRollup] of Object.entries(sessionData.dailyRollups!)) {
-		processOneRollupDay(dayKey, dayRollup, flags, acc, dates, editorType, dailyStatsMap, repository);
+		processOneRollupDay(dayKey, dayRollup, flags, acc, dates, editorType, dailyStatsMap, repository, sessionData.taskCategory);
 	}
 	if (flags.addedToLast30Days && sessionData.linesAdded !== undefined) {
 		const dayKeys = Object.keys(sessionData.dailyRollups!).sort();
@@ -721,7 +728,7 @@ function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulato
 	if (!inLast30Days && !inLastMonth) { return true; }
 	if (inLast30Days) {
 		const dailyEntry = getOrCreateDailyEntry(dailyStatsMap, lastActivityUtcKey);
-		addToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage);
+		addToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategory);
 		if (sessionData.linesAdded !== undefined) { attributeLocToDay(dailyEntry, sessionData, editorType, repository); }
 		accumulatePeriod(acc.last30DaysStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage, sessionData.copilotExactCostDollars);
 	}

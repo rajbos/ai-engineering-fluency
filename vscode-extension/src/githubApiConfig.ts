@@ -4,6 +4,7 @@
  */
 
 import * as vscode from 'vscode';
+import type * as http from 'http';
 
 /** GitHub REST API hostname for github.com (the default, used when no enterprise URI is configured). */
 export const GITHUB_API_HOSTNAME = 'api.github.com';
@@ -102,4 +103,58 @@ export function buildGitHubApiHeaders(token: string): Record<string, string> {
 		Accept: GITHUB_API_ACCEPT_V3,
 		'X-GitHub-Api-Version': GITHUB_API_VERSION,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Low-level request failure handling shared by every GitHub HTTPS request
+// ---------------------------------------------------------------------------
+
+/**
+ * Marker stamped on the synthetic error passed to `req.destroy()` when our own socket-inactivity
+ * timeout fires, so the paired `'error'` handler can tell it apart from a genuine transport
+ * failure (DNS resolution, TLS handshake, connection reset/refused, ...). `req.destroy(err)`
+ * re-emits `err` on the request's `'error'` event, so both paths land in the same listener.
+ */
+const INACTIVITY_TIMEOUT_MARKER = Symbol('inactivityTimeout');
+
+type MarkedError = NodeJS.ErrnoException & { [INACTIVITY_TIMEOUT_MARKER]?: true };
+
+/**
+ * Attaches error/timeout handling to an in-flight `http(s).ClientRequest`, reporting an accurate,
+ * distinguishable failure reason via `onFailure` instead of a single generic "timed out" string.
+ *
+ * Two distinct failure classes are reported differently:
+ *
+ * - **Socket inactivity**: no bytes exchanged for `timeoutMs`. Node's per-socket idle timer can
+ *   fire well before `timeoutMs` of THIS request's own lifetime has elapsed — e.g. when the
+ *   request reuses a keep-alive connection whose idle clock had already been running before this
+ *   request began. Reporting the configured limit here would be actively misleading, so this
+ *   reports the REAL elapsed time since the request was created instead.
+ * - **Any other transport failure** (DNS, TLS, ECONNRESET, ECONNREFUSED, ...): reported with its
+ *   real `error.code` and message, not folded into the timeout wording.
+ *
+ * Only the first failure is reported — once a request has failed once it will not report again.
+ */
+export function attachRequestFailureHandling(
+	req: http.ClientRequest,
+	timeoutMs: number,
+	onFailure: (message: string) => void,
+): void {
+	const startedAt = Date.now();
+	let settled = false;
+	req.on('error', (e: MarkedError) => {
+		if (settled) { return; }
+		settled = true;
+		const elapsedS = ((Date.now() - startedAt) / 1000).toFixed(1);
+		if (e[INACTIVITY_TIMEOUT_MARKER]) {
+			onFailure(`No response for ${elapsedS}s (socket inactivity limit ${(timeoutMs / 1000).toFixed(0)}s)`);
+			return;
+		}
+		onFailure(`Connection failed after ${elapsedS}s${e.code ? ` (${e.code})` : ''}: ${e.message}`);
+	});
+	req.setTimeout(timeoutMs, () => {
+		const err: MarkedError = new Error('Socket inactivity timeout');
+		err[INACTIVITY_TIMEOUT_MARKER] = true;
+		req.destroy(err);
+	});
 }

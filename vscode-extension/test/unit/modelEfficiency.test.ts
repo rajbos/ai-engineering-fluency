@@ -10,6 +10,7 @@ import {
     deriveModelEfficiencyRates,
     createEmptyModelEfficiencyCounters,
     computeEfficiencyLowUsageThreshold,
+    computeLongTailModels,
     computeModelTokenShares,
     accumulateDailyModelTokens,
     accumulateDailyModelCounters,
@@ -298,6 +299,57 @@ test('computeEfficiencyLowUsageThreshold: correctly identifies Q1 across larger 
         usage[`model-${i}`] = { ...createEmptyModelEfficiencyCounters(), calls };
     });
     assert.equal(computeEfficiencyLowUsageThreshold(usage), 2);
+});
+
+// ---------------------------------------------------------------------------
+// computeLongTailModels
+// ---------------------------------------------------------------------------
+
+function usageWithCalls(counts: Record<string, number>): ModelEfficiencyUsage {
+    const usage: ModelEfficiencyUsage = {};
+    for (const [model, calls] of Object.entries(counts)) {
+        usage[model] = { ...createEmptyModelEfficiencyCounters(), calls };
+    }
+    return usage;
+}
+
+test('computeLongTailModels: groups everything after the steepest proportional drop', () => {
+    // Mirrors a real "Most used models locally" table: a clear cliff between the 4th (82 calls)
+    // and 5th (20 calls) model, with only gentle tapering elsewhere.
+    const usage = usageWithCalls({
+        kimi: 309, sol: 144, sonnet5: 120, opus5: 82,
+        unknown: 20, hydrafusion: 16, mistralMedium: 14, sonnet46: 12, terra: 12, maiCode: 11,
+        synthetic: 3, gpt54: 3, devstral: 3, fable5: 2, mistral2: 2, auto: 1, mistralMedium2: 1, codestral: 1,
+    });
+    const longTail = computeLongTailModels(usage);
+    assert.deepEqual(
+        [...longTail].sort(),
+        ['auto', 'codestral', 'devstral', 'fable5', 'gpt54', 'hydrafusion', 'maiCode', 'mistral2', 'mistralMedium', 'mistralMedium2', 'sonnet46', 'synthetic', 'terra', 'unknown'].sort(),
+    );
+    assert.ok(!longTail.has('opus5'), 'the model just before the cliff must stay in the main list');
+    assert.ok(!longTail.has('kimi'), 'top models must stay in the main list');
+});
+
+test('computeLongTailModels: returns an empty set when usage tapers off gradually', () => {
+    const usage = usageWithCalls({ a: 100, b: 80, c: 65, d: 55, e: 48 });
+    assert.equal(computeLongTailModels(usage).size, 0);
+});
+
+test('computeLongTailModels: returns an empty set when the resulting tail would have fewer than two models', () => {
+    // Steep drop exists (100 → 5), but only one model would land in the tail.
+    const usage = usageWithCalls({ a: 100, b: 5 });
+    assert.equal(computeLongTailModels(usage).size, 0);
+});
+
+test('computeLongTailModels: a clear cliff among just three models still produces a two-model tail', () => {
+    const usage = usageWithCalls({ a: 100, b: 3, c: 1 });
+    assert.deepEqual([...computeLongTailModels(usage)].sort(), ['b', 'c']);
+});
+
+test('computeLongTailModels: ignores zero-call models when scanning for the cliff', () => {
+    const usage = usageWithCalls({ a: 100, b: 40, c: 0, d: 0 });
+    const longTail = computeLongTailModels(usage);
+    assert.deepEqual([...longTail].sort(), ['c', 'd']);
 });
 
 // ---------------------------------------------------------------------------

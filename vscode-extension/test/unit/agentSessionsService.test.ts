@@ -1,17 +1,44 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import type * as http from 'node:http';
+import { EventEmitter } from 'node:events';
 import {
 	collectAgentSessions,
 	detectSessionSource,
 	fetchAgentSessionsForRepo,
 	readSessionUsage,
+	repositoryIdFromTask,
 	requestGitHubJson,
+	requestGitHubJsonTransport,
 	resolveTaskRepo,
 	type AgentRepoSummary,
 	type FetchAccountTaskPageFn,
+	type FetchRepositoryByIdFn,
 	type FetchTaskPageFn,
 	type FetchTaskDetailFn,
 } from '../../src/agentSessionsService';
+
+/**
+ * Minimal stand-in for `http.ClientRequest`, exercising exactly the surface
+ * `attachRequestFailureHandling` (see `src/githubApiConfig.ts`) touches. Lets a test drive the
+ * real request-creation code path in `agentSessionsService.ts` end-to-end without a live network
+ * call. `requestGitHubJsonTransport` accepts an injectable `requestFn` (defaulting to the real
+ * `https.request`) for exactly this purpose — Node's built-in module exports are non-configurable
+ * in current versions, so monkey-patching `https.request` directly is not viable here.
+ */
+class FakeClientRequest extends EventEmitter {
+	private timeoutCallback?: () => void;
+	setTimeout(_ms: number, cb: () => void): this {
+		this.timeoutCallback = cb;
+		return this;
+	}
+	destroy(err?: Error): this {
+		if (err) { this.emit('error', err); }
+		return this;
+	}
+	end(): this { return this; }
+	fireTimeout(): void { this.timeoutCallback?.(); }
+}
 
 // ---------------------------------------------------------------------------
 // detectSessionSource — pure function, no I/O
@@ -59,6 +86,33 @@ test('requestGitHubJson: stops waiting when the transport never settles', async 
 	const hangingTransport = async (): Promise<never> => new Promise(() => {});
 	const result = await requestGitHubJson('/agents/tasks', 'token', hangingTransport, 5);
 	assert.match(result.error ?? '', /GitHub API request \/agents\/tasks timed out/);
+});
+
+// ---------------------------------------------------------------------------
+// requestGitHubJson (default transport) — end-to-end through the real
+// `https.request` wiring, verifying it reports a genuine transport failure
+// distinctly from a socket-inactivity timeout (PR #1919 follow-up item 1: the
+// mislabelled GitHub request timeout).
+// ---------------------------------------------------------------------------
+
+test('requestGitHubJsonTransport: a genuine connection error is reported with its real code, not as a timeout', async () => {
+	const req = new FakeClientRequest();
+	const fakeRequestFn = (() => req) as unknown as typeof http.request;
+	const promise = requestGitHubJsonTransport('/agents/tasks', 'token', fakeRequestFn);
+	req.emit('error', Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }));
+	const result = await promise;
+	assert.match(result.error ?? '', /^Connection failed after \d+(\.\d+)?s \(ECONNRESET\): read ECONNRESET$/);
+	assert.doesNotMatch(result.error ?? '', /timed out|inactivity/i);
+});
+
+test('requestGitHubJsonTransport: a socket-inactivity timeout is reported with the real elapsed time, not the configured limit', async () => {
+	const req = new FakeClientRequest();
+	const fakeRequestFn = (() => req) as unknown as typeof http.request;
+	const promise = requestGitHubJsonTransport('/agents/tasks', 'token', fakeRequestFn);
+	await new Promise((resolve) => setTimeout(resolve, 5));
+	req.fireTimeout();
+	const result = await promise;
+	assert.match(result.error ?? '', /^No response for \d+(\.\d+)?s \(socket inactivity limit 15s\)$/);
 });
 
 test('fetchAgentSessionsForRepo: returns empty result when task list is empty', async () => {
@@ -286,6 +340,21 @@ test('resolveTaskRepo: returns undefined for a task with no resolvable repositor
 });
 
 // ---------------------------------------------------------------------------
+// repositoryIdFromTask — the bare numeric ID the account-wide listing guarantees
+// ---------------------------------------------------------------------------
+
+test('repositoryIdFromTask: reads a numeric repository.id', () => {
+	assert.equal(repositoryIdFromTask({ repository: { id: 42 } }), 42);
+});
+
+test('repositoryIdFromTask: returns undefined when there is no usable ID', () => {
+	assert.equal(repositoryIdFromTask({ repository: { full_name: 'octo/demo' } }), undefined);
+	assert.equal(repositoryIdFromTask({ repository: { id: 'not-a-number' } }), undefined);
+	assert.equal(repositoryIdFromTask({}), undefined);
+	assert.equal(repositoryIdFromTask(undefined), undefined);
+});
+
+// ---------------------------------------------------------------------------
 // collectAgentSessions — workspace repos merged with the account-wide task list
 // ---------------------------------------------------------------------------
 
@@ -328,6 +397,105 @@ test('collectAgentSessions: finds account tasks in repos that are not open in th
 	assert.equal(result.totalCredits, 4);
 });
 
+/** Task as the account-wide listing typically returns it: only a bare `repository.id`. */
+function makeAccountTaskWithRepoId(id: string, repoId: number, updatedAt = '2026-08-01T00:00:00Z'): any {
+	return {
+		id, name: `Task ${id}`, state: 'completed', updated_at: updatedAt, created_at: updatedAt,
+		repository: { id: repoId },
+	};
+}
+
+test('collectAgentSessions: resolves a bare repository.id via GET /repositories/{id}', async () => {
+	const accountPage = firstPageOnly([makeAccountTaskWithRepoId('a1', 555)]);
+	const lookedUp: number[] = [];
+	const fetchRepositoryById: FetchRepositoryByIdFn = async (id) => {
+		lookedUp.push(id);
+		return id === 555 ? { owner: 'octo', repo: 'byid' } : undefined;
+	};
+	const result = await collectAgentSessions({
+		token: 'token',
+		since: SINCE,
+		workspaceRepos: [],
+		fetchTaskPage: NO_TASKS,
+		fetchAccountTaskPage: async ({ page, archived }) => (archived ? { tasks: [] } : accountPage(page)),
+		fetchTaskDetail: async () => ({ sessions: [makeSession('cloud-model', 3)] }),
+		fetchAccountTaskDetail: async () => ({ sessions: [] }),
+		fetchRepositoryById,
+	});
+
+	assert.deepEqual(lookedUp, [555]);
+	assert.equal(result.repos.length, 1);
+	assert.equal(result.repos[0].owner, 'octo');
+	assert.equal(result.repos[0].repo, 'byid');
+	assert.ok(!result.repos[0].unassigned);
+	assert.equal(result.repos[0].discovery, 'account');
+	assert.equal(result.totalCredits, 3);
+});
+
+test('collectAgentSessions: dedups repository-ID lookups across tasks sharing the same repo', async () => {
+	const accountPage = firstPageOnly([
+		makeAccountTaskWithRepoId('a1', 777, '2026-08-01T00:00:00Z'),
+		makeAccountTaskWithRepoId('a2', 777, '2026-08-02T00:00:00Z'),
+	]);
+	let lookups = 0;
+	const fetchRepositoryById: FetchRepositoryByIdFn = async () => { lookups++; return { owner: 'octo', repo: 'shared-by-id' }; };
+	const result = await collectAgentSessions({
+		token: 'token',
+		since: SINCE,
+		workspaceRepos: [],
+		fetchTaskPage: NO_TASKS,
+		fetchAccountTaskPage: async ({ page, archived }) => (archived ? { tasks: [] } : accountPage(page)),
+		fetchTaskDetail: async () => ({ sessions: [] }),
+		fetchAccountTaskDetail: async () => ({ sessions: [] }),
+		fetchRepositoryById,
+	});
+
+	assert.equal(lookups, 1, 'one lookup per distinct repository ID, not per task');
+	assert.equal(result.repos.length, 1);
+	assert.equal(result.repos[0].tasksTotal, 2);
+});
+
+test('collectAgentSessions: a task whose repository-ID lookup fails still lands in the "no repository" bucket', async () => {
+	const accountPage = firstPageOnly([makeAccountTaskWithRepoId('a1', 999)]);
+	const result = await collectAgentSessions({
+		token: 'token',
+		since: SINCE,
+		workspaceRepos: [],
+		fetchTaskPage: NO_TASKS,
+		fetchAccountTaskPage: async ({ page, archived }) => (archived ? { tasks: [] } : accountPage(page)),
+		fetchTaskDetail: async () => ({ sessions: [] }),
+		fetchAccountTaskDetail: async () => ({ sessions: [] }),
+		fetchRepositoryById: async () => undefined,
+	});
+
+	assert.equal(result.repos.length, 1);
+	assert.equal(result.repos[0].unassigned, true);
+});
+
+test('collectAgentSessions: repository-ID lookups are capped, leaving the rest in the "no repository" bucket', async () => {
+	const tasks = [
+		makeAccountTaskWithRepoId('a1', 1),
+		makeAccountTaskWithRepoId('a2', 2),
+		makeAccountTaskWithRepoId('a3', 3),
+	];
+	const accountPage = firstPageOnly(tasks);
+	const result = await collectAgentSessions({
+		token: 'token',
+		since: SINCE,
+		workspaceRepos: [],
+		maxRepoIdLookups: 2,
+		fetchTaskPage: NO_TASKS,
+		fetchAccountTaskPage: async ({ page, archived }) => (archived ? { tasks: [] } : accountPage(page)),
+		fetchTaskDetail: async () => ({ sessions: [] }),
+		fetchAccountTaskDetail: async () => ({ sessions: [] }),
+		fetchRepositoryById: async (id) => ({ owner: 'octo', repo: `repo-${id}` }),
+	});
+
+	const resolvedRepos = result.repos.filter(r => !r.unassigned);
+	assert.equal(resolvedRepos.length, 2, 'only the first two distinct IDs are looked up');
+	assert.ok(result.repos.some(r => r.unassigned), 'the ID left over falls back to the unassigned bucket');
+});
+
 test('collectAgentSessions: a task in both listings is detailed once and marked as seen from both', async () => {
 	const shared = makeAccountTask('shared', 'octo/demo');
 	let detailCalls = 0;
@@ -347,6 +515,29 @@ test('collectAgentSessions: a task in both listings is detailed once and marked 
 	assert.equal(result.repos[0].tasksTotal, 1);
 	assert.equal(result.totalCredits, 7);
 	assert.equal(result.totalTasks, 1);
+});
+
+test('collectAgentSessions: a shared task whose account-listing repo-ID lookup fails does not spawn a spurious "no repository" row', async () => {
+	// Same task ID appears in both listings: the workspace listing resolves it via `owner`/`repo`
+	// filters, but the account-wide object only carries a bare repository ID whose lookup fails.
+	const workspaceTask = makeAccountTask('shared', undefined, '2026-08-01T00:00:00Z');
+	const accountTask = makeAccountTaskWithRepoId('shared', 4242, '2026-08-01T00:00:00Z');
+	const result = await collectAgentSessions({
+		token: 'token',
+		since: SINCE,
+		workspaceRepos: [{ owner: 'octo', repo: 'demo' }],
+		fetchTaskPage: async ({ page, archived }) => (!archived && page === 1 ? { tasks: [workspaceTask] } : { tasks: [] }),
+		fetchAccountTaskPage: async ({ page, archived }) => (!archived && page === 1 ? { tasks: [accountTask] } : { tasks: [] }),
+		fetchTaskDetail: async () => ({ sessions: [makeSession('cloud-model', 6)] }),
+		fetchAccountTaskDetail: async () => ({ sessions: [] }),
+		fetchRepositoryById: async () => undefined,
+	});
+
+	assert.equal(result.repos.length, 1, 'the failed account-side lookup must not create a second, unassigned row');
+	assert.equal(result.repos[0].owner, 'octo');
+	assert.equal(result.repos[0].repo, 'demo');
+	assert.equal(result.repos[0].discovery, 'both');
+	assert.equal(result.repos[0].tasksTotal, 1);
 });
 
 test('collectAgentSessions: tasks with no repository land in their own bucket, detailed by ID', async () => {

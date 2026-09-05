@@ -11,6 +11,13 @@ All notable changes to the VS Code extension will be documented in this file.
 - Group models from user-configured custom endpoints (BYOK) under their own provider group (e.g. `Mistral (Custom)`) in the Details "Cost by Provider" panel and the provider charts, instead of lumping them into "GitHub Copilot"/"Other"
 - Show only the model part of a three-part custom-endpoint model ID (`customendpoint/Mistral/mistral-medium-latest` → `mistral-medium-latest`), and estimate its cost from that model's pricing entry
 
+### Bug Fixes
+- Fix the "Efficiency" nav button in the Efficiency view doing nothing when clicked — the view passed no active view to the shared nav bar, so its own button rendered enabled with no click handler instead of being marked as the current page
+- Surface a warning when copying a path from the Usage Analysis view fails: the webview reported the failure but nothing on the extension side listened, so a failed copy was completely silent
+
+### Chores
+- New validation tooling: `npm run preflight` runs every check in one pass (see [docs/VALIDATION.md](../docs/VALIDATION.md)), `npm run check:contract` fails the build when a webview message has no handler on the other side, and `npm run check:interaction` clicks every control in every panel headlessly. CI now also renders before/after webview screenshots on pull requests
+
 ## [0.17.2] - 2026-08-17
 
 ### Features

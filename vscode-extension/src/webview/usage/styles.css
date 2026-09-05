@@ -504,6 +504,26 @@ body {
 	background: var(--model-color);
 }
 
+.model-leaderboard-other {
+	margin-top: 8px;
+}
+
+.model-leaderboard-other > summary {
+	cursor: pointer;
+	user-select: none;
+	font-size: 12px;
+	color: var(--text-secondary);
+	padding: 4px 0;
+}
+
+.model-leaderboard-other > summary:hover {
+	color: var(--link-color);
+}
+
+.model-leaderboard-other[open] > summary {
+	margin-bottom: 6px;
+}
+
 .model-use-cell {
 	display: grid;
 	grid-template-columns: 82px 42px auto;

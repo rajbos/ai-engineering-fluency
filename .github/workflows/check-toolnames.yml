@@ -348,6 +348,9 @@ jobs:
           python3 - << 'PYEOF'
           import json, re, sys, urllib.request, urllib.error, os
 
+          sys.path.insert(0, ".github/scripts")
+          from toolnames_utils import looks_like_json_fragment
+
           with open("/tmp/missing-tools.json") as f:
               missing_tools = json.load(f)
 
@@ -404,6 +407,12 @@ jobs:
               "  Claude Code IDs look like mcp__<server>__<tool>.",
               "- Tool IDs without any MCP prefix: just Title Case the words.",
               '- Never output placeholder text like "Tool Name Not Found" or "Unknown".',
+              "- Every value must be a plain string, never a nested JSON object or array.",
+              '  WRONG: {"MCP": {"run_workflow": "Playwright MCP: Run Workflow"}}',
+              '  RIGHT: {"MCP_run_workflow": "Playwright MCP: Run Workflow"}',
+              "  If a tool ID looks like it could describe multiple actions, pick the",
+              "  single best display name for that exact ID as given — do not invent",
+              "  sub-keys or restructure the input.",
               "",
               "EXISTING MAPPINGS (follow these patterns):",
               sample_lines,
@@ -411,7 +420,9 @@ jobs:
               "INPUT:",
               tool_ids_json,
               "",
-              "OUTPUT: JSON object only, no explanation.",
+              "OUTPUT: a flat JSON object only, no explanation. Every key must be exactly",
+              "one of the INPUT tool IDs (same spelling), and every value a plain string",
+              "with no braces, brackets, or quotes of its own.",
           ])
 
           payload = {
@@ -445,8 +456,21 @@ jobs:
               PLACEHOLDERS = {"tool name not found", "unknown", "not found", "n/a", "none", "unknown tool"}
               validated = {}
               for tool in missing_tools:
-                  friendly = str(generated.get(tool, "")).strip()
-                  if not friendly or len(friendly) > 200 or friendly.lower() in PLACEHOLDERS:
+                  raw = generated.get(tool, "")
+                  # The model occasionally nests a sub-object under a key
+                  # instead of a plain string (e.g. {"MCP": {"run_workflow":
+                  # "Playwright MCP: Run Workflow"}}). str()-ing that dict
+                  # produces a Python-repr string like
+                  # "{'run_workflow': 'Playwright MCP: Run Workflow'}", which
+                  # is not a valid friendly name — treat it as missing rather
+                  # than forwarding the raw structure.
+                  friendly = "" if isinstance(raw, (dict, list)) else str(raw).strip()
+                  if (
+                      not friendly
+                      or len(friendly) > 200
+                      or friendly.lower() in PLACEHOLDERS
+                      or looks_like_json_fragment(friendly)
+                  ):
                       # Local fallback transformation
                       s = re.sub(r'[_\-.]', ' ', tool)
                       s = re.sub(r'([a-z])([A-Z])', r'\1 \2', s)
@@ -483,20 +507,33 @@ jobs:
 
       - name: Update toolNames.json with new entries
         if: steps.extract.outputs.has_missing == 'true'
+        id: update
         run: |
           python3 - << 'PYEOF'
-          import json, re, sys
+          import json, os, re, sys
 
           sys.path.insert(0, ".github/scripts")
-          from toolnames_utils import find_friendly_duplicates, find_matches_for_new_tool
+          from toolnames_utils import find_friendly_duplicates, find_matches_for_new_tool, looks_like_json_fragment
 
           TOOLNAMES_FILE = "src/toolNames.json"
+          SKIP_REASONS_FILE = "/tmp/slm-skip-reasons.json"
+
+          skip_reasons = []
+
+          def write_skip_reasons():
+              with open(SKIP_REASONS_FILE, "w") as f:
+                  json.dump(skip_reasons, f)
+
+          def skip(tool_id, reason):
+              print(f"Skipping {tool_id!r} — {reason}", file=sys.stderr)
+              skip_reasons.append({"tool_id": tool_id, "reason": reason})
 
           with open("/tmp/slm-names.json") as f:
               new_entries = json.load(f)
 
           if not new_entries:
               print("No new entries to add.", file=sys.stderr)
+              write_skip_reasons()
               sys.exit(0)
 
           with open(TOOLNAMES_FILE) as f:
@@ -504,34 +541,52 @@ jobs:
 
           to_add = {}
           for tool_id, friendly_name in new_entries.items():
+              # Final backstop: never write a JSON-like friendly name, even
+              # if the generation step's own fallback was somehow bypassed.
+              if looks_like_json_fragment(friendly_name):
+                  skip(
+                      tool_id,
+                      f"friendly name {friendly_name!r} looks like a stray JSON/dict "
+                      "fragment, not a valid display name"
+                  )
+                  continue
               matches = find_matches_for_new_tool(tool_id, known_tools)
               if matches["exact"]:
-                  print(f"Skipping {tool_id!r} — already present", file=sys.stderr)
+                  skip(tool_id, "already present")
                   continue
               if matches["case_variant"]:
                   existing_id = matches["case_variant"][0][0]
-                  print(f"Skipping {tool_id!r} — case variant of {existing_id!r}", file=sys.stderr)
+                  skip(tool_id, f"case variant of {existing_id!r}")
                   continue
               if matches["canonical_equivalent"]:
                   existing_id = matches["canonical_equivalent"][0][0]
-                  print(f"Skipping {tool_id!r} — canonical equivalent of {existing_id!r}", file=sys.stderr)
+                  skip(tool_id, f"canonical equivalent of {existing_id!r}")
                   continue
               if matches["family_equivalent"]:
-                  print(f"Skipping {tool_id!r} — resolves via known MCP family pattern", file=sys.stderr)
+                  skip(tool_id, "resolves via known MCP family pattern")
                   continue
               friendly_dups = find_friendly_duplicates(friendly_name, known_tools)
               if friendly_dups:
                   existing_id, existing_friendly = friendly_dups[0]
-                  print(
-                      f"Skipping {tool_id!r} — friendly name '{friendly_name}' already used by "
-                      f"{existing_id!r} ({existing_friendly})",
-                      file=sys.stderr
+                  skip(
+                      tool_id,
+                      f"friendly name '{friendly_name}' already used by "
+                      f"{existing_id!r} ({existing_friendly})"
                   )
                   continue
               to_add[tool_id] = friendly_name
 
+          write_skip_reasons()
+
           if not to_add:
               print("All entries already present after dedup. Nothing to write.", file=sys.stderr)
+              print(
+                  f"::warning::add-toolnames-with-slm generated {len(new_entries)} friendly "
+                  f"name(s) but all were skipped by dedup, so no PR was opened. See the "
+                  "'Update toolNames.json with new entries' step log for per-tool reasons."
+              )
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write("added_count=0\n")
               sys.exit(0)
 
           ordered_items = list(known_tools.items()) + list(to_add.items())
@@ -552,6 +607,8 @@ jobs:
           with open(TOOLNAMES_FILE, "w") as f:
               f.write(new_content)
           print(f"✅ Wrote {len(to_add)} new entries to toolNames.json", file=sys.stderr)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"added_count={len(to_add)}\n")
           PYEOF
           
       - name: Restore gradlew files to prevent stash conflicts
@@ -632,7 +689,15 @@ jobs:
                   lines.append("")
                   lines.append("> ⚠️ Also check whether any of these tools should be added to `automaticTools.json`.")
               else:
-                  lines.append("> ℹ️ No PR was opened (either no changes were needed or generation failed).")
+                  skip_path = "/tmp/slm-skip-reasons.json"
+                  skip_reasons = json.load(open(skip_path)) if os.path.exists(skip_path) else []
+                  lines.append("> ⚠️ **No PR was opened** — every generated name was rejected by dedup, so `toolNames.json` was left unchanged:")
+                  lines.append(">")
+                  if skip_reasons:
+                      for item in skip_reasons:
+                          lines.append(f"> - `{esc(item['tool_id'])}`: {esc(item['reason'])}")
+                  else:
+                      lines.append("> - (no per-tool reason was recorded — check the workflow run log below)")
               lines.append("")
               lines.append(f"_Workflow run: {server_url}/{repo}/actions/runs/{run_id}_")
               comment = "\n".join(lines)
