@@ -3525,16 +3525,6 @@ background: var(--bg-tertiary);
 	color: var(--text-muted);
 	flex: 1;
 }
-
-.worktree-repo-actions {
-	white-space: nowrap;
-}
-
-.worktree-repo-cleanup-btn {
-	font-size: 12px;
-	padding: 4px 10px;
-	font-weight: normal;
-}
 `;
 
   // ../src/webview/shared/modelUtils.ts
@@ -5458,11 +5448,11 @@ ${_renderMultiModelMixedCostSessions(switching)}
     updateWorktreeResults();
     vscode.postMessage({ command: "scanWorktrees", rootPaths: worktreeRoots });
   }
-  function startWorktreeCleanup(repoLabel) {
+  function startWorktreeCleanup() {
     if (worktreeCleanupInProgress || worktreeCleanupConfirmPending || worktreeScanInProgress) {
       return;
     }
-    const targets = getCleanupCandidates(repoLabel);
+    const targets = getCleanupCandidates();
     if (targets.length === 0) {
       return;
     }
@@ -5470,8 +5460,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     updateWorktreeResults();
     vscode.postMessage({
       command: "cleanupPushedWorktrees",
-      worktrees: targets.map((w2) => ({ path: w2.path, branch: w2.branch, repoLabel: w2.repoLabel })),
-      repoLabel
+      worktrees: targets.map((w2) => ({ path: w2.path, branch: w2.branch, repoLabel: w2.repoLabel }))
     });
   }
   function _handleWorktreeActionButtonClick(target) {
@@ -5497,14 +5486,6 @@ ${_renderMultiModelMixedCostSessions(switching)}
     }
     if (target.id === "btn-cancel-cleanup") {
       vscode.postMessage({ command: "cancelCleanupPushedWorktrees" });
-      return true;
-    }
-    const repoCleanupBtn = target.closest(".worktree-repo-cleanup-btn");
-    if (repoCleanupBtn) {
-      const repo = decodeURIComponent(repoCleanupBtn.getAttribute("data-repo") || "");
-      if (repo) {
-        startWorktreeCleanup(repo);
-      }
       return true;
     }
     return false;
@@ -7267,13 +7248,6 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const size = `<span title="${totalBytes.toLocaleString()} bytes">${formatFileSize(totalBytes)}</span>`;
     return pending ? `${size} <span class="worktree-pending">\u2026</span>` : size;
   }
-  function buildWorktreeRepoCleanupButtonHtml(repoLabel, worktrees) {
-    const pushedCount = worktrees.filter((w2) => w2.pushed === "yes" && !isWorktreePending(w2)).length;
-    const disabled = worktreeCleanupInProgress || worktreeCleanupConfirmPending || worktreeScanInProgress || pushedCount === 0;
-    return `<button type="button" class="button secondary worktree-repo-cleanup-btn" data-repo="${encodeURIComponent(repoLabel)}"
-    title="Remove this repository's pushed worktrees via git worktree remove (asks for confirmation)" ${disabled ? "disabled" : ""}
-    >\u{1F9F9} Clean up (${pushedCount})</button>`;
-  }
   function buildWorktreeRepoRowsHtml(repoLabel, worktrees) {
     const expanded = worktreeExpandedRepos.has(repoLabel);
     const caret = expanded ? "\u25BC" : "\u25B6";
@@ -7282,10 +7256,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
     <td><span class="worktree-caret">${caret}</span> ${escapeHtml(repoLabel)}</td>
     <td>${worktrees.length}</td>
     <td>${worktreeSizeText(worktrees)}</td>
-    <td class="worktree-repo-actions">${buildWorktreeRepoCleanupButtonHtml(repoLabel, worktrees)}</td>
   </tr>`;
     const detailsRow = `<tr class="worktree-repo-details" data-repo="${repoAttr}"${expanded ? "" : ' style="display: none;"'}>
-    <td colspan="4">${buildWorktreeDetailsTableHtml(worktrees)}</td>
+    <td colspan="3">${buildWorktreeDetailsTableHtml(worktrees)}</td>
   </tr>`;
     return summaryRow + detailsRow;
   }
@@ -7307,8 +7280,8 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const diff = value(a3[1]) - value(b3[1]);
     return diff !== 0 ? dir * diff : a3[0].localeCompare(b3[0]);
   }
-  function getCleanupCandidates(repoLabel) {
-    return worktreeResults.filter((w2) => w2.pushed === "yes" && !isWorktreePending(w2) && (repoLabel === void 0 || w2.repoLabel === repoLabel));
+  function getCleanupCandidates() {
+    return worktreeResults.filter((w2) => w2.pushed === "yes" && !isWorktreePending(w2));
   }
   function renderWorktreeCleanupCard() {
     const pushedCount = getCleanupCandidates().length;
@@ -7384,7 +7357,6 @@ ${_renderMultiModelMixedCostSessions(switching)}
         <th class="sortable" data-wt-sort="repo">Repository${getWorktreeSortIndicator("repo")}</th>
         <th class="sortable" data-wt-sort="count">Worktrees${getWorktreeSortIndicator("count")}</th>
         <th class="sortable" data-wt-sort="size">Size${getWorktreeSortIndicator("size")}</th>
-        <th>Actions</th>
       </tr></thead>
       <tbody>${repoRows}</tbody>
     </table>
