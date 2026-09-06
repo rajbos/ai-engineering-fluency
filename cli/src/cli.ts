@@ -2,7 +2,7 @@
  * Copilot Token Tracker CLI
  *
  * Command-line interface for analyzing GitHub Copilot token usage
- * from local session files. Can be run via `npx copilot-token-tracker-cli`.
+ * from local session files. Can be run via `npx ai-engineering-fluency`.
  */
 import { Command } from 'commander';
 import { statsCommand } from './commands/stats';

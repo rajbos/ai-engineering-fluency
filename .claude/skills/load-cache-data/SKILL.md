@@ -305,7 +305,7 @@ The cache is tightly integrated with the extension's token tracking:
 **Solutions**:
 1. Check that session files exist via `getCopilotSessionFiles()`
 2. Verify global state is accessible
-3. Look for errors in Output channel (GitHub Copilot Token Tracker)
+3. Look for errors in Output channel (AI Engineering Fluency)
 
 ### Cache Out of Sync
 **Symptoms**: Token counts don't match session file contents

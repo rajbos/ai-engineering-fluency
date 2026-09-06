@@ -114,7 +114,7 @@ While implementation is complete, these manual tests should be performed:
 
 1. **Light Theme Testing**
    - Open VS Code with "Light+" or "Light (Visual Studio)" theme
-   - Run command: "Copilot Token Tracker: Show Details"
+   - Run command: "AI Engineering Fluency: Show Details"
    - Navigate through all 5 panels (Details, Chart, Usage, Diagnostics, Log Viewer)
    - Verify all text is readable, no dark-on-dark or light-on-light issues
    - Check buttons, borders, cards are visible

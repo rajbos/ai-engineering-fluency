@@ -16,7 +16,7 @@
 
 ### Test Steps
 1. Open Command Palette (`Ctrl+Shift+P`)
-2. Run "Copilot Token Tracker: Show Copilot Fluency Score"
+2. Run "AI Engineering Fluency: Show Copilot Fluency Score"
 3. **Verify**: Header shows "🔍 Level Viewer" button (should be visible)
 4. Click the "🔍 Level Viewer" button
 5. **Verify**: New panel opens titled "Fluency Level Viewer"
@@ -48,7 +48,7 @@
 
 ### Test Steps - Via Command
 1. Open Command Palette (`Ctrl+Shift+P`)
-2. Run "Copilot Token Tracker: Show Fluency Level Viewer (Debug Only)"
+2. Run "AI Engineering Fluency: Show Fluency Level Viewer (Debug Only)"
 3. **Verify**: Warning message appears: "Fluency Level Viewer is only available when a debugger is active."
 4. **Verify**: "Learn More" button is shown
 5. Click "Learn More"
@@ -56,7 +56,7 @@
 
 ### Test Steps - Via Fluency Score Panel
 1. Open Command Palette (`Ctrl+Shift+P`)
-2. Run "Copilot Token Tracker: Show Copilot Fluency Score"
+2. Run "AI Engineering Fluency: Show Copilot Fluency Score"
 3. **Verify**: Header does NOT show "🔍 Level Viewer" button
 4. **Verify**: Only standard buttons are shown (Refresh, Details, Chart, Usage, Diagnostics)
 

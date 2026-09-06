@@ -459,7 +459,7 @@ Methods available:
 - `warn(message)` (line 151): Warning-level logging
 - `error(message, error?)` (line 156): Error-level logging
 
-All logs go to "GitHub Copilot Token Tracker" output channel.
+All logs go to "AI Engineering Fluency" output channel.
 
 ### Diagnostic Report Generation
 **Method**: `generateDiagnosticReport()`

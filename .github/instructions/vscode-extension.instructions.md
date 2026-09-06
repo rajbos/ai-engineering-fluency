@@ -209,7 +209,7 @@ These are two completely separate logging systems:
 
 | Context | Method | Destination | Visibility |
 |---------|--------|-------------|------------|
-| Extension (`vscode-extension/src/extension.ts`) | `this.log()`, `this.warn()`, `this.error()` | VS Code Output Channel | Output panel → "Copilot Token Tracker" |
+| Extension (`vscode-extension/src/extension.ts`) | `this.log()`, `this.warn()`, `this.error()` | VS Code Output Channel | Output panel → "AI Engineering Fluency" |
 | Webview (`vscode-extension/src/webview/*/main.ts`) | `console.log()` | Browser DevTools | Help → Toggle Developer Tools in webview |
 
 - Clearing the output channel (`outputChannel.clear()`) does NOT affect webview console logs

@@ -88,7 +88,7 @@ Uses DefaultAzureCredential for authentication:
 ### Option 2: Shared Key
 
 Uses account access key stored in VS Code SecretStorage:
-- Set via command: "Copilot Token Tracker: Set Backend Storage Shared Key"
+- Set via command: "AI Engineering Fluency: Set Backend Storage Shared Key"
 - Does not sync across devices
 - Requires account key from Azure Portal
 
