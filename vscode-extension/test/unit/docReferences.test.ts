@@ -243,17 +243,32 @@ test('doc references: quoted UI strings match the current product name', () => {
 
 test('doc references: CLI comment matches the real npx package name', () => {
 	const cliPackageJson = readJson('cli/package.json');
-	const binNames = Object.keys(cliPackageJson.bin ?? {});
-	assert.equal(binNames.length, 1, `Expected exactly one cli/package.json bin entry, found: ${binNames.join(', ')}`);
-	const currentBinName = binNames[0];
 
-	const staleBinName = 'copilot-token-tracker-cli';
-	assert.notEqual(currentBinName, staleBinName, 'source of truth still says the old bin name — update this test');
+	// `npx <x>` resolves <x> against the npm PACKAGE name, not the bin name. Those differ
+	// here — the package is scoped (@rajbos/...) while the bin is bare — so validating
+	// against `bin` would happily accept `npx ai-engineering-fluency`, which resolves to a
+	// different (unscoped) package entirely. An earlier revision of this test made exactly
+	// that mistake and passed on a wrong invocation; assert against `name`.
+	const packageName: string = cliPackageJson.name;
+	assert.ok(packageName, 'cli/package.json has no "name" field to validate against');
+
+	const staleNames = ['copilot-token-tracker-cli', 'copilot-token-tracker'];
+	for (const stale of staleNames) {
+		assert.notEqual(packageName, stale, `source of truth still says the old package name — update this test`);
+	}
 
 	const cliTsContent = readRepoFile('cli/src/cli.ts');
-	assert.ok(
-		!cliTsContent.includes(staleBinName),
-		`cli/src/cli.ts still references the stale npx package name "${staleBinName}". ` +
-		`Source of truth: cli/package.json bin is "${currentBinName}".`
-	);
+
+	// Every `npx …` invocation in the file must name the real package.
+	const npxInvocations = [...cliTsContent.matchAll(/npx\s+(@?[\w./-]+)/g)];
+	assert.ok(npxInvocations.length > 0, 'expected at least one `npx …` invocation in cli/src/cli.ts');
+	for (const match of npxInvocations) {
+		assert.equal(
+			match[1],
+			packageName,
+			`cli/src/cli.ts documents "npx ${match[1]}", which does not resolve to this package. ` +
+			`Source of truth: cli/package.json "name" is "${packageName}" ` +
+			`(note: the bin name is NOT what npx resolves).`
+		);
+	}
 });

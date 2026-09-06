@@ -172,16 +172,22 @@
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\automaticTools.json" />
     </ItemGroup>
     <!--
-      Fail the build loudly when the freshly-built bundles are absent. There is no committed
-      fallback under webview\*.js any more (see docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md) — the
-      dist/webview build is the ONLY source of webview content, so if it's missing the Copy
-      below would silently no-op and the VSIX would ship with NO webview content at all, a
-      green build with a broken product. Build vscode-extension first (npm run package)
-      or use ./build.ps1 -Project visualstudio, which rebuilds the bundles automatically.
+      Fail the build loudly when ANY of the freshly-built bundles is absent. There is no
+      committed fallback under webview\*.js any more (see docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md)
+      — the dist/webview build is the ONLY source of webview content, so a missing input means
+      the Copy below silently ships a VSIX with partial or no webview content: a green build
+      with a broken product. Build vscode-extension first (npm run package) or use
+      ./build.ps1 -Project visualstudio, which rebuilds the bundles automatically.
+
+      Every item in _WebviewBundle is checked, not just one representative file — a
+      probe on a single bundle would pass while the other nine were missing.
     -->
+    <ItemGroup>
+      <_MissingWebviewBundle Include="@(_WebviewBundle)" Condition="!Exists('%(_WebviewBundle.FullPath)')" />
+    </ItemGroup>
     <Error
-      Condition="!Exists('..\..\..\vscode-extension\dist\webview\details.js')"
-      Text="vscode-extension/dist/webview bundles not found — nothing to package into webview\*.js (no committed fallback exists). Run 'npm run package' in vscode-extension/ or build via ./build.ps1 -Project visualstudio." />
+      Condition="'@(_MissingWebviewBundle)' != ''"
+      Text="vscode-extension/dist/webview bundle(s) not found: @(_MissingWebviewBundle->'%(Filename)%(Extension)', ', ') — nothing to package into webview\ (no committed fallback exists). Run 'npm run package' in vscode-extension/ or build via ./build.ps1 -Project visualstudio." />
     <Warning
       Condition="!Exists('$(MSBuildProjectDirectory)\cli-bundle\copilot-token-tracker.exe')"
       Text="cli-bundle/copilot-token-tracker.exe not found — the VSIX will have NO bundled CLI and will show empty/zero usage data. Run ./build.ps1 -Project visualstudio to build and copy the CLI exe." />
