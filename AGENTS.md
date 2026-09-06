@@ -221,3 +221,7 @@ preflight, is in [docs/VALIDATION.md](docs/VALIDATION.md).
 ## Localization changes require test coverage
 
 When adding or changing runtime localization keys (entries in `vscode-extension/package.nls.json` / `package.nls.zh-cn.json` consumed via the `l10n.t()` helper in `vscode-extension/src/l10n.ts`), add unit tests in `vscode-extension/test/unit/l10n.test.ts` asserting the new keys resolve to their expected English text (and zh-CN translation where one exists). PR review flags localization changes that ship without this coverage.
+
+## File-size ceiling (`max-lines`)
+
+`vscode-extension/eslint.config.mjs` enforces `"max-lines": ["warn", { max: 6000, ... }]` alongside the existing complexity rules. The per-function rules (`max-lines-per-function`, `complexity`, `sonarjs/cognitive-complexity`) were all satisfied while `vscode-extension/src/extension.ts` grew to 12,332 lines and 553 methods — proof that small functions alone don't stop a file from becoming unmanageable. New code should not push any linted file past 6000 lines; if you're about to, split it instead. `extension.ts` is today's sole (known) outlier, and stays that way on purpose until it's decomposed — see `docs/adr/EXTENSION-TS-DECOMPOSITION.md` for the extraction plan. Ratchet the 6000 number down as files shrink; don't raise it to accommodate growth.
