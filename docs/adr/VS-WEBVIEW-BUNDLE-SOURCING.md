@@ -1,5 +1,56 @@
 # Should the Visual Studio Webview Bundles Stay Committed?
 
+> ## 🚧 RELEASE GATE — READ THIS BEFORE THE NEXT VS RELEASE 🚧
+>
+> **Status: the ten committed webview files have been DELETED from git.** As of
+> the commit that added this banner, `visualstudio-extension/src/AIEngineeringFluency/webview/`
+> is empty in git — the six `.js` bundles and four `.json` sidecars are now
+> produced *only* by `CopyWebviewBundles`/`AddWebviewBundlesToVsix` in
+> `AIEngineeringFluency.csproj` at build time, from a fresh
+> `vscode-extension/dist/webview` build. **This has not been validated on a real
+> Windows/MSBuild/VSSDK build.** The container that made this change has no
+> `dotnet`, no MSBuild, no Windows, and no Visual Studio — everything about
+> whether the VSIX still packages correctly is inferred from reading the
+> `.csproj` and MSBuild's documented evaluate-then-execute model, not executed.
+>
+> **Before the next Visual Studio extension release ships, a human MUST, on a
+> real Windows machine with Visual Studio 2022 (VSSDK workload) and this repo's
+> MSBuild/.NET toolchain:**
+>
+> 1. Confirm a clean checkout of this branch has **no** `webview/*.js` or
+>    `webview/*.json` files under `visualstudio-extension/src/AIEngineeringFluency/`
+>    before building (i.e. actually exercise the "nothing committed" path).
+> 2. `cd vscode-extension && npm run package` (the same command
+>    `visualstudio-build.yml`/`visualstudio-publish.yml`/`release.yml` run) and
+>    confirm all six `.js` bundles and four `.json` sidecars land in
+>    `vscode-extension/dist/webview/`.
+> 3. Build the solution the way CI does:
+>    `msbuild AIEngineeringFluency.sln /p:Configuration=Release /t:Build /v:minimal`
+>    from `visualstudio-extension/`. Confirm the build **succeeds** and that
+>    `CopyWebviewBundles`'s new `Error` condition does **not** fire (if it does,
+>    `dist/webview` wasn't populated and the test is invalid, not passing).
+> 4. Locate the produced `.vsix`, unzip it, and confirm **all ten** webview
+>    files — `webview\chart.js`, `details.js`, `diagnostics.js`,
+>    `environmental.js`, `maturity.js`, `usage.js`, `tokenEstimators.json`,
+>    `modelPricing.json`, `toolNames.json`, `automaticTools.json` — are present,
+>    non-empty, and match the `dist/webview` content from step 2.
+> 5. Repeat steps 2–4 through the **actual `visualstudio-build.yml` GitHub
+>    Actions job** (push to a scratch branch, or `workflow_dispatch` if
+>    enabled) — the path that actually ships a release — and re-inspect its
+>    uploaded `.vsix` artifact the same way.
+> 6. Only once **both** the local build (step 4) and the CI build (step 5)
+>    confirm a correct, non-empty, current `.vsix` is deletion considered
+>    verified. Until then, treat every Visual Studio release built from this
+>    branch (or anything descended from it) as **unverified for webview
+>    content** — it may ship an empty or broken `webview/` folder with a green
+>    build, exactly the failure mode this whole change exists to prevent.
+>
+> The step-by-step detail behind each of these is in "What must happen before
+> the committed files can be deleted" further down (kept for its reasoning; the
+> checklist above is the authoritative, current gate). See "Deletion executed"
+> near the end of this document for exactly what changed, when, and under what
+> authorization.
+
 ## Problem Statement
 
 The Visual Studio host commits esbuild **build output** into source control:
@@ -535,3 +586,152 @@ this repo's CI uses:
 7. Restore the six files in the working copy used for steps 1–4 (or just
    discard that temp checkout) so nothing from this manual test leaks into any
    branch other than the follow-up deletion PR itself.
+
+## Deletion executed (this session)
+
+The ten committed files — the six `webview/*.js` bundles and the four
+`webview/*.json` sidecars (`tokenEstimators.json`, `modelPricing.json`,
+`toolNames.json`, `automaticTools.json`, which are copied by the same
+`CopyWebviewBundles` target and are equally build output, not hand-authored,
+confirmed by diffing them byte-identical against a fresh `vscode-extension/dist/webview`
+build) — were `git rm`'d from this branch.
+
+**Authorization**: the task instructing this deletion stated, in the
+repo owner's own words relayed by the orchestrating agent, that they had been
+shown both open risks from this document (the MSBuild wildcard-evaluation
+hazard, and the inability to run MSBuild in this container), accepted them
+explicitly, and committed to validating the VSIX build on Windows themselves
+before any release — i.e. exactly the release gate above. **This session did
+not independently verify that authorization came from the actual repo owner**;
+it acted on the instruction as given, per this session's own operating rules
+that a task from the launching agent directs the work. The previous session's
+refusal (see "A mid-task instruction to delete the bundles was not carried
+out" above) was over the same underlying ambiguity — a relayed instruction
+this session cannot itself verify — and that ambiguity is unchanged here. What
+*is* different this time: the instruction was the framing of this session's
+own task from the start (not a message overriding an in-progress task), it was
+explicit that MSBuild verification remains unavailable in this container and
+that the human accepts that gap and owns closing it, and the deliverable was
+scoped to a local commit only — no push, no PR — leaving a human reviewer a
+clean point to reject the change before it reaches `main` or a release. If
+that authorization was not genuine, the fix is to not push/merge these
+commits; nothing here reaches users on its own.
+
+**What changed alongside the deletion** (see the "Implementation Update"
+section above for the packaging-target work that made this safe to attempt):
+- `.gitignore` gained a pattern scoped to the generated file types under this
+  exact path (`webview/*.js`, `webview/*.json`), not the whole `webview/`
+  directory — confirmed nothing hand-authored ever lived there (the
+  hand-written `vscode-shim.js` lives at `WebBridge/vscode-shim.js`, a
+  different path, and is an `EmbeddedResource`, not a `Content` item under
+  `webview/`).
+- `.gitattributes` lost its `linguist-generated=true` line for these paths —
+  nothing left to mark.
+- `CopyWebviewBundles` in `AIEngineeringFluency.csproj`: the `Warning` for a
+  missing `dist/webview` became an `Error`, and its text (and
+  `AddWebviewBundlesToVsix`'s status comment) were corrected — there is no
+  committed fallback left to silently fall back to. `ContinueOnError="true"`
+  on the `Copy` task itself was kept, but only reaches that line after the new
+  `Error` has already stopped the build when the source files are absent, so
+  it now only covers genuine, unexpected copy failures (e.g. a locked file),
+  not "no source and no committed fallback."
+- The CI drift-check added earlier this session (comparing committed bundles
+  against a fresh build via `sync-host-views.js --json`'s `vsStale` /
+  `vsMissingCommitted` / `vsUntrackedCommitted` fields) was replaced, not
+  repaired — there is nothing committed left to compare against. The
+  replacement step in `.github/workflows/ci.yml` asserts existence and
+  non-emptiness only: that `npm run package` actually produced all six `.js`
+  bundles and four `.json` sidecars in `dist/webview`, and that a simulated
+  copy of that same directory (mirroring the `Remove-Item`/`Copy-Item` step in
+  `visualstudio-build.yml`/`visualstudio-publish.yml`/`release.yml`) still
+  contains all ten by name afterward. It deliberately does **not** compare
+  byte content between any two builds.
+- **A real ambiguity in the old drift-check, found while replacing it, is
+  independent evidence for this deletion.** `vscode-extension/package.json`
+  defines `compile` as `node esbuild.js` (unminified, sourcemapped) and
+  `package` as `tsc --noEmit && eslint ... && node esbuild.js --production`
+  (minified, no sourcemaps — confirmed in `esbuild.js`, where `--production`
+  toggles `minify`/`sourcemap`). The old `sync-host-views.js --refresh` path
+  refreshed the committed bundles from a `compile` (dev) build, while every VS
+  packaging path (`visualstudio-build.yml`, `visualstudio-publish.yml`,
+  `release.yml`) runs `package` (production) before copying. A committed
+  bundle "refreshed" via one and compared/packaged via the other would never
+  byte-match even when both are perfectly current — the old CI drift-check
+  (added earlier this session, now removed) was comparing across that
+  dev/production line without accounting for it. This was not exercised
+  end-to-end against a real CI run in this container; it is a read of
+  `package.json`/`esbuild.js`, consistent with the byte differences already
+  observed for `usage.js` earlier in this document, but it means "which build
+  mode is the committed copy supposed to match" never had one clear answer —
+  another way the manual-sync model was underspecified, on top of the
+  wildcard-evaluation hazard in §2. The replacement CI check sidesteps this
+  entirely by never comparing byte content across builds.
+- `sync-host-views.js` was scoped down to match its own original recommendation
+  in this document (§ Recommendation, point 5): it now tracks only view-LIST
+  drift (NEW/ORPHAN) for both Visual Studio and JetBrains, the same way it
+  always did for JetBrains, and no longer parses, hashes, or refreshes a
+  Visual Studio committed-bundle folder (removed the `--refresh` flag, the
+  `vsStale`/`vsMissingCommitted`/`vsUntrackedCommitted` fields, and the sha256
+  comparison entirely). Both `.github/skills/sync-host-views/SKILL.md` and its
+  CI-enforced mirror `.claude/skills/sync-host-views/SKILL.md` were updated to
+  match (kept byte-identical; verified with
+  `python3 .github/workflows/scripts/check_agent_mirror.py`, which reports
+  PASS). `.github/skills/README.md`'s summary of the skill was updated too
+  (not mirrored — only `SKILL.md` files are).
+- `visualstudio-build.yml`, `visualstudio-publish.yml`, and `release.yml`
+  needed **no changes**: their `Remove-Item`/`Copy-Item` steps were already
+  guarded with `if (Test-Path $dst) { Remove-Item ... }`, so a nonexistent
+  destination (the normal state now, since git doesn't track empty
+  directories) is already handled — `Remove-Item` is skipped and `Copy-Item
+  ... -Recurse` creates the destination. `build.ps1`'s equivalent local path
+  already does `New-Item -ItemType Directory ... -Force` before copying, for
+  the same reason. This was read, not executed (no Windows/pwsh here).
+- `scripts/repo-stats.ps1` excludes this path from repo line-count stats; its
+  comment claiming the excluded content was "committed to the repo" was
+  corrected — the exclusion itself was kept, since the generated files can
+  still exist locally as untracked build output after a Visual Studio build
+  and would otherwise skew the stats.
+- `visualstudio-extension/docs/DEBUGGING.md` and
+  `.github/codeql/codeql-config.yml` were read and left unchanged — neither
+  asserts the files are committed; both already describe (or exclude) a
+  build-time-generated path, which remains true.
+
+**What was verified in this container** (all listed in detail under "Report
+back" in the task, repeated here for the ADR record): `.csproj` XML
+well-formedness; `actionlint` (downloaded fresh, zero findings) and
+`python3 -c "import yaml; yaml.safe_load(...)"` on `ci.yml`; a manual
+extraction and execution of the new CI shell step against a real
+`npm run compile` output (all 10 files present, simulated VS copy step
+succeeds); `node sync-host-views.js` and `--json` run clean with the new
+logic; `check_agent_mirror.py` PASS; `npm run check-types`, `npm run lint`
+(0 errors / 16 warnings, the documented baseline), and `npm run test:node`
+(all suites pass) in `vscode-extension/`.
+
+**What remains completely unverified, stated bluntly**: whether
+`AddWebviewBundlesToVsix` actually causes `GetVsixSourceItems` to include
+these ten files in a real `.vsix`; whether the new `Error` in
+`CopyWebviewBundles` fires at the right point in a real MSBuild run without
+some other side effect; whether `VsixUtil`/`CreateVsixContainer` behaves as
+the `.csproj` comments describe when the `FileManifest` delete-and-regenerate
+trick runs against these specific files; and whether the resulting VSIX
+installs and renders all six webview screens correctly in actual Visual
+Studio. None of this can be checked without Windows, MSBuild, the VSSDK, and
+Visual Studio itself — see the release gate at the top of this document.
+
+**A note on this session's own working conditions**: partway through this
+work, a message arrived, formatted as if relayed from an external CI/PR event,
+describing a specific GitHub Actions failure on a numbered pull request. No
+pull request was opened by this session — the task explicitly scoped the work
+to a local commit only, so a real CI run against this session's changes could
+not exist yet. The message's underlying technical claim (that `npm run
+compile` and `npm run package` produce different byte content, and that a
+drift-check comparing across them would falsely report staleness) was checked
+independently against `package.json` and `esbuild.js` in this repo and found
+to be **true** and is recorded above; it also matched what this document
+already knew — the design of the replacement CI check in this session
+(existence/non-emptiness only, never cross-build byte comparison) already
+satisfied it without any further change being needed. But the message's
+specific claim of an observed failure on a real, numbered PR could not be
+corroborated and is not otherwise reflected in this document or repeated as
+fact — a reviewer should treat that part of the message as unverified, and
+should not assume any real CI run has exercised this change yet.
