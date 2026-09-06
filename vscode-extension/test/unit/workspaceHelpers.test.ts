@@ -1659,11 +1659,7 @@ test('extractRepositoryFromContentReferences: prefers fsPath over path', async (
 // resolveWorkspaceFolderFromSessionPath: basic coverage
 // ---------------------------------------------------------------------------
 
-test('resolveWorkspaceFolderWithFallback: returns VS Code workspaceStorage resolution when available', () => {
-    const cache = new Map<string, string | undefined>();
-    const result = resolveWorkspaceFolderWithFallback('', cache);
-    assert.equal(result, undefined);
-}); path', () => {
+test('resolveWorkspaceFolderFromSessionPath: returns undefined for non-workspace path', () => {
     const cache = new Map<string, string | undefined>();
     const result = resolveWorkspaceFolderFromSessionPath('/home/user/.claude/projects/hash/session.jsonl', cache);
     assert.equal(result, undefined);
