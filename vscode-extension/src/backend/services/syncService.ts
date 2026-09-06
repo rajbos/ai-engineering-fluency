@@ -109,6 +109,8 @@ export interface SyncServiceDeps {
 	updateTokenStats?: () => Promise<void>;
 	/** Returns the current GitHub OAuth access token, or undefined if not authenticated. */
 	getGithubToken?: () => string | undefined;
+	/** Resolves the session-specific editor label supplied by an ecosystem adapter. */
+	getEditorLabel?: (sessionFile: string) => string;
 }
 
 /**
@@ -1287,7 +1289,8 @@ return true;
 
 	private getEditorForFile(sessionFile: string, includeEditorDimension: boolean): string | undefined {
 		if (!includeEditorDimension) { return undefined; }
-		return getEditorTypeFromPath(sessionFile, this.deps.editorHandlers?.isOpenCodeSession);
+		return this.deps.getEditorLabel?.(sessionFile) ??
+			getEditorTypeFromPath(sessionFile, this.deps.editorHandlers?.isOpenCodeSession);
 	}
 
 	private isVSSessionFileType(sessionFile: string): boolean {

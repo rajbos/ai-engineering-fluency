@@ -31,6 +31,7 @@ interface FlatDepsOverrides {
 	getCrushSessionData?: (sessionFile: string) => Promise<any>;
 	isVSSessionFile?: (sessionFile: string) => boolean;
 	getGithubToken?: () => string | undefined;
+	getEditorLabel?: (sessionFile: string) => string;
 }
 
 function makeDeps(overrides?: FlatDepsOverrides): SyncServiceDeps {
@@ -56,6 +57,7 @@ function makeDeps(overrides?: FlatDepsOverrides): SyncServiceDeps {
 		},
 		updateTokenStats: overrides?.updateTokenStats,
 		getGithubToken: overrides?.getGithubToken,
+		getEditorLabel: overrides?.getEditorLabel,
 	};
 }
 
@@ -700,6 +702,52 @@ test('computeDailyRollupsFromLocalSessions processes JSONL files in fallback pat
 	} finally {
 		tmpFile.cleanup();
 	}
+});
+
+test('syncToSharingServer preserves the Copilot App editor label in uploaded rollups', async () => {
+	const dayKey = new Date().toISOString().slice(0, 10);
+	const sessionFile = '/home/user/.copilot/session-state/app-session/events.jsonl';
+	const uploadedEntries: Array<{ editor?: string }> = [];
+	const svc = new SyncService(
+		makeDeps({
+			getGithubToken: () => 'github-token',
+			getCopilotSessionFiles: async () => [sessionFile],
+			getEditorLabel: () => 'Copilot CLI (App)',
+			statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+			getSessionFileDataCached: async () => ({
+				tokens: 300,
+				mtime: Date.now(),
+				interactions: 1,
+				modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+				dailyRollups: {
+					[dayKey]: {
+						tokens: 300,
+						actualTokens: 300,
+						thinkingTokens: 0,
+						interactions: 1,
+						modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+					},
+				},
+			}),
+		}),
+		{} as any,
+		{} as any,
+		undefined,
+		BackendUtility,
+		{
+			uploadRollups: async (_endpoint: string, _token: string, entries: Array<{ editor?: string }>) => {
+				uploadedEntries.push(...entries);
+				return { success: true, entriesUploaded: entries.length, message: 'Uploaded' };
+			},
+		} as any,
+	);
+
+	await (svc as any).syncToSharingServer(
+		{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+		{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+	);
+
+	assert.deepEqual(uploadedEntries.map(entry => entry.editor), ['Copilot CLI (App)']);
 });
 
 test('computeDailyRollupsFromLocalSessions skips files older than lookback', async () => {

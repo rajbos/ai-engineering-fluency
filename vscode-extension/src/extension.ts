@@ -749,7 +749,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Extract custom agent name from a file:// URI pointing to a .agent.md file.
 	 * Returns the filename without the .agent.md extension.
 	 */
-	private getEditorTypeFromPath(filePath: string): string {
+	public getEditorTypeFromPath(filePath: string): string {
 		return this._resolveEditorLabel(filePath) ??
 			_getEditorTypeFromPath(filePath, (p) => this.findEcosystem(p)?.id === 'opencode');
 	}
@@ -12037,6 +12037,8 @@ function createBackendFacade(context: vscode.ExtensionContext, tokenTracker: Cop
     isVSSessionFile: (sessionFile: string) =>
       tokenTracker.visualStudio.isVSSessionFile(sessionFile),
     getGithubToken: () => tokenTracker.githubSession?.accessToken,
+    getEditorLabel: (sessionFile: string) =>
+      tokenTracker.getEditorTypeFromPath(sessionFile),
   });
 }
 

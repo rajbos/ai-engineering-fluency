@@ -85,6 +85,8 @@ export interface BackendFacadeDeps {
   }>;
   // Visual Studio session detection (binary MessagePack — cannot be parsed as JSON)
   isVSSessionFile?: (sessionFile: string) => boolean;
+  /** Resolves session-specific labels such as Copilot CLI (App). */
+  getEditorLabel?: (sessionFile: string) => string;
   /** Returns the current GitHub OAuth access token, or undefined if not authenticated. */
   getGithubToken?: () => string | undefined;
 }
@@ -150,6 +152,7 @@ export class BackendFacade {
         },
         updateTokenStats: deps.updateTokenStats,
         getGithubToken: deps.getGithubToken,
+        getEditorLabel: deps.getEditorLabel,
       },
       this.credentialService,
       this.dataPlaneService,
@@ -1096,7 +1099,6 @@ export class BackendFacade {
     return true;
   }
 }
-
 
 
 
