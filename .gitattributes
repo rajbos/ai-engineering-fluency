@@ -11,11 +11,6 @@
 # git stash/pop conflicts on Linux runners (see PR #1463 / issue #1445)
 jetbrains-plugin/gradlew.bat text
 
-# Committed esbuild output for the Visual Studio host webviews. Regenerated from
-# the VS Code bundles by the sync-host-views skill — collapse them in diffs and
-# keep them out of GitHub's language statistics.
-visualstudio-extension/src/AIEngineeringFluency/webview/*.js linguist-generated=true
-
 # Keep images and binaries untouched
 *.png binary
 *.jpg binary

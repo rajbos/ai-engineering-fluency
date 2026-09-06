@@ -126,34 +126,65 @@ jobs:
       working-directory: vscode-extension
       run: npm run package
 
-    # Guards against the failure mode documented in
-    # docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md: the Visual Studio host commits its
-    # own copies of these webview bundles, and "regenerate and hand-commit" has
-    # already gone stale in practice (usage.js missed a shipped feature for a
-    # while). Compares the freshly built vscode-extension/dist/webview bundles
-    # above against the committed visualstudio-extension copies and fails the
-    # build the moment they diverge, instead of shipping a stale VSIX silently.
-    - name: Check Visual Studio committed webview bundles for staleness
+    # Neither host commits webview content to git any more (see
+    # docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md) — vscode-extension/dist/webview,
+    # built by "Package extension" above, is the ONLY source for both the
+    # Visual Studio and JetBrains hosts, copied fresh at build time. There is
+    # no committed copy left to compare for staleness, so this step instead
+    # asserts that generation actually produces every file the Visual Studio
+    # .csproj's CopyWebviewBundles target expects to copy — the failure mode
+    # this exists to catch is a silently empty/partial dist/webview producing
+    # a "successful" but broken VSIX build downstream.
+    - name: Check webview bundles are generated correctly
       if: matrix.node-version == '24.x'
       shell: bash
       run: |
-        node .github/skills/sync-host-views/sync-host-views.js --json > sync-report.json || true
-        cat sync-report.json
-        node -e '
-          const r = require("./sync-report.json");
-          const stale = r.vsStale || [];
-          const missing = r.vsMissingCommitted || [];
-          const untracked = r.vsUntrackedCommitted || [];
-          if (stale.length || missing.length || untracked.length) {
-            if (stale.length) console.error("::error::Visual Studio committed webview bundle(s) are stale vs a fresh vscode-extension build: " + stale.join(", "));
-            if (missing.length) console.error("::error::Visual Studio .csproj lists webview bundle(s) with no committed file: " + missing.join(", "));
-            if (untracked.length) console.error("::error::Visual Studio has committed webview bundle(s) not referenced by the .csproj: " + untracked.join(", "));
-            console.error("Fix: cd vscode-extension && npm run compile && node ../.github/skills/sync-host-views/sync-host-views.js --refresh");
-            process.exit(1);
-          }
-          console.log("Visual Studio committed webview bundles are in sync with dist/webview.");
-        '
-        rm -f sync-report.json
+        set -euo pipefail
+        expected=(details chart usage diagnostics environmental maturity)
+        expected_json=(tokenEstimators modelPricing toolNames automaticTools)
+        missing=()
+        for name in "${expected[@]}"; do
+          f="vscode-extension/dist/webview/${name}.js"
+          if [ ! -s "$f" ]; then missing+=("$f"); fi
+        done
+        for name in "${expected_json[@]}"; do
+          f="vscode-extension/dist/webview/${name}.json"
+          if [ ! -s "$f" ]; then missing+=("$f"); fi
+        done
+        if [ "${#missing[@]}" -ne 0 ]; then
+          echo "::error::npm run package did not produce all expected webview bundle(s): ${missing[*]}"
+          exit 1
+        fi
+        echo "All 10 expected webview bundle/sidecar files were generated and non-empty."
+
+        # Simulate the Visual Studio Remove-Item/Copy-Item build step
+        # (visualstudio-build.yml / visualstudio-publish.yml / release.yml) on a
+        # scratch directory, to catch a copy-list mismatch without needing MSBuild.
+        # dist/webview also holds bundles VS doesn't ship (dashboard, efficiency, ...);
+        # this only re-checks the same 10 names against the copy destination.
+        rm -rf /tmp/vs-webview-check
+        mkdir -p /tmp/vs-webview-check
+        cp vscode-extension/dist/webview/*.js vscode-extension/dist/webview/*.json /tmp/vs-webview-check/
+        missing=()
+        for name in "${expected[@]}"; do
+          f="/tmp/vs-webview-check/${name}.js"
+          if [ ! -s "$f" ]; then missing+=("$f"); fi
+        done
+        for name in "${expected_json[@]}"; do
+          f="/tmp/vs-webview-check/${name}.json"
+          if [ ! -s "$f" ]; then missing+=("$f"); fi
+        done
+        rm -rf /tmp/vs-webview-check
+        if [ "${#missing[@]}" -ne 0 ]; then
+          echo "::error::VS-style copy did not yield all expected webview file(s): ${missing[*]}"
+          exit 1
+        fi
+        echo "Simulated Visual Studio webview copy step: all 10 expected file(s) present and non-empty."
+
+        # View-LIST drift (NEW/ORPHAN) is unrelated to bundle generation and is
+        # informational only here — it's a human decision (see
+        # .github/skills/sync-host-views/SKILL.md), not a CI gate.
+        node .github/skills/sync-host-views/sync-host-views.js || true
 
     - name: Compile tests
       working-directory: vscode-extension

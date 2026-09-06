@@ -172,21 +172,28 @@
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\automaticTools.json" />
     </ItemGroup>
     <!--
-      Warn loudly when the freshly-built bundles are absent. Without this, the Copy below
-      silently no-ops (ContinueOnError) and the VSIX ships the committed webview\*.js, which
-      can be weeks out of date — the root cause of missing icons / friendly model names /
-      "Other models" grouping in past releases. Build vscode-extension first (npm run package)
+      Fail the build loudly when the freshly-built bundles are absent. There is no committed
+      fallback under webview\*.js any more (see docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md) — the
+      dist/webview build is the ONLY source of webview content, so if it's missing the Copy
+      below would silently no-op and the VSIX would ship with NO webview content at all, a
+      green build with a broken product. Build vscode-extension first (npm run package)
       or use ./build.ps1 -Project visualstudio, which rebuilds the bundles automatically.
     -->
-    <Warning
+    <Error
       Condition="!Exists('..\..\..\vscode-extension\dist\webview\details.js')"
-      Text="vscode-extension/dist/webview bundles not found — packaging the committed (possibly STALE) webview\*.js. Run 'npm run package' in vscode-extension/ or build via ./build.ps1 -Project visualstudio." />
+      Text="vscode-extension/dist/webview bundles not found — nothing to package into webview\*.js (no committed fallback exists). Run 'npm run package' in vscode-extension/ or build via ./build.ps1 -Project visualstudio." />
     <Warning
       Condition="!Exists('$(MSBuildProjectDirectory)\cli-bundle\copilot-token-tracker.exe')"
       Text="cli-bundle/copilot-token-tracker.exe not found — the VSIX will have NO bundled CLI and will show empty/zero usage data. Run ./build.ps1 -Project visualstudio to build and copy the CLI exe." />
     <MakeDir Directories="$(MSBuildProjectDirectory)\webview" />
+    <!--
+      ContinueOnError is safe here specifically because the Error above already stopped the
+      build when dist/webview is missing — by the time this Copy runs, the source files are
+      known to exist, so a failure here would be an unexpected I/O error (e.g. a locked file)
+      worth a warning + Message rather than aborting the whole build outright.
+    -->
     <Copy SourceFiles="@(_WebviewBundle)" DestinationFolder="$(MSBuildProjectDirectory)\webview\" SkipUnchangedFiles="true" ContinueOnError="true" />
-    <Message Importance="high" Text="Copied webview bundles from vscode-extension/dist/webview/ — rebuild vscode-extension if they are missing." />
+    <Message Importance="high" Text="Copied webview bundles from vscode-extension/dist/webview/." />
 
   </Target>
   <!--
@@ -267,11 +274,12 @@
     See the "Why BeforeTargets=GetVsixSourceItems" comment on AddCliBundleToVsix for why
     BeforeTargets="Build" alone is not enough for VSIX packaging either.
 
-    Status: this target is currently a no-op relative to the committed webview\*.js fallback
-    — whenever webview\ is populated (today, always, because the bundles are still committed
-    to git) it ships the same files the old wildcard did. It becomes load-bearing only once
-    those committed files are removed, which is gated on the human verification steps in
-    docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md.
+    Status: the committed webview\*.js/*.json fallback has been removed (see
+    docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md) — this target is now the ONLY source of webview
+    content in the VSIX. webview\ is populated solely by CopyWebviewBundles from a fresh
+    vscode-extension/dist/webview build; see that target's Error for what happens if it's
+    missing. THE ACTUAL VSIX-PACKAGING BEHAVIOR OF THIS TARGET HAS NOT BEEN VERIFIED ON A
+    REAL MSBUILD/WINDOWS BUILD — see the release gate in the ADR before shipping.
   -->
   <Target Name="AddWebviewBundlesToVsix" BeforeTargets="GetVsixSourceItems">
     <!-- Force files.json to regenerate so webview entries are included (see AddCliBundleToVsix above for why). -->

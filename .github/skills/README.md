@@ -207,15 +207,15 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 **Use this skill when:**
 - After building or updating the VS Code webviews (`vscode-extension/esbuild.js` `entryPoints`)
 - Before a Visual Studio or JetBrains release, to ensure their shipped screens are current
-- When a host shows stale screens, or you suspect VS Code added a screen the hosts are missing
-- After changing the host include lists (`CopilotTokenTracker.csproj`, `jetbrains-plugin/build.gradle.kts`)
+- When you suspect VS Code added a screen a host is missing
+- After changing the host include lists (`AIEngineeringFluency.csproj`, `jetbrains-plugin/build.gradle.kts`)
 
 **Contents:**
-- `sync-host-views.js` — dependency-free Node.js detector that parses the canonical view set from `esbuild.js` and compares it to the Visual Studio (`csproj` + committed `webview/*.js`) and JetBrains (`build.gradle.kts`) host lists
-- Classifies each view as tracked / NEW (ask the user) / orphan; checks committed VS bundles for staleness vs `dist/webview` (sha256)
-- `--refresh` copies only already-tracked bundles into the Visual Studio `webview/` folder (never adds a view); `--json` for CI
-- Exit codes: `0` in sync · `1` mechanical drift · `2` config error · `3` NEW views (human decision required)
-- Workflow for refreshing existing screens and the ask-before-adding procedure for new screens, including the navigation wiring needed in each host
+- `sync-host-views.js` — dependency-free Node.js detector that parses the canonical view set from `esbuild.js` and compares it to the Visual Studio (`csproj`) and JetBrains (`build.gradle.kts`) host include lists. Neither host commits webview bundle content to git — both copy it fresh from `dist/webview` at their own build time — so this only tracks view-LIST drift, not bundle content
+- Classifies each view as tracked / NEW (ask the user) / orphan
+- `--json` for CI
+- Exit codes: `0` in sync · `1` mechanical drift (an ORPHAN) · `2` config error · `3` NEW views (human decision required)
+- Workflow for the ask-before-adding procedure for new screens, including the navigation wiring needed in each host
 
 ### visual-view-diff
 
