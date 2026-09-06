@@ -125,7 +125,36 @@ jobs:
     - name: Package extension
       working-directory: vscode-extension
       run: npm run package
-      
+
+    # Guards against the failure mode documented in
+    # docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md: the Visual Studio host commits its
+    # own copies of these webview bundles, and "regenerate and hand-commit" has
+    # already gone stale in practice (usage.js missed a shipped feature for a
+    # while). Compares the freshly built vscode-extension/dist/webview bundles
+    # above against the committed visualstudio-extension copies and fails the
+    # build the moment they diverge, instead of shipping a stale VSIX silently.
+    - name: Check Visual Studio committed webview bundles for staleness
+      if: matrix.node-version == '24.x'
+      shell: bash
+      run: |
+        node .github/skills/sync-host-views/sync-host-views.js --json > sync-report.json || true
+        cat sync-report.json
+        node -e '
+          const r = require("./sync-report.json");
+          const stale = r.vsStale || [];
+          const missing = r.vsMissingCommitted || [];
+          const untracked = r.vsUntrackedCommitted || [];
+          if (stale.length || missing.length || untracked.length) {
+            if (stale.length) console.error("::error::Visual Studio committed webview bundle(s) are stale vs a fresh vscode-extension build: " + stale.join(", "));
+            if (missing.length) console.error("::error::Visual Studio .csproj lists webview bundle(s) with no committed file: " + missing.join(", "));
+            if (untracked.length) console.error("::error::Visual Studio has committed webview bundle(s) not referenced by the .csproj: " + untracked.join(", "));
+            console.error("Fix: cd vscode-extension && npm run compile && node ../.github/skills/sync-host-views/sync-host-views.js --refresh");
+            process.exit(1);
+          }
+          console.log("Visual Studio committed webview bundles are in sync with dist/webview.");
+        '
+        rm -f sync-report.json
+
     - name: Compile tests
       working-directory: vscode-extension
       run: npm run compile-tests
