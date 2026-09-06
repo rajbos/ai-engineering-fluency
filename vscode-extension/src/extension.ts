@@ -325,6 +325,7 @@ import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
+import { getAzureTableStorageEndpoint } from './utils/azureEndpoints';
 import { isGuidMcpTool, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions } from '../../src/recentSessions';
@@ -9041,6 +9042,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       if (await this.dispatchSharedCommand(message)) { return; }
       switch (message.command) {
         case "refresh": await this.dispatch('refresh:dashboard', () => this.refreshDashboardPanel()); break;
+        case "configureBackend": await this.dispatch('configureBackend:dashboard', () => vscode.commands.executeCommand("aiEngineeringFluency.configureBackend")); break;
+        case "configureTeamServer": await this.dispatch('configureTeamServer:dashboard', () => vscode.commands.executeCommand("aiEngineeringFluency.configureTeamServer")); break;
         case "deleteUserDataset": await this.dispatch('deleteUserDataset', () => this.handleDeleteUserDataset(message.userId, message.datasetId)); break;
         case "backfillHistoricalData": await this.dispatch('backfillHistoricalData', () => this.handleBackfillHistoricalData()); break;
         case "openExternal": if (typeof message.url === 'string') { await vscode.env.openExternal(vscode.Uri.parse(message.url)); } break;
@@ -9063,7 +9066,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     } catch (error) {
       this.error("Failed to load dashboard data:", error);
       if (!this.lastDashboardData) {
-        this.dashboardPanel?.webview.postMessage({ command: "dashboardError", message: "Failed to load dashboard data. Please check backend configuration and try again." });
+        this.showDashboardFailure(this.getAzureDashboardFailureMessage("load dashboard data"));
       }
     }
   }
@@ -9091,10 +9094,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       this.log("✅ Team Dashboard refreshed");
     } catch (error) {
       this.error("Failed to refresh dashboard:", error);
-      this.dashboardPanel?.webview.postMessage({
-        command: "dashboardError",
-        message: "Failed to refresh dashboard data.",
-      });
+      this.showDashboardFailure(this.getAzureDashboardFailureMessage("refresh dashboard data"));
     }
   }
 
@@ -9146,11 +9146,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       await this.refreshDashboardPanel();
     } catch (error) {
       this.error("Failed to delete user dataset:", error);
-      this.dashboardPanel?.webview.postMessage({
-        command: "dashboardError",
-        message:
-          "Failed to delete data. Please check backend configuration and try again.",
-      });
+      this.showDashboardFailure(this.getAzureDashboardFailureMessage("delete Azure Storage data"));
     }
   }
 
@@ -9198,10 +9194,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       await this.refreshDashboardPanel();
     } catch (error) {
       this.error('Backfill failed:', error);
-      this.dashboardPanel?.webview.postMessage({
-        command: 'dashboardError',
-        message: 'Backfill failed. Please check backend configuration and try again.',
-      });
+      this.showDashboardFailure(this.getAzureDashboardFailureMessage("backfill Azure Storage data"));
     }
   }
 
@@ -9549,7 +9542,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
    * Azure is considered configured when all required Azure Storage fields are filled.
    * Team Server is configured when enabled with a valid http/https URL.
    */
-  private getDashboardBackendConfig(): { azureConfigured: boolean; teamServerConfigured: boolean; teamServerUrl: string } {
+  private getDashboardBackendConfig(): { azureConfigured: boolean; azureStorageUrl: string; teamServerConfigured: boolean; teamServerUrl: string } {
     const settings = this.backend?.getSettings();
     const azureConfigured = !!(
       settings?.subscriptionId &&
@@ -9557,8 +9550,26 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       settings?.storageAccount &&
       settings?.aggTable
     );
+    const azureStorageUrl = azureConfigured
+      ? getAzureTableStorageEndpoint(settings.storageAccount)
+      : '';
     const teamServerUrl = this.buildTeamServerUrl(settings);
-    return { azureConfigured, teamServerConfigured: !!teamServerUrl, teamServerUrl };
+    return { azureConfigured, azureStorageUrl, teamServerConfigured: !!teamServerUrl, teamServerUrl };
+  }
+
+  private getAzureDashboardFailureMessage(action: string): string {
+    const { azureStorageUrl } = this.getDashboardBackendConfig();
+    const source = azureStorageUrl ? ` from ${azureStorageUrl}` : '';
+    return `Unable to ${action}${source}. Review the Azure Storage configuration and try again.`;
+  }
+
+  private showDashboardFailure(message: string): void {
+    const { teamServerConfigured, teamServerUrl } = this.getDashboardBackendConfig();
+    this.dashboardPanel?.webview.postMessage(
+      teamServerConfigured
+        ? { command: 'dashboardTeamServerFallback', message, url: teamServerUrl }
+        : { command: 'dashboardError', message },
+    );
   }
 
   private buildTeamServerUrl(settings: any): string {
