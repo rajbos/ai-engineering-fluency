@@ -1673,6 +1673,10 @@ test('resolveWorkspaceFolderFromSessionPath: returns undefined for empty path', 
     assert.equal(result, undefined);
 });
 
+// ---------------------------------------------------------------------------
+// resolveWorkspaceFolderFromSessionPath: cache behavior
+// ---------------------------------------------------------------------------
+
 test('resolveWorkspaceFolderFromSessionPath: returns cached undefined on repeated call', () => {
     const cache = new Map<string, string | undefined>();
     const path1 = '/home/user/.config/Code/User/workspaceStorage/abc123/chatSessions/session.json';
