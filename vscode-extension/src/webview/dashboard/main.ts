@@ -68,6 +68,7 @@ type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
 
 interface DashboardConfig {
   azureConfigured: boolean;
+  azureStorageUrl: string;
   teamServerConfigured: boolean;
   teamServerUrl: string;
 }
@@ -117,7 +118,12 @@ function showLoading(): void {
 
   const loading = el("div", "loading-indicator");
   const spinner = el("div", "spinner");
-  const loadingText = el("div", "loading-text", "Loading dashboard data...");
+  const serverUrl = currentConfig?.azureStorageUrl;
+  const loadingText = el(
+    "div",
+    "loading-text",
+    serverUrl ? `Loading dashboard data from ${serverUrl}...` : "Loading dashboard data...",
+  );
   loadingTextEl = loadingText;
   loading.append(spinner, loadingText);
 
@@ -147,11 +153,21 @@ function showError(message: string): void {
   buttonRow.append(createButton(BUTTONS["btn-refresh"]));
   header.append(title, buttonRow);
 
-  const errorEl = el("div", "error-message", message);
-
-  container.append(header, errorEl);
+  container.append(header, buildDashboardFailure(message));
   root.append(themeStyle, style, container);
   wireButtons();
+}
+
+function buildDashboardFailure(message: string): HTMLElement {
+  const failure = el("div", "dashboard-failure");
+  const errorEl = el("div", "error-message", message);
+  const configureButton = createButton(
+    "btn-configure-backend",
+    "Configure Azure Storage",
+    "secondary",
+  );
+  failure.append(errorEl, configureButton);
+  return failure;
 }
 
 function render(stats: DashboardStats): void {
@@ -582,8 +598,8 @@ function buildTeamServerPanel(url: string): HTMLElement {
   return panel;
 }
 
-/** Shows the team-server-only full view (when Azure is not configured). */
-function showTeamServerView(url: string): void {
+/** Shows the team-server view, optionally retaining an Azure Storage failure message. */
+function showTeamServerView(url: string, failureMessage?: string): void {
   loadingTextEl = null;
   const root = document.getElementById("root");
   if (!root) { return; }
@@ -612,7 +628,11 @@ function showTeamServerView(url: string): void {
 
   const panel = buildTeamServerPanel(url);
 
-  container.append(header, panel);
+  container.append(header);
+  if (failureMessage) {
+    container.append(buildDashboardFailure(failureMessage));
+  }
+  container.append(panel);
   root.append(themeStyle, style, container);
   wireButtons();
 }
@@ -621,6 +641,12 @@ function wireButtons(): void {
   document.getElementById("btn-refresh")?.addEventListener("click", () => {
     vscode.postMessage({ command: "refresh" });
   });
+
+  document
+    .getElementById("btn-configure-backend")
+    ?.addEventListener("click", () => {
+      vscode.postMessage({ command: "configureBackend" });
+    });
 
   document.getElementById("btn-details")?.addEventListener("click", () => {
     vscode.postMessage({ command: "showDetails" });
@@ -668,8 +694,8 @@ registerMessageHandler((message: any) => {
     case "dashboardError":
       showError(message.message);
       break;
-    case "dashboardTeamServerReload": {
-      // No-op: team server is now a launch card, not an iframe
+    case "dashboardTeamServerFallback": {
+      showTeamServerView(message.url, message.message);
       break;
     }
     case "backfillProgress": {
