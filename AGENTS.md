@@ -1,4 +1,6 @@
-# GitHub Copilot Token Tracker — Repository Instructions
+# AI Engineering Fluency — Repository Instructions
+
+(Previously known as the "GitHub Copilot Token Tracker")
 
 This document provides top-level guidance for AI agents contributing to this repository. Detailed, folder-specific instructions live in `.github/instructions/` and are applied automatically by Copilot when you work inside those folders.
 
@@ -6,6 +8,8 @@ This document provides top-level guidance for AI agents contributing to this rep
 
 ```
 /
+├── AGENTS.md                    ← This file (the canonical content)
+├── CLAUDE.md                    ← Pointer to this file (`@AGENTS.md`)
 ├── build.ps1                    ← Root build orchestrator (all projects)
 ├── src/                         ← Shared TypeScript sources + JSON data files
 │                                   (session parsing, token estimation, adapters —
@@ -14,9 +18,16 @@ This document provides top-level guidance for AI agents contributing to this rep
 ├── cli/                         ← Command-line tool  (TypeScript / Node.js)
 ├── visualstudio-extension/      ← Visual Studio extension (C# / .NET)
 ├── jetbrains-plugin/            ← JetBrains IDE plugin (Kotlin / Gradle / IntelliJ Platform)
+├── desktop/                     ← Electron tray app; reuses vscode-extension's built
+│                                   webview bundles and cli/vscode-extension stats logic
+├── sharing-server/              ← Self-hosted API server + web dashboard for sharing
+│                                   fluency data across a team (TypeScript, SQLite, Docker)
+├── scripts/                     ← Build/release/CI helper scripts (Node, PowerShell, Python)
+├── omp-segment/                 ← Oh My Posh terminal prompt segment showing token usage
+├── assets/                      ← Logos and other static brand assets
 ├── docs/                        ← Shared documentation
 └── .github/
-    ├── copilot-instructions.md  ← This file
+    ├── copilot-instructions.md  ← Pointer to this file (`See ../AGENTS.md`)
     └── instructions/
         ├── vscode-extension.instructions.md   ← VS Code extension guide
         ├── cli.instructions.md                ← CLI guide
@@ -130,6 +141,21 @@ This repo also ships Claude Code equivalents of the Copilot customizations below
 - `.github/skills/*/SKILL.md` (Copilot Agent Skills) ↔ `.claude/skills/*/SKILL.md` (Claude Skills) — **only** the `SKILL.md` is duplicated (same content, same format on both tools). The scripts, README, and other supporting files live **only** under `.github/skills/<name>/` — do not copy them. The `.claude/skills/<name>/SKILL.md` file's instructions reference those scripts by their real `.github/skills/<name>/...` path, so there is a single source of truth for the code and no duplication.
 
 **If you add, remove, or edit a file under `.github/agents/`, make the matching change under `.claude/agents/` in the same PR** (and vice versa). **If you edit a skill's `SKILL.md` under `.github/skills/`, copy the same edit into `.claude/skills/<name>/SKILL.md`** — but if you only change a script/README/data file (not `SKILL.md` itself) under `.github/skills/`, no Claude-side change is needed, since Claude's copy just points at that same file. Claude Code does not read `.github/agents/` or `.github/skills/` on its own — without this manual mirroring the Claude-side copy silently goes stale.
+
+## Keep This File's Structure Diagram and Title in Sync
+
+This file's "Repository Structure" diagram and H1 title are the brief every agent
+reads to learn what this repo *is*. They go stale the same way the agents/skills
+mirror above does, and the failure mode is worse: agents get briefed on a repo
+that no longer exists.
+
+**Adding or removing a top-level directory, or renaming the product, requires
+updating this file's structure diagram and title in the same PR.** Concretely:
+
+- A new or removed directory under the repo root → add or remove its line (with
+  a short one-line description) in the diagram above.
+- A product rename → update the H1 and any other name references here, the way
+  `README.md`'s title and "Previously known as" line do.
 
 ## DevContainer Terminal Behavior
 
