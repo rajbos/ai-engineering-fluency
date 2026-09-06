@@ -9,7 +9,7 @@ This skill enables you to load actual token usage data from Azure Table Storage 
 
 ## Overview
 
-The Copilot Token Tracker extension can sync token usage data to Azure Table Storage. This skill provides helper scripts to:
+The AI Engineering Fluency extension can sync token usage data to Azure Table Storage. This skill provides helper scripts to:
 - Query and fetch data from Azure Storage Tables
 - Load data into a usable format for chat analysis
 - Authenticate using Azure credentials (Entra ID or Shared Key)
@@ -88,7 +88,7 @@ Uses DefaultAzureCredential for authentication:
 ### Option 2: Shared Key
 
 Uses account access key stored in VS Code SecretStorage:
-- Set via command: "Copilot Token Tracker: Set Backend Storage Shared Key"
+- Set via command: "AI Engineering Fluency: Set Backend Storage Shared Key"
 - Does not sync across devices
 - Requires account key from Azure Portal
 

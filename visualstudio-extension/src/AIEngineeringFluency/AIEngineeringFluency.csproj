@@ -172,33 +172,47 @@
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\automaticTools.json" />
     </ItemGroup>
     <!--
-      Warn loudly when the freshly-built bundles are absent. Without this, the Copy below
-      silently no-ops (ContinueOnError) and the VSIX ships the committed webview\*.js, which
-      can be weeks out of date — the root cause of missing icons / friendly model names /
-      "Other models" grouping in past releases. Build vscode-extension first (npm run package)
-      or use ./build.ps1 -Project visualstudio, which rebuilds the bundles automatically.
+      Fail the build loudly when ANY of the freshly-built bundles is absent. There is no
+      committed fallback under webview\*.js any more (see docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md)
+      — the dist/webview build is the ONLY source of webview content, so a missing input means
+      the Copy below silently ships a VSIX with partial or no webview content: a green build
+      with a broken product. Build vscode-extension first (npm run package) or use
+      ./build.ps1 -Project visualstudio, which rebuilds the bundles automatically.
+
+      Every item in _WebviewBundle is checked, not just one representative file — a
+      probe on a single bundle would pass while the other nine were missing.
     -->
-    <Warning
-      Condition="!Exists('..\..\..\vscode-extension\dist\webview\details.js')"
-      Text="vscode-extension/dist/webview bundles not found — packaging the committed (possibly STALE) webview\*.js. Run 'npm run package' in vscode-extension/ or build via ./build.ps1 -Project visualstudio." />
+    <ItemGroup>
+      <_MissingWebviewBundle Include="@(_WebviewBundle)" Condition="!Exists('%(_WebviewBundle.FullPath)')" />
+    </ItemGroup>
+    <Error
+      Condition="'@(_MissingWebviewBundle)' != ''"
+      Text="vscode-extension/dist/webview bundle(s) not found: @(_MissingWebviewBundle->'%(Filename)%(Extension)', ', ') — nothing to package into webview\ (no committed fallback exists). Run 'npm run package' in vscode-extension/ or build via ./build.ps1 -Project visualstudio." />
     <Warning
       Condition="!Exists('$(MSBuildProjectDirectory)\cli-bundle\copilot-token-tracker.exe')"
       Text="cli-bundle/copilot-token-tracker.exe not found — the VSIX will have NO bundled CLI and will show empty/zero usage data. Run ./build.ps1 -Project visualstudio to build and copy the CLI exe." />
     <MakeDir Directories="$(MSBuildProjectDirectory)\webview" />
+    <!--
+      ContinueOnError is safe here specifically because the Error above already stopped the
+      build when dist/webview is missing — by the time this Copy runs, the source files are
+      known to exist, so a failure here would be an unexpected I/O error (e.g. a locked file)
+      worth a warning + Message rather than aborting the whole build outright.
+    -->
     <Copy SourceFiles="@(_WebviewBundle)" DestinationFolder="$(MSBuildProjectDirectory)\webview\" SkipUnchangedFiles="true" ContinueOnError="true" />
-    <Message Importance="high" Text="Copied webview bundles from vscode-extension/dist/webview/ — rebuild vscode-extension if they are missing." />
+    <Message Importance="high" Text="Copied webview bundles from vscode-extension/dist/webview/." />
 
   </Target>
-  <!-- Include copied webview JS files inside the VSIX package -->
+  <!--
+    Copy webview files to the output directory so the extension DLL can find them when
+    loaded from bin\Debug or bin\Release (not from the VSIX). VSIX packaging is handled
+    separately by the AddWebviewBundlesToVsix target below (see its comment for why a
+    top-level wildcard Content Include is not used for that part).
+  -->
   <ItemGroup>
     <Content Include="webview\*.js" Condition="Exists('$(MSBuildProjectDirectory)\webview')">
-      <IncludeInVSIX>true</IncludeInVSIX>
-      <VSIXSubPath>webview\</VSIXSubPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="webview\*.json" Condition="Exists('$(MSBuildProjectDirectory)\webview')">
-      <IncludeInVSIX>true</IncludeInVSIX>
-      <VSIXSubPath>webview\</VSIXSubPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
@@ -247,6 +261,76 @@
       <VSIXSourceItem Include="$(MSBuildProjectDirectory)\cli-bundle\sql-wasm.wasm"
                       Condition="Exists('$(MSBuildProjectDirectory)\cli-bundle\sql-wasm.wasm')">
         <VSIXSubPath>cli-bundle\</VSIXSubPath>
+      </VSIXSourceItem>
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Add the webview JS bundles + JSON sidecar files into the VSIX by directly injecting
+    VSIXSourceItem entries immediately before GetVsixSourceItems collects them, instead of
+    the top-level wildcard `Content Include="webview\*.js"` this project used previously.
+
+    Why: this is a classic (non-SDK-style) .csproj, where a top-level wildcard <ItemGroup>
+    expands once at project EVALUATION, before any target — including CopyWebviewBundles
+    (BeforeTargets="Build") — has run. On a checkout where webview\*.js does not already
+    exist on disk before MSBuild starts, that wildcard evaluates to zero items, and the
+    VSIX silently ships no webview content. Explicitly enumerating the known bundle names
+    here (as CopyWebviewBundles's _WebviewBundle list already does) removes the dependency
+    on evaluation-time file presence, the same fix already applied to the CLI bundle above.
+    See the "Why BeforeTargets=GetVsixSourceItems" comment on AddCliBundleToVsix for why
+    BeforeTargets="Build" alone is not enough for VSIX packaging either.
+
+    Status: the committed webview\*.js/*.json fallback has been removed (see
+    docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md) — this target is now the ONLY source of webview
+    content in the VSIX. webview\ is populated solely by CopyWebviewBundles from a fresh
+    vscode-extension/dist/webview build; see that target's Error for what happens if it's
+    missing. THE ACTUAL VSIX-PACKAGING BEHAVIOR OF THIS TARGET HAS NOT BEEN VERIFIED ON A
+    REAL MSBUILD/WINDOWS BUILD — see the release gate in the ADR before shipping.
+  -->
+  <Target Name="AddWebviewBundlesToVsix" BeforeTargets="GetVsixSourceItems">
+    <!-- Force files.json to regenerate so webview entries are included (see AddCliBundleToVsix above for why). -->
+    <Delete Files="$(FileManifest)"
+            Condition="Exists('$(MSBuildProjectDirectory)\webview\details.js') AND Exists('$(FileManifest)')" />
+    <ItemGroup>
+      <VSIXSourceItem Include="$(MSBuildProjectDirectory)\webview\details.js"
+                      Condition="Exists('$(MSBuildProjectDirectory)\webview\details.js')">
+        <VSIXSubPath>webview\</VSIXSubPath>
+      </VSIXSourceItem>
+      <VSIXSourceItem Include="$(MSBuildProjectDirectory)\webview\chart.js"
+                      Condition="Exists('$(MSBuildProjectDirectory)\webview\chart.js')">
+        <VSIXSubPath>webview\</VSIXSubPath>
+      </VSIXSourceItem>
+      <VSIXSourceItem Include="$(MSBuildProjectDirectory)\webview\usage.js"
+                      Condition="Exists('$(MSBuildProjectDirectory)\webview\usage.js')">
+        <VSIXSubPath>webview\</VSIXSubPath>
+      </VSIXSourceItem>
+      <VSIXSourceItem Include="$(MSBuildProjectDirectory)\webview\diagnostics.js"
+                      Condition="Exists('$(MSBuildProjectDirectory)\webview\diagnostics.js')">
+        <VSIXSubPath>webview\</VSIXSubPath>
+      </VSIXSourceItem>
+      <VSIXSourceItem Include="$(MSBuildProjectDirectory)\webview\environmental.js"
+                      Condition="Exists('$(MSBuildProjectDirectory)\webview\environmental.js')">
+        <VSIXSubPath>webview\</VSIXSubPath>
+      </VSIXSourceItem>
+      <VSIXSourceItem Include="$(MSBuildProjectDirectory)\webview\maturity.js"
+                      Condition="Exists('$(MSBuildProjectDirectory)\webview\maturity.js')">
+        <VSIXSubPath>webview\</VSIXSubPath>
+      </VSIXSourceItem>
+      <VSIXSourceItem Include="$(MSBuildProjectDirectory)\webview\tokenEstimators.json"
+                      Condition="Exists('$(MSBuildProjectDirectory)\webview\tokenEstimators.json')">
+        <VSIXSubPath>webview\</VSIXSubPath>
+      </VSIXSourceItem>
+      <VSIXSourceItem Include="$(MSBuildProjectDirectory)\webview\modelPricing.json"
+                      Condition="Exists('$(MSBuildProjectDirectory)\webview\modelPricing.json')">
+        <VSIXSubPath>webview\</VSIXSubPath>
+      </VSIXSourceItem>
+      <VSIXSourceItem Include="$(MSBuildProjectDirectory)\webview\toolNames.json"
+                      Condition="Exists('$(MSBuildProjectDirectory)\webview\toolNames.json')">
+        <VSIXSubPath>webview\</VSIXSubPath>
+      </VSIXSourceItem>
+      <VSIXSourceItem Include="$(MSBuildProjectDirectory)\webview\automaticTools.json"
+                      Condition="Exists('$(MSBuildProjectDirectory)\webview\automaticTools.json')">
+        <VSIXSubPath>webview\</VSIXSubPath>
       </VSIXSourceItem>
     </ItemGroup>
   </Target>

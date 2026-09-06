@@ -1,5 +1,5 @@
 /**
- * Shared type definitions for the Copilot Token Tracker extension.
+ * Shared type definitions for the AI Engineering Fluency extension.
  * Extracted from extension.ts to reduce file size and improve reusability.
  */
 import type { TaskCategory, TaskCategoryBreakdown, TaskClassificationResult } from './taskClassification';

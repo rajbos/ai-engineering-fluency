@@ -1,6 +1,6 @@
 {
   "title": "JetBrains IDE GitHub Copilot Session File Schema Documentation",
-  "description": "Structure of session log files written by GitHub Copilot in JetBrains IDEs (IntelliJ IDEA, Rider, WebStorm, PyCharm, GoLand, etc.). Each conversation lives in its own UUID-named subdirectory; one or more partition-{n}.jsonl files store the events. The Copilot Token Tracker uses these files to attribute tokens, interactions, models, modes, and tools to the JetBrains editor surface.",
+  "description": "Structure of session log files written by GitHub Copilot in JetBrains IDEs (IntelliJ IDEA, Rider, WebStorm, PyCharm, GoLand, etc.). Each conversation lives in its own UUID-named subdirectory; one or more partition-{n}.jsonl files store the events. The AI Engineering Fluency uses these files to attribute tokens, interactions, models, modes, and tools to the JetBrains editor surface.",
   "version": "1.0",
   "lastUpdated": "2026-04-30",
   "schemaChanges": {
@@ -147,7 +147,7 @@
     }
   },
   "extractionRules": {
-    "description": "How the Copilot Token Tracker derives the common output fields from a JetBrains partition file.",
+    "description": "How the AI Engineering Fluency derives the common output fields from a JetBrains partition file.",
     "interactions": "Count of events with type === 'user.message' (one per user turn).",
     "estimatedInputTokens": "estimateTokensFromText(user.message_rendered.data.renderedMessage) summed across turns. Falls back to user.message.data.content when no rendered version exists.",
     "estimatedOutputTokens": "estimateTokensFromText(assistant.message.data.text) summed across all assistant.message events for the turn.",

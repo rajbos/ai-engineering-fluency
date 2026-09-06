@@ -1,4 +1,4 @@
-# Copilot Token Tracker CLI
+# AI Engineering Fluency CLI
 
 ![AI Engineering Fluency](../assets/AI%20Engineering%20Fluency%20-%20Transparent.png)
 
