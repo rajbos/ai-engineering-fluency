@@ -2,7 +2,7 @@
 
 ## Getting Help
 
-If you encounter issues with the GitHub Copilot Token Tracker extension, the best way to get support is by creating a well-documented bug report in the [GitHub Issues](https://github.com/rajbos/ai-engineering-fluency/issues) section of this repository.
+If you encounter issues with the AI Engineering Fluency extension, the best way to get support is by creating a well-documented bug report in the [GitHub Issues](https://github.com/rajbos/ai-engineering-fluency/issues) section of this repository.
 
 ## How to Report a Bug
 

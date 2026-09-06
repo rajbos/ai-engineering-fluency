@@ -1,7 +1,7 @@
 # Light Theme Support Implementation
 
 ## Overview
-This implementation adds comprehensive light theme support to all webview panels in the Copilot Token Tracker extension.
+This implementation adds comprehensive light theme support to all webview panels in the AI Engineering Fluency extension.
 
 ## Changes Made
 

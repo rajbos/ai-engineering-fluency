@@ -1,5 +1,5 @@
 name: Bug report — Visual Studio Extension
-description: Report a bug in the Copilot Token Tracker Visual Studio extension
+description: Report a bug in the AI Engineering Fluency Visual Studio extension
 title: "[BUG][visualstudio] "
 labels:
   - bug
@@ -8,7 +8,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for taking the time to report a bug in the **Copilot Token Tracker Visual Studio extension**.
+        Thank you for taking the time to report a bug in the **AI Engineering Fluency Visual Studio extension**.
         Please fill in as much detail as possible so we can reproduce and fix the issue quickly.
         > **Note:** This extension currently targets **Windows only** with Visual Studio 2022+.
 

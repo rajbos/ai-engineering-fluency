@@ -1,7 +1,7 @@
 ﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Root build orchestrator for the Copilot Token Tracker mono-repo.
+    Root build orchestrator for the AI Engineering Fluency mono-repo.
 
 .DESCRIPTION
     Builds one or more sub-projects from the repo root so that nothing gets missed.

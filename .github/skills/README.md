@@ -1,6 +1,6 @@
 ---
 title: GitHub Copilot Agent Skills
-description: Overview of agent skills for GitHub Copilot Token Tracker extension
+description: Overview of agent skills for AI Engineering Fluency extension
 lastUpdated: 2026-01-26
 ---
 

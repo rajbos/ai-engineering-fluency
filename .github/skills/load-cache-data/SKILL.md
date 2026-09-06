@@ -7,7 +7,7 @@ description: Load and display the last 10 cache entries as raw JSON output. DO N
 
 **IMPORTANT: Always output raw JSON only. Do not create extra files for displaying data.**
 
-This skill helps you access and inspect the GitHub Copilot Token Tracker's local session file cache. The cache stores pre-computed statistics for session files to avoid re-processing unchanged files.
+This skill helps you access and inspect the AI Engineering Fluency's local session file cache. The cache stores pre-computed statistics for session files to avoid re-processing unchanged files.
 
 ## Overview
 
