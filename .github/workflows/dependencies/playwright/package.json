@@ -1,0 +1,9 @@
+{
+  "name": "workflow-playwright",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned dependencies for the Webview UI checks workflow.",
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

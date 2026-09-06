@@ -1,0 +1,9 @@
+{
+  "name": "workflow-agent-skills-eval",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pinned dependencies for the Agent Skills Eval workflow.",
+  "dependencies": {
+    "agent-skills-eval": "0.1.1"
+  }
+}
