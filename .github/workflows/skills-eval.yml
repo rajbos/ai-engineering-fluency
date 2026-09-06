@@ -60,19 +60,17 @@ jobs:
           npx --yes @github/copilot --version
 
       - name: Install agent-skills-eval
+        working-directory: .github/workflows/dependencies/agent-skills-eval
         run: |
           set -euo pipefail
-          mkdir -p /tmp/skills-eval
-          cd /tmp/skills-eval
-          npm init -y > /dev/null
-          npm install --ignore-scripts --no-audit --no-fund agent-skills-eval@0.1.1
+          npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Run agent-skills-eval via the Copilot CLI
         id: eval
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-          EVAL_PKG_DIR: /tmp/skills-eval
+          EVAL_PKG_DIR: .github/workflows/dependencies/agent-skills-eval
           COPILOT_MODEL: ${{ inputs.model || '' }}
           SKILLS_ROOT: .github/skills
           EVAL_WORKSPACE: ./agent-skills-workspace
