@@ -12,6 +12,7 @@
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 
 /**
  * Global npm root without spawning the `npm` shim: Node refuses to spawn .cmd
@@ -51,6 +52,12 @@ const INSTALL_HINT = [
 /** Candidate module paths, cheapest first. */
 function candidatePaths() {
 	const paths = ['playwright', '@playwright/test', 'playwright-core'];
+	const workflowRoot = path.join(REPO_ROOT, '.github', 'workflows', 'dependencies', 'playwright', 'node_modules');
+	paths.push(
+		path.join(workflowRoot, 'playwright'),
+		path.join(workflowRoot, '@playwright', 'test'),
+		path.join(workflowRoot, 'playwright-core'),
+	);
 	// Global installs are not on a local script's resolution path, so ask npm
 	// where its global root is and look there too.
 	const globalRoot = globalNpmRoot();
