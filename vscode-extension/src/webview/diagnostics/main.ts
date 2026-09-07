@@ -2107,7 +2107,7 @@ function buildCurrentShareSummaryText(): string {
 /** Wires the "Copy Summary Text" button, social share buttons, and period selector on the Share
  * Card tab. Re-run after `reRenderShareCard()` replaces the tab's markup, since these elements are recreated. */
 function setupShareSummaryButtonHandler(): void {
-  // if (!document.getElementById("share-card-period-selector")) { return; }
+  // // if (!document.getElementById("share-card-period-selector")) { return; }
   renderShareCardPeriodSelector();
   document.getElementById("btn-copy-share-summary")?.addEventListener("click", () => {
     vscode.postMessage({ command: "copyText", text: buildCurrentShareSummaryText() });
