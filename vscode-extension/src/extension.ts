@@ -309,6 +309,7 @@ import {
 	getRepoPrCachePath,
 	isRepoPrEnvelopeUsable,
 	readRepoPrSnapshot,
+	shouldPreserveRepoPrSnapshotForEmptyDiscovery,
 	writeRepoPrSnapshot,
 } from './repoPrCache';
 import { getConfiguredGitHubEnterpriseUri, getConfiguredGitHubWebOrigin, getGitHubAuthProviderId } from './githubApiConfig';
@@ -2110,6 +2111,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const discoveryStart = Date.now();
 		const repos = await discoverGitHubRepos(workspacePaths, getConfiguredGitHubEnterpriseUri());
 		this.log(`🔎 Refreshing repository PRs snapshot: discovered ${repos.length} GitHub repo(s) across ${workspacePaths.length} workspace path(s) in ${((Date.now() - discoveryStart) / 1000).toFixed(1)}s`);
+		const existingSnapshot = await readRepoPrSnapshot(cachePath);
+		if (shouldPreserveRepoPrSnapshotForEmptyDiscovery(existingSnapshot, since, repos.length)) {
+			this.log('🔎 Repository PR discovery found no workspace repos; preserving the existing shared snapshot');
+			await this.publishRepoPrStats(existingSnapshot!.data);
+			return;
+		}
 		await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsProgress', total: repos.length, done: 0 });
 
 		const webOrigin = getConfiguredGitHubWebOrigin();
@@ -7272,14 +7279,6 @@ private computeFallbackDailyRollup(
 			return;
 		}
 
-		let stats = this.lastDetailedStats;
-		if (!stats) {
-			stats = await this.updateTokenStats();
-			if (!stats) {
-				return;
-			}
-		}
-
 		this.environmentalPanel = vscode.window.createWebviewPanel(
 			'copilotEnvironmental',
 			'Environmental Impact',
@@ -7287,7 +7286,10 @@ private computeFallbackDailyRollup(
 			{
 				enableScripts: true,
 				retainContextWhenHidden: false,
-				localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')]
+				localResourceRoots: [
+					vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview'),
+					vscode.Uri.joinPath(this.extensionUri, 'media'),
+				]
 			}
 		);
 
@@ -7304,12 +7306,18 @@ private computeFallbackDailyRollup(
 			}
 		});
 
-		this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, stats);
-
 		this.environmentalPanel.onDidDispose(() => {
 			this.log('🌿 Environmental Impact view closed');
 			this.environmentalPanel = undefined;
 		});
+
+		const panel = this.environmentalPanel;
+		panel.webview.html = this.getLoadingHtml(panel.webview);
+		void (async () => {
+			const stats = this.lastDetailedStats ?? await this.updateTokenStats();
+			if (this.environmentalPanel !== panel || !stats) { return; }
+			panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
+		})();
 	}
 
 	private getEnvironmentalHtml(webview: vscode.Webview, stats: DetailedStats): string {
@@ -8037,17 +8045,31 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			return;
 		}
 		if (this.logViewerPanel) { this.logViewerPanel.dispose(); this.logViewerPanel = undefined; }
-		const logData = await this.getSessionLogData(sessionFilePath);
 		this.logViewerSessionFilePath = sessionFilePath;
-		this.logViewerCurrentData = logData;
 		this.logViewerPanel = vscode.window.createWebviewPanel(
-			'copilotLogViewer', `Session: ${logData.title || path.basename(sessionFilePath)}`,
+			'copilotLogViewer', `Session: ${path.basename(sessionFilePath)}`,
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: false },
-			{ enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
+			{
+				enableScripts: true,
+				retainContextWhenHidden: false,
+				localResourceRoots: [
+					vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview'),
+					vscode.Uri.joinPath(this.extensionUri, 'media'),
+				],
+			}
 		);
-		this.logViewerPanel.webview.html = this.getLogViewerHtml(this.logViewerPanel.webview, logData, focusedTurnNumber);
 		this.logViewerPanel.webview.onDidReceiveMessage(async (message) => { await this.handleLogViewerMessage(message); });
 		this.logViewerPanel.onDidDispose(() => { this.logViewerPanel = undefined; });
+
+		const panel = this.logViewerPanel;
+		panel.webview.html = this.getLoadingHtml(panel.webview);
+		void (async () => {
+			const logData = await this.getSessionLogData(sessionFilePath);
+			if (this.logViewerPanel !== panel) { return; }
+			this.logViewerCurrentData = logData;
+			panel.title = `Session: ${logData.title || path.basename(sessionFilePath)}`;
+			panel.webview.html = this.getLogViewerHtml(panel.webview, logData, focusedTurnNumber);
+		})();
 	}
 
 	private async handleLogViewerMessage(message: any): Promise<void> {
@@ -8346,20 +8368,42 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 
 	public async showMaturity(): Promise<void> {
 		this.log('🎯 Opening Copilot Fluency Score dashboard');
-		await this.context.globalState.update('fluencyScore.everOpened', true);
 		if (this.maturityPanel) { this.maturityPanel.dispose(); this.maturityPanel = undefined; }
-		const maturityData = await this.calculateMaturityScores(true);
 		const isDebugMode = this.context.extensionMode === vscode.ExtensionMode.Development;
 		this.maturityPanel = vscode.window.createWebviewPanel(
 			'copilotMaturity', l10n.t('pptxTitle'),
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: true },
-			{ enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
+			{
+				enableScripts: true,
+				retainContextWhenHidden: false,
+				localResourceRoots: [
+					vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview'),
+					vscode.Uri.joinPath(this.extensionUri, 'media'),
+				],
+			}
 		);
-		const dismissedTips = await this.getDismissedFluencyTips();
-		const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
 		this.maturityPanel.webview.onDidReceiveMessage(async (message) => { await this.handleMaturityMessage(message); });
-		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks(), darkFactory: this.runDarkFactoryScan() });
 		this.maturityPanel.onDidDispose(() => { this.log('🎯 Copilot Fluency Score dashboard closed'); this.maturityPanel = undefined; });
+
+		const panel = this.maturityPanel;
+		panel.webview.html = this.getLoadingHtml(panel.webview);
+		void (async () => {
+			const [, maturityData, dismissedTips] = await Promise.all([
+				this.context.globalState.update('fluencyScore.everOpened', true),
+				this.calculateMaturityScores(true),
+				this.getDismissedFluencyTips(),
+			]);
+			if (this.maturityPanel !== panel) { return; }
+			const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
+			panel.webview.html = this.getMaturityHtml(panel.webview, {
+				...maturityData,
+				dismissedTips,
+				isDebugMode,
+				fluencyLevels,
+				installedHooks: this.hookManager.getInstalledHooks(),
+				darkFactory: this.runDarkFactoryScan(),
+			});
+		})();
 	}
 
 	private async handleMaturityMessage(message: any): Promise<void> {

@@ -558,17 +558,18 @@ function buildProviderTotalCard(stats: DetailedStats, allProviders: string[]): H
  */
 function buildProviderPanel(stats: DetailedStats): HTMLElement | null {
 	const allProviders = getAllProviders(stats);
+	const providersWithMonthlyCost = allProviders.filter(provider => (stats.month.billingGroupCosts?.[provider] ?? 0) > 0);
 	// With zero or one provider the panel adds no value (nothing to compare or
 	// filter), so hide it entirely.
-	if (allProviders.length <= 1) { return null; }
+	if (providersWithMonthlyCost.length <= 1) { return null; }
 
 	const section = el('div', 'section');
 	section.append(iconHeading('h3', 'credit-card', 'Cost by Provider'));
 	section.append(el('div', 'provider-panel-hint', 'Click a provider to hide/show it — this also filters the Editor & Model usage lists below.'));
 
 	const grid = el('div', 'provider-cards');
-	grid.append(buildProviderTotalCard(stats, allProviders));
-	allProviders.forEach(provider => grid.append(buildProviderCard(stats, provider)));
+	grid.append(buildProviderTotalCard(stats, providersWithMonthlyCost));
+	providersWithMonthlyCost.forEach(provider => grid.append(buildProviderCard(stats, provider)));
 	section.append(grid);
 	return section;
 }

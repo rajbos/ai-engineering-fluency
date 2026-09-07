@@ -247,3 +247,13 @@ test('changing the Share Card period refreshes the card and keeps its controls i
 	assert.equal(harness.posted.at(-1)?.command, 'copyText');
 	assert.match(harness.posted.at(-1)?.text, /2 sessions.*of all time/);
 });
+
+test('OTel Delta tab shows a detecting message while comparison data is still loading', async () => {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData({ otelComparison: undefined }));
+	await harness.settle();
+
+	const rendered = harness.text('#tab-otel-delta');
+	assert.ok(rendered?.includes('OpenTelemetry Detection Running'), `expected detecting title, got: ${rendered}`);
+	assert.ok(rendered?.includes('Detecting Copilot CLI OpenTelemetry export data'), `expected detecting body, got: ${rendered}`);
+});

@@ -3021,6 +3021,15 @@ ${filterPanel}
 }
 
 function renderOtelDeltaSetupNotice(comparison: CopilotCliOtelComparison | null | undefined): string {
+  if (comparison === undefined) {
+    return `<div class="info-box">
+<div class="info-box-title">📡 Copilot CLI OpenTelemetry Detection Running</div>
+<div>
+Detecting Copilot CLI OpenTelemetry export data…<br/><br/>
+This check compares this extension's estimated token counts against exact counts from local OTel export files.
+</div>
+</div>`;
+  }
   if (comparison && comparison.otelSessionsIndexed > 0) { return ''; }
   const dirStatus = comparison?.otelDirExists
     ? `The export directory exists but no session data has been indexed from it yet (${Number(comparison.otelFileCount)} file(s) found).`
