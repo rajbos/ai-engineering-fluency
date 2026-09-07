@@ -92,6 +92,36 @@ function buildStatsWithLongTailModelEfficiency(): Record<string, unknown> {
 	return stats;
 }
 
+function buildStatsWithCorrections(): Record<string, unknown> {
+	return {
+		...buildStats(),
+		correctionReport: {
+			sessionsPerRepo: 25,
+			sessionsWithMoments: 1,
+			counts: {
+				userCorrections: 1, editRetries: 0, editSelfCorrections: 0,
+				toolErrors: 1, toolErrorsRetried: 1, agentSelfCorrections: 0,
+			},
+			repos: [{
+				repository: 'acme/web-app',
+				sessionsWithMoments: 1,
+				counts: {
+					userCorrections: 1, editRetries: 0, editSelfCorrections: 0,
+					toolErrors: 1, toolErrorsRetried: 1, agentSelfCorrections: 0,
+				},
+				sessions: [{
+					file: '/sessions/example.jsonl',
+					title: 'Correcting the build',
+					moments: [
+						{ type: 'user-correction', turnNumber: 2, timestamp: '2026-08-01T12:00:00.000Z', snippet: 'No, use the existing endpoint.', matchedPattern: 'no' },
+						{ type: 'tool-error', turnNumber: 3, timestamp: '2026-08-01T12:01:00.000Z', snippet: 'Tool failed: edit', tool: 'edit', retried: true },
+					],
+				}],
+			}],
+		},
+	};
+}
+
 interface Harness {
 	window: any;
 	posted: any[];
@@ -287,6 +317,42 @@ test('accepts payloads relayed the way VS Code actually delivers them', async ()
 	assert.ok(rendered?.includes('ai-engineering-fluency'), `expected the repo table, got: ${rendered}`);
 });
 
+test('marks HydraFusion sessions in the recent sessions list', async () => {
+	const stats = buildStats();
+	const hydraFusionSession = {
+		title: 'HydraFusion task',
+		filePath: 'session.jsonl',
+		interactions: 12500,
+		toolCalls: 1500,
+		inputTokens: 1500000,
+		outputTokens: 12000,
+		thinkingTokens: 2000,
+		cachedTokens: 30000,
+		totalTokens: 1544000,
+		estimatedCost: 12.345,
+		editor: 'VS Code',
+		models: ['hydrafusion'],
+		lastActivity: '2026-08-31T12:00:00.000Z',
+	};
+	stats.todaySessions = [
+		hydraFusionSession,
+		{ ...hydraFusionSession, title: 'Unrelated task', models: ['unrelated-hydrafusion'] },
+	];
+	const harness = await bootWebview(stats);
+
+	const badges = harness.window.document.querySelectorAll('.hydrafusion-session-badge');
+	assert.equal(badges.length, 1, 'only the HydraFusion model identifier should be marked');
+	const badge = badges[0];
+	assert.ok(badge, 'expects a marker for HydraFusion sessions');
+	assert.equal(badge.textContent, 'HydraFusion');
+	const row = harness.window.document.querySelector('.sessions-table tbody tr');
+	assert.match(row.textContent, /12\.5K/);
+	assert.match(row.textContent, /1\.5M/);
+	assert.match(row.textContent, /\$12\.35/);
+	const costCell = [...row.cells].find(cell => cell.textContent === '$12.35');
+	assert.equal(costCell?.title, '$12.3450');
+});
+
 test('renders cloud agent session results', async () => {
 	const harness = await bootWebview(buildStats());
 
@@ -358,4 +424,26 @@ test('remembers the "Other models" open state across a leaderboard re-render', a
 	const detailsAfterSort = harness.window.document.getElementById('model-leaderboard-other');
 	assert.ok(detailsAfterSort, 'expects the "Other models" group to still exist after sorting');
 	assert.equal(detailsAfterSort.open, true, 'the open state must survive the re-render');
+});
+
+test('filters corrections by type and opens the selected session turn', async () => {
+	const harness = await bootWebview(buildStatsWithCorrections());
+	harness.window.document.querySelector('.tab-button[data-tab="corrections"]')?.click();
+
+	const userCorrection = harness.window.document.querySelector('button[data-correction-filter="user-correction"]');
+	assert.ok(userCorrection, 'expects a user-corrections filter pill');
+	userCorrection.click();
+
+	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 1);
+	assert.match(harness.text('.correction-moment') ?? '', /^You corrected the agent No, use the existing endpoint\. turn 2 · matched no/);
+	assert.equal(
+		harness.window.document.querySelector('button[data-correction-filter="user-correction"]')?.getAttribute('aria-pressed'),
+		'true',
+	);
+	harness.window.document.querySelector('button.correction-moment')?.click();
+	harness.window.document.querySelector('button.correction-moment')?.click();
+	const message = harness.posted.at(-1);
+	assert.equal(message.command, 'openSessionFile');
+	assert.equal(message.file, '/sessions/example.jsonl');
+	assert.equal(message.turnNumber, 2);
 });

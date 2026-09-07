@@ -153,6 +153,9 @@ members of that GitHub organization.
   `shareWorkspaceMachineNames` setting (off by default).
 - **Rollups only** — The extension sends daily aggregates (tokens, interactions, model
   names), not raw prompts or completions.
+- **Editor attribution** — Each rollup includes the session's editor label. This preserves
+  session-specific sources such as `Copilot CLI (App)` separately from terminal
+  `Copilot CLI` usage in the team dashboard.
 
 ---
 

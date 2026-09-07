@@ -60,7 +60,7 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^26.4.0",
+    "@types/node": "^26.4.1",
     "chart.js": "^4.4.7",
     "esbuild": "^0.28.2",
     "typescript": "^5.8.0"

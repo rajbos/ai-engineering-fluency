@@ -13,7 +13,7 @@ import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
-import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
+import { getModelDisplayName, getModelLookupCandidates } from '../../../../src/webview/shared/modelUtils';
 import { getModelBillingProvider } from '../../../../src/chartDataBuilder';
 import { getLongContextInfo } from '../../../../src/tokenEstimation';
 import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold, computeLongTailModels } from '../../../../src/modelEfficiency';
@@ -43,6 +43,14 @@ type ContextWindowStats = {
 	tierCounts: { [tier: string]: number };
 	maxReachedTokens?: number;
 	maxReachedWindowLimit?: number;
+};
+
+type AutomaticCompactionStats = {
+	total: number;
+	bySource: {
+		copilotCli: number;
+		claude: number;
+	};
 };
 
 type UsageAnalysisPeriod = {
@@ -178,6 +186,7 @@ type UsageAnalysisStats = {
 	last30Days: UsageAnalysisPeriod;
 	month: UsageAnalysisPeriod;
 	lastMonth: UsageAnalysisPeriod;
+	autoCompactionsLast7Days?: AutomaticCompactionStats;
 	locale?: string;
 	lastUpdated: string;
 	customizationMatrix?: WorkspaceCustomizationMatrix | null;
@@ -391,6 +400,8 @@ let activeTab = 'activity';
 let pendingTabAnchor: string | null = null;
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentInsights: EvaluatedInsight[] = [];
+let activeCorrectionFilter: CorrectionMomentType | null = null;
+let currentCorrectionReport: CorrectionReport | null = null;
 // Persisted across stats refreshes so the curation section doesn't disappear
 // when a periodic updateStats message omits curationAnalysis.
 let currentCurationAnalysis: ToolCurationAnalysis | null = null;
@@ -1121,18 +1132,28 @@ type SessionColumnDef = {
 	render: (s: TodaySessionSummary) => { html: string; title?: string };
 };
 
+function formatCompactSessionNumber(value: number): { html: string; title: string } {
+	return { html: formatCompact(value), title: formatNumber(value) };
+}
+
+function isHydraFusionModel(model: string): boolean {
+	return getModelLookupCandidates(model).some(candidate => candidate.toLowerCase() === 'hydrafusion');
+}
+
 const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
-	{ id: 'interactions', label: 'Turns', sortKey: 'interactions', align: 'right', render: s => ({ html: formatNumber(s.interactions) }) },
-	{ id: 'toolCalls', label: 'Tools', sortKey: 'toolCalls', align: 'right', render: s => ({ html: formatNumber(s.toolCalls) }) },
+	{ id: 'interactions', label: 'Turns', sortKey: 'interactions', align: 'right', render: s => formatCompactSessionNumber(s.interactions) },
+	{ id: 'toolCalls', label: 'Tools', sortKey: 'toolCalls', align: 'right', render: s => formatCompactSessionNumber(s.toolCalls) },
 	{ id: 'subAgentCalls', label: 'Sub-Agents', sortKey: 'subAgentCalls', align: 'right', render: s => s.subAgentCalls
-		? { html: formatNumber(s.subAgentCalls), title: `${s.subAgentCalls} sub-agent tool call${s.subAgentCalls === 1 ? '' : 's'} detected in this session` }
+		? { ...formatCompactSessionNumber(s.subAgentCalls), title: `${formatNumber(s.subAgentCalls)} sub-agent tool call${s.subAgentCalls === 1 ? '' : 's'} detected in this session` }
 		: { html: '—', title: 'No sub-agent calls detected in this session' } },
-	{ id: 'inputTokens', label: 'Input', sortKey: 'inputTokens', align: 'right', render: s => ({ html: formatNumber(s.inputTokens) }) },
-	{ id: 'outputTokens', label: 'Output', sortKey: 'outputTokens', align: 'right', render: s => ({ html: formatNumber(s.outputTokens) }) },
-	{ id: 'thinkingTokens', label: 'Thinking', sortKey: 'thinkingTokens', align: 'right', render: s => ({ html: formatNumber(s.thinkingTokens) }) },
-	{ id: 'cachedTokens', label: 'Cached', sortKey: 'cachedTokens', align: 'right', render: s => ({ html: formatNumber(s.cachedTokens) }) },
-	{ id: 'totalTokens', label: 'Total', sortKey: 'totalTokens', align: 'right', render: s => ({ html: formatNumber(s.totalTokens) }) },
-	{ id: 'estimatedCost', label: 'Cost', sortKey: 'estimatedCost', align: 'right', render: s => ({ html: s.estimatedCost > 0 ? `$${s.estimatedCost.toFixed(4)}` : '—' }) },
+	{ id: 'inputTokens', label: 'Input', sortKey: 'inputTokens', align: 'right', render: s => formatCompactSessionNumber(s.inputTokens) },
+	{ id: 'outputTokens', label: 'Output', sortKey: 'outputTokens', align: 'right', render: s => formatCompactSessionNumber(s.outputTokens) },
+	{ id: 'thinkingTokens', label: 'Thinking', sortKey: 'thinkingTokens', align: 'right', render: s => formatCompactSessionNumber(s.thinkingTokens) },
+	{ id: 'cachedTokens', label: 'Cached', sortKey: 'cachedTokens', align: 'right', render: s => formatCompactSessionNumber(s.cachedTokens) },
+	{ id: 'totalTokens', label: 'Total', sortKey: 'totalTokens', align: 'right', render: s => formatCompactSessionNumber(s.totalTokens) },
+	{ id: 'estimatedCost', label: 'Cost', sortKey: 'estimatedCost', align: 'right', render: s => s.estimatedCost > 0
+		? { html: formatCost(s.estimatedCost), title: `$${s.estimatedCost.toFixed(4)}` }
+		: { html: '—' } },
 	{ id: 'editor', label: 'Editor', sortKey: 'editor', align: 'left', render: s => ({ html: escapeHtml(s.editor || 'unknown') }) },
 	{ id: 'workspace', label: 'Workspace', sortKey: 'workspace', align: 'left', cellStyle: 'max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const workspace = escapeHtml(s.workspace || '—'); return { html: workspace, title: workspace }; } },
 	{ id: 'models', label: 'Models', align: 'left', cellStyle: 'font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—'; return { html: models, title: models }; } },
@@ -1216,6 +1237,9 @@ function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
 	const rows = sorted.map((s, idx) => {
 		const title = escapeHtml(s.title || 'Untitled session');
 		const filePath = escapeHtml(s.filePath || '');
+		const hydraFusionBadge = s.models.some(isHydraFusionModel)
+			? '<span class="hydrafusion-session-badge" title="This session used HydraFusion" style="display:inline-block; margin-right:4px; padding:1px 5px; border:1px solid var(--vscode-badge-background, var(--accent-color)); border-radius:999px; background:var(--vscode-badge-background, var(--accent-color)); color:var(--vscode-badge-foreground, var(--bg-primary)); font-size:10px; font-weight:600; line-height:14px; vertical-align:middle;">HydraFusion</span>'
+			: '';
 		const optionalCells = visibleColumns.map(col => {
 			const { html, title: cellTitle } = col.render(s);
 			const alignStyle = col.align === 'right' ? 'text-align:right;' : '';
@@ -1224,7 +1248,7 @@ function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
 		}).join('');
 		return `<tr>
 			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; color:var(--text-secondary);">${idx + 1}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="Open viewer for session &quot;${title}&quot;"><a href="#" class="session-title-link" data-file="${filePath}" style="color:var(--link-color, #4fc1ff); text-decoration:none; cursor:pointer;">${title}</a></td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="Open viewer for session &quot;${title}&quot;"><a href="#" class="session-title-link" data-file="${filePath}" style="color:var(--link-color, #4fc1ff); text-decoration:none; cursor:pointer;">${hydraFusionBadge}${title}</a></td>
 			${optionalCells}
 		</tr>`;
 	}).join('');
@@ -3316,7 +3340,7 @@ const CORRECTION_TYPE_META: Record<CorrectionMomentType, { label: string; color:
 	'agent-self-correction': { label: 'Agent caught itself', color: 'rgba(96,165,250,0.85)' },
 };
 
-function buildCorrectionMomentHtml(moment: CorrectionMoment): string {
+function buildCorrectionMomentHtml(moment: CorrectionMoment, sessionFile: string): string {
 	const meta = CORRECTION_TYPE_META[moment.type] ?? { label: moment.type, color: 'rgba(148,163,184,0.85)' };
 	const time = moment.timestamp ? new Date(moment.timestamp) : null;
 	const timeLabel = time && !isNaN(time.getTime()) ? time.toLocaleString() : '';
@@ -3324,7 +3348,7 @@ function buildCorrectionMomentHtml(moment: CorrectionMoment): string {
 		? `tool \`${moment.tool ?? '?'}\`${moment.retried ? ' — retried shortly after' : ''}`
 		: (moment.matchedPattern ? `matched ${moment.matchedPattern}` : '');
 	return `
-		<div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--bg-tertiary);">
+		<button type="button" class="correction-moment" data-correction-file="${escapeHtml(sessionFile)}" data-correction-turn="${moment.turnNumber}" title="Open this turn in the session log viewer" style="display:flex; width:100%; gap:10px; align-items:flex-start; padding:8px 0; border:0; border-bottom:1px solid var(--bg-tertiary); background:none; color:inherit; cursor:pointer; text-align:left;">
 			<span style="flex-shrink:0; font-size:10px; font-weight:700; letter-spacing:0.03em; padding:2px 8px; border-radius:10px; border:1px solid ${meta.color}; color:var(--text-primary); background:${meta.color.replace('0.85', '0.12')}; white-space:nowrap;">${escapeHtml(meta.label)}</span>
 			<div style="flex:1; min-width:0;">
 				<div style="font-size:12px; color:var(--text-primary); opacity:0.9; overflow-wrap:anywhere;">${escapeHtml(moment.snippet)}</div>
@@ -3332,10 +3356,10 @@ function buildCorrectionMomentHtml(moment: CorrectionMoment): string {
 					turn ${moment.turnNumber}${detail ? ` · ${escapeHtml(detail)}` : ''}${timeLabel ? ` · ${escapeHtml(timeLabel)}` : ''}
 				</div>
 			</div>
-		</div>`;
+		</button>`;
 }
 
-function buildCorrectionSessionHtml(session: CorrectionSessionEntry): string {
+function buildCorrectionSessionHtml(session: CorrectionSessionEntry, moments: CorrectionMoment[]): string {
 	const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
 	const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
 	const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : '';
@@ -3348,7 +3372,7 @@ function buildCorrectionSessionHtml(session: CorrectionSessionEntry): string {
 			<div style="font-size:12px; font-weight:600; color:var(--text-primary); overflow-wrap:anywhere;">
 				${escapeHtml(title)}${dateLabel || truncatedLabel ? ` <span style="font-weight:400; color:var(--text-secondary);">${dateLabel ? `· ${escapeHtml(dateLabel)}` : ''}${escapeHtml(truncatedLabel)}</span>` : ''}
 			</div>
-			${session.moments.map(buildCorrectionMomentHtml).join('')}
+			${moments.map(moment => buildCorrectionMomentHtml(moment, session.file)).join('')}
 		</div>`;
 }
 
@@ -3367,25 +3391,39 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null): string {
 	}
 
 	const c = report.counts;
-	const chip = (n: number, label: string): string => n > 0
-		? `<span style="font-size:11px; padding:2px 10px; border-radius:10px; background:var(--bg-tertiary); color:var(--text-primary);">${n} ${escapeHtml(label)}</span>`
+	const chip = (n: number, label: string, type: CorrectionMomentType): string => n > 0
+		? `<button type="button" data-correction-filter="${type}" aria-pressed="${activeCorrectionFilter === type}" style="font-size:11px; padding:2px 10px; border-radius:10px; border:1px solid ${activeCorrectionFilter === type ? 'var(--vscode-focusBorder)' : 'transparent'}; background:${activeCorrectionFilter === type ? 'var(--vscode-button-secondaryBackground)' : 'var(--bg-tertiary)'}; color:var(--text-primary); cursor:pointer;">${n} ${escapeHtml(label)}</button>`
 		: '';
 	const summaryChips = [
-		chip(c.userCorrections, 'user corrections'),
-		chip(c.toolErrors, 'tool errors'),
-		chip(c.editRetries, 'edit retries'),
-		chip(c.editSelfCorrections, 'edit self-corrections'),
-		chip(c.agentSelfCorrections, 'agent self-corrections'),
+		chip(c.userCorrections, 'user corrections', 'user-correction'),
+		chip(c.toolErrors, 'tool errors', 'tool-error'),
+		chip(c.editRetries, 'edit retries', 'edit-retry'),
+		chip(c.editSelfCorrections, 'edit self-corrections', 'edit-self-correction'),
+		chip(c.agentSelfCorrections, 'agent self-corrections', 'agent-self-correction'),
 	].filter(Boolean).join(' ');
 
-	const repoSections = report.repos.map(repo => `
+	const repoSections = report.repos.map(repo => {
+		const sessions = repo.sessions
+			.map(session => ({
+				session,
+				moments: activeCorrectionFilter
+					? session.moments.filter(moment => moment.type === activeCorrectionFilter)
+					: session.moments,
+			}))
+			.filter(({ moments }) => moments.length > 0);
+		if (sessions.length === 0) { return ''; }
+		return `
 		<div style="margin-top:18px;">
 			<div style="font-size:12px; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
 				${escapeHtml(repo.repository)}
-				<span style="font-weight:400; color:var(--text-secondary);">— ${repo.sessionsWithMoments} session${repo.sessionsWithMoments !== 1 ? 's' : ''} with moments</span>
+				<span style="font-weight:400; color:var(--text-secondary);">— ${sessions.length} session${sessions.length !== 1 ? 's' : ''} with moments</span>
 			</div>
-			${repo.sessions.map(buildCorrectionSessionHtml).join('')}
-		</div>`).join('');
+			${sessions.map(({ session, moments }) => buildCorrectionSessionHtml(session, moments)).join('')}
+		</div>`;
+	}).join('');
+	const emptyFilteredState = activeCorrectionFilter && !repoSections
+		? `<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">No ${CORRECTION_TYPE_META[activeCorrectionFilter].label.toLowerCase()} moments are available in this detail sample.</div>`
+		: '';
 
 	return `
 		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
@@ -3399,8 +3437,39 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null): string {
 				</div>
 				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">${summaryChips}</div>
 				${repoSections}
+				${emptyFilteredState}
 			</div>
 		</div>`;
+}
+
+function wireCorrectionInteractions(): void {
+	const panel = document.getElementById('tab-panel-corrections');
+	if (!panel) { return; }
+	panel.addEventListener('click', (event) => {
+		const target = event.target as HTMLElement;
+		const filterButton = target.closest<HTMLButtonElement>('button[data-correction-filter]');
+		if (filterButton) {
+			const filter = filterButton.getAttribute('data-correction-filter');
+			if (!filter || !CORRECTION_MOMENT_TYPES.includes(filter as CorrectionMomentType)) { return; }
+			activeCorrectionFilter = activeCorrectionFilter === filter ? null : filter as CorrectionMomentType;
+			renderCorrectionsPanel();
+			return;
+		}
+		const moment = target.closest<HTMLButtonElement>('button.correction-moment');
+		if (!moment) { return; }
+		const file = moment.getAttribute('data-correction-file');
+		const turnNumber = Number(moment.getAttribute('data-correction-turn'));
+		if (file && Number.isSafeInteger(turnNumber) && turnNumber > 0) {
+			vscode.postMessage({ command: 'openSessionFile', file, turnNumber });
+		}
+	});
+}
+
+function renderCorrectionsPanel(): void {
+	const panel = document.getElementById('tab-panel-corrections');
+	if (!panel) { return; }
+	setHtml(panel, buildCorrectionsTabPanelHtml(currentCorrectionReport));
+	wireCorrectionInteractions();
 }
 
 
@@ -4192,6 +4261,28 @@ function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined): stri
 	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow;
 }
 
+function renderAutomaticCompactions(stats: AutomaticCompactionStats | undefined): string {
+	if (!stats) { return ''; }
+	const sources: Array<[string, number]> = [
+		['GitHub Copilot CLI', stats.bySource.copilotCli],
+		['Claude', stats.bySource.claude],
+	];
+	const entries = sources.filter(([, count]) => count > 0)
+		.map(([source, count]) => `${escapeHtml(source)} ×${formatNumber(count)}`);
+	const breakdown = entries.length > 0
+		? entries.join(', ')
+		: 'No automatic compactions detected';
+	return `
+		<div class="automatic-compactions-card${stats.total > 0 ? ' automatic-compactions-card--active' : ''}"
+			title="Automatic compactions remove earlier messages to fit the context window and can affect response quality.">
+			<div>
+				<div class="automatic-compactions-label">↩ Automatic compactions (last 7 days)</div>
+				<div class="automatic-compactions-detail">${breakdown}</div>
+			</div>
+			<div class="automatic-compactions-value">${formatNumber(stats.total)}</div>
+		</div>`;
+}
+
 /**
  * Bottom-of-tab section: largest request per period vs the long-context
  * pricing threshold, fullest CLI window, and context tiers used.
@@ -4218,6 +4309,7 @@ function buildContextWindowSectionHtml(stats: UsageAnalysisStats): string {
 					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow)}
 				</div>
 			</div>
+			${renderAutomaticCompactions(stats.autoCompactionsLast7Days)}
 			${bar}
 		</div>`;
 }
@@ -4925,6 +5017,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	}
 
 	const matrix = syncRenderLayoutState(stats);
+	currentCorrectionReport = stats.correctionReport ?? null;
 	const customizationHtml = safeSectionHtml('Workspace Customization', () => buildCustomizationSectionHtml(matrix));
 	// buildUsageAllKeysSets and the context-ref totals are cheap, pure aggregations over
 	// already-validated stats — not worth isolating individually. buildUsageRootHtml (and each
@@ -4974,6 +5067,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	renderSessionsLookbackSelector();
 	setupWorktreesHandlers();
 	wireCopyButtons();
+	wireCorrectionInteractions();
 	// Initialize currentInsights from the stats and wire card buttons
 	currentInsights = stats.insights ?? [];
 	wireInsightCardButtons();

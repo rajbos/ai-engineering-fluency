@@ -260,6 +260,11 @@ body {
 	box-shadow: 0 6px 16px rgb(0, 0, 0, 0.4), 0 2px 4px rgb(0, 0, 0, 0.2);
 }
 
+.turn-card-focused {
+	border-color: var(--vscode-focusBorder);
+	box-shadow: 0 0 0 2px var(--vscode-focusBorder), 0 6px 16px rgb(0, 0, 0, 0.4);
+}
+
 .turn-header {
 	background: var(--bg-tertiary);
 	padding: 14px 16px;

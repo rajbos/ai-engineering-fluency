@@ -825,6 +825,8 @@ todaySessions?: TodaySessionSummary[];
 recentSessions?: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] };
 /** Optional tool curation analysis (VS Code only; absent in CLI/VS/JetBrains). */
 curationAnalysis?: ToolCurationAnalysis | null;
+/** Automatic context compactions observed across recent Copilot CLI and Claude sessions. */
+autoCompactionsLast7Days?: AutomaticCompactionStats;
 /**
  * Daily-bucketed multi-agent/delegation usage over the trailing ~30 days, for the
  * "Multi-Agent Usage" sparkline on the Fluency dashboard. Absent when no sessions
@@ -1010,6 +1012,15 @@ export interface DarkFactoryReport {
   repos: DarkFactoryRepoReport[];
   /** Repositories found but not scanned because the per-scan cap was reached. */
   skippedRepoCount: number;
+}
+
+/** Automatic context compactions grouped by the session format that recorded them. */
+export interface AutomaticCompactionStats {
+  total: number;
+  bySource: {
+    copilotCli: number;
+    claude: number;
+  };
 }
 
 export interface UsageAnalysisPeriod {

@@ -186,6 +186,7 @@ Content-Type: application/json
     "workspaceName": "My Project",
     "machineId": "laptop-abc123",
     "machineName": "My Laptop",
+    "editor": "Copilot CLI (App)",
     "inputTokens": 15000,
     "outputTokens": 8000,
     "interactions": 42,
@@ -195,7 +196,7 @@ Content-Type: application/json
 ```
 
 Accepts up to **500 entries per request**. The server upserts by
-`(user_id, dataset_id, day, model, workspace_id, machine_id)` so repeated
+`(user_id, dataset_id, day, model, workspace_id, machine_id, editor)` so repeated
 uploads are safe and idempotent.
 
 ### Other endpoints
@@ -312,11 +313,11 @@ users (
 
 usage_uploads (
   id, user_id, dataset_id, day, model,
-  workspace_id, workspace_name, machine_id, machine_name,
+  workspace_id, workspace_name, machine_id, machine_name, editor,
   input_tokens, output_tokens, interactions, schema_version,
   uploaded_at
 )
--- UNIQUE(user_id, dataset_id, day, model, workspace_id, machine_id)
+-- UNIQUE(user_id, dataset_id, day, model, workspace_id, machine_id, editor)
 ```
 
 ## Backup

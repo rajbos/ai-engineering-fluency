@@ -325,6 +325,7 @@ import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
+import { getAzureTableStorageEndpoint } from './utils/azureEndpoints';
 import { isGuidMcpTool, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions } from '../../src/recentSessions';
@@ -749,7 +750,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Extract custom agent name from a file:// URI pointing to a .agent.md file.
 	 * Returns the filename without the .agent.md extension.
 	 */
-	private getEditorTypeFromPath(filePath: string): string {
+	public getEditorTypeFromPath(filePath: string): string {
 		return this._resolveEditorLabel(filePath) ??
 			_getEditorTypeFromPath(filePath, (p) => this.findEcosystem(p)?.id === 'opencode');
 	}
@@ -3349,6 +3350,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			last30Days: stats.last30Days,
 			month: stats.month,
 			lastMonth: stats.lastMonth,
+			autoCompactionsLast7Days: stats.autoCompactionsLast7Days,
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
 		};
@@ -3409,6 +3411,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			last30Days: stats.last30Days,
 			month: stats.month,
 			lastMonth: stats.lastMonth,
+			autoCompactionsLast7Days: stats.autoCompactionsLast7Days,
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
 			todaySessions: stats.todaySessions,
@@ -4040,12 +4043,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
 		let correctionReport: CorrectionReport | undefined;
 		let repeatedTasks: RepeatedTaskReport | undefined;
+		let autoCompactionsLast7Days: UsageAnalysisStats['autoCompactionsLast7Days'];
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
 			const periods = { todayStats, last30DaysStats, monthStats, lastMonthStats, todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey };
 			const wsMaps = { workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts };
 			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
 			recentSessions = this.buildRecentSessionBuckets(usageResults, now);
+			autoCompactionsLast7Days = this.buildAutoCompactionStats(usageResults, now);
 			correctionReport = this.buildCorrectionReport(usageResults);
 			repeatedTasks = this.buildRepeatedTaskReport(usageResults);
 			this._lastSkillCallsByEditor = {};
@@ -4076,6 +4081,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			repeatedTasks,
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats),
 			agenticDailyTrend,
+			autoCompactionsLast7Days,
 		};
 		this.lastUsageAnalysisStats = stats;
 		return stats;
@@ -4561,6 +4567,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return this.buildRecentSessionItems(results)
 			.filter(it => it.activityKey >= startKey)
 			.map(it => it.value);
+	}
+
+	/**
+	 * Aggregate the two explicit automatic-compaction signals emitted by supported
+	 * session formats without exposing them as regular tool calls.
+	 */
+	private buildAutoCompactionStats(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		now: Date,
+	): NonNullable<UsageAnalysisStats['autoCompactionsLast7Days']> {
+		const startKey = getTimeWindowStartDayKey('last7', now);
+		const bySource = { copilotCli: 0, claude: 0 };
+		for (const result of results) {
+			if (!result || this.computeLastActivityKey(result.sessionData, result.mtime) < startKey) { continue; }
+			bySource.copilotCli += result.sessionData.truncationCount ?? 0;
+			bySource.claude += result.sessionData.usageAnalysis?.toolCalls.byTool['__auto_compact__'] ?? 0;
+		}
+		return { total: bySource.copilotCli + bySource.claude, bySource };
 	}
 
 	private buildRecentSessionItems(
@@ -7378,8 +7402,11 @@ private computeFallbackDailyRollup(
 
 	private async _handleOpenSessionFile(message: any): Promise<void> {
 		if (!message.file) { return; }
+		const turnNumber = typeof message.turnNumber === 'number' && Number.isSafeInteger(message.turnNumber) && message.turnNumber > 0
+			? message.turnNumber
+			: undefined;
 		await this.dispatch('openSessionFile:analysis', async () => {
-			try { await this.showLogViewer(message.file); }
+			try { await this.showLogViewer(message.file, turnNumber); }
 			catch { vscode.window.showErrorMessage('Could not open log viewer: ' + message.file); }
 		});
 	}
@@ -7497,6 +7524,7 @@ private computeFallbackDailyRollup(
 		return {
 			today: analysisStats.today, last30Days: analysisStats.last30Days,
 			month: analysisStats.month, lastMonth: analysisStats.lastMonth,
+			autoCompactionsLast7Days: analysisStats.autoCompactionsLast7Days,
 			locale: analysisStats.locale,
 			customizationMatrix: analysisStats.customizationMatrix || null,
 			missedPotential: analysisStats.missedPotential || [],
@@ -7853,7 +7881,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 	}
 
-	public async showLogViewer(sessionFilePath: string): Promise<void> {
+	public async showLogViewer(sessionFilePath: string, focusedTurnNumber?: number): Promise<void> {
 		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
 			const trajectoryId = this.windsurf.extractTrajectoryId(sessionFilePath);
 			const pbPath = path.join(os.homedir(), '.codeium', 'windsurf', 'cascade', `${trajectoryId}.pb`);
@@ -7877,7 +7905,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: false },
 			{ enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
 		);
-		this.logViewerPanel.webview.html = this.getLogViewerHtml(this.logViewerPanel.webview, logData);
+		this.logViewerPanel.webview.html = this.getLogViewerHtml(this.logViewerPanel.webview, logData, focusedTurnNumber);
 		this.logViewerPanel.webview.onDidReceiveMessage(async (message) => { await this.handleLogViewerMessage(message); });
 		this.logViewerPanel.onDidDispose(() => { this.logViewerPanel = undefined; });
 	}
@@ -8070,11 +8098,11 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 	}
 
-	private getLogViewerHtml(webview: vscode.Webview, logData: SessionLogData): string {
+	private getLogViewerHtml(webview: vscode.Webview, logData: SessionLogData, focusedTurnNumber?: number): string {
 		const nonce = getNonce();
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'logviewer.js'));
 
-		const initialData = JSON.stringify({ ...logData, compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }).replace(/</g, '\\u003c');
+		const initialData = JSON.stringify({ ...logData, focusedTurnNumber, compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }).replace(/</g, '\\u003c');
 
 		return `<!DOCTYPE html>
 		<html lang="en">
@@ -9014,6 +9042,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       if (await this.dispatchSharedCommand(message)) { return; }
       switch (message.command) {
         case "refresh": await this.dispatch('refresh:dashboard', () => this.refreshDashboardPanel()); break;
+        case "configureBackend": await this.dispatch('configureBackend:dashboard', () => vscode.commands.executeCommand("aiEngineeringFluency.configureBackend")); break;
+        case "configureTeamServer": await this.dispatch('configureTeamServer:dashboard', () => vscode.commands.executeCommand("aiEngineeringFluency.configureTeamServer")); break;
         case "deleteUserDataset": await this.dispatch('deleteUserDataset', () => this.handleDeleteUserDataset(message.userId, message.datasetId)); break;
         case "backfillHistoricalData": await this.dispatch('backfillHistoricalData', () => this.handleBackfillHistoricalData()); break;
         case "openExternal": if (typeof message.url === 'string') { await vscode.env.openExternal(vscode.Uri.parse(message.url)); } break;
@@ -9036,7 +9066,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     } catch (error) {
       this.error("Failed to load dashboard data:", error);
       if (!this.lastDashboardData) {
-        this.dashboardPanel?.webview.postMessage({ command: "dashboardError", message: "Failed to load dashboard data. Please check backend configuration and try again." });
+        this.showDashboardFailure(this.getAzureDashboardFailureMessage("load dashboard data"));
       }
     }
   }
@@ -9064,10 +9094,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       this.log("✅ Team Dashboard refreshed");
     } catch (error) {
       this.error("Failed to refresh dashboard:", error);
-      this.dashboardPanel?.webview.postMessage({
-        command: "dashboardError",
-        message: "Failed to refresh dashboard data.",
-      });
+      this.showDashboardFailure(this.getAzureDashboardFailureMessage("refresh dashboard data"));
     }
   }
 
@@ -9119,11 +9146,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       await this.refreshDashboardPanel();
     } catch (error) {
       this.error("Failed to delete user dataset:", error);
-      this.dashboardPanel?.webview.postMessage({
-        command: "dashboardError",
-        message:
-          "Failed to delete data. Please check backend configuration and try again.",
-      });
+      this.showDashboardFailure(this.getAzureDashboardFailureMessage("delete Azure Storage data"));
     }
   }
 
@@ -9171,10 +9194,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       await this.refreshDashboardPanel();
     } catch (error) {
       this.error('Backfill failed:', error);
-      this.dashboardPanel?.webview.postMessage({
-        command: 'dashboardError',
-        message: 'Backfill failed. Please check backend configuration and try again.',
-      });
+      this.showDashboardFailure(this.getAzureDashboardFailureMessage("backfill Azure Storage data"));
     }
   }
 
@@ -9522,7 +9542,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
    * Azure is considered configured when all required Azure Storage fields are filled.
    * Team Server is configured when enabled with a valid http/https URL.
    */
-  private getDashboardBackendConfig(): { azureConfigured: boolean; teamServerConfigured: boolean; teamServerUrl: string } {
+  private getDashboardBackendConfig(): { azureConfigured: boolean; azureStorageUrl: string; teamServerConfigured: boolean; teamServerUrl: string } {
     const settings = this.backend?.getSettings();
     const azureConfigured = !!(
       settings?.subscriptionId &&
@@ -9530,8 +9550,26 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       settings?.storageAccount &&
       settings?.aggTable
     );
+    const azureStorageUrl = azureConfigured
+      ? getAzureTableStorageEndpoint(settings.storageAccount)
+      : '';
     const teamServerUrl = this.buildTeamServerUrl(settings);
-    return { azureConfigured, teamServerConfigured: !!teamServerUrl, teamServerUrl };
+    return { azureConfigured, azureStorageUrl, teamServerConfigured: !!teamServerUrl, teamServerUrl };
+  }
+
+  private getAzureDashboardFailureMessage(action: string): string {
+    const { azureStorageUrl } = this.getDashboardBackendConfig();
+    const source = azureStorageUrl ? ` from ${azureStorageUrl}` : '';
+    return `Unable to ${action}${source}. Review the Azure Storage configuration and try again.`;
+  }
+
+  private showDashboardFailure(message: string): void {
+    const { teamServerConfigured, teamServerUrl } = this.getDashboardBackendConfig();
+    this.dashboardPanel?.webview.postMessage(
+      teamServerConfigured
+        ? { command: 'dashboardTeamServerFallback', message, url: teamServerUrl }
+        : { command: 'dashboardError', message },
+    );
   }
 
   private buildTeamServerUrl(settings: any): string {
@@ -11729,6 +11767,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       last30Days: stats.last30Days,
       month: stats.month,
       lastMonth: stats.lastMonth,
+      autoCompactionsLast7Days: stats.autoCompactionsLast7Days,
       locale: detectedLocale,
       customizationMatrix: stats.customizationMatrix || null,
       missedPotential: stats.missedPotential || [],
@@ -12009,6 +12048,8 @@ function createBackendFacade(context: vscode.ExtensionContext, tokenTracker: Cop
     isVSSessionFile: (sessionFile: string) =>
       tokenTracker.visualStudio.isVSSessionFile(sessionFile),
     getGithubToken: () => tokenTracker.githubSession?.accessToken,
+    getEditorLabel: (sessionFile: string) =>
+      tokenTracker.getEditorTypeFromPath(sessionFile),
   });
 }
 

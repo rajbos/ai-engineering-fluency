@@ -21,7 +21,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
     - name: Harden the runner (Block all outbound calls except allowed)
-      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+      uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
       with:
         egress-policy: block
         allowed-endpoints: >
@@ -52,7 +52,7 @@ jobs:
     
     steps:
     - name: Harden the runner (Block all outbound calls except allowed)
-      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+      uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
       with:
         egress-policy: block
         # Allowlist inferred from the harden-runner audit output of the 10 most
@@ -241,7 +241,7 @@ jobs:
     
     steps:
     - name: Harden the runner (Block all outbound calls except allowed)
-      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+      uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
       with:
         egress-policy: block
         # Allowlist inferred from the harden-runner audit output of the sampled
@@ -297,7 +297,7 @@ jobs:
     if: github.event_name == 'pull_request'
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+      uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
       with:
         egress-policy: audit
 
@@ -320,11 +320,12 @@ jobs:
       run: npm ci --ignore-scripts
 
     # Playwright is deliberately not a dependency of the extension - it is
-    # tooling, not shipped code - so the harness looks for a global install.
+    # tooling, not shipped code - so the harness uses a dedicated locked install.
     - name: Install Playwright Chromium
+      working-directory: .github/workflows/dependencies/playwright
       run: |
-        npm install -g playwright@1.56.0
-        npx --yes playwright@1.56.0 install --with-deps chromium
+        npm ci --ignore-scripts --no-audit --no-fund
+        npx --no-install playwright install --with-deps chromium
 
     - name: Compile webview bundles
       working-directory: vscode-extension
