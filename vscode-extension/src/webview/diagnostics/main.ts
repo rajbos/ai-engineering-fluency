@@ -846,6 +846,13 @@ function renderShareCardTab(detailedFiles: SessionFileDetails[], isLoadingSessio
   </div>`;
 }
 
+function renderShareCardContent(): void {
+  const container = document.getElementById("tab-share");
+  if (!container) { return; }
+  setHtml(container, renderShareCardTab(storedDetailedFiles, isLoading));
+  setupShareSummaryButtonHandler();
+}
+
 function renderDebugTab(counters: GlobalStateCounters | undefined): string {
   const c = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: '', efficiencyTabBannerDismissed: false };
   return `
@@ -2086,7 +2093,7 @@ function renderShareCardPeriodSelector(): void {
     onChange: (value) => {
       currentShareCardPeriod = value as Period;
       diagState.patch({ shareCardPeriod: currentShareCardPeriod });
-      reRenderShareCard();
+      renderShareCardContent();
     },
   });
   wrapper.append(select);
@@ -2107,6 +2114,7 @@ function buildCurrentShareSummaryText(): string {
 /** Wires the "Copy Summary Text" button, social share buttons, and period selector on the Share
  * Card tab. Re-run after `reRenderShareCard()` replaces the tab's markup, since these elements are recreated. */
 function setupShareSummaryButtonHandler(): void {
+  if (!document.getElementById("share-card-period-selector")) { return; }
   renderShareCardPeriodSelector();
   document.getElementById("btn-copy-share-summary")?.addEventListener("click", () => {
     vscode.postMessage({ command: "copyText", text: buildCurrentShareSummaryText() });
