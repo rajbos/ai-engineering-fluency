@@ -116,6 +116,9 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/saoudrizwan.claude-dev/tasks/')) { return 'Cline'; }
 	// Kilo Code (OpenCode fork): virtual DB session paths <...>/.local/share/kilo/kilo.db#ses_<id>.
 	if (normalized.includes('/kilo/kilo.db#')) { return 'Kilo Code'; }
+	// Kilo CLI: session files under <...>/.local/share/kilo/storage/session_diff/ses_<id>.json.
+	// Must be checked before the generic /kilo/ match to distinguish CLI from Code.
+	if (normalized.includes('/kilo/storage/session_diff/ses_') && normalized.endsWith('.json')) { return 'Kilo CLI'; }
 	if (normalized.includes('/opencode/')) { return 'OpenCode'; }
 	// OpenAI Codex CLI (~/.codex): must be checked before the generic 'code'-based
 	// fallbacks below ('codex' contains 'code' and would misclassify as VS Code).

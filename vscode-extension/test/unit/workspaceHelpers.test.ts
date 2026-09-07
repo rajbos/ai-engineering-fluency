@@ -1027,6 +1027,14 @@ test('getEditorTypeFromPath: detects Crush', () => {
     assert.equal(getEditorTypeFromPath('/home/user/.crush/crush.db#session-id'), 'Crush');
 });
 
+test('getEditorTypeFromPath: detects Kilo CLI', () => {
+    assert.equal(getEditorTypeFromPath('/home/user/.local/share/kilo/storage/session_diff/ses_abc123.json'), 'Kilo CLI');
+});
+
+test('getEditorTypeFromPath: detects Kilo Code', () => {
+    assert.equal(getEditorTypeFromPath('/home/user/.local/share/kilo/kilo.db#ses_abc123'), 'Kilo Code');
+});
+
 test('getEditorTypeFromPath: detects Cline (not VS Code) despite /Code/User/ in path', () => {
     assert.equal(getEditorTypeFromPath('C:\\Users\\user\\AppData\\Roaming\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\tasks\\1782681302220\\ui_messages.json'), 'Cline');
 });

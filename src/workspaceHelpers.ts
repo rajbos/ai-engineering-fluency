@@ -1124,6 +1124,9 @@ function detectCliAgentStoreFromPath(lowerPath: string): string | undefined {
 	// Kilo Code (OpenCode fork): virtual DB session paths <...>/.local/share/kilo/kilo.db#ses_<id>.
 	// Checked here so it wins over any generic substring fallbacks further down.
 	if (lowerPath.includes('/kilo/kilo.db#')) { return 'Kilo Code'; }
+	// Kilo CLI: session files under <...>/.local/share/kilo/storage/session_diff/ses_<id>.json.
+	// Must be checked before the generic /kilo/ match to distinguish CLI from Code.
+	if (lowerPath.includes('/kilo/storage/session_diff/ses_') && lowerPath.endsWith('.json')) { return 'Kilo CLI'; }
 	// Hermes Agent's virtual path scheme is <HERMES_HOME>/state.db#<session_id>. HERMES_HOME
 	// itself never contains 'code'/'copilot'/'cursor' (Windows: %LOCALAPPDATA%/hermes, else
 	// ~/.hermes), but the check is placed here alongside the other DB-backed CLI adapters for
@@ -1197,7 +1200,7 @@ function detectVSCodeVariantFromPath(lowerPath: string): string | undefined {
  * Returns: 'VS Code', 'VS Code Insiders', 'VSCodium', 'Cursor', 'Copilot CLI',
  *          'JetBrains', 'OpenCode', 'Claude Code', 'Claude Desktop', 'Continue',
  *          'Mistral Vibe', 'Gemini CLI', 'Claude Desktop Cowork', 'Crush', 'Cline',
- *          or 'Unknown'.
+ *          'Kilo Code', 'Kilo CLI', or 'Unknown'.
  * Note: 'Claude Code' and 'Claude Desktop' share the same ~/.claude/projects/ directory
  * and are distinguished by the `entrypoint` field inside the session file, not the path
  * (see detectClaudeCodeEditorVariant). 'Claude Desktop Cowork' is a separate, unrelated

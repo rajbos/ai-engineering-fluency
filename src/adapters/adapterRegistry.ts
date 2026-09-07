@@ -36,6 +36,7 @@ import { HermesDataAccess } from '../hermes';
 
 import { OpenCodeAdapter } from './openCodeAdapter';
 import { KiloAdapter } from './kiloAdapter';
+import { KiloCliAdapter } from './kiloCliAdapter';
 import { CrushAdapter } from './crushAdapter';
 import { VisualStudioAdapter } from './visualStudioAdapter';
 import { ContinueAdapter } from './continueAdapter';
@@ -59,9 +60,9 @@ import { HermesAdapter } from './hermesAdapter';
 
 /** Data-access instances and callbacks required to build the adapter registry. */
 export interface AdapterRegistryDeps {
-openCode: OpenCodeDataAccess;
-kilo: KiloDataAccess;
-crush: CrushDataAccess;
+  openCode: OpenCodeDataAccess;
+  kilo: KiloDataAccess;
+  crush: CrushDataAccess;
 continue_: ContinueDataAccess;
 eclipse: EclipseDataAccess;
 visualStudio: VisualStudioDataAccess;
@@ -103,10 +104,10 @@ export type DataAccessInstances = Omit<AdapterRegistryDeps, 'estimateTokens' | '
  *   passed to data-access constructors that require it for WASM loading.
  */
 export function createDataAccessInstances(extensionUri: UriLike): DataAccessInstances {
-return {
-openCode: new OpenCodeDataAccess(extensionUri),
-kilo: new KiloDataAccess(extensionUri),
-crush: new CrushDataAccess(extensionUri),
+  return {
+    openCode: new OpenCodeDataAccess(extensionUri),
+    kilo: new KiloDataAccess(extensionUri),
+    crush: new CrushDataAccess(extensionUri),
 continue_: new ContinueDataAccess(),
 eclipse: new EclipseDataAccess(),
 visualStudio: new VisualStudioDataAccess(),
@@ -133,9 +134,10 @@ hermes: new HermesDataAccess(),
  * use identical registration order and constructor wiring.
  */
 export function buildAdapterRegistry(deps: AdapterRegistryDeps): IEcosystemAdapter[] {
-return [
-new OpenCodeAdapter(deps.openCode),
-new KiloAdapter(deps.kilo),
+  return [
+    new OpenCodeAdapter(deps.openCode),
+    new KiloAdapter(deps.kilo),
+    new KiloCliAdapter(),
 new CrushAdapter(deps.crush),
 new VisualStudioAdapter(deps.visualStudio, deps.estimateTokens),
 new ContinueAdapter(deps.continue_),

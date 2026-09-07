@@ -2,6 +2,7 @@ export { buildAdapterRegistry, createDataAccessInstances } from './adapterRegist
 export type { AdapterRegistryDeps, DataAccessInstances } from './adapterRegistry';
 export { OpenCodeAdapter } from './openCodeAdapter';
 export { KiloAdapter } from './kiloAdapter';
+export { KiloCliAdapter } from './kiloCliAdapter';
 export { CrushAdapter } from './crushAdapter';
 export { ContinueAdapter } from './continueAdapter';
 export { ClaudeDesktopAdapter } from './claudeDesktopAdapter';
