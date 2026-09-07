@@ -846,13 +846,6 @@ function renderShareCardTab(detailedFiles: SessionFileDetails[], isLoadingSessio
   </div>`;
 }
 
-function renderShareCardContent(): void {
-  const container = document.getElementById("tab-share");
-  if (!container) { return; }
-  setHtml(container, renderShareCardTab(storedDetailedFiles, isLoading));
-  setupShareSummaryButtonHandler();
-}
-
 function renderDebugTab(counters: GlobalStateCounters | undefined): string {
   const c = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: '', efficiencyTabBannerDismissed: false };
   return `
