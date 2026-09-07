@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: VS Code Extension — Marketplace
-    url: https://marketplace.visualstudio.com/items?itemName=RobBos.copilot-token-tracker
+    url: https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency
     about: View the AI Engineering Fluency VS Code extension on the Marketplace
   - name: CLI — npm package
     url: https://www.npmjs.com/package/@rajbos/ai-engineering-fluency
