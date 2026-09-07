@@ -292,14 +292,15 @@ test('tells the host when a payload arrived but could not be rendered', async ()
 
 test('reports only unknown tools that have not already been reported', async () => {
 	const harness = await bootWebview(buildStatsWithUnknownTools(['already_reported_tool', 'fresh_tool'], ['already_reported_tool']));
-	const reportButton = harness.window.document.querySelector<HTMLElement>('[data-report-unknown-tools]');
+	const reportButton = harness.window.document.querySelector('[data-report-unknown-tools]') as HTMLElement | null;
 	assert.ok(reportButton, 'expected unknown-tools report button to be rendered');
 
 	reportButton.dispatchEvent(new harness.window.MouseEvent('click', { bubbles: true }));
 	await harness.settle();
 
 	const reportMessage = harness.posted.find((message) => message.command === 'openUnknownToolsIssue');
-	assert.deepEqual(reportMessage, { command: 'openUnknownToolsIssue', toolNames: ['fresh_tool'] });
+	assert.equal(reportMessage?.command, 'openUnknownToolsIssue');
+	assert.deepEqual(Array.from(reportMessage?.toolNames ?? []), ['fresh_tool']);
 	assert.equal(harness.window.document.querySelector('[data-report-unknown-tools]'), null);
 });
 
