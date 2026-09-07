@@ -50,7 +50,7 @@ function buildInitialData(overrides: Record<string, unknown> = {}): Record<strin
 		isDebugMode: false,
 		globalStateCounters: {
 			openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false,
-			unknownMcpDismissedVersion: '', efficiencyTabBannerDismissed: false,
+			unknownMcpDismissedTools: [], unknownMcpReportedTools: [], efficiencyTabBannerDismissed: false,
 		},
 		githubAuth: { authenticated: false },
 		sessionFolders: [],

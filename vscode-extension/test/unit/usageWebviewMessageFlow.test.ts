@@ -85,6 +85,19 @@ function buildStats(): Record<string, unknown> {
 	};
 }
 
+function buildStatsWithUnknownTools(unknownTools: string[], reportedUnknownTools: string[] = []): Record<string, unknown> {
+	const stats = buildStats();
+	stats.last30Days = {
+		...(stats.last30Days as Record<string, unknown>),
+		toolCalls: {
+			total: unknownTools.length,
+			byTool: Object.fromEntries(unknownTools.map(tool => [tool, 1])),
+		},
+	};
+	stats.reportedUnknownTools = reportedUnknownTools;
+	return stats;
+}
+
 /** `buildStats()` with a long-tail "Most used models locally" dataset for `last30Days`. */
 function buildStatsWithLongTailModelEfficiency(): Record<string, unknown> {
 	const stats = buildStats();
@@ -275,6 +288,19 @@ test('tells the host when a payload arrived but could not be rendered', async ()
 		!withLayout.posted.some((m) => m.command === 'usageWebviewTrace' && String(m.stage).startsWith('repoPrStatsLoaded')),
 		'a successful render must not log anything',
 	);
+});
+
+test('reports only unknown tools that have not already been reported', async () => {
+	const harness = await bootWebview(buildStatsWithUnknownTools(['already_reported_tool', 'fresh_tool'], ['already_reported_tool']));
+	const reportButton = harness.window.document.querySelector<HTMLElement>('[data-report-unknown-tools]');
+	assert.ok(reportButton, 'expected unknown-tools report button to be rendered');
+
+	reportButton.dispatchEvent(new harness.window.MouseEvent('click', { bubbles: true }));
+	await harness.settle();
+
+	const reportMessage = harness.posted.find((message) => message.command === 'openUnknownToolsIssue');
+	assert.deepEqual(reportMessage, { command: 'openUnknownToolsIssue', toolNames: ['fresh_tool'] });
+	assert.equal(harness.window.document.querySelector('[data-report-unknown-tools]'), null);
 });
 
 test('a rejected message is reported to the host instead of vanishing', async () => {

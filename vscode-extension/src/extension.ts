@@ -331,6 +331,7 @@ import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
 import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
+import { evaluateUnknownToolNotification, mergeToolLists, sanitizeToolList } from './unknownToolTracking';
 
 type LocalViewRegressionProbeResult = {
   pass: boolean;
@@ -338,6 +339,10 @@ type LocalViewRegressionProbeResult = {
   timedOut?: boolean;
   metrics?: ViewRegressionProbeSnapshot;
 };
+
+const UNKNOWN_TOOLS_DISMISSED_STATE_KEY = 'news.unknownMcpTools.dismissedTools';
+const UNKNOWN_TOOLS_REPORTED_STATE_KEY = 'news.unknownMcpTools.reportedTools';
+const UNKNOWN_TOOLS_LEGACY_DISMISSED_VERSION_KEY = 'news.unknownMcpTools.dismissedVersion';
 
 type LocalViewRegressionCase = {
   id: string;
@@ -1750,12 +1755,40 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return Array.from(allTools).filter(tool => !lookupKnownToolName(tool, this.toolNameMap) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
 	}
 
+	private getStoredUnknownToolList(key: string): string[] {
+		const stored = this.context.globalState.get<unknown>(key, []);
+		return Array.isArray(stored) ? sanitizeToolList(stored) : [];
+	}
+
+	private async setStoredUnknownToolList(key: string, tools: readonly string[]): Promise<string[]> {
+		const sanitized = sanitizeToolList(tools);
+		await this.context.globalState.update(key, sanitized.length > 0 ? sanitized : undefined);
+		return sanitized;
+	}
+
+	private buildUnknownToolsIssueUrl(unknownTools: readonly string[]): string {
+		const title = encodeURIComponent('Add missing friendly names for tools');
+		const toolList = unknownTools.map(tool => `- \`${tool}\``).join('\n');
+		const body = encodeURIComponent(
+			`## Unknown Tools Found\n\n` +
+			`The following tools were detected but don't have friendly display names:\n\n` +
+			`${toolList}\n\n` +
+			`Please add friendly names for these tools to improve the user experience.`
+		);
+		return `${this.getRepositoryUrl()}/issues/new?title=${title}&body=${body}&labels=${encodeURIComponent('MCP Toolnames')}`;
+	}
+
+	private async _handleOpenUnknownToolsIssue(rawTools: unknown): Promise<void> {
+		if (!Array.isArray(rawTools)) { return; }
+		const reportableTools = sanitizeToolList(rawTools);
+		if (reportableTools.length === 0) { return; }
+		const updatedReported = mergeToolLists(this.getStoredUnknownToolList(UNKNOWN_TOOLS_REPORTED_STATE_KEY), reportableTools);
+		await this.setStoredUnknownToolList(UNKNOWN_TOOLS_REPORTED_STATE_KEY, updatedReported);
+		this.analysisPanel?.webview.postMessage({ command: 'unknownToolsReported', toolNames: updatedReported });
+		await vscode.env.openExternal(vscode.Uri.parse(this.buildUnknownToolsIssueUrl(reportableTools)));
+	}
+
 	private async showUnknownMcpToolsBanner(): Promise<void> {
-		const dismissedKey = 'news.unknownMcpTools.dismissedVersion';
-		const dismissedVersion = this.context.globalState.get<string>(dismissedKey);
-		if (dismissedVersion === packageJson.version) {
-			return;
-		}
 		const openCountKey = 'extension.unknownMcpOpenCount';
 		const openCount = (this.context.globalState.get<number>(openCountKey) ?? 0) + 1;
 		await this.context.globalState.update(openCountKey, openCount);
@@ -1764,18 +1797,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		const stats = await this.calculateUsageAnalysisStats(true);
 		const unknownTools = this.getUnknownMcpToolsFromStats(stats);
-		if (unknownTools.length === 0) {
+		const dismissedTools = this.getStoredUnknownToolList(UNKNOWN_TOOLS_DISMISSED_STATE_KEY);
+		const reportedTools = this.getStoredUnknownToolList(UNKNOWN_TOOLS_REPORTED_STATE_KEY);
+		const notification = evaluateUnknownToolNotification(unknownTools, dismissedTools, reportedTools);
+		if (notification.actionableTools.length === 0) {
+			return;
+		}
+		const legacyDismissedVersion = this.context.globalState.get<string>(UNKNOWN_TOOLS_LEGACY_DISMISSED_VERSION_KEY);
+		if (dismissedTools.length === 0 && legacyDismissedVersion === packageJson.version) {
+			await this.setStoredUnknownToolList(UNKNOWN_TOOLS_DISMISSED_STATE_KEY, notification.actionableTools);
+			await this.context.globalState.update(UNKNOWN_TOOLS_LEGACY_DISMISSED_VERSION_KEY, undefined);
+			return;
+		}
+		if (!notification.shouldShow) {
 			return;
 		}
 		const open = l10n.t('button.openUsageAnalysis');
 		const dismiss = l10n.t('button.dismiss');
 		const choice = await vscode.window.showInformationMessage(
-			`🔌 Found ${unknownTools.length} tool${unknownTools.length > 1 ? 's' : ''} without friendly names. Help improve the extension by reporting them.`,
+			`🔌 Found ${notification.actionableTools.length} tool${notification.actionableTools.length > 1 ? 's' : ''} without friendly names. Help improve the extension by reporting them.`,
 
 			open,
 			dismiss
 		);
-		await this.context.globalState.update(dismissedKey, packageJson.version);
+		await this.setStoredUnknownToolList(
+			UNKNOWN_TOOLS_DISMISSED_STATE_KEY,
+			mergeToolLists(dismissedTools, notification.actionableTools),
+		);
+		await this.context.globalState.update(UNKNOWN_TOOLS_LEGACY_DISMISSED_VERSION_KEY, undefined);
 		if (choice === open) {
 			await this.showUsageAnalysisOnToolsTab('unknown-mcp-tools-section');
 		}
@@ -7423,6 +7472,7 @@ private computeFallbackDailyRollup(
 				const toolName = message.toolName as string;
 				return toolName ? this._handleSuppressUnknownTool(toolName) : undefined;
 			},
+			openUnknownToolsIssue: (message) => this.dispatch('openUnknownToolsIssue', () => this._handleOpenUnknownToolsIssue(message.toolNames)),
 			loadRepoPrStats: () => this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats()),
 			loadAgentSessions: () => this.dispatch('loadAgentSessions', () => this.loadAgentSessions()),
 			loadRecentSessions: (message) => this.dispatch(`loadRecentSessions:${message.period}`, () => this.loadRecentSessions(message.period as ChartTimeWindow)),
@@ -7531,6 +7581,8 @@ private computeFallbackDailyRollup(
 			lastUpdated: analysisStats.lastUpdated.toISOString(),
 			backendConfigured: this.isBackendConfigured(),
 			currentWorkspacePaths: workspacePaths,
+			suppressedUnknownTools: vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', []),
+			reportedUnknownTools: this.getStoredUnknownToolList(UNKNOWN_TOOLS_REPORTED_STATE_KEY),
 			todaySessions: analysisStats.todaySessions || [],
 			insights: this.buildCurrentInsights(analysisStats),
 			correctionReport: analysisStats.correctionReport ?? null,
@@ -10000,7 +10052,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     await this.context.globalState.update('extension.openCount', 0);
     await this.context.globalState.update('extension.unknownMcpOpenCount', 0);
     await this.context.globalState.update('news.fluencyScoreBanner.v1.dismissed', false);
-    await this.context.globalState.update('news.unknownMcpTools.dismissedVersion', undefined);
+    await this.context.globalState.update(UNKNOWN_TOOLS_DISMISSED_STATE_KEY, undefined);
+    await this.context.globalState.update(UNKNOWN_TOOLS_REPORTED_STATE_KEY, undefined);
+    await this.context.globalState.update(UNKNOWN_TOOLS_LEGACY_DISMISSED_VERSION_KEY, undefined);
     await this.context.globalState.update('news.efficiencyTab.v1.dismissed', false);
     vscode.window.showInformationMessage('Debug counters and dismissed flags have been reset.');
     await this.showDiagnosticReport();
@@ -11597,7 +11651,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       openCount: this.context.globalState.get<number>('extension.openCount') ?? 0,
       unknownMcpOpenCount: this.context.globalState.get<number>('extension.unknownMcpOpenCount') ?? 0,
       fluencyBannerDismissed: this.context.globalState.get<boolean>('news.fluencyScoreBanner.v1.dismissed') ?? false,
-      unknownMcpDismissedVersion: this.context.globalState.get<string>('news.unknownMcpTools.dismissedVersion') ?? '',
+      unknownMcpDismissedTools: this.getStoredUnknownToolList(UNKNOWN_TOOLS_DISMISSED_STATE_KEY),
+      unknownMcpReportedTools: this.getStoredUnknownToolList(UNKNOWN_TOOLS_REPORTED_STATE_KEY),
       efficiencyTabBannerDismissed: this.context.globalState.get<boolean>('news.efficiencyTab.v1.dismissed') ?? false,
     };
 
@@ -11775,6 +11830,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       backendConfigured: this.isBackendConfigured(),
       currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
       suppressedUnknownTools,
+      reportedUnknownTools: this.getStoredUnknownToolList(UNKNOWN_TOOLS_REPORTED_STATE_KEY),
       todaySessions: stats.todaySessions || [],
       use24HourTime: this.getUse24HourTimeSetting(),
       hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),

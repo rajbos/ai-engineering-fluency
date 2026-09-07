@@ -116,7 +116,8 @@ type GlobalStateCounters = {
   openCount: number;
   unknownMcpOpenCount: number;
   fluencyBannerDismissed: boolean;
-  unknownMcpDismissedVersion: string;
+  unknownMcpDismissedTools: string[];
+  unknownMcpReportedTools: string[];
   efficiencyTabBannerDismissed: boolean;
 };
 
@@ -717,8 +718,8 @@ function counterRow(key: string, label: string, value: number): string {
     </tr>`;
 }
 
-function stringRow(key: string, label: string, value: string): string {
-  const display = value ? `✅ ${escapeHtml(value)}` : '❌ (not set)';
+function toolListRow(key: string, label: string, values: string[]): string {
+  const display = values.length ? `✅ ${values.length} tool(s): ${escapeHtml(values.join(', '))}` : '❌ (empty)';
   return `
     <tr>
       <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${escapeHtml(label)}</td>
@@ -847,7 +848,7 @@ function renderShareCardTab(detailedFiles: SessionFileDetails[], isLoadingSessio
 }
 
 function renderDebugTab(counters: GlobalStateCounters | undefined): string {
-  const c = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: '', efficiencyTabBannerDismissed: false };
+  const c = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedTools: [], unknownMcpReportedTools: [], efficiencyTabBannerDismissed: false };
   return `
     <div id="tab-debug" class="tab-content">
       <div class="info-box">
@@ -863,7 +864,8 @@ function renderDebugTab(counters: GlobalStateCounters | undefined): string {
         <h4 style="margin-top:16px;">Dismissed Flags</h4>
         <table><tbody>
           ${flagRow('news.fluencyScoreBanner.v1.dismissed', 'news.fluencyScoreBanner.v1.dismissed', c.fluencyBannerDismissed)}
-          ${stringRow('news.unknownMcpTools.dismissedVersion', 'news.unknownMcpTools.dismissedVersion', c.unknownMcpDismissedVersion)}
+          ${toolListRow('news.unknownMcpTools.dismissedTools', 'news.unknownMcpTools.dismissedTools', c.unknownMcpDismissedTools)}
+          ${toolListRow('news.unknownMcpTools.reportedTools', 'news.unknownMcpTools.reportedTools', c.unknownMcpReportedTools)}
           ${flagRow('news.efficiencyTab.v1.dismissed', 'news.efficiencyTab.v1.dismissed', c.efficiencyTabBannerDismissed)}
         </tbody></table>
         <div style="margin-top: 16px;">

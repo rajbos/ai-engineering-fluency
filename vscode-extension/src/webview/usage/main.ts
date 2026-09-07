@@ -194,6 +194,7 @@ type UsageAnalysisStats = {
 	backendConfigured?: boolean;
 	currentWorkspacePaths?: string[];
 	suppressedUnknownTools?: string[];
+	reportedUnknownTools?: string[];
 	todaySessions?: TodaySessionSummary[];
 	recentSessions?: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] };
 	use24HourTime?: boolean;
@@ -405,6 +406,7 @@ let currentCorrectionReport: CorrectionReport | null = null;
 // Persisted across stats refreshes so the curation section doesn't disappear
 // when a periodic updateStats message omits curationAnalysis.
 let currentCurationAnalysis: ToolCurationAnalysis | null = null;
+let lastRenderedStats: UsageAnalysisStats | null = null;
 
 type WorktreeResult = {
 	path: string;
@@ -732,6 +734,7 @@ function getEffortDisplayName(level: string): string {
 }
 
 import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../../../src/utils/toolUtils';
+import { excludeTrackedTools, mergeToolLists } from '../../unknownToolTracking';
 
 // Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
 const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
@@ -782,19 +785,8 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 	return Array.from(allTools).filter(tool => !(TOOL_NAME_MAP && lookupKnownToolName(tool, TOOL_NAME_MAP)) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
 }
 
-function createMcpToolIssueUrl(unknownTools: string[]): string {
-	const repoUrl = 'https://github.com/rajbos/ai-engineering-fluency';
-	const title = encodeURIComponent('Add missing friendly names for tools');
-	const toolList = unknownTools.map(tool => `- \`${tool}\``).join('\n');
-	const body = encodeURIComponent(
-		`## Unknown Tools Found\n\n` +
-		`The following tools were detected but don't have friendly display names:\n\n` +
-		`${toolList}\n\n` +
-		`Please add friendly names for these tools to improve the user experience.`
-	);
-	const labels = encodeURIComponent('MCP Toolnames');
-	
-	return `${repoUrl}/issues/new?title=${title}&body=${body}&labels=${labels}`;
+function getReportableUnknownTools(stats: UsageAnalysisStats): string[] {
+	return excludeTrackedTools(getUnknownMcpTools(stats), stats.reportedUnknownTools ?? []);
 }
 
 // ─── Mode bar chart helpers ────────────────────────────────────────────────────
@@ -1696,6 +1688,9 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 				: undefined,
 			suppressedUnknownTools: Array.isArray(raw.suppressedUnknownTools)
 				? raw.suppressedUnknownTools.filter((t: unknown) => typeof t === 'string') as string[]
+				: undefined,
+			reportedUnknownTools: Array.isArray(raw.reportedUnknownTools)
+				? raw.reportedUnknownTools.filter((t: unknown) => typeof t === 'string') as string[]
 				: undefined,
 		};
 
@@ -4480,7 +4475,7 @@ function buildContextRefsHtml(stats: UsageAnalysisStats, todayTotalRefs: number,
 function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
 	const unknownTools = getUnknownMcpTools(stats);
 	if (unknownTools.length === 0) { return ''; }
-	const issueUrl = createMcpToolIssueUrl(unknownTools);
+	const reportableUnknownTools = getReportableUnknownTools(stats);
 	const toolListHtml = unknownTools.map(tool => {
 		const todayCount = (stats.today.toolCalls.byTool[tool] || 0) + (stats.today.mcpTools.byTool[tool] || 0);
 		const last30Count = (stats.last30Days.toolCalls.byTool[tool] || 0) + (stats.last30Days.mcpTools.byTool[tool] || 0);
@@ -4498,10 +4493,11 @@ function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
 			<div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:10px;">
 				${toolListHtml}
 			</div>
-			<a href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--button-bg); color: var(--button-fg); border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: 500;">
+			${reportableUnknownTools.length > 0 ? `
+			<button type="button" data-report-unknown-tools="true" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--button-bg); color: var(--button-fg); border: none; border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: 500; cursor: pointer;">
 				<span>📝</span>
 				<span>Report Unknown Tools</span>
-			</a>
+			</button>` : ''}
 		</div>
 	`;
 }
@@ -5015,6 +5011,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	if (!root) {
 		return;
 	}
+	lastRenderedStats = stats;
 
 	const matrix = syncRenderLayoutState(stats);
 	currentCorrectionReport = stats.correctionReport ?? null;
@@ -5247,6 +5244,16 @@ function handleToolSuppressed(toolName: string): void {
 	}
 }
 
+function handleUnknownToolsReported(rawToolNames: unknown): void {
+	if (!lastRenderedStats || !Array.isArray(rawToolNames)) { return; }
+	lastRenderedStats = {
+		...lastRenderedStats,
+		reportedUnknownTools: mergeToolLists(lastRenderedStats.reportedUnknownTools ?? [], rawToolNames),
+	};
+	renderLayout(lastRenderedStats);
+	setupSessionsTableSort();
+}
+
 function handleHighlightUnknownTools(): void {
 	activeTab = 'tools';
 	document.querySelectorAll<HTMLElement>('.tab-button').forEach(btn => {
@@ -5340,6 +5347,8 @@ function handleExtensionMessage(message: any): void {
 			handleUpdateStats(message); break;
 		case 'toolSuppressed':
 			handleToolSuppressed(message.toolName as string); break;
+		case 'unknownToolsReported':
+			handleUnknownToolsReported(message.toolNames); break;
 		case 'highlightUnknownTools':
 			handleHighlightUnknownTools(); break;
 		case 'repoPrStatsLoaded':
@@ -5940,6 +5949,20 @@ async function bootstrap(): Promise<void> {
 	// Event delegation for suppress-tool buttons (rendered dynamically in the tools section)
 	document.addEventListener('click', (event) => {
 		const target = event.target as HTMLElement;
+		const reportButton = target.closest<HTMLElement>('[data-report-unknown-tools]');
+		if (reportButton && lastRenderedStats) {
+			const reportableUnknownTools = getReportableUnknownTools(lastRenderedStats);
+			if (reportableUnknownTools.length > 0) {
+				lastRenderedStats = {
+					...lastRenderedStats,
+					reportedUnknownTools: mergeToolLists(lastRenderedStats.reportedUnknownTools ?? [], reportableUnknownTools),
+				};
+				renderLayout(lastRenderedStats);
+				setupSessionsTableSort();
+				vscode.postMessage({ command: 'openUnknownToolsIssue', toolNames: reportableUnknownTools });
+			}
+			return;
+		}
 		const toolName = target.getAttribute('data-suppress-tool');
 		if (toolName) {
 			// Optimistic UI: remove the item immediately so the user sees instant feedback,
