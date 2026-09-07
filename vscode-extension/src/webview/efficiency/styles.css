@@ -200,22 +200,6 @@
 .attr-bar-fill.pos { background: var(--vscode-charts-red, #fb7185); }
 .attr-bar-fill.neg { background: var(--vscode-charts-green, #4ade80); }
 .attr-bar-value { font-size: 0.88em; font-variant-numeric: tabular-nums; }
-.attr-waterfall {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 4px 18px;
-	margin: -8px 0 14px;
-	color: var(--vscode-descriptionForeground);
-	font-size: 0.82em;
-}
-.attr-waterfall span:not(:last-child)::after {
-	content: '→';
-	margin-left: 18px;
-}
-.attr-waterfall b {
-	color: var(--vscode-foreground);
-	font-variant-numeric: tabular-nums;
-}
 
 .attr-shift-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
 .attr-shift-table th, .attr-shift-table td {

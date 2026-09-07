@@ -177,9 +177,21 @@ jobs:
         working-directory: sharing-server
         run: npm run check-types
 
-      - name: Run unit tests
+      - name: Run server and data separation regression tests
         working-directory: sharing-server
         run: npm test
+
+      - name: Install existing headless browser tooling
+        working-directory: .github/workflows/dependencies/playwright
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npx --no-install playwright install --with-deps chromium
+
+      - name: Check member interactions and identity-free downloads
+        working-directory: sharing-server
+        env:
+          NODE_PATH: ${{ github.workspace }}/.github/workflows/dependencies/playwright/node_modules
+        run: npm run check:interaction
 
       - name: Build library (lib/)
         working-directory: sharing-server

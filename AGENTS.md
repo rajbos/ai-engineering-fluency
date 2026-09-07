@@ -44,7 +44,11 @@ This document provides top-level guidance for AI agents contributing to this rep
 | `cli/` | `.github/instructions/cli.instructions.md` |
 | `visualstudio-extension/` | `.github/instructions/visualstudio-extension.instructions.md` |
 | `jetbrains-plugin/` | `.github/instructions/jetbrains-plugin.instructions.md` |
+| `sharing-server/` | [sharing-server/AGENTS.md](sharing-server/AGENTS.md), `.github/instructions/sharing-server.instructions.md` |
 | `.github/workflows/` | `.github/instructions/workflows.instructions.md` |
+
+All sharing-server coding, testing, documentation and downstream customization
+must follow the [server data separation contract](sharing-server/AGENTS.md).
 
 ## Building Everything
 

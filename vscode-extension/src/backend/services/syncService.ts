@@ -24,7 +24,7 @@ import { SharingServerUploadService, type SharingServerEntry } from './sharingSe
 import { SyncLock } from './syncLock';
 import { type IBlobUploadService } from './blobUploadService';
 import { isJsonlContent } from '../../../../src/tokenEstimation';
-import { getEditorTypeFromPath } from '../../../../src/workspaceHelpers';
+import { getEditorTypeFromPath, refineEditorLabelForInteractionModeSplit } from '../../../../src/workspaceHelpers';
 
 /** Ecosystem session per-model usage entry (input, output, optional interactions). */
 type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };
@@ -1289,8 +1289,11 @@ return true;
 
 	private getEditorForFile(sessionFile: string, includeEditorDimension: boolean): string | undefined {
 		if (!includeEditorDimension) { return undefined; }
-		return this.deps.getEditorLabel?.(sessionFile) ??
+		const label = this.deps.getEditorLabel?.(sessionFile) ??
 			getEditorTypeFromPath(sessionFile, this.deps.editorHandlers?.isOpenCodeSession);
+		// Break out "Copilot App" and "Claude (VS Code)" from the coarser path-based label so
+		// the sharing-server "Editors Used" breakdown matches the local Interaction Modes view.
+		return refineEditorLabelForInteractionModeSplit(sessionFile, label);
 	}
 
 	private isVSSessionFileType(sessionFile: string): boolean {

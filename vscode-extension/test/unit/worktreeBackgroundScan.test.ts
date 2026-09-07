@@ -7,6 +7,7 @@ import {
 	sumWorktreeBytes,
 	parseCleanupPushedWorktreesMessage,
 	buildCleanupConfirmTitle,
+	validateWorktreeRepoRootFromSessionPaths,
 	WORKTREE_BACKGROUND_SCAN_INTERVAL_MS,
 	WORKTREE_SCAN_NOTIFY_MIN_BYTES,
 } from '../../src/worktreeBackgroundScan';
@@ -238,4 +239,31 @@ test('buildCleanupConfirmTitle: unscoped, singular vs. plural count', () => {
 
 test('buildCleanupConfirmTitle: names the repository when scoped', () => {
 	assert.equal(buildCleanupConfirmTitle(2, 'repo-a'), 'Clean up 2 pushed worktrees in "repo-a"?');
+});
+
+// ---------------------------------------------------------------------------
+// validateWorktreeRepoRootFromSessionPaths
+// ---------------------------------------------------------------------------
+
+test('validateWorktreeRepoRootFromSessionPaths: accepts a session workspace in the same repo root', () => {
+	const result = validateWorktreeRepoRootFromSessionPaths(
+		'C:\\Users\\me\\.copilot\\copilot-worktrees\\repo\\feature-x',
+		[
+			'C:\\Users\\me\\.copilot\\copilot-worktrees\\repo\\main',
+			'C:\\Users\\me\\.copilot\\copilot-worktrees\\repo\\feature-x\\nested',
+		],
+	);
+
+	assert.equal(result?.repoRoot, 'C:\\Users\\me\\.copilot\\copilot-worktrees\\repo');
+	assert.equal(result?.sessionWorkspacePath, 'C:\\Users\\me\\.copilot\\copilot-worktrees\\repo\\main');
+});
+
+test('validateWorktreeRepoRootFromSessionPaths: rejects unrelated session workspaces', () => {
+	assert.equal(
+		validateWorktreeRepoRootFromSessionPaths(
+			'C:\\Users\\me\\.copilot\\copilot-worktrees\\repo-a\\feature-x',
+			['C:\\Users\\me\\.copilot\\copilot-worktrees\\repo-b\\main'],
+		),
+		undefined,
+	);
 });

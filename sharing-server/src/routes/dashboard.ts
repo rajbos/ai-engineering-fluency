@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
@@ -13,7 +13,14 @@ import {
 	type UploadRow, type UserRow, type UserUsageSummary, type AdminDailyRow,
 } from '../db.js';
 import { OAUTH_STATE_MAX_AGE_SECONDS } from '../config.js';
+import { getTeamInsights, parseTeamDays } from '../teamInsights.js';
+import { renderTeamInsights, teamInsightsCsv } from './teamPage.js';
 export const dashboard = new Hono();
+
+dashboard.use('*', async (c, next) => {
+	c.header('Cache-Control', 'private, no-store');
+	await next();
+});
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID ?? '';
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET ?? '';
@@ -258,6 +265,44 @@ dashboard.get('/admin', (c) => {
 	const dailyTotals = getAdminDailyTotals(90);
 
 	return c.html(adminDashboardPage(user, userSummaries, dailyTotals));
+});
+
+function getSessionUser(c: Context): UserRow | undefined {
+	const cookie = getCookie(c, COOKIE_NAME);
+	const claims = cookie ? decodeSession(cookie) : null;
+	return claims ? getUserById(claims.sub) : undefined;
+}
+
+dashboard.get('/team', (c) => {
+	const user = getSessionUser(c);
+	if (!user) return c.redirect('/dashboard');
+
+	const data = getTeamInsights(user.id, parseTeamDays(c.req.query('days')));
+	return c.html(layout('Team Insights', `
+<div class="header">
+  <h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"></h1>
+  <span class="spacer"></span>
+  ${user.is_admin === 1 ? '<a href="/admin">Admin Dashboard</a>' : ''}
+  <a href="/dashboard">My Dashboard</a>
+  <strong aria-current="page">Team Insights</strong>
+  <span>${h(user.github_name ?? user.github_login)}</span>
+  <a href="/auth/logout">Sign out</a>
+</div>
+<script>${_chartJsCode}</script>
+${renderTeamInsights(data)}`));
+});
+
+dashboard.get('/team/export', (c) => {
+	const user = getSessionUser(c);
+	if (!user) return c.redirect('/dashboard');
+	const format = c.req.query('format') ?? 'csv';
+	if (format !== 'csv' && format !== 'json') {
+		return c.json({ error: 'Supported export formats: csv, json.' }, 400);
+	}
+	const data = getTeamInsights(user.id, parseTeamDays(c.req.query('days')));
+	c.header('Content-Disposition', `attachment; filename="team-insights-${data.days}days.${format}"`);
+	if (format === 'json') return c.json(data);
+	return c.body(teamInsightsCsv(data), 200, { 'Content-Type': 'text/csv; charset=utf-8' });
 });
 
 // ── HTML Rendering ────────────────────────────────────────────────────────────
@@ -1045,6 +1090,7 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
   <span class="spacer"></span>
   ${fluencyBadgeHtml}
   ${isAdmin ? `<a href="/admin" style="margin-left:8px;color:#e3b341">Admin Dashboard</a><span style="margin-left:8px;color:#e6edf3;font-size:0.875rem;font-weight:600">My Dashboard</span>` : ''}
+  <a href="/team">Team Insights</a>
   ${avatarUrl ? `<img src="${avatarUrl}" class="avatar-sm" alt="${login}" style="margin-left:8px">` : ''}
   <span style="color:#c9d1d9;font-size:0.875rem">${displayName}</span>
   <a href="/auth/logout" style="margin-left:8px">Sign out</a>
@@ -1413,6 +1459,7 @@ function adminDashboardPage(
   <span class="spacer"></span>
   <span style="color:#e6edf3;font-size:0.875rem;font-weight:600">Admin Dashboard</span>
   <a href="/dashboard" style="margin-left:8px">My Dashboard</a>
+  <a href="/team">Team Insights</a>
   ${adminAvatar ? `<img src="${adminAvatar}" class="avatar-sm" alt="${adminLogin}" style="margin-left:8px">` : ''}
   <span style="color:#c9d1d9;font-size:0.875rem">${adminName}</span>
   <a href="/auth/logout" style="margin-left:8px">Sign out</a>

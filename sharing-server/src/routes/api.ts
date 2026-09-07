@@ -3,6 +3,7 @@ import { requireBearerAuth, checkUploadRateLimit, type AuthVariables } from '../
 import { upsertUpload, deleteUploadsForDays, getUploadsForUser, getDb, upsertUserFluencyScore, type UploadEntry } from '../db.js';
 import { MAX_ENTRIES_PER_UPLOAD } from '../config.js';
 import { validateEntry } from '../validation/uploadSchema.js';
+import { getTeamInsights, parseTeamDays } from '../teamInsights.js';
 
 // Fluency score payload limits
 const MAX_FLUENCY_LABEL_LENGTH = 128;
@@ -92,6 +93,7 @@ api.post('/upload', requireBearerAuth, async (c) => {
 /** GET /api/me — Return the authenticated user's GitHub profile info. */
 api.get('/me', requireBearerAuth, (c) => {
 	const user = c.get('user');
+	c.header('Cache-Control', 'private, no-store');
 	return c.json({
 		githubId: user.github_id,
 		login: user.github_login,
@@ -104,10 +106,17 @@ api.get('/me', requireBearerAuth, (c) => {
 /** GET /api/data?days=30 — Return the authenticated user's own upload data. */
 api.get('/data', requireBearerAuth, (c) => {
 	const user = c.get('user');
+	c.header('Cache-Control', 'private, no-store');
 	const daysRaw = c.req.query('days');
 	const days = clampDays(daysRaw);
 	const data = getUploadsForUser(user.id, days);
 	return c.json(data);
+});
+
+/** GET /api/team-insights?days=30 — Anonymous team totals with authenticated self context. */
+api.get('/team-insights', requireBearerAuth, (c) => {
+	c.header('Cache-Control', 'private, no-store');
+	return c.json(getTeamInsights(c.get('user').id, parseTeamDays(c.req.query('days'))));
 });
 
 /**

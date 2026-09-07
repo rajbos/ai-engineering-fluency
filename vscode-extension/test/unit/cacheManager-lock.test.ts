@@ -171,3 +171,48 @@ test('renewAgentTasksLock: refreshes our own timestamp and refuses to renew anot
 	fs.writeFileSync(lockPath, JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
 	assert.equal(await manager.renewAgentTasksLock(), false, 'never renew a lock this window does not own');
 });
+
+// ── Repo-PRs lock: only one window refreshes the hourly Repository PRs snapshot ────────
+
+test('acquireRepoPrLock: uses its own lock file, separate from the other leases', async () => {
+	const { manager } = makeDirAndManager();
+	assert.notEqual(manager.getRepoPrLockPath(), manager.getRefreshLockPath());
+	assert.notEqual(manager.getRepoPrLockPath(), manager.getAgentTasksLockPath());
+	assert.ok(manager.getRepoPrLockPath().includes('repoprs_'));
+
+	assert.equal(await manager.acquireRepoPrLock(), true);
+	assert.equal(await manager.acquireRefreshLock(), true, 'holding one lock must not block the other');
+	assert.equal(await manager.acquireAgentTasksLock(), true, 'holding one lock must not block the other');
+
+	await manager.releaseRepoPrLock();
+	await manager.releaseRefreshLock();
+	await manager.releaseAgentTasksLock();
+});
+
+test('acquireRepoPrLock: a second window is turned away while the lock is held, then let in', async () => {
+	const { manager } = makeDirAndManager();
+	await manager.acquireRepoPrLock();
+
+	const lockPath = manager.getRepoPrLockPath();
+	fs.writeFileSync(lockPath, JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
+	assert.equal(await manager.acquireRepoPrLock(), false, 'a live lock from another window blocks the refresh');
+
+	fs.unlinkSync(lockPath);
+	assert.equal(await manager.acquireRepoPrLock(), true);
+	await manager.releaseRepoPrLock();
+});
+
+test('renewRepoPrLock: refreshes our own timestamp and refuses to renew another window\'s lock', async () => {
+	const { manager } = makeDirAndManager();
+	await manager.acquireRepoPrLock();
+	const lockPath = manager.getRepoPrLockPath();
+	const before = JSON.parse(fs.readFileSync(lockPath, 'utf-8')).timestamp;
+
+	await new Promise(resolve => setTimeout(resolve, 5));
+	assert.equal(await manager.renewRepoPrLock(), true);
+	const after = JSON.parse(fs.readFileSync(lockPath, 'utf-8')).timestamp;
+	assert.ok(after >= before, 'renewing should move the timestamp forward');
+
+	fs.writeFileSync(lockPath, JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
+	assert.equal(await manager.renewRepoPrLock(), false, 'never renew a lock this window does not own');
+});

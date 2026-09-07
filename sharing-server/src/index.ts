@@ -25,6 +25,15 @@ export {
 export { api } from './routes/api.js';
 export { dashboard } from './routes/dashboard.js';
 
+// Reuse the member-safe projection rather than exposing admin queries to team members.
+export {
+	getTeamInsights,
+	parseTeamDays,
+	type TeamInsights,
+	type TeamMember,
+	type UsageCohort,
+} from './teamInsights.js';
+
 // Auth — reuse so downstream endpoints authenticate the *same* user as core uploads.
 // This is what makes the two datasets joinable on `user_id`.
 export {

@@ -463,3 +463,40 @@ test('TeamServerConfigPanel - renderHtml generates valid HTML', async () => {
 	assert.ok(html.includes('teamAnonymized'), 'Should include sharing profile');
 	assert.ok(html.includes('nonce='), 'Should include nonce for CSP');
 });
+
+test('TeamServerConfigPanel - renderHtml includes the data-sharing info column', async () => {
+	(vscode as any).__mock.reset();
+
+	const context = {
+		extensionUri: vscode.Uri.parse('file:///extension'),
+		subscriptions: []
+	} as any;
+
+	const { TeamServerConfigPanel } = require('../../src/backend/teamServerConfigPanel');
+	TeamServerConfigPanel.current = undefined;
+
+	const panel = new TeamServerConfigPanel(context.extensionUri);
+	const mockWebview = { postMessage: () => {} } as any;
+	const html = (panel as any).renderHtml(mockWebview, false, '', 'off');
+
+	// Info column explaining what data is shared and why
+	assert.ok(html.includes('What data is shared'), 'Should include the info column heading');
+	assert.ok(html.includes('id="profile-explainer"'), 'Should include the per-profile explainer container');
+	assert.ok(html.includes('Your identity'), 'Should explain the always-on GitHub identity model');
+	assert.ok(html.includes('PROFILE_EXPLAINERS'), 'Should include the per-profile explainer script map');
+	assert.ok(html.includes('teamAnonymized:'), 'Explainer map should cover the teamAnonymized profile');
+	assert.ok(html.includes('teamPseudonymous:'), 'Explainer map should cover the teamPseudonymous profile');
+	assert.ok(html.includes('teamIdentified:'), 'Explainer map should cover the teamIdentified profile');
+
+	// Fields table listing the exact SharingServerEntry payload
+	assert.ok(html.includes('Fields sent per upload'), 'Should include the fields table heading');
+	assert.ok(html.includes('workspaceId, machineId'), 'Should list workspace/machine IDs');
+	assert.ok(html.includes('workspaceName, machineName'), 'Should list optional workspace/machine names');
+	assert.ok(html.includes('datasetId, fluencyMetrics'), 'Should list dataset ID and fluency metrics');
+	assert.ok(html.includes('Prompt and response content is never uploaded'), 'Should include the no-content callout');
+
+	// Illustrative dashboard preview
+	assert.ok(html.includes("What you'll get"), 'Should include the dashboard preview heading');
+	assert.ok(html.includes('dashboard-preview'), 'Should include the dashboard preview mockup');
+	assert.ok(html.includes('not live data'), 'Should label the mockup as illustrative, not live data');
+});

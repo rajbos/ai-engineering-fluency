@@ -404,6 +404,28 @@ export function getAllUsers(): UserRow[] {
 	return getDb().prepare('SELECT * FROM users ORDER BY created_at DESC').all() as unknown as UserRow[];
 }
 
+/** Internal aggregates for Team Insights; user IDs must never leave the server. */
+export interface TeamUsageDayRow {
+	user_id: number;
+	day: string;
+	input_tokens: number;
+	output_tokens: number;
+	interactions: number;
+}
+
+export function getTeamUsageDays(startDay: string, endDay: string): TeamUsageDayRow[] {
+	return getDb().prepare(`
+		SELECT user_id, day,
+			SUM(input_tokens) AS input_tokens,
+			SUM(output_tokens) AS output_tokens,
+			SUM(interactions) AS interactions
+		FROM usage_uploads
+		WHERE day >= ? AND day <= ?
+		GROUP BY user_id, day
+		HAVING SUM(input_tokens) + SUM(output_tokens) > 0 OR SUM(interactions) > 0
+	`).all(startDay, endDay) as unknown as TeamUsageDayRow[];
+}
+
 export interface AdminUploadRow extends UploadRow {
 	github_login: string;
 }

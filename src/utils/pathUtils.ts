@@ -52,6 +52,7 @@ export function normalizePathForDedup(
 /**
  * Normalize a session workspace path up to its parent repository root by stripping a trailing
  * agent-worktree segment created by Copilot CLI, Claude Code, or the Copilot App:
+ *   "<home>/.copilot/copilot-worktrees/<repo>[/...]" -> "<home>/.copilot/copilot-worktrees/<repo>"
  *   "<repo>/copilot-worktrees/<name>[/...]"      -> "<repo>"
  *   "<repo>/.claude/worktrees/<name>[/...]"       -> "<repo>"
  *   "<parent>/<repo>.worktrees/<name>[/...]"      -> "<parent>/<repo>"
@@ -64,6 +65,8 @@ export function normalizePathForDedup(
  * and the input's separator style is preserved.
  */
 export function normalizeToRepoRoot(p: string): string {
+	const appStore = p.match(/^(.+?[\\/]\.copilot[\\/]copilot-worktrees[\\/][^\\/]+)(?:[\\/].*)?$/i);
+	if (appStore) { return appStore[1]; }
 	const copilot = p.match(/^(.+?)[\\/]copilot-worktrees[\\/][^\\/]+(?:[\\/].*)?$/i);
 	if (copilot) { return copilot[1]; }
 	const claude = p.match(/^(.+?)[\\/]\.claude[\\/]worktrees[\\/][^\\/]+(?:[\\/].*)?$/i);

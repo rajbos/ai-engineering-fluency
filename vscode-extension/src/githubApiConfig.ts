@@ -67,6 +67,37 @@ export function getConfiguredGitHubEnterpriseUri(): string | undefined {
 	return vscode.workspace.getConfiguration().get<string>('github-enterprise.uri') || undefined;
 }
 
+/**
+ * Derive the *web* origin (for building `https://host/owner/repo`-style links, as opposed to the
+ * REST API host from `deriveGitHubApiEndpoints`) for an optional GitHub Enterprise base URI.
+ * Unlike the API host, the web host never gets an `api.` prefix or an `/api/v3` path — both GHE.com
+ * and on-prem GitHub Enterprise Server serve their web UI from the same host the user configured.
+ *
+ * Pure function (no VS Code dependency) so it can be unit tested directly.
+ */
+export function deriveGitHubWebOrigin(enterpriseUri: string | undefined): string {
+	const GITHUB_DOT_COM_ORIGIN = 'https://github.com';
+	if (!enterpriseUri) { return GITHUB_DOT_COM_ORIGIN; }
+
+	let url: URL;
+	try {
+		url = new URL(enterpriseUri);
+	} catch {
+		return GITHUB_DOT_COM_ORIGIN;
+	}
+
+	const authority = url.host;
+	if (!authority || authority === 'github.com' || authority === 'www.github.com' || authority === 'api.github.com') {
+		return GITHUB_DOT_COM_ORIGIN;
+	}
+	return `${url.protocol}//${authority}`;
+}
+
+/** The GitHub web origin to use for building repo/PR links for the current configuration. */
+export function getConfiguredGitHubWebOrigin(): string {
+	return deriveGitHubWebOrigin(getConfiguredGitHubEnterpriseUri());
+}
+
 /** The GitHub API endpoints to use for the current configuration (github.com, GHE.com, or GHES). */
 export function getGitHubApiEndpoints(): GitHubApiEndpoints {
 	return deriveGitHubApiEndpoints(getConfiguredGitHubEnterpriseUri());

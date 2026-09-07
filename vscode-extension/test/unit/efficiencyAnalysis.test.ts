@@ -16,6 +16,7 @@ import {
 	buildModelWeeklySeries,
 	resolveModelCompareWindow,
 	selectDaysInWindow,
+	windowHasModelData,
 	type EfficiencyDeps,
 	type EfficiencySessionInput,
 } from '../../../src/efficiencyAnalysis';
@@ -749,4 +750,32 @@ test('selectDaysInWindow: keeps only days inside the window, bounds included', (
 test('selectDaysInWindow: returns nothing when no day falls inside the window', () => {
 	const days = [modelDay('2026-01-05', {}), modelDay('2026-02-05', {})];
 	assert.equal(selectDaysInWindow(days, resolveModelCompareWindow('last30', NOW)).length, 0);
+});
+
+test('resolveModelCompareWindow: rangeLabel is a concrete date span distinguishing same-length windows', () => {
+	const last = resolveModelCompareWindow('last30', NOW);
+	const prev = resolveModelCompareWindow('prev30', NOW);
+	assert.equal(last.rangeLabel, 'Jun 16 – Jul 15, 2026');
+	assert.equal(prev.rangeLabel, 'May 17 – Jun 15, 2026');
+	assert.notEqual(last.rangeLabel, prev.rangeLabel);
+});
+
+test('resolveModelCompareWindow: rangeLabel includes both years when the span crosses a year boundary', () => {
+	const w = resolveModelCompareWindow('lastMonth', new Date(2026, 0, 9, 12, 0, 0));
+	assert.equal(w.rangeLabel, 'Dec 1 – Dec 31, 2025');
+});
+
+test('windowHasModelData: false when no day in the window has per-model efficiency data', () => {
+	const days = [modelDay('2026-07-01', {}), modelDay('2026-07-10', {})];
+	assert.equal(windowHasModelData(days, resolveModelCompareWindow('thisMonth', NOW)), false);
+});
+
+test('windowHasModelData: true when at least one day in the window has per-model efficiency data', () => {
+	const days = [modelDay('2026-07-10', { 'gpt-4o': {} })];
+	assert.equal(windowHasModelData(days, resolveModelCompareWindow('thisMonth', NOW)), true);
+});
+
+test('windowHasModelData: ignores data outside the window bounds', () => {
+	const days = [modelDay('2026-06-01', { 'gpt-4o': {} })];
+	assert.equal(windowHasModelData(days, resolveModelCompareWindow('thisMonth', NOW)), false);
 });

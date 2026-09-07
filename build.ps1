@@ -293,7 +293,11 @@ function Build-Sharing {
         switch ($Target) {
             'build'   { Ensure-NpmDeps .; npm run build }
             'package' { Ensure-NpmDeps .; npm run build:production }
-            'test'    { Write-Host "    (no sharing-server tests yet)" }
+            'test'    {
+                Ensure-NpmDeps .
+                npm test
+                if ($LASTEXITCODE -ne 0) { throw "Sharing-server tests failed" }
+            }
             'clean'   { Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue }
         }
         Write-Ok "sharing-server done."

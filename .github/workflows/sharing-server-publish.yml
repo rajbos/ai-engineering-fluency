@@ -63,6 +63,9 @@ jobs:
       - name: Run type checking
         run: npm run check-types
 
+      - name: Run server and data separation regression tests
+        run: npm test
+
       - name: Build library (lib/)
         run: npm run build:lib
 

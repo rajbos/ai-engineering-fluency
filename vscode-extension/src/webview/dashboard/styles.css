@@ -300,6 +300,52 @@
         align-items: flex-start;
         gap: 12px;
         margin-bottom: 24px;
+        border: 2px solid var(--vscode-foreground);
+        padding: 20px;
+}
+
+.config-card-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+}
+
+.config-card-icon {
+        font-size: 22px;
+        line-height: 1;
+}
+
+.config-card-heading {
+        font-size: 15px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: var(--vscode-foreground);
+}
+
+.team-server-panel {
+        margin-top: 20px;
+}
+
+.team-server-card {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+        border: 2px solid var(--vscode-foreground);
+        padding: 20px;
+}
+
+.team-server-card-url {
+        font-size: 13px;
+        color: var(--vscode-descriptionForeground);
+        word-break: break-all;
+}
+
+.team-server-card-note {
+        font-size: 12px;
+        color: var(--vscode-descriptionForeground);
+        margin: 0;
 }
 
 /* Fluency score badges */

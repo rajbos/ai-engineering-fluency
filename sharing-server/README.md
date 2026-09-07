@@ -4,6 +4,11 @@ A self-hosted API server + web dashboard that makes sharing AI Engineering Fluen
 across a team dramatically easier. No Azure account required — anyone with Docker can
 host it in minutes.
 
+Development, testing and downstream customization must follow the
+[data separation contract](https://github.com/rajbos/ai-engineering-fluency/blob/main/sharing-server/AGENTS.md)
+(`sharing-server/AGENTS.md` in this repository, also shipped as `AGENTS.md` in
+the published npm package).
+
 ## How it works
 
 ```
@@ -90,6 +95,11 @@ prompt — it reuses your existing GitHub session.
 
 ## Building from source
 
+For code changes, also run the [server validation checks](../docs/VALIDATION.md#sharing-server)
+and satisfy the data separation contract's HTTP/HTML privacy tests.
+The root `.\build.ps1 -Project sharing -Target test` runs the server's `npm test`;
+run the type/build/headless interaction checks separately as described there.
+
 ```bash
 # From the repo root:
 ./build.ps1 -Project sharing
@@ -154,7 +164,10 @@ curl http://localhost:3000/health
 # → {"status":"ok","timestamp":"..."}
 ```
 
-Open `http://localhost:3000/dashboard` in your browser to test the OAuth login flow.
+For manual verification, open `http://localhost:3000/dashboard` in your browser
+to test the OAuth login flow. Automated tests use isolated SQLite fixtures and
+stubbed GitHub access, never production data or live GitHub; see the
+[required validation contract](AGENTS.md#required-validation).
 
 ## Environment variables
 
@@ -210,6 +223,75 @@ uploads are safe and idempotent.
 | `GET` | `/auth/github/callback` | Public | OAuth callback |
 | `GET` | `/auth/logout` | Session | Clear session |
 | `GET` | `/dashboard` | Session cookie | Web dashboard |
+| `GET` | `/team?days=30` | Session cookie | Identity-free Team Insights page |
+| `GET` | `/team/export?days=30&format=csv` | Session cookie | Team Insights download (`csv` or `json`), using the same safe projection |
+| `GET` | `/api/team-insights?days=30` | Bearer token | Identity-free team totals and own comparison |
+
+### Team Insights
+
+`/team` and `/api/team-insights` accept `days=7`, `days=30` or `days=90`.
+Omitted, malformed or unsupported values default to 30.
+Each window covers exactly N UTC calendar dates including today, beginning N−1
+dates ago; future-dated uploads are excluded.
+
+Team Insights shows exact numeric period totals for anonymous active members,
+marks your own row, and compares your input + output tokens with active uploaders:
+rank, share of team tokens, percentile and a **Light / Medium / Heavy / Very heavy**
+usage cohort. Registered users without positive tokens or interactions in the
+window are not active members. If you are inactive, your `self` row has zero
+numeric totals/activity/share and `rank`, `percentile` and `cohort` are `null`;
+you are excluded from `members`.
+Only aggregate team and your own daily trends are exposed, never peer daily series.
+
+Period filters are full-page `/team?days=N` links and work without JavaScript.
+The page includes cohort counts/thresholds, an exact numeric member table and
+expandable exact daily team/own totals. Trend modes compare your own line with
+either team totals or the team average per **daily active uploader**, not all
+registered users or the entire period's active-member count.
+
+Download the selected period with cookie-authenticated
+`/team/export?days=N&format=csv` or `format=json` (N is 7, 30 or 90).
+Both formats use the same safe Team Insights projection; exports do not add
+peer identities, metadata or per-peer daily data.
+
+Tied token totals have the same rank and cohort. Cohorts use interpolated
+p25/p50/p75 thresholds with `<=` boundaries; percentile counts only other active
+uploaders with strictly lower totals, and is undefined when there are no peers.
+These are relative usage groups, not productivity ratings. See the
+[authoritative comparison definitions](AGENTS.md#period-and-comparison-semantics).
+If team tokens total zero, `sharePercent` is `0` and the UI displays `0.0%` by
+convention, rather than claiming a mathematically defined share.
+
+**Anonymous labels remove direct identifiers, not all re-identification risk.**
+Exact totals and small-team comparisons can reveal identity; there is no
+minimum team size or suppression. Peer responses are an explicit numeric
+allowlist plus self flags and calculated comparisons/cohorts, not uploaded rows.
+The [data separation contract](AGENTS.md#team-projection) applies to API JSON,
+HTML, embedded scripts, chart data and any new exports. Personal uploaded data
+remains owner-only; named member detail remains server-authorized admin-only.
+Admins using member surfaces receive the same identity-free team shape.
+Personalized and team responses use `Cache-Control: private, no-store`.
+
+#### Team Insights JSON response
+
+The API returns the following explicit projection (the server keeps grouping IDs
+internal):
+
+| Field | Contents |
+|---|---|
+| `days`, `startDay`, `endDay` | Selected duration and inclusive UTC date bounds |
+| `summary` | `activeUsers`, `inputTokens`, `outputTokens`, `totalTokens`, `interactions`, `averageTokens`, `medianTokens` |
+| `members` | Active member rows, without identifiers |
+| `self` | Your member row, including the zero-valued inactive case |
+| `cohorts` | Rows with `label` and `members` (count) |
+| `daily` | Rows with `day`, `inputTokens`, `outputTokens`, `totalTokens`, `interactions`, `ownTokens`, `activeUsers` |
+| `quartiles` | Interpolated token thresholds `q1`, `q2`, `q3` |
+
+Each `members`/`self` row contains only `isSelf`, `inputTokens`, `outputTokens`,
+`totalTokens`, `interactions`, `daysActive`, `tokensPerActiveDay`, `sharePercent`,
+`rank`, `percentile` and `cohort`. `daily.activeUsers` is that date's active
+uploader count; `daily.ownTokens` belongs only to the authenticated viewer.
+There are no stable member aliases or peer-specific daily rows.
 
 ## Rate limits
 
@@ -272,10 +354,18 @@ await startServer(app);
 | `createApp({ mountApi, mountDashboard })` | Opt out of the built-in route groups. |
 | `registerSchemaExtension(name, fn)` | Add tables/indexes/migrations. Call before the first `getDb()`. |
 | `requireBearerAuth` | Authenticate with the same GitHub token as `/api/upload`, so your rows share the same `user_id`. |
+| `getTeamInsights(viewerId, days)`, `parseTeamDays(raw)` | Reuse the safe Team Insights projection and supported-period parsing. Derive `viewerId` only from server-authenticated identity, never request/query input. |
+| `TeamInsights`, `TeamMember`, `UsageCohort` | Public TypeScript types for the identity-free projection. |
 | `startServer(app, opts)` | Backup/restore, DB init with retry, periodic backup, graceful shutdown. |
 
 ### Guidance
 
+- **Preserve the [data separation contract](https://github.com/rajbos/ai-engineering-fluency/blob/main/sharing-server/AGENTS.md).**
+  Overrides registered before built-in routes can bypass their protection:
+  retain owner/admin authorization and the same allowlisted member projection,
+  including caching, charts and exports. Add the contract's HTTP/HTML privacy
+  regression tests for custom routes; importing the library alone does not
+  enforce these boundaries on your extensions.
 - **Add tables, don't widen `usage_uploads`.** Keeping downstream tables separate means
   core migrations and your migrations never conflict.
 - **Join on `(user_id, dataset_id, day, workspace_id, machine_id)`** — the natural rollup
@@ -302,6 +392,10 @@ Unlike the Azure Storage backend which supports anonymized and pseudonymous mode
 the sharing server is **identified mode only** — every upload is linked to a GitHub
 user ID. Workspace and machine names are included or excluded based on the extension's
 `shareWorkspaceMachineNames` setting (off by default).
+
+Identified storage does not grant peers access to those fields. The personal
+dashboard, identity-free Team Insights and named admin views have separate
+server-enforced access boundaries; see the [data separation contract](AGENTS.md).
 
 ## Data schema
 

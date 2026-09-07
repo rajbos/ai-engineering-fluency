@@ -27,6 +27,7 @@
   },
   "files": [
     "lib",
+    "AGENTS.md",
     "README.md"
   ],
   "repository": {
@@ -45,6 +46,7 @@
     "clean:db": "node clean-db.js",
     "update": "npm ci && node esbuild.js",
     "check-types": "tsc --noEmit",
+    "check:interaction": "node scripts/check-team-interaction.cjs",
     "test": "node esbuild.tests.js && node --test \"out/test/*.test.js\""
   },
   "dependencies": {

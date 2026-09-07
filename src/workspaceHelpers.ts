@@ -22,6 +22,7 @@ import {
 } from './utils/pathUtils';
 import { withErrorRecoverySync } from './utils/errors';
 import { isGuidMcpTool, lookupKnownToolName } from './utils/toolUtils';
+import { isCopilotAppClientName } from './copilotCliStore';
 
 export {
 	fileUriToPath,
@@ -1212,6 +1213,62 @@ export function getEditorTypeFromPath(filePath: string, isOpenCodeSessionFile?: 
 	return detectToolEditorFromPath(filePath, lowerPath, isOpenCodeSessionFile) ??
 		detectVSCodeVariantFromPath(lowerPath) ??
 		'Unknown';
+}
+
+/**
+ * Maps the content-classified `ModeUsage` keys (see `MODE_USAGE_CONTENT_CLASSIFIED_KEYS` in
+ * `vscode-extension/src/webview/shared/types.ts`) to the editor label
+ * `refineEditorLabelForInteractionModeSplit` produces for them when synced to the sharing
+ * server. `claudeDesktop` is intentionally absent: Claude Desktop already gets its own
+ * stable path-based label ('Claude Desktop') via `detectClaudeCodeEditorVariant`, so it
+ * needs no further refinement here.
+ *
+ * `workspaceHelpers.test.ts` asserts this map's keys plus `claudeDesktop` equal
+ * `MODE_USAGE_CONTENT_CLASSIFIED_KEYS` — add a new content-classified interaction mode to
+ * one and the test fails until the other side is updated too.
+ */
+export const SYNCED_INTERACTION_MODE_LABELS: Readonly<Record<string, string>> = {
+	cliApp: 'Copilot App',
+	claudeVsCode: 'Claude (VS Code)',
+};
+
+/**
+ * Refines a `getEditorTypeFromPath` result with the same content-based signals the
+ * "Interaction Modes" usage view already applies per-session (see
+ * `usageAnalysis.ts::_asuApplyCopilotAppSplit` and `claudeCodeAdapter.ts::resolveModeBucket`),
+ * so consumers that sync a single per-file editor label (e.g. the sharing-server upload)
+ * can distinguish:
+ *  - 'Copilot App' — a Copilot CLI session launched via the Copilot desktop app
+ *    (`client_name: github/autopilot` in the session's sibling `workspace.yaml`).
+ *    Only covers file-based (worktree) session-state sessions; DB-backed Copilot CLI
+ *    sessions (session-store.db) still report 'Copilot CLI'.
+ *  - 'Claude (VS Code)' — a Claude Code session embedded in VS Code, i.e. the generic
+ *    'Claude Code' bucket `detectClaudeCodeEditorVariant` returns for any entrypoint other
+ *    than the standalone desktop app or the terminal CLI.
+ * Leaves every other editor label untouched.
+ */
+export function refineEditorLabelForInteractionModeSplit(filePath: string, baseLabel: string): string {
+	if (baseLabel === 'Claude Code') { return SYNCED_INTERACTION_MODE_LABELS.claudeVsCode; }
+	if (baseLabel === 'Copilot CLI' && isCopilotAppSessionFile(filePath)) { return SYNCED_INTERACTION_MODE_LABELS.cliApp; }
+	return baseLabel;
+}
+
+/**
+ * Synchronously checks the sibling `workspace.yaml` of a Copilot CLI session-state file for
+ * `client_name: github/autopilot`, the marker the Copilot desktop app writes when it launches
+ * the CLI. Mirrors the async check in `usageAnalysis.ts::_asuApplyCopilotAppSplit`, but sync
+ * so it can be called from the otherwise-synchronous `getEditorTypeFromPath` family.
+ * @internal
+ */
+function isCopilotAppSessionFile(filePath: string): boolean {
+	try {
+		const yamlPath = path.join(path.dirname(filePath), 'workspace.yaml');
+		const content = fs.readFileSync(yamlPath, 'utf8');
+		const clientMatch = content.match(/^client_name:\s*(.+)$/m);
+		return !!clientMatch && isCopilotAppClientName(clientMatch[1].trim());
+	} catch {
+		return false;
+	}
 }
 
 // ── detectEditorSource helper ──────────────────────────────────────────

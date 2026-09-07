@@ -1051,29 +1051,44 @@ export type ModelCompareWindowId = 'last30' | 'prev30' | 'last90' | 'thisMonth' 
 export interface ModelCompareWindow {
 	id: ModelCompareWindowId;
 	label: string;
+	/** Short, concrete date span (e.g. "Aug 8 – Sep 6") so windows with similar names are distinguishable. */
+	rangeLabel: string;
 	startKey: string;
 	endKey: string;
 }
 
-/** Resolves a window id into concrete day-key bounds relative to `now`. */
+/** Formats a short "Mon D – Mon D[, YYYY]" span; adds the year to the start when it differs from the end's year. */
+function formatDateRangeLabel(startKey: string, endKey: string): string {
+	const start = new Date(`${startKey}T00:00:00`);
+	const end = new Date(`${endKey}T00:00:00`);
+	const sameYear = start.getFullYear() === end.getFullYear();
+	const startOpts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) };
+	const startFmt = start.toLocaleDateString('en-US', startOpts);
+	const endFmt = end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+	return `${startFmt} – ${endFmt}`;
+}
+
+/** Resolves a window id into concrete date bounds relative to `now`. */
 export function resolveModelCompareWindow(id: ModelCompareWindowId, now: Date): ModelCompareWindow {
 	const monthLabel = (d: Date): string => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 	const dayOffset = (days: number): Date => new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
+	const build = (label: string, startKey: string, endKey: string): ModelCompareWindow =>
+		({ id, label, rangeLabel: formatDateRangeLabel(startKey, endKey), startKey, endKey });
 	switch (id) {
 		case 'last30':
-			return { id, label: 'Last 30 days', startKey: fmtKey(dayOffset(29)), endKey: fmtKey(now) };
+			return build('Last 30 days', fmtKey(dayOffset(29)), fmtKey(now));
 		case 'prev30':
-			return { id, label: 'Previous 30 days', startKey: fmtKey(dayOffset(59)), endKey: fmtKey(dayOffset(30)) };
+			return build('Previous 30 days', fmtKey(dayOffset(59)), fmtKey(dayOffset(30)));
 		case 'last90':
-			return { id, label: 'Last 90 days', startKey: fmtKey(dayOffset(89)), endKey: fmtKey(now) };
+			return build('Last 90 days', fmtKey(dayOffset(89)), fmtKey(now));
 		case 'thisMonth': {
 			const start = new Date(now.getFullYear(), now.getMonth(), 1);
-			return { id, label: monthLabel(start), startKey: fmtKey(start), endKey: fmtKey(now) };
+			return build(monthLabel(start), fmtKey(start), fmtKey(now));
 		}
 		case 'lastMonth': {
 			const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 			const end = new Date(now.getFullYear(), now.getMonth(), 0);
-			return { id, label: monthLabel(start), startKey: fmtKey(start), endKey: fmtKey(end) };
+			return build(monthLabel(start), fmtKey(start), fmtKey(end));
 		}
 	}
 }
@@ -1081,6 +1096,11 @@ export function resolveModelCompareWindow(id: ModelCompareWindowId, now: Date): 
 /** Filters `days` down to the resolved window (inclusive on both ends). */
 export function selectDaysInWindow(days: ModelDailyInput[], window: ModelCompareWindow): ModelDailyInput[] {
 	return days.filter(d => d.date >= window.startKey && d.date <= window.endKey);
+}
+
+/** Whether any per-model efficiency data exists inside the resolved window — used to hide/disable empty windows in the picker. */
+export function windowHasModelData(days: ModelDailyInput[], window: ModelCompareWindow): boolean {
+	return selectDaysInWindow(days, window).some(d => d.modelEfficiency && Object.keys(d.modelEfficiency).length > 0);
 }
 
 export type ModelComparisonMetricId =	| 'cost-per-edit-turn' | 'cost-per-session' | 'cost-per-kloc' | 'dollars-per-mtokens'

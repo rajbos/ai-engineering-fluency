@@ -19,6 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import initSqlJs from 'sql.js';
+import { readDbBufferWithWal } from '../../src/utils/sqliteWal';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
 
@@ -102,7 +103,9 @@ export class CopilotAppDataAccess {
 
 		try {
 			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
+			// Merge any pending WAL frames first — the Copilot app may still hold data.db
+			// open in WAL mode, so a bare file read can silently miss its most recent writes.
+			const buffer = await readDbBufferWithWal(dbPath);
 			const db = new SQL.Database(buffer);
 			try {
 				return this._buildHierarchyFromDb(db, sessionUuids);
@@ -130,7 +133,10 @@ export class CopilotAppDataAccess {
 
 		try {
 			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
+			// Same WAL-merge rationale as getSessionHierarchy above: context_current_tokens
+			// etc. are updated continuously while a Copilot CLI session runs, and those
+			// writes can sit in data.db-wal, unseen by a bare file read, for a long time.
+			const buffer = await readDbBufferWithWal(dbPath);
 			const db = new SQL.Database(buffer);
 			try {
 				const ph = sessionUuids.map(() => '?').join(', ');

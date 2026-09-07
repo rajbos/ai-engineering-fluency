@@ -15,6 +15,7 @@ All notable changes to the VS Code extension will be documented in this file.
 ### Bug Fixes
 - Fix the "Efficiency" nav button in the Efficiency view doing nothing when clicked — the view passed no active view to the shared nav bar, so its own button rendered enabled with no click handler instead of being marked as the current page
 - Surface a warning when copying a path from the Usage Analysis view fails: the webview reported the failure but nothing on the extension side listened, so a failed copy was completely silent
+- Sharing-server sync now reports "Copilot App" and "Claude (VS Code)" as their own editor labels (matching the local Interaction Modes view) instead of lumping them into "Copilot CLI"/"Claude Code" — the team dashboard's "Editors Used" panel previously had no way to show these categories at all, since the synced `editor` field never carried the distinction
 
 ### Chores
 - New validation tooling: `npm run preflight` runs every check in one pass (see [docs/VALIDATION.md](../docs/VALIDATION.md)), `npm run check:contract` fails the build when a webview message has no handler on the other side, and `npm run check:interaction` clicks every control in every panel headlessly. CI now also renders before/after webview screenshots on pull requests

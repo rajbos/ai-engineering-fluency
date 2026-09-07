@@ -322,6 +322,12 @@ Some dependencies (like `@vscode/webview-ui-toolkit`) declare peer dependencies 
 
 ### Development Principles
 
+Sharing-server contributions (including tests, docs and downstream overrides)
+must follow the [server data separation contract](sharing-server/AGENTS.md).
+For server build and test commands, use the
+[server validation guidance](docs/VALIDATION.md#sharing-server), not the
+extension-specific workflow below.
+
 1. **Minimal Changes:** Only modify files directly needed for your changes
 2. **Focused Modifications:** Make surgical, precise changes
 3. **Preserve Structure:** Maintain existing code organization
@@ -364,6 +370,10 @@ npm run lint:json
 **Note:** JSON validation is automatically run in CI/CD pipelines to catch syntax errors early.
 
 ## Testing
+
+For the sharing server, follow the [required privacy tests](sharing-server/AGENTS.md#required-validation)
+and [server validation guidance](docs/VALIDATION.md#sharing-server). Tests use
+isolated SQLite fixtures and stubbed GitHub access, never production data.
 
 - Test the extension manually in the Extension Development Host (F5)
 - Verify token tracking works correctly

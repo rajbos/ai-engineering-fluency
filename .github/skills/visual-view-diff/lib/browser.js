@@ -49,23 +49,19 @@ const INSTALL_HINT = [
 ].join('\n');
 
 /**
- * The pinned install CI uses: `.github/workflows/dependencies/playwright`, whose
- * lockfile fixes the Playwright version for the Webview UI checks workflow. It is
- * outside this script's own `node_modules` resolution chain, so it has to be named
- * explicitly — nothing about `require()` would find it on its own.
+ * CI installs a pinned Playwright into its own package tree (see
+ * .github/workflows/dependencies/playwright) rather than globally, so a plain
+ * `require('playwright')` from this file never finds it via Node's normal
+ * upward node_modules search. Resolve that location explicitly.
  */
-function pinnedWorkflowRoot() {
-	// lib/ -> visual-view-diff/ -> skills/ -> .github/ -> repo root
-	const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
-	return path.join(repoRoot, '.github', 'workflows', 'dependencies', 'playwright', 'node_modules');
+function pinnedWorkflowInstallRoot() {
+	return path.join(__dirname, '..', '..', '..', 'workflows', 'dependencies', 'playwright', 'node_modules');
 }
 
 /** Candidate module paths, cheapest first. */
 function candidatePaths() {
 	const paths = ['playwright', '@playwright/test', 'playwright-core'];
-	// The workflow's pinned, lockfile-managed install. Checked before the global
-	// root because CI installs there and nowhere else.
-	const pinnedRoot = pinnedWorkflowRoot();
+	const pinnedRoot = pinnedWorkflowInstallRoot();
 	paths.push(`${pinnedRoot}/playwright`, `${pinnedRoot}/@playwright/test`, `${pinnedRoot}/playwright-core`);
 	// Global installs are not on a local script's resolution path, so ask npm
 	// where its global root is and look there too.

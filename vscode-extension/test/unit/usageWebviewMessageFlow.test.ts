@@ -92,6 +92,31 @@ function buildStatsWithLongTailModelEfficiency(): Record<string, unknown> {
 	return stats;
 }
 
+/**
+ * `buildStats()` with a Workspace Health customization matrix mirroring a real long-tail
+ * distribution: 5 heavily-used workspaces (110-60 sessions) followed by 5 workspaces with
+ * only 1-2 sessions each — the "clear cliff" `computeWorkspaceHealthGrouping()` should detect.
+ */
+function buildStatsWithLongTailWorkspaces(): Record<string, unknown> {
+	const stats = buildStats();
+	const majorSessionCounts = [110, 90, 80, 70, 60];
+	const tailSessionCounts = [2, 2, 1, 1, 1];
+	const workspaces = [...majorSessionCounts, ...tailSessionCounts].map((sessionCount, index) => ({
+		workspacePath: `/repos/repo-${index + 1}`,
+		workspaceName: `repo-${index + 1}`,
+		sessionCount,
+		interactionCount: sessionCount * 10,
+		typeStatuses: {},
+	}));
+	stats.customizationMatrix = {
+		customizationTypes: [],
+		workspaces,
+		totalWorkspaces: workspaces.length,
+		workspacesWithIssues: 0,
+	};
+	return stats;
+}
+
 function buildStatsWithCorrections(): Record<string, unknown> {
 	return {
 		...buildStats(),
@@ -305,6 +330,42 @@ test('renders repository PR fetch progress into the panel', async () => {
 	assert.ok(rendered?.includes('1/2'), `expected fetch progress, got: ${rendered}`);
 });
 
+test('renders the cleanup log with the worktree path for failing entries', async () => {
+	const harness = await bootWebview(buildStats());
+	const worktreePath = 'C:\\Users\\me\\.copilot\\copilot-worktrees\\repo\\feature-x';
+
+	harness.post({
+		command: 'worktreeFound',
+		worktree: {
+			path: worktreePath,
+			repoLabel: 'repo',
+			branch: 'feature-x',
+			lastCommit: 'abc1234',
+			lastCommitDate: '2026-09-07T10:00:00.000Z',
+			pushed: 'yes',
+			files: 1,
+			folders: 1,
+			bytes: 1024,
+		},
+	});
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult',
+		path: worktreePath,
+		branch: 'feature-x',
+		repoLabel: 'repo',
+		status: 'error',
+		reason: `Could not safely locate the main repository for "${worktreePath}".`,
+		processed: 1,
+		total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+
+	const rendered = harness.text('.worktree-cleanup-log');
+	assert.ok(rendered?.includes(worktreePath), `expected the worktree path in the cleanup log, got: ${rendered}`);
+	assert.ok(rendered?.includes('Could not safely locate the main repository'), 'expected the cleanup reason to stay visible');
+});
+
 test('accepts payloads relayed the way VS Code actually delivers them', async () => {
 	// The panel hung with `delivered=true` logged host-side because the webview's source-trust
 	// check compared window identities. VS Code relays from an internal window, so every
@@ -351,6 +412,69 @@ test('marks HydraFusion sessions in the recent sessions list', async () => {
 	assert.match(row.textContent, /\$12\.35/);
 	const costCell = [...row.cells].find(cell => cell.textContent === '$12.35');
 	assert.equal(costCell?.title, '$12.3450');
+});
+
+test('Recent Sessions Duration column falls back to wall-clock time when activeDurationMs is zero', async () => {
+	// Regression test for a bug where session formats without per-request timing data (e.g.
+	// Copilot CLI JSONL) always reported activeDurationMs === 0, and the Duration column's old
+	// `??` fallback treated that defined zero as "no fallback needed", showing a misleading "<1m"
+	// for sessions that actually ran much longer.
+	const stats = buildStats();
+	const cliSession = {
+		title: 'Long CLI session', filePath: 'cli-session.jsonl', interactions: 40, toolCalls: 53,
+		inputTokens: 3700000, outputTokens: 14300, thinkingTokens: 0, cachedTokens: 3600000, totalTokens: 3800000,
+		estimatedCost: 1.13, editor: 'Copilot CLI (App)', models: ['gpt-5.6-terra'],
+		lastActivity: '2026-09-06T11:00:00.000Z',
+		durationMs: 125 * 60_000, // 125 minutes of wall-clock time
+		activeDurationMs: 0, // no per-request timing available for this format
+	};
+	stats.todaySessions = [cliSession];
+	const harness = await bootWebview(stats);
+
+	const row = harness.window.document.querySelector('.sessions-table tbody tr');
+	assert.ok(row, 'expects a rendered session row');
+	assert.match(row.textContent, /2h 05m/, 'Duration should fall back to the 125-minute wall-clock time, not "<1m"');
+	assert.doesNotMatch(row.textContent, /<1m/, 'a zero-but-defined activeDurationMs must not be shown as "<1m"');
+});
+
+test('Recent Sessions pill filters narrow the table by editor, vendor, model, and HydraFusion', async () => {
+	const stats = buildStats();
+	const baseSession = {
+		interactions: 10, toolCalls: 5, inputTokens: 1000, outputTokens: 500, thinkingTokens: 0,
+		cachedTokens: 0, totalTokens: 1500, estimatedCost: 0.5, lastActivity: '2026-09-06T11:00:00.000Z',
+	};
+	stats.todaySessions = [
+		{ ...baseSession, title: 'CLI session', filePath: 'a.jsonl', editor: 'Copilot CLI (App)', models: ['claude-opus-5'] },
+		{ ...baseSession, title: 'VS Code session', filePath: 'b.jsonl', editor: 'VS Code', models: ['gpt-5.6-terra'] },
+		{ ...baseSession, title: 'HydraFusion session', filePath: 'c.jsonl', editor: 'VS Code', models: ['hydrafusion'] },
+	];
+	const harness = await bootWebview(stats);
+	const doc = harness.window.document;
+	const titles = () => [...doc.querySelectorAll('.sessions-table tbody tr .session-title-link')].map(a => a.textContent.replace(/^HydraFusion/, ''));
+
+	assert.deepEqual(titles(), ['CLI session', 'VS Code session', 'HydraFusion session'], 'all three sessions render before any filter is applied');
+
+	// Filter by editor: only the two VS Code sessions should remain.
+	const editorPill = [...doc.querySelectorAll('.session-filter-pill[data-filter-type="editor"]')].find(p => p.getAttribute('data-filter-value') === 'VS Code');
+	assert.ok(editorPill, 'expects a VS Code editor filter pill');
+	editorPill.click();
+	assert.deepEqual(titles(), ['VS Code session', 'HydraFusion session']);
+	// The click replaces the whole table container's HTML, so re-query for the live pill.
+	const editorPillAfterClick = [...doc.querySelectorAll('.session-filter-pill[data-filter-type="editor"]')].find(p => p.getAttribute('data-filter-value') === 'VS Code');
+	assert.equal(editorPillAfterClick?.getAttribute('aria-pressed'), 'true', 'an active pill should expose aria-pressed="true"');
+
+	// Combine with the HydraFusion quick filter: only the HydraFusion session should remain.
+	const hydraPill = doc.querySelector('.session-filter-pill-hydrafusion');
+	assert.ok(hydraPill, 'expects a HydraFusion quick-filter pill');
+	hydraPill.click();
+	assert.deepEqual(titles(), ['HydraFusion session']);
+
+	// Clearing filters restores every session.
+	const clearButton = doc.getElementById('sessions-filter-clear');
+	assert.ok(clearButton, 'expects a "Clear filters" button once a filter is active');
+	clearButton.click();
+	assert.deepEqual(titles(), ['CLI session', 'VS Code session', 'HydraFusion session']);
+	assert.equal(doc.getElementById('sessions-filter-clear'), null, 'the clear button disappears once no filters are active');
 });
 
 test('renders cloud agent session results', async () => {
@@ -424,6 +548,62 @@ test('remembers the "Other models" open state across a leaderboard re-render', a
 	const detailsAfterSort = harness.window.document.getElementById('model-leaderboard-other');
 	assert.ok(detailsAfterSort, 'expects the "Other models" group to still exist after sorting');
 	assert.equal(detailsAfterSort.open, true, 'the open state must survive the re-render');
+});
+
+test('collapses the long tail of low-activity workspaces into an "Other" row on Workspace Health', async () => {
+	const harness = await bootWebview(buildStatsWithLongTailWorkspaces());
+
+	const majorRows = harness.window.document.querySelectorAll('#repo-list-pane .repo-name');
+	assert.equal(majorRows.length, 5, 'only the 5 high-activity workspaces should render as individual rows');
+
+	const rendered = harness.text('#repo-list-pane');
+	assert.match(rendered ?? '', /Other \(5 repositories with low activity\)/);
+
+	const showAllButton = harness.window.document.getElementById('btn-show-other-workspaces');
+	assert.ok(showAllButton, 'expects a "Show all" toggle for the collapsed tail');
+
+	showAllButton.click();
+	await harness.settle();
+
+	const allRows = harness.window.document.querySelectorAll('#repo-list-pane .repo-name');
+	assert.equal(allRows.length, 10, '"Show all" must reveal every workspace, including the low-activity tail');
+	assert.equal(
+		harness.window.document.getElementById('btn-show-other-workspaces'), null,
+		'the "Other" row must disappear once expanded',
+	);
+	const collapseButton = harness.window.document.getElementById('btn-collapse-other-workspaces');
+	assert.ok(collapseButton, 'expects a "Show less" toggle once expanded');
+
+	collapseButton.click();
+	await harness.settle();
+
+	const collapsedAgainRows = harness.window.document.querySelectorAll('#repo-list-pane .repo-name');
+	assert.equal(collapsedAgainRows.length, 5, '"Show less" must collapse back to just the major group');
+});
+
+test('does not group workspaces on Workspace Health when there is no long tail', async () => {
+	const stats = buildStats();
+	// A gentle, non-cliff distribution with too few workspaces to bother grouping.
+	stats.customizationMatrix = {
+		customizationTypes: [],
+		workspaces: [10, 8, 6, 4].map((sessionCount, index) => ({
+			workspacePath: `/repos/repo-${index + 1}`,
+			workspaceName: `repo-${index + 1}`,
+			sessionCount,
+			interactionCount: sessionCount * 10,
+			typeStatuses: {},
+		})),
+		totalWorkspaces: 4,
+		workspacesWithIssues: 0,
+	};
+	const harness = await bootWebview(stats);
+
+	const rows = harness.window.document.querySelectorAll('#repo-list-pane .repo-name');
+	assert.equal(rows.length, 4, 'all workspaces should render individually when there is no meaningful drop-off');
+	assert.equal(
+		harness.window.document.getElementById('btn-show-other-workspaces'), null,
+		'no "Other" row should appear for a small, non-cliff workspace list',
+	);
 });
 
 test('filters corrections by type and opens the selected session turn', async () => {

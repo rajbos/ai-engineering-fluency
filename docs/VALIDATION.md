@@ -206,3 +206,52 @@ interaction smoke does gate, because a dead control never is.
 - **A dead control that is already the selected option** is reported as
   `noop-selected`, not as a finding. That is the trade for not carrying three
   standing false positives on the chart view's segmented controls.
+
+## Sharing server
+
+The extension preflight above does not validate the sharing server. Server coding
+and testing follow the [authoritative data separation contract](../sharing-server/AGENTS.md),
+including its HTTP/HTML privacy regression checklist. Unlike the extension's
+`local` stage, server tests must never read production data or call live GitHub:
+use isolated temporary SQLite fixtures, never user databases, and stub authentication.
+
+From `sharing-server`, run:
+
+```sh
+npm run check-types
+npm run build
+npm test
+npm run check:interaction
+```
+
+The server's `check:interaction` is a reproducible headless browser check,
+separate from the extension command of the same name. It requires an existing
+Playwright installation and its Chromium browser, resolved through
+`.github/skills/visual-view-diff/lib/browser.js`; no new dependencies are added.
+Against an isolated temporary-fixture server, it clicks period links, team-total
+and daily-average trend modes, raw daily-total expansion, CSV/JSON downloads and
+personal-dashboard navigation. It never launches an editor or IDE and does not
+use production data or live GitHub.
+
+The root test entry point is:
+
+```powershell
+.\build.ps1 -Project sharing -Target test
+```
+
+It runs the server's `npm test`, not the separate type/build/interaction checks.
+The deployment workflow gates on `npm test` and `npm run check:interaction`,
+using the repository's locked Playwright tooling. The package publishing workflow
+also runs `npm test` before the library build.
+
+Exercise `/team` with a session cookie and `/api/team-insights` with a bearer token
+through actual HTTP routes, plus both CSV and JSON `/team/export` downloads with
+a session cookie. Verify the full-page period links also work without JavaScript,
+daily-average denominators use daily active uploaders, and expanded totals match
+the safe payload. Inspect complete responses, including hidden markup
+and embedded scripts, with exact key allowlists and seeded sentinel-absence
+assertions. Cover owner/admin authorization, identity-free admin member views,
+private/no-store caching, and the contract's UTC-window, activity, ties, quartiles
+and no-peer edge cases. New exports and downstream route overrides need the same
+checks. A chart screenshot or a helper-only unit test cannot establish separation.
+All automated verification is non-interactive; never launch a GUI editor/IDE.

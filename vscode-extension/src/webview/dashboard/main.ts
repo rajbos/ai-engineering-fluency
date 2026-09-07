@@ -160,13 +160,19 @@ function showError(message: string): void {
 
 function buildDashboardFailure(message: string): HTMLElement {
   const failure = el("div", "dashboard-failure");
+
+  const header = el("div", "config-card-header");
+  const icon = el("span", "config-card-icon", "☁️");
+  const heading = el("span", "config-card-heading", "Azure Storage");
+  header.append(icon, heading);
+
   const errorEl = el("div", "error-message", message);
   const configureButton = createButton(
     "btn-configure-backend",
     "Configure Azure Storage",
     "secondary",
   );
-  failure.append(errorEl, configureButton);
+  failure.append(header, errorEl, configureButton);
   return failure;
 }
 
@@ -576,11 +582,14 @@ function buildTeamServerPanel(url: string): HTMLElement {
 
   const card = el("div", "team-server-card");
 
-  const icon = el("div", "team-server-card-icon", "🖥️");
-  const heading = el("div", "team-server-card-heading", "Team Server Dashboard");
+  const header = el("div", "config-card-header");
+  const icon = el("span", "config-card-icon", "🖥️");
+  const heading = el("span", "config-card-heading", "Team Server Dashboard");
+  header.append(icon, heading);
+
   const urlEl = el("div", "team-server-card-url", url);
 
-  const openBtn = el("button", "team-server-open-btn", "↗ Open Team Server in Browser") as HTMLButtonElement;
+  const openBtn = createButton("btn-open-team-server", "↗ Open Team Server in Browser", "secondary") as HTMLButtonElement;
   openBtn.addEventListener("click", () => {
     vscode.postMessage({ command: "openExternal", url });
   });
@@ -593,7 +602,7 @@ function buildTeamServerPanel(url: string): HTMLElement {
     "so the dashboard opens in your default browser instead.",
   );
 
-  card.append(icon, heading, urlEl, openBtn, note);
+  card.append(header, urlEl, openBtn, note);
   panel.append(card);
   return panel;
 }

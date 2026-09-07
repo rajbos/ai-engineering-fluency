@@ -27,6 +27,7 @@ import {
 	listComparableModels,
 	resolveModelCompareWindow,
 	selectDaysInWindow,
+	windowHasModelData,
 } from '../../../../src/efficiencyAnalysis';
 import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 
@@ -263,8 +264,6 @@ function renderAttributionTab(d: EfficiencyViewData): string {
 		return `<p class="eff-section-note">Not enough data to decompose the cost change — both compared windows need at least one session with token data.</p>`;
 	}
 	const maxAbs = Math.max(Math.abs(a.volumeEffect), Math.abs(a.efficiencyEffect), Math.abs(a.mixEffect), 0.01);
-	const afterVolume = a.prev.cost + a.volumeEffect;
-	const afterEfficiency = afterVolume + a.efficiencyEffect;
 	const shifts = a.modelShifts.length === 0 ? '' : `
 		<h3>Model mix movement</h3>
 		<table class="attr-shift-table">
@@ -286,7 +285,6 @@ function renderAttributionTab(d: EfficiencyViewData): string {
 			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.cur))}</div><div class="stat-value">$${a.cur.cost.toFixed(2)}</div><div class="stat-sub">${escapeHtml(d.attributionWindows.curRange)} · ${a.cur.sessions} sessions · ${formatCompact(a.cur.tokens)} tokens</div></div>
 			<div class="attr-stat"><div class="stat-label">Change</div><div class="stat-value">${fmtMoney(a.deltaCost)}</div><div class="stat-sub">blended rate ${a.prev.dollarsPerMTokens.toFixed(2)} → ${a.cur.dollarsPerMTokens.toFixed(2)} $/M tokens</div></div>
 		</div>
-		<div class="attr-waterfall"><span>Starting cost <b>$${a.prev.cost.toFixed(2)}</b></span><span>After session count <b>$${afterVolume.toFixed(2)}</b></span><span>After session size <b>$${afterEfficiency.toFixed(2)}</b></span><span>After model mix <b>$${a.cur.cost.toFixed(2)}</b></span></div>
 		<div class="attr-bars">
 			${attrBar('Volume (session count)', `${a.prev.sessions.toLocaleString()} → ${a.cur.sessions.toLocaleString()} sessions`, a.volumeEffect, maxAbs, `Session count went from ${a.prev.sessions} to ${a.cur.sessions}.`)}
 			${attrBar('Session size (tokens/session)', `${formatCompact(a.prev.tokensPerSession)} → ${formatCompact(a.cur.tokensPerSession)} tokens/session`, a.efficiencyEffect, maxAbs, `Tokens per session went from ${Math.round(a.prev.tokensPerSession)} to ${Math.round(a.cur.tokensPerSession)}.`)}
@@ -505,7 +503,14 @@ function payloadNow(d: EfficiencyViewData): Date {
 	return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 }
 
-/** Picks sensible defaults on first render: the two most-used comparable models. */
+/** Which window ids currently have per-model data, in `WINDOW_OPTIONS` order. */
+function availableWindowIds(d: EfficiencyViewData, now: Date): ModelCompareWindowId[] {
+	return WINDOW_OPTIONS
+		.map(w => w.id)
+		.filter(id => windowHasModelData(d.modelDaily, resolveModelCompareWindow(id, now)));
+}
+
+/** Picks sensible defaults on first render: the two most-used comparable models, and windows that actually have data. */
 function initModelState(d: EfficiencyViewData): void {
 	if (modelState.initialized) { return; }
 	modelState.initialized = true;
@@ -514,6 +519,13 @@ function initModelState(d: EfficiencyViewData): void {
 	const pool = preferred.length >= 2 ? preferred : models;
 	modelState.modelA = pool[0]?.model ?? '';
 	modelState.modelB = pool[1]?.model ?? pool[0]?.model ?? '';
+
+	const available = availableWindowIds(d, payloadNow(d));
+	if (available.length > 0) {
+		modelState.window = available.includes('last30') ? 'last30' : available[0];
+		modelState.windowA = available[0];
+		modelState.windowB = available.length > 1 ? available[1] : available[0];
+	}
 }
 
 /** Resolves the current selection into a comparison, or null when a side has no data. */
@@ -547,13 +559,19 @@ function modelOptions(d: EfficiencyViewData): { value: string; label: string }[]
 	}));
 }
 
-function windowOptions(): { value: string; label: string }[] {
-	return WINDOW_OPTIONS.map(w => ({ value: w.id, label: w.label }));
+/** Dropdown options for the window picker: each label carries its concrete date span, and windows with no per-model data yet are disabled so they can't silently be picked. */
+function windowOptions(d: EfficiencyViewData, now: Date): { value: string; label: string; disabled?: boolean }[] {
+	return WINDOW_OPTIONS.map(w => {
+		const resolved = resolveModelCompareWindow(w.id, now);
+		const hasData = windowHasModelData(d.modelDaily, resolved);
+		const label = `${w.label} (${resolved.rangeLabel})${hasData ? '' : ' — no data'}`;
+		return { value: w.id, label, disabled: !hasData };
+	});
 }
 
 function renderModelControls(d: EfficiencyViewData): string {
 	const models = modelOptions(d);
-	const windows = windowOptions();
+	const windows = windowOptions(d, payloadNow(d));
 	const modeSelect = selectHtml('model-mode', [
 		{ value: 'models', label: 'Compare two models' },
 		{ value: 'periods', label: 'One model, two periods' },

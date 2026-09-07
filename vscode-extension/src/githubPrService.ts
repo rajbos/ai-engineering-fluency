@@ -37,6 +37,10 @@ export type RepoPrStatsResult = {
 	since: string; // ISO date string
 	/** Set when the collection itself failed (not a per-repo error) — the panel shows this instead of hanging on "Loading…". */
 	error?: string;
+	/** When the snapshot was fetched from GitHub; empty string when it has never been fetched. */
+	fetchedAt?: string;
+	/** How often the snapshot is refreshed, so the UI can say when the next refresh is due. */
+	refreshIntervalMs?: number;
 };
 
 // ---------------------------------------------------------------------------

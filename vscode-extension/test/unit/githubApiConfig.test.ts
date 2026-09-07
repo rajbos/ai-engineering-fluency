@@ -3,7 +3,7 @@ import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import { EventEmitter } from 'node:events';
 import type * as http from 'node:http';
-import { deriveGitHubApiEndpoints, getGitHubAuthProviderId, attachRequestFailureHandling } from '../../src/githubApiConfig';
+import { deriveGitHubApiEndpoints, deriveGitHubWebOrigin, getConfiguredGitHubWebOrigin, getGitHubAuthProviderId, attachRequestFailureHandling } from '../../src/githubApiConfig';
 
 /**
  * Minimal stand-in for `http.ClientRequest`, exercising exactly the surface
@@ -78,6 +78,40 @@ test('deriveGitHubApiEndpoints: derives api.<tenant> subdomain for GHE.com (data
 test('deriveGitHubApiEndpoints: derives /api/v3 and /api/graphql for on-prem GitHub Enterprise Server', () => {
 	const endpoints = deriveGitHubApiEndpoints('https://github.acme-corp.com');
 	assert.deepEqual(endpoints, { hostname: 'github.acme-corp.com', restPathPrefix: '/api/v3', graphQlPath: '/api/graphql' });
+});
+
+// ---------------------------------------------------------------------------
+// deriveGitHubWebOrigin / getConfiguredGitHubWebOrigin — the *web* host used to build
+// `https://host/owner/repo`-style repo links (as opposed to the REST API host above).
+// ---------------------------------------------------------------------------
+
+test('deriveGitHubWebOrigin: returns github.com for no enterprise URI, an empty string, or an unparseable URI', () => {
+	assert.equal(deriveGitHubWebOrigin(undefined), 'https://github.com');
+	assert.equal(deriveGitHubWebOrigin(''), 'https://github.com');
+	assert.equal(deriveGitHubWebOrigin('not a url'), 'https://github.com');
+});
+
+test('deriveGitHubWebOrigin: returns github.com for a github.com URI', () => {
+	assert.equal(deriveGitHubWebOrigin('https://github.com'), 'https://github.com');
+	assert.equal(deriveGitHubWebOrigin('https://www.github.com'), 'https://github.com');
+	assert.equal(deriveGitHubWebOrigin('https://api.github.com'), 'https://github.com');
+});
+
+test('deriveGitHubWebOrigin: returns the tenant origin (no api. prefix) for GHE.com (data residency)', () => {
+	assert.equal(deriveGitHubWebOrigin('https://customer.ghe.com'), 'https://customer.ghe.com');
+});
+
+test('deriveGitHubWebOrigin: returns the configured host origin (no /api/v3 suffix) for on-prem GitHub Enterprise Server', () => {
+	assert.equal(deriveGitHubWebOrigin('https://github.acme-corp.com'), 'https://github.acme-corp.com');
+});
+
+test('getConfiguredGitHubWebOrigin: reads the github-enterprise.uri setting and derives its web origin', () => {
+	withEnterpriseUri('https://github.acme-corp.com', () => {
+		assert.equal(getConfiguredGitHubWebOrigin(), 'https://github.acme-corp.com');
+	});
+	withEnterpriseUri(undefined, () => {
+		assert.equal(getConfiguredGitHubWebOrigin(), 'https://github.com');
+	});
 });
 
 // ---------------------------------------------------------------------------

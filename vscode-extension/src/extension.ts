@@ -121,6 +121,7 @@ import {
   sumWorktreeBytes as _sumWorktreeBytes,
   parseCleanupPushedWorktreesMessage as _parseCleanupPushedWorktreesMessage,
   buildCleanupConfirmTitle as _buildCleanupConfirmTitle,
+  validateWorktreeRepoRootFromSessionPaths as _validateWorktreeRepoRootFromSessionPaths,
   type WorktreeBackgroundScanResult,
 } from './worktreeBackgroundScan';
 import { scanWorktreeRootsWithTimeout as _scanWorktreeRootsWithTimeout } from './worktreeScan';
@@ -301,7 +302,16 @@ import {
 	readAgentTasksSnapshot,
 	writeAgentTasksSnapshot,
 } from './agentTasksCache';
-import { getConfiguredGitHubEnterpriseUri, getGitHubAuthProviderId } from './githubApiConfig';
+import {
+	REPO_PRS_CACHE_SCHEMA_VERSION,
+	REPO_PRS_REFRESH_INTERVAL_MS,
+	canServeRepoPrSnapshot,
+	getRepoPrCachePath,
+	isRepoPrEnvelopeUsable,
+	readRepoPrSnapshot,
+	writeRepoPrSnapshot,
+} from './repoPrCache';
+import { getConfiguredGitHubEnterpriseUri, getConfiguredGitHubWebOrigin, getGitHubAuthProviderId } from './githubApiConfig';
 
 // --- View regression ---
 import {
@@ -331,6 +341,7 @@ import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
 import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
+import { TtftScanResultCache } from './ttftAnalysisCache';
 
 type LocalViewRegressionProbeResult = {
   pass: boolean;
@@ -494,6 +505,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Full, unfiltered session file paths from the last diagnostics load (no 14-day/500-file cap) —
 	// the TTFT scan-range picker filters this list itself instead of relying on diagnosticsCachedFiles.
 	private diagnosticsAllSessionFiles: string[] = [];
+	// Per scan-range TTFT result cache. Granularity changes reuse the cached sample set instantly.
+	private readonly diagnosticsTtftCache = new TtftScanResultCache();
 	// Cache of the last diagnostic report text for copy/issue operations
 	private lastDiagnosticReport: string = '';
 	// Incremented on each worktree scan start/cancel; in-flight scans check this to stop early
@@ -714,8 +727,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		premium_interactions_remaining?: number;
 	} = {};
 
-	// Cached PR stats result for the repos tab
+	// Cached PR stats result for the repos tab (mirrors the shared snapshot on disk)
 	private _lastRepoPrStats?: RepoPrStatsResult;
+
+	// True while this window is refreshing the shared repository-PRs snapshot from the GitHub API
+	private _repoPrRefreshInFlight = false;
 
 	// Cached cloud agent sessions result for the cloud agent tab (mirrors the shared snapshot on disk)
 	private _lastAgentSessionsData?: AgentSessionsResult;
@@ -1337,6 +1353,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.diagnosticsHasLoadedFiles = false;
 			this.diagnosticsCachedFiles = [];
 			this.diagnosticsAllSessionFiles = [];
+			this.diagnosticsTtftCache.clear();
 			// Clear cached computed stats so details panel doesn't show stale data
 			this.lastDetailedStats = undefined;
 			this.lastDailyStats = undefined;
@@ -1897,9 +1914,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (this.analysisPanel) {
 				const since = new Date();
 				since.setDate(since.getDate() - 30);
-				const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
-				this._lastRepoPrStats = result;
-				await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
+				await this.publishRepoPrStats(this.buildEmptyRepoPrStatsResult(since, false));
 				await this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			}
 		} catch (error) {
@@ -1942,12 +1957,56 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return this.githubSession;
 	}
 
-	/** Load PR stats for all discovered GitHub repos and send results to the analysis panel. */
+	private repoPrStatsSince(): Date {
+		const since = new Date();
+		since.setDate(since.getDate() - 30);
+		return since;
+	}
+
+	/** Path of the cross-window Repository PRs snapshot shared by every window of this VS Code edition. */
+	private repoPrCachePath(): string {
+		return getRepoPrCachePath(this.context.globalStorageUri.fsPath, this.cacheManager.getCacheIdentifier());
+	}
+
+	/** An empty snapshot — `fetchedAt: ''` marks "never fetched", which the panel renders as pending. */
+	private buildEmptyRepoPrStatsResult(since: Date, authenticated: boolean): RepoPrStatsResult {
+		return { repos: [], authenticated, since: since.toISOString(), fetchedAt: '' };
+	}
+
+	/**
+	 * Remember and push a snapshot to the analysis panel, if one is open. The refresh interval is
+	 * stamped on here so the panel can show when the next refresh is due without duplicating the
+	 * cache policy.
+	 */
+	private async publishRepoPrStats(result: RepoPrStatsResult): Promise<void> {
+		const stamped: RepoPrStatsResult = { ...result, refreshIntervalMs: REPO_PRS_REFRESH_INTERVAL_MS };
+		this._lastRepoPrStats = stamped;
+		const { delivered, wasReady } = await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: stamped });
+		this.log(`🔎 Repository PR stats posted for ${stamped.repos.length} repo(s) (delivered=${delivered}, webviewReady=${wasReady}, ${this._describeAnalysisPanel()})`);
+
+		// `fetchedAt` is only set on real (cache-read or freshly-fetched) snapshots — the instant
+		// placeholder served on cold open uses ''. If the Efficiency panel is already open and its
+		// Value tab was rendered before this real data landed (e.g. the user opened Repository PRs
+		// after Efficiency), its "no data" hint would otherwise persist until an explicit Refresh
+		// click, since showEfficiency() deliberately doesn't recompute on reveal. Push the update.
+		if (stamped.fetchedAt && this.efficiencyPanel) {
+			void this.dispatch('refresh:efficiency', () => this.refreshEfficiencyPanel()).catch((err) => {
+				this.warn(`Failed to refresh Efficiency view after repository PR stats update: ${err}`);
+			});
+		}
+	}
+
+	/**
+	 * Show Repository PR stats in the analysis panel.
+	 *
+	 * This never calls GitHub itself: it serves the shared hourly snapshot (see `repoPrCache.ts`)
+	 * so opening the tab is instant and costs no API calls, then asks for a refresh, which only
+	 * happens if the snapshot is stale *and* this window wins the repo-PRs lock.
+	 */
 	private async loadRepoPrStats(): Promise<void> {
 		if (!this.analysisPanel) { return; }
 
-		const since = new Date();
-		since.setDate(since.getDate() - 30);
+		const since = this.repoPrStatsSince();
 		this.log('🔎 Loading repository PR stats (last 30 days)…');
 		try {
 			await this.collectAndPublishRepoPrStats(since);
@@ -1958,28 +2017,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// tolerates the panel being disposed mid-flight (postMessage on a disposed webview
 			// resolves false instead of throwing).
 			this.error('Failed to load repository PR stats', err);
-			const result: RepoPrStatsResult = {
-				repos: [], authenticated: !this._githubSignedOutByUser, since: since.toISOString(),
-				error: err instanceof Error ? err.message : String(err),
-			};
-			this._lastRepoPrStats = result;
-			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
+			const fallback = this._lastRepoPrStats ?? this.buildEmptyRepoPrStatsResult(since, !this._githubSignedOutByUser);
+			// The webview renders the error box in place of the repo table whenever `error` is
+			// set, even if `repos` is populated — so only surface it when there is no cached data
+			// to fall back to. A transient snapshot-read/timeout failure would otherwise blank out
+			// perfectly good previously-loaded PR data behind a "failed to load" message.
+			const message = err instanceof Error ? err.message : String(err);
+			await this.publishRepoPrStats(fallback.repos.length > 0 ? fallback : { ...fallback, error: message });
 		}
 	}
 
 	private async collectAndPublishRepoPrStats(since: Date): Promise<void> {
 		if (this._githubSignedOutByUser) {
-			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
-			this._lastRepoPrStats = result;
-			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
+			await this.publishRepoPrStats(this.buildEmptyRepoPrStatsResult(since, false));
 			return;
 		}
 
 		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 		if (!session) {
-			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
-			this._lastRepoPrStats = result;
-			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
+			await this.publishRepoPrStats(this.buildEmptyRepoPrStatsResult(since, false));
 			return;
 		}
 
@@ -1990,27 +2046,100 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log(`✅ GitHub session synced from existing VS Code auth: ${session.account.label}`);
 		}
 
+		await this.publishRepoPrStats(this._lastRepoPrStats ?? this.buildEmptyRepoPrStatsResult(since, true));
+		const snapshot = await _withTimeout(
+			readRepoPrSnapshot(this.repoPrCachePath()),
+			10_000,
+			'Reading the repository PRs snapshot',
+		);
+		if (isRepoPrEnvelopeUsable(snapshot, since)) {
+			await this.publishRepoPrStats(snapshot!.data);
+		}
+
+		void this.maybeRefreshRepoPrStats().catch((err) => {
+			this.warn(`Repository PRs refresh scheduling failed: ${err}`);
+		});
+	}
+
+	/**
+	 * Refresh the Repository PRs snapshot from the GitHub API, if it is due.
+	 *
+	 * Collecting it costs a PR-list call (plus a commit-messages call per PR to detect
+	 * co-authored-by AI) for every discovered repo, so it is deliberately rationed: at most once
+	 * every REPO_PRS_REFRESH_INTERVAL_MS, and only in the window that wins the repo-PRs lock — the
+	 * other windows read that window's snapshot from global storage instead of repeating the calls.
+	 * Runs on extension start and on every cache refresh cycle (both leader-gated), plus whenever
+	 * the Repository PRs tab is opened.
+	 */
+	private async maybeRefreshRepoPrStats(): Promise<void> {
+		if (this._repoPrRefreshInFlight || this._githubSignedOutByUser) { return; }
+		const since = this.repoPrStatsSince();
+		const cachePath = this.repoPrCachePath();
+		if (canServeRepoPrSnapshot(await readRepoPrSnapshot(cachePath), since, Date.now())) { return; }
+
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+		if (!session) { return; }
+
+		let acquired = false;
+		try { acquired = await this.cacheManager.acquireRepoPrLock(); }
+		catch (err) { this.warn(`Failed to acquire repo-PRs lock: ${err}`); }
+		if (!acquired) {
+			this.log('⏭️ Repository PRs refresh skipped — another window is refreshing the shared snapshot');
+			return;
+		}
+
+		this._repoPrRefreshInFlight = true;
+		// Heartbeat the lock: a slow API pass must not look stale to another window, which would
+		// let it start the same collection in parallel.
+		const heartbeat = setInterval(() => { void this.cacheManager.renewRepoPrLock(); }, 60 * 1000);
+		try {
+			await this.refreshRepoPrStatsSnapshot(session.accessToken, session.account.label, since, cachePath);
+		} catch (err) {
+			this.warn(`Repository PRs refresh failed: ${err}`);
+		} finally {
+			clearInterval(heartbeat);
+			this._repoPrRefreshInFlight = false;
+			try { await this.cacheManager.releaseRepoPrLock(); }
+			catch (err) { this.warn(`Failed to release repo-PRs lock: ${err}`); }
+		}
+	}
+
+	/** Collect the snapshot from every discovered workspace repo, write it to disk and publish it. */
+	private async refreshRepoPrStatsSnapshot(token: string, userLogin: string | undefined, since: Date, cachePath: string): Promise<void> {
 		const workspacePaths = this._buildWorkspacePaths();
 		const discoveryStart = Date.now();
 		const repos = await discoverGitHubRepos(workspacePaths, getConfiguredGitHubEnterpriseUri());
-		this.log(`🔎 Discovered ${repos.length} GitHub repo(s) across ${workspacePaths.length} workspace path(s) in ${((Date.now() - discoveryStart) / 1000).toFixed(1)}s`);
+		this.log(`🔎 Refreshing repository PRs snapshot: discovered ${repos.length} GitHub repo(s) across ${workspacePaths.length} workspace path(s) in ${((Date.now() - discoveryStart) / 1000).toFixed(1)}s`);
 		await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsProgress', total: repos.length, done: 0 });
 
+		const webOrigin = getConfiguredGitHubWebOrigin();
 		const results: RepoPrInfo[] = [];
 		for (let i = 0; i < repos.length; i++) {
 			const { owner, repo } = repos[i];
 			this.log(`🔎 Fetching PRs for ${owner}/${repo} (${i + 1}/${repos.length})…`);
-			const { prs, error } = await fetchRepoPrs(owner, repo, session.accessToken, since);
+			const { prs, error } = await fetchRepoPrs(owner, repo, token, since);
 			this.log(`🔎 Fetched ${prs.length} PR(s) for ${owner}/${repo}${error ? ` — ${error}` : ''}`);
-			const stats = this.collectAiPrStats(prs, error, session.account.label);
-			results.push({ owner, repo, repoUrl: `https://github.com/${owner}/${repo}`, ...stats, error });
+			const stats = this.collectAiPrStats(prs, error, userLogin);
+			results.push({ owner, repo, repoUrl: `${webOrigin}/${owner}/${repo}`, ...stats, error });
 			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsProgress', total: repos.length, done: i + 1 });
 		}
 
-		const result: RepoPrStatsResult = { repos: results, authenticated: true, since: since.toISOString() };
-		this._lastRepoPrStats = result;
-		const { delivered, wasReady } = await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
-		this.log(`🔎 Repository PR stats posted for ${results.length} repo(s) (delivered=${delivered}, webviewReady=${wasReady}, ${this._describeAnalysisPanel()})`);
+		const fetchedAt = new Date().toISOString();
+		const result: RepoPrStatsResult = { repos: results, authenticated: true, since: since.toISOString(), fetchedAt };
+
+		try {
+			await writeRepoPrSnapshot(cachePath, {
+				schemaVersion: REPO_PRS_CACHE_SCHEMA_VERSION,
+				fetchedAt,
+				since: result.since,
+				data: result,
+			});
+		} catch (err) {
+			this.warn(`Failed to write repository PRs snapshot: ${err}`);
+		}
+
+		this.log(`🔎 Repository PRs snapshot: ${results.length} repo(s)`);
+		await this.publishRepoPrStats(result);
 	}
 
 	/** Classify one PR, pushing any AI detail rows and returning its contribution to the counters. */
@@ -2784,11 +2913,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Piggyback the once-daily background worktree scan on the same leader election: only
 		// the window that won this refresh's leader lock may start it, and it runs detached
 		// (drip-throttled, can take far longer than this refresh cycle) so it never blocks it.
-		// The hourly cloud-agent snapshot refresh rides along for the same reason: it is leader-only
-		// GitHub API work that must not hold up the parse, and this also gives it a run at startup.
+		// The hourly cloud-agent and repository-PRs snapshot refreshes ride along for the same
+		// reason: they are leader-only GitHub API work that must not hold up the parse, and this
+		// also gives them a run at startup.
 		if (isLeader) {
 			void this.maybeStartBackgroundWorktreeScan();
 			void this.maybeRefreshAgentSessions();
+			void this.maybeRefreshRepoPrStats();
 		}
 
 		try {
@@ -4725,7 +4856,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Wall-clock duration (includes idle gaps between turns) — kept for reference/future use.
 		const durationMs = computeSessionDurationMs(sessionData.firstInteraction, sessionData.lastInteraction);
 		// Net/active duration (excludes idle gaps between turns) — this is what's shown as "Duration".
-		const activeDurationMs = analysis.sessionDuration?.activeDurationMs;
+		// Only meaningful for formats with per-request timing data (e.g. VS Code Chat); other
+		// formats (e.g. Copilot CLI JSONL) report 0 here, which must not shadow the wall-clock
+		// duration below, or every such session would misleadingly show up as "<1m".
+		const rawActiveDurationMs = analysis.sessionDuration?.activeDurationMs;
+		const activeDurationMs = rawActiveDurationMs !== undefined && rawActiveDurationMs > 0 ? rawActiveDurationMs : undefined;
 		const workspace = this.resolveSessionWorkspaceName(sessionData, sessionFile);
 		return {
 			title: sessionData.title || null, filePath: sessionFile, interactions,
@@ -6974,40 +7109,45 @@ private computeFallbackDailyRollup(
 	 * debug log (non-VS-Code-Chat editors, or Chat sessions predating this file) resolve to
 	 * null immediately with no I/O — see resolveDebugLogCandidatePaths in workspaceHelpers.ts.
 	 *
-	 * Scans `diagnosticsAllSessionFiles` — the full, unfiltered discovery list — rather than
+	 * The scan result is cached per scan-range selector so granularity-only changes can reuse the
+	 * same sample set instantly. When the range changes, the first miss for that range scans
+	 * `diagnosticsAllSessionFiles` — the full, unfiltered discovery list — rather than
 	 * `diagnosticsCachedFiles`, which is capped to the last 14 days / 500 files for the rest of
 	 * the Diagnostics screen. That cap silently hid real `attrs.ttft` data that exists on disk
-	 * but is older than 14 days; `scanRangeMs` (null = all time) lets the tab's own picker widen
-	 * the search instead. Debug-log-shaped candidates are found cheaply first (no I/O — a path
-	 * check), then only those are stat'd for the range filter.
+	 * but is older than 14 days; the tab's own picker widens the search instead. Debug-log-shaped
+	 * candidates are found cheaply first (no I/O — a path check), then only those are stat'd for
+	 * the requested range on a cache miss.
 	 */
-	private async collectTtftSamples(scanRangeMs: number | null): Promise<{ samples: TtftSample[]; fileCount: number }> {
-		const candidates = this.diagnosticsAllSessionFiles.filter(f => _resolveDebugLogCandidatePaths(f) !== undefined);
-		const CONCURRENCY = 20;
-		let inRange = candidates;
-		if (scanRangeMs !== null) {
-			const cutoff = Date.now() - scanRangeMs;
-			const withStats: (string | null)[] = [];
-			for (let i = 0; i < candidates.length; i += CONCURRENCY) {
-				const batch = candidates.slice(i, i + CONCURRENCY);
-				const results = await Promise.all(batch.map(async (file) => {
-					try {
-						const stat = await fs.promises.stat(file);
-						return stat.mtimeMs >= cutoff ? file : null;
-					} catch { return null; }
-				}));
-				withStats.push(...results);
+	private async collectTtftSamples(scanRange: TtftScanRange): Promise<{ samples: TtftSample[]; fileCount: number }> {
+		return this.diagnosticsTtftCache.getOrLoad(scanRange, async () => {
+			const scanRangeMs = ttftScanRangeToMs(scanRange);
+			const candidates = this.diagnosticsAllSessionFiles.filter(f => _resolveDebugLogCandidatePaths(f) !== undefined);
+			const CONCURRENCY = 20;
+			let inRange = candidates;
+			if (scanRangeMs !== null) {
+				const cutoff = Date.now() - scanRangeMs;
+				const withStats: (string | null)[] = [];
+				for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+					const batch = candidates.slice(i, i + CONCURRENCY);
+					const results = await Promise.all(batch.map(async (file) => {
+						try {
+							const stat = await fs.promises.stat(file);
+							return stat.mtimeMs >= cutoff ? file : null;
+						} catch { return null; }
+					}));
+					withStats.push(...results);
+				}
+				inRange = withStats.filter((f): f is string => f !== null);
 			}
-			inRange = withStats.filter((f): f is string => f !== null);
-		}
 
-		const all: TtftSample[] = [];
-		for (let i = 0; i < inRange.length; i += CONCURRENCY) {
-			const batch = inRange.slice(i, i + CONCURRENCY);
-			const results = await Promise.all(batch.map(f => this.readTtftSamplesForSessionFile(f)));
-			for (const r of results) { if (r) { all.push(...r); } }
-		}
-		return { samples: all, fileCount: inRange.length };
+			const all: TtftSample[] = [];
+			for (let i = 0; i < inRange.length; i += CONCURRENCY) {
+				const batch = inRange.slice(i, i + CONCURRENCY);
+				const results = await Promise.all(batch.map(f => this.readTtftSamplesForSessionFile(f)));
+				for (const r of results) { if (r) { all.push(...r); } }
+			}
+			return { samples: all, fileCount: inRange.length };
+		});
 	}
 
 	private extractPerRequestUsageFromRawLines(lines: string[]): Map<number, { promptTokens: number; outputTokens: number }> {
@@ -10207,7 +10347,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    */
   private async diagHandleAnalyzeTtft(message: any): Promise<void> {
     const granularity: TtftGranularity = message?.granularity === 'week' || message?.granularity === 'month' ? message.granularity : 'day';
-    const scanRangeMs = ttftScanRangeToMs(message?.scanRange);
+    const scanRange: TtftScanRange = message?.scanRange === '30d' || message?.scanRange === '90d' || message?.scanRange === '180d' || message?.scanRange === '365d' || message?.scanRange === 'all'
+      ? message.scanRange
+      : '14d';
     if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
 
     if (!this.diagnosticsHasLoadedFiles) {
@@ -10215,7 +10357,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       return;
     }
 
-    const { samples, fileCount } = await this.collectTtftSamples(scanRangeMs);
+    const { samples, fileCount } = await this.collectTtftSamples(scanRange);
     const buckets = _buildTtftBuckets(samples, granularity);
     const series = _buildTtftModelSeries(buckets);
 
@@ -10837,30 +10979,66 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    * worktree is reported as "skipped", not force-removed.
    */
   private async cleanupSinglePushedWorktree(worktreePath: string): Promise<{ status: "deleted" | "skipped" | "error"; reason?: string }> {
+    const sessionEvidence = await this.findSessionRepoEvidenceForWorktree(worktreePath);
     const mainRepoRoot = await this.resolveMainRepoRoot(worktreePath);
-    if (!mainRepoRoot || path.resolve(mainRepoRoot).toLowerCase() === path.resolve(worktreePath).toLowerCase()) {
-      return { status: "error", reason: "Could not safely locate the main repository." };
+    const validatedMainRepoRoot = mainRepoRoot ?? sessionEvidence?.repoRoot;
+    if (!validatedMainRepoRoot || _normalizePathForDedup(validatedMainRepoRoot) === _normalizePathForDedup(_normalizeToRepoRoot(worktreePath))) {
+      return { status: "error", reason: `Could not safely locate the main repository for "${worktreePath}".` };
+    }
+    if (mainRepoRoot && sessionEvidence && _normalizePathForDedup(mainRepoRoot) !== _normalizePathForDedup(sessionEvidence.repoRoot)) {
+      return {
+        status: "error",
+        reason: `Repo validation failed for "${worktreePath}": git resolved "${mainRepoRoot}" but session "${sessionEvidence.sessionWorkspacePath}" points to "${sessionEvidence.repoRoot}".`,
+      };
     }
 
     const pushed = await this.getWorktreePushedStatus(worktreePath);
     if (pushed !== "yes") {
       return {
         status: "skipped",
-        reason: pushed === "no" ? "Has commits not pushed to any remote." : "Push status could not be confirmed.",
+        reason: pushed === "no"
+          ? `Worktree at "${worktreePath}" has commits not pushed to any remote.`
+          : `Could not confirm push status for worktree at "${worktreePath}".`,
       };
     }
 
-    let result = await this.removeGitWorktree(mainRepoRoot, worktreePath, false);
+    let result = await this.removeGitWorktree(validatedMainRepoRoot, worktreePath, false);
     if (!result.ok && /modified or untracked/i.test(result.stderr)) {
       return { status: "skipped", reason: "Has uncommitted or untracked changes." };
     }
     if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr)) {
-      result = await this.removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath);
+      result = await this.removeWorktreeDirectoryFallback(validatedMainRepoRoot, worktreePath);
     }
     if (!result.ok) {
-      return { status: "error", reason: result.stderr || "unknown error" };
+      return { status: "error", reason: `Could not delete worktree at "${worktreePath}": ${result.stderr || "unknown error"}` };
     }
     return { status: "deleted" };
+  }
+
+  private getKnownSessionWorkspacePaths(): string[] {
+    return this.diagnosticsCachedFiles
+      .map((details) => typeof details.workspacePath === "string" ? details.workspacePath.trim() : "")
+      .filter((value): value is string => value.length > 0);
+  }
+
+  private async findSessionRepoEvidenceForWorktree(worktreePath: string): Promise<{ sessionWorkspacePath: string; repoRoot: string } | undefined> {
+    const cachedMatch = _validateWorktreeRepoRootFromSessionPaths(worktreePath, this.getKnownSessionWorkspacePaths());
+    if (cachedMatch) { return cachedMatch; }
+
+    const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+    const maxFilesToInspect = 25;
+    for (const sessionFile of sessionFiles.slice(0, maxFilesToInspect)) {
+      try {
+        const details = await this.getSessionFileDetails(sessionFile);
+        if (!details.workspacePath) { continue; }
+        const match = _validateWorktreeRepoRootFromSessionPaths(worktreePath, [details.workspacePath]);
+        if (match) { return match; }
+      } catch {
+        // Ignore individual session parse failures; this is only a best-effort validation path.
+      }
+    }
+
+    return undefined;
   }
 
   private async confirmDeleteWorktree(worktreePath: string, branch: string, repoLabel: string, pushed: "yes" | "no" | "?"): Promise<boolean> {
@@ -11087,6 +11265,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
 
       const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
       this.diagnosticsAllSessionFiles = sessionFiles;
+      this.diagnosticsTtftCache.clear();
       const sessionFileData = await this.getSessionFilePreviewData(sessionFiles);
       const sessionFolders = this.buildSessionFolderData(sessionFiles);
       const candidatePaths = this.sessionDiscovery.getDiagnosticCandidatePaths();
@@ -11779,6 +11958,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       use24HourTime: this.getUse24HourTimeSetting(),
       hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
       insights: this.buildCurrentInsights(stats),
+      correctionReport: stats.correctionReport ?? null,
       curationAnalysis: stats.curationAnalysis ?? null,
       sessionColumnSettings,
       copilotApiBalance: this._buildCopilotApiBalance(),

@@ -22,6 +22,19 @@ export type CategoryLevelData = {
 };
 
 export type ModeUsage = { ask: number; edit: number; agent: number; plan: number; customAgent: number; cli: number; cliApp?: number; claudeDesktop?: number; claudeVsCode?: number };
+
+/**
+ * ModeUsage keys computed from session *content* (not just path) that distinguish an
+ * interaction surface the coarse per-file editor label can't see on its own — e.g. a
+ * Copilot CLI session launched via the desktop app, or a Claude Code session embedded
+ * in VS Code vs. the standalone desktop app.
+ *
+ * If you add a new key here, also update `SYNCED_INTERACTION_MODE_LABELS` in
+ * `src/workspaceHelpers.ts` (repo root) so the sharing-server sync's per-file editor
+ * label picks it up too — `workspaceHelpers.test.ts` locks these two lists together
+ * and fails the build if they diverge.
+ */
+export const MODE_USAGE_CONTENT_CLASSIFIED_KEYS = ['cliApp', 'claudeDesktop', 'claudeVsCode'] as const;
 export type ToolCallUsage = { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } };
 export type McpToolUsage = { total: number; byServer: { [key: string]: number }; byTool: { [key: string]: number } };
 

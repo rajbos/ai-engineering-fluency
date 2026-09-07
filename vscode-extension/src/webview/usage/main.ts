@@ -200,7 +200,7 @@ type UsageAnalysisStats = {
 	/** When true (default), rows tagged "auto" are hidden from the Tool Usage tables so only intentional tool calls are shown. */
 	hideAutomaticToolCalls?: boolean;
 	insights?: EvaluatedInsight[];
-	/** Correction-moment report: per-repo, over each repo's most recent sessions. Null when no moments were detected. */
+	/** Correction-moment report: per-repo, over each repo's most recent sessions. Undefined while the report is still loading, null when no moments were detected. */
 	correctionReport?: CorrectionReport | null;
 	/** Repeated-task candidates (skill suggestions). Null when no repeated task was found. */
 	repeatedTasks?: RepeatedTaskReport | null;
@@ -392,6 +392,8 @@ const repoAnalysisState = new Map<string, RepoAnalysisRecord>();
 const repoAnalysisInFlight = new Set<string>();
 let selectedRepoPath: string | null = null;
 let isSwitchingRepository = false;
+/** When true, the Workspace Health repo list shows every workspace instead of grouping low-activity ones into "Other". */
+let showAllWorkspacesInHealth = false;
 let isBatchAnalysisInProgress = false;
 /** True while the single "Analyze Repo for Best Practices" analysis (no workspace matrix) runs. */
 let isSingleRepoAnalysisInProgress = false;
@@ -401,7 +403,7 @@ let pendingTabAnchor: string | null = null;
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentInsights: EvaluatedInsight[] = [];
 let activeCorrectionFilter: CorrectionMomentType | null = null;
-let currentCorrectionReport: CorrectionReport | null = null;
+let currentCorrectionReport: CorrectionReport | null | undefined = undefined;
 // Persisted across stats refreshes so the curation section doesn't disappear
 // when a periodic updateStats message omits curationAnalysis.
 let currentCurationAnalysis: ToolCurationAnalysis | null = null;
@@ -721,6 +723,10 @@ type RepoPrStatsResult = {
   authenticated: boolean;
   since: string;
   error?: string;
+  /** When the snapshot was fetched from GitHub; empty string when it has never been fetched. */
+  fetchedAt?: string;
+  /** How often the snapshot is refreshed, so the UI can say when the next refresh is due. */
+  refreshIntervalMs?: number;
 };
 
 const EFFORT_DISPLAY_NAMES: Record<string, string> = {
@@ -1140,6 +1146,16 @@ function isHydraFusionModel(model: string): boolean {
 	return getModelLookupCandidates(model).some(candidate => candidate.toLowerCase() === 'hydrafusion');
 }
 
+/**
+ * Returns the duration to display/sort by for a session: the active (non-idle) duration when
+ * available, falling back to the wall-clock duration for session formats that don't provide
+ * per-request timing data (e.g. Copilot CLI JSONL, where `activeDurationMs` is always 0).
+ * Single source of truth for this fallback so the cell renderer and sort comparator can't drift.
+ */
+function getEffectiveSessionDurationMs(s: TodaySessionSummary): number | undefined {
+	return s.activeDurationMs ? s.activeDurationMs : s.durationMs;
+}
+
 const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 	{ id: 'interactions', label: 'Turns', sortKey: 'interactions', align: 'right', render: s => formatCompactSessionNumber(s.interactions) },
 	{ id: 'toolCalls', label: 'Tools', sortKey: 'toolCalls', align: 'right', render: s => formatCompactSessionNumber(s.toolCalls) },
@@ -1158,7 +1174,7 @@ const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 	{ id: 'workspace', label: 'Workspace', sortKey: 'workspace', align: 'left', cellStyle: 'max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const workspace = escapeHtml(s.workspace || '—'); return { html: workspace, title: workspace }; } },
 	{ id: 'models', label: 'Models', align: 'left', cellStyle: 'font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—'; return { html: models, title: models }; } },
 	{ id: 'durationMs', label: 'Duration', sortKey: 'durationMs', align: 'right', cellStyle: 'white-space:nowrap;', render: s => {
-		const net = s.activeDurationMs ?? s.durationMs;
+		const net = getEffectiveSessionDurationMs(s);
 		const wallLabel = s.durationMs !== undefined ? `Wall time: ${formatDurationShort(s.durationMs)}` : undefined;
 		return { html: formatDurationShort(net), ...(wallLabel ? { title: wallLabel } : {}) };
 	} },
@@ -1190,8 +1206,128 @@ const recentSessionsCache: { [period: string]: TodaySessionSummary[] } = {};
 /** Which optional columns are currently visible. Title (and the row number) are always shown. */
 let enabledSessionColumns: Set<SessionColumnId> = new Set(ALL_SESSION_COLUMN_IDS);
 
+// --- Recent Sessions pill filters (Editor / Model / Model vendor / HydraFusion) ---
+/** Active editor pill filters. Empty set means "no filter" (show all editors). */
+let sessionFilterEditors: Set<string> = new Set();
+/** Active model-vendor pill filters (e.g. "Anthropic", "OpenAI"). Empty set means "no filter". */
+let sessionFilterVendors: Set<string> = new Set();
+/** Active model pill filters. Empty set means "no filter". */
+let sessionFilterModels: Set<string> = new Set();
+/** Quick toggle: when true, only show sessions that used a HydraFusion model. */
+let sessionFilterHydraFusionOnly = false;
+
 function saveSessionColumnSettings(): void {
 	vscode.postMessage({ command: 'saveSessionColumnSettings', settings: { enabledColumns: Array.from(enabledSessionColumns) } });
+}
+
+/** Returns true when a session passes all currently active pill filters. */
+function sessionMatchesFilters(s: TodaySessionSummary): boolean {
+	if (sessionFilterHydraFusionOnly && !s.models.some(isHydraFusionModel)) { return false; }
+	if (sessionFilterEditors.size > 0 && !sessionFilterEditors.has(s.editor || 'unknown')) { return false; }
+	if (sessionFilterModels.size > 0 && !s.models.some(m => sessionFilterModels.has(m))) { return false; }
+	if (sessionFilterVendors.size > 0 && !s.models.some(m => sessionFilterVendors.has(getModelBillingProvider(m)))) { return false; }
+	return true;
+}
+
+/** Whether any Recent Sessions pill filter is currently active. */
+function hasActiveSessionFilters(): boolean {
+	return sessionFilterHydraFusionOnly || sessionFilterEditors.size > 0 || sessionFilterVendors.size > 0 || sessionFilterModels.size > 0;
+}
+
+type SessionFilterOption = { value: string; label: string; count: number };
+
+/** Computes the distinct editor/vendor/model values (with counts) present across the given sessions, used to render filter pills. */
+function computeSessionFilterOptions(sessions: TodaySessionSummary[]): {
+	editors: SessionFilterOption[];
+	vendors: SessionFilterOption[];
+	models: SessionFilterOption[];
+	hydraFusionCount: number;
+} {
+	const editorCounts = new Map<string, number>();
+	const vendorCounts = new Map<string, number>();
+	const modelCounts = new Map<string, number>();
+	let hydraFusionCount = 0;
+	for (const s of sessions) {
+		const editor = s.editor || 'unknown';
+		editorCounts.set(editor, (editorCounts.get(editor) || 0) + 1);
+		const vendorsInSession = new Set<string>();
+		let hasHydra = false;
+		for (const m of s.models) {
+			modelCounts.set(m, (modelCounts.get(m) || 0) + 1);
+			vendorsInSession.add(getModelBillingProvider(m));
+			if (isHydraFusionModel(m)) { hasHydra = true; }
+		}
+		for (const v of vendorsInSession) { vendorCounts.set(v, (vendorCounts.get(v) || 0) + 1); }
+		if (hasHydra) { hydraFusionCount++; }
+	}
+	const toSortedOptions = (counts: Map<string, number>, labelFn: (value: string) => string): SessionFilterOption[] =>
+		Array.from(counts.entries())
+			.map(([value, count]) => ({ value, label: labelFn(value), count }))
+			.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+	return {
+		editors: toSortedOptions(editorCounts, v => v),
+		vendors: toSortedOptions(vendorCounts, v => v),
+		models: toSortedOptions(modelCounts, getModelDisplayName),
+		hydraFusionCount,
+	};
+}
+
+/** Renders one labeled group of toggle pills (e.g. "Editor: VS Code (12) JetBrains (3)"). */
+function buildFilterPillGroupHtml(groupLabel: string, filterType: string, items: SessionFilterOption[], activeSet: Set<string>): string {
+	if (items.length === 0) { return ''; }
+	const pills = items.map(({ value, label, count }) => {
+		const isActive = activeSet.has(value);
+		const safeLabel = escapeHtml(label);
+		return `<button type="button" class="session-filter-pill${isActive ? ' active' : ''}" data-filter-type="${filterType}" data-filter-value="${escapeHtml(value)}" aria-pressed="${isActive}" title="${safeLabel}: ${count} session${count === 1 ? '' : 's'}">${safeLabel} <span class="session-filter-pill-count">${count}</span></button>`;
+	}).join('');
+	return `<div class="session-filter-group"><span class="session-filter-group-label">${escapeHtml(groupLabel)}:</span>${pills}</div>`;
+}
+
+/** Renders the pill filter bar above the Recent Sessions table (Editor / Vendor / Model / HydraFusion). */
+function buildSessionFilterBarHtml(sessions: TodaySessionSummary[]): string {
+	if (!sessions || sessions.length === 0) { return ''; }
+	const opts = computeSessionFilterOptions(sessions);
+	if (opts.editors.length === 0 && opts.vendors.length === 0 && opts.models.length === 0) { return ''; }
+	const groups: string[] = [];
+	if (opts.hydraFusionCount > 0) {
+		const isActive = sessionFilterHydraFusionOnly;
+		groups.push(`<div class="session-filter-group"><button type="button" class="session-filter-pill session-filter-pill-hydrafusion${isActive ? ' active' : ''}" data-filter-type="hydrafusion" data-filter-value="true" aria-pressed="${isActive}" title="Show only sessions that used HydraFusion">⚡ HydraFusion <span class="session-filter-pill-count">${opts.hydraFusionCount}</span></button></div>`);
+	}
+	groups.push(buildFilterPillGroupHtml('Editor', 'editor', opts.editors, sessionFilterEditors));
+	groups.push(buildFilterPillGroupHtml('Vendor', 'vendor', opts.vendors, sessionFilterVendors));
+	groups.push(buildFilterPillGroupHtml('Model', 'model', opts.models, sessionFilterModels));
+	const clearButton = hasActiveSessionFilters()
+		? `<button type="button" id="sessions-filter-clear" class="session-filter-pill session-filter-pill-clear">✕ Clear filters</button>`
+		: '';
+	return `<div class="session-filter-bar">${groups.filter(Boolean).join('')}${clearButton}</div>`;
+}
+
+/** Handles a click on a filter pill or the "Clear filters" button; returns true if it was handled. */
+function handleSessionFilterPillClick(target: HTMLElement): boolean {
+	const clearButton = target.closest<HTMLElement>('#sessions-filter-clear');
+	if (clearButton) {
+		sessionFilterEditors.clear();
+		sessionFilterVendors.clear();
+		sessionFilterModels.clear();
+		sessionFilterHydraFusionOnly = false;
+		return true;
+	}
+	const pill = target.closest<HTMLElement>('.session-filter-pill');
+	if (!pill) { return false; }
+	const filterType = pill.getAttribute('data-filter-type');
+	const value = pill.getAttribute('data-filter-value');
+	if (filterType === 'hydrafusion') {
+		sessionFilterHydraFusionOnly = !sessionFilterHydraFusionOnly;
+		return true;
+	}
+	if (!value) { return false; }
+	const targetSet = filterType === 'editor' ? sessionFilterEditors
+		: filterType === 'vendor' ? sessionFilterVendors
+		: filterType === 'model' ? sessionFilterModels
+		: undefined;
+	if (!targetSet) { return false; }
+	if (targetSet.has(value)) { targetSet.delete(value); } else { targetSet.add(value); }
+	return true;
 }
 
 function getSessionSortIndicator(column: SessionSortColumn): string {
@@ -1203,7 +1339,7 @@ const _todaySessionColumnComparators: Partial<Record<SessionSortColumn, (a: Toda
 	title: (a, b) => (a.title || '').localeCompare(b.title || ''),
 	editor: (a, b) => (a.editor || '').localeCompare(b.editor || ''),
 	workspace: (a, b) => (a.workspace || '').localeCompare(b.workspace || ''),
-	durationMs: (a, b) => (a.activeDurationMs ?? a.durationMs ?? -1) - (b.activeDurationMs ?? b.durationMs ?? -1),
+	durationMs: (a, b) => (getEffectiveSessionDurationMs(a) ?? -1) - (getEffectiveSessionDurationMs(b) ?? -1),
 	subAgentCalls: (a, b) => (a.subAgentCalls ?? 0) - (b.subAgentCalls ?? 0),
 	lastActivity: (a, b) => (a.lastActivity || '').localeCompare(b.lastActivity || ''),
 };
@@ -1231,8 +1367,14 @@ function renderTodaySessionsTable(sessions: TodaySessionSummary[]): string {
 }
 
 function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
-	const sorted = sortTodaySessions(sessions);
+	const filterBarHtml = buildSessionFilterBarHtml(sessions);
+	const filtered = sessions.filter(sessionMatchesFilters);
+	const sorted = sortTodaySessions(filtered);
 	const visibleColumns = SESSION_COLUMN_DEFS.filter(c => enabledSessionColumns.has(c.id));
+
+	if (sorted.length === 0) {
+		return `${filterBarHtml}<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">No sessions match the selected filters.</div>`;
+	}
 
 	const rows = sorted.map((s, idx) => {
 		const title = escapeHtml(s.title || 'Untitled session');
@@ -1260,6 +1402,7 @@ function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
 	}).join('');
 
 	return `
+		${filterBarHtml}
 		<div style="overflow-x:auto;">
 		<table class="sessions-table" style="width:100%; border-collapse:collapse; min-width:1050px;">
 			<thead>
@@ -1306,6 +1449,12 @@ function setupSessionsTableSort(): void {
 			if (file) {
 				vscode.postMessage({ command: 'openSessionFile', file });
 			}
+			return;
+		}
+		// Handle filter pill / clear-filters clicks
+		if (handleSessionFilterPillClick(e.target as HTMLElement)) {
+			const container = document.getElementById('sessions-table-container');
+			if (container) { setHtml(container, buildSessionsTableHtml(cachedTodaySessions)); }
 			return;
 		}
 		// Handle sortable column header clicks
@@ -1656,7 +1805,9 @@ function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null 
 
 /** Sanitize the optional correction/repeated-task reports onto the stats object. */
 function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void {
-	sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
+	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'correctionReport')) {
+		sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
+	}
 	sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
 }
 
@@ -2213,6 +2364,8 @@ function sanitizeRepoPrStatsData(input: unknown): RepoPrStatsResult {
 		authenticated: Boolean(src.authenticated),
 		since: typeof src.since === 'string' || typeof src.since === 'number' ? src.since : Date.now(),
 		error: typeof src.error === 'string' ? escapeHtml(src.error) : undefined,
+		fetchedAt: typeof src.fetchedAt === 'string' ? src.fetchedAt : '',
+		refreshIntervalMs: toSafeNumber(src.refreshIntervalMs),
 		repos: repos.map((repo) => {
 			const r = (repo && typeof repo === 'object') ? (repo as Record<string, unknown>) : {};
 			const aiDetails = Array.isArray(r.aiDetails) ? r.aiDetails : [];
@@ -2290,6 +2443,25 @@ function renderRepoPrRow(r: RepoPrInfo, cell: string, cellCenter: string): strin
 	</tr>`;
 }
 
+/**
+ * Freshness line for the snapshot. The data is fetched at most once an hour, by whichever VS Code
+ * window holds the repo-PRs lock, so the panel always says how old what it shows is.
+ */
+function repoPrSnapshotFreshnessHtml(data: RepoPrStatsResult): string {
+  const box = 'margin-bottom:12px; padding:8px 10px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:11px; color:var(--text-secondary);';
+  if (!data.fetchedAt) {
+    return `<div style="${box}">🕒 <strong>Not fetched yet.</strong> The snapshot is refreshed hourly by the main VS Code window — it will appear here once that first refresh completes.</div>`;
+  }
+  const fetchedMs = Date.parse(data.fetchedAt);
+  const nextRefresh = Number.isFinite(fetchedMs) && data.refreshIntervalMs
+    ? new Date(fetchedMs + data.refreshIntervalMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : 'unknown';
+  return `<div style="${box}">
+    🕒 Updated <strong>${escapeHtml(getTimeSince(data.fetchedAt))}</strong> · next refresh after ${escapeHtml(nextRefresh)}.
+    Cached and refreshed at most once an hour, by a single VS Code window, to keep GitHub API usage low.
+  </div>`;
+}
+
 function renderReposPrContent(data: RepoPrStatsResult): string {
 	const sinceDate = escapeHtml(new Date(data.since).toLocaleDateString());
 	if (data.error) {
@@ -2308,7 +2480,7 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 			</div>`;
 	}
 	if (data.repos.length === 0) {
-		return `
+		return `${repoPrSnapshotFreshnessHtml(data)}
 			<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
 				No GitHub repositories detected in your workspace folders.
 			</div>`;
@@ -2321,6 +2493,7 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 	const rows = data.repos.map((r) => renderRepoPrRow(r, cell, cellCenter)).join('');
 
 	return `
+		${repoPrSnapshotFreshnessHtml(data)}
 		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
 			Showing PRs created since ${sinceDate}.
 			Reviewer requests are only visible for <strong>open</strong> PRs — the GitHub API clears this field after a PR is merged or closed.
@@ -3280,13 +3453,13 @@ function buildInsightsTabPanelHtml(insights: EvaluatedInsight[]): string {
 // ── Corrections tab ─────────────────────────────────────────────────────────
 
 /** Badge with the number of sessions carrying correction moments (empty when none). */
-function correctionsCountBadgeHtml(report: CorrectionReport | null): string {
+function correctionsCountBadgeHtml(report: CorrectionReport | null | undefined): string {
 	if (!report || report.sessionsWithMoments === 0) { return ''; }
 	return ` <span style="background:rgba(251,191,36,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${report.sessionsWithMoments}</span>`;
 }
 
 /** Corrections tab-bar button (extracted to keep buildUsageRootHtml under the complexity limit). */
-function correctionsTabButtonHtml(report: CorrectionReport | null): string {
+function correctionsTabButtonHtml(report: CorrectionReport | null | undefined): string {
 	return `<button class="tab-button ${activeTab === 'corrections' ? 'active' : ''}" data-tab="corrections"><span class="codicon codicon-debug-restart"></span> Corrections${correctionsCountBadgeHtml(report)}</button>`;
 }
 
@@ -3376,7 +3549,20 @@ function buildCorrectionSessionHtml(session: CorrectionSessionEntry, moments: Co
 		</div>`;
 }
 
-function buildCorrectionsTabPanelHtml(report: CorrectionReport | null): string {
+function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefined): string {
+	if (typeof report === 'undefined') {
+		return `
+		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
+			<div class="section">
+				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
+				<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
+				<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+					⏳ Scanning recent sessions for correction moments…
+				</div>
+			</div>
+		</div>`;
+	}
+
 	if (!report || report.repos.length === 0) {
 		return `
 		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
@@ -3634,7 +3820,7 @@ function buildUsageRootHtml(
 				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent"><span class="codicon codicon-cloud"></span> Cloud Agent</button>
 				<button class="tab-button ${activeTab === 'worktrees' ? 'active' : ''}" data-tab="worktrees"><span class="codicon codicon-git-branch"></span> Worktrees</button>
 				<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insights ?? []).filter(i => i.status === 'new').length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter(i => i.status === 'new').length}</span>` : ''}</button>
-				${correctionsTabButtonHtml(stats.correctionReport ?? null)}
+				${correctionsTabButtonHtml(stats.correctionReport)}
 			</div>
 
 			${safeSectionHtml('Recent Sessions', () => buildSessionsTabPanelHtml(stats))}
@@ -3644,7 +3830,7 @@ function buildUsageRootHtml(
 			${safeSectionHtml('Repository PRs & Cloud Agent', () => buildReposAndAgentTabPanelsHtml())}
 			${safeSectionHtml('Worktrees', () => buildWorktreesTabPanelHtml())}
 			${safeSectionHtml('Insights', () => buildInsightsTabPanelHtml(stats.insights ?? []))}
-			${safeSectionHtml('Corrections', () => buildCorrectionsTabPanelHtml(stats.correctionReport ?? null))}
+			${safeSectionHtml('Corrections', () => buildCorrectionsTabPanelHtml(stats.correctionReport))}
 			<div class="footer">
 				Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} · Updates every 5 minutes
 			</div>
@@ -3900,9 +4086,14 @@ function renderWorktreeCleanupLog(): string {
 		const icon = e.status === "skipped" ? "⏭️" : "❌";
 		return `<div class="worktree-cleanup-log-row">
       <span>${icon}</span>
-      <span class="worktree-cleanup-log-branch">${escapeHtml(e.branch)}</span>
-      <span class="worktree-cleanup-log-repo">${escapeHtml(e.repoLabel)}</span>
-      <span class="worktree-cleanup-log-reason">${escapeHtml(e.reason || "")}</span>
+      <div class="worktree-cleanup-log-details">
+        <div class="worktree-cleanup-log-headline">
+          <span class="worktree-cleanup-log-branch">${escapeHtml(e.branch)}</span>
+          <span class="worktree-cleanup-log-repo">${escapeHtml(e.repoLabel)}</span>
+        </div>
+        <div class="worktree-cleanup-log-path">${escapeHtml(e.path)}</div>
+        <div class="worktree-cleanup-log-reason">${escapeHtml(e.reason || "")}</div>
+      </div>
     </div>`;
 	}).join("");
 	return `<div class="worktree-cleanup-log">${rows}</div>`;
@@ -4273,7 +4464,7 @@ function renderAutomaticCompactions(stats: AutomaticCompactionStats | undefined)
 		? entries.join(', ')
 		: 'No automatic compactions detected';
 	return `
-		<div class="automatic-compactions-card${stats.total > 0 ? ' automatic-compactions-card--active' : ''}"
+		<div class="automatic-compactions-card"
 			title="Automatic compactions remove earlier messages to fit the context window and can affect response quality.">
 			<div>
 				<div class="automatic-compactions-label">↩ Automatic compactions (last 7 days)</div>
@@ -5017,7 +5208,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	}
 
 	const matrix = syncRenderLayoutState(stats);
-	currentCorrectionReport = stats.correctionReport ?? null;
+	currentCorrectionReport = stats.correctionReport;
 	const customizationHtml = safeSectionHtml('Workspace Customization', () => buildCustomizationSectionHtml(matrix));
 	// buildUsageAllKeysSets and the context-ref totals are cheap, pure aggregations over
 	// already-validated stats — not worth isolating individually. buildUsageRootHtml (and each
@@ -5162,6 +5353,16 @@ function wireRepositoryButtons(): void {
 
 	document.getElementById('repo-list-pane')?.addEventListener('click', (e: MouseEvent) => {
 		const target = e.target as HTMLElement;
+		if (target.closest('#btn-show-other-workspaces')) {
+			showAllWorkspacesInHealth = true;
+			renderRepositoryHygienePanels();
+			return;
+		}
+		if (target.closest('#btn-collapse-other-workspaces')) {
+			showAllWorkspacesInHealth = false;
+			renderRepositoryHygienePanels();
+			return;
+		}
 		const actionButton = target.closest<HTMLElement>('.btn-repo-action');
 		if (!actionButton) { return; }
 		const workspacePath = actionButton.getAttribute('data-workspace-path');
@@ -5222,6 +5423,9 @@ function handleUpdateStats(message: any): void {
 	const sanitized = sanitizeStats(message.data);
 	if (sanitized) {
 		_ulLoadingActive = false;
+		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'correctionReport')) {
+			sanitized.correctionReport = currentCorrectionReport;
+		}
 		// CLI-backed hosts include all buckets; VS Code omits them and keeps using lazy loading.
 		replaceRecentSessionsCache(sanitized.recentSessions);
 		renderLayout(sanitized);
@@ -5700,7 +5904,39 @@ function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: st
 	return container;
 }
 
-function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: any[], hasSelectedRepository: boolean): void {
+/**
+ * Splits workspaces into a "major" group and a long-tail "other" group based on session count,
+ * so a handful of heavily-used workspaces aren't buried in a long list of one/two-session workspaces.
+ * The split point is found dynamically: the biggest proportional drop in session count between
+ * consecutive workspaces (sorted descending), as long as the drop is at least 2x and leaves a
+ * tail of 3+ workspaces (otherwise there's no meaningful "long tail" to group).
+ */
+function computeWorkspaceHealthGrouping(workspaces: WorkspaceCustomizationRow[]): { visible: WorkspaceCustomizationRow[]; otherWorkspaces: WorkspaceCustomizationRow[] } {
+	if (workspaces.length <= 6) {
+		return { visible: workspaces, otherWorkspaces: [] };
+	}
+	const sorted = [...workspaces].sort((a, b) => (Number(b.sessionCount) || 0) - (Number(a.sessionCount) || 0));
+	let splitIdx = -1;
+	let bestRatio = 1;
+	// Only consider split points that would leave a tail of 3+ workspaces — a later, larger
+	// ratio near the very end of the list isn't a valid candidate since it wouldn't group anything.
+	for (let i = 1; i <= sorted.length - 3; i++) {
+		const prev = Number(sorted[i - 1].sessionCount) || 0;
+		const curr = Number(sorted[i].sessionCount) || 0;
+		if (prev <= 0) { continue; }
+		const ratio = prev / Math.max(curr, 1);
+		if (ratio > bestRatio) {
+			bestRatio = ratio;
+			splitIdx = i;
+		}
+	}
+	if (splitIdx < 1 || bestRatio < 2) {
+		return { visible: sorted, otherWorkspaces: [] };
+	}
+	return { visible: sorted.slice(0, splitIdx), otherWorkspaces: sorted.slice(splitIdx) };
+}
+
+function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: WorkspaceCustomizationRow[], hasSelectedRepository: boolean, otherWorkspaces: WorkspaceCustomizationRow[] = [], canCollapse: boolean = false): void {
 	const colStyles = {
 		sessions: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
 		interactions: 'width: 80px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
@@ -5742,7 +5978,21 @@ function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: any[], has
 				</vscode-button>
 			</div>
 		`;
-	}).join(''));
+	}).join('') + (otherWorkspaces.length > 0 ? `
+		<div class="repo-item repo-item-other" style="padding: 6px 12px; border-top: 1px solid var(--border-color); display: flex; align-items: center; gap: 10px; background: var(--bg-secondary);">
+			<div style="flex: 1; min-width: 0; font-size: 12px; font-style: italic; color: var(--text-secondary);">
+				Other (${otherWorkspaces.length} repositor${otherWorkspaces.length === 1 ? 'y' : 'ies'} with low activity)
+			</div>
+			<div style="${colStyles.sessions}">${otherWorkspaces.reduce((sum, ws) => sum + (Number(ws.sessionCount) || 0), 0)}</div>
+			<div style="${colStyles.interactions}">${otherWorkspaces.reduce((sum, ws) => sum + (Number(ws.interactionCount) || 0), 0)}</div>
+			<div style="${colStyles.score}">—</div>
+			<vscode-button id="btn-show-other-workspaces" appearance="secondary" style="width: 110px; flex-shrink: 0;">Show all</vscode-button>
+		</div>
+	` : showAllWorkspacesInHealth && !hasSelectedRepository && canCollapse ? `
+		<div class="repo-item repo-item-other" style="padding: 6px 12px; border-top: 1px solid var(--border-color); display: flex; align-items: center; justify-content: flex-end;">
+			<vscode-button id="btn-collapse-other-workspaces" appearance="secondary" style="width: 110px; flex-shrink: 0;">Show less</vscode-button>
+		</div>
+	` : ''));
 }
 
 function renderRepoDetailSuccess(detailsPane: HTMLElement, record: any, workspaceName: string): void {
@@ -5777,13 +6027,22 @@ function renderRepositoryHygienePanels(): void {
 	}
 
 	const hasSelectedRepository = !!selectedRepoPath && !isSwitchingRepository;
-	const visibleWorkspaces = hasSelectedRepository
-		? hygieneMatrixState.workspaces.filter((ws) => ws.workspacePath === selectedRepoPath)
-		: hygieneMatrixState.workspaces;
+	const grouping = computeWorkspaceHealthGrouping(hygieneMatrixState.workspaces);
+	const canCollapse = grouping.otherWorkspaces.length > 0;
+	let visibleWorkspaces: WorkspaceCustomizationRow[];
+	let otherWorkspaces: WorkspaceCustomizationRow[] = [];
+	if (hasSelectedRepository) {
+		visibleWorkspaces = hygieneMatrixState.workspaces.filter((ws) => ws.workspacePath === selectedRepoPath);
+	} else if (showAllWorkspacesInHealth || !canCollapse) {
+		visibleWorkspaces = grouping.visible.concat(grouping.otherWorkspaces);
+	} else {
+		visibleWorkspaces = grouping.visible;
+		otherWorkspaces = grouping.otherWorkspaces;
+	}
 
 	listContainer.classList.remove('repo-hygiene-pane-collapsed');
 	detailsContainer.classList.toggle('repo-hygiene-pane-collapsed', !hasSelectedRepository);
-	renderRepoListPane(listPane, visibleWorkspaces, hasSelectedRepository);
+	renderRepoListPane(listPane, visibleWorkspaces, hasSelectedRepository, otherWorkspaces, canCollapse);
 
 	if (!hasSelectedRepository || !selectedRepoPath) {
 		detailsPane.replaceChildren();

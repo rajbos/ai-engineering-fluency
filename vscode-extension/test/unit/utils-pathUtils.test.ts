@@ -194,6 +194,13 @@ test('normalizeToRepoRoot: strips trailing sub-path below a "<repo>.worktrees" w
 	);
 });
 
+test('normalizeToRepoRoot: strips Copilot App ".copilot/copilot-worktrees" repo root', () => {
+	assert.equal(
+		normalizeToRepoRoot('C:\\Users\\me\\.copilot\\copilot-worktrees\\ai-engineering-fluency\\rajbos-supreme-carnival'),
+		'C:\\Users\\me\\.copilot\\copilot-worktrees\\ai-engineering-fluency'
+	);
+});
+
 // getRepoNameFromWorkspacePath tests
 test('getRepoNameFromWorkspacePath: app-store worktree resolves to the repo folder, not the worktree name', () => {
 	assert.equal(
@@ -243,4 +250,3 @@ test('getRepoNameFromWorkspacePath: Copilot App "<repo>.worktrees" layout resolv
 		'proj'
 	);
 });
-

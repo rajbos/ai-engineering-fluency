@@ -88,13 +88,15 @@ changes what `attrs.ttft` contains.
 ## Design choices worth knowing
 
 - **Lazy, not eager.** Unlike the OTel Delta tab (computed once at diagnostics load),
-  TTFT is scanned on demand — first tab open, or a granularity change — mirroring the
-  Model Usage tab's pattern. Scanning every session's debug log on every diagnostics open
-  would be needless I/O for a Research-tab curiosity nobody asked to see yet.
-- **Not cached in the session cache.** Token counts and billing are cached per session
-  because the dashboard's cost numbers depend on them. TTFT samples are re-read fresh on
-  each request instead — they don't feed any other number in the extension, so persisting
-  them would be schema complexity with no payoff.
+  TTFT is scanned on demand — first tab open, or a scan-range change — mirroring the
+  Model Usage tab's pattern. Granularity-only changes reuse the cached sample set and just
+  rebucket it. Scanning every session's debug log on every diagnostics open would be
+  needless I/O for a Research-tab curiosity nobody asked to see yet.
+- **Cached in memory, not persisted.** Token counts and billing are cached per session
+  because the dashboard's cost numbers depend on them. TTFT samples stay in an in-memory
+  cache for the current diagnostics session so bucket changes are instant, but they are
+  still re-read from disk when the diagnostics data reloads. They do not feed any other
+  number in the extension, so persisting them would be schema complexity with no payoff.
 - **No fixed trailing window.** Token charts show a fixed last-30-days/6-weeks/12-months
   window. TTFT buckets span only from the earliest sample to the latest, because how far
   back TTFT history exists depends entirely on VS Code's own debug-log retention, which
