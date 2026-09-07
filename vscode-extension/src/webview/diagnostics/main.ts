@@ -2089,7 +2089,7 @@ function renderShareCardPeriodSelector(): void {
     onChange: (value) => {
       currentShareCardPeriod = value as Period;
       diagState.patch({ shareCardPeriod: currentShareCardPeriod });
-      renderShareCardContent();
+      reRenderShareCard();
     },
   });
   wrapper.append(select);

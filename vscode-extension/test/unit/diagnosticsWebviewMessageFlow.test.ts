@@ -208,6 +208,70 @@ test('a githubAuth value from an early backendStorageInfoLoaded message also sur
 	assert.ok(rendered?.includes('octocat'), `expected the authenticated GitHub user to render, got: ${rendered}`);
 });
 
+test('changing the Share Card period refreshes the card and keeps its controls interactive', async () => {
+	await preloadBundle();
+	const recent = new Date().toISOString();
+	const old = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
+	const session = (file: string, lastInteraction: string) => ({
+		file,
+		size: 100,
+		modified: lastInteraction,
+		interactions: 2,
+		tokens: 1_000,
+		contextReferences: {},
+		firstInteraction: lastInteraction,
+		lastInteraction,
+		editorSource: 'VS Code',
+	});
+	const harness = bootWebviewUnsettled(buildInitialData({
+		detailedSessionFiles: [session('recent.json', recent), session('old.json', old)],
+	}));
+	await harness.settle();
+
+	const initialCard = harness.text('#tab-share');
+	assert.ok(initialCard?.includes('Last 14 Days · 1 editor detected'));
+	assert.ok(initialCard?.includes('1 Sessions'));
+
+	const selector = harness.window.document.getElementById('share-card-period-select') as HTMLSelectElement;
+	selector.value = 'allTime';
+	selector.dispatchEvent(new harness.window.Event('change', { bubbles: true }));
+
+	const refreshedCard = harness.text('#tab-share');
+	assert.ok(refreshedCard?.includes('All Time · 1 editor detected'));
+	assert.ok(refreshedCard?.includes('2 Sessions'));
+	assert.equal(harness.window.document.querySelectorAll('#tab-share').length, 1);
+	const refreshedSelector = harness.window.document.getElementById('share-card-period-select') as HTMLSelectElement;
+	assert.equal(refreshedSelector.value, 'allTime');
+
+	(harness.window.document.getElementById('btn-copy-share-summary') as HTMLButtonElement).click();
+	assert.equal(harness.posted.at(-1)?.command, 'copyText');
+	assert.match(harness.posted.at(-1)?.text, /2 sessions.*of all time/);
+});
+
+test('a backendStorageInfoLoaded message delivered before the layout renders is not discarded by the first paint', async () => {
+	// The host sends this message as early as possible (sendBackendStorageInfoEarly), racing the
+	// webview's own bootstrap() which awaits a dynamic import before building any DOM. Dispatching
+	// synchronously right after eval — before the pending import microtask resolves — reproduces
+	// that race deterministically: renderLayout() has not run yet, so no #tab-backend exists.
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData({ backendStorageInfo: null }));
+
+	assert.equal(harness.window.document.getElementById('tab-backend'), null, 'layout must not exist yet');
+	harness.postSync({ command: 'backendStorageInfoLoaded', backendStorageInfo: configuredBackendStorageInfo(), githubAuth: { authenticated: true, username: 'octocat' } });
+
+	await harness.settle();
+
+	const rendered = harness.text('#tab-backend');
+	assert.ok(
+		rendered?.includes('Configured & Enabled'),
+		`the early message's data must survive into the first paint, got: ${rendered}`,
+	);
+	assert.ok(
+		!rendered?.includes('Loading backend storage status'),
+		'the first paint must not silently fall back to the placeholder once real data already arrived',
+	);
+});
+
 test('OTel Delta tab shows a detecting message while comparison data is still loading', async () => {
 	await preloadBundle();
 	const harness = bootWebviewUnsettled(buildInitialData({ otelComparison: undefined }));
