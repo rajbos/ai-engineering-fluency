@@ -166,10 +166,17 @@
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\diagnostics.js" />
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\environmental.js" />
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\maturity.js" />
+      <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\fluency-level-viewer.js" />
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\tokenEstimators.json" />
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\modelPricing.json" />
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\toolNames.json" />
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\automaticTools.json" />
+      <!--
+        The Scoring Guide (fluency-level-viewer) reads its rubric straight from the shared
+        source JSON; unlike the four above it is not needed by the VS Code webviews at
+        runtime, so esbuild does not stage it in dist/webview/ and we copy it from src/.
+      -->
+      <_WebviewBundle Include="..\..\..\src\fluencyLevelData.json" />
     </ItemGroup>
     <!--
       Warn loudly when the freshly-built bundles are absent. Without this, the Copy below

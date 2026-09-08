@@ -45,6 +45,12 @@ namespace AIEngineeringFluency.Tests
         }
 
         [TestMethod]
+        public void ViewToGlobalKey_FluencyLevelViewer_ReturnsCorrectKey()
+        {
+            Assert.AreEqual("__INITIAL_FLUENCY_LEVEL_DATA__", ThemedHtmlBuilder.ViewToGlobalKey("fluency-level-viewer"));
+        }
+
+        [TestMethod]
         public void ViewToGlobalKey_Unknown_FallsBackToDetails()
         {
             Assert.AreEqual("__INITIAL_DETAILS__", ThemedHtmlBuilder.ViewToGlobalKey("nonexistent"));

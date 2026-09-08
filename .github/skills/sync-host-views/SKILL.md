@@ -33,10 +33,11 @@ this skill protects.
 | **Visual Studio committed bundles** | `visualstudio-extension/src/CopilotTokenTracker/webview/<name>.js` | refreshed copies packaged into the VSIX |
 | **JetBrains host list** | `jetbrains-plugin/build.gradle.kts` | `prepareBundledAssets` → `from(".../dist/webview") { include("<name>.js", …) }` |
 
-At the time of writing VS Code builds **9** views and both hosts ship the same
-**6**: `chart, details, diagnostics, environmental, maturity, usage`. The three
-VS Code-only views are `dashboard`, `fluency-level-viewer`, and `logviewer` —
-intentionally not shipped by the hosts.
+At the time of writing VS Code builds **11** views. Visual Studio ships **7**
+(`chart, details, diagnostics, environmental, fluency-level-viewer, maturity,
+usage`) and JetBrains ships **6** (the same set without `fluency-level-viewer`).
+The remaining VS Code-only views are `dashboard`, `efficiency`, `logviewer` and
+`whatsnew` — intentionally not shipped by the hosts.
 
 ### Why the two hosts differ in practice
 

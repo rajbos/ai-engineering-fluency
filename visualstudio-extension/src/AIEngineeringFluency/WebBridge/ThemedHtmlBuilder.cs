@@ -56,8 +56,6 @@ html, body {{ margin: 0; padding: 0; height: 100%; overflow: auto; }}
 #btn-diagnostics {{ display: none !important; }}
 /* Chart: hide By Repository toggle (no repo data) */
 #view-repository {{ display: none !important; }}
-/* Maturity: hide Fluency Level Viewer inline button (not available in Visual Studio) */
-#btn-level-viewer-inline {{ display: none !important; }}
 /* Maturity: hide VS Code Marketplace MCP discovery button (not available in Visual Studio) */
 .mcp-discover-btn {{ display: none !important; }}
 /* Maturity: social-share buttons and the repo create-an-issue link ARE supported in
@@ -294,6 +292,7 @@ html, body {{
                 "diagnostics"   => "__INITIAL_DIAGNOSTICS__",
                 "environmental" => "__INITIAL_ENVIRONMENTAL__",
                 "maturity"      => "__INITIAL_MATURITY__",
+                "fluency-level-viewer" => "__INITIAL_FLUENCY_LEVEL_DATA__",
                 _               => "__INITIAL_DETAILS__",
             };
 
