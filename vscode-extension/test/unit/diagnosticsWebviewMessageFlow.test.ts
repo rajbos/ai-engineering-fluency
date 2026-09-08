@@ -289,6 +289,33 @@ test('a backendStorageInfoLoaded message delivered before the layout renders is 
 	);
 });
 
+test('Share Card setup is a no-op on the loading first paint, and does not abort the rest of the wiring', async () => {
+	// renderShareCardTab() emits the period selector and share buttons only once session files
+	// have loaded. On the loading first paint — which every panel open goes through — none of
+	// the elements setupShareSummaryButtonHandler() wires exist yet. It must still return
+	// cleanly: setupButtonHandlers() calls it mid-sequence, so anything thrown here would
+	// silently leave every button wired after it — starting with btn-issue — dead for the
+	// rest of the session. reRenderShareCard() wires them for real once the data arrives.
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData({ detailedSessionFiles: [] }));
+	await harness.settle();
+
+	const card = harness.text('#tab-share');
+	assert.ok(card?.includes('Loading session files'), `expected the loading placeholder, got: ${card}`);
+	assert.equal(
+		harness.window.document.getElementById('share-card-period-select'),
+		null,
+		'the period selector must not exist while session files are still loading',
+	);
+
+	(harness.window.document.getElementById('btn-issue') as HTMLButtonElement).click();
+	assert.equal(
+		harness.posted.at(-1)?.command,
+		'openIssue',
+		'a button wired after setupShareSummaryButtonHandler must still be interactive',
+	);
+});
+
 test('OTel Delta tab shows a detecting message while comparison data is still loading', async () => {
 	await preloadBundle();
 	const harness = bootWebviewUnsettled(buildInitialData({ otelComparison: undefined }));
