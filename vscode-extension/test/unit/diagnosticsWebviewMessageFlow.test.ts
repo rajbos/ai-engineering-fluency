@@ -142,6 +142,17 @@ function bootWebviewUnsettled(initialData: Record<string, unknown> | null): Harn
 	};
 }
 
+/**
+ * Reads one Share Card stat tile ("Sessions", "Interactions", …) by its label. The value and the
+ * label live in sibling divs with no whitespace between them, so `harness.text()` would run them
+ * together ("1Sessions"); going through the DOM keeps the assertion readable.
+ */
+function shareStat(harness: Harness, label: string): string | undefined {
+	const tiles = Array.from(harness.window.document.querySelectorAll('#tab-share .share-stat')) as any[];
+	const tile = tiles.find((t) => t.querySelector('.share-stat-label')?.textContent === label);
+	return tile?.querySelector('.share-stat-value')?.textContent;
+}
+
 let syncBundle: string | undefined;
 function getSyncBundle(): string {
 	if (syncBundle === undefined) { throw new Error('Bundle not preloaded — call preloadBundle() first'); }
@@ -229,16 +240,22 @@ test('changing the Share Card period refreshes the card and keeps its controls i
 	await harness.settle();
 
 	const initialCard = harness.text('#tab-share');
-	assert.ok(initialCard?.includes('Last 14 Days · 1 editor detected'));
-	assert.ok(initialCard?.includes('1 Sessions'));
+	assert.ok(
+		initialCard?.includes('Last 14 days · 1 editor detected'),
+		`expected the default 14-day subtitle, got: ${initialCard}`,
+	);
+	assert.equal(shareStat(harness, 'Sessions'), '1', 'only the recent session falls inside the default period');
 
 	const selector = harness.window.document.getElementById('share-card-period-select') as HTMLSelectElement;
 	selector.value = 'allTime';
 	selector.dispatchEvent(new harness.window.Event('change', { bubbles: true }));
 
 	const refreshedCard = harness.text('#tab-share');
-	assert.ok(refreshedCard?.includes('All Time · 1 editor detected'));
-	assert.ok(refreshedCard?.includes('2 Sessions'));
+	assert.ok(
+		refreshedCard?.includes('All time · 1 editor detected'),
+		`expected the card to re-render for the new period, got: ${refreshedCard}`,
+	);
+	assert.equal(shareStat(harness, 'Sessions'), '2', 'the 60-day-old session joins the count once the period is All time');
 	assert.equal(harness.window.document.querySelectorAll('#tab-share').length, 1);
 	const refreshedSelector = harness.window.document.getElementById('share-card-period-select') as HTMLSelectElement;
 	assert.equal(refreshedSelector.value, 'allTime');
