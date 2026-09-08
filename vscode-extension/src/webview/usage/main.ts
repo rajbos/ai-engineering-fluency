@@ -17,6 +17,7 @@ import { getModelDisplayName, getModelLookupCandidates } from '../../../../src/w
 import { getModelBillingProvider } from '../../../../src/chartDataBuilder';
 import { getLongContextInfo } from '../../../../src/tokenEstimation';
 import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold, computeLongTailModels } from '../../../../src/modelEfficiency';
+import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDetection';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
@@ -104,6 +105,8 @@ type EvaluatedInsight = {
 	body: string;
 	actionLabel?: string;
 	actionCommand?: string;
+	secondaryActionLabel?: string;
+	secondaryActionCommand?: string;
 	status: InsightStatus;
 	allowToast?: boolean;
 };
@@ -1694,6 +1697,8 @@ function sanitizeInsights(rawInsights: any[]): EvaluatedInsight[] {
 			body: typeof i.body === 'string' ? i.body : '',
 			actionLabel: typeof i.actionLabel === 'string' ? i.actionLabel : undefined,
 			actionCommand: typeof i.actionCommand === 'string' ? i.actionCommand : undefined,
+			secondaryActionLabel: typeof i.secondaryActionLabel === 'string' ? i.secondaryActionLabel : undefined,
+			secondaryActionCommand: typeof i.secondaryActionCommand === 'string' ? i.secondaryActionCommand : undefined,
 			status: (['new', 'seen', 'dismissed', 'snoozed', 'done'].includes(i.status) ? i.status : 'new') as InsightStatus,
 			allowToast: !!i.allowToast,
 		}));
@@ -3366,6 +3371,23 @@ function buildReposAndAgentTabPanelsHtml(): string {
 		</div>`;
 }
 
+/** Builds the primary + optional secondary action buttons for one insight card. */
+function buildInsightActionButtonsHtml(insight: EvaluatedInsight, bg: string, border: string): string {
+	const actionBtn = insight.actionLabel
+		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="execute" data-command="${escapeHtml(insight.actionCommand ?? '')}"
+				style="padding:5px 14px; font-size:12px; font-weight:600; cursor:pointer;
+				border:1px solid ${border}; border-radius:5px;
+				background:${bg}; color:var(--text-primary);">${escapeHtml(insight.actionLabel)}</button>`
+		: '';
+	const secondaryActionBtn = insight.secondaryActionLabel
+		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="execute" data-command="${escapeHtml(insight.secondaryActionCommand ?? '')}"
+				style="padding:5px 14px; font-size:12px; font-weight:600; cursor:pointer; margin-left:8px;
+				border:1px solid ${border}; border-radius:5px;
+				background:transparent; color:var(--text-primary);">${escapeHtml(insight.secondaryActionLabel)}</button>`
+		: '';
+	return actionBtn || secondaryActionBtn ? `<div style="margin-top:12px;">${actionBtn}${secondaryActionBtn}</div>` : '';
+}
+
 function buildInsightCardHtml(insight: EvaluatedInsight): string {
 	const severityColors: Record<InsightSeverity, string> = {
 		tip: 'rgba(96,165,250,0.12)',
@@ -3389,12 +3411,7 @@ function buildInsightCardHtml(insight: EvaluatedInsight): string {
 	const isNew = insight.status === 'new';
 	const isDone = insight.status === 'done';
 
-	const actionBtn = insight.actionLabel
-		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="execute" data-command="${escapeHtml(insight.actionCommand ?? '')}"
-				style="padding:5px 14px; font-size:12px; font-weight:600; cursor:pointer;
-				border:1px solid ${border}; border-radius:5px;
-				background:${bg}; color:var(--text-primary);">${escapeHtml(insight.actionLabel)}</button>`
-		: '';
+	const actionButtonsHtml = buildInsightActionButtonsHtml(insight, bg, border);
 
 	const doneBtn = !isDone
 		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="done"
@@ -3432,7 +3449,7 @@ function buildInsightCardHtml(insight: EvaluatedInsight): string {
 						${escapeHtml(insight.title)}
 					</div>
 					<div style="font-size:12px; color:var(--text-primary); line-height:1.5; opacity:0.85; white-space:pre-wrap;">${escapeHtml(insight.body)}</div>
-					${actionBtn ? `<div style="margin-top:12px;">${actionBtn}</div>` : ''}
+					${actionButtonsHtml}
 				</div>
 				<div style="flex-shrink:0; margin-top:-4px;">
 					${dismissBtn}
@@ -3587,6 +3604,42 @@ function buildCorrectionSessionHtml(session: CorrectionSessionEntry, moments: Co
 		</div>`;
 }
 
+/** "Ask Copilot to fix this" + "Copy prompt" buttons for one repository's correction section. */
+function buildCorrectionRepoActionsHtml(repository: string): string {
+	const repoAttr = escapeHtml(repository);
+	return `
+		<div style="display:flex; gap:6px;">
+			<button type="button" class="correction-ask-copilot" data-correction-repo="${repoAttr}"
+				title="Send these correction examples to Copilot Chat and ask how to improve this workspace's setup"
+				style="font-size:11px; padding:3px 10px; border-radius:5px; border:1px solid var(--vscode-focusBorder); background:var(--vscode-button-secondaryBackground); color:var(--text-primary); cursor:pointer;">🤖 Ask Copilot to fix this</button>
+			<button type="button" class="correction-copy-prompt" data-correction-repo="${repoAttr}"
+				title="Copy the same prompt to paste into another workspace's Copilot Chat"
+				style="font-size:11px; padding:3px 10px; border-radius:5px; border:1px solid transparent; background:var(--bg-tertiary); color:var(--text-primary); cursor:pointer;">📋 Copy prompt</button>
+		</div>`;
+}
+
+/** One repository's session list within the Corrections tab, or '' if the active filter leaves nothing to show. */
+function buildCorrectionRepoSectionHtml(repo: CorrectionRepoGroup, activeFilter: CorrectionMomentType | null): string {
+	const sessions = repo.sessions
+		.map(session => ({
+			session,
+			moments: activeFilter ? session.moments.filter(moment => moment.type === activeFilter) : session.moments,
+		}))
+		.filter(({ moments }) => moments.length > 0);
+	if (sessions.length === 0) { return ''; }
+	return `
+	<div style="margin-top:18px;">
+		<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
+			<div style="font-size:12px; font-weight:700; color:var(--text-primary);">
+				${escapeHtml(repo.repository)}
+				<span style="font-weight:400; color:var(--text-secondary);">— ${sessions.length} session${sessions.length !== 1 ? 's' : ''} with moments</span>
+			</div>
+			${buildCorrectionRepoActionsHtml(repo.repository)}
+		</div>
+		${sessions.map(({ session, moments }) => buildCorrectionSessionHtml(session, moments)).join('')}
+	</div>`;
+}
+
 function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefined): string {
 	if (typeof report === 'undefined') {
 		return `
@@ -3629,25 +3682,7 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 		? `<span title="Corrections landing within a few turns of an earlier one — no sentiment data is available from any editor, this is the closest local proxy for rising frustration" style="font-size:11px; padding:2px 10px; border-radius:10px; background:rgba(248,113,113,0.12); border:1px solid rgba(248,113,113,0.85); color:var(--text-primary);">📈 ${c.escalatedUserCorrections} escalating</span>`
 		: '';
 
-	const repoSections = report.repos.map(repo => {
-		const sessions = repo.sessions
-			.map(session => ({
-				session,
-				moments: activeCorrectionFilter
-					? session.moments.filter(moment => moment.type === activeCorrectionFilter)
-					: session.moments,
-			}))
-			.filter(({ moments }) => moments.length > 0);
-		if (sessions.length === 0) { return ''; }
-		return `
-		<div style="margin-top:18px;">
-			<div style="font-size:12px; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
-				${escapeHtml(repo.repository)}
-				<span style="font-weight:400; color:var(--text-secondary);">— ${sessions.length} session${sessions.length !== 1 ? 's' : ''} with moments</span>
-			</div>
-			${sessions.map(({ session, moments }) => buildCorrectionSessionHtml(session, moments)).join('')}
-		</div>`;
-	}).join('');
+	const repoSections = report.repos.map(repo => buildCorrectionRepoSectionHtml(repo, activeCorrectionFilter)).join('');
 	const emptyFilteredState = activeCorrectionFilter && !repoSections
 		? `<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">No ${CORRECTION_TYPE_META[activeCorrectionFilter].label.toLowerCase()} moments are available in this detail sample.</div>`
 		: '';
@@ -3669,6 +3704,37 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 		</div>`;
 }
 
+/** Finds the repo group backing a correction "Ask Copilot"/"Copy prompt" button, and builds its prompt. */
+function buildCorrectionPromptForRepo(repository: string): string | null {
+	const repo = currentCorrectionReport?.repos.find(r => r.repository === repository);
+	return repo ? buildCorrectionImprovementPrompt(repo) : null;
+}
+
+/** Handles a click on either the "Ask Copilot to fix this" or "Copy prompt" correction button. Returns true if handled. */
+function handleCorrectionPromptButtonClick(target: HTMLElement): boolean {
+	const askCopilotButton = target.closest<HTMLButtonElement>('button.correction-ask-copilot');
+	if (askCopilotButton) {
+		const repository = askCopilotButton.getAttribute('data-correction-repo');
+		const prompt = repository ? buildCorrectionPromptForRepo(repository) : null;
+		if (prompt) { vscode.postMessage({ command: 'openCopilotChatWithPrompt', prompt }); }
+		return true;
+	}
+	const copyPromptButton = target.closest<HTMLButtonElement>('button.correction-copy-prompt');
+	if (copyPromptButton) {
+		const repository = copyPromptButton.getAttribute('data-correction-repo');
+		const prompt = repository ? buildCorrectionPromptForRepo(repository) : null;
+		if (prompt) {
+			navigator.clipboard.writeText(prompt).then(() => {
+				const original = copyPromptButton.textContent;
+				copyPromptButton.textContent = '✅ Copied!';
+				setTimeout(() => { copyPromptButton.textContent = original; }, 2000);
+			});
+		}
+		return true;
+	}
+	return false;
+}
+
 function wireCorrectionInteractions(): void {
 	const panel = document.getElementById('tab-panel-corrections');
 	if (!panel) { return; }
@@ -3682,6 +3748,7 @@ function wireCorrectionInteractions(): void {
 			renderCorrectionsPanel();
 			return;
 		}
+		if (handleCorrectionPromptButtonClick(target)) { return; }
 		const moment = target.closest<HTMLButtonElement>('button.correction-moment');
 		if (!moment) { return; }
 		const file = moment.getAttribute('data-correction-file');

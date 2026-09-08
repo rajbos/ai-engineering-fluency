@@ -9,9 +9,12 @@ import {
     MAX_MOMENTS_PER_SESSION,
     USER_CORRECTION_PATTERNS,
     AGENT_SELF_CORRECTION_PATTERNS,
+    selectCorrectionPromptExamples,
+    buildCorrectionImprovementPrompt,
+    MAX_PROMPT_EXAMPLES,
     type CorrectionTurn,
 } from '../../../src/correctionDetection';
-import type { ChatTurn } from '../../../src/types';
+import type { ChatTurn, CorrectionMoment, CorrectionRepoGroup, CorrectionSessionEntry } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -397,4 +400,73 @@ test('pattern catalogs stay non-empty and well-formed', () => {
         assert.ok(p.re instanceof RegExp);
         assert.ok(p.label.length > 0);
     }
+});
+
+// ---------------------------------------------------------------------------
+// improvement prompt ("Ask Copilot to fix this")
+// ---------------------------------------------------------------------------
+
+function correctionMoment(overrides: Partial<CorrectionMoment> & Pick<CorrectionMoment, 'type'>): CorrectionMoment {
+    return { turnNumber: 1, timestamp: null, snippet: 'example snippet', ...overrides };
+}
+
+function correctionSession(moments: CorrectionMoment[], file = 'session.jsonl'): CorrectionSessionEntry {
+    return { file, moments };
+}
+
+function correctionRepoGroup(sessions: CorrectionSessionEntry[]): CorrectionRepoGroup {
+    return {
+        repository: 'owner/repo',
+        sessions,
+        counts: summarizeCorrectionMoments(sessions.flatMap(s => s.moments)),
+        sessionsWithMoments: sessions.length,
+    };
+}
+
+test('selectCorrectionPromptExamples: escalated user-corrections rank above everything else', () => {
+    const escalated = correctionMoment({ type: 'user-correction', escalated: true, snippet: 'no, that is wrong again' });
+    const toolError = correctionMoment({ type: 'tool-error', snippet: 'edit failed' });
+    const repo = correctionRepoGroup([correctionSession([toolError, escalated])]);
+    assert.deepEqual(selectCorrectionPromptExamples(repo), [escalated, toolError]);
+});
+
+test('selectCorrectionPromptExamples: strong-intensity corrections rank above plain ones, which rank above other types', () => {
+    const plain = correctionMoment({ type: 'user-correction', snippet: 'no, not that' });
+    const strong = correctionMoment({ type: 'user-correction', intensity: 'strong', snippet: 'STOP doing that again!!' });
+    const editRetry = correctionMoment({ type: 'edit-retry', snippet: 're-edited a.ts' });
+    const repo = correctionRepoGroup([correctionSession([editRetry, plain, strong])]);
+    assert.deepEqual(selectCorrectionPromptExamples(repo), [strong, plain, editRetry]);
+});
+
+test('selectCorrectionPromptExamples: prefers moments from more recent sessions on a severity tie', () => {
+    const older = correctionMoment({ type: 'tool-error', snippet: 'older failure' });
+    const newer = correctionMoment({ type: 'tool-error', snippet: 'newer failure' });
+    // repo.sessions is already ordered most-recent-first (see buildCorrectionReport in extension.ts)
+    const repo = correctionRepoGroup([correctionSession([newer], 'newest.jsonl'), correctionSession([older], 'oldest.jsonl')]);
+    assert.deepEqual(selectCorrectionPromptExamples(repo), [newer, older]);
+});
+
+test('selectCorrectionPromptExamples: caps at MAX_PROMPT_EXAMPLES', () => {
+    const moments = Array.from({ length: MAX_PROMPT_EXAMPLES + 5 }, (_, i) => correctionMoment({ type: 'tool-error', snippet: `failure ${i}` }));
+    const repo = correctionRepoGroup([correctionSession(moments)]);
+    assert.equal(selectCorrectionPromptExamples(repo).length, MAX_PROMPT_EXAMPLES);
+});
+
+test('buildCorrectionImprovementPrompt: names the repository and includes numbered example snippets', () => {
+    const repo = correctionRepoGroup([correctionSession([
+        correctionMoment({ type: 'user-correction', snippet: 'no, that is wrong' }),
+        correctionMoment({ type: 'tool-error', tool: 'runTests', snippet: 'tests failed' }),
+    ])]);
+    const prompt = buildCorrectionImprovementPrompt(repo);
+    assert.ok(prompt.includes('owner/repo'));
+    assert.ok(prompt.includes('1. You corrected the agent: "no, that is wrong"'));
+    assert.ok(prompt.includes('2. A tool call failed (runTests): "tests failed"'));
+    assert.ok(prompt.toLowerCase().includes('copilot-instructions.md'));
+    assert.ok(prompt.toLowerCase().includes('agents.md'));
+});
+
+test('buildCorrectionImprovementPrompt: handles a repo with no moments gracefully', () => {
+    const prompt = buildCorrectionImprovementPrompt(correctionRepoGroup([]));
+    assert.ok(prompt.includes('owner/repo'));
+    assert.ok(!prompt.includes('1. '));
 });

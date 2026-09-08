@@ -43,7 +43,7 @@
  * This module is intentionally pure (no VS Code API, no filesystem access) so
  * it can be unit-tested with mocked data and reused by the CLI and the webview.
  */
-import type { CorrectionCounts, CorrectionMoment } from './types';
+import type { CorrectionCounts, CorrectionMoment, CorrectionMomentType, CorrectionRepoGroup } from './types';
 import { extractEditFilePath, isEditToolName } from './modelEfficiency';
 
 // ---------------------------------------------------------------------------
@@ -364,4 +364,69 @@ export function mergeCorrectionCounts(target: CorrectionCounts, source: Correcti
 	target.toolErrorsRetried += source.toolErrorsRetried;
 	target.agentSelfCorrections += source.agentSelfCorrections;
 	target.escalatedUserCorrections += source.escalatedUserCorrections;
+}
+
+// ---------------------------------------------------------------------------
+// Improvement prompt ("Ask Copilot to fix this")
+// ---------------------------------------------------------------------------
+
+/** Max number of moments included as concrete examples in a generated improvement prompt. */
+export const MAX_PROMPT_EXAMPLES = 5;
+
+/**
+ * Ranks a moment for inclusion in an improvement prompt: escalated user-corrections first, then
+ * "strong"-intensity ones, then any other user-correction, then everything else. User-corrections
+ * are the clearest first-hand signal that something needed fixing, so they outrank heuristic
+ * agent/tool signals of the same recency.
+ */
+function correctionPromptSeverity(moment: CorrectionMoment): number {
+	if (moment.type !== 'user-correction') { return 0; }
+	if (moment.escalated) { return 3; }
+	if (moment.intensity === 'strong') { return 2; }
+	return 1;
+}
+
+/**
+ * Picks up to `limit` moments from a repo's scanned sessions to use as concrete examples in an
+ * improvement prompt: highest-severity first (see `correctionPromptSeverity`), then most recent
+ * — `repo.sessions` is already ordered most-recent-first (see `buildCorrectionReport`), and ties
+ * within a session break by turn number, latest first.
+ */
+export function selectCorrectionPromptExamples(repo: CorrectionRepoGroup, limit = MAX_PROMPT_EXAMPLES): CorrectionMoment[] {
+	const ranked = repo.sessions.flatMap((session, sessionIndex) =>
+		session.moments.map(moment => ({ moment, sessionIndex }))
+	);
+	ranked.sort((a, b) =>
+		correctionPromptSeverity(b.moment) - correctionPromptSeverity(a.moment)
+		|| a.sessionIndex - b.sessionIndex
+		|| b.moment.turnNumber - a.moment.turnNumber
+	);
+	return ranked.slice(0, limit).map(r => r.moment);
+}
+
+const CORRECTION_MOMENT_DESCRIPTIONS: Record<CorrectionMomentType, (m: CorrectionMoment) => string> = {
+	'user-correction': m => `You corrected the agent: "${m.snippet}"`,
+	'agent-self-correction': m => `The agent had to backtrack mid-task: "${m.snippet}"`,
+	'tool-error': m => `A tool call failed${m.tool ? ` (${m.tool})` : ''}: "${m.snippet}"`,
+	'edit-retry': m => `The agent immediately re-edited ${m.file ?? 'a file'} it had just edited: "${m.snippet}"`,
+	'edit-self-correction': m => `The agent went back to re-edit ${m.file ?? 'a file'} it had already edited earlier in the same turn: "${m.snippet}"`,
+};
+
+/**
+ * Builds a ready-to-paste prompt asking an AI coding assistant (GitHub Copilot Chat first) to
+ * propose concrete workspace-setup improvements — instructions files, custom instructions,
+ * prompt/chat-mode files — that would have prevented this repo's most notable correction moments.
+ * Grounding the ask in real examples steers the assistant toward this repository's actual failure
+ * modes instead of generic advice.
+ */
+export function buildCorrectionImprovementPrompt(repo: CorrectionRepoGroup): string {
+	const examples = selectCorrectionPromptExamples(repo);
+	const exampleLines = examples.map((m, i) => `${i + 1}. ${CORRECTION_MOMENT_DESCRIPTIONS[m.type](m)}`);
+	return [
+		`While working in this workspace ("${repo.repository}"), I or the AI had to correct course to get things done correctly. Examples from recent sessions:`,
+		'',
+		...exampleLines,
+		'',
+		"Please review this workspace's current setup — instructions files (e.g. .github/copilot-instructions.md, AGENTS.md), custom instructions, and prompt/chat-mode files — and propose specific, concrete changes that would prevent these kinds of corrections from being needed again. Base your suggestions on what is actually present in this repository rather than generic advice.",
+	].join('\n');
 }

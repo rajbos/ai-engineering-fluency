@@ -826,10 +826,9 @@ test('insight navigation actions target their destination tabs and sections', ()
 
 	const corrections = makeCtx();
 	corrections.last30Days.corrections = { ...emptyCorrections(), userCorrections: 3, sessionsWithMoments: 2 };
-	assert.equal(
-		evaluateInsights(corrections, {}, 7, null).find(i => i.id === 'corrections-user-pushback')?.actionCommand,
-		'aiEngineeringFluency.openCorrectionsTab',
-	);
+	const pushbackInsight = evaluateInsights(corrections, {}, 7, null).find(i => i.id === 'corrections-user-pushback');
+	assert.equal(pushbackInsight?.actionCommand, 'aiEngineeringFluency.openCorrectionsTab');
+	assert.equal(pushbackInsight?.secondaryActionCommand, 'aiEngineeringFluency.askCopilotAboutCorrections');
 
 	corrections.last30Days.corrections = { ...emptyCorrections(), toolErrors: 5, sessionsWithMoments: 2 };
 	assert.equal(

@@ -310,6 +310,9 @@ export interface EvaluatedInsight {
 	body: string;
 	actionLabel?: string;
 	actionCommand?: string;
+	/** Optional second action, rendered alongside the primary one (e.g. an alternate next step). */
+	secondaryActionLabel?: string;
+	secondaryActionCommand?: string;
 	status: InsightStatus;
 	/** When true, this insight may also be surfaced as a VS Code toast notification. */
 	allowToast?: boolean;
@@ -327,6 +330,8 @@ interface InsightDefinition {
 	buildBody: (ctx: InsightContext) => string;
 	actionLabel?: string | ((ctx: InsightContext) => string);
 	actionCommand?: string | ((ctx: InsightContext) => string);
+	secondaryActionLabel?: string | ((ctx: InsightContext) => string);
+	secondaryActionCommand?: string | ((ctx: InsightContext) => string);
 	/** Returns true when this insight is applicable given the current context. */
 	appliesTo: (ctx: InsightContext) => boolean;
 	/** Higher weight → surfaced earlier when multiple insights apply. */
@@ -1373,6 +1378,8 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		},
 		actionLabel: 'View Corrections',
 		actionCommand: 'aiEngineeringFluency.openCorrectionsTab',
+		secondaryActionLabel: '🤖 Ask Copilot to Fix This',
+		secondaryActionCommand: 'aiEngineeringFluency.askCopilotAboutCorrections',
 		appliesTo: (ctx) => (ctx.last30Days.corrections?.userCorrections ?? 0) >= 3,
 		weight: 70,
 	},
@@ -1467,6 +1474,8 @@ export function evaluateInsights(
 				body: def.buildBody(ctx),
 				actionLabel: typeof def.actionLabel === 'function' ? def.actionLabel(ctx) : def.actionLabel,
 				actionCommand: typeof def.actionCommand === 'function' ? def.actionCommand(ctx) : def.actionCommand,
+				secondaryActionLabel: typeof def.secondaryActionLabel === 'function' ? def.secondaryActionLabel(ctx) : def.secondaryActionLabel,
+				secondaryActionCommand: typeof def.secondaryActionCommand === 'function' ? def.secondaryActionCommand(ctx) : def.secondaryActionCommand,
 				status,
 				allowToast: def.allowToast,
 			};

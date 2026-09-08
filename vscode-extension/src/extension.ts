@@ -84,6 +84,7 @@ import {
   createEmptyCorrectionCounts as _createEmptyCorrectionCounts,
   mergeCorrectionCounts as _mergeCorrectionCounts,
   summarizeCorrectionMoments as _summarizeCorrectionMoments,
+  buildCorrectionImprovementPrompt as _buildCorrectionImprovementPrompt,
 } from '../../src/correctionDetection';
 
 // --- Repeated-task detection (skill candidates from recurring prompts) ---
@@ -7822,6 +7823,24 @@ private computeFallbackDailyRollup(
 		await this.showUsageAnalysisOnTab('corrections');
 	}
 
+	/**
+	 * Opens the Corrections tab and, for the repository with the most correction moments in the
+	 * last cached report, sends Copilot Chat a prompt asking how to improve that workspace's setup
+	 * (instructions files, custom instructions, etc.) grounded in real correction examples. Used by
+	 * the "Ask Copilot to Fix This" insight action, which — unlike the per-repo buttons in the
+	 * Corrections tab — has no single repo to target on its own.
+	 */
+	public async askCopilotAboutCorrections(): Promise<void> {
+		await this.showUsageAnalysisOnCorrectionsTab();
+		const repos = this.lastUsageAnalysisStats?.correctionReport?.repos ?? [];
+		if (repos.length === 0) { return; }
+		const topRepo = repos.reduce((best, repo) =>
+			this.correctionMomentCount(repo.counts) > this.correctionMomentCount(best.counts) ? repo : best
+		);
+		const prompt = _buildCorrectionImprovementPrompt(topRepo);
+		await vscode.commands.executeCommand('workbench.action.chat.open', { query: prompt, isNewChat: true });
+	}
+
 	public async showUsageAnalysisOnModelEfficiency(): Promise<void> {
 		await this.showUsageAnalysisOnTab('activity', 'section-model-efficiency');
 	}
@@ -12678,6 +12697,7 @@ function registerUsageNavigationCommands(context: vscode.ExtensionContext, token
     ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
     ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
     ["aiEngineeringFluency.openCorrectionsTab", "Open Corrections tab command called", () => tokenTracker.showUsageAnalysisOnCorrectionsTab()],
+    ["aiEngineeringFluency.askCopilotAboutCorrections", "Ask Copilot about corrections command called", () => tokenTracker.askCopilotAboutCorrections()],
     ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
   ];
   context.subscriptions.push(...commands.map(([id, logMessage, handler]) =>
