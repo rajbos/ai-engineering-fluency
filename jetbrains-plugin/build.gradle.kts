@@ -133,7 +133,20 @@ val prepareBundledAssets by tasks.registering(Copy::class) {
 
     // 1. Webview JS bundles produced by `npm run compile` in vscode-extension/.
     from("$repoRoot/vscode-extension/dist/webview") {
-        include("details.js", "chart.js", "usage.js", "diagnostics.js", "environmental.js", "maturity.js")
+        include(
+            "details.js", "chart.js", "usage.js", "diagnostics.js", "environmental.js", "maturity.js",
+            "fluency-level-viewer.js",
+        )
+        into("webview")
+    }
+
+    // 1b. The Scoring Guide (fluency-level-viewer) reads its rubric straight from the shared
+    //     source JSON; unlike the compiled bundles above it is not needed by the VS Code
+    //     webviews at runtime, so esbuild does not stage it in dist/webview/ — copy it from
+    //     src/ instead, alongside the bundles so WebviewResources can load it the same way
+    //     (classpath resource under /webview/).
+    from("$repoRoot/src") {
+        include("fluencyLevelData.json")
         into("webview")
     }
 
