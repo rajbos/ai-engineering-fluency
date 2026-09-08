@@ -4,6 +4,7 @@ import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, D
 import { ClaudeCodeDataAccess, normalizeClaudeModelId } from '../claudecode';
 import { readClaudeCodeEventsForAnalysis, createEmptySessionUsageAnalysis, applyModelTierClassification, addSkillCall } from '../usageAnalysis';
 import { isMcpTool, extractMcpServerName, detectClaudeCodeEditorVariant } from '../workspaceHelpers';
+import { detectCacheBreakage, type CacheTurn } from '../cacheBreakage';
 import { createEmptyContextRefs } from '../tokenEstimation';
 
 /**
@@ -302,18 +303,54 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		// Code extension all write to the same ~/.claude/projects/ format, so user-turn interactions
 		// are bucketed into the matching modeUsage field instead of always landing in `cli`.
 		const modeBucket = this.resolveModeBucket(sessionFile);
+		// Cache turns are keyed by message.id so a re-logged API response is counted
+		// once — detectCacheBreakage reads a duplicate as a full prefix wipe.
+		const cacheTurns = new Map<string, CacheTurn>();
 		for (const event of events) {
 			if (event.type === 'user' && event.message?.role === 'user' && !event.isSidechain) {
 				this.processUserEvent(event, analysis, modeBucket);
 			} else if (event.type === 'assistant') {
 				this.processAssistantEvent(event, analysis, ctx, models);
+				this.collectCacheTurn(event, cacheTurns);
 			} else if (event.type === 'system' && event.subtype === 'compact_boundary') {
 				this.processCompactBoundaryEvent(event, analysis);
 			}
 		}
+		if (cacheTurns.size > 0) {
+			analysis.cacheBreakage = detectCacheBreakage([...cacheTurns.values()]);
+		}
 		this.applyModelSwitchingStats(models, analysis);
 		applyModelTierClassification(ctx.modelPricing, analysis.modelSwitching.uniqueModels, models, analysis);
 		return analysis;
+	}
+
+	/**
+	 * Map one assistant event onto a {@link CacheTurn}, keyed by `message.id` so
+	 * later fragments of the same response overwrite earlier ones (last-wins,
+	 * matching ClaudeCodeDataAccess.deduplicateAssistantEvents).
+	 *
+	 * Sidechain (subagent) turns are skipped: they run against their own prompt
+	 * prefix, so interleaving them with the main thread would look like constant
+	 * cache invalidation. Turns with no usage, and Claude Code's `<synthetic>`
+	 * placeholder responses, carry no billing information and are skipped too.
+	 */
+	private collectCacheTurn(event: any, into: Map<string, CacheTurn>): void {
+		if (event.isSidechain) { return; }
+		const msg = event.message;
+		const usage = msg?.usage;
+		const msgId = msg?.id as string | undefined;
+		if (!usage || !msgId || msg?.model === '<synthetic>') { return; }
+		const timestamp = Date.parse(event.timestamp);
+		if (Number.isNaN(timestamp)) { return; }
+		into.set(msgId, {
+			timestamp,
+			model: normalizeClaudeModelId(msg.model || 'unknown'),
+			inputTokens: usage.input_tokens || 0,
+			cacheReadTokens: usage.cache_read_input_tokens || 0,
+			cacheCreationTokens: usage.cache_creation_input_tokens || 0,
+			cacheCreation1hTokens: usage.cache_creation?.ephemeral_1h_input_tokens || 0,
+			compacted: Boolean(msg.context_management),
+		});
 	}
 
 	private processCompactBoundaryEvent(event: any, analysis: import('../types').SessionUsageAnalysis): void {

@@ -1,4 +1,5 @@
 import type { ApplyButtonUsage, DailyModelEfficiency, DailyTokenStats, ModelUsage, UsageAnalysisPeriod } from './types';
+import type { CacheBreakagePeriodStats } from './cacheBreakage';
 import { getModelDisplayName } from './webview/shared/modelUtils';
 import { createEmptyDailyModelEfficiencyEntry, mergeDailyModelEfficiency } from './modelEfficiency';
 
@@ -1293,6 +1294,13 @@ export interface EfficiencyViewData {
 	modelDaily: ModelDailyInput[];
 	/** True when at least two models cleared the comparison sample floor. */
 	hasModelComparison: boolean;
+	/**
+	 * Prompt-cache breakage over the last 30 days. Null for users whose editors
+	 * do not report per-turn cache token counts (today: anything but Claude Code
+	 * / Claude Desktop), in which case the Cache tab is hidden entirely rather
+	 * than shown empty.
+	 */
+	cacheBreakage: CacheBreakagePeriodStats | null;
 	lastUpdated: string;
 	backendConfigured: boolean;
 	compactNumbers?: boolean;

@@ -36,6 +36,7 @@ import {
 	type EfficiencyTurn,
 } from './modelEfficiency';
 import { detectCorrectionAnalysis, mergeCorrectionCounts, summarizeCorrectionMoments } from './correctionDetection';
+import { createEmptyCacheBreakagePeriodStats, mergeCacheBreakageIntoPeriod } from './cacheBreakage';
 import { MAX_PROMPT_LENGTH } from './repeatedTasks';
 import {
 	applyDelta,
@@ -1358,6 +1359,14 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	_muaMergeEnhancedMetrics(period, analysis);
 	_muaMergeTaskCategories(period, analysis);
 	_muaMergeCorrections(period, analysis);
+	_muaMergeCacheBreakage(period, analysis);
+}
+
+/** Fold a session's cache-breakage result into the period's aggregated stats. */
+function _muaMergeCacheBreakage(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.cacheBreakage) { return; }
+	if (!period.cacheBreakage) { period.cacheBreakage = createEmptyCacheBreakagePeriodStats(); }
+	mergeCacheBreakageIntoPeriod(period.cacheBreakage, analysis.cacheBreakage);
 }
 
 /** Fold a session's correction moments into the period's aggregated counters. */

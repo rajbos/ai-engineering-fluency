@@ -232,5 +232,30 @@
   "lastUpdated": "2026-03-14T09:30:00.000Z",
   "backendConfigured": false,
   "compactNumbers": false,
-  "isDebugMode": false
+  "isDebugMode": false,
+  "cacheBreakage": {
+    "counts": {
+      "model-switch": {
+        "breaks": 9,
+        "tokensRewritten": 1176903
+      },
+      "compaction": {
+        "breaks": 1,
+        "tokensRewritten": 609190
+      },
+      "ttl-expiry": {
+        "breaks": 34,
+        "tokensRewritten": 5222994
+      },
+      "prefix-invalidated": {
+        "breaks": 8,
+        "tokensRewritten": 1394384
+      }
+    },
+    "sessionsAnalyzed": 62,
+    "sessionsWithBreaks": 29,
+    "tokensWritten": 15892222,
+    "peakContextTokens": 9264875,
+    "worstRewriteFactor": 6.26
+  }
 }
