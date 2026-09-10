@@ -71,10 +71,14 @@ The extension automatically discovers all sessions under the `.vs` folder for ea
     Mastodon buttons are handled by the Visual Studio host.
   - Sections and tabs that have no data in Visual Studio are hidden on the views
     that do ship: the Usage Analysis Dashboard hides the Workspace Health,
-    Repository PRs, Cloud Agent, Insights and Today's Sessions tabs plus the
+    Repository PRs, Cloud Agent, Insights and Recent Sessions tabs plus the
     Copilot Customization Files, Missed Potential and Repository Hygiene sections;
     the chart hides the By Repository toggle; the Fluency Score view hides the
     VS Code Marketplace MCP discovery button.
+  - **The Worktrees tab on the Usage Analysis Dashboard renders but does nothing.**
+    Unlike the other unsupported tabs it is not hidden, and the host has no
+    handlers for its `scanWorktrees`, `pickWorktreeRoot`, `deleteWorktree` or
+    cleanup commands, so scanning, picking a root and deleting are no-ops.
 
   The Usage Analysis Dashboard, the AI Engineering Fluency Score and its Scoring
   Guide **are** available in Visual Studio, along with the details, chart and
