@@ -1046,6 +1046,108 @@ test('ClaudeCodeAdapter.analyzeUsage: multiple user turns in a claude-desktop se
 	}
 });
 
+// ----- ClaudeCodeAdapter.analyzeUsage: every event in the session is processed -----
+//
+// analyzeUsage's for-loop must run to completion and return once, after the loop —
+// not return from inside it. A regression that closed the loop early would still
+// type-check (a `return` inside a `for` is legal JS), so this is asserted directly
+// on aggregate counts that only add up correctly if every event was visited.
+
+test('ClaudeCodeAdapter.analyzeUsage: processes every event, not just the first — user turns, tool calls and models all accumulate past event 1', async () => {
+	const events = [
+		{ type: 'user', isSidechain: false, entrypoint: 'cli', message: { role: 'user', content: 'first' } },
+		{
+			type: 'assistant',
+			message: {
+				id: 'm1', model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'tool_use',
+				content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/a.ts' } }],
+			},
+		},
+		{ type: 'user', isSidechain: false, message: { role: 'user', content: 'second' } },
+		{
+			type: 'assistant',
+			message: {
+				id: 'm2', model: 'claude-opus-4-6', role: 'assistant', stop_reason: 'tool_use',
+				content: [{ type: 'tool_use', name: 'Write', input: { file_path: '/b.ts' } }],
+			},
+		},
+		{ type: 'user', isSidechain: false, message: { role: 'user', content: 'third' } },
+		{
+			type: 'assistant',
+			message: {
+				id: 'm3', model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn',
+				content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/c.ts' } }],
+			},
+		},
+	];
+	const filePath = createTempSession(events);
+	try {
+		const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+		// 3 user turns — only reachable if the loop visited events past index 0.
+		assert.equal(result.modeUsage.cli, 3);
+		// 3 tool calls across 3 separate assistant events.
+		assert.equal(result.toolCalls.total, 3);
+		assert.deepEqual(result.toolCalls.byTool, { Read: 1, Write: 1, Edit: 1 });
+		// Model-switching stats are computed once, after the loop, from all 3 models seen.
+		assert.equal(result.modelSwitching.totalRequests, 3);
+		assert.equal(result.modelSwitching.modelCount, 2);
+		assert.equal(result.modelSwitching.switchCount, 2);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
+// ----- ClaudeCodeAdapter.analyzeUsage: cacheBreakage (see src/cacheBreakage.ts) -----
+
+test('ClaudeCodeAdapter.analyzeUsage: populates cacheBreakage from a multi-turn session with a TTL-expiry break', async () => {
+	const bigPrefix = 60_000;
+	const events = [
+		{
+			type: 'assistant',
+			message: {
+				id: 'c1', model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn',
+				content: [{ type: 'text', text: 'warm the cache' }],
+				usage: { input_tokens: 2, output_tokens: 10, cache_creation_input_tokens: bigPrefix, cache_read_input_tokens: 0 },
+			},
+			timestamp: '2026-05-06T10:00:00.000Z',
+		},
+		{
+			// Idle well past the 5-minute default TTL, same model, no compaction —
+			// the whole prefix has to be written again.
+			type: 'assistant',
+			message: {
+				id: 'c2', model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn',
+				content: [{ type: 'text', text: 're-warm' }],
+				usage: { input_tokens: 2, output_tokens: 10, cache_creation_input_tokens: bigPrefix, cache_read_input_tokens: 0 },
+			},
+			timestamp: '2026-05-06T10:30:00.000Z',
+		},
+	];
+	const filePath = createTempSession(events);
+	try {
+		const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+		assert.ok(result.cacheBreakage, 'cacheBreakage should be populated when assistant events carry usage');
+		assert.equal(result.cacheBreakage!.breaks.length, 1);
+		assert.equal(result.cacheBreakage!.breaks[0].cause, 'ttl-expiry');
+		assert.equal(result.cacheBreakage!.tokensWritten, bigPrefix * 2);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
+test('ClaudeCodeAdapter.analyzeUsage: leaves cacheBreakage undefined when no assistant event carries usage', async () => {
+	const events = [
+		{ type: 'user', isSidechain: false, message: { role: 'user', content: 'hi' } },
+	];
+	const filePath = createTempSession(events);
+	try {
+		const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+		assert.equal(result.cacheBreakage, undefined);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
 // ----- getClaudeCodeDailyFractions (issue #1608, root cause A) -----
 
 test('getClaudeCodeDailyFractions: splits usage by each assistant event day, weighted by tokens', async () => {
