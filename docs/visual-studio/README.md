@@ -75,10 +75,19 @@ The extension automatically discovers all sessions under the `.vs` folder for ea
     Copilot Customization Files, Missed Potential and Repository Hygiene sections;
     the chart hides the By Repository toggle; the Fluency Score view hides the
     VS Code Marketplace MCP discovery button.
-  - **The Worktrees tab on the Usage Analysis Dashboard renders but does nothing.**
-    Unlike the other unsupported tabs it is not hidden, and the host has no
-    handlers for its `scanWorktrees`, `pickWorktreeRoot`, `deleteWorktree` or
-    cleanup commands, so scanning, picking a root and deleting are no-ops.
+  - **Some controls render but do nothing.** Unlike the surfaces above these are
+    not hidden, and the host has no handler for the commands they post:
+    - The **Efficiency Trends** button in the toolbar of *every* view. It posts
+      `showEfficiency`, which the host does not handle. (The Team Dashboard
+      button beside it does not have this problem — the toolbar drops it when no
+      backend is configured, which is always the case here.)
+    - The **Worktrees** tab on the Usage Analysis Dashboard. `scanWorktrees`,
+      `pickWorktreeRoot`, `deleteWorktree` and the cleanup commands are all
+      unhandled, so scanning, picking a root and deleting are no-ops.
+    - On the **Tool Output** tab, the Tool Curation section's "open" links and
+      the suppress-tool control (`openFile`, `openFileFromList`,
+      `manageExtension`, `openAgentPlugins`, `suppressUnknownTool`). Suppressing
+      a tool updates the view but is not persisted.
 
   The Usage Analysis Dashboard, the AI Engineering Fluency Score and its Scoring
   Guide **are** available in Visual Studio, along with the details, chart and
