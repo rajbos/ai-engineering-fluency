@@ -5,6 +5,7 @@
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { setHtml } from '../shared/domUtils';
 import { escapeHtml, formatCompact, setCompactNumbers } from '../shared/formatUtils';
+import type { CacheBreakCause } from '../../../../src/cacheBreakage';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -61,7 +62,7 @@ async function loadChartModule(): Promise<void> {
 	Chart = mod.default as ChartConstructor;
 }
 
-type TabId = 'trends' | 'skills' | 'deltas' | 'attribution' | 'models' | 'value' | 'combined';
+type TabId = 'trends' | 'skills' | 'deltas' | 'attribution' | 'cache' | 'models' | 'value' | 'combined';
 let activeTab: TabId = 'trends';
 
 const TABS: { id: TabId; label: string }[] = [
@@ -69,10 +70,19 @@ const TABS: { id: TabId; label: string }[] = [
 	{ id: 'skills', label: '🛠️ Tools & Skills' },
 	{ id: 'deltas', label: '🗓️ Month vs Month' },
 	{ id: 'attribution', label: '💸 Cost Attribution' },
+	{ id: 'cache', label: '⚡ Prompt Cache' },
 	{ id: 'models', label: '🤖 Models' },
 	{ id: 'value', label: '🎁 Value' },
 	{ id: 'combined', label: '🧩 Combined' },
 ];
+
+/**
+ * Tabs to show for this dataset. The Prompt Cache tab only exists when there is
+ * cache-breakage data to put in it (Claude Code / Claude Desktop sessions).
+ */
+function visibleTabs(d: EfficiencyViewData): { id: TabId; label: string }[] {
+	return TABS.filter(t => t.id !== 'cache' || d.cacheBreakage);
+}
 
 // ── Formatting ─────────────────────────────────────────────────────────
 
@@ -688,6 +698,95 @@ function taskMixHtml(cmp: ModelComparison): string {
 		<div class="task-legend">${legend}</div>`;
 }
 
+/**
+ * Human-readable cause labels and the advice attached to each. The advice is
+ * the point of the tab: a break the user cannot act on is just trivia.
+ */
+const CACHE_CAUSE_INFO: Record<CacheBreakCause, { label: string; icon: string; advice: string }> = {
+	'ttl-expiry': {
+		label: 'Idle longer than the cache lifetime',
+		icon: '⏳',
+		advice: 'The conversation sat idle past the cache lifetime, so the whole prompt had to be written again. Wrapping a session up, or coming back to it sooner, avoids this.',
+	},
+	'model-switch': {
+		label: 'Switched model mid-session',
+		icon: '🔀',
+		advice: 'Each model keeps its own cache, so switching part-way through re-warms the entire conversation. Choosing the model up front is cheaper than switching later.',
+	},
+	'prefix-invalidated': {
+		label: 'Tools or system prompt changed',
+		icon: '🧩',
+		advice: 'Something above the conversation changed — usually an MCP server or skill starting or stopping mid-session, which invalidates everything cached beneath it.',
+	},
+	'compaction': {
+		label: 'Context compacted',
+		icon: '🗜️',
+		advice: 'History was rewritten to fit the context window, which necessarily discards the cached prefix. Largely unavoidable once a session runs long.',
+	},
+};
+
+const CACHE_CAUSES = Object.keys(CACHE_CAUSE_INFO) as CacheBreakCause[];
+
+/** Verdict on a period-level re-write factor. 1.0 means every token written once. */
+function cacheVerdict(factor: number): { cls: string; text: string } {
+	if (factor <= 1.15) { return { cls: 'improving', text: 'Healthy — your context is written about once per session, which is the best case.' }; }
+	if (factor <= 2) { return { cls: 'mixed', text: 'Some re-warming. A few sessions are paying to write context they had already cached.' }; }
+	return { cls: 'declining', text: 'Context is being written several times over. The causes below show where it is going.' };
+}
+
+const CACHE_INTRO = 'Re-sent conversation history is billed at a discount while it stays cached, and at a premium when it has to be written again. This tab shows the moments the cached prompt was thrown away over the last 30 days, and what caused each one.';
+
+function renderCacheCauseRow(cause: CacheBreakCause, breaks: number, tokens: number, sharePct: number): string {
+	const info = CACHE_CAUSE_INFO[cause];
+	return `
+		<div class="cache-cause-row">
+			<div class="cache-cause-head">
+				<span class="cache-cause-label">${info.icon} ${escapeHtml(info.label)}</span>
+				<span class="cache-cause-count">${breaks}× · ${formatCompact(tokens)} tokens re-written</span>
+			</div>
+			<div class="cache-cause-track"><div class="cache-cause-fill" style="width: ${sharePct.toFixed(1)}%"></div></div>
+			<p class="cache-cause-advice">${escapeHtml(info.advice)}</p>
+		</div>`;
+}
+
+function renderCacheTab(d: EfficiencyViewData): string {
+	const c = d.cacheBreakage;
+	if (!c || c.sessionsAnalyzed === 0) {
+		return `<p class="eff-section-note">No prompt-cache data in the last 30 days. Only editors that report per-turn cache token counts (Claude Code, Claude Desktop) can be analysed here.</p>`;
+	}
+	const factor = c.peakContextTokens > 0 ? c.tokensWritten / c.peakContextTokens : 0;
+	const totalBreaks = CACHE_CAUSES.reduce((sum, k) => sum + c.counts[k].breaks, 0);
+	const totalRewritten = CACHE_CAUSES.reduce((sum, k) => sum + c.counts[k].tokensRewritten, 0);
+	const healthy = c.sessionsAnalyzed - c.sessionsWithBreaks;
+
+	if (totalBreaks === 0) {
+		return `
+			<p class="eff-section-note">${escapeHtml(CACHE_INTRO)}</p>
+			<div class="eff-verdict improving"><span class="verdict-icon">✅</span><span class="verdict-text">No cache breaks across ${c.sessionsAnalyzed} session${c.sessionsAnalyzed === 1 ? '' : 's'} in the last 30 days. Nothing to fix.</span></div>`;
+	}
+
+	const verdict = cacheVerdict(factor);
+	const rows = CACHE_CAUSES
+		.filter(k => c.counts[k].breaks > 0)
+		.sort((a, b) => c.counts[b].tokensRewritten - c.counts[a].tokensRewritten)
+		.map(k => renderCacheCauseRow(
+			k,
+			c.counts[k].breaks,
+			c.counts[k].tokensRewritten,
+			totalRewritten > 0 ? (c.counts[k].tokensRewritten / totalRewritten) * 100 : 0,
+		)).join('');
+
+	return `
+		<p class="eff-section-note">${escapeHtml(CACHE_INTRO)}</p>
+		<div class="eff-verdict ${verdict.cls}"><span class="verdict-icon">⚡</span><span class="verdict-text">${escapeHtml(verdict.text)}</span></div>
+		<div class="attr-summary">
+			<div class="attr-stat"><div class="stat-label">Re-write factor</div><div class="stat-value">${factor.toFixed(2)}×</div><div class="stat-sub">1.00× is ideal · worst session ${c.worstRewriteFactor.toFixed(2)}×</div></div>
+			<div class="attr-stat"><div class="stat-label">Cache breaks</div><div class="stat-value">${totalBreaks}</div><div class="stat-sub">${formatCompact(totalRewritten)} tokens re-written</div></div>
+			<div class="attr-stat"><div class="stat-label">Sessions affected</div><div class="stat-value">${c.sessionsWithBreaks} of ${c.sessionsAnalyzed}</div><div class="stat-sub">${healthy} session${healthy === 1 ? '' : 's'} with no break at all</div></div>
+		</div>
+		<div class="cache-causes">${rows}</div>`;
+}
+
 function renderModelsTab(d: EfficiencyViewData): string {
 	initModelState(d);
 	if (d.modelDaily.length === 0) {
@@ -979,6 +1078,7 @@ function renderActiveTab(d: EfficiencyViewData): string {
 		case 'skills': return renderSkillsTab(d);
 		case 'deltas': return renderDeltasTab(d);
 		case 'attribution': return renderAttributionTab(d);
+		case 'cache': return renderCacheTab(d);
 		case 'models': return renderModelsTab(d);
 		case 'value': return renderValueTab(d);
 		case 'combined': return renderCombinedTab(d);
@@ -990,6 +1090,10 @@ function render(): void {
 	if (!root || !data) { return; }
 	setCompactNumbers(data.compactNumbers !== false);
 	destroyCharts();
+	// Snap back to a real tab if the selected one is no longer shown — e.g. the
+	// Prompt Cache tab after cache data disappeared — so the content and the
+	// highlighted tab button never disagree.
+	if (!visibleTabs(data).some(t => t.id === activeTab)) { activeTab = 'trends'; }
 	const verdict = computeVerdict(data);
 	setHtml(root, `
 		<style>${themeStyles}</style>
@@ -1000,7 +1104,7 @@ function render(): void {
 			<p class="eff-subtitle">Are you working more efficiently with AI over time — and is it coming from using AI differently, cheaper models, or leaner sessions? Last updated ${escapeHtml(new Date(data.lastUpdated).toLocaleString())}.</p>
 			<div class="eff-verdict ${verdict.cls}"><span class="verdict-icon">${verdict.icon}</span><span class="verdict-text">${verdict.text}</span></div>
 			<div class="eff-tabs">
-				${TABS.map(t => `<button class="eff-tab ${t.id === activeTab ? 'active' : ''}" data-tab="${t.id}">${t.label}</button>`).join('')}
+				${visibleTabs(data).map(t => `<button class="eff-tab ${t.id === activeTab ? 'active' : ''}" data-tab="${t.id}">${t.label}</button>`).join('')}
 			</div>
 			<div id="eff-tab-content">${renderActiveTab(data)}</div>
 			<p class="caveat">⚠️ Honest caveats: costs are estimates from token counts and public rates; lines of code is a weak value proxy (refactors and generated boilerplate distort it); shorter sessions only count as efficiency when output (lines, applied blocks, PRs) holds or rises. Every trend here should be read alongside its value counterpart.</p>

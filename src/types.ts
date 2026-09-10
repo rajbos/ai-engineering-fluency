@@ -3,6 +3,7 @@
  * Extracted from extension.ts to reduce file size and improve reusability.
  */
 import type { TaskCategory, TaskCategoryBreakdown, TaskClassificationResult } from './taskClassification';
+import type { CacheBreakageResult, CacheBreakagePeriodStats } from './cacheBreakage';
 
 /**
  * Character-to-token ratio for a specific AI model.
@@ -417,6 +418,11 @@ export interface SessionUsageAnalysis {
   mcpTools: McpToolUsage;
   /** Agent-skill invocation counts for this session. See {@link SkillCallUsage}. */
   skillCalls?: SkillCallUsage;
+  /**
+   * Prompt-cache invalidations detected in this session, with the cause of each.
+   * Absent for session formats that do not report per-turn cache token counts.
+   */
+  cacheBreakage?: CacheBreakageResult;
   /** Aggregated task-classification result for this session. */
   taskClassification: TaskClassificationResult;
   modelSwitching: {
@@ -1103,6 +1109,12 @@ export interface UsageAnalysisPeriod {
    * Absent when no session in the period carried moments.
    */
   corrections?: CorrectionPeriodCounts;
+  /**
+   * Aggregated prompt-cache breakage across the period's sessions (folded in by
+   * mergeUsageAnalysis). Absent when no session in the period reported cache
+   * token counts.
+   */
+  cacheBreakage?: CacheBreakagePeriodStats;
 }
 
 /** Aggregated context-window usage for one usage-analysis period. */

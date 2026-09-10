@@ -365,3 +365,45 @@
 .model-radar-wrap { position: relative; height: 360px; margin-bottom: 12px; }
 .model-trend-wrap { position: relative; height: 300px; margin-bottom: 10px; }
 .model-trend-controls { margin: 8px 0; }
+/* ── Prompt Cache tab ─────────────────────────────────────────────── */
+.cache-causes { margin: 14px 0 18px 0; }
+.cache-cause-row {
+	padding: 10px 0;
+	border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.25));
+}
+.cache-cause-row:last-child { border-bottom: none; }
+.cache-cause-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+.cache-cause-label { font-size: 0.95em; font-weight: 600; }
+.cache-cause-count {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.82em;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+.cache-cause-track {
+	position: relative;
+	height: 6px;
+	margin: 6px 0 4px 0;
+	border-radius: 3px;
+	background: var(--vscode-editorWidget-background, rgba(128, 128, 128, 0.18));
+}
+.cache-cause-fill {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	border-radius: 3px;
+	background: var(--vscode-charts-yellow, #fbbf24);
+}
+.cache-cause-advice {
+	margin: 4px 0 0 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.85em;
+	line-height: 1.45;
+}

@@ -9494,6 +9494,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			hasSkills: skillTrends.totalCalls > 0,
 			modelDaily,
 			hasModelComparison: _listComparableModels(modelDaily).filter(m => m.sampleSufficient).length >= 2,
+			cacheBreakage: usage.last30Days.cacheBreakage ?? null,
 			lastUpdated: now.toISOString(),
 			backendConfigured: this.isBackendConfigured(),
 			compactNumbers: this.getCompactNumbersSetting(),
