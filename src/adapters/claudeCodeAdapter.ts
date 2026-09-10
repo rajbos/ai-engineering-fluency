@@ -315,7 +315,12 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 			} else if (event.type === 'system' && event.subtype === 'compact_boundary') {
 				this.processCompactBoundaryEvent(event, analysis);
 			}
+		}
 		if (cacheTurns.size > 0) {
+			// Map iteration is insertion order, which is only approximately chronological —
+			// a late-arriving streaming fragment of an earlier message can land after a
+			// newer one. detectCacheBreakage compares each turn to its predecessor, so the
+			// turns must be in true timestamp order first.
 			const orderedTurns = [...cacheTurns.values()].sort((a, b) => a.timestamp - b.timestamp);
 			analysis.cacheBreakage = detectCacheBreakage(orderedTurns);
 		}
