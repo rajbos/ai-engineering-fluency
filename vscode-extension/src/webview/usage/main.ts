@@ -482,7 +482,22 @@ let worktreeCleanupInProgress = false;
 let worktreeCleanupConfirmPending = false;
 let worktreeCleanupStatus: { processed: number; total: number } = { processed: 0, total: 0 };
 type WorktreeCleanupOutcome = "deleted" | "skipped" | "error";
-type WorktreeCleanupLogEntry = { path: string; branch: string; repoLabel: string; status: WorktreeCleanupOutcome; reason?: string };
+/**
+ * Remediation context for a cleanup row the user still has to act on (see
+ * WorktreeCleanupDiagnostics in extension.ts — same shape, all fields best-effort).
+ */
+type WorktreeCleanupDiagnostics = {
+	lastModified?: string;
+	lastCommitDate?: string;
+	lastCommitRelative?: string;
+	remoteBranch?: string;
+	remoteStatus?: "tracked" | "gone" | "none";
+	ahead?: number;
+	behind?: number;
+	modifiedFiles?: number;
+	untrackedFiles?: number;
+};
+type WorktreeCleanupLogEntry = { path: string; branch: string; repoLabel: string; status: WorktreeCleanupOutcome; reason?: string; diagnostics?: WorktreeCleanupDiagnostics };
 let worktreeCleanupLog: WorktreeCleanupLogEntry[] = [];
 
 function numField(v: unknown): number { return Number(v ?? 0) || 0; }
@@ -2050,14 +2065,21 @@ function _handleWorktreeRootsListClick(target: HTMLElement): boolean {
 }
 
 function _handleWorktreeRowLinkClick(event: MouseEvent, target: HTMLElement): boolean {
-	const revealLink = target.closest(".worktree-reveal-link") as HTMLElement | null;
+	const openEditorBtn = target.closest(".worktree-open-editor-btn") as HTMLElement | null;
+	if (openEditorBtn) {
+		event.preventDefault();
+		const p = decodeURIComponent(openEditorBtn.getAttribute("data-path") || "");
+		if (p) { vscode.postMessage({ command: "openWorktreeInEditor", path: p }); }
+		return true;
+	}
+	const revealLink = target.closest(".worktree-reveal-link, .worktree-reveal-btn") as HTMLElement | null;
 	if (revealLink) {
 		event.preventDefault();
 		const p = decodeURIComponent(revealLink.getAttribute("data-path") || "");
 		if (p) { vscode.postMessage({ command: "revealPath", path: p }); }
 		return true;
 	}
-	const deleteLink = target.closest(".worktree-delete-link") as HTMLElement | null;
+	const deleteLink = target.closest(".worktree-delete-link, .worktree-delete-btn") as HTMLElement | null;
 	if (deleteLink) {
 		event.preventDefault();
 		const p = decodeURIComponent(deleteLink.getAttribute("data-path") || "");
@@ -2257,8 +2279,28 @@ function handleCleanupWorktreeResult(message: any): void {
 		repoLabel: String(message.repoLabel ?? ""),
 		status,
 		reason: typeof message.reason === "string" ? message.reason : undefined,
+		diagnostics: sanitizeWorktreeCleanupDiagnostics(message.diagnostics),
 	});
 	updateWorktreeResults();
+}
+
+/** Normalizes the optional diagnostics payload; a missing/!object value yields undefined (no detail line). */
+function sanitizeWorktreeCleanupDiagnostics(raw: unknown): WorktreeCleanupDiagnostics | undefined {
+	if (!raw || typeof raw !== "object") { return undefined; }
+	const d = raw as Record<string, unknown>;
+	const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+	const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+	return {
+		lastModified: str(d.lastModified),
+		lastCommitDate: str(d.lastCommitDate),
+		lastCommitRelative: str(d.lastCommitRelative),
+		remoteBranch: str(d.remoteBranch),
+		remoteStatus: d.remoteStatus === "tracked" || d.remoteStatus === "gone" || d.remoteStatus === "none" ? d.remoteStatus : undefined,
+		ahead: num(d.ahead),
+		behind: num(d.behind),
+		modifiedFiles: num(d.modifiedFiles),
+		untrackedFiles: num(d.untrackedFiles),
+	};
 }
 
 function handleCleanupComplete(): void {
@@ -4249,6 +4291,90 @@ function renderWorktreeCleanupCard(): string {
   </div>`;
 }
 
+/** Local date/time label for an ISO string; empty when it is missing or unparseable. */
+function formatWorktreeTimestamp(iso: string | undefined): string {
+	if (!iso) { return ""; }
+	const date = new Date(iso);
+	return isNaN(date.getTime()) ? "" : date.toLocaleString();
+}
+
+/** One "label: value" chip; `danger` marks a fact that blocks or endangers the cleanup. */
+function worktreeChip(icon: string, text: string, title: string, danger = false): string {
+	return `<span class="worktree-cleanup-chip${danger ? " danger" : ""}" title="${escapeHtml(title)}">${icon} ${escapeHtml(text)}</span>`;
+}
+
+/** "Last updated" / "Last commit" chips — how stale (or how live) this worktree is. */
+function buildWorktreeAgeChips(d: WorktreeCleanupDiagnostics): string[] {
+	const chips: string[] = [];
+	const lastModified = formatWorktreeTimestamp(d.lastModified);
+	if (lastModified) {
+		chips.push(worktreeChip("🕒", `Last updated: ${lastModified}`, "Newest file modification at the worktree root"));
+	}
+	const commitTitle = formatWorktreeTimestamp(d.lastCommitDate) || "Last commit on the checked-out branch";
+	if (d.lastCommitRelative || d.lastCommitDate) {
+		chips.push(worktreeChip("📝", `Last commit: ${d.lastCommitRelative || commitTitle}`, commitTitle));
+	}
+	return chips;
+}
+
+/** Remote-branch + ahead/behind chips — whether the work here exists anywhere but this folder. */
+function buildWorktreeRemoteChips(d: WorktreeCleanupDiagnostics): string[] {
+	const chips: string[] = [];
+	// An undefined status means the probe itself failed, so no remote chip is shown at all —
+	// silence is correct here, whereas "never pushed" would be an invented fact.
+	if (d.remoteStatus === "none") {
+		chips.push(worktreeChip("⚠️", "Remote: none (never pushed)", "This branch was never pushed — it has no upstream tracking branch", true));
+	} else if (d.remoteStatus === "gone") {
+		chips.push(worktreeChip("⚠️", `Remote: ${d.remoteBranch ?? "unknown"} (gone)`, "The upstream branch no longer exists on the remote (deleted or pruned)", true));
+	} else if (d.remoteStatus === "tracked" && d.remoteBranch) {
+		chips.push(worktreeChip("🌐", `Remote: ${d.remoteBranch}`, "Upstream tracking branch"));
+	}
+	if (d.ahead === undefined && d.behind === undefined) { return chips; }
+	const ahead = d.ahead ?? 0, behind = d.behind ?? 0;
+	const synced = ahead === 0 && behind === 0;
+	chips.push(worktreeChip(
+		synced ? "✅" : "🔀",
+		`Push status: ${synced ? "up to date" : `${ahead} ahead · ${behind} behind`}`,
+		"Commits on this branch compared with its upstream",
+		ahead > 0,
+	));
+	return chips;
+}
+
+/** Working-tree chip — how much uncommitted work would be lost by a force-delete. */
+function buildWorktreeDirtyChips(d: WorktreeCleanupDiagnostics): string[] {
+	if (d.modifiedFiles === undefined && d.untrackedFiles === undefined) { return []; }
+	const modified = d.modifiedFiles ?? 0, untracked = d.untrackedFiles ?? 0;
+	const clean = modified === 0 && untracked === 0;
+	return [worktreeChip(
+		clean ? "✅" : "✏️",
+		`Changes: ${clean ? "clean" : `${modified} modified · ${untracked} untracked`}`,
+		"Uncommitted work in this worktree",
+		!clean,
+	)];
+}
+
+/**
+ * The remediation facts for one blocked cleanup row, as compact "label: value" chips. Each chip
+ * answers a question the user would otherwise have to open a terminal to answer: is this stale,
+ * does the branch still exist on the remote, is it in sync, and how much work is uncommitted.
+ */
+function buildWorktreeCleanupDetailChips(d: WorktreeCleanupDiagnostics | undefined): string {
+	if (!d) { return ""; }
+	const chips = [...buildWorktreeAgeChips(d), ...buildWorktreeRemoteChips(d), ...buildWorktreeDirtyChips(d)];
+	return chips.length === 0 ? "" : `<div class="worktree-cleanup-chips">${chips.join("")}</div>`;
+}
+
+/** Per-row remediation actions for a worktree the cleanup could not delete. */
+function buildWorktreeCleanupActions(e: WorktreeCleanupLogEntry): string {
+	const p = encodeURIComponent(e.path);
+	return `<div class="worktree-cleanup-log-actions">
+      <button type="button" class="button secondary worktree-open-editor-btn" data-path="${p}" title="Open this worktree folder in a new VS Code window so you can commit, push, or clean it up">💻 Open in VS Code</button>
+      <button type="button" class="button secondary worktree-reveal-btn" data-path="${p}" title="Show this folder in the OS file explorer">📂 Reveal folder</button>
+      <button type="button" class="button secondary worktree-delete-btn" data-path="${p}" data-branch="${encodeURIComponent(e.branch)}" data-repo="${encodeURIComponent(e.repoLabel)}" data-pushed="?" title="Try removing it again — you will be asked to confirm, and to force-delete if it still has uncommitted changes">🗑️ Delete anyway…</button>
+    </div>`;
+}
+
 /** Non-deleted cleanup outcomes (skipped/error) — successful deletions just remove the row, no need to list them. */
 function renderWorktreeCleanupLog(): string {
 	const notable = worktreeCleanupLog.filter((e) => e.status !== "deleted");
@@ -4264,6 +4390,8 @@ function renderWorktreeCleanupLog(): string {
         </div>
         <div class="worktree-cleanup-log-path">${escapeHtml(e.path)}</div>
         <div class="worktree-cleanup-log-reason">${escapeHtml(e.reason || "")}</div>
+        ${buildWorktreeCleanupDetailChips(e.diagnostics)}
+        ${buildWorktreeCleanupActions(e)}
       </div>
     </div>`;
 	}).join("");
@@ -4292,8 +4420,12 @@ function renderWorktreeCleanupStatus(): string {
 
 function renderWorktreeResults(): string {
 	if (worktreeResults.length === 0) {
+		// The cleanup report is still shown here: a run that deleted or errored on every
+		// remaining worktree empties this list, and dropping the report with it would hide
+		// exactly the rows the user still has to act on.
 		if (worktreeScanInProgress) { return '<div style="padding: 16px; color: var(--text-muted);">Discovering worktrees…</div>'; }
-		return '<div style="padding: 16px; color: var(--text-muted);">No worktrees found yet. Add root folders above and click Scan.</div>';
+		return '<div style="padding: 16px; color: var(--text-muted);">No worktrees found yet. Add root folders above and click Scan.</div>'
+			+ renderWorktreeCleanupStatus();
 	}
 	const groups = groupWorktreesByRepo(worktreeResults);
 	const totalBytes = worktreeResults.reduce((s, w) => s + knownBytes(w), 0);
