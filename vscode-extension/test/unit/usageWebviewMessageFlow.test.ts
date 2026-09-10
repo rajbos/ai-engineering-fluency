@@ -147,6 +147,15 @@ function buildStatsWithCorrections(): Record<string, unknown> {
 	};
 }
 
+/** Same report, but with one escalating user correction so the 📈 filter pill renders. */
+function buildStatsWithEscalatingCorrection(): Record<string, unknown> {
+	const stats = buildStatsWithCorrections() as any;
+	stats.correctionReport.counts.escalatedUserCorrections = 1;
+	stats.correctionReport.repos[0].counts.escalatedUserCorrections = 1;
+	stats.correctionReport.repos[0].sessions[0].moments[0].escalated = true;
+	return stats;
+}
+
 interface Harness {
 	window: any;
 	posted: any[];
@@ -744,4 +753,38 @@ test('filters corrections by type and opens the selected session turn', async ()
 	assert.equal(message.command, 'openSessionFile');
 	assert.equal(message.file, '/sessions/example.jsonl');
 	assert.equal(message.turnNumber, 2);
+});
+
+test('corrections filter reports how many moments are shown and can be cleared', async () => {
+	const harness = await bootWebview(buildStatsWithCorrections());
+	harness.window.document.querySelector('.tab-button[data-tab="corrections"]')?.click();
+
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Showing all 2 listed correction moments/);
+	assert.equal(harness.window.document.querySelector('button.correction-clear-filter'), null, 'no clear button without a filter');
+
+	harness.window.document.querySelector('button[data-correction-filter="tool-error"]')?.click();
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Showing 1 of 2 listed correction moments/);
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Tool errors/);
+	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 1);
+
+	harness.window.document.querySelector('button.correction-clear-filter')?.click();
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Showing all 2 listed correction moments/);
+	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 2);
+});
+
+test('the escalating pill is a filter that narrows the list to escalated moments', async () => {
+	const harness = await bootWebview(buildStatsWithEscalatingCorrection());
+	harness.window.document.querySelector('.tab-button[data-tab="corrections"]')?.click();
+
+	const escalating = harness.window.document.querySelector('button[data-correction-filter="escalated"]');
+	assert.ok(escalating, 'the escalating pill must be a clickable filter, not a static badge');
+	escalating.click();
+
+	assert.equal(
+		harness.window.document.querySelector('button[data-correction-filter="escalated"]')?.getAttribute('aria-pressed'),
+		'true',
+	);
+	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 1);
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Showing 1 of 2 listed correction moments/);
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Escalating corrections/);
 });

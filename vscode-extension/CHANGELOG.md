@@ -17,6 +17,7 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ### Bug Fixes
 - The worktree cleanup report no longer disappears when the run empties the worktree list — the skipped/failed rows you still have to act on stayed hidden behind the "No worktrees found yet" empty state
+- Corrections tab filtering is now readable: the "📈 escalating" badge is a real filter pill (it did nothing when clicked before), active pills are outlined and bold with a "✕" plus a "Clear filter" button, a "Showing X of Y listed correction moments" bar states what the list below is filtered to, each repository header reports how many of its sessions and moments match, and the empty-filter state explains why a counted moment can sit outside the capped detail sample
 - Fix the "Efficiency" nav button in the Efficiency view doing nothing when clicked — the view passed no active view to the shared nav bar, so its own button rendered enabled with no click handler instead of being marked as the current page
 - Surface a warning when copying a path from the Usage Analysis view fails: the webview reported the failure but nothing on the extension side listened, so a failed copy was completely silent
 - Sharing-server sync now reports "Copilot App" and "Claude (VS Code)" as their own editor labels (matching the local Interaction Modes view) instead of lumping them into "Copilot CLI"/"Claude Code" — the team dashboard's "Editors Used" panel previously had no way to show these categories at all, since the synced `editor` field never carried the distinction
