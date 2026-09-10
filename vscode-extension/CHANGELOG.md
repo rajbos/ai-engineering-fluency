@@ -5,6 +5,7 @@ All notable changes to the VS Code extension will be documented in this file.
 ## [Unreleased]
 
 ### Features
+- Worktree cleanup now explains *why* each worktree could not be removed and lets you act on it: every skipped/failed row shows when the folder was last touched, the last commit's age, whether the branch still has a remote (and whether that remote branch was deleted), the ahead/behind push status, and the number of modified/untracked files — plus "💻 Open in VS Code", "📂 Reveal folder" and "🗑️ Delete anyway…" buttons on the row itself
 - New "What's New" view (command palette: *AI Engineering Fluency: What's New*) listing the last 5 releases in plain English, plus a one-at-a-time notification that points out a new view/tab/section after an update — at most one a day, at most 3 per release, and never one you already opened yourself. Turn the notifications off with `aiEngineeringFluency.whatsNew.notificationsEnabled`; see [docs/features/WHATS-NEW.md](../docs/features/WHATS-NEW.md)
 - New "Research > TTFT" tab in the Diagnostic Report: time-to-first-token averages by day/week/month with a trendline per model, read from VS Code Copilot Chat's own debug log (`attrs.ttft`) — no setup required, see [docs/features/TTFT-TRENDS.md](../docs/features/TTFT-TRENDS.md)
 - New "Skill Suggestions" section in the Usage Analysis Tools & Integrations tab: clusters the first prompt of each session to find tasks you keep prompting for manually (candidates for a reusable skill or prompt file), plus a new insight when a task repeats across 3+ sessions
@@ -15,6 +16,7 @@ All notable changes to the VS Code extension will be documented in this file.
 - Show only the model part of a three-part custom-endpoint model ID (`customendpoint/Mistral/mistral-medium-latest` → `mistral-medium-latest`), and estimate its cost from that model's pricing entry
 
 ### Bug Fixes
+- The worktree cleanup report no longer disappears when the run empties the worktree list — the skipped/failed rows you still have to act on stayed hidden behind the "No worktrees found yet" empty state
 - Fix the "Efficiency" nav button in the Efficiency view doing nothing when clicked — the view passed no active view to the shared nav bar, so its own button rendered enabled with no click handler instead of being marked as the current page
 - Surface a warning when copying a path from the Usage Analysis view fails: the webview reported the failure but nothing on the extension side listened, so a failed copy was completely silent
 - Sharing-server sync now reports "Copilot App" and "Claude (VS Code)" as their own editor labels (matching the local Interaction Modes view) instead of lumping them into "Copilot CLI"/"Claude Code" — the team dashboard's "Editors Used" panel previously had no way to show these categories at all, since the synced `editor` field never carried the distinction

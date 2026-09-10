@@ -502,6 +502,36 @@ interface WorktreeScanResult {
 	bytes: number;
 }
 
+/**
+ * Extra git/filesystem context gathered for a worktree the bulk cleanup could not delete.
+ * A bare "Has uncommitted or untracked changes." tells the user nothing about *what* to do,
+ * so every field here exists to answer a remediation question: is this stale or still active
+ * (lastModified/lastCommitDate), does the branch exist on the remote and is it in sync
+ * (remoteBranch/ahead/behind), and how much local work is actually at risk (modifiedFiles/
+ * untrackedFiles). Fields are optional because each probe is best-effort — a git failure
+ * degrades that one field, it never fails the whole report.
+ */
+interface WorktreeCleanupDiagnostics {
+	/** Newest mtime seen at the worktree root (ISO), i.e. when the folder was last touched. */
+	lastModified?: string;
+	/** ISO timestamp of the last commit on the checked-out branch. */
+	lastCommitDate?: string;
+	/** Human-readable relative age of the last commit ("3 weeks ago"). */
+	lastCommitRelative?: string;
+	/** Upstream tracking ref (e.g. "origin/feature-x"), or undefined when the branch has no upstream. */
+	remoteBranch?: string;
+	/** True when a remote branch with this name actually exists on the remote right now. */
+	remoteBranchExists?: boolean;
+	/** Commits on HEAD not on the upstream branch. */
+	ahead?: number;
+	/** Commits on the upstream branch not on HEAD. */
+	behind?: number;
+	/** Tracked files with uncommitted modifications. */
+	modifiedFiles?: number;
+	/** Untracked files (excluding ignored ones). */
+	untrackedFiles?: number;
+}
+
 type UsageAnalysisTab = 'activity' | 'tools' | 'health' | 'worktrees' | 'insights' | 'corrections';
 
 /** Narrows an arbitrary tab name (e.g. from the what's-new catalog) to one `showUsageAnalysisOnTab` accepts. */
@@ -7918,6 +7948,7 @@ private computeFallbackDailyRollup(
 			scanWorktrees: (message) => this.dispatch('scanWorktrees:analysis', () => this.diagHandleScanWorktrees(message)),
 			cancelWorktreeScan: () => this.dispatch('cancelWorktreeScan:analysis', () => this.diagHandleCancelWorktreeScan()),
 			deleteWorktree: (message) => this.dispatch('deleteWorktree:analysis', () => this.diagHandleDeleteWorktree(message)),
+			openWorktreeInEditor: (message) => this.dispatch('openWorktreeInEditor:analysis', () => this.diagHandleOpenWorktreeInEditor(message)),
 			cleanupPushedWorktrees: (message) => this.dispatch('cleanupPushedWorktrees:analysis', () => this.diagHandleCleanupPushedWorktrees(message)),
 			cancelCleanupPushedWorktrees: () => this.dispatch('cancelCleanupPushedWorktrees:analysis', () => this.diagHandleCancelCleanupPushedWorktrees()),
 			// The webview posts this when navigator.clipboard rejects (no permission,
@@ -11145,6 +11176,77 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     return match ? match[1] : remoteUrl;
   }
 
+  /** Counts `git status --porcelain` lines, split into untracked ("??") and modified/staged. */
+  private async getWorktreeDirtyCounts(worktreeRoot: string): Promise<{ modifiedFiles?: number; untrackedFiles?: number }> {
+    const status = await this.runGit(["status", "--porcelain"], worktreeRoot);
+    if (!status.ok) { return {}; }
+    const lines = status.stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
+    const untrackedFiles = lines.filter((line) => line.startsWith("??")).length;
+    return { modifiedFiles: lines.length - untrackedFiles, untrackedFiles };
+  }
+
+  /**
+   * Upstream tracking info: the upstream ref name, whether it still exists on the remote
+   * (a branch deleted after a merged PR is the single most common reason a leftover worktree
+   * is safe to remove), and the ahead/behind commit counts against it.
+   */
+  private async getWorktreeRemoteBranchInfo(worktreeRoot: string): Promise<{ remoteBranch?: string; remoteBranchExists?: boolean; ahead?: number; behind?: number }> {
+    const upstream = await this.runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], worktreeRoot);
+    if (!upstream.ok || !upstream.stdout) { return { remoteBranchExists: false }; }
+    const remoteBranch = upstream.stdout;
+    // Resolving the remote-tracking ref locally (no network) tells us whether git still knows
+    // about that branch; a pruned/deleted remote branch leaves the upstream name but no ref.
+    const refExists = await this.runGit(["rev-parse", "--verify", "--quiet", `refs/remotes/${remoteBranch}`], worktreeRoot);
+    const counts = await this.runGit(["rev-list", "--left-right", "--count", `HEAD...${remoteBranch}`], worktreeRoot);
+    const [aheadRaw, behindRaw] = counts.ok ? counts.stdout.split(/\s+/) : [];
+    return {
+      remoteBranch,
+      remoteBranchExists: refExists.ok && refExists.stdout.length > 0,
+      ahead: Number.isFinite(Number(aheadRaw)) && aheadRaw !== undefined ? Number(aheadRaw) : undefined,
+      behind: Number.isFinite(Number(behindRaw)) && behindRaw !== undefined ? Number(behindRaw) : undefined,
+    };
+  }
+
+  /** Newest mtime among the worktree root's direct entries, as an ISO string ("when was this last touched"). */
+  private async getWorktreeLastModified(worktreeRoot: string): Promise<string | undefined> {
+    try {
+      const entries = await fs.promises.readdir(worktreeRoot, { withFileTypes: true });
+      let newest = (await fs.promises.stat(worktreeRoot)).mtimeMs;
+      for (const entry of entries) {
+        if (entry.name === ".git") { continue; }
+        try {
+          const stat = await fs.promises.stat(path.join(worktreeRoot, entry.name));
+          if (stat.mtimeMs > newest) { newest = stat.mtimeMs; }
+        } catch { /* unreadable entry, ignore */ }
+      }
+      return new Date(newest).toISOString();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Best-effort remediation context for a worktree the cleanup skipped or failed on. Every
+   * probe degrades independently, so a partially broken repository still yields whatever
+   * fields could be read instead of an all-or-nothing failure.
+   */
+  private async collectWorktreeCleanupDiagnostics(worktreeRoot: string): Promise<WorktreeCleanupDiagnostics> {
+    const [lastModified, lastCommitDate, lastCommitRelative, remoteInfo, dirty] = await Promise.all([
+      this.getWorktreeLastModified(worktreeRoot),
+      this.runGit(["log", "-1", "--format=%cI"], worktreeRoot),
+      this.runGit(["log", "-1", "--format=%cr"], worktreeRoot),
+      this.getWorktreeRemoteBranchInfo(worktreeRoot),
+      this.getWorktreeDirtyCounts(worktreeRoot),
+    ]);
+    return {
+      lastModified,
+      lastCommitDate: lastCommitDate.ok && lastCommitDate.stdout ? lastCommitDate.stdout : undefined,
+      lastCommitRelative: lastCommitRelative.ok && lastCommitRelative.stdout ? lastCommitRelative.stdout : undefined,
+      ...remoteInfo,
+      ...dirty,
+    };
+  }
+
   /**
    * Resolve the main (non-linked) repository root that owns a given worktree, so `git worktree
    * remove` can be run from a location git recognizes as the repository. Returns null when the
@@ -11277,6 +11379,24 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     }
   }
 
+  /**
+   * Opens a worktree folder in a VS Code window so the user can immediately deal with whatever
+   * blocked its cleanup (commit, push, or delete files). Uses a new window rather than replacing
+   * the current one so the Usage Analysis panel — and the cleanup report it is showing — survives.
+   */
+  private async diagHandleOpenWorktreeInEditor(message: any): Promise<void> {
+    const worktreePath = typeof message?.path === "string" ? message.path.trim() : "";
+    if (!worktreePath) { return; }
+    try {
+      const stat = await fs.promises.stat(worktreePath);
+      if (!stat.isDirectory()) { throw new Error("not a directory"); }
+    } catch {
+      vscode.window.showErrorMessage(`Could not open "${worktreePath}" — the folder no longer exists.`);
+      return;
+    }
+    await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(worktreePath), { forceNewWindow: true });
+  }
+
   private diagHandleCancelCleanupPushedWorktrees(): void {
     this.worktreeCleanupId++;
     if (this.analysisPanel && this.isPanelOpen(this.analysisPanel)) {
@@ -11333,10 +11453,12 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       if (outcome.status === "deleted") { deleted++; send({ command: "worktreeDeleted", path: target.path }); }
       else if (outcome.status === "skipped") { skipped++; }
       else { errors++; }
+      // Only the rows the user still has to act on get the (git-invoking) diagnostics pass.
+      const diagnostics = outcome.status === "deleted" ? undefined : await this.collectWorktreeCleanupDiagnostics(target.path);
       send({
         command: "cleanupWorktreeResult",
         path: target.path, branch: target.branch, repoLabel: target.repoLabel,
-        status: outcome.status, reason: outcome.reason,
+        status: outcome.status, reason: outcome.reason, diagnostics,
         processed: i + 1, total: candidates.length,
       });
     }
