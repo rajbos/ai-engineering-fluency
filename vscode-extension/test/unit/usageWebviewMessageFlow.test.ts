@@ -395,7 +395,7 @@ test('a blocked cleanup entry shows remediation details and actionable buttons',
 			lastCommitDate: '2026-08-20T09:00:00.000Z',
 			lastCommitRelative: '3 weeks ago',
 			remoteBranch: 'origin/stale-branch',
-			remoteBranchExists: false,
+			remoteStatus: 'gone',
 			ahead: 2,
 			behind: 5,
 			modifiedFiles: 3,
@@ -427,7 +427,7 @@ test('a synced, never-dirty entry reports "up to date" rather than counts', asyn
 		repoLabel: 'repo',
 		status: 'error',
 		reason: 'Could not delete worktree.',
-		diagnostics: { remoteBranch: 'origin/clean', remoteBranchExists: true, ahead: 0, behind: 0, modifiedFiles: 0, untrackedFiles: 0 },
+		diagnostics: { remoteBranch: 'origin/clean', remoteStatus: 'tracked', ahead: 0, behind: 0, modifiedFiles: 0, untrackedFiles: 0 },
 		processed: 1,
 		total: 1,
 	});
@@ -450,7 +450,7 @@ test('a branch that was never pushed is flagged as having no remote', async () =
 		repoLabel: 'repo',
 		status: 'skipped',
 		reason: 'Worktree has commits not pushed to any remote.',
-		diagnostics: { remoteBranchExists: false },
+		diagnostics: { remoteStatus: 'none' },
 		processed: 1,
 		total: 1,
 	});
@@ -458,6 +458,32 @@ test('a branch that was never pushed is flagged as having no remote', async () =
 
 	const rendered = harness.text('.worktree-cleanup-log');
 	assert.ok(rendered?.includes('Remote: none (never pushed)'), `expected a missing-remote warning, got: ${rendered}`);
+});
+
+test('a worktree whose remote could not be probed shows no remote claim at all', async () => {
+	// "Could not read this worktree" and "this branch has no upstream" both fail the same git
+	// lookup. Reporting the unreadable case as "never pushed" would be an invented fact, so the
+	// host omits remoteStatus entirely and the row must simply carry no remote chip.
+	const harness = await bootWebview(buildStats());
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult',
+		path: 'C:\\wt\\unreadable',
+		branch: '?',
+		repoLabel: 'repo',
+		status: 'error',
+		reason: 'Could not safely locate the main repository.',
+		diagnostics: { lastModified: '2026-09-01T08:30:00.000Z' },
+		processed: 1,
+		total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+
+	const rendered = harness.text('.worktree-cleanup-log');
+	assert.ok(rendered?.includes('Last updated:'), `expected the readable facts to still render, got: ${rendered}`);
+	assert.ok(!rendered?.includes('Remote:'), 'an unprobed remote must not be reported as a fact');
+	assert.ok(!rendered?.includes('never pushed'), 'an unreadable worktree must never be called "never pushed"');
 });
 
 test('clicking "Open in VS Code" asks the host to open that worktree folder', async () => {

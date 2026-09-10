@@ -491,7 +491,7 @@ type WorktreeCleanupDiagnostics = {
 	lastCommitDate?: string;
 	lastCommitRelative?: string;
 	remoteBranch?: string;
-	remoteBranchExists?: boolean;
+	remoteStatus?: "tracked" | "gone" | "none";
 	ahead?: number;
 	behind?: number;
 	modifiedFiles?: number;
@@ -2295,7 +2295,7 @@ function sanitizeWorktreeCleanupDiagnostics(raw: unknown): WorktreeCleanupDiagno
 		lastCommitDate: str(d.lastCommitDate),
 		lastCommitRelative: str(d.lastCommitRelative),
 		remoteBranch: str(d.remoteBranch),
-		remoteBranchExists: typeof d.remoteBranchExists === "boolean" ? d.remoteBranchExists : undefined,
+		remoteStatus: d.remoteStatus === "tracked" || d.remoteStatus === "gone" || d.remoteStatus === "none" ? d.remoteStatus : undefined,
 		ahead: num(d.ahead),
 		behind: num(d.behind),
 		modifiedFiles: num(d.modifiedFiles),
@@ -4320,11 +4320,13 @@ function buildWorktreeAgeChips(d: WorktreeCleanupDiagnostics): string[] {
 /** Remote-branch + ahead/behind chips — whether the work here exists anywhere but this folder. */
 function buildWorktreeRemoteChips(d: WorktreeCleanupDiagnostics): string[] {
 	const chips: string[] = [];
-	if (!d.remoteBranch) {
+	// An undefined status means the probe itself failed, so no remote chip is shown at all —
+	// silence is correct here, whereas "never pushed" would be an invented fact.
+	if (d.remoteStatus === "none") {
 		chips.push(worktreeChip("⚠️", "Remote: none (never pushed)", "This branch was never pushed — it has no upstream tracking branch", true));
-	} else if (d.remoteBranchExists === false) {
-		chips.push(worktreeChip("⚠️", `Remote: ${d.remoteBranch} (gone)`, "The upstream branch no longer exists on the remote (deleted or pruned)", true));
-	} else {
+	} else if (d.remoteStatus === "gone") {
+		chips.push(worktreeChip("⚠️", `Remote: ${d.remoteBranch ?? "unknown"} (gone)`, "The upstream branch no longer exists on the remote (deleted or pruned)", true));
+	} else if (d.remoteStatus === "tracked" && d.remoteBranch) {
 		chips.push(worktreeChip("🌐", `Remote: ${d.remoteBranch}`, "Upstream tracking branch"));
 	}
 	if (d.ahead === undefined && d.behind === undefined) { return chips; }

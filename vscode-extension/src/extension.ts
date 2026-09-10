@@ -518,10 +518,15 @@ interface WorktreeCleanupDiagnostics {
 	lastCommitDate?: string;
 	/** Human-readable relative age of the last commit ("3 weeks ago"). */
 	lastCommitRelative?: string;
-	/** Upstream tracking ref (e.g. "origin/feature-x"), or undefined when the branch has no upstream. */
+	/** Upstream tracking ref (e.g. "origin/feature-x"), present only when `remoteStatus` is "tracked" or "gone". */
 	remoteBranch?: string;
-	/** True when a remote branch with this name actually exists on the remote right now. */
-	remoteBranchExists?: boolean;
+	/**
+	 * Tri-state so an unreadable worktree is never reported as a fact: "tracked" (upstream exists),
+	 * "gone" (upstream configured but its remote-tracking ref is gone), "none" (branch has no
+	 * upstream). Left undefined when the probe itself failed — the UI then shows no remote chip
+	 * rather than claiming the branch was never pushed.
+	 */
+	remoteStatus?: "tracked" | "gone" | "none";
 	/** Commits on HEAD not on the upstream branch. */
 	ahead?: number;
 	/** Commits on the upstream branch not on HEAD. */
@@ -11189,10 +11194,18 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    * Upstream tracking info: the upstream ref name, whether it still exists on the remote
    * (a branch deleted after a merged PR is the single most common reason a leftover worktree
    * is safe to remove), and the ahead/behind commit counts against it.
+   *
+   * A failing `@{upstream}` lookup is ambiguous — it means both "this branch has no upstream"
+   * and "this is not a readable git worktree" — so the worktree is probed for readability
+   * first. When that probe fails nothing is reported, because claiming "never pushed" for a
+   * worktree we could not read would put a false remediation fact in front of the user.
    */
-  private async getWorktreeRemoteBranchInfo(worktreeRoot: string): Promise<{ remoteBranch?: string; remoteBranchExists?: boolean; ahead?: number; behind?: number }> {
+  private async getWorktreeRemoteBranchInfo(worktreeRoot: string): Promise<{ remoteBranch?: string; remoteStatus?: "tracked" | "gone" | "none"; ahead?: number; behind?: number }> {
+    const readable = await this.runGit(["rev-parse", "--is-inside-work-tree"], worktreeRoot);
+    if (!readable.ok || readable.stdout !== "true") { return {}; }
+
     const upstream = await this.runGit(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], worktreeRoot);
-    if (!upstream.ok || !upstream.stdout) { return { remoteBranchExists: false }; }
+    if (!upstream.ok || !upstream.stdout) { return { remoteStatus: "none" }; }
     const remoteBranch = upstream.stdout;
     // Resolving the remote-tracking ref locally (no network) tells us whether git still knows
     // about that branch; a pruned/deleted remote branch leaves the upstream name but no ref.
@@ -11201,7 +11214,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     const [aheadRaw, behindRaw] = counts.ok ? counts.stdout.split(/\s+/) : [];
     return {
       remoteBranch,
-      remoteBranchExists: refExists.ok && refExists.stdout.length > 0,
+      remoteStatus: refExists.ok && refExists.stdout.length > 0 ? "tracked" : "gone",
       ahead: Number.isFinite(Number(aheadRaw)) && aheadRaw !== undefined ? Number(aheadRaw) : undefined,
       behind: Number.isFinite(Number(behindRaw)) && behindRaw !== undefined ? Number(behindRaw) : undefined,
     };
