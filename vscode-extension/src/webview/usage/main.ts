@@ -117,6 +117,9 @@ type EvaluatedInsight = {
 
 type CorrectionMomentType = 'user-correction' | 'edit-retry' | 'edit-self-correction' | 'tool-error' | 'agent-self-correction';
 
+/** A correction filter is either a moment type or the cross-type "escalated" flag. */
+type CorrectionFilter = CorrectionMomentType | 'escalated';
+
 type CorrectionMoment = {
 	type: CorrectionMomentType;
 	turnNumber: number;
@@ -412,7 +415,7 @@ let activeTab = 'activity';
 let pendingTabAnchor: string | null = null;
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentInsights: EvaluatedInsight[] = [];
-let activeCorrectionFilter: CorrectionMomentType | null = null;
+let activeCorrectionFilter: CorrectionFilter | null = null;
 let currentCorrectionReport: CorrectionReport | null | undefined = undefined;
 // Persisted across stats refreshes so the curation section doesn't disappear
 // when a periodic updateStats message omits curationAnalysis.
@@ -1705,6 +1708,7 @@ function sanitizeInsights(rawInsights: any[]): EvaluatedInsight[] {
 }
 
 const CORRECTION_MOMENT_TYPES: CorrectionMomentType[] = ['user-correction', 'edit-retry', 'edit-self-correction', 'tool-error', 'agent-self-correction'];
+const CORRECTION_FILTERS: CorrectionFilter[] = [...CORRECTION_MOMENT_TYPES, 'escalated'];
 
 function sanitizeCorrectionMoment(raw: any): CorrectionMoment | null {
 	if (!raw || typeof raw !== 'object') { return null; }
@@ -3618,21 +3622,82 @@ function buildCorrectionRepoActionsHtml(repository: string): string {
 		</div>`;
 }
 
+const CORRECTION_FILTER_LABELS: Record<CorrectionFilter, string> = {
+	'user-correction': 'User corrections',
+	'tool-error': 'Tool errors',
+	'edit-retry': 'Edit retries',
+	'edit-self-correction': 'Edit self-corrections',
+	'agent-self-correction': 'Agent self-corrections',
+	'escalated': 'Escalating corrections',
+};
+
+/** True when a moment satisfies the active corrections filter (null filter = everything). */
+function correctionMomentMatchesFilter(moment: CorrectionMoment, filter: CorrectionFilter | null): boolean {
+	if (!filter) { return true; }
+	if (filter === 'escalated') { return moment.escalated === true; }
+	return moment.type === filter;
+}
+
+/** Small "✕ Clear filter" button shown whenever a corrections filter is active. */
+function buildCorrectionClearFilterButtonHtml(): string {
+	return `<button type="button" class="correction-clear-filter" title="Show every correction moment again" style="font-size:11px; padding:2px 10px; border-radius:10px; border:1px solid var(--border-color, transparent); background:var(--bg-tertiary); color:var(--text-primary); cursor:pointer;">✕ Clear filter</button>`;
+}
+
+/** One filter pill. Active pills are outlined, bold and carry a ✕ so the active state is unmistakable. */
+function correctionFilterChipHtml(count: number, label: string, filter: CorrectionFilter, accent?: string): string {
+	if (count <= 0) { return ''; }
+	const active = activeCorrectionFilter === filter;
+	const border = active ? 'var(--vscode-focusBorder)' : (accent ?? 'transparent');
+	const background = active ? 'var(--vscode-button-secondaryBackground, var(--bg-tertiary))' : (accent ? accent.replace('0.85', '0.12') : 'var(--bg-tertiary)');
+	const title = active ? `Showing only ${label} — select again to clear` : `Show only ${label}`;
+	return `<button type="button" data-correction-filter="${filter}" aria-pressed="${active}" title="${escapeHtml(title)}" style="font-size:11px; font-weight:${active ? '700' : '400'}; padding:2px 10px; border-radius:10px; border:1px solid ${border}; background:${background}; color:var(--text-primary); cursor:pointer; box-shadow:${active ? '0 0 0 1px var(--vscode-focusBorder)' : 'none'};">${count} ${escapeHtml(label)}${active ? ' ✕' : ''}</button>`;
+}
+
+/** The full pill row, including the escalating pill which filters across types. */
+function buildCorrectionFilterChipsHtml(c: CorrectionCounts): string {
+	return [
+		correctionFilterChipHtml(c.userCorrections, 'user corrections', 'user-correction'),
+		correctionFilterChipHtml(c.toolErrors, 'tool errors', 'tool-error'),
+		correctionFilterChipHtml(c.editRetries, 'edit retries', 'edit-retry'),
+		correctionFilterChipHtml(c.editSelfCorrections, 'edit self-corrections', 'edit-self-correction'),
+		correctionFilterChipHtml(c.agentSelfCorrections, 'agent self-corrections', 'agent-self-correction'),
+		correctionFilterChipHtml(c.escalatedUserCorrections, '📈 escalating', 'escalated', 'rgba(248,113,113,0.85)'),
+	].filter(Boolean).join(' ');
+}
+
+/** "Showing X of Y moments" bar so it is always clear what the list below is filtered to. */
+function buildCorrectionFilterStatusHtml(report: CorrectionReport): string {
+	const sampled = report.repos.flatMap(repo => repo.sessions.flatMap(session => session.moments));
+	const shown = sampled.filter(moment => correctionMomentMatchesFilter(moment, activeCorrectionFilter)).length;
+	const summary = activeCorrectionFilter
+		? `Showing <strong>${shown}</strong> of <strong>${sampled.length}</strong> listed correction moments — filtered by <strong>${escapeHtml(CORRECTION_FILTER_LABELS[activeCorrectionFilter])}</strong>`
+		: `Showing all <strong>${sampled.length}</strong> listed correction moments — no filter active`;
+	return `
+		<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px; padding:6px 10px; border-radius:6px; background:var(--bg-tertiary); border-left:3px solid ${activeCorrectionFilter ? 'var(--vscode-focusBorder)' : 'transparent'}; font-size:11px; color:var(--text-secondary);">
+			<span id="corrections-filter-status">${summary}</span>
+			${activeCorrectionFilter ? buildCorrectionClearFilterButtonHtml() : ''}
+		</div>`;
+}
+
 /** One repository's session list within the Corrections tab, or '' if the active filter leaves nothing to show. */
-function buildCorrectionRepoSectionHtml(repo: CorrectionRepoGroup, activeFilter: CorrectionMomentType | null): string {
+function buildCorrectionRepoSectionHtml(repo: CorrectionRepoGroup, activeFilter: CorrectionFilter | null): string {
 	const sessions = repo.sessions
 		.map(session => ({
 			session,
-			moments: activeFilter ? session.moments.filter(moment => moment.type === activeFilter) : session.moments,
+			moments: session.moments.filter(moment => correctionMomentMatchesFilter(moment, activeFilter)),
 		}))
 		.filter(({ moments }) => moments.length > 0);
 	if (sessions.length === 0) { return ''; }
+	const shownMoments = sessions.reduce((sum, { moments }) => sum + moments.length, 0);
+	const sessionLabel = activeFilter
+		? `— ${sessions.length} of ${repo.sessions.length} session${repo.sessions.length !== 1 ? 's' : ''} match · ${shownMoments} moment${shownMoments !== 1 ? 's' : ''}`
+		: `— ${sessions.length} session${sessions.length !== 1 ? 's' : ''} with moments · ${shownMoments} moment${shownMoments !== 1 ? 's' : ''}`;
 	return `
 	<div style="margin-top:18px;">
 		<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
 			<div style="font-size:12px; font-weight:700; color:var(--text-primary);">
 				${escapeHtml(repo.repository)}
-				<span style="font-weight:400; color:var(--text-secondary);">— ${sessions.length} session${sessions.length !== 1 ? 's' : ''} with moments</span>
+				<span style="font-weight:400; color:var(--text-secondary);">${escapeHtml(sessionLabel)}</span>
 			</div>
 			${buildCorrectionRepoActionsHtml(repo.repository)}
 		</div>
@@ -3667,24 +3732,15 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 		</div>`;
 	}
 
-	const c = report.counts;
-	const chip = (n: number, label: string, type: CorrectionMomentType): string => n > 0
-		? `<button type="button" data-correction-filter="${type}" aria-pressed="${activeCorrectionFilter === type}" style="font-size:11px; padding:2px 10px; border-radius:10px; border:1px solid ${activeCorrectionFilter === type ? 'var(--vscode-focusBorder)' : 'transparent'}; background:${activeCorrectionFilter === type ? 'var(--vscode-button-secondaryBackground)' : 'var(--bg-tertiary)'}; color:var(--text-primary); cursor:pointer;">${n} ${escapeHtml(label)}</button>`
-		: '';
-	const summaryChips = [
-		chip(c.userCorrections, 'user corrections', 'user-correction'),
-		chip(c.toolErrors, 'tool errors', 'tool-error'),
-		chip(c.editRetries, 'edit retries', 'edit-retry'),
-		chip(c.editSelfCorrections, 'edit self-corrections', 'edit-self-correction'),
-		chip(c.agentSelfCorrections, 'agent self-corrections', 'agent-self-correction'),
-	].filter(Boolean).join(' ');
-	const escalationNote = c.escalatedUserCorrections > 0
-		? `<span title="Corrections landing within a few turns of an earlier one — no sentiment data is available from any editor, this is the closest local proxy for rising frustration" style="font-size:11px; padding:2px 10px; border-radius:10px; background:rgba(248,113,113,0.12); border:1px solid rgba(248,113,113,0.85); color:var(--text-primary);">📈 ${c.escalatedUserCorrections} escalating</span>`
-		: '';
-
+	const summaryChips = buildCorrectionFilterChipsHtml(report.counts);
 	const repoSections = report.repos.map(repo => buildCorrectionRepoSectionHtml(repo, activeCorrectionFilter)).join('');
+	const statusBar = buildCorrectionFilterStatusHtml(report);
 	const emptyFilteredState = activeCorrectionFilter && !repoSections
-		? `<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">No ${CORRECTION_TYPE_META[activeCorrectionFilter].label.toLowerCase()} moments are available in this detail sample.</div>`
+		? `<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+				No <strong>${escapeHtml(CORRECTION_FILTER_LABELS[activeCorrectionFilter].toLowerCase())}</strong> appear in the detail sample below.
+				The pill counts cover every detected moment, while each long session only lists a capped sample of its moments — so a counted moment can sit outside this list.
+				<div style="margin-top:10px;">${buildCorrectionClearFilterButtonHtml()}</div>
+			</div>`
 		: '';
 
 	return `
@@ -3697,7 +3753,9 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 					sessions without corrections are not listed. Summary counts include all detected moments; long sessions show a capped detail sample.
 					Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
 				</div>
-				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">${summaryChips}${escalationNote}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:12px;">Filter the list below — select a pill to drill down, select it again to clear.</div>
+				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">${summaryChips}</div>
+				${statusBar}
 				${repoSections}
 				${emptyFilteredState}
 			</div>
@@ -3740,11 +3798,16 @@ function wireCorrectionInteractions(): void {
 	if (!panel) { return; }
 	panel.addEventListener('click', (event) => {
 		const target = event.target as HTMLElement;
+		if (target.closest('button.correction-clear-filter')) {
+			activeCorrectionFilter = null;
+			renderCorrectionsPanel();
+			return;
+		}
 		const filterButton = target.closest<HTMLButtonElement>('button[data-correction-filter]');
 		if (filterButton) {
-			const filter = filterButton.getAttribute('data-correction-filter');
-			if (!filter || !CORRECTION_MOMENT_TYPES.includes(filter as CorrectionMomentType)) { return; }
-			activeCorrectionFilter = activeCorrectionFilter === filter ? null : filter as CorrectionMomentType;
+			const filter = filterButton.getAttribute('data-correction-filter') as CorrectionFilter | null;
+			if (!filter || !CORRECTION_FILTERS.includes(filter)) { return; }
+			activeCorrectionFilter = activeCorrectionFilter === filter ? null : filter;
 			renderCorrectionsPanel();
 			return;
 		}
