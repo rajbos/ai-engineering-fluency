@@ -315,9 +315,9 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 			} else if (event.type === 'system' && event.subtype === 'compact_boundary') {
 				this.processCompactBoundaryEvent(event, analysis);
 			}
-		}
 		if (cacheTurns.size > 0) {
-			analysis.cacheBreakage = detectCacheBreakage([...cacheTurns.values()]);
+			const orderedTurns = [...cacheTurns.values()].sort((a, b) => a.timestamp - b.timestamp);
+			analysis.cacheBreakage = detectCacheBreakage(orderedTurns);
 		}
 		this.applyModelSwitchingStats(models, analysis);
 		applyModelTierClassification(ctx.modelPricing, analysis.modelSwitching.uniqueModels, models, analysis);
