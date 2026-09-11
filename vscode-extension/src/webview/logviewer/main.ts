@@ -1,7 +1,7 @@
 // Log Viewer webview - displays session file details and chat turns
 import { ContextReferenceUsage, getTotalContextRefs, getImplicitContextRefs, getExplicitContextRefs, getContextRefsSummary } from '../shared/contextRefUtils';
 import { setHtml } from '../shared/domUtils';
-import { escapeHtml, formatCompact, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
+import { escapeHtml, formatCompact, formatCost, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 import { buildTurnOverviewRows, hashModelToHue } from './turnsOverview';
@@ -34,6 +34,7 @@ result?: string;
 isSubAgent?: boolean;
 subAgentModel?: string;
 subAgentTokens?: { input: number; output: number };
+subAgentCost?: number;
 };
 
 type ChatTurn = {
@@ -51,6 +52,8 @@ outputTokensEstimate: number;
 thinkingTokensEstimate: number;
 actualUsage?: ActualUsage;
 thinkingEffort?: string;
+/** Estimated USD cost of this turn's own model call, computed host-side. Absent when unknown. */
+estimatedCost?: number;
 };
 
 type ThinkingEffortUsage = { byEffort: { [effort: string]: number }; switchCount: number; defaultEffort: string | null };
@@ -629,7 +632,7 @@ return `
 <td class="tool-name-cell">
 <span class="tool-name tool-call-link" data-turn="${turn.turnNumber}" data-toolcall="${idx}" title="${escapeHtml(tc.toolName)}" style="cursor:pointer;">${escapeHtml(displayName)}</span>
 ${tc.isSubAgent && tc.subAgentModel ? `<span class="sub-agent-model-badge">${escapeHtml(getModelDisplayName(tc.subAgentModel))}</span>` : ''}
-${tc.isSubAgent && tc.subAgentTokens ? `<span class="sub-agent-tokens">↑${tc.subAgentTokens.input.toLocaleString()} ↓${tc.subAgentTokens.output.toLocaleString()} tokens</span>` : ''}
+${tc.isSubAgent && tc.subAgentTokens ? `<span class="sub-agent-tokens">↑${formatCompact(tc.subAgentTokens.input)} ↓${formatCompact(tc.subAgentTokens.output)} tokens${tc.subAgentCost ? ` · ${formatCost(tc.subAgentCost)}` : ''}</span>` : ''}
 ${tc.arguments && !tc.isSubAgent ? `<details class="tool-details"><summary>Arguments</summary><pre>${escapeHtml(tc.arguments)}</pre></details>` : ''}
 ${tc.result && !tc.isSubAgent ? `<details class="tool-details"><summary>Result</summary><pre>${escapeHtml(truncateText(tc.result, 500))}</pre></details>` : ''}
 </td>
@@ -1081,10 +1084,25 @@ function renderTurnsOverviewTable(data: SessionLogData): string {
 	const rows = buildTurnOverviewRows(data.turns);
 	const hasCached = rows.some(r => r.cached !== null);
 	const hasModelSwitches = rows.some((r, i) => i > 0 && r.model && rows[i - 1].model && r.model !== rows[i - 1].model);
+	const hasCost = rows.some(r => r.cost !== null || r.children.some(c => c.cost !== null));
+	const totalChildren = rows.reduce((sum, r) => sum + r.children.length, 0);
+
+	const costCell = (cost: number | null): string => hasCost ? `<td class="count-cell">${cost !== null ? formatCost(cost) : '—'}</td>` : '';
 
 	const bodyRows = rows.map((row, i) => {
 		const switched = i > 0 && !!row.model && !!rows[i - 1].model && row.model !== rows[i - 1].model;
 		const cachedCell = hasCached ? `<td class="count-cell">${row.cached !== null ? formatCompact(row.cached) : '—'}</td>` : '';
+		const childRows = row.children.map(child => `<tr class="turns-overview-row turns-overview-child-row" data-turn="${row.turnNumber}" title="Sub-agent call from step #${row.turnNumber} — jump to turn">
+<td class="turns-overview-num">↳ 🤖</td>
+<td><span class="turn-mode turns-overview-child-tool" title="${escapeHtml(child.toolName)}">${escapeHtml(child.toolName)}</span></td>
+<td>${renderModelOverviewBadge(child.model)}</td>
+<td class="count-cell">${formatCompact(child.input)}</td>
+${hasCached ? '<td class="count-cell">—</td>' : ''}
+<td class="count-cell">${formatCompact(child.output)}</td>
+<td class="count-cell"><strong>${formatCompact(child.total)}</strong></td>
+${costCell(child.cost)}
+<td class="turns-overview-actual" title="Estimated from text">~</td>
+</tr>`).join('');
 		return `<tr class="turns-overview-row${switched ? ' turns-overview-row-switch' : ''}" data-turn="${row.turnNumber}" title="Jump to turn #${row.turnNumber}">
 <td class="turns-overview-num">#${row.turnNumber}${switched ? ' <span class="overview-switch-icon" title="Model changed from the previous step">⇄</span>' : ''}</td>
 <td><span class="turn-mode" style="background: ${getModeColor(row.mode)};">${getModeIcon(row.mode)} ${escapeHtml(row.mode)}</span></td>
@@ -1093,8 +1111,9 @@ function renderTurnsOverviewTable(data: SessionLogData): string {
 ${cachedCell}
 <td class="count-cell">${formatCompact(row.output)}</td>
 <td class="count-cell"><strong>${formatCompact(row.total)}</strong></td>
+${costCell(row.cost)}
 <td class="turns-overview-actual" title="${row.isActual ? 'Actual API usage' : 'Estimated from text'}">${row.isActual ? '✓' : '~'}</td>
-</tr>`;
+</tr>${childRows}`;
 	}).join('');
 
 	return `
@@ -1102,6 +1121,7 @@ ${cachedCell}
 <div class="turns-overview-header">
 <span>🧭 Session Steps Overview (${rows.length})</span>
 ${hasModelSwitches ? '<span class="overview-switch-note">⇄ marks a model change from the previous step</span>' : ''}
+${totalChildren > 0 ? `<span class="overview-switch-note">🤖 ↳ marks a sub-agent/child session delegated from that step</span>` : ''}
 </div>
 <div class="turns-overview-table-wrap">
 <table class="turns-overview-table">
@@ -1114,6 +1134,7 @@ ${hasModelSwitches ? '<span class="overview-switch-note">⇄ marks a model chang
 ${hasCached ? '<th scope="col">Cached</th>' : ''}
 <th scope="col">Output</th>
 <th scope="col">Total</th>
+${hasCost ? '<th scope="col">Cost</th>' : ''}
 <th scope="col" title="✓ actual API usage, ~ estimated from text">Src</th>
 </tr>
 </thead>

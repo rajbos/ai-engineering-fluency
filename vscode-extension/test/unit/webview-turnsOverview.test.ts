@@ -2,6 +2,7 @@ import { describe, test } from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import {
+	buildTurnChildRows,
 	buildTurnOverviewRows,
 	getTurnCachedTokens,
 	hashModelToHue,
@@ -115,6 +116,43 @@ describe('buildTurnOverviewRows', () => {
 	test('produces one row per turn, in order', () => {
 		const rows = buildTurnOverviewRows([turn({ turnNumber: 1 }), turn({ turnNumber: 2 }), turn({ turnNumber: 3 })]);
 		assert.deepEqual(rows.map(r => r.turnNumber), [1, 2, 3]);
+	});
+
+	test('carries through the host-computed estimatedCost as cost, or null when absent', () => {
+		const rows = buildTurnOverviewRows([turn({ estimatedCost: 0.0123 }), turn({ turnNumber: 2 })]);
+		assert.equal(rows[0].cost, 0.0123);
+		assert.equal(rows[1].cost, null);
+	});
+
+	test('has no children when the turn has no sub-agent tool calls', () => {
+		const rows = buildTurnOverviewRows([turn({ toolCalls: [{ toolName: 'view' }, { toolName: 'edit' }] })]);
+		assert.deepEqual(rows[0].children, []);
+	});
+
+	test('builds one child row per sub-agent tool call, ignoring regular tool calls', () => {
+		const rows = buildTurnOverviewRows([
+			turn({
+				toolCalls: [
+					{ toolName: 'view' },
+					{ toolName: 'task', isSubAgent: true, subAgentModel: 'claude-sonnet-4-6', subAgentTokens: { input: 500, output: 200 }, subAgentCost: 0.05 },
+					{ toolName: 'task', isSubAgent: true, subAgentModel: 'gpt-4o', subAgentTokens: { input: 100, output: 40 } },
+				],
+			}),
+		]);
+		assert.equal(rows[0].children.length, 2);
+		assert.deepEqual(rows[0].children[0], { toolName: 'task', model: 'claude-sonnet-4-6', input: 500, output: 200, total: 700, cost: 0.05 });
+		assert.deepEqual(rows[0].children[1], { toolName: 'task', model: 'gpt-4o', input: 100, output: 40, total: 140, cost: null });
+	});
+});
+
+describe('buildTurnChildRows', () => {
+	test('returns an empty array when the turn has no tool calls', () => {
+		assert.deepEqual(buildTurnChildRows(turn()), []);
+	});
+
+	test('defaults model to null and tokens to 0 when a sub-agent call has no usage data yet', () => {
+		const rows = buildTurnChildRows(turn({ toolCalls: [{ toolName: 'task', isSubAgent: true }] }));
+		assert.deepEqual(rows, [{ toolName: 'task', model: null, input: 0, output: 0, total: 0, cost: null }]);
 	});
 });
 

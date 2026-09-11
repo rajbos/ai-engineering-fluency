@@ -6951,6 +6951,7 @@ private computeFallbackDailyRollup(
 				'For accurate billing data, check the Cursor dashboard at cursor.com/settings.',
 			],
 		} : undefined;
+		this.attachTurnCosts(turns);
 		return {
 			file: details.file, title: details.title || null, editorSource: details.editorSource,
 			editorName, size: details.size, modified: details.modified, interactions: details.interactions,
@@ -7315,6 +7316,32 @@ private computeFallbackDailyRollup(
 
 	public calculateEstimatedCost(modelUsage: ModelUsage, pricingSource: 'provider' | 'copilot' = 'provider'): number {
 		return _calculateEstimatedCost(modelUsage, this.modelPricing, pricingSource);
+	}
+
+	/**
+	 * Post-processes already-built `turns` with estimated USD costs, for the log viewer's
+	 * Session Steps Overview table: one cost per turn (its own model call — actual usage
+	 * tokens when available, otherwise the text-based estimate) and one per sub-agent/child
+	 * tool call (using its own `subAgentModel` + `subAgentTokens`). Mutates `turns` in place.
+	 * Silently leaves `estimatedCost`/`subAgentCost` unset when the model is unknown or has
+	 * no pricing entry (`calculateEstimatedCost` returns 0 for those, which we treat as "no cost").
+	 */
+	private attachTurnCosts(turns: ChatTurn[]): void {
+		for (const turn of turns) {
+			const input = turn.actualUsage ? turn.actualUsage.promptTokens : turn.inputTokensEstimate;
+			const output = turn.actualUsage ? turn.actualUsage.completionTokens : turn.outputTokensEstimate;
+			if (turn.model && (input > 0 || output > 0)) {
+				const cost = this.calculateEstimatedCost({ [turn.model]: { inputTokens: input, outputTokens: output, sessions: 1 } });
+				if (cost > 0) { turn.estimatedCost = cost; }
+			}
+			for (const tc of turn.toolCalls) {
+				if (!tc.isSubAgent || !tc.subAgentModel || !tc.subAgentTokens) { continue; }
+				const cost = this.calculateEstimatedCost({
+					[tc.subAgentModel]: { inputTokens: tc.subAgentTokens.input, outputTokens: tc.subAgentTokens.output, sessions: 1 },
+				});
+				if (cost > 0) { tc.subAgentCost = cost; }
+			}
+		}
 	}
 
 

@@ -1247,6 +1247,23 @@ details[open] > summary .collapse-arrow {
 	border-left: 3px solid var(--vscode-focusBorder, #3b82f6);
 }
 
+.turns-overview-child-row {
+	background: var(--bg-tertiary);
+	font-size: 11px;
+	opacity: 0.9;
+}
+
+.turns-overview-child-row .turns-overview-num {
+	font-weight: 400;
+	color: var(--text-secondary);
+}
+
+.turns-overview-child-tool {
+	background: transparent !important;
+	border: 1px dashed var(--border-subtle);
+	color: var(--text-secondary);
+}
+
 .turns-overview-num {
 	font-weight: 600;
 	color: var(--text-primary);
