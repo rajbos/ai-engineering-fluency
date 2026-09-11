@@ -31,13 +31,26 @@ import * as path from 'path';
 import * as os from 'os';
 
 /**
- * Never copy a database above this size just to merge in WAL frames — the copy +
- * native-open + checkpoint + read-back is O(size) I/O and memory, and for a multi-GB db
- * (exactly the shape that triggered #2033) that is worse than reading a slightly stale
- * plain `.db` file. Above this threshold `tryReadDbWithWal` returns `null` so callers fall
- * back to `fs.readFileSync(dbPath)`.
+ * Never copy a db + WAL pair whose COMBINED size is above this budget just to merge in WAL
+ * frames — `performWalMerge` copies both `dbPath` and `dbPath-wal` in full, so the temp
+ * footprint it must bound is their sum, not the main db alone. The copy + native-open +
+ * checkpoint + read-back is O(size) I/O and memory, and for a multi-GB pair (exactly the shape
+ * that triggered #2033 — Cursor's `state.vscdb` routinely runs 1-2 GB on its own) that is worse
+ * than reading a slightly stale plain `.db` file. Above this threshold `tryReadDbWithWal`
+ * returns `null` so callers fall back to `fs.readFileSync(dbPath)` — a WAL-blind read that can
+ * be stale, logged once per path below. Callers that need both cheap AND current reads for a
+ * database this large should prefer the copy-free read-only `node:sqlite` backend instead (see
+ * `src/cursor.ts`), which has no size cap because it never copies anything.
  */
 export const MAX_WAL_MERGE_DB_SIZE_BYTES = 256 * 1024 * 1024; // 256 MB
+
+/**
+ * Db paths we've already logged as "skipped: over the combined size cap", so the message is
+ * emitted once per path instead of on every poll (callers of `tryReadDbWithWal` are typically
+ * called every few seconds). Cleared for a path once it becomes eligible again, so a later
+ * regrowth past the cap logs again — this tracks the *decision*, not a one-time-ever message.
+ */
+const loggedOversizedPaths = new Set<string>();
 
 /** Minimum time between WAL-merge attempts for the same db path. */
 const WAL_MERGE_MIN_INTERVAL_MS = 60_000;
@@ -52,9 +65,34 @@ const WAL_MERGE_WRITER_ACTIVE_INTERVAL_MS = 5 * 60_000;
 /** A writer is considered "recently active" if its WAL was touched within this window. */
 const WRITER_ACTIVE_WAL_RECENCY_MS = 30_000;
 
-interface WalMergeCacheEntry {
+/**
+ * The full identity of the bytes a merge (or a plain direct read) actually reflects: the main
+ * db file's mtime/size, and the `-wal` sidecar's mtime/size, *as they were when those bytes were
+ * produced*. Callers that cache a db keyed on file identity should key on this instead of
+ * re-statting the files after the fact — see `readDbBufferWithWalFingerprint`.
+ */
+export interface WalReadResult {
 	buffer: Buffer;
+	dbMtimeMs: number;
+	dbSize: number;
+	walMtimeMs: number;
+	walSize: number;
+}
+
+interface WalMergeCacheEntry {
+	/** The last successful merge result, if any attempt has ever succeeded for this path. */
+	buffer: Buffer | undefined;
+	/** When the last attempt (successful or failed) ran — drives the time-based throttle. */
 	attemptedAt: number;
+	/**
+	 * The db+wal fingerprint the *cached `buffer`* was produced from (meaningless when `buffer`
+	 * is undefined). Used to detect a main-file change (checkpoint / wholesale replacement)
+	 * during the throttle window — see `tryReadDbWithWalFingerprint`.
+	 */
+	dbMtimeMs: number;
+	dbSize: number;
+	walMtimeMs: number;
+	walSize: number;
 }
 
 /** Per-db-path cache of the last successful (or last-served) merge result and when it was produced. */
@@ -72,6 +110,11 @@ const WAL_MERGE_CACHE_RETENTION_MS = WAL_MERGE_WRITER_ACTIVE_INTERVAL_MS;
 /** Number of merged buffers currently retained — for tests only. */
 export function walMergeCacheSizeForTests(): number {
 	return walMergeCache.size;
+}
+
+/** Whether a cache entry (successful or failed-attempt) is currently retained for `dbPath` — for tests only. */
+export function walMergeCacheHasEntryForTests(dbPath: string): boolean {
+	return walMergeCache.has(dbPath);
 }
 
 /** Drops merged buffers nothing can serve from any more, so they aren't retained forever. */
@@ -96,30 +139,54 @@ export function isWalWriterActive(dbPath: string, nowMs: number = Date.now()): b
 	return nowMs - walMtimeMs <= WRITER_ACTIVE_WAL_RECENCY_MS;
 }
 
+/** The full identity (mtime + size) of `dbPath`, and of `dbPath` and its `-wal` sidecar. */
+interface WalMergeEligibility {
+	walPath: string;
+	dbMtimeMs: number;
+	dbSize: number;
+	walMtimeMs: number;
+	walSize: number;
+}
+
 /**
- * Returns `{ walPath }` when `dbPath` has a non-empty WAL worth merging and is small enough to
- * copy, or `null` when a merge should be skipped outright (no `-wal` file, an empty one, or the
- * db is above `MAX_WAL_MERGE_DB_SIZE_BYTES`).
+ * Returns the current db+wal fingerprint when `dbPath` has a non-empty WAL worth merging and the
+ * COMBINED db+WAL size is small enough to copy, or `null` when a merge should be skipped outright
+ * (no `-wal` file, an empty one, or db+wal together are above `MAX_WAL_MERGE_DB_SIZE_BYTES`).
+ * Logs once (at debug level) the first time a path is skipped for being over the cap, so a large
+ * db falling back to a WAL-blind read is discoverable instead of silent — see module docs.
  */
-function checkWalMergeEligible(dbPath: string): { walPath: string } | null {
+function checkWalMergeEligible(dbPath: string): WalMergeEligibility | null {
 	const walPath = dbPath + '-wal';
-	let walSize: number;
+	let walStat: fs.Stats;
 	try {
-		walSize = fs.statSync(walPath).size;
+		walStat = fs.statSync(walPath);
 	} catch {
 		return null; // No WAL file — no merge needed
 	}
-	if (walSize === 0) { return null; }
+	if (walStat.size === 0) { return null; }
 
-	let dbSize: number;
+	let dbStat: fs.Stats;
 	try {
-		dbSize = fs.statSync(dbPath).size;
+		dbStat = fs.statSync(dbPath);
 	} catch {
 		return null;
 	}
-	if (dbSize > MAX_WAL_MERGE_DB_SIZE_BYTES) { return null; } // never copy a huge db just to merge WAL frames
+	// Cap the COMBINED footprint: performWalMerge copies both files, so the db alone being under
+	// the cap doesn't bound the temp copy when the WAL itself is huge.
+	if (dbStat.size + walStat.size > MAX_WAL_MERGE_DB_SIZE_BYTES) {
+		if (!loggedOversizedPaths.has(dbPath)) {
+			loggedOversizedPaths.add(dbPath);
+			console.debug(
+				`[sqliteWal] Skipping WAL merge for ${dbPath}: db (${dbStat.size} bytes) + wal (${walStat.size} bytes) `
+				+ `exceed the ${MAX_WAL_MERGE_DB_SIZE_BYTES} byte cap — reads will be a plain, potentially stale `
+				+ `snapshot of the main db file until the WAL shrinks below the cap or a checkpoint runs.`
+			);
+		}
+		return null;
+	}
+	loggedOversizedPaths.delete(dbPath); // eligible again — a later regrowth past the cap should log again
 
-	return { walPath };
+	return { walPath, dbMtimeMs: dbStat.mtimeMs, dbSize: dbStat.size, walMtimeMs: walStat.mtimeMs, walSize: walStat.size };
 }
 
 /**
@@ -162,49 +229,102 @@ function performWalMerge(dbPath: string, walPath: string): Buffer {
 }
 
 /**
- * Returns a fully checked-out buffer for `dbPath` with any pending WAL frames
- * merged in, or `null` when there is no WAL to merge (no `-wal` file, an
- * empty one, the db is above `MAX_WAL_MERGE_DB_SIZE_BYTES`, or `node:sqlite`
- * is unavailable / the merge attempt failed and nothing was cached yet).
- * Callers should fall back to `fs.readFileSync(dbPath)` when this returns null.
+ * Returns a fully checked-out buffer for `dbPath` with any pending WAL frames merged in, together
+ * with the db+wal fingerprint those exact bytes were produced from — or `null` when there is no
+ * WAL to merge (no `-wal` file, an empty one, the combined db+wal size is above
+ * `MAX_WAL_MERGE_DB_SIZE_BYTES`, or `node:sqlite` is unavailable / the merge attempt failed and
+ * nothing was ever cached for this path). Callers should fall back to a plain
+ * `fs.readFileSync(dbPath)` (using the current file stat as the fingerprint) when this returns
+ * null — `readDbBufferWithWalFingerprint` below does exactly that.
  *
- * Repeated calls for the same `dbPath` within the throttle window are served from an
- * in-memory cache of the last merge result instead of re-copying — see module docs.
+ * Repeated calls for the same `dbPath` within the throttle window are served from an in-memory
+ * cache of the last merge result instead of re-copying — see module docs. The fingerprint
+ * returned for a cache-served buffer is the buffer's ORIGINAL fingerprint (when it was produced),
+ * not a fresh stat of the current files: the whole point is that those bytes may now be stale, and
+ * a caller that re-stats and stores "current" would hide that staleness — see #2036 review notes.
+ *
+ * The cached buffer is only served while the main db file's own identity (mtime+size) still
+ * matches what produced it — a checkpoint or wholesale replacement of the main `.db` file during
+ * the throttle window forces a fresh merge instead of silently reusing a buffer that predates it.
+ * The WAL's mtime is deliberately NOT part of that reuse decision (reacting to every WAL touch is
+ * what the throttle exists to prevent) — only whether the *main* file changed underneath it.
  */
-export async function tryReadDbWithWal(dbPath: string): Promise<Buffer | null> {
-	const eligible = checkWalMergeEligible(dbPath);
-	if (!eligible) { return null; }
-
+export async function tryReadDbWithWalFingerprint(dbPath: string): Promise<WalReadResult | null> {
 	const now = Date.now();
+	// Run eviction before the eligibility check (not after it, behind an early return) so a path
+	// that has gone ineligible (WAL gone/emptied, or grown past the cap) still gets its retained
+	// buffer reclaimed instead of holding it for the life of the process.
 	evictExpiredWalMergeCacheEntries(now);
+
+	const eligible = checkWalMergeEligible(dbPath);
+	if (!eligible) {
+		walMergeCache.delete(dbPath); // drop it now rather than waiting out the retention window
+		return null;
+	}
+
 	const cached = walMergeCache.get(dbPath);
 	const minInterval = isWalWriterActive(dbPath, now) ? WAL_MERGE_WRITER_ACTIVE_INTERVAL_MS : WAL_MERGE_MIN_INTERVAL_MS;
 	if (cached && now - cached.attemptedAt < minInterval) {
-		return cached.buffer; // serve the previous merge result instead of re-merging
+		const mainDbUnchanged = cached.dbMtimeMs === eligible.dbMtimeMs && cached.dbSize === eligible.dbSize;
+		if (cached.buffer && mainDbUnchanged) {
+			// Serve the previous merge result under its ORIGINAL fingerprint — see doc comment above.
+			return { buffer: cached.buffer, dbMtimeMs: cached.dbMtimeMs, dbSize: cached.dbSize, walMtimeMs: cached.walMtimeMs, walSize: cached.walSize };
+		}
+		if (!cached.buffer) {
+			return null; // a recent attempt already failed and produced nothing to serve — stay throttled
+		}
+		// cached.buffer exists but the main db file changed since — fall through to a fresh merge
+		// rather than serving bytes that no longer reflect the main file (item 2).
 	}
 
 	try {
 		const buffer = performWalMerge(dbPath, eligible.walPath);
-		walMergeCache.set(dbPath, { buffer, attemptedAt: now });
-		return buffer;
+		walMergeCache.set(dbPath, {
+			buffer, attemptedAt: now,
+			dbMtimeMs: eligible.dbMtimeMs, dbSize: eligible.dbSize, walMtimeMs: eligible.walMtimeMs, walSize: eligible.walSize,
+		});
+		return { buffer, dbMtimeMs: eligible.dbMtimeMs, dbSize: eligible.dbSize, walMtimeMs: eligible.walMtimeMs, walSize: eligible.walSize };
 	} catch {
-		// node:sqlite unavailable or copy/merge failed. Record the attempt so a db that keeps
-		// failing isn't retried on every call, and keep serving the last good result if we have one.
-		if (cached) {
+		// node:sqlite unavailable or copy/merge failed.
+		if (cached?.buffer) {
+			// Keep serving the last-good buffer (under its own original fingerprint), but record
+			// this attempt so a merge that keeps failing is throttled too.
 			cached.attemptedAt = now;
-			return cached.buffer;
+			return { buffer: cached.buffer, dbMtimeMs: cached.dbMtimeMs, dbSize: cached.dbSize, walMtimeMs: cached.walMtimeMs, walSize: cached.walSize };
 		}
-		return null; // fall back to direct read — nothing usable was ever cached for this db
+		// Nothing usable was ever cached for this db — record the failed attempt anyway so a
+		// persistently failing path is throttled instead of re-attempting the full copy/merge on
+		// every single call (the expensive, repeatedly-failing case the throttle exists for).
+		walMergeCache.set(dbPath, {
+			buffer: undefined, attemptedAt: now,
+			dbMtimeMs: eligible.dbMtimeMs, dbSize: eligible.dbSize, walMtimeMs: eligible.walMtimeMs, walSize: eligible.walSize,
+		});
+		return null; // fall back to direct read
+	}
+}
+
+/**
+ * Same as {@link tryReadDbWithWalFingerprint}, returning just the buffer for callers that don't
+ * need the fingerprint.
+ */
+export async function tryReadDbWithWal(dbPath: string): Promise<Buffer | null> {
+	const result = await tryReadDbWithWalFingerprint(dbPath);
+	return result ? result.buffer : null;
+}
+
+/** The `-wal` sidecar's mtime and size, or zeroes when no `-wal` file exists. */
+function statWal(dbPath: string): { mtimeMs: number; size: number } {
+	try {
+		const stat = fs.statSync(dbPath + '-wal');
+		return { mtimeMs: stat.mtimeMs, size: stat.size };
+	} catch {
+		return { mtimeMs: 0, size: 0 };
 	}
 }
 
 /** The WAL sidecar's mtime in milliseconds, or 0 when no `-wal` file exists. */
 export function getWalMtimeMs(dbPath: string): number {
-	try {
-		return fs.statSync(dbPath + '-wal').mtimeMs;
-	} catch {
-		return 0;
-	}
+	return statWal(dbPath).mtimeMs;
 }
 
 const WAL_TEMP_FILE_PREFIXES = ['cursor-wal-', 'sqlite-wal-'];
@@ -268,4 +388,27 @@ export async function sweepStaleWalTempFiles(minAgeMs: number = 60 * 60 * 1000, 
 export async function readDbBufferWithWal(dbPath: string): Promise<Buffer> {
 	const walBuffer = await tryReadDbWithWal(dbPath);
 	return walBuffer ?? fs.readFileSync(dbPath);
+}
+
+/**
+ * Same as {@link readDbBufferWithWal}, but always returns the db+wal fingerprint the returned
+ * bytes actually reflect (never null) — for callers that key their own cache on file identity.
+ *
+ * Prefer this over pairing `readDbBufferWithWal` with a fresh `getWalMtimeMs(dbPath)` call after
+ * the read: a merge served from the throttle cache can be older than "now", and re-stating the
+ * WAL after the fact stamps the cache entry with a fingerprint the served bytes don't actually
+ * match — see the #2036 review notes on `tryReadDbWithWalFingerprint` above. When no merge ran
+ * (no WAL to merge, or the merge failed with nothing cached), the fingerprint is a fresh stat of
+ * the plain file that was actually read, which is accurate since that read has no staleness window.
+ */
+export async function readDbBufferWithWalFingerprint(dbPath: string): Promise<WalReadResult> {
+	const merged = await tryReadDbWithWalFingerprint(dbPath);
+	if (merged) { return merged; }
+
+	// No merge ran — fall back to a plain read, stat'd right alongside it so the fingerprint
+	// matches the bytes just read as closely as a single-process read/stat pair can.
+	const dbStat = fs.statSync(dbPath);
+	const buffer = fs.readFileSync(dbPath);
+	const wal = statWal(dbPath);
+	return { buffer, dbMtimeMs: dbStat.mtimeMs, dbSize: dbStat.size, walMtimeMs: wal.mtimeMs, walSize: wal.size };
 }

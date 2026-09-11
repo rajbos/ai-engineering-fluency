@@ -238,6 +238,163 @@ test('a failed read-only open demotes the db only temporarily, not for the proce
 	}
 });
 
+test('a failed read-only open demotes the db only temporarily — the REAL query path retries the native backend once the cooldown expires', async () => {
+	// Unlike the test above (which only pokes the private _readOnlyUnsupportedDbs map and the
+	// isReadOnlyDemoted predicate directly), this exercises the actual public query path end to
+	// end with an injected failing/recovering backend and a controllable clock, so a regression
+	// that left queryReadOnly permanently bypassed after one failure would be caught here.
+	const fixture = createCursorDbFixture();
+	const realNow = Date.now;
+	try {
+		const composerId = 'composer-cooldown';
+		const payload = JSON.stringify({ composerId, name: 'Cooldown session', contextTokensUsed: 5 });
+		fixture.writer.exec(`INSERT INTO cursorDiskKV VALUES ('composerData:${composerId}', '${payload.replace(/'/g, "''")}')`);
+
+		const access = new CursorDataAccess(FAKE_URI);
+		const { DatabaseSync: RealDatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
+		let openAttempts = 0;
+		let shouldFail = true;
+		class ControllableDatabaseSync {
+			private readonly real: InstanceType<typeof RealDatabaseSync>;
+			constructor(dbPath: string, options?: ConstructorParameters<typeof RealDatabaseSync>[1]) {
+				openAttempts++;
+				if (shouldFail) {
+					throw new Error('simulated transient read-only failure (e.g. SQLITE_BUSY during a checkpoint)');
+				}
+				this.real = new RealDatabaseSync(dbPath, options);
+			}
+			prepare(sql: string) { return this.real.prepare(sql); }
+			close() { return this.real.close(); }
+		}
+		(access as unknown as { getNodeSqliteModule: () => { DatabaseSync: unknown } }).getNodeSqliteModule = () => (
+			{ DatabaseSync: ControllableDatabaseSync }
+		);
+
+		const virtualPath = `${fixture.dbPath}#${composerId}`;
+		const composerCache = (access as unknown as { _composerCache: Map<string, unknown> })._composerCache;
+
+		// First call: the native open fails, so the real query path falls back to sql.js and
+		// demotes this db path.
+		const first = await access.readComposerData(virtualPath);
+		assert.equal(openAttempts, 1, 'the native backend should have been attempted once');
+		assert.equal(first?.name, 'Cooldown session', 'the sql.js fallback must still return correct data');
+
+		// Still within the cooldown — force a re-query (bypassing the unrelated composer-data
+		// cache) and confirm the real query path does NOT retry the native backend yet.
+		composerCache.clear();
+		await access.readComposerData(virtualPath);
+		assert.equal(openAttempts, 1, 'still within the cooldown, the real query path must not retry the native backend');
+
+		// Jump the clock past the cooldown, and let the native backend succeed this time.
+		Date.now = () => realNow() + 6 * 60_000;
+		shouldFail = false;
+		composerCache.clear();
+
+		await access.readComposerData(virtualPath);
+		assert.equal(
+			openAttempts, 2,
+			'past the cooldown, the real query path must attempt the native backend again — not stay demoted for the process lifetime'
+		);
+	} finally {
+		Date.now = realNow;
+		fixture.cleanup();
+	}
+});
+
+test('the sql.js fallback backend caches a parsed Database per db path instead of reloading the whole db for every distinct composer', async () => {
+	const fixture = createCursorDbFixture();
+	try {
+		const composerIds = ['fallback-c1', 'fallback-c2', 'fallback-c3'];
+		for (const id of composerIds) {
+			fixture.writer.exec(
+				`INSERT INTO cursorDiskKV VALUES ('composerData:${id}', '${JSON.stringify({ composerId: id, contextTokensUsed: 1 }).replace(/'/g, "''")}')`
+			);
+		}
+
+		const access = new CursorDataAccess(FAKE_URI);
+		// Simulate an environment without node:sqlite (older Electron) — every query below must go
+		// through the sql.js fallback.
+		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+
+		let dbConstructions = 0;
+		const realInitSqlJs = access.initSqlJs.bind(access);
+		access.initSqlJs = async () => {
+			const SQL = await realInitSqlJs();
+			const RealDatabase = SQL.Database;
+			function CountingDatabase(this: unknown, ...args: unknown[]) {
+				dbConstructions++;
+				return new (RealDatabase as unknown as new (...a: unknown[]) => unknown)(...args);
+			}
+			CountingDatabase.prototype = RealDatabase.prototype;
+			return { ...SQL, Database: CountingDatabase as unknown as typeof SQL.Database };
+		};
+
+		// Sequential (NOT concurrent) reads across distinct composers — deliberately not batched
+		// via Promise.all, so this can only be served by the per-db-path Database cache and not by
+		// the (separate, already-tested) single-flight dedup for concurrent calls to the same
+		// composer. Each id is also queried for the first time, so the per-composer `_composerCache`
+		// can't short-circuit the call before it ever reaches the sql.js backend either.
+		for (const id of composerIds) {
+			const data = await access.readComposerData(`${fixture.dbPath}#${id}`);
+			assert.equal(data?.composerId, id);
+		}
+
+		assert.equal(
+			dbConstructions, 1,
+			'one sql.js Database load should serve every composer in this db path, not one reload per composer'
+		);
+
+		// A later, separate read of the SAME composer (composer cache still valid — file unchanged)
+		// should also reuse it.
+		await access.readComposerData(`${fixture.dbPath}#${composerIds[0]}`);
+		assert.equal(dbConstructions, 1, 'a cache-valid follow-up read should not reload the db either');
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test('a transient read failure is not cached as "composer not found" — it is retried on the next call, not stuck forever', async () => {
+	const fixture = createCursorDbFixture();
+	try {
+		const composerId = 'composer-transient';
+		const payload = JSON.stringify({ composerId, name: 'Recovered session', contextTokensUsed: 3 });
+		fixture.writer.exec(`INSERT INTO cursorDiskKV VALUES ('composerData:${composerId}', '${payload.replace(/'/g, "''")}')`);
+
+		const access = new CursorDataAccess(FAKE_URI);
+		// Force every query through the sql.js fallback, and make its very first load fail —
+		// simulating a momentary error (e.g. a transient lock) rather than a genuinely missing row.
+		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+		let initAttempts = 0;
+		const realInitSqlJs = access.initSqlJs.bind(access);
+		access.initSqlJs = async () => {
+			initAttempts++;
+			if (initAttempts === 1) {
+				throw new Error('simulated transient failure (e.g. a momentary lock)');
+			}
+			return realInitSqlJs();
+		};
+
+		const virtualPath = `${fixture.dbPath}#${composerId}`;
+
+		const first = await access.readComposerData(virtualPath);
+		assert.equal(first, null, 'a transient read failure surfaces as null for this one call');
+
+		const cache = (access as unknown as { _composerCache: Map<string, unknown> })._composerCache;
+		assert.equal(
+			cache.has(virtualPath), false,
+			'a failed read must not be cached as "not found" — caching it would hide a live composer until the file identity happens to change'
+		);
+
+		const second = await access.readComposerData(virtualPath);
+		assert.equal(
+			second?.name, 'Recovered session',
+			'once the backend recovers, the next call must see the real data — not a cached null from the earlier failure'
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
 test('the -wal size is part of the composer cache key, not just its mtime', async () => {
 	const fixture = createCursorDbFixture();
 	try {

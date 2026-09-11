@@ -11,7 +11,7 @@ import type { ModelUsage, ModelId } from './types';
 import { normalizePathForComparison } from './workspaceHelpers';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { readTextFileWithSizeGuardSync } from './utils/safeFileRead';
-import { readDbBufferWithWal, getWalMtimeMs } from './utils/sqliteWal';
+import { readDbBufferWithWalFingerprint, getWalMtimeMs } from './utils/sqliteWal';
 
 // Access SqlJsStatic and Database via the globally declared initSqlJs namespace.
 type SqlJsStatic = initSqlJs.SqlJsStatic;
@@ -155,10 +155,17 @@ export class OpenCodeDataAccess {
 
 	private async refreshOpenCodeDb(dbPath: string, stats: fs.Stats): Promise<SqlDatabase | null> {
 		let db: SqlDatabase;
+		let walMtimeMs: number;
 		try {
 			const SQL = await this.initSqlJs();
-			const buffer = await readDbBufferWithWal(dbPath);
-			db = new SQL.Database(buffer);
+			// Use the fingerprint the read itself reports rather than a fresh getWalMtimeMs(dbPath)
+			// call afterwards: a throttled sqliteWal read can serve a buffer older than "now", and
+			// stamping it with the current WAL mtime would make a stale cache entry look current —
+			// permanently hiding any WAL writes that land after this read but before the throttle
+			// window lapses (see #2036 review notes on src/utils/sqliteWal.ts).
+			const result = await readDbBufferWithWalFingerprint(dbPath);
+			db = new SQL.Database(result.buffer);
+			walMtimeMs = result.walMtimeMs;
 		} catch {
 			return this.getCachedDbForPath(dbPath);
 		}
@@ -173,7 +180,7 @@ export class OpenCodeDataAccess {
 		}
 
 		this.closeDbCache();
-		this._dbCache = { db, path: dbPath, mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs: getWalMtimeMs(dbPath) };
+		this._dbCache = { db, path: dbPath, mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs };
 		return db;
 	}
 

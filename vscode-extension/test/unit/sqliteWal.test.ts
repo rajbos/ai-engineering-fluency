@@ -7,8 +7,10 @@ import {
 	MAX_WAL_MERGE_DB_SIZE_BYTES,
 	isWalWriterActive,
 	tryReadDbWithWal,
+	tryReadDbWithWalFingerprint,
 	sweepStaleWalTempFiles,
 	walMergeCacheSizeForTests,
+	walMergeCacheHasEntryForTests,
 } from '../../../src/utils/sqliteWal';
 
 /**
@@ -194,6 +196,163 @@ test('tryReadDbWithWal evicts merged buffers once they are past the retention wi
 		assert.notEqual(second, first, 'past the retention window a fresh merge must run, not the cached buffer');
 	} finally {
 		Date.now = realNow;
+		fixture.cleanup();
+	}
+});
+
+test('tryReadDbWithWalFingerprint reports the ORIGINAL fingerprint for a throttled buffer, not the current (changed) WAL state', async () => {
+	// This is the root-cause regression test for the "throttle can hide data forever" bug: a
+	// caller that stamps its own cache with a freshly-read WAL mtime after being served a stale,
+	// throttled buffer ends up with a cache entry that claims to be newer than the data actually
+	// is. If the writer then stops, that wrong fingerprint never gets invalidated again.
+	const fixture = createWalFixture();
+	try {
+		const first = await tryReadDbWithWalFingerprint(fixture.dbPath);
+		assert.ok(first, 'first call should merge and return a result');
+
+		fixture.writer.exec("INSERT INTO t VALUES ('more')"); // live WAL state moves on
+		const liveWal = fs.statSync(fixture.dbPath + '-wal');
+		assert.ok(
+			liveWal.mtimeMs !== first.walMtimeMs || liveWal.size !== first.walSize,
+			'fixture setup: the live WAL must have changed since the first merge'
+		);
+
+		const second = await tryReadDbWithWalFingerprint(fixture.dbPath); // inside the throttle window
+		assert.equal(second?.buffer, first.buffer, 'sanity: served from the throttle cache');
+		assert.equal(
+			second?.walMtimeMs, first.walMtimeMs,
+			'a throttled (stale) buffer must report the fingerprint it was actually produced from — not a fresh stat of the live WAL, which would claim newer data than the served bytes actually contain'
+		);
+		assert.equal(second?.walSize, first.walSize);
+		assert.equal(second?.dbMtimeMs, first.dbMtimeMs);
+		assert.equal(second?.dbSize, first.dbSize);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+/**
+ * Spies on `fs.copyFileSync` for the duration of a test, returning a restore function.
+ *
+ * TS compiles `import * as fs from 'fs'` to a live-binding getter (via tslib's `__importStar`),
+ * so this module's own `fs.copyFileSync` can't be assigned directly ("Cannot set property
+ * copyFileSync of #<Object> which has only a getter"). `require('fs')` returns the real,
+ * plain-writable module object underneath that every `import * as fs` — including in
+ * src/utils/sqliteWal.ts — transparently forwards reads to, so mutating it here is visible there.
+ */
+function spyOnCopyFileSync(
+	impl: (original: typeof fs.copyFileSync, ...args: Parameters<typeof fs.copyFileSync>) => ReturnType<typeof fs.copyFileSync>
+): () => void {
+	const rawFs = require('fs') as typeof fs;
+	const original = rawFs.copyFileSync;
+	rawFs.copyFileSync = ((...args: Parameters<typeof fs.copyFileSync>) => impl(original, ...args)) as typeof fs.copyFileSync;
+	return () => { rawFs.copyFileSync = original; };
+}
+
+test('tryReadDbWithWalFingerprint does not serve a throttled buffer once the main db file itself has changed', async () => {
+	const fixture = createWalFixture();
+	let copyCalls = 0;
+	const restoreCopyFileSync = spyOnCopyFileSync((original, ...args) => {
+		copyCalls++;
+		return original(...args);
+	});
+	try {
+		const first = await tryReadDbWithWal(fixture.dbPath);
+		assert.ok(first, 'first call should merge and return a buffer');
+		const copyCallsAfterFirstMerge = copyCalls;
+		assert.ok(copyCallsAfterFirstMerge > 0, 'sanity: the first call actually copied files');
+
+		// A checkpoint (RESTART) folds all pending frames into the main .db file, changing its
+		// mtime/size, while leaving journal_mode=WAL active for further writes — this is the
+		// "checkpoint changed the main file while a WAL remains" scenario item 2 guards against.
+		// It must NOT be confused with "the writer stopped" (nothing here reduces WAL activity).
+		fixture.writer.exec('PRAGMA wal_checkpoint(RESTART);');
+		fixture.writer.exec("INSERT INTO t VALUES ('after-checkpoint')"); // leave a fresh, non-empty WAL
+
+		// Still well inside the throttle window — a naive throttle would just re-serve `first`.
+		const second = await tryReadDbWithWal(fixture.dbPath);
+
+		assert.ok(
+			copyCalls > copyCallsAfterFirstMerge,
+			'a main-db-file change during the throttle window must force a fresh merge attempt, not silently reuse a buffer that predates the change'
+		);
+		assert.notEqual(second, first, 'the served buffer must reflect the post-checkpoint db, not the stale pre-checkpoint one');
+	} finally {
+		restoreCopyFileSync();
+		fixture.cleanup();
+	}
+});
+
+test('tryReadDbWithWal evicts a now-ineligible path\'s cached buffer immediately, not after the retention window', async () => {
+	const fixture = createWalFixture();
+	try {
+		const first = await tryReadDbWithWal(fixture.dbPath);
+		assert.ok(first, 'first call should merge and return a buffer');
+		assert.equal(walMergeCacheHasEntryForTests(fixture.dbPath), true, 'the merged buffer should be cached initially');
+
+		// Checkpoint+truncate collapses the WAL to empty — the path is now ineligible for merging.
+		fixture.writer.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+		const result = await tryReadDbWithWal(fixture.dbPath);
+
+		assert.equal(result, null, 'no WAL left to merge, so tryReadDbWithWal must return null');
+		assert.equal(
+			walMergeCacheHasEntryForTests(fixture.dbPath), false,
+			'an ineligible path\'s retained buffer must be dropped immediately, not held for the rest of the retention window'
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test('tryReadDbWithWal refuses to attempt a merge when db+wal COMBINED exceed the cap, even though the db alone is small', async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sqlitewal-hugewal-'));
+	const dbPath = path.join(tmpDir, 'small.db');
+	const walPath = dbPath + '-wal';
+	let copyCalls = 0;
+	const restoreCopyFileSync = spyOnCopyFileSync((original, ...args) => {
+		copyCalls++;
+		return original(...args);
+	});
+	try {
+		fs.writeFileSync(dbPath, 'tiny db content, nowhere near the cap alone');
+		// A sparse file reports the requested size via fs.stat without writing real bytes to disk.
+		const fd = fs.openSync(walPath, 'w');
+		fs.ftruncateSync(fd, MAX_WAL_MERGE_DB_SIZE_BYTES);
+		fs.closeSync(fd);
+
+		const result = await tryReadDbWithWal(dbPath);
+
+		assert.equal(result, null, 'a small db with a huge WAL must still be refused');
+		assert.equal(
+			copyCalls, 0,
+			'the combined db+wal size must be checked BEFORE any copy is attempted — a small db must not let an oversized WAL through the cap'
+		);
+	} finally {
+		restoreCopyFileSync();
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+test('tryReadDbWithWal throttles a persistently failing merge instead of retrying the expensive copy on every call', async () => {
+	const fixture = createWalFixture();
+	let copyAttempts = 0;
+	const restoreCopyFileSync = spyOnCopyFileSync(() => {
+		copyAttempts++;
+		throw new Error('simulated persistent copy failure');
+	});
+	try {
+		const first = await tryReadDbWithWal(fixture.dbPath);
+		assert.equal(first, null, 'a failing merge with nothing cached yet must return null');
+		assert.equal(copyAttempts, 1, 'sanity: the merge was attempted once');
+
+		const second = await tryReadDbWithWal(fixture.dbPath);
+		assert.equal(second, null);
+		assert.equal(
+			copyAttempts, 1,
+			'a persistently failing merge must be throttled like a successful one — retrying the full copy on every single call defeats the throttle exactly where it matters most'
+		);
+	} finally {
+		restoreCopyFileSync();
 		fixture.cleanup();
 	}
 });

@@ -259,3 +259,67 @@ test('OpenCode DB cache is invalidated when WAL file disappears', async () => {
 		harness.cleanup();
 	}
 });
+
+/**
+ * Real WAL-mode `opencode.db`-shaped fixture (real `session` table, real node:sqlite writer) for
+ * the end-to-end regression test below — unlike the harness above, this exercises the actual
+ * merge/throttle path in src/utils/sqliteWal.ts, not a fake in-memory Database.
+ */
+function createOpenCodeWalFixture() {
+	const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-wal-fixture-'));
+	const dbPath = path.join(tmpDir, 'opencode.db');
+	const writer = new DatabaseSync(dbPath);
+	writer.exec('PRAGMA journal_mode=WAL;');
+	writer.exec(
+		'CREATE TABLE session (id TEXT PRIMARY KEY, slug TEXT, title TEXT, time_created INTEGER, time_updated INTEGER, project_id TEXT, directory TEXT);'
+	);
+	return {
+		tmpDir,
+		dbPath,
+		writer,
+		cleanup: () => {
+			try { writer.close(); } catch { /* ignore */ }
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		},
+	};
+}
+
+test('a WAL write made inside the throttle window eventually becomes visible once the writer goes quiet (regression: throttle must not hide data forever)', async () => {
+	// Reproduces the exact losing sequence from the #2036 review: write, read inside the throttle
+	// window (served a stale buffer), write again, read again (still throttled/stale), writer goes
+	// quiet, and — once the throttle window lapses — the new data must finally become visible. Before
+	// the fix, the caller re-stamped its cache with a freshly-read WAL mtime after being served a
+	// stale buffer, so the cache believed it already had the latest data and never refreshed again.
+	const fixture = createOpenCodeWalFixture();
+	const realNow = Date.now;
+	try {
+		fixture.writer.exec("INSERT INTO session VALUES ('s1', 'slug-1', 'Original title', 1, 1, 'p1', '/dir')");
+
+		const access = new OpenCodeDataAccess({ fsPath: '', path: '', scheme: 'file' });
+		access.getOpenCodeDataDir = () => fixture.tmpDir;
+
+		const first = await access.readOpenCodeDbSession('s1');
+		assert.equal(first?.title, 'Original title');
+
+		// A write lands inside the throttle window — a re-read must still see the old snapshot.
+		fixture.writer.exec("UPDATE session SET title = 'Updated title' WHERE id = 's1'");
+		const second = await access.readOpenCodeDbSession('s1');
+		assert.equal(second?.title, 'Original title', 'sanity: still within the throttle window, the stale snapshot is served');
+
+		// The writer goes quiet (no further WAL activity) — under the bug, the cache's wal
+		// fingerprint would already have been (wrongly) stamped as "current" during the read above,
+		// so nothing would ever invalidate it again, even indefinitely into the future.
+		const shifted = realNow() + 70_000; // past WAL_MERGE_MIN_INTERVAL_MS (60s) and the 30s writer-recency window
+		Date.now = () => shifted;
+
+		const third = await access.readOpenCodeDbSession('s1');
+		assert.equal(
+			third?.title, 'Updated title',
+			'once the throttle window lapses, the write must become visible — the cache must not have been fooled into believing it already had it'
+		);
+	} finally {
+		Date.now = realNow;
+		fixture.cleanup();
+	}
+});

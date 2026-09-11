@@ -25,7 +25,7 @@ import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
 import type { UriLike } from './opencode';
 import { normalizePathForComparison } from './utils/pathUtils';
-import { readDbBufferWithWal } from './utils/sqliteWal';
+import { readDbBufferWithWalFingerprint } from './utils/sqliteWal';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
 
@@ -39,6 +39,23 @@ const EMPTY_RESULT: QueryResult = { columns: [], values: [] };
 
 interface CursorComposerCacheEntry {
 	data: CursorComposerData | null;
+	mtimeMs: number;
+	size: number;
+	walMtimeMs: number;
+	walSize: number;
+}
+
+/** The db+wal file identity a query result actually reflects — see `queryAll`'s doc comment. */
+interface WalFingerprint {
+	mtimeMs: number;
+	size: number;
+	walMtimeMs: number;
+	walSize: number;
+}
+
+/** A parsed sql.js `Database` cached for one db path, plus the file identity it was built from. */
+interface CursorSqlJsDbCacheEntry {
+	db: initSqlJs.Database;
 	mtimeMs: number;
 	size: number;
 	walMtimeMs: number;
@@ -101,6 +118,17 @@ export class CursorDataAccess {
 	// fires 4 of them via Promise.all before any of them can populate _composerCache above.
 	private readonly _composerInflight: Map<string, Promise<CursorComposerData | null>> = new Map();
 
+	// Per-db-path cache of a parsed sql.js Database for the fallback backend (used when
+	// node:sqlite is unavailable, or a db is temporarily demoted after a read-only failure).
+	// Without this, every distinct composer query on the fallback path reads and reparses the
+	// entire db from scratch — and processEcosystemSessionDetails runs several adapter methods
+	// concurrently across up to 10 sessions, so one Cursor db could be fully reloaded many times
+	// per refresh. Restores the equivalent of the pre-#2033 cached parsed Database, but keyed and
+	// invalidated the same way the rest of this file already does (mtime/size + wal mtime/size).
+	private readonly _sqlJsDbCache: Map<string, CursorSqlJsDbCacheEntry> = new Map();
+	// Dedupes concurrent fallback queries against the same db path while a (re)load is in flight.
+	private readonly _sqlJsDbInflight: Map<string, Promise<CursorSqlJsDbCacheEntry | null>> = new Map();
+
 	private readonly extensionUri: UriLike;
 
 	constructor(extensionUri: UriLike) {
@@ -112,6 +140,11 @@ export class CursorDataAccess {
 		this._composerInflight.clear();
 		this._readOnlyUnsupportedDbs.clear();
 		this._sqlJsInitPromise = null;
+		for (const entry of this._sqlJsDbCache.values()) {
+			try { entry.db.close(); } catch { /* ignore */ }
+		}
+		this._sqlJsDbCache.clear();
+		this._sqlJsDbInflight.clear();
 	}
 
 	// ── Path helpers ──────────────────────────────────────────────────────────
@@ -265,39 +298,108 @@ export class CursorDataAccess {
 		}
 	}
 
+	/** Closes and drops the cached sql.js Database for `dbPath`, if any. */
+	private evictSqlJsDb(dbPath: string): void {
+		const existing = this._sqlJsDbCache.get(dbPath);
+		if (!existing) { return; }
+		try { existing.db.close(); } catch { /* ignore */ }
+		this._sqlJsDbCache.delete(dbPath);
+	}
+
 	/**
-	 * Fallback backend for when the read-only connection can't be used: loads `dbPath` (with any
-	 * pending WAL frames merged in) into sql.js via the shared, hardened helper — which caps the
-	 * size of database it will copy, throttles merge attempts per path, and backs off further
-	 * while a writer looks active. See src/utils/sqliteWal.ts.
+	 * Returns a cached, already-parsed sql.js `Database` for `dbPath` (with any pending WAL frames
+	 * merged in via the shared, hardened helper — see src/utils/sqliteWal.ts), reloading only when
+	 * the underlying file identity (mtime/size + wal mtime/size, same basis `_composerCache` uses)
+	 * has changed. Without this, every distinct composer on the fallback path would re-read and
+	 * re-parse the whole db (see class-level `_sqlJsDbCache` doc comment). Single-flight per db
+	 * path so concurrent fallback queries share one (re)load instead of racing.
 	 */
-	private async queryViaSqlJs(dbPath: string, sql: string, params: QueryParam[]): Promise<QueryResult | null> {
-		let db: initSqlJs.Database | undefined;
-		try {
-			const SQL = await this.initSqlJs();
-			const buffer = await readDbBufferWithWal(dbPath);
-			db = new SQL.Database(buffer);
-			const result = db.exec(sql, params);
-			return result.length === 0 ? EMPTY_RESULT : result[0];
-		} catch {
+	private async getSqlJsDb(dbPath: string): Promise<CursorSqlJsDbCacheEntry | null> {
+		const stats = this.statDb(dbPath);
+		if (!stats) {
+			this.evictSqlJsDb(dbPath);
 			return null;
+		}
+		const wal = this.statWal(dbPath);
+		const cached = this._sqlJsDbCache.get(dbPath);
+		if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size
+			&& cached.walMtimeMs === wal.mtimeMs && cached.walSize === wal.size) {
+			return cached;
+		}
+
+		const inflight = this._sqlJsDbInflight.get(dbPath);
+		if (inflight) { return inflight; }
+
+		const promise = (async (): Promise<CursorSqlJsDbCacheEntry | null> => {
+			try {
+				const SQL = await this.initSqlJs();
+				const result = await readDbBufferWithWalFingerprint(dbPath);
+				const db = new SQL.Database(result.buffer);
+				this.evictSqlJsDb(dbPath); // close whatever was cached before replacing it
+				const entry: CursorSqlJsDbCacheEntry = {
+					db, mtimeMs: result.dbMtimeMs, size: result.dbSize, walMtimeMs: result.walMtimeMs, walSize: result.walSize,
+				};
+				this._sqlJsDbCache.set(dbPath, entry);
+				return entry;
+			} catch {
+				return null;
+			}
+		})();
+		this._sqlJsDbInflight.set(dbPath, promise);
+		try {
+			return await promise;
 		} finally {
-			if (db) { try { db.close(); } catch { /* ignore */ } }
+			if (this._sqlJsDbInflight.get(dbPath) === promise) {
+				this._sqlJsDbInflight.delete(dbPath);
+			}
+		}
+	}
+
+	/**
+	 * Fallback backend for when the read-only connection can't be used: queries a per-db-path
+	 * cached sql.js `Database` (see `getSqlJsDb`) and reports the db+wal fingerprint those bytes
+	 * were actually built from, so callers can key their own caches on it instead of re-statting
+	 * the live files afterwards (a served buffer can be older than "now" — see sqliteWal.ts).
+	 */
+	private async queryViaSqlJs(dbPath: string, sql: string, params: QueryParam[]): Promise<{ result: QueryResult; fingerprint: WalFingerprint } | null> {
+		const entry = await this.getSqlJsDb(dbPath);
+		if (!entry) { return null; }
+		try {
+			const result = entry.db.exec(sql, params);
+			return {
+				result: result.length === 0 ? EMPTY_RESULT : result[0],
+				fingerprint: { mtimeMs: entry.mtimeMs, size: entry.size, walMtimeMs: entry.walMtimeMs, walSize: entry.walSize },
+			};
+		} catch {
+			// A query failing against an otherwise-successfully-opened db is unusual (e.g. a
+			// concurrent write corrupted the cached parse) — evict it so a broken instance isn't
+			// reused, rather than silently caching a source of repeated failures.
+			this.evictSqlJsDb(dbPath);
+			return null;
 		}
 	}
 
 	/**
 	 * Runs `sql` against `dbPath` and returns rows in sql.js's `{ columns, values }` shape,
 	 * preferring the copy-free read-only backend and falling back to sql.js when that isn't
-	 * available for this db. Returns an empty result (never throws) when `dbPath` doesn't exist
-	 * or both backends fail.
+	 * available for this db.
+	 *
+	 * Returns `null` when both backends failed to read `dbPath` at all — a transient failure,
+	 * distinct from a successful read that legitimately found zero rows (`{ result: EMPTY_RESULT,
+	 * ... }`, e.g. when the db file doesn't exist). Callers that cache "not found" must not do so
+	 * for a `null` return, only for a real (possibly empty) `QueryResult` — see `queryComposerData`,
+	 * which is why this distinction exists.
+	 *
+	 * `fingerprint` is non-null only when the sql.js fallback served the rows — the read-only
+	 * backend reads the live file directly, so there is no separate "as of" state to report; a
+	 * caller that needs a stat for that path should take a fresh one, since that read has no
+	 * staleness window.
 	 */
-	private async queryAll(dbPath: string, sql: string, params: QueryParam[] = []): Promise<QueryResult> {
-		if (!this.statDb(dbPath)) { return EMPTY_RESULT; }
+	private async queryAll(dbPath: string, sql: string, params: QueryParam[] = []): Promise<{ result: QueryResult; fingerprint: WalFingerprint | null } | null> {
+		if (!this.statDb(dbPath)) { return { result: EMPTY_RESULT, fingerprint: null }; } // no db file — genuinely nothing there, not a failure
 		const readOnlyResult = this.queryReadOnly(dbPath, sql, params);
-		if (readOnlyResult) { return readOnlyResult; }
-		const fallback = await this.queryViaSqlJs(dbPath, sql, params);
-		return fallback ?? EMPTY_RESULT;
+		if (readOnlyResult) { return { result: readOnlyResult, fingerprint: null }; }
+		return this.queryViaSqlJs(dbPath, sql, params); // null on failure propagates as-is
 	}
 
 	private evictComposerCacheIfOverCapacity(): void {
@@ -332,14 +434,24 @@ export class CursorDataAccess {
 		if (inflight) { return inflight; }
 
 		const promise = (async () => {
-			const data = await this.queryComposerData(dbPath, composerId);
-			if (stats) {
+			const outcome = await this.queryComposerData(dbPath, composerId);
+			// A `null` outcome means the read itself failed (both backends), not that the composer
+			// genuinely doesn't exist — don't cache that, or a transient failure becomes sticky
+			// until the file's identity happens to change. Only cache a real result (row present
+			// or genuinely absent).
+			if (outcome && stats) {
+				// The bytes queryComposerData actually read can be older than the `stats`/`wal`
+				// captured above (the sql.js fallback may have served a throttled, stale buffer) —
+				// key the cache entry on the fingerprint those bytes were actually produced from,
+				// falling back to the pre-query stat only when the query didn't go through that
+				// path (outcome.fingerprint is null for the live read-only backend).
+				const fp = outcome.fingerprint ?? { mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs: wal.mtimeMs, walSize: wal.size };
 				this._composerCache.set(virtualPath, {
-					data, mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs: wal.mtimeMs, walSize: wal.size,
+					data: outcome.data, mtimeMs: fp.mtimeMs, size: fp.size, walMtimeMs: fp.walMtimeMs, walSize: fp.walSize,
 				});
 				this.evictComposerCacheIfOverCapacity();
 			}
-			return data;
+			return outcome ? outcome.data : null;
 		})();
 		this._composerInflight.set(virtualPath, promise);
 		try {
@@ -351,18 +463,25 @@ export class CursorDataAccess {
 		}
 	}
 
-	private async queryComposerData(dbPath: string, composerId: string): Promise<CursorComposerData | null> {
+	/**
+	 * Returns `null` when the underlying read failed (both backends) — distinct from
+	 * `{ data: null, ... }`, which means the read succeeded and the composer genuinely doesn't
+	 * exist. `readComposerData` relies on this distinction to avoid caching a transient failure as
+	 * "not found" (see its doc comment).
+	 */
+	private async queryComposerData(dbPath: string, composerId: string): Promise<{ data: CursorComposerData | null; fingerprint: WalFingerprint | null } | null> {
+		const outcome = await this.queryAll(
+			dbPath,
+			"SELECT value FROM cursorDiskKV WHERE key = ?",
+			[`composerData:${composerId}`]
+		);
+		if (!outcome) { return null; } // both backends failed — a transient failure, not "not found"
+		if (outcome.result.values.length === 0) { return { data: null, fingerprint: outcome.fingerprint }; }
 		try {
-			const result = await this.queryAll(
-				dbPath,
-				"SELECT value FROM cursorDiskKV WHERE key = ?",
-				[`composerData:${composerId}`]
-			);
-			if (result.values.length === 0) { return null; }
-			const raw = result.values[0][0] as string;
-			return JSON.parse(raw) as CursorComposerData;
+			const raw = outcome.result.values[0][0] as string;
+			return { data: JSON.parse(raw) as CursorComposerData, fingerprint: outcome.fingerprint };
 		} catch {
-			return null;
+			return null; // malformed JSON — treat as a read failure, not "not found"; retry next call
 		}
 	}
 
@@ -379,12 +498,13 @@ export class CursorDataAccess {
 		try {
 			const placeholders = bubbleIds.map(() => '?').join(',');
 			const keys = bubbleIds.map(id => `bubbleId:${composerId}:${id}`);
-			const result = await this.queryAll(
+			const outcome = await this.queryAll(
 				dbPath,
 				`SELECT key, value FROM cursorDiskKV WHERE key IN (${placeholders})`,
 				keys
 			);
-			for (const row of result.values) {
+			if (!outcome) { return map; } // both backends failed — treat like "no bubbles found this time"
+			for (const row of outcome.result.values) {
 				const key = row[0] as string;
 				const raw = row[1] as string;
 				const bubbleId = key.replace(`bubbleId:${composerId}:`, '');
@@ -405,11 +525,12 @@ export class CursorDataAccess {
 		const dbPath = this.getCursorDbPath();
 		try {
 			// Keys are `composerData:<uuid>` — exclude sub-keys like `composerData:<uuid>:<other>`
-			const result = await this.queryAll(
+			const outcome = await this.queryAll(
 				dbPath,
 				"SELECT key FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND (length(key) - length(replace(key, ':', ''))) = 1"
 			);
-			return result.values.map((row: unknown[]) => {
+			if (!outcome) { return []; } // both backends failed this call — not "no sessions"
+			return outcome.result.values.map((row: unknown[]) => {
 				const composerId = (row[0] as string).replace('composerData:', '');
 				return `${dbPath}#${composerId}`;
 			});
