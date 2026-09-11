@@ -25,11 +25,24 @@ import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
 import type { UriLike } from './opencode';
 import { normalizePathForComparison } from './utils/pathUtils';
+import { readDbBufferWithWal, getWalMtimeMs } from './utils/sqliteWal';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
-type SqlDatabase = initSqlJs.Database;
 
-type CursorDbCacheEntry = { db: SqlDatabase; mtimeMs: number; size: number; walMtimeMs: number };
+/** Rows in sql.js's `db.exec()` shape, which every query backend below normalizes to. */
+interface QueryResult { columns: string[]; values: unknown[][] }
+
+/** Bound query parameter types accepted by both the node:sqlite and sql.js backends. */
+type QueryParam = string | number | null;
+
+const EMPTY_RESULT: QueryResult = { columns: [], values: [] };
+
+interface CursorComposerCacheEntry {
+	data: CursorComposerData | null;
+	mtimeMs: number;
+	size: number;
+	walMtimeMs: number;
+}
 
 interface CursorComposerData {
 	composerId: string;
@@ -53,10 +66,32 @@ export interface CursorBubble {
 }
 
 export class CursorDataAccess {
+	private static readonly COMPOSER_CACHE_MAX_ENTRIES = 2000;
+
 	private _sqlJsModule: SqlJsStatic | null = null;
 	private _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
-	private _dbCache: Map<string, CursorDbCacheEntry> = new Map();
-	private _dbCacheInflight: Map<string, Promise<SqlDatabase | null>> = new Map();
+
+	// Read-only node:sqlite backend. `undefined` = not yet probed, `null` = require('node:sqlite')
+	// failed (older Electron without native SQLite support) so every db path uses the sql.js
+	// fallback instead.
+	private _nodeSqliteModule: typeof import('node:sqlite') | null | undefined;
+	// Per-db-path memo of a failed read-only open/query (e.g. SQLITE_READONLY_CANTINIT when the
+	// -shm sidecar can't be initialised read-only), so a db that can't use the read-only backend
+	// doesn't retry that probe on every call — it falls straight to sql.js instead.
+	private readonly _readOnlyUnsupportedDbs: Set<string> = new Set();
+
+	// Cache of already-parsed composer data blobs. A single session read makes ~4 calls into
+	// readComposerData (getTokens/countInteractions/getModelUsage/getSessionMeta, see
+	// getSessionData), and discovery walks hundreds of sessions, so without this every one of
+	// those re-queries the db. Invalidated per composer by the underlying db file's
+	// mtime/size/WAL-mtime — cheap to recompute now that a "refresh" is a single-row read-only
+	// query rather than a multi-GB copy, so a busy WAL no longer triggers repeated full-database
+	// work, only a cache miss on the next read.
+	private readonly _composerCache: Map<string, CursorComposerCacheEntry> = new Map();
+	// Dedupes concurrent readComposerData() calls for the same virtual path — getSessionData()
+	// fires 4 of them via Promise.all before any of them can populate _composerCache above.
+	private readonly _composerInflight: Map<string, Promise<CursorComposerData | null>> = new Map();
+
 	private readonly extensionUri: UriLike;
 
 	constructor(extensionUri: UriLike) {
@@ -64,11 +99,9 @@ export class CursorDataAccess {
 	}
 
 	dispose(): void {
-		for (const entry of this._dbCache.values()) {
-			try { entry.db.close(); } catch { /* ignore */ }
-		}
-		this._dbCache.clear();
-		this._dbCacheInflight.clear();
+		this._composerCache.clear();
+		this._composerInflight.clear();
+		this._readOnlyUnsupportedDbs.clear();
 		this._sqlJsInitPromise = null;
 	}
 
@@ -148,104 +181,91 @@ export class CursorDataAccess {
 		return this._sqlJsInitPromise;
 	}
 
-	// ── DB caching ────────────────────────────────────────────────────────────
-
-	private getWalMtimeMs(dbPath: string): number {
-		try { return fs.statSync(dbPath + '-wal').mtimeMs; } catch { return 0; }
-	}
+	// ── Query backends ────────────────────────────────────────────────────────
 
 	private statDb(dbPath: string): fs.Stats | null {
-		try {
-			return fs.statSync(dbPath);
-		} catch (error) {
-			const code = (error as NodeJS.ErrnoException)?.code;
-			if ((code === 'ENOENT' || code === 'ENOTDIR') && this._dbCache.has(dbPath)) {
-				try { this._dbCache.get(dbPath)!.db.close(); } catch { /* ignore */ }
-				this._dbCache.delete(dbPath);
-			}
-			return null;
-		}
+		try { return fs.statSync(dbPath); } catch { return null; }
 	}
 
-	private isCachedDbCurrent(dbPath: string, stats: fs.Stats): boolean {
-		const entry = this._dbCache.get(dbPath);
-		return !!entry && entry.mtimeMs === stats.mtimeMs && entry.size === stats.size
-			&& entry.walMtimeMs === this.getWalMtimeMs(dbPath);
+	private getNodeSqliteModule(): typeof import('node:sqlite') | null {
+		if (this._nodeSqliteModule === undefined) {
+			try {
+				this._nodeSqliteModule = require('node:sqlite') as typeof import('node:sqlite');
+			} catch {
+				this._nodeSqliteModule = null;
+			}
+		}
+		return this._nodeSqliteModule;
 	}
 
 	/**
-	 * When an active WAL file is present, sql.js cannot see uncommitted WAL frames.
-	 * Copies the DB + WAL to a temp location, uses node:sqlite to checkpoint the WAL,
-	 * and returns the merged buffer for sql.js. Falls back to null if unavailable.
+	 * Preferred backend: a read-only `node:sqlite` connection against the live db file. This
+	 * sees another process's pending WAL frames directly, cross-process, with zero copies, and
+	 * mutates neither the main db nor the WAL. Opens, queries and closes immediately for every
+	 * call — never caches the handle, since a long-lived reader can block the writer's own WAL
+	 * checkpointing and make its WAL grow. Returns `null` when this backend can't be used for
+	 * `dbPath` (node:sqlite unavailable, or the open/query failed — e.g. `SQLITE_READONLY_CANTINIT`
+	 * when the `-shm` sidecar can't be initialised read-only), so the caller can fall back to sql.js.
 	 */
-	private async tryReadDbWithWal(dbPath: string): Promise<Buffer | null> {
-		const walPath = dbPath + '-wal';
-		let walSize: number;
-		try { walSize = fs.statSync(walPath).size; } catch { return null; }
-		if (walSize === 0) { return null; }
+	private queryReadOnly(dbPath: string, sql: string, params: QueryParam[]): QueryResult | null {
+		const mod = this.getNodeSqliteModule();
+		if (!mod || this._readOnlyUnsupportedDbs.has(dbPath)) { return null; }
+		let db: import('node:sqlite').DatabaseSync | undefined;
 		try {
-			const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
-			const tmpDir = path.join(os.homedir(), '.copilot', 'tmp');
-			fs.mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
-			const tmpDb = path.join(tmpDir, `cursor-wal-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.db`);
-			const tmpWal = tmpDb + '-wal';
-			const tmpShm = tmpDb + '-shm';
-			const shmPath = dbPath + '-shm';
-			fs.copyFileSync(dbPath, tmpDb);
-			fs.copyFileSync(walPath, tmpWal);
-			if (fs.existsSync(shmPath)) { fs.copyFileSync(shmPath, tmpShm); }
-			const nativeDb = new DatabaseSync(tmpDb);
-			nativeDb.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-			nativeDb.close();
-			const buffer = fs.readFileSync(tmpDb);
-			for (const f of [tmpDb, tmpWal, tmpShm]) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
-			return buffer;
+			db = new mod.DatabaseSync(dbPath, { readOnly: true });
+			const rows = db.prepare(sql).all(...(params as import('node:sqlite').SQLInputValue[])) as Array<Record<string, unknown>>;
+			if (rows.length === 0) { return EMPTY_RESULT; }
+			const columns = Object.keys(rows[0]);
+			const values = rows.map(row => columns.map(col => row[col]));
+			return { columns, values };
 		} catch {
+			this._readOnlyUnsupportedDbs.add(dbPath);
 			return null;
+		} finally {
+			if (db) { try { db.close(); } catch { /* ignore */ } }
 		}
 	}
 
-	private async refreshDb(dbPath: string, stats: fs.Stats): Promise<SqlDatabase | null> {
-		const walMtimeMs = this.getWalMtimeMs(dbPath);
-		let db: SqlDatabase;
+	/**
+	 * Fallback backend for when the read-only connection can't be used: loads `dbPath` (with any
+	 * pending WAL frames merged in) into sql.js via the shared, hardened helper — which caps the
+	 * size of database it will copy, throttles merge attempts per path, and backs off further
+	 * while a writer looks active. See src/utils/sqliteWal.ts.
+	 */
+	private async queryViaSqlJs(dbPath: string, sql: string, params: QueryParam[]): Promise<QueryResult | null> {
+		let db: initSqlJs.Database | undefined;
 		try {
 			const SQL = await this.initSqlJs();
-			const walBuffer = await this.tryReadDbWithWal(dbPath);
-			const buffer = walBuffer ?? fs.readFileSync(dbPath);
+			const buffer = await readDbBufferWithWal(dbPath);
 			db = new SQL.Database(buffer);
+			const result = db.exec(sql, params);
+			return result.length === 0 ? EMPTY_RESULT : result[0];
 		} catch {
-			return this._dbCache.get(dbPath)?.db ?? null;
+			return null;
+		} finally {
+			if (db) { try { db.close(); } catch { /* ignore */ } }
 		}
-
-		const currentStats = this.statDb(dbPath);
-		if (!currentStats || currentStats.mtimeMs !== stats.mtimeMs || currentStats.size !== stats.size) {
-			try { db.close(); } catch { /* ignore */ }
-			return this._dbCache.get(dbPath)?.db ?? null;
-		}
-
-		const existing = this._dbCache.get(dbPath);
-		if (existing) { try { existing.db.close(); } catch { /* ignore */ } }
-		this._dbCache.set(dbPath, { db, mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs });
-		return db;
 	}
 
-	private async getDb(dbPath: string): Promise<SqlDatabase | null> {
-		const stats = this.statDb(dbPath);
-		if (!stats) { return this._dbCache.get(dbPath)?.db ?? null; }
-		if (this.isCachedDbCurrent(dbPath, stats)) {
-			return this._dbCache.get(dbPath)!.db;
-		}
-		const cacheKey = `${dbPath}:${stats.mtimeMs}:${stats.size}:wal${this.getWalMtimeMs(dbPath)}`;
-		const inflight = this._dbCacheInflight.get(cacheKey);
-		if (inflight) { return inflight; }
-		const promise = this.refreshDb(dbPath, stats);
-		this._dbCacheInflight.set(cacheKey, promise);
-		try {
-			return await promise;
-		} finally {
-			if (this._dbCacheInflight.get(cacheKey) === promise) {
-				this._dbCacheInflight.delete(cacheKey);
-			}
+	/**
+	 * Runs `sql` against `dbPath` and returns rows in sql.js's `{ columns, values }` shape,
+	 * preferring the copy-free read-only backend and falling back to sql.js when that isn't
+	 * available for this db. Returns an empty result (never throws) when `dbPath` doesn't exist
+	 * or both backends fail.
+	 */
+	private async queryAll(dbPath: string, sql: string, params: QueryParam[] = []): Promise<QueryResult> {
+		if (!this.statDb(dbPath)) { return EMPTY_RESULT; }
+		const readOnlyResult = this.queryReadOnly(dbPath, sql, params);
+		if (readOnlyResult) { return readOnlyResult; }
+		const fallback = await this.queryViaSqlJs(dbPath, sql, params);
+		return fallback ?? EMPTY_RESULT;
+	}
+
+	private evictComposerCacheIfOverCapacity(): void {
+		while (this._composerCache.size > CursorDataAccess.COMPOSER_CACHE_MAX_ENTRIES) {
+			const oldestKey = this._composerCache.keys().next().value;
+			if (oldestKey === undefined) { break; }
+			this._composerCache.delete(oldestKey);
 		}
 	}
 
@@ -258,15 +278,46 @@ export class CursorDataAccess {
 		const dbPath = this.getDbPathFromVirtual(virtualPath);
 		const composerId = this.getComposerIdFromVirtual(virtualPath);
 		if (!composerId) { return null; }
-		const db = await this.getDb(dbPath);
-		if (!db) { return null; }
+
+		const stats = this.statDb(dbPath);
+		const walMtimeMs = getWalMtimeMs(dbPath);
+		if (stats) {
+			const cached = this._composerCache.get(virtualPath);
+			if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size && cached.walMtimeMs === walMtimeMs) {
+				return cached.data;
+			}
+		}
+
+		const inflight = this._composerInflight.get(virtualPath);
+		if (inflight) { return inflight; }
+
+		const promise = (async () => {
+			const data = await this.queryComposerData(dbPath, composerId);
+			if (stats) {
+				this._composerCache.set(virtualPath, { data, mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs });
+				this.evictComposerCacheIfOverCapacity();
+			}
+			return data;
+		})();
+		this._composerInflight.set(virtualPath, promise);
 		try {
-			const result = db.exec(
+			return await promise;
+		} finally {
+			if (this._composerInflight.get(virtualPath) === promise) {
+				this._composerInflight.delete(virtualPath);
+			}
+		}
+	}
+
+	private async queryComposerData(dbPath: string, composerId: string): Promise<CursorComposerData | null> {
+		try {
+			const result = await this.queryAll(
+				dbPath,
 				"SELECT value FROM cursorDiskKV WHERE key = ?",
 				[`composerData:${composerId}`]
 			);
-			if (result.length === 0 || result[0].values.length === 0) { return null; }
-			const raw = result[0].values[0][0] as string;
+			if (result.values.length === 0) { return null; }
+			const raw = result.values[0][0] as string;
 			return JSON.parse(raw) as CursorComposerData;
 		} catch {
 			return null;
@@ -282,18 +333,16 @@ export class CursorDataAccess {
 		const dbPath = this.getDbPathFromVirtual(virtualPath);
 		const composerId = this.getComposerIdFromVirtual(virtualPath);
 		if (!composerId) { return new Map(); }
-		const db = await this.getDb(dbPath);
-		if (!db) { return new Map(); }
 		const map = new Map<string, CursorBubble>();
 		try {
 			const placeholders = bubbleIds.map(() => '?').join(',');
 			const keys = bubbleIds.map(id => `bubbleId:${composerId}:${id}`);
-			const result = db.exec(
+			const result = await this.queryAll(
+				dbPath,
 				`SELECT key, value FROM cursorDiskKV WHERE key IN (${placeholders})`,
 				keys
 			);
-			if (result.length === 0) { return map; }
-			for (const row of result[0].values) {
+			for (const row of result.values) {
 				const key = row[0] as string;
 				const raw = row[1] as string;
 				const bubbleId = key.replace(`bubbleId:${composerId}:`, '');
@@ -312,15 +361,13 @@ export class CursorDataAccess {
 	 */
 	async discoverSessions(): Promise<string[]> {
 		const dbPath = this.getCursorDbPath();
-		const db = await this.getDb(dbPath);
-		if (!db) { return []; }
 		try {
 			// Keys are `composerData:<uuid>` — exclude sub-keys like `composerData:<uuid>:<other>`
-			const result = db.exec(
+			const result = await this.queryAll(
+				dbPath,
 				"SELECT key FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND (length(key) - length(replace(key, ':', ''))) = 1"
 			);
-			if (result.length === 0) { return []; }
-			return result[0].values.map((row: unknown[]) => {
+			return result.values.map((row: unknown[]) => {
 				const composerId = (row[0] as string).replace('composerData:', '');
 				return `${dbPath}#${composerId}`;
 			});

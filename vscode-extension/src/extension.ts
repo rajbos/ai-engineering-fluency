@@ -176,6 +176,7 @@ import { SessionDiscovery } from '../../src/sessionDiscovery';
 
 // --- Cache ---
 import { CacheManager } from './cacheManager';
+import { sweepStaleWalTempFiles } from '../../src/utils/sqliteWal';
 import { HookManager } from './hookManager';
 
 // --- Usage analysis ---
@@ -1492,6 +1493,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Best-effort housekeeping: reclaim cache/lock files orphaned by previous
 		// Extension Development Host sessions. Never blocks activation.
 		void this.cacheManager.cleanupStaleDevCacheFiles().catch((e) => this.warn(`Stale dev cache cleanup failed: ${e}`));
+		// Best-effort housekeeping: reclaim WAL-merge temp files stranded by earlier extension
+		// versions (see #2033) or an interrupted merge. Never blocks activation.
+		void sweepStaleWalTempFiles().catch((e) => this.warn(`Stale WAL temp file sweep failed: ${e}`));
 		this._sessionRestorePromise = this.restoreGitHubSession();
 		this.setupGitHubAuthListener(context);
 		this.sessionDiscovery.checkCopilotExtension();
