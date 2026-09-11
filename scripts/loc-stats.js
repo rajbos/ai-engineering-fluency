@@ -98,9 +98,12 @@ for (const exts of Object.values(EXT_BY_LANG)) {
 function isTestFile(relPath, ext) {
   const base = path.basename(relPath);
   const lower = base.toLowerCase();
-  if (ext === '.cs') return lower.endsWith('test.cs') || lower.endsWith('tests.cs');
+  if (ext === '.cs') return /test.*\.cs$/i.test(base);
+  if (ext === '.kt' || ext === '.kts') {
+    return /(^|[\\/])tests?([\\/])/i.test(relPath) ||
+      /tests?\.(?:kt|kts)$/i.test(base);
+  }
   // TS/JS: *.test.ts / *.test.tsx / *.test.js / *.spec.ts
-  return /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(base);
 }
 
 // ── Scenario discovery ─────────────────────────────────────────────────────
