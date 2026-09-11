@@ -88,25 +88,39 @@ test('isWalWriterActive: shm present and wal touched recently => active', () => 
 });
 
 test('isWalWriterActive: no shm file => not active', () => {
-	const fixture = createWalFixture();
+	// Built from plain files rather than by deleting a live connection's -shm: SQLite holds that
+	// file open, and while POSIX happily unlinks an open file, Windows either refuses the delete
+	// or leaves it pending until the handle closes — so existsSync still sees it and the check
+	// reports "active". That made this test pass on Linux/macOS and fail intermittently on
+	// Windows. No live handle, no race, and the scenario under test is unchanged.
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sqlitewal-noshm-'));
 	try {
-		fs.unlinkSync(fixture.dbPath + '-shm');
+		const dbPath = path.join(tmpDir, 'test.db');
+		fs.writeFileSync(dbPath, 'db');
+		fs.writeFileSync(dbPath + '-wal', 'recent wal frames'); // recent mtime, so only the missing -shm decides
+		assert.equal(fs.existsSync(dbPath + '-shm'), false, 'fixture setup: no -shm should exist');
 
-		assert.equal(isWalWriterActive(fixture.dbPath), false);
+		assert.equal(isWalWriterActive(dbPath), false);
 	} finally {
-		fixture.cleanup();
+		fs.rmSync(tmpDir, { recursive: true, force: true });
 	}
 });
 
 test('isWalWriterActive: shm present but wal mtime is old => not active', () => {
-	const fixture = createWalFixture();
+	// Plain files for the same reason as the test above: back-dating the -wal of a live writer
+	// races SQLite, which can touch the file again at any point.
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sqlitewal-oldwal-'));
 	try {
+		const dbPath = path.join(tmpDir, 'test.db');
+		fs.writeFileSync(dbPath, 'db');
+		fs.writeFileSync(dbPath + '-wal', 'stale wal frames');
+		fs.writeFileSync(dbPath + '-shm', 'shm'); // present, so only the stale -wal mtime decides
 		const oldDate = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes ago
-		fs.utimesSync(fixture.dbPath + '-wal', oldDate, oldDate);
+		fs.utimesSync(dbPath + '-wal', oldDate, oldDate);
 
-		assert.equal(isWalWriterActive(fixture.dbPath), false);
+		assert.equal(isWalWriterActive(dbPath), false);
 	} finally {
-		fixture.cleanup();
+		fs.rmSync(tmpDir, { recursive: true, force: true });
 	}
 });
 
