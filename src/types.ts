@@ -1231,7 +1231,7 @@ export interface ChatTurn {
   userMessage: string;
   assistantResponse: string;
   model: string | null;
-  toolCalls: { toolName: string; arguments?: string; result?: string; isSubAgent?: boolean; subAgentModel?: string; subAgentTokens?: { input: number; output: number } }[];
+  toolCalls: { toolName: string; arguments?: string; result?: string; isSubAgent?: boolean; subAgentModel?: string; subAgentTokens?: { input: number; output: number }; subAgentCost?: number }[];
   contextReferences: ContextReferenceUsage;
   mcpTools: { server: string; tool: string }[];
   inputTokensEstimate: number;
@@ -1240,6 +1240,13 @@ export interface ChatTurn {
   actualUsage?: ActualUsage;
   /** Thinking effort level active when this turn was submitted (e.g. "low", "medium", "high"). */
   thinkingEffort?: string;
+  /**
+   * Estimated USD cost of this turn's own model call (excludes sub-agent/child costs),
+   * computed host-side via `calculateEstimatedCost()` from the turn's model + token
+   * usage (actual when available, otherwise the text-based estimate). Absent when the
+   * model is unknown or has no pricing entry.
+   */
+  estimatedCost?: number;
 }
 
 // Full session log data for the log viewer
