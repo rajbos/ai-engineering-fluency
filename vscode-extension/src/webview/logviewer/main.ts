@@ -960,7 +960,7 @@ ${buildHierarchyCard(data)}
 ${usageContextTotal === 0 ? 'None' : `implicit ${usageContextImplicit}, explicit ${usageContextExplicit}`}
 </div>
 </div>
-${buildFileNameCard(data)}
+${buildTimelineCard(data)}
 <div class="summary-card">
 <div class="summary-label">💻 Editor</div>
 <div class="summary-value" style="font-size: 20px; word-break: keep-all;">${escapeHtml(data.editorName)}</div>
