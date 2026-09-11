@@ -11,6 +11,7 @@ on:
     paths:
       - .github/workflows/loc-stats.yml
       - scripts/loc-stats.js
+      - scripts/loc-stats.test.js
 
 permissions:
   contents: read
@@ -37,6 +38,9 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
+
+      - name: Run unit tests
+        run: node --test scripts/loc-stats.test.js
 
       - name: Generate LOC stats
         run: |

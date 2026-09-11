@@ -334,4 +334,19 @@ function main() {
   );
 }
 
-main();
+// Export pure helpers for unit testing (see scripts/loc-stats.test.js).
+module.exports = {
+  isTestFile,
+  countScenarios,
+  countMatches,
+  countNonBlankLines,
+  langForExt,
+  primaryLanguage,
+  buildMarkdown,
+  CODE_EXTENSIONS,
+  EXT_BY_LANG,
+};
+
+if (require.main === module) {
+  main();
+}
