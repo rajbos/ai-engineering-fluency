@@ -146,6 +146,8 @@
   "pptxSubject": "AI 工程熟练度评分报告",
   "pptxTitle": "AI 工程熟练度评分",
   "pptxGeneratedBy": "由 AI 工程熟练度扩展生成",
+  "share.exportTitle": "AI 工程熟练度评分",
+  "share.exportReportLabel": "报告",
   "fluencyScoreFeedbackTitle": "AI 工程熟练度评分反馈",
   "diagnosticReportTitle": "AI 工程熟练度 - 诊断报告",
   "backendConfigMessage": "后端配置在设置中可用。在设置中搜索 \"AI 工程熟练度: 后端\"。",

@@ -4122,6 +4122,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'nav.btnLevelViewer': l10n.t('nav.btnLevelViewer'),
 			'nav.btnEnvironmental': l10n.t('nav.btnEnvironmental'),
 			'nav.btnEfficiency': l10n.t('nav.btnEfficiency'),
+			// Share/export card strings (rendered into the PNG image)
+			'share.exportTitle': l10n.t('share.exportTitle'),
+			'share.exportReportLabel': l10n.t('share.exportReportLabel'),
 			// Current language for reference
 			'__language__': language
 		};

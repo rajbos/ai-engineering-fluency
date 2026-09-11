@@ -1,6 +1,7 @@
 import { describe, test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { buildShareCardHeaderHtml, shareCardContainerStyle, SHARE_CARD_BG } from '../../src/webview/maturity/shareCard';
+import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
 
 describe('buildShareCardHeaderHtml', () => {
   test('renders the fixed report title and a "Report ·" line carrying the date', () => {
@@ -30,6 +31,24 @@ describe('buildShareCardHeaderHtml', () => {
   test('falls back to Invalid Date for an empty lastUpdated string', () => {
     const html = buildShareCardHeaderHtml('');
     assert.match(html, /Report &middot; Invalid Date/);
+  });
+
+  test('renders the localized title and report label when localization is initialized', () => {
+    initializeWebviewLocalization({
+      'share.exportTitle': 'AI 工程熟练度评分',
+      'share.exportReportLabel': '报告',
+    });
+    try {
+      const html = buildShareCardHeaderHtml('2026-09-01T12:00:00.000Z');
+      assert.match(html, /AI 工程熟练度评分/);
+      assert.match(html, /报告 &middot; /);
+      // The English fallback strings must NOT leak through once localized.
+      assert.ok(!html.includes('AI Engineering Fluency Score'), 'localized title must replace the English default');
+      assert.ok(!html.includes('Report &middot;'), 'localized report label must replace the English default');
+    } finally {
+      // Reset to built-in defaults so other tests are not affected.
+      initializeWebviewLocalization({});
+    }
   });
 
   test('uses the centered title-block style and the dark share-card background', () => {

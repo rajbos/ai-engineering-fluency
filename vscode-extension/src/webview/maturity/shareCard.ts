@@ -1,4 +1,5 @@
 import { escapeHtml } from '../shared/formatUtils';
+import { localize } from '../shared/localization';
 
 export const SHARE_CARD_BG = '#1b1b1e';
 
@@ -16,7 +17,9 @@ const TITLE_BLOCK_STYLE = 'text-align:center;margin-bottom:20px;';
  */
 export function buildShareCardHeaderHtml(lastUpdated: string): string {
   const when = new Date(lastUpdated).toLocaleString();
-  return `<div style="${TITLE_BLOCK_STYLE}"><div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">AI Engineering Fluency Score</div><div style="font-size:16px;color:#b8b8c8;">Report &middot; ${escapeHtml(when)}</div></div>`;
+  const title = escapeHtml(localize('share.exportTitle'));
+  const reportLabel = escapeHtml(localize('share.exportReportLabel'));
+  return `<div style="${TITLE_BLOCK_STYLE}"><div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">${title}</div><div style="font-size:16px;color:#b8b8c8;">${reportLabel} &middot; ${escapeHtml(when)}</div></div>`;
 }
 
 /**
