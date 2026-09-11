@@ -77,7 +77,13 @@ import type {
   CorrectionSessionEntry,
   RepeatedTaskReport,
 } from '../../src/types';
-import { CONTEXT_NEAR_LIMIT_RATIO } from '../../src/types';
+import {
+	ensureContextPressure,
+	hasContextSignal,
+	mergeDbContextPressure,
+	mergeSessionContextPressure,
+	sessionCompactionEvents,
+} from './contextPressure';
 import { getTimeWindowStartDate, getTimeWindowStartDayKey } from '../../src/timeWindows';
 
 // --- Correction-moment detection (per-repo report over recent sessions) ---
@@ -4905,26 +4911,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/**
 	 * Fold one data.db context row into a period's per-session exhaustion counters.
-	 * `alreadyCounted` is true when `_mergeContextPressure` already counted this
-	 * session from its events.jsonl signals; `compacted` sessions are excluded from
-	 * `sessionsNearLimit` because compaction resets the fill they'd be judged on.
+	 * See `contextPressure.ts` for the denominator and de-duplication rules.
 	 */
 	private _mergeDbContextPressure(
 		period: UsageAnalysisPeriod, info: SessionContextWindow, alreadyCounted: boolean, compacted: boolean,
 	): void {
-		const limit = info.contextWindowLimit;
-		const reached = info.contextReachedTokens;
-		const hasFill = !!limit && !!reached && reached > 0;
-		// A tier-only row is still a context-bearing session, so it belongs in the
-		// denominator even though there is no fill to measure it against.
-		if (!hasFill && !info.contextTier) { return; }
-		const cp = this._ensureContextPressure(period);
-		if (!alreadyCounted) { cp.sessionsConsidered++; }
-		if (!hasFill) { return; }
-		cp.sessionsWithFillData++;
-		const fillPercent = Math.min(100, Math.round((reached! / limit!) * 100));
-		if (fillPercent > (cp.worstFillPercent ?? 0)) { cp.worstFillPercent = fillPercent; }
-		if (!compacted && reached! >= limit! * CONTEXT_NEAR_LIMIT_RATIO) { cp.sessionsNearLimit++; }
+		mergeDbContextPressure(period, info, alreadyCounted, compacted);
 	}
 
 	/**
@@ -5452,31 +5444,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Get-or-create the contextPressure aggregate on a usage period. */
 	private _ensureContextPressure(period: UsageAnalysisPeriod): NonNullable<UsageAnalysisPeriod['contextPressure']> {
-		if (!period.contextPressure) {
-			period.contextPressure = { sessionsConsidered: 0, sessionsCompacted: 0, sessionsNearLimit: 0, sessionsWithFillData: 0 };
-		}
-		return period.contextPressure;
+		return ensureContextPressure(period);
 	}
 
 	/** Automatic compaction/truncation events recorded for one session, across all formats. */
 	private _sessionCompactionEvents(sessionData: SessionFileCache): number {
-		return (sessionData.truncationCount ?? 0)
-			+ (sessionData.usageAnalysis?.toolCalls.byTool['__auto_compact__'] ?? 0);
+		return sessionCompactionEvents(sessionData);
 	}
 
 	/** True when a session carries any usable context-window or compaction signal. */
 	private _hasContextSignal(sessionData: SessionFileCache): boolean {
-		return !!sessionData.maxRequestInputTokens
-			|| !!sessionData.contextTier
-			|| this._sessionCompactionEvents(sessionData) > 0;
+		return hasContextSignal(sessionData);
 	}
 
 	/** Count one session towards a period's per-session context-exhaustion counters. */
 	private _mergeContextPressure(period: UsageAnalysisPeriod, sessionData: SessionFileCache): void {
-		if (!this._hasContextSignal(sessionData)) { return; }
-		const cp = this._ensureContextPressure(period);
-		cp.sessionsConsidered++;
-		if (this._sessionCompactionEvents(sessionData) > 0) { cp.sessionsCompacted++; }
+		mergeSessionContextPressure(period, sessionData);
 	}
 
 	/** Fold one session's context-window fields (from its cache entry) into a period aggregate. */
