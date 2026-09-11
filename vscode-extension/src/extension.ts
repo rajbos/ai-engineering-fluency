@@ -8774,6 +8774,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			shareToIssue: () => this.dispatch('shareToIssue', () => this.maturityHandleShareToIssue()),
 			resetDismissedTips: () => this.dispatch('resetDismissedTips', async () => { await this.resetDismissedFluencyTips(); await this.refreshMaturityPanel(); }),
 			downloadChartImage: () => this.dispatch('downloadChartImage', () => this.downloadChartImage()),
+			exportImageFailed: async () => { vscode.window.showErrorMessage('Failed to export the Fluency Score image. The dashboard was not ready yet; try again once it has finished loading.'); },
 			shareToSocialFailed: async () => { vscode.window.showErrorMessage('Failed to generate share card image.'); },
 		};
 		if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }

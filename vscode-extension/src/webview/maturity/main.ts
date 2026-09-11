@@ -524,7 +524,7 @@ async function handlePngExport(): Promise<void> {
   const stageBanner = document.querySelector('.stage-banner') as HTMLElement | null;
   const radarWrapper = document.querySelector('.radar-wrapper') as HTMLElement | null;
   if (!stageBanner && !radarWrapper) {
-    vscode.postMessage({ command: 'downloadChartImage' });
+    vscode.postMessage({ command: 'exportImageFailed' });
     return;
   }
 
@@ -550,7 +550,7 @@ async function handlePngExport(): Promise<void> {
     const dataUrl = canvas.toDataURL('image/png');
     vscode.postMessage({ command: 'saveChartImage', data: dataUrl });
   } catch {
-    vscode.postMessage({ command: 'downloadChartImage' });
+    vscode.postMessage({ command: 'exportImageFailed' });
   } finally {
     document.body.removeChild(card);
   }

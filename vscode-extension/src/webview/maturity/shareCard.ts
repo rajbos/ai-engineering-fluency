@@ -8,8 +8,8 @@ const SHARE_CARD_BASE_STYLE =
 const TITLE_BLOCK_STYLE = 'text-align:center;margin-bottom:20px;';
 
 /**
- * Builds the centered report header shown at the top of a fluency-share export
- * (PNG/PDF/PPTX cover). Pure so it can be unit-tested without a DOM.
+ * Builds the centered report header shown at the top of the PNG Fluency Score
+ * export. Pure so it can be unit-tested without a DOM.
  *
  * The date is rendered through `escapeHtml` because it derives from the user's
  * session-log `lastUpdated` value, which is untrusted session-log data.
@@ -21,8 +21,8 @@ export function buildShareCardHeaderHtml(lastUpdated: string): string {
 
 /**
  * The CSS text for the off-screen export card container. Kept as a constant so
- * the PNG/PDF/PPTX exports compose identical cards and the value is stable in
- * snapshot-style assertions.
+ * the PNG export composes its card from a single, stable value that
+ * snapshot-style assertions can pin.
  */
 export function shareCardContainerStyle(): string {
   return SHARE_CARD_BASE_STYLE;
