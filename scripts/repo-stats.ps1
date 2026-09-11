@@ -33,8 +33,8 @@ $excludeDirs = @(
 
 # Relative path fragments to exclude (generated/bundled webview output committed to the repo).
 $excludePathFragments = @(
-    'visualstudio-extension/src/CopilotTokenTracker/webview',
-    'visualstudio-extension\src\CopilotTokenTracker\webview'
+    'visualstudio-extension/src/AIEngineeringFluency/webview',
+    'visualstudio-extension\src\AIEngineeringFluency\webview'
 )
 
 # File names to exclude (lockfiles etc. that aren't hand-written code).
