@@ -65,7 +65,7 @@ model?: { key?: string; dir?: string };
 modelOtherExpanded?: boolean;
 editorOtherExpanded?: boolean;
 /** Whether the "Usage by Editor" section is collapsed (its table hidden). Persisted across sessions. */
-editorSectionCollapsed?: boolean;
+editorSectionCollapsed: boolean = (_initSort?.editorSectionCollapsed) ?? false;
 /** Billing-group (provider) names that the user has unchecked in the cost provider filter. */
 excludedProviders?: string[];
 };
