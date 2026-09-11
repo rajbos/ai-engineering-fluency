@@ -17,6 +17,27 @@ type SessionAggregateInput,
 type UtcDateRanges,
 } from '../../../src/statsHelpers';
 import type { ModelUsage, EditorUsage, SessionFileCache, DailyRollupEntry } from '../../../src/types';
+import { scaleModelUsage, preserveAutoRouting } from '../../../src/statsHelpers';
+import { calculateEstimatedCost } from '../../../src/tokenEstimation';
+
+test('Auto subsets survive merging, scaling, reconciliation and debug-log replacement', () => {
+	const source: ModelUsage = { model: { inputTokens: 100, outputTokens: 40, sessions: 1,
+		autoRouting: { inputTokens: 40, outputTokens: 20 } } };
+	const target: ModelUsage = {};
+	addModelUsage(target, source);
+	addModelUsage(target, source);
+	addModelUsage(target, { model: { inputTokens: 100, outputTokens: 20, sessions: 1 } });
+	assert.deepEqual(target.model.autoRouting, { inputTokens: 80, outputTokens: 40 });
+	assert.deepEqual(source.model.autoRouting, { inputTokens: 40, outputTokens: 20 });
+	assert.deepEqual(scaleModelUsage(target, 0.5).model.autoRouting, { inputTokens: 40, outputTokens: 20 });
+	assert.deepEqual(reconcileModelUsageToTotal(target, 600, 300).model.autoRouting, { inputTokens: 160, outputTokens: 120 });
+	const replacement: ModelUsage = { model: { inputTokens: 1_000_000, outputTokens: 1_000_000, cachedReadTokens: 500_000, sessions: 0 } };
+	preserveAutoRouting(source, replacement);
+	assert.deepEqual(replacement.model.autoRouting, { inputTokens: 400_000, outputTokens: 500_000, cachedReadTokens: 200_000 });
+	const pricing = { model: { inputCostPerMillion: 20, outputCostPerMillion: 40,
+		copilotPricing: { inputCostPerMillion: 2, outputCostPerMillion: 4, cachedInputCostPerMillion: 0.2 } } };
+	assert.ok(Math.abs(calculateEstimatedCost(replacement, pricing, 'copilot') - 4.856) < 1e-12);
+});
 
 // ── Helper factory ───────────────────────────────────────────────────────────
 

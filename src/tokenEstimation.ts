@@ -2,7 +2,7 @@
  * Token estimation and model-related utility functions.
  * Pure or near-pure functions extracted from CopilotTokenTracker for reusability.
  */
-import type { ModelUsage, ModelPricing, ContextReferenceUsage, TokenEstimator } from './types';
+import type { ModelUsage, ModelPricing, ContextReferenceUsage, TokenEstimator, ChatTurn } from './types';
 import { toLocalDayKey } from './utils/dayKeys';
 import type { CopilotCliOtelSessionUsage } from './copilotCliOtel';
 import { getModelLookupCandidates } from './webview/shared/modelUtils';
@@ -10,6 +10,7 @@ import { getModelLookupCandidates } from './webview/shared/modelUtils';
 /** Minimum request shape needed by getModelFromRequest. */
 interface ModelRequestSource {
 	modelId?: string;
+	response?: unknown[];
 	result?: {
 		metadata?: { modelId?: string };
 		details?: string;
@@ -1039,15 +1040,6 @@ function getDisplayNameLookup(modelPricing: { [key: string]: ModelPricing }): { 
 	return cached;
 }
 
-/** Find the model ID for a request by matching display names against its details string. Returns null if not found. */
-function _gmfrFindByDisplayName(details: string, modelPricing: { [key: string]: ModelPricing }): string | null {
-	const { map, sortedNames } = getDisplayNameLookup(modelPricing);
-	for (const displayName of sortedNames) {
-		if (details.includes(displayName)) { return map[displayName]; }
-	}
-	return null;
-}
-
 function _gmrMatchDisplayName(details: string, modelPricing: { [key: string]: ModelPricing }): string | null {
 	const { map, sortedNames } = getDisplayNameLookup(modelPricing);
 	for (const displayName of sortedNames) {
@@ -1056,24 +1048,40 @@ function _gmrMatchDisplayName(details: string, modelPricing: { [key: string]: Mo
 	return null;
 }
 
-export function getModelFromRequest(request: ModelRequestSource, modelPricing: { [key: string]: ModelPricing } = {}): string {
-	if (request.modelId) { return request.modelId.replace(/^copilot\//, ''); }
-	if (request.result?.metadata?.modelId) { return request.result.metadata.modelId.replace(/^copilot\//, ''); }
+function isAutoModel(model: string | undefined): boolean {
+	return model === 'auto' || model === 'copilot/auto';
+}
+
+function getAutoResolution(request: ModelRequestSource): string | undefined {
+	if (!Array.isArray(request.response)) { return undefined; }
+	for (const item of request.response) {
+		if (!item || typeof item !== 'object' || !('kind' in item) || item.kind !== 'autoModeResolution') { continue; }
+		if (!('resolved' in item) || !item.resolved || typeof item.resolved !== 'object') { continue; }
+		if ('id' in item.resolved && typeof item.resolved.id === 'string' && item.resolved.id && !isAutoModel(item.resolved.id)) {
+			return item.resolved.id.replace(/^copilot\//, '');
+		}
+	}
+	return undefined;
+}
+
+/** Only explicit request-level evidence qualifies; a session picker can change between turns. */
+export function isCopilotAutoRequest(request: ModelRequestSource): boolean {
+	return isAutoModel(request.modelId) || isAutoModel(request.result?.metadata?.modelId)
+		|| (Array.isArray(request.response) && request.response.some(item => !!item && typeof item === 'object' && 'kind' in item && item.kind === 'autoModeResolution'));
+}
+
+export function getModelFromRequest(request: ModelRequestSource, modelPricing: { [key: string]: ModelPricing } = {}, fallbackModel = 'gpt-4'): string {
+	const resolved = getAutoResolution(request);
+	if (resolved) { return resolved; }
+	const candidates = [request.modelId, request.result?.metadata?.modelId];
+	const explicit = candidates.find(model => model && !isAutoModel(model));
+	if (explicit) { return explicit.replace(/^copilot\//, ''); }
 	if (request.result?.details) {
 		const matched = _gmrMatchDisplayName(request.result.details, modelPricing);
 		if (matched) { return matched; }
 	}
-
-	if (request.result?.metadata?.modelId) {
-		return request.result.metadata.modelId.replace(/^copilot\//, '');
-	}
-
-	if (request.result?.details) {
-		const found = _gmfrFindByDisplayName(request.result.details, modelPricing);
-		if (found) { return found; }
-	}
-
-	return 'gpt-4'; // default
+	if (isCopilotAutoRequest(request)) { return 'auto'; }
+	return fallbackModel;
 }
 
 /**
@@ -1356,9 +1364,45 @@ export function calculateEstimatedCost(
 		const outputCost = (usage.outputTokens / 1_000_000) * pricing.outputCostPerMillion;
 
 		totalCost += uncachedInputCost + cachedReadCost + cacheCreation5mCost + cacheCreation1hCost + outputCost;
+		totalCost -= copilotAutoDiscount(model, usage, baseEntry, pricingSource);
 	}
 
 	return totalCost;
+}
+
+function copilotAutoDiscount(model: string, usage: ModelUsage[string], pricing: ModelPricing, source: 'provider' | 'copilot'): number {
+	if (source !== 'copilot' || !pricing.copilotPricing || !usage.autoRouting) { return 0; }
+	// Provider fallbacks and recorded exact charges are not Copilot rate estimates.
+	return 0.1 * calculateEstimatedCost(
+		{ [model]: { ...usage.autoRouting, sessions: 0 } },
+		{ [model]: pricing.copilotPricing },
+		'provider',
+	);
+}
+
+function attachSubAgentCosts(turn: ChatTurn, modelPricing: Record<string, ModelPricing>, pricingSource: 'provider' | 'copilot'): void {
+	for (const tc of turn.toolCalls) {
+		if (!tc.isSubAgent || !tc.subAgentModel || !tc.subAgentTokens) { continue; }
+		const cost = calculateEstimatedCost({
+			[tc.subAgentModel]: { inputTokens: tc.subAgentTokens.input, outputTokens: tc.subAgentTokens.output, sessions: 1 },
+		}, modelPricing, pricingSource);
+		if (cost > 0) { tc.subAgentCost = cost; }
+	}
+}
+
+/** Attach estimates only; recorded exact billing is handled separately by the caller. */
+export function attachEstimatedTurnCosts(turns: ChatTurn[], modelPricing: Record<string, ModelPricing>, pricingSource: 'provider' | 'copilot'): void {
+	for (const turn of turns) {
+		const inputTokens = turn.actualUsage?.promptTokens ?? turn.inputTokensEstimate;
+		const outputTokens = turn.actualUsage?.completionTokens ?? turn.outputTokensEstimate;
+		if (turn.model && (inputTokens > 0 || outputTokens > 0)) {
+			const usage = { inputTokens, outputTokens, sessions: 1,
+				...(turn.autoRouted ? { autoRouting: { inputTokens, outputTokens } } : {}) };
+			const cost = calculateEstimatedCost({ [turn.model]: usage }, modelPricing, pricingSource);
+			if (cost > 0) { turn.estimatedCost = cost; }
+		}
+		attachSubAgentCosts(turn, modelPricing, pricingSource);
+	}
 }
 
 /**

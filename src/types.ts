@@ -39,6 +39,8 @@ export interface ModelUsage {
      */
     cacheCreation1hTokens?: number;
     thinkingTokens?: number;
+    /** Token subset from explicitly Auto-routed Copilot requests (not additional usage). */
+    autoRouting?: Omit<ModelUsage[string], 'sessions' | 'autoRouting'>;
     /** Number of sessions that used this model in the aggregated period. */
     sessions: number;
   };
@@ -1231,6 +1233,8 @@ export interface ChatTurn {
   userMessage: string;
   assistantResponse: string;
   model: string | null;
+  /** Explicit per-request Copilot Auto selection; never inferred from a session's final picker. */
+  autoRouted?: boolean;
   toolCalls: { toolName: string; arguments?: string; result?: string; isSubAgent?: boolean; subAgentModel?: string; subAgentTokens?: { input: number; output: number }; subAgentCost?: number }[];
   contextReferences: ContextReferenceUsage;
   mcpTools: { server: string; tool: string }[];
