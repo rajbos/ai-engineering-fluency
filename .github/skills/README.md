@@ -92,6 +92,21 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - ESLint commands to identify violation candidates
 - Commit message and PR description templates
 
+### deduplicate-code
+
+**Purpose**: Detect copy-pasted code blocks with the dependency-free `check-code-duplication.js` detector, then pick one duplicate group and extract a shared helper to eliminate it, keeping all tests green.
+
+**Use this skill when:**
+- The CI step summary's "Code Duplication Analysis" report grows
+- A PR review notes duplicated / copy-pasted code
+- You want to DRY up the codebase (vscode-extension/src, shared src/, cli/src)
+
+**Contents:**
+- Step-by-step workflow: list groups → pick one → baseline tests → extract helper → lint → re-run detector → build → commit → PR
+- Guidance on which duplicate groups are safe to consolidate (and which intentionally-mirrored editor adapters to skip)
+- Drives `node scripts/check-code-duplication.js` for detection and verification
+- Commit message and PR description templates
+
 ### validate-editor-names
 
 **Purpose**: Verify that the CLI and VS Code extension always agree on editor display names, and every name has an icon in the webview icon map.
