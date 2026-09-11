@@ -126,6 +126,33 @@ test('l10n: clipboard-failure keys resolve in zh-cn', () => {
 	}
 });
 
+// Keys rendered into the share-card PNG export (PR #2035) — guards against raw
+// keys resurfacing in the exported image for every locale.
+test('l10n: share-card export keys resolve in English', () => {
+	const expected: Record<string, string> = {
+		'share.exportTitle': 'AI Engineering Fluency Score',
+		'share.exportReportLabel': 'Report',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: share-card export keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'share.exportTitle': 'AI 工程熟练度评分',
+			'share.exportReportLabel': '报告',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test("l10n: what's-new notification keys resolve in English", () => {
 	// The two buttons on the one-a-day new-feature notification. A missing key
 	// here would put a raw `whatsNew.takeMeThere` on the button, which is the

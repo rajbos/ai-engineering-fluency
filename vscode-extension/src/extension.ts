@@ -4122,6 +4122,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'nav.btnLevelViewer': l10n.t('nav.btnLevelViewer'),
 			'nav.btnEnvironmental': l10n.t('nav.btnEnvironmental'),
 			'nav.btnEfficiency': l10n.t('nav.btnEfficiency'),
+			// Share/export card strings (rendered into the PNG image)
+			'share.exportTitle': l10n.t('share.exportTitle'),
+			'share.exportReportLabel': l10n.t('share.exportReportLabel'),
 			// Current language for reference
 			'__language__': language
 		};
@@ -8774,6 +8777,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			shareToIssue: () => this.dispatch('shareToIssue', () => this.maturityHandleShareToIssue()),
 			resetDismissedTips: () => this.dispatch('resetDismissedTips', async () => { await this.resetDismissedFluencyTips(); await this.refreshMaturityPanel(); }),
 			downloadChartImage: () => this.dispatch('downloadChartImage', () => this.downloadChartImage()),
+			exportImageFailed: async () => { vscode.window.showErrorMessage('Failed to export the Fluency Score image. The dashboard was not ready yet; try again once it has finished loading.'); },
 			shareToSocialFailed: async () => { vscode.window.showErrorMessage('Failed to generate share card image.'); },
 		};
 		if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }

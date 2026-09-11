@@ -17,7 +17,11 @@ export interface WebviewLocalization {
 	'nav.btnLevelViewer': string;
 	'nav.btnEnvironmental': string;
 	'nav.btnEfficiency': string;
-	
+
+	// Share/export card strings (rendered into the PNG image)
+	'share.exportTitle': string;
+	'share.exportReportLabel': string;
+
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
 }
@@ -33,7 +37,9 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'nav.btnDashboard': 'Team Dashboard',
 	'nav.btnLevelViewer': 'Level Viewer',
 	'nav.btnEnvironmental': 'Environmental Impact',
-	'nav.btnEfficiency': 'Efficiency'
+	'nav.btnEfficiency': 'Efficiency',
+	'share.exportTitle': 'AI Engineering Fluency Score',
+	'share.exportReportLabel': 'Report'
 };
 
 // Current localization strings, initialized with defaults
