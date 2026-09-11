@@ -4,6 +4,7 @@ import { setHtml } from '../shared/domUtils';
 import { escapeHtml, formatCompact, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
+import { buildTurnOverviewRows, hashModelToHue } from './turnsOverview';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -1055,6 +1056,76 @@ ${hasBreakdown ? `<div class="session-usage-breakdown">
 `;
 }
 
+// ── Turns overview table ─────────────────────────────────────────────────────
+// Row-building logic (getTurnCachedTokens, buildTurnOverviewRows, hashModelToHue)
+// lives in ./turnsOverview.ts so it can be unit-tested without the CSS/DOM
+// dependencies this file carries — see that module for its doc comments.
+
+function renderModelOverviewBadge(model: string | null): string {
+	if (!model) { return '<span class="overview-model-badge overview-model-unknown">—</span>'; }
+	const hue = hashModelToHue(model);
+	const style = `background: hsl(${hue}, 55%, 16%); color: hsl(${hue}, 70%, 78%); border-color: hsl(${hue}, 55%, 32%);`;
+	return `<span class="overview-model-badge" style="${style}" title="${escapeHtml(model)}">${escapeHtml(getModelDisplayName(model))}</span>`;
+}
+
+/**
+ * Renders the turns-overview table shown above the chat-turns list: one compact,
+ * clickable row per turn with its mode, model, and input/cached/output token
+ * usage, so a multi-model session (e.g. model-routing research) can be scanned
+ * at a glance without opening every turn card. A row's model badge differing
+ * from the one above it is flagged with ⇄ to spot model switches quickly.
+ * Clicking a row scrolls to and briefly highlights the matching turn card.
+ */
+function renderTurnsOverviewTable(data: SessionLogData): string {
+	if (data.turns.length === 0) { return ''; }
+	const rows = buildTurnOverviewRows(data.turns);
+	const hasCached = rows.some(r => r.cached !== null);
+	const hasModelSwitches = rows.some((r, i) => i > 0 && r.model && rows[i - 1].model && r.model !== rows[i - 1].model);
+
+	const bodyRows = rows.map((row, i) => {
+		const switched = i > 0 && !!row.model && !!rows[i - 1].model && row.model !== rows[i - 1].model;
+		const cachedCell = hasCached ? `<td class="count-cell">${row.cached !== null ? formatCompact(row.cached) : '—'}</td>` : '';
+		return `<tr class="turns-overview-row${switched ? ' turns-overview-row-switch' : ''}" data-turn="${row.turnNumber}" title="Jump to turn #${row.turnNumber}">
+<td class="turns-overview-num">#${row.turnNumber}${switched ? ' <span class="overview-switch-icon" title="Model changed from the previous step">⇄</span>' : ''}</td>
+<td><span class="turn-mode" style="background: ${getModeColor(row.mode)};">${getModeIcon(row.mode)} ${escapeHtml(row.mode)}</span></td>
+<td>${renderModelOverviewBadge(row.model)}</td>
+<td class="count-cell">${formatCompact(row.input)}</td>
+${cachedCell}
+<td class="count-cell">${formatCompact(row.output)}</td>
+<td class="count-cell"><strong>${formatCompact(row.total)}</strong></td>
+<td class="turns-overview-actual" title="${row.isActual ? 'Actual API usage' : 'Estimated from text'}">${row.isActual ? '✓' : '~'}</td>
+</tr>`;
+	}).join('');
+
+	return `
+<div class="turns-overview">
+<div class="turns-overview-header">
+<span>🧭 Session Steps Overview (${rows.length})</span>
+${hasModelSwitches ? '<span class="overview-switch-note">⇄ marks a model change from the previous step</span>' : ''}
+</div>
+<div class="turns-overview-table-wrap">
+<table class="turns-overview-table">
+<thead>
+<tr>
+<th scope="col">Step</th>
+<th scope="col">Mode</th>
+<th scope="col">Model</th>
+<th scope="col">Input</th>
+${hasCached ? '<th scope="col">Cached</th>' : ''}
+<th scope="col">Output</th>
+<th scope="col">Total</th>
+<th scope="col" title="✓ actual API usage, ~ estimated from text">Src</th>
+</tr>
+</thead>
+<tbody>
+${bodyRows}
+</tbody>
+</table>
+</div>
+</div>
+`;
+}
+
 /**
  * Wires up all DOM event handlers after the layout has been injected into
  * `#root`. Must be called once immediately after `root.innerHTML` is set.
@@ -1120,6 +1191,16 @@ e.preventDefault();
 });
 }
 
+/** Clicking a turns-overview row jumps to and briefly highlights the matching turn card. */
+function wireUpTurnsOverviewHandlers(): void {
+document.querySelectorAll<HTMLElement>('.turns-overview-row').forEach(row => {
+row.addEventListener('click', () => {
+const turnNumber = parseInt(row.getAttribute('data-turn') || '0', 10);
+if (turnNumber > 0) { scrollAndFocusTurn(turnNumber); }
+});
+});
+}
+
 function wireUpEventHandlers(): void {
 document.getElementById('btn-raw')?.addEventListener('click', () => {
 vscode.postMessage({ command: 'openRawFile' });
@@ -1145,6 +1226,7 @@ vscode.postMessage({ command: 'openRawFile' });
 });
 
 wireUpToolCallHandlers();
+wireUpTurnsOverviewHandlers();
 }
 
 // ── Entry-point renderers (signatures preserved) ─────────────────────────────
@@ -1381,6 +1463,8 @@ ${renderSessionActualUsage(
 	actualStats.aggregatedBreakdown,
 )}
 
+${renderTurnsOverviewTable(data)}
+
 <div class="turns-header">
 <span>📝</span>
 <span>Chat Turns (${data.turns.length})${data.title ? ` - ${escapeHtml(data.title)}` : ''}</span>
@@ -1402,9 +1486,8 @@ ${data.turns.length > 0
 	focusRequestedTurn(data as SessionLogData & { focusedTurnNumber?: number; });
 }
 
-function focusRequestedTurn(data: SessionLogData & { focusedTurnNumber?: number; }): void {
-	const turnNumber = data.focusedTurnNumber;
-	if (typeof turnNumber !== 'number' || !Number.isSafeInteger(turnNumber) || turnNumber < 1) { return; }
+/** Scrolls to and briefly highlights the turn card for the given turn number, if it exists. */
+function scrollAndFocusTurn(turnNumber: number): void {
 	const turnCard = document.querySelector<HTMLElement>(`.turn-card[data-turn="${turnNumber}"]`);
 	if (!turnCard) { return; }
 	turnCard.classList.add('turn-card-focused');
@@ -1412,6 +1495,12 @@ function focusRequestedTurn(data: SessionLogData & { focusedTurnNumber?: number;
 	turnCard.focus({ preventScroll: true });
 	turnCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	setTimeout(() => turnCard.classList.remove('turn-card-focused'), 2_000);
+}
+
+function focusRequestedTurn(data: SessionLogData & { focusedTurnNumber?: number; }): void {
+	const turnNumber = data.focusedTurnNumber;
+	if (typeof turnNumber !== 'number' || !Number.isSafeInteger(turnNumber) || turnNumber < 1) { return; }
+	scrollAndFocusTurn(turnNumber);
 }
 
 async function bootstrap(): Promise<void> {
