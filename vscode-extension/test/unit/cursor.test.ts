@@ -237,3 +237,46 @@ test('a failed read-only open demotes the db only temporarily, not for the proce
 		fixture.cleanup();
 	}
 });
+
+test('the -wal size is part of the composer cache key, not just its mtime', async () => {
+	const fixture = createCursorDbFixture();
+	try {
+		const composerId = '11111111-2222-3333-4444-555555555555';
+		const virtualPath = `${fixture.dbPath}#${composerId}`;
+		const write = (name: string) => fixture.writer.exec(
+			`INSERT OR REPLACE INTO cursorDiskKV VALUES ('composerData:${composerId}', '${JSON.stringify({ composerId, name }).replace(/'/g, "''")}')`
+		);
+
+		const access = new CursorDataAccess(FAKE_URI);
+		write('first');
+		assert.equal((await access.readComposerData(virtualPath))?.name, 'first');
+
+		write('second');
+
+		// Re-point the cached entry's file-identity fields at the *current* db and -wal mtimes,
+		// leaving only the recorded walSize stale. That is the situation a coarse-granularity
+		// filesystem produces on its own (ext3/HFS+/FAT keep whole-second mtimes, so two WAL
+		// appends in one tick move no mtime while the WAL still grows) and it cannot be staged
+		// here by back-dating files, because utimes does not round-trip an mtime exactly — doing
+		// it that way invalidates the entry via the mtime and proves nothing. Reaching into the
+		// cache isolates the one field under test.
+		const cache = (access as unknown as {
+			_composerCache: Map<string, { mtimeMs: number; size: number; walMtimeMs: number; walSize: number }>;
+		})._composerCache;
+		const entry = cache.get(virtualPath);
+		assert.ok(entry, 'fixture setup: the first read should have cached an entry');
+		const dbNow = fs.statSync(fixture.dbPath);
+		const walNow = fs.statSync(fixture.dbPath + '-wal');
+		assert.notEqual(entry.walSize, walNow.size, 'fixture setup: the WAL should have grown since the cached read');
+		entry.mtimeMs = dbNow.mtimeMs;
+		entry.size = dbNow.size;
+		entry.walMtimeMs = walNow.mtimeMs;
+
+		assert.equal(
+			(await access.readComposerData(virtualPath))?.name, 'second',
+			'a grown WAL must invalidate the entry even when every mtime matches'
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});

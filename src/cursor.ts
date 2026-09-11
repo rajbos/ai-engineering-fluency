@@ -25,7 +25,7 @@ import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
 import type { UriLike } from './opencode';
 import { normalizePathForComparison } from './utils/pathUtils';
-import { readDbBufferWithWal, getWalMtimeMs } from './utils/sqliteWal';
+import { readDbBufferWithWal } from './utils/sqliteWal';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
 
@@ -42,6 +42,7 @@ interface CursorComposerCacheEntry {
 	mtimeMs: number;
 	size: number;
 	walMtimeMs: number;
+	walSize: number;
 }
 
 interface CursorComposerData {
@@ -90,8 +91,9 @@ export class CursorDataAccess {
 	// Cache of already-parsed composer data blobs. A single session read makes ~4 calls into
 	// readComposerData (getTokens/countInteractions/getModelUsage/getSessionMeta, see
 	// getSessionData), and discovery walks hundreds of sessions, so without this every one of
-	// those re-queries the db. Invalidated per composer by the underlying db file's
-	// mtime/size/WAL-mtime — cheap to recompute now that a "refresh" is a single-row read-only
+	// those re-queries the db. Invalidated per composer by the underlying db file's mtime/size
+	// and its -wal sidecar's mtime *and* size (see statWal for why size is part of the key) —
+	// cheap to recompute now that a "refresh" is a single-row read-only
 	// query rather than a multi-GB copy, so a busy WAL no longer triggers repeated full-database
 	// work, only a cache miss on the next read.
 	private readonly _composerCache: Map<string, CursorComposerCacheEntry> = new Map();
@@ -189,6 +191,24 @@ export class CursorDataAccess {
 	}
 
 	// ── Query backends ────────────────────────────────────────────────────────
+
+	/**
+	 * The `-wal` sidecar's mtime and size, or zeroes when there is no `-wal` file.
+	 *
+	 * Size matters as well as mtime: mtime granularity is coarse on some filesystems (whole
+	 * seconds on ext3/HFS+/FAT), so two WAL appends inside one tick can leave the mtime — and the
+	 * untouched main db's mtime/size — identical, and a cache keyed on those alone would serve a
+	 * stale composer blob. WAL frames are appended, so the file grows on every write and the size
+	 * moves even when the mtime cannot. One stat, both fields.
+	 */
+	private statWal(dbPath: string): { mtimeMs: number; size: number } {
+		try {
+			const stats = fs.statSync(dbPath + '-wal');
+			return { mtimeMs: stats.mtimeMs, size: stats.size };
+		} catch {
+			return { mtimeMs: 0, size: 0 };
+		}
+	}
 
 	private statDb(dbPath: string): fs.Stats | null {
 		try { return fs.statSync(dbPath); } catch { return null; }
@@ -299,10 +319,11 @@ export class CursorDataAccess {
 		if (!composerId) { return null; }
 
 		const stats = this.statDb(dbPath);
-		const walMtimeMs = getWalMtimeMs(dbPath);
+		const wal = this.statWal(dbPath);
 		if (stats) {
 			const cached = this._composerCache.get(virtualPath);
-			if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size && cached.walMtimeMs === walMtimeMs) {
+			if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size
+				&& cached.walMtimeMs === wal.mtimeMs && cached.walSize === wal.size) {
 				return cached.data;
 			}
 		}
@@ -313,7 +334,9 @@ export class CursorDataAccess {
 		const promise = (async () => {
 			const data = await this.queryComposerData(dbPath, composerId);
 			if (stats) {
-				this._composerCache.set(virtualPath, { data, mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs });
+				this._composerCache.set(virtualPath, {
+					data, mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs: wal.mtimeMs, walSize: wal.size,
+				});
 				this.evictComposerCacheIfOverCapacity();
 			}
 			return data;
