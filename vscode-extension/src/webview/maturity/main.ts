@@ -5,6 +5,7 @@ import { setHtml } from '../shared/domUtils';
 import { escapeHtml, markdownToHtml, safeSectionHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { buildDarkFactorySectionHtml } from './darkFactorySection';
+import { buildShareCardHeaderHtml, shareCardContainerStyle } from './shareCard';
 import type { DarkFactoryReport } from '../../../../src/types';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage, CategoryLevelData } from '../shared/types';
 import themeStyles from '../shared/theme.css';
@@ -534,11 +535,10 @@ async function handlePngExport(): Promise<void> {
   // data URL cannot do — that was why the previous export rendered as a near-
   // empty, too-dark square.
   const card = document.createElement('div');
-  card.style.cssText = 'position:absolute;left:-9999px;top:0;width:1200px;background:#1b1b1e;padding:32px;border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
+  card.style.cssText = shareCardContainerStyle();
 
   const titleEl = document.createElement('div');
-  titleEl.style.cssText = 'text-align:center;margin-bottom:20px;';
-  setHtml(titleEl, `<div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">AI Engineering Fluency Score</div><div style="font-size:16px;color:#b8b8c8;">Report &middot; ${escapeHtml(new Date(data.lastUpdated).toLocaleString())}</div>`);
+  setHtml(titleEl, buildShareCardHeaderHtml(data.lastUpdated));
   card.appendChild(titleEl);
 
   if (stageBanner) { card.appendChild(stageBanner.cloneNode(true)); }
