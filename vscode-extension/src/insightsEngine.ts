@@ -970,7 +970,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 			const worstNote = worst ? ` The fullest one reached ${worst}% of its window.` : '';
 			const compacted = cp.sessionsCompacted;
 			const compactedNote = compacted > 0
-				? ` A further ${compacted} session${compacted !== 1 ? 's' : ''} went past that point and compacted, losing earlier context.`
+				? ` Separately, ${compacted} session${compacted !== 1 ? 's' : ''} compacted automatically, losing earlier context.`
 				: '';
 			return `${n} of your ${cp.sessionsWithFillData} sessions with measured context fill reached at least ${Math.round(CONTEXT_NEAR_LIMIT_RATIO * 100)}% of their context window in the last 30 days.${worstNote}${compactedNote} ` +
 				`Once a window fills, the client silently drops or summarizes earlier turns — answers start losing detail you already gave. ` +

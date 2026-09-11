@@ -1,908 +1,9 @@
-"use strict";
-(() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __esm = (fn, res, err) => function __init() {
-    if (err) throw err[0];
-    try {
-      return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-    } catch (e7) {
-      throw err = [e7], e7;
-    }
-  };
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-
-  // node_modules/@lit/reactive-element/css-tag.js
-  var t, e, s, o, n, r, i, S, c;
-  var init_css_tag = __esm({
-    "node_modules/@lit/reactive-element/css-tag.js"() {
-      t = globalThis;
-      e = t.ShadowRoot && (void 0 === t.ShadyCSS || t.ShadyCSS.nativeShadow) && "adoptedStyleSheets" in Document.prototype && "replace" in CSSStyleSheet.prototype;
-      s = /* @__PURE__ */ Symbol();
-      o = /* @__PURE__ */ new WeakMap();
-      n = class {
-        constructor(t4, e7, o7) {
-          if (this._$cssResult$ = true, o7 !== s) throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");
-          this.cssText = t4, this.t = e7;
-        }
-        get styleSheet() {
-          let t4 = this.o;
-          const s4 = this.t;
-          if (e && void 0 === t4) {
-            const e7 = void 0 !== s4 && 1 === s4.length;
-            e7 && (t4 = o.get(s4)), void 0 === t4 && ((this.o = t4 = new CSSStyleSheet()).replaceSync(this.cssText), e7 && o.set(s4, t4));
-          }
-          return t4;
-        }
-        toString() {
-          return this.cssText;
-        }
-      };
-      r = (t4) => new n("string" == typeof t4 ? t4 : t4 + "", void 0, s);
-      i = (t4, ...e7) => {
-        const o7 = 1 === t4.length ? t4[0] : e7.reduce((e8, s4, o8) => e8 + ((t5) => {
-          if (true === t5._$cssResult$) return t5.cssText;
-          if ("number" == typeof t5) return t5;
-          throw Error("Value passed to 'css' function must be a 'css' function result: " + t5 + ". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.");
-        })(s4) + t4[o8 + 1], t4[0]);
-        return new n(o7, t4, s);
-      };
-      S = (s4, o7) => {
-        if (e) s4.adoptedStyleSheets = o7.map((t4) => t4 instanceof CSSStyleSheet ? t4 : t4.styleSheet);
-        else for (const e7 of o7) {
-          const o8 = document.createElement("style"), n5 = t.litNonce;
-          void 0 !== n5 && o8.setAttribute("nonce", n5), o8.textContent = e7.cssText, s4.appendChild(o8);
-        }
-      };
-      c = e ? (t4) => t4 : (t4) => t4 instanceof CSSStyleSheet ? ((t5) => {
-        let e7 = "";
-        for (const s4 of t5.cssRules) e7 += s4.cssText;
-        return r(e7);
-      })(t4) : t4;
-    }
-  });
-
-  // node_modules/@lit/reactive-element/reactive-element.js
-  var i2, e2, h, r2, o2, n2, a, c2, l, p, d, u, f, b, y;
-  var init_reactive_element = __esm({
-    "node_modules/@lit/reactive-element/reactive-element.js"() {
-      init_css_tag();
-      init_css_tag();
-      ({ is: i2, defineProperty: e2, getOwnPropertyDescriptor: h, getOwnPropertyNames: r2, getOwnPropertySymbols: o2, getPrototypeOf: n2 } = Object);
-      a = globalThis;
-      c2 = a.trustedTypes;
-      l = c2 ? c2.emptyScript : "";
-      p = a.reactiveElementPolyfillSupport;
-      d = (t4, s4) => t4;
-      u = { toAttribute(t4, s4) {
-        switch (s4) {
-          case Boolean:
-            t4 = t4 ? l : null;
-            break;
-          case Object:
-          case Array:
-            t4 = null == t4 ? t4 : JSON.stringify(t4);
-        }
-        return t4;
-      }, fromAttribute(t4, s4) {
-        let i6 = t4;
-        switch (s4) {
-          case Boolean:
-            i6 = null !== t4;
-            break;
-          case Number:
-            i6 = null === t4 ? null : Number(t4);
-            break;
-          case Object:
-          case Array:
-            try {
-              i6 = JSON.parse(t4);
-            } catch (t5) {
-              i6 = null;
-            }
-        }
-        return i6;
-      } };
-      f = (t4, s4) => !i2(t4, s4);
-      b = { attribute: true, type: String, converter: u, reflect: false, useDefault: false, hasChanged: f };
-      Symbol.metadata ?? (Symbol.metadata = /* @__PURE__ */ Symbol("metadata")), a.litPropertyMetadata ?? (a.litPropertyMetadata = /* @__PURE__ */ new WeakMap());
-      y = class extends HTMLElement {
-        static addInitializer(t4) {
-          this._$Ei(), (this.l ?? (this.l = [])).push(t4);
-        }
-        static get observedAttributes() {
-          return this.finalize(), this._$Eh && [...this._$Eh.keys()];
-        }
-        static createProperty(t4, s4 = b) {
-          if (s4.state && (s4.attribute = false), this._$Ei(), this.prototype.hasOwnProperty(t4) && ((s4 = Object.create(s4)).wrapped = true), this.elementProperties.set(t4, s4), !s4.noAccessor) {
-            const i6 = /* @__PURE__ */ Symbol(), h3 = this.getPropertyDescriptor(t4, i6, s4);
-            void 0 !== h3 && e2(this.prototype, t4, h3);
-          }
-        }
-        static getPropertyDescriptor(t4, s4, i6) {
-          const { get: e7, set: r6 } = h(this.prototype, t4) ?? { get() {
-            return this[s4];
-          }, set(t5) {
-            this[s4] = t5;
-          } };
-          return { get: e7, set(s5) {
-            const h3 = e7?.call(this);
-            r6?.call(this, s5), this.requestUpdate(t4, h3, i6);
-          }, configurable: true, enumerable: true };
-        }
-        static getPropertyOptions(t4) {
-          return this.elementProperties.get(t4) ?? b;
-        }
-        static _$Ei() {
-          if (this.hasOwnProperty(d("elementProperties"))) return;
-          const t4 = n2(this);
-          t4.finalize(), void 0 !== t4.l && (this.l = [...t4.l]), this.elementProperties = new Map(t4.elementProperties);
-        }
-        static finalize() {
-          if (this.hasOwnProperty(d("finalized"))) return;
-          if (this.finalized = true, this._$Ei(), this.hasOwnProperty(d("properties"))) {
-            const t5 = this.properties, s4 = [...r2(t5), ...o2(t5)];
-            for (const i6 of s4) this.createProperty(i6, t5[i6]);
-          }
-          const t4 = this[Symbol.metadata];
-          if (null !== t4) {
-            const s4 = litPropertyMetadata.get(t4);
-            if (void 0 !== s4) for (const [t5, i6] of s4) this.elementProperties.set(t5, i6);
-          }
-          this._$Eh = /* @__PURE__ */ new Map();
-          for (const [t5, s4] of this.elementProperties) {
-            const i6 = this._$Eu(t5, s4);
-            void 0 !== i6 && this._$Eh.set(i6, t5);
-          }
-          this.elementStyles = this.finalizeStyles(this.styles);
-        }
-        static finalizeStyles(s4) {
-          const i6 = [];
-          if (Array.isArray(s4)) {
-            const e7 = new Set(s4.flat(1 / 0).reverse());
-            for (const s5 of e7) i6.unshift(c(s5));
-          } else void 0 !== s4 && i6.push(c(s4));
-          return i6;
-        }
-        static _$Eu(t4, s4) {
-          const i6 = s4.attribute;
-          return false === i6 ? void 0 : "string" == typeof i6 ? i6 : "string" == typeof t4 ? t4.toLowerCase() : void 0;
-        }
-        constructor() {
-          super(), this._$Ep = void 0, this.isUpdatePending = false, this.hasUpdated = false, this._$Em = null, this._$Ev();
-        }
-        _$Ev() {
-          this._$ES = new Promise((t4) => this.enableUpdating = t4), this._$AL = /* @__PURE__ */ new Map(), this._$E_(), this.requestUpdate(), this.constructor.l?.forEach((t4) => t4(this));
-        }
-        addController(t4) {
-          (this._$EO ?? (this._$EO = /* @__PURE__ */ new Set())).add(t4), void 0 !== this.renderRoot && this.isConnected && t4.hostConnected?.();
-        }
-        removeController(t4) {
-          this._$EO?.delete(t4);
-        }
-        _$E_() {
-          const t4 = /* @__PURE__ */ new Map(), s4 = this.constructor.elementProperties;
-          for (const i6 of s4.keys()) this.hasOwnProperty(i6) && (t4.set(i6, this[i6]), delete this[i6]);
-          t4.size > 0 && (this._$Ep = t4);
-        }
-        createRenderRoot() {
-          const t4 = this.shadowRoot ?? this.attachShadow(this.constructor.shadowRootOptions);
-          return S(t4, this.constructor.elementStyles), t4;
-        }
-        connectedCallback() {
-          this.renderRoot ?? (this.renderRoot = this.createRenderRoot()), this.enableUpdating(true), this._$EO?.forEach((t4) => t4.hostConnected?.());
-        }
-        enableUpdating(t4) {
-        }
-        disconnectedCallback() {
-          this._$EO?.forEach((t4) => t4.hostDisconnected?.());
-        }
-        attributeChangedCallback(t4, s4, i6) {
-          this._$AK(t4, i6);
-        }
-        _$ET(t4, s4) {
-          const i6 = this.constructor.elementProperties.get(t4), e7 = this.constructor._$Eu(t4, i6);
-          if (void 0 !== e7 && true === i6.reflect) {
-            const h3 = (void 0 !== i6.converter?.toAttribute ? i6.converter : u).toAttribute(s4, i6.type);
-            this._$Em = t4, null == h3 ? this.removeAttribute(e7) : this.setAttribute(e7, h3), this._$Em = null;
-          }
-        }
-        _$AK(t4, s4) {
-          const i6 = this.constructor, e7 = i6._$Eh.get(t4);
-          if (void 0 !== e7 && this._$Em !== e7) {
-            const t5 = i6.getPropertyOptions(e7), h3 = "function" == typeof t5.converter ? { fromAttribute: t5.converter } : void 0 !== t5.converter?.fromAttribute ? t5.converter : u;
-            this._$Em = e7;
-            const r6 = h3.fromAttribute(s4, t5.type);
-            this[e7] = r6 ?? this._$Ej?.get(e7) ?? r6, this._$Em = null;
-          }
-        }
-        requestUpdate(t4, s4, i6, e7 = false, h3) {
-          if (void 0 !== t4) {
-            const r6 = this.constructor;
-            if (false === e7 && (h3 = this[t4]), i6 ?? (i6 = r6.getPropertyOptions(t4)), !((i6.hasChanged ?? f)(h3, s4) || i6.useDefault && i6.reflect && h3 === this._$Ej?.get(t4) && !this.hasAttribute(r6._$Eu(t4, i6)))) return;
-            this.C(t4, s4, i6);
-          }
-          false === this.isUpdatePending && (this._$ES = this._$EP());
-        }
-        C(t4, s4, { useDefault: i6, reflect: e7, wrapped: h3 }, r6) {
-          i6 && !(this._$Ej ?? (this._$Ej = /* @__PURE__ */ new Map())).has(t4) && (this._$Ej.set(t4, r6 ?? s4 ?? this[t4]), true !== h3 || void 0 !== r6) || (this._$AL.has(t4) || (this.hasUpdated || i6 || (s4 = void 0), this._$AL.set(t4, s4)), true === e7 && this._$Em !== t4 && (this._$Eq ?? (this._$Eq = /* @__PURE__ */ new Set())).add(t4));
-        }
-        async _$EP() {
-          this.isUpdatePending = true;
-          try {
-            await this._$ES;
-          } catch (t5) {
-            Promise.reject(t5);
-          }
-          const t4 = this.scheduleUpdate();
-          return null != t4 && await t4, !this.isUpdatePending;
-        }
-        scheduleUpdate() {
-          return this.performUpdate();
-        }
-        performUpdate() {
-          if (!this.isUpdatePending) return;
-          if (!this.hasUpdated) {
-            if (this.renderRoot ?? (this.renderRoot = this.createRenderRoot()), this._$Ep) {
-              for (const [t6, s5] of this._$Ep) this[t6] = s5;
-              this._$Ep = void 0;
-            }
-            const t5 = this.constructor.elementProperties;
-            if (t5.size > 0) for (const [s5, i6] of t5) {
-              const { wrapped: t6 } = i6, e7 = this[s5];
-              true !== t6 || this._$AL.has(s5) || void 0 === e7 || this.C(s5, void 0, i6, e7);
-            }
-          }
-          let t4 = false;
-          const s4 = this._$AL;
-          try {
-            t4 = this.shouldUpdate(s4), t4 ? (this.willUpdate(s4), this._$EO?.forEach((t5) => t5.hostUpdate?.()), this.update(s4)) : this._$EM();
-          } catch (s5) {
-            throw t4 = false, this._$EM(), s5;
-          }
-          t4 && this._$AE(s4);
-        }
-        willUpdate(t4) {
-        }
-        _$AE(t4) {
-          this._$EO?.forEach((t5) => t5.hostUpdated?.()), this.hasUpdated || (this.hasUpdated = true, this.firstUpdated(t4)), this.updated(t4);
-        }
-        _$EM() {
-          this._$AL = /* @__PURE__ */ new Map(), this.isUpdatePending = false;
-        }
-        get updateComplete() {
-          return this.getUpdateComplete();
-        }
-        getUpdateComplete() {
-          return this._$ES;
-        }
-        shouldUpdate(t4) {
-          return true;
-        }
-        update(t4) {
-          this._$Eq && (this._$Eq = this._$Eq.forEach((t5) => this._$ET(t5, this[t5]))), this._$EM();
-        }
-        updated(t4) {
-        }
-        firstUpdated(t4) {
-        }
-      };
-      y.elementStyles = [], y.shadowRootOptions = { mode: "open" }, y[d("elementProperties")] = /* @__PURE__ */ new Map(), y[d("finalized")] = /* @__PURE__ */ new Map(), p?.({ ReactiveElement: y }), (a.reactiveElementVersions ?? (a.reactiveElementVersions = [])).push("2.1.2");
-    }
-  });
-
-  // node_modules/lit-html/lit-html.js
-  function V(t4, i6) {
-    if (!u2(t4) || !t4.hasOwnProperty("raw")) throw Error("invalid template strings array");
-    return void 0 !== e3 ? e3.createHTML(i6) : i6;
-  }
-  function M(t4, i6, s4 = t4, e7) {
-    if (i6 === E) return i6;
-    let h3 = void 0 !== e7 ? s4._$Co?.[e7] : s4._$Cl;
-    const o7 = a2(i6) ? void 0 : i6._$litDirective$;
-    return h3?.constructor !== o7 && (h3?._$AO?.(false), void 0 === o7 ? h3 = void 0 : (h3 = new o7(t4), h3._$AT(t4, s4, e7)), void 0 !== e7 ? (s4._$Co ?? (s4._$Co = []))[e7] = h3 : s4._$Cl = h3), void 0 !== h3 && (i6 = M(t4, h3._$AS(t4, i6.values), h3, e7)), i6;
-  }
-  var t2, i3, s2, e3, h2, o3, n3, r3, l2, c3, a2, u2, d2, f2, v, _, m, p2, g, $, y2, x, b2, w, T, E, A, C, P, N, S2, R, k, H, I, L, z, Z, B, D;
-  var init_lit_html = __esm({
-    "node_modules/lit-html/lit-html.js"() {
-      t2 = globalThis;
-      i3 = (t4) => t4;
-      s2 = t2.trustedTypes;
-      e3 = s2 ? s2.createPolicy("lit-html", { createHTML: (t4) => t4 }) : void 0;
-      h2 = "$lit$";
-      o3 = `lit$${Math.random().toFixed(9).slice(2)}$`;
-      n3 = "?" + o3;
-      r3 = `<${n3}>`;
-      l2 = document;
-      c3 = () => l2.createComment("");
-      a2 = (t4) => null === t4 || "object" != typeof t4 && "function" != typeof t4;
-      u2 = Array.isArray;
-      d2 = (t4) => u2(t4) || "function" == typeof t4?.[Symbol.iterator];
-      f2 = "[ 	\n\f\r]";
-      v = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g;
-      _ = /-->/g;
-      m = />/g;
-      p2 = RegExp(`>|${f2}(?:([^\\s"'>=/]+)(${f2}*=${f2}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`, "g");
-      g = /'/g;
-      $ = /"/g;
-      y2 = /^(?:script|style|textarea|title)$/i;
-      x = (t4) => (i6, ...s4) => ({ _$litType$: t4, strings: i6, values: s4 });
-      b2 = x(1);
-      w = x(2);
-      T = x(3);
-      E = /* @__PURE__ */ Symbol.for("lit-noChange");
-      A = /* @__PURE__ */ Symbol.for("lit-nothing");
-      C = /* @__PURE__ */ new WeakMap();
-      P = l2.createTreeWalker(l2, 129);
-      N = (t4, i6) => {
-        const s4 = t4.length - 1, e7 = [];
-        let n5, l3 = 2 === i6 ? "<svg>" : 3 === i6 ? "<math>" : "", c4 = v;
-        for (let i7 = 0; i7 < s4; i7++) {
-          const s5 = t4[i7];
-          let a3, u3, d3 = -1, f3 = 0;
-          for (; f3 < s5.length && (c4.lastIndex = f3, u3 = c4.exec(s5), null !== u3); ) f3 = c4.lastIndex, c4 === v ? "!--" === u3[1] ? c4 = _ : void 0 !== u3[1] ? c4 = m : void 0 !== u3[2] ? (y2.test(u3[2]) && (n5 = RegExp("</" + u3[2], "g")), c4 = p2) : void 0 !== u3[3] && (c4 = p2) : c4 === p2 ? ">" === u3[0] ? (c4 = n5 ?? v, d3 = -1) : void 0 === u3[1] ? d3 = -2 : (d3 = c4.lastIndex - u3[2].length, a3 = u3[1], c4 = void 0 === u3[3] ? p2 : '"' === u3[3] ? $ : g) : c4 === $ || c4 === g ? c4 = p2 : c4 === _ || c4 === m ? c4 = v : (c4 = p2, n5 = void 0);
-          const x2 = c4 === p2 && t4[i7 + 1].startsWith("/>") ? " " : "";
-          l3 += c4 === v ? s5 + r3 : d3 >= 0 ? (e7.push(a3), s5.slice(0, d3) + h2 + s5.slice(d3) + o3 + x2) : s5 + o3 + (-2 === d3 ? i7 : x2);
-        }
-        return [V(t4, l3 + (t4[s4] || "<?>") + (2 === i6 ? "</svg>" : 3 === i6 ? "</math>" : "")), e7];
-      };
-      S2 = class _S {
-        constructor({ strings: t4, _$litType$: i6 }, e7) {
-          let r6;
-          this.parts = [];
-          let l3 = 0, a3 = 0;
-          const u3 = t4.length - 1, d3 = this.parts, [f3, v2] = N(t4, i6);
-          if (this.el = _S.createElement(f3, e7), P.currentNode = this.el.content, 2 === i6 || 3 === i6) {
-            const t5 = this.el.content.firstChild;
-            t5.replaceWith(...t5.childNodes);
-          }
-          for (; null !== (r6 = P.nextNode()) && d3.length < u3; ) {
-            if (1 === r6.nodeType) {
-              if (r6.hasAttributes()) for (const t5 of r6.getAttributeNames()) if (t5.endsWith(h2)) {
-                const i7 = v2[a3++], s4 = r6.getAttribute(t5).split(o3), e8 = /([.?@])?(.*)/.exec(i7);
-                d3.push({ type: 1, index: l3, name: e8[2], strings: s4, ctor: "." === e8[1] ? I : "?" === e8[1] ? L : "@" === e8[1] ? z : H }), r6.removeAttribute(t5);
-              } else t5.startsWith(o3) && (d3.push({ type: 6, index: l3 }), r6.removeAttribute(t5));
-              if (y2.test(r6.tagName)) {
-                const t5 = r6.textContent.split(o3), i7 = t5.length - 1;
-                if (i7 > 0) {
-                  r6.textContent = s2 ? s2.emptyScript : "";
-                  for (let s4 = 0; s4 < i7; s4++) r6.append(t5[s4], c3()), P.nextNode(), d3.push({ type: 2, index: ++l3 });
-                  r6.append(t5[i7], c3());
-                }
-              }
-            } else if (8 === r6.nodeType) if (r6.data === n3) d3.push({ type: 2, index: l3 });
-            else {
-              let t5 = -1;
-              for (; -1 !== (t5 = r6.data.indexOf(o3, t5 + 1)); ) d3.push({ type: 7, index: l3 }), t5 += o3.length - 1;
-            }
-            l3++;
-          }
-        }
-        static createElement(t4, i6) {
-          const s4 = l2.createElement("template");
-          return s4.innerHTML = t4, s4;
-        }
-      };
-      R = class {
-        constructor(t4, i6) {
-          this._$AV = [], this._$AN = void 0, this._$AD = t4, this._$AM = i6;
-        }
-        get parentNode() {
-          return this._$AM.parentNode;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        u(t4) {
-          const { el: { content: i6 }, parts: s4 } = this._$AD, e7 = (t4?.creationScope ?? l2).importNode(i6, true);
-          P.currentNode = e7;
-          let h3 = P.nextNode(), o7 = 0, n5 = 0, r6 = s4[0];
-          for (; void 0 !== r6; ) {
-            if (o7 === r6.index) {
-              let i7;
-              2 === r6.type ? i7 = new k(h3, h3.nextSibling, this, t4) : 1 === r6.type ? i7 = new r6.ctor(h3, r6.name, r6.strings, this, t4) : 6 === r6.type && (i7 = new Z(h3, this, t4)), this._$AV.push(i7), r6 = s4[++n5];
-            }
-            o7 !== r6?.index && (h3 = P.nextNode(), o7++);
-          }
-          return P.currentNode = l2, e7;
-        }
-        p(t4) {
-          let i6 = 0;
-          for (const s4 of this._$AV) void 0 !== s4 && (void 0 !== s4.strings ? (s4._$AI(t4, s4, i6), i6 += s4.strings.length - 2) : s4._$AI(t4[i6])), i6++;
-        }
-      };
-      k = class _k {
-        get _$AU() {
-          return this._$AM?._$AU ?? this._$Cv;
-        }
-        constructor(t4, i6, s4, e7) {
-          this.type = 2, this._$AH = A, this._$AN = void 0, this._$AA = t4, this._$AB = i6, this._$AM = s4, this.options = e7, this._$Cv = e7?.isConnected ?? true;
-        }
-        get parentNode() {
-          let t4 = this._$AA.parentNode;
-          const i6 = this._$AM;
-          return void 0 !== i6 && 11 === t4?.nodeType && (t4 = i6.parentNode), t4;
-        }
-        get startNode() {
-          return this._$AA;
-        }
-        get endNode() {
-          return this._$AB;
-        }
-        _$AI(t4, i6 = this) {
-          t4 = M(this, t4, i6), a2(t4) ? t4 === A || null == t4 || "" === t4 ? (this._$AH !== A && this._$AR(), this._$AH = A) : t4 !== this._$AH && t4 !== E && this._(t4) : void 0 !== t4._$litType$ ? this.$(t4) : void 0 !== t4.nodeType ? this.T(t4) : d2(t4) ? this.k(t4) : this._(t4);
-        }
-        O(t4) {
-          return this._$AA.parentNode.insertBefore(t4, this._$AB);
-        }
-        T(t4) {
-          this._$AH !== t4 && (this._$AR(), this._$AH = this.O(t4));
-        }
-        _(t4) {
-          this._$AH !== A && a2(this._$AH) ? this._$AA.nextSibling.data = t4 : this.T(l2.createTextNode(t4)), this._$AH = t4;
-        }
-        $(t4) {
-          const { values: i6, _$litType$: s4 } = t4, e7 = "number" == typeof s4 ? this._$AC(t4) : (void 0 === s4.el && (s4.el = S2.createElement(V(s4.h, s4.h[0]), this.options)), s4);
-          if (this._$AH?._$AD === e7) this._$AH.p(i6);
-          else {
-            const t5 = new R(e7, this), s5 = t5.u(this.options);
-            t5.p(i6), this.T(s5), this._$AH = t5;
-          }
-        }
-        _$AC(t4) {
-          let i6 = C.get(t4.strings);
-          return void 0 === i6 && C.set(t4.strings, i6 = new S2(t4)), i6;
-        }
-        k(t4) {
-          u2(this._$AH) || (this._$AH = [], this._$AR());
-          const i6 = this._$AH;
-          let s4, e7 = 0;
-          for (const h3 of t4) e7 === i6.length ? i6.push(s4 = new _k(this.O(c3()), this.O(c3()), this, this.options)) : s4 = i6[e7], s4._$AI(h3), e7++;
-          e7 < i6.length && (this._$AR(s4 && s4._$AB.nextSibling, e7), i6.length = e7);
-        }
-        _$AR(t4 = this._$AA.nextSibling, s4) {
-          for (this._$AP?.(false, true, s4); t4 !== this._$AB; ) {
-            const s5 = i3(t4).nextSibling;
-            i3(t4).remove(), t4 = s5;
-          }
-        }
-        setConnected(t4) {
-          void 0 === this._$AM && (this._$Cv = t4, this._$AP?.(t4));
-        }
-      };
-      H = class {
-        get tagName() {
-          return this.element.tagName;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        constructor(t4, i6, s4, e7, h3) {
-          this.type = 1, this._$AH = A, this._$AN = void 0, this.element = t4, this.name = i6, this._$AM = e7, this.options = h3, s4.length > 2 || "" !== s4[0] || "" !== s4[1] ? (this._$AH = Array(s4.length - 1).fill(new String()), this.strings = s4) : this._$AH = A;
-        }
-        _$AI(t4, i6 = this, s4, e7) {
-          const h3 = this.strings;
-          let o7 = false;
-          if (void 0 === h3) t4 = M(this, t4, i6, 0), o7 = !a2(t4) || t4 !== this._$AH && t4 !== E, o7 && (this._$AH = t4);
-          else {
-            const e8 = t4;
-            let n5, r6;
-            for (t4 = h3[0], n5 = 0; n5 < h3.length - 1; n5++) r6 = M(this, e8[s4 + n5], i6, n5), r6 === E && (r6 = this._$AH[n5]), o7 || (o7 = !a2(r6) || r6 !== this._$AH[n5]), r6 === A ? t4 = A : t4 !== A && (t4 += (r6 ?? "") + h3[n5 + 1]), this._$AH[n5] = r6;
-          }
-          o7 && !e7 && this.j(t4);
-        }
-        j(t4) {
-          t4 === A ? this.element.removeAttribute(this.name) : this.element.setAttribute(this.name, t4 ?? "");
-        }
-      };
-      I = class extends H {
-        constructor() {
-          super(...arguments), this.type = 3;
-        }
-        j(t4) {
-          this.element[this.name] = t4 === A ? void 0 : t4;
-        }
-      };
-      L = class extends H {
-        constructor() {
-          super(...arguments), this.type = 4;
-        }
-        j(t4) {
-          this.element.toggleAttribute(this.name, !!t4 && t4 !== A);
-        }
-      };
-      z = class extends H {
-        constructor(t4, i6, s4, e7, h3) {
-          super(t4, i6, s4, e7, h3), this.type = 5;
-        }
-        _$AI(t4, i6 = this) {
-          if ((t4 = M(this, t4, i6, 0) ?? A) === E) return;
-          const s4 = this._$AH, e7 = t4 === A && s4 !== A || t4.capture !== s4.capture || t4.once !== s4.once || t4.passive !== s4.passive, h3 = t4 !== A && (s4 === A || e7);
-          e7 && this.element.removeEventListener(this.name, this, s4), h3 && this.element.addEventListener(this.name, this, t4), this._$AH = t4;
-        }
-        handleEvent(t4) {
-          "function" == typeof this._$AH ? this._$AH.call(this.options?.host ?? this.element, t4) : this._$AH.handleEvent(t4);
-        }
-      };
-      Z = class {
-        constructor(t4, i6, s4) {
-          this.element = t4, this.type = 6, this._$AN = void 0, this._$AM = i6, this.options = s4;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        _$AI(t4) {
-          M(this, t4);
-        }
-      };
-      B = t2.litHtmlPolyfillSupport;
-      B?.(S2, k), (t2.litHtmlVersions ?? (t2.litHtmlVersions = [])).push("3.3.3");
-      D = (t4, i6, s4) => {
-        const e7 = s4?.renderBefore ?? i6;
-        let h3 = e7._$litPart$;
-        if (void 0 === h3) {
-          const t5 = s4?.renderBefore ?? null;
-          e7._$litPart$ = h3 = new k(i6.insertBefore(c3(), t5), t5, void 0, s4 ?? {});
-        }
-        return h3._$AI(t4), h3;
-      };
-    }
-  });
-
-  // node_modules/lit-element/lit-element.js
-  var s3, i4, o4;
-  var init_lit_element = __esm({
-    "node_modules/lit-element/lit-element.js"() {
-      init_reactive_element();
-      init_reactive_element();
-      init_lit_html();
-      init_lit_html();
-      s3 = globalThis;
-      i4 = class extends y {
-        constructor() {
-          super(...arguments), this.renderOptions = { host: this }, this._$Do = void 0;
-        }
-        createRenderRoot() {
-          var _a;
-          const t4 = super.createRenderRoot();
-          return (_a = this.renderOptions).renderBefore ?? (_a.renderBefore = t4.firstChild), t4;
-        }
-        update(t4) {
-          const r6 = this.render();
-          this.hasUpdated || (this.renderOptions.isConnected = this.isConnected), super.update(t4), this._$Do = D(r6, this.renderRoot, this.renderOptions);
-        }
-        connectedCallback() {
-          super.connectedCallback(), this._$Do?.setConnected(true);
-        }
-        disconnectedCallback() {
-          super.disconnectedCallback(), this._$Do?.setConnected(false);
-        }
-        render() {
-          return E;
-        }
-      };
-      i4._$litElement$ = true, i4["finalized"] = true, s3.litElementHydrateSupport?.({ LitElement: i4 });
-      o4 = s3.litElementPolyfillSupport;
-      o4?.({ LitElement: i4 });
-      (s3.litElementVersions ?? (s3.litElementVersions = [])).push("4.2.2");
-    }
-  });
-
-  // node_modules/lit-html/is-server.js
-  var init_is_server = __esm({
-    "node_modules/lit-html/is-server.js"() {
-    }
-  });
-
-  // node_modules/lit/index.js
-  var init_lit = __esm({
-    "node_modules/lit/index.js"() {
-      init_reactive_element();
-      init_lit_html();
-      init_lit_element();
-      init_is_server();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/custom-element.js
-  var init_custom_element = __esm({
-    "node_modules/@lit/reactive-element/decorators/custom-element.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/property.js
-  function n4(t4) {
-    return (e7, o7) => "object" == typeof o7 ? r4(t4, e7, o7) : ((t5, e8, o8) => {
-      const r6 = e8.hasOwnProperty(o8);
-      return e8.constructor.createProperty(o8, t5), r6 ? Object.getOwnPropertyDescriptor(e8, o8) : void 0;
-    })(t4, e7, o7);
-  }
-  var o5, r4;
-  var init_property = __esm({
-    "node_modules/@lit/reactive-element/decorators/property.js"() {
-      init_reactive_element();
-      o5 = { attribute: true, type: String, converter: u, reflect: false, hasChanged: f };
-      r4 = (t4 = o5, e7, r6) => {
-        const { kind: n5, metadata: i6 } = r6;
-        let s4 = globalThis.litPropertyMetadata.get(i6);
-        if (void 0 === s4 && globalThis.litPropertyMetadata.set(i6, s4 = /* @__PURE__ */ new Map()), "setter" === n5 && ((t4 = Object.create(t4)).wrapped = true), s4.set(r6.name, t4), "accessor" === n5) {
-          const { name: o7 } = r6;
-          return { set(r7) {
-            const n6 = e7.get.call(this);
-            e7.set.call(this, r7), this.requestUpdate(o7, n6, t4, true, r7);
-          }, init(e8) {
-            return void 0 !== e8 && this.C(o7, void 0, t4, e8), e8;
-          } };
-        }
-        if ("setter" === n5) {
-          const { name: o7 } = r6;
-          return function(r7) {
-            const n6 = this[o7];
-            e7.call(this, r7), this.requestUpdate(o7, n6, t4, true, r7);
-          };
-        }
-        throw Error("Unsupported decorator location: " + n5);
-      };
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/state.js
-  function r5(r6) {
-    return n4({ ...r6, state: true, attribute: false });
-  }
-  var init_state = __esm({
-    "node_modules/@lit/reactive-element/decorators/state.js"() {
-      init_property();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/event-options.js
-  var init_event_options = __esm({
-    "node_modules/@lit/reactive-element/decorators/event-options.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/base.js
-  var init_base = __esm({
-    "node_modules/@lit/reactive-element/decorators/base.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query.js
-  var init_query = __esm({
-    "node_modules/@lit/reactive-element/decorators/query.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-all.js
-  var init_query_all = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-all.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-async.js
-  var init_query_async = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-async.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-assigned-elements.js
-  var init_query_assigned_elements = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-assigned-elements.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-assigned-nodes.js
-  var init_query_assigned_nodes = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-assigned-nodes.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/lit/decorators.js
-  var init_decorators = __esm({
-    "node_modules/lit/decorators.js"() {
-      init_custom_element();
-      init_property();
-      init_state();
-      init_event_options();
-      init_query();
-      init_query_all();
-      init_query_async();
-      init_query_assigned_elements();
-      init_query_assigned_nodes();
-    }
-  });
-
-  // node_modules/lit-html/directive.js
-  var t3, e5, i5;
-  var init_directive = __esm({
-    "node_modules/lit-html/directive.js"() {
-      t3 = { ATTRIBUTE: 1, CHILD: 2, PROPERTY: 3, BOOLEAN_ATTRIBUTE: 4, EVENT: 5, ELEMENT: 6 };
-      e5 = (t4) => (...e7) => ({ _$litDirective$: t4, values: e7 });
-      i5 = class {
-        constructor(t4) {
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        _$AT(t4, e7, i6) {
-          this._$Ct = t4, this._$AM = e7, this._$Ci = i6;
-        }
-        _$AS(t4, e7) {
-          return this.update(t4, e7);
-        }
-        update(t4, e7) {
-          return this.render(...e7);
-        }
-      };
-    }
-  });
-
-  // node_modules/lit-html/directives/class-map.js
-  var e6;
-  var init_class_map = __esm({
-    "node_modules/lit-html/directives/class-map.js"() {
-      init_lit_html();
-      init_directive();
-      e6 = e5(class extends i5 {
-        constructor(t4) {
-          if (super(t4), t4.type !== t3.ATTRIBUTE || "class" !== t4.name || t4.strings?.length > 2) throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.");
-        }
-        render(t4) {
-          return " " + Object.keys(t4).filter((s4) => t4[s4]).join(" ") + " ";
-        }
-        update(s4, [i6]) {
-          if (void 0 === this.st) {
-            this.st = /* @__PURE__ */ new Set(), void 0 !== s4.strings && (this.nt = new Set(s4.strings.join(" ").split(/\s/).filter((t4) => "" !== t4)));
-            for (const t4 in i6) i6[t4] && !this.nt?.has(t4) && this.st.add(t4);
-            return this.render(i6);
-          }
-          const r6 = s4.element.classList;
-          for (const t4 of this.st) t4 in i6 || (r6.remove(t4), this.st.delete(t4));
-          for (const t4 in i6) {
-            const s5 = !!i6[t4];
-            s5 === this.st.has(t4) || this.nt?.has(t4) || (s5 ? (r6.add(t4), this.st.add(t4)) : (r6.remove(t4), this.st.delete(t4)));
-          }
-          return E;
-        }
-      });
-    }
-  });
-
-  // node_modules/lit/directives/class-map.js
-  var init_class_map2 = __esm({
-    "node_modules/lit/directives/class-map.js"() {
-      init_class_map();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/VscElement.js
-  var VERSION, CONFIG_KEY, warn, VscElement, customElement;
-  var init_VscElement = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/VscElement.js"() {
-      init_lit();
-      VERSION = "2.5.1";
-      CONFIG_KEY = "__vscodeElements_disableRegistryWarning__";
-      warn = (message, componentInstance) => {
-        const prefix = "[VSCode Elements] ";
-        if (componentInstance) {
-          console.warn(`${prefix}${message}
-%o`, componentInstance);
-        } else {
-          console.warn(`${message}
-%o`, componentInstance);
-        }
-      };
-      VscElement = class extends i4 {
-        /** VSCode Elements version */
-        get version() {
-          return VERSION;
-        }
-        warn(message) {
-          warn(message, this);
-        }
-      };
-      customElement = (tagName) => {
-        return (classOrTarget) => {
-          const customElementClass = customElements.get(tagName);
-          if (!customElementClass) {
-            customElements.define(tagName, classOrTarget);
-            return;
-          }
-          if (CONFIG_KEY in window) {
-            return;
-          }
-          const el2 = document.createElement(tagName);
-          const anotherVersion = el2?.version;
-          let message = "";
-          if (!anotherVersion) {
-            message += "is already registered by an unknown custom element handler class.";
-          } else if (anotherVersion !== VERSION) {
-            message += "is already registered by a different version of VSCode Elements. ";
-            message += `This version is "${VERSION}", while the other one is "${anotherVersion}".`;
-          } else {
-            message += `is already registered by the same version of VSCode Elements (${VERSION}).`;
-          }
-          warn(`The custom element "${tagName}" ${message}
-To suppress this warning, set window.${CONFIG_KEY} to true`);
-        };
-      };
-    }
-  });
-
-  // node_modules/lit-html/directives/if-defined.js
-  var o6;
-  var init_if_defined = __esm({
-    "node_modules/lit-html/directives/if-defined.js"() {
-      init_lit_html();
-      o6 = (o7) => o7 ?? A;
-    }
-  });
-
-  // node_modules/lit/directives/if-defined.js
-  var init_if_defined2 = __esm({
-    "node_modules/lit/directives/if-defined.js"() {
-      init_if_defined();
-    }
-  });
-
-  // node_modules/lit/directive.js
-  var init_directive2 = __esm({
-    "node_modules/lit/directive.js"() {
-      init_directive();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/style-property-map.js
-  var StylePropertyMap, stylePropertyMap;
-  var init_style_property_map = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/style-property-map.js"() {
-      init_lit();
-      init_directive2();
-      StylePropertyMap = class extends i5 {
-        constructor(partInfo) {
-          super(partInfo);
-          this._prevProperties = {};
-          if (partInfo.type !== t3.PROPERTY || partInfo.name !== "style") {
-            throw new Error("The `stylePropertyMap` directive must be used in the `style` property");
-          }
-        }
-        update(part, [styleProps]) {
-          Object.entries(styleProps).forEach(([key, val]) => {
-            if (this._prevProperties[key] !== val) {
-              if (key.startsWith("--")) {
-                part.element.style.setProperty(key, val);
-              } else {
-                part.element.style[key] = val;
-              }
-              this._prevProperties[key] = val;
-            }
-          });
-          return E;
-        }
-        render(_styleProps) {
-          return E;
-        }
-      };
-      stylePropertyMap = e5(StylePropertyMap);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/default.styles.js
-  var default_styles_default;
-  var init_default_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/default.styles.js"() {
-      init_lit();
-      default_styles_default = i`
+"use strict";(()=>{var Xe=Object.defineProperty;var d=(e,t,o)=>()=>{if(o)throw o[0];try{return e&&(t=e(e=0)),t}catch(n){throw o=[n],n}};var Ze=(e,t)=>{for(var o in t)Xe(e,o,{get:t[o],enumerable:!0})};var it,at,St,se,W,ct,L,ie,kt,Ct=d(()=>{it=globalThis,at=it.ShadowRoot&&(it.ShadyCSS===void 0||it.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,St=Symbol(),se=new WeakMap,W=class{constructor(t,o,n){if(this._$cssResult$=!0,n!==St)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=t,this.t=o}get styleSheet(){let t=this.o,o=this.t;if(at&&t===void 0){let n=o!==void 0&&o.length===1;n&&(t=se.get(o)),t===void 0&&((this.o=t=new CSSStyleSheet).replaceSync(this.cssText),n&&se.set(o,t))}return t}toString(){return this.cssText}},ct=e=>new W(typeof e=="string"?e:e+"",void 0,St),L=(e,...t)=>{let o=e.length===1?e[0]:t.reduce((n,r,s)=>n+(i=>{if(i._$cssResult$===!0)return i.cssText;if(typeof i=="number")return i;throw Error("Value passed to 'css' function must be a 'css' function result: "+i+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(r)+e[s+1],e[0]);return new W(o,e,St)},ie=(e,t)=>{if(at)e.adoptedStyleSheets=t.map(o=>o instanceof CSSStyleSheet?o:o.styleSheet);else for(let o of t){let n=document.createElement("style"),r=it.litNonce;r!==void 0&&n.setAttribute("nonce",r),n.textContent=o.cssText,e.appendChild(n)}},kt=at?e=>e:e=>e instanceof CSSStyleSheet?(t=>{let o="";for(let n of t.cssRules)o+=n.cssText;return ct(o)})(e):e});var po,ho,go,fo,mo,bo,k,ae,vo,yo,q,K,dt,ce,w,G=d(()=>{Ct();Ct();({is:po,defineProperty:ho,getOwnPropertyDescriptor:go,getOwnPropertyNames:fo,getOwnPropertySymbols:mo,getPrototypeOf:bo}=Object),k=globalThis,ae=k.trustedTypes,vo=ae?ae.emptyScript:"",yo=k.reactiveElementPolyfillSupport,q=(e,t)=>e,K={toAttribute(e,t){switch(t){case Boolean:e=e?vo:null;break;case Object:case Array:e=e==null?e:JSON.stringify(e)}return e},fromAttribute(e,t){let o=e;switch(t){case Boolean:o=e!==null;break;case Number:o=e===null?null:Number(e);break;case Object:case Array:try{o=JSON.parse(e)}catch{o=null}}return o}},dt=(e,t)=>!po(e,t),ce={attribute:!0,type:String,converter:K,reflect:!1,useDefault:!1,hasChanged:dt};Symbol.metadata??(Symbol.metadata=Symbol("metadata")),k.litPropertyMetadata??(k.litPropertyMetadata=new WeakMap);w=class extends HTMLElement{static addInitializer(t){this._$Ei(),(this.l??(this.l=[])).push(t)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(t,o=ce){if(o.state&&(o.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(t)&&((o=Object.create(o)).wrapped=!0),this.elementProperties.set(t,o),!o.noAccessor){let n=Symbol(),r=this.getPropertyDescriptor(t,n,o);r!==void 0&&ho(this.prototype,t,r)}}static getPropertyDescriptor(t,o,n){let{get:r,set:s}=go(this.prototype,t)??{get(){return this[o]},set(i){this[o]=i}};return{get:r,set(i){let a=r?.call(this);s?.call(this,i),this.requestUpdate(t,a,n)},configurable:!0,enumerable:!0}}static getPropertyOptions(t){return this.elementProperties.get(t)??ce}static _$Ei(){if(this.hasOwnProperty(q("elementProperties")))return;let t=bo(this);t.finalize(),t.l!==void 0&&(this.l=[...t.l]),this.elementProperties=new Map(t.elementProperties)}static finalize(){if(this.hasOwnProperty(q("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(q("properties"))){let o=this.properties,n=[...fo(o),...mo(o)];for(let r of n)this.createProperty(r,o[r])}let t=this[Symbol.metadata];if(t!==null){let o=litPropertyMetadata.get(t);if(o!==void 0)for(let[n,r]of o)this.elementProperties.set(n,r)}this._$Eh=new Map;for(let[o,n]of this.elementProperties){let r=this._$Eu(o,n);r!==void 0&&this._$Eh.set(r,o)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(t){let o=[];if(Array.isArray(t)){let n=new Set(t.flat(1/0).reverse());for(let r of n)o.unshift(kt(r))}else t!==void 0&&o.push(kt(t));return o}static _$Eu(t,o){let n=o.attribute;return n===!1?void 0:typeof n=="string"?n:typeof t=="string"?t.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(t=>this.enableUpdating=t),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(t=>t(this))}addController(t){(this._$EO??(this._$EO=new Set)).add(t),this.renderRoot!==void 0&&this.isConnected&&t.hostConnected?.()}removeController(t){this._$EO?.delete(t)}_$E_(){let t=new Map,o=this.constructor.elementProperties;for(let n of o.keys())this.hasOwnProperty(n)&&(t.set(n,this[n]),delete this[n]);t.size>0&&(this._$Ep=t)}createRenderRoot(){let t=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return ie(t,this.constructor.elementStyles),t}connectedCallback(){this.renderRoot??(this.renderRoot=this.createRenderRoot()),this.enableUpdating(!0),this._$EO?.forEach(t=>t.hostConnected?.())}enableUpdating(t){}disconnectedCallback(){this._$EO?.forEach(t=>t.hostDisconnected?.())}attributeChangedCallback(t,o,n){this._$AK(t,n)}_$ET(t,o){let n=this.constructor.elementProperties.get(t),r=this.constructor._$Eu(t,n);if(r!==void 0&&n.reflect===!0){let s=(n.converter?.toAttribute!==void 0?n.converter:K).toAttribute(o,n.type);this._$Em=t,s==null?this.removeAttribute(r):this.setAttribute(r,s),this._$Em=null}}_$AK(t,o){let n=this.constructor,r=n._$Eh.get(t);if(r!==void 0&&this._$Em!==r){let s=n.getPropertyOptions(r),i=typeof s.converter=="function"?{fromAttribute:s.converter}:s.converter?.fromAttribute!==void 0?s.converter:K;this._$Em=r;let a=i.fromAttribute(o,s.type);this[r]=a??this._$Ej?.get(r)??a,this._$Em=null}}requestUpdate(t,o,n,r=!1,s){if(t!==void 0){let i=this.constructor;if(r===!1&&(s=this[t]),n??(n=i.getPropertyOptions(t)),!((n.hasChanged??dt)(s,o)||n.useDefault&&n.reflect&&s===this._$Ej?.get(t)&&!this.hasAttribute(i._$Eu(t,n))))return;this.C(t,o,n)}this.isUpdatePending===!1&&(this._$ES=this._$EP())}C(t,o,{useDefault:n,reflect:r,wrapped:s},i){n&&!(this._$Ej??(this._$Ej=new Map)).has(t)&&(this._$Ej.set(t,i??o??this[t]),s!==!0||i!==void 0)||(this._$AL.has(t)||(this.hasUpdated||n||(o=void 0),this._$AL.set(t,o)),r===!0&&this._$Em!==t&&(this._$Eq??(this._$Eq=new Set)).add(t))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(o){Promise.reject(o)}let t=this.scheduleUpdate();return t!=null&&await t,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??(this.renderRoot=this.createRenderRoot()),this._$Ep){for(let[r,s]of this._$Ep)this[r]=s;this._$Ep=void 0}let n=this.constructor.elementProperties;if(n.size>0)for(let[r,s]of n){let{wrapped:i}=s,a=this[r];i!==!0||this._$AL.has(r)||a===void 0||this.C(r,void 0,s,a)}}let t=!1,o=this._$AL;try{t=this.shouldUpdate(o),t?(this.willUpdate(o),this._$EO?.forEach(n=>n.hostUpdate?.()),this.update(o)):this._$EM()}catch(n){throw t=!1,this._$EM(),n}t&&this._$AE(o)}willUpdate(t){}_$AE(t){this._$EO?.forEach(o=>o.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(t)),this.updated(t)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(t){return!0}update(t){this._$Eq&&(this._$Eq=this._$Eq.forEach(o=>this._$ET(o,this[o]))),this._$EM()}updated(t){}firstUpdated(t){}};w.elementStyles=[],w.shadowRootOptions={mode:"open"},w[q("elementProperties")]=new Map,w[q("finalized")]=new Map,yo?.({ReactiveElement:w}),(k.reactiveElementVersions??(k.reactiveElementVersions=[])).push("2.1.2")});function ye(e,t){if(!Pt(e)||!e.hasOwnProperty("raw"))throw Error("invalid template strings array");return le!==void 0?le.createHTML(t):t}function O(e,t,o=e,n){if(t===x)return t;let r=n!==void 0?o._$Co?.[n]:o._$Cl,s=Z(t)?void 0:t._$litDirective$;return r?.constructor!==s&&(r?._$AO?.(!1),s===void 0?r=void 0:(r=new s(e),r._$AT(e,o,n)),n!==void 0?(o._$Co??(o._$Co=[]))[n]=r:o._$Cl=r),r!==void 0&&(t=O(e,r._$AS(e,t.values),r,n)),t}var J,de,lt,le,me,C,be,xo,R,X,Z,Pt,_o,Tt,Y,ue,pe,B,he,ge,ve,Dt,$,bn,vn,x,f,fe,M,Eo,Q,It,tt,N,Lt,Bt,Mt,Rt,wo,xe,U=d(()=>{J=globalThis,de=e=>e,lt=J.trustedTypes,le=lt?lt.createPolicy("lit-html",{createHTML:e=>e}):void 0,me="$lit$",C=`lit$${Math.random().toFixed(9).slice(2)}$`,be="?"+C,xo=`<${be}>`,R=document,X=()=>R.createComment(""),Z=e=>e===null||typeof e!="object"&&typeof e!="function",Pt=Array.isArray,_o=e=>Pt(e)||typeof e?.[Symbol.iterator]=="function",Tt=`[ 	
+\f\r]`,Y=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,ue=/-->/g,pe=/>/g,B=RegExp(`>|${Tt}(?:([^\\s"'>=/]+)(${Tt}*=${Tt}*(?:[^ 	
+\f\r"'\`<>=]|("|')|))|$)`,"g"),he=/'/g,ge=/"/g,ve=/^(?:script|style|textarea|title)$/i,Dt=e=>(t,...o)=>({_$litType$:e,strings:t,values:o}),$=Dt(1),bn=Dt(2),vn=Dt(3),x=Symbol.for("lit-noChange"),f=Symbol.for("lit-nothing"),fe=new WeakMap,M=R.createTreeWalker(R,129);Eo=(e,t)=>{let o=e.length-1,n=[],r,s=t===2?"<svg>":t===3?"<math>":"",i=Y;for(let a=0;a<o;a++){let c=e[a],g,m,l=-1,y=0;for(;y<c.length&&(i.lastIndex=y,m=i.exec(c),m!==null);)y=i.lastIndex,i===Y?m[1]==="!--"?i=ue:m[1]!==void 0?i=pe:m[2]!==void 0?(ve.test(m[2])&&(r=RegExp("</"+m[2],"g")),i=B):m[3]!==void 0&&(i=B):i===B?m[0]===">"?(i=r??Y,l=-1):m[1]===void 0?l=-2:(l=i.lastIndex-m[2].length,g=m[1],i=m[3]===void 0?B:m[3]==='"'?ge:he):i===ge||i===he?i=B:i===ue||i===pe?i=Y:(i=B,r=void 0);let E=i===B&&e[a+1].startsWith("/>")?" ":"";s+=i===Y?c+xo:l>=0?(n.push(g),c.slice(0,l)+me+c.slice(l)+C+E):c+C+(l===-2?a:E)}return[ye(e,s+(e[o]||"<?>")+(t===2?"</svg>":t===3?"</math>":"")),n]},Q=class e{constructor({strings:t,_$litType$:o},n){let r;this.parts=[];let s=0,i=0,a=t.length-1,c=this.parts,[g,m]=Eo(t,o);if(this.el=e.createElement(g,n),M.currentNode=this.el.content,o===2||o===3){let l=this.el.content.firstChild;l.replaceWith(...l.childNodes)}for(;(r=M.nextNode())!==null&&c.length<a;){if(r.nodeType===1){if(r.hasAttributes())for(let l of r.getAttributeNames())if(l.endsWith(me)){let y=m[i++],E=r.getAttribute(l).split(C),S=/([.?@])?(.*)/.exec(y);c.push({type:1,index:s,name:S[2],strings:E,ctor:S[1]==="."?Lt:S[1]==="?"?Bt:S[1]==="@"?Mt:N}),r.removeAttribute(l)}else l.startsWith(C)&&(c.push({type:6,index:s}),r.removeAttribute(l));if(ve.test(r.tagName)){let l=r.textContent.split(C),y=l.length-1;if(y>0){r.textContent=lt?lt.emptyScript:"";for(let E=0;E<y;E++)r.append(l[E],X()),M.nextNode(),c.push({type:2,index:++s});r.append(l[y],X())}}}else if(r.nodeType===8)if(r.data===be)c.push({type:2,index:s});else{let l=-1;for(;(l=r.data.indexOf(C,l+1))!==-1;)c.push({type:7,index:s}),l+=C.length-1}s++}}static createElement(t,o){let n=R.createElement("template");return n.innerHTML=t,n}};It=class{constructor(t,o){this._$AV=[],this._$AN=void 0,this._$AD=t,this._$AM=o}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(t){let{el:{content:o},parts:n}=this._$AD,r=(t?.creationScope??R).importNode(o,!0);M.currentNode=r;let s=M.nextNode(),i=0,a=0,c=n[0];for(;c!==void 0;){if(i===c.index){let g;c.type===2?g=new tt(s,s.nextSibling,this,t):c.type===1?g=new c.ctor(s,c.name,c.strings,this,t):c.type===6&&(g=new Rt(s,this,t)),this._$AV.push(g),c=n[++a]}i!==c?.index&&(s=M.nextNode(),i++)}return M.currentNode=R,r}p(t){let o=0;for(let n of this._$AV)n!==void 0&&(n.strings!==void 0?(n._$AI(t,n,o),o+=n.strings.length-2):n._$AI(t[o])),o++}},tt=class e{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(t,o,n,r){this.type=2,this._$AH=f,this._$AN=void 0,this._$AA=t,this._$AB=o,this._$AM=n,this.options=r,this._$Cv=r?.isConnected??!0}get parentNode(){let t=this._$AA.parentNode,o=this._$AM;return o!==void 0&&t?.nodeType===11&&(t=o.parentNode),t}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(t,o=this){t=O(this,t,o),Z(t)?t===f||t==null||t===""?(this._$AH!==f&&this._$AR(),this._$AH=f):t!==this._$AH&&t!==x&&this._(t):t._$litType$!==void 0?this.$(t):t.nodeType!==void 0?this.T(t):_o(t)?this.k(t):this._(t)}O(t){return this._$AA.parentNode.insertBefore(t,this._$AB)}T(t){this._$AH!==t&&(this._$AR(),this._$AH=this.O(t))}_(t){this._$AH!==f&&Z(this._$AH)?this._$AA.nextSibling.data=t:this.T(R.createTextNode(t)),this._$AH=t}$(t){let{values:o,_$litType$:n}=t,r=typeof n=="number"?this._$AC(t):(n.el===void 0&&(n.el=Q.createElement(ye(n.h,n.h[0]),this.options)),n);if(this._$AH?._$AD===r)this._$AH.p(o);else{let s=new It(r,this),i=s.u(this.options);s.p(o),this.T(i),this._$AH=s}}_$AC(t){let o=fe.get(t.strings);return o===void 0&&fe.set(t.strings,o=new Q(t)),o}k(t){Pt(this._$AH)||(this._$AH=[],this._$AR());let o=this._$AH,n,r=0;for(let s of t)r===o.length?o.push(n=new e(this.O(X()),this.O(X()),this,this.options)):n=o[r],n._$AI(s),r++;r<o.length&&(this._$AR(n&&n._$AB.nextSibling,r),o.length=r)}_$AR(t=this._$AA.nextSibling,o){for(this._$AP?.(!1,!0,o);t!==this._$AB;){let n=de(t).nextSibling;de(t).remove(),t=n}}setConnected(t){this._$AM===void 0&&(this._$Cv=t,this._$AP?.(t))}},N=class{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(t,o,n,r,s){this.type=1,this._$AH=f,this._$AN=void 0,this.element=t,this.name=o,this._$AM=r,this.options=s,n.length>2||n[0]!==""||n[1]!==""?(this._$AH=Array(n.length-1).fill(new String),this.strings=n):this._$AH=f}_$AI(t,o=this,n,r){let s=this.strings,i=!1;if(s===void 0)t=O(this,t,o,0),i=!Z(t)||t!==this._$AH&&t!==x,i&&(this._$AH=t);else{let a=t,c,g;for(t=s[0],c=0;c<s.length-1;c++)g=O(this,a[n+c],o,c),g===x&&(g=this._$AH[c]),i||(i=!Z(g)||g!==this._$AH[c]),g===f?t=f:t!==f&&(t+=(g??"")+s[c+1]),this._$AH[c]=g}i&&!r&&this.j(t)}j(t){t===f?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,t??"")}},Lt=class extends N{constructor(){super(...arguments),this.type=3}j(t){this.element[this.name]=t===f?void 0:t}},Bt=class extends N{constructor(){super(...arguments),this.type=4}j(t){this.element.toggleAttribute(this.name,!!t&&t!==f)}},Mt=class extends N{constructor(t,o,n,r,s){super(t,o,n,r,s),this.type=5}_$AI(t,o=this){if((t=O(this,t,o,0)??f)===x)return;let n=this._$AH,r=t===f&&n!==f||t.capture!==n.capture||t.once!==n.once||t.passive!==n.passive,s=t!==f&&(n===f||r);r&&this.element.removeEventListener(this.name,this,n),s&&this.element.addEventListener(this.name,this,t),this._$AH=t}handleEvent(t){typeof this._$AH=="function"?this._$AH.call(this.options?.host??this.element,t):this._$AH.handleEvent(t)}},Rt=class{constructor(t,o,n){this.element=t,this.type=6,this._$AN=void 0,this._$AM=o,this.options=n}get _$AU(){return this._$AM._$AU}_$AI(t){O(this,t)}},wo=J.litHtmlPolyfillSupport;wo?.(Q,tt),(J.litHtmlVersions??(J.litHtmlVersions=[])).push("3.3.3");xe=(e,t,o)=>{let n=o?.renderBefore??t,r=n._$litPart$;if(r===void 0){let s=o?.renderBefore??null;n._$litPart$=r=new tt(t.insertBefore(X(),s),s,void 0,o??{})}return r._$AI(e),r}});var et,T,$o,_e=d(()=>{G();G();U();U();et=globalThis,T=class extends w{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){var o;let t=super.createRenderRoot();return(o=this.renderOptions).renderBefore??(o.renderBefore=t.firstChild),t}update(t){let o=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(t),this._$Do=xe(o,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return x}};T._$litElement$=!0,T.finalized=!0,et.litElementHydrateSupport?.({LitElement:T});$o=et.litElementPolyfillSupport;$o?.({LitElement:T});(et.litElementVersions??(et.litElementVersions=[])).push("4.2.2")});var Ee=d(()=>{});var I=d(()=>{G();U();_e();Ee()});var we=d(()=>{});function u(e){return(t,o)=>typeof o=="object"?So(e,t,o):((n,r,s)=>{let i=r.hasOwnProperty(s);return r.constructor.createProperty(s,n),i?Object.getOwnPropertyDescriptor(r,s):void 0})(e,t,o)}var Ao,So,Ot=d(()=>{G();Ao={attribute:!0,type:String,converter:K,reflect:!1,hasChanged:dt},So=(e=Ao,t,o)=>{let{kind:n,metadata:r}=o,s=globalThis.litPropertyMetadata.get(r);if(s===void 0&&globalThis.litPropertyMetadata.set(r,s=new Map),n==="setter"&&((e=Object.create(e)).wrapped=!0),s.set(o.name,e),n==="accessor"){let{name:i}=o;return{set(a){let c=t.get.call(this);t.set.call(this,a),this.requestUpdate(i,c,e,!0,a)},init(a){return a!==void 0&&this.C(i,void 0,e,a),a}}}if(n==="setter"){let{name:i}=o;return function(a){let c=this[i];t.call(this,a),this.requestUpdate(i,c,e,!0,a)}}throw Error("Unsupported decorator location: "+n)}});function Nt(e){return u({...e,state:!0,attribute:!1})}var $e=d(()=>{Ot();});var Ae=d(()=>{});var H=d(()=>{});var Se=d(()=>{H();});var ke=d(()=>{H();});var Ce=d(()=>{H();});var Te=d(()=>{H();});var Ie=d(()=>{H();});var Ut=d(()=>{we();Ot();$e();Ae();Se();ke();Ce();Te();Ie()});var pt,ht,F,Ht=d(()=>{pt={ATTRIBUTE:1,CHILD:2,PROPERTY:3,BOOLEAN_ATTRIBUTE:4,EVENT:5,ELEMENT:6},ht=e=>(...t)=>({_$litDirective$:e,values:t}),F=class{constructor(t){}get _$AU(){return this._$AM._$AU}_$AT(t,o,n){this._$Ct=t,this._$AM=o,this._$Ci=n}_$AS(t,o){return this.update(t,o)}update(t,o){return this.render(...o)}}});var gt,Le=d(()=>{U();Ht();gt=ht(class extends F{constructor(e){if(super(e),e.type!==pt.ATTRIBUTE||e.name!=="class"||e.strings?.length>2)throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.")}render(e){return" "+Object.keys(e).filter(t=>e[t]).join(" ")+" "}update(e,[t]){if(this.st===void 0){this.st=new Set,e.strings!==void 0&&(this.nt=new Set(e.strings.join(" ").split(/\s/).filter(n=>n!=="")));for(let n in t)t[n]&&!this.nt?.has(n)&&this.st.add(n);return this.render(t)}let o=e.element.classList;for(let n of this.st)n in t||(o.remove(n),this.st.delete(n));for(let n in t){let r=!!t[n];r===this.st.has(n)||this.nt?.has(n)||(r?(o.add(n),this.st.add(n)):(o.remove(n),this.st.delete(n)))}return x}})});var Ft=d(()=>{Le()});var ft,Be,Me,z,mt,zt=d(()=>{I();ft="2.5.1",Be="__vscodeElements_disableRegistryWarning__",Me=(e,t)=>{console.warn(t?`[VSCode Elements] ${e}
+%o`:`${e}
+%o`,t)},z=class extends T{get version(){return ft}warn(t){Me(t,this)}},mt=e=>t=>{if(!customElements.get(e)){customElements.define(e,t);return}if(Be in window)return;let r=document.createElement(e)?.version,s="";r?r!==ft?(s+="is already registered by a different version of VSCode Elements. ",s+=`This version is "${ft}", while the other one is "${r}".`):s+=`is already registered by the same version of VSCode Elements (${ft}).`:s+="is already registered by an unknown custom element handler class.",Me(`The custom element "${e}" ${s}
+To suppress this warning, set window.${Be} to true`)}});var V,Re=d(()=>{U();V=e=>e??f});var Vt=d(()=>{Re()});var Pe=d(()=>{Ht()});var jt,De,Oe=d(()=>{I();Pe();jt=class extends F{constructor(t){if(super(t),this._prevProperties={},t.type!==pt.PROPERTY||t.name!=="style")throw new Error("The `stylePropertyMap` directive must be used in the `style` property")}update(t,[o]){return Object.entries(o).forEach(([n,r])=>{this._prevProperties[n]!==r&&(n.startsWith("--")?t.element.style.setProperty(n,r):t.element.style[n]=r,this._prevProperties[n]=r)}),x}render(t){return x}},De=ht(jt)});var bt,Wt=d(()=>{I();bt=L`
   :host([hidden]) {
     display: none;
   }
@@ -913,19 +14,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     opacity: 0.4;
     pointer-events: none;
   }
-`;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.styles.js
-  var styles, vscode_icon_styles_default;
-  var init_vscode_icon_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.styles.js"() {
-      init_lit();
-      init_default_styles();
-      styles = [
-        default_styles_default,
-        i`
+`});var ko,Ne,Ue=d(()=>{I();Wt();ko=[bt,L`
     :host {
       color: var(--vscode-icon-foreground, #cccccc);
       display: inline-block;
@@ -985,168 +74,25 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       animation-timing-function: linear;
       animation-iteration-count: infinite;
     }
-  `
-      ];
-      vscode_icon_styles_default = styles;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.js
-  var __decorate, VscodeIcon_1, VscodeIcon;
-  var init_vscode_icon = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.js"() {
-      init_lit();
-      init_decorators();
-      init_class_map2();
-      init_if_defined2();
-      init_VscElement();
-      init_style_property_map();
-      init_vscode_icon_styles();
-      __decorate = function(decorators, target, key, desc) {
-        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
-        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
-        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
-        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
-      };
-      VscodeIcon = VscodeIcon_1 = class VscodeIcon2 extends VscElement {
-        constructor() {
-          super(...arguments);
-          this.label = "";
-          this.name = "";
-          this.size = 16;
-          this.spin = false;
-          this.spinDuration = 1.5;
-          this.actionIcon = false;
-          this._onButtonClick = (ev) => {
-            this.dispatchEvent(new CustomEvent("vsc-click", { detail: { originalEvent: ev } }));
-          };
-        }
-        connectedCallback() {
-          super.connectedCallback();
-          const { href, nonce } = this._getStylesheetConfig();
-          VscodeIcon_1.stylesheetHref = href;
-          VscodeIcon_1.nonce = nonce;
-        }
-        /**
-         * For using web fonts in web components, the font stylesheet must be included
-         * twice: on the page and in the web component. This function looks for the
-         * font stylesheet on the page and returns the stylesheet URL and the nonce
-         * id.
-         */
-        _getStylesheetConfig() {
-          if (typeof document === "undefined") {
-            return { nonce: void 0, href: void 0 };
-          }
-          const linkElement = document.getElementById("vscode-codicon-stylesheet");
-          const href = linkElement?.getAttribute("href") || void 0;
-          const nonce = linkElement?.nonce || void 0;
-          if (!linkElement) {
-            let msg = 'To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';
-            msg += "See https://vscode-elements.github.io/components/icon/ for more details.";
-            this.warn(msg);
-          }
-          return { nonce, href };
-        }
-        render() {
-          const { stylesheetHref, nonce } = VscodeIcon_1;
-          const content = b2`<span
-      class=${e6({
-            codicon: true,
-            ["codicon-" + this.name]: true,
-            spin: this.spin
-          })}
-      .style=${stylePropertyMap({
-            animationDuration: String(this.spinDuration) + "s",
-            fontSize: this.size + "px",
-            height: this.size + "px",
-            width: this.size + "px"
-          })}
-    ></span>`;
-          const wrapped = this.actionIcon ? b2` <button
+  `],Ne=ko});var P,ot,_,He=d(()=>{I();Ut();Ft();Vt();zt();Oe();Ue();P=function(e,t,o,n){var r=arguments.length,s=r<3?t:n===null?n=Object.getOwnPropertyDescriptor(t,o):n,i;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")s=Reflect.decorate(e,t,o,n);else for(var a=e.length-1;a>=0;a--)(i=e[a])&&(s=(r<3?i(s):r>3?i(t,o,s):i(t,o))||s);return r>3&&s&&Object.defineProperty(t,o,s),s},_=ot=class extends z{constructor(){super(...arguments),this.label="",this.name="",this.size=16,this.spin=!1,this.spinDuration=1.5,this.actionIcon=!1,this._onButtonClick=t=>{this.dispatchEvent(new CustomEvent("vsc-click",{detail:{originalEvent:t}}))}}connectedCallback(){super.connectedCallback();let{href:t,nonce:o}=this._getStylesheetConfig();ot.stylesheetHref=t,ot.nonce=o}_getStylesheetConfig(){if(typeof document>"u")return{nonce:void 0,href:void 0};let t=document.getElementById("vscode-codicon-stylesheet"),o=t?.getAttribute("href")||void 0,n=t?.nonce||void 0;if(!t){let r='To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';r+="See https://vscode-elements.github.io/components/icon/ for more details.",this.warn(r)}return{nonce:n,href:o}}render(){let{stylesheetHref:t,nonce:o}=ot,n=$`<span
+      class=${gt({codicon:!0,["codicon-"+this.name]:!0,spin:this.spin})}
+      .style=${De({animationDuration:String(this.spinDuration)+"s",fontSize:this.size+"px",height:this.size+"px",width:this.size+"px"})}
+    ></span>`,r=this.actionIcon?$` <button
           class="button"
           @click=${this._onButtonClick}
           aria-label=${this.label}
         >
-          ${content}
-        </button>` : b2` <span class="icon" aria-hidden="true" role="presentation"
-          >${content}</span
-        >`;
-          return b2`
+          ${n}
+        </button>`:$` <span class="icon" aria-hidden="true" role="presentation"
+          >${n}</span
+        >`;return $`
       <link
         rel="stylesheet"
-        href=${o6(stylesheetHref)}
-        nonce=${o6(nonce)}
+        href=${V(t)}
+        nonce=${V(o)}
       />
-      ${wrapped}
-    `;
-        }
-      };
-      VscodeIcon.styles = vscode_icon_styles_default;
-      VscodeIcon.stylesheetHref = "";
-      VscodeIcon.nonce = "";
-      __decorate([
-        n4()
-      ], VscodeIcon.prototype, "label", void 0);
-      __decorate([
-        n4({ type: String })
-      ], VscodeIcon.prototype, "name", void 0);
-      __decorate([
-        n4({ type: Number })
-      ], VscodeIcon.prototype, "size", void 0);
-      __decorate([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeIcon.prototype, "spin", void 0);
-      __decorate([
-        n4({ type: Number, attribute: "spin-duration" })
-      ], VscodeIcon.prototype, "spinDuration", void 0);
-      __decorate([
-        n4({ type: Boolean, reflect: true, attribute: "action-icon" })
-      ], VscodeIcon.prototype, "actionIcon", void 0);
-      VscodeIcon = VscodeIcon_1 = __decorate([
-        customElement("vscode-icon")
-      ], VscodeIcon);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/index.js
-  var init_vscode_icon2 = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/index.js"() {
-      init_vscode_icon();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/helpers.js
-  function getDefaultFontStack() {
-    if (navigator.userAgent.indexOf("Linux") > -1) {
-      return 'system-ui, "Ubuntu", "Droid Sans", sans-serif';
-    } else if (navigator.userAgent.indexOf("Mac") > -1) {
-      return "-apple-system, BlinkMacSystemFont, sans-serif";
-    } else if (navigator.userAgent.indexOf("Windows") > -1) {
-      return '"Segoe WPC", "Segoe UI", sans-serif';
-    } else {
-      return "sans-serif";
-    }
-  }
-  var DEFAULT_LINE_HEIGHT, DEFAULT_FONT_SIZE, INPUT_LINE_HEIGHT_RATIO;
-  var init_helpers = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/helpers.js"() {
-      DEFAULT_LINE_HEIGHT = 16;
-      DEFAULT_FONT_SIZE = 13;
-      INPUT_LINE_HEIGHT_RATIO = DEFAULT_LINE_HEIGHT / DEFAULT_FONT_SIZE;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.styles.js
-  var defaultFontStack, styles2, vscode_button_styles_default;
-  var init_vscode_button_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.styles.js"() {
-      init_lit();
-      init_default_styles();
-      init_helpers();
-      defaultFontStack = r(getDefaultFontStack());
-      styles2 = [
-        default_styles_default,
-        i`
+      ${r}
+    `}};_.styles=Ne;_.stylesheetHref="";_.nonce="";P([u()],_.prototype,"label",void 0);P([u({type:String})],_.prototype,"name",void 0);P([u({type:Number})],_.prototype,"size",void 0);P([u({type:Boolean,reflect:!0})],_.prototype,"spin",void 0);P([u({type:Number,attribute:"spin-duration"})],_.prototype,"spinDuration",void 0);P([u({type:Boolean,reflect:!0,attribute:"action-icon"})],_.prototype,"actionIcon",void 0);_=ot=P([mt("vscode-icon")],_)});var Fe=d(()=>{He()});function ze(){return navigator.userAgent.indexOf("Linux")>-1?'system-ui, "Ubuntu", "Droid Sans", sans-serif':navigator.userAgent.indexOf("Mac")>-1?"-apple-system, BlinkMacSystemFont, sans-serif":navigator.userAgent.indexOf("Windows")>-1?'"Segoe WPC", "Segoe UI", sans-serif':"sans-serif"}var Ve=d(()=>{});var Co,To,je,We=d(()=>{I();Wt();Ve();Co=ct(ze()),To=[bt,L`
     :host {
       cursor: pointer;
       display: inline-block;
@@ -1174,7 +120,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       box-sizing: border-box;
       color: var(--vscode-button-foreground, #ffffff);
       display: flex;
-      font-family: var(--vscode-font-family, ${defaultFontStack});
+      font-family: var(--vscode-font-family, ${Co});
       font-size: var(--vscode-font-size, 13px);
       font-weight: var(--vscode-font-weight, normal);
       height: 100%;
@@ -1330,549 +276,29 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     :host([icon]) .icon-after {
       margin-left: 3px;
     }
-  `
-      ];
-      vscode_button_styles_default = styles2;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.js
-  var __decorate2, VscodeButton;
-  var init_vscode_button = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.js"() {
-      init_lit();
-      init_decorators();
-      init_class_map2();
-      init_VscElement();
-      init_vscode_icon2();
-      init_vscode_button_styles();
-      init_if_defined2();
-      __decorate2 = function(decorators, target, key, desc) {
-        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
-        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
-        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
-        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
-      };
-      VscodeButton = class VscodeButton2 extends VscElement {
-        get form() {
-          return this._internals.form;
-        }
-        constructor() {
-          super();
-          this.autofocus = false;
-          this.tabIndex = 0;
-          this.secondary = false;
-          this.block = false;
-          this.role = "button";
-          this.disabled = false;
-          this.icon = "";
-          this.iconSpin = false;
-          this.iconAfter = "";
-          this.iconAfterSpin = false;
-          this.focused = false;
-          this.name = void 0;
-          this.iconOnly = false;
-          this.type = "button";
-          this.value = "";
-          this._prevTabindex = 0;
-          this._hasContentBefore = false;
-          this._hasContentAfter = false;
-          this._handleFocus = () => {
-            this.focused = true;
-          };
-          this._handleBlur = () => {
-            this.focused = false;
-          };
-          this.addEventListener("keydown", this._handleKeyDown.bind(this));
-          this.addEventListener("click", this._handleClick.bind(this));
-          this._internals = this.attachInternals();
-        }
-        connectedCallback() {
-          super.connectedCallback();
-          if (this.autofocus) {
-            if (this.tabIndex < 0) {
-              this.tabIndex = 0;
-            }
-            this.updateComplete.then(() => {
-              this.focus();
-              this.requestUpdate();
-            });
-          }
-          this.addEventListener("focus", this._handleFocus);
-          this.addEventListener("blur", this._handleBlur);
-        }
-        disconnectedCallback() {
-          super.disconnectedCallback();
-          this.removeEventListener("focus", this._handleFocus);
-          this.removeEventListener("blur", this._handleBlur);
-        }
-        update(changedProperties) {
-          super.update(changedProperties);
-          if (changedProperties.has("value")) {
-            this._internals.setFormValue(this.value);
-          }
-          if (changedProperties.has("disabled")) {
-            if (this.disabled) {
-              this._prevTabindex = this.tabIndex;
-              this.tabIndex = -1;
-            } else {
-              this.tabIndex = this._prevTabindex;
-            }
-          }
-        }
-        _executeAction() {
-          if (this.type === "submit" && this._internals.form) {
-            this._internals.form.requestSubmit();
-          }
-          if (this.type === "reset" && this._internals.form) {
-            this._internals.form.reset();
-          }
-        }
-        _handleKeyDown(event) {
-          if ((event.key === "Enter" || event.key === " ") && !this.hasAttribute("disabled")) {
-            const syntheticClick = new MouseEvent("click", {
-              bubbles: true,
-              cancelable: true
-            });
-            syntheticClick.synthetic = true;
-            this.dispatchEvent(syntheticClick);
-            this._executeAction();
-          }
-        }
-        _handleClick(event) {
-          if (event.synthetic) {
-            return;
-          }
-          if (!this.hasAttribute("disabled")) {
-            this._executeAction();
-          }
-        }
-        _handleSlotChange(ev) {
-          const slot = ev.target;
-          if (slot.name === "content-before") {
-            this._hasContentBefore = slot.assignedElements().length > 0;
-          }
-          if (slot.name === "content-after") {
-            this._hasContentAfter = slot.assignedElements().length > 0;
-          }
-        }
-        render() {
-          const hasIcon = this.icon !== "";
-          const hasIconAfter = this.iconAfter !== "";
-          const baseClasses = {
-            base: true,
-            "icon-only": this.iconOnly,
-            "has-content-before": this._hasContentBefore,
-            "has-content-after": this._hasContentAfter
-          };
-          const iconElem = hasIcon ? b2`<vscode-icon
+  `],je=To});var v,p,qe=d(()=>{I();Ut();Ft();zt();Fe();We();Vt();v=function(e,t,o,n){var r=arguments.length,s=r<3?t:n===null?n=Object.getOwnPropertyDescriptor(t,o):n,i;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")s=Reflect.decorate(e,t,o,n);else for(var a=e.length-1;a>=0;a--)(i=e[a])&&(s=(r<3?i(s):r>3?i(t,o,s):i(t,o))||s);return r>3&&s&&Object.defineProperty(t,o,s),s},p=class extends z{get form(){return this._internals.form}constructor(){super(),this.autofocus=!1,this.tabIndex=0,this.secondary=!1,this.block=!1,this.role="button",this.disabled=!1,this.icon="",this.iconSpin=!1,this.iconAfter="",this.iconAfterSpin=!1,this.focused=!1,this.name=void 0,this.iconOnly=!1,this.type="button",this.value="",this._prevTabindex=0,this._hasContentBefore=!1,this._hasContentAfter=!1,this._handleFocus=()=>{this.focused=!0},this._handleBlur=()=>{this.focused=!1},this.addEventListener("keydown",this._handleKeyDown.bind(this)),this.addEventListener("click",this._handleClick.bind(this)),this._internals=this.attachInternals()}connectedCallback(){super.connectedCallback(),this.autofocus&&(this.tabIndex<0&&(this.tabIndex=0),this.updateComplete.then(()=>{this.focus(),this.requestUpdate()})),this.addEventListener("focus",this._handleFocus),this.addEventListener("blur",this._handleBlur)}disconnectedCallback(){super.disconnectedCallback(),this.removeEventListener("focus",this._handleFocus),this.removeEventListener("blur",this._handleBlur)}update(t){super.update(t),t.has("value")&&this._internals.setFormValue(this.value),t.has("disabled")&&(this.disabled?(this._prevTabindex=this.tabIndex,this.tabIndex=-1):this.tabIndex=this._prevTabindex)}_executeAction(){this.type==="submit"&&this._internals.form&&this._internals.form.requestSubmit(),this.type==="reset"&&this._internals.form&&this._internals.form.reset()}_handleKeyDown(t){if((t.key==="Enter"||t.key===" ")&&!this.hasAttribute("disabled")){let o=new MouseEvent("click",{bubbles:!0,cancelable:!0});o.synthetic=!0,this.dispatchEvent(o),this._executeAction()}}_handleClick(t){t.synthetic||this.hasAttribute("disabled")||this._executeAction()}_handleSlotChange(t){let o=t.target;o.name==="content-before"&&(this._hasContentBefore=o.assignedElements().length>0),o.name==="content-after"&&(this._hasContentAfter=o.assignedElements().length>0)}render(){let t=this.icon!=="",o=this.iconAfter!=="",n={base:!0,"icon-only":this.iconOnly,"has-content-before":this._hasContentBefore,"has-content-after":this._hasContentAfter},r=t?$`<vscode-icon
           name=${this.icon}
           ?spin=${this.iconSpin}
-          spin-duration=${o6(this.iconSpinDuration)}
+          spin-duration=${V(this.iconSpinDuration)}
           class="icon"
-        ></vscode-icon>` : A;
-          const iconAfterElem = hasIconAfter ? b2`<vscode-icon
+        ></vscode-icon>`:f,s=o?$`<vscode-icon
           name=${this.iconAfter}
           ?spin=${this.iconAfterSpin}
-          spin-duration=${o6(this.iconAfterSpinDuration)}
+          spin-duration=${V(this.iconAfterSpinDuration)}
           class="icon-after"
-        ></vscode-icon>` : A;
-          return b2`
+        ></vscode-icon>`:f;return $`
       <div
-        class=${e6(baseClasses)}
+        class=${gt(n)}
         part="base"
         @slotchange=${this._handleSlotChange}
       >
         <slot name="content-before"></slot>
-        ${iconElem}
+        ${r}
         <slot></slot>
-        ${iconAfterElem}
+        ${s}
         <slot name="content-after"></slot>
       </div>
-    `;
-        }
-      };
-      VscodeButton.styles = vscode_button_styles_default;
-      VscodeButton.formAssociated = true;
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "autofocus", void 0);
-      __decorate2([
-        n4({ type: Number, reflect: true })
-      ], VscodeButton.prototype, "tabIndex", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "secondary", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "block", void 0);
-      __decorate2([
-        n4({ reflect: true })
-      ], VscodeButton.prototype, "role", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "disabled", void 0);
-      __decorate2([
-        n4()
-      ], VscodeButton.prototype, "icon", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-spin" })
-      ], VscodeButton.prototype, "iconSpin", void 0);
-      __decorate2([
-        n4({ type: Number, reflect: true, attribute: "icon-spin-duration" })
-      ], VscodeButton.prototype, "iconSpinDuration", void 0);
-      __decorate2([
-        n4({ attribute: "icon-after" })
-      ], VscodeButton.prototype, "iconAfter", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-after-spin" })
-      ], VscodeButton.prototype, "iconAfterSpin", void 0);
-      __decorate2([
-        n4({
-          type: Number,
-          reflect: true,
-          attribute: "icon-after-spin-duration"
-        })
-      ], VscodeButton.prototype, "iconAfterSpinDuration", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "focused", void 0);
-      __decorate2([
-        n4({ type: String, reflect: true })
-      ], VscodeButton.prototype, "name", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-only" })
-      ], VscodeButton.prototype, "iconOnly", void 0);
-      __decorate2([
-        n4({ reflect: true })
-      ], VscodeButton.prototype, "type", void 0);
-      __decorate2([
-        n4()
-      ], VscodeButton.prototype, "value", void 0);
-      __decorate2([
-        r5()
-      ], VscodeButton.prototype, "_hasContentBefore", void 0);
-      __decorate2([
-        r5()
-      ], VscodeButton.prototype, "_hasContentAfter", void 0);
-      VscodeButton = __decorate2([
-        customElement("vscode-button")
-      ], VscodeButton);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-button/index.js
-  var vscode_button_exports = {};
-  __export(vscode_button_exports, {
-    VscodeButton: () => VscodeButton
-  });
-  var init_vscode_button2 = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/index.js"() {
-      init_vscode_button();
-    }
-  });
-
-  // src/webview/shared/domUtils.ts
-  function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) {
-      node.className = className;
-    }
-    if (text !== void 0) {
-      node.textContent = text;
-    }
-    return node;
-  }
-  function iconHeading(tag, icon, text, className) {
-    const node = document.createElement(tag);
-    if (className) {
-      node.className = className;
-    }
-    const iconSpan = document.createElement("span");
-    iconSpan.className = `codicon codicon-${icon}`;
-    node.append(iconSpan, document.createTextNode(` ${text}`));
-    return node;
-  }
-  function buildNavIconSpan(icon, iconColor) {
-    const iconSpan = document.createElement("span");
-    iconSpan.className = `codicon codicon-${icon} nav-icon`;
-    if (iconColor) {
-      iconSpan.style.setProperty("--icon-accent", iconColor);
-    }
-    return iconSpan;
-  }
-  function applyButtonConfigAttributes(button, config) {
-    if (config.appearance) {
-      button.setAttribute("appearance", config.appearance);
-    }
-    if (config.hidden) {
-      button.hidden = true;
-    }
-    if (config.active) {
-      button.classList.add("nav-active");
-      button.setAttribute("disabled", "");
-      button.setAttribute("aria-current", "page");
-    }
-  }
-  function createButton(configOrId, label, appearance) {
-    const button = document.createElement("vscode-button");
-    if (typeof configOrId === "string") {
-      button.id = configOrId;
-      button.textContent = label || "";
-      if (appearance) {
-        button.setAttribute("appearance", appearance);
-      }
-      return button;
-    }
-    const config = configOrId;
-    button.id = config.id;
-    if (config.icon) {
-      button.append(buildNavIconSpan(config.icon, config.iconColor), document.createTextNode(config.label));
-    } else {
-      button.textContent = config.label;
-    }
-    applyButtonConfigAttributes(button, config);
-    return button;
-  }
-
-  // src/webview/shared/localization.ts
-  var DEFAULT_LOCALIZATION = {
-    "nav.btnRefresh": "Refresh",
-    "nav.btnDetails": "Details",
-    "nav.btnChart": "Chart",
-    "nav.btnUsage": "Usage Analysis",
-    "nav.btnDiagnostics": "Diagnostics",
-    "nav.btnMaturity": "Fluency Score",
-    "nav.btnDashboard": "Team Dashboard",
-    "nav.btnLevelViewer": "Level Viewer",
-    "nav.btnEnvironmental": "Environmental Impact",
-    "nav.btnEfficiency": "Efficiency"
-  };
-  var currentLocalization = { ...DEFAULT_LOCALIZATION };
-  function initializeWebviewLocalization(localization) {
-    const resolved = {};
-    for (const [key, value] of Object.entries(localization)) {
-      if (typeof value === "string" && value !== key) {
-        resolved[key] = value;
-      }
-    }
-    currentLocalization = { ...DEFAULT_LOCALIZATION, ...resolved };
-  }
-  function localize(key) {
-    return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
-  }
-  var currentLanguage = "en";
-  function setCurrentLanguage(language) {
-    currentLanguage = language;
-  }
-
-  // src/webview/shared/buttonConfig.ts
-  var BUTTON_DEFS = {
-    "btn-refresh": {
-      id: "btn-refresh",
-      labelKey: "nav.btnRefresh",
-      icon: "refresh",
-      appearance: "primary"
-    },
-    "btn-details": {
-      id: "btn-details",
-      labelKey: "nav.btnDetails",
-      icon: "robot",
-      iconColor: "#c37bff",
-      appearance: "secondary"
-    },
-    "btn-chart": {
-      id: "btn-chart",
-      labelKey: "nav.btnChart",
-      icon: "graph-line",
-      iconColor: "#60a5fa",
-      appearance: "secondary"
-    },
-    "btn-usage": {
-      id: "btn-usage",
-      labelKey: "nav.btnUsage",
-      icon: "graph",
-      iconColor: "#22d3ee",
-      appearance: "secondary"
-    },
-    "btn-diagnostics": {
-      id: "btn-diagnostics",
-      labelKey: "nav.btnDiagnostics",
-      icon: "search",
-      iconColor: "#fb7185",
-      appearance: "secondary"
-    },
-    "btn-maturity": {
-      id: "btn-maturity",
-      labelKey: "nav.btnMaturity",
-      icon: "target",
-      iconColor: "#fbbf24",
-      appearance: "secondary"
-    },
-    "btn-dashboard": {
-      id: "btn-dashboard",
-      labelKey: "nav.btnDashboard",
-      icon: "organization",
-      iconColor: "#818cf8",
-      appearance: "secondary"
-    },
-    "btn-level-viewer": {
-      id: "btn-level-viewer",
-      labelKey: "nav.btnLevelViewer",
-      icon: "list-tree",
-      iconColor: "#94a3b8",
-      appearance: "secondary"
-    },
-    "btn-environmental": {
-      id: "btn-environmental",
-      labelKey: "nav.btnEnvironmental",
-      icon: "globe",
-      iconColor: "#4ade80",
-      appearance: "secondary"
-    },
-    "btn-efficiency": {
-      id: "btn-efficiency",
-      labelKey: "nav.btnEfficiency",
-      icon: "dashboard",
-      iconColor: "#f472b6",
-      appearance: "secondary"
-    }
-  };
-  var BUTTONS = new Proxy({}, {
-    get(_target, prop) {
-      const def = BUTTON_DEFS[prop];
-      if (!def) {
-        return void 0;
-      }
-      const { labelKey, ...rest } = def;
-      return { ...rest, label: localize(labelKey) };
-    }
-  });
-  var NAV_ORDER = [
-    "btn-refresh",
-    "btn-details",
-    "btn-chart",
-    "btn-usage",
-    "btn-maturity",
-    "btn-efficiency",
-    "btn-environmental",
-    "btn-diagnostics",
-    "btn-dashboard"
-  ];
-  function getNavButtons(activeView, backendConfigured) {
-    return NAV_ORDER.filter((id) => id !== "btn-dashboard" || backendConfigured).map((id) => ({ ...BUTTONS[id], active: id === activeView }));
-  }
-
-  // ../src/webview/shared/dataLoader.ts
-  function getWindowData(key) {
-    const win = globalThis.window;
-    return win ? win[key] : void 0;
-  }
-
-  // src/webview/shared/formatUtils.ts
-  var _estimatorsData = getWindowData("__TOKEN_ESTIMATORS__");
-  var tokenEstimators = _estimatorsData?.estimators ?? {};
-  var currentLocale;
-  var compactNumbersEnabled = true;
-  function setCompactNumbers(enabled) {
-    compactNumbersEnabled = enabled;
-  }
-  function formatFixed(value, digits) {
-    return new Intl.NumberFormat(currentLocale, {
-      minimumFractionDigits: digits,
-      maximumFractionDigits: digits
-    }).format(value);
-  }
-  function formatNumber(value) {
-    return value.toLocaleString(currentLocale);
-  }
-  function formatCompact(value) {
-    if (!compactNumbersEnabled) {
-      return formatNumber(value);
-    }
-    return new Intl.NumberFormat(currentLocale, {
-      notation: "compact",
-      maximumFractionDigits: 1
-    }).format(value);
-  }
-
-  // src/webview/shared/messageHandler.ts
-  function collectOwnOrigins(currentWindow) {
-    const origins = [];
-    const origin = currentWindow.location?.origin;
-    if (origin && origin !== "null") {
-      origins.push(origin);
-    }
-    const href = currentWindow.location?.href;
-    const derived = href ? /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href) : null;
-    if (derived && !origins.includes(derived[0])) {
-      origins.push(derived[0]);
-    }
-    return origins;
-  }
-  function isTrustedWebviewMessageSource(source, currentWindow, origin) {
-    if (source === null || source === void 0 || source === currentWindow) {
-      return true;
-    }
-    if (source === currentWindow.parent || source === currentWindow.top) {
-      return true;
-    }
-    return Boolean(origin) && collectOwnOrigins(currentWindow).includes(origin);
-  }
-  function registerMessageHandler(handler, onUntrustedMessage) {
-    window.addEventListener("message", (event) => {
-      if (!isTrustedWebviewMessageSource(event.source, window, event.origin)) {
-        onUntrustedMessage?.(event);
-        return;
-      }
-      handler(event.data);
-    });
-  }
-
-  // src/webview/shared/extensionPoints.ts
-  function buttonElementId(id) {
-    return `ext-point-${id}`;
-  }
-  function renderExtensionPointButtons(vscodeApi, buttons) {
-    const buttonRow = document.querySelector(".button-row");
-    if (!buttonRow) {
-      return;
-    }
-    const desiredIds = new Set(buttons.map((b3) => b3.id));
-    for (const existing of Array.from(buttonRow.querySelectorAll('[id^="ext-point-"]'))) {
-      const id = existing.id.slice("ext-point-".length);
-      if (!desiredIds.has(id)) {
-        existing.remove();
-      }
-    }
-    for (const btn of buttons) {
-      if (document.getElementById(buttonElementId(btn.id))) {
-        continue;
-      }
-      const el2 = document.createElement("vscode-button");
-      el2.id = buttonElementId(btn.id);
-      el2.textContent = btn.label;
-      el2.addEventListener("click", () => {
-        vscodeApi.postMessage({ command: "extensionPointAction", buttonId: btn.id });
-      });
-      buttonRow.append(el2);
-    }
-  }
-  function wireExtensionPointButtons(vscodeApi) {
-    renderExtensionPointButtons(vscodeApi, window.__EXTENSION_POINT_BUTTONS__ ?? []);
-    if (window.__extensionPointButtonsListenerRegistered__) {
-      return;
-    }
-    window.__extensionPointButtonsListenerRegistered__ = true;
-    registerMessageHandler((message) => {
-      if (message?.command === "extensionPointButtonsUpdated" && Array.isArray(message.buttons)) {
-        renderExtensionPointButtons(vscodeApi, message.buttons);
-      }
-    });
-  }
-
-  // src/webview/shared/theme.css
-  var theme_default = `/**
+    `}};p.styles=je;p.formAssociated=!0;v([u({type:Boolean,reflect:!0})],p.prototype,"autofocus",void 0);v([u({type:Number,reflect:!0})],p.prototype,"tabIndex",void 0);v([u({type:Boolean,reflect:!0})],p.prototype,"secondary",void 0);v([u({type:Boolean,reflect:!0})],p.prototype,"block",void 0);v([u({reflect:!0})],p.prototype,"role",void 0);v([u({type:Boolean,reflect:!0})],p.prototype,"disabled",void 0);v([u()],p.prototype,"icon",void 0);v([u({type:Boolean,reflect:!0,attribute:"icon-spin"})],p.prototype,"iconSpin",void 0);v([u({type:Number,reflect:!0,attribute:"icon-spin-duration"})],p.prototype,"iconSpinDuration",void 0);v([u({attribute:"icon-after"})],p.prototype,"iconAfter",void 0);v([u({type:Boolean,reflect:!0,attribute:"icon-after-spin"})],p.prototype,"iconAfterSpin",void 0);v([u({type:Number,reflect:!0,attribute:"icon-after-spin-duration"})],p.prototype,"iconAfterSpinDuration",void 0);v([u({type:Boolean,reflect:!0})],p.prototype,"focused",void 0);v([u({type:String,reflect:!0})],p.prototype,"name",void 0);v([u({type:Boolean,reflect:!0,attribute:"icon-only"})],p.prototype,"iconOnly",void 0);v([u({reflect:!0})],p.prototype,"type",void 0);v([u()],p.prototype,"value",void 0);v([Nt()],p.prototype,"_hasContentBefore",void 0);v([Nt()],p.prototype,"_hasContentAfter",void 0);p=v([mt("vscode-button")],p)});var Ke={};Ze(Ke,{VscodeButton:()=>p});var Ge=d(()=>{qe()});function b(e,t,o){let n=document.createElement(e);return t&&(n.className=t),o!==void 0&&(n.textContent=o),n}function wt(e,t,o,n){let r=document.createElement(e);n&&(r.className=n);let s=document.createElement("span");return s.className=`codicon codicon-${t}`,r.append(s,document.createTextNode(` ${o}`)),r}function Qe(e,t){let o=document.createElement("span");return o.className=`codicon codicon-${e} nav-icon`,t&&o.style.setProperty("--icon-accent",t),o}function to(e,t){t.appearance&&e.setAttribute("appearance",t.appearance),t.hidden&&(e.hidden=!0),t.active&&(e.classList.add("nav-active"),e.setAttribute("disabled",""),e.setAttribute("aria-current","page"))}function qt(e,t,o){let n=document.createElement("vscode-button");if(typeof e=="string")return n.id=e,n.textContent=t||"",o&&n.setAttribute("appearance",o),n;let r=e;return n.id=r.id,r.icon?n.append(Qe(r.icon,r.iconColor),document.createTextNode(r.label)):n.textContent=r.label,to(n,r),n}var $t={"nav.btnRefresh":"Refresh","nav.btnDetails":"Details","nav.btnChart":"Chart","nav.btnUsage":"Usage Analysis","nav.btnDiagnostics":"Diagnostics","nav.btnMaturity":"Fluency Score","nav.btnDashboard":"Team Dashboard","nav.btnLevelViewer":"Level Viewer","nav.btnEnvironmental":"Environmental Impact","nav.btnEfficiency":"Efficiency","share.exportTitle":"AI Engineering Fluency Score","share.exportReportLabel":"Report"},Kt={...$t};function Gt(e){let t={};for(let[o,n]of Object.entries(e))typeof n=="string"&&n!==o&&(t[o]=n);Kt={...$t,...t}}function Yt(e){return Kt[e]||$t[e]||e}var eo="en";function Jt(e){eo=e}var oo={"btn-refresh":{id:"btn-refresh",labelKey:"nav.btnRefresh",icon:"refresh",appearance:"primary"},"btn-details":{id:"btn-details",labelKey:"nav.btnDetails",icon:"robot",iconColor:"#c37bff",appearance:"secondary"},"btn-chart":{id:"btn-chart",labelKey:"nav.btnChart",icon:"graph-line",iconColor:"#60a5fa",appearance:"secondary"},"btn-usage":{id:"btn-usage",labelKey:"nav.btnUsage",icon:"graph",iconColor:"#22d3ee",appearance:"secondary"},"btn-diagnostics":{id:"btn-diagnostics",labelKey:"nav.btnDiagnostics",icon:"search",iconColor:"#fb7185",appearance:"secondary"},"btn-maturity":{id:"btn-maturity",labelKey:"nav.btnMaturity",icon:"target",iconColor:"#fbbf24",appearance:"secondary"},"btn-dashboard":{id:"btn-dashboard",labelKey:"nav.btnDashboard",icon:"organization",iconColor:"#818cf8",appearance:"secondary"},"btn-level-viewer":{id:"btn-level-viewer",labelKey:"nav.btnLevelViewer",icon:"list-tree",iconColor:"#94a3b8",appearance:"secondary"},"btn-environmental":{id:"btn-environmental",labelKey:"nav.btnEnvironmental",icon:"globe",iconColor:"#4ade80",appearance:"secondary"},"btn-efficiency":{id:"btn-efficiency",labelKey:"nav.btnEfficiency",icon:"dashboard",iconColor:"#f472b6",appearance:"secondary"}},no=new Proxy({},{get(e,t){let o=oo[t];if(!o)return;let{labelKey:n,...r}=o;return{...r,label:Yt(n)}}});var ro=["btn-refresh","btn-details","btn-chart","btn-usage","btn-maturity","btn-efficiency","btn-environmental","btn-diagnostics","btn-dashboard"];function Xt(e,t){return ro.filter(o=>o!=="btn-dashboard"||t).map(o=>({...no[o],active:o===e}))}function rt(e){let t=globalThis.window;return t?t[e]:void 0}var so=rt("__TOKEN_ESTIMATORS__"),sn=so?.estimators??{},At,Zt=!0;function Qt(e){Zt=e}function D(e,t){return new Intl.NumberFormat(At,{minimumFractionDigits:t,maximumFractionDigits:t}).format(e)}function io(e){return e.toLocaleString(At)}function j(e){return Zt?new Intl.NumberFormat(At,{notation:"compact",maximumFractionDigits:1}).format(e):io(e)}function ao(e){let t=[],o=e.location?.origin;o&&o!=="null"&&t.push(o);let n=e.location?.href,r=n?/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(n):null;return r&&!t.includes(r[0])&&t.push(r[0]),t}function co(e,t,o){return e==null||e===t||e===t.parent||e===t.top?!0:!!o&&ao(t).includes(o)}function st(e,t){window.addEventListener("message",o=>{if(!co(o.source,window,o.origin)){t?.(o);return}e(o.data)})}function te(e){return`ext-point-${e}`}function ee(e,t){let o=document.querySelector(".button-row");if(!o)return;let n=new Set(t.map(r=>r.id));for(let r of Array.from(o.querySelectorAll('[id^="ext-point-"]'))){let s=r.id.slice(10);n.has(s)||r.remove()}for(let r of t){if(document.getElementById(te(r.id)))continue;let s=document.createElement("vscode-button");s.id=te(r.id),s.textContent=r.label,s.addEventListener("click",()=>{e.postMessage({command:"extensionPointAction",buttonId:r.id})}),o.append(s)}}function oe(e){ee(e,window.__EXTENSION_POINT_BUTTONS__??[]),!window.__extensionPointButtonsListenerRegistered__&&(window.__extensionPointButtonsListenerRegistered__=!0,st(t=>{t?.command==="extensionPointButtonsUpdated"&&Array.isArray(t.buttons)&&ee(e,t.buttons)}))}var ne=`/**
  * Shared theme variables for all webview panels
  * Uses VS Code theme tokens for automatic light/dark theme support.
  *
@@ -2202,245 +628,171 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
 	text-shadow: 2px 2px 0 var(--vscode-panel-border);
 	white-space: nowrap;
 }
-`;
+`;var re=`body {
+	margin: 0;
+	background: var(--bg-primary);
+	color: var(--text-primary);
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
 
-  // src/webview/environmental/styles.css
-  var styles_default = "body {\n	margin: 0;\n	background: var(--bg-primary);\n	color: var(--text-primary);\n	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n}\n\n.container {\n	padding: 16px;\n	display: flex;\n	flex-direction: column;\n	gap: 14px;\n	max-width: 1200px;\n	margin: 0 auto;\n}\n\n.header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	gap: 12px;\n	padding-bottom: 4px;\n}\n\n.title {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n\n\n.sections {\n	display: flex;\n	flex-direction: column;\n	gap: 16px;\n}\n\n.section {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n}\n\n.section h3 {\n	margin: 0 0 10px;\n	font-size: 14px;\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	color: var(--text-primary);\n	letter-spacing: 0.2px;\n}\n\n/* --- Metric cards --- */\n.metric-cards {\n	display: flex;\n	flex-direction: column;\n	gap: 16px;\n}\n\n.metric-card {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 8px;\n	padding: 14px 16px;\n}\n\n.metric-card-header {\n	display: flex;\n	align-items: center;\n	gap: 7px;\n	margin-bottom: 12px;\n}\n\n.metric-card-icon {\n	font-size: 16px;\n	line-height: 1;\n}\n\n.metric-card-label {\n	font-size: 13px;\n	font-weight: 700;\n	color: var(--text-primary);\n	text-transform: uppercase;\n	letter-spacing: 0.4px;\n}\n\n.metric-primary-value {\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n	padding: 6px 0 10px;\n	border-bottom: 1px solid var(--border-subtle);\n	margin-bottom: 8px;\n}\n\n.analogy-grid {\n	display: grid;\n	grid-template-columns: repeat(4, 1fr);\n	gap: 16px;\n}\n\n.analogy-col {\n	display: flex;\n	flex-direction: column;\n	gap: 6px;\n}\n\n.analogy-col-header {\n	font-size: 11px;\n	font-weight: 700;\n	color: var(--text-secondary);\n	text-transform: uppercase;\n	letter-spacing: 0.5px;\n	padding-bottom: 5px;\n	border-bottom: 1px solid var(--border-subtle);\n	margin-bottom: 2px;\n}\n\n.analogy-item {\n	display: flex;\n	align-items: baseline;\n	gap: 6px;\n	font-size: 12px;\n	color: var(--text-primary);\n	line-height: 1.5;\n}\n\n.analogy-icon {\n	flex-shrink: 0;\n	width: 20px;\n	text-align: center;\n	font-size: 13px;\n}\n\n.notes {\n	margin: 4px 0 0;\n	padding-left: 16px;\n	color: var(--text-secondary);\n}\n\n.notes li {\n	margin: 4px 0;\n	line-height: 1.4;\n}\n\n.footer {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 6px;\n}\n\n.section-intro {\n	color: var(--text-secondary);\n	font-size: 12px;\n	margin: 0 0 10px;\n	line-height: 1.5;\n}\n";
+.container {
+	padding: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	max-width: 1200px;
+	margin: 0 auto;
+}
 
-  // src/webview/environmental/main.ts
-  var CO2_GRAMS_PER_CAR_KM = 120;
-  var CO2_GRAMS_PER_KETTLE_BOIL = 20;
-  var CO2_GRAMS_PER_TRAIN_KM = 41;
-  var CO2_GRAMS_PER_FLIGHT_KM = 180;
-  var CO2_GRAMS_PER_PHONE_CHARGE = 8;
-  var CO2_GRAMS_PER_LED_HOUR = 3;
-  var WATER_LITERS_PER_SHOWER_MINUTE = 8;
-  var WATER_LITERS_PER_WASHER_LOAD = 50;
-  var WATER_LITERS_PER_MUG = 0.25;
-  var WATER_LITERS_PER_BATHTUB = 150;
-  var WATER_LITERS_PER_DISHWASHER = 12;
-  var WATER_LITERS_DAILY_DRINKING = 2;
-  var vscode = acquireVsCodeApi();
-  var initialData = getWindowData("__INITIAL_ENVIRONMENTAL__");
-  if (initialData?.localization) {
-    initializeWebviewLocalization(initialData.localization);
-    const language = initialData.localization["__language__"] || "en";
-    setCurrentLanguage(language);
-  }
-  function calculateProjection(last30DaysValue) {
-    return last30DaysValue / 30 * 365.25;
-  }
-  function smartFixed(value) {
-    if (value < 1e-3) {
-      return formatFixed(value, 6);
-    }
-    if (value < 1) {
-      return formatFixed(value, 4);
-    }
-    if (value <= 100) {
-      return formatFixed(value, 2);
-    }
-    if (value <= 1e3) {
-      return formatFixed(value, 1);
-    }
-    return formatFixed(Math.round(value), 0);
-  }
-  function formatCo2Grams(grams) {
-    if (grams >= 1e3) {
-      return `${smartFixed(grams / 1e3)} kg`;
-    }
-    return `${smartFixed(grams)} g`;
-  }
-  var co2AnalogyItems = (grams) => [
-    { icon: "\u{1F697}", text: `${smartFixed(grams / CO2_GRAMS_PER_CAR_KM)} km driving (EU petrol car)` },
-    { icon: "\u{1F682}", text: `${smartFixed(grams / CO2_GRAMS_PER_TRAIN_KM)} km by train (EU intercity)` },
-    { icon: "\u2708\uFE0F", text: `${smartFixed(grams / CO2_GRAMS_PER_FLIGHT_KM)} km flying (economy, short-haul)` },
-    { icon: "\u{1FAD6}", text: `${smartFixed(grams / CO2_GRAMS_PER_KETTLE_BOIL)} kettle boils` },
-    { icon: "\u{1F4F1}", text: `${smartFixed(grams / CO2_GRAMS_PER_PHONE_CHARGE)} smartphone charges` },
-    { icon: "\u{1F4A1}", text: `${smartFixed(grams / CO2_GRAMS_PER_LED_HOUR)} hours of LED lighting (10 W)` }
-  ];
-  var waterAnalogyItems = (liters) => [
-    { icon: "\u2615", text: `${smartFixed(liters / WATER_LITERS_PER_MUG)} mugs of tea/coffee` },
-    { icon: "\u{1F6BF}", text: `${smartFixed(liters / WATER_LITERS_PER_SHOWER_MINUTE)} shower minutes` },
-    { icon: "\u{1F455}", text: `${smartFixed(liters / WATER_LITERS_PER_WASHER_LOAD)} washing machine loads` },
-    { icon: "\u{1F6C1}", text: `${smartFixed(liters / WATER_LITERS_PER_BATHTUB)} standard bathtubs` },
-    { icon: "\u{1F37D}\uFE0F", text: `${smartFixed(liters / WATER_LITERS_PER_DISHWASHER)} dishwasher cycles` },
-    { icon: "\u{1F4A7}", text: `${smartFixed(liters / WATER_LITERS_DAILY_DRINKING)} days of drinking water` }
-  ];
-  var treeAnalogyItems = (fraction) => {
-    const daysAbsorbed = fraction * 365.25;
-    if (fraction >= 1) {
-      return [
-        { icon: "\u{1F333}", text: `${smartFixed(fraction)} \xD7 a tree's full annual CO\u2082 absorption` },
-        { icon: "\u{1F332}", text: `Plant ${Math.ceil(fraction)} trees to fully offset this per year` }
-      ];
-    }
-    return [
-      { icon: "\u{1F333}", text: `${smartFixed(fraction * 100)} % of one tree's annual absorption` },
-      { icon: "\u{1F4C5}", text: `1 tree absorbs this CO\u2082 in about ${smartFixed(daysAbsorbed)} days` }
-    ];
-  };
-  function render(stats) {
-    setCompactNumbers(stats.compactNumbers !== false);
-    const root = document.getElementById("root");
-    if (!root) {
-      return;
-    }
-    const projectedCo2 = calculateProjection(stats.last30Days.co2);
-    const projectedWater = calculateProjection(stats.last30Days.waterUsage);
-    const projectedTrees = calculateProjection(stats.last30Days.treesEquivalent);
-    const projectedTokens = Math.round(calculateProjection(stats.last30Days.tokens));
-    const lastUpdated = new Date(stats.lastUpdated);
-    root.replaceChildren();
-    const themeStyle = document.createElement("style");
-    themeStyle.textContent = theme_default;
-    const style = document.createElement("style");
-    style.textContent = styles_default;
-    const container = el("div", "container");
-    const header = el("div", "header");
-    const title = el("div", "title", "\u{1F33F} Environmental Impact");
-    const buttonRow = el("div", "button-row");
-    buttonRow.append(...getNavButtons("btn-environmental", !!stats.backendConfigured).map((config) => createButton(config)));
-    header.append(title, buttonRow);
-    const footer = el("div", "footer", `Last updated: ${lastUpdated.toLocaleString()} \xB7 Updates every 5 minutes`);
-    const sections = el("div", "sections");
-    sections.append(buildImpactCards(stats, projectedTokens, projectedCo2, projectedWater, projectedTrees));
-    sections.append(buildEstimatesSection());
-    container.append(header, sections, footer);
-    root.append(themeStyle, style, container);
-    wireButtons();
-  }
-  function buildAnalogyColumn(periodLabel, primaryValue, analogies) {
-    const col = el("div", "analogy-col");
-    col.append(el("div", "analogy-col-header", periodLabel));
-    col.append(el("div", "metric-primary-value", primaryValue));
-    if (analogies) {
-      for (const item of analogies) {
-        const itemEl = el("div", "analogy-item");
-        itemEl.append(el("span", "analogy-icon", item.icon));
-        const itemText = document.createElement("span");
-        itemText.textContent = item.text;
-        itemEl.append(itemText);
-        col.append(itemEl);
-      }
-    }
-    return col;
-  }
-  function buildMetricCard(periodCols, header) {
-    const card = el("div", "metric-card");
-    const cardHeader = el("div", "metric-card-header");
-    const iconEl = el("span", "metric-card-icon", header.icon);
-    iconEl.style.color = header.color;
-    cardHeader.append(iconEl, el("span", "metric-card-label", header.label));
-    card.append(cardHeader);
-    const grid = el("div", "analogy-grid");
-    for (const [periodLabel, primaryValue, analogies] of periodCols) {
-      grid.append(buildAnalogyColumn(periodLabel, primaryValue, analogies));
-    }
-    card.append(grid);
-    return card;
-  }
-  function buildImpactCards(stats, projectedTokens, projectedCo2, projectedWater, projectedTrees) {
-    const section = el("div", "section");
-    const heading = iconHeading("h3", "globe", "Impact at a Glance");
-    section.append(heading);
-    const intro = el("p", "section-intro");
-    intro.textContent = "All figures are estimates based on average data center energy and water consumption figures. Analogies use European averages. Treat these as order-of-magnitude indicators, not precise measurements.";
-    section.append(intro);
-    const periods = [
-      [
-        ["\u{1F4C5} Today", formatCompact(stats.today.tokens), null],
-        ["\u{1F4C8} Last 30 Days", formatCompact(stats.last30Days.tokens), null],
-        ["\u{1F4C6} Previous Month", formatCompact(stats.lastMonth.tokens), null],
-        ["\u{1F30D} Projected Year", formatCompact(projectedTokens), null]
-      ],
-      [
-        ["\u{1F4C5} Today", formatCo2Grams(stats.today.co2), co2AnalogyItems(stats.today.co2)],
-        ["\u{1F4C8} Last 30 Days", formatCo2Grams(stats.last30Days.co2), co2AnalogyItems(stats.last30Days.co2)],
-        ["\u{1F4C6} Previous Month", formatCo2Grams(stats.lastMonth.co2), co2AnalogyItems(stats.lastMonth.co2)],
-        ["\u{1F30D} Projected Year", formatCo2Grams(projectedCo2), co2AnalogyItems(projectedCo2)]
-      ],
-      [
-        ["\u{1F4C5} Today", `${smartFixed(stats.today.waterUsage)} L`, waterAnalogyItems(stats.today.waterUsage)],
-        ["\u{1F4C8} Last 30 Days", `${smartFixed(stats.last30Days.waterUsage)} L`, waterAnalogyItems(stats.last30Days.waterUsage)],
-        ["\u{1F4C6} Previous Month", `${smartFixed(stats.lastMonth.waterUsage)} L`, waterAnalogyItems(stats.lastMonth.waterUsage)],
-        ["\u{1F30D} Projected Year", `${smartFixed(projectedWater)} L`, waterAnalogyItems(projectedWater)]
-      ],
-      [
-        ["\u{1F4C5} Today", `${smartFixed(stats.today.treesEquivalent)} \u{1F333}`, treeAnalogyItems(stats.today.treesEquivalent)],
-        ["\u{1F4C8} Last 30 Days", `${smartFixed(stats.last30Days.treesEquivalent)} \u{1F333}`, treeAnalogyItems(stats.last30Days.treesEquivalent)],
-        ["\u{1F4C6} Previous Month", `${smartFixed(stats.lastMonth.treesEquivalent)} \u{1F333}`, treeAnalogyItems(stats.lastMonth.treesEquivalent)],
-        ["\u{1F30D} Projected Year", `${smartFixed(projectedTrees)} \u{1F333}`, treeAnalogyItems(projectedTrees)]
-      ]
-    ];
-    const metricHeaders = [
-      { icon: "\u{1F7E3}", label: "Tokens (total)", color: "#c37bff" },
-      { icon: "\u{1F331}", label: "Estimated CO\u2082", color: "#7fe36f" },
-      { icon: "\u{1F4A7}", label: "Estimated Water", color: "#6fc3ff" },
-      { icon: "\u{1F333}", label: "Tree equivalent", color: "#9de67f" }
-    ];
-    const cards = el("div", "metric-cards");
-    periods.forEach((periodCols, i6) => cards.append(buildMetricCard(periodCols, metricHeaders[i6])));
-    section.append(cards);
-    return section;
-  }
-  function buildEstimatesSection() {
-    const section = el("div", "section");
-    const heading = iconHeading("h3", "lightbulb", "Calculation & Estimates");
-    section.append(heading);
-    const notes = document.createElement("ul");
-    notes.className = "notes";
-    const items = [
-      "Cost (UBB) uses GitHub Copilot AI Credit rates (1 credit = $0.01) under Usage Based Billing.",
-      "Estimated CO\u2082 is based on ~0.2 g CO\u2082e per 1,000 tokens (average data center energy mix and PUE).",
-      "Estimated water usage is based on ~0.3 L per 1,000 tokens (data center cooling estimates).",
-      "Tree equivalent represents the fraction of a single mature tree's annual CO\u2082 absorption (~21 kg/year).",
-      "CO\u2082 analogies: petrol car \u2248 120 g/km \xB7 intercity train \u2248 41 g/km \xB7 economy flight \u2248 180 g/km (ICAO avg.) \xB7 smartphone charge \u2248 8 g \xB7 LED bulb \u2248 3 g/hr (10 W, EU grid) \xB7 kettle boil \u2248 20 g.",
-      "Water analogies: shower \u2248 8 L/min \xB7 washing machine \u2248 50 L \xB7 standard bathtub \u2248 150 L \xB7 dishwasher \u2248 12 L \xB7 mug of tea \u2248 250 mL \xB7 daily drinking water \u2248 2 L/person.",
-      "All analogies are order-of-magnitude estimates. Actual values depend on your region's energy mix and device efficiency."
-    ];
-    items.forEach((text) => {
-      const li = document.createElement("li");
-      li.textContent = text;
-      notes.append(li);
-    });
-    section.append(notes);
-    return section;
-  }
-  function wireButtons() {
-    document.getElementById("btn-refresh")?.addEventListener("click", () => vscode.postMessage({ command: "refresh" }));
-    document.getElementById("btn-details")?.addEventListener("click", () => vscode.postMessage({ command: "showDetails" }));
-    document.getElementById("btn-chart")?.addEventListener("click", () => vscode.postMessage({ command: "showChart" }));
-    document.getElementById("btn-usage")?.addEventListener("click", () => vscode.postMessage({ command: "showUsageAnalysis" }));
-    document.getElementById("btn-diagnostics")?.addEventListener("click", () => vscode.postMessage({ command: "showDiagnostics" }));
-    document.getElementById("btn-maturity")?.addEventListener("click", () => vscode.postMessage({ command: "showMaturity" }));
-    document.getElementById("btn-dashboard")?.addEventListener("click", () => vscode.postMessage({ command: "showDashboard" }));
-    document.getElementById("btn-efficiency")?.addEventListener("click", () => vscode.postMessage({ command: "showEfficiency" }));
-    wireExtensionPointButtons(vscode);
-  }
-  registerMessageHandler((message) => {
-    if (message.command === "updateStats") {
-      render(message.data);
-    }
-  });
-  async function bootstrap() {
-    await Promise.resolve().then(() => (init_vscode_button2(), vscode_button_exports));
-    if (initialData) {
-      render(initialData);
-    } else {
-      const root = document.getElementById("root");
-      if (root) {
-        root.textContent = "";
-        const fallback = document.createElement("div");
-        fallback.style.padding = "16px";
-        fallback.style.color = "#e7e7e7";
-        fallback.textContent = "No data available.";
-        root.append(fallback);
-      }
-    }
-  }
-  bootstrap();
-})();
+.header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 12px;
+	padding-bottom: 4px;
+}
+
+.title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+
+
+.sections {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.section {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	padding: 12px;
+	box-shadow: 0 4px 10px var(--shadow-color);
+}
+
+.section h3 {
+	margin: 0 0 10px;
+	font-size: 14px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--text-primary);
+	letter-spacing: 0.2px;
+}
+
+/* --- Metric cards --- */
+.metric-cards {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.metric-card {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 8px;
+	padding: 14px 16px;
+}
+
+.metric-card-header {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	margin-bottom: 12px;
+}
+
+.metric-card-icon {
+	font-size: 16px;
+	line-height: 1;
+}
+
+.metric-card-label {
+	font-size: 13px;
+	font-weight: 700;
+	color: var(--text-primary);
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+}
+
+.metric-primary-value {
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--text-primary);
+	padding: 6px 0 10px;
+	border-bottom: 1px solid var(--border-subtle);
+	margin-bottom: 8px;
+}
+
+.analogy-grid {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 16px;
+}
+
+.analogy-col {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.analogy-col-header {
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--text-secondary);
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	padding-bottom: 5px;
+	border-bottom: 1px solid var(--border-subtle);
+	margin-bottom: 2px;
+}
+
+.analogy-item {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--text-primary);
+	line-height: 1.5;
+}
+
+.analogy-icon {
+	flex-shrink: 0;
+	width: 20px;
+	text-align: center;
+	font-size: 13px;
+}
+
+.notes {
+	margin: 4px 0 0;
+	padding-left: 16px;
+	color: var(--text-secondary);
+}
+
+.notes li {
+	margin: 4px 0;
+	line-height: 1.4;
+}
+
+.footer {
+	color: var(--text-muted);
+	font-size: 11px;
+	margin-top: 6px;
+}
+
+.section-intro {
+	color: var(--text-secondary);
+	font-size: 12px;
+	margin: 0 0 10px;
+	line-height: 1.5;
+}
+`;var Io=120,Lo=20,Bo=41,Mo=180,Ro=8,Po=3,Do=8,Oo=50,No=.25,Uo=150,Ho=12,Fo=2,A=acquireVsCodeApi(),nt=rt("__INITIAL_ENVIRONMENTAL__");if(nt?.localization){Gt(nt.localization);let e=nt.localization.__language__||"en";Jt(e)}function vt(e){return e/30*365.25}function h(e){return e<.001?D(e,6):e<1?D(e,4):e<=100?D(e,2):e<=1e3?D(e,1):D(Math.round(e),0)}function yt(e){return e>=1e3?`${h(e/1e3)} kg`:`${h(e)} g`}var xt=e=>[{icon:"\u{1F697}",text:`${h(e/Io)} km driving (EU petrol car)`},{icon:"\u{1F682}",text:`${h(e/Bo)} km by train (EU intercity)`},{icon:"\u2708\uFE0F",text:`${h(e/Mo)} km flying (economy, short-haul)`},{icon:"\u{1FAD6}",text:`${h(e/Lo)} kettle boils`},{icon:"\u{1F4F1}",text:`${h(e/Ro)} smartphone charges`},{icon:"\u{1F4A1}",text:`${h(e/Po)} hours of LED lighting (10 W)`}],_t=e=>[{icon:"\u2615",text:`${h(e/No)} mugs of tea/coffee`},{icon:"\u{1F6BF}",text:`${h(e/Do)} shower minutes`},{icon:"\u{1F455}",text:`${h(e/Oo)} washing machine loads`},{icon:"\u{1F6C1}",text:`${h(e/Uo)} standard bathtubs`},{icon:"\u{1F37D}\uFE0F",text:`${h(e/Ho)} dishwasher cycles`},{icon:"\u{1F4A7}",text:`${h(e/Fo)} days of drinking water`}],Et=e=>{let t=e*365.25;return e>=1?[{icon:"\u{1F333}",text:`${h(e)} \xD7 a tree's full annual CO\u2082 absorption`},{icon:"\u{1F332}",text:`Plant ${Math.ceil(e)} trees to fully offset this per year`}]:[{icon:"\u{1F333}",text:`${h(e*100)} % of one tree's annual absorption`},{icon:"\u{1F4C5}",text:`1 tree absorbs this CO\u2082 in about ${h(t)} days`}]};function Ye(e){Qt(e.compactNumbers!==!1);let t=document.getElementById("root");if(!t)return;let o=vt(e.last30Days.co2),n=vt(e.last30Days.waterUsage),r=vt(e.last30Days.treesEquivalent),s=Math.round(vt(e.last30Days.tokens)),i=new Date(e.lastUpdated);t.replaceChildren();let a=document.createElement("style");a.textContent=ne;let c=document.createElement("style");c.textContent=re;let g=b("div","container"),m=b("div","header"),l=b("div","title","\u{1F33F} Environmental Impact"),y=b("div","button-row");y.append(...Xt("btn-environmental",!!e.backendConfigured).map(Je=>qt(Je))),m.append(l,y);let E=b("div","footer",`Last updated: ${i.toLocaleString()} \xB7 Updates every 5 minutes`),S=b("div","sections");S.append(jo(e,s,o,n,r)),S.append(Wo()),g.append(m,S,E),t.append(a,c,g),qo()}function zo(e,t,o){let n=b("div","analogy-col");if(n.append(b("div","analogy-col-header",e)),n.append(b("div","metric-primary-value",t)),o)for(let r of o){let s=b("div","analogy-item");s.append(b("span","analogy-icon",r.icon));let i=document.createElement("span");i.textContent=r.text,s.append(i),n.append(s)}return n}function Vo(e,t){let o=b("div","metric-card"),n=b("div","metric-card-header"),r=b("span","metric-card-icon",t.icon);r.style.color=t.color,n.append(r,b("span","metric-card-label",t.label)),o.append(n);let s=b("div","analogy-grid");for(let[i,a,c]of e)s.append(zo(i,a,c));return o.append(s),o}function jo(e,t,o,n,r){let s=b("div","section"),i=wt("h3","globe","Impact at a Glance");s.append(i);let a=b("p","section-intro");a.textContent="All figures are estimates based on average data center energy and water consumption figures. Analogies use European averages. Treat these as order-of-magnitude indicators, not precise measurements.",s.append(a);let c=[[["\u{1F4C5} Today",j(e.today.tokens),null],["\u{1F4C8} Last 30 Days",j(e.last30Days.tokens),null],["\u{1F4C6} Previous Month",j(e.lastMonth.tokens),null],["\u{1F30D} Projected Year",j(t),null]],[["\u{1F4C5} Today",yt(e.today.co2),xt(e.today.co2)],["\u{1F4C8} Last 30 Days",yt(e.last30Days.co2),xt(e.last30Days.co2)],["\u{1F4C6} Previous Month",yt(e.lastMonth.co2),xt(e.lastMonth.co2)],["\u{1F30D} Projected Year",yt(o),xt(o)]],[["\u{1F4C5} Today",`${h(e.today.waterUsage)} L`,_t(e.today.waterUsage)],["\u{1F4C8} Last 30 Days",`${h(e.last30Days.waterUsage)} L`,_t(e.last30Days.waterUsage)],["\u{1F4C6} Previous Month",`${h(e.lastMonth.waterUsage)} L`,_t(e.lastMonth.waterUsage)],["\u{1F30D} Projected Year",`${h(n)} L`,_t(n)]],[["\u{1F4C5} Today",`${h(e.today.treesEquivalent)} \u{1F333}`,Et(e.today.treesEquivalent)],["\u{1F4C8} Last 30 Days",`${h(e.last30Days.treesEquivalent)} \u{1F333}`,Et(e.last30Days.treesEquivalent)],["\u{1F4C6} Previous Month",`${h(e.lastMonth.treesEquivalent)} \u{1F333}`,Et(e.lastMonth.treesEquivalent)],["\u{1F30D} Projected Year",`${h(r)} \u{1F333}`,Et(r)]]],g=[{icon:"\u{1F7E3}",label:"Tokens (total)",color:"#c37bff"},{icon:"\u{1F331}",label:"Estimated CO\u2082",color:"#7fe36f"},{icon:"\u{1F4A7}",label:"Estimated Water",color:"#6fc3ff"},{icon:"\u{1F333}",label:"Tree equivalent",color:"#9de67f"}],m=b("div","metric-cards");return c.forEach((l,y)=>m.append(Vo(l,g[y]))),s.append(m),s}function Wo(){let e=b("div","section"),t=wt("h3","lightbulb","Calculation & Estimates");e.append(t);let o=document.createElement("ul");return o.className="notes",["Cost (UBB) uses GitHub Copilot AI Credit rates (1 credit = $0.01) under Usage Based Billing.","Estimated CO\u2082 is based on ~0.2 g CO\u2082e per 1,000 tokens (average data center energy mix and PUE).","Estimated water usage is based on ~0.3 L per 1,000 tokens (data center cooling estimates).","Tree equivalent represents the fraction of a single mature tree's annual CO\u2082 absorption (~21 kg/year).","CO\u2082 analogies: petrol car \u2248 120 g/km \xB7 intercity train \u2248 41 g/km \xB7 economy flight \u2248 180 g/km (ICAO avg.) \xB7 smartphone charge \u2248 8 g \xB7 LED bulb \u2248 3 g/hr (10 W, EU grid) \xB7 kettle boil \u2248 20 g.","Water analogies: shower \u2248 8 L/min \xB7 washing machine \u2248 50 L \xB7 standard bathtub \u2248 150 L \xB7 dishwasher \u2248 12 L \xB7 mug of tea \u2248 250 mL \xB7 daily drinking water \u2248 2 L/person.","All analogies are order-of-magnitude estimates. Actual values depend on your region's energy mix and device efficiency."].forEach(r=>{let s=document.createElement("li");s.textContent=r,o.append(s)}),e.append(o),e}function qo(){document.getElementById("btn-refresh")?.addEventListener("click",()=>A.postMessage({command:"refresh"})),document.getElementById("btn-details")?.addEventListener("click",()=>A.postMessage({command:"showDetails"})),document.getElementById("btn-chart")?.addEventListener("click",()=>A.postMessage({command:"showChart"})),document.getElementById("btn-usage")?.addEventListener("click",()=>A.postMessage({command:"showUsageAnalysis"})),document.getElementById("btn-diagnostics")?.addEventListener("click",()=>A.postMessage({command:"showDiagnostics"})),document.getElementById("btn-maturity")?.addEventListener("click",()=>A.postMessage({command:"showMaturity"})),document.getElementById("btn-dashboard")?.addEventListener("click",()=>A.postMessage({command:"showDashboard"})),document.getElementById("btn-efficiency")?.addEventListener("click",()=>A.postMessage({command:"showEfficiency"})),oe(A)}st(e=>{e.command==="updateStats"&&Ye(e.data)});async function Ko(){if(await Promise.resolve().then(()=>(Ge(),Ke)),nt)Ye(nt);else{let e=document.getElementById("root");if(e){e.textContent="";let t=document.createElement("div");t.style.padding="16px",t.style.color="#e7e7e7",t.textContent="No data available.",e.append(t)}}}Ko();})();
 /*! Bundled license information:
 
 @lit/reactive-element/css-tag.js:
@@ -2491,4 +843,3 @@ lit-html/directives/if-defined.js:
    * SPDX-License-Identifier: BSD-3-Clause
    *)
 */
-//# sourceMappingURL=environmental.js.map

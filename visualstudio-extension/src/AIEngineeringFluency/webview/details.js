@@ -1,908 +1,9 @@
-"use strict";
-(() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __esm = (fn, res, err) => function __init() {
-    if (err) throw err[0];
-    try {
-      return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-    } catch (e7) {
-      throw err = [e7], e7;
-    }
-  };
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-
-  // node_modules/@lit/reactive-element/css-tag.js
-  var t, e, s, o, n, r, i, S, c;
-  var init_css_tag = __esm({
-    "node_modules/@lit/reactive-element/css-tag.js"() {
-      t = globalThis;
-      e = t.ShadowRoot && (void 0 === t.ShadyCSS || t.ShadyCSS.nativeShadow) && "adoptedStyleSheets" in Document.prototype && "replace" in CSSStyleSheet.prototype;
-      s = /* @__PURE__ */ Symbol();
-      o = /* @__PURE__ */ new WeakMap();
-      n = class {
-        constructor(t4, e7, o7) {
-          if (this._$cssResult$ = true, o7 !== s) throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");
-          this.cssText = t4, this.t = e7;
-        }
-        get styleSheet() {
-          let t4 = this.o;
-          const s4 = this.t;
-          if (e && void 0 === t4) {
-            const e7 = void 0 !== s4 && 1 === s4.length;
-            e7 && (t4 = o.get(s4)), void 0 === t4 && ((this.o = t4 = new CSSStyleSheet()).replaceSync(this.cssText), e7 && o.set(s4, t4));
-          }
-          return t4;
-        }
-        toString() {
-          return this.cssText;
-        }
-      };
-      r = (t4) => new n("string" == typeof t4 ? t4 : t4 + "", void 0, s);
-      i = (t4, ...e7) => {
-        const o7 = 1 === t4.length ? t4[0] : e7.reduce((e8, s4, o8) => e8 + ((t5) => {
-          if (true === t5._$cssResult$) return t5.cssText;
-          if ("number" == typeof t5) return t5;
-          throw Error("Value passed to 'css' function must be a 'css' function result: " + t5 + ". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.");
-        })(s4) + t4[o8 + 1], t4[0]);
-        return new n(o7, t4, s);
-      };
-      S = (s4, o7) => {
-        if (e) s4.adoptedStyleSheets = o7.map((t4) => t4 instanceof CSSStyleSheet ? t4 : t4.styleSheet);
-        else for (const e7 of o7) {
-          const o8 = document.createElement("style"), n5 = t.litNonce;
-          void 0 !== n5 && o8.setAttribute("nonce", n5), o8.textContent = e7.cssText, s4.appendChild(o8);
-        }
-      };
-      c = e ? (t4) => t4 : (t4) => t4 instanceof CSSStyleSheet ? ((t5) => {
-        let e7 = "";
-        for (const s4 of t5.cssRules) e7 += s4.cssText;
-        return r(e7);
-      })(t4) : t4;
-    }
-  });
-
-  // node_modules/@lit/reactive-element/reactive-element.js
-  var i2, e2, h, r2, o2, n2, a, c2, l, p, d, u, f, b, y;
-  var init_reactive_element = __esm({
-    "node_modules/@lit/reactive-element/reactive-element.js"() {
-      init_css_tag();
-      init_css_tag();
-      ({ is: i2, defineProperty: e2, getOwnPropertyDescriptor: h, getOwnPropertyNames: r2, getOwnPropertySymbols: o2, getPrototypeOf: n2 } = Object);
-      a = globalThis;
-      c2 = a.trustedTypes;
-      l = c2 ? c2.emptyScript : "";
-      p = a.reactiveElementPolyfillSupport;
-      d = (t4, s4) => t4;
-      u = { toAttribute(t4, s4) {
-        switch (s4) {
-          case Boolean:
-            t4 = t4 ? l : null;
-            break;
-          case Object:
-          case Array:
-            t4 = null == t4 ? t4 : JSON.stringify(t4);
-        }
-        return t4;
-      }, fromAttribute(t4, s4) {
-        let i6 = t4;
-        switch (s4) {
-          case Boolean:
-            i6 = null !== t4;
-            break;
-          case Number:
-            i6 = null === t4 ? null : Number(t4);
-            break;
-          case Object:
-          case Array:
-            try {
-              i6 = JSON.parse(t4);
-            } catch (t5) {
-              i6 = null;
-            }
-        }
-        return i6;
-      } };
-      f = (t4, s4) => !i2(t4, s4);
-      b = { attribute: true, type: String, converter: u, reflect: false, useDefault: false, hasChanged: f };
-      Symbol.metadata ?? (Symbol.metadata = /* @__PURE__ */ Symbol("metadata")), a.litPropertyMetadata ?? (a.litPropertyMetadata = /* @__PURE__ */ new WeakMap());
-      y = class extends HTMLElement {
-        static addInitializer(t4) {
-          this._$Ei(), (this.l ?? (this.l = [])).push(t4);
-        }
-        static get observedAttributes() {
-          return this.finalize(), this._$Eh && [...this._$Eh.keys()];
-        }
-        static createProperty(t4, s4 = b) {
-          if (s4.state && (s4.attribute = false), this._$Ei(), this.prototype.hasOwnProperty(t4) && ((s4 = Object.create(s4)).wrapped = true), this.elementProperties.set(t4, s4), !s4.noAccessor) {
-            const i6 = /* @__PURE__ */ Symbol(), h3 = this.getPropertyDescriptor(t4, i6, s4);
-            void 0 !== h3 && e2(this.prototype, t4, h3);
-          }
-        }
-        static getPropertyDescriptor(t4, s4, i6) {
-          const { get: e7, set: r6 } = h(this.prototype, t4) ?? { get() {
-            return this[s4];
-          }, set(t5) {
-            this[s4] = t5;
-          } };
-          return { get: e7, set(s5) {
-            const h3 = e7?.call(this);
-            r6?.call(this, s5), this.requestUpdate(t4, h3, i6);
-          }, configurable: true, enumerable: true };
-        }
-        static getPropertyOptions(t4) {
-          return this.elementProperties.get(t4) ?? b;
-        }
-        static _$Ei() {
-          if (this.hasOwnProperty(d("elementProperties"))) return;
-          const t4 = n2(this);
-          t4.finalize(), void 0 !== t4.l && (this.l = [...t4.l]), this.elementProperties = new Map(t4.elementProperties);
-        }
-        static finalize() {
-          if (this.hasOwnProperty(d("finalized"))) return;
-          if (this.finalized = true, this._$Ei(), this.hasOwnProperty(d("properties"))) {
-            const t5 = this.properties, s4 = [...r2(t5), ...o2(t5)];
-            for (const i6 of s4) this.createProperty(i6, t5[i6]);
-          }
-          const t4 = this[Symbol.metadata];
-          if (null !== t4) {
-            const s4 = litPropertyMetadata.get(t4);
-            if (void 0 !== s4) for (const [t5, i6] of s4) this.elementProperties.set(t5, i6);
-          }
-          this._$Eh = /* @__PURE__ */ new Map();
-          for (const [t5, s4] of this.elementProperties) {
-            const i6 = this._$Eu(t5, s4);
-            void 0 !== i6 && this._$Eh.set(i6, t5);
-          }
-          this.elementStyles = this.finalizeStyles(this.styles);
-        }
-        static finalizeStyles(s4) {
-          const i6 = [];
-          if (Array.isArray(s4)) {
-            const e7 = new Set(s4.flat(1 / 0).reverse());
-            for (const s5 of e7) i6.unshift(c(s5));
-          } else void 0 !== s4 && i6.push(c(s4));
-          return i6;
-        }
-        static _$Eu(t4, s4) {
-          const i6 = s4.attribute;
-          return false === i6 ? void 0 : "string" == typeof i6 ? i6 : "string" == typeof t4 ? t4.toLowerCase() : void 0;
-        }
-        constructor() {
-          super(), this._$Ep = void 0, this.isUpdatePending = false, this.hasUpdated = false, this._$Em = null, this._$Ev();
-        }
-        _$Ev() {
-          this._$ES = new Promise((t4) => this.enableUpdating = t4), this._$AL = /* @__PURE__ */ new Map(), this._$E_(), this.requestUpdate(), this.constructor.l?.forEach((t4) => t4(this));
-        }
-        addController(t4) {
-          (this._$EO ?? (this._$EO = /* @__PURE__ */ new Set())).add(t4), void 0 !== this.renderRoot && this.isConnected && t4.hostConnected?.();
-        }
-        removeController(t4) {
-          this._$EO?.delete(t4);
-        }
-        _$E_() {
-          const t4 = /* @__PURE__ */ new Map(), s4 = this.constructor.elementProperties;
-          for (const i6 of s4.keys()) this.hasOwnProperty(i6) && (t4.set(i6, this[i6]), delete this[i6]);
-          t4.size > 0 && (this._$Ep = t4);
-        }
-        createRenderRoot() {
-          const t4 = this.shadowRoot ?? this.attachShadow(this.constructor.shadowRootOptions);
-          return S(t4, this.constructor.elementStyles), t4;
-        }
-        connectedCallback() {
-          this.renderRoot ?? (this.renderRoot = this.createRenderRoot()), this.enableUpdating(true), this._$EO?.forEach((t4) => t4.hostConnected?.());
-        }
-        enableUpdating(t4) {
-        }
-        disconnectedCallback() {
-          this._$EO?.forEach((t4) => t4.hostDisconnected?.());
-        }
-        attributeChangedCallback(t4, s4, i6) {
-          this._$AK(t4, i6);
-        }
-        _$ET(t4, s4) {
-          const i6 = this.constructor.elementProperties.get(t4), e7 = this.constructor._$Eu(t4, i6);
-          if (void 0 !== e7 && true === i6.reflect) {
-            const h3 = (void 0 !== i6.converter?.toAttribute ? i6.converter : u).toAttribute(s4, i6.type);
-            this._$Em = t4, null == h3 ? this.removeAttribute(e7) : this.setAttribute(e7, h3), this._$Em = null;
-          }
-        }
-        _$AK(t4, s4) {
-          const i6 = this.constructor, e7 = i6._$Eh.get(t4);
-          if (void 0 !== e7 && this._$Em !== e7) {
-            const t5 = i6.getPropertyOptions(e7), h3 = "function" == typeof t5.converter ? { fromAttribute: t5.converter } : void 0 !== t5.converter?.fromAttribute ? t5.converter : u;
-            this._$Em = e7;
-            const r6 = h3.fromAttribute(s4, t5.type);
-            this[e7] = r6 ?? this._$Ej?.get(e7) ?? r6, this._$Em = null;
-          }
-        }
-        requestUpdate(t4, s4, i6, e7 = false, h3) {
-          if (void 0 !== t4) {
-            const r6 = this.constructor;
-            if (false === e7 && (h3 = this[t4]), i6 ?? (i6 = r6.getPropertyOptions(t4)), !((i6.hasChanged ?? f)(h3, s4) || i6.useDefault && i6.reflect && h3 === this._$Ej?.get(t4) && !this.hasAttribute(r6._$Eu(t4, i6)))) return;
-            this.C(t4, s4, i6);
-          }
-          false === this.isUpdatePending && (this._$ES = this._$EP());
-        }
-        C(t4, s4, { useDefault: i6, reflect: e7, wrapped: h3 }, r6) {
-          i6 && !(this._$Ej ?? (this._$Ej = /* @__PURE__ */ new Map())).has(t4) && (this._$Ej.set(t4, r6 ?? s4 ?? this[t4]), true !== h3 || void 0 !== r6) || (this._$AL.has(t4) || (this.hasUpdated || i6 || (s4 = void 0), this._$AL.set(t4, s4)), true === e7 && this._$Em !== t4 && (this._$Eq ?? (this._$Eq = /* @__PURE__ */ new Set())).add(t4));
-        }
-        async _$EP() {
-          this.isUpdatePending = true;
-          try {
-            await this._$ES;
-          } catch (t5) {
-            Promise.reject(t5);
-          }
-          const t4 = this.scheduleUpdate();
-          return null != t4 && await t4, !this.isUpdatePending;
-        }
-        scheduleUpdate() {
-          return this.performUpdate();
-        }
-        performUpdate() {
-          if (!this.isUpdatePending) return;
-          if (!this.hasUpdated) {
-            if (this.renderRoot ?? (this.renderRoot = this.createRenderRoot()), this._$Ep) {
-              for (const [t6, s5] of this._$Ep) this[t6] = s5;
-              this._$Ep = void 0;
-            }
-            const t5 = this.constructor.elementProperties;
-            if (t5.size > 0) for (const [s5, i6] of t5) {
-              const { wrapped: t6 } = i6, e7 = this[s5];
-              true !== t6 || this._$AL.has(s5) || void 0 === e7 || this.C(s5, void 0, i6, e7);
-            }
-          }
-          let t4 = false;
-          const s4 = this._$AL;
-          try {
-            t4 = this.shouldUpdate(s4), t4 ? (this.willUpdate(s4), this._$EO?.forEach((t5) => t5.hostUpdate?.()), this.update(s4)) : this._$EM();
-          } catch (s5) {
-            throw t4 = false, this._$EM(), s5;
-          }
-          t4 && this._$AE(s4);
-        }
-        willUpdate(t4) {
-        }
-        _$AE(t4) {
-          this._$EO?.forEach((t5) => t5.hostUpdated?.()), this.hasUpdated || (this.hasUpdated = true, this.firstUpdated(t4)), this.updated(t4);
-        }
-        _$EM() {
-          this._$AL = /* @__PURE__ */ new Map(), this.isUpdatePending = false;
-        }
-        get updateComplete() {
-          return this.getUpdateComplete();
-        }
-        getUpdateComplete() {
-          return this._$ES;
-        }
-        shouldUpdate(t4) {
-          return true;
-        }
-        update(t4) {
-          this._$Eq && (this._$Eq = this._$Eq.forEach((t5) => this._$ET(t5, this[t5]))), this._$EM();
-        }
-        updated(t4) {
-        }
-        firstUpdated(t4) {
-        }
-      };
-      y.elementStyles = [], y.shadowRootOptions = { mode: "open" }, y[d("elementProperties")] = /* @__PURE__ */ new Map(), y[d("finalized")] = /* @__PURE__ */ new Map(), p?.({ ReactiveElement: y }), (a.reactiveElementVersions ?? (a.reactiveElementVersions = [])).push("2.1.2");
-    }
-  });
-
-  // node_modules/lit-html/lit-html.js
-  function V(t4, i6) {
-    if (!u2(t4) || !t4.hasOwnProperty("raw")) throw Error("invalid template strings array");
-    return void 0 !== e3 ? e3.createHTML(i6) : i6;
-  }
-  function M(t4, i6, s4 = t4, e7) {
-    if (i6 === E) return i6;
-    let h3 = void 0 !== e7 ? s4._$Co?.[e7] : s4._$Cl;
-    const o7 = a2(i6) ? void 0 : i6._$litDirective$;
-    return h3?.constructor !== o7 && (h3?._$AO?.(false), void 0 === o7 ? h3 = void 0 : (h3 = new o7(t4), h3._$AT(t4, s4, e7)), void 0 !== e7 ? (s4._$Co ?? (s4._$Co = []))[e7] = h3 : s4._$Cl = h3), void 0 !== h3 && (i6 = M(t4, h3._$AS(t4, i6.values), h3, e7)), i6;
-  }
-  var t2, i3, s2, e3, h2, o3, n3, r3, l2, c3, a2, u2, d2, f2, v, _, m, p2, g, $, y2, x, b2, w, T, E, A, C, P, N, S2, R, k, H, I, L, z, Z, B, D;
-  var init_lit_html = __esm({
-    "node_modules/lit-html/lit-html.js"() {
-      t2 = globalThis;
-      i3 = (t4) => t4;
-      s2 = t2.trustedTypes;
-      e3 = s2 ? s2.createPolicy("lit-html", { createHTML: (t4) => t4 }) : void 0;
-      h2 = "$lit$";
-      o3 = `lit$${Math.random().toFixed(9).slice(2)}$`;
-      n3 = "?" + o3;
-      r3 = `<${n3}>`;
-      l2 = document;
-      c3 = () => l2.createComment("");
-      a2 = (t4) => null === t4 || "object" != typeof t4 && "function" != typeof t4;
-      u2 = Array.isArray;
-      d2 = (t4) => u2(t4) || "function" == typeof t4?.[Symbol.iterator];
-      f2 = "[ 	\n\f\r]";
-      v = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g;
-      _ = /-->/g;
-      m = />/g;
-      p2 = RegExp(`>|${f2}(?:([^\\s"'>=/]+)(${f2}*=${f2}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`, "g");
-      g = /'/g;
-      $ = /"/g;
-      y2 = /^(?:script|style|textarea|title)$/i;
-      x = (t4) => (i6, ...s4) => ({ _$litType$: t4, strings: i6, values: s4 });
-      b2 = x(1);
-      w = x(2);
-      T = x(3);
-      E = /* @__PURE__ */ Symbol.for("lit-noChange");
-      A = /* @__PURE__ */ Symbol.for("lit-nothing");
-      C = /* @__PURE__ */ new WeakMap();
-      P = l2.createTreeWalker(l2, 129);
-      N = (t4, i6) => {
-        const s4 = t4.length - 1, e7 = [];
-        let n5, l3 = 2 === i6 ? "<svg>" : 3 === i6 ? "<math>" : "", c4 = v;
-        for (let i7 = 0; i7 < s4; i7++) {
-          const s5 = t4[i7];
-          let a3, u3, d3 = -1, f3 = 0;
-          for (; f3 < s5.length && (c4.lastIndex = f3, u3 = c4.exec(s5), null !== u3); ) f3 = c4.lastIndex, c4 === v ? "!--" === u3[1] ? c4 = _ : void 0 !== u3[1] ? c4 = m : void 0 !== u3[2] ? (y2.test(u3[2]) && (n5 = RegExp("</" + u3[2], "g")), c4 = p2) : void 0 !== u3[3] && (c4 = p2) : c4 === p2 ? ">" === u3[0] ? (c4 = n5 ?? v, d3 = -1) : void 0 === u3[1] ? d3 = -2 : (d3 = c4.lastIndex - u3[2].length, a3 = u3[1], c4 = void 0 === u3[3] ? p2 : '"' === u3[3] ? $ : g) : c4 === $ || c4 === g ? c4 = p2 : c4 === _ || c4 === m ? c4 = v : (c4 = p2, n5 = void 0);
-          const x2 = c4 === p2 && t4[i7 + 1].startsWith("/>") ? " " : "";
-          l3 += c4 === v ? s5 + r3 : d3 >= 0 ? (e7.push(a3), s5.slice(0, d3) + h2 + s5.slice(d3) + o3 + x2) : s5 + o3 + (-2 === d3 ? i7 : x2);
-        }
-        return [V(t4, l3 + (t4[s4] || "<?>") + (2 === i6 ? "</svg>" : 3 === i6 ? "</math>" : "")), e7];
-      };
-      S2 = class _S {
-        constructor({ strings: t4, _$litType$: i6 }, e7) {
-          let r6;
-          this.parts = [];
-          let l3 = 0, a3 = 0;
-          const u3 = t4.length - 1, d3 = this.parts, [f3, v2] = N(t4, i6);
-          if (this.el = _S.createElement(f3, e7), P.currentNode = this.el.content, 2 === i6 || 3 === i6) {
-            const t5 = this.el.content.firstChild;
-            t5.replaceWith(...t5.childNodes);
-          }
-          for (; null !== (r6 = P.nextNode()) && d3.length < u3; ) {
-            if (1 === r6.nodeType) {
-              if (r6.hasAttributes()) for (const t5 of r6.getAttributeNames()) if (t5.endsWith(h2)) {
-                const i7 = v2[a3++], s4 = r6.getAttribute(t5).split(o3), e8 = /([.?@])?(.*)/.exec(i7);
-                d3.push({ type: 1, index: l3, name: e8[2], strings: s4, ctor: "." === e8[1] ? I : "?" === e8[1] ? L : "@" === e8[1] ? z : H }), r6.removeAttribute(t5);
-              } else t5.startsWith(o3) && (d3.push({ type: 6, index: l3 }), r6.removeAttribute(t5));
-              if (y2.test(r6.tagName)) {
-                const t5 = r6.textContent.split(o3), i7 = t5.length - 1;
-                if (i7 > 0) {
-                  r6.textContent = s2 ? s2.emptyScript : "";
-                  for (let s4 = 0; s4 < i7; s4++) r6.append(t5[s4], c3()), P.nextNode(), d3.push({ type: 2, index: ++l3 });
-                  r6.append(t5[i7], c3());
-                }
-              }
-            } else if (8 === r6.nodeType) if (r6.data === n3) d3.push({ type: 2, index: l3 });
-            else {
-              let t5 = -1;
-              for (; -1 !== (t5 = r6.data.indexOf(o3, t5 + 1)); ) d3.push({ type: 7, index: l3 }), t5 += o3.length - 1;
-            }
-            l3++;
-          }
-        }
-        static createElement(t4, i6) {
-          const s4 = l2.createElement("template");
-          return s4.innerHTML = t4, s4;
-        }
-      };
-      R = class {
-        constructor(t4, i6) {
-          this._$AV = [], this._$AN = void 0, this._$AD = t4, this._$AM = i6;
-        }
-        get parentNode() {
-          return this._$AM.parentNode;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        u(t4) {
-          const { el: { content: i6 }, parts: s4 } = this._$AD, e7 = (t4?.creationScope ?? l2).importNode(i6, true);
-          P.currentNode = e7;
-          let h3 = P.nextNode(), o7 = 0, n5 = 0, r6 = s4[0];
-          for (; void 0 !== r6; ) {
-            if (o7 === r6.index) {
-              let i7;
-              2 === r6.type ? i7 = new k(h3, h3.nextSibling, this, t4) : 1 === r6.type ? i7 = new r6.ctor(h3, r6.name, r6.strings, this, t4) : 6 === r6.type && (i7 = new Z(h3, this, t4)), this._$AV.push(i7), r6 = s4[++n5];
-            }
-            o7 !== r6?.index && (h3 = P.nextNode(), o7++);
-          }
-          return P.currentNode = l2, e7;
-        }
-        p(t4) {
-          let i6 = 0;
-          for (const s4 of this._$AV) void 0 !== s4 && (void 0 !== s4.strings ? (s4._$AI(t4, s4, i6), i6 += s4.strings.length - 2) : s4._$AI(t4[i6])), i6++;
-        }
-      };
-      k = class _k {
-        get _$AU() {
-          return this._$AM?._$AU ?? this._$Cv;
-        }
-        constructor(t4, i6, s4, e7) {
-          this.type = 2, this._$AH = A, this._$AN = void 0, this._$AA = t4, this._$AB = i6, this._$AM = s4, this.options = e7, this._$Cv = e7?.isConnected ?? true;
-        }
-        get parentNode() {
-          let t4 = this._$AA.parentNode;
-          const i6 = this._$AM;
-          return void 0 !== i6 && 11 === t4?.nodeType && (t4 = i6.parentNode), t4;
-        }
-        get startNode() {
-          return this._$AA;
-        }
-        get endNode() {
-          return this._$AB;
-        }
-        _$AI(t4, i6 = this) {
-          t4 = M(this, t4, i6), a2(t4) ? t4 === A || null == t4 || "" === t4 ? (this._$AH !== A && this._$AR(), this._$AH = A) : t4 !== this._$AH && t4 !== E && this._(t4) : void 0 !== t4._$litType$ ? this.$(t4) : void 0 !== t4.nodeType ? this.T(t4) : d2(t4) ? this.k(t4) : this._(t4);
-        }
-        O(t4) {
-          return this._$AA.parentNode.insertBefore(t4, this._$AB);
-        }
-        T(t4) {
-          this._$AH !== t4 && (this._$AR(), this._$AH = this.O(t4));
-        }
-        _(t4) {
-          this._$AH !== A && a2(this._$AH) ? this._$AA.nextSibling.data = t4 : this.T(l2.createTextNode(t4)), this._$AH = t4;
-        }
-        $(t4) {
-          const { values: i6, _$litType$: s4 } = t4, e7 = "number" == typeof s4 ? this._$AC(t4) : (void 0 === s4.el && (s4.el = S2.createElement(V(s4.h, s4.h[0]), this.options)), s4);
-          if (this._$AH?._$AD === e7) this._$AH.p(i6);
-          else {
-            const t5 = new R(e7, this), s5 = t5.u(this.options);
-            t5.p(i6), this.T(s5), this._$AH = t5;
-          }
-        }
-        _$AC(t4) {
-          let i6 = C.get(t4.strings);
-          return void 0 === i6 && C.set(t4.strings, i6 = new S2(t4)), i6;
-        }
-        k(t4) {
-          u2(this._$AH) || (this._$AH = [], this._$AR());
-          const i6 = this._$AH;
-          let s4, e7 = 0;
-          for (const h3 of t4) e7 === i6.length ? i6.push(s4 = new _k(this.O(c3()), this.O(c3()), this, this.options)) : s4 = i6[e7], s4._$AI(h3), e7++;
-          e7 < i6.length && (this._$AR(s4 && s4._$AB.nextSibling, e7), i6.length = e7);
-        }
-        _$AR(t4 = this._$AA.nextSibling, s4) {
-          for (this._$AP?.(false, true, s4); t4 !== this._$AB; ) {
-            const s5 = i3(t4).nextSibling;
-            i3(t4).remove(), t4 = s5;
-          }
-        }
-        setConnected(t4) {
-          void 0 === this._$AM && (this._$Cv = t4, this._$AP?.(t4));
-        }
-      };
-      H = class {
-        get tagName() {
-          return this.element.tagName;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        constructor(t4, i6, s4, e7, h3) {
-          this.type = 1, this._$AH = A, this._$AN = void 0, this.element = t4, this.name = i6, this._$AM = e7, this.options = h3, s4.length > 2 || "" !== s4[0] || "" !== s4[1] ? (this._$AH = Array(s4.length - 1).fill(new String()), this.strings = s4) : this._$AH = A;
-        }
-        _$AI(t4, i6 = this, s4, e7) {
-          const h3 = this.strings;
-          let o7 = false;
-          if (void 0 === h3) t4 = M(this, t4, i6, 0), o7 = !a2(t4) || t4 !== this._$AH && t4 !== E, o7 && (this._$AH = t4);
-          else {
-            const e8 = t4;
-            let n5, r6;
-            for (t4 = h3[0], n5 = 0; n5 < h3.length - 1; n5++) r6 = M(this, e8[s4 + n5], i6, n5), r6 === E && (r6 = this._$AH[n5]), o7 || (o7 = !a2(r6) || r6 !== this._$AH[n5]), r6 === A ? t4 = A : t4 !== A && (t4 += (r6 ?? "") + h3[n5 + 1]), this._$AH[n5] = r6;
-          }
-          o7 && !e7 && this.j(t4);
-        }
-        j(t4) {
-          t4 === A ? this.element.removeAttribute(this.name) : this.element.setAttribute(this.name, t4 ?? "");
-        }
-      };
-      I = class extends H {
-        constructor() {
-          super(...arguments), this.type = 3;
-        }
-        j(t4) {
-          this.element[this.name] = t4 === A ? void 0 : t4;
-        }
-      };
-      L = class extends H {
-        constructor() {
-          super(...arguments), this.type = 4;
-        }
-        j(t4) {
-          this.element.toggleAttribute(this.name, !!t4 && t4 !== A);
-        }
-      };
-      z = class extends H {
-        constructor(t4, i6, s4, e7, h3) {
-          super(t4, i6, s4, e7, h3), this.type = 5;
-        }
-        _$AI(t4, i6 = this) {
-          if ((t4 = M(this, t4, i6, 0) ?? A) === E) return;
-          const s4 = this._$AH, e7 = t4 === A && s4 !== A || t4.capture !== s4.capture || t4.once !== s4.once || t4.passive !== s4.passive, h3 = t4 !== A && (s4 === A || e7);
-          e7 && this.element.removeEventListener(this.name, this, s4), h3 && this.element.addEventListener(this.name, this, t4), this._$AH = t4;
-        }
-        handleEvent(t4) {
-          "function" == typeof this._$AH ? this._$AH.call(this.options?.host ?? this.element, t4) : this._$AH.handleEvent(t4);
-        }
-      };
-      Z = class {
-        constructor(t4, i6, s4) {
-          this.element = t4, this.type = 6, this._$AN = void 0, this._$AM = i6, this.options = s4;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        _$AI(t4) {
-          M(this, t4);
-        }
-      };
-      B = t2.litHtmlPolyfillSupport;
-      B?.(S2, k), (t2.litHtmlVersions ?? (t2.litHtmlVersions = [])).push("3.3.3");
-      D = (t4, i6, s4) => {
-        const e7 = s4?.renderBefore ?? i6;
-        let h3 = e7._$litPart$;
-        if (void 0 === h3) {
-          const t5 = s4?.renderBefore ?? null;
-          e7._$litPart$ = h3 = new k(i6.insertBefore(c3(), t5), t5, void 0, s4 ?? {});
-        }
-        return h3._$AI(t4), h3;
-      };
-    }
-  });
-
-  // node_modules/lit-element/lit-element.js
-  var s3, i4, o4;
-  var init_lit_element = __esm({
-    "node_modules/lit-element/lit-element.js"() {
-      init_reactive_element();
-      init_reactive_element();
-      init_lit_html();
-      init_lit_html();
-      s3 = globalThis;
-      i4 = class extends y {
-        constructor() {
-          super(...arguments), this.renderOptions = { host: this }, this._$Do = void 0;
-        }
-        createRenderRoot() {
-          var _a;
-          const t4 = super.createRenderRoot();
-          return (_a = this.renderOptions).renderBefore ?? (_a.renderBefore = t4.firstChild), t4;
-        }
-        update(t4) {
-          const r6 = this.render();
-          this.hasUpdated || (this.renderOptions.isConnected = this.isConnected), super.update(t4), this._$Do = D(r6, this.renderRoot, this.renderOptions);
-        }
-        connectedCallback() {
-          super.connectedCallback(), this._$Do?.setConnected(true);
-        }
-        disconnectedCallback() {
-          super.disconnectedCallback(), this._$Do?.setConnected(false);
-        }
-        render() {
-          return E;
-        }
-      };
-      i4._$litElement$ = true, i4["finalized"] = true, s3.litElementHydrateSupport?.({ LitElement: i4 });
-      o4 = s3.litElementPolyfillSupport;
-      o4?.({ LitElement: i4 });
-      (s3.litElementVersions ?? (s3.litElementVersions = [])).push("4.2.2");
-    }
-  });
-
-  // node_modules/lit-html/is-server.js
-  var init_is_server = __esm({
-    "node_modules/lit-html/is-server.js"() {
-    }
-  });
-
-  // node_modules/lit/index.js
-  var init_lit = __esm({
-    "node_modules/lit/index.js"() {
-      init_reactive_element();
-      init_lit_html();
-      init_lit_element();
-      init_is_server();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/custom-element.js
-  var init_custom_element = __esm({
-    "node_modules/@lit/reactive-element/decorators/custom-element.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/property.js
-  function n4(t4) {
-    return (e7, o7) => "object" == typeof o7 ? r4(t4, e7, o7) : ((t5, e8, o8) => {
-      const r6 = e8.hasOwnProperty(o8);
-      return e8.constructor.createProperty(o8, t5), r6 ? Object.getOwnPropertyDescriptor(e8, o8) : void 0;
-    })(t4, e7, o7);
-  }
-  var o5, r4;
-  var init_property = __esm({
-    "node_modules/@lit/reactive-element/decorators/property.js"() {
-      init_reactive_element();
-      o5 = { attribute: true, type: String, converter: u, reflect: false, hasChanged: f };
-      r4 = (t4 = o5, e7, r6) => {
-        const { kind: n5, metadata: i6 } = r6;
-        let s4 = globalThis.litPropertyMetadata.get(i6);
-        if (void 0 === s4 && globalThis.litPropertyMetadata.set(i6, s4 = /* @__PURE__ */ new Map()), "setter" === n5 && ((t4 = Object.create(t4)).wrapped = true), s4.set(r6.name, t4), "accessor" === n5) {
-          const { name: o7 } = r6;
-          return { set(r7) {
-            const n6 = e7.get.call(this);
-            e7.set.call(this, r7), this.requestUpdate(o7, n6, t4, true, r7);
-          }, init(e8) {
-            return void 0 !== e8 && this.C(o7, void 0, t4, e8), e8;
-          } };
-        }
-        if ("setter" === n5) {
-          const { name: o7 } = r6;
-          return function(r7) {
-            const n6 = this[o7];
-            e7.call(this, r7), this.requestUpdate(o7, n6, t4, true, r7);
-          };
-        }
-        throw Error("Unsupported decorator location: " + n5);
-      };
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/state.js
-  function r5(r6) {
-    return n4({ ...r6, state: true, attribute: false });
-  }
-  var init_state = __esm({
-    "node_modules/@lit/reactive-element/decorators/state.js"() {
-      init_property();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/event-options.js
-  var init_event_options = __esm({
-    "node_modules/@lit/reactive-element/decorators/event-options.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/base.js
-  var init_base = __esm({
-    "node_modules/@lit/reactive-element/decorators/base.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query.js
-  var init_query = __esm({
-    "node_modules/@lit/reactive-element/decorators/query.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-all.js
-  var init_query_all = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-all.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-async.js
-  var init_query_async = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-async.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-assigned-elements.js
-  var init_query_assigned_elements = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-assigned-elements.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-assigned-nodes.js
-  var init_query_assigned_nodes = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-assigned-nodes.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/lit/decorators.js
-  var init_decorators = __esm({
-    "node_modules/lit/decorators.js"() {
-      init_custom_element();
-      init_property();
-      init_state();
-      init_event_options();
-      init_query();
-      init_query_all();
-      init_query_async();
-      init_query_assigned_elements();
-      init_query_assigned_nodes();
-    }
-  });
-
-  // node_modules/lit-html/directive.js
-  var t3, e5, i5;
-  var init_directive = __esm({
-    "node_modules/lit-html/directive.js"() {
-      t3 = { ATTRIBUTE: 1, CHILD: 2, PROPERTY: 3, BOOLEAN_ATTRIBUTE: 4, EVENT: 5, ELEMENT: 6 };
-      e5 = (t4) => (...e7) => ({ _$litDirective$: t4, values: e7 });
-      i5 = class {
-        constructor(t4) {
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        _$AT(t4, e7, i6) {
-          this._$Ct = t4, this._$AM = e7, this._$Ci = i6;
-        }
-        _$AS(t4, e7) {
-          return this.update(t4, e7);
-        }
-        update(t4, e7) {
-          return this.render(...e7);
-        }
-      };
-    }
-  });
-
-  // node_modules/lit-html/directives/class-map.js
-  var e6;
-  var init_class_map = __esm({
-    "node_modules/lit-html/directives/class-map.js"() {
-      init_lit_html();
-      init_directive();
-      e6 = e5(class extends i5 {
-        constructor(t4) {
-          if (super(t4), t4.type !== t3.ATTRIBUTE || "class" !== t4.name || t4.strings?.length > 2) throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.");
-        }
-        render(t4) {
-          return " " + Object.keys(t4).filter((s4) => t4[s4]).join(" ") + " ";
-        }
-        update(s4, [i6]) {
-          if (void 0 === this.st) {
-            this.st = /* @__PURE__ */ new Set(), void 0 !== s4.strings && (this.nt = new Set(s4.strings.join(" ").split(/\s/).filter((t4) => "" !== t4)));
-            for (const t4 in i6) i6[t4] && !this.nt?.has(t4) && this.st.add(t4);
-            return this.render(i6);
-          }
-          const r6 = s4.element.classList;
-          for (const t4 of this.st) t4 in i6 || (r6.remove(t4), this.st.delete(t4));
-          for (const t4 in i6) {
-            const s5 = !!i6[t4];
-            s5 === this.st.has(t4) || this.nt?.has(t4) || (s5 ? (r6.add(t4), this.st.add(t4)) : (r6.remove(t4), this.st.delete(t4)));
-          }
-          return E;
-        }
-      });
-    }
-  });
-
-  // node_modules/lit/directives/class-map.js
-  var init_class_map2 = __esm({
-    "node_modules/lit/directives/class-map.js"() {
-      init_class_map();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/VscElement.js
-  var VERSION, CONFIG_KEY, warn, VscElement, customElement;
-  var init_VscElement = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/VscElement.js"() {
-      init_lit();
-      VERSION = "2.5.1";
-      CONFIG_KEY = "__vscodeElements_disableRegistryWarning__";
-      warn = (message, componentInstance) => {
-        const prefix = "[VSCode Elements] ";
-        if (componentInstance) {
-          console.warn(`${prefix}${message}
-%o`, componentInstance);
-        } else {
-          console.warn(`${message}
-%o`, componentInstance);
-        }
-      };
-      VscElement = class extends i4 {
-        /** VSCode Elements version */
-        get version() {
-          return VERSION;
-        }
-        warn(message) {
-          warn(message, this);
-        }
-      };
-      customElement = (tagName) => {
-        return (classOrTarget) => {
-          const customElementClass = customElements.get(tagName);
-          if (!customElementClass) {
-            customElements.define(tagName, classOrTarget);
-            return;
-          }
-          if (CONFIG_KEY in window) {
-            return;
-          }
-          const el2 = document.createElement(tagName);
-          const anotherVersion = el2?.version;
-          let message = "";
-          if (!anotherVersion) {
-            message += "is already registered by an unknown custom element handler class.";
-          } else if (anotherVersion !== VERSION) {
-            message += "is already registered by a different version of VSCode Elements. ";
-            message += `This version is "${VERSION}", while the other one is "${anotherVersion}".`;
-          } else {
-            message += `is already registered by the same version of VSCode Elements (${VERSION}).`;
-          }
-          warn(`The custom element "${tagName}" ${message}
-To suppress this warning, set window.${CONFIG_KEY} to true`);
-        };
-      };
-    }
-  });
-
-  // node_modules/lit-html/directives/if-defined.js
-  var o6;
-  var init_if_defined = __esm({
-    "node_modules/lit-html/directives/if-defined.js"() {
-      init_lit_html();
-      o6 = (o7) => o7 ?? A;
-    }
-  });
-
-  // node_modules/lit/directives/if-defined.js
-  var init_if_defined2 = __esm({
-    "node_modules/lit/directives/if-defined.js"() {
-      init_if_defined();
-    }
-  });
-
-  // node_modules/lit/directive.js
-  var init_directive2 = __esm({
-    "node_modules/lit/directive.js"() {
-      init_directive();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/style-property-map.js
-  var StylePropertyMap, stylePropertyMap;
-  var init_style_property_map = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/style-property-map.js"() {
-      init_lit();
-      init_directive2();
-      StylePropertyMap = class extends i5 {
-        constructor(partInfo) {
-          super(partInfo);
-          this._prevProperties = {};
-          if (partInfo.type !== t3.PROPERTY || partInfo.name !== "style") {
-            throw new Error("The `stylePropertyMap` directive must be used in the `style` property");
-          }
-        }
-        update(part, [styleProps]) {
-          Object.entries(styleProps).forEach(([key, val]) => {
-            if (this._prevProperties[key] !== val) {
-              if (key.startsWith("--")) {
-                part.element.style.setProperty(key, val);
-              } else {
-                part.element.style[key] = val;
-              }
-              this._prevProperties[key] = val;
-            }
-          });
-          return E;
-        }
-        render(_styleProps) {
-          return E;
-        }
-      };
-      stylePropertyMap = e5(StylePropertyMap);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/default.styles.js
-  var default_styles_default;
-  var init_default_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/default.styles.js"() {
-      init_lit();
-      default_styles_default = i`
+"use strict";(()=>{var on=Object.defineProperty;var g=(t,e,o)=>()=>{if(o)throw o[0];try{return t&&(e=t(t=0)),e}catch(n){throw o=[n],n}};var Mt=(t,e)=>{for(var o in e)on(t,o,{get:e[o],enumerable:!0})};var Ue,Re,ot,Wt,ue,J,O,qt,nt,st=g(()=>{Ue=globalThis,Re=Ue.ShadowRoot&&(Ue.ShadyCSS===void 0||Ue.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,ot=Symbol(),Wt=new WeakMap,ue=class{constructor(e,o,n){if(this._$cssResult$=!0,n!==ot)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=e,this.t=o}get styleSheet(){let e=this.o,o=this.t;if(Re&&e===void 0){let n=o!==void 0&&o.length===1;n&&(e=Wt.get(o)),e===void 0&&((this.o=e=new CSSStyleSheet).replaceSync(this.cssText),n&&Wt.set(o,e))}return e}toString(){return this.cssText}},J=t=>new ue(typeof t=="string"?t:t+"",void 0,ot),O=(t,...e)=>{let o=t.length===1?t[0]:e.reduce((n,s,r)=>n+(a=>{if(a._$cssResult$===!0)return a.cssText;if(typeof a=="number")return a;throw Error("Value passed to 'css' function must be a 'css' function result: "+a+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(s)+t[r+1],t[0]);return new ue(o,t,ot)},qt=(t,e)=>{if(Re)t.adoptedStyleSheets=e.map(o=>o instanceof CSSStyleSheet?o:o.styleSheet);else for(let o of e){let n=document.createElement("style"),s=Ue.litNonce;s!==void 0&&n.setAttribute("nonce",s),n.textContent=o.cssText,t.appendChild(n)}},nt=Re?t=>t:t=>t instanceof CSSStyleSheet?(e=>{let o="";for(let n of e.cssRules)o+=n.cssText;return J(o)})(t):t});var vn,Cn,Sn,xn,En,Mn,$,Vt,wn,Dn,pe,ge,Pe,Yt,I,fe=g(()=>{st();st();({is:vn,defineProperty:Cn,getOwnPropertyDescriptor:Sn,getOwnPropertyNames:xn,getOwnPropertySymbols:En,getPrototypeOf:Mn}=Object),$=globalThis,Vt=$.trustedTypes,wn=Vt?Vt.emptyScript:"",Dn=$.reactiveElementPolyfillSupport,pe=(t,e)=>t,ge={toAttribute(t,e){switch(e){case Boolean:t=t?wn:null;break;case Object:case Array:t=t==null?t:JSON.stringify(t)}return t},fromAttribute(t,e){let o=t;switch(e){case Boolean:o=t!==null;break;case Number:o=t===null?null:Number(t);break;case Object:case Array:try{o=JSON.parse(t)}catch{o=null}}return o}},Pe=(t,e)=>!vn(t,e),Yt={attribute:!0,type:String,converter:ge,reflect:!1,useDefault:!1,hasChanged:Pe};Symbol.metadata??(Symbol.metadata=Symbol("metadata")),$.litPropertyMetadata??($.litPropertyMetadata=new WeakMap);I=class extends HTMLElement{static addInitializer(e){this._$Ei(),(this.l??(this.l=[])).push(e)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(e,o=Yt){if(o.state&&(o.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(e)&&((o=Object.create(o)).wrapped=!0),this.elementProperties.set(e,o),!o.noAccessor){let n=Symbol(),s=this.getPropertyDescriptor(e,n,o);s!==void 0&&Cn(this.prototype,e,s)}}static getPropertyDescriptor(e,o,n){let{get:s,set:r}=Sn(this.prototype,e)??{get(){return this[o]},set(a){this[o]=a}};return{get:s,set(a){let c=s?.call(this);r?.call(this,a),this.requestUpdate(e,c,n)},configurable:!0,enumerable:!0}}static getPropertyOptions(e){return this.elementProperties.get(e)??Yt}static _$Ei(){if(this.hasOwnProperty(pe("elementProperties")))return;let e=Mn(this);e.finalize(),e.l!==void 0&&(this.l=[...e.l]),this.elementProperties=new Map(e.elementProperties)}static finalize(){if(this.hasOwnProperty(pe("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(pe("properties"))){let o=this.properties,n=[...xn(o),...En(o)];for(let s of n)this.createProperty(s,o[s])}let e=this[Symbol.metadata];if(e!==null){let o=litPropertyMetadata.get(e);if(o!==void 0)for(let[n,s]of o)this.elementProperties.set(n,s)}this._$Eh=new Map;for(let[o,n]of this.elementProperties){let s=this._$Eu(o,n);s!==void 0&&this._$Eh.set(s,o)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(e){let o=[];if(Array.isArray(e)){let n=new Set(e.flat(1/0).reverse());for(let s of n)o.unshift(nt(s))}else e!==void 0&&o.push(nt(e));return o}static _$Eu(e,o){let n=o.attribute;return n===!1?void 0:typeof n=="string"?n:typeof e=="string"?e.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(e=>this.enableUpdating=e),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(e=>e(this))}addController(e){(this._$EO??(this._$EO=new Set)).add(e),this.renderRoot!==void 0&&this.isConnected&&e.hostConnected?.()}removeController(e){this._$EO?.delete(e)}_$E_(){let e=new Map,o=this.constructor.elementProperties;for(let n of o.keys())this.hasOwnProperty(n)&&(e.set(n,this[n]),delete this[n]);e.size>0&&(this._$Ep=e)}createRenderRoot(){let e=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return qt(e,this.constructor.elementStyles),e}connectedCallback(){this.renderRoot??(this.renderRoot=this.createRenderRoot()),this.enableUpdating(!0),this._$EO?.forEach(e=>e.hostConnected?.())}enableUpdating(e){}disconnectedCallback(){this._$EO?.forEach(e=>e.hostDisconnected?.())}attributeChangedCallback(e,o,n){this._$AK(e,n)}_$ET(e,o){let n=this.constructor.elementProperties.get(e),s=this.constructor._$Eu(e,n);if(s!==void 0&&n.reflect===!0){let r=(n.converter?.toAttribute!==void 0?n.converter:ge).toAttribute(o,n.type);this._$Em=e,r==null?this.removeAttribute(s):this.setAttribute(s,r),this._$Em=null}}_$AK(e,o){let n=this.constructor,s=n._$Eh.get(e);if(s!==void 0&&this._$Em!==s){let r=n.getPropertyOptions(s),a=typeof r.converter=="function"?{fromAttribute:r.converter}:r.converter?.fromAttribute!==void 0?r.converter:ge;this._$Em=s;let c=a.fromAttribute(o,r.type);this[s]=c??this._$Ej?.get(s)??c,this._$Em=null}}requestUpdate(e,o,n,s=!1,r){if(e!==void 0){let a=this.constructor;if(s===!1&&(r=this[e]),n??(n=a.getPropertyOptions(e)),!((n.hasChanged??Pe)(r,o)||n.useDefault&&n.reflect&&r===this._$Ej?.get(e)&&!this.hasAttribute(a._$Eu(e,n))))return;this.C(e,o,n)}this.isUpdatePending===!1&&(this._$ES=this._$EP())}C(e,o,{useDefault:n,reflect:s,wrapped:r},a){n&&!(this._$Ej??(this._$Ej=new Map)).has(e)&&(this._$Ej.set(e,a??o??this[e]),r!==!0||a!==void 0)||(this._$AL.has(e)||(this.hasUpdated||n||(o=void 0),this._$AL.set(e,o)),s===!0&&this._$Em!==e&&(this._$Eq??(this._$Eq=new Set)).add(e))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(o){Promise.reject(o)}let e=this.scheduleUpdate();return e!=null&&await e,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??(this.renderRoot=this.createRenderRoot()),this._$Ep){for(let[s,r]of this._$Ep)this[s]=r;this._$Ep=void 0}let n=this.constructor.elementProperties;if(n.size>0)for(let[s,r]of n){let{wrapped:a}=r,c=this[s];a!==!0||this._$AL.has(s)||c===void 0||this.C(s,void 0,r,c)}}let e=!1,o=this._$AL;try{e=this.shouldUpdate(o),e?(this.willUpdate(o),this._$EO?.forEach(n=>n.hostUpdate?.()),this.update(o)):this._$EM()}catch(n){throw e=!1,this._$EM(),n}e&&this._$AE(o)}willUpdate(e){}_$AE(e){this._$EO?.forEach(o=>o.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(e)),this.updated(e)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(e){return!0}update(e){this._$Eq&&(this._$Eq=this._$Eq.forEach(o=>this._$ET(o,this[o]))),this._$EM()}updated(e){}firstUpdated(e){}};I.elementStyles=[],I.shadowRootOptions={mode:"open"},I[pe("elementProperties")]=new Map,I[pe("finalized")]=new Map,Dn?.({ReactiveElement:I}),($.reactiveElementVersions??($.reactiveElementVersions=[])).push("2.1.2")});function ao(t,e){if(!ut(t)||!t.hasOwnProperty("raw"))throw Error("invalid template strings array");return Xt!==void 0?Xt.createHTML(e):e}function X(t,e,o=t,n){if(e===w)return e;let s=n!==void 0?o._$Co?.[n]:o._$Cl,r=ye(e)?void 0:e._$litDirective$;return s?.constructor!==r&&(s?._$AO?.(!1),r===void 0?s=void 0:(s=new r(t),s._$AT(t,o,n)),n!==void 0?(o._$Co??(o._$Co=[]))[n]=s:o._$Cl=s),s!==void 0&&(e=X(t,s._$AS(t,e.values),s,n)),e}var he,Jt,Oe,Xt,no,L,so,An,K,be,ye,ut,_n,rt,me,Zt,Qt,F,eo,to,ro,pt,_,ar,ir,w,T,oo,H,Un,ke,at,Te,Z,it,ct,lt,dt,Rn,io,Q=g(()=>{he=globalThis,Jt=t=>t,Oe=he.trustedTypes,Xt=Oe?Oe.createPolicy("lit-html",{createHTML:t=>t}):void 0,no="$lit$",L=`lit$${Math.random().toFixed(9).slice(2)}$`,so="?"+L,An=`<${so}>`,K=document,be=()=>K.createComment(""),ye=t=>t===null||typeof t!="object"&&typeof t!="function",ut=Array.isArray,_n=t=>ut(t)||typeof t?.[Symbol.iterator]=="function",rt=`[ 	
+\f\r]`,me=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,Zt=/-->/g,Qt=/>/g,F=RegExp(`>|${rt}(?:([^\\s"'>=/]+)(${rt}*=${rt}*(?:[^ 	
+\f\r"'\`<>=]|("|')|))|$)`,"g"),eo=/'/g,to=/"/g,ro=/^(?:script|style|textarea|title)$/i,pt=t=>(e,...o)=>({_$litType$:t,strings:e,values:o}),_=pt(1),ar=pt(2),ir=pt(3),w=Symbol.for("lit-noChange"),T=Symbol.for("lit-nothing"),oo=new WeakMap,H=K.createTreeWalker(K,129);Un=(t,e)=>{let o=t.length-1,n=[],s,r=e===2?"<svg>":e===3?"<math>":"",a=me;for(let c=0;c<o;c++){let i=t[c],l,d,u=-1,p=0;for(;p<i.length&&(a.lastIndex=p,d=a.exec(i),d!==null);)p=a.lastIndex,a===me?d[1]==="!--"?a=Zt:d[1]!==void 0?a=Qt:d[2]!==void 0?(ro.test(d[2])&&(s=RegExp("</"+d[2],"g")),a=F):d[3]!==void 0&&(a=F):a===F?d[0]===">"?(a=s??me,u=-1):d[1]===void 0?u=-2:(u=a.lastIndex-d[2].length,l=d[1],a=d[3]===void 0?F:d[3]==='"'?to:eo):a===to||a===eo?a=F:a===Zt||a===Qt?a=me:(a=F,s=void 0);let m=a===F&&t[c+1].startsWith("/>")?" ":"";r+=a===me?i+An:u>=0?(n.push(l),i.slice(0,u)+no+i.slice(u)+L+m):i+L+(u===-2?c:m)}return[ao(t,r+(t[o]||"<?>")+(e===2?"</svg>":e===3?"</math>":"")),n]},ke=class t{constructor({strings:e,_$litType$:o},n){let s;this.parts=[];let r=0,a=0,c=e.length-1,i=this.parts,[l,d]=Un(e,o);if(this.el=t.createElement(l,n),H.currentNode=this.el.content,o===2||o===3){let u=this.el.content.firstChild;u.replaceWith(...u.childNodes)}for(;(s=H.nextNode())!==null&&i.length<c;){if(s.nodeType===1){if(s.hasAttributes())for(let u of s.getAttributeNames())if(u.endsWith(no)){let p=d[a++],m=s.getAttribute(u).split(L),h=/([.?@])?(.*)/.exec(p);i.push({type:1,index:r,name:h[2],strings:m,ctor:h[1]==="."?it:h[1]==="?"?ct:h[1]==="@"?lt:Z}),s.removeAttribute(u)}else u.startsWith(L)&&(i.push({type:6,index:r}),s.removeAttribute(u));if(ro.test(s.tagName)){let u=s.textContent.split(L),p=u.length-1;if(p>0){s.textContent=Oe?Oe.emptyScript:"";for(let m=0;m<p;m++)s.append(u[m],be()),H.nextNode(),i.push({type:2,index:++r});s.append(u[p],be())}}}else if(s.nodeType===8)if(s.data===so)i.push({type:2,index:r});else{let u=-1;for(;(u=s.data.indexOf(L,u+1))!==-1;)i.push({type:7,index:r}),u+=L.length-1}r++}}static createElement(e,o){let n=K.createElement("template");return n.innerHTML=e,n}};at=class{constructor(e,o){this._$AV=[],this._$AN=void 0,this._$AD=e,this._$AM=o}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(e){let{el:{content:o},parts:n}=this._$AD,s=(e?.creationScope??K).importNode(o,!0);H.currentNode=s;let r=H.nextNode(),a=0,c=0,i=n[0];for(;i!==void 0;){if(a===i.index){let l;i.type===2?l=new Te(r,r.nextSibling,this,e):i.type===1?l=new i.ctor(r,i.name,i.strings,this,e):i.type===6&&(l=new dt(r,this,e)),this._$AV.push(l),i=n[++c]}a!==i?.index&&(r=H.nextNode(),a++)}return H.currentNode=K,s}p(e){let o=0;for(let n of this._$AV)n!==void 0&&(n.strings!==void 0?(n._$AI(e,n,o),o+=n.strings.length-2):n._$AI(e[o])),o++}},Te=class t{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(e,o,n,s){this.type=2,this._$AH=T,this._$AN=void 0,this._$AA=e,this._$AB=o,this._$AM=n,this.options=s,this._$Cv=s?.isConnected??!0}get parentNode(){let e=this._$AA.parentNode,o=this._$AM;return o!==void 0&&e?.nodeType===11&&(e=o.parentNode),e}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(e,o=this){e=X(this,e,o),ye(e)?e===T||e==null||e===""?(this._$AH!==T&&this._$AR(),this._$AH=T):e!==this._$AH&&e!==w&&this._(e):e._$litType$!==void 0?this.$(e):e.nodeType!==void 0?this.T(e):_n(e)?this.k(e):this._(e)}O(e){return this._$AA.parentNode.insertBefore(e,this._$AB)}T(e){this._$AH!==e&&(this._$AR(),this._$AH=this.O(e))}_(e){this._$AH!==T&&ye(this._$AH)?this._$AA.nextSibling.data=e:this.T(K.createTextNode(e)),this._$AH=e}$(e){let{values:o,_$litType$:n}=e,s=typeof n=="number"?this._$AC(e):(n.el===void 0&&(n.el=ke.createElement(ao(n.h,n.h[0]),this.options)),n);if(this._$AH?._$AD===s)this._$AH.p(o);else{let r=new at(s,this),a=r.u(this.options);r.p(o),this.T(a),this._$AH=r}}_$AC(e){let o=oo.get(e.strings);return o===void 0&&oo.set(e.strings,o=new ke(e)),o}k(e){ut(this._$AH)||(this._$AH=[],this._$AR());let o=this._$AH,n,s=0;for(let r of e)s===o.length?o.push(n=new t(this.O(be()),this.O(be()),this,this.options)):n=o[s],n._$AI(r),s++;s<o.length&&(this._$AR(n&&n._$AB.nextSibling,s),o.length=s)}_$AR(e=this._$AA.nextSibling,o){for(this._$AP?.(!1,!0,o);e!==this._$AB;){let n=Jt(e).nextSibling;Jt(e).remove(),e=n}}setConnected(e){this._$AM===void 0&&(this._$Cv=e,this._$AP?.(e))}},Z=class{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(e,o,n,s,r){this.type=1,this._$AH=T,this._$AN=void 0,this.element=e,this.name=o,this._$AM=s,this.options=r,n.length>2||n[0]!==""||n[1]!==""?(this._$AH=Array(n.length-1).fill(new String),this.strings=n):this._$AH=T}_$AI(e,o=this,n,s){let r=this.strings,a=!1;if(r===void 0)e=X(this,e,o,0),a=!ye(e)||e!==this._$AH&&e!==w,a&&(this._$AH=e);else{let c=e,i,l;for(e=r[0],i=0;i<r.length-1;i++)l=X(this,c[n+i],o,i),l===w&&(l=this._$AH[i]),a||(a=!ye(l)||l!==this._$AH[i]),l===T?e=T:e!==T&&(e+=(l??"")+r[i+1]),this._$AH[i]=l}a&&!s&&this.j(e)}j(e){e===T?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,e??"")}},it=class extends Z{constructor(){super(...arguments),this.type=3}j(e){this.element[this.name]=e===T?void 0:e}},ct=class extends Z{constructor(){super(...arguments),this.type=4}j(e){this.element.toggleAttribute(this.name,!!e&&e!==T)}},lt=class extends Z{constructor(e,o,n,s,r){super(e,o,n,s,r),this.type=5}_$AI(e,o=this){if((e=X(this,e,o,0)??T)===w)return;let n=this._$AH,s=e===T&&n!==T||e.capture!==n.capture||e.once!==n.once||e.passive!==n.passive,r=e!==T&&(n===T||s);s&&this.element.removeEventListener(this.name,this,n),r&&this.element.addEventListener(this.name,this,e),this._$AH=e}handleEvent(e){typeof this._$AH=="function"?this._$AH.call(this.options?.host??this.element,e):this._$AH.handleEvent(e)}},dt=class{constructor(e,o,n){this.element=e,this.type=6,this._$AN=void 0,this._$AM=o,this.options=n}get _$AU(){return this._$AM._$AU}_$AI(e){X(this,e)}},Rn=he.litHtmlPolyfillSupport;Rn?.(ke,Te),(he.litHtmlVersions??(he.litHtmlVersions=[])).push("3.3.3");io=(t,e,o)=>{let n=o?.renderBefore??e,s=n._$litPart$;if(s===void 0){let r=o?.renderBefore??null;n._$litPart$=s=new Te(e.insertBefore(be(),r),r,void 0,o??{})}return s._$AI(t),s}});var ve,B,Pn,co=g(()=>{fe();fe();Q();Q();ve=globalThis,B=class extends I{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){var o;let e=super.createRenderRoot();return(o=this.renderOptions).renderBefore??(o.renderBefore=e.firstChild),e}update(e){let o=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(e),this._$Do=io(o,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return w}};B._$litElement$=!0,B.finalized=!0,ve.litElementHydrateSupport?.({LitElement:B});Pn=ve.litElementPolyfillSupport;Pn?.({LitElement:B});(ve.litElementVersions??(ve.litElementVersions=[])).push("4.2.2")});var lo=g(()=>{});var R=g(()=>{fe();Q();co();lo()});var uo=g(()=>{});function y(t){return(e,o)=>typeof o=="object"?In(t,e,o):((n,s,r)=>{let a=s.hasOwnProperty(r);return s.constructor.createProperty(r,n),a?Object.getOwnPropertyDescriptor(s,r):void 0})(t,e,o)}var On,In,gt=g(()=>{fe();On={attribute:!0,type:String,converter:ge,reflect:!1,hasChanged:Pe},In=(t=On,e,o)=>{let{kind:n,metadata:s}=o,r=globalThis.litPropertyMetadata.get(s);if(r===void 0&&globalThis.litPropertyMetadata.set(s,r=new Map),n==="setter"&&((t=Object.create(t)).wrapped=!0),r.set(o.name,t),n==="accessor"){let{name:a}=o;return{set(c){let i=e.get.call(this);e.set.call(this,c),this.requestUpdate(a,i,t,!0,c)},init(c){return c!==void 0&&this.C(a,void 0,t,c),c}}}if(n==="setter"){let{name:a}=o;return function(c){let i=this[a];e.call(this,c),this.requestUpdate(a,i,t,!0,c)}}throw Error("Unsupported decorator location: "+n)}});function ft(t){return y({...t,state:!0,attribute:!1})}var po=g(()=>{gt();});var go=g(()=>{});var ee=g(()=>{});var fo=g(()=>{ee();});var mo=g(()=>{ee();});var ho=g(()=>{ee();});var bo=g(()=>{ee();});var yo=g(()=>{ee();});var $e=g(()=>{uo();gt();po();go();fo();mo();ho();bo();yo()});var Le,Be,te,mt=g(()=>{Le={ATTRIBUTE:1,CHILD:2,PROPERTY:3,BOOLEAN_ATTRIBUTE:4,EVENT:5,ELEMENT:6},Be=t=>(...e)=>({_$litDirective$:t,values:e}),te=class{constructor(e){}get _$AU(){return this._$AM._$AU}_$AT(e,o,n){this._$Ct=e,this._$AM=o,this._$Ci=n}_$AS(e,o){return this.update(e,o)}update(e,o){return this.render(...o)}}});var Ne,ko=g(()=>{Q();mt();Ne=Be(class extends te{constructor(t){if(super(t),t.type!==Le.ATTRIBUTE||t.name!=="class"||t.strings?.length>2)throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.")}render(t){return" "+Object.keys(t).filter(e=>t[e]).join(" ")+" "}update(t,[e]){if(this.st===void 0){this.st=new Set,t.strings!==void 0&&(this.nt=new Set(t.strings.join(" ").split(/\s/).filter(n=>n!=="")));for(let n in e)e[n]&&!this.nt?.has(n)&&this.st.add(n);return this.render(e)}let o=t.element.classList;for(let n of this.st)n in e||(o.remove(n),this.st.delete(n));for(let n in e){let s=!!e[n];s===this.st.has(n)||this.nt?.has(n)||(s?(o.add(n),this.st.add(n)):(o.remove(n),this.st.delete(n)))}return w}})});var ht=g(()=>{ko()});var je,To,vo,N,oe,Fe=g(()=>{R();je="2.5.1",To="__vscodeElements_disableRegistryWarning__",vo=(t,e)=>{console.warn(e?`[VSCode Elements] ${t}
+%o`:`${t}
+%o`,e)},N=class extends B{get version(){return je}warn(e){vo(e,this)}},oe=t=>e=>{if(!customElements.get(t)){customElements.define(t,e);return}if(To in window)return;let s=document.createElement(t)?.version,r="";s?s!==je?(r+="is already registered by a different version of VSCode Elements. ",r+=`This version is "${je}", while the other one is "${s}".`):r+=`is already registered by the same version of VSCode Elements (${je}).`:r+="is already registered by an unknown custom element handler class.",vo(`The custom element "${t}" ${r}
+To suppress this warning, set window.${To} to true`)}});var ne,Co=g(()=>{Q();ne=t=>t??T});var bt=g(()=>{Co()});var So=g(()=>{mt()});var yt,xo,Eo=g(()=>{R();So();yt=class extends te{constructor(e){if(super(e),this._prevProperties={},e.type!==Le.PROPERTY||e.name!=="style")throw new Error("The `stylePropertyMap` directive must be used in the `style` property")}update(e,[o]){return Object.entries(o).forEach(([n,s])=>{this._prevProperties[n]!==s&&(n.startsWith("--")?e.element.style.setProperty(n,s):e.element.style[n]=s,this._prevProperties[n]=s)}),w}render(e){return w}},xo=Be(yt)});var se,He=g(()=>{R();se=O`
   :host([hidden]) {
     display: none;
   }
@@ -913,19 +14,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     opacity: 0.4;
     pointer-events: none;
   }
-`;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.styles.js
-  var styles, vscode_icon_styles_default;
-  var init_vscode_icon_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.styles.js"() {
-      init_lit();
-      init_default_styles();
-      styles = [
-        default_styles_default,
-        i`
+`});var $n,Mo,wo=g(()=>{R();He();$n=[se,O`
     :host {
       color: var(--vscode-icon-foreground, #cccccc);
       display: inline-block;
@@ -985,168 +74,25 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       animation-timing-function: linear;
       animation-iteration-count: infinite;
     }
-  `
-      ];
-      vscode_icon_styles_default = styles;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.js
-  var __decorate, VscodeIcon_1, VscodeIcon;
-  var init_vscode_icon = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.js"() {
-      init_lit();
-      init_decorators();
-      init_class_map2();
-      init_if_defined2();
-      init_VscElement();
-      init_style_property_map();
-      init_vscode_icon_styles();
-      __decorate = function(decorators, target, key, desc) {
-        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
-        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
-        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
-        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
-      };
-      VscodeIcon = VscodeIcon_1 = class VscodeIcon2 extends VscElement {
-        constructor() {
-          super(...arguments);
-          this.label = "";
-          this.name = "";
-          this.size = 16;
-          this.spin = false;
-          this.spinDuration = 1.5;
-          this.actionIcon = false;
-          this._onButtonClick = (ev) => {
-            this.dispatchEvent(new CustomEvent("vsc-click", { detail: { originalEvent: ev } }));
-          };
-        }
-        connectedCallback() {
-          super.connectedCallback();
-          const { href, nonce } = this._getStylesheetConfig();
-          VscodeIcon_1.stylesheetHref = href;
-          VscodeIcon_1.nonce = nonce;
-        }
-        /**
-         * For using web fonts in web components, the font stylesheet must be included
-         * twice: on the page and in the web component. This function looks for the
-         * font stylesheet on the page and returns the stylesheet URL and the nonce
-         * id.
-         */
-        _getStylesheetConfig() {
-          if (typeof document === "undefined") {
-            return { nonce: void 0, href: void 0 };
-          }
-          const linkElement = document.getElementById("vscode-codicon-stylesheet");
-          const href = linkElement?.getAttribute("href") || void 0;
-          const nonce = linkElement?.nonce || void 0;
-          if (!linkElement) {
-            let msg = 'To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';
-            msg += "See https://vscode-elements.github.io/components/icon/ for more details.";
-            this.warn(msg);
-          }
-          return { nonce, href };
-        }
-        render() {
-          const { stylesheetHref, nonce } = VscodeIcon_1;
-          const content = b2`<span
-      class=${e6({
-            codicon: true,
-            ["codicon-" + this.name]: true,
-            spin: this.spin
-          })}
-      .style=${stylePropertyMap({
-            animationDuration: String(this.spinDuration) + "s",
-            fontSize: this.size + "px",
-            height: this.size + "px",
-            width: this.size + "px"
-          })}
-    ></span>`;
-          const wrapped = this.actionIcon ? b2` <button
+  `],Mo=$n});var G,Ce,D,Do=g(()=>{R();$e();ht();bt();Fe();Eo();wo();G=function(t,e,o,n){var s=arguments.length,r=s<3?e:n===null?n=Object.getOwnPropertyDescriptor(e,o):n,a;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")r=Reflect.decorate(t,e,o,n);else for(var c=t.length-1;c>=0;c--)(a=t[c])&&(r=(s<3?a(r):s>3?a(e,o,r):a(e,o))||r);return s>3&&r&&Object.defineProperty(e,o,r),r},D=Ce=class extends N{constructor(){super(...arguments),this.label="",this.name="",this.size=16,this.spin=!1,this.spinDuration=1.5,this.actionIcon=!1,this._onButtonClick=e=>{this.dispatchEvent(new CustomEvent("vsc-click",{detail:{originalEvent:e}}))}}connectedCallback(){super.connectedCallback();let{href:e,nonce:o}=this._getStylesheetConfig();Ce.stylesheetHref=e,Ce.nonce=o}_getStylesheetConfig(){if(typeof document>"u")return{nonce:void 0,href:void 0};let e=document.getElementById("vscode-codicon-stylesheet"),o=e?.getAttribute("href")||void 0,n=e?.nonce||void 0;if(!e){let s='To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';s+="See https://vscode-elements.github.io/components/icon/ for more details.",this.warn(s)}return{nonce:n,href:o}}render(){let{stylesheetHref:e,nonce:o}=Ce,n=_`<span
+      class=${Ne({codicon:!0,["codicon-"+this.name]:!0,spin:this.spin})}
+      .style=${xo({animationDuration:String(this.spinDuration)+"s",fontSize:this.size+"px",height:this.size+"px",width:this.size+"px"})}
+    ></span>`,s=this.actionIcon?_` <button
           class="button"
           @click=${this._onButtonClick}
           aria-label=${this.label}
         >
-          ${content}
-        </button>` : b2` <span class="icon" aria-hidden="true" role="presentation"
-          >${content}</span
-        >`;
-          return b2`
+          ${n}
+        </button>`:_` <span class="icon" aria-hidden="true" role="presentation"
+          >${n}</span
+        >`;return _`
       <link
         rel="stylesheet"
-        href=${o6(stylesheetHref)}
-        nonce=${o6(nonce)}
+        href=${ne(e)}
+        nonce=${ne(o)}
       />
-      ${wrapped}
-    `;
-        }
-      };
-      VscodeIcon.styles = vscode_icon_styles_default;
-      VscodeIcon.stylesheetHref = "";
-      VscodeIcon.nonce = "";
-      __decorate([
-        n4()
-      ], VscodeIcon.prototype, "label", void 0);
-      __decorate([
-        n4({ type: String })
-      ], VscodeIcon.prototype, "name", void 0);
-      __decorate([
-        n4({ type: Number })
-      ], VscodeIcon.prototype, "size", void 0);
-      __decorate([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeIcon.prototype, "spin", void 0);
-      __decorate([
-        n4({ type: Number, attribute: "spin-duration" })
-      ], VscodeIcon.prototype, "spinDuration", void 0);
-      __decorate([
-        n4({ type: Boolean, reflect: true, attribute: "action-icon" })
-      ], VscodeIcon.prototype, "actionIcon", void 0);
-      VscodeIcon = VscodeIcon_1 = __decorate([
-        customElement("vscode-icon")
-      ], VscodeIcon);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/index.js
-  var init_vscode_icon2 = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/index.js"() {
-      init_vscode_icon();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/helpers.js
-  function getDefaultFontStack() {
-    if (navigator.userAgent.indexOf("Linux") > -1) {
-      return 'system-ui, "Ubuntu", "Droid Sans", sans-serif';
-    } else if (navigator.userAgent.indexOf("Mac") > -1) {
-      return "-apple-system, BlinkMacSystemFont, sans-serif";
-    } else if (navigator.userAgent.indexOf("Windows") > -1) {
-      return '"Segoe WPC", "Segoe UI", sans-serif';
-    } else {
-      return "sans-serif";
-    }
-  }
-  var DEFAULT_LINE_HEIGHT, DEFAULT_FONT_SIZE, INPUT_LINE_HEIGHT_RATIO;
-  var init_helpers = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/helpers.js"() {
-      DEFAULT_LINE_HEIGHT = 16;
-      DEFAULT_FONT_SIZE = 13;
-      INPUT_LINE_HEIGHT_RATIO = DEFAULT_LINE_HEIGHT / DEFAULT_FONT_SIZE;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.styles.js
-  var defaultFontStack, styles2, vscode_button_styles_default;
-  var init_vscode_button_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.styles.js"() {
-      init_lit();
-      init_default_styles();
-      init_helpers();
-      defaultFontStack = r(getDefaultFontStack());
-      styles2 = [
-        default_styles_default,
-        i`
+      ${s}
+    `}};D.styles=Mo;D.stylesheetHref="";D.nonce="";G([y()],D.prototype,"label",void 0);G([y({type:String})],D.prototype,"name",void 0);G([y({type:Number})],D.prototype,"size",void 0);G([y({type:Boolean,reflect:!0})],D.prototype,"spin",void 0);G([y({type:Number,attribute:"spin-duration"})],D.prototype,"spinDuration",void 0);G([y({type:Boolean,reflect:!0,attribute:"action-icon"})],D.prototype,"actionIcon",void 0);D=Ce=G([oe("vscode-icon")],D)});var Ao=g(()=>{Do()});function Ke(){return navigator.userAgent.indexOf("Linux")>-1?'system-ui, "Ubuntu", "Droid Sans", sans-serif':navigator.userAgent.indexOf("Mac")>-1?"-apple-system, BlinkMacSystemFont, sans-serif":navigator.userAgent.indexOf("Windows")>-1?'"Segoe WPC", "Segoe UI", sans-serif':"sans-serif"}var kt=g(()=>{});var Ln,Bn,_o,Uo=g(()=>{R();He();kt();Ln=J(Ke()),Bn=[se,O`
     :host {
       cursor: pointer;
       display: inline-block;
@@ -1174,7 +120,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       box-sizing: border-box;
       color: var(--vscode-button-foreground, #ffffff);
       display: flex;
-      font-family: var(--vscode-font-family, ${defaultFontStack});
+      font-family: var(--vscode-font-family, ${Ln});
       font-size: var(--vscode-font-size, 13px);
       font-weight: var(--vscode-font-weight, normal);
       height: 100%;
@@ -1330,259 +276,29 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     :host([icon]) .icon-after {
       margin-left: 3px;
     }
-  `
-      ];
-      vscode_button_styles_default = styles2;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.js
-  var __decorate2, VscodeButton;
-  var init_vscode_button = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.js"() {
-      init_lit();
-      init_decorators();
-      init_class_map2();
-      init_VscElement();
-      init_vscode_icon2();
-      init_vscode_button_styles();
-      init_if_defined2();
-      __decorate2 = function(decorators, target, key, desc) {
-        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
-        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
-        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
-        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
-      };
-      VscodeButton = class VscodeButton2 extends VscElement {
-        get form() {
-          return this._internals.form;
-        }
-        constructor() {
-          super();
-          this.autofocus = false;
-          this.tabIndex = 0;
-          this.secondary = false;
-          this.block = false;
-          this.role = "button";
-          this.disabled = false;
-          this.icon = "";
-          this.iconSpin = false;
-          this.iconAfter = "";
-          this.iconAfterSpin = false;
-          this.focused = false;
-          this.name = void 0;
-          this.iconOnly = false;
-          this.type = "button";
-          this.value = "";
-          this._prevTabindex = 0;
-          this._hasContentBefore = false;
-          this._hasContentAfter = false;
-          this._handleFocus = () => {
-            this.focused = true;
-          };
-          this._handleBlur = () => {
-            this.focused = false;
-          };
-          this.addEventListener("keydown", this._handleKeyDown.bind(this));
-          this.addEventListener("click", this._handleClick.bind(this));
-          this._internals = this.attachInternals();
-        }
-        connectedCallback() {
-          super.connectedCallback();
-          if (this.autofocus) {
-            if (this.tabIndex < 0) {
-              this.tabIndex = 0;
-            }
-            this.updateComplete.then(() => {
-              this.focus();
-              this.requestUpdate();
-            });
-          }
-          this.addEventListener("focus", this._handleFocus);
-          this.addEventListener("blur", this._handleBlur);
-        }
-        disconnectedCallback() {
-          super.disconnectedCallback();
-          this.removeEventListener("focus", this._handleFocus);
-          this.removeEventListener("blur", this._handleBlur);
-        }
-        update(changedProperties) {
-          super.update(changedProperties);
-          if (changedProperties.has("value")) {
-            this._internals.setFormValue(this.value);
-          }
-          if (changedProperties.has("disabled")) {
-            if (this.disabled) {
-              this._prevTabindex = this.tabIndex;
-              this.tabIndex = -1;
-            } else {
-              this.tabIndex = this._prevTabindex;
-            }
-          }
-        }
-        _executeAction() {
-          if (this.type === "submit" && this._internals.form) {
-            this._internals.form.requestSubmit();
-          }
-          if (this.type === "reset" && this._internals.form) {
-            this._internals.form.reset();
-          }
-        }
-        _handleKeyDown(event) {
-          if ((event.key === "Enter" || event.key === " ") && !this.hasAttribute("disabled")) {
-            const syntheticClick = new MouseEvent("click", {
-              bubbles: true,
-              cancelable: true
-            });
-            syntheticClick.synthetic = true;
-            this.dispatchEvent(syntheticClick);
-            this._executeAction();
-          }
-        }
-        _handleClick(event) {
-          if (event.synthetic) {
-            return;
-          }
-          if (!this.hasAttribute("disabled")) {
-            this._executeAction();
-          }
-        }
-        _handleSlotChange(ev) {
-          const slot = ev.target;
-          if (slot.name === "content-before") {
-            this._hasContentBefore = slot.assignedElements().length > 0;
-          }
-          if (slot.name === "content-after") {
-            this._hasContentAfter = slot.assignedElements().length > 0;
-          }
-        }
-        render() {
-          const hasIcon = this.icon !== "";
-          const hasIconAfter = this.iconAfter !== "";
-          const baseClasses = {
-            base: true,
-            "icon-only": this.iconOnly,
-            "has-content-before": this._hasContentBefore,
-            "has-content-after": this._hasContentAfter
-          };
-          const iconElem = hasIcon ? b2`<vscode-icon
+  `],_o=Bn});var v,k,Ro=g(()=>{R();$e();ht();Fe();Ao();Uo();bt();v=function(t,e,o,n){var s=arguments.length,r=s<3?e:n===null?n=Object.getOwnPropertyDescriptor(e,o):n,a;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")r=Reflect.decorate(t,e,o,n);else for(var c=t.length-1;c>=0;c--)(a=t[c])&&(r=(s<3?a(r):s>3?a(e,o,r):a(e,o))||r);return s>3&&r&&Object.defineProperty(e,o,r),r},k=class extends N{get form(){return this._internals.form}constructor(){super(),this.autofocus=!1,this.tabIndex=0,this.secondary=!1,this.block=!1,this.role="button",this.disabled=!1,this.icon="",this.iconSpin=!1,this.iconAfter="",this.iconAfterSpin=!1,this.focused=!1,this.name=void 0,this.iconOnly=!1,this.type="button",this.value="",this._prevTabindex=0,this._hasContentBefore=!1,this._hasContentAfter=!1,this._handleFocus=()=>{this.focused=!0},this._handleBlur=()=>{this.focused=!1},this.addEventListener("keydown",this._handleKeyDown.bind(this)),this.addEventListener("click",this._handleClick.bind(this)),this._internals=this.attachInternals()}connectedCallback(){super.connectedCallback(),this.autofocus&&(this.tabIndex<0&&(this.tabIndex=0),this.updateComplete.then(()=>{this.focus(),this.requestUpdate()})),this.addEventListener("focus",this._handleFocus),this.addEventListener("blur",this._handleBlur)}disconnectedCallback(){super.disconnectedCallback(),this.removeEventListener("focus",this._handleFocus),this.removeEventListener("blur",this._handleBlur)}update(e){super.update(e),e.has("value")&&this._internals.setFormValue(this.value),e.has("disabled")&&(this.disabled?(this._prevTabindex=this.tabIndex,this.tabIndex=-1):this.tabIndex=this._prevTabindex)}_executeAction(){this.type==="submit"&&this._internals.form&&this._internals.form.requestSubmit(),this.type==="reset"&&this._internals.form&&this._internals.form.reset()}_handleKeyDown(e){if((e.key==="Enter"||e.key===" ")&&!this.hasAttribute("disabled")){let o=new MouseEvent("click",{bubbles:!0,cancelable:!0});o.synthetic=!0,this.dispatchEvent(o),this._executeAction()}}_handleClick(e){e.synthetic||this.hasAttribute("disabled")||this._executeAction()}_handleSlotChange(e){let o=e.target;o.name==="content-before"&&(this._hasContentBefore=o.assignedElements().length>0),o.name==="content-after"&&(this._hasContentAfter=o.assignedElements().length>0)}render(){let e=this.icon!=="",o=this.iconAfter!=="",n={base:!0,"icon-only":this.iconOnly,"has-content-before":this._hasContentBefore,"has-content-after":this._hasContentAfter},s=e?_`<vscode-icon
           name=${this.icon}
           ?spin=${this.iconSpin}
-          spin-duration=${o6(this.iconSpinDuration)}
+          spin-duration=${ne(this.iconSpinDuration)}
           class="icon"
-        ></vscode-icon>` : A;
-          const iconAfterElem = hasIconAfter ? b2`<vscode-icon
+        ></vscode-icon>`:T,r=o?_`<vscode-icon
           name=${this.iconAfter}
           ?spin=${this.iconAfterSpin}
-          spin-duration=${o6(this.iconAfterSpinDuration)}
+          spin-duration=${ne(this.iconAfterSpinDuration)}
           class="icon-after"
-        ></vscode-icon>` : A;
-          return b2`
+        ></vscode-icon>`:T;return _`
       <div
-        class=${e6(baseClasses)}
+        class=${Ne(n)}
         part="base"
         @slotchange=${this._handleSlotChange}
       >
         <slot name="content-before"></slot>
-        ${iconElem}
+        ${s}
         <slot></slot>
-        ${iconAfterElem}
+        ${r}
         <slot name="content-after"></slot>
       </div>
-    `;
-        }
-      };
-      VscodeButton.styles = vscode_button_styles_default;
-      VscodeButton.formAssociated = true;
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "autofocus", void 0);
-      __decorate2([
-        n4({ type: Number, reflect: true })
-      ], VscodeButton.prototype, "tabIndex", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "secondary", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "block", void 0);
-      __decorate2([
-        n4({ reflect: true })
-      ], VscodeButton.prototype, "role", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "disabled", void 0);
-      __decorate2([
-        n4()
-      ], VscodeButton.prototype, "icon", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-spin" })
-      ], VscodeButton.prototype, "iconSpin", void 0);
-      __decorate2([
-        n4({ type: Number, reflect: true, attribute: "icon-spin-duration" })
-      ], VscodeButton.prototype, "iconSpinDuration", void 0);
-      __decorate2([
-        n4({ attribute: "icon-after" })
-      ], VscodeButton.prototype, "iconAfter", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-after-spin" })
-      ], VscodeButton.prototype, "iconAfterSpin", void 0);
-      __decorate2([
-        n4({
-          type: Number,
-          reflect: true,
-          attribute: "icon-after-spin-duration"
-        })
-      ], VscodeButton.prototype, "iconAfterSpinDuration", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "focused", void 0);
-      __decorate2([
-        n4({ type: String, reflect: true })
-      ], VscodeButton.prototype, "name", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-only" })
-      ], VscodeButton.prototype, "iconOnly", void 0);
-      __decorate2([
-        n4({ reflect: true })
-      ], VscodeButton.prototype, "type", void 0);
-      __decorate2([
-        n4()
-      ], VscodeButton.prototype, "value", void 0);
-      __decorate2([
-        r5()
-      ], VscodeButton.prototype, "_hasContentBefore", void 0);
-      __decorate2([
-        r5()
-      ], VscodeButton.prototype, "_hasContentAfter", void 0);
-      VscodeButton = __decorate2([
-        customElement("vscode-button")
-      ], VscodeButton);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-button/index.js
-  var vscode_button_exports = {};
-  __export(vscode_button_exports, {
-    VscodeButton: () => VscodeButton
-  });
-  var init_vscode_button2 = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/index.js"() {
-      init_vscode_button();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-badge/vscode-badge.styles.js
-  var defaultFontStack2, styles3, vscode_badge_styles_default;
-  var init_vscode_badge_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-badge/vscode-badge.styles.js"() {
-      init_lit();
-      init_default_styles();
-      init_helpers();
-      defaultFontStack2 = r(getDefaultFontStack());
-      styles3 = [
-        default_styles_default,
-        i`
+    `}};k.styles=_o;k.formAssociated=!0;v([y({type:Boolean,reflect:!0})],k.prototype,"autofocus",void 0);v([y({type:Number,reflect:!0})],k.prototype,"tabIndex",void 0);v([y({type:Boolean,reflect:!0})],k.prototype,"secondary",void 0);v([y({type:Boolean,reflect:!0})],k.prototype,"block",void 0);v([y({reflect:!0})],k.prototype,"role",void 0);v([y({type:Boolean,reflect:!0})],k.prototype,"disabled",void 0);v([y()],k.prototype,"icon",void 0);v([y({type:Boolean,reflect:!0,attribute:"icon-spin"})],k.prototype,"iconSpin",void 0);v([y({type:Number,reflect:!0,attribute:"icon-spin-duration"})],k.prototype,"iconSpinDuration",void 0);v([y({attribute:"icon-after"})],k.prototype,"iconAfter",void 0);v([y({type:Boolean,reflect:!0,attribute:"icon-after-spin"})],k.prototype,"iconAfterSpin",void 0);v([y({type:Number,reflect:!0,attribute:"icon-after-spin-duration"})],k.prototype,"iconAfterSpinDuration",void 0);v([y({type:Boolean,reflect:!0})],k.prototype,"focused",void 0);v([y({type:String,reflect:!0})],k.prototype,"name",void 0);v([y({type:Boolean,reflect:!0,attribute:"icon-only"})],k.prototype,"iconOnly",void 0);v([y({reflect:!0})],k.prototype,"type",void 0);v([y()],k.prototype,"value",void 0);v([ft()],k.prototype,"_hasContentBefore",void 0);v([ft()],k.prototype,"_hasContentAfter",void 0);k=v([oe("vscode-button")],k)});var Po={};Mt(Po,{VscodeButton:()=>k});var Oo=g(()=>{Ro()});var Nn,jn,Io,$o=g(()=>{R();He();kt();Nn=J(Ke()),jn=[se,O`
     :host {
       display: inline-block;
     }
@@ -1594,7 +310,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       box-sizing: border-box;
       color: var(--vscode-badge-foreground, #f8f8f8);
       display: block;
-      font-family: var(--vscode-font-family, ${defaultFontStack2});
+      font-family: var(--vscode-font-family, ${Nn});
       font-size: 11px;
       font-weight: 400;
       line-height: 14px;
@@ -1631,488 +347,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       min-width: 16px;
       padding: 3px 5px;
     }
-  `
-      ];
-      vscode_badge_styles_default = styles3;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-badge/vscode-badge.js
-  var __decorate3, VscodeBadge;
-  var init_vscode_badge = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-badge/vscode-badge.js"() {
-      init_lit();
-      init_decorators();
-      init_VscElement();
-      init_vscode_badge_styles();
-      __decorate3 = function(decorators, target, key, desc) {
-        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
-        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
-        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
-        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
-      };
-      VscodeBadge = class VscodeBadge2 extends VscElement {
-        constructor() {
-          super(...arguments);
-          this.variant = "default";
-        }
-        render() {
-          return b2`<div class="root"><slot></slot></div>`;
-        }
-      };
-      VscodeBadge.styles = vscode_badge_styles_default;
-      __decorate3([
-        n4({ reflect: true })
-      ], VscodeBadge.prototype, "variant", void 0);
-      VscodeBadge = __decorate3([
-        customElement("vscode-badge")
-      ], VscodeBadge);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-badge/index.js
-  var vscode_badge_exports = {};
-  __export(vscode_badge_exports, {
-    VscodeBadge: () => VscodeBadge
-  });
-  var init_vscode_badge2 = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-badge/index.js"() {
-      init_vscode_badge();
-    }
-  });
-
-  // ../src/webview/shared/dataLoader.ts
-  function getWindowData(key) {
-    const win = globalThis.window;
-    return win ? win[key] : void 0;
-  }
-
-  // ../src/webview/shared/modelUtils.ts
-  var _pricingData = getWindowData("__MODEL_PRICING__");
-  var _modelNames = {};
-  for (const [modelId, pricing] of Object.entries(_pricingData?.pricing ?? {})) {
-    if (pricing.displayNames && pricing.displayNames.length > 0) {
-      _modelNames[modelId] = pricing.displayNames[0];
-    }
-  }
-  var CUSTOM_PROVIDER_SUFFIX = " (Custom)";
-  function decodeSegment(segment) {
-    try {
-      return decodeURIComponent(segment);
-    } catch {
-      return segment;
-    }
-  }
-  function parseCustomProviderModel(model) {
-    const parts = model.split("/");
-    if (parts.length !== 3 || parts.some((part) => part.trim() === "")) {
-      return void 0;
-    }
-    return {
-      source: decodeSegment(parts[0]),
-      providerName: decodeSegment(parts[1]),
-      modelId: decodeSegment(parts[2])
-    };
-  }
-  var UUID_PREFIX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\//i;
-  function getModelLookupCandidates(model) {
-    const candidates = [];
-    const add = (id) => {
-      if (id && !candidates.includes(id)) {
-        candidates.push(id);
-      }
-    };
-    const addWithVersionVariant = (id) => {
-      add(id);
-      add(id.replace(/(\d+)-(\d+)(?=-|$)/, "$1.$2"));
-    };
-    const base = model.replace(/^copilot\//, "");
-    addWithVersionVariant(base);
-    const custom = parseCustomProviderModel(base);
-    if (custom) {
-      addWithVersionVariant(custom.modelId);
-    }
-    if (UUID_PREFIX.test(base)) {
-      addWithVersionVariant(base.replace(UUID_PREFIX, ""));
-    }
-    return candidates;
-  }
-  function getCustomProviderGroup(model) {
-    const parsed = parseCustomProviderModel(model);
-    return parsed ? `${parsed.providerName}${CUSTOM_PROVIDER_SUFFIX}` : void 0;
-  }
-  function isCustomProviderGroup(group) {
-    return group.endsWith(CUSTOM_PROVIDER_SUFFIX);
-  }
-  function getModelDisplayName(model) {
-    for (const candidate of getModelLookupCandidates(model)) {
-      if (_modelNames[candidate]) {
-        return _modelNames[candidate];
-      }
-    }
-    const custom = parseCustomProviderModel(model);
-    if (custom) {
-      return custom.modelId;
-    }
-    if (UUID_PREFIX.test(model)) {
-      return model.replace(UUID_PREFIX, "");
-    }
-    return decodeSegment(model);
-  }
-
-  // src/editorIcons.ts
-  var EDITOR_ICON_MAP = {
-    "Antigravity": "\u{1F680}",
-    "Claude Code": "\u{1F7E0}",
-    "Claude Code CLI": "\u{1F7E0}",
-    "Claude Desktop": "\u{1F7E0}",
-    "Claude Desktop Cowork": "\u{1F7E0}",
-    "Cline": "\u{1F916}",
-    "Codex CLI": "\u{1F300}",
-    "Continue": "\u25B6\uFE0F",
-    "Copilot CLI": "\u{1F916}",
-    "Copilot CLI (App)": "\u{1F916}",
-    "Crush": "\u{1F9BE}",
-    "Cursor": "\u{1F5B1}\uFE0F",
-    "Devin": "\u{1F9E0}",
-    "Devin CLI": "\u{1F9E0}",
-    "Eclipse": "\u{1F311}",
-    "Gemini CLI": "\u{1F48E}",
-    "Hermes": "\u{1FABD}",
-    "JetBrains": "\u{1F9E9}",
-    "Kiro": "\u{1F47B}",
-    "Kiro CLI": "\u{1F47B}",
-    "Mistral Vibe": "\u{1F525}",
-    "MS Scout (Copilot CLI)": "\u{1F52D}",
-    "OpenCode": "\u{1F7E2}",
-    "Pi": "\u03C0",
-    "Unknown": "\u2753",
-    "Visual Studio": "\u{1FA9F}",
-    "VS Code": "\u{1F499}",
-    "VS Code Exploration": "\u{1F9EA}",
-    "VS Code Insiders": "\u{1F49A}",
-    "VS Code Server": "\u2601\uFE0F",
-    "VS Code Server (Insiders)": "\u2601\uFE0F",
-    "VSCodium": "\u{1F537}",
-    "Windsurf": "\u{1F3C4}"
-  };
-  function getEditorIconByName(editor) {
-    return EDITOR_ICON_MAP[editor] ?? "\u{1F4DD}";
-  }
-
-  // src/webview/shared/formatUtils.ts
-  var _estimatorsData = getWindowData("__TOKEN_ESTIMATORS__");
-  var tokenEstimators = _estimatorsData?.estimators ?? {};
-  var currentLocale;
-  var compactNumbersEnabled = true;
-  function setCompactNumbers(enabled) {
-    compactNumbersEnabled = enabled;
-  }
-  function getEditorIcon(editor) {
-    return getEditorIconByName(editor);
-  }
-  function getCharsPerToken(model) {
-    const ratio = tokenEstimators[model] ?? 0.25;
-    return 1 / ratio;
-  }
-  function formatFixed(value, digits) {
-    return new Intl.NumberFormat(currentLocale, {
-      minimumFractionDigits: digits,
-      maximumFractionDigits: digits
-    }).format(value);
-  }
-  function formatPercent(value, digits = 1) {
-    return `${formatFixed(value, digits)}%`;
-  }
-  function formatNumber(value) {
-    return value.toLocaleString(currentLocale);
-  }
-  function formatCompact(value) {
-    if (!compactNumbersEnabled) {
-      return formatNumber(value);
-    }
-    return new Intl.NumberFormat(currentLocale, {
-      notation: "compact",
-      maximumFractionDigits: 1
-    }).format(value);
-  }
-  function formatCost(value) {
-    return new Intl.NumberFormat(currentLocale, {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(value);
-  }
-
-  // src/webview/shared/domUtils.ts
-  function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) {
-      node.className = className;
-    }
-    if (text !== void 0) {
-      node.textContent = text;
-    }
-    return node;
-  }
-  function iconHeading(tag, icon, text, className) {
-    const node = document.createElement(tag);
-    if (className) {
-      node.className = className;
-    }
-    const iconSpan = document.createElement("span");
-    iconSpan.className = `codicon codicon-${icon}`;
-    node.append(iconSpan, document.createTextNode(` ${text}`));
-    return node;
-  }
-  function buildNavIconSpan(icon, iconColor) {
-    const iconSpan = document.createElement("span");
-    iconSpan.className = `codicon codicon-${icon} nav-icon`;
-    if (iconColor) {
-      iconSpan.style.setProperty("--icon-accent", iconColor);
-    }
-    return iconSpan;
-  }
-  function applyButtonConfigAttributes(button, config) {
-    if (config.appearance) {
-      button.setAttribute("appearance", config.appearance);
-    }
-    if (config.hidden) {
-      button.hidden = true;
-    }
-    if (config.active) {
-      button.classList.add("nav-active");
-      button.setAttribute("disabled", "");
-      button.setAttribute("aria-current", "page");
-    }
-  }
-  function createButton(configOrId, label, appearance) {
-    const button = document.createElement("vscode-button");
-    if (typeof configOrId === "string") {
-      button.id = configOrId;
-      button.textContent = label || "";
-      if (appearance) {
-        button.setAttribute("appearance", appearance);
-      }
-      return button;
-    }
-    const config = configOrId;
-    button.id = config.id;
-    if (config.icon) {
-      button.append(buildNavIconSpan(config.icon, config.iconColor), document.createTextNode(config.label));
-    } else {
-      button.textContent = config.label;
-    }
-    applyButtonConfigAttributes(button, config);
-    return button;
-  }
-
-  // src/webview/shared/localization.ts
-  var DEFAULT_LOCALIZATION = {
-    "nav.btnRefresh": "Refresh",
-    "nav.btnDetails": "Details",
-    "nav.btnChart": "Chart",
-    "nav.btnUsage": "Usage Analysis",
-    "nav.btnDiagnostics": "Diagnostics",
-    "nav.btnMaturity": "Fluency Score",
-    "nav.btnDashboard": "Team Dashboard",
-    "nav.btnLevelViewer": "Level Viewer",
-    "nav.btnEnvironmental": "Environmental Impact",
-    "nav.btnEfficiency": "Efficiency"
-  };
-  var currentLocalization = { ...DEFAULT_LOCALIZATION };
-  function initializeWebviewLocalization(localization) {
-    const resolved = {};
-    for (const [key, value] of Object.entries(localization)) {
-      if (typeof value === "string" && value !== key) {
-        resolved[key] = value;
-      }
-    }
-    currentLocalization = { ...DEFAULT_LOCALIZATION, ...resolved };
-  }
-  function localize(key) {
-    return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
-  }
-  var currentLanguage = "en";
-  function setCurrentLanguage(language) {
-    currentLanguage = language;
-  }
-
-  // src/webview/shared/buttonConfig.ts
-  var BUTTON_DEFS = {
-    "btn-refresh": {
-      id: "btn-refresh",
-      labelKey: "nav.btnRefresh",
-      icon: "refresh",
-      appearance: "primary"
-    },
-    "btn-details": {
-      id: "btn-details",
-      labelKey: "nav.btnDetails",
-      icon: "robot",
-      iconColor: "#c37bff",
-      appearance: "secondary"
-    },
-    "btn-chart": {
-      id: "btn-chart",
-      labelKey: "nav.btnChart",
-      icon: "graph-line",
-      iconColor: "#60a5fa",
-      appearance: "secondary"
-    },
-    "btn-usage": {
-      id: "btn-usage",
-      labelKey: "nav.btnUsage",
-      icon: "graph",
-      iconColor: "#22d3ee",
-      appearance: "secondary"
-    },
-    "btn-diagnostics": {
-      id: "btn-diagnostics",
-      labelKey: "nav.btnDiagnostics",
-      icon: "search",
-      iconColor: "#fb7185",
-      appearance: "secondary"
-    },
-    "btn-maturity": {
-      id: "btn-maturity",
-      labelKey: "nav.btnMaturity",
-      icon: "target",
-      iconColor: "#fbbf24",
-      appearance: "secondary"
-    },
-    "btn-dashboard": {
-      id: "btn-dashboard",
-      labelKey: "nav.btnDashboard",
-      icon: "organization",
-      iconColor: "#818cf8",
-      appearance: "secondary"
-    },
-    "btn-level-viewer": {
-      id: "btn-level-viewer",
-      labelKey: "nav.btnLevelViewer",
-      icon: "list-tree",
-      iconColor: "#94a3b8",
-      appearance: "secondary"
-    },
-    "btn-environmental": {
-      id: "btn-environmental",
-      labelKey: "nav.btnEnvironmental",
-      icon: "globe",
-      iconColor: "#4ade80",
-      appearance: "secondary"
-    },
-    "btn-efficiency": {
-      id: "btn-efficiency",
-      labelKey: "nav.btnEfficiency",
-      icon: "dashboard",
-      iconColor: "#f472b6",
-      appearance: "secondary"
-    }
-  };
-  var BUTTONS = new Proxy({}, {
-    get(_target, prop) {
-      const def = BUTTON_DEFS[prop];
-      if (!def) {
-        return void 0;
-      }
-      const { labelKey, ...rest } = def;
-      return { ...rest, label: localize(labelKey) };
-    }
-  });
-  var NAV_ORDER = [
-    "btn-refresh",
-    "btn-details",
-    "btn-chart",
-    "btn-usage",
-    "btn-maturity",
-    "btn-efficiency",
-    "btn-environmental",
-    "btn-diagnostics",
-    "btn-dashboard"
-  ];
-  function getNavButtons(activeView, backendConfigured) {
-    return NAV_ORDER.filter((id) => id !== "btn-dashboard" || backendConfigured).map((id) => ({ ...BUTTONS[id], active: id === activeView }));
-  }
-
-  // src/webview/shared/messageHandler.ts
-  function collectOwnOrigins(currentWindow) {
-    const origins = [];
-    const origin = currentWindow.location?.origin;
-    if (origin && origin !== "null") {
-      origins.push(origin);
-    }
-    const href = currentWindow.location?.href;
-    const derived = href ? /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href) : null;
-    if (derived && !origins.includes(derived[0])) {
-      origins.push(derived[0]);
-    }
-    return origins;
-  }
-  function isTrustedWebviewMessageSource(source, currentWindow, origin) {
-    if (source === null || source === void 0 || source === currentWindow) {
-      return true;
-    }
-    if (source === currentWindow.parent || source === currentWindow.top) {
-      return true;
-    }
-    return Boolean(origin) && collectOwnOrigins(currentWindow).includes(origin);
-  }
-  function registerMessageHandler(handler, onUntrustedMessage) {
-    window.addEventListener("message", (event) => {
-      if (!isTrustedWebviewMessageSource(event.source, window, event.origin)) {
-        onUntrustedMessage?.(event);
-        return;
-      }
-      handler(event.data);
-    });
-  }
-
-  // src/webview/shared/extensionPoints.ts
-  function buttonElementId(id) {
-    return `ext-point-${id}`;
-  }
-  function renderExtensionPointButtons(vscodeApi, buttons) {
-    const buttonRow = document.querySelector(".button-row");
-    if (!buttonRow) {
-      return;
-    }
-    const desiredIds = new Set(buttons.map((b3) => b3.id));
-    for (const existing of Array.from(buttonRow.querySelectorAll('[id^="ext-point-"]'))) {
-      const id = existing.id.slice("ext-point-".length);
-      if (!desiredIds.has(id)) {
-        existing.remove();
-      }
-    }
-    for (const btn of buttons) {
-      if (document.getElementById(buttonElementId(btn.id))) {
-        continue;
-      }
-      const el2 = document.createElement("vscode-button");
-      el2.id = buttonElementId(btn.id);
-      el2.textContent = btn.label;
-      el2.addEventListener("click", () => {
-        vscodeApi.postMessage({ command: "extensionPointAction", buttonId: btn.id });
-      });
-      buttonRow.append(el2);
-    }
-  }
-  function wireExtensionPointButtons(vscodeApi) {
-    renderExtensionPointButtons(vscodeApi, window.__EXTENSION_POINT_BUTTONS__ ?? []);
-    if (window.__extensionPointButtonsListenerRegistered__) {
-      return;
-    }
-    window.__extensionPointButtonsListenerRegistered__ = true;
-    registerMessageHandler((message) => {
-      if (message?.command === "extensionPointButtonsUpdated" && Array.isArray(message.buttons)) {
-        renderExtensionPointButtons(vscodeApi, message.buttons);
-      }
-    });
-  }
-
-  // src/webview/shared/theme.css
-  var theme_default = `/**
+  `],Io=jn});var Lo,re,Bo=g(()=>{R();$e();Fe();$o();Lo=function(t,e,o,n){var s=arguments.length,r=s<3?e:n===null?n=Object.getOwnPropertyDescriptor(e,o):n,a;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")r=Reflect.decorate(t,e,o,n);else for(var c=t.length-1;c>=0;c--)(a=t[c])&&(r=(s<3?a(r):s>3?a(e,o,r):a(e,o))||r);return s>3&&r&&Object.defineProperty(e,o,r),r},re=class extends N{constructor(){super(...arguments),this.variant="default"}render(){return _`<div class="root"><slot></slot></div>`}};re.styles=Io;Lo([y({reflect:!0})],re.prototype,"variant",void 0);re=Lo([oe("vscode-badge")],re)});var No={};Mt(No,{VscodeBadge:()=>re});var jo=g(()=>{Bo()});function Y(t){let e=globalThis.window;return e?e[t]:void 0}var nn=Y("__MODEL_PRICING__"),Je={};for(let[t,e]of Object.entries(nn?.pricing??{}))e.displayNames&&e.displayNames.length>0&&(Je[t]=e.displayNames[0]);var wt=" (Custom)";function Ee(t){try{return decodeURIComponent(t)}catch{return t}}function Xe(t){let e=t.split("/");if(!(e.length!==3||e.some(o=>o.trim()==="")))return{source:Ee(e[0]),providerName:Ee(e[1]),modelId:Ee(e[2])}}var Me=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\//i;function we(t){let e=[],o=a=>{a&&!e.includes(a)&&e.push(a)},n=a=>{o(a),o(a.replace(/(\d+)-(\d+)(?=-|$)/,"$1.$2"))},s=t.replace(/^copilot\//,"");n(s);let r=Xe(s);return r&&n(r.modelId),Me.test(s)&&n(s.replace(Me,"")),e}function De(t){let e=Xe(t);return e?`${e.providerName}${wt}`:void 0}function Dt(t){return t.endsWith(wt)}function Ze(t){for(let o of we(t))if(Je[o])return Je[o];let e=Xe(t);return e?e.modelId:Me.test(t)?t.replace(Me,""):Ee(t)}var At={Antigravity:"\u{1F680}","Claude Code":"\u{1F7E0}","Claude Code CLI":"\u{1F7E0}","Claude Desktop":"\u{1F7E0}","Claude Desktop Cowork":"\u{1F7E0}",Cline:"\u{1F916}","Codex CLI":"\u{1F300}",Continue:"\u25B6\uFE0F","Copilot CLI":"\u{1F916}","Copilot CLI (App)":"\u{1F916}",Crush:"\u{1F9BE}",Cursor:"\u{1F5B1}\uFE0F",Devin:"\u{1F9E0}","Devin CLI":"\u{1F9E0}",Eclipse:"\u{1F311}","Gemini CLI":"\u{1F48E}",Hermes:"\u{1FABD}",JetBrains:"\u{1F9E9}","Kilo Code":"\u{1F7E3}",Kiro:"\u{1F47B}","Kiro CLI":"\u{1F47B}","Mistral Vibe":"\u{1F525}","MS Scout (Copilot CLI)":"\u{1F52D}",OpenCode:"\u{1F7E2}",Pi:"\u03C0",Unknown:"\u2753","Visual Studio":"\u{1FA9F}","VS Code":"\u{1F499}","VS Code Exploration":"\u{1F9EA}","VS Code Insiders":"\u{1F49A}","VS Code Server":"\u2601\uFE0F","VS Code Server (Insiders)":"\u2601\uFE0F",VSCodium:"\u{1F537}",Windsurf:"\u{1F3C4}"};function _t(t){return At[t]??"\u{1F4DD}"}var sn=Y("__TOKEN_ESTIMATORS__"),rn=sn?.estimators??{},Ae,Ut=!0;function Rt(t){Ut=t}function Pt(t){return _t(t)}function Ot(t){return 1/(rn[t]??.25)}function an(t,e){return new Intl.NumberFormat(Ae,{minimumFractionDigits:e,maximumFractionDigits:e}).format(t)}function S(t,e=1){return`${an(t,e)}%`}function x(t){return t.toLocaleString(Ae)}function f(t){return Ut?new Intl.NumberFormat(Ae,{notation:"compact",maximumFractionDigits:1}).format(t):x(t)}function E(t){return new Intl.NumberFormat(Ae,{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(t)}function b(t,e,o){let n=document.createElement(t);return e&&(n.className=e),o!==void 0&&(n.textContent=o),n}function de(t,e,o,n){let s=document.createElement(t);n&&(s.className=n);let r=document.createElement("span");return r.className=`codicon codicon-${e}`,s.append(r,document.createTextNode(` ${o}`)),s}function cn(t,e){let o=document.createElement("span");return o.className=`codicon codicon-${t} nav-icon`,e&&o.style.setProperty("--icon-accent",e),o}function ln(t,e){e.appearance&&t.setAttribute("appearance",e.appearance),e.hidden&&(t.hidden=!0),e.active&&(t.classList.add("nav-active"),t.setAttribute("disabled",""),t.setAttribute("aria-current","page"))}function It(t,e,o){let n=document.createElement("vscode-button");if(typeof t=="string")return n.id=t,n.textContent=e||"",o&&n.setAttribute("appearance",o),n;let s=t;return n.id=s.id,s.icon?n.append(cn(s.icon,s.iconColor),document.createTextNode(s.label)):n.textContent=s.label,ln(n,s),n}var Qe={"nav.btnRefresh":"Refresh","nav.btnDetails":"Details","nav.btnChart":"Chart","nav.btnUsage":"Usage Analysis","nav.btnDiagnostics":"Diagnostics","nav.btnMaturity":"Fluency Score","nav.btnDashboard":"Team Dashboard","nav.btnLevelViewer":"Level Viewer","nav.btnEnvironmental":"Environmental Impact","nav.btnEfficiency":"Efficiency","share.exportTitle":"AI Engineering Fluency Score","share.exportReportLabel":"Report"},$t={...Qe};function Lt(t){let e={};for(let[o,n]of Object.entries(t))typeof n=="string"&&n!==o&&(e[o]=n);$t={...Qe,...e}}function Bt(t){return $t[t]||Qe[t]||t}var dn="en";function Nt(t){dn=t}var un={"btn-refresh":{id:"btn-refresh",labelKey:"nav.btnRefresh",icon:"refresh",appearance:"primary"},"btn-details":{id:"btn-details",labelKey:"nav.btnDetails",icon:"robot",iconColor:"#c37bff",appearance:"secondary"},"btn-chart":{id:"btn-chart",labelKey:"nav.btnChart",icon:"graph-line",iconColor:"#60a5fa",appearance:"secondary"},"btn-usage":{id:"btn-usage",labelKey:"nav.btnUsage",icon:"graph",iconColor:"#22d3ee",appearance:"secondary"},"btn-diagnostics":{id:"btn-diagnostics",labelKey:"nav.btnDiagnostics",icon:"search",iconColor:"#fb7185",appearance:"secondary"},"btn-maturity":{id:"btn-maturity",labelKey:"nav.btnMaturity",icon:"target",iconColor:"#fbbf24",appearance:"secondary"},"btn-dashboard":{id:"btn-dashboard",labelKey:"nav.btnDashboard",icon:"organization",iconColor:"#818cf8",appearance:"secondary"},"btn-level-viewer":{id:"btn-level-viewer",labelKey:"nav.btnLevelViewer",icon:"list-tree",iconColor:"#94a3b8",appearance:"secondary"},"btn-environmental":{id:"btn-environmental",labelKey:"nav.btnEnvironmental",icon:"globe",iconColor:"#4ade80",appearance:"secondary"},"btn-efficiency":{id:"btn-efficiency",labelKey:"nav.btnEfficiency",icon:"dashboard",iconColor:"#f472b6",appearance:"secondary"}},pn=new Proxy({},{get(t,e){let o=un[e];if(!o)return;let{labelKey:n,...s}=o;return{...s,label:Bt(n)}}});var gn=["btn-refresh","btn-details","btn-chart","btn-usage","btn-maturity","btn-efficiency","btn-environmental","btn-diagnostics","btn-dashboard"];function jt(t,e){return gn.filter(o=>o!=="btn-dashboard"||e).map(o=>({...pn[o],active:o===t}))}function fn(t){let e=[],o=t.location?.origin;o&&o!=="null"&&e.push(o);let n=t.location?.href,s=n?/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(n):null;return s&&!e.includes(s[0])&&e.push(s[0]),e}function mn(t,e,o){return t==null||t===e||t===e.parent||t===e.top?!0:!!o&&fn(e).includes(o)}function _e(t,e){window.addEventListener("message",o=>{if(!mn(o.source,window,o.origin)){e?.(o);return}t(o.data)})}function Ft(t){return`ext-point-${t}`}function Ht(t,e){let o=document.querySelector(".button-row");if(!o)return;let n=new Set(e.map(s=>s.id));for(let s of Array.from(o.querySelectorAll('[id^="ext-point-"]'))){let r=s.id.slice(10);n.has(r)||s.remove()}for(let s of e){if(document.getElementById(Ft(s.id)))continue;let r=document.createElement("vscode-button");r.id=Ft(s.id),r.textContent=s.label,r.addEventListener("click",()=>{t.postMessage({command:"extensionPointAction",buttonId:s.id})}),o.append(r)}}function Kt(t){Ht(t,window.__EXTENSION_POINT_BUTTONS__??[]),!window.__extensionPointButtonsListenerRegistered__&&(window.__extensionPointButtonsListenerRegistered__=!0,_e(e=>{e?.command==="extensionPointButtonsUpdated"&&Array.isArray(e.buttons)&&Ht(t,e.buttons)}))}var Gt=`/**
  * Shared theme variables for all webview panels
  * Uses VS Code theme tokens for automatic light/dark theme support.
  *
@@ -2442,1132 +677,293 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
 	text-shadow: 2px 2px 0 var(--vscode-panel-border);
 	white-space: nowrap;
 }
-`;
+`;var zt=`body {
+	margin: 0;
+	background: var(--bg-primary);
+	color: var(--text-primary);
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
 
-  // src/webview/details/styles.css
-  var styles_default = "body {\n	margin: 0;\n	background: var(--bg-primary);\n	color: var(--text-primary);\n	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n}\n\n.container {\n	padding: 16px;\n	display: flex;\n	flex-direction: column;\n	gap: 14px;\n	max-width: 1200px;\n	margin: 0 auto;\n}\n\n.header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	gap: 12px;\n	padding-bottom: 4px;\n}\n\n.header-left {\n	display: flex;\n	flex-direction: column;\n	gap: 4px;\n}\n\n.title {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n.plan-badge {\n	display: inline-flex;\n	align-items: center;\n	gap: 4px;\n	align-self: flex-start;\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 999px;\n	padding: 2px 10px;\n	font-size: 11px;\n	color: var(--text-secondary);\n	cursor: help;\n}\n\n.provider-panel-hint {\n	color: var(--text-secondary);\n	font-size: 11px;\n	margin: -4px 0 10px;\n}\n\n.provider-cards {\n	display: grid;\n	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));\n	gap: 10px;\n	text-align: center;\n}\n\n.provider-card {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n	text-align: center;\n	cursor: pointer;\n	transition: background-color 0.1s ease, opacity 0.1s ease;\n}\n\n.provider-card:hover {\n	background: var(--list-hover-bg);\n}\n\n.provider-card-excluded {\n	opacity: 0.45;\n}\n\n.provider-card-total {\n	cursor: default;\n	border-style: dashed;\n}\n\n.provider-card-total:hover {\n	background: var(--bg-secondary);\n}\n\n.provider-card-label {\n	color: var(--text-secondary);\n	font-size: 11px;\n	margin-bottom: 6px;\n}\n\n.provider-card-value {\n	color: var(--text-primary);\n	font-size: 18px;\n	font-weight: 700;\n}\n\n.provider-card-sub {\n	color: var(--text-secondary);\n	font-size: 10px;\n	margin-top: 4px;\n}\n\n.no-data-row td {\n	text-align: center;\n	color: var(--text-secondary);\n	font-size: 12px;\n	padding: 14px;\n	font-style: italic;\n}\n\n.sections {\n	display: flex;\n	flex-direction: column;\n	gap: 16px;\n}\n\n.section {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n}\n\n.section h3 {\n	margin: 0 0 10px;\n	font-size: 14px;\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	color: var(--text-primary);\n	letter-spacing: 0.2px;\n}\n\n.stats-table {\n	width: 100%;\n	border-collapse: collapse;\n	table-layout: fixed;\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 8px;\n	overflow: hidden;\n}\n\n.stats-table thead {\n	background: var(--list-hover-bg);\n}\n\n.stats-table th,\n.stats-table td {\n	padding: 10px 12px;\n	border-bottom: 1px solid var(--border-subtle);\n	vertical-align: middle;\n}\n\n.stats-table th {\n	text-align: left;\n	color: var(--text-secondary);\n	font-weight: 700;\n	font-size: 12px;\n	letter-spacing: 0.1px;\n}\n\n.stats-table td {\n	color: var(--text-primary);\n	font-size: 12px;\n}\n\n.stats-table th.align-right,\n.stats-table td.align-right {\n	text-align: right;\n}\n\n.stats-table tr.group-row td {\n	background: var(--list-hover-bg);\n	color: var(--text-secondary);\n	font-size: 12px;\n	font-weight: 700;\n	text-transform: uppercase;\n	letter-spacing: 1px;\n	padding: 8px 12px;\n	border-top: 1px solid var(--border-color);\n	border-bottom: 1px solid var(--border-color);\n}\n\n/* First group sits right under the table header, no extra top rule needed */\n.stats-table tbody tr.group-row:first-child td {\n	border-top: none;\n}\n\n.metric-label {\n	display: inline-flex;\n	align-items: center;\n	gap: 6px;\n	font-weight: 600;\n}\n\n.period-header {\n	display: flex;\n	align-items: center;\n	gap: 4px;\n	color: var(--text-secondary);\n}\n\n.align-right .period-header {\n	justify-content: flex-end;\n}\n\n.value-right {\n	text-align: right;\n}\n\n.muted {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 4px;\n}\n\n.notes {\n	margin: 4px 0 0;\n	padding-left: 16px;\n	color: var(--text-secondary);\n}\n\n.notes li {\n	margin: 4px 0;\n	line-height: 1.4;\n}\n\n.footer {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 6px;\n}\n\n.empty-state {\n	display: flex;\n	flex-direction: column;\n	gap: 12px;\n	padding: 20px;\n}\n\n.empty-state-title {\n	font-size: 15px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n.empty-state-description {\n	color: var(--text-secondary);\n	font-size: 13px;\n	line-height: 1.5;\n	margin: 0;\n}\n\n.empty-state-steps {\n	margin: 0;\n	padding-left: 20px;\n	color: var(--text-secondary);\n	font-size: 13px;\n	line-height: 1.6;\n}\n\n.empty-state-steps li {\n	margin: 4px 0;\n}\n\n.empty-state-note {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 6px;\n	padding: 10px 14px;\n	color: var(--text-secondary);\n	font-size: 12px;\n	line-height: 1.5;\n}\n";
+.container {
+	padding: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	max-width: 1200px;
+	margin: 0 auto;
+}
 
-  // ../src/statsHelpers.ts
-  var COPILOT_EDITOR_NAMES = /* @__PURE__ */ new Set([
-    "VS Code",
-    "VS Code Insiders",
-    "VS Code Exploration",
-    "VS Code Server",
-    "VS Code Server (Insiders)",
-    "VSCodium",
-    "Visual Studio",
-    "JetBrains",
-    "Copilot CLI",
-    "Copilot CLI (App)",
-    "MS Scout (Copilot CLI)"
-  ]);
+.header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 12px;
+	padding-bottom: 4px;
+}
 
-  // ../src/tokenEstimation.ts
-  var NANO_AIU_TO_DOLLARS = 1 / 1e11;
+.header-left {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
 
-  // ../src/chartDataBuilder.ts
-  var MODEL_PROVIDER_PREFIXES = [
-    ["anthropic", "Anthropic"],
-    ["claude", "Anthropic"],
-    ["codestral", "Mistral AI"],
-    ["devstral", "Mistral AI"],
-    ["gemini", "Google"],
-    ["goldeneye", "xAI"],
-    ["google", "Google"],
-    ["gpt", "OpenAI"],
-    ["grok", "xAI"],
-    ["magistral", "Mistral AI"],
-    ["mai-", "Microsoft"],
-    ["ministral", "Mistral AI"],
-    ["mistral", "Mistral AI"],
-    ["o1", "OpenAI"],
-    ["o3", "OpenAI"],
-    ["o4", "OpenAI"],
-    ["pixtral", "Mistral AI"],
-    ["qwen", "Alibaba"],
-    ["raptor", "xAI"]
-  ];
-  function getModelBillingProvider(modelId) {
-    const customGroup = getCustomProviderGroup(modelId);
-    if (customGroup) {
-      return customGroup;
-    }
-    const match = getModelLookupCandidates(modelId).flatMap((candidate) => MODEL_PROVIDER_PREFIXES.filter(([prefix]) => candidate.toLowerCase().startsWith(prefix))).at(0);
-    return match ? match[1] : "Other";
-  }
-  function getBillingGroup(editor, modelId) {
-    const customGroup = getCustomProviderGroup(modelId);
-    if (customGroup) {
-      return customGroup;
-    }
-    if (COPILOT_EDITOR_NAMES.has(editor)) {
-      return "GitHub Copilot";
-    }
-    return getModelBillingProvider(modelId);
-  }
+.title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
 
-  // src/webview/details/main.ts
-  var vscode = acquireVsCodeApi();
-  var initialData = getWindowData("__INITIAL_DETAILS__");
-  console.log("[CopilotTokenTracker] details webview loaded");
-  if (initialData?.localization) {
-    initializeWebviewLocalization(initialData.localization);
-    const language = initialData.localization["__language__"] || "en";
-    setCurrentLanguage(language);
-    console.log("[CopilotTokenTracker] Webview localization initialized for language:", language);
-  }
-  var _initSort = initialData?.sortSettings;
-  var editorSortKey = _initSort?.editor?.key ?? "name";
-  var editorSortDir = _initSort?.editor?.dir ?? "asc";
-  var modelSortKey = _initSort?.model?.key ?? "name";
-  var modelSortDir = _initSort?.model?.dir ?? "asc";
-  var modelOtherExpanded = _initSort?.modelOtherExpanded ?? false;
-  var editorOtherExpanded = _initSort?.editorOtherExpanded ?? false;
-  var excludedProviders = new Set(_initSort?.excludedProviders ?? []);
-  var lastStats = null;
-  function calculateProjection(last30DaysValue) {
-    const daysInYear = 365.25;
-    return last30DaysValue / 30 * daysInYear;
-  }
-  function buildValueCell(mainValue, subText) {
-    const td = document.createElement("td");
-    td.className = "value-right align-right";
-    td.textContent = mainValue;
-    if (subText !== void 0) {
-      td.append(el("div", "muted", subText));
-    }
-    return td;
-  }
-  function buildMetricLabelCell(icon, label, color, tooltip) {
-    const td = document.createElement("td");
-    const labelWrapper = document.createElement("span");
-    labelWrapper.className = "metric-label";
-    const iconSpan = document.createElement("span");
-    iconSpan.textContent = icon;
-    if (color) {
-      iconSpan.style.color = color;
-    }
-    const textSpan = document.createElement("span");
-    textSpan.textContent = label;
-    if (tooltip) {
-      labelWrapper.title = tooltip;
-      labelWrapper.style.cursor = "help";
-      const hintSpan = document.createElement("span");
-      hintSpan.textContent = " \u2139\uFE0F";
-      hintSpan.style.cssText = "font-size:0.75em; opacity:0.6;";
-      textSpan.append(hintSpan);
-    }
-    labelWrapper.append(iconSpan, textSpan);
-    td.append(labelWrapper);
-    return td;
-  }
-  function buildSortableTableHeader(columns, getSortKey, getSortDir, onSort) {
-    const thead = document.createElement("thead");
-    const headerRow = document.createElement("tr");
-    const wraps = [];
-    function updateHeaders() {
-      wraps.forEach((w2, i6) => {
-        w2.textContent = `${columns[i6].icon} ${columns[i6].text}${getSortIndicator(columns[i6].key, getSortKey(), getSortDir())}`;
-      });
-    }
-    columns.forEach((h3, idx) => {
-      const th = document.createElement("th");
-      th.className = idx === 0 ? "" : "align-right";
-      th.style.cursor = "pointer";
-      th.style.userSelect = "none";
-      th.title = `Sort by ${h3.text}`;
-      const wrap = el("div", "period-header");
-      wrap.textContent = `${h3.icon} ${h3.text}${getSortIndicator(h3.key, getSortKey(), getSortDir())}`;
-      th.append(wrap);
-      wraps.push(wrap);
-      th.addEventListener("click", () => {
-        onSort(h3.key);
-        updateHeaders();
-      });
-      headerRow.append(th);
-    });
-    thead.append(headerRow);
-    return { thead, updateHeaders };
-  }
-  function render(stats) {
-    setCompactNumbers(stats.compactNumbers !== false);
-    lastStats = stats;
-    const root = document.getElementById("root");
-    if (!root) {
-      return;
-    }
-    const allProviders = getAllProviders(stats);
-    const projectedTokens = Math.round(calculateProjection(stats.last30Days.tokens + stats.last30Days.thinkingTokens));
-    const projectedSessions = Math.round(calculateProjection(stats.last30Days.sessions));
-    const projectedCo2 = calculateProjection(stats.last30Days.co2);
-    const projectedWater = calculateProjection(stats.last30Days.waterUsage);
-    const projectedCost = calculateProjection(totalCostForPeriod(stats.last30Days, allProviders));
-    const projectedCostCopilot = calculateProjection(stats.last30Days.estimatedCostCopilot ?? 0);
-    const projectedTrees = calculateProjection(stats.last30Days.treesEquivalent);
-    renderShell(root, stats, {
-      projectedTokens,
-      projectedSessions,
-      projectedCo2,
-      projectedWater,
-      projectedCost,
-      projectedCostCopilot,
-      projectedTrees
-    });
-    wireButtons();
-  }
-  function rerenderFromLastStats() {
-    if (lastStats) {
-      render(lastStats);
-    }
-  }
-  function renderShell(root, stats, projections) {
-    const lastUpdated = new Date(stats.lastUpdated);
-    root.replaceChildren();
-    const themeStyle = document.createElement("style");
-    themeStyle.textContent = theme_default;
-    const style = document.createElement("style");
-    style.textContent = styles_default;
-    const container = el("div", "container");
-    const header = el("div", "header");
-    const headerLeft = el("div", "header-left");
-    headerLeft.append(el("div", "title", "AI Engineering Fluency"));
-    const planBadge = buildPlanBadge(stats);
-    if (planBadge) {
-      headerLeft.append(planBadge);
-    }
-    const buttonRow = el("div", "button-row");
-    buttonRow.append(...getNavButtons("btn-details", !!stats.backendConfigured).map((config) => createButton(config)));
-    header.append(headerLeft, buttonRow);
-    const footer = el("div", "footer", `Last updated: ${lastUpdated.toLocaleString()} \xB7 Updates every 5 minutes`);
-    const sections = el("div", "sections");
-    const isEmptyState = (stats.today.tokens ?? 0) === 0 && (stats.last30Days.tokens ?? 0) === 0 && (stats.lastMonth.tokens ?? 0) === 0;
-    if (isEmptyState) {
-      sections.append(buildEmptyStateSection());
-    } else {
-      const providerPanel = buildProviderPanel(stats);
-      if (providerPanel) {
-        sections.append(providerPanel);
-      }
-    }
-    sections.append(buildMetricsSection(stats, projections));
-    const editorSection = buildEditorUsageSection(stats);
-    if (editorSection) {
-      sections.append(editorSection);
-    }
-    const modelSection = buildModelUsageSection(stats);
-    if (modelSection) {
-      sections.append(modelSection);
-    }
-    container.append(header, sections, footer);
-    root.append(themeStyle, style, container);
-  }
-  function sumInputTokens(p3) {
-    return Object.values(p3.modelUsage).reduce((s4, m2) => s4 + m2.inputTokens, 0);
-  }
-  function sumOutputTokens(p3) {
-    return Object.values(p3.modelUsage).reduce((s4, m2) => s4 + m2.outputTokens, 0);
-  }
-  function hasActualTokens(p3) {
-    return (p3.actualTokens || 0) > 0;
-  }
-  function serviceOverheadPct(p3) {
-    return hasActualTokens(p3) ? formatPercent((p3.actualTokens - p3.estimatedTokens) / p3.actualTokens * 100) : "\u2014";
-  }
-  function inputTokenCell(p3) {
-    return hasActualTokens(p3) ? formatCompact(sumInputTokens(p3)) : "\u2014";
-  }
-  function outputTokenCell(p3) {
-    return hasActualTokens(p3) ? formatCompact(sumOutputTokens(p3)) : "\u2014";
-  }
-  function totalTokenCell(p3) {
-    const modelTotal = sumInputTokens(p3) + sumOutputTokens(p3);
-    if ((p3.actualTokens ?? 0) > 0) {
-      return formatCompact(p3.tokens + p3.thinkingTokens);
-    }
-    return formatCompact(modelTotal > 0 ? modelTotal : p3.tokens);
-  }
-  function buildCachedTokenRow(stats) {
-    if (!(stats.today.cachedTokens || stats.last30Days.cachedTokens || stats.month.cachedTokens || stats.lastMonth.cachedTokens)) {
-      return [];
-    }
-    return [{ label: "Cached tokens", labelTooltip: 'Cache-read tokens \u2014 already included in "Input tokens" above, shown separately because they are billed at a lower rate.', icon: "\u26A1", color: "#34d399", today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), month: formatCompact(stats.month.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: "\u2014" }];
-  }
-  function buildPlanBadge(stats) {
-    if (!stats.copilotPlan) {
-      return null;
-    }
-    const plan = stats.copilotPlan;
-    const credits = plan.monthlyAiCreditsUsd > 0 ? `$${plan.monthlyAiCreditsUsd} credits/month` : "no credits";
-    const badge = el("div", "plan-badge", `\u{1F3F7}\uFE0F ${plan.planName} \xB7 ${credits}`);
-    badge.title = `Your active GitHub Copilot subscription plan (ID: ${plan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`;
-    return badge;
-  }
-  function buildMetricsGroups(stats, projections) {
-    const allProviders = getAllProviders(stats);
-    const tokenRows = [
-      { label: "Total tokens", labelTooltip: "All LLM API tokens counted across every call in this period \u2014 matches the status bar. When debug logs are available this is the definitive total; otherwise it falls back to per-model attribution or the text-based estimate.", icon: "\u{1F7E3}", color: "#c37bff", today: totalTokenCell(stats.today), last30Days: totalTokenCell(stats.last30Days), month: totalTokenCell(stats.month), lastMonth: totalTokenCell(stats.lastMonth), projected: formatCompact(projections.projectedTokens) },
-      { label: "Input tokens", labelTooltip: "Total prompt tokens sent to the model, including any cache-read tokens (shown separately below).", icon: "\u2B06\uFE0F", color: "#c37bff", today: inputTokenCell(stats.today), last30Days: inputTokenCell(stats.last30Days), month: inputTokenCell(stats.month), lastMonth: inputTokenCell(stats.lastMonth), projected: "\u2014" },
-      { label: "Output tokens", icon: "\u2B07\uFE0F", color: "#c37bff", today: outputTokenCell(stats.today), last30Days: outputTokenCell(stats.last30Days), month: outputTokenCell(stats.month), lastMonth: outputTokenCell(stats.lastMonth), projected: "\u2014" },
-      ...buildCachedTokenRow(stats),
-      { label: "Tokens (user estimated)", icon: "\u{1F4DD}", color: "#b39ddb", today: formatCompact(stats.today.estimatedTokens), last30Days: formatCompact(stats.last30Days.estimatedTokens), month: formatCompact(stats.month.estimatedTokens), lastMonth: formatCompact(stats.lastMonth.estimatedTokens), projected: "\u2014" },
-      { label: "Service overhead %", icon: "\u2601\uFE0F", color: "#90a4ae", today: serviceOverheadPct(stats.today), last30Days: serviceOverheadPct(stats.last30Days), month: serviceOverheadPct(stats.month), lastMonth: serviceOverheadPct(stats.lastMonth), projected: "\u2014" },
-      { label: "Thinking tokens", icon: "\u{1F9E0}", color: "#a78bfa", today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: "\u2014" }
-    ];
-    const selectedProvidersCostRows = isCopilotOnlyProviders(allProviders) ? [] : [
-      { label: "Estimated cost (selected providers)", labelTooltip: "Sum of estimated cost across the providers selected in the Cost by Provider filter below \u2014 GitHub Copilot uses UBB AI Credit rates, other providers use their own API pricing.", icon: "\u{1F4B5}", color: "#7ce38b", today: formatCost(totalCostForPeriod(stats.today, allProviders)), last30Days: formatCost(totalCostForPeriod(stats.last30Days, allProviders)), month: formatCost(totalCostForPeriod(stats.month, allProviders)), lastMonth: formatCost(totalCostForPeriod(stats.lastMonth, allProviders)), projected: formatCost(projections.projectedCost) }
-    ];
-    const costRows = [
-      ...selectedProvidersCostRows,
-      { label: "Estimated cost (GitHub Copilot UBB)", labelTooltip: "Based on GitHub Copilot AI Credit rates (1 credit = $0.01) \u2014 this is what Copilot will bill you. UBB = Usage Based Billing.", icon: "\u{1F7E2}", color: "#7ce38b", today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) }
-    ];
-    const activityRows = [
-      { label: "Sessions", icon: "\u{1F4C2}", color: "#66aaff", today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), month: formatNumber(stats.month.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
-      { label: "Sessions with sub-agents", labelTooltip: "Sessions that delegated work to sub-agents in this period (task/read_agent/write_agent/list_agents, runSubagent, delegate_* tool calls detected in the session logs).", icon: "\u{1F916}", color: "#66aaff", today: formatNumber(stats.today.subAgentSessions ?? 0), last30Days: formatNumber(stats.last30Days.subAgentSessions ?? 0), month: formatNumber(stats.month.subAgentSessions ?? 0), lastMonth: formatNumber(stats.lastMonth.subAgentSessions ?? 0), projected: "\u2014" },
-      { label: "Average interactions/session", icon: "\u{1F4AC}", color: "#8ce0ff", today: formatNumber(stats.today.avgInteractionsPerSession), last30Days: formatNumber(stats.last30Days.avgInteractionsPerSession), month: formatNumber(stats.month.avgInteractionsPerSession), lastMonth: formatNumber(stats.lastMonth.avgInteractionsPerSession), projected: "\u2014" },
-      { label: "Average tokens/session", icon: "\u{1F522}", color: "#7ce38b", today: formatCompact(stats.today.avgTokensPerSession), last30Days: formatCompact(stats.last30Days.avgTokensPerSession), month: formatCompact(stats.month.avgTokensPerSession), lastMonth: formatCompact(stats.lastMonth.avgTokensPerSession), projected: "\u2014" }
-    ];
-    return [
-      { heading: "\u{1F522} Tokens", rows: tokenRows },
-      { heading: "\u{1F4B0} Cost", rows: costRows },
-      { heading: "\u{1F4AC} Activity", rows: activityRows }
-    ];
-  }
-  function buildGroupHeaderRow(label) {
-    const tr = document.createElement("tr");
-    tr.className = "group-row";
-    const td = document.createElement("td");
-    td.colSpan = 6;
-    td.textContent = label;
-    tr.append(td);
-    return tr;
-  }
-  function buildNoDataRow(colSpan, message) {
-    const tr = document.createElement("tr");
-    tr.className = "no-data-row";
-    const td = document.createElement("td");
-    td.colSpan = colSpan;
-    td.textContent = message;
-    tr.append(td);
-    return tr;
-  }
-  function buildMetricsSection(stats, projections) {
-    const section = el("div", "section");
-    section.append(iconHeading("h3", "graph", "Key Metrics"));
-    const table = document.createElement("table");
-    table.className = "stats-table";
-    const thead = document.createElement("thead");
-    const headerRow = document.createElement("tr");
-    const HEADERS = [{ icon: "\u{1F4CA}", text: "Metric" }, { icon: "\u{1F4C5}", text: "Today" }, { icon: "\u{1F4C8}", text: "Last 30 Days" }, { icon: "\u{1F5D3}\uFE0F", text: "Current Month" }, { icon: "\u{1F4C6}", text: "Previous Month" }, { icon: "\u{1F30D}", text: "Projected Year" }];
-    HEADERS.forEach((h3, idx) => {
-      const th = document.createElement("th");
-      th.className = idx === 0 ? "" : "align-right";
-      const wrap = el("div", "period-header");
-      wrap.textContent = `${h3.icon} ${h3.text}`;
-      th.append(wrap);
-      headerRow.append(th);
-    });
-    thead.append(headerRow);
-    table.append(thead);
-    const tbody = document.createElement("tbody");
-    buildMetricsGroups(stats, projections).forEach((group) => {
-      tbody.append(buildGroupHeaderRow(group.heading));
-      group.rows.forEach((row) => {
-        const tr = document.createElement("tr");
-        tr.append(buildMetricLabelCell(row.icon, row.label, row.color, row.labelTooltip), buildValueCell(row.today), buildValueCell(row.last30Days), buildValueCell(row.month), buildValueCell(row.lastMonth), buildValueCell(row.projected));
-        tbody.append(tr);
-      });
-    });
-    table.append(tbody);
-    section.append(table);
-    return section;
-  }
-  var PROVIDER_ICONS = {
-    "GitHub Copilot": "\u{1F419}",
-    "Anthropic": "\u{1F170}\uFE0F",
-    "Google": "\u{1F537}",
-    "OpenAI": "\u{1F7E2}",
-    "Mistral AI": "\u{1F32C}\uFE0F",
-    "xAI": "\u2716\uFE0F",
-    "Microsoft": "\u{1FA9F}",
-    "Alibaba": "\u{1F409}",
-    "Other": "\u2754"
-  };
-  function getProviderIcon(provider) {
-    if (PROVIDER_ICONS[provider]) {
-      return PROVIDER_ICONS[provider];
-    }
-    return isCustomProviderGroup(provider) ? "\u{1F9E9}" : "\u{1F4B5}";
-  }
-  function buildProviderCard(stats, provider) {
-    const isExcluded = excludedProviders.has(provider);
-    const card = el("div", `provider-card${isExcluded ? " provider-card-excluded" : ""}`);
-    card.tabIndex = 0;
-    card.setAttribute("role", "button");
-    card.setAttribute("aria-pressed", String(!isExcluded));
-    card.title = isExcluded ? `${provider} is hidden \u2014 click to show it again and include it in the totals below.` : `Click to hide ${provider} \u2014 filters it out of the totals and the Editor/Model usage lists below.`;
-    card.append(
-      el("div", "provider-card-label", `${getProviderIcon(provider)} ${provider}`),
-      el("div", "provider-card-value", formatCost(stats.month.billingGroupCosts?.[provider] || 0)),
-      el("div", "provider-card-sub", "Cost this month")
-    );
-    const toggle = () => {
-      if (excludedProviders.has(provider)) {
-        excludedProviders.delete(provider);
-      } else {
-        excludedProviders.add(provider);
-      }
-      saveSortSettings();
-      rerenderFromLastStats();
-    };
-    card.addEventListener("click", toggle);
-    card.addEventListener("keydown", (e7) => {
-      if (e7.key === "Enter" || e7.key === " ") {
-        e7.preventDefault();
-        toggle();
-      }
-    });
-    return card;
-  }
-  function buildProviderTotalCard(stats, allProviders) {
-    const included = includedProviders(allProviders);
-    const card = el("div", "provider-card provider-card-total");
-    card.title = `Sum of ${included.length} of ${allProviders.length} selected provider(s).`;
-    card.append(
-      el("div", "provider-card-label", "\u2211 Total (selected)"),
-      el("div", "provider-card-value", formatCost(sumBillingGroupCosts(stats.month.billingGroupCosts, included))),
-      el("div", "provider-card-sub", "Cost this month")
-    );
-    return card;
-  }
-  function buildProviderPanel(stats) {
-    const allProviders = getAllProviders(stats);
-    if (allProviders.length <= 1) {
-      return null;
-    }
-    const section = el("div", "section");
-    section.append(iconHeading("h3", "credit-card", "Cost by Provider"));
-    section.append(el("div", "provider-panel-hint", "Click a provider to hide/show it \u2014 this also filters the Editor & Model usage lists below."));
-    const grid = el("div", "provider-cards");
-    grid.append(buildProviderTotalCard(stats, allProviders));
-    allProviders.forEach((provider) => grid.append(buildProviderCard(stats, provider)));
-    section.append(grid);
-    return section;
-  }
-  function getSortIndicator(colKey, activeKey, dir) {
-    if (colKey !== activeKey) {
-      return " \u2195";
-    }
-    return dir === "asc" ? " \u2191" : " \u2193";
-  }
-  function saveSortSettings() {
-    vscode.postMessage({
-      command: "saveSortSettings",
-      settings: {
-        editor: { key: editorSortKey, dir: editorSortDir },
-        model: { key: modelSortKey, dir: modelSortDir },
-        modelOtherExpanded,
-        editorOtherExpanded,
-        excludedProviders: Array.from(excludedProviders)
-      }
-    });
-  }
-  var ALL_PERIODS = ["today", "last30Days", "month", "lastMonth"];
-  function getAllProviders(stats) {
-    const set = /* @__PURE__ */ new Set();
-    ALL_PERIODS.forEach((period) => {
-      Object.keys(stats[period].billingGroupCosts ?? {}).forEach((p3) => set.add(p3));
-    });
-    return Array.from(set).sort((a3, b3) => {
-      if (a3 === "GitHub Copilot") {
-        return -1;
-      }
-      if (b3 === "GitHub Copilot") {
-        return 1;
-      }
-      return a3.localeCompare(b3);
-    });
-  }
-  function isCopilotOnlyProviders(allProviders) {
-    return allProviders.every((p3) => p3 === "GitHub Copilot");
-  }
-  function includedProviders(allProviders) {
-    return allProviders.filter((p3) => !excludedProviders.has(p3));
-  }
-  function sumBillingGroupCosts(billingGroupCosts, providers) {
-    if (!billingGroupCosts) {
-      return 0;
-    }
-    return providers.reduce((s4, p3) => s4 + (billingGroupCosts[p3] || 0), 0);
-  }
-  function totalCostForPeriod(period, allProviders) {
-    if (allProviders.length === 0) {
-      return period.estimatedCostCopilot ?? period.estimatedCost ?? 0;
-    }
-    return sumBillingGroupCosts(period.billingGroupCosts, includedProviders(allProviders));
-  }
-  function editorBillingGroups(stats, editor) {
-    const groups = /* @__PURE__ */ new Set();
-    ALL_PERIODS.forEach((period) => {
-      const modelUsage = stats[period].editorModelUsage?.[editor];
-      if (modelUsage) {
-        Object.keys(modelUsage).forEach((model) => groups.add(getBillingGroup(editor, model)));
-      }
-    });
-    return groups;
-  }
-  function modelBillingGroups(stats, model) {
-    const groups = /* @__PURE__ */ new Set();
-    ALL_PERIODS.forEach((period) => {
-      const editorModelUsage = stats[period].editorModelUsage;
-      if (!editorModelUsage) {
-        return;
-      }
-      Object.keys(editorModelUsage).forEach((editor) => {
-        if (editorModelUsage[editor][model]) {
-          groups.add(getBillingGroup(editor, model));
-        }
-      });
-    });
-    return groups;
-  }
-  function isVisibleForProviderFilter(groups) {
-    if (excludedProviders.size === 0) {
-      return true;
-    }
-    if (groups.size === 0) {
-      return true;
-    }
-    return Array.from(groups).some((g2) => !excludedProviders.has(g2));
-  }
-  function toEditorItem(stats, editor) {
-    const todayUsage = stats.today.editorUsage[editor] || { tokens: 0, sessions: 0 };
-    const last30DaysUsage = stats.last30Days.editorUsage[editor] || { tokens: 0, sessions: 0 };
-    const monthUsage = stats.month.editorUsage[editor] || { tokens: 0, sessions: 0 };
-    const lastMonthUsage = stats.lastMonth.editorUsage[editor] || { tokens: 0, sessions: 0 };
-    return { editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens: Math.round(calculateProjection(last30DaysUsage.tokens)), projectedSessions: Math.round(calculateProjection(last30DaysUsage.sessions)) };
-  }
-  function toOtherEditorItem(stats, otherEditors) {
-    const sumUsage = (period) => otherEditors.reduce((acc, e7) => {
-      const u3 = stats[period].editorUsage[e7] || { tokens: 0, sessions: 0 };
-      return { tokens: acc.tokens + u3.tokens, sessions: acc.sessions + u3.sessions };
-    }, { tokens: 0, sessions: 0 });
-    const todayUsage = sumUsage("today");
-    const last30DaysUsage = sumUsage("last30Days");
-    const monthUsage = sumUsage("month");
-    const lastMonthUsage = sumUsage("lastMonth");
-    return {
-      editor: `Other (${otherEditors.length} editor${otherEditors.length !== 1 ? "s" : ""})`,
-      todayUsage,
-      last30DaysUsage,
-      monthUsage,
-      lastMonthUsage,
-      projectedTokens: Math.round(calculateProjection(last30DaysUsage.tokens)),
-      projectedSessions: Math.round(calculateProjection(last30DaysUsage.sessions)),
-      otherEditors
-    };
-  }
-  function sortEditorItems(items) {
-    items.sort((a3, b3) => {
-      let cmp;
-      switch (editorSortKey) {
-        case "name":
-          cmp = a3.editor.localeCompare(b3.editor);
-          break;
-        case "today":
-          cmp = a3.todayUsage.tokens - b3.todayUsage.tokens;
-          break;
-        case "last30Days":
-          cmp = a3.last30DaysUsage.tokens - b3.last30DaysUsage.tokens;
-          break;
-        case "month":
-          cmp = a3.monthUsage.tokens - b3.monthUsage.tokens;
-          break;
-        case "lastMonth":
-          cmp = a3.lastMonthUsage.tokens - b3.lastMonthUsage.tokens;
-          break;
-        case "projected":
-          cmp = a3.projectedTokens - b3.projectedTokens;
-          break;
-        default:
-          cmp = 0;
-      }
-      return editorSortDir === "asc" ? cmp : -cmp;
-    });
-  }
-  function sortEditorsBySignificance(stats, editors) {
-    return [...editors].sort((a3, b3) => {
-      if (editorSortKey === "name") {
-        return a3.localeCompare(b3);
-      }
-      const aItem = toEditorItem(stats, a3);
-      const bItem = toEditorItem(stats, b3);
-      let cmp;
-      switch (editorSortKey) {
-        case "today":
-          cmp = aItem.todayUsage.tokens - bItem.todayUsage.tokens;
-          break;
-        case "last30Days":
-          cmp = aItem.last30DaysUsage.tokens - bItem.last30DaysUsage.tokens;
-          break;
-        case "month":
-          cmp = aItem.monthUsage.tokens - bItem.monthUsage.tokens;
-          break;
-        case "lastMonth":
-          cmp = aItem.lastMonthUsage.tokens - bItem.lastMonthUsage.tokens;
-          break;
-        case "projected":
-          cmp = aItem.projectedTokens - bItem.projectedTokens;
-          break;
-        default:
-          cmp = 0;
-      }
-      return -cmp || a3.localeCompare(b3);
-    });
-  }
-  function buildEditorRow(item, totals, isOtherChild) {
-    const { editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens, projectedSessions } = item;
-    const todayPct = totals.today > 0 ? todayUsage.tokens / totals.today * 100 : 0;
-    const last30Pct = totals.last30Days > 0 ? last30DaysUsage.tokens / totals.last30Days * 100 : 0;
-    const monthPct = totals.month > 0 ? monthUsage.tokens / totals.month * 100 : 0;
-    const lastMonthPct = totals.lastMonth > 0 ? lastMonthUsage.tokens / totals.lastMonth * 100 : 0;
-    const tr = document.createElement("tr");
-    if (isOtherChild) {
-      tr.style.opacity = "0.85";
-    }
-    if (editor === "JetBrains") {
-      tr.title = "JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available.";
-    }
-    if (editor === "Antigravity") {
-      tr.title = "Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.";
-    }
-    if (editor === "Cursor") {
-      tr.title = "Cursor: token counts reflect the context window size at the last request (contextTokensUsed). Output tokens are not stored locally.";
-    }
-    const labelTd = document.createElement("td");
-    const labelWrapper = document.createElement("span");
-    labelWrapper.className = "metric-label";
-    if (isOtherChild) {
-      const indentSpan = document.createElement("span");
-      indentSpan.style.cssText = "display:inline-block;width:12px";
-      labelWrapper.append(indentSpan);
-    }
-    labelWrapper.append(document.createTextNode(`${getEditorIcon(editor)} ${editor}`));
-    if (editor === "JetBrains" || editor === "Antigravity" || editor === "Cursor") {
-      labelWrapper.append(document.createTextNode(" \u24D8"));
-    }
-    labelTd.append(labelWrapper);
-    tr.append(
-      labelTd,
-      buildValueCell(formatCompact(todayUsage.tokens), `${formatPercent(todayPct)} \xB7 ${todayUsage.sessions} sessions`),
-      buildValueCell(formatCompact(last30DaysUsage.tokens), `${formatPercent(last30Pct)} \xB7 ${last30DaysUsage.sessions} sessions`),
-      buildValueCell(formatCompact(monthUsage.tokens), `${formatPercent(monthPct)} \xB7 ${monthUsage.sessions} sessions`),
-      buildValueCell(formatCompact(lastMonthUsage.tokens), `${formatPercent(lastMonthPct)} \xB7 ${lastMonthUsage.sessions} sessions`),
-      buildValueCell(formatCompact(projectedTokens), `${projectedSessions} sessions`)
-    );
-    return tr;
-  }
-  function appendOtherEditors(item, totals, onToggleOther, tbody, stats) {
-    const otherEditors = item.otherEditors ?? [];
-    const pct = (part, total) => total > 0 ? part / total * 100 : 0;
-    const otherTr = document.createElement("tr");
-    otherTr.style.cursor = "pointer";
-    otherTr.style.background = "var(--list-hover-bg)";
-    otherTr.title = editorOtherExpanded ? "Collapse other editors" : "Expand other editors";
-    const otherLabelWrapper = document.createElement("span");
-    otherLabelWrapper.className = "metric-label";
-    const otherNameSpan = document.createElement("span");
-    otherNameSpan.style.cssText = "color:var(--text-secondary);font-weight:600;";
-    otherNameSpan.textContent = `\u{1F4E6} ${item.editor}`;
-    const otherToggleSpan = document.createElement("span");
-    otherToggleSpan.style.cssText = "font-size:10px;color:var(--text-muted)";
-    otherToggleSpan.textContent = ` ${editorOtherExpanded ? "\u25B2" : "\u25BC"}`;
-    otherLabelWrapper.append(otherNameSpan, otherToggleSpan);
-    const otherLabelTd = document.createElement("td");
-    otherLabelTd.append(otherLabelWrapper);
-    const mkOtherTd = (usage, total) => {
-      const td = buildValueCell(formatCompact(usage.tokens));
-      td.append(el("div", "muted", `${formatPercent(pct(usage.tokens, total))} \xB7 ${usage.sessions} sessions`));
-      return td;
-    };
-    otherTr.append(
-      otherLabelTd,
-      mkOtherTd(item.todayUsage, totals.today),
-      mkOtherTd(item.last30DaysUsage, totals.last30Days),
-      mkOtherTd(item.monthUsage, totals.month),
-      mkOtherTd(item.lastMonthUsage, totals.lastMonth),
-      buildValueCell(formatCompact(item.projectedTokens), `${item.projectedSessions} sessions`)
-    );
-    otherTr.addEventListener("click", () => {
-      editorOtherExpanded = !editorOtherExpanded;
-      saveSortSettings();
-      onToggleOther();
-    });
-    tbody.append(otherTr);
-    if (editorOtherExpanded) {
-      const otherItems = otherEditors.map((e7) => toEditorItem(stats, e7));
-      sortEditorItems(otherItems);
-      otherItems.forEach((childItem) => tbody.append(buildEditorRow(childItem, totals, true)));
-    }
-  }
-  function buildEditorTbody(stats, visibleEditors, onToggleOther) {
-    const editors = visibleEditors;
-    const totals = {
-      today: editors.reduce((s4, e7) => s4 + (stats.today.editorUsage[e7]?.tokens || 0), 0),
-      last30Days: editors.reduce((s4, e7) => s4 + (stats.last30Days.editorUsage[e7]?.tokens || 0), 0),
-      month: editors.reduce((s4, e7) => s4 + (stats.month.editorUsage[e7]?.tokens || 0), 0),
-      lastMonth: editors.reduce((s4, e7) => s4 + (stats.lastMonth.editorUsage[e7]?.tokens || 0), 0)
-    };
-    const tbody = document.createElement("tbody");
-    if (editors.length === 0) {
-      tbody.append(buildNoDataRow(6, "No editor usage matches the selected provider filter."));
-      return tbody;
-    }
-    const sortedBySignificance = sortEditorsBySignificance(stats, editors);
-    const topEditors = sortedBySignificance.slice(0, TOP_N_EDITORS);
-    const otherEditors = sortedBySignificance.slice(TOP_N_EDITORS);
-    const items = topEditors.map((editor) => toEditorItem(stats, editor));
-    sortEditorItems(items);
-    if (otherEditors.length > 0) {
-      items.push(toOtherEditorItem(stats, otherEditors));
-    }
-    items.forEach((item) => {
-      if (item.otherEditors) {
-        appendOtherEditors(item, totals, onToggleOther, tbody, stats);
-      } else {
-        tbody.append(buildEditorRow(item, totals, false));
-      }
-    });
-    return tbody;
-  }
-  var TOP_N_EDITORS = 5;
-  function buildEditorUsageSection(stats) {
-    const allEditors = /* @__PURE__ */ new Set([
-      ...Object.keys(stats.today.editorUsage),
-      ...Object.keys(stats.last30Days.editorUsage),
-      ...Object.keys(stats.month.editorUsage),
-      ...Object.keys(stats.lastMonth.editorUsage)
-    ]);
-    if (allEditors.size === 0) {
-      return null;
-    }
-    const visibleEditors = Array.from(allEditors).filter((editor) => isVisibleForProviderFilter(editorBillingGroups(stats, editor)));
-    const section = el("div", "section");
-    const heading = iconHeading("h3", "device-desktop", "Usage by Editor");
-    section.append(heading);
-    const table = document.createElement("table");
-    table.className = "stats-table";
-    const editorColHeaders = [
-      { icon: "\u{1F4DD}", text: "Editor", key: "name" },
-      { icon: "\u{1F4C5}", text: "Today", key: "today" },
-      { icon: "\u{1F4C8}", text: "Last 30 Days", key: "last30Days" },
-      { icon: "\u{1F5D3}\uFE0F", text: "Current Month", key: "month" },
-      { icon: "\u{1F4C6}", text: "Previous Month", key: "lastMonth" },
-      { icon: "\u{1F30D}", text: "Projected Year", key: "projected" }
-    ];
-    function rebuildTbody() {
-      const newTbody = buildEditorTbody(stats, visibleEditors, rebuildTbody);
-      const oldTbody = table.querySelector("tbody");
-      if (oldTbody) {
-        table.replaceChild(newTbody, oldTbody);
-      } else {
-        table.append(newTbody);
-      }
-    }
-    const { thead } = buildSortableTableHeader(
-      editorColHeaders,
-      () => editorSortKey,
-      () => editorSortDir,
-      (key) => {
-        if (editorSortKey === key) {
-          editorSortDir = editorSortDir === "asc" ? "desc" : "asc";
-        } else {
-          editorSortKey = key;
-          editorSortDir = key === "name" ? "asc" : "desc";
-        }
-        rebuildTbody();
-        saveSortSettings();
-      }
-    );
-    table.append(thead);
-    rebuildTbody();
-    section.append(table);
-    return section;
-  }
-  var TOP_N_MODELS = 5;
-  function toModelItem(stats, model) {
-    const todayUsage = stats.today.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-    const last30DaysUsage = stats.last30Days.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-    const monthUsage = stats.month.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-    const lastMonthUsage = stats.lastMonth.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-    const todayTotal = todayUsage.inputTokens + todayUsage.outputTokens;
-    const last30DaysTotal = last30DaysUsage.inputTokens + last30DaysUsage.outputTokens;
-    const monthTotal = monthUsage.inputTokens + monthUsage.outputTokens;
-    const lastMonthTotal = lastMonthUsage.inputTokens + lastMonthUsage.outputTokens;
-    return {
-      model,
-      todayTotal,
-      todayInputPct: todayTotal > 0 ? todayUsage.inputTokens / todayTotal * 100 : 0,
-      todayOutputPct: todayTotal > 0 ? todayUsage.outputTokens / todayTotal * 100 : 0,
-      last30DaysTotal,
-      last30DaysInputPct: last30DaysTotal > 0 ? last30DaysUsage.inputTokens / last30DaysTotal * 100 : 0,
-      last30DaysOutputPct: last30DaysTotal > 0 ? last30DaysUsage.outputTokens / last30DaysTotal * 100 : 0,
-      monthTotal,
-      monthInputPct: monthTotal > 0 ? monthUsage.inputTokens / monthTotal * 100 : 0,
-      monthOutputPct: monthTotal > 0 ? monthUsage.outputTokens / monthTotal * 100 : 0,
-      lastMonthTotal,
-      lastMonthInputPct: lastMonthTotal > 0 ? lastMonthUsage.inputTokens / lastMonthTotal * 100 : 0,
-      lastMonthOutputPct: lastMonthTotal > 0 ? lastMonthUsage.outputTokens / lastMonthTotal * 100 : 0,
-      projected: Math.round(calculateProjection(last30DaysTotal)),
-      charsPerToken: getCharsPerToken(model)
-    };
-  }
-  function toOtherModelItem(stats, otherModels) {
-    const sumUsage = (period) => otherModels.reduce((acc, m2) => {
-      const u3 = stats[period].modelUsage[m2] || { inputTokens: 0, outputTokens: 0 };
-      return { inputTokens: acc.inputTokens + u3.inputTokens, outputTokens: acc.outputTokens + u3.outputTokens };
-    }, { inputTokens: 0, outputTokens: 0 });
-    const todayUsage = sumUsage("today");
-    const last30DaysUsage = sumUsage("last30Days");
-    const monthUsage = sumUsage("month");
-    const lastMonthUsage = sumUsage("lastMonth");
-    const todayTotal = todayUsage.inputTokens + todayUsage.outputTokens;
-    const last30DaysTotal = last30DaysUsage.inputTokens + last30DaysUsage.outputTokens;
-    const monthTotal = monthUsage.inputTokens + monthUsage.outputTokens;
-    const lastMonthTotal = lastMonthUsage.inputTokens + lastMonthUsage.outputTokens;
-    return {
-      model: `Other (${otherModels.length} model${otherModels.length !== 1 ? "s" : ""})`,
-      todayTotal,
-      todayInputPct: todayTotal > 0 ? todayUsage.inputTokens / todayTotal * 100 : 0,
-      todayOutputPct: todayTotal > 0 ? todayUsage.outputTokens / todayTotal * 100 : 0,
-      last30DaysTotal,
-      last30DaysInputPct: last30DaysTotal > 0 ? last30DaysUsage.inputTokens / last30DaysTotal * 100 : 0,
-      last30DaysOutputPct: last30DaysTotal > 0 ? last30DaysUsage.outputTokens / last30DaysTotal * 100 : 0,
-      monthTotal,
-      monthInputPct: monthTotal > 0 ? monthUsage.inputTokens / monthTotal * 100 : 0,
-      monthOutputPct: monthTotal > 0 ? monthUsage.outputTokens / monthTotal * 100 : 0,
-      lastMonthTotal,
-      lastMonthInputPct: lastMonthTotal > 0 ? lastMonthUsage.inputTokens / lastMonthTotal * 100 : 0,
-      lastMonthOutputPct: lastMonthTotal > 0 ? lastMonthUsage.outputTokens / lastMonthTotal * 100 : 0,
-      projected: Math.round(calculateProjection(last30DaysTotal)),
-      charsPerToken: 0,
-      otherModels
-    };
-  }
-  function sortModelItems(items) {
-    items.sort((a3, b3) => {
-      let cmp;
-      switch (modelSortKey) {
-        case "name":
-          cmp = a3.model.localeCompare(b3.model);
-          break;
-        case "today":
-          cmp = a3.todayTotal - b3.todayTotal;
-          break;
-        case "last30Days":
-          cmp = a3.last30DaysTotal - b3.last30DaysTotal;
-          break;
-        case "month":
-          cmp = a3.monthTotal - b3.monthTotal;
-          break;
-        case "lastMonth":
-          cmp = a3.lastMonthTotal - b3.lastMonthTotal;
-          break;
-        case "projected":
-          cmp = a3.projected - b3.projected;
-          break;
-        default:
-          cmp = 0;
-      }
-      return modelSortDir === "asc" ? cmp : -cmp;
-    });
-  }
-  function sortModelsBySignificance(stats, models) {
-    return [...models].sort((a3, b3) => {
-      if (modelSortKey === "name") {
-        return a3.localeCompare(b3);
-      }
-      const aItem = toModelItem(stats, a3);
-      const bItem = toModelItem(stats, b3);
-      let cmp;
-      switch (modelSortKey) {
-        case "today":
-          cmp = aItem.todayTotal - bItem.todayTotal;
-          break;
-        case "last30Days":
-          cmp = aItem.last30DaysTotal - bItem.last30DaysTotal;
-          break;
-        case "month":
-          cmp = aItem.monthTotal - bItem.monthTotal;
-          break;
-        case "lastMonth":
-          cmp = aItem.lastMonthTotal - bItem.lastMonthTotal;
-          break;
-        case "projected":
-          cmp = aItem.projected - bItem.projected;
-          break;
-        default:
-          cmp = 0;
-      }
-      return -cmp || a3.localeCompare(b3);
-    });
-  }
-  function buildModelRowEl(item, isOtherChild) {
-    const tr = document.createElement("tr");
-    if (isOtherChild) {
-      tr.style.opacity = "0.85";
-    }
-    const labelTd = document.createElement("td");
-    const labelWrapper = document.createElement("span");
-    labelWrapper.className = "metric-label";
-    if (isOtherChild) {
-      const indentSpan = document.createElement("span");
-      indentSpan.style.cssText = "display:inline-block;width:12px";
-      labelWrapper.append(indentSpan);
-    }
-    const charsSpan = document.createElement("span");
-    charsSpan.style.cssText = "color:#9aa0a6;font-size:11px;font-weight:500;";
-    charsSpan.textContent = `(~${item.charsPerToken.toFixed(1)} chars/tk)`;
-    labelWrapper.append(document.createTextNode(`${getModelDisplayName(item.model)} `), charsSpan);
-    labelTd.append(labelWrapper);
-    tr.append(
-      labelTd,
-      buildValueCell(formatCompact(item.todayTotal), `\u2191${formatPercent(item.todayInputPct)} \u2193${formatPercent(item.todayOutputPct)}`),
-      buildValueCell(formatCompact(item.last30DaysTotal), `\u2191${formatPercent(item.last30DaysInputPct)} \u2193${formatPercent(item.last30DaysOutputPct)}`),
-      buildValueCell(formatCompact(item.monthTotal), `\u2191${formatPercent(item.monthInputPct)} \u2193${formatPercent(item.monthOutputPct)}`),
-      buildValueCell(formatCompact(item.lastMonthTotal), `\u2191${formatPercent(item.lastMonthInputPct)} \u2193${formatPercent(item.lastMonthOutputPct)}`),
-      buildValueCell(formatCompact(item.projected))
-    );
-    return tr;
-  }
-  function appendOtherModels(item, onToggleOther, tbody, stats) {
-    const otherModels = item.otherModels ?? [];
-    const pct = (part, total) => total > 0 ? part / total * 100 : 0;
-    const otherTr = document.createElement("tr");
-    otherTr.style.cursor = "pointer";
-    otherTr.style.background = "var(--list-hover-bg)";
-    otherTr.title = modelOtherExpanded ? "Collapse other models" : "Expand other models";
-    const otherLabelWrapper = document.createElement("span");
-    otherLabelWrapper.className = "metric-label";
-    const otherNameSpan = document.createElement("span");
-    otherNameSpan.style.cssText = "color:var(--text-secondary);font-weight:600;";
-    otherNameSpan.textContent = `\u{1F4E6} ${item.model}`;
-    const otherToggleSpan = document.createElement("span");
-    otherToggleSpan.style.cssText = "font-size:10px;color:var(--text-muted)";
-    otherToggleSpan.textContent = ` ${modelOtherExpanded ? "\u25B2" : "\u25BC"}`;
-    otherLabelWrapper.append(otherNameSpan, otherToggleSpan);
-    const otherLabelTd = document.createElement("td");
-    otherLabelTd.append(otherLabelWrapper);
-    const mkOtherTd = (total, inputPct, outputPct) => {
-      const td = buildValueCell(formatCompact(total));
-      if (total > 0) {
-        td.append(el("div", "muted", `\u2191${formatPercent(inputPct)} \u2193${formatPercent(outputPct)}`));
-      }
-      return td;
-    };
-    otherTr.append(
-      otherLabelTd,
-      mkOtherTd(item.todayTotal, item.todayInputPct, item.todayOutputPct),
-      mkOtherTd(item.last30DaysTotal, item.last30DaysInputPct, item.last30DaysOutputPct),
-      mkOtherTd(item.monthTotal, item.monthInputPct, item.monthOutputPct),
-      mkOtherTd(item.lastMonthTotal, item.lastMonthInputPct, item.lastMonthOutputPct),
-      buildValueCell(formatCompact(item.projected))
-    );
-    otherTr.addEventListener("click", () => {
-      modelOtherExpanded = !modelOtherExpanded;
-      saveSortSettings();
-      onToggleOther();
-    });
-    tbody.append(otherTr);
-    if (modelOtherExpanded) {
-      const otherItems = otherModels.map((m2) => toModelItem(stats, m2));
-      sortModelItems(otherItems);
-      otherItems.forEach((childItem) => tbody.append(buildModelRowEl(childItem, true)));
-    }
-  }
-  function buildModelTbody(stats, visibleModels, onToggleOther) {
-    const sortedBySignificance = sortModelsBySignificance(stats, visibleModels);
-    const topModels = sortedBySignificance.slice(0, TOP_N_MODELS);
-    const otherModels = sortedBySignificance.slice(TOP_N_MODELS);
-    const items = topModels.map((m2) => toModelItem(stats, m2));
-    sortModelItems(items);
-    if (otherModels.length > 0) {
-      items.push(toOtherModelItem(stats, otherModels));
-    }
-    const tbody = document.createElement("tbody");
-    items.forEach((item) => {
-      if (item.otherModels) {
-        appendOtherModels(item, onToggleOther, tbody, stats);
-      } else {
-        tbody.append(buildModelRowEl(item, false));
-      }
-    });
-    return tbody;
-  }
-  function buildModelUsageSection(stats) {
-    const allModels = /* @__PURE__ */ new Set([
-      ...Object.keys(stats.today.modelUsage),
-      ...Object.keys(stats.last30Days.modelUsage),
-      ...Object.keys(stats.month.modelUsage),
-      ...Object.keys(stats.lastMonth.modelUsage)
-    ]);
-    if (allModels.size === 0) {
-      return null;
-    }
-    const visibleModels = new Set(Array.from(allModels).filter((model) => isVisibleForProviderFilter(modelBillingGroups(stats, model))));
-    const section = el("div", "section");
-    const heading = iconHeading("h3", "symbol-numeric", "Model Usage (Tokens)");
-    section.append(heading);
-    const table = document.createElement("table");
-    table.className = "stats-table";
-    if (visibleModels.size === 0) {
-      const tbody = document.createElement("tbody");
-      tbody.append(buildNoDataRow(6, "No model usage matches the selected provider filter."));
-      table.append(tbody);
-      section.append(table);
-      return section;
-    }
-    const modelColHeaders = [
-      { icon: "\u{1F9E0}", text: "Model", key: "name" },
-      { icon: "\u{1F4C5}", text: "Today", key: "today" },
-      { icon: "\u{1F4C8}", text: "Last 30 Days", key: "last30Days" },
-      { icon: "\u{1F5D3}\uFE0F", text: "Current Month", key: "month" },
-      { icon: "\u{1F4C6}", text: "Previous Month", key: "lastMonth" },
-      { icon: "\u{1F30D}", text: "Projected Year", key: "projected" }
-    ];
-    function rebuildTbody() {
-      const newTbody = buildModelTbody(stats, Array.from(visibleModels), rebuildTbody);
-      const oldTbody = table.querySelector("tbody");
-      if (oldTbody) {
-        table.replaceChild(newTbody, oldTbody);
-      } else {
-        table.append(newTbody);
-      }
-    }
-    const { thead } = buildSortableTableHeader(
-      modelColHeaders,
-      () => modelSortKey,
-      () => modelSortDir,
-      (key) => {
-        if (modelSortKey === key) {
-          modelSortDir = modelSortDir === "asc" ? "desc" : "asc";
-        } else {
-          modelSortKey = key;
-          modelSortDir = key === "name" ? "asc" : "desc";
-        }
-        rebuildTbody();
-        saveSortSettings();
-      }
-    );
-    table.append(thead);
-    rebuildTbody();
-    section.append(table);
-    return section;
-  }
-  function buildEmptyStateSection() {
-    const section = el("div", "section");
-    const inner = el("div", "empty-state");
-    const title = el("div", "empty-state-title", "\u{1F44B} Welcome to AI Engineering Fluency");
-    const desc = el(
-      "p",
-      "empty-state-description",
-      "This extension tracks AI token usage by reading session log files stored locally by supported tools. No token data has been found yet."
-    );
-    const toolsLabel = document.createElement("p");
-    toolsLabel.className = "empty-state-description";
-    const toolsLabelStrong = document.createElement("strong");
-    toolsLabelStrong.textContent = "Supported tools & editors:";
-    toolsLabel.append(toolsLabelStrong);
-    const toolsList = document.createElement("ul");
-    toolsList.className = "empty-state-steps";
-    const toolsTexts = [
-      "\u{1F680} Antigravity \u2014 Google's Gemini-powered desktop IDE",
-      "\u{1F916} Claude Code \u2014 Anthropic's CLI coding agent",
-      "\u{1F4BB} Copilot CLI \u2014 GitHub Copilot in the terminal",
-      "\u{1F5B1}\uFE0F Cursor, \u{1F30A} Windsurf \u2014 built-in AI chat",
-      "\u{1F48E} Gemini CLI \u2014 Google's open-source CLI coding agent",
-      "\u{1F7E2} OpenCode, \u{1F980} Crush \u2014 terminal-based coding agents",
-      "\u03C0 Pi \u2014 Mistral-powered terminal coding agent",
-      "\u{1F5A5}\uFE0F Visual Studio 2022+ \u2014 GitHub Copilot Chat extension",
-      "\u{1F499} VS Code / VS Code Insiders / VSCodium \u2014 GitHub Copilot Chat extension"
-    ];
-    toolsTexts.forEach((text) => {
-      const li = document.createElement("li");
-      li.textContent = text;
-      toolsList.append(li);
-    });
-    const stepsLabel = document.createElement("p");
-    stepsLabel.className = "empty-state-description";
-    const stepsLabelStrong = document.createElement("strong");
-    stepsLabelStrong.textContent = "To get started:";
-    stepsLabel.append(stepsLabelStrong);
-    const steps = document.createElement("ol");
-    steps.className = "empty-state-steps";
-    const stepTexts = [
-      "Use any of the supported tools or editors listed above to interact with an AI model.",
-      "For GitHub Copilot in VS Code: open the Copilot Chat panel (Ctrl+Alt+I / Cmd+Alt+I) and start a conversation.",
-      "For terminal agents (Claude Code, Gemini CLI, Antigravity, Pi, OpenCode, Copilot CLI): run a coding session in your terminal.",
-      "Click the \u{1F504} Refresh button above to reload the stats after your first session."
-    ];
-    stepTexts.forEach((text) => {
-      const li = document.createElement("li");
-      li.textContent = text;
-      steps.append(li);
-    });
-    const note = el(
-      "div",
-      "empty-state-note",
-      "\u{1F4A1} If you have been using one of the supported tools but still see no data, open the Diagnostics panel (\u{1F50D} Diagnostics button above) to verify that session files are being discovered correctly."
-    );
-    inner.append(title, desc, toolsLabel, toolsList, stepsLabel, steps, note);
-    section.append(inner);
-    return section;
-  }
-  function wireButtons() {
-    const refresh = document.getElementById("btn-refresh");
-    const chart = document.getElementById("btn-chart");
-    const usage = document.getElementById("btn-usage");
-    const diagnostics = document.getElementById("btn-diagnostics");
-    refresh?.addEventListener("click", () => vscode.postMessage({ command: "refresh" }));
-    chart?.addEventListener("click", () => vscode.postMessage({ command: "showChart" }));
-    usage?.addEventListener("click", () => vscode.postMessage({ command: "showUsageAnalysis" }));
-    diagnostics?.addEventListener("click", () => vscode.postMessage({ command: "showDiagnostics" }));
-    const maturity = document.getElementById("btn-maturity");
-    maturity?.addEventListener("click", () => vscode.postMessage({ command: "showMaturity" }));
-    const dashboard = document.getElementById("btn-dashboard");
-    dashboard?.addEventListener("click", () => vscode.postMessage({ command: "showDashboard" }));
-    const environmental = document.getElementById("btn-environmental");
-    environmental?.addEventListener("click", () => vscode.postMessage({ command: "showEnvironmental" }));
-    const efficiency = document.getElementById("btn-efficiency");
-    efficiency?.addEventListener("click", () => vscode.postMessage({ command: "showEfficiency" }));
-    wireExtensionPointButtons(vscode);
-  }
-  async function bootstrap() {
-    console.log("[CopilotTokenTracker] bootstrap called");
-    await Promise.resolve().then(() => (init_vscode_button2(), vscode_button_exports));
-    await Promise.resolve().then(() => (init_vscode_badge2(), vscode_badge_exports));
-    if (initialData) {
-      console.log("[CopilotTokenTracker] Rendering details with initialData:", initialData);
-      render(initialData);
-    } else {
-      console.warn("[CopilotTokenTracker] No initialData found, rendering fallback.");
-      const root = document.getElementById("root");
-      if (root) {
-        root.textContent = "";
-        const fallback = document.createElement("div");
-        fallback.style.padding = "16px";
-        fallback.style.color = "#e7e7e7";
-        fallback.textContent = "No data available.";
-        root.append(fallback);
-      }
-    }
-  }
-  registerMessageHandler((message) => {
-    if (message.command === "updateStats") {
-      render(message.data);
-    }
-  });
-  void bootstrap();
-})();
+.plan-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	align-self: flex-start;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 999px;
+	padding: 2px 10px;
+	font-size: 11px;
+	color: var(--text-secondary);
+	cursor: help;
+}
+
+.provider-panel-hint {
+	color: var(--text-secondary);
+	font-size: 11px;
+	margin: -4px 0 10px;
+}
+
+.provider-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	gap: 10px;
+	text-align: center;
+}
+
+.provider-card {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	padding: 12px;
+	box-shadow: 0 4px 10px var(--shadow-color);
+	text-align: center;
+	cursor: pointer;
+	transition: background-color 0.1s ease, opacity 0.1s ease;
+}
+
+.provider-card:hover {
+	background: var(--list-hover-bg);
+}
+
+.provider-card-excluded {
+	opacity: 0.45;
+}
+
+.provider-card-total {
+	cursor: default;
+	border-style: dashed;
+}
+
+.provider-card-total:hover {
+	background: var(--bg-secondary);
+}
+
+.provider-card-label {
+	color: var(--text-secondary);
+	font-size: 11px;
+	margin-bottom: 6px;
+}
+
+.provider-card-value {
+	color: var(--text-primary);
+	font-size: 18px;
+	font-weight: 700;
+}
+
+.provider-card-sub {
+	color: var(--text-secondary);
+	font-size: 10px;
+	margin-top: 4px;
+}
+
+.no-data-row td {
+	text-align: center;
+	color: var(--text-secondary);
+	font-size: 12px;
+	padding: 14px;
+	font-style: italic;
+}
+
+.sections {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.section {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	padding: 12px;
+	box-shadow: 0 4px 10px var(--shadow-color);
+}
+
+.section h3 {
+	margin: 0 0 10px;
+	font-size: 14px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--text-primary);
+	letter-spacing: 0.2px;
+}
+
+.stats-table {
+	width: 100%;
+	border-collapse: collapse;
+	table-layout: fixed;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.stats-table thead {
+	background: var(--list-hover-bg);
+}
+
+.stats-table th,
+.stats-table td {
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--border-subtle);
+	vertical-align: middle;
+}
+
+.stats-table th {
+	text-align: left;
+	color: var(--text-secondary);
+	font-weight: 700;
+	font-size: 12px;
+	letter-spacing: 0.1px;
+}
+
+.stats-table td {
+	color: var(--text-primary);
+	font-size: 12px;
+}
+
+.stats-table th.align-right,
+.stats-table td.align-right {
+	text-align: right;
+}
+
+.stats-table tr.group-row td {
+	background: var(--list-hover-bg);
+	color: var(--text-secondary);
+	font-size: 12px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+	padding: 8px 12px;
+	border-top: 1px solid var(--border-color);
+	border-bottom: 1px solid var(--border-color);
+}
+
+/* First group sits right under the table header, no extra top rule needed */
+.stats-table tbody tr.group-row:first-child td {
+	border-top: none;
+}
+
+.metric-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-weight: 600;
+}
+
+.period-header {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	color: var(--text-secondary);
+}
+
+.align-right .period-header {
+	justify-content: flex-end;
+}
+
+.value-right {
+	text-align: right;
+}
+
+.muted {
+	color: var(--text-muted);
+	font-size: 11px;
+	margin-top: 4px;
+}
+
+.notes {
+	margin: 4px 0 0;
+	padding-left: 16px;
+	color: var(--text-secondary);
+}
+
+.notes li {
+	margin: 4px 0;
+	line-height: 1.4;
+}
+
+.footer {
+	color: var(--text-muted);
+	font-size: 11px;
+	margin-top: 6px;
+}
+
+.empty-state {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 20px;
+}
+
+.empty-state-title {
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.empty-state-description {
+	color: var(--text-secondary);
+	font-size: 13px;
+	line-height: 1.5;
+	margin: 0;
+}
+
+.empty-state-steps {
+	margin: 0;
+	padding-left: 20px;
+	color: var(--text-secondary);
+	font-size: 13px;
+	line-height: 1.6;
+}
+
+.empty-state-steps li {
+	margin: 4px 0;
+}
+
+.empty-state-note {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 6px;
+	padding: 10px 14px;
+	color: var(--text-secondary);
+	font-size: 12px;
+	line-height: 1.5;
+}
+`;var et=new Set(["VS Code","VS Code Insiders","VS Code Exploration","VS Code Server","VS Code Server (Insiders)","VSCodium","Visual Studio","JetBrains","Copilot CLI","Copilot CLI (App)","MS Scout (Copilot CLI)"]);var Fs=1/1e11;var kn=[["anthropic","Anthropic"],["claude","Anthropic"],["codestral","Mistral AI"],["devstral","Mistral AI"],["gemini","Google"],["goldeneye","xAI"],["google","Google"],["gpt","OpenAI"],["grok","xAI"],["magistral","Mistral AI"],["mai-","Microsoft"],["ministral","Mistral AI"],["mistral","Mistral AI"],["o1","OpenAI"],["o3","OpenAI"],["o4","OpenAI"],["pixtral","Mistral AI"],["qwen","Alibaba"],["raptor","xAI"]];function Tn(t){let e=De(t);if(e)return e;let o=we(t).flatMap(n=>kn.filter(([s])=>n.toLowerCase().startsWith(s))).at(0);return o?o[1]:"Other"}function tt(t,e){let o=De(e);return o||(et.has(t)?"GitHub Copilot":Tn(e))}var P=acquireVsCodeApi(),z=Y("__INITIAL_DETAILS__");console.log("[CopilotTokenTracker] details webview loaded");if(z?.localization){Lt(z.localization);let t=z.localization.__language__||"en";Nt(t),console.log("[CopilotTokenTracker] Webview localization initialized for language:",t)}var V=z?.sortSettings,W=V?.editor?.key??"name",ce=V?.editor?.dir??"asc",q=V?.model?.key??"name",le=V?.model?.dir??"asc",ae=V?.modelOtherExpanded??!1,ie=V?.editorOtherExpanded??!1,j=new Set(V?.excludedProviders??[]),Tt=null;function M(t){return t/30*365.25}function C(t,e){let o=document.createElement("td");return o.className="value-right align-right",o.textContent=t,e!==void 0&&o.append(b("div","muted",e)),o}function Fn(t,e,o,n){let s=document.createElement("td"),r=document.createElement("span");r.className="metric-label";let a=document.createElement("span");a.textContent=t,o&&(a.style.color=o);let c=document.createElement("span");if(c.textContent=e,n){r.title=n,r.style.cursor="help";let i=document.createElement("span");i.textContent=" \u2139\uFE0F",i.style.cssText="font-size:0.75em; opacity:0.6;",c.append(i)}return r.append(a,c),s.append(r),s}function zo(t,e,o,n){let s=document.createElement("thead"),r=document.createElement("tr"),a=[];function c(){a.forEach((i,l)=>{i.textContent=`${t[l].icon} ${t[l].text}${Ho(t[l].key,e(),o())}`})}return t.forEach((i,l)=>{let d=document.createElement("th");d.className=l===0?"":"align-right",d.style.cursor="pointer",d.style.userSelect="none",d.title=`Sort by ${i.text}`;let u=b("div","period-header");u.textContent=`${i.icon} ${i.text}${Ho(i.key,e(),o())}`,d.append(u),a.push(u),d.addEventListener("click",()=>{n(i.key),c()}),r.append(d)}),s.append(r),{thead:s,updateHeaders:c}}function vt(t){Rt(t.compactNumbers!==!1),Tt=t;let e=document.getElementById("root");if(!e)return;let o=xt(t),n=Math.round(M(t.last30Days.tokens+t.last30Days.thinkingTokens)),s=Math.round(M(t.last30Days.sessions)),r=M(t.last30Days.co2),a=M(t.last30Days.waterUsage),c=M(Se(t.last30Days,o)),i=M(t.last30Days.estimatedCostCopilot??0),l=M(t.last30Days.treesEquivalent);Kn(e,t,{projectedTokens:n,projectedSessions:s,projectedCo2:r,projectedWater:a,projectedCost:c,projectedCostCopilot:i,projectedTrees:l}),gs()}function Hn(){Tt&&vt(Tt)}function Kn(t,e,o){let n=new Date(e.lastUpdated);t.replaceChildren();let s=document.createElement("style");s.textContent=Gt;let r=document.createElement("style");r.textContent=zt;let a=b("div","container"),c=b("div","header"),i=b("div","header-left");i.append(b("div","title","AI Engineering Fluency"));let l=zn(e);l&&i.append(l);let d=b("div","button-row");d.append(...jt("btn-details",!!e.backendConfigured).map(U=>It(U))),c.append(i,d);let u=b("div","footer",`Last updated: ${n.toLocaleString()} \xB7 Updates every 5 minutes`),p=b("div","sections");if((e.today.tokens??0)===0&&(e.last30Days.tokens??0)===0&&(e.lastMonth.tokens??0)===0)p.append(ps());else{let U=Zn(e);U&&p.append(U)}p.append(Vn(e,o));let h=as(e);h&&p.append(h);let A=us(e);A&&p.append(A),a.append(c,p,u),t.append(s,r,a)}function Wo(t){return Object.values(t.modelUsage).reduce((e,o)=>e+o.inputTokens,0)}function qo(t){return Object.values(t.modelUsage).reduce((e,o)=>e+o.outputTokens,0)}function Ct(t){return(t.actualTokens||0)>0}function Ge(t){return Ct(t)?S((t.actualTokens-t.estimatedTokens)/t.actualTokens*100):"\u2014"}function ze(t){return Ct(t)?f(Wo(t)):"\u2014"}function We(t){return Ct(t)?f(qo(t)):"\u2014"}function qe(t){let e=Wo(t)+qo(t);return(t.actualTokens??0)>0?f(t.tokens+t.thinkingTokens):f(e>0?e:t.tokens)}function Gn(t){return t.today.cachedTokens||t.last30Days.cachedTokens||t.month.cachedTokens||t.lastMonth.cachedTokens?[{label:"Cached tokens",labelTooltip:'Cache-read tokens \u2014 already included in "Input tokens" above, shown separately because they are billed at a lower rate.',icon:"\u26A1",color:"#34d399",today:f(t.today.cachedTokens||0),last30Days:f(t.last30Days.cachedTokens||0),month:f(t.month.cachedTokens||0),lastMonth:f(t.lastMonth.cachedTokens||0),projected:"\u2014"}]:[]}function zn(t){if(!t.copilotPlan)return null;let e=t.copilotPlan,o=e.monthlyAiCreditsUsd>0?`$${e.monthlyAiCreditsUsd} credits/month`:"no credits",n=b("div","plan-badge",`\u{1F3F7}\uFE0F ${e.planName} \xB7 ${o}`);return n.title=`Your active GitHub Copilot subscription plan (ID: ${e.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`,n}function Wn(t,e){let o=xt(t),n=[{label:"Total tokens",labelTooltip:"All LLM API tokens counted across every call in this period \u2014 matches the status bar. When debug logs are available this is the definitive total; otherwise it falls back to per-model attribution or the text-based estimate.",icon:"\u{1F7E3}",color:"#c37bff",today:qe(t.today),last30Days:qe(t.last30Days),month:qe(t.month),lastMonth:qe(t.lastMonth),projected:f(e.projectedTokens)},{label:"Input tokens",labelTooltip:"Total prompt tokens sent to the model, including any cache-read tokens (shown separately below).",icon:"\u2B06\uFE0F",color:"#c37bff",today:ze(t.today),last30Days:ze(t.last30Days),month:ze(t.month),lastMonth:ze(t.lastMonth),projected:"\u2014"},{label:"Output tokens",icon:"\u2B07\uFE0F",color:"#c37bff",today:We(t.today),last30Days:We(t.last30Days),month:We(t.month),lastMonth:We(t.lastMonth),projected:"\u2014"},...Gn(t),{label:"Tokens (user estimated)",icon:"\u{1F4DD}",color:"#b39ddb",today:f(t.today.estimatedTokens),last30Days:f(t.last30Days.estimatedTokens),month:f(t.month.estimatedTokens),lastMonth:f(t.lastMonth.estimatedTokens),projected:"\u2014"},{label:"Service overhead %",icon:"\u2601\uFE0F",color:"#90a4ae",today:Ge(t.today),last30Days:Ge(t.last30Days),month:Ge(t.month),lastMonth:Ge(t.lastMonth),projected:"\u2014"},{label:"Thinking tokens",icon:"\u{1F9E0}",color:"#a78bfa",today:f(t.today.thinkingTokens||0),last30Days:f(t.last30Days.thinkingTokens||0),month:f(t.month.thinkingTokens||0),lastMonth:f(t.lastMonth.thinkingTokens||0),projected:"\u2014"}],r=[...Qn(o)?[]:[{label:"Estimated cost (selected providers)",labelTooltip:"Sum of estimated cost across the providers selected in the Cost by Provider filter below \u2014 GitHub Copilot uses UBB AI Credit rates, other providers use their own API pricing.",icon:"\u{1F4B5}",color:"#7ce38b",today:E(Se(t.today,o)),last30Days:E(Se(t.last30Days,o)),month:E(Se(t.month,o)),lastMonth:E(Se(t.lastMonth,o)),projected:E(e.projectedCost)}],{label:"Estimated cost (GitHub Copilot UBB)",labelTooltip:"Based on GitHub Copilot AI Credit rates (1 credit = $0.01) \u2014 this is what Copilot will bill you. UBB = Usage Based Billing.",icon:"\u{1F7E2}",color:"#7ce38b",today:E(t.today.estimatedCostCopilot??0),last30Days:E(t.last30Days.estimatedCostCopilot??0),month:E(t.month.estimatedCostCopilot??0),lastMonth:E(t.lastMonth.estimatedCostCopilot??0),projected:E(e.projectedCostCopilot??0)}],a=[{label:"Sessions",icon:"\u{1F4C2}",color:"#66aaff",today:x(t.today.sessions),last30Days:x(t.last30Days.sessions),month:x(t.month.sessions),lastMonth:x(t.lastMonth.sessions),projected:x(e.projectedSessions)},{label:"Sessions with sub-agents",labelTooltip:"Sessions that delegated work to sub-agents in this period (task/read_agent/write_agent/list_agents, runSubagent, delegate_* tool calls detected in the session logs).",icon:"\u{1F916}",color:"#66aaff",today:x(t.today.subAgentSessions??0),last30Days:x(t.last30Days.subAgentSessions??0),month:x(t.month.subAgentSessions??0),lastMonth:x(t.lastMonth.subAgentSessions??0),projected:"\u2014"},{label:"Average interactions/session",icon:"\u{1F4AC}",color:"#8ce0ff",today:x(t.today.avgInteractionsPerSession),last30Days:x(t.last30Days.avgInteractionsPerSession),month:x(t.month.avgInteractionsPerSession),lastMonth:x(t.lastMonth.avgInteractionsPerSession),projected:"\u2014"},{label:"Average tokens/session",icon:"\u{1F522}",color:"#7ce38b",today:f(t.today.avgTokensPerSession),last30Days:f(t.last30Days.avgTokensPerSession),month:f(t.month.avgTokensPerSession),lastMonth:f(t.lastMonth.avgTokensPerSession),projected:"\u2014"}];return[{heading:"\u{1F522} Tokens",rows:n},{heading:"\u{1F4B0} Cost",rows:r},{heading:"\u{1F4AC} Activity",rows:a}]}function qn(t){let e=document.createElement("tr");e.className="group-row";let o=document.createElement("td");return o.colSpan=6,o.textContent=t,e.append(o),e}function Vo(t,e){let o=document.createElement("tr");o.className="no-data-row";let n=document.createElement("td");return n.colSpan=t,n.textContent=e,o.append(n),o}function Vn(t,e){let o=b("div","section");o.append(de("h3","graph","Key Metrics"));let n=document.createElement("table");n.className="stats-table";let s=document.createElement("thead"),r=document.createElement("tr");[{icon:"\u{1F4CA}",text:"Metric"},{icon:"\u{1F4C5}",text:"Today"},{icon:"\u{1F4C8}",text:"Last 30 Days"},{icon:"\u{1F5D3}\uFE0F",text:"Current Month"},{icon:"\u{1F4C6}",text:"Previous Month"},{icon:"\u{1F30D}",text:"Projected Year"}].forEach((i,l)=>{let d=document.createElement("th");d.className=l===0?"":"align-right";let u=b("div","period-header");u.textContent=`${i.icon} ${i.text}`,d.append(u),r.append(d)}),s.append(r),n.append(s);let c=document.createElement("tbody");return Wn(t,e).forEach(i=>{c.append(qn(i.heading)),i.rows.forEach(l=>{let d=document.createElement("tr");d.append(Fn(l.icon,l.label,l.color,l.labelTooltip),C(l.today),C(l.last30Days),C(l.month),C(l.lastMonth),C(l.projected)),c.append(d)})}),n.append(c),o.append(n),o}var Fo={"GitHub Copilot":"\u{1F419}",Anthropic:"\u{1F170}\uFE0F",Google:"\u{1F537}",OpenAI:"\u{1F7E2}","Mistral AI":"\u{1F32C}\uFE0F",xAI:"\u2716\uFE0F",Microsoft:"\u{1FA9F}",Alibaba:"\u{1F409}",Other:"\u2754"};function Yn(t){return Fo[t]?Fo[t]:Dt(t)?"\u{1F9E9}":"\u{1F4B5}"}function Jn(t,e){let o=j.has(e),n=b("div",`provider-card${o?" provider-card-excluded":""}`);n.tabIndex=0,n.setAttribute("role","button"),n.setAttribute("aria-pressed",String(!o)),n.title=o?`${e} is hidden \u2014 click to show it again and include it in the totals below.`:`Click to hide ${e} \u2014 filters it out of the totals and the Editor/Model usage lists below.`,n.append(b("div","provider-card-label",`${Yn(e)} ${e}`),b("div","provider-card-value",E(t.month.billingGroupCosts?.[e]||0)),b("div","provider-card-sub","Cost this month"));let s=()=>{j.has(e)?j.delete(e):j.add(e),xe(),Hn()};return n.addEventListener("click",s),n.addEventListener("keydown",r=>{(r.key==="Enter"||r.key===" ")&&(r.preventDefault(),s())}),n}function Xn(t,e){let o=Yo(e),n=b("div","provider-card provider-card-total");return n.title=`Sum of ${o.length} of ${e.length} selected provider(s).`,n.append(b("div","provider-card-label","\u2211 Total (selected)"),b("div","provider-card-value",E(Jo(t.month.billingGroupCosts,o))),b("div","provider-card-sub","Cost this month")),n}function Zn(t){let o=xt(t).filter(r=>(t.month.billingGroupCosts?.[r]??0)>0);if(o.length<=1)return null;let n=b("div","section");n.append(de("h3","credit-card","Cost by Provider")),n.append(b("div","provider-panel-hint","Click a provider to hide/show it \u2014 this also filters the Editor & Model usage lists below."));let s=b("div","provider-cards");return s.append(Xn(t,o)),o.forEach(r=>s.append(Jn(t,r))),n.append(s),n}function Ho(t,e,o){return t!==e?" \u2195":o==="asc"?" \u2191":" \u2193"}function xe(){P.postMessage({command:"saveSortSettings",settings:{editor:{key:W,dir:ce},model:{key:q,dir:le},modelOtherExpanded:ae,editorOtherExpanded:ie,excludedProviders:Array.from(j)}})}var St=["today","last30Days","month","lastMonth"];function xt(t){let e=new Set;return St.forEach(o=>{Object.keys(t[o].billingGroupCosts??{}).forEach(n=>e.add(n))}),Array.from(e).sort((o,n)=>o==="GitHub Copilot"?-1:n==="GitHub Copilot"?1:o.localeCompare(n))}function Qn(t){return t.every(e=>e==="GitHub Copilot")}function Yo(t){return t.filter(e=>!j.has(e))}function Jo(t,e){return t?e.reduce((o,n)=>o+(t[n]||0),0):0}function Se(t,e){return e.length===0?t.estimatedCostCopilot??t.estimatedCost??0:Jo(t.billingGroupCosts,Yo(e))}function es(t,e){let o=new Set;return St.forEach(n=>{let s=t[n].editorModelUsage?.[e];s&&Object.keys(s).forEach(r=>o.add(tt(e,r)))}),o}function ts(t,e){let o=new Set;return St.forEach(n=>{let s=t[n].editorModelUsage;s&&Object.keys(s).forEach(r=>{s[r][e]&&o.add(tt(r,e))})}),o}function Xo(t){return j.size===0||t.size===0?!0:Array.from(t).some(e=>!j.has(e))}function Ve(t,e){let o=t.today.editorUsage[e]||{tokens:0,sessions:0},n=t.last30Days.editorUsage[e]||{tokens:0,sessions:0},s=t.month.editorUsage[e]||{tokens:0,sessions:0},r=t.lastMonth.editorUsage[e]||{tokens:0,sessions:0};return{editor:e,todayUsage:o,last30DaysUsage:n,monthUsage:s,lastMonthUsage:r,projectedTokens:Math.round(M(n.tokens)),projectedSessions:Math.round(M(n.sessions))}}function os(t,e){let o=c=>e.reduce((i,l)=>{let d=t[c].editorUsage[l]||{tokens:0,sessions:0};return{tokens:i.tokens+d.tokens,sessions:i.sessions+d.sessions}},{tokens:0,sessions:0}),n=o("today"),s=o("last30Days"),r=o("month"),a=o("lastMonth");return{editor:`Other (${e.length} editor${e.length!==1?"s":""})`,todayUsage:n,last30DaysUsage:s,monthUsage:r,lastMonthUsage:a,projectedTokens:Math.round(M(s.tokens)),projectedSessions:Math.round(M(s.sessions)),otherEditors:e}}function Zo(t){t.sort((e,o)=>{let n;switch(W){case"name":n=e.editor.localeCompare(o.editor);break;case"today":n=e.todayUsage.tokens-o.todayUsage.tokens;break;case"last30Days":n=e.last30DaysUsage.tokens-o.last30DaysUsage.tokens;break;case"month":n=e.monthUsage.tokens-o.monthUsage.tokens;break;case"lastMonth":n=e.lastMonthUsage.tokens-o.lastMonthUsage.tokens;break;case"projected":n=e.projectedTokens-o.projectedTokens;break;default:n=0}return ce==="asc"?n:-n})}function ns(t,e){return[...e].sort((o,n)=>{if(W==="name")return o.localeCompare(n);let s=Ve(t,o),r=Ve(t,n),a;switch(W){case"today":a=s.todayUsage.tokens-r.todayUsage.tokens;break;case"last30Days":a=s.last30DaysUsage.tokens-r.last30DaysUsage.tokens;break;case"month":a=s.monthUsage.tokens-r.monthUsage.tokens;break;case"lastMonth":a=s.lastMonthUsage.tokens-r.lastMonthUsage.tokens;break;case"projected":a=s.projectedTokens-r.projectedTokens;break;default:a=0}return-a||o.localeCompare(n)})}function Qo(t,e,o){let{editor:n,todayUsage:s,last30DaysUsage:r,monthUsage:a,lastMonthUsage:c,projectedTokens:i,projectedSessions:l}=t,d=e.today>0?s.tokens/e.today*100:0,u=e.last30Days>0?r.tokens/e.last30Days*100:0,p=e.month>0?a.tokens/e.month*100:0,m=e.lastMonth>0?c.tokens/e.lastMonth*100:0,h=document.createElement("tr");o&&(h.style.opacity="0.85"),n==="JetBrains"&&(h.title="JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available."),n==="Antigravity"&&(h.title="Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally."),n==="Cursor"&&(h.title="Cursor: token counts reflect the context window size at the last request (contextTokensUsed). Output tokens are not stored locally.");let A=document.createElement("td"),U=document.createElement("span");if(U.className="metric-label",o){let Et=document.createElement("span");Et.style.cssText="display:inline-block;width:12px",U.append(Et)}return U.append(document.createTextNode(`${Pt(n)} ${n}`)),(n==="JetBrains"||n==="Antigravity"||n==="Cursor")&&U.append(document.createTextNode(" \u24D8")),A.append(U),h.append(A,C(f(s.tokens),`${S(d)} \xB7 ${s.sessions} sessions`),C(f(r.tokens),`${S(u)} \xB7 ${r.sessions} sessions`),C(f(a.tokens),`${S(p)} \xB7 ${a.sessions} sessions`),C(f(c.tokens),`${S(m)} \xB7 ${c.sessions} sessions`),C(f(i),`${l} sessions`)),h}function ss(t,e,o,n,s){let r=t.otherEditors??[],a=(m,h)=>h>0?m/h*100:0,c=document.createElement("tr");c.style.cursor="pointer",c.style.background="var(--list-hover-bg)",c.title=ie?"Collapse other editors":"Expand other editors";let i=document.createElement("span");i.className="metric-label";let l=document.createElement("span");l.style.cssText="color:var(--text-secondary);font-weight:600;",l.textContent=`\u{1F4E6} ${t.editor}`;let d=document.createElement("span");d.style.cssText="font-size:10px;color:var(--text-muted)",d.textContent=` ${ie?"\u25B2":"\u25BC"}`,i.append(l,d);let u=document.createElement("td");u.append(i);let p=(m,h)=>{let A=C(f(m.tokens));return A.append(b("div","muted",`${S(a(m.tokens,h))} \xB7 ${m.sessions} sessions`)),A};if(c.append(u,p(t.todayUsage,e.today),p(t.last30DaysUsage,e.last30Days),p(t.monthUsage,e.month),p(t.lastMonthUsage,e.lastMonth),C(f(t.projectedTokens),`${t.projectedSessions} sessions`)),c.addEventListener("click",()=>{ie=!ie,xe(),o()}),n.append(c),ie){let m=r.map(h=>Ve(s,h));Zo(m),m.forEach(h=>n.append(Qo(h,e,!0)))}}function rs(t,e,o){let n=e,s={today:n.reduce((d,u)=>d+(t.today.editorUsage[u]?.tokens||0),0),last30Days:n.reduce((d,u)=>d+(t.last30Days.editorUsage[u]?.tokens||0),0),month:n.reduce((d,u)=>d+(t.month.editorUsage[u]?.tokens||0),0),lastMonth:n.reduce((d,u)=>d+(t.lastMonth.editorUsage[u]?.tokens||0),0)},r=document.createElement("tbody");if(n.length===0)return r.append(Vo(6,"No editor usage matches the selected provider filter.")),r;let a=ns(t,n),c=a.slice(0,Ko),i=a.slice(Ko),l=c.map(d=>Ve(t,d));return Zo(l),i.length>0&&l.push(os(t,i)),l.forEach(d=>{d.otherEditors?ss(d,s,o,r,t):r.append(Qo(d,s,!1))}),r}var Ko=5;function as(t){let e=new Set([...Object.keys(t.today.editorUsage),...Object.keys(t.last30Days.editorUsage),...Object.keys(t.month.editorUsage),...Object.keys(t.lastMonth.editorUsage)]);if(e.size===0)return null;let o=Array.from(e).filter(l=>Xo(es(t,l))),n=b("div","section"),s=de("h3","device-desktop","Usage by Editor");n.append(s);let r=document.createElement("table");r.className="stats-table";let a=[{icon:"\u{1F4DD}",text:"Editor",key:"name"},{icon:"\u{1F4C5}",text:"Today",key:"today"},{icon:"\u{1F4C8}",text:"Last 30 Days",key:"last30Days"},{icon:"\u{1F5D3}\uFE0F",text:"Current Month",key:"month"},{icon:"\u{1F4C6}",text:"Previous Month",key:"lastMonth"},{icon:"\u{1F30D}",text:"Projected Year",key:"projected"}];function c(){let l=rs(t,o,c),d=r.querySelector("tbody");d?r.replaceChild(l,d):r.append(l)}let{thead:i}=zo(a,()=>W,()=>ce,l=>{W===l?ce=ce==="asc"?"desc":"asc":(W=l,ce=l==="name"?"asc":"desc"),c(),xe()});return r.append(i),c(),n.append(r),n}var Go=5;function Ye(t,e){let o=t.today.modelUsage[e]||{inputTokens:0,outputTokens:0},n=t.last30Days.modelUsage[e]||{inputTokens:0,outputTokens:0},s=t.month.modelUsage[e]||{inputTokens:0,outputTokens:0},r=t.lastMonth.modelUsage[e]||{inputTokens:0,outputTokens:0},a=o.inputTokens+o.outputTokens,c=n.inputTokens+n.outputTokens,i=s.inputTokens+s.outputTokens,l=r.inputTokens+r.outputTokens;return{model:e,todayTotal:a,todayInputPct:a>0?o.inputTokens/a*100:0,todayOutputPct:a>0?o.outputTokens/a*100:0,last30DaysTotal:c,last30DaysInputPct:c>0?n.inputTokens/c*100:0,last30DaysOutputPct:c>0?n.outputTokens/c*100:0,monthTotal:i,monthInputPct:i>0?s.inputTokens/i*100:0,monthOutputPct:i>0?s.outputTokens/i*100:0,lastMonthTotal:l,lastMonthInputPct:l>0?r.inputTokens/l*100:0,lastMonthOutputPct:l>0?r.outputTokens/l*100:0,projected:Math.round(M(c)),charsPerToken:Ot(e)}}function is(t,e){let o=u=>e.reduce((p,m)=>{let h=t[u].modelUsage[m]||{inputTokens:0,outputTokens:0};return{inputTokens:p.inputTokens+h.inputTokens,outputTokens:p.outputTokens+h.outputTokens}},{inputTokens:0,outputTokens:0}),n=o("today"),s=o("last30Days"),r=o("month"),a=o("lastMonth"),c=n.inputTokens+n.outputTokens,i=s.inputTokens+s.outputTokens,l=r.inputTokens+r.outputTokens,d=a.inputTokens+a.outputTokens;return{model:`Other (${e.length} model${e.length!==1?"s":""})`,todayTotal:c,todayInputPct:c>0?n.inputTokens/c*100:0,todayOutputPct:c>0?n.outputTokens/c*100:0,last30DaysTotal:i,last30DaysInputPct:i>0?s.inputTokens/i*100:0,last30DaysOutputPct:i>0?s.outputTokens/i*100:0,monthTotal:l,monthInputPct:l>0?r.inputTokens/l*100:0,monthOutputPct:l>0?r.outputTokens/l*100:0,lastMonthTotal:d,lastMonthInputPct:d>0?a.inputTokens/d*100:0,lastMonthOutputPct:d>0?a.outputTokens/d*100:0,projected:Math.round(M(i)),charsPerToken:0,otherModels:e}}function en(t){t.sort((e,o)=>{let n;switch(q){case"name":n=e.model.localeCompare(o.model);break;case"today":n=e.todayTotal-o.todayTotal;break;case"last30Days":n=e.last30DaysTotal-o.last30DaysTotal;break;case"month":n=e.monthTotal-o.monthTotal;break;case"lastMonth":n=e.lastMonthTotal-o.lastMonthTotal;break;case"projected":n=e.projected-o.projected;break;default:n=0}return le==="asc"?n:-n})}function cs(t,e){return[...e].sort((o,n)=>{if(q==="name")return o.localeCompare(n);let s=Ye(t,o),r=Ye(t,n),a;switch(q){case"today":a=s.todayTotal-r.todayTotal;break;case"last30Days":a=s.last30DaysTotal-r.last30DaysTotal;break;case"month":a=s.monthTotal-r.monthTotal;break;case"lastMonth":a=s.lastMonthTotal-r.lastMonthTotal;break;case"projected":a=s.projected-r.projected;break;default:a=0}return-a||o.localeCompare(n)})}function tn(t,e){let o=document.createElement("tr");e&&(o.style.opacity="0.85");let n=document.createElement("td"),s=document.createElement("span");if(s.className="metric-label",e){let a=document.createElement("span");a.style.cssText="display:inline-block;width:12px",s.append(a)}let r=document.createElement("span");return r.style.cssText="color:#9aa0a6;font-size:11px;font-weight:500;",r.textContent=`(~${t.charsPerToken.toFixed(1)} chars/tk)`,s.append(document.createTextNode(`${Ze(t.model)} `),r),n.append(s),o.append(n,C(f(t.todayTotal),`\u2191${S(t.todayInputPct)} \u2193${S(t.todayOutputPct)}`),C(f(t.last30DaysTotal),`\u2191${S(t.last30DaysInputPct)} \u2193${S(t.last30DaysOutputPct)}`),C(f(t.monthTotal),`\u2191${S(t.monthInputPct)} \u2193${S(t.monthOutputPct)}`),C(f(t.lastMonthTotal),`\u2191${S(t.lastMonthInputPct)} \u2193${S(t.lastMonthOutputPct)}`),C(f(t.projected))),o}function ls(t,e,o,n){let s=t.otherModels??[],r=(p,m)=>m>0?p/m*100:0,a=document.createElement("tr");a.style.cursor="pointer",a.style.background="var(--list-hover-bg)",a.title=ae?"Collapse other models":"Expand other models";let c=document.createElement("span");c.className="metric-label";let i=document.createElement("span");i.style.cssText="color:var(--text-secondary);font-weight:600;",i.textContent=`\u{1F4E6} ${t.model}`;let l=document.createElement("span");l.style.cssText="font-size:10px;color:var(--text-muted)",l.textContent=` ${ae?"\u25B2":"\u25BC"}`,c.append(i,l);let d=document.createElement("td");d.append(c);let u=(p,m,h)=>{let A=C(f(p));return p>0&&A.append(b("div","muted",`\u2191${S(m)} \u2193${S(h)}`)),A};if(a.append(d,u(t.todayTotal,t.todayInputPct,t.todayOutputPct),u(t.last30DaysTotal,t.last30DaysInputPct,t.last30DaysOutputPct),u(t.monthTotal,t.monthInputPct,t.monthOutputPct),u(t.lastMonthTotal,t.lastMonthInputPct,t.lastMonthOutputPct),C(f(t.projected))),a.addEventListener("click",()=>{ae=!ae,xe(),e()}),o.append(a),ae){let p=s.map(m=>Ye(n,m));en(p),p.forEach(m=>o.append(tn(m,!0)))}}function ds(t,e,o){let n=cs(t,e),s=n.slice(0,Go),r=n.slice(Go),a=s.map(i=>Ye(t,i));en(a),r.length>0&&a.push(is(t,r));let c=document.createElement("tbody");return a.forEach(i=>{i.otherModels?ls(i,o,c,t):c.append(tn(i,!1))}),c}function us(t){let e=new Set([...Object.keys(t.today.modelUsage),...Object.keys(t.last30Days.modelUsage),...Object.keys(t.month.modelUsage),...Object.keys(t.lastMonth.modelUsage)]);if(e.size===0)return null;let o=new Set(Array.from(e).filter(l=>Xo(ts(t,l)))),n=b("div","section"),s=de("h3","symbol-numeric","Model Usage (Tokens)");n.append(s);let r=document.createElement("table");if(r.className="stats-table",o.size===0){let l=document.createElement("tbody");return l.append(Vo(6,"No model usage matches the selected provider filter.")),r.append(l),n.append(r),n}let a=[{icon:"\u{1F9E0}",text:"Model",key:"name"},{icon:"\u{1F4C5}",text:"Today",key:"today"},{icon:"\u{1F4C8}",text:"Last 30 Days",key:"last30Days"},{icon:"\u{1F5D3}\uFE0F",text:"Current Month",key:"month"},{icon:"\u{1F4C6}",text:"Previous Month",key:"lastMonth"},{icon:"\u{1F30D}",text:"Projected Year",key:"projected"}];function c(){let l=ds(t,Array.from(o),c),d=r.querySelector("tbody");d?r.replaceChild(l,d):r.append(l)}let{thead:i}=zo(a,()=>q,()=>le,l=>{q===l?le=le==="asc"?"desc":"asc":(q=l,le=l==="name"?"asc":"desc"),c(),xe()});return r.append(i),c(),n.append(r),n}function ps(){let t=b("div","section"),e=b("div","empty-state"),o=b("div","empty-state-title","\u{1F44B} Welcome to AI Engineering Fluency"),n=b("p","empty-state-description","This extension tracks AI token usage by reading session log files stored locally by supported tools. No token data has been found yet."),s=document.createElement("p");s.className="empty-state-description";let r=document.createElement("strong");r.textContent="Supported tools & editors:",s.append(r);let a=document.createElement("ul");a.className="empty-state-steps",["\u{1F680} Antigravity \u2014 Google's Gemini-powered desktop IDE","\u{1F916} Claude Code \u2014 Anthropic's CLI coding agent","\u{1F4BB} Copilot CLI \u2014 GitHub Copilot in the terminal","\u{1F5B1}\uFE0F Cursor, \u{1F30A} Windsurf \u2014 built-in AI chat","\u{1F48E} Gemini CLI \u2014 Google's open-source CLI coding agent","\u{1F7E2} OpenCode, \u{1F980} Crush \u2014 terminal-based coding agents","\u03C0 Pi \u2014 Mistral-powered terminal coding agent","\u{1F5A5}\uFE0F Visual Studio 2022+ \u2014 GitHub Copilot Chat extension","\u{1F499} VS Code / VS Code Insiders / VSCodium \u2014 GitHub Copilot Chat extension"].forEach(m=>{let h=document.createElement("li");h.textContent=m,a.append(h)});let i=document.createElement("p");i.className="empty-state-description";let l=document.createElement("strong");l.textContent="To get started:",i.append(l);let d=document.createElement("ol");d.className="empty-state-steps",["Use any of the supported tools or editors listed above to interact with an AI model.","For GitHub Copilot in VS Code: open the Copilot Chat panel (Ctrl+Alt+I / Cmd+Alt+I) and start a conversation.","For terminal agents (Claude Code, Gemini CLI, Antigravity, Pi, OpenCode, Copilot CLI): run a coding session in your terminal.","Click the \u{1F504} Refresh button above to reload the stats after your first session."].forEach(m=>{let h=document.createElement("li");h.textContent=m,d.append(h)});let p=b("div","empty-state-note","\u{1F4A1} If you have been using one of the supported tools but still see no data, open the Diagnostics panel (\u{1F50D} Diagnostics button above) to verify that session files are being discovered correctly.");return e.append(o,n,s,a,i,d,p),t.append(e),t}function gs(){let t=document.getElementById("btn-refresh"),e=document.getElementById("btn-chart"),o=document.getElementById("btn-usage"),n=document.getElementById("btn-diagnostics");t?.addEventListener("click",()=>P.postMessage({command:"refresh"})),e?.addEventListener("click",()=>P.postMessage({command:"showChart"})),o?.addEventListener("click",()=>P.postMessage({command:"showUsageAnalysis"})),n?.addEventListener("click",()=>P.postMessage({command:"showDiagnostics"})),document.getElementById("btn-maturity")?.addEventListener("click",()=>P.postMessage({command:"showMaturity"})),document.getElementById("btn-dashboard")?.addEventListener("click",()=>P.postMessage({command:"showDashboard"})),document.getElementById("btn-environmental")?.addEventListener("click",()=>P.postMessage({command:"showEnvironmental"})),document.getElementById("btn-efficiency")?.addEventListener("click",()=>P.postMessage({command:"showEfficiency"})),Kt(P)}async function fs(){if(console.log("[CopilotTokenTracker] bootstrap called"),await Promise.resolve().then(()=>(Oo(),Po)),await Promise.resolve().then(()=>(jo(),No)),z)console.log("[CopilotTokenTracker] Rendering details with initialData:",z),vt(z);else{console.warn("[CopilotTokenTracker] No initialData found, rendering fallback.");let t=document.getElementById("root");if(t){t.textContent="";let e=document.createElement("div");e.style.padding="16px",e.style.color="#e7e7e7",e.textContent="No data available.",t.append(e)}}}_e(t=>{t.command==="updateStats"&&vt(t.data)});fs();})();
 /*! Bundled license information:
 
 @lit/reactive-element/css-tag.js:
@@ -3618,4 +1014,3 @@ lit-html/directives/if-defined.js:
    * SPDX-License-Identifier: BSD-3-Clause
    *)
 */
-//# sourceMappingURL=details.js.map

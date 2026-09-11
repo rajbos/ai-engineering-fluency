@@ -4903,13 +4903,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 	): void {
 		const limit = info.contextWindowLimit;
 		const reached = info.contextReachedTokens;
-		if (!limit || !reached || reached <= 0) { return; }
+		const hasFill = !!limit && !!reached && reached > 0;
+		// A tier-only row is still a context-bearing session, so it belongs in the
+		// denominator even though there is no fill to measure it against.
+		if (!hasFill && !info.contextTier) { return; }
 		const cp = this._ensureContextPressure(period);
 		if (!alreadyCounted) { cp.sessionsConsidered++; }
+		if (!hasFill) { return; }
 		cp.sessionsWithFillData++;
-		const fillPercent = Math.min(100, Math.round((reached / limit) * 100));
+		const fillPercent = Math.min(100, Math.round((reached! / limit!) * 100));
 		if (fillPercent > (cp.worstFillPercent ?? 0)) { cp.worstFillPercent = fillPercent; }
-		if (!compacted && reached >= limit * CONTEXT_NEAR_LIMIT_RATIO) { cp.sessionsNearLimit++; }
+		if (!compacted && reached! >= limit! * CONTEXT_NEAR_LIMIT_RATIO) { cp.sessionsNearLimit++; }
 	}
 
 	/**

@@ -183,7 +183,10 @@ test('context-window-near-limit: fires at two near-limit sessions and reports th
 	assert.ok(insight, 'insight should fire at two near-limit sessions');
 	assert.match(insight!.body, /2 of your 9 sessions/);
 	assert.match(insight!.body, /94% of its window/);
-	assert.match(insight!.body, /1 session went past that point/);
+	assert.match(insight!.body, /Separately, 1 session compacted automatically/);
+	// The compaction signal does not establish that the session crossed the
+	// near-limit threshold, so the wording must not imply that it did.
+	assert.doesNotMatch(insight!.body, /went past that point/);
 });
 
 test('context-window-near-limit: yields to auto-compaction-pattern when that already fires', () => {
