@@ -21,6 +21,7 @@ const {
   langForExt,
   primaryLanguage,
   buildMarkdown,
+  extractTrendRows,
   CODE_EXTENSIONS,
   EXT_BY_LANG,
 } = require('./loc-stats.js');
@@ -246,4 +247,82 @@ test('EXT_BY_LANG maps languages to their extension sets', () => {
   assert.ok(EXT_BY_LANG.typescript.has('.tsx'));
   assert.ok(EXT_BY_LANG.csharp.has('.cs'));
   assert.ok(EXT_BY_LANG.kotlin.has('.kts'));
+});
+
+// ── extractTrendRows / trend accumulation ────────────────────────────────────────
+
+function trendReport(prevRows) {
+  const header = [
+    '## Historical Trend\n\n',
+    '| Date | Source LOC | Test LOC | Test Scenarios |\n',
+    '|---|---:|---:|---:|\n',
+  ].join('');
+  return header + prevRows.join('') + '\n<!-- done -->\n';
+}
+
+test('extractTrendRows: pulls data rows out of a prior report', () => {
+  const prev = trendReport([
+    '| 2026-07-01 | 130,000 | 40,000 | 3,500 |\n',
+    '| 2026-08-01 | 134,000 | 41,000 | 3,600 |\n',
+  ]);
+  const rows = extractTrendRows(prev);
+  assert.equal(rows.length, 2);
+  assert.ok(rows[0].startsWith('| 2026-07-01 |'));
+  assert.ok(rows[1].startsWith('| 2026-08-01 |'));
+});
+
+test('extractTrendRows: ignores the header and separator rows', () => {
+  const prev = [
+    '## Historical Trend\n\n',
+    '| Date | Source LOC | Test LOC | Test Scenarios |\n',
+    '|---|---:|---:|---:|\n',
+  ].join('') + '\n<!-- done -->\n';
+  assert.deepEqual(extractTrendRows(prev), []);
+});
+
+test('extractTrendRows: returns [] for empty/missing content', () => {
+  assert.deepEqual(extractTrendRows(''), []);
+  assert.deepEqual(extractTrendRows(null), []);
+});
+
+test('buildMarkdown: preserves prior trend rows and appends the current month', () => {
+  const results = [{
+    name: 'Demo', dir: 'demo', files: 1, lines: 136727, testFiles: 1,
+    testLines: 42344, scenarios: 3711, languages: { typescript: 1 },
+  }];
+  const prior = [
+    '| 2026-07-01 | 130,000 | 40,000 | 3,500 |\n',
+    '| 2026-08-01 | 134,000 | 41,000 | 3,600 |\n',
+  ];
+  const md = buildMarkdown(results, '2026-09-01T03:17:00.000Z', prior);
+  assert.match(md, /\| 2026-07-01 \| 130,000 \| 40,000 \| 3,500/);
+  assert.match(md, /\| 2026-08-01 \| 134,000 \| 41,000 \| 3,600/);
+  assert.match(md, /\| 2026-09-01 \| 136,727 \| 42,344 \| 3,711/);
+});
+
+test('buildMarkdown: replacing the same-day row is idempotent', () => {
+  const results = [{
+    name: 'Demo', dir: 'demo', files: 1, lines: 136727, testFiles: 1,
+    testLines: 42344, scenarios: 3711, languages: { typescript: 1 },
+  }];
+  const prior = [
+    '| 2026-07-01 | 130,000 | 40,000 | 3,500 |\n',
+    '| 2026-09-01 | 999,999 | 1 | 1 |\n',
+  ];
+  const md = buildMarkdown(results, '2026-09-01T03:17:00.000Z', prior);
+  // The stale 2026-09-01 row must be replaced, not duplicated.
+  assert.ok(!/999,999/.test(md));
+  const sameDay = (md.match(/\| 2026-09-01 \|/g) || []).length;
+  assert.equal(sameDay, 1);
+  assert.match(md, /\| 2026-09-01 \| 136,727 \| 42,344 \| 3,711/);
+});
+
+test('buildMarkdown: with no prior rows the trend table has exactly one row', () => {
+  const results = [{
+    name: 'Demo', dir: 'demo', files: 1, lines: 100, testFiles: 0,
+    testLines: 0, scenarios: 0, languages: { typescript: 1 },
+  }];
+  const md = buildMarkdown(results, '2026-09-01T03:17:00.000Z', []);
+  const dataRows = (md.match(/^\| 2026-09-01 \|/gm) || []).length;
+  assert.equal(dataRows, 1);
 });
