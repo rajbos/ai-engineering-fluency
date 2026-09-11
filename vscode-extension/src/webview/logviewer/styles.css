@@ -234,8 +234,9 @@ body {
 
 .summary-compact-row {
 	display: flex;
+	flex-wrap: wrap;
 	justify-content: space-between;
-	gap: 8px;
+	gap: 4px 8px;
 	font-size: 11px;
 	line-height: 1.5;
 }
@@ -246,10 +247,12 @@ body {
 }
 
 .summary-compact-val {
+	flex: 1 1 auto;
+	min-width: 0;
 	color: var(--link-color);
 	font-weight: 600;
 	text-align: right;
-	overflow-wrap: break-word;
+	overflow-wrap: anywhere;
 }
 
 .summary-sub {
