@@ -13,6 +13,10 @@ import {
 	sanitizeContextPressure,
 	sanitizeContextWindow,
 } from './contextWindowSanitizer';
+// Imported from the shared contract rather than re-declared locally, so a shape
+// change in src/types.ts surfaces here as a type error instead of silently
+// drifting out of sync with what the extension host actually sends.
+import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats } from '../../../../src/types';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -42,30 +46,6 @@ type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	mediumCostRequests: number;
 	unknownRequests: number;
 	totalRequests: number;
-};
-
-type ContextWindowStats = {
-	maxRequestInputTokens: number;
-	maxRequestModels: string[];
-	tierCounts: { [tier: string]: number };
-	maxReachedTokens?: number;
-	maxReachedWindowLimit?: number;
-};
-
-type ContextPressureStats = {
-	sessionsConsidered: number;
-	sessionsCompacted: number;
-	sessionsNearLimit: number;
-	sessionsWithFillData: number;
-	worstFillPercent?: number;
-};
-
-type AutomaticCompactionStats = {
-	total: number;
-	bySource: {
-		copilotCli: number;
-		claude: number;
-	};
 };
 
 type UsageAnalysisPeriod = {
