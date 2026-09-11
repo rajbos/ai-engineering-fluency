@@ -1055,6 +1055,124 @@ ${hasBreakdown ? `<div class="session-usage-breakdown">
 `;
 }
 
+// ── Turns overview table ─────────────────────────────────────────────────────
+
+type TurnOverviewRow = {
+	turnNumber: number;
+	model: string | null;
+	mode: ChatTurn['mode'];
+	input: number;
+	cached: number | null;
+	output: number;
+	total: number;
+	isActual: boolean;
+};
+
+/**
+ * Deduces per-turn cache-read tokens from `actualUsage.promptTokenDetails`,
+ * when the adapter reported a breakdown entry whose category/label mentions
+ * "cache" (e.g. Gemini CLI's `{ category: 'cached', label: 'Cache reads' }`).
+ * Returns `null` when no such entry exists — most adapters don't split cache
+ * reads out per turn, so the Cached column is only shown when at least one
+ * turn actually has this data (see `renderTurnsOverviewTable`).
+ */
+function getTurnCachedTokens(turn: ChatTurn): number | null {
+	const au = turn.actualUsage;
+	if (!au?.promptTokenDetails?.length) { return null; }
+	const cachedPct = au.promptTokenDetails
+		.filter(d => /cache/i.test(d.category) || /cache/i.test(d.label))
+		.reduce((sum, d) => sum + d.percentageOfPrompt, 0);
+	if (cachedPct <= 0) { return null; }
+	return Math.round(au.promptTokens * cachedPct / 100);
+}
+
+function buildTurnOverviewRows(data: SessionLogData): TurnOverviewRow[] {
+	return data.turns.map(turn => {
+		const au = turn.actualUsage;
+		const isActual = !!au;
+		const input = isActual ? au!.promptTokens : turn.inputTokensEstimate;
+		const output = isActual ? au!.completionTokens : turn.outputTokensEstimate;
+		const total = isActual
+			? (au!.promptTokens + au!.completionTokens)
+			: (turn.inputTokensEstimate + turn.outputTokensEstimate + turn.thinkingTokensEstimate);
+		return { turnNumber: turn.turnNumber, model: turn.model, mode: turn.mode, input, cached: getTurnCachedTokens(turn), output, total, isActual };
+	});
+}
+
+/** Stable string hash → hue, so each distinct model gets a consistent badge color across the overview table. */
+function hashModelToHue(model: string): number {
+	let hash = 0;
+	for (let i = 0; i < model.length; i++) {
+		hash = (hash * 31 + model.charCodeAt(i)) >>> 0;
+	}
+	return hash % 360;
+}
+
+function renderModelOverviewBadge(model: string | null): string {
+	if (!model) { return '<span class="overview-model-badge overview-model-unknown">—</span>'; }
+	const hue = hashModelToHue(model);
+	const style = `background: hsl(${hue}, 55%, 16%); color: hsl(${hue}, 70%, 78%); border-color: hsl(${hue}, 55%, 32%);`;
+	return `<span class="overview-model-badge" style="${style}" title="${escapeHtml(model)}">${escapeHtml(getModelDisplayName(model))}</span>`;
+}
+
+/**
+ * Renders the turns-overview table shown above the chat-turns list: one compact,
+ * clickable row per turn with its mode, model, and input/cached/output token
+ * usage, so a multi-model session (e.g. model-routing research) can be scanned
+ * at a glance without opening every turn card. A row's model badge differing
+ * from the one above it is flagged with ⇄ to spot model switches quickly.
+ * Clicking a row scrolls to and briefly highlights the matching turn card.
+ */
+function renderTurnsOverviewTable(data: SessionLogData): string {
+	if (data.turns.length === 0) { return ''; }
+	const rows = buildTurnOverviewRows(data);
+	const hasCached = rows.some(r => r.cached !== null);
+	const hasModelSwitches = rows.some((r, i) => i > 0 && r.model && rows[i - 1].model && r.model !== rows[i - 1].model);
+
+	const bodyRows = rows.map((row, i) => {
+		const switched = i > 0 && !!row.model && !!rows[i - 1].model && row.model !== rows[i - 1].model;
+		const cachedCell = hasCached ? `<td class="count-cell">${row.cached !== null ? formatCompact(row.cached) : '—'}</td>` : '';
+		return `<tr class="turns-overview-row${switched ? ' turns-overview-row-switch' : ''}" data-turn="${row.turnNumber}" title="Jump to turn #${row.turnNumber}">
+<td class="turns-overview-num">#${row.turnNumber}${switched ? ' <span class="overview-switch-icon" title="Model changed from the previous step">⇄</span>' : ''}</td>
+<td><span class="turn-mode" style="background: ${getModeColor(row.mode)};">${getModeIcon(row.mode)} ${escapeHtml(row.mode)}</span></td>
+<td>${renderModelOverviewBadge(row.model)}</td>
+<td class="count-cell">${formatCompact(row.input)}</td>
+${cachedCell}
+<td class="count-cell">${formatCompact(row.output)}</td>
+<td class="count-cell"><strong>${formatCompact(row.total)}</strong></td>
+<td class="turns-overview-actual" title="${row.isActual ? 'Actual API usage' : 'Estimated from text'}">${row.isActual ? '✓' : '~'}</td>
+</tr>`;
+	}).join('');
+
+	return `
+<div class="turns-overview">
+<div class="turns-overview-header">
+<span>🧭 Session Steps Overview (${rows.length})</span>
+${hasModelSwitches ? '<span class="overview-switch-note">⇄ marks a model change from the previous step</span>' : ''}
+</div>
+<div class="turns-overview-table-wrap">
+<table class="turns-overview-table">
+<thead>
+<tr>
+<th scope="col">Step</th>
+<th scope="col">Mode</th>
+<th scope="col">Model</th>
+<th scope="col">Input</th>
+${hasCached ? '<th scope="col">Cached</th>' : ''}
+<th scope="col">Output</th>
+<th scope="col">Total</th>
+<th scope="col" title="✓ actual API usage, ~ estimated from text">Src</th>
+</tr>
+</thead>
+<tbody>
+${bodyRows}
+</tbody>
+</table>
+</div>
+</div>
+`;
+}
+
 /**
  * Wires up all DOM event handlers after the layout has been injected into
  * `#root`. Must be called once immediately after `root.innerHTML` is set.
@@ -1120,6 +1238,16 @@ e.preventDefault();
 });
 }
 
+/** Clicking a turns-overview row jumps to and briefly highlights the matching turn card. */
+function wireUpTurnsOverviewHandlers(): void {
+document.querySelectorAll<HTMLElement>('.turns-overview-row').forEach(row => {
+row.addEventListener('click', () => {
+const turnNumber = parseInt(row.getAttribute('data-turn') || '0', 10);
+if (turnNumber > 0) { scrollAndFocusTurn(turnNumber); }
+});
+});
+}
+
 function wireUpEventHandlers(): void {
 document.getElementById('btn-raw')?.addEventListener('click', () => {
 vscode.postMessage({ command: 'openRawFile' });
@@ -1145,6 +1273,7 @@ vscode.postMessage({ command: 'openRawFile' });
 });
 
 wireUpToolCallHandlers();
+wireUpTurnsOverviewHandlers();
 }
 
 // ── Entry-point renderers (signatures preserved) ─────────────────────────────
@@ -1381,6 +1510,8 @@ ${renderSessionActualUsage(
 	actualStats.aggregatedBreakdown,
 )}
 
+${renderTurnsOverviewTable(data)}
+
 <div class="turns-header">
 <span>📝</span>
 <span>Chat Turns (${data.turns.length})${data.title ? ` - ${escapeHtml(data.title)}` : ''}</span>
@@ -1402,9 +1533,8 @@ ${data.turns.length > 0
 	focusRequestedTurn(data as SessionLogData & { focusedTurnNumber?: number; });
 }
 
-function focusRequestedTurn(data: SessionLogData & { focusedTurnNumber?: number; }): void {
-	const turnNumber = data.focusedTurnNumber;
-	if (typeof turnNumber !== 'number' || !Number.isSafeInteger(turnNumber) || turnNumber < 1) { return; }
+/** Scrolls to and briefly highlights the turn card for the given turn number, if it exists. */
+function scrollAndFocusTurn(turnNumber: number): void {
 	const turnCard = document.querySelector<HTMLElement>(`.turn-card[data-turn="${turnNumber}"]`);
 	if (!turnCard) { return; }
 	turnCard.classList.add('turn-card-focused');
@@ -1412,6 +1542,12 @@ function focusRequestedTurn(data: SessionLogData & { focusedTurnNumber?: number;
 	turnCard.focus({ preventScroll: true });
 	turnCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	setTimeout(() => turnCard.classList.remove('turn-card-focused'), 2_000);
+}
+
+function focusRequestedTurn(data: SessionLogData & { focusedTurnNumber?: number; }): void {
+	const turnNumber = data.focusedTurnNumber;
+	if (typeof turnNumber !== 'number' || !Number.isSafeInteger(turnNumber) || turnNumber < 1) { return; }
+	scrollAndFocusTurn(turnNumber);
 }
 
 async function bootstrap(): Promise<void> {

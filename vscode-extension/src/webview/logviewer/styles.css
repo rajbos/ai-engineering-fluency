@@ -1173,6 +1173,114 @@ details[open] > summary .collapse-arrow {
 	}
 }
 
+/* Turns overview table */
+.turns-overview {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 12px;
+	padding: 16px 20px 4px;
+	margin-bottom: 24px;
+	box-shadow: 0 4px 12px rgb(0, 0, 0, 0.3), 0 1px 3px rgb(0, 0, 0, 0.2);
+}
+
+.turns-overview-header {
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--text-primary);
+	margin-bottom: 12px;
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.overview-switch-note {
+	font-size: 12px;
+	font-weight: 400;
+	color: var(--text-secondary);
+}
+
+.turns-overview-table-wrap {
+	overflow-x: auto;
+}
+
+.turns-overview-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+
+.turns-overview-table th,
+.turns-overview-table td {
+	padding: 6px 12px;
+	text-align: left;
+	border-bottom: 1px solid var(--border-subtle);
+	white-space: nowrap;
+}
+
+.turns-overview-table th {
+	color: var(--text-secondary);
+	font-weight: 600;
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	background: var(--bg-tertiary);
+	position: sticky;
+	top: 0;
+}
+
+.turns-overview-table .count-cell {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+.turns-overview-row {
+	cursor: pointer;
+	transition: background 0.15s;
+}
+
+.turns-overview-row:hover {
+	background: var(--bg-tertiary);
+}
+
+.turns-overview-row-switch {
+	border-left: 3px solid var(--vscode-focusBorder, #3b82f6);
+}
+
+.turns-overview-num {
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.overview-switch-icon {
+	font-size: 11px;
+	opacity: 0.8;
+}
+
+.turns-overview-actual {
+	text-align: center;
+	color: var(--text-secondary);
+}
+
+.overview-model-badge {
+	display: inline-block;
+	font-size: 11px;
+	font-weight: 600;
+	padding: 3px 9px;
+	border-radius: 6px;
+	border: 1px solid var(--border-subtle);
+	max-width: 180px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	vertical-align: middle;
+}
+
+.overview-model-unknown {
+	background: var(--bg-tertiary);
+	color: var(--text-secondary);
+}
+
 /* Session hierarchy card */
 .hierarchy-card-content {
 text-align: left;
