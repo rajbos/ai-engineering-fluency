@@ -107,6 +107,15 @@ jobs:
       shell: bash
       run: node scripts/parse-lint-output.js "$RUNNER_TEMP/lint-output.json" >> "$GITHUB_STEP_SUMMARY"
 
+    - name: Run code duplication analysis
+      # Report-only, like the complexity analysis above: surfaces copy-pasted
+      # blocks across vscode-extension/src, the shared src/ and cli/src so a
+      # reviewer can see them without failing the build on pre-existing clones.
+      if: always() && matrix.node-version == '24.x'
+      working-directory: vscode-extension
+      shell: bash
+      run: npm run --silent check:duplicates -- --min-lines 14 >> "$GITHUB_STEP_SUMMARY" || true
+
     - name: Run type checking
       working-directory: vscode-extension
       run: npm run check-types

@@ -543,6 +543,7 @@
     "check:contract": "node ../scripts/validate-webview-contract.js",
     "check:interaction": "node ../scripts/interaction-smoke.js",
     "check:editor-data": "node ../scripts/check-editor-data-coverage.js",
+    "check:duplicates": "node ../scripts/check-code-duplication.js",
     "preflight": "node ../scripts/preflight.js",
     "preflight:quick": "node ../scripts/preflight.js --quick",
     "sync-changelog": "node ../scripts/sync-changelog.js",
