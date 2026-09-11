@@ -104,6 +104,7 @@ function isTestFile(relPath, ext) {
       /tests?\.(?:kt|kts)$/i.test(base);
   }
   // TS/JS: *.test.ts / *.test.tsx / *.test.js / *.spec.ts
+  return /\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(base);
 }
 
 // ── Scenario discovery ─────────────────────────────────────────────────────
@@ -112,7 +113,8 @@ function countScenarios(content, ext) {
   let count = 0;
   if (ext === '.cs') {
     // C#: xUnit ([Fact]/[Theory]) and MSTest ([TestMethod]/[Test]).
-    count += countMatches(content, /\[\s*(Fact|Theory|Test|TestMethod|TestCase|DataTestMethod)\s*\]/g);
+    // Attribute arguments such as [Theory(...)] or [Fact(DisplayName = ...)] are optional.
+    count += countMatches(content, /\[\s*(Fact|Theory|Test|TestMethod|TestCase|DataTestMethod)\b[^\]]*\]/g);
     return count;
   }
   if (ext === '.kt' || ext === '.kts') {
@@ -120,10 +122,14 @@ function countScenarios(content, ext) {
     count += countMatches(content, /@(Test|ParameterizedTest|RepeatedTest|TestFactory)\b/g);
     return count;
   }
-  // TS/JS: count `it(...)` / `test(...)` and `describe(...)` blocks.
-  count += countMatches(content, /\bit\s*\(/g);
-  count += countMatches(content, /\btest\s*\(/g);
-  count += countMatches(content, /\bdescribe\s*\(/g);
+  // TS/JS: count `it(...)` / `test(...)` and `describe(...)` blocks, including
+  // test-case modifier forms such as `it.skip(...)`, `test.only(...)` and
+  // `describe.serial(...)`. Lifecycle hooks (`test.beforeEach`, `test.after`)
+  // and unrelated `.ts(` references are intentionally not counted.
+  const modifiers = '(?:\\.(?:skip|only|todo|fails|serial))?';
+  count += countMatches(content, new RegExp('\\bit\\b' + modifiers + '\\s*\\(', 'g'));
+  count += countMatches(content, new RegExp('\\btest\\b' + modifiers + '\\s*\\(', 'g'));
+  count += countMatches(content, new RegExp('\\bdescribe\\b' + modifiers + '\\s*\\(', 'g'));
   return count;
 }
 
