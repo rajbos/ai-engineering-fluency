@@ -1094,6 +1094,11 @@ export interface UsageAnalysisPeriod {
    * Absent when no session in the period carried context-size data.
    */
   contextWindow?: ContextWindowStats;
+  /**
+   * Per-session context-exhaustion counters for the period (compacted vs.
+   * almost-full sessions). Absent when no session carried a context signal.
+   */
+  contextPressure?: ContextPressureStats;
   /** Weighted task-category session totals for the period. */
   taskCategoryPrimarySessions?: Partial<Record<TaskCategory, number>>;
   taskCategoryWeightedSessions?: Partial<Record<TaskCategory, number>>;
@@ -1129,6 +1134,35 @@ export interface ContextWindowStats {
   maxReachedTokens?: number;
   /** Selected window limit of that fullest CLI session. */
   maxReachedWindowLimit?: number;
+}
+
+/** Fraction of a session's context window that counts as "almost full". */
+export const CONTEXT_NEAR_LIMIT_RATIO = 0.8;
+
+/**
+ * How often a period's sessions ran out of context window, counted per
+ * *session* rather than per compaction event. Absent when no session in the
+ * period carried a usable context signal.
+ */
+export interface ContextPressureStats {
+  /** Sessions in the period that carried any context-window signal at all (the denominator). */
+  sessionsConsidered: number;
+  /** Sessions whose history was automatically compacted/truncated at least once. */
+  sessionsCompacted: number;
+  /**
+   * Sessions whose observed context fill reached at least
+   * `CONTEXT_NEAR_LIMIT_RATIO` of their selected window without compacting.
+   * Compacted sessions are excluded so the two counters never double-count.
+   */
+  sessionsNearLimit: number;
+  /**
+   * Sessions for which an actual window fill *and* limit were known (Copilot CLI
+   * `data.db` only). This is the denominator for `sessionsNearLimit`, which is
+   * narrower than `sessionsConsidered`.
+   */
+  sessionsWithFillData: number;
+  /** Highest observed fill as a percentage of the session's window limit (0-100). */
+  worstFillPercent?: number;
 }
 
 /** Parent/child session reference used in hierarchy info (Copilot CLI sessions). */

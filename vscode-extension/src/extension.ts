@@ -77,6 +77,7 @@ import type {
   CorrectionSessionEntry,
   RepeatedTaskReport,
 } from '../../src/types';
+import { CONTEXT_NEAR_LIMIT_RATIO } from '../../src/types';
 import { getTimeWindowStartDate, getTimeWindowStartDayKey } from '../../src/timeWindows';
 
 // --- Correction-moment detection (per-repo report over recent sessions) ---
@@ -4892,6 +4893,26 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
+	 * Fold one data.db context row into a period's per-session exhaustion counters.
+	 * `alreadyCounted` is true when `_mergeContextPressure` already counted this
+	 * session from its events.jsonl signals; `compacted` sessions are excluded from
+	 * `sessionsNearLimit` because compaction resets the fill they'd be judged on.
+	 */
+	private _mergeDbContextPressure(
+		period: UsageAnalysisPeriod, info: SessionContextWindow, alreadyCounted: boolean, compacted: boolean,
+	): void {
+		const limit = info.contextWindowLimit;
+		const reached = info.contextReachedTokens;
+		if (!limit || !reached || reached <= 0) { return; }
+		const cp = this._ensureContextPressure(period);
+		if (!alreadyCounted) { cp.sessionsConsidered++; }
+		cp.sessionsWithFillData++;
+		const fillPercent = Math.min(100, Math.round((reached / limit) * 100));
+		if (fillPercent > (cp.worstFillPercent ?? 0)) { cp.worstFillPercent = fillPercent; }
+		if (!compacted && reached >= limit * CONTEXT_NEAR_LIMIT_RATIO) { cp.sessionsNearLimit++; }
+	}
+
+	/**
 	 * Enrich the usage periods and today's session list with context-window
 	 * state from data.db: the selected window limit, the last known fill, and
 	 * the context tier (data.db also covers sessions whose events.jsonl lacks
@@ -4900,8 +4921,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Collect activity key + tier presence per Copilot CLI session uuid in the loaded window. */
 	private _collectCliSessionEntries(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
-	): Map<string, { activityKey: string; hadTier: boolean }> {
-		const entries = new Map<string, { activityKey: string; hadTier: boolean }>();
+	): Map<string, { activityKey: string; hadTier: boolean; hasContextSignal: boolean; compacted: boolean }> {
+		const entries = new Map<string, { activityKey: string; hadTier: boolean; hasContextSignal: boolean; compacted: boolean }>();
 		for (const r of usageResults) {
 			if (!r || r.sessionData.interactions === 0) { continue; }
 			const uuid = this.extractCopilotCliUuid(r.sessionFile);
@@ -4909,6 +4930,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			entries.set(uuid, {
 				activityKey: this.computeLastActivityKey(r.sessionData, r.mtime),
 				hadTier: !!r.sessionData.contextTier,
+				hasContextSignal: this._hasContextSignal(r.sessionData),
+				compacted: this._sessionCompactionEvents(r.sessionData) > 0,
 			});
 		}
 		return entries;
@@ -4940,6 +4963,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				if (!entry) { continue; }
 				for (const period of this._periodsForActivityKey(entry.activityKey, periods)) {
 					this._mergeDbContextIntoPeriod(period, info, entry.hadTier);
+					this._mergeDbContextPressure(period, info, entry.hasContextSignal, entry.compacted);
 				}
 				const session = todayByUuid.get(uuid);
 				if (session) { this._applyDbContextToTodaySession(session, info); }
@@ -5411,8 +5435,38 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return period.contextWindow;
 	}
 
+	/** Get-or-create the contextPressure aggregate on a usage period. */
+	private _ensureContextPressure(period: UsageAnalysisPeriod): NonNullable<UsageAnalysisPeriod['contextPressure']> {
+		if (!period.contextPressure) {
+			period.contextPressure = { sessionsConsidered: 0, sessionsCompacted: 0, sessionsNearLimit: 0, sessionsWithFillData: 0 };
+		}
+		return period.contextPressure;
+	}
+
+	/** Automatic compaction/truncation events recorded for one session, across all formats. */
+	private _sessionCompactionEvents(sessionData: SessionFileCache): number {
+		return (sessionData.truncationCount ?? 0)
+			+ (sessionData.usageAnalysis?.toolCalls.byTool['__auto_compact__'] ?? 0);
+	}
+
+	/** True when a session carries any usable context-window or compaction signal. */
+	private _hasContextSignal(sessionData: SessionFileCache): boolean {
+		return !!sessionData.maxRequestInputTokens
+			|| !!sessionData.contextTier
+			|| this._sessionCompactionEvents(sessionData) > 0;
+	}
+
+	/** Count one session towards a period's per-session context-exhaustion counters. */
+	private _mergeContextPressure(period: UsageAnalysisPeriod, sessionData: SessionFileCache): void {
+		if (!this._hasContextSignal(sessionData)) { return; }
+		const cp = this._ensureContextPressure(period);
+		cp.sessionsConsidered++;
+		if (this._sessionCompactionEvents(sessionData) > 0) { cp.sessionsCompacted++; }
+	}
+
 	/** Fold one session's context-window fields (from its cache entry) into a period aggregate. */
 	private _mergeContextWindowStats(period: UsageAnalysisPeriod, sessionData: SessionFileCache): void {
+		this._mergeContextPressure(period, sessionData);
 		if (!sessionData.maxRequestInputTokens && !sessionData.contextTier) { return; }
 		const cw = this._ensureContextWindow(period);
 		if ((sessionData.maxRequestInputTokens ?? 0) > cw.maxRequestInputTokens) {

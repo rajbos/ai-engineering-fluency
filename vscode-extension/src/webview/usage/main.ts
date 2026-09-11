@@ -46,6 +46,14 @@ type ContextWindowStats = {
 	maxReachedWindowLimit?: number;
 };
 
+type ContextPressureStats = {
+	sessionsConsidered: number;
+	sessionsCompacted: number;
+	sessionsNearLimit: number;
+	sessionsWithFillData: number;
+	worstFillPercent?: number;
+};
+
 type AutomaticCompactionStats = {
 	total: number;
 	bySource: {
@@ -67,6 +75,7 @@ type UsageAnalysisPeriod = {
 		switchCount: number;
 	};
 	contextWindow?: ContextWindowStats;
+	contextPressure?: ContextPressureStats;
 	modelEfficiency?: ModelEfficiencyUsage;
 };
 
@@ -4741,8 +4750,30 @@ function _cwFullestWindowRow(cw: ContextWindowStats): string {
 		'The highest context fill recorded for a Copilot CLI session in this period, versus its window limit');
 }
 
+/** Per-session context-exhaustion rows for one period column (empty when unavailable). */
+function _cwPressureRows(cp: ContextPressureStats | undefined): string {
+	if (!cp) { return ''; }
+	const compactedRow = cp.sessionsConsidered > 0
+		? _cwRow('🗜️ Sessions compacted',
+			`${formatNumber(cp.sessionsCompacted)} of ${formatNumber(cp.sessionsConsidered)}`,
+			cp.sessionsCompacted > 0
+				? `${formatFixed((cp.sessionsCompacted / cp.sessionsConsidered) * 100, 0)}% of sessions with context data lost earlier turns to automatic compaction`
+				: 'No session ran out of context window in this period',
+			'Sessions where the client automatically compacted or truncated the history at least once, counted per session rather than per compaction event')
+		: '';
+	const nearRow = cp.sessionsWithFillData > 0
+		? _cwRow('⚠️ Sessions near the limit',
+			`${formatNumber(cp.sessionsNearLimit)} of ${formatNumber(cp.sessionsWithFillData)}`,
+			cp.worstFillPercent
+				? `Fullest session reached ${cp.worstFillPercent}% of its window`
+				: undefined,
+			'Copilot CLI sessions that filled at least 80% of their context window without compacting — the early-warning band before context starts getting dropped')
+		: '';
+	return compactedRow + nearRow;
+}
+
 /** Renders one period column of the context-window section. */
-function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined): string {
+function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined, cp?: ContextPressureStats): string {
 	const hasData = !!cw && (cw.maxRequestInputTokens > 0 || (cw.maxReachedTokens ?? 0) > 0 || Object.keys(cw.tierCounts).length > 0);
 	if (!hasData) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
 	const tierEntries = Object.entries(cw!.tierCounts);
@@ -4752,7 +4783,7 @@ function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined): stri
 			`${tierSessionCount} Copilot CLI session${tierSessionCount === 1 ? '' : 's'} grouped by chosen window size — "default" is the standard window at normal rates; larger tiers unlock more context at long-context prices`,
 			'Copilot CLI lets you pick a context-window tier per session; the count shows how many sessions used each tier')
 		: '';
-	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow;
+	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow + _cwPressureRows(cp);
 }
 
 function renderAutomaticCompactions(stats: AutomaticCompactionStats | undefined): string {
@@ -4792,15 +4823,15 @@ function buildContextWindowSectionHtml(stats: UsageAnalysisStats): string {
 			<div class="three-column">
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-					${renderContextWindowPeriodHtml(stats.today.contextWindow)}
+					${renderContextWindowPeriodHtml(stats.today.contextWindow, stats.today.contextPressure)}
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-					${renderContextWindowPeriodHtml(cw30)}
+					${renderContextWindowPeriodHtml(cw30, stats.last30Days.contextPressure)}
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow)}
+					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow, stats.lastMonth.contextPressure)}
 				</div>
 			</div>
 			${renderAutomaticCompactions(stats.autoCompactionsLast7Days)}
