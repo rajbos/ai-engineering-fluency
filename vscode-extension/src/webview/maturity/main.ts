@@ -513,40 +513,47 @@ function buildMaturityRootHtml(
   `;
 }
 
-function handlePngExport(): void {
-  const svgEl = document.querySelector('.radar-svg') as SVGSVGElement | null;
-  if (!svgEl) { return; }
+async function handlePngExport(): Promise<void> {
+  const data = initialData;
+  if (!data) { return; }
 
-  const clone = svgEl.cloneNode(true) as SVGSVGElement;
-  const vb = (svgEl.getAttribute('viewBox') || '0 0 650 410').split(/\s+/).map(Number);
-  const exportWidth = 1100;
-  const exportHeight = Math.round(exportWidth * ((vb[3] || 410) / (vb[2] || 650)));
-  clone.setAttribute('width', String(exportWidth));
-  clone.setAttribute('height', String(exportHeight));
-  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  bg.setAttribute('width', '100%');
-  bg.setAttribute('height', '100%');
-  bg.setAttribute('fill', '#1b1b1e');
-  clone.insertBefore(bg, clone.firstChild);
+  const html2canvasModule = await import('html2canvas');
+  const html2canvas = (html2canvasModule.default ?? html2canvasModule) as unknown as (element: HTMLElement, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
 
-  const svgData = new XMLSerializer().serializeToString(clone);
-  const encodedSvg = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+  const stageBanner = document.querySelector('.stage-banner') as HTMLElement | null;
+  const radarWrapper = document.querySelector('.radar-wrapper') as HTMLElement | null;
+  if (!stageBanner && !radarWrapper) {
+    vscode.postMessage({ command: 'downloadChartImage' });
+    return;
+  }
 
-  const img = new Image();
-  img.onload = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = exportWidth;
-    canvas.height = exportHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) { return; }
-    ctx.drawImage(img, 0, 0, exportWidth, exportHeight);
+  // Compose a self-contained card off-screen so the exported PNG resembles the
+  // Fluency Score screen (title + stage banner + radar + legend). Rendering via
+  // html2canvas against the live document resolves the radar's theme CSS
+  // variables (--text-primary, --text-muted, ...), which a standalone SVG
+  // data URL cannot do — that was why the previous export rendered as a near-
+  // empty, too-dark square.
+  const card = document.createElement('div');
+  card.style.cssText = 'position:absolute;left:-9999px;top:0;width:1200px;background:#1b1b1e;padding:32px;border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
+
+  const titleEl = document.createElement('div');
+  titleEl.style.cssText = 'text-align:center;margin-bottom:20px;';
+  setHtml(titleEl, `<div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">AI Engineering Fluency Score</div><div style="font-size:16px;color:#b8b8c8;">Report &middot; ${escapeHtml(new Date(data.lastUpdated).toLocaleString())}</div>`);
+  card.appendChild(titleEl);
+
+  if (stageBanner) { card.appendChild(stageBanner.cloneNode(true)); }
+  if (radarWrapper) { card.appendChild(radarWrapper.cloneNode(true)); }
+
+  document.body.appendChild(card);
+  try {
+    const canvas = await html2canvas(card, { backgroundColor: '#1b1b1e', scale: 2, useCORS: true });
     const dataUrl = canvas.toDataURL('image/png');
     vscode.postMessage({ command: 'saveChartImage', data: dataUrl });
-  };
-  img.onerror = () => {
+  } catch {
     vscode.postMessage({ command: 'downloadChartImage' });
-  };
-  img.src = encodedSvg;
+  } finally {
+    document.body.removeChild(card);
+  }
 }
 
 async function handleScreenshotExport(command: 'exportPdf' | 'exportPptx'): Promise<void> {
@@ -692,7 +699,7 @@ function wireExportHandlers(): void {
       const exportType = target.getAttribute('data-export-type');
       if (exportDropdown) { exportDropdown.style.display = 'none'; }
       if (exportType === 'png') {
-        handlePngExport();
+        void handlePngExport();
       } else if (exportType === 'pdf') {
         void handleScreenshotExport('exportPdf');
       } else if (exportType === 'pptx') {
