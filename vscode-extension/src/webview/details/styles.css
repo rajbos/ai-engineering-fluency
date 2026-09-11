@@ -142,6 +142,24 @@ body {
 	letter-spacing: 0.2px;
 }
 
+.section-heading-collapsible {
+	cursor: pointer;
+	user-select: none;
+}
+
+.section-heading-collapsible:hover {
+	color: var(--text-secondary);
+}
+
+.section-heading-chevron {
+	font-size: 10px;
+	color: var(--text-secondary);
+}
+
+.hidden {
+	display: none !important;
+}
+
 .stats-table {
 	width: 100%;
 	border-collapse: collapse;
