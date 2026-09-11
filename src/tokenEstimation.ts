@@ -14,6 +14,8 @@ interface ModelRequestSource {
 		metadata?: { modelId?: string };
 		details?: string;
 	};
+	/** Response stream items — scanned for an `autoModeResolution` entry (see `_findAutoModeResolvedModel`). */
+	response?: unknown[];
 }
 
 /** Shape of a single delta event line in a JSONL session file. */
@@ -1056,8 +1058,36 @@ function _gmrMatchDisplayName(details: string, modelPricing: { [key: string]: Mo
 	return null;
 }
 
+/**
+ * When Copilot's "Auto" model routing is used, `request.modelId` (and
+ * `result.metadata.modelId`) only ever record the generic `"auto"` /
+ * `"copilot/auto"` id — the actual model Auto picked for that turn is reported
+ * separately, as an `autoModeResolution` item in the response stream:
+ * `{ kind: 'autoModeResolution', resolved: { id, name } }`. Without resolving
+ * this, cost/tier lookups treat "auto" as an unpriced model id, silently
+ * showing $0/no cost for every Auto-routed turn. Returns null when no such
+ * item is present (e.g. non-Auto requests, or older sessions predating it).
+ */
+function _findAutoModeResolvedModel(response: unknown[] | undefined): string | null {
+	if (!Array.isArray(response)) { return null; }
+	for (const item of response) {
+		if (item && typeof item === 'object' && (item as { kind?: string }).kind === 'autoModeResolution') {
+			const id = (item as { resolved?: { id?: string } }).resolved?.id;
+			if (typeof id === 'string' && id) { return id; }
+		}
+	}
+	return null;
+}
+
 export function getModelFromRequest(request: ModelRequestSource, modelPricing: { [key: string]: ModelPricing } = {}): string {
-	if (request.modelId) { return request.modelId.replace(/^copilot\//, ''); }
+	if (request.modelId) {
+		const stripped = request.modelId.replace(/^copilot\//, '');
+		if (stripped === 'auto') {
+			const resolved = _findAutoModeResolvedModel(request.response);
+			if (resolved) { return resolved; }
+		}
+		return stripped;
+	}
 	if (request.result?.metadata?.modelId) { return request.result.metadata.modelId.replace(/^copilot\//, ''); }
 	if (request.result?.details) {
 		const matched = _gmrMatchDisplayName(request.result.details, modelPricing);

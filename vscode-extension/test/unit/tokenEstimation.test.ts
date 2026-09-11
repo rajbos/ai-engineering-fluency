@@ -1498,6 +1498,35 @@ test('getModelFromRequest: strips copilot/ prefix from result.metadata.modelId',
         assert.equal(getModelFromRequest(req), 'claude-sonnet-4.5');
 });
 
+// ── getModelFromRequest: Auto-mode resolution ───────────────────────────────
+// Copilot's "Auto" routing only records "auto"/"copilot/auto" as modelId; the
+// model actually picked for that turn is reported later as an
+// `autoModeResolution` item in the response stream. Without resolving this,
+// "auto" is treated as an unpriced model, silently dropping the turn's cost.
+
+test('getModelFromRequest: resolves the real model from an autoModeResolution response item', () => {
+        const req = {
+                modelId: 'copilot/auto',
+                response: [
+                        { kind: 'autoModeResolution', resolved: { id: 'mai-code-1.1-flash', name: 'MAI-Code-1.1-Flash' } },
+                ],
+        };
+        assert.equal(getModelFromRequest(req), 'mai-code-1.1-flash');
+});
+
+test('getModelFromRequest: falls back to "auto" when no autoModeResolution item is present', () => {
+        assert.equal(getModelFromRequest({ modelId: 'auto' }), 'auto');
+        assert.equal(getModelFromRequest({ modelId: 'copilot/auto', response: [] }), 'auto');
+});
+
+test('getModelFromRequest: non-auto modelId is unaffected by a response array', () => {
+        const req = {
+                modelId: 'copilot/gpt-4o',
+                response: [{ kind: 'autoModeResolution', resolved: { id: 'claude-sonnet-4.5' } }],
+        };
+        assert.equal(getModelFromRequest(req), 'gpt-4o');
+});
+
 // ── selectTokenEstimationStrategy: format detection limit ──────────────────
 
 test('selectTokenEstimationStrategy: format detection stops after FORMAT_DETECTION_LINE_LIMIT non-empty lines', () => {

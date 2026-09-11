@@ -7064,7 +7064,7 @@ private computeFallbackDailyRollup(
 		const contextRefs = this.createEmptyContextRefs();
 		const userMessage = request.message?.text || '';
 		this.analyzeRequestContext(request, contextRefs);
-		const requestModel = request.modelId || currentModel || this.getModelFromRequest(request) || 'gpt-4';
+		const requestModel = this.resolveDeltaTurnModel(request, currentModel);
 		const { responseText, thinkingText, toolCalls, mcpTools } = this.extractResponseData(request.response || []);
 		const actualUsage = this.extractActualUsageFromRequest(request, rawUsageFallback, i);
 		return {
@@ -7077,6 +7077,22 @@ private computeFallbackDailyRollup(
 			thinkingTokensEstimate: this.estimateTokensFromText(thinkingText, requestModel),
 			actualUsage, thinkingEffort: effortByRequestId.get(request.requestId)
 		};
+	}
+
+	/**
+	 * Resolves the model actually used for one delta-format turn. `request.modelId`
+	 * is only the generic `"auto"`/`"copilot/auto"` id when Copilot's Auto routing
+	 * was used — the real per-turn model is only recoverable via `getModelFromRequest`
+	 * (which reads the response stream's `autoModeResolution` item). Preferring a raw
+	 * `"auto"` modelId here would otherwise price every Auto-routed turn as an unknown
+	 * model, silently dropping its cost from the Session Steps Overview table.
+	 */
+	private resolveDeltaTurnModel(request: any, currentModel: string | null): string {
+		const rawModelId = request.modelId ? String(request.modelId).replace(/^copilot\//, '') : null;
+		if (rawModelId && rawModelId !== 'auto') { return rawModelId; }
+		const resolved = this.getModelFromRequest(request);
+		if (resolved && resolved !== 'auto') { return resolved; }
+		return currentModel || rawModelId || 'gpt-4';
 	}
 
 	private extractActualUsageFromRequest(request: any, rawUsageFallback: Map<number, { promptTokens: number; outputTokens: number }>, index: number): ActualUsage | undefined {
