@@ -153,6 +153,49 @@ test('l10n: share-card export keys resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: usage context-pressure keys resolve in English', () => {
+	// These back the two context-pressure rows in the Usage view's Context
+	// Window section. A missing key would render a raw
+	// `usage.contextPressure.compactedLabel` as the row label.
+	const expected: Record<string, string> = {
+		'usage.contextPressure.compactedLabel': '🗜️ Sessions compacted',
+		'usage.contextPressure.noneCompacted': 'No session ran out of context window in this period',
+		'usage.contextPressure.nearLimitLabel': '⚠️ Sessions near the limit',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+	assert.equal(t('usage.contextPressure.ofCount', '3', '12'), '3 of 12');
+	assert.equal(t('usage.contextPressure.worstFill', '94'), 'Fullest session reached 94% of its window');
+	assert.equal(
+		t('usage.contextPressure.compactedShare', '25'),
+		'25% of sessions with context data lost earlier turns to automatic compaction',
+	);
+	assert.match(t('usage.contextPressure.nearLimitTooltip', '80'), /at least 80% of their context window/);
+	assert.match(t('usage.contextPressure.compactedTooltip'), /counted per session rather than per compaction event/);
+});
+
+test('l10n: usage context-pressure keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'usage.contextPressure.compactedLabel': '🗜️ 已压缩的会话',
+			'usage.contextPressure.noneCompacted': '本期间没有会话耗尽上下文窗口',
+			'usage.contextPressure.nearLimitLabel': '⚠️ 接近上限的会话',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+		// The Chinese phrasing reorders the two counts, so the placeholders are
+		// not positional in the same way as English — a plain concatenation
+		// would silently produce "3 个中的 12 个".
+		assert.equal(t('usage.contextPressure.ofCount', '3', '12'), '12 个中的 3 个');
+		assert.equal(t('usage.contextPressure.worstFill', '94'), '最满的会话达到了其窗口的 94%');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test("l10n: what's-new notification keys resolve in English", () => {
 	// The two buttons on the one-a-day new-feature notification. A missing key
 	// here would put a raw `whatsNew.takeMeThere` on the button, which is the

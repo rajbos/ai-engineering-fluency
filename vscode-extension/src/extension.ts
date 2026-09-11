@@ -4126,6 +4126,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Share/export card strings (rendered into the PNG image)
 			'share.exportTitle': l10n.t('share.exportTitle'),
 			'share.exportReportLabel': l10n.t('share.exportReportLabel'),
+			// Usage view — context-pressure rows. Templates with {0}/{1} are
+			// resolved webview-side by localizeFormat(), so they are passed
+			// through unformatted here.
+			'usage.contextPressure.compactedLabel': l10n.t('usage.contextPressure.compactedLabel'),
+			'usage.contextPressure.ofCount': l10n.t('usage.contextPressure.ofCount'),
+			'usage.contextPressure.compactedShare': l10n.t('usage.contextPressure.compactedShare'),
+			'usage.contextPressure.noneCompacted': l10n.t('usage.contextPressure.noneCompacted'),
+			'usage.contextPressure.compactedTooltip': l10n.t('usage.contextPressure.compactedTooltip'),
+			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
+			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
+			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
 			// Current language for reference
 			'__language__': language
 		};

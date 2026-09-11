@@ -5,7 +5,7 @@ import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
 import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
-import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
 import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
 import {
 	hasContextWindowData,
@@ -17,6 +17,10 @@ import {
 // change in src/types.ts surfaces here as a type error instead of silently
 // drifting out of sync with what the extension host actually sends.
 import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats } from '../../../../src/types';
+import { CONTEXT_NEAR_LIMIT_RATIO } from '../../../../src/types';
+
+/** The near-limit threshold as a whole percentage, for display in copy. */
+const NEAR_LIMIT_PERCENT = Math.round(CONTEXT_NEAR_LIMIT_RATIO * 100);
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -4748,20 +4752,20 @@ function _cwFullestWindowRow(cw: ContextWindowStats): string {
 function _cwPressureRows(cp: ContextPressureStats | undefined): string {
 	if (!cp) { return ''; }
 	const compactedRow = cp.sessionsConsidered > 0
-		? _cwRow('🗜️ Sessions compacted',
-			`${formatNumber(cp.sessionsCompacted)} of ${formatNumber(cp.sessionsConsidered)}`,
+		? _cwRow(localize('usage.contextPressure.compactedLabel'),
+			localizeFormat('usage.contextPressure.ofCount', formatNumber(cp.sessionsCompacted), formatNumber(cp.sessionsConsidered)),
 			cp.sessionsCompacted > 0
-				? `${formatFixed((cp.sessionsCompacted / cp.sessionsConsidered) * 100, 0)}% of sessions with context data lost earlier turns to automatic compaction`
-				: 'No session ran out of context window in this period',
-			'Sessions where the client automatically compacted or truncated the history at least once, counted per session rather than per compaction event')
+				? localizeFormat('usage.contextPressure.compactedShare', formatFixed((cp.sessionsCompacted / cp.sessionsConsidered) * 100, 0))
+				: localize('usage.contextPressure.noneCompacted'),
+			localize('usage.contextPressure.compactedTooltip'))
 		: '';
 	const nearRow = cp.sessionsWithFillData > 0
-		? _cwRow('⚠️ Sessions near the limit',
-			`${formatNumber(cp.sessionsNearLimit)} of ${formatNumber(cp.sessionsWithFillData)}`,
+		? _cwRow(localize('usage.contextPressure.nearLimitLabel'),
+			localizeFormat('usage.contextPressure.ofCount', formatNumber(cp.sessionsNearLimit), formatNumber(cp.sessionsWithFillData)),
 			cp.worstFillPercent
-				? `Fullest session reached ${cp.worstFillPercent}% of its window`
+				? localizeFormat('usage.contextPressure.worstFill', cp.worstFillPercent)
 				: undefined,
-			'Copilot CLI sessions that filled at least 80% of their context window without compacting — the early-warning band before context starts getting dropped')
+			localizeFormat('usage.contextPressure.nearLimitTooltip', NEAR_LIMIT_PERCENT))
 		: '';
 	return compactedRow + nearRow;
 }
