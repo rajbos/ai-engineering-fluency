@@ -7,6 +7,12 @@ import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileS
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
+import {
+	hasContextWindowData,
+	sanitizeAutomaticCompactions,
+	sanitizeContextPressure,
+	sanitizeContextWindow,
+} from './contextWindowSanitizer';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -1667,6 +1673,11 @@ function sanitizeContextRefs(refs: any): ContextReferenceUsage {
 	};
 }
 
+/**
+ * Validated pass-through for a period's context-window aggregate. Numbers are
+ * coerced and the model list / tier map are rebuilt so an untrusted payload
+ * cannot smuggle extra fields into the render path.
+ */
 function sanitizePeriod(period: any): UsageAnalysisPeriod {
 	const p = (period && typeof period === 'object') ? period : {};
 	const toolCalls = (p.toolCalls && typeof p.toolCalls === 'object') ? p.toolCalls : {};
@@ -1710,6 +1721,8 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 		},
 		thinkingEffortUsage: p.thinkingEffortUsage,
 		modelEfficiency: p.modelEfficiency,
+		contextWindow: sanitizeContextWindow(p.contextWindow),
+		contextPressure: sanitizeContextPressure(p.contextPressure),
 	};
 }
 
@@ -1861,6 +1874,7 @@ function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void 
 		sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
 	}
 	sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
+	sanitized.autoCompactionsLast7Days = sanitizeAutomaticCompactions(raw?.autoCompactionsLast7Days);
 }
 
 function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
@@ -4774,8 +4788,10 @@ function _cwPressureRows(cp: ContextPressureStats | undefined): string {
 
 /** Renders one period column of the context-window section. */
 function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined, cp?: ContextPressureStats): string {
-	const hasData = !!cw && (cw.maxRequestInputTokens > 0 || (cw.maxReachedTokens ?? 0) > 0 || Object.keys(cw.tierCounts).length > 0);
-	if (!hasData) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+	const hasWindowData = hasContextWindowData(cw);
+	const pressureRows = _cwPressureRows(cp);
+	if (!hasWindowData && !pressureRows) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+	if (!hasWindowData) { return pressureRows; }
 	const tierEntries = Object.entries(cw!.tierCounts);
 	const tierSessionCount = tierEntries.reduce((sum, [, c]) => sum + c, 0);
 	const tierRow = tierEntries.length > 0
@@ -4783,7 +4799,7 @@ function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined, cp?: 
 			`${tierSessionCount} Copilot CLI session${tierSessionCount === 1 ? '' : 's'} grouped by chosen window size — "default" is the standard window at normal rates; larger tiers unlock more context at long-context prices`,
 			'Copilot CLI lets you pick a context-window tier per session; the count shows how many sessions used each tier')
 		: '';
-	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow + _cwPressureRows(cp);
+	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow + pressureRows;
 }
 
 function renderAutomaticCompactions(stats: AutomaticCompactionStats | undefined): string {
