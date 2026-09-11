@@ -4,6 +4,7 @@ import { setHtml } from '../shared/domUtils';
 import { escapeHtml, formatCompact, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
+import { buildTurnOverviewRows, hashModelToHue } from './turnsOverview';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -1056,57 +1057,9 @@ ${hasBreakdown ? `<div class="session-usage-breakdown">
 }
 
 // ── Turns overview table ─────────────────────────────────────────────────────
-
-type TurnOverviewRow = {
-	turnNumber: number;
-	model: string | null;
-	mode: ChatTurn['mode'];
-	input: number;
-	cached: number | null;
-	output: number;
-	total: number;
-	isActual: boolean;
-};
-
-/**
- * Deduces per-turn cache-read tokens from `actualUsage.promptTokenDetails`,
- * when the adapter reported a breakdown entry whose category/label mentions
- * "cache" (e.g. Gemini CLI's `{ category: 'cached', label: 'Cache reads' }`).
- * Returns `null` when no such entry exists — most adapters don't split cache
- * reads out per turn, so the Cached column is only shown when at least one
- * turn actually has this data (see `renderTurnsOverviewTable`).
- */
-function getTurnCachedTokens(turn: ChatTurn): number | null {
-	const au = turn.actualUsage;
-	if (!au?.promptTokenDetails?.length) { return null; }
-	const cachedPct = au.promptTokenDetails
-		.filter(d => /cache/i.test(d.category) || /cache/i.test(d.label))
-		.reduce((sum, d) => sum + d.percentageOfPrompt, 0);
-	if (cachedPct <= 0) { return null; }
-	return Math.round(au.promptTokens * cachedPct / 100);
-}
-
-function buildTurnOverviewRows(data: SessionLogData): TurnOverviewRow[] {
-	return data.turns.map(turn => {
-		const au = turn.actualUsage;
-		const isActual = !!au;
-		const input = isActual ? au!.promptTokens : turn.inputTokensEstimate;
-		const output = isActual ? au!.completionTokens : turn.outputTokensEstimate;
-		const total = isActual
-			? (au!.promptTokens + au!.completionTokens)
-			: (turn.inputTokensEstimate + turn.outputTokensEstimate + turn.thinkingTokensEstimate);
-		return { turnNumber: turn.turnNumber, model: turn.model, mode: turn.mode, input, cached: getTurnCachedTokens(turn), output, total, isActual };
-	});
-}
-
-/** Stable string hash → hue, so each distinct model gets a consistent badge color across the overview table. */
-function hashModelToHue(model: string): number {
-	let hash = 0;
-	for (let i = 0; i < model.length; i++) {
-		hash = (hash * 31 + model.charCodeAt(i)) >>> 0;
-	}
-	return hash % 360;
-}
+// Row-building logic (getTurnCachedTokens, buildTurnOverviewRows, hashModelToHue)
+// lives in ./turnsOverview.ts so it can be unit-tested without the CSS/DOM
+// dependencies this file carries — see that module for its doc comments.
 
 function renderModelOverviewBadge(model: string | null): string {
 	if (!model) { return '<span class="overview-model-badge overview-model-unknown">—</span>'; }
@@ -1125,7 +1078,7 @@ function renderModelOverviewBadge(model: string | null): string {
  */
 function renderTurnsOverviewTable(data: SessionLogData): string {
 	if (data.turns.length === 0) { return ''; }
-	const rows = buildTurnOverviewRows(data);
+	const rows = buildTurnOverviewRows(data.turns);
 	const hasCached = rows.some(r => r.cached !== null);
 	const hasModelSwitches = rows.some((r, i) => i > 0 && r.model && rows[i - 1].model && r.model !== rows[i - 1].model);
 
