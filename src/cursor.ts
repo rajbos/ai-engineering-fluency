@@ -125,9 +125,17 @@ export class CursorDataAccess {
 	// concurrently across up to 10 sessions, so one Cursor db could be fully reloaded many times
 	// per refresh. Restores the equivalent of the pre-#2033 cached parsed Database, but keyed and
 	// invalidated the same way the rest of this file already does (mtime/size + wal mtime/size).
+	// Only ever holds a "settled" entry, i.e. one built from a read that positively included
+	// whatever was pending in the WAL (`WalReadResult.walIncluded`) — see `getSqlJsDb`.
 	private readonly _sqlJsDbCache: Map<string, CursorSqlJsDbCacheEntry> = new Map();
 	// Dedupes concurrent fallback queries against the same db path while a (re)load is in flight.
 	private readonly _sqlJsDbInflight: Map<string, Promise<CursorSqlJsDbCacheEntry | null>> = new Map();
+	// A single trailing slot for the most recent WAL-blind (`walIncluded: false`) parsed Database
+	// per db path — still usable for the call that just produced it, but deliberately NOT part of
+	// `_sqlJsDbCache` (see `getSqlJsDb`'s doc comment on why a WAL-blind read must not be treated as
+	// settled). Held here — rather than closed immediately — only so its underlying WASM memory is
+	// still reclaimed (on the next read for the same path, or on `dispose()`) instead of leaking.
+	private readonly _pendingTransientSqlJsDb: Map<string, CursorSqlJsDbCacheEntry> = new Map();
 
 	private readonly extensionUri: UriLike;
 
@@ -145,6 +153,10 @@ export class CursorDataAccess {
 		}
 		this._sqlJsDbCache.clear();
 		this._sqlJsDbInflight.clear();
+		for (const entry of this._pendingTransientSqlJsDb.values()) {
+			try { entry.db.close(); } catch { /* ignore */ }
+		}
+		this._pendingTransientSqlJsDb.clear();
 	}
 
 	// ── Path helpers ──────────────────────────────────────────────────────────
@@ -306,6 +318,20 @@ export class CursorDataAccess {
 		this._sqlJsDbCache.delete(dbPath);
 	}
 
+	/** Closes and drops the single trailing WAL-blind (transient) Database for `dbPath`, if any. */
+	private releasePendingTransientSqlJsDb(dbPath: string): void {
+		const pending = this._pendingTransientSqlJsDb.get(dbPath);
+		if (!pending) { return; }
+		try { pending.db.close(); } catch { /* ignore */ }
+		this._pendingTransientSqlJsDb.delete(dbPath);
+	}
+
+	/** True when `entry`'s file-identity fields match the fingerprint a read actually reported. */
+	private sqlJsEntryMatchesFingerprint(entry: CursorSqlJsDbCacheEntry | undefined, fp: WalFingerprint): boolean {
+		return !!entry && entry.mtimeMs === fp.mtimeMs && entry.size === fp.size
+			&& entry.walMtimeMs === fp.walMtimeMs && entry.walSize === fp.walSize;
+	}
+
 	/**
 	 * Returns a cached, already-parsed sql.js `Database` for `dbPath` (with any pending WAL frames
 	 * merged in via the shared, hardened helper — see src/utils/sqliteWal.ts), reloading only when
@@ -313,6 +339,15 @@ export class CursorDataAccess {
 	 * has changed. Without this, every distinct composer on the fallback path would re-read and
 	 * re-parse the whole db (see class-level `_sqlJsDbCache` doc comment). Single-flight per db
 	 * path so concurrent fallback queries share one (re)load instead of racing.
+	 *
+	 * The fresh-stat check below is only a CHEAP pre-check for "should we even attempt a read" — it
+	 * decides whether to call `readDbBufferWithWalFingerprint` at all, not whether to reparse. A
+	 * throttled read inside sqliteWal.ts can honestly report the SAME original fingerprint as what
+	 * is already cached here (nothing actually changed, it was just served from that module's own
+	 * throttle), and reparsing on every such call would defeat this very cache in exactly the
+	 * busy-WAL scenario it exists for — see #2036 review notes (Fix 1). So after the read, the
+	 * decision to reparse is made again from the read's OWN reported fingerprint, not another fresh
+	 * stat.
 	 */
 	private async getSqlJsDb(dbPath: string): Promise<CursorSqlJsDbCacheEntry | null> {
 		const stats = this.statDb(dbPath);
@@ -322,9 +357,8 @@ export class CursorDataAccess {
 		}
 		const wal = this.statWal(dbPath);
 		const cached = this._sqlJsDbCache.get(dbPath);
-		if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size
-			&& cached.walMtimeMs === wal.mtimeMs && cached.walSize === wal.size) {
-			return cached;
+		if (this.sqlJsEntryMatchesFingerprint(cached, { mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs: wal.mtimeMs, walSize: wal.size })) {
+			return cached as CursorSqlJsDbCacheEntry;
 		}
 
 		const inflight = this._sqlJsDbInflight.get(dbPath);
@@ -334,11 +368,48 @@ export class CursorDataAccess {
 			try {
 				const SQL = await this.initSqlJs();
 				const result = await readDbBufferWithWalFingerprint(dbPath);
+				const resultFp: WalFingerprint = { mtimeMs: result.dbMtimeMs, size: result.dbSize, walMtimeMs: result.walMtimeMs, walSize: result.walSize };
+
+				// The cheap pre-check above used a fresh WAL stat and found a possible change, but
+				// the read itself may have been served from sqliteWal's own throttle under the
+				// buffer's ORIGINAL fingerprint — i.e. nothing actually changed since the db already
+				// persisted here was built. Reuse it rather than reparsing bytes we already have
+				// parsed. Deliberately checked against ONLY the persisted (settled, walIncluded:true)
+				// cache here, never the transient slot: a WAL-blind read's fingerprint can be
+				// byte-for-byte identical to a LATER, genuinely walIncluded:true merge of that same
+				// (unchanged-on-disk) WAL — the fingerprint tuple alone can't tell "still blind"
+				// apart from "now included" in that case, so matching against a stale transient
+				// entry here could wrongly serve pre-merge content as if it were the fresh merge.
+				const persisted = this._sqlJsDbCache.get(dbPath);
+				if (this.sqlJsEntryMatchesFingerprint(persisted, resultFp)) {
+					return persisted as CursorSqlJsDbCacheEntry;
+				}
+				// A still-blind read reporting the exact same fingerprint as the last still-blind
+				// read is unambiguous, though (neither included the WAL, and nothing about the files
+				// changed) — safe to reuse rather than reparsing the identical bytes again.
+				if (!result.walIncluded) {
+					const pendingTransient = this._pendingTransientSqlJsDb.get(dbPath);
+					if (this.sqlJsEntryMatchesFingerprint(pendingTransient, resultFp)) {
+						return pendingTransient as CursorSqlJsDbCacheEntry;
+					}
+				}
+
 				const db = new SQL.Database(result.buffer);
+				const entry: CursorSqlJsDbCacheEntry = { db, ...resultFp };
+
+				if (!result.walIncluded) {
+					// A WAL-blind plain read (see sqliteWal.ts) — usable for this one call, but not
+					// safe to treat as "caught up": persisting it into the long-lived cache would let
+					// a later WAL-quiet moment look identical to a genuinely caught-up read, hiding
+					// committed rows never checkpointed into the main file — see #2036 review notes
+					// (Fix 3). Keep it only in the single trailing transient slot instead.
+					this.releasePendingTransientSqlJsDb(dbPath);
+					this._pendingTransientSqlJsDb.set(dbPath, entry);
+					return entry;
+				}
+
 				this.evictSqlJsDb(dbPath); // close whatever was cached before replacing it
-				const entry: CursorSqlJsDbCacheEntry = {
-					db, mtimeMs: result.dbMtimeMs, size: result.dbSize, walMtimeMs: result.walMtimeMs, walSize: result.walSize,
-				};
+				this.releasePendingTransientSqlJsDb(dbPath);
 				this._sqlJsDbCache.set(dbPath, entry);
 				return entry;
 			} catch {

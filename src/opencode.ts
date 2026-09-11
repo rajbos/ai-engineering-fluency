@@ -11,7 +11,7 @@ import type { ModelUsage, ModelId } from './types';
 import { normalizePathForComparison } from './workspaceHelpers';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { readTextFileWithSizeGuardSync } from './utils/safeFileRead';
-import { readDbBufferWithWalFingerprint, getWalMtimeMs } from './utils/sqliteWal';
+import { readDbBufferWithWalFingerprint, getWalStat, type WalReadResult } from './utils/sqliteWal';
 
 // Access SqlJsStatic and Database via the globally declared initSqlJs namespace.
 type SqlJsStatic = initSqlJs.SqlJsStatic;
@@ -24,7 +24,10 @@ export interface UriLike {
 	readonly scheme: string;
 }
 
-type OpenCodeDbCache = { db: SqlDatabase; mtimeMs: number; size: number; path: string; walMtimeMs: number };
+// walSize (not just walMtimeMs) is part of the cache identity: mtime granularity is coarse on
+// some filesystems, so two WAL appends inside one tick can leave the mtime unchanged while the
+// WAL still grows — see getWalStat's doc comment and #2036 review notes (Fix 1b).
+type OpenCodeDbCache = { db: SqlDatabase; mtimeMs: number; size: number; path: string; walMtimeMs: number; walSize: number };
 type OpenCodeModelUsageWithInteractions = {
 	[modelName: ModelId]: ModelUsage[ModelId] & { interactions?: number };
 };
@@ -34,6 +37,12 @@ export class OpenCodeDataAccess {
 	private _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
 	private _dbCache: OpenCodeDbCache | null = null;
 	private _dbCacheInflight: Map<string, Promise<SqlDatabase | null>> = new Map();
+	// A single trailing slot for the most recent WAL-blind (`walIncluded: false`) parsed Database —
+	// still usable for the call that just produced it, but deliberately NOT installed as `_dbCache`
+	// (see `refreshOpenCodeDb`'s doc comment on why a WAL-blind read must not be treated as
+	// settled). Held here — rather than closed immediately — only so its underlying WASM memory is
+	// still reclaimed (on the next read, or on `dispose()`) instead of leaking.
+	private _pendingTransientDb: SqlDatabase | null = null;
 	private readonly extensionUri: UriLike;
 
 	constructor(extensionUri: UriLike) {
@@ -103,6 +112,7 @@ export class OpenCodeDataAccess {
 
 	dispose(): void {
 		this.closeDbCache();
+		this.releasePendingTransientDb();
 		this._dbCacheInflight.clear();
 		this._sqlJsInitPromise = null;
 	}
@@ -115,6 +125,13 @@ export class OpenCodeDataAccess {
 		if (this._dbCache) {
 			this.closeDb(this._dbCache.db);
 			this._dbCache = null;
+		}
+	}
+
+	private releasePendingTransientDb(): void {
+		if (this._pendingTransientDb) {
+			this.closeDb(this._pendingTransientDb);
+			this._pendingTransientDb = null;
 		}
 	}
 
@@ -139,33 +156,58 @@ export class OpenCodeDataAccess {
 	}
 
 	private isCachedDbCurrent(dbPath: string, stats: fs.Stats): boolean {
+		const wal = getWalStat(dbPath);
 		return this._dbCache?.path === dbPath
 			&& this._dbCache.mtimeMs === stats.mtimeMs
 			&& this._dbCache.size === stats.size
-			&& this._dbCache.walMtimeMs === getWalMtimeMs(dbPath);
+			&& this._dbCache.walMtimeMs === wal.mtimeMs
+			&& this._dbCache.walSize === wal.size;
 	}
 
 	private getDbCacheKey(dbPath: string, stats: fs.Stats): string {
-		return `${dbPath}:${stats.mtimeMs}:${stats.size}:wal${getWalMtimeMs(dbPath)}`;
+		const wal = getWalStat(dbPath);
+		return `${dbPath}:${stats.mtimeMs}:${stats.size}:wal${wal.mtimeMs}:${wal.size}`;
 	}
 
 	private sameDbStats(left: fs.Stats, right: fs.Stats): boolean {
 		return left.mtimeMs === right.mtimeMs && left.size === right.size;
 	}
 
+	/** True when `_dbCache` was built from a read that reported this exact fingerprint. */
+	private isCachedDbCurrentForFingerprint(dbPath: string, result: WalReadResult): boolean {
+		return this._dbCache?.path === dbPath
+			&& this._dbCache.mtimeMs === result.dbMtimeMs
+			&& this._dbCache.size === result.dbSize
+			&& this._dbCache.walMtimeMs === result.walMtimeMs
+			&& this._dbCache.walSize === result.walSize;
+	}
+
 	private async refreshOpenCodeDb(dbPath: string, stats: fs.Stats): Promise<SqlDatabase | null> {
-		let db: SqlDatabase;
-		let walMtimeMs: number;
+		let result: WalReadResult;
 		try {
-			const SQL = await this.initSqlJs();
-			// Use the fingerprint the read itself reports rather than a fresh getWalMtimeMs(dbPath)
+			// Use the fingerprint the read itself reports rather than a fresh getWalStat(dbPath)
 			// call afterwards: a throttled sqliteWal read can serve a buffer older than "now", and
-			// stamping it with the current WAL mtime would make a stale cache entry look current —
+			// stamping it with the current WAL state would make a stale cache entry look current —
 			// permanently hiding any WAL writes that land after this read but before the throttle
 			// window lapses (see #2036 review notes on src/utils/sqliteWal.ts).
-			const result = await readDbBufferWithWalFingerprint(dbPath);
+			result = await readDbBufferWithWalFingerprint(dbPath);
+		} catch {
+			return this.getCachedDbForPath(dbPath);
+		}
+
+		// The cheap pre-check in getOpenCodeDb() that led here used a fresh WAL stat and found a
+		// possible change, but the read above may have been served from sqliteWal's own throttle
+		// under the buffer's ORIGINAL fingerprint — i.e. nothing actually changed since the db
+		// already cached here was built. Reuse it rather than paying to reparse bytes we already
+		// have parsed — see #2036 review notes (Fix 1).
+		if (this.isCachedDbCurrentForFingerprint(dbPath, result)) {
+			return this._dbCache?.db ?? null;
+		}
+
+		let db: SqlDatabase;
+		try {
+			const SQL = await this.initSqlJs();
 			db = new SQL.Database(result.buffer);
-			walMtimeMs = result.walMtimeMs;
 		} catch {
 			return this.getCachedDbForPath(dbPath);
 		}
@@ -179,8 +221,20 @@ export class OpenCodeDataAccess {
 			return this.getCachedDbForPath(dbPath);
 		}
 
+		if (!result.walIncluded) {
+			// A WAL-blind plain read (see sqliteWal.ts) — usable for this one call, but not safe to
+			// treat as "caught up": persisting it into `_dbCache` would let a later WAL-quiet moment
+			// look identical to a genuinely caught-up read, hiding committed rows never checkpointed
+			// into the main file — see #2036 review notes (Fix 3). Keep it only in the single
+			// trailing transient slot instead.
+			this.releasePendingTransientDb();
+			this._pendingTransientDb = db;
+			return db;
+		}
+
 		this.closeDbCache();
-		this._dbCache = { db, path: dbPath, mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs };
+		this.releasePendingTransientDb();
+		this._dbCache = { db, path: dbPath, mtimeMs: result.dbMtimeMs, size: result.dbSize, walMtimeMs: result.walMtimeMs, walSize: result.walSize };
 		return db;
 	}
 

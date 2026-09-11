@@ -8,6 +8,7 @@ import {
 	isWalWriterActive,
 	tryReadDbWithWal,
 	tryReadDbWithWalFingerprint,
+	readDbBufferWithWalFingerprint,
 	sweepStaleWalTempFiles,
 	walMergeCacheSizeForTests,
 	walMergeCacheHasEntryForTests,
@@ -158,7 +159,10 @@ test('sweepStaleWalTempFiles removes old matching files and leaves recent or non
 		fs.writeFileSync(nonMatchingOldFile, 'unrelated');
 		fs.utimesSync(nonMatchingOldFile, oldDate, oldDate);
 
-		const removed = await sweepStaleWalTempFiles(60 * 60 * 1000, [dirA, dirB]);
+		const removed = await sweepStaleWalTempFiles(60 * 60 * 1000, [
+			{ dir: dirA, prefixes: ['cursor-wal-'] },
+			{ dir: dirB, prefixes: ['sqlite-wal-'] },
+		]);
 
 		assert.equal(removed, 2, 'exactly the two old, prefix-matching files should be removed');
 		assert.equal(fs.existsSync(oldCursorFile), false, 'old cursor-wal- file should be gone');
@@ -173,8 +177,55 @@ test('sweepStaleWalTempFiles removes old matching files and leaves recent or non
 
 test('sweepStaleWalTempFiles tolerates a missing directory', async () => {
 	const missingDir = path.join(os.tmpdir(), `sqlitewal-missing-${Date.now()}-${Math.random().toString(16).slice(2)}`);
-	const removed = await sweepStaleWalTempFiles(60 * 60 * 1000, [missingDir]);
+	const removed = await sweepStaleWalTempFiles(60 * 60 * 1000, [{ dir: missingDir, prefixes: ['cursor-wal-'] }]);
 	assert.equal(removed, 0);
+});
+
+test('sweepStaleWalTempFiles only sweeps a directory for ITS OWN assigned prefix, never the other directory\'s prefix (Fix 4)', async () => {
+	// os.tmpdir() has only ever leaked cursor-wal-* (see #2033); sqlite-wal-* has only ever been
+	// written under ~/.copilot/tmp (see performWalMerge). Both directories are shared with other
+	// applications, so sweeping a plausible-but-foreign prefix out of either one risks deleting a
+	// file that belongs to something else entirely — this must not happen in either direction.
+	const tmpdirRole = fs.mkdtempSync(path.join(os.tmpdir(), 'sqlitewal-sweep-tmpdir-role-'));
+	const copilotTmpRole = fs.mkdtempSync(path.join(os.tmpdir(), 'sqlitewal-sweep-copilot-role-'));
+	try {
+		const oldDate = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 hours ago
+		const makeOld = (dir: string, name: string) => {
+			const p = path.join(dir, name);
+			fs.writeFileSync(p, 'old');
+			fs.utimesSync(p, oldDate, oldDate);
+			return p;
+		};
+
+		// The correct case for each directory's own prefix: removed.
+		const ownCursorFile = makeOld(tmpdirRole, 'cursor-wal-own-old.db');
+		const ownSqliteFile = makeOld(copilotTmpRole, 'sqlite-wal-own-old.db');
+
+		// The foreign-prefix case for each directory: a plausible-looking file that must be left
+		// alone because it does not belong to what this helper has ever written into THAT directory.
+		const foreignSqliteFileInTmpdirRole = makeOld(tmpdirRole, 'sqlite-wal-foreign-old.db');
+		const foreignCursorFileInCopilotRole = makeOld(copilotTmpRole, 'cursor-wal-foreign-old.db');
+
+		const removed = await sweepStaleWalTempFiles(60 * 60 * 1000, [
+			{ dir: tmpdirRole, prefixes: ['cursor-wal-'] },
+			{ dir: copilotTmpRole, prefixes: ['sqlite-wal-'] },
+		]);
+
+		assert.equal(removed, 2, 'only the two files matching their OWN directory\'s prefix should be removed');
+		assert.equal(fs.existsSync(ownCursorFile), false, 'cursor-wal- in the os.tmpdir() role must be removed');
+		assert.equal(fs.existsSync(ownSqliteFile), false, 'sqlite-wal- in the ~/.copilot/tmp role must be removed');
+		assert.equal(
+			fs.existsSync(foreignSqliteFileInTmpdirRole), true,
+			'sqlite-wal- in the os.tmpdir() role must be left alone — that prefix is only ever swept from ~/.copilot/tmp'
+		);
+		assert.equal(
+			fs.existsSync(foreignCursorFileInCopilotRole), true,
+			'cursor-wal- in the ~/.copilot/tmp role must be left alone — that prefix is only ever swept from os.tmpdir()'
+		);
+	} finally {
+		fs.rmSync(tmpdirRole, { recursive: true, force: true });
+		fs.rmSync(copilotTmpRole, { recursive: true, force: true });
+	}
 });
 
 
@@ -330,6 +381,100 @@ test('tryReadDbWithWal refuses to attempt a merge when db+wal COMBINED exceed th
 	} finally {
 		restoreCopyFileSync();
 		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+test('tryReadDbWithWalFingerprint does not serve a stale buffer under its old fingerprint when the main db changed and the re-merge attempt fails (Fix 2)', async () => {
+	const fixture = createWalFixture();
+	let shouldFailMerge = false;
+	const restoreCopyFileSync = spyOnCopyFileSync((original, ...args) => {
+		if (shouldFailMerge) { throw new Error('simulated merge failure'); }
+		return original(...args);
+	});
+	try {
+		const first = await tryReadDbWithWalFingerprint(fixture.dbPath);
+		assert.ok(first, 'first call should merge and return a result');
+
+		// A checkpoint (RESTART) folds pending frames into the main .db file, changing its
+		// mtime/size — exactly the "main db changed" condition that makes
+		// tryReadDbWithWalFingerprint fall through to attempting a fresh merge instead of serving
+		// the throttled buffer.
+		fixture.writer.exec('PRAGMA wal_checkpoint(RESTART);');
+		fixture.writer.exec("INSERT INTO t VALUES ('after-checkpoint')"); // leave a fresh, non-empty WAL
+
+		// Now make the fresh re-merge attempt itself fail (e.g. a transient lock, or an ENOENT from
+		// an atomic-replace pattern).
+		shouldFailMerge = true;
+		const second = await tryReadDbWithWalFingerprint(fixture.dbPath);
+
+		assert.equal(
+			second, null,
+			'the main db changed since the cached buffer and the re-merge failed — the stale pre-checkpoint buffer must not be served under a fingerprint that no longer matches the current main db'
+		);
+
+		// readDbBufferWithWalFingerprint (the public, "never null" API) must fall through to a
+		// fresh, honestly-fingerprinted plain read of the CURRENT main db — not silently reuse the
+		// stale pre-checkpoint fingerprint a caller might otherwise believe is still accurate.
+		const currentDbStat = fs.statSync(fixture.dbPath);
+		const fallback = await readDbBufferWithWalFingerprint(fixture.dbPath);
+		assert.equal(
+			fallback.dbMtimeMs, currentDbStat.mtimeMs,
+			'the fallback fingerprint must reflect the CURRENT (post-checkpoint) main db, not the stale cached one'
+		);
+		assert.equal(fallback.dbSize, currentDbStat.size);
+		assert.notEqual(fallback.dbMtimeMs, first.dbMtimeMs, 'sanity: the post-checkpoint main db must differ from the pre-checkpoint one');
+	} finally {
+		restoreCopyFileSync();
+		fixture.cleanup();
+	}
+});
+
+test('readDbBufferWithWalFingerprint reports walIncluded:false when the WAL-blind fallback skips a non-empty, un-mergeable WAL (Fix 3)', async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sqlitewal-walincluded-oversized-'));
+	const dbPath = path.join(tmpDir, 'huge.db');
+	const walPath = dbPath + '-wal';
+	try {
+		// A sparse file reports the requested size via fs.stat without writing real bytes to disk.
+		const fd = fs.openSync(dbPath, 'w');
+		fs.ftruncateSync(fd, MAX_WAL_MERGE_DB_SIZE_BYTES + 1024);
+		fs.closeSync(fd);
+		fs.writeFileSync(walPath, 'not empty so the WAL-present check passes');
+
+		const result = await readDbBufferWithWalFingerprint(dbPath);
+
+		assert.equal(
+			result.walIncluded, false,
+			'a non-empty WAL that could not be merged in (over the combined size cap) must be reported as NOT included — the returned bytes exclude it'
+		);
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+test('readDbBufferWithWalFingerprint reports walIncluded:true when there is no WAL content to have missed', async () => {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sqlitewal-walincluded-nowal-'));
+	const dbPath = path.join(tmpDir, 'plain.db');
+	try {
+		fs.writeFileSync(dbPath, 'not wal mode');
+		const result = await readDbBufferWithWalFingerprint(dbPath);
+		assert.equal(result.walIncluded, true, 'nothing was excluded — there was no WAL content to miss');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+test('tryReadDbWithWalFingerprint reports walIncluded:true for both a fresh merge and a throttle-served buffer', async () => {
+	const fixture = createWalFixture();
+	try {
+		const first = await tryReadDbWithWalFingerprint(fixture.dbPath);
+		assert.equal(first?.walIncluded, true, 'a fresh, successful merge folds in the WAL');
+
+		fixture.writer.exec("INSERT INTO t VALUES ('more')");
+		const second = await tryReadDbWithWalFingerprint(fixture.dbPath); // served from the throttle
+		assert.equal(second?.buffer, first?.buffer, 'sanity: served from the throttle cache');
+		assert.equal(second?.walIncluded, true, 'a throttle-served buffer still reflects an honestly-reported, WAL-inclusive point in time');
+	} finally {
+		fixture.cleanup();
 	}
 });
 

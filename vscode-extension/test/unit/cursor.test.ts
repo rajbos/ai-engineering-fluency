@@ -437,3 +437,116 @@ test('the -wal size is part of the composer cache key, not just its mtime', asyn
 		fixture.cleanup();
 	}
 });
+
+test('the sql.js fallback reuses the parsed Database across a throttled read instead of reparsing every time the live WAL is touched (Fix 1)', async () => {
+	const fixture = createCursorDbFixture();
+	try {
+		const composerId = 'fix1-composer';
+		fixture.writer.exec(
+			`INSERT INTO cursorDiskKV VALUES ('composerData:${composerId}', '${JSON.stringify({ composerId, name: 'v1' }).replace(/'/g, "''")}')`
+		);
+
+		const access = new CursorDataAccess(FAKE_URI);
+		// Simulate an environment without node:sqlite (older Electron) — every query below must go
+		// through the sql.js fallback and its per-db-path Database cache (getSqlJsDb).
+		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+
+		let dbConstructions = 0;
+		const realInitSqlJs = access.initSqlJs.bind(access);
+		access.initSqlJs = async () => {
+			const SQL = await realInitSqlJs();
+			const RealDatabase = SQL.Database;
+			function CountingDatabase(this: unknown, ...args: unknown[]) {
+				dbConstructions++;
+				return new (RealDatabase as unknown as new (...a: unknown[]) => unknown)(...args);
+			}
+			CountingDatabase.prototype = RealDatabase.prototype;
+			return { ...SQL, Database: CountingDatabase as unknown as typeof SQL.Database };
+		};
+
+		const virtualPath = `${fixture.dbPath}#${composerId}`;
+		const first = await access.readComposerData(virtualPath);
+		assert.equal(first?.name, 'v1');
+		assert.equal(dbConstructions, 1, 'the first read parses the db once');
+
+		// Touch the live WAL (grows it, changing its mtime/size) WITHOUT letting sqliteWal's own
+		// merge throttle window lapse, and clear the per-composer cache so this call is forced back
+		// down into getSqlJsDb — the cheap fresh-stat pre-check will see the WAL has moved and
+		// attempt a read, but that read will be served from sqliteWal's own throttle under the
+		// SAME original fingerprint as before (nothing has actually changed from the fallback's
+		// point of view).
+		fixture.writer.exec(
+			`INSERT INTO cursorDiskKV VALUES ('composerData:other', '${JSON.stringify({ composerId: 'other' }).replace(/'/g, "''")}')`
+		);
+		const composerCache = (access as unknown as { _composerCache: Map<string, unknown> })._composerCache;
+		composerCache.clear();
+
+		const second = await access.readComposerData(virtualPath);
+		assert.equal(second?.name, 'v1', 'still the same data — the throttled read served the original, unchanged buffer');
+		assert.equal(
+			dbConstructions, 1,
+			'a throttled read reporting the SAME fingerprint as before must reuse the already-parsed Database, not reparse it'
+		);
+	} finally {
+		fixture.cleanup();
+	}
+});
+
+test('a WAL-blind plain read (merge failed, nothing cached) is not persisted as a settled per-path Database — a later successful merge still surfaces data written before it (Fix 3)', async () => {
+	const fixture = createCursorDbFixture();
+	let mergeShouldFail = true;
+	const rawFs = require('fs') as typeof fs;
+	const originalCopyFileSync = rawFs.copyFileSync;
+	// TS compiles `import * as fs` to a live-binding getter, so this module's own fs.copyFileSync
+	// can't be assigned directly; require('fs') returns the real, writable module object every
+	// `import * as fs` — including src/utils/sqliteWal.ts's — transparently forwards reads to.
+	rawFs.copyFileSync = ((...args: Parameters<typeof fs.copyFileSync>) => {
+		if (mergeShouldFail) { throw new Error('simulated merge failure'); }
+		return originalCopyFileSync(...args);
+	}) as typeof fs.copyFileSync;
+	const realNow = Date.now;
+	try {
+		const composerId = 'fix3-composer';
+		const write = (name: string) => fixture.writer.exec(
+			`INSERT OR REPLACE INTO cursorDiskKV VALUES ('composerData:${composerId}', '${JSON.stringify({ composerId, name }).replace(/'/g, "''")}')`
+		);
+		write('v1');
+		// Checkpoint v1 into the MAIN db file (not just leaving it in the WAL) so the plain,
+		// WAL-blind fallback below can still see it.
+		fixture.writer.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+		write('v2'); // pending only in the WAL from here on
+
+		const access = new CursorDataAccess(FAKE_URI);
+		(access as unknown as { getNodeSqliteModule: () => null }).getNodeSqliteModule = () => null;
+
+		const virtualPath = `${fixture.dbPath}#${composerId}`;
+		const composerCache = (access as unknown as { _composerCache: Map<string, unknown> })._composerCache;
+		const sqlJsDbCache = (access as unknown as { _sqlJsDbCache: Map<string, unknown> })._sqlJsDbCache;
+
+		// First read: the merge fails (forced), so this falls back to a WAL-blind plain read that
+		// only sees v1 (the checkpointed main file) — v2 is still pending, unmerged, in the WAL.
+		const first = await access.readComposerData(virtualPath);
+		assert.equal(first?.name, 'v1', 'sanity: the WAL-blind read only sees the checkpointed main file');
+		assert.equal(
+			sqlJsDbCache.has(fixture.dbPath), false,
+			'a WAL-blind read must not be persisted into the long-lived per-path Database cache as "settled"'
+		);
+
+		// Now let merges succeed again, jump past sqliteWal's own merge-retry throttle (so the next
+		// attempt is not itself short-circuited as "recently failed, stay throttled"), and force a
+		// re-query.
+		mergeShouldFail = false;
+		Date.now = () => realNow() + 6 * 60_000;
+		composerCache.clear();
+
+		const second = await access.readComposerData(virtualPath);
+		assert.equal(
+			second?.name, 'v2',
+			'the WAL data written before the WAL-blind read must still surface once a real merge succeeds — proving the earlier read was not wrongly cached as caught-up'
+		);
+	} finally {
+		Date.now = realNow;
+		rawFs.copyFileSync = originalCopyFileSync;
+		fixture.cleanup();
+	}
+});

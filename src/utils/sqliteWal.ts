@@ -77,6 +77,19 @@ export interface WalReadResult {
 	dbSize: number;
 	walMtimeMs: number;
 	walSize: number;
+	/**
+	 * Whether `buffer` folds in whatever was pending in the `-wal` sidecar as of this fingerprint —
+	 * `true` for a fresh merge, a throttle-served buffer, or a last-good buffer served after a
+	 * transient re-merge failure (all of these reflect *some* honestly-reported point in time that
+	 * did account for the WAL); `false` only for the plain, WAL-blind fallback read in
+	 * `readDbBufferWithWalFingerprint` when a non-empty `-wal` existed but wasn't merged in (e.g.
+	 * the db+wal combined size is over `MAX_WAL_MERGE_DB_SIZE_BYTES`, or the merge failed with
+	 * nothing to fall back on). A caller with its own long-lived per-path cache must not persist a
+	 * `walIncluded: false` result as "settled, current" — a later WAL-quiet moment would then look
+	 * identical to a genuinely caught-up read, permanently hiding rows that were committed but never
+	 * checkpointed into the main file. See #2036 review notes (Fix 3).
+	 */
+	walIncluded: boolean;
 }
 
 interface WalMergeCacheEntry {
@@ -268,7 +281,7 @@ export async function tryReadDbWithWalFingerprint(dbPath: string): Promise<WalRe
 		const mainDbUnchanged = cached.dbMtimeMs === eligible.dbMtimeMs && cached.dbSize === eligible.dbSize;
 		if (cached.buffer && mainDbUnchanged) {
 			// Serve the previous merge result under its ORIGINAL fingerprint — see doc comment above.
-			return { buffer: cached.buffer, dbMtimeMs: cached.dbMtimeMs, dbSize: cached.dbSize, walMtimeMs: cached.walMtimeMs, walSize: cached.walSize };
+			return { buffer: cached.buffer, dbMtimeMs: cached.dbMtimeMs, dbSize: cached.dbSize, walMtimeMs: cached.walMtimeMs, walSize: cached.walSize, walIncluded: true };
 		}
 		if (!cached.buffer) {
 			return null; // a recent attempt already failed and produced nothing to serve — stay throttled
@@ -283,23 +296,35 @@ export async function tryReadDbWithWalFingerprint(dbPath: string): Promise<WalRe
 			buffer, attemptedAt: now,
 			dbMtimeMs: eligible.dbMtimeMs, dbSize: eligible.dbSize, walMtimeMs: eligible.walMtimeMs, walSize: eligible.walSize,
 		});
-		return { buffer, dbMtimeMs: eligible.dbMtimeMs, dbSize: eligible.dbSize, walMtimeMs: eligible.walMtimeMs, walSize: eligible.walSize };
+		return { buffer, dbMtimeMs: eligible.dbMtimeMs, dbSize: eligible.dbSize, walMtimeMs: eligible.walMtimeMs, walSize: eligible.walSize, walIncluded: true };
 	} catch {
-		// node:sqlite unavailable or copy/merge failed.
-		if (cached?.buffer) {
+		// node:sqlite unavailable or copy/merge failed. This `catch` is only reached when either
+		// nothing was cached yet, or the `mainDbUnchanged` check above found the main db file HAS
+		// changed since the cached buffer was produced (that's precisely why we fell through to
+		// attempting a fresh merge instead of serving the throttled buffer). Only serve the old
+		// buffer under its old fingerprint in the FIRST case — the main db genuinely hasn't moved,
+		// so this failure is a transient hiccup (e.g. a momentary lock) and the buffer is still
+		// accurate. In the second case, serving it anyway would be actively misleading: a caller
+		// whose own cache still holds that same old fingerprint (because it too has been unable to
+		// observe the main-db change through this same call chain) would conclude nothing changed,
+		// even though we positively know the main db has moved since — see #2036 review notes (Fix 2).
+		const mainDbUnchangedSinceCache = !!cached && cached.dbMtimeMs === eligible.dbMtimeMs && cached.dbSize === eligible.dbSize;
+		if (cached?.buffer && mainDbUnchangedSinceCache) {
 			// Keep serving the last-good buffer (under its own original fingerprint), but record
 			// this attempt so a merge that keeps failing is throttled too.
 			cached.attemptedAt = now;
-			return { buffer: cached.buffer, dbMtimeMs: cached.dbMtimeMs, dbSize: cached.dbSize, walMtimeMs: cached.walMtimeMs, walSize: cached.walSize };
+			return { buffer: cached.buffer, dbMtimeMs: cached.dbMtimeMs, dbSize: cached.dbSize, walMtimeMs: cached.walMtimeMs, walSize: cached.walSize, walIncluded: true };
 		}
-		// Nothing usable was ever cached for this db — record the failed attempt anyway so a
-		// persistently failing path is throttled instead of re-attempting the full copy/merge on
-		// every single call (the expensive, repeatedly-failing case the throttle exists for).
+		// Either nothing usable was ever cached for this db, or the main db has changed since what
+		// WAS cached — in both cases there is nothing honest left to serve under an old fingerprint.
+		// Record the failed attempt anyway so a persistently failing path is throttled instead of
+		// re-attempting the full copy/merge on every single call, and drop any now-stale buffer so
+		// it can't be served later under a fingerprint that no longer matches its own main db state.
 		walMergeCache.set(dbPath, {
 			buffer: undefined, attemptedAt: now,
 			dbMtimeMs: eligible.dbMtimeMs, dbSize: eligible.dbSize, walMtimeMs: eligible.walMtimeMs, walSize: eligible.walSize,
 		});
-		return null; // fall back to direct read
+		return null; // fall back to a fresh, honestly-fingerprinted direct read of the CURRENT main db
 	}
 }
 
@@ -327,7 +352,23 @@ export function getWalMtimeMs(dbPath: string): number {
 	return statWal(dbPath).mtimeMs;
 }
 
-const WAL_TEMP_FILE_PREFIXES = ['cursor-wal-', 'sqlite-wal-'];
+/**
+ * The WAL sidecar's mtime AND size, or zeroes when no `-wal` file exists. Prefer this over
+ * `getWalMtimeMs` alone for anything that caches a parsed db keyed on file identity: mtime
+ * granularity is coarse on some filesystems (whole seconds on ext3/HFS+/FAT), so two WAL appends
+ * inside one tick can leave the mtime identical while the file still grows — a cache keyed on
+ * mtime alone would miss that and serve stale data. WAL frames are appended, so size always moves
+ * on a write even when mtime cannot.
+ */
+export function getWalStat(dbPath: string): { mtimeMs: number; size: number } {
+	return statWal(dbPath);
+}
+
+/** One directory to sweep, and the WAL-merge temp-file prefix(es) this helper's own code has ever written there. */
+interface WalTempSweepTarget {
+	dir: string;
+	prefixes: string[];
+}
 
 /** Removes `filePath` if it is a plain file older than `minAgeMs`. Returns whether it removed it. */
 async function removeIfStaleWalTempFile(filePath: string, minAgeMs: number, nowMs: number): Promise<boolean> {
@@ -341,8 +382,8 @@ async function removeIfStaleWalTempFile(filePath: string, minAgeMs: number, nowM
 	}
 }
 
-/** Sweeps one directory for stale WAL-merge temp files. Returns how many it removed. */
-async function sweepDirForStaleWalTempFiles(dir: string, minAgeMs: number, nowMs: number): Promise<number> {
+/** Sweeps one directory, for only its own given prefix(es), for stale WAL-merge temp files. Returns how many it removed. */
+async function sweepDirForStaleWalTempFiles(dir: string, prefixes: string[], minAgeMs: number, nowMs: number): Promise<number> {
 	let entries: string[];
 	try {
 		entries = await fs.promises.readdir(dir);
@@ -351,7 +392,7 @@ async function sweepDirForStaleWalTempFiles(dir: string, minAgeMs: number, nowMs
 	}
 	let removed = 0;
 	for (const name of entries) {
-		if (!WAL_TEMP_FILE_PREFIXES.some(prefix => name.startsWith(prefix))) { continue; }
+		if (!prefixes.some(prefix => name.startsWith(prefix))) { continue; }
 		if (await removeIfStaleWalTempFile(path.join(dir, name), minAgeMs, nowMs)) { removed++; }
 	}
 	return removed;
@@ -361,21 +402,31 @@ async function sweepDirForStaleWalTempFiles(dir: string, minAgeMs: number, nowMs
  * Best-effort sweep of stranded WAL-merge temp files. Earlier extension versions (<= 0.17.2)
  * copied Cursor's `state.vscdb` on every read without a `finally`-guarded cleanup, leaking
  * `cursor-wal-*` (+ `-wal`/`-shm` siblings) files into `os.tmpdir()` — see #2033. The current
- * helper writes `sqlite-wal-*` under `~/.copilot/tmp` instead, but nothing sweeps either
- * location today. Runs once at activation (see extension.ts) to reclaim both.
+ * helper writes `sqlite-wal-*` under `~/.copilot/tmp` instead, but nothing swept either
+ * location before this. Runs once at activation (see extension.ts) to reclaim both.
  *
- * Conservative by design: only removes files whose name starts with one of our own temp-file
- * prefixes AND are older than `minAgeMs`; anything else — including any error — is left alone.
+ * Conservative by design: only removes files whose name starts with a prefix AND are older than
+ * `minAgeMs`; anything else — including any error — is left alone. Each directory is swept ONLY
+ * for the prefix(es) this helper's own code has actually ever written there — never the other
+ * directory's prefix — because BOTH directories are shared with other applications: `os.tmpdir()`
+ * by every process on the machine, and `~/.copilot/tmp` by GitHub Copilot tooling broadly (it is
+ * not exclusively this extension's directory either). Sweeping a plausible-but-foreign prefix out
+ * of either one risks deleting a file that belongs to something else entirely — `sqlite-wal-*` is
+ * a generic-sounding name this helper has never written into `os.tmpdir()`, so it is scoped to
+ * `~/.copilot/tmp` only, where `performWalMerge` is the sole writer of that name.
  *
- * `dirsOverride` replaces the default [`os.tmpdir()`, `~/.copilot/tmp`] pair — for tests only;
- * production callers should omit it.
+ * `dirsOverride` replaces the default [`os.tmpdir()` swept for `cursor-wal-*`, `~/.copilot/tmp`
+ * swept for `sqlite-wal-*`] pair — for tests only; production callers should omit it.
  */
-export async function sweepStaleWalTempFiles(minAgeMs: number = 60 * 60 * 1000, dirsOverride?: string[]): Promise<number> {
-	const dirs = dirsOverride ?? [os.tmpdir(), path.join(os.homedir(), '.copilot', 'tmp')];
+export async function sweepStaleWalTempFiles(minAgeMs: number = 60 * 60 * 1000, dirsOverride?: WalTempSweepTarget[]): Promise<number> {
+	const targets = dirsOverride ?? [
+		{ dir: os.tmpdir(), prefixes: ['cursor-wal-'] },
+		{ dir: path.join(os.homedir(), '.copilot', 'tmp'), prefixes: ['sqlite-wal-'] },
+	];
 	const now = Date.now();
 	let removed = 0;
-	for (const dir of dirs) {
-		removed += await sweepDirForStaleWalTempFiles(dir, minAgeMs, now);
+	for (const { dir, prefixes } of targets) {
+		removed += await sweepDirForStaleWalTempFiles(dir, prefixes, minAgeMs, now);
 	}
 	return removed;
 }
@@ -420,5 +471,12 @@ export async function readDbBufferWithWalFingerprint(dbPath: string): Promise<Wa
 		try { fs.closeSync(fd); } catch { /* ignore */ }
 	}
 	const wal = statWal(dbPath);
-	return { buffer, dbMtimeMs: dbStat.mtimeMs, dbSize: dbStat.size, walMtimeMs: wal.mtimeMs, walSize: wal.size };
+	return {
+		buffer, dbMtimeMs: dbStat.mtimeMs, dbSize: dbStat.size, walMtimeMs: wal.mtimeMs, walSize: wal.size,
+		// This read is WAL-blind — it never merged in the `-wal` sidecar's frames. That's harmless
+		// when there is nothing pending there to have missed (`wal.size === 0`), but honest callers
+		// with their own settle-and-cache logic must know when it's NOT harmless (a non-empty WAL
+		// existed but wasn't folded in) — see the `walIncluded` doc comment on `WalReadResult`.
+		walIncluded: wal.size === 0,
+	};
 }
