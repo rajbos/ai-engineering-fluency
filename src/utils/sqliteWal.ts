@@ -405,10 +405,20 @@ export async function readDbBufferWithWalFingerprint(dbPath: string): Promise<Wa
 	const merged = await tryReadDbWithWalFingerprint(dbPath);
 	if (merged) { return merged; }
 
-	// No merge ran — fall back to a plain read, stat'd right alongside it so the fingerprint
-	// matches the bytes just read as closely as a single-process read/stat pair can.
-	const dbStat = fs.statSync(dbPath);
-	const buffer = fs.readFileSync(dbPath);
+	// No merge ran — fall back to a plain read. Open once and take both the stat and the bytes
+	// from that one descriptor rather than stat'ing the path and then reading it: a separate
+	// stat-then-read pair re-resolves the path, so a file replaced in between yields a
+	// fingerprint describing one file and bytes from another — precisely the mismatch this
+	// return value exists to prevent (and a CodeQL TOCTOU finding on the earlier form).
+	const fd = fs.openSync(dbPath, 'r');
+	let buffer: Buffer;
+	let dbStat: fs.Stats;
+	try {
+		dbStat = fs.fstatSync(fd);
+		buffer = fs.readFileSync(fd);
+	} finally {
+		try { fs.closeSync(fd); } catch { /* ignore */ }
+	}
 	const wal = statWal(dbPath);
 	return { buffer, dbMtimeMs: dbStat.mtimeMs, dbSize: dbStat.size, walMtimeMs: wal.mtimeMs, walSize: wal.size };
 }
