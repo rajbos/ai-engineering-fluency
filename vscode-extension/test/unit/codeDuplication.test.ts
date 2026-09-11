@@ -27,6 +27,7 @@ const dup = requireFromHere(
 	normalizeLine: (raw: string) => string;
 	isNoise: (line: string) => boolean;
 	globToRegExp: (glob: string) => RegExp;
+	escapeMarkdownCell: (s: string) => string;
 	findDuplicates: (
 		fileTokens: { relPath: string; tokens: { text: string; line: number }[] }[],
 		minLines: number
@@ -195,6 +196,35 @@ test('parseArgs: applies defaults and parses flags', () => {
 	assert.equal(b.json, true);
 	assert.equal(b.failThreshold, 200);
 	assert.deepEqual(b.includes, ['src/**/*.ts']);
+});
+
+test('globToRegExp: a --include value cannot inject an arbitrary regex', () => {
+	// A glob containing regex metacharacters must be escaped, never compiled
+	// as a live regex operator. `(` without a matching `)` would otherwise throw
+	// or match unintended content.
+	const re = dup.globToRegExp('src/(weird).ts');
+	assert.ok(re.test('src/(weird).ts'));
+	assert.ok(!re.test('src/weird.ts'));
+});
+
+test('escapeMarkdownCell: escapes backslash first, then the pipe delimiter', () => {
+	assert.equal(dup.escapeMarkdownCell('plain'), 'plain');
+	assert.equal(dup.escapeMarkdownCell('a|b'), 'a\\|b');
+	// A backslash must be doubled before the pipe escape, so `\|` cannot smuggle
+	// a literal pipe through as a column separator.
+	assert.equal(dup.escapeMarkdownCell('a\\|b'), 'a\\\\\\|b');
+});
+
+test('renderMarkdown: previews are escaped for the table cell', () => {
+	const md = dup.renderMarkdown(
+		[{ lines: 8, occurrences: [{ file: 'a.ts', startLine: 1, endLine: 8 }], preview: 'a|b\\c' }],
+		5,
+		null
+	);
+	// The raw preview content must be escaped: pipe -> \|, backslash -> \\,
+	// so it cannot break out of its table cell.
+	assert.match(md, /`a\\\|b\\\\c…`/);
+	assert.ok(!md.includes('a|b\\c'));
 });
 
 test('the detector runs against the repo and reports a non-empty step-summary', () => {

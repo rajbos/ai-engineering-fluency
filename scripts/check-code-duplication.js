@@ -127,6 +127,14 @@ function tokenizeFile(absPath) {
 	return out;
 }
 
+/*
+ * Characters that have special meaning in a RegExp. Everything that is not a
+ * glob metacharacter (`*`, `?`) is escaped against this set so a `--include`
+ * value can never inject an arbitrary regex — the emitted pattern only ever
+ * contains `.*`, `[^/]*`, `[^/]`, and escaped literals.
+ */
+const REGEX_METACHARS = new Set('\\^$.*+?()[]{}|');
+
 /** Minimal glob -> RegExp matcher supporting **, *, ? and braces-free patterns. */
 function globToRegExp(glob) {
 	let re = '';
@@ -142,7 +150,7 @@ function globToRegExp(glob) {
 			}
 		} else if (c === '?') {
 			re += '[^/]';
-		} else if ('.+()^$|{}\\[]'.includes(c)) {
+		} else if (REGEX_METACHARS.has(c)) {
 			re += '\\' + c;
 		} else {
 			re += c;
@@ -373,6 +381,13 @@ function totalDuplicatedLines(groups) {
 	return total;
 }
 
+/** Escape a string for safe use inside a Markdown table cell: backslash first,
+ * then the pipe that delimits columns, so source paths/previews cannot break
+ * out of the cell or smuggle a column separator. */
+function escapeMarkdownCell(s) {
+	return s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+}
+
 function renderMarkdown(groups, scanned, threshold) {
 	let md = '## \u2396\ufe0f\u200d Code Duplication Analysis\n\n';
 	md += `| Files scanned | Duplicate groups | Total duplicated lines |\n`;
@@ -390,7 +405,7 @@ function renderMarkdown(groups, scanned, threshold) {
 	md += '|:-----:|:-----------:|:------|---------|\n';
 	for (const g of top) {
 		const files = [...new Set(g.occurrences.map((o) => o.file))].map((f) => `\`${f}\``).join('<br>');
-		const preview = g.preview.replace(/\|/g, '\\|').replace(/\n/g, ' \u2026 ');
+		const preview = escapeMarkdownCell(g.preview).replace(/\n/g, ' … ');
 		md += `| ${g.lines} | ${g.occurrences.length} | ${files} | \`${preview}\u2026\` |\n`;
 	}
 	md += '\n';
@@ -466,6 +481,7 @@ module.exports = {
 	findDuplicates,
 	extendGroups,
 	totalDuplicatedLines,
+	escapeMarkdownCell,
 	renderMarkdown,
 	renderJson,
 	MIN_LINES_DEFAULT,
