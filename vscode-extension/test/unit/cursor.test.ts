@@ -8,15 +8,25 @@ import { CursorDataAccess } from '../../../src/cursor';
 
 const FAKE_URI: UriLike = { fsPath: '', path: '', scheme: 'file' };
 
-/** Counts entries in `dir` whose name starts with one of `prefixes`. Missing dir counts as 0. */
-function countMatchingFiles(dir: string, prefixes: string[]): number {
+/**
+ * Counts WAL temp files in `dir` that *this* process created. Both temp directories below are
+ * shared with every other process on the machine — including the concurrently-running
+ * sqliteWal.test.js, which performs real merges into `~/.copilot/tmp` — so a bare prefix count
+ * would intermittently see another test file's in-flight temp files and fail. The merge helper
+ * embeds the creating pid in every name (`<prefix>...-<pid>-<ts>-<rand>`), so scoping the count
+ * to this pid keeps the assertion about this test alone. Missing dir counts as 0.
+ */
+function countOwnWalTempFiles(dir: string, prefixes: string[]): number {
 	let entries: string[];
 	try {
 		entries = fs.readdirSync(dir);
 	} catch {
 		return 0;
 	}
-	return entries.filter(name => prefixes.some(prefix => name.startsWith(prefix))).length;
+	const ownPid = `-${process.pid}-`;
+	return entries.filter(
+		name => prefixes.some(prefix => name.startsWith(prefix)) && name.includes(ownPid)
+	).length;
 }
 
 const WAL_TEMP_PREFIXES = ['cursor-wal-', 'sqlite-wal-'];
@@ -56,8 +66,8 @@ test('readComposerData sees a live writer\'s pending WAL frames via the read-onl
 
 		const beforeMain = fs.statSync(fixture.dbPath);
 		const beforeWal = fs.statSync(fixture.dbPath + '-wal');
-		const beforeTmpCount = countMatchingFiles(os.tmpdir(), WAL_TEMP_PREFIXES);
-		const beforeCopilotTmpCount = countMatchingFiles(copilotTmpDir, WAL_TEMP_PREFIXES);
+		const beforeTmpCount = countOwnWalTempFiles(os.tmpdir(), WAL_TEMP_PREFIXES);
+		const beforeCopilotTmpCount = countOwnWalTempFiles(copilotTmpDir, WAL_TEMP_PREFIXES);
 
 		const access = new CursorDataAccess(FAKE_URI);
 		const virtualPath = `${fixture.dbPath}#${composerId}`;
@@ -72,8 +82,8 @@ test('readComposerData sees a live writer\'s pending WAL frames via the read-onl
 		assert.equal(afterMain.mtimeMs, beforeMain.mtimeMs, 'main db file mtime must be unchanged (no write)');
 		assert.equal(afterWal.size, beforeWal.size, '-wal file size must be unchanged (no truncating checkpoint)');
 
-		assert.equal(countMatchingFiles(os.tmpdir(), WAL_TEMP_PREFIXES), beforeTmpCount, 'no temp file in os.tmpdir()');
-		assert.equal(countMatchingFiles(copilotTmpDir, WAL_TEMP_PREFIXES), beforeCopilotTmpCount, 'no temp file in ~/.copilot/tmp');
+		assert.equal(countOwnWalTempFiles(os.tmpdir(), WAL_TEMP_PREFIXES), beforeTmpCount, 'this process must create no temp file in os.tmpdir()');
+		assert.equal(countOwnWalTempFiles(copilotTmpDir, WAL_TEMP_PREFIXES), beforeCopilotTmpCount, 'this process must create no temp file in ~/.copilot/tmp');
 	} finally {
 		fixture.cleanup();
 	}
@@ -193,5 +203,37 @@ test('a db path that fails to open read-only is only probed once, not retried on
 		assert.equal(openAttempts, 1, 'the read-only backend should only be probed once for a db path that fails to open');
 	} finally {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+test('a failed read-only open demotes the db only temporarily, not for the process lifetime', async () => {
+	const fixture = createCursorDbFixture();
+	try {
+		const access = new CursorDataAccess(FAKE_URI);
+		// Force the read-only backend to fail once, as a transient SQLITE_BUSY would while the
+		// writer holds an exclusive lock during its own checkpoint.
+		const accessInternals = access as unknown as {
+			_readOnlyUnsupportedDbs: Map<string, number>;
+			isReadOnlyDemoted(dbPath: string): boolean;
+		};
+		accessInternals._readOnlyUnsupportedDbs.set(fixture.dbPath, Date.now());
+		assert.equal(
+			accessInternals.isReadOnlyDemoted(fixture.dbPath), true,
+			'a just-failed db should be demoted to the sql.js fallback'
+		);
+
+		// Past the cooldown the demotion must lapse — otherwise one transient failure strands this
+		// db on the copy-based fallback forever, reintroducing the multi-GB copies (#2033).
+		accessInternals._readOnlyUnsupportedDbs.set(fixture.dbPath, Date.now() - 6 * 60_000);
+		assert.equal(
+			accessInternals.isReadOnlyDemoted(fixture.dbPath), false,
+			'the demotion must expire so the copy-free backend is retried'
+		);
+		assert.equal(
+			accessInternals._readOnlyUnsupportedDbs.has(fixture.dbPath), false,
+			'the lapsed entry should be cleared rather than accumulating'
+		);
+	} finally {
+		fixture.cleanup();
 	}
 });

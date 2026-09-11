@@ -61,6 +61,29 @@ interface WalMergeCacheEntry {
 const walMergeCache = new Map<string, WalMergeCacheEntry>();
 
 /**
+ * How long a merged buffer is kept after its last use. A cached buffer is only ever *served*
+ * inside the throttle window above, so past that point it is dead weight — and at up to
+ * `MAX_WAL_MERGE_DB_SIZE_BYTES` each, across every consumer's db path, retaining them for the
+ * life of the extension host would be a sizeable leak. Evicting only costs a plain (slightly
+ * stale) direct read on the next call, which is what an uncached path does anyway.
+ */
+const WAL_MERGE_CACHE_RETENTION_MS = WAL_MERGE_WRITER_ACTIVE_INTERVAL_MS;
+
+/** Number of merged buffers currently retained — for tests only. */
+export function walMergeCacheSizeForTests(): number {
+	return walMergeCache.size;
+}
+
+/** Drops merged buffers nothing can serve from any more, so they aren't retained forever. */
+function evictExpiredWalMergeCacheEntries(nowMs: number): void {
+	for (const [key, entry] of walMergeCache) {
+		if (nowMs - entry.attemptedAt >= WAL_MERGE_CACHE_RETENTION_MS) {
+			walMergeCache.delete(key);
+		}
+	}
+}
+
+/**
  * Heuristic for "another process currently holds this db open in WAL mode", using only two
  * `fs.stat` checks — no process enumeration, no lock probing. `<db>-shm` exists only while some
  * process holds the db open in WAL mode; a recently-touched `<db>-wal` on top of that means it is
@@ -153,6 +176,7 @@ export async function tryReadDbWithWal(dbPath: string): Promise<Buffer | null> {
 	if (!eligible) { return null; }
 
 	const now = Date.now();
+	evictExpiredWalMergeCacheEntries(now);
 	const cached = walMergeCache.get(dbPath);
 	const minInterval = isWalWriterActive(dbPath, now) ? WAL_MERGE_WRITER_ACTIVE_INTERVAL_MS : WAL_MERGE_MIN_INTERVAL_MS;
 	if (cached && now - cached.attemptedAt < minInterval) {

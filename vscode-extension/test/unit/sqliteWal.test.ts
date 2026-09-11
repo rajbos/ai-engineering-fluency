@@ -8,6 +8,7 @@ import {
 	isWalWriterActive,
 	tryReadDbWithWal,
 	sweepStaleWalTempFiles,
+	walMergeCacheSizeForTests,
 } from '../../../src/utils/sqliteWal';
 
 /**
@@ -158,4 +159,27 @@ test('sweepStaleWalTempFiles tolerates a missing directory', async () => {
 	const missingDir = path.join(os.tmpdir(), `sqlitewal-missing-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 	const removed = await sweepStaleWalTempFiles(60 * 60 * 1000, [missingDir]);
 	assert.equal(removed, 0);
+});
+
+
+test('tryReadDbWithWal evicts merged buffers once they are past the retention window', async () => {
+	const fixture = createWalFixture();
+	const realNow = Date.now;
+	try {
+		const first = await tryReadDbWithWal(fixture.dbPath);
+		assert.ok(first, 'first call should merge and return a buffer');
+		assert.ok(walMergeCacheSizeForTests() > 0, 'the merged buffer should be cached initially');
+
+		// Jump past the retention window (the longest throttle interval) so the cached buffer
+		// can never be served again — it must be dropped rather than retained for the life of
+		// the process, since each one can be up to MAX_WAL_MERGE_DB_SIZE_BYTES.
+		const shifted = realNow() + 6 * 60_000;
+		Date.now = () => shifted;
+
+		const second = await tryReadDbWithWal(fixture.dbPath);
+		assert.notEqual(second, first, 'past the retention window a fresh merge must run, not the cached buffer');
+	} finally {
+		Date.now = realNow;
+		fixture.cleanup();
+	}
 });

@@ -67,6 +67,8 @@ export interface CursorBubble {
 
 export class CursorDataAccess {
 	private static readonly COMPOSER_CACHE_MAX_ENTRIES = 2000;
+	// How long a db path stays demoted to the sql.js fallback after a failed read-only attempt.
+	private static readonly READ_ONLY_RETRY_COOLDOWN_MS = 5 * 60_000;
 
 	private _sqlJsModule: SqlJsStatic | null = null;
 	private _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
@@ -78,7 +80,12 @@ export class CursorDataAccess {
 	// Per-db-path memo of a failed read-only open/query (e.g. SQLITE_READONLY_CANTINIT when the
 	// -shm sidecar can't be initialised read-only), so a db that can't use the read-only backend
 	// doesn't retry that probe on every call — it falls straight to sql.js instead.
-	private readonly _readOnlyUnsupportedDbs: Set<string> = new Set();
+	// Stores when the failure happened rather than a bare flag: the demotion expires after
+	// READ_ONLY_RETRY_COOLDOWN_MS so a *transient* failure (e.g. SQLITE_BUSY while the writer
+	// holds an exclusive lock during its own checkpoint) doesn't strand this db on the expensive
+	// copy-based fallback for the rest of the process's life — which would reintroduce exactly
+	// the multi-GB copies this class exists to avoid.
+	private readonly _readOnlyUnsupportedDbs: Map<string, number> = new Map();
 
 	// Cache of already-parsed composer data blobs. A single session read makes ~4 calls into
 	// readComposerData (getTokens/countInteractions/getModelUsage/getSessionMeta, see
@@ -199,6 +206,18 @@ export class CursorDataAccess {
 	}
 
 	/**
+	 * True while `dbPath` is still demoted to the sql.js fallback after a recent read-only
+	 * failure. The demotion expires so a transient failure doesn't become permanent.
+	 */
+	private isReadOnlyDemoted(dbPath: string): boolean {
+		const failedAt = this._readOnlyUnsupportedDbs.get(dbPath);
+		if (failedAt === undefined) { return false; }
+		if (Date.now() - failedAt < CursorDataAccess.READ_ONLY_RETRY_COOLDOWN_MS) { return true; }
+		this._readOnlyUnsupportedDbs.delete(dbPath);
+		return false;
+	}
+
+	/**
 	 * Preferred backend: a read-only `node:sqlite` connection against the live db file. This
 	 * sees another process's pending WAL frames directly, cross-process, with zero copies, and
 	 * mutates neither the main db nor the WAL. Opens, queries and closes immediately for every
@@ -209,7 +228,7 @@ export class CursorDataAccess {
 	 */
 	private queryReadOnly(dbPath: string, sql: string, params: QueryParam[]): QueryResult | null {
 		const mod = this.getNodeSqliteModule();
-		if (!mod || this._readOnlyUnsupportedDbs.has(dbPath)) { return null; }
+		if (!mod || this.isReadOnlyDemoted(dbPath)) { return null; }
 		let db: import('node:sqlite').DatabaseSync | undefined;
 		try {
 			db = new mod.DatabaseSync(dbPath, { readOnly: true });
@@ -219,7 +238,7 @@ export class CursorDataAccess {
 			const values = rows.map(row => columns.map(col => row[col]));
 			return { columns, values };
 		} catch {
-			this._readOnlyUnsupportedDbs.add(dbPath);
+			this._readOnlyUnsupportedDbs.set(dbPath, Date.now());
 			return null;
 		} finally {
 			if (db) { try { db.close(); } catch { /* ignore */ } }
