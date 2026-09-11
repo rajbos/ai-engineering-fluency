@@ -199,12 +199,14 @@ test('parseArgs: applies defaults and parses flags', () => {
 });
 
 test('globToRegExp: a --include value cannot inject an arbitrary regex', () => {
-	// A glob containing regex metacharacters must be escaped, never compiled
-	// as a live regex operator. `(` without a matching `)` would otherwise throw
-	// or match unintended content.
-	const re = dup.globToRegExp('src/(weird).ts');
-	assert.ok(re.test('src/(weird).ts'));
-	assert.ok(!re.test('src/weird.ts'));
+	// A glob containing regex metacharacters is rejected by the safe-alphabet
+	// sanitizer before a RegExp is built, so it can never inject a live regex
+	// operator. Parentheses are not part of the glob grammar and are refused.
+	assert.throws(() => dup.globToRegExp('src/(weird).ts'), /Invalid --include glob/);
+});
+
+test('globToRegExp: rejects a glob smuggling a regex alternation operator', () => {
+	assert.throws(() => dup.globToRegExp('src/a|b.ts'), /Invalid --include glob/);
 });
 
 test('escapeMarkdownCell: escapes backslash first, then the pipe delimiter', () => {

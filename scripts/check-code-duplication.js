@@ -135,8 +135,20 @@ function tokenizeFile(absPath) {
  */
 const REGEX_METACHARS = new Set('\\^$.*+?()[]{}|');
 
+/*
+ * The only characters a `--include` glob is allowed to contain. Anything
+ * outside this set is rejected before the RegExp is built, which is the
+ * sanitization step CodeQL's regex-injection query looks for: by the time
+ * the glob reaches `new RegExp(...)`, it is known to be composed solely of
+ * safe literal characters plus the glob metacharacters handled below.
+ */
+const SAFE_GLOB_CHARS = /^[A-Za-z0-9_\-./?*]+$/;
+
 /** Minimal glob -> RegExp matcher supporting **, *, ? and braces-free patterns. */
 function globToRegExp(glob) {
+	if (!SAFE_GLOB_CHARS.test(glob)) {
+		throw new Error(`Invalid --include glob (only letters, digits, _ - . / ? * are allowed): ${glob}`);
+	}
 	let re = '';
 	for (let i = 0; i < glob.length; i++) {
 		const c = glob[i];
