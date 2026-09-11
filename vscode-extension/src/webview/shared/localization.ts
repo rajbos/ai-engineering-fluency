@@ -22,6 +22,16 @@ export interface WebviewLocalization {
 	'share.exportTitle': string;
 	'share.exportReportLabel': string;
 
+	// Usage view — context-pressure rows
+	'usage.contextPressure.compactedLabel': string;
+	'usage.contextPressure.ofCount': string;
+	'usage.contextPressure.compactedShare': string;
+	'usage.contextPressure.noneCompacted': string;
+	'usage.contextPressure.compactedTooltip': string;
+	'usage.contextPressure.nearLimitLabel': string;
+	'usage.contextPressure.worstFill': string;
+	'usage.contextPressure.nearLimitTooltip': string;
+
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
 }
@@ -39,7 +49,15 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'nav.btnEnvironmental': 'Environmental Impact',
 	'nav.btnEfficiency': 'Efficiency',
 	'share.exportTitle': 'AI Engineering Fluency Score',
-	'share.exportReportLabel': 'Report'
+	'share.exportReportLabel': 'Report',
+	'usage.contextPressure.compactedLabel': '🗜️ Sessions compacted',
+	'usage.contextPressure.ofCount': '{0} of {1}',
+	'usage.contextPressure.compactedShare': '{0}% of sessions with context data lost earlier turns to automatic compaction',
+	'usage.contextPressure.noneCompacted': 'No session ran out of context window in this period',
+	'usage.contextPressure.compactedTooltip': 'Sessions where the client automatically compacted or truncated the history at least once, counted per session rather than per compaction event',
+	'usage.contextPressure.nearLimitLabel': '⚠️ Sessions near the limit',
+	'usage.contextPressure.worstFill': 'Fullest session reached {0}% of its window',
+	'usage.contextPressure.nearLimitTooltip': 'Copilot CLI sessions that filled at least {0}% of their context window without compacting — the early-warning band before context starts getting dropped'
 };
 
 // Current localization strings, initialized with defaults
@@ -68,6 +86,19 @@ export function initializeWebviewLocalization(localization: Partial<WebviewLocal
  */
 export function localize(key: string): string {
 	return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
+}
+
+/**
+ * Localize a string that carries `{0}`, `{1}`, … placeholders, mirroring the
+ * formatting `vscode.l10n.t()` and the extension-side `l10n.t()` helper use.
+ * Placeholders with no matching argument are left intact rather than replaced
+ * with `undefined`, so a short-changed call degrades visibly instead of lying.
+ */
+export function localizeFormat(key: string, ...args: Array<string | number>): string {
+	return localize(key).replace(/\{(\d+)\}/g, (match, index) => {
+		const i = Number(index);
+		return i < args.length ? String(args[i]) : match;
+	});
 }
 
 /**

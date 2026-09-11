@@ -77,6 +77,13 @@ import type {
   CorrectionSessionEntry,
   RepeatedTaskReport,
 } from '../../src/types';
+import {
+	ensureContextPressure,
+	hasContextSignal,
+	mergeDbContextPressure,
+	mergeSessionContextPressure,
+	sessionCompactionEvents,
+} from './contextPressure';
 import { getTimeWindowStartDate, getTimeWindowStartDayKey } from '../../src/timeWindows';
 
 // --- Correction-moment detection (per-repo report over recent sessions) ---
@@ -4129,6 +4136,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Share/export card strings (rendered into the PNG image)
 			'share.exportTitle': l10n.t('share.exportTitle'),
 			'share.exportReportLabel': l10n.t('share.exportReportLabel'),
+			// Usage view — context-pressure rows. Templates with {0}/{1} are
+			// resolved webview-side by localizeFormat(), so they are passed
+			// through unformatted here.
+			'usage.contextPressure.compactedLabel': l10n.t('usage.contextPressure.compactedLabel'),
+			'usage.contextPressure.ofCount': l10n.t('usage.contextPressure.ofCount'),
+			'usage.contextPressure.compactedShare': l10n.t('usage.contextPressure.compactedShare'),
+			'usage.contextPressure.noneCompacted': l10n.t('usage.contextPressure.noneCompacted'),
+			'usage.contextPressure.compactedTooltip': l10n.t('usage.contextPressure.compactedTooltip'),
+			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
+			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
+			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
 			// Current language for reference
 			'__language__': language
 		};
@@ -4896,6 +4914,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
+	 * Fold one data.db context row into a period's per-session exhaustion counters.
+	 * See `contextPressure.ts` for the denominator and de-duplication rules.
+	 */
+	private _mergeDbContextPressure(
+		period: UsageAnalysisPeriod, info: SessionContextWindow, alreadyCounted: boolean, compacted: boolean,
+	): void {
+		mergeDbContextPressure(period, info, alreadyCounted, compacted);
+	}
+
+	/**
 	 * Enrich the usage periods and today's session list with context-window
 	 * state from data.db: the selected window limit, the last known fill, and
 	 * the context tier (data.db also covers sessions whose events.jsonl lacks
@@ -4904,8 +4932,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Collect activity key + tier presence per Copilot CLI session uuid in the loaded window. */
 	private _collectCliSessionEntries(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
-	): Map<string, { activityKey: string; hadTier: boolean }> {
-		const entries = new Map<string, { activityKey: string; hadTier: boolean }>();
+	): Map<string, { activityKey: string; hadTier: boolean; hasContextSignal: boolean; compacted: boolean }> {
+		const entries = new Map<string, { activityKey: string; hadTier: boolean; hasContextSignal: boolean; compacted: boolean }>();
 		for (const r of usageResults) {
 			if (!r || r.sessionData.interactions === 0) { continue; }
 			const uuid = this.extractCopilotCliUuid(r.sessionFile);
@@ -4913,6 +4941,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			entries.set(uuid, {
 				activityKey: this.computeLastActivityKey(r.sessionData, r.mtime),
 				hadTier: !!r.sessionData.contextTier,
+				hasContextSignal: this._hasContextSignal(r.sessionData),
+				compacted: this._sessionCompactionEvents(r.sessionData) > 0,
 			});
 		}
 		return entries;
@@ -4944,6 +4974,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				if (!entry) { continue; }
 				for (const period of this._periodsForActivityKey(entry.activityKey, periods)) {
 					this._mergeDbContextIntoPeriod(period, info, entry.hadTier);
+					this._mergeDbContextPressure(period, info, entry.hasContextSignal, entry.compacted);
 				}
 				const session = todayByUuid.get(uuid);
 				if (session) { this._applyDbContextToTodaySession(session, info); }
@@ -5415,8 +5446,29 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return period.contextWindow;
 	}
 
+	/** Get-or-create the contextPressure aggregate on a usage period. */
+	private _ensureContextPressure(period: UsageAnalysisPeriod): NonNullable<UsageAnalysisPeriod['contextPressure']> {
+		return ensureContextPressure(period);
+	}
+
+	/** Automatic compaction/truncation events recorded for one session, across all formats. */
+	private _sessionCompactionEvents(sessionData: SessionFileCache): number {
+		return sessionCompactionEvents(sessionData);
+	}
+
+	/** True when a session carries any usable context-window or compaction signal. */
+	private _hasContextSignal(sessionData: SessionFileCache): boolean {
+		return hasContextSignal(sessionData);
+	}
+
+	/** Count one session towards a period's per-session context-exhaustion counters. */
+	private _mergeContextPressure(period: UsageAnalysisPeriod, sessionData: SessionFileCache): void {
+		mergeSessionContextPressure(period, sessionData);
+	}
+
 	/** Fold one session's context-window fields (from its cache entry) into a period aggregate. */
 	private _mergeContextWindowStats(period: UsageAnalysisPeriod, sessionData: SessionFileCache): void {
+		this._mergeContextPressure(period, sessionData);
 		if (!sessionData.maxRequestInputTokens && !sessionData.contextTier) { return; }
 		const cw = this._ensureContextWindow(period);
 		if ((sessionData.maxRequestInputTokens ?? 0) > cw.maxRequestInputTokens) {

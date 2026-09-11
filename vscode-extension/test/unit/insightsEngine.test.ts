@@ -142,6 +142,94 @@ test('auto-compaction-pattern: body mentions /compact and /new', () => {
 });
 
 // ---------------------------------------------------------------------------
+// context-window-near-limit / context-window-healthy insight tests
+// ---------------------------------------------------------------------------
+
+const NEAR_LIMIT_ID = 'context-window-near-limit';
+const HEALTHY_ID = 'context-window-healthy';
+
+function makePressureCtx(pressure: {
+	sessionsConsidered: number; sessionsCompacted: number;
+	sessionsNearLimit: number; sessionsWithFillData: number; worstFillPercent?: number;
+}, autoCompact?: number): InsightContext {
+	const ctx = makeCtx(autoCompact !== undefined ? { autoCompact } : undefined);
+	ctx.last30Days.contextPressure = pressure;
+	return ctx;
+}
+
+test('context-window-near-limit: insight exists in INSIGHT_CATALOG with category=context', () => {
+	const def = INSIGHT_CATALOG.find(d => d.id === NEAR_LIMIT_ID);
+	assert.ok(def, 'context-window-near-limit should be in INSIGHT_CATALOG');
+	assert.equal(def!.category, 'context');
+	assert.equal(def!.severity, 'tip');
+});
+
+test('context-window-near-limit: does NOT fire without contextPressure data', () => {
+	const results = evaluateInsights(makeCtx(), {}, 7, null);
+	assert.equal(results.find(i => i.id === NEAR_LIMIT_ID), undefined);
+});
+
+test('context-window-near-limit: does NOT fire at a single near-limit session', () => {
+	const ctx = makePressureCtx({ sessionsConsidered: 8, sessionsCompacted: 0, sessionsNearLimit: 1, sessionsWithFillData: 8 });
+	assert.equal(evaluateInsights(ctx, {}, 7, null).find(i => i.id === NEAR_LIMIT_ID), undefined);
+});
+
+test('context-window-near-limit: fires at two near-limit sessions and reports the counts', () => {
+	const ctx = makePressureCtx({
+		sessionsConsidered: 12, sessionsCompacted: 1, sessionsNearLimit: 2,
+		sessionsWithFillData: 9, worstFillPercent: 94,
+	});
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === NEAR_LIMIT_ID);
+	assert.ok(insight, 'insight should fire at two near-limit sessions');
+	assert.match(insight!.body, /2 of your 9 sessions/);
+	assert.match(insight!.body, /94% of its window/);
+	assert.match(insight!.body, /Separately, 1 session compacted automatically/);
+	// The compaction signal does not establish that the session crossed the
+	// near-limit threshold, so the wording must not imply that it did.
+	assert.doesNotMatch(insight!.body, /went past that point/);
+});
+
+test('context-window-near-limit: yields to auto-compaction-pattern when that already fires', () => {
+	const ctx = makePressureCtx({
+		sessionsConsidered: 12, sessionsCompacted: 4, sessionsNearLimit: 3, sessionsWithFillData: 9,
+	}, 6);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.ok(results.find(i => i.id === AUTO_COMPACT_ID), 'auto-compaction insight should fire');
+	assert.equal(results.find(i => i.id === NEAR_LIMIT_ID), undefined);
+});
+
+test('auto-compaction-pattern: body reports the per-session share when available', () => {
+	const ctx = makePressureCtx({
+		sessionsConsidered: 20, sessionsCompacted: 5, sessionsNearLimit: 0, sessionsWithFillData: 20,
+	}, 6);
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === AUTO_COMPACT_ID);
+	assert.ok(insight);
+	assert.match(insight!.body, /5 of the 20 sessions with context data over the last 30 days \(25%\)/);
+});
+
+test('context-window-healthy: fires only when nothing came close', () => {
+	const clean = makePressureCtx({
+		sessionsConsidered: 15, sessionsCompacted: 0, sessionsNearLimit: 0,
+		sessionsWithFillData: 15, worstFillPercent: 31,
+	}, 0);
+	const insight = evaluateInsights(clean, {}, 7, null).find(i => i.id === HEALTHY_ID);
+	assert.ok(insight, 'healthy insight should fire on a clean 30-day window');
+	assert.match(insight!.body, /only 31% of its window/);
+
+	const dirty = makePressureCtx({
+		sessionsConsidered: 15, sessionsCompacted: 1, sessionsNearLimit: 0, sessionsWithFillData: 15,
+	}, 0);
+	assert.equal(evaluateInsights(dirty, {}, 7, null).find(i => i.id === HEALTHY_ID), undefined);
+});
+
+test('context-window-healthy: does NOT fire without enough measured sessions', () => {
+	const ctx = makePressureCtx({
+		sessionsConsidered: 4, sessionsCompacted: 0, sessionsNearLimit: 0, sessionsWithFillData: 4,
+	}, 0);
+	assert.equal(evaluateInsights(ctx, {}, 7, null).find(i => i.id === HEALTHY_ID), undefined);
+});
+
+// ---------------------------------------------------------------------------
 // high-prompt-bloat insight tests
 // ---------------------------------------------------------------------------
 

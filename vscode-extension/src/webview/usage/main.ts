@@ -5,8 +5,22 @@ import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
 import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
-import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
 import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
+import {
+	hasContextWindowData,
+	sanitizeAutomaticCompactions,
+	sanitizeContextPressure,
+	sanitizeContextWindow,
+} from './contextWindowSanitizer';
+// Imported from the shared contract rather than re-declared locally, so a shape
+// change in src/types.ts surfaces here as a type error instead of silently
+// drifting out of sync with what the extension host actually sends.
+import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats } from '../../../../src/types';
+import { CONTEXT_NEAR_LIMIT_RATIO } from '../../../../src/types';
+
+/** The near-limit threshold as a whole percentage, for display in copy. */
+const NEAR_LIMIT_PERCENT = Math.round(CONTEXT_NEAR_LIMIT_RATIO * 100);
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -38,22 +52,6 @@ type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	totalRequests: number;
 };
 
-type ContextWindowStats = {
-	maxRequestInputTokens: number;
-	maxRequestModels: string[];
-	tierCounts: { [tier: string]: number };
-	maxReachedTokens?: number;
-	maxReachedWindowLimit?: number;
-};
-
-type AutomaticCompactionStats = {
-	total: number;
-	bySource: {
-		copilotCli: number;
-		claude: number;
-	};
-};
-
 type UsageAnalysisPeriod = {
 	sessions: number;
 	toolCalls: ToolCallUsage;
@@ -67,6 +65,7 @@ type UsageAnalysisPeriod = {
 		switchCount: number;
 	};
 	contextWindow?: ContextWindowStats;
+	contextPressure?: ContextPressureStats;
 	modelEfficiency?: ModelEfficiencyUsage;
 };
 
@@ -1658,6 +1657,11 @@ function sanitizeContextRefs(refs: any): ContextReferenceUsage {
 	};
 }
 
+/**
+ * Validated pass-through for a period's context-window aggregate. Numbers are
+ * coerced and the model list / tier map are rebuilt so an untrusted payload
+ * cannot smuggle extra fields into the render path.
+ */
 function sanitizePeriod(period: any): UsageAnalysisPeriod {
 	const p = (period && typeof period === 'object') ? period : {};
 	const toolCalls = (p.toolCalls && typeof p.toolCalls === 'object') ? p.toolCalls : {};
@@ -1701,6 +1705,8 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 		},
 		thinkingEffortUsage: p.thinkingEffortUsage,
 		modelEfficiency: p.modelEfficiency,
+		contextWindow: sanitizeContextWindow(p.contextWindow),
+		contextPressure: sanitizeContextPressure(p.contextPressure),
 	};
 }
 
@@ -1852,6 +1858,7 @@ function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void 
 		sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
 	}
 	sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
+	sanitized.autoCompactionsLast7Days = sanitizeAutomaticCompactions(raw?.autoCompactionsLast7Days);
 }
 
 function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
@@ -4741,10 +4748,34 @@ function _cwFullestWindowRow(cw: ContextWindowStats): string {
 		'The highest context fill recorded for a Copilot CLI session in this period, versus its window limit');
 }
 
+/** Per-session context-exhaustion rows for one period column (empty when unavailable). */
+function _cwPressureRows(cp: ContextPressureStats | undefined): string {
+	if (!cp) { return ''; }
+	const compactedRow = cp.sessionsConsidered > 0
+		? _cwRow(localize('usage.contextPressure.compactedLabel'),
+			localizeFormat('usage.contextPressure.ofCount', formatNumber(cp.sessionsCompacted), formatNumber(cp.sessionsConsidered)),
+			cp.sessionsCompacted > 0
+				? localizeFormat('usage.contextPressure.compactedShare', formatFixed((cp.sessionsCompacted / cp.sessionsConsidered) * 100, 0))
+				: localize('usage.contextPressure.noneCompacted'),
+			localize('usage.contextPressure.compactedTooltip'))
+		: '';
+	const nearRow = cp.sessionsWithFillData > 0
+		? _cwRow(localize('usage.contextPressure.nearLimitLabel'),
+			localizeFormat('usage.contextPressure.ofCount', formatNumber(cp.sessionsNearLimit), formatNumber(cp.sessionsWithFillData)),
+			cp.worstFillPercent
+				? localizeFormat('usage.contextPressure.worstFill', cp.worstFillPercent)
+				: undefined,
+			localizeFormat('usage.contextPressure.nearLimitTooltip', NEAR_LIMIT_PERCENT))
+		: '';
+	return compactedRow + nearRow;
+}
+
 /** Renders one period column of the context-window section. */
-function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined): string {
-	const hasData = !!cw && (cw.maxRequestInputTokens > 0 || (cw.maxReachedTokens ?? 0) > 0 || Object.keys(cw.tierCounts).length > 0);
-	if (!hasData) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined, cp?: ContextPressureStats): string {
+	const hasWindowData = hasContextWindowData(cw);
+	const pressureRows = _cwPressureRows(cp);
+	if (!hasWindowData && !pressureRows) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+	if (!hasWindowData) { return pressureRows; }
 	const tierEntries = Object.entries(cw!.tierCounts);
 	const tierSessionCount = tierEntries.reduce((sum, [, c]) => sum + c, 0);
 	const tierRow = tierEntries.length > 0
@@ -4752,7 +4783,7 @@ function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined): stri
 			`${tierSessionCount} Copilot CLI session${tierSessionCount === 1 ? '' : 's'} grouped by chosen window size — "default" is the standard window at normal rates; larger tiers unlock more context at long-context prices`,
 			'Copilot CLI lets you pick a context-window tier per session; the count shows how many sessions used each tier')
 		: '';
-	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow;
+	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow + pressureRows;
 }
 
 function renderAutomaticCompactions(stats: AutomaticCompactionStats | undefined): string {
@@ -4792,15 +4823,15 @@ function buildContextWindowSectionHtml(stats: UsageAnalysisStats): string {
 			<div class="three-column">
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-					${renderContextWindowPeriodHtml(stats.today.contextWindow)}
+					${renderContextWindowPeriodHtml(stats.today.contextWindow, stats.today.contextPressure)}
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-					${renderContextWindowPeriodHtml(cw30)}
+					${renderContextWindowPeriodHtml(cw30, stats.last30Days.contextPressure)}
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow)}
+					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow, stats.lastMonth.contextPressure)}
 				</div>
 			</div>
 			${renderAutomaticCompactions(stats.autoCompactionsLast7Days)}
