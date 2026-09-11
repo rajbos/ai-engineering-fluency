@@ -971,20 +971,22 @@ ${buildFileNameCard(data)}
 <div class="summary-value">${formatFileSize(data.size)}</div>
 <div class="summary-sub">Total size on disk</div>
 </div>
-<div class="summary-card">
-<div class="summary-label">🕒 Modified</div>
-<div class="summary-value" style="font-size: 14px; word-break: keep-all;">${formatDate(data.modified)}</div>
-<div class="summary-sub">Last file modification</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">▶️ First Interaction</div>
-<div class="summary-value" style="font-size: 14px; word-break: keep-all;">${formatDate(data.firstInteraction)}</div>
-<div class="summary-sub">Session started</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">⏹️ Last Interaction</div>
-<div class="summary-value" style="font-size: 14px; word-break: keep-all;">${formatDate(data.lastInteraction)}</div>
-<div class="summary-sub">Most recent activity</div>
+${buildTimelineCard(data)}
+</div>`;
+}
+
+/**
+ * Renders a single compact card grouping the three session timestamps
+ * (started, last activity, last file modification) as small rows instead of
+ * three separate full-sized cards.
+ */
+function buildTimelineCard(data: SessionLogData): string {
+	return `<div class="summary-card summary-card--compact">
+<div class="summary-label">🕒 Timeline</div>
+<div class="summary-compact-rows">
+<div class="summary-compact-row"><span class="summary-compact-key">▶️ Started</span><span class="summary-compact-val">${formatDate(data.firstInteraction)}</span></div>
+<div class="summary-compact-row"><span class="summary-compact-key">⏹️ Last activity</span><span class="summary-compact-val">${formatDate(data.lastInteraction)}</span></div>
+<div class="summary-compact-row"><span class="summary-compact-key">💾 Modified</span><span class="summary-compact-val">${formatDate(data.modified)}</span></div>
 </div>
 </div>`;
 }
