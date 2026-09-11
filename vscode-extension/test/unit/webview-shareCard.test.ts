@@ -9,6 +9,14 @@ describe('buildShareCardHeaderHtml', () => {
     assert.match(html, /Report &middot; /);
   });
 
+  test('renders a localized date string for a valid ISO timestamp', () => {
+    const html = buildShareCardHeaderHtml('2026-09-01T12:00:00.000Z');
+    // A valid date must not surface the "Invalid Date" placeholder.
+    assert.ok(!html.includes('Invalid Date'), 'valid date must render a real date, not Invalid Date');
+    // The date must be escaped text inside the report line, not raw markup.
+    assert.match(html, /Report &middot; [^<]+<\/div>/);
+  });
+
   test('degrades gracefully when lastUpdated is not a parseable date', () => {
     const payload = '2026-09-01"><img src=x onerror=alert(1)>';
     const html = buildShareCardHeaderHtml(payload);
@@ -16,6 +24,12 @@ describe('buildShareCardHeaderHtml', () => {
     // so the raw markup never reaches the rendered header.
     assert.match(html, /Report &middot; Invalid Date/);
     assert.ok(!html.includes('<img'), 'raw <img must not survive into the header');
+    assert.ok(!html.includes('"<img'), 'unescaped breakout sequence must not appear');
+  });
+
+  test('falls back to Invalid Date for an empty lastUpdated string', () => {
+    const html = buildShareCardHeaderHtml('');
+    assert.match(html, /Report &middot; Invalid Date/);
   });
 
   test('uses the centered title-block style and the dark share-card background', () => {
