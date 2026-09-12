@@ -22,11 +22,14 @@
  *
  * What counts as a UI-rendering position:
  *   - `expr.textContent = '...'` / `.innerText` / `.innerHTML` / `.title` /
- *     `.placeholder` (string, template-literal, or `cond ? 'A' : 'B'` RHS)
+ *     `.placeholder` — the RHS may be a string/template literal, `cond ? 'A' : 'B'`,
+ *     `'a' + x + 'b'` concatenation, or `x ?? 'Fallback'` / `x || 'Fallback'` (each static piece
+ *     is checked independently; a non-literal operand like `x` correctly contributes nothing)
  *   - `{ textContent: '...' }` / `{ 'textContent': '...' }`-style object literal
  *     properties with the same names
  *   - known text-argument sinks: `el(tag, className, text)`, `iconHeading(tag, icon, text)`,
- *     `createButton(id, label, appearance?)`, `document.createTextNode(text)`
+ *     `createButton(id, label, appearance?)`, `document.createTextNode(text)`,
+ *     `setHtml(el, html)` (domUtils.ts's sanctioned `.innerHTML=` wrapper)
  *   - `expr.setAttribute('aria-label'|'title'|'placeholder', value)`
  *   - `aria-label="..."` / `title="..."` / `placeholder="..."` attributes and text content
  *     between HTML tags (`<button>`, `<h1>`-`<h6>`, `<p>`, `<vscode-button>`, ...) embedded in
@@ -42,14 +45,30 @@
  * `l10n.t(`, or `vscode.l10n.t(`, comments, import paths, and CSS/URL/class/
  * id/data-* values (those attribute names are never scanned).
  *
- * Known limitation: a literal nested *inside* a template's `${...}` hole (e.g. a ternary whose
- * branches are themselves template literals) is only checked against the sink positions above —
- * if the hole itself sits inside an HTML tag in the *enclosing* template
- * (`<vscode-button>${cond ? 'A' : `B (${x})`}</vscode-button>`), that enclosing tag context is
- * not threaded through, so such a literal can still slip past. This is a deliberate scope
- * boundary (full data-flow tracking of arbitrary composed expressions is a different, much
- * larger tool) rather than an oversight — use the `// i18n-exempt` / allowlist escape hatches or
- * a manual audit for this specific shape.
+ * Known limitations — deliberate scope boundaries, not oversights (full data-flow / nested-
+ * language parsing of arbitrary code is a different, much larger tool than this AST ratchet):
+ *   1. A literal nested *inside* a template's `${...}` hole (e.g. a ternary whose branches are
+ *      themselves template literals) is only checked against the sink positions above — if the
+ *      hole itself sits inside an HTML tag in the *enclosing* template
+ *      (`<vscode-button>${cond ? 'A' : `B (${x})`}</vscode-button>`), that enclosing tag context
+ *      is not threaded through, so such a literal can still slip past.
+ *   2. `src/backend/configPanel.ts`, `src/backend/teamServerConfigPanel.ts`, and
+ *      `src/loadingHtml.ts` build large inline `<script>` bodies as plain TS string/template
+ *      literals containing client-side JavaScript source. This script only sees those as opaque
+ *      text (matching embedded HTML tags/attributes within them, same as any other literal) — it
+ *      does not parse the JS *inside* the script tag as its own program, so a hardcoded
+ *      `el.textContent = '...'`-shaped assignment written as part of that embedded script's
+ *      source is invisible here. Only genuinely new occurrences of this shape count, since the
+ *      baseline already covers what's there today, but it means this class of file is scanned
+ *      for markup, not for the client-side logic embedded inside it.
+ *   3. Sink recognition (TARGET_PROPS / TEXT_ARG_SINKS / ATTR_NAMES) is a fixed, explicit list of
+ *      known property/function names, not a generic call-graph or taint analysis — a project
+ *      helper that internally forwards a string argument into DOM text under a name not in that
+ *      list (e.g. a `ButtonConfig.label` field consumed by some other rendering helper) is not
+ *      automatically covered. Add the helper to the relevant list if it becomes a recurring
+ *      source of missed strings; this script intentionally does not attempt to discover such
+ *      helpers on its own.
+ * Use the `// i18n-exempt` / allowlist escape hatches or a manual audit for any of these shapes.
  *
  * Escape hatches for a legitimate new literal:
  *   1. An inline `// i18n-exempt: <reason>` comment on the same line or the
@@ -116,7 +135,16 @@ const TEXT_ARG_SINKS = new Map([
 	['iconHeading', 2],
 	['createButton', 1], // createButton(id, label, appearance?) legacy positional form; the config-object form isn't covered
 	['document.createTextNode', 0],
+	['setHtml', 1], // domUtils.ts's sanctioned innerHTML= wrapper — same "HTML-bearing" handling as .innerHTML below
 ]);
+
+// Sinks whose value is markup (raw HTML), not plain text, mirroring TARGET_PROPS' `innerHTML`.
+// When such a value already contains a recognizable tag, the generic per-literal tag/attribute
+// scan (scanHtmlLiteralForTags, run on every string/template literal regardless of context)
+// independently reports the meaningful sub-pieces already — reporting the whole raw markup blob
+// here too would double-count the same UI text as two separate CI errors/baseline entries.
+const HTML_BEARING_SINKS = new Set(['setHtml']);
+const HTML_BEARING_PROPS = new Set(['innerHTML']);
 
 // \p{L}: at least one Unicode-letter run, so non-Latin UI text (e.g. Chinese, Japanese) is
 // treated as prose too, not just ASCII — this extension ships zh-CN localization.
@@ -180,11 +208,20 @@ function unwrapParens(node) {
 	return n;
 }
 
+const LITERAL_LEAF_BINARY_OPS = new Set([
+	ts.SyntaxKind.PlusToken, // string concatenation: 'Parsing ' + total + ' files' — checks each static piece
+	ts.SyntaxKind.QuestionQuestionToken, // x ?? 'Fallback'
+	ts.SyntaxKind.BarBarToken, // x || 'Fallback'
+]);
+
 /**
  * Extracts every static string/template literal leaf reachable from `node` without crossing a
  * function or a non-literal expression — so `cond ? 'A' : 'B'` (and nested conditionals in either
- * branch) yield both `'A'` and `'B'` instead of only checking whichever the whole RHS "is". Used
- * everywhere a literal in a UI-rendering position is checked (assignment target, sink argument).
+ * branch), `'a' + x + 'b'` concatenation, and `x ?? 'Fallback'` / `x || 'Fallback'` all yield their
+ * static piece(s) instead of only checking whichever the whole RHS "is" (or nothing at all, for a
+ * composed expression this doesn't recognize — e.g. a non-literal `x + y`, which correctly
+ * contributes no literal). Used everywhere a literal in a UI-rendering position is checked
+ * (assignment target, sink argument).
  */
 function extractLiteralTexts(node) {
 	const n = unwrapParens(node);
@@ -198,6 +235,9 @@ function extractLiteralTexts(node) {
 	}
 	if (ts.isConditionalExpression(n)) {
 		return [...extractLiteralTexts(n.whenTrue), ...extractLiteralTexts(n.whenFalse)];
+	}
+	if (ts.isBinaryExpression(n) && LITERAL_LEAF_BINARY_OPS.has(n.operatorToken.kind)) {
+		return [...extractLiteralTexts(n.left), ...extractLiteralTexts(n.right)];
 	}
 	return [];
 }
@@ -260,9 +300,13 @@ function mapFlatIndexToSourceOffset(index, segments) {
 	return seg.sourceOffset + within;
 }
 
-// Requires an actual `//` marker before "i18n-exempt" so the escape hatch only fires from a real
-// comment, not any string/code that happens to contain that phrase.
-const EXEMPT_MARKER_RE = /\/\/.*i18n-exempt\b/i;
+// Requires "i18n-exempt" to immediately follow a `//` (only whitespace in between), matching the
+// documented `// i18n-exempt: <reason>` contract, so the escape hatch only fires from something
+// that actually looks like that comment — not just any `//` earlier on the line followed by the
+// phrase somewhere later. `.*i18n-exempt` (no anchor) matched a URL's own "//" scheme separator
+// with the phrase anywhere after it on the same line, e.g. a UI string that happens to read
+// `'Read https://example.com/i18n-exempt for details'` — no comment there at all.
+const EXEMPT_MARKER_RE = /\/\/\s*i18n-exempt\b/i;
 
 /** True if the source line at `line` (1-based), or the line before it, carries a `// i18n-exempt` comment. */
 function isExemptByInlineComment(fileLines, line) {
@@ -290,7 +334,9 @@ function reportAt(rawText, offset, ctx, reason) {
 
 function checkAssignmentTarget(propName, valueNode, ctx, reasonPrefix) {
 	if (!propName || !TARGET_PROPS.has(propName)) { return; }
+	const htmlBearing = HTML_BEARING_PROPS.has(propName);
 	for (const literal of extractLiteralTexts(valueNode)) {
+		if (htmlBearing && NESTED_TAG_RE.test(literal.text)) { continue; } // tag content: let the generic literal scan report it instead
 		reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${reasonPrefix}${propName}`);
 	}
 }
@@ -326,7 +372,12 @@ function scanFlattenedForTagText(text, textOffsetInFlat, segments, ctx, depth = 
 		const tag = m[1].toLowerCase();
 		const body = m[2];
 		const bodyStartInFlat = textOffsetInFlat + m.index + m[0].indexOf('>') + 1;
-		const bodyOffset = mapFlatIndexToSourceOffset(bodyStartInFlat, segments);
+		// Skip leading whitespace (a multiline `<button>\n  Refresh\n</button>` otherwise attributes
+		// the violation to the opening tag's own line — the newline right after `>` — instead of the
+		// line the reportable text actually sits on, so an `// i18n-exempt` placed naturally next to
+		// the text is ignored and the baseline hashes the wrong (opening-tag) line).
+		const leadingWs = body.match(/^\s*/)[0].length;
+		const bodyOffset = mapFlatIndexToSourceOffset(bodyStartInFlat + leadingWs, segments);
 
 		// Recurse into a body with further nested markup to also catch a nested tag's own text
 		// (bounded to one level deep). Report the OUTER tag's own text with any nested tags/HTML
@@ -353,11 +404,13 @@ function scanHtmlLiteralForTags(node, ctx) {
 	scanFlattenedForTagText(text, 0, segments, ctx);
 }
 
-/** `el(tag, className, text)` / `iconHeading(tag, icon, text, className)`-style calls where a fixed argument position holds display text. */
+/** `el(tag, className, text)` / `iconHeading(tag, icon, text, className)`-style calls where a fixed argument position holds display text. `setHtml(el, html)` is markup-bearing like `.innerHTML =` (see HTML_BEARING_SINKS): a tag-bearing value is left for the generic literal scan to avoid double-reporting the same text. */
 function checkTextArgSink(node, chain, ctx) {
 	const argIndex = TEXT_ARG_SINKS.get(chain);
 	if (argIndex === undefined || node.arguments.length <= argIndex) { return; }
+	const htmlBearing = HTML_BEARING_SINKS.has(chain);
 	for (const literal of extractLiteralTexts(node.arguments[argIndex])) {
+		if (htmlBearing && NESTED_TAG_RE.test(literal.text)) { continue; }
 		reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${chain}() text argument`);
 	}
 }

@@ -412,3 +412,106 @@ test('scanFile: nested-tag recursion does not hang or corrupt scanning of a late
 		},
 	);
 });
+
+// ── round-4 fixes: concatenation/fallback literals, dedup, exempt marker, multiline offset ──
+
+test('scanFile: flags each static piece of a string-concatenation assignment', () => {
+	withTempFile("el.textContent = '✗ Shared key update failed: ' + message;\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		const texts = violations.map((v) => v.text.trim());
+		assert.ok(texts.includes('✗ Shared key update failed:'), `expected among: ${JSON.stringify(texts)}`);
+	});
+});
+
+test('scanFile: flags the fallback literal of a ?? or || sink argument', () => {
+	withTempFile("const span = el('span', 'feature-kind', KIND_LABEL[feature.kind] ?? 'New');\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		const texts = violations.map((v) => v.text.trim());
+		assert.ok(texts.includes('New'), `expected among: ${JSON.stringify(texts)}`);
+	});
+	withTempFile("el.title = a.b || 'Fallback title';\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		const texts = violations.map((v) => v.text.trim());
+		assert.ok(texts.includes('Fallback title'), `expected among: ${JSON.stringify(texts)}`);
+	});
+});
+
+test('scanFile: does not double-report an innerHTML assignment whose value already contains a tag', () => {
+	withTempFile("el.innerHTML = '<span>Refresh</span>';\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1, `expected exactly one violation, got: ${JSON.stringify(violations)}`);
+		assert.equal(violations[0].text, 'Refresh');
+	});
+});
+
+test('scanFile: an innerHTML assignment with plain (non-tag) text is still flagged once', () => {
+	withTempFile("el.innerHTML = 'Refresh';\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+		assert.equal(violations[0].text, 'Refresh');
+	});
+});
+
+test('scanFile: flags setHtml(el, text) plain-text payloads (no tag content, so the generic literal scan can\'t catch it)', () => {
+	withTempFile("setHtml(root, 'Refresh');\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+		assert.equal(violations[0].text, 'Refresh');
+	});
+});
+
+test('scanFile: does not double-report setHtml(el, html) when the payload already contains a tag', () => {
+	withTempFile('setHtml(root, "<span>Analyzing…</span>");\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1, `expected exactly one violation, got: ${JSON.stringify(violations)}`);
+		assert.equal(violations[0].text, 'Analyzing…');
+	});
+});
+
+test('scanFile: a URL containing "//" does not activate the i18n-exempt escape hatch', () => {
+	withTempFile("el.title = 'Read https://example.com/i18n-exempt for details';\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1, 'the URL text itself should still be flagged, not silently exempted');
+	});
+});
+
+test('scanFile: a multiline tag body attributes the violation to the text\'s own line, not the opening tag\'s line', () => {
+	withTempFile(
+		[
+			'const html = `<button>',
+			'  Refresh', // i18n-exempt is placed here, next to the actual text, not on the <button> line
+			'</button>`;',
+			'',
+		].join('\n'),
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			assert.equal(violations.length, 1);
+			assert.equal(violations[0].line, 2, `expected the violation on the "Refresh" line (2), got line ${violations[0].line}`);
+		},
+	);
+});
+
+test('scanFile: an i18n-exempt comment next to the actual text of a multiline tag body is respected', () => {
+	withTempFile(
+		[
+			'const html = `<button>',
+			'  Refresh // i18n-exempt: brand-specific label',
+			'</button>`;',
+			'',
+		].join('\n'),
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			assert.equal(violations.length, 0, `expected the exemption to apply, got: ${JSON.stringify(violations)}`);
+		},
+	);
+});
