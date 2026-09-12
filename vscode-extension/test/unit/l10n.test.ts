@@ -261,13 +261,29 @@ test('l10n: log viewer summary card labels resolve in English', () => {
 });
 
 test('l10n: efficiency Cost Attribution labels resolve in English', () => {
-	assert.equal(t('efficiency.attribution.costEffect'), 'Estimated cost effect');
+	const expected: Record<string, string> = {
+		'efficiency.attribution.costEffect': 'Estimated cost effect',
+		'efficiency.attribution.change': 'Change',
+		'efficiency.attribution.periodSub': '{0} · {1} sessions · {2} tokens',
+		'efficiency.attribution.blendedRate': 'blended rate {0} → {1} $/M tokens',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
 });
 
 test('l10n: efficiency Cost Attribution labels resolve in zh-cn', () => {
 	mock.setLanguage('zh-cn');
 	try {
-		assert.equal(t('efficiency.attribution.costEffect'), '预计成本影响');
+		const expected: Record<string, string> = {
+			'efficiency.attribution.costEffect': '预计成本影响',
+			'efficiency.attribution.change': '变化',
+			'efficiency.attribution.periodSub': '{0} · {1} 个会话 · {2} 个令牌',
+			'efficiency.attribution.blendedRate': '混合费率 {0} → {1} 美元/百万令牌',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
 	} finally {
 		mock.setLanguage('en');
 	}

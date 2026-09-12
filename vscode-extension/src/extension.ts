@@ -4208,8 +4208,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
 			'logviewer.summary.started': l10n.t('logviewer.summary.started'),
 			'logviewer.summary.lastActivity': l10n.t('logviewer.summary.lastActivity'),
-			// Efficiency view — Cost Attribution bars
+			// Efficiency view — Cost Attribution bars and summary cards. Templates with
+			// {0}/{1} are resolved webview-side by localizeFormat(), so they are passed
+			// through unformatted here.
 			'efficiency.attribution.costEffect': l10n.t('efficiency.attribution.costEffect'),
+			'efficiency.attribution.change': l10n.t('efficiency.attribution.change'),
+			'efficiency.attribution.periodSub': l10n.t('efficiency.attribution.periodSub'),
+			'efficiency.attribution.blendedRate': l10n.t('efficiency.attribution.blendedRate'),
 			// Current language for reference
 			'__language__': language
 		};

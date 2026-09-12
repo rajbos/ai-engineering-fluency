@@ -30,7 +30,7 @@ import {
 	selectDaysInWindow,
 	windowHasModelData,
 } from '../../../../src/efficiencyAnalysis';
-import { initializeWebviewLocalization, localize, setCurrentLanguage } from '../shared/localization';
+import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
 import { buildAttributionTooltip } from './attributionText';
 
 // Minimal structural types for the dynamically imported Chart.js bundle —
@@ -300,9 +300,9 @@ function renderAttributionTab(d: EfficiencyViewData): string {
 	return `
 		<p class="eff-section-note">The periods are adjacent, not overlapping: ${escapeHtml(capitalizeFirst(d.attributionWindows.prev))} is <b>${escapeHtml(d.attributionWindows.prevRange)}</b>; ${escapeHtml(d.attributionWindows.cur)} is <b>${escapeHtml(d.attributionWindows.curRange)}</b>. Each bar is a <b>what-if dollar amount</b>, not a session count: starting from the earlier cost, the factors are applied in order. Green reduces estimated cost; red increases it.</p>
 		<div class="attr-summary">
-			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.prev))}</div><div class="stat-value">${formatCost(a.prev.cost)}</div><div class="stat-sub">${escapeHtml(d.attributionWindows.prevRange)} · ${formatNumber(a.prev.sessions)} sessions · ${formatCompact(a.prev.tokens)} tokens</div></div>
-			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.cur))}</div><div class="stat-value">${formatCost(a.cur.cost)}</div><div class="stat-sub">${escapeHtml(d.attributionWindows.curRange)} · ${formatNumber(a.cur.sessions)} sessions · ${formatCompact(a.cur.tokens)} tokens</div></div>
-			<div class="attr-stat"><div class="stat-label">Change</div><div class="stat-value">${fmtMoney(a.deltaCost)}</div><div class="stat-sub">blended rate ${formatFixed(a.prev.dollarsPerMTokens, 2)} → ${formatFixed(a.cur.dollarsPerMTokens, 2)} $/M tokens</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.prev))}</div><div class="stat-value">${formatCost(a.prev.cost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.periodSub', d.attributionWindows.prevRange, formatNumber(a.prev.sessions), formatCompact(a.prev.tokens)))}</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.cur))}</div><div class="stat-value">${formatCost(a.cur.cost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.periodSub', d.attributionWindows.curRange, formatNumber(a.cur.sessions), formatCompact(a.cur.tokens)))}</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(localize('efficiency.attribution.change'))}</div><div class="stat-value">${fmtMoney(a.deltaCost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.blendedRate', formatFixed(a.prev.dollarsPerMTokens, 2), formatFixed(a.cur.dollarsPerMTokens, 2)))}</div></div>
 		</div>
 		<div class="attr-bars">
 			${attrBar('Volume (session count)', `${formatNumber(a.prev.sessions)} → ${formatNumber(a.cur.sessions)} sessions`, a.volumeEffect, maxAbs, buildAttributionTooltip({ measure: 'Session count', prev: a.prev.sessions, cur: a.cur.sessions, unit: 'sessions', kind: 'count', effect: a.volumeEffect }))}

@@ -243,5 +243,8 @@
   "logviewer.summary.timeline": "时间线",
   "logviewer.summary.started": "开始",
   "logviewer.summary.lastActivity": "最后活动",
-  "efficiency.attribution.costEffect": "预计成本影响"
+  "efficiency.attribution.costEffect": "预计成本影响",
+  "efficiency.attribution.change": "变化",
+  "efficiency.attribution.periodSub": "{0} · {1} 个会话 · {2} 个令牌",
+  "efficiency.attribution.blendedRate": "混合费率 {0} → {1} 美元/百万令牌"
 }

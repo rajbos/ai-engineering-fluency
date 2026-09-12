@@ -241,5 +241,8 @@
   "logviewer.summary.timeline": "Timeline",
   "logviewer.summary.started": "Started",
   "logviewer.summary.lastActivity": "Last activity",
-  "efficiency.attribution.costEffect": "Estimated cost effect"
+  "efficiency.attribution.costEffect": "Estimated cost effect",
+  "efficiency.attribution.change": "Change",
+  "efficiency.attribution.periodSub": "{0} · {1} sessions · {2} tokens",
+  "efficiency.attribution.blendedRate": "blended rate {0} → {1} $/M tokens"
 }

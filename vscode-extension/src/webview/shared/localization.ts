@@ -64,8 +64,11 @@ export interface WebviewLocalization {
 	'logviewer.summary.started': string;
 	'logviewer.summary.lastActivity': string;
 
-	// Efficiency view — Cost Attribution bars
+	// Efficiency view — Cost Attribution bars and summary cards
 	'efficiency.attribution.costEffect': string;
+	'efficiency.attribution.change': string;
+	'efficiency.attribution.periodSub': string;
+	'efficiency.attribution.blendedRate': string;
 
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
@@ -121,7 +124,10 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'logviewer.summary.timeline': 'Timeline',
 	'logviewer.summary.started': 'Started',
 	'logviewer.summary.lastActivity': 'Last activity',
-	'efficiency.attribution.costEffect': 'Estimated cost effect'
+	'efficiency.attribution.costEffect': 'Estimated cost effect',
+	'efficiency.attribution.change': 'Change',
+	'efficiency.attribution.periodSub': '{0} · {1} sessions · {2} tokens',
+	'efficiency.attribution.blendedRate': 'blended rate {0} → {1} $/M tokens'
 };
 
 // Current localization strings, initialized with defaults
