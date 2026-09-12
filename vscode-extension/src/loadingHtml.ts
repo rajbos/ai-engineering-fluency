@@ -117,18 +117,23 @@ ${getLoadingHtmlScript(startedAtMs)}
  * sub-step so the bar keeps moving through a long aggregation phase; a host that
  * computes in one opaque block sends neither and gets the historical fixed 96%.
  *
- * `barPct` is the single monotonic value behind the bar, fed by both phases: parsing
- * progress is scaled into the lower 85% and compute sub-steps occupy the rest. Parsing
- * always ends on a 100% tick, so without that split the first compute step would drop
- * the bar (to 88%, or to 96% for a host that sends no sub-steps at all). Clamping also
- * absorbs a concurrent background refresh, which shares this channel and can deliver
- * parsing ticks after a compute sub-step has already run.
+ * `barPct` is the value behind the bar, fed by both phases: parsing progress is scaled
+ * into the lower 85% and compute sub-steps occupy the rest. Parsing always ends on a
+ * 100% tick, so without that split the first compute step would drop the bar (to 88%,
+ * or to 96% for a host that sends no sub-steps at all).
+ *
+ * The clamp applies only once the compute phase has begun, not within parsing itself.
+ * A parsing percentage can legitimately fall — `_preloadSessionFiles` reports against a
+ * discovery total that grows as adapter batches arrive, so an early batch can read 1/1
+ * and a later tick 2/400 — and clamping that would freeze the bar at the high-water mark
+ * for the rest of the parse. After a compute sub-step, a parsing tick is stale (a
+ * concurrent background refresh shares this channel) and must not drag the bar back.
  */
 export function getLoadingHtmlScript(startedAtMs: number = Date.now()): string {
 	return `(function () {
     var t0 = ${Math.floor(startedAtMs)};
     var EDITORS = [];
-    var editorsSeen = 0, barPct = 0;
+    var editorsSeen = 0, barPct = 0, computing = false;
     function updateElapsed() {
         var s = Math.floor((Date.now() - t0) / 1000);
         var el = document.getElementById('badge-elapsed');
@@ -173,7 +178,7 @@ export function getLoadingHtmlScript(startedAtMs: number = Date.now()): string {
                 var ct = document.getElementById('chip-total'); if (ct) ct.textContent = total.toLocaleString();
             } else if (m.step === 'computing') {
                 enterParsing(0);
-                setDone('s-parse'); setActive('s-compute'); barPct = Math.max(barPct, typeof m.percentage === 'number' ? m.percentage : 96);
+                setDone('s-parse'); setActive('s-compute'); computing = true; barPct = Math.max(barPct, typeof m.percentage === 'number' ? m.percentage : 96);
                 var fill = document.getElementById('prog-fill'); if (fill) { fill.classList.remove('indeterminate'); fill.style.width = barPct + '%'; }
                 var pct = document.getElementById('pct'); if (pct) pct.textContent = barPct + '%';
                 var sub2 = document.getElementById('subtitle'); if (sub2) sub2.textContent = m.label || 'Computing statistics...';
@@ -185,7 +190,7 @@ export function getLoadingHtmlScript(startedAtMs: number = Date.now()): string {
             // Editors are included in every progress tick so pills appear even when the
             // one-time loadingStep 'parsing' message was dropped before the listener attached.
             if (m.editors && m.editors.length > EDITORS.length) { EDITORS = m.editors; }
-            var pct2 = document.getElementById('pct'); barPct = Math.max(barPct, Math.round(m.percentage * 0.85)); if (pct2) pct2.textContent = barPct + '%';
+            var pct2 = document.getElementById('pct'); var scaled = Math.round(m.percentage * 0.85); barPct = computing ? Math.max(barPct, scaled) : scaled; if (pct2) pct2.textContent = barPct + '%';
             var fill2 = document.getElementById('prog-fill'); if (fill2) { fill2.classList.remove('indeterminate'); fill2.style.width = (barPct < 3 ? 3 : barPct) + '%'; }
             var cd = document.getElementById('chip-done'); if (cd) cd.textContent = m.completed.toLocaleString();
             // Backfill the total chip too: when the one-time loadingStep 'parsing' message

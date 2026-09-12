@@ -726,8 +726,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Progress reporters watching the shared full-year walk, including late joiners. */
 	private readonly _fullDailyStatsProgressSinks =
 		new Set<(completed: number, total: number, sessionFile?: string) => void>();
+	/** Most recent tick from the shared walk, replayed to a reporter that joins late. */
+	private _fullDailyStatsLastTick: [number, number, string | undefined] | undefined;
 	/** Last successfully rendered Efficiency payload, restored if a refresh build fails. */
 	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
+	/** Bumped whenever the computed stat caches are invalidated; see recordEfficiencyPayload(). */
+	private _cacheGeneration = 0;
 	private outputChannel!: vscode.OutputChannel;
 	private lastDetailedStats: DetailedStats | undefined;
 	private lastDailyStats: DailyTokenStats[] | undefined;
@@ -1345,6 +1349,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = undefined;
 		this.lastEfficiencySessionInputs = undefined;
 		this._lastEfficiencyViewData = undefined;
+		this._cacheGeneration++;
 		const results: LocalViewRegressionResult[] = [];
 		let dataSourceLabel = 'local session data';
 		try {
@@ -1364,6 +1369,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = this.lastDashboardData = undefined;
 			this.lastEfficiencySessionInputs = undefined;
 			this._lastEfficiencyViewData = undefined;
+			this._cacheGeneration++;
 		}
 		await this.reportLocalViewRegressionResults(results, dataSourceLabel);
 	}
@@ -1383,7 +1389,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async computeRegressionStats(dataSourceLabel: string, sessionFiles: string[]): Promise<{ detailedStats: any; dailyStats: any; usageStats: any; maturityData: any; diagnosticReport: string; fluencyLevelData: any; chartTotals: any }> {
 		const detailedStats = await this.updateTokenStats(true);
 		if (!detailedStats) { throw new Error(`Failed to calculate detailed stats from ${dataSourceLabel}.`); }
-		const dailyStats = this.lastDailyStats ?? await this.calculateFullDailyStats();
+		// Deliberately not calculateFullDailyStats(): this runs against the bundled sample
+		// directory, and joining a live-data walk already in flight would fold live stats
+		// into the regression result.
+		const dailyStats = this.lastDailyStats ?? await this.calculateDailyStats();
 		const usageStats = await this.calculateUsageAnalysisStats(false);
 		const maturityData = await this.calculateMaturityScores(false);
 		const diagnosticReport = await this.generateDiagnosticReport();
@@ -1507,6 +1516,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.lastDashboardData = undefined;
 			this.lastEfficiencySessionInputs = undefined;
 			this._lastEfficiencyViewData = undefined;
+			this._cacheGeneration++;
 
 			this.log(`Cache cleared successfully. Removed ${cacheSize} entries.`);
 			vscode.window.showInformationMessage('Cache cleared successfully. Reloading statistics...');
@@ -4415,14 +4425,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// that joins a walk already in flight would otherwise have its reporter silently
 		// dropped — the Efficiency panel opening during the refresh's detached walk would
 		// then show no progress at all until that walk finished.
-		if (onProgress) { this._fullDailyStatsProgressSinks.add(onProgress); }
+		if (onProgress) {
+			this._fullDailyStatsProgressSinks.add(onProgress);
+			// Replay the latest tick. Per-file callbacks stop while the aggregation loop runs,
+			// so a joiner arriving in that window would otherwise sit indeterminate until the
+			// whole walk resolved, with no indication anything was happening.
+			if (this._fullDailyStatsLastTick) { onProgress(...this._fullDailyStatsLastTick); }
+		}
 		this._fullDailyStatsInFlight ??= this
 			.calculateDailyStats(365, knownSessionFiles, (completed, total, sessionFile) => {
+				this._fullDailyStatsLastTick = [completed, total, sessionFile];
 				for (const sink of this._fullDailyStatsProgressSinks) { sink(completed, total, sessionFile); }
 			})
 			.finally(() => {
 				this._fullDailyStatsInFlight = undefined;
 				this._fullDailyStatsProgressSinks.clear();
+				this._fullDailyStatsLastTick = undefined;
 			});
 		return this._fullDailyStatsInFlight;
 	}
@@ -9601,11 +9619,12 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// key locked — if the user closes the panel and reopens it before the build finishes, the
 		// reopen would be silently dropped as "already in flight" (same fix as showChart above).
 		void (async () => {
+			const generation = this._cacheGeneration;
 			const data = await this.runEfficiencyBuild(
 				() => this.buildEfficiencyViewData(false, this.efficiencyLoadingSink(panel)));
 			// Record the payload even if this panel is gone: it is valid data, and a later
 			// refresh falls back to it rather than stranding its panel on the loading screen.
-			this._lastEfficiencyViewData = data;
+			this.recordEfficiencyPayload(data, generation);
 			// The user may have closed the panel while the data was being computed.
 			if (this.efficiencyPanel !== panel) { return; }
 			panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
@@ -9620,6 +9639,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// Refresh forces all three walks to recompute, so it is as slow as a cold open —
 		// show the same loading screen with live progress rather than a frozen view.
 		let data: EfficiencyViewData;
+		const generation = this._cacheGeneration;
 		try {
 			data = await this.runEfficiencyBuild(async () => {
 				// Swap in the loading screen only once this refresh actually starts; queued
@@ -9627,7 +9647,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				if (this.efficiencyPanel === panel) { panel.webview.html = this.getLoadingHtml(panel.webview); }
 				return this.buildEfficiencyViewData(true, this.efficiencyLoadingSink(panel));
 			});
-			this._lastEfficiencyViewData = data;
+			this.recordEfficiencyPayload(data, generation);
 		} catch (error) {
 			// Never strand the panel on the loading screen: fall back to the last good payload,
 			// which the initial build records even when its own render was skipped.
@@ -9742,6 +9762,20 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * refresh's parsing ticks arriving here mid-compute — is harmless for the bar, which the
 	 * loading script clamps monotonically.
 	 */
+	/**
+	 * Records a built payload as the fallback a failed refresh renders, unless the caches it
+	 * was computed from have been invalidated since the build began. Without that check a
+	 * build started before `clearCache()` could finish after it and reinstate pre-clear data
+	 * as the "last good" result.
+	 */
+	private recordEfficiencyPayload(data: EfficiencyViewData, builtAtGeneration: number): void {
+		if (builtAtGeneration !== this._cacheGeneration) {
+			this.log('⚡ [Efficiency] Discarding a payload built before the caches were cleared');
+			return;
+		}
+		this._lastEfficiencyViewData = data;
+	}
+
 	private postEfficiencyStep(send: (msg: object) => void, percentage: number, label: string): void {
 		send({ command: 'loadingStep', step: 'computing', percentage, label });
 	}

@@ -147,6 +147,22 @@ test('a compute sub-step posted before parsing would freeze the bar for the whol
 	assert.equal(fresh.pct(), '85%');
 });
 
+test('parsing follows a falling percentage from a growing discovery total', () => {
+	const ui = runLoadingScript();
+
+	// _preloadSessionFiles reports against a discovery total that grows as adapter batches
+	// arrive, so an early batch legitimately reads 1/1 and a later tick 2/400. Clamping
+	// inside the parsing phase would freeze the bar at that high-water mark.
+	ui.post({ command: 'loadingProgress', completed: 1, total: 1, percentage: 100 });
+	assert.equal(ui.pct(), '85%');
+
+	ui.post({ command: 'loadingProgress', completed: 2, total: 400, percentage: 1 });
+	assert.equal(ui.pct(), '1%', 'the bar must follow parsing down rather than stick at 85%');
+
+	ui.post({ command: 'loadingProgress', completed: 200, total: 400, percentage: 50 });
+	assert.equal(ui.pct(), '43%');
+});
+
 test('a late parsing tick cannot drag the bar back below a compute sub-step', () => {
 	const ui = runLoadingScript();
 
