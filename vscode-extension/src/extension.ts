@@ -10769,11 +10769,11 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    */
   private async diagHandlePromptMistralApiKey(): Promise<void> {
     const key = await vscode.window.showInputBox({
-      title: 'Mistral API Key',
+      title: l10n.t('mistral.prompt.title'),
       prompt: l10n.t('mistral.prompt.enterApiKey'),
       password: true,
       ignoreFocusOut: true,
-      validateInput: (v) => (v && v.trim() ? undefined : 'API key is required'),
+      validateInput: (v) => (v && v.trim() ? undefined : l10n.t('mistral.prompt.required')),
     });
     if (key) { await this.diagHandleSetMistralApiKey(key); }
   }
@@ -11986,14 +11986,16 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    * These are cheap relative to the stats/usage-analysis/report pipeline, so sending them early
    * lets the Settings > Backend Storage tab populate right away instead of showing a "not
    * available" placeholder for the several seconds the rest of diagnostics load takes.
-   * Returns the computed values so the caller can reuse them in the final diagnosticDataLoaded message.
+   * Returns backendStorageInfo/githubAuthStatus so the caller can reuse them in the final
+   * diagnosticDataLoaded message; mistralCloudSessionsStatus is NOT returned for reuse there —
+   * the diagnostics pipeline this gates can take a while, so the final message re-reads it fresh
+   * instead of risking a stale snapshot overwriting a key connected/removed in the meantime.
    */
   private async sendBackendStorageInfoEarly(
     panel: vscode.WebviewPanel,
   ): Promise<{
     backendStorageInfo: any;
     githubAuthStatus: { authenticated: boolean; username?: string };
-    mistralCloudSessionsStatus: { apiKeyConfigured: boolean };
   }> {
     const backendStorageInfo = await this.getBackendStorageInfo();
     this.log(
@@ -12011,8 +12013,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         githubAuth: githubAuthStatus,
         mistralCloudSessionsStatus,
       });
+      // BETA: rehydrate a previously fetched conversation listing (kept in memory across panel
+      // close/reopen within the same extension host session) so it doesn't disappear until the
+      // user clicks Refresh again.
+      if (this._lastMistralCloudSessions) {
+        panel.webview.postMessage({ command: "mistralCloudSessionsResult", result: this._lastMistralCloudSessions });
+      }
     }
-    return { backendStorageInfo, githubAuthStatus, mistralCloudSessionsStatus };
+    return { backendStorageInfo, githubAuthStatus };
   }
 
   /**
@@ -12028,7 +12036,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         await this._sessionRestorePromise;
       }
 
-      const { backendStorageInfo, githubAuthStatus, mistralCloudSessionsStatus } = await this.sendBackendStorageInfoEarly(panel);
+      const { backendStorageInfo, githubAuthStatus } = await this.sendBackendStorageInfoEarly(panel);
 
       if (!this.lastDetailedStats) {
         this.log(
@@ -12063,6 +12071,11 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       this.log(
         `Sending backend info to webview: ${backendStorageInfo ? "present" : "missing"}`,
       );
+      // Re-read rather than reuse the value captured at the top of this method: the report/stats
+      // pipeline above can take a while, during which the user may have connected or removed the
+      // key (already reflected live via the early message and the connect/remove handlers), and
+      // reusing the stale snapshot here would overwrite that live state with an outdated one.
+      const currentMistralCloudSessionsStatus = await this.getMistralCloudSessionsStatus();
       panel.webview.postMessage({
         command: "diagnosticDataLoaded",
         report,
@@ -12077,7 +12090,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         skillDescriptions: this._buildSkillDescriptions(),
         toolFamilies: getToolFamilies(),
         otelComparison,
-        mistralCloudSessionsStatus,
+        mistralCloudSessionsStatus: currentMistralCloudSessionsStatus,
       });
 
       this.log("✅ Diagnostic data loaded and sent to webview");

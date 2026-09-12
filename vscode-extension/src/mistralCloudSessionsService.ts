@@ -12,8 +12,8 @@ import type { MistralCloudConversation, MistralCloudSessionsResult } from '../..
  * conversations associated with the configured Mistral API key.
  *
  * Everything here is best-effort and tolerant of API drift: the listing is parsed defensively
- * and unknown fields are ignored. Mark the UI surface as "Beta" while this relies on an
- * undocumented endpoint.
+ * and unknown fields are ignored. Mark the UI surface as "Beta" while this relies on a beta
+ * endpoint whose use for Vibe Code Web specifically is undocumented.
  */
 
 /** Re-export shared types so callers import from one place. */
@@ -189,7 +189,12 @@ export async function collectMistralCloudSessions(
         totalCount: 0,
         authenticated: false,
         fetchedAt,
-        error: list.statusCode ? `${list.error} (${list.statusCode})` : list.error,
+        // requestMistralJson's HTTP-status errors already read "HTTP <code>"; only append the
+        // status code here when the message doesn't already carry it (e.g. a JSON parse failure
+        // on an otherwise-2xx response), so the UI never shows something like "HTTP 401 (401)".
+        error: list.statusCode && !list.error.includes(String(list.statusCode))
+          ? `${list.error} (${list.statusCode})`
+          : list.error,
       };
     }
     return {

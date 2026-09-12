@@ -87,6 +87,19 @@ test('listMistralConversations: skips entries without a string id', async () => 
 	assert.equal(result.conversations![0].id, 'good');
 });
 
+test('listMistralConversations: skips null/primitive entries instead of throwing on the whole listing', async () => {
+	const body = [
+		null,
+		'not-an-object',
+		42,
+		{ id: 'good', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', agent_id: 'a', name: 'n', description: null, object: 'conversation' },
+	];
+	const result = await listMistralConversations('key', { requestFn: makeRequestFn(makeResponse(body)) });
+	assert.equal(result.error, undefined);
+	assert.equal(result.conversations?.length, 1);
+	assert.equal(result.conversations![0].id, 'good');
+});
+
 test('listMistralConversations: maps an HTTP error status into the result', async () => {
 	const result = await listMistralConversations('key', { requestFn: makeRequestFn(makeResponse({}, 401)) });
 	assert.equal(result.conversations, undefined);
@@ -138,6 +151,13 @@ test('collectMistralCloudSessions: a 401 sets authenticated=false and surfaces t
 	assert.equal(result.authenticated, false);
 	assert.match(result.error, /HTTP 401/);
 	assert.equal(result.conversations.length, 0);
+});
+
+test('collectMistralCloudSessions: does not duplicate the status code already embedded in an HTTP error', async () => {
+	const result = await collectMistralCloudSessions('key', { requestFn: makeRequestFn(makeResponse({}, 401)) });
+	// requestMistralJson's HTTP-status errors already read "HTTP 401" — the status code must not
+	// be appended a second time (e.g. "HTTP 401 (401)").
+	assert.equal(result.error, 'HTTP 401');
 });
 
 test('requestMistralJson: builds a Bearer-auth GET request to api.mistral.ai', async () => {
