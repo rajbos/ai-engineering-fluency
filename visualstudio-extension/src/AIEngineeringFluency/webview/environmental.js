@@ -2345,7 +2345,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     const heading = iconHeading("h3", "globe", "Impact at a Glance");
     section.append(heading);
     const intro = el("p", "section-intro");
-    intro.textContent = "All figures are estimates based on average data center energy and water consumption figures. Analogies use European averages. Treat these as order-of-magnitude indicators, not precise measurements.";
+    intro.textContent = localize("environmental.intro");
     section.append(intro);
     const periods = [
       [
@@ -2386,18 +2386,19 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   }
   function buildEstimatesSection() {
     const section = el("div", "section");
-    const heading = iconHeading("h3", "lightbulb", "Calculation & Estimates");
+    const heading = iconHeading("h3", "lightbulb", localize("environmental.methodology.heading"));
     section.append(heading);
     const notes = document.createElement("ul");
     notes.className = "notes";
     const items = [
-      "Cost (UBB) uses GitHub Copilot AI Credit rates (1 credit = $0.01) under Usage Based Billing.",
-      "Estimated CO\u2082 is based on ~0.2 g CO\u2082e per 1,000 tokens (average data center energy mix and PUE).",
-      "Estimated water usage is based on ~0.3 L per 1,000 tokens (data center cooling estimates).",
-      "Tree equivalent represents the fraction of a single mature tree's annual CO\u2082 absorption (~21 kg/year).",
-      "CO\u2082 analogies: petrol car \u2248 120 g/km \xB7 intercity train \u2248 41 g/km \xB7 economy flight \u2248 180 g/km (ICAO avg.) \xB7 smartphone charge \u2248 8 g \xB7 LED bulb \u2248 3 g/hr (10 W, EU grid) \xB7 kettle boil \u2248 20 g.",
-      "Water analogies: shower \u2248 8 L/min \xB7 washing machine \u2248 50 L \xB7 standard bathtub \u2248 150 L \xB7 dishwasher \u2248 12 L \xB7 mug of tea \u2248 250 mL \xB7 daily drinking water \u2248 2 L/person.",
-      "All analogies are order-of-magnitude estimates. Actual values depend on your region's energy mix and device efficiency."
+      localize("environmental.methodology.cost"),
+      localize("environmental.methodology.co2Paper"),
+      localize("environmental.methodology.co2Weights"),
+      localize("environmental.methodology.water"),
+      localize("environmental.methodology.tree"),
+      localize("environmental.methodology.co2Analogies"),
+      localize("environmental.methodology.waterAnalogies"),
+      localize("environmental.methodology.caveat")
     ];
     items.forEach((text) => {
       const li = document.createElement("li");
