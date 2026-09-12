@@ -2904,14 +2904,13 @@ function _gmusEstimateDeltaRequestTokens(request: SessionRequestRaw, requestMode
 /** Process a single delta-format request, extracting or estimating token usage. */
 function _gmusProcessDeltaRequest(request: SessionRequestRaw, defaultModel: string, modelUsage: ModelUsage, deps: GmusDeps): void {
 	if (!request.requestId) { return; }
-	let requestModel = defaultModel;
-	if (request.modelId) {
-		requestModel = request.modelId.replace(/^copilot\//, '');
-	} else if (request.result?.metadata?.modelId) {
-		requestModel = request.result.metadata.modelId.replace(/^copilot\//, '');
-	} else if (request.result?.details) {
-		requestModel = getModelFromRequest(request, deps.modelPricing);
-	}
+	// Route through the shared resolver whenever the request carries its own model
+	// info, so Auto-routed requests (modelId "auto"/"copilot/auto") resolve to the
+	// actually-picked model via the response's `autoModeResolution` item instead of
+	// being attributed to the unpriced "auto" id. Falls back to the session-level
+	// `defaultModel` only when the request has no model info of its own at all.
+	const hasOwnModelInfo = !!(request.modelId || request.result?.metadata?.modelId || request.result?.details);
+	const requestModel = hasOwnModelInfo ? getModelFromRequest(request, deps.modelPricing) : defaultModel;
 	// Untrusted `modelId` string from parsed session JSON — see protoGuard.ts.
 	if (isUnsafeObjectKey(requestModel)) { return; }
 	if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }

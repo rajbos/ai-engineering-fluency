@@ -14,6 +14,8 @@ interface ModelRequestSource {
 		metadata?: { modelId?: string };
 		details?: string;
 	};
+	/** Response stream items — scanned for an `autoModeResolution` entry (see `_findAutoModeResolvedModel`). */
+	response?: unknown[];
 }
 
 /** Shape of a single delta event line in a JSONL session file. */
@@ -1040,14 +1042,6 @@ function getDisplayNameLookup(modelPricing: { [key: string]: ModelPricing }): { 
 }
 
 /** Find the model ID for a request by matching display names against its details string. Returns null if not found. */
-function _gmfrFindByDisplayName(details: string, modelPricing: { [key: string]: ModelPricing }): string | null {
-	const { map, sortedNames } = getDisplayNameLookup(modelPricing);
-	for (const displayName of sortedNames) {
-		if (details.includes(displayName)) { return map[displayName]; }
-	}
-	return null;
-}
-
 function _gmrMatchDisplayName(details: string, modelPricing: { [key: string]: ModelPricing }): string | null {
 	const { map, sortedNames } = getDisplayNameLookup(modelPricing);
 	for (const displayName of sortedNames) {
@@ -1056,22 +1050,44 @@ function _gmrMatchDisplayName(details: string, modelPricing: { [key: string]: Mo
 	return null;
 }
 
+/**
+ * When Copilot's "Auto" model routing is used, `request.modelId` (and
+ * `result.metadata.modelId`) only ever record the generic `"auto"` /
+ * `"copilot/auto"` id — the actual model Auto picked for that turn is reported
+ * separately, as an `autoModeResolution` item in the response stream:
+ * `{ kind: 'autoModeResolution', resolved: { id, name } }`. Without resolving
+ * this, cost/tier lookups treat "auto" as an unpriced model id, silently
+ * showing $0/no cost for every Auto-routed turn. Returns null when no such
+ * item is present (e.g. non-Auto requests, or older sessions predating it).
+ */
+function _findAutoModeResolvedModel(response: unknown[] | undefined): string | null {
+	if (!Array.isArray(response)) { return null; }
+	for (const item of response) {
+		if (item && typeof item === 'object' && (item as { kind?: string }).kind === 'autoModeResolution') {
+			const id = (item as { resolved?: { id?: string } }).resolved?.id;
+			if (typeof id === 'string' && id) { return id; }
+		}
+	}
+	return null;
+}
+
 export function getModelFromRequest(request: ModelRequestSource, modelPricing: { [key: string]: ModelPricing } = {}): string {
-	if (request.modelId) { return request.modelId.replace(/^copilot\//, ''); }
-	if (request.result?.metadata?.modelId) { return request.result.metadata.modelId.replace(/^copilot\//, ''); }
+	const rawModelId = request.modelId
+		? request.modelId.replace(/^copilot\//, '')
+		: (request.result?.metadata?.modelId ? request.result.metadata.modelId.replace(/^copilot\//, '') : null);
+	if (rawModelId && rawModelId !== 'auto') { return rawModelId; }
+	if (rawModelId === 'auto') {
+		// Auto routing: the raw id is a generic placeholder — try to resolve the
+		// model actually picked for this turn before falling back to the "auto"
+		// sentinel itself (never silently substitute an unrelated model here).
+		const resolved = _findAutoModeResolvedModel(request.response);
+		if (resolved) { return resolved; }
+	}
 	if (request.result?.details) {
 		const matched = _gmrMatchDisplayName(request.result.details, modelPricing);
 		if (matched) { return matched; }
 	}
-
-	if (request.result?.metadata?.modelId) {
-		return request.result.metadata.modelId.replace(/^copilot\//, '');
-	}
-
-	if (request.result?.details) {
-		const found = _gmfrFindByDisplayName(request.result.details, modelPricing);
-		if (found) { return found; }
-	}
+	if (rawModelId === 'auto') { return rawModelId; }
 
 	return 'gpt-4'; // default
 }

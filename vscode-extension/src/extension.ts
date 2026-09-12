@@ -7064,7 +7064,7 @@ private computeFallbackDailyRollup(
 		const contextRefs = this.createEmptyContextRefs();
 		const userMessage = request.message?.text || '';
 		this.analyzeRequestContext(request, contextRefs);
-		const requestModel = request.modelId || currentModel || this.getModelFromRequest(request) || 'gpt-4';
+		const requestModel = this.resolveDeltaTurnModel(request, currentModel);
 		const { responseText, thinkingText, toolCalls, mcpTools } = this.extractResponseData(request.response || []);
 		const actualUsage = this.extractActualUsageFromRequest(request, rawUsageFallback, i);
 		return {
@@ -7077,6 +7077,32 @@ private computeFallbackDailyRollup(
 			thinkingTokensEstimate: this.estimateTokensFromText(thinkingText, requestModel),
 			actualUsage, thinkingEffort: effortByRequestId.get(request.requestId)
 		};
+	}
+
+	/**
+	 * Resolves the model actually used for one delta-format turn. `request.modelId`
+	 * is only the generic `"auto"`/`"copilot/auto"` id when Copilot's Auto routing
+	 * was used — the real per-turn model is only recoverable via `getModelFromRequest`
+	 * (which reads the response stream's `autoModeResolution` item). Preferring a raw
+	 * `"auto"` modelId here would otherwise price every Auto-routed turn as an unknown
+	 * model, silently dropping its cost from the Session Steps Overview table.
+	 *
+	 * When a turn is explicitly Auto-routed but its response has no `autoModeResolution`
+	 * item (e.g. an older session predating that field), the `"auto"` sentinel is kept
+	 * as-is rather than falling back to `currentModel` — the session's selected model can
+	 * differ from whatever Auto actually picked, and substituting it would silently
+	 * mislabel/misprice the turn.
+	 */
+	private resolveDeltaTurnModel(request: any, currentModel: string | null): string {
+		const rawModelId = request.modelId ? String(request.modelId).replace(/^copilot\//, '') : null;
+		if (rawModelId && rawModelId !== 'auto') { return rawModelId; }
+		if (rawModelId === 'auto') {
+			const resolved = this.getModelFromRequest(request);
+			return (resolved && resolved !== 'auto') ? resolved : 'auto';
+		}
+		const resolved = this.getModelFromRequest(request);
+		if (resolved && resolved !== 'auto' && resolved !== 'gpt-4') { return resolved; }
+		return currentModel || resolved || 'gpt-4';
 	}
 
 	private extractActualUsageFromRequest(request: any, rawUsageFallback: Map<number, { promptTokens: number; outputTokens: number }>, index: number): ActualUsage | undefined {
