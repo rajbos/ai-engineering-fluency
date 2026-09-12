@@ -143,23 +143,17 @@ body {
 }
 
 .section-heading-collapsible {
-  cursor: pointer;
-  user-select: none;
-}
 	cursor: pointer;
 	user-select: none;
 }
 
-.section-heading-collapsible:hover {
-  color: var(--text-secondary);
-}
+.section-heading-collapsible:hover,
+.section-heading-collapsible:focus-visible {
 	color: var(--text-secondary);
+	outline: none;
 }
 
 .section-heading-chevron {
-  font-size: 10px;
-  color: var(--text-secondary);
-}
 	font-size: 10px;
 	color: var(--text-secondary);
 }

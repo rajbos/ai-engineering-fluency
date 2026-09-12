@@ -32,6 +32,10 @@ export interface WebviewLocalization {
 	'usage.contextPressure.worstFill': string;
 	'usage.contextPressure.nearLimitTooltip': string;
 
+	// Details view — collapsible "Usage by Editor" section heading tooltips
+	'details.editorSection.show': string;
+	'details.editorSection.hide': string;
+
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
 }
@@ -57,7 +61,9 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'usage.contextPressure.compactedTooltip': 'Sessions where the client automatically compacted or truncated the history at least once, counted per session rather than per compaction event',
 	'usage.contextPressure.nearLimitLabel': '⚠️ Sessions near the limit',
 	'usage.contextPressure.worstFill': 'Fullest session reached {0}% of its window',
-	'usage.contextPressure.nearLimitTooltip': 'Copilot CLI sessions that filled at least {0}% of their context window without compacting — the early-warning band before context starts getting dropped'
+	'usage.contextPressure.nearLimitTooltip': 'Copilot CLI sessions that filled at least {0}% of their context window without compacting — the early-warning band before context starts getting dropped',
+	'details.editorSection.show': 'Show Usage by Editor',
+	'details.editorSection.hide': 'Hide Usage by Editor'
 };
 
 // Current localization strings, initialized with defaults

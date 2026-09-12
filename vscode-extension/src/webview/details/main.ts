@@ -4,7 +4,7 @@ import { getEditorIcon, getCharsPerToken, formatFixed, formatPercent, formatNumb
 import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
-import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { initializeWebviewLocalization, setCurrentLanguage, localize } from '../shared/localization';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -65,7 +65,7 @@ model?: { key?: string; dir?: string };
 modelOtherExpanded?: boolean;
 editorOtherExpanded?: boolean;
 /** Whether the "Usage by Editor" section is collapsed (its table hidden). Persisted across sessions. */
-editorSectionCollapsed: boolean = (_initSort?.editorSectionCollapsed) ?? false;
+editorSectionCollapsed?: boolean;
 /** Billing-group (provider) names that the user has unchecked in the cost provider filter. */
 excludedProviders?: string[];
 };
@@ -857,6 +857,25 @@ items.forEach(item => {
 return tbody;
 }
 
+/** Wires the collapsible "Usage by Editor" section heading: toggles the table's visibility, syncs ARIA state and the localized tooltip, and supports keyboard activation (Enter/Space) since the heading carries role="button". The collapsed state is persisted via saveSortSettings(). */
+function wireEditorSectionToggle(heading: HTMLElement, table: HTMLElement, chevron: HTMLElement): void {
+const toggleEditorSection = (): void => {
+editorSectionCollapsed = !editorSectionCollapsed;
+table.classList.toggle('hidden', editorSectionCollapsed);
+chevron.textContent = editorSectionCollapsed ? '\u25b8' : '\u25be';
+heading.setAttribute('aria-expanded', String(!editorSectionCollapsed));
+heading.title = editorSectionCollapsed ? localize('details.editorSection.show') : localize('details.editorSection.hide');
+saveSortSettings();
+};
+heading.addEventListener('click', toggleEditorSection);
+heading.addEventListener('keydown', (event: KeyboardEvent) => {
+if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+event.preventDefault();
+toggleEditorSection();
+}
+});
+}
+
 const TOP_N_EDITORS = 5;
 
 function buildEditorUsageSection(stats: DetailedStats): HTMLElement | null {
@@ -876,13 +895,18 @@ const visibleEditors = Array.from(allEditors).filter(editor => isVisibleForProvi
 const section = el('div', 'section');
 const heading = iconHeading('h3', 'device-desktop', 'Usage by Editor');
 heading.classList.add('section-heading-collapsible');
+heading.setAttribute('role', 'button');
+heading.setAttribute('tabindex', '0');
+heading.setAttribute('aria-expanded', String(!editorSectionCollapsed));
+heading.setAttribute('aria-controls', 'editor-usage-table');
 const chevron = el('span', 'section-heading-chevron', editorSectionCollapsed ? '\u25b8' : '\u25be');
-heading.title = editorSectionCollapsed ? 'Show Usage by Editor' : 'Hide Usage by Editor';
+heading.title = editorSectionCollapsed ? localize('details.editorSection.show') : localize('details.editorSection.hide');
 heading.append(chevron);
 section.append(heading);
 
 const table = document.createElement('table');
 table.className = 'stats-table';
+table.id = 'editor-usage-table';
 
 const editorColHeaders: ColHeader[] = [
 { icon: '📝', text: 'Editor', key: 'name' },
@@ -920,13 +944,7 @@ rebuildTbody();
 if (editorSectionCollapsed) { table.classList.add('hidden'); }
 section.append(table);
 
-heading.addEventListener('click', () => {
-editorSectionCollapsed = !editorSectionCollapsed;
-table.classList.toggle('hidden', editorSectionCollapsed);
-chevron.textContent = editorSectionCollapsed ? '\u25b8' : '\u25be';
-heading.title = editorSectionCollapsed ? 'Show Usage by Editor' : 'Hide Usage by Editor';
-saveSortSettings();
-});
+wireEditorSectionToggle(heading, table, chevron);
 
 return section;
 }

@@ -4147,6 +4147,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
 			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
 			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
+			// Details view — collapsible "Usage by Editor" section heading tooltips
+			'details.editorSection.show': l10n.t('details.editorSection.show'),
+			'details.editorSection.hide': l10n.t('details.editorSection.hide'),
 			// Current language for reference
 			'__language__': language
 		};

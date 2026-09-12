@@ -194,6 +194,8 @@
   "usage.contextPressure.nearLimitLabel": "⚠️ 接近上限的会话",
   "usage.contextPressure.worstFill": "最满的会话达到了其窗口的 {0}%",
   "usage.contextPressure.nearLimitTooltip": "在未压缩的情况下填满了至少 {0}% 上下文窗口的 Copilot CLI 会话——这是上下文开始被丢弃之前的预警区间",
+  "details.editorSection.show": "显示按编辑器划分的用量",
+  "details.editorSection.hide": "隐藏按编辑器划分的用量",
 
   "onboarding.welcome.message": "AI 工程熟练度跟踪您的 GitHub Copilot 使用情况——令牌计数、成本估算以及基于您与 AI 工具交互方式的熟练度评分。",
   "onboarding.welcome.openFluencyScore": "打开熟练度评分",
