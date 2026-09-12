@@ -30,7 +30,9 @@
  *     properties with the same names
  *   - known text-argument sinks: `el(tag, className, text)`, `iconHeading(tag, icon, text)`,
  *     `createButton(id, label, appearance?)`, `document.createTextNode(text)`,
- *     `setHtml(el, html)` (domUtils.ts's sanctioned `.innerHTML=` wrapper)
+ *     `setHtml(el, html)` (domUtils.ts's sanctioned `.innerHTML=` wrapper), and the shared webview
+ *     card/badge wrappers that forward a fixed argument into one of the sinks above —
+ *     `buildCard(id, label, value)`, `buildStatCard(label, value)`, `statusBadgeHtml(status, label?)`
  *   - `expr.setAttribute('aria-label'|'title'|'placeholder', value)`
  *   - `aria-label="..."` / `title="..."` / `placeholder="..."` attributes and text content
  *     between HTML tags (`<button>`, `<h1>`-`<h6>`, `<p>`, `<b>`, `<code>`, `<vscode-button>`, ...)
@@ -170,6 +172,9 @@ const TEXT_ARG_SINKS = new Map([
 	['createButton', 1], // createButton(id, label, appearance?) legacy positional form; the config-object form isn't covered
 	['document.createTextNode', 0],
 	['setHtml', 1], // domUtils.ts's sanctioned innerHTML= wrapper — same "HTML-bearing" handling as .innerHTML below
+	['buildCard', 1], // chart/main.ts: buildCard(id, label, value) — label forwarded into el(..., label)
+	['buildStatCard', 0], // dashboard/main.ts: buildStatCard(label, value) — label forwarded into el(..., label)
+	['statusBadgeHtml', 1], // usage/main.ts: statusBadgeHtml(status, label?) — label used as an aria-label/title attribute value
 ]);
 
 // Sinks whose value is markup (raw HTML), not plain text, mirroring TARGET_PROPS' `innerHTML`.
@@ -256,8 +261,22 @@ const LITERAL_LEAF_BINARY_OPS = new Set([
  * composed expression this doesn't recognize — e.g. a non-literal `x + y`, which correctly
  * contributes no literal). Used everywhere a literal in a UI-rendering position is checked
  * (assignment target, sink argument).
+ *
+ * `htmlBearing` (true only for a value flowing into `.innerHTML =` / `setHtml(...)`) filters out a
+ * literal's *own* static chunks when they read as markup, deferring to the generic HTML tag/
+ * attribute scan instead of double-reporting. This is decided from ALL of a template's static
+ * chunks combined, not each chunk in isolation — a `${...}`-bearing template splits its static
+ * text into several chunks, and a chunk landing between two holes (e.g. the
+ * `;margin-bottom:12px;">` piece of `` `<div style="color:${c};margin-bottom:12px;">${label}</div>` ``)
+ * can contain no `<` of its own even though the literal as a whole is unambiguously markup —
+ * testing it in isolation both reports that CSS/attribute fragment as false-positive prose and,
+ * in the mirror case, fails to skip a chunk like `<span>Hardcoded ` that never closes within its
+ * own chunk. The combined check does NOT extend into a literal nested *inside* an interpolation
+ * hole (the recursive call below) — a ternary/fallback sitting in a hole is judged on its own
+ * text, independent of whatever markup surrounds the hole in the enclosing template, so
+ * `` `<div>${cond ? 'Refresh' : 'Retry'}</div>` `` still reports its branches.
  */
-function extractLiteralTexts(node, sourceFile) {
+function extractLiteralTexts(node, sourceFile, htmlBearing = false) {
 	const n = unwrapParens(node);
 	if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) {
 		// One entry per static chunk (not one combined string for a TemplateExpression) — a
@@ -275,18 +294,20 @@ function extractLiteralTexts(node, sourceFile) {
 			const leadingSkip = chunk.text.match(LEADING_SKIP_RE)[0].length;
 			return { text: chunk.text, offset: chunk.offset + leadingSkip };
 		});
-		if (!ts.isTemplateExpression(n)) { return chunkResults; }
+		const isMarkup = htmlBearing && HTML_TAG_FRAGMENT_RE.test(chunkResults.map((r) => r.text).join(''));
+		const ownResults = isMarkup ? [] : chunkResults;
+		if (!ts.isTemplateExpression(n)) { return ownResults; }
 		// Also recurse into each interpolation hole's own expression — a hole that's itself a
 		// ternary/concatenation/fallback (e.g. `` `${cond ? 'Refresh' : 'Retry'}` `` used directly
 		// as a sink argument) has leaf literals of its own that the static chunks above never see.
-		const spanResults = n.templateSpans.flatMap((span) => extractLiteralTexts(span.expression, sourceFile));
-		return [...chunkResults, ...spanResults];
+		const spanResults = n.templateSpans.flatMap((span) => extractLiteralTexts(span.expression, sourceFile, htmlBearing));
+		return [...ownResults, ...spanResults];
 	}
 	if (ts.isConditionalExpression(n)) {
-		return [...extractLiteralTexts(n.whenTrue, sourceFile), ...extractLiteralTexts(n.whenFalse, sourceFile)];
+		return [...extractLiteralTexts(n.whenTrue, sourceFile, htmlBearing), ...extractLiteralTexts(n.whenFalse, sourceFile, htmlBearing)];
 	}
 	if (ts.isBinaryExpression(n) && LITERAL_LEAF_BINARY_OPS.has(n.operatorToken.kind)) {
-		return [...extractLiteralTexts(n.left, sourceFile), ...extractLiteralTexts(n.right, sourceFile)];
+		return [...extractLiteralTexts(n.left, sourceFile, htmlBearing), ...extractLiteralTexts(n.right, sourceFile, htmlBearing)];
 	}
 	return [];
 }
@@ -413,8 +434,10 @@ function reportAt(rawText, offset, ctx, reason) {
 function checkAssignmentTarget(propName, valueNode, ctx, reasonPrefix) {
 	if (!propName || !TARGET_PROPS.has(propName)) { return; }
 	const htmlBearing = HTML_BEARING_PROPS.has(propName);
-	for (const literal of extractLiteralTexts(valueNode, ctx.sourceFile)) {
-		if (htmlBearing && HTML_TAG_FRAGMENT_RE.test(literal.text)) { continue; } // tag content: let the generic literal scan report it instead
+	// tag-bearing markup is left for the generic literal scan to avoid double-reporting the same
+	// text — extractLiteralTexts itself decides that per-literal (combined across a template's
+	// static chunks, not each chunk in isolation; see its doc comment).
+	for (const literal of extractLiteralTexts(valueNode, ctx.sourceFile, htmlBearing)) {
 		reportAt(literal.text, literal.offset, ctx, `${reasonPrefix}${propName}`);
 	}
 }
@@ -501,16 +524,15 @@ function blankHtmlComments(text) {
 }
 
 function scanFlattenedForTagText(text, textOffsetInFlat, segments, ctx) {
-	// Blank comments first so a tag name inside one can never be mistaken for real markup below —
-	// see HTML_COMMENT_RE. Blanking is idempotent (a body passed in via recursion has already had
-	// its comments blanked by the parent call), so re-blanking here is a safe no-op in that case.
-	const searchable = blankHtmlComments(text);
+	// `text` is expected to already have HTML comments blanked by the caller (scanHtmlLiteralForTags
+	// blanks once, up front, before any scan runs) — a recursive call here passes a `body` substring
+	// that inherits that blanking, so no re-blanking is needed at this level.
 	// matchAll (not a manual exec()/lastIndex loop) is required here: this function recurses into
 	// a nested tag's body using the SAME shared TAG_TEXT_RE object, and exec() mutates that
 	// object's .lastIndex as shared state — the recursive call would corrupt the outer loop's
 	// position in `text` and either skip content or (as originally shipped) loop forever
 	// re-matching the same span. matchAll clones the regex per call, so recursion is safe.
-	for (const m of searchable.matchAll(TAG_TEXT_RE)) {
+	for (const m of text.matchAll(TAG_TEXT_RE)) {
 		const tag = m[1].toLowerCase();
 		const body = m[2];
 		const bodyStartInFlat = textOffsetInFlat + m.index + m[0].indexOf('>') + 1;
@@ -557,7 +579,12 @@ function reportOwnTextRuns(body, bodyStartInFlat, segments, ctx, reason) {
 function scanHtmlLiteralForTags(node, ctx) {
 	const chunks = getStaticChunks(node, ctx.sourceFile);
 	if (chunks.length === 0) { return; }
-	const { text, segments } = flattenChunks(chunks);
+	const { text: rawText, segments } = flattenChunks(chunks);
+	// Blank HTML comments once, up front, before either scan runs — otherwise a commented-out
+	// fragment (e.g. `<!-- <button aria-label="Refresh"></button> -->`, which never renders) can
+	// still trip the attribute scan even though scanFlattenedForTagText's own comment-blanking
+	// (see HTML_COMMENT_RE) already protects the tag-text path.
+	const text = blankHtmlComments(rawText);
 	scanFlattenedForAttributes(text, segments, ctx);
 	scanFlattenedForTagText(text, 0, segments, ctx);
 	// This call runs on EVERY string/template literal in scope via walk(), including plain prose
@@ -579,8 +606,7 @@ function checkTextArgSink(node, chain, ctx) {
 	const argIndex = TEXT_ARG_SINKS.get(chain);
 	if (argIndex === undefined || node.arguments.length <= argIndex) { return; }
 	const htmlBearing = HTML_BEARING_SINKS.has(chain);
-	for (const literal of extractLiteralTexts(node.arguments[argIndex], ctx.sourceFile)) {
-		if (htmlBearing && HTML_TAG_FRAGMENT_RE.test(literal.text)) { continue; }
+	for (const literal of extractLiteralTexts(node.arguments[argIndex], ctx.sourceFile, htmlBearing)) {
 		reportAt(literal.text, literal.offset, ctx, `${chain}() text argument`);
 	}
 }
@@ -699,11 +725,23 @@ function getFileLines(absPath) {
 	return lines;
 }
 
-/** The trimmed content of the source line a violation was found on — the baseline's stable key ingredient. */
-function violationLineHash(violation) {
+/**
+ * The trimmed content of the source line(s) a violation was found on — the baseline's stable key
+ * ingredient. A direct-text run can itself span multiple lines (e.g. a multiline tag body with no
+ * nested element/hole to split it into separate runs); hashing only `violation.line` would leave
+ * the hash unchanged when new prose is added on a later line of that same run, silently covering
+ * it as pre-existing. `violation.text`'s own newline count is a reliable proxy for how many actual
+ * source lines the run spans, since flattening never introduces or removes them.
+ */
+export function violationLineHash(violation) {
 	const absPath = path.join(repoRoot, violation.file);
 	const lines = getFileLines(absPath);
-	return hashLine((lines[violation.line - 1] || '').trim());
+	const spanLineCount = violation.text.split('\n').length;
+	const spanned = [];
+	for (let i = 0; i < spanLineCount; i++) {
+		spanned.push((lines[violation.line - 1 + i] || '').trim());
+	}
+	return hashLine(spanned.join('\n'));
 }
 
 function tallyKeys(keys) {

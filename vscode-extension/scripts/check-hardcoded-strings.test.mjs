@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { looksProse, scanFile, hashLine, isLocalizationCall, isConsoleCall, newIndexesBeyondBaseline } from './check-hardcoded-strings.mjs';
+import { looksProse, scanFile, hashLine, isLocalizationCall, isConsoleCall, newIndexesBeyondBaseline, violationLineHash } from './check-hardcoded-strings.mjs';
 
 // ── looksProse ───────────────────────────────────────────────────────────────
 
@@ -742,5 +742,70 @@ test('scanFile: an HTML attribute value beginning with an interpolation hole att
 		const match = violations.find((v) => v.text.includes('Refresh'));
 		assert.ok(match, `expected a violation containing "Refresh", got: ${JSON.stringify(violations)}`);
 		assert.equal(match.line, 2, `expected the violation on the "Refresh" line (2), got line ${match.line}`);
+	});
+});
+
+// ── round-9 fixes: multiline-run hashing, comment-blanked attributes, wrapper sinks, cross-chunk markup ──
+
+test('violationLineHash: changing only a later line of a multiline direct-text run changes the hash', () => {
+	const hashBefore = withTempFile('const html = `<div>\n  Line one\n  Line two\n</div>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+		assert.ok(violations[0].text.includes('\n'), `expected a multiline run, got: ${JSON.stringify(violations[0])}`);
+		return violationLineHash(violations[0]);
+	});
+	const hashAfter = withTempFile('const html = `<div>\n  Line one\n  Line CHANGED\n</div>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		return violationLineHash(violations[0]);
+	});
+	assert.notEqual(hashBefore, hashAfter, 'expected changing a later line of the same multiline run to change its baseline hash');
+});
+
+test('scanFile: an HTML attribute inside a commented-out element is not flagged (comments blanked before attribute scanning too)', () => {
+	withTempFile('const html = `<div><!-- <button aria-label="Refresh"></button> --></div>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 0, `expected the commented-out attribute not to be flagged, got: ${JSON.stringify(violations)}`);
+	});
+});
+
+test('scanFile: recognizes buildCard/buildStatCard/statusBadgeHtml as text-argument sinks', () => {
+	withTempFile("buildCard('id', 'Total Sessions', '5');\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.ok(violations.some((v) => v.text === 'Total Sessions'), `expected among: ${JSON.stringify(violations)}`);
+	});
+	withTempFile("buildStatCard('Synced Tokens', '5');\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.ok(violations.some((v) => v.text === 'Synced Tokens'), `expected among: ${JSON.stringify(violations)}`);
+	});
+	withTempFile("statusBadgeHtml('❌', 'Error');\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.ok(violations.some((v) => v.text === 'Error'), `expected among: ${JSON.stringify(violations)}`);
+	});
+});
+
+test('scanFile: a CSS/attribute chunk between two interpolation holes in an innerHTML template is not misreported as prose', () => {
+	withTempFile(
+		'el.innerHTML = `<div style="color:${color};margin-bottom:12px;">${label}</div>`;\n',
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			assert.equal(violations.length, 0, `expected no violations for the CSS fragment, got: ${JSON.stringify(violations)}`);
+		},
+	);
+});
+
+test('scanFile: a ternary nested inside an innerHTML template\'s interpolation hole is still caught despite the enclosing markup', () => {
+	withTempFile("el.innerHTML = `<div>${cond ? 'Refresh' : 'Retry'}</div>`;\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		const texts = violations.map((v) => v.text);
+		assert.ok(texts.includes('Refresh'), `expected among: ${JSON.stringify(violations)}`);
+		assert.ok(texts.includes('Retry'), `expected among: ${JSON.stringify(violations)}`);
 	});
 });
