@@ -26,7 +26,7 @@ permissions:
 jobs:
   analyze:
     name: Analyze
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runs-on || 'ubuntu-latest' }}
     permissions:
       actions: read
       contents: read
@@ -41,8 +41,11 @@ jobs:
         # Each entry only checks out and sets up the toolchain its own language
         # needs (see the sparse-checkout / conditional setup steps below):
         #   - actions / typescript: repo-wide, no compiled build required.
-        #   - csharp: build-mode "none" (the CodeQL C# extractor can analyze the
-        #     visualstudio-extension/ source without an MSBuild/dotnet build).
+        #   - csharp: build-mode "manual", built via MSBuild on windows-latest
+        #     (the visualstudio-extension/ classic VSSDK net48 project needs a
+        #     real compiler pass — build-mode "none" left CodeQL's call-target
+        #     quality metric at 82% (< 85% threshold) because the no-build
+        #     extractor can't fully resolve the VS SDK / NuGet package types).
         #   - java-kotlin: build-mode "manual", built via the jetbrains-plugin/
         #     Gradle wrapper (compileKotlin only — buildPlugin isn't needed for
         #     extraction and would pull down the full IntelliJ Platform SDK).
@@ -50,7 +53,8 @@ jobs:
           - language: actions
           - language: typescript
           - language: csharp
-            build-mode: none
+            build-mode: manual
+            runs-on: windows-latest
             sparse-checkout: |
               visualstudio-extension
               .github
@@ -77,13 +81,13 @@ jobs:
           # the requested version is not in the runner's toolcache (release
           # downloads on github.com redirect there) — without them, init fails
           # with ECONNREFUSED on runner images that lack the pinned version.
-          # api.nuget.org / globalcdn.nuget.org: CodeQL's C# build-mode "none"
-          # extractor restores NuGet dependencies itself (from *.csproj/*.sln) to
-          # resolve external types before extraction — see
-          # https://docs.github.com/en/code-security/reference/code-scanning/codeql/build-options-for-compiled-languages#no-build-for-c
-          # Without these, that restore is silently blocked by egress-policy,
-          # degrading database quality ("Low C# analysis quality" / percentage of
-          # calls with call target below the 85% threshold).
+          # api.nuget.org / globalcdn.nuget.org: the csharp matrix entry builds
+          # via `nuget restore` + `msbuild` (build-mode "manual"), and the C#
+          # extractor under build-mode "none" also restores NuGet itself. Either
+          # way, restoring the VS SDK / VSSDK / NuGet package references needs
+          # these endpoints — without them the restore is silently blocked by
+          # egress-policy, degrading database quality ("Low C# analysis quality" /
+          # percentage of calls with call target below the 85% threshold).
           allowed-endpoints: >
             api.adoptium.net:443
             api.github.com:443
@@ -167,10 +171,48 @@ jobs:
         # comment on the "Setup Gradle" step above for why that matters to CodeQL.
         run: ./gradlew compileKotlin compileTestKotlin --no-daemon --rerun-tasks --no-build-cache
 
+      # build-mode: manual — trace the Visual Studio extension's MSBuild build.
+      # The classic (non-SDK-style) net48 VSSDK project needs a real compiler
+      # pass so CodeQL can resolve the VS SDK / NuGet package types (the no-build
+      # extractor's call-target metric sat at 82%, below the 85% threshold).
+      # The whole solution is built so the runner and test projects are also
+      # extracted (matching what build-mode "none" scanned before). The
+      # webview-bundle / cli-bundle copy targets (CopyWebviewBundles /
+      # AddCliBundleToVsix) would pull in vscode-extension and cli build outputs
+      # that aren't checked out here, so CopyWebviewBundles is skipped via
+      # /p:CopyWebviewBundles=false (AddCliBundleToVsix only runs during VSIX
+      # packaging, not /t:Build). nuget restore is required first for the VSSDK
+      # PackageReference packages; dotnet restore is needed for the SDK-style
+      # test project (mirrors .github/workflows/visualstudio-build.yml).
+      - name: Add MSBuild to PATH
+        if: matrix.language == 'csharp'
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
+
+      - name: Restore NuGet packages (C#)
+        if: matrix.language == 'csharp'
+        working-directory: visualstudio-extension
+        run: nuget restore AIEngineeringFluency.sln
+
+      - name: Restore test project (SDK-style)
+        if: matrix.language == 'csharp'
+        working-directory: visualstudio-extension
+        run: dotnet restore src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj
+
+      - name: Build C# solution (CodeQL tracing)
+        if: matrix.language == 'csharp'
+        working-directory: visualstudio-extension
+        run: >-
+          msbuild AIEngineeringFluency.sln
+          /p:Configuration=Release
+          /p:Platform="Any CPU"
+          /p:CopyWebviewBundles=false
+          /t:Build
+          /v:minimal
+
       # Autobuild attempts to build any compiled languages (C/C++, C#, or Java)
-      # that aren't otherwise handled above. csharp uses build-mode: none (no
-      # build required) and java-kotlin is built manually above, so this only
-      # ever runs for languages that fall through to CodeQL's default build-mode.
+      # that aren't otherwise handled above. csharp and java-kotlin are both
+      # built manually above, so this only ever runs for languages that fall
+      # through to CodeQL's default build-mode.
       - name: Autobuild
         if: matrix.language != 'csharp' && matrix.language != 'java-kotlin'
         uses: github/codeql-action/autobuild@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
