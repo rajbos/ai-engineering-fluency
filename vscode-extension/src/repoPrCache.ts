@@ -99,6 +99,22 @@ export function shouldPreserveRepoPrSnapshotForEmptyDiscovery(
 		&& (envelope?.data.repos.length ?? 0) > 0;
 }
 
+/**
+ * True when a snapshot carries real PR data rather than the "never fetched" placeholder.
+ *
+ * `buildEmptyRepoPrStatsResult()` serves an instant placeholder on cold open — `repos: []` with
+ * `fetchedAt: ''` — so consumers that derive metrics from the snapshot (the Efficiency view's Value
+ * tab) can tell "no PR data yet" from "fetched, and the answer is zero". `fetchedAt` is optional in
+ * `RepoPrStatsResult`, and nothing on the cache-read path requires it, so a populated repo list
+ * counts as real on its own.
+ */
+export function isRealRepoPrSnapshot(
+	result: Pick<RepoPrStatsResult, 'repos' | 'fetchedAt'> | undefined,
+): boolean {
+	if (!result) { return false; }
+	return Boolean(result.fetchedAt) || (Array.isArray(result.repos) && result.repos.length > 0);
+}
+
 /** When the next refresh becomes due, as an ISO timestamp (undefined when it is due now). */
 export function nextRepoPrRefreshAt(
 	fetchedAt: string | undefined,

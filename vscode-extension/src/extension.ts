@@ -324,6 +324,7 @@ import {
 	REPO_PRS_REFRESH_INTERVAL_MS,
 	canServeRepoPrSnapshot,
 	getRepoPrCachePath,
+	isRealRepoPrSnapshot,
 	isRepoPrEnvelopeUsable,
 	readRepoPrSnapshot,
 	shouldPreserveRepoPrSnapshotForEmptyDiscovery,
@@ -2389,6 +2390,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * cache policy.
 	 */
 	private async publishRepoPrStats(result: RepoPrStatsResult): Promise<void> {
+		// A refresh already in flight when the user signs out finishes with an authenticated result,
+		// and publishing it would repopulate both the Repository PRs tab and the Efficiency Value
+		// cards that the sign-out just cleared. The guard in maybeRefreshRepoPrStats() only covers
+		// refreshes that have not started yet, so drop the late result here.
+		if (result.authenticated && this._githubSignedOutByUser) {
+			this.log('🔎 Dropping an authenticated repository PR result — the user signed out while it was in flight');
+			return;
+		}
 		const stamped: RepoPrStatsResult = { ...result, refreshIntervalMs: REPO_PRS_REFRESH_INTERVAL_MS };
 		this._lastRepoPrStats = stamped;
 		const { delivered, wasReady } = await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: stamped });
@@ -9595,10 +9604,10 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		const rendered = this._lastEfficiencyViewData;
 		if (!this.efficiencyPanel || !rendered) { return; }
 		const stats = this._lastRepoPrStats;
-		// `fetchedAt` is only set on real (cache-read or freshly-fetched) snapshots — the instant
-		// placeholder served on cold open uses ''. An unauthenticated snapshot *is* definitive
-		// though: it means "no PR data", which is what turns populated cards back into the hint.
-		if (stats && stats.authenticated && !stats.fetchedAt) { return; }
+		// The instant placeholder served on cold open carries no PR data at all, so it says nothing
+		// about the Value metrics. An unauthenticated snapshot *is* definitive though: it means "no
+		// PR data", which is what turns populated cards back into the hint.
+		if (stats && stats.authenticated && !isRealRepoPrSnapshot(stats)) { return; }
 		const value = this.deriveEfficiencyValueSignals(rendered);
 		if (valueSignalsEqual(value, rendered.value)) { return; }
 		this._lastEfficiencyViewData = { ...rendered, value };
@@ -9632,7 +9641,11 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * the Value tab renders as its actionable hint rather than as zeroes.
 	 */
 	private repoPrValueInputs(): Pick<ValueSignalsInput, 'userPrs' | 'mergedPrs' | 'aiPrs' | 'prsSince'> {
-		const prStats = this._lastRepoPrStats?.authenticated ? this._lastRepoPrStats : undefined;
+		// Same "is there really PR data?" test the update path uses: summing the cold-open
+		// placeholder's empty repo list would render 0-PR cards instead of the never-loaded hint,
+		// while an authenticated snapshot that really was fetched renders its zeroes as zeroes.
+		const last = this._lastRepoPrStats;
+		const prStats = last?.authenticated && isRealRepoPrSnapshot(last) ? last : undefined;
 		const sumRepos = (pick: (r: RepoPrInfo) => number | undefined): number | null =>
 			prStats ? prStats.repos.reduce((s, r) => s + (pick(r) ?? 0), 0) : null;
 		return {
