@@ -5,8 +5,22 @@ import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
 import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
-import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
 import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
+import {
+	hasContextWindowData,
+	sanitizeAutomaticCompactions,
+	sanitizeContextPressure,
+	sanitizeContextWindow,
+} from './contextWindowSanitizer';
+// Imported from the shared contract rather than re-declared locally, so a shape
+// change in src/types.ts surfaces here as a type error instead of silently
+// drifting out of sync with what the extension host actually sends.
+import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats } from '../../../../src/types';
+import { CONTEXT_NEAR_LIMIT_RATIO } from '../../../../src/types';
+
+/** The near-limit threshold as a whole percentage, for display in copy. */
+const NEAR_LIMIT_PERCENT = Math.round(CONTEXT_NEAR_LIMIT_RATIO * 100);
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -17,6 +31,7 @@ import { getModelDisplayName, getModelLookupCandidates } from '../../../../src/w
 import { getModelBillingProvider } from '../../../../src/chartDataBuilder';
 import { getLongContextInfo } from '../../../../src/tokenEstimation';
 import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold, computeLongTailModels } from '../../../../src/modelEfficiency';
+import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDetection';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
@@ -37,22 +52,6 @@ type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	totalRequests: number;
 };
 
-type ContextWindowStats = {
-	maxRequestInputTokens: number;
-	maxRequestModels: string[];
-	tierCounts: { [tier: string]: number };
-	maxReachedTokens?: number;
-	maxReachedWindowLimit?: number;
-};
-
-type AutomaticCompactionStats = {
-	total: number;
-	bySource: {
-		copilotCli: number;
-		claude: number;
-	};
-};
-
 type UsageAnalysisPeriod = {
 	sessions: number;
 	toolCalls: ToolCallUsage;
@@ -66,6 +65,7 @@ type UsageAnalysisPeriod = {
 		switchCount: number;
 	};
 	contextWindow?: ContextWindowStats;
+	contextPressure?: ContextPressureStats;
 	modelEfficiency?: ModelEfficiencyUsage;
 };
 
@@ -104,6 +104,8 @@ type EvaluatedInsight = {
 	body: string;
 	actionLabel?: string;
 	actionCommand?: string;
+	secondaryActionLabel?: string;
+	secondaryActionCommand?: string;
 	status: InsightStatus;
 	allowToast?: boolean;
 };
@@ -114,6 +116,9 @@ type EvaluatedInsight = {
 
 type CorrectionMomentType = 'user-correction' | 'edit-retry' | 'edit-self-correction' | 'tool-error' | 'agent-self-correction';
 
+/** A correction filter is either a moment type or the cross-type "escalated" flag. */
+type CorrectionFilter = CorrectionMomentType | 'escalated';
+
 type CorrectionMoment = {
 	type: CorrectionMomentType;
 	turnNumber: number;
@@ -123,6 +128,12 @@ type CorrectionMoment = {
 	file?: string;
 	retried?: boolean;
 	matchedPattern?: string;
+	/** `user-correction` only: shouting/punctuation/intensifier cues on the message itself. */
+	intensity?: 'strong';
+	/** `user-correction` only: clustered with an earlier correction a few turns back. */
+	escalated?: boolean;
+	/** `agent-self-correction` only: which nearby signal corroborated the phrase match. */
+	corroboratedBy?: 'tool-error' | 'edit-retry' | 'user-correction';
 };
 
 type CorrectionCounts = {
@@ -132,6 +143,7 @@ type CorrectionCounts = {
 	toolErrors: number;
 	toolErrorsRetried: number;
 	agentSelfCorrections: number;
+	escalatedUserCorrections: number;
 };
 
 type CorrectionSessionEntry = {
@@ -402,7 +414,7 @@ let activeTab = 'activity';
 let pendingTabAnchor: string | null = null;
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentInsights: EvaluatedInsight[] = [];
-let activeCorrectionFilter: CorrectionMomentType | null = null;
+let activeCorrectionFilter: CorrectionFilter | null = null;
 let currentCorrectionReport: CorrectionReport | null | undefined = undefined;
 // Persisted across stats refreshes so the curation section doesn't disappear
 // when a periodic updateStats message omits curationAnalysis.
@@ -469,7 +481,22 @@ let worktreeCleanupInProgress = false;
 let worktreeCleanupConfirmPending = false;
 let worktreeCleanupStatus: { processed: number; total: number } = { processed: 0, total: 0 };
 type WorktreeCleanupOutcome = "deleted" | "skipped" | "error";
-type WorktreeCleanupLogEntry = { path: string; branch: string; repoLabel: string; status: WorktreeCleanupOutcome; reason?: string };
+/**
+ * Remediation context for a cleanup row the user still has to act on (see
+ * WorktreeCleanupDiagnostics in extension.ts — same shape, all fields best-effort).
+ */
+type WorktreeCleanupDiagnostics = {
+	lastModified?: string;
+	lastCommitDate?: string;
+	lastCommitRelative?: string;
+	remoteBranch?: string;
+	remoteStatus?: "tracked" | "gone" | "none";
+	ahead?: number;
+	behind?: number;
+	modifiedFiles?: number;
+	untrackedFiles?: number;
+};
+type WorktreeCleanupLogEntry = { path: string; branch: string; repoLabel: string; status: WorktreeCleanupOutcome; reason?: string; diagnostics?: WorktreeCleanupDiagnostics };
 let worktreeCleanupLog: WorktreeCleanupLogEntry[] = [];
 
 function numField(v: unknown): number { return Number(v ?? 0) || 0; }
@@ -1142,8 +1169,16 @@ function formatCompactSessionNumber(value: number): { html: string; title: strin
 	return { html: formatCompact(value), title: formatNumber(value) };
 }
 
+/**
+ * Whether a raw model id refers to HydraFusion.
+ *
+ * Ids arrive in several shapes (`hydrafusion`, `copilot/hydrafusion`, `hydra-fusion`,
+ * a dated/preview suffix), so separators are stripped and the name must start the id —
+ * that keeps unrelated models that merely end in the word (`unrelated-hydrafusion`) out.
+ */
 function isHydraFusionModel(model: string): boolean {
-	return getModelLookupCandidates(model).some(candidate => candidate.toLowerCase() === 'hydrafusion');
+	return getModelLookupCandidates(model)
+		.some(candidate => candidate.toLowerCase().replace(/[-_. ]/g, '').startsWith('hydrafusion'));
 }
 
 /**
@@ -1622,6 +1657,11 @@ function sanitizeContextRefs(refs: any): ContextReferenceUsage {
 	};
 }
 
+/**
+ * Validated pass-through for a period's context-window aggregate. Numbers are
+ * coerced and the model list / tier map are rebuilt so an untrusted payload
+ * cannot smuggle extra fields into the render path.
+ */
 function sanitizePeriod(period: any): UsageAnalysisPeriod {
 	const p = (period && typeof period === 'object') ? period : {};
 	const toolCalls = (p.toolCalls && typeof p.toolCalls === 'object') ? p.toolCalls : {};
@@ -1665,6 +1705,8 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 		},
 		thinkingEffortUsage: p.thinkingEffortUsage,
 		modelEfficiency: p.modelEfficiency,
+		contextWindow: sanitizeContextWindow(p.contextWindow),
+		contextPressure: sanitizeContextPressure(p.contextPressure),
 	};
 }
 
@@ -1679,12 +1721,15 @@ function sanitizeInsights(rawInsights: any[]): EvaluatedInsight[] {
 			body: typeof i.body === 'string' ? i.body : '',
 			actionLabel: typeof i.actionLabel === 'string' ? i.actionLabel : undefined,
 			actionCommand: typeof i.actionCommand === 'string' ? i.actionCommand : undefined,
+			secondaryActionLabel: typeof i.secondaryActionLabel === 'string' ? i.secondaryActionLabel : undefined,
+			secondaryActionCommand: typeof i.secondaryActionCommand === 'string' ? i.secondaryActionCommand : undefined,
 			status: (['new', 'seen', 'dismissed', 'snoozed', 'done'].includes(i.status) ? i.status : 'new') as InsightStatus,
 			allowToast: !!i.allowToast,
 		}));
 }
 
 const CORRECTION_MOMENT_TYPES: CorrectionMomentType[] = ['user-correction', 'edit-retry', 'edit-self-correction', 'tool-error', 'agent-self-correction'];
+const CORRECTION_FILTERS: CorrectionFilter[] = [...CORRECTION_MOMENT_TYPES, 'escalated'];
 
 function sanitizeCorrectionMoment(raw: any): CorrectionMoment | null {
 	if (!raw || typeof raw !== 'object') { return null; }
@@ -1698,6 +1743,9 @@ function sanitizeCorrectionMoment(raw: any): CorrectionMoment | null {
 		file: typeof raw.file === 'string' ? raw.file : undefined,
 		retried: raw.retried === true ? true : undefined,
 		matchedPattern: typeof raw.matchedPattern === 'string' ? raw.matchedPattern : undefined,
+		intensity: raw.intensity === 'strong' ? 'strong' : undefined,
+		escalated: raw.escalated === true ? true : undefined,
+		corroboratedBy: ['tool-error', 'edit-retry', 'user-correction'].includes(raw.corroboratedBy) ? raw.corroboratedBy : undefined,
 	};
 }
 
@@ -1710,6 +1758,7 @@ function sanitizeCorrectionCounts(raw: any): CorrectionCounts {
 		toolErrors: num(raw?.toolErrors),
 		toolErrorsRetried: num(raw?.toolErrorsRetried),
 		agentSelfCorrections: num(raw?.agentSelfCorrections),
+		escalatedUserCorrections: num(raw?.escalatedUserCorrections),
 	};
 }
 
@@ -1809,6 +1858,7 @@ function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void 
 		sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
 	}
 	sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
+	sanitized.autoCompactionsLast7Days = sanitizeAutomaticCompactions(raw?.autoCompactionsLast7Days);
 }
 
 function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
@@ -2022,14 +2072,21 @@ function _handleWorktreeRootsListClick(target: HTMLElement): boolean {
 }
 
 function _handleWorktreeRowLinkClick(event: MouseEvent, target: HTMLElement): boolean {
-	const revealLink = target.closest(".worktree-reveal-link") as HTMLElement | null;
+	const openEditorBtn = target.closest(".worktree-open-editor-btn") as HTMLElement | null;
+	if (openEditorBtn) {
+		event.preventDefault();
+		const p = decodeURIComponent(openEditorBtn.getAttribute("data-path") || "");
+		if (p) { vscode.postMessage({ command: "openWorktreeInEditor", path: p }); }
+		return true;
+	}
+	const revealLink = target.closest(".worktree-reveal-link, .worktree-reveal-btn") as HTMLElement | null;
 	if (revealLink) {
 		event.preventDefault();
 		const p = decodeURIComponent(revealLink.getAttribute("data-path") || "");
 		if (p) { vscode.postMessage({ command: "revealPath", path: p }); }
 		return true;
 	}
-	const deleteLink = target.closest(".worktree-delete-link") as HTMLElement | null;
+	const deleteLink = target.closest(".worktree-delete-link, .worktree-delete-btn") as HTMLElement | null;
 	if (deleteLink) {
 		event.preventDefault();
 		const p = decodeURIComponent(deleteLink.getAttribute("data-path") || "");
@@ -2229,8 +2286,28 @@ function handleCleanupWorktreeResult(message: any): void {
 		repoLabel: String(message.repoLabel ?? ""),
 		status,
 		reason: typeof message.reason === "string" ? message.reason : undefined,
+		diagnostics: sanitizeWorktreeCleanupDiagnostics(message.diagnostics),
 	});
 	updateWorktreeResults();
+}
+
+/** Normalizes the optional diagnostics payload; a missing/!object value yields undefined (no detail line). */
+function sanitizeWorktreeCleanupDiagnostics(raw: unknown): WorktreeCleanupDiagnostics | undefined {
+	if (!raw || typeof raw !== "object") { return undefined; }
+	const d = raw as Record<string, unknown>;
+	const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+	const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+	return {
+		lastModified: str(d.lastModified),
+		lastCommitDate: str(d.lastCommitDate),
+		lastCommitRelative: str(d.lastCommitRelative),
+		remoteBranch: str(d.remoteBranch),
+		remoteStatus: d.remoteStatus === "tracked" || d.remoteStatus === "gone" || d.remoteStatus === "none" ? d.remoteStatus : undefined,
+		ahead: num(d.ahead),
+		behind: num(d.behind),
+		modifiedFiles: num(d.modifiedFiles),
+		untrackedFiles: num(d.untrackedFiles),
+	};
 }
 
 function handleCleanupComplete(): void {
@@ -2324,13 +2401,25 @@ function handleWorktreeMessage(message: any): void {
 	if (handler) { handler(message); }
 }
 
+/**
+ * Tells the host which subview the user is looking at, so the what's-new
+ * announcer can stay quiet about tabs they already found. Fire-and-forget.
+ */
+function reportTabOpened(tab: string): void {
+	vscode.postMessage({ command: 'viewTabOpened', view: 'usage', tab });
+}
+
 function setupTabs(): void {
 	const tabButtons = document.querySelectorAll<HTMLElement>('.tab-button');
+	// The tab that is already on screen counts as opened — the user is reading it
+	// right now, whether or not they clicked anything to get here.
+	reportTabOpened(activeTab);
 	tabButtons.forEach(button => {
 		button.addEventListener('click', () => {
 			const tab = button.getAttribute('data-tab');
 			if (!tab) { return; }
 			activeTab = tab;
+			reportTabOpened(tab);
 			tabButtons.forEach(btn => btn.classList.toggle('active', btn.getAttribute('data-tab') === tab));
 			document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
 				panel.style.display = 'none';
@@ -3335,6 +3424,23 @@ function buildReposAndAgentTabPanelsHtml(): string {
 		</div>`;
 }
 
+/** Builds the primary + optional secondary action buttons for one insight card. */
+function buildInsightActionButtonsHtml(insight: EvaluatedInsight, bg: string, border: string): string {
+	const actionBtn = insight.actionLabel
+		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="execute" data-command="${escapeHtml(insight.actionCommand ?? '')}"
+				style="padding:5px 14px; font-size:12px; font-weight:600; cursor:pointer;
+				border:1px solid ${border}; border-radius:5px;
+				background:${bg}; color:var(--text-primary);">${escapeHtml(insight.actionLabel)}</button>`
+		: '';
+	const secondaryActionBtn = insight.secondaryActionLabel
+		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="execute" data-command="${escapeHtml(insight.secondaryActionCommand ?? '')}"
+				style="padding:5px 14px; font-size:12px; font-weight:600; cursor:pointer; margin-left:8px;
+				border:1px solid ${border}; border-radius:5px;
+				background:transparent; color:var(--text-primary);">${escapeHtml(insight.secondaryActionLabel)}</button>`
+		: '';
+	return actionBtn || secondaryActionBtn ? `<div style="margin-top:12px;">${actionBtn}${secondaryActionBtn}</div>` : '';
+}
+
 function buildInsightCardHtml(insight: EvaluatedInsight): string {
 	const severityColors: Record<InsightSeverity, string> = {
 		tip: 'rgba(96,165,250,0.12)',
@@ -3358,12 +3464,7 @@ function buildInsightCardHtml(insight: EvaluatedInsight): string {
 	const isNew = insight.status === 'new';
 	const isDone = insight.status === 'done';
 
-	const actionBtn = insight.actionLabel
-		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="execute" data-command="${escapeHtml(insight.actionCommand ?? '')}"
-				style="padding:5px 14px; font-size:12px; font-weight:600; cursor:pointer;
-				border:1px solid ${border}; border-radius:5px;
-				background:${bg}; color:var(--text-primary);">${escapeHtml(insight.actionLabel)}</button>`
-		: '';
+	const actionButtonsHtml = buildInsightActionButtonsHtml(insight, bg, border);
 
 	const doneBtn = !isDone
 		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="done"
@@ -3401,7 +3502,7 @@ function buildInsightCardHtml(insight: EvaluatedInsight): string {
 						${escapeHtml(insight.title)}
 					</div>
 					<div style="font-size:12px; color:var(--text-primary); line-height:1.5; opacity:0.85; white-space:pre-wrap;">${escapeHtml(insight.body)}</div>
-					${actionBtn ? `<div style="margin-top:12px;">${actionBtn}</div>` : ''}
+					${actionButtonsHtml}
 				</div>
 				<div style="flex-shrink:0; margin-top:-4px;">
 					${dismissBtn}
@@ -3495,7 +3596,7 @@ function buildRepeatedTaskClusterHtml(cluster: RepeatedTaskCluster): string {
 function buildSkillSuggestionsSectionHtml(report: RepeatedTaskReport | null): string {
 	if (!report || report.clusters.length === 0) { return ''; }
 	return `
-		<div class="section">
+		<div class="section" id="section-skill-suggestions">
 			<div class="section-title"><span>🧩</span><span>Skill Suggestions</span></div>
 			<div class="section-subtitle">
 				Tasks you keep prompting for across sessions (first prompt per session, ${report.sessionsScanned} sessions scanned).
@@ -3520,9 +3621,16 @@ function buildCorrectionMomentHtml(moment: CorrectionMoment, sessionFile: string
 	const detail = moment.type === 'tool-error'
 		? `tool \`${moment.tool ?? '?'}\`${moment.retried ? ' — retried shortly after' : ''}`
 		: (moment.matchedPattern ? `matched ${moment.matchedPattern}` : '');
+	const escalationBadge = moment.escalated
+		? `<span title="Clustered with an earlier correction a few turns back" style="flex-shrink:0; font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; border:1px solid rgba(248,113,113,0.85); color:var(--text-primary); background:rgba(248,113,113,0.12); white-space:nowrap;">📈 escalating</span>`
+		: '';
+	const intensityBadge = moment.intensity === 'strong'
+		? `<span title="Shouting / repeated punctuation / an intensifier like &quot;again&quot;" style="flex-shrink:0; font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; border:1px solid rgba(248,113,113,0.85); color:var(--text-primary); background:rgba(248,113,113,0.12); white-space:nowrap;">🔥 intense</span>`
+		: '';
 	return `
 		<button type="button" class="correction-moment" data-correction-file="${escapeHtml(sessionFile)}" data-correction-turn="${moment.turnNumber}" title="Open this turn in the session log viewer" style="display:flex; width:100%; gap:10px; align-items:flex-start; padding:8px 0; border:0; border-bottom:1px solid var(--bg-tertiary); background:none; color:inherit; cursor:pointer; text-align:left;">
 			<span style="flex-shrink:0; font-size:10px; font-weight:700; letter-spacing:0.03em; padding:2px 8px; border-radius:10px; border:1px solid ${meta.color}; color:var(--text-primary); background:${meta.color.replace('0.85', '0.12')}; white-space:nowrap;">${escapeHtml(meta.label)}</span>
+			${escalationBadge}${intensityBadge}
 			<div style="flex:1; min-width:0;">
 				<div style="font-size:12px; color:var(--text-primary); opacity:0.9; overflow-wrap:anywhere;">${escapeHtml(moment.snippet)}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:3px;">
@@ -3547,6 +3655,103 @@ function buildCorrectionSessionHtml(session: CorrectionSessionEntry, moments: Co
 			</div>
 			${moments.map(moment => buildCorrectionMomentHtml(moment, session.file)).join('')}
 		</div>`;
+}
+
+/** "Ask Copilot to fix this" + "Copy prompt" buttons for one repository's correction section. */
+function buildCorrectionRepoActionsHtml(repository: string): string {
+	const repoAttr = escapeHtml(repository);
+	return `
+		<div style="display:flex; gap:6px;">
+			<button type="button" class="correction-ask-copilot" data-correction-repo="${repoAttr}"
+				title="Send these correction examples to Copilot Chat and ask how to improve this workspace's setup"
+				style="font-size:11px; padding:3px 10px; border-radius:5px; border:1px solid var(--vscode-focusBorder); background:var(--vscode-button-secondaryBackground); color:var(--text-primary); cursor:pointer;">🤖 Ask Copilot to fix this</button>
+			<button type="button" class="correction-copy-prompt" data-correction-repo="${repoAttr}"
+				title="Copy the same prompt to paste into another workspace's Copilot Chat"
+				style="font-size:11px; padding:3px 10px; border-radius:5px; border:1px solid transparent; background:var(--bg-tertiary); color:var(--text-primary); cursor:pointer;">📋 Copy prompt</button>
+		</div>`;
+}
+
+const CORRECTION_FILTER_LABELS: Record<CorrectionFilter, string> = {
+	'user-correction': 'User corrections',
+	'tool-error': 'Tool errors',
+	'edit-retry': 'Edit retries',
+	'edit-self-correction': 'Edit self-corrections',
+	'agent-self-correction': 'Agent self-corrections',
+	'escalated': 'Escalating corrections',
+};
+
+/** True when a moment satisfies the active corrections filter (null filter = everything). */
+function correctionMomentMatchesFilter(moment: CorrectionMoment, filter: CorrectionFilter | null): boolean {
+	if (!filter) { return true; }
+	if (filter === 'escalated') { return moment.escalated === true; }
+	return moment.type === filter;
+}
+
+/** Small "✕ Clear filter" button shown whenever a corrections filter is active. */
+function buildCorrectionClearFilterButtonHtml(): string {
+	return `<button type="button" class="correction-clear-filter" title="Show every correction moment again" style="font-size:11px; padding:2px 10px; border-radius:10px; border:1px solid var(--border-color, transparent); background:var(--bg-tertiary); color:var(--text-primary); cursor:pointer;">✕ Clear filter</button>`;
+}
+
+/** One filter pill. Active pills are outlined, bold and carry a ✕ so the active state is unmistakable. */
+function correctionFilterChipHtml(count: number, label: string, filter: CorrectionFilter, accent?: string): string {
+	if (count <= 0) { return ''; }
+	const active = activeCorrectionFilter === filter;
+	const border = active ? 'var(--vscode-focusBorder)' : (accent ?? 'transparent');
+	const background = active ? 'var(--vscode-button-secondaryBackground, var(--bg-tertiary))' : (accent ? accent.replace('0.85', '0.12') : 'var(--bg-tertiary)');
+	const title = active ? `Showing only ${label} — select again to clear` : `Show only ${label}`;
+	return `<button type="button" data-correction-filter="${filter}" aria-pressed="${active}" title="${escapeHtml(title)}" style="font-size:11px; font-weight:${active ? '700' : '400'}; padding:2px 10px; border-radius:10px; border:1px solid ${border}; background:${background}; color:var(--text-primary); cursor:pointer; box-shadow:${active ? '0 0 0 1px var(--vscode-focusBorder)' : 'none'};">${count} ${escapeHtml(label)}${active ? ' ✕' : ''}</button>`;
+}
+
+/** The full pill row, including the escalating pill which filters across types. */
+function buildCorrectionFilterChipsHtml(c: CorrectionCounts): string {
+	return [
+		correctionFilterChipHtml(c.userCorrections, 'user corrections', 'user-correction'),
+		correctionFilterChipHtml(c.toolErrors, 'tool errors', 'tool-error'),
+		correctionFilterChipHtml(c.editRetries, 'edit retries', 'edit-retry'),
+		correctionFilterChipHtml(c.editSelfCorrections, 'edit self-corrections', 'edit-self-correction'),
+		correctionFilterChipHtml(c.agentSelfCorrections, 'agent self-corrections', 'agent-self-correction'),
+		correctionFilterChipHtml(c.escalatedUserCorrections, '📈 escalating', 'escalated', 'rgba(248,113,113,0.85)'),
+	].filter(Boolean).join(' ');
+}
+
+/** "Showing X of Y moments" bar so it is always clear what the list below is filtered to. */
+function buildCorrectionFilterStatusHtml(report: CorrectionReport): string {
+	const sampled = report.repos.flatMap(repo => repo.sessions.flatMap(session => session.moments));
+	const shown = sampled.filter(moment => correctionMomentMatchesFilter(moment, activeCorrectionFilter)).length;
+	const summary = activeCorrectionFilter
+		? `Showing <strong>${shown}</strong> of <strong>${sampled.length}</strong> listed correction moments — filtered by <strong>${escapeHtml(CORRECTION_FILTER_LABELS[activeCorrectionFilter])}</strong>`
+		: `Showing all <strong>${sampled.length}</strong> listed correction moments — no filter active`;
+	return `
+		<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:10px; padding:6px 10px; border-radius:6px; background:var(--bg-tertiary); border-left:3px solid ${activeCorrectionFilter ? 'var(--vscode-focusBorder)' : 'transparent'}; font-size:11px; color:var(--text-secondary);">
+			<span id="corrections-filter-status">${summary}</span>
+			${activeCorrectionFilter ? buildCorrectionClearFilterButtonHtml() : ''}
+		</div>`;
+}
+
+/** One repository's session list within the Corrections tab, or '' if the active filter leaves nothing to show. */
+function buildCorrectionRepoSectionHtml(repo: CorrectionRepoGroup, activeFilter: CorrectionFilter | null): string {
+	const sessions = repo.sessions
+		.map(session => ({
+			session,
+			moments: session.moments.filter(moment => correctionMomentMatchesFilter(moment, activeFilter)),
+		}))
+		.filter(({ moments }) => moments.length > 0);
+	if (sessions.length === 0) { return ''; }
+	const shownMoments = sessions.reduce((sum, { moments }) => sum + moments.length, 0);
+	const sessionLabel = activeFilter
+		? `— ${sessions.length} of ${repo.sessions.length} session${repo.sessions.length !== 1 ? 's' : ''} match · ${shownMoments} moment${shownMoments !== 1 ? 's' : ''}`
+		: `— ${sessions.length} session${sessions.length !== 1 ? 's' : ''} with moments · ${shownMoments} moment${shownMoments !== 1 ? 's' : ''}`;
+	return `
+	<div style="margin-top:18px;">
+		<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
+			<div style="font-size:12px; font-weight:700; color:var(--text-primary);">
+				${escapeHtml(repo.repository)}
+				<span style="font-weight:400; color:var(--text-secondary);">${escapeHtml(sessionLabel)}</span>
+			</div>
+			${buildCorrectionRepoActionsHtml(repo.repository)}
+		</div>
+		${sessions.map(({ session, moments }) => buildCorrectionSessionHtml(session, moments)).join('')}
+	</div>`;
 }
 
 function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefined): string {
@@ -3576,39 +3781,15 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 		</div>`;
 	}
 
-	const c = report.counts;
-	const chip = (n: number, label: string, type: CorrectionMomentType): string => n > 0
-		? `<button type="button" data-correction-filter="${type}" aria-pressed="${activeCorrectionFilter === type}" style="font-size:11px; padding:2px 10px; border-radius:10px; border:1px solid ${activeCorrectionFilter === type ? 'var(--vscode-focusBorder)' : 'transparent'}; background:${activeCorrectionFilter === type ? 'var(--vscode-button-secondaryBackground)' : 'var(--bg-tertiary)'}; color:var(--text-primary); cursor:pointer;">${n} ${escapeHtml(label)}</button>`
-		: '';
-	const summaryChips = [
-		chip(c.userCorrections, 'user corrections', 'user-correction'),
-		chip(c.toolErrors, 'tool errors', 'tool-error'),
-		chip(c.editRetries, 'edit retries', 'edit-retry'),
-		chip(c.editSelfCorrections, 'edit self-corrections', 'edit-self-correction'),
-		chip(c.agentSelfCorrections, 'agent self-corrections', 'agent-self-correction'),
-	].filter(Boolean).join(' ');
-
-	const repoSections = report.repos.map(repo => {
-		const sessions = repo.sessions
-			.map(session => ({
-				session,
-				moments: activeCorrectionFilter
-					? session.moments.filter(moment => moment.type === activeCorrectionFilter)
-					: session.moments,
-			}))
-			.filter(({ moments }) => moments.length > 0);
-		if (sessions.length === 0) { return ''; }
-		return `
-		<div style="margin-top:18px;">
-			<div style="font-size:12px; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
-				${escapeHtml(repo.repository)}
-				<span style="font-weight:400; color:var(--text-secondary);">— ${sessions.length} session${sessions.length !== 1 ? 's' : ''} with moments</span>
-			</div>
-			${sessions.map(({ session, moments }) => buildCorrectionSessionHtml(session, moments)).join('')}
-		</div>`;
-	}).join('');
+	const summaryChips = buildCorrectionFilterChipsHtml(report.counts);
+	const repoSections = report.repos.map(repo => buildCorrectionRepoSectionHtml(repo, activeCorrectionFilter)).join('');
+	const statusBar = buildCorrectionFilterStatusHtml(report);
 	const emptyFilteredState = activeCorrectionFilter && !repoSections
-		? `<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">No ${CORRECTION_TYPE_META[activeCorrectionFilter].label.toLowerCase()} moments are available in this detail sample.</div>`
+		? `<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+				No <strong>${escapeHtml(CORRECTION_FILTER_LABELS[activeCorrectionFilter].toLowerCase())}</strong> appear in the detail sample below.
+				The pill counts cover every detected moment, while each long session only lists a capped sample of its moments — so a counted moment can sit outside this list.
+				<div style="margin-top:10px;">${buildCorrectionClearFilterButtonHtml()}</div>
+			</div>`
 		: '';
 
 	return `
@@ -3621,11 +3802,44 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 					sessions without corrections are not listed. Summary counts include all detected moments; long sessions show a capped detail sample.
 					Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
 				</div>
-				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">${summaryChips}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:12px;">Filter the list below — select a pill to drill down, select it again to clear.</div>
+				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">${summaryChips}</div>
+				${statusBar}
 				${repoSections}
 				${emptyFilteredState}
 			</div>
 		</div>`;
+}
+
+/** Finds the repo group backing a correction "Ask Copilot"/"Copy prompt" button, and builds its prompt. */
+function buildCorrectionPromptForRepo(repository: string): string | null {
+	const repo = currentCorrectionReport?.repos.find(r => r.repository === repository);
+	return repo ? buildCorrectionImprovementPrompt(repo) : null;
+}
+
+/** Handles a click on either the "Ask Copilot to fix this" or "Copy prompt" correction button. Returns true if handled. */
+function handleCorrectionPromptButtonClick(target: HTMLElement): boolean {
+	const askCopilotButton = target.closest<HTMLButtonElement>('button.correction-ask-copilot');
+	if (askCopilotButton) {
+		const repository = askCopilotButton.getAttribute('data-correction-repo');
+		const prompt = repository ? buildCorrectionPromptForRepo(repository) : null;
+		if (prompt) { vscode.postMessage({ command: 'openCopilotChatWithPrompt', prompt }); }
+		return true;
+	}
+	const copyPromptButton = target.closest<HTMLButtonElement>('button.correction-copy-prompt');
+	if (copyPromptButton) {
+		const repository = copyPromptButton.getAttribute('data-correction-repo');
+		const prompt = repository ? buildCorrectionPromptForRepo(repository) : null;
+		if (prompt) {
+			navigator.clipboard.writeText(prompt).then(() => {
+				const original = copyPromptButton.textContent;
+				copyPromptButton.textContent = '✅ Copied!';
+				setTimeout(() => { copyPromptButton.textContent = original; }, 2000);
+			});
+		}
+		return true;
+	}
+	return false;
 }
 
 function wireCorrectionInteractions(): void {
@@ -3633,14 +3847,20 @@ function wireCorrectionInteractions(): void {
 	if (!panel) { return; }
 	panel.addEventListener('click', (event) => {
 		const target = event.target as HTMLElement;
-		const filterButton = target.closest<HTMLButtonElement>('button[data-correction-filter]');
-		if (filterButton) {
-			const filter = filterButton.getAttribute('data-correction-filter');
-			if (!filter || !CORRECTION_MOMENT_TYPES.includes(filter as CorrectionMomentType)) { return; }
-			activeCorrectionFilter = activeCorrectionFilter === filter ? null : filter as CorrectionMomentType;
+		if (target.closest('button.correction-clear-filter')) {
+			activeCorrectionFilter = null;
 			renderCorrectionsPanel();
 			return;
 		}
+		const filterButton = target.closest<HTMLButtonElement>('button[data-correction-filter]');
+		if (filterButton) {
+			const filter = filterButton.getAttribute('data-correction-filter') as CorrectionFilter | null;
+			if (!filter || !CORRECTION_FILTERS.includes(filter)) { return; }
+			activeCorrectionFilter = activeCorrectionFilter === filter ? null : filter;
+			renderCorrectionsPanel();
+			return;
+		}
+		if (handleCorrectionPromptButtonClick(target)) { return; }
 		const moment = target.closest<HTMLButtonElement>('button.correction-moment');
 		if (!moment) { return; }
 		const file = moment.getAttribute('data-correction-file');
@@ -4078,6 +4298,90 @@ function renderWorktreeCleanupCard(): string {
   </div>`;
 }
 
+/** Local date/time label for an ISO string; empty when it is missing or unparseable. */
+function formatWorktreeTimestamp(iso: string | undefined): string {
+	if (!iso) { return ""; }
+	const date = new Date(iso);
+	return isNaN(date.getTime()) ? "" : date.toLocaleString();
+}
+
+/** One "label: value" chip; `danger` marks a fact that blocks or endangers the cleanup. */
+function worktreeChip(icon: string, text: string, title: string, danger = false): string {
+	return `<span class="worktree-cleanup-chip${danger ? " danger" : ""}" title="${escapeHtml(title)}">${icon} ${escapeHtml(text)}</span>`;
+}
+
+/** "Last updated" / "Last commit" chips — how stale (or how live) this worktree is. */
+function buildWorktreeAgeChips(d: WorktreeCleanupDiagnostics): string[] {
+	const chips: string[] = [];
+	const lastModified = formatWorktreeTimestamp(d.lastModified);
+	if (lastModified) {
+		chips.push(worktreeChip("🕒", `Last updated: ${lastModified}`, "Newest file modification at the worktree root"));
+	}
+	const commitTitle = formatWorktreeTimestamp(d.lastCommitDate) || "Last commit on the checked-out branch";
+	if (d.lastCommitRelative || d.lastCommitDate) {
+		chips.push(worktreeChip("📝", `Last commit: ${d.lastCommitRelative || commitTitle}`, commitTitle));
+	}
+	return chips;
+}
+
+/** Remote-branch + ahead/behind chips — whether the work here exists anywhere but this folder. */
+function buildWorktreeRemoteChips(d: WorktreeCleanupDiagnostics): string[] {
+	const chips: string[] = [];
+	// An undefined status means the probe itself failed, so no remote chip is shown at all —
+	// silence is correct here, whereas "never pushed" would be an invented fact.
+	if (d.remoteStatus === "none") {
+		chips.push(worktreeChip("⚠️", "Remote: none (never pushed)", "This branch was never pushed — it has no upstream tracking branch", true));
+	} else if (d.remoteStatus === "gone") {
+		chips.push(worktreeChip("⚠️", `Remote: ${d.remoteBranch ?? "unknown"} (gone)`, "The upstream branch no longer exists on the remote (deleted or pruned)", true));
+	} else if (d.remoteStatus === "tracked" && d.remoteBranch) {
+		chips.push(worktreeChip("🌐", `Remote: ${d.remoteBranch}`, "Upstream tracking branch"));
+	}
+	if (d.ahead === undefined && d.behind === undefined) { return chips; }
+	const ahead = d.ahead ?? 0, behind = d.behind ?? 0;
+	const synced = ahead === 0 && behind === 0;
+	chips.push(worktreeChip(
+		synced ? "✅" : "🔀",
+		`Push status: ${synced ? "up to date" : `${ahead} ahead · ${behind} behind`}`,
+		"Commits on this branch compared with its upstream",
+		ahead > 0,
+	));
+	return chips;
+}
+
+/** Working-tree chip — how much uncommitted work would be lost by a force-delete. */
+function buildWorktreeDirtyChips(d: WorktreeCleanupDiagnostics): string[] {
+	if (d.modifiedFiles === undefined && d.untrackedFiles === undefined) { return []; }
+	const modified = d.modifiedFiles ?? 0, untracked = d.untrackedFiles ?? 0;
+	const clean = modified === 0 && untracked === 0;
+	return [worktreeChip(
+		clean ? "✅" : "✏️",
+		`Changes: ${clean ? "clean" : `${modified} modified · ${untracked} untracked`}`,
+		"Uncommitted work in this worktree",
+		!clean,
+	)];
+}
+
+/**
+ * The remediation facts for one blocked cleanup row, as compact "label: value" chips. Each chip
+ * answers a question the user would otherwise have to open a terminal to answer: is this stale,
+ * does the branch still exist on the remote, is it in sync, and how much work is uncommitted.
+ */
+function buildWorktreeCleanupDetailChips(d: WorktreeCleanupDiagnostics | undefined): string {
+	if (!d) { return ""; }
+	const chips = [...buildWorktreeAgeChips(d), ...buildWorktreeRemoteChips(d), ...buildWorktreeDirtyChips(d)];
+	return chips.length === 0 ? "" : `<div class="worktree-cleanup-chips">${chips.join("")}</div>`;
+}
+
+/** Per-row remediation actions for a worktree the cleanup could not delete. */
+function buildWorktreeCleanupActions(e: WorktreeCleanupLogEntry): string {
+	const p = encodeURIComponent(e.path);
+	return `<div class="worktree-cleanup-log-actions">
+      <button type="button" class="button secondary worktree-open-editor-btn" data-path="${p}" title="Open this worktree folder in a new VS Code window so you can commit, push, or clean it up">💻 Open in VS Code</button>
+      <button type="button" class="button secondary worktree-reveal-btn" data-path="${p}" title="Show this folder in the OS file explorer">📂 Reveal folder</button>
+      <button type="button" class="button secondary worktree-delete-btn" data-path="${p}" data-branch="${encodeURIComponent(e.branch)}" data-repo="${encodeURIComponent(e.repoLabel)}" data-pushed="?" title="Try removing it again — you will be asked to confirm, and to force-delete if it still has uncommitted changes">🗑️ Delete anyway…</button>
+    </div>`;
+}
+
 /** Non-deleted cleanup outcomes (skipped/error) — successful deletions just remove the row, no need to list them. */
 function renderWorktreeCleanupLog(): string {
 	const notable = worktreeCleanupLog.filter((e) => e.status !== "deleted");
@@ -4093,6 +4397,8 @@ function renderWorktreeCleanupLog(): string {
         </div>
         <div class="worktree-cleanup-log-path">${escapeHtml(e.path)}</div>
         <div class="worktree-cleanup-log-reason">${escapeHtml(e.reason || "")}</div>
+        ${buildWorktreeCleanupDetailChips(e.diagnostics)}
+        ${buildWorktreeCleanupActions(e)}
       </div>
     </div>`;
 	}).join("");
@@ -4121,8 +4427,12 @@ function renderWorktreeCleanupStatus(): string {
 
 function renderWorktreeResults(): string {
 	if (worktreeResults.length === 0) {
+		// The cleanup report is still shown here: a run that deleted or errored on every
+		// remaining worktree empties this list, and dropping the report with it would hide
+		// exactly the rows the user still has to act on.
 		if (worktreeScanInProgress) { return '<div style="padding: 16px; color: var(--text-muted);">Discovering worktrees…</div>'; }
-		return '<div style="padding: 16px; color: var(--text-muted);">No worktrees found yet. Add root folders above and click Scan.</div>';
+		return '<div style="padding: 16px; color: var(--text-muted);">No worktrees found yet. Add root folders above and click Scan.</div>'
+			+ renderWorktreeCleanupStatus();
 	}
 	const groups = groupWorktreesByRepo(worktreeResults);
 	const totalBytes = worktreeResults.reduce((s, w) => s + knownBytes(w), 0);
@@ -4438,10 +4748,34 @@ function _cwFullestWindowRow(cw: ContextWindowStats): string {
 		'The highest context fill recorded for a Copilot CLI session in this period, versus its window limit');
 }
 
+/** Per-session context-exhaustion rows for one period column (empty when unavailable). */
+function _cwPressureRows(cp: ContextPressureStats | undefined): string {
+	if (!cp) { return ''; }
+	const compactedRow = cp.sessionsConsidered > 0
+		? _cwRow(localize('usage.contextPressure.compactedLabel'),
+			localizeFormat('usage.contextPressure.ofCount', formatNumber(cp.sessionsCompacted), formatNumber(cp.sessionsConsidered)),
+			cp.sessionsCompacted > 0
+				? localizeFormat('usage.contextPressure.compactedShare', formatFixed((cp.sessionsCompacted / cp.sessionsConsidered) * 100, 0))
+				: localize('usage.contextPressure.noneCompacted'),
+			localize('usage.contextPressure.compactedTooltip'))
+		: '';
+	const nearRow = cp.sessionsWithFillData > 0
+		? _cwRow(localize('usage.contextPressure.nearLimitLabel'),
+			localizeFormat('usage.contextPressure.ofCount', formatNumber(cp.sessionsNearLimit), formatNumber(cp.sessionsWithFillData)),
+			cp.worstFillPercent
+				? localizeFormat('usage.contextPressure.worstFill', cp.worstFillPercent)
+				: undefined,
+			localizeFormat('usage.contextPressure.nearLimitTooltip', NEAR_LIMIT_PERCENT))
+		: '';
+	return compactedRow + nearRow;
+}
+
 /** Renders one period column of the context-window section. */
-function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined): string {
-	const hasData = !!cw && (cw.maxRequestInputTokens > 0 || (cw.maxReachedTokens ?? 0) > 0 || Object.keys(cw.tierCounts).length > 0);
-	if (!hasData) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined, cp?: ContextPressureStats): string {
+	const hasWindowData = hasContextWindowData(cw);
+	const pressureRows = _cwPressureRows(cp);
+	if (!hasWindowData && !pressureRows) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+	if (!hasWindowData) { return pressureRows; }
 	const tierEntries = Object.entries(cw!.tierCounts);
 	const tierSessionCount = tierEntries.reduce((sum, [, c]) => sum + c, 0);
 	const tierRow = tierEntries.length > 0
@@ -4449,7 +4783,7 @@ function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined): stri
 			`${tierSessionCount} Copilot CLI session${tierSessionCount === 1 ? '' : 's'} grouped by chosen window size — "default" is the standard window at normal rates; larger tiers unlock more context at long-context prices`,
 			'Copilot CLI lets you pick a context-window tier per session; the count shows how many sessions used each tier')
 		: '';
-	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow;
+	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow + pressureRows;
 }
 
 function renderAutomaticCompactions(stats: AutomaticCompactionStats | undefined): string {
@@ -4489,15 +4823,15 @@ function buildContextWindowSectionHtml(stats: UsageAnalysisStats): string {
 			<div class="three-column">
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-					${renderContextWindowPeriodHtml(stats.today.contextWindow)}
+					${renderContextWindowPeriodHtml(stats.today.contextWindow, stats.today.contextPressure)}
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-					${renderContextWindowPeriodHtml(cw30)}
+					${renderContextWindowPeriodHtml(cw30, stats.last30Days.contextPressure)}
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow)}
+					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow, stats.lastMonth.contextPressure)}
 				</div>
 			</div>
 			${renderAutomaticCompactions(stats.autoCompactionsLast7Days)}

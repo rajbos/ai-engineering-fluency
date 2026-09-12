@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"s1","timestamp":"2026-01-01T00:00:00.000Z","cwd":"/home/user/project"}
+{"type":"message","id":"u1","parentId":"s1","timestamp":"2026-01-01T00:01:00.000Z","message":{"role":"user","content":[{"type":"text","text":"task one"}],"timestamp":1000}}
+{"type":"message","id":"a1","parentId":"u1","timestamp":"2026-01-01T00:02:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"model":"mistral-medium-3.5","usage":{"input":1000,"output":50,"cacheRead":0,"cacheWrite":0,"totalTokens":1050},"timestamp":2000}}
+{"type":"message","id":"a2","parentId":"a1","timestamp":"2026-01-01T00:02:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"model":"mistral-medium-3.5","usage":{"input":2000,"output":80,"cacheRead":0,"cacheWrite":0,"totalTokens":2080},"timestamp":2000}}
+{"type":"message","id":"u2","parentId":"a2","timestamp":"2026-01-01T00:01:00.000Z","message":{"role":"user","content":[{"type":"text","text":"task two"}],"timestamp":1000}}
+{"type":"message","id":"a3","parentId":"u2","timestamp":"2026-01-01T00:02:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"model":"mistral-medium-3.5","usage":{"input":500,"output":20,"cacheRead":0,"cacheWrite":0,"totalTokens":520},"timestamp":2000}}

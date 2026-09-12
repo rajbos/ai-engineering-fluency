@@ -2,6 +2,11 @@
 
 All notable changes to the Visual Studio extension will be documented in this file.
 
+## [Unreleased]
+
+### ✨ Features & Improvements
+- New "Scoring Guide" view — the full fluency rubric: all four stages for each of the six categories, with the explicit thresholds required to reach each stage and the next steps to get there. Reached from the "📊 How is my score calculated?" button on the Fluency Score view, which was previously hidden in Visual Studio because the view did not exist here
+
 ## [1.0.5] - 2026-04-11
 
 ### ✨ Features & Improvements

@@ -185,7 +185,21 @@
       "switchCount": 5
     },
     "multiAgentParentSessions": 3,
-    "delegationSessions": 5
+    "delegationSessions": 5,
+    "contextWindow": {
+      "maxRequestInputTokens": 96000,
+      "maxRequestModels": ["claude-sonnet-4.5"],
+      "tierCounts": { "default": 4 },
+      "maxReachedTokens": 118000,
+      "maxReachedWindowLimit": 128000
+    },
+    "contextPressure": {
+      "sessionsConsidered": 6,
+      "sessionsCompacted": 1,
+      "sessionsNearLimit": 2,
+      "sessionsWithFillData": 4,
+      "worstFillPercent": 92
+    }
   },
   "last30Days": {
     "sessions": 264,
@@ -453,7 +467,21 @@
       }
     },
     "multiAgentParentSessions": 33,
-    "delegationSessions": 55
+    "delegationSessions": 55,
+    "contextWindow": {
+      "maxRequestInputTokens": 142000,
+      "maxRequestModels": ["claude-sonnet-4.5"],
+      "tierCounts": { "default": 48, "long": 6 },
+      "maxReachedTokens": 126500,
+      "maxReachedWindowLimit": 128000
+    },
+    "contextPressure": {
+      "sessionsConsidered": 61,
+      "sessionsCompacted": 7,
+      "sessionsNearLimit": 9,
+      "sessionsWithFillData": 42,
+      "worstFillPercent": 99
+    }
   },
   "month": {
     "sessions": 288,

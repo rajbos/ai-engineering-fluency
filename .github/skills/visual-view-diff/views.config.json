@@ -75,6 +75,13 @@
       "fixture": "efficiency.json"
     },
     {
+      "id": "whatsnew",
+      "title": "What's New",
+      "bundle": "whatsnew",
+      "global": "__INITIAL_WHATSNEW__",
+      "fixture": "whatsnew.json"
+    },
+    {
       "id": "diagnostics",
       "title": "Diagnostics",
       "bundle": "diagnostics",

@@ -17,7 +17,60 @@ type SessionAggregateInput,
 type UtcDateRanges,
 } from '../../../src/statsHelpers';
 import type { ModelUsage, EditorUsage, SessionFileCache, DailyRollupEntry } from '../../../src/types';
+import { scaleModelUsage, preserveAutoRouting, reconcileDebugLogModelUsage } from '../../../src/statsHelpers';
+import { calculateEstimatedCost } from '../../../src/tokenEstimation';
 
+test('Auto subsets survive merging, scaling, reconciliation and debug-log replacement', () => {
+	const source: ModelUsage = { model: { inputTokens: 100, outputTokens: 40, sessions: 1,
+		autoRouting: { inputTokens: 40, outputTokens: 20 } } };
+	const target: ModelUsage = {};
+	addModelUsage(target, source);
+	addModelUsage(target, source);
+	addModelUsage(target, { model: { inputTokens: 100, outputTokens: 20, sessions: 1 } });
+	assert.deepEqual(target.model.autoRouting, { inputTokens: 80, outputTokens: 40 });
+	assert.deepEqual(source.model.autoRouting, { inputTokens: 40, outputTokens: 20 });
+	assert.deepEqual(scaleModelUsage(target, 0.5).model.autoRouting, { inputTokens: 40, outputTokens: 20 });
+	assert.deepEqual(reconcileModelUsageToTotal(target, 600, 300).model.autoRouting, { inputTokens: 160, outputTokens: 120 });
+	const replacement: ModelUsage = { model: { inputTokens: 1_000_000, outputTokens: 1_000_000, cachedReadTokens: 500_000, sessions: 0 } };
+	preserveAutoRouting(source, replacement);
+	assert.deepEqual(replacement.model.autoRouting, { inputTokens: 400_000, outputTokens: 500_000, cachedReadTokens: 200_000 });
+	const pricing = { model: { inputCostPerMillion: 20, outputCostPerMillion: 40,
+		copilotPricing: { inputCostPerMillion: 2, outputCostPerMillion: 4, cachedInputCostPerMillion: 0.2 } } };
+	assert.ok(Math.abs(calculateEstimatedCost(replacement, pricing, 'copilot') - 4.856) < 1e-12);
+});
+
+test('debug-log supplementation retains cached Auto usage, daily costs and source immutability', () => {
+	const cached = makeSession({
+		modelUsage: { model: { inputTokens: 100, outputTokens: 40, sessions: 1,
+			autoRouting: { inputTokens: 40, outputTokens: 20 } } },
+		dailyRollups: { '2026-09-11': { tokens: 140, actualTokens: 140, thinkingTokens: 0, interactions: 1, modelUsage: {} } },
+	});
+	const before = structuredClone(cached);
+	const debug: ModelUsage = { model: { inputTokens: 1_000_000, outputTokens: 1_000_000, cachedReadTokens: 500_000, sessions: 0 } };
+	const usage = reconcileDebugLogModelUsage(cached.modelUsage, debug, 1_000_000, 1_000_000);
+	assert.deepEqual(usage.model.autoRouting, { inputTokens: 400_000, outputTokens: 500_000, cachedReadTokens: 200_000 });
+	const daily = distributeModelUsageToDays(cached.dailyRollups!, usage)!;
+	assert.deepEqual(daily['2026-09-11'].modelUsage.model.autoRouting, usage.model.autoRouting);
+	assert.equal(daily['2026-09-11'].actualTokens, 2_000_000);
+	assert.deepEqual(cached, before);
+	assert.equal(debug.model.autoRouting, undefined);
+	const noBreakdown = reconcileDebugLogModelUsage(cached.modelUsage, {}, 1_000_000, 1_000_000);
+	assert.deepEqual(noBreakdown.model.autoRouting, { inputTokens: 400_000, outputTokens: 500_000 });
+	const pricing = { model: { inputCostPerMillion: 20, outputCostPerMillion: 40,
+		copilotPricing: { inputCostPerMillion: 2, outputCostPerMillion: 4, cachedInputCostPerMillion: 0.2 } } };
+	assert.ok(Math.abs(calculateEstimatedCost(daily['2026-09-11'].modelUsage, pricing, 'copilot') - 4.856) < 1e-12);
+});
+
+test('partial debug breakdown does not transfer unmatched Auto eligibility to another model', () => {
+	const original: ModelUsage = {
+		autoModel: { inputTokens: 100, outputTokens: 100, sessions: 1, autoRouting: { inputTokens: 100, outputTokens: 100 } },
+		manualModel: { inputTokens: 100, outputTokens: 100, sessions: 1 },
+	};
+	const usage = reconcileDebugLogModelUsage(original, { manualModel: { inputTokens: 200, outputTokens: 200, sessions: 0 } }, 400, 400);
+	assert.equal(usage.manualModel.autoRouting, undefined);
+	assert.equal(usage.autoModel, undefined);
+	assert.deepEqual(original.autoModel.autoRouting, { inputTokens: 100, outputTokens: 100 });
+});
 // ── Helper factory ───────────────────────────────────────────────────────────
 
 function makeSession(overrides: Partial<SessionFileCache> = {}): SessionFileCache {

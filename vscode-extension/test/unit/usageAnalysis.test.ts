@@ -23,6 +23,7 @@ import {
     type UsageAnalysisDeps,
 } from '../../../src/usageAnalysis';
 import { createEmptyTaskClassificationResult } from '../../../src/taskClassification';
+import { calculateEstimatedCost } from '../../../src/tokenEstimation';
 import type {
     UsageAnalysisPeriod,
     SessionUsageAnalysis,
@@ -32,6 +33,52 @@ import type {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+test('Auto usage: JSON and delta sessions retain mixed per-request routing without discounting subagents', async () => {
+	const requests = [
+		{ requestId: 'auto', modelId: 'copilot/auto',
+			result: { promptTokens: 1_000_000, outputTokens: 500_000 },
+			response: [
+				{ kind: 'autoModeResolution', resolved: { id: 'gpt-4o', name: 'GPT-4o' } },
+				{ kind: 'toolInvocationSerialized', toolSpecificData: { kind: 'subagent', modelName: 'gpt-4o', prompt: 'abcd', result: 'efgh' } },
+			] },
+		{ requestId: 'manual', modelId: 'gpt-4o', result: { usage: { promptTokens: 2_000_000, completionTokens: 1_000_000 } } },
+		{ requestId: 'metadata-auto', modelId: 'auto', result: { metadata: { modelId: 'gpt-4o', promptTokens: 100, outputTokens: 50 } } },
+	];
+	const deps = { warn: (message: string) => assert.fail(message), ecosystems: [], tokenEstimators: { 'gpt-4o': 0.25 },
+		modelPricing: { 'gpt-4o': { inputCostPerMillion: 20, outputCostPerMillion: 40, copilotPricing: { inputCostPerMillion: 2, outputCostPerMillion: 4 } } } };
+	const session = { requests, selectedModel: { identifier: 'copilot/auto' } };
+	for (const [file, content] of [
+		['mixed.json', JSON.stringify(session)],
+		['mixed.jsonl', JSON.stringify({ kind: 0, v: session })],
+	]) {
+		const usage = await getModelUsageFromSession(deps, file, content);
+		assert.deepEqual(usage['gpt-4o'].autoRouting, { inputTokens: 1_000_100, outputTokens: 500_050 });
+		assert.equal(usage['gpt-4o'].inputTokens, 3_000_101);
+		assert.equal(usage['gpt-4o'].outputTokens, 1_500_051);
+		const provider = calculateEstimatedCost(usage, deps.modelPricing);
+		const copilot = calculateEstimatedCost(usage, deps.modelPricing, 'copilot');
+		assert.ok(Math.abs(copilot - (provider / 10 - 0.40004)) < 1e-10);
+	}
+});
+
+test('Auto usage: marker-only estimates work but session picker and CLI model changes do not imply discounts', async () => {
+	const deps = { warn: (message: string) => assert.fail(message), ecosystems: [], tokenEstimators: { 'gpt-4o': 0.25 }, modelPricing: {} };
+	const request = { requestId: '1', message: { text: 'abcd', parts: [{ text: 'abcd' }] },
+		response: [{ kind: 'autoModeResolution', resolved: { id: 'gpt-4o' } }, { kind: 'markdownContent', value: 'efgh' }] };
+	const usage = await getModelUsageFromSession(deps, 'estimate.json', JSON.stringify({ requests: [request] }));
+	assert.deepEqual(usage['gpt-4o'].autoRouting, { inputTokens: 1, outputTokens: 1 });
+	const manual = await getModelUsageFromSession(deps, 'manual.json', JSON.stringify({
+		selectedModel: { identifier: 'copilot/auto' }, requests: [{ modelId: 'gpt-4o', result: { promptTokens: 10, outputTokens: 5 } }],
+	}));
+	assert.equal(manual['gpt-4o'].autoRouting, undefined);
+	const cli = await getModelUsageFromSession(deps, 'cli.jsonl', [
+		{ type: 'session.start', data: { selectedModel: 'auto' } },
+		{ type: 'session.model_change', data: { newModel: 'gpt-4o' } },
+		{ type: 'session.shutdown', data: { modelMetrics: { 'gpt-4o': { usage: { inputTokens: 10, outputTokens: 5 } } } } },
+	].map(event => JSON.stringify(event)).join('\n'));
+	assert.equal(cli['gpt-4o'].autoRouting, undefined);
+});
 
 function emptyRefs(): ContextReferenceUsage {
     return {
@@ -184,13 +231,14 @@ test('mergeUsageAnalysis: uses uncapped correction counts and tracks user-correc
     }];
     analysis.correctionCounts = {
         userCorrections: 2, editRetries: 60, editSelfCorrections: 4,
-        toolErrors: 70, toolErrorsRetried: 50, agentSelfCorrections: 1,
+        toolErrors: 70, toolErrorsRetried: 50, agentSelfCorrections: 1, escalatedUserCorrections: 1,
     };
     mergeUsageAnalysis(period, analysis);
     assert.equal(period.corrections?.editRetries, 60);
     assert.equal(period.corrections?.toolErrors, 70);
     assert.equal(period.corrections?.sessionsWithMoments, 1);
     assert.equal(period.corrections?.sessionsWithUserCorrections, 1);
+    assert.equal(period.corrections?.sessionsWithEscalations, 1);
 });
 
 test('mergeModelEfficiencyTokens: folds per-session model usage tokens and cost into the period', () => {
@@ -1001,6 +1049,27 @@ test('getModelUsageFromSession: CLI live session gives far lower estimate than o
 // ---------------------------------------------------------------------------
 // calculateModelSwitching
 // ---------------------------------------------------------------------------
+
+test('Auto model switching and usage buckets use resolved models in delta requests', async () => {
+	const deps = makeMockDeps();
+	const request = { requestId: 'auto-turn', modelId: 'auto', message: { text: 'hello' },
+		result: { promptTokens: 100, outputTokens: 40 },
+		response: [{ kind: 'autoModeResolution', resolved: { id: 'gpt-4o' } }] };
+	const content = [
+		{ kind: 0, v: { requests: [], selectedModel: { identifier: 'copilot/auto' } } },
+		{ kind: 2, k: ['requests'], v: [request] },
+	].map(event => JSON.stringify(event)).join('\n');
+	const analysis = emptyAnalysis();
+	await calculateModelSwitching(deps, 'auto-buckets.jsonl', analysis, content);
+	assert.equal(analysis.modelSwitching.standardRequests, 1);
+	assert.equal(analysis.modelSwitching.mediumCostRequests, 1);
+	assert.equal(analysis.modelSwitching.unknownRequests, 0);
+	const usage = await analyzeSessionUsage(deps, 'auto-buckets.jsonl', content);
+	assert.deepEqual(usage.modelSwitching.uniqueModels, ['gpt-4o']);
+	assert.equal(usage.modelSwitching.standardRequests, 1);
+	assert.equal(usage.modelSwitching.mediumCostRequests, 1);
+	assert.equal(usage.modelSwitching.unknownRequests, 0);
+});
 
 test('calculateModelSwitching: empty requests list leaves analysis unchanged', async () => {
     const content = JSON.stringify({ requests: [] });

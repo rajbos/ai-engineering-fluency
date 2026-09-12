@@ -3,6 +3,7 @@
  * Extracted from extension.ts to reduce file size and improve reusability.
  */
 import type { TaskCategory, TaskCategoryBreakdown, TaskClassificationResult } from './taskClassification';
+import type { CacheBreakageResult, CacheBreakagePeriodStats } from './cacheBreakage';
 
 /**
  * Character-to-token ratio for a specific AI model.
@@ -38,6 +39,8 @@ export interface ModelUsage {
      */
     cacheCreation1hTokens?: number;
     thinkingTokens?: number;
+    /** Token subset from explicitly Auto-routed Copilot requests (not additional usage). */
+    autoRouting?: Omit<ModelUsage[string], 'sessions' | 'autoRouting'>;
     /** Number of sessions that used this model in the aggregated period. */
     sessions: number;
   };
@@ -417,6 +420,11 @@ export interface SessionUsageAnalysis {
   mcpTools: McpToolUsage;
   /** Agent-skill invocation counts for this session. See {@link SkillCallUsage}. */
   skillCalls?: SkillCallUsage;
+  /**
+   * Prompt-cache invalidations detected in this session, with the cause of each.
+   * Absent for session formats that do not report per-turn cache token counts.
+   */
+  cacheBreakage?: CacheBreakageResult;
   /** Aggregated task-classification result for this session. */
   taskClassification: TaskClassificationResult;
   modelSwitching: {
@@ -608,6 +616,26 @@ export interface CorrectionMoment {
   retried?: boolean;
   /** Label of the heuristic pattern that matched (pattern-based types only). */
   matchedPattern?: string;
+  /**
+   * `user-correction` only: set when the message itself carries extra intensity cues
+   * (ALL-CAPS emphasis, repeated `!`/`?`, "again"/"seriously"-style intensifiers) on top
+   * of the base correction phrasing. A rough proxy for "the user sounds more frustrated
+   * than a plain correction", not a verdict.
+   */
+  intensity?: 'strong';
+  /**
+   * `user-correction` only: set when this is the second (or later) user-correction
+   * within a short rolling window of turns, i.e. corrections are clustering rather than
+   * being one-off — the closest local proxy for rising frustration we can compute
+   * without any external sentiment data.
+   */
+  escalated?: boolean;
+  /**
+   * `agent-self-correction` only: which nearby signal corroborated the phrase match.
+   * `agent-self-correction` moments are only emitted when corroborated (see
+   * correctionDetection.ts) — this records why, mainly for UI/debugging transparency.
+   */
+  corroboratedBy?: 'tool-error' | 'edit-retry' | 'user-correction';
 }
 
 /** Aggregated correction-moment counters (per session, repo, or period). */
@@ -618,6 +646,8 @@ export interface CorrectionCounts {
   toolErrors: number;
   toolErrorsRetried: number;
   agentSelfCorrections: number;
+  /** Count of `user-correction` moments with `escalated: true` (see CorrectionMoment). */
+  escalatedUserCorrections: number;
 }
 
 /** Period-level correction counters plus the number of sessions that had any moment. */
@@ -625,6 +655,8 @@ export interface CorrectionPeriodCounts extends CorrectionCounts {
   sessionsWithMoments: number;
   /** Sessions containing at least one user-correction moment. */
   sessionsWithUserCorrections?: number;
+  /** Sessions containing at least one escalated user-correction moment. */
+  sessionsWithEscalations?: number;
 }
 
 /** One session's entry in the correction report. */
@@ -1064,6 +1096,11 @@ export interface UsageAnalysisPeriod {
    * Absent when no session in the period carried context-size data.
    */
   contextWindow?: ContextWindowStats;
+  /**
+   * Per-session context-exhaustion counters for the period (compacted vs.
+   * almost-full sessions). Absent when no session carried a context signal.
+   */
+  contextPressure?: ContextPressureStats;
   /** Weighted task-category session totals for the period. */
   taskCategoryPrimarySessions?: Partial<Record<TaskCategory, number>>;
   taskCategoryWeightedSessions?: Partial<Record<TaskCategory, number>>;
@@ -1079,6 +1116,12 @@ export interface UsageAnalysisPeriod {
    * Absent when no session in the period carried moments.
    */
   corrections?: CorrectionPeriodCounts;
+  /**
+   * Aggregated prompt-cache breakage across the period's sessions (folded in by
+   * mergeUsageAnalysis). Absent when no session in the period reported cache
+   * token counts.
+   */
+  cacheBreakage?: CacheBreakagePeriodStats;
 }
 
 /** Aggregated context-window usage for one usage-analysis period. */
@@ -1093,6 +1136,35 @@ export interface ContextWindowStats {
   maxReachedTokens?: number;
   /** Selected window limit of that fullest CLI session. */
   maxReachedWindowLimit?: number;
+}
+
+/** Fraction of a session's context window that counts as "almost full". */
+export const CONTEXT_NEAR_LIMIT_RATIO = 0.8;
+
+/**
+ * How often a period's sessions ran out of context window, counted per
+ * *session* rather than per compaction event. Absent when no session in the
+ * period carried a usable context signal.
+ */
+export interface ContextPressureStats {
+  /** Sessions in the period that carried any context-window signal at all (the denominator). */
+  sessionsConsidered: number;
+  /** Sessions whose history was automatically compacted/truncated at least once. */
+  sessionsCompacted: number;
+  /**
+   * Sessions whose observed context fill reached at least
+   * `CONTEXT_NEAR_LIMIT_RATIO` of their selected window without compacting.
+   * Compacted sessions are excluded so the two counters never double-count.
+   */
+  sessionsNearLimit: number;
+  /**
+   * Sessions for which an actual window fill *and* limit were known (Copilot CLI
+   * `data.db` only). This is the denominator for `sessionsNearLimit`, which is
+   * narrower than `sessionsConsidered`.
+   */
+  sessionsWithFillData: number;
+  /** Highest observed fill as a percentage of the session's window limit (0-100). */
+  worstFillPercent?: number;
 }
 
 /** Parent/child session reference used in hierarchy info (Copilot CLI sessions). */
@@ -1161,7 +1233,9 @@ export interface ChatTurn {
   userMessage: string;
   assistantResponse: string;
   model: string | null;
-  toolCalls: { toolName: string; arguments?: string; result?: string; isSubAgent?: boolean; subAgentModel?: string; subAgentTokens?: { input: number; output: number } }[];
+  /** Explicit per-request Copilot Auto selection; never inferred from a session's final picker. */
+  autoRouted?: boolean;
+  toolCalls: { toolName: string; arguments?: string; result?: string; isSubAgent?: boolean; subAgentModel?: string; subAgentTokens?: { input: number; output: number }; subAgentCost?: number }[];
   contextReferences: ContextReferenceUsage;
   mcpTools: { server: string; tool: string }[];
   inputTokensEstimate: number;
@@ -1170,6 +1244,13 @@ export interface ChatTurn {
   actualUsage?: ActualUsage;
   /** Thinking effort level active when this turn was submitted (e.g. "low", "medium", "high"). */
   thinkingEffort?: string;
+  /**
+   * Estimated USD cost of this turn's own model call (excludes sub-agent/child costs),
+   * computed host-side via `calculateEstimatedCost()` from the turn's model + token
+   * usage (actual when available, otherwise the text-based estimate). Absent when the
+   * model is unknown or has no pricing entry.
+   */
+  estimatedCost?: number;
 }
 
 // Full session log data for the log viewer

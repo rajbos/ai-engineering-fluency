@@ -502,6 +502,8 @@ function detectToolEditorFromRootPath(lower: string): string | undefined {
 	// marker must be checked before the generic VS Code family matches.
 	if (lower.includes('saoudrizwan.claude-dev')) { return 'Cline'; }
 	if (lower.includes('opencode')) { return 'OpenCode'; }
+	// Kilo Code (OpenCode fork) data root ~/.local/share/kilo.
+	if (lower.endsWith('/kilo')) { return 'Kilo Code'; }
 	// Hermes Agent's root is <HERMES_HOME> (Windows: %LOCALAPPDATA%/hermes, else ~/.hermes).
 	// 'hermes' doesn't collide with 'copilot'/'code'/'cursor', but checked here alongside
 	// the other CLI-tool root markers for consistency.
@@ -1119,6 +1121,9 @@ export function detectClaudeCodeEditorVariant(filePath: string): string {
  */
 function detectCliAgentStoreFromPath(lowerPath: string): string | undefined {
 	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
+	// Kilo Code (OpenCode fork): virtual DB session paths <...>/.local/share/kilo/kilo.db#ses_<id>.
+	// Checked here so it wins over any generic substring fallbacks further down.
+	if (lowerPath.includes('/kilo/kilo.db#')) { return 'Kilo Code'; }
 	// Hermes Agent's virtual path scheme is <HERMES_HOME>/state.db#<session_id>. HERMES_HOME
 	// itself never contains 'code'/'copilot'/'cursor' (Windows: %LOCALAPPDATA%/hermes, else
 	// ~/.hermes), but the check is placed here alongside the other DB-backed CLI adapters for

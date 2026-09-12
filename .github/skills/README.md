@@ -253,6 +253,23 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 
 **Runs in CI as:** [`.github/workflows/pr-risk-review.yml`](../workflows/pr-risk-review.yml) — gates on the PR author being a known repository contributor, drives this skill through the GitHub Copilot CLI, then applies a `risk: *` label and posts the comment. Advisory; it never blocks a merge.
 
+### whats-new-catalog
+
+**Purpose**: Keep the What's New release catalog (`vscode-extension/src/whatsNew/catalog.ts`) — the hand-written prose behind the What's New view and the one-a-day new-feature notifications — in step with what the extension actually ships.
+
+**Use this skill when:**
+- Bumping the extension version or cutting a release (a release with no catalog entry is invisible in the view and can never be announced)
+- After adding a new view, tab, or section that users should be told about
+- When the What's New view looks stale, or a "Take me there" button lands somewhere unexpected
+- After renaming or removing a tab that a catalog entry might still point at
+
+**Contents:**
+- `whats-new-catalog.js` — dependency-free detector (apart from the repo's own TypeScript, which it uses to transpile and evaluate `catalog.ts` exactly rather than regex-parsing multi-line prose)
+- Checks version coverage, date hygiene (only the newest entry may be `date: null`), orphan surfaces (a view/tab that no longer exists), and **tab-tracking gaps** — a catalogued tab on a view that never posts `viewTabOpened`, which silently breaks the "don't announce what they already found" rule and is invisible in review
+- Prints the surface inventory (every view and tab, ticked where the catalog names it), marks features that fall beyond the per-release announcement cap, and lists the CHANGELOG's `Unreleased` feature bullets — the raw material for a new entry
+- Exit codes: `0` consistent · `1` mechanical drift · `2` config error · `3` no entry for the current version (needs written prose)
+- The editorial guidance for writing an entry: user-facing prose rather than changelog shorthand, ordering by importance because the cap truncates, and never reusing a feature `id` (they are persisted per user to remember what has been announced)
+
 ## Using Agent Skills
 
 ### In VS Code

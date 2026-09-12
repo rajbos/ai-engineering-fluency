@@ -100,6 +100,8 @@ type UsageEventRow = {
 type CliStoreDbCacheEntry = { db: SqlDatabase; mtimeMs: number; size: number };
 type CliStoreSessionsCacheEntry = { mtimeMs: number; size: number; byId: Map<string, CliStoreSession> };
 type CliStoreTurnCountsCacheEntry = { mtimeMs: number; size: number; byId: Map<string, number> };
+type CliStoreUsage = { modelUsage: ModelUsage; actualTokens: number; cacheReadTokens: number; nanoAiu: number };
+type CliStoreUsageCacheEntry = { mtimeMs: number; size: number; bySessionId: Map<string, CliStoreUsage> };
 
 export class CopilotCliStoreAccess {
 	private _sqlJsModule: SqlJsStatic | null = null;
@@ -114,6 +116,8 @@ export class CopilotCliStoreAccess {
 	private _sessionsCacheInflight: Map<string, Promise<Map<string, CliStoreSession>>> = new Map();
 	private _turnCountsCache: Map<string, CliStoreTurnCountsCacheEntry> = new Map();
 	private _turnCountsCacheInflight: Map<string, Promise<Map<string, number>>> = new Map();
+	private _usageCache: Map<string, CliStoreUsageCacheEntry> = new Map();
+	private _usageCacheInflight: Map<string, Promise<Map<string, CliStoreUsage>>> = new Map();
 
 	constructor(initSqlJsFn?: typeof initSqlJs) {
 		this._initSqlJsFn = initSqlJsFn ?? initSqlJs;
@@ -129,6 +133,8 @@ export class CopilotCliStoreAccess {
 		this._sessionsCacheInflight.clear();
 		this._turnCountsCache.clear();
 		this._turnCountsCacheInflight.clear();
+		this._usageCache.clear();
+		this._usageCacheInflight.clear();
 		this._sqlJsInitPromise = null;
 	}
 
@@ -344,6 +350,75 @@ export class CopilotCliStoreAccess {
 	}
 
 	/**
+	 * Returns exact usage grouped by session. Loading this table once avoids a full
+	 * sql.js scan for every DB-only Copilot CLI session during startup.
+	 */
+	private async getUsageMap(dbPath: string): Promise<Map<string, CliStoreUsage>> {
+		const stats = await this.statDb(dbPath);
+		if (!stats) { return this._usageCache.get(dbPath)?.bySessionId ?? new Map(); }
+
+		const cached = this._usageCache.get(dbPath);
+		if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) {
+			return cached.bySessionId;
+		}
+
+		const cacheKey = `${dbPath}:${stats.mtimeMs}:${stats.size}`;
+		const inflight = this._usageCacheInflight.get(cacheKey);
+		if (inflight) { return inflight; }
+
+		const loadPromise = (async () => {
+			const db = await this.getDb(dbPath);
+			const bySessionId = new Map<string, CliStoreUsage>();
+			if (db) {
+				try {
+					const result = db.exec('SELECT session_id, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_nano_aiu FROM assistant_usage_events');
+					if (result.length > 0) {
+						const columns = result[0].columns;
+						const sessionIdIndex = columns.indexOf('session_id');
+						for (const row of result[0].values) {
+							const sessionId = row[sessionIdIndex];
+							if (typeof sessionId !== 'string') { continue; }
+							const event = this.parseUsageEventRow(columns, row);
+							this.addUsageEventToSessionUsage(bySessionId, sessionId, event);
+						}
+						this.removeEmptyUsage(bySessionId);
+					}
+				} catch { /* leave bySessionId empty on query failure */ }
+			}
+			this._usageCache.set(dbPath, { mtimeMs: stats.mtimeMs, size: stats.size, bySessionId });
+			return bySessionId;
+		})();
+		this._usageCacheInflight.set(cacheKey, loadPromise);
+		try {
+			return await loadPromise;
+		} finally {
+			if (this._usageCacheInflight.get(cacheKey) === loadPromise) {
+				this._usageCacheInflight.delete(cacheKey);
+			}
+		}
+	}
+
+	private addUsageEventToSessionUsage(bySessionId: Map<string, CliStoreUsage>, sessionId: string, event: UsageEventRow): void {
+		let usage = bySessionId.get(sessionId);
+		if (!usage) {
+			usage = { modelUsage: {}, actualTokens: 0, cacheReadTokens: 0, nanoAiu: 0 };
+			bySessionId.set(sessionId, usage);
+		}
+		this.addUsageEventToModelUsage(usage.modelUsage, event);
+		usage.actualTokens += event.inputTokens + event.outputTokens;
+		usage.cacheReadTokens += event.cacheReadTokens;
+		usage.nanoAiu += event.nanoAiu;
+	}
+
+	private removeEmptyUsage(bySessionId: Map<string, CliStoreUsage>): void {
+		for (const [sessionId, usage] of bySessionId) {
+			if (usage.actualTokens === 0 && usage.cacheReadTokens === 0 && usage.nanoAiu === 0) {
+				bySessionId.delete(sessionId);
+			}
+		}
+	}
+
+	/**
 	 * Stat a virtual session-store.db session path.
 	 *
 	 * IMPORTANT: this must NOT simply return `fs.stat()` on the shared .db file —
@@ -482,20 +557,10 @@ export class CopilotCliStoreAccess {
 	 * exposed as `cacheCreationTokens`. `total_nano_aiu` is summed to
 	 * `nanoAiu` so callers can compute exact dollar cost.
 	 */
-	async getSessionUsage(sessionId: string): Promise<{ modelUsage: ModelUsage; actualTokens: number; cacheReadTokens: number; nanoAiu: number } | null> {
+	async getSessionUsage(sessionId: string): Promise<CliStoreUsage | null> {
 		const dbPath = this.getDbPath();
-		const db = await this.getDb(dbPath);
-		if (!db) { return null; }
-		try {
-			const result = db.exec(
-				'SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_nano_aiu FROM assistant_usage_events WHERE session_id = ?',
-				[sessionId],
-			);
-			if (!result.length) { return null; }
-			return this.aggregateUsageEvents(result[0].columns, result[0].values);
-		} catch {
-			return null;
-		}
+		const usageBySessionId = await this.getUsageMap(dbPath);
+		return usageBySessionId.get(sessionId) ?? null;
 	}
 
 	/** Parse one `assistant_usage_events` row into a typed record, defaulting non-numeric fields to 0. */
@@ -522,23 +587,6 @@ export class CopilotCliStoreAccess {
 		usage.outputTokens += event.outputTokens;
 		if (event.cacheReadTokens > 0) { usage.cachedReadTokens = (usage.cachedReadTokens ?? 0) + event.cacheReadTokens; }
 		if (event.cacheWriteTokens > 0) { usage.cacheCreationTokens = (usage.cacheCreationTokens ?? 0) + event.cacheWriteTokens; }
-	}
-
-	/** Aggregate billing rows into totals; null when every counter is zero (treated as "no billing data"). */
-	private aggregateUsageEvents(cols: string[], rows: SqlValue[][]): { modelUsage: ModelUsage; actualTokens: number; cacheReadTokens: number; nanoAiu: number } | null {
-		const modelUsage: ModelUsage = {};
-		let actualTokens = 0;
-		let cacheReadTokens = 0;
-		let nanoAiu = 0;
-		for (const row of rows) {
-			const event = this.parseUsageEventRow(cols, row);
-			this.addUsageEventToModelUsage(modelUsage, event);
-			actualTokens += event.inputTokens + event.outputTokens;
-			cacheReadTokens += event.cacheReadTokens;
-			nanoAiu += event.nanoAiu;
-		}
-		if (actualTokens === 0 && cacheReadTokens === 0 && nanoAiu === 0) { return null; }
-		return { modelUsage, actualTokens, cacheReadTokens, nanoAiu };
 	}
 
 	/**

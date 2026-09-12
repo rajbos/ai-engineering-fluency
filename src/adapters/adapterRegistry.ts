@@ -15,6 +15,7 @@
 import type { IEcosystemAdapter } from '../ecosystemAdapter';
 import { OpenCodeDataAccess } from '../opencode';
 import type { UriLike } from '../opencode';
+import { KiloDataAccess } from '../kilo';
 import { CrushDataAccess } from '../crush';
 import { ContinueDataAccess } from '../continue';
 import { EclipseDataAccess } from '../eclipse';
@@ -34,6 +35,7 @@ import { CodexCliDataAccess } from '../codexcli';
 import { HermesDataAccess } from '../hermes';
 
 import { OpenCodeAdapter } from './openCodeAdapter';
+import { KiloAdapter } from './kiloAdapter';
 import { CrushAdapter } from './crushAdapter';
 import { VisualStudioAdapter } from './visualStudioAdapter';
 import { ContinueAdapter } from './continueAdapter';
@@ -58,6 +60,7 @@ import { HermesAdapter } from './hermesAdapter';
 /** Data-access instances and callbacks required to build the adapter registry. */
 export interface AdapterRegistryDeps {
 openCode: OpenCodeDataAccess;
+kilo: KiloDataAccess;
 crush: CrushDataAccess;
 continue_: ContinueDataAccess;
 eclipse: EclipseDataAccess;
@@ -102,6 +105,7 @@ export type DataAccessInstances = Omit<AdapterRegistryDeps, 'estimateTokens' | '
 export function createDataAccessInstances(extensionUri: UriLike): DataAccessInstances {
 return {
 openCode: new OpenCodeDataAccess(extensionUri),
+kilo: new KiloDataAccess(extensionUri),
 crush: new CrushDataAccess(extensionUri),
 continue_: new ContinueDataAccess(),
 eclipse: new EclipseDataAccess(),
@@ -131,6 +135,7 @@ hermes: new HermesDataAccess(),
 export function buildAdapterRegistry(deps: AdapterRegistryDeps): IEcosystemAdapter[] {
 return [
 new OpenCodeAdapter(deps.openCode),
+new KiloAdapter(deps.kilo),
 new CrushAdapter(deps.crush),
 new VisualStudioAdapter(deps.visualStudio, deps.estimateTokens),
 new ContinueAdapter(deps.continue_),

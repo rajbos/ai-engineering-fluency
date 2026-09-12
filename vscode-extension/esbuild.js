@@ -62,6 +62,7 @@ async function main() {
 			'fluency-level-viewer': 'src/webview/fluency-level-viewer/main.ts',
 			environmental: 'src/webview/environmental/main.ts',
 			efficiency: 'src/webview/efficiency/main.ts',
+			whatsnew: 'src/webview/whatsnew/main.ts',
 		},
 		bundle: true,
 		format: 'iife',

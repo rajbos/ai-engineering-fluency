@@ -2,12 +2,14 @@
 
 > ## 🚧 RELEASE GATE — READ THIS BEFORE THE NEXT VS RELEASE 🚧
 >
-> **Status: the ten committed webview files have been DELETED from git.** As of
+> **Status: the committed webview files have been DELETED from git.** As of
 > the commit that added this banner, `visualstudio-extension/src/AIEngineeringFluency/webview/`
-> is empty in git — the six `.js` bundles and four `.json` sidecars are now
+> is empty in git — the seven `.js` bundles and five `.json` sidecars are now
 > produced *only* by `CopyWebviewBundles`/`AddWebviewBundlesToVsix` in
 > `AIEngineeringFluency.csproj` at build time, from a fresh
-> `vscode-extension/dist/webview` build. **This has not been validated on a real
+> `vscode-extension/dist/webview` build (the `fluencyLevelData.json` sidecar is
+> copied from `src/` rather than `dist/webview/`, since esbuild does not stage
+> it there — see the `.csproj` `_WebviewBundle` list for the exact sources). **This has not been validated on a real
 > Windows/MSBuild/VSSDK build.** The container that made this change has no
 > `dotnet`, no MSBuild, no Windows, and no Visual Studio — everything about
 > whether the VSIX still packages correctly is inferred from reading the
@@ -22,18 +24,21 @@
 >    before building (i.e. actually exercise the "nothing committed" path).
 > 2. `cd vscode-extension && npm run package` (the same command
 >    `visualstudio-build.yml`/`visualstudio-publish.yml`/`release.yml` run) and
->    confirm all six `.js` bundles and four `.json` sidecars land in
->    `vscode-extension/dist/webview/`.
+>    confirm all seven `.js` bundles and four `.json` sidecars land in
+>    `vscode-extension/dist/webview/` (the fifth sidecar, `fluencyLevelData.json`,
+>    is sourced from `src/` — confirm it is present there).
 > 3. Build the solution the way CI does:
 >    `msbuild AIEngineeringFluency.sln /p:Configuration=Release /t:Build /v:minimal`
 >    from `visualstudio-extension/`. Confirm the build **succeeds** and that
 >    `CopyWebviewBundles`'s new `Error` condition does **not** fire (if it does,
 >    `dist/webview` wasn't populated and the test is invalid, not passing).
-> 4. Locate the produced `.vsix`, unzip it, and confirm **all ten** webview
+> 4. Locate the produced `.vsix`, unzip it, and confirm **all twelve** webview
 >    files — `webview\chart.js`, `details.js`, `diagnostics.js`,
->    `environmental.js`, `maturity.js`, `usage.js`, `tokenEstimators.json`,
->    `modelPricing.json`, `toolNames.json`, `automaticTools.json` — are present,
->    non-empty, and match the `dist/webview` content from step 2.
+>    `environmental.js`, `maturity.js`, `usage.js`, `fluency-level-viewer.js`,
+>    `tokenEstimators.json`, `modelPricing.json`, `toolNames.json`,
+>    `automaticTools.json`, `fluencyLevelData.json` — are present,
+>    non-empty, and match the `dist/webview` content from step 2 (and `src/`
+>    for `fluencyLevelData.json`).
 > 5. Repeat steps 2–4 through the **actual `visualstudio-build.yml` GitHub
 >    Actions job** (push to a scratch branch, or `workflow_dispatch` if
 >    enabled) — the path that actually ships a release — and re-inspect its
@@ -640,11 +645,11 @@ section above for the packaging-target work that made this safe to attempt):
   `vsMissingCommitted` / `vsUntrackedCommitted` fields) was replaced, not
   repaired — there is nothing committed left to compare against. The
   replacement step in `.github/workflows/ci.yml` asserts existence and
-  non-emptiness only: that `npm run package` actually produced all six `.js`
+  non-emptiness only: that `npm run package` actually produced all seven `.js`
   bundles and four `.json` sidecars in `dist/webview`, and that a simulated
   copy of that same directory (mirroring the `Remove-Item`/`Copy-Item` step in
   `visualstudio-build.yml`/`visualstudio-publish.yml`/`release.yml`) still
-  contains all ten by name afterward. It deliberately does **not** compare
+  contains all eleven by name afterward. It deliberately does **not** compare
   byte content between any two builds.
 - **A real ambiguity in the old drift-check, found while replacing it, is
   independent evidence for this deletion.** `vscode-extension/package.json`

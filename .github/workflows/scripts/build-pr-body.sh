@@ -18,6 +18,15 @@ CHANGED_FILES="${CHANGED_FILES:-}"
   echo "> ⚠️ These edits are model-generated proposals. Review them carefully before merging;"
   echo "> the model only addresses what it is confident about and skips the rest."
   echo
+  # The marker must stay a literal substring for check-test-coverage.sh, which
+  # greps the raw body. Backticked and bolded rather than written line-initially
+  # as `[skip-test-check]: ...`, which is CommonMark link-reference-definition
+  # syntax and can render as nothing at all.
+  echo "**\`[skip-test-check]\`** — these fixes touch production source without"
+  echo "touching tests by construction: they are model-generated proposals for a"
+  echo "human to review and test, not a shippable change in their own right. The"
+  echo "reviewed PR (#${PR_NUMBER}) carries the test coverage for the underlying change."
+  echo
   echo "<details><summary>Full review findings</summary>"
   echo
   cat combined.md

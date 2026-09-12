@@ -11,6 +11,7 @@ import {
 	isRepoPrSnapshotFresh,
 	nextRepoPrRefreshAt,
 	readRepoPrSnapshot,
+	shouldPreserveRepoPrSnapshotForEmptyDiscovery,
 	writeRepoPrSnapshot,
 	type RepoPrCacheEnvelope,
 } from '../../src/repoPrCache';
@@ -106,6 +107,18 @@ test('canServeRepoPrSnapshot: a usable but stale snapshot is not served without 
 	assert.equal(isRepoPrEnvelopeUsable(stale, SINCE), true);
 	assert.equal(canServeRepoPrSnapshot(stale, SINCE, NOW), false);
 	assert.equal(canServeRepoPrSnapshot(makeEnvelope(), SINCE, NOW), true);
+});
+
+test('shouldPreserveRepoPrSnapshotForEmptyDiscovery: retains a populated usable snapshot when a window finds no repos', () => {
+	const populated = makeEnvelope({
+		data: makeResult({
+			repos: [{ owner: 'a', repo: 'b', repoUrl: 'https://github.com/a/b', totalPrs: 3, aiAuthoredPrs: 1, aiReviewRequestedPrs: 0, aiDetails: [] }],
+		}),
+	});
+	assert.equal(shouldPreserveRepoPrSnapshotForEmptyDiscovery(populated, SINCE, 0), true);
+	assert.equal(shouldPreserveRepoPrSnapshotForEmptyDiscovery(populated, SINCE, 1), false);
+	assert.equal(shouldPreserveRepoPrSnapshotForEmptyDiscovery(makeEnvelope(), SINCE, 0), false);
+	assert.equal(shouldPreserveRepoPrSnapshotForEmptyDiscovery(makeEnvelope({ schemaVersion: 0 }), SINCE, 0), false);
 });
 
 // ---------------------------------------------------------------------------

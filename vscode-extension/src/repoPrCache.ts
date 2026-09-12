@@ -85,6 +85,20 @@ export function isRepoPrEnvelopeUsable(
 	return snapshotSince <= since.getTime() + 60_000;
 }
 
+/**
+ * A global snapshot may be refreshed by a VS Code window that has no repository folders open.
+ * Do not let that window replace an existing, usable repository list with an empty result.
+ */
+export function shouldPreserveRepoPrSnapshotForEmptyDiscovery(
+	envelope: RepoPrCacheEnvelope | undefined,
+	since: Date,
+	discoveredRepoCount: number,
+): boolean {
+	return discoveredRepoCount === 0
+		&& isRepoPrEnvelopeUsable(envelope, since)
+		&& (envelope?.data.repos.length ?? 0) > 0;
+}
+
 /** When the next refresh becomes due, as an ISO timestamp (undefined when it is due now). */
 export function nextRepoPrRefreshAt(
 	fetchedAt: string | undefined,

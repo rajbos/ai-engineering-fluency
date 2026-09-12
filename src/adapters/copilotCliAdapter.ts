@@ -41,6 +41,7 @@ export function getCopilotCliSessionStateDir(): string {
 export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'copilotcli';
 	readonly displayName = 'Copilot CLI';
+	private static readonly WORKSPACE_YAML_CONCURRENCY = 20;
 
 	private readonly store = new CopilotCliStoreAccess();
 	/** UUIDs of sessions discovered to have been created by Microsoft Scout. */
@@ -245,6 +246,24 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		}
 	}
 
+	/** Read workspace metadata with bounded I/O so large session histories do not saturate disk. */
+	private async markDbOnlySessionsFromWorkspaceYaml(sessions: { id: string; cwd: string | null }[], root: string): Promise<void> {
+		let nextIndex = 0;
+		const worker = async (): Promise<void> => {
+			while (nextIndex < sessions.length) {
+				const session = sessions[nextIndex++];
+				if (isMicrosoftScoutCwd(session.cwd)) {
+					this._scoutSessionIds.add(session.id);
+				}
+				await this._tryMarkScoutFromWorkspaceYaml(path.join(root, session.id), session.id);
+			}
+		};
+		await Promise.all(Array.from(
+			{ length: Math.min(CopilotCliAdapter.WORKSPACE_YAML_CONCURRENCY, sessions.length) },
+			() => worker(),
+		));
+	}
+
 	getCandidatePaths(): CandidatePath[] {
 		const paths: CandidatePath[] = [
 			{ path: getCopilotCliSessionStateDir(), source: 'Copilot CLI' },
@@ -323,14 +342,9 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 			const dbOnlySessions = await this.store.discoverNewSessionsWithCwd(knownUuids);
 			if (dbOnlySessions.length > 0) {
 				log(`📄 Found ${dbOnlySessions.length} chat-only session(s) in Copilot CLI session-store.db`);
-				await Promise.all(dbOnlySessions.map(async ({ id, cwd }) => {
-					if (isMicrosoftScoutCwd(cwd)) {
-						this._scoutSessionIds.add(id);
-					}
-					// Chat-only sessions still get a session-state/<uuid>/ dir with workspace.yaml
-					// (just no events.jsonl), so client_name (app vs. terminal CLI) is still detectable.
-					await this._tryMarkScoutFromWorkspaceYaml(path.join(root, id), id);
-				}));
+				// Chat-only sessions still get a session-state/<uuid>/ dir with workspace.yaml
+				// (just no events.jsonl), so client_name (app vs. terminal CLI) is still detectable.
+				await this.markDbOnlySessionsFromWorkspaceYaml(dbOnlySessions, root);
 				for (const { id } of dbOnlySessions) {
 					sessionFiles.push(this.store.virtualPath(id));
 				}

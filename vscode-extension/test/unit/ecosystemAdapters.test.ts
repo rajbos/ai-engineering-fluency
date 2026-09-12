@@ -31,6 +31,7 @@ import { DevinCliAdapter } from '../../../src/adapters/devinCliAdapter';
 import { ClineAdapter } from '../../../src/adapters/clineAdapter';
 import { CodexCliAdapter } from '../../../src/adapters/codexCliAdapter';
 import { HermesAdapter } from '../../../src/adapters/hermesAdapter';
+import { KiloAdapter } from '../../../src/adapters/kiloAdapter';
 
 import { OpenCodeDataAccess } from '../../../src/opencode';
 import { CrushDataAccess } from '../../../src/crush';
@@ -48,6 +49,7 @@ import { DevinCliDataAccess } from '../../../src/devinCli';
 import { ClineDataAccess } from '../../../src/cline';
 import { CodexCliDataAccess } from '../../../src/codexcli';
 import { HermesDataAccess } from '../../../src/hermes';
+import { KiloDataAccess } from '../../../src/kilo';
 
 // Stub functions for adapters requiring callbacks
 const noopEstimateTokens = (_text: string, _model?: string) => 0;
@@ -71,6 +73,7 @@ const devinCliDA = new DevinCliDataAccess();
 const clineDA = new ClineDataAccess();
 const codexCliDA = new CodexCliDataAccess();
 const hermesDA = new HermesDataAccess();
+const kiloDA = new KiloDataAccess(null as any);
 
 const openCodeAdapter = new OpenCodeAdapter(openCodeDA);
 const crushAdapter = new CrushAdapter(crushDA);
@@ -90,6 +93,7 @@ const devinCliAdapter = new DevinCliAdapter(devinCliDA);
 const clineAdapter = new ClineAdapter(clineDA);
 const codexCliAdapter = new CodexCliAdapter(codexCliDA);
 const hermesAdapter = new HermesAdapter(hermesDA);
+const kiloAdapter = new KiloAdapter(kiloDA);
 
 const allAdapters: IEcosystemAdapter[] = [
     openCodeAdapter, crushAdapter, continueAdapter, eclipseAdapter,
@@ -98,17 +102,18 @@ const allAdapters: IEcosystemAdapter[] = [
     clineAdapter,
     codexCliAdapter,
     hermesAdapter,
+    kiloAdapter,
 ];
 
 // ---------------------------------------------------------------------------
 // isDiscoverable type guard
 // ---------------------------------------------------------------------------
 
-test('isDiscoverable: returns true for all 18 adapters', () => {
+test('isDiscoverable: returns true for all 19 adapters', () => {
     for (const adapter of allAdapters) {
         assert.ok(isDiscoverable(adapter), `Expected ${adapter.id} to be discoverable`);
     }
-    assert.equal(allAdapters.length, 18);
+    assert.equal(allAdapters.length, 19);
 });
 
 test('isDiscoverable: returns false for plain IEcosystemAdapter without discover()', () => {
@@ -145,6 +150,7 @@ test('adapter IDs are stable lowercase identifiers', () => {
     assert.equal(devinCliAdapter.id, 'devincli');
     assert.equal(clineAdapter.id, 'cline');
     assert.equal(hermesAdapter.id, 'hermes');
+    assert.equal(kiloAdapter.id, 'kilo');
 });
 
 // ---------------------------------------------------------------------------
@@ -183,6 +189,53 @@ test('OpenCodeAdapter.handles: recognises DB virtual paths', () => {
 test('OpenCodeAdapter.handles: rejects unrelated paths', () => {
     assert.ok(!openCodeAdapter.handles(path.join(os.homedir(), '.continue', 'sessions', 'abc.json')));
     assert.ok(!openCodeAdapter.handles(path.join(os.homedir(), '.claude', 'projects', 'hash', 'abc.jsonl')));
+});
+
+test('KiloAdapter.handles: recognises kilo.db DB virtual paths', () => {
+    const p = path.join(kiloDA.getKiloDataDir(), 'kilo.db#ses_abc123');
+    assert.ok(kiloAdapter.handles(p));
+});
+
+test('KiloAdapter.handles: rejects OpenCode paths and unrelated paths', () => {
+    assert.ok(!kiloAdapter.handles(path.join(openCodeDA.getOpenCodeDataDir(), 'opencode.db#ses_abc123')));
+    assert.ok(!kiloAdapter.handles(path.join(os.homedir(), '.continue', 'sessions', 'abc.json')));
+    assert.ok(!kiloAdapter.handles(path.join(os.homedir(), '.claude', 'projects', 'hash', 'abc.jsonl')));
+});
+
+test('KiloDataAccess: coerces numeric token strings and ISO timestamps', async () => {
+    const dataAccess = new KiloDataAccess(null as any);
+    dataAccess.getKiloMessagesForSession = async () => [
+        { id: 'user-1', role: 'user', time: { created: '2026-09-07T12:00:00.000Z' } },
+        {
+            id: 'assistant-1', role: 'assistant', parentID: 'user-1', modelID: 'test-model',
+            tokens: { total: '150', output: '20', reasoning: '5', cache: { read: '10', write: '3' } }
+        }
+    ];
+
+    const result = await dataAccess.getKiloSessionData('kilo.db#ses_test');
+
+    assert.equal(result.timestamp, Date.parse('2026-09-07T12:00:00.000Z'));
+    assert.equal(result.tokens, 150);
+    assert.equal(result.modelUsage['test-model'].inputTokens, 125);
+    assert.equal(result.modelUsage['test-model'].outputTokens, 25);
+    assert.equal(result.modelUsage['test-model'].cachedReadTokens, 10);
+    assert.equal(result.modelUsage['test-model'].cacheCreationTokens, 3);
+});
+
+test('KiloAdapter.analyzeUsage: ignores unsafe tool names', async () => {
+    const dataAccess = new KiloDataAccess(null as any);
+    dataAccess.getKiloMessagesForSession = async () => [{ id: 'assistant-1', role: 'assistant', modelID: 'test-model' }];
+    dataAccess.getKiloPartsForMessage = async () => [
+        { type: 'tool', tool: '__proto__' },
+        { type: 'tool', tool: 'read_file' }
+    ];
+    const adapter = new KiloAdapter(dataAccess);
+
+    const analysis = await adapter.analyzeUsage('kilo.db#ses_test', { modelPricing: {}, toolNameMap: {} });
+
+    assert.equal(analysis.toolCalls.total, 1);
+    assert.deepEqual(analysis.toolCalls.byTool, { read_file: 1 });
+    assert.equal(Object.prototype.hasOwnProperty.call(analysis.toolCalls.byTool, '__proto__'), false);
 });
 
 test('ContinueAdapter.handles: recognises ~/.continue/sessions paths', () => {
@@ -376,6 +429,13 @@ test('OpenCodeAdapter.getCandidatePaths: returns both JSON dir and DB paths', ()
     assert.ok(sources.some(s => s.includes('JSON')), 'Should include JSON path');
     assert.ok(sources.some(s => s.includes('DB')), 'Should include DB path');
     assert.equal(paths.length, 2);
+});
+
+test('KiloAdapter.getCandidatePaths: returns the kilo.db database path', () => {
+    const paths = kiloAdapter.getCandidatePaths();
+    assert.equal(paths.length, 1);
+    assert.ok(paths[0].path.endsWith('kilo.db'));
+    assert.equal(paths[0].source, 'Kilo Code (DB)');
 });
 
 test('CrushAdapter.getCandidatePaths: always includes projects.json path', () => {

@@ -1227,6 +1227,41 @@ background: var(--bg-tertiary);
 	word-break: break-word;
 }
 
+.worktree-cleanup-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 6px;
+}
+
+.worktree-cleanup-chip {
+	padding: 2px 8px;
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	background: var(--bg-tertiary);
+	color: var(--text-secondary);
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+/* Facts that block or endanger a cleanup (unpushed commits, dirty tree, missing remote). */
+.worktree-cleanup-chip.danger {
+	border-color: var(--vscode-errorForeground, #f14c4c);
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.worktree-cleanup-log-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 8px;
+}
+
+.worktree-cleanup-log-actions .button {
+	padding: 3px 10px;
+	font-size: 11px;
+}
+
 .worktree-repo-actions {
 	white-space: nowrap;
 }

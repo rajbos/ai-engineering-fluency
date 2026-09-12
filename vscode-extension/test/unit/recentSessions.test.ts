@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { buildRecentSessionBuckets } from '../../../src/recentSessions';
+import { buildRecentSessionBuckets, collectSessionModelIds } from '../../../src/recentSessions';
 import { sanitizeRecentSessionBuckets } from '../../src/webview/usage/recentSessionsSanitizer';
 
 const validSessionSummary = {
@@ -58,5 +58,26 @@ describe('sanitizeRecentSessionBuckets', () => {
 
 	test('rejects partial payloads so callers can use their lazy-loading fallback', () => {
 		assert.equal(sanitizeRecentSessionBuckets({ last7: [] }), undefined);
+	});
+});
+
+describe('collectSessionModelIds', () => {
+	test('adds models that only served turns without an attributable usage record', () => {
+		assert.deepEqual(
+			collectSessionModelIds({ 'gpt-5': {} }, { 'gpt-5': {}, hydrafusion: {} }),
+			['gpt-5', 'hydrafusion'],
+		);
+	});
+
+	test('keeps token-attributed models first and drops the unknown placeholder', () => {
+		assert.deepEqual(
+			collectSessionModelIds({ 'claude-opus-5': {} }, { unknown: {}, 'gpt-5.6-terra': {} }),
+			['claude-opus-5', 'gpt-5.6-terra'],
+		);
+	});
+
+	test('falls back to the efficiency models when token attribution is empty', () => {
+		assert.deepEqual(collectSessionModelIds({}, { hydrafusion: {} }), ['hydrafusion']);
+		assert.deepEqual(collectSessionModelIds(undefined, undefined), []);
 	});
 });

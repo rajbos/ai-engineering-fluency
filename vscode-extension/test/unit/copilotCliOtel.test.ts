@@ -40,12 +40,16 @@ function createFakeSqlJs(rows: StoreRow[]): typeof initSqlJs {
 			run(_sql: string, _params?: unknown[]): void { /* no-op — tests only read */ }
 
 			exec(sql: string, params?: unknown[]): initSqlJs.QueryExecResult[] {
-				if (sql.includes('assistant_usage_events') && params && params.length > 0) {
-					const sessionId = params[0] as string;
-					const matches = rows.filter(r => r.session_id === sessionId);
+				if (sql.includes('assistant_usage_events')) {
+					const matches = params && params.length > 0
+						? rows.filter(r => r.session_id === params[0] as string)
+						: rows;
 					return [{
-						columns: ['model', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'total_nano_aiu'],
+						columns: sql.includes('session_id,')
+							? ['session_id', 'model', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'total_nano_aiu']
+							: ['model', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'total_nano_aiu'],
 						values: matches.map(r => [
+							...(sql.includes('session_id,') ? [r.session_id] : []),
 							r.model,
 							r.input_tokens,
 							r.output_tokens,
@@ -278,6 +282,7 @@ test('getCopilotCliStoreUsage: reads exact usage from assistant_usage_events', a
 		const storeAccess = createStoreAccess(homeDir, [
 			{ session_id: SESSION_ID, model: 'claude-sonnet-5', input_tokens: 100, output_tokens: 10, cache_read_tokens: 80, cache_write_tokens: 15, total_nano_aiu: 12345 },
 			{ session_id: SESSION_ID, model: 'claude-sonnet-5', input_tokens: 50, output_tokens: 5, cache_read_tokens: 40, cache_write_tokens: 5, total_nano_aiu: 6000 },
+			{ session_id: SESSION_ID_2, model: 'gpt-5', input_tokens: 20, output_tokens: 2, cache_read_tokens: 0, cache_write_tokens: 0, total_nano_aiu: 2000 },
 		]);
 
 		const usage = await getCopilotCliStoreUsage(eventsJsonlPath(homeDir, SESSION_ID), storeAccess);
@@ -289,6 +294,10 @@ test('getCopilotCliStoreUsage: reads exact usage from assistant_usage_events', a
 		assert.equal(usage!.modelUsage['claude-sonnet-5'].outputTokens, 15);
 		assert.equal(usage!.modelUsage['claude-sonnet-5'].cachedReadTokens, 120);
 		assert.equal(usage!.modelUsage['claude-sonnet-5'].cacheCreationTokens, 20);
+
+		const secondUsage = await getCopilotCliStoreUsage(eventsJsonlPath(homeDir, SESSION_ID_2), storeAccess);
+		assert.equal(secondUsage!.actualTokens, 22);
+		assert.equal(secondUsage!.modelUsage['gpt-5'].inputTokens, 20);
 	});
 });
 

@@ -248,6 +248,10 @@ namespace AIEngineeringFluency.ToolWindow
                     var maturity = await StatsBuilder.BuildMaturityAsync();
                     return JsonSerializer.Serialize(maturity, serOpts);
                 }
+                case "fluency-level-viewer":
+                {
+                    return BuildFluencyLevelJson();
+                }
                 default:
                 {
                     var stats = await StatsBuilder.BuildAsync() ?? new DetailedStats
@@ -257,6 +261,53 @@ namespace AIEngineeringFluency.ToolWindow
                     stats.CompactNumbers = Options.ExtensionSettings.CompactNumbers;
                     return JsonSerializer.Serialize(stats, serOpts);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Builds the Scoring Guide payload from the <c>fluencyLevelData.json</c> rubric
+        /// staged next to the assembly. The rubric is static reference data — the same file
+        /// the fluency scores are calculated against — so it needs no CLI round trip; only
+        /// the <c>backendConfigured</c> flag (which gates the Team Dashboard nav button)
+        /// comes from the cached stats.
+        /// </summary>
+        /// <returns>
+        /// The view's initial JSON, or the literal <c>null</c> when the rubric file is
+        /// missing or malformed — the webview renders "No data available." for that rather
+        /// than throwing on an empty category list.
+        /// </returns>
+        private static string BuildFluencyLevelJson()
+        {
+            try
+            {
+                var rubricPath = Path.Combine(
+                    Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!,
+                    "webview",
+                    "fluencyLevelData.json");
+
+                if (!File.Exists(rubricPath))
+                {
+                    Utilities.OutputLogger.LogWarning($"Scoring Guide: rubric not found at {rubricPath}");
+                    return "null";
+                }
+
+                if (JsonNode.Parse(File.ReadAllText(rubricPath)) is not JsonArray categories)
+                {
+                    Utilities.OutputLogger.LogWarning("Scoring Guide: rubric is not a JSON array");
+                    return "null";
+                }
+
+                return new JsonObject
+                {
+                    ["categories"]        = categories,
+                    ["isDebugMode"]       = false,
+                    ["backendConfigured"] = CliBridge.GetCachedStats()?.BackendConfigured ?? false,
+                }.ToJsonString();
+            }
+            catch (Exception ex)
+            {
+                Utilities.OutputLogger.LogError($"Scoring Guide: failed to build payload: {ex.Message}");
+                return "null";
             }
         }
 
@@ -425,6 +476,10 @@ namespace AIEngineeringFluency.ToolWindow
 
                         case "showMaturity":
                             await NavigateToViewAsync("maturity");
+                            break;
+
+                        case "showFluencyLevelViewer":
+                            await NavigateToViewAsync("fluency-level-viewer");
                             break;
 
                         case "shareToLinkedIn":

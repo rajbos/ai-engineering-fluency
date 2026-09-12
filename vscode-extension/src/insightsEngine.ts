@@ -17,6 +17,7 @@ import toolNamesData from '../../src/toolNames.json';
 import modelPricingData from '../../src/modelPricing.json';
 import { resolveGuidMcpToolName, resolveMcpFamilyToolName, lookupKnownToolName } from '../../src/utils/toolUtils';
 import { getLongContextInfo, type LongContextInfo } from '../../src/tokenEstimation';
+import { CONTEXT_NEAR_LIMIT_RATIO } from '../../src/types';
 import type { ModelPricing } from '../../src/types';
 
 // ---------------------------------------------------------------------------
@@ -310,6 +311,9 @@ export interface EvaluatedInsight {
 	body: string;
 	actionLabel?: string;
 	actionCommand?: string;
+	/** Optional second action, rendered alongside the primary one (e.g. an alternate next step). */
+	secondaryActionLabel?: string;
+	secondaryActionCommand?: string;
 	status: InsightStatus;
 	/** When true, this insight may also be surfaced as a VS Code toast notification. */
 	allowToast?: boolean;
@@ -327,6 +331,8 @@ interface InsightDefinition {
 	buildBody: (ctx: InsightContext) => string;
 	actionLabel?: string | ((ctx: InsightContext) => string);
 	actionCommand?: string | ((ctx: InsightContext) => string);
+	secondaryActionLabel?: string | ((ctx: InsightContext) => string);
+	secondaryActionCommand?: string | ((ctx: InsightContext) => string);
 	/** Returns true when this insight is applicable given the current context. */
 	appliesTo: (ctx: InsightContext) => boolean;
 	/** Higher weight → surfaced earlier when multiple insights apply. */
@@ -348,6 +354,27 @@ function autoCompactBreakdown(stats: AutomaticCompactionStats): string {
 	return sources.filter(([, count]) => count > 0)
 		.map(([source, count]) => `${source}: ${count}`)
 		.join('; ');
+}
+
+/** Sessions in the last 30 days whose history was automatically compacted. */
+function compactedSessionCount(ctx: InsightContext): number {
+	return ctx.last30Days.contextPressure?.sessionsCompacted ?? 0;
+}
+
+/** Sessions in the last 30 days that almost filled their window without compacting. */
+function nearLimitSessionCount(ctx: InsightContext): number {
+	return ctx.last30Days.contextPressure?.sessionsNearLimit ?? 0;
+}
+
+/**
+ * "N of your M sessions" phrasing for the last 30 days, or an empty string when
+ * per-session context data was unavailable (e.g. no Copilot CLI / Claude sessions).
+ */
+function compactedSessionPhrase(ctx: InsightContext): string {
+	const cp = ctx.last30Days.contextPressure;
+	if (!cp || cp.sessionsConsidered === 0 || cp.sessionsCompacted === 0) { return ''; }
+	const pct = Math.round((cp.sessionsCompacted / cp.sessionsConsidered) * 100);
+	return ` That's ${cp.sessionsCompacted} of the ${cp.sessionsConsidered} sessions with context data over the last 30 days (${pct}%).`;
 }
 
 // Starter catalog
@@ -923,13 +950,63 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		buildBody: (ctx) => {
 			const stats = ctx.autoCompactionsLast7Days!;
 			const n = autoCompactCount(ctx);
-			return `Your sessions automatically compacted ${n} time${n !== 1 ? 's' : ''} in the last 7 days (${autoCompactBreakdown(stats)}). ` +
+			return `Your sessions automatically compacted ${n} time${n !== 1 ? 's' : ''} in the last 7 days (${autoCompactBreakdown(stats)}).${compactedSessionPhrase(ctx)} ` +
 				`Auto-compaction means earlier context was lost without your control — you may have noticed replies suddenly lacking earlier detail. ` +
 				`To avoid this: start a fresh chat (\`/new\`) when switching tasks, and use \`/compact\` yourself in Claude before the window fills.`;
 		},
 		appliesTo: (ctx) => autoCompactCount(ctx) > 5,
 		weight: 65,
 		allowToast: true,
+	},
+	{
+		id: 'context-window-near-limit',
+		category: 'context',
+		severity: 'tip',
+		title: '🧠 Some sessions nearly ran out of context window',
+		buildBody: (ctx) => {
+			const cp = ctx.last30Days.contextPressure!;
+			const n = cp.sessionsNearLimit;
+			const worst = cp.worstFillPercent;
+			const worstNote = worst ? ` The fullest one reached ${worst}% of its window.` : '';
+			const compacted = cp.sessionsCompacted;
+			const compactedNote = compacted > 0
+				? ` Separately, ${compacted} session${compacted !== 1 ? 's' : ''} compacted automatically, losing earlier context.`
+				: '';
+			return `${n} of your ${cp.sessionsWithFillData} sessions with measured context fill reached at least ${Math.round(CONTEXT_NEAR_LIMIT_RATIO * 100)}% of their context window in the last 30 days.${worstNote}${compactedNote} ` +
+				`Once a window fills, the client silently drops or summarizes earlier turns — answers start losing detail you already gave. ` +
+				`Head it off by starting a fresh chat (\`/new\`) per task with a short handoff summary, running \`/compact\` yourself while you still control what's kept, and narrowing context to the files that matter instead of whole-repo references.`;
+		},
+		appliesTo: (ctx) => {
+			// Don't double up with the auto-compaction insight, which already covers
+			// sessions that went past the line.
+			if (autoCompactCount(ctx) > 5) { return false; }
+			const cp = ctx.last30Days.contextPressure;
+			return !!cp && cp.sessionsWithFillData > 0 && nearLimitSessionCount(ctx) >= 2;
+		},
+		weight: 60,
+		allowToast: true,
+	},
+	{
+		id: 'context-window-healthy',
+		category: 'context',
+		severity: 'celebration',
+		title: '🎯 You keep your context windows comfortable',
+		buildBody: (ctx) => {
+			const cp = ctx.last30Days.contextPressure!;
+			const worst = cp.worstFillPercent;
+			const worstNote = worst ? ` — the fullest reached only ${worst}% of its window` : '';
+			return `None of your ${cp.sessionsWithFillData} sessions with measured context fill came close to their context window in the last 30 days${worstNote}. ` +
+				`That means no silent compaction and no lost earlier detail, which is exactly where you want to be. ` +
+				`Keep scoping one task per chat and pointing at specific files rather than the whole repo.`;
+		},
+		appliesTo: (ctx) => {
+			const cp = ctx.last30Days.contextPressure;
+			return !!cp && cp.sessionsWithFillData >= 10
+				&& compactedSessionCount(ctx) === 0
+				&& nearLimitSessionCount(ctx) === 0
+				&& autoCompactCount(ctx) === 0;
+		},
+		weight: 25,
 	},
 
 	// ── Model cost & efficiency ───────────────────────────────────────────────
@@ -1373,6 +1450,8 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		},
 		actionLabel: 'View Corrections',
 		actionCommand: 'aiEngineeringFluency.openCorrectionsTab',
+		secondaryActionLabel: '🤖 Ask Copilot to Fix This',
+		secondaryActionCommand: 'aiEngineeringFluency.askCopilotAboutCorrections',
 		appliesTo: (ctx) => (ctx.last30Days.corrections?.userCorrections ?? 0) >= 3,
 		weight: 70,
 	},
@@ -1397,6 +1476,26 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 			return c.toolErrors >= 5 || (c.editRetries + c.editSelfCorrections) >= 10;
 		},
 		weight: 55,
+	},
+	{
+		id: 'corrections-user-escalation',
+		category: 'customization',
+		severity: 'opportunity',
+		title: '📈 Corrections are clustering, not one-off',
+		buildBody: (ctx) => {
+			const c = ctx.last30Days.corrections;
+			const escalated = c?.escalatedUserCorrections ?? 0;
+			const sessions = c?.sessionsWithEscalations ?? 0;
+			return `In the last 30 days, ${escalated} correction${escalated !== 1 ? 's' : ''} landed within a few turns of ` +
+				`an earlier one in the same session, across ${sessions} session${sessions !== 1 ? 's' : ''} — no single editor records a real ` +
+				`sentiment score, but repeated back-to-back pushback is the closest local signal we have to "this conversation is going badly". ` +
+				`When you see this, it's often faster to stop, restate the goal or constraint clearly, and start a fresh turn than to keep correcting course. ` +
+				`See the Corrections tab (moments marked 📈) for exactly where.`;
+		},
+		actionLabel: 'View Corrections',
+		actionCommand: 'aiEngineeringFluency.openCorrectionsTab',
+		appliesTo: (ctx) => (ctx.last30Days.corrections?.escalatedUserCorrections ?? 0) >= 2,
+		weight: 60,
 	},
 	{
 		id: 'repeated-task-skill-candidate',
@@ -1447,6 +1546,8 @@ export function evaluateInsights(
 				body: def.buildBody(ctx),
 				actionLabel: typeof def.actionLabel === 'function' ? def.actionLabel(ctx) : def.actionLabel,
 				actionCommand: typeof def.actionCommand === 'function' ? def.actionCommand(ctx) : def.actionCommand,
+				secondaryActionLabel: typeof def.secondaryActionLabel === 'function' ? def.secondaryActionLabel(ctx) : def.secondaryActionLabel,
+				secondaryActionCommand: typeof def.secondaryActionCommand === 'function' ? def.secondaryActionCommand(ctx) : def.secondaryActionCommand,
 				status,
 				allowToast: def.allowToast,
 			};

@@ -96,6 +96,9 @@ class TokenTrackerPanel(
      */
     private fun loadViewFromCache(view: String) {
         val result = runCatching {
+            if (view == "fluency-level-viewer") {
+                return@runCatching buildFluencyLevelJson()
+            }
             val json = CliBridge.fetchStats(view)
             val jsonKey = CliBridge.viewToAllJsonKey(view)
             var initialJson = if (jsonKey != null) extractJsonKey(json, jsonKey) else json
@@ -140,6 +143,9 @@ class TokenTrackerPanel(
                 result.fold(
                     onSuccess = {
                         val statsResult = runCatching {
+                            if (view == "fluency-level-viewer") {
+                                return@runCatching buildFluencyLevelJson()
+                            }
                             val json = CliBridge.fetchStats(view)
                             val jsonKey = CliBridge.viewToAllJsonKey(view)
                             if (jsonKey != null) extractJsonKey(json, jsonKey) else json
@@ -286,6 +292,7 @@ class TokenTrackerPanel(
                 "showUsageAnalysis" -> navigateToView("usage")
                 "showEnvironmental" -> navigateToView("environmental")
                 "showMaturity" -> navigateToView("maturity")
+                "showFluencyLevelViewer" -> navigateToView("fluency-level-viewer")
                 "showDiagnostics" -> navigateToView("details") // not supported yet
                 "showDashboard" -> navigateToView("details") // not supported yet
 
@@ -358,6 +365,33 @@ class TokenTrackerPanel(
             browser.loadHTML(WebviewResources.buildHtml(view, hostBridgeInjectFunction = hostBridge.inject("payload")))
             prefetchAndLoadView(view)
         }
+    }
+
+    /**
+     * Builds the Scoring Guide payload from the `fluencyLevelData.json` rubric
+     * bundled with the plugin. The rubric is static reference data — the same
+     * file the fluency scores are calculated against — so it needs no CLI
+     * round trip; only `backendConfigured` (which gates the Team Dashboard nav
+     * button) is derived from cached CLI stats.
+     *
+     * Returns the literal `"null"` when the rubric is missing or malformed, so
+     * the webview renders "No data available." instead of throwing on an
+     * empty category list — mirrors the Visual Studio host's degraded path.
+     */
+    private fun buildFluencyLevelJson(): String {
+        val categories = WebviewResources.loadFluencyLevelRubric()
+        if (categories == null) {
+            log.warn("Scoring Guide: rubric missing or malformed")
+            return "null"
+        }
+        val backendConfigured = extractBackendConfigured(CliBridge.cachedFluencyJson ?: CliBridge.cachedAllJson)
+        return "{\"categories\":$categories,\"isDebugMode\":false,\"backendConfigured\":$backendConfigured}"
+    }
+
+    /** Regex-extracts the top-level `"backendConfigured"` boolean from a cached CLI JSON blob. */
+    private fun extractBackendConfigured(json: String?): Boolean {
+        if (json == null) return false
+        return """"backendConfigured"\s*:\s*true""".toRegex().containsMatchIn(json)
     }
 
     /**

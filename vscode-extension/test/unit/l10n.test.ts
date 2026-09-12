@@ -125,3 +125,170 @@ test('l10n: clipboard-failure keys resolve in zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+
+// Keys rendered into the share-card PNG export (PR #2035) — guards against raw
+// keys resurfacing in the exported image for every locale.
+test('l10n: share-card export keys resolve in English', () => {
+	const expected: Record<string, string> = {
+		'share.exportTitle': 'AI Engineering Fluency Score',
+		'share.exportReportLabel': 'Report',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: share-card export keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'share.exportTitle': 'AI 工程熟练度评分',
+			'share.exportReportLabel': '报告',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: usage context-pressure keys resolve in English', () => {
+	// These back the two context-pressure rows in the Usage view's Context
+	// Window section. A missing key would render a raw
+	// `usage.contextPressure.compactedLabel` as the row label.
+	const expected: Record<string, string> = {
+		'usage.contextPressure.compactedLabel': '🗜️ Sessions compacted',
+		'usage.contextPressure.noneCompacted': 'No session ran out of context window in this period',
+		'usage.contextPressure.nearLimitLabel': '⚠️ Sessions near the limit',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+	assert.equal(t('usage.contextPressure.ofCount', '3', '12'), '3 of 12');
+	assert.equal(t('usage.contextPressure.worstFill', '94'), 'Fullest session reached 94% of its window');
+	assert.equal(
+		t('usage.contextPressure.compactedShare', '25'),
+		'25% of sessions with context data lost earlier turns to automatic compaction',
+	);
+	assert.match(t('usage.contextPressure.nearLimitTooltip', '80'), /at least 80% of their context window/);
+	assert.match(t('usage.contextPressure.compactedTooltip'), /counted per session rather than per compaction event/);
+});
+
+test('l10n: usage context-pressure keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'usage.contextPressure.compactedLabel': '🗜️ 已压缩的会话',
+			'usage.contextPressure.noneCompacted': '本期间没有会话耗尽上下文窗口',
+			'usage.contextPressure.nearLimitLabel': '⚠️ 接近上限的会话',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+		// The Chinese phrasing reorders the two counts, so the placeholders are
+		// not positional in the same way as English — a plain concatenation
+		// would silently produce "3 个中的 12 个".
+		assert.equal(t('usage.contextPressure.ofCount', '3', '12'), '12 个中的 3 个');
+		assert.equal(t('usage.contextPressure.worstFill', '94'), '最满的会话达到了其窗口的 94%');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test("l10n: what's-new notification keys resolve in English", () => {
+	// The two buttons on the one-a-day new-feature notification. A missing key
+	// here would put a raw `whatsNew.takeMeThere` on the button, which is the
+	// kind of thing nobody notices until a user reports it.
+	const expected: Record<string, string> = {
+		'whatsNew.takeMeThere': 'Take me there',
+		'whatsNew.seeAll': 'See what else is new',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test("l10n: what's-new notification keys resolve in zh-cn", () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'whatsNew.takeMeThere': '带我去看看',
+			'whatsNew.seeAll': '查看其他新增内容',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+// Log viewer summary card labels (PR #2045 follow-up) — guards against raw
+// keys resurfacing in the log viewer summary cards for every locale.
+test('l10n: log viewer summary card labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'logviewer.summary.interactions': 'Interactions',
+		'logviewer.summary.editorMode': 'Editor Mode',
+		'logviewer.summary.estimatedTokens': 'Estimated Tokens',
+		'logviewer.summary.actualTokens': 'Actual Tokens',
+		'logviewer.summary.modelTurns': 'Model Turns',
+		'logviewer.summary.inputTokens': 'Input Tokens',
+		'logviewer.summary.outputTokens': 'Output Tokens',
+		'logviewer.summary.cachedInput': 'Cached Input',
+		'logviewer.summary.thinkingTokens': 'Thinking Tokens',
+		'logviewer.summary.thinkingEffort': 'Thinking Effort',
+		'logviewer.summary.subAgents': 'Sub-Agents',
+		'logviewer.summary.contextTruncated': 'Context Truncated',
+		'logviewer.summary.sessionHierarchy': 'Session Hierarchy',
+		'logviewer.summary.toolCalls': 'Tool Calls',
+		'logviewer.summary.mcpTools': 'MCP Tools',
+		'logviewer.summary.contextRefs': 'Context Refs',
+		'logviewer.summary.fileName': 'File Name',
+		'logviewer.summary.editor': 'Editor',
+		'logviewer.summary.fileSize': 'File Size',
+		'logviewer.summary.modified': 'Modified',
+		'logviewer.summary.timeline': 'Timeline',
+		'logviewer.summary.started': 'Started',
+		'logviewer.summary.lastActivity': 'Last activity',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: log viewer summary card labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'logviewer.summary.interactions': '交互次数',
+			'logviewer.summary.editorMode': '编辑器模式',
+			'logviewer.summary.estimatedTokens': '预计令牌数',
+			'logviewer.summary.actualTokens': '实际令牌数',
+			'logviewer.summary.modelTurns': '模型轮次',
+			'logviewer.summary.inputTokens': '输入令牌',
+			'logviewer.summary.outputTokens': '输出令牌',
+			'logviewer.summary.cachedInput': '缓存输入',
+			'logviewer.summary.thinkingTokens': '思考令牌',
+			'logviewer.summary.thinkingEffort': '思考强度',
+			'logviewer.summary.subAgents': '子代理',
+			'logviewer.summary.contextTruncated': '上下文截断',
+			'logviewer.summary.sessionHierarchy': '会话层级',
+			'logviewer.summary.toolCalls': '工具调用',
+			'logviewer.summary.mcpTools': 'MCP 工具',
+			'logviewer.summary.contextRefs': '上下文引用',
+			'logviewer.summary.fileName': '文件名',
+			'logviewer.summary.editor': '编辑器',
+			'logviewer.summary.fileSize': '文件大小',
+			'logviewer.summary.modified': '修改时间',
+			'logviewer.summary.timeline': '时间线',
+			'logviewer.summary.started': '开始',
+			'logviewer.summary.lastActivity': '最后活动',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});

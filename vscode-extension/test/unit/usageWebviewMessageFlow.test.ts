@@ -147,6 +147,15 @@ function buildStatsWithCorrections(): Record<string, unknown> {
 	};
 }
 
+/** Same report, but with one escalating user correction so the 📈 filter pill renders. */
+function buildStatsWithEscalatingCorrection(): Record<string, unknown> {
+	const stats = buildStatsWithCorrections() as any;
+	stats.correctionReport.counts.escalatedUserCorrections = 1;
+	stats.correctionReport.repos[0].counts.escalatedUserCorrections = 1;
+	stats.correctionReport.repos[0].sessions[0].moments[0].escalated = true;
+	return stats;
+}
+
 interface Harness {
 	window: any;
 	posted: any[];
@@ -366,6 +375,145 @@ test('renders the cleanup log with the worktree path for failing entries', async
 	assert.ok(rendered?.includes('Could not safely locate the main repository'), 'expected the cleanup reason to stay visible');
 });
 
+test('a blocked cleanup entry shows remediation details and actionable buttons', async () => {
+	// A bare "Has uncommitted or untracked changes." gives the user nothing to act on. The row
+	// has to say how stale the worktree is, whether the branch still exists on the remote, and
+	// whether it is pushed — and offer a way to go fix it.
+	const harness = await bootWebview(buildStats());
+	const worktreePath = 'C:\\Users\\me\\.copilot\\copilot-worktrees\\repo\\stale-branch';
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult',
+		path: worktreePath,
+		branch: 'stale-branch',
+		repoLabel: 'repo',
+		status: 'skipped',
+		reason: 'Has uncommitted or untracked changes.',
+		diagnostics: {
+			lastModified: '2026-09-01T08:30:00.000Z',
+			lastCommitDate: '2026-08-20T09:00:00.000Z',
+			lastCommitRelative: '3 weeks ago',
+			remoteBranch: 'origin/stale-branch',
+			remoteStatus: 'gone',
+			ahead: 2,
+			behind: 5,
+			modifiedFiles: 3,
+			untrackedFiles: 1,
+		},
+		processed: 1,
+		total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+
+	const rendered = harness.text('.worktree-cleanup-log');
+	assert.ok(rendered?.includes('Last updated:'), `expected a last-updated chip, got: ${rendered}`);
+	assert.ok(rendered?.includes('Last commit: 3 weeks ago'), 'expected the relative last-commit age');
+	assert.ok(rendered?.includes('origin/stale-branch'), 'expected the remote branch name');
+	assert.ok(rendered?.includes('(gone)'), 'a deleted upstream branch must be called out');
+	assert.ok(rendered?.includes('2 ahead') && rendered?.includes('5 behind'), 'expected the ahead/behind push status');
+	assert.ok(rendered?.includes('3 modified') && rendered?.includes('1 untracked'), 'expected the dirty-file counts');
+	assert.ok(rendered?.includes('Open in VS Code'), 'expected an open-in-VS-Code remediation button');
+});
+
+test('a synced, never-dirty entry reports "up to date" rather than counts', async () => {
+	const harness = await bootWebview(buildStats());
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult',
+		path: 'C:\\wt\\clean',
+		branch: 'clean',
+		repoLabel: 'repo',
+		status: 'error',
+		reason: 'Could not delete worktree.',
+		diagnostics: { remoteBranch: 'origin/clean', remoteStatus: 'tracked', ahead: 0, behind: 0, modifiedFiles: 0, untrackedFiles: 0 },
+		processed: 1,
+		total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+
+	const rendered = harness.text('.worktree-cleanup-log');
+	assert.ok(rendered?.includes('Push status: up to date'), `expected an up-to-date push status, got: ${rendered}`);
+	assert.ok(rendered?.includes('Changes: clean'), 'a clean tree must say so instead of showing zero counts');
+	assert.ok(!rendered?.includes('(gone)'), 'an existing upstream branch must not be marked gone');
+});
+
+test('a branch that was never pushed is flagged as having no remote', async () => {
+	const harness = await bootWebview(buildStats());
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult',
+		path: 'C:\\wt\\local-only',
+		branch: 'local-only',
+		repoLabel: 'repo',
+		status: 'skipped',
+		reason: 'Worktree has commits not pushed to any remote.',
+		diagnostics: { remoteStatus: 'none' },
+		processed: 1,
+		total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+
+	const rendered = harness.text('.worktree-cleanup-log');
+	assert.ok(rendered?.includes('Remote: none (never pushed)'), `expected a missing-remote warning, got: ${rendered}`);
+});
+
+test('a worktree whose remote could not be probed shows no remote claim at all', async () => {
+	// "Could not read this worktree" and "this branch has no upstream" both fail the same git
+	// lookup. Reporting the unreadable case as "never pushed" would be an invented fact, so the
+	// host omits remoteStatus entirely and the row must simply carry no remote chip.
+	const harness = await bootWebview(buildStats());
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult',
+		path: 'C:\\wt\\unreadable',
+		branch: '?',
+		repoLabel: 'repo',
+		status: 'error',
+		reason: 'Could not safely locate the main repository.',
+		diagnostics: { lastModified: '2026-09-01T08:30:00.000Z' },
+		processed: 1,
+		total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+
+	const rendered = harness.text('.worktree-cleanup-log');
+	assert.ok(rendered?.includes('Last updated:'), `expected the readable facts to still render, got: ${rendered}`);
+	assert.ok(!rendered?.includes('Remote:'), 'an unprobed remote must not be reported as a fact');
+	assert.ok(!rendered?.includes('never pushed'), 'an unreadable worktree must never be called "never pushed"');
+});
+
+test('clicking "Open in VS Code" asks the host to open that worktree folder', async () => {
+	const harness = await bootWebview(buildStats());
+	const worktreePath = 'C:\\wt\\needs-attention';
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post({
+		command: 'cleanupWorktreeResult',
+		path: worktreePath,
+		branch: 'needs-attention',
+		repoLabel: 'repo',
+		status: 'skipped',
+		reason: 'Has uncommitted or untracked changes.',
+		diagnostics: { modifiedFiles: 2, untrackedFiles: 0 },
+		processed: 1,
+		total: 1,
+	});
+	harness.post({ command: 'cleanupComplete' });
+	harness.posted.length = 0;
+
+	const button = harness.window.document.querySelector('.worktree-open-editor-btn') as HTMLElement | null;
+	assert.ok(button, 'expected an open-in-VS-Code button on the blocked cleanup row');
+	button.dispatchEvent(new harness.window.MouseEvent('click', { bubbles: true }));
+
+	const posted = harness.posted.find((m) => m.command === 'openWorktreeInEditor');
+	assert.ok(posted, `expected an openWorktreeInEditor message, got: ${JSON.stringify(harness.posted)}`);
+	assert.equal(posted.path, worktreePath);
+});
+
 test('accepts payloads relayed the way VS Code actually delivers them', async () => {
 	// The panel hung with `delivered=true` logged host-side because the webview's source-trust
 	// check compared window identities. VS Code relays from an internal window, so every
@@ -397,12 +545,17 @@ test('marks HydraFusion sessions in the recent sessions list', async () => {
 	};
 	stats.todaySessions = [
 		hydraFusionSession,
-		{ ...hydraFusionSession, title: 'Unrelated task', models: ['unrelated-hydrafusion'] },
+		// Id variants seen in real session logs must all be recognized...
+		{ ...hydraFusionSession, title: 'Prefixed task', filePath: 'b.jsonl', models: ['copilot/hydrafusion'] },
+		{ ...hydraFusionSession, title: 'Separated task', filePath: 'c.jsonl', models: ['hydra-fusion'] },
+		{ ...hydraFusionSession, title: 'Suffixed task', filePath: 'd.jsonl', models: ['hydrafusion-preview'] },
+		// ...while a different model that merely ends in the name must not be.
+		{ ...hydraFusionSession, title: 'Unrelated task', filePath: 'e.jsonl', models: ['unrelated-hydrafusion'] },
 	];
 	const harness = await bootWebview(stats);
 
 	const badges = harness.window.document.querySelectorAll('.hydrafusion-session-badge');
-	assert.equal(badges.length, 1, 'only the HydraFusion model identifier should be marked');
+	assert.equal(badges.length, 4, 'every HydraFusion id variant should be marked, and only those');
 	const badge = badges[0];
 	assert.ok(badge, 'expects a marker for HydraFusion sessions');
 	assert.equal(badge.textContent, 'HydraFusion');
@@ -626,4 +779,38 @@ test('filters corrections by type and opens the selected session turn', async ()
 	assert.equal(message.command, 'openSessionFile');
 	assert.equal(message.file, '/sessions/example.jsonl');
 	assert.equal(message.turnNumber, 2);
+});
+
+test('corrections filter reports how many moments are shown and can be cleared', async () => {
+	const harness = await bootWebview(buildStatsWithCorrections());
+	harness.window.document.querySelector('.tab-button[data-tab="corrections"]')?.click();
+
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Showing all 2 listed correction moments/);
+	assert.equal(harness.window.document.querySelector('button.correction-clear-filter'), null, 'no clear button without a filter');
+
+	harness.window.document.querySelector('button[data-correction-filter="tool-error"]')?.click();
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Showing 1 of 2 listed correction moments/);
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Tool errors/);
+	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 1);
+
+	harness.window.document.querySelector('button.correction-clear-filter')?.click();
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Showing all 2 listed correction moments/);
+	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 2);
+});
+
+test('the escalating pill is a filter that narrows the list to escalated moments', async () => {
+	const harness = await bootWebview(buildStatsWithEscalatingCorrection());
+	harness.window.document.querySelector('.tab-button[data-tab="corrections"]')?.click();
+
+	const escalating = harness.window.document.querySelector('button[data-correction-filter="escalated"]');
+	assert.ok(escalating, 'the escalating pill must be a clickable filter, not a static badge');
+	escalating.click();
+
+	assert.equal(
+		harness.window.document.querySelector('button[data-correction-filter="escalated"]')?.getAttribute('aria-pressed'),
+		'true',
+	);
+	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 1);
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Showing 1 of 2 listed correction moments/);
+	assert.match(harness.text('#corrections-filter-status') ?? '', /Escalating corrections/);
 });

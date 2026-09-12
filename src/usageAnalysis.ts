@@ -36,12 +36,14 @@ import {
 	type EfficiencyTurn,
 } from './modelEfficiency';
 import { detectCorrectionAnalysis, mergeCorrectionCounts, summarizeCorrectionMoments } from './correctionDetection';
+import { createEmptyCacheBreakagePeriodStats, mergeCacheBreakageIntoPeriod } from './cacheBreakage';
 import { MAX_PROMPT_LENGTH } from './repeatedTasks';
 import {
 	applyDelta,
 	isJsonlContent,
 	isUuidPointerFile,
 	getModelFromRequest,
+	isCopilotAutoRequest,
 	getModelTier,
 	getModelCostBucket,
 	estimateTokensFromText,
@@ -752,10 +754,7 @@ function _pdsaProcessRequest(
 }
 
 function _pdsaGetReqModel(req: SessionRequestRaw, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): string {
-	if (req.modelId) { return req.modelId.replace(/^copilot\//, ''); }
-	if (req.result?.metadata?.modelId) { return req.result.metadata.modelId.replace(/^copilot\//, ''); }
-	if (req.result?.details) { return getModelFromRequest(req, modelPricing); }
-	return defaultModel;
+	return getModelFromRequest(req, modelPricing, defaultModel);
 }
 
 function _pdsaCountModelSwitches(models: string[]): number {
@@ -1358,18 +1357,27 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	_muaMergeEnhancedMetrics(period, analysis);
 	_muaMergeTaskCategories(period, analysis);
 	_muaMergeCorrections(period, analysis);
+	_muaMergeCacheBreakage(period, analysis);
+}
+
+/** Fold a session's cache-breakage result into the period's aggregated stats. */
+function _muaMergeCacheBreakage(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.cacheBreakage) { return; }
+	if (!period.cacheBreakage) { period.cacheBreakage = createEmptyCacheBreakagePeriodStats(); }
+	mergeCacheBreakageIntoPeriod(period.cacheBreakage, analysis.cacheBreakage);
 }
 
 /** Fold a session's correction moments into the period's aggregated counters. */
 function _muaMergeCorrections(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
 	if (!analysis.correctionMoments || analysis.correctionMoments.length === 0) { return; }
 	if (!period.corrections) {
-		period.corrections = { userCorrections: 0, editRetries: 0, editSelfCorrections: 0, toolErrors: 0, toolErrorsRetried: 0, agentSelfCorrections: 0, sessionsWithMoments: 0, sessionsWithUserCorrections: 0 };
+		period.corrections = { userCorrections: 0, editRetries: 0, editSelfCorrections: 0, toolErrors: 0, toolErrorsRetried: 0, agentSelfCorrections: 0, escalatedUserCorrections: 0, sessionsWithMoments: 0, sessionsWithUserCorrections: 0, sessionsWithEscalations: 0 };
 	}
 	const counts = analysis.correctionCounts ?? summarizeCorrectionMoments(analysis.correctionMoments);
 	mergeCorrectionCounts(period.corrections, counts);
 	period.corrections.sessionsWithMoments++;
 	if (counts.userCorrections > 0) { period.corrections.sessionsWithUserCorrections!++; }
+	if (counts.escalatedUserCorrections > 0) { period.corrections.sessionsWithEscalations!++; }
 }
 
 /** @internal lookup table for analyzeContextReferences */
@@ -1784,11 +1792,7 @@ function _cmsExtractDefaultModel(event: CmsEvent, currentDefault: string): strin
 }
 
 function _cmsGetJsonlRequestModel(request: unknown, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): string {
-	const r = request as { modelId?: string; result?: { metadata?: { modelId?: string }; details?: unknown } };
-	if (r.modelId) { return r.modelId.replace(/^copilot\//, ''); }
-	if (r.result?.metadata?.modelId) { return r.result.metadata.modelId.replace(/^copilot\//, ''); }
-	if (r.result?.details) { return getModelFromRequest(request as SessionRequestRaw, modelPricing); }
-	return defaultModel;
+	return getModelFromRequest(request as SessionRequestRaw, modelPricing, defaultModel);
 }
 
 function _cmsCountEventRequests(event: CmsEvent, tierCounts: TierCounts, costCounts: CostCounts, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): void {
@@ -2894,20 +2898,15 @@ function _gmusEstimateDeltaRequestTokens(request: SessionRequestRaw, requestMode
 /** Process a single delta-format request, extracting or estimating token usage. */
 function _gmusProcessDeltaRequest(request: SessionRequestRaw, defaultModel: string, modelUsage: ModelUsage, deps: GmusDeps): void {
 	if (!request.requestId) { return; }
-	let requestModel = defaultModel;
-	if (request.modelId) {
-		requestModel = request.modelId.replace(/^copilot\//, '');
-	} else if (request.result?.metadata?.modelId) {
-		requestModel = request.result.metadata.modelId.replace(/^copilot\//, '');
-	} else if (request.result?.details) {
-		requestModel = getModelFromRequest(request, deps.modelPricing);
-	}
+	const requestModel = getModelFromRequest(request, deps.modelPricing, defaultModel);
 	// Untrusted `modelId` string from parsed session JSON — see protoGuard.ts.
 	if (isUnsafeObjectKey(requestModel)) { return; }
 	if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
+	const before = { ...modelUsage[requestModel] };
 	if (!tryExtractExactTokenUsage(request, requestModel, modelUsage)) {
 		_gmusEstimateDeltaRequestTokens(request, requestModel, modelUsage, deps);
 	}
+	recordAutoRequestUsage(request, modelUsage[requestModel], before);
 	if (request.response && Array.isArray(request.response)) {
 		accumulateSubAgentTokenUsage(request.response as ResponseItemRaw[], requestModel, modelUsage, deps.tokenEstimators);
 	}
@@ -2923,19 +2922,20 @@ function _gmusProcessDeltaRequests(state: GmusJsonlState, modelUsage: ModelUsage
 }
 
 /** Apply regex-based fallback extraction to fill in any requests that reconstruction missed. */
-function _gmusDeltaFallbackExtraction(lines: string[], state: GmusJsonlState, modelUsage: ModelUsage): void {
+function _gmusDeltaFallbackExtraction(lines: string[], state: GmusJsonlState, modelUsage: ModelUsage, deps: GmusDeps): void {
 	const rawModelUsage = extractPerRequestUsageFromRawLines(lines);
 	for (const [reqIdx, extracted] of rawModelUsage) {
 		const request = state.sessionState.requests?.[reqIdx] as SessionRequestRaw | undefined;
 		if (!request) { continue; }
 		if (request.result?.usage || (typeof request.result?.promptTokens === 'number') || (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number')) { continue; }
-		let requestModel = state.defaultModel;
-		if (request.modelId) { requestModel = request.modelId.replace(/^copilot\//, ''); }
+		const requestModel = getModelFromRequest(request, deps.modelPricing, state.defaultModel);
 		// Untrusted `modelId` string from parsed session JSON — see protoGuard.ts.
 		if (isUnsafeObjectKey(requestModel)) { continue; }
 		if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
+		const before = { ...modelUsage[requestModel] };
 		modelUsage[requestModel].inputTokens += extracted.promptTokens;
 		modelUsage[requestModel].outputTokens += extracted.outputTokens;
+		recordAutoRequestUsage(request, modelUsage[requestModel], before);
 	}
 }
 
@@ -2957,7 +2957,7 @@ function _gmusProcessJsonlContent(lines: string[], modelUsage: ModelUsage, deps:
 	if (!state.isDeltaBased && state.cliShutdownModelUsage) { return state.cliShutdownModelUsage; }
 	if (!state.isDeltaBased && state.cliRealOutputByModel) { return _gmusBuildEstimatedCliUsage(state, modelUsage); }
 	_gmusProcessDeltaRequests(state, modelUsage, deps);
-	_gmusDeltaFallbackExtraction(lines, state, modelUsage);
+	_gmusDeltaFallbackExtraction(lines, state, modelUsage, deps);
 	return null;
 }
 
@@ -2976,13 +2976,24 @@ function _gmusProcessJsonRequestEstimate(request: SessionRequestRaw, model: stri
 	}
 }
 
+/** Record the parent's eligible token delta before adding any sub-agent usage. */
+function recordAutoRequestUsage(request: SessionRequestRaw, usage: ModelUsage[string], before: ModelUsage[string]): void {
+	if (!isCopilotAutoRequest(request)) { return; }
+	usage.autoRouting = {
+		inputTokens: (usage.autoRouting?.inputTokens ?? 0) + usage.inputTokens - before.inputTokens,
+		outputTokens: (usage.autoRouting?.outputTokens ?? 0) + usage.outputTokens - before.outputTokens,
+	};
+}
+
 /** Process a single JSON-format session request, accumulating its token usage. */
 function _gmusProcessJsonRequest(request: SessionRequestRaw, modelUsage: ModelUsage, deps: GmusDeps): void {
 	const model = getModelFromRequest(request, deps.modelPricing);
 	// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
 	if (isUnsafeObjectKey(model)) { return; }
 	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
+	const before = { ...modelUsage[model] };
 	if (!tryExtractExactTokenUsage(request, model, modelUsage)) { _gmusProcessJsonRequestEstimate(request, model, modelUsage, deps); }
+	recordAutoRequestUsage(request, modelUsage[model], before);
 	if (request.response && Array.isArray(request.response)) {
 		accumulateSubAgentTokenUsage(request.response as ResponseItemRaw[], model, modelUsage, deps.tokenEstimators);
 	}

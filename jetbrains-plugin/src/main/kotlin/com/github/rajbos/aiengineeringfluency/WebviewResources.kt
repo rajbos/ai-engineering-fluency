@@ -73,10 +73,14 @@ object WebviewResources {
                 <style>
                     html, body { margin: 0; padding: 0; height: 100%; background: #1e1e1e; color: #d4d4d4;
                                  font-family: -apple-system, 'Segoe UI', sans-serif; }
-                    /* Buttons/sections not supported in JetBrains — mirrors ThemedHtmlBuilder.cs in VS extension */
+                    /* Buttons/sections not supported in JetBrains. Loosely mirrors — but does
+                       not exactly match — ThemedHtmlBuilder.cs in the VS extension: each host
+                       hides only what its own build doesn't ship, and the two feature sets
+                       differ (e.g. JetBrains still hides #btn-level-viewer / .share-section /
+                       .beta-footer that VS ships, while VS hides Export/Share-to-Issue that
+                       JetBrains doesn't address here). */
                     #btn-diagnostics,
                     #btn-level-viewer,
-                    #btn-level-viewer-inline,
                     #view-repository,
                     .share-section,
                     .beta-footer,
@@ -282,11 +286,25 @@ object WebviewResources {
         "diagnostics" -> "__INITIAL_DIAGNOSTICS__"
         "environmental" -> "__INITIAL_ENVIRONMENTAL__"
         "maturity" -> "__INITIAL_MATURITY__"
+        "fluency-level-viewer" -> "__INITIAL_FLUENCY_LEVEL_DATA__"
         else -> "__INITIAL_DETAILS__"
     }
 
     private fun loadResource(path: String): String? =
         WebviewResources::class.java.getResourceAsStream(path)?.bufferedReader()?.use { it.readText() }
+
+    /**
+     * Returns the raw JSON array contents of the Scoring Guide rubric
+     * (`fluencyLevelData.json`, staged next to the webview bundles by
+     * `prepareBundledAssets`), or null when it is missing or not a JSON array.
+     * The rubric is static reference data — the same file the fluency scores
+     * are calculated against — so callers combine it with `backendConfigured`
+     * from cached CLI stats rather than fetching it from the CLI.
+     */
+    fun loadFluencyLevelRubric(): String? {
+        val raw = loadResource("/webview/fluencyLevelData.json")?.trim() ?: return null
+        return raw.takeIf { it.startsWith("[") && it.endsWith("]") }
+    }
 
     /**
      * Returns a view-specific JS block injected after the bundle, mirroring
