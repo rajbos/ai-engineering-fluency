@@ -34,12 +34,13 @@
  *   - `aria-label="..."` / `title="..."` / `placeholder="..."` attributes and text content
  *     between HTML tags (`<button>`, `<h1>`-`<h6>`, `<p>`, `<b>`, `<code>`, `<vscode-button>`, ...)
  *     embedded in any string or template literal (not just ones already known to be templates),
- *     with a template's `${...}` holes bridged so matches can span an interpolation, and a tag's
- *     own direct text still found — as its own, independently-offset violation — when its body
- *     also contains a nested (tracked) element (e.g. an icon `<span>` before a label) or an HTML
- *     comment; nested markup is recursed into (to any depth) for its own text rather than merged
- *     into or blanked out of the outer tag's report, so nothing is double-counted and nothing
- *     nested more than one level deep is silently dropped
+ *     with a template's `${...}` holes bridged so matches can span an interpolation, direct
+ *     top-level text outside any tag (e.g. a raw HTML fragment concatenated with other markup
+ *     before being handed to a sink), and a tag's own direct text found separately from any
+ *     nested (tracked) element or HTML comment inside its body — recursion into nested markup is
+ *     unbounded (not capped at one level), so content nested arbitrarily deep is still found, and
+ *     each independent text run gets its own offset rather than being merged/blanked into one
+ *     combined report
  *
  * Explicitly not flagged: console.log/warn/error/info/debug/trace arguments,
  * anything already an argument to `localize(`, `localizeFormat(`, `t(`,
@@ -88,11 +89,15 @@
  * Baseline / ratchet:
  *   This check does not try to fix today's existing violations — it only
  *   stops new ones. `hardcoded-strings-baseline.json` records every violation
- *   that already existed when the check was introduced, keyed by file path +
- *   a hash of the *offending source line's trimmed content* (not the line
- *   number, so the baseline survives unrelated line-number drift). The check
- *   fails only when it finds a violation whose file+hash isn't in the
- *   baseline — i.e. a genuinely new hardcoded string.
+ *   that already existed when it was generated, keyed by file path + a hash
+ *   of the *offending source line's trimmed content* (not the line number, so
+ *   the baseline survives unrelated line-number drift), together with how
+ *   many times that exact (file, hash) occurred. A file+hash existing in the
+ *   baseline is not a blanket pass: only that many occurrences (in scan
+ *   order) are treated as pre-existing — a genuinely new violation whose line
+ *   happens to hash identically to an already-baselined one (e.g. an
+ *   identical line copied elsewhere in the same file) still fails once the
+ *   baselined count is exceeded. See newIndexesBeyondBaseline.
  *
  * Usage:
  *   node scripts/check-hardcoded-strings.mjs                 # check mode (CI)
@@ -124,7 +129,8 @@ const TARGET_PROPS = new Set(['textContent', 'innerText', 'innerHTML', 'title', 
 const TAGS = [
 	'button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span',
 	'td', 'th', 'option', 'summary', 'caption', 'div', 'a', 'li', 'legend',
-	'strong', 'em', 'small', 'dt', 'dd', 'figcaption', 'title', 'b', 'code',
+	'strong', 'em', 'small', 'dt', 'dd', 'figcaption', 'title', 'b', 'code', 'pre',
+	'text', // SVG <text> element (e.g. chart axis labels), not to be confused with the "text" attribute name
 	'vscode-button', 'vscode-badge', 'vscode-checkbox', 'vscode-dropdown',
 	'vscode-link', 'vscode-option', 'vscode-text-field'
 ];
@@ -246,7 +252,7 @@ function extractLiteralTexts(node, sourceFile) {
 		// multiline `` `${x}\n  Refresh` `` must attribute its report to Refresh's own line, not
 		// the template's opening line, or a baseline hash and an `// i18n-exempt` placed next to
 		// Refresh both silently apply to the wrong line.
-		return getStaticChunks(n, sourceFile).map((chunk) => {
+		const chunkResults = getStaticChunks(n, sourceFile).map((chunk) => {
 			// A template-tail/-middle chunk's raw text starts right after the closing `}` of the
 			// previous interpolation, typically with a leading newline/indentation — e.g. for
 			// `` `${label}\n  Refresh` ``, the tail's own text is "\n  Refresh" starting at the `}`.
@@ -257,6 +263,12 @@ function extractLiteralTexts(node, sourceFile) {
 			const leadingSkip = chunk.text.match(LEADING_SKIP_RE)[0].length;
 			return { text: chunk.text, offset: chunk.offset + leadingSkip };
 		});
+		if (!ts.isTemplateExpression(n)) { return chunkResults; }
+		// Also recurse into each interpolation hole's own expression — a hole that's itself a
+		// ternary/concatenation/fallback (e.g. `` `${cond ? 'Refresh' : 'Retry'}` `` used directly
+		// as a sink argument) has leaf literals of its own that the static chunks above never see.
+		const spanResults = n.templateSpans.flatMap((span) => extractLiteralTexts(span.expression, sourceFile));
+		return [...chunkResults, ...spanResults];
 	}
 	if (ts.isConditionalExpression(n)) {
 		return [...extractLiteralTexts(n.whenTrue, sourceFile), ...extractLiteralTexts(n.whenFalse, sourceFile)];
@@ -409,12 +421,11 @@ function scanFlattenedForAttributes(text, segments, ctx) {
 /**
  * Scans `text` (a slice of the flattened literal starting at `textOffsetInFlat`) for tag-text
  * matches. A body containing nested markup — e.g. `<button><span class="icon"></span>
- * Corrections</button>` — is recursed into once (so the inner `<span>`'s own text, if any, is
- * still separately caught) and the outer tag's *own* direct text is reported by blanking the
- * nested markup out (replacing each `<...>` with same-length spaces, so offsets keep lining up)
- * rather than requiring the whole body to be nesting-free. Capped at one level: a tag nested two
- * levels deep is reported as one combined blob rather than recursed into again, which covers the
- * common icon-plus-text pattern without a full recursive HTML parser.
+ * Corrections</button>` — is recursed into (to any depth — see the call below, unbounded) so a
+ * nested (tracked) tag's own text is still separately caught, while the outer tag's own direct
+ * text is reported via `splitOwnTextRuns`, which excludes each nested element's or comment's
+ * *entire* span rather than requiring the whole body to be nesting-free — so nothing is
+ * double-counted between the recursive call and the outer tag's own runs.
  */
 // Matches a *complete* nested element (any tag name — not just ones in TAGS — open through its
 // nearest matching close) or an HTML comment, as one unit. Used to carve a tag's own direct text
@@ -467,25 +478,51 @@ function scanFlattenedForTagText(text, textOffsetInFlat, segments, ctx) {
 			scanFlattenedForTagText(body, bodyStartInFlat, segments, ctx);
 		}
 
-		for (const run of splitOwnTextRuns(body, bodyStartInFlat)) {
-			// Skip leading whitespace: a multiline `<button>\n  Refresh\n</button>` otherwise
-			// attributes the violation to the line right after `>` (a blank/whitespace-only line)
-			// instead of the line the reportable text actually sits on, so the baseline hashes the
-			// wrong line.
-			const leadingSkip = run.text.match(LEADING_SKIP_RE)[0].length;
-			const runOffset = mapFlatIndexToSourceOffset(run.offsetInFlat + leadingSkip, segments);
-			reportAt(run.text, runOffset, ctx, `<${tag}> text content`);
-		}
+		reportOwnTextRuns(body, bodyStartInFlat, segments, ctx, `<${tag}> text content`);
 	}
 }
 
-/** Scans a string/template literal (plain strings included, not just template literals) for embedded HTML tag text and aria-label/title/placeholder attributes, bridging `${...}` holes so matches can span an interpolation. */
+/** Splits `body` into its direct-text runs via splitOwnTextRuns and reports each at its own offset (skipping leading whitespace/interpolation-placeholder first — see the callers' comments for why). */
+function reportOwnTextRuns(body, bodyStartInFlat, segments, ctx, reason) {
+	for (const run of splitOwnTextRuns(body, bodyStartInFlat)) {
+		// Skip leading whitespace: a multiline `<button>\n  Refresh\n</button>` otherwise
+		// attributes the violation to the line right after `>` (a blank/whitespace-only line)
+		// instead of the line the reportable text actually sits on, so the baseline hashes the
+		// wrong line. Also skips HOLE_PLACEHOLDER, for a run beginning right after an
+		// interpolation hole.
+		const leadingSkip = run.text.match(LEADING_SKIP_RE)[0].length;
+		const runOffset = mapFlatIndexToSourceOffset(run.offsetInFlat + leadingSkip, segments);
+		reportAt(run.text, runOffset, ctx, reason);
+	}
+}
+
+/**
+ * Scans a string/template literal (plain strings included, not just template literals) for
+ * embedded HTML tag text and aria-label/title/placeholder attributes, bridging `${...}` holes so
+ * matches can span an interpolation. Also reports direct text sitting *outside* any matched tag at
+ * the top level of the literal — e.g. a raw HTML fragment like `'<span class="icon"></span>
+ * Insights'` (built to be concatenated with other markup before reaching a sink such as
+ * `setHtml`) has "Insights" outside any wrapping element of its own; `reportOwnTextRuns` on the
+ * whole literal excludes the fully-matched `<span>...</span>` (same as it would inside a tag's
+ * body) and reports what's left, without duplicating what scanFlattenedForTagText already finds
+ * inside actual tags.
+ */
 function scanHtmlLiteralForTags(node, ctx) {
 	const chunks = getStaticChunks(node, ctx.sourceFile);
 	if (chunks.length === 0) { return; }
 	const { text, segments } = flattenChunks(chunks);
 	scanFlattenedForAttributes(text, segments, ctx);
 	scanFlattenedForTagText(text, 0, segments, ctx);
+	// Gated on HTML_TAG_FRAGMENT_RE: this call runs on EVERY string/template literal in scope via
+	// walk(), including plain prose with no markup at all (e.g. 'Refresh', a URL, a multiline
+	// template used directly as an assignment/sink value). Those are already fully handled by the
+	// assignment/sink-specific paths (checkAssignmentTarget, checkTextArgSink,
+	// checkSetAttributeSink) — without the gate this would double-report them, since a literal
+	// with no tag markup has nothing for splitOwnTextRuns to exclude and reports the whole text
+	// back verbatim under a second reason string.
+	if (HTML_TAG_FRAGMENT_RE.test(text)) {
+		reportOwnTextRuns(text, 0, segments, ctx, 'text content (outside any tag)');
+	}
 }
 
 /** `el(tag, className, text)` / `iconHeading(tag, icon, text, className)`-style calls where a fixed argument position holds display text. `setHtml(el, html)` is markup-bearing like `.innerHTML =` (see HTML_BEARING_SINKS): a tag-bearing value is left for the generic literal scan to avoid double-reporting the same text. */
@@ -597,10 +634,23 @@ export function hashLine(text) {
 	return crypto.createHash('sha1').update(text).digest('hex').slice(0, 12);
 }
 
+// violationLineHash is called once per violation (including every already-baselined one, of which
+// there are 1000+), and most violations in a run share a handful of source files — cache each
+// file's lines by absolute path instead of re-reading and re-splitting the same file repeatedly.
+const fileLinesCache = new Map();
+function getFileLines(absPath) {
+	let lines = fileLinesCache.get(absPath);
+	if (lines === undefined) {
+		lines = fs.readFileSync(absPath, 'utf8').split('\n');
+		fileLinesCache.set(absPath, lines);
+	}
+	return lines;
+}
+
 /** The trimmed content of the source line a violation was found on — the baseline's stable key ingredient. */
 function violationLineHash(violation) {
 	const absPath = path.join(repoRoot, violation.file);
-	const lines = fs.readFileSync(absPath, 'utf8').split('\n');
+	const lines = getFileLines(absPath);
 	return hashLine((lines[violation.line - 1] || '').trim());
 }
 

@@ -673,3 +673,15 @@ test('scanFile: a multiline template used directly as an assignment value attrib
 		assert.equal(violations[0].line, 2, `expected the violation on the "Refresh" line (2), got line ${violations[0].line}`);
 	});
 });
+
+test('scanFile: catches direct text sitting outside any tag in a raw HTML fragment, without double-reporting it', () => {
+	withTempFile(
+		"setHtml(tabButton, '<span class=\"codicon codicon-lightbulb\"></span> Insights');\n",
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			const matches = violations.filter((v) => v.text.trim() === 'Insights');
+			assert.equal(matches.length, 1, `expected "Insights" reported exactly once, got: ${JSON.stringify(violations)}`);
+		},
+	);
+});
