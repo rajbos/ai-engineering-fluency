@@ -73,7 +73,6 @@ export interface WebviewLocalization {
 	'mistral.button.refresh': string;
 	'mistral.button.removeApiKey': string;
 	'mistral.button.connectApiKey': string;
-	'mistral.prompt.enterApiKey': string;
 	'mistral.table.id': string;
 	'mistral.table.name': string;
 	'mistral.table.agentId': string;
@@ -147,7 +146,6 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'mistral.button.refresh': 'Refresh',
 	'mistral.button.removeApiKey': 'Remove API key',
 	'mistral.button.connectApiKey': 'Connect Mistral API key',
-	'mistral.prompt.enterApiKey': 'Enter your Mistral API key (stored in VS Code SecretStorage, used to call api.mistral.ai):',
 	'mistral.table.id': 'ID',
 	'mistral.table.name': 'Name',
 	'mistral.table.agentId': 'Agent ID',

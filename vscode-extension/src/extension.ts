@@ -580,6 +580,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private diagnosticsAllSessionFiles: string[] = [];
 	// BETA: last Mistral cloud (web) sessions result fetched for the diagnostics Research tab.
 	private _lastMistralCloudSessions?: MistralCloudSessionsResult;
+	// BETA: bumped on every refresh/clear so a slow in-flight refresh can detect it was superseded
+	// (e.g. by "Remove API key") and discard its result instead of repopulating stale data.
+	private _mistralCloudRefreshGeneration = 0;
 	// Per scan-range TTFT result cache. Granularity changes reuse the cached sample set instantly.
 	private readonly diagnosticsTtftCache = new TtftScanResultCache();
 	// Cache of the last diagnostic report text for copy/issue operations
@@ -4202,7 +4205,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'mistral.button.refresh': l10n.t('mistral.button.refresh'),
 			'mistral.button.removeApiKey': l10n.t('mistral.button.removeApiKey'),
 			'mistral.button.connectApiKey': l10n.t('mistral.button.connectApiKey'),
-			'mistral.prompt.enterApiKey': l10n.t('mistral.prompt.enterApiKey'),
 			'mistral.table.id': l10n.t('mistral.table.id'),
 			'mistral.table.name': l10n.t('mistral.table.name'),
 			'mistral.table.agentId': l10n.t('mistral.table.agentId'),
@@ -10573,7 +10575,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       analyzeModelUsage: () => this.dispatch('analyzeModelUsage:diagnostics', () => this.diagHandleAnalyzeModelUsage(message)),
       analyzeTtft: () => this.dispatch('analyzeTtft:diagnostics', () => this.diagHandleAnalyzeTtft(message)),
       refreshMistralCloudSessions: () => this.dispatch('refreshMistralCloudSessions:diagnostics', () => this.diagHandleRefreshMistralCloudSessions()),
-      setMistralApiKey: () => typeof message.apiKey === 'string' ? this.dispatch('setMistralApiKey:diagnostics', () => this.diagHandleSetMistralApiKey(message.apiKey)) : Promise.resolve(),
+      promptMistralApiKey: () => this.dispatch('promptMistralApiKey:diagnostics', () => this.diagHandlePromptMistralApiKey()),
       clearMistralApiKey: () => this.dispatch('clearMistralApiKey:diagnostics', () => this.diagHandleClearMistralApiKey()),
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
@@ -10758,7 +10760,23 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     }
   }
 
-  /** BETA: prompt the user for a Mistral API key and store it in SecretStorage, then refresh. */
+  /**
+   * BETA: prompt for the Mistral API key via the native VS Code input box (masked, extension-host
+   * side) rather than a webview `window.prompt()`, which would show the credential as clear text
+   * in the page and keep it in page JavaScript.
+   */
+  private async diagHandlePromptMistralApiKey(): Promise<void> {
+    const key = await vscode.window.showInputBox({
+      title: 'Mistral API Key',
+      prompt: l10n.t('mistral.prompt.enterApiKey'),
+      password: true,
+      ignoreFocusOut: true,
+      validateInput: (v) => (v && v.trim() ? undefined : 'API key is required'),
+    });
+    if (key) { await this.diagHandleSetMistralApiKey(key); }
+  }
+
+  /** BETA: store the Mistral API key in SecretStorage, then refresh. */
   private async diagHandleSetMistralApiKey(apiKey: string): Promise<void> {
     const key = apiKey.trim();
     if (!key) { return; }
@@ -10776,6 +10794,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
   private async diagHandleClearMistralApiKey(): Promise<void> {
     try {
       await this.context.secrets.delete(MISTRAL_API_KEY_SECRET);
+      this._mistralCloudRefreshGeneration++;
       this._lastMistralCloudSessions = undefined;
       this.log('Mistral API key removed.');
       if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
@@ -10804,8 +10823,10 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
   /** BETA: fetch Mistral cloud conversations and post the result to the diagnostics webview. */
   private async diagHandleRefreshMistralCloudSessions(): Promise<void> {
     if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
+    const generation = ++this._mistralCloudRefreshGeneration;
     let apiKey: string | undefined;
     try { apiKey = await this.context.secrets.get(MISTRAL_API_KEY_SECRET); } catch { apiKey = undefined; }
+    if (generation !== this._mistralCloudRefreshGeneration) { return; }
     if (!apiKey) {
       this._lastMistralCloudSessions = this.buildEmptyMistralCloudSessionsResult();
       this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result: this._lastMistralCloudSessions });
@@ -10813,6 +10834,12 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     }
     this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result: { ...this.buildEmptyMistralCloudSessionsResult(), authenticated: true } });
     const result = await collectMistralCloudSessions(apiKey);
+    // The key may have been removed or changed while this fetch was in flight (e.g. "Remove API
+    // key" clicked mid-refresh) — discard a now-stale result instead of repopulating the UI with
+    // data fetched under a key that is no longer the configured one.
+    let currentKey: string | undefined;
+    try { currentKey = await this.context.secrets.get(MISTRAL_API_KEY_SECRET); } catch { currentKey = undefined; }
+    if (generation !== this._mistralCloudRefreshGeneration || currentKey !== apiKey) { return; }
     this._lastMistralCloudSessions = result;
     if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
       this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result });

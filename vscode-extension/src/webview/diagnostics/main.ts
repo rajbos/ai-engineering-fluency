@@ -3494,23 +3494,18 @@ function setupMistralCloudHandlers(): void {
   const connect = document.getElementById("btn-mistral-connect");
   const disconnect = document.getElementById("btn-mistral-disconnect");
   const refresh = document.getElementById("btn-mistral-refresh");
-  connect?.addEventListener("click", () => promptMistralApiKey());
+  // The API key is a sensitive credential, so it is collected by the extension
+  // host via vscode.window.showInputBox({ password: true }) — never via a
+  // clear-text window.prompt() inside the webview.
+  connect?.addEventListener("click", () => {
+    vscode.postMessage({ command: "promptMistralApiKey" });
+  });
   disconnect?.addEventListener("click", () => {
     vscode.postMessage({ command: "clearMistralApiKey" });
   });
   refresh?.addEventListener("click", () => {
     vscode.postMessage({ command: "refreshMistralCloudSessions" });
   });
-}
-
-function promptMistralApiKey(): void {
-  const existing = window.prompt(
-    localize("mistral.prompt.enterApiKey"),
-    "",
-  );
-  if (existing !== null && existing.trim()) {
-    vscode.postMessage({ command: "setMistralApiKey", apiKey: existing.trim() });
-  }
 }
 
 function rerenderMistralCloudTab(): void {
