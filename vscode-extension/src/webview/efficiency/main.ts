@@ -31,6 +31,7 @@ import {
 	windowHasModelData,
 } from '../../../../src/efficiencyAnalysis';
 import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { renderModelMixTable } from './modelMixTable';
 
 // Minimal structural types for the dynamically imported Chart.js bundle —
 // a `typeof import('chart.js/auto')` type-import trips TS1542 under CJS resolution.
@@ -274,20 +275,7 @@ function renderAttributionTab(d: EfficiencyViewData): string {
 		return `<p class="eff-section-note">Not enough data to decompose the cost change — both compared windows need at least one session with token data.</p>`;
 	}
 	const maxAbs = Math.max(Math.abs(a.volumeEffect), Math.abs(a.efficiencyEffect), Math.abs(a.mixEffect), 0.01);
-	const shifts = a.modelShifts.length === 0 ? '' : `
-		<h3>Model mix movement</h3>
-		<table class="attr-shift-table">
-			<thead><tr><th>Model</th><th class="num">${escapeHtml(d.attributionWindows.prevRange)}</th><th class="num">${escapeHtml(d.attributionWindows.curRange)}</th><th class="num">Shift</th></tr></thead>
-			<tbody>
-				${a.modelShifts.map(s => `
-					<tr>
-						<td>${escapeHtml(s.displayName)}</td>
-						<td class="num">${(s.prevShare * 100).toFixed(1)}%</td>
-						<td class="num">${(s.curShare * 100).toFixed(1)}%</td>
-						<td class="num ${s.deltaShare > 0 ? 'share-up' : 'share-down'}">${s.deltaShare > 0 ? '+' : ''}${(s.deltaShare * 100).toFixed(1)} pt</td>
-					</tr>`).join('')}
-			</tbody>
-		</table>`;
+	const shifts = a.modelShifts.length === 0 ? '' : renderModelMixTable(a.modelShifts, d.attributionWindows);
 	return `
 		<p class="eff-section-note">The periods are adjacent, not overlapping: ${escapeHtml(capitalizeFirst(d.attributionWindows.prev))} is <b>${escapeHtml(d.attributionWindows.prevRange)}</b>; ${escapeHtml(d.attributionWindows.cur)} is <b>${escapeHtml(d.attributionWindows.curRange)}</b>. Each bar is a <b>what-if dollar amount</b>, not a session count: starting from the earlier cost, the factors are applied in order. Green reduces estimated cost; red increases it.</p>
 		<div class="attr-summary">

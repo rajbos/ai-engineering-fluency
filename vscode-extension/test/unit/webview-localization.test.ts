@@ -63,3 +63,23 @@ test('localize: a raw unresolved key in the payload falls back to the English de
 	assert.equal(localize('usage.contextPressure.compactedLabel'), '🗜️ Sessions compacted');
 	initializeWebviewLocalization({});
 });
+
+test('localize: the model-mix table defaults are present without any payload', () => {
+	// The Cost Attribution table renders on first paint, before any payload is
+	// guaranteed, so raw keys must never reach its headers.
+	initializeWebviewLocalization({});
+	for (const key of [
+		'efficiency.modelMix.heading',
+		'efficiency.modelMix.caption',
+		'efficiency.modelMix.model',
+		'efficiency.modelMix.previous',
+		'efficiency.modelMix.current',
+		'efficiency.modelMix.shift',
+		'efficiency.modelMix.shiftPoints',
+		'efficiency.modelMix.canonicalId',
+	]) {
+		assert.notEqual(localize(key), key, `${key} should have a built-in English default`);
+	}
+	assert.equal(localizeFormat('efficiency.modelMix.shiftPoints', '+1.5'), '+1.5 pt');
+	assert.equal(localizeFormat('efficiency.modelMix.canonicalId', 'gpt-4o'), 'Model ID: gpt-4o');
+});

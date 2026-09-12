@@ -224,10 +224,17 @@ export interface CostAttributionSide {
 	dollarsPerMTokens: number;
 }
 
-/** One model's share of tokens in the two compared periods. */
+/**
+ * One model's share of tokens in the two compared periods.
+ *
+ * Deliberately canonical: the raw `model` id and numeric shares only. Friendly
+ * names are resolved in the webview by `getModelDisplayName()`, which reads the
+ * pricing JSON from `window.__MODEL_PRICING__` — a global that does not exist in
+ * the extension host, so resolving here would serialize raw ids anyway.
+ */
 export interface ModelMixShift {
+	/** Canonical model identifier, exactly as it appears in the session data. */
 	model: string;
-	displayName: string;
 	/** Share of period tokens, 0..1. */
 	prevShare: number;
 	curShare: number;
@@ -293,7 +300,7 @@ function buildModelShifts(prev: Map<string, number>, cur: Map<string, number>, p
 		const deltaShare = curShare - prevShare;
 		// Ignore sub-half-point movements — they are noise in the mix story.
 		if (Math.abs(deltaShare) < 0.005) { continue; }
-		shifts.push({ model, displayName: getModelDisplayName(model), prevShare, curShare, deltaShare, prevTokens, curTokens });
+		shifts.push({ model, prevShare, curShare, deltaShare, prevTokens, curTokens });
 	}
 	return shifts.sort((a, b) => Math.abs(b.deltaShare) - Math.abs(a.deltaShare)).slice(0, 6);
 }

@@ -298,3 +298,40 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: Cost Attribution model-mix table labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'efficiency.modelMix.heading': 'Model mix movement',
+		'efficiency.modelMix.caption': 'Token share per model, {0} compared with {1}',
+		'efficiency.modelMix.model': 'Model',
+		'efficiency.modelMix.previous': 'Previous',
+		'efficiency.modelMix.current': 'Current',
+		'efficiency.modelMix.shift': 'Shift',
+		'efficiency.modelMix.shiftPoints': '{0} pt',
+		'efficiency.modelMix.canonicalId': 'Model ID: {0}',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: Cost Attribution model-mix table labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'efficiency.modelMix.heading': '模型组合变化',
+			'efficiency.modelMix.caption': '各模型的令牌占比，{0} 与 {1} 对比',
+			'efficiency.modelMix.model': '模型',
+			'efficiency.modelMix.previous': '上一期',
+			'efficiency.modelMix.current': '本期',
+			'efficiency.modelMix.shift': '变化',
+			'efficiency.modelMix.shiftPoints': '{0} 个百分点',
+			'efficiency.modelMix.canonicalId': '模型 ID：{0}',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});

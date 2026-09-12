@@ -32,6 +32,16 @@ export interface WebviewLocalization {
 	'usage.contextPressure.worstFill': string;
 	'usage.contextPressure.nearLimitTooltip': string;
 
+	// Efficiency view — Cost Attribution model-mix table
+	'efficiency.modelMix.heading': string;
+	'efficiency.modelMix.caption': string;
+	'efficiency.modelMix.model': string;
+	'efficiency.modelMix.previous': string;
+	'efficiency.modelMix.current': string;
+	'efficiency.modelMix.shift': string;
+	'efficiency.modelMix.shiftPoints': string;
+	'efficiency.modelMix.canonicalId': string;
+
 	// Details view — collapsible "Usage by Editor" section heading tooltips
 	'details.editorSection.show': string;
 	'details.editorSection.hide': string;
@@ -90,6 +100,14 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'usage.contextPressure.nearLimitLabel': '⚠️ Sessions near the limit',
 	'usage.contextPressure.worstFill': 'Fullest session reached {0}% of its window',
 	'usage.contextPressure.nearLimitTooltip': 'Copilot CLI sessions that filled at least {0}% of their context window without compacting — the early-warning band before context starts getting dropped',
+	'efficiency.modelMix.heading': 'Model mix movement',
+	'efficiency.modelMix.caption': 'Token share per model, {0} compared with {1}',
+	'efficiency.modelMix.model': 'Model',
+	'efficiency.modelMix.previous': 'Previous',
+	'efficiency.modelMix.current': 'Current',
+	'efficiency.modelMix.shift': 'Shift',
+	'efficiency.modelMix.shiftPoints': '{0} pt',
+	'efficiency.modelMix.canonicalId': 'Model ID: {0}',
 	'details.editorSection.show': 'Show Usage by Editor',
 	'details.editorSection.hide': 'Hide Usage by Editor',
 	'logviewer.summary.interactions': 'Interactions',

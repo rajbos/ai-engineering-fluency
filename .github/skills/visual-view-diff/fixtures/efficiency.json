@@ -99,17 +99,59 @@
     "modelShifts": [
       {
         "model": "claude-sonnet-4.5",
-        "deltaShare": 0.18
+        "prevShare": 0.22,
+        "curShare": 0.4,
+        "deltaShare": 0.18,
+        "prevTokens": 858000,
+        "curTokens": 1780000
       },
       {
         "model": "gpt-4o",
-        "deltaShare": -0.11
+        "prevShare": 0.31,
+        "curShare": 0.2,
+        "deltaShare": -0.11,
+        "prevTokens": 1209000,
+        "curTokens": 890000
+      },
+      {
+        "model": "claude-opus-4-8",
+        "prevShare": 0.04,
+        "curShare": 0.12,
+        "deltaShare": 0.08,
+        "prevTokens": 156000,
+        "curTokens": 534000
+      },
+      {
+        "model": "customendpoint/Mistral/mistral-medium-latest",
+        "prevShare": 0.1,
+        "curShare": 0.04,
+        "deltaShare": -0.06,
+        "prevTokens": 390000,
+        "curTokens": 178000
+      },
+      {
+        "model": "9f4a1c2e-7b31-4d55-9e6a-2c8b0f1d3a47/gpt-5-mini",
+        "prevShare": 0.0,
+        "curShare": 0.05,
+        "deltaShare": 0.05,
+        "prevTokens": 0,
+        "curTokens": 222500
+      },
+      {
+        "model": "internal-eval-model-2026-preview-long-name",
+        "prevShare": 0.12,
+        "curShare": 0.07,
+        "deltaShare": -0.05,
+        "prevTokens": 468000,
+        "curTokens": 311500
       }
     ]
   },
   "attributionWindows": {
-    "prev": "Jan 12 – Feb 8",
-    "cur": "Feb 9 – Mar 8"
+    "prev": "previous 30 days",
+    "cur": "last 30 days",
+    "prevRange": "Jan 12, 2026–Feb 8, 2026",
+    "curRange": "Feb 9, 2026–Mar 8, 2026"
   },
   "deltas": [
     {

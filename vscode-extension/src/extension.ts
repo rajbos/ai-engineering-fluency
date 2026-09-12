@@ -4178,6 +4178,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
 			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
 			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
+			// Efficiency view — Cost Attribution model-mix table. Templates with
+			// {0}/{1} are resolved webview-side by localizeFormat().
+			'efficiency.modelMix.heading': l10n.t('efficiency.modelMix.heading'),
+			'efficiency.modelMix.caption': l10n.t('efficiency.modelMix.caption'),
+			'efficiency.modelMix.model': l10n.t('efficiency.modelMix.model'),
+			'efficiency.modelMix.previous': l10n.t('efficiency.modelMix.previous'),
+			'efficiency.modelMix.current': l10n.t('efficiency.modelMix.current'),
+			'efficiency.modelMix.shift': l10n.t('efficiency.modelMix.shift'),
+			'efficiency.modelMix.shiftPoints': l10n.t('efficiency.modelMix.shiftPoints'),
+			'efficiency.modelMix.canonicalId': l10n.t('efficiency.modelMix.canonicalId'),
 			// Details view — collapsible "Usage by Editor" section heading tooltips
 			'details.editorSection.show': l10n.t('details.editorSection.show'),
 			'details.editorSection.hide': l10n.t('details.editorSection.hide'),
@@ -9608,6 +9618,22 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		return payload;
 	}
 
+	/**
+	 * Formats one boundary of a Cost Attribution window. The ranges sit next to
+	 * localized table labels, so they follow the VS Code display language rather
+	 * than a hardcoded en-US. VS Code can report a tag Intl rejects (the
+	 * 'qps-ploc' pseudo-locale), which throws a RangeError, so an unusable tag
+	 * falls back to en-US instead of taking the whole view down.
+	 */
+	private formatAttributionDate(date: Date): string {
+		const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+		try {
+			return date.toLocaleDateString(vscode.env.language || undefined, options);
+		} catch {
+			return date.toLocaleDateString('en-US', options);
+		}
+	}
+
 	private async buildEfficiencyViewData(forceRecalc = false): Promise<EfficiencyViewData> {
 		const now = new Date();
 		const dailyStats = (!forceRecalc && this.lastFullDailyStats) ? this.lastFullDailyStats : await this.calculateDailyStats();
@@ -9623,9 +9649,6 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		const skillImpact = _computeSkillImpact(sessionInputs);
 		const { prevDays, curDays } = _splitTrailingWindows(dailyStats, now);
 		const attributionBoundaries = _getTrailingWindowBoundaries(now);
-		const formatAttributionDate = (date: Date): string => date.toLocaleDateString('en-US', {
-			month: 'short', day: 'numeric', year: 'numeric',
-		});
 		const attribution = _computeCostAttribution(prevDays, curDays, deps);
 		const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 		const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -9660,8 +9683,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			attributionWindows: {
 				prev: 'previous 30 days',
 				cur: 'last 30 days',
-				prevRange: `${formatAttributionDate(attributionBoundaries.prevStart)}–${formatAttributionDate(attributionBoundaries.prevEnd)}`,
-				curRange: `${formatAttributionDate(attributionBoundaries.curStart)}–${formatAttributionDate(attributionBoundaries.curEnd)}`,
+				prevRange: `${this.formatAttributionDate(attributionBoundaries.prevStart)}–${this.formatAttributionDate(attributionBoundaries.prevEnd)}`,
+				curRange: `${this.formatAttributionDate(attributionBoundaries.curStart)}–${this.formatAttributionDate(attributionBoundaries.curEnd)}`,
 			},
 			deltas,
 			deltaWindows: {

@@ -235,6 +235,51 @@ test('computeCostAttribution: reports the largest model mix shifts', () => {
 	assert.ok(shiftA.deltaShare < 0);
 });
 
+test('computeCostAttribution: model shifts stay canonical — raw ids, no host-resolved names', () => {
+	// The host has no pricing map to resolve names against (window.__MODEL_PRICING__
+	// only exists in the webview), so the analytics layer deliberately emits the raw
+	// id and lets the view resolve it. A friendly name appearing here would mean the
+	// resolver moved back to the host and silently degraded to raw ids in production.
+	const deps = pricedDeps({ 'gpt-4o': 10, 'claude-sonnet-4.5': 10 });
+	const prevDays = [day('2026-06-01', { tokens: 1_000_000, sessions: 10, modelUsage: { ...usage('gpt-4o', 500_000, 300_000, 8), ...usage('claude-sonnet-4.5', 150_000, 50_000, 2) } })];
+	const curDays = [day('2026-07-01', { tokens: 1_000_000, sessions: 10, modelUsage: { ...usage('gpt-4o', 150_000, 50_000, 2), ...usage('claude-sonnet-4.5', 500_000, 300_000, 8) } })];
+	const attr = computeCostAttribution(prevDays, curDays, deps);
+	assert.ok(attr);
+	assert.deepEqual(attr.modelShifts.map(s => s.model).sort(), ['claude-sonnet-4.5', 'gpt-4o']);
+	for (const s of attr.modelShifts) {
+		assert.deepEqual(
+			Object.keys(s).sort(),
+			['curShare', 'curTokens', 'deltaShare', 'model', 'prevShare', 'prevTokens'],
+		);
+	}
+});
+
+test('computeCostAttribution: keeps the 0.5-point noise threshold, |delta| sort and six-row cap', () => {
+	// Shares in percentage points; each period totals 100, so a model's delta is
+	// exactly the difference between its two entries. 'quiet' moves 0.4 points —
+	// just under the noise gate — while eight others move 5 points or more.
+	const prevShares: Record<string, number> = { m0: 20, m1: 20, m2: 15, m3: 15, m4: 10, m5: 10, m6: 5, m7: 4.6, quiet: 0.4 };
+	const curShares: Record<string, number> = { m0: 12, m1: 13, m2: 9, m3: 10, m4: 15, m5: 16, m6: 11, m7: 13.2, quiet: 0.8 };
+	const deps = pricedDeps(Object.fromEntries(Object.keys(prevShares).map(m => [m, 10])));
+	const toUsage = (shares: Record<string, number>): ModelUsage =>
+		Object.assign({}, ...Object.entries(shares).map(([m, pts]) => usage(m, pts * 10_000, 0, 1)));
+	const attr = computeCostAttribution(
+		[day('2026-06-01', { tokens: 1_000_000, sessions: 9, modelUsage: toUsage(prevShares) })],
+		[day('2026-07-01', { tokens: 1_000_000, sessions: 9, modelUsage: toUsage(curShares) })],
+		deps,
+	);
+	assert.ok(attr);
+	assert.equal(attr.modelShifts.length, 6, 'capped at the six largest movements');
+	assert.ok(!attr.modelShifts.some(s => s.model === 'quiet'), 'sub-half-point movement is filtered as noise');
+	const magnitudes = attr.modelShifts.map(s => Math.abs(s.deltaShare));
+	assert.deepEqual(magnitudes, [...magnitudes].sort((a, b) => b - a), 'sorted by |deltaShare|, largest first');
+	for (const s of attr.modelShifts) {
+		assert.ok(Math.abs(s.deltaShare) >= 0.005);
+	}
+	// The two smallest qualifying movements (5 points each) fall off the cap.
+	assert.ok(!attr.modelShifts.some(s => s.model === 'm3' || s.model === 'm4'));
+});
+
 // ── splitTrailingWindows ─────────────────────────────────────────────────────
 
 test('splitTrailingWindows: partitions days into trailing and previous 30-day windows', () => {
