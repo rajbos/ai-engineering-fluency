@@ -30,6 +30,8 @@
  * https://github.com/samueltauil/hydrafusion-traces (docs/SPIKE.md).
  */
 
+import { NANO_AIU_TO_DOLLARS } from './tokenEstimation';
+
 /** Nano-AIU per AIU — the CLI reports credits scaled by 1e9 to keep them integral. */
 const NANO_AIU_PER_AIU = 1_000_000_000;
 
@@ -233,16 +235,19 @@ export function nanoAiuToAiu(nanoAiu: unknown): number {
 }
 
 /**
- * AI credits convert to USD at a fixed, documented rate — see `monthlyAiCreditsUsd`
- * in `vscode-extension/src/copilotPlans.json`: "1 AI credit = $0.01". This is GitHub's
- * own conversion, not an estimate, so it applies uniformly regardless of which model
- * served a leg.
+ * AIU-to-USD rate, derived from the repo's one canonical nano-AIU-to-dollars rate
+ * (`NANO_AIU_TO_DOLLARS` in `tokenEstimation.ts`, applied elsewhere to
+ * `session.shutdown.totalNanoAiu`) rather than a second hard-coded constant here.
+ * `NANO_AIU_PER_AIU * NANO_AIU_TO_DOLLARS` is the same $0.01-per-credit rate GitHub
+ * documents in `copilotPlans.json`'s `monthlyAiCreditsUsd` note ("1 AI credit =
+ * $0.01") — computed once as its own factor, rather than inline in `aiuToUsd` below,
+ * so the multiplication order doesn't reintroduce floating-point noise per call.
  */
-const USD_PER_AIU = 0.01;
+const AIU_TO_USD_RATE = NANO_AIU_PER_AIU * NANO_AIU_TO_DOLLARS;
 
 /** Converts AIU credits (already divided from nano-AIU) into a USD amount for display. */
 export function aiuToUsd(aiu: number): number {
-	return aiu * USD_PER_AIU;
+	return aiu * AIU_TO_USD_RATE;
 }
 
 function parseUsage(raw: unknown): HydraFusionUsage {
@@ -571,7 +576,11 @@ export function matchHydraFusionTurnsToChatTurns(
 		let matchedTurnNumber: number | null = null;
 		while (chatIndex < chatTurns.length) {
 			const ts = chatTurns[chatIndex].timestamp ? Date.parse(chatTurns[chatIndex].timestamp!) : NaN;
-			if (Number.isNaN(ts) || ts > startedAt) { break; }
+			// An unusable timestamp can never be a match for *any* fusion turn, but it must not
+			// get stuck as the loop's position either — skip it permanently so later, well-formed
+			// chat turns stay reachable by this and every subsequent fusion turn.
+			if (Number.isNaN(ts)) { chatIndex++; continue; }
+			if (ts > startedAt) { break; }
 			matchedTurnNumber = chatTurns[chatIndex].turnNumber;
 			chatIndex++;
 		}

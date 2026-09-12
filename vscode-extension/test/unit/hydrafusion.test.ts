@@ -441,6 +441,26 @@ describe('matchHydraFusionTurnsToChatTurns', () => {
 		assert.equal(matches.get(0), 1);
 	});
 
+	test('a chat turn with no timestamp is skipped permanently, not left blocking every later fusion turn', () => {
+		// Regression test: an earlier version broke out of the advancement loop on an
+		// unusable timestamp without moving past it, so chatIndex stayed pinned there —
+		// every subsequent fusion turn hit the same bad entry immediately and could never
+		// reach turn 3, even though it has a perfectly good timestamp.
+		const content = [
+			fusionTurnAt('f1', '2026-01-01T00:00:05.000Z'),
+			fusionTurnAt('f2', '2026-01-01T00:00:25.000Z'),
+		].join('\n');
+		const summary = analyzeHydraFusionSession(content)!;
+		const chatTurns = [
+			{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' },
+			{ turnNumber: 2, timestamp: null },
+			{ turnNumber: 3, timestamp: '2026-01-01T00:00:20.000Z' },
+		];
+		const matches = matchHydraFusionTurnsToChatTurns(chatTurns, summary.turns);
+		assert.equal(matches.get(0), 1);
+		assert.equal(matches.get(1), 3);
+	});
+
 	test('returns an empty map for a session with no fusion turns', () => {
 		const chatTurns = [{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' }];
 		assert.equal(matchHydraFusionTurnsToChatTurns(chatTurns, []).size, 0);

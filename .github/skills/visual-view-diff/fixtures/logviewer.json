@@ -173,7 +173,7 @@
               "aiu": 11.429228
             },
             "isFinalSource": false,
-            "completedAt": "2026-09-11T09:15:02.400Z"
+            "completedAt": "2026-03-14T09:14:02.400Z"
           },
           {
             "phaseId": "fusion-a1b2c3d4:judge",
@@ -193,7 +193,7 @@
               "aiu": 0.6076
             },
             "isFinalSource": false,
-            "completedAt": "2026-09-11T09:15:03.600Z"
+            "completedAt": "2026-03-14T09:14:03.600Z"
           },
           {
             "phaseId": "fusion-a1b2c3d4:repair",
@@ -213,7 +213,7 @@
               "aiu": 180.21224
             },
             "isFinalSource": true,
-            "completedAt": "2026-09-11T09:15:06.000Z"
+            "completedAt": "2026-03-14T09:14:06.000Z"
           }
         ],
         "handoffs": [
@@ -231,8 +231,8 @@
         "aiu": 192.249068,
         "reviewAiu": 12.036828,
         "durationMs": 292424,
-        "startedAt": "2026-09-11T09:15:01.200Z",
-        "completedAt": "2026-09-11T09:15:07.200Z",
+        "startedAt": "2026-03-14T09:14:01.200Z",
+        "completedAt": "2026-03-14T09:14:07.200Z",
         "isCompound": true
       },
       {
@@ -271,7 +271,7 @@
               "aiu": 248.10442
             },
             "isFinalSource": true,
-            "completedAt": "2026-09-11T09:15:09.600Z"
+            "completedAt": "2026-03-14T09:18:02.400Z"
           },
           {
             "phaseId": "fusion-e5f6a7b8:critic",
@@ -291,7 +291,7 @@
               "aiu": 1.2841
             },
             "isFinalSource": false,
-            "completedAt": "2026-09-11T09:15:10.800Z"
+            "completedAt": "2026-03-14T09:18:03.600Z"
           }
         ],
         "handoffs": [],
@@ -303,8 +303,8 @@
         "aiu": 249.38852,
         "reviewAiu": 1.2841,
         "durationMs": 193044,
-        "startedAt": "2026-09-11T09:15:08.400Z",
-        "completedAt": "2026-09-11T09:15:12.000Z",
+        "startedAt": "2026-03-14T09:18:01.200Z",
+        "completedAt": "2026-03-14T09:18:04.800Z",
         "isCompound": true
       },
       {
@@ -341,7 +341,7 @@
               "aiu": 14.720411
             },
             "isFinalSource": true,
-            "completedAt": "2026-09-11T09:15:14.400Z"
+            "completedAt": "2026-03-14T09:22:02.400Z"
           }
         ],
         "handoffs": [],
@@ -353,8 +353,8 @@
         "aiu": 14.720411,
         "reviewAiu": 0,
         "durationMs": 22509,
-        "startedAt": "2026-09-11T09:15:13.200Z",
-        "completedAt": "2026-09-11T09:15:15.600Z",
+        "startedAt": "2026-03-14T09:22:01.200Z",
+        "completedAt": "2026-03-14T09:22:03.600Z",
         "isCompound": false
       }
     ],
