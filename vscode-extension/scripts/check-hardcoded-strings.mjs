@@ -69,13 +69,23 @@ const TARGET_PROPS = new Set(['textContent', 'innerText', 'innerHTML', 'title', 
 const TAGS = [
 	'button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span',
 	'td', 'th', 'option', 'summary', 'caption', 'div', 'a', 'li', 'legend',
-	'strong', 'em', 'small', 'dt', 'dd', 'figcaption', 'title'
+	'strong', 'em', 'small', 'dt', 'dd', 'figcaption', 'title', 'vscode-button'
 ];
 const TAG_TEXT_RE = new RegExp(`<(${TAGS.join('|')})(?:\\s[^>]*)?>([^<]+)</\\1>`, 'gi');
 const ATTR_NAMES = ['aria-label', 'title', 'placeholder'];
 const ATTR_RE = new RegExp(`(?<![\\w-])(?:${ATTR_NAMES.join('|')})\\s*=\\s*(["'])((?:(?!\\1)[\\s\\S])*)\\1`, 'gi');
 
-const LETTER_RUN_RE = /[A-Za-z]{2,}/;
+// Functions where a specific (0-based) argument position holds display text, mirroring
+// TARGET_PROPS but for call-based sinks instead of property assignment — e.g. domUtils.ts's
+// `el(tag, className, text)` and `iconHeading(tag, icon, text, className)` helpers.
+const TEXT_ARG_SINKS = new Map([
+	['el', 2],
+	['iconHeading', 2],
+]);
+
+// \p{L}: at least one Unicode-letter run, so non-Latin UI text (e.g. Chinese, Japanese) is
+// treated as prose too, not just ASCII — this extension ships zh-CN localization.
+const LETTER_RUN_RE = /\p{L}{2,}/u;
 const URL_SCHEME_RE = /^(?:[a-z][a-z0-9+.-]*:)?\/\//i;
 const URL_PROTOCOL_RE = /^(https?|mailto|data|vscode-resource|vscode-webview|command):/i;
 const CSS_UNIT_VALUE_RE = /^-?\d+(\.\d+)?(px|em|rem|ex|ch|vh|vw|vmin|vmax|pt|pc|in|cm|mm|deg|rad|grad|turn|s|ms|fr|%)$/i;
@@ -149,8 +159,12 @@ function extractLiteralText(node) {
 	return null;
 }
 
-/** Splits a template literal into its raw static text chunks (skipping `${...}` holes), each tagged with its absolute source offset. */
-function getTemplateChunks(node, sourceFile) {
+/**
+ * Splits a string/template literal into its raw static text chunks (skipping `${...}` holes for
+ * a template expression; a plain string or no-substitution template yields exactly one chunk),
+ * each tagged with its absolute source offset.
+ */
+function getStaticChunks(node, sourceFile) {
 	const raw = sourceFile.text;
 	const chunks = [];
 	function push(literalNode, prefixLen, suffixLen) {
@@ -158,7 +172,9 @@ function getTemplateChunks(node, sourceFile) {
 		const end = literalNode.getEnd();
 		chunks.push({ text: raw.slice(start + prefixLen, end - suffixLen), offset: start + prefixLen });
 	}
-	if (ts.isNoSubstitutionTemplateLiteral(node)) {
+	if (ts.isStringLiteral(node)) {
+		push(node, 1, 1); // '...' or "..."
+	} else if (ts.isNoSubstitutionTemplateLiteral(node)) {
 		push(node, 1, 1); // `...`
 	} else if (ts.isTemplateExpression(node)) {
 		push(node.head, 1, 2); // `...${
@@ -173,11 +189,43 @@ function getTemplateChunks(node, sourceFile) {
 	return chunks;
 }
 
-/** True if the source line at `line` (1-based), or the line before it, carries an `i18n-exempt` comment. */
+// Bridges a template's `${...}` holes with a neutral, bracket/quote-free marker so tag/attribute
+// regexes can match text that spans an interpolation (e.g. `<span>${x} turns</span>`) instead of
+// only seeing whichever side of the hole happens to share a chunk with the tag delimiter.
+const HOLE_PLACEHOLDER = '‹…›'; // ‹…›
+
+/** Concatenates static chunks into one flat string (holes bridged by HOLE_PLACEHOLDER), plus a
+ * segment map for translating a flat-text index back to an absolute source offset. */
+function flattenChunks(chunks) {
+	let text = '';
+	const segments = [];
+	chunks.forEach((chunk, i) => {
+		segments.push({ flatStart: text.length, sourceOffset: chunk.offset, length: chunk.text.length });
+		text += chunk.text;
+		if (i < chunks.length - 1) { text += HOLE_PLACEHOLDER; }
+	});
+	return { text, segments };
+}
+
+/** Maps an index into flattened chunk text back to an absolute source offset, clamping into the nearest chunk if the index falls inside a placeholder. */
+function mapFlatIndexToSourceOffset(index, segments) {
+	let seg = segments[0];
+	for (const s of segments) {
+		if (s.flatStart <= index) { seg = s; } else { break; }
+	}
+	const within = Math.min(Math.max(index - seg.flatStart, 0), seg.length);
+	return seg.sourceOffset + within;
+}
+
+// Requires an actual `//` marker before "i18n-exempt" so the escape hatch only fires from a real
+// comment, not any string/code that happens to contain that phrase.
+const EXEMPT_MARKER_RE = /\/\/.*i18n-exempt\b/i;
+
+/** True if the source line at `line` (1-based), or the line before it, carries a `// i18n-exempt` comment. */
 function isExemptByInlineComment(fileLines, line) {
 	const current = fileLines[line - 1] || '';
 	const previous = fileLines[line - 2] || '';
-	return /i18n-exempt\b/i.test(current) || /i18n-exempt\b/i.test(previous);
+	return EXEMPT_MARKER_RE.test(current) || EXEMPT_MARKER_RE.test(previous);
 }
 
 function loadAllowlist() {
@@ -204,30 +252,49 @@ function checkAssignmentTarget(propName, valueNode, ctx, reasonPrefix) {
 	reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${reasonPrefix}${propName}`);
 }
 
-function scanChunkForAttributes(chunk, ctx) {
+function scanFlattenedForAttributes(text, segments, ctx) {
 	ATTR_RE.lastIndex = 0;
 	let m;
-	while ((m = ATTR_RE.exec(chunk.text)) !== null) {
+	while ((m = ATTR_RE.exec(text)) !== null) {
 		const value = m[2];
 		const valueOffsetInMatch = m[0].length - 1 - value.length;
-		reportAt(value, chunk.offset + m.index + valueOffsetInMatch, ctx, 'HTML attribute (aria-label/title/placeholder)');
+		reportAt(value, mapFlatIndexToSourceOffset(m.index + valueOffsetInMatch, segments), ctx, 'HTML attribute (aria-label/title/placeholder)');
 	}
 }
 
-function scanChunkForTagText(chunk, ctx) {
+function scanFlattenedForTagText(text, segments, ctx) {
 	TAG_TEXT_RE.lastIndex = 0;
 	let m;
-	while ((m = TAG_TEXT_RE.exec(chunk.text)) !== null) {
+	while ((m = TAG_TEXT_RE.exec(text)) !== null) {
 		const openTagEnd = m[0].indexOf('>') + 1;
-		reportAt(m[2], chunk.offset + m.index + openTagEnd, ctx, `<${m[1].toLowerCase()}> text content`);
+		reportAt(m[2], mapFlatIndexToSourceOffset(m.index + openTagEnd, segments), ctx, `<${m[1].toLowerCase()}> text content`);
 	}
 }
 
-function scanTemplateForHtml(node, ctx) {
-	for (const chunk of getTemplateChunks(node, ctx.sourceFile)) {
-		scanChunkForAttributes(chunk, ctx);
-		scanChunkForTagText(chunk, ctx);
-	}
+/** Scans a string/template literal (plain strings included, not just template literals) for embedded HTML tag text and aria-label/title/placeholder attributes, bridging `${...}` holes so matches can span an interpolation. */
+function scanHtmlLiteralForTags(node, ctx) {
+	const chunks = getStaticChunks(node, ctx.sourceFile);
+	if (chunks.length === 0) { return; }
+	const { text, segments } = flattenChunks(chunks);
+	scanFlattenedForAttributes(text, segments, ctx);
+	scanFlattenedForTagText(text, segments, ctx);
+}
+
+/** `el(tag, className, text)` / `iconHeading(tag, icon, text, className)`-style calls where a fixed argument position holds display text. */
+function checkTextArgSink(node, chain, ctx) {
+	const argIndex = TEXT_ARG_SINKS.get(chain);
+	if (argIndex === undefined || node.arguments.length <= argIndex) { return; }
+	const literal = extractLiteralText(node.arguments[argIndex]);
+	if (literal) { reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${chain}() text argument`); }
+}
+
+/** `expr.setAttribute('title'|'aria-label'|'placeholder', value)` — the imperative-JS equivalent of an HTML attribute literal. */
+function checkSetAttributeSink(node, ctx) {
+	if (!ts.isPropertyAccessExpression(node.expression) || node.expression.name.text !== 'setAttribute' || node.arguments.length < 2) { return; }
+	const nameArg = unwrapParens(node.arguments[0]);
+	if (!ts.isStringLiteral(nameArg) || !ATTR_NAMES.includes(nameArg.text)) { return; }
+	const literal = extractLiteralText(node.arguments[1]);
+	if (literal) { reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `setAttribute('${nameArg.text}', ...) value`); }
 }
 
 function walk(node, ctx) {
@@ -238,6 +305,8 @@ function walk(node, ctx) {
 		if (isConsoleCall(chain) || isLocalizationCall(chain)) {
 			return; // exempt: don't descend into console.*/localize()/t()/l10n.t() arguments
 		}
+		if (chain !== null) { checkTextArgSink(node, chain, ctx); }
+		checkSetAttributeSink(node, ctx);
 	}
 
 	if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
@@ -249,8 +318,8 @@ function walk(node, ctx) {
 		checkAssignmentTarget(node.name.text, node.initializer, ctx, 'object literal property .');
 	}
 
-	if (ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) {
-		scanTemplateForHtml(node, ctx);
+	if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) {
+		scanHtmlLiteralForTags(node, ctx);
 	}
 
 	ts.forEachChild(node, (child) => walk(child, ctx));
@@ -318,30 +387,63 @@ function violationLineHash(violation) {
 	return hashLine((lines[violation.line - 1] || '').trim());
 }
 
+function tallyKeys(keys) {
+	const counts = new Map();
+	for (const key of keys) { counts.set(key, (counts.get(key) || 0) + 1); }
+	return counts;
+}
+
+/**
+ * For each key (in scan order), determines whether it is "new": a key's first `baselineCount`
+ * occurrences are pre-existing, any beyond that are new. This is what lets a genuinely new
+ * duplicate of an already-baselined line get caught, instead of every occurrence of a
+ * once-baselined (file, hash) silently passing forever. Pure and disk-independent so it's
+ * directly testable; `main()` supplies `file::hash` keys built from `violationLineHash`.
+ */
+export function newIndexesBeyondBaseline(keys, baseline) {
+	const seenCounts = new Map();
+	return keys.map((key) => {
+		const occurrence = (seenCounts.get(key) || 0) + 1;
+		seenCounts.set(key, occurrence);
+		return occurrence > (baseline.get(key) || 0);
+	});
+}
+
+/** Loads the baseline as file::hash -> occurrence count, so a line duplicated elsewhere in the same file isn't silently covered by one baselined occurrence. */
 function loadBaseline() {
-	if (!fs.existsSync(baselinePath)) { return new Set(); }
+	if (!fs.existsSync(baselinePath)) { return new Map(); }
 	const data = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
 	const entries = Array.isArray(data.violations) ? data.violations : [];
-	return new Set(entries.map((e) => `${e.file}::${e.hash}`));
+	const counts = new Map();
+	for (const e of entries) {
+		counts.set(`${e.file}::${e.hash}`, typeof e.count === 'number' ? e.count : 1);
+	}
+	return counts;
 }
 
 function writeBaseline(violations) {
-	const entries = violations
-		.map((v) => ({ file: v.file, line: v.line, hash: violationLineHash(v), sample: formatForDisplay(v.text).slice(0, 80) }))
-		.sort((a, b) => (a.file === b.file ? a.line - b.line : a.file.localeCompare(b.file)));
-	// One baseline row per distinct (file, hash) — matches the lookup key used at check time.
+	// Group by (file, hash), counting occurrences instead of collapsing them — two distinct
+	// lines that happen to have identical trimmed content must both count as baselined, or a
+	// later *third* occurrence of that same text would be wrongly treated as pre-existing.
 	const byKey = new Map();
-	for (const e of entries) {
-		const key = `${e.file}::${e.hash}`;
-		if (!byKey.has(key)) { byKey.set(key, e); }
+	for (const v of violations) {
+		const hash = violationLineHash(v);
+		const key = `${v.file}::${hash}`;
+		const existing = byKey.get(key);
+		if (existing) {
+			existing.count += 1;
+		} else {
+			byKey.set(key, { file: v.file, hash, count: 1, line: v.line, sample: formatForDisplay(v.text).slice(0, 80) });
+		}
 	}
+	const entries = [...byKey.values()].sort((a, b) => (a.file === b.file ? a.line - b.line : a.file.localeCompare(b.file)));
 	const payload = {
 		'//': 'Generated by check-hardcoded-strings.mjs --update-baseline. Do not hand-edit; see the "Detecting Hardcoded Strings" section of .github/instructions/vscode-extension.instructions.md.',
 		generatedAt: new Date().toISOString(),
-		violations: [...byKey.values()]
+		violations: entries
 	};
 	fs.writeFileSync(baselinePath, `${JSON.stringify(payload, null, 2)}\n`);
-	return byKey.size;
+	return entries.length;
 }
 
 const inGitHubActions = process.env.GITHUB_ACTIONS === 'true';
@@ -376,15 +478,15 @@ function main() {
 	}
 
 	const baseline = loadBaseline();
-	const newViolations = [];
-	const knownKeys = new Set();
-	for (const v of violations) {
-		const key = `${v.file}::${violationLineHash(v)}`;
-		knownKeys.add(key);
-		if (!baseline.has(key)) { newViolations.push(v); }
-	}
+	const keys = violations.map((v) => `${v.file}::${violationLineHash(v)}`);
+	const isNew = newIndexesBeyondBaseline(keys, baseline);
+	const newViolations = violations.filter((_, i) => isNew[i]);
 
-	const staleCount = [...baseline].filter((k) => !knownKeys.has(k)).length;
+	const seenCounts = tallyKeys(keys);
+	let staleCount = 0;
+	for (const [key, baselineCount] of baseline) {
+		if ((seenCounts.get(key) || 0) < baselineCount) { staleCount += 1; }
+	}
 
 	console.log(`Found ${violations.length} hardcoded-looking string(s) in scope (${violations.length - newViolations.length} already in baseline).`);
 	if (staleCount > 0) {

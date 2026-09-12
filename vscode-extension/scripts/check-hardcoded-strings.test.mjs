@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { looksProse, scanFile, hashLine, isLocalizationCall, isConsoleCall } from './check-hardcoded-strings.mjs';
+import { looksProse, scanFile, hashLine, isLocalizationCall, isConsoleCall, newIndexesBeyondBaseline } from './check-hardcoded-strings.mjs';
 
 // ── looksProse ───────────────────────────────────────────────────────────────
 
@@ -51,6 +51,11 @@ test('looksProse: kebab-case class/id tokens are not prose', () => {
 test('looksProse: single-word camelCase identifiers are not prose, but camelCase with spaces is', () => {
 	assert.equal(looksProse('myVariableName'), false);
 	assert.equal(looksProse('myVariableName is set'), true);
+});
+
+test('looksProse: non-Latin scripts (e.g. Chinese) are recognized as prose too', () => {
+	assert.equal(looksProse('刷新'), true);
+	assert.equal(looksProse('こんにちは'), true);
 });
 
 // ── hashLine ─────────────────────────────────────────────────────────────────
@@ -173,4 +178,104 @@ test('scanFile: numeric/CSS-only literals in a UI-rendering position are not fla
 		scanFile(filePath, new Set(), violations);
 		assert.equal(violations.length, 0);
 	});
+});
+
+test('scanFile: flags a <vscode-button> label the same as a standard HTML tag', () => {
+	withTempFile('const html = `<vscode-button>🔄 Refresh</vscode-button>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+		assert.equal(violations[0].text, '🔄 Refresh');
+	});
+});
+
+test('scanFile: flags tag text embedded in a plain string literal, not only template literals', () => {
+	withTempFile('setHtml(btn, "<span>Analyzing…</span>");\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+		assert.equal(violations[0].text, 'Analyzing…');
+	});
+});
+
+test('scanFile: flags prose that spans a template interpolation inside a tag', () => {
+	withTempFile('const html = `<span>${count} turns remaining</span>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+		assert.match(violations[0].text, /turns remaining/);
+	});
+});
+
+test('scanFile: flags the text argument of el(tag, className, text) and iconHeading(tag, icon, text)', () => {
+	withTempFile(
+		"const a = el('button', 'toggle', 'Day');\nconst b = iconHeading('h3', 'graph', 'Key Metrics');\n",
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			const texts = violations.map((v) => v.text).sort();
+			assert.deepEqual(texts, ['Day', 'Key Metrics']);
+		},
+	);
+});
+
+test('scanFile: does not flag a non-text argument position of el()/iconHeading()', () => {
+	withTempFile("const a = el('button', 'toggle-day');\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 0);
+	});
+});
+
+test('scanFile: flags element.setAttribute("title"|"aria-label"|"placeholder", value)', () => {
+	withTempFile(
+		"docLink.setAttribute('title', 'View official documentation');\ninput.setAttribute('aria-label', 'Search sessions');\n",
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			const texts = violations.map((v) => v.text).sort();
+			assert.deepEqual(texts, ['Search sessions', 'View official documentation']);
+		},
+	);
+});
+
+test('scanFile: does not flag setAttribute() for an unrelated attribute name', () => {
+	withTempFile("docLink.setAttribute('href', 'Some non-attribute prose value');\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 0);
+	});
+});
+
+test('scanFile: an "i18n-exempt" phrase without a leading // does not suppress the finding', () => {
+	withTempFile("el.title = 'this literally contains the phrase i18n-exempt in it';\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+	});
+});
+
+// ── newIndexesBeyondBaseline (baseline occurrence-count semantics) ───────────
+
+test('newIndexesBeyondBaseline: a key baselined once still passes once', () => {
+	const baseline = new Map([['file.ts::abc', 1]]);
+	assert.deepEqual(newIndexesBeyondBaseline(['file.ts::abc'], baseline), [false]);
+});
+
+test('newIndexesBeyondBaseline: a second identical occurrence beyond the baselined count is new', () => {
+	// Two distinct source lines with identical trimmed content hash the same — the baseline
+	// recorded only one occurrence, so a genuinely new duplicate must still be caught.
+	const baseline = new Map([['file.ts::abc', 1]]);
+	const result = newIndexesBeyondBaseline(['file.ts::abc', 'file.ts::abc'], baseline);
+	assert.deepEqual(result, [false, true]);
+});
+
+test('newIndexesBeyondBaseline: occurrences up to the baselined count all pass, beyond it are new', () => {
+	const baseline = new Map([['file.ts::abc', 2]]);
+	const keys = ['file.ts::abc', 'file.ts::abc', 'file.ts::abc'];
+	assert.deepEqual(newIndexesBeyondBaseline(keys, baseline), [false, false, true]);
+});
+
+test('newIndexesBeyondBaseline: a key absent from the baseline is always new', () => {
+	assert.deepEqual(newIndexesBeyondBaseline(['file.ts::zzz'], new Map()), [true]);
 });
