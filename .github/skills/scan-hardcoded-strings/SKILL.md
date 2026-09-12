@@ -24,8 +24,9 @@ Use this skill when you need to:
 
 It complements two existing scripts that only check *consistency* of strings
 already wired through localization (`scripts/validate-localization.js` /
-`npm run lint:l10n`, and `vscode-extension/scripts/validate-l10n.mjs` /
-`npm run validate:l10n`) — neither of those, nor anything else in the repo,
+`npm --prefix vscode-extension run lint:l10n`, and
+`vscode-extension/scripts/validate-l10n.mjs` /
+`npm --prefix vscode-extension run validate:l10n`) — neither of those, nor anything else in the repo,
 detects a plain string literal that never calls `localize(`/`t(`/
 `vscode.l10n.t(` in the first place. A separate, stricter AST-based CI gate
 for *new* instances of this may exist as an independent effort; this skill is
@@ -49,15 +50,19 @@ The script will:
    block/JSDoc comments so example markup in a doc comment isn't mistaken
    for real UI text
 2. Flag string/template literals in UI-rendering positions — assignments to
-   `.textContent`/`.innerText`/`.innerHTML`/`.title`/`.placeholder`,
-   `aria-label="..."`/`title="..."`/`placeholder="..."` HTML attributes, text
-   inside `<div>`, `<button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`,
+   `.textContent`/`.innerText`/`.innerHTML`/`.title`/`.placeholder` (a direct
+   literal or a conditional/ternary RHS whose branches are literals),
+   `aria-label="..."`/`title="..."`/`placeholder="..."` HTML attributes (or
+   the same three set via `.setAttribute('title', '...')`), a literal
+   `document.createTextNode('...')` argument, text inside `<div>`,
+   `<button>`, `<vscode-button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`,
    `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>`, `<li>`, `<title>`
    tags in template literals (tolerating simple nested inline tags like
    `<a>`/`<strong>`, which are also matched as a literal's own root tag so
-   e.g. `el.innerHTML = '<strong>Save changes</strong>'` isn't missed), and
-   the UI-text argument of a known shared DOM helper call (`el(...)`,
-   `iconHeading(...)`, `createButton(...)` from
+   e.g. `el.innerHTML = '<strong>Save changes</strong>'` isn't missed, and
+   void/structural tags like `<input>`/`<br>` that never need a closing
+   tag), and the UI-text argument of a known shared DOM helper call
+   (`el(...)`, `iconHeading(...)`, `createButton(...)` from
    `vscode-extension/src/webview/shared/domUtils.ts`)
 3. Skip anything already wrapped in `localize(`, `localizeFormat(`, `t(`, or
    `vscode.l10n.t(`, and anything that doesn't look like prose (pure
@@ -106,8 +111,10 @@ ranking — triage each entry:
 3. Add test coverage per the repo's "Localization changes require test
    coverage" rule (`vscode-extension/test/unit/l10n.test.ts`).
 4. Re-run this script to confirm the finding disappeared, then run
-   `npm run lint:l10n` and `npm run validate:l10n` to confirm the new key is
-   consistent across locale files.
+   `npm --prefix vscode-extension run lint:l10n` and
+   `npm --prefix vscode-extension run validate:l10n` (both scripts live in
+   `vscode-extension/package.json`, not the repo root) to confirm the new
+   key is consistent across locale files.
 
 ## Files in This Directory
 

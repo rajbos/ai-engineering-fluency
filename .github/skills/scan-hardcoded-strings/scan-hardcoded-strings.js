@@ -42,7 +42,7 @@ const WEBVIEW_DIR = path.join(REPO_ROOT, 'vscode-extension/src/webview');
 const EXTENSION_FILE = path.join(REPO_ROOT, 'vscode-extension/src/extension.ts');
 const REPORT_PATH = path.join(REPO_ROOT, 'hardcoded-strings-report.md');
 
-const TAG_NAMES = ['div', 'button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'td', 'th', 'option', 'summary', 'caption', 'li', 'title'];
+const TAG_NAMES = ['div', 'button', 'vscode-button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'td', 'th', 'option', 'summary', 'caption', 'li', 'title'];
 const TEXT_PROPS = ['textContent', 'innerText', 'innerHTML', 'title', 'placeholder'];
 
 // ── File collection ────────────────────────────────────────────────────────
@@ -60,6 +60,35 @@ function collectTsFiles(dir) {
         }
     }
     return results;
+}
+
+// ── Shared bracket matching ──────────────────────────────────────────────────
+
+/**
+ * Scan forward from `start` (which must point at `openChar`) and return the
+ * index of its matching `closeChar`, treating quoted strings/template
+ * literals as opaque so a stray bracket inside a UI string's text (e.g.
+ * `el('span', 'label', 'What does this (mean?')`) doesn't confuse the depth
+ * count. Returns -1 if no match is found before the end of input.
+ */
+function findMatchingBracket(content, start, openChar, closeChar) {
+    let depth = 0;
+    let quote = null;
+    for (let i = start; i < content.length; i++) {
+        const c = content[i];
+        if (quote) {
+            if (c === '\\') { i++; continue; }
+            if (c === quote) { quote = null; }
+            continue;
+        }
+        if (c === '"' || c === "'" || c === '`') { quote = c; continue; }
+        if (c === openChar) { depth++; }
+        else if (c === closeChar) {
+            depth--;
+            if (depth === 0) { return i; }
+        }
+    }
+    return -1;
 }
 
 // ── extension.ts scope restriction ──────────────────────────────────────────
@@ -83,15 +112,7 @@ function extractHtmlMethodRanges(content) {
     let m;
     while ((m = declRe.exec(content)) !== null) {
         const parenStart = m.index + m[0].length - 1;
-        let depth = 0;
-        let parenEnd = -1;
-        for (let i = parenStart; i < content.length; i++) {
-            if (content[i] === '(') { depth++; }
-            else if (content[i] === ')') {
-                depth--;
-                if (depth === 0) { parenEnd = i; break; }
-            }
-        }
+        const parenEnd = findMatchingBracket(content, parenStart, '(', ')');
         if (parenEnd === -1) { continue; }
 
         const braceStart = content.indexOf('{', parenEnd);
@@ -100,15 +121,7 @@ function extractHtmlMethodRanges(content) {
         // signature (e.g. an interface member), not a method implementation.
         if (content.slice(parenEnd + 1, braceStart).includes(';')) { continue; }
 
-        let bdepth = 0;
-        let braceEnd = -1;
-        for (let i = braceStart; i < content.length; i++) {
-            if (content[i] === '{') { bdepth++; }
-            else if (content[i] === '}') {
-                bdepth--;
-                if (bdepth === 0) { braceEnd = i; break; }
-            }
-        }
+        const braceEnd = findMatchingBracket(content, braceStart, '{', '}');
         if (braceEnd === -1) { continue; }
 
         ranges.push([braceStart, braceEnd]);
@@ -140,20 +153,18 @@ function stripLocalizedCalls(text) {
         const m = CALL_OPEN.exec(result);
         if (!m) { break; }
         const openIdx = m.index + m[0].length - 1;
-        let depth = 0;
-        let end = -1;
-        for (let i = openIdx; i < result.length; i++) {
-            if (result[i] === '(') { depth++; }
-            else if (result[i] === ')') {
-                depth--;
-                if (depth === 0) { end = i; break; }
-            }
-        }
+        const end = findMatchingBracket(result, openIdx, '(', ')');
         if (end === -1) { break; }
         result = result.slice(0, m.index) + result.slice(end + 1);
     }
     return result;
 }
+
+// Matches trailing `==`, `===`, `!=`, or `!==` right before a literal, so a
+// comparison operand like `typeof x === 'string'` isn't mistaken for a
+// ternary branch's UI text (`'string'` here is a typeof-result check, not
+// hardcoded prose).
+const COMPARISON_BEFORE_RE = /(?:={2,3}|!={1,2})\s*$/;
 
 /** Extract quoted string literal bodies (non-nested) from an interpolation expression. */
 function extractInterpolationLiterals(expr) {
@@ -162,6 +173,7 @@ function extractInterpolationLiterals(expr) {
     const re = /(["'])((?:(?!\1)[^\\]|\\.)*)\1/g;
     let m;
     while ((m = re.exec(stripped)) !== null) {
+        if (COMPARISON_BEFORE_RE.test(stripped.slice(0, m.index))) { continue; }
         literals.push(m[2]);
     }
     return literals;
@@ -193,9 +205,20 @@ function stripInterpolations(text) {
     return result;
 }
 
+/**
+ * Remove HTML tag delimiters (`<strong>`, `</a>`, etc.) while keeping any
+ * text between them, so a tag whose only content was an interpolation —
+ * e.g. `<strong>${count}</strong>` — doesn't leave its own tag *name*
+ * ("strong") behind to be misread as hardcoded prose once the interpolation
+ * itself has been blanked out.
+ */
+function stripHtmlTags(text) {
+    return text.replace(/<\/?[a-zA-Z][^>]*>/g, ' ');
+}
+
 /** Reduce a raw literal body to its static (non-localized, non-interpolated) text. */
 function extractStaticText(rawBody) {
-    return stripInterpolations(stripLocalizedCalls(rawBody));
+    return stripHtmlTags(stripInterpolations(stripLocalizedCalls(rawBody)));
 }
 
 // ── Prose heuristic ─────────────────────────────────────────────────────────
@@ -312,6 +335,35 @@ function findPropertyAssignments(content) {
         }
     }
 
+    // Conditional RHS (e.g. a ternary) whose branches are literals, such as
+    // `otherTr.title = expanded ? 'Collapse other editors' : 'Expand other
+    // editors';` — the negative lookahead excludes an RHS that starts with a
+    // quote/backtick directly, since that's already covered by the two
+    // detectors above; this only matches when the RHS is a real expression.
+    // Limited to between the `=` and the first `;`/newline (a ternary
+    // conventionally written on one line). The "does this start with a
+    // quote" check is done in plain JS rather than a regex lookahead: a
+    // lookahead right after `\s*` can be defeated by backtracking (`\s*`
+    // giving back the whitespace it matched so the lookahead re-checks one
+    // position earlier, where the next character is the whitespace itself,
+    // not the quote) — so a plain literal RHS containing "?" was still
+    // matching here as a false "conditional" duplicate of the literal
+    // detector above.
+    const conditionalRe = new RegExp('\\.(' + propAlt + ')\\s*=(?!=)\\s*([^;\\n]*\\?[^;\\n]*)[;\\n]', 'g');
+    while ((m = conditionalRe.exec(content)) !== null) {
+        const [full, prop, expr] = m;
+        if (/^\s*["'`]/.test(expr)) { continue; } // RHS is a direct literal — already covered above
+        const literals = extractInterpolationLiterals(expr).filter((lit) => looksLikeProse(lit));
+        if (literals.length > 0) {
+            findings.push({
+                index: m.index,
+                line: lineAt(content, m.index),
+                kind: `.${prop} assignment (conditional)`,
+                snippet: toSnippet(full),
+            });
+        }
+    }
+
     return findings;
 }
 
@@ -353,6 +405,12 @@ function findHtmlAttributes(content) {
 // create an issue</a>.</div>` should still be read as one block of prose
 // rather than being skipped because of the `<a>...</a>` in the middle.
 const INLINE_PASSTHROUGH_TAGS = ['a', 'strong', 'em', 'code', 'b', 'i', 'u'];
+// Void/self-closing structural elements: they never have a closing tag, so
+// allowing them inline (without requiring a matching `</tag>`) keeps e.g. a
+// `<label>` with a leading `<input>` or a `<div>` with `<br>` line breaks
+// from being skipped just because the body pattern saw a `<` it didn't
+// recognize.
+const VOID_TAGS = ['input', 'br', 'hr', 'img', 'source', 'wbr', 'meta', 'link'];
 
 /**
  * Detect hardcoded text content inside common UI-bearing HTML tags.
@@ -368,8 +426,13 @@ const INLINE_PASSTHROUGH_TAGS = ['a', 'strong', 'em', 'code', 'b', 'i', 'u'];
 function findTagContent(content) {
     const findings = [];
     const inlineAlt = INLINE_PASSTHROUGH_TAGS.join('|');
+    const voidAlt = VOID_TAGS.join('|');
     const tagAlt = [...TAG_NAMES, ...INLINE_PASSTHROUGH_TAGS].join('|');
-    const bodyPattern = '(?:[^<]|<(?:' + inlineAlt + ')(?:\\s[^>]*)?>|</(?:' + inlineAlt + ')>)*';
+    const bodyPattern = '(?:[^<]'
+        + '|<(?:' + inlineAlt + ')(?:\\s[^>]*)?>'
+        + '|</(?:' + inlineAlt + ')>'
+        + '|<(?:' + voidAlt + ')(?:\\s[^>]*)?/?>'
+        + ')*';
     const re = new RegExp('<(' + tagAlt + ')(?:\\s[^>]*)?>(' + bodyPattern + ')</\\1>', 'g');
     let m;
     while ((m = re.exec(content)) !== null) {
@@ -435,15 +498,7 @@ function findHelperCallText(content) {
         const name = m[1];
         if (content[m.index - 1] === '.') { continue; } // e.g. `this.el(...)`
         const openIdx = m.index + m[0].length - 1;
-        let depth = 0;
-        let end = -1;
-        for (let i = openIdx; i < content.length; i++) {
-            if (content[i] === '(') { depth++; }
-            else if (content[i] === ')') {
-                depth--;
-                if (depth === 0) { end = i; break; }
-            }
-        }
+        const end = findMatchingBracket(content, openIdx, '(', ')');
         if (end === -1) { continue; }
 
         const args = splitTopLevelArgs(content.slice(openIdx + 1, end));
@@ -465,6 +520,63 @@ function findHelperCallText(content) {
     return findings;
 }
 
+/** Detect a hardcoded literal passed to `document.createTextNode(...)`. */
+function findTextNodeCalls(content) {
+    const findings = [];
+    const re = /\bdocument\.createTextNode\(/g;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+        const openIdx = m.index + m[0].length - 1;
+        const end = findMatchingBracket(content, openIdx, '(', ')');
+        if (end === -1) { continue; }
+        const arg = content.slice(openIdx + 1, end).trim();
+        const litMatch = /^(["'`])([\s\S]*)\1$/.exec(arg);
+        if (!litMatch) { continue; } // not a direct literal — skip
+        const staticText = extractStaticText(litMatch[2]);
+        if (looksLikeProse(staticText)) {
+            findings.push({
+                index: m.index,
+                line: lineAt(content, m.index),
+                kind: 'createTextNode() argument',
+                snippet: toSnippet(content.slice(m.index, end + 1)),
+            });
+        }
+    }
+    return findings;
+}
+
+const SET_ATTRIBUTE_NAMES = ['aria-label', 'title', 'placeholder'];
+
+/** Detect a hardcoded literal passed as the value to `.setAttribute('title'|'aria-label'|'placeholder', '...')`. */
+function findSetAttributeCalls(content) {
+    const findings = [];
+    const attrAlt = SET_ATTRIBUTE_NAMES.join('|');
+    const re = new RegExp('\\.setAttribute\\(\\s*([\'"])(' + attrAlt + ')\\1\\s*,\\s*', 'g');
+    let m;
+    while ((m = re.exec(content)) !== null) {
+        const attr = m[2];
+        const valueStart = m.index + m[0].length;
+        const quoteChar = content[valueStart];
+        if (quoteChar !== '"' && quoteChar !== "'" && quoteChar !== '`') { continue; } // not a direct literal — skip
+        let end = -1;
+        for (let i = valueStart + 1; i < content.length; i++) {
+            if (content[i] === '\\') { i++; continue; }
+            if (content[i] === quoteChar) { end = i; break; }
+        }
+        if (end === -1) { continue; }
+        const staticText = extractStaticText(content.slice(valueStart + 1, end));
+        if (looksLikeProse(staticText)) {
+            findings.push({
+                index: m.index,
+                line: lineAt(content, m.index),
+                kind: `setAttribute('${attr}') argument`,
+                snippet: toSnippet(content.slice(m.index, end + 1)),
+            });
+        }
+    }
+    return findings;
+}
+
 /**
  * Run all detectors against one file's content, deduped by line+snippet and
  * optionally restricted to a set of allowed character ranges.
@@ -475,6 +587,8 @@ function scanFile(content, allowedRanges) {
         ...findHtmlAttributes(content),
         ...findTagContent(content),
         ...findHelperCallText(content),
+        ...findTextNodeCalls(content),
+        ...findSetAttributeCalls(content),
     ];
     if (allowedRanges) {
         all = all.filter((f) => isWithinRanges(f.index, allowedRanges));
@@ -542,9 +656,40 @@ function buildMarkdownReport(results, total, scannedCount) {
  * (`//`) are deliberately left alone — `//` also opens a URL, and unlike a
  * block comment's `/*`, stripping from the first `//` to end-of-line risks
  * truncating a genuine template-literal line that happens to contain one.
+ *
+ * Quote/template-aware: a single-pass scan tracks whether each character is
+ * inside a string or template literal, so a UI string that itself contains
+ * the literal text `/*` / `*\/` (e.g. `'<div>/* text *\/Save changes</div>'`)
+ * is left untouched rather than being mistaken for a real comment.
  */
 function maskBlockComments(content) {
-    return content.replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '));
+    let result = '';
+    let quote = null;
+    let inComment = false;
+    for (let i = 0; i < content.length; i++) {
+        const c = content[i];
+        const next = content[i + 1];
+        if (inComment) {
+            if (c === '*' && next === '/') {
+                result += '  ';
+                i++;
+                inComment = false;
+            } else {
+                result += c === '\n' ? '\n' : ' ';
+            }
+            continue;
+        }
+        if (quote) {
+            result += c;
+            if (c === '\\') { result += content[++i] ?? ''; continue; }
+            if (c === quote) { quote = null; }
+            continue;
+        }
+        if (c === '"' || c === "'" || c === '`') { quote = c; result += c; continue; }
+        if (c === '/' && next === '*') { inComment = true; result += '  '; i++; continue; }
+        result += c;
+    }
+    return result;
 }
 
 function runScan() {
@@ -569,7 +714,12 @@ function runScan() {
 }
 
 function main() {
-    const jsonMode = process.argv.includes('--json');
+    const argv = process.argv.slice(2);
+    const jsonMode = argv.includes('--json');
+    const outIdx = argv.indexOf('--out');
+    // Overridable so tests can point the report at a scratch path instead of
+    // rewriting the tracked hardcoded-strings-report.md on every test run.
+    const reportPath = outIdx !== -1 && argv[outIdx + 1] ? path.resolve(argv[outIdx + 1]) : REPORT_PATH;
     const { results, total, scannedCount } = runScan();
 
     if (jsonMode) {
@@ -592,9 +742,9 @@ function main() {
         }
     }
 
-    fs.writeFileSync(REPORT_PATH, buildMarkdownReport(results, total, scannedCount), 'utf8');
+    fs.writeFileSync(reportPath, buildMarkdownReport(results, total, scannedCount), 'utf8');
     if (!jsonMode) {
-        console.log(`\nMarkdown report written to ${path.relative(REPO_ROOT, REPORT_PATH)}`);
+        console.log(`\nMarkdown report written to ${path.relative(REPO_ROOT, reportPath)}`);
     }
 
     // Informational script — never fail the build. Setting exitCode (rather
@@ -624,11 +774,13 @@ function runMain(mainFn = main) {
 
 module.exports = {
     collectTsFiles,
+    findMatchingBracket,
     extractHtmlMethodRanges,
     isWithinRanges,
     stripLocalizedCalls,
     extractInterpolationLiterals,
     stripInterpolations,
+    stripHtmlTags,
     extractStaticText,
     looksLikeProse,
     toSnippet,
@@ -637,6 +789,8 @@ module.exports = {
     findHtmlAttributes,
     findTagContent,
     findHelperCallText,
+    findTextNodeCalls,
+    findSetAttributeCalls,
     splitTopLevelArgs,
     scanFile,
     maskBlockComments,

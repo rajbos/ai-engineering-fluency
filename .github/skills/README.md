@@ -138,7 +138,7 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 
 ### scan-hardcoded-strings
 
-**Purpose**: Inventory hardcoded (non-localized) UI text across `vscode-extension/src/webview/**` and the `get*Html()` methods in `vscode-extension/src/extension.ts` — string/template literals rendered as UI text that never go through `localize()`/`t()`/`vscode.l10n.t()`.
+**Purpose**: Inventory hardcoded (non-localized) UI text across `vscode-extension/src/webview/**` and the `get*Html()` methods in `vscode-extension/src/extension.ts` — string/template literals rendered as UI text that never go through `localize()`/`localizeFormat()`/`t()`/`vscode.l10n.t()`.
 
 **Use this skill when:**
 - Auditing UI text after adding or changing a webview panel, to catch strings typed directly instead of routed through localization

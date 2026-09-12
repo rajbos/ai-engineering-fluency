@@ -15,10 +15,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const os = require('node:os');
+const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const {
     stripLocalizedCalls,
     stripInterpolations,
+    stripHtmlTags,
     extractStaticText,
     looksLikeProse,
     escapeTableCell,
@@ -26,6 +29,8 @@ const {
     findHtmlAttributes,
     findTagContent,
     findHelperCallText,
+    findTextNodeCalls,
+    findSetAttributeCalls,
     splitTopLevelArgs,
     scanFile,
     extractHtmlMethodRanges,
@@ -33,6 +38,7 @@ const {
     buildMarkdownReport,
     runMain,
     maskBlockComments,
+    findMatchingBracket,
 } = require('./scan-hardcoded-strings.js');
 
 const SCRIPT_PATH = path.join(__dirname, 'scan-hardcoded-strings.js');
@@ -91,12 +97,33 @@ test('stripInterpolations: one non-prose literal in a ternary does not suppress 
     assert.doesNotMatch(result, /https:\/\//);
 });
 
+test('stripInterpolations: a typeof/comparison literal in the ternary condition is not treated as a UI-text branch', () => {
+    // Regression: `typeof x === 'string' ? x : ''` used to have "string"
+    // extracted as if it were a hardcoded ternary branch, because
+    // extractInterpolationLiterals scanned for *any* quoted literal in the
+    // expression rather than just the branches after "?".
+    const result = stripInterpolations("${typeof label === 'string' ? label : ''}");
+    assert.doesNotMatch(result, /string/);
+});
+
 // ── extractStaticText / looksLikeProse ───────────────────────────────────────
 
 test('extractStaticText: strips both localized calls and interpolations', () => {
     const result = extractStaticText("${localize('key')} Loading ${count} items");
     assert.match(result, /Loading/);
     assert.match(result, /items/);
+});
+
+test('stripHtmlTags: removes tag delimiters but keeps text between them', () => {
+    assert.equal(stripHtmlTags('<strong>Note:</strong>').trim(), 'Note:');
+});
+
+test('extractStaticText: a tag whose only content was an interpolation does not leak its tag name as prose', () => {
+    // Regression: `<strong>${formatNumber(count)}</strong> (${formatPercent(pct, 0)})`
+    // used to leave `<strong></strong>` behind after interpolation removal,
+    // and looksLikeProse counted "strong" itself as a hardcoded letter run.
+    const result = extractStaticText('<strong>${formatNumber(count)}</strong> (${formatPercent(pct, 0)})');
+    assert.equal(looksLikeProse(result), false);
 });
 
 test('looksLikeProse: rejects pure numbers, symbols, and emoji', () => {
@@ -158,6 +185,26 @@ test('escapeTableCell: neutralizes backticks so a snippet cannot close its code 
     assert.equal(escapeTableCell('has `backtick` inside'), "has 'backtick' inside");
 });
 
+// ── findMatchingBracket ──────────────────────────────────────────────────────
+
+test('findMatchingBracket: finds the matching close paren', () => {
+    const src = 'el(a, b, c)';
+    assert.equal(findMatchingBracket(src, 2, '(', ')'), src.length - 1);
+});
+
+test('findMatchingBracket: treats quoted content as opaque, ignoring brackets inside it', () => {
+    // Regression: an unmatched "(" inside a UI string used to make the naive
+    // depth counter overshoot past the call's real closing paren.
+    const src = "el('span', 'label', 'What does this (mean?')";
+    const end = findMatchingBracket(src, 2, '(', ')');
+    assert.equal(end, src.length - 1);
+});
+
+test('findMatchingBracket: works for braces too', () => {
+    const src = '{ a: 1, b: { c: 2 } }';
+    assert.equal(findMatchingBracket(src, 0, '{', '}'), src.length - 1);
+});
+
 // ── findPropertyAssignments ───────────────────────────────────────────────────
 
 test('findPropertyAssignments: flags a hardcoded .textContent string literal', () => {
@@ -183,6 +230,41 @@ test('findPropertyAssignments: flags a template literal with hardcoded prose aro
 
 test('findPropertyAssignments: skips innerHTML assignments containing markup (deferred to tag scan)', () => {
     const findings = findPropertyAssignments('el.innerHTML = `<div>Some text</div>`;');
+    assert.equal(findings.length, 0);
+});
+
+test('findPropertyAssignments: flags a ternary RHS whose branches are literals', () => {
+    // Regression: `otherTr.title = expanded ? 'Collapse other editors' :
+    // 'Expand other editors';` was invisible because the RHS doesn't start
+    // immediately with a quote.
+    const findings = findPropertyAssignments(
+        "otherTr.title = editorOtherExpanded ? 'Collapse other editors' : 'Expand other editors';"
+    );
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, '.title assignment (conditional)');
+});
+
+test('findPropertyAssignments: a plain literal RHS containing "?" is not double-reported as conditional', () => {
+    const findings = findPropertyAssignments("el.title = 'What does this mean?';");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, '.title assignment');
+});
+
+test('findPropertyAssignments: does not treat a "===" comparison as an assignment', () => {
+    // Regression: `.title === 'string' ? i.title : ''` is a typeof-style
+    // comparison inside some other expression, not a `.title =` assignment —
+    // `=\s*` alone would match the first "=" of "===" and misread the rest.
+    const findings = findPropertyAssignments("check(i.title === 'string' ? i.title : '');");
+    assert.equal(findings.length, 0);
+});
+
+test('findPropertyAssignments: does not flag a "typeof x === literal" comparison inside a real ternary condition', () => {
+    // Regression: extractInterpolationLiterals used to pick up the 'string'
+    // typeof-comparison literal in the ternary's *condition* and flag it as
+    // if it were a hardcoded UI-text branch.
+    const findings = findPropertyAssignments(
+        "el.textContent = typeof check?.label === 'string' ? check.label : '';"
+    );
     assert.equal(findings.length, 0);
 });
 
@@ -291,6 +373,24 @@ test('findTagContent: flags an inline tag (<strong>) used as the root of the lit
     assert.equal(findings[0].kind, '<strong> content');
 });
 
+test('findTagContent: tolerates a void/structural tag (<input>) before visible text in a <label>', () => {
+    const findings = findTagContent('<label><input type="checkbox" /> Enable feature flag</label>');
+    assert.equal(findings.length, 1);
+    assert.match(findings[0].snippet, /Enable feature flag/);
+});
+
+test('findTagContent: tolerates <br> line breaks inside a <div>', () => {
+    const findings = findTagContent('<div>It never tells you<br>that you are ready to go dark.</div>');
+    assert.equal(findings.length, 1);
+    assert.match(findings[0].snippet, /ready to go dark/);
+});
+
+test('findTagContent: flags hardcoded text inside a <vscode-button>', () => {
+    const findings = findTagContent('<vscode-button id="btn-refresh">🔄 Refresh</vscode-button>');
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, '<vscode-button> content');
+});
+
 // ── splitTopLevelArgs ─────────────────────────────────────────────────────────
 
 test('splitTopLevelArgs: splits simple comma-separated arguments', () => {
@@ -346,6 +446,43 @@ test('findHelperCallText: handles a template-literal text argument containing an
     const findings = findHelperCallText("el('span', 'header-icon', `Loading ${count} items`)");
     assert.equal(findings.length, 1);
     assert.match(findings[0].snippet, /Loading/);
+});
+
+// ── findTextNodeCalls ────────────────────────────────────────────────────────
+
+test('findTextNodeCalls: flags a hardcoded document.createTextNode() argument', () => {
+    const findings = findTextNodeCalls("document.createTextNode(' By Editor')");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, 'createTextNode() argument');
+});
+
+test('findTextNodeCalls: does not flag a variable argument', () => {
+    const findings = findTextNodeCalls('document.createTextNode(label)');
+    assert.equal(findings.length, 0);
+});
+
+// ── findSetAttributeCalls ────────────────────────────────────────────────────
+
+test('findSetAttributeCalls: flags a hardcoded title set via setAttribute', () => {
+    const findings = findSetAttributeCalls("docLink.setAttribute('title', 'View official documentation')");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, "setAttribute('title') argument");
+});
+
+test('findSetAttributeCalls: flags a hardcoded aria-label set via setAttribute (double quotes)', () => {
+    const findings = findSetAttributeCalls('el.setAttribute("aria-label", "Report this unknown path")');
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, "setAttribute('aria-label') argument");
+});
+
+test('findSetAttributeCalls: does not flag an unrelated attribute name', () => {
+    const findings = findSetAttributeCalls("el.setAttribute('data-file', 'Some hardcoded value here')");
+    assert.equal(findings.length, 0);
+});
+
+test('findSetAttributeCalls: does not flag a variable value argument', () => {
+    const findings = findSetAttributeCalls("el.setAttribute('title', someVariable)");
+    assert.equal(findings.length, 0);
 });
 
 // ── scanFile ──────────────────────────────────────────────────────────────────
@@ -471,6 +608,21 @@ test('maskBlockComments: does not touch code outside comments', () => {
     assert.equal(maskBlockComments(src), src);
 });
 
+test('maskBlockComments: does not corrupt a string literal that itself contains "/*"/"*/"', () => {
+    // Regression: a naive /\/\*[\s\S]*?\*\//g regex would treat the literal
+    // text inside this string as a real comment and blank out "Save changes".
+    const src = "const html = '<div>/* text */Save changes</div>';";
+    assert.equal(maskBlockComments(src), src);
+});
+
+test('maskBlockComments: still masks a real comment that sits next to a quote-like string', () => {
+    const src = "/* comment */ el.textContent = 'Refresh';";
+    const masked = maskBlockComments(src);
+    assert.doesNotMatch(masked, /comment/);
+    assert.match(masked, /el\.textContent = 'Refresh';/);
+    assert.equal(masked.length, src.length);
+});
+
 test('scanFile: does not flag example markup inside a /** ... */ doc comment', () => {
     const src = [
         '/**',
@@ -517,19 +669,36 @@ test('runMain: a normal (non-throwing) mainFn leaves exit code as it set it', ()
 // Everything above tests the exported pure helpers directly; these two tests
 // instead invoke the script exactly as a user/CI would, so a regression in
 // main()'s wiring (argv parsing, console output, report writing) is caught
-// even though it isn't itself an exported function.
+// even though it isn't itself an exported function. `--out` points the report
+// at a scratch file in os.tmpdir() so running the suite doesn't rewrite (and
+// dirty) the tracked hardcoded-strings-report.md at the repo root.
 
-test('CLI smoke test: normal mode exits 0, scans real files, and writes the report', () => {
-    const result = spawnSync(process.execPath, [SCRIPT_PATH], { encoding: 'utf8' });
-    assert.equal(result.status, 0);
-    assert.match(result.stdout, /Scanned \d+ file\(s\)/);
-    assert.match(result.stdout, /Markdown report written to/);
+function withTempReportPath(fn) {
+    const tmpPath = path.join(os.tmpdir(), `scan-hardcoded-strings-test-${process.pid}-${Date.now()}.md`);
+    try {
+        fn(tmpPath);
+    } finally {
+        fs.rmSync(tmpPath, { force: true });
+    }
+}
+
+test('CLI smoke test: normal mode exits 0, scans real files, and writes the report to --out', () => {
+    withTempReportPath((tmpPath) => {
+        const result = spawnSync(process.execPath, [SCRIPT_PATH, '--out', tmpPath], { encoding: 'utf8' });
+        assert.equal(result.status, 0);
+        assert.match(result.stdout, /Scanned \d+ file\(s\)/);
+        assert.match(result.stdout, /Markdown report written to/);
+        assert.ok(fs.existsSync(tmpPath));
+        assert.match(fs.readFileSync(tmpPath, 'utf8'), /# Hardcoded UI Strings Inventory/);
+    });
 });
 
 test('CLI smoke test: --json mode exits 0 and prints parseable JSON with the expected shape', () => {
-    const result = spawnSync(process.execPath, [SCRIPT_PATH, '--json'], { encoding: 'utf8' });
-    assert.equal(result.status, 0);
-    const parsed = JSON.parse(result.stdout);
-    assert.equal(typeof parsed.total, 'number');
-    assert.ok(Array.isArray(parsed.files));
+    withTempReportPath((tmpPath) => {
+        const result = spawnSync(process.execPath, [SCRIPT_PATH, '--json', '--out', tmpPath], { encoding: 'utf8' });
+        assert.equal(result.status, 0);
+        const parsed = JSON.parse(result.stdout);
+        assert.equal(typeof parsed.total, 'number');
+        assert.ok(Array.isArray(parsed.files));
+    });
 });

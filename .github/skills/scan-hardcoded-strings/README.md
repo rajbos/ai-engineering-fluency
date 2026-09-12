@@ -14,8 +14,9 @@ build.
 
 This complements (does not replace) the existing localization checks:
 
-- `scripts/validate-localization.js` (`npm run lint:l10n`, wired into CI) and
-  `vscode-extension/scripts/validate-l10n.mjs` (`npm run validate:l10n`) check
+- `scripts/validate-localization.js` (`npm --prefix vscode-extension run lint:l10n`,
+  wired into CI) and `vscode-extension/scripts/validate-l10n.mjs`
+  (`npm --prefix vscode-extension run validate:l10n`) check
   *consistency* of strings that already go through the localization system
   (e.g. every key used in source has a translation, translations stay in
   sync). They do not detect a plain string literal baked directly into UI
@@ -51,6 +52,11 @@ node .github/skills/scan-hardcoded-strings/scan-hardcoded-strings.js
 
 # Machine-readable JSON
 node .github/skills/scan-hardcoded-strings/scan-hardcoded-strings.js --json
+
+# Write the report somewhere other than the default hardcoded-strings-report.md
+# (the CLI smoke tests in scan-hardcoded-strings.test.js use this so running
+# the suite doesn't rewrite the tracked report on every run)
+node .github/skills/scan-hardcoded-strings/scan-hardcoded-strings.js --out /tmp/scratch-report.md
 ```
 
 The script scans:
@@ -64,21 +70,27 @@ addition to printing a console summary grouped by file.
 
 - Assignment to `.textContent`, `.innerText`, `.innerHTML`, `.title`, or
   `.placeholder` where the right-hand side is a direct string/template
-  literal
+  literal, **or** a conditional expression whose branches are literals (e.g.
+  `otherTr.title = expanded ? 'Collapse other editors' : 'Expand other
+  editors';`)
 - `aria-label="..."`, `title="..."`, and `placeholder="..."` HTML attributes
   (not to be confused with the `.title =` / `.placeholder =` JS property
   assignments above — those are matched separately so the same occurrence
   isn't reported twice)
+- The same three attribute names set via a literal
+  `el.setAttribute('title', '...')` call
+- A literal argument to `document.createTextNode('...')`
 - Text content inside common UI-bearing HTML tags embedded in template
-  literals: `<div>`, `<button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`,
-  `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>`, `<li>`, `<title>` —
-  tolerating simple nested inline tags (`<a>`, `<strong>`, `<em>`, `<code>`,
-  `<b>`, `<i>`, `<u>`) so prose broken up by an inline link or emphasis is
-  still read as one block instead of being skipped. Those inline tags are
-  also matched as a literal's *root* tag (not only nested), so e.g.
-  `el.innerHTML = '<strong>Save changes</strong>'` is still found even
-  though `.innerHTML` assignments containing markup otherwise defer entirely
-  to this detector
+  literals: `<div>`, `<button>`, `<vscode-button>`, `<label>`, `<h1>`–`<h6>`,
+  `<p>`, `<span>`, `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>`,
+  `<li>`, `<title>` — tolerating simple nested inline tags (`<a>`,
+  `<strong>`, `<em>`, `<code>`, `<b>`, `<i>`, `<u>`) so prose broken up by an
+  inline link or emphasis is still read as one block instead of being
+  skipped, and void/structural tags (`<input>`, `<br>`, `<hr>`, `<img>`,
+  etc.) that never need a closing tag. Those inline tags are also matched as
+  a literal's *root* tag (not only nested), so e.g. `el.innerHTML =
+  '<strong>Save changes</strong>'` is still found even though `.innerHTML`
+  assignments containing markup otherwise defer entirely to this detector
 - A string/template literal passed as the UI-text argument to a known shared
   DOM helper (`el(tag, className, text)`, `iconHeading(tag, icon, text,
   className)`, `createButton(id, label, appearance)` from
@@ -116,14 +128,21 @@ inside an interpolation's own expression — e.g. a ternary like
 checked, since that is often where the actual hardcoded UI text lives. Each
 recovered literal is prose-checked on its own before being combined, so one
 non-prose branch (e.g. a URL) can't poison another genuine one — `` `${cond
-? 'https://x' : 'Open link'}` `` still surfaces "Open link".
+? 'https://x' : 'Open link'}` `` still surfaces "Open link". Similarly, tag
+delimiters left behind by a stripped interpolation (e.g. `<strong></strong>`
+after `<strong>${count}</strong>` loses its dynamic content) are removed
+before the prose check, so a tag *name* like "strong" is never itself
+mistaken for hardcoded text.
 
 Before any detector runs, `/* ... */` block comments (including JSDoc) are
 blanked out — a doc-comment example like `Converts [text](url) to <a
 href="url">text</a>` is not real UI markup and would otherwise be
 misreported. `//` line comments are deliberately left alone, since stripping
 from the first `//` to end-of-line risks truncating a genuine line that
-happens to contain a URL.
+happens to contain a URL. The masking (and every other balanced-bracket scan
+in the script — matching a call's closing paren, a method's closing brace)
+is quote/template-aware, so a UI string that itself contains `(`, `)`, or a
+literal `/* ... */`-looking sequence doesn't confuse the scan.
 
 This is a **line/regex-based scan**, not an AST parse — by design, since this
 is a triage report rather than a hard CI gate (a stricter, ratcheted AST-based
@@ -165,6 +184,9 @@ Nothing is auto-fixed.
    `AGENTS.md` — add coverage in `vscode-extension/test/unit/l10n.test.ts` for
    any new key.
 3. Re-run this script to confirm the finding is gone, then re-run
-   `npm run lint:l10n` / `npm run validate:l10n` to confirm consistency.
+   `npm --prefix vscode-extension run lint:l10n` /
+   `npm --prefix vscode-extension run validate:l10n` to confirm consistency
+   (both scripts are defined in `vscode-extension/package.json`, not the
+   repo root).
 4. For a false positive, no action is needed — this script has no baseline or
    suppression mechanism; just use judgement on each report.
