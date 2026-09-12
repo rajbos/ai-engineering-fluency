@@ -65,16 +65,18 @@ The script will:
    of a known shared DOM helper call (`el(...)`, `iconHeading(...)`,
    `createButton(...)` from `vscode-extension/src/webview/shared/domUtils.ts`)
    — that argument may be several string/template literals joined by `+`,
-   not just one
+   or a top-level ternary of (recursively) literal/`+`-joined branches, not
+   just a single direct literal
 3. Skip anything already wrapped in `localize(`, `localizeFormat(`, `t(`, or
    `vscode.l10n.t(`, and anything that doesn't look like prose (pure
    numbers/symbols, URLs, CSS values, a narrow denylist of single CSS-keyword
    tokens — not every single lowercase word; the letter check itself is
    Unicode-aware, so non-English text isn't exempted) — but recover string
-   literals that are themselves a whole ternary branch inside an
-   interpolation's expression, e.g. `` `${flag ? 'Enable Overrides' :
-   'Disable Overrides'}` `` (a literal that is merely an argument to some
-   other call in the same interpolation, e.g. `` `${buttonHtml('btn-refresh')}` ``,
+   literals that are themselves a whole ternary branch, or the fallback side
+   of a `||` default, inside an interpolation's expression, e.g. `` `${flag ?
+   'Enable Overrides' : 'Disable Overrides'}` `` or `` `${msg || '<em>No
+   message</em>'}` `` (a literal that is merely an argument to some other
+   call in the same interpolation, e.g. `` `${buttonHtml('btn-refresh')}` ``,
    is left alone), checking each recovered literal on its own so one
    non-prose branch can't suppress another genuine one
 4. Print a console report grouped by file, with line numbers and snippets

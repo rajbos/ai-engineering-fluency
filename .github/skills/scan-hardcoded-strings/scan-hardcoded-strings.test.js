@@ -33,7 +33,9 @@ const {
     findSetAttributeCalls,
     splitTopLevelArgs,
     splitTopLevelConcat,
+    splitTernary,
     extractConcatenatedLiteralText,
+    skipQuotedLiteral,
     scanFile,
     extractHtmlMethodRanges,
     isWithinRanges,
@@ -118,6 +120,18 @@ test('stripInterpolations: a literal argument to a non-localization helper call 
     // it is no longer a ternary-branch position.
     const result = stripInterpolations("${buttonHtml('btn-refresh')}");
     assert.doesNotMatch(result, /btn-refresh/);
+});
+
+test('stripInterpolations: preserves a literal fallback after ||', () => {
+    // Regression: logviewer/main.ts's `${escapeHtml(turn.userMessage) ||
+    // '<em>No message</em>'}` and diagnostics/main.ts's
+    // `${escapeHtml(message.error || "Unknown error")}` were both invisible —
+    // the ternary-branch rule only recognized a literal after '?'/':', not
+    // the fallback side of a `||` default.
+    const result1 = stripInterpolations("${escapeHtml(turn.userMessage) || '<em>No message</em>'}");
+    assert.match(result1, /No message/);
+    const result2 = stripInterpolations('${escapeHtml(message.error || "Unknown error")}');
+    assert.match(result2, /Unknown error/);
 });
 
 // ── extractStaticText / looksLikeProse ───────────────────────────────────────
@@ -217,6 +231,36 @@ test('findMatchingBracket: treats quoted content as opaque, ignoring brackets in
 test('findMatchingBracket: works for braces too', () => {
     const src = '{ a: 1, b: { c: 2 } }';
     assert.equal(findMatchingBracket(src, 0, '{', '}'), src.length - 1);
+});
+
+test('findMatchingBracket: a nested template literal does not desync the paren count', () => {
+    // Regression: a template literal's own backtick was treated as a flat
+    // quote, so a *nested* template literal inside a `${...}` interpolation
+    // (e.g. `` `outer ${fn(`inner)`)}` ``, common in this HTML-templating
+    // codebase) had its inner backtick misread as closing the outer one,
+    // making the call's real closing paren undercounted.
+    const src = "el('div', '', `outer ${fn(`inner)`)}`)";
+    const openIdx = src.indexOf('(');
+    assert.equal(findMatchingBracket(src, openIdx, '(', ')'), src.length - 1);
+});
+
+// ── skipQuotedLiteral ────────────────────────────────────────────────────────
+
+test('skipQuotedLiteral: skips a plain quoted string', () => {
+    const src = "'hello' rest";
+    assert.equal(skipQuotedLiteral(src, 0), "'hello'".length);
+});
+
+test('skipQuotedLiteral: skips a template literal containing a nested template inside an interpolation', () => {
+    const src = '`outer ${fn(`inner`)} end` rest';
+    const end = skipQuotedLiteral(src, 0);
+    assert.equal(src.slice(0, end), '`outer ${fn(`inner`)} end`');
+});
+
+test('skipQuotedLiteral: tracks an object literal inside an interpolation without closing early', () => {
+    const src = '`${ {a: 1} }` rest';
+    const end = skipQuotedLiteral(src, 0);
+    assert.equal(src.slice(0, end), '`${ {a: 1} }`');
 });
 
 // ── findPropertyAssignments ───────────────────────────────────────────────────
@@ -517,11 +561,28 @@ test('findHelperCallText: does not flag a concatenation with a non-literal piece
     assert.equal(findings.length, 0);
 });
 
-// ── splitTopLevelConcat / extractConcatenatedLiteralText ───────────────────────
+test('findHelperCallText: flags a text argument that is a ternary of literal branches', () => {
+    // Regression: dashboard/main.ts's el('div', 'loading-text', serverUrl ?
+    // `Loading dashboard data from ${serverUrl}...` : 'Loading dashboard
+    // data...') was invisible — extractConcatenatedLiteralText only handled
+    // a direct literal or a `+` concatenation, not a top-level ternary.
+    const findings = findHelperCallText(
+        "el('div', 'loading-text', serverUrl ? `Loading dashboard data from ${serverUrl}...` : 'Loading dashboard data...')",
+    );
+    assert.equal(findings.length, 1);
+    assert.match(findings[0].snippet, /Loading dashboard data/);
+});
+
+// ── splitTopLevelConcat / splitTernary / extractConcatenatedLiteralText ────────
 
 test('splitTopLevelConcat: splits on a top-level + but not one inside a literal or nested call', () => {
     const parts = splitTopLevelConcat("`a ${1 + 2}` + 'b' + foo(1 + 1)");
     assert.deepEqual(parts, ["`a ${1 + 2}`", "'b'", 'foo(1 + 1)']);
+});
+
+test('splitTopLevelConcat: a nested template inside a piece does not desync the split', () => {
+    const parts = splitTopLevelConcat("`a ${fn(`b + c`)}` + 'd'");
+    assert.deepEqual(parts, ['`a ${fn(`b + c`)}`', "'d'"]);
 });
 
 test('extractConcatenatedLiteralText: joins the static text of concatenated literals', () => {
@@ -531,6 +592,36 @@ test('extractConcatenatedLiteralText: joins the static text of concatenated lite
 
 test('extractConcatenatedLiteralText: returns null when any piece is not a direct literal', () => {
     assert.equal(extractConcatenatedLiteralText("'Hello ' + name"), null);
+});
+
+test('splitTernary: splits a simple top-level ternary', () => {
+    assert.deepEqual(splitTernary("cond ? 'a' : 'b'"), [" 'a' ", " 'b'"]);
+});
+
+test('splitTernary: returns null for a non-ternary expression', () => {
+    assert.equal(splitTernary('getChartTitle()'), null);
+});
+
+test('splitTernary: does not split on optional chaining or nullish coalescing', () => {
+    assert.equal(splitTernary("a?.b ?? 'c'"), null);
+});
+
+test('splitTernary: a nested ternary in a branch does not confuse the outer split point', () => {
+    const [consequent, alternate] = splitTernary("a ? (b ? 'x' : 'y') : 'z'");
+    assert.equal(consequent.trim(), "(b ? 'x' : 'y')");
+    assert.equal(alternate.trim(), "'z'");
+});
+
+test('extractConcatenatedLiteralText: resolves a ternary of literal branches', () => {
+    const text = extractConcatenatedLiteralText(
+        "serverUrl ? `Loading dashboard data from ${serverUrl}...` : 'Loading dashboard data...'",
+    );
+    assert.match(text, /Loading dashboard data from/);
+    assert.match(text, /Loading dashboard data\.\.\./);
+});
+
+test('extractConcatenatedLiteralText: returns null when a ternary has no literal branch', () => {
+    assert.equal(extractConcatenatedLiteralText('cond ? getA() : getB()'), null);
 });
 
 // ── findTextNodeCalls ────────────────────────────────────────────────────────
@@ -568,6 +659,12 @@ test('findSetAttributeCalls: does not flag an unrelated attribute name', () => {
 test('findSetAttributeCalls: does not flag a variable value argument', () => {
     const findings = findSetAttributeCalls("el.setAttribute('title', someVariable)");
     assert.equal(findings.length, 0);
+});
+
+test('findSetAttributeCalls: a nested template in the value does not truncate the match', () => {
+    const findings = findSetAttributeCalls("el.setAttribute('title', `outer ${fn(`inner`)} text`)");
+    assert.equal(findings.length, 1);
+    assert.match(findings[0].snippet, /outer/);
 });
 
 // ── scanFile ──────────────────────────────────────────────────────────────────

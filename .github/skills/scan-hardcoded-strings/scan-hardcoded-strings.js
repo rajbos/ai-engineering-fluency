@@ -62,26 +62,68 @@ function collectTsFiles(dir) {
     return results;
 }
 
-// ── Shared bracket matching ──────────────────────────────────────────────────
+// ── Shared quote/bracket matching ───────────────────────────────────────────
+
+/**
+ * Given `content[start]` is the opening `"`, `'`, or `` ` `` of a string or
+ * template literal, return the index just past its matching closer. For a
+ * plain quote this is just the next unescaped occurrence of the same quote
+ * character. For a template literal, a `${...}` interpolation is real code —
+ * it can contain its own nested string/template literals (e.g. `` `outer
+ * ${fn(`inner`)}` ``, common in this HTML-templating codebase) — so this
+ * recurses into any quote found inside an interpolation and tracks the
+ * interpolation's own `{`/`}` nesting (an object literal like `${ {a:1} }`)
+ * to find *its* closing `}` correctly, rather than treating the literal's
+ * first backtick or brace as the end. Returns `content.length` if the
+ * literal is unterminated.
+ */
+function skipQuotedLiteral(content, start) {
+    const quote = content[start];
+    let i = start + 1;
+    if (quote !== '`') {
+        for (; i < content.length; i++) {
+            if (content[i] === '\\') { i++; continue; }
+            if (content[i] === quote) { return i + 1; }
+        }
+        return i;
+    }
+    for (; i < content.length; i++) {
+        const c = content[i];
+        if (c === '\\') { i++; continue; }
+        if (c === '`') { return i + 1; }
+        if (c === '$' && content[i + 1] === '{') {
+            i += 2;
+            let depth = 0;
+            for (; i < content.length; i++) {
+                const cc = content[i];
+                if (cc === '"' || cc === "'" || cc === '`') { i = skipQuotedLiteral(content, i) - 1; continue; }
+                if (cc === '{') { depth++; continue; }
+                if (cc === '}') {
+                    if (depth === 0) { break; }
+                    depth--;
+                    continue;
+                }
+            }
+            continue;
+        }
+    }
+    return i;
+}
 
 /**
  * Scan forward from `start` (which must point at `openChar`) and return the
  * index of its matching `closeChar`, treating quoted strings/template
- * literals as opaque so a stray bracket inside a UI string's text (e.g.
- * `el('span', 'label', 'What does this (mean?')`) doesn't confuse the depth
- * count. Returns -1 if no match is found before the end of input.
+ * literals (via `skipQuotedLiteral`, so a nested template's own bracket
+ * characters are skipped too) as opaque so a stray bracket inside a UI
+ * string's text (e.g. `el('span', 'label', 'What does this (mean?')`)
+ * doesn't confuse the depth count. Returns -1 if no match is found before
+ * the end of input.
  */
 function findMatchingBracket(content, start, openChar, closeChar) {
     let depth = 0;
-    let quote = null;
     for (let i = start; i < content.length; i++) {
         const c = content[i];
-        if (quote) {
-            if (c === '\\') { i++; continue; }
-            if (c === quote) { quote = null; }
-            continue;
-        }
-        if (c === '"' || c === "'" || c === '`') { quote = c; continue; }
+        if (c === '"' || c === "'" || c === '`') { i = skipQuotedLiteral(content, i) - 1; continue; }
         if (c === openChar) { depth++; }
         else if (c === closeChar) {
             depth--;
@@ -160,25 +202,27 @@ function stripLocalizedCalls(text) {
     return result;
 }
 
-// A literal is only treated as a ternary branch's UI text when it is itself
-// the whole consequent/alternate of a conditional — i.e. immediately
-// preceded by `?` or `:` (ignoring whitespace). This is a positive allowlist
-// rather than a denylist of specific "not a branch" contexts, so it excludes
-// a comparison operand (`typeof x === 'string'` — `'string'` follows `===`,
-// not `?`/`:`) *and* a literal argument buried inside some other call within
-// the interpolation (`` `${buttonHtml('btn-refresh')}` `` — `'btn-refresh'`
-// follows `(`, not `?`/`:`) without needing a separate rule for each shape of
-// "not actually a UI-text branch" expression.
-const TERNARY_BRANCH_BEFORE_RE = /[?:]\s*$/;
+// A literal is only treated as a conditional's UI text when it is itself the
+// whole consequent/alternate of a ternary (immediately preceded by `?` or
+// `:`) or the fallback side of a `||` default (`expr || 'Unknown error'`),
+// ignoring whitespace. This is a positive allowlist rather than a denylist of
+// specific "not a branch" contexts, so it excludes a comparison operand
+// (`typeof x === 'string'` — `'string'` follows `===`, not `?`/`:`/`||`)
+// *and* a literal argument buried inside some other call within the
+// interpolation (`` `${buttonHtml('btn-refresh')}` `` — `'btn-refresh'`
+// follows `(`) without needing a separate rule for each shape of "not
+// actually a UI-text branch" expression.
+const BRANCH_OR_FALLBACK_BEFORE_RE = /(?:[?:]|\|\|)\s*$/;
 
 /**
  * Extract quoted string/template literal bodies (non-nested) that are
- * themselves a ternary branch — e.g. both branches of
+ * themselves a conditional branch — both branches of a ternary like
  * `` isExcluded ? `${provider} is hidden...` : `Click to hide ${provider}...` ``
- * (a template-literal ternary), not just single/double-quoted branches. A
- * literal elsewhere in the expression (a function-call argument, a
- * comparison operand) is not a UI-rendering position on its own and is left
- * alone.
+ * (a template-literal ternary, not just single/double-quoted branches), or
+ * the fallback side of a `||` default like `` escapeHtml(turn.userMessage) ||
+ * '<em>No message</em>' ``. A literal elsewhere in the expression (a
+ * function-call argument, a comparison operand) is not a UI-rendering
+ * position on its own and is left alone.
  */
 function extractInterpolationLiterals(expr) {
     const stripped = stripLocalizedCalls(expr);
@@ -186,7 +230,7 @@ function extractInterpolationLiterals(expr) {
     const re = /(["'`])((?:(?!\1)[^\\]|\\.)*)\1/g;
     let m;
     while ((m = re.exec(stripped)) !== null) {
-        if (!TERNARY_BRANCH_BEFORE_RE.test(stripped.slice(0, m.index))) { continue; }
+        if (!BRANCH_OR_FALLBACK_BEFORE_RE.test(stripped.slice(0, m.index))) { continue; }
         literals.push(m[2]);
     }
     return literals;
@@ -478,21 +522,23 @@ function findTagContent(content) {
 // call sites). Value: 0-based index of the text argument in each call.
 const HELPER_TEXT_ARG_INDEX = { el: 2, iconHeading: 2, createButton: 1 };
 
-/** Split a raw (unparenthesized) argument-list string on top-level commas. */
+/**
+ * Split a raw (unparenthesized) argument-list string on top-level commas,
+ * treating a quoted literal (via `skipQuotedLiteral`, so a nested template
+ * literal's own comma-like characters can't desync this) as one opaque unit.
+ */
 function splitTopLevelArgs(argsStr) {
     const parts = [];
     let depth = 0;
     let current = '';
-    let quote = null;
     for (let i = 0; i < argsStr.length; i++) {
         const c = argsStr[i];
-        if (quote) {
-            current += c;
-            if (c === '\\') { current += argsStr[++i] ?? ''; continue; }
-            if (c === quote) { quote = null; }
+        if (c === '"' || c === "'" || c === '`') {
+            const end = skipQuotedLiteral(argsStr, i);
+            current += argsStr.slice(i, end);
+            i = end - 1;
             continue;
         }
-        if (c === '"' || c === "'" || c === '`') { quote = c; current += c; continue; }
         if (c === '(' || c === '[' || c === '{') { depth++; current += c; continue; }
         if (c === ')' || c === ']' || c === '}') { depth--; current += c; continue; }
         if (c === ',' && depth === 0) { parts.push(current); current = ''; continue; }
@@ -504,24 +550,22 @@ function splitTopLevelArgs(argsStr) {
 
 /**
  * Split an argument expression on top-level `+` operators (outside any
- * string/template literal or nested bracket), so a concatenated literal
- * argument like `` `The last ${n} releases. ` + 'more text.' `` can be read
- * as separate pieces.
+ * quoted literal — via `skipQuotedLiteral`, nested-template-safe — or nested
+ * bracket), so a concatenated literal argument like `` `The last ${n}
+ * releases. ` + 'more text.' `` can be read as separate pieces.
  */
 function splitTopLevelConcat(expr) {
     const parts = [];
     let depth = 0;
-    let quote = null;
     let current = '';
     for (let i = 0; i < expr.length; i++) {
         const c = expr[i];
-        if (quote) {
-            current += c;
-            if (c === '\\') { current += expr[++i] ?? ''; continue; }
-            if (c === quote) { quote = null; }
+        if (c === '"' || c === "'" || c === '`') {
+            const end = skipQuotedLiteral(expr, i);
+            current += expr.slice(i, end);
+            i = end - 1;
             continue;
         }
-        if (c === '"' || c === "'" || c === '`') { quote = c; current += c; continue; }
         if (c === '(' || c === '[' || c === '{') { depth++; current += c; continue; }
         if (c === ')' || c === ']' || c === '}') { depth--; current += c; continue; }
         if (c === '+' && depth === 0) { parts.push(current); current = ''; continue; }
@@ -532,16 +576,60 @@ function splitTopLevelConcat(expr) {
 }
 
 /**
+ * If `expr` is a top-level ternary (`cond ? a : b`), return its
+ * `[consequent, alternate]` pieces; otherwise `null`. Only a top-level
+ * `?`/`:` — outside quotes/brackets, and not part of `?.`/`??` — is
+ * recognized, tracking nested ternaries' own `?`/`:` pairs so the split
+ * point is the `:` that actually closes the *first* `?` (e.g. `a ? (b ? c :
+ * d) : e` splits after the outer `:`, not the inner one).
+ */
+function splitTernary(expr) {
+    let depth = 0;
+    let pending = 0;
+    let qIdx = -1;
+    for (let i = 0; i < expr.length; i++) {
+        const c = expr[i];
+        if (c === '"' || c === "'" || c === '`') { i = skipQuotedLiteral(expr, i) - 1; continue; }
+        if (c === '(' || c === '[' || c === '{') { depth++; continue; }
+        if (c === ')' || c === ']' || c === '}') { depth--; continue; }
+        if (depth !== 0) { continue; }
+        if (c === '?') {
+            if (expr[i + 1] === '.' || expr[i + 1] === '?') { i++; continue; } // ?. or ??
+            if (qIdx === -1) { qIdx = i; }
+            pending++;
+            continue;
+        }
+        if (c === ':') {
+            if (pending === 0) { continue; }
+            pending--;
+            if (pending === 0) { return [expr.slice(qIdx + 1, i), expr.slice(i + 1)]; }
+        }
+    }
+    return null;
+}
+
+/**
  * Resolve an argument expression to its combined static UI text when it is
  * made up entirely of string/template literals joined by `+` — e.g.
  * `` `The last ${n} releases. ` + 'more text.' ``, which the single-literal
  * pattern (`^(quote)...(same quote)$`) can't recognize since the two quote
- * characters at the start and end of the whole expression differ. Returns
- * `null` if any piece isn't a direct literal (a variable/call there means
- * the text isn't fully knowable statically, so the whole argument is
- * skipped rather than guessed at).
+ * characters at the start and end of the whole expression differ — or a
+ * top-level ternary whose branches are (recursively) resolvable this way,
+ * e.g. `serverUrl ? \`Loading data from ${serverUrl}...\` : "Loading
+ * data..."`. Returns `null` if a (non-ternary) expression's pieces aren't
+ * all direct literals, or if a ternary's branches resolve to nothing (a
+ * variable/call there means the text isn't fully knowable statically, so
+ * that piece is skipped rather than guessed at).
  */
 function extractConcatenatedLiteralText(expr) {
+    const ternary = splitTernary(expr);
+    if (ternary) {
+        const branchTexts = ternary
+            .map((branch) => extractConcatenatedLiteralText(branch))
+            .filter((text) => text !== null);
+        return branchTexts.length > 0 ? branchTexts.join(' ') : null;
+    }
+
     const pieces = splitTopLevelConcat(expr);
     const texts = [];
     for (const piece of pieces) {
@@ -627,12 +715,9 @@ function findSetAttributeCalls(content) {
         const valueStart = m.index + m[0].length;
         const quoteChar = content[valueStart];
         if (quoteChar !== '"' && quoteChar !== "'" && quoteChar !== '`') { continue; } // not a direct literal — skip
-        let end = -1;
-        for (let i = valueStart + 1; i < content.length; i++) {
-            if (content[i] === '\\') { i++; continue; }
-            if (content[i] === quoteChar) { end = i; break; }
-        }
-        if (end === -1) { continue; }
+        const skipEnd = skipQuotedLiteral(content, valueStart);
+        if (content[skipEnd - 1] !== quoteChar) { continue; } // unterminated — no closing quote found
+        const end = skipEnd - 1;
         const staticText = extractStaticText(content.slice(valueStart + 1, end));
         if (looksLikeProse(staticText)) {
             findings.push({
@@ -936,6 +1021,7 @@ function runMain(mainFn = main) {
 
 module.exports = {
     collectTsFiles,
+    skipQuotedLiteral,
     findMatchingBracket,
     extractHtmlMethodRanges,
     isWithinRanges,
@@ -955,6 +1041,7 @@ module.exports = {
     findSetAttributeCalls,
     splitTopLevelArgs,
     splitTopLevelConcat,
+    splitTernary,
     extractConcatenatedLiteralText,
     scanFile,
     maskBlockComments,

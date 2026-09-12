@@ -104,7 +104,10 @@ addition to printing a console summary grouped by file.
   The text argument may also be several literals joined by `+` (e.g. `` el('div',
   'intro', `The last ${n} releases. ` + 'more text.') ``) — each piece is
   recognized and their static text is joined, rather than requiring the whole
-  argument to be a single literal
+  argument to be a single literal — or a top-level ternary whose branches are
+  (recursively) literals or `+`-concatenations of literals, e.g. `serverUrl ?
+  \`Loading data from ${serverUrl}...\` : "Loading data..."`; both branches'
+  static text is combined into one finding
 
 `extension.ts` is scanned only within its `get*Html(...)` method bodies
 (`getDetailsHtml`, `getLoadingHtmlCssBase`, etc.) — not the whole 13k-line
@@ -131,13 +134,15 @@ or `vscode.l10n.t(...)` call — including inside a template-literal interpolati
 `` `${localize('key')}` `` — is stripped out before the prose check runs, so
 already-localized text is not flagged. Conversely, a string literal that is
 itself a whole ternary branch inside an interpolation's expression — e.g.
-`` `${flag ? 'Enable Overrides' : 'Disable Overrides'}` `` — is preserved and
-checked, since that is often where the actual hardcoded UI text lives. Only a
-literal immediately preceded by `?` or `:` (ignoring whitespace) counts as a
+`` `${flag ? 'Enable Overrides' : 'Disable Overrides'}` `` — or the fallback
+side of a `||` default — e.g. `` `${escapeHtml(msg) || '<em>No message</em>'}` ``
+or `` `${escapeHtml(err || "Unknown error")}` `` — is preserved and checked,
+since that is often where the actual hardcoded UI text lives. Only a literal
+immediately preceded by `?`, `:`, or `||` (ignoring whitespace) counts as a
 branch this way; a literal that is merely an argument to some other call
 inside the same interpolation — e.g. `` `${buttonHtml('btn-refresh')}` `` —
 is left alone, since `'btn-refresh'` there is a button id, not UI text, and
-follows `(` rather than `?`/`:`. The same rule is what keeps a comparison
+follows `(` rather than `?`/`:`/`||`. The same rule is what keeps a comparison
 operand like `` `${typeof x === 'string' ? x : ''}` `` from being misread as
 a branch. Each recovered literal is prose-checked on its own before being
 combined, so one non-prose branch (e.g. a URL) can't poison another genuine
@@ -152,16 +157,23 @@ blanked out — a doc-comment example like `Converts [text](url) to <a
 href="url">text</a>` is not real UI markup and would otherwise be
 misreported. `//` line comments are deliberately left alone, since stripping
 from the first `//` to end-of-line risks truncating a genuine line that
-happens to contain a URL. The masking (and every other balanced-bracket scan
-in the script — matching a call's closing paren, a method's closing brace)
-is quote/template-aware, so a UI string that itself contains `(`, `)`, or a
-literal `/* ... */`-looking sequence doesn't confuse the scan. It's also
-regex-literal-aware (`.replace(/"/g, ...)` doesn't get misread as opening an
-unterminated string) and correctly handles a *nested* template literal
-inside a `${...}` interpolation (`` `...${fn(`${x} y`)}...` ``, common in
-this HTML-templating codebase) rather than treating the first inner backtick
-as closing the outer one — either bug, if left unfixed, would silently
-disable comment masking for the rest of the file from that point on.
+happens to contain a URL. The masking (and every other balanced-bracket or
+argument-splitting scan in the script — matching a call's closing paren, a
+method's closing brace, splitting a call's arguments on top-level commas,
+splitting a `+`-concatenation) shares one quote/template-aware primitive
+(`skipQuotedLiteral`), so a UI string that itself contains `(`, `)`, `,`,
+`+`, or a literal `/* ... */`-looking sequence doesn't confuse the scan.
+That primitive is also regex-literal-aware (`.replace(/"/g, ...)` doesn't
+get misread as opening an unterminated string, though this check lives in
+the comment-masking tokenizer specifically, not `skipQuotedLiteral` itself)
+and correctly handles a *nested* template literal inside a `${...}`
+interpolation — `` `...${fn(`${x} y`)}...` ``, or a helper call like
+`el('div', '', `outer ${fn(`inner`)}`)`, both common in this
+HTML-templating codebase — rather than treating the first inner backtick as
+closing the outer one. Left unfixed, that bug silently disabled comment
+masking for the rest of a file, or undercounted a call's real closing paren
+(truncating its argument list) or an argument split (misreading a comma or
+`+` inside the nested literal as top-level), from that point on.
 
 This is a **line/regex-based scan**, not an AST parse — by design, since this
 is a triage report rather than a hard CI gate (a stricter, ratcheted AST-based

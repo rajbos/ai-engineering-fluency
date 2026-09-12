@@ -11,7 +11,7 @@ before localizing.
 
 - Files scanned: 36
 - Files with findings: 17
-- Total candidate strings: 1218
+- Total candidate strings: 1225
 
 ## Findings by file
 
@@ -66,11 +66,12 @@ before localizing.
 | 1371 | .title assignment | `.title = '${ds.label} · ${labels[i]}: ${value.toLocaleString()} lines'` |
 | 1552 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/dashboard/main.ts` (31)
+### `vscode-extension/src/webview/dashboard/main.ts` (32)
 
 | Line | Kind | Snippet |
 |---|---|---|
 | 116 | el() text argument | `el("div", "title", "📊 Team Dashboard")` |
+| 122 | el() text argument | `el( "div", "loading-text", serverUrl ? 'Loading dashboard data from ${serverUrl}...' : "Loading dashboard data...", )` |
 | 151 | el() text argument | `el("div", "title", "📊 Team Dashboard")` |
 | 166 | el() text argument | `el("span", "config-card-heading", "Azure Storage")` |
 | 170 | createButton() text argument | `createButton( "btn-configure-backend", "Configure Azure Storage", "secondary", )` |
@@ -102,7 +103,7 @@ before localizing.
 | 625 | el() text argument | `el("div", "title", "📊 Team Dashboard")` |
 | 744 | .textContent assignment | `.textContent = "Failed to initialize dashboard."` |
 
-### `vscode-extension/src/webview/details/main.ts` (29)
+### `vscode-extension/src/webview/details/main.ts` (30)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -125,6 +126,7 @@ before localizing.
 | 812 | el() text argument | `el('div', 'muted', '${formatPercent(pct(usage.tokens, total))} · ${usage.sessions} sessions')` |
 | 865 | .textContent assignment (conditional) | `.textContent = editorSectionCollapsed ? '\\u25b8' : '\\u25be';` |
 | 896 | iconHeading() text argument | `iconHeading('h3', 'device-desktop', 'Usage by Editor')` |
+| 902 | el() text argument | `el('span', 'section-heading-chevron', editorSectionCollapsed ? '\\u25b8' : '\\u25be')` |
 | 1075 | .textContent assignment | `.textContent = '(~${item.charsPerToken.toFixed(1)} chars/tk)'` |
 | 1092 | .title assignment (conditional) | `.title = modelOtherExpanded ? 'Collapse other models' : 'Expand other models';` |
 | 1158 | iconHeading() text argument | `iconHeading('h3', 'symbol-numeric', 'Model Usage (Tokens)')` |
@@ -136,7 +138,7 @@ before localizing.
 | 1275 | iconHeading() text argument | `iconHeading('h3', 'lightbulb', 'Calculation & Estimates')` |
 | 1343 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/diagnostics/main.ts` (361)
+### `vscode-extension/src/webview/diagnostics/main.ts` (362)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -351,6 +353,7 @@ before localizing.
 | 1977 | <span> content | `<span>⏳</span><span>Clearing...</span>` |
 | 2152 | <span> content | `<span>⏳</span><span>Clearing...</span>"); btn.disabled = true; } updateCacheNumbers(); vscode.postMessage({ command: "clearCache" }); }); document .getElementBy…` |
 | 2369 | <h3> content | `<h3><span class="codicon codicon-warning"></span> Error Loading Diagnostic Data</h3>` |
+| 2370 | <p> content | `<p>${escapeHtml(message.error \|\| "Unknown error")}</p>` |
 | 2484 | .textContent assignment (conditional) | `.textContent = total > 0 ? '⏳ Loading sessions… (${processed}/${total})' : "⏳ Loading sessions…";` |
 | 2494 | .textContent assignment | `.textContent = '📁 Session Files (${storedDetailedFiles.length})'` |
 | 2503 | <option> content | `<option value="all">🌐 All Editors</option>` |
@@ -664,7 +667,7 @@ before localizing.
 | 306 | <div> content | `<div class="hydra-panel-title">🧩 One turn in detail</div>` |
 | 307 | <div> content | `<div class="hydra-panel-sub">Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg…` |
 
-### `vscode-extension/src/webview/logviewer/main.ts` (91)
+### `vscode-extension/src/webview/logviewer/main.ts` (93)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -754,7 +757,9 @@ before localizing.
 | 1282 | <div> content | `<div class="mcp-header">🔌 MCP Tools (${turn.mcpTools.length})</div>` |
 | 1296 | <div> content | `<div class="turn-meta"> <span class="turn-number">#${turn.turnNumber}</span> <span class="turn-mode" style="background: ${getModeColor(turn.mode)};">${getModeIc…` |
 | 1316 | <div> content | `<div class="message-label">👤 User</div>` |
+| 1317 | <div> content | `<div class="message-text">${escapeHtml(turn.userMessage) \|\| '<em>No message</em>'}</div>` |
 | 1321 | <div> content | `<div class="message-label">🤖 Assistant</div>` |
+| 1322 | <div> content | `<div class="message-text">${escapeHtml(turn.assistantResponse) \|\| '<em>No response</em>'}</div>` |
 | 1498 | <span> content | `<span>📝</span> <span>Chat Turns (${data.turns.length})${data.title ? ' - ${escapeHtml(data.title)}' : ''}</span>` |
 | 1500 | <vscode-button> content | `<vscode-button id="btn-refresh-session" appearance="secondary" style="margin-left: auto;">🔄 Refresh</vscode-button>` |
 | 1506 | <div> content | `<div class="empty-state">No chat turns found in this session.</div>` |
@@ -779,7 +784,7 @@ before localizing.
 | 176 | <div> content | `<div> A dark factory is a governed, observable production system &mdash; humans specify intent, constraints, risk and evidence of success while agents implement…` |
 | 188 | <div> content | `<div class="df-footer">Scanned ${escapeHtml(new Date(report.scannedAt).toLocaleString())} &middot; Stages 1&ndash;${report.maxAssessableStage} are assessable; S…` |
 
-### `vscode-extension/src/webview/maturity/main.ts` (58)
+### `vscode-extension/src/webview/maturity/main.ts` (60)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -791,6 +796,7 @@ before localizing.
 | 314 | <li> content | `<li class="evidence-item"><span class="evidence-icon">-</span><span>No thresholds defined</span></li>` |
 | 318 | <div> content | `<div class="tip-item" style="color:#666;">No tips for this stage</div>` |
 | 323 | <div> content | `<div class="category-header"> <span class="category-name">${cat.icon} ${escapeHtml(cat.category)}</span> <span class="category-stage-badge badge-${displayStage}…` |
+| 327 | <div> content | `<div class="category-stage-label">${escapeHtml(STAGE_LABELS[displayStage] \|\| 'Unknown')}</div>` |
 | 332 | <div> content | `<div class="demo-section-label">🎯 Requirements to Reach This Stage</div>` |
 | 335 | <div> content | `<div class="demo-section-label">💡 Tips</div>` |
 | 347 | title attribute | `title="Remove session reminder"` |
@@ -802,6 +808,7 @@ before localizing.
 | 392 | <div> content | `<div class="tip-item" style="color:#666;">No specific suggestions - you\\'re doing great!</div>` |
 | 397 | <button> content | `<button class="mcp-discover-btn" data-action="searchMcp">🔍 Discover more MCP Servers in Marketplace</button>` |
 | 406 | <div> content | `<div class="category-header"> <span class="category-name">${cat.icon} ${escapeHtml(cat.category)}</span> <span class="category-stage-badge badge-${cat.stage}">S…` |
+| 410 | <div> content | `<div class="category-stage-label">${escapeHtml(STAGE_LABELS[cat.stage] \|\| 'Unknown')}</div>` |
 | 414 | <li> content | `<li class="evidence-item"><span class="evidence-icon">-</span><span>No significant activity detected</span></li>` |
 | 419 | <div> content | `<div style="font-size: 11px; font-weight: 600; color: #f59e0b;">💡 Next steps to level up:</div>` |
 | 420 | title attribute | `title="Dismiss these tips"` |
