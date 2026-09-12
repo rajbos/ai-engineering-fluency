@@ -1,6 +1,6 @@
 # VS Code Variants Support
 
-The Copilot Token Tracker extension and analysis script check session files for **all VS Code variants**:
+The AI Engineering Fluency extension and analysis script check session files for **all VS Code variants**:
 
 ## Supported Editors
 

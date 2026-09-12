@@ -1,6 +1,6 @@
 {
   "title": "GitHub Copilot Session File Schema Documentation",
-  "description": "This document describes the structure of session log files created by GitHub Copilot Chat extension. These files are used by the Copilot Token Tracker extension to calculate token usage statistics.",
+  "description": "This document describes the structure of session log files created by GitHub Copilot Chat extension. These files are used by the AI Engineering Fluency extension to calculate token usage statistics.",
   "version": "2.0",
   "lastUpdated": "2026-01-21",
   "schemaChanges": {
@@ -1415,7 +1415,7 @@
     }
   },
   "extensionUsageSummary": {
-    "description": "Summary of which fields the Copilot Token Tracker extension actually uses",
+    "description": "Summary of which fields the AI Engineering Fluency extension actually uses",
     "primaryDataSources": {
       "json_files": {
         "format": "Standard JSON session files",

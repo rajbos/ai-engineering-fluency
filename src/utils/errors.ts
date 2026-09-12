@@ -1,5 +1,5 @@
 /**
- * Error utilities for the Copilot Token Tracker extension.
+ * Error utilities for the AI Engineering Fluency extension.
  * Provides custom error types, error handling, and secret redaction.
  */
 

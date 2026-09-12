@@ -5,7 +5,7 @@ description: Analyzing GitHub Copilot session log files to extract token usage, 
 
 # Copilot Log Analysis Skill
 
-This skill documents the methods and approaches used by the GitHub Copilot Token Tracker extension to analyze Copilot session log files. These files contain chat sessions, token usage, and model information.
+This skill documents the methods and approaches used by the AI Engineering Fluency extension to analyze Copilot session log files. These files contain chat sessions, token usage, and model information.
 
 ## Overview
 
@@ -459,7 +459,7 @@ Methods available:
 - `warn(message)` (line 151): Warning-level logging
 - `error(message, error?)` (line 156): Error-level logging
 
-All logs go to "GitHub Copilot Token Tracker" output channel.
+All logs go to "AI Engineering Fluency" output channel.
 
 ### Diagnostic Report Generation
 **Method**: `generateDiagnosticReport()`

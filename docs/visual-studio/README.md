@@ -1,4 +1,4 @@
-# Copilot Token Tracker — Visual Studio Extension
+# AI Engineering Fluency — Visual Studio Extension
 
 ![AI Engineering Fluency](https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/assets/AI%20Engineering%20Fluency%20-%20Transparent.png)
 

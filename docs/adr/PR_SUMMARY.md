@@ -1,7 +1,7 @@
 # PR Summary: Add Comprehensive Light Theme Support
 
 ## Overview
-This PR implements complete light theme support for all 5 webview panels in the Copilot Token Tracker extension, ensuring the extension is readable and accessible across all VS Code themes.
+This PR implements complete light theme support for all 5 webview panels in the AI Engineering Fluency extension, ensuring the extension is readable and accessible across all VS Code themes.
 
 ## Problem Statement
 Previously, all webview panels used hardcoded dark theme colors, making them unreadable when users had VS Code light themes enabled. This created a poor user experience for approximately 30-40% of VS Code users who prefer light themes.

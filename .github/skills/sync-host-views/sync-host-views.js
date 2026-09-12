@@ -13,23 +13,25 @@
  *
  * The Visual Studio and JetBrains hosts each load a *subset* of those compiled
  * bundles (currently 6 of 9). They deliberately do NOT ship every view. This
- * script:
+ * script detects, per host, which views are TRACKED, which are NEW (present in
+ * VS Code but not yet wired into the host), and which are ORPHAN (listed by
+ * the host but no longer produced by VS Code).
  *
- *   1. Detects, per host, which views are TRACKED, which are NEW (present in
- *      VS Code but not yet wired into the host), and which are ORPHAN (listed by
- *      the host but no longer produced by VS Code).
- *   2. For Visual Studio, whose bundles are committed to the repo, flags any
- *      committed bundle that is STALE relative to the freshly built dist bundle.
- *   3. With `--refresh`, copies ONLY the already-tracked bundles from dist into
- *      the Visual Studio committed `webview/` folder. It never adds a new view —
- *      adding a view is a human decision (see SKILL.md).
+ * Neither host commits webview content to git any more (see
+ * docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md): Visual Studio's `webview/*.js`
+ * and `*.json` are esbuild output copied fresh from `vscode-extension/dist/webview`
+ * by the `.csproj`'s `CopyWebviewBundles` MSBuild target, exactly like
+ * JetBrains' `prepareBundledAssets` Gradle task always did. There is
+ * therefore nothing left for this script to compare a committed copy
+ * against, or to `--refresh` — this script only tracks view-LIST drift
+ * (which named bundles each host's build config references), not bundle
+ * CONTENT freshness, for both hosts equally.
  *
  * Dependency-free. Node >= 16.
  *
  * Exit codes:
- *   0  everything in sync (and, with --refresh, nothing left stale)
- *   1  drift that the agent can fix mechanically (stale VS bundles, orphan
- *      entries, or host include-list vs committed-file mismatch)
+ *   0  everything in sync
+ *   1  drift that the agent can fix mechanically (an ORPHAN entry)
  *   2  environment / configuration error (a source file was not found)
  *   3  NEW views detected — a human must decide whether to add them. Takes
  *      precedence over exit 1.
@@ -39,7 +41,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
 // ── Repo layout ──────────────────────────────────────────────────────────────
 // This file lives at <repo>/.github/skills/sync-host-views/sync-host-views.js
@@ -51,9 +52,6 @@ const PATHS = {
   vsCsproj: path.join(
     REPO_ROOT, 'visualstudio-extension', 'src', 'AIEngineeringFluency',
     'AIEngineeringFluency.csproj',
-  ),
-  vsCommittedWebview: path.join(
-    REPO_ROOT, 'visualstudio-extension', 'src', 'AIEngineeringFluency', 'webview',
   ),
   jbGradle: path.join(REPO_ROOT, 'jetbrains-plugin', 'build.gradle.kts'),
 };
@@ -128,23 +126,6 @@ function parseVsCsprojViews() {
   return views;
 }
 
-/** Visual Studio committed bundles actually checked into webview/ (name -> path). */
-function listVsCommittedBundles() {
-  const out = new Map();
-  let entries;
-  try {
-    entries = fs.readdirSync(PATHS.vsCommittedWebview);
-  } catch {
-    return out;
-  }
-  for (const f of entries) {
-    if (f.endsWith('.js') && !f.endsWith('.js.map')) {
-      out.set(f.slice(0, -3), path.join(PATHS.vsCommittedWebview, f));
-    }
-  }
-  return out;
-}
-
 /**
  * JetBrains host include list. Finds the `from("…/vscode-extension/dist/webview")`
  * block inside build.gradle.kts and extracts the `*.js` names from its
@@ -177,17 +158,12 @@ function parseJetBrainsViews() {
   return views;
 }
 
-function sha256(file) {
-  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-}
-
 // ── Analysis ─────────────────────────────────────────────────────────────────
 
 function analyse() {
   const canonical = parseCanonicalViews();
   const dist = listDistBundles();
   const vsList = parseVsCsprojViews();
-  const vsCommitted = listVsCommittedBundles();
   const jbList = parseJetBrainsViews();
 
   const sortV = (set) => [...set].sort();
@@ -204,83 +180,23 @@ function analyse() {
   const vs = classify(vsList);
   const jb = classify(jbList);
 
-  // VS-specific: committed bundle vs dist freshness + list/file consistency.
-  const vsStale = []; // tracked, committed exists, differs from dist
-  const vsMissingCommitted = []; // in csproj list but no committed file
-  const vsUntrackedCommitted = []; // committed file not in csproj list
-  const vsNoDist = []; // tracked but dist not built (cannot verify/refresh)
-
-  for (const v of vs.tracked) {
-    const distPath = dist.get(v);
-    const comPath = vsCommitted.get(v);
-    if (!comPath) {
-      vsMissingCommitted.push(v);
-      continue;
-    }
-    if (!distPath) {
-      vsNoDist.push(v);
-      continue;
-    }
-    if (sha256(distPath) !== sha256(comPath)) {
-      vsStale.push(v);
-    }
-  }
-  for (const v of vsCommitted.keys()) {
-    if (!vsList.has(v)) vsUntrackedCommitted.push(v);
-  }
-  vsUntrackedCommitted.sort();
-
   return {
     canonical: sortV(canonical),
     distAvailable: dist.size > 0,
     vs,
     jb,
-    vsStale,
-    vsMissingCommitted,
-    vsUntrackedCommitted,
-    vsNoDist,
-    _dist: dist,
-    _vsCommitted: vsCommitted,
   };
-}
-
-// ── Refresh (VS committed bundles only; never adds a view) ──────────────────
-
-function refreshVs(result) {
-  if (!result.distAvailable) {
-    throw new ConfigError(
-      'dist/webview is empty — build it first: (cd vscode-extension && npm run package).',
-    );
-  }
-  const updated = [];
-  for (const v of result.vs.tracked) {
-    const distPath = result._dist.get(v);
-    if (!distPath) continue; // already reported as vsNoDist
-    const destPath = path.join(PATHS.vsCommittedWebview, `${v}.js`);
-    const before = fs.existsSync(destPath) ? sha256(destPath) : null;
-    fs.copyFileSync(distPath, destPath);
-    if (before !== sha256(destPath)) updated.push(v);
-  }
-  return updated;
 }
 
 // ── Reporting ────────────────────────────────────────────────────────────────
 
 function decideExit(result) {
   if (result.vs.newViews.length || result.jb.newViews.length) return 3;
-  if (
-    result.vsStale.length ||
-    result.vsMissingCommitted.length ||
-    result.vsUntrackedCommitted.length ||
-    result.vs.orphan.length ||
-    result.jb.orphan.length
-  ) {
-    return 1;
-  }
+  if (result.vs.orphan.length || result.jb.orphan.length) return 1;
   return 0;
 }
 
-function printReport(result, refreshed) {
+function printReport(result) {
   const rel = (set) => (set.length ? set.join(', ') : '(none)');
 
   console.log(bold('\nHost view sync report'));
@@ -301,30 +217,14 @@ function printReport(result, refreshed) {
     }
   }
 
-  console.log(bold('\nVisual Studio committed-bundle health'));
-  if (refreshed) {
-    console.log(`  ${green('refreshed')}: ${refreshed.length ? refreshed.join(', ') : '(already up to date)'}`);
-  } else {
-    console.log(`  stale vs dist: ${result.vsStale.length ? yellow(result.vsStale.join(', ')) : green('none')}`);
-  }
-  if (result.vsNoDist.length) {
-    console.log(`  ${yellow('cannot verify (dist bundle missing)')}: ${result.vsNoDist.join(', ')}`);
-  }
-  if (result.vsMissingCommitted.length) {
-    console.log(`  ${red('in csproj but no committed file')}: ${result.vsMissingCommitted.join(', ')}`);
-  }
-  if (result.vsUntrackedCommitted.length) {
-    console.log(`  ${red('committed file not in csproj list')}: ${result.vsUntrackedCommitted.join(', ')}`);
-  }
-
-  const code = refreshed ? decideExit({ ...result, vsStale: [] }) : decideExit(result);
+  const code = decideExit(result);
   console.log('-'.repeat(60));
   if (code === 0) {
     console.log(green('[OK] Hosts are in sync with the VS Code views.'));
   } else if (code === 3) {
     console.log(yellow('[NEW] New VS Code views detected. Do NOT auto-add them — ask the user (see SKILL.md).'));
   } else {
-    console.log(yellow('[DRIFT] Mechanical drift detected. Run with --refresh, or fix the host lists (see SKILL.md).'));
+    console.log(yellow('[DRIFT] Mechanical drift detected. Fix the host lists (see SKILL.md).'));
   }
   console.log('');
 }
@@ -337,16 +237,13 @@ function main() {
     console.log(`sync-host-views — keep VS / JetBrains views in sync with VS Code
 
 Usage:
-  node .github/skills/sync-host-views/sync-host-views.js [--refresh] [--json]
+  node .github/skills/sync-host-views/sync-host-views.js [--json]
 
 Options:
-  --refresh   Copy already-tracked bundles from vscode-extension/dist/webview
-              into the Visual Studio committed webview/ folder. Never adds a
-              new view (that is a human decision).
   --json      Emit machine-readable JSON instead of a report.
   --help      Show this help.
 
-Exit codes: 0 in sync · 1 mechanical drift · 2 config error · 3 NEW views (ask user)`);
+Exit codes: 0 in sync · 1 mechanical drift (ORPHAN) · 2 config error · 3 NEW views (ask user)`);
     return 0;
   }
 
@@ -361,28 +258,14 @@ Exit codes: 0 in sync · 1 mechanical drift · 2 config error · 3 NEW views (as
     throw e;
   }
 
-  let refreshed = null;
-  if (args.includes('--refresh')) {
-    try {
-      refreshed = refreshVs(result);
-    } catch (e) {
-      if (e instanceof ConfigError) {
-        console.error(red(`config error: ${e.message}`));
-        return 2;
-      }
-      throw e;
-    }
-  }
-
   if (args.includes('--json')) {
-    const code = refreshed ? decideExit({ ...result, vsStale: [] }) : decideExit(result);
-    const { _dist, _vsCommitted, ...clean } = result;
-    console.log(JSON.stringify({ ...clean, refreshed, exitCode: code }, null, 2));
+    const code = decideExit(result);
+    console.log(JSON.stringify({ ...result, exitCode: code }, null, 2));
     return code;
   }
 
-  printReport(result, refreshed);
-  return refreshed ? decideExit({ ...result, vsStale: [] }) : decideExit(result);
+  printReport(result);
+  return decideExit(result);
 }
 
 process.exit(main());

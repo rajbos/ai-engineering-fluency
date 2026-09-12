@@ -5,7 +5,7 @@ description: Refresh token estimator and model pricing JSON files with latest da
 
 # Refresh JSON Data Skill
 
-This skill helps you update the token estimation ratios and model pricing data in the Copilot Token Tracker extension.
+This skill helps you update the token estimation ratios and model pricing data in the AI Engineering Fluency extension.
 
 ## Overview
 

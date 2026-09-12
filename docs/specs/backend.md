@@ -436,7 +436,7 @@ All settings in VS Code user settings (global scope, Settings Sync compatible):
 ### Initial Setup
 
 1. **Open Command Palette**: `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (macOS)
-2. **Run**: "Copilot Token Tracker: Configure Backend"
+2. **Run**: "AI Engineering Fluency: Configure Backend"
 3. **Follow Wizard**:
    - Sign in to Azure (if not already)
    - Select subscription

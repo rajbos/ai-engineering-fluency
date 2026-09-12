@@ -1,6 +1,6 @@
 ---
 name: Feature request — VS Code Extension
-about: Suggest a new feature or improvement for the Copilot Token Tracker VS Code extension
+about: Suggest a new feature or improvement for the AI Engineering Fluency VS Code extension
 title: '[FEATURE][vscode] '
 labels: "enhancement, vscode-extension"
 assignees: ''
