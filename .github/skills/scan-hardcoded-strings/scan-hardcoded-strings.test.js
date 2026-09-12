@@ -38,6 +38,8 @@ const {
     buildMarkdownReport,
     runMain,
     maskBlockComments,
+    isRegexLiteralStart,
+    findRegexLiteralEnd,
     findMatchingBracket,
 } = require('./scan-hardcoded-strings.js');
 
@@ -266,6 +268,21 @@ test('findPropertyAssignments: does not flag a "typeof x === literal" comparison
         "el.textContent = typeof check?.label === 'string' ? check.label : '';"
     );
     assert.equal(findings.length, 0);
+});
+
+test('findPropertyAssignments: flags a multi-line ternary with template-literal branches', () => {
+    // Regression: a ternary wrapped across lines (a common style for a long
+    // condition/branches) was invisible because the RHS scan stopped at the
+    // first newline, and template-literal branches weren't recognized as
+    // literals at all (only single/double-quoted ones were).
+    const src = [
+        'card.title = isExcluded',
+        '    ? `${provider} is hidden — click to show it again and include it in the totals below.`',
+        '    : `Click to hide ${provider} — filters it out of the totals and the Editor/Model usage lists below.`;',
+    ].join('\n');
+    const findings = findPropertyAssignments(src);
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, '.title assignment (conditional)');
 });
 
 // ── findHtmlAttributes ───────────────────────────────────────────────────────
@@ -621,6 +638,101 @@ test('maskBlockComments: still masks a real comment that sits next to a quote-li
     assert.doesNotMatch(masked, /comment/);
     assert.match(masked, /el\.textContent = 'Refresh';/);
     assert.equal(masked.length, src.length);
+});
+
+test('maskBlockComments: a regex literal containing a quote character does not desync the scanner', () => {
+    // Regression: `.replace(/"/g, '&quot;')` looks, to a naive char-by-char
+    // scanner, like it opens an unterminated double-quoted string at the `"`
+    // inside the regex. That stuck "still inside a string" state then
+    // silently disabled comment masking for the rest of the file — a real
+    // /** ... */ doc comment later in the file (containing example markup)
+    // was never masked because the scanner still thought it was inside a
+    // string when it reached the comment's "/*".
+    const src = [
+        "function escapeHtml(s) {",
+        '  return s.replace(/"/g, "&quot;");',
+        '}',
+        '',
+        '/**',
+        ' * Converts [text](url) to <a href="url">text</a>',
+        ' */',
+        'export function markdownToHtml() {}',
+    ].join('\n');
+    const masked = maskBlockComments(src);
+    assert.doesNotMatch(masked, /<a href/);
+    assert.match(masked, /export function markdownToHtml/);
+    assert.equal(masked.length, src.length);
+});
+
+test('maskBlockComments: a regex literal containing "/*"-like text does not open a fake comment', () => {
+    const src = 'const re = /\\/\\*not a comment\\*\\//; const x = "keep me";';
+    const masked = maskBlockComments(src);
+    assert.equal(masked, src);
+});
+
+test('maskBlockComments: division is not mistaken for the start of a regex literal', () => {
+    const src = 'const ratio = total / 2; const s = "keep me";';
+    assert.equal(maskBlockComments(src), src);
+});
+
+test('maskBlockComments: a nested template literal inside ${...} does not desync the scanner', () => {
+    // Regression: a template literal containing an interpolation whose
+    // expression itself contains another template literal — extremely
+    // common in this HTML-templating codebase, e.g.
+    // `${attrBar('label', \`$${a} /M tokens\`, ...)}` — was misread as the
+    // *outer* template ending at the first nested backtick. Everything after
+    // that point was scanned as if it were plain code, and a "/" inside the
+    // nested template's own text (e.g. "/M tokens") could then be
+    // misidentified as opening a regex literal, corrupting comment masking
+    // for the rest of the file.
+    const src = [
+        'function render() {',
+        '  return `',
+        '    ${attrBar(\'Model mix ($/token)\', `$${a.prev} → $${a.cur} /M tokens`, a.mixEffect)}',
+        '  `;',
+        '}',
+        '',
+        '/** A real doc comment with example markup: <a href="url">text</a> */',
+        'export function next() {}',
+    ].join('\n');
+    const masked = maskBlockComments(src);
+    assert.doesNotMatch(masked, /<a href/);
+    assert.match(masked, /export function next/);
+    assert.equal(masked.length, src.length);
+});
+
+test('maskBlockComments: a "}" inside a nested object literal in ${...} does not end the interpolation early', () => {
+    const src = 'const html = `${fn({ a: 1, b: 2 })} rest`;\n/** doc <a href="url">text</a> */\nfunction f() {}';
+    const masked = maskBlockComments(src);
+    assert.doesNotMatch(masked, /<a href/);
+    assert.match(masked, /function f/);
+    assert.equal(masked.length, src.length);
+});
+
+// ── isRegexLiteralStart / findRegexLiteralEnd ────────────────────────────────
+
+test('isRegexLiteralStart: true after an operator/punctuation that expects an expression', () => {
+    assert.equal(isRegexLiteralStart('foo.replace('), true);
+    assert.equal(isRegexLiteralStart('return '), true);
+    assert.equal(isRegexLiteralStart(''), true);
+});
+
+test('isRegexLiteralStart: false after an identifier/number/closing bracket (division context)', () => {
+    assert.equal(isRegexLiteralStart('total '), false);
+    assert.equal(isRegexLiteralStart('foo() '), false);
+    assert.equal(isRegexLiteralStart('a[0] '), false);
+});
+
+test('findRegexLiteralEnd: finds the closing slash and includes trailing flags', () => {
+    const src = '/foo\\/bar/gi, rest';
+    const end = findRegexLiteralEnd(src, 0);
+    assert.equal(src.slice(0, end), '/foo\\/bar/gi');
+});
+
+test('findRegexLiteralEnd: a "/" inside a character class does not end the regex early', () => {
+    const src = '/[a/b]/g, rest';
+    const end = findRegexLiteralEnd(src, 0);
+    assert.equal(src.slice(0, end), '/[a/b]/g');
 });
 
 test('scanFile: does not flag example markup inside a /** ... */ doc comment', () => {

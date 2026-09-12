@@ -142,7 +142,13 @@ from the first `//` to end-of-line risks truncating a genuine line that
 happens to contain a URL. The masking (and every other balanced-bracket scan
 in the script — matching a call's closing paren, a method's closing brace)
 is quote/template-aware, so a UI string that itself contains `(`, `)`, or a
-literal `/* ... */`-looking sequence doesn't confuse the scan.
+literal `/* ... */`-looking sequence doesn't confuse the scan. It's also
+regex-literal-aware (`.replace(/"/g, ...)` doesn't get misread as opening an
+unterminated string) and correctly handles a *nested* template literal
+inside a `${...}` interpolation (`` `...${fn(`${x} y`)}...` ``, common in
+this HTML-templating codebase) rather than treating the first inner backtick
+as closing the outer one — either bug, if left unfixed, would silently
+disable comment masking for the rest of the file from that point on.
 
 This is a **line/regex-based scan**, not an AST parse — by design, since this
 is a triage report rather than a hard CI gate (a stricter, ratcheted AST-based

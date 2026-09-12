@@ -11,7 +11,7 @@ before localizing.
 
 - Files scanned: 36
 - Files with findings: 17
-- Total candidate strings: 1235
+- Total candidate strings: 1240
 
 ## Findings by file
 
@@ -28,7 +28,7 @@ before localizing.
 | 12433 | <title> content | `<title>Diagnostic Report</title>` |
 | 12620 | <title> content | `<title>Usage Analysis</title>` |
 
-### `vscode-extension/src/webview/chart/main.ts` (32)
+### `vscode-extension/src/webview/chart/main.ts` (33)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -61,6 +61,7 @@ before localizing.
 | 602 | createTextNode() argument | `document.createTextNode(' By Editor')` |
 | 649 | .textContent assignment | `.textContent = '${periodMeta.footer} (${periodMeta.aggregationLabel})\\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\\nUpdates automatically every…` |
 | 663 | .title assignment (conditional) | `.title = editorListCollapsed ? 'Show per-editor breakdown' : 'Hide per-editor breakdown';` |
+| 955 | .title assignment (conditional) | `.title = supported ? '' : 'Not available for ${currentMetric} metric';` |
 | 1337 | el() text argument | `el('div', 'heatmap-empty', 'No language data for this period.')` |
 | 1371 | .title assignment | `.title = '${ds.label} · ${labels[i]}: ${value.toLocaleString()} lines'` |
 | 1552 | .textContent assignment | `.textContent = 'No data available.'` |
@@ -101,7 +102,7 @@ before localizing.
 | 625 | el() text argument | `el("div", "title", "📊 Team Dashboard")` |
 | 744 | .textContent assignment | `.textContent = "Failed to initialize dashboard."` |
 
-### `vscode-extension/src/webview/details/main.ts` (28)
+### `vscode-extension/src/webview/details/main.ts` (29)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -110,6 +111,7 @@ before localizing.
 | 315 | el() text argument | `el('div', 'footer', 'Last updated: ${lastUpdated.toLocaleString()} · Updates every 5 minutes')` |
 | 395 | .title assignment | `.title = 'Your active GitHub Copilot subscription plan (ID: ${plan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).'` |
 | 462 | iconHeading() text argument | `iconHeading('h3', 'graph', 'Key Metrics')` |
+| 522 | .title assignment (conditional) | `.title = isExcluded ? '${provider} is hidden — click to show it again and include it in the totals below.' : 'Click to hide ${provider} — filters it out of the …` |
 | 529 | el() text argument | `el('div', 'provider-card-sub', 'Cost this month')` |
 | 548 | .title assignment | `.title = 'Sum of ${included.length} of ${allProviders.length} selected provider(s).'` |
 | 550 | el() text argument | `el('div', 'provider-card-label', '∑ Total (selected)')` |
@@ -134,7 +136,7 @@ before localizing.
 | 1275 | iconHeading() text argument | `iconHeading('h3', 'lightbulb', 'Calculation & Estimates')` |
 | 1343 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/diagnostics/main.ts` (366)
+### `vscode-extension/src/webview/diagnostics/main.ts` (367)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -380,6 +382,7 @@ before localizing.
 | 2684 | <p> content | `<p style="color: #999; font-size: 12px; margin-bottom: 12px;"> Clearing the cache will force the extension to re-read and re-analyze all session files on the ne…` |
 | 2689 | <span> content | `<span>Clear Cache</span>` |
 | 2690 | <span> content | `<span>Reset Insights Dismissals</span>` |
+| 2703 | <p> content | `<p> ${ data.quotaEntitlements.premium_interactions ? '<strong>Premium Interactions:</strong> $${data.quotaEntitlements.premium_interactions.toFixed(2)}/month<br…` |
 | 2714 | <p> content | `<p class="hint">No quota information available from the API yet. Sign out and back in to refresh.</p>` |
 | 2716 | <h4> content | `<h4>📊 API Quota Information</h4>` |
 | 2723 | <h4> content | `<h4>🆕 Editor Discovery Notifications</h4>` |
@@ -620,7 +623,7 @@ before localizing.
 | 154 | <div> content | `<div class="footer"> 📊 Scoring Guide &middot; ${data.categories.length} categories &middot; 4 stages each </div>` |
 | 168 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/logviewer/hydraFusionSection.ts` (47)
+### `vscode-extension/src/webview/logviewer/hydraFusionSection.ts` (48)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -647,6 +650,7 @@ before localizing.
 | 215 | title attribute | `title="Judge rejected this draft"` |
 | 216 | title attribute | `title="Judge accepted this draft"` |
 | 218 | title attribute | `title="This leg produced the answer you saw"` |
+| 219 | title attribute | `title="${escapeHtml('${p.kind} · ${p.model} · ${formatAiu(p.usage.aiu)} AIU')}"` |
 | 231 | title attribute | `title="This leg produced the answer you saw"` |
 | 231 | <span> content | `<span class="hydra-final-tag" title="This leg produced the answer you saw">answer</span>` |
 | 257 | title attribute | `title="Credits for this turn"` |
@@ -871,12 +875,11 @@ before localizing.
 |---|---|---|
 | 22 | <div> content | `<div style="font-size:16px;color:#b8b8c8;">${reportLabel} &middot; ${escapeHtml(when)}</div>` |
 
-### `vscode-extension/src/webview/shared/formatUtils.ts` (2)
+### `vscode-extension/src/webview/shared/formatUtils.ts` (1)
 
 | Line | Kind | Snippet |
 |---|---|---|
 | 135 | <div> content | `<div style="color: var(--text-secondary); font-size: 12px; padding: 8px 0;"> This section couldn't be displayed due to an unexpected error. Other sections are u…` |
-| 224 | <a> content | `<a href="url" target="_blank" rel="noopener noreferrer">text</a> */ export function markdownToHtml(text: string): string { let escaped = escapeHtml(text); escap…` |
 
 ### `vscode-extension/src/webview/usage/billingCoverage.ts` (5)
 
@@ -888,7 +891,7 @@ before localizing.
 | 50 | <th> content | `<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>` |
 | 56 | <td> content | `<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>` |
 
-### `vscode-extension/src/webview/usage/main.ts` (429)
+### `vscode-extension/src/webview/usage/main.ts` (431)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -897,6 +900,7 @@ before localizing.
 | 298 | aria-label attribute | `aria-label="${escapeHtml(label ?? 'Missing')}"` |
 | 593 | <div> content | `<div id="ul-badge">📊 Analyzing Usage Data</div>` |
 | 595 | <div> content | `<div id="ul-subtitle">Initializing…</div>` |
+| 673 | .textContent assignment (conditional) | `.textContent = pct === 100 ? '100%' : '${pct}%';` |
 | 697 | .textContent assignment | `.textContent = '🔄 Refresh'` |
 | 884 | <div> content | `<div class="stat-label">\\u{1F4CA} Avg Models per Conversation</div>` |
 | 888 | <div> content | `<div class="stat-label">\\u{1F504} Switching Frequency</div>` |
@@ -1056,6 +1060,7 @@ before localizing.
 | 3171 | title attribute | `title="Defined in ${s.configFiles.length} config files"` |
 | 3171 | <button> content | `<button class="curation-file-btn" data-command="openFileFromList" data-paths="${escapeHtml(JSON.stringify(s.configFiles))}" style="background:none;border:none;p…` |
 | 3184 | <td> content | `<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${notConnected ? '<em style="color:var(--text-secondary)">not connected</em>' : s.availa…` |
+| 3186 | <td> content | `<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${b > 0 ? '~${b.toLocaleString()} tokens' : '—'}</td>` |
 | 3196 | <code> content | `<code>.vscode/mcp.json</code>` |
 | 3216 | <summary> content | `<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;"> 🔌 MCP Servers in Last ${windowDays} Days (${allSer…` |
 | 3222 | <label> content | `<label for="mcp-hide-toggle" style="font-size:12px; color:var(--text-primary); cursor:pointer; user-select:none;">Hide servers with usage</label>` |

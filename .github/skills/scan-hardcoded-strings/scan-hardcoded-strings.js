@@ -166,11 +166,16 @@ function stripLocalizedCalls(text) {
 // hardcoded prose).
 const COMPARISON_BEFORE_RE = /(?:={2,3}|!={1,2})\s*$/;
 
-/** Extract quoted string literal bodies (non-nested) from an interpolation expression. */
+/**
+ * Extract quoted string/template literal bodies (non-nested) from an
+ * interpolation or conditional expression — e.g. both branches of
+ * `` isExcluded ? `${provider} is hidden...` : `Click to hide ${provider}...` ``
+ * (a template-literal ternary), not just single/double-quoted branches.
+ */
 function extractInterpolationLiterals(expr) {
     const stripped = stripLocalizedCalls(expr);
     const literals = [];
-    const re = /(["'])((?:(?!\1)[^\\]|\\.)*)\1/g;
+    const re = /(["'`])((?:(?!\1)[^\\]|\\.)*)\1/g;
     let m;
     while ((m = re.exec(stripped)) !== null) {
         if (COMPARISON_BEFORE_RE.test(stripped.slice(0, m.index))) { continue; }
@@ -340,16 +345,19 @@ function findPropertyAssignments(content) {
     // editors';` — the negative lookahead excludes an RHS that starts with a
     // quote/backtick directly, since that's already covered by the two
     // detectors above; this only matches when the RHS is a real expression.
-    // Limited to between the `=` and the first `;`/newline (a ternary
-    // conventionally written on one line). The "does this start with a
-    // quote" check is done in plain JS rather than a regex lookahead: a
-    // lookahead right after `\s*` can be defeated by backtracking (`\s*`
-    // giving back the whitespace it matched so the lookahead re-checks one
-    // position earlier, where the next character is the whitespace itself,
-    // not the quote) — so a plain literal RHS containing "?" was still
-    // matching here as a false "conditional" duplicate of the literal
-    // detector above.
-    const conditionalRe = new RegExp('\\.(' + propAlt + ')\\s*=(?!=)\\s*([^;\\n]*\\?[^;\\n]*)[;\\n]', 'g');
+    // Spans up to the statement's terminating `;`, which may be on a later
+    // line — a ternary is often wrapped like
+    //   card.title = isExcluded
+    //       ? `${provider} is hidden...`
+    //       : `Click to hide ${provider}...`;
+    // The "does this start with a quote" check is done in plain JS rather
+    // than a regex lookahead: a lookahead right after `\s*` can be defeated
+    // by backtracking (`\s*` giving back the whitespace it matched so the
+    // lookahead re-checks one position earlier, where the next character is
+    // the whitespace itself, not the quote) — so a plain literal RHS
+    // containing "?" was still matching here as a false "conditional"
+    // duplicate of the literal detector above.
+    const conditionalRe = new RegExp('\\.(' + propAlt + ')\\s*=(?!=)\\s*([^;]*?\\?[^;]*?);', 'g');
     while ((m = conditionalRe.exec(content)) !== null) {
         const [full, prop, expr] = m;
         if (/^\s*["'`]/.test(expr)) { continue; } // RHS is a direct literal — already covered above
@@ -647,49 +655,142 @@ function buildMarkdownReport(results, total, scannedCount) {
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
+// Characters/keywords after which a bare `/` starts a regex literal rather
+// than a division operator — the standard heuristic ("this position expects
+// an expression, not a value to divide"). Not exhaustive JS grammar, but
+// covers this codebase's actual regex call sites (`.replace(/.../, ...)`,
+// `.test(/.../)`, `return /.../`. etc.).
+const REGEX_CONTEXT_RE = /(?:[(,=:[!&|?{};]|\breturn|\btypeof|\bcase)\s*$/;
+
+/**
+ * Does a bare `/` at this point in `resultSoFar` start a regex literal? Looks
+ * at the last non-whitespace content already emitted (or the start of file).
+ */
+function isRegexLiteralStart(resultSoFar) {
+    if (resultSoFar.trim() === '') { return true; }
+    return REGEX_CONTEXT_RE.test(resultSoFar.slice(-60));
+}
+
 /**
  * Blank out `/* ... *\/` block comments (JSDoc included), replacing every
  * non-newline character with a space so character offsets and line numbers
  * stay identical to the original content. This keeps example markup or
  * prose written in a doc comment (e.g. `Converts [text](url) to <a
  * href="url">text</a>`) from being reported as real UI text. Line comments
- * (`//`) are deliberately left alone — `//` also opens a URL, and unlike a
+ * (`//`) are deliberately left unmasked — `//` also opens a URL, and unlike a
  * block comment's `/*`, stripping from the first `//` to end-of-line risks
- * truncating a genuine template-literal line that happens to contain one.
+ * truncating a genuine template-literal line that happens to contain one —
+ * but they are still skipped *opaquely* (copied through without
+ * interpretation) so a quote character inside one can't desync the scanner.
  *
- * Quote/template-aware: a single-pass scan tracks whether each character is
- * inside a string or template literal, so a UI string that itself contains
- * the literal text `/*` / `*\/` (e.g. `'<div>/* text *\/Save changes</div>'`)
- * is left untouched rather than being mistaken for a real comment.
+ * A stack-based scan tracks what kind of span each character is in — code,
+ * a `"`/`'` string, a `` ` `` template literal, a `${...}` interpolation
+ * inside one, or a comment — so that:
+ *   - a UI string containing the literal text `/*` / `*\/` (e.g.
+ *     `'<div>/* text *\/Save changes</div>'`) is left untouched rather than
+ *     being mistaken for a real comment;
+ *   - a regex literal containing a quote character (e.g. `.replace(/"/g,
+ *     '&quot;')`) doesn't get misread as opening an unterminated string;
+ *   - a *nested* template literal — `` `...${fn('a', `${x} b`, `c`)}...` ``,
+ *     common in this HTML-templating codebase — doesn't get misread as
+ *     closing the outer template at its first inner backtick. Both of the
+ *     previous two bugs, if left unfixed, silently disable comment masking
+ *     for the entire rest of the file from that point on.
  */
 function maskBlockComments(content) {
     let result = '';
-    let quote = null;
-    let inComment = false;
-    for (let i = 0; i < content.length; i++) {
+    // Stack of spans we're nested inside, innermost last. 'code' is also
+    // used for the body of a `${...}` interpolation (tracking its own brace
+    // `depth` so a nested `{}` block/object literal doesn't end it early).
+    const stack = [{ type: 'code' }];
+    let i = 0;
+    while (i < content.length) {
+        const top = stack[stack.length - 1];
         const c = content[i];
         const next = content[i + 1];
-        if (inComment) {
-            if (c === '*' && next === '/') {
-                result += '  ';
-                i++;
-                inComment = false;
-            } else {
-                result += c === '\n' ? '\n' : ' ';
-            }
+
+        if (top.type === 'comment') {
+            if (c === '*' && next === '/') { result += '  '; i += 2; stack.pop(); continue; }
+            result += c === '\n' ? '\n' : ' ';
+            i++;
             continue;
         }
-        if (quote) {
+
+        if (top.type === 'string') {
             result += c;
-            if (c === '\\') { result += content[++i] ?? ''; continue; }
-            if (c === quote) { quote = null; }
+            if (c === '\\') { result += content[i + 1] ?? ''; i += 2; continue; }
+            if (c === top.quote) { stack.pop(); }
+            i++;
             continue;
         }
-        if (c === '"' || c === "'" || c === '`') { quote = c; result += c; continue; }
-        if (c === '/' && next === '*') { inComment = true; result += '  '; i++; continue; }
+
+        if (top.type === 'template') {
+            if (c === '\\') { result += c + (content[i + 1] ?? ''); i += 2; continue; }
+            if (c === '`') { result += c; stack.pop(); i++; continue; }
+            if (c === '$' && next === '{') { result += '${'; stack.push({ type: 'code', depth: 0, inTemplateExpr: true }); i += 2; continue; }
+            result += c;
+            i++;
+            continue;
+        }
+
+        // 'code' — either top-level or inside a `${...}` interpolation.
+        if (top.inTemplateExpr) {
+            if (c === '{') { top.depth++; result += c; i++; continue; }
+            if (c === '}') {
+                if (top.depth === 0) { stack.pop(); result += c; i++; continue; }
+                top.depth--;
+                result += c;
+                i++;
+                continue;
+            }
+        }
+        if (c === '/' && next === '*') { stack.push({ type: 'comment' }); result += '  '; i += 2; continue; }
+        if (c === '/' && next === '/') {
+            // Line comment: copy through unmasked but opaquely, so any
+            // stray quote/regex-like character inside it is not interpreted.
+            while (i < content.length && content[i] !== '\n') { result += content[i]; i++; }
+            continue;
+        }
+        if (c === '"' || c === "'") { stack.push({ type: 'string', quote: c }); result += c; i++; continue; }
+        if (c === '`') { stack.push({ type: 'template' }); result += c; i++; continue; }
+        if (c === '/' && isRegexLiteralStart(result)) {
+            const end = findRegexLiteralEnd(content, i);
+            if (end !== -1) {
+                result += content.slice(i, end);
+                i = end;
+                continue;
+            }
+        }
         result += c;
+        i++;
     }
     return result;
+}
+
+/**
+ * Given a `/` at `start` that looks like it opens a regex literal, scan for
+ * its closing `/` (respecting `[...]` character classes and backslash
+ * escapes, and never crossing a newline — an unterminated-looking regex is
+ * treated as division instead) plus any trailing flag letters. Returns the
+ * index just past the literal, or -1 if it doesn't look like a real regex.
+ */
+function findRegexLiteralEnd(content, start) {
+    let inClass = false;
+    let j = start + 1;
+    while (j < content.length) {
+        const cc = content[j];
+        if (cc === '\n') { return -1; }
+        if (cc === '\\') { j += 2; continue; }
+        if (cc === '[') { inClass = true; j++; continue; }
+        if (cc === ']') { inClass = false; j++; continue; }
+        if (cc === '/' && !inClass) {
+            let k = j + 1;
+            while (k < content.length && /[a-z]/i.test(content[k])) { k++; }
+            return k;
+        }
+        j++;
+    }
+    return -1;
 }
 
 function runScan() {
@@ -794,6 +895,8 @@ module.exports = {
     splitTopLevelArgs,
     scanFile,
     maskBlockComments,
+    isRegexLiteralStart,
+    findRegexLiteralEnd,
     buildMarkdownReport,
     runScan,
     main,
