@@ -196,7 +196,9 @@ jobs:
       - name: Restore test project (SDK-style)
         if: matrix.language == 'csharp'
         working-directory: visualstudio-extension
-        run: dotnet restore src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj
+run: |
+  dotnet restore src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj
+  dotnet restore src/AIEngineeringFluencyRunner/AIEngineeringFluencyRunner.csproj
 
       - name: Build C# solution (CodeQL tracing)
         if: matrix.language == 'csharp'
