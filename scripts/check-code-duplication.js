@@ -94,6 +94,10 @@ function normalizeLine(raw) {
  * only a comment. Comment-only lines are dropped so a copied block that gained or
  * lost comments is still detected; inline trailing comments are kept (they rarely
  * span whole lines and the whitespace normalization handles trailing spaces).
+ *
+ * This classifies a single line without block-comment context; use
+ * `tokenizeFile` for whole-file tokenization, which tracks block-comment state
+ * so an unprefixed body line inside a block comment is also dropped.
  */
 function isNoise(line) {
 	if (line === '') { return true; }
@@ -106,9 +110,48 @@ function isNoise(line) {
 }
 
 /**
+ * Classify a raw line as noise (no code signal) while tracking block-comment
+ * state across lines. A line is noise when it is blank, a line comment, or any
+ * line within (including the opening/closing lines of) a block comment.
+ * Unprefixed body lines inside a block comment are dropped here, which
+ * `isNoise` alone cannot see. Returns `{ noise, inBlock, text }`.
+ */
+function classifyLine(raw, inBlock) {
+	const line = normalizeLine(raw);
+	const t = line.trim();
+	if (inBlock) {
+		const closeIdx = t.indexOf('*/');
+		if (closeIdx === -1) { return { noise: true, inBlock: true }; }
+		const after = t.slice(closeIdx + 2).trim();
+		if (after === '' || after.startsWith('//')) { return { noise: true, inBlock: false }; }
+		return { noise: false, inBlock: false, text: after };
+	}
+	if (t === '' || t.startsWith('//')) { return { noise: true, inBlock: false }; }
+	const openIdx = t.indexOf('/*');
+	if (openIdx === -1) { return { noise: false, inBlock: false, text: line }; }
+	const before = t.slice(0, openIdx).trim();
+	const afterOpen = t.slice(openIdx + 2);
+	const closeIdx = afterOpen.indexOf('*/');
+	if (closeIdx === -1) {
+		if (before === '') { return { noise: true, inBlock: true }; }
+		return { noise: false, inBlock: true, text: before };
+	}
+	const after = afterOpen.slice(closeIdx + 2).trim();
+	// The text between the open and close markers is comment content; with no
+	// code before the open and no code (or only a line comment) after the
+	// close, the whole line is a comment.
+	const allComment = before === '' && (after === '' || after.startsWith('//'));
+	if (allComment) { return { noise: true, inBlock: false }; }
+	const codePart = [before, after].filter((s) => s !== '').join(' ');
+	return { noise: false, inBlock: false, text: codePart };
+}
+
+/**
  * Read a source file and return an array of { text: normalizedLine, line: originalLineNo }.
  * Noise lines are dropped (their original line numbers are not represented), so a
- * duplicate block's reported length counts meaningful lines only.
+ * duplicate block's reported length counts meaningful lines only. Block-comment
+ * state is tracked across lines so unprefixed body lines inside a block
+ * comment are dropped too.
  */
 function tokenizeFile(absPath) {
 	let content;
@@ -119,10 +162,12 @@ function tokenizeFile(absPath) {
 	}
 	const lines = content.split(/\r?\n/);
 	const out = [];
+	let inBlock = false;
 	for (let i = 0; i < lines.length; i++) {
-		const norm = normalizeLine(lines[i]);
-		if (isNoise(norm)) { continue; }
-		out.push({ text: norm, line: i + 1 });
+		const c = classifyLine(lines[i], inBlock);
+		inBlock = c.inBlock;
+		if (c.noise) { continue; }
+		out.push({ text: c.text, line: i + 1 });
 	}
 	return out;
 }
@@ -187,11 +232,24 @@ function walk(dir, out) {
 	}
 }
 
+/** The longest static directory prefix of a glob before the first wildcard,
+ * so a glob whose first segment contains a wildcard (e.g. a `src` pattern
+ * where the segment after src has a star) walks the directory before that
+ * wildcard rather than a literal path that may not exist. Star, double-star,
+ * and question mark all count as wildcards. */
+function globBase(glob) {
+	const idx = glob.search(/[*?]/);
+	if (idx === -1) { return glob; }
+	const prefix = glob.slice(0, idx);
+	const slash = prefix.lastIndexOf('/');
+	return slash === -1 ? '' : prefix.slice(0, slash);
+}
+
 /** Collect the absolute file paths matching the include globs under root. */
 function collectFiles(root, includes) {
 	const patterns = includes.map((g) => {
 		const re = globToRegExp(g);
-		const base = g.startsWith('**') ? root : path.dirname(path.join(root, g)).replace(/\*.*$/, '');
+		const base = g.startsWith('**') ? root : path.join(root, globBase(g));
 		return { re, base };
 	});
 	const seen = new Set();
@@ -242,25 +300,33 @@ function findDuplicates(fileTokens, minLines) {
 				entry = { content: window, occurrences: [] };
 				bucket.contents.set(content, entry);
 			}
-			entry.occurrences.push({ file: ft.relPath, startLine: tokens[i].line, endLine: tokens[i + minLines - 1].line });
+			entry.occurrences.push({ file: ft.relPath, startLine: tokens[i].line, endLine: tokens[i + minLines - 1].line, startTok: i, endTok: i + minLines - 1 });
 		}
 	}
 
-	// Keep only groups that actually occur in >= 2 places; dedup the occurrence
-	// list so a window landing on the exact same lines in the same file twice
-	// (impossible for distinct i, but cheap to guard) is not double counted.
+	// Keep only groups that actually occur in >= 2 places. Within a single file,
+	// overlapping windows (e.g. a run of identical lines producing windows starting
+	// on consecutive token indices) describe one block, not a clone, so reject an
+	// occurrence whose token range overlaps an already-kept occurrence in the same
+	// file. Token-index overlap is used because noise lines are dropped, so equal
+	// original line ranges are not a reliable overlap signal.
 	const duplicateGroups = [];
 	for (const bucket of groups.values()) {
 		for (const entry of bucket.contents.values()) {
 			const occ = entry.occurrences;
 			const dedup = [];
 			for (const o of occ) {
-				if (!dedup.some((d) => d.file === o.file && d.startLine === o.startLine)) {
-					dedup.push(o);
+				let overlap = false;
+				for (const d of dedup) {
+					if (d.file === o.file && o.startTok <= d.endTok && d.startTok <= o.endTok) {
+						overlap = true;
+						break;
+					}
 				}
+				if (!overlap) { dedup.push(o); }
 			}
 			if (dedup.length < 2) { continue; }
-			duplicateGroups.push({ content: entry.content, occurrences: dedup });
+			duplicateGroups.push({ content: entry.content, occurrences: dedup.map(({ startTok, endTok, ...rest }) => rest) });
 		}
 	}
 
@@ -269,10 +335,11 @@ function findDuplicates(fileTokens, minLines) {
 
 /**
  * Extend each duplicate group to its maximal shared block by requiring every
- * occurrence to agree on the preceding and following normalized lines. Occurrences
- * that cannot extend to the full shared block are dropped from that group (they
- * keep only the original window-sized match); groups that collapse below 2
- * occurrences are removed. Lines are matched by their normalized text.
+ * occurrence to agree on the preceding and following normalized lines. All
+ * occurrences extend together as long as they all share the next (or previous)
+ * line; when any occurrence cannot extend, the whole group stops for that
+ * direction and every occurrence keeps its current bounds. Lines are matched by
+ * their normalized text.
  */
 function extendGroups(groups, fileTokens, minLines) {
 	const byFile = new Map();
@@ -400,6 +467,14 @@ function escapeMarkdownCell(s) {
 	return s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
 }
 
+/** HTML-escape a string so it is safe to interpolate inside `<code>` markup in a
+ * Markdown table cell. This is delimiter-safe: a source preview containing a
+ * backtick or template literal cannot close the code span, because the span is
+ * an HTML `<code>` element rather than a backtick fence. */
+function escapeHtml(s) {
+	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function renderMarkdown(groups, scanned, threshold) {
 	let md = '## \u2396\ufe0f\u200d Code Duplication Analysis\n\n';
 	md += `| Files scanned | Duplicate groups | Total duplicated lines |\n`;
@@ -417,8 +492,8 @@ function renderMarkdown(groups, scanned, threshold) {
 	md += '|:-----:|:-----------:|:------|---------|\n';
 	for (const g of top) {
 		const files = [...new Set(g.occurrences.map((o) => o.file))].map((f) => `\`${f}\``).join('<br>');
-		const preview = escapeMarkdownCell(g.preview).replace(/\n/g, ' … ');
-		md += `| ${g.lines} | ${g.occurrences.length} | ${files} | \`${preview}\u2026\` |\n`;
+		const preview = escapeMarkdownCell(escapeHtml(g.preview)).replace(/\n/g, ' … ');
+		md += `| ${g.lines} | ${g.occurrences.length} | ${files} | <code>${preview}…</code> |\n`;
 	}
 	md += '\n';
 
@@ -477,9 +552,8 @@ function main() {
 	}
 
 	if (args.failThreshold !== null && total > args.failThreshold) {
-		process.exit(1);
+		process.exitCode = 1;
 	}
-	process.exit(0);
 }
 
 // Exported for the unit test (mirrors scripts/validate-webview-contract.js).
@@ -487,13 +561,16 @@ module.exports = {
 	parseArgs,
 	normalizeLine,
 	isNoise,
+	classifyLine,
 	tokenizeFile,
 	globToRegExp,
+	globBase,
 	collectFiles,
 	findDuplicates,
 	extendGroups,
 	totalDuplicatedLines,
 	escapeMarkdownCell,
+	escapeHtml,
 	renderMarkdown,
 	renderJson,
 	MIN_LINES_DEFAULT,

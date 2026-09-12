@@ -26,8 +26,12 @@ const dup = requireFromHere(
 ) as {
 	normalizeLine: (raw: string) => string;
 	isNoise: (line: string) => boolean;
+	classifyLine: (raw: string, inBlock: boolean) => { noise: boolean; inBlock: boolean; text?: string };
+	tokenizeFile: (absPath: string) => { text: string; line: number }[] | null;
 	globToRegExp: (glob: string) => RegExp;
+	globBase: (glob: string) => string;
 	escapeMarkdownCell: (s: string) => string;
+	escapeHtml: (s: string) => string;
 	findDuplicates: (
 		fileTokens: { relPath: string; tokens: { text: string; line: number }[] }[],
 		minLines: number
@@ -42,10 +46,12 @@ const dup = requireFromHere(
 function makeFileTokens(relPath: string, source: string) {
 	const tokens: { text: string; line: number }[] = [];
 	const lines = source.split(/\r?\n/);
+	let inBlock = false;
 	for (let i = 0; i < lines.length; i++) {
-		const norm = dup.normalizeLine(lines[i]);
-		if (dup.isNoise(norm)) { continue; }
-		tokens.push({ text: norm, line: i + 1 });
+		const c = dup.classifyLine(lines[i], inBlock);
+		inBlock = c.inBlock;
+		if (c.noise) { continue; }
+		tokens.push({ text: c.text as string, line: i + 1 });
 	}
 	return { relPath, tokens };
 }
@@ -64,6 +70,59 @@ test('isNoise: treats blank and comment-only lines as noise, code as signal', ()
 	assert.ok(dup.isNoise('*/ block close'));
 	assert.ok(!dup.isNoise('const x = 1;'));
 	assert.ok(!dup.isNoise('return x; // trailing'));
+});
+
+test('classifyLine: tracks block-comment state across lines so unprefixed body lines are noise', () => {
+	// Inside an open block comment, an unprefixed body line is noise.
+	assert.deepEqual(dup.classifyLine('this is prose', true), { noise: true, inBlock: true });
+	// A line comment after the close stays noise and closes the block.
+	assert.deepEqual(dup.classifyLine('*/ // trailing', true), { noise: true, inBlock: false });
+	// Code after the close on the same line is kept.
+	const c = dup.classifyLine('*/ const x = 1;', true);
+	assert.equal(c.noise, false);
+	assert.equal(c.inBlock, false);
+	assert.equal(c.text, 'const x = 1;');
+	// A block comment opening with no code is noise and enters the block.
+	assert.deepEqual(dup.classifyLine('/* header', false), { noise: true, inBlock: true });
+	// A whole-line `/* ... */` block is noise.
+	assert.deepEqual(dup.classifyLine('/* one liner */', false), { noise: true, inBlock: false });
+	// Code preceding an open + code after close on the same line is kept.
+	const m = dup.classifyLine('const a = 1; /* c */ const b = 2;', false);
+	assert.equal(m.noise, false);
+	assert.equal(m.inBlock, false);
+	assert.equal(m.text, 'const a = 1; const b = 2;');
+});
+
+test('tokenizeFile: drops unprefixed body lines inside a block comment', () => {
+	const tmp = fs.mkdtempSync(path.join(requireFromHere('node:os').tmpdir(), 'dup-'));
+	try {
+		const file = path.join(tmp, 'block.ts');
+		fs.writeFileSync(file, '/**\n * a documentation block\n * with prose lines\n */\nconst real = 1;\n');
+		const tokens = dup.tokenizeFile(file);
+		assert.ok(tokens);
+		assert.equal(tokens.length, 1);
+		assert.equal(tokens[0].text, 'const real = 1;');
+		assert.equal(tokens[0].line, 5);
+	} finally {
+		fs.rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
+test('findDuplicates: does not flag overlapping windows of one repeated run as a clone', () => {
+	// Seven identical meaningful lines with min-lines 6 produce windows starting
+	// on token indices 0 and 1; that is one block, not a within-file duplicate.
+	const run = Array.from({ length: 7 }, () => 'const same = 1;').join('\n');
+	const fileA = makeFileTokens('a.ts', `${run}\n`);
+	const groups = dup.findDuplicates([fileA], 6);
+	assert.equal(groups.length, 0, 'a single repeated run should not be reported as an intra-file clone');
+});
+
+test('globBase: returns the static directory prefix before the first wildcard', () => {
+	assert.equal(dup.globBase('src/**/*.ts'), 'src');
+	assert.equal(dup.globBase('src/foo*/*.ts'), 'src');
+	assert.equal(dup.globBase('a/b/c/*.ts'), 'a/b/c');
+	assert.equal(dup.globBase('*.ts'), '');
+	assert.equal(dup.globBase('no/wildcard.ts'), 'no/wildcard.ts');
 });
 
 test('globToRegExp: matches double-star recursively and single-star within a segment', () => {
@@ -217,21 +276,87 @@ test('escapeMarkdownCell: escapes backslash first, then the pipe delimiter', () 
 	assert.equal(dup.escapeMarkdownCell('a\\|b'), 'a\\\\\\|b');
 });
 
+test('escapeHtml: HTML-escapes ampersand, angle brackets for safe <code> use', () => {
+	assert.equal(dup.escapeHtml('plain'), 'plain');
+	assert.equal(dup.escapeHtml('a<b>c&d'), 'a&lt;b&gt;c&amp;d');
+});
+
 test('renderMarkdown: previews are escaped for the table cell', () => {
 	const md = dup.renderMarkdown(
-		[{ lines: 8, occurrences: [{ file: 'a.ts', startLine: 1, endLine: 8 }], preview: 'a|b\\c' }],
+		[{ lines: 8, occurrences: [{ file: 'a.ts', startLine: 1, endLine: 8 }], preview: 'a|b\\c`tick' }],
 		5,
 		null
 	);
-	// The raw preview content must be escaped: pipe -> \|, backslash -> \\,
-	// so it cannot break out of its table cell.
-	assert.match(md, /`a\\\|b\\\\c…`/);
-	assert.ok(!md.includes('a|b\\c'));
+	// The preview is rendered inside an HTML <code> element (not a backtick
+	// span) with pipes/backslashes escaped and HTML-entities applied, so a
+	// source backtick or template literal cannot close the code span.
+	assert.match(md, /<code>a\\\|b\\\\c`tick…<\/code>/);
+	assert.ok(!md.includes('| a|b\\c`tick'));
 });
 
-test('the detector runs against the repo and reports a non-empty step-summary', () => {
-	// The real end-to-end check: the script scans the shared source dirs and the
-	// repo has known shared adapters, so a green run must still find duplicates.
+test('the detector runs end-to-end against a fixture and reports a clone', () => {
+	// A behavior assertion against a temp fixture, independent of the current
+	// repo duplication baseline, so a legitimate cleanup never fails this suite.
+	const { spawnSync } = requireFromHere('node:child_process') as typeof import('node:child_process');
+	const tmp = fs.mkdtempSync(path.join(requireFromHere('node:os').tmpdir(), 'dup-e2e-'));
+	try {
+		const block = [
+			'function sharedHelper(a: number, b: number): number {',
+			'const sum = a + b;',
+			'const product = a * b;',
+			'if (sum > product) { return sum; }',
+			'return product;',
+			'}',
+			'export { sharedHelper };',
+		].join('\n');
+		fs.mkdirSync(path.join(tmp, 'src'), { recursive: true });
+		fs.writeFileSync(path.join(tmp, 'src', 'a.ts'), `// header\n${block}\nconst extra = 1;\n`);
+		fs.writeFileSync(path.join(tmp, 'src', 'b.ts'), `/* file b */\n${block}\nconst other = 2;\n`);
+		const result = spawnSync(
+			process.execPath,
+			[path.join(REPO_ROOT, 'scripts', 'check-code-duplication.js'), '--min-lines', '6', '--include', 'src/**/*.ts', '--json', '--root', tmp],
+			{ cwd: tmp, encoding: 'utf8' }
+		);
+		assert.equal(result.status, 0, `detector should run report-only; stderr: ${result.stderr}`);
+		const parsed = JSON.parse(result.stdout);
+		assert.equal(parsed.filesScanned, 2);
+		assert.ok(Array.isArray(parsed.groups));
+		assert.ok(parsed.groups.length >= 1, 'the fixture has a copied block');
+	} finally {
+		fs.rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
+test('the detector exits 1 against a fixture when --fail-threshold is exceeded', () => {
+	const { spawnSync } = requireFromHere('node:child_process') as typeof import('node:child_process');
+	const tmp = fs.mkdtempSync(path.join(requireFromHere('node:os').tmpdir(), 'dup-thr-'));
+	try {
+		const block = [
+			'function sharedHelper(a: number, b: number): number {',
+			'const sum = a + b;',
+			'const product = a * b;',
+			'if (sum > product) { return sum; }',
+			'return product;',
+			'}',
+			'export { sharedHelper };',
+		].join('\n');
+		fs.mkdirSync(path.join(tmp, 'src'), { recursive: true });
+		fs.writeFileSync(path.join(tmp, 'src', 'a.ts'), `${block}\n`);
+		fs.writeFileSync(path.join(tmp, 'src', 'b.ts'), `${block}\n`);
+		const result = spawnSync(
+			process.execPath,
+			[path.join(REPO_ROOT, 'scripts', 'check-code-duplication.js'), '--min-lines', '6', '--fail-threshold', '1', '--include', 'src/**/*.ts', '--json', '--root', tmp],
+			{ cwd: tmp, encoding: 'utf8' }
+		);
+		assert.equal(result.status, 1, 'threshold of 1 is exceeded by the fixture clone');
+	} finally {
+		fs.rmSync(tmp, { recursive: true, force: true });
+	}
+});
+
+test('the detector runs against the repo as a smoke check (no baseline assertion)', () => {
+	// Independent of the duplication baseline: only asserts the tool runs and
+	// emits a valid shape, so source cleanup never breaks this suite.
 	const { spawnSync } = requireFromHere('node:child_process') as typeof import('node:child_process');
 	const result = spawnSync(
 		process.execPath,
@@ -240,17 +365,6 @@ test('the detector runs against the repo and reports a non-empty step-summary', 
 	);
 	assert.equal(result.status, 0, `detector should run report-only; stderr: ${result.stderr}`);
 	const parsed = JSON.parse(result.stdout);
-	assert.ok(parsed.filesScanned > 50, 'should scan the shared source dirs');
+	assert.ok(parsed.filesScanned > 0, 'should scan at least some source files');
 	assert.ok(Array.isArray(parsed.groups));
-	assert.ok(parsed.groups.length >= 1, 'the repo has known shared clone groups');
-});
-
-test('the detector exits 1 when --fail-threshold is exceeded', () => {
-	const { spawnSync } = requireFromHere('node:child_process') as typeof import('node:child_process');
-	const result = spawnSync(
-		process.execPath,
-		[path.join(REPO_ROOT, 'scripts', 'check-code-duplication.js'), '--min-lines', '14', '--fail-threshold', '1', '--json'],
-		{ cwd: REPO_ROOT, encoding: 'utf8' }
-	);
-	assert.equal(result.status, 1, 'threshold of 1 is exceeded by the repo known clones');
 });

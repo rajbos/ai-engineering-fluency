@@ -111,10 +111,14 @@ jobs:
       # Report-only, like the complexity analysis above: surfaces copy-pasted
       # blocks across vscode-extension/src, the shared src/ and cli/src so a
       # reviewer can see them without failing the build on pre-existing clones.
+      # The detector exits 0 on report-only findings (no --fail-threshold), so
+      # its only nonzero exit is a genuine tool failure (syntax/runtime error);
+      # leaving that unmasked surfaces tool-health problems instead of a green
+      # job with no analysis.
       if: always() && matrix.node-version == '24.x'
       working-directory: vscode-extension
       shell: bash
-      run: npm run --silent check:duplicates -- --min-lines 14 >> "$GITHUB_STEP_SUMMARY" || true
+      run: npm run --silent check:duplicates -- --min-lines 14 >> "$GITHUB_STEP_SUMMARY"
 
     - name: Run type checking
       working-directory: vscode-extension
