@@ -27,7 +27,19 @@ This complements (does not replace) the existing localization checks:
 
 - **SKILL.md** — Main skill file with YAML frontmatter and instructions for the agent
 - **scan-hardcoded-strings.js** — Node.js script that performs the scan
+- **scan-hardcoded-strings.test.js** — Unit tests for the detection helpers
 - **README.md** — This file
+
+## Running the Tests
+
+```bash
+node --test .github/skills/scan-hardcoded-strings/scan-hardcoded-strings.test.js
+```
+
+Covers the localization-call stripper, the interpolation stripper (including
+ternary-literal recovery), the prose heuristic's exclusion rules, each
+detector, the `extension.ts` method-range restriction, and markdown report
+generation.
 
 ## Quick Usage
 
@@ -52,8 +64,14 @@ addition to printing a console summary grouped by file.
   literal
 - `aria-label="..."` attributes
 - Text content inside common UI-bearing HTML tags embedded in template
-  literals: `<button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`, `<td>`,
-  `<th>`, `<option>`, `<summary>`, `<caption>`
+  literals: `<div>`, `<button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`,
+  `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>`
+
+`extension.ts` is scanned only within its `get*Html(...)` method bodies
+(`getDetailsHtml`, `getLoadingHtmlCssBase`, etc.) — not the whole 13k-line
+file — so unrelated string literals elsewhere (GitHub issue Markdown
+templates, VS Code panel titles, log messages) are not misreported as
+webview UI text.
 
 A candidate string must also contain a run of 2+ letters and pass a "looks
 like prose" filter that excludes:
@@ -68,7 +86,10 @@ like prose" filter that excludes:
 Anything already wrapped in a `localize(...)`, `t(...)`, or `vscode.l10n.t(...)`
 call — including inside a template-literal interpolation like
 `` `${localize('key')}` `` — is stripped out before the prose check runs, so
-already-localized text is not flagged.
+already-localized text is not flagged. Conversely, a string literal hidden
+inside an interpolation's own expression — e.g. a ternary like
+`` `${flag ? 'Enable Overrides' : 'Disable Overrides'}` `` — is preserved and
+checked, since that is often where the actual hardcoded UI text lives.
 
 This is a **line/regex-based scan**, not an AST parse — by design, since this
 is a triage report rather than a hard CI gate (a stricter, ratcheted AST-based
@@ -90,10 +111,20 @@ The script always exits `0`. Nothing is auto-fixed.
 
 ## After Reviewing Findings
 
-1. For a genuine hardcoded string, add a key to
-   `vscode-extension/package.nls.json` (extension-host code, via `t()`) or to
-   `DEFAULT_LOCALIZATION` in `vscode-extension/src/webview/shared/localization.ts`
-   (webview code, via `localize()`), then reference it from the flagged site.
+1. For a genuine hardcoded string:
+   - Extension-host code (via `t()`): add the key to
+     `vscode-extension/package.nls.json` (+ `package.nls.zh-cn.json` where
+     translated).
+   - Webview code (via `localize()`): add the key **and its English text** to
+     `DEFAULT_LOCALIZATION` in
+     `vscode-extension/src/webview/shared/localization.ts` — this is only the
+     fallback used when no override arrives — **and** also add the key to
+     `getWebviewLocalization()` in `vscode-extension/src/extension.ts` (via
+     `l10n.t('key')`) plus `package.nls.json` / `package.nls.zh-cn.json`.
+     Skipping the `getWebviewLocalization()` step means the webview always
+     falls back to the English `DEFAULT_LOCALIZATION` text, even for
+     non-English users.
+   Then reference the key from the flagged call site.
 2. Follow "Localization changes require test coverage" in the repo's
    `AGENTS.md` — add coverage in `vscode-extension/test/unit/l10n.test.ts` for
    any new key.

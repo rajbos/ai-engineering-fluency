@@ -3,17 +3,18 @@
 /**
  * Hardcoded UI String Inventory Scan
  *
- * Walks vscode-extension/src/webview/**\/*.ts and vscode-extension/src/extension.ts
- * (the webview-HTML-producing code) looking for string/template literals that
- * are rendered directly as UI text but are NOT wrapped in localize(), t(), or
- * vscode.l10n.t(). This is a triage/inventory report, not a CI gate: it never
- * exits non-zero and does not modify any source file.
+ * Walks vscode-extension/src/webview/**\/*.ts and the get*Html()-named methods
+ * in vscode-extension/src/extension.ts (the webview-HTML-producing code) looking
+ * for string/template literals that are rendered directly as UI text but are NOT
+ * wrapped in localize(), t(), or vscode.l10n.t(). This is a triage/inventory
+ * report, not a CI gate: it never exits non-zero and does not modify any source
+ * file.
  *
  * UI-rendering positions checked:
  *   - Assignment to .textContent / .innerText / .innerHTML / .title / .placeholder
  *   - aria-label="..." attributes
  *   - Text content inside common HTML tags embedded in template literals
- *     (<button>, <label>, <h1>-<h6>, <p>, <span>, <td>, <th>, <option>,
+ *     (<div>, <button>, <label>, <h1>-<h6>, <p>, <span>, <td>, <th>, <option>,
  *     <summary>, <caption>)
  *
  * Usage:
@@ -40,9 +41,7 @@ const WEBVIEW_DIR = path.join(REPO_ROOT, 'vscode-extension/src/webview');
 const EXTENSION_FILE = path.join(REPO_ROOT, 'vscode-extension/src/extension.ts');
 const REPORT_PATH = path.join(REPO_ROOT, 'hardcoded-strings-report.md');
 
-const JSON_MODE = process.argv.includes('--json');
-
-const TAG_NAMES = ['button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'td', 'th', 'option', 'summary', 'caption'];
+const TAG_NAMES = ['div', 'button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'td', 'th', 'option', 'summary', 'caption'];
 const TEXT_PROPS = ['textContent', 'innerText', 'innerHTML', 'title', 'placeholder'];
 
 // ── File collection ────────────────────────────────────────────────────────
@@ -60,6 +59,66 @@ function collectTsFiles(dir) {
         }
     }
     return results;
+}
+
+// ── extension.ts scope restriction ──────────────────────────────────────────
+
+/**
+ * Find the [start, end] character ranges of every `get*Html*(...) { ... }`
+ * method body in `content` — the webview-HTML-producing methods (getDetailsHtml,
+ * getLoadingHtmlCssBase, etc.), mirroring the canonical list in this repo's
+ * AGENTS.md. Scanning is restricted to these ranges for extension.ts so that
+ * unrelated string literals elsewhere in the 13k-line file (e.g. GitHub issue
+ * Markdown templates) are not misreported as webview UI text.
+ *
+ * A declaration is recognized by requiring the method name to start the
+ * statement (only whitespace and an optional access modifier before it) —
+ * this excludes call sites like `this.getLoadingHtmlCssBase()` embedded
+ * mid-line inside another method's template literal.
+ */
+function extractHtmlMethodRanges(content) {
+    const ranges = [];
+    const declRe = /^[ \t]*(?:private|public|protected)?\s*(?:async\s+)?(get[A-Za-z]*Html[A-Za-z]*)\s*\(/gm;
+    let m;
+    while ((m = declRe.exec(content)) !== null) {
+        const parenStart = m.index + m[0].length - 1;
+        let depth = 0;
+        let parenEnd = -1;
+        for (let i = parenStart; i < content.length; i++) {
+            if (content[i] === '(') { depth++; }
+            else if (content[i] === ')') {
+                depth--;
+                if (depth === 0) { parenEnd = i; break; }
+            }
+        }
+        if (parenEnd === -1) { continue; }
+
+        const braceStart = content.indexOf('{', parenEnd);
+        if (braceStart === -1) { continue; }
+        // A `;` between the parameter list and the brace means this is a type
+        // signature (e.g. an interface member), not a method implementation.
+        if (content.slice(parenEnd + 1, braceStart).includes(';')) { continue; }
+
+        let bdepth = 0;
+        let braceEnd = -1;
+        for (let i = braceStart; i < content.length; i++) {
+            if (content[i] === '{') { bdepth++; }
+            else if (content[i] === '}') {
+                bdepth--;
+                if (bdepth === 0) { braceEnd = i; break; }
+            }
+        }
+        if (braceEnd === -1) { continue; }
+
+        ranges.push([braceStart, braceEnd]);
+        declRe.lastIndex = braceEnd;
+    }
+    return ranges;
+}
+
+/** Does `index` fall inside any [start, end] range? */
+function isWithinRanges(index, ranges) {
+    return ranges.some(([start, end]) => index >= start && index <= end);
 }
 
 // ── Localization-call stripping ────────────────────────────────────────────
@@ -91,11 +150,31 @@ function stripLocalizedCalls(text) {
     return result;
 }
 
-/** Strip ${...} interpolations (non-nested assumption) so only static literal text remains. */
+/** Extract quoted string literal bodies (non-nested) from an interpolation expression. */
+function extractInterpolationLiterals(expr) {
+    const stripped = stripLocalizedCalls(expr);
+    const literals = [];
+    const re = /(["'])((?:(?!\1)[^\\]|\\.)*)\1/g;
+    let m;
+    while ((m = re.exec(stripped)) !== null) {
+        literals.push(m[2]);
+    }
+    return literals;
+}
+
+/**
+ * Strip ${...} interpolations (non-nested assumption), keeping any string
+ * literals found inside them (e.g. the branches of a ternary like
+ * `${flag ? 'Enable Overrides' : 'Disable Overrides'}`) so that hardcoded
+ * prose hidden inside an interpolation is not silently discarded.
+ */
 function stripInterpolations(text) {
     let result = text;
     for (let iter = 0; iter < 10; iter++) {
-        const next = result.replace(/\$\{[^{}]*\}/g, ' ');
+        const next = result.replace(/\$\{([^{}]*)\}/g, (_, expr) => {
+            const literals = extractInterpolationLiterals(expr);
+            return literals.length > 0 ? ` ${literals.join(' ')} ` : ' ';
+        });
         if (next === result) { break; }
         result = next;
     }
@@ -155,6 +234,11 @@ function escapeTableCell(text) {
 }
 
 // ── Detectors ───────────────────────────────────────────────────────────────
+//
+// Each detector returns findings with an `index` (character offset of the
+// match) alongside `line`/`kind`/`snippet`, so callers can restrict results to
+// a set of allowed ranges (see `extractHtmlMethodRanges`). `scanFile` strips
+// `index` back out before returning.
 
 /**
  * Detect assignments like `el.textContent = "..."` / `el.title = \`...\`` where
@@ -174,6 +258,7 @@ function findPropertyAssignments(content) {
         const staticText = extractStaticText(body);
         if (looksLikeProse(staticText)) {
             findings.push({
+                index: m.index,
                 line: lineAt(content, m.index),
                 kind: `.${prop} assignment`,
                 snippet: toSnippet(full),
@@ -189,6 +274,7 @@ function findPropertyAssignments(content) {
         const staticText = extractStaticText(body);
         if (looksLikeProse(staticText)) {
             findings.push({
+                index: m.index,
                 line: lineAt(content, m.index),
                 kind: `.${prop} assignment`,
                 snippet: toSnippet(full),
@@ -209,6 +295,7 @@ function findAriaLabels(content) {
         const staticText = extractStaticText(body);
         if (looksLikeProse(staticText)) {
             findings.push({
+                index: m.index,
                 line: lineAt(content, m.index),
                 kind: 'aria-label attribute',
                 snippet: toSnippet(full),
@@ -229,6 +316,7 @@ function findTagContent(content) {
         const staticText = extractStaticText(body);
         if (looksLikeProse(staticText)) {
             findings.push({
+                index: m.index,
                 line: lineAt(content, m.index),
                 kind: `<${tag}> content`,
                 snippet: toSnippet(full),
@@ -238,84 +326,45 @@ function findTagContent(content) {
     return findings;
 }
 
-/** Run all detectors against one file's content, deduped by line+snippet. */
-function scanFile(content) {
-    const all = [
+/**
+ * Run all detectors against one file's content, deduped by line+snippet and
+ * optionally restricted to a set of allowed character ranges.
+ */
+function scanFile(content, allowedRanges) {
+    let all = [
         ...findPropertyAssignments(content),
         ...findAriaLabels(content),
         ...findTagContent(content),
     ];
+    if (allowedRanges) {
+        all = all.filter((f) => isWithinRanges(f.index, allowedRanges));
+    }
     const seen = new Set();
     const deduped = [];
     for (const f of all) {
         const key = `${f.line}|${f.kind}|${f.snippet}`;
         if (seen.has(key)) { continue; }
         seen.add(key);
-        deduped.push(f);
+        deduped.push({ line: f.line, kind: f.kind, snippet: f.snippet });
     }
     deduped.sort((a, b) => a.line - b.line);
     return deduped;
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────
+// ── Report generation ───────────────────────────────────────────────────────
 
-function main() {
-    const files = [...collectTsFiles(WEBVIEW_DIR)];
-    if (fs.existsSync(EXTENSION_FILE)) { files.push(EXTENSION_FILE); }
-
-    const results = []; // { file, findings }
-    let total = 0;
-
-    for (const file of files.sort()) {
-        const content = fs.readFileSync(file, 'utf8');
-        const findings = scanFile(content);
-        if (findings.length > 0) {
-            const rel = path.relative(REPO_ROOT, file);
-            results.push({ file: rel, findings });
-            total += findings.length;
-        }
-    }
-
-    if (JSON_MODE) {
-        console.log(JSON.stringify({ total, files: results }, null, 2));
-    } else {
-        console.log(`Scanned ${files.length} file(s) under vscode-extension/src/webview/ and extension.ts\n`);
-        if (total === 0) {
-            console.log('No hardcoded UI strings found.');
-        } else {
-            for (const { file, findings } of results) {
-                console.log(`${file} (${findings.length})`);
-                for (const f of findings) {
-                    console.log(`  L${f.line} [${f.kind}] ${f.snippet}`);
-                }
-                console.log('');
-            }
-            console.log('─────────────────────────────────────────');
-            console.log(`Found ${total} candidate hardcoded string(s) across ${results.length} file(s).`);
-            console.log('This is an informational inventory, not a hard failure — see the skill README for triage guidance.');
-        }
-    }
-
-    writeMarkdownReport(results, total, files.length);
-    if (!JSON_MODE) {
-        console.log(`\nMarkdown report written to ${path.relative(REPO_ROOT, REPORT_PATH)}`);
-    }
-
-    // Informational script — never fail the build.
-    process.exit(0);
-}
-
-function writeMarkdownReport(results, total, scannedCount) {
+function buildMarkdownReport(results, total, scannedCount) {
     const lines = [];
     lines.push('# Hardcoded UI Strings Inventory');
     lines.push('');
     lines.push(`Generated by \`.github/skills/scan-hardcoded-strings/scan-hardcoded-strings.js\` on ${new Date().toISOString().slice(0, 10)}.`);
     lines.push('');
     lines.push('This is an informational triage report, not a CI gate. It lists candidate UI');
-    lines.push('strings under `vscode-extension/src/webview/**` and `vscode-extension/src/extension.ts`');
-    lines.push('that are rendered as UI text but are not wrapped in `localize()`, `t()`, or');
-    lines.push('`vscode.l10n.t()`. Some entries may be false positives (see the skill README');
-    lines.push('for the exclusion rules) — triage each one before localizing.');
+    lines.push('strings under `vscode-extension/src/webview/**` and the `get*Html()` methods in');
+    lines.push('`vscode-extension/src/extension.ts` that are rendered as UI text but are not');
+    lines.push('wrapped in `localize()`, `t()`, or `vscode.l10n.t()`. Some entries may be false');
+    lines.push('positives (see the skill README for the exclusion rules) — triage each one');
+    lines.push('before localizing.');
     lines.push('');
     lines.push(`- Files scanned: ${scannedCount}`);
     lines.push(`- Files with findings: ${results.length}`);
@@ -339,7 +388,87 @@ function writeMarkdownReport(results, total, scannedCount) {
         }
     }
 
-    fs.writeFileSync(REPORT_PATH, lines.join('\n') + '\n', 'utf8');
+    return lines.join('\n') + '\n';
 }
 
-main();
+// ── Main ───────────────────────────────────────────────────────────────────
+
+function runScan() {
+    const files = [...collectTsFiles(WEBVIEW_DIR)];
+    if (fs.existsSync(EXTENSION_FILE)) { files.push(EXTENSION_FILE); }
+
+    const results = []; // { file, findings }
+    let total = 0;
+
+    for (const file of files.sort()) {
+        const content = fs.readFileSync(file, 'utf8');
+        const allowedRanges = file === EXTENSION_FILE ? extractHtmlMethodRanges(content) : null;
+        const findings = scanFile(content, allowedRanges);
+        if (findings.length > 0) {
+            const rel = path.relative(REPO_ROOT, file);
+            results.push({ file: rel, findings });
+            total += findings.length;
+        }
+    }
+
+    return { results, total, scannedCount: files.length };
+}
+
+function main() {
+    const jsonMode = process.argv.includes('--json');
+    const { results, total, scannedCount } = runScan();
+
+    if (jsonMode) {
+        console.log(JSON.stringify({ total, files: results }, null, 2));
+    } else {
+        console.log(`Scanned ${scannedCount} file(s) under vscode-extension/src/webview/ and extension.ts's get*Html() methods\n`);
+        if (total === 0) {
+            console.log('No hardcoded UI strings found.');
+        } else {
+            for (const { file, findings } of results) {
+                console.log(`${file} (${findings.length})`);
+                for (const f of findings) {
+                    console.log(`  L${f.line} [${f.kind}] ${f.snippet}`);
+                }
+                console.log('');
+            }
+            console.log('─────────────────────────────────────────');
+            console.log(`Found ${total} candidate hardcoded string(s) across ${results.length} file(s).`);
+            console.log('This is an informational inventory, not a hard failure — see the skill README for triage guidance.');
+        }
+    }
+
+    fs.writeFileSync(REPORT_PATH, buildMarkdownReport(results, total, scannedCount), 'utf8');
+    if (!jsonMode) {
+        console.log(`\nMarkdown report written to ${path.relative(REPO_ROOT, REPORT_PATH)}`);
+    }
+
+    // Informational script — never fail the build. Setting exitCode (rather
+    // than calling process.exit()) lets buffered stdout/stderr writes drain
+    // before the process exits, instead of risking truncated output when
+    // piped (e.g. in CI or `| head`).
+    process.exitCode = 0;
+}
+
+module.exports = {
+    collectTsFiles,
+    extractHtmlMethodRanges,
+    isWithinRanges,
+    stripLocalizedCalls,
+    extractInterpolationLiterals,
+    stripInterpolations,
+    extractStaticText,
+    looksLikeProse,
+    toSnippet,
+    escapeTableCell,
+    findPropertyAssignments,
+    findAriaLabels,
+    findTagContent,
+    scanFile,
+    buildMarkdownReport,
+    runScan,
+};
+
+if (require.main === module) {
+    main();
+}
