@@ -215,5 +215,29 @@
   "insights.cadenceDays": "洞察通知之间的最少天数",
 
   "usage.copyFailed": "无法将路径复制到剪贴板。",
-  "usage.copyFailed.retry": "重新复制"
+  "usage.copyFailed.retry": "重新复制",
+
+  "logviewer.summary.interactions": "交互次数",
+  "logviewer.summary.editorMode": "编辑器模式",
+  "logviewer.summary.estimatedTokens": "预计令牌数",
+  "logviewer.summary.actualTokens": "实际令牌数",
+  "logviewer.summary.modelTurns": "模型轮次",
+  "logviewer.summary.inputTokens": "输入令牌",
+  "logviewer.summary.outputTokens": "输出令牌",
+  "logviewer.summary.cachedInput": "缓存输入",
+  "logviewer.summary.thinkingTokens": "思考令牌",
+  "logviewer.summary.thinkingEffort": "思考强度",
+  "logviewer.summary.subAgents": "子代理",
+  "logviewer.summary.contextTruncated": "上下文截断",
+  "logviewer.summary.sessionHierarchy": "会话层级",
+  "logviewer.summary.toolCalls": "工具调用",
+  "logviewer.summary.mcpTools": "MCP 工具",
+  "logviewer.summary.contextRefs": "上下文引用",
+  "logviewer.summary.fileName": "文件名",
+  "logviewer.summary.editor": "编辑器",
+  "logviewer.summary.fileSize": "文件大小",
+  "logviewer.summary.modified": "修改时间",
+  "logviewer.summary.timeline": "时间线",
+  "logviewer.summary.started": "开始",
+  "logviewer.summary.lastActivity": "最后活动"
 }
