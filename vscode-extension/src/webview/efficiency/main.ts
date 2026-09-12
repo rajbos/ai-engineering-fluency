@@ -32,7 +32,7 @@ import {
 	selectDaysInWindow,
 	windowHasModelData,
 } from '../../../../src/efficiencyAnalysis';
-import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
 
 // Minimal structural types for the dynamically imported Chart.js bundle —
 // a `typeof import('chart.js/auto')` type-import trips TS1542 under CJS resolution.
@@ -573,6 +573,18 @@ function modelOptions(d: EfficiencyViewData): { value: string; label: string }[]
 	}));
 }
 
+/**
+ * Model B's options, with an explicit placeholder when the window holds no
+ * second model. Without one the browser falls back to showing the first option
+ * — the same model as A — so the picker would claim a self-comparison the tab
+ * is not actually rendering.
+ */
+function modelBOptions(options: { value: string; label: string; disabled?: boolean }[]): typeof options {
+	return modelState.modelB === ''
+		? [{ value: '', label: localize('efficiency.models.noSecondModel'), disabled: true }, ...options]
+		: options;
+}
+
 /** Dropdown options for the window picker: each label carries its concrete date span, and windows with no per-model data yet are disabled so they can't silently be picked. */
 function windowOptions(d: EfficiencyViewData, now: Date): { value: string; label: string; disabled?: boolean }[] {
 	return WINDOW_OPTIONS.map(w => {
@@ -587,19 +599,20 @@ function renderModelControls(d: EfficiencyViewData): string {
 	const models = modelOptions(d);
 	const windows = windowOptions(d, payloadNow(d));
 	const modeSelect = selectHtml('model-mode', [
-		{ value: 'models', label: 'Compare two models' },
-		{ value: 'periods', label: 'One model, two periods' },
+		{ value: 'models', label: localize('efficiency.models.mode.models') },
+		{ value: 'periods', label: localize('efficiency.models.mode.periods') },
 	], modelState.mode);
+	const caption = (key: string): string => escapeHtml(localize(`efficiency.models.controls.${key}`));
 	const body = modelState.mode === 'periods'
 		? `
-			<label>Model ${selectHtml('model-a', models, modelState.modelA)}</label>
-			<label>Baseline ${selectHtml('window-a', windows, modelState.windowA)}</label>
-			<label>Compared with ${selectHtml('window-b', windows, modelState.windowB)}</label>`
+			<label>${caption('model')} ${selectHtml('model-a', models, modelState.modelA)}</label>
+			<label>${caption('baseline')} ${selectHtml('window-a', windows, modelState.windowA)}</label>
+			<label>${caption('comparedWith')} ${selectHtml('window-b', windows, modelState.windowB)}</label>`
 		: `
-			<label>Model A ${selectHtml('model-a', models, modelState.modelA)}</label>
-			<label>Model B ${selectHtml('model-b', models, modelState.modelB)}</label>
-			<label>Window ${selectHtml('window', windows, modelState.window)}</label>`;
-	return `<div class="model-controls"><label>Mode ${modeSelect}</label>${body}</div>`;
+			<label>${caption('modelA')} ${selectHtml('model-a', models, modelState.modelA)}</label>
+			<label>${caption('modelB')} ${selectHtml('model-b', modelBOptions(models), modelState.modelB)}</label>
+			<label>${caption('window')} ${selectHtml('window', windows, modelState.window)}</label>`;
+	return `<div class="model-controls"><label>${caption('mode')} ${modeSelect}</label>${body}</div>`;
 }
 
 /** Renders a side's headline volume so the reader can judge the sample for themselves. */
@@ -801,13 +814,13 @@ function noEligibleModelsNote(d: EfficiencyViewData): string {
 	if (modelState.mode === 'periods') {
 		const a = resolveModelCompareWindow(modelState.windowA, now);
 		const b = resolveModelCompareWindow(modelState.windowB, now);
-		return `No model was used in both ${a.label} (${a.rangeLabel}) and ${b.label} (${b.rangeLabel}), so there is no model to follow across those periods. Pick different periods, or switch to “Compare two models”.`;
+		return localizeFormat('efficiency.models.noSharedModel', a.label, a.rangeLabel, b.label, b.rangeLabel);
 	}
 	const w = resolveModelCompareWindow(modelState.window, now);
 	const eligible = listEligibleModels(d.modelDaily, modelState, now).length;
 	return eligible === 1
-		? `Only one model was used in ${w.label} (${w.rangeLabel}), so there is no pair to compare. Pick a wider window, or switch to “One model, two periods”.`
-		: `No model was used in ${w.label} (${w.rangeLabel}). Pick a wider window.`;
+		? localizeFormat('efficiency.models.noPairInWindow', w.label, w.rangeLabel)
+		: localizeFormat('efficiency.models.noModelsInWindow', w.label, w.rangeLabel);
 }
 
 function renderModelsTab(d: EfficiencyViewData): string {

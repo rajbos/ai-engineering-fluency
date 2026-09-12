@@ -1179,7 +1179,11 @@ export function reconcileModelSelection(
 	const firstOther = (exclude?: string): string =>
 		(pool.find(m => m.model !== exclude) ?? eligible.find(m => m.model !== exclude))?.model ?? '';
 
-	const modelA = eligibleIds.has(selection.modelA) ? selection.modelA : firstOther();
+	// Replacing Model A must not eat an eligible Model B: that would move the
+	// user's pick onto the other side and then displace it. Take the next model
+	// instead, and only fall back to B when there is nothing else in the window.
+	const heldB = selection.mode === 'models' && eligibleIds.has(selection.modelB) ? selection.modelB : undefined;
+	const modelA = eligibleIds.has(selection.modelA) ? selection.modelA : (firstOther(heldB) || firstOther());
 	// `periods` mode compares one model against itself across two windows, so it
 	// leaves Model B untouched — it is reconciled again on the way back to `models`.
 	if (selection.mode === 'periods') { return { ...selection, modelA }; }

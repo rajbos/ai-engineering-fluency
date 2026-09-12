@@ -76,6 +76,21 @@ export interface WebviewLocalization {
 	'hydrafusion.overview.modelChangedTooltip': string;
 	'hydrafusion.overview.expandHint': string;
 
+	// Efficiency view — Models tab empty states
+	'efficiency.models.noPairInWindow': string;
+	'efficiency.models.noModelsInWindow': string;
+	'efficiency.models.noSharedModel': string;
+	'efficiency.models.noSecondModel': string;
+	'efficiency.models.controls.mode': string;
+	'efficiency.models.controls.modelA': string;
+	'efficiency.models.controls.modelB': string;
+	'efficiency.models.controls.model': string;
+	'efficiency.models.controls.baseline': string;
+	'efficiency.models.controls.comparedWith': string;
+	'efficiency.models.controls.window': string;
+	'efficiency.models.mode.models': string;
+	'efficiency.models.mode.periods': string;
+
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
 }
@@ -139,7 +154,20 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'hydrafusion.overview.showLegsTooltip': 'Show the HydraFusion legs behind this step',
 	'hydrafusion.overview.legsCaption': '⚡ HydraFusion legs for step #{0} — total',
 	'hydrafusion.overview.modelChangedTooltip': 'Model changed from the previous step',
-	'hydrafusion.overview.expandHint': '⚡ expand a step to see the HydraFusion legs behind it'
+	'hydrafusion.overview.expandHint': '⚡ expand a step to see the HydraFusion legs behind it',
+	'efficiency.models.noPairInWindow': 'Only one model was used in {0} ({1}), so there is no pair to compare. Pick a wider window, or switch to “One model, two periods”.',
+	'efficiency.models.noModelsInWindow': 'No model was used in {0} ({1}). Pick a wider window.',
+	'efficiency.models.noSharedModel': 'No model was used in both {0} ({1}) and {2} ({3}), so there is no model to follow across those periods. Pick different periods, or switch to “Compare two models”.',
+	'efficiency.models.noSecondModel': '— no second model in this window —',
+	'efficiency.models.controls.mode': 'Mode',
+	'efficiency.models.controls.modelA': 'Model A',
+	'efficiency.models.controls.modelB': 'Model B',
+	'efficiency.models.controls.model': 'Model',
+	'efficiency.models.controls.baseline': 'Baseline',
+	'efficiency.models.controls.comparedWith': 'Compared with',
+	'efficiency.models.controls.window': 'Window',
+	'efficiency.models.mode.models': 'Compare two models',
+	'efficiency.models.mode.periods': 'One model, two periods'
 };
 
 // Current localization strings, initialized with defaults

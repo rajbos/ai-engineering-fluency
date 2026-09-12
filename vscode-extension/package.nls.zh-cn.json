@@ -252,5 +252,18 @@
   "hydrafusion.overview.showLegsTooltip": "显示此步骤背后的 HydraFusion 环节",
   "hydrafusion.overview.legsCaption": "⚡ 步骤 #{0} 的 HydraFusion 环节 — 共计",
   "hydrafusion.overview.modelChangedTooltip": "模型较上一步骤有变化",
-  "hydrafusion.overview.expandHint": "⚡ 展开步骤以查看其背后的 HydraFusion 环节"
+  "hydrafusion.overview.expandHint": "⚡ 展开步骤以查看其背后的 HydraFusion 环节",
+  "efficiency.models.noPairInWindow": "{0}（{1}）内只使用了一个模型，无法组成对比。请选择更大的时间窗口，或切换到“单个模型，两个时段”。",
+  "efficiency.models.noModelsInWindow": "{0}（{1}）内未使用任何模型。请选择更大的时间窗口。",
+  "efficiency.models.noSharedModel": "没有模型同时在{0}（{1}）和{2}（{3}）内使用过，因此无法跨这两个时段跟踪同一个模型。请选择其他时段，或切换到“对比两个模型”。",
+  "efficiency.models.noSecondModel": "— 此时间窗口内没有第二个模型 —",
+  "efficiency.models.controls.mode": "模式",
+  "efficiency.models.controls.modelA": "模型 A",
+  "efficiency.models.controls.modelB": "模型 B",
+  "efficiency.models.controls.model": "模型",
+  "efficiency.models.controls.baseline": "基准时段",
+  "efficiency.models.controls.comparedWith": "对比时段",
+  "efficiency.models.controls.window": "时间窗口",
+  "efficiency.models.mode.models": "对比两个模型",
+  "efficiency.models.mode.periods": "单个模型，两个时段"
 }

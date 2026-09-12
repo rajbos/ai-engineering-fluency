@@ -288,6 +288,10 @@ async function runScenario(page, view, scenario) {
 
   for (const step of scenario.steps) {
     const label = `${scenario.name}: ${step.click ? `click ${step.click}` : `select ${step.select}`}`;
+    // A select with nothing else to offer changes nothing, but the step still
+    // has to clear the shared checks below — a broken single-option state is
+    // exactly what `expect` is there to catch.
+    let noop = false;
     await waitForQuietDom(page);
     const before = await page.evaluate(DOM_SIGNATURE);
     await page.evaluate(() => {
@@ -313,14 +317,14 @@ async function runScenario(page, view, scenario) {
         break;
       }
       if (pick.noop) {
-        steps.push({ step: label, status: 'noop-single-option' });
-        continue;
-      }
-      try {
-        await page.selectOption(step.select, pick.value, { timeout: 2000 });
-      } catch (error) {
-        fail(label, `could not change: ${String(error.message).split('\n')[0]}`);
-        break;
+        noop = true;
+      } else {
+        try {
+          await page.selectOption(step.select, pick.value, { timeout: 2000 });
+        } catch (error) {
+          fail(label, `could not change: ${String(error.message).split('\n')[0]}`);
+          break;
+        }
       }
     }
 
@@ -349,7 +353,7 @@ async function runScenario(page, view, scenario) {
         break;
       }
     }
-    steps.push({ step: label, status: before === after ? 'no-dom-change' : 'ok' });
+    steps.push({ step: label, status: noop ? 'noop-single-option' : before === after ? 'no-dom-change' : 'ok' });
   }
 
   return { name: scenario.name, steps, findings };

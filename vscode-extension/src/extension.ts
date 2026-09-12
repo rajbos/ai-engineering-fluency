@@ -4221,8 +4221,33 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'hydrafusion.overview.legsCaption': l10n.t('hydrafusion.overview.legsCaption'),
 			'hydrafusion.overview.modelChangedTooltip': l10n.t('hydrafusion.overview.modelChangedTooltip'),
 			'hydrafusion.overview.expandHint': l10n.t('hydrafusion.overview.expandHint'),
+			...this.getEfficiencyModelsLocalization(),
 			// Current language for reference
 			'__language__': language
+		};
+	}
+
+	/**
+	 * Models-tab strings for the Efficiency view. Kept in its own method so
+	 * `getWebviewLocalization` stays inside the function-size ceiling. Templates
+	 * with {0}..{3} are resolved webview-side by `localizeFormat()`, so they pass
+	 * through unformatted here.
+	 */
+	private getEfficiencyModelsLocalization(): { [key: string]: string } {
+		return {
+			'efficiency.models.noPairInWindow': l10n.t('efficiency.models.noPairInWindow'),
+			'efficiency.models.noModelsInWindow': l10n.t('efficiency.models.noModelsInWindow'),
+			'efficiency.models.noSharedModel': l10n.t('efficiency.models.noSharedModel'),
+			'efficiency.models.noSecondModel': l10n.t('efficiency.models.noSecondModel'),
+			'efficiency.models.controls.mode': l10n.t('efficiency.models.controls.mode'),
+			'efficiency.models.controls.modelA': l10n.t('efficiency.models.controls.modelA'),
+			'efficiency.models.controls.modelB': l10n.t('efficiency.models.controls.modelB'),
+			'efficiency.models.controls.model': l10n.t('efficiency.models.controls.model'),
+			'efficiency.models.controls.baseline': l10n.t('efficiency.models.controls.baseline'),
+			'efficiency.models.controls.comparedWith': l10n.t('efficiency.models.controls.comparedWith'),
+			'efficiency.models.controls.window': l10n.t('efficiency.models.controls.window'),
+			'efficiency.models.mode.models': l10n.t('efficiency.models.mode.models'),
+			'efficiency.models.mode.periods': l10n.t('efficiency.models.mode.periods'),
 		};
 	}
 

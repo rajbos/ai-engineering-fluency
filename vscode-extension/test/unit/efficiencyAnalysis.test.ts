@@ -917,3 +917,19 @@ test('reconcileModelSelection: does not change the selected windows or mode', ()
 	assert.equal(next.windowA, 'prev30');
 	assert.equal(next.windowB, 'last30');
 });
+
+test('reconcileModelSelection: replacing a stale Model A does not displace an eligible Model B', () => {
+	// 'big' sorts first, so a naive replacement would move the user's B onto side A
+	// and then push a different model into B — losing the pick it claims to keep.
+	const days = [modelDay('2026-07-02', { big: solidModel({ inputTokens: 5_000_000 }), small: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'gone', modelB: 'big' }), NOW);
+	assert.equal(next.modelB, 'big');
+	assert.equal(next.modelA, 'small');
+});
+
+test('reconcileModelSelection: falls back to Model B for Model A when the window holds nothing else', () => {
+	const days = [modelDay('2026-07-02', { only: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'gone', modelB: 'only' }), NOW);
+	assert.equal(next.modelA, 'only');
+	assert.equal(next.modelB, '');
+});

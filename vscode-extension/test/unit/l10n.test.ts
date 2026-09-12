@@ -342,3 +342,77 @@ test('l10n: HydraFusion Routing labels resolve in zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+
+// Efficiency view — Models tab empty states. These explain why a window cannot
+// form a comparison, so they must not surface in English for zh-CN users.
+test('l10n: Efficiency Models tab empty states resolve in English', () => {
+	const expected: Record<string, string> = {
+		'efficiency.models.noPairInWindow': 'Only one model was used in {0} ({1}), so there is no pair to compare. Pick a wider window, or switch to \u201cOne model, two periods\u201d.',
+		'efficiency.models.noModelsInWindow': 'No model was used in {0} ({1}). Pick a wider window.',
+		'efficiency.models.noSharedModel': 'No model was used in both {0} ({1}) and {2} ({3}), so there is no model to follow across those periods. Pick different periods, or switch to \u201cCompare two models\u201d.',
+		'efficiency.models.noSecondModel': '\u2014 no second model in this window \u2014',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: Efficiency Models tab empty states resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'efficiency.models.noPairInWindow': '{0}\uff08{1}\uff09\u5185\u53ea\u4f7f\u7528\u4e86\u4e00\u4e2a\u6a21\u578b\uff0c\u65e0\u6cd5\u7ec4\u6210\u5bf9\u6bd4\u3002\u8bf7\u9009\u62e9\u66f4\u5927\u7684\u65f6\u95f4\u7a97\u53e3\uff0c\u6216\u5207\u6362\u5230\u201c\u5355\u4e2a\u6a21\u578b\uff0c\u4e24\u4e2a\u65f6\u6bb5\u201d\u3002',
+			'efficiency.models.noModelsInWindow': '{0}\uff08{1}\uff09\u5185\u672a\u4f7f\u7528\u4efb\u4f55\u6a21\u578b\u3002\u8bf7\u9009\u62e9\u66f4\u5927\u7684\u65f6\u95f4\u7a97\u53e3\u3002',
+			'efficiency.models.noSecondModel': '\u2014 \u6b64\u65f6\u95f4\u7a97\u53e3\u5185\u6ca1\u6709\u7b2c\u4e8c\u4e2a\u6a21\u578b \u2014',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+		// The two-window message is the only one carrying four placeholders.
+		const shared = t('efficiency.models.noSharedModel');
+		assert.equal(
+			shared,
+			'\u6ca1\u6709\u6a21\u578b\u540c\u65f6\u5728{0}\uff08{1}\uff09\u548c{2}\uff08{3}\uff09\u5185\u4f7f\u7528\u8fc7\uff0c\u56e0\u6b64\u65e0\u6cd5\u8de8\u8fd9\u4e24\u4e2a\u65f6\u6bb5\u8ddf\u8e2a\u540c\u4e00\u4e2a\u6a21\u578b\u3002\u8bf7\u9009\u62e9\u5176\u4ed6\u65f6\u6bb5\uff0c\u6216\u5207\u6362\u5230\u201c\u5bf9\u6bd4\u4e24\u4e2a\u6a21\u578b\u201d\u3002',
+			'zh-cn value for efficiency.models.noSharedModel',
+		);
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: Efficiency Models tab control labels resolve in English and zh-cn', () => {
+	const english: Record<string, string> = {
+		'efficiency.models.controls.mode': 'Mode',
+		'efficiency.models.controls.modelA': 'Model A',
+		'efficiency.models.controls.modelB': 'Model B',
+		'efficiency.models.controls.model': 'Model',
+		'efficiency.models.controls.baseline': 'Baseline',
+		'efficiency.models.controls.comparedWith': 'Compared with',
+		'efficiency.models.controls.window': 'Window',
+		'efficiency.models.mode.models': 'Compare two models',
+		'efficiency.models.mode.periods': 'One model, two periods',
+	};
+	for (const [key, value] of Object.entries(english)) {
+		assert.equal(t(key), value, `English value for ${key}`);
+	}
+
+	mock.setLanguage('zh-cn');
+	try {
+		const chinese: Record<string, string> = {
+			'efficiency.models.controls.mode': '\u6a21\u5f0f',
+			'efficiency.models.controls.modelA': '\u6a21\u578b A',
+			'efficiency.models.controls.modelB': '\u6a21\u578b B',
+			'efficiency.models.controls.model': '\u6a21\u578b',
+			'efficiency.models.controls.baseline': '\u57fa\u51c6\u65f6\u6bb5',
+			'efficiency.models.controls.comparedWith': '\u5bf9\u6bd4\u65f6\u6bb5',
+			'efficiency.models.controls.window': '\u65f6\u95f4\u7a97\u53e3',
+			'efficiency.models.mode.models': '\u5bf9\u6bd4\u4e24\u4e2a\u6a21\u578b',
+			'efficiency.models.mode.periods': '\u5355\u4e2a\u6a21\u578b\uff0c\u4e24\u4e2a\u65f6\u6bb5',
+		};
+		for (const [key, value] of Object.entries(chinese)) {
+			assert.equal(t(key), value, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
