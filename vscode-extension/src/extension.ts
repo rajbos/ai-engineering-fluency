@@ -4184,8 +4184,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Details view — collapsible "Usage by Editor" section heading tooltips
 			'details.editorSection.show': l10n.t('details.editorSection.show'),
 			'details.editorSection.hide': l10n.t('details.editorSection.hide'),
-			// Efficiency view — Value tab empty-state action
+			// Efficiency view — Value tab empty state. `prsHint` carries a {0} placeholder
+			// resolved webview-side by localizeFormat(), so it is passed through unformatted.
 			'efficiency.value.openRepositoryPrs': l10n.t('efficiency.value.openRepositoryPrs'),
+			'efficiency.value.prsHint': l10n.t('efficiency.value.prsHint'),
+			'efficiency.value.prsHintDestination': l10n.t('efficiency.value.prsHintDestination'),
 			// Log viewer summary card labels
 			'logviewer.summary.interactions': l10n.t('logviewer.summary.interactions'),
 			'logviewer.summary.editorMode': l10n.t('logviewer.summary.editorMode'),

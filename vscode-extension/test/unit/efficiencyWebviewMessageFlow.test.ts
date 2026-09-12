@@ -70,7 +70,12 @@ function buildData(userPrs: number | null): Record<string, unknown> {
 		cacheBreakage: null,
 		lastUpdated: '2026-08-29T12:00:00.000Z',
 		backendConfigured: false,
-		localization: { 'efficiency.value.openRepositoryPrs': 'Open Repository PRs', '__language__': 'en' },
+		localization: {
+			'efficiency.value.openRepositoryPrs': 'Open Repository PRs',
+			'efficiency.value.prsHint': '💡 Connect GitHub and open {0} once to add pull-request metrics here.',
+			'efficiency.value.prsHintDestination': 'Usage Analysis → Repository PRs',
+			'__language__': 'en',
+		},
 	};
 }
 
@@ -125,6 +130,18 @@ async function bootWebview(initialData: Record<string, unknown>): Promise<Harnes
 test('efficiency Value empty state: Open Repository PRs button asks the host for the Repository PRs tab', async () => {
 	const harness = await bootWebview(buildData(null));
 	await harness.clickTab('value');
+
+	const hint = harness.window.document.querySelector('.value-hint-text');
+	assert.equal(
+		hint?.textContent.trim(),
+		'💡 Connect GitHub and open Usage Analysis → Repository PRs once to add pull-request metrics here.',
+		'the explanation comes from the localization payload, with the destination interpolated',
+	);
+	assert.equal(
+		hint?.querySelector('b')?.textContent,
+		'Usage Analysis → Repository PRs',
+		'the destination stays emphasized rather than arriving as escaped markup',
+	);
 
 	const button = harness.window.document.getElementById('btn-open-repo-prs');
 	assert.ok(button, 'expected the Open Repository PRs button in the Value tab empty state');

@@ -30,7 +30,7 @@ import {
 	selectDaysInWindow,
 	windowHasModelData,
 } from '../../../../src/efficiencyAnalysis';
-import { initializeWebviewLocalization, localize, setCurrentLanguage } from '../shared/localization';
+import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
 
 // Minimal structural types for the dynamically imported Chart.js bundle —
 // a `typeof import('chart.js/auto')` type-import trips TS1542 under CJS resolution.
@@ -452,9 +452,12 @@ function renderValueTab(d: EfficiencyViewData): string {
 	// The empty state stays explanatory, but the destination it names is one click away:
 	// the button asks the host to reveal Usage Analysis *on* the Repository PRs tab, which
 	// is what actually fills these cards.
+	// `{0}` is the emphasized destination name; the bundle's own text is the only markup
+	// interpolated into it, and the destination itself is escaped before emphasis.
+	const destination = `<b>${escapeHtml(localize('efficiency.value.prsHintDestination'))}</b>`;
 	const hint = v.userPrs === null
 		? `<div class="value-hint">
-				<span class="value-hint-text">💡 Connect GitHub and open <b>Usage Analysis → Repository PRs</b> once to add pull-request metrics here — merged PRs are a far better value signal than lines of code.</span>
+				<span class="value-hint-text">${localizeFormat('efficiency.value.prsHint', destination)}</span>
 				<vscode-button id="btn-open-repo-prs" appearance="secondary">${escapeHtml(localize('efficiency.value.openRepositoryPrs'))}</vscode-button>
 			</div>`
 		: '';
