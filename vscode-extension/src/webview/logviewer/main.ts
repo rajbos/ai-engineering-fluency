@@ -716,7 +716,7 @@ function buildEditorIdentityCard(data: SessionLogData, stats: SummaryStats): str
 <div class="summary-compact-rows">
 <div class="summary-compact-row"><span class="summary-compact-key">💻 ${localize('logviewer.summary.editorSource')}</span><span class="summary-compact-val" style="font-size: 13px; font-weight: 700;">${escapeHtml(data.editorName)}</span></div>
 <div class="summary-compact-row"><span class="summary-compact-key">🎛️ ${localize('logviewer.summary.editorMode')}</span><span class="summary-compact-val">${modeValue}</span></div>
-<div class="summary-compact-row"><span class="summary-compact-key">📝 ${localize('logviewer.summary.interactions')}</span><span class="summary-compact-val">${interactions} ${interactions === 1 ? 'turn' : 'turns'}</span></div>
+<div class="summary-compact-row"><span class="summary-compact-key">📝 ${localize('logviewer.summary.interactions')}</span><span class="summary-compact-val">${interactions}</span></div>
 </div>
 <div class="summary-sub">${escapeHtml(modeSub)}</div>
 </div>`;
