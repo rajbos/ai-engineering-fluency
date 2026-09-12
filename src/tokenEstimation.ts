@@ -1042,14 +1042,6 @@ function getDisplayNameLookup(modelPricing: { [key: string]: ModelPricing }): { 
 }
 
 /** Find the model ID for a request by matching display names against its details string. Returns null if not found. */
-function _gmfrFindByDisplayName(details: string, modelPricing: { [key: string]: ModelPricing }): string | null {
-	const { map, sortedNames } = getDisplayNameLookup(modelPricing);
-	for (const displayName of sortedNames) {
-		if (details.includes(displayName)) { return map[displayName]; }
-	}
-	return null;
-}
-
 function _gmrMatchDisplayName(details: string, modelPricing: { [key: string]: ModelPricing }): string | null {
 	const { map, sortedNames } = getDisplayNameLookup(modelPricing);
 	for (const displayName of sortedNames) {
@@ -1080,28 +1072,22 @@ function _findAutoModeResolvedModel(response: unknown[] | undefined): string | n
 }
 
 export function getModelFromRequest(request: ModelRequestSource, modelPricing: { [key: string]: ModelPricing } = {}): string {
-	if (request.modelId) {
-		const stripped = request.modelId.replace(/^copilot\//, '');
-		if (stripped === 'auto') {
-			const resolved = _findAutoModeResolvedModel(request.response);
-			if (resolved) { return resolved; }
-		}
-		return stripped;
+	const rawModelId = request.modelId
+		? request.modelId.replace(/^copilot\//, '')
+		: (request.result?.metadata?.modelId ? request.result.metadata.modelId.replace(/^copilot\//, '') : null);
+	if (rawModelId && rawModelId !== 'auto') { return rawModelId; }
+	if (rawModelId === 'auto') {
+		// Auto routing: the raw id is a generic placeholder — try to resolve the
+		// model actually picked for this turn before falling back to the "auto"
+		// sentinel itself (never silently substitute an unrelated model here).
+		const resolved = _findAutoModeResolvedModel(request.response);
+		if (resolved) { return resolved; }
 	}
-	if (request.result?.metadata?.modelId) { return request.result.metadata.modelId.replace(/^copilot\//, ''); }
 	if (request.result?.details) {
 		const matched = _gmrMatchDisplayName(request.result.details, modelPricing);
 		if (matched) { return matched; }
 	}
-
-	if (request.result?.metadata?.modelId) {
-		return request.result.metadata.modelId.replace(/^copilot\//, '');
-	}
-
-	if (request.result?.details) {
-		const found = _gmfrFindByDisplayName(request.result.details, modelPricing);
-		if (found) { return found; }
-	}
+	if (rawModelId === 'auto') { return rawModelId; }
 
 	return 'gpt-4'; // default
 }

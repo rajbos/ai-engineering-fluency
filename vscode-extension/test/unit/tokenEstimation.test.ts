@@ -1527,6 +1527,14 @@ test('getModelFromRequest: non-auto modelId is unaffected by a response array', 
         assert.equal(getModelFromRequest(req), 'gpt-4o');
 });
 
+test('getModelFromRequest: resolves auto from result.metadata.modelId (metadata-only shape) too', () => {
+        const req = {
+                result: { metadata: { modelId: 'copilot/auto' } },
+                response: [{ kind: 'autoModeResolution', resolved: { id: 'gpt-5.4' } }],
+        };
+        assert.equal(getModelFromRequest(req), 'gpt-5.4');
+});
+
 // ── selectTokenEstimationStrategy: format detection limit ──────────────────
 
 test('selectTokenEstimationStrategy: format detection stops after FORMAT_DETECTION_LINE_LIMIT non-empty lines', () => {
