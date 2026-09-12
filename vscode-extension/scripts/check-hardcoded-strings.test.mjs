@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { looksProse, scanFile, hashLine, isLocalizationCall, isConsoleCall, newIndexesBeyondBaseline, violationLineHash } from './check-hardcoded-strings.mjs';
+import { looksProse, scanFile, hashLine, isLocalizationCall, isConsoleCall, newIndexesBeyondBaseline, violationLineHash, localizationHintForFile } from './check-hardcoded-strings.mjs';
 
 // ── looksProse ───────────────────────────────────────────────────────────────
 
@@ -484,10 +484,15 @@ test('scanFile: a URL containing "//" does not activate the i18n-exempt escape h
 });
 
 test('scanFile: a multiline tag body attributes the violation to the text\'s own line, not the opening tag\'s line', () => {
+	// This only exercises line attribution, not exemption: a `//` inside a template literal's own
+	// backtick content is part of the rendered string, never a real comment, so there is no way to
+	// place a genuine exempt comment next to "Refresh" here specifically (see the "genuine i18n-
+	// exempt comment next to one operand of a multi-line concatenation" test below for a shape
+	// where that IS achievable, and Known limitation 5 in this script's header for why not here).
 	withTempFile(
 		[
 			'const html = `<button>',
-			'  Refresh', // i18n-exempt is placed here, next to the actual text, not on the <button> line
+			'  Refresh',
 			'</button>`;',
 			'',
 		].join('\n'),
@@ -496,6 +501,25 @@ test('scanFile: a multiline tag body attributes the violation to the text\'s own
 			scanFile(filePath, new Set(), violations);
 			assert.equal(violations.length, 1);
 			assert.equal(violations[0].line, 2, `expected the violation on the "Refresh" line (2), got line ${violations[0].line}`);
+		},
+	);
+});
+
+test('scanFile: a genuine i18n-exempt comment next to one operand of a multi-line concatenation suppresses only that operand', () => {
+	withTempFile(
+		[
+			"el.textContent =",
+			"\t'Prefix ' +",
+			"\t// i18n-exempt: brand-specific suffix",
+			"\t'BrandName';",
+			'',
+		].join('\n'),
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			const texts = violations.map((v) => v.text.trim());
+			assert.ok(texts.includes('Prefix'), `expected the un-exempted operand to remain flagged, got: ${JSON.stringify(violations)}`);
+			assert.ok(!texts.includes('BrandName'), `expected the exempted operand to be suppressed, got: ${JSON.stringify(violations)}`);
 		},
 	);
 });
@@ -808,4 +832,44 @@ test('scanFile: a ternary nested inside an innerHTML template\'s interpolation h
 		assert.ok(texts.includes('Refresh'), `expected among: ${JSON.stringify(violations)}`);
 		assert.ok(texts.includes('Retry'), `expected among: ${JSON.stringify(violations)}`);
 	});
+});
+
+// ── round-10 fixes: comment-plus-trailing text, attribute hole-splitting, localization hint ──
+
+test('scanFile: visible text following a bare HTML comment (with no other real tag) is still caught', () => {
+	withTempFile("const html = '<!-- section --> Refresh';\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.ok(violations.some((v) => v.text === 'Refresh'), `expected "Refresh" among: ${JSON.stringify(violations)}`);
+	});
+});
+
+test('scanFile: a concatenated HTML-bearing sink still catches prose in an operand whose own opening tag has no closing tag in the same operand', () => {
+	withTempFile("setHtml(root, '<button>Refresh' + label + '</button>');\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.ok(violations.some((v) => v.text === 'Refresh'), `expected "Refresh" among: ${JSON.stringify(violations)}`);
+	});
+});
+
+test('scanFile: an attribute value with static prose on both sides of an interpolation hole is reported as two independently-anchored violations', () => {
+	withTempFile(
+		'const html = `<button aria-label="Prefix ${count}\n  Refresh"></button>`;\n',
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			const prefix = violations.find((v) => v.text.trim() === 'Prefix');
+			const refresh = violations.find((v) => v.text === 'Refresh');
+			assert.ok(prefix, `expected "Prefix" to be reported, got: ${JSON.stringify(violations)}`);
+			assert.ok(refresh, `expected "Refresh" to be reported, got: ${JSON.stringify(violations)}`);
+			assert.equal(prefix.line, 1, `expected "Prefix" on line 1, got line ${prefix.line}`);
+			assert.equal(refresh.line, 2, `expected "Refresh" on its own line (2), not "Prefix"'s line, got line ${refresh.line}`);
+		},
+	);
+});
+
+test('localizationHintForFile: points webview files at localize(), everything else at t()', () => {
+	assert.match(localizationHintForFile('src/webview/usage/main.ts'), /localize\(\)/);
+	assert.match(localizationHintForFile('src/backend/configPanel.ts'), /t\(\)/);
+	assert.match(localizationHintForFile('src/loadingHtml.ts'), /t\(\)/);
 });

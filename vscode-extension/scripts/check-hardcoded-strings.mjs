@@ -83,17 +83,23 @@
  *      is a boundary, not a queue of one-off patches waiting to happen.
  *   5. A `// i18n-exempt` comment is checked against the specific source line a violation is
  *      reported on (or the line directly above it) — never against the line the *enclosing*
- *      literal/statement starts on. For a single-line literal these coincide, but for a multiline
- *      template the exempt comment must sit next to the actual prose line, not above the
- *      template's opening backtick; see the escape-hatch note below.
+ *      literal/statement starts on. This works cleanly for a single-line literal (a real comment
+ *      can sit right above or beside it) and for a genuinely multi-line *expression* built from
+ *      several separate literals — e.g. concatenation, where a real comment can precede any one
+ *      operand on its own line. It does NOT work for a specific inner line of a *multiline
+ *      template literal*'s own backtick content: a `//` appearing there is part of the string's
+ *      rendered text, never a real TypeScript comment (see the round-4 fixture verifying exactly
+ *      this is not a bypass), so there is no source position from which such a comment could ever
+ *      be checked. The allowlist is the only escape hatch for that shape.
  * Use the `// i18n-exempt` / allowlist escape hatches or a manual audit for any of these shapes.
  *
  * Escape hatches for a legitimate new literal:
  *   1. An inline `// i18n-exempt: <reason>` comment on the same line as the reported text, or the
- *      line immediately above it — for a multiline template this means the line the flagged prose
- *      itself sits on, not necessarily the template's own opening line (see limitation 5 above).
+ *      line immediately above it. Only reaches text that can have a real comment next to it — see
+ *      limitation 5 above for why a multiline template literal's own inner content cannot.
  *   2. An exact-match entry in `hardcoded-strings-allowlist.json` (this
- *      folder), for literals that are hard to annotate inline.
+ *      folder), for literals that are hard to annotate inline — required for a multiline template
+ *      literal's inner text, per limitation 5.
  *
  * Baseline / ratchet:
  *   This check does not try to fix today's existing violations — it only
@@ -454,12 +460,13 @@ function scanFlattenedForAttributes(text, segments, ctx) {
 		// actually terminated this match instead of assuming a fixed length.
 		const closingLen = m[0].endsWith(`\\${quote}`) ? 2 : 1;
 		const valueOffsetInMatch = m[0].length - closingLen - value.length;
-		// Skip leading whitespace/HOLE_PLACEHOLDER, same as reportOwnTextRuns: a value starting
-		// right after a `${...}` hole (e.g. `aria-label="${label}\n  Refresh"`) otherwise has its
-		// offset anchored to the hole's own line instead of the line the reportable text is on.
-		const leadingSkip = value.match(LEADING_SKIP_RE)[0].length;
-		const offset = mapFlatIndexToSourceOffset(m.index + valueOffsetInMatch + leadingSkip, segments);
-		reportAt(value, offset, ctx, 'HTML attribute (aria-label/title/placeholder)');
+		// Reuse reportOwnTextRuns (the same splitting tag text already gets) rather than reporting
+		// the whole captured value as one violation: an attribute value can itself contain multiple
+		// `${...}` holes with static prose on both sides (e.g. `aria-label="${a} label ${b}"`), and
+		// treating that as a single combined run would anchor the whole thing to its first line —
+		// unchanged even when only the text after a later hole is edited — the same combined-blob
+		// bug already fixed for tag text runs in round 8.
+		reportOwnTextRuns(value, m.index + valueOffsetInMatch, segments, ctx, 'HTML attribute (aria-label/title/placeholder)');
 	}
 }
 
@@ -596,7 +603,15 @@ function scanHtmlLiteralForTags(node, ctx) {
 	// nested element or HTML comment for splitOwnTextRuns to exclude — a loose "looks like a tag"
 	// check (any `<letter`, with no closing `>` required) would both double-report the former and
 	// misclassify the latter as markup.
-	if (!text.matchAll(NESTED_ELEMENT_OR_COMMENT_RE).next().done) {
+	//
+	// The presence check itself must run against `rawText` (before comment-blanking), not `text` —
+	// a literal that's *only* a comment plus trailing prose (e.g. `'<!-- section --> Refresh'`, no
+	// other real tag) has nothing left for NESTED_ELEMENT_OR_COMMENT_RE to match once its comment
+	// is already blanked to spaces, so the gate would wrongly conclude there's no markup here at
+	// all and skip reporting the visible "Refresh". reportOwnTextRuns itself still runs on the
+	// blanked `text`, so the (non-rendering) comment's own content is correctly excluded rather
+	// than misread as real markup.
+	if (!rawText.matchAll(NESTED_ELEMENT_OR_COMMENT_RE).next().done) {
 		reportOwnTextRuns(text, 0, segments, ctx, 'text content (outside any tag)');
 	}
 }
@@ -822,6 +837,17 @@ function annotate(level, { file, line, message }) {
 	console.log(`::${level} file=${escapeProperty(file)},line=${line}::${escapeData(message)}`);
 }
 
+/** Webview bundle code (src/webview/**) must use the webview's own `localize()` helper (a different
+ * runtime contract — string data passed in at panel-creation time, see the "Webview Localization"
+ * section of vscode-extension.instructions.md) rather than the extension-host's `t()`; every other
+ * scanned file (configPanel.ts, teamServerConfigPanel.ts, loadingHtml.ts, extension.ts) runs in the
+ * extension host, where `t()` is correct. */
+export function localizationHintForFile(file) {
+	return file.startsWith('src/webview/')
+		? "localize() from src/webview/shared/localization.ts"
+		: "t() from src/l10n.ts";
+}
+
 function main() {
 	const updateBaseline = process.argv.includes('--update-baseline');
 
@@ -855,7 +881,7 @@ function main() {
 		for (const v of newViolations) {
 			const displayText = formatForDisplay(v.text);
 			console.error(`   - [${v.file}:${v.line}] ${v.reason}: "${displayText}"`);
-			annotate('error', { file: v.file, line: v.line, message: `Hardcoded UI string (${v.reason}): "${displayText}". Route it through localize()/t() from src/l10n.ts, or add an "// i18n-exempt: <reason>" comment / an entry in scripts/hardcoded-strings-allowlist.json if it's intentionally not localized.` });
+			annotate('error', { file: v.file, line: v.line, message: `Hardcoded UI string (${v.reason}): "${displayText}". Route it through ${localizationHintForFile(v.file)}, or add an "// i18n-exempt: <reason>" comment / an entry in scripts/hardcoded-strings-allowlist.json if it's intentionally not localized.` });
 		}
 		console.error('\nRun "npm run lint:hardcoded-strings -- --update-baseline" only if these are pre-existing and intentionally deferred — new UI code should be localized instead.\n');
 		process.exit(1);
