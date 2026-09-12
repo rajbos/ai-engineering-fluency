@@ -11,7 +11,7 @@ before localizing.
 
 - Files scanned: 36
 - Files with findings: 17
-- Total candidate strings: 1240
+- Total candidate strings: 1218
 
 ## Findings by file
 
@@ -136,11 +136,11 @@ before localizing.
 | 1275 | iconHeading() text argument | `iconHeading('h3', 'lightbulb', 'Calculation & Estimates')` |
 | 1343 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/diagnostics/main.ts` (367)
+### `vscode-extension/src/webview/diagnostics/main.ts` (361)
 
 | Line | Kind | Snippet |
 |---|---|---|
-| 32 | <span> content | `<span>⏳ Loading diagnostic data…</span>` |
+| 30 | <div> content | `<div style="display:flex;align-items:center;gap:10px;"> <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:…` |
 | 34 | <div> content | `<div id="report-loading-subtext" style="font-size:12px;color:var(--text-muted);">Scanning session files…</div>` |
 | 355 | .textContent assignment | `.textContent = '${getEditorIcon("Crush")} Crush'` |
 | 378 | .textContent assignment | `.textContent = "Scanned Paths (all candidate locations):"` |
@@ -149,7 +149,7 @@ before localizing.
 | 619 | <div> content | `<div class="editor-panel-stats">${detailedFiles.length} sessions</div>` |
 | 620 | <div> content | `<div class="editor-panel-stats">${editorStats[editor].count} sessions · ${editorStats[editor].interactions} interactions</div>` |
 | 628 | title attribute | `title="Sessions where some debug-log tokens cannot be assigned to a specific model — may indicate incomplete model attribution in the debug log"` |
-| 628 | <span> content | `<span class="hidden-count">(${unattributedCount} session${unattributedCount === 1 ? '' : 's'})</span>` |
+| 628 | <label> content | `<label class="empty-sessions-toggle" title="Sessions where some debug-log tokens cannot be assigned to a specific model — may indicate incomplete model attribut…` |
 | 631 | <div> content | `<div class="summary-label">📁 ${currentEditorFilter ? "Filtered" : "Total"} Sessions</div>` |
 | 632 | <div> content | `<div class="summary-label">💬 Interactions</div>` |
 | 633 | title attribute | `title="${totalTokens.toLocaleString()} tokens"` |
@@ -158,15 +158,14 @@ before localizing.
 | 634 | <div> content | `<div class="summary-sub">${totalContextRefs === 0 ? "None" : ""}${mkRef("file","","#file")}${mkRef("symbol","","#sym")}${mkRef("implicitSelection","","implicit"…` |
 | 635 | <div> content | `<div class="summary-label">📅 Time Range</div>` |
 | 635 | <div> content | `<div class="summary-value">Last 14 days</div>` |
-| 637 | <span> content | `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` |
+| 637 | <label> content | `<label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? 'checked' : ''}>Hide sessions with 0 interactions${ze…` |
 | 644 | title attribute | `title="${label} detected in this session"` |
 | 644 | <span> content | `<span class="session-hierarchy-badge" title="${label} detected in this session">🤖 ${sf.subAgentCalls} Sub-Agent${sf.subAgentCalls === 1 ? '' : 's'}</span>` |
 | 654 | title attribute | `title="Parent session: ${escapeHtml(sf.parentInfo.name)}"` |
 | 659 | <span> content | `<span class="session-hierarchy-badge hierarchy-children" title="${label}">↓ ${count} ${count === 1 ? 'Child' : 'Children'}</span>` |
 | 670 | title attribute | `title="⚠️ ${unattributed.toLocaleString()} tokens (~${pct}%) not attributed to any model — debug log events without a model field"` |
+| 670 | <span> content | `<span title="⚠️ ${unattributed.toLocaleString()} tokens (~${pct}%) not attributed to any model — debug log events without a model field" style="color:#f59e0b; c…` |
 | 677 | title attribute | `title="Empty session"` |
-| 677 | <a> content | `<a href="#" class="session-file-link" data-file="${encodeURIComponent(sf.file)}" title="${escapeHtml(sf.title)}">${escapeHtml(sf.title.length > 40 ? sf.title.su…` |
-| 680 | <span> content | `<span style="color: #888; font-style: italic;">No workspace</span>` |
 | 684 | title attribute | `title="${sf.title ? escapeHtml(sf.title) : "` |
 | 684 | title attribute | `title="${Number(sf.tokens \|\| 0).toLocaleString()} tokens"` |
 | 684 | title attribute | `title="View formatted JSONL file"` |
@@ -185,7 +184,7 @@ before localizing.
 | 693 | <div> content | `<div class="loading-subtext" id="session-loading-subtext">Analyzing up to 500 files from the last 14 days</div>` |
 | 694 | <p> content | `<p style="color: #999;">No session files with activity in the last 14 days.</p>` |
 | 715 | <button> content | `<button class="button secondary debug-counter-set" data-key="${escapeHtml(key)}" style="padding: 2px 10px; font-size: 12px;">Set</button>` |
-| 737 | <span> content | `<span style="margin-left:6px; font-family: var(--vscode-editor-font-family, monospace);">${value ? '✅ true' : '❌ false'}</span>` |
+| 735 | <td> content | `<td style="padding: 6px 8px 6px 0;"> <input type="checkbox" class="debug-flag-input" data-key="${escapeHtml(key)}" ${value ? 'checked' : ''} /> <span style="mar…` |
 | 740 | <button> content | `<button class="button secondary debug-flag-set" data-key="${escapeHtml(key)}" style="padding: 2px 10px; font-size: 12px;">Set</button>` |
 | 789 | <div> content | `<div class="info-box-title">📸 Share Card</div>` |
 | 790 | <div> content | `<div>A snapshot of your AI coding toolbox — screenshot this card to share your editor mix on social media.</div>` |
@@ -196,7 +195,7 @@ before localizing.
 | 814 | <div> content | `<div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">No session activity in this period. Try a wider range.</div>` |
 | 818 | <div> content | `<div class="info-box-title">📸 Share Card</div>` |
 | 819 | <div> content | `<div>A snapshot of your AI coding toolbox — screenshot this card to share your editor mix on social media.</div>` |
-| 822 | <span> content | `<span style="font-size: 12px; color: var(--text-muted);">Period:</span>` |
+| 821 | <div> content | `<div class="share-card-controls" style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;"> <span style="font-size: 12px; color: var(--text-mut…` |
 | 826 | <div> content | `<div class="share-badge">🤖 AI Engineering Fluency</div>` |
 | 827 | <div> content | `<div class="share-title">My AI Coding Toolbox</div>` |
 | 828 | <div> content | `<div class="share-subtitle">${escapeHtml(PERIOD_LABELS[period])} · ${editors.length} editor${editors.length === 1 ? "" : "s"} detected</div>` |
@@ -205,15 +204,15 @@ before localizing.
 | 833 | title attribute | `title="${totalTokens.toLocaleString()} tokens"` |
 | 833 | <div> content | `<div class="share-stat-label">Tokens</div>` |
 | 834 | <div> content | `<div class="share-stat-label">Editors</div>` |
-| 839 | <span> content | `<span>Copy Summary Text</span>` |
-| 842 | <span> content | `<span>Share on LinkedIn</span>` |
-| 843 | <span> content | `<span>Share on Bluesky</span>` |
-| 844 | <span> content | `<span>Share on Mastodon</span>` |
+| 839 | <button> content | `<button class="button secondary" id="btn-copy-share-summary"><span>📋</span><span>Copy Summary Text</span></button>` |
+| 842 | <button> content | `<button id="btn-share-card-linkedin" class="share-btn share-btn-linkedin"><span class="share-btn-icon">💼</span><span>Share on LinkedIn</span></button>` |
+| 843 | <button> content | `<button id="btn-share-card-bluesky" class="share-btn share-btn-bluesky"><span class="share-btn-icon">🦋</span><span>Share on Bluesky</span></button>` |
+| 844 | <button> content | `<button id="btn-share-card-mastodon" class="share-btn share-btn-mastodon"><span class="share-btn-icon">🐘</span><span>Share on Mastodon</span></button>` |
 | 854 | <div> content | `<div class="info-box-title">🐛 Debug — Global State Counters</div>` |
 | 855 | <div> content | `<div>Visible only when a debugger is attached. Edit counters and dismissed flags stored in VS Code global state, then click Set to apply. Changes take effect im…` |
 | 858 | <h4> content | `<h4>Notification Counters</h4>` |
 | 863 | <h4> content | `<h4 style="margin-top:16px;">Dismissed Flags</h4>` |
-| 870 | <span> content | `<span>Reset All Counters &amp; Dismissed Flags</span>` |
+| 870 | <button> content | `<button class="button secondary" id="btn-reset-debug-counters"><span>🔄</span><span>Reset All Counters &amp; Dismissed Flags</span></button>` |
 | 886 | <div> content | `<div class="info-box-title">🔑 GitHub Authentication</div>` |
 | 887 | <div> content | `<div> Authenticate with GitHub to unlock additional features in future releases. </div>` |
 | 894 | <div> content | `<div class="summary-label">${statusIcon} Status</div>` |
@@ -223,8 +222,8 @@ before localizing.
 | 912 | <li> content | `<li>Team collaboration features</li>` |
 | 913 | <li> content | `<li>Advanced analytics and insights</li>` |
 | 918 | <p> content | `<p style="color: #999; font-size: 12px; margin-bottom: 16px;"> Sign in with your GitHub account to unlock future features. This uses VS Code's built-in authenti…` |
-| 928 | <span> content | `<span>Disconnect GitHub</span>` |
-| 933 | <span> content | `<span>Authenticate with GitHub</span>` |
+| 926 | <button> content | `<button class="button secondary" id="btn-sign-out-github"> <span>🔌</span> <span>Disconnect GitHub</span> </button>` |
+| 931 | <button> content | `<button class="button" id="btn-authenticate-github"> <span>🔑</span> <span>Authenticate with GitHub</span> </button>` |
 | 950 | <h4> content | `<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Azure Storage</h4>` |
 | 950 | <p> content | `<p style="color: #999; font-size: 12px; margin-bottom: 16px;">To enable cloud synchronization, configure an Azure Storage account via the Backend configuration …` |
 | 950 | <li> content | `<li>Azure subscription with Storage Account access</li>` |
@@ -253,7 +252,7 @@ before localizing.
 | 958 | <div> content | `<div class="summary-label">👥 Sharing Profile</div>` |
 | 958 | <div> content | `<div class="summary-label">🕒 Last Sync</div>` |
 | 958 | <div> content | `<div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? getTimeSince(azureInfo.lastSyncTime) : "Never"}</div>` |
-| 960 | <span> content | `<span>${azureInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span>` |
+| 960 | <button> content | `<button class="button" id="btn-configure-backend"><span>${azureInfo.isConfigured ? "⚙️" : "🔧"}</span><span>${azureInfo.isConfigured ? "Manage Backend" : "Confi…` |
 | 967 | <div> content | `<div class="summary-label">${authIcon} GitHub Auth</div>` |
 | 972 | <h4> content | `<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Team Server</h4>` |
 | 972 | <p> content | `<p style="color: #999; font-size: 12px; margin-bottom: 16px;">Deploy the sharing server and configure its URL in the Backend configuration panel.</p>` |
@@ -276,14 +275,14 @@ before localizing.
 | 983 | <div> content | `<div class="summary-label">👥 Sharing Profile</div>` |
 | 983 | <div> content | `<div class="summary-label">🕒 Last Sync</div>` |
 | 983 | <div> content | `<div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : "Never"}</div>` |
-| 985 | <span> content | `<span>${teamInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span>` |
+| 985 | <button> content | `<button class="button" id="btn-configure-backend-team"><span>${teamInfo.isConfigured ? "⚙️" : "🔧"}</span><span>${teamInfo.isConfigured ? "Manage Backend" : "Co…` |
 | 995 | <div> content | `<div class="info-box-title">☁️ Backend Storage</div>` |
 | 996 | <div> content | `<div>⏳ Loading backend storage status...</div>` |
 | 1003 | <button> content | `<button class="subtab active" data-subtab="backend-azure">☁️ Azure Storage</button>` |
 | 1004 | <button> content | `<button class="subtab" data-subtab="backend-teamserver">🖥️ Team Server</button>` |
 | 1018 | <div> content | `<div class="info-box-title">🔬 Path Analyzer</div>` |
 | 1019 | <div> content | `<div> Analyze any folder to find session files and inspect their content. This helps troubleshoot why the extension isn't finding your AI tool's session files, …` |
-| 1026 | <span> content | `<span>Folder Selection</span>` |
+| 1026 | <div> content | `<div class="section-title"><span class="codicon codicon-folder-opened"></span><span>Folder Selection</span></div>` |
 | 1032 | placeholder attribute | `placeholder="Paste a folder path here, e.g. /Users/you/.claude/projects/abc123"` |
 | 1034 | <button> content | `<button class="button secondary" id="btn-browse-folder">📂 Browse…</button>` |
 | 1037 | <label> content | `<label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 6px;"> Tool type (determines which file types to scan): </label>` |
@@ -298,11 +297,12 @@ before localizing.
 | 1049 | <option> content | `<option value="mistral-vibe">🔥 Mistral Vibe</option>` |
 | 1050 | <option> content | `<option value="opencode">🟢 OpenCode (JSON format only — DB not supported)</option>` |
 | 1054 | <button> content | `<button class="button" id="btn-analyze-folder">🔍 Analyze</button>` |
+| 1068 | <strong> content | `<strong>${escapeHtml(String(safeInteractions))}</strong>' : '<span style="color: var(--text-muted);">0</span>'; const safeTokens = Number(f.tokens); const token…` |
 | 1072 | title attribute | `title="${escapeHtml(String(safeTokens.toLocaleString()))} tokens"` |
 | 1104 | <div> content | `<div>⚠️ Scan limit reached (500 files). Results may be incomplete. Try a more specific subfolder.</div>` |
 | 1111 | <div> content | `<div style="font-size: 14px;">No matching files found in this folder.</div>` |
 | 1112 | <div> content | `<div style="font-size: 12px; margin-top: 8px;">Try a different folder path or tool type.</div>` |
-| 1119 | <span> content | `<span>Analysis Results</span>` |
+| 1119 | <div> content | `<div class="section-title"><span class="codicon codicon-graph"></span><span>Analysis Results</span></div>` |
 | 1123 | <div> content | `<div class="summary-label">📄 Files Scanned</div>` |
 | 1127 | <div> content | `<div class="summary-label">✅ With Sessions</div>` |
 | 1129 | <div> content | `<div style="font-size: 11px; color: var(--text-muted);">${files.length - sessionFiles.length} empty / unknown</div>` |
@@ -343,31 +343,26 @@ before localizing.
 | 1472 | .textContent assignment | `.textContent = "Total:"` |
 | 1845 | .textContent assignment | `.textContent = "0 MB"` |
 | 1851 | .textContent assignment | `.textContent = "Never"` |
-| 1886 | <span> content | `<span>Analyzing…</span>` |
-| 1894 | <span> content | `<span>Scanning files…</span>` |
-| 1917 | <span> content | `<span>Aggregating model usage…</span>` |
+| 1886 | <span> content | `<span>⏳</span><span>Analyzing…</span>` |
+| 1892 | <div> content | `<div class="analyzer-loading"> <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius…` |
+| 1915 | <div> content | `<div class="analyzer-loading"> <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius…` |
 | 1940 | <div> content | `<div class="info-box-title">⏳ Still loading session files</div>` |
 | 1941 | <div> content | `<div>Session files are still being scanned in the background. Wait a moment (watch the "Session Files" tab count) and try again.</div>` |
-| 1977 | <span> content | `<span>Clearing...</span>` |
-| 2152 | <span> content | `<span>Clearing...</span>` |
-| 2167 | <span> content | `<span>Clearing...</span>` |
-| 2370 | <p> content | `<p>${escapeHtml(message.error \|\| "Unknown error")}</p>` |
+| 1977 | <span> content | `<span>⏳</span><span>Clearing...</span>` |
+| 2152 | <span> content | `<span>⏳</span><span>Clearing...</span>"); btn.disabled = true; } updateCacheNumbers(); vscode.postMessage({ command: "clearCache" }); }); document .getElementBy…` |
+| 2369 | <h3> content | `<h3><span class="codicon codicon-warning"></span> Error Loading Diagnostic Data</h3>` |
 | 2484 | .textContent assignment (conditional) | `.textContent = total > 0 ? '⏳ Loading sessions… (${processed}/${total})' : "⏳ Loading sessions…";` |
 | 2494 | .textContent assignment | `.textContent = '📁 Session Files (${storedDetailedFiles.length})'` |
 | 2503 | <option> content | `<option value="all">🌐 All Editors</option>` |
-| 2532 | <span> content | `<span>Cache Cleared</span>` |
-| 2537 | <span> content | `<span>Cache Cleared</span>` |
-| 2544 | <span> content | `<span>Clear Cache</span>` |
-| 2548 | <span> content | `<span>Clear Cache</span>` |
+| 2532 | <span> content | `<span>✅</span><span>Cache Cleared</span>"); btnReport.disabled = false; } if (btnTab) { btnTab.style.background = "#2d6a4f"; setHtml(btnTab, "<span>✅</span><spa…` |
 | 2558 | .textContent assignment | `.textContent = '${cacheInfo.sizeInMB.toFixed(2)} MB'` |
 | 2562 | .textContent assignment | `.textContent = "0 seconds ago"` |
-| 2584 | <span> content | `<span>Analyze</span>` |
+| 2584 | <span> content | `<span>🔍</span><span>Analyze</span>` |
 | 2591 | <div> content | `<div class="info-box-title">⚠️ Analysis Error</div>` |
 | 2640 | <div> content | `<div class="info-box-title">💾 Cache Information</div>` |
 | 2641 | <div> content | `<div> The extension caches session file data to improve performance and reduce file system operations. Cache is stored in VS Code's global state and persists ac…` |
 | 2649 | <div> content | `<div class="summary-label">📦 Cache Entries</div>` |
 | 2653 | <div> content | `<div class="summary-label">💾 Cache Size</div>` |
-| 2654 | <div> content | `<div class="summary-value">${data.cacheInfo?.sizeInMB ? data.cacheInfo.sizeInMB.toFixed(2) + " MB" : "N/A"}</div>` |
 | 2657 | <div> content | `<div class="summary-label">🕒 Last Updated</div>` |
 | 2658 | <div> content | `<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? formatDate(data.cacheInfo.lastUpdated) : "Never"}</div>` |
 | 2661 | <div> content | `<div class="summary-label">⏱️ Cache Age</div>` |
@@ -380,14 +375,14 @@ before localizing.
 | 2678 | <li> content | `<li>Usage analysis data (tool calls, modes, context references)</li>` |
 | 2683 | <h4> content | `<h4>Cache Management</h4>` |
 | 2684 | <p> content | `<p style="color: #999; font-size: 12px; margin-bottom: 12px;"> Clearing the cache will force the extension to re-read and re-analyze all session files on the ne…` |
-| 2689 | <span> content | `<span>Clear Cache</span>` |
-| 2690 | <span> content | `<span>Reset Insights Dismissals</span>` |
+| 2689 | <button> content | `<button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>Clear Cache</span></button>` |
+| 2690 | <button> content | `<button class="button secondary" id="btn-reset-insights-tab"><span>💡</span><span>Reset Insights Dismissals</span></button>` |
 | 2703 | <p> content | `<p> ${ data.quotaEntitlements.premium_interactions ? '<strong>Premium Interactions:</strong> $${data.quotaEntitlements.premium_interactions.toFixed(2)}/month<br…` |
 | 2714 | <p> content | `<p class="hint">No quota information available from the API yet. Sign out and back in to refresh.</p>` |
 | 2716 | <h4> content | `<h4>📊 API Quota Information</h4>` |
 | 2723 | <h4> content | `<h4>🆕 Editor Discovery Notifications</h4>` |
 | 2724 | <p> content | `<p> The extension remembers which editors it has already seen so each editor triggers a discovery notification only once. Use this reset to clear that memory an…` |
-| 2731 | <span> content | `<span>Reset Discovered Editors</span>` |
+| 2729 | <button> content | `<button class="button secondary" id="btn-reset-discovered-editors"> <span>♻️</span> <span>Reset Discovered Editors</span> </button>` |
 | 2744 | <div> content | `<div class="info-box-title">⚙️ Display Settings</div>` |
 | 2745 | <div> content | `<div>Configure what is shown in the status bar at the bottom of VS Code. Changes take effect immediately — no data refresh needed.</div>` |
 | 2748 | <h4> content | `<h4>📊 Status Bar Display</h4>` |
@@ -414,11 +409,10 @@ before localizing.
 | 2790 | <p> content | `<p class="hint" style="color: #90ee90;"><strong>ℹ️ API-driven budget:</strong> Your premium_interactions quota entitlement is <strong>$${data.quotaEntitlements.…` |
 | 2797 | <h4> content | `<h4>🔢 Number Formatting</h4>` |
 | 2798 | <p> content | `<p> Token counts can be shown in compact format using K/M suffixes (e.g. <strong>1.5K</strong>, <strong>1.2M</strong>) for quick scanning, or as full numbers (e…` |
-| 2805 | <span> content | `<span>Open Display Settings</span>` |
+| 2803 | <button> content | `<button class="button" id="btn-open-display-settings"> <span>⚙️</span> <span>Open Display Settings</span> </button>` |
 | 2849 | title attribute | `title="${pct}% of built-in average"` |
 | 2851 | <td> content | `<td class="tool-ratio tool-builtin-label">baseline</td>` |
-| 2853 | <span> content | `<span class="tool-type-badge built-in">built-in</span>` |
-| 2853 | <span> content | `<span class="tool-type-badge alternative">alt</span>` |
+| 2853 | <span> content | `<span class="tool-type-badge built-in">built-in</span>' : ' <span class="tool-type-badge alternative">alt</span>` |
 | 2864 | <th> content | `<th class="tool-sortable" data-sort="tool">Tool${getToolSortIndicator("tool")}</th>` |
 | 2865 | <th> content | `<th class="tool-sortable" data-sort="calls">Calls${getToolSortIndicator("calls")}</th>` |
 | 2866 | <th> content | `<th class="tool-sortable" data-sort="total">Total Output Tokens${getToolSortIndicator("total")}</th>` |
@@ -430,6 +424,7 @@ before localizing.
 | 2942 | <div> content | `<div class="info-box-title">🔧 Tool Output Token Analysis</div>` |
 | 2943 | <strong> content | `<strong>vs Built-in</strong>` |
 | 2943 | <button> content | `<button class="inline-link" id="btn-open-tool-families-settings">Configure tool families ↗</button>` |
+| 2968 | <button> content | `<button class="skill-usage-chip${activeFilter === 'all' ? ' active' : ''}" data-editor="all">All <span class="skill-usage-chip-count">${formatTokenCount(totalAl…` |
 | 2992 | <div> content | `<div class="info-box-title">🧩 Skill Usage</div>` |
 | 2993 | <div> content | `<div>Tracks how often each agent skill (e.g. a <code>/skill-name</code> invocation or another editor's <code>SKILL.md</code> workflow) was invoked over the last…` |
 | 3014 | <div> content | `<div class="info-box-title">🧩 Skill Usage</div>` |
@@ -478,14 +473,14 @@ before localizing.
 | 3345 | <th> content | `<th>Samples</th>` |
 | 3354 | <div> content | `<div class="info-box-title">⏱️ Time to First Token</div>` |
 | 3355 | <div> content | `<div> How long a chat model takes to start streaming a response, averaged per model over time. Read from VS Code Copilot Chat's own debug log (<code>attrs.ttft<…` |
-| 3377 | <span> content | `<span>Scanning debug logs for TTFT…</span>` |
-| 3422 | <span> content | `<span id="ttft-loading-status">Waiting for session files to finish loading…</span>` |
+| 3375 | <div> content | `<div class="analyzer-loading"> <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius…` |
+| 3420 | <div> content | `<div class="analyzer-loading"> <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius…` |
 | 3440 | <div> content | `<div class="info-box-title">📋 About This Report</div>` |
 | 3443 | <strong> content | `<strong>not</strong>` |
-| 3448 | <span> content | `<span>Copy to Clipboard</span>` |
-| 3449 | <span> content | `<span>Open GitHub Issue</span>` |
-| 3450 | <span> content | `<span>Clear Cache</span>` |
-| 3451 | <span> content | `<span>Reset Insights Dismissals</span>` |
+| 3448 | <button> content | `<button class="button" id="btn-copy"><span>📋</span><span>Copy to Clipboard</span></button>` |
+| 3449 | <button> content | `<button class="button secondary" id="btn-issue"><span>🐛</span><span>Open GitHub Issue</span></button>` |
+| 3450 | <button> content | `<button class="button secondary" id="btn-clear-cache"><span>🗑️</span><span>Clear Cache</span></button>` |
+| 3451 | <button> content | `<button class="button secondary" id="btn-reset-insights"><span>💡</span><span>Reset Insights Dismissals</span></button>` |
 | 3461 | <button> content | `<button class="group-tab active" data-group="diagnostics">🩺 Diagnostics</button>` |
 | 3462 | <button> content | `<button class="group-tab" data-group="research">🔬 Research</button>` |
 | 3463 | <button> content | `<button class="group-tab" data-group="settings">⚙️ Settings</button>` |
@@ -503,12 +498,11 @@ before localizing.
 | 3484 | <button> content | `<button class="tab" data-tab="backend">☁️ Backend Storage</button>` |
 | 3485 | <button> content | `<button class="tab" data-tab="github">🔑 GitHub Auth</button>` |
 | 3486 | <button> content | `<button class="tab" data-tab="debug">🐛 Debug</button>` |
-| 3502 | <span> content | `<span class="header-title">Diagnostic Report</span>` |
-| 3504 | <div> content | `<div class="button-row"> ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)} </div>` |
+| 3500 | <div> content | `<div class="header-left"> <span class="header-icon">🔍</span> <span class="header-title">Diagnostic Report</span> </div>` |
 | 3514 | <div> content | `<div class="info-box-title">📁 Session File Analysis</div>` |
 | 3637 | .textContent assignment | `.textContent = "No data available."` |
 
-### `vscode-extension/src/webview/efficiency/main.ts` (82)
+### `vscode-extension/src/webview/efficiency/main.ts` (80)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -528,7 +522,6 @@ before localizing.
 | 295 | <div> content | `<div class="stat-sub">${escapeHtml(d.attributionWindows.curRange)} · ${a.cur.sessions} sessions · ${formatCompact(a.cur.tokens)} tokens</div>` |
 | 296 | <div> content | `<div class="stat-label">Change</div>` |
 | 296 | <div> content | `<div class="stat-sub">blended rate ${a.prev.dollarsPerMTokens.toFixed(2)} → ${a.cur.dollarsPerMTokens.toFixed(2)} $/M tokens</div>` |
-| 298 | <div> content | `<div class="attr-bars"> ${attrBar('Volume (session count)', '${a.prev.sessions.toLocaleString()} → ${a.cur.sessions.toLocaleString()} sessions', a.volumeEffect,…` |
 | 332 | <div> content | `<div class="skill-impact-sub">${impact.withSkill.sessions} sessions with · ${impact.withoutSkill.sessions} without · ${impact.totalCalls} invocations</div>` |
 | 334 | <th> content | `<th>Metric</th>` |
 | 334 | <th> content | `<th class="num">With</th>` |
@@ -560,7 +553,7 @@ before localizing.
 | 597 | <label> content | `<label>Window ${selectHtml('window', windows, modelState.window)}</label>` |
 | 598 | <label> content | `<label>Mode ${modeSelect}</label>` |
 | 608 | <div> content | `<div class="model-side-stats">${m.sessions} sessions · ${m.editTurns} edit turns · ${formatCompact(m.tokens)} tokens · $${m.cost.toFixed(2)}</div>` |
-| 625 | <span> content | `<span class="model-win-chip tie">tie</span>` |
+| 617 | <span> content | `<span class="delta-change ${cls}">${arrow} ${Math.abs(r.deltaPct).toFixed(0)}%</span>'; } function comparisonWinnerCell(r: ModelComparisonRow): string { if (r.s…` |
 | 645 | <th> content | `<th>Metric</th>` |
 | 648 | <th> content | `<th class="num">B vs A</th>` |
 | 649 | <th> content | `<th class="num">Better</th>` |
@@ -570,9 +563,9 @@ before localizing.
 | 673 | <h3> content | `<h3>⚠️ Read with care</h3>` |
 | 695 | <h3> content | `<h3>What kind of work each side did</h3>` |
 | 696 | <p> content | `<p class="eff-section-note">Task categories are classified per session and split across that session's models by token share, so this is context, not a score. V…` |
-| 745 | <span> content | `<span class="cache-cause-count">${breaks}× · ${formatCompact(tokens)} tokens re-written</span>` |
+| 743 | <div> content | `<div class="cache-cause-head"> <span class="cache-cause-label">${info.icon} ${escapeHtml(info.label)}</span> <span class="cache-cause-count">${breaks}× · ${form…` |
 | 755 | <p> content | `<p class="eff-section-note">No prompt-cache data in the last 30 days. Only editors that report per-turn cache token counts (Claude Code, Claude Desktop) can be …` |
-| 765 | <span> content | `<span class="verdict-text">No cache breaks across ${c.sessionsAnalyzed} session${c.sessionsAnalyzed === 1 ? '' : 's'} in the last 30 days. Nothing to fix.</span…` |
+| 765 | <div> content | `<div class="eff-verdict improving"><span class="verdict-icon">✅</span><span class="verdict-text">No cache breaks across ${c.sessionsAnalyzed} session${c.session…` |
 | 783 | <div> content | `<div class="stat-label">Re-write factor</div>` |
 | 783 | <div> content | `<div class="stat-sub">1.00× is ideal · worst session ${c.worstRewriteFactor.toFixed(2)}×</div>` |
 | 784 | <div> content | `<div class="stat-label">Cache breaks</div>` |
@@ -589,7 +582,6 @@ before localizing.
 | 815 | <p> content | `<p class="eff-section-note">Weekly values for each side's model, so a model getting better — or quietly getting worse — is visible. Gaps are weeks where the mod…` |
 | 816 | <label> content | `<label>Metric ${selectHtml('model-trend-metric', metricOptions, modelState.trendMetric)}</label>` |
 | 857 | <p> content | `<p class="eff-section-note">Not enough shared metrics between the two sides to draw a shape.</p>` |
-| 1102 | <div> content | `<div class="button-row">${navButtonsHtml('btn-efficiency', !!data.backendConfigured)}</div>` |
 | 1103 | <h1> content | `<h1>⚡ Efficiency</h1>` |
 | 1104 | <p> content | `<p class="eff-subtitle">Are you working more efficiently with AI over time — and is it coming from using AI differently, cheaper models, or leaner sessions? Las…` |
 | 1110 | <p> content | `<p class="caveat">⚠️ Honest caveats: costs are estimates from token counts and public rates; lines of code is a weak value proxy (refactors and generated boiler…` |
@@ -606,29 +598,27 @@ before localizing.
 | 257 | iconHeading() text argument | `iconHeading('h3', 'lightbulb', 'Calculation & Estimates')` |
 | 313 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/fluency-level-viewer/main.ts` (12)
+### `vscode-extension/src/webview/fluency-level-viewer/main.ts` (10)
 
 | Line | Kind | Snippet |
 |---|---|---|
-| 58 | <span> content | `<span>No specific thresholds</span>` |
-| 67 | <span> content | `<span>No specific suggestions - you\\'re at the highest level!</span>` |
+| 58 | <li> content | `<li class="threshold-item"><span class="threshold-icon">-</span><span>No specific thresholds</span></li>` |
+| 67 | <li> content | `<li class="tip-item-viewer"><span class="tip-icon">✓</span><span>No specific suggestions - you\\'re at the highest level!</span></li>` |
 | 73 | <div> content | `<div class="level-badge badge-${level.stage}">Stage ${level.stage}</div>` |
 | 78 | <div> content | `<div class="threshold-title">🎯 Requirements to Reach This Stage</div>` |
 | 84 | <div> content | `<div class="tips-title">💡 Next Steps (if below this stage)</div>` |
-| 123 | <span> content | `<span class="header-title">Scoring Guide</span>` |
-| 124 | <span> content | `<span class="debug-badge">🐛 DEBUG MODE</span>` |
-| 126 | <div> content | `<div class="button-row"> ${buttonHtml('btn-refresh')} ${buttonHtml('btn-maturity')} ${buttonHtml('btn-details')} ${buttonHtml('btn-chart')} ${buttonHtml('btn-us…` |
+| 121 | <div> content | `<div class="header-left"> <span class="header-icon">📊</span> <span class="header-title">Scoring Guide</span> ${data.isDebugMode ? '<span class="debug-badge">🐛…` |
 | 138 | <div> content | `<div class="info-box-title">📋 About This Tool</div>` |
 | 139 | <div> content | `<div> This tool shows all fluency score rules, thresholds, and tips for each category and stage. Use it to understand how the scoring system works and what acti…` |
 | 154 | <div> content | `<div class="footer"> 📊 Scoring Guide &middot; ${data.categories.length} categories &middot; 4 stages each </div>` |
 | 168 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/logviewer/hydraFusionSection.ts` (48)
+### `vscode-extension/src/webview/logviewer/hydraFusionSection.ts` (46)
 
 | Line | Kind | Snippet |
 |---|---|---|
-| 148 | <span> content | `<span class="hydra-pattern-pill-aiu">${escapeHtml(formatAiu(p.aiu))} AIU</span>` |
-| 150 | <span> content | `<span class="hydra-pattern-row-label">Patterns chosen</span>` |
+| 147 | <span> content | `<span class="hydra-pattern-pill ${patternClass(p.pattern)}" title="${escapeHtml(patternTitle(p.pattern))}"> ${escapeHtml(p.pattern)} <strong>${p.turns}</strong>…` |
+| 150 | <div> content | `<div class="hydra-pattern-row"><span class="hydra-pattern-row-label">Patterns chosen</span>${pills}</div>` |
 | 159 | title attribute | `title="Turns where this model supplied the answer you saw"` |
 | 167 | <div> content | `<div class="hydra-panel-title">🤝 Who did the work</div>` |
 | 168 | <div> content | `<div class="hydra-panel-sub">Every leg the router ran, grouped by the model that served it.</div>` |
@@ -638,7 +628,7 @@ before localizing.
 | 173 | title attribute | `title="Turns where this model produced the final answer"` |
 | 173 | <th> content | `<th scope="col" title="Turns where this model produced the final answer">Answers</th>` |
 | 174 | <th> content | `<th scope="col">AIU</th>` |
-| 175 | <span> content | `<span class="hydra-sr-only">Share of credits</span>` |
+| 175 | <th> content | `<th scope="col"><span class="hydra-sr-only">Share of credits</span></th>` |
 | 176 | <th> content | `<th scope="col">Input</th>` |
 | 177 | <th> content | `<th scope="col">Output</th>` |
 | 198 | <div> content | `<div class="hydra-panel-title">💰 Where the credits went</div>` |
@@ -646,37 +636,35 @@ before localizing.
 | 202 | <th> content | `<th scope="col">Phase</th>` |
 | 203 | <th> content | `<th scope="col">Legs</th>` |
 | 204 | <th> content | `<th scope="col">AIU</th>` |
-| 205 | <span> content | `<span class="hydra-sr-only">Share of credits</span>` |
+| 205 | <th> content | `<th scope="col"><span class="hydra-sr-only">Share of credits</span></th>` |
 | 215 | title attribute | `title="Judge rejected this draft"` |
+| 215 | <span> content | `<span class="hydra-verdict-reject" title="Judge rejected this draft">✗</span>' : p.verdict === 'accept' ? '<span class="hydra-verdict-accept" title="Judge accep…` |
 | 216 | title attribute | `title="Judge accepted this draft"` |
 | 218 | title attribute | `title="This leg produced the answer you saw"` |
-| 219 | title attribute | `title="${escapeHtml('${p.kind} · ${p.model} · ${formatAiu(p.usage.aiu)} AIU')}"` |
 | 231 | title attribute | `title="This leg produced the answer you saw"` |
-| 231 | <span> content | `<span class="hydra-final-tag" title="This leg produced the answer you saw">answer</span>` |
+| 231 | <td> content | `<td class="hydra-model-cell">${escapeHtml(phase.model)}${phase.isFinalSource ? ' <span class="hydra-final-tag" title="This leg produced the answer you saw">answ…` |
+| 252 | <summary> content | `<summary class="hydra-turn-summary"> <span class="hydra-turn-num">#${index + 1}</span> <span class="hydra-pattern-badge ${patternClass(turn.pattern)}" title="${…` |
 | 257 | title attribute | `title="Credits for this turn"` |
-| 257 | <span> content | `<span title="Credits for this turn"><strong>${escapeHtml(formatAiu(turn.aiu))}</strong> AIU</span>` |
 | 258 | title attribute | `title="Wall-clock time for the whole turn"` |
 | 259 | title attribute | `title="Router hops in this turn"` |
-| 259 | <span> content | `<span title="Router hops in this turn">${turn.phases.length} leg${turn.phases.length === 1 ? '' : 's'}</span>` |
 | 263 | <div> content | `<div class="hydra-turn-plan">Planned: <code>${escapeHtml(plan)}</code>${escapeHtml(skipped)}</div>` |
 | 264 | <div> content | `<div class="hydra-turn-degraded">⚠️ Degraded: ${escapeHtml(turn.degradedReason)}</div>` |
 | 267 | <th> content | `<th scope="col">Phase</th>` |
 | 268 | <th> content | `<th scope="col">Model</th>` |
 | 269 | <th> content | `<th scope="col">Verdict</th>` |
 | 270 | <th> content | `<th scope="col">Duration</th>` |
-| 271 | <span> content | `<span class="hydra-sr-only">Relative duration</span>` |
+| 271 | <th> content | `<th scope="col"><span class="hydra-sr-only">Relative duration</span></th>` |
 | 272 | title attribute | `title="Inference calls this leg made"` |
 | 272 | <th> content | `<th scope="col" title="Inference calls this leg made">Calls</th>` |
 | 273 | <th> content | `<th scope="col">Input</th>` |
 | 274 | <th> content | `<th scope="col">Output</th>` |
 | 275 | <th> content | `<th scope="col">AIU</th>` |
-| 293 | <span> content | `<span class="hydra-header-title">⚡ HydraFusion Routing</span>` |
-| 294 | <span> content | `<span class="hydra-header-sub">${summary.totalTurns} turn${summary.totalTurns === 1 ? '' : 's'} · ${summary.totalLegs} legs · ${modelCount} model${modelCount ==…` |
+| 292 | <div> content | `<div class="hydra-header"> <span class="hydra-header-title">⚡ HydraFusion Routing</span> <span class="hydra-header-sub">${summary.totalTurns} turn${summary.tota…` |
 | 296 | <div> content | `<div class="hydra-intro"> HydraFusion answers one prompt with several models — drafting, reviewing and escalating — then hands back a single answer and a single…` |
 | 306 | <div> content | `<div class="hydra-panel-title">🧩 One turn in detail</div>` |
 | 307 | <div> content | `<div class="hydra-panel-sub">Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg…` |
 
-### `vscode-extension/src/webview/logviewer/main.ts` (99)
+### `vscode-extension/src/webview/logviewer/main.ts` (91)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -686,6 +674,7 @@ before localizing.
 | 308 | <th> content | `<th>Count</th>` |
 | 309 | <th> content | `<th>Type</th>` |
 | 374 | title attribute | `title="Model not persisted in JetBrains session log; may differ from earlier turns if the user switched models."` |
+| 374 | <span> content | `<span class="turn-model" title="Model not persisted in JetBrains session log; may differ from earlier turns if the user switched models.">🎯 ?</span>'; } if (mo…` |
 | 378 | title attribute | `title="JetBrains session logs only record the model family (inferred from the tool call ID prefix). Specific version isn't persisted."` |
 | 416 | <div> content | `<div>Other: ${other}</div>` |
 | 430 | <th> content | `<th>Delta</th>` |
@@ -693,29 +682,26 @@ before localizing.
 | 465 | <th> content | `<th>Estimated</th>` |
 | 466 | <th> content | `<th>Actual</th>` |
 | 468 | <th> content | `<th>Ratio</th>` |
-| 486 | <span> content | `<span class="context-badge">📋 copilot-instructions.md</span>` |
-| 489 | <span> content | `<span class="context-badge">🤖 agents.md</span>` |
+| 486 | <span> content | `<span class="context-badge">📋 copilot-instructions.md</span>'); } if (refs.agentsMd > 0) { badges.push('<span class="context-badge">🤖 agents.md</span>'); } //…` |
 | 503 | title attribute | `title="Symbol: ${escapeHtml(symbolName)}"` |
-| 537 | <span> content | `<span class="category-system">System: ${systemPct}% (~${formatCompact(systemTokens)} tokens)</span>` |
-| 538 | <span> content | `<span class="category-user">User Context: ${userPct}% (~${formatCompact(userTokens)} tokens)</span>` |
+| 536 | <div> content | `<div class="breakdown-summary"> <span class="category-system">System: ${systemPct}% (~${formatCompact(systemTokens)} tokens)</span> <span class="category-user">…` |
 | 543 | <th> content | `<th>Category</th>` |
 | 544 | <th> content | `<th>Label</th>` |
 | 546 | <th> content | `<th>~Tokens</th>` |
 | 547 | <th> content | `<th>Distribution</th>` |
-| 582 | <span> content | `<span class="actual-usage-header-inline">📊 ACTUAL LLM USAGE</span>` |
-| 587 | <span> content | `<span class="usage-badge ${deltaClass(dTotal)}">delta: ${deltaSign(dTotal)}${formatCompact(dTotal)}</span>` |
+| 580 | <summary> content | `<summary class="actual-usage-summary"> <span class="collapse-arrow">▶</span> <span class="actual-usage-header-inline">📊 ACTUAL LLM USAGE</span> <span class="ac…` |
 | 617 | title attribute | `title="Click to filter by ${escapeHtml(name)}"` |
+| 617 | <span> content | `<span class="tool-summary-item" data-tool-filter="${escapeHtml(name)}" data-turn="${turn.turnNumber}" title="Click to filter by ${escapeHtml(name)}">${escapeHtm…` |
 | 620 | title attribute | `title="Click to filter sub-agent calls"` |
-| 620 | <span> content | `<span class="sub-agent-summary-item" data-tool-filter="__subagent__" data-turn="${turn.turnNumber}" title="Click to filter sub-agent calls">🤖 Sub-Agents: <stro…` |
-| 639 | <span> content | `<span class="sub-agent-tokens">↑${formatCompact(tc.subAgentTokens.input)} ↓${formatCompact(tc.subAgentTokens.output)} tokens${tc.subAgentCost ? ' · ${formatCost…` |
+| 637 | <span> content | `<span class="tool-name tool-call-link" data-turn="${turn.turnNumber}" data-toolcall="${idx}" title="${escapeHtml(tc.toolName)}" style="cursor:pointer;">${escape…` |
 | 640 | <summary> content | `<summary>Arguments</summary>` |
 | 641 | <summary> content | `<summary>Result</summary>` |
+| 643 | <td> content | `<td class="tool-action-cell"> ${!tc.isSubAgent ? '<span class="tool-call-pretty" data-turn="${turn.turnNumber}" data-toolcall="${idx}" title="View pretty JSON" …` |
 | 644 | title attribute | `title="View pretty JSON"` |
-| 644 | <span> content | `<span class="tool-call-pretty" data-turn="${turn.turnNumber}" data-toolcall="${idx}" title="View pretty JSON" style="cursor:pointer;color:#22c55e;">Investigate<…` |
-| 655 | <span> content | `<span class="tools-header-inline">🔧 TOOL CALLS (${turn.toolCalls.length})</span>` |
+| 653 | <summary> content | `<summary class="tool-calls-summary"> <span class="collapse-arrow">▶</span> <span class="tools-header-inline">🔧 TOOL CALLS (${turn.toolCalls.length})</span> <sp…` |
 | 661 | <th> content | `<th scope="col">Tool Name</th>` |
 | 662 | <th> content | `<th scope="col">Action</th>` |
-| 688 | <span> content | `<span class="context-refs-header-inline">🔗 CONTEXT REFERENCES (${totalRefs})</span>` |
+| 686 | <summary> content | `<summary class="context-refs-summary"> <span class="collapse-arrow">▶</span> <span class="context-refs-header-inline">🔗 CONTEXT REFERENCES (${totalRefs})</span…` |
 | 767 | <div> content | `<div class="summary-sub">↑${formatCompact(actualPromptTotal)} prompt, ↓${formatCompact(actualCompletionTotal)} completion</div>` |
 | 771 | title attribute | `title="Token counts from the Copilot Chat debug log, summed across every LLM API call in this session. Agent-mode sessions make multiple calls per user turn; th…` |
 | 774 | <div> content | `<div class="summary-sub">↑${formatCompact(data.debugLogInputTokens)} input, ↓${formatCompact(data.debugLogOutputTokens ?? 0)} output</div>` |
@@ -729,30 +715,28 @@ before localizing.
 | 818 | <div> content | `<div class="summary-sub">Prompt tokens served from cache</div>` |
 | 827 | <div> content | `<div class="summary-sub">${stats.turnsWithThinking} of ${data.turns.length} turns used thinking</div>` |
 | 850 | <div> content | `<div class="hierarchy-line hierarchy-parent-line">↑ Parent: <strong>${pName}</strong></div>` |
-| 856 | <span> content | `<span style="color: var(--vscode-descriptionForeground);">+${more} more</span>` |
+| 855 | <span> content | `<span class="hierarchy-child-name">${escapeHtml(c.name)}</span>').join(', '); const moreHtml = more > 0 ? ' <span style="color: var(--vscode-descriptionForegrou…` |
 | 857 | <div> content | `<div class="hierarchy-line hierarchy-children-line">↓ Children (${childCount}): ${childItems}${moreHtml}</div>` |
 | 885 | title attribute | `title="The AI dropped earlier messages to fit within the context window. This breaks prompt cache efficiency and may affect response quality."` |
-| 920 | <span> content | `<span class="editor-info-badge">ℹ️ Data Availability</span>` |
+| 917 | <div> content | `<div class="editor-info-header"> <span class="editor-info-icon">${icon}</span> <span class="editor-info-name">${escapeHtml(data.editorName)}</span> <span class=…` |
 | 937 | <div> content | `<div class="summary-sub">Total chat turns in this session</div>` |
 | 963 | <div> content | `<div class="summary-sub"> ${usageContextTotal === 0 ? 'None' : 'implicit ${usageContextImplicit}, explicit ${usageContextExplicit}'} </div>` |
 | 971 | <div> content | `<div class="summary-sub">Source editor</div>` |
 | 976 | <div> content | `<div class="summary-sub">Total size on disk</div>` |
 | 1048 | <div> content | `<div class="session-usage-header">📊 Session Actual LLM Usage (${turnsWithActual.length}/${data.turns.length} turns with data)</div>` |
-| 1055 | <span> content | `<span class="category-system">System: ~${formatCompact(systemTokens)} tokens</span>` |
-| 1056 | <span> content | `<span class="category-user">User Context: ~${formatCompact(userTokens)} tokens</span>` |
+| 1054 | <div> content | `<div class="breakdown-summary"> <span class="category-system">System: ~${formatCompact(systemTokens)} tokens</span> <span class="category-user">User Context: ~$…` |
 | 1059 | <th> content | `<th>Category</th>` |
 | 1059 | <th> content | `<th>Label</th>` |
 | 1059 | <th> content | `<th>Avg %</th>` |
 | 1059 | <th> content | `<th>Total ~Tokens</th>` |
 | 1059 | <th> content | `<th>Distribution</th>` |
+| 1074 | <span> content | `<span class="overview-model-badge overview-model-unknown">—</span>'; } const hue = hashModelToHue(model); const style = 'background: hsl(${hue}, 55%, 16%); colo…` |
 | 1101 | title attribute | `title="Sub-agent call from step #${row.turnNumber} — jump to turn"` |
 | 1110 | title attribute | `title="Estimated from text"` |
 | 1112 | title attribute | `title="Jump to turn #${row.turnNumber}"` |
 | 1113 | title attribute | `title="Model changed from the previous step"` |
 | 1121 | title attribute | `title="${row.isActual ? 'Actual API usage' : 'Estimated from text'}"` |
-| 1128 | <span> content | `<span>🧭 Session Steps Overview (${rows.length})</span>` |
-| 1129 | <span> content | `<span class="overview-switch-note">⇄ marks a model change from the previous step</span>` |
-| 1130 | <span> content | `<span class="overview-switch-note">🤖 ↳ marks a sub-agent/child session delegated from that step</span>` |
+| 1127 | <div> content | `<div class="turns-overview-header"> <span>🧭 Session Steps Overview (${rows.length})</span> ${hasModelSwitches ? '<span class="overview-switch-note">⇄ marks a m…` |
 | 1136 | <th> content | `<th scope="col">Step</th>` |
 | 1137 | <th> content | `<th scope="col">Mode</th>` |
 | 1138 | <th> content | `<th scope="col">Model</th>` |
@@ -768,54 +752,45 @@ before localizing.
 | 1264 | title attribute | `title="Cursor: per-turn token counts are not stored locally. Output tokens are unavailable and input tokens require the full context window."` |
 | 1265 | title attribute | `title="Eclipse: estimated from message + thinking text only. Actual API counts are not stored locally."` |
 | 1282 | <div> content | `<div class="mcp-header">🔌 MCP Tools (${turn.mcpTools.length})</div>` |
-| 1301 | <span> content | `<span class="turn-tokens"${tokenTooltip}>📊 ${formatCompact(totalTokens)} tokens (↑${turn.inputTokensEstimate} ↓${turn.outputTokensEstimate})${tokenSuffix}</spa…` |
-| 1302 | <span> content | `<span class="turn-tokens" style="color: #a78bfa;">🧠 ${formatCompact(turn.thinkingTokensEstimate)} thinking</span>` |
-| 1303 | <span> content | `<span class="turn-tokens" style="color: #22c55e;">✓ ${formatCompact(turn.actualUsage!.promptTokens + turn.actualUsage!.completionTokens)} actual</span>` |
+| 1296 | <div> content | `<div class="turn-meta"> <span class="turn-number">#${turn.turnNumber}</span> <span class="turn-mode" style="background: ${getModeColor(turn.mode)};">${getModeIc…` |
 | 1316 | <div> content | `<div class="message-label">👤 User</div>` |
-| 1317 | <div> content | `<div class="message-text">${escapeHtml(turn.userMessage) \|\| '<em>No message</em>'}</div>` |
 | 1321 | <div> content | `<div class="message-label">🤖 Assistant</div>` |
-| 1322 | <div> content | `<div class="message-text">${escapeHtml(turn.assistantResponse) \|\| '<em>No response</em>'}</div>` |
-| 1499 | <span> content | `<span>Chat Turns (${data.turns.length})${data.title ? ' - ${escapeHtml(data.title)}' : ''}</span>` |
+| 1498 | <span> content | `<span>📝</span> <span>Chat Turns (${data.turns.length})${data.title ? ' - ${escapeHtml(data.title)}' : ''}</span>` |
 | 1500 | <vscode-button> content | `<vscode-button id="btn-refresh-session" appearance="secondary" style="margin-left: auto;">🔄 Refresh</vscode-button>` |
 | 1506 | <div> content | `<div class="empty-state">No chat turns found in this session.</div>` |
 | 1541 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/maturity/darkFactorySection.ts` (17)
+### `vscode-extension/src/webview/maturity/darkFactorySection.ts` (14)
 
 | Line | Kind | Snippet |
 |---|---|---|
-| 52 | <span> content | `<span class="df-band-stage">Stage ${repo.confirmedStage}</span>` |
-| 53 | <span> content | `<span class="df-band-note">every control observed</span>` |
-| 57 | <span> content | `<span class="df-band-note">up to Stage ${repo.ceilingStage} unverified &middot; ${repo.unknownCount} control(s) not checked</span>` |
-| 58 | <span> content | `<span class="df-band-note">${repo.unknownCount} control(s) not checked</span>` |
-| 60 | <span> content | `<span class="df-band-stage">Stage ${repo.confirmedStage} confirmed</span>` |
+| 51 | <div> content | `<div class="df-band df-band-complete"> <span class="df-band-stage">Stage ${repo.confirmedStage}</span> <span class="df-band-note">every control observed</span> …` |
+| 57 | <span> content | `<span class="df-band-note">up to Stage ${repo.ceilingStage} unverified &middot; ${repo.unknownCount} control(s) not checked</span>' : '<span class="df-band-note…` |
+| 59 | <div> content | `<div class="df-band"> <span class="df-band-stage">Stage ${repo.confirmedStage} confirmed</span> ${ceiling} </div>` |
 | 68 | title attribute | `title="Detected by pattern matching — a candidate, not a verdict"` |
 | 68 | <span> content | `<span class="df-heuristic" title="Detected by pattern matching — a candidate, not a verdict">heuristic</span>` |
 | 83 | <div> content | `<div class="df-block-title">Missing for Stage ${stage.stage} &mdash; ${escapeHtml(stage.name)}</div>` |
 | 95 | <div> content | `<div class="df-block-title">Could not check for Stage ${stage.stage}</div>` |
 | 118 | <div> content | `<div class="df-block-title">Anti-patterns detected</div>` |
-| 129 | <span> content | `<span class="df-repo-owner df-repo-owner-unknown">local repository &mdash; no GitHub remote resolved</span>` |
+| 128 | <span> content | `<span class="df-repo-owner">${escapeHtml(repo.nameWithOwner)}</span>' : '<span class="df-repo-owner df-repo-owner-unknown">local repository &mdash; no GitHub re…` |
 | 164 | <div> content | `<div class="df-empty">No git repositories were found in this workspace, so there is nothing to assess. This scan reads repositories, never people.</div>` |
-| 171 | <span> content | `<span class="df-section-title">Dark Factory Readiness</span>` |
-| 172 | <span> content | `<span class="df-section-badge">per repository</span>` |
+| 169 | <div> content | `<div class="df-section-head"> <span class="df-section-icon">🏭</span> <span class="df-section-title">Dark Factory Readiness</span> <span class="df-section-badge…` |
 | 175 | <div> content | `<div class="info-box-title">📋 What this measures</div>` |
 | 176 | <div> content | `<div> A dark factory is a governed, observable production system &mdash; humans specify intent, constraints, risk and evidence of success while agents implement…` |
 | 188 | <div> content | `<div class="df-footer">Scanned ${escapeHtml(new Date(report.scannedAt).toLocaleString())} &middot; Stages 1&ndash;${report.maxAssessableStage} are assessable; S…` |
 
-### `vscode-extension/src/webview/maturity/main.ts` (62)
+### `vscode-extension/src/webview/maturity/main.ts` (58)
 
 | Line | Kind | Snippet |
 |---|---|---|
-| 207 | <span> content | `<span style="font-size: 11px; font-weight: 600; color: #999;">📈 Multi-Agent Usage (last ${n} days)</span>` |
-| 215 | <span> content | `<span style="color:#22d3ee;">— total</span>` |
-| 216 | <span> content | `<span style="color:#a78bfa;">┄ multi-agent parents</span>` |
+| 206 | <div> content | `<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;"> <span style="font-size: 11px; font-weight: 600; color: #99…` |
+| 213 | <div> content | `<div style="display: flex; justify-content: space-between; font-size: 9px; color: #666;"> <span>${first}</span> <span style="color:#22d3ee;">— total</span> <spa…` |
 | 244 | title attribute | `title="${demoPanelExpanded ? 'Collapse' : 'Expand'} Demo Mode Panel"` |
 | 250 | <button> content | `<button class="demo-btn demo-btn-toggle" id="demo-toggle">${demoModeActive ? '⏸ Disable Overrides' : '▶ Enable Overrides'}</button>` |
 | 251 | <button> content | `<button class="demo-btn demo-btn-reset" id="demo-reset">↺ Reset to Actual</button>` |
-| 314 | <span> content | `<span>No thresholds defined</span>` |
+| 314 | <li> content | `<li class="evidence-item"><span class="evidence-icon">-</span><span>No thresholds defined</span></li>` |
 | 318 | <div> content | `<div class="tip-item" style="color:#666;">No tips for this stage</div>` |
-| 325 | <span> content | `<span class="category-stage-badge badge-${displayStage}">Stage ${displayStage}</span>` |
-| 327 | <div> content | `<div class="category-stage-label">${escapeHtml(STAGE_LABELS[displayStage] \|\| 'Unknown')}</div>` |
+| 323 | <div> content | `<div class="category-header"> <span class="category-name">${cat.icon} ${escapeHtml(cat.category)}</span> <span class="category-stage-badge badge-${displayStage}…` |
 | 332 | <div> content | `<div class="demo-section-label">🎯 Requirements to Reach This Stage</div>` |
 | 335 | <div> content | `<div class="demo-section-label">💡 Tips</div>` |
 | 347 | title attribute | `title="Remove session reminder"` |
@@ -826,22 +801,20 @@ before localizing.
 | 352 | <button> content | `<button class="hook-reminder-btn" data-hook-id="${escapeHtml(hookId)}" data-action="installHook" title="Install a Copilot hook that reminds you in future sessio…` |
 | 392 | <div> content | `<div class="tip-item" style="color:#666;">No specific suggestions - you\\'re doing great!</div>` |
 | 397 | <button> content | `<button class="mcp-discover-btn" data-action="searchMcp">🔍 Discover more MCP Servers in Marketplace</button>` |
-| 408 | <span> content | `<span class="category-stage-badge badge-${cat.stage}">Stage ${cat.stage}</span>` |
-| 410 | <div> content | `<div class="category-stage-label">${escapeHtml(STAGE_LABELS[cat.stage] \|\| 'Unknown')}</div>` |
-| 414 | <span> content | `<span>No significant activity detected</span>` |
+| 406 | <div> content | `<div class="category-header"> <span class="category-name">${cat.icon} ${escapeHtml(cat.category)}</span> <span class="category-stage-badge badge-${cat.stage}">S…` |
+| 414 | <li> content | `<li class="evidence-item"><span class="evidence-icon">-</span><span>No significant activity detected</span></li>` |
 | 419 | <div> content | `<div style="font-size: 11px; font-weight: 600; color: #f59e0b;">💡 Next steps to level up:</div>` |
 | 420 | title attribute | `title="Dismiss these tips"` |
-| 430 | <span> content | `<span class="share-title">Share Your AI Engineering Fluency Score</span>` |
+| 430 | <div> content | `<div class="share-header"><span class="share-icon">📢</span><span class="share-title">Share Your AI Engineering Fluency Score</span></div>` |
 | 431 | <div> content | `<div class="share-description">Share your progress with the community and inspire others to level up their AI engineering skills!</div>` |
-| 433 | <span> content | `<span>Share on LinkedIn</span>` |
-| 434 | <span> content | `<span>Share on Bluesky</span>` |
-| 435 | <span> content | `<span>Share on Mastodon</span>` |
-| 437 | <span> content | `<span>Export Fluency Score</span>` |
-| 439 | <span> content | `<span>Export as PNG Image</span>` |
-| 440 | <span> content | `<span>Export as PDF Report</span>` |
-| 441 | <span> content | `<span>Export as PowerPoint</span>` |
-| 466 | <span> content | `<span class="header-title">AI Engineering Fluency Score</span>` |
-| 468 | <div> content | `<div class="button-row"> ${navButtonsHtml('btn-maturity', !!data.backendConfigured)} </div>` |
+| 433 | <button> content | `<button id="btn-share-linkedin" class="share-btn share-btn-linkedin"><span class="share-btn-icon">💼</span><span>Share on LinkedIn</span></button>` |
+| 434 | <button> content | `<button id="btn-share-bluesky" class="share-btn share-btn-bluesky"><span class="share-btn-icon">🦋</span><span>Share on Bluesky</span></button>` |
+| 435 | <button> content | `<button id="btn-share-mastodon" class="share-btn share-btn-mastodon"><span class="share-btn-icon">🐘</span><span>Share on Mastodon</span></button>` |
+| 437 | <button> content | `<button id="btn-export-toggle" class="share-btn share-btn-download"><span class="share-btn-icon">💾</span><span>Export Fluency Score</span><span class="dropdown…` |
+| 439 | <button> content | `<button class="export-menu-item" data-export-type="png"><span class="export-menu-icon">🖼️</span><span>Export as PNG Image</span></button>` |
+| 440 | <button> content | `<button class="export-menu-item" data-export-type="pdf"><span class="export-menu-icon">📄</span><span>Export as PDF Report</span></button>` |
+| 441 | <button> content | `<button class="export-menu-item" data-export-type="pptx"><span class="export-menu-icon">📊</span><span>Export as PowerPoint</span></button>` |
+| 464 | <div> content | `<div class="header-left"> <span class="header-icon">🎯</span> <span class="header-title">AI Engineering Fluency Score</span> </div>` |
 | 473 | <div> content | `<div class="info-box-title">📋 About This Dashboard</div>` |
 | 478 | <a> content | `<a href="https://github.com/rajbos/ai-engineering-fluency/blob/main/docs/FLUENCY-LEVELS.md" class="beta-link">Read the full scoring rules</a>` |
 | 478 | <button> content | `<button id="btn-level-viewer-inline" class="inline-action-btn">📊 How is my score calculated?</button>` |
@@ -891,31 +864,33 @@ before localizing.
 | 50 | <th> content | `<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>` |
 | 56 | <td> content | `<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>` |
 
-### `vscode-extension/src/webview/usage/main.ts` (431)
+### `vscode-extension/src/webview/usage/main.ts` (435)
 
 | Line | Kind | Snippet |
 |---|---|---|
 | 294 | aria-label attribute | `aria-label="${escapeHtml(label ?? 'Present and fresh')}"` |
+| 294 | <span> content | `<span style="${base}background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.5);color:#4ade80;font-size:12px;"${titleAttr} aria-label="${escapeHtml(labe…` |
 | 296 | aria-label attribute | `aria-label="${escapeHtml(label ?? 'Present but stale')}"` |
 | 298 | aria-label attribute | `aria-label="${escapeHtml(label ?? 'Missing')}"` |
 | 593 | <div> content | `<div id="ul-badge">📊 Analyzing Usage Data</div>` |
 | 595 | <div> content | `<div id="ul-subtitle">Initializing…</div>` |
+| 613 | <span> content | `<span class="ul-pop">✓</span>'); } } function _ulSetActive(id: string): void { const el = document.getElementById(id); if (!el) { return; } el.className = 'ul-s…` |
 | 673 | .textContent assignment (conditional) | `.textContent = pct === 100 ? '100%' : '${pct}%';` |
 | 697 | .textContent assignment | `.textContent = '🔄 Refresh'` |
 | 884 | <div> content | `<div class="stat-label">\\u{1F4CA} Avg Models per Conversation</div>` |
 | 888 | <div> content | `<div class="stat-label">\\u{1F504} Switching Frequency</div>` |
 | 890 | <div> content | `<div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Sessions with &gt;1 model</div>` |
 | 893 | <div> content | `<div class="stat-label">\\u{1F4C8} Max Models in Session</div>` |
-| 910 | <span> content | `<span style="color: #4ade80;">💚 Low cost:</span>` |
-| 916 | <span> content | `<span style="color: var(--link-color);">🟡 Medium cost:</span>` |
-| 922 | <span> content | `<span style="color: var(--warning-fg);">💸 High cost:</span>` |
-| 928 | <span> content | `<span style="color: var(--text-muted);">❓ Unknown:</span>` |
+| 909 | <div> content | `<div style="margin-bottom: 6px;"> <span style="color: #4ade80;">💚 Low cost:</span> <span style="font-size: 11px; color: var(--text-primary);">${allLowCostModel…` |
+| 915 | <div> content | `<div style="margin-bottom: 6px;"> <span style="color: var(--link-color);">🟡 Medium cost:</span> <span style="font-size: 11px; color: var(--text-primary);">${al…` |
+| 921 | <div> content | `<div style="margin-bottom: 6px;"> <span style="color: var(--warning-fg);">💸 High cost:</span> <span style="font-size: 11px; color: var(--text-primary);">${allH…` |
+| 927 | <div> content | `<div style="margin-bottom: 6px;"> <span style="color: var(--text-muted);">❓ Unknown:</span> <span style="font-size: 11px; color: var(--text-primary);">${allUnkn…` |
 | 942 | <div> content | `<div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>` |
-| 945 | <span> content | `<span style="color: #4ade80;">💚 Low cost: </span>` |
-| 951 | <span> content | `<span style="color: var(--link-color);">🟡 Medium cost: </span>` |
-| 957 | <span> content | `<span style="color: var(--warning-fg);">💸 High cost: </span>` |
-| 963 | <span> content | `<span style="color: var(--text-muted);">❓ Unknown: </span>` |
-| 977 | <span> content | `<span style="font-size: 11px; color: var(--link-color);">🔀 Mixed cost sessions: ${formatNumber(switching.mixedCostSessions)}</span>` |
+| 944 | <div> content | `<div style="margin-bottom: 4px; font-size: 11px;"> <span style="color: #4ade80;">💚 Low cost: </span> <span style="color: var(--text-primary);">${formatNumber(s…` |
+| 950 | <div> content | `<div style="margin-bottom: 4px; font-size: 11px;"> <span style="color: var(--link-color);">🟡 Medium cost: </span> <span style="color: var(--text-primary);">${f…` |
+| 956 | <div> content | `<div style="margin-bottom: 4px; font-size: 11px;"> <span style="color: var(--warning-fg);">💸 High cost: </span> <span style="color: var(--text-primary);">${for…` |
+| 962 | <div> content | `<div style="margin-bottom: 4px; font-size: 11px;"> <span style="color: var(--text-muted);">❓ Unknown: </span> <span style="color: var(--text-primary);">${format…` |
+| 976 | <div> content | `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);"> <span style="font-size: 11px; color: var(--link-color);">🔀 Mixed c…` |
 | 995 | <div> content | `<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Cost Level:</div>` |
 | 1044 | <div> content | `<div style="font-size: 13px; font-weight: 600; color: var(--success-fg); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;"> ${statusBadgeHtml('…` |
 | 1047 | <div> content | `<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;"> All active workspaces that contain instruction files for other AI tools (e.g. .…` |
@@ -933,6 +908,7 @@ before localizing.
 | 1141 | <th> content | `<th style="padding:8px 12px; opacity:0.9; text-align:right; width:90px;">Calls</th>` |
 | 1316 | title attribute | `title="${safeLabel}: ${count} session${count === 1 ? '' : 's'}"` |
 | 1329 | title attribute | `title="Show only sessions that used HydraFusion"` |
+| 1329 | <button> content | `<button type="button" class="session-filter-pill session-filter-pill-hydrafusion${isActive ? ' active' : ''}" data-filter-type="hydrafusion" data-filter-value="…` |
 | 1335 | <button> content | `<button type="button" id="sessions-filter-clear" class="session-filter-pill session-filter-pill-clear">✕ Clear filters</button>` |
 | 1411 | <div> content | `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">No sessions match the selected filters.</div>` |
 | 1418 | title attribute | `title="This session used HydraFusion"` |
@@ -958,12 +934,11 @@ before localizing.
 | 2598 | title attribute | `title="Open PRs where an AI agent was listed as a requested reviewer"` |
 | 2598 | <th> content | `<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="Open P…` |
 | 2606 | <div> content | `<div style="margin-top:8px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:8px;"> † Copilot Review Agent reques…` |
-| 2617 | <span> content | `<span>AI Activity in Repository PRs</span>` |
+| 2617 | <div> content | `<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>` |
 | 2618 | <div> content | `<div class="section-subtitle"> PRs from the last 30 days across your known repositories, showing how many were <strong>authored by cloud agents</strong> (i.e. o…` |
 | 2636 | title attribute | `title="Tasks the agents API reported without a repository — typically ad-hoc sessions started from cloud chat"` |
 | 2636 | <span> content | `<span style="${mono} color:var(--text-secondary);" title="Tasks the agents API reported without a repository — typically ad-hoc sessions started from cloud chat…` |
 | 2640 | title attribute | `title="Found through your account-wide agent tasks — this repo is not open in any workspace folder"` |
-| 2640 | <span> content | `<span title="Found through your account-wide agent tasks — this repo is not open in any workspace folder" style="color:var(--text-muted); font-size:10px;">(not …` |
 | 2656 | title attribute | `title="Showing ${r.tasksScanned} of ${r.tasksTotal} tasks — capped to limit API usage"` |
 | 2656 | <span> content | `<span title="Showing ${r.tasksScanned} of ${r.tasksTotal} tasks — capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${r.tasksScanned}…` |
 | 2677 | <div> content | `<div style="${box}">🕒 <strong>Not fetched yet.</strong> The snapshot is refreshed hourly by the main VS Code window — it will appear here once that first refre…` |
@@ -984,29 +959,25 @@ before localizing.
 | 2757 | title attribute | `title="AI credits consumed (1 credit = $0.01). Only available when the API reports usage data."` |
 | 2757 | <th> content | `<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="AI cre…` |
 | 2763 | <div> content | `<div style="margin-top:8px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:8px;"> ℹ️ <strong>No double-counting…` |
-| 2775 | <span> content | `<span>Copilot Cloud Agent Sessions</span>` |
+| 2775 | <div> content | `<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>` |
 | 2776 | <div> content | `<div class="section-subtitle"> Cloud agent tasks and sessions from the last 30 days. Each <strong>task</strong> is a user request to the agent; each <strong>ses…` |
-| 2790 | <span> content | `<span>Copilot Customization Files</span>` |
+| 2790 | <div> content | `<div class="section-title"><span>🛠️</span><span>Copilot Customization Files</span></div>` |
 | 2791 | <div> content | `<div class="section-subtitle">Showing workspace customization status for active workspaces</div>` |
 | 2792 | <div> content | `<div style="color: var(--text-muted); padding:12px;">No workspaces with customization files detected in the last 30 days.</div>` |
-| 2813 | <span> content | `<span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', 'No customization files')}</span>` |
 | 2823 | <div> content | `<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;"> 🛠️ Copilot Customization Files </div>` |
-| 2829 | <span> content | `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${matrix.workspacesWithIssues} workspace(s) have no…` |
-| 2830 | <span> content | `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} All workspaces have up-to-date customizations.</span>` |
+| 2826 | <div> content | `<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;"> Showing ${matri…` |
 | 2836 | <th> content | `<th style="text-align: left; padding: 8px; border-bottom: 2px solid var(--border-color);">📂 Workspace</th>` |
 | 2837 | <th> content | `<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);">Sessions</th>` |
-| 2857 | <span> content | `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} = Present &amp; Fresh</span>` |
-| 2859 | <span> content | `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} = Present but Stale</span>` |
-| 2861 | <span> content | `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('❌')} = Missing</span>` |
+| 2856 | <div> content | `<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;"> <span style="display:inline-flex;align-items:center;gap:4px;">${st…` |
 | 2876 | <div> content | `<div style="color: var(--text-muted); font-size: 11px;">No data</div>` |
 | 2894 | <div> content | `<div style="font-size: 11px; color: var(--link-color); margin-top: 6px;">🔀 ${formatNumber(ms.mixedCostSessions)} mixed-cost session${ms.mixedCostSessions !== 1…` |
 | 2896 | <div> content | `<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">${formatNumber(total)} total requests</div>` |
-| 2902 | <span> content | `<span>Model Cost Usage</span>` |
+| 2902 | <div> content | `<div class="section-title"><span>💰</span><span>Model Cost Usage</span></div>` |
 | 2903 | <div> content | `<div class="section-subtitle">Request distribution across cost levels — low (&lt;$2/M tokens), medium ($2–5/M), high (≥$5/M)</div>` |
 | 2906 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>` |
 | 2910 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>` |
 | 2914 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>` |
-| 2927 | <span> content | `<span>Thinking Effort (Reasoning)</span>` |
+| 2927 | <div> content | `<div class="section-title"><span>💡</span><span>Thinking Effort (Reasoning)</span></div>` |
 | 2928 | <div> content | `<div class="section-subtitle">How often each reasoning effort level was used (requests per level)</div>` |
 | 2931 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>` |
 | 2935 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>` |
@@ -1019,7 +990,7 @@ before localizing.
 | 3010 | <div> content | `<div class="repo-hygiene-pane-header">📁 Repository List</div>` |
 | 3014 | <div> content | `<div class="repo-hygiene-pane-header">📊 Repository Details</div>` |
 | 3018 | <vscode-button> content | `<vscode-button id="btn-analyse-repo" ${isSingleRepoAnalysisInProgress ? 'disabled="true" appearance="secondary"' : ''}>${isSingleRepoAnalysisInProgress ? 'Analy…` |
-| 3033 | <span> content | `<span>MCP Tools</span>` |
+| 3033 | <div> content | `<div class="section-title"><span>🔌</span><span>MCP Tools</span></div>` |
 | 3034 | <div> content | `<div class="section-subtitle">Model Context Protocol (MCP) server and tool usage</div>` |
 | 3038 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>` |
 | 3040 | <div> content | `<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.today.mcpTools.total)}</di…` |
@@ -1100,13 +1071,13 @@ before localizing.
 | 3349 | <th> content | `<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Description</th>` |
 | 3350 | <th> content | `<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Est. Overhead</th>` |
 | 3354 | <div> content | `<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">💡 These tools are provided by VS Code itself and cannot be disabled. They are exclude…` |
-| 3383 | <span> content | `<span>Tool Curation</span>` |
+| 3383 | <div> content | `<div class="section-title"><span>✂️</span><span>Tool Curation</span></div>` |
 | 3384 | <div> content | `<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Compare available tools against actual usage to reduce prompt overhead (last ${wi…` |
-| 3397 | <span> content | `<span>Tool Curation</span>` |
+| 3397 | <div> content | `<div class="section-title"><span>✂️</span><span>Tool Curation</span></div>` |
 | 3398 | <div> content | `<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Tool curation is temporarily unavailable due to a rendering error. Try Refresh.</…` |
-| 3413 | <span> content | `<span>AI Activity in Repository PRs</span>` |
+| 3413 | <div> content | `<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>` |
 | 3414 | <div> content | `<div class="section-subtitle">PRs from the last 30 days across your known repositories — authored or reviewed by AI agents.</div>` |
-| 3420 | <span> content | `<span>Copilot Cloud Agent Sessions</span>` |
+| 3420 | <div> content | `<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>` |
 | 3421 | <div> content | `<div class="section-subtitle">Cloud agent tasks and sessions from the last 30 days, fetched from the GitHub API.</div>` |
 | 3470 | <button> content | `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="done" title="Mark as done" style="padding:5px 14px; font-size:12px; …` |
 | 3471 | title attribute | `title="Mark as done"` |
@@ -1114,21 +1085,21 @@ before localizing.
 | 3478 | <button> content | `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="snooze" title="Snooze for 7 days" style="padding:5px 14px; font-size…` |
 | 3479 | title attribute | `title="Snooze for 7 days"` |
 | 3487 | title attribute | `title="Dismiss permanently"` |
-| 3501 | <span> content | `<span style="font-size:10px; padding:2px 7px; border-radius:10px; background:${accent}; color:#0d1117; font-weight:700; letter-spacing:0.04em;">NEW</span>` |
+| 3500 | <div> content | `<div style="font-size:13px; font-weight:700; color:var(--text-primary); margin-bottom:8px; display:flex; align-items:center; gap:8px;"> ${isNew ? '<span style="…` |
 | 3525 | <div> content | `<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">✨ For You</div>` |
 | 3528 | <div> content | `<div style="margin-bottom:20px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;"…` |
 | 3534 | <div> content | `<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">All Tips</div>` |
-| 3542 | <span> content | `<span>Insights</span>` |
+| 3542 | <div> content | `<div class="section-title"><span>💡</span><span>Insights</span></div>` |
 | 3543 | <div> content | `<div class="section-subtitle"> Personalized tips based on your usage patterns. Tips are data-driven — they only appear when relevant to how you code with AI. </…` |
+| 3564 | <button> content | `<button class="tab-button ${activeTab === 'corrections' ? 'active' : ''}" data-tab="corrections"><span class="codicon codicon-debug-restart"></span> Corrections…` |
 | 3584 | <span> content | `<span style="flex-shrink:0; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222…` |
 | 3585 | <div> content | `<div style="flex:1; min-width:0; font-size:12px; color:var(--text-primary); font-style:italic; overflow-wrap:anywhere;">&ldquo;${escapeHtml(cluster.representati…` |
 | 3589 | <summary> content | `<summary style="font-size:11px; color:var(--text-secondary); cursor:pointer;">Sessions (${cluster.sessions.length})</summary>` |
-| 3600 | <span> content | `<span>Skill Suggestions</span>` |
+| 3600 | <div> content | `<div class="section-title"><span>🧩</span><span>Skill Suggestions</span></div>` |
 | 3601 | <div> content | `<div class="section-subtitle"> Tasks you keep prompting for across sessions (first prompt per session, ${report.sessionsScanned} sessions scanned). A repeated t…` |
 | 3625 | title attribute | `title="Clustered with an earlier correction a few turns back"` |
 | 3625 | <span> content | `<span title="Clustered with an earlier correction a few turns back" style="flex-shrink:0; font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; …` |
 | 3628 | title attribute | `title="Shouting / repeated punctuation / an intensifier like &quot;again&quot;"` |
-| 3628 | <span> content | `<span title="Shouting / repeated punctuation / an intensifier like &quot;again&quot;" style="flex-shrink:0; font-size:10px; font-weight:700; padding:2px 8px; bo…` |
 | 3631 | title attribute | `title="Open this turn in the session log viewer"` |
 | 3636 | <div> content | `<div style="font-size:11px; color:var(--text-secondary); margin-top:3px;"> turn ${moment.turnNumber}${detail ? ' · ${escapeHtml(detail)}' : ''}${timeLabel ? ' ·…` |
 | 3665 | <button> content | `<button type="button" class="correction-ask-copilot" data-correction-repo="${repoAttr}" title="Send these correction examples to Copilot Chat and ask how to imp…` |
@@ -1138,34 +1109,45 @@ before localizing.
 | 3692 | title attribute | `title="Show every correction moment again"` |
 | 3692 | <button> content | `<button type="button" class="correction-clear-filter" title="Show every correction moment again" style="font-size:11px; padding:2px 10px; border-radius:10px; bo…` |
 | 3722 | <strong> content | `<strong>${shown}</strong> of <strong>${sampled.length}</strong> listed correction moments — filtered by <strong>${escapeHtml(CORRECTION_FILTER_LABELS[activeCorr…` |
-| 3762 | <span> content | `<span>Corrections</span>` |
+| 3762 | <div> content | `<div class="section-title"><span>🔁</span><span>Corrections</span></div>` |
 | 3763 | <div> content | `<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>` |
 | 3764 | <div> content | `<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;"> ⏳…` |
-| 3775 | <span> content | `<span>Corrections</span>` |
+| 3775 | <div> content | `<div class="section-title"><span>🔁</span><span>Corrections</span></div>` |
 | 3776 | <div> content | `<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>` |
 | 3777 | <div> content | `<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;"> ✨…` |
-| 3798 | <span> content | `<span>Corrections</span>` |
+| 3798 | <div> content | `<div class="section-title"><span>🔁</span><span>Corrections</span></div>` |
 | 3799 | <div> content | `<div class="section-subtitle"> Moments where the agent corrected itself after an error, or you had to correct the agent — heuristic detection over each reposito…` |
 | 3805 | <div> content | `<div style="font-size:11px; color:var(--text-secondary); margin-top:12px;">Filter the list below — select a pill to drill down, select it again to clear.</div>` |
 | 3836 | .textContent assignment | `.textContent = '✅ Copied!'` |
+| 3887 | <span> content | `<span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${newCount}</span>' : ''; const titleOnly = '<span class="codic…` |
 | 3902 | <div> content | `<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">✨ For You</div>` |
 | 3905 | <div> content | `<div style="margin-bottom:20px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;"…` |
 | 3911 | <div> content | `<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">All Tips</div>` |
-| 4015 | <span> content | `<span class="header-title">Usage Analysis</span>` |
-| 4017 | <div> content | `<div class="button-row"> ${navButtonsHtml('btn-usage', !!stats.backendConfigured)} </div>` |
-| 4024 | <span> content | `<span>📋 About This Dashboard</span>` |
+| 4013 | <div> content | `<div class="header-left"> <span class="header-icon">📊</span> <span class="header-title">Usage Analysis</span> </div>` |
+| 4023 | <div> content | `<div class="info-box-title info-box-toggle" id="about-info-toggle" role="button" tabindex="0" aria-expanded="${!aboutCollapsed}" aria-controls="about-info-body"…` |
 | 4027 | <div> content | `<div class="info-box-body" id="about-info-body"${aboutCollapsed ? ' style="display:none"' : ''}> This dashboard analyzes your GitHub Copilot usage patterns by e…` |
+| 4035 | <button> content | `<button class="tab-button ${activeTab === 'activity' ? 'active' : ''}" data-tab="activity"><span class="codicon codicon-pulse"></span> My Activity</button>` |
+| 4036 | <button> content | `<button class="tab-button ${activeTab === 'sessions' ? 'active' : ''}" data-tab="sessions"><span class="codicon codicon-history"></span> Recent Sessions</button…` |
+| 4037 | <button> content | `<button class="tab-button ${activeTab === 'tools' ? 'active' : ''}" data-tab="tools"><span class="codicon codicon-tools"></span> Tools &amp; Integrations</butto…` |
+| 4038 | <button> content | `<button class="tab-button ${activeTab === 'health' ? 'active' : ''}" data-tab="health"><span class="codicon codicon-server-environment"></span> Workspace Health…` |
+| 4039 | <button> content | `<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos"><span class="codicon codicon-git-pull-request"></span> Repository PRs</butt…` |
+| 4040 | <button> content | `<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent"><span class="codicon codicon-cloud"></span> Cloud Agent</button>` |
+| 4041 | <button> content | `<button class="tab-button ${activeTab === 'worktrees' ? 'active' : ''}" data-tab="worktrees"><span class="codicon codicon-git-branch"></span> Worktrees</button>` |
+| 4042 | <button> content | `<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insi…` |
 | 4054 | <div> content | `<div class="footer"> Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} · Updates every 5 minutes </div>` |
 | 4063 | <div> content | `<div style="color: var(--text-muted); font-size: 12px; margin: 8px 0;">No root folders added yet. Add a folder to scan for worktrees.</div>` |
+| 4069 | <button> content | `<button class="worktree-roots-toggle" id="btn-toggle-worktree-roots" aria-expanded="${worktreeRootsExpanded}"><span class="worktree-caret">${worktreeRootsExpand…` |
 | 4088 | <div> content | `<div class="info-box-title">📦 Computing sizes &amp; push status…</div>` |
 | 4089 | <div> content | `<div>${done} / ${total} worktree${total === 1 ? "" : "s"} analyzed (${seconds}s)</div>` |
+| 4106 | <div> content | `<div>Folder: <span style="font-family: var(--vscode-editor-font-family, monospace);">${escapeHtml(s.root \|\| "…")}</span></div>` |
 | 4126 | <div> content | `<div>🌳 Found automatically by the daily background scan: ${size} across ${count} worktree${count === 1 ? "" : "s"}, last checked ${when}. Scan again for the la…` |
-| 4132 | <span> content | `<span>Root Folders</span>` |
+| 4132 | <div> content | `<div class="section-title"><span class="codicon codicon-folder-opened"></span><span>Root Folders</span></div>` |
 | 4139 | placeholder attribute | `placeholder="Paste a root folder path here, e.g. C:\\\\code\\\\repos"` |
 | 4142 | <button> content | `<button class="button secondary" id="btn-browse-worktree-root" ${worktreeScanInProgress ? "disabled" : ""}>📂 Browse…</button>` |
 | 4143 | <button> content | `<button class="button secondary" id="btn-add-worktree-root" ${worktreeScanInProgress ? "disabled" : ""}>➕ Add</button>` |
 | 4146 | <button> content | `<button class="button" id="btn-scan-worktrees" ${worktreeScanInProgress \|\| worktreeCleanupInProgress \|\| worktreeRoots.length === 0 ? "disabled" : ""}>🔍 Scan fo…` |
 | 4147 | <button> content | `<button class="button secondary" id="btn-cancel-worktree-scan">✕ Cancel</button>` |
+| 4179 | <span> content | `<span class="worktree-pending">${worktreeScanInProgress ? active : "—"}</span>'; const pushedIcon = w.pushed === "yes" ? "✅" : w.pushed === "no" ? "🔴" : "❓"; c…` |
 | 4185 | title attribute | `title="${w.bytes.toLocaleString()} bytes"` |
 | 4193 | <td> content | `<td> <a href="#" class="worktree-reveal-link" data-path="${encodeURIComponent(w.path)}">Open</a> <a href="#" class="worktree-delete-link" data-path="${encodeURI…` |
 | 4195 | title attribute | `title="Remove via git worktree remove (asks for confirmation)"` |
@@ -1177,6 +1159,7 @@ before localizing.
 | 4206 | <th> content | `<th>Size</th>` |
 | 4206 | <th> content | `<th>Actions</th>` |
 | 4216 | title attribute | `title="${totalBytes.toLocaleString()} bytes"` |
+| 4216 | <span> content | `<span title="${totalBytes.toLocaleString()} bytes">${formatFileSize(totalBytes)}</span>'; return pending ? '${size} <span class="worktree-pending">…</span>` |
 | 4229 | <button> content | `<button type="button" class="button secondary worktree-repo-cleanup-btn" data-repo="${encodeURIComponent(repoLabel)}" title="Remove this repository's pushed wor…` |
 | 4230 | title attribute | `title="Remove this repository's pushed worktrees via git worktree remove (asks for confirmation)"` |
 | 4293 | <div> content | `<div class="summary-label">Pushed Worktrees</div>` |
@@ -1205,38 +1188,34 @@ before localizing.
 | 4483 | title attribute | `title="Sessions that delegated work to sub-agents (task/read_agent/write_agent/list_agents, runSubagent, delegate_*, …)"` |
 | 4483 | <div> content | `<div style="margin-top:8px; font-size:12px; color:var(--text-secondary);" title="Sessions that delegated work to sub-agents (task/read_agent/write_agent/list_ag…` |
 | 4497 | <div> content | `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}…</div>` |
-| 4503 | <span> content | `<span>Recent Sessions</span>` |
+| 4502 | <div> content | `<div class="section-title" style="display:flex; align-items:center; gap:8px;"> <span>📋</span><span>Recent Sessions</span> <span id="sessions-lookback-wrapper" …` |
 | 4507 | <div> content | `<div class="section-subtitle">Individual session breakdown for the selected period — sorted by number of interactions (most active first).</div>` |
 | 4540 | title attribute | `title="Usage the API reports but this device has no local session data for"` |
+| 4543 | <div> content | `<div style="display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:var(--text-secondary); margin-top:6px;"> <span><span style="display:inline-block; widt…` |
 | 4550 | <div> content | `<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">GitHub Copilot API (all channels)</div>` |
 | 4554 | <div> content | `<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Credits used</div>` |
 | 4558 | <div> content | `<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Credits remaining</div>` |
 | 4562 | <div> content | `<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Monthly budget</div>` |
-| 4566 | <span> content | `<span>${usedPct}% used</span>` |
-| 4566 | <span> content | `<span>${pct}% available</span>` |
+| 4565 | <div> content | `<div style="margin-bottom:4px; font-size:11px; color:var(--text-secondary); display:flex; justify-content:space-between;"> <span>${usedPct}% used</span><span>${…` |
 | 4572 | <div> content | `<div style="font-size:11px; color:var(--text-muted); margin-top:6px;"> 1 AI Credit = $0.01 · Budget = $${formatFixed(api.budgetUsd, 2)}/month </div>` |
 | 4581 | <div> content | `<div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.5;"> ℹ️ No Copilot API quota data available yet. The API balance appears a…` |
-| 4591 | <span> content | `<span>Gap (untracked Copilot usage)</span>` |
-| 4591 | <span> content | `<span>$${formatFixed(gapUsd, 2)} (${formatNumber(gapCredits)} credits)</span>` |
-| 4594 | <span> content | `<span>Other providers (not in Copilot API)</span>` |
+| 4591 | <div> content | `<div style="display:flex; justify-content:space-between; padding-top:6px; border-top:1px solid var(--border-subtle); color:var(--text-secondary);"><span>Gap (un…` |
+| 4594 | <div> content | `<div style="display:flex; justify-content:space-between;"><span>Other providers (not in Copilot API)</span><span>$${formatFixed(nonCopilotCostUsd, 2)}</span></d…` |
 | 4597 | <div> content | `<div style="margin-top:8px; font-size:11px; color:var(--text-muted); line-height:1.5;">ℹ️ The gap represents Copilot usage the extension cannot track: <strong>g…` |
 | 4598 | <div> content | `<div style="margin-top:8px; font-size:11px; color:var(--text-muted);">✅ Extension-tracked Copilot usage matches the API — no significant untracked usage from we…` |
 | 4601 | <div> content | `<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">Coverage analysis</div>` |
-| 4603 | <span> content | `<span>API total Copilot usage</span>` |
-| 4603 | <span> content | `<span style="font-weight:600;">$${formatFixed(apiUsedUsd, 2)} (${formatNumber(api.usedAiCredits)} credits)</span>` |
-| 4604 | <span> content | `<span>Extension tracked (Copilot IDE sessions)</span>` |
-| 4604 | <span> content | `<span style="font-weight:600;">$${formatFixed(copilotCostUsd, 2)} (${formatNumber(Math.round(copilotCostUsd * 100))} credits)</span>` |
-| 4626 | <span> content | `<span>AI Billing Coverage</span>` |
+| 4603 | <div> content | `<div style="display:flex; justify-content:space-between;"><span>API total Copilot usage</span><span style="font-weight:600;">$${formatFixed(apiUsedUsd, 2)} (${f…` |
+| 4604 | <div> content | `<div style="display:flex; justify-content:space-between;"><span>Extension tracked (Copilot IDE sessions)</span><span style="font-weight:600;">$${formatFixed(cop…` |
+| 4626 | <div> content | `<div class="section-title"><span>💳</span><span>AI Billing Coverage</span></div>` |
 | 4627 | <div> content | `<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs, alo…` |
-| 4649 | <span> content | `<span>Interaction Modes</span>` |
+| 4649 | <div> content | `<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>` |
 | 4650 | <div> content | `<div class="section-subtitle">How you're using AI assistants: Ask (chat), Edit (code edits), Agent (autonomous tasks), Plan, Custom Agent, CLI (terminal), Copil…` |
-| 4651 | <div> content | `<div class="two-column"> ${renderModeBarChart(stats.today.modeUsage, '📅 Today')} ${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')} </div>` |
-| 4707 | <span> content | `<span>${formatNumber(maxTokens)} tokens — ${formatFixed(pct, 0)}% of the ${formatNumber(tier.thresholdTokens)}-token default tier for ${modelName}</span>` |
+| 4706 | <div> content | `<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-secondary); margin-bottom:4px;"> <span>${formatNumber(maxTokens)} toke…` |
 | 4713 | <div> content | `<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Default tier fits ${_defaultTierCapacityText(tier.thresholdTokens)}; ${rateNote}.</div>` |
 | 4777 | <div> content | `<div style="color: var(--text-muted); font-size: 11px;">No data</div>` |
 | 4802 | title attribute | `title="Automatic compactions remove earlier messages to fit the context window and can affect response quality."` |
 | 4804 | <div> content | `<div class="automatic-compactions-label">↩ Automatic compactions (last 7 days)</div>` |
-| 4821 | <span> content | `<span>Context Window &amp; Long-Context Pricing</span>` |
+| 4821 | <div> content | `<div class="section-title"><span>🪟</span><span>Context Window &amp; Long-Context Pricing</span></div>` |
 | 4822 | <div> content | `<div class="section-subtitle">How close your largest requests come to the long-context price line. Models with tiered pricing bill higher input rates once a req…` |
 | 4825 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>` |
 | 4829 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>` |
@@ -1251,32 +1230,30 @@ before localizing.
 | 4912 | <td> content | `<td class="ctx-ref-name">📊 Total References</td>` |
 | 4972 | <div> content | `<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📎 Attached Files by Type (Last 30 Days)</div>` |
 | 4984 | <div> content | `<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📁 Most Referenced Files (Last 30 Days)</div>` |
-| 4997 | <span> content | `<span>Context References</span>` |
+| 4997 | <div> content | `<div class="section-title"><span>🔗</span><span>Context References</span></div>` |
 | 4998 | <div> content | `<div class="section-subtitle">How often you reference files, selections, symbols, and workspace context</div>` |
 | 5018 | title attribute | `title="Suppress this tool from the unknown list"` |
 | 5018 | aria-label attribute | `aria-label="Suppress ${escapeHtml(tool)}"` |
-| 5028 | <span> content | `<span>Report Unknown Tools</span>` |
+| 5026 | <a> content | `<a href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; backg…` |
 | 5114 | <span> content | `<span>${formatNumber(row.counters.calls)} turns</span>` |
 | 5238 | aria-label attribute | `aria-label="Model vendor colors"` |
-| 5247 | <strong> content | `<strong>No comparable edit data yet.</strong>` |
-| 5247 | <span> content | `<span>The chart appears after local sessions record both a model and structured edit turns.</span>` |
+| 5247 | <div> content | `<div class="model-leaderboard-empty"><strong>No comparable edit data yet.</strong><span>The chart appears after local sessions record both a model and structure…` |
 | 5266 | aria-label attribute | `aria-label="One-shot edit rate compared with ${escapeHtml(metric.axisLabel.toLowerCase())}; bubble size represents ${escapeHtml(bubbleMetric.label.toLowerCase()…` |
+| 5269 | <text> content | `<text class="efficiency-axis-title" x="17" y="155" text-anchor="middle" transform="rotate(-90 17 155)">One-shot edit rate</text>` |
+| 5270 | <text> content | `<text class="efficiency-chart-hint" x="836" y="17" text-anchor="end">higher is better ↑</text>` |
 | 5288 | aria-label attribute | `aria-label="Efficiency comparison metric"` |
 | 5288 | <span> content | `<span>X-axis</span>` |
 | 5289 | <span> content | `<span>Bubble size</span>` |
 | 5290 | <span> content | `<span>Color by</span>` |
 | 5317 | <summary> content | `<summary>Other models (${otherRows.length}, ${formatRatePercent(otherShare)} of turns)</summary>` |
-| 5325 | <strong> content | `<strong>No per-model efficiency data for this period.</strong>` |
-| 5325 | <span> content | `<span>Run local agent sessions with model and tool-call metadata, then refresh the dashboard.</span>` |
-| 5333 | <strong> content | `<strong>Efficiency frontier</strong>` |
-| 5333 | <span> content | `<span>One-shot edit rate is a local quality proxy, not a benchmark pass rate.</span>` |
-| 5335 | <strong> content | `<strong>Most used models locally</strong>` |
-| 5335 | <span> content | `<span>Ranked by your local turns; all averages use the same selected period.</span>` |
-| 5342 | <span> content | `<span>Local Model Leaderboard</span>` |
+| 5325 | <div> content | `<div class="model-leaderboard-empty"><strong>No per-model efficiency data for this period.</strong><span>Run local agent sessions with model and tool-call metad…` |
+| 5333 | <div> content | `<div><strong>Efficiency frontier</strong><span>One-shot edit rate is a local quality proxy, not a benchmark pass rate.</span></div>` |
+| 5335 | <div> content | `<div><strong>Most used models locally</strong><span>Ranked by your local turns; all averages use the same selected period.</span></div>` |
+| 5342 | <div> content | `<div class="section-title"><span>🎯</span><span>Local Model Leaderboard</span></div>` |
 | 5343 | <div> content | `<div class="section-subtitle">Compare the models in your own sessions by local usage, one-shot edits, cost, output tokens, and tool steps. Exactness depends on …` |
 | 5346 | title attribute | `title="Show only models above the 25th-percentile local turn count."` |
 | 5346 | <label> content | `<label class="model-leaderboard-filter" title="Show only models above the 25th-percentile local turn count."> <input type="checkbox" id="eff-filter-low-usage"${…` |
-| 5444 | <span> content | `<span>Tool Usage</span>` |
+| 5444 | <div> content | `<div class="section-title"><span>🔧</span><span>Tool Usage</span></div>` |
 | 5445 | <div> content | `<div class="section-subtitle">Functions and tools invoked by Copilot during interactions${hideAutomaticToolCalls ? ' (automatic tool calls hidden — disable "Hid…` |
 | 5448 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>` |
 | 5450 | <div> content | `<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.today.toolCalls.total)}</…` |
@@ -1284,11 +1261,10 @@ before localizing.
 | 5457 | <div> content | `<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.last30Days.toolCalls.tota…` |
 | 5462 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>` |
 | 5464 | <div> content | `<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.month.toolCalls.total)}</…` |
-| 5476 | <span> content | `<span>Multi-Model Usage</span>` |
+| 5476 | <div> content | `<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>` |
 | 5477 | <div> content | `<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>` |
-| 5478 | <div> content | `<div class="three-column"> ${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allLowCostModels, allMediumCostModels, allHighCostModels, allUnknown…` |
 | 5501 | <div> content | `<div style="color: var(--vscode-foreground); opacity: 0.7; margin-bottom: 12px;">⚠️ Something went wrong rendering the dashboard.</div>` |
-| 5557 | <span> content | `<span>Sessions Summary</span>` |
+| 5557 | <div> content | `<div class="section-title"><span>📈</span><span>Sessions Summary</span></div>` |
 | 5559 | <div> content | `<div class="stat-label">📅 Today Sessions</div>` |
 | 5560 | <div> content | `<div class="stat-label">📆 Last 30 Days Sessions</div>` |
 | 5561 | <div> content | `<div class="stat-label">📅 This Month Sessions</div>` |
@@ -1318,6 +1294,7 @@ before localizing.
 | 6397 | <div> content | `<div style="font-size: 11px; color: #fca5a5;">Repository: ${escapeHtml(workspaceName)}</div>` |
 | 6398 | <vscode-button> content | `<vscode-button id="btn-switch-repository" style="min-width: 120px;">Switch Repository</vscode-button>` |
 | 6400 | <div> content | `<div style="font-size: 12px; font-weight: 600; color: #ef4444; margin-bottom: 4px;">❌ Analysis Failed</div>` |
+| 6410 | <div> content | `<div style="font-size: 12px; color: var(--text-secondary);">Repository: <span style="color: var(--text-primary); font-weight: 600; font-family: 'Courier New', m…` |
 | 6411 | <vscode-button> content | `<vscode-button id="btn-switch-repository" style="min-width: 120px;">Switch Repository</vscode-button>` |
 | 6413 | <div> content | `<div style="font-size: 11px; color: var(--text-muted);">No analysis data yet. Click Analyze in the list.</div>` |
 | 6434 | .textContent assignment | `.textContent = 'Analyze Repo for Best Practices'` |
@@ -1327,7 +1304,7 @@ before localizing.
 | 6512 | .textContent assignment | `.textContent = '⏳ Taking longer than expected… Session files may be large or the scan is still in progress.'` |
 | 6554 | .textContent assignment | `.textContent = 'Failed to initialize usage analysis. Please try refreshing.'` |
 
-### `vscode-extension/src/webview/whatsnew/main.ts` (8)
+### `vscode-extension/src/webview/whatsnew/main.ts` (9)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -1337,6 +1314,7 @@ before localizing.
 | 107 | el() text argument | `el('span', 'release-current', 'You are here')` |
 | 116 | el() text argument | `el('div', 'release-empty', 'Fixes and maintenance only — nothing new to go and look at.')` |
 | 139 | el() text argument | `el('div', 'title', "📣 What's New")` |
+| 146 | el() text argument | `el( 'div', 'intro', 'The last ${data.releases.length} release${data.releases.length === 1 ? '' : 's'}, in plain English. ' + 'The extension points out at most o…` |
 | 159 | el() text argument | `el('div', 'footer', 'Running version ${data.currentVersion}. The full changelog, including fixes, ships with the extension.')` |
 | 198 | .textContent assignment | `.textContent = 'No release information available.'` |
 

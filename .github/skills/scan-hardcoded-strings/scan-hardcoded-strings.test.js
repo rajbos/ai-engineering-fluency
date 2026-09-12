@@ -32,6 +32,8 @@ const {
     findTextNodeCalls,
     findSetAttributeCalls,
     splitTopLevelArgs,
+    splitTopLevelConcat,
+    extractConcatenatedLiteralText,
     scanFile,
     extractHtmlMethodRanges,
     isWithinRanges,
@@ -106,6 +108,16 @@ test('stripInterpolations: a typeof/comparison literal in the ternary condition 
     // expression rather than just the branches after "?".
     const result = stripInterpolations("${typeof label === 'string' ? label : ''}");
     assert.doesNotMatch(result, /string/);
+});
+
+test('stripInterpolations: a literal argument to a non-localization helper call is not treated as UI text', () => {
+    // Regression: `${buttonHtml('btn-refresh')}` had 'btn-refresh' extracted
+    // and flagged as prose, because extractInterpolationLiterals grabbed any
+    // quoted literal anywhere in the interpolation's expression, not just an
+    // actual ternary branch. 'btn-refresh' follows '(' here, not '?'/':', so
+    // it is no longer a ternary-branch position.
+    const result = stripInterpolations("${buttonHtml('btn-refresh')}");
+    assert.doesNotMatch(result, /btn-refresh/);
 });
 
 // ── extractStaticText / looksLikeProse ───────────────────────────────────────
@@ -408,6 +420,29 @@ test('findTagContent: flags hardcoded text inside a <vscode-button>', () => {
     assert.equal(findings[0].kind, '<vscode-button> content');
 });
 
+test('findTagContent: tolerates a nested <span> badge inside a <label> without losing the outer text', () => {
+    // Regression: a <span> nested inside another scanned tag (e.g. a trailing
+    // counter badge) was not in INLINE_PASSTHROUGH_TAGS, so the body pattern
+    // couldn't get past it and the whole outer <label> match — including its
+    // real UI text — was missed (diagnostics/main.ts's "Show only sessions
+    // with unattributed tokens" checkbox label).
+    const findings = findTagContent(
+        '<label>Show only sessions with unattributed tokens<span class="hidden-count">(3)</span></label>',
+    );
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, '<label> content');
+    assert.match(findings[0].snippet, /unattributed tokens/);
+});
+
+test('findTagContent: flags hardcoded text inside an SVG <text> element', () => {
+    // Regression: 'text' wasn't in TAG_NAMES, so SVG chart labels like
+    // usage/main.ts's <text>One-shot edit rate</text> and
+    // <text>higher is better</text> were invisible to this scan.
+    const findings = findTagContent('<text class="efficiency-chart-hint" x="836" y="17">higher is better</text>');
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, '<text> content');
+});
+
 // ── splitTopLevelArgs ─────────────────────────────────────────────────────────
 
 test('splitTopLevelArgs: splits simple comma-separated arguments', () => {
@@ -463,6 +498,39 @@ test('findHelperCallText: handles a template-literal text argument containing an
     const findings = findHelperCallText("el('span', 'header-icon', `Loading ${count} items`)");
     assert.equal(findings.length, 1);
     assert.match(findings[0].snippet, /Loading/);
+});
+
+test('findHelperCallText: flags a text argument made of literals joined by +', () => {
+    // Regression: whatsnew/main.ts's el('div', 'intro', `The last ${n} releases. ` +
+    // 'more text.') was invisible — the single-literal pattern requires the
+    // whole argument to start and end with the SAME quote character, which a
+    // concatenation of a template literal and a string literal never does.
+    const findings = findHelperCallText(
+        "el('div', 'intro', `The last ${n} releases, in plain English. ` + 'Only until you have opened it.')",
+    );
+    assert.equal(findings.length, 1);
+    assert.match(findings[0].snippet, /plain English/);
+});
+
+test('findHelperCallText: does not flag a concatenation with a non-literal piece', () => {
+    const findings = findHelperCallText("el('div', 'intro', 'Prefix ' + getSuffix())");
+    assert.equal(findings.length, 0);
+});
+
+// ── splitTopLevelConcat / extractConcatenatedLiteralText ───────────────────────
+
+test('splitTopLevelConcat: splits on a top-level + but not one inside a literal or nested call', () => {
+    const parts = splitTopLevelConcat("`a ${1 + 2}` + 'b' + foo(1 + 1)");
+    assert.deepEqual(parts, ["`a ${1 + 2}`", "'b'", 'foo(1 + 1)']);
+});
+
+test('extractConcatenatedLiteralText: joins the static text of concatenated literals', () => {
+    const text = extractConcatenatedLiteralText("'Hello ' + `world`");
+    assert.equal(text, 'Hello  world');
+});
+
+test('extractConcatenatedLiteralText: returns null when any piece is not a direct literal', () => {
+    assert.equal(extractConcatenatedLiteralText("'Hello ' + name"), null);
 });
 
 // ── findTextNodeCalls ────────────────────────────────────────────────────────

@@ -56,23 +56,27 @@ The script will:
    the same three set via `.setAttribute('title', '...')`), a literal
    `document.createTextNode('...')` argument, text inside `<div>`,
    `<button>`, `<vscode-button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`,
-   `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>`, `<li>`, `<title>`
-   tags in template literals (tolerating simple nested inline tags like
-   `<a>`/`<strong>`, which are also matched as a literal's own root tag so
-   e.g. `el.innerHTML = '<strong>Save changes</strong>'` isn't missed, and
-   void/structural tags like `<input>`/`<br>` that never need a closing
-   tag), and the UI-text argument of a known shared DOM helper call
-   (`el(...)`, `iconHeading(...)`, `createButton(...)` from
-   `vscode-extension/src/webview/shared/domUtils.ts`)
+   `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>`, `<li>`, `<title>`,
+   and SVG's `<text>` tags in template literals (tolerating simple nested
+   inline tags like `<a>`/`<strong>`/`<span>`, which are also matched as a
+   literal's own root tag so e.g. `el.innerHTML = '<strong>Save
+   changes</strong>'` isn't missed, and void/structural tags like
+   `<input>`/`<br>` that never need a closing tag), and the UI-text argument
+   of a known shared DOM helper call (`el(...)`, `iconHeading(...)`,
+   `createButton(...)` from `vscode-extension/src/webview/shared/domUtils.ts`)
+   — that argument may be several string/template literals joined by `+`,
+   not just one
 3. Skip anything already wrapped in `localize(`, `localizeFormat(`, `t(`, or
    `vscode.l10n.t(`, and anything that doesn't look like prose (pure
    numbers/symbols, URLs, CSS values, a narrow denylist of single CSS-keyword
    tokens — not every single lowercase word; the letter check itself is
    Unicode-aware, so non-English text isn't exempted) — but recover string
-   literals hidden inside an interpolation's own expression, e.g. a ternary
-   like `` `${flag ? 'Enable Overrides' : 'Disable Overrides'}` ``, checking
-   each recovered literal on its own so one non-prose branch can't suppress
-   another genuine one
+   literals that are themselves a whole ternary branch inside an
+   interpolation's expression, e.g. `` `${flag ? 'Enable Overrides' :
+   'Disable Overrides'}` `` (a literal that is merely an argument to some
+   other call in the same interpolation, e.g. `` `${buttonHtml('btn-refresh')}` ``,
+   is left alone), checking each recovered literal on its own so one
+   non-prose branch can't suppress another genuine one
 4. Print a console report grouped by file, with line numbers and snippets
 5. Write the same findings to `hardcoded-strings-report.md` at the repo root
 6. Set `process.exitCode = 0` rather than forcing `process.exit()` — this

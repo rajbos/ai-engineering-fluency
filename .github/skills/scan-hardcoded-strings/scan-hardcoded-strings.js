@@ -42,7 +42,7 @@ const WEBVIEW_DIR = path.join(REPO_ROOT, 'vscode-extension/src/webview');
 const EXTENSION_FILE = path.join(REPO_ROOT, 'vscode-extension/src/extension.ts');
 const REPORT_PATH = path.join(REPO_ROOT, 'hardcoded-strings-report.md');
 
-const TAG_NAMES = ['div', 'button', 'vscode-button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'td', 'th', 'option', 'summary', 'caption', 'li', 'title'];
+const TAG_NAMES = ['div', 'button', 'vscode-button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'td', 'th', 'option', 'summary', 'caption', 'li', 'title', 'text'];
 const TEXT_PROPS = ['textContent', 'innerText', 'innerHTML', 'title', 'placeholder'];
 
 // ── File collection ────────────────────────────────────────────────────────
@@ -160,17 +160,25 @@ function stripLocalizedCalls(text) {
     return result;
 }
 
-// Matches trailing `==`, `===`, `!=`, or `!==` right before a literal, so a
-// comparison operand like `typeof x === 'string'` isn't mistaken for a
-// ternary branch's UI text (`'string'` here is a typeof-result check, not
-// hardcoded prose).
-const COMPARISON_BEFORE_RE = /(?:={2,3}|!={1,2})\s*$/;
+// A literal is only treated as a ternary branch's UI text when it is itself
+// the whole consequent/alternate of a conditional — i.e. immediately
+// preceded by `?` or `:` (ignoring whitespace). This is a positive allowlist
+// rather than a denylist of specific "not a branch" contexts, so it excludes
+// a comparison operand (`typeof x === 'string'` — `'string'` follows `===`,
+// not `?`/`:`) *and* a literal argument buried inside some other call within
+// the interpolation (`` `${buttonHtml('btn-refresh')}` `` — `'btn-refresh'`
+// follows `(`, not `?`/`:`) without needing a separate rule for each shape of
+// "not actually a UI-text branch" expression.
+const TERNARY_BRANCH_BEFORE_RE = /[?:]\s*$/;
 
 /**
- * Extract quoted string/template literal bodies (non-nested) from an
- * interpolation or conditional expression — e.g. both branches of
+ * Extract quoted string/template literal bodies (non-nested) that are
+ * themselves a ternary branch — e.g. both branches of
  * `` isExcluded ? `${provider} is hidden...` : `Click to hide ${provider}...` ``
- * (a template-literal ternary), not just single/double-quoted branches.
+ * (a template-literal ternary), not just single/double-quoted branches. A
+ * literal elsewhere in the expression (a function-call argument, a
+ * comparison operand) is not a UI-rendering position on its own and is left
+ * alone.
  */
 function extractInterpolationLiterals(expr) {
     const stripped = stripLocalizedCalls(expr);
@@ -178,7 +186,7 @@ function extractInterpolationLiterals(expr) {
     const re = /(["'`])((?:(?!\1)[^\\]|\\.)*)\1/g;
     let m;
     while ((m = re.exec(stripped)) !== null) {
-        if (COMPARISON_BEFORE_RE.test(stripped.slice(0, m.index))) { continue; }
+        if (!TERNARY_BRANCH_BEFORE_RE.test(stripped.slice(0, m.index))) { continue; }
         literals.push(m[2]);
     }
     return literals;
@@ -412,7 +420,11 @@ function findHtmlAttributes(content) {
 // content without stopping the match — e.g. `<div>Beta — please <a href="...">
 // create an issue</a>.</div>` should still be read as one block of prose
 // rather than being skipped because of the `<a>...</a>` in the middle.
-const INLINE_PASSTHROUGH_TAGS = ['a', 'strong', 'em', 'code', 'b', 'i', 'u'];
+// `span` is included since it's routinely used inline for a trailing badge
+// or counter (e.g. `<label>...text<span class="hidden-count">(3)</span>
+// </label>`) — without it, the body pattern can't get past the nested
+// `<span>` and the whole outer match (and its real UI text) is missed.
+const INLINE_PASSTHROUGH_TAGS = ['a', 'strong', 'em', 'code', 'b', 'i', 'u', 'span'];
 // Void/self-closing structural elements: they never have a closing tag, so
 // allowing them inline (without requiring a matching `</tag>`) keeps e.g. a
 // `<label>` with a leading `<input>` or a `<div>` with `<br>` line breaks
@@ -491,6 +503,56 @@ function splitTopLevelArgs(argsStr) {
 }
 
 /**
+ * Split an argument expression on top-level `+` operators (outside any
+ * string/template literal or nested bracket), so a concatenated literal
+ * argument like `` `The last ${n} releases. ` + 'more text.' `` can be read
+ * as separate pieces.
+ */
+function splitTopLevelConcat(expr) {
+    const parts = [];
+    let depth = 0;
+    let quote = null;
+    let current = '';
+    for (let i = 0; i < expr.length; i++) {
+        const c = expr[i];
+        if (quote) {
+            current += c;
+            if (c === '\\') { current += expr[++i] ?? ''; continue; }
+            if (c === quote) { quote = null; }
+            continue;
+        }
+        if (c === '"' || c === "'" || c === '`') { quote = c; current += c; continue; }
+        if (c === '(' || c === '[' || c === '{') { depth++; current += c; continue; }
+        if (c === ')' || c === ']' || c === '}') { depth--; current += c; continue; }
+        if (c === '+' && depth === 0) { parts.push(current); current = ''; continue; }
+        current += c;
+    }
+    parts.push(current);
+    return parts.map((p) => p.trim());
+}
+
+/**
+ * Resolve an argument expression to its combined static UI text when it is
+ * made up entirely of string/template literals joined by `+` — e.g.
+ * `` `The last ${n} releases. ` + 'more text.' ``, which the single-literal
+ * pattern (`^(quote)...(same quote)$`) can't recognize since the two quote
+ * characters at the start and end of the whole expression differ. Returns
+ * `null` if any piece isn't a direct literal (a variable/call there means
+ * the text isn't fully knowable statically, so the whole argument is
+ * skipped rather than guessed at).
+ */
+function extractConcatenatedLiteralText(expr) {
+    const pieces = splitTopLevelConcat(expr);
+    const texts = [];
+    for (const piece of pieces) {
+        const litMatch = /^(["'`])([\s\S]*)\1$/.exec(piece);
+        if (!litMatch) { return null; }
+        texts.push(extractStaticText(litMatch[2]));
+    }
+    return texts.join(' ');
+}
+
+/**
  * Detect hardcoded text passed as a string/template literal to a known
  * shared UI-text helper (`el(tag, className, text)`, `iconHeading(tag, icon,
  * text, className)`, `createButton(id, label, appearance)`). Only bare calls
@@ -512,10 +574,9 @@ function findHelperCallText(content) {
         const args = splitTopLevelArgs(content.slice(openIdx + 1, end));
         const arg = args[HELPER_TEXT_ARG_INDEX[name]];
         if (!arg) { continue; }
-        const litMatch = /^(["'`])([\s\S]*)\1$/.exec(arg);
-        if (!litMatch) { continue; } // not a direct literal (variable/call/etc.) — skip
+        const staticText = extractConcatenatedLiteralText(arg);
+        if (staticText === null) { continue; } // not a direct literal (or concatenation of literals) — skip
 
-        const staticText = extractStaticText(litMatch[2]);
         if (looksLikeProse(staticText)) {
             findings.push({
                 index: m.index,
@@ -893,6 +954,8 @@ module.exports = {
     findTextNodeCalls,
     findSetAttributeCalls,
     splitTopLevelArgs,
+    splitTopLevelConcat,
+    extractConcatenatedLiteralText,
     scanFile,
     maskBlockComments,
     isRegexLiteralStart,

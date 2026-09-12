@@ -83,21 +83,28 @@ addition to printing a console summary grouped by file.
 - Text content inside common UI-bearing HTML tags embedded in template
   literals: `<div>`, `<button>`, `<vscode-button>`, `<label>`, `<h1>`–`<h6>`,
   `<p>`, `<span>`, `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>`,
-  `<li>`, `<title>` — tolerating simple nested inline tags (`<a>`,
-  `<strong>`, `<em>`, `<code>`, `<b>`, `<i>`, `<u>`) so prose broken up by an
-  inline link or emphasis is still read as one block instead of being
-  skipped, and void/structural tags (`<input>`, `<br>`, `<hr>`, `<img>`,
-  etc.) that never need a closing tag. Those inline tags are also matched as
-  a literal's *root* tag (not only nested), so e.g. `el.innerHTML =
-  '<strong>Save changes</strong>'` is still found even though `.innerHTML`
-  assignments containing markup otherwise defer entirely to this detector
+  `<li>`, `<title>`, and SVG's `<text>` (used for chart labels, e.g. the
+  efficiency chart's axis titles) — tolerating simple nested inline tags
+  (`<a>`, `<strong>`, `<em>`, `<code>`, `<b>`, `<i>`, `<u>`, `<span>`) so
+  prose broken up by an inline link, emphasis, or a trailing badge/counter
+  (`<span class="hidden-count">(3)</span>`) is still read as one block
+  instead of being skipped, and void/structural tags (`<input>`, `<br>`,
+  `<hr>`, `<img>`, etc.) that never need a closing tag. Those inline tags are
+  also matched as a literal's *root* tag (not only nested), so e.g.
+  `el.innerHTML = '<strong>Save changes</strong>'` is still found even though
+  `.innerHTML` assignments containing markup otherwise defer entirely to
+  this detector
 - A string/template literal passed as the UI-text argument to a known shared
   DOM helper (`el(tag, className, text)`, `iconHeading(tag, icon, text,
   className)`, `createButton(id, label, appearance)` from
   `vscode-extension/src/webview/shared/domUtils.ts`) — these helpers set
   `.textContent` internally, so a call site like `el('button', 'my-btn',
   'Take me there')` never appears as a `.textContent = ` assignment and would
-  otherwise be invisible to this scan (500+ call sites use these helpers)
+  otherwise be invisible to this scan (500+ call sites use these helpers).
+  The text argument may also be several literals joined by `+` (e.g. `` el('div',
+  'intro', `The last ${n} releases. ` + 'more text.') ``) — each piece is
+  recognized and their static text is joined, rather than requiring the whole
+  argument to be a single literal
 
 `extension.ts` is scanned only within its `get*Html(...)` method bodies
 (`getDetailsHtml`, `getLoadingHtmlCssBase`, etc.) — not the whole 13k-line
@@ -122,17 +129,23 @@ like prose" filter that excludes:
 Anything already wrapped in a `localize(...)`, `localizeFormat(...)`, `t(...)`,
 or `vscode.l10n.t(...)` call — including inside a template-literal interpolation like
 `` `${localize('key')}` `` — is stripped out before the prose check runs, so
-already-localized text is not flagged. Conversely, a string literal hidden
-inside an interpolation's own expression — e.g. a ternary like
+already-localized text is not flagged. Conversely, a string literal that is
+itself a whole ternary branch inside an interpolation's expression — e.g.
 `` `${flag ? 'Enable Overrides' : 'Disable Overrides'}` `` — is preserved and
-checked, since that is often where the actual hardcoded UI text lives. Each
-recovered literal is prose-checked on its own before being combined, so one
-non-prose branch (e.g. a URL) can't poison another genuine one — `` `${cond
-? 'https://x' : 'Open link'}` `` still surfaces "Open link". Similarly, tag
-delimiters left behind by a stripped interpolation (e.g. `<strong></strong>`
-after `<strong>${count}</strong>` loses its dynamic content) are removed
-before the prose check, so a tag *name* like "strong" is never itself
-mistaken for hardcoded text.
+checked, since that is often where the actual hardcoded UI text lives. Only a
+literal immediately preceded by `?` or `:` (ignoring whitespace) counts as a
+branch this way; a literal that is merely an argument to some other call
+inside the same interpolation — e.g. `` `${buttonHtml('btn-refresh')}` `` —
+is left alone, since `'btn-refresh'` there is a button id, not UI text, and
+follows `(` rather than `?`/`:`. The same rule is what keeps a comparison
+operand like `` `${typeof x === 'string' ? x : ''}` `` from being misread as
+a branch. Each recovered literal is prose-checked on its own before being
+combined, so one non-prose branch (e.g. a URL) can't poison another genuine
+one — `` `${cond ? 'https://x' : 'Open link'}` `` still surfaces "Open link".
+Similarly, tag delimiters left behind by a stripped interpolation (e.g.
+`<strong></strong>` after `<strong>${count}</strong>` loses its dynamic
+content) are removed before the prose check, so a tag *name* like "strong" is
+never itself mistaken for hardcoded text.
 
 Before any detector runs, `/* ... */` block comments (including JSDoc) are
 blanked out — a doc-comment example like `Converts [text](url) to <a
