@@ -31,6 +31,12 @@ import {
 	windowHasModelData,
 } from '../../../../src/efficiencyAnalysis';
 import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { registerMessageHandler } from '../shared/messageHandler';
+import {
+	createEfficiencyWebviewReadyNotifier,
+	isValueSignalsPayload,
+	valueSignalsEqual,
+} from './valueUpdate';
 
 // Minimal structural types for the dynamically imported Chart.js bundle —
 // a `typeof import('chart.js/auto')` type-import trips TS1542 under CJS resolution.
@@ -44,7 +50,12 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 };
 
 const vscode = acquireVsCodeApi();
-const data = getWindowData<EfficiencyViewData & { localization?: Record<string, string> }>('__INITIAL_EFFICIENCY__');
+const notifyEfficiencyWebviewReady = createEfficiencyWebviewReadyNotifier(
+	(message) => vscode.postMessage(message),
+);
+// Mutable: the host pushes a fresh Value snapshot when Repository PR data lands after this
+// document was rendered (see `valueSignalsUpdated` below), which must survive tab switches.
+let data = getWindowData<EfficiencyViewData & { localization?: Record<string, string> }>('__INITIAL_EFFICIENCY__');
 
 // Initialize localization for webview
 if (data?.localization) {
@@ -1156,6 +1167,32 @@ function wireEvents(): void {
 	wireExtensionPointButtons(vscode);
 }
 
+// ── Host messages ──────────────────────────────────────────────────────
+
+/**
+ * Applies a Value snapshot pushed by the host after Repository PR data loaded.
+ *
+ * Deliberately *not* a full re-render: the selected tab, the Models-tab controls and the live
+ * Chart.js instances all live in this document and a re-render would tear them down. When Value
+ * is the active tab only its fragment is replaced; otherwise the new state is simply retained
+ * and picked up by the next tab switch.
+ */
+function applyValueSignals(next: EfficiencyViewData['value']): void {
+	if (!data || valueSignalsEqual(data.value, next)) { return; }
+	data = { ...data, value: next };
+	if (activeTab !== 'value') { return; }
+	setHtml(document.getElementById('eff-tab-content'), renderValueTab(data));
+}
+
+registerMessageHandler<{ command?: string; value?: unknown }>((message) => {
+	// Repository PR results are the only host push this view consumes. Cloud-agent task loads
+	// publish their own message and must not touch Value: `aiPrs` counts bot-authored pull
+	// requests, not cloud-agent tasks.
+	if (message?.command !== 'valueSignalsUpdated' || !isValueSignalsPayload(message.value)) { return; }
+	applyValueSignals(message.value);
+});
+notifyEfficiencyWebviewReady('listener-registered');
+
 async function bootstrap(): Promise<void> {
 	await import('@vscode-elements/elements/dist/vscode-button/index.js');
 	if (!data) {
@@ -1164,6 +1201,9 @@ async function bootstrap(): Promise<void> {
 		return;
 	}
 	render();
+	// The first announcement above necessarily happens before anything is rendered, so a replay
+	// it triggered found no `#eff-tab-content` to update. Announce again now that there is one.
+	notifyEfficiencyWebviewReady('content-rendered');
 }
 
 void bootstrap();

@@ -95,3 +95,25 @@ test('a hanging webview delivery is bounded and remains replayable', { timeout: 
 	await replay.markReady();
 	assert.deepEqual(delivered, ['agentSessionsLoaded']);
 });
+
+test('reset() forgets buffered state so a later document gets nothing stale', async () => {
+	// The Efficiency panel's buffered Value snapshot is derived from the data one document was
+	// rendered with; replaying it into a *later* document would push stale numbers over fresher
+	// bootstrap data, so that panel resets the buffer whenever it replaces its HTML.
+	const delivered: string[] = [];
+	const replay = new WebviewMessageReplay((message) => {
+		delivered.push(message.command);
+		return true;
+	});
+
+	await replay.markReady();
+	await replay.publish('valueSignals', { command: 'valueSignalsUpdated', value: {} });
+	delivered.length = 0;
+
+	replay.reset();
+	assert.equal(replay.isReady, false, 'the replacement document has not announced readiness yet');
+
+	const replayed = await replay.markReady();
+	assert.deepEqual(replayed, []);
+	assert.deepEqual(delivered, []);
+});

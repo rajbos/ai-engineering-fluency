@@ -227,7 +227,10 @@ import {
   type EfficiencyViewData,
   type ModelDailyInput,
   type PeriodVolumeTotals,
+  type ValueSignals,
+  type ValueSignalsInput,
 } from '../../src/efficiencyAnalysis';
+import { valueSignalsEqual } from './webview/efficiency/valueUpdate';
 
 import { scanDarkFactoryReadiness } from './darkFactoryService';
 
@@ -712,6 +715,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private fluencyLevelViewerPanel: vscode.WebviewPanel | undefined;
 	private environmentalPanel: vscode.WebviewPanel | undefined;
 	private efficiencyPanel: vscode.WebviewPanel | undefined;
+	/**
+	 * Replay channel for the Efficiency panel's Value updates. Reset on every HTML replacement and
+	 * on disposal: a retained snapshot is only valid for the document it was derived for.
+	 */
+	private readonly efficiencyMessageReplay = new WebviewMessageReplay(
+		(message) => this.efficiencyPanel?.webview.postMessage(message) ?? false,
+		2_000,
+		(error) => this.warn(`Efficiency message delivery failed: ${error}`),
+	);
+	/** The data the live Efficiency document was rendered with; the base for Value-only updates. */
+	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
 	private whatsNewPanel: vscode.WebviewPanel | undefined;
 	/** What the user has already been told about; see `src/whatsNew/announcer.ts`. */
 	private _whatsNewState: WhatsNewState = { ...EMPTY_WHATS_NEW_STATE };
@@ -2374,16 +2388,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const { delivered, wasReady } = await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: stamped });
 		this.log(`🔎 Repository PR stats posted for ${stamped.repos.length} repo(s) (delivered=${delivered}, webviewReady=${wasReady}, ${this._describeAnalysisPanel()})`);
 
-		// `fetchedAt` is only set on real (cache-read or freshly-fetched) snapshots — the instant
-		// placeholder served on cold open uses ''. If the Efficiency panel is already open and its
-		// Value tab was rendered before this real data landed (e.g. the user opened Repository PRs
-		// after Efficiency), its "no data" hint would otherwise persist until an explicit Refresh
-		// click, since showEfficiency() deliberately doesn't recompute on reveal. Push the update.
-		if (stamped.fetchedAt && this.efficiencyPanel) {
-			void this.dispatch('refresh:efficiency', () => this.refreshEfficiencyPanel()).catch((err) => {
-				this.warn(`Failed to refresh Efficiency view after repository PR stats update: ${err}`);
-			});
-		}
+		// The Efficiency view's Value tab is derived from this same snapshot, and it is routinely
+		// rendered before Repository PRs are loaded from the Usage Analysis panel. Push a
+		// Value-only update so its "no data" hint doesn't persist until an explicit Refresh click
+		// (showEfficiency() deliberately doesn't recompute on reveal, and `retainContextWhenHidden`
+		// means revealing a hidden panel re-renders nothing).
+		await this.notifyEfficiencyValueSignals();
 	}
 
 	/**
@@ -9497,8 +9507,19 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			if (this.handleLocalViewRegressionMessage(message)) { return; }
 			if (await this.dispatchSharedCommand(message)) { return; }
 			if (message.command === 'refresh') { await this.dispatch('refresh:efficiency', () => this.refreshEfficiencyPanel()); }
+			if (message.command === 'efficiencyWebviewReady') {
+				const replayed = await this.efficiencyMessageReplay.markReady();
+				this.log(`📨 Efficiency webview ready (${message.reason ?? 'unknown'}); replayed: ${replayed.length ? replayed.join(', ') : 'nothing buffered'}`);
+			}
 		});
-		this.efficiencyPanel.onDidDispose(() => { this.log('⚡ Efficiency view closed'); this.efficiencyPanel = undefined; });
+		this.efficiencyPanel.onDidDispose(() => {
+			this.log('⚡ Efficiency view closed');
+			this.efficiencyPanel = undefined;
+			// Transient per-document state: a later cold open derives Value from the latest
+			// Repository PR snapshot on its own.
+			this.efficiencyMessageReplay.reset();
+			this._lastEfficiencyViewData = undefined;
+		});
 
 		const panel = this.efficiencyPanel;
 		panel.webview.html = this.getLoadingHtml(panel.webview);
@@ -9513,7 +9534,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			const data = await this.buildEfficiencyViewData();
 			// The user may have closed the panel while the data was being computed.
 			if (this.efficiencyPanel !== panel) { return; }
-			panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
+			await this.renderEfficiencyData(panel, data);
 			this.log('⚡ Efficiency view rendered');
 		})();
 	}
@@ -9522,7 +9543,85 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		if (!this.efficiencyPanel) { return; }
 		this.log('🔄 Refreshing Efficiency view');
 		const data = await this.buildEfficiencyViewData(true);
-		this.efficiencyPanel.webview.html = this.getEfficiencyHtml(this.efficiencyPanel.webview, data);
+		if (!this.efficiencyPanel) { return; }
+		await this.renderEfficiencyData(this.efficiencyPanel, data);
+	}
+
+	/**
+	 * Installs a freshly built Efficiency document and reconciles its Value tab.
+	 *
+	 * Both render paths are async, so a Repository PRs result can land *while* the data is being
+	 * built — it would then be baked into neither the replaced document (built too early) nor a
+	 * live update (the old document is gone). Re-deriving Value here from the current snapshot and
+	 * publishing it when it disagrees with what was just rendered closes that race; the replay
+	 * buffer holds the message until the new document announces readiness.
+	 */
+	private async renderEfficiencyData(panel: vscode.WebviewPanel, data: EfficiencyViewData): Promise<void> {
+		this.efficiencyMessageReplay.reset();
+		this._lastEfficiencyViewData = data;
+		panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
+		await this.notifyEfficiencyValueSignals();
+	}
+
+	/**
+	 * Posts a Value-only update to the live Efficiency document when the Repository PR snapshot
+	 * moves its metrics.
+	 *
+	 * Only the Value fragment is derived and sent: no log scan, no trend recomputation and no
+	 * `webview.html` replacement, so the selected tab, the Models-tab controls and the live charts
+	 * all survive. Cloud-agent task loads deliberately never reach here — `aiPrs` counts
+	 * bot-authored pull requests, not cloud-agent tasks.
+	 */
+	private async notifyEfficiencyValueSignals(): Promise<void> {
+		const rendered = this._lastEfficiencyViewData;
+		if (!this.efficiencyPanel || !rendered) { return; }
+		const stats = this._lastRepoPrStats;
+		// `fetchedAt` is only set on real (cache-read or freshly-fetched) snapshots — the instant
+		// placeholder served on cold open uses ''. An unauthenticated snapshot *is* definitive
+		// though: it means "no PR data", which is what turns populated cards back into the hint.
+		if (stats && stats.authenticated && !stats.fetchedAt) { return; }
+		const value = this.deriveEfficiencyValueSignals(rendered);
+		if (valueSignalsEqual(value, rendered.value)) { return; }
+		this._lastEfficiencyViewData = { ...rendered, value };
+		const { delivered, wasReady } = await this.efficiencyMessageReplay.publish(
+			'valueSignals', { command: 'valueSignalsUpdated', value },
+		);
+		this.log(`⚡ Efficiency Value signals posted (prs=${value.userPrs ?? 'none'}, delivered=${delivered}, webviewReady=${wasReady})`);
+	}
+
+	/**
+	 * Rebuilds the Value snapshot from the rendered view's own cost / apply / LOC totals plus the
+	 * current PR aggregate — the lightweight alternative to re-running `buildEfficiencyViewData()`.
+	 *
+	 * `now` comes from the rendered snapshot so repeated derivations over an unchanged PR
+	 * aggregate produce a byte-identical result (`prsPerWeek` divides by elapsed time), which is
+	 * what makes the "did anything change?" comparison meaningful.
+	 */
+	private deriveEfficiencyValueSignals(rendered: EfficiencyViewData): ValueSignals {
+		const v = rendered.value;
+		return _computeValueSignals({
+			...this.repoPrValueInputs(),
+			periodCost: v.periodCost,
+			applyUsage: { totalApplies: v.appliedBlocks, totalCodeBlocks: v.totalBlocks, applyRate: v.applyRate ?? 0 },
+			linesChanged: v.linesChanged,
+			now: new Date(rendered.lastUpdated),
+		});
+	}
+
+	/**
+	 * The PR half of the Value metrics. Null counts mean "Repository PRs were never loaded", which
+	 * the Value tab renders as its actionable hint rather than as zeroes.
+	 */
+	private repoPrValueInputs(): Pick<ValueSignalsInput, 'userPrs' | 'mergedPrs' | 'aiPrs' | 'prsSince'> {
+		const prStats = this._lastRepoPrStats?.authenticated ? this._lastRepoPrStats : undefined;
+		const sumRepos = (pick: (r: RepoPrInfo) => number | undefined): number | null =>
+			prStats ? prStats.repos.reduce((s, r) => s + (pick(r) ?? 0), 0) : null;
+		return {
+			userPrs: sumRepos(r => r.userAuthoredPrs),
+			mergedPrs: sumRepos(r => r.userMergedPrs),
+			aiPrs: sumRepos(r => r.aiAuthoredPrs),
+			prsSince: prStats?.since ?? null,
+		};
 	}
 
 	/** Maps one cached session to the pure-module input shape for efficiency trends. */
@@ -9637,14 +9736,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		);
 		const curCost = curDays.reduce((s, d) => s + this.calculateEstimatedCost(d.modelUsage, 'copilot'), 0);
 		const curLoc = curDays.reduce((s, d) => s + (d.linesAdded ?? 0) + (d.linesRemoved ?? 0), 0);
-		const prStats = this._lastRepoPrStats?.authenticated ? this._lastRepoPrStats : undefined;
-		const sumRepos = (pick: (r: RepoPrInfo) => number | undefined): number | null =>
-			prStats ? prStats.repos.reduce((s, r) => s + (pick(r) ?? 0), 0) : null;
 		const value = _computeValueSignals({
-			userPrs: sumRepos(r => r.userAuthoredPrs),
-			mergedPrs: sumRepos(r => r.userMergedPrs),
-			aiPrs: sumRepos(r => r.aiAuthoredPrs),
-			prsSince: prStats?.since ?? null,
+			...this.repoPrValueInputs(),
 			periodCost: curCost,
 			applyUsage: usage.last30Days.applyUsage,
 			linesChanged: curLoc,
