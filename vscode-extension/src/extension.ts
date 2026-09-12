@@ -724,7 +724,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Shared full-year daily-stats walk; see calculateFullDailyStats(). */
 	private _fullDailyStatsInFlight: Promise<DailyTokenStats[]> | undefined;
 	/** Progress reporters watching the shared full-year walk, including late joiners. */
-	private readonly _fullDailyStatsProgressSinks = new Set<(completed: number, total: number) => void>();
+	private readonly _fullDailyStatsProgressSinks =
+		new Set<(completed: number, total: number, sessionFile?: string) => void>();
 	/** Last successfully rendered Efficiency payload, restored if a refresh build fails. */
 	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
 	private outputChannel!: vscode.OutputChannel;
@@ -4408,7 +4409,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private calculateFullDailyStats(
 		knownSessionFiles?: string[],
-		onProgress?: (completed: number, total: number) => void,
+		onProgress?: (completed: number, total: number, sessionFile?: string) => void,
 	): Promise<DailyTokenStats[]> {
 		// Reporters are held in a set rather than passed straight through, because a caller
 		// that joins a walk already in flight would otherwise have its reporter silently
@@ -4416,8 +4417,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// then show no progress at all until that walk finished.
 		if (onProgress) { this._fullDailyStatsProgressSinks.add(onProgress); }
 		this._fullDailyStatsInFlight ??= this
-			.calculateDailyStats(365, knownSessionFiles, (completed, total) => {
-				for (const sink of this._fullDailyStatsProgressSinks) { sink(completed, total); }
+			.calculateDailyStats(365, knownSessionFiles, (completed, total, sessionFile) => {
+				for (const sink of this._fullDailyStatsProgressSinks) { sink(completed, total, sessionFile); }
 			})
 			.finally(() => {
 				this._fullDailyStatsInFlight = undefined;
@@ -4433,7 +4434,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async calculateDailyStats(
 		daysBack = 365,
 		knownSessionFiles?: string[],
-		onProgress?: (completed: number, total: number) => void,
+		onProgress?: (completed: number, total: number, sessionFile?: string) => void,
 	): Promise<DailyTokenStats[]> {
 		const now = new Date();
 		const cutoffStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack);
@@ -4454,7 +4455,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					if (mtime < cutoffMs) { return null; }
 					return { sessionFile, sessionData: await this.getSessionFileDataCached(sessionFile, mtime, fileSize), mtime };
 				} finally {
-					onProgress?.(++completed, sessionFiles.length);
+					onProgress?.(++completed, sessionFiles.length, sessionFile);
 				}
 			});
 
@@ -9767,7 +9768,21 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			// its lower band, so posting one here would pin the bar above that band and freeze
 			// it for the whole parse — the exact failure this view had at 96%. The walk's own
 			// parsing ticks drive the bar instead.
-			dailyStats = await this.calculateFullDailyStats(undefined, this.buildProgressCallback(true, undefined, send));
+			// Editors are discovered from the files the walk reports, so the Efficiency loader
+			// grows the same pills the details loader does instead of an always-empty row.
+			const editors = new Set<string>();
+			const report = this.buildProgressCallback(
+				true,
+				() => [...editors].map(name => ({ icon: this.getEditorIconForLoader(name), name })),
+				send,
+			);
+			dailyStats = await this.calculateFullDailyStats(undefined, (completed, total, sessionFile) => {
+				if (sessionFile) {
+					const editor = this.detectEditorSource(sessionFile);
+					if (editor && editor !== 'Unknown') { editors.add(editor); }
+				}
+				report(completed, total);
+			});
 		}
 		this.postEfficiencyStep(send, stepPct.usage, l10n.t('loading.efficiency.usageAnalysis'));
 		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
