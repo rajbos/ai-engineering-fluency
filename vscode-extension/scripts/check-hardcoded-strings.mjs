@@ -85,7 +85,7 @@ const KEBAB_IDENTIFIER_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)+$/;
 const CAMEL_IDENTIFIER_RE = /^[a-z]+(?:[A-Z][a-z0-9]*)+$/;
 
 /** True if `text` looks like translatable prose rather than a number, CSS value, URL, or bare identifier/class token. */
-function looksProse(text) {
+export function looksProse(text) {
 	if (!text) { return false; }
 	if (!LETTER_RUN_RE.test(text)) { return false; }
 	if (URL_SCHEME_RE.test(text) || URL_PROTOCOL_RE.test(text)) { return false; }
@@ -120,12 +120,12 @@ function getCalleeChainText(expr) {
 }
 
 const LOCALIZATION_CALLS = new Set(['localize', 'localizeFormat', 't', 'l10n.t', 'vscode.l10n.t']);
-function isLocalizationCall(chain) {
+export function isLocalizationCall(chain) {
 	return chain !== null && LOCALIZATION_CALLS.has(chain);
 }
 
 const CONSOLE_CALL_RE = /^console\.(log|warn|error|info|debug|trace)$/;
-function isConsoleCall(chain) {
+export function isConsoleCall(chain) {
 	return chain !== null && CONSOLE_CALL_RE.test(chain);
 }
 
@@ -273,7 +273,7 @@ function findHtmlMethodBodies(sourceFile) {
 	return bodies;
 }
 
-function scanFile(filePath, allowlist, violations, rootSelector) {
+export function scanFile(filePath, allowlist, violations, rootSelector) {
 	const sourceText = fs.readFileSync(filePath, 'utf8');
 	const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 	const ctx = {
@@ -307,7 +307,7 @@ function collectAllViolations() {
 	});
 }
 
-function hashLine(text) {
+export function hashLine(text) {
 	return crypto.createHash('sha1').update(text).digest('hex').slice(0, 12);
 }
 
@@ -406,4 +406,5 @@ function main() {
 	process.exit(0);
 }
 
-main();
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isDirectRun) { main(); }

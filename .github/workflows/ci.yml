@@ -93,6 +93,10 @@ jobs:
       working-directory: vscode-extension
       run: npm run lint:l10n
 
+    - name: Test hardcoded-string checker
+      working-directory: vscode-extension
+      run: npm run test:hardcoded-strings
+
     - name: Check for hardcoded UI strings
       working-directory: vscode-extension
       run: npm run lint:hardcoded-strings
