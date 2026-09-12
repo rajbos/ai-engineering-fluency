@@ -698,15 +698,49 @@ ${renderContextReferencesDetailed(turn.contextReferences)}
 
 // ── Layout section renderers ─────────────────────────────────────────────────
 
-function buildEditorModeCard(data: SessionLogData, stats: SummaryStats): string {
-	if (stats.totalModeTurns <= 0) { return ''; }
-	const { modeEntries, primaryModeLabel, modeSubLabel } = stats;
-	const title = modeEntries.map(([m, n]) => `${getModeIcon(m)} ${MODE_LABELS[m]} (${n})`).join(' · ');
+/**
+ * Combined "Editor identity" card: merges the previous Interactions (turns),
+ * Editor Mode and Source Editor cards into a single compact card so the three
+ * related facets of "which editor, in which mode, doing how many turns" read
+ * as one panel instead of three.
+ */
+function buildEditorIdentityCard(data: SessionLogData, stats: SummaryStats): string {
+	const { modeEntries, primaryModeLabel, modeSubLabel, totalModeTurns } = stats;
+	const interactions = data.interactions;
+	const modesTitle = modeEntries.map(([m, n]) => `${getModeIcon(m)} ${MODE_LABELS[m]} (${n})`).join(' · ');
 	const extraModes = modeEntries.length > 1 ? ` · ${modeEntries.slice(1).map(([m, n]) => `${MODE_LABELS[m]} ${n}`).join(', ')}` : '';
-	return `<div class="summary-card" title="${escapeHtml(title)}">
-<div class="summary-label">🎛️ ${localize('logviewer.summary.editorMode')}</div>
-<div class="summary-value" style="font-size: 1.1em;">${primaryModeLabel}</div>
-<div class="summary-sub">${escapeHtml(modeSubLabel)}${extraModes}</div>
+	const modeValue = totalModeTurns > 0 ? primaryModeLabel : '—';
+	const modeSub = totalModeTurns > 0 ? `${modeSubLabel}${extraModes}` : 'No mode data';
+	return `<div class="summary-card summary-card--compact summary-card--combined" title="${escapeHtml(modesTitle)}">
+<div class="summary-label">🖥️ ${localize('logviewer.summary.editor')}</div>
+<div class="summary-compact-rows">
+<div class="summary-compact-row"><span class="summary-compact-key">💻 ${localize('logviewer.summary.editorSource')}</span><span class="summary-compact-val" style="font-size: 13px; font-weight: 700;">${escapeHtml(data.editorName)}</span></div>
+<div class="summary-compact-row"><span class="summary-compact-key">🎛️ ${localize('logviewer.summary.editorMode')}</span><span class="summary-compact-val">${modeValue}</span></div>
+<div class="summary-compact-row"><span class="summary-compact-key">📝 ${localize('logviewer.summary.interactions')}</span><span class="summary-compact-val">${interactions} ${interactions === 1 ? 'turn' : 'turns'}</span></div>
+</div>
+<div class="summary-sub">${escapeHtml(modeSub)}</div>
+</div>`;
+}
+
+/**
+ * Combined "MCP tools & context references" card: merges the previous MCP Tools
+ * and Context Refs cards into a single compact card, since both describe the
+ * external context a session pulled in (tool servers vs. editor references).
+ */
+function buildMcpAndContextRefsCard(data: SessionLogData, stats: SummaryStats): string {
+	const { usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit, usageContextExplicit } = stats;
+	const mcpSub = usageMcpTotal === 0 ? 'None' : formatTopListWithOther(usageTopMcpTools, usageMcpTotal);
+	const refsSub = usageContextTotal === 0 ? 'None' : `implicit ${usageContextImplicit}, explicit ${usageContextExplicit}`;
+	return `<div class="summary-card summary-card--compact summary-card--combined">
+<div class="summary-label">🔌 ${localize('logviewer.summary.mcpAndContextRefs')}</div>
+<div class="summary-compact-rows">
+<div class="summary-compact-row"><span class="summary-compact-key">🔌 ${localize('logviewer.summary.mcpTools')}</span><span class="summary-compact-val">${usageMcpTotal}</span></div>
+<div class="summary-compact-row"><span class="summary-compact-key">🔗 ${localize('logviewer.summary.contextRefs')}</span><span class="summary-compact-val">${usageContextTotal}</span></div>
+</div>
+<div class="summary-sub combined-card-sub">
+<div class="combined-card-sub-line">🔌 <span class="combined-card-sub-label">${localize('logviewer.summary.mcpTools')}:</span> ${mcpSub}</div>
+<div class="combined-card-sub-line">🔗 <span class="combined-card-sub-label">${localize('logviewer.summary.contextRefs')}:</span> ${refsSub}</div>
+</div>
 </div>`;
 }
 
@@ -931,12 +965,7 @@ function renderSummaryCards(data: SessionLogData, stats: SummaryStats): string {
 	const { usageToolTotal, usageTopTools, usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit, usageContextExplicit } = stats;
 	return `
 <div class="summary-cards">
-<div class="summary-card">
-<div class="summary-label">📝 ${localize('logviewer.summary.interactions')}</div>
-<div class="summary-value">${data.interactions}</div>
-<div class="summary-sub">Total chat turns in this session</div>
-</div>
-${buildEditorModeCard(data, stats)}
+${buildEditorIdentityCard(data, stats)}
 ${buildEstimatedTokensCard(data, stats)}
 ${buildActualTokensCard(data, stats)}
 ${buildModelTurnsCard(data)}
@@ -952,24 +981,7 @@ ${buildHierarchyCard(data)}
 <div class="summary-value">${usageToolTotal}</div>
 <div class="summary-sub">${formatTopListWithOther(usageTopTools, usageToolTotal, lookupToolName)}</div>
 </div>
-<div class="summary-card">
-<div class="summary-label">🔌 ${localize('logviewer.summary.mcpTools')}</div>
-<div class="summary-value">${usageMcpTotal}</div>
-<div class="summary-sub">${formatTopListWithOther(usageTopMcpTools, usageMcpTotal)}</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">🔗 ${localize('logviewer.summary.contextRefs')}</div>
-<div class="summary-value">${usageContextTotal}</div>
-<div class="summary-sub">
-${usageContextTotal === 0 ? 'None' : `implicit ${usageContextImplicit}, explicit ${usageContextExplicit}`}
-</div>
-</div>
-${buildTimelineCard(data)}
-<div class="summary-card">
-<div class="summary-label">💻 ${localize('logviewer.summary.editor')}</div>
-<div class="summary-value" style="font-size: 20px; word-break: keep-all;">${escapeHtml(data.editorName)}</div>
-<div class="summary-sub">Source editor</div>
-</div>
+${buildMcpAndContextRefsCard(data, stats)}
 <div class="summary-card">
 <div class="summary-label">📦 ${localize('logviewer.summary.fileSize')}</div>
 <div class="summary-value">${formatFileSize(data.size)}</div>

@@ -226,6 +226,30 @@ body {
 	text-align: left;
 }
 
+/* Combined compact cards merge several formerly separate summary cards and
+   hold more rows, so span two grid columns for legibility. */
+.summary-card--compact.summary-card--combined {
+	grid-column: span 2;
+}
+
+/* Sub-text for combined cards: stack each merged metric on its own line. */
+.combined-card-sub {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.combined-card-sub-line {
+	font-size: 11px;
+	line-height: 1.5;
+	word-break: break-word;
+	overflow-wrap: anywhere;
+}
+
+.combined-card-sub-label {
+	font-weight: 600;
+}
+
 .summary-compact-rows {
 	display: flex;
 	flex-direction: column;
