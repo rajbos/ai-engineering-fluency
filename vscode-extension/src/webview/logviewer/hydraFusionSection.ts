@@ -267,13 +267,16 @@ export function renderLegsTable(phases: HydraFusionPhase[]): string {
  *   when `matchHydraFusionTurnsToChatTurns` could place this turn — renders a link
  *   that scrolls to and expands that row so the same leg detail can be reached from
  *   either place. `null` when no match was found (e.g. the chat turn carries no
- *   timestamp), in which case the link is simply omitted.
+ *   timestamp), in which case the link is simply omitted — as it also is when the
+ *   turn has no completed phases yet (an in-flight turn): the overview row has
+ *   nothing to expand, so a link there would promise detail it can't deliver.
  */
 export function renderTurnRow(turn: HydraFusionTurn, index: number, chatTurnNumber: number | null = null): string {
 	const plan = turn.plannedPhases.length > 0 ? turn.plannedPhases.join(' › ') : null;
 	const skipped = plan && turn.plannedPhases.length > turn.phases.length
 		? ` (${turn.plannedPhases.length - turn.phases.length} planned leg${turn.plannedPhases.length - turn.phases.length === 1 ? '' : 's'} never ran)`
 		: '';
+	const canJumpToStep = chatTurnNumber !== null && turn.phases.length > 0;
 
 	return `<details class="hydra-turn">
 <summary class="hydra-turn-summary">
@@ -284,7 +287,7 @@ export function renderTurnRow(turn: HydraFusionTurn, index: number, chatTurnNumb
 <span title="Credits for this turn"><strong>${escapeHtml(formatFusionCost(turn.aiu))}</strong></span>
 <span title="Wall-clock time for the whole turn">${escapeHtml(formatFusionDuration(turn.durationMs))}</span>
 <span title="Router hops in this turn">${turn.phases.length} leg${turn.phases.length === 1 ? '' : 's'}</span>
-${chatTurnNumber !== null ? `<span class="hydra-jump-to-step" data-turn="${chatTurnNumber}" title="Jump to step #${chatTurnNumber} in the Session Steps Overview below" role="button" tabindex="0">⤵ step #${chatTurnNumber}</span>` : ''}
+${canJumpToStep ? `<span class="hydra-jump-to-step" data-turn="${chatTurnNumber}" title="Jump to step #${chatTurnNumber} in the Session Steps Overview below" role="button" tabindex="0">⤵ step #${chatTurnNumber}</span>` : ''}
 </span>
 </summary>
 <div class="hydra-turn-body">

@@ -1130,7 +1130,7 @@ ${costCell(child.cost)}
 <td class="turns-overview-actual" title="Estimated from text">~</td>
 </tr>`).join('');
 		const legToggle = row.legs.length > 0
-			? `<button type="button" class="turns-overview-leg-toggle" data-turn="${row.turnNumber}" aria-expanded="false" title="Show the HydraFusion legs behind this step">▸</button> `
+			? `<button type="button" class="turns-overview-leg-toggle" data-turn="${row.turnNumber}" aria-expanded="false" aria-label="Toggle HydraFusion legs for step #${row.turnNumber}" title="Show the HydraFusion legs behind this step">▸</button> `
 			: '';
 		const legsRow = row.legs.length > 0
 			? `<tr class="turns-overview-legs-row" data-parent-turn="${row.turnNumber}" style="display: none;">

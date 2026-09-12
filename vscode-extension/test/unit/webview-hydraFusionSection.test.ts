@@ -217,6 +217,14 @@ describe('renderHydraFusionSection', () => {
 		assert.match(html, /hydra-jump-to-step" data-turn="3"/);
 		assert.match(html, /step #3/);
 	});
+
+	test('omits the jump-to-step link for an in-flight turn with no completed phases, even with a chat-turn match', () => {
+		// Resolved but nothing has completed yet — the overview row would have no legs to expand.
+		const inFlight = line('session.fusion_resolved', { fusionId: 'f', pattern: 'single', phasePlan: [{ kind: 'primary' }], syntheticModel: 'hydrafusion' });
+		const summary = analyzeHydraFusionSession(inFlight);
+		const html = renderHydraFusionSection(summary, new Map([[0, 1]]));
+		assert.ok(!html.includes('hydra-jump-to-step'));
+	});
 });
 
 describe('renderLegsTable', () => {

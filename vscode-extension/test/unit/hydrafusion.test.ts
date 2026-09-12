@@ -409,6 +409,27 @@ describe('matchHydraFusionTurnsToChatTurns', () => {
 		assert.equal(matches.size, 0);
 	});
 
+	test('known limitation: attaches to a nearby non-fusion turn when the real trigger is missing from chatTurns entirely', () => {
+		// Unlike the "skips a chat turn a non-fusion model handled" case above, here chat turn 2
+		// is the ONLY turn available before f2 — there is no turn 3 in the list at all (e.g. it
+		// was dropped upstream during turn extraction). matchHydraFusionTurnsToChatTurns has no
+		// way to tell "the real trigger is missing" apart from "turn 2 is genuinely closest", so
+		// it attaches f2 there. Documented in the function's own doc comment as a known trade-off
+		// that would need a shared turn id to fully close.
+		const content = [
+			fusionTurnAt('f1', '2026-01-01T00:00:05.000Z'),
+			fusionTurnAt('f2', '2026-01-01T00:00:25.000Z'),
+		].join('\n');
+		const summary = analyzeHydraFusionSession(content)!;
+		const chatTurns = [
+			{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' },
+			{ turnNumber: 2, timestamp: '2026-01-01T00:00:10.000Z' },
+		];
+		const matches = matchHydraFusionTurnsToChatTurns(chatTurns, summary.turns);
+		assert.equal(matches.get(0), 1);
+		assert.equal(matches.get(1), 2);
+	});
+
 	test('stops advancing at a chat turn with no timestamp rather than guessing past it', () => {
 		const content = fusionTurnAt('f1', '2026-01-01T00:00:20.000Z');
 		const summary = analyzeHydraFusionSession(content)!;

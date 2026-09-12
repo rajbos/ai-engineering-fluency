@@ -541,6 +541,20 @@ export function analyzeHydraFusionSession(content: string): HydraFusionSummary |
  * the corresponding entries out of the map rather than guessing; callers get an
  * empty map, not a wrong one.
  *
+ * Known limitation: this correlates by timestamp proximity because neither event
+ * stream carries a shared identifier — `user.message` (which becomes a `ChatTurn`)
+ * has none, and `session.fusion_resolved`'s own `turnId` has nothing on the chat
+ * side to match against. So if the chat turn that actually triggered a fusion
+ * resolution is missing from `chatTurns` entirely (e.g. it was dropped during
+ * turn extraction upstream, not a case this function can detect), that fusion
+ * turn's legs attach to whichever earlier chat turn happens to precede it instead
+ * — a real turn just never routed through HydraFusion is handled correctly (see
+ * the "skips a chat turn a non-fusion model handled" test), but a turn missing
+ * outright is not distinguishable from one. Fixing that would mean threading a
+ * shared id (e.g. `assistant.turn_start`/`turn_end`'s `turnId`) through `ChatTurn`
+ * itself, which is a larger change to the canonical turn model shared by every
+ * consumer — out of scope for what is otherwise a display-only feature.
+ *
  * @returns Map from fusion turn index (into `hydraTurns`) to the matching chat
  *   turn's `turnNumber`.
  */
