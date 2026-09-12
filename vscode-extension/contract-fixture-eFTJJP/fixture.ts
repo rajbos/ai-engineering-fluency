@@ -1,1 +1,0 @@
-declare const p: any; p.webview.postMessage({ type: 'testResult', ok: true });

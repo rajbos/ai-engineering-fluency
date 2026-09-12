@@ -1390,7 +1390,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Sets the cache entry for a session file, including file size.
 	 */
 	private setCachedSessionData(filePath: string, data: SessionFileCache, fileSize?: number): void {
-		return this.cacheManager.setCachedSessionData(filePath, data);
+		const cached = this.getCachedSessionData(filePath);
+		const isNewEntry = cached === undefined || cached.mtime !== data.mtime || cached.size !== data.size;
+		return this.cacheManager.setCachedSessionData(filePath, data, fileSize, isNewEntry);
 	}
 
 
@@ -3094,6 +3096,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 				await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget);
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
+				// Checkpoint cache periodically during long-running preload
+				if (processed % 25 === 0) {
+					this.cacheManager.maybeCheckpointCache();
+				}
 			}
 		};
 
@@ -3297,6 +3303,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Core discover → parse → compute → render → persist pass for one refresh. */
 	private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {
 		this.log(isLeader ? 'Updating token stats (leader)...' : 'Updating token stats (follower)...');
+
+		// Reset checkpoint counters at the start of each refresh cycle
+		if (isLeader) {
+			this.cacheManager.resetCheckpointCounters();
+		}
 
 		const { last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(new Date());
 		const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
