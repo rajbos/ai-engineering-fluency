@@ -577,6 +577,10 @@ function renderUsageLoadingState(initialMessage = 'Loading usage analysis...'): 
 	const root = document.getElementById('root');
 	if (!root) { return; }
 	_ulLoadingActive = true;
+	// The tab bar is about to be replaced, so the next layout is a fresh one: a switchTab
+	// arriving while this loading UI is up has no button to click, and only setupTabs can
+	// start that tab's fetch once the layout comes back.
+	layoutLazyTabLoadStarted = false;
 
 	const stepsHtml = USAGE_LOADING_STEPS.map((s, i) => {
 		const isFirst = i === 0;
@@ -718,8 +722,8 @@ function showLoadError(message: string): void {
 
 // State for the Repository PRs tab
 let repoPrStatsLoaded = false;
-/** True once the first rendered layout has kicked off its active tab's lazy fetch. */
-let initialLazyTabLoadStarted = false;
+/** True once the layout currently on screen has kicked off its active tab's lazy fetch. */
+let layoutLazyTabLoadStarted = false;
 let repoPrStatsData: RepoPrStatsResult | null = null;
 
 // State for the Cloud Agent tab
@@ -2434,9 +2438,11 @@ function setupTabs(): void {
 	// The tab that is already on screen counts as opened — the user is reading it
 	// right now, whether or not they clicked anything to get here.
 	reportTabOpened(activeTab);
-	// Guarded so a later re-render never re-fires a fetch the user did not ask for.
-	if (!initialLazyTabLoadStarted) {
-		initialLazyTabLoadStarted = true;
+	// Once per rendered layout, so a stats refresh that rebuilds the same layout does not
+	// re-fire a fetch the user never asked for again, while a layout rebuilt after the
+	// loading state still starts the tab it lands on.
+	if (!layoutLazyTabLoadStarted) {
+		layoutLazyTabLoadStarted = true;
 		startLazyTabLoad(activeTab);
 	}
 	tabButtons.forEach(button => {

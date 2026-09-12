@@ -317,6 +317,26 @@ test('a stats refresh does not re-fire the active tab\'s lazy fetch', async () =
 	);
 });
 
+test('a switchTab to Repository PRs during a refresh still starts the PR fetch', async () => {
+	// `usageRefreshing` swaps the whole root for the loading card, so the tab bar is gone again
+	// even though a layout rendered earlier. A guard that only ever fires once per webview would
+	// skip this second layout and leave the tab on its placeholder with no fetch in flight.
+	const harness = await bootWebview(buildStats());
+	harness.post({ command: 'usageRefreshing' });
+	await harness.settle();
+	assert.equal(harness.window.document.querySelector('.tab-button[data-tab="repos"]'), null);
+
+	harness.post({ command: 'switchTab', tab: 'repos' });
+	harness.post({ command: 'updateStats', data: buildStats() });
+	await harness.settle();
+
+	assert.equal(
+		harness.posted.filter((m) => m.command === 'loadRepoPrStats').length,
+		1,
+		'the layout rebuilt after the loading state must ask for the PR statistics',
+	);
+});
+
 test('a layout re-render repopulates the GitHub activity panels from retained state', async () => {
 	// Any stats refresh rebuilds the whole root, recreating the "Loading…" placeholders. The
 	// already-received PR data must be re-applied instead of being visually lost.
