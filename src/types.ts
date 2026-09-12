@@ -1450,3 +1450,40 @@ export interface ToolCurationAnalysis {
   /** Prioritised list of recommendations. */
   recommendations: ToolCurationRecommendation[];
 }
+
+/**
+ * One conversation returned by Mistral's (beta) Agents `/v1/conversations` listing.
+ * The Mistral Agents/Conversations API is in beta — fields are best-effort and may change.
+ * Only fields the extension actually consumes are typed; the raw `metadata` object is
+ * preserved verbatim so new server-side fields surface without a type bump.
+ */
+export interface MistralCloudConversation {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  agentId: string;
+  name: string | null;
+  description: string | null;
+  /** Optional agent version reported by the API (string or number). */
+  agentVersion: string | null;
+  /** Verbatim `metadata` object from the API, for forward compatibility. */
+  metadata: Record<string, unknown> | null;
+}
+
+/**
+ * Result of loading Mistral Vibe cloud (web) sessions via the beta Agents Conversations API.
+ * `authenticated` mirrors the GitHub AgentSessionsResult convention: false when no API key
+ * is configured (or the user declined to provide one) — callers should show the connect UI.
+ */
+export interface MistralCloudSessionsResult {
+  /** Conversations (newest first), capped to `pageSize`. */
+  conversations: MistralCloudConversation[];
+  /** Total conversations reported by the listing, when the API returns it. */
+  totalCount: number;
+  /** True when an API key is configured and the listing call succeeded. */
+  authenticated: boolean;
+  /** ISO timestamp of the fetch; empty when never fetched. */
+  fetchedAt: string;
+  /** Error message when the fetch failed (auth, network, API error). Empty on success. */
+  error: string;
+}

@@ -66,6 +66,7 @@ import type {
   SessionLogData,
   WorkspaceCustomizationSummary,
   AgentSessionsResult,
+  MistralCloudSessionsResult,
   TokenEstimator,
   SessionRelationRef,
   EvaluatedInsight,
@@ -302,6 +303,10 @@ import {
 	type RepoPrStatsResult,
 } from './githubPrService';
 import { collectAgentSessions } from './agentSessionsService';
+import {
+	collectMistralCloudSessions,
+	MISTRAL_API_KEY_SECRET,
+} from './mistralCloudSessionsService';
 import {
 	AGENT_TASKS_CACHE_SCHEMA_VERSION,
 	AGENT_TASKS_REFRESH_INTERVAL_MS,
@@ -573,6 +578,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Full, unfiltered session file paths from the last diagnostics load (no 14-day/500-file cap) —
 	// the TTFT scan-range picker filters this list itself instead of relying on diagnosticsCachedFiles.
 	private diagnosticsAllSessionFiles: string[] = [];
+	// BETA: last Mistral cloud (web) sessions result fetched for the diagnostics Research tab.
+	private _lastMistralCloudSessions?: MistralCloudSessionsResult;
 	// Per scan-range TTFT result cache. Granularity changes reuse the cached sample set instantly.
 	private readonly diagnosticsTtftCache = new TtftScanResultCache();
 	// Cache of the last diagnostic report text for copy/issue operations
@@ -10534,6 +10541,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       analyzeFolder: () => this.dispatch('analyzeFolder:diagnostics', () => this.diagHandleAnalyzeFolder(message)),
       analyzeModelUsage: () => this.dispatch('analyzeModelUsage:diagnostics', () => this.diagHandleAnalyzeModelUsage(message)),
       analyzeTtft: () => this.dispatch('analyzeTtft:diagnostics', () => this.diagHandleAnalyzeTtft(message)),
+      refreshMistralCloudSessions: () => this.dispatch('refreshMistralCloudSessions:diagnostics', () => this.diagHandleRefreshMistralCloudSessions()),
+      setMistralApiKey: () => typeof message.apiKey === 'string' ? this.dispatch('setMistralApiKey:diagnostics', () => this.diagHandleSetMistralApiKey(message.apiKey)) : Promise.resolve(),
+      clearMistralApiKey: () => this.dispatch('clearMistralApiKey:diagnostics', () => this.diagHandleClearMistralApiKey()),
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
     await this.handleDiagnosticConditionalCommand(message);
@@ -10714,6 +10724,67 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (signIn) { await this.authenticateWithGitHub(); } else { await this.signOutFromGitHub(); }
     if (this.diagnosticsPanel) {
       this.diagnosticsPanel.webview.postMessage({ command: 'githubAuthUpdated', githubAuth: this.getGitHubAuthStatus() });
+    }
+  }
+
+  /** BETA: prompt the user for a Mistral API key and store it in SecretStorage, then refresh. */
+  private async diagHandleSetMistralApiKey(apiKey: string): Promise<void> {
+    const key = apiKey.trim();
+    if (!key) { return; }
+    try {
+      await this.context.secrets.store(MISTRAL_API_KEY_SECRET, key);
+      this.log('Mistral API key stored.');
+      await this.diagHandleRefreshMistralCloudSessions();
+    } catch (error) {
+      this.error('Failed to store Mistral API key:', error);
+      vscode.window.showErrorMessage('Failed to store the Mistral API key.');
+    }
+  }
+
+  /** BETA: delete the stored Mistral API key and clear the cached cloud sessions. */
+  private async diagHandleClearMistralApiKey(): Promise<void> {
+    try {
+      await this.context.secrets.delete(MISTRAL_API_KEY_SECRET);
+      this._lastMistralCloudSessions = undefined;
+      this.log('Mistral API key removed.');
+      if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
+        this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result: this.buildEmptyMistralCloudSessionsResult() });
+      }
+    } catch (error) {
+      this.error('Failed to remove Mistral API key:', error);
+    }
+  }
+
+  /** BETA: empty result shape used when no key is configured or the key was cleared. */
+  private buildEmptyMistralCloudSessionsResult(): MistralCloudSessionsResult {
+    return { conversations: [], totalCount: 0, authenticated: false, fetchedAt: '', error: '' };
+  }
+
+  /** BETA: whether a Mistral API key is currently stored. Sent as initial data to the webview. */
+  private async getMistralCloudSessionsStatus(): Promise<{ apiKeyConfigured: boolean }> {
+    try {
+      const key = await this.context.secrets.get(MISTRAL_API_KEY_SECRET);
+      return { apiKeyConfigured: !!key };
+    } catch {
+      return { apiKeyConfigured: false };
+    }
+  }
+
+  /** BETA: fetch Mistral cloud conversations and post the result to the diagnostics webview. */
+  private async diagHandleRefreshMistralCloudSessions(): Promise<void> {
+    if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
+    let apiKey: string | undefined;
+    try { apiKey = await this.context.secrets.get(MISTRAL_API_KEY_SECRET); } catch { apiKey = undefined; }
+    if (!apiKey) {
+      this._lastMistralCloudSessions = this.buildEmptyMistralCloudSessionsResult();
+      this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result: this._lastMistralCloudSessions });
+      return;
+    }
+    this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result: { ...this.buildEmptyMistralCloudSessionsResult(), authenticated: true } });
+    const result = await collectMistralCloudSessions(apiKey);
+    this._lastMistralCloudSessions = result;
+    if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
+      this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result });
     }
   }
 
@@ -11890,6 +11961,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
 
       const { backendStorageInfo, githubAuthStatus } = await this.sendBackendStorageInfoEarly(panel);
 
+      const mistralCloudSessionsStatus = await this.getMistralCloudSessionsStatus();
+
       if (!this.lastDetailedStats) {
         this.log(
           "⚡ No cached stats found - forcing initial stats calculation to populate cache...",
@@ -11937,6 +12010,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         skillDescriptions: this._buildSkillDescriptions(),
         toolFamilies: getToolFamilies(),
         otelComparison,
+        mistralCloudSessionsStatus,
       });
 
       this.log("✅ Diagnostic data loaded and sent to webview");

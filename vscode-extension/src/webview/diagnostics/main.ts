@@ -187,6 +187,8 @@ type DiagnosticsData = {
   skillDescriptions?: { [skillName: string]: string };
   toolFamilies?: ToolFamilyConfig[];
   otelComparison?: CopilotCliOtelComparison | null;
+  /** BETA: whether a Mistral API key is configured, posted with diagnosticDataLoaded. */
+  mistralCloudSessionsStatus?: { apiKeyConfigured: boolean };
 };
 
 type ToolFamilyConfig = {
@@ -195,6 +197,25 @@ type ToolFamilyConfig = {
   builtIn: string[];
   alternatives: string[];
   description?: string;
+};
+
+type MistralCloudConversation = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  agentId: string;
+  name: string | null;
+  description: string | null;
+  agentVersion: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
+type MistralCloudSessionsResult = {
+  conversations: MistralCloudConversation[];
+  totalCount: number;
+  authenticated: boolean;
+  fetchedAt: string;
+  error: string;
 };
 
 type OtelDeltaPeriod = "all" | "today" | "yesterday" | "week" | "month";
@@ -279,6 +300,8 @@ let storedDetailedFiles: SessionFileDetails[] = [];
 let isLoading = true;
 let currentBackendInfo: BackendStorageInfo | undefined;
 let currentGithubAuth: GitHubAuthStatus | undefined;
+let currentMistralCloudSessions: MistralCloudSessionsResult | undefined;
+let currentMistralApiKeyConfigured = false;
 let currentModelUsageTimeRange = "all";
 
 function removeSessionFilesSection(reportText: string): string {
@@ -2336,6 +2359,7 @@ function handleDiagnosticDataLoaded(message: DiagMessage): void {
   handleToolAnalysisSection(message);
   handleSkillUsageSection(message);
   handleOtelComparisonSection(message);
+  handleMistralCloudSessionsStatus(message);
 }
 
 function handleGithubAuthUpdated(message: DiagMessage): void {
@@ -2629,6 +2653,8 @@ function setupMessageHandlers(): void {
       handleModelUsageResult(message);
     } else if (message.command === "ttftResult") {
       handleTtftResult(message);
+    } else if (message.command === "mistralCloudSessionsResult") {
+      handleMistralCloudSessionsResult(message);
     }
   });
 }
@@ -3380,6 +3406,133 @@ function triggerTtftAnalysis(): void {
   vscode.postMessage({ command: "analyzeTtft", granularity: currentTtftGranularity, scanRange: currentTtftScanRange });
 }
 
+function renderMistralConversationRow(c: MistralCloudConversation): string {
+  const created = c.createdAt ? new Date(c.createdAt).toLocaleString() : "—";
+  const updated = c.updatedAt ? new Date(c.updatedAt).toLocaleString() : "—";
+  const name = c.name || "(untitled)";
+  const desc = c.description || "";
+  const descCell = desc
+    ? `<span title="${escapeHtml(desc)}">${escapeHtml(desc.slice(0, 60))}${desc.length > 60 ? "…" : ""}</span>`
+    : "—";
+  return `<tr>
+    <td title="${escapeHtml(c.id)}">${escapeHtml(c.id.slice(0, 8))}</td>
+    <td>${escapeHtml(name)}</td>
+    <td>${escapeHtml(c.agentId || "—")}</td>
+    <td>${escapeHtml(c.agentVersion || "—")}</td>
+    <td>${created}</td>
+    <td>${updated}</td>
+    <td>${descCell}</td>
+  </tr>`;
+}
+
+function renderMistralConversationTable(conversations: MistralCloudConversation[]): string {
+  const rows = conversations.map(renderMistralConversationRow).join("");
+  if (!rows) { return ""; }
+  return `<table class="session-table"><thead><tr><th>ID</th><th>Name</th><th>Agent ID</th><th>Version</th><th>Created</th><th>Updated</th><th>Description</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderMistralCloudSummaryCards(result: MistralCloudSessionsResult | undefined, configured: boolean): string {
+  const statusText = configured ? "API key configured" : "No API key configured";
+  const statusColor = configured ? "#2d6a4f" : "#666";
+  const statusIcon = configured ? "✅" : "⚪";
+  const count = result?.conversations?.length ?? 0;
+  const totalSuffix = result && result.totalCount > count ? ` of ${result.totalCount.toLocaleString()}` : "";
+  const lastFetched = result?.fetchedAt ? new Date(result.fetchedAt).toLocaleString() : "";
+  return `<div class="summary-cards">
+<div class="summary-card" style="border-left: 4px solid ${statusColor};">
+<div class="summary-label">${statusIcon} Status</div>
+<div class="summary-value" style="font-size: 14px; color: ${statusColor};">${statusText}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">Conversations</div>
+<div class="summary-value" style="font-size: 16px;">${count.toLocaleString()}${totalSuffix}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">Last fetched</div>
+<div class="summary-value" style="font-size: 14px;">${escapeHtml(lastFetched || "—")}</div>
+</div>
+</div>`;
+}
+
+function renderMistralCloudButtons(configured: boolean): string {
+  return configured
+    ? `<button class="button" id="btn-mistral-refresh"><span>🔄</span><span>Refresh</span></button>
+     <button class="button secondary" id="btn-mistral-disconnect"><span>🔌</span><span>Remove API key</span></button>`
+    : `<button class="button" id="btn-mistral-connect"><span>🔑</span><span>Connect Mistral API key</span></button>`;
+}
+
+function renderMistralCloudTab(
+  result: MistralCloudSessionsResult | undefined,
+  apiKeyConfigured: boolean,
+): string {
+  const betaBadge = `<span class="beta-badge" title="Beta">Beta</span>`;
+  const configured = apiKeyConfigured || !!result?.authenticated;
+  const errorBox = result?.error
+    ? `<div class="info-box" style="border-left:4px solid #d9534f;"><div><b>Error:</b> ${escapeHtml(result.error)}</div></div>`
+    : "";
+  return `<div id="tab-mistral-cloud" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">🔥 Mistral Vibe Cloud Sessions ${betaBadge}</div>
+<div>
+Lists conversations from your Mistral account via the beta <code>GET /v1/conversations</code> API
+on <code>api.mistral.ai</code>. This is the closest available surface to Vibe Code Web (cloud)
+sessions; it is <b>undocumented for Vibe Code Web specifically</b> and may not include all cloud
+sessions. Requires a Mistral API key stored locally (never leaves your machine).
+</div>
+</div>
+${renderMistralCloudSummaryCards(result, configured)}
+${errorBox}
+<div class="button-group" id="mistral-cloud-buttons">
+${renderMistralCloudButtons(configured)}
+</div>
+${renderMistralConversationTable(result?.conversations ?? [])}
+</div>`;
+}
+
+function setupMistralCloudHandlers(): void {
+  const connect = document.getElementById("btn-mistral-connect");
+  const disconnect = document.getElementById("btn-mistral-disconnect");
+  const refresh = document.getElementById("btn-mistral-refresh");
+  connect?.addEventListener("click", () => promptMistralApiKey());
+  disconnect?.addEventListener("click", () => {
+    vscode.postMessage({ command: "clearMistralApiKey" });
+  });
+  refresh?.addEventListener("click", () => {
+    vscode.postMessage({ command: "refreshMistralCloudSessions" });
+  });
+}
+
+function promptMistralApiKey(): void {
+  const existing = window.prompt(
+    "Enter your Mistral API key (stored in VS Code SecretStorage, used to call api.mistral.ai):",
+    "",
+  );
+  if (existing !== null && existing.trim()) {
+    vscode.postMessage({ command: "setMistralApiKey", apiKey: existing.trim() });
+  }
+}
+
+function rerenderMistralCloudTab(): void {
+  replaceTabContent("mistral-cloud", renderMistralCloudTab(currentMistralCloudSessions, currentMistralApiKeyConfigured), setupMistralCloudHandlers);
+}
+
+function handleMistralCloudSessionsResult(message: DiagMessage): void {
+  if (message.result === undefined) { return; }
+  currentMistralCloudSessions = message.result as MistralCloudSessionsResult;
+  if (currentMistralCloudSessions?.authenticated) { currentMistralApiKeyConfigured = true; }
+  rerenderMistralCloudTab();
+}
+
+function handleMistralCloudSessionsStatus(message: DiagMessage): void {
+  const status = message.mistralCloudSessionsStatus as { apiKeyConfigured: boolean } | undefined;
+  if (!status) { return; }
+  currentMistralApiKeyConfigured = !!status.apiKeyConfigured;
+  if (!currentMistralApiKeyConfigured && !currentMistralCloudSessions) {
+    currentMistralCloudSessions = { conversations: [], totalCount: 0, authenticated: false, fetchedAt: "", error: "" };
+  }
+  rerenderMistralCloudTab();
+}
+
 function setupTtftHandlers(): void {
   document.getElementById("ttft-granularity")?.addEventListener("change", (e) => {
     currentTtftGranularity = (e.target as HTMLSelectElement).value as TtftGranularity;
@@ -3476,6 +3629,7 @@ function renderTabBars(data: DiagnosticsData, detailedFiles: SessionFileDetails[
 <button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
 <button class="tab" data-tab="skill-usage">🧩 Skill Usage</button>
 <button class="tab" data-tab="otel-delta">📡 OTel Delta</button>
+<button class="tab" data-tab="mistral-cloud">🔥 Mistral Cloud (Beta)</button>
 <button class="tab" data-tab="ttft">⏱️ TTFT</button>
 </div>
 
@@ -3538,6 +3692,7 @@ ${renderModelUsageTab(detailedFiles, isLoading)}
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
 ${renderSkillUsageTab(data.skillCallStats, data.skillCallsByEditor, data.skillDescriptions, skillUsageEditorFilter)}
 ${renderOtelDeltaTab(data.otelComparison)}
+${renderMistralCloudTab(currentMistralCloudSessions, currentMistralApiKeyConfigured)}
 ${renderTtftTab()}
 </div>
 `;
@@ -3575,6 +3730,9 @@ function renderLayout(data: DiagnosticsData): void {
   currentSkillCallStats = data.skillCallStats;
   currentSkillCallsByEditor = data.skillCallsByEditor;
   currentSkillDescriptions = data.skillDescriptions;
+  if (data.mistralCloudSessionsStatus) {
+    currentMistralApiKeyConfigured = !!data.mistralCloudSessionsStatus.apiKeyConfigured;
+  }
 
   const reportIsLoading = data.report === LOADING_PLACEHOLDER;
   const escapedReport = reportIsLoading
@@ -3613,6 +3771,7 @@ function renderLayout(data: DiagnosticsData): void {
   setupToolAnalysisSortHandlers();
   setupSkillUsageFilterHandler();
   setupOtelDeltaPeriodHandler();
+  setupMistralCloudHandlers();
   setupTtftHandlers();
 
   const savedState = diagState.restore();
