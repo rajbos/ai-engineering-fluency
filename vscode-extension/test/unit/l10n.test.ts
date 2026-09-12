@@ -298,3 +298,47 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+
+// HydraFusion Routing section (log viewer) and its Session Steps Overview integration
+// (hardcoded-strings baseline fix) — guards against these strings resurfacing in English
+// for zh-CN users.
+test('l10n: HydraFusion Routing labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'hydrafusion.table.cost': 'Cost',
+		'hydrafusion.turn.costTooltip': 'Cost for this turn',
+		'hydrafusion.turn.jumpToStepTooltip': 'Jump to step #{0} in the Session Steps Overview below',
+		'hydrafusion.turn.jumpToStepLabel': '⤵ step #{0}',
+		'hydrafusion.turnsPanel.subtitle': 'Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg a judge rejected. The same legs also appear under their step in the Session Steps Overview below.',
+		'hydrafusion.overview.toggleLegsAriaLabel': 'Toggle HydraFusion legs for step #{0}',
+		'hydrafusion.overview.showLegsTooltip': 'Show the HydraFusion legs behind this step',
+		'hydrafusion.overview.legsCaption': '⚡ HydraFusion legs for step #{0} — total',
+		'hydrafusion.overview.modelChangedTooltip': 'Model changed from the previous step',
+		'hydrafusion.overview.expandHint': '⚡ expand a step to see the HydraFusion legs behind it',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: HydraFusion Routing labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'hydrafusion.table.cost': '成本',
+			'hydrafusion.turn.costTooltip': '本轮成本',
+			'hydrafusion.turn.jumpToStepTooltip': '跳转到下方会话步骤概览中的步骤 #{0}',
+			'hydrafusion.turn.jumpToStepLabel': '⤵ 步骤 #{0}',
+			'hydrafusion.turnsPanel.subtitle': '展开某一轮以查看每个环节，它的判定结果及花费。● 标记你实际收到输出的环节；✗ 标记被评审判定拒绝的环节。相同的环节也会出现在下方会话步骤概览中对应的步骤下。',
+			'hydrafusion.overview.toggleLegsAriaLabel': '切换步骤 #{0} 的 HydraFusion 环节',
+			'hydrafusion.overview.showLegsTooltip': '显示此步骤背后的 HydraFusion 环节',
+			'hydrafusion.overview.legsCaption': '⚡ 步骤 #{0} 的 HydraFusion 环节 — 共计',
+			'hydrafusion.overview.modelChangedTooltip': '模型较上一步骤有变化',
+			'hydrafusion.overview.expandHint': '⚡ 展开步骤以查看其背后的 HydraFusion 环节',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});

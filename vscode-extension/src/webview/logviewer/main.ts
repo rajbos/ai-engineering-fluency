@@ -12,7 +12,7 @@ import type { HydraFusionSummary, HydraFusionTurn } from '../../../../src/hydraf
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
-import { initializeWebviewLocalization, setCurrentLanguage, localize } from '../shared/localization';
+import { initializeWebviewLocalization, setCurrentLanguage, localize, localizeFormat } from '../shared/localization';
 
 // ── Type definitions ──────────────────────────────────────────────────────────
 
@@ -1146,21 +1146,21 @@ ${costCell(child.cost)}
 <td class="turns-overview-actual" title="Estimated from text">~</td>
 </tr>`).join('');
 		const legToggle = row.legs.length > 0
-			? `<button type="button" class="turns-overview-leg-toggle" data-turn="${row.turnNumber}" aria-expanded="false" aria-label="Toggle HydraFusion legs for step #${row.turnNumber}" title="Show the HydraFusion legs behind this step">▸</button> `
+			? `<button type="button" class="turns-overview-leg-toggle" data-turn="${row.turnNumber}" aria-expanded="false" aria-label="${escapeHtml(localizeFormat('hydrafusion.overview.toggleLegsAriaLabel', row.turnNumber))}" title="${escapeHtml(localize('hydrafusion.overview.showLegsTooltip'))}">▸</button> `
 			: '';
 		const hydraTurn = hydraTurnByChatTurn.get(row.turnNumber);
 		const legsRow = row.legs.length > 0 && hydraTurn
 			? `<tr class="turns-overview-legs-row" data-parent-turn="${row.turnNumber}" style="display: none;">
 <td colspan="${columnCount}">
 <div class="turns-overview-legs-wrap">
-<div class="turns-overview-legs-caption">⚡ HydraFusion legs for step #${row.turnNumber} — total <strong>${escapeHtml(formatFusionCost(hydraTurn.aiu))}</strong></div>
+<div class="turns-overview-legs-caption">${escapeHtml(localizeFormat('hydrafusion.overview.legsCaption', row.turnNumber))} <strong>${escapeHtml(formatFusionCost(hydraTurn.aiu))}</strong></div>
 ${renderLegsTable(hydraTurn.phases)}
 </div>
 </td>
 </tr>`
 			: '';
 		return `<tr class="turns-overview-row${switched ? ' turns-overview-row-switch' : ''}" data-turn="${row.turnNumber}" title="Jump to turn #${row.turnNumber}">
-<td class="turns-overview-num">${legToggle}#${row.turnNumber}${switched ? ' <span class="overview-switch-icon" title="Model changed from the previous step">⇄</span>' : ''}</td>
+<td class="turns-overview-num">${legToggle}#${row.turnNumber}${switched ? ` <span class="overview-switch-icon" title="${escapeHtml(localize('hydrafusion.overview.modelChangedTooltip'))}">⇄</span>` : ''}</td>
 <td><span class="turn-mode" style="background: ${getModeColor(row.mode)};">${getModeIcon(row.mode)} ${escapeHtml(row.mode)}</span></td>
 <td>${renderModelOverviewBadge(row.model)}</td>
 <td class="count-cell">${formatCompact(row.input)}</td>
@@ -1178,7 +1178,7 @@ ${costCell(row.cost)}
 <span>🧭 Session Steps Overview (${rows.length})</span>
 ${hasModelSwitches ? '<span class="overview-switch-note">⇄ marks a model change from the previous step</span>' : ''}
 ${totalChildren > 0 ? `<span class="overview-switch-note">🤖 ↳ marks a sub-agent/child session delegated from that step</span>` : ''}
-${hasLegs ? '<span class="overview-switch-note">⚡ expand a step to see the HydraFusion legs behind it</span>' : ''}
+${hasLegs ? `<span class="overview-switch-note">${escapeHtml(localize('hydrafusion.overview.expandHint'))}</span>` : ''}
 </div>
 <div class="turns-overview-table-wrap">
 <table class="turns-overview-table">
