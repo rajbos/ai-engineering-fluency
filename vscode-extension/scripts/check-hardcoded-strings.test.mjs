@@ -663,3 +663,13 @@ test('scanFile: a text run beginning right after an interpolation hole attribute
 		assert.equal(match.line, 2, `expected the violation on the "Refresh" line (2), got line ${match.line}`);
 	});
 });
+
+test('scanFile: a multiline template used directly as an assignment value attributes its report to the prose\'s own line, not the template\'s opening line', () => {
+	withTempFile('el.title = `${label}\n  Refresh`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+		assert.equal(violations[0].text, 'Refresh');
+		assert.equal(violations[0].line, 2, `expected the violation on the "Refresh" line (2), got line ${violations[0].line}`);
+	});
+});

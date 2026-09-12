@@ -239,21 +239,30 @@ const LITERAL_LEAF_BINARY_OPS = new Set([
  * contributes no literal). Used everywhere a literal in a UI-rendering position is checked
  * (assignment target, sink argument).
  */
-function extractLiteralTexts(node) {
+function extractLiteralTexts(node, sourceFile) {
 	const n = unwrapParens(node);
-	if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
-		return [{ text: n.text, node: n }];
-	}
-	if (ts.isTemplateExpression(n)) {
-		let text = n.head.text;
-		for (const span of n.templateSpans) { text += span.literal.text; }
-		return [{ text, node: n }];
+	if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) {
+		// One entry per static chunk (not one combined string for a TemplateExpression) — a
+		// multiline `` `${x}\n  Refresh` `` must attribute its report to Refresh's own line, not
+		// the template's opening line, or a baseline hash and an `// i18n-exempt` placed next to
+		// Refresh both silently apply to the wrong line.
+		return getStaticChunks(n, sourceFile).map((chunk) => {
+			// A template-tail/-middle chunk's raw text starts right after the closing `}` of the
+			// previous interpolation, typically with a leading newline/indentation — e.g. for
+			// `` `${label}\n  Refresh` ``, the tail's own text is "\n  Refresh" starting at the `}`.
+			// Without skipping that, the reported offset resolves to the *previous* line (the one
+			// with `${label}`), not Refresh's own line. LEADING_SKIP_RE (whitespace, defined below)
+			// covers this; it also tolerates HOLE_PLACEHOLDER even though these are raw (non-
+			// flattened) chunks where that string can't actually occur.
+			const leadingSkip = chunk.text.match(LEADING_SKIP_RE)[0].length;
+			return { text: chunk.text, offset: chunk.offset + leadingSkip };
+		});
 	}
 	if (ts.isConditionalExpression(n)) {
-		return [...extractLiteralTexts(n.whenTrue), ...extractLiteralTexts(n.whenFalse)];
+		return [...extractLiteralTexts(n.whenTrue, sourceFile), ...extractLiteralTexts(n.whenFalse, sourceFile)];
 	}
 	if (ts.isBinaryExpression(n) && LITERAL_LEAF_BINARY_OPS.has(n.operatorToken.kind)) {
-		return [...extractLiteralTexts(n.left), ...extractLiteralTexts(n.right)];
+		return [...extractLiteralTexts(n.left, sourceFile), ...extractLiteralTexts(n.right, sourceFile)];
 	}
 	return [];
 }
@@ -380,9 +389,9 @@ function reportAt(rawText, offset, ctx, reason) {
 function checkAssignmentTarget(propName, valueNode, ctx, reasonPrefix) {
 	if (!propName || !TARGET_PROPS.has(propName)) { return; }
 	const htmlBearing = HTML_BEARING_PROPS.has(propName);
-	for (const literal of extractLiteralTexts(valueNode)) {
+	for (const literal of extractLiteralTexts(valueNode, ctx.sourceFile)) {
 		if (htmlBearing && HTML_TAG_FRAGMENT_RE.test(literal.text)) { continue; } // tag content: let the generic literal scan report it instead
-		reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${reasonPrefix}${propName}`);
+		reportAt(literal.text, literal.offset, ctx, `${reasonPrefix}${propName}`);
 	}
 }
 
@@ -484,9 +493,9 @@ function checkTextArgSink(node, chain, ctx) {
 	const argIndex = TEXT_ARG_SINKS.get(chain);
 	if (argIndex === undefined || node.arguments.length <= argIndex) { return; }
 	const htmlBearing = HTML_BEARING_SINKS.has(chain);
-	for (const literal of extractLiteralTexts(node.arguments[argIndex])) {
+	for (const literal of extractLiteralTexts(node.arguments[argIndex], ctx.sourceFile)) {
 		if (htmlBearing && HTML_TAG_FRAGMENT_RE.test(literal.text)) { continue; }
-		reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${chain}() text argument`);
+		reportAt(literal.text, literal.offset, ctx, `${chain}() text argument`);
 	}
 }
 
@@ -495,8 +504,8 @@ function checkSetAttributeSink(node, ctx) {
 	if (!ts.isPropertyAccessExpression(node.expression) || node.expression.name.text !== 'setAttribute' || node.arguments.length < 2) { return; }
 	const nameArg = unwrapParens(node.arguments[0]);
 	if (!ts.isStringLiteral(nameArg) || !ATTR_NAMES.includes(nameArg.text)) { return; }
-	for (const literal of extractLiteralTexts(node.arguments[1])) {
-		reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `setAttribute('${nameArg.text}', ...) value`);
+	for (const literal of extractLiteralTexts(node.arguments[1], ctx.sourceFile)) {
+		reportAt(literal.text, literal.offset, ctx, `setAttribute('${nameArg.text}', ...) value`);
 	}
 }
 
