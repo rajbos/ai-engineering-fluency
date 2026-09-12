@@ -232,6 +232,12 @@ body {
 	grid-column: span 2;
 }
 
+@media (max-width: 330px) {
+	.summary-card--compact.summary-card--combined {
+		grid-column: span 1;
+	}
+}
+
 /* Sub-text for combined cards: stack each merged metric on its own line. */
 .combined-card-sub {
 	display: flex;
