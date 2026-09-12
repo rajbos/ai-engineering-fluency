@@ -196,6 +196,21 @@ test('l10n: usage context-pressure keys resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: efficiency Value empty-state action key resolves in English', () => {
+	// Labels the "Open Repository PRs" button in the Efficiency view's Value tab empty state.
+	// A missing key would render the raw `efficiency.value.openRepositoryPrs` on the button.
+	assert.equal(t('efficiency.value.openRepositoryPrs'), 'Open Repository PRs');
+});
+
+test('l10n: efficiency Value empty-state action key resolves in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('efficiency.value.openRepositoryPrs'), '打开仓库 PR');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test("l10n: what's-new notification keys resolve in English", () => {
 	// The two buttons on the one-a-day new-feature notification. A missing key
 	// here would put a raw `whatsNew.takeMeThere` on the button, which is the

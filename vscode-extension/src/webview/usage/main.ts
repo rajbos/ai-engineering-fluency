@@ -718,6 +718,8 @@ function showLoadError(message: string): void {
 
 // State for the Repository PRs tab
 let repoPrStatsLoaded = false;
+/** True once the first rendered layout has kicked off its active tab's lazy fetch. */
+let initialLazyTabLoadStarted = false;
 let repoPrStatsData: RepoPrStatsResult | null = null;
 
 // State for the Cloud Agent tab
@@ -2409,11 +2411,34 @@ function reportTabOpened(tab: string): void {
 	vscode.postMessage({ command: 'viewTabOpened', view: 'usage', tab });
 }
 
+/**
+ * Starts a tab's one-time data fetch. Called on a tab click and, once, for whichever tab the
+ * layout first renders on: a tab the host requested while the tab bar did not exist yet (see
+ * `handleSwitchTab`) has no button to click, so nothing else would ever start its fetch.
+ */
+function startLazyTabLoad(tab: string): void {
+	// Lazy-load repo PR stats on first visit to the tab
+	if (tab === 'repos' && !repoPrStatsLoaded) {
+		repoPrStatsLoaded = true;
+		vscode.postMessage({ command: 'loadRepoPrStats' });
+	}
+	// Lazy-load cloud agent sessions on first visit to the tab
+	if (tab === 'agent' && !agentSessionsLoaded) {
+		agentSessionsLoaded = true;
+		vscode.postMessage({ command: 'loadAgentSessions' });
+	}
+}
+
 function setupTabs(): void {
 	const tabButtons = document.querySelectorAll<HTMLElement>('.tab-button');
 	// The tab that is already on screen counts as opened — the user is reading it
 	// right now, whether or not they clicked anything to get here.
 	reportTabOpened(activeTab);
+	// Guarded so a later re-render never re-fires a fetch the user did not ask for.
+	if (!initialLazyTabLoadStarted) {
+		initialLazyTabLoadStarted = true;
+		startLazyTabLoad(activeTab);
+	}
 	tabButtons.forEach(button => {
 		button.addEventListener('click', () => {
 			const tab = button.getAttribute('data-tab');
@@ -2426,16 +2451,7 @@ function setupTabs(): void {
 			});
 			const activePanel = document.getElementById(`tab-panel-${tab}`);
 			if (activePanel) { activePanel.style.display = 'block'; }
-			// Lazy-load repo PR stats on first visit to the tab
-			if (tab === 'repos' && !repoPrStatsLoaded) {
-				repoPrStatsLoaded = true;
-				vscode.postMessage({ command: 'loadRepoPrStats' });
-			}
-			// Lazy-load cloud agent sessions on first visit to the tab
-			if (tab === 'agent' && !agentSessionsLoaded) {
-				agentSessionsLoaded = true;
-				vscode.postMessage({ command: 'loadAgentSessions' });
-			}
+			startLazyTabLoad(tab);
 			// Mark new insights as seen when visiting the Insights tab
 			if (tab === 'insights') {
 				currentInsights
