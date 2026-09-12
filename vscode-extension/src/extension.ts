@@ -725,8 +725,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _efficiencyPrimeInFlight: Promise<void> | undefined;
 	/** Shared full-year daily-stats walk; see calculateFullDailyStats(). */
 	private _fullDailyStatsInFlight: Promise<DailyTokenStats[]> | undefined;
+	/** Tail of the serialized corpus-preload queue; see _queueSessionPreload(). */
+	private _preloadChain: Promise<void> = Promise.resolve();
 	/** Last successfully rendered Efficiency payload, restored if a refresh build fails. */
 	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
+	/** Monotonic id of the newest requested Efficiency build; older builds discard their result. */
+	private _efficiencyBuildSeq = 0;
 	private outputChannel!: vscode.OutputChannel;
 	private lastDetailedStats: DetailedStats | undefined;
 	private lastDailyStats: DailyTokenStats[] | undefined;
@@ -797,8 +801,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Editor list captured during the last (or current) log analysis, used to render the loading tooltip SVG
 	private _loadingEditors: { icon: string; name: string }[] = [];
-	/** Panels currently showing the shared loading screen and subscribed to its progress messages. */
-	private readonly _loadingPanels = new Set<vscode.WebviewPanel>();
+	/** Panels showing the Efficiency loading screen → how many in-flight builds hold a lease. */
+	private readonly _loadingPanels = new Map<vscode.WebviewPanel, number>();
 	// Previous progress percentage used to animate the progress bar smoothly between tooltip updates
 	private _prevLoadingPercentage = 0;
 
@@ -1380,7 +1384,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async computeRegressionStats(dataSourceLabel: string, sessionFiles: string[]): Promise<{ detailedStats: any; dailyStats: any; usageStats: any; maturityData: any; diagnosticReport: string; fluencyLevelData: any; chartTotals: any }> {
 		const detailedStats = await this.updateTokenStats(true);
 		if (!detailedStats) { throw new Error(`Failed to calculate detailed stats from ${dataSourceLabel}.`); }
-		const dailyStats = this.lastDailyStats ?? await this.calculateDailyStats();
+		const dailyStats = this.lastDailyStats ?? await this.calculateFullDailyStats();
 		const usageStats = await this.calculateUsageAnalysisStats(false);
 		const maturityData = await this.calculateMaturityScores(false);
 		const diagnosticReport = await this.generateDiagnosticReport();
@@ -2262,28 +2266,44 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Broadcast a loading-screen message to every panel currently showing the shared
-	 * loading HTML. The details panel opts in via `_detailsPanelIsLoading`; any other
-	 * panel opts in for the duration of its build with `withLoadingPanel()`.
+	 * Send a loading-screen message to the details panel's loading screen.
+	 *
+	 * Deliberately narrow. Loading-screen messages are not addressed to anyone, and the
+	 * script renders each one over the whole screen — subtitle, file counters, parse
+	 * checklist and editor pills, not just the bar. Broadcasting them to every open
+	 * loading screen therefore lets one operation's counts and labels appear on a panel
+	 * waiting for a completely different operation. Each build sends to its own panel
+	 * instead; see `sendEfficiencyLoadingMessage()`.
 	 */
 	private sendLoadingPanelMessage(msg: object): void {
 		if (this.detailsPanel && this._detailsPanelIsLoading) {
 			void this.detailsPanel.webview.postMessage(msg);
 		}
-		for (const panel of this._loadingPanels) {
+	}
+
+	/** Send a loading-screen message to the panels showing the Efficiency loading screen. */
+	private sendEfficiencyLoadingMessage(msg: object): void {
+		for (const panel of this._loadingPanels.keys()) {
 			void panel.webview.postMessage(msg);
 		}
 	}
 
 	/**
-	 * Runs `build` with `panel` subscribed to loading-screen progress, so a view that
-	 * shows getLoadingHtml() while it computes gets the same live per-file progress the
-	 * details panel gets instead of a bar frozen at a fixed percentage.
+	 * Runs `build` with `panel` subscribed to its own loading-screen progress, so a view
+	 * that shows getLoadingHtml() while it computes gets live per-file progress instead
+	 * of a bar frozen at a fixed percentage.
+	 *
+	 * Leases are reference-counted: an initial build and a refresh of the same panel can
+	 * overlap, and a plain add/delete would unsubscribe the panel when the first of them
+	 * finished, silently dropping the survivor's remaining progress.
 	 */
 	private async withLoadingPanel<T>(panel: vscode.WebviewPanel, build: () => Promise<T>): Promise<T> {
-		this._loadingPanels.add(panel);
+		this._loadingPanels.set(panel, (this._loadingPanels.get(panel) ?? 0) + 1);
 		try { return await build(); }
-		finally { this._loadingPanels.delete(panel); }
+		finally {
+			const held = (this._loadingPanels.get(panel) ?? 1) - 1;
+			if (held > 0) { this._loadingPanels.set(panel, held); } else { this._loadingPanels.delete(panel); }
+		}
 	}
 
 	/**
@@ -3388,7 +3408,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			[...discoveredEditorSet].map(name => ({ icon: this.getEditorIconForLoader(name), name }))
 		);
 		const missBudget = isLeader ? undefined : { remaining: CopilotTokenTracker.FOLLOWER_MISS_BUDGET };
-		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget);
+		const { sessionFiles, preloaded } = await this._queueSessionPreload(
+			() => this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget));
 		if (!isLeader && preloaded.length < sessionFiles.length) {
 			this.log(`Follower with cold cache: stats below are partial (${preloaded.length}/${sessionFiles.length} files within date range parsed within the follower budget). Will resync once the leader publishes its snapshot.`);
 		}
@@ -3487,7 +3508,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (typeof this._followerResyncTimer.unref === 'function') { this._followerResyncTimer.unref(); }
 	}
 
-	private buildProgressCallback(silent: boolean, getEditors?: () => { icon: string; name: string }[]): (completed: number, total: number) => void {
+	private buildProgressCallback(
+		silent: boolean,
+		getEditors?: () => { icon: string; name: string }[],
+		send: (msg: object) => void = (msg) => this.sendLoadingPanelMessage(msg),
+	): (completed: number, total: number) => void {
 		// Always build a callback regardless of `silent` so that a silent background
 		// refresh that coalesces with an open loading panel still sends progress
 		// messages to it.  Status-bar updates remain gated on !silent; loading-panel
@@ -3512,7 +3537,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const editors = getEditors?.() ?? [];
 				this._loadingEditors = editors;
 				const msg: Record<string, unknown> = { command: 'loadingStep', step: 'parsing', total, editors };
-				this.sendLoadingPanelMessage(msg);
+				send(msg);
 				if (!silent) {
 					// Set the hover tooltip exactly once when parsing starts, using the
 					// indeterminate (self-animating SMIL) variant. The tooltip is never
@@ -3532,7 +3557,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (now - lastProgressSentMs >= 500 || completed === total) {
 				lastProgressSentMs = now;
 				const editors = getEditors?.() ?? [];
-				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage, editors });
+				send({ command: 'loadingProgress', completed, total, percentage, editors });
 			}
 		};
 	}
@@ -4383,6 +4408,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._fullDailyStatsInFlight ??= this.calculateDailyStats(365, knownSessionFiles)
 			.finally(() => { this._fullDailyStatsInFlight = undefined; });
 		return this._fullDailyStatsInFlight;
+	}
+
+	/**
+	 * Serializes every full corpus preload so two of them never walk the same files at once.
+	 *
+	 * `_preloadSessionFiles` is reached from the refresh path and from the Efficiency prime,
+	 * and the periodic silent refresh fires on its own timer — so checking "is a refresh in
+	 * flight?" once, before starting, cannot rule out a second walk beginning a moment later.
+	 * Queueing here does: the second caller waits, then finds the cache the first one filled
+	 * and completes on warm entries instead of re-statting and re-parsing the corpus. Waiting
+	 * costs nothing it would not already have spent doing that work itself.
+	 */
+	private _queueSessionPreload<T>(run: () => Promise<T>): Promise<T> {
+		const queued = this._preloadChain.then(run, run);
+		// Keep the chain alive regardless of this run's outcome, so one failure cannot wedge
+		// every later preload.
+		this._preloadChain = queued.then(() => undefined, () => undefined);
+		return queued;
 	}
 
 	/** Compute daily token stats for up to `daysBack` days, using the same token preference
@@ -7935,7 +7978,7 @@ private computeFallbackDailyRollup(
 		// before the calculation finishes, the reopen would be silently dropped as "already in flight".
 		if (!hasFullData) {
 			void (async () => {
-				const fullStats = await this.calculateDailyStats();
+				const fullStats = await this.calculateFullDailyStats();
 				if (this.chartPanel) {
 					void this.chartPanel.webview.postMessage({
 						command: 'updateChartData',
@@ -8848,7 +8891,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 
 		this.log('🔄 Refreshing Chart view');
 		// Refresh the full-year daily stats so week/month period views are up to date
-		await this.calculateDailyStats();
+		await this.calculateFullDailyStats();
 		// Refresh all stats so the status bar and tooltip stay in sync
 		await this.updateTokenStats();
 		this.log('✅ Chart view refreshed');
@@ -9551,9 +9594,12 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// key locked — if the user closes the panel and reopens it before the build finishes, the
 		// reopen would be silently dropped as "already in flight" (same fix as showChart above).
 		void (async () => {
+			// This build is detached from showEfficiency()'s dispatch key, so a refresh can start
+			// alongside it; whichever was requested last owns the panel.
+			const seq = ++this._efficiencyBuildSeq;
 			const data = await this.withLoadingPanel(panel, () => this.buildEfficiencyViewData());
 			// The user may have closed the panel while the data was being computed.
-			if (this.efficiencyPanel !== panel) { return; }
+			if (this.efficiencyPanel !== panel || seq !== this._efficiencyBuildSeq) { return; }
 			this._lastEfficiencyViewData = data;
 			panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
 			this.log('⚡ Efficiency view rendered');
@@ -9567,19 +9613,20 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// Refresh forces all three walks to recompute, so it is as slow as a cold open —
 		// show the same loading screen with live progress rather than a frozen view.
 		const previous = this._lastEfficiencyViewData;
+		const seq = ++this._efficiencyBuildSeq;
 		panel.webview.html = this.getLoadingHtml(panel.webview);
 		let data: EfficiencyViewData;
 		try {
 			data = await this.withLoadingPanel(panel, () => this.buildEfficiencyViewData(true));
-			this._lastEfficiencyViewData = data;
 		} catch (error) {
 			// Never strand the panel on the loading screen: fall back to what it was showing.
 			this.error('Error refreshing Efficiency view:', error);
-			if (!previous || this.efficiencyPanel !== panel) { return; }
+			if (!previous || this.efficiencyPanel !== panel || seq !== this._efficiencyBuildSeq) { return; }
 			panel.webview.html = this.getEfficiencyHtml(panel.webview, previous);
 			return;
 		}
-		if (this.efficiencyPanel !== panel) { return; }
+		if (this.efficiencyPanel !== panel || seq !== this._efficiencyBuildSeq) { return; }
+		this._lastEfficiencyViewData = data;
 		panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
 	}
 
@@ -9685,9 +9732,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * loading script clamps monotonically.
 	 */
 	private postEfficiencyStep(percentage: number, label: string): void {
-		for (const panel of this._loadingPanels) {
-			void panel.webview.postMessage({ command: 'loadingStep', step: 'computing', percentage, label });
-		}
+		this.sendEfficiencyLoadingMessage({ command: 'loadingStep', step: 'computing', percentage, label });
 	}
 
 	/**
@@ -9707,30 +9752,37 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 */
 	private async primeEfficiencySessionCache(forceRecalc: boolean, now: Date): Promise<void> {
 		// Every walk this would help is already memoized — nothing to warm.
-		const needsDaily = forceRecalc || !this.lastFullDailyStats;
-		const needsUsage = forceRecalc || !this.lastUsageAnalysisStats;
-		const needsInputs = forceRecalc || !this.lastEfficiencySessionInputs;
-		if (!needsDaily && !needsUsage && !needsInputs) { return; }
+		if (!this.efficiencyWalksNeeded(forceRecalc)) { return; }
 
-		// A refresh already in flight walks the same files. Let it finish rather than
-		// racing it with a second concurrent pass over the same corpus. It only covers the
-		// trailing ~60 days though, so the wider prime below still runs afterwards — it
-		// just finds those recent files already cached.
+		// A refresh already in flight walks the same files, and so does the full-year
+		// daily-stats job `_runRefreshCore` starts detached (which routinely outlives the
+		// refresh promise). Let either finish rather than racing it with another pass.
 		if (this._updateTokenStatsInFlight) {
 			this.log('⚡ [Efficiency] Waiting for the in-flight refresh before priming the session cache');
 			await this._updateTokenStatsInFlight.catch(() => undefined);
 		}
-		// That refresh starts its own full-year walk detached, so it can still be running now.
-		// It covers the same corpus as the prime below; let it finish rather than race it.
 		if (this._fullDailyStatsInFlight) {
 			this.log('⚡ [Efficiency] Waiting for the in-flight full-year daily stats walk');
 			await this._fullDailyStatsInFlight.catch(() => undefined);
 		}
 
+		// Re-check after those waits: the work we waited for may have populated the very
+		// caches the prime exists to warm, in which case walking again would be pure cost.
+		if (!this.efficiencyWalksNeeded(forceRecalc)) {
+			this.log('⚡ [Efficiency] Session cache already warm after waiting; skipping the prime');
+			return;
+		}
+
 		// Opening and refreshing can overlap; one prime serves both.
-		this._efficiencyPrimeInFlight ??= this.runEfficiencySessionCachePrime(now);
-		try { await this._efficiencyPrimeInFlight; }
-		finally { this._efficiencyPrimeInFlight = undefined; }
+		this._efficiencyPrimeInFlight ??= this.runEfficiencySessionCachePrime(now)
+			.finally(() => { this._efficiencyPrimeInFlight = undefined; });
+		await this._efficiencyPrimeInFlight;
+	}
+
+	/** True when any of the three Efficiency aggregation walks would still have to run. */
+	private efficiencyWalksNeeded(forceRecalc: boolean): boolean {
+		if (forceRecalc) { return true; }
+		return !this.lastFullDailyStats || !this.lastUsageAnalysisStats || !this.lastEfficiencySessionInputs;
 	}
 
 	/** The single preload pass behind primeEfficiencySessionCache(). */
@@ -9739,15 +9791,17 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// so one pass covers all of them.
 		const cutoffMs = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).getTime();
 		const editorSet = new Set<string>();
-		// `silent` so the status bar keeps showing stats; loading-panel messages are sent
-		// regardless, which is what the Efficiency loading screen is listening for.
-		const progressCallback = this.buildProgressCallback(true, () =>
-			[...editorSet].map(name => ({ icon: this.getEditorIconForLoader(name), name }))
+		// `silent` so the status bar keeps showing stats; progress is addressed to the
+		// Efficiency loading screen rather than whatever else happens to be loading.
+		const progressCallback = this.buildProgressCallback(
+			true,
+			() => [...editorSet].map(name => ({ icon: this.getEditorIconForLoader(name), name })),
+			(msg) => this.sendEfficiencyLoadingMessage(msg),
 		);
 		const startedMs = Date.now();
 		try {
-			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'discovering' });
-			await this._preloadSessionFiles(cutoffMs, progressCallback, editorSet);
+			this.sendEfficiencyLoadingMessage({ command: 'loadingStep', step: 'discovering' });
+			await this._queueSessionPreload(() => this._preloadSessionFiles(cutoffMs, progressCallback, editorSet));
 			this.log(`⚡ [Efficiency] Session cache primed in ${((Date.now() - startedMs) / 1000).toFixed(1)}s`);
 		} catch (error) {
 			// Priming is an optimisation: the three walks below still parse what they need.
