@@ -8,7 +8,7 @@ lastUpdated: 2026-09-12
 
 A dependency-free Node script that scans the VS Code extension's webview UI
 code for string/template literals that render as UI text but are **not**
-wrapped in `localize()`, `t()`, or `vscode.l10n.t()`. It produces a
+wrapped in `localize()`, `localizeFormat()`, `t()`, or `vscode.l10n.t()`. It produces a
 human-triageable inventory — it is **informational only** and never fails a
 build.
 
@@ -72,6 +72,13 @@ addition to printing a console summary grouped by file.
   nested inline tags (`<a>`, `<strong>`, `<em>`, `<code>`, `<b>`, `<i>`,
   `<u>`) so prose broken up by an inline link or emphasis is still read as
   one block instead of being skipped
+- A string/template literal passed as the UI-text argument to a known shared
+  DOM helper (`el(tag, className, text)`, `iconHeading(tag, icon, text,
+  className)`, `createButton(id, label, appearance)` from
+  `vscode-extension/src/webview/shared/domUtils.ts`) — these helpers set
+  `.textContent` internally, so a call site like `el('button', 'my-btn',
+  'Take me there')` never appears as a `.textContent = ` assignment and would
+  otherwise be invisible to this scan (500+ call sites use these helpers)
 
 `extension.ts` is scanned only within its `get*Html(...)` method bodies
 (`getDetailsHtml`, `getLoadingHtmlCssBase`, etc.) — not the whole 13k-line
@@ -81,7 +88,9 @@ webview UI text.
 
 A candidate string must also contain a run of 2+ letters and pass a "looks
 like prose" filter that excludes:
-- Pure numbers/symbols/emoji with no letters
+- Pure numbers/symbols/emoji with no letters (the letter check is
+  Unicode-aware, so non-English text such as Chinese or Cyrillic is still
+  treated as prose, not silently exempted for being outside A-Z)
 - URLs (`http(s)://`, `www.`)
 - CSS values: hex colors (`#fff`), units (`12px`, `1.5rem`), and CSS
   functions (`rgba(...)`, `calc(...)`, `var(...)`, etc.)
@@ -97,7 +106,10 @@ or `vscode.l10n.t(...)` call — including inside a template-literal interpolati
 already-localized text is not flagged. Conversely, a string literal hidden
 inside an interpolation's own expression — e.g. a ternary like
 `` `${flag ? 'Enable Overrides' : 'Disable Overrides'}` `` — is preserved and
-checked, since that is often where the actual hardcoded UI text lives.
+checked, since that is often where the actual hardcoded UI text lives. Each
+recovered literal is prose-checked on its own before being combined, so one
+non-prose branch (e.g. a URL) can't poison another genuine one — `` `${cond
+? 'https://x' : 'Open link'}` `` still surfaces "Open link".
 
 This is a **line/regex-based scan**, not an AST parse — by design, since this
 is a triage report rather than a hard CI gate (a stricter, ratcheted AST-based
@@ -115,7 +127,9 @@ Each finding shows:
 - **Snippet** — a whitespace-collapsed, truncated excerpt of the offending
   code
 
-The script always exits `0`. Nothing is auto-fixed.
+The script always exits `0`, even if an unexpected error occurs partway
+through (it is caught, logged to stderr, and does not change the exit code).
+Nothing is auto-fixed.
 
 ## After Reviewing Findings
 

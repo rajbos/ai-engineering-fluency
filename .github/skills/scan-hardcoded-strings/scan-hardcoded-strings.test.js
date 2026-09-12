@@ -23,6 +23,8 @@ const {
     findPropertyAssignments,
     findHtmlAttributes,
     findTagContent,
+    findHelperCallText,
+    splitTopLevelArgs,
     scanFile,
     extractHtmlMethodRanges,
     isWithinRanges,
@@ -74,6 +76,15 @@ test('stripInterpolations: drops localized calls inside an interpolation', () =>
     assert.equal(result.trim(), '');
 });
 
+test('stripInterpolations: one non-prose literal in a ternary does not suppress a genuine sibling', () => {
+    // Regression: joining literals before the prose check let a leading URL
+    // branch's failed URL check apply to the whole joined string, discarding
+    // a real label like "Open link" that happened to share the interpolation.
+    const result = stripInterpolations("${cond ? 'https://example.com' : 'Open link'}");
+    assert.match(result, /Open link/);
+    assert.doesNotMatch(result, /https:\/\//);
+});
+
 // ── extractStaticText / looksLikeProse ───────────────────────────────────────
 
 test('extractStaticText: strips both localized calls and interpolations', () => {
@@ -120,6 +131,13 @@ test('looksLikeProse: accepts a genuine one-word label that is not a known CSS k
     assert.equal(looksLikeProse('tie'), true);
     assert.equal(looksLikeProse('open'), true);
     assert.equal(looksLikeProse('manage'), true);
+});
+
+test('looksLikeProse: accepts non-English (non-ASCII) UI text', () => {
+    // Regression: the letter-run check was ASCII-only ([A-Za-z]), so hardcoded
+    // Chinese/Cyrillic/etc. text was silently exempt from the inventory.
+    assert.equal(looksLikeProse('刷新'), true);
+    assert.equal(looksLikeProse('Сохранить'), true);
 });
 
 // ── escapeTableCell ───────────────────────────────────────────────────────────
@@ -243,6 +261,63 @@ test('findTagContent: tolerates simple nested inline tags (<a>, <strong>) inside
     );
     assert.equal(findings.length, 1);
     assert.match(findings[0].snippet, /create an issue/);
+});
+
+// ── splitTopLevelArgs ─────────────────────────────────────────────────────────
+
+test('splitTopLevelArgs: splits simple comma-separated arguments', () => {
+    assert.deepEqual(splitTopLevelArgs("'div', 'header'"), ["'div'", "'header'"]);
+});
+
+test('splitTopLevelArgs: does not split on commas inside nested parens/brackets/braces', () => {
+    const args = splitTopLevelArgs("'div', foo(a, b), [1, 2], { x: 1, y: 2 }");
+    assert.deepEqual(args, ["'div'", 'foo(a, b)', '[1, 2]', '{ x: 1, y: 2 }']);
+});
+
+test('splitTopLevelArgs: does not split on commas or interpolation braces inside a template literal', () => {
+    const args = splitTopLevelArgs("'button', `toggle${a === 'x' ? ' active' : ''}`, 'Day'");
+    assert.deepEqual(args, ["'button'", "`toggle${a === 'x' ? ' active' : ''}`", "'Day'"]);
+});
+
+// ── findHelperCallText ───────────────────────────────────────────────────────
+
+test('findHelperCallText: flags the text argument of el(tag, className, text)', () => {
+    const findings = findHelperCallText("el('button', 'my-btn', 'Take me there')");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, 'el() text argument');
+});
+
+test('findHelperCallText: flags the text argument of iconHeading(tag, icon, text, className)', () => {
+    const findings = findHelperCallText("iconHeading('h3', 'graph', 'Key Metrics')");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, 'iconHeading() text argument');
+});
+
+test('findHelperCallText: flags the label argument of the legacy createButton(id, label, appearance)', () => {
+    const findings = findHelperCallText("createButton('btn-save', 'Save changes', 'primary')");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, 'createButton() text argument');
+});
+
+test('findHelperCallText: does not flag a variable/expression text argument', () => {
+    const findings = findHelperCallText("el('span', 'label', getChartTitle())");
+    assert.equal(findings.length, 0);
+});
+
+test('findHelperCallText: does not flag createButton(config) called with a single object argument', () => {
+    const findings = findHelperCallText('createButton(config)');
+    assert.equal(findings.length, 0);
+});
+
+test('findHelperCallText: does not flag a method call like this.el(...) or obj.el(...)', () => {
+    const findings = findHelperCallText("this.el('button', 'my-btn', 'Take me there')");
+    assert.equal(findings.length, 0);
+});
+
+test('findHelperCallText: handles a template-literal text argument containing an interpolation', () => {
+    const findings = findHelperCallText("el('span', 'header-icon', `Loading ${count} items`)");
+    assert.equal(findings.length, 1);
+    assert.match(findings[0].snippet, /Loading/);
 });
 
 // ── scanFile ──────────────────────────────────────────────────────────────────

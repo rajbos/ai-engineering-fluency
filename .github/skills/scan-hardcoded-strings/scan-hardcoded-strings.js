@@ -172,12 +172,19 @@ function extractInterpolationLiterals(expr) {
  * literals found inside them (e.g. the branches of a ternary like
  * `${flag ? 'Enable Overrides' : 'Disable Overrides'}`) so that hardcoded
  * prose hidden inside an interpolation is not silently discarded.
+ *
+ * Each recovered literal is prose-checked *individually* before being kept:
+ * joining every literal from an interpolation first and running one prose
+ * check over the combined string would let a non-prose branch (e.g. a URL)
+ * poison the whole result — `${cond ? 'https://x' : 'Open link'}` must not
+ * lose "Open link" just because "https://x" fails the URL check when the two
+ * are concatenated together.
  */
 function stripInterpolations(text) {
     let result = text;
     for (let iter = 0; iter < 10; iter++) {
         const next = result.replace(/\$\{([^{}]*)\}/g, (_, expr) => {
-            const literals = extractInterpolationLiterals(expr);
+            const literals = extractInterpolationLiterals(expr).filter((lit) => looksLikeProse(lit));
             return literals.length > 0 ? ` ${literals.join(' ')} ` : ' ';
         });
         if (next === result) { break; }
@@ -213,7 +220,10 @@ const CSS_KEYWORD_TOKENS = new Set([
     'solid', 'dashed', 'dotted', 'transparent',
 ]);
 const URL_RE = /^(https?:\/\/|www\.)/i;
-const LETTER_RUN_RE = /[A-Za-z]{2,}/;
+// Unicode-aware: a run of 2+ letters in any script (not just ASCII), so
+// hardcoded non-English UI text (Chinese, Japanese, Cyrillic, etc.) is not
+// silently exempted just for being outside A-Z.
+const LETTER_RUN_RE = /\p{L}{2,}/u;
 
 /** Heuristic: does this static text look like UI prose that should be localized? */
 function looksLikeProse(text) {
@@ -367,6 +377,84 @@ function findTagContent(content) {
     return findings;
 }
 
+// Shared DOM helpers (vscode-extension/src/webview/shared/domUtils.ts) that
+// take plain UI text as a positional argument and set it as textContent
+// internally, rather than the caller ever writing `.textContent = ...`
+// directly. Calls to these are otherwise invisible to this scanner even
+// though they are one of the most common ways webview text is set (500+
+// call sites). Value: 0-based index of the text argument in each call.
+const HELPER_TEXT_ARG_INDEX = { el: 2, iconHeading: 2, createButton: 1 };
+
+/** Split a raw (unparenthesized) argument-list string on top-level commas. */
+function splitTopLevelArgs(argsStr) {
+    const parts = [];
+    let depth = 0;
+    let current = '';
+    let quote = null;
+    for (let i = 0; i < argsStr.length; i++) {
+        const c = argsStr[i];
+        if (quote) {
+            current += c;
+            if (c === '\\') { current += argsStr[++i] ?? ''; continue; }
+            if (c === quote) { quote = null; }
+            continue;
+        }
+        if (c === '"' || c === "'" || c === '`') { quote = c; current += c; continue; }
+        if (c === '(' || c === '[' || c === '{') { depth++; current += c; continue; }
+        if (c === ')' || c === ']' || c === '}') { depth--; current += c; continue; }
+        if (c === ',' && depth === 0) { parts.push(current); current = ''; continue; }
+        current += c;
+    }
+    if (current.trim() !== '' || parts.length > 0) { parts.push(current); }
+    return parts.map((p) => p.trim());
+}
+
+/**
+ * Detect hardcoded text passed as a string/template literal to a known
+ * shared UI-text helper (`el(tag, className, text)`, `iconHeading(tag, icon,
+ * text, className)`, `createButton(id, label, appearance)`). Only bare calls
+ * are matched (not `obj.el(...)`) to avoid colliding with an unrelated
+ * same-named method on some other object.
+ */
+function findHelperCallText(content) {
+    const findings = [];
+    const nameAlt = Object.keys(HELPER_TEXT_ARG_INDEX).join('|');
+    const re = new RegExp('\\b(' + nameAlt + ')\\(', 'g');
+    let m;
+    while ((m = re.exec(content)) !== null) {
+        const name = m[1];
+        if (content[m.index - 1] === '.') { continue; } // e.g. `this.el(...)`
+        const openIdx = m.index + m[0].length - 1;
+        let depth = 0;
+        let end = -1;
+        for (let i = openIdx; i < content.length; i++) {
+            if (content[i] === '(') { depth++; }
+            else if (content[i] === ')') {
+                depth--;
+                if (depth === 0) { end = i; break; }
+            }
+        }
+        if (end === -1) { continue; }
+
+        const args = splitTopLevelArgs(content.slice(openIdx + 1, end));
+        const arg = args[HELPER_TEXT_ARG_INDEX[name]];
+        if (!arg) { continue; }
+        const litMatch = /^(["'`])([\s\S]*)\1$/.exec(arg);
+        if (!litMatch) { continue; } // not a direct literal (variable/call/etc.) — skip
+
+        const staticText = extractStaticText(litMatch[2]);
+        if (looksLikeProse(staticText)) {
+            findings.push({
+                index: m.index,
+                line: lineAt(content, m.index),
+                kind: `${name}() text argument`,
+                snippet: toSnippet(content.slice(m.index, end + 1)),
+            });
+        }
+    }
+    return findings;
+}
+
 /**
  * Run all detectors against one file's content, deduped by line+snippet and
  * optionally restricted to a set of allowed character ranges.
@@ -376,6 +464,7 @@ function scanFile(content, allowedRanges) {
         ...findPropertyAssignments(content),
         ...findHtmlAttributes(content),
         ...findTagContent(content),
+        ...findHelperCallText(content),
     ];
     if (allowedRanges) {
         all = all.filter((f) => isWithinRanges(f.index, allowedRanges));
@@ -403,7 +492,7 @@ function buildMarkdownReport(results, total, scannedCount) {
     lines.push('This is an informational triage report, not a CI gate. It lists candidate UI');
     lines.push('strings under `vscode-extension/src/webview/**` and the `get*Html()` methods in');
     lines.push('`vscode-extension/src/extension.ts` that are rendered as UI text but are not');
-    lines.push('wrapped in `localize()`, `t()`, or `vscode.l10n.t()`. Some entries may be false');
+    lines.push('wrapped in `localize()`, `localizeFormat()`, `t()`, or `vscode.l10n.t()`. Some entries may be false');
     lines.push('positives (see the skill README for the exclusion rules) — triage each one');
     lines.push('before localizing.');
     lines.push('');
@@ -491,6 +580,22 @@ function main() {
     process.exitCode = 0;
 }
 
+/**
+ * Run main() but honor the "always exits 0" contract even when something
+ * operational goes wrong (an unreadable source file, an unwritable report
+ * path, etc.) — those errors are reported to stderr, not left to crash the
+ * process with a non-zero exit that would unexpectedly fail a maintenance
+ * or CI invocation of this informational script.
+ */
+function runMain() {
+    try {
+        main();
+    } catch (err) {
+        console.error('scan-hardcoded-strings: error while scanning —', err instanceof Error ? err.message : err);
+        process.exitCode = 0;
+    }
+}
+
 module.exports = {
     collectTsFiles,
     extractHtmlMethodRanges,
@@ -505,11 +610,13 @@ module.exports = {
     findPropertyAssignments,
     findHtmlAttributes,
     findTagContent,
+    findHelperCallText,
+    splitTopLevelArgs,
     scanFile,
     buildMarkdownReport,
     runScan,
 };
 
 if (require.main === module) {
-    main();
+    runMain();
 }

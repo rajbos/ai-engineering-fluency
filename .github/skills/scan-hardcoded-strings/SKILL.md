@@ -1,6 +1,6 @@
 ---
 name: scan-hardcoded-strings
-description: Inventory hardcoded (non-localized) UI text across vscode-extension/src/webview/** and the webview-HTML-producing code in vscode-extension/src/extension.ts — string/template literals rendered as UI text that never go through localize()/t()/vscode.l10n.t(). Produces a human-triageable report; never fails the build. Use after a UI change, before a release, or periodically as a localization audit.
+description: Inventory hardcoded (non-localized) UI text across vscode-extension/src/webview/** and the webview-HTML-producing code in vscode-extension/src/extension.ts — string/template literals rendered as UI text that never go through localize()/localizeFormat()/t()/vscode.l10n.t(). Produces a human-triageable report; never fails the build. Use after a UI change, before a release, or periodically as a localization audit.
 ---
 
 # Scan Hardcoded Strings Skill
@@ -48,22 +48,29 @@ The script will:
    Markdown templates or VS Code panel titles)
 2. Flag string/template literals in UI-rendering positions — assignments to
    `.textContent`/`.innerText`/`.innerHTML`/`.title`/`.placeholder`,
-   `aria-label="..."`/`title="..."`/`placeholder="..."` HTML attributes, and
-   text inside `<div>`, `<button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`,
+   `aria-label="..."`/`title="..."`/`placeholder="..."` HTML attributes, text
+   inside `<div>`, `<button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`,
    `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>` tags in template
-   literals (tolerating simple nested inline tags like `<a>`/`<strong>`)
+   literals (tolerating simple nested inline tags like `<a>`/`<strong>`), and
+   the UI-text argument of a known shared DOM helper call (`el(...)`,
+   `iconHeading(...)`, `createButton(...)` from
+   `vscode-extension/src/webview/shared/domUtils.ts`)
 3. Skip anything already wrapped in `localize(`, `localizeFormat(`, `t(`, or
    `vscode.l10n.t(`, and anything that doesn't look like prose (pure
    numbers/symbols, URLs, CSS values, a narrow denylist of single CSS-keyword
-   tokens — not every single lowercase word) — but recover string literals
-   hidden inside an interpolation's own expression, e.g. a ternary like
-   `` `${flag ? 'Enable Overrides' : 'Disable Overrides'}` ``, rather than
-   discarding them along with the interpolation
+   tokens — not every single lowercase word; the letter check itself is
+   Unicode-aware, so non-English text isn't exempted) — but recover string
+   literals hidden inside an interpolation's own expression, e.g. a ternary
+   like `` `${flag ? 'Enable Overrides' : 'Disable Overrides'}` ``, checking
+   each recovered literal on its own so one non-prose branch can't suppress
+   another genuine one
 4. Print a console report grouped by file, with line numbers and snippets
 5. Write the same findings to `hardcoded-strings-report.md` at the repo root
 6. Set `process.exitCode = 0` rather than forcing `process.exit()` — this
    script informs, it does not gate, and letting the process exit naturally
-   avoids truncating buffered output when piped (e.g. in CI or `--json | ...`)
+   avoids truncating buffered output when piped (e.g. in CI or `--json | ...`).
+   Any unexpected error during the scan is caught and logged to stderr rather
+   than crashing with a non-zero exit code, preserving that contract.
 
 ## Interpreting Output
 
