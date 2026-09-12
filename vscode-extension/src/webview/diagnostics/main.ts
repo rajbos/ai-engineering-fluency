@@ -2633,6 +2633,7 @@ function setupMessageHandlers(): void {
       handleDiagnosticDataLoaded(message);
     } else if (message.command === "backendStorageInfoLoaded") {
       handleBackendStorageSection(message);
+      handleMistralCloudSessionsStatus(message);
     } else if (message.command === "githubAuthUpdated") {
       handleGithubAuthUpdated(message);
     } else if (message.command === "diagnosticDataError") {
@@ -3436,7 +3437,9 @@ function renderMistralCloudSummaryCards(result: MistralCloudSessionsResult | und
   const statusColor = configured ? "#2d6a4f" : "#666";
   const statusIcon = configured ? "✅" : "⚪";
   const count = result?.conversations?.length ?? 0;
-  const totalSuffix = result && result.totalCount > count ? ` of ${result.totalCount.toLocaleString()}` : "";
+  const countDisplay = result && result.totalCount > count
+    ? localizeFormat("mistral.summary.ofCount", count.toLocaleString(), result.totalCount.toLocaleString())
+    : count.toLocaleString();
   const lastFetched = result?.fetchedAt ? new Date(result.fetchedAt).toLocaleString() : "";
   return `<div class="summary-cards">
 <div class="summary-card" style="border-left: 4px solid ${statusColor};">
@@ -3445,7 +3448,7 @@ function renderMistralCloudSummaryCards(result: MistralCloudSessionsResult | und
 </div>
 <div class="summary-card">
 <div class="summary-label">${localize("mistral.summary.conversations")}</div>
-<div class="summary-value" style="font-size: 16px;">${count.toLocaleString()}${totalSuffix}</div>
+<div class="summary-value" style="font-size: 16px;">${countDisplay}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">${localize("mistral.summary.lastFetched")}</div>
@@ -3626,7 +3629,7 @@ function renderTabBars(data: DiagnosticsData, detailedFiles: SessionFileDetails[
 <button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
 <button class="tab" data-tab="skill-usage">🧩 Skill Usage</button>
 <button class="tab" data-tab="otel-delta">📡 OTel Delta</button>
-<button class="tab" data-tab="mistral-cloud">🔥 Mistral Cloud (Beta)</button>
+<button class="tab" data-tab="mistral-cloud">${localize("mistral.tabCaption")}</button>
 <button class="tab" data-tab="ttft">⏱️ TTFT</button>
 </div>
 

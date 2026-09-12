@@ -110,8 +110,10 @@ function optDate(v: unknown): string {
   return v === null || v === undefined ? '' : String(v);
 }
 
-/** Normalize one raw conversation object into the typed shape consumed by the webview. */
-function normalizeConversation(raw: RawConversation): MistralCloudConversation | undefined {
+/** Normalize one raw conversation entry into the typed shape consumed by the webview. */
+function normalizeConversation(entry: unknown): MistralCloudConversation | undefined {
+  if (entry === null || typeof entry !== 'object') { return undefined; }
+  const raw = entry as RawConversation;
   if (typeof raw.id !== 'string' || !raw.id) { return undefined; }
   return {
     id: raw.id,
@@ -148,8 +150,9 @@ export async function listMistralConversations(
   const result = await requestMistralJson(path, apiKey, options.requestFn);
   if (result.error) { return { error: result.error, statusCode: result.statusCode }; }
   const body = result.body;
-  // The API may return either a bare array or an object envelope; tolerate both.
-  const rawList: RawConversation[] = Array.isArray(body)
+  // The API may return either a bare array or an object envelope; tolerate both. Entries are
+  // `unknown` (not assumed to be objects) since a beta endpoint may include a malformed entry.
+  const rawList: unknown[] = Array.isArray(body)
     ? body
     : Array.isArray(body?.data) ? body.data : [];
   const conversations: MistralCloudConversation[] = [];

@@ -58,6 +58,7 @@ export interface WebviewLocalization {
 	'logviewer.summary.lastActivity': string;
 
 	// Diagnostics — Mistral Cloud (Beta) tab
+	'mistral.tabCaption': string;
 	'mistral.tabTitle': string;
 	'mistral.betaBadge': string;
 	'mistral.description.intro': string;
@@ -68,6 +69,7 @@ export interface WebviewLocalization {
 	'mistral.status.configured': string;
 	'mistral.status.notConfigured': string;
 	'mistral.summary.conversations': string;
+	'mistral.summary.ofCount': string;
 	'mistral.summary.lastFetched': string;
 	'mistral.error.label': string;
 	'mistral.button.refresh': string;
@@ -131,6 +133,7 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'logviewer.summary.timeline': 'Timeline',
 	'logviewer.summary.started': 'Started',
 	'logviewer.summary.lastActivity': 'Last activity',
+	'mistral.tabCaption': '🔥 Mistral Cloud (Beta)',
 	'mistral.tabTitle': '🔥 Mistral Vibe Cloud Sessions',
 	'mistral.betaBadge': 'Beta',
 	'mistral.description.intro': 'Lists conversations from your Mistral account via the beta {0} API on {1}.',
@@ -141,6 +144,7 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'mistral.status.configured': 'API key configured',
 	'mistral.status.notConfigured': 'No API key configured',
 	'mistral.summary.conversations': 'Conversations',
+	'mistral.summary.ofCount': '{0} of {1}',
 	'mistral.summary.lastFetched': 'Last fetched',
 	'mistral.error.label': 'Error:',
 	'mistral.button.refresh': 'Refresh',

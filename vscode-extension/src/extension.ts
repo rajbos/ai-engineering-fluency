@@ -4190,6 +4190,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Diagnostics — Mistral Cloud (Beta) tab strings. Templates with {0}/{1} are resolved webview-side by localizeFormat(), so they are passed through unformatted here. */
 	private getMistralCloudLocalization(): Record<string, string> {
 		return {
+			'mistral.tabCaption': l10n.t('mistral.tabCaption'),
 			'mistral.tabTitle': l10n.t('mistral.tabTitle'),
 			'mistral.betaBadge': l10n.t('mistral.betaBadge'),
 			'mistral.description.intro': l10n.t('mistral.description.intro'),
@@ -4200,6 +4201,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'mistral.status.configured': l10n.t('mistral.status.configured'),
 			'mistral.status.notConfigured': l10n.t('mistral.status.notConfigured'),
 			'mistral.summary.conversations': l10n.t('mistral.summary.conversations'),
+			'mistral.summary.ofCount': l10n.t('mistral.summary.ofCount'),
 			'mistral.summary.lastFetched': l10n.t('mistral.summary.lastFetched'),
 			'mistral.error.label': l10n.t('mistral.error.label'),
 			'mistral.button.refresh': l10n.t('mistral.button.refresh'),
@@ -10786,7 +10788,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       await this.diagHandleRefreshMistralCloudSessions();
     } catch (error) {
       this.error('Failed to store Mistral API key:', error);
-      vscode.window.showErrorMessage('Failed to store the Mistral API key.');
+      vscode.window.showErrorMessage(l10n.t('mistral.error.storeFailed'));
     }
   }
 
@@ -10826,7 +10828,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     const generation = ++this._mistralCloudRefreshGeneration;
     let apiKey: string | undefined;
     try { apiKey = await this.context.secrets.get(MISTRAL_API_KEY_SECRET); } catch { apiKey = undefined; }
-    if (generation !== this._mistralCloudRefreshGeneration) { return; }
+    if (generation !== this._mistralCloudRefreshGeneration || !this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
     if (!apiKey) {
       this._lastMistralCloudSessions = this.buildEmptyMistralCloudSessionsResult();
       this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result: this._lastMistralCloudSessions });
@@ -11988,20 +11990,29 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    */
   private async sendBackendStorageInfoEarly(
     panel: vscode.WebviewPanel,
-  ): Promise<{ backendStorageInfo: any; githubAuthStatus: { authenticated: boolean; username?: string } }> {
+  ): Promise<{
+    backendStorageInfo: any;
+    githubAuthStatus: { authenticated: boolean; username?: string };
+    mistralCloudSessionsStatus: { apiKeyConfigured: boolean };
+  }> {
     const backendStorageInfo = await this.getBackendStorageInfo();
     this.log(
       `Backend storage info retrieved: azure.enabled=${backendStorageInfo.azure?.enabled}, azure.configured=${backendStorageInfo.azure?.isConfigured}, teamServer.enabled=${backendStorageInfo.teamServer?.enabled}, teamServer.configured=${backendStorageInfo.teamServer?.isConfigured}`,
     );
     const githubAuthStatus = this.getGitHubAuthStatus();
+    // BETA: sent early (rather than only in the later diagnosticDataLoaded message) so a user with
+    // an existing key doesn't briefly see "No API key configured" and a Connect button while the
+    // full diagnostics scan is still running.
+    const mistralCloudSessionsStatus = await this.getMistralCloudSessionsStatus();
     if (this.isPanelOpen(panel)) {
       panel.webview.postMessage({
         command: "backendStorageInfoLoaded",
         backendStorageInfo,
         githubAuth: githubAuthStatus,
+        mistralCloudSessionsStatus,
       });
     }
-    return { backendStorageInfo, githubAuthStatus };
+    return { backendStorageInfo, githubAuthStatus, mistralCloudSessionsStatus };
   }
 
   /**
@@ -12017,9 +12028,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         await this._sessionRestorePromise;
       }
 
-      const { backendStorageInfo, githubAuthStatus } = await this.sendBackendStorageInfoEarly(panel);
-
-      const mistralCloudSessionsStatus = await this.getMistralCloudSessionsStatus();
+      const { backendStorageInfo, githubAuthStatus, mistralCloudSessionsStatus } = await this.sendBackendStorageInfoEarly(panel);
 
       if (!this.lastDetailedStats) {
         this.log(

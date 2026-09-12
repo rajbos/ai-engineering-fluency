@@ -342,3 +342,79 @@ test('restoring the Mistral Cloud tab reveals the Research leaf bar and marks it
 	assert.ok(mistralTabButton?.classList.contains('active'), 'expected the Mistral Cloud tab button to be active');
 	assert.ok(mistralTabContent?.classList.contains('active'), 'expected the Mistral Cloud tab content to be active');
 });
+
+test('Mistral Cloud tab: Connect posts promptMistralApiKey when no key is configured', async () => {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData());
+	await harness.settle();
+
+	const connectButton = harness.window.document.getElementById('btn-mistral-connect') as HTMLButtonElement | null;
+	assert.ok(connectButton, 'expected a Connect button when no API key is configured');
+	assert.equal(harness.window.document.getElementById('btn-mistral-refresh'), null, 'Refresh should not render before a key is configured');
+	connectButton!.click();
+
+	const posted = harness.posted.find((m) => m.command === 'promptMistralApiKey');
+	assert.ok(posted, `expected a promptMistralApiKey message, got: ${JSON.stringify(harness.posted)}`);
+});
+
+test('Mistral Cloud tab: Refresh and Remove API key post their commands once a key is configured', async () => {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData({ mistralCloudSessionsStatus: { apiKeyConfigured: true } }));
+	await harness.settle();
+
+	const refreshButton = harness.window.document.getElementById('btn-mistral-refresh') as HTMLButtonElement | null;
+	const disconnectButton = harness.window.document.getElementById('btn-mistral-disconnect') as HTMLButtonElement | null;
+	assert.ok(refreshButton, 'expected a Refresh button once an API key is configured');
+	assert.ok(disconnectButton, 'expected a Remove API key button once an API key is configured');
+
+	refreshButton!.click();
+	assert.ok(
+		harness.posted.some((m) => m.command === 'refreshMistralCloudSessions'),
+		`expected a refreshMistralCloudSessions message, got: ${JSON.stringify(harness.posted)}`,
+	);
+
+	disconnectButton!.click();
+	assert.ok(
+		harness.posted.some((m) => m.command === 'clearMistralApiKey'),
+		`expected a clearMistralApiKey message, got: ${JSON.stringify(harness.posted)}`,
+	);
+});
+
+test('Mistral Cloud tab: a mistralCloudSessionsResult message rerenders the tab with fetched conversations', async () => {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData({ mistralCloudSessionsStatus: { apiKeyConfigured: true } }));
+	await harness.settle();
+
+	harness.post({
+		command: 'mistralCloudSessionsResult',
+		result: {
+			conversations: [{
+				id: 'conv-123', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-02T00:00:00Z',
+				agentId: 'agent-1', name: 'My beta conversation', description: null, agentVersion: '1',
+			}],
+			totalCount: 1,
+			authenticated: true,
+			fetchedAt: '2026-01-02T00:00:00Z',
+			error: '',
+		},
+	});
+	await harness.settle();
+
+	const rendered = harness.text('#tab-mistral-cloud');
+	assert.ok(rendered?.includes('My beta conversation'), `expected the fetched conversation name, got: ${rendered}`);
+});
+
+test('Mistral Cloud tab: an error result rerenders the tab with the error box, not stale success state', async () => {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData({ mistralCloudSessionsStatus: { apiKeyConfigured: true } }));
+	await harness.settle();
+
+	harness.post({
+		command: 'mistralCloudSessionsResult',
+		result: { conversations: [], totalCount: 0, authenticated: false, fetchedAt: '2026-01-02T00:00:00Z', error: 'HTTP 401' },
+	});
+	await harness.settle();
+
+	const rendered = harness.text('#tab-mistral-cloud');
+	assert.ok(rendered?.includes('HTTP 401'), `expected the error text to render, got: ${rendered}`);
+});

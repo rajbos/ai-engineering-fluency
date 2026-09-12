@@ -239,6 +239,7 @@
   "logviewer.summary.started": "开始",
   "logviewer.summary.lastActivity": "最后活动",
 
+  "mistral.tabCaption": "🔥 Mistral 云(测试版)",
   "mistral.tabTitle": "🔥 Mistral Vibe 云会话",
   "mistral.betaBadge": "测试版",
   "mistral.description.intro": "通过测试版 {0} API（位于 {1}）列出你的 Mistral 账户中的对话。",
@@ -249,8 +250,10 @@
   "mistral.status.configured": "已配置 API 密钥",
   "mistral.status.notConfigured": "未配置 API 密钥",
   "mistral.summary.conversations": "对话数",
+  "mistral.summary.ofCount": "{1} 个中的 {0} 个",
   "mistral.summary.lastFetched": "最后获取时间",
   "mistral.error.label": "错误:",
+  "mistral.error.storeFailed": "存储 Mistral API 密钥失败。",
   "mistral.button.refresh": "刷新",
   "mistral.button.removeApiKey": "移除 API 密钥",
   "mistral.button.connectApiKey": "连接 Mistral API 密钥",
