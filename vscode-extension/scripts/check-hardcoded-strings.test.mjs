@@ -348,3 +348,67 @@ test('scanFile: does not collapse two distinct same-text occurrences on the same
 		assert.notEqual(violations[0].offset, violations[1].offset);
 	});
 });
+
+// ── round-3 fix: nested tags inside a tag body (icon-plus-text pattern) ──────
+
+test('scanFile: flags a tag\'s own trailing text when it also contains a nested (icon) element', () => {
+	withTempFile(
+		'const html = `<button><span class="codicon codicon-x"></span> Corrections needed</button>`;\n',
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			const texts = violations.map((v) => v.text.trim());
+			assert.ok(texts.includes('Corrections needed'), `expected "Corrections needed" among: ${JSON.stringify(texts)}`);
+		},
+	);
+});
+
+test('scanFile: still catches a nested tag\'s own real text alongside the outer tag\'s trailing text', () => {
+	withTempFile(
+		'const html = `<button><span>Icon label</span> and more</button>`;\n',
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			const texts = violations.map((v) => v.text.trim());
+			assert.ok(texts.includes('Icon label'), `expected "Icon label" among: ${JSON.stringify(texts)}`);
+			assert.ok(texts.some((t) => t.includes('and more')), `expected outer trailing text among: ${JSON.stringify(texts)}`);
+		},
+	);
+});
+
+test('scanFile: does not report the nested tag\'s own markup (e.g. the word "span") as if it were prose', () => {
+	withTempFile(
+		'const html = `<div><span class="codicon codicon-a"></span><span class="codicon codicon-b"></span></div>`;\n',
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			assert.equal(violations.length, 0, `expected no violations, got: ${JSON.stringify(violations)}`);
+		},
+	);
+});
+
+test('scanFile: does not report an HTML comment\'s text nested inside a scanned tag as UI prose', () => {
+	withTempFile(
+		'const html = `<div><!-- Mode Usage Section --></div>`;\n',
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			assert.equal(violations.length, 0, `expected no violations, got: ${JSON.stringify(violations)}`);
+		},
+	);
+});
+
+test('scanFile: nested-tag recursion does not hang or corrupt scanning of a later sibling tag', () => {
+	withTempFile(
+		'const html = `<button><span></span> First</button><button>Second</button>`;\n',
+		(filePath) => {
+			const violations = [];
+			const start = Date.now();
+			scanFile(filePath, new Set(), violations);
+			assert.ok(Date.now() - start < 2000, 'scanFile should complete quickly, not hang');
+			const texts = violations.map((v) => v.text.trim());
+			assert.ok(texts.some((t) => t.includes('First')), `expected outer trailing text among: ${JSON.stringify(texts)}`);
+			assert.ok(texts.includes('Second'), `expected the later sibling <button>Second</button> to still be found among: ${JSON.stringify(texts)}`);
+		},
+	);
+});

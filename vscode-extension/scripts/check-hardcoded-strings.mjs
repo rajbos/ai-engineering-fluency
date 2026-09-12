@@ -31,7 +31,11 @@
  *   - `aria-label="..."` / `title="..."` / `placeholder="..."` attributes and text content
  *     between HTML tags (`<button>`, `<h1>`-`<h6>`, `<p>`, `<vscode-button>`, ...) embedded in
  *     any string or template literal (not just ones already known to be templates), with a
- *     template's `${...}` holes bridged so matches can span an interpolation
+ *     template's `${...}` holes bridged so matches can span an interpolation, and a tag's own
+ *     trailing/leading text still found when its body also contains a nested element (e.g. an
+ *     icon `<span>` before a label) — nested tags/HTML comments are blanked out of the reported
+ *     text rather than left raw; one further level of nesting is still recursed into for its own
+ *     text, deeper nesting is reported as one combined (blanked) blob
  *
  * Explicitly not flagged: console.log/warn/error/info/debug/trace arguments,
  * anything already an argument to `localize(`, `localizeFormat(`, `t(`,
@@ -96,7 +100,11 @@ const TAGS = [
 	'vscode-button', 'vscode-badge', 'vscode-checkbox', 'vscode-dropdown',
 	'vscode-link', 'vscode-option', 'vscode-text-field'
 ];
-const TAG_TEXT_RE = new RegExp(`<(${TAGS.join('|')})(?:\\s[^>]*)?>([^<]+)</\\1>`, 'gi');
+// Body is matched non-greedily up to the nearest same-name closing tag rather than `[^<]+`, so a
+// body containing nested markup (e.g. an icon <span> before trailing text) still matches instead
+// of failing outright — see scanFlattenedForTagText for how the nested content is then handled.
+const TAG_TEXT_RE = new RegExp(`<(${TAGS.join('|')})(?:\\s[^>]*)?>([\\s\\S]*?)</\\1>`, 'gi');
+const NESTED_TAG_RE = /<[a-zA-Z]/;
 const ATTR_NAMES = ['aria-label', 'title', 'placeholder'];
 const ATTR_RE = new RegExp(`(?<![\\w-])(?:${ATTR_NAMES.join('|')})\\s*=\\s*(["'])((?:(?!\\1)[\\s\\S])*)\\1`, 'gi');
 
@@ -288,21 +296,51 @@ function checkAssignmentTarget(propName, valueNode, ctx, reasonPrefix) {
 }
 
 function scanFlattenedForAttributes(text, segments, ctx) {
-	ATTR_RE.lastIndex = 0;
-	let m;
-	while ((m = ATTR_RE.exec(text)) !== null) {
+	// matchAll clones the regex internally rather than mutating ATTR_RE.lastIndex, so this is
+	// safe to call while another scan of the same shared regex is in progress (see
+	// scanFlattenedForTagText's recursion for why that distinction matters here).
+	for (const m of text.matchAll(ATTR_RE)) {
 		const value = m[2];
 		const valueOffsetInMatch = m[0].length - 1 - value.length;
 		reportAt(value, mapFlatIndexToSourceOffset(m.index + valueOffsetInMatch, segments), ctx, 'HTML attribute (aria-label/title/placeholder)');
 	}
 }
 
-function scanFlattenedForTagText(text, segments, ctx) {
-	TAG_TEXT_RE.lastIndex = 0;
-	let m;
-	while ((m = TAG_TEXT_RE.exec(text)) !== null) {
-		const openTagEnd = m[0].indexOf('>') + 1;
-		reportAt(m[2], mapFlatIndexToSourceOffset(m.index + openTagEnd, segments), ctx, `<${m[1].toLowerCase()}> text content`);
+/**
+ * Scans `text` (a slice of the flattened literal starting at `textOffsetInFlat`) for tag-text
+ * matches. A body containing nested markup — e.g. `<button><span class="icon"></span>
+ * Corrections</button>` — is recursed into once (so the inner `<span>`'s own text, if any, is
+ * still separately caught) and the outer tag's *own* direct text is reported by blanking the
+ * nested markup out (replacing each `<...>` with same-length spaces, so offsets keep lining up)
+ * rather than requiring the whole body to be nesting-free. Capped at one level: a tag nested two
+ * levels deep is reported as one combined blob rather than recursed into again, which covers the
+ * common icon-plus-text pattern without a full recursive HTML parser.
+ */
+function scanFlattenedForTagText(text, textOffsetInFlat, segments, ctx, depth = 0) {
+	// matchAll (not a manual exec()/lastIndex loop) is required here: this function recurses into
+	// a nested tag's body using the SAME shared TAG_TEXT_RE object, and exec() mutates that
+	// object's .lastIndex as shared state — the recursive call would corrupt the outer loop's
+	// position in `text` and either skip content or (as originally shipped) loop forever
+	// re-matching the same span. matchAll clones the regex per call, so recursion is safe.
+	for (const m of text.matchAll(TAG_TEXT_RE)) {
+		const tag = m[1].toLowerCase();
+		const body = m[2];
+		const bodyStartInFlat = textOffsetInFlat + m.index + m[0].indexOf('>') + 1;
+		const bodyOffset = mapFlatIndexToSourceOffset(bodyStartInFlat, segments);
+
+		// Recurse into a body with further nested markup to also catch a nested tag's own text
+		// (bounded to one level deep). Report the OUTER tag's own text with any nested tags/HTML
+		// comments blanked out — unconditionally, not just when NESTED_TAG_RE matched — rather
+		// than left raw: an unblanked nested `<span>`/`<vscode-option>`/`<!-- comment -->` can
+		// itself contain a letter run (a tag name, or genuine-looking comment prose that never
+		// renders to a user) that trips looksProse() with no real UI text behind it.
+		if (depth === 0 && NESTED_TAG_RE.test(body)) {
+			scanFlattenedForTagText(body, bodyStartInFlat, segments, ctx, depth + 1);
+		}
+		const ownText = body
+			.replace(/<!--[\s\S]*?-->/g, (comment) => ' '.repeat(comment.length))
+			.replace(/<[^>]*>/g, (tagMarkup) => ' '.repeat(tagMarkup.length));
+		reportAt(ownText, bodyOffset, ctx, `<${tag}> text content`);
 	}
 }
 
@@ -312,7 +350,7 @@ function scanHtmlLiteralForTags(node, ctx) {
 	if (chunks.length === 0) { return; }
 	const { text, segments } = flattenChunks(chunks);
 	scanFlattenedForAttributes(text, segments, ctx);
-	scanFlattenedForTagText(text, segments, ctx);
+	scanFlattenedForTagText(text, 0, segments, ctx);
 }
 
 /** `el(tag, className, text)` / `iconHeading(tag, icon, text, className)`-style calls where a fixed argument position holds display text. */
