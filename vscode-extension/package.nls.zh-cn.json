@@ -242,5 +242,6 @@
   "logviewer.summary.modified": "修改时间",
   "logviewer.summary.timeline": "时间线",
   "logviewer.summary.started": "开始",
-  "logviewer.summary.lastActivity": "最后活动"
+  "logviewer.summary.lastActivity": "最后活动",
+  "efficiency.attribution.costEffect": "预计成本影响"
 }

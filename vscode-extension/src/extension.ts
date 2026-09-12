@@ -4208,6 +4208,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
 			'logviewer.summary.started': l10n.t('logviewer.summary.started'),
 			'logviewer.summary.lastActivity': l10n.t('logviewer.summary.lastActivity'),
+			// Efficiency view — Cost Attribution bars
+			'efficiency.attribution.costEffect': l10n.t('efficiency.attribution.costEffect'),
 			// Current language for reference
 			'__language__': language
 		};
@@ -9678,6 +9680,9 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			lastUpdated: now.toISOString(),
 			backendConfigured: this.isBackendConfigured(),
 			compactNumbers: this.getCompactNumbersSetting(),
+			// Same detected locale the Usage Analysis view formats with, so both
+			// views group numbers and place currency symbols identically.
+			locale: usage.locale,
 			isDebugMode: this.context.extensionMode === vscode.ExtensionMode.Development,
 		};
 	}

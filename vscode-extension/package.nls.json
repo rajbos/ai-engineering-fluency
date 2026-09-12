@@ -240,5 +240,6 @@
   "logviewer.summary.modified": "Modified",
   "logviewer.summary.timeline": "Timeline",
   "logviewer.summary.started": "Started",
-  "logviewer.summary.lastActivity": "Last activity"
+  "logviewer.summary.lastActivity": "Last activity",
+  "efficiency.attribution.costEffect": "Estimated cost effect"
 }

@@ -260,6 +260,19 @@ test('l10n: log viewer summary card labels resolve in English', () => {
 	}
 });
 
+test('l10n: efficiency Cost Attribution labels resolve in English', () => {
+	assert.equal(t('efficiency.attribution.costEffect'), 'Estimated cost effect');
+});
+
+test('l10n: efficiency Cost Attribution labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('efficiency.attribution.costEffect'), '预计成本影响');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 	mock.setLanguage('zh-cn');
 	try {

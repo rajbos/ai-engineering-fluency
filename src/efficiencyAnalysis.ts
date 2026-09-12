@@ -1304,5 +1304,10 @@ export interface EfficiencyViewData {
 	lastUpdated: string;
 	backendConfigured: boolean;
 	compactNumbers?: boolean;
+	/**
+	 * Locale used by the view's number/currency formatters, detected by the
+	 * extension host. Undefined falls back to the webview runtime's own locale.
+	 */
+	locale?: string;
 	isDebugMode?: boolean;
 }

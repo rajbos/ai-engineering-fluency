@@ -10,6 +10,8 @@ import {
 	formatPercent,
 	formatNumber,
 	formatCost,
+	formatSignedCostPrecise,
+	formatSignedCostCompact,
 	formatDurationShort,
 	formatFileSize,
 	getTimeSince,
@@ -19,6 +21,7 @@ import {
 	STAGE_LABELS,
 	STAGE_DESCRIPTIONS
 } from '../../src/webview/shared/formatUtils';
+import { buildAttributionTooltip } from '../../src/webview/efficiency/attributionText';
 
 // ── getModelDisplayName ─────────────────────────────────────────────────
 
@@ -220,6 +223,88 @@ test('formatCost: zero cost', () => {
 	const result = formatCost(0);
 	assert.ok(result.includes('$'), 'should contain dollar sign');
 	assert.ok(result.includes('0.00'), 'should show two decimal zeros');
+});
+
+// ── formatSignedCostPrecise / formatSignedCostCompact ───────────────────
+
+test('formatSignedCostPrecise: signs the effect and keeps four decimals', () => {
+	setFormatLocale('en-US');
+	assert.equal(formatSignedCostPrecise(7.35), '+$7.3500');
+	assert.equal(formatSignedCostPrecise(-7.35), '-$7.3500');
+});
+
+test('formatSignedCostPrecise: a sub-cent effect keeps its digits and its sign', () => {
+	setFormatLocale('en-US');
+	assert.equal(formatSignedCostPrecise(-0.0037), '-$0.0037');
+	assert.equal(formatSignedCostPrecise(0.0037), '+$0.0037');
+});
+
+test('formatSignedCostPrecise: zero carries no sign', () => {
+	setFormatLocale('en-US');
+	assert.equal(formatSignedCostPrecise(0), '$0.0000');
+});
+
+test('formatSignedCostCompact: two decimals for ordinary dollar amounts', () => {
+	setFormatLocale('en-US');
+	assert.equal(formatSignedCostCompact(7.35), '+$7.35');
+	assert.equal(formatSignedCostCompact(-1234.5), '-$1,234.50');
+	assert.equal(formatSignedCostCompact(0), '$0.00');
+});
+
+test('formatSignedCostCompact: widens to four decimals rather than showing a non-zero effect as $0.00', () => {
+	setFormatLocale('en-US');
+	assert.equal(formatSignedCostCompact(-0.0037), '-$0.0037');
+	assert.equal(formatSignedCostCompact(0.0037), '+$0.0037');
+});
+
+test('formatSignedCostCompact: a locale places its own separators and symbol', () => {
+	setFormatLocale('nl-NL');
+	// nl-NL writes the USD symbol first (followed by a non-breaking space) and
+	// uses a comma as the decimal mark.
+	assert.equal(formatSignedCostCompact(1234.5), 'US$\u00a0+1.234,50');
+	assert.equal(formatSignedCostPrecise(-0.0037), 'US$\u00a0-0,0037');
+	setFormatLocale('en-US');
+});
+
+// ── buildAttributionTooltip ─────────────────────────────────────────────
+
+test('buildAttributionTooltip: volume bar names the session counts and the signed effect', () => {
+	setFormatLocale('en-US');
+	assert.equal(
+		buildAttributionTooltip({ measure: 'Session count', prev: 64, cur: 73, unit: 'sessions', kind: 'count', effect: 7.35 }),
+		'Session count: 64 → 73 sessions\nEstimated cost effect: +$7.3500',
+	);
+});
+
+test('buildAttributionTooltip: session-size bar groups and rounds the token averages', () => {
+	setFormatLocale('en-US');
+	assert.equal(
+		buildAttributionTooltip({ measure: 'Tokens per session', prev: 60938.4, cur: 55120.6, unit: 'tokens/session', kind: 'tokens', effect: -3.5 }),
+		'Tokens per session: 60,938 → 55,121 tokens/session\nEstimated cost effect: -$3.5000',
+	);
+});
+
+test('buildAttributionTooltip: model-mix bar renders the blended rates as currency', () => {
+	setFormatLocale('en-US');
+	assert.equal(
+		buildAttributionTooltip({ measure: 'Blended price', prev: 13.41, cur: 13.41, unit: 'per M tokens', kind: 'rate', effect: 0 }),
+		'Blended price: $13.41 → $13.41 per M tokens\nEstimated cost effect: $0.0000',
+	);
+});
+
+test('buildAttributionTooltip: a non-zero sub-cent effect survives into the tooltip', () => {
+	setFormatLocale('en-US');
+	const tooltip = buildAttributionTooltip({ measure: 'Blended price', prev: 13.41, cur: 13.4, unit: 'per M tokens', kind: 'rate', effect: -0.0037 });
+	assert.ok(tooltip.endsWith('Estimated cost effect: -$0.0037'), tooltip);
+});
+
+test('buildAttributionTooltip: a non-US locale groups the counts and localizes the currency', () => {
+	setFormatLocale('nl-NL');
+	assert.equal(
+		buildAttributionTooltip({ measure: 'Tokens per session', prev: 1234567, cur: 1234567, unit: 'tokens/session', kind: 'tokens', effect: 7.35 }),
+		'Tokens per session: 1.234.567 → 1.234.567 tokens/session\nEstimated cost effect: US$\u00a0+7,3500',
+	);
+	setFormatLocale('en-US');
 });
 
 // ── escapeHtml ──────────────────────────────────────────────────────────
