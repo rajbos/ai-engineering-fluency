@@ -18,7 +18,7 @@ for the exclusion rules) — triage each one before localizing.
 
 | Line | Kind | Snippet |
 |---|---|---|
-| 8540 | .title assignment | `.title = `Session: ${logData.title \|\| path.basename(sessionFilePath)}`` |
+| 8540 | .title assignment | `.title = 'Session: ${logData.title \|\| path.basename(sessionFilePath)}'` |
 | 8945 | <h2> content | `<h2>${c.icon} ${c.category} — Stage ${c.stage}</h2>` |
 | 8947 | <h2> content | `<h2>Feedback</h2>` |
 
@@ -33,40 +33,40 @@ for the exclusion rules) — triage each one before localizing.
 | 431 | .title assignment | `.title = 'Loading historical data for monthly aggregation…'` |
 | 452 | .title assignment | `.title = 'Full history is still loading. "Last 90 days", "All time", and weekly/monthly aggregation are not available yet.'` |
 | 465 | .title assignment | `.title = 'No edit data available yet (VS Code edit/agent sessions only)'` |
-| 481 | .title assignment | `.title = `Not available for ${currentMetric} metric`` |
+| 481 | .title assignment | `.title = 'Not available for ${currentMetric} metric'` |
 | 575 | .title assignment | `.title = 'JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens…` |
 | 580 | .title assignment | `.title = 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.'` |
-| 649 | .textContent assignment | `.textContent = `${periodMeta.footer} (${periodMeta.aggregationLabel})\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every…` |
-| 1371 | .title assignment | `.title = `${ds.label} · ${labels[i]}: ${value.toLocaleString()} lines`` |
+| 649 | .textContent assignment | `.textContent = '${periodMeta.footer} (${periodMeta.aggregationLabel})\\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\\nUpdates automatically every…` |
+| 1371 | .title assignment | `.title = '${ds.label} · ${labels[i]}: ${value.toLocaleString()} lines'` |
 | 1552 | .textContent assignment | `.textContent = 'No data available.'` |
 
 ### `vscode-extension/src/webview/dashboard/main.ts` (11)
 
 | Line | Kind | Snippet |
 |---|---|---|
-| 280 | .textContent assignment | `.textContent = `⚠️ Only ${syncCoverage}% of your local activity is synced to cloud (${formatCompact(syncedTokens)} of ${formatCompact(localTokens)} local tokens…` |
+| 280 | .textContent assignment | `.textContent = '⚠️ Only ${syncCoverage}% of your local activity is synced to cloud (${formatCompact(syncedTokens)} of ${formatCompact(localTokens)} local tokens…` |
 | 283 | .textContent assignment | `.textContent = "To close the gap: increase the lookback window, run a manual sync, or check that blob upload is enabled and configured."` |
 | 285 | .textContent assignment | `.textContent = "⏫ Backfill Historical Data"` |
 | 288 | .title assignment | `.title = "Scan all local session files and upload missing daily data to Azure Storage"` |
-| 328 | .textContent assignment | `.textContent = `📅 Synced data range: ${firstDate} → ${lastDate}`` |
-| 330 | .textContent assignment | `.textContent = `📅 First synced data: ${firstDate}`` |
-| 332 | .textContent assignment | `.textContent = `📅 Last synced data: ${lastDate}`` |
-| 337 | .textContent assignment | `.textContent = `Dashboard is filtered to the last ${lookback} days. This reflects what team members have synced to cloud storage. Older data may exist locally b…` |
-| 414 | .title assignment | `.title = `Delete data for ${displayUserId} in dataset ${displayDatasetId}`` |
-| 477 | .textContent assignment | `.textContent = `${stageIcon} Stage ${cat.stage}`` |
+| 328 | .textContent assignment | `.textContent = '📅 Synced data range: ${firstDate} → ${lastDate}'` |
+| 330 | .textContent assignment | `.textContent = '📅 First synced data: ${firstDate}'` |
+| 332 | .textContent assignment | `.textContent = '📅 Last synced data: ${lastDate}'` |
+| 337 | .textContent assignment | `.textContent = 'Dashboard is filtered to the last ${lookback} days. This reflects what team members have synced to cloud storage. Older data may exist locally b…` |
+| 414 | .title assignment | `.title = 'Delete data for ${displayUserId} in dataset ${displayDatasetId}'` |
+| 477 | .textContent assignment | `.textContent = '${stageIcon} Stage ${cat.stage}'` |
 | 744 | .textContent assignment | `.textContent = "Failed to initialize dashboard."` |
 
 ### `vscode-extension/src/webview/details/main.ts` (10)
 
 | Line | Kind | Snippet |
 |---|---|---|
-| 232 | .title assignment | `.title = `Sort by ${h.text}`` |
-| 395 | .title assignment | `.title = `Your active GitHub Copilot subscription plan (ID: ${plan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`` |
-| 548 | .title assignment | `.title = `Sum of ${included.length} of ${allProviders.length} selected provider(s).`` |
+| 232 | .title assignment | `.title = 'Sort by ${h.text}'` |
+| 395 | .title assignment | `.title = 'Your active GitHub Copilot subscription plan (ID: ${plan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).'` |
+| 548 | .title assignment | `.title = 'Sum of ${included.length} of ${allProviders.length} selected provider(s).'` |
 | 772 | .title assignment | `.title = 'JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens…` |
 | 773 | .title assignment | `.title = 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.'` |
 | 774 | .title assignment | `.title = 'Cursor: token counts reflect the context window size at the last request (contextTokensUsed). Output tokens are not stored locally.'` |
-| 1075 | .textContent assignment | `.textContent = `(~${item.charsPerToken.toFixed(1)} chars/tk)`` |
+| 1075 | .textContent assignment | `.textContent = '(~${item.charsPerToken.toFixed(1)} chars/tk)'` |
 | 1222 | .textContent assignment | `.textContent = 'Supported tools & editors:'` |
 | 1247 | .textContent assignment | `.textContent = 'To get started:'` |
 | 1343 | .textContent assignment | `.textContent = 'No data available.'` |
@@ -76,7 +76,7 @@ for the exclusion rules) — triage each one before localizing.
 | Line | Kind | Snippet |
 |---|---|---|
 | 32 | <span> content | `<span>⏳ Loading diagnostic data…</span>` |
-| 355 | .textContent assignment | `.textContent = `${getEditorIcon("Crush")} Crush`` |
+| 355 | .textContent assignment | `.textContent = '${getEditorIcon("Crush")} Crush'` |
 | 378 | .textContent assignment | `.textContent = "Scanned Paths (all candidate locations):"` |
 | 382 | .textContent assignment | `.textContent = "These are all the paths the extension checks for session files. Paths marked with ✅ exist on this system."` |
 | 628 | <span> content | `<span class="hidden-count">(${unattributedCount} session${unattributedCount === 1 ? '' : 's'})</span>` |
@@ -164,13 +164,13 @@ for the exclusion rules) — triage each one before localizing.
 | 1977 | <span> content | `<span>Clearing...</span>` |
 | 2152 | <span> content | `<span>Clearing...</span>` |
 | 2167 | <span> content | `<span>Clearing...</span>` |
-| 2494 | .textContent assignment | `.textContent = `📁 Session Files (${storedDetailedFiles.length})`` |
+| 2494 | .textContent assignment | `.textContent = '📁 Session Files (${storedDetailedFiles.length})'` |
 | 2503 | <option> content | `<option value="all">🌐 All Editors</option>` |
 | 2532 | <span> content | `<span>Cache Cleared</span>` |
 | 2537 | <span> content | `<span>Cache Cleared</span>` |
 | 2544 | <span> content | `<span>Clear Cache</span>` |
 | 2548 | <span> content | `<span>Clear Cache</span>` |
-| 2558 | .textContent assignment | `.textContent = `${cacheInfo.sizeInMB.toFixed(2)} MB`` |
+| 2558 | .textContent assignment | `.textContent = '${cacheInfo.sizeInMB.toFixed(2)} MB'` |
 | 2562 | .textContent assignment | `.textContent = "0 seconds ago"` |
 | 2584 | <span> content | `<span>Analyze</span>` |
 | 2666 | <h4> content | `<h4>Storage Location</h4>` |
@@ -321,7 +321,7 @@ for the exclusion rules) — triage each one before localizing.
 | Line | Kind | Snippet |
 |---|---|---|
 | 58 | <span> content | `<span>No specific thresholds</span>` |
-| 67 | <span> content | `<span>No specific suggestions - you\'re at the highest level!</span>` |
+| 67 | <span> content | `<span>No specific suggestions - you\\'re at the highest level!</span>` |
 | 123 | <span> content | `<span class="header-title">Scoring Guide</span>` |
 | 124 | <span> content | `<span class="debug-badge">🐛 DEBUG MODE</span>` |
 | 168 | .textContent assignment | `.textContent = 'No data available.'` |
@@ -378,7 +378,7 @@ for the exclusion rules) — triage each one before localizing.
 | 547 | <th> content | `<th>Distribution</th>` |
 | 582 | <span> content | `<span class="actual-usage-header-inline">📊 ACTUAL LLM USAGE</span>` |
 | 587 | <span> content | `<span class="usage-badge ${deltaClass(dTotal)}">delta: ${deltaSign(dTotal)}${formatCompact(dTotal)}</span>` |
-| 639 | <span> content | `<span class="sub-agent-tokens">↑${formatCompact(tc.subAgentTokens.input)} ↓${formatCompact(tc.subAgentTokens.output)} tokens${tc.subAgentCost ? ` · ${formatCost…` |
+| 639 | <span> content | `<span class="sub-agent-tokens">↑${formatCompact(tc.subAgentTokens.input)} ↓${formatCompact(tc.subAgentTokens.output)} tokens${tc.subAgentCost ? ' · ${formatCost…` |
 | 640 | <summary> content | `<summary>Arguments</summary>` |
 | 641 | <summary> content | `<summary>Result</summary>` |
 | 644 | <span> content | `<span class="tool-call-pretty" data-turn="${turn.turnNumber}" data-toolcall="${idx}" title="View pretty JSON" style="cursor:pointer;color:#22c55e;">Investigate<…` |
@@ -410,7 +410,7 @@ for the exclusion rules) — triage each one before localizing.
 | 1301 | <span> content | `<span class="turn-tokens"${tokenTooltip}>📊 ${formatCompact(totalTokens)} tokens (↑${turn.inputTokensEstimate} ↓${turn.outputTokensEstimate})${tokenSuffix}</spa…` |
 | 1302 | <span> content | `<span class="turn-tokens" style="color: #a78bfa;">🧠 ${formatCompact(turn.thinkingTokensEstimate)} thinking</span>` |
 | 1303 | <span> content | `<span class="turn-tokens" style="color: #22c55e;">✓ ${formatCompact(turn.actualUsage!.promptTokens + turn.actualUsage!.completionTokens)} actual</span>` |
-| 1499 | <span> content | `<span>Chat Turns (${data.turns.length})${data.title ? ` - ${escapeHtml(data.title)}` : ''}</span>` |
+| 1499 | <span> content | `<span>Chat Turns (${data.turns.length})${data.title ? ' - ${escapeHtml(data.title)}' : ''}</span>` |
 | 1541 | .textContent assignment | `.textContent = 'No data available.'` |
 
 ### `vscode-extension/src/webview/maturity/darkFactorySection.ts` (8)
@@ -653,16 +653,16 @@ for the exclusion rules) — triage each one before localizing.
 | 6132 | .textContent assignment | `.textContent = '💡 Top Recommendations'` |
 | 6166 | .textContent assignment | `.textContent = 'Let Copilot help you fix the identified issues in this repository.'` |
 | 6169 | .textContent assignment | `.textContent = '🤖 Ask Copilot to Improve'` |
-| 6182 | .textContent assignment | `.textContent = `⚠️ Open "${repoFolderName}" in VS Code first, then paste this prompt into Copilot Chat:`` |
+| 6182 | .textContent assignment | `.textContent = '⚠️ Open "${repoFolderName}" in VS Code first, then paste this prompt into Copilot Chat:'` |
 | 6188 | .textContent assignment | `.textContent = '📋 Copy prompt'` |
 | 6191 | .textContent assignment | `.textContent = '✅ Copied!'` |
 | 6192 | .textContent assignment | `.textContent = '📋 Copy prompt'` |
-| 6213 | .textContent assignment | `.textContent = `Score: ${toFiniteNumber(summary.totalScore)} / ${toFiniteNumber(summary.maxScore)} points`` |
+| 6213 | .textContent assignment | `.textContent = 'Score: ${toFiniteNumber(summary.totalScore)} / ${toFiniteNumber(summary.maxScore)} points'` |
 | 6340 | .textContent assignment | `.textContent = 'Repository: '` |
 | 6348 | .textContent assignment | `.textContent = 'Switch Repository'` |
 | 6434 | .textContent assignment | `.textContent = 'Analyze Repo for Best Practices'` |
 | 6464 | .textContent assignment | `.textContent = 'Analyze Repo for Best Practices'` |
-| 6493 | .textContent assignment | `.textContent = `Analyze All Repositories (${count})`` |
+| 6493 | .textContent assignment | `.textContent = 'Analyze All Repositories (${count})'` |
 | 6512 | .textContent assignment | `.textContent = '⏳ Taking longer than expected… Session files may be large or the scan is still in progress.'` |
 | 6554 | .textContent assignment | `.textContent = 'Failed to initialize usage analysis. Please try refreshing.'` |
 

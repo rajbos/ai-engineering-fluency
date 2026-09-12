@@ -140,6 +140,20 @@ function toSnippet(text, max = 160) {
     return collapsed.length > max ? collapsed.slice(0, max) + '…' : collapsed;
 }
 
+/**
+ * Escape a value for safe embedding inside a markdown table cell wrapped in a
+ * backtick code span. Backslashes are escaped first — escaping `|` alone
+ * would let a snippet's own trailing backslash combine with the inserted
+ * one and change its meaning. Backticks are neutralized too since a literal
+ * one would otherwise close the surrounding code span early.
+ */
+function escapeTableCell(text) {
+    return text
+        .replace(/\\/g, '\\\\')
+        .replace(/\|/g, '\\|')
+        .replace(/`/g, "'");
+}
+
 // ── Detectors ───────────────────────────────────────────────────────────────
 
 /**
@@ -319,8 +333,7 @@ function writeMarkdownReport(results, total, scannedCount) {
             lines.push('| Line | Kind | Snippet |');
             lines.push('|---|---|---|');
             for (const f of findings) {
-                const escaped = f.snippet.replace(/\|/g, '\\|');
-                lines.push(`| ${f.line} | ${f.kind} | \`${escaped}\` |`);
+                lines.push(`| ${f.line} | ${f.kind} | \`${escapeTableCell(f.snippet)}\` |`);
             }
             lines.push('');
         }
