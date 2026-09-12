@@ -48,6 +48,14 @@ test('isValueSignalsPayload rejects payloads that would render as undefined', ()
 	assert.equal(isValueSignalsPayload(signals({ periodCost: Number.NaN })), false);
 	assert.equal(isValueSignalsPayload(signals({ userPrs: '3' as unknown as number })), false);
 	assert.equal(isValueSignalsPayload(signals({ prsSince: 12 as unknown as string })), false);
+	// An unparseable date would render as "Invalid Date" in the "you opened since …" line.
+	assert.equal(isValueSignalsPayload(signals({ prsSince: 'not-a-date' })), false);
+	assert.equal(isValueSignalsPayload(signals({ prsSince: '' })), false);
+});
+
+test('isValueSignalsPayload accepts the date shapes the host actually sends', () => {
+	assert.ok(isValueSignalsPayload(signals({ prsSince: '2026-02-14T00:00:00.000Z' })));
+	assert.ok(isValueSignalsPayload(signals({ prsSince: '2026-02-14' })));
 });
 
 test('valueSignalsEqual treats an unchanged snapshot as a no-op', () => {

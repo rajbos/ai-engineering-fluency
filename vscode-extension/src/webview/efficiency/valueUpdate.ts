@@ -56,7 +56,10 @@ export function isValueSignalsPayload(value: unknown): value is ValueSignals {
 	if (!nullableNumbers.every((key) => isNullableNumber(v[key]))) { return false; }
 	const numbers = ['appliedBlocks', 'totalBlocks', 'linesChanged', 'periodCost'];
 	if (!numbers.every((key) => typeof v[key] === 'number' && Number.isFinite(v[key] as number))) { return false; }
-	return v.prsSince === null || typeof v.prsSince === 'string';
+	// `prsSince` has to be a *parseable* date, not merely a string: the Value tab renders it
+	// through `new Date(...)`, so an unparseable one would show up as "Invalid Date".
+	if (v.prsSince === null) { return true; }
+	return typeof v.prsSince === 'string' && Number.isFinite(Date.parse(v.prsSince));
 }
 
 /**

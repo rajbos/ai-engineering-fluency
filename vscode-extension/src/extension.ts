@@ -2314,11 +2314,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('✅ Successfully signed out from GitHub');
 			vscode.window.showInformationMessage('Signed out from GitHub successfully.');
 
-			// Notify the analysis panel so the Repository PRs tab shows "not authenticated"
+			const since = new Date();
+			since.setDate(since.getDate() - 30);
+			// Record the unauthenticated PR result regardless of which panels are open: the
+			// Efficiency view's Value tab derives its PR metrics from this same snapshot, and
+			// sign-out is also reachable from Diagnostics and the command palette. Leaving the
+			// authenticated snapshot in place would keep those cards showing PR metrics the user
+			// just signed out of. publishRepoPrStats() tolerates a closed Analysis panel (the
+			// message is retained for replay) and notifies Efficiency itself.
+			await this.publishRepoPrStats(this.buildEmptyRepoPrStatsResult(since, false));
+			// Cloud-agent data has no such cross-panel consumer, so it stays panel-conditional.
 			if (this.analysisPanel) {
-				const since = new Date();
-				since.setDate(since.getDate() - 30);
-				await this.publishRepoPrStats(this.buildEmptyRepoPrStatsResult(since, false));
 				await this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			}
 		} catch (error) {

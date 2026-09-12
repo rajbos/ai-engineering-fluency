@@ -272,8 +272,11 @@ test('cloud-agent and malformed messages never touch the Value tab', async () =>
 	// A malformed payload must not replace real metrics with `undefined`s either.
 	harness.postFromHost({ command: 'valueSignalsUpdated', value: { userPrs: 4 } });
 	harness.postFromHost({ command: 'valueSignalsUpdated' });
+	// An unparseable `prsSince` would render the PR window as "Invalid Date".
+	harness.postFromHost({ command: 'valueSignalsUpdated', value: loadedValue({ prsSince: 'not-a-date' }) });
 	await harness.settle();
 
 	assert.equal(harness.window.document.querySelector('.value-card'), firstCard, 'no re-render');
 	assert.match(harness.tabText(), new RegExp(HINT));
+	assert.doesNotMatch(harness.tabText(), /Invalid Date/);
 });
