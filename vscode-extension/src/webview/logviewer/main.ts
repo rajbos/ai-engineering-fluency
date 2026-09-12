@@ -5,9 +5,9 @@ import { escapeHtml, formatCompact, formatCost, formatFileSize, setCompactNumber
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 import { buildTurnOverviewRows, hashModelToHue } from './turnsOverview';
-import { renderHydraFusionSection, renderLegsTable } from './hydraFusionSection';
+import { renderHydraFusionSection, renderLegsTable, formatFusionCost } from './hydraFusionSection';
 import { matchHydraFusionTurnsToChatTurns } from '../../../../src/hydrafusion';
-import type { HydraFusionPhase, HydraFusionSummary } from '../../../../src/hydrafusion';
+import type { HydraFusionSummary, HydraFusionTurn } from '../../../../src/hydrafusion';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -1102,14 +1102,18 @@ function renderTurnsOverviewTable(data: SessionLogData, hydraTurnMatches?: Map<n
 	const hasLegs = rows.some(r => r.legs.length > 0);
 	const columnCount = 7 + (hasCached ? 1 : 0) + (hasCost ? 1 : 0);
 
-	// Reverse-map chat turn number → this turn's raw HydraFusion phases, so an
-	// expanded row can reuse the exact same leg table the HydraFusion section
-	// renders above, instead of re-deriving markup from the trimmed TurnOverviewLegRow.
-	const legPhasesByTurn = new Map<number, HydraFusionPhase[]>();
+	// Reverse-map chat turn number → this turn's matched HydraFusionTurn, so an expanded
+	// row can reuse the exact same leg table the HydraFusion section renders above
+	// (instead of re-deriving markup from the trimmed TurnOverviewLegRow) and show the
+	// same total: the turn's own rollup `aiu`, not a sum of the legs' individual costs,
+	// which `analyzeHydraFusionSession` can legitimately differ from (it prefers
+	// `session.fusion_completed.totalNanoAiu` and only falls back to summing legs when
+	// that rollup is missing — see buildTurn in src/hydrafusion.ts).
+	const hydraTurnByChatTurn = new Map<number, HydraFusionTurn>();
 	if (data.hydraFusion && hydraTurnMatches) {
 		for (const [hydraIndex, chatTurnNumber] of hydraTurnMatches) {
-			const phases = data.hydraFusion.turns[hydraIndex]?.phases;
-			if (phases) { legPhasesByTurn.set(chatTurnNumber, phases); }
+			const hydraTurn = data.hydraFusion.turns[hydraIndex];
+			if (hydraTurn) { hydraTurnByChatTurn.set(chatTurnNumber, hydraTurn); }
 		}
 	}
 
@@ -1132,12 +1136,13 @@ ${costCell(child.cost)}
 		const legToggle = row.legs.length > 0
 			? `<button type="button" class="turns-overview-leg-toggle" data-turn="${row.turnNumber}" aria-expanded="false" aria-label="Toggle HydraFusion legs for step #${row.turnNumber}" title="Show the HydraFusion legs behind this step">▸</button> `
 			: '';
-		const legsRow = row.legs.length > 0
+		const hydraTurn = hydraTurnByChatTurn.get(row.turnNumber);
+		const legsRow = row.legs.length > 0 && hydraTurn
 			? `<tr class="turns-overview-legs-row" data-parent-turn="${row.turnNumber}" style="display: none;">
 <td colspan="${columnCount}">
 <div class="turns-overview-legs-wrap">
-<div class="turns-overview-legs-caption">⚡ HydraFusion legs for step #${row.turnNumber} — total <strong>${escapeHtml(formatCost(row.legs.reduce((s, l) => s + l.costUsd, 0)))}</strong></div>
-${renderLegsTable(legPhasesByTurn.get(row.turnNumber) ?? [])}
+<div class="turns-overview-legs-caption">⚡ HydraFusion legs for step #${row.turnNumber} — total <strong>${escapeHtml(formatFusionCost(hydraTurn.aiu))}</strong></div>
+${renderLegsTable(hydraTurn.phases)}
 </div>
 </td>
 </tr>`

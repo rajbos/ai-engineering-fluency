@@ -106,7 +106,7 @@ function renderHeadlineCards(summary: HydraFusionSummary): string {
 	));
 
 	cards.push(renderCard(
-		'💳', 'Credits', formatFusionCost(summary.totalAiu),
+		'💳', 'Cost', formatFusionCost(summary.totalAiu),
 		`${summary.totalLegs} legs · ${summary.totalRequestCount} inference calls`,
 		'Cost of the AI credits the CLI itself reported (1 credit = $0.01), summed from each turn\'s rollup. Legs are router hops; inference calls are model round trips across all of them.',
 	));
@@ -284,7 +284,7 @@ export function renderTurnRow(turn: HydraFusionTurn, index: number, chatTurnNumb
 <span class="hydra-pattern-badge ${patternClass(turn.pattern)}" title="${escapeHtml(patternTitle(turn.pattern))}">${escapeHtml(turn.pattern)}</span>
 <span class="hydra-turn-chain">${renderModelChain(turn)}</span>
 <span class="hydra-turn-metrics">
-<span title="Credits for this turn"><strong>${escapeHtml(formatFusionCost(turn.aiu))}</strong></span>
+<span title="Cost for this turn"><strong>${escapeHtml(formatFusionCost(turn.aiu))}</strong></span>
 <span title="Wall-clock time for the whole turn">${escapeHtml(formatFusionDuration(turn.durationMs))}</span>
 <span title="Router hops in this turn">${turn.phases.length} leg${turn.phases.length === 1 ? '' : 's'}</span>
 ${canJumpToStep ? `<span class="hydra-jump-to-step" data-turn="${chatTurnNumber}" title="Jump to step #${chatTurnNumber} in the Session Steps Overview below" role="button" tabindex="0">⤵ step #${chatTurnNumber}</span>` : ''}
