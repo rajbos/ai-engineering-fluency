@@ -62,10 +62,16 @@ addition to printing a console summary grouped by file.
 - Assignment to `.textContent`, `.innerText`, `.innerHTML`, `.title`, or
   `.placeholder` where the right-hand side is a direct string/template
   literal
-- `aria-label="..."` attributes
+- `aria-label="..."`, `title="..."`, and `placeholder="..."` HTML attributes
+  (not to be confused with the `.title =` / `.placeholder =` JS property
+  assignments above — those are matched separately so the same occurrence
+  isn't reported twice)
 - Text content inside common UI-bearing HTML tags embedded in template
   literals: `<div>`, `<button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`,
-  `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>`
+  `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>` — tolerating simple
+  nested inline tags (`<a>`, `<strong>`, `<em>`, `<code>`, `<b>`, `<i>`,
+  `<u>`) so prose broken up by an inline link or emphasis is still read as
+  one block instead of being skipped
 
 `extension.ts` is scanned only within its `get*Html(...)` method bodies
 (`getDetailsHtml`, `getLoadingHtmlCssBase`, etc.) — not the whole 13k-line
@@ -79,12 +85,14 @@ like prose" filter that excludes:
 - URLs (`http(s)://`, `www.`)
 - CSS values: hex colors (`#fff`), units (`12px`, `1.5rem`), and CSS
   functions (`rgba(...)`, `calc(...)`, `var(...)`, etc.)
-- Single lowercase/hyphenated tokens with no spaces (e.g. `active`, `flex`,
-  `hidden`) — these read as class names, CSS keywords, or other identifiers
-  rather than prose
+- A narrow denylist of single lowercase/hyphenated tokens known to be CSS
+  keywords or state flags (e.g. `active`, `flex`, `hidden`, `disabled`) —
+  **not** a blanket rule against every single lowercase word, since a
+  genuine one-word label like `tie` or `open` is exactly the kind of string
+  this scan exists to catch
 
-Anything already wrapped in a `localize(...)`, `t(...)`, or `vscode.l10n.t(...)`
-call — including inside a template-literal interpolation like
+Anything already wrapped in a `localize(...)`, `localizeFormat(...)`, `t(...)`,
+or `vscode.l10n.t(...)` call — including inside a template-literal interpolation like
 `` `${localize('key')}` `` — is stripped out before the prose check runs, so
 already-localized text is not flagged. Conversely, a string literal hidden
 inside an interpolation's own expression — e.g. a ternary like

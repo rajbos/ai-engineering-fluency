@@ -136,6 +136,20 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - Summary output marking each URL as ✅ OK, ⚠️ REDIRECT, or ❌ BROKEN; exits with code `1` when any URL is broken
 - Guidance for fixing broken tech.hub.ms and code.visualstudio.com links
 
+### scan-hardcoded-strings
+
+**Purpose**: Inventory hardcoded (non-localized) UI text across `vscode-extension/src/webview/**` and the `get*Html()` methods in `vscode-extension/src/extension.ts` — string/template literals rendered as UI text that never go through `localize()`/`t()`/`vscode.l10n.t()`.
+
+**Use this skill when:**
+- Auditing UI text after adding or changing a webview panel, to catch strings typed directly instead of routed through localization
+- Building or refreshing a localization backlog before a release
+- Periodically re-running as a maintenance/audit pass to see whether the backlog is growing or shrinking
+
+**Contents:**
+- `scan-hardcoded-strings.js` — dependency-free Node script that flags string/template literals in UI-rendering positions (`.textContent`/`.innerText`/`.innerHTML`/`.title`/`.placeholder` assignments, `aria-label`/`title`/`placeholder` HTML attributes, and text inside `<div>`/`<button>`/`<label>`/`<h1>`–`<h6>`/`<p>`/`<span>`/`<td>`/`<th>`/`<option>`/`<summary>`/`<caption>` tags)
+- `scan-hardcoded-strings.test.js` — unit tests for the detection helpers
+- Console and Markdown report output (`hardcoded-strings-report.md` at the repo root); always exits `0` — informational, not a CI gate
+
 ### validate-app-db-schema
 
 **Purpose**: Validate that `~/.copilot/data.db` still exposes the tables and columns the session hierarchy feature depends on (`workspace_parent_links`, `workspaces`, `sessions`).

@@ -21,7 +21,7 @@ const {
     looksLikeProse,
     escapeTableCell,
     findPropertyAssignments,
-    findAriaLabels,
+    findHtmlAttributes,
     findTagContent,
     scanFile,
     extractHtmlMethodRanges,
@@ -48,6 +48,13 @@ test('stripLocalizedCalls: removes a bare t() call but not identifiers ending in
 
 test('stripLocalizedCalls: leaves surrounding text intact', () => {
     assert.equal(stripLocalizedCalls("prefix ${localize('key')} suffix"), 'prefix ${} suffix');
+});
+
+test('stripLocalizedCalls: removes a localizeFormat() call (and its extra args) entirely', () => {
+    assert.equal(stripLocalizedCalls("localizeFormat('nav.count', count)"), '');
+    // Confirm "localize" as a plain prefix doesn't cause a bad partial match:
+    // the whole "localizeFormat(...)" call must be consumed, not just "localize".
+    assert.equal(stripLocalizedCalls("prefix ${localizeFormat('key', n)} suffix"), 'prefix ${} suffix');
 });
 
 // ── stripInterpolations ──────────────────────────────────────────────────────
@@ -94,7 +101,7 @@ test('looksLikeProse: rejects CSS values', () => {
     assert.equal(looksLikeProse('var(--text-muted)'), false);
 });
 
-test('looksLikeProse: rejects single class/id-like tokens', () => {
+test('looksLikeProse: rejects known CSS-keyword/state single tokens', () => {
     assert.equal(looksLikeProse('active'), false);
     assert.equal(looksLikeProse('flex'), false);
     assert.equal(looksLikeProse('hidden'), false);
@@ -104,6 +111,15 @@ test('looksLikeProse: accepts genuine UI prose', () => {
     assert.equal(looksLikeProse('No data available.'), true);
     assert.equal(looksLikeProse('Refresh'), true);
     assert.equal(looksLikeProse('Enable Overrides'), true);
+});
+
+test('looksLikeProse: accepts a genuine one-word label that is not a known CSS keyword', () => {
+    // Regression: the single-token exclusion must be a narrow denylist, not a
+    // blanket rule against every lowercase word — "tie", "open", "manage" are
+    // real visible UI text (e.g. a <span class="model-win-chip tie">tie</span>).
+    assert.equal(looksLikeProse('tie'), true);
+    assert.equal(looksLikeProse('open'), true);
+    assert.equal(looksLikeProse('manage'), true);
 });
 
 // ── escapeTableCell ───────────────────────────────────────────────────────────
@@ -146,16 +162,48 @@ test('findPropertyAssignments: skips innerHTML assignments containing markup (de
     assert.equal(findings.length, 0);
 });
 
-// ── findAriaLabels ────────────────────────────────────────────────────────────
+// ── findHtmlAttributes ───────────────────────────────────────────────────────
 
-test('findAriaLabels: flags a hardcoded aria-label', () => {
-    const findings = findAriaLabels('<button aria-label="Close panel"></button>');
+test('findHtmlAttributes: flags a hardcoded aria-label', () => {
+    const findings = findHtmlAttributes('<button aria-label="Close panel"></button>');
     assert.equal(findings.length, 1);
     assert.equal(findings[0].kind, 'aria-label attribute');
 });
 
-test('findAriaLabels: does not flag an already-localized aria-label', () => {
-    const findings = findAriaLabels("<button aria-label=\"${localize('close')}\"></button>");
+test('findHtmlAttributes: flags a hardcoded title HTML attribute', () => {
+    const findings = findHtmlAttributes('<button title="Show all dismissed tips again"></button>');
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, 'title attribute');
+});
+
+test('findHtmlAttributes: flags a hardcoded placeholder HTML attribute', () => {
+    const findings = findHtmlAttributes('<input placeholder="Enter a folder path" />');
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, 'placeholder attribute');
+});
+
+test('findHtmlAttributes: does not flag an already-localized aria-label', () => {
+    const findings = findHtmlAttributes("<button aria-label=\"${localize('close')}\"></button>");
+    assert.equal(findings.length, 0);
+});
+
+test('findHtmlAttributes: does not flag a JS ".title = " property assignment', () => {
+    // findPropertyAssignments already covers this syntactic form; the HTML
+    // attribute detector must not double-report the same occurrence.
+    const findings = findHtmlAttributes("panel.title = 'Session: foo';");
+    assert.equal(findings.length, 0);
+});
+
+test('findHtmlAttributes: does not flag a plain local variable named "title"/"placeholder"', () => {
+    // Regression: `let title = 'Sessions';` is a JS variable declaration, not
+    // an HTML attribute — HTML attributes in this codebase are always written
+    // tight (`title="..."`, no spaces around `=`).
+    const findings = findHtmlAttributes("let title = 'Sessions by Provider';\nconst placeholder = 'Pick a folder';");
+    assert.equal(findings.length, 0);
+});
+
+test('findHtmlAttributes: does not flag "subtitle=" or "data-title=" (not the title attribute)', () => {
+    const findings = findHtmlAttributes('<div subtitle="Some prose" data-title="Other prose"></div>');
     assert.equal(findings.length, 0);
 });
 
@@ -187,6 +235,14 @@ test('findTagContent: does not flag an already-localized tag body', () => {
 test('findTagContent: does not flag a tag with only a CSS-value-like or empty body', () => {
     assert.equal(findTagContent('<span class="dot"></span>').length, 0);
     assert.equal(findTagContent('<span style="color:#fff"> </span>').length, 0);
+});
+
+test('findTagContent: tolerates simple nested inline tags (<a>, <strong>) inside a block tag', () => {
+    const findings = findTagContent(
+        '<div class="beta-footer-content"><strong>Beta</strong> — please <a href="https://example.com">create an issue</a> on the repository.</div>'
+    );
+    assert.equal(findings.length, 1);
+    assert.match(findings[0].snippet, /create an issue/);
 });
 
 // ── scanFile ──────────────────────────────────────────────────────────────────

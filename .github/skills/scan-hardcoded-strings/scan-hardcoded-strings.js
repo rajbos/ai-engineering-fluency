@@ -6,16 +6,17 @@
  * Walks vscode-extension/src/webview/**\/*.ts and the get*Html()-named methods
  * in vscode-extension/src/extension.ts (the webview-HTML-producing code) looking
  * for string/template literals that are rendered directly as UI text but are NOT
- * wrapped in localize(), t(), or vscode.l10n.t(). This is a triage/inventory
- * report, not a CI gate: it never exits non-zero and does not modify any source
- * file.
+ * wrapped in localize(), t(), localizeFormat(), or vscode.l10n.t(). This is a
+ * triage/inventory report, not a CI gate: it never exits non-zero and does not
+ * modify any source file.
  *
  * UI-rendering positions checked:
  *   - Assignment to .textContent / .innerText / .innerHTML / .title / .placeholder
- *   - aria-label="..." attributes
+ *   - aria-label="..." / title="..." / placeholder="..." HTML attributes
  *   - Text content inside common HTML tags embedded in template literals
  *     (<div>, <button>, <label>, <h1>-<h6>, <p>, <span>, <td>, <th>, <option>,
- *     <summary>, <caption>)
+ *     <summary>, <caption>), tolerating simple nested inline tags
+ *     (<a>, <strong>, <em>, <code>, <b>, <i>, <u>)
  *
  * Usage:
  *   node .github/skills/scan-hardcoded-strings/scan-hardcoded-strings.js
@@ -123,10 +124,14 @@ function isWithinRanges(index, ranges) {
 
 // ── Localization-call stripping ────────────────────────────────────────────
 
-// Matches the opening of a localize(/t(/l10n.t(/vscode.l10n.t( call. `\b` before
-// the bare `t(` alternative keeps it from matching inside identifiers like
-// `getText(` or `format(` (no word boundary exists between "x" and "t" there).
-const CALL_OPEN = /\b(?:vscode\.l10n\.t|l10n\.t|localize|t)\(/;
+// Matches the opening of a localize(/localizeFormat(/t(/l10n.t(/vscode.l10n.t(
+// call. `\b` before the bare `t(` alternative keeps it from matching inside
+// identifiers like `getText(` or `format(` (no word boundary exists between
+// "x" and "t" there). `localizeFormat` must come before `localize` in the
+// alternation only for readability — regex alternation already requires the
+// full alternative (including the trailing literal `(`) to match, so
+// `localize(` alone can never partially match `localizeFormat(`.
+const CALL_OPEN = /\b(?:vscode\.l10n\.t|l10n\.t|localizeFormat|localize|t)\(/;
 
 /** Remove already-localized call expressions (with balanced parens) from text. */
 function stripLocalizedCalls(text) {
@@ -191,7 +196,22 @@ function extractStaticText(rawBody) {
 const CSS_UNIT_RE = /^-?[\d.]+(px|em|rem|%|vh|vw|ms|s|deg|fr|ch|q)$/;
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
 const CSS_FUNC_RE = /^(rgba?|hsla?|url|var|calc|linear-gradient|repeating-linear-gradient|translate[XYZ]?|rotate|scale)\(/;
-const SINGLE_TOKEN_RE = /^[a-z][a-z0-9-]*$/; // e.g. "active", "flex", "hidden" — likely a class/id/CSS keyword
+const SINGLE_TOKEN_RE = /^[a-z][a-z0-9-]*$/;
+// Single lowercase/hyphenated tokens that are near-certainly a CSS keyword or
+// state flag rather than visible prose. Deliberately a narrow denylist, not a
+// blanket "reject every single lowercase word" rule — this detector only ever
+// sees rendered text/attribute values (class/id/style attributes are never
+// scanned), so a genuine one-word label like "tie", "open", or "manage" must
+// still be flagged as a candidate for localization.
+const CSS_KEYWORD_TOKENS = new Set([
+    'active', 'hidden', 'visible', 'collapsed', 'expanded', 'disabled', 'enabled', 'selected', 'checked',
+    'flex', 'block', 'inline', 'inline-block', 'grid', 'table', 'none', 'contents',
+    'absolute', 'relative', 'fixed', 'sticky', 'static',
+    'left', 'right', 'center', 'top', 'bottom', 'auto', 'inherit', 'initial', 'unset',
+    'bold', 'italic', 'underline', 'uppercase', 'lowercase', 'capitalize',
+    'pointer', 'default', 'wrap', 'nowrap', 'row', 'column',
+    'solid', 'dashed', 'dotted', 'transparent',
+]);
 const URL_RE = /^(https?:\/\/|www\.)/i;
 const LETTER_RUN_RE = /[A-Za-z]{2,}/;
 
@@ -204,7 +224,7 @@ function looksLikeProse(text) {
     if (HEX_COLOR_RE.test(trimmed)) { return false; }
     if (CSS_UNIT_RE.test(trimmed)) { return false; }
     if (CSS_FUNC_RE.test(trimmed)) { return false; }
-    if (SINGLE_TOKEN_RE.test(trimmed)) { return false; } // class-or-id-only token
+    if (SINGLE_TOKEN_RE.test(trimmed) && CSS_KEYWORD_TOKENS.has(trimmed.toLowerCase())) { return false; }
     return true;
 }
 
@@ -285,19 +305,32 @@ function findPropertyAssignments(content) {
     return findings;
 }
 
-/** Detect aria-label="..." attributes with hardcoded prose. */
-function findAriaLabels(content) {
+const HTML_ATTR_NAMES = ['aria-label', 'title', 'placeholder'];
+
+/**
+ * Detect `aria-label="..."` / `title="..."` / `placeholder="..."` HTML
+ * attributes with hardcoded prose. HTML attributes in this codebase are
+ * always written tight (`title="..."`, no spaces around `=`), so requiring
+ * no whitespace around `=` distinguishes them from a JS statement like
+ * `let title = 'Sessions';` or `const placeholder = ...` (which do use
+ * spaces and are plain local variables, not markup). The negative lookbehind
+ * also excludes a preceding `.` (so `panel.title = '...'` — a JS property
+ * assignment, already covered by `findPropertyAssignments`) and preceding
+ * word/hyphen characters (so `data-title=`/`subtitle=` don't match `title=`).
+ */
+function findHtmlAttributes(content) {
     const findings = [];
-    const re = /aria-label\s*=\s*(["'])((?:(?!\1)[^\\\n]|\\.)*)\1/g;
+    const attrAlt = HTML_ATTR_NAMES.join('|');
+    const re = new RegExp('(?<![.\\w-])(' + attrAlt + ')=(["\'])((?:(?!\\2)[^\\\\\\n]|\\\\.)*)\\2', 'g');
     let m;
     while ((m = re.exec(content)) !== null) {
-        const [full, , body] = m;
+        const [full, attr, , body] = m;
         const staticText = extractStaticText(body);
         if (looksLikeProse(staticText)) {
             findings.push({
                 index: m.index,
                 line: lineAt(content, m.index),
-                kind: 'aria-label attribute',
+                kind: `${attr} attribute`,
                 snippet: toSnippet(full),
             });
         }
@@ -305,11 +338,19 @@ function findAriaLabels(content) {
     return findings;
 }
 
+// Simple inline elements allowed to appear nested inside a scanned tag's
+// content without stopping the match — e.g. `<div>Beta — please <a href="...">
+// create an issue</a>.</div>` should still be read as one block of prose
+// rather than being skipped because of the `<a>...</a>` in the middle.
+const INLINE_PASSTHROUGH_TAGS = ['a', 'strong', 'em', 'code', 'b', 'i', 'u'];
+
 /** Detect hardcoded text content inside common UI-bearing HTML tags. */
 function findTagContent(content) {
     const findings = [];
     const tagAlt = TAG_NAMES.join('|');
-    const re = new RegExp('<(' + tagAlt + ')(?:\\s[^>]*)?>([^<]*)</\\1>', 'g');
+    const inlineAlt = INLINE_PASSTHROUGH_TAGS.join('|');
+    const bodyPattern = '(?:[^<]|<(?:' + inlineAlt + ')(?:\\s[^>]*)?>|</(?:' + inlineAlt + ')>)*';
+    const re = new RegExp('<(' + tagAlt + ')(?:\\s[^>]*)?>(' + bodyPattern + ')</\\1>', 'g');
     let m;
     while ((m = re.exec(content)) !== null) {
         const [full, tag, body] = m;
@@ -333,7 +374,7 @@ function findTagContent(content) {
 function scanFile(content, allowedRanges) {
     let all = [
         ...findPropertyAssignments(content),
-        ...findAriaLabels(content),
+        ...findHtmlAttributes(content),
         ...findTagContent(content),
     ];
     if (allowedRanges) {
@@ -462,7 +503,7 @@ module.exports = {
     toSnippet,
     escapeTableCell,
     findPropertyAssignments,
-    findAriaLabels,
+    findHtmlAttributes,
     findTagContent,
     scanFile,
     buildMarkdownReport,

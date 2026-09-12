@@ -48,13 +48,15 @@ The script will:
    Markdown templates or VS Code panel titles)
 2. Flag string/template literals in UI-rendering positions — assignments to
    `.textContent`/`.innerText`/`.innerHTML`/`.title`/`.placeholder`,
-   `aria-label="..."` attributes, and text inside `<div>`, `<button>`,
-   `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`, `<td>`, `<th>`, `<option>`,
-   `<summary>`, `<caption>` tags in template literals
-3. Skip anything already wrapped in `localize(`, `t(`, or `vscode.l10n.t(`,
-   and anything that doesn't look like prose (pure numbers/symbols, URLs, CSS
-   values, single class/id-like tokens) — but recover string literals hidden
-   inside an interpolation's own expression, e.g. a ternary like
+   `aria-label="..."`/`title="..."`/`placeholder="..."` HTML attributes, and
+   text inside `<div>`, `<button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`,
+   `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>` tags in template
+   literals (tolerating simple nested inline tags like `<a>`/`<strong>`)
+3. Skip anything already wrapped in `localize(`, `localizeFormat(`, `t(`, or
+   `vscode.l10n.t(`, and anything that doesn't look like prose (pure
+   numbers/symbols, URLs, CSS values, a narrow denylist of single CSS-keyword
+   tokens — not every single lowercase word) — but recover string literals
+   hidden inside an interpolation's own expression, e.g. a ternary like
    `` `${flag ? 'Enable Overrides' : 'Disable Overrides'}` ``, rather than
    discarding them along with the interpolation
 4. Print a console report grouped by file, with line numbers and snippets
