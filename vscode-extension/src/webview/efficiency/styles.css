@@ -201,20 +201,25 @@
 .attr-bar-fill.neg { background: var(--vscode-charts-green, #4ade80); }
 .attr-bar-value { font-size: 0.88em; font-variant-numeric: tabular-nums; }
 
-/* Capped at a readable desktop width; the wrapper scrolls instead of squeezing
-   the numbers once the panel is narrower than the table's minimum. */
-.attr-shift-scroll { max-width: 720px; overflow-x: auto; }
-.attr-shift-table { width: 100%; min-width: 420px; border-collapse: collapse; font-size: 0.88em; table-layout: fixed; }
+.attr-shift-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
 .attr-shift-table th, .attr-shift-table td {
 	text-align: left;
 	padding: 5px 10px;
 	border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.2));
 }
-.attr-shift-table thead th { color: var(--vscode-descriptionForeground); font-weight: 600; }
-.attr-shift-table th.attr-shift-model { width: 40%; }
-.attr-shift-table th.num, .attr-shift-table td.num { width: 20%; text-align: right; font-variant-numeric: tabular-nums; }
-.attr-shift-table tbody th.attr-shift-model { font-weight: 400; }
-.attr-shift-table th.num .th-sub {
+.attr-shift-table th { color: var(--vscode-descriptionForeground); font-weight: 600; }
+.attr-shift-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Model-mix movement table only. `.attr-shift-table` is shared with the Skills
+   tab's impact cards and the Models tab's 5-column comparison table, neither of
+   which has a scroll wrapper — so every layout rule below is scoped to
+   `.attr-model-mix` rather than widening the shared selectors. */
+.attr-shift-scroll { max-width: 720px; overflow-x: auto; }
+.attr-model-mix { min-width: 420px; table-layout: fixed; }
+.attr-model-mix th.attr-shift-model { width: 40%; }
+.attr-model-mix th.num, .attr-model-mix td.num { width: 20%; text-align: right; font-variant-numeric: tabular-nums; }
+.attr-model-mix tbody th.attr-shift-model { font-weight: 400; }
+.attr-model-mix th.num .th-sub {
 	display: block;
 	font-weight: 400;
 	font-size: 0.8em;
@@ -222,7 +227,7 @@
 }
 /* Only the name truncates — the full friendly and canonical ids stay reachable
    through the cell's title and its screen-reader text. */
-.attr-shift-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attr-model-mix .attr-shift-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attr-shift-sr {
 	position: absolute;
 	width: 1px;

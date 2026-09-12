@@ -40,7 +40,7 @@ export function renderModelMixTable(
 	return `
 		<h3 id="attr-shift-heading">${escapeHtml(localize('efficiency.modelMix.heading'))}</h3>
 		<div class="attr-shift-scroll" role="region" tabindex="0" aria-labelledby="attr-shift-heading">
-			<table class="attr-shift-table">
+			<table class="attr-shift-table attr-model-mix">
 				<caption class="attr-shift-sr">${escapeHtml(localizeFormat('efficiency.modelMix.caption', windows.prevRange, windows.curRange))}</caption>
 				<thead>
 					<tr>
