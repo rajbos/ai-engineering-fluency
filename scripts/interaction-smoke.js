@@ -32,6 +32,14 @@
  * deliberate trade the contract checker makes, because the alternative is three
  * standing false positives on the chart view and a check nobody trusts.
  *
+ * Two things the click pass cannot reach: a `<select>`, which is changed rather
+ * than clicked, and a control that only exists after some other control was
+ * used. A view can therefore declare `scenarios` in views.config.json — scripted
+ * click/select steps replayed on a fresh page, each step asserting that the view
+ * still renders what the scenario says it must. That is how the Models tab's
+ * mode/window/model pickers are covered: every offered combination has to keep
+ * producing a comparison, not an empty side.
+ *
  * Controls are clicked in one pass over a single page, so a click that opens a
  * dialog can hide later controls. Those are reported as `skipped`, never as
  * failures — use `--isolate` to reload the page between clicks when a view's
@@ -254,6 +262,99 @@ async function clickControl(page, control) {
   return { status: 'dead', posted, domChanged: false, quiet };
 }
 
+/**
+ * Picks the value a `select` step should switch to: the declared one, or the
+ * first enabled option that is not already selected. Returns null when the
+ * select has nothing else to offer, which is a legitimate no-op, not a failure.
+ */
+const PICK_OPTION = ([selector, wanted]) => {
+  const el = document.querySelector(selector);
+  if (!el) {
+    return { missing: true };
+  }
+  const options = Array.from(el.options).filter((o) => !o.disabled);
+  if (wanted !== null && wanted !== undefined) {
+    return options.some((o) => o.value === wanted) ? { value: wanted } : { unavailable: true };
+  }
+  const next = options.find((o) => o.value !== el.value);
+  return next ? { value: next.value } : { noop: true };
+};
+
+/** Replays one declared scenario on a fresh page and reports what each step did. */
+async function runScenario(page, view, scenario) {
+  const steps = [];
+  const findings = [];
+  const fail = (control, detail) => findings.push({ view: view.id, kind: 'scenario-step-failed', control, detail });
+
+  for (const step of scenario.steps) {
+    const label = `${scenario.name}: ${step.click ? `click ${step.click}` : `select ${step.select}`}`;
+    await waitForQuietDom(page);
+    const before = await page.evaluate(DOM_SIGNATURE);
+    await page.evaluate(() => {
+      window.__HARNESS_POSTED_MESSAGES__.length = 0;
+      window.__HARNESS_ERRORS__.length = 0;
+    });
+
+    if (step.click) {
+      try {
+        await page.locator(step.click).first().click({ timeout: 2000, noWaitAfter: true });
+      } catch (error) {
+        fail(label, `could not click: ${String(error.message).split('\n')[0]}`);
+        break;
+      }
+    } else {
+      const pick = await page.evaluate(PICK_OPTION, [step.select, step.value ?? null]);
+      if (pick.missing) {
+        fail(label, 'the scenario expects this control to be on screen, and it is not');
+        break;
+      }
+      if (pick.unavailable) {
+        fail(label, `option '${step.value}' is not offered by ${step.select}`);
+        break;
+      }
+      if (pick.noop) {
+        steps.push({ step: label, status: 'noop-single-option' });
+        continue;
+      }
+      try {
+        await page.selectOption(step.select, pick.value, { timeout: 2000 });
+      } catch (error) {
+        fail(label, `could not change: ${String(error.message).split('\n')[0]}`);
+        break;
+      }
+    }
+
+    await page.waitForTimeout(120);
+    await waitForQuietDom(page);
+    const [errors, after] = await Promise.all([
+      page.evaluate(() => window.__HARNESS_ERRORS__.slice()),
+      page.evaluate(DOM_SIGNATURE),
+    ]);
+    if (errors.length > 0) {
+      findings.push({ view: view.id, kind: 'scenario-step-threw', control: label, detail: errors.join(' | ').slice(0, 400) });
+      break;
+    }
+    // `expect` is what the view must still be showing after the step — the point
+    // of the scenario, not a bonus assertion: a picker that silently drops to an
+    // empty state is exactly the failure worth catching.
+    if (scenario.expect) {
+      const present = await page.evaluate((sel) => Boolean(document.querySelector(sel)), scenario.expect);
+      if (!present) {
+        findings.push({
+          view: view.id,
+          kind: 'scenario-expectation-failed',
+          control: label,
+          detail: `'${scenario.expect}' is gone after this step`,
+        });
+        break;
+      }
+    }
+    steps.push({ step: label, status: before === after ? 'no-dom-change' : 'ok' });
+  }
+
+  return { name: scenario.name, steps, findings };
+}
+
 async function smokeView({ browser, view, defaults, handledCommands, isolate }) {
   const bundlePath = path.join(DIST_DIR, `${view.bundle}.js`);
   if (!fs.existsSync(bundlePath)) {
@@ -326,6 +427,18 @@ async function smokeView({ browser, view, defaults, handledCommands, isolate }) 
   }
 
   await page.close();
+
+  // Scenarios get their own page each, so a scripted flow never inherits the
+  // state the click pass left behind.
+  const scenarios = [];
+  for (const scenario of view.scenarios || []) {
+    const scenarioPage = await openPage(browser, pageFile, view, defaults);
+    const outcome = await runScenario(scenarioPage, view, scenario);
+    await scenarioPage.close();
+    scenarios.push({ name: outcome.name, steps: outcome.steps });
+    findings.push(...outcome.findings);
+  }
+
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
   return {
@@ -333,6 +446,7 @@ async function smokeView({ browser, view, defaults, handledCommands, isolate }) 
     status: 'ok',
     renderErrors,
     controls: results,
+    scenarios,
     findings,
   };
 }
@@ -397,6 +511,9 @@ async function main() {
       .join(', ');
     const mark = report.findings.length === 0 ? '✅' : '❌';
     console.log(`   ${report.view.padEnd(22)} ${mark} ${report.controls.length} control(s): ${summary || 'none found'}`);
+    for (const scenario of report.scenarios || []) {
+      console.log(`   ${' '.repeat(22)}    ▸ ${scenario.name}: ${scenario.steps.length} step(s) replayed`);
+    }
     if (report.renderErrors && report.renderErrors.length > 0) {
       console.log(`   ${' '.repeat(22)}    ⚠️  render error: ${report.renderErrors[0].split('\n')[0]}`);
     }

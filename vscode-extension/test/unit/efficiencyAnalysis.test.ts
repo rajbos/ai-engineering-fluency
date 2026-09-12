@@ -14,10 +14,13 @@ import {
 	listComparableModels,
 	compareModels,
 	buildModelWeeklySeries,
+	listEligibleModels,
+	reconcileModelSelection,
 	resolveModelCompareWindow,
 	selectDaysInWindow,
 	windowHasModelData,
 	type EfficiencyDeps,
+	type ModelCompareSelection,
 	type EfficiencySessionInput,
 } from '../../../src/efficiencyAnalysis';
 import { createEmptyDailyModelEfficiencyEntry } from '../../../src/modelEfficiency';
@@ -778,4 +781,139 @@ test('windowHasModelData: true when at least one day in the window has per-model
 test('windowHasModelData: ignores data outside the window bounds', () => {
 	const days = [modelDay('2026-06-01', { 'gpt-4o': {} })];
 	assert.equal(windowHasModelData(days, resolveModelCompareWindow('thisMonth', NOW)), false);
+});
+
+
+// ── Models tab eligibility and selection reconciliation ──────────────────────
+
+/** A selection with the shipped defaults, overridden per test. */
+function selection(overrides: Partial<ModelCompareSelection> = {}): ModelCompareSelection {
+	return { mode: 'models', modelA: '', modelB: '', window: 'last30', windowA: 'lastMonth', windowB: 'thisMonth', ...overrides };
+}
+
+/** A year of data where the only two-model pair sits outside every selectable window. */
+function historicalOnlyDays(): DailyTokenStats[] {
+	return [
+		modelDay('2025-09-10', { legacy: solidModel({ inputTokens: 9_000_000 }), 'legacy-mini': solidModel({ inputTokens: 8_000_000 }) }),
+		modelDay('2026-07-02', { current: solidModel({}) }),
+	];
+}
+
+test('listEligibleModels: models mode offers only models present in the selected window', () => {
+	const models = listEligibleModels(historicalOnlyDays(), selection({ window: 'last30' }), NOW);
+	assert.deepEqual(models.map(m => m.model), ['current']);
+});
+
+test('listEligibleModels: periods mode offers only models present in both selected windows', () => {
+	const days = [
+		modelDay('2026-06-10', { shared: solidModel({}), juneOnly: solidModel({}) }),
+		modelDay('2026-07-02', { shared: solidModel({}), julyOnly: solidModel({}) }),
+	];
+	const models = listEligibleModels(days, selection({ mode: 'periods', windowA: 'lastMonth', windowB: 'thisMonth' }), NOW);
+	assert.deepEqual(models.map(m => m.model), ['shared']);
+});
+
+test('listEligibleModels: periods mode counts an overlapping window once when sizing the sample', () => {
+	const days = [modelDay('2026-07-02', { a: solidModel({ sessionShare: 3 }) })];
+	// windowA === windowB: the same days must not be merged twice and lift `a` over the sample floor.
+	const models = listEligibleModels(days, selection({ mode: 'periods', windowA: 'thisMonth', windowB: 'thisMonth' }), NOW);
+	assert.deepEqual(models.map(m => m.model), ['a']);
+	assert.equal(models[0].sessionShare, 3);
+	assert.equal(models[0].sampleSufficient, false);
+});
+
+test('reconcileModelSelection: replaces a model that only exists outside the active window', () => {
+	const days = historicalOnlyDays();
+	const window = resolveModelCompareWindow('last30', NOW);
+	// The pre-fix pickers defaulted from the whole payload, so the most-used model
+	// of the year was selected even though the active window has none of it —
+	// leaving a permanently missing side for every offered combination.
+	const stale = listComparableModels(days)[0].model;
+	assert.equal(stale, 'legacy');
+	assert.equal(computeModelPeriodMetrics(selectDaysInWindow(days, window), stale, window.label), null);
+
+	const next = reconcileModelSelection(days, selection({ modelA: 'legacy', modelB: 'legacy-mini' }), NOW);
+	assert.equal(next.modelA, 'current');
+	assert.ok(computeModelPeriodMetrics(selectDaysInWindow(days, window), next.modelA, window.label) !== null);
+});
+
+test('reconcileModelSelection: models mode defaults to two distinct models when the window has a pair', () => {
+	const days = [modelDay('2026-07-02', { big: solidModel({ inputTokens: 5_000_000 }), small: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection(), NOW);
+	assert.equal(next.modelA, 'big');
+	assert.equal(next.modelB, 'small');
+});
+
+test('reconcileModelSelection: models mode splits a Model B that has collapsed onto Model A', () => {
+	const days = [modelDay('2026-07-02', { big: solidModel({ inputTokens: 5_000_000 }), small: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'big', modelB: 'big' }), NOW);
+	assert.equal(next.modelA, 'big');
+	assert.equal(next.modelB, 'small');
+});
+
+test('reconcileModelSelection: keeps a still-eligible pick untouched', () => {
+	const days = [modelDay('2026-07-02', { big: solidModel({ inputTokens: 5_000_000 }), small: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'small', modelB: 'big' }), NOW);
+	assert.equal(next.modelA, 'small');
+	assert.equal(next.modelB, 'big');
+});
+
+test('reconcileModelSelection: keeps a low-sample pick the user made, but defaults to models that clear the floor', () => {
+	const lowSample = { ...createEmptyDailyModelEfficiencyEntry(), sessions: 1, sessionShare: 1, editTurns: 2, inputTokens: 100 };
+	const days = [modelDay('2026-07-02', { a: solidModel({ inputTokens: 5_000_000 }), b: solidModel({}), rare: lowSample })];
+	assert.equal(reconcileModelSelection(days, selection({ modelA: 'rare', modelB: 'a' }), NOW).modelA, 'rare');
+	assert.deepEqual(
+		[reconcileModelSelection(days, selection(), NOW).modelA, reconcileModelSelection(days, selection(), NOW).modelB],
+		['a', 'b'],
+	);
+});
+
+test('reconcileModelSelection: models mode leaves Model B empty rather than comparing a model with itself', () => {
+	const days = [modelDay('2026-07-02', { only: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'only', modelB: 'only' }), NOW);
+	assert.equal(next.modelA, 'only');
+	assert.equal(next.modelB, '');
+});
+
+test('reconcileModelSelection: periods mode repoints a model that is missing from one of the two periods', () => {
+	const days = [
+		modelDay('2026-06-10', { shared: solidModel({}) }),
+		modelDay('2026-07-02', { shared: solidModel({}), julyOnly: solidModel({ inputTokens: 9_000_000 }) }),
+	];
+	const sel = selection({ mode: 'periods', modelA: 'julyOnly', windowA: 'lastMonth', windowB: 'thisMonth' });
+	const next = reconcileModelSelection(days, sel, NOW);
+	assert.equal(next.modelA, 'shared');
+	for (const id of ['lastMonth', 'thisMonth'] as const) {
+		const w = resolveModelCompareWindow(id, NOW);
+		assert.ok(computeModelPeriodMetrics(selectDaysInWindow(days, w), next.modelA, w.label) !== null);
+	}
+});
+
+test('reconcileModelSelection: periods mode preserves Model B so switching back to models mode keeps it', () => {
+	const days = [
+		modelDay('2026-06-10', { a: solidModel({ inputTokens: 5_000_000 }), b: solidModel({}) }),
+		modelDay('2026-07-02', { a: solidModel({ inputTokens: 5_000_000 }), b: solidModel({}) }),
+	];
+	const sel = selection({ mode: 'periods', modelA: 'a', modelB: 'b', windowA: 'lastMonth', windowB: 'thisMonth' });
+	assert.equal(reconcileModelSelection(days, sel, NOW).modelB, 'b');
+});
+
+test('reconcileModelSelection: empties both sides when the active window holds nothing to compare', () => {
+	const days = [modelDay('2025-09-10', { legacy: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'legacy', modelB: 'legacy' }), NOW);
+	assert.equal(next.modelA, '');
+	assert.equal(next.modelB, '');
+	// An empty side is the honest answer here — not a zero-valued stand-in.
+	const w = resolveModelCompareWindow('last30', NOW);
+	assert.equal(computeModelPeriodMetrics(selectDaysInWindow(days, w), next.modelA, w.label), null);
+});
+
+test('reconcileModelSelection: does not change the selected windows or mode', () => {
+	const days = [modelDay('2026-07-02', { a: solidModel({}), b: solidModel({}) })];
+	const sel = selection({ window: 'last90', windowA: 'prev30', windowB: 'last30' });
+	const next = reconcileModelSelection(days, sel, NOW);
+	assert.equal(next.mode, 'models');
+	assert.equal(next.window, 'last90');
+	assert.equal(next.windowA, 'prev30');
+	assert.equal(next.windowB, 'last30');
 });

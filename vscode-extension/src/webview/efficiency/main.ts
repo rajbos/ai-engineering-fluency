@@ -17,6 +17,7 @@ import type {
 	ModelComparison,
 	ModelComparisonMetricId,
 	ModelComparisonRow,
+	ModelCompareSelection,
 	ModelCompareWindowId,
 	ModelPeriodMetrics,
 	SkillImpact,
@@ -25,7 +26,8 @@ import {
 	buildModelWeeklySeries,
 	compareModels,
 	computeModelPeriodMetrics,
-	listComparableModels,
+	listEligibleModels,
+	reconcileModelSelection,
 	resolveModelCompareWindow,
 	selectDaysInWindow,
 	windowHasModelData,
@@ -490,15 +492,9 @@ const WINDOW_OPTIONS: { id: ModelCompareWindowId; label: string }[] = [
 	{ id: 'lastMonth', label: 'Last month' },
 ];
 
-type CompareMode = 'models' | 'periods';
+type CompareMode = ModelCompareSelection['mode'];
 
-const modelState: {
-	mode: CompareMode;
-	modelA: string;
-	modelB: string;
-	window: ModelCompareWindowId;
-	windowA: ModelCompareWindowId;
-	windowB: ModelCompareWindowId;
+const modelState: ModelCompareSelection & {
 	trendMetric: ModelComparisonMetricId;
 	initialized: boolean;
 } = {
@@ -520,22 +516,29 @@ function availableWindowIds(d: EfficiencyViewData, now: Date): ModelCompareWindo
 		.filter(id => windowHasModelData(d.modelDaily, resolveModelCompareWindow(id, now)));
 }
 
-/** Picks sensible defaults on first render: the two most-used comparable models, and windows that actually have data. */
+/** Picks the windows that actually have data on first render; `reconcileModelState` then fills in the models those windows can compare. */
 function initModelState(d: EfficiencyViewData): void {
 	if (modelState.initialized) { return; }
 	modelState.initialized = true;
-	const models = listComparableModels(d.modelDaily);
-	const preferred = models.filter(m => m.sampleSufficient);
-	const pool = preferred.length >= 2 ? preferred : models;
-	modelState.modelA = pool[0]?.model ?? '';
-	modelState.modelB = pool[1]?.model ?? pool[0]?.model ?? '';
-
 	const available = availableWindowIds(d, payloadNow(d));
 	if (available.length > 0) {
 		modelState.window = available.includes('last30') ? 'last30' : available[0];
 		modelState.windowA = available[0];
 		modelState.windowB = available.length > 1 ? available[1] : available[0];
 	}
+}
+
+/**
+ * Re-points the model pickers at something the active window(s) can compare.
+ *
+ * Run on every render, because a mode or window change leaves the previous
+ * selection behind — a model that only exists outside the new window would
+ * otherwise report a missing side for every offered combination.
+ */
+function reconcileModelState(d: EfficiencyViewData): void {
+	const next = reconcileModelSelection(d.modelDaily, modelState, payloadNow(d));
+	modelState.modelA = next.modelA;
+	modelState.modelB = next.modelB;
 }
 
 /** Resolves the current selection into a comparison, or null when a side has no data. */
@@ -562,8 +565,9 @@ function selectHtml(id: string, options: { value: string; label: string; disable
 	return `<select id="${id}" class="model-select">${opts}</select>`;
 }
 
+/** Dropdown options for the model pickers: only models the active window(s) can actually compare. */
 function modelOptions(d: EfficiencyViewData): { value: string; label: string }[] {
-	return listComparableModels(d.modelDaily).map(m => ({
+	return listEligibleModels(d.modelDaily, modelState, payloadNow(d)).map(m => ({
 		value: m.model,
 		label: `${m.displayName} (${m.sessions} sessions${m.sampleSufficient ? '' : ', low sample'})`,
 	}));
@@ -787,17 +791,37 @@ function renderCacheTab(d: EfficiencyViewData): string {
 		<div class="cache-causes">${rows}</div>`;
 }
 
+/**
+ * Explains why the active window(s) cannot form a comparison. The pickers only
+ * ever offer eligible models, so reaching here means the window itself is too
+ * narrow — not that the current pick is stale.
+ */
+function noEligibleModelsNote(d: EfficiencyViewData): string {
+	const now = payloadNow(d);
+	if (modelState.mode === 'periods') {
+		const a = resolveModelCompareWindow(modelState.windowA, now);
+		const b = resolveModelCompareWindow(modelState.windowB, now);
+		return `No model was used in both ${a.label} (${a.rangeLabel}) and ${b.label} (${b.rangeLabel}), so there is no model to follow across those periods. Pick different periods, or switch to “Compare two models”.`;
+	}
+	const w = resolveModelCompareWindow(modelState.window, now);
+	const eligible = listEligibleModels(d.modelDaily, modelState, now).length;
+	return eligible === 1
+		? `Only one model was used in ${w.label} (${w.rangeLabel}), so there is no pair to compare. Pick a wider window, or switch to “One model, two periods”.`
+		: `No model was used in ${w.label} (${w.rangeLabel}). Pick a wider window.`;
+}
+
 function renderModelsTab(d: EfficiencyViewData): string {
 	initModelState(d);
 	if (d.modelDaily.length === 0) {
 		return `<p class="eff-section-note">No per-model efficiency data yet. This tab needs sessions whose logs carry per-turn tool-call detail (Copilot CLI, Claude Code, Copilot Chat and similar). Keep working and check back in a few days.</p>`;
 	}
+	reconcileModelState(d);
 	const controls = renderModelControls(d);
 	const cmp = buildModelComparison(d);
 	if (!cmp) {
 		return `
 			${controls}
-			<p class="eff-section-note">No data for one of the two sides in the selected window. Pick a different model or a wider window.</p>`;
+			<p class="eff-section-note">${escapeHtml(noEligibleModelsNote(d))}</p>`;
 	}
 	const metricOptions = MODEL_TREND_METRICS.map(m => ({ value: m.id, label: m.label }));
 	return `

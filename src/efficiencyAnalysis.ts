@@ -1104,6 +1104,89 @@ export function windowHasModelData(days: ModelDailyInput[], window: ModelCompare
 	return selectDaysInWindow(days, window).some(d => d.modelEfficiency && Object.keys(d.modelEfficiency).length > 0);
 }
 
+/** Which two sides the Models tab is comparing. */
+export type ModelCompareMode = 'models' | 'periods';
+
+/** The Models tab's current picker state, in the shape the webview keeps it. */
+export interface ModelCompareSelection {
+	mode: ModelCompareMode;
+	modelA: string;
+	modelB: string;
+	/** The shared window, used by `models` mode. */
+	window: ModelCompareWindowId;
+	/** The baseline window, used by `periods` mode. */
+	windowA: ModelCompareWindowId;
+	/** The compared-with window, used by `periods` mode. */
+	windowB: ModelCompareWindowId;
+}
+
+/** Deduplicates day entries by identity, so overlapping windows are not counted twice. */
+function uniqueDays(...groups: ModelDailyInput[][]): ModelDailyInput[] {
+	return [...new Set(groups.flat())];
+}
+
+/**
+ * Lists the models the *active* window(s) can actually compare, so the pickers
+ * never offer a selection that is guaranteed to render an empty side.
+ *
+ * In `models` mode that is every model present in the shared window. In
+ * `periods` mode it is only the models present in *both* windows — a model used
+ * in just one of them has no second side to compare against. Volume ordering
+ * and the sample floor are computed over the same window(s), never over the
+ * full payload, so "low sample" reflects what is being compared.
+ */
+export function listEligibleModels(
+	days: ModelDailyInput[],
+	selection: ModelCompareSelection,
+	now: Date,
+): ComparableModel[] {
+	if (selection.mode === 'periods') {
+		const daysA = selectDaysInWindow(days, resolveModelCompareWindow(selection.windowA, now));
+		const daysB = selectDaysInWindow(days, resolveModelCompareWindow(selection.windowB, now));
+		const inA = new Set(listComparableModels(daysA).map(m => m.model));
+		const inB = new Set(listComparableModels(daysB).map(m => m.model));
+		return listComparableModels(uniqueDays(daysA, daysB)).filter(m => inA.has(m.model) && inB.has(m.model));
+	}
+	return listComparableModels(selectDaysInWindow(days, resolveModelCompareWindow(selection.window, now)));
+}
+
+/** How many distinct models the mode needs before a comparison can be formed. */
+function modelsNeeded(mode: ModelCompareMode): number {
+	return mode === 'models' ? 2 : 1;
+}
+
+/**
+ * Brings a stale selection back to something the active window(s) can compare.
+ *
+ * Selections survive mode and window changes, so a model picked from a wider
+ * slice of history — or a Model B that is still valid but now equals Model A —
+ * would otherwise leave a side permanently empty. A model the user picked that
+ * is still eligible is always kept, even when it is below the sample floor;
+ * only *defaults* prefer the models that clear it. Returns empty model ids when
+ * the window(s) hold nothing eligible, which is the caller's cue to render its
+ * empty state.
+ */
+export function reconcileModelSelection(
+	days: ModelDailyInput[],
+	selection: ModelCompareSelection,
+	now: Date,
+): ModelCompareSelection {
+	const eligible = listEligibleModels(days, selection, now);
+	const eligibleIds = new Set(eligible.map(m => m.model));
+	const sufficient = eligible.filter(m => m.sampleSufficient);
+	const pool = sufficient.length >= modelsNeeded(selection.mode) ? sufficient : eligible;
+	// Most-used first, preferring models that clear the sample floor.
+	const firstOther = (exclude?: string): string =>
+		(pool.find(m => m.model !== exclude) ?? eligible.find(m => m.model !== exclude))?.model ?? '';
+
+	const modelA = eligibleIds.has(selection.modelA) ? selection.modelA : firstOther();
+	// `periods` mode compares one model against itself across two windows, so it
+	// leaves Model B untouched — it is reconciled again on the way back to `models`.
+	if (selection.mode === 'periods') { return { ...selection, modelA }; }
+	const keepB = eligibleIds.has(selection.modelB) && selection.modelB !== modelA;
+	return { ...selection, modelA, modelB: keepB ? selection.modelB : firstOther(modelA) };
+}
+
 export type ModelComparisonMetricId =	| 'cost-per-edit-turn' | 'cost-per-session' | 'cost-per-kloc' | 'dollars-per-mtokens'
 	| 'tokens-per-edit-turn' | 'tokens-per-session' | 'one-shot-rate' | 'retry-rate'
 	| 'self-correction-rate' | 'cache-read-share' | 'active-minutes-per-session' | 'apply-rate';
