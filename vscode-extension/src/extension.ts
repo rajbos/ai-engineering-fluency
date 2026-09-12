@@ -721,16 +721,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _whatsNewReady: Promise<void> | undefined;
 	/** Memoized per-session efficiency inputs; cleared wherever the daily/usage stat caches are. */
 	private lastEfficiencySessionInputs: EfficiencySessionInput[] | undefined;
-	/** Shared session-cache prime, so an Efficiency open and refresh never walk the corpus twice. */
-	private _efficiencyPrimeInFlight: Promise<void> | undefined;
 	/** Shared full-year daily-stats walk; see calculateFullDailyStats(). */
 	private _fullDailyStatsInFlight: Promise<DailyTokenStats[]> | undefined;
-	/** Tail of the serialized corpus-preload queue; see _queueSessionPreload(). */
-	private _preloadChain: Promise<void> = Promise.resolve();
 	/** Last successfully rendered Efficiency payload, restored if a refresh build fails. */
 	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
-	/** Monotonic id of the newest requested Efficiency build; older builds discard their result. */
-	private _efficiencyBuildSeq = 0;
 	private outputChannel!: vscode.OutputChannel;
 	private lastDetailedStats: DetailedStats | undefined;
 	private lastDailyStats: DailyTokenStats[] | undefined;
@@ -801,8 +795,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Editor list captured during the last (or current) log analysis, used to render the loading tooltip SVG
 	private _loadingEditors: { icon: string; name: string }[] = [];
-	/** Panels showing the Efficiency loading screen → how many in-flight builds hold a lease. */
-	private readonly _loadingPanels = new Map<vscode.WebviewPanel, number>();
+	/** Tail of the serialized Efficiency build queue; see runEfficiencyBuild(). */
+	private _efficiencyBuildChain: Promise<void> = Promise.resolve();
 	// Previous progress percentage used to animate the progress bar smoothly between tooltip updates
 	private _prevLoadingPercentage = 0;
 
@@ -2273,7 +2267,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * checklist and editor pills, not just the bar. Broadcasting them to every open
 	 * loading screen therefore lets one operation's counts and labels appear on a panel
 	 * waiting for a completely different operation. Each build sends to its own panel
-	 * instead; see `sendEfficiencyLoadingMessage()`.
+	 * instead; see `efficiencyLoadingSink()`.
 	 */
 	private sendLoadingPanelMessage(msg: object): void {
 		if (this.detailsPanel && this._detailsPanelIsLoading) {
@@ -2281,29 +2275,33 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	/** Send a loading-screen message to the panels showing the Efficiency loading screen. */
-	private sendEfficiencyLoadingMessage(msg: object): void {
-		for (const panel of this._loadingPanels.keys()) {
+	/**
+	 * A loading-screen sink bound to one panel, for a build to report its own progress.
+	 *
+	 * The check is deliberately against the live panel rather than a subscription list: a
+	 * build outlives a panel the user closed, and its late messages must not land on the
+	 * replacement panel a reopen created, whose own build is reporting there.
+	 */
+	private efficiencyLoadingSink(panel: vscode.WebviewPanel): (msg: object) => void {
+		return (msg: object) => {
+			if (this.efficiencyPanel !== panel) { return; }
 			void panel.webview.postMessage(msg);
-		}
+		};
 	}
 
 	/**
-	 * Runs `build` with `panel` subscribed to its own loading-screen progress, so a view
-	 * that shows getLoadingHtml() while it computes gets live per-file progress instead
-	 * of a bar frozen at a fixed percentage.
+	 * Serializes Efficiency builds.
 	 *
-	 * Leases are reference-counted: an initial build and a refresh of the same panel can
-	 * overlap, and a plain add/delete would unsubscribe the panel when the first of them
-	 * finished, silently dropping the survivor's remaining progress.
+	 * Two builds overlapping is not only a render race: they write shared caches
+	 * (`lastUsageAnalysisStats`, `lastEfficiencySessionInputs`, `lastFullDailyStats`), so an
+	 * older build finishing second leaves stale data behind for every later view. Running
+	 * them one at a time removes that ordering problem at the source, and a queued refresh
+	 * then reuses whatever the build ahead of it just cached.
 	 */
-	private async withLoadingPanel<T>(panel: vscode.WebviewPanel, build: () => Promise<T>): Promise<T> {
-		this._loadingPanels.set(panel, (this._loadingPanels.get(panel) ?? 0) + 1);
-		try { return await build(); }
-		finally {
-			const held = (this._loadingPanels.get(panel) ?? 1) - 1;
-			if (held > 0) { this._loadingPanels.set(panel, held); } else { this._loadingPanels.delete(panel); }
-		}
+	private runEfficiencyBuild<T>(build: () => Promise<T>): Promise<T> {
+		const queued = this._efficiencyBuildChain.then(build, build);
+		this._efficiencyBuildChain = queued.then(() => undefined, () => undefined);
+		return queued;
 	}
 
 	/**
@@ -3408,8 +3406,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			[...discoveredEditorSet].map(name => ({ icon: this.getEditorIconForLoader(name), name }))
 		);
 		const missBudget = isLeader ? undefined : { remaining: CopilotTokenTracker.FOLLOWER_MISS_BUDGET };
-		const { sessionFiles, preloaded } = await this._queueSessionPreload(
-			() => this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget));
+		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget);
 		if (!isLeader && preloaded.length < sessionFiles.length) {
 			this.log(`Follower with cold cache: stats below are partial (${preloaded.length}/${sessionFiles.length} files within date range parsed within the follower budget). Will resync once the leader publishes its snapshot.`);
 		}
@@ -4404,35 +4401,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * while that one is mid-flight, re-statting and re-parsing the same cold files. Every
 	 * caller of the 365-day walk goes through here so there is only ever one.
 	 */
-	private calculateFullDailyStats(knownSessionFiles?: string[]): Promise<DailyTokenStats[]> {
-		this._fullDailyStatsInFlight ??= this.calculateDailyStats(365, knownSessionFiles)
+	private calculateFullDailyStats(
+		knownSessionFiles?: string[],
+		onProgress?: (completed: number, total: number) => void,
+	): Promise<DailyTokenStats[]> {
+		this._fullDailyStatsInFlight ??= this.calculateDailyStats(365, knownSessionFiles, onProgress)
 			.finally(() => { this._fullDailyStatsInFlight = undefined; });
 		return this._fullDailyStatsInFlight;
-	}
-
-	/**
-	 * Serializes every full corpus preload so two of them never walk the same files at once.
-	 *
-	 * `_preloadSessionFiles` is reached from the refresh path and from the Efficiency prime,
-	 * and the periodic silent refresh fires on its own timer — so checking "is a refresh in
-	 * flight?" once, before starting, cannot rule out a second walk beginning a moment later.
-	 * Queueing here does: the second caller waits, then finds the cache the first one filled
-	 * and completes on warm entries instead of re-statting and re-parsing the corpus. Waiting
-	 * costs nothing it would not already have spent doing that work itself.
-	 */
-	private _queueSessionPreload<T>(run: () => Promise<T>): Promise<T> {
-		const queued = this._preloadChain.then(run, run);
-		// Keep the chain alive regardless of this run's outcome, so one failure cannot wedge
-		// every later preload.
-		this._preloadChain = queued.then(() => undefined, () => undefined);
-		return queued;
 	}
 
 	/** Compute daily token stats for up to `daysBack` days, using the same token preference
 	 *  (actualTokens > estimatedTokens) and UTC date assignment as calculateDetailedStats
 	 *  so all chart period views are consistent. Stores the result in
 	 *  `lastFullDailyStats` and returns it. Zero-fill is handled per-period in buildChartData. */
-	private async calculateDailyStats(daysBack = 365, knownSessionFiles?: string[]): Promise<DailyTokenStats[]> {
+	private async calculateDailyStats(
+		daysBack = 365,
+		knownSessionFiles?: string[],
+		onProgress?: (completed: number, total: number) => void,
+	): Promise<DailyTokenStats[]> {
 		const now = new Date();
 		const cutoffStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack);
 		const cutoffStartKey = toLocalDayKey(cutoffStart);
@@ -4443,13 +4429,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const sessionFiles = knownSessionFiles ?? await this.sessionDiscovery.getCopilotSessionFiles();
 			this.log(`📈 Preparing chart data (${daysBack}d) from ${sessionFiles.length} session file(s)...`);
 
+			let completed = 0;
 			const dailyResults = await this.runWithConcurrency(sessionFiles, async (sessionFile) => {
-				const fileStats = await this.statSessionFile(sessionFile);
-				const mtime = fileStats.mtime.getTime();
-				const fileSize = fileStats.size;
-				if (mtime < cutoffMs) { return null; }
-				const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-				return { sessionFile, sessionData, mtime };
+				try {
+					const fileStats = await this.statSessionFile(sessionFile);
+					const mtime = fileStats.mtime.getTime();
+					const fileSize = fileStats.size;
+					if (mtime < cutoffMs) { return null; }
+					return { sessionFile, sessionData: await this.getSessionFileDataCached(sessionFile, mtime, fileSize), mtime };
+				} finally {
+					onProgress?.(++completed, sessionFiles.length);
+				}
 			});
 
 			for (const r of dailyResults) {
@@ -9594,13 +9584,13 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// key locked — if the user closes the panel and reopens it before the build finishes, the
 		// reopen would be silently dropped as "already in flight" (same fix as showChart above).
 		void (async () => {
-			// This build is detached from showEfficiency()'s dispatch key, so a refresh can start
-			// alongside it; whichever was requested last owns the panel.
-			const seq = ++this._efficiencyBuildSeq;
-			const data = await this.withLoadingPanel(panel, () => this.buildEfficiencyViewData());
-			// The user may have closed the panel while the data was being computed.
-			if (this.efficiencyPanel !== panel || seq !== this._efficiencyBuildSeq) { return; }
+			const data = await this.runEfficiencyBuild(
+				() => this.buildEfficiencyViewData(false, this.efficiencyLoadingSink(panel)));
+			// Record the payload even if this panel is gone: it is valid data, and a later
+			// refresh falls back to it rather than stranding its panel on the loading screen.
 			this._lastEfficiencyViewData = data;
+			// The user may have closed the panel while the data was being computed.
+			if (this.efficiencyPanel !== panel) { return; }
 			panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
 			this.log('⚡ Efficiency view rendered');
 		})();
@@ -9612,21 +9602,25 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		this.log('🔄 Refreshing Efficiency view');
 		// Refresh forces all three walks to recompute, so it is as slow as a cold open —
 		// show the same loading screen with live progress rather than a frozen view.
-		const previous = this._lastEfficiencyViewData;
-		const seq = ++this._efficiencyBuildSeq;
-		panel.webview.html = this.getLoadingHtml(panel.webview);
 		let data: EfficiencyViewData;
 		try {
-			data = await this.withLoadingPanel(panel, () => this.buildEfficiencyViewData(true));
+			data = await this.runEfficiencyBuild(async () => {
+				// Swap in the loading screen only once this refresh actually starts; queued
+				// behind an initial build, it would otherwise blank the panel and sit there.
+				if (this.efficiencyPanel === panel) { panel.webview.html = this.getLoadingHtml(panel.webview); }
+				return this.buildEfficiencyViewData(true, this.efficiencyLoadingSink(panel));
+			});
+			this._lastEfficiencyViewData = data;
 		} catch (error) {
-			// Never strand the panel on the loading screen: fall back to what it was showing.
+			// Never strand the panel on the loading screen: fall back to the last good payload,
+			// which the initial build records even when its own render was skipped.
 			this.error('Error refreshing Efficiency view:', error);
-			if (!previous || this.efficiencyPanel !== panel || seq !== this._efficiencyBuildSeq) { return; }
+			const previous = this._lastEfficiencyViewData;
+			if (!previous || this.efficiencyPanel !== panel) { return; }
 			panel.webview.html = this.getEfficiencyHtml(panel.webview, previous);
 			return;
 		}
-		if (this.efficiencyPanel !== panel || seq !== this._efficiencyBuildSeq) { return; }
-		this._lastEfficiencyViewData = data;
+		if (this.efficiencyPanel !== panel) { return; }
 		panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
 	}
 
@@ -9731,96 +9725,41 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * refresh's parsing ticks arriving here mid-compute — is harmless for the bar, which the
 	 * loading script clamps monotonically.
 	 */
-	private postEfficiencyStep(percentage: number, label: string): void {
-		this.sendEfficiencyLoadingMessage({ command: 'loadingStep', step: 'computing', percentage, label });
+	private postEfficiencyStep(send: (msg: object) => void, percentage: number, label: string): void {
+		send({ command: 'loadingStep', step: 'computing', percentage, label });
 	}
 
 	/**
-	 * Warm the shared session cache once before the Efficiency build's three aggregation
-	 * walks run.
+	 * The three aggregation passes behind the Efficiency view, reporting each as a named
+	 * sub-step so the loading bar keeps moving through them.
 	 *
-	 * buildEfficiencyViewData() calls calculateDailyStats(), calculateUsageAnalysisStats()
-	 * and collectEfficiencySessionInputs() in sequence, and each one independently walks
-	 * the whole session corpus. On a cold cache that means the same files are parsed up to
-	 * three times — the bulk of the cold-open wait. One preload pass ahead of them fills
-	 * `cacheManager.cache`, so all three then hit warm entries and only pay a stat plus a
-	 * map lookup per file.
-	 *
-	 * It also gives the loading screen something real to report: the preload emits
-	 * per-file progress through the normal loading-panel channel, so the bar climbs with
-	 * the parse instead of jumping straight to the compute phase.
+	 * Only the first parses cold files. It covers the widest window (a full year), and the
+	 * other two read strict subsets of it straight out of the in-memory session cache it
+	 * fills, so per-file progress is reported from that walk rather than from a separate
+	 * warm-up pass over the same corpus.
 	 */
-	private async primeEfficiencySessionCache(forceRecalc: boolean, now: Date): Promise<void> {
-		// Every walk this would help is already memoized — nothing to warm.
-		if (!this.efficiencyWalksNeeded(forceRecalc)) { return; }
-
-		// A refresh already in flight walks the same files, and so does the full-year
-		// daily-stats job `_runRefreshCore` starts detached (which routinely outlives the
-		// refresh promise). Let either finish rather than racing it with another pass.
-		if (this._updateTokenStatsInFlight) {
-			this.log('⚡ [Efficiency] Waiting for the in-flight refresh before priming the session cache');
-			await this._updateTokenStatsInFlight.catch(() => undefined);
-		}
-		if (this._fullDailyStatsInFlight) {
-			this.log('⚡ [Efficiency] Waiting for the in-flight full-year daily stats walk');
-			await this._fullDailyStatsInFlight.catch(() => undefined);
-		}
-
-		// Re-check after those waits: the work we waited for may have populated the very
-		// caches the prime exists to warm, in which case walking again would be pure cost.
-		if (!this.efficiencyWalksNeeded(forceRecalc)) {
-			this.log('⚡ [Efficiency] Session cache already warm after waiting; skipping the prime');
-			return;
-		}
-
-		// Opening and refreshing can overlap; one prime serves both.
-		this._efficiencyPrimeInFlight ??= this.runEfficiencySessionCachePrime(now)
-			.finally(() => { this._efficiencyPrimeInFlight = undefined; });
-		await this._efficiencyPrimeInFlight;
-	}
-
-	/** True when any of the three Efficiency aggregation walks would still have to run. */
-	private efficiencyWalksNeeded(forceRecalc: boolean): boolean {
-		if (forceRecalc) { return true; }
-		return !this.lastFullDailyStats || !this.lastUsageAnalysisStats || !this.lastEfficiencySessionInputs;
-	}
-
-	/** The single preload pass behind primeEfficiencySessionCache(). */
-	private async runEfficiencySessionCachePrime(now: Date): Promise<void> {
-		// Widest window any of the three consumers reads (calculateDailyStats' 365 days),
-		// so one pass covers all of them.
-		const cutoffMs = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()).getTime();
-		const editorSet = new Set<string>();
-		// `silent` so the status bar keeps showing stats; progress is addressed to the
-		// Efficiency loading screen rather than whatever else happens to be loading.
-		const progressCallback = this.buildProgressCallback(
-			true,
-			() => [...editorSet].map(name => ({ icon: this.getEditorIconForLoader(name), name })),
-			(msg) => this.sendEfficiencyLoadingMessage(msg),
-		);
-		const startedMs = Date.now();
-		try {
-			this.sendEfficiencyLoadingMessage({ command: 'loadingStep', step: 'discovering' });
-			await this._queueSessionPreload(() => this._preloadSessionFiles(cutoffMs, progressCallback, editorSet));
-			this.log(`⚡ [Efficiency] Session cache primed in ${((Date.now() - startedMs) / 1000).toFixed(1)}s`);
-		} catch (error) {
-			// Priming is an optimisation: the three walks below still parse what they need.
-			this.warn(`Efficiency session cache prime failed, falling back to per-walk parsing: ${error}`);
-		}
-	}
-
-	private async buildEfficiencyViewData(forceRecalc = false): Promise<EfficiencyViewData> {
-		const now = new Date();
+	private async collectEfficiencyInputs(forceRecalc: boolean, send: (msg: object) => void): Promise<{
+		dailyStats: DailyTokenStats[]; usage: UsageAnalysisStats; sessionInputs: EfficiencySessionInput[];
+	}> {
 		const stepPct = CopilotTokenTracker.EFFICIENCY_STEP_PCT;
-		await this.primeEfficiencySessionCache(forceRecalc, now);
-
-		this.postEfficiencyStep(stepPct.daily, l10n.t('loading.efficiency.dailyActivity'));
-		const dailyStats = (!forceRecalc && this.lastFullDailyStats) ? this.lastFullDailyStats : await this.calculateFullDailyStats();
-		this.postEfficiencyStep(stepPct.usage, l10n.t('loading.efficiency.usageAnalysis'));
+		this.postEfficiencyStep(send, stepPct.daily, l10n.t('loading.efficiency.dailyActivity'));
+		const dailyStats = (!forceRecalc && this.lastFullDailyStats)
+			? this.lastFullDailyStats
+			: await this.calculateFullDailyStats(undefined, this.buildProgressCallback(true, undefined, send));
+		this.postEfficiencyStep(send, stepPct.usage, l10n.t('loading.efficiency.usageAnalysis'));
 		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
-		this.postEfficiencyStep(stepPct.sessions, l10n.t('loading.efficiency.sessionSignals'));
+		this.postEfficiencyStep(send, stepPct.sessions, l10n.t('loading.efficiency.sessionSignals'));
 		const sessionInputs = await this.collectEfficiencySessionInputs(12, !forceRecalc);
-		this.postEfficiencyStep(stepPct.trends, l10n.t('loading.efficiency.buildingTrends'));
+		this.postEfficiencyStep(send, stepPct.trends, l10n.t('loading.efficiency.buildingTrends'));
+		return { dailyStats, usage, sessionInputs };
+	}
+
+	private async buildEfficiencyViewData(
+		forceRecalc = false,
+		send: (msg: object) => void = () => { /* no loading screen to report to */ },
+	): Promise<EfficiencyViewData> {
+		const now = new Date();
+		const { dailyStats, usage, sessionInputs } = await this.collectEfficiencyInputs(forceRecalc, send);
 		const deps = {
 			calculateEstimatedCost: (mu: ModelUsage, src: 'provider' | 'copilot') => this.calculateEstimatedCost(mu, src),
 			now,
