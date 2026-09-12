@@ -10,7 +10,7 @@ positives (see the skill README for the exclusion rules) — triage each one
 before localizing.
 
 - Files scanned: 36
-- Files with findings: 17
+- Files with findings: 16
 - Total candidate strings: 1225
 
 ## Findings by file
@@ -505,7 +505,7 @@ before localizing.
 | 3514 | <div> content | `<div class="info-box-title">📁 Session File Analysis</div>` |
 | 3637 | .textContent assignment | `.textContent = "No data available."` |
 
-### `vscode-extension/src/webview/efficiency/main.ts` (80)
+### `vscode-extension/src/webview/efficiency/main.ts` (81)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -525,6 +525,7 @@ before localizing.
 | 295 | <div> content | `<div class="stat-sub">${escapeHtml(d.attributionWindows.curRange)} · ${a.cur.sessions} sessions · ${formatCompact(a.cur.tokens)} tokens</div>` |
 | 296 | <div> content | `<div class="stat-label">Change</div>` |
 | 296 | <div> content | `<div class="stat-sub">blended rate ${a.prev.dollarsPerMTokens.toFixed(2)} → ${a.cur.dollarsPerMTokens.toFixed(2)} $/M tokens</div>` |
+| 298 | <div> content | `<div class="attr-bars"> ${attrBar('Volume (session count)', '${a.prev.sessions.toLocaleString()} → ${a.cur.sessions.toLocaleString()} sessions', a.volumeEffect,…` |
 | 332 | <div> content | `<div class="skill-impact-sub">${impact.withSkill.sessions} sessions with · ${impact.withoutSkill.sessions} without · ${impact.totalCalls} invocations</div>` |
 | 334 | <th> content | `<th>Metric</th>` |
 | 334 | <th> content | `<th class="num">With</th>` |
@@ -616,7 +617,7 @@ before localizing.
 | 154 | <div> content | `<div class="footer"> 📊 Scoring Guide &middot; ${data.categories.length} categories &middot; 4 stages each </div>` |
 | 168 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/logviewer/hydraFusionSection.ts` (46)
+### `vscode-extension/src/webview/logviewer/hydraFusionSection.ts` (47)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -644,6 +645,7 @@ before localizing.
 | 215 | <span> content | `<span class="hydra-verdict-reject" title="Judge rejected this draft">✗</span>' : p.verdict === 'accept' ? '<span class="hydra-verdict-accept" title="Judge accep…` |
 | 216 | title attribute | `title="Judge accepted this draft"` |
 | 218 | title attribute | `title="This leg produced the answer you saw"` |
+| 219 | title attribute | `title="${escapeHtml('${p.kind} · ${p.model} · ${formatAiu(p.usage.aiu)} AIU')}"` |
 | 231 | title attribute | `title="This leg produced the answer you saw"` |
 | 231 | <td> content | `<td class="hydra-model-cell">${escapeHtml(phase.model)}${phase.isFinalSource ? ' <span class="hydra-final-tag" title="This leg produced the answer you saw">answ…` |
 | 252 | <summary> content | `<summary class="hydra-turn-summary"> <span class="hydra-turn-num">#${index + 1}</span> <span class="hydra-pattern-badge ${patternClass(turn.pattern)}" title="${…` |
@@ -849,12 +851,6 @@ before localizing.
 | 626 | <div> content | `<div style="font-size:14px;color:#7a7a8a;">Track your AI usage with AI Engineering Fluency</div>` |
 | 738 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/maturity/shareCard.ts` (1)
-
-| Line | Kind | Snippet |
-|---|---|---|
-| 22 | <div> content | `<div style="font-size:16px;color:#b8b8c8;">${reportLabel} &middot; ${escapeHtml(when)}</div>` |
-
 ### `vscode-extension/src/webview/shared/formatUtils.ts` (1)
 
 | Line | Kind | Snippet |
@@ -871,7 +867,7 @@ before localizing.
 | 50 | <th> content | `<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>` |
 | 56 | <td> content | `<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>` |
 
-### `vscode-extension/src/webview/usage/main.ts` (435)
+### `vscode-extension/src/webview/usage/main.ts` (434)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -1100,7 +1096,6 @@ before localizing.
 | 3543 | <div> content | `<div class="section-subtitle"> Personalized tips based on your usage patterns. Tips are data-driven — they only appear when relevant to how you code with AI. </…` |
 | 3564 | <button> content | `<button class="tab-button ${activeTab === 'corrections' ? 'active' : ''}" data-tab="corrections"><span class="codicon codicon-debug-restart"></span> Corrections…` |
 | 3584 | <span> content | `<span style="flex-shrink:0; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222…` |
-| 3585 | <div> content | `<div style="flex:1; min-width:0; font-size:12px; color:var(--text-primary); font-style:italic; overflow-wrap:anywhere;">&ldquo;${escapeHtml(cluster.representati…` |
 | 3589 | <summary> content | `<summary style="font-size:11px; color:var(--text-secondary); cursor:pointer;">Sessions (${cluster.sessions.length})</summary>` |
 | 3600 | <div> content | `<div class="section-title"><span>🧩</span><span>Skill Suggestions</span></div>` |
 | 3601 | <div> content | `<div class="section-subtitle"> Tasks you keep prompting for across sessions (first prompt per session, ${report.sessionsScanned} sessions scanned). A repeated t…` |

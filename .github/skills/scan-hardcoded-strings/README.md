@@ -137,20 +137,36 @@ itself a whole ternary branch inside an interpolation's expression — e.g.
 `` `${flag ? 'Enable Overrides' : 'Disable Overrides'}` `` — or the fallback
 side of a `||` default — e.g. `` `${escapeHtml(msg) || '<em>No message</em>'}` ``
 or `` `${escapeHtml(err || "Unknown error")}` `` — is preserved and checked,
-since that is often where the actual hardcoded UI text lives. Only a literal
-immediately preceded by `?`, `:`, or `||` (ignoring whitespace) counts as a
-branch this way; a literal that is merely an argument to some other call
-inside the same interpolation — e.g. `` `${buttonHtml('btn-refresh')}` `` —
-is left alone, since `'btn-refresh'` there is a button id, not UI text, and
-follows `(` rather than `?`/`:`/`||`. The same rule is what keeps a comparison
-operand like `` `${typeof x === 'string' ? x : ''}` `` from being misread as
-a branch. Each recovered literal is prose-checked on its own before being
-combined, so one non-prose branch (e.g. a URL) can't poison another genuine
-one — `` `${cond ? 'https://x' : 'Open link'}` `` still surfaces "Open link".
+since that is often where the actual hardcoded UI text lives. A *plain*
+single/double-quoted literal only counts as a branch this way when it's
+immediately preceded by `?`, `:`, or `||` (ignoring whitespace); one that is
+merely an argument to some other call inside the same interpolation — e.g.
+`` `${buttonHtml('btn-refresh')}` `` — is left alone, since `'btn-refresh'`
+there is a button id, not UI text, and follows `(` rather than `?`/`:`/`||`.
+The same rule is what keeps a comparison operand like `` `${typeof x ===
+'string' ? x : ''}` `` from being misread as a branch. A **template**
+(backtick-quoted) literal, however, is recovered regardless of what precedes
+it — e.g. `` `${escapeHtml(`${p.kind} · ${p.model} AIU`)}` `` still surfaces
+"AIU" even though the nested template is a plain argument to `escapeHtml(`,
+not a ternary/`||` branch — because in this codebase a template literal is
+used to *build* display text, unlike a plain quoted string which is
+routinely a lookup key or id. Each recovered literal is prose-checked on its
+own before being combined, so one non-prose branch (e.g. a URL) can't poison
+another genuine one — `` `${cond ? 'https://x' : 'Open link'}` `` still
+surfaces "Open link".
 Similarly, tag delimiters left behind by a stripped interpolation (e.g.
 `<strong></strong>` after `<strong>${count}</strong>` loses its dynamic
 content) are removed before the prose check, so a tag *name* like "strong" is
-never itself mistaken for hardcoded text.
+never itself mistaken for hardcoded text. HTML character references
+(`&middot;`, `&amp;`, `&#8226;`, `&#x2022;`) are stripped the same way — a
+separator like `` `${a} &middot; ${b}` `` reduces, once both interpolations
+are gone, to just `&middot;`, and without this step the entity *name*
+("middot") would itself be misread as a prose word.
+
+A `.title`/`.textContent`/etc. template-literal assignment is matched with
+the same nested-template-aware scan (`skipQuotedLiteral`) described below, so
+`` el.title = `${format(`Save changes`)}`; `` isn't truncated at the nested
+literal's opening backtick.
 
 Before any detector runs, `/* ... */` block comments (including JSDoc) are
 blanked out — a doc-comment example like `Converts [text](url) to <a

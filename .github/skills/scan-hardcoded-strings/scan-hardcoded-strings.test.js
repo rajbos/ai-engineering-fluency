@@ -134,6 +134,45 @@ test('stripInterpolations: preserves a literal fallback after ||', () => {
     assert.match(result2, /Unknown error/);
 });
 
+test('stripInterpolations: recovers a nested template literal passed as a plain call argument', () => {
+    // Regression: logviewer/hydraFusionSection.ts's `title="${escapeHtml(`${p.kind}
+    // · ${p.model} · ${formatAiu(p.usage.aiu)} AIU`)}"` was invisible — the
+    // nested template literal's static text ("AIU") was discarded because
+    // it wasn't preceded by '?'/':'/'||' (it follows the plain call
+    // `escapeHtml(`). Unlike a quoted string (routinely a lookup key/id in
+    // this codebase, e.g. `buttonHtml('btn-refresh')`), a *template*
+    // literal is used to build display text, so it's recovered regardless
+    // of what precedes it.
+    const result = stripInterpolations('${escapeHtml(`${p.kind} · ${p.model} · ${formatAiu(p.usage.aiu)} AIU`)}');
+    assert.match(result, /AIU/);
+});
+
+test('stripInterpolations: does not recover a plain quoted literal that is not a branch, even inside a nested template', () => {
+    // The template-literal relaxation above must not swallow the *sibling*
+    // rule that a plain quoted literal is only recovered at a branch
+    // position — confirm buttonHtml('btn-refresh') is still excluded when
+    // it appears in a more complex surrounding expression.
+    const result = stripInterpolations("${cond ? buttonHtml('btn-refresh') : ''}");
+    assert.doesNotMatch(result, /btn-refresh/);
+});
+
+// ── stripHtmlEntities ────────────────────────────────────────────────────────
+
+test('extractStaticText: strips HTML entities so an entity name is not mistaken for prose', () => {
+    // Regression: maturity/shareCard.ts's `${reportLabel} &middot;
+    // ${escapeHtml(when)}` reduced (once both interpolations are stripped)
+    // to just "&middot;", and looksLikeProse read the entity name "middot"
+    // as a real prose word.
+    const result = extractStaticText('${reportLabel} &middot; ${escapeHtml(when)}');
+    assert.doesNotMatch(result, /middot/);
+    assert.equal(looksLikeProse(result), false);
+});
+
+test('extractStaticText: strips numeric and hex HTML entities too', () => {
+    const result = extractStaticText('${a} &#8220;&#x201c;&ldquo;');
+    assert.doesNotMatch(result, /&/);
+});
+
 // ── extractStaticText / looksLikeProse ───────────────────────────────────────
 
 test('extractStaticText: strips both localized calls and interpolations', () => {
@@ -289,6 +328,16 @@ test('findPropertyAssignments: flags a template literal with hardcoded prose aro
 test('findPropertyAssignments: skips innerHTML assignments containing markup (deferred to tag scan)', () => {
     const findings = findPropertyAssignments('el.innerHTML = `<div>Some text</div>`;');
     assert.equal(findings.length, 0);
+});
+
+test('findPropertyAssignments: a nested template literal inside an interpolation does not truncate the match', () => {
+    // Regression: the template-literal RHS regex (`` `([^`]*)` ``) stopped at
+    // the FIRST backtick, so `.title = \`${format(\`Save changes\`)}\`;` was
+    // truncated at the nested template's opener and its real text ("Save
+    // changes") was never inspected.
+    const findings = findPropertyAssignments('el.title = `${format(`Save changes`)}`;');
+    assert.equal(findings.length, 1);
+    assert.match(findings[0].snippet, /Save changes/);
 });
 
 test('findPropertyAssignments: flags a ternary RHS whose branches are literals', () => {

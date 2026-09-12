@@ -69,16 +69,20 @@ The script will:
    just a single direct literal
 3. Skip anything already wrapped in `localize(`, `localizeFormat(`, `t(`, or
    `vscode.l10n.t(`, and anything that doesn't look like prose (pure
-   numbers/symbols, URLs, CSS values, a narrow denylist of single CSS-keyword
-   tokens — not every single lowercase word; the letter check itself is
-   Unicode-aware, so non-English text isn't exempted) — but recover string
-   literals that are themselves a whole ternary branch, or the fallback side
-   of a `||` default, inside an interpolation's expression, e.g. `` `${flag ?
-   'Enable Overrides' : 'Disable Overrides'}` `` or `` `${msg || '<em>No
-   message</em>'}` `` (a literal that is merely an argument to some other
-   call in the same interpolation, e.g. `` `${buttonHtml('btn-refresh')}` ``,
-   is left alone), checking each recovered literal on its own so one
-   non-prose branch can't suppress another genuine one
+   numbers/symbols, URLs, CSS values, HTML character references like
+   `&middot;`/`&#8226;`, a narrow denylist of single CSS-keyword tokens — not
+   every single lowercase word; the letter check itself is Unicode-aware, so
+   non-English text isn't exempted) — but recover string literals that are
+   themselves a whole ternary branch, or the fallback side of a `||` default,
+   inside an interpolation's expression, e.g. `` `${flag ? 'Enable Overrides'
+   : 'Disable Overrides'}` `` or `` `${msg || '<em>No message</em>'}` `` (a
+   *plain* quoted literal that is merely an argument to some other call in
+   the same interpolation, e.g. `` `${buttonHtml('btn-refresh')}` ``, is left
+   alone — but a *template* literal there, e.g. `` `${escapeHtml(`${a} ·
+   ${b} AIU`)}` ``, is still recovered, since a template literal builds
+   display text while a plain quoted string is routinely a lookup key/id),
+   checking each recovered literal on its own so one non-prose branch can't
+   suppress another genuine one
 4. Print a console report grouped by file, with line numbers and snippets
 5. Write the same findings to `hardcoded-strings-report.md` at the repo root
 6. Set `process.exitCode = 0` rather than forcing `process.exit()` — this

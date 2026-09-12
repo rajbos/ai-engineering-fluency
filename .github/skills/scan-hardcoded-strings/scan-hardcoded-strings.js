@@ -215,14 +215,25 @@ function stripLocalizedCalls(text) {
 const BRANCH_OR_FALLBACK_BEFORE_RE = /(?:[?:]|\|\|)\s*$/;
 
 /**
- * Extract quoted string/template literal bodies (non-nested) that are
- * themselves a conditional branch — both branches of a ternary like
- * `` isExcluded ? `${provider} is hidden...` : `Click to hide ${provider}...` ``
- * (a template-literal ternary, not just single/double-quoted branches), or
- * the fallback side of a `||` default like `` escapeHtml(turn.userMessage) ||
- * '<em>No message</em>' ``. A literal elsewhere in the expression (a
- * function-call argument, a comparison operand) is not a UI-rendering
- * position on its own and is left alone.
+ * Extract quoted string/template literal bodies (non-nested at the regex
+ * level — a *nested* template literal, e.g. `` escapeHtml(`${a} · ${b} AIU`) ``,
+ * has already had its own inner `${...}` interpolations reduced to plain
+ * text by the time this runs, courtesy of `stripInterpolations`'s
+ * inside-out iteration) that are either:
+ * - themselves a conditional branch — both branches of a ternary like
+ *   `` isExcluded ? `${provider} is hidden...` : `Click to hide ${provider}...` ``
+ *   (a template-literal ternary, not just single/double-quoted branches), or
+ *   the fallback side of a `||` default like `` escapeHtml(turn.userMessage) ||
+ *   '<em>No message</em>' ``, or
+ * - a template literal (backtick-quoted) anywhere in the expression, e.g. the
+ *   sole argument to a pass-through display helper like `` escapeHtml(`${p.kind}
+ *   · ${p.model} AIU`) ``. Unlike a single/double-quoted string — routinely
+ *   used in this codebase as a lookup key or id (`buttonHtml('btn-refresh')`)
+ *   — a backtick template literal is used here to *build* display text, so
+ *   it's treated as UI-rendering regardless of what precedes it.
+ * A single/double-quoted literal elsewhere in the expression (a function-call
+ * argument, a comparison operand) is not a UI-rendering position on its own
+ * and is left alone.
  */
 function extractInterpolationLiterals(expr) {
     const stripped = stripLocalizedCalls(expr);
@@ -230,7 +241,8 @@ function extractInterpolationLiterals(expr) {
     const re = /(["'`])((?:(?!\1)[^\\]|\\.)*)\1/g;
     let m;
     while ((m = re.exec(stripped)) !== null) {
-        if (!BRANCH_OR_FALLBACK_BEFORE_RE.test(stripped.slice(0, m.index))) { continue; }
+        const isTemplateLiteral = m[1] === '`';
+        if (!isTemplateLiteral && !BRANCH_OR_FALLBACK_BEFORE_RE.test(stripped.slice(0, m.index))) { continue; }
         literals.push(m[2]);
     }
     return literals;
@@ -273,9 +285,20 @@ function stripHtmlTags(text) {
     return text.replace(/<\/?[a-zA-Z][^>]*>/g, ' ');
 }
 
+/**
+ * Remove HTML character references (`&middot;`, `&amp;`, `&#8226;`,
+ * `&#x2022;`) so an entity name isn't itself mistaken for a prose word —
+ * e.g. a separator like `${a} &middot; ${b}` reducing, once both
+ * interpolations are stripped, to just `&middot;` would otherwise pass the
+ * "looks like prose" letter-run check on the word "middot".
+ */
+function stripHtmlEntities(text) {
+    return text.replace(/&(#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);/g, ' ');
+}
+
 /** Reduce a raw literal body to its static (non-localized, non-interpolated) text. */
 function extractStaticText(rawBody) {
-    return stripHtmlTags(stripInterpolations(stripLocalizedCalls(rawBody)));
+    return stripHtmlEntities(stripHtmlTags(stripInterpolations(stripLocalizedCalls(rawBody))));
 }
 
 // ── Prose heuristic ─────────────────────────────────────────────────────────
@@ -359,11 +382,18 @@ function findPropertyAssignments(content) {
     const findings = [];
     const propAlt = TEXT_PROPS.join('|');
 
-    // Template-literal RHS (can span multiple lines).
-    const templateRe = new RegExp('\\.(' + propAlt + ')\\s*=\\s*`([^`]*)`', 'g');
+    // Template-literal RHS (can span multiple lines). Uses skipQuotedLiteral
+    // (rather than a `` `([^`]*)` `` regex) so a *nested* template literal
+    // inside an interpolation — e.g. `` .title = `${format(`Save
+    // changes`)}`; `` — doesn't truncate the match at the inner backtick.
+    const templateStartRe = new RegExp('\\.(' + propAlt + ')\\s*=\\s*`', 'g');
     let m;
-    while ((m = templateRe.exec(content)) !== null) {
-        const [full, prop, body] = m;
+    while ((m = templateStartRe.exec(content)) !== null) {
+        const prop = m[1];
+        const backtickIdx = m.index + m[0].length - 1;
+        const end = skipQuotedLiteral(content, backtickIdx);
+        if (content[end - 1] !== '`') { continue; } // unterminated
+        const body = content.slice(backtickIdx + 1, end - 1);
         if (prop === 'innerHTML' && body.includes('<')) { continue; } // deferred to tag-content scan
         const staticText = extractStaticText(body);
         if (looksLikeProse(staticText)) {
@@ -371,7 +401,7 @@ function findPropertyAssignments(content) {
                 index: m.index,
                 line: lineAt(content, m.index),
                 kind: `.${prop} assignment`,
-                snippet: toSnippet(full),
+                snippet: toSnippet(content.slice(m.index, end)),
             });
         }
     }
@@ -1029,6 +1059,7 @@ module.exports = {
     extractInterpolationLiterals,
     stripInterpolations,
     stripHtmlTags,
+    stripHtmlEntities,
     extractStaticText,
     looksLikeProse,
     toSnippet,
