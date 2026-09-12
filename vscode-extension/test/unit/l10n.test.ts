@@ -230,12 +230,12 @@ test('l10n: environmental methodology keys resolve in English', () => {
 		'environmental.methodology.heading': 'Calculation & Estimates',
 		'environmental.methodology.co2Paper': 'Estimated CO₂ uses Jegham et al., "How Hungry is AI? Benchmarking Energy, Water, and Carbon Footprint of LLM Inference", with a baseline of 840 g CO₂e per 1M output-equivalent tokens.',
 		'environmental.methodology.co2Weights': 'Output-equivalent token weights: output = 1.0, uncached input = 0.05, cache write = 0.0625, cache read = 0.0005. Cache-aware weighting is only used when per-model token breakdowns are available; otherwise the tracker falls back to the legacy flat estimate.',
-		'environmental.methodology.cost': 'Cost estimate uses weighted token categories from usage analysis, then applies average carbon intensity per output-equivalent token. This remains a directional estimate because data center region, hardware, and workload vary.',
-		'environmental.methodology.water': 'Water estimate uses a global average water-intensity reference mapped from estimated energy use and should be interpreted as an order-of-magnitude signal.',
-		'environmental.methodology.tree': 'Tree equivalent converts estimated CO₂ to annual sequestration using a fixed per-tree average.',
-		'environmental.methodology.co2Analogies': 'CO₂ analogies (car km, smartphone charges) use standard public conversion factors and are illustrative only.',
-		'environmental.methodology.waterAnalogies': 'Water analogies (bottles, showers) use common volume assumptions for readability.',
-		'environmental.methodology.caveat': 'Methodology references provide transparency; they do not imply exact measurement for your specific runs.',
+		'environmental.methodology.cost': 'Cost (UBB) uses GitHub Copilot AI Credit rates (1 credit = $0.01) under Usage Based Billing.',
+		'environmental.methodology.water': 'Estimated water usage remains based on ~0.3 L per 1,000 total tokens (data center cooling estimates).',
+		'environmental.methodology.tree': 'Tree equivalent represents the fraction of a single mature tree\'s annual CO₂ absorption (~21 kg/year).',
+		'environmental.methodology.co2Analogies': 'CO₂ analogies: petrol car ≈ 120 g/km · intercity train ≈ 41 g/km · economy flight ≈ 180 g/km (ICAO avg.) · smartphone charge ≈ 8 g · LED bulb ≈ 3 g/hr (10 W, EU grid) · kettle boil ≈ 20 g.',
+		'environmental.methodology.waterAnalogies': 'Water analogies: shower ≈ 8 L/min · washing machine ≈ 50 L · standard bathtub ≈ 150 L · dishwasher ≈ 12 L · mug of tea ≈ 250 mL · daily drinking water ≈ 2 L/person.',
+		'environmental.methodology.caveat': 'All analogies are order-of-magnitude estimates. Actual values depend on your region\'s energy mix, hardware, model implementation, and caching behavior.',
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
@@ -286,12 +286,12 @@ test('l10n: environmental methodology keys resolve in zh-cn', () => {
 			'environmental.methodology.heading': '计算与估算',
 			'environmental.methodology.co2Paper': 'CO₂ 估算采用 Jegham 等人的论文《How Hungry is AI? Benchmarking Energy, Water, and Carbon Footprint of LLM Inference》，并以每 100 万输出当量令牌 840 g CO₂e 为基线。',
 			'environmental.methodology.co2Weights': '输出当量令牌权重：输出 = 1.0，未缓存输入 = 0.05，缓存写入 = 0.0625，缓存读取 = 0.0005。只有在存在按模型拆分的令牌明细时才使用缓存感知权重；否则追踪器会回退到旧的固定估算。',
-			'environmental.methodology.cost': '成本估算使用用量分析中的加权令牌类别，再按每个输出当量令牌的平均碳强度换算。由于数据中心区域、硬件与负载差异，这仍是方向性估算。',
-			'environmental.methodology.water': '用水估算使用基于能耗估算映射的全球平均用水强度参考值，应作为数量级信号解读。',
-			'environmental.methodology.tree': '树木当量将估算 CO₂ 按固定的单棵树年吸收平均值进行换算。',
-			'environmental.methodology.co2Analogies': 'CO₂ 类比（行车公里、手机充电次数）采用公开的标准换算系数，仅用于示意。',
-			'environmental.methodology.waterAnalogies': '用水类比（瓶装水、淋浴次数）使用常见体积假设以提高可读性。',
-			'environmental.methodology.caveat': '方法学引用用于提供透明度，并不代表对你具体运行的精确测量。',
+			'environmental.methodology.cost': '成本（UBB）在按量计费下使用 GitHub Copilot AI Credit 费率（1 个 credit = $0.01）。',
+			'environmental.methodology.water': '用水量估算仍基于每 1,000 个总令牌约 0.3 L（数据中心冷却估算）。',
+			'environmental.methodology.tree': '树木当量表示一棵成熟树一年吸收 CO₂ 的占比（约 21 kg/年）。',
+			'environmental.methodology.co2Analogies': 'CO₂ 类比：汽油车 ≈ 120 g/km · 城际列车 ≈ 41 g/km · 经济舱短途航班 ≈ 180 g/km（ICAO 平均）· 智能手机充满电 ≈ 8 g · LED 灯 ≈ 3 g/小时（10 W，欧盟电网）· 烧开一壶水 ≈ 20 g。',
+			'environmental.methodology.waterAnalogies': '用水类比：淋浴 ≈ 8 L/分钟 · 洗衣机 ≈ 50 L · 标准浴缸 ≈ 150 L · 洗碗机 ≈ 12 L · 一杯茶 ≈ 250 mL · 每人每日饮水 ≈ 2 L。',
+			'environmental.methodology.caveat': '所有类比都只是数量级估算。实际数值取决于你所在地区的能源结构、硬件、模型实现和缓存行为。',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
