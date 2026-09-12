@@ -52,6 +52,7 @@ Documentation and JSON schemas for Copilot session log file formats across diffe
 | [logFilesSchema/VSCODE-VARIANTS.md](logFilesSchema/VSCODE-VARIANTS.md) | VS Code variant support details |
 | [logFilesSchema/gemini-cli-session-format.md](logFilesSchema/gemini-cli-session-format.md) | Gemini CLI JSONL session format (Windows) |
 | [logFilesSchema/vscode-chat-debug-log-format.md](logFilesSchema/vscode-chat-debug-log-format.md) | VS Code Copilot Chat debug log — exact tokens and the AI Unit billing path |
+| [logFilesSchema/hydrafusion-routing-events.md](logFilesSchema/hydrafusion-routing-events.md) | HydraFusion routing events in Copilot CLI logs — which models ran behind one answer, and what each leg cost |
 | [logFilesSchema/session-file-schema.json](logFilesSchema/session-file-schema.json) | Manual schema documentation (JSON) |
 | [logFilesSchema/session-file-schema-analysis.json](logFilesSchema/session-file-schema-analysis.json) | Auto-generated schema analysis (JSON) |
 

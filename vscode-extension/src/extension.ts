@@ -153,6 +153,8 @@ import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
+import { analyzeHydraFusionSession } from '../../src/hydrafusion';
+import type { HydraFusionSummary } from '../../src/hydrafusion';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
 import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout } from './utils/promises';
 import { WebviewMessageReplay } from './webviewMessageReplay';
@@ -1388,7 +1390,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Sets the cache entry for a session file, including file size.
 	 */
 	private setCachedSessionData(filePath: string, data: SessionFileCache, fileSize?: number): void {
-		return this.cacheManager.setCachedSessionData(filePath, data);
+		const cached = this.getCachedSessionData(filePath);
+		const isNewEntry = cached === undefined || cached.mtime !== data.mtime || cached.size !== data.size;
+		return this.cacheManager.setCachedSessionData(filePath, data, fileSize, isNewEntry);
 	}
 
 
@@ -3092,6 +3096,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 				await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget);
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
+				// Checkpoint cache periodically during long-running preload
+				if (processed % 25 === 0) {
+					this.cacheManager.maybeCheckpointCache();
+				}
 			}
 		};
 
@@ -3295,6 +3303,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Core discover → parse → compute → render → persist pass for one refresh. */
 	private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {
 		this.log(isLeader ? 'Updating token stats (leader)...' : 'Updating token stats (follower)...');
+
+		// Reset checkpoint counters at the start of each refresh cycle
+		if (isLeader) {
+			this.cacheManager.resetCheckpointCounters();
+		}
 
 		const { last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(new Date());
 		const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
@@ -6962,6 +6975,7 @@ private computeFallbackDailyRollup(
 		const cached = this.diagnosticsCachedFiles.find(f => f.file === sessionFile);
 		const details = cached ?? await this.getSessionFileDetails(sessionFile);
 		let subAgentsStarted: number | undefined;
+		let hydraFusion: HydraFusionSummary | undefined;
 		let turns: ChatTurn[] = [];
 
 		try {
@@ -6986,6 +7000,7 @@ private computeFallbackDailyRollup(
 					const cliResult = await this.buildCliJsonlTurns(lines, sessionFile, fileContent);
 					turns = cliResult.turns;
 					subAgentsStarted = cliResult.subAgentsStarted;
+					hydraFusion = analyzeHydraFusionSession(fileContent);
 				}
 			} else {
 				const sessionContent = JSON.parse(fileContent);
@@ -7004,7 +7019,7 @@ private computeFallbackDailyRollup(
 		}
 
 		const sessionCache = this.getCachedSessionData(sessionFile);
-		return this.buildBaseLogData(details, turns, usageAnalysis, sessionCache, undefined, undefined, undefined, subAgentsStarted);
+		return this.buildBaseLogData(details, turns, usageAnalysis, sessionCache, undefined, undefined, undefined, { subAgentsStarted, hydraFusion });
 	}
 
 	private buildBaseLogData(
@@ -7015,7 +7030,8 @@ private computeFallbackDailyRollup(
 		eco?: IEcosystemAdapter | null,
 		sessionFile?: string,
 		ecoActualTokens?: number,
-		subAgentsStarted?: number
+		/** Extras only the CLI JSONL path can supply; every other caller leaves them out. */
+		extras: { subAgentsStarted?: number; hydraFusion?: HydraFusionSummary } = {}
 	): SessionLogData {
 		const editorName = details.editorName || (eco && sessionFile ? getEcosystemDisplayName(eco, sessionFile) : details.editorSource);
 		const actualTokens = ecoActualTokens ?? sessionCache?.actualTokens ?? 0;
@@ -7036,7 +7052,8 @@ private computeFallbackDailyRollup(
 			...(editorNote ? { editorNote } : {}),
 			...(details.parentInfo ? { parentInfo: details.parentInfo } : {}),
 			...(details.childInfo ? { childInfo: details.childInfo, totalChildCount: details.totalChildCount } : {}),
-			...this.buildLogDataCacheFields(sessionCache, subAgentsStarted ?? ((details.totalChildCount ?? 0) > 0 ? details.totalChildCount : undefined)),
+			...(extras.hydraFusion ? { hydraFusion: extras.hydraFusion } : {}),
+			...this.buildLogDataCacheFields(sessionCache, extras.subAgentsStarted ?? ((details.totalChildCount ?? 0) > 0 ? details.totalChildCount : undefined)),
 		};
 	}
 

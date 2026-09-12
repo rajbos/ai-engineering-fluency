@@ -1,5 +1,0 @@
-{"timestamp":"2026-09-07T18:59:24.980Z","type":"user.message","model":"gpt-4.1","data":{"content":"hi"}}
-{"timestamp":"2026-09-07T18:59:24.980Z","type":"assistant.message","model":"gpt-4.1","data":{"content":"yo"}}
-{"timestamp":"2026-09-07T18:59:24.980Z","type":"tool.result","model":"gpt-4.1","data":{"output":"out"}}
-{ not valid json
-{"timestamp":"2025-09-07T18:59:24.980Z","type":"user.message","model":"gpt-4.1","data":{"content":"too old"}}
