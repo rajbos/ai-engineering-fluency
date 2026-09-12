@@ -3520,6 +3520,7 @@ function handleMistralCloudSessionsResult(message: DiagMessage): void {
   if (message.result === undefined) { return; }
   currentMistralCloudSessions = message.result as MistralCloudSessionsResult;
   if (currentMistralCloudSessions?.authenticated) { currentMistralApiKeyConfigured = true; }
+  else if (!currentMistralCloudSessions?.error) { currentMistralApiKeyConfigured = false; }
   rerenderMistralCloudTab();
 }
 
