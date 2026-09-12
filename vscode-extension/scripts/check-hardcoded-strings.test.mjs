@@ -279,3 +279,72 @@ test('newIndexesBeyondBaseline: occurrences up to the baselined count all pass, 
 test('newIndexesBeyondBaseline: a key absent from the baseline is always new', () => {
 	assert.deepEqual(newIndexesBeyondBaseline(['file.ts::zzz'], new Map()), [true]);
 });
+
+// ── round-2 fixes: conditional literals, string-literal keys, more sinks, more tags ──────────
+
+test('scanFile: flags both branches of a ternary assigned to a UI-rendering property', () => {
+	withTempFile("toggle.title = collapsed ? 'Show details' : 'Hide details';\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		const texts = violations.map((v) => v.text).sort();
+		assert.deepEqual(texts, ['Hide details', 'Show details']);
+	});
+});
+
+test('scanFile: flags an object literal property whose key is a string literal, not just an identifier', () => {
+	withTempFile("const cfg = { 'textContent': 'Refresh' };\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+		assert.equal(violations[0].text, 'Refresh');
+	});
+});
+
+test('scanFile: flags createButton(id, label, appearance) legacy positional form', () => {
+	withTempFile("const b = createButton('open-x', 'Take me there', 'secondary');\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+		assert.equal(violations[0].text, 'Take me there');
+	});
+});
+
+test('scanFile: does not flag createButton(config) single-argument config-object form', () => {
+	withTempFile('const b = createButton(BUTTONS["btn-refresh"]);\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 0);
+	});
+});
+
+test('scanFile: flags document.createTextNode(text)', () => {
+	withTempFile("el.append(document.createTextNode(' By Editor'));\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+		assert.equal(violations[0].text, 'By Editor');
+	});
+});
+
+test('scanFile: flags text in additional VS Code toolkit custom elements (badge, checkbox, dropdown, link, option, text-field)', () => {
+	withTempFile(
+		'const html = `<vscode-badge>New</vscode-badge><vscode-link>Learn more</vscode-link>`;\n',
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			const texts = violations.map((v) => v.text).sort();
+			assert.deepEqual(texts, ['Learn more', 'New']);
+		},
+	);
+});
+
+test('scanFile: does not collapse two distinct same-text occurrences on the same line', () => {
+	withTempFile('const html = `<button>Refresh</button><button>Refresh</button>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 2);
+		assert.equal(violations[0].text, 'Refresh');
+		assert.equal(violations[1].text, 'Refresh');
+		assert.notEqual(violations[0].offset, violations[1].offset);
+	});
+});

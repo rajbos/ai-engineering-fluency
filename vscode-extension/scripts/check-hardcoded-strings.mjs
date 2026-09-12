@@ -13,6 +13,8 @@
  *
  * Scope:
  *   - vscode-extension/src/webview/**\/*.ts (all webview UI code)
+ *   - vscode-extension/src/backend/configPanel.ts, src/backend/teamServerConfigPanel.ts, and
+ *     src/loadingHtml.ts — whole files dedicated to building webview HTML outside src/webview/
  *   - vscode-extension/src/extension.ts, but only inside the `getXxxHtml`-style
  *     methods that build webview HTML (`^get[A-Za-z0-9_]*Html$`) — the rest of
  *     that 13k-line file is extension-host code with its own l10n conventions
@@ -20,16 +22,30 @@
  *
  * What counts as a UI-rendering position:
  *   - `expr.textContent = '...'` / `.innerText` / `.innerHTML` / `.title` /
- *     `.placeholder` (string or template-literal RHS)
- *   - `{ textContent: '...' }`-style object literal properties with the same names
- *   - `aria-label="..."` / `title="..."` / `placeholder="..."` attributes and
- *     text content between HTML tags (`<button>`, `<h1>`-`<h6>`, `<p>`, ...)
- *     embedded in template literals
+ *     `.placeholder` (string, template-literal, or `cond ? 'A' : 'B'` RHS)
+ *   - `{ textContent: '...' }` / `{ 'textContent': '...' }`-style object literal
+ *     properties with the same names
+ *   - known text-argument sinks: `el(tag, className, text)`, `iconHeading(tag, icon, text)`,
+ *     `createButton(id, label, appearance?)`, `document.createTextNode(text)`
+ *   - `expr.setAttribute('aria-label'|'title'|'placeholder', value)`
+ *   - `aria-label="..."` / `title="..."` / `placeholder="..."` attributes and text content
+ *     between HTML tags (`<button>`, `<h1>`-`<h6>`, `<p>`, `<vscode-button>`, ...) embedded in
+ *     any string or template literal (not just ones already known to be templates), with a
+ *     template's `${...}` holes bridged so matches can span an interpolation
  *
  * Explicitly not flagged: console.log/warn/error/info/debug/trace arguments,
  * anything already an argument to `localize(`, `localizeFormat(`, `t(`,
  * `l10n.t(`, or `vscode.l10n.t(`, comments, import paths, and CSS/URL/class/
  * id/data-* values (those attribute names are never scanned).
+ *
+ * Known limitation: a literal nested *inside* a template's `${...}` hole (e.g. a ternary whose
+ * branches are themselves template literals) is only checked against the sink positions above —
+ * if the hole itself sits inside an HTML tag in the *enclosing* template
+ * (`<vscode-button>${cond ? 'A' : `B (${x})`}</vscode-button>`), that enclosing tag context is
+ * not threaded through, so such a literal can still slip past. This is a deliberate scope
+ * boundary (full data-flow tracking of arbitrary composed expressions is a different, much
+ * larger tool) rather than an oversight — use the `// i18n-exempt` / allowlist escape hatches or
+ * a manual audit for this specific shape.
  *
  * Escape hatches for a legitimate new literal:
  *   1. An inline `// i18n-exempt: <reason>` comment on the same line or the
@@ -61,6 +77,13 @@ const extRoot = path.resolve(scriptDir, '..');
 const repoRoot = path.resolve(extRoot, '..');
 const webviewDir = path.join(extRoot, 'src', 'webview');
 const extensionTsPath = path.join(extRoot, 'src', 'extension.ts');
+// Whole files outside src/webview/ and extension.ts that are entirely dedicated to building
+// webview HTML (unlike extension.ts's mix of concerns, these don't need a method-name filter).
+const EXTRA_FULL_SCAN_FILES = [
+	path.join(extRoot, 'src', 'backend', 'configPanel.ts'),
+	path.join(extRoot, 'src', 'backend', 'teamServerConfigPanel.ts'),
+	path.join(extRoot, 'src', 'loadingHtml.ts'),
+];
 const baselinePath = path.join(scriptDir, 'hardcoded-strings-baseline.json');
 const allowlistPath = path.join(scriptDir, 'hardcoded-strings-allowlist.json');
 
@@ -69,7 +92,9 @@ const TARGET_PROPS = new Set(['textContent', 'innerText', 'innerHTML', 'title', 
 const TAGS = [
 	'button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span',
 	'td', 'th', 'option', 'summary', 'caption', 'div', 'a', 'li', 'legend',
-	'strong', 'em', 'small', 'dt', 'dd', 'figcaption', 'title', 'vscode-button'
+	'strong', 'em', 'small', 'dt', 'dd', 'figcaption', 'title',
+	'vscode-button', 'vscode-badge', 'vscode-checkbox', 'vscode-dropdown',
+	'vscode-link', 'vscode-option', 'vscode-text-field'
 ];
 const TAG_TEXT_RE = new RegExp(`<(${TAGS.join('|')})(?:\\s[^>]*)?>([^<]+)</\\1>`, 'gi');
 const ATTR_NAMES = ['aria-label', 'title', 'placeholder'];
@@ -81,6 +106,8 @@ const ATTR_RE = new RegExp(`(?<![\\w-])(?:${ATTR_NAMES.join('|')})\\s*=\\s*(["']
 const TEXT_ARG_SINKS = new Map([
 	['el', 2],
 	['iconHeading', 2],
+	['createButton', 1], // createButton(id, label, appearance?) legacy positional form; the config-object form isn't covered
+	['document.createTextNode', 0],
 ]);
 
 // \p{L}: at least one Unicode-letter run, so non-Latin UI text (e.g. Chinese, Japanese) is
@@ -145,18 +172,26 @@ function unwrapParens(node) {
 	return n;
 }
 
-/** Extracts the static prose text of a string/template literal RHS, or null if it isn't one. */
-function extractLiteralText(node) {
+/**
+ * Extracts every static string/template literal leaf reachable from `node` without crossing a
+ * function or a non-literal expression — so `cond ? 'A' : 'B'` (and nested conditionals in either
+ * branch) yield both `'A'` and `'B'` instead of only checking whichever the whole RHS "is". Used
+ * everywhere a literal in a UI-rendering position is checked (assignment target, sink argument).
+ */
+function extractLiteralTexts(node) {
 	const n = unwrapParens(node);
 	if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) {
-		return { text: n.text, node: n };
+		return [{ text: n.text, node: n }];
 	}
 	if (ts.isTemplateExpression(n)) {
 		let text = n.head.text;
 		for (const span of n.templateSpans) { text += span.literal.text; }
-		return { text, node: n };
+		return [{ text, node: n }];
 	}
-	return null;
+	if (ts.isConditionalExpression(n)) {
+		return [...extractLiteralTexts(n.whenTrue), ...extractLiteralTexts(n.whenFalse)];
+	}
+	return [];
 }
 
 /**
@@ -242,14 +277,14 @@ function reportAt(rawText, offset, ctx, reason) {
 	if (ctx.allowlist.has(trimmed)) { return; }
 	const line = ts.getLineAndCharacterOfPosition(ctx.sourceFile, offset).line + 1;
 	if (isExemptByInlineComment(ctx.fileLines, line)) { return; }
-	ctx.violations.push({ file: ctx.relFile, line, text: trimmed, reason });
+	ctx.violations.push({ file: ctx.relFile, line, offset, text: trimmed, reason });
 }
 
 function checkAssignmentTarget(propName, valueNode, ctx, reasonPrefix) {
 	if (!propName || !TARGET_PROPS.has(propName)) { return; }
-	const literal = extractLiteralText(valueNode);
-	if (!literal) { return; }
-	reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${reasonPrefix}${propName}`);
+	for (const literal of extractLiteralTexts(valueNode)) {
+		reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${reasonPrefix}${propName}`);
+	}
 }
 
 function scanFlattenedForAttributes(text, segments, ctx) {
@@ -284,8 +319,9 @@ function scanHtmlLiteralForTags(node, ctx) {
 function checkTextArgSink(node, chain, ctx) {
 	const argIndex = TEXT_ARG_SINKS.get(chain);
 	if (argIndex === undefined || node.arguments.length <= argIndex) { return; }
-	const literal = extractLiteralText(node.arguments[argIndex]);
-	if (literal) { reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${chain}() text argument`); }
+	for (const literal of extractLiteralTexts(node.arguments[argIndex])) {
+		reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${chain}() text argument`);
+	}
 }
 
 /** `expr.setAttribute('title'|'aria-label'|'placeholder', value)` — the imperative-JS equivalent of an HTML attribute literal. */
@@ -293,8 +329,9 @@ function checkSetAttributeSink(node, ctx) {
 	if (!ts.isPropertyAccessExpression(node.expression) || node.expression.name.text !== 'setAttribute' || node.arguments.length < 2) { return; }
 	const nameArg = unwrapParens(node.arguments[0]);
 	if (!ts.isStringLiteral(nameArg) || !ATTR_NAMES.includes(nameArg.text)) { return; }
-	const literal = extractLiteralText(node.arguments[1]);
-	if (literal) { reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `setAttribute('${nameArg.text}', ...) value`); }
+	for (const literal of extractLiteralTexts(node.arguments[1])) {
+		reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `setAttribute('${nameArg.text}', ...) value`);
+	}
 }
 
 function walk(node, ctx) {
@@ -314,7 +351,7 @@ function walk(node, ctx) {
 		checkAssignmentTarget(node.left.name.text, node.right, ctx, 'assignment to .');
 	}
 
-	if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name)) {
+	if (ts.isPropertyAssignment(node) && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))) {
 		checkAssignmentTarget(node.name.text, node.initializer, ctx, 'object literal property .');
 	}
 
@@ -363,13 +400,18 @@ function collectAllViolations() {
 	for (const file of collectFiles(webviewDir, ['.ts'])) {
 		scanFile(file, allowlist, violations);
 	}
+	for (const file of EXTRA_FULL_SCAN_FILES) {
+		if (fs.existsSync(file)) { scanFile(file, allowlist, violations); }
+	}
 	scanFile(extensionTsPath, allowlist, violations, findHtmlMethodBodies);
 
-	// De-duplicate exact (file, line, text) hits — the assignment-based and
-	// HTML-template-based passes can both match the same literal.
+	// De-duplicate exact (file, offset, text) hits — the assignment-based and HTML-template-based
+	// passes can both match the same literal at the same source position. Keying on the offset
+	// (not the line) is deliberate: two distinct occurrences of identical text on the same line —
+	// e.g. `<button>Refresh</button><button>Refresh</button>` — must both survive as violations.
 	const seen = new Set();
 	return violations.filter((v) => {
-		const key = `${v.file}:${v.line}:${v.text}`;
+		const key = `${v.file}:${v.offset}:${v.text}`;
 		if (seen.has(key)) { return false; }
 		seen.add(key);
 		return true;
