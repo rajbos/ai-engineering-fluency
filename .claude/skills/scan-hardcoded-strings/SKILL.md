@@ -65,8 +65,8 @@ The script will:
    of a known shared DOM helper call (`el(...)`, `iconHeading(...)`,
    `createButton(...)` from `vscode-extension/src/webview/shared/domUtils.ts`)
    — that argument may be several string/template literals joined by `+`,
-   or a top-level ternary of (recursively) literal/`+`-joined branches, not
-   just a single direct literal
+   or a top-level ternary or `??`/`||` fallback of (recursively)
+   literal/`+`-joined branches, not just a single direct literal
 3. Skip anything already wrapped in `localize(`, `localizeFormat(`, `t(`, or
    `vscode.l10n.t(`, and anything that doesn't look like prose (pure
    numbers/symbols, URLs, CSS values, HTML character references like

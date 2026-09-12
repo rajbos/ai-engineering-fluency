@@ -34,6 +34,7 @@ const {
     splitTopLevelArgs,
     splitTopLevelConcat,
     splitTernary,
+    splitNullishOrOr,
     extractConcatenatedLiteralText,
     skipQuotedLiteral,
     scanFile,
@@ -390,6 +391,16 @@ test('findPropertyAssignments: flags a multi-line ternary with template-literal 
     assert.equal(findings[0].kind, '.title assignment (conditional)');
 });
 
+test('findPropertyAssignments: a semicolon inside a quoted conditional branch does not truncate the statement', () => {
+    // Regression: the statement-boundary scan looked for the first `;`
+    // anywhere in the text (`[^;]*?`), so `el.title = condition ? 'Save;
+    // changes' : 'Cancel';` was truncated right after "Save" and neither
+    // branch was ever extracted.
+    const findings = findPropertyAssignments("el.title = condition ? 'Save; changes' : 'Cancel';");
+    assert.equal(findings.length, 1);
+    assert.match(findings[0].snippet, /Save; changes/);
+});
+
 // ── findHtmlAttributes ───────────────────────────────────────────────────────
 
 test('findHtmlAttributes: flags a hardcoded aria-label', () => {
@@ -671,6 +682,39 @@ test('extractConcatenatedLiteralText: resolves a ternary of literal branches', (
 
 test('extractConcatenatedLiteralText: returns null when a ternary has no literal branch', () => {
     assert.equal(extractConcatenatedLiteralText('cond ? getA() : getB()'), null);
+});
+
+// ── splitNullishOrOr / ?? and || fallback support ──────────────────────────────
+
+test('splitNullishOrOr: splits on a top-level ??', () => {
+    assert.deepEqual(splitNullishOrOr("KIND_LABEL[feature.kind] ?? 'New'"), ['KIND_LABEL[feature.kind] ', " 'New'"]);
+});
+
+test('splitNullishOrOr: splits on a top-level ||', () => {
+    assert.deepEqual(splitNullishOrOr("getLabel() || 'Default'"), ['getLabel() ', " 'Default'"]);
+});
+
+test('splitNullishOrOr: returns null when there is no top-level ?? or ||', () => {
+    assert.equal(splitNullishOrOr('getLabel()'), null);
+});
+
+test('splitNullishOrOr: does not split on ?? or || inside a nested call/bracket', () => {
+    assert.equal(splitNullishOrOr("foo(a ?? b)"), null);
+});
+
+test('findHelperCallText: flags a text argument that is a ?? fallback to a literal', () => {
+    // Regression: whatsnew/main.ts's el('span', 'feature-kind',
+    // KIND_LABEL[feature.kind] ?? 'New') was invisible —
+    // extractConcatenatedLiteralText only handled `+` concatenation and
+    // ternaries, not a `??` fallback.
+    const findings = findHelperCallText("el('span', 'feature-kind', KIND_LABEL[feature.kind] ?? 'New')");
+    assert.equal(findings.length, 1);
+    assert.match(findings[0].snippet, /New/);
+});
+
+test('extractConcatenatedLiteralText: resolves a || fallback to a literal', () => {
+    const text = extractConcatenatedLiteralText("getLabel() || 'Default label'");
+    assert.equal(text, 'Default label');
 });
 
 // ── findTextNodeCalls ────────────────────────────────────────────────────────

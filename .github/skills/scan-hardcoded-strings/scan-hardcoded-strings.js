@@ -427,8 +427,11 @@ function findPropertyAssignments(content) {
     // editors';` — the negative lookahead excludes an RHS that starts with a
     // quote/backtick directly, since that's already covered by the two
     // detectors above; this only matches when the RHS is a real expression.
-    // Spans up to the statement's terminating `;`, which may be on a later
-    // line — a ternary is often wrapped like
+    // Spans up to the statement's terminating top-level `;` (found via a
+    // quote/bracket-aware scan, not a `[^;]*?` regex, so a `;` inside a UI
+    // string branch — e.g. `cond ? 'Save; changes' : 'Cancel';` — doesn't
+    // end the statement early), which may be on a later line — a ternary is
+    // often wrapped like
     //   card.title = isExcluded
     //       ? `${provider} is hidden...`
     //       : `Click to hide ${provider}...`;
@@ -439,17 +442,34 @@ function findPropertyAssignments(content) {
     // the whitespace itself, not the quote) — so a plain literal RHS
     // containing "?" was still matching here as a false "conditional"
     // duplicate of the literal detector above.
-    const conditionalRe = new RegExp('\\.(' + propAlt + ')\\s*=(?!=)\\s*([^;]*?\\?[^;]*?);', 'g');
-    while ((m = conditionalRe.exec(content)) !== null) {
-        const [full, prop, expr] = m;
-        if (/^\s*["'`]/.test(expr)) { continue; } // RHS is a direct literal — already covered above
+    const conditionalStartRe = new RegExp('\\.(' + propAlt + ')\\s*=(?!=)\\s*', 'g');
+    while ((m = conditionalStartRe.exec(content)) !== null) {
+        const prop = m[1];
+        const exprStart = m.index + m[0].length;
+        if (/^["'`]/.test(content.slice(exprStart))) { continue; } // RHS is a direct literal — already covered above
+
+        let i = exprStart;
+        let depth = 0;
+        let end = -1;
+        while (i < content.length) {
+            const c = content[i];
+            if (c === '"' || c === "'" || c === '`') { i = skipQuotedLiteral(content, i); continue; }
+            if (c === '(' || c === '[' || c === '{') { depth++; i++; continue; }
+            if (c === ')' || c === ']' || c === '}') { depth--; i++; continue; }
+            if (c === ';' && depth === 0) { end = i; break; }
+            i++;
+        }
+        if (end === -1) { continue; }
+
+        const expr = content.slice(exprStart, end);
+        if (!expr.includes('?')) { continue; } // not actually a conditional
         const literals = extractInterpolationLiterals(expr).filter((lit) => looksLikeProse(lit));
         if (literals.length > 0) {
             findings.push({
                 index: m.index,
                 line: lineAt(content, m.index),
                 kind: `.${prop} assignment (conditional)`,
-                snippet: toSnippet(full),
+                snippet: toSnippet(content.slice(m.index, end + 1)),
             });
         }
     }
@@ -639,15 +659,39 @@ function splitTernary(expr) {
 }
 
 /**
+ * If `expr` contains a top-level `??` (nullish coalescing) or `||`
+ * (logical OR) — outside quotes/brackets — return `[left, right]` split on
+ * the *first* such occurrence; otherwise `null`. Handles a fallback pattern
+ * like `KIND_LABEL[feature.kind] ?? 'New'`, where the left side is a
+ * dynamic lookup and the right side is the literal UI text shown when it
+ * misses.
+ */
+function splitNullishOrOr(expr) {
+    let depth = 0;
+    for (let i = 0; i < expr.length; i++) {
+        const c = expr[i];
+        if (c === '"' || c === "'" || c === '`') { i = skipQuotedLiteral(expr, i) - 1; continue; }
+        if (c === '(' || c === '[' || c === '{') { depth++; continue; }
+        if (c === ')' || c === ']' || c === '}') { depth--; continue; }
+        if (depth !== 0) { continue; }
+        if ((c === '?' && expr[i + 1] === '?') || (c === '|' && expr[i + 1] === '|')) {
+            return [expr.slice(0, i), expr.slice(i + 2)];
+        }
+    }
+    return null;
+}
+
+/**
  * Resolve an argument expression to its combined static UI text when it is
  * made up entirely of string/template literals joined by `+` — e.g.
  * `` `The last ${n} releases. ` + 'more text.' ``, which the single-literal
  * pattern (`^(quote)...(same quote)$`) can't recognize since the two quote
  * characters at the start and end of the whole expression differ — or a
- * top-level ternary whose branches are (recursively) resolvable this way,
- * e.g. `serverUrl ? \`Loading data from ${serverUrl}...\` : "Loading
- * data..."`. Returns `null` if a (non-ternary) expression's pieces aren't
- * all direct literals, or if a ternary's branches resolve to nothing (a
+ * top-level ternary or `??`/`||` fallback whose branches are (recursively)
+ * resolvable this way, e.g. `serverUrl ? \`Loading data from ${serverUrl}...\`
+ * : "Loading data..."` or `KIND_LABEL[feature.kind] ?? 'New'`. Returns
+ * `null` if a (non-conditional) expression's pieces aren't all direct
+ * literals, or if every branch of a conditional resolves to nothing (a
  * variable/call there means the text isn't fully knowable statically, so
  * that piece is skipped rather than guessed at).
  */
@@ -655,6 +699,14 @@ function extractConcatenatedLiteralText(expr) {
     const ternary = splitTernary(expr);
     if (ternary) {
         const branchTexts = ternary
+            .map((branch) => extractConcatenatedLiteralText(branch))
+            .filter((text) => text !== null);
+        return branchTexts.length > 0 ? branchTexts.join(' ') : null;
+    }
+
+    const nullishOrOr = splitNullishOrOr(expr);
+    if (nullishOrOr) {
+        const branchTexts = nullishOrOr
             .map((branch) => extractConcatenatedLiteralText(branch))
             .filter((text) => text !== null);
         return branchTexts.length > 0 ? branchTexts.join(' ') : null;
@@ -1073,6 +1125,7 @@ module.exports = {
     splitTopLevelArgs,
     splitTopLevelConcat,
     splitTernary,
+    splitNullishOrOr,
     extractConcatenatedLiteralText,
     scanFile,
     maskBlockComments,

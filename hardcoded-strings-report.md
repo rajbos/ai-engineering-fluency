@@ -11,7 +11,7 @@ before localizing.
 
 - Files scanned: 36
 - Files with findings: 16
-- Total candidate strings: 1225
+- Total candidate strings: 1226
 
 ## Findings by file
 
@@ -1306,10 +1306,11 @@ before localizing.
 | 6512 | .textContent assignment | `.textContent = '⏳ Taking longer than expected… Session files may be large or the scan is still in progress.'` |
 | 6554 | .textContent assignment | `.textContent = 'Failed to initialize usage analysis. Please try refreshing.'` |
 
-### `vscode-extension/src/webview/whatsnew/main.ts` (9)
+### `vscode-extension/src/webview/whatsnew/main.ts` (10)
 
 | Line | Kind | Snippet |
 |---|---|---|
+| 81 | el() text argument | `el('span', 'feature-kind', KIND_LABEL[feature.kind] ?? 'New')` |
 | 83 | el() text argument | `el('span', 'feature-unseen', 'Not opened yet')` |
 | 89 | createButton() text argument | `createButton('open-${feature.id}', 'Take me there', 'secondary')` |
 | 104 | el() text argument | `el('span', 'release-version', 'Version ${release.version}')` |

@@ -104,9 +104,10 @@ addition to printing a console summary grouped by file.
   The text argument may also be several literals joined by `+` (e.g. `` el('div',
   'intro', `The last ${n} releases. ` + 'more text.') ``) — each piece is
   recognized and their static text is joined, rather than requiring the whole
-  argument to be a single literal — or a top-level ternary whose branches are
-  (recursively) literals or `+`-concatenations of literals, e.g. `serverUrl ?
-  \`Loading data from ${serverUrl}...\` : "Loading data..."`; both branches'
+  argument to be a single literal — or a top-level ternary or `??`/`||`
+  fallback whose branches are (recursively) literals or `+`-concatenations of
+  literals, e.g. `serverUrl ? \`Loading data from ${serverUrl}...\` : "Loading
+  data..."` or `KIND_LABEL[feature.kind] ?? 'New'`; every resolvable branch's
   static text is combined into one finding
 
 `extension.ts` is scanned only within its `get*Html(...)` method bodies
@@ -166,7 +167,10 @@ are gone, to just `&middot;`, and without this step the entity *name*
 A `.title`/`.textContent`/etc. template-literal assignment is matched with
 the same nested-template-aware scan (`skipQuotedLiteral`) described below, so
 `` el.title = `${format(`Save changes`)}`; `` isn't truncated at the nested
-literal's opening backtick.
+literal's opening backtick. A conditional (ternary) assignment's
+statement-terminating `;` is found the same quote-aware way, so a `;`
+*inside* a literal branch — e.g. `` el.title = cond ? 'Save; changes' :
+'Cancel'; `` — doesn't end the statement early and truncate both branches.
 
 Before any detector runs, `/* ... */` block comments (including JSDoc) are
 blanked out — a doc-comment example like `Converts [text](url) to <a
