@@ -9,7 +9,10 @@
  *
  * The script listens for `message` events on `window` with payloads:
  *   { command: 'loadingStep', step: 'discovering' | 'parsing' | 'computing',
- *     total?, editors? }
+ *     total?, editors?, percentage?, label? }
+ *     (`percentage`/`label` apply to the 'computing' step: a caller that can break its
+ *      compute phase into sub-steps drives the bar through them instead of parking it
+ *      at the default 96% for the whole phase.)
  *   { command: 'loadingProgress', completed, total, percentage, editors? }
  * In VS Code these arrive via webview.postMessage; in the desktop app the
  * preload bridges ipcRenderer 'loading-message' events to window.postMessage.
@@ -97,7 +100,7 @@ export function getLoadingHtmlBody(nonce: string, iconUri?: string, startedAtMs:
         <div class="step step-active" id="s-discover"><i class="step-ico"><span class="spin-ico">↻</span></i><span class="step-lbl">Discovering session files</span><span class="step-cnt" id="sc-discover"></span></div>
 
         <div class="step" id="s-parse"><i class="step-ico">○</i><span class="step-lbl">Parsing session logs</span><span class="step-cnt" id="sc-parse"></span></div>
-        <div class="step" id="s-compute"><i class="step-ico">○</i><span class="step-lbl">Computing statistics</span><span class="step-cnt"></span></div>
+        <div class="step" id="s-compute"><i class="step-ico">○</i><span class="step-lbl">Computing statistics</span><span class="step-cnt" id="sc-compute"></span></div>
         <div class="step" id="s-ready"><i class="step-ico">○</i><span class="step-lbl">Ready!</span><span class="step-cnt"></span></div>
     </div>
 </div>
@@ -107,11 +110,72 @@ ${getLoadingHtmlScript(startedAtMs)}
 </body>`;
 }
 
+/**
+ * Handlers for the two inbound message shapes, split out of getLoadingHtmlScript so
+ * each builder stays readable (and under the lint file/function size ceilings). Both
+ * emit plain ES5 that closes over the state declared in the parent IIFE.
+ */
+function getLoadingStepHandlerScript(): string {
+	return `function handleStep(m) {
+        if (m.step === 'discovering') { setActive('s-discover'); return; }
+        if (m.step === 'parsing') {
+            var total = m.total || 0;
+            if (m.editors !== undefined) { EDITORS = m.editors; editorsSeen = 0; }
+            enterParsing(total);
+            var sub = document.getElementById('subtitle'); if (sub) sub.textContent = 'Parsing ' + total + ' session files...';
+            var bf = document.getElementById('badge-files'); if (bf) bf.textContent = total + ' files';
+            var ct = document.getElementById('chip-total'); if (ct) ct.textContent = total.toLocaleString();
+            return;
+        }
+        if (m.step !== 'computing') { return; }
+        enterParsing(0);
+        setDone('s-parse'); setActive('s-compute');
+        // A caller that knows how far through the compute phase it is sends
+        // percentage/label per sub-step, so the bar keeps moving. Callers that
+        // compute in one opaque block send neither and get the old fixed 96%.
+        var cpct = (typeof m.percentage === 'number') ? m.percentage : 96;
+        if (cpct < computePct) { cpct = computePct; } else { computePct = cpct; }
+        var fill = document.getElementById('prog-fill'); if (fill) { fill.classList.remove('indeterminate'); fill.style.width = cpct + '%'; }
+        var pct = document.getElementById('pct'); if (pct) pct.textContent = cpct + '%';
+        var sub2 = document.getElementById('subtitle'); if (sub2) sub2.textContent = m.label || 'Computing statistics...';
+        var scc = document.getElementById('sc-compute'); if (scc && m.label) scc.textContent = m.label;
+    }`;
+}
+
+function getLoadingProgressHandlerScript(): string {
+	return `function handleProgress(m) {
+        // Receiving progress means parsing is underway — reconcile the checklist in case
+        // the loadingStep 'parsing' transition was missed during webview startup.
+        enterParsing(m.total);
+        // Editors are included in every progress tick so pills appear even when the
+        // one-time loadingStep 'parsing' message was dropped before the listener attached.
+        if (m.editors && m.editors.length > EDITORS.length) { EDITORS = m.editors; }
+        var pct2 = document.getElementById('pct'); if (pct2) pct2.textContent = m.percentage + '%';
+        var fill2 = document.getElementById('prog-fill'); if (fill2) { fill2.classList.remove('indeterminate'); fill2.style.width = (m.percentage < 3 ? 3 : m.percentage) + '%'; }
+        var cd = document.getElementById('chip-done'); if (cd) cd.textContent = m.completed.toLocaleString();
+        // Backfill the total chip too: when the one-time loadingStep 'parsing' message
+        // was dropped before this listener attached, it would otherwise stay at '–'.
+        var ct2 = document.getElementById('chip-total'); if (ct2 && m.total) ct2.textContent = m.total.toLocaleString();
+        var bf2 = document.getElementById('badge-files'); if (bf2) bf2.textContent = m.completed + '\\u202f/\\u202f' + m.total + ' files';
+        var sc2 = document.getElementById('sc-parse'); if (sc2) sc2.textContent = '(' + m.completed + '/' + m.total + ')';
+        var sub3 = document.getElementById('subtitle'); if (sub3) sub3.textContent = 'Parsing session ' + m.completed + '\\u202f/\\u202f' + m.total + '\\u2026';
+        var expectedPills = Math.min(EDITORS.length, Math.floor((m.completed / Math.max(1, m.total)) * EDITORS.length));
+        while (editorsSeen < expectedPills) {
+            var editor = EDITORS[editorsSeen]; editorsSeen++;
+            var row = document.getElementById('editors-row');
+            if (row) { var pill = document.createElement('div'); pill.className = 'chip'; pill.style.animation = 'pop-in 0.35s ease both'; pill.innerHTML = '<span>' + editor.icon + '</span>\\u00a0<span class="chip-value">' + esc(editor.name) + '</span>'; row.appendChild(pill); }
+        }
+    }`;
+}
+
 export function getLoadingHtmlScript(startedAtMs: number = Date.now()): string {
 	return `(function () {
     var t0 = ${Math.floor(startedAtMs)};
     var EDITORS = [];
     var editorsSeen = 0;
+    // Compute-phase percentage never walks backwards, so an out-of-order or duplicated
+    // sub-step message cannot make the bar visibly retreat.
+    var computePct = 0;
     function updateElapsed() {
         var s = Math.floor((Date.now() - t0) / 1000);
         var el = document.getElementById('badge-elapsed');
@@ -143,47 +207,12 @@ export function getLoadingHtmlScript(startedAtMs: number = Date.now()): string {
         }
         if (total) { var sc = document.getElementById('sc-discover'); if (sc) sc.textContent = '(' + total + ' found)'; }
     }
+    ${getLoadingStepHandlerScript()}
+    ${getLoadingProgressHandlerScript()}
     window.addEventListener('message', function (ev) {
         var m = ev.data; if (!m) return;
-        if (m.command === 'loadingStep') {
-            if (m.step === 'discovering') { setActive('s-discover');
-            } else if (m.step === 'parsing') {
-                var total = m.total || 0;
-                if (m.editors !== undefined) { EDITORS = m.editors; editorsSeen = 0; }
-                enterParsing(total);
-                var sub = document.getElementById('subtitle'); if (sub) sub.textContent = 'Parsing ' + total + ' session files...';
-                var bf = document.getElementById('badge-files'); if (bf) bf.textContent = total + ' files';
-                var ct = document.getElementById('chip-total'); if (ct) ct.textContent = total.toLocaleString();
-            } else if (m.step === 'computing') {
-                enterParsing(0);
-                setDone('s-parse'); setActive('s-compute');
-                var fill = document.getElementById('prog-fill'); if (fill) { fill.classList.remove('indeterminate'); fill.style.width = '96%'; }
-                var pct = document.getElementById('pct'); if (pct) pct.textContent = '96%';
-                var sub2 = document.getElementById('subtitle'); if (sub2) sub2.textContent = 'Computing statistics...';
-            }
-        } else if (m.command === 'loadingProgress') {
-            // Receiving progress means parsing is underway — reconcile the checklist in case
-            // the loadingStep 'parsing' transition was missed during webview startup.
-            enterParsing(m.total);
-            // Editors are included in every progress tick so pills appear even when the
-            // one-time loadingStep 'parsing' message was dropped before the listener attached.
-            if (m.editors && m.editors.length > EDITORS.length) { EDITORS = m.editors; }
-            var pct2 = document.getElementById('pct'); if (pct2) pct2.textContent = m.percentage + '%';
-            var fill2 = document.getElementById('prog-fill'); if (fill2) { fill2.classList.remove('indeterminate'); fill2.style.width = (m.percentage < 3 ? 3 : m.percentage) + '%'; }
-            var cd = document.getElementById('chip-done'); if (cd) cd.textContent = m.completed.toLocaleString();
-            // Backfill the total chip too: when the one-time loadingStep 'parsing' message
-            // was dropped before this listener attached, it would otherwise stay at '–'.
-            var ct2 = document.getElementById('chip-total'); if (ct2 && m.total) ct2.textContent = m.total.toLocaleString();
-            var bf2 = document.getElementById('badge-files'); if (bf2) bf2.textContent = m.completed + '\\u202f/\\u202f' + m.total + ' files';
-            var sc2 = document.getElementById('sc-parse'); if (sc2) sc2.textContent = '(' + m.completed + '/' + m.total + ')';
-            var sub3 = document.getElementById('subtitle'); if (sub3) sub3.textContent = 'Parsing session ' + m.completed + '\\u202f/\\u202f' + m.total + '\\u2026';
-            var expectedPills = Math.min(EDITORS.length, Math.floor((m.completed / Math.max(1, m.total)) * EDITORS.length));
-            while (editorsSeen < expectedPills) {
-                var editor = EDITORS[editorsSeen]; editorsSeen++;
-                var row = document.getElementById('editors-row');
-                if (row) { var pill = document.createElement('div'); pill.className = 'chip'; pill.style.animation = 'pop-in 0.35s ease both'; pill.innerHTML = '<span>' + editor.icon + '</span>\\u00a0<span class="chip-value">' + esc(editor.name) + '</span>'; row.appendChild(pill); }
-            }
-        }
+        if (m.command === 'loadingStep') { handleStep(m); }
+        else if (m.command === 'loadingProgress') { handleProgress(m); }
     });
 }());`;
 }

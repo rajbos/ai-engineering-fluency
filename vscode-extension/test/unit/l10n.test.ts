@@ -298,3 +298,32 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: efficiency loading step labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'loading.efficiency.dailyActivity': 'Aggregating daily activity…',
+		'loading.efficiency.usageAnalysis': 'Analysing usage patterns…',
+		'loading.efficiency.sessionSignals': 'Reading session signals…',
+		'loading.efficiency.buildingTrends': 'Building efficiency trends…',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: efficiency loading step labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'loading.efficiency.dailyActivity': '正在汇总每日活动…',
+			'loading.efficiency.usageAnalysis': '正在分析使用模式…',
+			'loading.efficiency.sessionSignals': '正在读取会话信号…',
+			'loading.efficiency.buildingTrends': '正在构建效率趋势…',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
