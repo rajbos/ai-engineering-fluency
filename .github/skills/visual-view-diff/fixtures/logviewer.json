@@ -134,5 +134,330 @@
   "cachedTokens": 2100,
   "subAgentsStarted": 0,
   "modelTurns": 3,
-  "compactNumbers": false
+  "compactNumbers": false,
+  "hydraFusion": {
+    "turns": [
+      {
+        "fusionId": "fusion-a1b2c3d4",
+        "pattern": "cascade",
+        "outcome": "completed",
+        "degradedReason": null,
+        "policy": "max",
+        "routeSource": "capi_plan",
+        "routingLatencyMs": 1134.3,
+        "plannedPhases": [
+          "primary",
+          "judge",
+          "repair"
+        ],
+        "primaryModel": "mai-code-1.1-flash",
+        "secondaryModel": "gpt-5.6-sol",
+        "fallbackModel": "gpt-5.6-sol",
+        "finalSourceModel": "gpt-5.6-sol",
+        "phases": [
+          {
+            "phaseId": "fusion-a1b2c3d4:phase:0",
+            "kind": "primary",
+            "role": "solver",
+            "model": "mai-code-1.1-flash",
+            "status": "succeeded",
+            "verdict": null,
+            "durationMs": 46514,
+            "conversationScope": "root",
+            "usage": {
+              "requestCount": 26,
+              "inputTokens": 1149793,
+              "outputTokens": 31925,
+              "cachedTokens": 855424,
+              "cacheWriteTokens": 0,
+              "aiu": 11.429228
+            },
+            "isFinalSource": false,
+            "completedAt": "2026-09-11T09:15:02.400Z"
+          },
+          {
+            "phaseId": "fusion-a1b2c3d4:judge",
+            "kind": "judge",
+            "role": "judge",
+            "model": "gpt-5.6-sol",
+            "status": "succeeded",
+            "verdict": "reject",
+            "durationMs": 2095,
+            "conversationScope": "review",
+            "usage": {
+              "requestCount": 1,
+              "inputTokens": 989,
+              "outputTokens": 106,
+              "cachedTokens": 0,
+              "cacheWriteTokens": 0,
+              "aiu": 0.6076
+            },
+            "isFinalSource": false,
+            "completedAt": "2026-09-11T09:15:03.600Z"
+          },
+          {
+            "phaseId": "fusion-a1b2c3d4:repair",
+            "kind": "repair",
+            "role": "solver",
+            "model": "gpt-5.6-sol",
+            "status": "succeeded",
+            "verdict": null,
+            "durationMs": 243815,
+            "conversationScope": "root",
+            "usage": {
+              "requestCount": 37,
+              "inputTokens": 2360608,
+              "outputTokens": 26069,
+              "cachedTokens": 2267136,
+              "cacheWriteTokens": 0,
+              "aiu": 180.21224
+            },
+            "isFinalSource": true,
+            "completedAt": "2026-09-11T09:15:06.000Z"
+          }
+        ],
+        "handoffs": [
+          {
+            "sourcePhaseId": "fusion-a1b2c3d4:judge",
+            "targetPhaseId": "fusion-a1b2c3d4:repair",
+            "targetModel": "gpt-5.6-sol"
+          }
+        ],
+        "requestCount": 64,
+        "inputTokens": 3511390,
+        "outputTokens": 58100,
+        "cachedTokens": 3122560,
+        "cacheWriteTokens": 0,
+        "aiu": 192.249068,
+        "reviewAiu": 12.036828,
+        "durationMs": 292424,
+        "startedAt": "2026-09-11T09:15:01.200Z",
+        "completedAt": "2026-09-11T09:15:07.200Z",
+        "isCompound": true
+      },
+      {
+        "fusionId": "fusion-e5f6a7b8",
+        "pattern": "critique",
+        "outcome": "completed",
+        "degradedReason": null,
+        "policy": "max",
+        "routeSource": "capi_plan",
+        "routingLatencyMs": 402.1,
+        "plannedPhases": [
+          "draft",
+          "critic",
+          "revision"
+        ],
+        "primaryModel": "claude-opus-5",
+        "secondaryModel": "gpt-5.6-luna",
+        "fallbackModel": "gpt-5.6-luna",
+        "finalSourceModel": "claude-opus-5",
+        "phases": [
+          {
+            "phaseId": "fusion-e5f6a7b8:phase:0",
+            "kind": "draft",
+            "role": "solver",
+            "model": "claude-opus-5",
+            "status": "succeeded",
+            "verdict": null,
+            "durationMs": 188402,
+            "conversationScope": "root",
+            "usage": {
+              "requestCount": 48,
+              "inputTokens": 4820114,
+              "outputTokens": 41902,
+              "cachedTokens": 4102881,
+              "cacheWriteTokens": 0,
+              "aiu": 248.10442
+            },
+            "isFinalSource": true,
+            "completedAt": "2026-09-11T09:15:09.600Z"
+          },
+          {
+            "phaseId": "fusion-e5f6a7b8:critic",
+            "kind": "critic",
+            "role": "critic",
+            "model": "gpt-5.6-luna",
+            "status": "succeeded",
+            "verdict": null,
+            "durationMs": 3181,
+            "conversationScope": "review",
+            "usage": {
+              "requestCount": 1,
+              "inputTokens": 2204,
+              "outputTokens": 318,
+              "cachedTokens": 0,
+              "cacheWriteTokens": 0,
+              "aiu": 1.2841
+            },
+            "isFinalSource": false,
+            "completedAt": "2026-09-11T09:15:10.800Z"
+          }
+        ],
+        "handoffs": [],
+        "requestCount": 49,
+        "inputTokens": 4822318,
+        "outputTokens": 42220,
+        "cachedTokens": 4102881,
+        "cacheWriteTokens": 0,
+        "aiu": 249.38852,
+        "reviewAiu": 1.2841,
+        "durationMs": 193044,
+        "startedAt": "2026-09-11T09:15:08.400Z",
+        "completedAt": "2026-09-11T09:15:12.000Z",
+        "isCompound": true
+      },
+      {
+        "fusionId": "fusion-c9d0e1f2",
+        "pattern": "single",
+        "outcome": "completed",
+        "degradedReason": null,
+        "policy": "max",
+        "routeSource": "capi_plan",
+        "routingLatencyMs": 288.7,
+        "plannedPhases": [
+          "primary"
+        ],
+        "primaryModel": "gpt-5.6-sol",
+        "secondaryModel": null,
+        "fallbackModel": null,
+        "finalSourceModel": "gpt-5.6-sol",
+        "phases": [
+          {
+            "phaseId": "fusion-c9d0e1f2:phase:0",
+            "kind": "primary",
+            "role": "solver",
+            "model": "gpt-5.6-sol",
+            "status": "succeeded",
+            "verdict": null,
+            "durationMs": 21880,
+            "conversationScope": "root",
+            "usage": {
+              "requestCount": 9,
+              "inputTokens": 402117,
+              "outputTokens": 7744,
+              "cachedTokens": 361028,
+              "cacheWriteTokens": 0,
+              "aiu": 14.720411
+            },
+            "isFinalSource": true,
+            "completedAt": "2026-09-11T09:15:14.400Z"
+          }
+        ],
+        "handoffs": [],
+        "requestCount": 9,
+        "inputTokens": 402117,
+        "outputTokens": 7744,
+        "cachedTokens": 361028,
+        "cacheWriteTokens": 0,
+        "aiu": 14.720411,
+        "reviewAiu": 0,
+        "durationMs": 22509,
+        "startedAt": "2026-09-11T09:15:13.200Z",
+        "completedAt": "2026-09-11T09:15:15.600Z",
+        "isCompound": false
+      }
+    ],
+    "totalTurns": 3,
+    "patternCounts": [
+      {
+        "pattern": "critique",
+        "turns": 1,
+        "aiu": 249.38852
+      },
+      {
+        "pattern": "cascade",
+        "turns": 1,
+        "aiu": 192.249068
+      },
+      {
+        "pattern": "single",
+        "turns": 1,
+        "aiu": 14.720411
+      }
+    ],
+    "compoundTurns": 2,
+    "compoundRatePercent": 66.66666666666666,
+    "judgeAccepts": 0,
+    "judgeRejects": 1,
+    "judgeRejectionRatePercent": 100,
+    "totalAiu": 456.357999,
+    "reviewAiu": 13.320928,
+    "reviewSharePercent": 2.9189645035672966,
+    "totalInputTokens": 8735825,
+    "totalOutputTokens": 108064,
+    "totalCachedTokens": 7586469,
+    "totalRequestCount": 122,
+    "totalLegs": 6,
+    "byModel": [
+      {
+        "model": "claude-opus-5",
+        "legs": 1,
+        "aiu": 248.10442,
+        "inputTokens": 4820114,
+        "outputTokens": 41902,
+        "finalAnswers": 1
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "legs": 3,
+        "aiu": 195.540251,
+        "inputTokens": 2763714,
+        "outputTokens": 33919,
+        "finalAnswers": 2
+      },
+      {
+        "model": "mai-code-1.1-flash",
+        "legs": 1,
+        "aiu": 11.429228,
+        "inputTokens": 1149793,
+        "outputTokens": 31925,
+        "finalAnswers": 0
+      },
+      {
+        "model": "gpt-5.6-luna",
+        "legs": 1,
+        "aiu": 1.2841,
+        "inputTokens": 2204,
+        "outputTokens": 318,
+        "finalAnswers": 0
+      }
+    ],
+    "byPhaseKind": [
+      {
+        "kind": "draft",
+        "legs": 1,
+        "aiu": 248.10442
+      },
+      {
+        "kind": "repair",
+        "legs": 1,
+        "aiu": 180.21224
+      },
+      {
+        "kind": "primary",
+        "legs": 2,
+        "aiu": 26.149639
+      },
+      {
+        "kind": "critic",
+        "legs": 1,
+        "aiu": 1.2841
+      },
+      {
+        "kind": "judge",
+        "legs": 1,
+        "aiu": 0.6076
+      }
+    ],
+    "models": [
+      "claude-opus-5",
+      "gpt-5.6-sol",
+      "mai-code-1.1-flash",
+      "gpt-5.6-luna"
+    ],
+    "avgRoutingLatencyMs": 608.3666666666667,
+    "degradedTurns": 0,
+    "syntheticModel": "hydrafusion"
+  }
 }
