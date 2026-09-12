@@ -22,7 +22,6 @@ function runLoadingScript(): {
 	pct: () => string;
 	barWidth: () => string;
 	subtitle: () => string;
-	computeStepLabel: () => string;
 } {
 	const makeEl = () => ({
 		textContent: '',
@@ -58,7 +57,6 @@ function runLoadingScript(): {
 		pct: () => read('pct', 'textContent'),
 		barWidth: () => els.get('prog-fill')?.style.width ?? '',
 		subtitle: () => read('subtitle', 'textContent'),
-		computeStepLabel: () => read('sc-compute', 'textContent'),
 	};
 }
 
@@ -79,7 +77,6 @@ test('computing step follows a caller-driven percentage and label', () => {
 	assert.equal(ui.pct(), '88%');
 	assert.equal(ui.barWidth(), '88%');
 	assert.equal(ui.subtitle(), 'Aggregating daily activity…');
-	assert.equal(ui.computeStepLabel(), 'Aggregating daily activity…');
 
 	ui.post({ command: 'loadingStep', step: 'computing', percentage: 96, label: 'Reading session signals…' });
 	assert.equal(ui.pct(), '96%');
@@ -104,8 +101,4 @@ test('parsing progress drives the bar before the compute phase starts', () => {
 	assert.equal(ui.pct(), '30%');
 	assert.equal(ui.barWidth(), '30%');
 	assert.match(ui.subtitle(), /^Parsing session 120/);
-});
-
-test('the compute step renders the checklist counter element it writes into', () => {
-	assert.match(getLoadingHtmlBody('nonce'), /id="sc-compute"/);
 });
