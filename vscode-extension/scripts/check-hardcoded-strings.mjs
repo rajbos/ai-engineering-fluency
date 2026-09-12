@@ -22,9 +22,10 @@
  *
  * What counts as a UI-rendering position:
  *   - `expr.textContent = '...'` / `.innerText` / `.innerHTML` / `.title` /
- *     `.placeholder` — the RHS may be a string/template literal, `cond ? 'A' : 'B'`,
- *     `'a' + x + 'b'` concatenation, or `x ?? 'Fallback'` / `x || 'Fallback'` (each static piece
- *     is checked independently; a non-literal operand like `x` correctly contributes nothing)
+ *     `.placeholder`, via a plain `=` or a compound `+=` — the RHS may be a string/template
+ *     literal, `cond ? 'A' : 'B'`, `'a' + x + 'b'` concatenation, or `x ?? 'Fallback'` /
+ *     `x || 'Fallback'` (each static piece is checked independently; a non-literal operand like
+ *     `x` correctly contributes nothing)
  *   - `{ textContent: '...' }` / `{ 'textContent': '...' }`-style object literal
  *     properties with the same names
  *   - known text-argument sinks: `el(tag, className, text)`, `iconHeading(tag, icon, text)`,
@@ -78,11 +79,17 @@
  *      end at the inner tag's own close, and text after that (`Outer`) is never seen as anything.
  *      A correct general fix needs a real stack-based tokenizer, not another regex tweak — this
  *      is a boundary, not a queue of one-off patches waiting to happen.
+ *   5. A `// i18n-exempt` comment is checked against the specific source line a violation is
+ *      reported on (or the line directly above it) — never against the line the *enclosing*
+ *      literal/statement starts on. For a single-line literal these coincide, but for a multiline
+ *      template the exempt comment must sit next to the actual prose line, not above the
+ *      template's opening backtick; see the escape-hatch note below.
  * Use the `// i18n-exempt` / allowlist escape hatches or a manual audit for any of these shapes.
  *
  * Escape hatches for a legitimate new literal:
- *   1. An inline `// i18n-exempt: <reason>` comment on the same line or the
- *      line immediately above the literal.
+ *   1. An inline `// i18n-exempt: <reason>` comment on the same line as the reported text, or the
+ *      line immediately above it — for a multiline template this means the line the flagged prose
+ *      itself sits on, not necessarily the template's own opening line (see limitation 5 above).
  *   2. An exact-match entry in `hardcoded-strings-allowlist.json` (this
  *      folder), for literals that are hard to annotate inline.
  *
@@ -147,7 +154,12 @@ const NESTED_TAG_RE = /<[a-zA-Z]/;
 // were prose.
 const HTML_TAG_FRAGMENT_RE = /<\/?[a-zA-Z]/;
 const ATTR_NAMES = ['aria-label', 'title', 'placeholder'];
-const ATTR_RE = new RegExp(`(?<![\\w-])(?:${ATTR_NAMES.join('|')})\\s*=\\s*(["'])((?:(?!\\1)[\\s\\S])*)\\1`, 'gi');
+// getStaticChunks() slices the raw TS source text, not the "cooked" string value — so a plain
+// double-quoted TS string wrapping a double-quoted HTML attribute has its inner quotes escaped
+// (`aria-label=\"Refresh\"`) exactly as written in the source. The optional `\\?` before each
+// quote tolerates that escaping (a single-quoted TS string wrapping the same attribute needs no
+// escaping and matches either way).
+const ATTR_RE = new RegExp(`(?<![\\w-])(?:${ATTR_NAMES.join('|')})\\s*=\\s*\\\\?(["'])((?:(?!\\\\?\\1)[\\s\\S])*)\\\\?\\1`, 'gi');
 
 // Functions where a specific (0-based) argument position holds display text, mirroring
 // TARGET_PROPS but for call-based sinks instead of property assignment — e.g. domUtils.ts's
@@ -413,8 +425,18 @@ function scanFlattenedForAttributes(text, segments, ctx) {
 	// scanFlattenedForTagText's recursion for why that distinction matters here).
 	for (const m of text.matchAll(ATTR_RE)) {
 		const value = m[2];
-		const valueOffsetInMatch = m[0].length - 1 - value.length;
-		reportAt(value, mapFlatIndexToSourceOffset(m.index + valueOffsetInMatch, segments), ctx, 'HTML attribute (aria-label/title/placeholder)');
+		const quote = m[1];
+		// The match's closing delimiter is either just the quote (1 char) or an escaped quote (the
+		// `\\?` tolerance added for escaped-attribute source text — 2 chars); measure which one
+		// actually terminated this match instead of assuming a fixed length.
+		const closingLen = m[0].endsWith(`\\${quote}`) ? 2 : 1;
+		const valueOffsetInMatch = m[0].length - closingLen - value.length;
+		// Skip leading whitespace/HOLE_PLACEHOLDER, same as reportOwnTextRuns: a value starting
+		// right after a `${...}` hole (e.g. `aria-label="${label}\n  Refresh"`) otherwise has its
+		// offset anchored to the hole's own line instead of the line the reportable text is on.
+		const leadingSkip = value.match(LEADING_SKIP_RE)[0].length;
+		const offset = mapFlatIndexToSourceOffset(m.index + valueOffsetInMatch + leadingSkip, segments);
+		reportAt(value, offset, ctx, 'HTML attribute (aria-label/title/placeholder)');
 	}
 }
 
@@ -433,19 +455,31 @@ function scanFlattenedForAttributes(text, segments, ctx) {
 // delimiters) means its inner content is never re-reported as if it were the outer tag's own text
 // (recursion below already reports it separately, once, if it's itself a tracked tag).
 const NESTED_ELEMENT_OR_COMMENT_RE = /<!--[\s\S]*?-->|<([a-zA-Z][a-zA-Z0-9-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>|<[^>]*>/g;
+// Same as NESTED_ELEMENT_OR_COMMENT_RE, but also treats an interpolation hole as its own excluded
+// unit — used only for splitting a body into independent runs (see splitOwnTextRuns below), not
+// for the top-level "does this contain real markup" gate in scanHtmlLiteralForTags, since a hole
+// alone isn't markup. Without this, static prose on both sides of a `${...}` hole in the same tag
+// body (e.g. `<button>Prefix ${count}\n  Refresh</button>`) is treated as one combined run anchored
+// to the *first* side's line, so a later edit to only the second side's text reuses the unchanged
+// first line's baseline hash and bypasses the ratchet.
+const RUN_BOUNDARY_RE = new RegExp(
+	`${NESTED_ELEMENT_OR_COMMENT_RE.source}|${HOLE_PLACEHOLDER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+	'g'
+);
 
 /**
- * Splits a tag's body into its own direct-text runs — the parts not inside some nested element or
- * comment — each tagged with its own offset in the flattened text. Reporting each run separately
- * (rather than collapsing the whole body into one combined, nested-markup-blanked string) matters
- * for the baseline's line-based hashing: a body with an already-baselined run on one line and a
- * later, genuinely new run added on another line must produce two independently-hashed
- * violations, not one combined report still anchored to the first (unchanged) line.
+ * Splits a tag's body into its own direct-text runs — the parts not inside some nested element,
+ * comment, or interpolation hole — each tagged with its own offset in the flattened text.
+ * Reporting each run separately (rather than collapsing the whole body into one combined,
+ * nested-markup-blanked string) matters for the baseline's line-based hashing: a body with an
+ * already-baselined run on one line and a later, genuinely new run added on another line must
+ * produce two independently-hashed violations, not one combined report still anchored to the
+ * first (unchanged) line.
  */
 function splitOwnTextRuns(body, bodyStartInFlat) {
 	const runs = [];
 	let lastIndex = 0;
-	for (const m of body.matchAll(NESTED_ELEMENT_OR_COMMENT_RE)) {
+	for (const m of body.matchAll(RUN_BOUNDARY_RE)) {
 		if (m.index > lastIndex) {
 			runs.push({ text: body.slice(lastIndex, m.index), offsetInFlat: bodyStartInFlat + lastIndex });
 		}
@@ -457,13 +491,26 @@ function splitOwnTextRuns(body, bodyStartInFlat) {
 	return runs;
 }
 
+// Matches a complete HTML comment. Used to blank out comment bodies (replacing their characters
+// with same-length spaces, so offsets stay aligned) before TAG_TEXT_RE ever runs — otherwise a tag
+// name typed inside a commented-out snippet (e.g. `<!-- <span>Refresh</span> -->`, which never
+// renders) is indistinguishable from a real nested element and gets reported as UI text.
+const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
+function blankHtmlComments(text) {
+	return text.replace(HTML_COMMENT_RE, (m) => ' '.repeat(m.length));
+}
+
 function scanFlattenedForTagText(text, textOffsetInFlat, segments, ctx) {
+	// Blank comments first so a tag name inside one can never be mistaken for real markup below —
+	// see HTML_COMMENT_RE. Blanking is idempotent (a body passed in via recursion has already had
+	// its comments blanked by the parent call), so re-blanking here is a safe no-op in that case.
+	const searchable = blankHtmlComments(text);
 	// matchAll (not a manual exec()/lastIndex loop) is required here: this function recurses into
 	// a nested tag's body using the SAME shared TAG_TEXT_RE object, and exec() mutates that
 	// object's .lastIndex as shared state — the recursive call would corrupt the outer loop's
 	// position in `text` and either skip content or (as originally shipped) loop forever
 	// re-matching the same span. matchAll clones the regex per call, so recursion is safe.
-	for (const m of text.matchAll(TAG_TEXT_RE)) {
+	for (const m of searchable.matchAll(TAG_TEXT_RE)) {
 		const tag = m[1].toLowerCase();
 		const body = m[2];
 		const bodyStartInFlat = textOffsetInFlat + m.index + m[0].indexOf('>') + 1;
@@ -513,14 +560,16 @@ function scanHtmlLiteralForTags(node, ctx) {
 	const { text, segments } = flattenChunks(chunks);
 	scanFlattenedForAttributes(text, segments, ctx);
 	scanFlattenedForTagText(text, 0, segments, ctx);
-	// Gated on HTML_TAG_FRAGMENT_RE: this call runs on EVERY string/template literal in scope via
-	// walk(), including plain prose with no markup at all (e.g. 'Refresh', a URL, a multiline
-	// template used directly as an assignment/sink value). Those are already fully handled by the
+	// This call runs on EVERY string/template literal in scope via walk(), including plain prose
+	// with no markup at all (e.g. 'Refresh', a URL, a multiline template used directly as an
+	// assignment/sink value) and non-HTML sentinel strings that merely start with `<letter` (e.g.
+	// '<unresolved:', a workspace-path placeholder). Those are either already fully handled by the
 	// assignment/sink-specific paths (checkAssignmentTarget, checkTextArgSink,
-	// checkSetAttributeSink) — without the gate this would double-report them, since a literal
-	// with no tag markup has nothing for splitOwnTextRuns to exclude and reports the whole text
-	// back verbatim under a second reason string.
-	if (HTML_TAG_FRAGMENT_RE.test(text)) {
+	// checkSetAttributeSink) or aren't markup at all, so the gate below requires an actual complete
+	// nested element or HTML comment for splitOwnTextRuns to exclude — a loose "looks like a tag"
+	// check (any `<letter`, with no closing `>` required) would both double-report the former and
+	// misclassify the latter as markup.
+	if (!text.matchAll(NESTED_ELEMENT_OR_COMMENT_RE).next().done) {
 		reportOwnTextRuns(text, 0, segments, ctx, 'text content (outside any tag)');
 	}
 }
@@ -558,9 +607,12 @@ function walk(node, ctx) {
 		checkSetAttributeSink(node, ctx);
 	}
 
-	if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-		&& ts.isPropertyAccessExpression(node.left)) {
-		checkAssignmentTarget(node.left.name.text, node.right, ctx, 'assignment to .');
+	// `+=` (e.g. `element.textContent += 'Refresh'`) is a valid way to append rendered text, same
+	// as a plain `=`; checkAssignmentTarget is operator-agnostic, so both share the same handling.
+	if (ts.isBinaryExpression(node) && ts.isPropertyAccessExpression(node.left)
+		&& (node.operatorToken.kind === ts.SyntaxKind.EqualsToken || node.operatorToken.kind === ts.SyntaxKind.PlusEqualsToken)) {
+		const reasonPrefix = node.operatorToken.kind === ts.SyntaxKind.EqualsToken ? 'assignment to .' : 'compound (+=) assignment to .';
+		checkAssignmentTarget(node.left.name.text, node.right, ctx, reasonPrefix);
 	}
 
 	if (ts.isPropertyAssignment(node) && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))) {

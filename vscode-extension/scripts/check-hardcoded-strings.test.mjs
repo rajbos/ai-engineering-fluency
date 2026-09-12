@@ -685,3 +685,62 @@ test('scanFile: catches direct text sitting outside any tag in a raw HTML fragme
 		},
 	);
 });
+
+// ── round-8 fixes: sentinel strings, escaped attributes, hole-split runs, comments-in-recursion, += ──
+
+test('scanFile: a non-HTML sentinel string starting with "<letter" is not misclassified as a tag fragment', () => {
+	withTempFile("if (!ws.workspacePath.startsWith('<unresolved:')) {}\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 0, `expected no violations for a non-HTML sentinel, got: ${JSON.stringify(violations)}`);
+	});
+});
+
+test('scanFile: an HTML attribute matches even when the wrapping TS string escapes its own quote character', () => {
+	withTempFile('const html = "<button aria-label=\\"Refresh\\"></button>";\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		const matches = violations.filter((v) => v.text === 'Refresh');
+		assert.equal(matches.length, 1, `expected "Refresh" to be caught despite escaped quotes, got: ${JSON.stringify(violations)}`);
+	});
+});
+
+test('scanFile: static prose on both sides of an interpolation hole in the same tag body is reported as two independently-anchored violations', () => {
+	withTempFile('const html = `<button>Prefix ${count}\n  Refresh</button>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		const prefix = violations.find((v) => v.text.trim() === 'Prefix');
+		const refresh = violations.find((v) => v.text === 'Refresh');
+		assert.ok(prefix, `expected "Prefix" to be reported, got: ${JSON.stringify(violations)}`);
+		assert.ok(refresh, `expected "Refresh" to be reported, got: ${JSON.stringify(violations)}`);
+		assert.equal(prefix.line, 1, `expected "Prefix" on line 1, got line ${prefix.line}`);
+		assert.equal(refresh.line, 2, `expected "Refresh" on its own line (2), not "Prefix"'s line, got line ${refresh.line}`);
+	});
+});
+
+test('scanFile: does not descend into a tag typed inside an HTML comment during nested-tag recursion', () => {
+	withTempFile('const html = `<div><!-- <span>Refresh</span> --></div>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 0, `expected the commented-out span not to be treated as real markup, got: ${JSON.stringify(violations)}`);
+	});
+});
+
+test('scanFile: a compound += assignment to a UI-rendering property is flagged the same as a plain assignment', () => {
+	withTempFile("element.textContent += 'Refresh';\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1);
+		assert.equal(violations[0].text, 'Refresh');
+	});
+});
+
+test('scanFile: an HTML attribute value beginning with an interpolation hole attributes its offset past the hole, not to it', () => {
+	withTempFile('const html = `<button aria-label="${label}\n  Refresh"></button>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		const match = violations.find((v) => v.text.includes('Refresh'));
+		assert.ok(match, `expected a violation containing "Refresh", got: ${JSON.stringify(violations)}`);
+		assert.equal(match.line, 2, `expected the violation on the "Refresh" line (2), got line ${match.line}`);
+	});
+});
