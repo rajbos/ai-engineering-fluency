@@ -1181,6 +1181,8 @@ function applyValueSignals(next: EfficiencyViewData['value']): void {
 	if (!data || valueSignalsEqual(data.value, next)) { return; }
 	data = { ...data, value: next };
 	if (activeTab !== 'value') { return; }
+	// Before the first render there is no `#eff-tab-content` yet; `setHtml` no-ops on a missing
+	// element, and the state assigned above is what that render then picks up.
 	setHtml(document.getElementById('eff-tab-content'), renderValueTab(data));
 }
 
