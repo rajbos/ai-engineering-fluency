@@ -2,8 +2,10 @@ import { describe, test } from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import {
+	aiuToUsd,
 	analyzeHydraFusionSession,
 	containsHydraFusionEvents,
+	matchHydraFusionTurnsToChatTurns,
 	nanoAiuToAiu,
 } from '../../../src/hydrafusion';
 
@@ -346,5 +348,121 @@ describe('analyzeHydraFusionSession', () => {
 		const summary = analyzeHydraFusionSession(content)!;
 		assert.equal(summary.totalTurns, 2);
 		assert.deepEqual(summary.turns.map(t => t.phases[0].model), ['model-a', 'model-b']);
+	});
+});
+
+describe('aiuToUsd', () => {
+	test('converts AI credits to dollars at the documented $0.01-per-credit rate', () => {
+		assert.equal(aiuToUsd(14.72), 0.1472);
+		assert.equal(aiuToUsd(0), 0);
+	});
+});
+
+describe('matchHydraFusionTurnsToChatTurns', () => {
+	/** A minimal one-leg fusion turn, timestamped so matching tests control ordering directly. */
+	function fusionTurnAt(fusionId: string, timestamp: string): string {
+		return [
+			line('session.fusion_resolved', { fusionId, pattern: 'single', phasePlan: [{ kind: 'primary' }] }, timestamp),
+			line('assistant.fusion_phase_completed', { fusionId, phaseId: `${fusionId}:phase:0`, phaseKind: 'primary', model: 'm', usage: { totalNanoAiu: AIU } }, timestamp),
+			line('session.fusion_completed', { fusionId, finalSourcePhaseId: `${fusionId}:phase:0`, totalNanoAiu: AIU }, timestamp),
+		].join('\n');
+	}
+
+	test('matches each fusion turn to the last chat turn whose prompt preceded it', () => {
+		const content = [
+			fusionTurnAt('f1', '2026-01-01T00:00:05.000Z'),
+			fusionTurnAt('f2', '2026-01-01T00:00:15.000Z'),
+		].join('\n');
+		const summary = analyzeHydraFusionSession(content)!;
+		const chatTurns = [
+			{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' },
+			{ turnNumber: 2, timestamp: '2026-01-01T00:00:10.000Z' },
+		];
+		const matches = matchHydraFusionTurnsToChatTurns(chatTurns, summary.turns);
+		assert.equal(matches.get(0), 1);
+		assert.equal(matches.get(1), 2);
+	});
+
+	test('skips a chat turn a non-fusion model handled, rather than mismatching the next fusion turn to it', () => {
+		// Turn 2 wasn't routed through HydraFusion (no fusion turn resolves between it and turn 3),
+		// so it must not absorb f1's match even though it's chronologically closest.
+		const content = [
+			fusionTurnAt('f1', '2026-01-01T00:00:05.000Z'),
+			fusionTurnAt('f2', '2026-01-01T00:00:25.000Z'),
+		].join('\n');
+		const summary = analyzeHydraFusionSession(content)!;
+		const chatTurns = [
+			{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' },
+			{ turnNumber: 2, timestamp: '2026-01-01T00:00:10.000Z' },
+			{ turnNumber: 3, timestamp: '2026-01-01T00:00:20.000Z' },
+		];
+		const matches = matchHydraFusionTurnsToChatTurns(chatTurns, summary.turns);
+		assert.equal(matches.get(0), 1);
+		assert.equal(matches.get(1), 3);
+	});
+
+	test('leaves a fusion turn unmatched when no chat turn timestamp precedes it', () => {
+		const content = fusionTurnAt('f1', '2020-01-01T00:00:00.000Z');
+		const summary = analyzeHydraFusionSession(content)!;
+		const chatTurns = [{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' }];
+		const matches = matchHydraFusionTurnsToChatTurns(chatTurns, summary.turns);
+		assert.equal(matches.size, 0);
+	});
+
+	test('known limitation: attaches to a nearby non-fusion turn when the real trigger is missing from chatTurns entirely', () => {
+		// Unlike the "skips a chat turn a non-fusion model handled" case above, here chat turn 2
+		// is the ONLY turn available before f2 — there is no turn 3 in the list at all (e.g. it
+		// was dropped upstream during turn extraction). matchHydraFusionTurnsToChatTurns has no
+		// way to tell "the real trigger is missing" apart from "turn 2 is genuinely closest", so
+		// it attaches f2 there. Documented in the function's own doc comment as a known trade-off
+		// that would need a shared turn id to fully close.
+		const content = [
+			fusionTurnAt('f1', '2026-01-01T00:00:05.000Z'),
+			fusionTurnAt('f2', '2026-01-01T00:00:25.000Z'),
+		].join('\n');
+		const summary = analyzeHydraFusionSession(content)!;
+		const chatTurns = [
+			{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' },
+			{ turnNumber: 2, timestamp: '2026-01-01T00:00:10.000Z' },
+		];
+		const matches = matchHydraFusionTurnsToChatTurns(chatTurns, summary.turns);
+		assert.equal(matches.get(0), 1);
+		assert.equal(matches.get(1), 2);
+	});
+
+	test('never matches a chat turn with no timestamp, even when it is otherwise the nearest one', () => {
+		const content = fusionTurnAt('f1', '2026-01-01T00:00:20.000Z');
+		const summary = analyzeHydraFusionSession(content)!;
+		const chatTurns = [
+			{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' },
+			{ turnNumber: 2, timestamp: null },
+		];
+		const matches = matchHydraFusionTurnsToChatTurns(chatTurns, summary.turns);
+		assert.equal(matches.get(0), 1);
+	});
+
+	test('a chat turn with no timestamp is skipped permanently, not left blocking every later fusion turn', () => {
+		// Regression test: an earlier version broke out of the advancement loop on an
+		// unusable timestamp without moving past it, so chatIndex stayed pinned there —
+		// every subsequent fusion turn hit the same bad entry immediately and could never
+		// reach turn 3, even though it has a perfectly good timestamp.
+		const content = [
+			fusionTurnAt('f1', '2026-01-01T00:00:05.000Z'),
+			fusionTurnAt('f2', '2026-01-01T00:00:25.000Z'),
+		].join('\n');
+		const summary = analyzeHydraFusionSession(content)!;
+		const chatTurns = [
+			{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' },
+			{ turnNumber: 2, timestamp: null },
+			{ turnNumber: 3, timestamp: '2026-01-01T00:00:20.000Z' },
+		];
+		const matches = matchHydraFusionTurnsToChatTurns(chatTurns, summary.turns);
+		assert.equal(matches.get(0), 1);
+		assert.equal(matches.get(1), 3);
+	});
+
+	test('returns an empty map for a session with no fusion turns', () => {
+		const chatTurns = [{ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' }];
+		assert.equal(matchHydraFusionTurnsToChatTurns(chatTurns, []).size, 0);
 	});
 });

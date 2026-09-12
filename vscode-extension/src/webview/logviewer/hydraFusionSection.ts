@@ -9,7 +9,8 @@
 // @security every model id, pattern, verdict and phase kind originates from the session
 // file and is therefore untrusted; all of them go through `escapeHtml` before rendering.
 
-import { escapeHtml, formatCompact, formatFixed, formatPercent } from '../shared/formatUtils';
+import { escapeHtml, formatCompact, formatCost, formatPercent } from '../shared/formatUtils';
+import { aiuToUsd } from '../../../../src/hydrafusion';
 import type {
 	HydraFusionPhase,
 	HydraFusionSummary,
@@ -45,14 +46,9 @@ function patternTitle(pattern: string): string {
 	return PATTERN_META[pattern]?.title ?? 'Routing pattern reported by the CLI';
 }
 
-/**
- * Formats AI credit units for display.
- *
- * Small turns routinely cost well under one credit, so two decimals are kept until the
- * number is large enough that they stop carrying information.
- */
-export function formatAiu(value: number): string {
-	return formatFixed(value, Math.abs(value) >= 100 ? 1 : 2);
+/** Formats AIU credits as the USD cost shown everywhere else in the app. */
+export function formatFusionCost(aiu: number): string {
+	return formatCost(aiuToUsd(aiu));
 }
 
 /**
@@ -105,14 +101,14 @@ function renderHeadlineCards(summary: HydraFusionSummary): string {
 
 	cards.push(renderCard(
 		'🔍', 'Review share', formatPercent(summary.reviewSharePercent),
-		`${formatAiu(summary.reviewAiu)} of ${formatAiu(summary.totalAiu)} AIU`,
+		`${formatFusionCost(summary.reviewAiu)} of ${formatFusionCost(summary.totalAiu)}`,
 		'Share of the bill spent on legs that did not supply the final answer — reviews and superseded drafts. Those legs still sit in the final leg\'s context, so this is the cost of review rather than waste.',
 	));
 
 	cards.push(renderCard(
-		'💳', 'Credits', `${formatAiu(summary.totalAiu)} AIU`,
+		'💳', 'Cost', formatFusionCost(summary.totalAiu),
 		`${summary.totalLegs} legs · ${summary.totalRequestCount} inference calls`,
-		'AI credit units reported by the CLI itself, summed from each turn\'s rollup. Legs are router hops; inference calls are model round trips across all of them.',
+		'Cost of the AI credits the CLI itself reported (1 credit = $0.01), summed from each turn\'s rollup. Legs are router hops; inference calls are model round trips across all of them.',
 	));
 
 	cards.push(renderCard(
@@ -145,7 +141,7 @@ function renderHeadlineCards(summary: HydraFusionSummary): string {
 /** The pattern mix as pills — which execution shapes the router chose, and what each cost. */
 function renderPatternPills(summary: HydraFusionSummary): string {
 	const pills = summary.patternCounts.map(p => `<span class="hydra-pattern-pill ${patternClass(p.pattern)}" title="${escapeHtml(patternTitle(p.pattern))}">
-${escapeHtml(p.pattern)} <strong>${p.turns}</strong> <span class="hydra-pattern-pill-aiu">${escapeHtml(formatAiu(p.aiu))} AIU</span>
+${escapeHtml(p.pattern)} <strong>${p.turns}</strong> <span class="hydra-pattern-pill-aiu">${escapeHtml(formatFusionCost(p.aiu))}</span>
 </span>`).join('');
 	return `<div class="hydra-pattern-row"><span class="hydra-pattern-row-label">Patterns chosen</span>${pills}</div>`;
 }
@@ -157,7 +153,7 @@ function renderModelTable(summary: HydraFusionSummary): string {
 <td class="hydra-model-cell"><span class="hydra-model-name">${escapeHtml(m.model)}</span></td>
 <td class="hydra-num">${m.legs}</td>
 <td class="hydra-num" title="Turns where this model supplied the answer you saw">${m.finalAnswers}</td>
-<td class="hydra-num"><strong>${escapeHtml(formatAiu(m.aiu))}</strong></td>
+<td class="hydra-num"><strong>${escapeHtml(formatFusionCost(m.aiu))}</strong></td>
 <td class="hydra-bar-cell"><span class="hydra-bar" style="width:${barWidthPercent(m.aiu, maxAiu).toFixed(1)}%"></span></td>
 <td class="hydra-num">${formatCompact(m.inputTokens)}</td>
 <td class="hydra-num">${formatCompact(m.outputTokens)}</td>
@@ -171,7 +167,7 @@ function renderModelTable(summary: HydraFusionSummary): string {
 <th scope="col">Model</th>
 <th scope="col" title="Router hops this model served">Legs</th>
 <th scope="col" title="Turns where this model produced the final answer">Answers</th>
-<th scope="col">AIU</th>
+<th scope="col">Cost</th>
 <th scope="col"><span class="hydra-sr-only">Share of credits</span></th>
 <th scope="col">Input</th>
 <th scope="col">Output</th>
@@ -189,7 +185,7 @@ function renderPhaseLedger(summary: HydraFusionSummary): string {
 		return `<tr>
 <td><span class="hydra-phase-badge ${meta.cssClass}">${meta.icon} ${escapeHtml(p.kind)}</span></td>
 <td class="hydra-num">${p.legs}</td>
-<td class="hydra-num"><strong>${escapeHtml(formatAiu(p.aiu))}</strong></td>
+<td class="hydra-num"><strong>${escapeHtml(formatFusionCost(p.aiu))}</strong></td>
 <td class="hydra-bar-cell"><span class="hydra-bar ${meta.cssClass}" style="width:${barWidthPercent(p.aiu, maxAiu).toFixed(1)}%"></span></td>
 </tr>`;
 	}).join('');
@@ -201,7 +197,7 @@ function renderPhaseLedger(summary: HydraFusionSummary): string {
 <thead><tr>
 <th scope="col">Phase</th>
 <th scope="col">Legs</th>
-<th scope="col">AIU</th>
+<th scope="col">Cost</th>
 <th scope="col"><span class="hydra-sr-only">Share of credits</span></th>
 </tr></thead>
 <tbody>${rows}</tbody>
@@ -216,7 +212,7 @@ function renderModelChain(turn: HydraFusionTurn): string {
 			: p.verdict === 'accept' ? '<span class="hydra-verdict-accept" title="Judge accepted this draft">✓</span>'
 			: '';
 		const finalMark = p.isFinalSource ? '<span class="hydra-final-dot" title="This leg produced the answer you saw">●</span>' : '';
-		return `<span class="hydra-chain-item ${phaseMeta(p.kind).cssClass}" title="${escapeHtml(`${p.kind} · ${p.model} · ${formatAiu(p.usage.aiu)} AIU`)}">${escapeHtml(p.model)}${verdictMark}${finalMark}</span>`;
+		return `<span class="hydra-chain-item ${phaseMeta(p.kind).cssClass}" title="${escapeHtml(`${p.kind} · ${p.model} · ${formatFusionCost(p.usage.aiu)}`)}">${escapeHtml(p.model)}${verdictMark}${finalMark}</span>`;
 	}).join('<span class="hydra-chain-arrow">→</span>');
 }
 
@@ -235,34 +231,20 @@ function renderLegRow(phase: HydraFusionPhase, maxDurationMs: number): string {
 <td class="hydra-num">${phase.usage.requestCount}</td>
 <td class="hydra-num">${formatCompact(phase.usage.inputTokens)}</td>
 <td class="hydra-num">${formatCompact(phase.usage.outputTokens)}</td>
-<td class="hydra-num"><strong>${escapeHtml(formatAiu(phase.usage.aiu))}</strong></td>
+<td class="hydra-num"><strong>${escapeHtml(formatFusionCost(phase.usage.aiu))}</strong></td>
 </tr>`;
 }
 
-/** One collapsed turn row that expands into its leg-by-leg waterfall. */
-export function renderTurnRow(turn: HydraFusionTurn, index: number): string {
-	const maxDurationMs = Math.max(...turn.phases.map(p => p.durationMs), 0);
-	const legs = turn.phases.map(p => renderLegRow(p, maxDurationMs)).join('');
-	const plan = turn.plannedPhases.length > 0 ? turn.plannedPhases.join(' › ') : null;
-	const skipped = plan && turn.plannedPhases.length > turn.phases.length
-		? ` (${turn.plannedPhases.length - turn.phases.length} planned leg${turn.plannedPhases.length - turn.phases.length === 1 ? '' : 's'} never ran)`
-		: '';
-
-	return `<details class="hydra-turn">
-<summary class="hydra-turn-summary">
-<span class="hydra-turn-num">#${index + 1}</span>
-<span class="hydra-pattern-badge ${patternClass(turn.pattern)}" title="${escapeHtml(patternTitle(turn.pattern))}">${escapeHtml(turn.pattern)}</span>
-<span class="hydra-turn-chain">${renderModelChain(turn)}</span>
-<span class="hydra-turn-metrics">
-<span title="Credits for this turn"><strong>${escapeHtml(formatAiu(turn.aiu))}</strong> AIU</span>
-<span title="Wall-clock time for the whole turn">${escapeHtml(formatFusionDuration(turn.durationMs))}</span>
-<span title="Router hops in this turn">${turn.phases.length} leg${turn.phases.length === 1 ? '' : 's'}</span>
-</span>
-</summary>
-<div class="hydra-turn-body">
-${plan ? `<div class="hydra-turn-plan">Planned: <code>${escapeHtml(plan)}</code>${escapeHtml(skipped)}</div>` : ''}
-${turn.degradedReason ? `<div class="hydra-turn-degraded">⚠️ Degraded: ${escapeHtml(turn.degradedReason)}</div>` : ''}
-<table class="hydra-table hydra-legs-table">
+/**
+ * The leg-by-leg waterfall for one turn: phase, model, verdict, duration and cost.
+ * Exported so the Session Steps Overview table (main.ts) can embed the exact same
+ * table under a matching turn's row instead of re-deriving its own — see
+ * `matchHydraFusionTurnsToChatTurns` in src/hydrafusion.ts for how rows are matched.
+ */
+export function renderLegsTable(phases: HydraFusionPhase[]): string {
+	const maxDurationMs = Math.max(...phases.map(p => p.durationMs), 0);
+	const legs = phases.map(p => renderLegRow(p, maxDurationMs)).join('');
+	return `<table class="hydra-table hydra-legs-table">
 <thead><tr>
 <th scope="col">Phase</th>
 <th scope="col">Model</th>
@@ -272,10 +254,46 @@ ${turn.degradedReason ? `<div class="hydra-turn-degraded">⚠️ Degraded: ${esc
 <th scope="col" title="Inference calls this leg made">Calls</th>
 <th scope="col">Input</th>
 <th scope="col">Output</th>
-<th scope="col">AIU</th>
+<th scope="col">Cost</th>
 </tr></thead>
 <tbody>${legs}</tbody>
-</table>
+</table>`;
+}
+
+/**
+ * One collapsed turn row that expands into its leg-by-leg waterfall.
+ *
+ * @param chatTurnNumber The matching row in the Session Steps Overview table below,
+ *   when `matchHydraFusionTurnsToChatTurns` could place this turn — renders a link
+ *   that scrolls to and expands that row so the same leg detail can be reached from
+ *   either place. `null` when no match was found (e.g. the chat turn carries no
+ *   timestamp), in which case the link is simply omitted — as it also is when the
+ *   turn has no completed phases yet (an in-flight turn): the overview row has
+ *   nothing to expand, so a link there would promise detail it can't deliver.
+ */
+export function renderTurnRow(turn: HydraFusionTurn, index: number, chatTurnNumber: number | null = null): string {
+	const plan = turn.plannedPhases.length > 0 ? turn.plannedPhases.join(' › ') : null;
+	const skipped = plan && turn.plannedPhases.length > turn.phases.length
+		? ` (${turn.plannedPhases.length - turn.phases.length} planned leg${turn.plannedPhases.length - turn.phases.length === 1 ? '' : 's'} never ran)`
+		: '';
+	const canJumpToStep = chatTurnNumber !== null && turn.phases.length > 0;
+
+	return `<details class="hydra-turn">
+<summary class="hydra-turn-summary">
+<span class="hydra-turn-num">#${index + 1}</span>
+<span class="hydra-pattern-badge ${patternClass(turn.pattern)}" title="${escapeHtml(patternTitle(turn.pattern))}">${escapeHtml(turn.pattern)}</span>
+<span class="hydra-turn-chain">${renderModelChain(turn)}</span>
+<span class="hydra-turn-metrics">
+<span title="Cost for this turn"><strong>${escapeHtml(formatFusionCost(turn.aiu))}</strong></span>
+<span title="Wall-clock time for the whole turn">${escapeHtml(formatFusionDuration(turn.durationMs))}</span>
+<span title="Router hops in this turn">${turn.phases.length} leg${turn.phases.length === 1 ? '' : 's'}</span>
+${canJumpToStep ? `<span class="hydra-jump-to-step" data-turn="${chatTurnNumber}" title="Jump to step #${chatTurnNumber} in the Session Steps Overview below" role="button" tabindex="0">⤵ step #${chatTurnNumber}</span>` : ''}
+</span>
+</summary>
+<div class="hydra-turn-body">
+${plan ? `<div class="hydra-turn-plan">Planned: <code>${escapeHtml(plan)}</code>${escapeHtml(skipped)}</div>` : ''}
+${turn.degradedReason ? `<div class="hydra-turn-degraded">⚠️ Degraded: ${escapeHtml(turn.degradedReason)}</div>` : ''}
+${renderLegsTable(turn.phases)}
 </div>
 </details>`;
 }
@@ -283,8 +301,13 @@ ${turn.degradedReason ? `<div class="hydra-turn-degraded">⚠️ Degraded: ${esc
 /**
  * Renders the whole HydraFusion section, or an empty string when the session never
  * routed through it — which is the case for every session except HydraFusion CLI ones.
+ *
+ * @param chatTurnMatches Fusion turn index → matching `ChatTurn.turnNumber`, from
+ *   `matchHydraFusionTurnsToChatTurns`. Optional so direct callers (and existing
+ *   tests) can render the section on its own; omitting it just drops the
+ *   "jump to step" links from each turn row.
  */
-export function renderHydraFusionSection(summary: HydraFusionSummary | undefined): string {
+export function renderHydraFusionSection(summary: HydraFusionSummary | undefined, chatTurnMatches?: Map<number, number>): string {
 	if (!summary || summary.totalTurns === 0) { return ''; }
 
 	const modelCount = summary.models.length;
@@ -304,8 +327,8 @@ ${renderPhaseLedger(summary)}
 </div>
 <div class="hydra-panel hydra-turns-panel">
 <div class="hydra-panel-title">🧩 One turn in detail</div>
-<div class="hydra-panel-sub">Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg a judge rejected.</div>
-<div class="hydra-turns">${summary.turns.map((t, i) => renderTurnRow(t, i)).join('')}</div>
+<div class="hydra-panel-sub">Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg a judge rejected. The same legs also appear under their step in the Session Steps Overview below.</div>
+<div class="hydra-turns">${summary.turns.map((t, i) => renderTurnRow(t, i, chatTurnMatches?.get(i) ?? null)).join('')}</div>
 </div>
 </div>`;
 }

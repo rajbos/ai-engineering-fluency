@@ -30,6 +30,8 @@
  * https://github.com/samueltauil/hydrafusion-traces (docs/SPIKE.md).
  */
 
+import { NANO_AIU_TO_DOLLARS } from './tokenEstimation';
+
 /** Nano-AIU per AIU — the CLI reports credits scaled by 1e9 to keep them integral. */
 const NANO_AIU_PER_AIU = 1_000_000_000;
 
@@ -230,6 +232,22 @@ function asOptionalNumber(value: unknown): number | null {
 /** Converts the CLI's nano-AIU integer into AIU credits. */
 export function nanoAiuToAiu(nanoAiu: unknown): number {
 	return asNumber(nanoAiu) / NANO_AIU_PER_AIU;
+}
+
+/**
+ * AIU-to-USD rate, derived from the repo's one canonical nano-AIU-to-dollars rate
+ * (`NANO_AIU_TO_DOLLARS` in `tokenEstimation.ts`, applied elsewhere to
+ * `session.shutdown.totalNanoAiu`) rather than a second hard-coded constant here.
+ * `NANO_AIU_PER_AIU * NANO_AIU_TO_DOLLARS` is the same $0.01-per-credit rate GitHub
+ * documents in `copilotPlans.json`'s `monthlyAiCreditsUsd` note ("1 AI credit =
+ * $0.01") — computed once as its own factor, rather than inline in `aiuToUsd` below,
+ * so the multiplication order doesn't reintroduce floating-point noise per call.
+ */
+const AIU_TO_USD_RATE = NANO_AIU_PER_AIU * NANO_AIU_TO_DOLLARS;
+
+/** Converts AIU credits (already divided from nano-AIU) into a USD amount for display. */
+export function aiuToUsd(aiu: number): number {
+	return aiu * AIU_TO_USD_RATE;
 }
 
 function parseUsage(raw: unknown): HydraFusionUsage {
@@ -510,4 +528,63 @@ export function analyzeHydraFusionSession(content: string): HydraFusionSummary |
 		degradedTurns: turns.filter(t => t.degradedReason !== null).length,
 		syntheticModel,
 	};
+}
+
+/**
+ * Correlates each fusion turn with the chat turn (`ChatTurn.turnNumber`) whose user
+ * prompt triggered it, so per-leg detail can be shown inline in the generic turns
+ * table instead of only in the dedicated HydraFusion section.
+ *
+ * Both sequences are chronologically ordered — chat turns by `turnNumber`, fusion
+ * turns by the order the router resolved them — so a single forward merge suffices:
+ * for each fusion turn, advance through chat turns while their timestamp is at or
+ * before the fusion turn's routing decision (`startedAt`). The last chat turn
+ * advanced past is the one whose prompt the router was resolving; turns the router
+ * never got to (a later prompt, or one where routing was skipped) are left unmatched.
+ *
+ * A missing timestamp on either side — or a session with no fusion turns — leaves
+ * the corresponding entries out of the map rather than guessing; callers get an
+ * empty map, not a wrong one.
+ *
+ * Known limitation: this correlates by timestamp proximity because neither event
+ * stream carries a shared identifier — `user.message` (which becomes a `ChatTurn`)
+ * has none, and `session.fusion_resolved`'s own `turnId` has nothing on the chat
+ * side to match against. So if the chat turn that actually triggered a fusion
+ * resolution is missing from `chatTurns` entirely (e.g. it was dropped during
+ * turn extraction upstream, not a case this function can detect), that fusion
+ * turn's legs attach to whichever earlier chat turn happens to precede it instead
+ * — a real turn just never routed through HydraFusion is handled correctly (see
+ * the "skips a chat turn a non-fusion model handled" test), but a turn missing
+ * outright is not distinguishable from one. Fixing that would mean threading a
+ * shared id (e.g. `assistant.turn_start`/`turn_end`'s `turnId`) through `ChatTurn`
+ * itself, which is a larger change to the canonical turn model shared by every
+ * consumer — out of scope for what is otherwise a display-only feature.
+ *
+ * @returns Map from fusion turn index (into `hydraTurns`) to the matching chat
+ *   turn's `turnNumber`.
+ */
+export function matchHydraFusionTurnsToChatTurns(
+	chatTurns: { turnNumber: number; timestamp: string | null }[],
+	hydraTurns: HydraFusionTurn[],
+): Map<number, number> {
+	const matches = new Map<number, number>();
+	let chatIndex = 0;
+	for (let h = 0; h < hydraTurns.length; h++) {
+		const startedAt = hydraTurns[h].startedAt ? Date.parse(hydraTurns[h].startedAt!) : NaN;
+		if (Number.isNaN(startedAt)) { continue; }
+
+		let matchedTurnNumber: number | null = null;
+		while (chatIndex < chatTurns.length) {
+			const ts = chatTurns[chatIndex].timestamp ? Date.parse(chatTurns[chatIndex].timestamp!) : NaN;
+			// An unusable timestamp can never be a match for *any* fusion turn, but it must not
+			// get stuck as the loop's position either — skip it permanently so later, well-formed
+			// chat turns stay reachable by this and every subsequent fusion turn.
+			if (Number.isNaN(ts)) { chatIndex++; continue; }
+			if (ts > startedAt) { break; }
+			matchedTurnNumber = chatTurns[chatIndex].turnNumber;
+			chatIndex++;
+		}
+		if (matchedTurnNumber !== null) { matches.set(h, matchedTurnNumber); }
+	}
+	return matches;
 }

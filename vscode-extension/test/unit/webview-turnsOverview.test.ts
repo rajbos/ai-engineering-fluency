@@ -3,11 +3,13 @@ import * as assert from 'node:assert/strict';
 
 import {
 	buildTurnChildRows,
+	buildTurnLegRows,
 	buildTurnOverviewRows,
 	getTurnCachedTokens,
 	hashModelToHue,
 	type TurnOverviewSourceTurn,
 } from '../../src/webview/logviewer/turnsOverview';
+import type { HydraFusionSummary, HydraFusionTurn } from '../../../src/hydrafusion';
 
 function turn(overrides: Partial<TurnOverviewSourceTurn> = {}): TurnOverviewSourceTurn {
 	return {
@@ -18,6 +20,34 @@ function turn(overrides: Partial<TurnOverviewSourceTurn> = {}): TurnOverviewSour
 		outputTokensEstimate: 50,
 		thinkingTokensEstimate: 0,
 		...overrides,
+	};
+}
+
+/** A minimal one-leg HydraFusion turn for testing the legs correlation, independent of the parser. */
+function hydraTurn(overrides: Partial<HydraFusionTurn> = {}): HydraFusionTurn {
+	return {
+		fusionId: 'f', pattern: 'single', outcome: 'completed', degradedReason: null, policy: null,
+		routeSource: null, routingLatencyMs: null, plannedPhases: [], primaryModel: null,
+		secondaryModel: null, fallbackModel: null, finalSourceModel: 'gpt-4o',
+		phases: [{
+			phaseId: 'f:phase:0', kind: 'primary', role: 'solver', model: 'gpt-4o', status: 'succeeded',
+			verdict: null, durationMs: 1000, conversationScope: 'root',
+			usage: { requestCount: 1, inputTokens: 100, outputTokens: 20, cachedTokens: 0, cacheWriteTokens: 0, aiu: 5 },
+			isFinalSource: true, completedAt: null,
+		}],
+		handoffs: [], requestCount: 1, inputTokens: 100, outputTokens: 20, cachedTokens: 0, cacheWriteTokens: 0,
+		aiu: 5, reviewAiu: 0, durationMs: 1000, startedAt: null, completedAt: null, isCompound: false,
+		...overrides,
+	};
+}
+
+function hydraSummary(turns: HydraFusionTurn[]): HydraFusionSummary {
+	return {
+		turns, totalTurns: turns.length, patternCounts: [], compoundTurns: 0, compoundRatePercent: 0,
+		judgeAccepts: 0, judgeRejects: 0, judgeRejectionRatePercent: null, totalAiu: 0, reviewAiu: 0,
+		reviewSharePercent: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCachedTokens: 0,
+		totalRequestCount: 0, totalLegs: 0, byModel: [], byPhaseKind: [], models: [], avgRoutingLatencyMs: null,
+		degradedTurns: 0, syntheticModel: null,
 	};
 }
 
@@ -142,6 +172,53 @@ describe('buildTurnOverviewRows', () => {
 		assert.equal(rows[0].children.length, 2);
 		assert.deepEqual(rows[0].children[0], { toolName: 'task', model: 'claude-sonnet-4-6', input: 500, output: 200, total: 700, cost: 0.05 });
 		assert.deepEqual(rows[0].children[1], { toolName: 'task', model: 'gpt-4o', input: 100, output: 40, total: 140, cost: null });
+	});
+
+	test('every row has an empty legs array for a plain session that never used HydraFusion', () => {
+		const rows = buildTurnOverviewRows([turn({ turnNumber: 1 }), turn({ turnNumber: 2 })]);
+		assert.deepEqual(rows[0].legs, []);
+		assert.deepEqual(rows[1].legs, []);
+	});
+
+	test('attaches legs only to the chat turn hydraTurnMatches places, leaving the rest empty', () => {
+		const summary = hydraSummary([hydraTurn()]);
+		const matches = new Map([[0, 2]]); // fusion turn 0 matches chat turn #2
+		const rows = buildTurnOverviewRows(
+			[turn({ turnNumber: 1, timestamp: '2026-01-01T00:00:00.000Z' }), turn({ turnNumber: 2, timestamp: '2026-01-01T00:00:05.000Z' })],
+			summary,
+			matches,
+		);
+		assert.deepEqual(rows[0].legs, []);
+		assert.equal(rows[1].legs.length, 1);
+		assert.equal(rows[1].legs[0].model, 'gpt-4o');
+	});
+
+	test('leaves every row without legs when hydraTurnMatches is omitted, even with a HydraFusion summary present', () => {
+		const summary = hydraSummary([hydraTurn()]);
+		const rows = buildTurnOverviewRows([turn({ turnNumber: 1 })], summary);
+		assert.deepEqual(rows[0].legs, []);
+	});
+});
+
+describe('buildTurnLegRows', () => {
+	test('maps each phase to a leg row, converting its AIU cost to USD', () => {
+		const rows = buildTurnLegRows(hydraTurn());
+		assert.deepEqual(rows, [{
+			kind: 'primary', model: 'gpt-4o', verdict: null, isFinalSource: true,
+			durationMs: 1000, requestCount: 1, input: 100, output: 20, costUsd: 0.05,
+		}]);
+	});
+
+	test('produces one row per leg, in the order the router ran them', () => {
+		const t = hydraTurn({
+			phases: [
+				{ phaseId: 'f:phase:0', kind: 'primary', role: 'solver', model: 'a', status: 'succeeded', verdict: null, durationMs: 1, conversationScope: 'root', usage: { requestCount: 1, inputTokens: 1, outputTokens: 1, cachedTokens: 0, cacheWriteTokens: 0, aiu: 1 }, isFinalSource: false, completedAt: null },
+				{ phaseId: 'f:judge', kind: 'judge', role: 'judge', model: 'b', status: 'succeeded', verdict: 'reject', durationMs: 2, conversationScope: 'review', usage: { requestCount: 1, inputTokens: 2, outputTokens: 2, cachedTokens: 0, cacheWriteTokens: 0, aiu: 2 }, isFinalSource: false, completedAt: null },
+			],
+		});
+		const rows = buildTurnLegRows(t);
+		assert.deepEqual(rows.map(r => r.kind), ['primary', 'judge']);
+		assert.equal(rows[1].verdict, 'reject');
 	});
 });
 

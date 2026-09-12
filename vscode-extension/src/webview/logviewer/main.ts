@@ -5,8 +5,9 @@ import { escapeHtml, formatCompact, formatCost, formatFileSize, setCompactNumber
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 import { buildTurnOverviewRows, hashModelToHue } from './turnsOverview';
-import { renderHydraFusionSection } from './hydraFusionSection';
-import type { HydraFusionSummary } from '../../../../src/hydrafusion';
+import { renderHydraFusionSection, renderLegsTable, formatFusionCost } from './hydraFusionSection';
+import { matchHydraFusionTurnsToChatTurns } from '../../../../src/hydrafusion';
+import type { HydraFusionSummary, HydraFusionTurn } from '../../../../src/hydrafusion';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -1084,14 +1085,37 @@ function renderModelOverviewBadge(model: string | null): string {
  * at a glance without opening every turn card. A row's model badge differing
  * from the one above it is flagged with ⇄ to spot model switches quickly.
  * Clicking a row scrolls to and briefly highlights the matching turn card.
+ *
+ * When a turn was routed through HydraFusion (`hydraTurnMatches` places it), its
+ * row also gets a ⚡ toggle that expands the same leg-by-leg table shown in the
+ * HydraFusion section above — see `matchHydraFusionTurnsToChatTurns`. This is the
+ * only difference from a plain session's table: everything else here runs exactly
+ * as before for the overwhelming majority of sessions, which never used the router.
  */
-function renderTurnsOverviewTable(data: SessionLogData): string {
+function renderTurnsOverviewTable(data: SessionLogData, hydraTurnMatches?: Map<number, number>): string {
 	if (data.turns.length === 0) { return ''; }
-	const rows = buildTurnOverviewRows(data.turns);
+	const rows = buildTurnOverviewRows(data.turns, data.hydraFusion, hydraTurnMatches);
 	const hasCached = rows.some(r => r.cached !== null);
 	const hasModelSwitches = rows.some((r, i) => i > 0 && r.model && rows[i - 1].model && r.model !== rows[i - 1].model);
 	const hasCost = rows.some(r => r.cost !== null || r.children.some(c => c.cost !== null));
 	const totalChildren = rows.reduce((sum, r) => sum + r.children.length, 0);
+	const hasLegs = rows.some(r => r.legs.length > 0);
+	const columnCount = 7 + (hasCached ? 1 : 0) + (hasCost ? 1 : 0);
+
+	// Reverse-map chat turn number → this turn's matched HydraFusionTurn, so an expanded
+	// row can reuse the exact same leg table the HydraFusion section renders above
+	// (instead of re-deriving markup from the trimmed TurnOverviewLegRow) and show the
+	// same total: the turn's own rollup `aiu`, not a sum of the legs' individual costs,
+	// which `analyzeHydraFusionSession` can legitimately differ from (it prefers
+	// `session.fusion_completed.totalNanoAiu` and only falls back to summing legs when
+	// that rollup is missing — see buildTurn in src/hydrafusion.ts).
+	const hydraTurnByChatTurn = new Map<number, HydraFusionTurn>();
+	if (data.hydraFusion && hydraTurnMatches) {
+		for (const [hydraIndex, chatTurnNumber] of hydraTurnMatches) {
+			const hydraTurn = data.hydraFusion.turns[hydraIndex];
+			if (hydraTurn) { hydraTurnByChatTurn.set(chatTurnNumber, hydraTurn); }
+		}
+	}
 
 	const costCell = (cost: number | null): string => hasCost ? `<td class="count-cell">${cost !== null ? formatCost(cost) : '—'}</td>` : '';
 
@@ -1109,8 +1133,22 @@ ${hasCached ? '<td class="count-cell">—</td>' : ''}
 ${costCell(child.cost)}
 <td class="turns-overview-actual" title="Estimated from text">~</td>
 </tr>`).join('');
+		const legToggle = row.legs.length > 0
+			? `<button type="button" class="turns-overview-leg-toggle" data-turn="${row.turnNumber}" aria-expanded="false" aria-label="Toggle HydraFusion legs for step #${row.turnNumber}" title="Show the HydraFusion legs behind this step">▸</button> `
+			: '';
+		const hydraTurn = hydraTurnByChatTurn.get(row.turnNumber);
+		const legsRow = row.legs.length > 0 && hydraTurn
+			? `<tr class="turns-overview-legs-row" data-parent-turn="${row.turnNumber}" style="display: none;">
+<td colspan="${columnCount}">
+<div class="turns-overview-legs-wrap">
+<div class="turns-overview-legs-caption">⚡ HydraFusion legs for step #${row.turnNumber} — total <strong>${escapeHtml(formatFusionCost(hydraTurn.aiu))}</strong></div>
+${renderLegsTable(hydraTurn.phases)}
+</div>
+</td>
+</tr>`
+			: '';
 		return `<tr class="turns-overview-row${switched ? ' turns-overview-row-switch' : ''}" data-turn="${row.turnNumber}" title="Jump to turn #${row.turnNumber}">
-<td class="turns-overview-num">#${row.turnNumber}${switched ? ' <span class="overview-switch-icon" title="Model changed from the previous step">⇄</span>' : ''}</td>
+<td class="turns-overview-num">${legToggle}#${row.turnNumber}${switched ? ' <span class="overview-switch-icon" title="Model changed from the previous step">⇄</span>' : ''}</td>
 <td><span class="turn-mode" style="background: ${getModeColor(row.mode)};">${getModeIcon(row.mode)} ${escapeHtml(row.mode)}</span></td>
 <td>${renderModelOverviewBadge(row.model)}</td>
 <td class="count-cell">${formatCompact(row.input)}</td>
@@ -1119,7 +1157,7 @@ ${cachedCell}
 <td class="count-cell"><strong>${formatCompact(row.total)}</strong></td>
 ${costCell(row.cost)}
 <td class="turns-overview-actual" title="${row.isActual ? 'Actual API usage' : 'Estimated from text'}">${row.isActual ? '✓' : '~'}</td>
-</tr>${childRows}`;
+</tr>${childRows}${legsRow}`;
 	}).join('');
 
 	return `
@@ -1128,6 +1166,7 @@ ${costCell(row.cost)}
 <span>🧭 Session Steps Overview (${rows.length})</span>
 ${hasModelSwitches ? '<span class="overview-switch-note">⇄ marks a model change from the previous step</span>' : ''}
 ${totalChildren > 0 ? `<span class="overview-switch-note">🤖 ↳ marks a sub-agent/child session delegated from that step</span>` : ''}
+${hasLegs ? '<span class="overview-switch-note">⚡ expand a step to see the HydraFusion legs behind it</span>' : ''}
 </div>
 <div class="turns-overview-table-wrap">
 <table class="turns-overview-table">
@@ -1218,12 +1257,43 @@ e.preventDefault();
 });
 }
 
-/** Clicking a turns-overview row jumps to and briefly highlights the matching turn card. */
+/**
+ * Clicking a turns-overview row jumps to and briefly highlights the matching turn card.
+ * A row with HydraFusion legs also gets a ▸ toggle that expands them in place — its
+ * clicks are excluded here (via stopPropagation in its own handler below) so they
+ * don't also trigger the jump-to-turn-card behavior.
+ */
 function wireUpTurnsOverviewHandlers(): void {
 document.querySelectorAll<HTMLElement>('.turns-overview-row').forEach(row => {
-row.addEventListener('click', () => {
+row.addEventListener('click', (e) => {
+if ((e.target as HTMLElement).closest('.turns-overview-leg-toggle')) { return; }
 const turnNumber = parseInt(row.getAttribute('data-turn') || '0', 10);
 if (turnNumber > 0) { scrollAndFocusTurn(turnNumber); }
+});
+});
+
+document.querySelectorAll<HTMLElement>('.turns-overview-leg-toggle').forEach(toggle => {
+toggle.addEventListener('click', (e) => {
+e.stopPropagation();
+const turnNumber = toggle.getAttribute('data-turn') || '';
+const expanded = toggle.getAttribute('aria-expanded') === 'true';
+setOverviewLegsExpanded(turnNumber, !expanded);
+});
+});
+}
+
+/** Clicking (or activating with the keyboard) a HydraFusion turn's "jump to step" link scrolls to and expands its row in the Session Steps Overview table below. */
+function wireUpHydraFusionHandlers(): void {
+document.querySelectorAll<HTMLElement>('.hydra-jump-to-step').forEach(link => {
+const activate = (e: Event): void => {
+e.preventDefault();
+e.stopPropagation();
+const turnNumber = parseInt(link.getAttribute('data-turn') || '0', 10);
+if (turnNumber > 0) { scrollAndFocusOverviewRow(turnNumber); }
+};
+link.addEventListener('click', activate);
+link.addEventListener('keydown', (e) => {
+if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') { activate(e); }
 });
 });
 }
@@ -1254,6 +1324,7 @@ vscode.postMessage({ command: 'openRawFile' });
 
 wireUpToolCallHandlers();
 wireUpTurnsOverviewHandlers();
+wireUpHydraFusionHandlers();
 }
 
 // ── Entry-point renderers (signatures preserved) ─────────────────────────────
@@ -1475,6 +1546,12 @@ function renderLayout(data: SessionLogData): void {
 		modeSubLabel: modeStats.modeSubLabel,
 	};
 
+	// Computed once and shared by both renderers below so the HydraFusion section's
+	// "jump to step" links and the Session Steps Overview table's expandable legs
+	// agree on which turn is which. `undefined` for the overwhelming majority of
+	// sessions, which never used HydraFusion — both renderers treat that as "no legs".
+	const hydraTurnMatches = data.hydraFusion ? matchHydraFusionTurnsToChatTurns(data.turns, data.hydraFusion.turns) : undefined;
+
 	setHtml(root, `
 <style>${themeStyles}</style>
 <style>${styles}</style>
@@ -1490,9 +1567,9 @@ ${renderSessionActualUsage(
 	actualStats.aggregatedBreakdown,
 )}
 
-${renderHydraFusionSection(data.hydraFusion)}
+${renderHydraFusionSection(data.hydraFusion, hydraTurnMatches)}
 
-${renderTurnsOverviewTable(data)}
+${renderTurnsOverviewTable(data, hydraTurnMatches)}
 
 <div class="turns-header">
 <span>📝</span>
@@ -1524,6 +1601,26 @@ function scrollAndFocusTurn(turnNumber: number): void {
 	turnCard.focus({ preventScroll: true });
 	turnCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	setTimeout(() => turnCard.classList.remove('turn-card-focused'), 2_000);
+}
+
+/** Shows or hides the HydraFusion legs nested under a Session Steps Overview row, syncing its toggle button. */
+function setOverviewLegsExpanded(turnNumber: string, expanded: boolean): void {
+	const toggle = document.querySelector<HTMLElement>(`.turns-overview-leg-toggle[data-turn="${turnNumber}"]`);
+	const legsRow = document.querySelector<HTMLElement>(`.turns-overview-legs-row[data-parent-turn="${turnNumber}"]`);
+	if (!toggle || !legsRow) { return; }
+	toggle.setAttribute('aria-expanded', String(expanded));
+	toggle.textContent = expanded ? '▾' : '▸';
+	legsRow.style.display = expanded ? '' : 'none';
+}
+
+/** Scrolls to and briefly highlights a Session Steps Overview row, expanding its legs if it has any. */
+function scrollAndFocusOverviewRow(turnNumber: number): void {
+	const row = document.querySelector<HTMLElement>(`.turns-overview-row:not(.turns-overview-child-row)[data-turn="${turnNumber}"]`);
+	if (!row) { return; }
+	setOverviewLegsExpanded(String(turnNumber), true);
+	row.classList.add('turns-overview-row-focused');
+	row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	setTimeout(() => row.classList.remove('turns-overview-row-focused'), 2_000);
 }
 
 function focusRequestedTurn(data: SessionLogData & { focusedTurnNumber?: number; }): void {

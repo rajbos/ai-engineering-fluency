@@ -3,6 +3,9 @@
 // unit-testable directly in Node, unlike main.ts itself which can only be
 // exercised through the headless webview interaction/visual-diff harnesses.
 
+import { aiuToUsd } from '../../../../src/hydrafusion';
+import type { HydraFusionSummary, HydraFusionTurn } from '../../../../src/hydrafusion';
+
 export type TurnOverviewPromptDetail = {
 	category: string;
 	label: string;
@@ -25,6 +28,8 @@ export type TurnOverviewSourceToolCall = {
 
 export type TurnOverviewSourceTurn = {
 	turnNumber: number;
+	/** ISO timestamp of the turn's user message, used only to match it against HydraFusion legs. */
+	timestamp?: string | null;
 	model: string | null;
 	mode: string;
 	inputTokensEstimate: number;
@@ -47,6 +52,19 @@ export type TurnOverviewChildRow = {
 	cost: number | null;
 };
 
+/** One HydraFusion leg nested under the turn whose prompt it answered — see `buildTurnLegRows`. */
+export type TurnOverviewLegRow = {
+	kind: string;
+	model: string;
+	verdict: string | null;
+	isFinalSource: boolean;
+	durationMs: number;
+	requestCount: number;
+	input: number;
+	output: number;
+	costUsd: number;
+};
+
 export type TurnOverviewRow = {
 	turnNumber: number;
 	model: string | null;
@@ -58,6 +76,8 @@ export type TurnOverviewRow = {
 	isActual: boolean;
 	cost: number | null;
 	children: TurnOverviewChildRow[];
+	/** HydraFusion legs behind this turn, when `matchHydraFusionTurnsToChatTurns` could place it. Empty otherwise. */
+	legs: TurnOverviewLegRow[];
 };
 
 /**
@@ -90,8 +110,37 @@ export function buildTurnChildRows(turn: TurnOverviewSourceTurn): TurnOverviewCh
 		});
 }
 
-/** Builds one overview row per turn, preferring actual API usage over the text-based estimate when available. */
-export function buildTurnOverviewRows(turns: TurnOverviewSourceTurn[]): TurnOverviewRow[] {
+/** Builds the leg rows for one HydraFusion turn, converting each leg's AIU cost to USD. */
+export function buildTurnLegRows(hydraTurn: HydraFusionTurn): TurnOverviewLegRow[] {
+	return hydraTurn.phases.map(p => ({
+		kind: p.kind, model: p.model, verdict: p.verdict, isFinalSource: p.isFinalSource,
+		durationMs: p.durationMs, requestCount: p.usage.requestCount,
+		input: p.usage.inputTokens, output: p.usage.outputTokens, costUsd: aiuToUsd(p.usage.aiu),
+	}));
+}
+
+/**
+ * Builds one overview row per turn, preferring actual API usage over the text-based estimate when available.
+ *
+ * @param hydraFusion The session's HydraFusion summary, when it used the router. Absent for the
+ *   overwhelming majority of sessions, in which case every row's `legs` is simply empty.
+ * @param hydraTurnMatches Fusion turn index → matching `ChatTurn.turnNumber`, from
+ *   `matchHydraFusionTurnsToChatTurns`. Callers compute this once and pass it to both this
+ *   function and `renderHydraFusionSection` so the two views agree on which turn is which.
+ */
+export function buildTurnOverviewRows(
+	turns: TurnOverviewSourceTurn[],
+	hydraFusion?: HydraFusionSummary,
+	hydraTurnMatches?: Map<number, number>,
+): TurnOverviewRow[] {
+	const legsByChatTurn = new Map<number, TurnOverviewLegRow[]>();
+	if (hydraFusion && hydraTurnMatches) {
+		for (const [hydraIndex, chatTurnNumber] of hydraTurnMatches) {
+			const hydraTurn = hydraFusion.turns[hydraIndex];
+			if (hydraTurn) { legsByChatTurn.set(chatTurnNumber, buildTurnLegRows(hydraTurn)); }
+		}
+	}
+
 	return turns.map(turn => {
 		const au = turn.actualUsage;
 		const isActual = !!au;
@@ -104,6 +153,7 @@ export function buildTurnOverviewRows(turns: TurnOverviewSourceTurn[]): TurnOver
 			turnNumber: turn.turnNumber, model: turn.model, mode: turn.mode, input, cached: getTurnCachedTokens(turn), output, total, isActual,
 			cost: turn.estimatedCost ?? null,
 			children: buildTurnChildRows(turn),
+			legs: legsByChatTurn.get(turn.turnNumber) ?? [],
 		};
 	});
 }

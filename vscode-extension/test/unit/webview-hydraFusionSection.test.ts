@@ -1,13 +1,14 @@
 import { describe, test } from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { analyzeHydraFusionSession } from '../../../src/hydrafusion';
+import { analyzeHydraFusionSession, matchHydraFusionTurnsToChatTurns } from '../../../src/hydrafusion';
 import { setFormatLocale } from '../../src/webview/shared/formatUtils';
 import {
 	barWidthPercent,
-	formatAiu,
+	formatFusionCost,
 	formatFusionDuration,
 	renderHydraFusionSection,
+	renderLegsTable,
 } from '../../src/webview/logviewer/hydraFusionSection';
 
 // Pin the locale so decimal separators and grouping are deterministic regardless of
@@ -57,14 +58,14 @@ function renderCascade(overrides: { draftModel?: string } = {}): string {
 	return renderHydraFusionSection(analyzeHydraFusionSession(cascadeSession(overrides)));
 }
 
-describe('formatAiu', () => {
-	test('keeps two decimals for the sub-credit turns that routing produces', () => {
-		assert.equal(formatAiu(0.58), '0.58');
-		assert.equal(formatAiu(14.72), '14.72');
+describe('formatFusionCost', () => {
+	test('converts AIU credits to USD at the documented $0.01-per-credit rate', () => {
+		assert.equal(formatFusionCost(14.72), '$0.15');
+		assert.equal(formatFusionCost(192.25), '$1.92');
 	});
 
-	test('drops to one decimal once the number is large enough that two stop informing', () => {
-		assert.equal(formatAiu(2811.93338), '2,811.9');
+	test('rounds a sub-cent leg to the nearest cent rather than showing more precision than the app uses elsewhere', () => {
+		assert.equal(formatFusionCost(0.58), '$0.01');
 	});
 });
 
@@ -126,11 +127,12 @@ describe('renderHydraFusionSection', () => {
 		assert.match(html, /1 rejected · 0 accepted/);
 	});
 
-	test('separates review spend from the credits that bought the answer', () => {
+	test('separates review spend from the credits that bought the answer, shown in dollars rather than AIU', () => {
 		const html = renderCascade();
 		assert.match(html, /Review share/);
-		// draft 0.58 + judge 2.45 were superseded by the repair leg.
-		assert.match(html, /3\.03 of 14\.72 AIU/);
+		// draft 0.58 + judge 2.45 AIU were superseded by the repair leg, at $0.01 per credit.
+		assert.match(html, /\$0\.03 of \$0\.15/);
+		assert.ok(!html.includes('AIU'), 'AIU units should no longer appear now that costs are shown in dollars');
 	});
 
 	test('distinguishes router legs from inference calls', () => {
@@ -202,5 +204,44 @@ describe('renderHydraFusionSection', () => {
 		const html = renderHydraFusionSection(analyzeHydraFusionSession(single));
 		assert.ok(!html.includes('Judge rejections'));
 		assert.match(html, /0\.0%/); // compound rate: no turn used more than one model
+	});
+
+	test('omits the jump-to-step link when no chat-turn match is supplied', () => {
+		assert.ok(!renderCascade().includes('hydra-jump-to-step'));
+	});
+
+	test('links to the matching Session Steps Overview row when a chat-turn match is supplied', () => {
+		const summary = analyzeHydraFusionSession(cascadeSession());
+		const matches = new Map([[0, 3]]); // this session's one fusion turn matches chat step #3
+		const html = renderHydraFusionSection(summary, matches);
+		assert.match(html, /hydra-jump-to-step" data-turn="3"/);
+		assert.match(html, /step #3/);
+	});
+
+	test('omits the jump-to-step link for an in-flight turn with no completed phases, even with a chat-turn match', () => {
+		// Resolved but nothing has completed yet — the overview row would have no legs to expand.
+		const inFlight = line('session.fusion_resolved', { fusionId: 'f', pattern: 'single', phasePlan: [{ kind: 'primary' }], syntheticModel: 'hydrafusion' });
+		const summary = analyzeHydraFusionSession(inFlight);
+		const html = renderHydraFusionSection(summary, new Map([[0, 1]]));
+		assert.ok(!html.includes('hydra-jump-to-step'));
+	});
+});
+
+describe('renderLegsTable', () => {
+	test('renders one row per leg with its phase, model, verdict, duration and cost', () => {
+		const summary = analyzeHydraFusionSession(cascadeSession());
+		const html = renderLegsTable(summary!.turns[0].phases);
+		assert.match(html, /hydra-phase-badge hydra-phase-repair">🛠️ repair/);
+		assert.match(html, /hydra-verdict hydra-verdict-reject">reject</);
+		assert.match(html, /gpt-5\.6-sol/);
+		assert.match(html, /mai-code-1\.1-flash/);
+		assert.match(html, /\$0\.12/); // the 11.69 AIU repair leg, at $0.01 per credit
+	});
+
+	test('is the exact table renderTurnRow embeds, so main.ts can reuse it for the matching overview row', () => {
+		const summary = analyzeHydraFusionSession(cascadeSession());
+		const sectionHtml = renderHydraFusionSection(summary);
+		const legsTableHtml = renderLegsTable(summary!.turns[0].phases);
+		assert.ok(sectionHtml.includes(legsTableHtml));
 	});
 });

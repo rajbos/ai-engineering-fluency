@@ -1333,6 +1333,44 @@ details[open] > summary .collapse-arrow {
 	color: var(--text-secondary);
 }
 
+.turns-overview-row-focused {
+	background: color-mix(in srgb, var(--vscode-focusBorder, #3b82f6) 22%, transparent);
+}
+
+.turns-overview-leg-toggle {
+	background: transparent;
+	border: 1px solid var(--border-subtle);
+	border-radius: 4px;
+	color: var(--text-secondary);
+	cursor: pointer;
+	font-size: 9px;
+	line-height: 1;
+	padding: 2px 4px;
+	margin-right: 2px;
+}
+
+.turns-overview-leg-toggle:hover {
+	background: var(--bg-tertiary);
+	color: var(--text-primary);
+}
+
+.turns-overview-legs-row td {
+	background: var(--bg-tertiary);
+	padding: 10px 12px 12px 34px;
+	white-space: normal;
+}
+
+.turns-overview-legs-wrap {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.turns-overview-legs-caption {
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
 /* Session hierarchy card */
 .hierarchy-card-content {
 text-align: left;
@@ -1725,6 +1763,20 @@ span.hydra-bar.hydra-phase-other { background: var(--text-secondary); }
 	color: var(--text-secondary);
 	font-variant-numeric: tabular-nums;
 	white-space: nowrap;
+}
+
+.hydra-jump-to-step {
+	border: 1px solid var(--border-subtle);
+	border-radius: 5px;
+	padding: 1px 6px;
+	cursor: pointer;
+	font-variant-numeric: normal;
+}
+
+.hydra-jump-to-step:hover,
+.hydra-jump-to-step:focus-visible {
+	background: var(--bg-tertiary);
+	color: var(--text-primary);
 }
 
 .hydra-turn-body {
