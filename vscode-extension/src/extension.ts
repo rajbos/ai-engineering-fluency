@@ -420,6 +420,44 @@ export function tooltipSecondaryPeriod(
 	return usesLast30(tokensSetting) || usesLast30(costSetting) ? 'last30days' : 'currentMonth';
 }
 
+/** Sums per-provider costs into a total-across-all-providers figure. */
+export function defaultSumBillingGroupCosts(billingGroupCosts: Record<string, number> | undefined): number {
+	return Object.values(billingGroupCosts ?? {}).reduce((s, v) => s + v, 0);
+}
+
+/**
+ * Formats the main stats table in Markdown for the status bar hover tooltip.
+ * Renders Today, Current Month, and Last 30 Days columns side by side.
+ */
+export function formatTooltipStatsTable(
+	detailedStats: DetailedStats,
+	sumCosts: (costs: Record<string, number> | undefined) => number = defaultSumBillingGroupCosts
+): string {
+	// Trailing &nbsp; padding on "Today" and "Current Month" columns widens them a bit,
+	// giving the value columns visual breathing room without VS Code table cell CSS to lean on.
+	const pad = (cell: string) => `${cell}&nbsp;&nbsp;&nbsp;&nbsp;`;
+	// Hide decimals once the rounded display value reaches 1000+ so large totals stay readable.
+	const formatUsageValue = (n: number, fractionDigits: number, unit: string) => {
+		const rounded = Math.round(n * (10 ** fractionDigits)) / (10 ** fractionDigits);
+		const format = Math.abs(rounded) >= 1000
+			? { minimumFractionDigits: 0, maximumFractionDigits: 0 }
+			: { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits };
+		return `${n.toLocaleString(undefined, format)} ${unit}`;
+	};
+	const grams = (n: number) => formatUsageValue(n, 2, 'grams');
+	const liters = (n: number) => formatUsageValue(n, 3, 'liters');
+
+	return (
+		`|  | 📅 ${l10n.t('tooltip.todayLabel')} | 📊 ${l10n.t('tooltip.currentMonthLabel')} | 📈 ${l10n.t('tooltip.last30DaysLabel')} |\n` +
+		`|:---|:---|:---|:---|\n` +
+		`| ${l10n.t('tooltip.tokensLabel')} : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${pad(detailedStats.month.tokens.toLocaleString())} | ${detailedStats.last30Days.tokens.toLocaleString()} |\n` +
+		`| ${l10n.t('tooltip.copilotCostLabel')} : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | ${pad(`$ ${(detailedStats.month.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(detailedStats.last30Days.estimatedCostCopilot ?? 0).toFixed(2)} |\n` +
+		`| ${l10n.t('tooltip.allProvidersCostLabel')} : | ${pad(`$ ${sumCosts(detailedStats.today.billingGroupCosts).toFixed(2)}`)} | ${pad(`$ ${sumCosts(detailedStats.month.billingGroupCosts).toFixed(2)}`)} | $ ${sumCosts(detailedStats.last30Days.billingGroupCosts).toFixed(2)} |\n` +
+		`| ${l10n.t('tooltip.co2Label')} : | ${pad(grams(detailedStats.today.co2))} | ${pad(grams(detailedStats.month.co2))} | ${grams(detailedStats.last30Days.co2)} |\n` +
+		`| ${l10n.t('tooltip.waterLabel')} : | ${pad(liters(detailedStats.today.waterUsage))} | ${pad(liters(detailedStats.month.waterUsage))} | ${liters(detailedStats.last30Days.waterUsage)} |\n`
+	);
+}
+
 // ── extension.ts module-level helpers ────────────────────────────────────────
 
 /** Type guard for the social platforms supported by `shareTextToSocialPlatform`. */
@@ -3635,28 +3673,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tooltip.supportThemeIcons = false;
 		tooltip.appendMarkdown(`#### ${l10n.t('tooltip.title')}`);
 		tooltip.appendMarkdown('\n---\n');
-		const secondaryPeriod = tooltipSecondaryPeriod(this.getStatusBarShowTokensSetting(), this.getStatusBarShowCostSetting());
-		const secondaryStats = secondaryPeriod === 'currentMonth' ? detailedStats.month : detailedStats.last30Days;
-		const secondaryLabel = secondaryPeriod === 'currentMonth' ? l10n.t('tooltip.currentMonthLabel') : l10n.t('tooltip.last30DaysLabel');
-		// Trailing &nbsp; padding on the "Today" column widens it a bit, giving the two
-		// value columns visual breathing room without VS Code table cell CSS to lean on.
-		const pad = (cell: string) => `${cell}&nbsp;&nbsp;&nbsp;&nbsp;`;
-		// Hide decimals once the rounded display value reaches 1000+ so large totals stay readable.
-		const formatUsageValue = (n: number, fractionDigits: number, unit: string) => {
-			const rounded = Math.round(n * (10 ** fractionDigits)) / (10 ** fractionDigits);
-			const format = Math.abs(rounded) >= 1000
-				? { minimumFractionDigits: 0, maximumFractionDigits: 0 }
-				: { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits };
-			return `${n.toLocaleString(undefined, format)} ${unit}`;
-		};
-		const grams = (n: number) => formatUsageValue(n, 2, 'grams');
-		const liters = (n: number) => formatUsageValue(n, 3, 'liters');
-		tooltip.appendMarkdown(`|  | 📅 ${l10n.t('tooltip.todayLabel')} | 📊 ${secondaryLabel} |\n|:---|:---|:---|\n`);
-		tooltip.appendMarkdown(`| ${l10n.t('tooltip.tokensLabel')} : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${secondaryStats.tokens.toLocaleString()} |\n`);
-		tooltip.appendMarkdown(`| ${l10n.t('tooltip.copilotCostLabel')} : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
-		tooltip.appendMarkdown(`| ${l10n.t('tooltip.allProvidersCostLabel')} : | ${pad(`$ ${this.sumBillingGroupCosts(detailedStats.today.billingGroupCosts).toFixed(2)}`)} | $ ${this.sumBillingGroupCosts(secondaryStats.billingGroupCosts).toFixed(2)} |\n`);
-		tooltip.appendMarkdown(`| ${l10n.t('tooltip.co2Label')} : | ${pad(grams(detailedStats.today.co2))} | ${grams(secondaryStats.co2)} |\n`);
-		tooltip.appendMarkdown(`| ${l10n.t('tooltip.waterLabel')} : | ${pad(liters(detailedStats.today.waterUsage))} | ${liters(secondaryStats.waterUsage)} |\n`);
+		tooltip.appendMarkdown(formatTooltipStatsTable(detailedStats, (costs) => this.sumBillingGroupCosts(costs)));
 		tooltip.appendMarkdown('\n---\n');
 		this.appendProviderCostSection(tooltip, detailedStats);
 		return tooltip;
@@ -3664,7 +3681,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Sums per-provider costs into a total-across-all-providers figure. */
 	private sumBillingGroupCosts(billingGroupCosts: Record<string, number> | undefined): number {
-		return Object.values(billingGroupCosts ?? {}).reduce((s, v) => s + v, 0);
+		return defaultSumBillingGroupCosts(billingGroupCosts);
 	}
 
 	/** Builds and appends the cost sections: a GitHub Copilot budget gauge on top (spend vs.
