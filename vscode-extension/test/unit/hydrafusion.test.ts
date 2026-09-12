@@ -430,7 +430,7 @@ describe('matchHydraFusionTurnsToChatTurns', () => {
 		assert.equal(matches.get(1), 2);
 	});
 
-	test('stops advancing at a chat turn with no timestamp rather than guessing past it', () => {
+	test('never matches a chat turn with no timestamp, even when it is otherwise the nearest one', () => {
 		const content = fusionTurnAt('f1', '2026-01-01T00:00:20.000Z');
 		const summary = analyzeHydraFusionSession(content)!;
 		const chatTurns = [
