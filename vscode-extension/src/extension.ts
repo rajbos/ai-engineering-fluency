@@ -4148,6 +4148,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
 			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
 			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
+			// Details view — collapsible "Usage by Editor" section heading tooltips
+			'details.editorSection.show': l10n.t('details.editorSection.show'),
+			'details.editorSection.hide': l10n.t('details.editorSection.hide'),
 			// Log viewer summary card labels
 			'logviewer.summary.interactions': l10n.t('logviewer.summary.interactions'),
 			'logviewer.summary.editorMode': l10n.t('logviewer.summary.editorMode'),
@@ -10276,6 +10279,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     const sortSettings = this.context.globalState.get('details.sortSettings', {
       editor: { key: 'name', dir: 'asc' },
       model: { key: 'name', dir: 'asc' },
+      modelOtherExpanded: false,
+      editorOtherExpanded: false,
+      editorSectionCollapsed: false,
       excludedProviders: [],
     });
     const dataWithBackend = {

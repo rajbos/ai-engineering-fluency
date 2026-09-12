@@ -32,6 +32,10 @@ export interface WebviewLocalization {
 	'usage.contextPressure.worstFill': string;
 	'usage.contextPressure.nearLimitTooltip': string;
 
+	// Details view — collapsible "Usage by Editor" section heading tooltips
+	'details.editorSection.show': string;
+	'details.editorSection.hide': string;
+
 	// Log viewer summary card labels
 	'logviewer.summary.interactions': string;
 	'logviewer.summary.editorMode': string;
@@ -83,6 +87,8 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'usage.contextPressure.nearLimitLabel': '⚠️ Sessions near the limit',
 	'usage.contextPressure.worstFill': 'Fullest session reached {0}% of its window',
 	'usage.contextPressure.nearLimitTooltip': 'Copilot CLI sessions that filled at least {0}% of their context window without compacting — the early-warning band before context starts getting dropped',
+	'details.editorSection.show': 'Show Usage by Editor',
+	'details.editorSection.hide': 'Hide Usage by Editor',
 	'logviewer.summary.interactions': 'Interactions',
 	'logviewer.summary.editorMode': 'Editor Mode',
 	'logviewer.summary.estimatedTokens': 'Estimated Tokens',

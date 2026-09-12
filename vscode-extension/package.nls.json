@@ -193,6 +193,8 @@
   "usage.contextPressure.nearLimitLabel": "⚠️ Sessions near the limit",
   "usage.contextPressure.worstFill": "Fullest session reached {0}% of its window",
   "usage.contextPressure.nearLimitTooltip": "Copilot CLI sessions that filled at least {0}% of their context window without compacting — the early-warning band before context starts getting dropped",
+  "details.editorSection.show": "Show Usage by Editor",
+  "details.editorSection.hide": "Hide Usage by Editor",
   "onboarding.welcome.message": "AI Engineering Fluency tracks your GitHub Copilot usage — token counts, cost estimates, and fluency scores based on how you interact with AI tools.",
   "onboarding.welcome.openFluencyScore": "Open Fluency Score",
   "onboarding.welcome.learnMore": "Learn More",
