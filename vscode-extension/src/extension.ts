@@ -723,6 +723,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private lastEfficiencySessionInputs: EfficiencySessionInput[] | undefined;
 	/** Shared full-year daily-stats walk; see calculateFullDailyStats(). */
 	private _fullDailyStatsInFlight: Promise<DailyTokenStats[]> | undefined;
+	/** Progress reporters watching the shared full-year walk, including late joiners. */
+	private readonly _fullDailyStatsProgressSinks = new Set<(completed: number, total: number) => void>();
 	/** Last successfully rendered Efficiency payload, restored if a refresh build fails. */
 	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
 	private outputChannel!: vscode.OutputChannel;
@@ -1341,6 +1343,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.sessionDiscovery.clearCache();
 		this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = undefined;
 		this.lastEfficiencySessionInputs = undefined;
+		this._lastEfficiencyViewData = undefined;
 		const results: LocalViewRegressionResult[] = [];
 		let dataSourceLabel = 'local session data';
 		try {
@@ -1359,6 +1362,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.sessionDiscovery.clearCache();
 			this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = this.lastDashboardData = undefined;
 			this.lastEfficiencySessionInputs = undefined;
+			this._lastEfficiencyViewData = undefined;
 		}
 		await this.reportLocalViewRegressionResults(results, dataSourceLabel);
 	}
@@ -1501,6 +1505,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.lastUsageAnalysisStats = undefined;
 			this.lastDashboardData = undefined;
 			this.lastEfficiencySessionInputs = undefined;
+			this._lastEfficiencyViewData = undefined;
 
 			this.log(`Cache cleared successfully. Removed ${cacheSize} entries.`);
 			vscode.window.showInformationMessage('Cache cleared successfully. Reloading statistics...');
@@ -4405,8 +4410,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 		knownSessionFiles?: string[],
 		onProgress?: (completed: number, total: number) => void,
 	): Promise<DailyTokenStats[]> {
-		this._fullDailyStatsInFlight ??= this.calculateDailyStats(365, knownSessionFiles, onProgress)
-			.finally(() => { this._fullDailyStatsInFlight = undefined; });
+		// Reporters are held in a set rather than passed straight through, because a caller
+		// that joins a walk already in flight would otherwise have its reporter silently
+		// dropped — the Efficiency panel opening during the refresh's detached walk would
+		// then show no progress at all until that walk finished.
+		if (onProgress) { this._fullDailyStatsProgressSinks.add(onProgress); }
+		this._fullDailyStatsInFlight ??= this
+			.calculateDailyStats(365, knownSessionFiles, (completed, total) => {
+				for (const sink of this._fullDailyStatsProgressSinks) { sink(completed, total); }
+			})
+			.finally(() => {
+				this._fullDailyStatsInFlight = undefined;
+				this._fullDailyStatsProgressSinks.clear();
+			});
 		return this._fullDailyStatsInFlight;
 	}
 
@@ -9742,10 +9758,17 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		dailyStats: DailyTokenStats[]; usage: UsageAnalysisStats; sessionInputs: EfficiencySessionInput[];
 	}> {
 		const stepPct = CopilotTokenTracker.EFFICIENCY_STEP_PCT;
-		this.postEfficiencyStep(send, stepPct.daily, l10n.t('loading.efficiency.dailyActivity'));
-		const dailyStats = (!forceRecalc && this.lastFullDailyStats)
-			? this.lastFullDailyStats
-			: await this.calculateFullDailyStats(undefined, this.buildProgressCallback(true, undefined, send));
+		let dailyStats: DailyTokenStats[];
+		if (!forceRecalc && this.lastFullDailyStats) {
+			this.postEfficiencyStep(send, stepPct.daily, l10n.t('loading.efficiency.dailyActivity'));
+			dailyStats = this.lastFullDailyStats;
+		} else {
+			// No compute sub-step before the walk. The bar is monotonic and parsing owns only
+			// its lower band, so posting one here would pin the bar above that band and freeze
+			// it for the whole parse — the exact failure this view had at 96%. The walk's own
+			// parsing ticks drive the bar instead.
+			dailyStats = await this.calculateFullDailyStats(undefined, this.buildProgressCallback(true, undefined, send));
+		}
 		this.postEfficiencyStep(send, stepPct.usage, l10n.t('loading.efficiency.usageAnalysis'));
 		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
 		this.postEfficiencyStep(send, stepPct.sessions, l10n.t('loading.efficiency.sessionSignals'));

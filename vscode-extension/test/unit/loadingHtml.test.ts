@@ -126,6 +126,27 @@ test('a host that sends no compute sub-steps still moves forward at its fixed 96
 	assert.equal(ui.pct(), '96%');
 });
 
+test('a compute sub-step posted before parsing would freeze the bar for the whole parse', () => {
+	const ui = runLoadingScript();
+
+	// Regression guard for the shape of the original bug, at a different number: a host that
+	// announces a compute sub-step *before* the file walk pins the monotonic bar above
+	// parsing's band, and every subsequent parse tick is then clamped away.
+	ui.post({ command: 'loadingStep', step: 'computing', percentage: 88, label: 'Aggregating daily activity…' });
+	ui.post({ command: 'loadingProgress', completed: 100, total: 400, percentage: 25 });
+	ui.post({ command: 'loadingProgress', completed: 400, total: 400, percentage: 100 });
+
+	assert.equal(ui.pct(), '88%', 'the bar cannot move during the parse once pinned above its band');
+
+	// Which is why collectEfficiencyInputs() posts no compute step until the walk is done:
+	// left to itself, parsing climbs through its own band.
+	const fresh = runLoadingScript();
+	fresh.post({ command: 'loadingProgress', completed: 100, total: 400, percentage: 25 });
+	assert.equal(fresh.pct(), '21%');
+	fresh.post({ command: 'loadingProgress', completed: 400, total: 400, percentage: 100 });
+	assert.equal(fresh.pct(), '85%');
+});
+
 test('a late parsing tick cannot drag the bar back below a compute sub-step', () => {
 	const ui = runLoadingScript();
 
