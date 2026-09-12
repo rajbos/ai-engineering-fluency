@@ -64,6 +64,18 @@ export interface WebviewLocalization {
 	'logviewer.summary.started': string;
 	'logviewer.summary.lastActivity': string;
 
+	// HydraFusion Routing section (log viewer) and its Session Steps Overview integration
+	'hydrafusion.table.cost': string;
+	'hydrafusion.turn.costTooltip': string;
+	'hydrafusion.turn.jumpToStepTooltip': string;
+	'hydrafusion.turn.jumpToStepLabel': string;
+	'hydrafusion.turnsPanel.subtitle': string;
+	'hydrafusion.overview.toggleLegsAriaLabel': string;
+	'hydrafusion.overview.showLegsTooltip': string;
+	'hydrafusion.overview.legsCaption': string;
+	'hydrafusion.overview.modelChangedTooltip': string;
+	'hydrafusion.overview.expandHint': string;
+
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
 }
@@ -117,7 +129,17 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'logviewer.summary.modified': 'Modified',
 	'logviewer.summary.timeline': 'Timeline',
 	'logviewer.summary.started': 'Started',
-	'logviewer.summary.lastActivity': 'Last activity'
+	'logviewer.summary.lastActivity': 'Last activity',
+	'hydrafusion.table.cost': 'Cost',
+	'hydrafusion.turn.costTooltip': 'Cost for this turn',
+	'hydrafusion.turn.jumpToStepTooltip': 'Jump to step #{0} in the Session Steps Overview below',
+	'hydrafusion.turn.jumpToStepLabel': '⤵ step #{0}',
+	'hydrafusion.turnsPanel.subtitle': 'Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg a judge rejected. The same legs also appear under their step in the Session Steps Overview below.',
+	'hydrafusion.overview.toggleLegsAriaLabel': 'Toggle HydraFusion legs for step #{0}',
+	'hydrafusion.overview.showLegsTooltip': 'Show the HydraFusion legs behind this step',
+	'hydrafusion.overview.legsCaption': '⚡ HydraFusion legs for step #{0} — total',
+	'hydrafusion.overview.modelChangedTooltip': 'Model changed from the previous step',
+	'hydrafusion.overview.expandHint': '⚡ expand a step to see the HydraFusion legs behind it'
 };
 
 // Current localization strings, initialized with defaults
