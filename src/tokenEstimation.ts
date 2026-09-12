@@ -2,7 +2,7 @@
  * Token estimation and model-related utility functions.
  * Pure or near-pure functions extracted from CopilotTokenTracker for reusability.
  */
-import type { ModelUsage, ModelPricing, ContextReferenceUsage, TokenEstimator } from './types';
+import type { ModelUsage, ModelPricing, ContextReferenceUsage, TokenEstimator, ChatTurn } from './types';
 import { toLocalDayKey } from './utils/dayKeys';
 import type { CopilotCliOtelSessionUsage } from './copilotCliOtel';
 import { getModelLookupCandidates } from './webview/shared/modelUtils';
@@ -10,12 +10,11 @@ import { getModelLookupCandidates } from './webview/shared/modelUtils';
 /** Minimum request shape needed by getModelFromRequest. */
 interface ModelRequestSource {
 	modelId?: string;
+	response?: unknown[];
 	result?: {
 		metadata?: { modelId?: string };
 		details?: string;
 	};
-	/** Response stream items — scanned for an `autoModeResolution` entry (see `_findAutoModeResolvedModel`). */
-	response?: unknown[];
 }
 
 /** Shape of a single delta event line in a JSONL session file. */
@@ -1050,46 +1049,41 @@ function _gmrMatchDisplayName(details: string, modelPricing: { [key: string]: Mo
 	return null;
 }
 
-/**
- * When Copilot's "Auto" model routing is used, `request.modelId` (and
- * `result.metadata.modelId`) only ever record the generic `"auto"` /
- * `"copilot/auto"` id — the actual model Auto picked for that turn is reported
- * separately, as an `autoModeResolution` item in the response stream:
- * `{ kind: 'autoModeResolution', resolved: { id, name } }`. Without resolving
- * this, cost/tier lookups treat "auto" as an unpriced model id, silently
- * showing $0/no cost for every Auto-routed turn. Returns null when no such
- * item is present (e.g. non-Auto requests, or older sessions predating it).
- */
-function _findAutoModeResolvedModel(response: unknown[] | undefined): string | null {
-	if (!Array.isArray(response)) { return null; }
-	for (const item of response) {
-		if (item && typeof item === 'object' && (item as { kind?: string }).kind === 'autoModeResolution') {
-			const id = (item as { resolved?: { id?: string } }).resolved?.id;
-			if (typeof id === 'string' && id) { return id; }
-		}
-	}
-	return null;
+function isAutoModel(model: string | undefined): boolean {
+	return model === 'auto' || model === 'copilot/auto';
 }
 
-export function getModelFromRequest(request: ModelRequestSource, modelPricing: { [key: string]: ModelPricing } = {}): string {
-	const rawModelId = request.modelId
-		? request.modelId.replace(/^copilot\//, '')
-		: (request.result?.metadata?.modelId ? request.result.metadata.modelId.replace(/^copilot\//, '') : null);
-	if (rawModelId && rawModelId !== 'auto') { return rawModelId; }
-	if (rawModelId === 'auto') {
-		// Auto routing: the raw id is a generic placeholder — try to resolve the
-		// model actually picked for this turn before falling back to the "auto"
-		// sentinel itself (never silently substitute an unrelated model here).
-		const resolved = _findAutoModeResolvedModel(request.response);
-		if (resolved) { return resolved; }
+function getAutoResolution(request: ModelRequestSource): string | undefined {
+	if (!Array.isArray(request.response)) { return undefined; }
+	for (const item of request.response) {
+		if (!item || typeof item !== 'object' || !('kind' in item) || item.kind !== 'autoModeResolution') { continue; }
+		if (!('resolved' in item) || !item.resolved || typeof item.resolved !== 'object') { continue; }
+		if ('id' in item.resolved && typeof item.resolved.id === 'string' && item.resolved.id && !isAutoModel(item.resolved.id)) {
+			return item.resolved.id.replace(/^copilot\//, '');
+		}
 	}
+	return undefined;
+}
+
+/** Only explicit request-level evidence qualifies; a session picker can change between turns. */
+export function isCopilotAutoRequest(request: ModelRequestSource): boolean {
+	return isAutoModel(request.modelId) || isAutoModel(request.result?.metadata?.modelId)
+		|| (Array.isArray(request.response) && request.response.some(item => !!item && typeof item === 'object' && 'kind' in item && item.kind === 'autoModeResolution'));
+}
+
+export function getModelFromRequest(request: ModelRequestSource, modelPricing: { [key: string]: ModelPricing } = {}, fallbackModel = 'gpt-4'): string {
+	if (request.modelId && !isAutoModel(request.modelId)) { return request.modelId.replace(/^copilot\//, ''); }
+	const resolved = getAutoResolution(request);
+	if (resolved) { return resolved; }
+	const candidates = [request.modelId, request.result?.metadata?.modelId];
+	const explicit = candidates.find(model => model && !isAutoModel(model));
+	if (explicit) { return explicit.replace(/^copilot\//, ''); }
 	if (request.result?.details) {
 		const matched = _gmrMatchDisplayName(request.result.details, modelPricing);
 		if (matched) { return matched; }
 	}
-	if (rawModelId === 'auto') { return rawModelId; }
-
-	return 'gpt-4'; // default
+	if (isCopilotAutoRequest(request)) { return 'auto'; }
+	return fallbackModel;
 }
 
 /**
@@ -1372,9 +1366,45 @@ export function calculateEstimatedCost(
 		const outputCost = (usage.outputTokens / 1_000_000) * pricing.outputCostPerMillion;
 
 		totalCost += uncachedInputCost + cachedReadCost + cacheCreation5mCost + cacheCreation1hCost + outputCost;
+		totalCost -= copilotAutoDiscount(model, usage, baseEntry, pricingSource);
 	}
 
 	return totalCost;
+}
+
+function copilotAutoDiscount(model: string, usage: ModelUsage[string], pricing: ModelPricing, source: 'provider' | 'copilot'): number {
+	if (source !== 'copilot' || !pricing.copilotPricing || !usage.autoRouting) { return 0; }
+	// Provider fallbacks and recorded exact charges are not Copilot rate estimates.
+	return 0.1 * calculateEstimatedCost(
+		{ [model]: { ...usage.autoRouting, sessions: 0 } },
+		{ [model]: pricing.copilotPricing },
+		'provider',
+	);
+}
+
+function attachSubAgentCosts(turn: ChatTurn, modelPricing: Record<string, ModelPricing>, pricingSource: 'provider' | 'copilot'): void {
+	for (const tc of turn.toolCalls) {
+		if (!tc.isSubAgent || !tc.subAgentModel || !tc.subAgentTokens) { continue; }
+		const cost = calculateEstimatedCost({
+			[tc.subAgentModel]: { inputTokens: tc.subAgentTokens.input, outputTokens: tc.subAgentTokens.output, sessions: 1 },
+		}, modelPricing, pricingSource);
+		if (cost > 0) { tc.subAgentCost = cost; }
+	}
+}
+
+/** Attach estimates only; recorded exact billing is handled separately by the caller. */
+export function attachEstimatedTurnCosts(turns: ChatTurn[], modelPricing: Record<string, ModelPricing>, pricingSource: 'provider' | 'copilot'): void {
+	for (const turn of turns) {
+		const inputTokens = turn.actualUsage?.promptTokens ?? turn.inputTokensEstimate;
+		const outputTokens = turn.actualUsage?.completionTokens ?? turn.outputTokensEstimate;
+		if (turn.model && (inputTokens > 0 || outputTokens > 0)) {
+			const usage = { inputTokens, outputTokens, sessions: 1,
+				...(turn.autoRouted ? { autoRouting: { inputTokens, outputTokens } } : {}) };
+			const cost = calculateEstimatedCost({ [turn.model]: usage }, modelPricing, pricingSource);
+			if (cost > 0) { turn.estimatedCost = cost; }
+		}
+		attachSubAgentCosts(turn, modelPricing, pricingSource);
+	}
 }
 
 /**

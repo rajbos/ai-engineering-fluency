@@ -163,6 +163,8 @@ import {
   estimateTokensFromJsonlSession as _estimateTokensFromJsonlSession,
   extractPerRequestUsageFromRawLines as _extractPerRequestUsageFromRawLines,
   getModelFromRequest as _getModelFromRequest,
+  isCopilotAutoRequest,
+  attachEstimatedTurnCosts,
   isJsonlContent as _isJsonlContent,
   isUuidPointerFile as _isUuidPointerFile,
   applyDelta as _applyDelta,
@@ -266,7 +268,7 @@ import {
 } from '../../src/workspaceHelpers';
 
 // --- Chart building ---
-import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from '../../src/chartDataBuilder';
+import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup, getPricingSourceForEditor } from '../../src/chartDataBuilder';
 
 // --- Time-to-first-token analysis ---
 import { buildTtftBuckets as _buildTtftBuckets, buildTtftModelSeries as _buildTtftModelSeries, type TtftGranularity } from '../../src/ttftAnalysis';
@@ -286,6 +288,7 @@ import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDe
 
 // --- Stats helpers ---
 import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, computeFallbackDailyRollup as _computeFallbackDailyRollup, type SessionAggregateInput } from '../../src/statsHelpers';
+import { scaleModelUsage, reconcileDebugLogModelUsage } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -554,10 +557,8 @@ function isUsageAnalysisTab(tab: string): tab is UsageAnalysisTab {
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation.
-	// Correction detection now requires corroboration for agent-self-correction moments and
-	// adds intensity/escalation fields to user-correction moments — old cached moments were
-	// computed under the previous (uncorroborated) logic and lack these fields.
-	private static readonly CACHE_VERSION = 71;
+	// Rebuild model usage with the per-request Auto-routing subset used by Copilot estimates.
+	private static readonly CACHE_VERSION = 72;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
@@ -6206,7 +6207,7 @@ if (session.toolCalls) { usageAnalysis.toolCalls = session.toolCalls; }
 		// Reconcile to the debug log's totals even when the breakdown is missing or
 		// partial (e.g. some requests lack a `model` attribute), so Input+Output
 		// never drifts from Total — see reconcileModelUsageToTotal for why.
-		const supplementModelUsage = reconcileModelUsageToTotal(breakdownUsage, debugLogTokens.inputTokens, debugLogTokens.outputTokens);
+		const supplementModelUsage = reconcileDebugLogModelUsage(cached.modelUsage, breakdownUsage, debugLogTokens.inputTokens, debugLogTokens.outputTokens);
 		// Redistribute to days via the shared helper, which also re-syncs each day's
 		// actualTokens to the debug-log-sized usage — see distributeModelUsageToDays.
 		const supplementDailyRollups = cached.dailyRollups
@@ -6357,11 +6358,7 @@ private computeFallbackDailyRollup(
 	} catch { /* ignore */ }
 }
 	private scaledModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
-		const dayModelUsage: ModelUsage = {};
-		for (const [model, usage] of Object.entries(modelUsage)) {
-			dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}), ...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * fraction) } : {}), sessions: 0 };
-		}
-		return dayModelUsage;
+		return scaleModelUsage(modelUsage, fraction);
 	}
 
 	private resolveAndApplyDebugLog(
@@ -6411,8 +6408,8 @@ private computeFallbackDailyRollup(
 		// Reconcile against the debug log's own totals even when the breakdown is
 		// missing or partial (e.g. some requests lack a `model` attribute), so
 		// Input+Output never drifts from Total — see reconcileModelUsageToTotal.
-		const resolvedModelUsage = reconcileModelUsageToTotal(
-			Object.keys(breakdownUsage).length > 0 ? breakdownUsage : modelUsage,
+		const resolvedModelUsage = reconcileDebugLogModelUsage(
+			modelUsage, breakdownUsage,
 			debugLogTokens.inputTokens,
 			debugLogTokens.outputTokens,
 		);
@@ -7027,7 +7024,7 @@ private computeFallbackDailyRollup(
 				'For accurate billing data, check the Cursor dashboard at cursor.com/settings.',
 			],
 		} : undefined;
-		this.attachTurnCosts(turns);
+		attachEstimatedTurnCosts(turns, this.modelPricing, getPricingSourceForEditor(editorName));
 		return {
 			file: details.file, title: details.title || null, editorSource: details.editorSource,
 			editorName, size: details.size, modified: details.modified, interactions: details.interactions,
@@ -7095,6 +7092,7 @@ private computeFallbackDailyRollup(
 			turnNumber: i + 1,
 			timestamp: request.timestamp ? new Date(request.timestamp).toISOString() : null,
 			mode: sessionMode, userMessage, assistantResponse: responseText, model: requestModel,
+			autoRouted: isCopilotAutoRequest(request),
 			toolCalls, contextReferences: contextRefs, mcpTools,
 			inputTokensEstimate: this.estimateTokensFromText(userMessage, requestModel),
 			outputTokensEstimate: this.estimateTokensFromText(responseText, requestModel),
@@ -7118,15 +7116,7 @@ private computeFallbackDailyRollup(
 	 * mislabel/misprice the turn.
 	 */
 	private resolveDeltaTurnModel(request: any, currentModel: string | null): string {
-		const rawModelId = request.modelId ? String(request.modelId).replace(/^copilot\//, '') : null;
-		if (rawModelId && rawModelId !== 'auto') { return rawModelId; }
-		if (rawModelId === 'auto') {
-			const resolved = this.getModelFromRequest(request);
-			return (resolved && resolved !== 'auto') ? resolved : 'auto';
-		}
-		const resolved = this.getModelFromRequest(request);
-		if (resolved && resolved !== 'auto' && resolved !== 'gpt-4') { return resolved; }
-		return currentModel || resolved || 'gpt-4';
+		return _getModelFromRequest(request, this.modelPricing, currentModel || 'gpt-4');
 	}
 
 	private extractActualUsageFromRequest(request: any, rawUsageFallback: Map<number, { promptTokens: number; outputTokens: number }>, index: number): ActualUsage | undefined {
@@ -7351,6 +7341,8 @@ private computeFallbackDailyRollup(
 		return {
 			turnNumber, timestamp: request.timestamp || request.ts || request.result?.timestamp || null,
 			mode: requestMode, userMessage, assistantResponse, model, toolCalls, contextReferences: contextRefs, mcpTools,
+			autoRouted: isCopilotAutoRequest(request),
+			actualUsage: this.extractActualUsageFromRequest(request, new Map(), turnNumber - 1),
 			inputTokensEstimate: this.estimateTokensFromText(userMessage, model),
 			outputTokensEstimate: this.estimateTokensFromText(assistantResponse, model),
 			thinkingTokensEstimate: this.estimateTokensFromText(thinkingText, model)
@@ -7420,31 +7412,6 @@ private computeFallbackDailyRollup(
 		return _calculateEstimatedCost(modelUsage, this.modelPricing, pricingSource);
 	}
 
-	/**
-	 * Post-processes already-built `turns` with estimated USD costs, for the log viewer's
-	 * Session Steps Overview table: one cost per turn (its own model call — actual usage
-	 * tokens when available, otherwise the text-based estimate) and one per sub-agent/child
-	 * tool call (using its own `subAgentModel` + `subAgentTokens`). Mutates `turns` in place.
-	 * Silently leaves `estimatedCost`/`subAgentCost` unset when the model is unknown or has
-	 * no pricing entry (`calculateEstimatedCost` returns 0 for those, which we treat as "no cost").
-	 */
-	private attachTurnCosts(turns: ChatTurn[]): void {
-		for (const turn of turns) {
-			const input = turn.actualUsage ? turn.actualUsage.promptTokens : turn.inputTokensEstimate;
-			const output = turn.actualUsage ? turn.actualUsage.completionTokens : turn.outputTokensEstimate;
-			if (turn.model && (input > 0 || output > 0)) {
-				const cost = this.calculateEstimatedCost({ [turn.model]: { inputTokens: input, outputTokens: output, sessions: 1 } });
-				if (cost > 0) { turn.estimatedCost = cost; }
-			}
-			for (const tc of turn.toolCalls) {
-				if (!tc.isSubAgent || !tc.subAgentModel || !tc.subAgentTokens) { continue; }
-				const cost = this.calculateEstimatedCost({
-					[tc.subAgentModel]: { inputTokens: tc.subAgentTokens.input, outputTokens: tc.subAgentTokens.output, sessions: 1 },
-				});
-				if (cost > 0) { tc.subAgentCost = cost; }
-			}
-		}
-	}
 
 
 
@@ -10747,12 +10714,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
   /** Merge one file's per-model usage entries into the running aggregate. */
   private static mergeModelUsageEntry(aggregated: ModelUsage, model: string, usage: ModelUsage[ModelId]): void {
     if (!aggregated[model]) { aggregated[model] = { inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0, sessions: 0 }; }
-    const agg = aggregated[model];
-    agg.inputTokens += usage.inputTokens || 0;
-    agg.outputTokens += usage.outputTokens || 0;
-    agg.cachedReadTokens = (agg.cachedReadTokens || 0) + (usage.cachedReadTokens || 0);
-    agg.cacheCreationTokens = (agg.cacheCreationTokens || 0) + (usage.cacheCreationTokens || 0);
-    agg.cacheCreation1hTokens = (agg.cacheCreation1hTokens || 0) + (usage.cacheCreation1hTokens || 0);
+    addModelUsage(aggregated, { [model]: { ...usage, sessions: 0 } });
   }
 
   /** Aggregate per-model usage (and per-model session counts) across a set of session files with modelUsage data. */

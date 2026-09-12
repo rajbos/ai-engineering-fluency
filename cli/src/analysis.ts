@@ -6,6 +6,7 @@
  * bootstrap-dependent logic lives in helpers.ts.
  */
 import { calculateEstimatedCost } from '../../src/tokenEstimation';
+import { addModelUsage, scaleModelUsage } from '../../src/statsHelpers';
 import { normalizePathForComparison, detectClaudeCodeEditorVariant } from '../../src/workspaceHelpers';
 import { getCustomProviderGroup } from '../../src/webview/shared/modelUtils';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
@@ -195,19 +196,7 @@ export function aggregateIntoPeriod(period: PeriodStats, data: SessionData, frac
 	period.sessions++;
 
 	// Merge model usage proportionally
-	for (const [model, usage] of Object.entries(data.modelUsage)) {
-		if (!period.modelUsage[model]) {
-			period.modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
-		}
-		period.modelUsage[model].inputTokens += Math.round(usage.inputTokens * fraction);
-		period.modelUsage[model].outputTokens += Math.round(usage.outputTokens * fraction);
-		if (usage.cachedReadTokens !== undefined) {
-			period.modelUsage[model].cachedReadTokens = (period.modelUsage[model].cachedReadTokens ?? 0) + Math.round(usage.cachedReadTokens * fraction);
-		}
-		if (usage.cacheCreationTokens !== undefined) {
-			period.modelUsage[model].cacheCreationTokens = (period.modelUsage[model].cacheCreationTokens ?? 0) + Math.round(usage.cacheCreationTokens * fraction);
-		}
-	}
+	addModelUsage(period.modelUsage, scaleModelUsage(data.modelUsage, fraction));
 
 	// Track interactions proportionally for the running average
 	const interactions = Math.round(data.interactions * fraction);
@@ -378,9 +367,7 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 				for (const [editor, mu] of Object.entries(e.editorModelUsage)) {
 					for (const [modelId, usage] of Object.entries(mu)) {
 						if (getBillingGroup(editor, modelId) !== group) { continue; }
-						if (!grouped[modelId]) { grouped[modelId] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
-						grouped[modelId].inputTokens += usage.inputTokens;
-						grouped[modelId].outputTokens += usage.outputTokens;
+						addModelUsage(grouped, { [modelId]: { ...usage, sessions: 0 } });
 					}
 				}
 				const pricingSource = group === 'GitHub Copilot' ? 'copilot' : 'provider';
@@ -399,9 +386,7 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 					for (const [editor, mu] of Object.entries(e.editorModelUsage)) {
 						for (const [modelId, usage] of Object.entries(mu)) {
 							if (getBillingGroup(editor, modelId) !== group) { continue; }
-							if (!grouped[modelId]) { grouped[modelId] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
-							grouped[modelId].inputTokens += usage.inputTokens;
-							grouped[modelId].outputTokens += usage.outputTokens;
+							addModelUsage(grouped, { [modelId]: { ...usage, sessions: 0 } });
 						}
 					}
 					return calculateEstimatedCost(grouped, modelPricing, pricingSource);
@@ -416,17 +401,7 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 	const mergeEntry = (target: DailyEntry, src: DailyEntry) => {
 		target.tokens += src.tokens;
 		target.sessions += src.sessions;
-		for (const [m, u] of Object.entries(src.modelUsage)) {
-			if (!target.modelUsage[m]) { target.modelUsage[m] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
-			target.modelUsage[m].inputTokens += u.inputTokens;
-			target.modelUsage[m].outputTokens += u.outputTokens;
-			if (u.cachedReadTokens !== undefined) {
-				target.modelUsage[m].cachedReadTokens = (target.modelUsage[m].cachedReadTokens ?? 0) + u.cachedReadTokens;
-			}
-			if (u.cacheCreationTokens !== undefined) {
-				target.modelUsage[m].cacheCreationTokens = (target.modelUsage[m].cacheCreationTokens ?? 0) + u.cacheCreationTokens;
-			}
-		}
+		addModelUsage(target.modelUsage, scaleModelUsage(src.modelUsage, 1));
 		for (const [e, u] of Object.entries(src.editorUsage)) {
 			if (!target.editorUsage[e]) { target.editorUsage[e] = { tokens: 0, sessions: 0 }; }
 			target.editorUsage[e].tokens += u.tokens;
@@ -436,11 +411,7 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 			if (!target.editorModelUsage) { target.editorModelUsage = {}; }
 			for (const [editor, mu] of Object.entries(src.editorModelUsage)) {
 				if (!target.editorModelUsage[editor]) { target.editorModelUsage[editor] = {}; }
-				for (const [model, u] of Object.entries(mu)) {
-					if (!target.editorModelUsage[editor][model]) { target.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
-					target.editorModelUsage[editor][model].inputTokens += u.inputTokens;
-					target.editorModelUsage[editor][model].outputTokens += u.outputTokens;
-				}
+				addModelUsage(target.editorModelUsage[editor], scaleModelUsage(mu, 1));
 			}
 		}
 	};
