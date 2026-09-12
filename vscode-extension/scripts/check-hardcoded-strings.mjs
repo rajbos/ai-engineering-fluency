@@ -68,6 +68,14 @@
  *      automatically covered. Add the helper to the relevant list if it becomes a recurring
  *      source of missed strings; this script intentionally does not attempt to discover such
  *      helpers on its own.
+ *   4. TAG_TEXT_RE (and NESTED_ELEMENT_OR_COMMENT_RE) stop at the *nearest* matching closing tag,
+ *      not a properly balanced one — regex fundamentally cannot count arbitrary nesting depth for
+ *      a repeated same-name pair (this is the same class of problem as matching balanced
+ *      parentheses, which is provably not a regular language). So a tag nested directly inside
+ *      another tag of the *same* name (`<div><div>Inner</div> Outer</div>`) has its outer match
+ *      end at the inner tag's own close, and text after that (`Outer`) is never seen as anything.
+ *      A correct general fix needs a real stack-based tokenizer, not another regex tweak — this
+ *      is a boundary, not a queue of one-off patches waiting to happen.
  * Use the `// i18n-exempt` / allowlist escape hatches or a manual audit for any of these shapes.
  *
  * Escape hatches for a legitimate new literal:
@@ -300,19 +308,39 @@ function mapFlatIndexToSourceOffset(index, segments) {
 	return seg.sourceOffset + within;
 }
 
-// Requires "i18n-exempt" to immediately follow a `//` (only whitespace in between), matching the
-// documented `// i18n-exempt: <reason>` contract, so the escape hatch only fires from something
-// that actually looks like that comment — not just any `//` earlier on the line followed by the
-// phrase somewhere later. `.*i18n-exempt` (no anchor) matched a URL's own "//" scheme separator
-// with the phrase anywhere after it on the same line, e.g. a UI string that happens to read
-// `'Read https://example.com/i18n-exempt for details'` — no comment there at all.
-const EXEMPT_MARKER_RE = /\/\/\s*i18n-exempt\b/i;
+const EXEMPT_MARKER_RE = /i18n-exempt\b/i;
 
-/** True if the source line at `line` (1-based), or the line before it, carries a `// i18n-exempt` comment. */
-function isExemptByInlineComment(fileLines, line) {
-	const current = fileLines[line - 1] || '';
-	const previous = fileLines[line - 2] || '';
-	return EXEMPT_MARKER_RE.test(current) || EXEMPT_MARKER_RE.test(previous);
+/**
+ * Collects the 0-based source lines spanned by every REAL comment (// or /* *\/) in `sourceFile`
+ * whose text contains "i18n-exempt", using the TypeScript scanner in trivia mode (skipTrivia:
+ * false) rather than matching against raw line text. This is deliberate, not a style choice: a
+ * naive line-text regex can't distinguish an actual comment from the same characters appearing
+ * inside a string/template literal's own value — e.g. a template literal building
+ * `<button>...</button>` markup whose rendered text happens to *contain* the substring
+ * "// i18n-exempt: reason" would previously suppress its own violation, even though that text
+ * renders to users and never was a comment. The scanner correctly treats string/template literal
+ * bodies as opaque token text, so a marker inside one is never mistaken for a comment.
+ */
+function findExemptCommentLines(sourceFile) {
+	const lines = new Set();
+	const scanner = ts.createScanner(ts.ScriptTarget.Latest, /* skipTrivia */ false, ts.LanguageVariant.Standard, sourceFile.text);
+	let kind = scanner.scan();
+	while (kind !== ts.SyntaxKind.EndOfFileToken) {
+		if (kind === ts.SyntaxKind.SingleLineCommentTrivia || kind === ts.SyntaxKind.MultiLineCommentTrivia) {
+			if (EXEMPT_MARKER_RE.test(scanner.getTokenText())) {
+				const startLine = ts.getLineAndCharacterOfPosition(sourceFile, scanner.getTokenPos()).line;
+				const endLine = ts.getLineAndCharacterOfPosition(sourceFile, scanner.getTextPos()).line;
+				for (let l = startLine; l <= endLine; l++) { lines.add(l); }
+			}
+		}
+		kind = scanner.scan();
+	}
+	return lines;
+}
+
+/** True if the source line at `line` (1-based), or the line before it, falls within a real `i18n-exempt` comment. */
+function isExemptByInlineComment(ctx, line) {
+	return ctx.exemptCommentLines.has(line - 1) || ctx.exemptCommentLines.has(line - 2);
 }
 
 function loadAllowlist() {
@@ -328,7 +356,7 @@ function reportAt(rawText, offset, ctx, reason) {
 	if (!looksProse(trimmed)) { return; }
 	if (ctx.allowlist.has(trimmed)) { return; }
 	const line = ts.getLineAndCharacterOfPosition(ctx.sourceFile, offset).line + 1;
-	if (isExemptByInlineComment(ctx.fileLines, line)) { return; }
+	if (isExemptByInlineComment(ctx, line)) { return; }
 	ctx.violations.push({ file: ctx.relFile, line, offset, text: trimmed, reason });
 }
 
@@ -362,6 +390,36 @@ function scanFlattenedForAttributes(text, segments, ctx) {
  * levels deep is reported as one combined blob rather than recursed into again, which covers the
  * common icon-plus-text pattern without a full recursive HTML parser.
  */
+// Matches a *complete* nested element (any tag name — not just ones in TAGS — open through its
+// nearest matching close) or an HTML comment, as one unit. Used to carve a tag's own direct text
+// runs out of its body: excluding the nested element's full span (not just its `<tag>`/`</tag>`
+// delimiters) means its inner content is never re-reported as if it were the outer tag's own text
+// (recursion below already reports it separately, once, if it's itself a tracked tag).
+const NESTED_ELEMENT_OR_COMMENT_RE = /<!--[\s\S]*?-->|<([a-zA-Z][a-zA-Z0-9-]*)(?:\s[^>]*)?>[\s\S]*?<\/\1>|<[^>]*>/g;
+
+/**
+ * Splits a tag's body into its own direct-text runs — the parts not inside some nested element or
+ * comment — each tagged with its own offset in the flattened text. Reporting each run separately
+ * (rather than collapsing the whole body into one combined, nested-markup-blanked string) matters
+ * for the baseline's line-based hashing: a body with an already-baselined run on one line and a
+ * later, genuinely new run added on another line must produce two independently-hashed
+ * violations, not one combined report still anchored to the first (unchanged) line.
+ */
+function splitOwnTextRuns(body, bodyStartInFlat) {
+	const runs = [];
+	let lastIndex = 0;
+	for (const m of body.matchAll(NESTED_ELEMENT_OR_COMMENT_RE)) {
+		if (m.index > lastIndex) {
+			runs.push({ text: body.slice(lastIndex, m.index), offsetInFlat: bodyStartInFlat + lastIndex });
+		}
+		lastIndex = m.index + m[0].length;
+	}
+	if (lastIndex < body.length) {
+		runs.push({ text: body.slice(lastIndex), offsetInFlat: bodyStartInFlat + lastIndex });
+	}
+	return runs;
+}
+
 function scanFlattenedForTagText(text, textOffsetInFlat, segments, ctx, depth = 0) {
 	// matchAll (not a manual exec()/lastIndex loop) is required here: this function recurses into
 	// a nested tag's body using the SAME shared TAG_TEXT_RE object, and exec() mutates that
@@ -372,26 +430,22 @@ function scanFlattenedForTagText(text, textOffsetInFlat, segments, ctx, depth = 
 		const tag = m[1].toLowerCase();
 		const body = m[2];
 		const bodyStartInFlat = textOffsetInFlat + m.index + m[0].indexOf('>') + 1;
-		// Skip leading whitespace (a multiline `<button>\n  Refresh\n</button>` otherwise attributes
-		// the violation to the opening tag's own line — the newline right after `>` — instead of the
-		// line the reportable text actually sits on, so an `// i18n-exempt` placed naturally next to
-		// the text is ignored and the baseline hashes the wrong (opening-tag) line).
-		const leadingWs = body.match(/^\s*/)[0].length;
-		const bodyOffset = mapFlatIndexToSourceOffset(bodyStartInFlat + leadingWs, segments);
 
-		// Recurse into a body with further nested markup to also catch a nested tag's own text
-		// (bounded to one level deep). Report the OUTER tag's own text with any nested tags/HTML
-		// comments blanked out — unconditionally, not just when NESTED_TAG_RE matched — rather
-		// than left raw: an unblanked nested `<span>`/`<vscode-option>`/`<!-- comment -->` can
-		// itself contain a letter run (a tag name, or genuine-looking comment prose that never
-		// renders to a user) that trips looksProse() with no real UI text behind it.
+		// Recurse into a body with further nested markup to also catch a nested (tracked) tag's own
+		// text, bounded to one level deep to cap the cost.
 		if (depth === 0 && NESTED_TAG_RE.test(body)) {
 			scanFlattenedForTagText(body, bodyStartInFlat, segments, ctx, depth + 1);
 		}
-		const ownText = body
-			.replace(/<!--[\s\S]*?-->/g, (comment) => ' '.repeat(comment.length))
-			.replace(/<[^>]*>/g, (tagMarkup) => ' '.repeat(tagMarkup.length));
-		reportAt(ownText, bodyOffset, ctx, `<${tag}> text content`);
+
+		for (const run of splitOwnTextRuns(body, bodyStartInFlat)) {
+			// Skip leading whitespace: a multiline `<button>\n  Refresh\n</button>` otherwise
+			// attributes the violation to the line right after `>` (a blank/whitespace-only line)
+			// instead of the line the reportable text actually sits on, so the baseline hashes the
+			// wrong line.
+			const leadingWs = run.text.match(/^\s*/)[0].length;
+			const runOffset = mapFlatIndexToSourceOffset(run.offsetInFlat + leadingWs, segments);
+			reportAt(run.text, runOffset, ctx, `<${tag}> text content`);
+		}
 	}
 }
 
@@ -475,7 +529,7 @@ export function scanFile(filePath, allowlist, violations, rootSelector) {
 	const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 	const ctx = {
 		sourceFile,
-		fileLines: sourceText.split('\n'),
+		exemptCommentLines: findExemptCommentLines(sourceFile),
 		relFile: path.relative(repoRoot, filePath).replace(/\\/g, '/'),
 		allowlist,
 		violations

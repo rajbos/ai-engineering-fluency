@@ -500,7 +500,10 @@ test('scanFile: a multiline tag body attributes the violation to the text\'s own
 	);
 });
 
-test('scanFile: an i18n-exempt comment next to the actual text of a multiline tag body is respected', () => {
+test('scanFile: an i18n-exempt marker embedded in a template literal\'s own rendered text is NOT a real comment and must not suppress the finding', () => {
+	// "// i18n-exempt: ..." here is part of the STRING VALUE (it would render to users inside the
+	// <button>), not a TypeScript comment — text inside a template literal can never be a real
+	// comment. A naive line-text check can't tell the difference; the scanner-based check must.
 	withTempFile(
 		[
 			'const html = `<button>',
@@ -511,7 +514,89 @@ test('scanFile: an i18n-exempt comment next to the actual text of a multiline ta
 		(filePath) => {
 			const violations = [];
 			scanFile(filePath, new Set(), violations);
+			assert.equal(violations.length, 1, `the marker is inside the string, not a real comment, so this must still be flagged: ${JSON.stringify(violations)}`);
+		},
+	);
+});
+
+test('scanFile: a genuine // i18n-exempt comment on the line before a template literal is respected', () => {
+	withTempFile(
+		[
+			'// i18n-exempt: brand-specific label',
+			"el.title = `Refresh`;",
+			'',
+		].join('\n'),
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
 			assert.equal(violations.length, 0, `expected the exemption to apply, got: ${JSON.stringify(violations)}`);
 		},
 	);
+});
+
+test('scanFile: a genuine /* ... */ block comment carrying the marker is also respected', () => {
+	withTempFile("el.title = 'Refresh'; /* i18n-exempt: brand-specific label */\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 0, `expected the exemption to apply, got: ${JSON.stringify(violations)}`);
+	});
+});
+
+// ── round-5 fix: independent per-run reporting (own-text split, not one combined blob) ──────
+
+test('scanFile: two direct-text runs in the same tag body on different lines are reported as two independent violations', () => {
+	withTempFile(
+		[
+			'const html = `<div>',
+			'  First line',
+			'  <span></span>',
+			'  Second line',
+			'</div>`;',
+			'',
+		].join('\n'),
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			const byText = Object.fromEntries(violations.map((v) => [v.text.trim(), v.line]));
+			assert.equal(byText['First line'], 2, `expected "First line" on line 2, got: ${JSON.stringify(violations)}`);
+			assert.equal(byText['Second line'], 4, `expected "Second line" on line 4, got: ${JSON.stringify(violations)}`);
+		},
+	);
+});
+
+test('scanFile: a baselined run and a genuinely new run in the same tag body hash independently (regression for the combined-blob bug)', () => {
+	// Simulates the baseline scenario: "First line" already known, "Second line" added later on a
+	// different source line. Each run must get its own hash so adding "Second line" is detectable
+	// even though "First line"'s own line is completely unchanged.
+	withTempFile(
+		[
+			'const html = `<div>',
+			'  First line',
+			'  <span></span>',
+			'  Second line',
+			'</div>`;',
+			'',
+		].join('\n'),
+		(filePath) => {
+			const violations = [];
+			scanFile(filePath, new Set(), violations);
+			const lines = new Set(violations.map((v) => v.line));
+			assert.ok(lines.has(2) && lines.has(4), `expected distinct lines 2 and 4 to both be reportable, got: ${JSON.stringify(violations)}`);
+			assert.notEqual(
+				hashLine(violations.find((v) => v.line === 2).text),
+				hashLine(violations.find((v) => v.line === 4).text),
+				'the two runs must not collapse onto an identical hash',
+			);
+		},
+	);
+});
+
+test('scanFile: a nested tracked tag\'s full content is excluded from the outer tag\'s own text exactly once (no duplicate report)', () => {
+	withTempFile('const html = `<button><span>Refresh</span></button>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1, `expected exactly one violation (the inner span's), got: ${JSON.stringify(violations)}`);
+		assert.equal(violations[0].text, 'Refresh');
+		assert.match(violations[0].reason, /<span>/);
+	});
 });
