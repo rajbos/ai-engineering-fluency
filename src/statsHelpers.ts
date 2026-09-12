@@ -641,7 +641,10 @@ function getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dayK
 }
 
 /**
- * Folds a session/day's task-category attribution into the daily entry.
+ * Folds a session/day's task-category attribution into the daily entry. Shared by both
+ * aggregation paths in this file and by extension.ts's own daily-stats path (`addUsageToDailyEntry`
+ * in extension.ts calls this instead of keeping a second copy of the same algorithm), so a fix here
+ * can't drift out of sync between the periodic-refresh and full-refresh pipelines.
  *
  * The chart's "By Task" split (buildTaskCategoryTokenDatasets/SessionDatasets/CostDatasets in
  * chartDataBuilder.ts) reads taskCategoryTokens/taskCategorySessions/taskCategoryModelUsage, not
@@ -649,10 +652,13 @@ function getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dayK
  * calculateDetailedStats()) silently wipes the chart's task-category token/cost/session bars every
  * time it overwrites the recent day range in lastFullDailyStats (see mergeIntoFullDailyStats in
  * extension.ts). Weighted by taskCategoryShares when available, falling back to the primary
- * category and then "Conversation" — mirroring addTaskCategoryToDailyEntry in extension.ts — so a
- * mixed session's tokens/sessions/cost split across categories instead of collapsing onto one.
+ * category and then "Conversation" — so a mixed session's tokens/sessions/cost split across
+ * categories instead of collapsing onto one. `taskCategory` is also the only source for
+ * taskCategoryUsage (consumed by efficiencyAnalysis.ts's model task-mix comparison), so callers
+ * should pass their best-known category here even when it only comes from a broader fallback (e.g.
+ * the session's overall category when a specific day has no per-day classification of its own).
  */
-function addTaskCategoryToDailyEntry(entry: DailyTokenStats, tokens: number, modelUsage: ModelUsage, taskCategory?: TaskCategory, taskCategoryShares?: TaskCategoryBreakdown): void {
+export function addTaskCategoryToDailyEntry(entry: DailyTokenStats, tokens: number, modelUsage: ModelUsage, taskCategory?: TaskCategory, taskCategoryShares?: TaskCategoryBreakdown): void {
 	if (taskCategory) {
 		if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
 		if (!entry.taskCategoryUsage[taskCategory]) { entry.taskCategoryUsage[taskCategory] = { tokens: 0, sessions: 0 }; }
@@ -734,7 +740,7 @@ function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: num
 	}
 }
 
-function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLast30Days: boolean; addedToMonth: boolean; addedToLastMonth: boolean; addedToToday: boolean }, acc: PeriodAccumulators, dates: UtcDateRanges, editorType: string, dailyStatsMap: Map<string, DailyTokenStats>, repository: string): void {
+function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLast30Days: boolean; addedToMonth: boolean; addedToLastMonth: boolean; addedToToday: boolean }, acc: PeriodAccumulators, dates: UtcDateRanges, editorType: string, dailyStatsMap: Map<string, DailyTokenStats>, repository: string, sessionTaskCategoryFallback?: TaskCategory): void {
 	const inLast30Days = dayKey >= dates.last30DaysUtcStartKey;
 	const inLastMonth = dayKey >= dates.lastMonthUtcStartKey && dayKey <= dates.lastMonthUtcEndKey;
 	if (!inLast30Days && !inLastMonth) { return; }
@@ -744,9 +750,12 @@ function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLas
 	if (inLast30Days) {
 		const entry = getOrCreateDailyEntry(dailyStatsMap, dayKey);
 		// Per-day shares/primary category (mirrors extension.ts's rollup-path call to
-		// addUsageToDailyEntry) — a multi-category session is split across categories
-		// per day instead of collapsing the whole session onto one.
-		addToDailyEntry(entry, dayTokens, dayInteractions, editorType, repository, dayRollup.modelUsage, dayRollup.primaryTaskCategory, dayRollup.taskCategoryShares);
+		// addUsageToDailyEntry) — a multi-category session is split across categories per
+		// day instead of collapsing the whole session onto one. Falls back to the session's
+		// overall category (rather than silently dropping to "Conversation") for a day
+		// rollup that predates per-day task classification.
+		const taskCategory = dayRollup.primaryTaskCategory ?? sessionTaskCategoryFallback;
+		addToDailyEntry(entry, dayTokens, dayInteractions, editorType, repository, dayRollup.modelUsage, taskCategory, dayRollup.taskCategoryShares);
 		accumulatePeriod(acc.last30DaysStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToLast30Days, editorType, dayRollup.modelUsage, dayRollup.copilotExactCostDollars);
 		flags.addedToLast30Days = true;
 	}
@@ -780,7 +789,7 @@ function processRollupPath(input: SessionAggregateInput, acc: PeriodAccumulators
 	const repository = sessionData.repository || 'Unknown';
 	const flags = { addedToLast30Days: false, addedToMonth: false, addedToLastMonth: false, addedToToday: false };
 	for (const [dayKey, dayRollup] of Object.entries(sessionData.dailyRollups!)) {
-		processOneRollupDay(dayKey, dayRollup, flags, acc, dates, editorType, dailyStatsMap, repository);
+		processOneRollupDay(dayKey, dayRollup, flags, acc, dates, editorType, dailyStatsMap, repository, sessionData.taskCategory);
 	}
 	if (flags.addedToLast30Days && sessionData.linesAdded !== undefined) {
 		const dayKeys = Object.keys(sessionData.dailyRollups!).sort();

@@ -610,6 +610,12 @@ const day = result.dailyStatsMap.get('2025-03-15');
 assert.ok(day, 'daily entry should exist');
 assert.deepEqual(day!.taskCategoryTokens, { Coding: 75, Debugging: 25 });
 assert.deepEqual(day!.taskCategorySessions, { Coding: 0.75, Debugging: 0.25 });
+// The cost chart is driven by taskCategoryModelUsage, not taskCategoryTokens — assert it
+// separately so a regression in the per-category model-usage scaling doesn't slip through.
+assert.deepEqual(day!.taskCategoryModelUsage, {
+Coding: { 'gpt-4o': { inputTokens: 45, outputTokens: 30, sessions: 0 } },
+Debugging: { 'gpt-4o': { inputTokens: 15, outputTokens: 10, sessions: 0 } },
+});
 });
 
 test('aggregatePeriodStats: fallback path – populates taskCategoryTokens/Sessions/ModelUsage on the daily entry (regression: By Task chart empty after periodic refresh)', () => {
@@ -647,9 +653,10 @@ assert.deepEqual(day!.taskCategoryTokens, { Debugging: 30, Testing: 20 });
 assert.deepEqual(day!.taskCategorySessions, { Debugging: 0.6, Testing: 0.4 });
 });
 
-test('aggregatePeriodStats: rollup path – falls back to "Conversation" when a day rollup has no category info at all', () => {
-// Mirrors extension.ts's addTaskCategoryToDailyEntry fallback for pre-existing cached
-// dailyRollups that predate task classification (no primaryTaskCategory/taskCategoryShares).
+test('aggregatePeriodStats: rollup path – falls back to "Conversation" when neither the day nor the session has category info', () => {
+// addTaskCategoryToDailyEntry's own fallback, exercised when a pre-existing cached dailyRollup
+// predates task classification (no primaryTaskCategory/taskCategoryShares) AND the session
+// itself has no taskCategory either.
 const ranges = makeRanges('2025-03-15');
 const input: SessionAggregateInput = {
 editorType: 'vscode',
@@ -665,6 +672,31 @@ const day = result.dailyStatsMap.get('2025-03-15');
 assert.ok(day, 'daily entry should exist');
 assert.deepEqual(day!.taskCategoryTokens, { Conversation: 100 });
 assert.deepEqual(day!.taskCategorySessions, { Conversation: 1 });
+});
+
+test('aggregatePeriodStats: rollup path – falls back to the session-level taskCategory (not "Conversation") when only the day rollup lacks category info', () => {
+// Regression for a PR review finding: a day rollup that predates per-day task classification
+// (no primaryTaskCategory/taskCategoryShares of its own) must still use the session's overall
+// taskCategory — both for taskCategoryUsage (consumed by efficiencyAnalysis.ts's model
+// task-mix comparison) and for the chart's per-category token/session/model-usage maps —
+// rather than silently dropping to "Conversation" when the session's category is known.
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+taskCategory: 'Refactoring',
+dailyRollups: {
+'2025-03-15': { tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryUsage, { Refactoring: { tokens: 100, sessions: 1 } });
+assert.deepEqual(day!.taskCategoryTokens, { Refactoring: 100 });
+assert.deepEqual(day!.taskCategorySessions, { Refactoring: 1 });
 });
 
 test('aggregatePeriodStats: rollup path – counts sub-agent sessions once per period', () => {
