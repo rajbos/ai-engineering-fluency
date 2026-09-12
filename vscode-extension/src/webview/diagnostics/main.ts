@@ -3477,7 +3477,7 @@ function renderMistralCloudTab(
 Lists conversations from your Mistral account via the beta <code>GET /v1/conversations</code> API
 on <code>api.mistral.ai</code>. This is the closest available surface to Vibe Code Web (cloud)
 sessions; it is <b>undocumented for Vibe Code Web specifically</b> and may not include all cloud
-sessions. Requires a Mistral API key stored locally (never leaves your machine).
+  sessions. Requires a Mistral API key stored locally; it is sent only to <code>api.mistral.ai</code> over HTTPS.
 </div>
 </div>
 ${renderMistralCloudSummaryCards(result, configured)}
