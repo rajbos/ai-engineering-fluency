@@ -305,6 +305,8 @@ test('l10n: efficiency loading step labels resolve in English', () => {
 		'loading.efficiency.usageAnalysis': 'Analysing usage patterns…',
 		'loading.efficiency.sessionSignals': 'Reading session signals…',
 		'loading.efficiency.buildingTrends': 'Building efficiency trends…',
+		'efficiency.error.title': 'Could not build the Efficiency view',
+		'efficiency.error.retry': 'Try again',
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
@@ -319,6 +321,8 @@ test('l10n: efficiency loading step labels resolve in zh-cn', () => {
 			'loading.efficiency.usageAnalysis': '正在分析使用模式…',
 			'loading.efficiency.sessionSignals': '正在读取会话信号…',
 			'loading.efficiency.buildingTrends': '正在构建效率趋势…',
+			'efficiency.error.title': '无法构建效率视图',
+			'efficiency.error.retry': '重试',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);

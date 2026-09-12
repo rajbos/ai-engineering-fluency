@@ -4417,10 +4417,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * while that one is mid-flight, re-statting and re-parsing the same cold files. Every
 	 * caller of the 365-day walk goes through here so there is only ever one.
 	 */
-	private calculateFullDailyStats(
+	private async calculateFullDailyStats(
 		knownSessionFiles?: string[],
 		onProgress?: (completed: number, total: number, sessionFile?: string) => void,
+		force = false,
 	): Promise<DailyTokenStats[]> {
+		// A forced recompute means "read the corpus as it is now". Joining a walk that is
+		// already part-way through would hand back a snapshot taken before whatever prompted
+		// the refresh, so wait it out and then start a fresh one; the `??=` below sees a
+		// cleared slot because the previous walk's `finally` has run by then.
+		if (force && this._fullDailyStatsInFlight) {
+			await this._fullDailyStatsInFlight.catch(() => undefined);
+		}
 		// Reporters are held in a set rather than passed straight through, because a caller
 		// that joins a walk already in flight would otherwise have its reporter silently
 		// dropped — the Efficiency panel opening during the refresh's detached walk would
@@ -9620,15 +9628,20 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// reopen would be silently dropped as "already in flight" (same fix as showChart above).
 		void (async () => {
 			const generation = this._cacheGeneration;
-			const data = await this.runEfficiencyBuild(
-				() => this.buildEfficiencyViewData(false, this.efficiencyLoadingSink(panel)));
-			// Record the payload even if this panel is gone: it is valid data, and a later
-			// refresh falls back to it rather than stranding its panel on the loading screen.
-			this.recordEfficiencyPayload(data, generation);
-			// The user may have closed the panel while the data was being computed.
-			if (this.efficiencyPanel !== panel) { return; }
-			panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
-			this.log('⚡ Efficiency view rendered');
+			try {
+				const data = await this.runEfficiencyBuild(
+					() => this.buildEfficiencyViewData(false, this.efficiencyLoadingSink(panel)));
+				// Record the payload even if this panel is gone: it is valid data, and a later
+				// refresh falls back to it rather than stranding its panel on the loading screen.
+				this.recordEfficiencyPayload(data, generation);
+				// The user may have closed the panel while the data was being computed.
+				if (this.efficiencyPanel !== panel) { return; }
+				panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
+				this.log('⚡ Efficiency view rendered');
+			} catch (error) {
+				this.error('Error building Efficiency view:', error);
+				this.showEfficiencyError(panel, error);
+			}
 		})();
 	}
 
@@ -9653,8 +9666,9 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			// which the initial build records even when its own render was skipped.
 			this.error('Error refreshing Efficiency view:', error);
 			const previous = this._lastEfficiencyViewData;
-			if (!previous || this.efficiencyPanel !== panel) { return; }
-			panel.webview.html = this.getEfficiencyHtml(panel.webview, previous);
+			if (this.efficiencyPanel !== panel) { return; }
+			if (previous) { panel.webview.html = this.getEfficiencyHtml(panel.webview, previous); }
+			else { this.showEfficiencyError(panel, error); }
 			return;
 		}
 		if (this.efficiencyPanel !== panel) { return; }
@@ -9763,6 +9777,45 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * loading script clamps monotonically.
 	 */
 	/**
+	 * The Efficiency panel's failure state.
+	 *
+	 * Every path that swaps in the loading screen needs somewhere to land when the build
+	 * throws and there is no last-good payload to fall back to — a first open that fails, or
+	 * a refresh after the caches were cleared. Returning silently in those cases left the
+	 * panel on the loading screen for the rest of the session.
+	 */
+	private getEfficiencyErrorHtml(webview: vscode.Webview, error: unknown): string {
+		const nonce = getNonce();
+		// The detail is an error message, which can carry a file path or arbitrary text.
+		const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		const detail = esc(String(error instanceof Error ? error.message : error));
+		return `<!DOCTYPE html>
+		<html lang="en">
+		<head>
+			<meta charset="UTF-8" />
+			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+			${buildCspMeta(webview, nonce)}
+			<title>${l10n.t('efficiency.error.title')}</title>
+		</head>
+		<body style="font-family:var(--vscode-font-family);padding:24px;color:var(--vscode-foreground);">
+			<h2 style="margin:0 0 8px;">${esc(l10n.t('efficiency.error.title'))}</h2>
+			<p style="color:var(--vscode-descriptionForeground);margin:0 0 16px;">${detail}</p>
+			<button id="retry" style="padding:6px 14px;cursor:pointer;border:none;border-radius:2px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);">${esc(l10n.t('efficiency.error.retry'))}</button>
+			<script nonce="${nonce}">
+				const vscodeApi = acquireVsCodeApi();
+				document.getElementById('retry').addEventListener('click', () => vscodeApi.postMessage({ command: 'refresh' }));
+			</script>
+		</body>
+		</html>`;
+	}
+
+	/** Renders the failure state on `panel`, if it is still the live Efficiency panel. */
+	private showEfficiencyError(panel: vscode.WebviewPanel, error: unknown): void {
+		if (this.efficiencyPanel !== panel) { return; }
+		panel.webview.html = this.getEfficiencyErrorHtml(panel.webview, error);
+	}
+
+	/**
 	 * Records a built payload as the fallback a failed refresh renders, unless the caches it
 	 * was computed from have been invalidated since the build began. Without that check a
 	 * build started before `clearCache()` could finish after it and reinstate pre-clear data
@@ -9816,7 +9869,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 					if (editor && editor !== 'Unknown') { editors.add(editor); }
 				}
 				report(completed, total);
-			});
+			}, forceRecalc);
 		}
 		this.postEfficiencyStep(send, stepPct.usage, l10n.t('loading.efficiency.usageAnalysis'));
 		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
