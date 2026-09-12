@@ -9,9 +9,22 @@ import {
 	type MistralRequestFn,
 } from '../../src/mistralCloudSessionsService';
 
-/** Minimal stand-in for `http.ClientRequest`, exercising exactly the surface `requestMistralJson` touches. */
+/**
+ * Minimal stand-in for `http.ClientRequest`, exercising exactly the surface
+ * `attachRequestFailureHandling` (see `src/githubApiConfig.ts`) touches.
+ */
 class FakeClientRequest extends EventEmitter {
+	private timeoutCallback?: () => void;
+	setTimeout(_ms: number, cb: () => void): this {
+		this.timeoutCallback = cb;
+		return this;
+	}
+	destroy(err?: Error): this {
+		if (err) { this.emit('error', err); }
+		return this;
+	}
 	end(): this { return this; }
+	fireTimeout(): void { this.timeoutCallback?.(); }
 }
 
 function makeResponse(body: unknown, statusCode = 200): http.IncomingMessage {
@@ -85,6 +98,30 @@ test('listMistralConversations: reports a transport error', async () => {
 	const result = await listMistralConversations('key', { requestFn: makeErrorRequestFn(new Error('ECONNRESET')) });
 	assert.match(result.error ?? '', /ECONNRESET/);
 	assert.equal(result.conversations, undefined);
+});
+
+test('requestMistralJson: destroys the socket on timeout instead of leaving it hanging', async () => {
+	let capturedReq: FakeClientRequest | undefined;
+	const requestFn = ((() => {
+		const req = new FakeClientRequest();
+		capturedReq = req;
+		return req as unknown as http.ClientRequest;
+	}) as unknown) as MistralRequestFn;
+	let destroyed = false;
+	const originalDestroy = FakeClientRequest.prototype.destroy;
+	FakeClientRequest.prototype.destroy = function (err?: Error) {
+		destroyed = true;
+		return originalDestroy.call(this, err);
+	};
+	try {
+		const resultPromise = requestMistralJson('/v1/conversations', 'key', requestFn);
+		capturedReq!.fireTimeout();
+		const result = await resultPromise;
+		assert.equal(destroyed, true);
+		assert.match(result.error ?? '', /socket inactivity/i);
+	} finally {
+		FakeClientRequest.prototype.destroy = originalDestroy;
+	}
 });
 
 test('collectMistralCloudSessions: success sets authenticated=true and no error', async () => {

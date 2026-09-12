@@ -4178,8 +4178,39 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
 			'logviewer.summary.started': l10n.t('logviewer.summary.started'),
 			'logviewer.summary.lastActivity': l10n.t('logviewer.summary.lastActivity'),
+			...this.getMistralCloudLocalization(),
 			// Current language for reference
 			'__language__': language
+		};
+	}
+
+	/** Diagnostics — Mistral Cloud (Beta) tab strings. Templates with {0}/{1} are resolved webview-side by localizeFormat(), so they are passed through unformatted here. */
+	private getMistralCloudLocalization(): Record<string, string> {
+		return {
+			'mistral.tabTitle': l10n.t('mistral.tabTitle'),
+			'mistral.betaBadge': l10n.t('mistral.betaBadge'),
+			'mistral.description.intro': l10n.t('mistral.description.intro'),
+			'mistral.description.scope': l10n.t('mistral.description.scope'),
+			'mistral.description.undocumented': l10n.t('mistral.description.undocumented'),
+			'mistral.description.keyStorage': l10n.t('mistral.description.keyStorage'),
+			'mistral.status.label': l10n.t('mistral.status.label'),
+			'mistral.status.configured': l10n.t('mistral.status.configured'),
+			'mistral.status.notConfigured': l10n.t('mistral.status.notConfigured'),
+			'mistral.summary.conversations': l10n.t('mistral.summary.conversations'),
+			'mistral.summary.lastFetched': l10n.t('mistral.summary.lastFetched'),
+			'mistral.error.label': l10n.t('mistral.error.label'),
+			'mistral.button.refresh': l10n.t('mistral.button.refresh'),
+			'mistral.button.removeApiKey': l10n.t('mistral.button.removeApiKey'),
+			'mistral.button.connectApiKey': l10n.t('mistral.button.connectApiKey'),
+			'mistral.prompt.enterApiKey': l10n.t('mistral.prompt.enterApiKey'),
+			'mistral.table.id': l10n.t('mistral.table.id'),
+			'mistral.table.name': l10n.t('mistral.table.name'),
+			'mistral.table.agentId': l10n.t('mistral.table.agentId'),
+			'mistral.table.version': l10n.t('mistral.table.version'),
+			'mistral.table.created': l10n.t('mistral.table.created'),
+			'mistral.table.updated': l10n.t('mistral.table.updated'),
+			'mistral.table.description': l10n.t('mistral.table.description'),
+			'mistral.table.untitled': l10n.t('mistral.table.untitled'),
 		};
 	}
 

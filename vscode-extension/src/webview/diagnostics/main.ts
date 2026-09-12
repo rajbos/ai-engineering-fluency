@@ -12,7 +12,7 @@ import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import { registerMessageHandler } from "../shared/messageHandler";
 import { getModelColor } from "../../../../src/chartDataBuilder";
 import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
-import { initializeWebviewLocalization, setCurrentLanguage } from "../shared/localization";
+import { initializeWebviewLocalization, setCurrentLanguage, localize, localizeFormat } from "../shared/localization";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
@@ -1570,7 +1570,7 @@ function activateTab(tabId: string): boolean {
 /** Which group tab (Diagnostics / Research / Settings) each leaf tab lives under. */
 const TAB_GROUPS: Record<string, string[]> = {
   diagnostics: ["report", "sessions", "cache", "path-analyzer"],
-  research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta", "ttft"],
+  research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta", "mistral-cloud", "ttft"],
   settings: ["display", "backend", "github", "debug"],
 };
 
@@ -3409,7 +3409,7 @@ function triggerTtftAnalysis(): void {
 function renderMistralConversationRow(c: MistralCloudConversation): string {
   const created = c.createdAt ? new Date(c.createdAt).toLocaleString() : "—";
   const updated = c.updatedAt ? new Date(c.updatedAt).toLocaleString() : "—";
-  const name = c.name || "(untitled)";
+  const name = c.name || localize("mistral.table.untitled");
   const desc = c.description || "";
   const descCell = desc
     ? `<span title="${escapeHtml(desc)}">${escapeHtml(desc.slice(0, 60))}${desc.length > 60 ? "…" : ""}</span>`
@@ -3428,11 +3428,11 @@ function renderMistralConversationRow(c: MistralCloudConversation): string {
 function renderMistralConversationTable(conversations: MistralCloudConversation[]): string {
   const rows = conversations.map(renderMistralConversationRow).join("");
   if (!rows) { return ""; }
-  return `<table class="session-table"><thead><tr><th>ID</th><th>Name</th><th>Agent ID</th><th>Version</th><th>Created</th><th>Updated</th><th>Description</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<table class="session-table"><thead><tr><th>${localize("mistral.table.id")}</th><th>${localize("mistral.table.name")}</th><th>${localize("mistral.table.agentId")}</th><th>${localize("mistral.table.version")}</th><th>${localize("mistral.table.created")}</th><th>${localize("mistral.table.updated")}</th><th>${localize("mistral.table.description")}</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderMistralCloudSummaryCards(result: MistralCloudSessionsResult | undefined, configured: boolean): string {
-  const statusText = configured ? "API key configured" : "No API key configured";
+  const statusText = configured ? localize("mistral.status.configured") : localize("mistral.status.notConfigured");
   const statusColor = configured ? "#2d6a4f" : "#666";
   const statusIcon = configured ? "✅" : "⚪";
   const count = result?.conversations?.length ?? 0;
@@ -3440,15 +3440,15 @@ function renderMistralCloudSummaryCards(result: MistralCloudSessionsResult | und
   const lastFetched = result?.fetchedAt ? new Date(result.fetchedAt).toLocaleString() : "";
   return `<div class="summary-cards">
 <div class="summary-card" style="border-left: 4px solid ${statusColor};">
-<div class="summary-label">${statusIcon} Status</div>
+<div class="summary-label">${statusIcon} ${localize("mistral.status.label")}</div>
 <div class="summary-value" style="font-size: 14px; color: ${statusColor};">${statusText}</div>
 </div>
 <div class="summary-card">
-<div class="summary-label">Conversations</div>
+<div class="summary-label">${localize("mistral.summary.conversations")}</div>
 <div class="summary-value" style="font-size: 16px;">${count.toLocaleString()}${totalSuffix}</div>
 </div>
 <div class="summary-card">
-<div class="summary-label">Last fetched</div>
+<div class="summary-label">${localize("mistral.summary.lastFetched")}</div>
 <div class="summary-value" style="font-size: 14px;">${escapeHtml(lastFetched || "—")}</div>
 </div>
 </div>`;
@@ -3456,28 +3456,29 @@ function renderMistralCloudSummaryCards(result: MistralCloudSessionsResult | und
 
 function renderMistralCloudButtons(configured: boolean): string {
   return configured
-    ? `<button class="button" id="btn-mistral-refresh"><span>🔄</span><span>Refresh</span></button>
-     <button class="button secondary" id="btn-mistral-disconnect"><span>🔌</span><span>Remove API key</span></button>`
-    : `<button class="button" id="btn-mistral-connect"><span>🔑</span><span>Connect Mistral API key</span></button>`;
+    ? `<button class="button" id="btn-mistral-refresh"><span>🔄</span><span>${localize("mistral.button.refresh")}</span></button>
+     <button class="button secondary" id="btn-mistral-disconnect"><span>🔌</span><span>${localize("mistral.button.removeApiKey")}</span></button>`
+    : `<button class="button" id="btn-mistral-connect"><span>🔑</span><span>${localize("mistral.button.connectApiKey")}</span></button>`;
 }
 
 function renderMistralCloudTab(
   result: MistralCloudSessionsResult | undefined,
   apiKeyConfigured: boolean,
 ): string {
-  const betaBadge = `<span class="beta-badge" title="Beta">Beta</span>`;
+  const betaLabel = localize("mistral.betaBadge");
+  const betaBadge = `<span class="beta-badge" title="${escapeHtml(betaLabel)}">${escapeHtml(betaLabel)}</span>`;
   const configured = apiKeyConfigured || !!result?.authenticated;
   const errorBox = result?.error
-    ? `<div class="info-box" style="border-left:4px solid #d9534f;"><div><b>Error:</b> ${escapeHtml(result.error)}</div></div>`
+    ? `<div class="info-box" style="border-left:4px solid #d9534f;"><div><b>${localize("mistral.error.label")}</b> ${escapeHtml(result.error)}</div></div>`
     : "";
+  const introText = localizeFormat("mistral.description.intro", "<code>GET /v1/conversations</code>", "<code>api.mistral.ai</code>");
+  const scopeText = localizeFormat("mistral.description.scope", `<b>${localize("mistral.description.undocumented")}</b>`);
+  const keyStorageText = localizeFormat("mistral.description.keyStorage", "<code>api.mistral.ai</code>");
   return `<div id="tab-mistral-cloud" class="tab-content">
 <div class="info-box">
-<div class="info-box-title">🔥 Mistral Vibe Cloud Sessions ${betaBadge}</div>
+<div class="info-box-title">${localize("mistral.tabTitle")} ${betaBadge}</div>
 <div>
-Lists conversations from your Mistral account via the beta <code>GET /v1/conversations</code> API
-on <code>api.mistral.ai</code>. This is the closest available surface to Vibe Code Web (cloud)
-sessions; it is <b>undocumented for Vibe Code Web specifically</b> and may not include all cloud
-  sessions. Requires a Mistral API key stored locally; it is sent only to <code>api.mistral.ai</code> over HTTPS.
+${introText} ${scopeText} ${keyStorageText}
 </div>
 </div>
 ${renderMistralCloudSummaryCards(result, configured)}
@@ -3504,7 +3505,7 @@ function setupMistralCloudHandlers(): void {
 
 function promptMistralApiKey(): void {
   const existing = window.prompt(
-    "Enter your Mistral API key (stored in VS Code SecretStorage, used to call api.mistral.ai):",
+    localize("mistral.prompt.enterApiKey"),
     "",
   );
   if (existing !== null && existing.trim()) {

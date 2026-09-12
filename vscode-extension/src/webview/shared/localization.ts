@@ -57,6 +57,32 @@ export interface WebviewLocalization {
 	'logviewer.summary.started': string;
 	'logviewer.summary.lastActivity': string;
 
+	// Diagnostics — Mistral Cloud (Beta) tab
+	'mistral.tabTitle': string;
+	'mistral.betaBadge': string;
+	'mistral.description.intro': string;
+	'mistral.description.scope': string;
+	'mistral.description.undocumented': string;
+	'mistral.description.keyStorage': string;
+	'mistral.status.label': string;
+	'mistral.status.configured': string;
+	'mistral.status.notConfigured': string;
+	'mistral.summary.conversations': string;
+	'mistral.summary.lastFetched': string;
+	'mistral.error.label': string;
+	'mistral.button.refresh': string;
+	'mistral.button.removeApiKey': string;
+	'mistral.button.connectApiKey': string;
+	'mistral.prompt.enterApiKey': string;
+	'mistral.table.id': string;
+	'mistral.table.name': string;
+	'mistral.table.agentId': string;
+	'mistral.table.version': string;
+	'mistral.table.created': string;
+	'mistral.table.updated': string;
+	'mistral.table.description': string;
+	'mistral.table.untitled': string;
+
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
 }
@@ -105,7 +131,31 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'logviewer.summary.modified': 'Modified',
 	'logviewer.summary.timeline': 'Timeline',
 	'logviewer.summary.started': 'Started',
-	'logviewer.summary.lastActivity': 'Last activity'
+	'logviewer.summary.lastActivity': 'Last activity',
+	'mistral.tabTitle': '🔥 Mistral Vibe Cloud Sessions',
+	'mistral.betaBadge': 'Beta',
+	'mistral.description.intro': 'Lists conversations from your Mistral account via the beta {0} API on {1}.',
+	'mistral.description.scope': 'This is the closest available surface to Vibe Code Web (cloud) sessions; it is {0} and may not include all cloud sessions.',
+	'mistral.description.undocumented': 'undocumented for Vibe Code Web specifically',
+	'mistral.description.keyStorage': 'Requires a Mistral API key stored locally; it is sent only to {0} over HTTPS.',
+	'mistral.status.label': 'Status',
+	'mistral.status.configured': 'API key configured',
+	'mistral.status.notConfigured': 'No API key configured',
+	'mistral.summary.conversations': 'Conversations',
+	'mistral.summary.lastFetched': 'Last fetched',
+	'mistral.error.label': 'Error:',
+	'mistral.button.refresh': 'Refresh',
+	'mistral.button.removeApiKey': 'Remove API key',
+	'mistral.button.connectApiKey': 'Connect Mistral API key',
+	'mistral.prompt.enterApiKey': 'Enter your Mistral API key (stored in VS Code SecretStorage, used to call api.mistral.ai):',
+	'mistral.table.id': 'ID',
+	'mistral.table.name': 'Name',
+	'mistral.table.agentId': 'Agent ID',
+	'mistral.table.version': 'Version',
+	'mistral.table.created': 'Created',
+	'mistral.table.updated': 'Updated',
+	'mistral.table.description': 'Description',
+	'mistral.table.untitled': '(untitled)'
 };
 
 // Current localization strings, initialized with defaults

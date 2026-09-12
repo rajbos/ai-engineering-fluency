@@ -1,5 +1,6 @@
 import * as https from 'https';
 import { withTimeout } from './utils/promises';
+import { attachRequestFailureHandling } from './githubApiConfig';
 import type { MistralCloudConversation, MistralCloudSessionsResult } from '../../src/types';
 
 /**
@@ -94,7 +95,7 @@ export function requestMistralJson(
         });
       },
     );
-    req.on('error', (e) => resolve({ error: String(e) }));
+    attachRequestFailureHandling(req, FETCH_TIMEOUT_MS, (message) => resolve({ error: message }));
     req.end();
   });
 }

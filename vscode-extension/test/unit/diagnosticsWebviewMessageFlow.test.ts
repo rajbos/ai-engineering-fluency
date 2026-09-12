@@ -95,7 +95,7 @@ interface Harness {
  * need to dispatch a message *before* `bootstrap()`'s pending dynamic import resolves (i.e.
  * before `renderLayout` has run) must do so immediately, then call `settle()` themselves.
  */
-function bootWebviewUnsettled(initialData: Record<string, unknown> | null): Harness {
+function bootWebviewUnsettled(initialData: Record<string, unknown> | null, savedState?: Record<string, unknown>): Harness {
 	const bundle = getSyncBundle();
 	const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
 		runScripts: 'outside-only',
@@ -106,7 +106,7 @@ function bootWebviewUnsettled(initialData: Record<string, unknown> | null): Harn
 	const posted: any[] = [];
 	window.acquireVsCodeApi = () => ({
 		postMessage: (message: unknown) => { posted.push(message); },
-		getState: () => undefined,
+		getState: () => savedState,
 		setState: () => undefined,
 	});
 	// jsdom's ElementInternals is a stub; <vscode-button> calls setFormValue on it.
@@ -324,4 +324,21 @@ test('OTel Delta tab shows a detecting message while comparison data is still lo
 	const rendered = harness.text('#tab-otel-delta');
 	assert.ok(rendered?.includes('OpenTelemetry Detection Running'), `expected detecting title, got: ${rendered}`);
 	assert.ok(rendered?.includes('Detecting Copilot CLI OpenTelemetry export data'), `expected detecting body, got: ${rendered}`);
+});
+
+test('restoring the Mistral Cloud tab reveals the Research leaf bar and marks it active', async () => {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData(), { activeTab: 'mistral-cloud' });
+	await harness.settle();
+
+	const doc = harness.window.document;
+	const researchGroupTab = doc.querySelector('.group-tab[data-group="research"]');
+	const researchLeafBar = doc.querySelector('.leaf-tabs[data-group="research"]');
+	const mistralTabButton = doc.querySelector('.tab[data-tab="mistral-cloud"]');
+	const mistralTabContent = doc.getElementById('tab-mistral-cloud');
+
+	assert.ok(researchGroupTab?.classList.contains('active'), 'expected the Research group tab to be active');
+	assert.notEqual(researchLeafBar?.style.display, 'none', 'expected the Research leaf tab bar to be visible');
+	assert.ok(mistralTabButton?.classList.contains('active'), 'expected the Mistral Cloud tab button to be active');
+	assert.ok(mistralTabContent?.classList.contains('active'), 'expected the Mistral Cloud tab content to be active');
 });
