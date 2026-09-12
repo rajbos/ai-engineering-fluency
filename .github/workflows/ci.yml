@@ -92,7 +92,11 @@ jobs:
     - name: Validate localization files
       working-directory: vscode-extension
       run: npm run lint:l10n
-      
+
+    - name: Check for hardcoded UI strings
+      working-directory: vscode-extension
+      run: npm run lint:hardcoded-strings
+
     - name: Run linting
       working-directory: vscode-extension
       run: npm run lint

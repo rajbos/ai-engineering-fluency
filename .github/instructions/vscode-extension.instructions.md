@@ -172,6 +172,22 @@ const html = this.getSomeViewHtml(..., { localization });
 }
 ```
 
+### Detecting Hardcoded Strings
+
+`validate:l10n` and `lint:l10n` only check *consistency* of strings already wired through `localize(`/`t(`/`vscode.l10n.t(` — neither one notices a plain string literal written directly into UI-rendering code that never goes through that system at all, e.g. `button.textContent = 'Refresh'` or `<h2>Usage Analysis</h2>` baked straight into an HTML template literal. Run `npm run lint:hardcoded-strings` (script: `scripts/check-hardcoded-strings.mjs`) to catch that instead. It walks the TypeScript AST (not a blind regex scan) of `src/webview/**/*.ts` and the `getXxxHtml`-style methods in `extension.ts`, and flags a string/template literal that looks like prose when it sits in a UI-rendering position — assigned to `.textContent`/`.innerText`/`.innerHTML`/`.title`/`.placeholder`, or as an `aria-label`/`title`/`placeholder` attribute or tag text content (`<button>`, `<h1>`-`<h6>`, `<span>`, …) inside a template literal — and isn't already an argument to `localize(`/`t(`/`vscode.l10n.t(`.
+
+This check is a **baseline/ratchet**, the same pattern as the `max-lines` ceiling in `eslint.config.mjs` (see the repo-root AGENTS.md's "File-size ceiling" section): it doesn't try to fix today's existing hardcoded strings, it only stops new ones. `scripts/hardcoded-strings-baseline.json` records every violation that already existed, keyed by file + a hash of the offending line's trimmed content (not the line number, so it survives unrelated line-number drift). CI fails only when the check finds a violation whose file+hash isn't in that baseline — a genuinely new hardcoded string.
+
+If a new literal is legitimately not meant to be localized (a brand name, a debug-only string, an emoji), use one of two escape hatches instead of letting it fail the build:
+
+1. **Inline comment** — add `// i18n-exempt: <reason>` on the same line or the line directly above it:
+   ```typescript
+   el.title = 'AI Engineering Fluency'; // i18n-exempt: brand name
+   ```
+2. **Allowlist** — for a literal that's awkward to annotate inline (e.g. repeated across many files), add its exact text to `scripts/hardcoded-strings-allowlist.json`'s `allow` array instead.
+
+For everything else, route the string through `localize()`/`t()` per the sections above rather than reaching for an escape hatch. Never regenerate the baseline (`npm run lint:hardcoded-strings -- --update-baseline`) to paper over new violations — only run it when a genuinely pre-existing string is being deliberately deferred.
+
 ### Adding a New Language
 
 1. Create a new file `package.nls.<locale>.json` (e.g., `package.nls.fr.json` for French)
