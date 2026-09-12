@@ -666,6 +666,18 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 		if (!entry.taskCategoryUsage[taskCategory]) { entry.taskCategoryUsage[taskCategory] = { tokens: 0, sessions: 0 }; }
 		entry.taskCategoryUsage[taskCategory].tokens += tokens;
 		entry.taskCategoryUsage[taskCategory].sessions += 1;
+		// The chart's "By Task" split (buildTaskCategoryTokenDatasets/SessionDatasets/CostDatasets
+		// in chartDataBuilder.ts) reads these three fields, not taskCategoryUsage above — without
+		// them the periodic-refresh path (aggregatePeriodStats, used by calculateDetailedStats())
+		// silently wipes the chart's task-category token/cost/session bars every time it overwrites
+		// the recent day range in lastFullDailyStats (see mergeIntoFullDailyStats in extension.ts).
+		if (!entry.taskCategoryTokens) { entry.taskCategoryTokens = {}; }
+		if (!entry.taskCategorySessions) { entry.taskCategorySessions = {}; }
+		if (!entry.taskCategoryModelUsage) { entry.taskCategoryModelUsage = {}; }
+		entry.taskCategoryTokens[taskCategory] = (entry.taskCategoryTokens[taskCategory] || 0) + tokens;
+		entry.taskCategorySessions[taskCategory] = (entry.taskCategorySessions[taskCategory] || 0) + 1;
+		if (!entry.taskCategoryModelUsage[taskCategory]) { entry.taskCategoryModelUsage[taskCategory] = {}; }
+		addModelUsage(entry.taskCategoryModelUsage[taskCategory]!, modelUsage);
 	}
 }
 

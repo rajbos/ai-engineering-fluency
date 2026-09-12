@@ -549,6 +549,47 @@ assert.ok(day, 'daily entry should exist');
 assert.deepEqual(day!.taskCategoryUsage, { Debugging: { tokens: 50, sessions: 1 } });
 });
 
+test('aggregatePeriodStats: rollup path – populates taskCategoryTokens/Sessions/ModelUsage on the daily entry (regression: By Task chart empty after periodic refresh)', () => {
+// buildTaskCategoryTokenDatasets/SessionDatasets/CostDatasets (chartDataBuilder.ts) — the
+// datasets the chart's "By Task" split actually renders from — read these three fields, not
+// taskCategoryUsage. Without them, a periodic background refresh (calculateDetailedStats ->
+// aggregatePeriodStats -> mergeIntoFullDailyStats) silently wipes the chart's task-category
+// bars for the recent day range even though taskCategoryUsage stays populated.
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+taskCategory: 'Coding',
+dailyRollups: {
+'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 2, modelUsage: { 'gpt-4o': { inputTokens: 80, outputTokens: 40, sessions: 1 } } },
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Coding: 120 });
+assert.deepEqual(day!.taskCategorySessions, { Coding: 1 });
+assert.deepEqual(day!.taskCategoryModelUsage, { Coding: { 'gpt-4o': { inputTokens: 80, outputTokens: 40, sessions: 1 } } });
+});
+
+test('aggregatePeriodStats: fallback path – populates taskCategoryTokens/Sessions/ModelUsage on the daily entry (regression: By Task chart empty after periodic refresh)', () => {
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-14T10:00:00.000Z').getTime(),
+lastInteraction: '2025-03-14T10:00:00.000Z',
+sessionData: makeSession({ tokens: 50, taskCategory: 'Debugging', modelUsage: { 'gpt-4o': { inputTokens: 30, outputTokens: 20, sessions: 1 } } }),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-14');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Debugging: 50 });
+assert.deepEqual(day!.taskCategorySessions, { Debugging: 1 });
+assert.deepEqual(day!.taskCategoryModelUsage, { Debugging: { 'gpt-4o': { inputTokens: 30, outputTokens: 20, sessions: 1 } } });
+});
+
 test('aggregatePeriodStats: rollup path – counts sub-agent sessions once per period', () => {
 const ranges = makeRanges('2025-03-15');
 const withSubAgents: SessionAggregateInput = {
