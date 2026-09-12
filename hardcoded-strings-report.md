@@ -10,10 +10,23 @@ positives (see the skill README for the exclusion rules) — triage each one
 before localizing.
 
 - Files scanned: 36
-- Files with findings: 16
-- Total candidate strings: 1183
+- Files with findings: 17
+- Total candidate strings: 1236
 
 ## Findings by file
+
+### `vscode-extension/src/extension.ts` (8)
+
+| Line | Kind | Snippet |
+|---|---|---|
+| 1797 | <title> content | `<title>What's New</title>` |
+| 7804 | <title> content | `<title>Environmental Impact</title>` |
+| 8756 | <title> content | `<title>Session Log Viewer</title>` |
+| 9362 | <title> content | `<title>Scoring Guide</title>` |
+| 9682 | <title> content | `<title>AI Efficiency Trends</title>` |
+| 10190 | <title> content | `<title>Team Dashboard</title>` |
+| 12433 | <title> content | `<title>Diagnostic Report</title>` |
+| 12620 | <title> content | `<title>Usage Analysis</title>` |
 
 ### `vscode-extension/src/webview/chart/main.ts` (29)
 
@@ -115,7 +128,7 @@ before localizing.
 | 1275 | iconHeading() text argument | `iconHeading('h3', 'lightbulb', 'Calculation & Estimates')` |
 | 1343 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/diagnostics/main.ts` (343)
+### `vscode-extension/src/webview/diagnostics/main.ts` (365)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -144,6 +157,7 @@ before localizing.
 | 659 | <span> content | `<span class="session-hierarchy-badge hierarchy-children" title="${label}">↓ ${count} ${count === 1 ? 'Child' : 'Children'}</span>` |
 | 670 | title attribute | `title="⚠️ ${unattributed.toLocaleString()} tokens (~${pct}%) not attributed to any model — debug log events without a model field"` |
 | 677 | title attribute | `title="Empty session"` |
+| 677 | <a> content | `<a href="#" class="session-file-link" data-file="${encodeURIComponent(sf.file)}" title="${escapeHtml(sf.title)}">${escapeHtml(sf.title.length > 40 ? sf.title.su…` |
 | 680 | <span> content | `<span style="color: #888; font-style: italic;">No workspace</span>` |
 | 684 | title attribute | `title="${sf.title ? escapeHtml(sf.title) : "` |
 | 684 | title attribute | `title="${Number(sf.tokens \|\| 0).toLocaleString()} tokens"` |
@@ -197,11 +211,17 @@ before localizing.
 | 894 | <div> content | `<div class="summary-label">${statusIcon} Status</div>` |
 | 899 | <div> content | `<div class="summary-label">👤 Logged in as</div>` |
 | 907 | <p> content | `<p style="color: #999; font-size: 12px; margin-bottom: 16px;"> You are currently authenticated with GitHub. This enables future features such as: </p>` |
+| 911 | <li> content | `<li>Repository-specific usage tracking</li>` |
+| 912 | <li> content | `<li>Team collaboration features</li>` |
+| 913 | <li> content | `<li>Advanced analytics and insights</li>` |
 | 918 | <p> content | `<p style="color: #999; font-size: 12px; margin-bottom: 16px;"> Sign in with your GitHub account to unlock future features. This uses VS Code's built-in authenti…` |
 | 928 | <span> content | `<span>Disconnect GitHub</span>` |
 | 933 | <span> content | `<span>Authenticate with GitHub</span>` |
 | 950 | <h4> content | `<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Azure Storage</h4>` |
 | 950 | <p> content | `<p style="color: #999; font-size: 12px; margin-bottom: 16px;">To enable cloud synchronization, configure an Azure Storage account via the Backend configuration …` |
+| 950 | <li> content | `<li>Azure subscription with Storage Account access</li>` |
+| 950 | <li> content | `<li>Appropriate permissions (Storage Table Data Contributor or Storage Account Key)</li>` |
+| 950 | <li> content | `<li>VS Code signed in with your Azure account (for Entra ID auth)</li>` |
 | 952 | <h4> content | `<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4>` |
 | 952 | <td> content | `<td style="font-weight: 600; width: 200px;">Storage Account</td>` |
 | 952 | <td> content | `<td style="font-weight: 600;">Subscription ID</td>` |
@@ -229,6 +249,9 @@ before localizing.
 | 967 | <div> content | `<div class="summary-label">${authIcon} GitHub Auth</div>` |
 | 972 | <h4> content | `<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Team Server</h4>` |
 | 972 | <p> content | `<p style="color: #999; font-size: 12px; margin-bottom: 16px;">Deploy the sharing server and configure its URL in the Backend configuration panel.</p>` |
+| 972 | <li> content | `<li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li>` |
+| 972 | <li> content | `<li>Enter the server's base URL in the Backend configuration panel</li>` |
+| 972 | <li> content | `<li>Data syncs automatically every 5 minutes once configured</li>` |
 | 974 | <h4> content | `<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4>` |
 | 974 | <td> content | `<td style="font-weight: 600; width: 200px;">Server URL</td>` |
 | 974 | <h4> content | `<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 Local Session Statistics</h4>` |
@@ -340,10 +363,17 @@ before localizing.
 | 2661 | <div> content | `<div class="summary-label">⏱️ Cache Age</div>` |
 | 2666 | <h4> content | `<h4>Storage Location</h4>` |
 | 2667 | <div> content | `<div class="location-box"> <code>${escapeHtml(data.cacheInfo?.location \|\| "VS Code Global State")}</code> ${data.cacheInfo?.storagePath ? ' <a href="#" class="o…` |
+| 2674 | <li> content | `<li>Token counts per session file</li>` |
+| 2675 | <li> content | `<li>Interaction counts</li>` |
+| 2676 | <li> content | `<li>Model usage statistics</li>` |
+| 2677 | <li> content | `<li>File modification timestamps for validation</li>` |
+| 2678 | <li> content | `<li>Usage analysis data (tool calls, modes, context references)</li>` |
 | 2683 | <h4> content | `<h4>Cache Management</h4>` |
 | 2684 | <p> content | `<p style="color: #999; font-size: 12px; margin-bottom: 12px;"> Clearing the cache will force the extension to re-read and re-analyze all session files on the ne…` |
 | 2689 | <span> content | `<span>Clear Cache</span>` |
 | 2690 | <span> content | `<span>Reset Insights Dismissals</span>` |
+| 2706 | <strong> content | `<strong>Premium Interactions:</strong>` |
+| 2710 | <strong> content | `<strong>Completions:</strong>` |
 | 2714 | <p> content | `<p class="hint">No quota information available from the API yet. Sign out and back in to refresh.</p>` |
 | 2716 | <h4> content | `<h4>📊 API Quota Information</h4>` |
 | 2723 | <h4> content | `<h4>🆕 Editor Discovery Notifications</h4>` |
@@ -389,6 +419,7 @@ before localizing.
 | 2908 | <div> content | `<div>Track how many tokens each tool produces as output over the last 30 days. Data is collected as you use the extension — no output token data has been record…` |
 | 2932 | <h4> content | `<h4 class="tool-family-heading">Other Tools</h4>` |
 | 2942 | <div> content | `<div class="info-box-title">🔧 Tool Output Token Analysis</div>` |
+| 2943 | <strong> content | `<strong>vs Built-in</strong>` |
 | 2943 | <button> content | `<button class="inline-link" id="btn-open-tool-families-settings">Configure tool families ↗</button>` |
 | 2992 | <div> content | `<div class="info-box-title">🧩 Skill Usage</div>` |
 | 2993 | <div> content | `<div>Tracks how often each agent skill (e.g. a <code>/skill-name</code> invocation or another editor's <code>SKILL.md</code> workflow) was invoked over the last…` |
@@ -398,7 +429,10 @@ before localizing.
 | 3019 | <th> content | `<th>Description</th>` |
 | 3019 | <th> content | `<th>Invocations</th>` |
 | 3028 | <div> content | `<div class="info-box-title">📡 Copilot CLI OpenTelemetry Detection Running</div>` |
+| 3038 | <code> content | `<code>~/.copilot/otel</code>` |
 | 3040 | <div> content | `<div class="info-box-title">📡 Copilot CLI OpenTelemetry Export Not Detected</div>` |
+| 3042 | <strong> content | `<strong>exact</strong>` |
+| 3047 | <code> content | `<code>docs/COPILOT-CLI-OTEL-EXPORT.md</code>` |
 | 3114 | <label> content | `<label for="otel-delta-period">Show:</label>` |
 | 3127 | <div> content | `<div class="summary-label">📡 Sessions With OTel Data</div>` |
 | 3131 | <div> content | `<div class="summary-label">📊 Previous Estimate (Total)</div>` |
@@ -437,6 +471,7 @@ before localizing.
 | 3377 | <span> content | `<span>Scanning debug logs for TTFT…</span>` |
 | 3422 | <span> content | `<span id="ttft-loading-status">Waiting for session files to finish loading…</span>` |
 | 3440 | <div> content | `<div class="info-box-title">📋 About This Report</div>` |
+| 3443 | <strong> content | `<strong>not</strong>` |
 | 3448 | <span> content | `<span>Copy to Clipboard</span>` |
 | 3449 | <span> content | `<span>Open GitHub Issue</span>` |
 | 3450 | <span> content | `<span>Clear Cache</span>` |
@@ -745,7 +780,7 @@ before localizing.
 | 1506 | <div> content | `<div class="empty-state">No chat turns found in this session.</div>` |
 | 1541 | .textContent assignment | `.textContent = 'No data available.'` |
 
-### `vscode-extension/src/webview/maturity/darkFactorySection.ts` (16)
+### `vscode-extension/src/webview/maturity/darkFactorySection.ts` (17)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -764,9 +799,10 @@ before localizing.
 | 171 | <span> content | `<span class="df-section-title">Dark Factory Readiness</span>` |
 | 172 | <span> content | `<span class="df-section-badge">per repository</span>` |
 | 175 | <div> content | `<div class="info-box-title">📋 What this measures</div>` |
+| 181 | <strong> content | `<strong>It never tells you that you are ready to go dark.</strong>` |
 | 188 | <div> content | `<div class="df-footer">Scanned ${escapeHtml(new Date(report.scannedAt).toLocaleString())} &middot; Stages 1&ndash;${report.maxAssessableStage} are assessable; S…` |
 
-### `vscode-extension/src/webview/maturity/main.ts` (60)
+### `vscode-extension/src/webview/maturity/main.ts` (62)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -807,7 +843,9 @@ before localizing.
 | 466 | <span> content | `<span class="header-title">AI Engineering Fluency Score</span>` |
 | 468 | <div> content | `<div class="button-row"> ${navButtonsHtml('btn-maturity', !!data.backendConfigured)} </div>` |
 | 473 | <div> content | `<div class="info-box-title">📋 About This Dashboard</div>` |
+| 478 | <a> content | `<a href="https://github.com/rajbos/ai-engineering-fluency/blob/main/docs/FLUENCY-LEVELS.md" class="beta-link">Read the full scoring rules</a>` |
 | 478 | <button> content | `<button id="btn-level-viewer-inline" class="inline-action-btn">📊 How is my score calculated?</button>` |
+| 480 | <strong> content | `<strong>Note:</strong>` |
 | 484 | <div> content | `<div class="stage-banner-label">Overall AI Engineering Fluency</div>` |
 | 494 | <div> content | `<div class="legend-title">Stage Reference</div>` |
 | 495 | <div> content | `<div class="legend-label">Stage 1: AI Skeptic</div>` |
@@ -853,7 +891,7 @@ before localizing.
 | 50 | <th> content | `<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>` |
 | 56 | <td> content | `<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>` |
 
-### `vscode-extension/src/webview/usage/main.ts` (407)
+### `vscode-extension/src/webview/usage/main.ts` (427)
 
 | Line | Kind | Snippet |
 |---|---|---|
@@ -905,9 +943,12 @@ before localizing.
 | 1446 | <th> content | `<th class="sortable" data-sort="title" style="padding:6px 8px;">Title${getSessionSortIndicator('title')}</th>` |
 | 1466 | <button> content | `<button id="sessions-columns-toggle" type="button" style="font-size:12px; padding:2px 8px; background:var(--vscode-dropdown-background, var(--bg-secondary)); co…` |
 | 1580 | <div> content | `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}…</div>` |
+| 2515 | <li> content | `<li><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d.number} ${escapeHtml(d.title)}</a> — ${AI_PR_…` |
 | 2519 | <summary> content | `<summary style="cursor:pointer; color:var(--text-secondary);">Show ${r.aiDetails.length} detail(s)</summary>` |
 | 2542 | <div> content | `<div style="${box}">🕒 <strong>Not fetched yet.</strong> The snapshot is refreshed hourly by the main VS Code window — it will appear here once that first refre…` |
 | 2548 | <div> content | `<div style="${box}"> 🕒 Updated <strong>${escapeHtml(getTimeSince(data.fetchedAt))}</strong> · next refresh after ${escapeHtml(nextRefresh)}. Cached and refresh…` |
+| 2559 | <strong> content | `<strong>⚠️ Failed to load repository PR activity</strong>` |
+| 2567 | <strong> content | `<strong>🔒 GitHub authentication required</strong>` |
 | 2573 | <div> content | `<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);"> No GitHub repositories detected in your workspace folders. </div>` |
 | 2586 | <div> content | `<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;"> Showing PRs created since ${sinceDate}. Reviewer requests are only visible for <s…` |
 | 2594 | <th> content | `<th style="text-align:left; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;">📂 Repository</…` |
@@ -918,6 +959,7 @@ before localizing.
 | 2597 | <th> content | `<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="PRs wh…` |
 | 2598 | title attribute | `title="Open PRs where an AI agent was listed as a requested reviewer"` |
 | 2598 | <th> content | `<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="Open P…` |
+| 2608 | <code> content | `<code>copilot-swe-agent</code>, <code>claude-code-action</code>, <code>openai-code-agent</code>` |
 | 2617 | <span> content | `<span>AI Activity in Repository PRs</span>` |
 | 2618 | <div> content | `<div class="section-subtitle"> PRs from the last 30 days across your known repositories, showing how many were <strong>authored by cloud agents</strong> (i.e. o…` |
 | 2636 | title attribute | `title="Tasks the agents API reported without a repository — typically ad-hoc sessions started from cloud chat"` |
@@ -928,6 +970,7 @@ before localizing.
 | 2656 | <span> content | `<span title="Showing ${r.tasksScanned} of ${r.tasksTotal} tasks — capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${r.tasksScanned}…` |
 | 2677 | <div> content | `<div style="${box}">🕒 <strong>Not fetched yet.</strong> The snapshot is refreshed hourly by the main VS Code window — it will appear here once that first refre…` |
 | 2683 | <div> content | `<div style="${box}"> 🕒 Updated <strong>${escapeHtml(getTimeSince(data.fetchedAt))}</strong> · next refresh after ${escapeHtml(nextRefresh)}. Cached and refresh…` |
+| 2693 | <strong> content | `<strong>🔒 GitHub authentication required</strong>` |
 | 2699 | <div> content | `<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);"> No cloud agent tasks found — neither in your workspace repositories nor anywhere els…` |
 | 2727 | <div> content | `<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Tasks</div>` |
 | 2731 | <div> content | `<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Sessions</div>` |
@@ -942,6 +985,9 @@ before localizing.
 | 2756 | <th> content | `<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="Number…` |
 | 2757 | title attribute | `title="AI credits consumed (1 credit = $0.01). Only available when the API reports usage data."` |
 | 2757 | <th> content | `<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="AI cre…` |
+| 2764 | <strong> content | `<strong>No double-counting:</strong>` |
+| 2765 | <strong> content | `<strong>Two sources:</strong>` |
+| 2766 | <strong> content | `<strong>Action minutes</strong>` |
 | 2775 | <span> content | `<span>Copilot Cloud Agent Sessions</span>` |
 | 2776 | <div> content | `<div class="section-subtitle"> Cloud agent tasks and sessions from the last 30 days. Each <strong>task</strong> is a user request to the agent; each <strong>ses…` |
 | 2790 | <span> content | `<span>Copilot Customization Files</span>` |
@@ -979,13 +1025,19 @@ before localizing.
 | 3034 | <div> content | `<div class="section-subtitle">Model Context Protocol (MCP) server and tool usage</div>` |
 | 3038 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>` |
 | 3040 | <div> content | `<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.today.mcpTools.total)}</di…` |
+| 3042 | <strong> content | `<strong>By Server:</strong>` |
 | 3043 | <div> content | `<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>` |
 | 3047 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>` |
 | 3049 | <div> content | `<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.last30Days.mcpTools.total)…` |
+| 3051 | <strong> content | `<strong>By Server:</strong>` |
 | 3052 | <div> content | `<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>` |
 | 3056 | <h4> content | `<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>` |
 | 3058 | <div> content | `<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.month.mcpTools.total)}</di…` |
+| 3060 | <strong> content | `<strong>By Server:</strong>` |
 | 3061 | <div> content | `<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>` |
+| 3069 | <strong> content | `<strong>By Tool:</strong>` |
+| 3076 | <strong> content | `<strong>By Tool:</strong>` |
+| 3083 | <strong> content | `<strong>By Tool:</strong>` |
 | 3108 | <div> content | `<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Available</div>` |
 | 3112 | <div> content | `<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Used</div>` |
 | 3116 | <div> content | `<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Unused</div>` |
@@ -1010,6 +1062,7 @@ before localizing.
 | 3171 | title attribute | `title="Defined in ${s.configFiles.length} config files"` |
 | 3171 | <button> content | `<button class="curation-file-btn" data-command="openFileFromList" data-paths="${escapeHtml(JSON.stringify(s.configFiles))}" style="background:none;border:none;p…` |
 | 3184 | <td> content | `<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${notConnected ? '<em style="color:var(--text-secondary)">not connected</em>' : s.availa…` |
+| 3196 | <code> content | `<code>.vscode/mcp.json</code>` |
 | 3216 | <summary> content | `<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;"> 🔌 MCP Servers in Last ${windowDays} Days (${allSer…` |
 | 3222 | <label> content | `<label for="mcp-hide-toggle" style="font-size:12px; color:var(--text-primary); cursor:pointer; user-select:none;">Hide servers with usage</label>` |
 | 3223 | <span> content | `<span style="font-size:11px; color:var(--text-secondary);">${unusedCount} with no usage · ${usedCount} with usage</span>` |
@@ -1085,6 +1138,7 @@ before localizing.
 | 3669 | title attribute | `title="Copy the same prompt to paste into another workspace's Copilot Chat"` |
 | 3692 | title attribute | `title="Show every correction moment again"` |
 | 3692 | <button> content | `<button type="button" class="correction-clear-filter" title="Show every correction moment again" style="font-size:11px; padding:2px 10px; border-radius:10px; bo…` |
+| 3722 | <strong> content | `<strong>${shown}</strong> of <strong>${sampled.length}</strong> listed correction moments — filtered by <strong>${escapeHtml(CORRECTION_FILTER_LABELS[activeCorr…` |
 | 3762 | <span> content | `<span>Corrections</span>` |
 | 3763 | <div> content | `<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>` |
 | 3764 | <div> content | `<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;"> ⏳…` |
@@ -1206,6 +1260,7 @@ before localizing.
 | 5028 | <span> content | `<span>Report Unknown Tools</span>` |
 | 5114 | <span> content | `<span>${formatNumber(row.counters.calls)} turns</span>` |
 | 5238 | aria-label attribute | `aria-label="Model vendor colors"` |
+| 5247 | <strong> content | `<strong>No comparable edit data yet.</strong>` |
 | 5247 | <span> content | `<span>The chart appears after local sessions record both a model and structured edit turns.</span>` |
 | 5266 | aria-label attribute | `aria-label="One-shot edit rate compared with ${escapeHtml(metric.axisLabel.toLowerCase())}; bubble size represents ${escapeHtml(bubbleMetric.label.toLowerCase()…` |
 | 5288 | aria-label attribute | `aria-label="Efficiency comparison metric"` |
@@ -1213,8 +1268,11 @@ before localizing.
 | 5289 | <span> content | `<span>Bubble size</span>` |
 | 5290 | <span> content | `<span>Color by</span>` |
 | 5317 | <summary> content | `<summary>Other models (${otherRows.length}, ${formatRatePercent(otherShare)} of turns)</summary>` |
+| 5325 | <strong> content | `<strong>No per-model efficiency data for this period.</strong>` |
 | 5325 | <span> content | `<span>Run local agent sessions with model and tool-call metadata, then refresh the dashboard.</span>` |
+| 5333 | <strong> content | `<strong>Efficiency frontier</strong>` |
 | 5333 | <span> content | `<span>One-shot edit rate is a local quality proxy, not a benchmark pass rate.</span>` |
+| 5335 | <strong> content | `<strong>Most used models locally</strong>` |
 | 5335 | <span> content | `<span>Ranked by your local turns; all averages use the same selected period.</span>` |
 | 5342 | <span> content | `<span>Local Model Leaderboard</span>` |
 | 5343 | <div> content | `<div class="section-subtitle">Compare the models in your own sessions by local usage, one-shot edits, cost, output tokens, and tool steps. Exactness depends on …` |

@@ -38,8 +38,11 @@ node --test .github/skills/scan-hardcoded-strings/scan-hardcoded-strings.test.js
 
 Covers the localization-call stripper, the interpolation stripper (including
 ternary-literal recovery), the prose heuristic's exclusion rules, each
-detector, the `extension.ts` method-range restriction, and markdown report
-generation.
+detector (including the shared DOM-helper call detector and its argument
+parser), the `extension.ts` method-range restriction, block-comment masking,
+markdown report generation, the `runMain()` error-handling contract, and two
+CLI smoke tests that invoke the script itself (normal and `--json` modes) to
+exercise the executable path the pure-helper tests don't reach.
 
 ## Quick Usage
 
@@ -68,10 +71,14 @@ addition to printing a console summary grouped by file.
   isn't reported twice)
 - Text content inside common UI-bearing HTML tags embedded in template
   literals: `<div>`, `<button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`,
-  `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>` — tolerating simple
-  nested inline tags (`<a>`, `<strong>`, `<em>`, `<code>`, `<b>`, `<i>`,
-  `<u>`) so prose broken up by an inline link or emphasis is still read as
-  one block instead of being skipped
+  `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>`, `<li>`, `<title>` —
+  tolerating simple nested inline tags (`<a>`, `<strong>`, `<em>`, `<code>`,
+  `<b>`, `<i>`, `<u>`) so prose broken up by an inline link or emphasis is
+  still read as one block instead of being skipped. Those inline tags are
+  also matched as a literal's *root* tag (not only nested), so e.g.
+  `el.innerHTML = '<strong>Save changes</strong>'` is still found even
+  though `.innerHTML` assignments containing markup otherwise defer entirely
+  to this detector
 - A string/template literal passed as the UI-text argument to a known shared
   DOM helper (`el(tag, className, text)`, `iconHeading(tag, icon, text,
   className)`, `createButton(id, label, appearance)` from
@@ -110,6 +117,13 @@ checked, since that is often where the actual hardcoded UI text lives. Each
 recovered literal is prose-checked on its own before being combined, so one
 non-prose branch (e.g. a URL) can't poison another genuine one — `` `${cond
 ? 'https://x' : 'Open link'}` `` still surfaces "Open link".
+
+Before any detector runs, `/* ... */` block comments (including JSDoc) are
+blanked out — a doc-comment example like `Converts [text](url) to <a
+href="url">text</a>` is not real UI markup and would otherwise be
+misreported. `//` line comments are deliberately left alone, since stripping
+from the first `//` to end-of-line risks truncating a genuine line that
+happens to contain a URL.
 
 This is a **line/regex-based scan**, not an AST parse — by design, since this
 is a triage report rather than a hard CI gate (a stricter, ratcheted AST-based

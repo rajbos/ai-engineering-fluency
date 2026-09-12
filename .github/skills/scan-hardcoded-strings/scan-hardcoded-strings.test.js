@@ -14,6 +14,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const {
     stripLocalizedCalls,
     stripInterpolations,
@@ -29,7 +31,11 @@ const {
     extractHtmlMethodRanges,
     isWithinRanges,
     buildMarkdownReport,
+    runMain,
+    maskBlockComments,
 } = require('./scan-hardcoded-strings.js');
+
+const SCRIPT_PATH = path.join(__dirname, 'scan-hardcoded-strings.js');
 
 // ── stripLocalizedCalls ──────────────────────────────────────────────────────
 
@@ -263,6 +269,28 @@ test('findTagContent: tolerates simple nested inline tags (<a>, <strong>) inside
     assert.match(findings[0].snippet, /create an issue/);
 });
 
+test('findTagContent: flags hardcoded text inside a <li>', () => {
+    const findings = findTagContent('<li>Repository-specific usage tracking</li>');
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, '<li> content');
+});
+
+test('findTagContent: flags hardcoded text inside a document <title>', () => {
+    const findings = findTagContent('<title>Diagnostic Report</title>');
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, '<title> content');
+});
+
+test('findTagContent: flags an inline tag (<strong>) used as the root of the literal, not just nested', () => {
+    // Regression: a literal whose *root* is an inline-only tag (e.g. the body
+    // of an `el.innerHTML = '<strong>Save changes</strong>'` assignment,
+    // which findPropertyAssignments defers here because it contains "<")
+    // must still be found even though <strong> isn't a TAG_NAMES container.
+    const findings = findTagContent('<strong>Save changes</strong>');
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].kind, '<strong> content');
+});
+
 // ── splitTopLevelArgs ─────────────────────────────────────────────────────────
 
 test('splitTopLevelArgs: splits simple comma-separated arguments', () => {
@@ -419,4 +447,89 @@ test('buildMarkdownReport: renders a findings table with escaped snippet content
     const md = buildMarkdownReport(results, 1, 1);
     assert.match(md, /Total candidate strings: 1/);
     assert.match(md, /\| 42 \| \.textContent assignment \| `el\.textContent = 'a \\\| b'` \|/);
+});
+
+// ── maskBlockComments ─────────────────────────────────────────────────────────
+
+test('maskBlockComments: blanks a JSDoc example so it is not treated as real markup', () => {
+    const src = [
+        '/**',
+        ' * Converts [text](url) to <a href="url" target="_blank">text</a>',
+        ' */',
+        'export function markdownToHtml() {}',
+    ].join('\n');
+    const masked = maskBlockComments(src);
+    assert.doesNotMatch(masked, /<a href/);
+    // Line/character positions must be unchanged.
+    assert.equal(masked.length, src.length);
+    assert.equal(masked.split('\n').length, src.split('\n').length);
+    assert.match(masked, /export function markdownToHtml/);
+});
+
+test('maskBlockComments: does not touch code outside comments', () => {
+    const src = "el.textContent = 'Refresh';";
+    assert.equal(maskBlockComments(src), src);
+});
+
+test('scanFile: does not flag example markup inside a /** ... */ doc comment', () => {
+    const src = [
+        '/**',
+        ' * Converts [text](url) to <a href="url" target="_blank" rel="noopener noreferrer">text</a>',
+        ' */',
+        "export function markdownToHtml() { return '<a>real text</a>'; }",
+    ].join('\n');
+    const findings = scanFile(maskBlockComments(src));
+    assert.ok(!findings.some((f) => /target="_blank"/.test(f.snippet)));
+    assert.ok(findings.some((f) => /real text/.test(f.snippet)));
+});
+
+// ── runMain (error-path contract) ────────────────────────────────────────────
+
+test('runMain: an operational error is logged to stderr without changing the exit code contract', () => {
+    const originalExitCode = process.exitCode;
+    const originalConsoleError = console.error;
+    process.exitCode = undefined;
+    let logged = '';
+    console.error = (...args) => { logged = args.join(' '); };
+    try {
+        runMain(() => { throw new Error('simulated unreadable file'); });
+        assert.equal(process.exitCode, 0);
+        assert.match(logged, /simulated unreadable file/);
+    } finally {
+        console.error = originalConsoleError;
+        process.exitCode = originalExitCode;
+    }
+});
+
+test('runMain: a normal (non-throwing) mainFn leaves exit code as it set it', () => {
+    const originalExitCode = process.exitCode;
+    process.exitCode = undefined;
+    try {
+        runMain(() => { process.exitCode = 0; });
+        assert.equal(process.exitCode, 0);
+    } finally {
+        process.exitCode = originalExitCode;
+    }
+});
+
+// ── CLI smoke tests (the actual executable path) ─────────────────────────────
+//
+// Everything above tests the exported pure helpers directly; these two tests
+// instead invoke the script exactly as a user/CI would, so a regression in
+// main()'s wiring (argv parsing, console output, report writing) is caught
+// even though it isn't itself an exported function.
+
+test('CLI smoke test: normal mode exits 0, scans real files, and writes the report', () => {
+    const result = spawnSync(process.execPath, [SCRIPT_PATH], { encoding: 'utf8' });
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Scanned \d+ file\(s\)/);
+    assert.match(result.stdout, /Markdown report written to/);
+});
+
+test('CLI smoke test: --json mode exits 0 and prints parseable JSON with the expected shape', () => {
+    const result = spawnSync(process.execPath, [SCRIPT_PATH, '--json'], { encoding: 'utf8' });
+    assert.equal(result.status, 0);
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(typeof parsed.total, 'number');
+    assert.ok(Array.isArray(parsed.files));
 });

@@ -42,7 +42,7 @@ const WEBVIEW_DIR = path.join(REPO_ROOT, 'vscode-extension/src/webview');
 const EXTENSION_FILE = path.join(REPO_ROOT, 'vscode-extension/src/extension.ts');
 const REPORT_PATH = path.join(REPO_ROOT, 'hardcoded-strings-report.md');
 
-const TAG_NAMES = ['div', 'button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'td', 'th', 'option', 'summary', 'caption'];
+const TAG_NAMES = ['div', 'button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span', 'td', 'th', 'option', 'summary', 'caption', 'li', 'title'];
 const TEXT_PROPS = ['textContent', 'innerText', 'innerHTML', 'title', 'placeholder'];
 
 // ── File collection ────────────────────────────────────────────────────────
@@ -354,11 +354,21 @@ function findHtmlAttributes(content) {
 // rather than being skipped because of the `<a>...</a>` in the middle.
 const INLINE_PASSTHROUGH_TAGS = ['a', 'strong', 'em', 'code', 'b', 'i', 'u'];
 
-/** Detect hardcoded text content inside common UI-bearing HTML tags. */
+/**
+ * Detect hardcoded text content inside common UI-bearing HTML tags.
+ *
+ * The inline passthrough tags are also matched as top-level tags (not only
+ * as nested content within e.g. a `<div>`), so a literal whose *root* is one
+ * of them — `el.innerHTML = '<strong>Save changes</strong>'`, which
+ * `findPropertyAssignments` defers here because it contains `<` — is still
+ * found. This can occasionally double-report the same text once as part of
+ * an outer tag's content and once as the inline tag's own standalone match;
+ * for a triage report that overlap is preferable to missing the text.
+ */
 function findTagContent(content) {
     const findings = [];
-    const tagAlt = TAG_NAMES.join('|');
     const inlineAlt = INLINE_PASSTHROUGH_TAGS.join('|');
+    const tagAlt = [...TAG_NAMES, ...INLINE_PASSTHROUGH_TAGS].join('|');
     const bodyPattern = '(?:[^<]|<(?:' + inlineAlt + ')(?:\\s[^>]*)?>|</(?:' + inlineAlt + ')>)*';
     const re = new RegExp('<(' + tagAlt + ')(?:\\s[^>]*)?>(' + bodyPattern + ')</\\1>', 'g');
     let m;
@@ -523,6 +533,20 @@ function buildMarkdownReport(results, total, scannedCount) {
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
+/**
+ * Blank out `/* ... *\/` block comments (JSDoc included), replacing every
+ * non-newline character with a space so character offsets and line numbers
+ * stay identical to the original content. This keeps example markup or
+ * prose written in a doc comment (e.g. `Converts [text](url) to <a
+ * href="url">text</a>`) from being reported as real UI text. Line comments
+ * (`//`) are deliberately left alone — `//` also opens a URL, and unlike a
+ * block comment's `/*`, stripping from the first `//` to end-of-line risks
+ * truncating a genuine template-literal line that happens to contain one.
+ */
+function maskBlockComments(content) {
+    return content.replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '));
+}
+
 function runScan() {
     const files = [...collectTsFiles(WEBVIEW_DIR)];
     if (fs.existsSync(EXTENSION_FILE)) { files.push(EXTENSION_FILE); }
@@ -531,7 +555,7 @@ function runScan() {
     let total = 0;
 
     for (const file of files.sort()) {
-        const content = fs.readFileSync(file, 'utf8');
+        const content = maskBlockComments(fs.readFileSync(file, 'utf8'));
         const allowedRanges = file === EXTENSION_FILE ? extractHtmlMethodRanges(content) : null;
         const findings = scanFile(content, allowedRanges);
         if (findings.length > 0) {
@@ -581,15 +605,17 @@ function main() {
 }
 
 /**
- * Run main() but honor the "always exits 0" contract even when something
- * operational goes wrong (an unreadable source file, an unwritable report
- * path, etc.) — those errors are reported to stderr, not left to crash the
- * process with a non-zero exit that would unexpectedly fail a maintenance
- * or CI invocation of this informational script.
+ * Run `mainFn` (defaults to `main`) but honor the "always exits 0" contract
+ * even when something operational goes wrong (an unreadable source file, an
+ * unwritable report path, etc.) — those errors are reported to stderr, not
+ * left to crash the process with a non-zero exit that would unexpectedly
+ * fail a maintenance or CI invocation of this informational script. `mainFn`
+ * is injectable so the catch behavior itself can be unit tested without
+ * needing to force a real filesystem failure.
  */
-function runMain() {
+function runMain(mainFn = main) {
     try {
-        main();
+        mainFn();
     } catch (err) {
         console.error('scan-hardcoded-strings: error while scanning —', err instanceof Error ? err.message : err);
         process.exitCode = 0;
@@ -613,8 +639,11 @@ module.exports = {
     findHelperCallText,
     splitTopLevelArgs,
     scanFile,
+    maskBlockComments,
     buildMarkdownReport,
     runScan,
+    main,
+    runMain,
 };
 
 if (require.main === module) {

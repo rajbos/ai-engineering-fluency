@@ -45,13 +45,17 @@ The script will:
    `vscode-extension/src/webview/`, plus only the `get*Html(...)` method
    bodies in `vscode-extension/src/extension.ts` (not the whole 13k-line
    file — this keeps out unrelated string literals like GitHub issue
-   Markdown templates or VS Code panel titles)
+   Markdown templates or VS Code panel titles), after blanking out `/* ... */`
+   block/JSDoc comments so example markup in a doc comment isn't mistaken
+   for real UI text
 2. Flag string/template literals in UI-rendering positions — assignments to
    `.textContent`/`.innerText`/`.innerHTML`/`.title`/`.placeholder`,
    `aria-label="..."`/`title="..."`/`placeholder="..."` HTML attributes, text
    inside `<div>`, `<button>`, `<label>`, `<h1>`–`<h6>`, `<p>`, `<span>`,
-   `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>` tags in template
-   literals (tolerating simple nested inline tags like `<a>`/`<strong>`), and
+   `<td>`, `<th>`, `<option>`, `<summary>`, `<caption>`, `<li>`, `<title>`
+   tags in template literals (tolerating simple nested inline tags like
+   `<a>`/`<strong>`, which are also matched as a literal's own root tag so
+   e.g. `el.innerHTML = '<strong>Save changes</strong>'` isn't missed), and
    the UI-text argument of a known shared DOM helper call (`el(...)`,
    `iconHeading(...)`, `createButton(...)` from
    `vscode-extension/src/webview/shared/domUtils.ts`)
