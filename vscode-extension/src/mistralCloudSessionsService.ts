@@ -180,11 +180,10 @@ export async function collectMistralCloudSessions(
       'Mistral cloud sessions fetch',
     );
     if (list.error) {
-      const authError = list.statusCode === 401 || list.statusCode === 403;
       return {
         conversations: [],
         totalCount: 0,
-        authenticated: !authError,
+        authenticated: false,
         fetchedAt,
         error: list.statusCode ? `${list.error} (${list.statusCode})` : list.error,
       };
