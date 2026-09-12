@@ -2,6 +2,83 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import { extractSubAgentData, normalizeDisplayModelName, extractResponseItemText } from '../../../src/tokenEstimation';
+import { isCopilotAutoRequest, attachEstimatedTurnCosts } from '../../../src/tokenEstimation';
+import type { ChatTurn, ModelUsage } from '../../../src/types';
+import { getPricingSourceForEditor } from '../../../src/chartDataBuilder';
+
+const autoPricing = { 'gpt-4o': {
+	inputCostPerMillion: 20, outputCostPerMillion: 40, cachedInputCostPerMillion: 1,
+	copilotPricing: { inputCostPerMillion: 2, outputCostPerMillion: 4 },
+} };
+
+test('Auto discount: only the eligible Copilot token subset gets 10% off', () => {
+	const manual = { inputTokens: 1_000_000, outputTokens: 1_000_000, sessions: 1 };
+	const auto = { ...manual, autoRouting: { inputTokens: 1_000_000, outputTokens: 1_000_000 } };
+	assert.equal(calculateEstimatedCost({ 'gpt-4o': auto }, autoPricing, 'copilot'), 5.4);
+	assert.equal(calculateEstimatedCost({ 'gpt-4o': manual }, autoPricing, 'copilot'), 6);
+	assert.equal(calculateEstimatedCost({ 'gpt-4o': auto }, autoPricing, 'provider'), 60);
+	const mixed = { ...auto, inputTokens: 2_000_000, outputTokens: 3_000_000 };
+	assert.equal(calculateEstimatedCost({ 'gpt-4o': mixed }, autoPricing, 'copilot'), 15.4);
+	assert.equal(calculateEstimatedCost({ 'gpt-4o': mixed }, autoPricing), 160);
+	assert.equal(calculateEstimatedCost({ 'gpt-4o': auto }, { 'gpt-4o': { inputCostPerMillion: 20, outputCostPerMillion: 40 } }, 'copilot'), 60);
+});
+
+test('Auto discount: cache subset uses only Copilot rates and their fallbacks', () => {
+	const tokens = { inputTokens: 1_000_000, outputTokens: 1_000_000, cachedReadTokens: 500_000 };
+	const usage = { 'gpt-4o': { ...tokens, autoRouting: tokens, sessions: 1 } };
+	// Copilot has no cache rate: use its $2 input rate, not the provider's $1 cache rate.
+	assert.equal(calculateEstimatedCost(usage, autoPricing, 'copilot'), 5.4);
+	const pricing = { 'gpt-4o': { ...autoPricing['gpt-4o'], copilotPricing: {
+		inputCostPerMillion: 2, outputCostPerMillion: 4, cachedInputCostPerMillion: 0.2,
+		cacheCreationCostPerMillion: 3, cacheCreation1hCostPerMillion: 5,
+	} } };
+	const cached = { ...tokens, cacheCreationTokens: 200_000, cacheCreation1hTokens: 100_000 };
+	const autoUsage: ModelUsage = { 'gpt-4o': { ...cached, autoRouting: cached, sessions: 1 } };
+	assert.ok(Math.abs(calculateEstimatedCost(autoUsage, pricing, 'copilot') - 5.5 * 0.9) < 1e-12);
+});
+
+test('Auto detection and resolution use request evidence, not unrelated auto strings', () => {
+	for (const modelId of ['auto', 'copilot/auto']) {
+		const request = { modelId, result: { metadata: { modelId: 'gpt-4o' } } };
+		assert.equal(isCopilotAutoRequest(request), true);
+		assert.equal(getModelFromRequest(request), 'gpt-4o');
+	}
+	const response = [{ kind: 'autoModeResolution', resolved: { id: 'copilot/gpt-4o', name: 'GPT-4o' } }];
+	assert.equal(isCopilotAutoRequest({ response }), true);
+	assert.equal(getModelFromRequest({ response }), 'gpt-4o');
+	assert.equal(getModelFromRequest({ modelId: 'auto' }), 'auto');
+	assert.equal(isCopilotAutoRequest({ modelId: 'customendpoint/kiro/auto' }), false);
+	assert.equal(isCopilotAutoRequest({ modelId: 'gpt-4o' }), false);
+	assert.equal(isCopilotAutoRequest({ response: [null, {}, { kind: 'markdownContent', value: 'auto' }] }), false);
+	assert.equal(getModelFromRequest({ response: [{ kind: 'autoModeResolution', resolved: null }] }), 'auto');
+});
+
+test('Steps Overview costs: Auto actual usage discounted, manual/provider and child calls unchanged', () => {
+	const makeTurn = (autoRouted: boolean): ChatTurn => ({
+		turnNumber: 1, timestamp: null, mode: 'agent', userMessage: '', assistantResponse: '',
+		model: 'gpt-4o', autoRouted, contextReferences: createEmptyContextRefs(), mcpTools: [],
+		inputTokensEstimate: 1, outputTokensEstimate: 1, thinkingTokensEstimate: 0,
+		actualUsage: { promptTokens: 1_000_000, completionTokens: 1_000_000 },
+		toolCalls: [{ toolName: 'runSubagent', isSubAgent: true, subAgentModel: 'gpt-4o', subAgentTokens: { input: 1_000_000, output: 1_000_000 } }],
+	});
+	const turns = [makeTurn(true), makeTurn(false)];
+	attachEstimatedTurnCosts(turns, autoPricing, getPricingSourceForEditor('VS Code'));
+	assert.equal(turns[0].estimatedCost, 5.4);
+	assert.equal(turns[1].estimatedCost, 6);
+	assert.equal(turns[0].toolCalls[0].subAgentCost, 6);
+	const provider = makeTurn(true);
+	attachEstimatedTurnCosts([provider], autoPricing, getPricingSourceForEditor('Claude Code'));
+	assert.equal(provider.estimatedCost, 60);
+	const estimated = makeTurn(true);
+	delete estimated.actualUsage;
+	estimated.inputTokensEstimate = 1_000_000;
+	estimated.outputTokensEstimate = 1_000_000;
+	attachEstimatedTurnCosts([estimated], autoPricing, 'copilot');
+	assert.equal(estimated.estimatedCost, 5.4);
+	const unknown = { ...makeTurn(true), model: 'auto' };
+	attachEstimatedTurnCosts([unknown], autoPricing, 'copilot');
+	assert.equal(unknown.estimatedCost, undefined);
+});
 
 test('normalizeDisplayModelName: lowercases and replaces spaces with hyphens', () => {
 	assert.equal(normalizeDisplayModelName('Claude Haiku 4.5'), 'claude-haiku-4.5');
@@ -1496,6 +1573,43 @@ test('getModelFromRequest: result.details with no matching displayName falls bac
 test('getModelFromRequest: strips copilot/ prefix from result.metadata.modelId', () => {
         const req = { result: { metadata: { modelId: 'copilot/claude-sonnet-4.5' } } };
         assert.equal(getModelFromRequest(req), 'claude-sonnet-4.5');
+});
+
+// ── getModelFromRequest: Auto-mode resolution ───────────────────────────────
+// Copilot's "Auto" routing only records "auto"/"copilot/auto" as modelId; the
+// model actually picked for that turn is reported later as an
+// `autoModeResolution` item in the response stream. Without resolving this,
+// "auto" is treated as an unpriced model, silently dropping the turn's cost.
+
+test('getModelFromRequest: resolves the real model from an autoModeResolution response item', () => {
+        const req = {
+                modelId: 'copilot/auto',
+                response: [
+                        { kind: 'autoModeResolution', resolved: { id: 'mai-code-1.1-flash', name: 'MAI-Code-1.1-Flash' } },
+                ],
+        };
+        assert.equal(getModelFromRequest(req), 'mai-code-1.1-flash');
+});
+
+test('getModelFromRequest: falls back to "auto" when no autoModeResolution item is present', () => {
+        assert.equal(getModelFromRequest({ modelId: 'auto' }), 'auto');
+        assert.equal(getModelFromRequest({ modelId: 'copilot/auto', response: [] }), 'auto');
+});
+
+test('getModelFromRequest: non-auto modelId is unaffected by a response array', () => {
+        const req = {
+                modelId: 'copilot/gpt-4o',
+                response: [{ kind: 'autoModeResolution', resolved: { id: 'claude-sonnet-4.5' } }],
+        };
+        assert.equal(getModelFromRequest(req), 'gpt-4o');
+});
+
+test('getModelFromRequest: resolves auto from result.metadata.modelId (metadata-only shape) too', () => {
+        const req = {
+                result: { metadata: { modelId: 'copilot/auto' } },
+                response: [{ kind: 'autoModeResolution', resolved: { id: 'gpt-5.4' } }],
+        };
+        assert.equal(getModelFromRequest(req), 'gpt-5.4');
 });
 
 // ── selectTokenEstimationStrategy: format detection limit ──────────────────

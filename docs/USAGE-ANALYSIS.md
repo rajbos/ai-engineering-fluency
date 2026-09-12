@@ -16,7 +16,7 @@ You can access the Usage Analysis Dashboard in three ways:
 
 1. **From the Details Panel**: Click the status bar item to open the details panel, then click the "📊 Usage Analysis" button
 2. **From Command Palette**: Press `Ctrl+Shift+P` (Windows/Linux) or `Cmd+Shift+P` (macOS) and type "Show Usage Analysis Dashboard"
-3. **Direct Command**: Run the command `Copilot Token Tracker: Show Usage Analysis Dashboard`
+3. **Direct Command**: Run the command `AI Engineering Fluency: Show Usage Analysis Dashboard`
 
 ## Tracked Metrics
 

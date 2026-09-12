@@ -48,8 +48,7 @@ export function computeSessionDurationMs(firstInteraction: string | null | undef
 
 /**
  * Merges `source` model usage into `target` (in-place).
- * All four token fields are summed: inputTokens, outputTokens,
- * cachedReadTokens (optional), and cacheCreationTokens (optional).
+ * Sums token fields and the optional Auto-routing subset independently.
  */
 export function addModelUsage(target: ModelUsage, source: ModelUsage): void {
 for (const [model, usage] of Object.entries(source)) {
@@ -65,6 +64,10 @@ target[model].cachedReadTokens = (target[model].cachedReadTokens ?? 0) + usage.c
 if (usage.cacheCreationTokens !== undefined) {
 target[model].cacheCreationTokens = (target[model].cacheCreationTokens ?? 0) + usage.cacheCreationTokens;
 }
+if (usage.cacheCreation1hTokens !== undefined) {
+target[model].cacheCreation1hTokens = (target[model].cacheCreation1hTokens ?? 0) + usage.cacheCreation1hTokens;
+}
+mergeAutoRouting(target[model], usage);
 if (usage.thinkingTokens !== undefined) {
 target[model].thinkingTokens = (target[model].thinkingTokens ?? 0) + usage.thinkingTokens;
 }
@@ -72,6 +75,49 @@ if (usage.sessions !== undefined) {
 target[model].sessions = (target[model].sessions ?? 0) + usage.sessions;
 }
 }
+}
+
+function mergeAutoRouting(target: ModelUsage[string], source: ModelUsage[string]): void {
+	if (!source.autoRouting) { return; }
+	const subset: ModelUsage = { subset: { inputTokens: 0, outputTokens: 0, ...target.autoRouting, sessions: 0 } };
+	addModelUsage(subset, { subset: { ...source.autoRouting, sessions: 0 } });
+	const { sessions: _sessions, ...tokens } = subset.subset;
+	target.autoRouting = tokens;
+}
+
+function scaleAutoRouting(usage: ModelUsage[string], inputScale: number, outputScale: number): Pick<ModelUsage[string], 'autoRouting'> {
+	const auto = usage.autoRouting;
+	if (!auto) { return {}; }
+	return { autoRouting: {
+		inputTokens: Math.round(auto.inputTokens * inputScale),
+		outputTokens: Math.round(auto.outputTokens * outputScale),
+		...(auto.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(auto.cachedReadTokens * inputScale) } : {}),
+		...(auto.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(auto.cacheCreationTokens * inputScale) } : {}),
+		...(auto.cacheCreation1hTokens !== undefined ? { cacheCreation1hTokens: Math.round(auto.cacheCreation1hTokens * inputScale) } : {}),
+	} };
+}
+
+/**
+ * Keep request-derived Auto proportions when debug logs replace the token estimate.
+ * Debug model totals have no routing split: cache reads/writes inherit the estimated
+ * Auto input share, rather than discounting every request for that model.
+ */
+export function preserveAutoRouting(source: ModelUsage, replacement: ModelUsage): void {
+	for (const [model, usage] of Object.entries(replacement)) {
+		const original = source[model];
+		if (!original?.autoRouting) { continue; }
+		const inputShare = original.inputTokens > 0 ? original.autoRouting.inputTokens / original.inputTokens : 0;
+		const outputShare = original.outputTokens > 0 ? original.autoRouting.outputTokens / original.outputTokens : 0;
+		const { sessions: _sessions, ...tokens } = usage;
+		usage.autoRouting = scaleAutoRouting({ ...usage, autoRouting: tokens }, inputShare, outputShare).autoRouting;
+	}
+}
+
+/** Reconcile both fresh and cached sessions without dropping request-derived Auto usage. */
+export function reconcileDebugLogModelUsage(source: ModelUsage, breakdown: ModelUsage, inputTokens: number, outputTokens: number): ModelUsage {
+	const replacement = Object.fromEntries(Object.entries(breakdown).map(([model, usage]) => [model, { ...usage }]));
+	preserveAutoRouting(source, replacement);
+	return reconcileModelUsageToTotal(Object.keys(replacement).length > 0 ? replacement : source, inputTokens, outputTokens);
 }
 
 /**
@@ -111,6 +157,8 @@ export function reconcileModelUsageToTotal(modelUsage: ModelUsage, targetInputTo
 			inputTokens, outputTokens,
 			...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * inputScale) } : {}),
 			...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * inputScale) } : {}),
+			...(usage.cacheCreation1hTokens !== undefined ? { cacheCreation1hTokens: Math.round(usage.cacheCreation1hTokens * inputScale) } : {}),
+			...scaleAutoRouting(usage, inputScale, outputScale),
 			...(usage.sessions !== undefined ? { sessions: usage.sessions } : { sessions: 0 }),
 		};
 	}
@@ -170,7 +218,7 @@ export function sumModelUsageTokens(modelUsage: ModelUsage): number {
 }
 
 /** Scale every token field of a usage map by `fraction` (used for per-day distribution). */
-function scaleModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
+export function scaleModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
 	const scaled: ModelUsage = {};
 	for (const [model, usage] of Object.entries(modelUsage)) {
 		scaled[model] = {
@@ -178,6 +226,8 @@ function scaleModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
 			outputTokens: Math.round(usage.outputTokens * fraction),
 			...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}),
 			...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * fraction) } : {}),
+			...(usage.cacheCreation1hTokens !== undefined ? { cacheCreation1hTokens: Math.round(usage.cacheCreation1hTokens * fraction) } : {}),
+			...scaleAutoRouting(usage, fraction, fraction),
 			sessions: 0,
 		};
 	}

@@ -1,14 +1,18 @@
 // Log Viewer webview - displays session file details and chat turns
 import { ContextReferenceUsage, getTotalContextRefs, getImplicitContextRefs, getExplicitContextRefs, getContextRefsSummary } from '../shared/contextRefUtils';
 import { setHtml } from '../shared/domUtils';
-import { escapeHtml, formatCompact, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
+import { escapeHtml, formatCompact, formatCost, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
+import { buildTurnOverviewRows, hashModelToHue } from './turnsOverview';
+import { renderHydraFusionSection, renderLegsTable, formatFusionCost } from './hydraFusionSection';
+import { matchHydraFusionTurnsToChatTurns } from '../../../../src/hydrafusion';
+import type { HydraFusionSummary, HydraFusionTurn } from '../../../../src/hydrafusion';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
-import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { initializeWebviewLocalization, setCurrentLanguage, localize } from '../shared/localization';
 
 // ── Type definitions ──────────────────────────────────────────────────────────
 
@@ -33,6 +37,7 @@ result?: string;
 isSubAgent?: boolean;
 subAgentModel?: string;
 subAgentTokens?: { input: number; output: number };
+subAgentCost?: number;
 };
 
 type ChatTurn = {
@@ -50,6 +55,8 @@ outputTokensEstimate: number;
 thinkingTokensEstimate: number;
 actualUsage?: ActualUsage;
 thinkingEffort?: string;
+/** Estimated USD cost of this turn's own model call, computed host-side. Absent when unknown. */
+estimatedCost?: number;
 };
 
 type ThinkingEffortUsage = { byEffort: { [effort: string]: number }; switchCount: number; defaultEffort: string | null };
@@ -98,6 +105,8 @@ truncationCount?: number;
 messagesRemovedByTruncation?: number;
 /** Optional editor-specific note. When present, an info panel is rendered at the top of the viewer. */
 editorNote?: { items: string[] };
+/** Per-leg HydraFusion routing detail (Copilot CLI sessions that used the `hydrafusion` model). */
+hydraFusion?: HydraFusionSummary;
 compactNumbers?: boolean;
 };
 
@@ -628,7 +637,7 @@ return `
 <td class="tool-name-cell">
 <span class="tool-name tool-call-link" data-turn="${turn.turnNumber}" data-toolcall="${idx}" title="${escapeHtml(tc.toolName)}" style="cursor:pointer;">${escapeHtml(displayName)}</span>
 ${tc.isSubAgent && tc.subAgentModel ? `<span class="sub-agent-model-badge">${escapeHtml(getModelDisplayName(tc.subAgentModel))}</span>` : ''}
-${tc.isSubAgent && tc.subAgentTokens ? `<span class="sub-agent-tokens">↑${tc.subAgentTokens.input.toLocaleString()} ↓${tc.subAgentTokens.output.toLocaleString()} tokens</span>` : ''}
+${tc.isSubAgent && tc.subAgentTokens ? `<span class="sub-agent-tokens">↑${formatCompact(tc.subAgentTokens.input)} ↓${formatCompact(tc.subAgentTokens.output)} tokens${tc.subAgentCost ? ` · ${formatCost(tc.subAgentCost)}` : ''}</span>` : ''}
 ${tc.arguments && !tc.isSubAgent ? `<details class="tool-details"><summary>Arguments</summary><pre>${escapeHtml(tc.arguments)}</pre></details>` : ''}
 ${tc.result && !tc.isSubAgent ? `<details class="tool-details"><summary>Result</summary><pre>${escapeHtml(truncateText(tc.result, 500))}</pre></details>` : ''}
 </td>
@@ -690,15 +699,49 @@ ${renderContextReferencesDetailed(turn.contextReferences)}
 
 // ── Layout section renderers ─────────────────────────────────────────────────
 
-function buildEditorModeCard(data: SessionLogData, stats: SummaryStats): string {
-	if (stats.totalModeTurns <= 0) { return ''; }
-	const { modeEntries, primaryModeLabel, modeSubLabel } = stats;
-	const title = modeEntries.map(([m, n]) => `${getModeIcon(m)} ${MODE_LABELS[m]} (${n})`).join(' · ');
+/**
+ * Combined "Editor identity" card: merges the previous Interactions (turns),
+ * Editor Mode and Source Editor cards into a single compact card so the three
+ * related facets of "which editor, in which mode, doing how many turns" read
+ * as one panel instead of three.
+ */
+function buildEditorIdentityCard(data: SessionLogData, stats: SummaryStats): string {
+	const { modeEntries, primaryModeLabel, modeSubLabel, totalModeTurns } = stats;
+	const interactions = data.interactions;
+	const modesTitle = modeEntries.map(([m, n]) => `${getModeIcon(m)} ${MODE_LABELS[m]} (${n})`).join(' · ');
 	const extraModes = modeEntries.length > 1 ? ` · ${modeEntries.slice(1).map(([m, n]) => `${MODE_LABELS[m]} ${n}`).join(', ')}` : '';
-	return `<div class="summary-card" title="${escapeHtml(title)}">
-<div class="summary-label">🎛️ Editor Mode</div>
-<div class="summary-value" style="font-size: 1.1em;">${primaryModeLabel}</div>
-<div class="summary-sub">${escapeHtml(modeSubLabel)}${extraModes}</div>
+	const modeValue = totalModeTurns > 0 ? primaryModeLabel : '—';
+	const modeSub = totalModeTurns > 0 ? `${modeSubLabel}${extraModes}` : localize('logviewer.summary.noModeData');
+	return `<div class="summary-card summary-card--compact summary-card--combined" title="${escapeHtml(modesTitle)}">
+<div class="summary-label">🖥️ ${localize('logviewer.summary.editor')}</div>
+<div class="summary-compact-rows">
+<div class="summary-compact-row"><span class="summary-compact-key">💻 ${localize('logviewer.summary.editorSource')}</span><span class="summary-compact-val" style="font-size: 13px; font-weight: 700;">${escapeHtml(data.editorName)}</span></div>
+<div class="summary-compact-row"><span class="summary-compact-key">🎛️ ${localize('logviewer.summary.editorMode')}</span><span class="summary-compact-val">${modeValue}</span></div>
+<div class="summary-compact-row"><span class="summary-compact-key">📝 ${localize('logviewer.summary.interactions')}</span><span class="summary-compact-val">${interactions}</span></div>
+</div>
+<div class="summary-sub">${escapeHtml(modeSub)}</div>
+</div>`;
+}
+
+/**
+ * Combined "MCP tools & context references" card: merges the previous MCP Tools
+ * and Context Refs cards into a single compact card, since both describe the
+ * external context a session pulled in (tool servers vs. editor references).
+ */
+function buildMcpAndContextRefsCard(data: SessionLogData, stats: SummaryStats): string {
+	const { usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit, usageContextExplicit } = stats;
+	const mcpSub = usageMcpTotal === 0 ? 'None' : formatTopListWithOther(usageTopMcpTools, usageMcpTotal);
+	const refsSub = usageContextTotal === 0 ? 'None' : `implicit ${usageContextImplicit}, explicit ${usageContextExplicit}`;
+	return `<div class="summary-card summary-card--compact summary-card--combined">
+<div class="summary-label">🔌 ${localize('logviewer.summary.mcpAndContextRefs')}</div>
+<div class="summary-compact-rows">
+<div class="summary-compact-row"><span class="summary-compact-key">🔌 ${localize('logviewer.summary.mcpTools')}</span><span class="summary-compact-val">${usageMcpTotal}</span></div>
+<div class="summary-compact-row"><span class="summary-compact-key">🔗 ${localize('logviewer.summary.contextRefs')}</span><span class="summary-compact-val">${usageContextTotal}</span></div>
+</div>
+<div class="summary-sub combined-card-sub">
+<div class="combined-card-sub-line">🔌 <span class="combined-card-sub-label">${localize('logviewer.summary.mcpTools')}:</span> ${mcpSub}</div>
+<div class="combined-card-sub-line">🔗 <span class="combined-card-sub-label">${localize('logviewer.summary.contextRefs')}:</span> ${refsSub}</div>
+</div>
 </div>`;
 }
 
@@ -744,7 +787,7 @@ function buildEstimatedTokensCard(data: SessionLogData, stats: SummaryStats): st
 	const suffix = note ? ' ⓘ' : '';
 	const sub = note ? note.sub : 'Input + Output estimated from text';
 	return `<div class="summary-card"${titleAttr}>
-<div class="summary-label">📊 Estimated Tokens${suffix}</div>
+<div class="summary-label">📊 ${localize('logviewer.summary.estimatedTokens')}${suffix}</div>
 <div class="summary-value">${formatCompact(stats.totalTokens)}</div>
 <div class="summary-sub">${sub}</div>
 </div>`;
@@ -754,21 +797,21 @@ function buildActualTokensCard(data: SessionLogData, stats: SummaryStats): strin
 	const { hasAnyActualUsage, hasSessionActualOnly, actualTotal, actualPromptTotal, actualCompletionTotal, sessionActualTokens } = stats;
 	if (hasAnyActualUsage && !data.debugLogInputTokens) {
 		return `<div class="summary-card">
-<div class="summary-label">✅ Actual Tokens</div>
+<div class="summary-label">✅ ${localize('logviewer.summary.actualTokens')}</div>
 <div class="summary-value">${formatCompact(actualTotal)}</div>
 <div class="summary-sub">↑${formatCompact(actualPromptTotal)} prompt, ↓${formatCompact(actualCompletionTotal)} completion</div>
 </div>`;
 	}
 	if (data.debugLogInputTokens !== undefined) {
 		return `<div class="summary-card" title="Token counts from the Copilot Chat debug log, summed across every LLM API call in this session. Agent-mode sessions make multiple calls per user turn; the debug log captures all of them.">
-<div class="summary-label">✅ Actual Tokens</div>
+<div class="summary-label">✅ ${localize('logviewer.summary.actualTokens')}</div>
 <div class="summary-value">${formatCompact((data.debugLogInputTokens ?? 0) + (data.debugLogOutputTokens ?? 0))}</div>
 <div class="summary-sub">↑${formatCompact(data.debugLogInputTokens)} input, ↓${formatCompact(data.debugLogOutputTokens ?? 0)} output</div>
 </div>`;
 	}
 	if (hasSessionActualOnly) {
 		return `<div class="summary-card">
-<div class="summary-label">✅ Actual Tokens</div>
+<div class="summary-label">✅ ${localize('logviewer.summary.actualTokens')}</div>
 <div class="summary-value">${formatCompact(sessionActualTokens)}</div>
 <div class="summary-sub">${data.editorName === 'Mistral Vibe' ? 'From session data' : 'Actual API tokens from Copilot CLI usage data'}</div>
 </div>`;
@@ -782,7 +825,7 @@ function buildModelTurnsCard(data: SessionLogData): string {
 		? `${data.modelTurns} API calls for ${data.turns.length} user turn${data.turns.length !== 1 ? 's' : ''}`
 		: 'LLM API calls in this session';
 	return `<div class="summary-card" title="Number of LLM API calls made during this session, as recorded in the Copilot Chat debug log. Agent-mode sessions make multiple calls per user turn (tool call → re-prompt → final answer).">
-<div class="summary-label">🔄 Model Turns</div>
+<div class="summary-label">🔄 ${localize('logviewer.summary.modelTurns')}</div>
 <div class="summary-value">${data.modelTurns}</div>
 <div class="summary-sub">${subText}</div>
 </div>`;
@@ -791,12 +834,12 @@ function buildModelTurnsCard(data: SessionLogData): string {
 function buildDebugTokenCards(data: SessionLogData): string {
 	if (data.debugLogInputTokens === undefined) { return ''; }
 	return `<div class="summary-card" title="Total input tokens sent to the LLM across all API calls in this session, from the Copilot Chat debug log.">
-<div class="summary-label">📥 Input Tokens</div>
+<div class="summary-label">📥 ${localize('logviewer.summary.inputTokens')}</div>
 <div class="summary-value">${formatCompact(data.debugLogInputTokens)}</div>
 <div class="summary-sub">Prompt tokens across all model calls</div>
 </div>
 <div class="summary-card" title="Total output tokens generated by the LLM across all API calls in this session, from the Copilot Chat debug log.">
-<div class="summary-label">📤 Output Tokens</div>
+<div class="summary-label">📤 ${localize('logviewer.summary.outputTokens')}</div>
 <div class="summary-value">${formatCompact(data.debugLogOutputTokens ?? 0)}</div>
 <div class="summary-sub">Completion tokens across all model calls</div>
 </div>`;
@@ -805,7 +848,7 @@ function buildDebugTokenCards(data: SessionLogData): string {
 function buildCachedTokensCard(data: SessionLogData): string {
 	if ((data.cachedTokens ?? 0) <= 0) { return ''; }
 	return `<div class="summary-card" title="Tokens served from the provider's prompt cache. Cached tokens are billed at a lower rate and reduce latency. Source: Copilot CLI usage data (assistant_usage_events).">
-<div class="summary-label">💾 Cached Input</div>
+<div class="summary-label">💾 ${localize('logviewer.summary.cachedInput')}</div>
 <div class="summary-value">${formatCompact(data.cachedTokens!)}</div>
 <div class="summary-sub">Prompt tokens served from cache</div>
 </div>`;
@@ -814,7 +857,7 @@ function buildCachedTokensCard(data: SessionLogData): string {
 function buildThinkingTokensCard(data: SessionLogData, stats: SummaryStats): string {
 	if (stats.totalThinkingTokens <= 0) { return ''; }
 	return `<div class="summary-card">
-<div class="summary-label">🧠 Thinking Tokens</div>
+<div class="summary-label">🧠 ${localize('logviewer.summary.thinkingTokens')}</div>
 <div class="summary-value">${formatCompact(stats.totalThinkingTokens)}</div>
 <div class="summary-sub">${stats.turnsWithThinking} of ${data.turns.length} turns used thinking</div>
 </div>`;
@@ -825,7 +868,7 @@ function buildEffortCard(stats: SummaryStats): string {
 	const { effortDefaultLabel, effortSummary, sessionEffort } = stats;
 	const switchText = sessionEffort.switchCount > 0 ? ` · ${sessionEffort.switchCount} switch${sessionEffort.switchCount !== 1 ? 'es' : ''}` : '';
 	return `<div class="summary-card">
-<div class="summary-label">💡 Thinking Effort</div>
+<div class="summary-label">💡 ${localize('logviewer.summary.thinkingEffort')}</div>
 <div class="summary-value">${effortDefaultLabel}</div>
 <div class="summary-sub">${effortSummary}${switchText}</div>
 </div>`;
@@ -850,7 +893,7 @@ function buildHierarchyCard(data: SessionLogData): string {
 	}
 
 	return `<div class="summary-card">
-<div class="summary-label">🔗 Session Hierarchy</div>
+<div class="summary-label">🔗 ${localize('logviewer.summary.sessionHierarchy')}</div>
 <div class="summary-sub hierarchy-card-content">${parts.join('')}</div>
 </div>`;
 }
@@ -862,7 +905,7 @@ function buildSubAgentsCard(data: SessionLogData, stats: SummaryStats): string {
 		? `${data.subAgentsStarted} started · ${stats.totalSubAgentCalls} tool calls`
 		: 'Agent mode sub-agent invocations';
 	return `<div class="summary-card">
-<div class="summary-label">🤖 Sub-Agents</div>
+<div class="summary-label">🤖 ${localize('logviewer.summary.subAgents')}</div>
 <div class="summary-value">${count}</div>
 <div class="summary-sub">${sub}</div>
 </div>`;
@@ -875,7 +918,7 @@ function buildTruncationCard(data: SessionLogData): string {
 		? `${removed} message${removed !== 1 ? 's' : ''} dropped — prompt cache broken`
 		: 'Context window truncated';
 	return `<div class="summary-card summary-card--warning" title="The AI dropped earlier messages to fit within the context window. This breaks prompt cache efficiency and may affect response quality.">
-<div class="summary-label">⚠️ Context Truncated</div>
+<div class="summary-label">⚠️ ${localize('logviewer.summary.contextTruncated')}</div>
 <div class="summary-value">${data.truncationCount}</div>
 <div class="summary-sub">${sub}</div>
 </div>`;
@@ -890,7 +933,7 @@ function buildFileNameCard(data: SessionLogData): string {
 		: `<span class="filename-link" id="open-file-link" title="${title}">${displayName}</span>`;
 	const sub = isOpenCode ? 'Stored in SQLite database' : 'Click to open in editor';
 	return `<div class="summary-card">
-<div class="summary-label">📁 File Name</div>
+<div class="summary-label">📁 ${localize('logviewer.summary.fileName')}</div>
 <div class="summary-value" style="font-size: 16px;">${valueHtml}</div>
 <div class="summary-sub">${sub}</div>
 </div>`;
@@ -923,12 +966,7 @@ function renderSummaryCards(data: SessionLogData, stats: SummaryStats): string {
 	const { usageToolTotal, usageTopTools, usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit, usageContextExplicit } = stats;
 	return `
 <div class="summary-cards">
-<div class="summary-card">
-<div class="summary-label">📝 Interactions</div>
-<div class="summary-value">${data.interactions}</div>
-<div class="summary-sub">Total chat turns in this session</div>
-</div>
-${buildEditorModeCard(data, stats)}
+${buildEditorIdentityCard(data, stats)}
 ${buildEstimatedTokensCard(data, stats)}
 ${buildActualTokensCard(data, stats)}
 ${buildModelTurnsCard(data)}
@@ -940,47 +978,32 @@ ${buildSubAgentsCard(data, stats)}
 ${buildTruncationCard(data)}
 ${buildHierarchyCard(data)}
 <div class="summary-card">
-<div class="summary-label">🔧 Tool Calls</div>
+<div class="summary-label">🔧 ${localize('logviewer.summary.toolCalls')}</div>
 <div class="summary-value">${usageToolTotal}</div>
 <div class="summary-sub">${formatTopListWithOther(usageTopTools, usageToolTotal, lookupToolName)}</div>
 </div>
+${buildMcpAndContextRefsCard(data, stats)}
 <div class="summary-card">
-<div class="summary-label">🔌 MCP Tools</div>
-<div class="summary-value">${usageMcpTotal}</div>
-<div class="summary-sub">${formatTopListWithOther(usageTopMcpTools, usageMcpTotal)}</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">🔗 Context Refs</div>
-<div class="summary-value">${usageContextTotal}</div>
-<div class="summary-sub">
-${usageContextTotal === 0 ? 'None' : `implicit ${usageContextImplicit}, explicit ${usageContextExplicit}`}
-</div>
-</div>
-${buildFileNameCard(data)}
-<div class="summary-card">
-<div class="summary-label">💻 Editor</div>
-<div class="summary-value" style="font-size: 20px; word-break: keep-all;">${escapeHtml(data.editorName)}</div>
-<div class="summary-sub">Source editor</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">📦 File Size</div>
+<div class="summary-label">📦 ${localize('logviewer.summary.fileSize')}</div>
 <div class="summary-value">${formatFileSize(data.size)}</div>
 <div class="summary-sub">Total size on disk</div>
 </div>
-<div class="summary-card">
-<div class="summary-label">🕒 Modified</div>
-<div class="summary-value" style="font-size: 14px; word-break: keep-all;">${formatDate(data.modified)}</div>
-<div class="summary-sub">Last file modification</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">▶️ First Interaction</div>
-<div class="summary-value" style="font-size: 14px; word-break: keep-all;">${formatDate(data.firstInteraction)}</div>
-<div class="summary-sub">Session started</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">⏹️ Last Interaction</div>
-<div class="summary-value" style="font-size: 14px; word-break: keep-all;">${formatDate(data.lastInteraction)}</div>
-<div class="summary-sub">Most recent activity</div>
+${buildTimelineCard(data)}
+</div>`;
+}
+
+/**
+ * Renders a single compact card grouping the three session timestamps
+ * (started, last activity, last file modification) as small rows instead of
+ * three separate full-sized cards.
+ */
+function buildTimelineCard(data: SessionLogData): string {
+	return `<div class="summary-card summary-card--compact">
+<div class="summary-label">🕒 ${localize('logviewer.summary.timeline')}</div>
+<div class="summary-compact-rows">
+<div class="summary-compact-row"><span class="summary-compact-key">▶️ ${localize('logviewer.summary.started')}</span><span class="summary-compact-val">${formatDate(data.firstInteraction)}</span></div>
+<div class="summary-compact-row"><span class="summary-compact-key">⏹️ ${localize('logviewer.summary.lastActivity')}</span><span class="summary-compact-val">${formatDate(data.lastInteraction)}</span></div>
+<div class="summary-compact-row"><span class="summary-compact-key">💾 ${localize('logviewer.summary.modified')}</span><span class="summary-compact-val">${formatDate(data.modified)}</span></div>
 </div>
 </div>`;
 }
@@ -1055,6 +1078,132 @@ ${hasBreakdown ? `<div class="session-usage-breakdown">
 `;
 }
 
+// ── Turns overview table ─────────────────────────────────────────────────────
+// Row-building logic (getTurnCachedTokens, buildTurnOverviewRows, hashModelToHue)
+// lives in ./turnsOverview.ts so it can be unit-tested without the CSS/DOM
+// dependencies this file carries — see that module for its doc comments.
+
+function renderModelOverviewBadge(model: string | null): string {
+	if (!model) { return '<span class="overview-model-badge overview-model-unknown">—</span>'; }
+	const hue = hashModelToHue(model);
+	const style = `background: hsl(${hue}, 55%, 16%); color: hsl(${hue}, 70%, 78%); border-color: hsl(${hue}, 55%, 32%);`;
+	return `<span class="overview-model-badge" style="${style}" title="${escapeHtml(model)}">${escapeHtml(getModelDisplayName(model))}</span>`;
+}
+
+/**
+ * Renders the turns-overview table shown above the chat-turns list: one compact,
+ * clickable row per turn with its mode, model, and input/cached/output token
+ * usage, so a multi-model session (e.g. model-routing research) can be scanned
+ * at a glance without opening every turn card. A row's model badge differing
+ * from the one above it is flagged with ⇄ to spot model switches quickly.
+ * Clicking a row scrolls to and briefly highlights the matching turn card.
+ *
+ * When a turn was routed through HydraFusion (`hydraTurnMatches` places it), its
+ * row also gets a ⚡ toggle that expands the same leg-by-leg table shown in the
+ * HydraFusion section above — see `matchHydraFusionTurnsToChatTurns`. This is the
+ * only difference from a plain session's table: everything else here runs exactly
+ * as before for the overwhelming majority of sessions, which never used the router.
+ */
+function renderTurnsOverviewTable(data: SessionLogData, hydraTurnMatches?: Map<number, number>): string {
+	if (data.turns.length === 0) { return ''; }
+	const rows = buildTurnOverviewRows(data.turns, data.hydraFusion, hydraTurnMatches);
+	const hasCached = rows.some(r => r.cached !== null);
+	const hasModelSwitches = rows.some((r, i) => i > 0 && r.model && rows[i - 1].model && r.model !== rows[i - 1].model);
+	const hasCost = rows.some(r => r.cost !== null || r.children.some(c => c.cost !== null));
+	const totalChildren = rows.reduce((sum, r) => sum + r.children.length, 0);
+	const hasLegs = rows.some(r => r.legs.length > 0);
+	const columnCount = 7 + (hasCached ? 1 : 0) + (hasCost ? 1 : 0);
+
+	// Reverse-map chat turn number → this turn's matched HydraFusionTurn, so an expanded
+	// row can reuse the exact same leg table the HydraFusion section renders above
+	// (instead of re-deriving markup from the trimmed TurnOverviewLegRow) and show the
+	// same total: the turn's own rollup `aiu`, not a sum of the legs' individual costs,
+	// which `analyzeHydraFusionSession` can legitimately differ from (it prefers
+	// `session.fusion_completed.totalNanoAiu` and only falls back to summing legs when
+	// that rollup is missing — see buildTurn in src/hydrafusion.ts).
+	const hydraTurnByChatTurn = new Map<number, HydraFusionTurn>();
+	if (data.hydraFusion && hydraTurnMatches) {
+		for (const [hydraIndex, chatTurnNumber] of hydraTurnMatches) {
+			const hydraTurn = data.hydraFusion.turns[hydraIndex];
+			if (hydraTurn) { hydraTurnByChatTurn.set(chatTurnNumber, hydraTurn); }
+		}
+	}
+
+	const costCell = (cost: number | null): string => hasCost ? `<td class="count-cell">${cost !== null ? formatCost(cost) : '—'}</td>` : '';
+
+	const bodyRows = rows.map((row, i) => {
+		const switched = i > 0 && !!row.model && !!rows[i - 1].model && row.model !== rows[i - 1].model;
+		const cachedCell = hasCached ? `<td class="count-cell">${row.cached !== null ? formatCompact(row.cached) : '—'}</td>` : '';
+		const childRows = row.children.map(child => `<tr class="turns-overview-row turns-overview-child-row" data-turn="${row.turnNumber}" title="Sub-agent call from step #${row.turnNumber} — jump to turn">
+<td class="turns-overview-num">↳ 🤖</td>
+<td><span class="turn-mode turns-overview-child-tool" title="${escapeHtml(child.toolName)}">${escapeHtml(child.toolName)}</span></td>
+<td>${renderModelOverviewBadge(child.model)}</td>
+<td class="count-cell">${formatCompact(child.input)}</td>
+${hasCached ? '<td class="count-cell">—</td>' : ''}
+<td class="count-cell">${formatCompact(child.output)}</td>
+<td class="count-cell"><strong>${formatCompact(child.total)}</strong></td>
+${costCell(child.cost)}
+<td class="turns-overview-actual" title="Estimated from text">~</td>
+</tr>`).join('');
+		const legToggle = row.legs.length > 0
+			? `<button type="button" class="turns-overview-leg-toggle" data-turn="${row.turnNumber}" aria-expanded="false" aria-label="Toggle HydraFusion legs for step #${row.turnNumber}" title="Show the HydraFusion legs behind this step">▸</button> `
+			: '';
+		const hydraTurn = hydraTurnByChatTurn.get(row.turnNumber);
+		const legsRow = row.legs.length > 0 && hydraTurn
+			? `<tr class="turns-overview-legs-row" data-parent-turn="${row.turnNumber}" style="display: none;">
+<td colspan="${columnCount}">
+<div class="turns-overview-legs-wrap">
+<div class="turns-overview-legs-caption">⚡ HydraFusion legs for step #${row.turnNumber} — total <strong>${escapeHtml(formatFusionCost(hydraTurn.aiu))}</strong></div>
+${renderLegsTable(hydraTurn.phases)}
+</div>
+</td>
+</tr>`
+			: '';
+		return `<tr class="turns-overview-row${switched ? ' turns-overview-row-switch' : ''}" data-turn="${row.turnNumber}" title="Jump to turn #${row.turnNumber}">
+<td class="turns-overview-num">${legToggle}#${row.turnNumber}${switched ? ' <span class="overview-switch-icon" title="Model changed from the previous step">⇄</span>' : ''}</td>
+<td><span class="turn-mode" style="background: ${getModeColor(row.mode)};">${getModeIcon(row.mode)} ${escapeHtml(row.mode)}</span></td>
+<td>${renderModelOverviewBadge(row.model)}</td>
+<td class="count-cell">${formatCompact(row.input)}</td>
+${cachedCell}
+<td class="count-cell">${formatCompact(row.output)}</td>
+<td class="count-cell"><strong>${formatCompact(row.total)}</strong></td>
+${costCell(row.cost)}
+<td class="turns-overview-actual" title="${row.isActual ? 'Actual API usage' : 'Estimated from text'}">${row.isActual ? '✓' : '~'}</td>
+</tr>${childRows}${legsRow}`;
+	}).join('');
+
+	return `
+<div class="turns-overview">
+<div class="turns-overview-header">
+<span>🧭 Session Steps Overview (${rows.length})</span>
+${hasModelSwitches ? '<span class="overview-switch-note">⇄ marks a model change from the previous step</span>' : ''}
+${totalChildren > 0 ? `<span class="overview-switch-note">🤖 ↳ marks a sub-agent/child session delegated from that step</span>` : ''}
+${hasLegs ? '<span class="overview-switch-note">⚡ expand a step to see the HydraFusion legs behind it</span>' : ''}
+</div>
+<div class="turns-overview-table-wrap">
+<table class="turns-overview-table">
+<thead>
+<tr>
+<th scope="col">Step</th>
+<th scope="col">Mode</th>
+<th scope="col">Model</th>
+<th scope="col">Input</th>
+${hasCached ? '<th scope="col">Cached</th>' : ''}
+<th scope="col">Output</th>
+<th scope="col">Total</th>
+${hasCost ? '<th scope="col">Cost</th>' : ''}
+<th scope="col" title="✓ actual API usage, ~ estimated from text">Src</th>
+</tr>
+</thead>
+<tbody>
+${bodyRows}
+</tbody>
+</table>
+</div>
+</div>
+`;
+}
+
 /**
  * Wires up all DOM event handlers after the layout has been injected into
  * `#root`. Must be called once immediately after `root.innerHTML` is set.
@@ -1120,6 +1269,47 @@ e.preventDefault();
 });
 }
 
+/**
+ * Clicking a turns-overview row jumps to and briefly highlights the matching turn card.
+ * A row with HydraFusion legs also gets a ▸ toggle that expands them in place — its
+ * clicks are excluded here (via stopPropagation in its own handler below) so they
+ * don't also trigger the jump-to-turn-card behavior.
+ */
+function wireUpTurnsOverviewHandlers(): void {
+document.querySelectorAll<HTMLElement>('.turns-overview-row').forEach(row => {
+row.addEventListener('click', (e) => {
+if ((e.target as HTMLElement).closest('.turns-overview-leg-toggle')) { return; }
+const turnNumber = parseInt(row.getAttribute('data-turn') || '0', 10);
+if (turnNumber > 0) { scrollAndFocusTurn(turnNumber); }
+});
+});
+
+document.querySelectorAll<HTMLElement>('.turns-overview-leg-toggle').forEach(toggle => {
+toggle.addEventListener('click', (e) => {
+e.stopPropagation();
+const turnNumber = toggle.getAttribute('data-turn') || '';
+const expanded = toggle.getAttribute('aria-expanded') === 'true';
+setOverviewLegsExpanded(turnNumber, !expanded);
+});
+});
+}
+
+/** Clicking (or activating with the keyboard) a HydraFusion turn's "jump to step" link scrolls to and expands its row in the Session Steps Overview table below. */
+function wireUpHydraFusionHandlers(): void {
+document.querySelectorAll<HTMLElement>('.hydra-jump-to-step').forEach(link => {
+const activate = (e: Event): void => {
+e.preventDefault();
+e.stopPropagation();
+const turnNumber = parseInt(link.getAttribute('data-turn') || '0', 10);
+if (turnNumber > 0) { scrollAndFocusOverviewRow(turnNumber); }
+};
+link.addEventListener('click', activate);
+link.addEventListener('keydown', (e) => {
+if ((e as KeyboardEvent).key === 'Enter' || (e as KeyboardEvent).key === ' ') { activate(e); }
+});
+});
+}
+
 function wireUpEventHandlers(): void {
 document.getElementById('btn-raw')?.addEventListener('click', () => {
 vscode.postMessage({ command: 'openRawFile' });
@@ -1145,6 +1335,8 @@ vscode.postMessage({ command: 'openRawFile' });
 });
 
 wireUpToolCallHandlers();
+wireUpTurnsOverviewHandlers();
+wireUpHydraFusionHandlers();
 }
 
 // ── Entry-point renderers (signatures preserved) ─────────────────────────────
@@ -1366,6 +1558,12 @@ function renderLayout(data: SessionLogData): void {
 		modeSubLabel: modeStats.modeSubLabel,
 	};
 
+	// Computed once and shared by both renderers below so the HydraFusion section's
+	// "jump to step" links and the Session Steps Overview table's expandable legs
+	// agree on which turn is which. `undefined` for the overwhelming majority of
+	// sessions, which never used HydraFusion — both renderers treat that as "no legs".
+	const hydraTurnMatches = data.hydraFusion ? matchHydraFusionTurnsToChatTurns(data.turns, data.hydraFusion.turns) : undefined;
+
 	setHtml(root, `
 <style>${themeStyles}</style>
 <style>${styles}</style>
@@ -1380,6 +1578,10 @@ ${renderSessionActualUsage(
 	actualStats.actualPromptTotal, actualStats.actualCompletionTotal, actualStats.actualTotal,
 	actualStats.aggregatedBreakdown,
 )}
+
+${renderHydraFusionSection(data.hydraFusion, hydraTurnMatches)}
+
+${renderTurnsOverviewTable(data, hydraTurnMatches)}
 
 <div class="turns-header">
 <span>📝</span>
@@ -1402,9 +1604,8 @@ ${data.turns.length > 0
 	focusRequestedTurn(data as SessionLogData & { focusedTurnNumber?: number; });
 }
 
-function focusRequestedTurn(data: SessionLogData & { focusedTurnNumber?: number; }): void {
-	const turnNumber = data.focusedTurnNumber;
-	if (typeof turnNumber !== 'number' || !Number.isSafeInteger(turnNumber) || turnNumber < 1) { return; }
+/** Scrolls to and briefly highlights the turn card for the given turn number, if it exists. */
+function scrollAndFocusTurn(turnNumber: number): void {
 	const turnCard = document.querySelector<HTMLElement>(`.turn-card[data-turn="${turnNumber}"]`);
 	if (!turnCard) { return; }
 	turnCard.classList.add('turn-card-focused');
@@ -1412,6 +1613,32 @@ function focusRequestedTurn(data: SessionLogData & { focusedTurnNumber?: number;
 	turnCard.focus({ preventScroll: true });
 	turnCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	setTimeout(() => turnCard.classList.remove('turn-card-focused'), 2_000);
+}
+
+/** Shows or hides the HydraFusion legs nested under a Session Steps Overview row, syncing its toggle button. */
+function setOverviewLegsExpanded(turnNumber: string, expanded: boolean): void {
+	const toggle = document.querySelector<HTMLElement>(`.turns-overview-leg-toggle[data-turn="${turnNumber}"]`);
+	const legsRow = document.querySelector<HTMLElement>(`.turns-overview-legs-row[data-parent-turn="${turnNumber}"]`);
+	if (!toggle || !legsRow) { return; }
+	toggle.setAttribute('aria-expanded', String(expanded));
+	toggle.textContent = expanded ? '▾' : '▸';
+	legsRow.style.display = expanded ? '' : 'none';
+}
+
+/** Scrolls to and briefly highlights a Session Steps Overview row, expanding its legs if it has any. */
+function scrollAndFocusOverviewRow(turnNumber: number): void {
+	const row = document.querySelector<HTMLElement>(`.turns-overview-row:not(.turns-overview-child-row)[data-turn="${turnNumber}"]`);
+	if (!row) { return; }
+	setOverviewLegsExpanded(String(turnNumber), true);
+	row.classList.add('turns-overview-row-focused');
+	row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	setTimeout(() => row.classList.remove('turns-overview-row-focused'), 2_000);
+}
+
+function focusRequestedTurn(data: SessionLogData & { focusedTurnNumber?: number; }): void {
+	const turnNumber = data.focusedTurnNumber;
+	if (typeof turnNumber !== 'number' || !Number.isSafeInteger(turnNumber) || turnNumber < 1) { return; }
+	scrollAndFocusTurn(turnNumber);
 }
 
 async function bootstrap(): Promise<void> {

@@ -1,6 +1,6 @@
 ---
 title: GitHub Copilot Agent Skills
-description: Overview of agent skills for GitHub Copilot Token Tracker extension
+description: Overview of agent skills for AI Engineering Fluency extension
 lastUpdated: 2026-01-26
 ---
 
@@ -92,6 +92,21 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - ESLint commands to identify violation candidates
 - Commit message and PR description templates
 
+### deduplicate-code
+
+**Purpose**: Detect copy-pasted code blocks with the dependency-free `check-code-duplication.js` detector, then pick one duplicate group and extract a shared helper to eliminate it, keeping all tests green.
+
+**Use this skill when:**
+- The CI step summary's "Code Duplication Analysis" report grows
+- A PR review notes duplicated / copy-pasted code
+- You want to DRY up the codebase (vscode-extension/src, shared src/, cli/src)
+
+**Contents:**
+- Step-by-step workflow: list groups → pick one → baseline tests → extract helper → lint → re-run detector → build → commit → PR
+- Guidance on which duplicate groups are safe to consolidate (and which intentionally-mirrored editor adapters to skip)
+- Drives `node scripts/check-code-duplication.js` for detection and verification
+- Commit message and PR description templates
+
 ### validate-editor-names
 
 **Purpose**: Verify that the CLI and VS Code extension always agree on editor display names, and every name has an icon in the webview icon map.
@@ -120,6 +135,20 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - `check-urls.js` — Node.js script that scans every `*.ts` file under `src/`, extracts unique URLs, and sends HTTP HEAD requests (retrying with GET on 4xx) with a 10-second timeout
 - Summary output marking each URL as ✅ OK, ⚠️ REDIRECT, or ❌ BROKEN; exits with code `1` when any URL is broken
 - Guidance for fixing broken tech.hub.ms and code.visualstudio.com links
+
+### scan-hardcoded-strings
+
+**Purpose**: Inventory hardcoded (non-localized) UI text across `vscode-extension/src/webview/**` and the `get*Html()` methods in `vscode-extension/src/extension.ts` — string/template literals rendered as UI text that never go through `localize()`/`localizeFormat()`/`t()`/`vscode.l10n.t()`.
+
+**Use this skill when:**
+- Auditing UI text after adding or changing a webview panel, to catch strings typed directly instead of routed through localization
+- Building or refreshing a localization backlog before a release
+- Periodically re-running as a maintenance/audit pass to see whether the backlog is growing or shrinking
+
+**Contents:**
+- `scan-hardcoded-strings.js` — dependency-free Node script that flags string/template literals in UI-rendering positions (`.textContent`/`.innerText`/`.innerHTML`/`.title`/`.placeholder` assignments, `aria-label`/`title`/`placeholder` HTML attributes, and text inside `<div>`/`<button>`/`<label>`/`<h1>`–`<h6>`/`<p>`/`<span>`/`<td>`/`<th>`/`<option>`/`<summary>`/`<caption>` tags)
+- `scan-hardcoded-strings.test.js` — unit tests for the detection helpers
+- Console and Markdown report output (`hardcoded-strings-report.md` at the repo root); always exits `0` — informational, not a CI gate
 
 ### validate-app-db-schema
 
@@ -207,15 +236,15 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 **Use this skill when:**
 - After building or updating the VS Code webviews (`vscode-extension/esbuild.js` `entryPoints`)
 - Before a Visual Studio or JetBrains release, to ensure their shipped screens are current
-- When a host shows stale screens, or you suspect VS Code added a screen the hosts are missing
-- After changing the host include lists (`CopilotTokenTracker.csproj`, `jetbrains-plugin/build.gradle.kts`)
+- When you suspect VS Code added a screen a host is missing
+- After changing the host include lists (`AIEngineeringFluency.csproj`, `jetbrains-plugin/build.gradle.kts`)
 
 **Contents:**
-- `sync-host-views.js` — dependency-free Node.js detector that parses the canonical view set from `esbuild.js` and compares it to the Visual Studio (`csproj` + committed `webview/*.js`) and JetBrains (`build.gradle.kts`) host lists
-- Classifies each view as tracked / NEW (ask the user) / orphan; checks committed VS bundles for staleness vs `dist/webview` (sha256)
-- `--refresh` copies only already-tracked bundles into the Visual Studio `webview/` folder (never adds a view); `--json` for CI
-- Exit codes: `0` in sync · `1` mechanical drift · `2` config error · `3` NEW views (human decision required)
-- Workflow for refreshing existing screens and the ask-before-adding procedure for new screens, including the navigation wiring needed in each host
+- `sync-host-views.js` — dependency-free Node.js detector that parses the canonical view set from `esbuild.js` and compares it to the Visual Studio (`csproj`) and JetBrains (`build.gradle.kts`) host include lists. Neither host commits webview bundle content to git — both copy it fresh from `dist/webview` at their own build time — so this only tracks view-LIST drift, not bundle content
+- Classifies each view as tracked / NEW (ask the user) / orphan
+- `--json` for CI
+- Exit codes: `0` in sync · `1` mechanical drift (an ORPHAN) · `2` config error · `3` NEW views (human decision required)
+- Workflow for the ask-before-adding procedure for new screens, including the navigation wiring needed in each host
 
 ### visual-view-diff
 

@@ -9,7 +9,7 @@ import { TASK_CATEGORIES, type TaskCategory } from './taskClassification';
 export { COPILOT_EDITOR_NAMES } from './statsHelpers';
 
 /** Returns the pricing source to use for cost estimation for a given editor. */
-function getPricingSourceForEditor(editor: string): 'provider' | 'copilot' {
+export function getPricingSourceForEditor(editor: string): 'provider' | 'copilot' {
 	return COPILOT_EDITOR_NAMES.has(editor) ? 'copilot' : 'provider';
 }
 

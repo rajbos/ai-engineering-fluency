@@ -1,6 +1,6 @@
 ---
 name: Bug report — VS Code Extension
-about: Report a bug in the Copilot Token Tracker VS Code extension
+about: Report a bug in the AI Engineering Fluency VS Code extension
 title: '[BUG][vscode] '
 labels: "bug, vscode-extension"
 assignees: ''

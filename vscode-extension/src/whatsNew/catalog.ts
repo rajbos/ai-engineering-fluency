@@ -111,8 +111,16 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 		version: '0.17.3',
 		date: null,
 		headline:
-			'This release is about noticing patterns you would otherwise have to spot yourself: where the agent had to backtrack, which prompts you keep retyping, and how quickly models actually start answering.',
+			'This release is about noticing patterns you would otherwise have to spot yourself: what a model router did off screen, where the agent had to backtrack, which prompts you keep retyping, and how quickly models actually start answering.',
 		features: [
+			{
+				id: 'logviewer.hydrafusion-routing',
+				title: 'HydraFusion Routing',
+				description:
+					'When a Copilot CLI session runs on HydraFusion, several models draft, judge and repair one answer behind the scenes and you are shown one result and one credit number. This section opens that up: which models ran, who rejected whom, which leg you actually read, and what share of the credits went on review rather than on the answer.',
+				kind: 'section',
+				surface: { view: 'logviewer', anchor: 'section-hydrafusion-routing' },
+			},
 			{
 				id: 'usage.corrections-tab',
 				title: 'Corrections tab',

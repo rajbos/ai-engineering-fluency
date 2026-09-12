@@ -1,0 +1,6 @@
+{
+  "//": "Exact-match strings that check-hardcoded-strings.mjs should never flag, even in new code. Prefer an inline `// i18n-exempt: <reason>` comment next to the literal instead — use this file only when that isn't practical (e.g. a value repeated across many files). Matching is exact and whitespace-trimmed.",
+  "allow": [
+    "AI Engineering Fluency"
+  ]
+}

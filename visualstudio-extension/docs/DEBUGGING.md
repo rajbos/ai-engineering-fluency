@@ -1,4 +1,4 @@
-﻿# Copilot Token Tracker — Visual Studio Extension: Debugging Guide
+﻿# AI Engineering Fluency — Visual Studio Extension: Debugging Guide
 
 ## Prerequisites
 
@@ -50,7 +50,7 @@ into the local `webview/` folder before each build.
 1. Set **AIEngineeringFluency** as the startup project (it already is).
 2. Press **F5**.
 3. An **Experimental Instance** of Visual Studio launches with the extension installed.
-4. In the Experimental Instance: **View → Copilot Token Tracker**.
+4. In the Experimental Instance: **View → AI Engineering Fluency**.
 
 The tool window opens and the WebView2 dashboard loads automatically.
 

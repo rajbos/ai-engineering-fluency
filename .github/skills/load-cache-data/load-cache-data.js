@@ -2,7 +2,7 @@
 /**
  * Load Cache Data Script
  * 
- * This script loads and displays the GitHub Copilot Token Tracker's local cache data.
+ * This script loads and displays the AI Engineering Fluency's local cache data.
  * The cache stores pre-computed session file statistics to avoid re-processing unchanged files.
  * 
  * The extension's cache is stored in VS Code's globalState, which is persisted in a SQLite

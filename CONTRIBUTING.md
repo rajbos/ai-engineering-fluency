@@ -1,6 +1,6 @@
-# Contributing to Copilot Token Tracker
+# Contributing to AI Engineering Fluency
 
-Thank you for your interest in contributing to the Copilot Token Tracker extension! This guide will help you get started with development, especially when working with AI assistants like GitHub Copilot.
+Thank you for your interest in contributing to the AI Engineering Fluency extension! This guide will help you get started with development, especially when working with AI assistants like GitHub Copilot.
 
 ## Table of Contents
 

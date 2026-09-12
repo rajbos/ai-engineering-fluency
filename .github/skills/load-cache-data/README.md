@@ -1,6 +1,6 @@
 # Load Cache Data Skill - Quick Reference
 
-This skill provides tools and documentation for accessing the GitHub Copilot Token Tracker's local session file cache.
+This skill provides tools and documentation for accessing the AI Engineering Fluency's local session file cache.
 
 ## Quick Start
 

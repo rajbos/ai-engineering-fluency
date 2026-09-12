@@ -15,7 +15,7 @@ webview bundles from `vscode-extension/` and the CLI binary from `cli/`.
   only allowed to host the bundle, push stats into it, and react to
   `postMessage` events coming back.
 * **Do not modify `vscode-shim.js` from this project.** The shim lives in
-  `visualstudio-extension/src/CopilotTokenTracker/WebBridge/vscode-shim.js`
+  `visualstudio-extension/src/AIEngineeringFluency/WebBridge/vscode-shim.js`
   and is shared. Changes there must keep both extensions working.
 * **Do not break the JSON contract** between `CliBridge` and the webview
   bundles. The CLI commands and their `--json` shape are the integration

@@ -5,7 +5,7 @@
 1. **Press F5** to start debugging (or use the experimental instance if already running)
 2. In the experimental instance:
    - Go to **View > Output** (or press `Ctrl+Alt+O`)
-   - In the dropdown **"Show output from:"**, select **"Copilot Token Tracker"**
+   - In the dropdown **"Show output from:"**, select **"AI Engineering Fluency"**
 
 ## What the Logs Will Tell You
 
@@ -13,7 +13,7 @@ When the toolbar shows "0 | 0", check these log entries:
 
 ### 1. Extension Initialization
 ```
-[HH:mm:ss] === Copilot Token Tracker Extension Starting ===
+[HH:mm:ss] === AI Engineering Fluency Extension Starting ===
 [HH:mm:ss] Package GUID: 6B8CA5B3-1A9F-4C2E-8F3D-7E2A1B4C9D0F
 [HH:mm:ss] Initializing commands...
 [HH:mm:ss] === Extension Initialized Successfully ===

@@ -15,7 +15,7 @@ Detects which of the three releasable components have changed, bumps their versi
 |-----------|-------------|------------------------|----------------------------|
 | **VS Code extension** | `vscode-extension/package.json` → `version` | `vscode/v` | `release.yml` (Actions → _Extensions - Release_ → Run workflow) |
 | **CLI** | `cli/package.json` → `version` | `cli/v` | `cli-publish.yml` (Actions → _CLI - Publish to npm and GitHub_ → Run workflow) |
-| **Visual Studio extension** | `visualstudio-extension/src/CopilotTokenTracker/source.extension.vsixmanifest` → `Identity.Version` | `vs/v` | `visualstudio-build.yml` (Actions → _Visual Studio Extension - Build & Package_ → Run workflow, set `publish_marketplace: true`) |
+| **Visual Studio extension** | `visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest` → `Identity.Version` | `vs/v` | `visualstudio-build.yml` (Actions → _Visual Studio Extension - Build & Package_ → Run workflow, set `publish_marketplace: true`) |
 
 ---
 
@@ -76,7 +76,7 @@ node -p "require('./vscode-extension/package.json').version"
 node -p "require('./cli/package.json').version"
 ```
 
-For the VS extension, read the `Version` attribute from the `<Identity>` element in `visualstudio-extension/src/CopilotTokenTracker/source.extension.vsixmanifest`.
+For the VS extension, read the `Version` attribute from the `<Identity>` element in `visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest`.
 
 ### Step 5 — Confirm the plan with the user
 
@@ -112,7 +112,7 @@ npm version <bump-type> --no-git-tag-version
 cd ..
 ```
 
-For Visual Studio extension (if changed), update the `Version` attribute in the `<Identity>` element of `visualstudio-extension/src/CopilotTokenTracker/source.extension.vsixmanifest`. Use the `edit` tool to make a targeted string replacement. The current value will be something like `Version="1.0.4"` — replace only the version number, not the whole line.
+For Visual Studio extension (if changed), update the `Version` attribute in the `<Identity>` element of `visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest`. Use the `edit` tool to make a targeted string replacement. The current value will be something like `Version="1.0.4"` — replace only the version number, not the whole line.
 
 ### Step 7 — Create a release-prep branch
 
@@ -128,7 +128,7 @@ Stage only the version files:
 ```bash
 git add vscode-extension/package.json vscode-extension/package-lock.json   # if VS Code changed
 git add cli/package.json cli/package-lock.json                              # if CLI changed
-git add visualstudio-extension/src/CopilotTokenTracker/source.extension.vsixmanifest  # if VS changed
+git add visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest  # if VS changed
 ```
 
 Commit with a descriptive message:

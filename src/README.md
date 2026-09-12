@@ -110,6 +110,32 @@ calculateEstimatedCost(usage, pricing);             // provider/API cost (defaul
 calculateEstimatedCost(usage, pricing, 'copilot');  // GitHub Copilot AI-Credit cost
 ```
 
+**Copilot Auto routing:** estimated paid-plan AI-Credit costs apply GitHub's
+[10% Auto discount](https://code.visualstudio.com/blogs/2025/09/15/autoModelSelection)
+only to requests with an `autoModeResolution` response item or a request-level
+`modelId` of `auto` / `copilot/auto`. The resolved model supplies the rate;
+unresolved Auto stays unpriced. `ModelUsage.autoRouting` holds the eligible token
+subset (including optional cache fields), not extra usage, so manual requests
+for the same model are not discounted. Provider/API prices, provider fallbacks
+without a `copilotPricing` block, and recorded exact Copilot charges are unchanged.
+Session logs do not identify plan eligibility; these are paid-plan rate estimates,
+not a claim that a Free account incurs a charge. Premium-request counts are not
+converted into token costs by this calculation.
+
+Auto subsets survive aggregation and day allocation. When debug logs replace
+per-model tokens without a per-request routing split, the original Auto input/output
+proportions are retained as an estimate; cache tokens use the Auto input proportion.
+If a partial debug breakdown omits an Auto-routed model entirely, that unmatched
+subset cannot be priced reliably and is not transferred to another model. Recovering
+its discount requires linking debug requests to their original model/routing evidence;
+the current per-model totals do not provide that link.
+The Session Steps Overview uses Copilot rates for Copilot editors and provider
+rates for other editors. Sub-agents do not inherit the parent's Auto discount.
+Copilot CLI's model-change events and per-model billing/shutdown totals do not
+provide a reliable per-request Auto signal in the supported schemas; neither
+these nor JetBrains/Visual Studio heuristics receive an inferred discount.
+Other vendors' `auto` model names are not treated as Copilot routing.
+
 When a model has no `copilotPricing` block the `'copilot'` source falls back to
 the provider rates as a proxy — this means the Copilot cost is never
 *under-reported* due to a missing entry, it just won't reflect the (often

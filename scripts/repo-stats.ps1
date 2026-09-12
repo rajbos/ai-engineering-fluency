@@ -31,10 +31,11 @@ $excludeDirs = @(
     'coverage', '.nyc_output', 'packages', '.next', '.turbo', 'TestResults'
 )
 
-# Relative path fragments to exclude (generated/bundled webview output committed to the repo).
+# Relative path fragments to exclude (generated/bundled webview output — not committed,
+# but may exist locally as untracked build output after a Visual Studio build).
 $excludePathFragments = @(
-    'visualstudio-extension/src/CopilotTokenTracker/webview',
-    'visualstudio-extension\src\CopilotTokenTracker\webview'
+    'visualstudio-extension/src/AIEngineeringFluency/webview',
+    'visualstudio-extension\src\AIEngineeringFluency\webview'
 )
 
 # File names to exclude (lockfiles etc. that aren't hand-written code).

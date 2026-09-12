@@ -2,7 +2,7 @@
 
 ## Overview
 
-The GitHub Copilot CLI has changed its session storage format. This document describes the changes and their impact on the Copilot Token Tracker extension.
+The GitHub Copilot CLI has changed its session storage format. This document describes the changes and their impact on the AI Engineering Fluency extension.
 
 ## Date of Change
 

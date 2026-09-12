@@ -1,5 +1,5 @@
 name: Feature request — Visual Studio Extension
-description: Suggest a new feature or improvement for the Copilot Token Tracker Visual Studio extension
+description: Suggest a new feature or improvement for the AI Engineering Fluency Visual Studio extension
 title: "[FEATURE][visualstudio] "
 labels:
   - enhancement
@@ -8,7 +8,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for suggesting an improvement to the **Copilot Token Tracker Visual Studio extension**.
+        Thank you for suggesting an improvement to the **AI Engineering Fluency Visual Studio extension**.
         Please provide as much detail as possible to help us understand the request.
         > **Note:** This extension currently targets **Windows only** with Visual Studio 2022+.
 

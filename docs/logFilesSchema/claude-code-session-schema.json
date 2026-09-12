@@ -1,6 +1,6 @@
 {
   "title": "Claude Code Session File Schema Documentation",
-  "description": "This document describes the structure of session log files created by Claude Code (Anthropic's CLI/IDE extension). These files contain actual Anthropic API token counts and can be used by the Copilot Token Tracker extension to report on Claude Code token usage.",
+  "description": "This document describes the structure of session log files created by Claude Code (Anthropic's CLI/IDE extension). These files contain actual Anthropic API token counts and can be used by the AI Engineering Fluency extension to report on Claude Code token usage.",
   "version": "1.2",
   "lastUpdated": "2026-06-03",
   "schemaChanges": {
@@ -825,7 +825,7 @@
     }
   },
   "extensionIntegrationNotes": {
-    "description": "Guidance for integrating Claude Code session parsing into the Copilot Token Tracker extension",
+    "description": "Guidance for integrating Claude Code session parsing into the AI Engineering Fluency extension",
     "tokenCounting": {
       "approach": "Use the 'usage' object in assistant events directly — no estimation needed",
       "deduplication": "Multiple assistant events can share a requestId (streaming). Only count usage from the event with stop_reason != null, or sum unique requestIds.",
@@ -866,7 +866,7 @@
     "promptCachingImpact": "In typical Claude Code sessions, cache_read_input_tokens dominates because the system prompt and conversation history are cached. Only new content generates input_tokens. For cost calculation, the three fields must be weighted differently.",
     "multipleAssistantEvents": "A single user turn may generate many assistant events as the model streams content or makes multiple tool calls. Each has its own usage accounting. Sum by unique requestId or use stop_reason to find final counts.",
     "subagentTokens": "Sub-agents run as separate API calls and have their own token usage. Their JSONL files are separate, so including or excluding subagents is a clean decision.",
-    "noContentEstimation": "Unlike Copilot Token Tracker's character-based estimation, Claude Code session files make estimation unnecessary — always use the usage.input_tokens / output_tokens fields directly.",
+    "noContentEstimation": "Unlike AI Engineering Fluency's character-based estimation, Claude Code session files make estimation unnecessary — always use the usage.input_tokens / output_tokens fields directly.",
     "versionObserved": "Schema documented from Claude Code v2.1.5 and v2.1.86 (March 2026). Fields may be added in future versions."
   }
 }

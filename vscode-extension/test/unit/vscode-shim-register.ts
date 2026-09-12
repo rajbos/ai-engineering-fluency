@@ -332,6 +332,23 @@ function attachMock(target: any): void {
 		'aiEngineeringFluency.runLocalViewRegression',
 		'aiEngineeringFluency.generateDiagnosticReport'
 	]);
+
+	target.MarkdownString = target.MarkdownString ?? class MarkdownString {
+		value: string;
+		isTrusted: boolean = false;
+		supportThemeIcons: boolean = false;
+		constructor(value?: string) {
+			this.value = value ?? '';
+		}
+		appendMarkdown(value: string): any {
+			this.value += value;
+			return this;
+		}
+		appendText(value: string): any {
+			this.value += value;
+			return this;
+		}
+	};
 }
 
 const vscodeStub: any = {};

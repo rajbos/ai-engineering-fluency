@@ -23,6 +23,11 @@ visualstudio-extension/.vs/
 visualstudio-extension/src/AIEngineeringFluency/bin/
 visualstudio-extension/src/AIEngineeringFluency/obj/
 visualstudio-extension/src/AIEngineeringFluency/cli-bundle/
+# Generated webview bundles (esbuild output copied from vscode-extension/dist/webview
+# at build time by CopyWebviewBundles in AIEngineeringFluency.csproj). Scoped to the
+# generated file types only — see docs/adr/VS-WEBVIEW-BUNDLE-SOURCING.md.
+visualstudio-extension/src/AIEngineeringFluency/webview/*.js
+visualstudio-extension/src/AIEngineeringFluency/webview/*.json
 visualstudio-extension/src/AIEngineeringFluencyRunner/bin/
 visualstudio-extension/src/AIEngineeringFluencyRunner/obj/
 visualstudio-extension/src/AIEngineeringFluencyRunner/cli-bundle/
