@@ -4,7 +4,7 @@
 // combined indexed chart that overlays the ratio series with output.
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { setHtml } from '../shared/domUtils';
-import { escapeHtml, formatCompact, formatCost, formatFixed, formatNumber, formatSignedCostCompact, setCompactNumbers, setFormatLocale } from '../shared/formatUtils';
+import { escapeHtml, formatCompact, formatCost, formatNumber, formatSignedCostCompact, setCompactNumbers, setFormatLocale } from '../shared/formatUtils';
 import type { CacheBreakCause } from '../../../../src/cacheBreakage';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import themeStyles from '../shared/theme.css';
@@ -302,12 +302,12 @@ function renderAttributionTab(d: EfficiencyViewData): string {
 		<div class="attr-summary">
 			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.prev))}</div><div class="stat-value">${formatCost(a.prev.cost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.periodSub', d.attributionWindows.prevRange, formatNumber(a.prev.sessions), formatCompact(a.prev.tokens)))}</div></div>
 			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.cur))}</div><div class="stat-value">${formatCost(a.cur.cost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.periodSub', d.attributionWindows.curRange, formatNumber(a.cur.sessions), formatCompact(a.cur.tokens)))}</div></div>
-			<div class="attr-stat"><div class="stat-label">${escapeHtml(localize('efficiency.attribution.change'))}</div><div class="stat-value">${fmtMoney(a.deltaCost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.blendedRate', formatFixed(a.prev.dollarsPerMTokens, 2), formatFixed(a.cur.dollarsPerMTokens, 2)))}</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(localize('efficiency.attribution.change'))}</div><div class="stat-value">${fmtMoney(a.deltaCost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.blendedRate', formatCost(a.prev.dollarsPerMTokens), formatCost(a.cur.dollarsPerMTokens)))}</div></div>
 		</div>
 		<div class="attr-bars">
-			${attrBar('Volume (session count)', `${formatNumber(a.prev.sessions)} → ${formatNumber(a.cur.sessions)} sessions`, a.volumeEffect, maxAbs, buildAttributionTooltip({ measure: 'Session count', prev: a.prev.sessions, cur: a.cur.sessions, unit: 'sessions', kind: 'count', effect: a.volumeEffect }))}
-			${attrBar('Session size (tokens/session)', `${formatCompact(a.prev.tokensPerSession)} → ${formatCompact(a.cur.tokensPerSession)} tokens/session`, a.efficiencyEffect, maxAbs, buildAttributionTooltip({ measure: 'Tokens per session', prev: a.prev.tokensPerSession, cur: a.cur.tokensPerSession, unit: 'tokens/session', kind: 'tokens', effect: a.efficiencyEffect }))}
-			${attrBar('Model mix ($/token)', `${formatCost(a.prev.dollarsPerMTokens)} → ${formatCost(a.cur.dollarsPerMTokens)} /M tokens`, a.mixEffect, maxAbs, buildAttributionTooltip({ measure: 'Blended price', prev: a.prev.dollarsPerMTokens, cur: a.cur.dollarsPerMTokens, unit: 'per M tokens', kind: 'rate', effect: a.mixEffect }))}
+			${attrBar('Volume (session count)', `${formatNumber(a.prev.sessions)} → ${formatNumber(a.cur.sessions)} sessions`, a.volumeEffect, maxAbs, buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.volume', prev: a.prev.sessions, cur: a.cur.sessions, kind: 'count', effect: a.volumeEffect }))}
+			${attrBar('Session size (tokens/session)', `${formatCompact(a.prev.tokensPerSession)} → ${formatCompact(a.cur.tokensPerSession)} tokens/session`, a.efficiencyEffect, maxAbs, buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.size', prev: a.prev.tokensPerSession, cur: a.cur.tokensPerSession, kind: 'tokens', effect: a.efficiencyEffect }))}
+			${attrBar('Model mix ($/token)', `${formatCost(a.prev.dollarsPerMTokens)} → ${formatCost(a.cur.dollarsPerMTokens)} /M tokens`, a.mixEffect, maxAbs, buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.mix', prev: a.prev.dollarsPerMTokens, cur: a.cur.dollarsPerMTokens, kind: 'rate', effect: a.mixEffect }))}
 		</div>
 		${shifts}`;
 }

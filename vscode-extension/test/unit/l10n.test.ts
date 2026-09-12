@@ -263,9 +263,13 @@ test('l10n: log viewer summary card labels resolve in English', () => {
 test('l10n: efficiency Cost Attribution labels resolve in English', () => {
 	const expected: Record<string, string> = {
 		'efficiency.attribution.costEffect': 'Estimated cost effect',
+		'efficiency.attribution.costEffectLine': 'Estimated cost effect: {0}',
 		'efficiency.attribution.change': 'Change',
 		'efficiency.attribution.periodSub': '{0} · {1} sessions · {2} tokens',
-		'efficiency.attribution.blendedRate': 'blended rate {0} → {1} $/M tokens',
+		'efficiency.attribution.blendedRate': 'blended rate {0} → {1} per M tokens',
+		'efficiency.attribution.tooltip.volume': 'Session count: {0} → {1} sessions',
+		'efficiency.attribution.tooltip.size': 'Tokens per session: {0} → {1} tokens/session',
+		'efficiency.attribution.tooltip.mix': 'Blended price: {0} → {1} per M tokens',
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
@@ -277,9 +281,13 @@ test('l10n: efficiency Cost Attribution labels resolve in zh-cn', () => {
 	try {
 		const expected: Record<string, string> = {
 			'efficiency.attribution.costEffect': '预计成本影响',
+			'efficiency.attribution.costEffectLine': '预计成本影响：{0}',
 			'efficiency.attribution.change': '变化',
 			'efficiency.attribution.periodSub': '{0} · {1} 个会话 · {2} 个令牌',
-			'efficiency.attribution.blendedRate': '混合费率 {0} → {1} 美元/百万令牌',
+			'efficiency.attribution.blendedRate': '混合费率 {0} → {1} 每百万令牌',
+			'efficiency.attribution.tooltip.volume': '会话数：{0} → {1} 个会话',
+			'efficiency.attribution.tooltip.size': '每会话令牌数：{0} → {1} 令牌/会话',
+			'efficiency.attribution.tooltip.mix': '混合单价：{0} → {1} 每百万令牌',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);

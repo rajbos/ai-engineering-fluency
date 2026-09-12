@@ -66,9 +66,13 @@ export interface WebviewLocalization {
 
 	// Efficiency view — Cost Attribution bars and summary cards
 	'efficiency.attribution.costEffect': string;
+	'efficiency.attribution.costEffectLine': string;
 	'efficiency.attribution.change': string;
 	'efficiency.attribution.periodSub': string;
 	'efficiency.attribution.blendedRate': string;
+	'efficiency.attribution.tooltip.volume': string;
+	'efficiency.attribution.tooltip.size': string;
+	'efficiency.attribution.tooltip.mix': string;
 
 	// HydraFusion Routing section (log viewer) and its Session Steps Overview integration
 	'hydrafusion.table.cost': string;
@@ -137,9 +141,13 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'logviewer.summary.started': 'Started',
 	'logviewer.summary.lastActivity': 'Last activity',
 	'efficiency.attribution.costEffect': 'Estimated cost effect',
+	'efficiency.attribution.costEffectLine': 'Estimated cost effect: {0}',
 	'efficiency.attribution.change': 'Change',
 	'efficiency.attribution.periodSub': '{0} · {1} sessions · {2} tokens',
-	'efficiency.attribution.blendedRate': 'blended rate {0} → {1} $/M tokens',
+	'efficiency.attribution.blendedRate': 'blended rate {0} → {1} per M tokens',
+	'efficiency.attribution.tooltip.volume': 'Session count: {0} → {1} sessions',
+	'efficiency.attribution.tooltip.size': 'Tokens per session: {0} → {1} tokens/session',
+	'efficiency.attribution.tooltip.mix': 'Blended price: {0} → {1} per M tokens',
 	'hydrafusion.table.cost': 'Cost',
 	'hydrafusion.turn.costTooltip': 'Cost for this turn',
 	'hydrafusion.turn.jumpToStepTooltip': 'Jump to step #{0} in the Session Steps Overview below',

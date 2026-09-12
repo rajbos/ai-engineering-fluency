@@ -2,21 +2,24 @@
 // Kept out of `main.ts` (which grabs the VS Code webview API on import) so the
 // exact tooltip text can be asserted in unit tests without a DOM.
 import { formatCost, formatNumber, formatSignedCostPrecise } from '../shared/formatUtils';
-import { localize } from '../shared/localization';
+import { localizeFormat } from '../shared/localization';
 
 /** How a factor's two compared values should be rendered. */
 export type AttributionValueKind = 'count' | 'tokens' | 'rate';
 
 /** One Cost Attribution factor: what moved, from what to what, and what it cost. */
 export interface AttributionFactor {
-	/** What the two numbers measure, e.g. "Session count". */
-	measure: string;
+	/**
+	 * Localization key of the headline line, a template taking the previous and
+	 * current value — e.g. `Session count: {0} → {1} sessions`. The measure and
+	 * its unit live inside the template so a translation can reorder or re-word
+	 * both, rather than being concatenated around fixed English.
+	 */
+	headlineKey: string;
 	/** Value in the earlier window. */
 	prev: number;
 	/** Value in the later window. */
 	cur: number;
-	/** Unit that follows the pair, e.g. "sessions". */
-	unit: string;
 	kind: AttributionValueKind;
 	/** Signed dollar amount this factor contributed to the cost change. */
 	effect: number;
@@ -43,5 +46,6 @@ export function buildAttributionTooltip(factor: AttributionFactor): string {
 	const prev = formatAttributionValue(factor.prev, factor.kind);
 	const cur = formatAttributionValue(factor.cur, factor.kind);
 	const effect = formatSignedCostPrecise(factor.effect);
-	return `${factor.measure}: ${prev} → ${cur} ${factor.unit}\n${localize('efficiency.attribution.costEffect')}: ${effect}`;
+	const headline = localizeFormat(factor.headlineKey, prev, cur);
+	return `${headline}\n${localizeFormat('efficiency.attribution.costEffectLine', effect)}`;
 }

@@ -22,6 +22,7 @@ import {
 	STAGE_DESCRIPTIONS
 } from '../../src/webview/shared/formatUtils';
 import { buildAttributionTooltip } from '../../src/webview/efficiency/attributionText';
+import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
 
 // ── getModelDisplayName ─────────────────────────────────────────────────
 
@@ -270,41 +271,61 @@ test('formatSignedCostCompact: a locale places its own separators and symbol', (
 
 test('buildAttributionTooltip: volume bar names the session counts and the signed effect', () => {
 	setFormatLocale('en-US');
+	initializeWebviewLocalization({});
 	assert.equal(
-		buildAttributionTooltip({ measure: 'Session count', prev: 64, cur: 73, unit: 'sessions', kind: 'count', effect: 7.35 }),
+		buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.volume', prev: 64, cur: 73, kind: 'count', effect: 7.35 }),
 		'Session count: 64 → 73 sessions\nEstimated cost effect: +$7.3500',
 	);
 });
 
 test('buildAttributionTooltip: session-size bar groups and rounds the token averages', () => {
 	setFormatLocale('en-US');
+	initializeWebviewLocalization({});
 	assert.equal(
-		buildAttributionTooltip({ measure: 'Tokens per session', prev: 60938.4, cur: 55120.6, unit: 'tokens/session', kind: 'tokens', effect: -3.5 }),
+		buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.size', prev: 60938.4, cur: 55120.6, kind: 'tokens', effect: -3.5 }),
 		'Tokens per session: 60,938 → 55,121 tokens/session\nEstimated cost effect: -$3.5000',
 	);
 });
 
 test('buildAttributionTooltip: model-mix bar renders the blended rates as currency', () => {
 	setFormatLocale('en-US');
+	initializeWebviewLocalization({});
 	assert.equal(
-		buildAttributionTooltip({ measure: 'Blended price', prev: 13.41, cur: 13.41, unit: 'per M tokens', kind: 'rate', effect: 0 }),
+		buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.mix', prev: 13.41, cur: 13.41, kind: 'rate', effect: 0 }),
 		'Blended price: $13.41 → $13.41 per M tokens\nEstimated cost effect: $0.0000',
 	);
 });
 
 test('buildAttributionTooltip: a non-zero sub-cent effect survives into the tooltip', () => {
 	setFormatLocale('en-US');
-	const tooltip = buildAttributionTooltip({ measure: 'Blended price', prev: 13.41, cur: 13.4, unit: 'per M tokens', kind: 'rate', effect: -0.0037 });
+	initializeWebviewLocalization({});
+	const tooltip = buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.mix', prev: 13.41, cur: 13.4, kind: 'rate', effect: -0.0037 });
 	assert.ok(tooltip.endsWith('Estimated cost effect: -$0.0037'), tooltip);
 });
 
 test('buildAttributionTooltip: a non-US locale groups the counts and localizes the currency', () => {
 	setFormatLocale('nl-NL');
+	initializeWebviewLocalization({});
 	assert.equal(
-		buildAttributionTooltip({ measure: 'Tokens per session', prev: 1234567, cur: 1234567, unit: 'tokens/session', kind: 'tokens', effect: 7.35 }),
+		buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.size', prev: 1234567, cur: 1234567, kind: 'tokens', effect: 7.35 }),
 		'Tokens per session: 1.234.567 → 1.234.567 tokens/session\nEstimated cost effect: US$\u00a0+7,3500',
 	);
 	setFormatLocale('en-US');
+});
+
+test('buildAttributionTooltip: a translated payload localizes the whole tooltip, not just the effect line', () => {
+	// The measure and its unit live inside the template, so a translation can
+	// reword and reorder both — nothing English is concatenated around it.
+	setFormatLocale('en-US');
+	initializeWebviewLocalization({
+		'efficiency.attribution.tooltip.volume': '会话数：{0} → {1} 个会话',
+		'efficiency.attribution.costEffectLine': '预计成本影响：{0}',
+	});
+	assert.equal(
+		buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.volume', prev: 64, cur: 73, kind: 'count', effect: 7.35 }),
+		'会话数：64 → 73 个会话\n预计成本影响：+$7.3500',
+	);
+	initializeWebviewLocalization({});
 });
 
 // ── escapeHtml ──────────────────────────────────────────────────────────

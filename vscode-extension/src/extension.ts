@@ -4236,9 +4236,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private getEfficiencyAttributionLocalization(): Record<string, string> {
 		return {
 			'efficiency.attribution.costEffect': l10n.t('efficiency.attribution.costEffect'),
+			'efficiency.attribution.costEffectLine': l10n.t('efficiency.attribution.costEffectLine'),
 			'efficiency.attribution.change': l10n.t('efficiency.attribution.change'),
 			'efficiency.attribution.periodSub': l10n.t('efficiency.attribution.periodSub'),
 			'efficiency.attribution.blendedRate': l10n.t('efficiency.attribution.blendedRate'),
+			'efficiency.attribution.tooltip.volume': l10n.t('efficiency.attribution.tooltip.volume'),
+			'efficiency.attribution.tooltip.size': l10n.t('efficiency.attribution.tooltip.size'),
+			'efficiency.attribution.tooltip.mix': l10n.t('efficiency.attribution.tooltip.mix'),
 		};
 	}
 
