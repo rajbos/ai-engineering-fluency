@@ -37,9 +37,10 @@ export const environmentalCommand = new Command('environmental')
 		];
 
 		// Environmental impact methodology
-		console.log(chalk.dim('Methodology: Estimates based on industry averages for AI inference'));
-		console.log(chalk.dim(`  CO₂: ${ENVIRONMENTAL.CO2_PER_1K_TOKENS} gCO₂e per 1K tokens`));
-		console.log(chalk.dim(`  Water: ${ENVIRONMENTAL.WATER_USAGE_PER_1K_TOKENS} L per 1K tokens`));
+		console.log(chalk.dim('Methodology: CO₂ uses Jegham et al. "How Hungry is AI?" as an order-of-magnitude baseline.'));
+		console.log(chalk.dim(`  CO₂ baseline: ${ENVIRONMENTAL.CO2_GRAMS_PER_MILLION_OUTPUT_EQUIVALENT_TOKENS} gCO₂e per 1M output-equivalent tokens`));
+		console.log(chalk.dim(`  Output-equivalent weights: output=1.0, input=${ENVIRONMENTAL.INPUT_TOKEN_OUTPUT_EQUIVALENT_WEIGHT}, cache write=${ENVIRONMENTAL.CACHE_WRITE_OUTPUT_EQUIVALENT_WEIGHT}, cache read=${ENVIRONMENTAL.CACHE_READ_OUTPUT_EQUIVALENT_WEIGHT}`));
+		console.log(chalk.dim(`  Water: ${ENVIRONMENTAL.WATER_USAGE_PER_1K_TOKENS} L per 1K total tokens`));
 		console.log(chalk.dim(`  Tree absorption: ${formatCo2(ENVIRONMENTAL.CO2_ABSORPTION_PER_TREE_PER_YEAR)} CO₂/year\n`));
 
 		for (const period of periods) {

@@ -114,7 +114,7 @@ Based on your last 30 days of usage (520,423 tokens):
   Water usage      ~  0.63 L
   Tree equivalent  ~  0.02 trees/year needed to offset
 
-All figures are estimates based on published AI energy-use research.
+All figures are estimates. CO₂ uses Jegham et al., *How Hungry is AI? Benchmarking Energy, Water, and Carbon Footprint of LLM Inference*, with output-equivalent weighting for output, input, cache-write, and cache-read tokens.
 ```
 
 ---

@@ -103,7 +103,9 @@ Tracked editors:
 ### 7. Environmental Impact
 **Data Source**: Token usage
 
-- CO₂ emissions estimate (~0.2g CO₂e per 1000 tokens)
+- CO₂ emissions estimate based on Jegham et al., *How Hungry is AI? Benchmarking Energy, Water, and Carbon Footprint of LLM Inference*
+- CO₂ is derived from output-equivalent token weighting: output = 1.0, uncached input = 0.05, cache write = 0.0625, cache read = 0.0005
+- Falls back to the legacy flat estimate (~0.2g CO₂e per 1000 tokens) when no per-category model usage breakdown is available
 - Tree equivalent (based on annual CO₂ absorption)
 - Water usage estimate (~0.3L per 1000 tokens)
 
