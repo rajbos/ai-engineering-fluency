@@ -158,7 +158,13 @@
     webview\ folder so they can be packaged inside the VSIX.
     Prerequisite: run `npm run compile` in vscode-extension/ first.
   -->
-  <Target Name="CopyWebviewBundles" BeforeTargets="Build">
+  <!--
+    CopyWebviewBundles is skippable for environments that build the C# project
+    for extraction/analysis only and don't have the vscode-extension webview
+    build output checked out (notably the CodeQL C# scan, which sparse-checkouts
+    only visualstudio-extension/). Pass /p:CopyWebviewBundles=false to skip it.
+  -->
+  <Target Name="CopyWebviewBundles" BeforeTargets="Build" Condition="'$(CopyWebviewBundles)' != 'false'">
     <ItemGroup>
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\details.js" />
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\chart.js" />
