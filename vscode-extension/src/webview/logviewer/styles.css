@@ -1356,3 +1356,414 @@ color: #7adbb0;
 .hierarchy-child-name {
 font-style: italic;
 }
+
+/* ── HydraFusion routing section ──────────────────────────────────────────── */
+/* Renders the per-leg detail behind a routed turn (see hydraFusionSection.ts). */
+
+.hydra-section {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-subtle);
+	border-left: 3px solid #a678f0;
+	border-radius: 12px;
+	padding: 16px 20px;
+	margin-bottom: 24px;
+	box-shadow: 0 4px 12px rgb(0, 0, 0, 0.3), 0 1px 3px rgb(0, 0, 0, 0.2);
+}
+
+.hydra-header {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	flex-wrap: wrap;
+	margin-bottom: 6px;
+}
+
+.hydra-header-title {
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.hydra-header-sub {
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.hydra-intro {
+	font-size: 12px;
+	line-height: 1.6;
+	color: var(--text-secondary);
+	max-width: 105ch;
+	margin-bottom: 14px;
+}
+
+.hydra-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 10px;
+	margin-bottom: 14px;
+}
+
+.hydra-card {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 10px;
+	padding: 10px 12px;
+}
+
+.hydra-card-label {
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	color: var(--text-secondary);
+	margin-bottom: 4px;
+}
+
+.hydra-card-value {
+	font-size: 22px;
+	font-weight: 700;
+	color: #c9a9ff;
+	font-variant-numeric: tabular-nums;
+	line-height: 1.2;
+}
+
+.hydra-card-sub {
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-top: 3px;
+	line-height: 1.4;
+}
+
+.hydra-pattern-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-bottom: 16px;
+}
+
+.hydra-pattern-row-label {
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	color: var(--text-secondary);
+}
+
+.hydra-pattern-pill,
+.hydra-pattern-badge {
+	display: inline-block;
+	font-size: 11px;
+	font-weight: 600;
+	padding: 2px 9px;
+	border-radius: 999px;
+	border: 1px solid transparent;
+	white-space: nowrap;
+}
+
+.hydra-pattern-pill-aiu {
+	font-weight: 400;
+	opacity: 0.75;
+}
+
+.hydra-pattern-single {
+	background: color-mix(in srgb, #4fc1ff 18%, transparent);
+	border-color: color-mix(in srgb, #4fc1ff 45%, transparent);
+	color: #8ed6ff;
+}
+
+.hydra-pattern-cascade {
+	background: color-mix(in srgb, #e0a44a 18%, transparent);
+	border-color: color-mix(in srgb, #e0a44a 45%, transparent);
+	color: #f0c17f;
+}
+
+.hydra-pattern-critique {
+	background: color-mix(in srgb, #a678f0 18%, transparent);
+	border-color: color-mix(in srgb, #a678f0 45%, transparent);
+	color: #c9a9ff;
+}
+
+.hydra-pattern-other {
+	background: var(--bg-tertiary);
+	border-color: var(--border-subtle);
+	color: var(--text-secondary);
+}
+
+.hydra-split {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+	gap: 14px;
+	margin-bottom: 16px;
+}
+
+.hydra-panel {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 10px;
+	padding: 12px 14px;
+	overflow-x: auto;
+}
+
+.hydra-panel-title {
+	font-size: 13px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.hydra-panel-sub {
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin: 2px 0 10px;
+	line-height: 1.5;
+}
+
+.hydra-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 12px;
+}
+
+.hydra-table th,
+.hydra-table td {
+	padding: 5px 10px;
+	text-align: left;
+	border-bottom: 1px solid var(--border-subtle);
+	white-space: nowrap;
+}
+
+.hydra-table th {
+	color: var(--text-secondary);
+	font-weight: 600;
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.hydra-table tbody tr:last-child td {
+	border-bottom: none;
+}
+
+.hydra-num {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+.hydra-muted {
+	color: var(--text-secondary);
+}
+
+.hydra-model-cell {
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11px;
+	max-width: 220px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.hydra-bar-cell {
+	width: 100%;
+	min-width: 70px;
+	padding-right: 4px;
+}
+
+.hydra-bar {
+	display: block;
+	height: 7px;
+	border-radius: 4px;
+	background: #a678f0;
+	opacity: 0.85;
+}
+
+.hydra-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+}
+
+.hydra-phase-badge {
+	display: inline-block;
+	font-size: 10px;
+	font-weight: 600;
+	padding: 2px 7px;
+	border-radius: 5px;
+	border: 1px solid transparent;
+}
+
+.hydra-phase-solve {
+	background: color-mix(in srgb, #4fc1ff 16%, transparent);
+	border-color: color-mix(in srgb, #4fc1ff 40%, transparent);
+	color: #8ed6ff;
+}
+
+span.hydra-bar.hydra-phase-solve { background: #4fc1ff; }
+
+.hydra-phase-review {
+	background: color-mix(in srgb, #e0a44a 16%, transparent);
+	border-color: color-mix(in srgb, #e0a44a 40%, transparent);
+	color: #f0c17f;
+}
+
+span.hydra-bar.hydra-phase-review { background: #e0a44a; }
+
+.hydra-phase-repair {
+	background: color-mix(in srgb, #f07d7d 16%, transparent);
+	border-color: color-mix(in srgb, #f07d7d 40%, transparent);
+	color: #ff9f9f;
+}
+
+span.hydra-bar.hydra-phase-repair { background: #f07d7d; }
+
+.hydra-phase-other {
+	background: var(--bg-secondary);
+	border-color: var(--border-subtle);
+	color: var(--text-secondary);
+}
+
+span.hydra-bar.hydra-phase-other { background: var(--text-secondary); }
+
+.hydra-turns {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.hydra-turn {
+	border: 1px solid var(--border-subtle);
+	border-radius: 8px;
+	background: var(--bg-secondary);
+}
+
+.hydra-turn[open] {
+	border-color: color-mix(in srgb, #a678f0 45%, var(--border-subtle));
+}
+
+.hydra-turn-summary {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+	padding: 7px 10px;
+	cursor: pointer;
+	font-size: 12px;
+	list-style: none;
+}
+
+.hydra-turn-summary::-webkit-details-marker {
+	display: none;
+}
+
+.hydra-turn-summary::before {
+	content: "▸";
+	color: var(--text-secondary);
+	font-size: 10px;
+}
+
+.hydra-turn[open] .hydra-turn-summary::before {
+	content: "▾";
+}
+
+.hydra-turn-summary:hover {
+	background: var(--bg-tertiary);
+	border-radius: 8px;
+}
+
+.hydra-turn-num {
+	font-weight: 700;
+	color: var(--text-secondary);
+	font-variant-numeric: tabular-nums;
+	min-width: 26px;
+}
+
+.hydra-turn-chain {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex-wrap: wrap;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 11px;
+}
+
+.hydra-chain-item {
+	padding: 1px 6px;
+	border-radius: 5px;
+	border: 1px solid transparent;
+}
+
+.hydra-chain-arrow {
+	color: var(--text-secondary);
+	opacity: 0.7;
+}
+
+.hydra-verdict-reject { color: #ff9f9f; font-weight: 700; margin-left: 3px; }
+.hydra-verdict-accept { color: #7adbb0; font-weight: 700; margin-left: 3px; }
+
+.hydra-final-dot {
+	color: #7adbb0;
+	margin-left: 3px;
+}
+
+.hydra-final-tag {
+	font-size: 9px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	padding: 1px 5px;
+	border-radius: 4px;
+	background: color-mix(in srgb, #7adbb0 20%, transparent);
+	color: #7adbb0;
+}
+
+.hydra-turn-metrics {
+	display: inline-flex;
+	gap: 12px;
+	margin-left: auto;
+	color: var(--text-secondary);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.hydra-turn-body {
+	padding: 0 10px 10px;
+	overflow-x: auto;
+}
+
+.hydra-turn-plan,
+.hydra-turn-degraded {
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-bottom: 8px;
+}
+
+.hydra-turn-degraded {
+	color: var(--vscode-editorWarning-foreground, #d7a73b);
+}
+
+.hydra-legs-table tbody tr.hydra-leg-final {
+	background: color-mix(in srgb, #7adbb0 7%, transparent);
+}
+
+.hydra-verdict {
+	font-size: 10px;
+	font-weight: 700;
+	padding: 1px 6px;
+	border-radius: 4px;
+	text-transform: uppercase;
+}
+
+.hydra-verdict-reject.hydra-verdict,
+.hydra-verdict.hydra-verdict-reject {
+	background: color-mix(in srgb, #f07d7d 18%, transparent);
+	color: #ff9f9f;
+	margin-left: 0;
+}
+
+.hydra-verdict.hydra-verdict-accept {
+	background: color-mix(in srgb, #7adbb0 18%, transparent);
+	color: #7adbb0;
+	margin-left: 0;
+}

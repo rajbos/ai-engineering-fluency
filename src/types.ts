@@ -4,6 +4,7 @@
  */
 import type { TaskCategory, TaskCategoryBreakdown, TaskClassificationResult } from './taskClassification';
 import type { CacheBreakageResult, CacheBreakagePeriodStats } from './cacheBreakage';
+import type { HydraFusionSummary } from './hydrafusion';
 
 /**
  * Character-to-token ratio for a specific AI model.
@@ -1295,6 +1296,12 @@ export interface SessionLogData {
    * listing the items as bullet points alongside the editor name and icon.
    */
   editorNote?: { items: string[] };
+  /**
+   * Per-leg HydraFusion routing detail (Copilot CLI sessions that used the
+   * `hydrafusion` model). Absent for every other session, including CLI sessions
+   * that never routed through it. See `analyzeHydraFusionSession` in `hydrafusion.ts`.
+   */
+  hydraFusion?: HydraFusionSummary;
 }
 
 // ---------------------------------------------------------------------------

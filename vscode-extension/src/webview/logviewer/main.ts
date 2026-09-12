@@ -5,6 +5,8 @@ import { escapeHtml, formatCompact, formatCost, formatFileSize, setCompactNumber
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 import { buildTurnOverviewRows, hashModelToHue } from './turnsOverview';
+import { renderHydraFusionSection } from './hydraFusionSection';
+import type { HydraFusionSummary } from '../../../../src/hydrafusion';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -102,6 +104,8 @@ truncationCount?: number;
 messagesRemovedByTruncation?: number;
 /** Optional editor-specific note. When present, an info panel is rendered at the top of the viewer. */
 editorNote?: { items: string[] };
+/** Per-leg HydraFusion routing detail (Copilot CLI sessions that used the `hydrafusion` model). */
+hydraFusion?: HydraFusionSummary;
 compactNumbers?: boolean;
 };
 
@@ -1485,6 +1489,8 @@ ${renderSessionActualUsage(
 	actualStats.actualPromptTotal, actualStats.actualCompletionTotal, actualStats.actualTotal,
 	actualStats.aggregatedBreakdown,
 )}
+
+${renderHydraFusionSection(data.hydraFusion)}
 
 ${renderTurnsOverviewTable(data)}
 
