@@ -20,12 +20,20 @@ export class CacheManager {
 	private static readonly SNAPSHOT_SCHEMA_VERSION = 1;
 	private static readonly SNAPSHOT_MAX_ENTRIES = 20_000;
 
+	// Checkpoint constants: save every N new entries or every M milliseconds, whichever comes first
+	private static readonly CHECKPOINT_NEW_ENTRIES_THRESHOLD = 100;
+	private static readonly CHECKPOINT_INTERVAL_MS = 20_000;
+
 	private sessionFileCache: Map<string, SessionFileCache> = new Map();
 	private readonly context: vscode.ExtensionContext;
 	private readonly deps: CacheManagerDeps;
 	private readonly cacheVersion: number;
 	private readonly policy: CachePolicy<SessionFileCache>;
 	private lastLoadedSnapshotMtime = 0;
+	// Checkpoint tracking
+	private lastCheckpointTime = 0;
+	private entriesSinceLastCheckpoint = 0;
+	private checkpointInProgress = false;
 
 	constructor(
 		context: vscode.ExtensionContext,
@@ -62,13 +70,18 @@ export class CacheManager {
 
 	/**
 	 * Sets the cache entry for a session file, including file size.
+	 * Also tracks new entries for checkpointing purposes.
 	 */
-	setCachedSessionData(filePath: string, data: SessionFileCache, fileSize?: number): void {
+	setCachedSessionData(filePath: string, data: SessionFileCache, fileSize?: number, isNewEntry: boolean = false): void {
 		if (typeof fileSize === 'number') {
 			data.size = fileSize;
 		}
+		const isActualNewEntry = isNewEntry && !this.sessionFileCache.has(filePath);
 		this.sessionFileCache.set(filePath, data);
 		this.policy.evict(this.sessionFileCache);
+		if (isActualNewEntry) {
+			this.entriesSinceLastCheckpoint++;
+		}
 	}
 
 	async clearExpiredCache(): Promise<void> {
@@ -86,6 +99,52 @@ export class CacheManager {
 				})
 			);
 		}
+	}
+
+	/**
+	 * Check if a checkpoint save should be triggered based on time or entry count thresholds.
+	 * Returns true if checkpoint was triggered.
+	 */
+	maybeCheckpointCache(): boolean {
+		const now = Date.now();
+		const timeElapsed = now - this.lastCheckpointTime;
+		const entriesThresholdReached = this.entriesSinceLastCheckpoint >= CacheManager.CHECKPOINT_NEW_ENTRIES_THRESHOLD;
+		const timeThresholdReached = timeElapsed >= CacheManager.CHECKPOINT_INTERVAL_MS;
+
+		if ((entriesThresholdReached || timeThresholdReached) && !this.checkpointInProgress) {
+			this.checkpointInProgress = true;
+			void this.checkpointCacheInternal().finally(() => {
+				this.checkpointInProgress = false;
+			});
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Internal method to perform the checkpoint save.
+	 */
+	private async checkpointCacheInternal(): Promise<void> {
+		const now = Date.now();
+		const entriesCount = this.entriesSinceLastCheckpoint;
+		this.deps.log(`Checkpointing cache: ${entriesCount} new entries since last checkpoint (${((now - this.lastCheckpointTime) / 1000).toFixed(1)}s elapsed)`);
+
+		try {
+			await this.saveCacheToStorage();
+			this.lastCheckpointTime = now;
+			this.entriesSinceLastCheckpoint = 0;
+		} catch (error) {
+			this.deps.warn(`Checkpoint cache save failed: ${error}`);
+		}
+	}
+
+	/**
+	 * Reset checkpoint counters (call this at the start of a new refresh cycle).
+	 */
+	resetCheckpointCounters(): void {
+		this.lastCheckpointTime = Date.now();
+		this.entriesSinceLastCheckpoint = 0;
+		this.checkpointInProgress = false;
 	}
 
 	/**
