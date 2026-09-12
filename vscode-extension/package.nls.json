@@ -211,5 +211,29 @@
   "insights.cadenceDays": "Minimum number of days between insight toast notifications",
 
   "usage.copyFailed": "Could not copy the path to the clipboard.",
-  "usage.copyFailed.retry": "Copy Again"
+  "usage.copyFailed.retry": "Copy Again",
+
+  "logviewer.summary.interactions": "Interactions",
+  "logviewer.summary.editorMode": "Editor Mode",
+  "logviewer.summary.estimatedTokens": "Estimated Tokens",
+  "logviewer.summary.actualTokens": "Actual Tokens",
+  "logviewer.summary.modelTurns": "Model Turns",
+  "logviewer.summary.inputTokens": "Input Tokens",
+  "logviewer.summary.outputTokens": "Output Tokens",
+  "logviewer.summary.cachedInput": "Cached Input",
+  "logviewer.summary.thinkingTokens": "Thinking Tokens",
+  "logviewer.summary.thinkingEffort": "Thinking Effort",
+  "logviewer.summary.subAgents": "Sub-Agents",
+  "logviewer.summary.contextTruncated": "Context Truncated",
+  "logviewer.summary.sessionHierarchy": "Session Hierarchy",
+  "logviewer.summary.toolCalls": "Tool Calls",
+  "logviewer.summary.mcpTools": "MCP Tools",
+  "logviewer.summary.contextRefs": "Context Refs",
+  "logviewer.summary.fileName": "File Name",
+  "logviewer.summary.editor": "Editor",
+  "logviewer.summary.fileSize": "File Size",
+  "logviewer.summary.modified": "Modified",
+  "logviewer.summary.timeline": "Timeline",
+  "logviewer.summary.started": "Started",
+  "logviewer.summary.lastActivity": "Last activity"
 }
