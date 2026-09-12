@@ -1150,11 +1150,6 @@ export function listEligibleModels(
 	return listComparableModels(selectDaysInWindow(days, resolveModelCompareWindow(selection.window, now)));
 }
 
-/** How many distinct models the mode needs before a comparison can be formed. */
-function modelsNeeded(mode: ModelCompareMode): number {
-	return mode === 'models' ? 2 : 1;
-}
-
 /**
  * Brings a stale selection back to something the active window(s) can compare.
  *
@@ -1173,11 +1168,12 @@ export function reconcileModelSelection(
 ): ModelCompareSelection {
 	const eligible = listEligibleModels(days, selection, now);
 	const eligibleIds = new Set(eligible.map(m => m.model));
-	const sufficient = eligible.filter(m => m.sampleSufficient);
-	const pool = sufficient.length >= modelsNeeded(selection.mode) ? sufficient : eligible;
-	// Most-used first, preferring models that clear the sample floor.
-	const firstOther = (exclude?: string): string =>
-		(pool.find(m => m.model !== exclude) ?? eligible.find(m => m.model !== exclude))?.model ?? '';
+	// Defaults come off this pool: every model that clears the sample floor
+	// first, then the rest, each group still most-used first. A stable partition
+	// rather than an either/or, so a high-token low-sample model cannot outrank a
+	// model with a trustworthy sample when only one side can be filled from it.
+	const pool = [...eligible.filter(m => m.sampleSufficient), ...eligible.filter(m => !m.sampleSufficient)];
+	const firstOther = (exclude?: string): string => pool.find(m => m.model !== exclude)?.model ?? '';
 
 	// Replacing Model A must not eat an eligible Model B: that would move the
 	// user's pick onto the other side and then displace it. Take the next model

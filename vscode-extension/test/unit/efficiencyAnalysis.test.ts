@@ -933,3 +933,14 @@ test('reconcileModelSelection: falls back to Model B for Model A when the window
 	assert.equal(next.modelA, 'only');
 	assert.equal(next.modelB, '');
 });
+
+test('reconcileModelSelection: defaults lead with a model that clears the sample floor, not the biggest token count', () => {
+	// 'hog' has the most tokens but only one session equivalent, so it must not
+	// take a default side ahead of 'steady', which clears the floor.
+	const hog = { ...createEmptyDailyModelEfficiencyEntry(), sessions: 1, sessionShare: 1, editTurns: 2, inputTokens: 9_000_000, cost: 40 };
+	const days = [modelDay('2026-07-02', { hog, steady: solidModel({ inputTokens: 1_000_000 }) })];
+	assert.deepEqual(listEligibleModels(days, selection(), NOW).map(m => m.model), ['hog', 'steady']);
+	const next = reconcileModelSelection(days, selection(), NOW);
+	assert.equal(next.modelA, 'steady');
+	assert.equal(next.modelB, 'hog');
+});
