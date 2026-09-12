@@ -21,11 +21,11 @@ import { parseJetBrainsPartition } from '../../src/jetbrains';
 import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
 import { reconcileModelUsageToActualTokens } from '../../src/statsHelpers';
+import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
 import { withErrorRecovery } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
-import { ENVIRONMENTAL } from './constants';
 
 // Import JSON data files
 import tokenEstimatorsData from '../../src/tokenEstimators.json';
@@ -502,9 +502,10 @@ export async function calculateDetailedStats(
 		if (period.sessions > 0) {
 			period.avgTokensPerSession = Math.round(period.tokens / period.sessions);
 		}
-		period.co2 = (period.tokens / 1000) * ENVIRONMENTAL.CO2_PER_1K_TOKENS;
-		period.treesEquivalent = period.co2 / ENVIRONMENTAL.CO2_ABSORPTION_PER_TREE_PER_YEAR;
-		period.waterUsage = (period.tokens / 1000) * ENVIRONMENTAL.WATER_USAGE_PER_1K_TOKENS;
+		const environmentalImpact = calculateEnvironmentalImpact(period.modelUsage, period.tokens);
+		period.co2 = environmentalImpact.co2;
+		period.treesEquivalent = environmentalImpact.treesEquivalent;
+		period.waterUsage = environmentalImpact.waterUsage;
 		period.estimatedCost = calculateEstimatedCost(period.modelUsage, modelPricing);
 		period.estimatedCostCopilot = calculateEstimatedCost(period.modelUsage, modelPricing, 'copilot');
 	}

@@ -153,3 +153,32 @@ test("l10n: what's-new notification keys resolve in zh-cn", () => {
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: environmental methodology keys resolve in English', () => {
+	const expected: Record<string, string> = {
+		'environmental.intro': 'All figures are estimates. CO₂ uses a paper-backed output-equivalent token model; water and analogies use average reference values. Treat these as order-of-magnitude indicators, not precise measurements.',
+		'environmental.methodology.heading': 'Calculation & Estimates',
+		'environmental.methodology.co2Paper': 'Estimated CO₂ uses Jegham et al., "How Hungry is AI? Benchmarking Energy, Water, and Carbon Footprint of LLM Inference", with a baseline of 840 g CO₂e per 1M output-equivalent tokens.',
+		'environmental.methodology.co2Weights': 'Output-equivalent token weights: output = 1.0, uncached input = 0.05, cache write = 0.0625, cache read = 0.0005. Cache-aware weighting is only used when per-model token breakdowns are available; otherwise the tracker falls back to the legacy flat estimate.',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: environmental methodology keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'environmental.intro': '所有数据均为估算值。CO₂ 使用基于论文的“输出当量令牌”模型；用水量和类比值使用平均参考值。请将其视为数量级指标，而非精确测量。',
+			'environmental.methodology.heading': '计算与估算',
+			'environmental.methodology.co2Paper': 'CO₂ 估算采用 Jegham 等人的论文《How Hungry is AI? Benchmarking Energy, Water, and Carbon Footprint of LLM Inference》，并以每 100 万输出当量令牌 840 g CO₂e 为基线。',
+			'environmental.methodology.co2Weights': '输出当量令牌权重：输出 = 1.0，未缓存输入 = 0.05，缓存写入 = 0.0625，缓存读取 = 0.0005。只有在存在按模型拆分的令牌明细时才使用缓存感知权重；否则追踪器会回退到旧的固定估算。',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
