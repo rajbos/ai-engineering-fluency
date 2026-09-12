@@ -237,6 +237,7 @@
   "logviewer.summary.editor": "编辑器",
   "logviewer.summary.editorSource": "来源",
   "logviewer.summary.mcpAndContextRefs": "MCP 工具与上下文引用",
+  "logviewer.summary.noModeData": "无模式数据",
   "logviewer.summary.fileSize": "文件大小",
   "logviewer.summary.modified": "修改时间",
   "logviewer.summary.timeline": "时间线",

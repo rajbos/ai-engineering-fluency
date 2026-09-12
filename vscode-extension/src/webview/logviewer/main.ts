@@ -710,7 +710,7 @@ function buildEditorIdentityCard(data: SessionLogData, stats: SummaryStats): str
 	const modesTitle = modeEntries.map(([m, n]) => `${getModeIcon(m)} ${MODE_LABELS[m]} (${n})`).join(' · ');
 	const extraModes = modeEntries.length > 1 ? ` · ${modeEntries.slice(1).map(([m, n]) => `${MODE_LABELS[m]} ${n}`).join(', ')}` : '';
 	const modeValue = totalModeTurns > 0 ? primaryModeLabel : '—';
-	const modeSub = totalModeTurns > 0 ? `${modeSubLabel}${extraModes}` : 'No mode data';
+	const modeSub = totalModeTurns > 0 ? `${modeSubLabel}${extraModes}` : localize('logviewer.summary.noModeData');
 	return `<div class="summary-card summary-card--compact summary-card--combined" title="${escapeHtml(modesTitle)}">
 <div class="summary-label">🖥️ ${localize('logviewer.summary.editor')}</div>
 <div class="summary-compact-rows">

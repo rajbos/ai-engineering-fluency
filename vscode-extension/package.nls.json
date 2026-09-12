@@ -235,6 +235,7 @@
   "logviewer.summary.editor": "Editor",
   "logviewer.summary.editorSource": "Source",
   "logviewer.summary.mcpAndContextRefs": "MCP Tools & Context Refs",
+  "logviewer.summary.noModeData": "No mode data",
   "logviewer.summary.fileSize": "File Size",
   "logviewer.summary.modified": "Modified",
   "logviewer.summary.timeline": "Timeline",

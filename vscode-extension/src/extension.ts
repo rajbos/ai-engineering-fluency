@@ -4185,6 +4185,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'logviewer.summary.editor': l10n.t('logviewer.summary.editor'),
 			'logviewer.summary.editorSource': l10n.t('logviewer.summary.editorSource'),
 			'logviewer.summary.mcpAndContextRefs': l10n.t('logviewer.summary.mcpAndContextRefs'),
+			'logviewer.summary.noModeData': l10n.t('logviewer.summary.noModeData'),
 			'logviewer.summary.fileSize': l10n.t('logviewer.summary.fileSize'),
 			'logviewer.summary.modified': l10n.t('logviewer.summary.modified'),
 			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
