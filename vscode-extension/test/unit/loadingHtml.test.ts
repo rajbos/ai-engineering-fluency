@@ -93,12 +93,46 @@ test('computing percentage never walks backwards on an out-of-order sub-step', (
 	assert.equal(ui.barWidth(), '96%');
 });
 
-test('parsing progress drives the bar before the compute phase starts', () => {
+test('parsing progress drives the bar, scaled into its own lower band', () => {
 	const ui = runLoadingScript();
 
 	ui.post({ command: 'loadingProgress', completed: 120, total: 400, percentage: 30 });
 
-	assert.equal(ui.pct(), '30%');
-	assert.equal(ui.barWidth(), '30%');
+	// Parsing owns 0-85% so the compute sub-steps above it always move forward.
+	assert.equal(ui.pct(), '26%');
+	assert.equal(ui.barWidth(), '26%');
 	assert.match(ui.subtitle(), /^Parsing session 120/);
+});
+
+test('the first compute sub-step does not drop the bar after parsing finishes', () => {
+	const ui = runLoadingScript();
+
+	// The Efficiency prime always ends its file walk on a 100% tick...
+	ui.post({ command: 'loadingProgress', completed: 400, total: 400, percentage: 100 });
+	assert.equal(ui.pct(), '85%');
+
+	// ...so the first compute sub-step must still be an increase, not a jump backwards.
+	ui.post({ command: 'loadingStep', step: 'computing', percentage: 88, label: 'Aggregating daily activity…' });
+	assert.equal(ui.pct(), '88%');
+	assert.equal(ui.barWidth(), '88%');
+});
+
+test('a host that sends no compute sub-steps still moves forward at its fixed 96%', () => {
+	const ui = runLoadingScript();
+
+	ui.post({ command: 'loadingProgress', completed: 400, total: 400, percentage: 100 });
+	ui.post({ command: 'loadingStep', step: 'computing' });
+
+	assert.equal(ui.pct(), '96%');
+});
+
+test('a late parsing tick cannot drag the bar back below a compute sub-step', () => {
+	const ui = runLoadingScript();
+
+	ui.post({ command: 'loadingStep', step: 'computing', percentage: 92, label: 'Analysing usage patterns…' });
+	// A concurrent background refresh shares this channel and restarts its own file walk.
+	ui.post({ command: 'loadingProgress', completed: 10, total: 400, percentage: 3 });
+
+	assert.equal(ui.pct(), '92%', 'bar must not follow the unrelated refresh backwards');
+	assert.equal(ui.barWidth(), '92%');
 });

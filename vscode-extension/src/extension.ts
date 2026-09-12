@@ -723,6 +723,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private lastEfficiencySessionInputs: EfficiencySessionInput[] | undefined;
 	/** Shared session-cache prime, so an Efficiency open and refresh never walk the corpus twice. */
 	private _efficiencyPrimeInFlight: Promise<void> | undefined;
+	/** Shared full-year daily-stats walk; see calculateFullDailyStats(). */
+	private _fullDailyStatsInFlight: Promise<DailyTokenStats[]> | undefined;
 	/** Last successfully rendered Efficiency payload, restored if a refresh build fails. */
 	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
 	private outputChannel!: vscode.OutputChannel;
@@ -3418,7 +3420,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.persistRefreshResult(isLeader);
 
 		if (!this.lastFullDailyStats && !this.chartPanel) {
-			void this.calculateDailyStats(365, sessionFiles);
+			void this.calculateFullDailyStats(sessionFiles);
 		}
 
 		return detailedStats;
@@ -4366,6 +4368,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (this.analysisPanel && this.lastUsageAnalysisStats) {
 			void this.analysisPanel.webview.postMessage({ command: 'updateStats', data: this._buildAnalysisUpdateData(this.lastUsageAnalysisStats) });
 		}
+	}
+
+	/**
+	 * The full-year daily-stats walk, deduplicated behind one shared promise.
+	 *
+	 * `_runRefreshCore` starts this detached (fire-and-forget) at the end of a refresh, so it
+	 * routinely outlives `_updateTokenStatsInFlight`. Without a shared handle an Efficiency
+	 * build that waited for the refresh would still start a second walk over the same corpus
+	 * while that one is mid-flight, re-statting and re-parsing the same cold files. Every
+	 * caller of the 365-day walk goes through here so there is only ever one.
+	 */
+	private calculateFullDailyStats(knownSessionFiles?: string[]): Promise<DailyTokenStats[]> {
+		this._fullDailyStatsInFlight ??= this.calculateDailyStats(365, knownSessionFiles)
+			.finally(() => { this._fullDailyStatsInFlight = undefined; });
+		return this._fullDailyStatsInFlight;
 	}
 
 	/** Compute daily token stats for up to `daysBack` days, using the same token preference
@@ -9658,9 +9675,19 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		daily: 88, usage: 92, sessions: 96, trends: 98,
 	} as const;
 
-	/** Reports one Efficiency compute sub-step to the loading screen. */
+	/**
+	 * Reports one Efficiency compute sub-step to the panels showing *its* loading screen.
+	 *
+	 * Deliberately not routed through sendLoadingPanelMessage(): that also reaches the details
+	 * panel, whose loading screen is tracking updateTokenStats() rather than this build, so
+	 * these labels would describe work it is not doing. The reverse leak — a background
+	 * refresh's parsing ticks arriving here mid-compute — is harmless for the bar, which the
+	 * loading script clamps monotonically.
+	 */
 	private postEfficiencyStep(percentage: number, label: string): void {
-		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing', percentage, label });
+		for (const panel of this._loadingPanels) {
+			void panel.webview.postMessage({ command: 'loadingStep', step: 'computing', percentage, label });
+		}
 	}
 
 	/**
@@ -9692,6 +9719,12 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		if (this._updateTokenStatsInFlight) {
 			this.log('⚡ [Efficiency] Waiting for the in-flight refresh before priming the session cache');
 			await this._updateTokenStatsInFlight.catch(() => undefined);
+		}
+		// That refresh starts its own full-year walk detached, so it can still be running now.
+		// It covers the same corpus as the prime below; let it finish rather than race it.
+		if (this._fullDailyStatsInFlight) {
+			this.log('⚡ [Efficiency] Waiting for the in-flight full-year daily stats walk');
+			await this._fullDailyStatsInFlight.catch(() => undefined);
 		}
 
 		// Opening and refreshing can overlap; one prime serves both.
@@ -9728,7 +9761,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		await this.primeEfficiencySessionCache(forceRecalc, now);
 
 		this.postEfficiencyStep(stepPct.daily, l10n.t('loading.efficiency.dailyActivity'));
-		const dailyStats = (!forceRecalc && this.lastFullDailyStats) ? this.lastFullDailyStats : await this.calculateDailyStats();
+		const dailyStats = (!forceRecalc && this.lastFullDailyStats) ? this.lastFullDailyStats : await this.calculateFullDailyStats();
 		this.postEfficiencyStep(stepPct.usage, l10n.t('loading.efficiency.usageAnalysis'));
 		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
 		this.postEfficiencyStep(stepPct.sessions, l10n.t('loading.efficiency.sessionSignals'));
