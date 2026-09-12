@@ -288,7 +288,7 @@ import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDe
 
 // --- Stats helpers ---
 import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, computeFallbackDailyRollup as _computeFallbackDailyRollup, type SessionAggregateInput } from '../../src/statsHelpers';
-import { scaleModelUsage, preserveAutoRouting } from '../../src/statsHelpers';
+import { scaleModelUsage, reconcileDebugLogModelUsage } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -6183,7 +6183,7 @@ if (session.toolCalls) { usageAnalysis.toolCalls = session.toolCalls; }
 		// Reconcile to the debug log's totals even when the breakdown is missing or
 		// partial (e.g. some requests lack a `model` attribute), so Input+Output
 		// never drifts from Total — see reconcileModelUsageToTotal for why.
-		const supplementModelUsage = reconcileModelUsageToTotal(breakdownUsage, debugLogTokens.inputTokens, debugLogTokens.outputTokens);
+		const supplementModelUsage = reconcileDebugLogModelUsage(cached.modelUsage, breakdownUsage, debugLogTokens.inputTokens, debugLogTokens.outputTokens);
 		// Redistribute to days via the shared helper, which also re-syncs each day's
 		// actualTokens to the debug-log-sized usage — see distributeModelUsageToDays.
 		const supplementDailyRollups = cached.dailyRollups
@@ -6381,12 +6381,11 @@ private computeFallbackDailyRollup(
 		for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
 			breakdownUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}), sessions: 0 };
 		}
-		preserveAutoRouting(modelUsage, breakdownUsage);
 		// Reconcile against the debug log's own totals even when the breakdown is
 		// missing or partial (e.g. some requests lack a `model` attribute), so
 		// Input+Output never drifts from Total — see reconcileModelUsageToTotal.
-		const resolvedModelUsage = reconcileModelUsageToTotal(
-			Object.keys(breakdownUsage).length > 0 ? breakdownUsage : modelUsage,
+		const resolvedModelUsage = reconcileDebugLogModelUsage(
+			modelUsage, breakdownUsage,
 			debugLogTokens.inputTokens,
 			debugLogTokens.outputTokens,
 		);
@@ -7062,7 +7061,7 @@ private computeFallbackDailyRollup(
 		const contextRefs = this.createEmptyContextRefs();
 		const userMessage = request.message?.text || '';
 		this.analyzeRequestContext(request, contextRefs);
-		const requestModel = _getModelFromRequest(request, this.modelPricing, currentModel || 'gpt-4');
+		const requestModel = this.resolveDeltaTurnModel(request, currentModel);
 		const { responseText, thinkingText, toolCalls, mcpTools } = this.extractResponseData(request.response || []);
 		const actualUsage = this.extractActualUsageFromRequest(request, rawUsageFallback, i);
 		return {
@@ -7076,6 +7075,24 @@ private computeFallbackDailyRollup(
 			thinkingTokensEstimate: this.estimateTokensFromText(thinkingText, requestModel),
 			actualUsage, thinkingEffort: effortByRequestId.get(request.requestId)
 		};
+	}
+
+	/**
+	 * Resolves the model actually used for one delta-format turn. `request.modelId`
+	 * is only the generic `"auto"`/`"copilot/auto"` id when Copilot's Auto routing
+	 * was used — the real per-turn model is only recoverable via `getModelFromRequest`
+	 * (which reads the response stream's `autoModeResolution` item). Preferring a raw
+	 * `"auto"` modelId here would otherwise price every Auto-routed turn as an unknown
+	 * model, silently dropping its cost from the Session Steps Overview table.
+	 *
+	 * When a turn is explicitly Auto-routed but its response has no `autoModeResolution`
+	 * item (e.g. an older session predating that field), the `"auto"` sentinel is kept
+	 * as-is rather than falling back to `currentModel` — the session's selected model can
+	 * differ from whatever Auto actually picked, and substituting it would silently
+	 * mislabel/misprice the turn.
+	 */
+	private resolveDeltaTurnModel(request: any, currentModel: string | null): string {
+		return _getModelFromRequest(request, this.modelPricing, currentModel || 'gpt-4');
 	}
 
 	private extractActualUsageFromRequest(request: any, rawUsageFallback: Map<number, { promptTokens: number; outputTokens: number }>, index: number): ActualUsage | undefined {

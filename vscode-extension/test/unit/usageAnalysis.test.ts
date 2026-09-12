@@ -1050,6 +1050,27 @@ test('getModelUsageFromSession: CLI live session gives far lower estimate than o
 // calculateModelSwitching
 // ---------------------------------------------------------------------------
 
+test('Auto model switching and usage buckets use resolved models in delta requests', async () => {
+	const deps = makeMockDeps();
+	const request = { requestId: 'auto-turn', modelId: 'auto', message: { text: 'hello' },
+		result: { promptTokens: 100, outputTokens: 40 },
+		response: [{ kind: 'autoModeResolution', resolved: { id: 'gpt-4o' } }] };
+	const content = [
+		{ kind: 0, v: { requests: [], selectedModel: { identifier: 'copilot/auto' } } },
+		{ kind: 2, k: ['requests'], v: [request] },
+	].map(event => JSON.stringify(event)).join('\n');
+	const analysis = emptyAnalysis();
+	await calculateModelSwitching(deps, 'auto-buckets.jsonl', analysis, content);
+	assert.equal(analysis.modelSwitching.standardRequests, 1);
+	assert.equal(analysis.modelSwitching.mediumCostRequests, 1);
+	assert.equal(analysis.modelSwitching.unknownRequests, 0);
+	const usage = await analyzeSessionUsage(deps, 'auto-buckets.jsonl', content);
+	assert.deepEqual(usage.modelSwitching.uniqueModels, ['gpt-4o']);
+	assert.equal(usage.modelSwitching.standardRequests, 1);
+	assert.equal(usage.modelSwitching.mediumCostRequests, 1);
+	assert.equal(usage.modelSwitching.unknownRequests, 0);
+});
+
 test('calculateModelSwitching: empty requests list leaves analysis unchanged', async () => {
     const content = JSON.stringify({ requests: [] });
     const deps = makeMockDeps();

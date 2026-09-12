@@ -1040,6 +1040,7 @@ function getDisplayNameLookup(modelPricing: { [key: string]: ModelPricing }): { 
 	return cached;
 }
 
+/** Find the model ID for a request by matching display names against its details string. Returns null if not found. */
 function _gmrMatchDisplayName(details: string, modelPricing: { [key: string]: ModelPricing }): string | null {
 	const { map, sortedNames } = getDisplayNameLookup(modelPricing);
 	for (const displayName of sortedNames) {
@@ -1071,6 +1072,7 @@ export function isCopilotAutoRequest(request: ModelRequestSource): boolean {
 }
 
 export function getModelFromRequest(request: ModelRequestSource, modelPricing: { [key: string]: ModelPricing } = {}, fallbackModel = 'gpt-4'): string {
+	if (request.modelId && !isAutoModel(request.modelId)) { return request.modelId.replace(/^copilot\//, ''); }
 	const resolved = getAutoResolution(request);
 	if (resolved) { return resolved; }
 	const candidates = [request.modelId, request.result?.metadata?.modelId];

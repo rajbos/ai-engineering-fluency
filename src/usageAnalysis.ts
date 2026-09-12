@@ -754,10 +754,7 @@ function _pdsaProcessRequest(
 }
 
 function _pdsaGetReqModel(req: SessionRequestRaw, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): string {
-	if (req.modelId) { return req.modelId.replace(/^copilot\//, ''); }
-	if (req.result?.metadata?.modelId) { return req.result.metadata.modelId.replace(/^copilot\//, ''); }
-	if (req.result?.details) { return getModelFromRequest(req, modelPricing); }
-	return defaultModel;
+	return getModelFromRequest(req, modelPricing, defaultModel);
 }
 
 function _pdsaCountModelSwitches(models: string[]): number {
@@ -1795,11 +1792,7 @@ function _cmsExtractDefaultModel(event: CmsEvent, currentDefault: string): strin
 }
 
 function _cmsGetJsonlRequestModel(request: unknown, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): string {
-	const r = request as { modelId?: string; result?: { metadata?: { modelId?: string }; details?: unknown } };
-	if (r.modelId) { return r.modelId.replace(/^copilot\//, ''); }
-	if (r.result?.metadata?.modelId) { return r.result.metadata.modelId.replace(/^copilot\//, ''); }
-	if (r.result?.details) { return getModelFromRequest(request as SessionRequestRaw, modelPricing); }
-	return defaultModel;
+	return getModelFromRequest(request as SessionRequestRaw, modelPricing, defaultModel);
 }
 
 function _cmsCountEventRequests(event: CmsEvent, tierCounts: TierCounts, costCounts: CostCounts, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): void {

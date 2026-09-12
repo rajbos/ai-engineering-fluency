@@ -113,6 +113,13 @@ export function preserveAutoRouting(source: ModelUsage, replacement: ModelUsage)
 	}
 }
 
+/** Reconcile both fresh and cached sessions without dropping request-derived Auto usage. */
+export function reconcileDebugLogModelUsage(source: ModelUsage, breakdown: ModelUsage, inputTokens: number, outputTokens: number): ModelUsage {
+	const replacement = Object.fromEntries(Object.entries(breakdown).map(([model, usage]) => [model, { ...usage }]));
+	preserveAutoRouting(source, replacement);
+	return reconcileModelUsageToTotal(Object.keys(replacement).length > 0 ? replacement : source, inputTokens, outputTokens);
+}
+
 /**
  * Rescales a per-model usage breakdown so its input/output totals match an
  * authoritative target (e.g. a debug log or OTel export), while preserving each

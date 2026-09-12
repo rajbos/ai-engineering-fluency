@@ -125,6 +125,10 @@ converted into token costs by this calculation.
 Auto subsets survive aggregation and day allocation. When debug logs replace
 per-model tokens without a per-request routing split, the original Auto input/output
 proportions are retained as an estimate; cache tokens use the Auto input proportion.
+If a partial debug breakdown omits an Auto-routed model entirely, that unmatched
+subset cannot be priced reliably and is not transferred to another model. Recovering
+its discount requires linking debug requests to their original model/routing evidence;
+the current per-model totals do not provide that link.
 The Session Steps Overview uses Copilot rates for Copilot editors and provider
 rates for other editors. Sub-agents do not inherit the parent's Auto discount.
 Copilot CLI's model-change events and per-model billing/shutdown totals do not
