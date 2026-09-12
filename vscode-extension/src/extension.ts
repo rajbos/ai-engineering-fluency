@@ -4208,13 +4208,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
 			'logviewer.summary.started': l10n.t('logviewer.summary.started'),
 			'logviewer.summary.lastActivity': l10n.t('logviewer.summary.lastActivity'),
-			// Efficiency view — Cost Attribution bars and summary cards. Templates with
-			// {0}/{1} are resolved webview-side by localizeFormat(), so they are passed
-			// through unformatted here.
-			'efficiency.attribution.costEffect': l10n.t('efficiency.attribution.costEffect'),
-			'efficiency.attribution.change': l10n.t('efficiency.attribution.change'),
-			'efficiency.attribution.periodSub': l10n.t('efficiency.attribution.periodSub'),
-			'efficiency.attribution.blendedRate': l10n.t('efficiency.attribution.blendedRate'),
+			...this.getEfficiencyAttributionLocalization(),
 			// HydraFusion Routing section (log viewer) and its Session Steps Overview integration.
 			// Templates with {0} are resolved webview-side by localizeFormat(), so they are passed
 			// through unformatted here.
@@ -4230,6 +4224,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'hydrafusion.overview.expandHint': l10n.t('hydrafusion.overview.expandHint'),
 			// Current language for reference
 			'__language__': language
+		};
+	}
+
+	/**
+	 * Cost Attribution labels for the Efficiency webview, kept out of the
+	 * {@link getWebviewLocalization} literal to hold that method under the
+	 * `max-lines-per-function` ceiling. Templates with {0}/{1}/{2} are resolved
+	 * webview-side by `localizeFormat()`, so they are passed through unformatted.
+	 */
+	private getEfficiencyAttributionLocalization(): Record<string, string> {
+		return {
+			'efficiency.attribution.costEffect': l10n.t('efficiency.attribution.costEffect'),
+			'efficiency.attribution.change': l10n.t('efficiency.attribution.change'),
+			'efficiency.attribution.periodSub': l10n.t('efficiency.attribution.periodSub'),
+			'efficiency.attribution.blendedRate': l10n.t('efficiency.attribution.blendedRate'),
 		};
 	}
 
