@@ -19,6 +19,15 @@ type UtcDateRanges,
 import type { ModelUsage, EditorUsage, SessionFileCache, DailyRollupEntry } from '../../../src/types';
 import { scaleModelUsage, preserveAutoRouting, reconcileDebugLogModelUsage } from '../../../src/statsHelpers';
 import { calculateEstimatedCost } from '../../../src/tokenEstimation';
+import { TASK_CATEGORIES, type TaskCategory, type TaskCategoryBreakdown } from '../../../src/taskClassification';
+
+/** Builds a full TaskCategoryBreakdown (all categories present) from a partial map of non-zero shares. */
+function makeShares(partial: Partial<Record<TaskCategory, number>>): TaskCategoryBreakdown {
+return TASK_CATEGORIES.reduce((acc, category) => {
+acc[category] = partial[category] ?? 0;
+return acc;
+}, {} as TaskCategoryBreakdown);
+}
 
 test('Auto subsets survive merging, scaling, reconciliation and debug-log replacement', () => {
 	const source: ModelUsage = { model: { inputTokens: 100, outputTokens: 40, sessions: 1,
@@ -525,7 +534,7 @@ mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
 sessionData: makeSession({
 taskCategory: 'Coding',
 dailyRollups: {
-'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 2, modelUsage: {}, primaryTaskCategory: 'Coding' },
 },
 }),
 };
@@ -562,7 +571,7 @@ mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
 sessionData: makeSession({
 taskCategory: 'Coding',
 dailyRollups: {
-'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 2, modelUsage: { 'gpt-4o': { inputTokens: 80, outputTokens: 40, sessions: 1 } } },
+'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 2, modelUsage: { 'gpt-4o': { inputTokens: 80, outputTokens: 40, sessions: 1 } }, primaryTaskCategory: 'Coding' },
 },
 }),
 };
@@ -571,7 +580,36 @@ const day = result.dailyStatsMap.get('2025-03-15');
 assert.ok(day, 'daily entry should exist');
 assert.deepEqual(day!.taskCategoryTokens, { Coding: 120 });
 assert.deepEqual(day!.taskCategorySessions, { Coding: 1 });
-assert.deepEqual(day!.taskCategoryModelUsage, { Coding: { 'gpt-4o': { inputTokens: 80, outputTokens: 40, sessions: 1 } } });
+// taskCategoryModelUsage is scaled by category share (scaleModelUsage), which always
+// reports sessions: 0 — session counting for this map lives in taskCategorySessions above.
+assert.deepEqual(day!.taskCategoryModelUsage, { Coding: { 'gpt-4o': { inputTokens: 80, outputTokens: 40, sessions: 0 } } });
+});
+
+test('aggregatePeriodStats: rollup path – splits a mixed session across categories using per-day taskCategoryShares', () => {
+// Regression for a PR review finding: the rollup path must weight by the day's own
+// taskCategoryShares/primaryTaskCategory (mirroring extension.ts's addUsageToDailyEntry
+// call), not collapse a multi-category session onto sessionData.taskCategory.
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+taskCategory: 'Coding',
+dailyRollups: {
+'2025-03-15': {
+tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2,
+modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40, sessions: 1 } },
+primaryTaskCategory: 'Coding',
+taskCategoryShares: makeShares({ Coding: 0.75, Debugging: 0.25 }),
+},
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Coding: 75, Debugging: 25 });
+assert.deepEqual(day!.taskCategorySessions, { Coding: 0.75, Debugging: 0.25 });
 });
 
 test('aggregatePeriodStats: fallback path – populates taskCategoryTokens/Sessions/ModelUsage on the daily entry (regression: By Task chart empty after periodic refresh)', () => {
@@ -587,7 +625,46 @@ const day = result.dailyStatsMap.get('2025-03-14');
 assert.ok(day, 'daily entry should exist');
 assert.deepEqual(day!.taskCategoryTokens, { Debugging: 50 });
 assert.deepEqual(day!.taskCategorySessions, { Debugging: 1 });
-assert.deepEqual(day!.taskCategoryModelUsage, { Debugging: { 'gpt-4o': { inputTokens: 30, outputTokens: 20, sessions: 1 } } });
+assert.deepEqual(day!.taskCategoryModelUsage, { Debugging: { 'gpt-4o': { inputTokens: 30, outputTokens: 20, sessions: 0 } } });
+});
+
+test('aggregatePeriodStats: fallback path – splits a mixed session across categories using session-level taskCategoryShares', () => {
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-14T10:00:00.000Z').getTime(),
+lastInteraction: '2025-03-14T10:00:00.000Z',
+sessionData: makeSession({
+tokens: 50,
+taskCategory: 'Debugging',
+taskCategoryShares: makeShares({ Debugging: 0.6, Testing: 0.4 }),
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-14');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Debugging: 30, Testing: 20 });
+assert.deepEqual(day!.taskCategorySessions, { Debugging: 0.6, Testing: 0.4 });
+});
+
+test('aggregatePeriodStats: rollup path – falls back to "Conversation" when a day rollup has no category info at all', () => {
+// Mirrors extension.ts's addTaskCategoryToDailyEntry fallback for pre-existing cached
+// dailyRollups that predate task classification (no primaryTaskCategory/taskCategoryShares).
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+dailyRollups: {
+'2025-03-15': { tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Conversation: 100 });
+assert.deepEqual(day!.taskCategorySessions, { Conversation: 1 });
 });
 
 test('aggregatePeriodStats: rollup path – counts sub-agent sessions once per period', () => {

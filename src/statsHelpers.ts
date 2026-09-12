@@ -6,7 +6,7 @@
  */
 
 import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage, DailyRollupEntry } from './types';
-import type { TaskCategory } from './taskClassification';
+import type { TaskCategory, TaskCategoryBreakdown } from './taskClassification';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { toLocalDayKey } from './utils/dayKeys';
 import { getCustomProviderGroup } from './webview/shared/modelUtils';
@@ -640,7 +640,43 @@ function getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dayK
 	return dailyStatsMap.get(dayKey)!;
 }
 
-function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: ModelUsage, taskCategory?: TaskCategory): void {
+/**
+ * Folds a session/day's task-category attribution into the daily entry.
+ *
+ * The chart's "By Task" split (buildTaskCategoryTokenDatasets/SessionDatasets/CostDatasets in
+ * chartDataBuilder.ts) reads taskCategoryTokens/taskCategorySessions/taskCategoryModelUsage, not
+ * taskCategoryUsage below — without them the periodic-refresh path (aggregatePeriodStats, used by
+ * calculateDetailedStats()) silently wipes the chart's task-category token/cost/session bars every
+ * time it overwrites the recent day range in lastFullDailyStats (see mergeIntoFullDailyStats in
+ * extension.ts). Weighted by taskCategoryShares when available, falling back to the primary
+ * category and then "Conversation" — mirroring addTaskCategoryToDailyEntry in extension.ts — so a
+ * mixed session's tokens/sessions/cost split across categories instead of collapsing onto one.
+ */
+function addTaskCategoryToDailyEntry(entry: DailyTokenStats, tokens: number, modelUsage: ModelUsage, taskCategory?: TaskCategory, taskCategoryShares?: TaskCategoryBreakdown): void {
+	if (taskCategory) {
+		if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
+		if (!entry.taskCategoryUsage[taskCategory]) { entry.taskCategoryUsage[taskCategory] = { tokens: 0, sessions: 0 }; }
+		entry.taskCategoryUsage[taskCategory].tokens += tokens;
+		entry.taskCategoryUsage[taskCategory].sessions += 1;
+	}
+	if (!entry.taskCategoryTokens) { entry.taskCategoryTokens = {}; }
+	if (!entry.taskCategorySessions) { entry.taskCategorySessions = {}; }
+	if (!entry.taskCategoryModelUsage) { entry.taskCategoryModelUsage = {}; }
+	const shares = taskCategoryShares && Object.keys(taskCategoryShares).length > 0
+		? taskCategoryShares
+		: (taskCategory ? { [taskCategory]: 1 } : { Conversation: 1 });
+	for (const [category, shareRaw] of Object.entries(shares)) {
+		const share = Number(shareRaw) || 0;
+		if (share <= 0) { continue; }
+		const cat = category as TaskCategory;
+		entry.taskCategoryTokens[cat] = (entry.taskCategoryTokens[cat] || 0) + (tokens * share);
+		entry.taskCategorySessions[cat] = (entry.taskCategorySessions[cat] || 0) + share;
+		if (!entry.taskCategoryModelUsage[cat]) { entry.taskCategoryModelUsage[cat] = {}; }
+		addModelUsage(entry.taskCategoryModelUsage[cat]!, scaleModelUsage(modelUsage, share));
+	}
+}
+
+function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: ModelUsage, taskCategory?: TaskCategory, taskCategoryShares?: TaskCategoryBreakdown): void {
 	entry.tokens += tokens; entry.sessions += 1; entry.interactions += interactions;
 	if (!entry.editorUsage[editorType]) { entry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
 	entry.editorUsage[editorType].tokens += tokens; entry.editorUsage[editorType].sessions += 1;
@@ -661,24 +697,7 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 		if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
 		entry.editorModelUsage[editorType][model].sessions += 1;
 	}
-	if (taskCategory) {
-		if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
-		if (!entry.taskCategoryUsage[taskCategory]) { entry.taskCategoryUsage[taskCategory] = { tokens: 0, sessions: 0 }; }
-		entry.taskCategoryUsage[taskCategory].tokens += tokens;
-		entry.taskCategoryUsage[taskCategory].sessions += 1;
-		// The chart's "By Task" split (buildTaskCategoryTokenDatasets/SessionDatasets/CostDatasets
-		// in chartDataBuilder.ts) reads these three fields, not taskCategoryUsage above — without
-		// them the periodic-refresh path (aggregatePeriodStats, used by calculateDetailedStats())
-		// silently wipes the chart's task-category token/cost/session bars every time it overwrites
-		// the recent day range in lastFullDailyStats (see mergeIntoFullDailyStats in extension.ts).
-		if (!entry.taskCategoryTokens) { entry.taskCategoryTokens = {}; }
-		if (!entry.taskCategorySessions) { entry.taskCategorySessions = {}; }
-		if (!entry.taskCategoryModelUsage) { entry.taskCategoryModelUsage = {}; }
-		entry.taskCategoryTokens[taskCategory] = (entry.taskCategoryTokens[taskCategory] || 0) + tokens;
-		entry.taskCategorySessions[taskCategory] = (entry.taskCategorySessions[taskCategory] || 0) + 1;
-		if (!entry.taskCategoryModelUsage[taskCategory]) { entry.taskCategoryModelUsage[taskCategory] = {}; }
-		addModelUsage(entry.taskCategoryModelUsage[taskCategory]!, modelUsage);
-	}
+	addTaskCategoryToDailyEntry(entry, tokens, modelUsage, taskCategory, taskCategoryShares);
 }
 
 /**
@@ -715,7 +734,7 @@ function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: num
 	}
 }
 
-function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLast30Days: boolean; addedToMonth: boolean; addedToLastMonth: boolean; addedToToday: boolean }, acc: PeriodAccumulators, dates: UtcDateRanges, editorType: string, dailyStatsMap: Map<string, DailyTokenStats>, repository: string, taskCategory?: TaskCategory): void {
+function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLast30Days: boolean; addedToMonth: boolean; addedToLastMonth: boolean; addedToToday: boolean }, acc: PeriodAccumulators, dates: UtcDateRanges, editorType: string, dailyStatsMap: Map<string, DailyTokenStats>, repository: string): void {
 	const inLast30Days = dayKey >= dates.last30DaysUtcStartKey;
 	const inLastMonth = dayKey >= dates.lastMonthUtcStartKey && dayKey <= dates.lastMonthUtcEndKey;
 	if (!inLast30Days && !inLastMonth) { return; }
@@ -724,7 +743,10 @@ function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLas
 	const cached = dayRollup.cachedReadTokens ?? 0;
 	if (inLast30Days) {
 		const entry = getOrCreateDailyEntry(dailyStatsMap, dayKey);
-		addToDailyEntry(entry, dayTokens, dayInteractions, editorType, repository, dayRollup.modelUsage, taskCategory);
+		// Per-day shares/primary category (mirrors extension.ts's rollup-path call to
+		// addUsageToDailyEntry) — a multi-category session is split across categories
+		// per day instead of collapsing the whole session onto one.
+		addToDailyEntry(entry, dayTokens, dayInteractions, editorType, repository, dayRollup.modelUsage, dayRollup.primaryTaskCategory, dayRollup.taskCategoryShares);
 		accumulatePeriod(acc.last30DaysStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToLast30Days, editorType, dayRollup.modelUsage, dayRollup.copilotExactCostDollars);
 		flags.addedToLast30Days = true;
 	}
@@ -758,7 +780,7 @@ function processRollupPath(input: SessionAggregateInput, acc: PeriodAccumulators
 	const repository = sessionData.repository || 'Unknown';
 	const flags = { addedToLast30Days: false, addedToMonth: false, addedToLastMonth: false, addedToToday: false };
 	for (const [dayKey, dayRollup] of Object.entries(sessionData.dailyRollups!)) {
-		processOneRollupDay(dayKey, dayRollup, flags, acc, dates, editorType, dailyStatsMap, repository, sessionData.taskCategory);
+		processOneRollupDay(dayKey, dayRollup, flags, acc, dates, editorType, dailyStatsMap, repository);
 	}
 	if (flags.addedToLast30Days && sessionData.linesAdded !== undefined) {
 		const dayKeys = Object.keys(sessionData.dailyRollups!).sort();
@@ -790,7 +812,7 @@ function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulato
 	if (!inLast30Days && !inLastMonth) { return true; }
 	if (inLast30Days) {
 		const dailyEntry = getOrCreateDailyEntry(dailyStatsMap, lastActivityUtcKey);
-		addToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategory);
+		addToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategory, sessionData.taskCategoryShares);
 		if (sessionData.linesAdded !== undefined) { attributeLocToDay(dailyEntry, sessionData, editorType, repository); }
 		accumulatePeriod(acc.last30DaysStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage, sessionData.copilotExactCostDollars);
 	}
