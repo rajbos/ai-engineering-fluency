@@ -97,15 +97,29 @@ function loadHandledCommands() {
  * and returns a short description of each, so the driver can click by index
  * even after the DOM around it has shifted.
  */
-const TAG_CONTROLS = (selector) => {
-  const isVisible = (el) => {
+/**
+ * Installed on every page before its scripts run, so the control crawl and a
+ * scenario's `expect` agree on what "showing" means. An element that is in the
+ * DOM but `display:none`, `visibility:hidden`, or zero-sized is not showing —
+ * checking presence alone would let a scenario pass on a view that had gone
+ * blank.
+ */
+const INSTALL_VISIBILITY_HELPER = () => {
+  window.__SMOKE_IS_VISIBLE__ = (el) => {
     const rect = el.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) {
       return false;
     }
     const style = window.getComputedStyle(el);
-    return style.visibility !== 'hidden' && style.display !== 'none' && style.pointerEvents !== 'none';
+    return style.visibility !== 'hidden' && style.display !== 'none';
   };
+};
+
+const TAG_CONTROLS = (selector) => {
+  // Clickability is visibility plus pointer events: a control behind
+  // `pointer-events: none` is visible but cannot be clicked.
+  const isVisible = (el) =>
+    window.__SMOKE_IS_VISIBLE__(el) && window.getComputedStyle(el).pointerEvents !== 'none';
 
   const controls = [];
   let index = 0;
@@ -199,6 +213,7 @@ async function openPage(browser, pageFile, view, defaults) {
   // A control that opens a real URL or a dialog must not hang or navigate the
   // harness away from the page under test.
   page.on('dialog', (dialog) => void dialog.dismiss().catch(() => {}));
+  await page.addInitScript(INSTALL_VISIBILITY_HELPER);
   await page.goto(require('url').pathToFileURL(pageFile).href, { waitUntil: 'load' });
   await page.waitForTimeout(view.settleMs || defaults.settleMs || 1200);
   return page;
@@ -342,13 +357,16 @@ async function runScenario(page, view, scenario) {
     // of the scenario, not a bonus assertion: a picker that silently drops to an
     // empty state is exactly the failure worth catching.
     if (scenario.expect) {
-      const present = await page.evaluate((sel) => Boolean(document.querySelector(sel)), scenario.expect);
-      if (!present) {
+      const showing = await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        return Boolean(el && window.__SMOKE_IS_VISIBLE__(el));
+      }, scenario.expect);
+      if (!showing) {
         findings.push({
           view: view.id,
           kind: 'scenario-expectation-failed',
           control: label,
-          detail: `'${scenario.expect}' is gone after this step`,
+          detail: `'${scenario.expect}' is not showing after this step`,
         });
         break;
       }

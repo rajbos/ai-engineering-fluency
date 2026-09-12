@@ -190,8 +190,10 @@ been used. A view declares them in the same registry:
 
 Each scenario replays on its own fresh page. A `select` step without a `value`
 takes the next enabled option. A step that cannot run, throws, or leaves `expect`
-off the page is a finding — that last one is how the Models tab proves a picker
-reconciles instead of dropping to an empty state.
+no longer *showing* is a finding — "showing" means present **and** rendered (not
+`display:none`, `visibility:hidden`, or zero-sized), the same test the control
+crawl uses. That last check is how the Models tab proves a picker reconciles
+instead of dropping to an empty state.
 
 ### A note on the visual diff's baseline
 
