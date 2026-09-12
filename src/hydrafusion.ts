@@ -232,6 +232,19 @@ export function nanoAiuToAiu(nanoAiu: unknown): number {
 	return asNumber(nanoAiu) / NANO_AIU_PER_AIU;
 }
 
+/**
+ * AI credits convert to USD at a fixed, documented rate — see `monthlyAiCreditsUsd`
+ * in `vscode-extension/src/copilotPlans.json`: "1 AI credit = $0.01". This is GitHub's
+ * own conversion, not an estimate, so it applies uniformly regardless of which model
+ * served a leg.
+ */
+const USD_PER_AIU = 0.01;
+
+/** Converts AIU credits (already divided from nano-AIU) into a USD amount for display. */
+export function aiuToUsd(aiu: number): number {
+	return aiu * USD_PER_AIU;
+}
+
 function parseUsage(raw: unknown): HydraFusionUsage {
 	const u = asRecord(raw) ?? {};
 	return {
@@ -510,4 +523,45 @@ export function analyzeHydraFusionSession(content: string): HydraFusionSummary |
 		degradedTurns: turns.filter(t => t.degradedReason !== null).length,
 		syntheticModel,
 	};
+}
+
+/**
+ * Correlates each fusion turn with the chat turn (`ChatTurn.turnNumber`) whose user
+ * prompt triggered it, so per-leg detail can be shown inline in the generic turns
+ * table instead of only in the dedicated HydraFusion section.
+ *
+ * Both sequences are chronologically ordered — chat turns by `turnNumber`, fusion
+ * turns by the order the router resolved them — so a single forward merge suffices:
+ * for each fusion turn, advance through chat turns while their timestamp is at or
+ * before the fusion turn's routing decision (`startedAt`). The last chat turn
+ * advanced past is the one whose prompt the router was resolving; turns the router
+ * never got to (a later prompt, or one where routing was skipped) are left unmatched.
+ *
+ * A missing timestamp on either side — or a session with no fusion turns — leaves
+ * the corresponding entries out of the map rather than guessing; callers get an
+ * empty map, not a wrong one.
+ *
+ * @returns Map from fusion turn index (into `hydraTurns`) to the matching chat
+ *   turn's `turnNumber`.
+ */
+export function matchHydraFusionTurnsToChatTurns(
+	chatTurns: { turnNumber: number; timestamp: string | null }[],
+	hydraTurns: HydraFusionTurn[],
+): Map<number, number> {
+	const matches = new Map<number, number>();
+	let chatIndex = 0;
+	for (let h = 0; h < hydraTurns.length; h++) {
+		const startedAt = hydraTurns[h].startedAt ? Date.parse(hydraTurns[h].startedAt!) : NaN;
+		if (Number.isNaN(startedAt)) { continue; }
+
+		let matchedTurnNumber: number | null = null;
+		while (chatIndex < chatTurns.length) {
+			const ts = chatTurns[chatIndex].timestamp ? Date.parse(chatTurns[chatIndex].timestamp!) : NaN;
+			if (Number.isNaN(ts) || ts > startedAt) { break; }
+			matchedTurnNumber = chatTurns[chatIndex].turnNumber;
+			chatIndex++;
+		}
+		if (matchedTurnNumber !== null) { matches.set(h, matchedTurnNumber); }
+	}
+	return matches;
 }
