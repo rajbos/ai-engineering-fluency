@@ -32,13 +32,14 @@
  *     `setHtml(el, html)` (domUtils.ts's sanctioned `.innerHTML=` wrapper)
  *   - `expr.setAttribute('aria-label'|'title'|'placeholder', value)`
  *   - `aria-label="..."` / `title="..."` / `placeholder="..."` attributes and text content
- *     between HTML tags (`<button>`, `<h1>`-`<h6>`, `<p>`, `<vscode-button>`, ...) embedded in
- *     any string or template literal (not just ones already known to be templates), with a
- *     template's `${...}` holes bridged so matches can span an interpolation, and a tag's own
- *     trailing/leading text still found when its body also contains a nested element (e.g. an
- *     icon `<span>` before a label) — nested tags/HTML comments are blanked out of the reported
- *     text rather than left raw; one further level of nesting is still recursed into for its own
- *     text, deeper nesting is reported as one combined (blanked) blob
+ *     between HTML tags (`<button>`, `<h1>`-`<h6>`, `<p>`, `<b>`, `<code>`, `<vscode-button>`, ...)
+ *     embedded in any string or template literal (not just ones already known to be templates),
+ *     with a template's `${...}` holes bridged so matches can span an interpolation, and a tag's
+ *     own direct text still found — as its own, independently-offset violation — when its body
+ *     also contains a nested (tracked) element (e.g. an icon `<span>` before a label) or an HTML
+ *     comment; nested markup is recursed into (to any depth) for its own text rather than merged
+ *     into or blanked out of the outer tag's report, so nothing is double-counted and nothing
+ *     nested more than one level deep is silently dropped
  *
  * Explicitly not flagged: console.log/warn/error/info/debug/trace arguments,
  * anything already an argument to `localize(`, `localizeFormat(`, `t(`,
@@ -123,7 +124,7 @@ const TARGET_PROPS = new Set(['textContent', 'innerText', 'innerHTML', 'title', 
 const TAGS = [
 	'button', 'label', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'span',
 	'td', 'th', 'option', 'summary', 'caption', 'div', 'a', 'li', 'legend',
-	'strong', 'em', 'small', 'dt', 'dd', 'figcaption', 'title',
+	'strong', 'em', 'small', 'dt', 'dd', 'figcaption', 'title', 'b', 'code',
 	'vscode-button', 'vscode-badge', 'vscode-checkbox', 'vscode-dropdown',
 	'vscode-link', 'vscode-option', 'vscode-text-field'
 ];
@@ -132,6 +133,13 @@ const TAGS = [
 // of failing outright — see scanFlattenedForTagText for how the nested content is then handled.
 const TAG_TEXT_RE = new RegExp(`<(${TAGS.join('|')})(?:\\s[^>]*)?>([\\s\\S]*?)</\\1>`, 'gi');
 const NESTED_TAG_RE = /<[a-zA-Z]/;
+// Like NESTED_TAG_RE but also matches a bare CLOSING tag start (`</button`). Used where a fragment
+// is being checked for "is this markup, not prose" rather than "does this contain a nested
+// element" — a concatenated HTML-bearing sink can hand reportAt a lone closing-tag piece (e.g.
+// `setHtml(root, '<button>' + label + '</button>')`'s third operand), and NESTED_TAG_RE alone
+// wouldn't recognize `</button>` as markup, letting "button" itself trip looksProse() as if it
+// were prose.
+const HTML_TAG_FRAGMENT_RE = /<\/?[a-zA-Z]/;
 const ATTR_NAMES = ['aria-label', 'title', 'placeholder'];
 const ATTR_RE = new RegExp(`(?<![\\w-])(?:${ATTR_NAMES.join('|')})\\s*=\\s*(["'])((?:(?!\\1)[\\s\\S])*)\\1`, 'gi');
 
@@ -284,6 +292,11 @@ function getStaticChunks(node, sourceFile) {
 // regexes can match text that spans an interpolation (e.g. `<span>${x} turns</span>`) instead of
 // only seeing whichever side of the hole happens to share a chunk with the tag delimiter.
 const HOLE_PLACEHOLDER = '‹…›'; // ‹…›
+// Skips whitespace AND (repeats of) the interpolation placeholder itself before computing a run's
+// offset — a run beginning right after a `${...}` hole (e.g. `<button>${count}\n  Refresh</button>`)
+// otherwise has its offset anchored to the hole's own position (the end of the *previous* static
+// chunk), not the line the real text is actually on.
+const LEADING_SKIP_RE = new RegExp(`^(?:\\s|${HOLE_PLACEHOLDER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})*`);
 
 /** Concatenates static chunks into one flat string (holes bridged by HOLE_PLACEHOLDER), plus a
  * segment map for translating a flat-text index back to an absolute source offset. */
@@ -308,7 +321,11 @@ function mapFlatIndexToSourceOffset(index, segments) {
 	return seg.sourceOffset + within;
 }
 
-const EXEMPT_MARKER_RE = /i18n-exempt\b/i;
+// Requires "i18n-exempt" to be the first thing in the comment's content (after the `//` or `/*`
+// delimiter and optional whitespace), matching the documented `// i18n-exempt: <reason>` contract
+// — not merely mentioned anywhere in a longer comment, e.g. `// not i18n-exempt` or `// see the
+// i18n-exempt convention above` must NOT grant an exemption.
+const EXEMPT_MARKER_RE = /^(?:\/\/|\/\*)\s*i18n-exempt\b/i;
 
 /**
  * Collects the 0-based source lines spanned by every REAL comment (// or /* *\/) in `sourceFile`
@@ -364,7 +381,7 @@ function checkAssignmentTarget(propName, valueNode, ctx, reasonPrefix) {
 	if (!propName || !TARGET_PROPS.has(propName)) { return; }
 	const htmlBearing = HTML_BEARING_PROPS.has(propName);
 	for (const literal of extractLiteralTexts(valueNode)) {
-		if (htmlBearing && NESTED_TAG_RE.test(literal.text)) { continue; } // tag content: let the generic literal scan report it instead
+		if (htmlBearing && HTML_TAG_FRAGMENT_RE.test(literal.text)) { continue; } // tag content: let the generic literal scan report it instead
 		reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${reasonPrefix}${propName}`);
 	}
 }
@@ -420,7 +437,7 @@ function splitOwnTextRuns(body, bodyStartInFlat) {
 	return runs;
 }
 
-function scanFlattenedForTagText(text, textOffsetInFlat, segments, ctx, depth = 0) {
+function scanFlattenedForTagText(text, textOffsetInFlat, segments, ctx) {
 	// matchAll (not a manual exec()/lastIndex loop) is required here: this function recurses into
 	// a nested tag's body using the SAME shared TAG_TEXT_RE object, and exec() mutates that
 	// object's .lastIndex as shared state — the recursive call would corrupt the outer loop's
@@ -431,10 +448,14 @@ function scanFlattenedForTagText(text, textOffsetInFlat, segments, ctx, depth = 
 		const body = m[2];
 		const bodyStartInFlat = textOffsetInFlat + m.index + m[0].indexOf('>') + 1;
 
-		// Recurse into a body with further nested markup to also catch a nested (tracked) tag's own
-		// text, bounded to one level deep to cap the cost.
-		if (depth === 0 && NESTED_TAG_RE.test(body)) {
-			scanFlattenedForTagText(body, bodyStartInFlat, segments, ctx, depth + 1);
+		// Recurse into a body with further nested (tracked) markup to also catch its own text, to
+		// any depth — unbounded is safe here since each recursive call operates on `body`, which is
+		// always strictly shorter than `text` (it excludes at least the enclosing tag's own
+		// delimiters), guaranteeing termination without an artificial depth cap that would otherwise
+		// silently drop content nested more than one level deep (e.g. <button><span><strong>Refresh
+		// </strong></span></button>).
+		if (NESTED_TAG_RE.test(body)) {
+			scanFlattenedForTagText(body, bodyStartInFlat, segments, ctx);
 		}
 
 		for (const run of splitOwnTextRuns(body, bodyStartInFlat)) {
@@ -442,8 +463,8 @@ function scanFlattenedForTagText(text, textOffsetInFlat, segments, ctx, depth = 
 			// attributes the violation to the line right after `>` (a blank/whitespace-only line)
 			// instead of the line the reportable text actually sits on, so the baseline hashes the
 			// wrong line.
-			const leadingWs = run.text.match(/^\s*/)[0].length;
-			const runOffset = mapFlatIndexToSourceOffset(run.offsetInFlat + leadingWs, segments);
+			const leadingSkip = run.text.match(LEADING_SKIP_RE)[0].length;
+			const runOffset = mapFlatIndexToSourceOffset(run.offsetInFlat + leadingSkip, segments);
 			reportAt(run.text, runOffset, ctx, `<${tag}> text content`);
 		}
 	}
@@ -464,7 +485,7 @@ function checkTextArgSink(node, chain, ctx) {
 	if (argIndex === undefined || node.arguments.length <= argIndex) { return; }
 	const htmlBearing = HTML_BEARING_SINKS.has(chain);
 	for (const literal of extractLiteralTexts(node.arguments[argIndex])) {
-		if (htmlBearing && NESTED_TAG_RE.test(literal.text)) { continue; }
+		if (htmlBearing && HTML_TAG_FRAGMENT_RE.test(literal.text)) { continue; }
 		reportAt(literal.text, literal.node.getStart(ctx.sourceFile), ctx, `${chain}() text argument`);
 	}
 }

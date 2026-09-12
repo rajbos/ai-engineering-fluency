@@ -600,3 +600,66 @@ test('scanFile: a nested tracked tag\'s full content is excluded from the outer 
 		assert.match(violations[0].reason, /<span>/);
 	});
 });
+
+// ── round-6 fixes: more tags, unbounded recursion, closing-tag fragments, exempt-marker anchor ──
+
+test('scanFile: flags text inside <b> and <code>, both used in the real codebase', () => {
+	withTempFile('const html = `<p>Text is <b>bold text here</b> done</p>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		const texts = violations.map((v) => v.text.trim());
+		assert.ok(texts.includes('bold text here'), `expected among: ${JSON.stringify(texts)}`);
+	});
+	withTempFile('const html = `<p>run <code>/graphify</code> now</p>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		const texts = violations.map((v) => v.text.trim());
+		assert.ok(texts.includes('/graphify'), `expected among: ${JSON.stringify(texts)}`);
+	});
+});
+
+test('scanFile: recursion is not capped at one level — a tag nested two levels deep still has its own text caught', () => {
+	withTempFile('const html = `<button><span><strong>Refresh</strong></span></button>`;\n', (filePath) => {
+		const violations = [];
+		const start = Date.now();
+		scanFile(filePath, new Set(), violations);
+		assert.ok(Date.now() - start < 2000, 'scanFile should complete quickly, not hang');
+		const texts = violations.map((v) => v.text.trim());
+		assert.ok(texts.includes('Refresh'), `expected among: ${JSON.stringify(texts)}`);
+	});
+});
+
+test('scanFile: a concatenated HTML-bearing sink\'s lone closing-tag fragment is not misreported as prose', () => {
+	// '<button>' + label + '</button>': the first and third operands are pure markup fragments (no
+	// static prose), and `label` is a variable — nothing here should be flagged. Specifically,
+	// '</button>' must not trip looksProse() via the "button" substring the way a plain HTML_TAG
+	// check limited to *opening* tags would miss.
+	withTempFile("setHtml(root, '<button>' + label + '</button>');\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 0, `expected no violations, got: ${JSON.stringify(violations)}`);
+	});
+});
+
+test('scanFile: a comment that merely mentions "i18n-exempt" without it starting the comment does not exempt anything', () => {
+	withTempFile("el.title = 'Refresh'; // not i18n-exempt\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1, `expected the violation to remain, got: ${JSON.stringify(violations)}`);
+	});
+	withTempFile("el.title = 'Refresh'; // see the i18n-exempt convention above\n", (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		assert.equal(violations.length, 1, `expected the violation to remain, got: ${JSON.stringify(violations)}`);
+	});
+});
+
+test('scanFile: a text run beginning right after an interpolation hole attributes its offset past the hole, not to it', () => {
+	withTempFile('const html = `<button>${count}\n  Refresh\n</button>`;\n', (filePath) => {
+		const violations = [];
+		scanFile(filePath, new Set(), violations);
+		const match = violations.find((v) => v.text.includes('Refresh'));
+		assert.ok(match, `expected a violation containing "Refresh", got: ${JSON.stringify(violations)}`);
+		assert.equal(match.line, 2, `expected the violation on the "Refresh" line (2), got line ${match.line}`);
+	});
+});
