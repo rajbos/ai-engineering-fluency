@@ -1002,3 +1002,40 @@ test('a deep link survives a stats load slower than the re-assert window', async
 		`the slow-loading card must still be scrolled to, scrolled to: ${JSON.stringify(harness.scrolledTo)}`,
 	);
 });
+
+test('a deep link that never landed is dropped when the user navigates away', async () => {
+	// The card does not exist yet, so the request sits in pendingTabAnchor rather than the focus
+	// window. renderLayout consumes that without consulting the active tab, so leaving it set
+	// would aim the eventual render at a card on a tab the user has since left.
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-not-yet-rendered' });
+	harness.window.document.querySelector('.tab-button[data-tab="activity"]')?.click();
+	harness.scrolledTo.length = 0;
+
+	// The card finally arrives — too late, the user is reading something else.
+	const stats = buildStatsWithInsights();
+	(stats.insights as any[]).push({
+		id: 'not-yet-rendered', category: 'tools', severity: 'tip',
+		title: 'Late arrival', body: '...', status: 'new', allowToast: false,
+	});
+	harness.post({ command: 'updateStats', data: stats });
+	await harness.settleScroll();
+
+	assert.deepEqual(harness.scrolledTo, [], 'a stale deep link must not aim a later render');
+});
+
+test('switchTab still honours a static section anchor', async () => {
+	// switchTab clicks the tab button itself, which runs the clear-on-navigation handler, so the
+	// anchors are assigned after that click. This pins that ordering: assigning before the click
+	// again would have the host's own navigation wipe the anchor it just requested.
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'activity', anchor: 'section-interaction-modes' });
+	await harness.settleScroll();
+
+	assert.ok(
+		harness.scrolledTo.includes('section-interaction-modes'),
+		`the section anchor must still be honoured, scrolled to: ${JSON.stringify(harness.scrolledTo)}`,
+	);
+});

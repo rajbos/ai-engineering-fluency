@@ -5937,14 +5937,16 @@ function handleSwitchTab(message: any): void {
 	// the later renderLayout would land on the default tab — swallowing e.g. the worktree
 	// notification's "Show Me" action. With activeTab set, the eventual render honors it.
 	activeTab = tab;
-	pendingTabAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
+	const requestedAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
 	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${tab}"]`);
 	btn?.click();
-	// Armed after the click, not before: the click runs the same handler that clears the focus on
-	// user-driven navigation, and this navigation is the host's, not the user's. A card anchor has
-	// to outlive the re-renders that follow; a static section anchor is stable and needs no window.
-	focusedInsightAnchor = pendingTabAnchor && isInsightCardAnchor(pendingTabAnchor)
-		? { anchor: pendingTabAnchor, until: Date.now() + INSIGHT_FOCUS_WINDOW_MS }
+	// Both anchors are set after the click, not before: the click runs the same handler that drops
+	// an insight deep link on user-driven navigation, and this navigation is the host's, not the
+	// user's. A card anchor also has to outlive the re-renders that follow; a static section
+	// anchor is stable and needs no such window.
+	pendingTabAnchor = requestedAnchor;
+	focusedInsightAnchor = requestedAnchor && isInsightCardAnchor(requestedAnchor)
+		? { anchor: requestedAnchor, until: Date.now() + INSIGHT_FOCUS_WINDOW_MS }
 		: null;
 	scrollToPendingTabAnchor();
 }
@@ -5987,9 +5989,18 @@ function flashAnchorHighlight(element: HTMLElement): void {
 	activeFlashes.set(element, { shadow, transition, timer });
 }
 
-/** Forgets a pending insight deep link, so nothing later scrolls the user back to that card. */
+/**
+ * Forgets a pending insight deep link, so nothing later scrolls the user back to that card.
+ *
+ * Both halves have to go. A link whose card did not exist yet is still sitting in
+ * `pendingTabAnchor`, which `renderLayout` consumes without consulting the active tab — so
+ * leaving it set would aim a later render at a card on a tab the user has left. Static section
+ * anchors are left alone, keeping the behaviour change confined to insight deep links: the other
+ * `switchTab` callers target a section on the tab they are navigating to.
+ */
 function clearFocusedInsightAnchor(): void {
 	focusedInsightAnchor = null;
+	if (pendingTabAnchor && isInsightCardAnchor(pendingTabAnchor)) { pendingTabAnchor = null; }
 }
 
 /**

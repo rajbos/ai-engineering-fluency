@@ -2268,16 +2268,28 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Recomputes the badge from the current insight state, so its count, tooltip and click target
-	 * always describe the same, current list. `evaluated` lets a caller that already built the
-	 * list pass it in rather than evaluating every insight twice.
+	 * Recomputes the badge so its count, tooltip and click target all describe the same, current
+	 * list. `evaluated` lets a caller that already built that list pass it in rather than
+	 * evaluating every insight twice.
+	 *
+	 * The count comes from the evaluated list rather than the persisted state bag: the bag keeps
+	 * entries for insights that no longer apply (`mergeInsightStates` adds and refreshes, never
+	 * removes), so a bag-derived count can claim insights the Insights tab does not show and name
+	 * none of them. Counting the 'new' entries of the list is exactly what the tab's own badge
+	 * does, so the two can no longer disagree. Only with no list at all — stats not loaded yet —
+	 * is the bag the only thing left to go on.
 	 */
 	private refreshInsightBadgeFromState(now: string, evaluated?: EvaluatedInsight[]): void {
 		const stats = this.lastUsageAnalysisStats;
-		const list = evaluated ?? (stats ? this.buildCurrentInsights(stats) : []);
-		const topNew = list.find(i => i.status === 'new');
+		const list = evaluated ?? (stats ? this.buildCurrentInsights(stats) : undefined);
+		if (!list) {
+			this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
+			return;
+		}
+		const newInsights = list.filter(i => i.status === 'new');
+		const topNew = newInsights[0];
 		this.refreshStatusBarInsightBadge(
-			_countNewInsights(this._insightStateBag, now),
+			newInsights.length,
 			topNew ? { title: topNew.title, id: topNew.id } : undefined,
 		);
 	}
@@ -3902,9 +3914,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const evaluated = _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
 		_mergeInsightStates(evaluated, this._insightStateBag, now);
 
-		const newCount = _countNewInsights(this._insightStateBag, now);
-		const topNew = evaluated.find(i => i.status === 'new');
-		this.refreshStatusBarInsightBadge(newCount, topNew ? { title: topNew.title, id: topNew.id } : undefined);
+		this.refreshInsightBadgeFromState(now, evaluated);
 
 		await this.context.globalState.update('insights.state', this._insightStateBag);
 
