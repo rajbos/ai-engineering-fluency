@@ -8575,6 +8575,11 @@ private computeFallbackDailyRollup(
 
 		// Open the panel IMMEDIATELY with whatever daily stats are already in memory.
 		// Full-year data (needed for Week/Month views) is computed in the background below.
+		// A truthy lastFullDailyStats is not enough: a build already running when clearCache()
+		// fires finishes afterwards and repopulates it with pre-clear data, stamped with the
+		// generation the clear just superseded. currentFullDailyStats rejects that stamp so
+		// this falls back to the 30-day cache (or triggers a fresh full-year calculation below)
+		// instead of rendering stale data.
 		const hasFullData = !!this.currentFullDailyStats;
 		const initialStats = this.currentFullDailyStats ?? this.lastDailyStats ?? [];
 
@@ -8678,6 +8683,10 @@ private computeFallbackDailyRollup(
 			if (await this.dispatchSharedCommand(message)) { return; }
 			await this.handleAnalysisMessage(message);
 		});
+		// A truthy lastUsageAnalysisStats is not enough: a build already running when
+		// clearCache() fires finishes afterwards and repopulates it with pre-clear data,
+		// stamped with the generation the clear just superseded. currentUsageAnalysisStats
+		// rejects that stamp so this falls back to loading fresh data instead of rendering it.
 		const usageForOpen = this.currentUsageAnalysisStats;
 		this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, usageForOpen ?? null);
 		if (!usageForOpen) { void this.loadAnalysisStatsInBackground(this.analysisPanel); }
