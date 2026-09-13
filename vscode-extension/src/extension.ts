@@ -2005,18 +2005,28 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Mirrors SessionDiscovery.tryGetSampleDataFiles()'s effective-sample-dir check: sample mode
-	 * is active when either the local-view-regression override (runLocalViewRegression(), the
-	 * visual-view-diff/screenshot harness) or the aiEngineeringFluency.sampleDataDirectory setting
-	 * names a non-empty directory. In that mode SessionDiscovery bypasses every adapter and
-	 * returns only the fixture's files — callers that read the real on-disk cache directly (the
-	 * cache-only instant paint, the cache-seeded preload queue) must not mix real user sessions
-	 * into what is meant to be a clean, deterministic fixture run.
+	 * Mirrors SessionDiscovery.tryGetSampleDataFiles()'s effective-sample-dir check, precedence
+	 * AND existence gate: sample mode is active when the local-view-regression override
+	 * (runLocalViewRegression(), the visual-view-diff/screenshot harness) — falling back to the
+	 * aiEngineeringFluency.sampleDataDirectory setting — names a directory that actually exists
+	 * on disk. tryGetSampleDataFiles() returns `undefined` (and SessionDiscovery falls back to
+	 * real adapter discovery) for a configured-but-missing/stale directory; checking only for a
+	 * non-empty string here would disagree with that and wrongly suppress the cache-only instant
+	 * paint and cache-seeded queue on an otherwise normal warm boot. In that mode SessionDiscovery
+	 * bypasses every adapter and returns only the fixture's files — callers that read the real
+	 * on-disk cache directly must not mix real user sessions into what is meant to be a clean,
+	 * deterministic fixture run.
 	 */
 	private isSampleDataModeActive(): boolean {
-		if (this.localRegressionSampleDataDir && this.localRegressionSampleDataDir.trim().length > 0) { return true; }
-		const configured = vscode.workspace.getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory');
-		return !!(configured && configured.trim().length > 0);
+		const sampleDir = (this.localRegressionSampleDataDir && this.localRegressionSampleDataDir.trim().length > 0)
+			? this.localRegressionSampleDataDir
+			: vscode.workspace.getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory');
+		if (!sampleDir || sampleDir.trim().length === 0) { return false; }
+		try {
+			return fs.existsSync(sampleDir.trim());
+		} catch {
+			return false;
+		}
 	}
 
 	/**
@@ -3180,6 +3190,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * bypasses every adapter in that mode and returns only the fixture's files, so seeding real
 	 * cached sessions here would contaminate a screenshot/regression run with unrelated data.
 	 *
+	 * A seeded file that still exists but a clean, successful discovery pass no longer recognizes
+	 * (an adapter's rules changed, an integration got disabled) is reconciled back out of the
+	 * returned `preloaded` array by the caller, `_preloadSessionFiles()`, once the real discovery
+	 * result is known — this method only seeds the fast warm path, it doesn't know discovery's
+	 * outcome yet.
+	 *
 	 * Returns the number of paths seeded (for the caller's totalDiscovered count).
 	 */
 	private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, editorSet?: Set<string>): number {
@@ -3195,6 +3211,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		queue.push(...cachedPaths);
 		return cachedPaths.length;
+	}
+
+	/**
+	 * A cache-seeded file that still exists on disk but is no longer recognized by ANY current
+	 * adapter (e.g. an adapter's matching rules changed, an integration got disabled/uninstalled)
+	 * would otherwise keep contributing its stale stats to every refresh forever — unlike an
+	 * outright-deleted file, clearExpiredCache() has no way to detect this "un-discovered while
+	 * still readable" case. Only trust this run's discovery enough to drop such entries when it
+	 * actually completed cleanly (no adapter erroring, and it found *something*) — a
+	 * partial/flaky scan must never silently zero out real, still-valid cached sessions just
+	 * because one adapter hiccuped.
+	 */
+	private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {
+		if (this.sessionDiscovery.lastDiscoveryHadError || sessionFiles.length === 0) { return preloaded; }
+		const confirmedKeys = new Set(sessionFiles.map(f => _normalizePathForDedup(f)));
+		return preloaded.filter(p => confirmedKeys.has(_normalizePathForDedup(p.sessionFile)));
 	}
 
 	/**
@@ -3215,7 +3247,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let readIndex = 0;
 		let discoveryDone = false;
 		let totalDiscovered = 0;
-		const preloaded: SessionFilePreload[] = [];
+		let preloaded: SessionFilePreload[] = [];
 		let processed = 0;
 		const CONCURRENCY = 20;
 		this._deferredSessionPreloadCount = 0;
@@ -3286,6 +3318,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			discoveryPromise,
 			...Array.from({ length: CONCURRENCY }, () => worker()),
 		]);
+
+		preloaded = this.reconcilePreloadedAgainstDiscovery(preloaded, sessionFiles);
 
 		if (sessionFiles.length === 0) {
 			// `sessionFiles` only reflects this run's adapter discovery — it does not include the

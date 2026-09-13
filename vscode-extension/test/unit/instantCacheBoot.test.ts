@@ -111,12 +111,17 @@ test('renderInstantStatsFromCache() renders from the cache alone, with no discov
 	}
 });
 
-test('isSampleDataModeActive() checks both the local-regression override and the sampleDataDirectory setting', () => {
+test('isSampleDataModeActive() checks both sample-dir sources with the local-regression override taking precedence, and gates on existence', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private isSampleDataModeActive(): boolean {');
 	assert.ok(body.includes('this.localRegressionSampleDataDir'),
 		'must check localRegressionSampleDataDir — set by runLocalViewRegression()/the visual-view-diff harness');
 	assert.ok(body.includes("getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory')"),
 		'must check the aiEngineeringFluency.sampleDataDirectory setting — this must mirror SessionDiscovery.tryGetSampleDataFiles()\'s own check exactly, or the two can disagree about whether sample mode is active');
+	// tryGetSampleDataFiles() returns undefined (falls back to real discovery) for a
+	// configured-but-missing directory, not just an empty one — a configured stale/deleted
+	// sampleDataDirectory must not silently disable the cache-only paint on a normal warm boot.
+	assert.ok(/fs\.existsSync\(sampleDir\.trim\(\)\)/.test(body),
+		'must gate on the directory actually existing on disk, matching tryGetSampleDataFiles()\'s own existence check — a non-empty-string-only check disagrees with it for a stale/deleted configured directory');
 });
 
 test('_preloadSessionFiles() seeds the queue from the cache before discovery starts, dedupes with path normalization, and never discards seeded results on empty discovery', () => {
@@ -151,6 +156,30 @@ test('_preloadSessionFiles() seeds the queue from the cache before discovery sta
 		'the empty-discovery early return must return the real `preloaded` array, not a hardcoded empty one');
 	assert.ok(!/return \{ sessionFiles, preloaded: \[\] \};/.test(preloadBody),
 		'must not hardcode preloaded: [] on empty discovery — that discards cache-seeded results');
+
+	// A cache-seeded file that still exists but a clean discovery pass no longer recognizes must
+	// be reconciled out of `preloaded` (see reconcilePreloadedAgainstDiscovery()) — otherwise it
+	// keeps contributing stale stats to every refresh forever, since clearExpiredCache() only
+	// detects outright-deleted files, not "un-discovered while still readable" ones.
+	const reconcileIndex = preloadBody.indexOf('this.reconcilePreloadedAgainstDiscovery(preloaded, sessionFiles)');
+	assert.ok(reconcileIndex !== -1,
+		'_preloadSessionFiles() must reconcile `preloaded` against this run\'s discovery result via reconcilePreloadedAgainstDiscovery() after the Promise.all resolves');
+	const promiseAllIndex = preloadBody.indexOf('await Promise.all([');
+	assert.ok(promiseAllIndex !== -1 && promiseAllIndex < reconcileIndex,
+		'reconciliation must happen after discovery+workers finish (sessionFiles must be the real, final discovery result)');
+});
+
+test('reconcilePreloadedAgainstDiscovery() only trusts a clean, non-empty discovery result, and compares with path normalization', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {');
+
+	// Must bail out (keep every cached entry, no pruning) on a flaky/partial scan — gated on
+	// BOTH lastDiscoveryHadError and an empty sessionFiles list, so a single erroring adapter (or
+	// a run where discovery genuinely found nothing) never zeroes out real cached sessions.
+	assert.ok(/if \(this\.sessionDiscovery\.lastDiscoveryHadError \|\| sessionFiles\.length === 0\) \{ ?return preloaded; ?\}/.test(body),
+		'must return `preloaded` unfiltered whenever this run\'s discovery errored or found nothing — pruning must only ever run on a run we can actually trust');
+
+	assert.ok(/_normalizePathForDedup\(f\)/.test(body) && /confirmedKeys\.has\(_normalizePathForDedup\(p\.sessionFile\)\)/.test(body),
+		'the confirmed-by-discovery comparison must use _normalizePathForDedup() on both sides, matching the dedup key used everywhere else in this method');
 });
 
 test('seedPreloadQueueFromCache() skips sample-data mode, normalizes seen keys, and populates editorSet for cache-seeded paths', () => {
