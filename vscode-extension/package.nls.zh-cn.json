@@ -143,6 +143,7 @@
   "loading.efficiency.buildingTrends": "正在构建效率趋势…",
   "efficiency.error.title": "无法构建效率视图",
   "efficiency.error.retry": "重试",
+  "efficiency.error.staleAfterClear": "构建此视图时缓存数据已被清除。",
   "aiFluencyInsights": "AI 熟练度洞察",
   "aiEngineeringFluency": "AI 工程熟练度",
   "shareText": "我通过这个优秀的追踪器跟踪我的 AI 使用情况：AI 工程熟练度！也跟踪您的使用情况吧 #AIEngineeringFluency",

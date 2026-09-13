@@ -143,6 +143,7 @@
   "loading.efficiency.buildingTrends": "Building efficiency trends…",
   "efficiency.error.title": "Could not build the Efficiency view",
   "efficiency.error.retry": "Try again",
+  "efficiency.error.staleAfterClear": "The cached data was cleared while this view was being built.",
   "aiFluencyInsights": "AI Fluency Insights",
   "aiEngineeringFluency": "AI Engineering Fluency",
   "shareText": "I am tracking my AI usage through this great tracker: AI Engineering Fluency! Track your usage as well #AIEngineeringFluency",

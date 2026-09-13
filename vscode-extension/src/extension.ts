@@ -721,13 +721,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _whatsNewReady: Promise<void> | undefined;
 	/** Memoized per-session efficiency inputs; cleared wherever the daily/usage stat caches are. */
 	private lastEfficiencySessionInputs: EfficiencySessionInput[] | undefined;
-	/** Shared full-year daily-stats walk; see calculateFullDailyStats(). */
-	private _fullDailyStatsInFlight: Promise<DailyTokenStats[]> | undefined;
-	/** Progress reporters watching the shared full-year walk, including late joiners. */
-	private readonly _fullDailyStatsProgressSinks =
-		new Set<(completed: number, total: number, editors: ReadonlySet<string>) => void>();
-	/** Most recent tick from the shared walk, replayed to a reporter that joins late. */
-	private _fullDailyStatsLastTick: [number, number, ReadonlySet<string>] | undefined;
 	/** Last successfully rendered Efficiency payload, restored if a refresh build fails. */
 	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
 	/** Bumped whenever the computed stat caches are invalidated; see recordEfficiencyPayload(). */
@@ -1389,9 +1382,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async computeRegressionStats(dataSourceLabel: string, sessionFiles: string[]): Promise<{ detailedStats: any; dailyStats: any; usageStats: any; maturityData: any; diagnosticReport: string; fluencyLevelData: any; chartTotals: any }> {
 		const detailedStats = await this.updateTokenStats(true);
 		if (!detailedStats) { throw new Error(`Failed to calculate detailed stats from ${dataSourceLabel}.`); }
-		// Deliberately not calculateFullDailyStats(): this runs against the bundled sample
-		// directory, and joining a live-data walk already in flight would fold live stats
-		// into the regression result.
 		const dailyStats = this.lastDailyStats ?? await this.calculateDailyStats();
 		const usageStats = await this.calculateUsageAnalysisStats(false);
 		const maturityData = await this.calculateMaturityScores(false);
@@ -3454,7 +3444,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.persistRefreshResult(isLeader);
 
 		if (!this.lastFullDailyStats && !this.chartPanel) {
-			void this.calculateFullDailyStats(sessionFiles);
+			void this.calculateDailyStats(365, sessionFiles);
 		}
 
 		return detailedStats;
@@ -4418,66 +4408,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (this.analysisPanel && this.lastUsageAnalysisStats) {
 			void this.analysisPanel.webview.postMessage({ command: 'updateStats', data: this._buildAnalysisUpdateData(this.lastUsageAnalysisStats) });
 		}
-	}
-
-	/**
-	 * The full-year daily-stats walk, deduplicated behind one shared promise.
-	 *
-	 * `_runRefreshCore` starts this detached (fire-and-forget) at the end of a refresh, so it
-	 * routinely outlives `_updateTokenStatsInFlight`. Without a shared handle an Efficiency
-	 * build that waited for the refresh would still start a second walk over the same corpus
-	 * while that one is mid-flight, re-statting and re-parsing the same cold files. Every
-	 * caller of the 365-day walk goes through here so there is only ever one.
-	 */
-	private async calculateFullDailyStats(
-		knownSessionFiles?: string[],
-		onProgress?: (completed: number, total: number, editors: ReadonlySet<string>) => void,
-		force = false,
-	): Promise<DailyTokenStats[]> {
-		// A caller that brought its own discovery result cannot be served by a walk started
-		// from someone else's: joining would quietly drop files it had just found. It runs
-		// its own walk and does not publish a shared one.
-		if (knownSessionFiles) { return this.calculateDailyStats(365, knownSessionFiles, onProgress); }
-
-		// Reporters are held in a set rather than passed straight through, because a caller
-		// that joins a walk already in flight would otherwise have its reporter silently
-		// dropped — the Efficiency panel opening during the refresh's detached walk would
-		// then show no progress at all until that walk finished.
-		//
-		// Registered before the forced wait below, not after: a refresh queued behind an
-		// existing walk still has a loading screen up, and that walk's files are the same
-		// ones it is waiting on, so its ticks are the honest thing to show meanwhile.
-		const watch = (): void => {
-			if (!onProgress) { return; }
-			this._fullDailyStatsProgressSinks.add(onProgress);
-			// Replay the latest tick. Per-file callbacks stop while the aggregation loop runs,
-			// so a joiner arriving in that window would otherwise sit indeterminate until the
-			// whole walk resolved, with no indication anything was happening.
-			if (this._fullDailyStatsLastTick) { onProgress(...this._fullDailyStatsLastTick); }
-		};
-		watch();
-
-		// A forced recompute means "read the corpus as it is now". Joining a walk that is
-		// already part-way through would hand back a snapshot taken before whatever prompted
-		// the refresh, so wait it out and then start a fresh one; the `??=` below sees a
-		// cleared slot because the previous walk's `finally` has run by then.
-		if (force && this._fullDailyStatsInFlight) {
-			await this._fullDailyStatsInFlight.catch(() => undefined);
-			// That walk's `finally` emptied the sink set on its way out; re-register so the
-			// fresh walk below reports to this caller too.
-			watch();
-		}
-		this._fullDailyStatsInFlight ??= this
-			.calculateDailyStats(365, knownSessionFiles, (completed, total, editors) => {
-				this._fullDailyStatsLastTick = [completed, total, editors];
-				for (const sink of this._fullDailyStatsProgressSinks) { sink(completed, total, editors); }
-			})
-			.finally(() => {
-				this._fullDailyStatsInFlight = undefined;
-				this._fullDailyStatsProgressSinks.clear();
-				this._fullDailyStatsLastTick = undefined;
-			});
-		return this._fullDailyStatsInFlight;
 	}
 
 	/** Compute daily token stats for up to `daysBack` days, using the same token preference
@@ -8046,7 +7976,7 @@ private computeFallbackDailyRollup(
 		// before the calculation finishes, the reopen would be silently dropped as "already in flight".
 		if (!hasFullData) {
 			void (async () => {
-				const fullStats = await this.calculateFullDailyStats();
+				const fullStats = await this.calculateDailyStats();
 				if (this.chartPanel) {
 					void this.chartPanel.webview.postMessage({
 						command: 'updateChartData',
@@ -8959,7 +8889,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 
 		this.log('🔄 Refreshing Chart view');
 		// Refresh the full-year daily stats so week/month period views are up to date
-		await this.calculateFullDailyStats();
+		await this.calculateDailyStats();
 		// Refresh all stats so the status bar and tooltip stay in sync
 		await this.updateTokenStats();
 		this.log('✅ Chart view refreshed');
@@ -9668,10 +9598,14 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 					() => this.buildEfficiencyViewData(false, this.efficiencyLoadingSink(panel)));
 				// Record the payload even if this panel is gone: it is valid data, and a later
 				// refresh falls back to it rather than stranding its panel on the loading screen.
-				// A payload the caches have outlived is not rendered either: the clear that
-				// invalidated it is precisely a statement that this data is no longer current.
-				// The refresh it triggers will render in its place.
-				if (!this.recordEfficiencyPayload(data, generation)) { return; }
+				// A payload the caches have outlived is not rendered: the clear that invalidated
+				// it is precisely a statement that this data is no longer current. Nothing else
+				// will redraw this panel though — clearCache() refreshes the token stats, not
+				// this view — so rebuild rather than leaving the loading screen up forever.
+				if (!this.recordEfficiencyPayload(data, generation)) {
+					if (this.efficiencyPanel === panel) { void this.refreshEfficiencyPanel(); }
+					return;
+				}
 				// The user may have closed the panel while the data was being computed.
 				if (this.efficiencyPanel !== panel) { return; }
 				panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
@@ -9698,7 +9632,16 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				if (this.efficiencyPanel === panel) { panel.webview.html = this.getLoadingHtml(panel.webview); }
 				return this.buildEfficiencyViewData(true, this.efficiencyLoadingSink(panel));
 			});
-			if (!this.recordEfficiencyPayload(data, generation)) { return; }
+			// Same reasoning as the initial build, minus the rebuild: this *is* the refresh, so
+			// re-entering it on a clear that landed mid-build would loop. Fall back to the last
+			// good payload if the clear left one, else show the failure state.
+			if (!this.recordEfficiencyPayload(data, generation)) {
+				if (this.efficiencyPanel !== panel) { return; }
+				const afterClear = this._lastEfficiencyViewData;
+				if (afterClear) { panel.webview.html = this.getEfficiencyHtml(panel.webview, afterClear); }
+				else { this.showEfficiencyError(panel, new Error(l10n.t('efficiency.error.staleAfterClear'))); }
+				return;
+			}
 		} catch (error) {
 			// Never strand the panel on the loading screen: fall back to the last good payload,
 			// which the initial build records even when its own render was skipped.
@@ -9806,15 +9749,6 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	} as const;
 
 	/**
-	 * Reports one Efficiency compute sub-step to the panels showing *its* loading screen.
-	 *
-	 * Deliberately not routed through sendLoadingPanelMessage(): that also reaches the details
-	 * panel, whose loading screen is tracking updateTokenStats() rather than this build, so
-	 * these labels would describe work it is not doing. The reverse leak — a background
-	 * refresh's parsing ticks arriving here mid-compute — is harmless for the bar, which the
-	 * loading script clamps monotonically.
-	 */
-	/**
 	 * The Efficiency panel's failure state.
 	 *
 	 * Every path that swaps in the loading screen needs somewhere to land when the build
@@ -9868,6 +9802,13 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		return true;
 	}
 
+	/**
+	 * Reports one Efficiency compute sub-step to the panel showing *its* loading screen.
+	 *
+	 * Deliberately not routed through sendLoadingPanelMessage(): that also reaches the details
+	 * panel, whose loading screen is tracking updateTokenStats() rather than this build, so
+	 * these labels would describe work it is not doing.
+	 */
 	private postEfficiencyStep(send: (msg: object) => void, percentage: number, label: string): void {
 		send({ command: 'loadingStep', step: 'computing', percentage, label });
 	}
@@ -9902,10 +9843,10 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				() => [...seen].map(name => ({ icon: this.getEditorIconForLoader(name), name })),
 				send,
 			);
-			dailyStats = await this.calculateFullDailyStats(undefined, (completed, total, editors) => {
+			dailyStats = await this.calculateDailyStats(365, undefined, (completed, total, editors) => {
 				seen = editors;
 				report(completed, total);
-			}, forceRecalc);
+			});
 		}
 		this.postEfficiencyStep(send, stepPct.usage, l10n.t('loading.efficiency.usageAnalysis'));
 		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);

@@ -307,6 +307,7 @@ test('l10n: efficiency loading step labels resolve in English', () => {
 		'loading.efficiency.buildingTrends': 'Building efficiency trends…',
 		'efficiency.error.title': 'Could not build the Efficiency view',
 		'efficiency.error.retry': 'Try again',
+		'efficiency.error.staleAfterClear': 'The cached data was cleared while this view was being built.',
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
@@ -343,6 +344,7 @@ test('l10n: efficiency loading step labels resolve in zh-cn', () => {
 			'loading.efficiency.buildingTrends': '正在构建效率趋势…',
 			'efficiency.error.title': '无法构建效率视图',
 			'efficiency.error.retry': '重试',
+			'efficiency.error.staleAfterClear': '构建此视图时缓存数据已被清除。',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
