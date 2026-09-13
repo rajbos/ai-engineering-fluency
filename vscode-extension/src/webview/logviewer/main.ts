@@ -727,21 +727,29 @@ function buildEditorIdentityCard(data: SessionLogData, stats: SummaryStats): str
  * Combined "MCP tools & context references" card: merges the previous MCP Tools
  * and Context Refs cards into a single compact card, since both describe the
  * external context a session pulled in (tool servers vs. editor references).
+ *
+ * The sub-text only adds a breakdown line for a metric that has a nonzero
+ * count — repeating "MCP Tools: None" under a row that already reads
+ * "MCP Tools 0" restates the same zero without adding information, so it is
+ * dropped rather than shown twice.
  */
 function buildMcpAndContextRefsCard(data: SessionLogData, stats: SummaryStats): string {
 	const { usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit, usageContextExplicit } = stats;
-	const mcpSub = usageMcpTotal === 0 ? 'None' : formatTopListWithOther(usageTopMcpTools, usageMcpTotal);
-	const refsSub = usageContextTotal === 0 ? 'None' : `implicit ${usageContextImplicit}, explicit ${usageContextExplicit}`;
+	const subLines: string[] = [];
+	if (usageMcpTotal > 0) {
+		subLines.push(`<div class="combined-card-sub-line">🔌 ${formatTopListWithOther(usageTopMcpTools, usageMcpTotal)}</div>`);
+	}
+	if (usageContextTotal > 0) {
+		subLines.push(`<div class="combined-card-sub-line">🔗 implicit ${usageContextImplicit}, explicit ${usageContextExplicit}</div>`);
+	}
+	const subContent = subLines.length > 0 ? subLines.join('') : `<div class="combined-card-sub-line">None</div>`;
 	return `<div class="summary-card summary-card--compact summary-card--combined">
 <div class="summary-label">🔌 ${localize('logviewer.summary.mcpAndContextRefs')}</div>
 <div class="summary-compact-rows">
 <div class="summary-compact-row"><span class="summary-compact-key">🔌 ${localize('logviewer.summary.mcpTools')}</span><span class="summary-compact-val">${usageMcpTotal}</span></div>
 <div class="summary-compact-row"><span class="summary-compact-key">🔗 ${localize('logviewer.summary.contextRefs')}</span><span class="summary-compact-val">${usageContextTotal}</span></div>
 </div>
-<div class="summary-sub combined-card-sub">
-<div class="combined-card-sub-line">🔌 <span class="combined-card-sub-label">${localize('logviewer.summary.mcpTools')}:</span> ${mcpSub}</div>
-<div class="combined-card-sub-line">🔗 <span class="combined-card-sub-label">${localize('logviewer.summary.contextRefs')}:</span> ${refsSub}</div>
-</div>
+<div class="summary-sub combined-card-sub">${subContent}</div>
 </div>`;
 }
 

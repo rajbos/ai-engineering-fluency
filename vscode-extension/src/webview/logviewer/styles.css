@@ -260,10 +260,6 @@ body {
 	overflow-wrap: anywhere;
 }
 
-.combined-card-sub-label {
-	font-weight: 600;
-}
-
 .summary-compact-rows {
 	display: flex;
 	flex-direction: column;
