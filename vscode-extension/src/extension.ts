@@ -2125,6 +2125,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return this.isSampleDataModeActive() || this._disposed;
 	}
 
+	/**
+	 * Whether a cache entry is usable for the instant cache-only paint: it has real interaction
+	 * data, a finite mtime (a persisted snapshot is just parsed JSON — a malformed mtime would make
+	 * `new Date(...).toISOString()` throw deeper in renderInstantStatsFromCache(), aborting the
+	 * entire paint over one bad record instead of just skipping it), and falls within the same
+	 * recency window the real refresh bounds `preloaded` to (`cutoffMs`) — without that last check,
+	 * this provisional paint could include cache entries the real refresh's own `preloaded` excludes,
+	 * showing a higher, more-inclusive number that then visibly drops once the verified refresh
+	 * (which never counted those older entries) overwrites it moments later.
+	 */
+	private isUsableForInstantPaint(sessionData: SessionFileCache | undefined, cutoffMs: number): sessionData is SessionFileCache {
+		return !!sessionData && sessionData.interactions !== 0 && Number.isFinite(sessionData.mtime) && sessionData.mtime >= cutoffMs;
+	}
+
 	private async renderInstantStatsFromCache(): Promise<void> {
 		try {
 			// Sample-data mode (screenshot/regression fixtures, see runLocalViewRegression()
@@ -2142,9 +2156,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (this.shouldAbandonInstantPaintAfterCacheLoad()) { return; }
 			if (this.cacheManager.cache.size === 0) { return; }
 
+			// Same window the real refresh bounds `preloaded` to (see _preloadSessionFiles()'s own
+			// fileLoadCutoffMs) — without it, this provisional paint could include cache entries the
+			// real refresh's preloaded array excludes, so calculateDetailedStats() would show a
+			// higher, more-inclusive number here that then visibly drops once the verified refresh
+			// (which never counted those older entries) overwrites it moments later.
+			const { last30DaysStartMs: instantLast30DaysStartMs, lastMonthStartMs: instantLastMonthStartMs } = computeUtcDateRanges(new Date());
+			const instantPaintCutoffMs = Math.min(instantLast30DaysStartMs, instantLastMonthStartMs);
+
 			const preloaded: SessionFilePreload[] = [];
 			for (const [sessionFile, sessionData] of this.getDeduplicatedCacheEntries()) {
-				if (!sessionData || sessionData.interactions === 0) { continue; }
+				if (!this.isUsableForInstantPaint(sessionData, instantPaintCutoffMs)) { continue; }
 				const stat = { size: sessionData.size ?? 0, mtime: new Date(sessionData.mtime) } as unknown as import('fs').Stats;
 				preloaded.push({
 					sessionFile,
@@ -3289,11 +3311,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * result is known — this method only seeds the fast warm path, it doesn't know discovery's
 	 * outcome yet.
 	 *
+	 * Filtered to entries at or after `cutoffMs` — the same recency window `preloaded` itself is
+	 * bounded to (~30 days) — not the full, snapshot-capped (20,000-entry) cache. The worker pool's
+	 * concurrency is finite and this queue is a simple FIFO with no priority: seeding every cache
+	 * entry regardless of age would let a large, long-lived cache's old-but-still-valid backlog
+	 * occupy every worker ahead of the files that actually matter for this refresh's stats (today/
+	 * last30Days), delaying exactly the fast, relevant results this method exists to speed up. An
+	 * excluded older entry isn't lost — it still exists on disk, so normal streaming discovery finds
+	 * it and its cache hit resolves just as fast, only later in the queue instead of dominating the
+	 * front of it.
+	 *
 	 * Returns the number of paths seeded (for the caller's totalDiscovered count).
 	 */
-	private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, editorSet?: Set<string>): number {
+	private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, cutoffMs: number, editorSet?: Set<string>): number {
 		if (this.isSampleDataModeActive()) { return 0; }
-		const cachedPaths = this.getDeduplicatedCacheEntries().map(([filePath]) => filePath);
+		const cachedPaths = this.getDeduplicatedCacheEntries()
+			.filter(([, data]) => data.mtime >= cutoffMs)
+			.map(([filePath]) => filePath);
 		if (cachedPaths.length === 0) { return 0; }
 		for (const p of cachedPaths) { seen.add(_normalizePathForDedup(p)); }
 		if (editorSet) {
@@ -3379,7 +3413,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Seed the queue from the on-disk cache's known file list before discovery
 		// starts (see seedPreloadQueueFromCache doc comment for why).
 		const seen = new Set<string>();
-		const seededCount = this.seedPreloadQueueFromCache(queue, seen, editorSet);
+		const seededCount = this.seedPreloadQueueFromCache(queue, seen, cutoffMs, editorSet);
 		totalDiscovered += seededCount;
 
 		// Discovery fills the queue via onBatch callback
@@ -3655,11 +3689,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * truncated/incomplete year and, since an empty *or partial* array is truthy, showChart()'s
 	 * `!!this.lastFullDailyStats` / `?? this.lastDailyStats` checks would treat that as complete
 	 * data and get stuck instead of falling back to the real lastDailyStats or retrying on a later,
-	 * successful refresh. A genuine first-ever user with zero session files (sessionFiles and
-	 * preloaded both empty, no discovery error) is unaffected.
+	 * successful refresh. A genuine first-ever user with zero session files (sessionFiles and the
+	 * cache both empty, no discovery error) is unaffected.
+	 *
+	 * "We still have real cached data" is judged by the cache itself, not `preloaded` — `preloaded`
+	 * only holds entries within `fileLoadCutoffMs` (~30 days), far narrower than this 365-day
+	 * backfill. A dormant user with real data older than that window would have an empty `preloaded`
+	 * on a transient empty-discovery run too, and still hit the exact bug this guard exists to avoid
+	 * if only `preloaded` were checked.
 	 */
 	private isDiscoveryUntrustworthyForBackfill(sessionFiles: string[], preloaded: SessionFilePreload[]): boolean {
-		return this.sessionDiscovery.lastDiscoveryHadError || (sessionFiles.length === 0 && preloaded.length > 0);
+		return this.sessionDiscovery.lastDiscoveryHadError
+			|| (sessionFiles.length === 0 && (preloaded.length > 0 || this.cacheManager.cache.size > 0));
 	}
 
 	/** Core discover → parse → compute → render → persist pass for one refresh. */

@@ -136,6 +136,21 @@ test('renderInstantStatsFromCache() renders from the cache alone, with no discov
 	for (const renderCall of ['this.updateStatusBarAndTooltip(stats)', 'this.updateDetailsPanelIfOpen(stats, true)', 'this.updateChartPanelIfOpen(true)']) {
 		assert.ok(body.includes(renderCall), `renderInstantStatsFromCache() must call ${renderCall} so an already-open panel also gets the instant first paint`);
 	}
+
+	// Must compute the same cutoff the real refresh bounds `preloaded` to (Math.min of last30Days/
+	// lastMonth start), and filter every cache entry through isUsableForInstantPaint() with it —
+	// otherwise this provisional paint could include entries the real refresh's own preloaded
+	// excludes, showing a higher number that then visibly drops once the verified refresh lands.
+	assert.ok(body.includes('computeUtcDateRanges(new Date())'),
+		'must compute the same UTC date ranges the real refresh uses to derive fileLoadCutoffMs');
+	assert.ok(/this\.isUsableForInstantPaint\(sessionData, instantPaintCutoffMs\)/.test(body),
+		'must filter each cache entry through isUsableForInstantPaint() with the computed cutoff before including it');
+});
+
+test('isUsableForInstantPaint() requires real interaction data, a finite mtime, and falling within the cutoff window', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private isUsableForInstantPaint(sessionData: SessionFileCache | undefined, cutoffMs: number): sessionData is SessionFileCache {');
+	assert.ok(body.includes('return !!sessionData && sessionData.interactions !== 0 && Number.isFinite(sessionData.mtime) && sessionData.mtime >= cutoffMs;'),
+		'must reject a missing entry, a zero-interaction entry, a non-finite mtime (a malformed persisted record — new Date(...).toISOString() would throw on it deeper in the caller), and an entry older than cutoffMs, in one place');
 });
 
 test('shouldAbandonInstantPaintAfterCacheLoad() checks both sample mode and disposal', () => {
@@ -176,8 +191,8 @@ test('_preloadSessionFiles() seeds the queue from the cache before discovery sta
 	// latch onto that type's braces instead of the function body. Anchor the
 	// marker on the tail of the signature instead, right before the real `{`.
 	const preloadBody = extractBracesBlock(EXTENSION_SRC, 'preloaded: SessionFilePreload[] }> {');
-	assert.ok(preloadBody.includes('this.seedPreloadQueueFromCache(queue, seen, editorSet)'),
-		'_preloadSessionFiles() must seed the queue from the cache before kicking off adapter discovery');
+	assert.ok(preloadBody.includes('this.seedPreloadQueueFromCache(queue, seen, cutoffMs, editorSet)'),
+		'_preloadSessionFiles() must seed the queue from the cache before kicking off adapter discovery, passing through its own cutoffMs so the seed is bounded the same way the rest of this pass is');
 
 	const seedIndex = preloadBody.indexOf('this.seedPreloadQueueFromCache(');
 	const discoveryIndex = preloadBody.indexOf('getCopilotSessionFilesStreaming');
@@ -230,15 +245,22 @@ test('reconcilePreloadedAgainstDiscovery() only trusts a clean, non-empty, non-s
 		'the confirmed-by-discovery comparison must use _normalizePathForDedup() on both sides, matching the dedup key used everywhere else in this method');
 });
 
-test('seedPreloadQueueFromCache() skips sample-data mode, seeds from the deduplicated cache view, normalizes seen keys, and populates editorSet', () => {
-	const body = extractBracesBlock(EXTENSION_SRC, 'private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, editorSet?: Set<string>): number {');
+test('seedPreloadQueueFromCache() skips sample-data mode, seeds from the deduplicated + cutoff-filtered cache view, normalizes seen keys, and populates editorSet', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, cutoffMs: number, editorSet?: Set<string>): number {');
 	const sampleGuardIndex = body.indexOf('if (this.isSampleDataModeActive()) { return 0; }');
 	assert.ok(sampleGuardIndex !== -1, 'must skip seeding entirely in sample-data mode — otherwise real cached sessions get mixed into a screenshot/regression fixture run');
 
 	// Must source cachedPaths from the deduplicated view, not the raw cache Map — otherwise two
 	// path-spelling variants of the same file in the cache both get queued and double-counted.
-	assert.ok(body.includes('this.getDeduplicatedCacheEntries().map(([filePath]) => filePath)'),
+	assert.ok(body.includes('this.getDeduplicatedCacheEntries()'),
 		'cachedPaths must come from getDeduplicatedCacheEntries(), not Array.from(this.cacheManager.cache.keys()) — the raw keys can contain multiple spellings of the same physical file');
+
+	// Must filter by cutoffMs, not seed the entire (up to 20,000-entry) cache unbounded — the
+	// worker pool's concurrency is finite and this queue is a plain FIFO, so an unfiltered seed
+	// would let a large cache's old-but-still-valid backlog occupy every worker ahead of the files
+	// that actually matter for this refresh, delaying relevant results instead of speeding them up.
+	assert.ok(/\.filter\(\(\[, data\]\) => data\.mtime >= cutoffMs\)/.test(body),
+		'must filter cache entries to cutoffMs before seeding — an excluded older entry still exists on disk and arrives via normal streaming discovery instead, just not front-loaded ahead of relevant files');
 
 	assert.ok(/seen\.add\(_normalizePathForDedup\(p\)\)/.test(body),
 		'must normalize cached paths with _normalizePathForDedup() before adding to `seen`, matching the discovery-side check');
@@ -333,10 +355,17 @@ test('the constructor chains the OpenCode DB probe onto _cacheLoadPromise only, 
 		'_cacheLoadPromise must still chain queueMissingOpenCodeDbSessionsFromCache() — the real refresh path (which awaits _cacheLoadPromise) needs the OpenCode DB reconciled before discovery/preload starts');
 });
 
-test('isDiscoveryUntrustworthyForBackfill() detects both the empty-discovery-but-cached-data case and lastDiscoveryHadError', () => {
+test('isDiscoveryUntrustworthyForBackfill() detects the empty-discovery-but-cached-data case (via preloaded OR the raw cache), and lastDiscoveryHadError', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private isDiscoveryUntrustworthyForBackfill(sessionFiles: string[], preloaded: SessionFilePreload[]): boolean {');
-	assert.ok(/return this\.sessionDiscovery\.lastDiscoveryHadError \|\| \(sessionFiles\.length === 0 && preloaded\.length > 0\);/.test(body),
+	assert.ok(/return this\.sessionDiscovery\.lastDiscoveryHadError\s*\|\|\s*\(sessionFiles\.length === 0 && \(preloaded\.length > 0 \|\| this\.cacheManager\.cache\.size > 0\)\);/.test(body),
 		'must detect BOTH the "sessionFiles empty but preloaded non-empty" case AND lastDiscoveryHadError — calculateDailyStats(365, sessionFiles) would otherwise store a truncated/incomplete (but truthy) lastFullDailyStats when only one adapter out of several failed');
+
+	// preloaded alone is not enough: it only holds entries within fileLoadCutoffMs (~30 days), far
+	// narrower than this 365-day backfill. A dormant user with real cached data older than that
+	// window would have an empty `preloaded` too on a transient empty-discovery run, and this guard
+	// must still catch it via the raw cache instead of letting the original bug through.
+	assert.ok(/this\.cacheManager\.cache\.size > 0/.test(body),
+		'must also treat a non-empty cache as "we have real data" even when none of it made it into the narrower preloaded array');
 });
 
 test('_runRefreshCore() skips the one-time full-year chart backfill when discovery is untrustworthy', () => {
