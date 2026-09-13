@@ -290,7 +290,7 @@ import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDe
 
 // --- Stats helpers ---
 import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, computeFallbackDailyRollup as _computeFallbackDailyRollup, type SessionAggregateInput } from '../../src/statsHelpers';
-import { scaleModelUsage, reconcileDebugLogModelUsage } from '../../src/statsHelpers';
+import { scaleModelUsage, reconcileDebugLogModelUsage, addTaskCategoryToDailyEntry as _addTaskCategoryToDailyEntry } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -4435,7 +4435,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (dayKey < cutoffUtcStartKey) { continue; }
 			const dayTokens = (dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens);
 			const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dayKey);
-			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, dayRollup.taskCategoryShares, dayRollup.primaryTaskCategory);
+			// Falls back to the session's overall category (rather than silently dropping to
+			// "Conversation") for a day rollup that predates per-day task classification.
+			const primaryTaskCategory = dayRollup.primaryTaskCategory ?? sessionData.taskCategory;
+			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, dayRollup.taskCategoryShares, primaryTaskCategory);
 			if (!lastDayKey || dayKey > lastDayKey) { lastDayKey = dayKey; }
 		}
 		if (lastDayKey) {
@@ -4524,39 +4527,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (const model of Object.keys(modelUsage)) {
 			entry.editorModelUsage[editorType][model]!.sessions += 1;
 		}
-		this.addTaskCategoryToDailyEntry(entry, tokens, modelUsage, taskCategoryShares, primaryTaskCategory);
-	}
-
-	private addTaskCategoryToDailyEntry(
-		entry: DailyTokenStats,
-		tokens: number,
-		modelUsage: ModelUsage,
-		taskCategoryShares?: TaskCategoryBreakdown,
-		primaryTaskCategory?: TaskCategory
-	): void {
-		if (!entry.taskCategoryTokens) { entry.taskCategoryTokens = {}; }
-		if (!entry.taskCategorySessions) { entry.taskCategorySessions = {}; }
-		if (!entry.taskCategoryModelUsage) { entry.taskCategoryModelUsage = {}; }
-		const shares: Partial<Record<TaskCategory, number>> = taskCategoryShares && Object.keys(taskCategoryShares).length > 0
-			? taskCategoryShares
-			: (primaryTaskCategory ? { [primaryTaskCategory]: 1 } : { Conversation: 1 });
-		for (const [category, shareRaw] of Object.entries(shares)) {
-			const share = Number(shareRaw) || 0;
-			if (share <= 0) { continue; }
-			const cat = category as TaskCategory;
-			entry.taskCategoryTokens[cat] = (entry.taskCategoryTokens[cat] || 0) + (tokens * share);
-			entry.taskCategorySessions[cat] = (entry.taskCategorySessions[cat] || 0) + share;
-			if (!entry.taskCategoryModelUsage[cat]) { entry.taskCategoryModelUsage[cat] = {}; }
-			addModelUsage(entry.taskCategoryModelUsage[cat]!, this.scaledModelUsage(modelUsage, share));
-		}
-		if (primaryTaskCategory) {
-			if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
-			if (!entry.taskCategoryUsage[primaryTaskCategory]) {
-				entry.taskCategoryUsage[primaryTaskCategory] = { tokens: 0, sessions: 0 };
-			}
-			entry.taskCategoryUsage[primaryTaskCategory].tokens += tokens;
-			entry.taskCategoryUsage[primaryTaskCategory].sessions += 1;
-		}
+		// Shared with the periodic-refresh aggregation path (src/statsHelpers.ts) so a fix to the
+		// task-category attribution algorithm can't drift out of sync between the two pipelines.
+		_addTaskCategoryToDailyEntry(entry, tokens, modelUsage, primaryTaskCategory, taskCategoryShares);
 	}
 
 	private addLocToDailyEntry(entry: DailyTokenStats, linesAdded: number, linesRemoved: number, editorType: string, repository: string, languageUsage?: any): void {
