@@ -264,6 +264,7 @@ import {
   extractMcpServerName as _extractMcpServerName,
   normalizePath as _normalizePath,
   normalizePathForDedup as _normalizePathForDedup,
+  dedupeByNormalizedKeyKeepGreatest as _dedupeByNormalizedKeyKeepGreatest,
   normalizeToRepoRoot as _normalizeToRepoRoot,
   getRepoNameFromWorkspacePath as _getRepoNameFromWorkspacePath,
   resolveDebugLogCandidatePaths as _resolveDebugLogCandidatePaths,
@@ -2014,25 +2015,32 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Mirrors SessionDiscovery.tryGetSampleDataFiles()'s effective-sample-dir check, precedence
-	 * AND existence gate: sample mode is active when the local-view-regression override
-	 * (runLocalViewRegression(), the visual-view-diff/screenshot harness) — falling back to the
-	 * aiEngineeringFluency.sampleDataDirectory setting — names a directory that actually exists
-	 * on disk. tryGetSampleDataFiles() returns `undefined` (and SessionDiscovery falls back to
-	 * real adapter discovery) for a configured-but-missing/stale directory; checking only for a
-	 * non-empty string here would disagree with that and wrongly suppress the cache-only instant
-	 * paint and cache-seeded queue on an otherwise normal warm boot. In that mode SessionDiscovery
-	 * bypasses every adapter and returns only the fixture's files — callers that read the real
-	 * on-disk cache directly must not mix real user sessions into what is meant to be a clean,
-	 * deterministic fixture run.
+	 * Mirrors SessionDiscovery.tryGetSampleDataFiles()'s effective-sample-dir check — precedence,
+	 * empty-string handling, AND the directory (not just existence) gate:
+	 *
+	 * - Precedence: `sampleDataDirectoryOverride?.() ?? configured`. The override function
+	 *   (`() => this.localRegressionSampleDataDir`) is always defined once constructed, so `??`
+	 *   only ever falls through to the config setting while the override itself has never been
+	 *   set (`undefined`) — NOT whenever it happens to be falsy. runLocalViewRegression() sets it
+	 *   to `''` (not undefined) while it deliberately tries real discovery first; treating `''` as
+	 *   "no override, fall back to config" (a plain truthy check) disagrees with that and would
+	 *   wrongly suppress the cache-only paint/seeding during that phase whenever the user also
+	 *   happens to have a `sampleDataDirectory` setting configured for something else.
+	 * - tryGetSampleDataFiles() returns `undefined` (falls back to real adapter discovery) for a
+	 *   configured-but-missing/stale directory, or one whose `readdir()` fails (e.g. it names a
+	 *   file, not a directory) — an existence-only check disagrees with both and would wrongly
+	 *   suppress the cache-only instant paint/seeding on an otherwise normal warm boot.
+	 *
+	 * In sample mode SessionDiscovery bypasses every adapter and returns only the fixture's files
+	 * — callers that read the real on-disk cache directly must not mix real user sessions into
+	 * what is meant to be a clean, deterministic fixture run.
 	 */
 	private isSampleDataModeActive(): boolean {
-		const sampleDir = (this.localRegressionSampleDataDir && this.localRegressionSampleDataDir.trim().length > 0)
-			? this.localRegressionSampleDataDir
-			: vscode.workspace.getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory');
+		const overrideValue = this.localRegressionSampleDataDir;
+		const sampleDir = overrideValue !== undefined ? overrideValue : vscode.workspace.getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory');
 		if (!sampleDir || sampleDir.trim().length === 0) { return false; }
 		try {
-			return fs.existsSync(sampleDir.trim());
+			return fs.statSync(sampleDir.trim()).isDirectory();
 		} catch {
 			return false;
 		}
@@ -2052,15 +2060,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * will double-count that file's tokens.
 	 */
 	private getDeduplicatedCacheEntries(): [string, SessionFileCache][] {
-		const winners = new Map<string, [string, SessionFileCache]>();
-		for (const [filePath, data] of this.cacheManager.cache) {
-			const key = _normalizePathForDedup(filePath);
-			const existing = winners.get(key);
-			if (!existing || data.mtime > existing[1].mtime) {
-				winners.set(key, [filePath, data]);
-			}
-		}
-		return Array.from(winners.values());
+		return _dedupeByNormalizedKeyKeepGreatest(this.cacheManager.cache, data => data.mtime);
 	}
 
 	/**

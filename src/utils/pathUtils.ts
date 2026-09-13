@@ -50,6 +50,30 @@ export function normalizePathForDedup(
 }
 
 /**
+ * Collapses `entries` to at most one per normalizePathForDedup() key, keeping whichever value
+ * has the greater `getValue()` (typically an mtime) for a given key. A single logical resource
+ * (a session file, a cache entry) can be recorded more than once under raw-string keys that
+ * differ only in separator/case — e.g. two Windows spellings of the same path — and any caller
+ * that reads such a keyed collection directly, rather than through a path-identity-aware lookup,
+ * must dedupe through this first or it will double-count that resource.
+ */
+export function dedupeByNormalizedKeyKeepGreatest<T>(
+	entries: Iterable<[string, T]>,
+	getValue: (value: T) => number,
+	platform: NodeJS.Platform = process.platform as NodeJS.Platform
+): [string, T][] {
+	const winners = new Map<string, [string, T]>();
+	for (const [key, value] of entries) {
+		const normalizedKey = normalizePathForDedup(key, platform);
+		const existing = winners.get(normalizedKey);
+		if (!existing || getValue(value) > getValue(existing[1])) {
+			winners.set(normalizedKey, [key, value]);
+		}
+	}
+	return Array.from(winners.values());
+}
+
+/**
  * Normalize a session workspace path up to its parent repository root by stripping a trailing
  * agent-worktree segment created by Copilot CLI, Claude Code, or the Copilot App:
  *   "<home>/.copilot/copilot-worktrees/<repo>[/...]" -> "<home>/.copilot/copilot-worktrees/<repo>"

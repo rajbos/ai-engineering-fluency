@@ -40,7 +40,7 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { normalizePathForDedup } from '../../../src/utils/pathUtils';
+import { normalizePathForDedup, dedupeByNormalizedKeyKeepGreatest } from '../../../src/utils/pathUtils';
 
 // Compiled test output lives under out/vscode-extension/test/unit (tsconfig.tests.json's
 // rootDir is the repo root), so __dirname does not sit next to the real source tree —
@@ -128,17 +128,29 @@ test('renderInstantStatsFromCache() renders from the cache alone, with no discov
 	}
 });
 
-test('isSampleDataModeActive() checks both sample-dir sources with the local-regression override taking precedence, and gates on existence', () => {
+test('isSampleDataModeActive() picks the override only when it was actually set (not merely falsy), and gates on being a real directory', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private isSampleDataModeActive(): boolean {');
 	assert.ok(body.includes('this.localRegressionSampleDataDir'),
 		'must check localRegressionSampleDataDir — set by runLocalViewRegression()/the visual-view-diff harness');
 	assert.ok(body.includes("getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory')"),
 		'must check the aiEngineeringFluency.sampleDataDirectory setting — this must mirror SessionDiscovery.tryGetSampleDataFiles()\'s own check exactly, or the two can disagree about whether sample mode is active');
+
+	// SessionDiscovery's real precedence is `sampleDataDirectoryOverride?.() ?? configured` — the
+	// override function is always defined once constructed, so `??` only falls through to config
+	// when the override's *return value* is nullish. runLocalViewRegression() sets
+	// localRegressionSampleDataDir to '' (not undefined) while deliberately trying real discovery
+	// first; a plain truthy check treats '' the same as "no override" and wrongly falls back to
+	// config, disagreeing with SessionDiscovery whenever a sampleDataDirectory setting also
+	// happens to be configured.
+	assert.ok(/overrideValue !== undefined \? overrideValue :/.test(body),
+		'must select the override with an explicit !== undefined check, not a truthy check — otherwise runLocalViewRegression()\'s deliberate \'\' override is wrongly treated as absent');
+
 	// tryGetSampleDataFiles() returns undefined (falls back to real discovery) for a
-	// configured-but-missing directory, not just an empty one — a configured stale/deleted
-	// sampleDataDirectory must not silently disable the cache-only paint on a normal warm boot.
-	assert.ok(/fs\.existsSync\(sampleDir\.trim\(\)\)/.test(body),
-		'must gate on the directory actually existing on disk, matching tryGetSampleDataFiles()\'s own existence check — a non-empty-string-only check disagrees with it for a stale/deleted configured directory');
+	// configured-but-missing directory, or one whose readdir() fails (e.g. it names a file, not a
+	// directory) — a configured stale/deleted/non-directory sampleDataDirectory must not silently
+	// disable the cache-only paint on a normal warm boot.
+	assert.ok(/fs\.statSync\(sampleDir\.trim\(\)\)\.isDirectory\(\)/.test(body),
+		'must gate on the path actually being a directory (fs.statSync(...).isDirectory()), not merely existing — existsSync alone would also true for a misconfigured path pointing at a file');
 });
 
 test('_preloadSessionFiles() seeds the queue from the cache before discovery starts, dedupes with path normalization, and never discards seeded results on empty discovery', () => {
@@ -220,38 +232,32 @@ test('seedPreloadQueueFromCache() skips sample-data mode, seeds from the dedupli
 
 // A structural "does the source call getDeduplicatedCacheEntries()" assertion (see the tests
 // above) can't tell you the dedup itself is correct — only that something with that name got
-// called. This proves the actual behavior both consumers depend on: given a cache with two
-// path-spelling variants of the same physical file, exactly one entry (the newer by mtime)
-// survives. getDeduplicatedCacheEntries() is a private method on CopilotTokenTracker, which
-// can't be instantiated outside a full VS Code host (see the file header), so this reimplements
-// its exact, small algorithm against a plain Map fixture — a stand-in for `cacheManager.cache`
-// — to verify the algorithm itself, mirroring how normalizePathForDedup()'s own behavior is
-// proven directly in utils-pathUtils.test.ts rather than only asserted-as-called here.
-test('getDeduplicatedCacheEntries()\'s dedup-by-normalized-key-keep-newer-mtime algorithm keeps exactly one winner per physical file', () => {
+// called, and a prior version of this test reimplemented the algorithm locally instead of
+// exercising the real one, so a regression in production (e.g. keeping the older entry, or
+// dropping normalization) would still have passed. getDeduplicatedCacheEntries() is a private
+// method on CopilotTokenTracker, which can't be instantiated outside a full VS Code host (see the
+// file header), but the dedup algorithm itself now lives in the shared, side-effect-free
+// dedupeByNormalizedKeyKeepGreatest() (src/utils/pathUtils.ts) that getDeduplicatedCacheEntries()
+// delegates to — so this calls that exact production function directly.
+test('dedupeByNormalizedKeyKeepGreatest() — the production algorithm getDeduplicatedCacheEntries() delegates to — keeps exactly one winner per physical file', () => {
 	type MinimalCacheEntry = { mtime: number };
-	function dedupeByNormalizedKeyKeepNewer(cache: Map<string, MinimalCacheEntry>): [string, MinimalCacheEntry][] {
-		const winners = new Map<string, [string, MinimalCacheEntry]>();
-		for (const [filePath, data] of cache) {
-			const key = normalizePathForDedup(filePath, 'win32');
-			const existing = winners.get(key);
-			if (!existing || data.mtime > existing[1].mtime) {
-				winners.set(key, [filePath, data]);
-			}
-		}
-		return Array.from(winners.values());
-	}
-
 	const cache = new Map<string, MinimalCacheEntry>([
 		['C:\\Users\\dev\\.copilot\\session.json', { mtime: 1000 }],
 		['c:/Users/dev/.copilot/session.json', { mtime: 2000 }],
 		['C:\\Users\\dev\\.claude\\other.json', { mtime: 500 }],
 	]);
 
-	const deduped = dedupeByNormalizedKeyKeepNewer(cache);
+	const deduped = dedupeByNormalizedKeyKeepGreatest(cache, data => data.mtime, 'win32');
 	assert.equal(deduped.length, 2, 'two spelling variants of the same physical file must collapse to one entry');
 	const sessionEntry = deduped.find(([, data]) => data.mtime === 2000 || data.mtime === 1000);
 	assert.ok(sessionEntry, 'the session.json entry must survive under one of its two spellings');
 	assert.equal(sessionEntry![1].mtime, 2000, 'must keep the newer-mtime variant, not an arbitrary/first one');
+});
+
+test('getDeduplicatedCacheEntries() delegates to the shared dedupeByNormalizedKeyKeepGreatest() helper', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private getDeduplicatedCacheEntries(): [string, SessionFileCache][] {');
+	assert.ok(body.includes('_dedupeByNormalizedKeyKeepGreatest(this.cacheManager.cache, data => data.mtime)'),
+		'must delegate to the shared, independently-tested dedupeByNormalizedKeyKeepGreatest() helper rather than reimplementing the dedup loop inline');
 });
 
 // A structural "does the source call _normalizePathForDedup()" assertion (see the tests above)
