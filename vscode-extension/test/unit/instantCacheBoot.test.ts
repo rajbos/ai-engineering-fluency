@@ -32,6 +32,7 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { normalizePathForDedup } from '../../../src/utils/pathUtils';
 
 // Compiled test output lives under out/vscode-extension/test/unit (tsconfig.tests.json's
 // rootDir is the repo root), so __dirname does not sit next to the real source tree —
@@ -53,6 +54,15 @@ function extractBracesBlock(source: string, marker: string): string {
 		}
 	}
 	throw new Error(`unbalanced braces while scanning for marker: ${marker}`);
+}
+
+/** Slice the source between two unique markers (inclusive of both), for spans that aren't a single balanced-brace block (e.g. a few statements inside a larger function). */
+function sliceBetween(source: string, startMarker: string, endMarker: string): string {
+	const startIndex = source.indexOf(startMarker);
+	assert.notEqual(startIndex, -1, `start marker not found in extension.ts: ${startMarker}`);
+	const endMarkerIndex = source.indexOf(endMarker, startIndex);
+	assert.notEqual(endMarkerIndex, -1, `end marker not found after start marker in extension.ts: ${endMarker}`);
+	return source.slice(startIndex, endMarkerIndex + endMarker.length);
 }
 
 test('scheduleInitialUpdate() kicks off renderInstantStatsFromCache() before the real refresh', () => {
@@ -155,4 +165,43 @@ test('seedPreloadQueueFromCache() skips sample-data mode, normalizes seen keys, 
 		'must call detectEditorSource() for cache-seeded paths, or the loading UI editor pills will silently miss editors only known from the cache');
 	assert.ok(body.includes('queue.push(...cachedPaths)'), 'must push the cached (un-normalized) paths onto the shared queue — downstream stat/parse code needs the real path, not the dedup key');
 	assert.ok(body.includes('return cachedPaths.length'), 'must return the seeded count so the caller can fold it into totalDiscovered');
+});
+
+// A structural "does the source call _normalizePathForDedup()" assertion (see the tests above)
+// can't tell you the function actually collapses equivalent paths to the same key — only that
+// something with that name got called. This proves the actual invariant the dedup fix depends
+// on: on a non-Linux platform, a cache-recorded key and a freshly discovered key for the same
+// physical file that differ only in drive-letter case or separator style normalize identically,
+// so they can never coexist in the `seen` set as two "different" files. normalizePathForDedup()
+// itself already has full behavioral coverage in utils-pathUtils.test.ts; this test exists to
+// make the tie to *this* PR's dedup contract explicit rather than assumed.
+test('normalizePathForDedup() collapses the exact kind of equivalent-path pair the cache/discovery dedup relies on', () => {
+	const cacheRecordedKey = normalizePathForDedup('C:\\Users\\dev\\.copilot\\session.json', 'win32');
+	const freshlyDiscoveredKey = normalizePathForDedup('c:/Users/dev/.copilot/session.json', 'win32');
+	assert.equal(cacheRecordedKey, freshlyDiscoveredKey,
+		'a cached path and a freshly discovered path for the same file that differ only in drive-letter case/separator must normalize to the same seen-set key, or the file gets queued and counted twice');
+});
+
+test('the constructor chains the OpenCode DB probe onto _cacheLoadPromise only, never onto _cacheFileLoadPromise', () => {
+	// _cacheFileLoadPromise must resolve as soon as the on-disk snapshot itself is read, with
+	// nothing else chained onto it — renderInstantStatsFromCache() awaits exactly this promise,
+	// so if the OpenCode probe (or any other filesystem/DB I/O) were ever chained onto it too,
+	// the "instant, no I/O" guarantee of the cache-only first paint would silently regress.
+	const fileLoadBlock = sliceBetween(
+		EXTENSION_SRC,
+		'this._cacheFileLoadPromise = cacheFileLoad.finally(() => {',
+		'this._cacheFileLoadPromise = undefined;\n\t\t});'
+	);
+	assert.ok(!fileLoadBlock.includes('queueMissingOpenCodeDbSessionsFromCache'),
+		'_cacheFileLoadPromise must not chain queueMissingOpenCodeDbSessionsFromCache() (or any other I/O) — renderInstantStatsFromCache() depends on this promise resolving with no filesystem/DB work beyond the raw snapshot read');
+
+	// _cacheLoadPromise keeps its original, fuller meaning (used by the real refresh path, which
+	// legitimately needs the OpenCode reconciliation done before it starts discovery/preload).
+	const fullLoadBlock = sliceBetween(
+		EXTENSION_SRC,
+		'this._cacheLoadPromise = cacheFileLoad.then(async () => {',
+		'this._cacheLoadPromise = undefined;\n\t\t});'
+	);
+	assert.ok(fullLoadBlock.includes('queueMissingOpenCodeDbSessionsFromCache'),
+		'_cacheLoadPromise must still chain queueMissingOpenCodeDbSessionsFromCache() — the real refresh path (which awaits _cacheLoadPromise) needs the OpenCode DB reconciled before discovery/preload starts');
 });
