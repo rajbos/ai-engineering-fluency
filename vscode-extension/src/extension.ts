@@ -5020,12 +5020,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		mergeDbContextPressure(period, info, alreadyCounted, compacted);
 	}
 
-	/**
-	 * Enrich the usage periods and today's session list with context-window
-	 * state from data.db: the selected window limit, the last known fill, and
-	 * the context tier (data.db also covers sessions whose events.jsonl lacks
-	 * a contextTier). Errors are swallowed — this is optional enrichment only.
-	 */
 	/** Collect activity key + tier presence per Copilot CLI session uuid in the loaded window. */
 	private _collectCliSessionEntries(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
@@ -5089,6 +5083,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 		} catch { /* optional enrichment — suppress */ }
 	}
 
+	/**
+	 * Enrich the usage periods and the given session summary lists with
+	 * context-window state from data.db: the selected window limit, the last
+	 * known fill, and the context tier (data.db also covers sessions whose
+	 * events.jsonl lacks a contextTier).
+	 *
+	 * `sessionLists` covers today's list *and* the Recent Sessions lookback
+	 * buckets, so the per-session fill the "Context" column and its near-limit
+	 * filter read is populated for every period the tab can show, not only
+	 * today. Errors are swallowed — this is optional enrichment only.
+	 */
 	private async enrichContextWindowFromAppData(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
 		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; lastMonthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string; lastMonthUtcStartKey: string; lastMonthUtcEndKey: string },

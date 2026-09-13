@@ -19,9 +19,21 @@ function session(overrides: Partial<SessionContextFill> = {}): SessionContextFil
 // Fill percentage
 // ---------------------------------------------------------------------------
 
-test('getSessionContextFillPercent: returns the rounded fill percentage', () => {
+test('getSessionContextFillPercent: returns the fill percentage', () => {
 	assert.equal(getSessionContextFillPercent(session({ contextWindowLimit: 200_000, contextReachedTokens: 150_000 })), 75);
 	assert.equal(getSessionContextFillPercent(session({ contextWindowLimit: 128_000, contextReachedTokens: 64_500 })), 50);
+});
+
+test('getSessionContextFillPercent: never displays a percentage the near-limit rule would not flag', () => {
+	// 159,999 / 200,000 is 79.9995%. Rounding to nearest would show "80%" on a
+	// row the 80% rule leaves unflagged and the filter excludes — the column
+	// would contradict the badge beside it. Flooring keeps the two honest.
+	const justUnder = session({ contextWindowLimit: 200_000, contextReachedTokens: 159_999 });
+	assert.equal(getSessionContextFillPercent(justUnder), 79);
+	assert.equal(isSessionNearContextLimit(justUnder), false);
+	const atThreshold = session({ contextWindowLimit: 200_000, contextReachedTokens: 160_000 });
+	assert.equal(getSessionContextFillPercent(atThreshold), 80);
+	assert.equal(isSessionNearContextLimit(atThreshold), true);
 });
 
 test('getSessionContextFillPercent: clamps overshoot at 100%', () => {
@@ -93,10 +105,14 @@ test('isSessionNearContextLimit agrees with the sessionsNearLimit aggregate', ()
 		};
 		mergeDbContextPressure(period, info, false, row.compacted);
 	}
-	const perSessionCount = countSessionsNearContextLimit(rows.map(r => ({
+	const fills = rows.map(r => ({
 		contextWindowLimit: r.limit,
 		contextReachedTokens: r.reached,
 		...(r.compacted ? { truncationCount: 1 } : {}),
-	})));
-	assert.equal(perSessionCount, period.contextPressure!.sessionsNearLimit);
+	}));
+	assert.equal(countSessionsNearContextLimit(fills), period.contextPressure!.sessionsNearLimit);
+	// The aggregate's "fullest session" figure comes from the same helper as the
+	// per-session column, so the two can never report different percentages.
+	const worst = Math.max(...fills.map(f => getSessionContextFillPercent(f) ?? 0));
+	assert.equal(period.contextPressure!.worstFillPercent, worst);
 });

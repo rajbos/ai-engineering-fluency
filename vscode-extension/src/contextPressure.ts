@@ -16,7 +16,7 @@
  * to keep `sessionsConsidered` a true session count. Without it,
  * `sessionsNearLimit` could exceed `sessionsConsidered`.
  */
-import { CONTEXT_NEAR_LIMIT_RATIO } from '../../src/types';
+import { getSessionContextFillPercent, isSessionNearContextLimit } from '../../src/utils/contextFill';
 import type { UsageAnalysisPeriod } from '../../src/types';
 import type { SessionFileCache } from '../../src/types';
 import type { SessionContextWindow } from './copilotAppData';
@@ -77,7 +77,13 @@ export function mergeDbContextPressure(
 	if (!alreadyCounted) { cp.sessionsConsidered++; }
 	if (!hasFill) { return; }
 	cp.sessionsWithFillData++;
-	const fillPercent = Math.min(100, Math.round((reached! / limit!) * 100));
+	// Both the fill percentage and the near-limit rule come from the shared
+	// helper the Recent Sessions column and its filter use, so this counter and
+	// the list the insight links to can never answer differently. `compacted`
+	// arrives as its own flag here rather than on the row, so it is mapped onto
+	// the field the shared predicate reads.
+	const fill = { contextWindowLimit: limit!, contextReachedTokens: reached!, truncationCount: compacted ? 1 : 0 };
+	const fillPercent = getSessionContextFillPercent(fill)!;
 	if (fillPercent > (cp.worstFillPercent ?? 0)) { cp.worstFillPercent = fillPercent; }
-	if (!compacted && reached! >= limit! * CONTEXT_NEAR_LIMIT_RATIO) { cp.sessionsNearLimit++; }
+	if (isSessionNearContextLimit(fill)) { cp.sessionsNearLimit++; }
 }

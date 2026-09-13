@@ -5962,10 +5962,24 @@ function applySessionsTabPreset(preset: any): void {
 	sessionFilterVendors.clear();
 	sessionFilterModels.clear();
 	sessionFilterHydraFusionOnly = false;
-	enabledSessionColumns.add('contextFill');
+	enableSessionColumn('contextFill');
 	if (preset.lookback && PERIOD_LABELS[preset.lookback as Period]) {
 		sessionsLookback = preset.lookback as SessionsLookback;
 	}
+}
+
+/**
+ * Turns a column on in module state *and* in the already-rendered Columns menu.
+ *
+ * The menu is built once with the tab panel and sits outside `#sessions-panel-body`,
+ * so a re-render of the table never rebuilds it: flipping only the state would leave
+ * the checkbox unticked next to a visible column, and the next click on it would
+ * toggle the opposite of what it shows.
+ */
+function enableSessionColumn(id: SessionColumnId): void {
+	enabledSessionColumns.add(id);
+	const checkbox = document.querySelector<HTMLInputElement>(`#sessions-columns-menu input[data-column="${id}"]`);
+	if (checkbox) { checkbox.checked = true; }
 }
 
 function handleSwitchTab(message: any): void {

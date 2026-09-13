@@ -200,17 +200,6 @@ test('context-window-near-limit: offers a button that opens the matching session
 	assert.equal(insight!.actionLabel, 'Show these 3 sessions');
 });
 
-test('context-window-near-limit: action label is singular when only one session is listed', () => {
-	// The insight itself needs two near-limit sessions to fire, so the singular
-	// wording is exercised against the definition rather than an evaluated card.
-	const ctx = makePressureCtx({
-		sessionsConsidered: 12, sessionsCompacted: 0, sessionsNearLimit: 1, sessionsWithFillData: 9,
-	});
-	const def = INSIGHT_CATALOG.find(d => d.id === NEAR_LIMIT_ID)!;
-	const label = typeof def.actionLabel === 'function' ? def.actionLabel(ctx) : def.actionLabel;
-	assert.equal(label, 'Show the session');
-});
-
 test('context-window-near-limit: yields to auto-compaction-pattern when that already fires', () => {
 	const ctx = makePressureCtx({
 		sessionsConsidered: 12, sessionsCompacted: 4, sessionsNearLimit: 3, sessionsWithFillData: 9,

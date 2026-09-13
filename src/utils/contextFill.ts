@@ -25,13 +25,18 @@ export interface SessionContextFill {
 /**
  * How full a session's context window got, as a 0-100 percentage, or undefined
  * when the session carries no measured fill (only Copilot CLI's `data.db`
- * records the fill/limit pair). Clamped at 100 like the aggregate counter.
+ * records the fill/limit pair). Clamped at 100.
+ *
+ * Rounded *down*, not to nearest, so the number shown can never contradict the
+ * near-limit badge beside it: at 159,999 of 200,000 the raw ratio is 79.9995%,
+ * which rounding to nearest would display as "80%" on a row the 80% rule
+ * deliberately leaves unflagged and the filter excludes.
  */
 export function getSessionContextFillPercent(session: SessionContextFill): number | undefined {
 	const limit = session.contextWindowLimit;
 	const reached = session.contextReachedTokens;
 	if (!limit || !reached || reached <= 0) { return undefined; }
-	return Math.min(100, Math.round((reached / limit) * 100));
+	return Math.min(100, Math.floor((reached / limit) * 100));
 }
 
 /**
