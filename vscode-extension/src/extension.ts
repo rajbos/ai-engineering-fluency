@@ -431,7 +431,7 @@ export function defaultSumBillingGroupCosts(billingGroupCosts: Record<string, nu
 }
 
 /** The computed-stat caches that carry a generation stamp. */
-export type ComputedStatsKey = 'fullDaily' | 'usage' | 'sessionInputs';
+export type ComputedStatsKey = 'daily' | 'fullDaily' | 'usage' | 'sessionInputs';
 
 /**
  * Whether a computed-stat cache stamped at `stampedGeneration` may still be read.
@@ -814,6 +814,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * so `efficiencyBuildGuards.test.ts` asserts the fields appear nowhere but their writes and
 	 * these accessors.
 	 */
+	private get currentDailyStats(): DailyTokenStats[] | undefined {
+		return isComputedStatsCurrent(this._statsGeneration.daily, this._cacheGeneration) ? this.lastDailyStats : undefined;
+	}
 	private get currentFullDailyStats(): DailyTokenStats[] | undefined {
 		return isComputedStatsCurrent(this._statsGeneration.fullDaily, this._cacheGeneration) ? this.lastFullDailyStats : undefined;
 	}
@@ -1560,7 +1563,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async computeRegressionStats(dataSourceLabel: string, sessionFiles: string[]): Promise<{ detailedStats: any; dailyStats: any; usageStats: any; maturityData: any; diagnosticReport: string; fluencyLevelData: any; chartTotals: any }> {
 		const detailedStats = await this.updateTokenStats(true);
 		if (!detailedStats) { throw new Error(`Failed to calculate detailed stats from ${dataSourceLabel}.`); }
-		const dailyStats = this.lastDailyStats ?? await this.calculateDailyStats();
+		const dailyStats = this.currentDailyStats ?? await this.calculateDailyStats();
 		const usageStats = await this.calculateUsageAnalysisStats(false);
 		const maturityData = await this.calculateMaturityScores(false);
 		const diagnosticReport = await this.generateDiagnosticReport();
@@ -1707,6 +1710,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('Reloading token statistics...');
 			await this.updateTokenStats();
 			this.log('Token statistics reloaded successfully.');
+
+			// The Efficiency panel is not part of that refresh — _runRefreshCore() publishes to the
+			// details, chart, analysis and environmental panels, not this one — and showEfficiency()
+			// returns early for an already-open panel. Without this, an open Efficiency view keeps
+			// showing pre-clear numbers indefinitely until the user clicks Refresh. Detached
+			// deliberately: the rebuild is a full walk, and the panel puts up its own loading screen
+			// with live progress while it runs, so there is nothing for clearCache() to wait on.
+			if (this.efficiencyPanel) {
+				this.log('⚡ Rebuilding the open Efficiency view after the clear...');
+				void this.refreshEfficiencyPanel();
+			}
 		} catch (error) {
 			this.error('Error clearing cache:', error);
 			vscode.window.showErrorMessage('Failed to clear cache: ' + error);
@@ -2293,6 +2307,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private async renderInstantStatsFromCache(): Promise<void> {
+		// Captured before any await: what this paints is only as current as the cache it started
+		// from, so a clearCache() landing mid-aggregation must leave the stamp behind it.
+		const startedAtGeneration = this._cacheGeneration;
 		try {
 			// Sample-data mode (screenshot/regression fixtures, see runLocalViewRegression()
 			// and the aiEngineeringFluency.sampleDataDirectory setting) intentionally bypasses
@@ -2343,6 +2360,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (this._hasCompletedRealRefresh || this._disposed || this.isSampleDataModeActive()) { return; }
 			this.lastDetailedStats = stats;
 			this.lastDailyStats = dailyStats;
+			this._statsGeneration.daily = startedAtGeneration;
 			this.mergeIntoFullDailyStats(dailyStats);
 			this.updateStatusBarAndTooltip(stats);
 			this.updateDetailsPanelIfOpen(stats, true);
@@ -3926,8 +3944,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * adapter throws, even if other adapters still returned a non-empty partial sessionFiles list.
 	 * Either way, calculateDailyStats(365, sessionFiles) would compute and store a
 	 * truncated/incomplete year and, since an empty *or partial* array is truthy, showChart()'s
-	 * `!!this.currentFullDailyStats` / `?? this.lastDailyStats` checks would treat that as complete
-	 * data and get stuck instead of falling back to the real lastDailyStats or retrying on a later,
+	 * `!!this.currentFullDailyStats` / `?? this.currentDailyStats` checks would treat that as complete
+	 * data and get stuck instead of falling back to the real 30-day stats or retrying on a later,
 	 * successful refresh. A genuine first-ever user with zero session files (sessionFiles and the
 	 * cache both empty, no discovery error) is unaffected.
 	 *
@@ -3945,6 +3963,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Core discover → parse → compute → render → persist pass for one refresh. */
 	private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {
 		this.log(isLeader ? 'Updating token stats (leader)...' : 'Updating token stats (follower)...');
+		// Captured before the preload: this run's output belongs to the generation its inputs were
+		// gathered in, not the one each later calculation starts in (see calculateUsageAnalysisStats).
+		const startedAtGeneration = this._cacheGeneration;
 
 		// Reset checkpoint counters at the start of each refresh cycle
 		if (isLeader) {
@@ -3986,14 +4007,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// already started being published, or it can overwrite an already-correct status bar.
 		this._hasCompletedRealRefresh = true;
 		this.lastDailyStats = dailyStats;
+		this._statsGeneration.daily = startedAtGeneration;
 		this.mergeIntoFullDailyStats(dailyStats);
 
 		this.updateStatusBarAndTooltip(detailedStats);
 
 		this.updateDetailsPanelIfOpen(detailedStats, silent);
 		this.updateChartPanelIfOpen(silent);
-		await this.updateAnalysisPanelIfOpen(silent, preloaded);
-		await this.computeAndUploadFluencyScore(silent, preloaded);
+		await this.updateAnalysisPanelIfOpen(silent, preloaded, startedAtGeneration);
+		await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);
 		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
 		await this.evaluateAndSurfaceInsights();
 
@@ -4415,8 +4437,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private updateChartPanelIfOpen(silent: boolean): void {
-		if (!this.chartPanel || (!this.currentFullDailyStats && !this.lastDailyStats)) { return; }
-		const chartStats = this.currentFullDailyStats ?? this.lastDailyStats!;
+		if (!this.chartPanel || (!this.currentFullDailyStats && !this.currentDailyStats)) { return; }
+		const chartStats = this.currentFullDailyStats ?? this.currentDailyStats!;
 		if (silent) {
 			void this.chartPanel.webview.postMessage({ command: 'updateChartData', data: { ...this.buildChartData(chartStats), compactNumbers: this.getCompactNumbersSetting(), monthlyBudget: this.getEffectiveMonthlyBudget() } });
 		} else {
@@ -4424,9 +4446,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private async updateAnalysisPanelIfOpen(silent: boolean, preloaded?: SessionFilePreload[]): Promise<void> {
+	private async updateAnalysisPanelIfOpen(silent: boolean, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<void> {
 		if (!this.analysisPanel) { return; }
-		const analysisStats = await this.calculateUsageAnalysisStats(false, preloaded);
+		const analysisStats = await this.calculateUsageAnalysisStats(false, preloaded, originGeneration);
 		if (silent) {
 			// Reuse the same payload builder as the full-refresh paths (_buildAnalysisUpdateData)
 			// so every field the webview renders (correctionReport, repeatedTasks, curationAnalysis, …)
@@ -4444,9 +4466,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private async computeAndUploadFluencyScore(silent: boolean, preloaded?: SessionFilePreload[]): Promise<void> {
+	private async computeAndUploadFluencyScore(silent: boolean, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<void> {
 		const freshMaturityData = (!silent || this.maturityPanel)
-			? await this.calculateMaturityScores(false, preloaded)
+			? await this.calculateMaturityScores(false, preloaded, originGeneration)
 			: undefined;
 		if (this.maturityPanel && !silent && freshMaturityData) {
 			this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, freshMaturityData);
@@ -5050,8 +5072,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (this.environmentalPanel) {
 			this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, stats);
 		}
-		if (this.chartPanel && (this.currentFullDailyStats || this.lastDailyStats)) {
-			this.chartPanel.webview.html = this.getChartHtml(this.chartPanel.webview, this.currentFullDailyStats ?? this.lastDailyStats!);
+		if (this.chartPanel && (this.currentFullDailyStats || this.currentDailyStats)) {
+			this.chartPanel.webview.html = this.getChartHtml(this.chartPanel.webview, this.currentFullDailyStats ?? this.currentDailyStats!);
 		}
 		const usageForPanel = this.currentUsageAnalysisStats;
 		if (this.analysisPanel && usageForPanel) {
@@ -5283,13 +5305,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Calculate usage analysis statistics for today and last 30 days
 	 * @param useCache If true, return cached stats if available. If false, force recalculation.
 	 */
-	private async calculateUsageAnalysisStats(useCache = true, preloaded?: SessionFilePreload[]): Promise<UsageAnalysisStats> {
+	/**
+	 * `originGeneration` is the generation the caller's `preloaded` entries were gathered in. It
+	 * exists because stamping with this function's own start would be wrong for a refresh: the
+	 * entries can predate a clear that landed while the refresh was still preloading, and a
+	 * calculation starting *after* that clear would otherwise stamp pre-clear inputs as current.
+	 * Callers that pass no preloaded data have nothing older than this call to account for.
+	 */
+	private async calculateUsageAnalysisStats(useCache = true, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<UsageAnalysisStats> {
 		const cachedUsage = this.currentUsageAnalysisStats;
 		if (useCache && cachedUsage) {
 			this.log('🔍 [Usage Analysis] Using cached stats');
 			return cachedUsage;
 		}
-		const startedAtGeneration = this._cacheGeneration;
+		const startedAtGeneration = originGeneration ?? this._cacheGeneration;
 		const now = new Date();
 		const { todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(now);
 		const cutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
@@ -8581,7 +8610,7 @@ private computeFallbackDailyRollup(
 		// this falls back to the 30-day cache (or triggers a fresh full-year calculation below)
 		// instead of rendering stale data.
 		const hasFullData = !!this.currentFullDailyStats;
-		const initialStats = this.currentFullDailyStats ?? this.lastDailyStats ?? [];
+		const initialStats = this.currentFullDailyStats ?? this.currentDailyStats ?? [];
 
 		// Create webview panel now so the tab appears without waiting for I/O
 		this.chartPanel = vscode.window.createWebviewPanel(
@@ -9592,7 +9621,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 * Overall stage = median of the 6 category scores.
 	 * @param useCache If true, use cached usage stats. If false, force recalculation.
 	 */
-	private async calculateMaturityScores(useCache = true, preloaded?: SessionFilePreload[]): Promise<{
+	private async calculateMaturityScores(useCache = true, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<{
 		overallStage: number;
 		overallLabel: string;
 		categories: { category: string; icon: string; stage: number; evidence: string[]; tips: string[] }[];
@@ -9600,7 +9629,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		lastUpdated: string;
 		agenticTrend?: AgenticTrendPoint[];
 	}> {
-		return _calculateMaturityScores(this._lastCustomizationMatrix, (useCache) => this.calculateUsageAnalysisStats(useCache, preloaded), useCache, this._copilotPlanResolved?.isMCPEnabled);
+		return _calculateMaturityScores(this._lastCustomizationMatrix, (useCache) => this.calculateUsageAnalysisStats(useCache, preloaded, originGeneration), useCache, this._copilotPlanResolved?.isMCPEnabled);
 	}
 
 	/**
@@ -10548,6 +10577,11 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				seen = editors;
 				report(completed, total);
 			});
+			// Announced *after* the walk, not before it. Before, it would pin the bar above
+			// parsing's band and freeze it for the whole parse; after, it is a step up from 85%
+			// and the phase the PR advertises is shown on the cold open too, not only when the
+			// year was already cached.
+			this.postEfficiencyStep(send, stepPct.daily, l10n.t('loading.efficiency.dailyActivity'));
 		}
 		this.postEfficiencyStep(send, stepPct.usage, l10n.t('loading.efficiency.usageAnalysis'));
 		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
@@ -11120,13 +11154,15 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
   }
 
   private async getLocalStatsForWindow(lookbackDays: number): Promise<{ localTokens: number | undefined; localInteractions: number | undefined }> {
+    const startedAtGeneration = this._cacheGeneration;
     try {
       const { dailyStats: freshDailyStats } = await this.calculateDetailedStats(undefined);
       this.lastDailyStats = freshDailyStats;
+      this._statsGeneration.daily = startedAtGeneration;
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - lookbackDays);
       const cutoffStr = toLocalDayKey(cutoffDate);
-      const inWindow = (this.lastDailyStats ?? []).filter(d => d.date >= cutoffStr);
+      const inWindow = freshDailyStats.filter(d => d.date >= cutoffStr);
       return { localTokens: inWindow.reduce((sum, d) => sum + d.tokens, 0), localInteractions: inWindow.reduce((sum, d) => sum + d.interactions, 0) };
     } catch { return { localTokens: undefined, localInteractions: undefined }; }
   }

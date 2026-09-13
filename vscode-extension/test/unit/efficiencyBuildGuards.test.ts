@@ -227,6 +227,7 @@ test('wiring: every computed-stat cache is stamped with the generation its build
 	// Captured before the first await, never re-read at the write — re-reading would stamp a
 	// pre-clear result with the *post*-clear generation and make it look current.
 	for (const marker of [
+		'this._statsGeneration.daily = startedAtGeneration;',
 		'this._statsGeneration.fullDaily = startedAtGeneration;',
 		'this._statsGeneration.usage = startedAtGeneration;',
 		'this._statsGeneration.sessionInputs = startedAtGeneration;',
@@ -234,9 +235,21 @@ test('wiring: every computed-stat cache is stamped with the generation its build
 		assert.ok(EXTENSION_SRC.includes(marker), `missing generation stamp: ${marker}`);
 	}
 	assert.equal(
-		EXTENSION_SRC.split('const startedAtGeneration = this._cacheGeneration;').length - 1,
-		3,
-		'each of the three aggregation passes must capture the generation before its first await',
+		EXTENSION_SRC.split('const startedAtGeneration = ').length - 1,
+		6,
+		'every producer of a stamped cache must capture the generation before its first await',
+	);
+	// A refresh's results belong to the generation its *inputs* were gathered in, not the one in
+	// effect when a particular calculation happens to start. calculateUsageAnalysisStats() can be
+	// handed preloaded entries that predate a clear, so it prefers the caller's origin generation.
+	assert.ok(
+		EXTENSION_SRC.includes('const startedAtGeneration = originGeneration ?? this._cacheGeneration;'),
+		'calculateUsageAnalysisStats() must stamp with the caller-supplied origin generation when it has one',
+	);
+	assert.ok(
+		EXTENSION_SRC.includes('await this.updateAnalysisPanelIfOpen(silent, preloaded, startedAtGeneration);')
+		&& EXTENSION_SRC.includes('await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);'),
+		'_runRefreshCore() must pass its pre-preload generation down both paths that consume preloaded',
 	);
 	assert.ok(
 		!/_statsGeneration\.\w+ = this\._cacheGeneration/.test(EXTENSION_SRC),
@@ -246,6 +259,7 @@ test('wiring: every computed-stat cache is stamped with the generation its build
 
 test('wiring: every computed-stat cache is reachable only through a generation-guarded accessor', () => {
 	for (const [accessor, key, field] of [
+		['currentDailyStats', 'daily', 'lastDailyStats'],
 		['currentFullDailyStats', 'fullDaily', 'lastFullDailyStats'],
 		['currentUsageAnalysisStats', 'usage', 'lastUsageAnalysisStats'],
 		['currentEfficiencySessionInputs', 'sessionInputs', 'lastEfficiencySessionInputs'],
@@ -292,7 +306,7 @@ test('wiring: the raw computed-stat fields are never read outside their accessor
 	// raw field must be an assignment to it or the single read inside its own accessor — anything
 	// else is a consumer silently opted out of the generation check, which is how this guard was
 	// half-applied the first time.
-	for (const field of ['lastFullDailyStats', 'lastUsageAnalysisStats', 'lastEfficiencySessionInputs']) {
+	for (const field of ['lastDailyStats', 'lastFullDailyStats', 'lastUsageAnalysisStats', 'lastEfficiencySessionInputs']) {
 		const offenders = EXTENSION_SRC.split('\n')
 			.map((line, i) => ({ line: line.trim(), no: i + 1 }))
 			.filter(({ line }) => line.includes(`this.${field}`))
@@ -304,4 +318,39 @@ test('wiring: the raw computed-stat fields are never read outside their accessor
 			`${field} is read directly instead of through its generation-aware accessor`,
 		);
 	}
+});
+
+test('wiring: the Efficiency cold path announces the daily phase after its walk, never before', () => {
+	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async collectEfficiencyInputs('));
+	const inputs = body.slice(0, body.indexOf('\n\tprivate async buildEfficiencyViewData('));
+
+	const walkAt = inputs.indexOf('dailyStats = await this.calculateDailyStats(365,');
+	assert.ok(walkAt !== -1, 'the cold path must still perform the full-year walk');
+
+	const dailySteps = [...inputs.matchAll(/postEfficiencyStep\(send, stepPct\.daily/g)].map(m => m.index!);
+	assert.equal(dailySteps.length, 2, 'both the cached path and the cold path must announce the daily phase');
+
+	// Posting it before the walk pins the bar above parsing's band and freezes it for the whole
+	// parse — the failure this view had at 96%, and the reason the cold path posts it afterwards.
+	const coldStep = dailySteps.find(i => i > walkAt);
+	assert.ok(coldStep !== undefined, 'the cold path must announce the daily phase after its walk completes');
+
+	const usageAt = inputs.indexOf('postEfficiencyStep(send, stepPct.usage');
+	assert.ok(coldStep! < usageAt, 'and before the usage step, so the bar steps 85 -> 88 -> 92');
+});
+
+test('wiring: clearing the cache rebuilds an open Efficiency panel', () => {
+	// _runRefreshCore() publishes to the details/chart/analysis/environmental panels but not this
+	// one, and showEfficiency() returns early for an already-open panel — so without this the view
+	// keeps showing pre-clear numbers until the user clicks Refresh.
+	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('public async clearCache()'));
+	const clear = body.slice(0, body.indexOf('\n\tpublic async resetInsightsState('));
+	assert.ok(
+		/if \(this\.efficiencyPanel\) \{[\s\S]*?void this\.refreshEfficiencyPanel\(\);/.test(clear),
+		'clearCache() must rebuild an open Efficiency panel',
+	);
+	assert.ok(
+		clear.indexOf('void this.refreshEfficiencyPanel()') > clear.indexOf('await this.updateTokenStats()'),
+		'the rebuild must come after the clear has completed and the token stats refreshed',
+	);
 });
