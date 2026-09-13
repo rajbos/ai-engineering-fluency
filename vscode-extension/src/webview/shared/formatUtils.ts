@@ -101,6 +101,41 @@ export function formatCost(value: number): string {
 }
 
 /**
+ * Locale-aware signed USD amount with a fixed number of fraction digits.
+ * `Intl` places both the sign and the currency symbol, so the result stays
+ * correct in locales that write `US$ -0,0037` rather than `-$0.0037`.
+ * Zero carries no sign.
+ */
+function formatSignedCostWithDigits(value: number, digits: number): string {
+	return new Intl.NumberFormat(currentLocale, {
+		style: 'currency',
+		currency: 'USD',
+		minimumFractionDigits: digits,
+		maximumFractionDigits: digits,
+		signDisplay: 'exceptZero'
+	}).format(value);
+}
+
+/**
+ * Formats a signed USD cost effect at full precision (four fraction digits),
+ * for tooltips and other places where the exact amount matters more than
+ * brevity — e.g. `+$7.3500`.
+ */
+export function formatSignedCostPrecise(value: number): string {
+	return formatSignedCostWithDigits(value, 4);
+}
+
+/**
+ * Formats a signed USD cost effect for compact display: two fraction digits,
+ * widening to four when a non-zero effect would otherwise round away to
+ * `$0.00` and read as "no change at all" — e.g. `-$0.0037`.
+ */
+export function formatSignedCostCompact(value: number): string {
+	const roundsToZero = value !== 0 && Math.abs(value) < 0.005;
+	return formatSignedCostWithDigits(value, roundsToZero ? 4 : 2);
+}
+
+/**
  * Escapes HTML special characters in a string to prevent XSS.
  */
 export function escapeHtml(text: string): string {

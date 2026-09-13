@@ -32,6 +32,14 @@ export interface WebviewLocalization {
 	'usage.contextPressure.worstFill': string;
 	'usage.contextPressure.nearLimitTooltip': string;
 
+	// Usage view — Recent Sessions context-fill column and its filter pill
+	'usage.sessions.contextFill.columnLabel': string;
+	'usage.sessions.contextFill.nearLimitFilter': string;
+	'usage.sessions.contextFill.nearLimitFilterTooltip': string;
+	'usage.sessions.contextFill.used': string;
+	'usage.sessions.contextFill.usedNearLimit': string;
+	'usage.sessions.contextFill.noData': string;
+
 	// Details view — collapsible "Usage by Editor" section heading tooltips
 	'details.editorSection.show': string;
 	'details.editorSection.hide': string;
@@ -63,6 +71,16 @@ export interface WebviewLocalization {
 	'logviewer.summary.timeline': string;
 	'logviewer.summary.started': string;
 	'logviewer.summary.lastActivity': string;
+
+	// Efficiency view — Cost Attribution bars and summary cards
+	'efficiency.attribution.costEffect': string;
+	'efficiency.attribution.costEffectLine': string;
+	'efficiency.attribution.change': string;
+	'efficiency.attribution.periodSub': string;
+	'efficiency.attribution.blendedRate': string;
+	'efficiency.attribution.tooltip.volume': string;
+	'efficiency.attribution.tooltip.size': string;
+	'efficiency.attribution.tooltip.mix': string;
 
 	// HydraFusion Routing section + Session Steps Overview leg toggle
 	'logviewer.hydrafusion.cost': string;
@@ -117,6 +135,12 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'usage.contextPressure.nearLimitLabel': '⚠️ Sessions near the limit',
 	'usage.contextPressure.worstFill': 'Fullest session reached {0}% of its window',
 	'usage.contextPressure.nearLimitTooltip': 'Copilot CLI sessions that filled at least {0}% of their context window without compacting — the early-warning band before context starts getting dropped',
+	'usage.sessions.contextFill.columnLabel': 'Context',
+	'usage.sessions.contextFill.nearLimitFilter': '🧠 Near context limit',
+	'usage.sessions.contextFill.nearLimitFilterTooltip': 'Show only sessions that reached at least {0}% of their context window without compacting',
+	'usage.sessions.contextFill.used': '{0} of {1} context tokens used',
+	'usage.sessions.contextFill.usedNearLimit': '{0} of {1} context tokens used — at or past {2}% of the window',
+	'usage.sessions.contextFill.noData': 'No context-window fill recorded for this session (only GitHub Copilot CLI sessions report one)',
 	'details.editorSection.show': 'Show Usage by Editor',
 	'details.editorSection.hide': 'Hide Usage by Editor',
 	'logviewer.summary.interactions': 'Interactions',
@@ -145,6 +169,14 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'logviewer.summary.timeline': 'Timeline',
 	'logviewer.summary.started': 'Started',
 	'logviewer.summary.lastActivity': 'Last activity',
+	'efficiency.attribution.costEffect': 'Estimated cost effect',
+	'efficiency.attribution.costEffectLine': 'Estimated cost effect: {0}',
+	'efficiency.attribution.change': 'Change',
+	'efficiency.attribution.periodSub': '{0} · {1} sessions · {2} tokens',
+	'efficiency.attribution.blendedRate': 'blended rate {0} → {1} per M tokens',
+	'efficiency.attribution.tooltip.volume': 'Session count: {0} → {1} sessions',
+	'efficiency.attribution.tooltip.size': 'Tokens per session: {0} → {1} tokens/session',
+	'efficiency.attribution.tooltip.mix': 'Blended price: {0} → {1} per M tokens',
 	'logviewer.hydrafusion.cost': 'Cost',
 	'logviewer.hydrafusion.costForTurn': 'Cost for this turn',
 	'logviewer.hydrafusion.jumpToStepTitle': 'Jump to step #{0} in the Session Steps Overview below',

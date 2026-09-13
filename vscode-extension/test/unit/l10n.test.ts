@@ -196,6 +196,42 @@ test('l10n: usage context-pressure keys resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: Recent Sessions context-fill keys resolve in English', () => {
+	// These back the Recent Sessions "Context" column and the "near context
+	// limit" filter pill the context-pressure insight links to. A missing key
+	// would put a raw `usage.sessions.contextFill.nearLimitFilter` on the pill.
+	assert.equal(t('usage.sessions.contextFill.columnLabel'), 'Context');
+	assert.equal(t('usage.sessions.contextFill.nearLimitFilter'), '🧠 Near context limit');
+	assert.equal(
+		t('usage.sessions.contextFill.nearLimitFilterTooltip', '80'),
+		'Show only sessions that reached at least 80% of their context window without compacting',
+	);
+	assert.equal(t('usage.sessions.contextFill.used', '120,000', '200,000'), '120,000 of 200,000 context tokens used');
+	assert.equal(
+		t('usage.sessions.contextFill.usedNearLimit', '190,000', '200,000', '80'),
+		'190,000 of 200,000 context tokens used — at or past 80% of the window',
+	);
+	assert.match(t('usage.sessions.contextFill.noData'), /only GitHub Copilot CLI sessions report one/);
+});
+
+test('l10n: Recent Sessions context-fill keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.sessions.contextFill.columnLabel'), '上下文');
+		assert.equal(t('usage.sessions.contextFill.nearLimitFilter'), '🧠 接近上下文上限');
+		// The Chinese phrasing reorders the reached/limit counts, so a plain
+		// concatenation would report the two numbers the wrong way round.
+		assert.equal(t('usage.sessions.contextFill.used', '120,000', '200,000'), '已使用 200,000 个上下文 token 中的 120,000 个');
+		assert.equal(
+			t('usage.sessions.contextFill.usedNearLimit', '190,000', '200,000', '80'),
+			'已使用 200,000 个上下文 token 中的 190,000 个——达到或超过窗口的 80%',
+		);
+		assert.match(t('usage.sessions.contextFill.nearLimitFilterTooltip', '80'), /至少 80%/);
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test("l10n: what's-new notification keys resolve in English", () => {
 	// The two buttons on the one-a-day new-feature notification. A missing key
 	// here would put a raw `whatsNew.takeMeThere` on the button, which is the
@@ -257,6 +293,43 @@ test('l10n: log viewer summary card labels resolve in English', () => {
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: efficiency Cost Attribution labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'efficiency.attribution.costEffect': 'Estimated cost effect',
+		'efficiency.attribution.costEffectLine': 'Estimated cost effect: {0}',
+		'efficiency.attribution.change': 'Change',
+		'efficiency.attribution.periodSub': '{0} · {1} sessions · {2} tokens',
+		'efficiency.attribution.blendedRate': 'blended rate {0} → {1} per M tokens',
+		'efficiency.attribution.tooltip.volume': 'Session count: {0} → {1} sessions',
+		'efficiency.attribution.tooltip.size': 'Tokens per session: {0} → {1} tokens/session',
+		'efficiency.attribution.tooltip.mix': 'Blended price: {0} → {1} per M tokens',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: efficiency Cost Attribution labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'efficiency.attribution.costEffect': '预计成本影响',
+			'efficiency.attribution.costEffectLine': '预计成本影响：{0}',
+			'efficiency.attribution.change': '变化',
+			'efficiency.attribution.periodSub': '{0} · {1} 个会话 · {2} 个令牌',
+			'efficiency.attribution.blendedRate': '混合费率 {0} → {1} 每百万令牌',
+			'efficiency.attribution.tooltip.volume': '会话数：{0} → {1} 个会话',
+			'efficiency.attribution.tooltip.size': '每会话令牌数：{0} → {1} 令牌/会话',
+			'efficiency.attribution.tooltip.mix': '混合单价：{0} → {1} 每百万令牌',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
 	}
 });
 

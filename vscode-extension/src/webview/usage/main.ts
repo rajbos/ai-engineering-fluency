@@ -18,6 +18,7 @@ import {
 // drifting out of sync with what the extension host actually sends.
 import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats } from '../../../../src/types';
 import { CONTEXT_NEAR_LIMIT_RATIO } from '../../../../src/types';
+import { getSessionContextFillPercent, isSessionNearContextLimit } from '../../../../src/utils/contextFill';
 
 /** The near-limit threshold as a whole percentage, for display in copy. */
 const NEAR_LIMIT_PERCENT = Math.round(CONTEXT_NEAR_LIMIT_RATIO * 100);
@@ -84,6 +85,7 @@ type TodaySessionSummary = {
 	editor: string;
 	models: string[];
 	lastActivity: string;
+	truncationCount?: number;
 	maxRequestInputTokens?: number;
 	contextTier?: string;
 	contextWindowLimit?: number;
@@ -1167,11 +1169,11 @@ function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameRes
 }
 
 // --- Recent Sessions table with sortable, toggleable columns ---
-type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'durationMs' | 'lastActivity' | 'subAgentCalls';
+type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'durationMs' | 'lastActivity' | 'subAgentCalls' | 'contextFill';
 type SessionsLookback = Period;
 
 /** Optional (toggleable) session table columns. Title is always shown and is not part of this set. */
-type SessionColumnId = 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'models' | 'durationMs' | 'lastActivity' | 'subAgentCalls';
+type SessionColumnId = 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'models' | 'durationMs' | 'lastActivity' | 'subAgentCalls' | 'contextFill';
 
 type SessionColumnDef = {
 	id: SessionColumnId;
@@ -1232,6 +1234,20 @@ const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 		const wallLabel = s.durationMs !== undefined ? `Wall time: ${formatDurationShort(s.durationMs)}` : undefined;
 		return { html: formatDurationShort(net), ...(wallLabel ? { title: wallLabel } : {}) };
 	} },
+	{ id: 'contextFill', label: localize('usage.sessions.contextFill.columnLabel'), sortKey: 'contextFill', align: 'right', cellStyle: 'white-space:nowrap;', render: s => {
+		const pct = getSessionContextFillPercent(s);
+		if (pct === undefined) {
+			return { html: '—', title: localize('usage.sessions.contextFill.noData') };
+		}
+		const near = isSessionNearContextLimit(s);
+		const reached = formatNumber(s.contextReachedTokens!);
+		const limit = formatNumber(s.contextWindowLimit!);
+		const title = near
+			? localizeFormat('usage.sessions.contextFill.usedNearLimit', reached, limit, NEAR_LIMIT_PERCENT)
+			: localizeFormat('usage.sessions.contextFill.used', reached, limit);
+		const color = near ? 'var(--warning-color, #cca700)' : 'var(--text-primary)';
+		return { html: `<span style="color:${color};">${near ? '⚠️ ' : ''}${pct}%</span>`, title };
+	} },
 	{
 		id: 'lastActivity', label: 'Last Active', sortKey: 'lastActivity', align: 'right', cellStyle: 'white-space:nowrap;',
 		render: s => ({
@@ -1259,6 +1275,8 @@ let latestTodaySessions: TodaySessionSummary[] = [];
 const recentSessionsCache: { [period: string]: TodaySessionSummary[] } = {};
 /** Which optional columns are currently visible. Title (and the row number) are always shown. */
 let enabledSessionColumns: Set<SessionColumnId> = new Set(ALL_SESSION_COLUMN_IDS);
+/** Columns a navigation preset turned on; re-applied whenever saved settings replace the set above. */
+const presetForcedColumns = new Set<SessionColumnId>();
 
 // --- Recent Sessions pill filters (Editor / Model / Model vendor / HydraFusion) ---
 /** Active editor pill filters. Empty set means "no filter" (show all editors). */
@@ -1269,6 +1287,8 @@ let sessionFilterVendors: Set<string> = new Set();
 let sessionFilterModels: Set<string> = new Set();
 /** Quick toggle: when true, only show sessions that used a HydraFusion model. */
 let sessionFilterHydraFusionOnly = false;
+/** Quick toggle: when true, only show sessions that nearly filled their context window. */
+let sessionFilterNearContextLimitOnly = false;
 
 function saveSessionColumnSettings(): void {
 	vscode.postMessage({ command: 'saveSessionColumnSettings', settings: { enabledColumns: Array.from(enabledSessionColumns) } });
@@ -1276,6 +1296,7 @@ function saveSessionColumnSettings(): void {
 
 /** Returns true when a session passes all currently active pill filters. */
 function sessionMatchesFilters(s: TodaySessionSummary): boolean {
+	if (sessionFilterNearContextLimitOnly && !isSessionNearContextLimit(s)) { return false; }
 	if (sessionFilterHydraFusionOnly && !s.models.some(isHydraFusionModel)) { return false; }
 	if (sessionFilterEditors.size > 0 && !sessionFilterEditors.has(s.editor || 'unknown')) { return false; }
 	if (sessionFilterModels.size > 0 && !s.models.some(m => sessionFilterModels.has(m))) { return false; }
@@ -1285,7 +1306,8 @@ function sessionMatchesFilters(s: TodaySessionSummary): boolean {
 
 /** Whether any Recent Sessions pill filter is currently active. */
 function hasActiveSessionFilters(): boolean {
-	return sessionFilterHydraFusionOnly || sessionFilterEditors.size > 0 || sessionFilterVendors.size > 0 || sessionFilterModels.size > 0;
+	return sessionFilterHydraFusionOnly || sessionFilterNearContextLimitOnly
+		|| sessionFilterEditors.size > 0 || sessionFilterVendors.size > 0 || sessionFilterModels.size > 0;
 }
 
 type SessionFilterOption = { value: string; label: string; count: number };
@@ -1296,12 +1318,15 @@ function computeSessionFilterOptions(sessions: TodaySessionSummary[]): {
 	vendors: SessionFilterOption[];
 	models: SessionFilterOption[];
 	hydraFusionCount: number;
+	nearContextLimitCount: number;
 } {
 	const editorCounts = new Map<string, number>();
 	const vendorCounts = new Map<string, number>();
 	const modelCounts = new Map<string, number>();
 	let hydraFusionCount = 0;
+	let nearContextLimitCount = 0;
 	for (const s of sessions) {
+		if (isSessionNearContextLimit(s)) { nearContextLimitCount++; }
 		const editor = s.editor || 'unknown';
 		editorCounts.set(editor, (editorCounts.get(editor) || 0) + 1);
 		const vendorsInSession = new Set<string>();
@@ -1323,6 +1348,7 @@ function computeSessionFilterOptions(sessions: TodaySessionSummary[]): {
 		vendors: toSortedOptions(vendorCounts, v => v),
 		models: toSortedOptions(modelCounts, getModelDisplayName),
 		hydraFusionCount,
+		nearContextLimitCount,
 	};
 }
 
@@ -1343,6 +1369,15 @@ function buildSessionFilterBarHtml(sessions: TodaySessionSummary[]): string {
 	const opts = computeSessionFilterOptions(sessions);
 	if (opts.editors.length === 0 && opts.vendors.length === 0 && opts.models.length === 0) { return ''; }
 	const groups: string[] = [];
+	// Shown whenever any session nearly filled its window, or while the filter is on —
+	// the "Show these sessions" insight action switches it on, and a pill that vanished
+	// would leave the narrowed table with no visible reason for being narrow.
+	if (opts.nearContextLimitCount > 0 || sessionFilterNearContextLimitOnly) {
+		const isActive = sessionFilterNearContextLimitOnly;
+		const pillTitle = escapeHtml(localizeFormat('usage.sessions.contextFill.nearLimitFilterTooltip', NEAR_LIMIT_PERCENT));
+		const pillLabel = escapeHtml(localize('usage.sessions.contextFill.nearLimitFilter'));
+		groups.push(`<div class="session-filter-group"><button type="button" class="session-filter-pill${isActive ? ' active' : ''}" data-filter-type="nearcontextlimit" data-filter-value="true" aria-pressed="${isActive}" title="${pillTitle}">${pillLabel} <span class="session-filter-pill-count">${opts.nearContextLimitCount}</span></button></div>`);
+	}
 	if (opts.hydraFusionCount > 0) {
 		const isActive = sessionFilterHydraFusionOnly;
 		groups.push(`<div class="session-filter-group"><button type="button" class="session-filter-pill session-filter-pill-hydrafusion${isActive ? ' active' : ''}" data-filter-type="hydrafusion" data-filter-value="true" aria-pressed="${isActive}" title="Show only sessions that used HydraFusion">⚡ HydraFusion <span class="session-filter-pill-count">${opts.hydraFusionCount}</span></button></div>`);
@@ -1364,6 +1399,7 @@ function handleSessionFilterPillClick(target: HTMLElement): boolean {
 		sessionFilterVendors.clear();
 		sessionFilterModels.clear();
 		sessionFilterHydraFusionOnly = false;
+		sessionFilterNearContextLimitOnly = false;
 		return true;
 	}
 	const pill = target.closest<HTMLElement>('.session-filter-pill');
@@ -1372,6 +1408,10 @@ function handleSessionFilterPillClick(target: HTMLElement): boolean {
 	const value = pill.getAttribute('data-filter-value');
 	if (filterType === 'hydrafusion') {
 		sessionFilterHydraFusionOnly = !sessionFilterHydraFusionOnly;
+		return true;
+	}
+	if (filterType === 'nearcontextlimit') {
+		sessionFilterNearContextLimitOnly = !sessionFilterNearContextLimitOnly;
 		return true;
 	}
 	if (!value) { return false; }
@@ -1395,13 +1435,20 @@ const _todaySessionColumnComparators: Partial<Record<SessionSortColumn, (a: Toda
 	workspace: (a, b) => (a.workspace || '').localeCompare(b.workspace || ''),
 	durationMs: (a, b) => (getEffectiveSessionDurationMs(a) ?? -1) - (getEffectiveSessionDurationMs(b) ?? -1),
 	subAgentCalls: (a, b) => (a.subAgentCalls ?? 0) - (b.subAgentCalls ?? 0),
+	contextFill: (a, b) => (getSessionContextFillPercent(a) ?? -1) - (getSessionContextFillPercent(b) ?? -1),
 	lastActivity: (a, b) => (a.lastActivity || '').localeCompare(b.lastActivity || ''),
 };
+
+/** Sort columns handled by the generic numeric fallback below — i.e. the ones that are plain numeric fields on the summary. */
+type NumericSessionSortColumn = Extract<SessionSortColumn, keyof TodaySessionSummary>;
 
 function _compareTodaySessionsByColumn(a: TodaySessionSummary, b: TodaySessionSummary): number {
 	const comparator = _todaySessionColumnComparators[sessionSortColumn];
 	if (comparator) { return comparator(a, b); }
-	return (a[sessionSortColumn] as number) - (b[sessionSortColumn] as number);
+	// Every column without an explicit comparator is a numeric field; derived
+	// columns (e.g. contextFill) always have one, so they never reach this line.
+	const key = sessionSortColumn as NumericSessionSortColumn;
+	return (a[key] as number) - (b[key] as number);
 }
 
 function sortTodaySessions(sessions: TodaySessionSummary[]): TodaySessionSummary[] {
@@ -5936,11 +5983,62 @@ function handleExtensionMessage(message: any): void {
 	}
 }
 
+/**
+ * Applies a pre-set Recent Sessions filter carried by a `switchTab` message.
+ *
+ * Today the only preset is `nearContextLimit`, sent by the "Show these sessions"
+ * action on the "Some sessions nearly ran out of context window" insight. The
+ * Context column is force-enabled with it: a user who had hidden that column
+ * would otherwise land on a filtered table with no visible fill percentage to
+ * explain why those rows are the ones listed.
+ */
+function applySessionsTabPreset(preset: any): void {
+	if (!preset || typeof preset !== 'object' || preset.filter !== 'nearContextLimit') { return; }
+	sessionFilterNearContextLimitOnly = true;
+	sessionFilterEditors.clear();
+	sessionFilterVendors.clear();
+	sessionFilterModels.clear();
+	sessionFilterHydraFusionOnly = false;
+	enableSessionColumn('contextFill');
+	if (preset.lookback && PERIOD_LABELS[preset.lookback as Period]) {
+		sessionsLookback = preset.lookback as SessionsLookback;
+	}
+}
+
+/**
+ * Turns a column on in module state *and* in the already-rendered Columns menu.
+ *
+ * The menu is built once with the tab panel and sits outside `#sessions-panel-body`,
+ * so a re-render of the table never rebuilds it: flipping only the state would leave
+ * the checkbox unticked next to a visible column, and the next click on it would
+ * toggle the opposite of what it shows.
+ */
+function enableSessionColumn(id: SessionColumnId): void {
+	presetForcedColumns.add(id);
+	enabledSessionColumns.add(id);
+	const checkbox = document.querySelector<HTMLInputElement>(`#sessions-columns-menu input[data-column="${id}"]`);
+	if (checkbox) { checkbox.checked = true; }
+}
+
+/**
+ * Re-applies preset-forced columns over the saved column settings.
+ *
+ * `bootstrap()` yields on a dynamic import before it restores saved settings, and
+ * the message listener is live from module evaluation — so the host's pending
+ * `switchTab` preset routinely lands first, and the assignment that restores saved
+ * settings replaces the whole Set, dropping the column the preset turned on. That
+ * is the *normal* path when the insight opens a panel that wasn't already open.
+ */
+function reapplyPresetForcedColumns(): void {
+	for (const id of presetForcedColumns) { enabledSessionColumns.add(id); }
+}
+
 function handleSwitchTab(message: any): void {
 	const tab = String(message.tab);
 	// Ignore unknown tabs entirely: a bogus name must not blank the dashboard, and only
 	// allowlisted names may be interpolated into the selector below.
 	if (!isSwitchableTab(tab)) { return; }
+	applySessionsTabPreset(message.sessionsPreset);
 	// Persist the requested tab in module state, not just the DOM: while the webview is in
 	// its loading state the tab bar doesn't exist, so btn.click() below silently no-ops and
 	// the later renderLayout would land on the default tab — swallowing e.g. the worktree
@@ -5949,6 +6047,12 @@ function handleSwitchTab(message: any): void {
 	const requestedAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
 	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${tab}"]`);
 	btn?.click();
+	if (tab === 'sessions' && message.sessionsPreset) {
+		// The tab-button click re-renders from cached state; re-render the body so the
+		// preset's lookback is fetched and its filter is reflected in the pill bar.
+		renderSessionsLookbackSelector();
+		refreshSessionsPanelBody();
+	}
 	// Both anchors are set after the click, not before: the click runs the same handler that drops
 	// an insight deep link on user-driven navigation, and this navigation is the host's, not the
 	// user's. A card anchor also has to outlive the re-renders that follow; a static section
@@ -6644,6 +6748,7 @@ async function bootstrap(): Promise<void> {
 	if (Array.isArray(savedColumns)) {
 		const valid = savedColumns.filter((c): c is SessionColumnId => (ALL_SESSION_COLUMN_IDS as string[]).includes(c));
 		enabledSessionColumns = new Set(valid);
+		reapplyPresetForcedColumns();
 	}
 	renderLayout(initialData);
 	setupSessionsTableSort();

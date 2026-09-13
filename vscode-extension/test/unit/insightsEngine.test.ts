@@ -189,6 +189,17 @@ test('context-window-near-limit: fires at two near-limit sessions and reports th
 	assert.doesNotMatch(insight!.body, /went past that point/);
 });
 
+test('context-window-near-limit: offers a button that opens the matching session list', () => {
+	const ctx = makePressureCtx({
+		sessionsConsidered: 12, sessionsCompacted: 0, sessionsNearLimit: 3, sessionsWithFillData: 9,
+	});
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === NEAR_LIMIT_ID);
+	assert.ok(insight, 'insight should fire');
+	assert.equal(insight!.actionCommand, 'aiEngineeringFluency.showContextPressureSessions');
+	// The label carries the same count as the body, so the button plainly leads to those sessions.
+	assert.equal(insight!.actionLabel, 'Show these 3 sessions');
+});
+
 test('context-window-near-limit: yields to auto-compaction-pattern when that already fires', () => {
 	const ctx = makePressureCtx({
 		sessionsConsidered: 12, sessionsCompacted: 4, sessionsNearLimit: 3, sessionsWithFillData: 9,

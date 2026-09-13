@@ -4,7 +4,7 @@
 // combined indexed chart that overlays the ratio series with output.
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { setHtml } from '../shared/domUtils';
-import { escapeHtml, formatCompact, setCompactNumbers } from '../shared/formatUtils';
+import { escapeHtml, formatCompact, formatCost, formatNumber, formatSignedCostCompact, setCompactNumbers, setFormatLocale } from '../shared/formatUtils';
 import type { CacheBreakCause } from '../../../../src/cacheBreakage';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import themeStyles from '../shared/theme.css';
@@ -34,6 +34,7 @@ import {
 	windowHasModelData,
 } from '../../../../src/efficiencyAnalysis';
 import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
+import { buildAttributionTooltip } from './attributionText';
 
 // Minimal structural types for the dynamically imported Chart.js bundle —
 // a `typeof import('chart.js/auto')` type-import trips TS1542 under CJS resolution.
@@ -105,9 +106,13 @@ function fmtValue(v: number | null, unit: EfficiencyDelta['unit']): string {
 	}
 }
 
+/**
+ * Signed dollar amount for on-bar and summary display. Two decimals normally,
+ * four when a non-zero effect would otherwise round away to "$0.00" — the
+ * tooltips carry the full-precision value.
+ */
 function fmtMoney(v: number): string {
-	const sign = v < 0 ? '−' : '+';
-	return `${sign}$${Math.abs(v).toFixed(2)}`;
+	return formatSignedCostCompact(v);
 }
 
 /** Uppercases the first letter only — for window labels that read lowercase mid-sentence. */
@@ -259,15 +264,19 @@ function renderDeltasTab(d: EfficiencyViewData): string {
 		<div class="delta-grid">${cards}</div>`;
 }
 
-function attrBar(label: string, detail: string, value: number, maxAbs: number, explain: string): string {
+/**
+ * One factor bar. `tooltip` is prebuilt plain text (see `buildAttributionTooltip`)
+ * and is escaped here into the row's title attribute.
+ */
+function attrBar(label: string, detail: string, value: number, maxAbs: number, tooltip: string): string {
 	const widthPct = maxAbs > 0 ? Math.min(50, (Math.abs(value) / maxAbs) * 50) : 0;
 	const side = value >= 0 ? `left: 50%; width: ${widthPct}%;` : `right: 50%; width: ${widthPct}%;`;
 	const cls = value >= 0 ? 'pos' : 'neg';
 	return `
-		<div class="attr-bar-row" title="${escapeHtml(explain)}">
+		<div class="attr-bar-row" title="${escapeHtml(tooltip)}">
 			<div class="attr-bar-label">${escapeHtml(label)}<div class="attr-bar-detail">${escapeHtml(detail)}</div></div>
 			<div class="attr-bar-track"><div class="attr-bar-mid"></div><div class="attr-bar-fill ${cls}" style="${side}"></div></div>
-			<div class="attr-bar-value">${fmtMoney(value)}<div class="attr-bar-effect">estimated cost effect</div></div>
+			<div class="attr-bar-value">${fmtMoney(value)}<div class="attr-bar-effect">${escapeHtml(localize('efficiency.attribution.costEffect'))}</div></div>
 		</div>`;
 }
 
@@ -294,14 +303,14 @@ function renderAttributionTab(d: EfficiencyViewData): string {
 	return `
 		<p class="eff-section-note">The periods are adjacent, not overlapping: ${escapeHtml(capitalizeFirst(d.attributionWindows.prev))} is <b>${escapeHtml(d.attributionWindows.prevRange)}</b>; ${escapeHtml(d.attributionWindows.cur)} is <b>${escapeHtml(d.attributionWindows.curRange)}</b>. Each bar is a <b>what-if dollar amount</b>, not a session count: starting from the earlier cost, the factors are applied in order. Green reduces estimated cost; red increases it.</p>
 		<div class="attr-summary">
-			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.prev))}</div><div class="stat-value">$${a.prev.cost.toFixed(2)}</div><div class="stat-sub">${escapeHtml(d.attributionWindows.prevRange)} · ${a.prev.sessions} sessions · ${formatCompact(a.prev.tokens)} tokens</div></div>
-			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.cur))}</div><div class="stat-value">$${a.cur.cost.toFixed(2)}</div><div class="stat-sub">${escapeHtml(d.attributionWindows.curRange)} · ${a.cur.sessions} sessions · ${formatCompact(a.cur.tokens)} tokens</div></div>
-			<div class="attr-stat"><div class="stat-label">Change</div><div class="stat-value">${fmtMoney(a.deltaCost)}</div><div class="stat-sub">blended rate ${a.prev.dollarsPerMTokens.toFixed(2)} → ${a.cur.dollarsPerMTokens.toFixed(2)} $/M tokens</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.prev))}</div><div class="stat-value">${formatCost(a.prev.cost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.periodSub', d.attributionWindows.prevRange, formatNumber(a.prev.sessions), formatCompact(a.prev.tokens)))}</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.cur))}</div><div class="stat-value">${formatCost(a.cur.cost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.periodSub', d.attributionWindows.curRange, formatNumber(a.cur.sessions), formatCompact(a.cur.tokens)))}</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(localize('efficiency.attribution.change'))}</div><div class="stat-value">${fmtMoney(a.deltaCost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.blendedRate', formatCost(a.prev.dollarsPerMTokens), formatCost(a.cur.dollarsPerMTokens)))}</div></div>
 		</div>
 		<div class="attr-bars">
-			${attrBar('Volume (session count)', `${a.prev.sessions.toLocaleString()} → ${a.cur.sessions.toLocaleString()} sessions`, a.volumeEffect, maxAbs, `Session count went from ${a.prev.sessions} to ${a.cur.sessions}.`)}
-			${attrBar('Session size (tokens/session)', `${formatCompact(a.prev.tokensPerSession)} → ${formatCompact(a.cur.tokensPerSession)} tokens/session`, a.efficiencyEffect, maxAbs, `Tokens per session went from ${Math.round(a.prev.tokensPerSession)} to ${Math.round(a.cur.tokensPerSession)}.`)}
-			${attrBar('Model mix ($/token)', `$${a.prev.dollarsPerMTokens.toFixed(2)} → $${a.cur.dollarsPerMTokens.toFixed(2)} /M tokens`, a.mixEffect, maxAbs, `Blended price went from ${a.prev.dollarsPerMTokens.toFixed(2)} to ${a.cur.dollarsPerMTokens.toFixed(2)} $/M tokens.`)}
+			${attrBar('Volume (session count)', `${formatNumber(a.prev.sessions)} → ${formatNumber(a.cur.sessions)} sessions`, a.volumeEffect, maxAbs, buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.volume', prev: a.prev.sessions, cur: a.cur.sessions, kind: 'count', effect: a.volumeEffect }))}
+			${attrBar('Session size (tokens/session)', `${formatCompact(a.prev.tokensPerSession)} → ${formatCompact(a.cur.tokensPerSession)} tokens/session`, a.efficiencyEffect, maxAbs, buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.size', prev: a.prev.tokensPerSession, cur: a.cur.tokensPerSession, kind: 'tokens', effect: a.efficiencyEffect }))}
+			${attrBar('Model mix ($/token)', `${formatCost(a.prev.dollarsPerMTokens)} → ${formatCost(a.cur.dollarsPerMTokens)} /M tokens`, a.mixEffect, maxAbs, buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.mix', prev: a.prev.dollarsPerMTokens, cur: a.cur.dollarsPerMTokens, kind: 'rate', effect: a.mixEffect }))}
 		</div>
 		${shifts}`;
 }
@@ -1132,6 +1141,7 @@ function render(): void {
 	const root = document.getElementById('root');
 	if (!root || !data) { return; }
 	setCompactNumbers(data.compactNumbers !== false);
+	setFormatLocale(data.locale);
 	destroyCharts();
 	// Snap back to a real tab if the selected one is no longer shown — e.g. the
 	// Prompt Cache tab after cache data disappeared — so the content and the
