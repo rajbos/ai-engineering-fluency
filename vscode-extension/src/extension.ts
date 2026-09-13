@@ -1963,6 +1963,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private scheduleInitialUpdate(): void {
 		this.log('🚀 Starting token usage analysis...');
+		// Paint real numbers from the on-disk cache immediately, before the real
+		// discover→parse pass (below) even starts. No filesystem discovery, no
+		// fs.stat, no parsing — just the cache already loaded into memory — so a
+		// cold boot shows a real status bar within a second or two instead of
+		// blank/zero for however long the full scan takes. See issue #2018 fix #2.
+		void this.renderInstantStatsFromCache();
 		// Use a longer delay (3 s) so that:
 		// 1. VS Code and other extensions finish their own startup work first.
 		// 2. On macOS, the TCC privacy framework has time to resolve any first-time
@@ -1984,6 +1990,51 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this.error('Error in initial update:', error);
 			}
 		}, 3000);
+	}
+
+	/**
+	 * Paints the status bar (and any already-open Details/Chart panels) straight
+	 * from the on-disk cache — no filesystem discovery, no fs.stat, no parsing —
+	 * so a cold boot shows real numbers within a second or two instead of sitting
+	 * blank/zero for the full discover→parse pass. The real pass kicked off right
+	 * after this in scheduleInitialUpdate() still runs and overwrites this with
+	 * verified, reconciled data; this is a provisional first paint only (see issue
+	 * #2018, fix #2: "Render last-known stats from the loaded snapshot before the
+	 * parse finishes").
+	 */
+	private async renderInstantStatsFromCache(): Promise<void> {
+		try {
+			if (this._cacheLoadPromise) {
+				try { await this._cacheLoadPromise; } catch { /* already logged in loadCacheFromStorage */ }
+			}
+			if (this.cacheManager.cache.size === 0) { return; }
+
+			const preloaded: SessionFilePreload[] = [];
+			for (const [sessionFile, sessionData] of this.cacheManager.cache) {
+				if (!sessionData || sessionData.interactions === 0) { continue; }
+				const stat = { size: sessionData.size ?? 0, mtime: new Date(sessionData.mtime) } as unknown as import('fs').Stats;
+				preloaded.push({
+					sessionFile,
+					mtime: sessionData.mtime,
+					fileSize: sessionData.size ?? 0,
+					sessionData,
+					wasCached: true,
+					details: this.buildMinimalPreloadDetails(sessionFile, stat, sessionData),
+				});
+			}
+			if (preloaded.length === 0) { return; }
+
+			const { stats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
+			this.lastDetailedStats = stats;
+			this.lastDailyStats = dailyStats;
+			this.mergeIntoFullDailyStats(dailyStats);
+			this.updateStatusBarAndTooltip(stats);
+			this.updateDetailsPanelIfOpen(stats, true);
+			this.updateChartPanelIfOpen(true);
+			this.log(`⚡ Instant first paint from ${preloaded.length} cached session file(s) (provisional — full scan still running)`);
+		} catch (error) {
+			this.warn(`Instant cache-only render failed, waiting for full scan instead: ${error}`);
+		}
 	}
 
 	private async queueMissingOpenCodeDbSessionsFromCache(): Promise<void> {
@@ -3071,6 +3122,38 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
+	 * Seeds a preload queue with the on-disk cache's known file paths before adapter
+	 * discovery (a full filesystem walk across ~15 adapters) even starts, so the
+	 * worker pool begins stat+cache-validating files from tick zero instead of
+	 * waiting for the slowest adapter's directory walk to stream its first batch.
+	 * This is the "persist the discovery list ... render from it immediately,
+	 * re-discover in the background and reconcile" fix from issue #2018: on a warm
+	 * cache, most of the ~6500-file backlog is already known.
+	 *
+	 * Seeded paths are added to `seen` so the caller's discovery-batch handler can
+	 * dedupe against them — a file is still only ever processed once; newly-added or
+	 * previously uncached files still arrive through normal streaming discovery. A
+	 * cached path for a file deleted since the last run simply fails its stat with
+	 * ENOENT, which processPreloadQueueFileWithCrashLog already swallows — no
+	 * different from any other file that disappears mid-scan today.
+	 *
+	 * Returns the number of paths seeded (for the caller's totalDiscovered count).
+	 */
+	private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, editorSet?: Set<string>): number {
+		const cachedPaths = Array.from(this.cacheManager.cache.keys());
+		if (cachedPaths.length === 0) { return 0; }
+		for (const p of cachedPaths) { seen.add(p); }
+		if (editorSet) {
+			for (const file of cachedPaths) {
+				const editor = this.detectEditorSource(file);
+				if (editor && editor !== 'Unknown') { editorSet.add(editor); }
+			}
+		}
+		queue.push(...cachedPaths);
+		return cachedPaths.length;
+	}
+
+	/**
 	 * Discover all session files, stat them, and load (or cache-hit) their parsed data.
 	 * Returns a `SessionFilePreload[]` that both calculateDetailedStats and
 	 * calculateUsageAnalysisStats can consume, eliminating a second filesystem scan.
@@ -3099,6 +3182,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		const analyzeStartMs = Date.now();
 
+		// Seed the queue from the on-disk cache's known file list before discovery
+		// starts (see seedPreloadQueueFromCache doc comment for why).
+		const seen = new Set<string>();
+		const seededCount = this.seedPreloadQueueFromCache(queue, seen, editorSet);
+		totalDiscovered += seededCount;
+
 		// Discovery fills the queue via onBatch callback
 		const discoveryPromise = (async () => {
 			try {
@@ -3109,8 +3198,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 							if (editor && editor !== 'Unknown') { editorSet.add(editor); }
 						}
 					}
-					queue.push(...batch);
-					totalDiscovered += batch.length;
+					const newFiles = batch.filter(f => !seen.has(f));
+					if (newFiles.length === 0) { return; }
+					for (const f of newFiles) { seen.add(f); }
+					queue.push(...newFiles);
+					totalDiscovered += newFiles.length;
 					gate.signal();
 				});
 			} finally {
