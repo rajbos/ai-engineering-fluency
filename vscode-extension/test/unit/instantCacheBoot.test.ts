@@ -411,7 +411,11 @@ test('_runRefreshCore() skips the one-time full-year chart backfill when discove
 	// first refresh would launch a full, unbounded reparse of the entire session history in
 	// parallel with the leader's own preload — defeating the follower miss-budget stampede
 	// protection and the cold-boot cost this PR exists to cut.
-	assert.ok(/if \(isLeader && !this\.lastFullDailyStats && !this\.chartPanel && !this\.isDiscoveryUntrustworthyForBackfill\(sessionFiles, preloaded\)\) \{/.test(body),
+	// `currentFullDailyStats` rather than the raw `lastFullDailyStats`: the field is now read through
+	// a generation-aware accessor, so a set left behind by a build that was already running when the
+	// caches were cleared reads as absent and the backfill runs. The isLeader requirement this test
+	// exists for is unchanged.
+	assert.ok(/if \(isLeader && !this\.currentFullDailyStats && !this\.chartPanel && !this\.isDiscoveryUntrustworthyForBackfill\(sessionFiles, preloaded\)\) \{/.test(body),
 		'the backfill call must also require isLeader — calculateDailyStats(365, ...) has no follower miss-budget of its own, so running it on a follower would reparse the entire session history unbounded, defeating the FOLLOWER_MISS_BUDGET stampede protection used just above it');
 });
 

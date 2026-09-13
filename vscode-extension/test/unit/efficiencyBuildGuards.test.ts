@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import {
 	chainBuild,
 	isComputedStatsCurrent,
-	makePanelBoundSink,
+	makeLivePanelSink,
 	type PostablePanel,
 } from '../../src/extension';
 
@@ -63,8 +63,9 @@ test('isComputedStatsCurrent: the in-flight-build race is rejected end to end', 
 });
 
 // ---------------------------------------------------------------------------
-// makePanelBoundSink — a build outliving its panel must not paint onto the
-// replacement panel a reopen created.
+// makeLivePanelSink — Efficiency builds are serialized, so the single build in
+// flight is always what the live panel is waiting on. Its progress follows that
+// panel across a close/reopen instead of dying with the panel that started it.
 // ---------------------------------------------------------------------------
 
 function fakePanel(name: string): PostablePanel & { posted: object[]; name: string } {
@@ -72,9 +73,9 @@ function fakePanel(name: string): PostablePanel & { posted: object[]; name: stri
 	return { name, posted, webview: { postMessage: (msg: object) => { posted.push(msg); return true; } } };
 }
 
-test('makePanelBoundSink: delivers while its panel is the live one', () => {
+test('makeLivePanelSink: delivers to the live panel', () => {
 	const panel = fakePanel('a');
-	const sink = makePanelBoundSink(panel, () => panel);
+	const sink = makeLivePanelSink(() => panel);
 
 	sink({ command: 'loadingProgress', completed: 3 });
 	sink({ command: 'loadingStep', step: 'computing' });
@@ -85,52 +86,47 @@ test('makePanelBoundSink: delivers while its panel is the live one', () => {
 	]);
 });
 
-test('makePanelBoundSink: a build outliving its panel cannot post to the replacement', () => {
+test('makeLivePanelSink: a build outliving its panel keeps the replacement informed', () => {
+	// The regression this rule exists for: close the view mid-walk and reopen it, and the new
+	// panel's own build is queued behind the one still running. If progress died with the closed
+	// panel, the replacement would sit on a frozen loading screen for the rest of that walk.
 	const closed = fakePanel('closed');
 	const reopened = fakePanel('reopened');
 	let live: PostablePanel | undefined = closed;
 
-	// The slow build's sink, created while its panel was live.
-	const staleSink = makePanelBoundSink(closed, () => live);
-	staleSink({ tick: 1 });
+	const sink = makeLivePanelSink(() => live);
+	sink({ tick: 1 });
 
-	// The user closes that panel and reopens the view; the new panel has its own build.
 	live = reopened;
-	const freshSink = makePanelBoundSink(reopened, () => live);
-
-	staleSink({ tick: 2 });
-	freshSink({ tick: 3 });
-
-	assert.deepEqual(closed.posted, [{ tick: 1 }], 'the stale build stops posting once its panel is gone');
-	assert.deepEqual(reopened.posted, [{ tick: 3 }], 'and nothing of its lands on the replacement');
-});
-
-test('makePanelBoundSink: drops messages when no panel is live at all', () => {
-	const panel = fakePanel('a');
-	let live: PostablePanel | undefined = panel;
-	const sink = makePanelBoundSink(panel, () => live);
-
-	live = undefined;
-	sink({ tick: 1 });
-
-	assert.deepEqual(panel.posted, [], 'a closed view with no replacement receives nothing');
-});
-
-test('makePanelBoundSink: the live panel is read at send time, not captured', () => {
-	// If getLive() were resolved when the sink was built, this sink would be permanently
-	// dead after the first handover and would never resume.
-	const panel = fakePanel('a');
-	const other = fakePanel('b');
-	let live: PostablePanel | undefined = panel;
-	const sink = makePanelBoundSink(panel, () => live);
-
-	live = other;
-	sink({ tick: 1 });
-	live = panel;
 	sink({ tick: 2 });
 
-	assert.deepEqual(panel.posted, [{ tick: 2 }]);
-	assert.deepEqual(other.posted, [], 'a sink never posts to a panel it is not bound to');
+	assert.deepEqual(closed.posted, [{ tick: 1 }], 'the closed panel stops receiving');
+	assert.deepEqual(reopened.posted, [{ tick: 2 }], 'and the replacement picks the walk up mid-flight');
+});
+
+test('makeLivePanelSink: drops messages when no panel is live at all', () => {
+	let live: PostablePanel | undefined = fakePanel('a');
+	const sink = makeLivePanelSink(() => live);
+
+	live = undefined;
+	assert.doesNotThrow(() => sink({ tick: 1 }), 'a closed view with no replacement is not an error');
+});
+
+test('makeLivePanelSink: the live panel is read per message, not captured', () => {
+	// Captured once, this sink would keep posting to a panel the user has closed.
+	const first = fakePanel('a');
+	const second = fakePanel('b');
+	let live: PostablePanel | undefined = first;
+	const sink = makeLivePanelSink(() => live);
+
+	sink({ tick: 1 });
+	live = second;
+	sink({ tick: 2 });
+	live = first;
+	sink({ tick: 3 });
+
+	assert.deepEqual(first.posted, [{ tick: 1 }, { tick: 3 }]);
+	assert.deepEqual(second.posted, [{ tick: 2 }]);
 });
 
 // ---------------------------------------------------------------------------
@@ -248,24 +244,36 @@ test('wiring: every computed-stat cache is stamped with the generation its build
 	);
 });
 
-test('wiring: every reuse of a computed-stat cache is guarded by isComputedStatsCurrent', () => {
-	for (const [cache, key] of [
-		['this.lastFullDailyStats', 'fullDaily'],
-		['this.lastUsageAnalysisStats', 'usage'],
-		['this.lastEfficiencySessionInputs', 'sessionInputs'],
+test('wiring: every computed-stat cache is reachable only through a generation-guarded accessor', () => {
+	for (const [accessor, key, field] of [
+		['currentFullDailyStats', 'fullDaily', 'lastFullDailyStats'],
+		['currentUsageAnalysisStats', 'usage', 'lastUsageAnalysisStats'],
+		['currentEfficiencySessionInputs', 'sessionInputs', 'lastEfficiencySessionInputs'],
 	]) {
-		const guard = `${cache} && isComputedStatsCurrent(this._statsGeneration.${key}, this._cacheGeneration)`;
 		assert.ok(
-			EXTENSION_SRC.includes(guard),
-			`reusing ${cache} must be gated on its stamp still being current — expected: ${guard}`,
+			EXTENSION_SRC.includes(`private get ${accessor}()`),
+			`missing generation-aware accessor: ${accessor}`,
+		);
+		assert.ok(
+			EXTENSION_SRC.includes(
+				`return isComputedStatsCurrent(this._statsGeneration.${key}, this._cacheGeneration) ? this.${field} : undefined;`,
+			),
+			`${accessor} must return undefined once its stamp is no longer current`,
 		);
 	}
 });
 
 test('wiring: the Efficiency sink and build queue use the tested helpers', () => {
 	assert.ok(
-		EXTENSION_SRC.includes('return makePanelBoundSink(panel, () => this.efficiencyPanel);'),
-		'efficiencyLoadingSink() must delegate to the tested panel-identity helper',
+		EXTENSION_SRC.includes('return makeLivePanelSink(() => this.efficiencyPanel);'),
+		'efficiencyLoadingSink() must delegate to the tested live-panel helper',
+	);
+	// The sink following the live panel is only sound because renders do *not*: a build that
+	// outlived its panel must still be barred from drawing its result over the replacement.
+	assert.equal(
+		EXTENSION_SRC.split('this.efficiencyPanel !== panel').length - 1,
+		5,
+		'each Efficiency render path must keep its own panel-identity check',
 	);
 	assert.ok(
 		EXTENSION_SRC.includes('const { result, chain } = chainBuild(this._efficiencyBuildChain, build);'),
@@ -277,4 +285,23 @@ test('wiring: the Efficiency sink and build queue use the tested helpers', () =>
 		EXTENSION_SRC.includes('this._efficiencyBuildChain = chain;\n\t\treturn result;'),
 		'the queue must advance on the failure-absorbing chain, not on the caller-facing result',
 	);
+});
+
+test('wiring: the raw computed-stat fields are never read outside their accessors', () => {
+	// The accessors are only a guarantee if nothing bypasses them. Every surviving mention of a
+	// raw field must be an assignment to it or the single read inside its own accessor — anything
+	// else is a consumer silently opted out of the generation check, which is how this guard was
+	// half-applied the first time.
+	for (const field of ['lastFullDailyStats', 'lastUsageAnalysisStats', 'lastEfficiencySessionInputs']) {
+		const offenders = EXTENSION_SRC.split('\n')
+			.map((line, i) => ({ line: line.trim(), no: i + 1 }))
+			.filter(({ line }) => line.includes(`this.${field}`))
+			.filter(({ line }) => !new RegExp(`this\\.${field}\\s*=`).test(line))
+			.filter(({ line }) => !line.startsWith('*') && !line.startsWith('//'))
+			.filter(({ line }) => !line.includes('isComputedStatsCurrent('));
+		assert.deepEqual(
+			offenders, [],
+			`${field} is read directly instead of through its generation-aware accessor`,
+		);
+	}
 });
