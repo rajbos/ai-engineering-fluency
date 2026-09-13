@@ -227,10 +227,10 @@ import {
   type EfficiencyViewData,
   type ModelDailyInput,
   type PeriodVolumeTotals,
+  valueSignalsEqual as _valueSignalsEqual,
   type ValueSignals,
   type ValueSignalsInput,
 } from '../../src/efficiencyAnalysis';
-import { valueSignalsEqual } from './webview/efficiency/valueUpdate';
 
 import { scanDarkFactoryReadiness } from './darkFactoryService';
 
@@ -9608,7 +9608,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// PR data", which is what turns populated cards back into the hint.
 		if (stats && stats.authenticated && !isRealRepoPrSnapshot(stats)) { return; }
 		const value = this.deriveEfficiencyValueSignals(rendered);
-		if (valueSignalsEqual(value, rendered.value)) { return; }
+		if (_valueSignalsEqual(value, rendered.value)) { return; }
 		this._lastEfficiencyViewData = { ...rendered, value };
 		const { delivered, wasReady } = await this.efficiencyMessageReplay.publish(
 			'valueSignals', { command: 'valueSignalsUpdated', value },

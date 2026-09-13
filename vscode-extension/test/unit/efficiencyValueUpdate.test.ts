@@ -3,7 +3,6 @@ import * as assert from 'node:assert/strict';
 import {
 	createEfficiencyWebviewReadyNotifier,
 	isValueSignalsPayload,
-	valueSignalsEqual,
 	type EfficiencyWebviewReadyMessage,
 } from '../../src/webview/efficiency/valueUpdate';
 import type { ValueSignals } from '../../../src/efficiencyAnalysis';
@@ -56,15 +55,4 @@ test('isValueSignalsPayload rejects payloads that would render as undefined', ()
 test('isValueSignalsPayload accepts the date shapes the host actually sends', () => {
 	assert.ok(isValueSignalsPayload(signals({ prsSince: '2026-02-14T00:00:00.000Z' })));
 	assert.ok(isValueSignalsPayload(signals({ prsSince: '2026-02-14' })));
-});
-
-test('valueSignalsEqual treats an unchanged snapshot as a no-op', () => {
-	assert.ok(valueSignalsEqual(signals(), signals()));
-	assert.ok(valueSignalsEqual(undefined, undefined));
-	assert.equal(valueSignalsEqual(signals(), undefined), false);
-	assert.equal(valueSignalsEqual(signals(), signals({ mergedPrs: 15 })), false);
-	// Losing PR data (sign-out) is a change, not a no-op: the cards must go back to the hint.
-	assert.equal(valueSignalsEqual(signals(), signals({ userPrs: null })), false);
-	// Non-PR totals matter too — a refreshed cost changes cost-per-merged-PR.
-	assert.equal(valueSignalsEqual(signals(), signals({ periodCost: 50 })), false);
 });

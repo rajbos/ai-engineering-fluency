@@ -107,6 +107,12 @@ export function shouldPreserveRepoPrSnapshotForEmptyDiscovery(
  * tab) can tell "no PR data yet" from "fetched, and the answer is zero". `fetchedAt` is optional in
  * `RepoPrStatsResult`, and nothing on the cache-read path requires it, so a populated repo list
  * counts as real on its own.
+ *
+ * A snapshot with neither a timestamp nor repos is deliberately "no data" rather than "fetched,
+ * and the answer is zero": every producer stamps `fetchedAt` (the placeholder with `''`, the
+ * refresh path with a real ISO time, and the cache write carries that same result), so nothing
+ * legitimate lands here — and a zero-PR claim derived from a snapshot that cannot show it ever
+ * fetched would be a worse guess than the actionable hint.
  */
 export function isRealRepoPrSnapshot(
 	result: Pick<RepoPrStatsResult, 'repos' | 'fetchedAt'> | undefined,

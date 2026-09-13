@@ -61,19 +61,3 @@ export function isValueSignalsPayload(value: unknown): value is ValueSignals {
 	if (v.prsSince === null) { return true; }
 	return typeof v.prsSince === 'string' && Number.isFinite(Date.parse(v.prsSince));
 }
-
-/**
- * True when two Value snapshots say the same thing, so a re-render would be a no-op.
- *
- * Both sides check this: the host to avoid posting churn on every Repository PRs refresh, the
- * webview to leave the rendered DOM (and the user's scroll position) alone when a replayed or
- * duplicate update carries nothing new.
- */
-export function valueSignalsEqual(a: ValueSignals | undefined, b: ValueSignals | undefined): boolean {
-	if (!a || !b) { return a === b; }
-	const keys: (keyof ValueSignals)[] = [
-		'userPrs', 'mergedPrs', 'aiPrs', 'prsSince', 'prsPerWeek', 'costPerMergedPr',
-		'applyRate', 'appliedBlocks', 'totalBlocks', 'locPerDollar', 'linesChanged', 'periodCost',
-	];
-	return keys.every((key) => a[key] === b[key]);
-}

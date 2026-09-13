@@ -28,15 +28,12 @@ import {
 	listComparableModels,
 	resolveModelCompareWindow,
 	selectDaysInWindow,
+	valueSignalsEqual,
 	windowHasModelData,
 } from '../../../../src/efficiencyAnalysis';
 import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 import { registerMessageHandler } from '../shared/messageHandler';
-import {
-	createEfficiencyWebviewReadyNotifier,
-	isValueSignalsPayload,
-	valueSignalsEqual,
-} from './valueUpdate';
+import { createEfficiencyWebviewReadyNotifier, isValueSignalsPayload } from './valueUpdate';
 
 // Minimal structural types for the dynamically imported Chart.js bundle —
 // a `typeof import('chart.js/auto')` type-import trips TS1542 under CJS resolution.
