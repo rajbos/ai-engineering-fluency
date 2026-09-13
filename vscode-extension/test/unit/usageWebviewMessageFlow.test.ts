@@ -1039,3 +1039,20 @@ test('switchTab still honours a static section anchor', async () => {
 		`the section anchor must still be honoured, scrolled to: ${JSON.stringify(harness.scrolledTo)}`,
 	);
 });
+
+test('a deep link to an insight that no longer exists opens the tab and scrolls nowhere', async () => {
+	// The toast targets the insight it named, by id — so if that insight stopped applying (or was
+	// acted on elsewhere) between the toast appearing and "View" being clicked, there is no card
+	// to land on. That must degrade to plainly opening the tab, not to scrolling somewhere else.
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-long-gone' });
+	await harness.settleScroll();
+
+	assert.deepEqual(harness.scrolledTo, [], 'a missing target must not redirect the scroll');
+	assert.equal(
+		harness.window.document.getElementById('tab-panel-insights')?.style.display,
+		'block',
+		'the Insights tab must still be the one showing',
+	);
+});
