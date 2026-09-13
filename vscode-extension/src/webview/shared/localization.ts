@@ -64,17 +64,17 @@ export interface WebviewLocalization {
 	'logviewer.summary.started': string;
 	'logviewer.summary.lastActivity': string;
 
-	// HydraFusion Routing section (log viewer) and its Session Steps Overview integration
-	'hydrafusion.table.cost': string;
-	'hydrafusion.turn.costTooltip': string;
-	'hydrafusion.turn.jumpToStepTooltip': string;
-	'hydrafusion.turn.jumpToStepLabel': string;
-	'hydrafusion.turnsPanel.subtitle': string;
-	'hydrafusion.overview.toggleLegsAriaLabel': string;
-	'hydrafusion.overview.showLegsTooltip': string;
-	'hydrafusion.overview.legsCaption': string;
-	'hydrafusion.overview.modelChangedTooltip': string;
-	'hydrafusion.overview.expandHint': string;
+	// HydraFusion Routing section + Session Steps Overview leg toggle
+	'logviewer.hydrafusion.cost': string;
+	'logviewer.hydrafusion.costForTurn': string;
+	'logviewer.hydrafusion.jumpToStepTitle': string;
+	'logviewer.hydrafusion.jumpToStepLabel': string;
+	'logviewer.hydrafusion.turnDetailIntro': string;
+	'logviewer.hydrafusion.toggleLegsAriaLabel': string;
+	'logviewer.hydrafusion.showLegsTitle': string;
+	'logviewer.hydrafusion.legsCaptionTotal': string;
+	'logviewer.hydrafusion.modelChangedTitle': string;
+	'logviewer.hydrafusion.expandStepNote': string;
 
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
@@ -130,16 +130,16 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'logviewer.summary.timeline': 'Timeline',
 	'logviewer.summary.started': 'Started',
 	'logviewer.summary.lastActivity': 'Last activity',
-	'hydrafusion.table.cost': 'Cost',
-	'hydrafusion.turn.costTooltip': 'Cost for this turn',
-	'hydrafusion.turn.jumpToStepTooltip': 'Jump to step #{0} in the Session Steps Overview below',
-	'hydrafusion.turn.jumpToStepLabel': '⤵ step #{0}',
-	'hydrafusion.turnsPanel.subtitle': 'Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg a judge rejected. The same legs also appear under their step in the Session Steps Overview below.',
-	'hydrafusion.overview.toggleLegsAriaLabel': 'Toggle HydraFusion legs for step #{0}',
-	'hydrafusion.overview.showLegsTooltip': 'Show the HydraFusion legs behind this step',
-	'hydrafusion.overview.legsCaption': '⚡ HydraFusion legs for step #{0} — total',
-	'hydrafusion.overview.modelChangedTooltip': 'Model changed from the previous step',
-	'hydrafusion.overview.expandHint': '⚡ expand a step to see the HydraFusion legs behind it'
+	'logviewer.hydrafusion.cost': 'Cost',
+	'logviewer.hydrafusion.costForTurn': 'Cost for this turn',
+	'logviewer.hydrafusion.jumpToStepTitle': 'Jump to step #{0} in the Session Steps Overview below',
+	'logviewer.hydrafusion.jumpToStepLabel': 'step #{0}',
+	'logviewer.hydrafusion.turnDetailIntro': 'Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg a judge rejected. The same legs also appear under their step in the Session Steps Overview below.',
+	'logviewer.hydrafusion.toggleLegsAriaLabel': 'Toggle HydraFusion legs for step #{0}',
+	'logviewer.hydrafusion.showLegsTitle': 'Show the HydraFusion legs behind this step',
+	'logviewer.hydrafusion.legsCaptionTotal': '⚡ HydraFusion legs for step #{0} — total',
+	'logviewer.hydrafusion.modelChangedTitle': 'Model changed from the previous step',
+	'logviewer.hydrafusion.expandStepNote': '⚡ expand a step to see the HydraFusion legs behind it'
 };
 
 // Current localization strings, initialized with defaults

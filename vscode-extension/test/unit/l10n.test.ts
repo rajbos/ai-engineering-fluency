@@ -299,41 +299,40 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 	}
 });
 
-// HydraFusion Routing section (log viewer) and its Session Steps Overview integration
-// (hardcoded-strings baseline fix) — guards against these strings resurfacing in English
-// for zh-CN users.
-test('l10n: HydraFusion Routing labels resolve in English', () => {
+// HydraFusion Routing section + Session Steps Overview leg toggle (PR #2059
+// follow-up) — guards against raw keys resurfacing in the new cost/leg UI.
+test('l10n: HydraFusion routing keys resolve in English', () => {
 	const expected: Record<string, string> = {
-		'hydrafusion.table.cost': 'Cost',
-		'hydrafusion.turn.costTooltip': 'Cost for this turn',
-		'hydrafusion.turn.jumpToStepTooltip': 'Jump to step #{0} in the Session Steps Overview below',
-		'hydrafusion.turn.jumpToStepLabel': '⤵ step #{0}',
-		'hydrafusion.turnsPanel.subtitle': 'Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg a judge rejected. The same legs also appear under their step in the Session Steps Overview below.',
-		'hydrafusion.overview.toggleLegsAriaLabel': 'Toggle HydraFusion legs for step #{0}',
-		'hydrafusion.overview.showLegsTooltip': 'Show the HydraFusion legs behind this step',
-		'hydrafusion.overview.legsCaption': '⚡ HydraFusion legs for step #{0} — total',
-		'hydrafusion.overview.modelChangedTooltip': 'Model changed from the previous step',
-		'hydrafusion.overview.expandHint': '⚡ expand a step to see the HydraFusion legs behind it',
+		'logviewer.hydrafusion.cost': 'Cost',
+		'logviewer.hydrafusion.costForTurn': 'Cost for this turn',
+		'logviewer.hydrafusion.jumpToStepTitle': 'Jump to step #{0} in the Session Steps Overview below',
+		'logviewer.hydrafusion.jumpToStepLabel': 'step #{0}',
+		'logviewer.hydrafusion.turnDetailIntro': 'Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg a judge rejected. The same legs also appear under their step in the Session Steps Overview below.',
+		'logviewer.hydrafusion.toggleLegsAriaLabel': 'Toggle HydraFusion legs for step #{0}',
+		'logviewer.hydrafusion.showLegsTitle': 'Show the HydraFusion legs behind this step',
+		'logviewer.hydrafusion.legsCaptionTotal': '⚡ HydraFusion legs for step #{0} — total',
+		'logviewer.hydrafusion.modelChangedTitle': 'Model changed from the previous step',
+		'logviewer.hydrafusion.expandStepNote': '⚡ expand a step to see the HydraFusion legs behind it',
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
 	}
 });
 
-test('l10n: HydraFusion Routing labels resolve in zh-cn', () => {
+test('l10n: HydraFusion routing keys resolve in zh-cn', () => {
 	mock.setLanguage('zh-cn');
 	try {
 		const expected: Record<string, string> = {
-			'hydrafusion.table.cost': '成本',
-			'hydrafusion.turn.costTooltip': '本轮成本',
-			'hydrafusion.turn.jumpToStepTooltip': '跳转到下方会话步骤概览中的步骤 #{0}',
-			'hydrafusion.turn.jumpToStepLabel': '⤵ 步骤 #{0}',
-			'hydrafusion.turnsPanel.subtitle': '展开某一轮以查看每个环节，它的判定结果及花费。● 标记你实际收到输出的环节；✗ 标记被评审判定拒绝的环节。相同的环节也会出现在下方会话步骤概览中对应的步骤下。',
-			'hydrafusion.overview.toggleLegsAriaLabel': '切换步骤 #{0} 的 HydraFusion 环节',
-			'hydrafusion.overview.showLegsTooltip': '显示此步骤背后的 HydraFusion 环节',
-			'hydrafusion.overview.legsCaption': '⚡ 步骤 #{0} 的 HydraFusion 环节 — 共计',
-			'hydrafusion.overview.modelChangedTooltip': '模型较上一步骤有变化',
-			'hydrafusion.overview.expandHint': '⚡ 展开步骤以查看其背后的 HydraFusion 环节',
+			'logviewer.hydrafusion.cost': '费用',
+			'logviewer.hydrafusion.costForTurn': '本轮费用',
+			'logviewer.hydrafusion.jumpToStepTitle': '跳转到下方会话步骤概览中的第 {0} 步',
+			'logviewer.hydrafusion.jumpToStepLabel': '第 {0} 步',
+			'logviewer.hydrafusion.turnDetailIntro': '展开一轮以查看每个环节、它做出的决定以及它的花费。● 标记你实际收到输出的环节；✗ 标记被评审拒绝的环节。相同的环节也会出现在下方会话步骤概览中对应的步骤下。',
+			'logviewer.hydrafusion.toggleLegsAriaLabel': '切换第 {0} 步的 HydraFusion 环节',
+			'logviewer.hydrafusion.showLegsTitle': '显示此步骤背后的 HydraFusion 环节',
+			'logviewer.hydrafusion.legsCaptionTotal': '⚡ 第 {0} 步的 HydraFusion 环节 — 总计',
+			'logviewer.hydrafusion.modelChangedTitle': '模型较上一步已更改',
+			'logviewer.hydrafusion.expandStepNote': '⚡ 展开某一步以查看其背后的 HydraFusion 环节',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
