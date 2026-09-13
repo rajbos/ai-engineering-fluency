@@ -969,3 +969,36 @@ test('a re-render after the user switches tabs does not drag them back to the in
 
 	assert.deepEqual(harness.scrolledTo, [], 'a hidden card must not steal the scroll position');
 });
+
+test('clicking away from Insights and back drops the pending deep link', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-stale-skills' });
+	await harness.settleScroll();
+	// Away and straight back, before any re-render observes the tab change.
+	harness.window.document.querySelector('.tab-button[data-tab="activity"]')?.click();
+	harness.window.document.querySelector('.tab-button[data-tab="insights"]')?.click();
+	harness.scrolledTo.length = 0;
+
+	harness.post({ command: 'updateInsights', insights: buildStatsWithInsights().insights });
+	await harness.settleScroll();
+
+	assert.deepEqual(harness.scrolledTo, [], 'the user chose this scroll position; nothing may override it');
+});
+
+test('a deep link survives a stats load slower than the re-assert window', async () => {
+	// A badge click can reach a webview still on its loading screen, with no insight card in the
+	// DOM at all. `pendingTabAnchor` — not the short re-assert window — is what carries the link
+	// across the recalculation, and it is only consumed once the element is actually found.
+	const harness = await bootWebview(null);
+
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-marathon-session-today' });
+	await new Promise((resolve) => setTimeout(resolve, 4300));
+	harness.post({ command: 'updateStats', data: buildStatsWithInsights() });
+	await harness.settleScroll();
+
+	assert.ok(
+		harness.scrolledTo.includes('insight-card-marathon-session-today'),
+		`the slow-loading card must still be scrolled to, scrolled to: ${JSON.stringify(harness.scrolledTo)}`,
+	);
+});

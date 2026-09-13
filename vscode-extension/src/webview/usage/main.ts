@@ -414,10 +414,14 @@ let currentWorkspacePaths: string[] = [];
 let activeTab = 'activity';
 let pendingTabAnchor: string | null = null;
 /**
- * An insight anchor keeps re-asserting itself for this long across re-renders. Activating the
- * Insights tab immediately marks its new insights as "seen", which makes the host push a fresh
- * `updateInsights` that rebuilds every card — destroying the element we just scrolled to. Without
- * this window the scroll silently lands nowhere and the user is dropped at the top of the tab.
+ * How long an insight anchor keeps re-asserting itself once its card has been shown. Activating
+ * the Insights tab immediately marks its new insights as "seen", which makes the host push a
+ * fresh `updateInsights`; a background stats refresh runs the full `renderLayout`. Either rebuilds
+ * every card, destroying the element we just scrolled to, and without this the scroll is lost.
+ *
+ * This governs re-assertion only. A deep link requested before the cards exist at all — a badge
+ * click reaching a webview still on its loading screen — is carried by `pendingTabAnchor`, which
+ * is only consumed once the element is actually found, so a slow stats load cannot drop it.
  */
 const INSIGHT_FOCUS_WINDOW_MS = 4000;
 let focusedInsightAnchor: { anchor: string; until: number } | null = null;
@@ -2432,6 +2436,10 @@ function setupTabs(): void {
 			const tab = button.getAttribute('data-tab');
 			if (!tab) { return; }
 			activeTab = tab;
+			// The user chose where to look. Drop any pending insight deep link right here rather
+			// than waiting for a re-render to notice: clicking away and straight back would leave
+			// the old anchor live and yank them to that card on the next update.
+			clearFocusedInsightAnchor();
 			reportTabOpened(tab);
 			tabButtons.forEach(btn => btn.classList.toggle('active', btn.getAttribute('data-tab') === tab));
 			document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
@@ -5806,6 +5814,7 @@ function handleToolSuppressed(toolName: string): void {
 
 function handleHighlightUnknownTools(): void {
 	activeTab = 'tools';
+	clearFocusedInsightAnchor();
 	document.querySelectorAll<HTMLElement>('.tab-button').forEach(btn => {
 		btn.classList.toggle('active', btn.getAttribute('data-tab') === 'tools');
 	});
@@ -5929,13 +5938,14 @@ function handleSwitchTab(message: any): void {
 	// notification's "Show Me" action. With activeTab set, the eventual render honors it.
 	activeTab = tab;
 	pendingTabAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
-	// A card anchor has to outlive the re-render that activating the tab triggers, so remember it
-	// separately; a static section anchor is stable and needs no such window.
+	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${tab}"]`);
+	btn?.click();
+	// Armed after the click, not before: the click runs the same handler that clears the focus on
+	// user-driven navigation, and this navigation is the host's, not the user's. A card anchor has
+	// to outlive the re-renders that follow; a static section anchor is stable and needs no window.
 	focusedInsightAnchor = pendingTabAnchor && isInsightCardAnchor(pendingTabAnchor)
 		? { anchor: pendingTabAnchor, until: Date.now() + INSIGHT_FOCUS_WINDOW_MS }
 		: null;
-	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${tab}"]`);
-	btn?.click();
 	scrollToPendingTabAnchor();
 }
 
@@ -5975,6 +5985,11 @@ function flashAnchorHighlight(element: HTMLElement): void {
 		element.style.transition = transition;
 	}, 2000);
 	activeFlashes.set(element, { shadow, transition, timer });
+}
+
+/** Forgets a pending insight deep link, so nothing later scrolls the user back to that card. */
+function clearFocusedInsightAnchor(): void {
+	focusedInsightAnchor = null;
 }
 
 /**
