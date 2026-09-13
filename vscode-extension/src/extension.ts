@@ -932,6 +932,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Editor list captured during the last (or current) log analysis, used to render the loading tooltip SVG
 	private _loadingEditors: { icon: string; name: string }[] = [];
+	/** Generation the last automatic Efficiency rebuild was requested for; see requestEfficiencyRebuild(). */
+	private _efficiencyRebuildRequestedFor: number | undefined;
 	/** Tail of the serialized Efficiency build queue; see runEfficiencyBuild(). */
 	private _efficiencyBuildChain: Promise<void> = Promise.resolve();
 	// Previous progress percentage used to animate the progress bar smoothly between tooltip updates
@@ -1753,7 +1755,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// with live progress while it runs, so there is nothing for clearCache() to wait on.
 			if (this.efficiencyPanel) {
 				this.log('⚡ Rebuilding the open Efficiency view after the clear...');
-				void this.refreshEfficiencyPanel();
+				this.requestEfficiencyRebuild();
 			}
 		} catch (error) {
 			this.error('Error clearing cache:', error);
@@ -2756,6 +2758,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * them one at a time removes that ordering problem at the source, and a queued refresh
 	 * then reuses whatever the build ahead of it just cached.
 	 */
+	/**
+	 * Requests the one automatic Efficiency rebuild a cache invalidation is owed.
+	 *
+	 * Two paths independently notice an invalidation and want the panel rebuilt: `clearCache()`,
+	 * and a detached build discovering on completion that its payload predates the clear. Both
+	 * are correct to want it and neither can be dropped — `clearCache()` is not the only writer
+	 * that bumps the generation, so the build-side retry still covers the others — but together
+	 * they queued two full walks for a single clear, doubling exactly the wait this view exists
+	 * to make legible. Recording the generation a rebuild was requested for collapses them: the
+	 * first caller through wins, the second no-ops, and a *later* invalidation gets its own.
+	 */
+	private requestEfficiencyRebuild(): void {
+		if (!this.efficiencyPanel) { return; }
+		if (this._efficiencyRebuildRequestedFor === this._cacheGeneration) { return; }
+		this._efficiencyRebuildRequestedFor = this._cacheGeneration;
+		void this.refreshEfficiencyPanel();
+	}
+
 	private runEfficiencyBuild<T>(build: () => Promise<T>): Promise<T> {
 		const { result, chain } = chainBuild(this._efficiencyBuildChain, build);
 		this._efficiencyBuildChain = chain;
@@ -10379,7 +10399,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				// will redraw this panel though — clearCache() refreshes the token stats, not
 				// this view — so rebuild rather than leaving the loading screen up forever.
 				if (!this.recordEfficiencyPayload(data, generation)) {
-					if (this.efficiencyPanel === panel) { void this.refreshEfficiencyPanel(); }
+					if (this.efficiencyPanel === panel) { this.requestEfficiencyRebuild(); }
 					return;
 				}
 				// The user may have closed the panel while the data was being computed.

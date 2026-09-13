@@ -346,11 +346,33 @@ test('wiring: clearing the cache rebuilds an open Efficiency panel', () => {
 	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('public async clearCache()'));
 	const clear = body.slice(0, body.indexOf('\n\tpublic async resetInsightsState('));
 	assert.ok(
-		/if \(this\.efficiencyPanel\) \{[\s\S]*?void this\.refreshEfficiencyPanel\(\);/.test(clear),
+		/if \(this\.efficiencyPanel\) \{[\s\S]*?this\.requestEfficiencyRebuild\(\);/.test(clear),
 		'clearCache() must rebuild an open Efficiency panel',
 	);
 	assert.ok(
-		clear.indexOf('void this.refreshEfficiencyPanel()') > clear.indexOf('await this.updateTokenStats()'),
+		clear.indexOf('this.requestEfficiencyRebuild()') > clear.indexOf('await this.updateTokenStats()'),
 		'the rebuild must come after the clear has completed and the token stats refreshed',
+	);
+});
+
+test('wiring: a cache invalidation queues at most one automatic Efficiency rebuild', () => {
+	// clearCache() and the build-side payload retry both notice an invalidation and both want the
+	// panel rebuilt. Neither can be dropped — clearCache() is not the only writer that bumps the
+	// generation — so they are collapsed by generation instead, or one clear costs two full walks.
+	assert.ok(
+		EXTENSION_SRC.includes('private requestEfficiencyRebuild(): void {'),
+		'the automatic rebuild must go through a single coalescing entry point',
+	);
+	assert.ok(
+		EXTENSION_SRC.includes('if (this._efficiencyRebuildRequestedFor === this._cacheGeneration) { return; }')
+		&& EXTENSION_SRC.includes('this._efficiencyRebuildRequestedFor = this._cacheGeneration;'),
+		'it must record the generation it requested for, so a second caller at the same generation no-ops',
+	);
+	// Exactly one caller may start a rebuild directly: refreshEfficiencyPanel() is also the panel's
+	// own Refresh button, which must never be coalesced away.
+	assert.equal(
+		EXTENSION_SRC.split('void this.refreshEfficiencyPanel()').length - 1,
+		1,
+		'both automatic triggers must route through requestEfficiencyRebuild(), not call the refresh directly',
 	);
 });
