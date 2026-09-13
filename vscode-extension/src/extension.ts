@@ -2233,10 +2233,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.statusBarItem.text = this._devBranch ? `${text} [${this._devBranch}]` : text;
 	}
 
-	private refreshStatusBarInsightBadge(count: number, topInsightTitle?: string, topInsightId?: string): void {
+	/**
+	 * Repaints the insights badge. `topInsight` is set unconditionally rather than carried over:
+	 * once the previous top insight is dismissed, snoozed or marked done, keeping it would leave
+	 * the tooltip naming — and a click scrolling to — a card that is no longer at the top of the
+	 * list. Callers that only know the count use `refreshInsightBadgeFromState`.
+	 */
+	private refreshStatusBarInsightBadge(count: number, topInsight?: { title: string; id: string }): void {
 		this._newInsightCount = count;
-		this._topInsightTitle = topInsightTitle ?? this._topInsightTitle;
-		this._topInsightId = topInsightId ?? this._topInsightId;
+		this._topInsightTitle = topInsight?.title ?? null;
+		this._topInsightId = topInsight?.id ?? null;
 		// Main status bar: remove the 💡 badge — it now lives in its own item
 		this.setStatusBarText(this._statusBarBaseText);
 
@@ -2259,6 +2265,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 		} else {
 			this.insightsStatusBarItem.hide();
 		}
+	}
+
+	/**
+	 * Recomputes the badge from the current insight state, so its count, tooltip and click target
+	 * always describe the same, current list. `evaluated` lets a caller that already built the
+	 * list pass it in rather than evaluating every insight twice.
+	 */
+	private refreshInsightBadgeFromState(now: string, evaluated?: EvaluatedInsight[]): void {
+		const stats = this.lastUsageAnalysisStats;
+		const list = evaluated ?? (stats ? this.buildCurrentInsights(stats) : []);
+		const topNew = list.find(i => i.status === 'new');
+		this.refreshStatusBarInsightBadge(
+			_countNewInsights(this._insightStateBag, now),
+			topNew ? { title: topNew.title, id: topNew.id } : undefined,
+		);
 	}
 
 	private sendLoadingPanelMessage(msg: object): void {
@@ -3883,7 +3904,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		const newCount = _countNewInsights(this._insightStateBag, now);
 		const topNew = evaluated.find(i => i.status === 'new');
-		this.refreshStatusBarInsightBadge(newCount, topNew?.title, topNew?.id);
+		this.refreshStatusBarInsightBadge(newCount, topNew ? { title: topNew.title, id: topNew.id } : undefined);
 
 		await this.context.globalState.update('insights.state', this._insightStateBag);
 
@@ -3922,7 +3943,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				lastSurfacedAt: now,
 			};
 			await this.context.globalState.update('insights.state', this._insightStateBag);
-			this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
+			this.refreshInsightBadgeFromState(now);
 		}
 	}
 
@@ -8167,28 +8188,27 @@ private computeFallbackDailyRollup(
 			case 'seen':
 				if (existing.status === 'new') {
 					this._insightStateBag[id] = { ...existing, status: 'seen', lastSurfacedAt: now };
-					this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				}
 				break;
 			case 'dismiss':
 				this._insightStateBag[id] = { ...existing, status: 'dismissed', lastSurfacedAt: now };
-				this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				break;
 			case 'snooze': {
 				const snoozeUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 				this._insightStateBag[id] = { ...existing, status: 'snoozed', lastSurfacedAt: now, snoozeUntil };
-				this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				break;
 			}
 			case 'done':
 				this._insightStateBag[id] = { ...existing, status: 'done', lastSurfacedAt: now };
-				this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				break;
 		}
 		await this.context.globalState.update('insights.state', this._insightStateBag);
+		// Re-evaluate once and use it for both surfaces: the insight just acted on may no longer be
+		// the top 'new' one, and a badge left naming it would send a click to the wrong card.
+		const evaluated = this.lastUsageAnalysisStats ? this.buildCurrentInsights(this.lastUsageAnalysisStats) : undefined;
+		this.refreshInsightBadgeFromState(now, evaluated);
 		// Push refreshed state back to the webview
-		if (this.analysisPanel && this.lastUsageAnalysisStats) {
-			const evaluated = this.buildCurrentInsights(this.lastUsageAnalysisStats);
+		if (this.analysisPanel && evaluated) {
 			void this.analysisPanel.webview.postMessage({ command: 'updateInsights', insights: evaluated });
 		}
 	}

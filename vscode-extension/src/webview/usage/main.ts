@@ -421,6 +421,10 @@ let pendingTabAnchor: string | null = null;
  */
 const INSIGHT_FOCUS_WINDOW_MS = 4000;
 let focusedInsightAnchor: { anchor: string; until: number } | null = null;
+/** The node the last anchor scroll targeted, so a re-apply can tell a rebuild from a repeat. */
+let lastAnchorScrollTarget: HTMLElement | null = null;
+/** Elements with a highlight flash still in flight, with the styling their timer will restore. */
+const activeFlashes = new WeakMap<HTMLElement, { shadow: string; transition: string; timer: ReturnType<typeof setTimeout> }>();
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentInsights: EvaluatedInsight[] = [];
 let activeCorrectionFilter: CorrectionFilter | null = null;
@@ -5609,6 +5613,9 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	currentInsights = stats.insights ?? [];
 	wireInsightCardButtons();
 	scrollToPendingTabAnchor();
+	// A full layout rebuild — e.g. a background stats refresh landing mid-navigation — destroys
+	// the card a still-fresh insight anchor pointed at, just as an insights-only re-render does.
+	reapplyFocusedInsightAnchor();
 	// The GitHub activity containers only exist now. Re-announce readiness so the extension
 	// replays any PR / cloud-agent state that was posted while the DOM had no place to put it.
 	restoreGitHubActivityPanels(repoPrStatsData, agentSessionsData, updateReposPrPanel, updateAgentSessionsPanel);
@@ -5937,6 +5944,7 @@ function scrollToPendingTabAnchor(): void {
 	const anchor = document.getElementById(pendingTabAnchor);
 	if (anchor) {
 		pendingTabAnchor = null;
+		lastAnchorScrollTarget = anchor;
 		setTimeout(() => {
 			anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
 			flashAnchorHighlight(anchor);
@@ -5950,16 +5958,23 @@ function scrollToPendingTabAnchor(): void {
  * insight cards, the flash is what tells the user which one they were sent to.
  */
 function flashAnchorHighlight(element: HTMLElement): void {
+	// Re-flashing an element that is still lit must not capture the flash's *own* outline as the
+	// styling to restore — the second timer would then "restore" the outline permanently. Reuse
+	// the styling the first flash captured and cancel its timer instead.
+	const inFlight = activeFlashes.get(element);
+	if (inFlight) { clearTimeout(inFlight.timer); }
 	// A "new" insight card already carries its own inline glow; put it back afterwards rather than
 	// clearing the property, or the flash would permanently strip the card's own styling.
-	const previousShadow = element.style.boxShadow;
-	const previousTransition = element.style.transition;
+	const shadow = inFlight ? inFlight.shadow : element.style.boxShadow;
+	const transition = inFlight ? inFlight.transition : element.style.transition;
 	element.style.transition = 'box-shadow 0.3s ease';
 	element.style.boxShadow = '0 0 0 3px var(--vscode-focusBorder)';
-	setTimeout(() => {
-		element.style.boxShadow = previousShadow;
-		element.style.transition = previousTransition;
+	const timer = setTimeout(() => {
+		activeFlashes.delete(element);
+		element.style.boxShadow = shadow;
+		element.style.transition = transition;
 	}, 2000);
+	activeFlashes.set(element, { shadow, transition, timer });
 }
 
 /**
@@ -5972,6 +5987,15 @@ function reapplyFocusedInsightAnchor(): void {
 		focusedInsightAnchor = null;
 		return;
 	}
+	// The user may have clicked away in the meantime; re-scrolling a card on a hidden tab would
+	// only fight whatever they chose to look at instead.
+	if (activeTab !== 'insights') {
+		focusedInsightAnchor = null;
+		return;
+	}
+	const card = document.getElementById(focusedInsightAnchor.anchor);
+	// Nothing was rebuilt — we are still looking at the very node we just scrolled to.
+	if (!card || card === lastAnchorScrollTarget) { return; }
 	pendingTabAnchor = focusedInsightAnchor.anchor;
 	scrollToPendingTabAnchor();
 }

@@ -919,3 +919,53 @@ test("the highlight flash restores a new card's own glow instead of stripping it
 		'the flash must hand the card back the styling it had',
 	);
 });
+
+test('flashing the same card twice in a row does not leave it permanently outlined', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+	const before = harness.window.document.getElementById('insight-card-marathon-session-today').style.boxShadow;
+
+	// Two anchored navigations to the same card inside the 2s flash window: the second flash must
+	// not capture the first flash's own outline as the styling to restore.
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-marathon-session-today' });
+	await harness.settleScroll();
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-marathon-session-today' });
+	await harness.settleScroll();
+	await new Promise((resolve) => setTimeout(resolve, 2100));
+
+	assert.equal(
+		harness.window.document.getElementById('insight-card-marathon-session-today').style.boxShadow,
+		before,
+		'the card must end up with its original styling, not the focus outline',
+	);
+});
+
+test('a full stats re-render during the focus window still lands on the insight card', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-stale-skills' });
+	await harness.settleScroll();
+	harness.scrolledTo.length = 0;
+
+	// A background stats refresh rebuilds the whole layout, destroying the card just scrolled to.
+	harness.post({ command: 'updateStats', data: buildStatsWithInsights() });
+	await harness.settleScroll();
+
+	assert.ok(
+		harness.scrolledTo.includes('insight-card-stale-skills'),
+		`the rebuilt card must be scrolled to again, scrolled to: ${JSON.stringify(harness.scrolledTo)}`,
+	);
+});
+
+test('a re-render after the user switches tabs does not drag them back to the insight', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-stale-skills' });
+	await harness.settleScroll();
+	harness.window.document.querySelector('.tab-button[data-tab="activity"]')?.click();
+	harness.scrolledTo.length = 0;
+
+	harness.post({ command: 'updateInsights', insights: buildStatsWithInsights().insights });
+	await harness.settleScroll();
+
+	assert.deepEqual(harness.scrolledTo, [], 'a hidden card must not steal the scroll position');
+});
