@@ -285,7 +285,7 @@ export function renderTurnRow(turn: HydraFusionTurn, index: number, chatTurnNumb
 <span class="hydra-pattern-badge ${patternClass(turn.pattern)}" title="${escapeHtml(patternTitle(turn.pattern))}">${escapeHtml(turn.pattern)}</span>
 <span class="hydra-turn-chain">${renderModelChain(turn)}</span>
 <span class="hydra-turn-metrics">
-<span title="${localize('logviewer.hydrafusion.costForTurn')}"><strong>${escapeHtml(formatFusionCost(turn.aiu))}</strong></span>
+<span title="${escapeHtml(localize('logviewer.hydrafusion.costForTurn'))}"><strong>${escapeHtml(formatFusionCost(turn.aiu))}</strong></span>
 <span title="Wall-clock time for the whole turn">${escapeHtml(formatFusionDuration(turn.durationMs))}</span>
 <span title="Router hops in this turn">${turn.phases.length} leg${turn.phases.length === 1 ? '' : 's'}</span>
 ${canJumpToStep ? `<span class="hydra-jump-to-step" data-turn="${chatTurnNumber}" title="${escapeHtml(localizeFormat('logviewer.hydrafusion.jumpToStepTitle', chatTurnNumber))}" role="button" tabindex="0">⤵ ${escapeHtml(localizeFormat('logviewer.hydrafusion.jumpToStepLabel', chatTurnNumber))}</span>` : ''}

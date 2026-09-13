@@ -39,6 +39,19 @@ export class WebviewMessageReplay {
 		this.ready = false;
 	}
 
+	/**
+	 * Forgets every retained message and the readiness flag.
+	 *
+	 * For a panel whose buffered state is only meaningful for one document — the Efficiency
+	 * panel's Value snapshot is derived from the data that document was rendered with — replaying
+	 * it into a *later* document would push stale numbers over fresher bootstrap data. Such a
+	 * panel resets the buffer whenever it replaces its HTML, and on disposal.
+	 */
+	public reset(): void {
+		this.latest.clear();
+		this.ready = false;
+	}
+
 	public get isReady(): boolean {
 		return this.ready;
 	}
