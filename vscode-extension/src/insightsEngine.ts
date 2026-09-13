@@ -976,6 +976,11 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 				`Once a window fills, the client silently drops or summarizes earlier turns — answers start losing detail you already gave. ` +
 				`Head it off by starting a fresh chat (\`/new\`) per task with a short handoff summary, running \`/compact\` yourself while you still control what's kept, and narrowing context to the files that matter instead of whole-repo references.`;
 		},
+		actionLabel: (ctx) => {
+			const n = nearLimitSessionCount(ctx);
+			return `Show ${n === 1 ? 'the session' : `these ${n} sessions`}`;
+		},
+		actionCommand: 'aiEngineeringFluency.showContextPressureSessions',
 		appliesTo: (ctx) => {
 			// Don't double up with the auto-compaction insight, which already covers
 			// sessions that went past the line.

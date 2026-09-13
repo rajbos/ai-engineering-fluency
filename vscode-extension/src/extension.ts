@@ -588,12 +588,19 @@ interface WorktreeCleanupDiagnostics {
 	untrackedFiles?: number;
 }
 
-type UsageAnalysisTab = 'activity' | 'tools' | 'health' | 'worktrees' | 'insights' | 'corrections';
+type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'worktrees' | 'insights' | 'corrections';
 
 /** Narrows an arbitrary tab name (e.g. from the what's-new catalog) to one `showUsageAnalysisOnTab` accepts. */
 function isUsageAnalysisTab(tab: string): tab is UsageAnalysisTab {
-	return (['activity', 'tools', 'health', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
+	return (['activity', 'sessions', 'tools', 'health', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
 }
+
+/**
+ * Pre-set filter the Recent Sessions tab should apply when it is opened from
+ * elsewhere — today only `nearContextLimit`, which narrows the table to the very
+ * sessions the "nearly ran out of context window" insight counts.
+ */
+type SessionsTabPreset = { filter: 'nearContextLimit'; lookback: 'last30' };
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation.
@@ -706,7 +713,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		2_000,
 		(error) => this.warn(`Usage Analysis message delivery failed: ${error}`),
 	);
-	private pendingAnalysisNavigation: { tab: UsageAnalysisTab; anchor?: string } | undefined;
+	private pendingAnalysisNavigation: { tab: UsageAnalysisTab; anchor?: string; sessionsPreset?: SessionsTabPreset } | undefined;
 	private maturityPanel: vscode.WebviewPanel | undefined;
 	private dashboardPanel: vscode.WebviewPanel | undefined;
 	private fluencyLevelViewerPanel: vscode.WebviewPanel | undefined;
@@ -4632,7 +4639,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts);
 			await this.enrichMultiAgentParentCount(usageResults, last30DaysStats, last30DaysUtcStartKey);
 			agenticDailyTrend = await this._computeAgenticDailyTrend(usageResults, last30DaysUtcStartKey);
-			await this.enrichContextWindowFromAppData(usageResults, periods, todaySessionsList);
+			// The Recent Sessions buckets are stamped alongside today's list so the
+			// "near context limit" column and filter work for every lookback, not just today.
+			const contextSessionLists = [todaySessionsList, ...(recentSessions ? [recentSessions.last7, recentSessions.last30, recentSessions.currentMonth] : [])];
+			await this.enrichContextWindowFromAppData(usageResults, periods, contextSessionLists);
 		} catch (error) {
 			this.error('Error calculating usage analysis stats:', error);
 		}
@@ -5028,18 +5038,51 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (info.contextReachedTokens) { session.contextReachedTokens = info.contextReachedTokens; }
 	}
 
+	/**
+	 * Index session summaries by Copilot CLI session uuid. One uuid can map to
+	 * several summary objects: the "Today" list is built separately from the
+	 * Recent Sessions buckets, so the same session appears as two objects that
+	 * both need stamping.
+	 */
+	private _indexSessionsByCliUuid(sessionLists: TodaySessionSummary[][]): Map<string, TodaySessionSummary[]> {
+		const byUuid = new Map<string, TodaySessionSummary[]>();
+		for (const list of sessionLists) {
+			for (const session of list) {
+				const uuid = this.extractCopilotCliUuid(session.filePath);
+				if (!uuid) { continue; }
+				const existing = byUuid.get(uuid);
+				if (!existing) { byUuid.set(uuid, [session]); }
+				else if (!existing.includes(session)) { existing.push(session); }
+			}
+		}
+		return byUuid;
+	}
+
+	/**
+	 * Stamp data.db context-window state (tier, window limit, last fill) onto a
+	 * standalone list of session summaries — used by the lazily-loaded Recent
+	 * Sessions lookbacks, which are built outside the main analysis pass and
+	 * would otherwise show no context fill at all.
+	 */
+	private async applyDbContextToSessions(sessions: TodaySessionSummary[]): Promise<void> {
+		const byUuid = this._indexSessionsByCliUuid([sessions]);
+		if (byUuid.size === 0) { return; }
+		try {
+			const contextInfo = await this.copilotAppData.getSessionContextInfo([...byUuid.keys()]);
+			for (const [uuid, info] of contextInfo) {
+				for (const session of byUuid.get(uuid) ?? []) { this._applyDbContextToTodaySession(session, info); }
+			}
+		} catch { /* optional enrichment — suppress */ }
+	}
+
 	private async enrichContextWindowFromAppData(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
 		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; lastMonthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string; lastMonthUtcStartKey: string; lastMonthUtcEndKey: string },
-		todaySessionsList: TodaySessionSummary[],
+		sessionLists: TodaySessionSummary[][],
 	): Promise<void> {
 		const entries = this._collectCliSessionEntries(usageResults);
 		if (entries.size === 0) { return; }
-		const todayByUuid = new Map<string, TodaySessionSummary>();
-		for (const s of todaySessionsList) {
-			const uuid = this.extractCopilotCliUuid(s.filePath);
-			if (uuid) { todayByUuid.set(uuid, s); }
-		}
+		const sessionsByUuid = this._indexSessionsByCliUuid(sessionLists);
 		try {
 			const contextInfo = await this.copilotAppData.getSessionContextInfo([...entries.keys()]);
 			for (const [uuid, info] of contextInfo) {
@@ -5049,8 +5092,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					this._mergeDbContextIntoPeriod(period, info, entry.hadTier);
 					this._mergeDbContextPressure(period, info, entry.hasContextSignal, entry.compacted);
 				}
-				const session = todayByUuid.get(uuid);
-				if (session) { this._applyDbContextToTodaySession(session, info); }
+				for (const session of sessionsByUuid.get(uuid) ?? []) { this._applyDbContextToTodaySession(session, info); }
 			}
 		} catch { /* optional enrichment — suppress */ }
 	}
@@ -5122,6 +5164,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				}
 				const { results } = await this.loadUsageSessionFiles(undefined, start.getTime());
 				sessions = this.buildRecentSessionBucket(results, getTimeWindowStartDayKey(period, now));
+				await this.applyDbContextToSessions(sessions);
 			} else {
 				const stats = this.lastUsageAnalysisStats ?? await this.calculateUsageAnalysisStats(true);
 				sessions = stats.recentSessions?.[period] ?? [];
@@ -7983,11 +8026,21 @@ private computeFallbackDailyRollup(
 		}
 	}
 
-	private async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string): Promise<void> {
-		this.pendingAnalysisNavigation = { tab, ...(anchor ? { anchor } : {}) };
+	private async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string, sessionsPreset?: SessionsTabPreset): Promise<void> {
+		this.pendingAnalysisNavigation = { tab, ...(anchor ? { anchor } : {}), ...(sessionsPreset ? { sessionsPreset } : {}) };
 		await this.showUsageAnalysis();
 		this.analysisPanel?.reveal(vscode.ViewColumn.One, false);
 		await this.flushPendingAnalysisNavigation();
+	}
+
+	/**
+	 * Opens the Recent Sessions tab filtered to the sessions that nearly filled
+	 * their context window over the last 30 days — the actionable drill-down
+	 * behind the "Some sessions nearly ran out of context window" insight, whose
+	 * counters are computed over that same window.
+	 */
+	public async showContextPressureSessions(): Promise<void> {
+		await this.showUsageAnalysisOnTab('sessions', undefined, { filter: 'nearContextLimit', lookback: 'last30' });
 	}
 
 	/** Opens the Usage Analysis panel and activates the Insights tab. */
@@ -12989,6 +13042,7 @@ function registerUsageNavigationCommands(context: vscode.ExtensionContext, token
     ["aiEngineeringFluency.openCorrectionsTab", "Open Corrections tab command called", () => tokenTracker.showUsageAnalysisOnCorrectionsTab()],
     ["aiEngineeringFluency.askCopilotAboutCorrections", "Ask Copilot about corrections command called", () => tokenTracker.askCopilotAboutCorrections()],
     ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
+    ["aiEngineeringFluency.showContextPressureSessions", "Show near-context-limit sessions command called", () => tokenTracker.showContextPressureSessions()],
   ];
   context.subscriptions.push(...commands.map(([id, logMessage, handler]) =>
     vscode.commands.registerCommand(id, async () => {
