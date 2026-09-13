@@ -934,3 +934,30 @@ test('repeated-task-skill-candidate: does NOT fire below 3 sessions or without d
 	empty.repeatedTasks = { minClusterSize: 2, sessionsScanned: 20, clusters: [] };
 	assert.equal(evaluateInsights(empty, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
 });
+
+// ---------------------------------------------------------------------------
+// Snooze status — the invariant the status-bar insight badge counts against
+// ---------------------------------------------------------------------------
+// The badge derives its count by filtering the evaluated list for status 'new', the same filter
+// the Insights tab's own badge applies, so the two always agree. That only holds while an
+// unexpired snooze evaluates to 'snoozed' rather than 'new'.
+
+test('snoozed: an unexpired snooze never evaluates to new', () => {
+	const ctx = makeCtx({ autoCompact: 6 });
+	const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+	const state = {
+		[AUTO_COMPACT_ID]: { status: 'snoozed' as const, firstSurfacedAt: '2026-01-01T00:00:00.000Z', lastSurfacedAt: '2026-01-01T00:00:00.000Z', snoozeUntil: future },
+	};
+	const insight = evaluateInsights(ctx, state, 7, null).find(i => i.id === AUTO_COMPACT_ID);
+	assert.equal(insight?.status, 'snoozed');
+});
+
+test('snoozed: an expired snooze resurfaces as new when a toast is allowed', () => {
+	const ctx = makeCtx({ autoCompact: 6 });
+	const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+	const state = {
+		[AUTO_COMPACT_ID]: { status: 'snoozed' as const, firstSurfacedAt: '2026-01-01T00:00:00.000Z', lastSurfacedAt: '2026-01-01T00:00:00.000Z', snoozeUntil: past },
+	};
+	const insight = evaluateInsights(ctx, state, 7, null).find(i => i.id === AUTO_COMPACT_ID);
+	assert.equal(insight?.status, 'new');
+});
