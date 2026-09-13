@@ -392,6 +392,32 @@ test('deleteCachedSessionData() tombstones the path so a later writeSharedSnapsh
 	assert.equal(entries!['/b.json'].mtime, 2000, 'an unrelated entry must be untouched');
 });
 
+// A second, independent deletion of an already-tombstoned path is plausible in practice:
+// clearExpiredCache()'s fire-and-forget sweep can race with reconcilePreloadedAgainstDiscovery()'s
+// synchronous one, both independently deciding to delete the same path. The second call finds no
+// `existing` in-memory entry (the first deletion already removed it), so without preserving the
+// prior baseline, the tombstone would be silently weakened to mtime 0 — letting any stale disk
+// entry with a positive mtime pass the newer-than-tombstone check and be resurrected.
+test('deleteCachedSessionData() does not weaken an existing tombstone baseline on a second, independent deletion of the same path', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(5000), 10);
+	await writer.writeSharedSnapshot(); // disk: /a.json @ mtime 5000
+
+	const deleter = makeManager(dir);
+	deleter.setCachedSessionData('/a.json', entry(5000), 10);
+	deleter.deleteCachedSessionData('/a.json'); // first deletion: tombstone baseline = mtime 5000
+	deleter.deleteCachedSessionData('/a.json'); // second, independent deletion of the same path
+
+	// The same-age disk entry (mtime 5000, written before either deletion) is exactly what a
+	// wrongly weakened tombstone (mtime 0) would let back in via the `diskEntry.mtime > tombstoneMtime`
+	// check in buildMergedSnapshotEntries().
+	await deleter.writeSharedSnapshot();
+	const entries = await deleter.readSharedSnapshot();
+	assert.ok(!entries || !('/a.json' in entries!),
+		'the same-age disk entry must still be stripped — a wrongly-weakened tombstone (mtime 0) would have let it survive');
+});
+
 // This documents *why* deleteCachedSessionData() (not a plain `cache.delete()`) is required: it
 // proves writeSharedSnapshot()'s merge really does resurrect an in-memory-only delete from the
 // on-disk copy written before it. If this test ever starts failing because the merge stopped
@@ -479,13 +505,17 @@ test('loadSharedSnapshotIfChanged() does not resurrect a tombstoned path from a 
 	assert.ok(!reader.cache.has('/a.json'), 'the path must stay deleted in memory, not resurrected from the stale disk copy');
 });
 
-test('clearExpiredCache() does not tombstone virtual session paths (.db#session-id, editor:// schemes) via a raw fs.access() check', async () => {
+test('clearExpiredCache() does not tombstone virtual session paths (.db#/.vscdb#/.sqlite#session-id, editor:// schemes) via a raw fs.access() check', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
 	const virtualDbPath = path.join(dir, 'opencode.db#ses_doesNotMatterIfMissing');
+	const virtualVscdbPath = path.join(dir, 'state.vscdb#composerIdDoesNotMatterIfMissing'); // Cursor
+	const virtualSqlitePath = path.join(dir, 'state_1.sqlite#threadIdDoesNotMatterIfMissing'); // Codex
 	const virtualUriPath = 'windsurf://trajectory/some-id';
 	const realMissingPath = path.join(dir, 'definitely-does-not-exist.json');
 	m.setCachedSessionData(virtualDbPath, entry(1000), 10);
+	m.setCachedSessionData(virtualVscdbPath, entry(1000), 10);
+	m.setCachedSessionData(virtualSqlitePath, entry(1000), 10);
 	m.setCachedSessionData(virtualUriPath, entry(1000), 10);
 	m.setCachedSessionData(realMissingPath, entry(1000), 10);
 
@@ -493,6 +523,10 @@ test('clearExpiredCache() does not tombstone virtual session paths (.db#session-
 
 	assert.ok(m.cache.has(virtualDbPath),
 		'a .db#-style virtual path must survive clearExpiredCache() — fs.access() cannot validate it, and wrongly evicting it now tombstones a still-valid session out of every future snapshot, not just this process\'s memory');
+	assert.ok(m.cache.has(virtualVscdbPath),
+		'a .vscdb#-style virtual path (Cursor) must likewise survive — the exemption must recognize the general "<ext>#<id>" shape, not just the literal ".db#" substring');
+	assert.ok(m.cache.has(virtualSqlitePath),
+		'a .sqlite#-style virtual path (Codex) must likewise survive');
 	assert.ok(m.cache.has(virtualUriPath),
 		'a scheme:// virtual path (Windsurf/Devin) must likewise survive clearExpiredCache()');
 	assert.ok(!m.cache.has(realMissingPath),

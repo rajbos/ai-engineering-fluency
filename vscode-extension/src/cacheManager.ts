@@ -113,8 +113,15 @@ export class CacheManager {
 	 */
 	deleteCachedSessionData(filePath: string): void {
 		const existing = this.sessionFileCache.get(filePath);
+		const previousTombstoneMtime = this.deletedFilePaths.get(filePath);
 		this.sessionFileCache.delete(filePath);
-		this.deletedFilePaths.set(filePath, existing?.mtime ?? 0);
+		// A second, independent deletion of an already-tombstoned path (e.g. clearExpiredCache()'s
+		// fire-and-forget sweep racing with reconcilePreloadedAgainstDiscovery()'s synchronous one)
+		// finds no `existing` entry — the first deletion already removed it from sessionFileCache —
+		// so `existing?.mtime ?? 0` alone would silently weaken an already-recorded, stronger
+		// baseline down to 0, letting any stale disk entry with a positive mtime pass the
+		// newer-than-tombstone check and be resurrected. Keep the strongest (highest) baseline seen.
+		this.deletedFilePaths.set(filePath, Math.max(previousTombstoneMtime ?? 0, existing?.mtime ?? 0));
 	}
 
 	async clearExpiredCache(): Promise<void> {
@@ -124,9 +131,10 @@ export class CacheManager {
 		for (let i = 0; i < filesToCheck.length; i += BATCH_SIZE) {
 			await Promise.all(
 				filesToCheck.slice(i, i + BATCH_SIZE).map(async (filePath) => {
-					// Several ecosystems (Copilot CLI, Crush, Kilo, OpenCode) reference sessions
-					// through a virtual "<db-file>#<session-id>" path, and Windsurf/Devin use a
-					// "windsurf://"/"devin://" URI scheme — none of these are real filesystem paths
+					// Several ecosystems (Copilot CLI, Crush, Kilo, OpenCode, Cursor's state.vscdb#,
+					// Codex's state_<n>.sqlite#) reference sessions through a virtual
+					// "<db-file>#<session-id>" path, and Windsurf/Devin use a "windsurf://"/"devin://"
+					// URI scheme — none of these are real filesystem paths
 					// a raw fs.access() can validate; the actual session lives inside the DB (or is
 					// resolved by that adapter), not at this literal path. Since deleteCachedSessionData()
 					// now tombstones (excluding the path from every future snapshot merge, not just this
@@ -157,7 +165,12 @@ export class CacheManager {
 	}
 
 	private static isVirtualSessionPath(filePath: string): boolean {
-		return filePath.includes('://') || /\.db#/.test(filePath);
+		// Every "<db-file>#<session-id>" composite scheme observed across adapters — OpenCode/Crush/
+		// Kilo/Copilot CLI's session-store.db, but also Cursor's state.vscdb# and Codex's
+		// state_<n>.sqlite# — shares the same shape: a file-extension-like segment right before the
+		// '#'. Matching that shape generically (rather than hardcoding '.db#' alone) avoids silently
+		// missing the next adapter that reuses this pattern with a different backing-file extension.
+		return filePath.includes('://') || /\.[a-zA-Z0-9]+#/.test(filePath);
 	}
 
 	/**
