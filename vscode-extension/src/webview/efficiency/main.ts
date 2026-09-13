@@ -575,15 +575,18 @@ function modelOptions(eligible: ComparableModel[]): { value: string; label: stri
 }
 
 /**
- * Model B's options, with an explicit placeholder when the window holds no
- * second model. Without one the browser falls back to showing the first option
- * — the same model as A — so the picker would claim a self-comparison the tab
- * is not actually rendering.
+ * Model B's options. Model A is filtered out because the two sides must differ:
+ * offering it would be a choice reconciliation immediately undoes, bouncing the
+ * picker back on the next render. When that leaves nothing, an explicit
+ * placeholder stands in — without one the browser falls back to showing the
+ * first option, so the picker would claim a self-comparison the tab is not
+ * actually rendering.
  */
 function modelBOptions(options: { value: string; label: string; disabled?: boolean }[]): typeof options {
+	const distinct = options.filter(o => o.value !== modelState.modelA);
 	return modelState.modelB === ''
-		? [{ value: '', label: localize('efficiency.models.noSecondModel'), disabled: true }, ...options]
-		: options;
+		? [{ value: '', label: localize('efficiency.models.noSecondModel'), disabled: true }, ...distinct]
+		: distinct;
 }
 
 /** Dropdown options for the window picker: each label carries its concrete date span, and windows with no per-model data yet are disabled so they can't silently be picked. */
