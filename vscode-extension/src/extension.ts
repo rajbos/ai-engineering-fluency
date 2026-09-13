@@ -8541,8 +8541,13 @@ private computeFallbackDailyRollup(
 
 		// Open the panel IMMEDIATELY with whatever daily stats are already in memory.
 		// Full-year data (needed for Week/Month views) is computed in the background below.
-		const hasFullData = !!this.lastFullDailyStats;
-		const initialStats = this.lastFullDailyStats ?? this.lastDailyStats ?? [];
+		// A truthy lastFullDailyStats is not enough: a build already running when clearCache()
+		// fires finishes afterwards and repopulates it with pre-clear data, stamped with the
+		// generation the clear just superseded. isComputedStatsCurrent() rejects that stamp so
+		// this falls back to the 30-day cache (or triggers a fresh full-year calculation below)
+		// instead of rendering stale data.
+		const hasFullData = !!this.lastFullDailyStats && isComputedStatsCurrent(this._statsGeneration.fullDaily, this._cacheGeneration);
+		const initialStats = (hasFullData ? this.lastFullDailyStats : undefined) ?? this.lastDailyStats ?? [];
 
 		// Create webview panel now so the tab appears without waiting for I/O
 		this.chartPanel = vscode.window.createWebviewPanel(
@@ -8644,8 +8649,13 @@ private computeFallbackDailyRollup(
 			if (await this.dispatchSharedCommand(message)) { return; }
 			await this.handleAnalysisMessage(message);
 		});
-		this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, this.lastUsageAnalysisStats ?? null);
-		if (!this.lastUsageAnalysisStats) { void this.loadAnalysisStatsInBackground(this.analysisPanel); }
+		// A truthy lastUsageAnalysisStats is not enough: a build already running when
+		// clearCache() fires finishes afterwards and repopulates it with pre-clear data,
+		// stamped with the generation the clear just superseded. isComputedStatsCurrent()
+		// rejects that stamp so this falls back to loading fresh data instead of rendering it.
+		const usageStatsCurrent = !!this.lastUsageAnalysisStats && isComputedStatsCurrent(this._statsGeneration.usage, this._cacheGeneration);
+		this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, usageStatsCurrent ? this.lastUsageAnalysisStats! : null);
+		if (!usageStatsCurrent) { void this.loadAnalysisStatsInBackground(this.analysisPanel); }
 		this.analysisPanel.onDidDispose(() => {
 			this.log('📊 Usage Analysis dashboard closed');
 			this.analysisPanel = undefined;
