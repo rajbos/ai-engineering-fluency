@@ -699,6 +699,42 @@ assert.deepEqual(day!.taskCategoryTokens, { Refactoring: 100 });
 assert.deepEqual(day!.taskCategorySessions, { Refactoring: 1 });
 });
 
+test('aggregatePeriodStats: rollup path – a "__proto__" task category is skipped and does not pollute Object.prototype', () => {
+// Regression for a PR review security finding: taskCategory/taskCategoryShares ultimately come
+// from cached/parsed session data. `if (!entry.taskCategoryModelUsage[cat]) { ... }` reads
+// through the `__proto__` accessor to the real Object.prototype (truthy, so the own-property
+// initializer is skipped) and addModelUsage would then write model fields directly onto it —
+// the same class of bug isUnsafeObjectKey already guards against for "model" keys elsewhere in
+// this file. Use JSON.parse (not an object literal) for the malicious share map so "__proto__"
+// is a genuine own property, matching how untrusted JSON actually behaves.
+const ranges = makeRanges('2025-03-15');
+const maliciousShares = JSON.parse('{"__proto__": 1, "Coding": 0}') as TaskCategoryBreakdown;
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+taskCategory: '__proto__' as TaskCategory,
+dailyRollups: {
+'2025-03-15': {
+tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2,
+modelUsage: { 'gpt-4o': { inputTokens: 10, outputTokens: 5, sessions: 1 } },
+primaryTaskCategory: '__proto__' as TaskCategory,
+taskCategoryShares: maliciousShares,
+},
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.equal(Object.prototype.hasOwnProperty.call(Object.prototype, 'gpt-4o'), false, 'Object.prototype must not gain model fields');
+assert.equal(({} as any).tokens, undefined, 'plain objects must not inherit a stray tokens field');
+assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategoryTokens ?? {}, '__proto__'), false);
+assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategorySessions ?? {}, '__proto__'), false);
+assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategoryModelUsage ?? {}, '__proto__'), false);
+assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategoryUsage ?? {}, '__proto__'), false);
+});
+
 test('aggregatePeriodStats: rollup path – counts sub-agent sessions once per period', () => {
 const ranges = makeRanges('2025-03-15');
 const withSubAgents: SessionAggregateInput = {

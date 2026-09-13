@@ -659,7 +659,11 @@ function getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dayK
  * the session's overall category when a specific day has no per-day classification of its own).
  */
 export function addTaskCategoryToDailyEntry(entry: DailyTokenStats, tokens: number, modelUsage: ModelUsage, taskCategory?: TaskCategory, taskCategoryShares?: TaskCategoryBreakdown): void {
-	if (taskCategory) {
+	// taskCategory/taskCategoryShares ultimately come from cached/parsed session data, same as
+	// the "model" keys addModelUsage already guards — see protoGuard.ts. A malformed/tampered
+	// "__proto__" category would otherwise index Object.prototype and corrupt every plain object
+	// in the process, so treat it as unrecognised data and skip it, same as any other bad key.
+	if (taskCategory && !isUnsafeObjectKey(taskCategory)) {
 		if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
 		if (!entry.taskCategoryUsage[taskCategory]) { entry.taskCategoryUsage[taskCategory] = { tokens: 0, sessions: 0 }; }
 		entry.taskCategoryUsage[taskCategory].tokens += tokens;
@@ -672,6 +676,7 @@ export function addTaskCategoryToDailyEntry(entry: DailyTokenStats, tokens: numb
 		? taskCategoryShares
 		: (taskCategory ? { [taskCategory]: 1 } : { Conversation: 1 });
 	for (const [category, shareRaw] of Object.entries(shares)) {
+		if (isUnsafeObjectKey(category)) { continue; }
 		const share = Number(shareRaw) || 0;
 		if (share <= 0) { continue; }
 		const cat = category as TaskCategory;
