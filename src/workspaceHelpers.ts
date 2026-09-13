@@ -25,6 +25,7 @@ import { isGuidMcpTool, lookupKnownToolName } from './utils/toolUtils';
 import { isCopilotAppClientName } from './copilotCliStore';
 
 export {
+	dedupeByNormalizedKeyKeepGreatest,
 	fileUriToPath,
 	normalizePath,
 	normalizePathForComparison,

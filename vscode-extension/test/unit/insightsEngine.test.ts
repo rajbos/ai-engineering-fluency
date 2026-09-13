@@ -189,6 +189,17 @@ test('context-window-near-limit: fires at two near-limit sessions and reports th
 	assert.doesNotMatch(insight!.body, /went past that point/);
 });
 
+test('context-window-near-limit: offers a button that opens the matching session list', () => {
+	const ctx = makePressureCtx({
+		sessionsConsidered: 12, sessionsCompacted: 0, sessionsNearLimit: 3, sessionsWithFillData: 9,
+	});
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === NEAR_LIMIT_ID);
+	assert.ok(insight, 'insight should fire');
+	assert.equal(insight!.actionCommand, 'aiEngineeringFluency.showContextPressureSessions');
+	// The label carries the same count as the body, so the button plainly leads to those sessions.
+	assert.equal(insight!.actionLabel, 'Show these 3 sessions');
+});
+
 test('context-window-near-limit: yields to auto-compaction-pattern when that already fires', () => {
 	const ctx = makePressureCtx({
 		sessionsConsidered: 12, sessionsCompacted: 4, sessionsNearLimit: 3, sessionsWithFillData: 9,
@@ -933,4 +944,31 @@ test('repeated-task-skill-candidate: does NOT fire below 3 sessions or without d
 	const empty = makeCtx();
 	empty.repeatedTasks = { minClusterSize: 2, sessionsScanned: 20, clusters: [] };
 	assert.equal(evaluateInsights(empty, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// Snooze status — the invariant the status-bar insight badge counts against
+// ---------------------------------------------------------------------------
+// The badge derives its count by filtering the evaluated list for status 'new', the same filter
+// the Insights tab's own badge applies, so the two always agree. That only holds while an
+// unexpired snooze evaluates to 'snoozed' rather than 'new'.
+
+test('snoozed: an unexpired snooze never evaluates to new', () => {
+	const ctx = makeCtx({ autoCompact: 6 });
+	const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+	const state = {
+		[AUTO_COMPACT_ID]: { status: 'snoozed' as const, firstSurfacedAt: '2026-01-01T00:00:00.000Z', lastSurfacedAt: '2026-01-01T00:00:00.000Z', snoozeUntil: future },
+	};
+	const insight = evaluateInsights(ctx, state, 7, null).find(i => i.id === AUTO_COMPACT_ID);
+	assert.equal(insight?.status, 'snoozed');
+});
+
+test('snoozed: an expired snooze resurfaces as new when a toast is allowed', () => {
+	const ctx = makeCtx({ autoCompact: 6 });
+	const past = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+	const state = {
+		[AUTO_COMPACT_ID]: { status: 'snoozed' as const, firstSurfacedAt: '2026-01-01T00:00:00.000Z', lastSurfacedAt: '2026-01-01T00:00:00.000Z', snoozeUntil: past },
+	};
+	const insight = evaluateInsights(ctx, state, 7, null).find(i => i.id === AUTO_COMPACT_ID);
+	assert.equal(insight?.status, 'new');
 });

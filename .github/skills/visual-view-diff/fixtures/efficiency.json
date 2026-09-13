@@ -99,17 +99,59 @@
     "modelShifts": [
       {
         "model": "claude-sonnet-4.5",
-        "deltaShare": 0.18
+        "prevShare": 0.22,
+        "curShare": 0.4,
+        "deltaShare": 0.18,
+        "prevTokens": 858000,
+        "curTokens": 1780000
       },
       {
         "model": "gpt-4o",
-        "deltaShare": -0.11
+        "prevShare": 0.31,
+        "curShare": 0.2,
+        "deltaShare": -0.11,
+        "prevTokens": 1209000,
+        "curTokens": 890000
+      },
+      {
+        "model": "claude-opus-4-8",
+        "prevShare": 0.04,
+        "curShare": 0.12,
+        "deltaShare": 0.08,
+        "prevTokens": 156000,
+        "curTokens": 534000
+      },
+      {
+        "model": "customendpoint/Mistral/mistral-medium-latest",
+        "prevShare": 0.1,
+        "curShare": 0.04,
+        "deltaShare": -0.06,
+        "prevTokens": 390000,
+        "curTokens": 178000
+      },
+      {
+        "model": "9f4a1c2e-7b31-4d55-9e6a-2c8b0f1d3a47/gpt-5-mini",
+        "prevShare": 0.0,
+        "curShare": 0.05,
+        "deltaShare": 0.05,
+        "prevTokens": 0,
+        "curTokens": 222500
+      },
+      {
+        "model": "internal-eval-model-2026-preview-long-name",
+        "prevShare": 0.12,
+        "curShare": 0.07,
+        "deltaShare": -0.05,
+        "prevTokens": 468000,
+        "curTokens": 311500
       }
     ]
   },
   "attributionWindows": {
-    "prev": "Jan 12 – Feb 8",
-    "cur": "Feb 9 – Mar 8"
+    "prev": "previous 30 days",
+    "cur": "last 30 days",
+    "prevRange": "Jan 12, 2026–Feb 8, 2026",
+    "curRange": "Feb 9, 2026–Mar 8, 2026"
   },
   "deltas": [
     {
@@ -229,6 +271,507 @@
   },
   "skillImpact": [],
   "hasSkills": true,
+  "modelDaily": [
+    {
+      "date": "2026-01-20",
+      "modelEfficiency": {
+        "claude-sonnet-4.5": {
+          "calls": 20,
+          "toolCalls": 60,
+          "editTurns": 16,
+          "oneShotEditTurns": 12,
+          "retries": 5,
+          "selfCorrections": 1,
+          "editToolCalls": 22,
+          "inputTokens": 480000,
+          "outputTokens": 56000,
+          "cachedReadTokens": 280000,
+          "cost": 4.1,
+          "sessions": 4,
+          "sessionShare": 3.2,
+          "activeDurationMs": 2640000,
+          "durationSessionShare": 3.2,
+          "linesAdded": 360,
+          "linesRemoved": 100,
+          "applies": 24,
+          "codeBlocks": 28
+        },
+        "gpt-4o": {
+          "calls": 18,
+          "toolCalls": 54,
+          "editTurns": 12,
+          "oneShotEditTurns": 7,
+          "retries": 5,
+          "selfCorrections": 2,
+          "editToolCalls": 19,
+          "inputTokens": 450000,
+          "outputTokens": 57000,
+          "cachedReadTokens": 165000,
+          "cost": 4.4,
+          "sessions": 3,
+          "sessionShare": 2.0999999999999996,
+          "activeDurationMs": 2520000,
+          "durationSessionShare": 2.0999999999999996,
+          "linesAdded": 210,
+          "linesRemoved": 90,
+          "applies": 15,
+          "codeBlocks": 24
+        }
+      },
+      "taskCategoryUsage": {
+        "Coding": {
+          "tokens": 420000,
+          "sessions": 5
+        },
+        "Debugging": {
+          "tokens": 180000,
+          "sessions": 2
+        }
+      }
+    },
+    {
+      "date": "2026-01-28",
+      "modelEfficiency": {
+        "claude-sonnet-4.5": {
+          "calls": 15,
+          "toolCalls": 45,
+          "editTurns": 12,
+          "oneShotEditTurns": 9,
+          "retries": 3,
+          "selfCorrections": 1,
+          "editToolCalls": 16,
+          "inputTokens": 360000,
+          "outputTokens": 42000,
+          "cachedReadTokens": 210000,
+          "cost": 3.05,
+          "sessions": 3,
+          "sessionShare": 2.4000000000000004,
+          "activeDurationMs": 1980000,
+          "durationSessionShare": 2.4000000000000004,
+          "linesAdded": 270,
+          "linesRemoved": 75,
+          "applies": 18,
+          "codeBlocks": 21
+        },
+        "gpt-4o": {
+          "calls": 18,
+          "toolCalls": 54,
+          "editTurns": 12,
+          "oneShotEditTurns": 8,
+          "retries": 4,
+          "selfCorrections": 2,
+          "editToolCalls": 18,
+          "inputTokens": 450000,
+          "outputTokens": 57000,
+          "cachedReadTokens": 165000,
+          "cost": 4.3,
+          "sessions": 3,
+          "sessionShare": 2.0999999999999996,
+          "activeDurationMs": 2520000,
+          "durationSessionShare": 2.0999999999999996,
+          "linesAdded": 210,
+          "linesRemoved": 90,
+          "applies": 15,
+          "codeBlocks": 24
+        }
+      },
+      "taskCategoryUsage": {
+        "Coding": {
+          "tokens": 360000,
+          "sessions": 4
+        },
+        "Refactoring": {
+          "tokens": 140000,
+          "sessions": 2
+        }
+      }
+    },
+    {
+      "date": "2026-02-05",
+      "modelEfficiency": {
+        "claude-sonnet-4.5": {
+          "calls": 15,
+          "toolCalls": 45,
+          "editTurns": 12,
+          "oneShotEditTurns": 10,
+          "retries": 2,
+          "selfCorrections": 1,
+          "editToolCalls": 15,
+          "inputTokens": 360000,
+          "outputTokens": 42000,
+          "cachedReadTokens": 210000,
+          "cost": 3.0,
+          "sessions": 3,
+          "sessionShare": 2.4000000000000004,
+          "activeDurationMs": 1980000,
+          "durationSessionShare": 2.4000000000000004,
+          "linesAdded": 270,
+          "linesRemoved": 75,
+          "applies": 18,
+          "codeBlocks": 21
+        },
+        "gpt-4o": {
+          "calls": 12,
+          "toolCalls": 36,
+          "editTurns": 8,
+          "oneShotEditTurns": 5,
+          "retries": 3,
+          "selfCorrections": 2,
+          "editToolCalls": 13,
+          "inputTokens": 300000,
+          "outputTokens": 38000,
+          "cachedReadTokens": 110000,
+          "cost": 2.9,
+          "sessions": 2,
+          "sessionShare": 1.4,
+          "activeDurationMs": 1680000,
+          "durationSessionShare": 1.4,
+          "linesAdded": 140,
+          "linesRemoved": 60,
+          "applies": 10,
+          "codeBlocks": 16
+        }
+      },
+      "taskCategoryUsage": {
+        "Coding": {
+          "tokens": 300000,
+          "sessions": 3
+        },
+        "Testing": {
+          "tokens": 120000,
+          "sessions": 2
+        }
+      }
+    },
+    {
+      "date": "2026-02-18",
+      "modelEfficiency": {
+        "claude-sonnet-4.5": {
+          "calls": 20,
+          "toolCalls": 60,
+          "editTurns": 16,
+          "oneShotEditTurns": 13,
+          "retries": 3,
+          "selfCorrections": 1,
+          "editToolCalls": 20,
+          "inputTokens": 480000,
+          "outputTokens": 56000,
+          "cachedReadTokens": 280000,
+          "cost": 3.9,
+          "sessions": 4,
+          "sessionShare": 3.2,
+          "activeDurationMs": 2640000,
+          "durationSessionShare": 3.2,
+          "linesAdded": 360,
+          "linesRemoved": 100,
+          "applies": 24,
+          "codeBlocks": 28
+        },
+        "gpt-4o": {
+          "calls": 18,
+          "toolCalls": 54,
+          "editTurns": 12,
+          "oneShotEditTurns": 7,
+          "retries": 5,
+          "selfCorrections": 2,
+          "editToolCalls": 19,
+          "inputTokens": 450000,
+          "outputTokens": 57000,
+          "cachedReadTokens": 165000,
+          "cost": 4.35,
+          "sessions": 3,
+          "sessionShare": 2.0999999999999996,
+          "activeDurationMs": 2520000,
+          "durationSessionShare": 2.0999999999999996,
+          "linesAdded": 210,
+          "linesRemoved": 90,
+          "applies": 15,
+          "codeBlocks": 24
+        }
+      },
+      "taskCategoryUsage": {
+        "Coding": {
+          "tokens": 450000,
+          "sessions": 5
+        },
+        "Debugging": {
+          "tokens": 150000,
+          "sessions": 2
+        }
+      }
+    },
+    {
+      "date": "2026-02-24",
+      "modelEfficiency": {
+        "claude-haiku-4.5": {
+          "calls": 3,
+          "toolCalls": 9,
+          "editTurns": 2,
+          "oneShotEditTurns": 2,
+          "retries": 0,
+          "selfCorrections": 0,
+          "editToolCalls": 2,
+          "inputTokens": 40000,
+          "outputTokens": 5000,
+          "cachedReadTokens": 20000,
+          "cost": 0.3,
+          "sessions": 1,
+          "sessionShare": 0.5,
+          "activeDurationMs": 240000,
+          "durationSessionShare": 0.5,
+          "linesAdded": 25,
+          "linesRemoved": 6,
+          "applies": 2,
+          "codeBlocks": 3
+        },
+        "claude-sonnet-4.5": {
+          "calls": 15,
+          "toolCalls": 45,
+          "editTurns": 12,
+          "oneShotEditTurns": 10,
+          "retries": 2,
+          "selfCorrections": 1,
+          "editToolCalls": 15,
+          "inputTokens": 360000,
+          "outputTokens": 42000,
+          "cachedReadTokens": 210000,
+          "cost": 2.85,
+          "sessions": 3,
+          "sessionShare": 2.4000000000000004,
+          "activeDurationMs": 1980000,
+          "durationSessionShare": 2.4000000000000004,
+          "linesAdded": 270,
+          "linesRemoved": 75,
+          "applies": 18,
+          "codeBlocks": 21
+        },
+        "gpt-4o": {
+          "calls": 18,
+          "toolCalls": 54,
+          "editTurns": 12,
+          "oneShotEditTurns": 6,
+          "retries": 6,
+          "selfCorrections": 2,
+          "editToolCalls": 20,
+          "inputTokens": 450000,
+          "outputTokens": 57000,
+          "cachedReadTokens": 165000,
+          "cost": 4.2,
+          "sessions": 3,
+          "sessionShare": 2.0999999999999996,
+          "activeDurationMs": 2520000,
+          "durationSessionShare": 2.0999999999999996,
+          "linesAdded": 210,
+          "linesRemoved": 90,
+          "applies": 15,
+          "codeBlocks": 24
+        }
+      },
+      "taskCategoryUsage": {
+        "Coding": {
+          "tokens": 380000,
+          "sessions": 4
+        },
+        "Testing": {
+          "tokens": 160000,
+          "sessions": 2
+        }
+      }
+    },
+    {
+      "date": "2026-03-03",
+      "modelEfficiency": {
+        "claude-sonnet-4.5": {
+          "calls": 20,
+          "toolCalls": 60,
+          "editTurns": 16,
+          "oneShotEditTurns": 14,
+          "retries": 2,
+          "selfCorrections": 1,
+          "editToolCalls": 19,
+          "inputTokens": 480000,
+          "outputTokens": 56000,
+          "cachedReadTokens": 280000,
+          "cost": 3.8,
+          "sessions": 4,
+          "sessionShare": 3.2,
+          "activeDurationMs": 2640000,
+          "durationSessionShare": 3.2,
+          "linesAdded": 360,
+          "linesRemoved": 100,
+          "applies": 24,
+          "codeBlocks": 28
+        },
+        "gpt-4o": {
+          "calls": 12,
+          "toolCalls": 36,
+          "editTurns": 8,
+          "oneShotEditTurns": 4,
+          "retries": 4,
+          "selfCorrections": 2,
+          "editToolCalls": 14,
+          "inputTokens": 300000,
+          "outputTokens": 38000,
+          "cachedReadTokens": 110000,
+          "cost": 2.85,
+          "sessions": 2,
+          "sessionShare": 1.4,
+          "activeDurationMs": 1680000,
+          "durationSessionShare": 1.4,
+          "linesAdded": 140,
+          "linesRemoved": 60,
+          "applies": 10,
+          "codeBlocks": 16
+        }
+      },
+      "taskCategoryUsage": {
+        "Coding": {
+          "tokens": 470000,
+          "sessions": 5
+        },
+        "Refactoring": {
+          "tokens": 130000,
+          "sessions": 2
+        }
+      }
+    },
+    {
+      "date": "2026-03-10",
+      "modelEfficiency": {
+        "claude-haiku-4.5": {
+          "calls": 3,
+          "toolCalls": 9,
+          "editTurns": 2,
+          "oneShotEditTurns": 2,
+          "retries": 0,
+          "selfCorrections": 0,
+          "editToolCalls": 2,
+          "inputTokens": 40000,
+          "outputTokens": 5000,
+          "cachedReadTokens": 20000,
+          "cost": 0.28,
+          "sessions": 1,
+          "sessionShare": 0.5,
+          "activeDurationMs": 240000,
+          "durationSessionShare": 0.5,
+          "linesAdded": 25,
+          "linesRemoved": 6,
+          "applies": 2,
+          "codeBlocks": 3
+        },
+        "claude-sonnet-4.5": {
+          "calls": 15,
+          "toolCalls": 45,
+          "editTurns": 12,
+          "oneShotEditTurns": 11,
+          "retries": 1,
+          "selfCorrections": 1,
+          "editToolCalls": 14,
+          "inputTokens": 360000,
+          "outputTokens": 42000,
+          "cachedReadTokens": 210000,
+          "cost": 2.8,
+          "sessions": 3,
+          "sessionShare": 2.4000000000000004,
+          "activeDurationMs": 1980000,
+          "durationSessionShare": 2.4000000000000004,
+          "linesAdded": 270,
+          "linesRemoved": 75,
+          "applies": 18,
+          "codeBlocks": 21
+        },
+        "gpt-4o": {
+          "calls": 12,
+          "toolCalls": 36,
+          "editTurns": 8,
+          "oneShotEditTurns": 5,
+          "retries": 3,
+          "selfCorrections": 2,
+          "editToolCalls": 13,
+          "inputTokens": 300000,
+          "outputTokens": 38000,
+          "cachedReadTokens": 110000,
+          "cost": 2.8,
+          "sessions": 2,
+          "sessionShare": 1.4,
+          "activeDurationMs": 1680000,
+          "durationSessionShare": 1.4,
+          "linesAdded": 140,
+          "linesRemoved": 60,
+          "applies": 10,
+          "codeBlocks": 16
+        }
+      },
+      "taskCategoryUsage": {
+        "Coding": {
+          "tokens": 400000,
+          "sessions": 4
+        },
+        "Debugging": {
+          "tokens": 140000,
+          "sessions": 2
+        }
+      }
+    },
+    {
+      "date": "2026-03-13",
+      "modelEfficiency": {
+        "claude-sonnet-4.5": {
+          "calls": 15,
+          "toolCalls": 45,
+          "editTurns": 12,
+          "oneShotEditTurns": 12,
+          "retries": 1,
+          "selfCorrections": 1,
+          "editToolCalls": 14,
+          "inputTokens": 360000,
+          "outputTokens": 42000,
+          "cachedReadTokens": 210000,
+          "cost": 2.7,
+          "sessions": 3,
+          "sessionShare": 2.4000000000000004,
+          "activeDurationMs": 1980000,
+          "durationSessionShare": 2.4000000000000004,
+          "linesAdded": 270,
+          "linesRemoved": 75,
+          "applies": 18,
+          "codeBlocks": 21
+        },
+        "gpt-4o": {
+          "calls": 12,
+          "toolCalls": 36,
+          "editTurns": 8,
+          "oneShotEditTurns": 4,
+          "retries": 4,
+          "selfCorrections": 2,
+          "editToolCalls": 14,
+          "inputTokens": 300000,
+          "outputTokens": 38000,
+          "cachedReadTokens": 110000,
+          "cost": 2.75,
+          "sessions": 2,
+          "sessionShare": 1.4,
+          "activeDurationMs": 1680000,
+          "durationSessionShare": 1.4,
+          "linesAdded": 140,
+          "linesRemoved": 60,
+          "applies": 10,
+          "codeBlocks": 16
+        }
+      },
+      "taskCategoryUsage": {
+        "Coding": {
+          "tokens": 410000,
+          "sessions": 4
+        },
+        "Testing": {
+          "tokens": 110000,
+          "sessions": 1
+        }
+      }
+    }
+  ],
+  "hasModelComparison": true,
   "lastUpdated": "2026-03-14T09:30:00.000Z",
   "backendConfigured": false,
   "compactNumbers": false,

@@ -196,6 +196,42 @@ test('l10n: usage context-pressure keys resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: Recent Sessions context-fill keys resolve in English', () => {
+	// These back the Recent Sessions "Context" column and the "near context
+	// limit" filter pill the context-pressure insight links to. A missing key
+	// would put a raw `usage.sessions.contextFill.nearLimitFilter` on the pill.
+	assert.equal(t('usage.sessions.contextFill.columnLabel'), 'Context');
+	assert.equal(t('usage.sessions.contextFill.nearLimitFilter'), '🧠 Near context limit');
+	assert.equal(
+		t('usage.sessions.contextFill.nearLimitFilterTooltip', '80'),
+		'Show only sessions that reached at least 80% of their context window without compacting',
+	);
+	assert.equal(t('usage.sessions.contextFill.used', '120,000', '200,000'), '120,000 of 200,000 context tokens used');
+	assert.equal(
+		t('usage.sessions.contextFill.usedNearLimit', '190,000', '200,000', '80'),
+		'190,000 of 200,000 context tokens used — at or past 80% of the window',
+	);
+	assert.match(t('usage.sessions.contextFill.noData'), /only GitHub Copilot CLI sessions report one/);
+});
+
+test('l10n: Recent Sessions context-fill keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.sessions.contextFill.columnLabel'), '上下文');
+		assert.equal(t('usage.sessions.contextFill.nearLimitFilter'), '🧠 接近上下文上限');
+		// The Chinese phrasing reorders the reached/limit counts, so a plain
+		// concatenation would report the two numbers the wrong way round.
+		assert.equal(t('usage.sessions.contextFill.used', '120,000', '200,000'), '已使用 200,000 个上下文 token 中的 120,000 个');
+		assert.equal(
+			t('usage.sessions.contextFill.usedNearLimit', '190,000', '200,000', '80'),
+			'已使用 200,000 个上下文 token 中的 190,000 个——达到或超过窗口的 80%',
+		);
+		assert.match(t('usage.sessions.contextFill.nearLimitFilterTooltip', '80'), /至少 80%/);
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test("l10n: what's-new notification keys resolve in English", () => {
 	// The two buttons on the one-a-day new-feature notification. A missing key
 	// here would put a raw `whatsNew.takeMeThere` on the button, which is the
@@ -260,6 +296,43 @@ test('l10n: log viewer summary card labels resolve in English', () => {
 	}
 });
 
+test('l10n: efficiency Cost Attribution labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'efficiency.attribution.costEffect': 'Estimated cost effect',
+		'efficiency.attribution.costEffectLine': 'Estimated cost effect: {0}',
+		'efficiency.attribution.change': 'Change',
+		'efficiency.attribution.periodSub': '{0} · {1} sessions · {2} tokens',
+		'efficiency.attribution.blendedRate': 'blended rate {0} → {1} per M tokens',
+		'efficiency.attribution.tooltip.volume': 'Session count: {0} → {1} sessions',
+		'efficiency.attribution.tooltip.size': 'Tokens per session: {0} → {1} tokens/session',
+		'efficiency.attribution.tooltip.mix': 'Blended price: {0} → {1} per M tokens',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: efficiency Cost Attribution labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'efficiency.attribution.costEffect': '预计成本影响',
+			'efficiency.attribution.costEffectLine': '预计成本影响：{0}',
+			'efficiency.attribution.change': '变化',
+			'efficiency.attribution.periodSub': '{0} · {1} 个会话 · {2} 个令牌',
+			'efficiency.attribution.blendedRate': '混合费率 {0} → {1} 每百万令牌',
+			'efficiency.attribution.tooltip.volume': '会话数：{0} → {1} 个会话',
+			'efficiency.attribution.tooltip.size': '每会话令牌数：{0} → {1} 令牌/会话',
+			'efficiency.attribution.tooltip.mix': '混合单价：{0} → {1} 每百万令牌',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 	mock.setLanguage('zh-cn');
 	try {
@@ -311,6 +384,43 @@ test('l10n: efficiency loading step labels resolve in English', () => {
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: Cost Attribution model-mix table labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'efficiency.modelMix.heading': 'Model mix movement',
+		'efficiency.modelMix.caption': 'Token share per model, {0} compared with {1}',
+		'efficiency.modelMix.model': 'Model',
+		'efficiency.modelMix.previous': 'Previous',
+		'efficiency.modelMix.current': 'Current',
+		'efficiency.modelMix.shift': 'Shift',
+		'efficiency.modelMix.shiftPoints': '{0} pt',
+		'efficiency.modelMix.canonicalId': 'Model ID: {0}',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: Cost Attribution model-mix table labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'efficiency.modelMix.heading': '模型组合变化',
+			'efficiency.modelMix.caption': '各模型的令牌占比，{0} 与 {1} 对比',
+			'efficiency.modelMix.model': '模型',
+			'efficiency.modelMix.previous': '上一期',
+			'efficiency.modelMix.current': '本期',
+			'efficiency.modelMix.shift': '变化',
+			'efficiency.modelMix.shiftPoints': '{0} 个百分点',
+			'efficiency.modelMix.canonicalId': '模型 ID：{0}',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
 	}
 });
 
@@ -371,6 +481,82 @@ test('l10n: HydraFusion routing keys resolve in zh-cn', () => {
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+// Efficiency view — Models tab empty states. These explain why a window cannot
+// form a comparison, so they must not surface in English for zh-CN users.
+test('l10n: Efficiency Models tab empty states resolve in English', () => {
+	mock.setLanguage('en');
+	const expected: Record<string, string> = {
+		'efficiency.models.noPairInWindow': 'Only one model was used in {0} ({1}), so there is no pair to compare. Pick a wider window, or switch to \u201cOne model, two periods\u201d.',
+		'efficiency.models.noModelsInWindow': 'No model was used in {0} ({1}). Pick a wider window.',
+		'efficiency.models.noSharedModel': 'No model was used in both {0} ({1}) and {2} ({3}), so there is no model to follow across those periods. Pick different periods, or switch to \u201cCompare two models\u201d.',
+		'efficiency.models.noSecondModel': '\u2014 no second model in this window \u2014',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: Efficiency Models tab empty states resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'efficiency.models.noPairInWindow': '{0}\uff08{1}\uff09\u5185\u53ea\u4f7f\u7528\u4e86\u4e00\u4e2a\u6a21\u578b\uff0c\u65e0\u6cd5\u7ec4\u6210\u5bf9\u6bd4\u3002\u8bf7\u9009\u62e9\u66f4\u5927\u7684\u65f6\u95f4\u7a97\u53e3\uff0c\u6216\u5207\u6362\u5230\u201c\u5355\u4e2a\u6a21\u578b\uff0c\u4e24\u4e2a\u65f6\u6bb5\u201d\u3002',
+			'efficiency.models.noModelsInWindow': '{0}\uff08{1}\uff09\u5185\u672a\u4f7f\u7528\u4efb\u4f55\u6a21\u578b\u3002\u8bf7\u9009\u62e9\u66f4\u5927\u7684\u65f6\u95f4\u7a97\u53e3\u3002',
+			'efficiency.models.noSecondModel': '\u2014 \u6b64\u65f6\u95f4\u7a97\u53e3\u5185\u6ca1\u6709\u7b2c\u4e8c\u4e2a\u6a21\u578b \u2014',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+		// The two-window message is the only one carrying four placeholders.
+		const shared = t('efficiency.models.noSharedModel');
+		assert.equal(
+			shared,
+			'\u6ca1\u6709\u6a21\u578b\u540c\u65f6\u5728{0}\uff08{1}\uff09\u548c{2}\uff08{3}\uff09\u5185\u4f7f\u7528\u8fc7\uff0c\u56e0\u6b64\u65e0\u6cd5\u8de8\u8fd9\u4e24\u4e2a\u65f6\u6bb5\u8ddf\u8e2a\u540c\u4e00\u4e2a\u6a21\u578b\u3002\u8bf7\u9009\u62e9\u5176\u4ed6\u65f6\u6bb5\uff0c\u6216\u5207\u6362\u5230\u201c\u5bf9\u6bd4\u4e24\u4e2a\u6a21\u578b\u201d\u3002',
+			'zh-cn value for efficiency.models.noSharedModel',
+		);
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: Efficiency Models tab control labels resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	const english: Record<string, string> = {
+		'efficiency.models.controls.mode': 'Mode',
+		'efficiency.models.controls.modelA': 'Model A',
+		'efficiency.models.controls.modelB': 'Model B',
+		'efficiency.models.controls.model': 'Model',
+		'efficiency.models.controls.baseline': 'Baseline',
+		'efficiency.models.controls.comparedWith': 'Compared with',
+		'efficiency.models.controls.window': 'Window',
+		'efficiency.models.mode.models': 'Compare two models',
+		'efficiency.models.mode.periods': 'One model, two periods',
+	};
+	for (const [key, value] of Object.entries(english)) {
+		assert.equal(t(key), value, `English value for ${key}`);
+	}
+
+	mock.setLanguage('zh-cn');
+	try {
+		const chinese: Record<string, string> = {
+			'efficiency.models.controls.mode': '\u6a21\u5f0f',
+			'efficiency.models.controls.modelA': '\u6a21\u578b A',
+			'efficiency.models.controls.modelB': '\u6a21\u578b B',
+			'efficiency.models.controls.model': '\u6a21\u578b',
+			'efficiency.models.controls.baseline': '\u57fa\u51c6\u65f6\u6bb5',
+			'efficiency.models.controls.comparedWith': '\u5bf9\u6bd4\u65f6\u6bb5',
+			'efficiency.models.controls.window': '\u65f6\u95f4\u7a97\u53e3',
+			'efficiency.models.mode.models': '\u5bf9\u6bd4\u4e24\u4e2a\u6a21\u578b',
+			'efficiency.models.mode.periods': '\u5355\u4e2a\u6a21\u578b\uff0c\u4e24\u4e2a\u65f6\u6bb5',
+		};
+		for (const [key, value] of Object.entries(chinese)) {
+			assert.equal(t(key), value, `zh-cn value for ${key}`);
 		}
 	} finally {
 		mock.setLanguage('en');

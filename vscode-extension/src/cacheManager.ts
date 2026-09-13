@@ -25,6 +25,23 @@ export class CacheManager {
 	private static readonly CHECKPOINT_INTERVAL_MS = 20_000;
 
 	private sessionFileCache: Map<string, SessionFileCache> = new Map();
+	// Paths explicitly removed via deleteCachedSessionData(), for the lifetime of this
+	// CacheManager instance, mapped to the mtime of the entry that was removed (0 if none was
+	// cached). writeSharedSnapshot()'s merge starts from whatever is already on disk (so a window
+	// with a partial in-memory cache can never regress a richer published snapshot — see its own
+	// doc comment) — without tracking deletions separately, that same merge would silently
+	// resurrect a path removed from `sessionFileCache` the moment it's no longer present in memory
+	// to overwrite the stale on-disk copy. Tombstones let the merge tell "never seen this session"
+	// (leave the disk copy alone) apart from "seen and removed" (must not survive the merge).
+	//
+	// The recorded mtime is this tombstone's generation baseline, not just a boolean flag: another
+	// window can legitimately republish the same path (rediscover it, or simply save after this
+	// one decided to delete it) with a newer entry than what this window last saw. Blindly
+	// stripping every tombstoned path from the freshly-read on-disk snapshot — regardless of how
+	// new that disk entry is — would destroy that other window's valid, newer publish. Comparing
+	// against the baseline lets a same-or-older disk entry (what this window actually intended to
+	// delete) be stripped while a strictly newer one survives.
+	private deletedFilePaths: Map<string, number> = new Map();
 	private readonly context: vscode.ExtensionContext;
 	private readonly deps: CacheManagerDeps;
 	private readonly cacheVersion: number;
@@ -78,10 +95,33 @@ export class CacheManager {
 		}
 		const isActualNewEntry = isNewEntry && !this.sessionFileCache.has(filePath);
 		this.sessionFileCache.set(filePath, data);
+		// A path can be legitimately rediscovered after being deleted (see deleteCachedSessionData);
+		// a stale tombstone must not keep blocking it from ever being persisted again.
+		this.deletedFilePaths.delete(filePath);
 		this.policy.evict(this.sessionFileCache);
 		if (isActualNewEntry) {
 			this.entriesSinceLastCheckpoint++;
 		}
+	}
+
+	/**
+	 * Removes a cache entry and records a tombstone so it does not get silently resurrected by
+	 * writeSharedSnapshot()'s merge (which starts from whatever is already on disk) the next time
+	 * the cache is saved. Prefer this over `cache.delete(path)` directly for any deletion whose
+	 * effect must actually survive a save — an in-memory-only delete is undone by the very next
+	 * saveCacheToStorage()/checkpoint.
+	 */
+	deleteCachedSessionData(filePath: string): void {
+		const existing = this.sessionFileCache.get(filePath);
+		const previousTombstoneMtime = this.deletedFilePaths.get(filePath);
+		this.sessionFileCache.delete(filePath);
+		// A second, independent deletion of an already-tombstoned path (e.g. clearExpiredCache()'s
+		// fire-and-forget sweep racing with reconcilePreloadedAgainstDiscovery()'s synchronous one)
+		// finds no `existing` entry — the first deletion already removed it from sessionFileCache —
+		// so `existing?.mtime ?? 0` alone would silently weaken an already-recorded, stronger
+		// baseline down to 0, letting any stale disk entry with a positive mtime pass the
+		// newer-than-tombstone check and be resurrected. Keep the strongest (highest) baseline seen.
+		this.deletedFilePaths.set(filePath, Math.max(previousTombstoneMtime ?? 0, existing?.mtime ?? 0));
 	}
 
 	async clearExpiredCache(): Promise<void> {
@@ -91,14 +131,46 @@ export class CacheManager {
 		for (let i = 0; i < filesToCheck.length; i += BATCH_SIZE) {
 			await Promise.all(
 				filesToCheck.slice(i, i + BATCH_SIZE).map(async (filePath) => {
+					// Several ecosystems (Copilot CLI, Crush, Kilo, OpenCode, Cursor's state.vscdb#,
+					// Codex's state_<n>.sqlite#) reference sessions through a virtual
+					// "<db-file>#<session-id>" path, and Windsurf/Devin use a "windsurf://"/"devin://"
+					// URI scheme — none of these are real filesystem paths
+					// a raw fs.access() can validate; the actual session lives inside the DB (or is
+					// resolved by that adapter), not at this literal path. Since deleteCachedSessionData()
+					// now tombstones (excluding the path from every future snapshot merge, not just this
+					// process's memory — see its own doc comment), wrongly treating one of these as
+					// "missing" here would permanently discard a still-valid, expensive-to-rebuild
+					// session instead of just transiently dropping it from memory. Leaving them
+					// unvalidated here (neither expired nor confirmed) is the safe default; a real fix
+					// needs adapter-aware stat resolution, which CacheManager doesn't have.
+					if (CacheManager.isVirtualSessionPath(filePath)) { return; }
 					try {
 						await fs.promises.access(filePath);
-					} catch {
-						this.sessionFileCache.delete(filePath);
+					} catch (err) {
+						// fs.access() also rejects for reasons that don't mean "this file is gone" —
+						// EACCES/EPERM (a permissions hiccup), EBUSY, a transiently unmounted network
+						// drive, etc. Given deleteCachedSessionData()'s tombstone now excludes the path
+						// from every future snapshot save (not just this process's memory), treating any
+						// of those as a confirmed deletion would permanently discard a still-valid,
+						// expensive-to-rebuild session over what may be a passing I/O error. Only a
+						// "this path definitely doesn't exist" error is trustworthy enough to tombstone.
+						const code = (err as NodeJS.ErrnoException)?.code;
+						if (code === 'ENOENT' || code === 'ENOTDIR') {
+							this.deleteCachedSessionData(filePath);
+						}
 					}
 				})
 			);
 		}
+	}
+
+	private static isVirtualSessionPath(filePath: string): boolean {
+		// Every "<db-file>#<session-id>" composite scheme observed across adapters — OpenCode/Crush/
+		// Kilo/Copilot CLI's session-store.db, but also Cursor's state.vscdb# and Codex's
+		// state_<n>.sqlite# — shares the same shape: a file-extension-like segment right before the
+		// '#'. Matching that shape generically (rather than hardcoding '.db#' alone) avoids silently
+		// missing the next adapter that reuses this pattern with a different backing-file extension.
+		return filePath.includes('://') || /\.[a-zA-Z0-9]+#/.test(filePath);
 	}
 
 	/**
@@ -674,6 +746,18 @@ export class CacheManager {
 	private async buildMergedSnapshotEntries(): Promise<Record<string, SessionFileCache>> {
 		const existing = await this.readSharedSnapshot();
 		const merged: Record<string, SessionFileCache> = existing ? { ...existing } : {};
+		// A path removed via deleteCachedSessionData() must not be resurrected from whatever
+		// another (or this) window already published to disk — see deletedFilePaths' doc comment.
+		// Only strip a disk entry that is no newer than this tombstone's baseline mtime: a strictly
+		// newer disk entry means another window republished this path after this deletion decision
+		// was made, and that newer publish must survive, not be silently destroyed.
+		for (const [deletedPath, tombstoneMtime] of this.deletedFilePaths) {
+			const diskEntry = merged[deletedPath];
+			if (diskEntry && typeof diskEntry.mtime === 'number' && diskEntry.mtime > tombstoneMtime) {
+				continue;
+			}
+			delete merged[deletedPath];
+		}
 		for (const [filePath, entry] of this.sessionFileCache) {
 			const prev = merged[filePath];
 			if (!prev || (typeof entry.mtime === 'number' && entry.mtime >= prev.mtime)) {
@@ -760,9 +844,23 @@ export class CacheManager {
 		let merged = 0;
 		for (const [filePath, entry] of Object.entries(entries)) {
 			if (!entry || typeof entry.mtime !== 'number') { continue; }
+			// A tombstoned path has no `existing` in-memory entry to compare against (deleteCachedSessionData()
+			// removed it from sessionFileCache), so `!existing` would otherwise always be true and accept ANY
+			// snapshot entry unconditionally — including one no newer than what was actually deleted, e.g. a
+			// stale snapshot a concurrent window is still rewriting. Guard with the same tombstone-baseline
+			// comparison buildMergedSnapshotEntries() already applies on the write side: only a snapshot entry
+			// strictly newer than the tombstone survives.
 			const existing = this.sessionFileCache.get(filePath);
-			if (!existing || entry.mtime > existing.mtime) {
+			const tombstoneMtime = this.deletedFilePaths.get(filePath);
+			const isNewerThanTombstone = tombstoneMtime === undefined || entry.mtime > tombstoneMtime;
+			if ((!existing || entry.mtime > existing.mtime) && isNewerThanTombstone) {
 				this.sessionFileCache.set(filePath, entry);
+				// Must clear any tombstone this window recorded for this path, same as
+				// setCachedSessionData() does — buildMergedSnapshotEntries()'s mtime comparison
+				// already protects a newer disk entry on its own, but clearing here keeps this
+				// window's own next save from re-deciding "still gone" the moment it merges in
+				// proof that it plainly isn't.
+				this.deletedFilePaths.delete(filePath);
 				merged++;
 			}
 		}

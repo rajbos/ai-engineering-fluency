@@ -172,6 +172,29 @@ which is why it is not the default.
 `.github/skills/visual-view-diff/views.config.json` — the same registry the
 visual diff uses, so a view added for one is picked up by both.
 
+**Scenarios** cover what the one-pass crawl cannot reach: a `<select>`, which is
+changed rather than clicked, and a control that only appears once another one has
+been used. A view declares them in the same registry:
+
+```jsonc
+"scenarios": [{
+  "name": "Models tab: every mode/window/model combination still compares",
+  "expect": ".model-sides",           // must still be on screen after every step
+  "steps": [
+    { "click": "[data-tab=\"models\"]" },
+    { "select": "#model-b", "value": "claude-haiku-4.5" },
+    { "select": "#window", "value": "prev30" }
+  ]
+}]
+```
+
+Each scenario replays on its own fresh page. A `select` step without a `value`
+takes the next enabled option. A step that cannot run, throws, or leaves `expect`
+no longer *showing* is a finding — "showing" means present **and** rendered (not
+`display:none`, `visibility:hidden`, or zero-sized), the same test the control
+crawl uses. That last check is how the Models tab proves a picker reconciles
+instead of dropping to an empty state.
+
 ### A note on the visual diff's baseline
 
 `visual:diff` compares against the merge base with `origin/main`. **On a shallow

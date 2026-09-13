@@ -368,3 +368,224 @@ test('migrateOldCacheKeys: removes all sessionFileCache* keys from globalState',
 	// Unrelated keys must be preserved
 	assert.equal(context.globalState.get('github.authenticated'), true);
 });
+
+// ---------------------------------------------------------------------------
+// deleteCachedSessionData: deletion must survive a save (issue found in PR #2080
+// review — writeSharedSnapshot()'s merge starts from whatever is already on disk, so a
+// plain cache.delete() is silently resurrected by the very next save)
+// ---------------------------------------------------------------------------
+
+test('deleteCachedSessionData() tombstones the path so a later writeSharedSnapshot() cannot resurrect it from disk', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+	await m.writeSharedSnapshot();
+
+	m.deleteCachedSessionData('/a.json');
+	await m.writeSharedSnapshot();
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(entries, 'snapshot should still be readable');
+	assert.equal(Object.keys(entries!).length, 1, 'the deleted entry must not survive a later save');
+	assert.ok(!('/a.json' in entries!), '/a.json must be gone from the persisted snapshot, not resurrected from the disk copy written before the delete');
+	assert.equal(entries!['/b.json'].mtime, 2000, 'an unrelated entry must be untouched');
+});
+
+// A second, independent deletion of an already-tombstoned path is plausible in practice:
+// clearExpiredCache()'s fire-and-forget sweep can race with reconcilePreloadedAgainstDiscovery()'s
+// synchronous one, both independently deciding to delete the same path. The second call finds no
+// `existing` in-memory entry (the first deletion already removed it), so without preserving the
+// prior baseline, the tombstone would be silently weakened to mtime 0 — letting any stale disk
+// entry with a positive mtime pass the newer-than-tombstone check and be resurrected.
+test('deleteCachedSessionData() does not weaken an existing tombstone baseline on a second, independent deletion of the same path', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(5000), 10);
+	await writer.writeSharedSnapshot(); // disk: /a.json @ mtime 5000
+
+	const deleter = makeManager(dir);
+	deleter.setCachedSessionData('/a.json', entry(5000), 10);
+	deleter.deleteCachedSessionData('/a.json'); // first deletion: tombstone baseline = mtime 5000
+	deleter.deleteCachedSessionData('/a.json'); // second, independent deletion of the same path
+
+	// The same-age disk entry (mtime 5000, written before either deletion) is exactly what a
+	// wrongly weakened tombstone (mtime 0) would let back in via the `diskEntry.mtime > tombstoneMtime`
+	// check in buildMergedSnapshotEntries().
+	await deleter.writeSharedSnapshot();
+	const entries = await deleter.readSharedSnapshot();
+	assert.ok(!entries || !('/a.json' in entries!),
+		'the same-age disk entry must still be stripped — a wrongly-weakened tombstone (mtime 0) would have let it survive');
+});
+
+// This documents *why* deleteCachedSessionData() (not a plain `cache.delete()`) is required: it
+// proves writeSharedSnapshot()'s merge really does resurrect an in-memory-only delete from the
+// on-disk copy written before it. If this test ever starts failing because the merge stopped
+// reading from disk first, deleteCachedSessionData()'s tombstone becomes unnecessary — that's a
+// signal to revisit it, not a reason to delete this test.
+test('a plain cache.delete() (no tombstone) is resurrected by the next writeSharedSnapshot() — the exact bug deleteCachedSessionData() exists to avoid', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot();
+
+	m.cache.delete('/a.json');
+	await m.writeSharedSnapshot();
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(entries && '/a.json' in entries!,
+		'a plain cache.delete() is expected to be resurrected by the merge — this is exactly the bug deleteCachedSessionData() exists to avoid');
+});
+
+test('setCachedSessionData() clears a stale tombstone, so a rediscovered path can be persisted again', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot();
+
+	m.deleteCachedSessionData('/a.json');
+	m.setCachedSessionData('/a.json', entry(3000), 10); // rediscovered with a newer mtime
+	await m.writeSharedSnapshot();
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(entries && '/a.json' in entries!, 'a path re-added after deletion must not be permanently blocked by its old tombstone');
+	assert.equal(entries!['/a.json'].mtime, 3000);
+});
+
+// Cross-window scenario: window A tombstones a path, then a NEWER entry for that same path
+// arrives from another window via loadSharedSnapshotIfChanged() (mergeSnapshotEntries()) — not
+// via setCachedSessionData(), the only place that previously cleared a tombstone. Without also
+// clearing it there, window A's own next save would silently discard the other window's valid,
+// newer publish — not merely resurrect an old deletion, but destroy new data.
+test('loadSharedSnapshotIfChanged() clears a stale tombstone when accepting a newer entry from another window', async () => {
+	const dir = tmpDir();
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/a.json', entry(1000), 10);
+	await windowA.writeSharedSnapshot();
+
+	windowA.deleteCachedSessionData('/a.json');
+
+	// Another window republishes '/a.json' with a newer entry.
+	const windowB = makeManager(dir);
+	windowB.setCachedSessionData('/a.json', entry(5000), 10);
+	await windowB.writeSharedSnapshot();
+
+	// Window A picks up window B's newer snapshot via the merge path, not setCachedSessionData().
+	const merged = await windowA.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 1, 'the newer /a.json entry must be merged in');
+	assert.equal(windowA.cache.get('/a.json')?.mtime, 5000);
+
+	// Window A's own next save must not delete the entry it just accepted from window B.
+	await windowA.writeSharedSnapshot();
+	const entries = await windowA.readSharedSnapshot();
+	assert.ok(entries && '/a.json' in entries!,
+		'a stale tombstone must not survive accepting a newer merged-in entry — otherwise this window\'s own next save silently destroys another window\'s valid publish');
+	assert.equal(entries!['/a.json'].mtime, 5000);
+});
+
+// Distinct from the "clears a stale tombstone when accepting a NEWER entry" test above: this
+// covers mergeSnapshotEntries()'s own comparison, not just the end-to-end save-after-merge
+// behavior. A tombstoned path has no `existing` in-memory entry to compare against (it was
+// removed), so before the fix `!existing` was always true and ANY disk entry — even one no newer
+// than what was deleted — got merged back in unconditionally, silently resurrecting the deletion.
+test('loadSharedSnapshotIfChanged() does not resurrect a tombstoned path from a disk entry that is no newer than the deletion', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot();
+
+	const reader = makeManager(dir);
+	reader.setCachedSessionData('/a.json', entry(1000), 10);
+	reader.deleteCachedSessionData('/a.json'); // tombstone baseline = mtime 1000
+
+	// The on-disk snapshot still has the same-age entry the tombstone was recorded against.
+	const merged = await reader.loadSharedSnapshotIfChanged();
+
+	assert.equal(merged, 0, 'a disk entry no newer than the tombstone baseline must not be merged in');
+	assert.ok(!reader.cache.has('/a.json'), 'the path must stay deleted in memory, not resurrected from the stale disk copy');
+});
+
+test('clearExpiredCache() does not tombstone virtual session paths (.db#/.vscdb#/.sqlite#session-id, editor:// schemes) via a raw fs.access() check', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	const virtualDbPath = path.join(dir, 'opencode.db#ses_doesNotMatterIfMissing');
+	const virtualVscdbPath = path.join(dir, 'state.vscdb#composerIdDoesNotMatterIfMissing'); // Cursor
+	const virtualSqlitePath = path.join(dir, 'state_1.sqlite#threadIdDoesNotMatterIfMissing'); // Codex
+	const virtualUriPath = 'windsurf://trajectory/some-id';
+	const realMissingPath = path.join(dir, 'definitely-does-not-exist.json');
+	m.setCachedSessionData(virtualDbPath, entry(1000), 10);
+	m.setCachedSessionData(virtualVscdbPath, entry(1000), 10);
+	m.setCachedSessionData(virtualSqlitePath, entry(1000), 10);
+	m.setCachedSessionData(virtualUriPath, entry(1000), 10);
+	m.setCachedSessionData(realMissingPath, entry(1000), 10);
+
+	await m.clearExpiredCache();
+
+	assert.ok(m.cache.has(virtualDbPath),
+		'a .db#-style virtual path must survive clearExpiredCache() — fs.access() cannot validate it, and wrongly evicting it now tombstones a still-valid session out of every future snapshot, not just this process\'s memory');
+	assert.ok(m.cache.has(virtualVscdbPath),
+		'a .vscdb#-style virtual path (Cursor) must likewise survive — the exemption must recognize the general "<ext>#<id>" shape, not just the literal ".db#" substring');
+	assert.ok(m.cache.has(virtualSqlitePath),
+		'a .sqlite#-style virtual path (Codex) must likewise survive');
+	assert.ok(m.cache.has(virtualUriPath),
+		'a scheme:// virtual path (Windsurf/Devin) must likewise survive clearExpiredCache()');
+	assert.ok(!m.cache.has(realMissingPath),
+		'a genuinely missing real filesystem path must still be expired — this exemption must not blanket-disable expiry');
+});
+
+test('clearExpiredCache() only tombstones on a confirmed-missing error (ENOENT/ENOTDIR), not any fs.access() failure', { skip: process.platform === 'win32' }, async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	// A path with an over-length filename component reliably fails fs.access() with ENAMETOOLONG on
+	// Linux/macOS — a real fs.access() failure that is NOT "this file is gone" (unlike ENOENT).
+	const tooLongPath = path.join(dir, 'a'.repeat(300) + '.json');
+	m.setCachedSessionData(tooLongPath, entry(1000), 10);
+
+	await m.clearExpiredCache();
+
+	assert.ok(m.cache.has(tooLongPath),
+		'an fs.access() failure that is not ENOENT/ENOTDIR (ENAMETOOLONG here) must not be treated as a confirmed deletion — a permissions hiccup or transient I/O error would otherwise permanently tombstone a still-valid, expensive-to-rebuild session out of every future snapshot');
+});
+
+// Distinct from the loadSharedSnapshotIfChanged() cross-window test above: here window A never
+// merges window B's newer publish into its own in-memory cache before saving again — it just goes
+// straight to writeSharedSnapshot(), which reads the CURRENT on-disk snapshot (already containing
+// B's newer entry) and merges A's own map on top. Without a timestamp on the tombstone, A's
+// deletion decision (made before B ever republished) would still strip B's newer entry from the
+// merged result it writes back to disk.
+test('writeSharedSnapshot() does not let a stale tombstone strip a newer entry another window published to disk in the meantime', async () => {
+	const dir = tmpDir();
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/a.json', entry(1000), 10);
+	await windowA.writeSharedSnapshot();
+
+	windowA.deleteCachedSessionData('/a.json'); // tombstone baseline = mtime 1000
+
+	// Another window republishes '/a.json' with a newer entry, directly to disk — window A never
+	// sees this in memory.
+	const windowB = makeManager(dir);
+	windowB.setCachedSessionData('/a.json', entry(9000), 10);
+	await windowB.writeSharedSnapshot();
+
+	// Window A saves again without ever merging window B's update into its own cache.
+	await windowA.writeSharedSnapshot();
+
+	const entries = await windowA.readSharedSnapshot();
+	assert.ok(entries && '/a.json' in entries!,
+		'a tombstone recorded against an older mtime (1000) must not strip a disk entry that is now newer (9000) — that newer entry was published after this deletion decision was made');
+	assert.equal(entries!['/a.json'].mtime, 9000);
+});
+
+test('writeSharedSnapshot() still strips a disk entry that is the same age as or older than the tombstoned deletion', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot();
+
+	writer.deleteCachedSessionData('/a.json'); // tombstone baseline = mtime 1000
+	await writer.writeSharedSnapshot();
+
+	const entries = await writer.readSharedSnapshot();
+	assert.ok(!entries || !('/a.json' in entries!),
+		'a disk entry no newer than the tombstone\'s baseline mtime is exactly what the deletion targeted, and must still be stripped');
+});

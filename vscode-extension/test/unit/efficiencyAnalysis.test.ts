@@ -14,10 +14,13 @@ import {
 	listComparableModels,
 	compareModels,
 	buildModelWeeklySeries,
+	listEligibleModels,
+	reconcileModelSelection,
 	resolveModelCompareWindow,
 	selectDaysInWindow,
 	windowHasModelData,
 	type EfficiencyDeps,
+	type ModelCompareSelection,
 	type EfficiencySessionInput,
 } from '../../../src/efficiencyAnalysis';
 import { createEmptyDailyModelEfficiencyEntry } from '../../../src/modelEfficiency';
@@ -233,6 +236,51 @@ test('computeCostAttribution: reports the largest model mix shifts', () => {
 	const shiftA = attr.modelShifts.find(s => s.model === 'a');
 	assert.ok(shiftA);
 	assert.ok(shiftA.deltaShare < 0);
+});
+
+test('computeCostAttribution: model shifts stay canonical — raw ids, no host-resolved names', () => {
+	// The host has no pricing map to resolve names against (window.__MODEL_PRICING__
+	// only exists in the webview), so the analytics layer deliberately emits the raw
+	// id and lets the view resolve it. A friendly name appearing here would mean the
+	// resolver moved back to the host and silently degraded to raw ids in production.
+	const deps = pricedDeps({ 'gpt-4o': 10, 'claude-sonnet-4.5': 10 });
+	const prevDays = [day('2026-06-01', { tokens: 1_000_000, sessions: 10, modelUsage: { ...usage('gpt-4o', 500_000, 300_000, 8), ...usage('claude-sonnet-4.5', 150_000, 50_000, 2) } })];
+	const curDays = [day('2026-07-01', { tokens: 1_000_000, sessions: 10, modelUsage: { ...usage('gpt-4o', 150_000, 50_000, 2), ...usage('claude-sonnet-4.5', 500_000, 300_000, 8) } })];
+	const attr = computeCostAttribution(prevDays, curDays, deps);
+	assert.ok(attr);
+	assert.deepEqual(attr.modelShifts.map(s => s.model).sort(), ['claude-sonnet-4.5', 'gpt-4o']);
+	for (const s of attr.modelShifts) {
+		assert.deepEqual(
+			Object.keys(s).sort(),
+			['curShare', 'curTokens', 'deltaShare', 'model', 'prevShare', 'prevTokens'],
+		);
+	}
+});
+
+test('computeCostAttribution: keeps the 0.5-point noise threshold, |delta| sort and six-row cap', () => {
+	// Shares in percentage points; each period totals 100, so a model's delta is
+	// exactly the difference between its two entries. 'quiet' moves 0.4 points —
+	// just under the noise gate — while eight others move 5 points or more.
+	const prevShares: Record<string, number> = { m0: 20, m1: 20, m2: 15, m3: 15, m4: 10, m5: 10, m6: 5, m7: 4.6, quiet: 0.4 };
+	const curShares: Record<string, number> = { m0: 12, m1: 13, m2: 9, m3: 10, m4: 15, m5: 16, m6: 11, m7: 13.2, quiet: 0.8 };
+	const deps = pricedDeps(Object.fromEntries(Object.keys(prevShares).map(m => [m, 10])));
+	const toUsage = (shares: Record<string, number>): ModelUsage =>
+		Object.assign({}, ...Object.entries(shares).map(([m, pts]) => usage(m, pts * 10_000, 0, 1)));
+	const attr = computeCostAttribution(
+		[day('2026-06-01', { tokens: 1_000_000, sessions: 9, modelUsage: toUsage(prevShares) })],
+		[day('2026-07-01', { tokens: 1_000_000, sessions: 9, modelUsage: toUsage(curShares) })],
+		deps,
+	);
+	assert.ok(attr);
+	assert.equal(attr.modelShifts.length, 6, 'capped at the six largest movements');
+	assert.ok(!attr.modelShifts.some(s => s.model === 'quiet'), 'sub-half-point movement is filtered as noise');
+	const magnitudes = attr.modelShifts.map(s => Math.abs(s.deltaShare));
+	assert.deepEqual(magnitudes, [...magnitudes].sort((a, b) => b - a), 'sorted by |deltaShare|, largest first');
+	for (const s of attr.modelShifts) {
+		assert.ok(Math.abs(s.deltaShare) >= 0.005);
+	}
+	// The two smallest qualifying movements (5 points each) fall off the cap.
+	assert.ok(!attr.modelShifts.some(s => s.model === 'm3' || s.model === 'm4'));
 });
 
 // ── splitTrailingWindows ─────────────────────────────────────────────────────
@@ -778,4 +826,166 @@ test('windowHasModelData: true when at least one day in the window has per-model
 test('windowHasModelData: ignores data outside the window bounds', () => {
 	const days = [modelDay('2026-06-01', { 'gpt-4o': {} })];
 	assert.equal(windowHasModelData(days, resolveModelCompareWindow('thisMonth', NOW)), false);
+});
+
+
+// ── Models tab eligibility and selection reconciliation ──────────────────────
+
+/** A selection with the shipped defaults, overridden per test. */
+function selection(overrides: Partial<ModelCompareSelection> = {}): ModelCompareSelection {
+	return { mode: 'models', modelA: '', modelB: '', window: 'last30', windowA: 'lastMonth', windowB: 'thisMonth', ...overrides };
+}
+
+/** A year of data where the only two-model pair sits outside every selectable window. */
+function historicalOnlyDays(): DailyTokenStats[] {
+	return [
+		modelDay('2025-09-10', { legacy: solidModel({ inputTokens: 9_000_000 }), 'legacy-mini': solidModel({ inputTokens: 8_000_000 }) }),
+		modelDay('2026-07-02', { current: solidModel({}) }),
+	];
+}
+
+test('listEligibleModels: models mode offers only models present in the selected window', () => {
+	const models = listEligibleModels(historicalOnlyDays(), selection({ window: 'last30' }), NOW);
+	assert.deepEqual(models.map(m => m.model), ['current']);
+});
+
+test('listEligibleModels: periods mode offers only models present in both selected windows', () => {
+	const days = [
+		modelDay('2026-06-10', { shared: solidModel({}), juneOnly: solidModel({}) }),
+		modelDay('2026-07-02', { shared: solidModel({}), julyOnly: solidModel({}) }),
+	];
+	const models = listEligibleModels(days, selection({ mode: 'periods', windowA: 'lastMonth', windowB: 'thisMonth' }), NOW);
+	assert.deepEqual(models.map(m => m.model), ['shared']);
+});
+
+test('listEligibleModels: periods mode counts an overlapping window once when sizing the sample', () => {
+	const days = [modelDay('2026-07-02', { a: solidModel({ sessionShare: 3 }) })];
+	// windowA === windowB: the same days must not be merged twice and lift `a` over the sample floor.
+	const models = listEligibleModels(days, selection({ mode: 'periods', windowA: 'thisMonth', windowB: 'thisMonth' }), NOW);
+	assert.deepEqual(models.map(m => m.model), ['a']);
+	assert.equal(models[0].sessionShare, 3);
+	assert.equal(models[0].sampleSufficient, false);
+});
+
+test('reconcileModelSelection: replaces a model that only exists outside the active window', () => {
+	const days = historicalOnlyDays();
+	const window = resolveModelCompareWindow('last30', NOW);
+	// The pre-fix pickers defaulted from the whole payload, so the most-used model
+	// of the year was selected even though the active window has none of it —
+	// leaving a permanently missing side for every offered combination.
+	const stale = listComparableModels(days)[0].model;
+	assert.equal(stale, 'legacy');
+	assert.equal(computeModelPeriodMetrics(selectDaysInWindow(days, window), stale, window.label), null);
+
+	const next = reconcileModelSelection(days, selection({ modelA: 'legacy', modelB: 'legacy-mini' }), NOW);
+	assert.equal(next.modelA, 'current');
+	assert.ok(computeModelPeriodMetrics(selectDaysInWindow(days, window), next.modelA, window.label) !== null);
+});
+
+test('reconcileModelSelection: models mode defaults to two distinct models when the window has a pair', () => {
+	const days = [modelDay('2026-07-02', { big: solidModel({ inputTokens: 5_000_000 }), small: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection(), NOW);
+	assert.equal(next.modelA, 'big');
+	assert.equal(next.modelB, 'small');
+});
+
+test('reconcileModelSelection: models mode splits a Model B that has collapsed onto Model A', () => {
+	const days = [modelDay('2026-07-02', { big: solidModel({ inputTokens: 5_000_000 }), small: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'big', modelB: 'big' }), NOW);
+	assert.equal(next.modelA, 'big');
+	assert.equal(next.modelB, 'small');
+});
+
+test('reconcileModelSelection: keeps a still-eligible pick untouched', () => {
+	const days = [modelDay('2026-07-02', { big: solidModel({ inputTokens: 5_000_000 }), small: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'small', modelB: 'big' }), NOW);
+	assert.equal(next.modelA, 'small');
+	assert.equal(next.modelB, 'big');
+});
+
+test('reconcileModelSelection: keeps a low-sample pick the user made, but defaults to models that clear the floor', () => {
+	const lowSample = { ...createEmptyDailyModelEfficiencyEntry(), sessions: 1, sessionShare: 1, editTurns: 2, inputTokens: 100 };
+	const days = [modelDay('2026-07-02', { a: solidModel({ inputTokens: 5_000_000 }), b: solidModel({}), rare: lowSample })];
+	assert.equal(reconcileModelSelection(days, selection({ modelA: 'rare', modelB: 'a' }), NOW).modelA, 'rare');
+	assert.deepEqual(
+		[reconcileModelSelection(days, selection(), NOW).modelA, reconcileModelSelection(days, selection(), NOW).modelB],
+		['a', 'b'],
+	);
+});
+
+test('reconcileModelSelection: models mode leaves Model B empty rather than comparing a model with itself', () => {
+	const days = [modelDay('2026-07-02', { only: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'only', modelB: 'only' }), NOW);
+	assert.equal(next.modelA, 'only');
+	assert.equal(next.modelB, '');
+});
+
+test('reconcileModelSelection: periods mode repoints a model that is missing from one of the two periods', () => {
+	const days = [
+		modelDay('2026-06-10', { shared: solidModel({}) }),
+		modelDay('2026-07-02', { shared: solidModel({}), julyOnly: solidModel({ inputTokens: 9_000_000 }) }),
+	];
+	const sel = selection({ mode: 'periods', modelA: 'julyOnly', windowA: 'lastMonth', windowB: 'thisMonth' });
+	const next = reconcileModelSelection(days, sel, NOW);
+	assert.equal(next.modelA, 'shared');
+	for (const id of ['lastMonth', 'thisMonth'] as const) {
+		const w = resolveModelCompareWindow(id, NOW);
+		assert.ok(computeModelPeriodMetrics(selectDaysInWindow(days, w), next.modelA, w.label) !== null);
+	}
+});
+
+test('reconcileModelSelection: periods mode preserves Model B so switching back to models mode keeps it', () => {
+	const days = [
+		modelDay('2026-06-10', { a: solidModel({ inputTokens: 5_000_000 }), b: solidModel({}) }),
+		modelDay('2026-07-02', { a: solidModel({ inputTokens: 5_000_000 }), b: solidModel({}) }),
+	];
+	const sel = selection({ mode: 'periods', modelA: 'a', modelB: 'b', windowA: 'lastMonth', windowB: 'thisMonth' });
+	assert.equal(reconcileModelSelection(days, sel, NOW).modelB, 'b');
+});
+
+test('reconcileModelSelection: empties both sides when the active window holds nothing to compare', () => {
+	const days = [modelDay('2025-09-10', { legacy: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'legacy', modelB: 'legacy' }), NOW);
+	assert.equal(next.modelA, '');
+	assert.equal(next.modelB, '');
+	// An empty side is the honest answer here — not a zero-valued stand-in.
+	const w = resolveModelCompareWindow('last30', NOW);
+	assert.equal(computeModelPeriodMetrics(selectDaysInWindow(days, w), next.modelA, w.label), null);
+});
+
+test('reconcileModelSelection: does not change the selected windows or mode', () => {
+	const days = [modelDay('2026-07-02', { a: solidModel({}), b: solidModel({}) })];
+	const sel = selection({ window: 'last90', windowA: 'prev30', windowB: 'last30' });
+	const next = reconcileModelSelection(days, sel, NOW);
+	assert.equal(next.mode, 'models');
+	assert.equal(next.window, 'last90');
+	assert.equal(next.windowA, 'prev30');
+	assert.equal(next.windowB, 'last30');
+});
+
+test('reconcileModelSelection: replacing a stale Model A does not displace an eligible Model B', () => {
+	// 'big' sorts first, so a naive replacement would move the user's B onto side A
+	// and then push a different model into B — losing the pick it claims to keep.
+	const days = [modelDay('2026-07-02', { big: solidModel({ inputTokens: 5_000_000 }), small: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'gone', modelB: 'big' }), NOW);
+	assert.equal(next.modelB, 'big');
+	assert.equal(next.modelA, 'small');
+});
+
+test('reconcileModelSelection: falls back to Model B for Model A when the window holds nothing else', () => {
+	const days = [modelDay('2026-07-02', { only: solidModel({}) })];
+	const next = reconcileModelSelection(days, selection({ modelA: 'gone', modelB: 'only' }), NOW);
+	assert.equal(next.modelA, 'only');
+	assert.equal(next.modelB, '');
+});
+
+test('reconcileModelSelection: defaults lead with a model that clears the sample floor, not the biggest token count', () => {
+	// 'hog' has the most tokens but only one session equivalent, so it must not
+	// take a default side ahead of 'steady', which clears the floor.
+	const hog = { ...createEmptyDailyModelEfficiencyEntry(), sessions: 1, sessionShare: 1, editTurns: 2, inputTokens: 9_000_000, cost: 40 };
+	const days = [modelDay('2026-07-02', { hog, steady: solidModel({ inputTokens: 1_000_000 }) })];
+	assert.deepEqual(listEligibleModels(days, selection(), NOW).map(m => m.model), ['hog', 'steady']);
+	const next = reconcileModelSelection(days, selection(), NOW);
+	assert.equal(next.modelA, 'steady');
+	assert.equal(next.modelB, 'hog');
 });
