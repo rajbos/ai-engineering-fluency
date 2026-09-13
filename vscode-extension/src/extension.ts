@@ -1490,6 +1490,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const cacheSize = this.cacheManager.cache.size;
 			this.cacheManager.cache.clear();
 
+			// Invalidate before the first await, not after: a build already in flight can finish
+			// during it, and it would otherwise still pass the generation check and publish a
+			// payload built from the caches this call is in the middle of throwing away.
+			this._lastEfficiencyViewData = undefined;
+			this._cacheGeneration++;
+
 			// Delete the on-disk snapshot so it isn't reloaded after restart.
 			await this.cacheManager.deleteSharedSnapshot();
 
@@ -1505,8 +1511,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.lastUsageAnalysisStats = undefined;
 			this.lastDashboardData = undefined;
 			this.lastEfficiencySessionInputs = undefined;
-			this._lastEfficiencyViewData = undefined;
-			this._cacheGeneration++;
 
 			this.log(`Cache cleared successfully. Removed ${cacheSize} entries.`);
 			vscode.window.showInformationMessage('Cache cleared successfully. Reloading statistics...');
@@ -9592,10 +9596,12 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// key locked — if the user closes the panel and reopens it before the build finishes, the
 		// reopen would be silently dropped as "already in flight" (same fix as showChart above).
 		void (async () => {
-			const generation = this._cacheGeneration;
+			let generation = this._cacheGeneration;
 			try {
-				const data = await this.runEfficiencyBuild(
-					() => this.buildEfficiencyViewData(false, this.efficiencyLoadingSink(panel)));
+				const data = await this.runEfficiencyBuild(() => {
+					generation = this._cacheGeneration;
+					return this.buildEfficiencyViewData(false, this.efficiencyLoadingSink(panel));
+				});
 				// Record the payload even if this panel is gone: it is valid data, and a later
 				// refresh falls back to it rather than stranding its panel on the loading screen.
 				// A payload the caches have outlived is not rendered: the clear that invalidated
@@ -9624,9 +9630,13 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// Refresh forces all three walks to recompute, so it is as slow as a cold open —
 		// show the same loading screen with live progress rather than a frozen view.
 		let data: EfficiencyViewData;
-		const generation = this._cacheGeneration;
+		// Captured inside the queued callback, not here: a refresh waiting behind another build
+		// reads the caches as they are when it finally runs, so a clear that lands during that
+		// wait leaves it building from post-clear state, not stale state.
+		let generation = this._cacheGeneration;
 		try {
 			data = await this.runEfficiencyBuild(async () => {
+				generation = this._cacheGeneration;
 				// Swap in the loading screen only once this refresh actually starts; queued
 				// behind an initial build, it would otherwise blank the panel and sit there.
 				if (this.efficiencyPanel === panel) { panel.webview.html = this.getLoadingHtml(panel.webview); }
