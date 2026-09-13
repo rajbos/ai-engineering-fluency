@@ -476,3 +476,46 @@ test('clearExpiredCache() does not tombstone virtual session paths (.db#session-
 	assert.ok(!m.cache.has(realMissingPath),
 		'a genuinely missing real filesystem path must still be expired — this exemption must not blanket-disable expiry');
 });
+
+// Distinct from the loadSharedSnapshotIfChanged() cross-window test above: here window A never
+// merges window B's newer publish into its own in-memory cache before saving again — it just goes
+// straight to writeSharedSnapshot(), which reads the CURRENT on-disk snapshot (already containing
+// B's newer entry) and merges A's own map on top. Without a timestamp on the tombstone, A's
+// deletion decision (made before B ever republished) would still strip B's newer entry from the
+// merged result it writes back to disk.
+test('writeSharedSnapshot() does not let a stale tombstone strip a newer entry another window published to disk in the meantime', async () => {
+	const dir = tmpDir();
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/a.json', entry(1000), 10);
+	await windowA.writeSharedSnapshot();
+
+	windowA.deleteCachedSessionData('/a.json'); // tombstone baseline = mtime 1000
+
+	// Another window republishes '/a.json' with a newer entry, directly to disk — window A never
+	// sees this in memory.
+	const windowB = makeManager(dir);
+	windowB.setCachedSessionData('/a.json', entry(9000), 10);
+	await windowB.writeSharedSnapshot();
+
+	// Window A saves again without ever merging window B's update into its own cache.
+	await windowA.writeSharedSnapshot();
+
+	const entries = await windowA.readSharedSnapshot();
+	assert.ok(entries && '/a.json' in entries!,
+		'a tombstone recorded against an older mtime (1000) must not strip a disk entry that is now newer (9000) — that newer entry was published after this deletion decision was made');
+	assert.equal(entries!['/a.json'].mtime, 9000);
+});
+
+test('writeSharedSnapshot() still strips a disk entry that is the same age as or older than the tombstoned deletion', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot();
+
+	writer.deleteCachedSessionData('/a.json'); // tombstone baseline = mtime 1000
+	await writer.writeSharedSnapshot();
+
+	const entries = await writer.readSharedSnapshot();
+	assert.ok(!entries || !('/a.json' in entries!),
+		'a disk entry no newer than the tombstone\'s baseline mtime is exactly what the deletion targeted, and must still be stripped');
+});

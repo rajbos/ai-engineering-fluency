@@ -13038,14 +13038,22 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     // Save cache to storage before disposing (fire-and-forget async operation)
     // Note: Cache loss during abnormal shutdown is acceptable as it will rebuild on next startup
     // We can't await here since dispose() is synchronous
-    void (async () => {
-      try {
-        await this.saveCacheToStorage();
-      } catch (err) {
-        // Output channel will be disposed, so log to console as fallback
-        console.error("Error saving cache during disposal:", err);
-      }
-    })();
+    //
+    // Must skip this save in sample-data mode, same as persistRefreshResult() does before its own
+    // saveCacheToStorage() call: if the Extension Development Host closes while
+    // runLocalViewRegression() is still mid-flight (fixture entries already in cacheManager.cache,
+    // but its own finally block hasn't evicted them yet), this unconditional save would otherwise
+    // persist fixture data into the developer's real, shared production snapshot.
+    if (!this.isSampleDataModeActive()) {
+      void (async () => {
+        try {
+          await this.saveCacheToStorage();
+        } catch (err) {
+          // Output channel will be disposed, so log to console as fallback
+          console.error("Error saving cache during disposal:", err);
+        }
+      })();
+    }
     if (this.logViewerPanel) {
       this.logViewerPanel.dispose();
     }

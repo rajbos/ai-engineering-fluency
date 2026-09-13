@@ -26,14 +26,22 @@ export class CacheManager {
 
 	private sessionFileCache: Map<string, SessionFileCache> = new Map();
 	// Paths explicitly removed via deleteCachedSessionData(), for the lifetime of this
-	// CacheManager instance. writeSharedSnapshot()'s merge starts from whatever is already on
-	// disk (so a window with a partial in-memory cache can never regress a richer published
-	// snapshot — see its own doc comment) — without tracking deletions separately, that same
-	// merge would silently resurrect a path removed from `sessionFileCache` the moment it's
-	// no longer present in memory to overwrite the stale on-disk copy. Tombstones let the merge
-	// tell "never seen this session" (leave the disk copy alone) apart from "seen and removed"
-	// (must not survive the merge).
-	private deletedFilePaths: Set<string> = new Set();
+	// CacheManager instance, mapped to the mtime of the entry that was removed (0 if none was
+	// cached). writeSharedSnapshot()'s merge starts from whatever is already on disk (so a window
+	// with a partial in-memory cache can never regress a richer published snapshot — see its own
+	// doc comment) — without tracking deletions separately, that same merge would silently
+	// resurrect a path removed from `sessionFileCache` the moment it's no longer present in memory
+	// to overwrite the stale on-disk copy. Tombstones let the merge tell "never seen this session"
+	// (leave the disk copy alone) apart from "seen and removed" (must not survive the merge).
+	//
+	// The recorded mtime is this tombstone's generation baseline, not just a boolean flag: another
+	// window can legitimately republish the same path (rediscover it, or simply save after this
+	// one decided to delete it) with a newer entry than what this window last saw. Blindly
+	// stripping every tombstoned path from the freshly-read on-disk snapshot — regardless of how
+	// new that disk entry is — would destroy that other window's valid, newer publish. Comparing
+	// against the baseline lets a same-or-older disk entry (what this window actually intended to
+	// delete) be stripped while a strictly newer one survives.
+	private deletedFilePaths: Map<string, number> = new Map();
 	private readonly context: vscode.ExtensionContext;
 	private readonly deps: CacheManagerDeps;
 	private readonly cacheVersion: number;
@@ -104,8 +112,9 @@ export class CacheManager {
 	 * saveCacheToStorage()/checkpoint.
 	 */
 	deleteCachedSessionData(filePath: string): void {
+		const existing = this.sessionFileCache.get(filePath);
 		this.sessionFileCache.delete(filePath);
-		this.deletedFilePaths.add(filePath);
+		this.deletedFilePaths.set(filePath, existing?.mtime ?? 0);
 	}
 
 	async clearExpiredCache(): Promise<void> {
@@ -716,7 +725,14 @@ export class CacheManager {
 		const merged: Record<string, SessionFileCache> = existing ? { ...existing } : {};
 		// A path removed via deleteCachedSessionData() must not be resurrected from whatever
 		// another (or this) window already published to disk — see deletedFilePaths' doc comment.
-		for (const deletedPath of this.deletedFilePaths) {
+		// Only strip a disk entry that is no newer than this tombstone's baseline mtime: a strictly
+		// newer disk entry means another window republished this path after this deletion decision
+		// was made, and that newer publish must survive, not be silently destroyed.
+		for (const [deletedPath, tombstoneMtime] of this.deletedFilePaths) {
+			const diskEntry = merged[deletedPath];
+			if (diskEntry && typeof diskEntry.mtime === 'number' && diskEntry.mtime > tombstoneMtime) {
+				continue;
+			}
 			delete merged[deletedPath];
 		}
 		for (const [filePath, entry] of this.sessionFileCache) {
@@ -809,10 +825,10 @@ export class CacheManager {
 			if (!existing || entry.mtime > existing.mtime) {
 				this.sessionFileCache.set(filePath, entry);
 				// Must clear any tombstone this window recorded for this path, same as
-				// setCachedSessionData() does — otherwise a legitimately newer entry another
-				// window just published here gets silently deleted again by this window's own
-				// next save, since buildMergedSnapshotEntries() excludes every tombstoned path
-				// unconditionally.
+				// setCachedSessionData() does — buildMergedSnapshotEntries()'s mtime comparison
+				// already protects a newer disk entry on its own, but clearing here keeps this
+				// window's own next save from re-deciding "still gone" the moment it merges in
+				// proof that it plainly isn't.
 				this.deletedFilePaths.delete(filePath);
 				merged++;
 			}

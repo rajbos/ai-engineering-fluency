@@ -273,6 +273,21 @@ test('dedupeByNormalizedKeyKeepGreatest() — the production algorithm getDedupl
 	assert.equal(sessionEntry![1].mtime, 2000, 'must keep the newer-mtime variant, not an arbitrary/first one');
 });
 
+// A persisted snapshot is just parsed JSON — a single malformed/null record must not crash this
+// whole pass (which getDeduplicatedCacheEntries() feeds into both the cache-only instant paint and
+// the cache-seeded preload queue) the way a bare `data.mtime` dereference on a null entry would.
+test('dedupeByNormalizedKeyKeepGreatest() skips a null/undefined entry instead of throwing on getValue()', () => {
+	type MinimalCacheEntry = { mtime: number };
+	const cache = new Map<string, MinimalCacheEntry | null>([
+		['/a.json', null],
+		['/b.json', { mtime: 2000 }],
+	]);
+
+	const deduped = dedupeByNormalizedKeyKeepGreatest(cache as unknown as Map<string, MinimalCacheEntry>, data => data.mtime, 'linux');
+	assert.equal(deduped.length, 1, 'the null entry must be skipped, not thrown on');
+	assert.equal(deduped[0][0], '/b.json');
+});
+
 test('getDeduplicatedCacheEntries() delegates to the shared dedupeByNormalizedKeyKeepGreatest() helper', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private getDeduplicatedCacheEntries(): [string, SessionFileCache][] {');
 	assert.ok(body.includes('_dedupeByNormalizedKeyKeepGreatest(this.cacheManager.cache, data => data.mtime)'),
@@ -392,6 +407,17 @@ test('sample-data mode never writes to the shared on-disk cache snapshot: neithe
 	const preloadBody = extractBracesBlock(EXTENSION_SRC, 'preloaded: SessionFilePreload[] }> {');
 	assert.ok(/processed % 25 === 0 && !this\.isSampleDataModeActive\(\)/.test(preloadBody),
 		'the mid-parse checkpoint (maybeCheckpointCache(), which also writes the shared snapshot directly) must skip sample-data mode too, or it can persist fixture data even when persistRefreshResult() itself is correctly guarded');
+
+	// dispose()'s own shutdown save is a third, independent write path to the shared snapshot,
+	// bypassing persistRefreshResult() entirely — it needs the exact same guard. Without it, closing
+	// the Extension Development Host while runLocalViewRegression() is still mid-flight (fixture
+	// entries already in cacheManager.cache, its own finally block not yet run) would persist
+	// fixture data into the developer's real, shared production snapshot.
+	const disposeBody = extractBracesBlock(EXTENSION_SRC, 'public dispose(): void {');
+	const disposeSampleGuardIndex = disposeBody.indexOf('if (!this.isSampleDataModeActive()) {');
+	const disposeSaveIndex = disposeBody.indexOf('await this.saveCacheToStorage()');
+	assert.ok(disposeSampleGuardIndex !== -1 && disposeSaveIndex !== -1 && disposeSampleGuardIndex < disposeSaveIndex,
+		'dispose() must also skip its shutdown saveCacheToStorage() call in sample-data mode, same as persistRefreshResult()');
 });
 
 test('runLocalViewRegression() evicts its own session files from the in-memory cache when it finishes, by normalized key', () => {
