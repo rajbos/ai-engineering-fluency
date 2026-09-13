@@ -430,6 +430,65 @@ export function defaultSumBillingGroupCosts(billingGroupCosts: Record<string, nu
 	return Object.values(billingGroupCosts ?? {}).reduce((s, v) => s + v, 0);
 }
 
+/** The computed-stat caches that carry a generation stamp. */
+export type ComputedStatsKey = 'fullDaily' | 'usage' | 'sessionInputs';
+
+/**
+ * Whether a computed-stat cache stamped at `stampedGeneration` may still be read.
+ *
+ * The stamp is the cache generation in effect when the computation that produced the value
+ * *started*, not when it finished, and that distinction is the whole point. A build already
+ * running when the caches are cleared finishes afterwards and assigns its result — data
+ * derived from the pre-clear session cache — so the presence of a value proves nothing about
+ * whether it survived the clear. Stamping at the start makes such a result carry the old
+ * generation, and this rejects it. An unstamped cache (`undefined`) is never current.
+ */
+export function isComputedStatsCurrent(
+	stampedGeneration: number | undefined,
+	currentGeneration: number,
+): boolean {
+	return stampedGeneration === currentGeneration;
+}
+
+/** The minimum of a webview panel this module needs in order to post to it. */
+export interface PostablePanel { webview: { postMessage(msg: object): unknown } }
+
+/**
+ * A message sink bound to one panel, which drops anything sent after that panel stops being
+ * the live one.
+ *
+ * `getLive` is read at send time rather than captured, because the whole hazard is a build
+ * that outlives the panel that started it: by the time it reports, the user may have closed
+ * that panel and reopened a new one whose own build is reporting there. Comparing against
+ * the live panel at send time drops the stale build's messages instead of painting them over
+ * the replacement's loading screen.
+ */
+export function makePanelBoundSink<P extends PostablePanel>(
+	target: P,
+	getLive: () => P | undefined,
+): (msg: object) => void {
+	return (msg: object) => {
+		if (getLive() !== target) { return; }
+		void target.webview.postMessage(msg);
+	};
+}
+
+/**
+ * Queues `build` behind `previous` so only one runs at a time.
+ *
+ * Returns the caller's result separately from the chain the next caller should queue behind.
+ * The two differ in their failure handling on purpose: the result rejects so the caller can
+ * render a failure, while the chain always resolves, so one failed build does not wedge every
+ * build queued after it.
+ */
+export function chainBuild<T>(
+	previous: Promise<unknown>,
+	build: () => Promise<T>,
+): { result: Promise<T>; chain: Promise<void> } {
+	const result = previous.then(build, build);
+	return { result, chain: result.then(() => undefined, () => undefined) };
+}
+
 /**
  * Formats the main stats table in Markdown for the status bar hover tooltip.
  * Renders Today, Current Month, and Last 30 Days columns side by side.
@@ -737,6 +796,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
 	/** Bumped whenever the computed stat caches are invalidated; see recordEfficiencyPayload(). */
 	private _cacheGeneration = 0;
+	/**
+	 * Per-cache generation stamps: for each computed-stat cache, the `_cacheGeneration` that was
+	 * in effect when the computation now holding it *began*. Read through
+	 * `isComputedStatsCurrent()` before reusing a cache, so a build that was already running
+	 * when the caches were cleared cannot have its pre-clear result read back as current.
+	 */
+	private _statsGeneration: Partial<Record<ComputedStatsKey, number>> = {};
 	private outputChannel!: vscode.OutputChannel;
 	private lastDetailedStats: DetailedStats | undefined;
 	private lastDailyStats: DailyTokenStats[] | undefined;
@@ -2593,10 +2659,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * replacement panel a reopen created, whose own build is reporting there.
 	 */
 	private efficiencyLoadingSink(panel: vscode.WebviewPanel): (msg: object) => void {
-		return (msg: object) => {
-			if (this.efficiencyPanel !== panel) { return; }
-			void panel.webview.postMessage(msg);
-		};
+		return makePanelBoundSink(panel, () => this.efficiencyPanel);
 	}
 
 	/**
@@ -2609,9 +2672,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * then reuses whatever the build ahead of it just cached.
 	 */
 	private runEfficiencyBuild<T>(build: () => Promise<T>): Promise<T> {
-		const queued = this._efficiencyBuildChain.then(build, build);
-		this._efficiencyBuildChain = queued.then(() => undefined, () => undefined);
-		return queued;
+		const { result, chain } = chainBuild(this._efficiencyBuildChain, build);
+		this._efficiencyBuildChain = chain;
+		return result;
 	}
 
 	/**
@@ -4970,6 +5033,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		knownSessionFiles?: string[],
 		onProgress?: (completed: number, total: number, editors: ReadonlySet<string>) => void,
 	): Promise<DailyTokenStats[]> {
+		// Captured before the first await: the result is only as current as the state this walk
+		// started from, so a clearCache() landing mid-walk must leave this stamp behind it.
+		const startedAtGeneration = this._cacheGeneration;
 		const now = new Date();
 		const cutoffStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack);
 		const cutoffStartKey = toLocalDayKey(cutoffStart);
@@ -5022,6 +5088,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		const result = Array.from(dailyStatsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 		this.lastFullDailyStats = result;
+		this._statsGeneration.fullDaily = startedAtGeneration;
 		return result;
 	}
 
@@ -5182,10 +5249,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * @param useCache If true, return cached stats if available. If false, force recalculation.
 	 */
 	private async calculateUsageAnalysisStats(useCache = true, preloaded?: SessionFilePreload[]): Promise<UsageAnalysisStats> {
-		if (useCache && this.lastUsageAnalysisStats) {
+		if (useCache && this.lastUsageAnalysisStats && isComputedStatsCurrent(this._statsGeneration.usage, this._cacheGeneration)) {
 			this.log('🔍 [Usage Analysis] Using cached stats');
 			return this.lastUsageAnalysisStats;
 		}
+		const startedAtGeneration = this._cacheGeneration;
 		const now = new Date();
 		const { todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(now);
 		const cutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
@@ -5253,6 +5321,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			autoCompactionsLast7Days,
 		};
 		this.lastUsageAnalysisStats = stats;
+		this._statsGeneration.usage = startedAtGeneration;
 		return stats;
 	}
 
@@ -10253,10 +10322,11 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * `last*` stat caches and invalidated by the same paths.
 	 */
 	private async collectEfficiencySessionInputs(weeksBack = 12, useCache = true): Promise<EfficiencySessionInput[]> {
-		if (useCache && this.lastEfficiencySessionInputs) {
+		if (useCache && this.lastEfficiencySessionInputs && isComputedStatsCurrent(this._statsGeneration.sessionInputs, this._cacheGeneration)) {
 			this.log('⚡ [Efficiency] Using cached session inputs');
 			return this.lastEfficiencySessionInputs;
 		}
+		const startedAtGeneration = this._cacheGeneration;
 		const now = new Date();
 		const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - weeksBack * 7);
 		const inputs: EfficiencySessionInput[] = [];
@@ -10267,6 +10337,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				inputs.push(this.toEfficiencySessionInput(r.sessionData, r.mtime));
 			}
 			this.lastEfficiencySessionInputs = inputs;
+			this._statsGeneration.sessionInputs = startedAtGeneration;
 		} catch (error) {
 			this.error('Error collecting efficiency session inputs:', error);
 		}
@@ -10409,7 +10480,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	}> {
 		const stepPct = CopilotTokenTracker.EFFICIENCY_STEP_PCT;
 		let dailyStats: DailyTokenStats[];
-		if (!forceRecalc && this.lastFullDailyStats) {
+		if (!forceRecalc && this.lastFullDailyStats && isComputedStatsCurrent(this._statsGeneration.fullDaily, this._cacheGeneration)) {
 			this.postEfficiencyStep(send, stepPct.daily, l10n.t('loading.efficiency.dailyActivity'));
 			dailyStats = this.lastFullDailyStats;
 		} else {
