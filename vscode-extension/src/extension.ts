@@ -3308,9 +3308,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * cutoff, or whose stat/parse failed this run, never reaches `preloaded` at all but would still
 	 * be sitting in the cache — confirming it against `confirmedKeys` directly is the only way to
 	 * catch those too, not just the dedup winner a same-file spelling variant happened to produce.
+	 *
+	 * Must bail out in sample-data mode too, same as seedPreloadQueueFromCache()/
+	 * persistRefreshResult(): SessionDiscovery deliberately returns only the fixture directory's
+	 * files as `sessionFiles` in that mode, so `confirmedKeys` would contain nothing but fixture
+	 * paths — sweeping the whole cache against that would tombstone every real session the user
+	 * actually has, not just reconcile fixture-related entries.
 	 */
 	private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {
-		if (this.sessionDiscovery.lastDiscoveryHadError || sessionFiles.length === 0) { return preloaded; }
+		if (this.isSampleDataModeActive() || this.sessionDiscovery.lastDiscoveryHadError || sessionFiles.length === 0) { return preloaded; }
 		const confirmedKeys = new Set(sessionFiles.map(f => _normalizePathForDedup(f)));
 		for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
 			if (!confirmedKeys.has(_normalizePathForDedup(rawPath))) {

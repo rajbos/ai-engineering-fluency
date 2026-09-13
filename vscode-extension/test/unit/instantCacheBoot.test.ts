@@ -206,14 +206,17 @@ test('_preloadSessionFiles() seeds the queue from the cache before discovery sta
 		'reconciliation must happen after discovery+workers finish (sessionFiles must be the real, final discovery result)');
 });
 
-test('reconcilePreloadedAgainstDiscovery() only trusts a clean, non-empty discovery result, and compares with path normalization', () => {
+test('reconcilePreloadedAgainstDiscovery() only trusts a clean, non-empty, non-sample-mode discovery result, and compares with path normalization', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {');
 
-	// Must bail out (keep every cached entry, no pruning) on a flaky/partial scan — gated on
-	// BOTH lastDiscoveryHadError and an empty sessionFiles list, so a single erroring adapter (or
-	// a run where discovery genuinely found nothing) never zeroes out real cached sessions.
-	assert.ok(/if \(this\.sessionDiscovery\.lastDiscoveryHadError \|\| sessionFiles\.length === 0\) \{ ?return preloaded; ?\}/.test(body),
-		'must return `preloaded` unfiltered whenever this run\'s discovery errored or found nothing — pruning must only ever run on a run we can actually trust');
+	// Must bail out (keep every cached entry, no pruning) on a flaky/partial scan, OR while sample-data
+	// mode is active — gated on isSampleDataModeActive() as well as lastDiscoveryHadError and an empty
+	// sessionFiles list. Sample mode matters here specifically: SessionDiscovery returns only the
+	// fixture directory's files as `sessionFiles` in that mode, so without this guard every real
+	// cached session (none of which are in that fixture-only confirmed set) would be swept and
+	// tombstoned by a regression/screenshot run — not just fixture-related entries.
+	assert.ok(/if \(this\.isSampleDataModeActive\(\) \|\| this\.sessionDiscovery\.lastDiscoveryHadError \|\| sessionFiles\.length === 0\) \{ ?return preloaded; ?\}/.test(body),
+		'must return `preloaded` unfiltered whenever sample-data mode is active, or this run\'s discovery errored or found nothing — pruning must only ever run on a run we can actually trust with real session data');
 
 	assert.ok(/_normalizePathForDedup\(f\)/.test(body) && /confirmedKeys\.has\(_normalizePathForDedup\(p\.sessionFile\)\)/.test(body),
 		'the confirmed-by-discovery comparison must use _normalizePathForDedup() on both sides, matching the dedup key used everywhere else in this method');
