@@ -823,8 +823,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public githubSession: vscode.AuthenticationSession | undefined;
 	// Promise that resolves when the startup session restore completes
 	private _sessionRestorePromise: Promise<void> | undefined;
-	// Promise that resolves when the initial cache load from disk completes
+	// Promise that resolves when the initial cache load from disk completes, INCLUDING the
+	// OpenCode DB probe chained after it (queueMissingOpenCodeDbSessionsFromCache(), which does
+	// its own SQLite I/O). Callers that need the full startup sequence (the real refresh) await
+	// this one.
 	private _cacheLoadPromise: Promise<void> | undefined;
+	// Promise that resolves as soon as the on-disk cache *file* itself has been read — before the
+	// OpenCode DB probe chained onto _cacheLoadPromise runs. renderInstantStatsFromCache() awaits
+	// this one instead of _cacheLoadPromise, so it never blocks on OpenCode's SQLite I/O and stays
+	// a true no-filesystem-scan first paint.
+	private _cacheFileLoadPromise: Promise<void> | undefined;
 	/**
 	 * OpenCode DB virtual session paths discovered at startup that are missing from the
 	 * persisted cache. These paths bypass the mtime cutoff once so new DB sessions are
@@ -1535,7 +1543,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.context = context;
 		this.initializeAdapters(extensionUri, context);
 		this.initializeOutputChannel(context);
-		this._cacheLoadPromise = this.cacheManager.loadCacheFromStorage().then(async () => {
+		const cacheFileLoad = this.cacheManager.loadCacheFromStorage();
+		this._cacheFileLoadPromise = cacheFileLoad.finally(() => {
+			this._cacheFileLoadPromise = undefined;
+		});
+		this._cacheLoadPromise = cacheFileLoad.then(async () => {
 			await this.queueMissingOpenCodeDbSessionsFromCache();
 		}).finally(() => {
 			this._cacheLoadPromise = undefined;
@@ -1993,6 +2005,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
+	 * Mirrors SessionDiscovery.tryGetSampleDataFiles()'s effective-sample-dir check: sample mode
+	 * is active when either the local-view-regression override (runLocalViewRegression(), the
+	 * visual-view-diff/screenshot harness) or the aiEngineeringFluency.sampleDataDirectory setting
+	 * names a non-empty directory. In that mode SessionDiscovery bypasses every adapter and
+	 * returns only the fixture's files — callers that read the real on-disk cache directly (the
+	 * cache-only instant paint, the cache-seeded preload queue) must not mix real user sessions
+	 * into what is meant to be a clean, deterministic fixture run.
+	 */
+	private isSampleDataModeActive(): boolean {
+		if (this.localRegressionSampleDataDir && this.localRegressionSampleDataDir.trim().length > 0) { return true; }
+		const configured = vscode.workspace.getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory');
+		return !!(configured && configured.trim().length > 0);
+	}
+
+	/**
 	 * Paints the status bar (and any already-open Details/Chart panels) straight
 	 * from the on-disk cache — no filesystem discovery, no fs.stat, no parsing —
 	 * so a cold boot shows real numbers within a second or two instead of sitting
@@ -2004,8 +2031,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private async renderInstantStatsFromCache(): Promise<void> {
 		try {
-			if (this._cacheLoadPromise) {
-				try { await this._cacheLoadPromise; } catch { /* already logged in loadCacheFromStorage */ }
+			// Sample-data mode (screenshot/regression fixtures, see runLocalViewRegression()
+			// and the aiEngineeringFluency.sampleDataDirectory setting) intentionally bypasses
+			// all adapters and shows only the fixture's files. Rendering from the real,
+			// unrelated on-disk cache here would paint real user data over (or alongside) the
+			// fixture before the real fixture-only pass runs. Skip entirely.
+			if (this.isSampleDataModeActive()) { return; }
+			// Await only the raw cache-file read, not the OpenCode DB probe chained onto
+			// _cacheLoadPromise (queueMissingOpenCodeDbSessionsFromCache() does its own SQLite
+			// I/O) — awaiting that would defeat the point of a no-filesystem-scan first paint.
+			if (this._cacheFileLoadPromise) {
+				try { await this._cacheFileLoadPromise; } catch { /* already logged in loadCacheFromStorage */ }
 			}
 			if (this.cacheManager.cache.size === 0) { return; }
 
@@ -3130,19 +3166,27 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * re-discover in the background and reconcile" fix from issue #2018: on a warm
 	 * cache, most of the ~6500-file backlog is already known.
 	 *
-	 * Seeded paths are added to `seen` so the caller's discovery-batch handler can
-	 * dedupe against them — a file is still only ever processed once; newly-added or
-	 * previously uncached files still arrive through normal streaming discovery. A
-	 * cached path for a file deleted since the last run simply fails its stat with
-	 * ENOENT, which processPreloadQueueFileWithCrashLog already swallows — no
-	 * different from any other file that disappears mid-scan today.
+	 * Seeded paths are added to `seen` (keyed by _normalizePathForDedup(), the same
+	 * normalization SessionDiscovery.addDedupedBatch() uses across adapters — separators and case
+	 * can otherwise differ between a cache-recorded key and what a fresh adapter scan reports for
+	 * the same physical file, e.g. on Windows) so the caller's discovery-batch handler can dedupe
+	 * against them — a file is still only ever processed once; newly-added or previously uncached
+	 * files still arrive through normal streaming discovery. A cached path for a file deleted
+	 * since the last run simply fails its stat with ENOENT, which
+	 * processPreloadQueueFileWithCrashLog already swallows — no different from any other file
+	 * that disappears mid-scan today.
+	 *
+	 * Skipped entirely in sample-data mode (see isSampleDataModeActive()): SessionDiscovery
+	 * bypasses every adapter in that mode and returns only the fixture's files, so seeding real
+	 * cached sessions here would contaminate a screenshot/regression run with unrelated data.
 	 *
 	 * Returns the number of paths seeded (for the caller's totalDiscovered count).
 	 */
 	private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, editorSet?: Set<string>): number {
+		if (this.isSampleDataModeActive()) { return 0; }
 		const cachedPaths = Array.from(this.cacheManager.cache.keys());
 		if (cachedPaths.length === 0) { return 0; }
-		for (const p of cachedPaths) { seen.add(p); }
+		for (const p of cachedPaths) { seen.add(_normalizePathForDedup(p)); }
 		if (editorSet) {
 			for (const file of cachedPaths) {
 				const editor = this.detectEditorSource(file);
@@ -3198,9 +3242,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 							if (editor && editor !== 'Unknown') { editorSet.add(editor); }
 						}
 					}
-					const newFiles = batch.filter(f => !seen.has(f));
+					// Normalize with the same key SessionDiscovery.addDedupedBatch() uses across
+					// adapters (see seedPreloadQueueFromCache doc comment) so a cache-seeded path
+					// that differs only in separator/case from a freshly discovered one is still
+					// recognized as the same file, not queued (and counted) twice.
+					const newFiles = batch.filter(f => !seen.has(_normalizePathForDedup(f)));
 					if (newFiles.length === 0) { return; }
-					for (const f of newFiles) { seen.add(f); }
+					for (const f of newFiles) { seen.add(_normalizePathForDedup(f)); }
 					queue.push(...newFiles);
 					totalDiscovered += newFiles.length;
 					gate.signal();
@@ -3240,8 +3288,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 		]);
 
 		if (sessionFiles.length === 0) {
-			this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?');
-			return { sessionFiles, preloaded: [] };
+			// `sessionFiles` only reflects this run's adapter discovery — it does not include the
+			// cache-seeded backlog (see seedPreloadQueueFromCache()). If adapters transiently
+			// returned nothing (e.g. every adapter errored) while the cache still holds valid,
+			// already-processed entries, `preloaded` can be non-empty here; returning it (instead
+			// of hardcoding []) keeps those real, already-computed results instead of discarding
+			// them and regressing the instant cache-only paint back to zero stats.
+			if (preloaded.length === 0) {
+				this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?');
+			}
+			return { sessionFiles, preloaded };
 		}
 
 		this.logPreloadSessionFileSummary(sessionFiles, preloaded, analyzeStartMs);

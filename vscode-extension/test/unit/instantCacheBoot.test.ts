@@ -1,5 +1,5 @@
 /**
- * Regression guard for the two boot-time changes made for issue #2018 fix #2
+ * Regression guard for the boot-time changes made for issue #2018 fix #2
  * (persist the discovery list, render from it immediately):
  *
  *   1. `renderInstantStatsFromCache()` paints the status bar from the on-disk
@@ -11,12 +11,22 @@
  *      worker pool begins stat+cache-validating files from tick zero instead
  *      of waiting on the slowest adapter's directory walk.
  *
+ * Also covers the fixes made in response to PR #2080's Copilot review:
+ *   3. The instant paint must not block on the OpenCode DB probe chained onto
+ *      the cache-file load (queueMissingOpenCodeDbSessionsFromCache() does its
+ *      own SQLite I/O), and must not run at all in sample-data mode (it would
+ *      otherwise mix real user sessions into a screenshot/regression fixture).
+ *   4. Cache-to-discovery deduplication must use the same path normalization
+ *      SessionDiscovery uses across adapters, or a differently-cased/separated
+ *      cached key can coexist with a freshly discovered one and double-count
+ *      the same file.
+ *   5. `_preloadSessionFiles()` must not discard already-seeded `preloaded`
+ *      results just because this run's adapter discovery came back empty.
+ *
  * This isn't a runtime test (instantiating `CopilotTokenTracker` requires a
  * full VS Code host and file-system session discovery — see
  * analysisUpdateStatsPayload.test.ts for the same constraint), so instead it
- * asserts structural invariants directly on the source: the methods exist,
- * are wired into the boot path, and the discovery-batch handler still dedupes
- * against the cache-seeded paths (so a file is never double-processed).
+ * asserts structural invariants directly on the source.
  */
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
@@ -59,11 +69,22 @@ test('scheduleInitialUpdate() kicks off renderInstantStatsFromCache() before the
 		'renderInstantStatsFromCache() must be kicked off before the real updateTokenStats() pass');
 });
 
-test('renderInstantStatsFromCache() renders from the cache alone, with no discovery/fs I/O', () => {
+test('renderInstantStatsFromCache() renders from the cache alone, with no discovery/fs I/O, and skips sample-data mode', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private async renderInstantStatsFromCache(): Promise<void> {');
 
-	// Waits for the initial disk load, but never calls discovery or fs.stat.
-	assert.ok(body.includes('this._cacheLoadPromise'), 'must wait for the initial cache load before reading cacheManager.cache');
+	// Skips entirely in sample-data mode (screenshot/regression fixtures), and does so before
+	// touching the cache, or a warm real-user cache would still contaminate a fixture run.
+	const sampleGuardIndex = body.indexOf('if (this.isSampleDataModeActive()) { return; }');
+	assert.ok(sampleGuardIndex !== -1, 'must skip entirely in sample-data mode — otherwise a warm real cache paints real user data over a screenshot/regression fixture run');
+
+	// Waits for the raw cache-FILE load only — not the OpenCode DB probe chained onto
+	// _cacheLoadPromise, which does its own SQLite I/O and would defeat the "no filesystem/DB
+	// I/O" guarantee of an instant first paint.
+	assert.ok(body.includes('this._cacheFileLoadPromise'), 'must await _cacheFileLoadPromise (the raw cache-file load), not _cacheLoadPromise (which also chains the OpenCode DB probe)');
+	assert.ok(!/this\._cacheLoadPromise\b/.test(body), 'must not await _cacheLoadPromise — that also waits on queueMissingOpenCodeDbSessionsFromCache()\'s SQLite I/O, defeating the instant paint');
+	const cacheFileWaitIndex = body.indexOf('this._cacheFileLoadPromise');
+	assert.ok(sampleGuardIndex < cacheFileWaitIndex, 'the sample-data guard must run before waiting on/reading the cache');
+
 	assert.ok(!body.includes('getCopilotSessionFilesStreaming') && !body.includes('getCopilotSessionFiles('),
 		'renderInstantStatsFromCache() must not run adapter discovery — that defeats the point of an instant render');
 	assert.ok(!body.includes('statSessionFile('), 'renderInstantStatsFromCache() must not fs.stat — it should only read the already-loaded in-memory cache');
@@ -80,7 +101,15 @@ test('renderInstantStatsFromCache() renders from the cache alone, with no discov
 	}
 });
 
-test('_preloadSessionFiles() seeds the queue from the cache before discovery starts, and dedupes against it', () => {
+test('isSampleDataModeActive() checks both the local-regression override and the sampleDataDirectory setting', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private isSampleDataModeActive(): boolean {');
+	assert.ok(body.includes('this.localRegressionSampleDataDir'),
+		'must check localRegressionSampleDataDir — set by runLocalViewRegression()/the visual-view-diff harness');
+	assert.ok(body.includes("getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory')"),
+		'must check the aiEngineeringFluency.sampleDataDirectory setting — this must mirror SessionDiscovery.tryGetSampleDataFiles()\'s own check exactly, or the two can disagree about whether sample mode is active');
+});
+
+test('_preloadSessionFiles() seeds the queue from the cache before discovery starts, dedupes with path normalization, and never discards seeded results on empty discovery', () => {
 	// _preloadSessionFiles()'s own return type is an inline object literal
 	// (`Promise<{ sessionFiles: ...; preloaded: ... }>`), so a marker at the
 	// start of the signature would make extractBracesBlock's brace-balancing
@@ -95,16 +124,35 @@ test('_preloadSessionFiles() seeds the queue from the cache before discovery sta
 	assert.ok(seedIndex !== -1 && discoveryIndex !== -1 && seedIndex < discoveryIndex,
 		'the cache seed must happen before discovery starts, otherwise workers gain nothing from it');
 
-	// Discovery must dedupe against the cache-seeded `seen` set so a file already
-	// queued from the cache is never enqueued (and processed) a second time.
-	assert.ok(/batch\.filter\(f => !seen\.has\(f\)\)/.test(preloadBody),
-		'discovery batches must be filtered against the cache-seeded `seen` set to avoid double-processing a file');
+	// Discovery must dedupe against the cache-seeded `seen` set using the same path
+	// normalization SessionDiscovery.addDedupedBatch() uses across adapters — a raw-string
+	// comparison lets a differently-cased/separated cached key coexist with a freshly
+	// discovered one for the same physical file, double-queuing (and double-counting) it.
+	assert.ok(/seen\.has\(_normalizePathForDedup\(f\)\)/.test(preloadBody),
+		'discovery batches must be filtered using _normalizePathForDedup(), not a raw-string seen.has() check');
+	assert.ok(/seen\.add\(_normalizePathForDedup\(f\)\)/.test(preloadBody),
+		'newly discovered files must be added to `seen` via _normalizePathForDedup() too, matching how they were checked');
+
+	// A run whose fresh adapter discovery comes back empty (sessionFiles.length === 0) must not
+	// clobber already-seeded, already-processed `preloaded` results with a hardcoded [] — that
+	// would regress the instant cache-only paint straight back to zero stats whenever adapters
+	// transiently return nothing.
+	assert.ok(/if \(sessionFiles\.length === 0\) \{[\s\S]*?return \{ sessionFiles, preloaded \};[\s\S]*?\}/.test(preloadBody),
+		'the empty-discovery early return must return the real `preloaded` array, not a hardcoded empty one');
+	assert.ok(!/return \{ sessionFiles, preloaded: \[\] \};/.test(preloadBody),
+		'must not hardcode preloaded: [] on empty discovery — that discards cache-seeded results');
 });
 
-test('seedPreloadQueueFromCache() populates editorSet for cache-seeded paths too', () => {
+test('seedPreloadQueueFromCache() skips sample-data mode, normalizes seen keys, and populates editorSet for cache-seeded paths', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, editorSet?: Set<string>): number {');
+	const sampleGuardIndex = body.indexOf('if (this.isSampleDataModeActive()) { return 0; }');
+	assert.ok(sampleGuardIndex !== -1, 'must skip seeding entirely in sample-data mode — otherwise real cached sessions get mixed into a screenshot/regression fixture run');
+
+	assert.ok(/seen\.add\(_normalizePathForDedup\(p\)\)/.test(body),
+		'must normalize cached paths with _normalizePathForDedup() before adding to `seen`, matching the discovery-side check');
+
 	assert.ok(body.includes('this.detectEditorSource(file)'),
 		'must call detectEditorSource() for cache-seeded paths, or the loading UI editor pills will silently miss editors only known from the cache');
-	assert.ok(body.includes('queue.push(...cachedPaths)'), 'must push the cached paths onto the shared queue');
+	assert.ok(body.includes('queue.push(...cachedPaths)'), 'must push the cached (un-normalized) paths onto the shared queue — downstream stat/parse code needs the real path, not the dedup key');
 	assert.ok(body.includes('return cachedPaths.length'), 'must return the seeded count so the caller can fold it into totalDiscovered');
 });
