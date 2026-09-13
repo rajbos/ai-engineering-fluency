@@ -4208,6 +4208,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
 			'logviewer.summary.started': l10n.t('logviewer.summary.started'),
 			'logviewer.summary.lastActivity': l10n.t('logviewer.summary.lastActivity'),
+			// HydraFusion Routing section + Session Steps Overview leg toggle. Templates
+			// with {0} are resolved webview-side by localizeFormat().
+			'logviewer.hydrafusion.cost': l10n.t('logviewer.hydrafusion.cost'),
+			'logviewer.hydrafusion.costForTurn': l10n.t('logviewer.hydrafusion.costForTurn'),
+			'logviewer.hydrafusion.jumpToStepTitle': l10n.t('logviewer.hydrafusion.jumpToStepTitle'),
+			'logviewer.hydrafusion.jumpToStepLabel': l10n.t('logviewer.hydrafusion.jumpToStepLabel'),
+			'logviewer.hydrafusion.turnDetailIntro': l10n.t('logviewer.hydrafusion.turnDetailIntro'),
+			'logviewer.hydrafusion.toggleLegsAriaLabel': l10n.t('logviewer.hydrafusion.toggleLegsAriaLabel'),
+			'logviewer.hydrafusion.showLegsTitle': l10n.t('logviewer.hydrafusion.showLegsTitle'),
+			'logviewer.hydrafusion.legsCaptionTotal': l10n.t('logviewer.hydrafusion.legsCaptionTotal'),
+			'logviewer.hydrafusion.modelChangedTitle': l10n.t('logviewer.hydrafusion.modelChangedTitle'),
+			'logviewer.hydrafusion.expandStepNote': l10n.t('logviewer.hydrafusion.expandStepNote'),
 			// Current language for reference
 			'__language__': language
 		};
