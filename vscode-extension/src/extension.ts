@@ -2107,6 +2107,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (this._cacheFileLoadPromise) {
 				try { await this._cacheFileLoadPromise; } catch { /* already logged in loadCacheFromStorage */ }
 			}
+			// Re-check: sample mode could have turned on while the await above was suspended (e.g.
+			// runLocalViewRegression() started concurrently) — the check above only reflects the
+			// state at the very start of this call, not at the point the cache is actually read.
+			if (this.isSampleDataModeActive()) { return; }
 			if (this.cacheManager.cache.size === 0) { return; }
 
 			const preloaded: SessionFilePreload[] = [];

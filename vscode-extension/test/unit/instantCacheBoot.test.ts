@@ -103,12 +103,20 @@ test('renderInstantStatsFromCache() renders from the cache alone, with no discov
 	const cacheFileWaitIndex = body.indexOf('this._cacheFileLoadPromise');
 	assert.ok(sampleGuardIndex < cacheFileWaitIndex, 'the sample-data guard must run before waiting on/reading the cache');
 
+	// Sample mode is re-checked after the await too — the first check only reflects the state at
+	// the very start of this call, and runLocalViewRegression() could switch sample mode on while
+	// this was suspended waiting on _cacheFileLoadPromise, before the cache is actually read.
+	const cacheSizeCheckIndex = body.indexOf('if (this.cacheManager.cache.size === 0) { return; }');
+	const secondSampleGuardIndex = body.indexOf('if (this.isSampleDataModeActive()) { return; }', cacheFileWaitIndex);
+	assert.ok(secondSampleGuardIndex !== -1 && cacheFileWaitIndex < secondSampleGuardIndex && secondSampleGuardIndex < cacheSizeCheckIndex,
+		'must re-check isSampleDataModeActive() again after awaiting _cacheFileLoadPromise, before reading the cache — a single check at the top of the function can go stale across that await');
+
 	assert.ok(!body.includes('getCopilotSessionFilesStreaming') && !body.includes('getCopilotSessionFiles('),
 		'renderInstantStatsFromCache() must not run adapter discovery — that defeats the point of an instant render');
 	assert.ok(!body.includes('statSessionFile('), 'renderInstantStatsFromCache() must not fs.stat — it should only read the already-loaded in-memory cache');
 
 	// Bails out cleanly when there is nothing cached yet (first-ever run).
-	assert.ok(/if \(this\.cacheManager\.cache\.size === 0\) \{ ?return; ?\}/.test(body),
+	assert.ok(cacheSizeCheckIndex !== -1,
 		'must return early when the cache is empty instead of rendering an empty/misleading first paint');
 
 	// Iterates the deduplicated view of the cache, not the raw Map directly — the snapshot is
