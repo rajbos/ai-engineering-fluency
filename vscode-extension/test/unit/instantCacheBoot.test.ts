@@ -227,7 +227,7 @@ test('seedPreloadQueueFromCache() skips sample-data mode, seeds from the dedupli
 // its exact, small algorithm against a plain Map fixture — a stand-in for `cacheManager.cache`
 // — to verify the algorithm itself, mirroring how normalizePathForDedup()'s own behavior is
 // proven directly in utils-pathUtils.test.ts rather than only asserted-as-called here.
-test('the dedup-by-normalized-key-keep-newer-mtime algorithm getDeduplicatedCacheEntries() implements keeps exactly one winner per physical file', () => {
+test('getDeduplicatedCacheEntries()\'s dedup-by-normalized-key-keep-newer-mtime algorithm keeps exactly one winner per physical file', () => {
 	type MinimalCacheEntry = { mtime: number };
 	function dedupeByNormalizedKeyKeepNewer(cache: Map<string, MinimalCacheEntry>): [string, MinimalCacheEntry][] {
 		const winners = new Map<string, [string, MinimalCacheEntry]>();
@@ -308,4 +308,45 @@ test('_runRefreshCore() skips the one-time full-year chart backfill when discove
 	const guardToCallSpan = body.slice(guardIndex, backfillCallIndex);
 	assert.ok(/if \(!this\.lastFullDailyStats && !this\.chartPanel && !discoveryUntrustworthyForBackfill\) \{/.test(guardToCallSpan),
 		'the backfill call must be gated on !discoveryUntrustworthyForBackfill, or an unreliable empty-discovery run can still overwrite lastFullDailyStats with []');
+});
+
+test('renderInstantStatsFromCache() never overwrites a real refresh that already completed while it was still computing', () => {
+	const instantBody = extractBracesBlock(EXTENSION_SRC, 'private async renderInstantStatsFromCache(): Promise<void> {');
+	const calcIndex = instantBody.indexOf('await this.calculateDetailedStats(undefined, preloaded)');
+	const guardIndex = instantBody.indexOf('if (this._hasCompletedRealRefresh) { return; }');
+	const commitIndex = instantBody.indexOf('this.lastDetailedStats = stats;');
+	assert.ok(calcIndex !== -1 && guardIndex !== -1 && commitIndex !== -1 && calcIndex < guardIndex && guardIndex < commitIndex,
+		'renderInstantStatsFromCache() must check _hasCompletedRealRefresh after awaiting calculateDetailedStats but before committing its own results — otherwise a real refresh that finishes first can be silently overwritten by this slower, stale cache-only computation');
+
+	const refreshBody = extractBracesBlock(EXTENSION_SRC, 'private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {');
+	const flagSetIndex = refreshBody.indexOf('this._hasCompletedRealRefresh = true;');
+	const lastDetailedStatsIndex = refreshBody.indexOf('this.lastDetailedStats = detailedStats;');
+	assert.ok(flagSetIndex !== -1 && lastDetailedStatsIndex !== -1 && lastDetailedStatsIndex <= flagSetIndex,
+		'_runRefreshCore() must set _hasCompletedRealRefresh only once its own results are actually published (after this.lastDetailedStats is set)');
+});
+
+test('reconcilePreloadedAgainstDiscovery() evicts unconfirmed entries from the cache itself, not just from the returned array', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {');
+	assert.ok(body.includes('this.cacheManager.cache.delete(p.sessionFile)'),
+		'must delete() an unconfirmed entry from cacheManager.cache, not only exclude it from the returned `preloaded` — otherwise a future boot\'s cache-only instant paint (which reads the cache directly, before any discovery) keeps resurrecting it');
+});
+
+test('_preloadSessionFiles() always schedules clearExpiredCache(), even when this run\'s discovery came back empty', () => {
+	const preloadBody = extractBracesBlock(EXTENSION_SRC, 'preloaded: SessionFilePreload[] }> {');
+	const cleanupIndex = preloadBody.indexOf('this.cacheManager.clearExpiredCache()');
+	const emptyBranchIndex = preloadBody.indexOf('if (sessionFiles.length === 0) {');
+	assert.ok(cleanupIndex !== -1 && emptyBranchIndex !== -1 && cleanupIndex < emptyBranchIndex,
+		'clearExpiredCache() must be scheduled before the empty-sessionFiles early return, not only on the non-empty path — otherwise a cached entry for a genuinely deleted file never gets pruned on a run where every adapter returned nothing, and can keep being resurrected by a future cache-only instant paint');
+});
+
+test('sample-data mode never writes to the shared on-disk cache snapshot: neither the end-of-refresh save nor mid-parse checkpointing', () => {
+	const persistBody = extractBracesBlock(EXTENSION_SRC, 'private persistRefreshResult(isLeader: boolean): void {');
+	const sampleGuardIndex = persistBody.indexOf('if (this.isSampleDataModeActive()) { return; }');
+	const saveIndex = persistBody.indexOf('await this.saveCacheToStorage()');
+	assert.ok(sampleGuardIndex !== -1 && saveIndex !== -1 && sampleGuardIndex < saveIndex,
+		'persistRefreshResult() must skip saveCacheToStorage() in sample-data mode, before attempting the save — a regression/screenshot fixture refresh must never let its fixture data survive on disk past the run, where a later normal boot\'s cache-only instant paint would show it as real stats');
+
+	const preloadBody = extractBracesBlock(EXTENSION_SRC, 'preloaded: SessionFilePreload[] }> {');
+	assert.ok(/processed % 25 === 0 && !this\.isSampleDataModeActive\(\)/.test(preloadBody),
+		'the mid-parse checkpoint (maybeCheckpointCache(), which also writes the shared snapshot directly) must skip sample-data mode too, or it can persist fixture data even when persistRefreshResult() itself is correctly guarded');
 });

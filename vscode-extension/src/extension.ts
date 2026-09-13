@@ -834,6 +834,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// a true no-filesystem-scan first paint.
 	private _cacheFileLoadPromise: Promise<void> | undefined;
 	/**
+	 * Set once a real (discover→parse→verify) refresh has published its results. Guards
+	 * renderInstantStatsFromCache(): it runs fire-and-forget, concurrently with the real refresh
+	 * that starts 3s later in scheduleInitialUpdate() — normally far faster (pure in-memory
+	 * aggregation vs. filesystem discovery+parsing), but with no hard ordering guarantee. Without
+	 * this check, an instant paint that happened to take longer than the real refresh could finish
+	 * last and silently overwrite verified, freshly discovered stats with older cache-only ones.
+	 */
+	private _hasCompletedRealRefresh = false;
+	/**
 	 * OpenCode DB virtual session paths discovered at startup that are missing from the
 	 * persisted cache. These paths bypass the mtime cutoff once so new DB sessions are
 	 * picked up even when opencode.db's file mtime lags behind per-session updates.
@@ -2096,6 +2105,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (preloaded.length === 0) { return; }
 
 			const { stats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
+			// The real refresh (kicked off 3s later in scheduleInitialUpdate()) runs concurrently
+			// with this and is normally far faster to actually publish results once it starts, but
+			// there's no hard ordering guarantee. If it already committed verified data while this
+			// was still aggregating, never overwrite it with these older, cache-only numbers.
+			if (this._hasCompletedRealRefresh) { return; }
 			this.lastDetailedStats = stats;
 			this.lastDailyStats = dailyStats;
 			this.mergeIntoFullDailyStats(dailyStats);
@@ -3247,11 +3261,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * actually completed cleanly (no adapter erroring, and it found *something*) — a
 	 * partial/flaky scan must never silently zero out real, still-valid cached sessions just
 	 * because one adapter hiccuped.
+	 *
+	 * Unconfirmed entries are evicted from `cacheManager.cache` too, not just filtered out of the
+	 * returned array — otherwise this run's own `preloaded`/stats are correct, but the *next*
+	 * boot's cache-only instant paint (which reads the cache directly, before any discovery has
+	 * even run) would still resurrect the same stale entry, since nothing ever removed it from
+	 * the underlying cache.
 	 */
 	private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {
 		if (this.sessionDiscovery.lastDiscoveryHadError || sessionFiles.length === 0) { return preloaded; }
 		const confirmedKeys = new Set(sessionFiles.map(f => _normalizePathForDedup(f)));
-		return preloaded.filter(p => confirmedKeys.has(_normalizePathForDedup(p.sessionFile)));
+		const kept: SessionFilePreload[] = [];
+		for (const p of preloaded) {
+			if (confirmedKeys.has(_normalizePathForDedup(p.sessionFile))) {
+				kept.push(p);
+			} else {
+				this.cacheManager.cache.delete(p.sessionFile);
+			}
+		}
+		return kept;
 	}
 
 	/**
@@ -3331,8 +3359,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 				await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget);
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
-				// Checkpoint cache periodically during long-running preload
-				if (processed % 25 === 0) {
+				// Checkpoint cache periodically during long-running preload. Skipped in sample-data
+				// mode for the same reason persistRefreshResult() never saves there — a mid-parse
+				// checkpoint writes straight to the shared on-disk snapshot too, bypassing that guard.
+				if (processed % 25 === 0 && !this.isSampleDataModeActive()) {
 					this.cacheManager.maybeCheckpointCache();
 				}
 			}
@@ -3345,6 +3375,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		]);
 
 		preloaded = this.reconcilePreloadedAgainstDiscovery(preloaded, sessionFiles);
+
+		// Defer expired-cache cleanup to avoid blocking discovery/workers startup. Scheduled
+		// unconditionally (not only on a successful, non-empty scan) so a cached entry for a file
+		// that was genuinely deleted still gets pruned even on a run where every adapter otherwise
+		// returned nothing — otherwise it would keep sitting in the cache indefinitely, available
+		// for a future boot's cache-only instant paint to resurrect.
+		void Promise.resolve().then(() => this.cacheManager.clearExpiredCache());
 
 		if (sessionFiles.length === 0) {
 			// `sessionFiles` only reflects this run's adapter discovery — it does not include the
@@ -3360,9 +3397,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		this.logPreloadSessionFileSummary(sessionFiles, preloaded, analyzeStartMs);
-
-		// Defer expired-cache cleanup to avoid blocking discovery/workers startup
-		void Promise.resolve().then(() => this.cacheManager.clearExpiredCache());
 
 		return { sessionFiles, preloaded };
 	}
@@ -3596,6 +3630,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
 		this.lastDetailedStats = detailedStats;
+		// From this point on, renderInstantStatsFromCache() (if still in flight) must not commit
+		// its stale, cache-only results over these verified ones — see _hasCompletedRealRefresh.
+		this._hasCompletedRealRefresh = true;
 
 		this.persistRefreshResult(isLeader);
 
@@ -3619,9 +3656,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Persist results after a refresh. Only the leader publishes the shared
 	 * snapshot (so a follower's partial cache can never regress it); a follower
 	 * instead schedules a bounded resync to pick up the leader's snapshot.
+	 *
+	 * Never persists during sample-data mode (runLocalViewRegression(), the visual-view-diff
+	 * harness): that refresh's cache entries are fixture data, parsed under the SAME 'dev' cache
+	 * identity a real debug session uses (getCacheIdentifier() doesn't distinguish sample runs).
+	 * Saving them to the shared on-disk snapshot would let them survive past
+	 * localRegressionSampleDataDir being restored to '' — the cache-only instant paint and
+	 * cache-seeded preload queue (see isSampleDataModeActive()'s doc comment) read that same
+	 * snapshot directly on the *next* normal boot and would then display fixture data as real
+	 * stats. The regression tool only needs its results in memory (lastDetailedStats etc.) for
+	 * that one verification pass, never on disk.
 	 */
 	private persistRefreshResult(isLeader: boolean): void {
 		if (isLeader) {
+			if (this.isSampleDataModeActive()) { return; }
 			void (async () => {
 				try { await this.saveCacheToStorage(); }
 				catch (err) { this.warn(`Failed to save cache: ${err}`); }
