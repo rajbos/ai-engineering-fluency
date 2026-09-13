@@ -60,6 +60,43 @@ body {
 	box-shadow: 0 2px 6px var(--shadow-color);
 }
 
+/* Heading that opens a band of related .section cards inside one tab, so a long stack
+   reads as grouped rather than as one flat list with leftovers at the bottom. */
+.section-group-heading {
+	margin: 24px 0 10px;
+	padding-bottom: 6px;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.section-group-heading:first-child {
+	margin-top: 4px;
+}
+
+.section-group-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--text-primary);
+	letter-spacing: 0.01em;
+}
+
+.section-group-subtitle {
+	margin-top: 2px;
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+/* Sub-heading inside a section card, separating a block that answers a different question
+   from the columns above it (e.g. the 7-day compaction count under the per-period grid). */
+.ctx-window-subheading {
+	margin: 14px 0 6px;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
 .section-title {
 	font-size: 14px;
 	font-weight: 700;
@@ -215,6 +252,28 @@ body {
 	padding: 4px 8px;
 	vertical-align: middle;
 	color: var(--text-primary);
+}
+
+/* Collapsed long tail of reference kinds with no usage today or in the last 30 days.
+   Mirrors the ".model-leaderboard-other" disclosure so both long tails read the same. */
+.ctx-ref-other {
+	margin-top: 8px;
+}
+
+.ctx-ref-other > summary {
+	cursor: pointer;
+	user-select: none;
+	font-size: 12px;
+	color: var(--text-secondary);
+	padding: 4px 0;
+}
+
+.ctx-ref-other > summary:hover {
+	color: var(--link-color);
+}
+
+.ctx-ref-other[open] > summary {
+	margin-bottom: 6px;
 }
 
 
@@ -794,6 +853,47 @@ margin-bottom: 16px;
 border-bottom: 2px solid var(--border-color);
 padding-bottom: 0;
 flex-wrap: wrap;
+}
+
+/* Two-level tab strip: group tabs above, the active group's leaf tabs below.
+   Mirrors the ".group-tabs" / ".leaf-tabs" pair the Diagnostics view uses. */
+.group-tabs {
+border-bottom-width: 2px;
+margin-bottom: 4px;
+}
+
+.group-tab {
+display: inline-flex;
+align-items: center;
+gap: 5px;
+background: transparent;
+border: none;
+border-bottom: 3px solid transparent;
+color: var(--text-secondary);
+padding: 8px 18px;
+font-size: 13px;
+font-weight: 700;
+cursor: pointer;
+border-radius: 4px 4px 0 0;
+transition: all 0.15s ease;
+white-space: nowrap;
+margin-bottom: -2px;
+font-family: inherit;
+}
+
+.group-tab:hover {
+color: var(--text-primary);
+background: var(--list-hover-bg);
+}
+
+.group-tab.active {
+color: var(--text-primary);
+border-bottom-color: var(--link-color);
+}
+
+/* The leaf bar is subordinate to the group bar above it, so it carries a lighter rule. */
+.leaf-tabs {
+border-bottom-width: 1px;
 }
 
 .tab-button {

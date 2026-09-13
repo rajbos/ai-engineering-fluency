@@ -1546,7 +1546,10 @@ function activateTab(tabId: string): boolean {
 
 /** Which group tab (Diagnostics / Research / Settings) each leaf tab lives under. */
 const TAB_GROUPS: Record<string, string[]> = {
-  diagnostics: ["report", "sessions", "cache", "path-analyzer"],
+  // Keep in step with the leaf-tab bars in renderTabBars: a tab rendered in a bar but missing
+  // here can never be picked by firstAvailableTabInGroup, and groupOfTab only resolves it by
+  // falling through to the "diagnostics" default rather than by actually knowing its group.
+  diagnostics: ["report", "sessions", "cache", "path-analyzer", "share"],
   research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta", "ttft"],
   settings: ["display", "backend", "github", "debug"],
 };

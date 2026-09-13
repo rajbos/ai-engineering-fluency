@@ -196,6 +196,67 @@ test('l10n: usage context-pressure keys resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: usage tab-group, band and context-reference keys resolve in English', () => {
+	// These back the Usage view's group tab strip, the Activity tab's band headings, and the
+	// collapsed context-reference long tail. A missing key renders the raw key as a tab label
+	// or section heading.
+	const expected: Record<string, string> = {
+		'usage.group.usage': 'Usage',
+		'usage.group.workspace': 'Workspace',
+		'usage.group.github': 'GitHub',
+		'usage.group.coaching': 'Coaching',
+		'usage.band.overview.title': 'Overview',
+		'usage.band.spend.title': 'Spend & models',
+		'usage.band.context.title': 'Context',
+		'usage.contextWindow.compactionHeading': 'Context compaction',
+		'usage.contextRefs.noneRecent': 'No context references recorded today or in the last 30 days.',
+		'usage.contextRefs.totalTooltip': 'Total across the reference kinds (#file, #selection, @workspace, instructions files and so on). The Images, Prompt Files, Custom Prompts and Code Lines rows are separate metrics and are not included in this total.',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+	assert.match(t('usage.band.overview.subtitle'), /interaction modes/);
+	assert.match(t('usage.band.spend.subtitle'), /how hard they were asked to think/);
+	assert.match(t('usage.band.context.subtitle'), /what gets compacted away/);
+	// The count is a placeholder, not concatenated, so a locale can reposition it.
+	assert.equal(
+		t('usage.contextRefs.otherSummary', '4'),
+		'Other references (4, no usage today or in the last 30 days)',
+	);
+});
+
+test('l10n: usage tab-group, band and context-reference keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'usage.group.usage': '使用情况',
+			'usage.group.workspace': '工作区',
+			'usage.group.coaching': '改进建议',
+			'usage.band.overview.title': '概览',
+			'usage.band.spend.title': '花费与模型',
+			'usage.band.context.title': '上下文',
+			'usage.contextWindow.compactionHeading': '上下文压缩',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+		// "GitHub" is a proper noun and stays untranslated — asserted so a future bulk
+		// translation pass doesn't quietly localize a product name.
+		assert.equal(t('usage.group.github'), 'GitHub');
+		assert.equal(t('usage.contextRefs.otherSummary', '4'), '其他引用（4 个，今天和最近 30 天均未使用）');
+		// The band subtitles and the two context-reference strings are the longest prose in this
+		// set, so they are the likeliest to be dropped or half-translated in a bulk edit.
+		assert.equal(t('usage.band.overview.subtitle'), "你使用 AI 助手的总量，以及使用了哪些交互模式。", 'zh-cn value for usage.band.overview.subtitle');
+		assert.equal(t('usage.band.spend.subtitle'), "这些使用产生的成本、运行在哪些模型上，以及它们被要求思考的深度。", 'zh-cn value for usage.band.spend.subtitle');
+		assert.equal(t('usage.band.context.subtitle'), "你提供给模型的内容：附加的引用、请求与窗口上限的接近程度，以及被压缩掉的部分。", 'zh-cn value for usage.band.context.subtitle');
+		assert.equal(t('usage.contextRefs.noneRecent'), "今天和最近 30 天均未记录到上下文引用。", 'zh-cn value for usage.contextRefs.noneRecent');
+		assert.equal(t('usage.contextRefs.totalTooltip'), "各引用类型的合计（#file、#selection、@workspace、说明文件等）。图片、提示文件、自定义提示和代码行数这几行属于独立指标，不计入此合计。", 'zh-cn value for usage.contextRefs.totalTooltip');
+
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test("l10n: what's-new notification keys resolve in English", () => {
 	// The two buttons on the one-a-day new-feature notification. A missing key
 	// here would put a raw `whatsNew.takeMeThere` on the button, which is the

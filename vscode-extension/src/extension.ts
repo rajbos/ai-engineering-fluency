@@ -4178,6 +4178,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
 			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
 			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
+			// Usage view — tab group labels, Activity-tab band headings, context-reference long tail.
+			// otherSummary carries a {0} count resolved webview-side by localizeFormat().
+			'usage.group.usage': l10n.t('usage.group.usage'),
+			'usage.group.workspace': l10n.t('usage.group.workspace'),
+			'usage.group.github': l10n.t('usage.group.github'),
+			'usage.group.coaching': l10n.t('usage.group.coaching'),
+			'usage.band.overview.title': l10n.t('usage.band.overview.title'),
+			'usage.band.overview.subtitle': l10n.t('usage.band.overview.subtitle'),
+			'usage.band.spend.title': l10n.t('usage.band.spend.title'),
+			'usage.band.spend.subtitle': l10n.t('usage.band.spend.subtitle'),
+			'usage.band.context.title': l10n.t('usage.band.context.title'),
+			'usage.band.context.subtitle': l10n.t('usage.band.context.subtitle'),
+			'usage.contextRefs.otherSummary': l10n.t('usage.contextRefs.otherSummary'),
+			'usage.contextRefs.noneRecent': l10n.t('usage.contextRefs.noneRecent'),
+			'usage.contextRefs.totalTooltip': l10n.t('usage.contextRefs.totalTooltip'),
+			'usage.contextWindow.compactionHeading': l10n.t('usage.contextWindow.compactionHeading'),
 			// Details view — collapsible "Usage by Editor" section heading tooltips
 			'details.editorSection.show': l10n.t('details.editorSection.show'),
 			'details.editorSection.hide': l10n.t('details.editorSection.hide'),
@@ -8197,6 +8213,12 @@ private computeFallbackDailyRollup(
 			correctionReport: analysisStats.correctionReport ?? null,
 			repeatedTasks: analysisStats.repeatedTasks ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
+			// A cold-opened panel gets `window.__INITIAL_USAGE__ = null` when there are no cached
+			// stats yet (_buildUsageAnalysisInitialData returns 'null'), so the webview's
+			// initial-payload localization step is skipped entirely. Without this the whole view —
+			// tab groups, band headings, context-pressure rows — falls back to English on a
+			// non-English VS Code until the panel is reopened with stats already cached.
+			localization: this.getWebviewLocalization(),
 			copilotApiBalance: this._buildCopilotApiBalance(),
 			monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
 			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),

@@ -32,6 +32,22 @@ export interface WebviewLocalization {
 	'usage.contextPressure.worstFill': string;
 	'usage.contextPressure.nearLimitTooltip': string;
 
+	// Usage view — tab group labels, Activity-tab band headings, context-reference long tail
+	'usage.group.usage': string;
+	'usage.group.workspace': string;
+	'usage.group.github': string;
+	'usage.group.coaching': string;
+	'usage.band.overview.title': string;
+	'usage.band.overview.subtitle': string;
+	'usage.band.spend.title': string;
+	'usage.band.spend.subtitle': string;
+	'usage.band.context.title': string;
+	'usage.band.context.subtitle': string;
+	'usage.contextRefs.otherSummary': string;
+	'usage.contextRefs.noneRecent': string;
+	'usage.contextRefs.totalTooltip': string;
+	'usage.contextWindow.compactionHeading': string;
+
 	// Details view — collapsible "Usage by Editor" section heading tooltips
 	'details.editorSection.show': string;
 	'details.editorSection.hide': string;
@@ -102,6 +118,20 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'usage.contextPressure.nearLimitLabel': '⚠️ Sessions near the limit',
 	'usage.contextPressure.worstFill': 'Fullest session reached {0}% of its window',
 	'usage.contextPressure.nearLimitTooltip': 'Copilot CLI sessions that filled at least {0}% of their context window without compacting — the early-warning band before context starts getting dropped',
+	'usage.group.usage': 'Usage',
+	'usage.group.workspace': 'Workspace',
+	'usage.group.github': 'GitHub',
+	'usage.group.coaching': 'Coaching',
+	'usage.band.overview.title': 'Overview',
+	'usage.band.overview.subtitle': 'How much you used AI assistants, and in which interaction modes.',
+	'usage.band.spend.title': 'Spend & models',
+	'usage.band.spend.subtitle': 'What that usage cost, which models it ran on, and how hard they were asked to think.',
+	'usage.band.context.title': 'Context',
+	'usage.band.context.subtitle': 'What you feed the model: references you attach, how close requests come to the window limit, and what gets compacted away.',
+	'usage.contextRefs.otherSummary': 'Other references ({0}, no usage today or in the last 30 days)',
+	'usage.contextRefs.noneRecent': 'No context references recorded today or in the last 30 days.',
+	'usage.contextRefs.totalTooltip': 'Total across the reference kinds (#file, #selection, @workspace, instructions files and so on). The Images, Prompt Files, Custom Prompts and Code Lines rows are separate metrics and are not included in this total.',
+	'usage.contextWindow.compactionHeading': 'Context compaction',
 	'details.editorSection.show': 'Show Usage by Editor',
 	'details.editorSection.hide': 'Hide Usage by Editor',
 	'logviewer.summary.interactions': 'Interactions',
