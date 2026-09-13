@@ -740,7 +740,7 @@ function buildMcpAndContextRefsCard(data: SessionLogData, stats: SummaryStats): 
 		subLines.push(`<div class="combined-card-sub-line">🔌 ${formatTopListWithOther(usageTopMcpTools, usageMcpTotal)}</div>`);
 	}
 	if (usageContextTotal > 0) {
-		subLines.push(`<div class="combined-card-sub-line">🔗 implicit ${usageContextImplicit}, explicit ${usageContextExplicit}</div>`);
+		subLines.push(`<div class="combined-card-sub-line">${subContent}</div>`);
 	}
 	const subContent = subLines.length > 0 ? subLines.join('') : `<div class="combined-card-sub-line">None</div>`;
 	return `<div class="summary-card summary-card--compact summary-card--combined">
