@@ -32,6 +32,24 @@ export interface WebviewLocalization {
 	'usage.contextPressure.worstFill': string;
 	'usage.contextPressure.nearLimitTooltip': string;
 
+	// Usage view — Recent Sessions context-fill column and its filter pill
+	'usage.sessions.contextFill.columnLabel': string;
+	'usage.sessions.contextFill.nearLimitFilter': string;
+	'usage.sessions.contextFill.nearLimitFilterTooltip': string;
+	'usage.sessions.contextFill.used': string;
+	'usage.sessions.contextFill.usedNearLimit': string;
+	'usage.sessions.contextFill.noData': string;
+
+	// Efficiency view — Cost Attribution model-mix table
+	'efficiency.modelMix.heading': string;
+	'efficiency.modelMix.caption': string;
+	'efficiency.modelMix.model': string;
+	'efficiency.modelMix.previous': string;
+	'efficiency.modelMix.current': string;
+	'efficiency.modelMix.shift': string;
+	'efficiency.modelMix.shiftPoints': string;
+	'efficiency.modelMix.canonicalId': string;
+
 	// Details view — collapsible "Usage by Editor" section heading tooltips
 	'details.editorSection.show': string;
 	'details.editorSection.hide': string;
@@ -64,6 +82,16 @@ export interface WebviewLocalization {
 	'logviewer.summary.started': string;
 	'logviewer.summary.lastActivity': string;
 
+	// Efficiency view — Cost Attribution bars and summary cards
+	'efficiency.attribution.costEffect': string;
+	'efficiency.attribution.costEffectLine': string;
+	'efficiency.attribution.change': string;
+	'efficiency.attribution.periodSub': string;
+	'efficiency.attribution.blendedRate': string;
+	'efficiency.attribution.tooltip.volume': string;
+	'efficiency.attribution.tooltip.size': string;
+	'efficiency.attribution.tooltip.mix': string;
+
 	// HydraFusion Routing section + Session Steps Overview leg toggle
 	'logviewer.hydrafusion.cost': string;
 	'logviewer.hydrafusion.costForTurn': string;
@@ -75,6 +103,21 @@ export interface WebviewLocalization {
 	'logviewer.hydrafusion.legsCaptionTotal': string;
 	'logviewer.hydrafusion.modelChangedTitle': string;
 	'logviewer.hydrafusion.expandStepNote': string;
+
+	// Efficiency view — Models tab empty states
+	'efficiency.models.noPairInWindow': string;
+	'efficiency.models.noModelsInWindow': string;
+	'efficiency.models.noSharedModel': string;
+	'efficiency.models.noSecondModel': string;
+	'efficiency.models.controls.mode': string;
+	'efficiency.models.controls.modelA': string;
+	'efficiency.models.controls.modelB': string;
+	'efficiency.models.controls.model': string;
+	'efficiency.models.controls.baseline': string;
+	'efficiency.models.controls.comparedWith': string;
+	'efficiency.models.controls.window': string;
+	'efficiency.models.mode.models': string;
+	'efficiency.models.mode.periods': string;
 
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
@@ -102,6 +145,20 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'usage.contextPressure.nearLimitLabel': '⚠️ Sessions near the limit',
 	'usage.contextPressure.worstFill': 'Fullest session reached {0}% of its window',
 	'usage.contextPressure.nearLimitTooltip': 'Copilot CLI sessions that filled at least {0}% of their context window without compacting — the early-warning band before context starts getting dropped',
+	'usage.sessions.contextFill.columnLabel': 'Context',
+	'usage.sessions.contextFill.nearLimitFilter': '🧠 Near context limit',
+	'usage.sessions.contextFill.nearLimitFilterTooltip': 'Show only sessions that reached at least {0}% of their context window without compacting',
+	'usage.sessions.contextFill.used': '{0} of {1} context tokens used',
+	'usage.sessions.contextFill.usedNearLimit': '{0} of {1} context tokens used — at or past {2}% of the window',
+	'usage.sessions.contextFill.noData': 'No context-window fill recorded for this session (only GitHub Copilot CLI sessions report one)',
+	'efficiency.modelMix.heading': 'Model mix movement',
+	'efficiency.modelMix.caption': 'Token share per model, {0} compared with {1}',
+	'efficiency.modelMix.model': 'Model',
+	'efficiency.modelMix.previous': 'Previous',
+	'efficiency.modelMix.current': 'Current',
+	'efficiency.modelMix.shift': 'Shift',
+	'efficiency.modelMix.shiftPoints': '{0} pt',
+	'efficiency.modelMix.canonicalId': 'Model ID: {0}',
 	'details.editorSection.show': 'Show Usage by Editor',
 	'details.editorSection.hide': 'Hide Usage by Editor',
 	'logviewer.summary.interactions': 'Interactions',
@@ -130,6 +187,14 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'logviewer.summary.timeline': 'Timeline',
 	'logviewer.summary.started': 'Started',
 	'logviewer.summary.lastActivity': 'Last activity',
+	'efficiency.attribution.costEffect': 'Estimated cost effect',
+	'efficiency.attribution.costEffectLine': 'Estimated cost effect: {0}',
+	'efficiency.attribution.change': 'Change',
+	'efficiency.attribution.periodSub': '{0} · {1} sessions · {2} tokens',
+	'efficiency.attribution.blendedRate': 'blended rate {0} → {1} per M tokens',
+	'efficiency.attribution.tooltip.volume': 'Session count: {0} → {1} sessions',
+	'efficiency.attribution.tooltip.size': 'Tokens per session: {0} → {1} tokens/session',
+	'efficiency.attribution.tooltip.mix': 'Blended price: {0} → {1} per M tokens',
 	'logviewer.hydrafusion.cost': 'Cost',
 	'logviewer.hydrafusion.costForTurn': 'Cost for this turn',
 	'logviewer.hydrafusion.jumpToStepTitle': 'Jump to step #{0} in the Session Steps Overview below',
@@ -139,7 +204,20 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'logviewer.hydrafusion.showLegsTitle': 'Show the HydraFusion legs behind this step',
 	'logviewer.hydrafusion.legsCaptionTotal': '⚡ HydraFusion legs for step #{0} — total',
 	'logviewer.hydrafusion.modelChangedTitle': 'Model changed from the previous step',
-	'logviewer.hydrafusion.expandStepNote': '⚡ expand a step to see the HydraFusion legs behind it'
+	'logviewer.hydrafusion.expandStepNote': '⚡ expand a step to see the HydraFusion legs behind it',
+	'efficiency.models.noPairInWindow': 'Only one model was used in {0} ({1}), so there is no pair to compare. Pick a wider window, or switch to “One model, two periods”.',
+	'efficiency.models.noModelsInWindow': 'No model was used in {0} ({1}). Pick a wider window.',
+	'efficiency.models.noSharedModel': 'No model was used in both {0} ({1}) and {2} ({3}), so there is no model to follow across those periods. Pick different periods, or switch to “Compare two models”.',
+	'efficiency.models.noSecondModel': '— no second model in this window —',
+	'efficiency.models.controls.mode': 'Mode',
+	'efficiency.models.controls.modelA': 'Model A',
+	'efficiency.models.controls.modelB': 'Model B',
+	'efficiency.models.controls.model': 'Model',
+	'efficiency.models.controls.baseline': 'Baseline',
+	'efficiency.models.controls.comparedWith': 'Compared with',
+	'efficiency.models.controls.window': 'Window',
+	'efficiency.models.mode.models': 'Compare two models',
+	'efficiency.models.mode.periods': 'One model, two periods'
 };
 
 // Current localization strings, initialized with defaults

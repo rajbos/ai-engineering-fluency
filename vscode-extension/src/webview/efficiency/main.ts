@@ -4,19 +4,21 @@
 // combined indexed chart that overlays the ratio series with output.
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { setHtml } from '../shared/domUtils';
-import { escapeHtml, formatCompact, setCompactNumbers } from '../shared/formatUtils';
+import { escapeHtml, formatCompact, formatCost, formatNumber, formatSignedCostCompact, setCompactNumbers, setFormatLocale } from '../shared/formatUtils';
 import type { CacheBreakCause } from '../../../../src/cacheBreakage';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import type {
+	ComparableModel,
 	CostAttribution,
 	EfficiencyDelta,
 	EfficiencyViewData,
 	ModelComparison,
 	ModelComparisonMetricId,
 	ModelComparisonRow,
+	ModelCompareSelection,
 	ModelCompareWindowId,
 	ModelPeriodMetrics,
 	SkillImpact,
@@ -25,12 +27,15 @@ import {
 	buildModelWeeklySeries,
 	compareModels,
 	computeModelPeriodMetrics,
-	listComparableModels,
+	listEligibleModels,
+	reconcileModelSelection,
 	resolveModelCompareWindow,
 	selectDaysInWindow,
 	windowHasModelData,
 } from '../../../../src/efficiencyAnalysis';
-import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
+import { renderModelMixTable } from './modelMixTable';
+import { buildAttributionTooltip } from './attributionText';
 
 // Minimal structural types for the dynamically imported Chart.js bundle —
 // a `typeof import('chart.js/auto')` type-import trips TS1542 under CJS resolution.
@@ -102,9 +107,13 @@ function fmtValue(v: number | null, unit: EfficiencyDelta['unit']): string {
 	}
 }
 
+/**
+ * Signed dollar amount for on-bar and summary display. Two decimals normally,
+ * four when a non-zero effect would otherwise round away to "$0.00" — the
+ * tooltips carry the full-precision value.
+ */
 function fmtMoney(v: number): string {
-	const sign = v < 0 ? '−' : '+';
-	return `${sign}$${Math.abs(v).toFixed(2)}`;
+	return formatSignedCostCompact(v);
 }
 
 /** Uppercases the first letter only — for window labels that read lowercase mid-sentence. */
@@ -256,15 +265,19 @@ function renderDeltasTab(d: EfficiencyViewData): string {
 		<div class="delta-grid">${cards}</div>`;
 }
 
-function attrBar(label: string, detail: string, value: number, maxAbs: number, explain: string): string {
+/**
+ * One factor bar. `tooltip` is prebuilt plain text (see `buildAttributionTooltip`)
+ * and is escaped here into the row's title attribute.
+ */
+function attrBar(label: string, detail: string, value: number, maxAbs: number, tooltip: string): string {
 	const widthPct = maxAbs > 0 ? Math.min(50, (Math.abs(value) / maxAbs) * 50) : 0;
 	const side = value >= 0 ? `left: 50%; width: ${widthPct}%;` : `right: 50%; width: ${widthPct}%;`;
 	const cls = value >= 0 ? 'pos' : 'neg';
 	return `
-		<div class="attr-bar-row" title="${escapeHtml(explain)}">
+		<div class="attr-bar-row" title="${escapeHtml(tooltip)}">
 			<div class="attr-bar-label">${escapeHtml(label)}<div class="attr-bar-detail">${escapeHtml(detail)}</div></div>
 			<div class="attr-bar-track"><div class="attr-bar-mid"></div><div class="attr-bar-fill ${cls}" style="${side}"></div></div>
-			<div class="attr-bar-value">${fmtMoney(value)}<div class="attr-bar-effect">estimated cost effect</div></div>
+			<div class="attr-bar-value">${fmtMoney(value)}<div class="attr-bar-effect">${escapeHtml(localize('efficiency.attribution.costEffect'))}</div></div>
 		</div>`;
 }
 
@@ -274,31 +287,18 @@ function renderAttributionTab(d: EfficiencyViewData): string {
 		return `<p class="eff-section-note">Not enough data to decompose the cost change — both compared windows need at least one session with token data.</p>`;
 	}
 	const maxAbs = Math.max(Math.abs(a.volumeEffect), Math.abs(a.efficiencyEffect), Math.abs(a.mixEffect), 0.01);
-	const shifts = a.modelShifts.length === 0 ? '' : `
-		<h3>Model mix movement</h3>
-		<table class="attr-shift-table">
-			<thead><tr><th>Model</th><th class="num">${escapeHtml(d.attributionWindows.prevRange)}</th><th class="num">${escapeHtml(d.attributionWindows.curRange)}</th><th class="num">Shift</th></tr></thead>
-			<tbody>
-				${a.modelShifts.map(s => `
-					<tr>
-						<td>${escapeHtml(s.displayName)}</td>
-						<td class="num">${(s.prevShare * 100).toFixed(1)}%</td>
-						<td class="num">${(s.curShare * 100).toFixed(1)}%</td>
-						<td class="num ${s.deltaShare > 0 ? 'share-up' : 'share-down'}">${s.deltaShare > 0 ? '+' : ''}${(s.deltaShare * 100).toFixed(1)} pt</td>
-					</tr>`).join('')}
-			</tbody>
-		</table>`;
+	const shifts = a.modelShifts.length === 0 ? '' : renderModelMixTable(a.modelShifts, d.attributionWindows);
 	return `
 		<p class="eff-section-note">The periods are adjacent, not overlapping: ${escapeHtml(capitalizeFirst(d.attributionWindows.prev))} is <b>${escapeHtml(d.attributionWindows.prevRange)}</b>; ${escapeHtml(d.attributionWindows.cur)} is <b>${escapeHtml(d.attributionWindows.curRange)}</b>. Each bar is a <b>what-if dollar amount</b>, not a session count: starting from the earlier cost, the factors are applied in order. Green reduces estimated cost; red increases it.</p>
 		<div class="attr-summary">
-			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.prev))}</div><div class="stat-value">$${a.prev.cost.toFixed(2)}</div><div class="stat-sub">${escapeHtml(d.attributionWindows.prevRange)} · ${a.prev.sessions} sessions · ${formatCompact(a.prev.tokens)} tokens</div></div>
-			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.cur))}</div><div class="stat-value">$${a.cur.cost.toFixed(2)}</div><div class="stat-sub">${escapeHtml(d.attributionWindows.curRange)} · ${a.cur.sessions} sessions · ${formatCompact(a.cur.tokens)} tokens</div></div>
-			<div class="attr-stat"><div class="stat-label">Change</div><div class="stat-value">${fmtMoney(a.deltaCost)}</div><div class="stat-sub">blended rate ${a.prev.dollarsPerMTokens.toFixed(2)} → ${a.cur.dollarsPerMTokens.toFixed(2)} $/M tokens</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.prev))}</div><div class="stat-value">${formatCost(a.prev.cost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.periodSub', d.attributionWindows.prevRange, formatNumber(a.prev.sessions), formatCompact(a.prev.tokens)))}</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(capitalizeFirst(d.attributionWindows.cur))}</div><div class="stat-value">${formatCost(a.cur.cost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.periodSub', d.attributionWindows.curRange, formatNumber(a.cur.sessions), formatCompact(a.cur.tokens)))}</div></div>
+			<div class="attr-stat"><div class="stat-label">${escapeHtml(localize('efficiency.attribution.change'))}</div><div class="stat-value">${fmtMoney(a.deltaCost)}</div><div class="stat-sub">${escapeHtml(localizeFormat('efficiency.attribution.blendedRate', formatCost(a.prev.dollarsPerMTokens), formatCost(a.cur.dollarsPerMTokens)))}</div></div>
 		</div>
 		<div class="attr-bars">
-			${attrBar('Volume (session count)', `${a.prev.sessions.toLocaleString()} → ${a.cur.sessions.toLocaleString()} sessions`, a.volumeEffect, maxAbs, `Session count went from ${a.prev.sessions} to ${a.cur.sessions}.`)}
-			${attrBar('Session size (tokens/session)', `${formatCompact(a.prev.tokensPerSession)} → ${formatCompact(a.cur.tokensPerSession)} tokens/session`, a.efficiencyEffect, maxAbs, `Tokens per session went from ${Math.round(a.prev.tokensPerSession)} to ${Math.round(a.cur.tokensPerSession)}.`)}
-			${attrBar('Model mix ($/token)', `$${a.prev.dollarsPerMTokens.toFixed(2)} → $${a.cur.dollarsPerMTokens.toFixed(2)} /M tokens`, a.mixEffect, maxAbs, `Blended price went from ${a.prev.dollarsPerMTokens.toFixed(2)} to ${a.cur.dollarsPerMTokens.toFixed(2)} $/M tokens.`)}
+			${attrBar('Volume (session count)', `${formatNumber(a.prev.sessions)} → ${formatNumber(a.cur.sessions)} sessions`, a.volumeEffect, maxAbs, buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.volume', prev: a.prev.sessions, cur: a.cur.sessions, kind: 'count', effect: a.volumeEffect }))}
+			${attrBar('Session size (tokens/session)', `${formatCompact(a.prev.tokensPerSession)} → ${formatCompact(a.cur.tokensPerSession)} tokens/session`, a.efficiencyEffect, maxAbs, buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.size', prev: a.prev.tokensPerSession, cur: a.cur.tokensPerSession, kind: 'tokens', effect: a.efficiencyEffect }))}
+			${attrBar('Model mix ($/token)', `${formatCost(a.prev.dollarsPerMTokens)} → ${formatCost(a.cur.dollarsPerMTokens)} /M tokens`, a.mixEffect, maxAbs, buildAttributionTooltip({ headlineKey: 'efficiency.attribution.tooltip.mix', prev: a.prev.dollarsPerMTokens, cur: a.cur.dollarsPerMTokens, kind: 'rate', effect: a.mixEffect }))}
 		</div>
 		${shifts}`;
 }
@@ -490,15 +490,9 @@ const WINDOW_OPTIONS: { id: ModelCompareWindowId; label: string }[] = [
 	{ id: 'lastMonth', label: 'Last month' },
 ];
 
-type CompareMode = 'models' | 'periods';
+type CompareMode = ModelCompareSelection['mode'];
 
-const modelState: {
-	mode: CompareMode;
-	modelA: string;
-	modelB: string;
-	window: ModelCompareWindowId;
-	windowA: ModelCompareWindowId;
-	windowB: ModelCompareWindowId;
+const modelState: ModelCompareSelection & {
 	trendMetric: ModelComparisonMetricId;
 	initialized: boolean;
 } = {
@@ -520,22 +514,29 @@ function availableWindowIds(d: EfficiencyViewData, now: Date): ModelCompareWindo
 		.filter(id => windowHasModelData(d.modelDaily, resolveModelCompareWindow(id, now)));
 }
 
-/** Picks sensible defaults on first render: the two most-used comparable models, and windows that actually have data. */
+/** Picks the windows that actually have data on first render; `reconcileModelState` then fills in the models those windows can compare. */
 function initModelState(d: EfficiencyViewData): void {
 	if (modelState.initialized) { return; }
 	modelState.initialized = true;
-	const models = listComparableModels(d.modelDaily);
-	const preferred = models.filter(m => m.sampleSufficient);
-	const pool = preferred.length >= 2 ? preferred : models;
-	modelState.modelA = pool[0]?.model ?? '';
-	modelState.modelB = pool[1]?.model ?? pool[0]?.model ?? '';
-
 	const available = availableWindowIds(d, payloadNow(d));
 	if (available.length > 0) {
 		modelState.window = available.includes('last30') ? 'last30' : available[0];
 		modelState.windowA = available[0];
 		modelState.windowB = available.length > 1 ? available[1] : available[0];
 	}
+}
+
+/**
+ * Re-points the model pickers at something the active window(s) can compare.
+ *
+ * Run on every render, because a mode or window change leaves the previous
+ * selection behind — a model that only exists outside the new window would
+ * otherwise report a missing side for every offered combination.
+ */
+function reconcileModelState(d: EfficiencyViewData): void {
+	const next = reconcileModelSelection(d.modelDaily, modelState, payloadNow(d));
+	modelState.modelA = next.modelA;
+	modelState.modelB = next.modelB;
 }
 
 /** Resolves the current selection into a comparison, or null when a side has no data. */
@@ -562,11 +563,27 @@ function selectHtml(id: string, options: { value: string; label: string; disable
 	return `<select id="${id}" class="model-select">${opts}</select>`;
 }
 
-function modelOptions(d: EfficiencyViewData): { value: string; label: string }[] {
-	return listComparableModels(d.modelDaily).map(m => ({
+/** Dropdown options for the model pickers: only models the active window(s) can actually compare. */
+function modelOptions(eligible: ComparableModel[]): { value: string; label: string }[] {
+	return eligible.map(m => ({
 		value: m.model,
 		label: `${m.displayName} (${m.sessions} sessions${m.sampleSufficient ? '' : ', low sample'})`,
 	}));
+}
+
+/**
+ * Model B's options. Model A is filtered out because the two sides must differ:
+ * offering it would be a choice reconciliation immediately undoes, bouncing the
+ * picker back on the next render. When that leaves nothing, an explicit
+ * placeholder stands in — without one the browser falls back to showing the
+ * first option, so the picker would claim a self-comparison the tab is not
+ * actually rendering.
+ */
+function modelBOptions(options: { value: string; label: string; disabled?: boolean }[]): typeof options {
+	const distinct = options.filter(o => o.value !== modelState.modelA);
+	return modelState.modelB === ''
+		? [{ value: '', label: localize('efficiency.models.noSecondModel'), disabled: true }, ...distinct]
+		: distinct;
 }
 
 /** Dropdown options for the window picker: each label carries its concrete date span, and windows with no per-model data yet are disabled so they can't silently be picked. */
@@ -579,23 +596,24 @@ function windowOptions(d: EfficiencyViewData, now: Date): { value: string; label
 	});
 }
 
-function renderModelControls(d: EfficiencyViewData): string {
-	const models = modelOptions(d);
+function renderModelControls(d: EfficiencyViewData, eligible: ComparableModel[]): string {
+	const models = modelOptions(eligible);
 	const windows = windowOptions(d, payloadNow(d));
 	const modeSelect = selectHtml('model-mode', [
-		{ value: 'models', label: 'Compare two models' },
-		{ value: 'periods', label: 'One model, two periods' },
+		{ value: 'models', label: localize('efficiency.models.mode.models') },
+		{ value: 'periods', label: localize('efficiency.models.mode.periods') },
 	], modelState.mode);
+	const caption = (key: string): string => escapeHtml(localize(`efficiency.models.controls.${key}`));
 	const body = modelState.mode === 'periods'
 		? `
-			<label>Model ${selectHtml('model-a', models, modelState.modelA)}</label>
-			<label>Baseline ${selectHtml('window-a', windows, modelState.windowA)}</label>
-			<label>Compared with ${selectHtml('window-b', windows, modelState.windowB)}</label>`
+			<label>${caption('model')} ${selectHtml('model-a', models, modelState.modelA)}</label>
+			<label>${caption('baseline')} ${selectHtml('window-a', windows, modelState.windowA)}</label>
+			<label>${caption('comparedWith')} ${selectHtml('window-b', windows, modelState.windowB)}</label>`
 		: `
-			<label>Model A ${selectHtml('model-a', models, modelState.modelA)}</label>
-			<label>Model B ${selectHtml('model-b', models, modelState.modelB)}</label>
-			<label>Window ${selectHtml('window', windows, modelState.window)}</label>`;
-	return `<div class="model-controls"><label>Mode ${modeSelect}</label>${body}</div>`;
+			<label>${caption('modelA')} ${selectHtml('model-a', models, modelState.modelA)}</label>
+			<label>${caption('modelB')} ${selectHtml('model-b', modelBOptions(models), modelState.modelB)}</label>
+			<label>${caption('window')} ${selectHtml('window', windows, modelState.window)}</label>`;
+	return `<div class="model-controls"><label>${caption('mode')} ${modeSelect}</label>${body}</div>`;
 }
 
 /** Renders a side's headline volume so the reader can judge the sample for themselves. */
@@ -787,17 +805,39 @@ function renderCacheTab(d: EfficiencyViewData): string {
 		<div class="cache-causes">${rows}</div>`;
 }
 
+/**
+ * Explains why the active window(s) cannot form a comparison. The pickers only
+ * ever offer eligible models, so reaching here means the window itself is too
+ * narrow — not that the current pick is stale.
+ */
+function noEligibleModelsNote(d: EfficiencyViewData, eligible: ComparableModel[]): string {
+	const now = payloadNow(d);
+	if (modelState.mode === 'periods') {
+		const a = resolveModelCompareWindow(modelState.windowA, now);
+		const b = resolveModelCompareWindow(modelState.windowB, now);
+		return localizeFormat('efficiency.models.noSharedModel', a.label, a.rangeLabel, b.label, b.rangeLabel);
+	}
+	const w = resolveModelCompareWindow(modelState.window, now);
+	return eligible.length === 1
+		? localizeFormat('efficiency.models.noPairInWindow', w.label, w.rangeLabel)
+		: localizeFormat('efficiency.models.noModelsInWindow', w.label, w.rangeLabel);
+}
+
 function renderModelsTab(d: EfficiencyViewData): string {
 	initModelState(d);
 	if (d.modelDaily.length === 0) {
 		return `<p class="eff-section-note">No per-model efficiency data yet. This tab needs sessions whose logs carry per-turn tool-call detail (Copilot CLI, Claude Code, Copilot Chat and similar). Keep working and check back in a few days.</p>`;
 	}
-	const controls = renderModelControls(d);
+	reconcileModelState(d);
+	// Computed once per render and threaded through: the pickers, the empty-state
+	// note and the comparison all describe the same eligible set.
+	const eligible = listEligibleModels(d.modelDaily, modelState, payloadNow(d));
+	const controls = renderModelControls(d, eligible);
 	const cmp = buildModelComparison(d);
 	if (!cmp) {
 		return `
 			${controls}
-			<p class="eff-section-note">No data for one of the two sides in the selected window. Pick a different model or a wider window.</p>`;
+			<p class="eff-section-note">${escapeHtml(noEligibleModelsNote(d, eligible))}</p>`;
 	}
 	const metricOptions = MODEL_TREND_METRICS.map(m => ({ value: m.id, label: m.label }));
 	return `
@@ -1089,6 +1129,7 @@ function render(): void {
 	const root = document.getElementById('root');
 	if (!root || !data) { return; }
 	setCompactNumbers(data.compactNumbers !== false);
+	setFormatLocale(data.locale);
 	destroyCharts();
 	// Snap back to a real tab if the selected one is no longer shown — e.g. the
 	// Prompt Cache tab after cache data disappeared — so the content and the

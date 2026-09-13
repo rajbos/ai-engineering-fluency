@@ -224,10 +224,17 @@ export interface CostAttributionSide {
 	dollarsPerMTokens: number;
 }
 
-/** One model's share of tokens in the two compared periods. */
+/**
+ * One model's share of tokens in the two compared periods.
+ *
+ * Deliberately canonical: the raw `model` id and numeric shares only. Friendly
+ * names are resolved in the webview by `getModelDisplayName()`, which reads the
+ * pricing JSON from `window.__MODEL_PRICING__` — a global that does not exist in
+ * the extension host, so resolving here would serialize raw ids anyway.
+ */
 export interface ModelMixShift {
+	/** Canonical model identifier, exactly as it appears in the session data. */
 	model: string;
-	displayName: string;
 	/** Share of period tokens, 0..1. */
 	prevShare: number;
 	curShare: number;
@@ -293,7 +300,7 @@ function buildModelShifts(prev: Map<string, number>, cur: Map<string, number>, p
 		const deltaShare = curShare - prevShare;
 		// Ignore sub-half-point movements — they are noise in the mix story.
 		if (Math.abs(deltaShare) < 0.005) { continue; }
-		shifts.push({ model, displayName: getModelDisplayName(model), prevShare, curShare, deltaShare, prevTokens, curTokens });
+		shifts.push({ model, prevShare, curShare, deltaShare, prevTokens, curTokens });
 	}
 	return shifts.sort((a, b) => Math.abs(b.deltaShare) - Math.abs(a.deltaShare)).slice(0, 6);
 }
@@ -1104,6 +1111,100 @@ export function windowHasModelData(days: ModelDailyInput[], window: ModelCompare
 	return selectDaysInWindow(days, window).some(d => d.modelEfficiency && Object.keys(d.modelEfficiency).length > 0);
 }
 
+/** Which two sides the Models tab is comparing. */
+export type ModelCompareMode = 'models' | 'periods';
+
+/** The Models tab's current picker state, in the shape the webview keeps it. */
+export interface ModelCompareSelection {
+	mode: ModelCompareMode;
+	modelA: string;
+	modelB: string;
+	/** The shared window, used by `models` mode. */
+	window: ModelCompareWindowId;
+	/** The baseline window, used by `periods` mode. */
+	windowA: ModelCompareWindowId;
+	/** The compared-with window, used by `periods` mode. */
+	windowB: ModelCompareWindowId;
+}
+
+/** The models that appear at all in `days` — key presence only, no aggregation. */
+function modelsPresent(days: ModelDailyInput[]): Set<string> {
+	const seen = new Set<string>();
+	for (const day of days) {
+		for (const model of Object.keys(day.modelEfficiency ?? {})) { seen.add(model); }
+	}
+	return seen;
+}
+
+/** Deduplicates day entries by identity, so overlapping windows are not counted twice. */
+function uniqueDays(...groups: ModelDailyInput[][]): ModelDailyInput[] {
+	return [...new Set(groups.flat())];
+}
+
+/**
+ * Lists the models the *active* window(s) can actually compare, so the pickers
+ * never offer a selection that is guaranteed to render an empty side.
+ *
+ * In `models` mode that is every model present in the shared window. In
+ * `periods` mode it is only the models present in *both* windows — a model used
+ * in just one of them has no second side to compare against. Volume ordering
+ * and the sample floor are computed over the same window(s), never over the
+ * full payload, so "low sample" reflects what is being compared.
+ */
+export function listEligibleModels(
+	days: ModelDailyInput[],
+	selection: ModelCompareSelection,
+	now: Date,
+): ComparableModel[] {
+	if (selection.mode === 'periods') {
+		const daysA = selectDaysInWindow(days, resolveModelCompareWindow(selection.windowA, now));
+		const daysB = selectDaysInWindow(days, resolveModelCompareWindow(selection.windowB, now));
+		// Membership only needs the model keys, so it is a cheap scan — the full
+		// per-model aggregate is computed once, over the union.
+		const inA = modelsPresent(daysA);
+		const inB = modelsPresent(daysB);
+		return listComparableModels(uniqueDays(daysA, daysB)).filter(m => inA.has(m.model) && inB.has(m.model));
+	}
+	return listComparableModels(selectDaysInWindow(days, resolveModelCompareWindow(selection.window, now)));
+}
+
+/**
+ * Brings a stale selection back to something the active window(s) can compare.
+ *
+ * Selections survive mode and window changes, so a model picked from a wider
+ * slice of history — or a Model B that is still valid but now equals Model A —
+ * would otherwise leave a side permanently empty. A model the user picked that
+ * is still eligible is always kept, even when it is below the sample floor;
+ * only *defaults* prefer the models that clear it. Returns empty model ids when
+ * the window(s) hold nothing eligible, which is the caller's cue to render its
+ * empty state.
+ */
+export function reconcileModelSelection(
+	days: ModelDailyInput[],
+	selection: ModelCompareSelection,
+	now: Date,
+): ModelCompareSelection {
+	const eligible = listEligibleModels(days, selection, now);
+	const eligibleIds = new Set(eligible.map(m => m.model));
+	// Defaults come off this pool: every model that clears the sample floor
+	// first, then the rest, each group still most-used first. A stable partition
+	// rather than an either/or, so a high-token low-sample model cannot outrank a
+	// model with a trustworthy sample when only one side can be filled from it.
+	const pool = [...eligible.filter(m => m.sampleSufficient), ...eligible.filter(m => !m.sampleSufficient)];
+	const firstOther = (exclude?: string): string => pool.find(m => m.model !== exclude)?.model ?? '';
+
+	// Replacing Model A must not eat an eligible Model B: that would move the
+	// user's pick onto the other side and then displace it. Take the next model
+	// instead, and only fall back to B when there is nothing else in the window.
+	const heldB = selection.mode === 'models' && eligibleIds.has(selection.modelB) ? selection.modelB : undefined;
+	const modelA = eligibleIds.has(selection.modelA) ? selection.modelA : (firstOther(heldB) || firstOther());
+	// `periods` mode compares one model against itself across two windows, so it
+	// leaves Model B untouched — it is reconciled again on the way back to `models`.
+	if (selection.mode === 'periods') { return { ...selection, modelA }; }
+	const keepB = eligibleIds.has(selection.modelB) && selection.modelB !== modelA;
+	return { ...selection, modelA, modelB: keepB ? selection.modelB : firstOther(modelA) };
+}
+
 export type ModelComparisonMetricId =	| 'cost-per-edit-turn' | 'cost-per-session' | 'cost-per-kloc' | 'dollars-per-mtokens'
 	| 'tokens-per-edit-turn' | 'tokens-per-session' | 'one-shot-rate' | 'retry-rate'
 	| 'self-correction-rate' | 'cache-read-share' | 'active-minutes-per-session' | 'apply-rate';
@@ -1304,5 +1405,10 @@ export interface EfficiencyViewData {
 	lastUpdated: string;
 	backendConfigured: boolean;
 	compactNumbers?: boolean;
+	/**
+	 * Locale used by the view's number/currency formatters, detected by the
+	 * extension host. Undefined falls back to the webview runtime's own locale.
+	 */
+	locale?: string;
 	isDebugMode?: boolean;
 }
