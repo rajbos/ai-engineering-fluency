@@ -13026,7 +13026,9 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
 function registerUsageNavigationCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
   const commands: Array<[string, string, (...args: unknown[]) => Promise<void>]> = [
     // The status-bar insights badge passes the id of the insight its tooltip names, so the panel
-    // can scroll straight to that card. Invoked from the command palette there is no argument.
+    // can scroll straight to that card. It is the only caller that passes one — the command is
+    // registered but not contributed, so there is no palette or keybinding path — and the guard
+    // keeps any other invocation (or a non-string argument) on the plain open-the-tab behaviour.
     ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", (insightId) => tokenTracker.showUsageAnalysisOnInsightsTab(typeof insightId === 'string' ? insightId : undefined)],
     ["aiEngineeringFluency.openToolsTab", "Open Tools tab command called", () => tokenTracker.showUsageAnalysisOnToolsTab()],
     ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
