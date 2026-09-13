@@ -74,6 +74,18 @@ export interface WebviewLocalization {
 	'efficiency.attribution.tooltip.size': string;
 	'efficiency.attribution.tooltip.mix': string;
 
+	// HydraFusion Routing section + Session Steps Overview leg toggle
+	'logviewer.hydrafusion.cost': string;
+	'logviewer.hydrafusion.costForTurn': string;
+	'logviewer.hydrafusion.jumpToStepTitle': string;
+	'logviewer.hydrafusion.jumpToStepLabel': string;
+	'logviewer.hydrafusion.turnDetailIntro': string;
+	'logviewer.hydrafusion.toggleLegsAriaLabel': string;
+	'logviewer.hydrafusion.showLegsTitle': string;
+	'logviewer.hydrafusion.legsCaptionTotal': string;
+	'logviewer.hydrafusion.modelChangedTitle': string;
+	'logviewer.hydrafusion.expandStepNote': string;
+
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
 }
@@ -135,7 +147,17 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'efficiency.attribution.blendedRate': 'blended rate {0} → {1} per M tokens',
 	'efficiency.attribution.tooltip.volume': 'Session count: {0} → {1} sessions',
 	'efficiency.attribution.tooltip.size': 'Tokens per session: {0} → {1} tokens/session',
-	'efficiency.attribution.tooltip.mix': 'Blended price: {0} → {1} per M tokens'
+	'efficiency.attribution.tooltip.mix': 'Blended price: {0} → {1} per M tokens',
+	'logviewer.hydrafusion.cost': 'Cost',
+	'logviewer.hydrafusion.costForTurn': 'Cost for this turn',
+	'logviewer.hydrafusion.jumpToStepTitle': 'Jump to step #{0} in the Session Steps Overview below',
+	'logviewer.hydrafusion.jumpToStepLabel': 'step #{0}',
+	'logviewer.hydrafusion.turnDetailIntro': 'Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg a judge rejected. The same legs also appear under their step in the Session Steps Overview below.',
+	'logviewer.hydrafusion.toggleLegsAriaLabel': 'Toggle HydraFusion legs for step #{0}',
+	'logviewer.hydrafusion.showLegsTitle': 'Show the HydraFusion legs behind this step',
+	'logviewer.hydrafusion.legsCaptionTotal': '⚡ HydraFusion legs for step #{0} — total',
+	'logviewer.hydrafusion.modelChangedTitle': 'Model changed from the previous step',
+	'logviewer.hydrafusion.expandStepNote': '⚡ expand a step to see the HydraFusion legs behind it'
 };
 
 // Current localization strings, initialized with defaults
