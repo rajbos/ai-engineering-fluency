@@ -663,18 +663,27 @@ export function addTaskCategoryToDailyEntry(entry: DailyTokenStats, tokens: numb
 	// the "model" keys addModelUsage already guards — see protoGuard.ts. A malformed/tampered
 	// "__proto__" category would otherwise index Object.prototype and corrupt every plain object
 	// in the process, so treat it as unrecognised data and skip it, same as any other bad key.
-	if (taskCategory && !isUnsafeObjectKey(taskCategory)) {
+	// safeTaskCategory also backstops the fallback below: an unsafe taskCategory must not become
+	// the sole (and therefore filtered-out) entry in `shares`, which would leave every chart map
+	// empty for this entry instead of falling back to "Conversation".
+	const safeTaskCategory = taskCategory && !isUnsafeObjectKey(taskCategory) ? taskCategory : undefined;
+	if (safeTaskCategory) {
 		if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
-		if (!entry.taskCategoryUsage[taskCategory]) { entry.taskCategoryUsage[taskCategory] = { tokens: 0, sessions: 0 }; }
-		entry.taskCategoryUsage[taskCategory].tokens += tokens;
-		entry.taskCategoryUsage[taskCategory].sessions += 1;
+		if (!entry.taskCategoryUsage[safeTaskCategory]) { entry.taskCategoryUsage[safeTaskCategory] = { tokens: 0, sessions: 0 }; }
+		entry.taskCategoryUsage[safeTaskCategory].tokens += tokens;
+		entry.taskCategoryUsage[safeTaskCategory].sessions += 1;
 	}
 	if (!entry.taskCategoryTokens) { entry.taskCategoryTokens = {}; }
 	if (!entry.taskCategorySessions) { entry.taskCategorySessions = {}; }
 	if (!entry.taskCategoryModelUsage) { entry.taskCategoryModelUsage = {}; }
-	const shares = taskCategoryShares && Object.keys(taskCategoryShares).length > 0
-		? taskCategoryShares
-		: (taskCategory ? { [taskCategory]: 1 } : { Conversation: 1 });
+	// TaskCategoryBreakdown is always a full, all-categories map (see taskClassification.ts), so
+	// Object.keys(...).length is always 12 — checking it alone would treat an all-zero breakdown
+	// as "meaningful" and skip every category below, leaving no attribution at all. Require at
+	// least one positive share instead.
+	const hasPositiveShare = taskCategoryShares && Object.values(taskCategoryShares).some(v => Number(v) > 0);
+	const shares = hasPositiveShare
+		? taskCategoryShares!
+		: (safeTaskCategory ? { [safeTaskCategory]: 1 } : { Conversation: 1 });
 	for (const [category, shareRaw] of Object.entries(shares)) {
 		if (isUnsafeObjectKey(category)) { continue; }
 		const share = Number(shareRaw) || 0;

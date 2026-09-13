@@ -24,8 +24,8 @@ import { TASK_CATEGORIES, type TaskCategory, type TaskCategoryBreakdown } from '
 /** Builds a full TaskCategoryBreakdown (all categories present) from a partial map of non-zero shares. */
 function makeShares(partial: Partial<Record<TaskCategory, number>>): TaskCategoryBreakdown {
 return TASK_CATEGORIES.reduce((acc, category) => {
-acc[category] = partial[category] ?? 0;
-return acc;
+	acc[category] = partial[category] ?? 0;
+	return acc;
 }, {} as TaskCategoryBreakdown);
 }
 
@@ -733,6 +733,58 @@ assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategoryTokens ?? {},
 assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategorySessions ?? {}, '__proto__'), false);
 assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategoryModelUsage ?? {}, '__proto__'), false);
 assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategoryUsage ?? {}, '__proto__'), false);
+});
+
+test('aggregatePeriodStats: rollup path – an all-zero taskCategoryShares breakdown falls back to the primary category', () => {
+// Regression for a PR review finding: TaskCategoryBreakdown is always a full, all-categories
+// map, so `Object.keys(taskCategoryShares).length > 0` is always true even when every share is
+// 0 — that alone must not be treated as "meaningful shares", or every category gets filtered
+// out by the `share <= 0` check below and the entry ends up with no attribution at all.
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+taskCategory: 'Testing',
+dailyRollups: {
+'2025-03-15': {
+tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2, modelUsage: {},
+primaryTaskCategory: 'Testing',
+taskCategoryShares: makeShares({}),
+},
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Testing: 100 });
+assert.deepEqual(day!.taskCategorySessions, { Testing: 1 });
+});
+
+test('aggregatePeriodStats: rollup path – falls back to "Conversation" when the only known category is unsafe and there are no shares', () => {
+// Regression for a PR review finding: an unsafe taskCategory (e.g. "__proto__") must not become
+// the sole entry in the shares fallback map (`{ [taskCategory]: 1 }`), which would then get
+// filtered out by isUnsafeObjectKey inside the loop and leave the entry with no attribution —
+// it should fall through to the "Conversation" default instead, same as no category at all.
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+dailyRollups: {
+'2025-03-15': {
+tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2, modelUsage: {},
+primaryTaskCategory: '__proto__' as TaskCategory,
+},
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Conversation: 100 });
+assert.deepEqual(day!.taskCategorySessions, { Conversation: 1 });
 });
 
 test('aggregatePeriodStats: rollup path – counts sub-agent sessions once per period', () => {
