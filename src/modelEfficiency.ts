@@ -22,8 +22,9 @@
  * This module is intentionally pure (no VS Code API, no filesystem access) so it
  * can be unit-tested with mocked data and reused by the CLI and the webview.
  */
-import type { DailyModelEfficiency, DailyModelEfficiencyEntry, ModelEfficiencyCounters, ModelEfficiencyUsage, ModelPricing, ModelUsage, SessionFileCache } from './types';
+import type { DailyModelEfficiency, DailyModelEfficiencyEntry, DailyTokenStats, ModelEfficiencyCounters, ModelEfficiencyUsage, ModelPricing, ModelUsage, SessionFileCache } from './types';
 import { calculateEstimatedCost } from './tokenEstimation';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 
 // ---------------------------------------------------------------------------
 // Edit-tool detection
@@ -272,7 +273,16 @@ export function createEmptyDailyModelEfficiencyEntry(): DailyModelEfficiencyEntr
 	};
 }
 
-function ensureDailyEntry(target: DailyModelEfficiency, model: string): DailyModelEfficiencyEntry {
+/**
+ * The day entry for `model`, created on demand.
+ *
+ * Returns null for a prototype-polluting key: model ids come from parsed
+ * session logs, and `target['__proto__']` is truthy, so an unguarded lookup
+ * would hand back `Object.prototype` and the counter writes that follow would
+ * land on it. `statsHelpers` guards the same pattern — see protoGuard.ts.
+ */
+function ensureDailyEntry(target: DailyModelEfficiency, model: string): DailyModelEfficiencyEntry | null {
+	if (isUnsafeObjectKey(model)) { return null; }
 	if (!target[model]) { target[model] = createEmptyDailyModelEfficiencyEntry(); }
 	return target[model];
 }
@@ -344,6 +354,7 @@ export function accumulateDailyModelTokens(
 	if (!modelUsage) { return; }
 	for (const [model, usage] of Object.entries(modelUsage)) {
 		const entry = ensureDailyEntry(target, model);
+		if (!entry) { continue; }
 		entry.inputTokens += usage.inputTokens || 0;
 		entry.outputTokens += usage.outputTokens || 0;
 		entry.cachedReadTokens += usage.cachedReadTokens || 0;
@@ -367,6 +378,7 @@ export function accumulateDailyModelCounters(target: DailyModelEfficiency, input
 
 	for (const [model, counters] of Object.entries(input.modelEfficiency ?? {})) {
 		const entry = ensureDailyEntry(target, model);
+		if (!entry) { continue; }
 		entry.calls += counters.calls;
 		entry.toolCalls = (entry.toolCalls ?? 0) + (counters.toolCalls ?? 0);
 		entry.editTurns += counters.editTurns;
@@ -379,6 +391,7 @@ export function accumulateDailyModelCounters(target: DailyModelEfficiency, input
 	const hasDuration = (input.activeDurationMs ?? 0) > 0;
 	for (const [model, share] of shares) {
 		const entry = ensureDailyEntry(target, model);
+		if (!entry) { continue; }
 		entry.sessionShare += share;
 		if (hasDuration) {
 			entry.activeDurationMs += input.activeDurationMs! * share;
@@ -412,6 +425,7 @@ export function buildSessionEfficiencyAttribution(sessionData: SessionFileCache)
 	if (!src) { return; }
 	for (const [model, s] of Object.entries(src)) {
 		const t = ensureDailyEntry(target, model);
+		if (!t) { continue; }
 		t.calls += s.calls;
 		t.toolCalls = (t.toolCalls ?? 0) + (s.toolCalls ?? 0);
 		t.editTurns += s.editTurns;
@@ -517,4 +531,53 @@ export function computeLongTailModels(usage: ModelEfficiencyUsage): Set<string> 
 	const tailLength = cutoffIndex === -1 ? 0 : ranked.length - cutoffIndex;
 	if (cutoffIndex === -1 || smallestRatio >= 0.5 || tailLength < 2) { return new Set(); }
 	return new Set(ranked.slice(cutoffIndex).map(entry => entry.model));
+}
+
+// ---------------------------------------------------------------------------
+// Day + per-editor accumulation (kept paired by construction)
+// ---------------------------------------------------------------------------
+
+/**
+ * The per-editor slice of a day's model-efficiency counters, created on demand.
+ *
+ * Every session belongs to exactly one editor, so merging all slices of a day
+ * reproduces that day's `modelEfficiency` exactly. The Efficiency view's editor
+ * filter depends on that invariant holding, which is why the two writes below
+ * live in one function rather than at each call site: a caller cannot update
+ * the day total and forget the editor slice.
+ */
+function getOrCreateEditorSlice(entry: DailyTokenStats, editor: string): DailyModelEfficiency {
+	if (!entry.modelEfficiency) { entry.modelEfficiency = {}; }
+	if (!entry.editorModelEfficiency) { entry.editorModelEfficiency = {}; }
+	if (!entry.editorModelEfficiency[editor]) { entry.editorModelEfficiency[editor] = {}; }
+	return entry.editorModelEfficiency[editor];
+}
+
+/**
+ * Folds a session's token/cost usage into both the day total and the editor
+ * slice. See {@link getOrCreateEditorSlice} for why these are not separate calls.
+ */
+export function accumulateDayAndEditorModelTokens(
+	entry: DailyTokenStats,
+	editor: string,
+	modelUsage: ModelUsage,
+	pricing: { [model: string]: ModelPricing },
+): void {
+	const slice = getOrCreateEditorSlice(entry, editor);
+	accumulateDailyModelTokens(entry.modelEfficiency!, modelUsage, pricing);
+	accumulateDailyModelTokens(slice, modelUsage, pricing);
+}
+
+/**
+ * Folds a session's per-model turn counters (and its token-share-attributed
+ * duration, LOC and apply counts) into both the day total and the editor slice.
+ */
+export function accumulateDayAndEditorModelCounters(
+	entry: DailyTokenStats,
+	editor: string,
+	input: SessionEfficiencyAttribution,
+): void {
+	const slice = getOrCreateEditorSlice(entry, editor);
+	accumulateDailyModelCounters(entry.modelEfficiency!, input);
+	accumulateDailyModelCounters(slice, input);
 }

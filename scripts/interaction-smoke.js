@@ -74,6 +74,11 @@ const INTERACTIVE_SELECTOR = [
   'a[href^="command:"]',
   'input[type="checkbox"]',
   'input[type="radio"]',
+  // A <select> is never "clicked" into a new value by Playwright's click — the
+  // native picker is not part of the page — so it needs the change-event path
+  // below. Without it, every dropdown in the extension (chart filters, the
+  // Efficiency scope toolbar) ships silently unvalidated.
+  'select',
 ].join(', ');
 
 /** Reads the extension-side handled-command set once, for the unhandled check. */
@@ -100,6 +105,7 @@ const TAG_CONTROLS = (selector) => {
   };
 
   const controls = [];
+  const seen = new Map();
   let index = 0;
   for (const el of Array.from(document.querySelectorAll(selector))) {
     if (el.hasAttribute('disabled') || el.getAttribute('aria-disabled') === 'true') {
@@ -108,8 +114,44 @@ const TAG_CONTROLS = (selector) => {
     if (!isVisible(el)) {
       continue;
     }
+    // For a <select>, find a value other than the current one so the driver can
+    // change it; a select with one usable option has nothing to exercise. This
+    // runs *before* the id is assigned, so a skipped select never leaves a
+    // stale `data-smoke-id` for the next control's index to collide with.
+    let selectValue = null;
+    if (el instanceof HTMLSelectElement) {
+      const option = Array.from(el.options).find((o) => !o.disabled && o.value !== el.value);
+      if (!option) {
+        continue;
+      }
+      selectValue = option.value;
+    }
     el.setAttribute('data-smoke-id', String(index));
     const label = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+    // Identity, not position: a control that re-renders its view can add or
+    // remove controls around this one, and matching the fresh enumeration by
+    // array index would then silently exercise a different control.
+    //
+    // Built from stable attributes first. A <select>'s textContent is the
+    // concatenation of all its option labels, so it changes whenever a rerender
+    // prunes or refills the options — including it would make the control
+    // unfindable on the next pass and silently skip it, the exact failure this
+    // identity exists to prevent. Text is therefore only a last resort, and
+    // never for a <select>.
+    const tag = el.tagName.toLowerCase();
+    const stable =
+      el.id ||
+      el.getAttribute('name') ||
+      el.getAttribute('aria-label') ||
+      el.getAttribute('data-tab') ||
+      el.getAttribute('data-action') ||
+      el.getAttribute('data-command') ||
+      el.getAttribute('data-range') ||
+      '';
+    const identity = [tag, stable, stable || tag === 'select' ? '' : label].join('|');
+    const occurrence = seen.get(identity) || 0;
+    seen.set(identity, occurrence + 1);
+    const key = `${identity}#${occurrence}`;
     // A segmented control's current option, a checked radio: re-clicking it is
     // meant to be inert, so a no-op there is not evidence of broken wiring.
     const alreadySelected =
@@ -120,11 +162,13 @@ const TAG_CONTROLS = (selector) => {
       (el instanceof HTMLInputElement && el.type === 'radio' && el.checked);
     controls.push({
       index,
-      tag: el.tagName.toLowerCase(),
+      tag,
       id: el.id || null,
       classes: el.className && typeof el.className === 'string' ? el.className.slice(0, 80) : null,
       label: label || null,
       alreadySelected,
+      selectValue,
+      key,
     });
     index++;
   }
@@ -229,12 +273,20 @@ async function clickControl(page, control) {
 
   const locator = page.locator(`[data-smoke-id="${control.index}"]`);
   try {
-    await locator.click({ timeout: 1500, force: false, noWaitAfter: true });
+    if (control.tag === 'select') {
+      // selectOption fires input+change the way a user picking an option does;
+      // a plain click only opens the native picker, which the page never sees.
+      await locator.selectOption(control.selectValue, { timeout: 1500 });
+    } else {
+      await locator.click({ timeout: 1500, force: false, noWaitAfter: true });
+    }
   } catch (error) {
-    return { status: 'skipped', reason: `not clickable in this pass: ${String(error.message).split('\n')[0]}` };
+    return { status: 'skipped', reason: `not ${control.tag === 'select' ? 'selectable' : 'clickable'} in this pass: ${String(error.message).split('\n')[0]}` };
   }
 
-  await page.waitForTimeout(120);
+  // A select change usually triggers a full re-render; give it the same settle
+  // window a click gets before reading the signature back.
+  await page.waitForTimeout(control.tag === 'select' ? 250 : 120);
 
   const [posted, errors, after] = await Promise.all([
     page.evaluate(() => window.__HARNESS_POSTED_MESSAGES__.slice()),
@@ -279,11 +331,26 @@ async function smokeView({ browser, view, defaults, handledCommands, isolate }) 
   const results = [];
   const findings = [];
 
-  for (const control of controls) {
+  // Re-tag before each interaction rather than trusting the first enumeration.
+  // A control that re-renders its view (a tab button, a filter `<select>`)
+  // replaces every tagged node, and the stale `data-smoke-id`s then make every
+  // later control report `skipped` — untested, while the run still exits 0.
+  // Re-tagging keeps the pass honest without `--isolate`'s page reload.
+  for (const original of controls) {
     if (isolate && results.length > 0) {
       await page.close();
       page = await openPage(browser, pageFile, view, defaults);
-      await page.evaluate(TAG_CONTROLS, INTERACTIVE_SELECTOR);
+    }
+    const current = await page.evaluate(TAG_CONTROLS, INTERACTIVE_SELECTOR);
+    // Find *this* control again by identity. Matching by array position would
+    // drift the moment an earlier interaction added or removed a control — e.g.
+    // switching the Efficiency resolution to Daily removes the drill picker, so
+    // every later control would shift up one and be exercised in place of the
+    // one actually intended.
+    const control = current.find((c) => c.key === original.key);
+    if (!control) {
+      results.push({ ...original, status: 'skipped', reason: 'no longer present after an earlier interaction' });
+      continue;
     }
 
     const outcome = await clickControl(page, control);
@@ -301,13 +368,15 @@ async function smokeView({ browser, view, defaults, handledCommands, isolate }) 
         view: view.id,
         kind: 'dead-control',
         control: where,
-        detail: 'clicking it posts no message to the host and changes nothing on screen',
+        detail: control.tag === 'select'
+          ? 'changing its value posts no message to the host and changes nothing on screen'
+          : 'clicking it posts no message to the host and changes nothing on screen',
       });
     }
     if (outcome.status === 'error') {
       findings.push({
         view: view.id,
-        kind: 'click-threw',
+        kind: control.tag === 'select' ? 'change-threw' : 'click-threw',
         control: where,
         detail: outcome.errors.join(' | ').slice(0, 400),
       });
@@ -416,7 +485,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('\n✅ Every control does something when clicked.\n');
+  console.log('\n✅ Every control does something when clicked or changed.\n');
   process.exit(0);
 }
 

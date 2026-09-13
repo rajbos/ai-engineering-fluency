@@ -407,3 +407,74 @@
 	font-size: 0.85em;
 	line-height: 1.45;
 }
+
+/* Scope toolbar — time presets, resolution, drill-down and tab-scoped filters */
+.scope-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: center;
+	margin: 4px 0 10px 0;
+	padding: 10px 12px;
+	border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.25));
+	border-radius: 6px;
+	background: var(--vscode-editorWidget-background);
+}
+.scope-presets { display: flex; gap: 2px; }
+.scope-preset {
+	background: none;
+	border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+	color: var(--vscode-foreground);
+	padding: 4px 10px;
+	font-family: inherit;
+	font-size: 0.85em;
+	cursor: pointer;
+}
+.scope-preset:first-child { border-radius: 4px 0 0 4px; }
+.scope-preset:last-child { border-radius: 0 4px 4px 0; }
+.scope-preset:hover { color: var(--vscode-textLink-foreground); }
+.scope-preset.active {
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border-color: var(--vscode-button-background);
+}
+.scope-preset:focus-visible,
+.scope-back:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.scope-field {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 0.85em;
+	color: var(--vscode-descriptionForeground);
+}
+.scope-hint { font-size: 0.8em; color: var(--vscode-descriptionForeground); font-style: italic; }
+.scope-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 0.85em;
+	padding: 3px 8px;
+	border-radius: 12px;
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+}
+.scope-back {
+	background: none;
+	border: none;
+	color: inherit;
+	font-family: inherit;
+	font-size: 0.95em;
+	cursor: pointer;
+	text-decoration: underline;
+	padding: 0;
+}
+.scope-announce {
+	margin: 0 0 8px 0;
+	font-size: 0.8em;
+	color: var(--vscode-descriptionForeground);
+}
+.scope-caveat {
+	margin: 0 0 8px 0;
+	font-size: 0.82em;
+	color: var(--vscode-descriptionForeground);
+}

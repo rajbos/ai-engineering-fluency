@@ -298,7 +298,6 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
-
 // HydraFusion Routing section + Session Steps Overview leg toggle (PR #2059
 // follow-up) — guards against raw keys resurfacing in the new cost/leg UI.
 test('l10n: HydraFusion routing keys resolve in English', () => {
@@ -339,5 +338,73 @@ test('l10n: HydraFusion routing keys resolve in zh-cn', () => {
 		}
 	} finally {
 		mock.setLanguage('en');
+	}
+});
+// Efficiency scope toolbar (issue #1965) — the time presets, resolution,
+// drill-down and editor/vendor filters. Guards against raw keys surfacing in
+// the toolbar, and against the zh-CN bundle drifting away from the English one.
+test('l10n: efficiency scope toolbar labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'efficiency.scope.timeRangeGroup': 'Time range',
+		'efficiency.range.last30d': '30 days',
+		'efficiency.range.last12w': '12 weeks',
+		'efficiency.range.last6m': '6 months',
+		'efficiency.range.last1y': '1 year',
+		'efficiency.resolution.label': 'Resolution',
+		'efficiency.resolution.auto': 'Auto ({0})',
+		'efficiency.resolution.daily': 'Daily',
+		'efficiency.resolution.weekly': 'Weekly',
+		'efficiency.resolution.monthly': 'Monthly',
+		'efficiency.scope.editorLabel': 'Editor',
+		'efficiency.scope.allEditors': 'All editors',
+		'efficiency.scope.vendorLabel': 'Model vendor',
+		'efficiency.scope.allVendors': 'All vendors',
+		'efficiency.scope.drillLabel': 'Drill',
+		'efficiency.scope.drillPlaceholder': 'Drill into…',
+		'efficiency.scope.back': '↩ Back',
+		'efficiency.scope.backAria': 'Back to the previous range',
+		'efficiency.scope.drillHintWeekly': 'Click a week on a chart to drill into its days',
+		'efficiency.scope.drillHintMonthly': 'Click a month on a chart to drill into its days',
+		'efficiency.scope.announce': 'Showing {0}.',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: efficiency scope toolbar labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'efficiency.range.last30d': '30 天',
+			'efficiency.range.last12w': '12 周',
+			'efficiency.range.last6m': '6 个月',
+			'efficiency.range.last1y': '1 年',
+			'efficiency.resolution.label': '粒度',
+			'efficiency.resolution.auto': '自动（{0}）',
+			'efficiency.resolution.daily': '按天',
+			'efficiency.resolution.weekly': '按周',
+			'efficiency.resolution.monthly': '按月',
+			'efficiency.scope.editorLabel': '编辑器',
+			'efficiency.scope.allEditors': '所有编辑器',
+			'efficiency.scope.vendorLabel': '模型厂商',
+			'efficiency.scope.allVendors': '所有厂商',
+			'efficiency.scope.drillLabel': '下钻',
+			'efficiency.scope.drillPlaceholder': '下钻到…',
+			'efficiency.scope.back': '↩ 返回',
+			'efficiency.scope.backAria': '返回上一个范围',
+			'efficiency.scope.announce': '当前显示：{0}。',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: efficiency placeholder templates keep their {0} slot for localizeFormat', () => {
+	for (const key of ['efficiency.resolution.auto', 'efficiency.scope.announce', 'efficiency.scope.behaviorGap', 'efficiency.scope.editorScoped']) {
+		assert.ok(t(key).includes('{0}'), `${key} must carry a {0} placeholder`);
 	}
 });

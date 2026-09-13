@@ -94,6 +94,12 @@ export interface EditorUsage {
   [editorType: string]: {
     tokens: number;
     sessions: number;
+    /**
+     * User-request turns for this editor on this day. Optional because older
+     * in-memory stats (and fixtures) predate it; treat a missing value as 0
+     * rather than as "unknown".
+     */
+    interactions?: number;
     linesAdded?: number;
     linesRemoved?: number;
   };
@@ -190,6 +196,13 @@ export interface DailyTokenStats {
    * Absent when no session on this day carried per-model efficiency data.
    */
   modelEfficiency?: DailyModelEfficiency;
+  /**
+   * Per-editor split of {@link modelEfficiency}. Every session contributes to
+   * exactly one editor, so merging all editors reproduces `modelEfficiency`
+   * exactly — which is what lets the Efficiency view offer an editor filter
+   * without a second, divergent aggregation path.
+   */
+  editorModelEfficiency?: { [editor: string]: DailyModelEfficiency };
 }
 
 /**

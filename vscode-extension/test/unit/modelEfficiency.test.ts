@@ -14,10 +14,13 @@ import {
     computeModelTokenShares,
     accumulateDailyModelTokens,
     accumulateDailyModelCounters,
+    accumulateDayAndEditorModelTokens,
+    accumulateDayAndEditorModelCounters,
     mergeDailyModelEfficiency,
     type EfficiencyTurn,
+    type SessionEfficiencyAttribution,
 } from '../../../src/modelEfficiency';
-import type { DailyModelEfficiency, DailyModelEfficiencyEntry, ModelEfficiencyCounters, ModelEfficiencyUsage, ModelPricing } from '../../../src/types';
+import type { DailyModelEfficiency, DailyModelEfficiencyEntry, DailyTokenStats, ModelEfficiencyCounters, ModelEfficiencyUsage, ModelPricing, ModelUsage } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -499,4 +502,109 @@ test('mergeDailyModelEfficiency: tolerates an undefined source', () => {
     const target: DailyModelEfficiency = {};
     mergeDailyModelEfficiency(target, undefined);
     assert.deepEqual(target, {});
+});
+
+// ── Day + per-editor accumulation (issue #1965) ──────────────────────────────
+
+function emptyDay(date = '2026-07-13'): DailyTokenStats {
+	return { date, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} };
+}
+
+/** Sums one model's counters across every editor slice of a day. */
+function mergedEditorSlices(entry: DailyTokenStats): DailyModelEfficiency {
+	const merged: DailyModelEfficiency = {};
+	for (const slice of Object.values(entry.editorModelEfficiency ?? {})) { mergeDailyModelEfficiency(merged, slice); }
+	return merged;
+}
+
+test('accumulateDayAndEditorModelTokens: the editor slices merge back to the day total', () => {
+	const entry = emptyDay();
+	accumulateDayAndEditorModelTokens(entry, 'VS Code', { 'gpt-5': { inputTokens: 600, outputTokens: 120, sessions: 1 } }, {});
+	accumulateDayAndEditorModelTokens(entry, 'Claude Code', { 'gpt-5': { inputTokens: 400, outputTokens: 80, sessions: 1 } }, {});
+
+	assert.equal(entry.modelEfficiency!['gpt-5'].inputTokens, 1000);
+	assert.deepEqual(mergedEditorSlices(entry)['gpt-5'], entry.modelEfficiency!['gpt-5']);
+});
+
+test('accumulateDayAndEditorModelCounters: a mixed-model session lands in both the day and its editor', () => {
+	const entry = emptyDay();
+	const attribution: SessionEfficiencyAttribution = {
+		modelEfficiency: {
+			'gpt-5': { ...createEmptyModelEfficiencyCounters(), calls: 4, editTurns: 3, retries: 1 },
+			'claude-sonnet-4-5': { ...createEmptyModelEfficiencyCounters(), calls: 2, editTurns: 2 },
+		},
+		modelUsage: {
+			'gpt-5': { inputTokens: 600, outputTokens: 0, sessions: 1 },
+			'claude-sonnet-4-5': { inputTokens: 400, outputTokens: 0, sessions: 1 },
+		},
+		activeDurationMs: 600_000,
+		linesAdded: 50,
+		linesRemoved: 10,
+		applies: 4,
+		codeBlocks: 8,
+	};
+	accumulateDayAndEditorModelCounters(entry, 'VS Code', attribution);
+
+	// Both models are attributed, and the editor slice is identical to the day.
+	for (const model of ['gpt-5', 'claude-sonnet-4-5']) {
+		assert.deepEqual(mergedEditorSlices(entry)[model], entry.modelEfficiency![model], model);
+	}
+	// A 2-model session contributes 1.0 session equivalent in total, not 2 —
+	// the double-counting guard the editor filter depends on.
+	const shareTotal = Object.values(entry.modelEfficiency!).reduce((s, e) => s + e.sessionShare, 0);
+	assert.ok(Math.abs(shareTotal - 1) < 1e-9, `sessionShare should total 1, got ${shareTotal}`);
+});
+
+test('accumulateDayAndEditorModelCounters: several editors on one day stay separable and conserved', () => {
+	const entry = emptyDay();
+	const session = (calls: number, tokens: number): SessionEfficiencyAttribution => ({
+		modelEfficiency: { 'gpt-5': { ...createEmptyModelEfficiencyCounters(), calls, editTurns: calls } },
+		modelUsage: { 'gpt-5': { inputTokens: tokens, outputTokens: 0, sessions: 1 } },
+		activeDurationMs: 0, linesAdded: 0, linesRemoved: 0, applies: 0, codeBlocks: 0,
+	});
+	accumulateDayAndEditorModelCounters(entry, 'VS Code', session(3, 300));
+	accumulateDayAndEditorModelCounters(entry, 'Claude Code', session(5, 500));
+
+	assert.equal(entry.editorModelEfficiency!['VS Code']['gpt-5'].calls, 3);
+	assert.equal(entry.editorModelEfficiency!['Claude Code']['gpt-5'].calls, 5);
+	assert.equal(entry.modelEfficiency!['gpt-5'].calls, 8);
+	assert.deepEqual(mergedEditorSlices(entry)['gpt-5'], entry.modelEfficiency!['gpt-5']);
+});
+
+// A session log arrives as parsed JSON, and `JSON.parse` creates `__proto__` as
+// a real own property (an object *literal* would set the prototype instead and
+// never reach the guard at all — such a test cannot fail).
+function parsedModelUsage(model: string): ModelUsage {
+	return JSON.parse(`{"${model}": {"inputTokens": 500, "outputTokens": 100, "sessions": 1}}`);
+}
+
+test('accumulateDayAndEditorModelTokens: a prototype-polluting model id is dropped, not written to Object.prototype', () => {
+	const entry = emptyDay();
+	const usage = parsedModelUsage('__proto__');
+	assert.ok(Object.prototype.hasOwnProperty.call(usage, '__proto__'), 'fixture must carry a real own __proto__ key');
+
+	accumulateDayAndEditorModelTokens(entry, 'VS Code', usage, {});
+	accumulateDayAndEditorModelTokens(entry, 'VS Code', parsedModelUsage('constructor'), {});
+
+	// Unguarded, `target['__proto__']` returns Object.prototype and the counter
+	// writes land on it, poisoning every object in the process.
+	assert.equal((({}) as Record<string, unknown>).inputTokens, undefined, 'Object.prototype must not gain counters');
+	assert.equal(Object.prototype.hasOwnProperty.call(entry.modelEfficiency ?? {}, '__proto__'), false);
+	assert.equal(Object.prototype.hasOwnProperty.call(entry.modelEfficiency ?? {}, 'constructor'), false);
+});
+
+test('accumulateDayAndEditorModelCounters: a prototype-polluting model id is dropped from both the day and the editor slice', () => {
+	const entry = emptyDay();
+	const efficiency: ModelEfficiencyUsage = JSON.parse('{"__proto__": {"calls": 3, "toolCalls": 0, "editTurns": 2, "oneShotEditTurns": 0, "retries": 0, "selfCorrections": 0, "inputTokens": 100, "outputTokens": 0, "cachedReadTokens": 0, "cacheCreationTokens": 0, "cost": 0}}');
+	assert.ok(Object.prototype.hasOwnProperty.call(efficiency, '__proto__'), 'fixture must carry a real own __proto__ key');
+
+	accumulateDayAndEditorModelCounters(entry, 'VS Code', {
+		modelEfficiency: efficiency,
+		modelUsage: parsedModelUsage('__proto__'),
+		activeDurationMs: 1000, linesAdded: 1, linesRemoved: 0, applies: 0, codeBlocks: 0,
+	});
+
+	assert.equal((({}) as Record<string, unknown>).calls, undefined, 'Object.prototype must not gain counters');
+	assert.equal(Object.prototype.hasOwnProperty.call(entry.modelEfficiency ?? {}, '__proto__'), false);
+	assert.equal(Object.prototype.hasOwnProperty.call(entry.editorModelEfficiency?.['VS Code'] ?? {}, '__proto__'), false);
 });

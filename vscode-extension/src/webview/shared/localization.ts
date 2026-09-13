@@ -75,6 +75,31 @@ export interface WebviewLocalization {
 	'logviewer.hydrafusion.legsCaptionTotal': string;
 	'logviewer.hydrafusion.modelChangedTitle': string;
 	'logviewer.hydrafusion.expandStepNote': string;
+	// Efficiency view — scope toolbar (time presets, resolution, drill-down, filters)
+	'efficiency.scope.timeRangeGroup': string;
+	'efficiency.range.last30d': string;
+	'efficiency.range.last12w': string;
+	'efficiency.range.last6m': string;
+	'efficiency.range.last1y': string;
+	'efficiency.resolution.label': string;
+	'efficiency.resolution.auto': string;
+	'efficiency.resolution.daily': string;
+	'efficiency.resolution.weekly': string;
+	'efficiency.resolution.monthly': string;
+	'efficiency.scope.editorLabel': string;
+	'efficiency.scope.allEditors': string;
+	'efficiency.scope.vendorLabel': string;
+	'efficiency.scope.allVendors': string;
+	'efficiency.scope.drillLabel': string;
+	'efficiency.scope.drillPlaceholder': string;
+	'efficiency.scope.back': string;
+	'efficiency.scope.backAria': string;
+	'efficiency.scope.drillHintWeekly': string;
+	'efficiency.scope.drillHintMonthly': string;
+	'efficiency.scope.announce': string;
+	'efficiency.scope.behaviorGap': string;
+	'efficiency.scope.editorScoped': string;
+	'efficiency.scope.noDataFor': string;
 
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
@@ -139,7 +164,32 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'logviewer.hydrafusion.showLegsTitle': 'Show the HydraFusion legs behind this step',
 	'logviewer.hydrafusion.legsCaptionTotal': '⚡ HydraFusion legs for step #{0} — total',
 	'logviewer.hydrafusion.modelChangedTitle': 'Model changed from the previous step',
-	'logviewer.hydrafusion.expandStepNote': '⚡ expand a step to see the HydraFusion legs behind it'
+	'logviewer.hydrafusion.expandStepNote': '⚡ expand a step to see the HydraFusion legs behind it',
+	// Efficiency view — scope toolbar
+	'efficiency.scope.timeRangeGroup': 'Time range',
+	'efficiency.range.last30d': '30 days',
+	'efficiency.range.last12w': '12 weeks',
+	'efficiency.range.last6m': '6 months',
+	'efficiency.range.last1y': '1 year',
+	'efficiency.resolution.label': 'Resolution',
+	'efficiency.resolution.auto': 'Auto ({0})',
+	'efficiency.resolution.daily': 'Daily',
+	'efficiency.resolution.weekly': 'Weekly',
+	'efficiency.resolution.monthly': 'Monthly',
+	'efficiency.scope.editorLabel': 'Editor',
+	'efficiency.scope.allEditors': 'All editors',
+	'efficiency.scope.vendorLabel': 'Model vendor',
+	'efficiency.scope.allVendors': 'All vendors',
+	'efficiency.scope.drillLabel': 'Drill',
+	'efficiency.scope.drillPlaceholder': 'Drill into…',
+	'efficiency.scope.back': '↩ Back',
+	'efficiency.scope.backAria': 'Back to the previous range',
+	'efficiency.scope.drillHintWeekly': 'Click a week on a chart to drill into its days',
+	'efficiency.scope.drillHintMonthly': 'Click a month on a chart to drill into its days',
+	'efficiency.scope.announce': 'Showing {0}.',
+	'efficiency.scope.behaviorGap': '⚠️ Session-derived metrics (active minutes, retry rate, apply rate, skills) are only collected for the last {0} weeks, so earlier buckets in this range show gaps rather than zeros.',
+	'efficiency.scope.editorScoped': 'Scoped to {0}. Sessions whose editor could not be determined are excluded from this view.',
+	'efficiency.scope.noDataFor': 'No data for {0}'
 };
 
 // Current localization strings, initialized with defaults

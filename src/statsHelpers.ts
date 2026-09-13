@@ -23,6 +23,19 @@ export const COPILOT_EDITOR_NAMES = new Set([
 ]);
 
 /**
+ * The token count to trust for a session: the exact, API-reported count when
+ * there is one, otherwise the character-based estimate.
+ *
+ * `actualTokens` is `0` (or absent) rather than undefined when a session has no
+ * exact data, so a `??` fallback would treat that zero as authoritative and
+ * silently drop the estimate. This is the repository's canonical form of that
+ * check — see AGENTS.md, "CLI Must Reuse Shared Functions".
+ */
+export function preferActualTokens(actualTokens: number | undefined, estimatedTokens: number): number {
+	return actualTokens !== undefined && actualTokens > 0 ? actualTokens : estimatedTokens;
+}
+
+/**
  * Computes a session's total token count from input, output, and thinking tokens.
  *
  * Cached (cache-read) tokens are deliberately excluded: they are already a
@@ -700,6 +713,10 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 	entry.tokens += tokens; entry.sessions += 1; entry.interactions += interactions;
 	if (!entry.editorUsage[editorType]) { entry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
 	entry.editorUsage[editorType].tokens += tokens; entry.editorUsage[editorType].sessions += 1;
+	// Keep the per-editor turn count in step with the day total. The Efficiency
+	// view's editor filter divides by it, so a path that updated the day but not
+	// the editor slice would silently read as "0 turns" for that editor.
+	entry.editorUsage[editorType].interactions = (entry.editorUsage[editorType].interactions ?? 0) + interactions;
 	if (!entry.repositoryUsage[repository]) { entry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
 	entry.repositoryUsage[repository].tokens += tokens; entry.repositoryUsage[repository].sessions += 1;
 	addModelUsage(entry.modelUsage, modelUsage);

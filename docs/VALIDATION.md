@@ -135,8 +135,9 @@ npm run check:interaction -- --isolate            # reload between clicks (slow,
 
 Renders the **real** webview bundles headlessly (reusing the `visual-view-diff`
 harness — never the Extension Development Host, see *Never Launch a Real
-Editor/IDE Instance* in `AGENTS.md`), then clicks every interactive control and
-records what happened:
+Editor/IDE Instance* in `AGENTS.md`), then exercises every interactive control —
+clicking buttons, links, checkboxes and radios, and **changing `<select>`
+dropdowns to another option** — and records what happened:
 
 | Outcome | Meaning |
 |---|---|
@@ -146,13 +147,21 @@ records what happened:
 | `skipped` | not clickable in this pass (something else was covering it) |
 | `inconclusive` | the DOM never settled, so the result is not trustworthy |
 | `dead` | **posted nothing and changed nothing — a finding** |
-| `click-threw` | **threw an error — a finding** |
+| `click-threw` / `change-threw` | **threw an error — a finding** |
 
 It also flags a control that posts a command with no host handler, which is the
 half the static check cannot see: a command name computed at runtime
 (`{ command: someVar }`) resolving to something nobody handles.
 
-Two details matter for trusting the result:
+Three details matter for trusting the result:
+
+- **`<select>` is driven by `selectOption`, not by a click.** Playwright's click
+  only opens the native picker, which the page never sees, so a dropdown clicked
+  that way fires no `change` event and looks inert. Every `<select>` is instead
+  set to its first other enabled option, firing `input` + `change` the way a user
+  picking an option does. A `<select>` with only one usable option is skipped —
+  there is nothing to change it to. Without this, every dropdown in the extension
+  (chart filters, the Efficiency scope toolbar) would ship silently unvalidated.
 
 - **Focus state is normalized away** before the DOM is fingerprinted. Clicking
   anything moves focus, and focus is visible in the markup (`vscode-button`

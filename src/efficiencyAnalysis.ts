@@ -1,6 +1,7 @@
 import type { ApplyButtonUsage, DailyModelEfficiency, DailyTokenStats, ModelUsage, UsageAnalysisPeriod } from './types';
 import type { CacheBreakagePeriodStats } from './cacheBreakage';
 import { getModelDisplayName } from './webview/shared/modelUtils';
+import { getModelBillingProvider } from './chartDataBuilder';
 import { createEmptyDailyModelEfficiencyEntry, mergeDailyModelEfficiency } from './modelEfficiency';
 
 /**
@@ -76,12 +77,27 @@ export interface EfficiencySessionInput {
 	totalTokens?: number;
 	/** Agent-skill invocation counts by skill name (e.g. { graphify: 2 }); absent when none detected. */
 	skillCalls?: { [skillName: string]: number };
+	/**
+	 * Editor/agent display name this session ran in (e.g. "VS Code", "Claude Code").
+	 * Absent for sessions whose editor could not be determined — those are counted
+	 * in the unfiltered totals but excluded from every editor-scoped view.
+	 */
+	editor?: string;
 }
 
-/** One week of derived efficiency ratios. Ratio fields are null when the denominator is 0. */
-export interface EfficiencyWeekPoint {
-	/** Monday of the week, YYYY-MM-DD. */
-	weekKey: string;
+/**
+ * One bucket of derived efficiency ratios. Ratio fields are null when the
+ * denominator is 0 (or below a sample floor), never 0 — a gap is not a zero.
+ */
+export interface EfficiencyBucketPoint {
+	/** First day of the bucket, YYYY-MM-DD. */
+	bucketKey: string;
+	/** Inclusive first day aggregated into this bucket. */
+	startKey: string;
+	/** Inclusive last day aggregated into this bucket. */
+	endKey: string;
+	/** Bucket width this point was aggregated at. */
+	resolution: EfficiencyBucketResolution;
 	/** Human label, e.g. "Jun 2–8". */
 	label: string;
 	sessions: number;
@@ -99,9 +115,9 @@ export interface EfficiencyWeekPoint {
 	locPerDollar: number | null;
 	/** Average net active minutes per session (only sessions carrying duration data). */
 	activeMinutesPerSession: number | null;
-	/** Edit retries / edit turns across the week's sessions. */
+	/** Edit retries / edit turns across the bucket's sessions. */
 	retryRate: number | null;
-	/** Applied code blocks / shown code blocks across the week's sessions. */
+	/** Applied code blocks / shown code blocks across the bucket's sessions. */
 	applyRate: number | null;
 	/** Number of sessions that carried duration data (denominator of activeMinutesPerSession). */
 	durationSessions: number;
@@ -109,17 +125,304 @@ export interface EfficiencyWeekPoint {
 	editTurns: number;
 }
 
+/**
+ * A weekly point — {@link EfficiencyBucketPoint} plus the original `weekKey`
+ * field the view and its fixtures have always read.
+ */
+export interface EfficiencyWeekPoint extends EfficiencyBucketPoint {
+	/** Monday of the week, YYYY-MM-DD. Same value as `bucketKey`. */
+	weekKey: string;
+}
+
 const DEFAULT_TREND_WEEKS = 12;
-/** Minimum edit turns in a week before its retry rate is considered meaningful. */
+/** Minimum edit turns in a bucket before its retry rate is considered meaningful. */
 const MIN_EDIT_TURNS_PER_WEEK = 5;
 
-type WeekAccum = {
-	monday: Date;
-	sessions: number;
+// ---------------------------------------------------------------------------
+// Semantic zoom: time ranges, resolutions and buckets
+// ---------------------------------------------------------------------------
+
+/** Selectable time presets for the Efficiency charts. */
+export type EfficiencyRangeId = 'last30d' | 'last12w' | 'last6m' | 'last1y';
+
+/** Concrete bucket widths a series can be aggregated at. */
+export type EfficiencyBucketResolution = 'daily' | 'weekly' | 'monthly';
+
+/** Resolution as selected in the UI; `auto` derives the width from the range span. */
+export type EfficiencyResolution = 'auto' | EfficiencyBucketResolution;
+
+/** An inclusive day-key range, either a preset or a drill-down selection. */
+export interface EfficiencyRange {
+	/** The preset this came from, or `custom` after a drill-down. */
+	id: EfficiencyRangeId | 'custom';
+	/** Human label, e.g. "Last 12 weeks" or "Jun 2 – Jun 8". */
+	label: string;
+	/** Inclusive first day, YYYY-MM-DD. */
+	startKey: string;
+	/** Inclusive last day, YYYY-MM-DD. */
+	endKey: string;
+}
+
+export const EFFICIENCY_RANGE_OPTIONS: { id: EfficiencyRangeId; label: string }[] = [
+	{ id: 'last30d', label: '30 days' },
+	{ id: 'last12w', label: '12 weeks' },
+	{ id: 'last6m', label: '6 months' },
+	{ id: 'last1y', label: '1 year' },
+];
+
+/** The preset the view opens on — the window the weekly trends have always used. */
+export const DEFAULT_EFFICIENCY_RANGE_ID: EfficiencyRangeId = 'last12w';
+
+/** Longest range the payload carries daily aggregates for. */
+export const EFFICIENCY_MAX_RANGE_DAYS = 365;
+
+function parseDayKey(key: string): Date {
+	return new Date(`${key}T00:00:00`);
+}
+
+function startOfDay(d: Date): Date {
+	return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function firstOfMonth(d: Date): Date {
+	return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+/** Inclusive day count spanned by a range (a single day spans 1). */
+export function efficiencyRangeSpanDays(range: EfficiencyRange): number {
+	const start = parseDayKey(range.startKey).getTime();
+	const end = parseDayKey(range.endKey).getTime();
+	if (Number.isNaN(start) || Number.isNaN(end) || end < start) { return 0; }
+	return Math.round((end - start) / 86_400_000) + 1;
+}
+
+/**
+ * Resolves a preset into concrete inclusive day bounds relative to `now`.
+ *
+ * Preset starts are snapped to the natural bucket boundary they will be read
+ * at — Monday for the 12-week window, the first of the month for the 6-month
+ * and 1-year windows — so every bucket except the current one is whole. The
+ * current (partial) period is deliberately retained.
+ */
+export function resolveEfficiencyRange(id: EfficiencyRangeId, now: Date): EfficiencyRange {
+	const end = startOfDay(now);
+	const build = (label: string, start: Date): EfficiencyRange =>
+		({ id, label, startKey: fmtKey(start), endKey: fmtKey(end) });
+	switch (id) {
+		case 'last30d': {
+			const start = new Date(end);
+			start.setDate(end.getDate() - 29);
+			return build('Last 30 days', start);
+		}
+		case 'last12w': {
+			const start = getMondayOfWeek(end);
+			start.setDate(start.getDate() - (DEFAULT_TREND_WEEKS - 1) * 7);
+			return build('Last 12 weeks', start);
+		}
+		case 'last6m':
+			return build('Last 6 months', new Date(end.getFullYear(), end.getMonth() - 5, 1));
+		case 'last1y':
+			return build('Last 12 months', new Date(end.getFullYear(), end.getMonth() - 11, 1));
+	}
+}
+
+/** A drill-down range: the days contained in one weekly or monthly bucket. */
+export function drillRangeForBucket(bucket: EfficiencyBucket): EfficiencyRange {
+	return { id: 'custom', label: bucket.label, startKey: bucket.startKey, endKey: bucket.endKey };
+}
+
+/**
+ * Resolutions that make sense for a range. Daily is withheld beyond four months
+ * (hundreds of noisy points), weekly below a week, monthly below two months —
+ * each would present a resolution the data cannot honestly carry.
+ */
+export function availableResolutions(range: EfficiencyRange): EfficiencyBucketResolution[] {
+	const days = efficiencyRangeSpanDays(range);
+	const out: EfficiencyBucketResolution[] = [];
+	if (days <= 120) { out.push('daily'); }
+	if (days >= 7) { out.push('weekly'); }
+	if (days >= 60) { out.push('monthly'); }
+	return out.length > 0 ? out : ['daily'];
+}
+
+/** Turns the UI's resolution choice into a concrete bucket width. */
+export function resolveBucketResolution(resolution: EfficiencyResolution, range: EfficiencyRange): EfficiencyBucketResolution {
+	if (resolution !== 'auto' && availableResolutions(range).includes(resolution)) { return resolution; }
+	const days = efficiencyRangeSpanDays(range);
+	if (days <= 31) { return 'daily'; }
+	if (days <= 200) { return 'weekly'; }
+	return 'monthly';
+}
+
+/** One bucket of the x-axis: its key, label and the inclusive days it covers. */
+export interface EfficiencyBucket {
+	/** First day of the bucket, YYYY-MM-DD — also the point's `bucketKey`. */
+	key: string;
+	label: string;
+	startKey: string;
+	endKey: string;
+	resolution: EfficiencyBucketResolution;
+}
+
+function fmtDayLabel(d: Date): string {
+	return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function fmtMonthLabel(d: Date): string {
+	return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
+/**
+ * Lays out the buckets covering `range` at `resolution`.
+ *
+ * Weekly and monthly buckets snap *outward* to their natural boundary, so a
+ * bucket is never a silent fragment of a week or month; the trailing bucket is
+ * clipped to the range end, which is how the current (partial) period survives.
+ */
+export function buildEfficiencyBuckets(range: EfficiencyRange, resolution: EfficiencyBucketResolution): EfficiencyBucket[] {
+	const rangeStart = parseDayKey(range.startKey);
+	const rangeEnd = parseDayKey(range.endKey);
+	if (Number.isNaN(rangeStart.getTime()) || Number.isNaN(rangeEnd.getTime()) || rangeEnd < rangeStart) { return []; }
+	const buckets: EfficiencyBucket[] = [];
+	const step = (d: Date): Date => {
+		const next = new Date(d);
+		if (resolution === 'daily') { next.setDate(d.getDate() + 1); }
+		else if (resolution === 'weekly') { next.setDate(d.getDate() + 7); }
+		else { next.setMonth(d.getMonth() + 1, 1); }
+		return next;
+	};
+	let cursor = resolution === 'weekly' ? getMondayOfWeek(rangeStart)
+		: resolution === 'monthly' ? firstOfMonth(rangeStart)
+			: startOfDay(rangeStart);
+	// A year of daily buckets is 365 iterations; the guard is against a malformed range.
+	while (cursor <= rangeEnd && buckets.length <= EFFICIENCY_MAX_RANGE_DAYS + 1) {
+		const next = step(cursor);
+		const naturalEnd = new Date(next);
+		naturalEnd.setDate(next.getDate() - 1);
+		const end = naturalEnd > rangeEnd ? rangeEnd : naturalEnd;
+		buckets.push({
+			key: fmtKey(cursor),
+			label: resolution === 'daily' ? fmtDayLabel(cursor) : resolution === 'weekly' ? fmtWeekLabel(cursor) : fmtMonthLabel(cursor),
+			startKey: fmtKey(cursor),
+			endKey: fmtKey(end),
+			resolution,
+		});
+		cursor = next;
+	}
+	return buckets;
+}
+
+// ---------------------------------------------------------------------------
+// Compact daily volume aggregates (the payload behind filtered series)
+// ---------------------------------------------------------------------------
+
+/** The volume numbers one day (or one day-and-editor) contributes to a bucket. */
+export interface EfficiencyVolumeSlice {
 	tokens: number;
-	cost: number;
-	loc: number;
+	sessions: number;
 	interactions: number;
+	/** Lines added + removed. */
+	loc: number;
+	/** Estimated cost in USD on the Copilot AI-Credit basis. */
+	cost: number;
+}
+
+/**
+ * One day of volume aggregates, with an optional per-editor split.
+ *
+ * The day totals are the numbers the unfiltered series has always used and are
+ * kept verbatim, so turning the editor filter off reproduces the original
+ * values exactly rather than re-deriving them from the split.
+ */
+export interface EfficiencyDailyVolume extends EfficiencyVolumeSlice {
+	/** Local day key, YYYY-MM-DD. */
+	date: string;
+	/** Per-editor split of the same day. Editors absent here are unattributed. */
+	byEditor?: { [editor: string]: EfficiencyVolumeSlice };
+}
+
+function emptyVolumeSlice(): EfficiencyVolumeSlice {
+	return { tokens: 0, sessions: 0, interactions: 0, loc: 0, cost: 0 };
+}
+
+function addVolumeSlice(target: EfficiencyVolumeSlice, source: EfficiencyVolumeSlice): void {
+	target.tokens += source.tokens;
+	target.sessions += source.sessions;
+	target.interactions += source.interactions;
+	target.loc += source.loc;
+	target.cost += source.cost;
+}
+
+/**
+ * Projects daily stats onto the compact volume shape shipped to the webview:
+ * five numbers per day, plus the same five per editor when the day carries an
+ * editor breakdown. No prompts, paths, titles or repository names.
+ */
+export function toEfficiencyDailyVolume(dailyStats: DailyTokenStats[], deps: EfficiencyDeps): EfficiencyDailyVolume[] {
+	return dailyStats.map(day => {
+		const entry: EfficiencyDailyVolume = {
+			date: day.date,
+			tokens: day.tokens,
+			sessions: day.sessions,
+			interactions: day.interactions,
+			loc: (day.linesAdded ?? 0) + (day.linesRemoved ?? 0),
+			cost: deps.calculateEstimatedCost(day.modelUsage, 'copilot'),
+		};
+		const editors = Object.keys(day.editorUsage ?? {});
+		if (editors.length > 0) {
+			const byEditor: { [editor: string]: EfficiencyVolumeSlice } = {};
+			for (const editor of editors) {
+				const usage = day.editorUsage[editor];
+				byEditor[editor] = {
+					tokens: usage.tokens,
+					sessions: usage.sessions,
+					interactions: usage.interactions ?? 0,
+					loc: (usage.linesAdded ?? 0) + (usage.linesRemoved ?? 0),
+					cost: deps.calculateEstimatedCost(day.editorModelUsage?.[editor] ?? {}, 'copilot'),
+				};
+			}
+			entry.byEditor = byEditor;
+		}
+		return entry;
+	});
+}
+
+/**
+ * The label the editor detectors fall back to when a session's editor cannot
+ * be identified from its path. It is a sentinel, not an editor.
+ */
+export const UNKNOWN_EDITOR = 'Unknown';
+
+/**
+ * Selectable editor display names present in the payload, most-used first.
+ *
+ * The `Unknown` sentinel is deliberately omitted: those sessions are counted in
+ * the unfiltered totals and excluded from every editor scope, which is what the
+ * toolbar tells the user. Offering it as a scope would make that promise false.
+ */
+export function listEfficiencyEditors(volume: EfficiencyDailyVolume[]): string[] {
+	const tokensByEditor = new Map<string, number>();
+	for (const day of volume) {
+		for (const [editor, slice] of Object.entries(day.byEditor ?? {})) {
+			if (editor === UNKNOWN_EDITOR) { continue; }
+			tokensByEditor.set(editor, (tokensByEditor.get(editor) ?? 0) + slice.tokens);
+		}
+	}
+	return Array.from(tokensByEditor.entries()).sort((a, b) => b[1] - a[1]).map(([editor]) => editor);
+}
+
+/** The sessions belonging to `editor`, or all of them when no editor is selected. */
+export function filterSessionsByEditor(sessions: EfficiencySessionInput[], editor?: string): EfficiencySessionInput[] {
+	return editor ? sessions.filter(s => s.editor === editor) : sessions;
+}
+
+// ---------------------------------------------------------------------------
+// Bucketed efficiency series
+// ---------------------------------------------------------------------------
+
+type BucketAccum = {
+	bucket: EfficiencyBucket;
+	volume: EfficiencyVolumeSlice;
 	activeDurationMs: number;
 	durationSessions: number;
 	editTurns: number;
@@ -128,40 +431,110 @@ type WeekAccum = {
 	codeBlocks: number;
 };
 
-function emptyWeekAccum(monday: Date): WeekAccum {
-	return { monday, sessions: 0, tokens: 0, cost: 0, loc: 0, interactions: 0, activeDurationMs: 0, durationSessions: 0, editTurns: 0, retries: 0, applies: 0, codeBlocks: 0 };
+function emptyBucketAccum(bucket: EfficiencyBucket): BucketAccum {
+	return { bucket, volume: emptyVolumeSlice(), activeDurationMs: 0, durationSessions: 0, editTurns: 0, retries: 0, applies: 0, codeBlocks: 0 };
 }
 
 function ratio(numerator: number, denominator: number): number | null {
 	return denominator > 0 ? numerator / denominator : null;
 }
 
-function foldDayIntoWeek(week: WeekAccum, day: DailyTokenStats, deps: EfficiencyDeps): void {
-	week.tokens += day.tokens;
-	week.sessions += day.sessions;
-	week.interactions += day.interactions;
-	week.loc += (day.linesAdded ?? 0) + (day.linesRemoved ?? 0);
-	week.cost += deps.calculateEstimatedCost(day.modelUsage, 'copilot');
+function foldSessionIntoBucket(bucket: BucketAccum, s: EfficiencySessionInput): void {
+	if (s.activeDurationMs !== undefined && s.activeDurationMs > 0) {
+		bucket.activeDurationMs += s.activeDurationMs;
+		bucket.durationSessions += 1;
+	}
+	bucket.editTurns += s.editTurns ?? 0;
+	bucket.retries += s.retries ?? 0;
+	bucket.applies += s.applies ?? 0;
+	bucket.codeBlocks += s.codeBlocks ?? 0;
 }
 
-function foldSessionIntoWeek(week: WeekAccum, s: EfficiencySessionInput): void {
-	if (s.activeDurationMs !== undefined && s.activeDurationMs > 0) {
-		week.activeDurationMs += s.activeDurationMs;
-		week.durationSessions += 1;
+/**
+ * Indexes buckets by day key so a day lands in its bucket in one lookup.
+ * Buckets never overlap, so the mapping is unambiguous.
+ */
+function indexBucketsByDay(buckets: EfficiencyBucket[]): Map<string, number> {
+	const index = new Map<string, number>();
+	buckets.forEach((bucket, i) => {
+		const cursor = parseDayKey(bucket.startKey);
+		const end = parseDayKey(bucket.endKey);
+		while (cursor <= end) {
+			index.set(fmtKey(cursor), i);
+			cursor.setDate(cursor.getDate() + 1);
+		}
+	});
+	return index;
+}
+
+/** Options for {@link buildEfficiencyBucketSeries}. */
+export interface EfficiencySeriesOptions {
+	/** Restrict to one editor's sessions; omit for every editor. */
+	editor?: string;
+}
+
+/**
+ * Aggregates the compact daily volume and the per-session behavioural inputs
+ * into one point per bucket.
+ *
+ * Volume ratios (tokens/session, turns/session, cost/KLOC) come from the daily
+ * aggregates; behavioural ratios (active minutes, retry rate, apply rate) come
+ * from the per-session inputs, each attributed entirely to the bucket
+ * containing its last activity day.
+ */
+export function buildEfficiencyBucketSeries(
+	volume: EfficiencyDailyVolume[],
+	sessions: EfficiencySessionInput[],
+	buckets: EfficiencyBucket[],
+	options: EfficiencySeriesOptions = {},
+): EfficiencyBucketPoint[] {
+	const accums = buckets.map(emptyBucketAccum);
+	const byDay = indexBucketsByDay(buckets);
+
+	for (const day of volume) {
+		const index = byDay.get(day.date);
+		if (index === undefined) { continue; }
+		const slice = options.editor ? day.byEditor?.[options.editor] : day;
+		if (slice) { addVolumeSlice(accums[index].volume, slice); }
 	}
-	week.editTurns += s.editTurns ?? 0;
-	week.retries += s.retries ?? 0;
-	week.applies += s.applies ?? 0;
-	week.codeBlocks += s.codeBlocks ?? 0;
+
+	for (const s of filterSessionsByEditor(sessions, options.editor)) {
+		const index = byDay.get(s.dayKey);
+		if (index !== undefined) { foldSessionIntoBucket(accums[index], s); }
+	}
+
+	return accums.map(a => {
+		const v = a.volume;
+		return {
+			bucketKey: a.bucket.key,
+			startKey: a.bucket.startKey,
+			endKey: a.bucket.endKey,
+			resolution: a.bucket.resolution,
+			label: a.bucket.label,
+			sessions: v.sessions,
+			tokens: v.tokens,
+			cost: v.cost,
+			loc: v.loc,
+			interactions: v.interactions,
+			tokensPerSession: ratio(v.tokens, v.sessions),
+			turnsPerSession: ratio(v.interactions, v.sessions),
+			costPerKloc: v.loc > 0 ? v.cost / (v.loc / 1000) : null,
+			locPerDollar: v.cost > 0 ? v.loc / v.cost : null,
+			activeMinutesPerSession: a.durationSessions > 0 ? (a.activeDurationMs / a.durationSessions) / 60_000 : null,
+			retryRate: a.editTurns >= MIN_EDIT_TURNS_PER_WEEK ? a.retries / a.editTurns : null,
+			applyRate: ratio(a.applies, a.codeBlocks),
+			durationSessions: a.durationSessions,
+			editTurns: a.editTurns,
+		};
+	});
 }
 
 /**
  * Builds the weekly efficiency-ratio series for the trailing `weeksBack` weeks
- * (including the current, partial week).
+ * (including the current, partial week) — the view's default, unfiltered scope.
  *
- * Volume ratios (tokens/session, turns/session, cost/KLOC) come from the daily
- * stats; behavioural ratios (active minutes, retry rate, apply rate) come from
- * the per-session inputs.
+ * A thin wrapper over {@link buildEfficiencyBucketSeries} so the host-computed
+ * default and the webview's filtered recomputation can never drift apart.
  */
 export function buildEfficiencyTrends(
 	dailyStats: DailyTokenStats[],
@@ -170,44 +543,12 @@ export function buildEfficiencyTrends(
 	weeksBack: number = DEFAULT_TREND_WEEKS,
 ): EfficiencyWeekPoint[] {
 	const now = deps.now ?? new Date();
-	const thisMonday = getMondayOfWeek(now);
-	const weeks = new Map<string, WeekAccum>();
-	for (let w = weeksBack - 1; w >= 0; w--) {
-		const monday = new Date(thisMonday);
-		monday.setDate(thisMonday.getDate() - w * 7);
-		weeks.set(fmtKey(monday), emptyWeekAccum(monday));
-	}
-
-	for (const day of dailyStats) {
-		const week = weeks.get(fmtKey(getMondayOfWeek(new Date(day.date + 'T00:00:00'))));
-		if (week) { foldDayIntoWeek(week, day, deps); }
-	}
-
-	for (const s of sessions) {
-		const week = weeks.get(fmtKey(getMondayOfWeek(new Date(s.dayKey + 'T00:00:00'))));
-		if (week) { foldSessionIntoWeek(week, s); }
-	}
-
-	return Array.from(weeks.entries())
-		.sort(([a], [b]) => a.localeCompare(b))
-		.map(([weekKey, w]) => ({
-			weekKey,
-			label: fmtWeekLabel(w.monday),
-			sessions: w.sessions,
-			tokens: w.tokens,
-			cost: w.cost,
-			loc: w.loc,
-			interactions: w.interactions,
-			tokensPerSession: ratio(w.tokens, w.sessions),
-			turnsPerSession: ratio(w.interactions, w.sessions),
-			costPerKloc: w.loc > 0 ? w.cost / (w.loc / 1000) : null,
-			locPerDollar: w.cost > 0 ? w.loc / w.cost : null,
-			activeMinutesPerSession: w.durationSessions > 0 ? (w.activeDurationMs / w.durationSessions) / 60_000 : null,
-			retryRate: w.editTurns >= MIN_EDIT_TURNS_PER_WEEK ? w.retries / w.editTurns : null,
-			applyRate: ratio(w.applies, w.codeBlocks),
-			durationSessions: w.durationSessions,
-			editTurns: w.editTurns,
-		}));
+	const start = getMondayOfWeek(now);
+	start.setDate(start.getDate() - (weeksBack - 1) * 7);
+	const range: EfficiencyRange = { id: 'custom', label: `Last ${weeksBack} weeks`, startKey: fmtKey(start), endKey: fmtKey(startOfDay(now)) };
+	const buckets = buildEfficiencyBuckets(range, 'weekly');
+	return buildEfficiencyBucketSeries(toEfficiencyDailyVolume(dailyStats, deps), sessions, buckets)
+		.map(point => ({ ...point, weekKey: point.bucketKey }));
 }
 
 // ---------------------------------------------------------------------------
@@ -609,25 +950,31 @@ export function computeValueSignals(input: ValueSignalsInput): ValueSignals {
 // Skill / tool usage trends
 // ---------------------------------------------------------------------------
 
-/** One week of agent-skill usage. */
-export interface SkillUsageWeekPoint {
-	/** Monday of the week, YYYY-MM-DD. */
-	weekKey: string;
+/** One bucket of agent-skill usage. */
+export interface SkillUsageBucketPoint {
+	/** First day of the bucket, YYYY-MM-DD. */
+	bucketKey: string;
 	/** Human label, e.g. "Jun 2–8". */
 	label: string;
-	/** Total skill invocations across the week's sessions. */
+	/** Total skill invocations across the bucket's sessions. */
 	totalCalls: number;
 	/** Sessions that invoked at least one skill. */
 	skillSessions: number;
-	/** All sessions observed that week (denominator of `skillShare`). */
+	/** All sessions observed in the bucket (denominator of `skillShare`). */
 	trackedSessions: number;
 	/** Share of sessions using any skill, 0..1; null when no sessions tracked. */
 	skillShare: number | null;
-	/** Invocation counts by skill name for this week. */
+	/** Invocation counts by skill name for this bucket. */
 	byName: { [skillName: string]: number };
 }
 
-/** Weekly skill-usage series plus the overall top skills across the window. */
+/** A weekly skill-usage point — {@link SkillUsageBucketPoint} plus the original `weekKey`. */
+export interface SkillUsageWeekPoint extends SkillUsageBucketPoint {
+	/** Monday of the week, YYYY-MM-DD. Same value as `bucketKey`. */
+	weekKey: string;
+}
+
+/** Bucketed skill-usage series plus the overall top skills across the window. */
 export interface SkillUsageTrends {
 	weeks: SkillUsageWeekPoint[];
 	/** Skill names ordered by total invocations across the window, largest first. */
@@ -637,9 +984,54 @@ export interface SkillUsageTrends {
 }
 
 /**
- * Builds the weekly agent-skill usage series (graphify, custom slash-command
- * skills, …) for the trailing `weeksBack` weeks. Sessions are attributed to
- * the week of their last activity, matching {@link buildEfficiencyTrends}.
+ * Builds the agent-skill usage series (graphify, custom slash-command skills, …)
+ * over the given buckets. Sessions are attributed to the bucket containing their
+ * last activity day, matching {@link buildEfficiencyBucketSeries}.
+ */
+export function buildSkillUsageSeries(
+	sessions: EfficiencySessionInput[],
+	buckets: EfficiencyBucket[],
+	options: EfficiencySeriesOptions = {},
+): SkillUsageTrends {
+	type SkillAccum = { bucket: EfficiencyBucket; totalCalls: number; skillSessions: number; trackedSessions: number; byName: { [name: string]: number } };
+	const accums: SkillAccum[] = buckets.map(bucket => ({ bucket, totalCalls: 0, skillSessions: 0, trackedSessions: 0, byName: {} }));
+	const byDay = indexBucketsByDay(buckets);
+
+	const totalsByName = new Map<string, number>();
+	for (const s of filterSessionsByEditor(sessions, options.editor)) {
+		const index = byDay.get(s.dayKey);
+		if (index === undefined) { continue; }
+		const acc = accums[index];
+		acc.trackedSessions += 1;
+		const entries = Object.entries(s.skillCalls ?? {}).filter(([, count]) => count > 0);
+		if (entries.length === 0) { continue; }
+		acc.skillSessions += 1;
+		for (const [name, count] of entries) {
+			acc.totalCalls += count;
+			acc.byName[name] = (acc.byName[name] ?? 0) + count;
+			totalsByName.set(name, (totalsByName.get(name) ?? 0) + count);
+		}
+	}
+
+	return {
+		weeks: accums.map(a => ({
+			bucketKey: a.bucket.key,
+			weekKey: a.bucket.key,
+			label: a.bucket.label,
+			totalCalls: a.totalCalls,
+			skillSessions: a.skillSessions,
+			trackedSessions: a.trackedSessions,
+			skillShare: a.trackedSessions > 0 ? a.skillSessions / a.trackedSessions : null,
+			byName: a.byName,
+		})),
+		topSkills: Array.from(totalsByName.entries()).sort((a, b) => b[1] - a[1]).map(([name]) => name),
+		totalCalls: Array.from(totalsByName.values()).reduce((a, b) => a + b, 0),
+	};
+}
+
+/**
+ * Builds the weekly agent-skill usage series for the trailing `weeksBack` weeks
+ * — the view's default, unfiltered scope.
  */
 export function buildSkillUsageTrends(
 	sessions: EfficiencySessionInput[],
@@ -647,47 +1039,10 @@ export function buildSkillUsageTrends(
 	weeksBack: number = DEFAULT_TREND_WEEKS,
 ): SkillUsageTrends {
 	const now = deps.now ?? new Date();
-	const thisMonday = getMondayOfWeek(now);
-	type SkillWeekAccum = { monday: Date; totalCalls: number; skillSessions: number; trackedSessions: number; byName: { [name: string]: number } };
-	const weeks = new Map<string, SkillWeekAccum>();
-	for (let w = weeksBack - 1; w >= 0; w--) {
-		const monday = new Date(thisMonday);
-		monday.setDate(thisMonday.getDate() - w * 7);
-		weeks.set(fmtKey(monday), { monday, totalCalls: 0, skillSessions: 0, trackedSessions: 0, byName: {} });
-	}
-
-	const totalsByName = new Map<string, number>();
-	for (const s of sessions) {
-		const week = weeks.get(fmtKey(getMondayOfWeek(new Date(s.dayKey + 'T00:00:00'))));
-		if (!week) { continue; }
-		week.trackedSessions += 1;
-		const entries = Object.entries(s.skillCalls ?? {}).filter(([, count]) => count > 0);
-		if (entries.length === 0) { continue; }
-		week.skillSessions += 1;
-		for (const [name, count] of entries) {
-			week.totalCalls += count;
-			week.byName[name] = (week.byName[name] ?? 0) + count;
-			totalsByName.set(name, (totalsByName.get(name) ?? 0) + count);
-		}
-	}
-
-	const weekPoints = Array.from(weeks.entries())
-		.sort(([a], [b]) => a.localeCompare(b))
-		.map(([weekKey, w]) => ({
-			weekKey,
-			label: fmtWeekLabel(w.monday),
-			totalCalls: w.totalCalls,
-			skillSessions: w.skillSessions,
-			trackedSessions: w.trackedSessions,
-			skillShare: w.trackedSessions > 0 ? w.skillSessions / w.trackedSessions : null,
-			byName: w.byName,
-		}));
-
-	return {
-		weeks: weekPoints,
-		topSkills: Array.from(totalsByName.entries()).sort((a, b) => b[1] - a[1]).map(([name]) => name),
-		totalCalls: Array.from(totalsByName.values()).reduce((a, b) => a + b, 0),
-	};
+	const start = getMondayOfWeek(now);
+	start.setDate(start.getDate() - (weeksBack - 1) * 7);
+	const range: EfficiencyRange = { id: 'custom', label: `Last ${weeksBack} weeks`, startKey: fmtKey(start), endKey: fmtKey(startOfDay(now)) };
+	return buildSkillUsageSeries(sessions, buildEfficiencyBuckets(range, 'weekly'));
 }
 
 // ---------------------------------------------------------------------------
@@ -879,6 +1234,84 @@ export interface ModelDailyInput {
 	date: string;
 	modelEfficiency?: DailyModelEfficiency;
 	taskCategoryUsage?: { [category: string]: { tokens: number; sessions: number } };
+	/**
+	 * Editor/agent this slice belongs to. The payload carries one row per
+	 * (day, editor) pair, so merging every row reproduces the unsplit day
+	 * exactly while an editor-scoped view can take just its own rows. Absent on
+	 * rows whose editor could not be determined.
+	 */
+	editor?: string;
+}
+
+/**
+ * Splits one day's per-model efficiency counters into one row per editor, so
+ * the Models tab can scope to an editor.
+ *
+ * Merging every row of a day reproduces the unsplit day exactly: the counters
+ * are written per editor from the same sessions, and the day's task-category
+ * tokens are apportioned by each editor's share of the day's model tokens, so
+ * the shares sum back to 1. Returns an empty array when the day carries no
+ * editor split, leaving the caller to ship the unsplit row.
+ */
+export function splitModelDayByEditor(day: DailyTokenStats): ModelDailyInput[] {
+	const byEditor = day.editorModelEfficiency;
+	if (!byEditor || Object.keys(byEditor).length === 0) { return []; }
+	const editorTokens = new Map<string, number>();
+	let dayTokens = 0;
+	for (const [editor, efficiency] of Object.entries(byEditor)) {
+		const tokens = Object.values(efficiency).reduce((sum, e) => sum + e.inputTokens + e.outputTokens, 0);
+		editorTokens.set(editor, tokens);
+		dayTokens += tokens;
+	}
+	const rows: ModelDailyInput[] = [];
+	for (const [editor, efficiency] of Object.entries(byEditor)) {
+		if (Object.keys(efficiency).length === 0) { continue; }
+		const share = dayTokens > 0 ? (editorTokens.get(editor) ?? 0) / dayTokens : 0;
+		const row: ModelDailyInput = { date: day.date, modelEfficiency: efficiency, editor };
+		if (day.taskCategoryUsage && share > 0) {
+			const scaled: { [category: string]: { tokens: number; sessions: number } } = {};
+			for (const [category, usage] of Object.entries(day.taskCategoryUsage)) {
+				scaled[category] = { tokens: usage.tokens * share, sessions: usage.sessions * share };
+			}
+			row.taskCategoryUsage = scaled;
+		}
+		rows.push(row);
+	}
+	return rows;
+}
+
+/**
+ * Narrows day rows to one editor. Rows without an editor are unattributed
+ * usage and are deliberately excluded rather than silently folded into
+ * whichever editor is selected.
+ */
+export function selectModelDaysForEditor(days: ModelDailyInput[], editor?: string): ModelDailyInput[] {
+	return editor ? days.filter(d => d.editor === editor) : days;
+}
+
+/**
+ * Underlying model vendors present in `days`, alphabetically.
+ *
+ * This is the model's own provider ({@link getModelBillingProvider}), not
+ * whoever bills for the call — a Claude model used through Copilot is an
+ * Anthropic model on a GitHub Copilot bill, and conflating the two would make
+ * the filter lie. The one place the two blur is a BYOK custom endpoint, which
+ * that helper labels with the user's own provider group (e.g.
+ * "Mistral (Custom)") because the call is served by, and billed by, that
+ * endpoint; the filter surfaces that label verbatim rather than guessing at
+ * the model behind it.
+ */
+export function listModelVendors(days: ModelDailyInput[]): string[] {
+	const vendors = new Set<string>();
+	for (const day of days) {
+		for (const model of Object.keys(day.modelEfficiency ?? {})) { vendors.add(getModelBillingProvider(model)); }
+	}
+	return Array.from(vendors).sort((a, b) => a.localeCompare(b));
+}
+
+/** Keeps only the models served by `vendor`; no vendor means no narrowing. */
+export function filterModelsByVendor<T extends { model: string }>(models: T[], vendor?: string): T[] {
+	return vendor ? models.filter(m => getModelBillingProvider(m.model) === vendor) : models;
 }
 
 /**
@@ -1003,17 +1436,46 @@ export function listComparableModels(days: ModelDailyInput[]): ComparableModel[]
 		.sort((a, b) => b.tokens - a.tokens);
 }
 
-/** One week of one model's efficiency metrics, for the per-model trend chart. */
-export interface ModelWeekPoint {
-	weekKey: string;
+/** One bucket of one model's efficiency metrics, for the per-model drift chart. */
+export interface ModelBucketPoint {
+	/** First day of the bucket, YYYY-MM-DD. */
+	bucketKey: string;
 	label: string;
 	metrics: ModelPeriodMetrics | null;
 }
 
+/** A weekly drift point — {@link ModelBucketPoint} plus the original `weekKey`. */
+export interface ModelWeekPoint extends ModelBucketPoint {
+	/** Monday of the week, YYYY-MM-DD. Same value as `bucketKey`. */
+	weekKey: string;
+}
+
 /**
- * Builds a weekly series of `model`'s efficiency profile across the trend
- * window, so a model's own drift over time is visible. Weeks where the model
- * was not used carry a null profile (rendered as a gap, not a zero).
+ * Builds a bucketed series of `model`'s efficiency profile, so a model's own
+ * drift over time is visible. Buckets where the model was not used carry a null
+ * profile (rendered as a gap, not a zero).
+ */
+export function buildModelBucketSeries(
+	days: ModelDailyInput[],
+	model: string,
+	buckets: EfficiencyBucket[],
+): ModelBucketPoint[] {
+	const grouped: ModelDailyInput[][] = buckets.map(() => []);
+	const byDay = indexBucketsByDay(buckets);
+	for (const day of days) {
+		const index = byDay.get(day.date);
+		if (index !== undefined) { grouped[index].push(day); }
+	}
+	return buckets.map((bucket, i) => ({
+		bucketKey: bucket.key,
+		label: bucket.label,
+		metrics: computeModelPeriodMetrics(grouped[i], model, bucket.label),
+	}));
+}
+
+/**
+ * Builds the weekly drift series across the default trend window — a thin
+ * wrapper over {@link buildModelBucketSeries}.
  */
 export function buildModelWeeklySeries(
 	days: ModelDailyInput[],
@@ -1021,28 +1483,11 @@ export function buildModelWeeklySeries(
 	now: Date,
 	weeks = DEFAULT_TREND_WEEKS,
 ): ModelWeekPoint[] {
-	const thisMonday = getMondayOfWeek(now);
-	const buckets: { monday: Date; days: ModelDailyInput[] }[] = [];
-	const indexByKey = new Map<string, number>();
-	for (let i = weeks - 1; i >= 0; i--) {
-		const monday = new Date(thisMonday);
-		monday.setDate(thisMonday.getDate() - i * 7);
-		indexByKey.set(fmtKey(monday), buckets.length);
-		buckets.push({ monday, days: [] });
-	}
-
-	for (const day of days) {
-		const parsed = new Date(`${day.date}T00:00:00`);
-		if (Number.isNaN(parsed.getTime())) { continue; }
-		const index = indexByKey.get(fmtKey(getMondayOfWeek(parsed)));
-		if (index === undefined) { continue; }
-		buckets[index].days.push(day);
-	}
-
-	return buckets.map(b => {
-		const label = fmtWeekLabel(b.monday);
-		return { weekKey: fmtKey(b.monday), label, metrics: computeModelPeriodMetrics(b.days, model, label) };
-	});
+	const start = getMondayOfWeek(now);
+	start.setDate(start.getDate() - (weeks - 1) * 7);
+	const range: EfficiencyRange = { id: 'custom', label: `Last ${weeks} weeks`, startKey: fmtKey(start), endKey: fmtKey(startOfDay(now)) };
+	return buildModelBucketSeries(days, model, buildEfficiencyBuckets(range, 'weekly'))
+		.map(point => ({ ...point, weekKey: point.bucketKey }));
 }
 
 /** Selectable comparison windows, shared by the extension and the Models tab. */
@@ -1294,6 +1739,28 @@ export interface EfficiencyViewData {
 	modelDaily: ModelDailyInput[];
 	/** True when at least two models cleared the comparison sample floor. */
 	hasModelComparison: boolean;
+	/**
+	 * Compact per-day volume aggregates (five numbers per day, plus the same
+	 * five per editor) for up to {@link EFFICIENCY_MAX_RANGE_DAYS} days. This is
+	 * what the time presets, drill-down and editor filter recompute from, so no
+	 * UI gesture re-reads a session log. Absent on legacy payloads, in which
+	 * case the view falls back to the pre-computed `weekly` series.
+	 */
+	dailyVolume?: EfficiencyDailyVolume[];
+	/**
+	 * Per-session behavioural inputs (duration, edit turns, retries, applies,
+	 * skill calls) over the session-collection window — numeric counters plus
+	 * skill names only, never prompts, paths or titles.
+	 */
+	sessionSamples?: EfficiencySessionInput[];
+	/** Editor display names present in the payload, most-used first. */
+	editors?: string[];
+	/**
+	 * How many trailing days `sessionSamples` covers. Session-derived behaviour
+	 * is collected over a shorter window than the daily volume aggregates, so
+	 * ranges longer than this show duration/retry/apply gaps and say so.
+	 */
+	behaviorWindowDays?: number;
 	/**
 	 * Prompt-cache breakage over the last 30 days. Null for users whose editors
 	 * do not report per-turn cache token counts (today: anything but Claude Code

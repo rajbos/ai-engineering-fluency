@@ -15,6 +15,7 @@ sumModelUsageTokens,
 computeFallbackDailyRollup,
 type SessionAggregateInput,
 type UtcDateRanges,
+	preferActualTokens,
 } from '../../../src/statsHelpers';
 import type { ModelUsage, EditorUsage, SessionFileCache, DailyRollupEntry } from '../../../src/types';
 import { scaleModelUsage, preserveAutoRouting, reconcileDebugLogModelUsage } from '../../../src/statsHelpers';
@@ -1614,4 +1615,67 @@ test('computeFallbackDailyRollup: no-ops when tokens or timestamp are missing', 
 
 	computeFallbackDailyRollup(dailyRollups, '2025-03-10T09:00:00.000Z', { tokens: 0 }, {}, 1);
 	assert.equal(Object.keys(dailyRollups).length, 0, 'zero tokens means no rollup entry');
+});
+
+// ── preferActualTokens ───────────────────────────────────────────────────────
+
+test('preferActualTokens: uses the exact API-reported count when there is one', () => {
+	assert.equal(preferActualTokens(5000, 4200), 5000);
+});
+
+test('preferActualTokens: falls back to the estimate when no exact count exists', () => {
+	// The regression this guards: `actualTokens` is 0, not undefined, for a
+	// session with no exact data — a `??` fallback would return 0 and silently
+	// drop the estimate.
+	assert.equal(preferActualTokens(0, 4200), 4200);
+	assert.equal(preferActualTokens(undefined, 4200), 4200);
+});
+
+test('preferActualTokens: a zero estimate stays zero rather than becoming undefined', () => {
+	assert.equal(preferActualTokens(0, 0), 0);
+	assert.equal(preferActualTokens(undefined, 0), 0);
+});
+
+// ── Per-editor interactions (issue #1965) ────────────────────────────────────
+
+test('aggregatePeriodStats: per-editor interactions track the day total', () => {
+	// The Efficiency view's editor filter divides by this. The refresh path used
+	// to bump `entry.interactions` but not the editor slice, so filtered "turns
+	// per session" silently read as zero for the newest days after a background
+	// refresh replaced them.
+	const ranges = makeRanges('2025-03-15');
+	const input: SessionAggregateInput = {
+		editorType: 'vscode',
+		mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+		sessionData: makeSession({
+			dailyRollups: {
+				'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 7, modelUsage: {} },
+			},
+		}),
+	};
+	const result = aggregatePeriodStats([input], ranges);
+	const day = result.dailyStatsMap.get('2025-03-15');
+	assert.ok(day, 'expected a daily entry for the rollup day');
+	assert.equal(day.interactions, 7);
+	assert.equal(day.editorUsage['vscode'].interactions, 7, 'per-editor turns must match the day total for a single-editor day');
+});
+
+test('aggregatePeriodStats: two editors on one day split the turns without losing any', () => {
+	const ranges = makeRanges('2025-03-15');
+	const make = (editorType: string, interactions: number): SessionAggregateInput => ({
+		editorType,
+		mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+		sessionData: makeSession({
+			dailyRollups: {
+				'2025-03-15': { tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions, modelUsage: {} },
+			},
+		}),
+	});
+	const result = aggregatePeriodStats([make('vscode', 4), make('Claude Code', 6)], ranges);
+	const day = result.dailyStatsMap.get('2025-03-15');
+	assert.ok(day);
+	const summed = Object.values(day.editorUsage).reduce((sum: number, e) => sum + (e.interactions ?? 0), 0);
+	assert.equal(summed, day.interactions, 'editor slices must sum back to the day total');
+	assert.equal(day.editorUsage['vscode'].interactions, 4);
+	assert.equal(day.editorUsage['Claude Code'].interactions, 6);
 });
