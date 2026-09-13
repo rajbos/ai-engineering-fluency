@@ -156,14 +156,32 @@ function buildStatsWithEscalatingCorrection(): Record<string, unknown> {
 	return stats;
 }
 
+/**
+ * `buildStats()` with a handful of insights so the Insights tab renders real cards. Mirrors what
+ * the host sends: a couple of 'new' ones in "For You" plus one already-seen tip in "All Tips".
+ */
+function buildStatsWithInsights(): Record<string, unknown> {
+	const stats = buildStats();
+	stats.insights = [
+		{ id: 'missing-instructions', category: 'workspace', severity: 'opportunity', title: 'No instructions file', body: 'Add one.', status: 'new', allowToast: true },
+		{ id: 'marathon-session-today', category: 'hygiene', severity: 'tip', title: 'Marathon session today', body: 'Consider a fresh session.', status: 'new', allowToast: true },
+		{ id: 'stale-skills', category: 'tools', severity: 'tip', title: 'Stale skills', body: 'Some skills are unused.', status: 'seen', allowToast: false },
+	];
+	return stats;
+}
+
 interface Harness {
 	window: any;
 	posted: any[];
+	/** DOM ids of every element the webview called scrollIntoView() on, in order. */
+	scrolledTo: string[];
 	post: (message: Record<string, unknown>) => void;
 	postFromHostFrame: (message: Record<string, unknown>) => void;
 	postFromForeignOrigin: (message: Record<string, unknown>) => void;
 	text: (selector: string) => string | null;
 	settle: () => Promise<void>;
+	/** Waits out the webview's deferred scroll (scrollToPendingTabAnchor defers by 50ms). */
+	settleScroll: () => Promise<void>;
 }
 
 /** Boots the bundled webview in jsdom. `initialData` mirrors `window.__INITIAL_USAGE__`. */
@@ -185,6 +203,10 @@ async function bootWebview(initialData: Record<string, unknown> | null): Promise
 	window.HTMLElement.prototype.attachInternals = () => ({
 		setFormValue() { /* no-op */ }, setValidity() { /* no-op */ }, form: null, states: new Set(), role: null,
 	});
+	// jsdom does not implement scrollIntoView; record the target so tests can assert *where*
+	// the webview scrolled, not merely that it rendered the right tab.
+	const scrolledTo: string[] = [];
+	window.HTMLElement.prototype.scrollIntoView = function (this: any) { scrolledTo.push(this.id ?? ''); };
 	if (initialData) { window.__INITIAL_USAGE__ = initialData; }
 
 	window.eval(bundle);
@@ -197,7 +219,12 @@ async function bootWebview(initialData: Record<string, unknown> | null): Promise
 	return {
 		window,
 		posted,
+		scrolledTo,
 		settle,
+		settleScroll: async (): Promise<void> => {
+			await new Promise((resolve) => setTimeout(resolve, 80));
+			await settle();
+		},
 		post: (message) => {
 			const event = new window.MessageEvent('message', { data: message });
 			Object.defineProperty(event, 'source', { value: null });
@@ -813,4 +840,82 @@ test('the escalating pill is a filter that narrows the list to escalated moments
 	assert.equal(harness.window.document.querySelectorAll('button.correction-moment').length, 1);
 	assert.match(harness.text('#corrections-filter-status') ?? '', /Showing 1 of 2 listed correction moments/);
 	assert.match(harness.text('#corrections-filter-status') ?? '', /Escalating corrections/);
+});
+
+// ── Insight deep-linking ───────────────────────────────────────────────────
+// A toast ("💡 <title>" → View) and the status-bar insights badge both open the Insights tab for
+// one specific insight. Landing on the tab is not enough: with a dozen look-alike cards the user
+// still has to hunt for the one the notification was about.
+
+test('every insight card carries its own DOM id so the host can target it', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	for (const id of ['missing-instructions', 'marathon-session-today', 'stale-skills']) {
+		const card = harness.window.document.getElementById(`insight-card-${id}`);
+		assert.ok(card, `no card element for insight ${id}`);
+		assert.equal(card.getAttribute('data-insight-id'), id);
+	}
+});
+
+test('switchTab with an insight anchor scrolls to and highlights that card', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-marathon-session-today' });
+	await harness.settleScroll();
+
+	assert.ok(
+		harness.scrolledTo.includes('insight-card-marathon-session-today'),
+		`expected a scroll to the requested card, scrolled to: ${JSON.stringify(harness.scrolledTo)}`,
+	);
+	const card = harness.window.document.getElementById('insight-card-marathon-session-today');
+	assert.match(card.style.boxShadow, /var\(--vscode-focusBorder\)/, 'the target card must be visibly highlighted');
+});
+
+test('the insight anchor survives the re-render that marking the tab seen triggers', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	// Activating the tab makes the webview report its new insights as seen; the host answers with
+	// a fresh insight list, rebuilding every card and destroying the element just scrolled to.
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-missing-instructions' });
+	assert.ok(
+		harness.posted.some((m) => m.command === 'insightAction' && m.action === 'seen' && m.id === 'missing-instructions'),
+		'activating the tab should mark the new insights as seen',
+	);
+	harness.post({
+		command: 'updateInsights',
+		insights: (buildStatsWithInsights().insights as any[]).map((i) => (i.status === 'new' ? { ...i, status: 'seen' } : i)),
+	});
+	await harness.settleScroll();
+
+	assert.ok(
+		harness.scrolledTo.includes('insight-card-missing-instructions'),
+		`expected the rebuilt card to be scrolled to, scrolled to: ${JSON.stringify(harness.scrolledTo)}`,
+	);
+	const card = harness.window.document.getElementById('insight-card-missing-instructions');
+	assert.match(card.style.boxShadow, /var\(--vscode-focusBorder\)/);
+});
+
+test('a switchTab without an anchor scrolls nowhere', async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'insights' });
+	await harness.settleScroll();
+
+	assert.deepEqual(harness.scrolledTo, [], 'plain tab navigation must not hijack the scroll position');
+});
+
+test("the highlight flash restores a new card's own glow instead of stripping it", async () => {
+	const harness = await bootWebview(buildStatsWithInsights());
+	const before = harness.window.document.getElementById('insight-card-marathon-session-today').style.boxShadow;
+	assert.notEqual(before, '', 'a NEW insight card ships with its own inline glow');
+
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-marathon-session-today' });
+	await harness.settleScroll();
+	await new Promise((resolve) => setTimeout(resolve, 2100));
+
+	assert.equal(
+		harness.window.document.getElementById('insight-card-marathon-session-today').style.boxShadow,
+		before,
+		'the flash must hand the card back the styling it had',
+	);
 });

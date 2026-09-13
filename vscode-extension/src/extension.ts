@@ -349,6 +349,7 @@ import { getModelDisplayName } from '../../src/webview/shared/modelUtils';
 import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
+import { insightCardElementId } from './insightAnchors';
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
 import { getAzureTableStorageEndpoint } from './utils/azureEndpoints';
 import { isGuidMcpTool, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../src/utils/toolUtils';
@@ -745,6 +746,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _statusBarBaseText = '';
 	/** Cached top new insight title for tooltip display. */
 	private _topInsightTitle: string | null = null;
+	/** Id of the insight behind `_topInsightTitle`, so clicking the badge scrolls to that card. */
+	private _topInsightId: string | null = null;
 	/** Cached last detailed stats for tooltip rebuilding. */
 	private _lastDetailedStats: DetailedStats | undefined;
 	private tokenEstimators: Record<string, TokenEstimator> = tokenEstimatorsData.estimators;
@@ -2230,9 +2233,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.statusBarItem.text = this._devBranch ? `${text} [${this._devBranch}]` : text;
 	}
 
-	private refreshStatusBarInsightBadge(count: number, topInsightTitle?: string): void {
+	private refreshStatusBarInsightBadge(count: number, topInsightTitle?: string, topInsightId?: string): void {
 		this._newInsightCount = count;
 		this._topInsightTitle = topInsightTitle ?? this._topInsightTitle;
+		this._topInsightId = topInsightId ?? this._topInsightId;
 		// Main status bar: remove the 💡 badge — it now lives in its own item
 		this.setStatusBarText(this._statusBarBaseText);
 
@@ -2247,6 +2251,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			}
 			tooltip.appendMarkdown('Click to open the Insights tab');
 			this.insightsStatusBarItem.tooltip = tooltip;
+			// Pass the insight the tooltip names so the click lands on that card, not just the tab.
+			this.insightsStatusBarItem.command = this._topInsightId
+				? { command: 'aiEngineeringFluency.openInsightsTab', title: l10n.t('button.openInsightsTab'), arguments: [this._topInsightId] }
+				: 'aiEngineeringFluency.openInsightsTab';
 			this.insightsStatusBarItem.show();
 		} else {
 			this.insightsStatusBarItem.hide();
@@ -3875,7 +3883,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		const newCount = _countNewInsights(this._insightStateBag, now);
 		const topNew = evaluated.find(i => i.status === 'new');
-		this.refreshStatusBarInsightBadge(newCount, topNew?.title);
+		this.refreshStatusBarInsightBadge(newCount, topNew?.title, topNew?.id);
 
 		await this.context.globalState.update('insights.state', this._insightStateBag);
 
@@ -3906,7 +3914,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			dismiss,
 		);
 		if (choice === view) {
-			await this.showUsageAnalysisOnInsightsTab();
+			await this.showUsageAnalysisOnInsightsTab(toastCandidate.id);
 		} else if (choice === dismiss) {
 			this._insightStateBag[toastCandidate.id] = {
 				...(this._insightStateBag[toastCandidate.id] ?? { firstSurfacedAt: now }),
@@ -7990,9 +7998,14 @@ private computeFallbackDailyRollup(
 		await this.flushPendingAnalysisNavigation();
 	}
 
-	/** Opens the Usage Analysis panel and activates the Insights tab. */
-	public async showUsageAnalysisOnInsightsTab(): Promise<void> {
-		await this.showUsageAnalysisOnTab('insights');
+	/**
+	 * Opens the Usage Analysis panel and activates the Insights tab. When `insightId` is given —
+	 * the toast's "View" action, or the status-bar badge naming its top insight — the webview also
+	 * scrolls to and highlights that specific card, instead of dropping the user at the top of a
+	 * tab full of look-alike cards and leaving them to find the one they were notified about.
+	 */
+	public async showUsageAnalysisOnInsightsTab(insightId?: string): Promise<void> {
+		await this.showUsageAnalysisOnTab('insights', insightId ? insightCardElementId(insightId) : undefined);
 	}
 
 	/** Opens the Usage Analysis panel and activates the Tools & Integrations tab. */
@@ -12981,8 +12994,10 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
 }
 
 function registerUsageNavigationCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
-  const commands: Array<[string, string, () => Promise<void>]> = [
-    ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", () => tokenTracker.showUsageAnalysisOnInsightsTab()],
+  const commands: Array<[string, string, (...args: unknown[]) => Promise<void>]> = [
+    // The status-bar insights badge passes the id of the insight its tooltip names, so the panel
+    // can scroll straight to that card. Invoked from the command palette there is no argument.
+    ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", (insightId) => tokenTracker.showUsageAnalysisOnInsightsTab(typeof insightId === 'string' ? insightId : undefined)],
     ["aiEngineeringFluency.openToolsTab", "Open Tools tab command called", () => tokenTracker.showUsageAnalysisOnToolsTab()],
     ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
     ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
@@ -12991,9 +13006,9 @@ function registerUsageNavigationCommands(context: vscode.ExtensionContext, token
     ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
   ];
   context.subscriptions.push(...commands.map(([id, logMessage, handler]) =>
-    vscode.commands.registerCommand(id, async () => {
+    vscode.commands.registerCommand(id, async (...args: unknown[]) => {
       tokenTracker.log(logMessage);
-      await handler();
+      await handler(...args);
     })
   ));
 }
