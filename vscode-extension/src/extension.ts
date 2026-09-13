@@ -725,9 +725,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _fullDailyStatsInFlight: Promise<DailyTokenStats[]> | undefined;
 	/** Progress reporters watching the shared full-year walk, including late joiners. */
 	private readonly _fullDailyStatsProgressSinks =
-		new Set<(completed: number, total: number, sessionFile?: string) => void>();
+		new Set<(completed: number, total: number, editors: ReadonlySet<string>) => void>();
 	/** Most recent tick from the shared walk, replayed to a reporter that joins late. */
-	private _fullDailyStatsLastTick: [number, number, string | undefined] | undefined;
+	private _fullDailyStatsLastTick: [number, number, ReadonlySet<string>] | undefined;
 	/** Last successfully rendered Efficiency payload, restored if a refresh build fails. */
 	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
 	/** Bumped whenever the computed stat caches are invalidated; see recordEfficiencyPayload(). */
@@ -4419,31 +4419,46 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private async calculateFullDailyStats(
 		knownSessionFiles?: string[],
-		onProgress?: (completed: number, total: number, sessionFile?: string) => void,
+		onProgress?: (completed: number, total: number, editors: ReadonlySet<string>) => void,
 		force = false,
 	): Promise<DailyTokenStats[]> {
+		// A caller that brought its own discovery result cannot be served by a walk started
+		// from someone else's: joining would quietly drop files it had just found. It runs
+		// its own walk and does not publish a shared one.
+		if (knownSessionFiles) { return this.calculateDailyStats(365, knownSessionFiles, onProgress); }
+
+		// Reporters are held in a set rather than passed straight through, because a caller
+		// that joins a walk already in flight would otherwise have its reporter silently
+		// dropped — the Efficiency panel opening during the refresh's detached walk would
+		// then show no progress at all until that walk finished.
+		//
+		// Registered before the forced wait below, not after: a refresh queued behind an
+		// existing walk still has a loading screen up, and that walk's files are the same
+		// ones it is waiting on, so its ticks are the honest thing to show meanwhile.
+		const watch = (): void => {
+			if (!onProgress) { return; }
+			this._fullDailyStatsProgressSinks.add(onProgress);
+			// Replay the latest tick. Per-file callbacks stop while the aggregation loop runs,
+			// so a joiner arriving in that window would otherwise sit indeterminate until the
+			// whole walk resolved, with no indication anything was happening.
+			if (this._fullDailyStatsLastTick) { onProgress(...this._fullDailyStatsLastTick); }
+		};
+		watch();
+
 		// A forced recompute means "read the corpus as it is now". Joining a walk that is
 		// already part-way through would hand back a snapshot taken before whatever prompted
 		// the refresh, so wait it out and then start a fresh one; the `??=` below sees a
 		// cleared slot because the previous walk's `finally` has run by then.
 		if (force && this._fullDailyStatsInFlight) {
 			await this._fullDailyStatsInFlight.catch(() => undefined);
-		}
-		// Reporters are held in a set rather than passed straight through, because a caller
-		// that joins a walk already in flight would otherwise have its reporter silently
-		// dropped — the Efficiency panel opening during the refresh's detached walk would
-		// then show no progress at all until that walk finished.
-		if (onProgress) {
-			this._fullDailyStatsProgressSinks.add(onProgress);
-			// Replay the latest tick. Per-file callbacks stop while the aggregation loop runs,
-			// so a joiner arriving in that window would otherwise sit indeterminate until the
-			// whole walk resolved, with no indication anything was happening.
-			if (this._fullDailyStatsLastTick) { onProgress(...this._fullDailyStatsLastTick); }
+			// That walk's `finally` emptied the sink set on its way out; re-register so the
+			// fresh walk below reports to this caller too.
+			watch();
 		}
 		this._fullDailyStatsInFlight ??= this
-			.calculateDailyStats(365, knownSessionFiles, (completed, total, sessionFile) => {
-				this._fullDailyStatsLastTick = [completed, total, sessionFile];
-				for (const sink of this._fullDailyStatsProgressSinks) { sink(completed, total, sessionFile); }
+			.calculateDailyStats(365, knownSessionFiles, (completed, total, editors) => {
+				this._fullDailyStatsLastTick = [completed, total, editors];
+				for (const sink of this._fullDailyStatsProgressSinks) { sink(completed, total, editors); }
 			})
 			.finally(() => {
 				this._fullDailyStatsInFlight = undefined;
@@ -4460,7 +4475,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async calculateDailyStats(
 		daysBack = 365,
 		knownSessionFiles?: string[],
-		onProgress?: (completed: number, total: number, sessionFile?: string) => void,
+		onProgress?: (completed: number, total: number, editors: ReadonlySet<string>) => void,
 	): Promise<DailyTokenStats[]> {
 		const now = new Date();
 		const cutoffStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack);
@@ -4473,6 +4488,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log(`📈 Preparing chart data (${daysBack}d) from ${sessionFiles.length} session file(s)...`);
 
 			let completed = 0;
+			// Accumulated here rather than by the caller: a reporter that joins an already
+			// running walk gets the whole set with its first tick instead of only the file
+			// that happened to finish next.
+			const editors = new Set<string>();
 			const dailyResults = await this.runWithConcurrency(sessionFiles, async (sessionFile) => {
 				try {
 					const fileStats = await this.statSessionFile(sessionFile);
@@ -4481,7 +4500,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 					if (mtime < cutoffMs) { return null; }
 					return { sessionFile, sessionData: await this.getSessionFileDataCached(sessionFile, mtime, fileSize), mtime };
 				} finally {
-					onProgress?.(++completed, sessionFiles.length, sessionFile);
+					if (onProgress) {
+						const editor = this.detectEditorSource(sessionFile);
+						if (editor && editor !== 'Unknown') { editors.add(editor); }
+						onProgress(++completed, sessionFiles.length, editors);
+					}
 				}
 			});
 
@@ -9633,7 +9656,10 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 					() => this.buildEfficiencyViewData(false, this.efficiencyLoadingSink(panel)));
 				// Record the payload even if this panel is gone: it is valid data, and a later
 				// refresh falls back to it rather than stranding its panel on the loading screen.
-				this.recordEfficiencyPayload(data, generation);
+				// A payload the caches have outlived is not rendered either: the clear that
+				// invalidated it is precisely a statement that this data is no longer current.
+				// The refresh it triggers will render in its place.
+				if (!this.recordEfficiencyPayload(data, generation)) { return; }
 				// The user may have closed the panel while the data was being computed.
 				if (this.efficiencyPanel !== panel) { return; }
 				panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
@@ -9660,7 +9686,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				if (this.efficiencyPanel === panel) { panel.webview.html = this.getLoadingHtml(panel.webview); }
 				return this.buildEfficiencyViewData(true, this.efficiencyLoadingSink(panel));
 			});
-			this.recordEfficiencyPayload(data, generation);
+			if (!this.recordEfficiencyPayload(data, generation)) { return; }
 		} catch (error) {
 			// Never strand the panel on the loading screen: fall back to the last good payload,
 			// which the initial build records even when its own render was skipped.
@@ -9821,12 +9847,13 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * build started before `clearCache()` could finish after it and reinstate pre-clear data
 	 * as the "last good" result.
 	 */
-	private recordEfficiencyPayload(data: EfficiencyViewData, builtAtGeneration: number): void {
+	private recordEfficiencyPayload(data: EfficiencyViewData, builtAtGeneration: number): boolean {
 		if (builtAtGeneration !== this._cacheGeneration) {
 			this.log('⚡ [Efficiency] Discarding a payload built before the caches were cleared');
-			return;
+			return false;
 		}
 		this._lastEfficiencyViewData = data;
+		return true;
 	}
 
 	private postEfficiencyStep(send: (msg: object) => void, percentage: number, label: string): void {
@@ -9855,19 +9882,16 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			// its lower band, so posting one here would pin the bar above that band and freeze
 			// it for the whole parse — the exact failure this view had at 96%. The walk's own
 			// parsing ticks drive the bar instead.
-			// Editors are discovered from the files the walk reports, so the Efficiency loader
-			// grows the same pills the details loader does instead of an always-empty row.
-			const editors = new Set<string>();
+			// The walk hands over the editors it has seen, so the Efficiency loader grows the
+			// same pills the details loader does instead of an always-empty row.
+			let seen: ReadonlySet<string> = new Set<string>();
 			const report = this.buildProgressCallback(
 				true,
-				() => [...editors].map(name => ({ icon: this.getEditorIconForLoader(name), name })),
+				() => [...seen].map(name => ({ icon: this.getEditorIconForLoader(name), name })),
 				send,
 			);
-			dailyStats = await this.calculateFullDailyStats(undefined, (completed, total, sessionFile) => {
-				if (sessionFile) {
-					const editor = this.detectEditorSource(sessionFile);
-					if (editor && editor !== 'Unknown') { editors.add(editor); }
-				}
+			dailyStats = await this.calculateFullDailyStats(undefined, (completed, total, editors) => {
+				seen = editors;
 				report(completed, total);
 			}, forceRecalc);
 		}
