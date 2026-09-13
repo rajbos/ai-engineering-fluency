@@ -62,9 +62,11 @@ function renderShiftRow(shift: ModelMixShift): string {
 	// to disclose — repeating it would only make the screen-reader row noisier.
 	const sameAsId = displayName === shift.model;
 	const title = sameAsId ? displayName : `${displayName} — ${shift.model}`;
+	// The leading space matters: without it the accessible name computation runs the
+	// two spans together and the row is announced as "GPT-4oModel ID: gpt-4o".
 	const canonical = sameAsId
 		? ''
-		: `<span class="attr-shift-sr">${escapeHtml(localizeFormat('efficiency.modelMix.canonicalId', shift.model))}</span>`;
+		: `<span class="attr-shift-sr"> ${escapeHtml(localizeFormat('efficiency.modelMix.canonicalId', shift.model))}</span>`;
 	const points = `${shift.deltaShare > 0 ? '+' : ''}${formatFixed(shift.deltaShare * 100, 1)}`;
 	return `
 					<tr>

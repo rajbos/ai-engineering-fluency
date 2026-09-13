@@ -34,6 +34,17 @@ test('getModelDisplayName: returns raw model ID for unknown models', () => {
 	assert.equal(getModelDisplayName(''), '');
 });
 
+test('getModelDisplayName: an Object.prototype key is an unknown model, not an inherited value', () => {
+	// Model ids come from session data. With a normal object backing the lookup,
+	// `constructor` resolves to Object.prototype.constructor — a function — which
+	// then throws inside escapeHtml() and takes the whole view's render down.
+	for (const id of ['constructor', 'toString', 'valueOf', 'hasOwnProperty', '__proto__']) {
+		const name = getModelDisplayName(id);
+		assert.equal(typeof name, 'string', `${id} must resolve to a string`);
+		assert.equal(name, id, `${id} is unknown, so it stays itself`);
+	}
+});
+
 test('getModelDisplayName: decodes URI-encoded segments in unknown model IDs', () => {
 	assert.equal(getModelDisplayName('provider/Model%20Name'), 'provider/Model Name');
 });

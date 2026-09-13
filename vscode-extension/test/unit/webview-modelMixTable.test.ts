@@ -123,3 +123,20 @@ test('modelMixTable: renders the rows in the order the analytics layer supplied'
 	assert.deepEqual(order, [...order].sort((a, b) => a - b));
 	assert.ok(order.every(i => i >= 0));
 });
+
+test('modelMixTable: separates the visible name from the screen-reader id', () => {
+	initializeWebviewLocalization({});
+	const html = renderModelMixTable([shift('gpt-4o', 0.31, 0.2)], WINDOWS);
+	// Without the separator the row announces as "GPT-4oModel ID: gpt-4o".
+	assert.match(html, /<\/span><span class="attr-shift-sr"> Model ID: gpt-4o<\/span>/);
+});
+
+test('modelMixTable: renders a model id that collides with an Object.prototype key', () => {
+	// `getModelDisplayName` must not hand back an inherited function here — escapeHtml
+	// would throw on it and abort the whole Efficiency render.
+	initializeWebviewLocalization({});
+	for (const id of ['constructor', 'toString', '__proto__']) {
+		const html = renderModelMixTable([shift(id, 0.2, 0.3)], WINDOWS);
+		assert.match(html, new RegExp(`title="${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
+	}
+});
