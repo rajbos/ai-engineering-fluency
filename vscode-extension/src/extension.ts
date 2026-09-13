@@ -8907,6 +8907,12 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		// the cached stats so loadAnalysisStatsInBackground performs a full recalculation.
 		void this.analysisPanel.webview.postMessage({ command: 'usageRefreshing' });
 		this.lastUsageAnalysisStats = undefined;
+		// This is a computed-stat cache the Efficiency view also reads, so the same
+		// invalidation clearCache() performs applies: an Efficiency build spanning this
+		// refresh was built on the stats just discarded and must not become the payload a
+		// later failed refresh falls back to.
+		this._lastEfficiencyViewData = undefined;
+		this._cacheGeneration++;
 		await this.loadAnalysisStatsInBackground(this.analysisPanel);
 		// Refresh token stats so the status bar and tooltip stay in sync
 		await this.updateTokenStats();
