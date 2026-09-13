@@ -38,6 +38,7 @@ import { applyBillingFields, type CopilotApiBalance } from './billingStatsSaniti
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
+import { insightCardElementId, isInsightCardAnchor } from '../../insightAnchors';
 import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from './modelLeaderboard';
 import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
 
@@ -412,6 +413,24 @@ let isSingleRepoAnalysisInProgress = false;
 let currentWorkspacePaths: string[] = [];
 let activeTab = 'activity';
 let pendingTabAnchor: string | null = null;
+/**
+ * How long an insight anchor keeps re-asserting itself once its card has been shown. Activating
+ * the Insights tab immediately marks its new insights as "seen", which makes the host push a
+ * fresh `updateInsights`; a background stats refresh runs the full `renderLayout`. Either rebuilds
+ * every card, destroying the element we just scrolled to, and without this the scroll is lost.
+ *
+ * This governs re-assertion only. A deep link requested before the cards exist at all — a badge
+ * click reaching a webview still on its loading screen — is carried by `pendingTabAnchor`, which
+ * is only consumed once the element is actually found, so a slow stats load cannot drop it.
+ */
+const INSIGHT_FOCUS_WINDOW_MS = 4000;
+let focusedInsightAnchor: { anchor: string; until: number } | null = null;
+/** The node the last anchor scroll targeted, so a re-apply can tell a rebuild from a repeat. */
+let lastAnchorScrollTarget: HTMLElement | null = null;
+/** Handle of a deferred scroll to an insight card, so navigating away before it fires cancels it. */
+let pendingInsightScrollTimer: ReturnType<typeof setTimeout> | null = null;
+/** Elements with a highlight flash still in flight, with the styling their timer will restore. */
+const activeFlashes = new WeakMap<HTMLElement, { shadow: string; transition: string; timer: ReturnType<typeof setTimeout> }>();
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentInsights: EvaluatedInsight[] = [];
 let activeCorrectionFilter: CorrectionFilter | null = null;
@@ -2419,6 +2438,10 @@ function setupTabs(): void {
 			const tab = button.getAttribute('data-tab');
 			if (!tab) { return; }
 			activeTab = tab;
+			// The user chose where to look. Drop any pending insight deep link right here rather
+			// than waiting for a re-render to notice: clicking away and straight back would leave
+			// the old anchor live and yank them to that card on the next update.
+			clearFocusedInsightAnchor();
 			reportTabOpened(tab);
 			tabButtons.forEach(btn => btn.classList.toggle('active', btn.getAttribute('data-tab') === tab));
 			document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
@@ -3490,7 +3513,7 @@ function buildInsightCardHtml(insight: EvaluatedInsight): string {
 		: '';
 
 	return `
-		<div class="insight-card" data-insight-id="${escapeHtml(insight.id)}"
+		<div class="insight-card" id="${escapeHtml(insightCardElementId(insight.id))}" data-insight-id="${escapeHtml(insight.id)}"
 			style="margin-bottom:12px; padding:16px 18px; border-radius:8px;
 			background:${bg}; border:1px solid ${border};
 			${isNew ? 'box-shadow:0 2px 8px ' + bg + ';' : ''}
@@ -3916,6 +3939,16 @@ function refreshInsightsPanel(insights: EvaluatedInsight[]): void {
 	setHtml(container, forYouSection + allSection);
 	wireInsightCardButtons();
 	updateTabButtonCount(insights);
+	// A deep link that arrived before its card was in the list is still sitting unconsumed, and
+	// this re-render is the only thing that runs for an insights-only update — nothing else would
+	// scroll to the card that just appeared, and the focus window may already have lapsed waiting
+	// for exactly this.
+	if (pendingTabAnchor && isInsightCardAnchor(pendingTabAnchor) && activeTab === 'insights') {
+		scrollToPendingTabAnchor();
+	}
+	// Every card was just replaced, so a target that *was* resolved no longer exists in the DOM.
+	// Re-resolve it against the new cards.
+	reapplyFocusedInsightAnchor();
 }
 
 function _postOpenFileFromList(pathsJson: string | null): void {
@@ -5597,6 +5630,9 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	currentInsights = stats.insights ?? [];
 	wireInsightCardButtons();
 	scrollToPendingTabAnchor();
+	// A full layout rebuild — e.g. a background stats refresh landing mid-navigation — destroys
+	// the card a still-fresh insight anchor pointed at, just as an insights-only re-render does.
+	reapplyFocusedInsightAnchor();
 	// The GitHub activity containers only exist now. Re-announce readiness so the extension
 	// replays any PR / cloud-agent state that was posted while the DOM had no place to put it.
 	restoreGitHubActivityPanels(repoPrStatsData, agentSessionsData, updateReposPrPanel, updateAgentSessionsPanel);
@@ -5787,6 +5823,7 @@ function handleToolSuppressed(toolName: string): void {
 
 function handleHighlightUnknownTools(): void {
 	activeTab = 'tools';
+	clearFocusedInsightAnchor();
 	document.querySelectorAll<HTMLElement>('.tab-button').forEach(btn => {
 		btn.classList.toggle('active', btn.getAttribute('data-tab') === 'tools');
 	});
@@ -5798,9 +5835,7 @@ function handleHighlightUnknownTools(): void {
 	const el = document.getElementById('unknown-mcp-tools-section');
 	if (el) {
 		el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-		el.style.transition = 'box-shadow 0.3s ease';
-		el.style.boxShadow = '0 0 0 3px var(--vscode-focusBorder)';
-		setTimeout(() => { el.style.boxShadow = ''; }, 2000);
+		flashAnchorHighlight(el);
 	}
 }
 
@@ -5911,9 +5946,17 @@ function handleSwitchTab(message: any): void {
 	// the later renderLayout would land on the default tab — swallowing e.g. the worktree
 	// notification's "Show Me" action. With activeTab set, the eventual render honors it.
 	activeTab = tab;
-	pendingTabAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
+	const requestedAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
 	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${tab}"]`);
 	btn?.click();
+	// Both anchors are set after the click, not before: the click runs the same handler that drops
+	// an insight deep link on user-driven navigation, and this navigation is the host's, not the
+	// user's. A card anchor also has to outlive the re-renders that follow; a static section
+	// anchor is stable and needs no such window.
+	pendingTabAnchor = requestedAnchor;
+	focusedInsightAnchor = requestedAnchor && isInsightCardAnchor(requestedAnchor)
+		? { anchor: requestedAnchor, until: Date.now() + INSIGHT_FOCUS_WINDOW_MS }
+		: null;
 	scrollToPendingTabAnchor();
 }
 
@@ -5922,8 +5965,83 @@ function scrollToPendingTabAnchor(): void {
 	const anchor = document.getElementById(pendingTabAnchor);
 	if (anchor) {
 		pendingTabAnchor = null;
-		setTimeout(() => anchor.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+		lastAnchorScrollTarget = anchor;
+		const timer = setTimeout(() => {
+			if (pendingInsightScrollTimer === timer) { pendingInsightScrollTimer = null; }
+			anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			flashAnchorHighlight(anchor);
+		}, 50);
+		// Only an insight scroll is tracked, and so only it is cancellable: navigating away inside
+		// the defer would otherwise still scroll and flash the card the user just left behind.
+		// Section anchors keep their existing fire-and-forget behaviour.
+		if (isInsightCardAnchor(anchor.id)) { pendingInsightScrollTimer = timer; }
 	}
+}
+
+/**
+ * Briefly outlines the element we just scrolled to. Landing on the right tab is not the same as
+ * pointing at the one card the notification was about — on a tab holding a dozen look-alike
+ * insight cards, the flash is what tells the user which one they were sent to.
+ */
+function flashAnchorHighlight(element: HTMLElement): void {
+	// Re-flashing an element that is still lit must not capture the flash's *own* outline as the
+	// styling to restore — the second timer would then "restore" the outline permanently. Reuse
+	// the styling the first flash captured and cancel its timer instead.
+	const inFlight = activeFlashes.get(element);
+	if (inFlight) { clearTimeout(inFlight.timer); }
+	// A "new" insight card already carries its own inline glow; put it back afterwards rather than
+	// clearing the property, or the flash would permanently strip the card's own styling.
+	const shadow = inFlight ? inFlight.shadow : element.style.boxShadow;
+	const transition = inFlight ? inFlight.transition : element.style.transition;
+	element.style.transition = 'box-shadow 0.3s ease';
+	element.style.boxShadow = '0 0 0 3px var(--vscode-focusBorder)';
+	const timer = setTimeout(() => {
+		activeFlashes.delete(element);
+		element.style.boxShadow = shadow;
+		element.style.transition = transition;
+	}, 2000);
+	activeFlashes.set(element, { shadow, transition, timer });
+}
+
+/**
+ * Forgets a pending insight deep link, so nothing later scrolls the user back to that card.
+ *
+ * Both halves have to go. A link whose card did not exist yet is still sitting in
+ * `pendingTabAnchor`, which `renderLayout` consumes without consulting the active tab — so
+ * leaving it set would aim a later render at a card on a tab the user has left. Static section
+ * anchors are left alone, keeping the behaviour change confined to insight deep links: the other
+ * `switchTab` callers target a section on the tab they are navigating to.
+ */
+function clearFocusedInsightAnchor(): void {
+	focusedInsightAnchor = null;
+	if (pendingTabAnchor && isInsightCardAnchor(pendingTabAnchor)) { pendingTabAnchor = null; }
+	if (pendingInsightScrollTimer !== null) {
+		clearTimeout(pendingInsightScrollTimer);
+		pendingInsightScrollTimer = null;
+	}
+}
+
+/**
+ * Re-applies a still-fresh insight anchor after the cards were rebuilt. Called from the insights
+ * re-render, where the element the pending anchor pointed at has just been replaced.
+ */
+function reapplyFocusedInsightAnchor(): void {
+	if (!focusedInsightAnchor) { return; }
+	if (Date.now() >= focusedInsightAnchor.until) {
+		focusedInsightAnchor = null;
+		return;
+	}
+	// The user may have clicked away in the meantime; re-scrolling a card on a hidden tab would
+	// only fight whatever they chose to look at instead.
+	if (activeTab !== 'insights') {
+		focusedInsightAnchor = null;
+		return;
+	}
+	const card = document.getElementById(focusedInsightAnchor.anchor);
+	// Nothing was rebuilt — we are still looking at the very node we just scrolled to.
+	if (!card || card === lastAnchorScrollTarget) { return; }
+	pendingTabAnchor = focusedInsightAnchor.anchor;
+	scrollToPendingTabAnchor();
 }
 
 // Listen for messages from the extension

@@ -349,6 +349,7 @@ import { getModelDisplayName } from '../../src/webview/shared/modelUtils';
 import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
+import { insightCardElementId } from './insightAnchors';
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
 import { getAzureTableStorageEndpoint } from './utils/azureEndpoints';
 import { isGuidMcpTool, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../src/utils/toolUtils';
@@ -745,6 +746,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _statusBarBaseText = '';
 	/** Cached top new insight title for tooltip display. */
 	private _topInsightTitle: string | null = null;
+	/** Id of the insight behind `_topInsightTitle`, so clicking the badge scrolls to that card. */
+	private _topInsightId: string | null = null;
 	/** Cached last detailed stats for tooltip rebuilding. */
 	private _lastDetailedStats: DetailedStats | undefined;
 	private tokenEstimators: Record<string, TokenEstimator> = tokenEstimatorsData.estimators;
@@ -2230,9 +2233,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.statusBarItem.text = this._devBranch ? `${text} [${this._devBranch}]` : text;
 	}
 
-	private refreshStatusBarInsightBadge(count: number, topInsightTitle?: string): void {
+	/**
+	 * Repaints the insights badge. `topInsight` is set unconditionally rather than carried over:
+	 * once the previous top insight is dismissed, snoozed or marked done, keeping it would leave
+	 * the tooltip naming — and a click scrolling to — a card that is no longer at the top of the
+	 * list. Callers that only know the count use `refreshInsightBadgeFromState`.
+	 */
+	private refreshStatusBarInsightBadge(count: number, topInsight?: { title: string; id: string }): void {
 		this._newInsightCount = count;
-		this._topInsightTitle = topInsightTitle ?? this._topInsightTitle;
+		this._topInsightTitle = topInsight?.title ?? null;
+		this._topInsightId = topInsight?.id ?? null;
 		// Main status bar: remove the 💡 badge — it now lives in its own item
 		this.setStatusBarText(this._statusBarBaseText);
 
@@ -2247,10 +2257,41 @@ class CopilotTokenTracker implements vscode.Disposable {
 			}
 			tooltip.appendMarkdown('Click to open the Insights tab');
 			this.insightsStatusBarItem.tooltip = tooltip;
+			// Pass the insight the tooltip names so the click lands on that card, not just the tab.
+			this.insightsStatusBarItem.command = this._topInsightId
+				? { command: 'aiEngineeringFluency.openInsightsTab', title: l10n.t('button.openInsightsTab'), arguments: [this._topInsightId] }
+				: 'aiEngineeringFluency.openInsightsTab';
 			this.insightsStatusBarItem.show();
 		} else {
 			this.insightsStatusBarItem.hide();
 		}
+	}
+
+	/**
+	 * Recomputes the badge so its count, tooltip and click target all describe the same, current
+	 * list. `evaluated` lets a caller that already built that list pass it in rather than
+	 * evaluating every insight twice.
+	 *
+	 * The count comes from the evaluated list rather than the persisted state bag: the bag keeps
+	 * entries for insights that no longer apply (`mergeInsightStates` adds and refreshes, never
+	 * removes), so a bag-derived count can claim insights the Insights tab does not show and name
+	 * none of them. Counting the 'new' entries of the list is exactly what the tab's own badge
+	 * does, so the two can no longer disagree. Only with no list at all — stats not loaded yet —
+	 * is the bag the only thing left to go on.
+	 */
+	private refreshInsightBadgeFromState(now: string, evaluated?: EvaluatedInsight[]): void {
+		const stats = this.lastUsageAnalysisStats;
+		const list = evaluated ?? (stats ? this.buildCurrentInsights(stats) : undefined);
+		if (!list) {
+			this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
+			return;
+		}
+		const newInsights = list.filter(i => i.status === 'new');
+		const topNew = newInsights[0];
+		this.refreshStatusBarInsightBadge(
+			newInsights.length,
+			topNew ? { title: topNew.title, id: topNew.id } : undefined,
+		);
 	}
 
 	private sendLoadingPanelMessage(msg: object): void {
@@ -3873,9 +3914,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const evaluated = _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
 		_mergeInsightStates(evaluated, this._insightStateBag, now);
 
-		const newCount = _countNewInsights(this._insightStateBag, now);
-		const topNew = evaluated.find(i => i.status === 'new');
-		this.refreshStatusBarInsightBadge(newCount, topNew?.title);
+		this.refreshInsightBadgeFromState(now, evaluated);
 
 		await this.context.globalState.update('insights.state', this._insightStateBag);
 
@@ -3906,7 +3945,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			dismiss,
 		);
 		if (choice === view) {
-			await this.showUsageAnalysisOnInsightsTab();
+			await this.showUsageAnalysisOnInsightsTab(toastCandidate.id);
 		} else if (choice === dismiss) {
 			this._insightStateBag[toastCandidate.id] = {
 				...(this._insightStateBag[toastCandidate.id] ?? { firstSurfacedAt: now }),
@@ -3914,7 +3953,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				lastSurfacedAt: now,
 			};
 			await this.context.globalState.update('insights.state', this._insightStateBag);
-			this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
+			this.refreshInsightBadgeFromState(now);
 		}
 	}
 
@@ -7988,9 +8027,14 @@ private computeFallbackDailyRollup(
 		await this.flushPendingAnalysisNavigation();
 	}
 
-	/** Opens the Usage Analysis panel and activates the Insights tab. */
-	public async showUsageAnalysisOnInsightsTab(): Promise<void> {
-		await this.showUsageAnalysisOnTab('insights');
+	/**
+	 * Opens the Usage Analysis panel and activates the Insights tab. When `insightId` is given —
+	 * the toast's "View" action, or the status-bar badge naming its top insight — the webview also
+	 * scrolls to and highlights that specific card, instead of dropping the user at the top of a
+	 * tab full of look-alike cards and leaving them to find the one they were notified about.
+	 */
+	public async showUsageAnalysisOnInsightsTab(insightId?: string): Promise<void> {
+		await this.showUsageAnalysisOnTab('insights', insightId ? insightCardElementId(insightId) : undefined);
 	}
 
 	/** Opens the Usage Analysis panel and activates the Tools & Integrations tab. */
@@ -8152,28 +8196,27 @@ private computeFallbackDailyRollup(
 			case 'seen':
 				if (existing.status === 'new') {
 					this._insightStateBag[id] = { ...existing, status: 'seen', lastSurfacedAt: now };
-					this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				}
 				break;
 			case 'dismiss':
 				this._insightStateBag[id] = { ...existing, status: 'dismissed', lastSurfacedAt: now };
-				this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				break;
 			case 'snooze': {
 				const snoozeUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 				this._insightStateBag[id] = { ...existing, status: 'snoozed', lastSurfacedAt: now, snoozeUntil };
-				this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				break;
 			}
 			case 'done':
 				this._insightStateBag[id] = { ...existing, status: 'done', lastSurfacedAt: now };
-				this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				break;
 		}
 		await this.context.globalState.update('insights.state', this._insightStateBag);
+		// Re-evaluate once and use it for both surfaces: the insight just acted on may no longer be
+		// the top 'new' one, and a badge left naming it would send a click to the wrong card.
+		const evaluated = this.lastUsageAnalysisStats ? this.buildCurrentInsights(this.lastUsageAnalysisStats) : undefined;
+		this.refreshInsightBadgeFromState(now, evaluated);
 		// Push refreshed state back to the webview
-		if (this.analysisPanel && this.lastUsageAnalysisStats) {
-			const evaluated = this.buildCurrentInsights(this.lastUsageAnalysisStats);
+		if (this.analysisPanel && evaluated) {
 			void this.analysisPanel.webview.postMessage({ command: 'updateInsights', insights: evaluated });
 		}
 	}
@@ -12979,8 +13022,12 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
 }
 
 function registerUsageNavigationCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
-  const commands: Array<[string, string, () => Promise<void>]> = [
-    ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", () => tokenTracker.showUsageAnalysisOnInsightsTab()],
+  const commands: Array<[string, string, (...args: unknown[]) => Promise<void>]> = [
+    // The status-bar insights badge passes the id of the insight its tooltip names, so the panel
+    // can scroll straight to that card. It is the only caller that passes one — the command is
+    // registered but not contributed, so there is no palette or keybinding path — and the guard
+    // keeps any other invocation (or a non-string argument) on the plain open-the-tab behaviour.
+    ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", (insightId) => tokenTracker.showUsageAnalysisOnInsightsTab(typeof insightId === 'string' ? insightId : undefined)],
     ["aiEngineeringFluency.openToolsTab", "Open Tools tab command called", () => tokenTracker.showUsageAnalysisOnToolsTab()],
     ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
     ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
@@ -12989,9 +13036,9 @@ function registerUsageNavigationCommands(context: vscode.ExtensionContext, token
     ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
   ];
   context.subscriptions.push(...commands.map(([id, logMessage, handler]) =>
-    vscode.commands.registerCommand(id, async () => {
+    vscode.commands.registerCommand(id, async (...args: unknown[]) => {
       tokenTracker.log(logMessage);
-      await handler();
+      await handler(...args);
     })
   ));
 }
