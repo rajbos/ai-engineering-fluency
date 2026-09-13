@@ -19,6 +19,15 @@ type UtcDateRanges,
 import type { ModelUsage, EditorUsage, SessionFileCache, DailyRollupEntry } from '../../../src/types';
 import { scaleModelUsage, preserveAutoRouting, reconcileDebugLogModelUsage } from '../../../src/statsHelpers';
 import { calculateEstimatedCost } from '../../../src/tokenEstimation';
+import { TASK_CATEGORIES, type TaskCategory, type TaskCategoryBreakdown } from '../../../src/taskClassification';
+
+/** Builds a full TaskCategoryBreakdown (all categories present) from a partial map of non-zero shares. */
+function makeShares(partial: Partial<Record<TaskCategory, number>>): TaskCategoryBreakdown {
+return TASK_CATEGORIES.reduce((acc, category) => {
+	acc[category] = partial[category] ?? 0;
+	return acc;
+}, {} as TaskCategoryBreakdown);
+}
 
 test('Auto subsets survive merging, scaling, reconciliation and debug-log replacement', () => {
 	const source: ModelUsage = { model: { inputTokens: 100, outputTokens: 40, sessions: 1,
@@ -525,7 +534,7 @@ mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
 sessionData: makeSession({
 taskCategory: 'Coding',
 dailyRollups: {
-'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 2, modelUsage: {}, primaryTaskCategory: 'Coding' },
 },
 }),
 };
@@ -547,6 +556,235 @@ const result = aggregatePeriodStats([input], ranges);
 const day = result.dailyStatsMap.get('2025-03-14');
 assert.ok(day, 'daily entry should exist');
 assert.deepEqual(day!.taskCategoryUsage, { Debugging: { tokens: 50, sessions: 1 } });
+});
+
+test('aggregatePeriodStats: rollup path – populates taskCategoryTokens/Sessions/ModelUsage on the daily entry (regression: By Task chart empty after periodic refresh)', () => {
+// buildTaskCategoryTokenDatasets/SessionDatasets/CostDatasets (chartDataBuilder.ts) — the
+// datasets the chart's "By Task" split actually renders from — read these three fields, not
+// taskCategoryUsage. Without them, a periodic background refresh (calculateDetailedStats ->
+// aggregatePeriodStats -> mergeIntoFullDailyStats) silently wipes the chart's task-category
+// bars for the recent day range even though taskCategoryUsage stays populated.
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+taskCategory: 'Coding',
+dailyRollups: {
+'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 2, modelUsage: { 'gpt-4o': { inputTokens: 80, outputTokens: 40, sessions: 1 } }, primaryTaskCategory: 'Coding' },
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Coding: 120 });
+assert.deepEqual(day!.taskCategorySessions, { Coding: 1 });
+// taskCategoryModelUsage is scaled by category share (scaleModelUsage), which always
+// reports sessions: 0 — session counting for this map lives in taskCategorySessions above.
+assert.deepEqual(day!.taskCategoryModelUsage, { Coding: { 'gpt-4o': { inputTokens: 80, outputTokens: 40, sessions: 0 } } });
+});
+
+test('aggregatePeriodStats: rollup path – splits a mixed session across categories using per-day taskCategoryShares', () => {
+// Regression for a PR review finding: the rollup path must weight by the day's own
+// taskCategoryShares/primaryTaskCategory (mirroring extension.ts's addUsageToDailyEntry
+// call), not collapse a multi-category session onto sessionData.taskCategory.
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+taskCategory: 'Coding',
+dailyRollups: {
+'2025-03-15': {
+tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2,
+modelUsage: { 'gpt-4o': { inputTokens: 60, outputTokens: 40, sessions: 1 } },
+primaryTaskCategory: 'Coding',
+taskCategoryShares: makeShares({ Coding: 0.75, Debugging: 0.25 }),
+},
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Coding: 75, Debugging: 25 });
+assert.deepEqual(day!.taskCategorySessions, { Coding: 0.75, Debugging: 0.25 });
+// The cost chart is driven by taskCategoryModelUsage, not taskCategoryTokens — assert it
+// separately so a regression in the per-category model-usage scaling doesn't slip through.
+assert.deepEqual(day!.taskCategoryModelUsage, {
+Coding: { 'gpt-4o': { inputTokens: 45, outputTokens: 30, sessions: 0 } },
+Debugging: { 'gpt-4o': { inputTokens: 15, outputTokens: 10, sessions: 0 } },
+});
+});
+
+test('aggregatePeriodStats: fallback path – populates taskCategoryTokens/Sessions/ModelUsage on the daily entry (regression: By Task chart empty after periodic refresh)', () => {
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-14T10:00:00.000Z').getTime(),
+lastInteraction: '2025-03-14T10:00:00.000Z',
+sessionData: makeSession({ tokens: 50, taskCategory: 'Debugging', modelUsage: { 'gpt-4o': { inputTokens: 30, outputTokens: 20, sessions: 1 } } }),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-14');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Debugging: 50 });
+assert.deepEqual(day!.taskCategorySessions, { Debugging: 1 });
+assert.deepEqual(day!.taskCategoryModelUsage, { Debugging: { 'gpt-4o': { inputTokens: 30, outputTokens: 20, sessions: 0 } } });
+});
+
+test('aggregatePeriodStats: fallback path – splits a mixed session across categories using session-level taskCategoryShares', () => {
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-14T10:00:00.000Z').getTime(),
+lastInteraction: '2025-03-14T10:00:00.000Z',
+sessionData: makeSession({
+tokens: 50,
+taskCategory: 'Debugging',
+taskCategoryShares: makeShares({ Debugging: 0.6, Testing: 0.4 }),
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-14');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Debugging: 30, Testing: 20 });
+assert.deepEqual(day!.taskCategorySessions, { Debugging: 0.6, Testing: 0.4 });
+});
+
+test('aggregatePeriodStats: rollup path – falls back to "Conversation" when neither the day nor the session has category info', () => {
+// addTaskCategoryToDailyEntry's own fallback, exercised when a pre-existing cached dailyRollup
+// predates task classification (no primaryTaskCategory/taskCategoryShares) AND the session
+// itself has no taskCategory either.
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+dailyRollups: {
+'2025-03-15': { tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Conversation: 100 });
+assert.deepEqual(day!.taskCategorySessions, { Conversation: 1 });
+});
+
+test('aggregatePeriodStats: rollup path – falls back to the session-level taskCategory (not "Conversation") when only the day rollup lacks category info', () => {
+// Regression for a PR review finding: a day rollup that predates per-day task classification
+// (no primaryTaskCategory/taskCategoryShares of its own) must still use the session's overall
+// taskCategory — both for taskCategoryUsage (consumed by efficiencyAnalysis.ts's model
+// task-mix comparison) and for the chart's per-category token/session/model-usage maps —
+// rather than silently dropping to "Conversation" when the session's category is known.
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+taskCategory: 'Refactoring',
+dailyRollups: {
+'2025-03-15': { tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryUsage, { Refactoring: { tokens: 100, sessions: 1 } });
+assert.deepEqual(day!.taskCategoryTokens, { Refactoring: 100 });
+assert.deepEqual(day!.taskCategorySessions, { Refactoring: 1 });
+});
+
+test('aggregatePeriodStats: rollup path – a "__proto__" task category is skipped and does not pollute Object.prototype', () => {
+// Regression for a PR review security finding: taskCategory/taskCategoryShares ultimately come
+// from cached/parsed session data. `if (!entry.taskCategoryModelUsage[cat]) { ... }` reads
+// through the `__proto__` accessor to the real Object.prototype (truthy, so the own-property
+// initializer is skipped) and addModelUsage would then write model fields directly onto it —
+// the same class of bug isUnsafeObjectKey already guards against for "model" keys elsewhere in
+// this file. Use JSON.parse (not an object literal) for the malicious share map so "__proto__"
+// is a genuine own property, matching how untrusted JSON actually behaves.
+const ranges = makeRanges('2025-03-15');
+const maliciousShares = JSON.parse('{"__proto__": 1, "Coding": 0}') as TaskCategoryBreakdown;
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+taskCategory: '__proto__' as TaskCategory,
+dailyRollups: {
+'2025-03-15': {
+tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2,
+modelUsage: { 'gpt-4o': { inputTokens: 10, outputTokens: 5, sessions: 1 } },
+primaryTaskCategory: '__proto__' as TaskCategory,
+taskCategoryShares: maliciousShares,
+},
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.equal(Object.prototype.hasOwnProperty.call(Object.prototype, 'gpt-4o'), false, 'Object.prototype must not gain model fields');
+assert.equal(({} as any).tokens, undefined, 'plain objects must not inherit a stray tokens field');
+assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategoryTokens ?? {}, '__proto__'), false);
+assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategorySessions ?? {}, '__proto__'), false);
+assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategoryModelUsage ?? {}, '__proto__'), false);
+assert.equal(Object.prototype.hasOwnProperty.call(day!.taskCategoryUsage ?? {}, '__proto__'), false);
+});
+
+test('aggregatePeriodStats: rollup path – an all-zero taskCategoryShares breakdown falls back to the primary category', () => {
+// Regression for a PR review finding: TaskCategoryBreakdown is always a full, all-categories
+// map, so `Object.keys(taskCategoryShares).length > 0` is always true even when every share is
+// 0 — that alone must not be treated as "meaningful shares", or every category gets filtered
+// out by the `share <= 0` check below and the entry ends up with no attribution at all.
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+taskCategory: 'Testing',
+dailyRollups: {
+'2025-03-15': {
+tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2, modelUsage: {},
+primaryTaskCategory: 'Testing',
+taskCategoryShares: makeShares({}),
+},
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Testing: 100 });
+assert.deepEqual(day!.taskCategorySessions, { Testing: 1 });
+});
+
+test('aggregatePeriodStats: rollup path – falls back to "Conversation" when the only known category is unsafe and there are no shares', () => {
+// Regression for a PR review finding: an unsafe taskCategory (e.g. "__proto__") must not become
+// the sole entry in the shares fallback map (`{ [taskCategory]: 1 }`), which would then get
+// filtered out by isUnsafeObjectKey inside the loop and leave the entry with no attribution —
+// it should fall through to the "Conversation" default instead, same as no category at all.
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+dailyRollups: {
+'2025-03-15': {
+tokens: 100, actualTokens: 100, thinkingTokens: 0, interactions: 2, modelUsage: {},
+primaryTaskCategory: '__proto__' as TaskCategory,
+},
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15');
+assert.ok(day, 'daily entry should exist');
+assert.deepEqual(day!.taskCategoryTokens, { Conversation: 100 });
+assert.deepEqual(day!.taskCategorySessions, { Conversation: 1 });
 });
 
 test('aggregatePeriodStats: rollup path – counts sub-agent sessions once per period', () => {
