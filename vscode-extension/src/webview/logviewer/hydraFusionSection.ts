@@ -10,6 +10,7 @@
 // file and is therefore untrusted; all of them go through `escapeHtml` before rendering.
 
 import { escapeHtml, formatCompact, formatCost, formatPercent } from '../shared/formatUtils';
+import { localize, localizeFormat } from '../shared/localization';
 import { aiuToUsd } from '../../../../src/hydrafusion';
 import type {
 	HydraFusionPhase,
@@ -106,7 +107,7 @@ function renderHeadlineCards(summary: HydraFusionSummary): string {
 	));
 
 	cards.push(renderCard(
-		'💳', 'Cost', formatFusionCost(summary.totalAiu),
+		'💳', localize('logviewer.hydrafusion.cost'), formatFusionCost(summary.totalAiu),
 		`${summary.totalLegs} legs · ${summary.totalRequestCount} inference calls`,
 		'Cost of the AI credits the CLI itself reported (1 credit = $0.01), summed from each turn\'s rollup. Legs are router hops; inference calls are model round trips across all of them.',
 	));
@@ -167,7 +168,7 @@ function renderModelTable(summary: HydraFusionSummary): string {
 <th scope="col">Model</th>
 <th scope="col" title="Router hops this model served">Legs</th>
 <th scope="col" title="Turns where this model produced the final answer">Answers</th>
-<th scope="col">Cost</th>
+<th scope="col">${localize('logviewer.hydrafusion.cost')}</th>
 <th scope="col"><span class="hydra-sr-only">Share of credits</span></th>
 <th scope="col">Input</th>
 <th scope="col">Output</th>
@@ -197,7 +198,7 @@ function renderPhaseLedger(summary: HydraFusionSummary): string {
 <thead><tr>
 <th scope="col">Phase</th>
 <th scope="col">Legs</th>
-<th scope="col">Cost</th>
+<th scope="col">${localize('logviewer.hydrafusion.cost')}</th>
 <th scope="col"><span class="hydra-sr-only">Share of credits</span></th>
 </tr></thead>
 <tbody>${rows}</tbody>
@@ -254,7 +255,7 @@ export function renderLegsTable(phases: HydraFusionPhase[]): string {
 <th scope="col" title="Inference calls this leg made">Calls</th>
 <th scope="col">Input</th>
 <th scope="col">Output</th>
-<th scope="col">Cost</th>
+<th scope="col">${localize('logviewer.hydrafusion.cost')}</th>
 </tr></thead>
 <tbody>${legs}</tbody>
 </table>`;
@@ -284,10 +285,10 @@ export function renderTurnRow(turn: HydraFusionTurn, index: number, chatTurnNumb
 <span class="hydra-pattern-badge ${patternClass(turn.pattern)}" title="${escapeHtml(patternTitle(turn.pattern))}">${escapeHtml(turn.pattern)}</span>
 <span class="hydra-turn-chain">${renderModelChain(turn)}</span>
 <span class="hydra-turn-metrics">
-<span title="Cost for this turn"><strong>${escapeHtml(formatFusionCost(turn.aiu))}</strong></span>
+<span title="${localize('logviewer.hydrafusion.costForTurn')}"><strong>${escapeHtml(formatFusionCost(turn.aiu))}</strong></span>
 <span title="Wall-clock time for the whole turn">${escapeHtml(formatFusionDuration(turn.durationMs))}</span>
 <span title="Router hops in this turn">${turn.phases.length} leg${turn.phases.length === 1 ? '' : 's'}</span>
-${canJumpToStep ? `<span class="hydra-jump-to-step" data-turn="${chatTurnNumber}" title="Jump to step #${chatTurnNumber} in the Session Steps Overview below" role="button" tabindex="0">⤵ step #${chatTurnNumber}</span>` : ''}
+${canJumpToStep ? `<span class="hydra-jump-to-step" data-turn="${chatTurnNumber}" title="${escapeHtml(localizeFormat('logviewer.hydrafusion.jumpToStepTitle', chatTurnNumber))}" role="button" tabindex="0">⤵ ${escapeHtml(localizeFormat('logviewer.hydrafusion.jumpToStepLabel', chatTurnNumber))}</span>` : ''}
 </span>
 </summary>
 <div class="hydra-turn-body">
@@ -327,7 +328,7 @@ ${renderPhaseLedger(summary)}
 </div>
 <div class="hydra-panel hydra-turns-panel">
 <div class="hydra-panel-title">🧩 One turn in detail</div>
-<div class="hydra-panel-sub">Expand a turn to see each leg, what it decided, and what it cost. ● marks the leg whose output you actually received; ✗ marks a leg a judge rejected. The same legs also appear under their step in the Session Steps Overview below.</div>
+<div class="hydra-panel-sub">${localize('logviewer.hydrafusion.turnDetailIntro')}</div>
 <div class="hydra-turns">${summary.turns.map((t, i) => renderTurnRow(t, i, chatTurnMatches?.get(i) ?? null)).join('')}</div>
 </div>
 </div>`;
