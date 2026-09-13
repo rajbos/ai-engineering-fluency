@@ -32,6 +32,27 @@ export interface WebviewLocalization {
 	'usage.contextPressure.worstFill': string;
 	'usage.contextPressure.nearLimitTooltip': string;
 
+	// Usage view — GitHub activity (Repository PRs / Cloud Agent) freshness banner
+	'usage.githubActivity.refreshNow': string;
+	'usage.githubActivity.refreshNowTooltip': string;
+	'usage.githubActivity.notFetchedTitle': string;
+	'usage.githubActivity.notFetchedBody': string;
+	'usage.githubActivity.revalidatingTitle': string;
+	'usage.githubActivity.revalidatingBody': string;
+	'usage.githubActivity.updated': string;
+	'usage.githubActivity.unknownNextRefresh': string;
+	'usage.githubActivity.cachePolicy': string;
+	'usage.githubActivity.partialTitle': string;
+	'usage.githubActivity.retryHint': string;
+	'usage.githubActivity.partialRepoPrs': string;
+	'usage.githubActivity.partialAgentTasks': string;
+	'usage.githubActivity.tasksScannedTooltip': string;
+	'usage.githubActivity.tasksScannedLabel': string;
+	'usage.githubActivity.lowerBoundNote': string;
+	'usage.githubActivity.accountTasksIncomplete': string;
+	'usage.githubActivity.accountTasksUnavailable': string;
+	'usage.githubActivity.accountTasksUnknownReason': string;
+
 	// Details view — collapsible "Usage by Editor" section heading tooltips
 	'details.editorSection.show': string;
 	'details.editorSection.hide': string;
@@ -102,6 +123,25 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'usage.contextPressure.nearLimitLabel': '⚠️ Sessions near the limit',
 	'usage.contextPressure.worstFill': 'Fullest session reached {0}% of its window',
 	'usage.contextPressure.nearLimitTooltip': 'Copilot CLI sessions that filled at least {0}% of their context window without compacting — the early-warning band before context starts getting dropped',
+	'usage.githubActivity.refreshNow': '🔄 Refresh now',
+	'usage.githubActivity.refreshNowTooltip': 'Revalidate the cached GitHub data now instead of waiting for the next hourly refresh',
+	'usage.githubActivity.notFetchedTitle': 'Not fetched yet.',
+	'usage.githubActivity.notFetchedBody': 'The snapshot is refreshed hourly by whichever VS Code window takes it on — it will appear here once that first refresh completes.',
+	'usage.githubActivity.revalidatingTitle': 'Revalidating.',
+	'usage.githubActivity.revalidatingBody': 'Showing the cached snapshot from {0} while it is refreshed.',
+	'usage.githubActivity.updated': '🕒 Updated {0} · next refresh after {1}.',
+	'usage.githubActivity.unknownNextRefresh': 'unknown',
+	'usage.githubActivity.cachePolicy': 'Automatically revalidated at most once an hour, by a single VS Code window, to keep GitHub API usage low — Refresh now asks for one straight away.',
+	'usage.githubActivity.partialTitle': 'Partial data — the figures below are a lower bound.',
+	'usage.githubActivity.retryHint': 'Use Refresh now above to retry — details are in the extension Output channel.',
+	'usage.githubActivity.partialRepoPrs': 'At least one repository listing did not complete (an error, a timeout, or the page cap), so some pull requests in the window are not counted.',
+	'usage.githubActivity.partialAgentTasks': 'Some tasks were not detailed this pass — the task-detail budget was exhausted, or a task listing did not complete.',
+	'usage.githubActivity.tasksScannedTooltip': 'Showing {0} of {1} tasks — the rest could not be counted this pass, so these figures are a lower bound',
+	'usage.githubActivity.tasksScannedLabel': '({0}/{1} tasks scanned)',
+	'usage.githubActivity.lowerBoundNote': 'Note: some figures could not be counted this pass — a listing did not complete, a detail call failed, or the detail budget ran out — so these totals are lower bounds.',
+	'usage.githubActivity.accountTasksIncomplete': 'The account-wide task listing stopped early ({0}) — tasks outside your workspace repositories may be missing.',
+	'usage.githubActivity.accountTasksUnavailable': 'Account-wide tasks unavailable ({0}) — only workspace repositories are shown.',
+	'usage.githubActivity.accountTasksUnknownReason': 'the /agents/tasks endpoint could not be read',
 	'details.editorSection.show': 'Show Usage by Editor',
 	'details.editorSection.hide': 'Hide Usage by Editor',
 	'logviewer.summary.interactions': 'Interactions',

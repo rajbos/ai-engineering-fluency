@@ -86,3 +86,11 @@ pr-risk/
 # Generated cloud-agent session cache from copilot-setup-steps; contains only
 # ephemeral fetched timestamps/counts and is recreated on demand.
 usage-data/agent-sessions.json
+
+# Scratch directories the unit tests create next to the extension when a fixture
+# is not cleaned up (isolated temp dirs named after the suite that made them).
+# They are pure test debris and must never be committed.
+vscode-extension/ctt-*/
+vscode-extension/pi-test-*/
+vscode-extension/pi-discover-*/
+vscode-extension/contract-fixture-*/
