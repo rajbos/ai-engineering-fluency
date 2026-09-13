@@ -25,6 +25,15 @@ export class CacheManager {
 	private static readonly CHECKPOINT_INTERVAL_MS = 20_000;
 
 	private sessionFileCache: Map<string, SessionFileCache> = new Map();
+	// Paths explicitly removed via deleteCachedSessionData(), for the lifetime of this
+	// CacheManager instance. writeSharedSnapshot()'s merge starts from whatever is already on
+	// disk (so a window with a partial in-memory cache can never regress a richer published
+	// snapshot — see its own doc comment) — without tracking deletions separately, that same
+	// merge would silently resurrect a path removed from `sessionFileCache` the moment it's
+	// no longer present in memory to overwrite the stale on-disk copy. Tombstones let the merge
+	// tell "never seen this session" (leave the disk copy alone) apart from "seen and removed"
+	// (must not survive the merge).
+	private deletedFilePaths: Set<string> = new Set();
 	private readonly context: vscode.ExtensionContext;
 	private readonly deps: CacheManagerDeps;
 	private readonly cacheVersion: number;
@@ -78,10 +87,25 @@ export class CacheManager {
 		}
 		const isActualNewEntry = isNewEntry && !this.sessionFileCache.has(filePath);
 		this.sessionFileCache.set(filePath, data);
+		// A path can be legitimately rediscovered after being deleted (see deleteCachedSessionData);
+		// a stale tombstone must not keep blocking it from ever being persisted again.
+		this.deletedFilePaths.delete(filePath);
 		this.policy.evict(this.sessionFileCache);
 		if (isActualNewEntry) {
 			this.entriesSinceLastCheckpoint++;
 		}
+	}
+
+	/**
+	 * Removes a cache entry and records a tombstone so it does not get silently resurrected by
+	 * writeSharedSnapshot()'s merge (which starts from whatever is already on disk) the next time
+	 * the cache is saved. Prefer this over `cache.delete(path)` directly for any deletion whose
+	 * effect must actually survive a save — an in-memory-only delete is undone by the very next
+	 * saveCacheToStorage()/checkpoint.
+	 */
+	deleteCachedSessionData(filePath: string): void {
+		this.sessionFileCache.delete(filePath);
+		this.deletedFilePaths.add(filePath);
 	}
 
 	async clearExpiredCache(): Promise<void> {
@@ -94,7 +118,7 @@ export class CacheManager {
 					try {
 						await fs.promises.access(filePath);
 					} catch {
-						this.sessionFileCache.delete(filePath);
+						this.deleteCachedSessionData(filePath);
 					}
 				})
 			);
@@ -674,6 +698,11 @@ export class CacheManager {
 	private async buildMergedSnapshotEntries(): Promise<Record<string, SessionFileCache>> {
 		const existing = await this.readSharedSnapshot();
 		const merged: Record<string, SessionFileCache> = existing ? { ...existing } : {};
+		// A path removed via deleteCachedSessionData() must not be resurrected from whatever
+		// another (or this) window already published to disk — see deletedFilePaths' doc comment.
+		for (const deletedPath of this.deletedFilePaths) {
+			delete merged[deletedPath];
+		}
 		for (const [filePath, entry] of this.sessionFileCache) {
 			const prev = merged[filePath];
 			if (!prev || (typeof entry.mtime === 'number' && entry.mtime >= prev.mtime)) {

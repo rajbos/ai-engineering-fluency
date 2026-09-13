@@ -1355,9 +1355,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.lastEfficiencySessionInputs = undefined;
 		const results: LocalViewRegressionResult[] = [];
 		let dataSourceLabel = 'local session data';
+		// Populated once setupRegressionSessionFiles() resolves, so the finally block can evict
+		// exactly these entries from cacheManager.cache — see the finally block's comment for why.
+		let regressionSessionFiles: string[] = [];
 		try {
 			const setup = await this.setupRegressionSessionFiles(dataSourceLabel);
 			dataSourceLabel = setup.dataSourceLabel;
+			regressionSessionFiles = setup.sessionFiles;
 			this.log(`🧪 Starting local view regression using ${dataSourceLabel}. Found ${setup.sessionFiles.length} session file(s).`);
 			const stats = await this.computeRegressionStats(dataSourceLabel, setup.sessionFiles);
 			const cases = this.buildLocalViewRegressionCases(stats, setup.sessionFiles);
@@ -1369,6 +1373,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.pendingLocalViewRegressionProbe = undefined;
 			this.localRegressionSampleDataDir = previousSampleDir;
 			this.sessionDiscovery.clearCache();
+			// setupRegressionSessionFiles() falls back to the bundled fixture directory only when
+			// this machine has zero real session files (the common case in a clean CI runner —
+			// exactly where the visual-view-diff/screenshot harness runs); computeRegressionStats()
+			// then parses those fixture files through the normal pipeline, which unconditionally
+			// populates cacheManager.cache (getSessionFileDataCached() -> setCachedSessionData()).
+			// persistRefreshResult()/maybeCheckpointCache() being skipped in sample-data mode only
+			// stops that from reaching disk — it does nothing about the in-memory cache, which
+			// getDeduplicatedCacheEntries() (the cache-only instant paint, the cache-seeded preload
+			// queue) reads directly. Without evicting here, the very next normal refresh in this
+			// same session — no restart needed — would seed/paint from these fixture entries
+			// alongside or instead of real ones. Safe to always evict, even when this run used real
+			// session data instead of fixtures: those entries are legitimately rediscoverable, so
+			// this costs at most one avoidable reparse on the next refresh, not a correctness loss.
+			for (const sessionFile of regressionSessionFiles) {
+				this.cacheManager.deleteCachedSessionData(sessionFile);
+			}
 			this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = this.lastDashboardData = undefined;
 			this.lastEfficiencySessionInputs = undefined;
 		}
@@ -3262,21 +3282,37 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * partial/flaky scan must never silently zero out real, still-valid cached sessions just
 	 * because one adapter hiccuped.
 	 *
-	 * Unconfirmed entries are evicted from `cacheManager.cache` too, not just filtered out of the
-	 * returned array — otherwise this run's own `preloaded`/stats are correct, but the *next*
-	 * boot's cache-only instant paint (which reads the cache directly, before any discovery has
-	 * even run) would still resurrect the same stale entry, since nothing ever removed it from
-	 * the underlying cache.
+	 * Unconfirmed entries are evicted via cacheManager.deleteCachedSessionData() (which tombstones
+	 * the path so writeSharedSnapshot()'s merge — which starts from whatever is already on disk —
+	 * cannot silently resurrect it on the very next save) rather than filtered out of the returned
+	 * array alone — otherwise this run's own `preloaded`/stats are correct, but the *next* boot's
+	 * cache-only instant paint (which reads the cache directly, before any discovery has even run)
+	 * would still resurrect the same stale entry.
+	 *
+	 * Every raw cache key that normalizes to an unconfirmed path is evicted, not just the one
+	 * `preloaded` happened to carry (the winner getDeduplicatedCacheEntries() picked) — a
+	 * same-file spelling variant that lost that dedup never appears in `preloaded` at all, but
+	 * would still be sitting in the cache ready to become the new "winner" once the current one
+	 * is gone.
 	 */
 	private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {
 		if (this.sessionDiscovery.lastDiscoveryHadError || sessionFiles.length === 0) { return preloaded; }
 		const confirmedKeys = new Set(sessionFiles.map(f => _normalizePathForDedup(f)));
 		const kept: SessionFilePreload[] = [];
+		const unconfirmedNormalizedKeys = new Set<string>();
 		for (const p of preloaded) {
-			if (confirmedKeys.has(_normalizePathForDedup(p.sessionFile))) {
+			const key = _normalizePathForDedup(p.sessionFile);
+			if (confirmedKeys.has(key)) {
 				kept.push(p);
 			} else {
-				this.cacheManager.cache.delete(p.sessionFile);
+				unconfirmedNormalizedKeys.add(key);
+			}
+		}
+		if (unconfirmedNormalizedKeys.size > 0) {
+			for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
+				if (unconfirmedNormalizedKeys.has(_normalizePathForDedup(rawPath))) {
+					this.cacheManager.deleteCachedSessionData(rawPath);
+				}
 			}
 		}
 		return kept;
@@ -3616,6 +3652,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('computing'); }
 
 		const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
+		// Set as soon as the verified result exists, before any of the (some awaited, some
+		// network-bound — see computeAndUploadFluencyScore below) publication steps that follow.
+		// renderInstantStatsFromCache() (if still in flight) checks this right before committing
+		// its own, older cache-only results — it must never see this as false once real data has
+		// already started being published, or it can overwrite an already-correct status bar.
+		this._hasCompletedRealRefresh = true;
 		this.lastDailyStats = dailyStats;
 		this.mergeIntoFullDailyStats(dailyStats);
 
@@ -3630,9 +3672,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
 		this.lastDetailedStats = detailedStats;
-		// From this point on, renderInstantStatsFromCache() (if still in flight) must not commit
-		// its stale, cache-only results over these verified ones — see _hasCompletedRealRefresh.
-		this._hasCompletedRealRefresh = true;
 
 		this.persistRefreshResult(isLeader);
 

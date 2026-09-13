@@ -368,3 +368,60 @@ test('migrateOldCacheKeys: removes all sessionFileCache* keys from globalState',
 	// Unrelated keys must be preserved
 	assert.equal(context.globalState.get('github.authenticated'), true);
 });
+
+// ---------------------------------------------------------------------------
+// deleteCachedSessionData: deletion must survive a save (issue found in PR #2080
+// review — writeSharedSnapshot()'s merge starts from whatever is already on disk, so a
+// plain cache.delete() is silently resurrected by the very next save)
+// ---------------------------------------------------------------------------
+
+test('deleteCachedSessionData() tombstones the path so a later writeSharedSnapshot() cannot resurrect it from disk', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+	await m.writeSharedSnapshot();
+
+	m.deleteCachedSessionData('/a.json');
+	await m.writeSharedSnapshot();
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(entries, 'snapshot should still be readable');
+	assert.equal(Object.keys(entries!).length, 1, 'the deleted entry must not survive a later save');
+	assert.ok(!('/a.json' in entries!), '/a.json must be gone from the persisted snapshot, not resurrected from the disk copy written before the delete');
+	assert.equal(entries!['/b.json'].mtime, 2000, 'an unrelated entry must be untouched');
+});
+
+// This documents *why* deleteCachedSessionData() (not a plain `cache.delete()`) is required: it
+// proves writeSharedSnapshot()'s merge really does resurrect an in-memory-only delete from the
+// on-disk copy written before it. If this test ever starts failing because the merge stopped
+// reading from disk first, deleteCachedSessionData()'s tombstone becomes unnecessary — that's a
+// signal to revisit it, not a reason to delete this test.
+test('a plain cache.delete() (no tombstone) is resurrected by the next writeSharedSnapshot() — the exact bug deleteCachedSessionData() exists to avoid', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot();
+
+	m.cache.delete('/a.json');
+	await m.writeSharedSnapshot();
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(entries && '/a.json' in entries!,
+		'a plain cache.delete() is expected to be resurrected by the merge — this is exactly the bug deleteCachedSessionData() exists to avoid');
+});
+
+test('setCachedSessionData() clears a stale tombstone, so a rediscovered path can be persisted again', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot();
+
+	m.deleteCachedSessionData('/a.json');
+	m.setCachedSessionData('/a.json', entry(3000), 10); // rediscovered with a newer mtime
+	await m.writeSharedSnapshot();
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(entries && '/a.json' in entries!, 'a path re-added after deletion must not be permanently blocked by its old tombstone');
+	assert.equal(entries!['/a.json'].mtime, 3000);
+});

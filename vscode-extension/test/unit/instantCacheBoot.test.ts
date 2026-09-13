@@ -207,7 +207,7 @@ test('reconcilePreloadedAgainstDiscovery() only trusts a clean, non-empty discov
 	assert.ok(/if \(this\.sessionDiscovery\.lastDiscoveryHadError \|\| sessionFiles\.length === 0\) \{ ?return preloaded; ?\}/.test(body),
 		'must return `preloaded` unfiltered whenever this run\'s discovery errored or found nothing — pruning must only ever run on a run we can actually trust');
 
-	assert.ok(/_normalizePathForDedup\(f\)/.test(body) && /confirmedKeys\.has\(_normalizePathForDedup\(p\.sessionFile\)\)/.test(body),
+	assert.ok(/_normalizePathForDedup\(f\)/.test(body) && /const key = _normalizePathForDedup\(p\.sessionFile\);/.test(body) && /confirmedKeys\.has\(key\)/.test(body),
 		'the confirmed-by-discovery comparison must use _normalizePathForDedup() on both sides, matching the dedup key used everywhere else in this method');
 });
 
@@ -324,17 +324,35 @@ test('renderInstantStatsFromCache() never overwrites a real refresh that already
 	assert.ok(calcIndex !== -1 && guardIndex !== -1 && commitIndex !== -1 && calcIndex < guardIndex && guardIndex < commitIndex,
 		'renderInstantStatsFromCache() must check _hasCompletedRealRefresh after awaiting calculateDetailedStats but before committing its own results — otherwise a real refresh that finishes first can be silently overwritten by this slower, stale cache-only computation');
 
+	// The flag must be set as soon as _runRefreshCore()'s own verified result exists — right after
+	// its own calculateDetailedStats() resolves — and specifically BEFORE updateStatusBarAndTooltip()
+	// publishes it to the UI. Setting it any later (e.g. after the slower, some-awaited/some-network
+	// steps like computeAndUploadFluencyScore that follow) would leave a wide window where the real
+	// refresh has already redrawn the status bar, but renderInstantStatsFromCache() still sees the
+	// flag as false and can overwrite that already-correct UI with its own, older cache-only result.
 	const refreshBody = extractBracesBlock(EXTENSION_SRC, 'private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {');
+	const refreshCalcIndex = refreshBody.indexOf('await this.calculateDetailedStats(undefined, preloaded)');
 	const flagSetIndex = refreshBody.indexOf('this._hasCompletedRealRefresh = true;');
-	const lastDetailedStatsIndex = refreshBody.indexOf('this.lastDetailedStats = detailedStats;');
-	assert.ok(flagSetIndex !== -1 && lastDetailedStatsIndex !== -1 && lastDetailedStatsIndex <= flagSetIndex,
-		'_runRefreshCore() must set _hasCompletedRealRefresh only once its own results are actually published (after this.lastDetailedStats is set)');
+	const statusBarIndex = refreshBody.indexOf('this.updateStatusBarAndTooltip(detailedStats);');
+	assert.ok(refreshCalcIndex !== -1 && flagSetIndex !== -1 && statusBarIndex !== -1 && refreshCalcIndex < flagSetIndex && flagSetIndex < statusBarIndex,
+		'_runRefreshCore() must set _hasCompletedRealRefresh immediately after its own calculateDetailedStats() resolves, before updateStatusBarAndTooltip() (and every slower step after it) — not after the UI is already published');
 });
 
-test('reconcilePreloadedAgainstDiscovery() evicts unconfirmed entries from the cache itself, not just from the returned array', () => {
+test('reconcilePreloadedAgainstDiscovery() evicts every raw cache key for an unconfirmed path, via the tombstone-aware deleteCachedSessionData()', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {');
-	assert.ok(body.includes('this.cacheManager.cache.delete(p.sessionFile)'),
-		'must delete() an unconfirmed entry from cacheManager.cache, not only exclude it from the returned `preloaded` — otherwise a future boot\'s cache-only instant paint (which reads the cache directly, before any discovery) keeps resurrecting it');
+	assert.ok(body.includes('this.cacheManager.deleteCachedSessionData(rawPath)'),
+		'must evict via cacheManager.deleteCachedSessionData() (which tombstones the path), not a plain cache.delete() — a plain delete is silently resurrected by the very next saveCacheToStorage(), whose merge starts from whatever is already on disk (see cacheManager-snapshot.test.ts)');
+	assert.ok(!/this\.cacheManager\.cache\.delete\(/.test(body),
+		'must not touch cacheManager.cache directly — deletions here must always go through the tombstone-aware deleteCachedSessionData()');
+
+	// Must sweep every raw key in the cache that normalizes to an unconfirmed path, not only the
+	// one `preloaded` happened to carry (the dedup winner) — a same-file spelling variant that lost
+	// getDeduplicatedCacheEntries()'s dedup never appears in `preloaded`, but would still be sitting
+	// in the cache ready to become the new "winner" once the current one is evicted.
+	assert.ok(/for \(const rawPath of Array\.from\(this\.cacheManager\.cache\.keys\(\)\)\)/.test(body),
+		'must scan all raw cache keys (not just the preloaded winners) when evicting unconfirmed entries');
+	assert.ok(/unconfirmedNormalizedKeys\.has\(_normalizePathForDedup\(rawPath\)\)/.test(body),
+		'must match raw cache keys against the unconfirmed set via _normalizePathForDedup(), so a differently-cased/separated duplicate of an unconfirmed path is evicted too');
 });
 
 test('_preloadSessionFiles() always schedules clearExpiredCache(), even when this run\'s discovery came back empty', () => {
@@ -355,4 +373,25 @@ test('sample-data mode never writes to the shared on-disk cache snapshot: neithe
 	const preloadBody = extractBracesBlock(EXTENSION_SRC, 'preloaded: SessionFilePreload[] }> {');
 	assert.ok(/processed % 25 === 0 && !this\.isSampleDataModeActive\(\)/.test(preloadBody),
 		'the mid-parse checkpoint (maybeCheckpointCache(), which also writes the shared snapshot directly) must skip sample-data mode too, or it can persist fixture data even when persistRefreshResult() itself is correctly guarded');
+});
+
+test('runLocalViewRegression() evicts its own session files from the in-memory cache when it finishes', () => {
+	// Skipping the on-disk save (see the sample-data-mode test above) does not stop a regression
+	// pass from writing fixture entries into the IN-MEMORY cache — computeRegressionStats() runs
+	// the normal preload pipeline, whose getSessionFileDataCached() unconditionally calls
+	// setCachedSessionData() regardless of sample mode. Without eviction here, the very next
+	// normal refresh in this same session (no restart needed) would seed/paint from those fixture
+	// entries via getDeduplicatedCacheEntries(), which reads the cache directly.
+	const body = extractBracesBlock(EXTENSION_SRC, 'public async runLocalViewRegression(): Promise<void> {');
+
+	assert.ok(body.includes('regressionSessionFiles = setup.sessionFiles;'),
+		'must capture the exact session files (real or bundled-fixture) the regression pass used');
+
+	const finallyIndex = body.indexOf('} finally {');
+	const evictionIndex = body.indexOf('this.cacheManager.deleteCachedSessionData(sessionFile);');
+	assert.ok(finallyIndex !== -1 && evictionIndex !== -1 && evictionIndex > finallyIndex,
+		'must evict the regression run\'s own session files from the cache (via the tombstone-aware deleteCachedSessionData(), for consistency/defense-in-depth even though nothing should have reached disk during sample mode) in the finally block, so it always runs — even if the regression pass itself throws');
+
+	assert.ok(/for \(const sessionFile of regressionSessionFiles\)/.test(body),
+		'must loop over every captured regression session file, not just one');
 });
