@@ -103,6 +103,15 @@ test('renderInstantStatsFromCache() renders from the cache alone, with no discov
 	assert.ok(/if \(this\.cacheManager\.cache\.size === 0\) \{ ?return; ?\}/.test(body),
 		'must return early when the cache is empty instead of rendering an empty/misleading first paint');
 
+	// Iterates the deduplicated view of the cache, not the raw Map directly — the snapshot is
+	// keyed by whatever raw path string was recorded at write time, so two separator/case
+	// variants of the same physical file (e.g. on Windows) can coexist as separate entries and
+	// would otherwise get summed as if they were two different sessions.
+	assert.ok(body.includes('this.getDeduplicatedCacheEntries()'),
+		'must iterate getDeduplicatedCacheEntries(), not this.cacheManager.cache directly — a raw iteration can double-count a file that has two path-spelling variants in the cache');
+	assert.ok(!/for \(const \[sessionFile, sessionData\] of this\.cacheManager\.cache\)/.test(body),
+		'must not iterate this.cacheManager.cache directly — see getDeduplicatedCacheEntries()');
+
 	// Builds preload entries straight from cache and renders the same way a real refresh does.
 	assert.ok(body.includes('this.buildMinimalPreloadDetails('), 'must reuse buildMinimalPreloadDetails() to build SessionFileDetails without a fresh parse');
 	assert.ok(body.includes('this.calculateDetailedStats(undefined, preloaded)'), 'must aggregate stats via calculateDetailedStats() like the real refresh does');
@@ -182,10 +191,15 @@ test('reconcilePreloadedAgainstDiscovery() only trusts a clean, non-empty discov
 		'the confirmed-by-discovery comparison must use _normalizePathForDedup() on both sides, matching the dedup key used everywhere else in this method');
 });
 
-test('seedPreloadQueueFromCache() skips sample-data mode, normalizes seen keys, and populates editorSet for cache-seeded paths', () => {
+test('seedPreloadQueueFromCache() skips sample-data mode, seeds from the deduplicated cache view, normalizes seen keys, and populates editorSet', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, editorSet?: Set<string>): number {');
 	const sampleGuardIndex = body.indexOf('if (this.isSampleDataModeActive()) { return 0; }');
 	assert.ok(sampleGuardIndex !== -1, 'must skip seeding entirely in sample-data mode — otherwise real cached sessions get mixed into a screenshot/regression fixture run');
+
+	// Must source cachedPaths from the deduplicated view, not the raw cache Map — otherwise two
+	// path-spelling variants of the same file in the cache both get queued and double-counted.
+	assert.ok(body.includes('this.getDeduplicatedCacheEntries().map(([filePath]) => filePath)'),
+		'cachedPaths must come from getDeduplicatedCacheEntries(), not Array.from(this.cacheManager.cache.keys()) — the raw keys can contain multiple spellings of the same physical file');
 
 	assert.ok(/seen\.add\(_normalizePathForDedup\(p\)\)/.test(body),
 		'must normalize cached paths with _normalizePathForDedup() before adding to `seen`, matching the discovery-side check');
@@ -194,6 +208,42 @@ test('seedPreloadQueueFromCache() skips sample-data mode, normalizes seen keys, 
 		'must call detectEditorSource() for cache-seeded paths, or the loading UI editor pills will silently miss editors only known from the cache');
 	assert.ok(body.includes('queue.push(...cachedPaths)'), 'must push the cached (un-normalized) paths onto the shared queue — downstream stat/parse code needs the real path, not the dedup key');
 	assert.ok(body.includes('return cachedPaths.length'), 'must return the seeded count so the caller can fold it into totalDiscovered');
+});
+
+// A structural "does the source call getDeduplicatedCacheEntries()" assertion (see the tests
+// above) can't tell you the dedup itself is correct — only that something with that name got
+// called. This proves the actual behavior both consumers depend on: given a cache with two
+// path-spelling variants of the same physical file, exactly one entry (the newer by mtime)
+// survives. getDeduplicatedCacheEntries() is a private method on CopilotTokenTracker, which
+// can't be instantiated outside a full VS Code host (see the file header), so this reimplements
+// its exact, small algorithm against a plain Map fixture — a stand-in for `cacheManager.cache`
+// — to verify the algorithm itself, mirroring how normalizePathForDedup()'s own behavior is
+// proven directly in utils-pathUtils.test.ts rather than only asserted-as-called here.
+test('the dedup-by-normalized-key-keep-newer-mtime algorithm getDeduplicatedCacheEntries() implements keeps exactly one winner per physical file', () => {
+	type MinimalCacheEntry = { mtime: number };
+	function dedupeByNormalizedKeyKeepNewer(cache: Map<string, MinimalCacheEntry>): [string, MinimalCacheEntry][] {
+		const winners = new Map<string, [string, MinimalCacheEntry]>();
+		for (const [filePath, data] of cache) {
+			const key = normalizePathForDedup(filePath, 'win32');
+			const existing = winners.get(key);
+			if (!existing || data.mtime > existing[1].mtime) {
+				winners.set(key, [filePath, data]);
+			}
+		}
+		return Array.from(winners.values());
+	}
+
+	const cache = new Map<string, MinimalCacheEntry>([
+		['C:\\Users\\dev\\.copilot\\session.json', { mtime: 1000 }],
+		['c:/Users/dev/.copilot/session.json', { mtime: 2000 }],
+		['C:\\Users\\dev\\.claude\\other.json', { mtime: 500 }],
+	]);
+
+	const deduped = dedupeByNormalizedKeyKeepNewer(cache);
+	assert.equal(deduped.length, 2, 'two spelling variants of the same physical file must collapse to one entry');
+	const sessionEntry = deduped.find(([, data]) => data.mtime === 2000 || data.mtime === 1000);
+	assert.ok(sessionEntry, 'the session.json entry must survive under one of its two spellings');
+	assert.equal(sessionEntry![1].mtime, 2000, 'must keep the newer-mtime variant, not an arbitrary/first one');
 });
 
 // A structural "does the source call _normalizePathForDedup()" assertion (see the tests above)

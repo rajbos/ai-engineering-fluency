@@ -2030,6 +2030,31 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
+	 * Returns the on-disk cache's entries deduplicated by _normalizePathForDedup() key, keeping
+	 * whichever raw-path variant has the newer mtime for a given physical file. The cache
+	 * snapshot is keyed by whatever raw path string was recorded at write time — possibly across
+	 * different adapter runs/history — so two spelling variants of the same file (differing only
+	 * in separator/case, e.g. on Windows) can coexist as separate Map entries;
+	 * buildMergedSnapshotEntries() only merges entries that share the exact same key string, so
+	 * it never collapses these. The normal discover→parse pass never surfaces this, because
+	 * adapters always report one canonical spelling per real scan — only a fresh discovery's own
+	 * spelling is ever looked up. Any caller that reads the cache directly instead (the
+	 * cache-only instant paint, the cache-seeded preload queue) must dedupe through this, or it
+	 * will double-count that file's tokens.
+	 */
+	private getDeduplicatedCacheEntries(): [string, SessionFileCache][] {
+		const winners = new Map<string, [string, SessionFileCache]>();
+		for (const [filePath, data] of this.cacheManager.cache) {
+			const key = _normalizePathForDedup(filePath);
+			const existing = winners.get(key);
+			if (!existing || data.mtime > existing[1].mtime) {
+				winners.set(key, [filePath, data]);
+			}
+		}
+		return Array.from(winners.values());
+	}
+
+	/**
 	 * Paints the status bar (and any already-open Details/Chart panels) straight
 	 * from the on-disk cache — no filesystem discovery, no fs.stat, no parsing —
 	 * so a cold boot shows real numbers within a second or two instead of sitting
@@ -2056,7 +2081,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (this.cacheManager.cache.size === 0) { return; }
 
 			const preloaded: SessionFilePreload[] = [];
-			for (const [sessionFile, sessionData] of this.cacheManager.cache) {
+			for (const [sessionFile, sessionData] of this.getDeduplicatedCacheEntries()) {
 				if (!sessionData || sessionData.interactions === 0) { continue; }
 				const stat = { size: sessionData.size ?? 0, mtime: new Date(sessionData.mtime) } as unknown as import('fs').Stats;
 				preloaded.push({
@@ -3200,7 +3225,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private seedPreloadQueueFromCache(queue: string[], seen: Set<string>, editorSet?: Set<string>): number {
 		if (this.isSampleDataModeActive()) { return 0; }
-		const cachedPaths = Array.from(this.cacheManager.cache.keys());
+		const cachedPaths = this.getDeduplicatedCacheEntries().map(([filePath]) => filePath);
 		if (cachedPaths.length === 0) { return 0; }
 		for (const p of cachedPaths) { seen.add(_normalizePathForDedup(p)); }
 		if (editorSet) {
