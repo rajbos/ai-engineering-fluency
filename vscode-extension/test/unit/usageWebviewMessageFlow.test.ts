@@ -1092,3 +1092,25 @@ test('a deep link stranded past the focus window still lands when its card appea
 		`the card must be scrolled to once it exists, scrolled to: ${JSON.stringify(harness.scrolledTo)}`,
 	);
 });
+
+test('flashing a second card while the first is still lit restores both', async () => {
+	// Rapid clicks landing on *different* insights: the flashes overlap, so the first card's
+	// restore timer fires while the second is still outlined. Each element's captured styling is
+	// tracked separately, so neither may be left permanently outlined.
+	const harness = await bootWebview(buildStatsWithInsights());
+	const first = 'insight-card-marathon-session-today';
+	const second = 'insight-card-stale-skills';
+	const before = {
+		first: harness.window.document.getElementById(first).style.boxShadow,
+		second: harness.window.document.getElementById(second).style.boxShadow,
+	};
+
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: first });
+	await harness.settleScroll();
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: second });
+	await harness.settleScroll();
+	await new Promise((resolve) => setTimeout(resolve, 2200));
+
+	assert.equal(harness.window.document.getElementById(first).style.boxShadow, before.first);
+	assert.equal(harness.window.document.getElementById(second).style.boxShadow, before.second);
+});
