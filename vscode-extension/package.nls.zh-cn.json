@@ -194,6 +194,7 @@
   "usage.contextPressure.nearLimitLabel": "⚠️ 接近上限的会话",
   "usage.contextPressure.worstFill": "最满的会话达到了其窗口的 {0}%",
   "usage.contextPressure.nearLimitTooltip": "在未压缩的情况下填满了至少 {0}% 上下文窗口的 Copilot CLI 会话——这是上下文开始被丢弃之前的预警区间",
+  "usage.sessions.contextFill.columnLabel": "上下文",
   "usage.sessions.contextFill.nearLimitFilter": "🧠 接近上下文上限",
   "usage.sessions.contextFill.nearLimitFilterTooltip": "仅显示在未压缩的情况下达到其上下文窗口至少 {0}% 的会话",
   "usage.sessions.contextFill.used": "已使用 {1} 个上下文 token 中的 {0} 个",

@@ -33,6 +33,7 @@ export interface WebviewLocalization {
 	'usage.contextPressure.nearLimitTooltip': string;
 
 	// Usage view — Recent Sessions context-fill column and its filter pill
+	'usage.sessions.contextFill.columnLabel': string;
 	'usage.sessions.contextFill.nearLimitFilter': string;
 	'usage.sessions.contextFill.nearLimitFilterTooltip': string;
 	'usage.sessions.contextFill.used': string;
@@ -109,6 +110,7 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'usage.contextPressure.nearLimitLabel': '⚠️ Sessions near the limit',
 	'usage.contextPressure.worstFill': 'Fullest session reached {0}% of its window',
 	'usage.contextPressure.nearLimitTooltip': 'Copilot CLI sessions that filled at least {0}% of their context window without compacting — the early-warning band before context starts getting dropped',
+	'usage.sessions.contextFill.columnLabel': 'Context',
 	'usage.sessions.contextFill.nearLimitFilter': '🧠 Near context limit',
 	'usage.sessions.contextFill.nearLimitFilterTooltip': 'Show only sessions that reached at least {0}% of their context window without compacting',
 	'usage.sessions.contextFill.used': '{0} of {1} context tokens used',

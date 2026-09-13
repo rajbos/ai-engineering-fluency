@@ -1215,7 +1215,7 @@ const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 		const wallLabel = s.durationMs !== undefined ? `Wall time: ${formatDurationShort(s.durationMs)}` : undefined;
 		return { html: formatDurationShort(net), ...(wallLabel ? { title: wallLabel } : {}) };
 	} },
-	{ id: 'contextFill', label: 'Context', sortKey: 'contextFill', align: 'right', cellStyle: 'white-space:nowrap;', render: s => {
+	{ id: 'contextFill', label: localize('usage.sessions.contextFill.columnLabel'), sortKey: 'contextFill', align: 'right', cellStyle: 'white-space:nowrap;', render: s => {
 		const pct = getSessionContextFillPercent(s);
 		if (pct === undefined) {
 			return { html: '—', title: localize('usage.sessions.contextFill.noData') };
@@ -1256,6 +1256,8 @@ let latestTodaySessions: TodaySessionSummary[] = [];
 const recentSessionsCache: { [period: string]: TodaySessionSummary[] } = {};
 /** Which optional columns are currently visible. Title (and the row number) are always shown. */
 let enabledSessionColumns: Set<SessionColumnId> = new Set(ALL_SESSION_COLUMN_IDS);
+/** Columns a navigation preset turned on; re-applied whenever saved settings replace the set above. */
+const presetForcedColumns = new Set<SessionColumnId>();
 
 // --- Recent Sessions pill filters (Editor / Model / Model vendor / HydraFusion) ---
 /** Active editor pill filters. Empty set means "no filter" (show all editors). */
@@ -5977,9 +5979,23 @@ function applySessionsTabPreset(preset: any): void {
  * toggle the opposite of what it shows.
  */
 function enableSessionColumn(id: SessionColumnId): void {
+	presetForcedColumns.add(id);
 	enabledSessionColumns.add(id);
 	const checkbox = document.querySelector<HTMLInputElement>(`#sessions-columns-menu input[data-column="${id}"]`);
 	if (checkbox) { checkbox.checked = true; }
+}
+
+/**
+ * Re-applies preset-forced columns over the saved column settings.
+ *
+ * `bootstrap()` yields on a dynamic import before it restores saved settings, and
+ * the message listener is live from module evaluation — so the host's pending
+ * `switchTab` preset routinely lands first, and the assignment that restores saved
+ * settings replaces the whole Set, dropping the column the preset turned on. That
+ * is the *normal* path when the insight opens a panel that wasn't already open.
+ */
+function reapplyPresetForcedColumns(): void {
+	for (const id of presetForcedColumns) { enabledSessionColumns.add(id); }
 }
 
 function handleSwitchTab(message: any): void {
@@ -6614,6 +6630,7 @@ async function bootstrap(): Promise<void> {
 	if (Array.isArray(savedColumns)) {
 		const valid = savedColumns.filter((c): c is SessionColumnId => (ALL_SESSION_COLUMN_IDS as string[]).includes(c));
 		enabledSessionColumns = new Set(valid);
+		reapplyPresetForcedColumns();
 	}
 	renderLayout(initialData);
 	setupSessionsTableSort();

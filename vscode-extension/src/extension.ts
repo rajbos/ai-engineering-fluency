@@ -83,6 +83,9 @@ import {
 	mergeDbContextPressure,
 	mergeSessionContextPressure,
 	sessionCompactionEvents,
+	indexSessionsByCliUuid,
+	applyDbContextToSession,
+	applyDbContextToIndexedSessions,
 } from './contextPressure';
 import { getTimeWindowStartDate, getTimeWindowStartDayKey } from '../../src/timeWindows';
 
@@ -4167,6 +4170,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
 			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
 			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
+			'usage.sessions.contextFill.columnLabel': l10n.t('usage.sessions.contextFill.columnLabel'),
 			'usage.sessions.contextFill.nearLimitFilter': l10n.t('usage.sessions.contextFill.nearLimitFilter'),
 			'usage.sessions.contextFill.nearLimitFilterTooltip': l10n.t('usage.sessions.contextFill.nearLimitFilterTooltip'),
 			'usage.sessions.contextFill.used': l10n.t('usage.sessions.contextFill.used'),
@@ -5039,31 +5043,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return entries;
 	}
 
-	/** Stamp data.db context-window state onto one today-session summary. */
-	private _applyDbContextToTodaySession(session: TodaySessionSummary, info: SessionContextWindow): void {
-		if (info.contextTier && !session.contextTier) { session.contextTier = info.contextTier; }
-		if (info.contextWindowLimit) { session.contextWindowLimit = info.contextWindowLimit; }
-		if (info.contextReachedTokens) { session.contextReachedTokens = info.contextReachedTokens; }
-	}
-
-	/**
-	 * Index session summaries by Copilot CLI session uuid. One uuid can map to
-	 * several summary objects: the "Today" list is built separately from the
-	 * Recent Sessions buckets, so the same session appears as two objects that
-	 * both need stamping.
-	 */
+	/** Index session summaries by Copilot CLI uuid, using this class's path parser. */
 	private _indexSessionsByCliUuid(sessionLists: TodaySessionSummary[][]): Map<string, TodaySessionSummary[]> {
-		const byUuid = new Map<string, TodaySessionSummary[]>();
-		for (const list of sessionLists) {
-			for (const session of list) {
-				const uuid = this.extractCopilotCliUuid(session.filePath);
-				if (!uuid) { continue; }
-				const existing = byUuid.get(uuid);
-				if (!existing) { byUuid.set(uuid, [session]); }
-				else if (!existing.includes(session)) { existing.push(session); }
-			}
-		}
-		return byUuid;
+		return indexSessionsByCliUuid(sessionLists, (filePath) => this.extractCopilotCliUuid(filePath));
 	}
 
 	/**
@@ -5076,10 +5058,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const byUuid = this._indexSessionsByCliUuid([sessions]);
 		if (byUuid.size === 0) { return; }
 		try {
-			const contextInfo = await this.copilotAppData.getSessionContextInfo([...byUuid.keys()]);
-			for (const [uuid, info] of contextInfo) {
-				for (const session of byUuid.get(uuid) ?? []) { this._applyDbContextToTodaySession(session, info); }
-			}
+			applyDbContextToIndexedSessions(byUuid, await this.copilotAppData.getSessionContextInfo([...byUuid.keys()]));
 		} catch { /* optional enrichment — suppress */ }
 	}
 
@@ -5111,7 +5090,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					this._mergeDbContextIntoPeriod(period, info, entry.hadTier);
 					this._mergeDbContextPressure(period, info, entry.hasContextSignal, entry.compacted);
 				}
-				for (const session of sessionsByUuid.get(uuid) ?? []) { this._applyDbContextToTodaySession(session, info); }
+				for (const session of sessionsByUuid.get(uuid) ?? []) { applyDbContextToSession(session, info); }
 			}
 		} catch { /* optional enrichment — suppress */ }
 	}

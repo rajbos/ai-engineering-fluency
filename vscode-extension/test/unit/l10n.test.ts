@@ -200,6 +200,7 @@ test('l10n: Recent Sessions context-fill keys resolve in English', () => {
 	// These back the Recent Sessions "Context" column and the "near context
 	// limit" filter pill the context-pressure insight links to. A missing key
 	// would put a raw `usage.sessions.contextFill.nearLimitFilter` on the pill.
+	assert.equal(t('usage.sessions.contextFill.columnLabel'), 'Context');
 	assert.equal(t('usage.sessions.contextFill.nearLimitFilter'), '🧠 Near context limit');
 	assert.equal(
 		t('usage.sessions.contextFill.nearLimitFilterTooltip', '80'),
@@ -216,6 +217,7 @@ test('l10n: Recent Sessions context-fill keys resolve in English', () => {
 test('l10n: Recent Sessions context-fill keys resolve in zh-cn', () => {
 	mock.setLanguage('zh-cn');
 	try {
+		assert.equal(t('usage.sessions.contextFill.columnLabel'), '上下文');
 		assert.equal(t('usage.sessions.contextFill.nearLimitFilter'), '🧠 接近上下文上限');
 		// The Chinese phrasing reorders the reached/limit counts, so a plain
 		// concatenation would report the two numbers the wrong way round.
