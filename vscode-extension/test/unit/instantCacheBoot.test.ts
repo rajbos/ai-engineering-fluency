@@ -312,6 +312,35 @@ test('dedupeByNormalizedKeyKeepGreatest() skips a null/undefined entry instead o
 	assert.equal(deduped[0][0], '/b.json');
 });
 
+// A non-null record with a missing/non-numeric mtime passes the null/undefined guard above, but
+// `undefined > validMtime` and `NaN > validMtime` are both false — so if such a record is seen
+// first under a normalized key, `!existing` lets it win, and no later, genuinely valid duplicate
+// under that same key can ever out-score it. The malformed entry would then be the one instant
+// paint and the preload seed both read.
+test('dedupeByNormalizedKeyKeepGreatest() does not let a malformed (non-finite) score permanently win its key over a later valid duplicate', () => {
+	type MinimalCacheEntry = { mtime: unknown };
+	const cache = new Map<string, MinimalCacheEntry>([
+		['C:\\Users\\dev\\.copilot\\session.json', { mtime: undefined }],
+		['c:/Users/dev/.copilot/session.json', { mtime: 2000 }],
+	]);
+
+	const deduped = dedupeByNormalizedKeyKeepGreatest(cache, data => data.mtime as number, 'win32');
+	assert.equal(deduped.length, 1, 'the two spellings must still collapse to one entry');
+	assert.equal(deduped[0][1].mtime, 2000, 'the malformed entry must not shadow the valid duplicate, regardless of iteration order');
+});
+
+test('dedupeByNormalizedKeyKeepGreatest() skips an entry whose score is malformed and every duplicate under its key is also malformed', () => {
+	type MinimalCacheEntry = { mtime: unknown };
+	const cache = new Map<string, MinimalCacheEntry>([
+		['/a.json', { mtime: NaN }],
+		['/b.json', { mtime: 2000 }],
+	]);
+
+	const deduped = dedupeByNormalizedKeyKeepGreatest(cache, data => data.mtime as number, 'linux');
+	assert.equal(deduped.length, 1, 'the malformed-only entry must be dropped rather than surfaced with an unusable score');
+	assert.equal(deduped[0][0], '/b.json');
+});
+
 test('getDeduplicatedCacheEntries() delegates to the shared dedupeByNormalizedKeyKeepGreatest() helper', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private getDeduplicatedCacheEntries(): [string, SessionFileCache][] {');
 	assert.ok(body.includes('_dedupeByNormalizedKeyKeepGreatest(this.cacheManager.cache, data => data.mtime)'),
@@ -451,7 +480,7 @@ test('sample-data mode never writes to the shared on-disk cache snapshot: neithe
 		'dispose() must also skip its shutdown saveCacheToStorage() call in sample-data mode, same as persistRefreshResult()');
 });
 
-test('runLocalViewRegression() evicts its own session files from the in-memory cache when it finishes, by normalized key', () => {
+test('runLocalViewRegression() evicts its own session files from the cache when it finishes, only when bundled fixtures were used', () => {
 	// Skipping the on-disk save (see the sample-data-mode test above) does not stop a regression
 	// pass from writing fixture entries into the IN-MEMORY cache — computeRegressionStats() runs
 	// the normal preload pipeline, whose getSessionFileDataCached() unconditionally calls
@@ -462,12 +491,33 @@ test('runLocalViewRegression() evicts its own session files from the in-memory c
 
 	assert.ok(body.includes('regressionSessionFiles = setup.sessionFiles;'),
 		'must capture the exact session files (real or bundled-fixture) the regression pass used');
+	assert.ok(body.includes('usedBundledFixtures = setup.usedBundledFixtures;'),
+		'must capture whether this run actually used bundled fixtures (vs. real discovered sessions)');
 
 	const finallyIndex = body.indexOf('} finally {');
-	const regressionKeysIndex = body.indexOf('const regressionKeys = new Set(regressionSessionFiles.map(f => _normalizePathForDedup(f)));');
-	const evictionIndex = body.indexOf('this.cacheManager.deleteCachedSessionData(rawPath);');
-	assert.ok(finallyIndex !== -1 && regressionKeysIndex !== -1 && evictionIndex !== -1 && regressionKeysIndex > finallyIndex && evictionIndex > regressionKeysIndex,
-		'must evict the regression run\'s own session files from the cache (via the tombstone-aware deleteCachedSessionData()) in the finally block, so it always runs — even if the regression pass itself throws');
+	const fixtureGuardIndex = body.indexOf('if (usedBundledFixtures) {');
+	const evictCallIndex = body.indexOf('await this.evictRegressionSessionFilesFromCache(regressionSessionFiles);');
+	assert.ok(finallyIndex !== -1 && fixtureGuardIndex !== -1 && evictCallIndex !== -1
+		&& fixtureGuardIndex > finallyIndex && evictCallIndex > fixtureGuardIndex,
+		'must evict the regression run\'s own session files from the cache in the finally block, so it always runs — even if the regression pass itself throws');
+
+	// The whole sweep must be gated on usedBundledFixtures — when a developer runs this locally
+	// on a machine WITH real session data, regressionSessionFiles is that real, entire discovered
+	// set. Evicting it unconditionally isn't just "one avoidable reparse": deleteCachedSessionData()
+	// tombstones the path, and buildMergedSnapshotEntries() excludes every tombstoned path from
+	// every subsequent save — so a normal refresh's checkpoint/publish landing before the next full
+	// re-parse completes would wipe those real sessions from the shared on-disk snapshot too.
+	assert.ok(body.includes('if (usedBundledFixtures) {\n\t\t\t\tawait this.evictRegressionSessionFilesFromCache(regressionSessionFiles);\n\t\t\t}'),
+		'the eviction call must only run when usedBundledFixtures is true — evicting real discovered sessions risks permanently losing them from the shared snapshot, not just a harmless in-memory reparse');
+});
+
+// deleteCachedSessionData() only tombstones in memory. A stale on-disk snapshot entry from a run
+// predating the sample-mode save guards (or a mid-parse checkpoint that raced this eviction) would
+// otherwise sit untouched on disk until some unrelated later save happens to occur — and if the
+// Extension Development Host is closed before that, the next boot's instant paint loads and shows
+// the fixture data as real usage.
+test('evictRegressionSessionFilesFromCache() sweeps by normalized key and persists the tombstones to the shared snapshot', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private async evictRegressionSessionFilesFromCache(regressionSessionFiles: string[]): Promise<void> {');
 
 	// Must sweep by normalized key, not the exact raw strings setupRegressionSessionFiles()
 	// returned — otherwise a same-file spelling variant already sitting in the cache under a
@@ -478,17 +528,16 @@ test('runLocalViewRegression() evicts its own session files from the in-memory c
 	assert.ok(/regressionKeys\.has\(_normalizePathForDedup\(rawPath\)\)/.test(body),
 		'must match raw cache keys against regressionKeys via _normalizePathForDedup(), so a differently-cased/separated duplicate of a regression file is evicted too');
 
-	// The whole sweep must be gated on usedBundledFixtures — when a developer runs this locally
-	// on a machine WITH real session data, regressionSessionFiles is that real, entire discovered
-	// set. Evicting it unconditionally isn't just "one avoidable reparse": deleteCachedSessionData()
-	// tombstones the path, and buildMergedSnapshotEntries() excludes every tombstoned path from
-	// every subsequent save — so a normal refresh's checkpoint/publish landing before the next full
-	// re-parse completes would wipe those real sessions from the shared on-disk snapshot too.
-	assert.ok(body.includes('usedBundledFixtures = setup.usedBundledFixtures;'),
-		'must capture whether this run actually used bundled fixtures (vs. real discovered sessions)');
-	const fixtureGuardIndex = body.indexOf('if (usedBundledFixtures) {');
-	assert.ok(fixtureGuardIndex !== -1 && fixtureGuardIndex > finallyIndex && fixtureGuardIndex < regressionKeysIndex,
-		'the eviction sweep must run only when usedBundledFixtures is true — evicting real discovered sessions risks permanently losing them from the shared snapshot, not just a harmless in-memory reparse');
+	const evictionIndex = body.indexOf('this.cacheManager.deleteCachedSessionData(rawPath);');
+	const evictedAnyIndex = body.indexOf('evictedAny = true;');
+	const saveIndex = body.indexOf('await this.saveCacheToStorage();');
+	assert.ok(evictionIndex !== -1 && evictedAnyIndex !== -1 && saveIndex !== -1
+		&& evictedAnyIndex > evictionIndex && saveIndex > evictedAnyIndex,
+		'must persist the tombstones (via saveCacheToStorage()) after evicting fixture entries, so a stale on-disk copy from before this eviction existed does not linger until some other save happens to occur');
+
+	const guardIndex = body.indexOf('if (evictedAny && !this.isSampleDataModeActive()) {');
+	assert.ok(guardIndex !== -1 && guardIndex > evictedAnyIndex && guardIndex < saveIndex,
+		'the persist call must be gated on both having actually evicted something and sample mode being confirmed off again, not run unconditionally');
 });
 
 test('setupRegressionSessionFiles() reports whether it fell back to bundled fixtures vs. using real discovered sessions', () => {

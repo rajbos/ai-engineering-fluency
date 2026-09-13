@@ -1394,24 +1394,46 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// excludes tombstoned paths from every subsequent save, so a normal refresh's checkpoint
 			// or snapshot publish landing before the next full re-parse completes would wipe those
 			// real sessions from the shared on-disk snapshot too, not just this window's memory.
-			// Swept by normalized key, not the exact raw strings setupRegressionSessionFiles()
-			// returned: a same-file spelling variant already sitting in the cache under a different
-			// raw key (case/separator) would otherwise survive this eviction and still be readable
-			// by the very next getDeduplicatedCacheEntries() call.
 			if (usedBundledFixtures) {
-				const regressionKeys = new Set(regressionSessionFiles.map(f => _normalizePathForDedup(f)));
-				if (regressionKeys.size > 0) {
-					for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
-						if (regressionKeys.has(_normalizePathForDedup(rawPath))) {
-							this.cacheManager.deleteCachedSessionData(rawPath);
-						}
-					}
-				}
+				await this.evictRegressionSessionFilesFromCache(regressionSessionFiles);
 			}
 			this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = this.lastDashboardData = undefined;
 			this.lastEfficiencySessionInputs = undefined;
 		}
 		await this.reportLocalViewRegressionResults(results, dataSourceLabel);
+	}
+
+	// Called only when usedBundledFixtures is true (see runLocalViewRegression()'s finally block):
+	// evicting real discovered sessions unconditionally isn't just "one avoidable reparse" —
+	// deleteCachedSessionData() tombstones the path, and buildMergedSnapshotEntries() excludes every
+	// tombstoned path from every subsequent save, so a normal refresh's checkpoint/publish landing
+	// before the next full re-parse completes would wipe those real sessions from the shared
+	// on-disk snapshot too, not just this window's memory.
+	private async evictRegressionSessionFilesFromCache(regressionSessionFiles: string[]): Promise<void> {
+		// Swept by normalized key, not the exact raw strings setupRegressionSessionFiles() returned:
+		// a same-file spelling variant already sitting in the cache under a different raw key
+		// (case/separator) would otherwise survive this eviction and still be readable by the very
+		// next getDeduplicatedCacheEntries() call.
+		const regressionKeys = new Set(regressionSessionFiles.map(f => _normalizePathForDedup(f)));
+		if (regressionKeys.size === 0) { return; }
+		let evictedAny = false;
+		for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
+			if (regressionKeys.has(_normalizePathForDedup(rawPath))) {
+				this.cacheManager.deleteCachedSessionData(rawPath);
+				evictedAny = true;
+			}
+		}
+		// The eviction above only tombstones these paths in memory. A prior run (before the
+		// sample-mode save guards existed, or a checkpoint that raced this eviction) could have
+		// already written fixture entries to the shared on-disk snapshot; those would otherwise
+		// linger untouched until some later save happens to occur, and the next process boot would
+		// instant-paint them as real usage in the meantime. Persist now, while sample mode is
+		// confirmed off again (runLocalViewRegression()'s finally block just restored the previous
+		// sample dir before calling this), so the tombstones actually reach disk.
+		if (evictedAny && !this.isSampleDataModeActive()) {
+			try { await this.saveCacheToStorage(); }
+			catch (err) { console.error(`Failed to persist regression cache eviction: ${err}`); }
+		}
 	}
 
 	private async setupRegressionSessionFiles(defaultLabel: string): Promise<{ sessionFiles: string[]; dataSourceLabel: string; usedBundledFixtures: boolean }> {

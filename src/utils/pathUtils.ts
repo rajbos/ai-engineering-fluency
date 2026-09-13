@@ -65,12 +65,17 @@ export function dedupeByNormalizedKeyKeepGreatest<T>(
 	const winners = new Map<string, [string, T]>();
 	for (const [key, value] of entries) {
 		// A persisted snapshot is just parsed JSON — a corrupt/malformed record (e.g. a null
-		// entry) must not crash this whole pass; skip it the same way callers already skip an
-		// unusable entry when iterating the cache directly (falsy/empty session data).
+		// entry, or one with a missing/non-numeric score field) must not crash this whole pass,
+		// nor silently win its normalized key over a usable duplicate: `undefined > 123` and
+		// `NaN > 123` are both false, so an invalid first-seen record would otherwise block every
+		// later, valid record under the same key from ever replacing it. Skip it instead, the same
+		// way callers already skip an unusable entry when iterating the cache directly.
 		if (value === null || value === undefined) { continue; }
+		const score = getValue(value);
+		if (!Number.isFinite(score)) { continue; }
 		const normalizedKey = normalizePathForDedup(key, platform);
 		const existing = winners.get(normalizedKey);
-		if (!existing || getValue(value) > getValue(existing[1])) {
+		if (!existing || score > getValue(existing[1])) {
 			winners.set(normalizedKey, [key, value]);
 		}
 	}
