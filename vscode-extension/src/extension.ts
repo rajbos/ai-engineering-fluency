@@ -83,6 +83,9 @@ import {
 	mergeDbContextPressure,
 	mergeSessionContextPressure,
 	sessionCompactionEvents,
+	indexSessionsByCliUuid,
+	applyDbContextToSession,
+	applyDbContextToIndexedSessions,
 } from './contextPressure';
 import { getTimeWindowStartDate, getTimeWindowStartDayKey } from '../../src/timeWindows';
 
@@ -290,7 +293,7 @@ import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDe
 
 // --- Stats helpers ---
 import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, computeFallbackDailyRollup as _computeFallbackDailyRollup, type SessionAggregateInput } from '../../src/statsHelpers';
-import { scaleModelUsage, reconcileDebugLogModelUsage } from '../../src/statsHelpers';
+import { scaleModelUsage, reconcileDebugLogModelUsage, addTaskCategoryToDailyEntry as _addTaskCategoryToDailyEntry } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -349,6 +352,7 @@ import { getModelDisplayName } from '../../src/webview/shared/modelUtils';
 import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
+import { insightCardElementId } from './insightAnchors';
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
 import { getAzureTableStorageEndpoint } from './utils/azureEndpoints';
 import { isGuidMcpTool, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../src/utils/toolUtils';
@@ -588,12 +592,19 @@ interface WorktreeCleanupDiagnostics {
 	untrackedFiles?: number;
 }
 
-type UsageAnalysisTab = 'activity' | 'tools' | 'health' | 'worktrees' | 'insights' | 'corrections';
+type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'worktrees' | 'insights' | 'corrections';
 
 /** Narrows an arbitrary tab name (e.g. from the what's-new catalog) to one `showUsageAnalysisOnTab` accepts. */
 function isUsageAnalysisTab(tab: string): tab is UsageAnalysisTab {
-	return (['activity', 'tools', 'health', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
+	return (['activity', 'sessions', 'tools', 'health', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
 }
+
+/**
+ * Pre-set filter the Recent Sessions tab should apply when it is opened from
+ * elsewhere — today only `nearContextLimit`, which narrows the table to the very
+ * sessions the "nearly ran out of context window" insight counts.
+ */
+type SessionsTabPreset = { filter: 'nearContextLimit'; lookback: 'last30' };
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation.
@@ -706,7 +717,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		2_000,
 		(error) => this.warn(`Usage Analysis message delivery failed: ${error}`),
 	);
-	private pendingAnalysisNavigation: { tab: UsageAnalysisTab; anchor?: string } | undefined;
+	private pendingAnalysisNavigation: { tab: UsageAnalysisTab; anchor?: string; sessionsPreset?: SessionsTabPreset } | undefined;
 	private maturityPanel: vscode.WebviewPanel | undefined;
 	private dashboardPanel: vscode.WebviewPanel | undefined;
 	private fluencyLevelViewerPanel: vscode.WebviewPanel | undefined;
@@ -745,6 +756,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _statusBarBaseText = '';
 	/** Cached top new insight title for tooltip display. */
 	private _topInsightTitle: string | null = null;
+	/** Id of the insight behind `_topInsightTitle`, so clicking the badge scrolls to that card. */
+	private _topInsightId: string | null = null;
 	/** Cached last detailed stats for tooltip rebuilding. */
 	private _lastDetailedStats: DetailedStats | undefined;
 	private tokenEstimators: Record<string, TokenEstimator> = tokenEstimatorsData.estimators;
@@ -2230,9 +2243,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.statusBarItem.text = this._devBranch ? `${text} [${this._devBranch}]` : text;
 	}
 
-	private refreshStatusBarInsightBadge(count: number, topInsightTitle?: string): void {
+	/**
+	 * Repaints the insights badge. `topInsight` is set unconditionally rather than carried over:
+	 * once the previous top insight is dismissed, snoozed or marked done, keeping it would leave
+	 * the tooltip naming — and a click scrolling to — a card that is no longer at the top of the
+	 * list. Callers that only know the count use `refreshInsightBadgeFromState`.
+	 */
+	private refreshStatusBarInsightBadge(count: number, topInsight?: { title: string; id: string }): void {
 		this._newInsightCount = count;
-		this._topInsightTitle = topInsightTitle ?? this._topInsightTitle;
+		this._topInsightTitle = topInsight?.title ?? null;
+		this._topInsightId = topInsight?.id ?? null;
 		// Main status bar: remove the 💡 badge — it now lives in its own item
 		this.setStatusBarText(this._statusBarBaseText);
 
@@ -2247,10 +2267,41 @@ class CopilotTokenTracker implements vscode.Disposable {
 			}
 			tooltip.appendMarkdown('Click to open the Insights tab');
 			this.insightsStatusBarItem.tooltip = tooltip;
+			// Pass the insight the tooltip names so the click lands on that card, not just the tab.
+			this.insightsStatusBarItem.command = this._topInsightId
+				? { command: 'aiEngineeringFluency.openInsightsTab', title: l10n.t('button.openInsightsTab'), arguments: [this._topInsightId] }
+				: 'aiEngineeringFluency.openInsightsTab';
 			this.insightsStatusBarItem.show();
 		} else {
 			this.insightsStatusBarItem.hide();
 		}
+	}
+
+	/**
+	 * Recomputes the badge so its count, tooltip and click target all describe the same, current
+	 * list. `evaluated` lets a caller that already built that list pass it in rather than
+	 * evaluating every insight twice.
+	 *
+	 * The count comes from the evaluated list rather than the persisted state bag: the bag keeps
+	 * entries for insights that no longer apply (`mergeInsightStates` adds and refreshes, never
+	 * removes), so a bag-derived count can claim insights the Insights tab does not show and name
+	 * none of them. Counting the 'new' entries of the list is exactly what the tab's own badge
+	 * does, so the two can no longer disagree. Only with no list at all — stats not loaded yet —
+	 * is the bag the only thing left to go on.
+	 */
+	private refreshInsightBadgeFromState(now: string, evaluated?: EvaluatedInsight[]): void {
+		const stats = this.lastUsageAnalysisStats;
+		const list = evaluated ?? (stats ? this.buildCurrentInsights(stats) : undefined);
+		if (!list) {
+			this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
+			return;
+		}
+		const newInsights = list.filter(i => i.status === 'new');
+		const topNew = newInsights[0];
+		this.refreshStatusBarInsightBadge(
+			newInsights.length,
+			topNew ? { title: topNew.title, id: topNew.id } : undefined,
+		);
 	}
 
 	private sendLoadingPanelMessage(msg: object): void {
@@ -3873,9 +3924,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const evaluated = _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
 		_mergeInsightStates(evaluated, this._insightStateBag, now);
 
-		const newCount = _countNewInsights(this._insightStateBag, now);
-		const topNew = evaluated.find(i => i.status === 'new');
-		this.refreshStatusBarInsightBadge(newCount, topNew?.title);
+		this.refreshInsightBadgeFromState(now, evaluated);
 
 		await this.context.globalState.update('insights.state', this._insightStateBag);
 
@@ -3906,7 +3955,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			dismiss,
 		);
 		if (choice === view) {
-			await this.showUsageAnalysisOnInsightsTab();
+			await this.showUsageAnalysisOnInsightsTab(toastCandidate.id);
 		} else if (choice === dismiss) {
 			this._insightStateBag[toastCandidate.id] = {
 				...(this._insightStateBag[toastCandidate.id] ?? { firstSurfacedAt: now }),
@@ -3914,7 +3963,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				lastSurfacedAt: now,
 			};
 			await this.context.globalState.update('insights.state', this._insightStateBag);
-			this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
+			this.refreshInsightBadgeFromState(now);
 		}
 	}
 
@@ -4145,6 +4194,31 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
+	 * Usage view strings: the Context Window section's context-pressure rows and
+	 * the Recent Sessions context-fill column with its "near context limit"
+	 * filter pill. Templates carrying {0}/{1} are resolved webview-side by
+	 * localizeFormat(), so they are passed through unformatted here.
+	 */
+	private getUsageViewLocalization(): Record<string, string> {
+		return {
+			'usage.contextPressure.compactedLabel': l10n.t('usage.contextPressure.compactedLabel'),
+			'usage.contextPressure.ofCount': l10n.t('usage.contextPressure.ofCount'),
+			'usage.contextPressure.compactedShare': l10n.t('usage.contextPressure.compactedShare'),
+			'usage.contextPressure.noneCompacted': l10n.t('usage.contextPressure.noneCompacted'),
+			'usage.contextPressure.compactedTooltip': l10n.t('usage.contextPressure.compactedTooltip'),
+			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
+			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
+			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
+			'usage.sessions.contextFill.columnLabel': l10n.t('usage.sessions.contextFill.columnLabel'),
+			'usage.sessions.contextFill.nearLimitFilter': l10n.t('usage.sessions.contextFill.nearLimitFilter'),
+			'usage.sessions.contextFill.nearLimitFilterTooltip': l10n.t('usage.sessions.contextFill.nearLimitFilterTooltip'),
+			'usage.sessions.contextFill.used': l10n.t('usage.sessions.contextFill.used'),
+			'usage.sessions.contextFill.usedNearLimit': l10n.t('usage.sessions.contextFill.usedNearLimit'),
+			'usage.sessions.contextFill.noData': l10n.t('usage.sessions.contextFill.noData'),
+		};
+	}
+
+	/**
 	 * Get localization strings for webviews based on the current VS Code language.
 	 * This provides localized button labels and other UI strings for webview panels.
 	 */
@@ -4167,17 +4241,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Share/export card strings (rendered into the PNG image)
 			'share.exportTitle': l10n.t('share.exportTitle'),
 			'share.exportReportLabel': l10n.t('share.exportReportLabel'),
-			// Usage view — context-pressure rows. Templates with {0}/{1} are
-			// resolved webview-side by localizeFormat(), so they are passed
-			// through unformatted here.
-			'usage.contextPressure.compactedLabel': l10n.t('usage.contextPressure.compactedLabel'),
-			'usage.contextPressure.ofCount': l10n.t('usage.contextPressure.ofCount'),
-			'usage.contextPressure.compactedShare': l10n.t('usage.contextPressure.compactedShare'),
-			'usage.contextPressure.noneCompacted': l10n.t('usage.contextPressure.noneCompacted'),
-			'usage.contextPressure.compactedTooltip': l10n.t('usage.contextPressure.compactedTooltip'),
-			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
-			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
-			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
+			...this.getUsageViewLocalization(),
 			// Efficiency view — Cost Attribution model-mix table. Templates with
 			// {0}/{1} are resolved webview-side by localizeFormat().
 			'efficiency.modelMix.heading': l10n.t('efficiency.modelMix.heading'),
@@ -4218,6 +4282,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
 			'logviewer.summary.started': l10n.t('logviewer.summary.started'),
 			'logviewer.summary.lastActivity': l10n.t('logviewer.summary.lastActivity'),
+			...this.getEfficiencyAttributionLocalization(),
 			// HydraFusion Routing section + Session Steps Overview leg toggle. Templates
 			// with {0} are resolved webview-side by localizeFormat().
 			'logviewer.hydrafusion.cost': l10n.t('logviewer.hydrafusion.cost'),
@@ -4230,8 +4295,52 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'logviewer.hydrafusion.legsCaptionTotal': l10n.t('logviewer.hydrafusion.legsCaptionTotal'),
 			'logviewer.hydrafusion.modelChangedTitle': l10n.t('logviewer.hydrafusion.modelChangedTitle'),
 			'logviewer.hydrafusion.expandStepNote': l10n.t('logviewer.hydrafusion.expandStepNote'),
+			...this.getEfficiencyModelsLocalization(),
 			// Current language for reference
 			'__language__': language
+		};
+	}
+
+	/**
+	 * Models-tab strings for the Efficiency view. Kept in its own method so
+	 * `getWebviewLocalization` stays inside the function-size ceiling. Templates
+	 * with {0}..{3} are resolved webview-side by `localizeFormat()`, so they pass
+	 * through unformatted here.
+	 */
+	private getEfficiencyModelsLocalization(): { [key: string]: string } {
+		return {
+			'efficiency.models.noPairInWindow': l10n.t('efficiency.models.noPairInWindow'),
+			'efficiency.models.noModelsInWindow': l10n.t('efficiency.models.noModelsInWindow'),
+			'efficiency.models.noSharedModel': l10n.t('efficiency.models.noSharedModel'),
+			'efficiency.models.noSecondModel': l10n.t('efficiency.models.noSecondModel'),
+			'efficiency.models.controls.mode': l10n.t('efficiency.models.controls.mode'),
+			'efficiency.models.controls.modelA': l10n.t('efficiency.models.controls.modelA'),
+			'efficiency.models.controls.modelB': l10n.t('efficiency.models.controls.modelB'),
+			'efficiency.models.controls.model': l10n.t('efficiency.models.controls.model'),
+			'efficiency.models.controls.baseline': l10n.t('efficiency.models.controls.baseline'),
+			'efficiency.models.controls.comparedWith': l10n.t('efficiency.models.controls.comparedWith'),
+			'efficiency.models.controls.window': l10n.t('efficiency.models.controls.window'),
+			'efficiency.models.mode.models': l10n.t('efficiency.models.mode.models'),
+			'efficiency.models.mode.periods': l10n.t('efficiency.models.mode.periods'),
+		};
+	}
+
+	/**
+	 * Cost Attribution labels for the Efficiency webview, kept out of the
+	 * {@link getWebviewLocalization} literal to hold that method under the
+	 * `max-lines-per-function` ceiling. Templates with {0}/{1}/{2} are resolved
+	 * webview-side by `localizeFormat()`, so they are passed through unformatted.
+	 */
+	private getEfficiencyAttributionLocalization(): Record<string, string> {
+		return {
+			'efficiency.attribution.costEffect': l10n.t('efficiency.attribution.costEffect'),
+			'efficiency.attribution.costEffectLine': l10n.t('efficiency.attribution.costEffectLine'),
+			'efficiency.attribution.change': l10n.t('efficiency.attribution.change'),
+			'efficiency.attribution.periodSub': l10n.t('efficiency.attribution.periodSub'),
+			'efficiency.attribution.blendedRate': l10n.t('efficiency.attribution.blendedRate'),
+			'efficiency.attribution.tooltip.volume': l10n.t('efficiency.attribution.tooltip.volume'),
+			'efficiency.attribution.tooltip.size': l10n.t('efficiency.attribution.tooltip.size'),
+			'efficiency.attribution.tooltip.mix': l10n.t('efficiency.attribution.tooltip.mix'),
 		};
 	}
 
@@ -4420,7 +4529,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (dayKey < cutoffUtcStartKey) { continue; }
 			const dayTokens = (dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens);
 			const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dayKey);
-			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, dayRollup.taskCategoryShares, dayRollup.primaryTaskCategory);
+			// Falls back to the session's overall category (rather than silently dropping to
+			// "Conversation") for a day rollup that predates per-day task classification.
+			const primaryTaskCategory = dayRollup.primaryTaskCategory ?? sessionData.taskCategory;
+			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, dayRollup.taskCategoryShares, primaryTaskCategory);
 			if (!lastDayKey || dayKey > lastDayKey) { lastDayKey = dayKey; }
 		}
 		if (lastDayKey) {
@@ -4509,39 +4621,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (const model of Object.keys(modelUsage)) {
 			entry.editorModelUsage[editorType][model]!.sessions += 1;
 		}
-		this.addTaskCategoryToDailyEntry(entry, tokens, modelUsage, taskCategoryShares, primaryTaskCategory);
-	}
-
-	private addTaskCategoryToDailyEntry(
-		entry: DailyTokenStats,
-		tokens: number,
-		modelUsage: ModelUsage,
-		taskCategoryShares?: TaskCategoryBreakdown,
-		primaryTaskCategory?: TaskCategory
-	): void {
-		if (!entry.taskCategoryTokens) { entry.taskCategoryTokens = {}; }
-		if (!entry.taskCategorySessions) { entry.taskCategorySessions = {}; }
-		if (!entry.taskCategoryModelUsage) { entry.taskCategoryModelUsage = {}; }
-		const shares: Partial<Record<TaskCategory, number>> = taskCategoryShares && Object.keys(taskCategoryShares).length > 0
-			? taskCategoryShares
-			: (primaryTaskCategory ? { [primaryTaskCategory]: 1 } : { Conversation: 1 });
-		for (const [category, shareRaw] of Object.entries(shares)) {
-			const share = Number(shareRaw) || 0;
-			if (share <= 0) { continue; }
-			const cat = category as TaskCategory;
-			entry.taskCategoryTokens[cat] = (entry.taskCategoryTokens[cat] || 0) + (tokens * share);
-			entry.taskCategorySessions[cat] = (entry.taskCategorySessions[cat] || 0) + share;
-			if (!entry.taskCategoryModelUsage[cat]) { entry.taskCategoryModelUsage[cat] = {}; }
-			addModelUsage(entry.taskCategoryModelUsage[cat]!, this.scaledModelUsage(modelUsage, share));
-		}
-		if (primaryTaskCategory) {
-			if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
-			if (!entry.taskCategoryUsage[primaryTaskCategory]) {
-				entry.taskCategoryUsage[primaryTaskCategory] = { tokens: 0, sessions: 0 };
-			}
-			entry.taskCategoryUsage[primaryTaskCategory].tokens += tokens;
-			entry.taskCategoryUsage[primaryTaskCategory].sessions += 1;
-		}
+		// Shared with the periodic-refresh aggregation path (src/statsHelpers.ts) so a fix to the
+		// task-category attribution algorithm can't drift out of sync between the two pipelines.
+		_addTaskCategoryToDailyEntry(entry, tokens, modelUsage, primaryTaskCategory, taskCategoryShares);
 	}
 
 	private addLocToDailyEntry(entry: DailyTokenStats, linesAdded: number, linesRemoved: number, editorType: string, repository: string, languageUsage?: any): void {
@@ -4642,7 +4724,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts);
 			await this.enrichMultiAgentParentCount(usageResults, last30DaysStats, last30DaysUtcStartKey);
 			agenticDailyTrend = await this._computeAgenticDailyTrend(usageResults, last30DaysUtcStartKey);
-			await this.enrichContextWindowFromAppData(usageResults, periods, todaySessionsList);
+			// The Recent Sessions buckets are stamped alongside today's list so the
+			// "near context limit" column and filter work for every lookback, not just today.
+			const contextSessionLists = [todaySessionsList, ...(recentSessions ? [recentSessions.last7, recentSessions.last30, recentSessions.currentMonth] : [])];
+			await this.enrichContextWindowFromAppData(usageResults, periods, contextSessionLists);
 		} catch (error) {
 			this.error('Error calculating usage analysis stats:', error);
 		}
@@ -5006,12 +5091,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		mergeDbContextPressure(period, info, alreadyCounted, compacted);
 	}
 
-	/**
-	 * Enrich the usage periods and today's session list with context-window
-	 * state from data.db: the selected window limit, the last known fill, and
-	 * the context tier (data.db also covers sessions whose events.jsonl lacks
-	 * a contextTier). Errors are swallowed — this is optional enrichment only.
-	 */
 	/** Collect activity key + tier presence per Copilot CLI session uuid in the loaded window. */
 	private _collectCliSessionEntries(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
@@ -5031,25 +5110,44 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return entries;
 	}
 
-	/** Stamp data.db context-window state onto one today-session summary. */
-	private _applyDbContextToTodaySession(session: TodaySessionSummary, info: SessionContextWindow): void {
-		if (info.contextTier && !session.contextTier) { session.contextTier = info.contextTier; }
-		if (info.contextWindowLimit) { session.contextWindowLimit = info.contextWindowLimit; }
-		if (info.contextReachedTokens) { session.contextReachedTokens = info.contextReachedTokens; }
+	/** Index session summaries by Copilot CLI uuid, using this class's path parser. */
+	private _indexSessionsByCliUuid(sessionLists: TodaySessionSummary[][]): Map<string, TodaySessionSummary[]> {
+		return indexSessionsByCliUuid(sessionLists, (filePath) => this.extractCopilotCliUuid(filePath));
 	}
 
+	/**
+	 * Stamp data.db context-window state (tier, window limit, last fill) onto a
+	 * standalone list of session summaries — used by the lazily-loaded Recent
+	 * Sessions lookbacks, which are built outside the main analysis pass and
+	 * would otherwise show no context fill at all.
+	 */
+	private async applyDbContextToSessions(sessions: TodaySessionSummary[]): Promise<void> {
+		const byUuid = this._indexSessionsByCliUuid([sessions]);
+		if (byUuid.size === 0) { return; }
+		try {
+			applyDbContextToIndexedSessions(byUuid, await this.copilotAppData.getSessionContextInfo([...byUuid.keys()]));
+		} catch { /* optional enrichment — suppress */ }
+	}
+
+	/**
+	 * Enrich the usage periods and the given session summary lists with
+	 * context-window state from data.db: the selected window limit, the last
+	 * known fill, and the context tier (data.db also covers sessions whose
+	 * events.jsonl lacks a contextTier).
+	 *
+	 * `sessionLists` covers today's list *and* the Recent Sessions lookback
+	 * buckets, so the per-session fill the "Context" column and its near-limit
+	 * filter read is populated for every period the tab can show, not only
+	 * today. Errors are swallowed — this is optional enrichment only.
+	 */
 	private async enrichContextWindowFromAppData(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
 		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; lastMonthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string; lastMonthUtcStartKey: string; lastMonthUtcEndKey: string },
-		todaySessionsList: TodaySessionSummary[],
+		sessionLists: TodaySessionSummary[][],
 	): Promise<void> {
 		const entries = this._collectCliSessionEntries(usageResults);
 		if (entries.size === 0) { return; }
-		const todayByUuid = new Map<string, TodaySessionSummary>();
-		for (const s of todaySessionsList) {
-			const uuid = this.extractCopilotCliUuid(s.filePath);
-			if (uuid) { todayByUuid.set(uuid, s); }
-		}
+		const sessionsByUuid = this._indexSessionsByCliUuid(sessionLists);
 		try {
 			const contextInfo = await this.copilotAppData.getSessionContextInfo([...entries.keys()]);
 			for (const [uuid, info] of contextInfo) {
@@ -5059,8 +5157,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					this._mergeDbContextIntoPeriod(period, info, entry.hadTier);
 					this._mergeDbContextPressure(period, info, entry.hasContextSignal, entry.compacted);
 				}
-				const session = todayByUuid.get(uuid);
-				if (session) { this._applyDbContextToTodaySession(session, info); }
+				for (const session of sessionsByUuid.get(uuid) ?? []) { applyDbContextToSession(session, info); }
 			}
 		} catch { /* optional enrichment — suppress */ }
 	}
@@ -5132,6 +5229,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				}
 				const { results } = await this.loadUsageSessionFiles(undefined, start.getTime());
 				sessions = this.buildRecentSessionBucket(results, getTimeWindowStartDayKey(period, now));
+				await this.applyDbContextToSessions(sessions);
 			} else {
 				const stats = this.lastUsageAnalysisStats ?? await this.calculateUsageAnalysisStats(true);
 				sessions = stats.recentSessions?.[period] ?? [];
@@ -7993,16 +8091,31 @@ private computeFallbackDailyRollup(
 		}
 	}
 
-	private async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string): Promise<void> {
-		this.pendingAnalysisNavigation = { tab, ...(anchor ? { anchor } : {}) };
+	private async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string, sessionsPreset?: SessionsTabPreset): Promise<void> {
+		this.pendingAnalysisNavigation = { tab, ...(anchor ? { anchor } : {}), ...(sessionsPreset ? { sessionsPreset } : {}) };
 		await this.showUsageAnalysis();
 		this.analysisPanel?.reveal(vscode.ViewColumn.One, false);
 		await this.flushPendingAnalysisNavigation();
 	}
 
-	/** Opens the Usage Analysis panel and activates the Insights tab. */
-	public async showUsageAnalysisOnInsightsTab(): Promise<void> {
-		await this.showUsageAnalysisOnTab('insights');
+	/**
+	 * Opens the Recent Sessions tab filtered to the sessions that nearly filled
+	 * their context window over the last 30 days — the actionable drill-down
+	 * behind the "Some sessions nearly ran out of context window" insight, whose
+	 * counters are computed over that same window.
+	 */
+	public async showContextPressureSessions(): Promise<void> {
+		await this.showUsageAnalysisOnTab('sessions', undefined, { filter: 'nearContextLimit', lookback: 'last30' });
+	}
+
+	/**
+	 * Opens the Usage Analysis panel and activates the Insights tab. When `insightId` is given —
+	 * the toast's "View" action, or the status-bar badge naming its top insight — the webview also
+	 * scrolls to and highlights that specific card, instead of dropping the user at the top of a
+	 * tab full of look-alike cards and leaving them to find the one they were notified about.
+	 */
+	public async showUsageAnalysisOnInsightsTab(insightId?: string): Promise<void> {
+		await this.showUsageAnalysisOnTab('insights', insightId ? insightCardElementId(insightId) : undefined);
 	}
 
 	/** Opens the Usage Analysis panel and activates the Tools & Integrations tab. */
@@ -8164,28 +8277,27 @@ private computeFallbackDailyRollup(
 			case 'seen':
 				if (existing.status === 'new') {
 					this._insightStateBag[id] = { ...existing, status: 'seen', lastSurfacedAt: now };
-					this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				}
 				break;
 			case 'dismiss':
 				this._insightStateBag[id] = { ...existing, status: 'dismissed', lastSurfacedAt: now };
-				this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				break;
 			case 'snooze': {
 				const snoozeUntil = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 				this._insightStateBag[id] = { ...existing, status: 'snoozed', lastSurfacedAt: now, snoozeUntil };
-				this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				break;
 			}
 			case 'done':
 				this._insightStateBag[id] = { ...existing, status: 'done', lastSurfacedAt: now };
-				this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
 				break;
 		}
 		await this.context.globalState.update('insights.state', this._insightStateBag);
+		// Re-evaluate once and use it for both surfaces: the insight just acted on may no longer be
+		// the top 'new' one, and a badge left naming it would send a click to the wrong card.
+		const evaluated = this.lastUsageAnalysisStats ? this.buildCurrentInsights(this.lastUsageAnalysisStats) : undefined;
+		this.refreshInsightBadgeFromState(now, evaluated);
 		// Push refreshed state back to the webview
-		if (this.analysisPanel && this.lastUsageAnalysisStats) {
-			const evaluated = this.buildCurrentInsights(this.lastUsageAnalysisStats);
+		if (this.analysisPanel && evaluated) {
 			void this.analysisPanel.webview.postMessage({ command: 'updateInsights', insights: evaluated });
 		}
 	}
@@ -9713,6 +9825,9 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			lastUpdated: now.toISOString(),
 			backendConfigured: this.isBackendConfigured(),
 			compactNumbers: this.getCompactNumbersSetting(),
+			// Same detected locale the Usage Analysis view formats with, so both
+			// views group numbers and place currency symbols identically.
+			locale: usage.locale,
 			isDebugMode: this.context.extensionMode === vscode.ExtensionMode.Development,
 		};
 	}
@@ -13004,19 +13119,24 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
 }
 
 function registerUsageNavigationCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
-  const commands: Array<[string, string, () => Promise<void>]> = [
-    ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", () => tokenTracker.showUsageAnalysisOnInsightsTab()],
+  const commands: Array<[string, string, (...args: unknown[]) => Promise<void>]> = [
+    // The status-bar insights badge passes the id of the insight its tooltip names, so the panel
+    // can scroll straight to that card. It is the only caller that passes one — the command is
+    // registered but not contributed, so there is no palette or keybinding path — and the guard
+    // keeps any other invocation (or a non-string argument) on the plain open-the-tab behaviour.
+    ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", (insightId) => tokenTracker.showUsageAnalysisOnInsightsTab(typeof insightId === 'string' ? insightId : undefined)],
     ["aiEngineeringFluency.openToolsTab", "Open Tools tab command called", () => tokenTracker.showUsageAnalysisOnToolsTab()],
     ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
     ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
     ["aiEngineeringFluency.openCorrectionsTab", "Open Corrections tab command called", () => tokenTracker.showUsageAnalysisOnCorrectionsTab()],
     ["aiEngineeringFluency.askCopilotAboutCorrections", "Ask Copilot about corrections command called", () => tokenTracker.askCopilotAboutCorrections()],
     ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
+    ["aiEngineeringFluency.showContextPressureSessions", "Show near-context-limit sessions command called", () => tokenTracker.showContextPressureSessions()],
   ];
   context.subscriptions.push(...commands.map(([id, logMessage, handler]) =>
-    vscode.commands.registerCommand(id, async () => {
+    vscode.commands.registerCommand(id, async (...args: unknown[]) => {
       tokenTracker.log(logMessage);
-      await handler();
+      await handler(...args);
     })
   ));
 }

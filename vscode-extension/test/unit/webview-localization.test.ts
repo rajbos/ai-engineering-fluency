@@ -49,6 +49,12 @@ test('localize: the context-pressure defaults are present without any payload', 
 		'usage.contextPressure.compactedTooltip',
 		'usage.contextPressure.nearLimitLabel',
 		'usage.contextPressure.nearLimitTooltip',
+		'usage.sessions.contextFill.columnLabel',
+		'usage.sessions.contextFill.nearLimitFilter',
+		'usage.sessions.contextFill.nearLimitFilterTooltip',
+		'usage.sessions.contextFill.used',
+		'usage.sessions.contextFill.usedNearLimit',
+		'usage.sessions.contextFill.noData',
 	]) {
 		assert.notEqual(localize(key), key, `${key} should have a built-in English default`);
 	}
