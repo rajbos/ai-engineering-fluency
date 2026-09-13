@@ -22,6 +22,14 @@
  *      the same file.
  *   5. `_preloadSessionFiles()` must not discard already-seeded `preloaded`
  *      results just because this run's adapter discovery came back empty.
+ *   6. The cache snapshot itself (not just cache-vs-discovery) can contain
+ *      multiple raw-path spellings of the same physical file, which both the
+ *      instant paint and the cache-seeded queue must deduplicate against.
+ *   7. `_runRefreshCore()`'s one-time full-year chart backfill must not run
+ *      against an empty `sessionFiles` when real cache-seeded `preloaded`
+ *      data exists — calculateDailyStats(365, []) sets `lastFullDailyStats`
+ *      to `[]`, and since an empty array is truthy, showChart() would treat
+ *      that as complete data and get stuck showing an empty chart.
  *
  * This isn't a runtime test (instantiating `CopilotTokenTracker` requires a
  * full VS Code host and file-system session discovery — see
@@ -283,4 +291,21 @@ test('the constructor chains the OpenCode DB probe onto _cacheLoadPromise only, 
 	);
 	assert.ok(fullLoadBlock.includes('queueMissingOpenCodeDbSessionsFromCache'),
 		'_cacheLoadPromise must still chain queueMissingOpenCodeDbSessionsFromCache() — the real refresh path (which awaits _cacheLoadPromise) needs the OpenCode DB reconciled before discovery/preload starts');
+});
+
+test('_runRefreshCore() skips the one-time full-year chart backfill when discovery is empty but cache-seeded preloaded data exists', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {');
+
+	const guardIndex = body.indexOf('const discoveryUntrustworthyForBackfill = sessionFiles.length === 0 && preloaded.length > 0;');
+	assert.ok(guardIndex !== -1,
+		'_runRefreshCore() must detect the "sessionFiles empty but preloaded non-empty" case — calculateDailyStats(365, []) would otherwise set lastFullDailyStats to an empty (but truthy) array');
+
+	const backfillCallIndex = body.indexOf('void this.calculateDailyStats(365, sessionFiles);');
+	assert.ok(backfillCallIndex !== -1 && guardIndex < backfillCallIndex,
+		'the untrustworthy-discovery guard must be computed before the backfill call it protects');
+
+	// The guard must actually gate the call — not just exist unused nearby.
+	const guardToCallSpan = body.slice(guardIndex, backfillCallIndex);
+	assert.ok(/if \(!this\.lastFullDailyStats && !this\.chartPanel && !discoveryUntrustworthyForBackfill\) \{/.test(guardToCallSpan),
+		'the backfill call must be gated on !discoveryUntrustworthyForBackfill, or an unreliable empty-discovery run can still overwrite lastFullDailyStats with []');
 });

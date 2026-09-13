@@ -3599,7 +3599,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this.persistRefreshResult(isLeader);
 
-		if (!this.lastFullDailyStats && !this.chartPanel) {
+		// Skip the one-time full-year backfill when this run's discovery is the unreliable
+		// "sessionFiles came back empty but we still have real cached data" case (see
+		// reconcilePreloadedAgainstDiscovery()) — calculateDailyStats(365, []) would set
+		// lastFullDailyStats to [], and since an empty array is truthy, showChart()'s
+		// `!!this.lastFullDailyStats` / `?? this.lastDailyStats` checks would treat that as
+		// complete data and get stuck showing an empty chart instead of falling back to the
+		// real lastDailyStats or retrying on a later, successful refresh. A genuine first-ever
+		// user with zero session files (sessionFiles and preloaded both empty) is unaffected.
+		const discoveryUntrustworthyForBackfill = sessionFiles.length === 0 && preloaded.length > 0;
+		if (!this.lastFullDailyStats && !this.chartPanel && !discoveryUntrustworthyForBackfill) {
 			void this.calculateDailyStats(365, sessionFiles);
 		}
 
