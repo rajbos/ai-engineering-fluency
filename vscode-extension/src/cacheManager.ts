@@ -138,8 +138,18 @@ export class CacheManager {
 					if (CacheManager.isVirtualSessionPath(filePath)) { return; }
 					try {
 						await fs.promises.access(filePath);
-					} catch {
-						this.deleteCachedSessionData(filePath);
+					} catch (err) {
+						// fs.access() also rejects for reasons that don't mean "this file is gone" —
+						// EACCES/EPERM (a permissions hiccup), EBUSY, a transiently unmounted network
+						// drive, etc. Given deleteCachedSessionData()'s tombstone now excludes the path
+						// from every future snapshot save (not just this process's memory), treating any
+						// of those as a confirmed deletion would permanently discard a still-valid,
+						// expensive-to-rebuild session over what may be a passing I/O error. Only a
+						// "this path definitely doesn't exist" error is trustworthy enough to tombstone.
+						const code = (err as NodeJS.ErrnoException)?.code;
+						if (code === 'ENOENT' || code === 'ENOTDIR') {
+							this.deleteCachedSessionData(filePath);
+						}
 					}
 				})
 			);
@@ -821,8 +831,16 @@ export class CacheManager {
 		let merged = 0;
 		for (const [filePath, entry] of Object.entries(entries)) {
 			if (!entry || typeof entry.mtime !== 'number') { continue; }
+			// A tombstoned path has no `existing` in-memory entry to compare against (deleteCachedSessionData()
+			// removed it from sessionFileCache), so `!existing` would otherwise always be true and accept ANY
+			// snapshot entry unconditionally — including one no newer than what was actually deleted, e.g. a
+			// stale snapshot a concurrent window is still rewriting. Guard with the same tombstone-baseline
+			// comparison buildMergedSnapshotEntries() already applies on the write side: only a snapshot entry
+			// strictly newer than the tombstone survives.
 			const existing = this.sessionFileCache.get(filePath);
-			if (!existing || entry.mtime > existing.mtime) {
+			const tombstoneMtime = this.deletedFilePaths.get(filePath);
+			const isNewerThanTombstone = tombstoneMtime === undefined || entry.mtime > tombstoneMtime;
+			if ((!existing || entry.mtime > existing.mtime) && isNewerThanTombstone) {
 				this.sessionFileCache.set(filePath, entry);
 				// Must clear any tombstone this window recorded for this path, same as
 				// setCachedSessionData() does — buildMergedSnapshotEntries()'s mtime comparison

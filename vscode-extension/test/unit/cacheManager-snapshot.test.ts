@@ -457,6 +457,28 @@ test('loadSharedSnapshotIfChanged() clears a stale tombstone when accepting a ne
 	assert.equal(entries!['/a.json'].mtime, 5000);
 });
 
+// Distinct from the "clears a stale tombstone when accepting a NEWER entry" test above: this
+// covers mergeSnapshotEntries()'s own comparison, not just the end-to-end save-after-merge
+// behavior. A tombstoned path has no `existing` in-memory entry to compare against (it was
+// removed), so before the fix `!existing` was always true and ANY disk entry — even one no newer
+// than what was deleted — got merged back in unconditionally, silently resurrecting the deletion.
+test('loadSharedSnapshotIfChanged() does not resurrect a tombstoned path from a disk entry that is no newer than the deletion', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot();
+
+	const reader = makeManager(dir);
+	reader.setCachedSessionData('/a.json', entry(1000), 10);
+	reader.deleteCachedSessionData('/a.json'); // tombstone baseline = mtime 1000
+
+	// The on-disk snapshot still has the same-age entry the tombstone was recorded against.
+	const merged = await reader.loadSharedSnapshotIfChanged();
+
+	assert.equal(merged, 0, 'a disk entry no newer than the tombstone baseline must not be merged in');
+	assert.ok(!reader.cache.has('/a.json'), 'the path must stay deleted in memory, not resurrected from the stale disk copy');
+});
+
 test('clearExpiredCache() does not tombstone virtual session paths (.db#session-id, editor:// schemes) via a raw fs.access() check', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
@@ -475,6 +497,20 @@ test('clearExpiredCache() does not tombstone virtual session paths (.db#session-
 		'a scheme:// virtual path (Windsurf/Devin) must likewise survive clearExpiredCache()');
 	assert.ok(!m.cache.has(realMissingPath),
 		'a genuinely missing real filesystem path must still be expired — this exemption must not blanket-disable expiry');
+});
+
+test('clearExpiredCache() only tombstones on a confirmed-missing error (ENOENT/ENOTDIR), not any fs.access() failure', { skip: process.platform === 'win32' }, async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	// A path with an over-length filename component reliably fails fs.access() with ENAMETOOLONG on
+	// Linux/macOS — a real fs.access() failure that is NOT "this file is gone" (unlike ENOENT).
+	const tooLongPath = path.join(dir, 'a'.repeat(300) + '.json');
+	m.setCachedSessionData(tooLongPath, entry(1000), 10);
+
+	await m.clearExpiredCache();
+
+	assert.ok(m.cache.has(tooLongPath),
+		'an fs.access() failure that is not ENOENT/ENOTDIR (ENAMETOOLONG here) must not be treated as a confirmed deletion — a permissions hiccup or transient I/O error would otherwise permanently tombstone a still-valid, expensive-to-rebuild session out of every future snapshot');
 });
 
 // Distinct from the loadSharedSnapshotIfChanged() cross-window test above: here window A never

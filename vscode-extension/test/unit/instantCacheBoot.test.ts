@@ -147,10 +147,12 @@ test('renderInstantStatsFromCache() renders from the cache alone, with no discov
 		'must filter each cache entry through isUsableForInstantPaint() with the computed cutoff before including it');
 });
 
-test('isUsableForInstantPaint() requires real interaction data, a finite mtime, and falling within the cutoff window', () => {
+test('isUsableForInstantPaint() requires a finite positive interaction count, a finite mtime, and falling within the cutoff window', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private isUsableForInstantPaint(sessionData: SessionFileCache | undefined, cutoffMs: number): sessionData is SessionFileCache {');
-	assert.ok(body.includes('return !!sessionData && sessionData.interactions !== 0 && Number.isFinite(sessionData.mtime) && sessionData.mtime >= cutoffMs;'),
-		'must reject a missing entry, a zero-interaction entry, a non-finite mtime (a malformed persisted record — new Date(...).toISOString() would throw on it deeper in the caller), and an entry older than cutoffMs, in one place');
+	assert.ok(body.includes('Number.isFinite(sessionData.interactions) && sessionData.interactions > 0'),
+		'must require a finite, positive interactions count — a bare `!== 0` check wrongly accepts NaN or a negative value from a malformed persisted record, since neither strictly equals 0');
+	assert.ok(body.includes('Number.isFinite(sessionData.mtime) && sessionData.mtime >= cutoffMs'),
+		'must reject a missing entry, a non-finite mtime (a malformed persisted record — new Date(...).toISOString() would throw on it deeper in the caller), and an entry older than cutoffMs');
 });
 
 test('shouldAbandonInstantPaintAfterCacheLoad() checks both sample mode and disposal', () => {
@@ -381,10 +383,10 @@ test('_runRefreshCore() skips the one-time full-year chart backfill when discove
 test('renderInstantStatsFromCache() never overwrites a real refresh that already completed while it was still computing', () => {
 	const instantBody = extractBracesBlock(EXTENSION_SRC, 'private async renderInstantStatsFromCache(): Promise<void> {');
 	const calcIndex = instantBody.indexOf('await this.calculateDetailedStats(undefined, preloaded)');
-	const guardIndex = instantBody.indexOf('if (this._hasCompletedRealRefresh || this._disposed) { return; }');
+	const guardIndex = instantBody.indexOf('if (this._hasCompletedRealRefresh || this._disposed || this.isSampleDataModeActive()) { return; }');
 	const commitIndex = instantBody.indexOf('this.lastDetailedStats = stats;');
 	assert.ok(calcIndex !== -1 && guardIndex !== -1 && commitIndex !== -1 && calcIndex < guardIndex && guardIndex < commitIndex,
-		'renderInstantStatsFromCache() must check _hasCompletedRealRefresh (AND _disposed, since dispose() can also run during that same await) after awaiting calculateDetailedStats but before committing its own results — otherwise a real refresh that finishes first, or a window that closed mid-await, can be silently overwritten by/resumed into this slower, stale cache-only computation');
+		'renderInstantStatsFromCache() must check _hasCompletedRealRefresh, _disposed (dispose() can run during that same await), AND isSampleDataModeActive() (a regression run could start during that same, potentially slow await) after awaiting calculateDetailedStats but before committing its own results — otherwise a real refresh that finishes first, a window that closed mid-await, or a regression run that started mid-await can be silently overwritten by/resumed into/contaminated by this slower, stale cache-only computation');
 
 	// The flag must be set as soon as _runRefreshCore()'s own verified result exists — right after
 	// its own calculateDetailedStats() resolves — and specifically BEFORE updateStatusBarAndTooltip()

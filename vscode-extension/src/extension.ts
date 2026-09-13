@@ -2126,17 +2126,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Whether a cache entry is usable for the instant cache-only paint: it has real interaction
-	 * data, a finite mtime (a persisted snapshot is just parsed JSON — a malformed mtime would make
-	 * `new Date(...).toISOString()` throw deeper in renderInstantStatsFromCache(), aborting the
-	 * entire paint over one bad record instead of just skipping it), and falls within the same
-	 * recency window the real refresh bounds `preloaded` to (`cutoffMs`) — without that last check,
-	 * this provisional paint could include cache entries the real refresh's own `preloaded` excludes,
-	 * showing a higher, more-inclusive number that then visibly drops once the verified refresh
-	 * (which never counted those older entries) overwrites it moments later.
+	 * Whether a cache entry is usable for the instant cache-only paint: it has a finite, positive
+	 * interaction count (a persisted snapshot is just parsed JSON — an untyped `!== 0` check would
+	 * accept a NaN or negative `interactions` value, since neither strictly equals 0, letting it
+	 * propagate as a NaN/negative count into the provisional status/chart data), a finite mtime
+	 * (a malformed one would make `new Date(...).toISOString()` throw deeper in
+	 * renderInstantStatsFromCache(), aborting the entire paint over one bad record instead of just
+	 * skipping it), and falls within the same recency window the real refresh bounds `preloaded` to
+	 * (`cutoffMs`) — without that last check, this provisional paint could include cache entries the
+	 * real refresh's own `preloaded` excludes, showing a higher, more-inclusive number that then
+	 * visibly drops once the verified refresh (which never counted those older entries) overwrites
+	 * it moments later.
 	 */
 	private isUsableForInstantPaint(sessionData: SessionFileCache | undefined, cutoffMs: number): sessionData is SessionFileCache {
-		return !!sessionData && sessionData.interactions !== 0 && Number.isFinite(sessionData.mtime) && sessionData.mtime >= cutoffMs;
+		return !!sessionData
+			&& Number.isFinite(sessionData.interactions) && sessionData.interactions > 0
+			&& Number.isFinite(sessionData.mtime) && sessionData.mtime >= cutoffMs;
 	}
 
 	private async renderInstantStatsFromCache(): Promise<void> {
@@ -2184,8 +2189,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// with this and is normally far faster to actually publish results once it starts, but
 			// there's no hard ordering guarantee. If it already committed verified data while this
 			// was still aggregating, never overwrite it with these older, cache-only numbers.
-			// Also bail if the window closed during that same await — see the guard above.
-			if (this._hasCompletedRealRefresh || this._disposed) { return; }
+			// Also bail if the window closed, or sample-data mode turned on (e.g. runLocalViewRegression()
+			// started during this same, potentially slow aggregation) — publishing real cached stats now
+			// would contaminate a regression/screenshot run that expects only its fixture data.
+			if (this._hasCompletedRealRefresh || this._disposed || this.isSampleDataModeActive()) { return; }
 			this.lastDetailedStats = stats;
 			this.lastDailyStats = dailyStats;
 			this.mergeIntoFullDailyStats(dailyStats);
