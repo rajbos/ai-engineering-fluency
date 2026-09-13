@@ -399,14 +399,20 @@ test('isDiscoveryUntrustworthyForBackfill() detects the empty-discovery-but-cach
 		'must also treat a non-empty cache as "we have real data" even when none of it made it into the narrower preloaded array');
 });
 
-test('_runRefreshCore() skips the one-time full-year chart backfill when discovery is untrustworthy', () => {
+test('_runRefreshCore() skips the one-time full-year chart backfill when discovery is untrustworthy, or this window is a follower', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {');
 
 	const backfillCallIndex = body.indexOf('void this.calculateDailyStats(365, sessionFiles);');
 	assert.ok(backfillCallIndex !== -1, '_runRefreshCore() must still perform the one-time full-year backfill call');
 
-	assert.ok(/if \(!this\.lastFullDailyStats && !this\.chartPanel && !this\.isDiscoveryUntrustworthyForBackfill\(sessionFiles, preloaded\)\) \{/.test(body),
-		'the backfill call must be gated on !isDiscoveryUntrustworthyForBackfill(sessionFiles, preloaded), or an unreliable/partial discovery run can still overwrite lastFullDailyStats with an incomplete result');
+	// calculateDailyStats(365, sessionFiles) reparses every discovered file with no missBudget/
+	// follower awareness at all, unlike the regular per-refresh preload just above it (which passes
+	// FOLLOWER_MISS_BUDGET for non-leaders). Without the isLeader guard, every follower window's
+	// first refresh would launch a full, unbounded reparse of the entire session history in
+	// parallel with the leader's own preload — defeating the follower miss-budget stampede
+	// protection and the cold-boot cost this PR exists to cut.
+	assert.ok(/if \(isLeader && !this\.lastFullDailyStats && !this\.chartPanel && !this\.isDiscoveryUntrustworthyForBackfill\(sessionFiles, preloaded\)\) \{/.test(body),
+		'the backfill call must also require isLeader — calculateDailyStats(365, ...) has no follower miss-budget of its own, so running it on a follower would reparse the entire session history unbounded, defeating the FOLLOWER_MISS_BUDGET stampede protection used just above it');
 });
 
 test('renderInstantStatsFromCache() never overwrites a real refresh that already completed while it was still computing', () => {

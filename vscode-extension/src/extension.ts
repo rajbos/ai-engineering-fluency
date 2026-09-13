@@ -3793,8 +3793,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.persistRefreshResult(isLeader);
 
 		// Skip the one-time full-year backfill when this run's discovery can't be trusted to be
-		// complete — see isDiscoveryUntrustworthyForBackfill() for why.
-		if (!this.lastFullDailyStats && !this.chartPanel && !this.isDiscoveryUntrustworthyForBackfill(sessionFiles, preloaded)) {
+		// complete — see isDiscoveryUntrustworthyForBackfill() for why. Leader-only: unlike the
+		// regular refresh above, calculateDailyStats() has no missBudget/follower awareness at all —
+		// it reparses every discovered session file unconditionally. Running it on every follower
+		// window's first refresh would launch a full, unbounded reparse in parallel with the leader's
+		// own preload, defeating FOLLOWER_MISS_BUDGET's stampede protection and the very cold-boot
+		// cost this PR exists to cut. A follower that skips this still renders correctly: every
+		// lastFullDailyStats read elsewhere already falls back to lastDailyStats or computes its own
+		// full-year data lazily on demand (e.g. when Chart is opened).
+		if (isLeader && !this.lastFullDailyStats && !this.chartPanel && !this.isDiscoveryUntrustworthyForBackfill(sessionFiles, preloaded)) {
 			void this.calculateDailyStats(365, sessionFiles);
 		}
 
