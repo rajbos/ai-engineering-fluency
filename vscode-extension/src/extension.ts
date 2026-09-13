@@ -1587,6 +1587,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// generation, read the computed caches that had not been cleared yet, and so pass
 			// the check with pre-clear data. Clearing the caches here closes that window —
 			// after the await there is nothing left for such a build to read.
+			//
+			// It does not close the *writes*, and that gap is pre-existing rather than new here:
+			// calculateDailyStats() and calculateUsageAnalysisStats() assign lastFullDailyStats and
+			// lastUsageAnalysisStats when they finish, so a build already in flight repopulates them
+			// from pre-clear data after this runs. recordEfficiencyPayload() keeps that build's
+			// payload from being rendered or recorded; it cannot unwind those assignments. Closing
+			// it needs the generation threaded into the aggregation functions themselves.
 			this.lastDetailedStats = undefined;
 			this.lastDailyStats = undefined;
 			this.lastFullDailyStats = undefined;
