@@ -345,6 +345,7 @@ test('l10n: HydraFusion routing keys resolve in zh-cn', () => {
 // Efficiency view — Models tab empty states. These explain why a window cannot
 // form a comparison, so they must not surface in English for zh-CN users.
 test('l10n: Efficiency Models tab empty states resolve in English', () => {
+	mock.setLanguage('en');
 	const expected: Record<string, string> = {
 		'efficiency.models.noPairInWindow': 'Only one model was used in {0} ({1}), so there is no pair to compare. Pick a wider window, or switch to \u201cOne model, two periods\u201d.',
 		'efficiency.models.noModelsInWindow': 'No model was used in {0} ({1}). Pick a wider window.',
@@ -380,6 +381,7 @@ test('l10n: Efficiency Models tab empty states resolve in zh-cn', () => {
 });
 
 test('l10n: Efficiency Models tab control labels resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
 	const english: Record<string, string> = {
 		'efficiency.models.controls.mode': 'Mode',
 		'efficiency.models.controls.modelA': 'Model A',

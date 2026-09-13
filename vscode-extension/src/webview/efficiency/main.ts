@@ -11,6 +11,7 @@ import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import type {
+	ComparableModel,
 	CostAttribution,
 	EfficiencyDelta,
 	EfficiencyViewData,
@@ -566,8 +567,8 @@ function selectHtml(id: string, options: { value: string; label: string; disable
 }
 
 /** Dropdown options for the model pickers: only models the active window(s) can actually compare. */
-function modelOptions(d: EfficiencyViewData): { value: string; label: string }[] {
-	return listEligibleModels(d.modelDaily, modelState, payloadNow(d)).map(m => ({
+function modelOptions(eligible: ComparableModel[]): { value: string; label: string }[] {
+	return eligible.map(m => ({
 		value: m.model,
 		label: `${m.displayName} (${m.sessions} sessions${m.sampleSufficient ? '' : ', low sample'})`,
 	}));
@@ -595,8 +596,8 @@ function windowOptions(d: EfficiencyViewData, now: Date): { value: string; label
 	});
 }
 
-function renderModelControls(d: EfficiencyViewData): string {
-	const models = modelOptions(d);
+function renderModelControls(d: EfficiencyViewData, eligible: ComparableModel[]): string {
+	const models = modelOptions(eligible);
 	const windows = windowOptions(d, payloadNow(d));
 	const modeSelect = selectHtml('model-mode', [
 		{ value: 'models', label: localize('efficiency.models.mode.models') },
@@ -809,7 +810,7 @@ function renderCacheTab(d: EfficiencyViewData): string {
  * ever offer eligible models, so reaching here means the window itself is too
  * narrow — not that the current pick is stale.
  */
-function noEligibleModelsNote(d: EfficiencyViewData): string {
+function noEligibleModelsNote(d: EfficiencyViewData, eligible: ComparableModel[]): string {
 	const now = payloadNow(d);
 	if (modelState.mode === 'periods') {
 		const a = resolveModelCompareWindow(modelState.windowA, now);
@@ -817,8 +818,7 @@ function noEligibleModelsNote(d: EfficiencyViewData): string {
 		return localizeFormat('efficiency.models.noSharedModel', a.label, a.rangeLabel, b.label, b.rangeLabel);
 	}
 	const w = resolveModelCompareWindow(modelState.window, now);
-	const eligible = listEligibleModels(d.modelDaily, modelState, now).length;
-	return eligible === 1
+	return eligible.length === 1
 		? localizeFormat('efficiency.models.noPairInWindow', w.label, w.rangeLabel)
 		: localizeFormat('efficiency.models.noModelsInWindow', w.label, w.rangeLabel);
 }
@@ -829,12 +829,15 @@ function renderModelsTab(d: EfficiencyViewData): string {
 		return `<p class="eff-section-note">No per-model efficiency data yet. This tab needs sessions whose logs carry per-turn tool-call detail (Copilot CLI, Claude Code, Copilot Chat and similar). Keep working and check back in a few days.</p>`;
 	}
 	reconcileModelState(d);
-	const controls = renderModelControls(d);
+	// Computed once per render and threaded through: the pickers, the empty-state
+	// note and the comparison all describe the same eligible set.
+	const eligible = listEligibleModels(d.modelDaily, modelState, payloadNow(d));
+	const controls = renderModelControls(d, eligible);
 	const cmp = buildModelComparison(d);
 	if (!cmp) {
 		return `
 			${controls}
-			<p class="eff-section-note">${escapeHtml(noEligibleModelsNote(d))}</p>`;
+			<p class="eff-section-note">${escapeHtml(noEligibleModelsNote(d, eligible))}</p>`;
 	}
 	const metricOptions = MODEL_TREND_METRICS.map(m => ({ value: m.id, label: m.label }));
 	return `

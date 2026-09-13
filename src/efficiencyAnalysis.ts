@@ -1120,6 +1120,15 @@ export interface ModelCompareSelection {
 	windowB: ModelCompareWindowId;
 }
 
+/** The models that appear at all in `days` — key presence only, no aggregation. */
+function modelsPresent(days: ModelDailyInput[]): Set<string> {
+	const seen = new Set<string>();
+	for (const day of days) {
+		for (const model of Object.keys(day.modelEfficiency ?? {})) { seen.add(model); }
+	}
+	return seen;
+}
+
 /** Deduplicates day entries by identity, so overlapping windows are not counted twice. */
 function uniqueDays(...groups: ModelDailyInput[][]): ModelDailyInput[] {
 	return [...new Set(groups.flat())];
@@ -1143,8 +1152,10 @@ export function listEligibleModels(
 	if (selection.mode === 'periods') {
 		const daysA = selectDaysInWindow(days, resolveModelCompareWindow(selection.windowA, now));
 		const daysB = selectDaysInWindow(days, resolveModelCompareWindow(selection.windowB, now));
-		const inA = new Set(listComparableModels(daysA).map(m => m.model));
-		const inB = new Set(listComparableModels(daysB).map(m => m.model));
+		// Membership only needs the model keys, so it is a cheap scan — the full
+		// per-model aggregate is computed once, over the union.
+		const inA = modelsPresent(daysA);
+		const inB = modelsPresent(daysB);
 		return listComparableModels(uniqueDays(daysA, daysB)).filter(m => inA.has(m.model) && inB.has(m.model));
 	}
 	return listComparableModels(selectDaysInWindow(days, resolveModelCompareWindow(selection.window, now)));
