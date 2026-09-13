@@ -1386,8 +1386,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// alongside or instead of real ones. Safe to always evict, even when this run used real
 			// session data instead of fixtures: those entries are legitimately rediscoverable, so
 			// this costs at most one avoidable reparse on the next refresh, not a correctness loss.
-			for (const sessionFile of regressionSessionFiles) {
-				this.cacheManager.deleteCachedSessionData(sessionFile);
+			// Swept by normalized key, not the exact raw strings setupRegressionSessionFiles()
+			// returned: a same-file spelling variant already sitting in the cache under a different
+			// raw key (case/separator) would otherwise survive this eviction and still be readable
+			// by the very next getDeduplicatedCacheEntries() call.
+			const regressionKeys = new Set(regressionSessionFiles.map(f => _normalizePathForDedup(f)));
+			if (regressionKeys.size > 0) {
+				for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
+					if (regressionKeys.has(_normalizePathForDedup(rawPath))) {
+						this.cacheManager.deleteCachedSessionData(rawPath);
+					}
+				}
 			}
 			this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = this.lastDashboardData = undefined;
 			this.lastEfficiencySessionInputs = undefined;
@@ -3293,33 +3302,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * cache-only instant paint (which reads the cache directly, before any discovery has even run)
 	 * would still resurrect the same stale entry.
 	 *
-	 * Every raw cache key that normalizes to an unconfirmed path is evicted, not just the one
-	 * `preloaded` happened to carry (the winner getDeduplicatedCacheEntries() picked) — a
-	 * same-file spelling variant that lost that dedup never appears in `preloaded` at all, but
-	 * would still be sitting in the cache ready to become the new "winner" once the current one
-	 * is gone.
+	 * Every raw cache key that normalizes to an unconfirmed path is evicted — swept directly from
+	 * `cacheManager.cache`, not derived from `preloaded`. `preloaded` only holds files that passed
+	 * the refresh cutoff and parsed successfully; a cache-seeded entry that was too old for this
+	 * cutoff, or whose stat/parse failed this run, never reaches `preloaded` at all but would still
+	 * be sitting in the cache — confirming it against `confirmedKeys` directly is the only way to
+	 * catch those too, not just the dedup winner a same-file spelling variant happened to produce.
 	 */
 	private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {
 		if (this.sessionDiscovery.lastDiscoveryHadError || sessionFiles.length === 0) { return preloaded; }
 		const confirmedKeys = new Set(sessionFiles.map(f => _normalizePathForDedup(f)));
-		const kept: SessionFilePreload[] = [];
-		const unconfirmedNormalizedKeys = new Set<string>();
-		for (const p of preloaded) {
-			const key = _normalizePathForDedup(p.sessionFile);
-			if (confirmedKeys.has(key)) {
-				kept.push(p);
-			} else {
-				unconfirmedNormalizedKeys.add(key);
+		for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
+			if (!confirmedKeys.has(_normalizePathForDedup(rawPath))) {
+				this.cacheManager.deleteCachedSessionData(rawPath);
 			}
 		}
-		if (unconfirmedNormalizedKeys.size > 0) {
-			for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
-				if (unconfirmedNormalizedKeys.has(_normalizePathForDedup(rawPath))) {
-					this.cacheManager.deleteCachedSessionData(rawPath);
-				}
-			}
-		}
-		return kept;
+		return preloaded.filter(p => confirmedKeys.has(_normalizePathForDedup(p.sessionFile)));
 	}
 
 	/**
@@ -3619,6 +3617,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	/**
+	 * Whether this run's discovery can't be trusted to be complete, and the one-time full-year
+	 * chart backfill (calculateDailyStats(365, sessionFiles)) must therefore be skipped.
+	 *
+	 * Two cases: the "sessionFiles came back empty but we still have real cached data" case (see
+	 * reconcilePreloadedAgainstDiscovery()), or lastDiscoveryHadError — set whenever any single
+	 * adapter throws, even if other adapters still returned a non-empty partial sessionFiles list.
+	 * Either way, calculateDailyStats(365, sessionFiles) would compute and store a
+	 * truncated/incomplete year and, since an empty *or partial* array is truthy, showChart()'s
+	 * `!!this.lastFullDailyStats` / `?? this.lastDailyStats` checks would treat that as complete
+	 * data and get stuck instead of falling back to the real lastDailyStats or retrying on a later,
+	 * successful refresh. A genuine first-ever user with zero session files (sessionFiles and
+	 * preloaded both empty, no discovery error) is unaffected.
+	 */
+	private isDiscoveryUntrustworthyForBackfill(sessionFiles: string[], preloaded: SessionFilePreload[]): boolean {
+		return this.sessionDiscovery.lastDiscoveryHadError || (sessionFiles.length === 0 && preloaded.length > 0);
+	}
+
 	/** Core discover → parse → compute → render → persist pass for one refresh. */
 	private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {
 		this.log(isLeader ? 'Updating token stats (leader)...' : 'Updating token stats (follower)...');
@@ -3679,16 +3695,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this.persistRefreshResult(isLeader);
 
-		// Skip the one-time full-year backfill when this run's discovery is the unreliable
-		// "sessionFiles came back empty but we still have real cached data" case (see
-		// reconcilePreloadedAgainstDiscovery()) — calculateDailyStats(365, []) would set
-		// lastFullDailyStats to [], and since an empty array is truthy, showChart()'s
-		// `!!this.lastFullDailyStats` / `?? this.lastDailyStats` checks would treat that as
-		// complete data and get stuck showing an empty chart instead of falling back to the
-		// real lastDailyStats or retrying on a later, successful refresh. A genuine first-ever
-		// user with zero session files (sessionFiles and preloaded both empty) is unaffected.
-		const discoveryUntrustworthyForBackfill = sessionFiles.length === 0 && preloaded.length > 0;
-		if (!this.lastFullDailyStats && !this.chartPanel && !discoveryUntrustworthyForBackfill) {
+		// Skip the one-time full-year backfill when this run's discovery can't be trusted to be
+		// complete — see isDiscoveryUntrustworthyForBackfill() for why.
+		if (!this.lastFullDailyStats && !this.chartPanel && !this.isDiscoveryUntrustworthyForBackfill(sessionFiles, preloaded)) {
 			void this.calculateDailyStats(365, sessionFiles);
 		}
 

@@ -215,7 +215,7 @@ test('reconcilePreloadedAgainstDiscovery() only trusts a clean, non-empty discov
 	assert.ok(/if \(this\.sessionDiscovery\.lastDiscoveryHadError \|\| sessionFiles\.length === 0\) \{ ?return preloaded; ?\}/.test(body),
 		'must return `preloaded` unfiltered whenever this run\'s discovery errored or found nothing — pruning must only ever run on a run we can actually trust');
 
-	assert.ok(/_normalizePathForDedup\(f\)/.test(body) && /const key = _normalizePathForDedup\(p\.sessionFile\);/.test(body) && /confirmedKeys\.has\(key\)/.test(body),
+	assert.ok(/_normalizePathForDedup\(f\)/.test(body) && /confirmedKeys\.has\(_normalizePathForDedup\(p\.sessionFile\)\)/.test(body),
 		'the confirmed-by-discovery comparison must use _normalizePathForDedup() on both sides, matching the dedup key used everywhere else in this method');
 });
 
@@ -307,21 +307,20 @@ test('the constructor chains the OpenCode DB probe onto _cacheLoadPromise only, 
 		'_cacheLoadPromise must still chain queueMissingOpenCodeDbSessionsFromCache() — the real refresh path (which awaits _cacheLoadPromise) needs the OpenCode DB reconciled before discovery/preload starts');
 });
 
-test('_runRefreshCore() skips the one-time full-year chart backfill when discovery is empty but cache-seeded preloaded data exists', () => {
+test('isDiscoveryUntrustworthyForBackfill() detects both the empty-discovery-but-cached-data case and lastDiscoveryHadError', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private isDiscoveryUntrustworthyForBackfill(sessionFiles: string[], preloaded: SessionFilePreload[]): boolean {');
+	assert.ok(/return this\.sessionDiscovery\.lastDiscoveryHadError \|\| \(sessionFiles\.length === 0 && preloaded\.length > 0\);/.test(body),
+		'must detect BOTH the "sessionFiles empty but preloaded non-empty" case AND lastDiscoveryHadError — calculateDailyStats(365, sessionFiles) would otherwise store a truncated/incomplete (but truthy) lastFullDailyStats when only one adapter out of several failed');
+});
+
+test('_runRefreshCore() skips the one-time full-year chart backfill when discovery is untrustworthy', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {');
 
-	const guardIndex = body.indexOf('const discoveryUntrustworthyForBackfill = sessionFiles.length === 0 && preloaded.length > 0;');
-	assert.ok(guardIndex !== -1,
-		'_runRefreshCore() must detect the "sessionFiles empty but preloaded non-empty" case — calculateDailyStats(365, []) would otherwise set lastFullDailyStats to an empty (but truthy) array');
-
 	const backfillCallIndex = body.indexOf('void this.calculateDailyStats(365, sessionFiles);');
-	assert.ok(backfillCallIndex !== -1 && guardIndex < backfillCallIndex,
-		'the untrustworthy-discovery guard must be computed before the backfill call it protects');
+	assert.ok(backfillCallIndex !== -1, '_runRefreshCore() must still perform the one-time full-year backfill call');
 
-	// The guard must actually gate the call — not just exist unused nearby.
-	const guardToCallSpan = body.slice(guardIndex, backfillCallIndex);
-	assert.ok(/if \(!this\.lastFullDailyStats && !this\.chartPanel && !discoveryUntrustworthyForBackfill\) \{/.test(guardToCallSpan),
-		'the backfill call must be gated on !discoveryUntrustworthyForBackfill, or an unreliable empty-discovery run can still overwrite lastFullDailyStats with []');
+	assert.ok(/if \(!this\.lastFullDailyStats && !this\.chartPanel && !this\.isDiscoveryUntrustworthyForBackfill\(sessionFiles, preloaded\)\) \{/.test(body),
+		'the backfill call must be gated on !isDiscoveryUntrustworthyForBackfill(sessionFiles, preloaded), or an unreliable/partial discovery run can still overwrite lastFullDailyStats with an incomplete result');
 });
 
 test('renderInstantStatsFromCache() never overwrites a real refresh that already completed while it was still computing', () => {
@@ -353,14 +352,15 @@ test('reconcilePreloadedAgainstDiscovery() evicts every raw cache key for an unc
 	assert.ok(!/this\.cacheManager\.cache\.delete\(/.test(body),
 		'must not touch cacheManager.cache directly — deletions here must always go through the tombstone-aware deleteCachedSessionData()');
 
-	// Must sweep every raw key in the cache that normalizes to an unconfirmed path, not only the
-	// one `preloaded` happened to carry (the dedup winner) — a same-file spelling variant that lost
-	// getDeduplicatedCacheEntries()'s dedup never appears in `preloaded`, but would still be sitting
-	// in the cache ready to become the new "winner" once the current one is evicted.
+	// Must sweep every raw key in the cache that normalizes to an unconfirmed path, compared
+	// directly against confirmedKeys — not derived from `preloaded` — so a cache-seeded entry that
+	// was too old for the refresh cutoff, or whose stat/parse failed this run (and therefore never
+	// reached `preloaded` at all), is confirmed/evicted exactly like a dedup-winner spelling variant
+	// would be.
 	assert.ok(/for \(const rawPath of Array\.from\(this\.cacheManager\.cache\.keys\(\)\)\)/.test(body),
-		'must scan all raw cache keys (not just the preloaded winners) when evicting unconfirmed entries');
-	assert.ok(/unconfirmedNormalizedKeys\.has\(_normalizePathForDedup\(rawPath\)\)/.test(body),
-		'must match raw cache keys against the unconfirmed set via _normalizePathForDedup(), so a differently-cased/separated duplicate of an unconfirmed path is evicted too');
+		'must scan all raw cache keys (not just entries derived from `preloaded`) when evicting unconfirmed entries');
+	assert.ok(/if \(!confirmedKeys\.has\(_normalizePathForDedup\(rawPath\)\)\) \{/.test(body),
+		'must match raw cache keys directly against confirmedKeys via _normalizePathForDedup(), so an entry that never reached `preloaded` (cutoff-filtered or failed) is evicted too, not only unconfirmed dedup winners');
 });
 
 test('_preloadSessionFiles() always schedules clearExpiredCache(), even when this run\'s discovery came back empty', () => {
@@ -383,7 +383,7 @@ test('sample-data mode never writes to the shared on-disk cache snapshot: neithe
 		'the mid-parse checkpoint (maybeCheckpointCache(), which also writes the shared snapshot directly) must skip sample-data mode too, or it can persist fixture data even when persistRefreshResult() itself is correctly guarded');
 });
 
-test('runLocalViewRegression() evicts its own session files from the in-memory cache when it finishes', () => {
+test('runLocalViewRegression() evicts its own session files from the in-memory cache when it finishes, by normalized key', () => {
 	// Skipping the on-disk save (see the sample-data-mode test above) does not stop a regression
 	// pass from writing fixture entries into the IN-MEMORY cache — computeRegressionStats() runs
 	// the normal preload pipeline, whose getSessionFileDataCached() unconditionally calls
@@ -396,10 +396,17 @@ test('runLocalViewRegression() evicts its own session files from the in-memory c
 		'must capture the exact session files (real or bundled-fixture) the regression pass used');
 
 	const finallyIndex = body.indexOf('} finally {');
-	const evictionIndex = body.indexOf('this.cacheManager.deleteCachedSessionData(sessionFile);');
-	assert.ok(finallyIndex !== -1 && evictionIndex !== -1 && evictionIndex > finallyIndex,
-		'must evict the regression run\'s own session files from the cache (via the tombstone-aware deleteCachedSessionData(), for consistency/defense-in-depth even though nothing should have reached disk during sample mode) in the finally block, so it always runs — even if the regression pass itself throws');
+	const regressionKeysIndex = body.indexOf('const regressionKeys = new Set(regressionSessionFiles.map(f => _normalizePathForDedup(f)));');
+	const evictionIndex = body.indexOf('this.cacheManager.deleteCachedSessionData(rawPath);');
+	assert.ok(finallyIndex !== -1 && regressionKeysIndex !== -1 && evictionIndex !== -1 && regressionKeysIndex > finallyIndex && evictionIndex > regressionKeysIndex,
+		'must evict the regression run\'s own session files from the cache (via the tombstone-aware deleteCachedSessionData()) in the finally block, so it always runs — even if the regression pass itself throws');
 
-	assert.ok(/for \(const sessionFile of regressionSessionFiles\)/.test(body),
-		'must loop over every captured regression session file, not just one');
+	// Must sweep by normalized key, not the exact raw strings setupRegressionSessionFiles()
+	// returned — otherwise a same-file spelling variant already sitting in the cache under a
+	// different raw key (case/separator) survives this eviction and is still readable by the very
+	// next getDeduplicatedCacheEntries() call.
+	assert.ok(/for \(const rawPath of Array\.from\(this\.cacheManager\.cache\.keys\(\)\)\)/.test(body),
+		'must scan all raw cache keys, not just the exact regressionSessionFiles strings, when evicting');
+	assert.ok(/regressionKeys\.has\(_normalizePathForDedup\(rawPath\)\)/.test(body),
+		'must match raw cache keys against regressionKeys via _normalizePathForDedup(), so a differently-cased/separated duplicate of a regression file is evicted too');
 });
