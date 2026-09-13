@@ -196,6 +196,40 @@ test('l10n: usage context-pressure keys resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: Recent Sessions context-fill keys resolve in English', () => {
+	// These back the Recent Sessions "Context" column and the "near context
+	// limit" filter pill the context-pressure insight links to. A missing key
+	// would put a raw `usage.sessions.contextFill.nearLimitFilter` on the pill.
+	assert.equal(t('usage.sessions.contextFill.nearLimitFilter'), '🧠 Near context limit');
+	assert.equal(
+		t('usage.sessions.contextFill.nearLimitFilterTooltip', '80'),
+		'Show only sessions that reached at least 80% of their context window without compacting',
+	);
+	assert.equal(t('usage.sessions.contextFill.used', '120,000', '200,000'), '120,000 of 200,000 context tokens used');
+	assert.equal(
+		t('usage.sessions.contextFill.usedNearLimit', '190,000', '200,000', '80'),
+		'190,000 of 200,000 context tokens used — at or past 80% of the window',
+	);
+	assert.match(t('usage.sessions.contextFill.noData'), /only GitHub Copilot CLI sessions report one/);
+});
+
+test('l10n: Recent Sessions context-fill keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.sessions.contextFill.nearLimitFilter'), '🧠 接近上下文上限');
+		// The Chinese phrasing reorders the reached/limit counts, so a plain
+		// concatenation would report the two numbers the wrong way round.
+		assert.equal(t('usage.sessions.contextFill.used', '120,000', '200,000'), '已使用 200,000 个上下文 token 中的 120,000 个');
+		assert.equal(
+			t('usage.sessions.contextFill.usedNearLimit', '190,000', '200,000', '80'),
+			'已使用 200,000 个上下文 token 中的 190,000 个——达到或超过窗口的 80%',
+		);
+		assert.match(t('usage.sessions.contextFill.nearLimitFilterTooltip', '80'), /至少 80%/);
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test("l10n: what's-new notification keys resolve in English", () => {
 	// The two buttons on the one-a-day new-feature notification. A missing key
 	// here would put a raw `whatsNew.takeMeThere` on the button, which is the

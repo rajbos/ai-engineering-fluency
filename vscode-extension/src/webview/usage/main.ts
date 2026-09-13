@@ -1218,11 +1218,14 @@ const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 	{ id: 'contextFill', label: 'Context', sortKey: 'contextFill', align: 'right', cellStyle: 'white-space:nowrap;', render: s => {
 		const pct = getSessionContextFillPercent(s);
 		if (pct === undefined) {
-			return { html: '—', title: 'No context-window fill recorded for this session (only GitHub Copilot CLI sessions report one)' };
+			return { html: '—', title: localize('usage.sessions.contextFill.noData') };
 		}
 		const near = isSessionNearContextLimit(s);
-		const title = `${formatNumber(s.contextReachedTokens!)} of ${formatNumber(s.contextWindowLimit!)} context tokens used`
-			+ (near ? ` — at or past ${NEAR_LIMIT_PERCENT}% of the window` : '');
+		const reached = formatNumber(s.contextReachedTokens!);
+		const limit = formatNumber(s.contextWindowLimit!);
+		const title = near
+			? localizeFormat('usage.sessions.contextFill.usedNearLimit', reached, limit, NEAR_LIMIT_PERCENT)
+			: localizeFormat('usage.sessions.contextFill.used', reached, limit);
 		const color = near ? 'var(--warning-color, #cca700)' : 'var(--text-primary)';
 		return { html: `<span style="color:${color};">${near ? '⚠️ ' : ''}${pct}%</span>`, title };
 	} },
@@ -1350,7 +1353,9 @@ function buildSessionFilterBarHtml(sessions: TodaySessionSummary[]): string {
 	// would leave the narrowed table with no visible reason for being narrow.
 	if (opts.nearContextLimitCount > 0 || sessionFilterNearContextLimitOnly) {
 		const isActive = sessionFilterNearContextLimitOnly;
-		groups.push(`<div class="session-filter-group"><button type="button" class="session-filter-pill${isActive ? ' active' : ''}" data-filter-type="nearcontextlimit" data-filter-value="true" aria-pressed="${isActive}" title="Show only sessions that reached at least ${NEAR_LIMIT_PERCENT}% of their context window without compacting">🧠 Near context limit <span class="session-filter-pill-count">${opts.nearContextLimitCount}</span></button></div>`);
+		const pillTitle = escapeHtml(localizeFormat('usage.sessions.contextFill.nearLimitFilterTooltip', NEAR_LIMIT_PERCENT));
+		const pillLabel = escapeHtml(localize('usage.sessions.contextFill.nearLimitFilter'));
+		groups.push(`<div class="session-filter-group"><button type="button" class="session-filter-pill${isActive ? ' active' : ''}" data-filter-type="nearcontextlimit" data-filter-value="true" aria-pressed="${isActive}" title="${pillTitle}">${pillLabel} <span class="session-filter-pill-count">${opts.nearContextLimitCount}</span></button></div>`);
 	}
 	if (opts.hydraFusionCount > 0) {
 		const isActive = sessionFilterHydraFusionOnly;

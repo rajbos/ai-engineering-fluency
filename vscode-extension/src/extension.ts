@@ -4152,6 +4152,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
+	 * Usage view strings: the Context Window section's context-pressure rows and
+	 * the Recent Sessions context-fill column with its "near context limit"
+	 * filter pill. Templates carrying {0}/{1} are resolved webview-side by
+	 * localizeFormat(), so they are passed through unformatted here.
+	 */
+	private getUsageViewLocalization(): Record<string, string> {
+		return {
+			'usage.contextPressure.compactedLabel': l10n.t('usage.contextPressure.compactedLabel'),
+			'usage.contextPressure.ofCount': l10n.t('usage.contextPressure.ofCount'),
+			'usage.contextPressure.compactedShare': l10n.t('usage.contextPressure.compactedShare'),
+			'usage.contextPressure.noneCompacted': l10n.t('usage.contextPressure.noneCompacted'),
+			'usage.contextPressure.compactedTooltip': l10n.t('usage.contextPressure.compactedTooltip'),
+			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
+			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
+			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
+			'usage.sessions.contextFill.nearLimitFilter': l10n.t('usage.sessions.contextFill.nearLimitFilter'),
+			'usage.sessions.contextFill.nearLimitFilterTooltip': l10n.t('usage.sessions.contextFill.nearLimitFilterTooltip'),
+			'usage.sessions.contextFill.used': l10n.t('usage.sessions.contextFill.used'),
+			'usage.sessions.contextFill.usedNearLimit': l10n.t('usage.sessions.contextFill.usedNearLimit'),
+			'usage.sessions.contextFill.noData': l10n.t('usage.sessions.contextFill.noData'),
+		};
+	}
+
+	/**
 	 * Get localization strings for webviews based on the current VS Code language.
 	 * This provides localized button labels and other UI strings for webview panels.
 	 */
@@ -4174,17 +4198,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Share/export card strings (rendered into the PNG image)
 			'share.exportTitle': l10n.t('share.exportTitle'),
 			'share.exportReportLabel': l10n.t('share.exportReportLabel'),
-			// Usage view — context-pressure rows. Templates with {0}/{1} are
-			// resolved webview-side by localizeFormat(), so they are passed
-			// through unformatted here.
-			'usage.contextPressure.compactedLabel': l10n.t('usage.contextPressure.compactedLabel'),
-			'usage.contextPressure.ofCount': l10n.t('usage.contextPressure.ofCount'),
-			'usage.contextPressure.compactedShare': l10n.t('usage.contextPressure.compactedShare'),
-			'usage.contextPressure.noneCompacted': l10n.t('usage.contextPressure.noneCompacted'),
-			'usage.contextPressure.compactedTooltip': l10n.t('usage.contextPressure.compactedTooltip'),
-			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
-			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
-			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
+			...this.getUsageViewLocalization(),
 			// Details view — collapsible "Usage by Editor" section heading tooltips
 			'details.editorSection.show': l10n.t('details.editorSection.show'),
 			'details.editorSection.hide': l10n.t('details.editorSection.hide'),
