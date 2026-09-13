@@ -427,6 +427,8 @@ const INSIGHT_FOCUS_WINDOW_MS = 4000;
 let focusedInsightAnchor: { anchor: string; until: number } | null = null;
 /** The node the last anchor scroll targeted, so a re-apply can tell a rebuild from a repeat. */
 let lastAnchorScrollTarget: HTMLElement | null = null;
+/** Handle of a deferred scroll to an insight card, so navigating away before it fires cancels it. */
+let pendingInsightScrollTimer: ReturnType<typeof setTimeout> | null = null;
 /** Elements with a highlight flash still in flight, with the styling their timer will restore. */
 const activeFlashes = new WeakMap<HTMLElement, { shadow: string; transition: string; timer: ReturnType<typeof setTimeout> }>();
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -3937,8 +3939,15 @@ function refreshInsightsPanel(insights: EvaluatedInsight[]): void {
 	setHtml(container, forYouSection + allSection);
 	wireInsightCardButtons();
 	updateTabButtonCount(insights);
-	// Every card was just replaced, so a scroll target requested moments ago (a toast's "View"
-	// or the status-bar badge) no longer exists in the DOM. Re-resolve it against the new cards.
+	// A deep link that arrived before its card was in the list is still sitting unconsumed, and
+	// this re-render is the only thing that runs for an insights-only update — nothing else would
+	// scroll to the card that just appeared, and the focus window may already have lapsed waiting
+	// for exactly this.
+	if (pendingTabAnchor && isInsightCardAnchor(pendingTabAnchor) && activeTab === 'insights') {
+		scrollToPendingTabAnchor();
+	}
+	// Every card was just replaced, so a target that *was* resolved no longer exists in the DOM.
+	// Re-resolve it against the new cards.
 	reapplyFocusedInsightAnchor();
 }
 
@@ -5957,10 +5966,15 @@ function scrollToPendingTabAnchor(): void {
 	if (anchor) {
 		pendingTabAnchor = null;
 		lastAnchorScrollTarget = anchor;
-		setTimeout(() => {
+		const timer = setTimeout(() => {
+			if (pendingInsightScrollTimer === timer) { pendingInsightScrollTimer = null; }
 			anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
 			flashAnchorHighlight(anchor);
 		}, 50);
+		// Only an insight scroll is tracked, and so only it is cancellable: navigating away inside
+		// the defer would otherwise still scroll and flash the card the user just left behind.
+		// Section anchors keep their existing fire-and-forget behaviour.
+		if (isInsightCardAnchor(anchor.id)) { pendingInsightScrollTimer = timer; }
 	}
 }
 
@@ -6001,6 +6015,10 @@ function flashAnchorHighlight(element: HTMLElement): void {
 function clearFocusedInsightAnchor(): void {
 	focusedInsightAnchor = null;
 	if (pendingTabAnchor && isInsightCardAnchor(pendingTabAnchor)) { pendingTabAnchor = null; }
+	if (pendingInsightScrollTimer !== null) {
+		clearTimeout(pendingInsightScrollTimer);
+		pendingInsightScrollTimer = null;
+	}
 }
 
 /**

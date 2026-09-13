@@ -1056,3 +1056,39 @@ test('a deep link to an insight that no longer exists opens the tab and scrolls 
 		'the Insights tab must still be the one showing',
 	);
 });
+
+test('navigating away inside the deferred scroll cancels it', async () => {
+	// The scroll is deferred by 50ms. Clicking a tab inside that window must cancel it, or the
+	// timer still fires and drags the user back to a card on the tab they just left.
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-stale-skills' });
+	harness.window.document.querySelector('.tab-button[data-tab="activity"]')?.click();
+	await harness.settleScroll();
+
+	assert.deepEqual(harness.scrolledTo, [], 'the deferred scroll must not outlive the navigation');
+});
+
+test('a deep link stranded past the focus window still lands when its card appears', async () => {
+	// switchTab can arrive before the target is in the insights list. The pending anchor then has
+	// nothing to consume it, and for an insights-only update refreshInsightsPanel is the only
+	// thing that runs — by which time the focus window may long since have lapsed.
+	const harness = await bootWebview(buildStatsWithInsights());
+
+	harness.post({ command: 'switchTab', tab: 'insights', anchor: 'insight-card-late-bloomer' });
+	await new Promise((resolve) => setTimeout(resolve, 4300));
+	harness.scrolledTo.length = 0;
+
+	const insights = buildStatsWithInsights().insights as any[];
+	insights.push({
+		id: 'late-bloomer', category: 'tools', severity: 'tip',
+		title: 'Late bloomer', body: '...', status: 'new', allowToast: false,
+	});
+	harness.post({ command: 'updateInsights', insights });
+	await harness.settleScroll();
+
+	assert.ok(
+		harness.scrolledTo.includes('insight-card-late-bloomer'),
+		`the card must be scrolled to once it exists, scrolled to: ${JSON.stringify(harness.scrolledTo)}`,
+	);
+});
