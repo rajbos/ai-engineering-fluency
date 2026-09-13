@@ -1490,9 +1490,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const cacheSize = this.cacheManager.cache.size;
 			this.cacheManager.cache.clear();
 
-			// Invalidate before the first await, not after: a build already in flight can finish
-			// during it, and it would otherwise still pass the generation check and publish a
-			// payload built from the caches this call is in the middle of throwing away.
+			// Everything invalidating happens before the first await. Bumping the generation
+			// alone was not enough: a build starting during the await would capture the *new*
+			// generation, read the computed caches that had not been cleared yet, and so pass
+			// the check with pre-clear data. Clearing the caches here closes that window —
+			// after the await there is nothing left for such a build to read.
+			this.lastDetailedStats = undefined;
+			this.lastDailyStats = undefined;
+			this.lastFullDailyStats = undefined;
+			this.lastUsageAnalysisStats = undefined;
+			this.lastDashboardData = undefined;
+			this.lastEfficiencySessionInputs = undefined;
 			this._lastEfficiencyViewData = undefined;
 			this._cacheGeneration++;
 
@@ -1504,13 +1512,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.diagnosticsCachedFiles = [];
 			this.diagnosticsAllSessionFiles = [];
 			this.diagnosticsTtftCache.clear();
-			// Clear cached computed stats so details panel doesn't show stale data
-			this.lastDetailedStats = undefined;
-			this.lastDailyStats = undefined;
-			this.lastFullDailyStats = undefined;
-			this.lastUsageAnalysisStats = undefined;
-			this.lastDashboardData = undefined;
-			this.lastEfficiencySessionInputs = undefined;
 
 			this.log(`Cache cleared successfully. Removed ${cacheSize} entries.`);
 			vscode.window.showInformationMessage('Cache cleared successfully. Reloading statistics...');
@@ -4434,9 +4435,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log(`📈 Preparing chart data (${daysBack}d) from ${sessionFiles.length} session file(s)...`);
 
 			let completed = 0;
-			// Accumulated here rather than by the caller: a reporter that joins an already
-			// running walk gets the whole set with its first tick instead of only the file
-			// that happened to finish next.
+			// Accumulated here rather than by the caller, so every tick carries the whole set
+			// so far and a reporter does not have to rebuild it from the single file each
+			// tick names.
 			const editors = new Set<string>();
 			const dailyResults = await this.runWithConcurrency(sessionFiles, async (sessionFile) => {
 				try {
@@ -8907,11 +8908,11 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		// the cached stats so loadAnalysisStatsInBackground performs a full recalculation.
 		void this.analysisPanel.webview.postMessage({ command: 'usageRefreshing' });
 		this.lastUsageAnalysisStats = undefined;
-		// This is a computed-stat cache the Efficiency view also reads, so the same
-		// invalidation clearCache() performs applies: an Efficiency build spanning this
-		// refresh was built on the stats just discarded and must not become the payload a
-		// later failed refresh falls back to.
-		this._lastEfficiencyViewData = undefined;
+		// An Efficiency build spanning this refresh was built on the stats just discarded, so
+		// bump the generation to stop its result being recorded. Deliberately *not* clearing
+		// `_lastEfficiencyViewData` as clearCache() does: this leaves the session cache
+		// intact, so an Efficiency rebuild will succeed, and dropping the last good payload
+		// would only guarantee the failure state on the way there.
 		this._cacheGeneration++;
 		await this.loadAnalysisStatsInBackground(this.analysisPanel);
 		// Refresh token stats so the status bar and tooltip stay in sync
