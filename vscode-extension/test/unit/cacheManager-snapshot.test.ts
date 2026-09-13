@@ -425,3 +425,54 @@ test('setCachedSessionData() clears a stale tombstone, so a rediscovered path ca
 	assert.ok(entries && '/a.json' in entries!, 'a path re-added after deletion must not be permanently blocked by its old tombstone');
 	assert.equal(entries!['/a.json'].mtime, 3000);
 });
+
+// Cross-window scenario: window A tombstones a path, then a NEWER entry for that same path
+// arrives from another window via loadSharedSnapshotIfChanged() (mergeSnapshotEntries()) — not
+// via setCachedSessionData(), the only place that previously cleared a tombstone. Without also
+// clearing it there, window A's own next save would silently discard the other window's valid,
+// newer publish — not merely resurrect an old deletion, but destroy new data.
+test('loadSharedSnapshotIfChanged() clears a stale tombstone when accepting a newer entry from another window', async () => {
+	const dir = tmpDir();
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/a.json', entry(1000), 10);
+	await windowA.writeSharedSnapshot();
+
+	windowA.deleteCachedSessionData('/a.json');
+
+	// Another window republishes '/a.json' with a newer entry.
+	const windowB = makeManager(dir);
+	windowB.setCachedSessionData('/a.json', entry(5000), 10);
+	await windowB.writeSharedSnapshot();
+
+	// Window A picks up window B's newer snapshot via the merge path, not setCachedSessionData().
+	const merged = await windowA.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 1, 'the newer /a.json entry must be merged in');
+	assert.equal(windowA.cache.get('/a.json')?.mtime, 5000);
+
+	// Window A's own next save must not delete the entry it just accepted from window B.
+	await windowA.writeSharedSnapshot();
+	const entries = await windowA.readSharedSnapshot();
+	assert.ok(entries && '/a.json' in entries!,
+		'a stale tombstone must not survive accepting a newer merged-in entry — otherwise this window\'s own next save silently destroys another window\'s valid publish');
+	assert.equal(entries!['/a.json'].mtime, 5000);
+});
+
+test('clearExpiredCache() does not tombstone virtual session paths (.db#session-id, editor:// schemes) via a raw fs.access() check', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	const virtualDbPath = path.join(dir, 'opencode.db#ses_doesNotMatterIfMissing');
+	const virtualUriPath = 'windsurf://trajectory/some-id';
+	const realMissingPath = path.join(dir, 'definitely-does-not-exist.json');
+	m.setCachedSessionData(virtualDbPath, entry(1000), 10);
+	m.setCachedSessionData(virtualUriPath, entry(1000), 10);
+	m.setCachedSessionData(realMissingPath, entry(1000), 10);
+
+	await m.clearExpiredCache();
+
+	assert.ok(m.cache.has(virtualDbPath),
+		'a .db#-style virtual path must survive clearExpiredCache() — fs.access() cannot validate it, and wrongly evicting it now tombstones a still-valid session out of every future snapshot, not just this process\'s memory');
+	assert.ok(m.cache.has(virtualUriPath),
+		'a scheme:// virtual path (Windsurf/Devin) must likewise survive clearExpiredCache()');
+	assert.ok(!m.cache.has(realMissingPath),
+		'a genuinely missing real filesystem path must still be expired — this exemption must not blanket-disable expiry');
+});

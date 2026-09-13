@@ -1358,10 +1358,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Populated once setupRegressionSessionFiles() resolves, so the finally block can evict
 		// exactly these entries from cacheManager.cache — see the finally block's comment for why.
 		let regressionSessionFiles: string[] = [];
+		let usedBundledFixtures = false;
 		try {
 			const setup = await this.setupRegressionSessionFiles(dataSourceLabel);
 			dataSourceLabel = setup.dataSourceLabel;
 			regressionSessionFiles = setup.sessionFiles;
+			usedBundledFixtures = setup.usedBundledFixtures;
 			this.log(`🧪 Starting local view regression using ${dataSourceLabel}. Found ${setup.sessionFiles.length} session file(s).`);
 			const stats = await this.computeRegressionStats(dataSourceLabel, setup.sessionFiles);
 			const cases = this.buildLocalViewRegressionCases(stats, setup.sessionFiles);
@@ -1383,18 +1385,26 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// getDeduplicatedCacheEntries() (the cache-only instant paint, the cache-seeded preload
 			// queue) reads directly. Without evicting here, the very next normal refresh in this
 			// same session — no restart needed — would seed/paint from these fixture entries
-			// alongside or instead of real ones. Safe to always evict, even when this run used real
-			// session data instead of fixtures: those entries are legitimately rediscoverable, so
-			// this costs at most one avoidable reparse on the next refresh, not a correctness loss.
+			// alongside or instead of real ones.
+			//
+			// Only run this eviction when fixtures were actually used (usedBundledFixtures). When a
+			// developer runs this locally on a machine WITH real session data, regressionSessionFiles
+			// is that real, entire discovered set — tombstoning it isn't merely "one avoidable
+			// reparse" (deleteCachedSessionData() persists past this run): buildMergedSnapshotEntries()
+			// excludes tombstoned paths from every subsequent save, so a normal refresh's checkpoint
+			// or snapshot publish landing before the next full re-parse completes would wipe those
+			// real sessions from the shared on-disk snapshot too, not just this window's memory.
 			// Swept by normalized key, not the exact raw strings setupRegressionSessionFiles()
 			// returned: a same-file spelling variant already sitting in the cache under a different
 			// raw key (case/separator) would otherwise survive this eviction and still be readable
 			// by the very next getDeduplicatedCacheEntries() call.
-			const regressionKeys = new Set(regressionSessionFiles.map(f => _normalizePathForDedup(f)));
-			if (regressionKeys.size > 0) {
-				for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
-					if (regressionKeys.has(_normalizePathForDedup(rawPath))) {
-						this.cacheManager.deleteCachedSessionData(rawPath);
+			if (usedBundledFixtures) {
+				const regressionKeys = new Set(regressionSessionFiles.map(f => _normalizePathForDedup(f)));
+				if (regressionKeys.size > 0) {
+					for (const rawPath of Array.from(this.cacheManager.cache.keys())) {
+						if (regressionKeys.has(_normalizePathForDedup(rawPath))) {
+							this.cacheManager.deleteCachedSessionData(rawPath);
+						}
 					}
 				}
 			}
@@ -1404,16 +1414,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 		await this.reportLocalViewRegressionResults(results, dataSourceLabel);
 	}
 
-	private async setupRegressionSessionFiles(defaultLabel: string): Promise<{ sessionFiles: string[]; dataSourceLabel: string }> {
+	private async setupRegressionSessionFiles(defaultLabel: string): Promise<{ sessionFiles: string[]; dataSourceLabel: string; usedBundledFixtures: boolean }> {
 		let sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-		if (sessionFiles.length > 0) { return { sessionFiles, dataSourceLabel: defaultLabel }; }
+		if (sessionFiles.length > 0) { return { sessionFiles, dataSourceLabel: defaultLabel, usedBundledFixtures: false }; }
 		let sampleDir: string;
 		try { sampleDir = await this.ensureLocalViewRegressionSampleDir(); }
 		catch { throw new Error('Bundled sample session data was not found. Expected test fixtures under vscode-extension\\test\\fixtures\\sample-session-data\\chatSessions.'); }
 		this.localRegressionSampleDataDir = sampleDir;
 		this.sessionDiscovery.clearCache();
 		sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-		return { sessionFiles, dataSourceLabel: `bundled sample data (${sampleDir})` };
+		return { sessionFiles, dataSourceLabel: `bundled sample data (${sampleDir})`, usedBundledFixtures: true };
 	}
 
 	private async computeRegressionStats(dataSourceLabel: string, sessionFiles: string[]): Promise<{ detailedStats: any; dailyStats: any; usageStats: any; maturityData: any; diagnosticReport: string; fluencyLevelData: any; chartTotals: any }> {
@@ -2102,6 +2112,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * #2018, fix #2: "Render last-known stats from the loaded snapshot before the
 	 * parse finishes").
 	 */
+	/**
+	 * Whether renderInstantStatsFromCache() must abandon its cache-only paint after awaiting
+	 * _cacheFileLoadPromise: sample mode could have turned on while that await was suspended (e.g.
+	 * runLocalViewRegression() started concurrently) — the check at the top of the caller only
+	 * reflects the state at the very start of the call, not at the point the cache is actually
+	 * read — or the window could have been disposed (dispose() tears down statusBarItem/
+	 * detailsPanel/chartPanel synchronously, so resuming into aggregation/UI-publish afterward
+	 * would touch disposed VS Code objects).
+	 */
+	private shouldAbandonInstantPaintAfterCacheLoad(): boolean {
+		return this.isSampleDataModeActive() || this._disposed;
+	}
+
 	private async renderInstantStatsFromCache(): Promise<void> {
 		try {
 			// Sample-data mode (screenshot/regression fixtures, see runLocalViewRegression()
@@ -2116,10 +2139,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (this._cacheFileLoadPromise) {
 				try { await this._cacheFileLoadPromise; } catch { /* already logged in loadCacheFromStorage */ }
 			}
-			// Re-check: sample mode could have turned on while the await above was suspended (e.g.
-			// runLocalViewRegression() started concurrently) — the check above only reflects the
-			// state at the very start of this call, not at the point the cache is actually read.
-			if (this.isSampleDataModeActive()) { return; }
+			if (this.shouldAbandonInstantPaintAfterCacheLoad()) { return; }
 			if (this.cacheManager.cache.size === 0) { return; }
 
 			const preloaded: SessionFilePreload[] = [];
@@ -2142,7 +2162,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// with this and is normally far faster to actually publish results once it starts, but
 			// there's no hard ordering guarantee. If it already committed verified data while this
 			// was still aggregating, never overwrite it with these older, cache-only numbers.
-			if (this._hasCompletedRealRefresh) { return; }
+			// Also bail if the window closed during that same await — see the guard above.
+			if (this._hasCompletedRealRefresh || this._disposed) { return; }
 			this.lastDetailedStats = stats;
 			this.lastDailyStats = dailyStats;
 			this.mergeIntoFullDailyStats(dailyStats);

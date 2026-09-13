@@ -115,6 +115,18 @@ export class CacheManager {
 		for (let i = 0; i < filesToCheck.length; i += BATCH_SIZE) {
 			await Promise.all(
 				filesToCheck.slice(i, i + BATCH_SIZE).map(async (filePath) => {
+					// Several ecosystems (Copilot CLI, Crush, Kilo, OpenCode) reference sessions
+					// through a virtual "<db-file>#<session-id>" path, and Windsurf/Devin use a
+					// "windsurf://"/"devin://" URI scheme — none of these are real filesystem paths
+					// a raw fs.access() can validate; the actual session lives inside the DB (or is
+					// resolved by that adapter), not at this literal path. Since deleteCachedSessionData()
+					// now tombstones (excluding the path from every future snapshot merge, not just this
+					// process's memory — see its own doc comment), wrongly treating one of these as
+					// "missing" here would permanently discard a still-valid, expensive-to-rebuild
+					// session instead of just transiently dropping it from memory. Leaving them
+					// unvalidated here (neither expired nor confirmed) is the safe default; a real fix
+					// needs adapter-aware stat resolution, which CacheManager doesn't have.
+					if (CacheManager.isVirtualSessionPath(filePath)) { return; }
 					try {
 						await fs.promises.access(filePath);
 					} catch {
@@ -123,6 +135,10 @@ export class CacheManager {
 				})
 			);
 		}
+	}
+
+	private static isVirtualSessionPath(filePath: string): boolean {
+		return filePath.includes('://') || /\.db#/.test(filePath);
 	}
 
 	/**
@@ -792,6 +808,12 @@ export class CacheManager {
 			const existing = this.sessionFileCache.get(filePath);
 			if (!existing || entry.mtime > existing.mtime) {
 				this.sessionFileCache.set(filePath, entry);
+				// Must clear any tombstone this window recorded for this path, same as
+				// setCachedSessionData() does — otherwise a legitimately newer entry another
+				// window just published here gets silently deleted again by this window's own
+				// next save, since buildMergedSnapshotEntries() excludes every tombstoned path
+				// unconditionally.
+				this.deletedFilePaths.delete(filePath);
 				merged++;
 			}
 		}

@@ -103,13 +103,15 @@ test('renderInstantStatsFromCache() renders from the cache alone, with no discov
 	const cacheFileWaitIndex = body.indexOf('this._cacheFileLoadPromise');
 	assert.ok(sampleGuardIndex < cacheFileWaitIndex, 'the sample-data guard must run before waiting on/reading the cache');
 
-	// Sample mode is re-checked after the await too — the first check only reflects the state at
-	// the very start of this call, and runLocalViewRegression() could switch sample mode on while
-	// this was suspended waiting on _cacheFileLoadPromise, before the cache is actually read.
+	// After the await, both sample mode (re-checked — the first check only reflects the state at
+	// the very start of this call, and runLocalViewRegression() could switch it on while this was
+	// suspended) and disposal (dispose() can also run during that same await, e.g. the window
+	// closing during startup) are checked via one extracted helper — moving both branches out of
+	// this function keeps its own cyclomatic complexity under the lint ceiling.
 	const cacheSizeCheckIndex = body.indexOf('if (this.cacheManager.cache.size === 0) { return; }');
-	const secondSampleGuardIndex = body.indexOf('if (this.isSampleDataModeActive()) { return; }', cacheFileWaitIndex);
-	assert.ok(secondSampleGuardIndex !== -1 && cacheFileWaitIndex < secondSampleGuardIndex && secondSampleGuardIndex < cacheSizeCheckIndex,
-		'must re-check isSampleDataModeActive() again after awaiting _cacheFileLoadPromise, before reading the cache — a single check at the top of the function can go stale across that await');
+	const combinedGuardIndex = body.indexOf('if (this.shouldAbandonInstantPaintAfterCacheLoad()) { return; }');
+	assert.ok(combinedGuardIndex !== -1 && cacheFileWaitIndex < combinedGuardIndex && combinedGuardIndex < cacheSizeCheckIndex,
+		'must call shouldAbandonInstantPaintAfterCacheLoad() after awaiting _cacheFileLoadPromise, before reading the cache — a single check at the top of the function can go stale across that await');
 
 	assert.ok(!body.includes('getCopilotSessionFilesStreaming') && !body.includes('getCopilotSessionFiles('),
 		'renderInstantStatsFromCache() must not run adapter discovery — that defeats the point of an instant render');
@@ -134,6 +136,12 @@ test('renderInstantStatsFromCache() renders from the cache alone, with no discov
 	for (const renderCall of ['this.updateStatusBarAndTooltip(stats)', 'this.updateDetailsPanelIfOpen(stats, true)', 'this.updateChartPanelIfOpen(true)']) {
 		assert.ok(body.includes(renderCall), `renderInstantStatsFromCache() must call ${renderCall} so an already-open panel also gets the instant first paint`);
 	}
+});
+
+test('shouldAbandonInstantPaintAfterCacheLoad() checks both sample mode and disposal', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private shouldAbandonInstantPaintAfterCacheLoad(): boolean {');
+	assert.ok(body.includes('return this.isSampleDataModeActive() || this._disposed;'),
+		'must return true if either sample mode turned on or the window was disposed while the cache-file-load await was suspended — either one means the caller must not proceed to aggregate/publish');
 });
 
 test('isSampleDataModeActive() picks the override only when it was actually set (not merely falsy), and gates on being a real directory', () => {
@@ -329,10 +337,10 @@ test('_runRefreshCore() skips the one-time full-year chart backfill when discove
 test('renderInstantStatsFromCache() never overwrites a real refresh that already completed while it was still computing', () => {
 	const instantBody = extractBracesBlock(EXTENSION_SRC, 'private async renderInstantStatsFromCache(): Promise<void> {');
 	const calcIndex = instantBody.indexOf('await this.calculateDetailedStats(undefined, preloaded)');
-	const guardIndex = instantBody.indexOf('if (this._hasCompletedRealRefresh) { return; }');
+	const guardIndex = instantBody.indexOf('if (this._hasCompletedRealRefresh || this._disposed) { return; }');
 	const commitIndex = instantBody.indexOf('this.lastDetailedStats = stats;');
 	assert.ok(calcIndex !== -1 && guardIndex !== -1 && commitIndex !== -1 && calcIndex < guardIndex && guardIndex < commitIndex,
-		'renderInstantStatsFromCache() must check _hasCompletedRealRefresh after awaiting calculateDetailedStats but before committing its own results — otherwise a real refresh that finishes first can be silently overwritten by this slower, stale cache-only computation');
+		'renderInstantStatsFromCache() must check _hasCompletedRealRefresh (AND _disposed, since dispose() can also run during that same await) after awaiting calculateDetailedStats but before committing its own results — otherwise a real refresh that finishes first, or a window that closed mid-await, can be silently overwritten by/resumed into this slower, stale cache-only computation');
 
 	// The flag must be set as soon as _runRefreshCore()'s own verified result exists — right after
 	// its own calculateDetailedStats() resolves — and specifically BEFORE updateStatusBarAndTooltip()
@@ -412,4 +420,24 @@ test('runLocalViewRegression() evicts its own session files from the in-memory c
 		'must scan all raw cache keys, not just the exact regressionSessionFiles strings, when evicting');
 	assert.ok(/regressionKeys\.has\(_normalizePathForDedup\(rawPath\)\)/.test(body),
 		'must match raw cache keys against regressionKeys via _normalizePathForDedup(), so a differently-cased/separated duplicate of a regression file is evicted too');
+
+	// The whole sweep must be gated on usedBundledFixtures — when a developer runs this locally
+	// on a machine WITH real session data, regressionSessionFiles is that real, entire discovered
+	// set. Evicting it unconditionally isn't just "one avoidable reparse": deleteCachedSessionData()
+	// tombstones the path, and buildMergedSnapshotEntries() excludes every tombstoned path from
+	// every subsequent save — so a normal refresh's checkpoint/publish landing before the next full
+	// re-parse completes would wipe those real sessions from the shared on-disk snapshot too.
+	assert.ok(body.includes('usedBundledFixtures = setup.usedBundledFixtures;'),
+		'must capture whether this run actually used bundled fixtures (vs. real discovered sessions)');
+	const fixtureGuardIndex = body.indexOf('if (usedBundledFixtures) {');
+	assert.ok(fixtureGuardIndex !== -1 && fixtureGuardIndex > finallyIndex && fixtureGuardIndex < regressionKeysIndex,
+		'the eviction sweep must run only when usedBundledFixtures is true — evicting real discovered sessions risks permanently losing them from the shared snapshot, not just a harmless in-memory reparse');
+});
+
+test('setupRegressionSessionFiles() reports whether it fell back to bundled fixtures vs. using real discovered sessions', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'usedBundledFixtures: boolean }> {');
+	assert.ok(body.includes('return { sessionFiles, dataSourceLabel: defaultLabel, usedBundledFixtures: false };'),
+		'must report usedBundledFixtures: false on the real-session-data path (sessionFiles.length > 0)');
+	assert.ok(body.includes("return { sessionFiles, dataSourceLabel: `bundled sample data (${sampleDir})`, usedBundledFixtures: true };"),
+		'must report usedBundledFixtures: true only on the bundled-fixture fallback path');
 });
