@@ -1191,7 +1191,7 @@ ${hasLegs ? `<span class="overview-switch-note">${escapeHtml(localize('logviewer
 ${hasCached ? '<th scope="col">Cached</th>' : ''}
 <th scope="col">Output</th>
 <th scope="col">Total</th>
-${hasCost ? '<th scope="col">Cost</th>' : ''}
+${hasCost ? `<th scope="col">${localize('logviewer.hydrafusion.cost')}</th>` : ''}
 <th scope="col" title="✓ actual API usage, ~ estimated from text">Src</th>
 </tr>
 </thead>
