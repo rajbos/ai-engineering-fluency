@@ -927,7 +927,7 @@ function renderEditorInfoPanel(data: SessionLogData): string {
  * @security All user-controlled strings (editorName, file path) are escaped via `escapeHtml`.
  */
 function renderSummaryCards(data: SessionLogData, stats: SummaryStats): string {
-	const { usageToolTotal, usageTopTools, usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit, usageContextExplicit } = stats;
+	const { usageToolTotal, usageTopTools } = stats;
 	return `
 <div class="summary-cards">
 ${buildEditorIdentityCard(data, stats)}
