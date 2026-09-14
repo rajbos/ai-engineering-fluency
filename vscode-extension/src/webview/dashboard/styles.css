@@ -390,6 +390,7 @@
 }
 
 .leaderboard-row.expandable { cursor: pointer; }
+.leaderboard-row.expandable:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
 
 .expand-toggle {
         display: inline-block;
