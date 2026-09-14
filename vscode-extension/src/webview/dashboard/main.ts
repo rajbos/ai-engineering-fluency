@@ -468,7 +468,7 @@ function buildFluencyDetailPanel(member: TeamMemberStats): HTMLElement {
   const grid = el("div", "fluency-categories-grid");
 
   for (const cat of member.fluencyCategories ?? []) {
-    const card = el("div", `fluency-category-card stage-border-${cat.stage}`);
+    const card = el("div", "fluency-category-card");
 
     const cardHeader = el("div", "fluency-category-header");
     const catLabel = el("span", "fluency-category-label", `${cat.icon} ${cat.category}`);
