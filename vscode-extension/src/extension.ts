@@ -542,17 +542,22 @@ export function mergeDailyStatsIntoFullYear(
  * rebuild, and without `queuedBuilds` that rebuild runs a second full-year walk immediately
  * behind a queued build that was already going to produce post-clear data.
  *
- * A build that is already *running* captured an older generation and does not count: its result
- * will be discarded by `recordEfficiencyPayload()`. A build that already *completed* at this
- * generation does count — see `completedFor` — so the satisfying cases are "not yet started" and
- * "already finished here", never "running now".
+ * A build that is already *running* counts only when it captured this same generation — see
+ * `runningFor`. An earlier draft assumed a running build always captured an *older* one and could
+ * never satisfy the invalidation, which is false: `clearCache()` bumps the generation and only
+ * then awaits `updateTokenStats()`, so a build starting inside that await captures the *bumped*
+ * generation, takes `queuedBuilds` back to zero on its way in, and is still running when the
+ * rebuild is finally requested. Counting queued builds alone then starts a second full-year walk
+ * behind a running build that was already going to produce exactly that payload. A running build
+ * at an older generation still does not count: its result will be discarded.
  */
 export function planEfficiencyRebuild(
 	requestedFor: number | undefined,
 	currentGeneration: number,
 	queuedBuilds: number,
 	completedFor?: number,
-): 'start' | 'coalesce-onto-queued' | 'already-built' | 'already-requested' {
+	runningFor?: number,
+): 'start' | 'coalesce-onto-queued' | 'coalesce-onto-running' | 'already-built' | 'already-requested' {
 	if (requestedFor === currentGeneration) { return 'already-requested'; }
 	// A build that already *finished* at this generation answers the invalidation just as well as
 	// one still queued. clearCache() requests its rebuild only after awaiting updateTokenStats(),
@@ -560,7 +565,8 @@ export function planEfficiencyRebuild(
 	// the bumped generation and complete — after which counting queued builds alone would start a
 	// second full-year walk over data that is already current.
 	if (completedFor === currentGeneration) { return 'already-built'; }
-	return queuedBuilds > 0 ? 'coalesce-onto-queued' : 'start';
+	if (queuedBuilds > 0) { return 'coalesce-onto-queued'; }
+	return runningFor === currentGeneration ? 'coalesce-onto-running' : 'start';
 }
 
 /**
@@ -1069,6 +1075,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * invalidation it already covers needs no rebuild — see planEfficiencyRebuild().
 	 */
 	private _efficiencyBuildCompletedFor: number | undefined;
+	/**
+	 * The generation captured by the Efficiency build currently running, or undefined when none is.
+	 * A running build that captured *this* generation is already producing the payload an
+	 * invalidation wants — see planEfficiencyRebuild().
+	 */
+	private _efficiencyBuildRunningFor: number | undefined;
 	/** Tail of the serialized Efficiency build queue; see runEfficiencyBuild(). */
 	private _efficiencyBuildChain: Promise<void> = Promise.resolve();
 	// Previous progress percentage used to animate the progress bar smoothly between tooltip updates
@@ -2914,7 +2926,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!this.efficiencyPanel) { return; }
 		const plan = planEfficiencyRebuild(
 			this._efficiencyRebuildRequestedFor, this._cacheGeneration, this._efficiencyBuildsQueued,
-			this._efficiencyBuildCompletedFor,
+			this._efficiencyBuildCompletedFor, this._efficiencyBuildRunningFor,
 		);
 		if (plan === 'already-requested') { return; }
 		this._efficiencyRebuildRequestedFor = this._cacheGeneration;
@@ -2924,6 +2936,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		if (plan === 'coalesce-onto-queued') {
 			this.log('⚡ [Efficiency] A queued build will capture this invalidation; not queuing a second walk');
+			return;
+		}
+		if (plan === 'coalesce-onto-running') {
+			this.log('⚡ [Efficiency] The running build already captured this invalidation; not queuing a second walk');
 			return;
 		}
 		void this.refreshEfficiencyPanel();
@@ -2957,16 +2973,28 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * time removes that ordering problem at the source, and a queued refresh then reuses whatever
 	 * the build ahead of it just cached.
 	 *
-	 * The count is decremented immediately before `build` runs — and every caller captures
-	 * `_cacheGeneration` as the first statement of its callback, with no await in between — so a
-	 * non-zero count means at least one build is still going to read the live generation. That is
-	 * what lets requestEfficiencyRebuild() coalesce onto it instead of queuing a second walk.
+	 * The count is decremented immediately before `build` runs, so a non-zero count means at least
+	 * one build is still going to read the live generation. That is what lets
+	 * requestEfficiencyRebuild() coalesce onto it instead of queuing a second walk.
+	 *
+	 * Once a build starts, that count no longer describes it, so its captured generation is
+	 * recorded in `_efficiencyBuildRunningFor` for as long as it runs — a build that captured the
+	 * live generation answers an invalidation just as well while running as it did while queued.
+	 * The capture is taken here and *handed* to `build`, rather than each caller re-reading
+	 * `_cacheGeneration` as its first statement: one capture cannot drift from the other if there
+	 * is only one. It is cleared identity-checked, so a build settling after its successor started
+	 * cannot erase the successor's registration.
 	 */
-	private runEfficiencyBuild<T>(build: () => Promise<T>): Promise<T> {
+	private runEfficiencyBuild<T>(build: (generation: number) => Promise<T>): Promise<T> {
 		this._efficiencyBuildsQueued++;
-		const { result, chain } = chainBuild(this._efficiencyBuildChain, () => {
+		const { result, chain } = chainBuild(this._efficiencyBuildChain, async () => {
 			this._efficiencyBuildsQueued--;
-			return build();
+			const generation = this._cacheGeneration;
+			this._efficiencyBuildRunningFor = generation;
+			try { return await build(generation); }
+			finally {
+				if (this._efficiencyBuildRunningFor === generation) { this._efficiencyBuildRunningFor = undefined; }
+			}
 		});
 		this._efficiencyBuildChain = chain;
 		return result;
@@ -9462,7 +9490,13 @@ private computeFallbackDailyRollup(
 			});
 			void this.analysisPanel.webview.postMessage({ command: 'updateStats', data: this._buildAnalysisUpdateData(analysisStats) });
 		} catch (err) {
+			// Logged unconditionally — the failure is real and worth recording whatever its
+			// generation. The two *panel-facing* messages are not: a superseded load failing is
+			// no reason to replace the replacement refresh's loading state, or the valid content
+			// it already rendered, with an error about a walk whose result was going to be
+			// discarded anyway. Same gate as the success path, for the same reason.
 			this.error(`Failed to load usage analysis stats: ${err}`);
+			if (!this.mayPublishAt(startedAtGeneration)) { return; }
 			this.postUsageLoadingProgress('error', { error: String(err) });
 			if (this.analysisPanel && this.analysisPanel === panel) {
 				void this.analysisPanel.webview.postMessage({ command: 'updateStatsError', error: String(err) });
@@ -10776,8 +10810,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		void (async () => {
 			let generation = this._cacheGeneration;
 			try {
-				const data = await this.runEfficiencyBuild(() => {
-					generation = this._cacheGeneration;
+				const data = await this.runEfficiencyBuild(startedAt => {
+					generation = startedAt;
 					return this.buildEfficiencyViewData(false, this.efficiencyLoadingSink(), generation);
 				});
 				// Record the payload even if this panel is gone: it is valid data, and a later
@@ -10814,8 +10848,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// wait leaves it building from post-clear state, not stale state.
 		let generation = this._cacheGeneration;
 		try {
-			data = await this.runEfficiencyBuild(async () => {
-				generation = this._cacheGeneration;
+			data = await this.runEfficiencyBuild(async startedAt => {
+				generation = startedAt;
 				// Swap in the loading screen only once this refresh actually starts; queued
 				// behind an initial build, it would otherwise blank the panel and sit there.
 				if (this.efficiencyPanel === panel) { panel.webview.html = this.getLoadingHtml(panel.webview); }

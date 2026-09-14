@@ -330,9 +330,10 @@ test('wiring: the Efficiency sink and build queue use the tested helpers', () =>
 		'each Efficiency render path must keep its own panel-identity check',
 	);
 	// The build is wrapped rather than passed straight through, so the queue can tell a build that
-	// has not started yet (and will therefore read the live generation) from one already running.
+	// has not started yet (and will therefore read the live generation) from one already running —
+	// and so the running one's own capture is recorded for as long as it runs.
 	assert.ok(
-		/const \{ result, chain \} = chainBuild\(this\._efficiencyBuildChain, \(\) => \{\s*this\._efficiencyBuildsQueued--;\s*return build\(\);\s*\}\);/
+		/const \{ result, chain \} = chainBuild\(this\._efficiencyBuildChain, async \(\) => \{\s*this\._efficiencyBuildsQueued--;\s*const generation = this\._cacheGeneration;\s*this\._efficiencyBuildRunningFor = generation;\s*try \{ return await build\(generation\); \}/
 			.test(EXTENSION_SRC),
 		'runEfficiencyBuild() must delegate to the tested serialization helper',
 	);
@@ -433,6 +434,33 @@ test('wiring: a cache invalidation queues at most one automatic Efficiency rebui
 		EXTENSION_SRC.includes('this._efficiencyBuildsQueued++;')
 		&& EXTENSION_SRC.includes('this._efficiencyBuildsQueued--;'),
 		'runEfficiencyBuild() must track builds that are queued but have not started yet',
+	);
+	// And the generation of the build that is *running*, which the queued count stops describing
+	// the moment it starts. Handed to the build rather than re-read by each caller: two captures of
+	// the same number can drift, one cannot.
+	assert.ok(
+		EXTENSION_SRC.includes('private runEfficiencyBuild<T>(build: (generation: number) => Promise<T>): Promise<T> {'),
+		'runEfficiencyBuild() must hand the build its captured generation instead of each caller re-reading it',
+	);
+	assert.ok(
+		EXTENSION_SRC.includes('this._efficiencyBuildRunningFor = generation;')
+		&& EXTENSION_SRC.includes('this._efficiencyBuildRunningFor,'),
+		'the running build\'s generation must be recorded and given to the planner',
+	);
+	// Cleared identity-checked, like clearInFlightRefresh() and releaseEfficiencyRebuildRequest():
+	// a build settling after its successor started must not erase the successor's registration.
+	assert.ok(
+		EXTENSION_SRC.includes('if (this._efficiencyBuildRunningFor === generation) { this._efficiencyBuildRunningFor = undefined; }'),
+		'a settling build must only clear the running registration it owns',
+	);
+	// No caller may re-read the live generation inside its build callback — that is the drift the
+	// handed capture exists to remove.
+	for (const callback of ['this.runEfficiencyBuild(startedAt =>', 'this.runEfficiencyBuild(async startedAt =>']) {
+		assert.ok(EXTENSION_SRC.includes(callback), `build callers must take the handed generation: ${callback}`);
+	}
+	assert.equal(
+		EXTENSION_SRC.split('generation = startedAt;').length - 1, 2,
+		'both build callers must use the handed capture, not one of their own',
 	);
 	// Exactly one caller may start a rebuild directly: refreshEfficiencyPanel() is also the panel's
 	// own Refresh button, which must never be coalesced away.
@@ -554,11 +582,29 @@ test('planEfficiencyRebuild: a build that already completed at this generation s
 	assert.equal(planEfficiencyRebuild(undefined, 5, 1, 4), 'coalesce-onto-queued');
 });
 
-test('planEfficiencyRebuild: a build that is already running does not satisfy it', () => {
-	// runEfficiencyBuild() decrements the count as the build starts, precisely because a running
-	// build captured an older generation and its payload will be discarded by
-	// recordEfficiencyPayload(). Only a not-yet-started build is going to read the live one.
+test('planEfficiencyRebuild: a running build satisfies it only if it captured this generation', () => {
+	// This test previously asserted that a running build *never* satisfies the invalidation, on the
+	// stated grounds that it must have captured an older generation. That is false, and the case it
+	// misses is the ordinary one: clearCache() bumps the generation and only *then* awaits
+	// updateTokenStats(). A build starting inside that await captures the bumped generation, takes
+	// the queued count back to zero on its way in, and is still running when the rebuild is finally
+	// requested — so counting queued builds alone starts a second full-year walk behind a build
+	// that was already going to produce exactly that payload.
+	assert.equal(planEfficiencyRebuild(undefined, 5, 0, undefined, 5), 'coalesce-onto-running');
+	assert.equal(planEfficiencyRebuild(4, 5, 0, undefined, 5), 'coalesce-onto-running');
+
+	// A build running at an *older* generation still does not count: its payload will be discarded
+	// by recordEfficiencyPayload(), so something must rebuild.
+	assert.equal(planEfficiencyRebuild(undefined, 5, 0, undefined, 4), 'start');
+	// Nor does no running build at all.
 	assert.equal(planEfficiencyRebuild(undefined, 5, 0), 'start');
+	assert.equal(planEfficiencyRebuild(undefined, 5, 0, undefined, undefined), 'start');
+
+	// Precedence: a queued build is reported as such even when one is also running, and an
+	// already-recorded payload still wins over both — the cheaper answer is the truer one.
+	assert.equal(planEfficiencyRebuild(undefined, 5, 1, undefined, 5), 'coalesce-onto-queued');
+	assert.equal(planEfficiencyRebuild(undefined, 5, 0, 5, 5), 'already-built');
+	assert.equal(planEfficiencyRebuild(5, 5, 0, undefined, 5), 'already-requested');
 });
 
 // ---------------------------------------------------------------------------
@@ -764,6 +810,24 @@ test('wiring: the background Usage Analysis load gates its own post', () => {
 	const guardAt = fn.indexOf('if (!this.mayPublishAt(startedAtGeneration)) { return; }');
 	assert.ok(guardAt !== -1, 'it must check the generation before publishing');
 	assert.ok(captureAt < awaitAt && awaitAt < guardAt, 'the guard must come after its own await, not before it');
+	// The failure path publishes too, and is gated on the same capture. An error from a superseded
+	// walk replacing the replacement refresh's loading state — or the valid content it already
+	// rendered — is the same defect wearing a different message. The log stays unconditional.
+	const logAt = fn.indexOf('this.error(`Failed to load usage analysis stats:');
+	assert.ok(logAt !== -1, 'the failure must still be logged');
+	const catchGuardAt = fn.indexOf('if (!this.mayPublishAt(startedAtGeneration)) { return; }', guardAt + 1);
+	assert.ok(catchGuardAt !== -1, 'the catch block must gate its panel-facing messages too');
+	assert.ok(logAt < catchGuardAt, 'the log must not be gated — only the two panel messages are');
+	for (const publication of ["this.postUsageLoadingProgress('error'", "command: 'updateStatsError'"]) {
+		const at = fn.indexOf(publication);
+		assert.ok(at !== -1, `missing failure publication: ${publication}`);
+		assert.ok(catchGuardAt < at, `${publication} must sit behind the catch guard`);
+	}
+	// And the panel-identity check is retained alongside it, not replaced by it.
+	assert.ok(
+		fn.includes('if (this.analysisPanel && this.analysisPanel === panel) {'),
+		'the generation gate must not displace the panel-identity check',
+	);
 	// Both publications are behind it: the progress card's tool counts come from the same walk.
 	for (const publication of ["this.postUsageLoadingProgress('ready'", "command: 'updateStats'"]) {
 		const at = fn.indexOf(publication);
