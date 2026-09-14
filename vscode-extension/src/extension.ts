@@ -124,6 +124,14 @@ import {
   analyzeMemoryFiles as _analyzeMemoryFiles,
 } from '../../src/copilotMemoryFiles';
 
+/**
+ * Minimum time between memory-files filesystem scans (readdirSync/statSync across every
+ * VS Code User root and workspace hash). Memory file hygiene changes slowly, so reusing a
+ * recent scan avoids repeating a synchronous filesystem walk on every uncached recompute
+ * (e.g. periodic Usage Analysis refreshes while the panel is open).
+ */
+const MEMORY_FILES_SCAN_TTL_MS = 5 * 60 * 1000;
+
 // --- Insights engine ---
 import type { TaskCategory, TaskCategoryBreakdown } from '../../src/taskClassification';
 import {
@@ -461,6 +469,23 @@ export function isComputedStatsCurrent(
 	currentGeneration: number,
 ): boolean {
 	return stampedGeneration === currentGeneration;
+}
+
+/**
+ * Whether a previous memory-files filesystem scan (readdirSync/statSync across every VS
+ * Code User root and workspace hash) may be reused instead of re-walking the filesystem.
+ *
+ * `lastScannedAt` of `undefined` means no scan has ever completed, so it is never reusable.
+ * Otherwise the cached result is reusable while `now - lastScannedAt` is still within
+ * `ttlMs`, throttling a synchronous filesystem walk that would otherwise repeat on every
+ * uncached recompute (e.g. periodic Usage Analysis refreshes while the panel is open).
+ */
+export function isMemoryFilesScanFresh(
+	lastScannedAt: number | undefined,
+	now: number,
+	ttlMs: number,
+): boolean {
+	return lastScannedAt !== undefined && (now - lastScannedAt) < ttlMs;
 }
 
 /** The minimum of a webview panel this module needs in order to post to it. */
@@ -901,6 +926,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private lastChartSplit: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' | 'taskCategory' = 'total';
 	private lastChartTimeWindow: ChartTimeWindow = 'last30';
 	private lastUsageAnalysisStats: UsageAnalysisStats | undefined;
+	/** Cached result of the last memory-files filesystem scan, reused across recomputes within {@link MEMORY_FILES_SCAN_TTL_MS}. */
+	private _memoryFilesAnalysisCache: MemoryFilesAnalysis | null | undefined;
+	/** Wall-clock time (ms) of the last memory-files scan, used to throttle repeated `readdirSync`/`statSync` walks. */
+	private _memoryFilesAnalysisScannedAt: number | undefined;
 	private lastDashboardData: any | undefined;
 	/** Insight engine: persisted state for all surfaced insights. */
 	private _insightStateBag: InsightStateBag = {};
@@ -5634,16 +5663,26 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * user/repo/session scope) for a hygiene insight. Metadata-only (path/size/mtime),
 	 * never reads memory file content. Returns null when no memory files were found or
 	 * on any scan error, so a failure here never breaks the rest of the stats build.
+	 *
+	 * The underlying scan is a synchronous `readdirSync`/`statSync` walk across every VS
+	 * Code User root and workspace hash, so it is throttled to at most once per
+	 * {@link MEMORY_FILES_SCAN_TTL_MS} and reused across recomputes in between (e.g.
+	 * periodic Usage Analysis refreshes) rather than re-walking the filesystem every time.
 	 */
 	private computeMemoryFilesAnalysis(): MemoryFilesAnalysis | null {
+		const now = Date.now();
+		if (isMemoryFilesScanFresh(this._memoryFilesAnalysisScannedAt, now, MEMORY_FILES_SCAN_TTL_MS)) {
+			return this._memoryFilesAnalysisCache ?? null;
+		}
 		try {
 			const files = _discoverAllMemoryFiles();
-			if (files.length === 0) { return null; }
-			return _analyzeMemoryFiles(files);
+			this._memoryFilesAnalysisCache = files.length === 0 ? null : _analyzeMemoryFiles(files);
 		} catch (err) {
 			this.log(`⚠️ Memory files analysis failed: ${String(err)}`);
-			return null;
+			this._memoryFilesAnalysisCache = null;
 		}
+		this._memoryFilesAnalysisScannedAt = now;
+		return this._memoryFilesAnalysisCache;
 	}
 
 	async openMcpJson(): Promise<void> {

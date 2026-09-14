@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import {
 	chainBuild,
 	isComputedStatsCurrent,
+	isMemoryFilesScanFresh,
 	makeLivePanelSink,
 	type PostablePanel,
 } from '../../src/extension';
@@ -60,6 +61,28 @@ test('isComputedStatsCurrent: the in-flight-build race is rejected end to end', 
 	// 5. A build that starts after the clear stamps the live generation and is reusable.
 	const rebuildStamp = cacheGeneration;
 	assert.equal(isComputedStatsCurrent(rebuildStamp, cacheGeneration), true);
+});
+
+// ---------------------------------------------------------------------------
+// isMemoryFilesScanFresh — throttles the synchronous readdirSync/statSync walk that
+// discovers Copilot memory files, so it does not repeat on every uncached recompute
+// (e.g. a periodic Usage Analysis refresh while the panel is open).
+// ---------------------------------------------------------------------------
+
+test('isMemoryFilesScanFresh: a scan that has never run is never fresh', () => {
+	assert.equal(isMemoryFilesScanFresh(undefined, Date.now(), 5 * 60 * 1000), false);
+});
+
+test('isMemoryFilesScanFresh: a scan within the TTL window is reused', () => {
+	const now = 1_000_000;
+	assert.equal(isMemoryFilesScanFresh(now - 1000, now, 5 * 60 * 1000), true, 'well within TTL');
+	assert.equal(isMemoryFilesScanFresh(now - (5 * 60 * 1000 - 1), now, 5 * 60 * 1000), true, 'just under the TTL boundary');
+});
+
+test('isMemoryFilesScanFresh: a scan at or past the TTL is stale and must rescan', () => {
+	const now = 1_000_000;
+	assert.equal(isMemoryFilesScanFresh(now - 5 * 60 * 1000, now, 5 * 60 * 1000), false, 'exactly at the TTL boundary');
+	assert.equal(isMemoryFilesScanFresh(now - 6 * 60 * 1000, now, 5 * 60 * 1000), false, 'past the TTL');
 });
 
 // ---------------------------------------------------------------------------
