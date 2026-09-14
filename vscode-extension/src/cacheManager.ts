@@ -51,6 +51,11 @@ export class CacheManager {
 	private lastCheckpointTime = 0;
 	private entriesSinceLastCheckpoint = 0;
 	private checkpointInProgress = false;
+	// Bumped by resetCheckpointCounters(). Lets a still-in-flight checkpoint (see
+	// checkpointCacheInternal()) tell whether a new refresh cycle reset the counters out from
+	// under it while its own save was awaiting, so it doesn't subtract its now-stale captured
+	// count against a counter that has since started fresh.
+	private checkpointCounterGeneration = 0;
 
 	constructor(
 		context: vscode.ExtensionContext,
@@ -231,17 +236,25 @@ export class CacheManager {
 	 * what actually reached disk. Zeroing the whole counter here would wrongly mark that
 	 * in-flight write as checkpointed too, the same "lost on a crash before the next save" risk
 	 * this whole checkpoint-dirty-tracking rework exists to close.
+	 *
+	 * That subtraction is itself only valid against the counter it was captured from. If
+	 * resetCheckpointCounters() runs while this save is still in flight — a new leader refresh
+	 * cycle starting — it zeros the counter for that new cycle; subtracting this stale, unrelated
+	 * count against it afterwards could wrongly erase dirty entries the new cycle has genuinely
+	 * accumulated since. checkpointCounterGeneration detects that and skips the update entirely
+	 * in that case, leaving the new cycle's own counter (and its own future checkpoint) untouched.
 	 */
 	private async checkpointCacheInternal(): Promise<void> {
 		const now = Date.now();
 		const entriesCountAtStart = this.entriesSinceLastCheckpoint;
-		this.deps.log(`Checkpointing cache: ${entriesCountAtStart} new entries since last checkpoint (${((now - this.lastCheckpointTime) / 1000).toFixed(1)}s elapsed)`);
+		const generationAtStart = this.checkpointCounterGeneration;
+		this.deps.log(`Checkpointing cache: ${entriesCountAtStart} dirty entries (new, changed, or deleted) since last checkpoint (${((now - this.lastCheckpointTime) / 1000).toFixed(1)}s elapsed)`);
 
 		const saved = await this.saveCacheToStorage();
-		if (saved) {
+		if (saved && this.checkpointCounterGeneration === generationAtStart) {
 			this.lastCheckpointTime = now;
 			this.entriesSinceLastCheckpoint = Math.max(0, this.entriesSinceLastCheckpoint - entriesCountAtStart);
-		} else {
+		} else if (!saved) {
 			this.deps.log('Checkpoint save was skipped or failed; leaving the dirty count intact so the next checkpoint retries it');
 		}
 	}
@@ -253,6 +266,7 @@ export class CacheManager {
 		this.lastCheckpointTime = Date.now();
 		this.entriesSinceLastCheckpoint = 0;
 		this.checkpointInProgress = false;
+		this.checkpointCounterGeneration++;
 	}
 
 	/**

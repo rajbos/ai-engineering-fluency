@@ -806,6 +806,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * once files actually start piling up in the background.
 	 */
 	private static readonly MAX_CONCURRENT_DEFERRED_PARSES = 20;
+	/**
+	 * Size of _deferredParseReserve: a second, smaller pool a worker falls back to only once it
+	 * has waited 3s for a primary permit and gotten nothing — meaning every primary permit is
+	 * currently held by a parse showing no sign of ever finishing, not merely a slow one (those
+	 * settle well within that window). Acquiring from the reserve has no timeout, so total
+	 * concurrent parses stays bounded at MAX_CONCURRENT_DEFERRED_PARSES + this reserve instead of
+	 * growing without limit as more workers hit the same stuck wall across successive waves.
+	 */
+	private static readonly DEFERRED_PARSE_RESERVE_PERMITS = 10;
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -1062,6 +1071,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * previous run releasing its permit must still be able to admit a worker parked in the next one.
 	 */
 	private readonly _deferredParseSemaphore: Semaphore = createSemaphore(CopilotTokenTracker.MAX_CONCURRENT_DEFERRED_PARSES);
+	/** See DEFERRED_PARSE_RESERVE_PERMITS — the bounded fallback for when the primary semaphore above is entirely stuck. */
+	private readonly _deferredParseReserve: Semaphore = createSemaphore(CopilotTokenTracker.DEFERRED_PARSE_RESERVE_PERMITS);
 	private _deferredSessionRefreshTimer: NodeJS.Timeout | undefined;
 	private _updateTokenStatsStartedAt: number | undefined;
 
@@ -4069,16 +4080,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// left the losing side of the race registered forever — see git history), this is a
 				// real reservation: acquire() hands the freed permit to exactly one waiter per
 				// release(), and a timed-out acquire() removes its own registration.
-				//
-				// The 3s timeout is a safety valve, not the common case: if every held permit is
-				// stuck on a pathologically hung parse (not merely slow) rather than a genuinely
-				// freed slot, proceeding without one here — never released, since heldPermit tracks
-				// it below — avoids the alternative of hanging the whole preload pass forever.
-				const heldPermit = await this._deferredParseSemaphore.acquire(3_000);
+				let release: () => void;
+				if (await this._deferredParseSemaphore.acquire(3_000)) {
+					release = () => this._deferredParseSemaphore.release();
+				} else {
+					// The 3s timeout won: every primary permit is held by a parse that has shown no
+					// sign of ever finishing (merely slow files settle well within a handful of these
+					// waits). Falling back to running unreserved here would let total concurrency
+					// creep past the cap by a full worker-pool's width on every such wave — the exact
+					// drift the primary semaphore exists to prevent (see git history). Instead, wait
+					// (uncapped) on a small, separately bounded reserve — see
+					// DEFERRED_PARSE_RESERVE_PERMITS — so the worst case is a bigger but still fixed
+					// ceiling, not unbounded growth.
+					await this._deferredParseReserve.acquire();
+					release = () => this._deferredParseReserve.release();
+				}
 				const sessionFile = queue[readIndex++];
-				const wasDeferred = await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget, heldPermit);
-				if (heldPermit && !wasDeferred) {
-					this._deferredParseSemaphore.release();
+				const wasDeferred = await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget, release);
+				if (!wasDeferred) {
+					release();
 				}
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
@@ -4145,12 +4165,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * which file(s) were in flight. A "start" line with no matching "done"/"error"
 	 * for the same file means the process died while processing it.
 	 *
-	 * Returns whether this file ended up deferred to the background, so the caller (worker())
-	 * knows whether it still owns `heldPermit` (release it immediately) or ownership has
-	 * transferred to the deferred parse's own completion (deferSessionPreloadRefresh() releases
-	 * it there instead) — see _deferredParseSemaphore's doc comment at its declaration.
+	 * `release` is the permit worker() acquired for this file (from whichever pool — the primary
+	 * semaphore or the reserve, see their declarations), called exactly once total regardless of
+	 * outcome: either here-and-now by the caller when this returns `false` (not deferred), or
+	 * later by deferSessionPreloadRefresh() once the deferred parse itself finishes, when this
+	 * returns `true` and ownership has transferred.
 	 */
-	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget: { remaining: number } | undefined, heldPermit: boolean): Promise<boolean> {
+	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget: { remaining: number } | undefined, release: () => void): Promise<boolean> {
 		if (this._deferredSessionPreloadFiles.has(sessionFile)) {
 			this.debugCrashLog(`deferred ${sessionFile}`);
 			return false;
@@ -4166,7 +4187,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (e instanceof _TimeoutError) {
 				this.debugCrashLog(`deferred ${sessionFile}`);
 				this._deferredSessionPreloadCount++;
-				this.deferSessionPreloadRefresh(sessionFile, processing, heldPermit);
+				this.deferSessionPreloadRefresh(sessionFile, processing, release);
 				return true;
 			}
 			this.debugCrashLog(`error ${sessionFile}: ${e}`);
@@ -4178,19 +4199,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Keeps a timed-out preload alive without holding the initial statistics pass. Once every
 	 * deferred parse has filled its cache entry, a single refresh incorporates those results.
 	 */
-	private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>, heldPermit: boolean): void {
+	private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>, release: () => void): void {
 		this._deferredSessionPreloadFiles.add(sessionFile);
 		void processing
 			.then(() => this.debugCrashLog(`done(background)  ${sessionFile}`))
 			.catch(error => this.debugCrashLog(`error(background) ${sessionFile}: ${error}`))
 			.finally(() => {
 				this._deferredSessionPreloadFiles.delete(sessionFile);
-				// The worker that started this file didn't release its semaphore permit because
-				// this parse turned out to be deferred (see processPreloadQueueFileWithCrashLog);
-				// release it now that the background work it was held for has actually finished.
-				// A worker whose own acquire() timed out (heldPermit=false) never took a permit
-				// for this file, so there is nothing to release on its behalf.
-				if (heldPermit) { this._deferredParseSemaphore.release(); }
+				// The worker that started this file didn't release its permit because this parse
+				// turned out to be deferred (see processPreloadQueueFileWithCrashLog) — release it
+				// now that the background work it was held for has actually finished.
+				release();
 				if (this._deferredSessionPreloadFiles.size === 0) {
 					this.scheduleDeferredSessionRefresh();
 				}
@@ -9090,9 +9109,15 @@ private computeFallbackDailyRollup(
 		// Handle panel disposal
 		this.detailsPanel.onDidDispose(() => {
 			this.log('📊 Details panel closed');
-			if (this.detailsPanel) { this._refreshLoadingPanels.delete(this.detailsPanel); }
-			this.detailsPanel = undefined;
-			this._detailsPanelIsLoading = false;
+			// Always remove this specific panel from the registry, but only clear the tracked
+			// fields when they still point at it — a stale dispose callback for a panel that has
+			// already been replaced (this.detailsPanel !== panel) must not clear the replacement's
+			// own state out from under its own, still-in-flight showDetails() call.
+			this._refreshLoadingPanels.delete(panel);
+			if (this.detailsPanel === panel) {
+				this.detailsPanel = undefined;
+				this._detailsPanelIsLoading = false;
+			}
 		});
 
 		// Use cached stats if available, otherwise show loading screen while calculating
@@ -9168,8 +9193,11 @@ private computeFallbackDailyRollup(
 
 		this.environmentalPanel.onDidDispose(() => {
 			this.log('🌿 Environmental Impact view closed');
+			// Same guard as showDetails()'s dispose handler: a stale callback for an
+			// already-replaced panel (this.environmentalPanel !== panel) must not clear the
+			// replacement's own tracked reference.
 			this._refreshLoadingPanels.delete(panel);
-			this.environmentalPanel = undefined;
+			if (this.environmentalPanel === panel) { this.environmentalPanel = undefined; }
 		});
 
 		const panel = this.environmentalPanel;
