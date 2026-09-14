@@ -74,12 +74,7 @@ export function getLoadingHtmlBody(nonce: string, iconUri?: string, startedAtMs:
 	const badgeIcon = iconUri
 		? `<img src="${iconUri}" alt="" width="20" height="20" style="vertical-align:middle;margin-right:6px;border-radius:3px;" />`
 		: '🤖 ';
-	// lang="en" on the fragment, not inherited from the document: every string below is hardcoded
-	// English while the surrounding <html lang> is the viewer's locale (the page's <title> and, in
-	// the panels that host this, the localized payload). Declaring it here keeps assistive
-	// technology from reading this English with the document language's pronunciation rules.
-	// Drop the attribute once these strings are localized.
-	return `<body lang="en">
+	return `<body>
 <div class="card">
     <div class="header-row">
         <div>

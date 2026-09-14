@@ -549,8 +549,15 @@ export function planEfficiencyRebuild(
 	requestedFor: number | undefined,
 	currentGeneration: number,
 	queuedBuilds: number,
-): 'start' | 'coalesce-onto-queued' | 'already-requested' {
+	completedFor?: number,
+): 'start' | 'coalesce-onto-queued' | 'already-built' | 'already-requested' {
 	if (requestedFor === currentGeneration) { return 'already-requested'; }
+	// A build that already *finished* at this generation answers the invalidation just as well as
+	// one still queued. clearCache() requests its rebuild only after awaiting updateTokenStats(),
+	// which is long enough for a queued build to start (dropping `queuedBuilds` to zero), capture
+	// the bumped generation and complete — after which counting queued builds alone would start a
+	// second full-year walk over data that is already current.
+	if (completedFor === currentGeneration) { return 'already-built'; }
 	return queuedBuilds > 0 ? 'coalesce-onto-queued' : 'start';
 }
 
@@ -1034,6 +1041,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * invalidation needs no rebuild of its own — see planEfficiencyRebuild().
 	 */
 	private _efficiencyBuildsQueued = 0;
+	/**
+	 * The generation of the last Efficiency payload that was recorded rather than discarded. An
+	 * invalidation it already covers needs no rebuild — see planEfficiencyRebuild().
+	 */
+	private _efficiencyBuildCompletedFor: number | undefined;
 	/** Tail of the serialized Efficiency build queue; see runEfficiencyBuild(). */
 	private _efficiencyBuildChain: Promise<void> = Promise.resolve();
 	// Previous progress percentage used to animate the progress bar smoothly between tooltip updates
@@ -2888,9 +2900,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!this.efficiencyPanel) { return; }
 		const plan = planEfficiencyRebuild(
 			this._efficiencyRebuildRequestedFor, this._cacheGeneration, this._efficiencyBuildsQueued,
+			this._efficiencyBuildCompletedFor,
 		);
 		if (plan === 'already-requested') { return; }
 		this._efficiencyRebuildRequestedFor = this._cacheGeneration;
+		if (plan === 'already-built') {
+			this.log('⚡ [Efficiency] A build has already produced data for this generation; nothing to rebuild');
+			return;
+		}
 		if (plan === 'coalesce-onto-queued') {
 			this.log('⚡ [Efficiency] A queued build will capture this invalidation; not queuing a second walk');
 			return;
@@ -2906,6 +2923,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * non-zero count means at least one build is still going to read the live generation. That is
 	 * what lets requestEfficiencyRebuild() coalesce onto it instead of queuing a second walk.
 	 */
+	/**
+	 * Releases the automatic-rebuild stamp after a build fails.
+	 *
+	 * requestEfficiencyRebuild() marks a generation satisfied when it defers to a build that is
+	 * already queued — which assumes that build publishes. If it throws instead, the panel is left
+	 * on its error or fallback state and the stamp would keep every later request for that same
+	 * generation coalescing into nothing. Clearing it re-opens the retry without auto-retrying,
+	 * which could loop on a build that fails every time.
+	 */
+	private releaseEfficiencyRebuildRequest(): void {
+		this._efficiencyRebuildRequestedFor = undefined;
+	}
+
 	private runEfficiencyBuild<T>(build: () => Promise<T>): Promise<T> {
 		this._efficiencyBuildsQueued++;
 		const { result, chain } = chainBuild(this._efficiencyBuildChain, () => {
@@ -10728,6 +10758,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				this.log('⚡ Efficiency view rendered');
 			} catch (error) {
 				this.error('Error building Efficiency view:', error);
+				this.releaseEfficiencyRebuildRequest();
 				this.showEfficiencyError(panel, error);
 			}
 		})();
@@ -10774,6 +10805,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			// Never strand the panel on the loading screen: fall back to the last good payload,
 			// which the initial build records even when its own render was skipped.
 			this.error('Error refreshing Efficiency view:', error);
+			this.releaseEfficiencyRebuildRequest();
 			const previous = this._lastEfficiencyViewData;
 			if (this.efficiencyPanel !== panel) { return; }
 			if (previous) { panel.webview.html = this.getEfficiencyHtml(panel.webview, previous); }
@@ -10948,6 +10980,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			return false;
 		}
 		this._lastEfficiencyViewData = data;
+		this._efficiencyBuildCompletedFor = builtAtGeneration;
 		return true;
 	}
 

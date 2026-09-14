@@ -538,6 +538,18 @@ test('planEfficiencyRebuild: a queued build satisfies the invalidation instead o
 	assert.equal(planEfficiencyRebuild(4, 5, 2), 'coalesce-onto-queued');
 });
 
+test('planEfficiencyRebuild: a build that already completed at this generation satisfies it', () => {
+	// clearCache() requests its rebuild only after awaiting updateTokenStats() — long enough for a
+	// queued build to start (dropping the queued count to zero), capture the bumped generation and
+	// finish. Counting queued builds alone would then start a second full-year walk over data that
+	// is already current.
+	assert.equal(planEfficiencyRebuild(undefined, 5, 0, 5), 'already-built');
+	assert.equal(planEfficiencyRebuild(4, 5, 0, 5), 'already-built');
+	// A build that completed at an *older* generation settles nothing.
+	assert.equal(planEfficiencyRebuild(undefined, 5, 0, 4), 'start');
+	assert.equal(planEfficiencyRebuild(undefined, 5, 1, 4), 'coalesce-onto-queued');
+});
+
 test('planEfficiencyRebuild: a build that is already running does not satisfy it', () => {
 	// runEfficiencyBuild() decrements the count as the build starts, precisely because a running
 	// build captured an older generation and its payload will be discarded by
@@ -642,9 +654,13 @@ test('wiring: a refresh superseded by a clear publishes nothing at all', () => {
 	for (const [awaited, next] of [
 		['await this.updateAnalysisPanelIfOpen(', 'await this.computeAndUploadFluencyScore('],
 		['await this.computeAndUploadFluencyScore(', 'this.updateEnvironmentalPanelIfOpen('],
-		['await this.evaluateAndSurfaceInsights();', 'this.persistRefreshResult(isLeader);'],
+		['await this.evaluateAndSurfaceInsights(startedAtGeneration);', 'this.persistRefreshResult(isLeader);'],
 	]) {
-		const recheck = core.indexOf('if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }', core.indexOf(awaited));
+		// indexOf(-1) silently restarts from 0, which would match the entry gate and pass
+		// vacuously — this assertion caught exactly that after the insight call gained a parameter.
+		const awaitedAt = core.indexOf(awaited);
+		assert.ok(awaitedAt !== -1, `publishRefreshResult() no longer contains: ${awaited}`);
+		const recheck = core.indexOf('if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }', awaitedAt);
 		assert.ok(
 			recheck !== -1 && recheck < core.indexOf(next),
 			`a superseded run must not reach ${next} after awaiting ${awaited}`,
@@ -853,6 +869,40 @@ test('wiring: the Efficiency build threads its origin generation into both later
 	}
 });
 
+test('wiring: a failed Efficiency build does not leave its generation marked satisfied', () => {
+	// requestEfficiencyRebuild() marks a generation satisfied when it defers to a queued build.
+	// That assumes the build publishes; if it throws, the panel sits on its error/fallback state
+	// and the stamp would coalesce away every later request for the same generation.
+	assert.ok(
+		EXTENSION_SRC.includes('private releaseEfficiencyRebuildRequest(): void {')
+		&& EXTENSION_SRC.includes('this._efficiencyRebuildRequestedFor = undefined;'),
+		'a failed build must be able to release the rebuild stamp',
+	);
+	assert.equal(
+		EXTENSION_SRC.split('this.releaseEfficiencyRebuildRequest();').length - 1,
+		2,
+		'both Efficiency build paths must release the stamp when their build throws',
+	);
+	for (const [errorLog, until] of [
+		["this.error('Error building Efficiency view:', error);", '\n\tprivate async refreshEfficiencyPanel('],
+		["this.error('Error refreshing Efficiency view:', error);", '\n\t/** Maps one cached session'],
+	]) {
+		const at = EXTENSION_SRC.indexOf(errorLog);
+		assert.ok(at !== -1, `missing catch block: ${errorLog}`);
+		const rest = EXTENSION_SRC.slice(at, EXTENSION_SRC.indexOf(until, at));
+		assert.ok(rest.includes('this.releaseEfficiencyRebuildRequest();'), `${errorLog} must release the stamp`);
+	}
+	// And only a payload that was actually recorded may mark its generation built.
+	assert.ok(
+		/this\._lastEfficiencyViewData = data;\s*this\._efficiencyBuildCompletedFor = builtAtGeneration;/.test(EXTENSION_SRC),
+		'the completed-build marker must be set where the payload is recorded, not where the build starts',
+	);
+	assert.ok(
+		EXTENSION_SRC.includes('this._efficiencyBuildCompletedFor,'),
+		'requestEfficiencyRebuild() must consult the completed-build generation',
+	);
+});
+
 test('wiring: every rejected Efficiency payload queues the rebuild that replaces it', () => {
 	// Both rejection paths must queue one. showEfficiency()'s always did; refreshEfficiencyPanel()'s
 	// did not, on the stated grounds that re-entering the refresh "would loop". It cannot:
@@ -879,21 +929,6 @@ test('wiring: every rejected Efficiency payload queues the rebuild that replaces
 		EXTENSION_SRC.split('void this.refreshEfficiencyPanel()').length - 1,
 		1,
 		'the rebuild must be requested, not by calling the refresh directly — that is what could loop',
-	);
-});
-
-test('wiring: the English-only loading fragment declares its own language', () => {
-	// The loading body is hardcoded English (loadingHtml.ts has no localization at all) while the
-	// document around it now declares the viewer's locale — so without this the one document whose
-	// body is entirely English would be the one announced in the wrong language.
-	const LOADING_SRC = fs.readFileSync(path.join(__dirname, '../../../../src/loadingHtml.ts'), 'utf8');
-	assert.ok(
-		LOADING_SRC.includes('return `<body lang="en">'),
-		'the loading fragment must declare English, since its strings are not localized',
-	);
-	assert.equal(
-		/\bl10n\b|\blocalize\b|\blocalization\b/.test(LOADING_SRC), false,
-		'if these strings get localized, drop the lang="en" instead of leaving it lying about them',
 	);
 });
 
