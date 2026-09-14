@@ -9708,7 +9708,19 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		// `_lastEfficiencyViewData` as clearCache() does: this leaves the session cache
 		// intact, so an Efficiency rebuild will succeed, and dropping the last good payload
 		// would only guarantee the failure state on the way there.
+		//
+		// The generation is global, but this refresh is not: it invalidates usage-analysis
+		// state and nothing else. The daily and full-year caches are carried across the bump
+		// so they stay readable, because a bare bump silently truncated an open Chart. With
+		// `currentFullDailyStats` reading stale, _runRefreshCore()'s backfill is still skipped
+		// (it skips whenever a chart panel is open), `mergeIntoFullDailyStats()` early-returns,
+		// and the chart then re-renders from the 30-day fallback — losing its week, month and
+		// all-history ranges after nothing more than a Usage Analysis refresh.
+		const dailyWasCurrent = isComputedStatsCurrent(this._statsGeneration.daily, this._cacheGeneration);
+		const fullDailyWasCurrent = isComputedStatsCurrent(this._statsGeneration.fullDaily, this._cacheGeneration);
 		this._cacheGeneration++;
+		if (dailyWasCurrent) { this._statsGeneration.daily = this._cacheGeneration; }
+		if (fullDailyWasCurrent) { this._statsGeneration.fullDaily = this._cacheGeneration; }
 		await this.loadAnalysisStatsInBackground(this.analysisPanel);
 		// Refresh token stats so the status bar and tooltip stay in sync
 		await this.updateTokenStats();
