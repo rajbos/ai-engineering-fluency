@@ -437,6 +437,27 @@ export function defaultSumBillingGroupCosts(billingGroupCosts: Record<string, nu
 }
 
 /**
+ * Computes the figures for the Copilot Budget gauge row: total spend against budget
+ * (locally-tracked usage plus any usage the Copilot API reports that this device has no
+ * local session data for) and how much budget remains. Folding the untracked gap into the
+ * headline total keeps the "$X / $Y" figure consistent with the bar's percentage, so a
+ * reader doesn't have to read a second row and subtract to find out how much budget is
+ * actually left.
+ */
+export function computeCopilotBudgetDisplay(
+	copilotCost: number,
+	budget: number,
+	apiUsedUsd: number | null,
+): { totalUsed: number; remaining: number; trackedRatio: number; gapRatio: number; gapUsd: number } {
+	const gapUsd = apiUsedUsd !== null ? Math.max(0, apiUsedUsd - copilotCost) : 0;
+	const totalUsed = copilotCost + gapUsd;
+	const remaining = budget - totalUsed;
+	const trackedRatio = budget > 0 ? copilotCost / budget : 0;
+	const gapRatio = budget > 0 ? gapUsd / budget : 0;
+	return { totalUsed, remaining, trackedRatio, gapRatio, gapUsd };
+}
+
+/**
  * Formats the main stats table in Markdown for the status bar hover tooltip.
  * Renders Today, Current Month, and Last 30 Days columns side by side.
  */
@@ -4224,19 +4245,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *  silently inflating (or understating) the "tracked" portion. */
 	private appendCopilotBudgetRow(tooltip: vscode.MarkdownString, copilotCost: number, budget: number): void {
 		const apiBalance = this._buildCopilotApiBalance();
-		const apiUsedUsd = apiBalance ? apiBalance.usedAiCredits * 0.01 : 0;
-		const gapUsd = apiBalance ? Math.max(0, apiUsedUsd - copilotCost) : 0;
-		const trackedRatio = copilotCost / budget;
-		const gapRatio = gapUsd / budget;
+		const apiUsedUsd = apiBalance ? apiBalance.usedAiCredits * 0.01 : null;
+		const { totalUsed, remaining, trackedRatio, gapRatio, gapUsd } = computeCopilotBudgetDisplay(copilotCost, budget, apiUsedUsd);
 		const totalRatio = trackedRatio + gapRatio;
 		const color = totalRatio >= 0.9 ? '#EF5350' : totalRatio >= 0.75 ? '#FFA726' : '#4CAF50';
 		const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildTwoSegmentBarSvg(trackedRatio, gapRatio, color))})`;
-		// Budget row first, then a sub-header row labelling the section below, so the
-		// "these bars are a different scale" context sits right where it's needed
-		// instead of a footnote read only after the bars already look confusing.
-		tooltip.appendMarkdown(`| 🎯 Copilot Budget | $${copilotCost.toFixed(2)} / $${budget.toFixed(2)} | ${barCell} |\n`);
+		const remainingLabel = remaining >= 0
+			? l10n.t('tooltip.budgetRemaining', `$${remaining.toFixed(2)}`)
+			: l10n.t('tooltip.budgetOverBy', `$${Math.abs(remaining).toFixed(2)}`);
+		// The headline figure is total spend (tracked + untracked) against budget, so it
+		// agrees with the bar's percentage and states plainly how much budget is left —
+		// instead of showing only the tracked amount and leaving the reader to read the
+		// untracked sub-row and subtract it themselves to find the true remaining budget.
+		tooltip.appendMarkdown(`| 🎯 ${l10n.t('tooltip.copilotBudgetLabel')} | $${totalUsed.toFixed(2)} / $${budget.toFixed(2)} · ${remainingLabel} | ${barCell} |\n`);
 		if (gapUsd > 0.005) {
-			tooltip.appendMarkdown(`| &nbsp;&nbsp;↳ untracked (other devices/cloud) | $${gapUsd.toFixed(2)} |  |\n`);
+			tooltip.appendMarkdown(`| &nbsp;&nbsp;↳ ${l10n.t('tooltip.budgetTrackedVsUntracked', `$${copilotCost.toFixed(2)}`, `$${gapUsd.toFixed(2)}`)} |  |  |\n`);
 		}
 	}
 

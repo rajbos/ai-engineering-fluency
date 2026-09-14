@@ -4,6 +4,7 @@ import * as assert from 'node:assert/strict';
 import {
 	tooltipSecondaryPeriod,
 	formatTooltipStatsTable,
+	computeCopilotBudgetDisplay,
 	type StatusBarDisplaySetting
 } from '../../src/extension';
 import type { DetailedStats, PeriodStats } from '../../../src/types';
@@ -194,4 +195,41 @@ test('tooltipSecondaryPeriod: todayAndCurrentMonth both settings shows currentMo
 test('StatusBarDisplaySetting type is exported', () => {
 	const val: StatusBarDisplaySetting = 'both';
 	assert.equal(val, 'both');
+});
+
+// Regression coverage for the "Copilot Budget" tooltip row math: the headline
+// $used/$budget figure must include untracked (other devices/cloud) usage so
+// it matches the bar's percentage, and "remaining" must account for it too —
+// otherwise a user reading only the headline figure sees far more budget left
+// than actually remains (see PR discussion: $556.61/$800 read as ~$243 left,
+// while the untracked-usage sub-row alone left only ~$41).
+test('computeCopilotBudgetDisplay: folds untracked usage into totalUsed and remaining', () => {
+	const result = computeCopilotBudgetDisplay(556.61, 800, 759.21);
+	assert.ok(Math.abs(result.gapUsd - 202.60) < 1e-9);
+	assert.ok(Math.abs(result.totalUsed - 759.21) < 1e-9);
+	assert.ok(Math.abs(result.remaining - 40.79) < 1e-9);
+	assert.ok(Math.abs(result.trackedRatio - 556.61 / 800) < 1e-9);
+	assert.ok(Math.abs(result.gapRatio - 202.60 / 800) < 1e-9);
+});
+
+test('computeCopilotBudgetDisplay: no API balance means no gap, remaining is budget minus tracked cost', () => {
+	const result = computeCopilotBudgetDisplay(100, 800, null);
+	assert.equal(result.gapUsd, 0);
+	assert.equal(result.totalUsed, 100);
+	assert.equal(result.remaining, 700);
+});
+
+test('computeCopilotBudgetDisplay: API-reported usage below tracked cost never produces a negative gap', () => {
+	// The API total can lag local tracking; a negative gap would silently
+	// shrink totalUsed below the tracked cost, which would be worse than the
+	// original bug.
+	const result = computeCopilotBudgetDisplay(500, 800, 400);
+	assert.equal(result.gapUsd, 0);
+	assert.equal(result.totalUsed, 500);
+});
+
+test('computeCopilotBudgetDisplay: over budget yields a negative remaining', () => {
+	const result = computeCopilotBudgetDisplay(750, 800, 812.34);
+	assert.ok(Math.abs(result.gapUsd - 62.34) < 1e-9);
+	assert.ok(Math.abs(result.remaining - -12.34) < 1e-9);
 });
