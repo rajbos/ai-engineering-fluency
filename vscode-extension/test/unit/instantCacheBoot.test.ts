@@ -441,12 +441,20 @@ test('renderInstantStatsFromCache() never overwrites a real refresh that already
 	// steps like computeAndUploadFluencyScore that follow) would leave a wide window where the real
 	// refresh has already redrawn the status bar, but renderInstantStatsFromCache() still sees the
 	// flag as false and can overwrite that already-correct UI with its own, older cache-only result.
+	// The publication sequence lives in publishRefreshResult() (extracted so the generation can be
+	// re-checked at every async boundary); _runRefreshCore() hands its result straight to it, so
+	// "immediately after calculateDetailedStats()" spans the two.
 	const refreshBody = extractBracesBlock(EXTENSION_SRC, 'private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {');
 	const refreshCalcIndex = refreshBody.indexOf('await this.calculateDetailedStats(undefined, preloaded)');
-	const flagSetIndex = refreshBody.indexOf('this._hasCompletedRealRefresh = true;');
-	const statusBarIndex = refreshBody.indexOf('this.updateStatusBarAndTooltip(detailedStats);');
-	assert.ok(refreshCalcIndex !== -1 && flagSetIndex !== -1 && statusBarIndex !== -1 && refreshCalcIndex < flagSetIndex && flagSetIndex < statusBarIndex,
-		'_runRefreshCore() must set _hasCompletedRealRefresh immediately after its own calculateDetailedStats() resolves, before updateStatusBarAndTooltip() (and every slower step after it) — not after the UI is already published');
+	const publishIndex = refreshBody.indexOf('await this.publishRefreshResult(');
+	assert.ok(refreshCalcIndex !== -1 && publishIndex !== -1 && refreshCalcIndex < publishIndex,
+		'_runRefreshCore() must publish its verified result through publishRefreshResult() as soon as calculateDetailedStats() resolves');
+
+	const publishBody = extractBracesBlock(EXTENSION_SRC, 'private async publishRefreshResult(');
+	const flagSetIndex = publishBody.indexOf('this._hasCompletedRealRefresh = true;');
+	const statusBarIndex = publishBody.indexOf('this.updateStatusBarAndTooltip(detailedStats);');
+	assert.ok(flagSetIndex !== -1 && statusBarIndex !== -1 && flagSetIndex < statusBarIndex,
+		'publishRefreshResult() must set _hasCompletedRealRefresh before updateStatusBarAndTooltip() (and every slower step after it) — not after the UI is already published');
 });
 
 test('reconcilePreloadedAgainstDiscovery() evicts every raw cache key for an unconfirmed path, via the tombstone-aware deleteCachedSessionData()', () => {

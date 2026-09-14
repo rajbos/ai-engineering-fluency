@@ -450,7 +450,7 @@ test('wiring: a Usage Analysis refresh does not invalidate the daily or full-yea
 
 	assert.ok(refresh.includes('this._cacheGeneration++;'), 'the bump itself must stay — recordEfficiencyPayload() keys on it');
 
-	for (const key of ['daily', 'fullDaily']) {
+	for (const key of ['detailed', 'daily', 'fullDaily']) {
 		assert.ok(
 			refresh.includes(`isComputedStatsCurrent(this._statsGeneration.${key}, this._cacheGeneration)`),
 			`refreshAnalysisPanel() must record whether ${key} was current before the bump`,
@@ -465,6 +465,7 @@ test('wiring: a Usage Analysis refresh does not invalidate the daily or full-yea
 	// and every cache looks stale regardless.
 	const bumpAt = refresh.indexOf('this._cacheGeneration++;');
 	const lastRead = Math.max(
+		refresh.indexOf('const detailedWasCurrent'),
 		refresh.indexOf('const dailyWasCurrent'),
 		refresh.indexOf('const fullDailyWasCurrent'),
 	);
@@ -549,10 +550,22 @@ test('planEfficiencyRebuild: a build that is already running does not satisfy it
 // a hardcoded lang="en" has assistive technology announce it as English.
 // ---------------------------------------------------------------------------
 
-test('webviewDocumentLanguage: passes through a real VS Code locale', () => {
+test('webviewDocumentLanguage: declares a locale the extension actually has a bundle for', () => {
 	assert.equal(webviewDocumentLanguage('en'), 'en');
 	assert.equal(webviewDocumentLanguage('zh-cn'), 'zh-cn');
-	assert.equal(webviewDocumentLanguage('pt-BR'), 'pt-BR');
+	// A bare tag resolves to the bundle that serves it, so the declaration names the language the
+	// text is really in — Simplified Chinese, not an unqualified 'zh'.
+	assert.equal(webviewDocumentLanguage('zh'), 'zh-cn');
+});
+
+test('webviewDocumentLanguage: a language with no bundle is declared en, because the text is en', () => {
+	// The point of declaring the language is to stop assistive technology reading localized text
+	// with the wrong pronunciation rules. l10n.t() falls back to the English bundle for every
+	// language without a package.nls.<locale>.json, so on these installs the rendered strings ARE
+	// English — declaring 'fr' would be the same mismatch pointing the other way.
+	assert.equal(webviewDocumentLanguage('fr'), 'en');
+	assert.equal(webviewDocumentLanguage('pt-BR'), 'en');
+	assert.equal(webviewDocumentLanguage('zh-tw'), 'en', 'Traditional Chinese must not claim the Simplified bundle');
 });
 
 test('webviewDocumentLanguage: falls back to en for a missing or empty locale', () => {
@@ -561,12 +574,24 @@ test('webviewDocumentLanguage: falls back to en for a missing or empty locale', 
 	assert.equal(webviewDocumentLanguage('   '), 'en');
 });
 
-test('webviewDocumentLanguage: anything that is not a language tag cannot reach the attribute', () => {
-	// The value is interpolated into a double-quoted HTML attribute, so a non-tag must not be
-	// passed through at all rather than relying on it never containing a quote.
+test('webviewDocumentLanguage: anything that is not a known locale cannot reach the attribute', () => {
+	// The value is interpolated into a double-quoted HTML attribute. Resolving against the bundle
+	// list makes the output a closed set of compile-time ids, so this holds by construction.
 	assert.equal(webviewDocumentLanguage('en" onload="alert(1)'), 'en');
 	assert.equal(webviewDocumentLanguage('en><script>'), 'en');
-	assert.equal(webviewDocumentLanguage('en_US'), 'en', 'underscores are not BCP-47 separators');
+	assert.equal(webviewDocumentLanguage('zh-cn" onload="alert(1)'), 'en');
+});
+
+test('webviewDocumentLanguage: tracks the bundles that actually ship', () => {
+	// If a package.nls.<locale>.json is added, this must start returning it — otherwise the new
+	// translation ships while every view still declares English.
+	const bundles = fs.readdirSync(path.join(__dirname, '../../../..'))
+		.filter(f => /^package\.nls\..+\.json$/.test(f))
+		.map(f => f.replace(/^package\.nls\.|\.json$/g, '').toLowerCase());
+	assert.deepEqual(bundles.sort(), ['zh-cn'], 'a new bundle needs a case in the tests above');
+	for (const locale of bundles) {
+		assert.equal(webviewDocumentLanguage(locale), locale, `${locale} ships a bundle and must be declared`);
+	}
 });
 
 // ---------------------------------------------------------------------------
@@ -576,11 +601,11 @@ test('webviewDocumentLanguage: anything that is not a language tag cannot reach 
 // ---------------------------------------------------------------------------
 
 test('wiring: a refresh superseded by a clear publishes nothing at all', () => {
-	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async _runRefreshCore('));
-	const core = body.slice(0, body.indexOf('\n\t/**\n\t * Persist results after a refresh.'));
+	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async publishRefreshResult('));
+	const core = body.slice(0, body.indexOf('\n\t/** Core discover → parse → compute → render → persist pass'));
 
-	const gateAt = core.indexOf('if (this.isRefreshSuperseded(startedAtGeneration)) { return undefined; }');
-	assert.ok(gateAt !== -1, '_runRefreshCore() must gate on the generation its inputs were gathered in');
+	const gateAt = core.indexOf('if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }');
+	assert.ok(gateAt !== -1, 'publishRefreshResult() must gate on the generation its inputs were gathered in');
 
 	// Everything that leaves this function — the status bar, the four panel publications, the
 	// persisted snapshot — must sit behind the gate, not merely the cache stamps.
@@ -594,14 +619,47 @@ test('wiring: a refresh superseded by a clear publishes nothing at all', () => {
 		'this.persistRefreshResult(isLeader);',
 	]) {
 		const at = core.indexOf(published);
-		assert.ok(at !== -1, `_runRefreshCore() no longer contains: ${published}`);
+		assert.ok(at !== -1, `publishRefreshResult() no longer contains: ${published}`);
 		assert.ok(at > gateAt, `${published} must come after the superseded-run gate`);
 	}
+	// One check on entry is not enough: this awaits calculateUsageAnalysisStats(),
+	// calculateMaturityScores() and the insight pass, and a clearCache() landing in any of them
+	// would otherwise let the Environmental panel and the persisted snapshot carry pre-clear data.
+	assert.equal(
+		core.split('if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }').length - 1,
+		4,
+		'the generation must be re-checked after every await, not only on entry',
+	);
+	for (const [awaited, next] of [
+		['await this.updateAnalysisPanelIfOpen(', 'await this.computeAndUploadFluencyScore('],
+		['await this.computeAndUploadFluencyScore(', 'this.updateEnvironmentalPanelIfOpen('],
+		['await this.evaluateAndSurfaceInsights();', 'this.persistRefreshResult(isLeader);'],
+	]) {
+		const recheck = core.indexOf('if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }', core.indexOf(awaited));
+		assert.ok(
+			recheck !== -1 && recheck < core.indexOf(next),
+			`a superseded run must not reach ${next} after awaiting ${awaited}`,
+		);
+	}
+	// The detailed stats must be recorded before the analysis payload is built: it reads
+	// monthBillingGroupCosts through currentDetailedStats, which is empty until the stamp lands.
+	assert.ok(
+		core.indexOf('this.recordDetailedStats(detailedStats, startedAtGeneration);')
+		< core.indexOf('await this.updateAnalysisPanelIfOpen('),
+		'recordDetailedStats() must run before the panels that read currentDetailedStats',
+	);
 	// _hasCompletedRealRefresh in particular: it tells renderInstantStatsFromCache() that verified
 	// data has already been published, so a discarded run must never set it.
 	assert.ok(
 		core.indexOf('this._hasCompletedRealRefresh = true;') > gateAt,
 		'a discarded run must not claim a real refresh completed',
+	);
+	// And _runRefreshCore() must route its result through this method rather than publishing inline.
+	const runBody = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async _runRefreshCore('));
+	const run = runBody.slice(0, runBody.indexOf('\n\t/**\n\t * Persist results after a refresh.'));
+	assert.ok(
+		run.includes('const published = await this.publishRefreshResult(') && run.includes('if (!published) { return undefined; }'),
+		'_runRefreshCore() must publish through publishRefreshResult() and abandon the run when it declines',
 	);
 });
 

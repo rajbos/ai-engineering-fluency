@@ -8,7 +8,7 @@ import * as crypto from 'crypto';
 
 // Localization support (key-based resolver over package.nls*.json — see l10n.ts
 // for why vscode.l10n.t() cannot be used directly with key-based strings)
-import { t as l10nT } from './l10n';
+import { t as l10nT, resolvedLocale } from './l10n';
 const l10n = { t: l10nT };
 
 // --- JSON data files ---
@@ -456,6 +456,15 @@ export function isComputedStatsCurrent(
 	return stampedGeneration === currentGeneration;
 }
 
+/** The verified output of one refresh pass, as handed to publishRefreshResult(). */
+interface RefreshPublication {
+	detailedStats: DetailedStats;
+	dailyStats: DailyTokenStats[];
+	preloaded: SessionFilePreload[];
+	silent: boolean;
+	isLeader: boolean;
+}
+
 /** The minimum of a webview panel this module needs in order to post to it. */
 export interface PostablePanel { webview: { postMessage(msg: object): unknown } }
 
@@ -546,17 +555,21 @@ export function planEfficiencyRebuild(
 }
 
 /**
- * The document language for a webview's `<html lang>`, from `vscode.env.language`.
+ * The document language for a webview's `<html lang>`.
  *
- * Every view in this file renders localized text — a localized `<title>`, localized headings,
- * or a `localization` payload the view bundle renders from — so declaring `lang="en"` tells
- * assistive technology to announce that text with English pronunciation rules. Anything that
- * is not a plausible BCP-47 tag falls back to `en` rather than being interpolated into the
- * attribute, so an unexpected value cannot break out of the quotes.
+ * Every view in this file renders localized text — a localized `<title>`, localized headings, or a
+ * `localization` payload the view bundle renders from — so a hardcoded `lang="en"` tells assistive
+ * technology to announce translated text with English pronunciation rules.
+ *
+ * Derived from the bundle that actually serves those strings, not from `vscode.env.language`:
+ * `l10n.t()` falls back to the English bundle for every language without a
+ * `package.nls.<locale>.json`, so on a French or Brazilian-Portuguese install the rendered text is
+ * English and `lang="fr"` would be the same mismatch pointing the other way. `resolvedLocale()`
+ * returns a LOCALE_BUNDLES id or `en`, a closed set of compile-time constants, so the value is
+ * safe to interpolate into the quoted attribute.
  */
 export function webviewDocumentLanguage(vscodeLanguage: string | undefined): string {
-	const tag = (vscodeLanguage ?? '').trim();
-	return /^[A-Za-z]{1,8}(?:-[A-Za-z0-9]{1,8})*$/.test(tag) ? tag : 'en';
+	return resolvedLocale((vscodeLanguage ?? '').trim());
 }
 
 /**
@@ -4203,6 +4216,55 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._statsGeneration.detailed = originGeneration;
 	}
 
+	/**
+	 * Publishes one refresh's verified result, abandoning the sequence as soon as a cache clear
+	 * supersedes it.
+	 *
+	 * The generation is re-checked at every async boundary, not only on entry. Between the first
+	 * check and the last step this awaits calculateUsageAnalysisStats(), calculateMaturityScores()
+	 * and the insight pass — each long enough for a clearCache() to land — and everything after
+	 * such a bump (the Environmental panel, the persisted snapshot) would otherwise carry pre-clear
+	 * data that the clear waiting on this run is about to recompute anyway. What has already been
+	 * posted when a bump lands cannot be unposted, but every cache this writes is stamped with the
+	 * superseded generation, so no later read treats any of it as current.
+	 *
+	 * Returns false once superseded, so the caller reports the run as having published nothing.
+	 */
+	private async publishRefreshResult(result: RefreshPublication, startedAtGeneration: number): Promise<boolean> {
+		const { detailedStats, dailyStats, preloaded, silent, isLeader } = result;
+		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
+		// Set as soon as the verified result exists, before any of the (some awaited, some
+		// network-bound — see computeAndUploadFluencyScore below) publication steps that follow.
+		// renderInstantStatsFromCache() (if still in flight) checks this right before committing
+		// its own, older cache-only results — it must never see this as false once real data has
+		// already started being published, or it can overwrite an already-correct status bar.
+		this._hasCompletedRealRefresh = true;
+		this.lastDailyStats = dailyStats;
+		this._statsGeneration.daily = startedAtGeneration;
+		this.mergeIntoFullDailyStats(dailyStats, startedAtGeneration);
+		// Recorded *before* the panels publish, not after. _buildAnalysisUpdateData() and the
+		// initial Usage Analysis payload both read monthBillingGroupCosts through
+		// currentDetailedStats, and that accessor reads empty until this stamp lands — so
+		// publishing first dropped the Copilot Billing Coverage section from the very refresh
+		// that was holding the figure.
+		this.recordDetailedStats(detailedStats, startedAtGeneration);
+
+		this.updateStatusBarAndTooltip(detailedStats);
+		this.updateDetailsPanelIfOpen(detailedStats, silent);
+		this.updateChartPanelIfOpen(silent);
+		await this.updateAnalysisPanelIfOpen(silent, preloaded, startedAtGeneration);
+		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
+		await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);
+		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
+		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
+		await this.evaluateAndSurfaceInsights();
+		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
+
+		this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
+		this.persistRefreshResult(isLeader);
+		return true;
+	}
+
 	/** Core discover → parse → compute → render → persist pass for one refresh. */
 	private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {
 		this.log(isLeader ? 'Updating token stats (leader)...' : 'Updating token stats (follower)...');
@@ -4243,30 +4305,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.showLoadingTooltipForStep('computing', silent);
 
 		const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
-		if (this.isRefreshSuperseded(startedAtGeneration)) { return undefined; }
-		// Set as soon as the verified result exists, before any of the (some awaited, some
-		// network-bound — see computeAndUploadFluencyScore below) publication steps that follow.
-		// renderInstantStatsFromCache() (if still in flight) checks this right before committing
-		// its own, older cache-only results — it must never see this as false once real data has
-		// already started being published, or it can overwrite an already-correct status bar.
-		this._hasCompletedRealRefresh = true;
-		this.lastDailyStats = dailyStats;
-		this._statsGeneration.daily = startedAtGeneration;
-		this.mergeIntoFullDailyStats(dailyStats, startedAtGeneration);
-
-		this.updateStatusBarAndTooltip(detailedStats);
-
-		this.updateDetailsPanelIfOpen(detailedStats, silent);
-		this.updateChartPanelIfOpen(silent);
-		await this.updateAnalysisPanelIfOpen(silent, preloaded, startedAtGeneration);
-		await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);
-		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
-		await this.evaluateAndSurfaceInsights();
-
-		this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
-		this.recordDetailedStats(detailedStats, startedAtGeneration);
-
-		this.persistRefreshResult(isLeader);
+		const published = await this.publishRefreshResult(
+			{ detailedStats, dailyStats, preloaded, silent, isLeader }, startedAtGeneration,
+		);
+		if (!published) { return undefined; }
 
 		// Skip the one-time full-year backfill when this run's discovery can't be trusted to be
 		// complete — see isDiscoveryUntrustworthyForBackfill() for why. Leader-only: unlike the
@@ -9916,15 +9958,20 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		// would only guarantee the failure state on the way there.
 		//
 		// The generation is global, but this refresh is not: it invalidates usage-analysis
-		// state and nothing else. The daily and full-year caches are carried across the bump
-		// so they stay readable, because a bare bump silently truncated an open Chart. With
+		// state and nothing else. The detailed, daily and full-year caches are carried across the
+		// bump so they stay readable. Dropping the detailed one costs this panel's own Copilot
+		// Billing Coverage section — _buildAnalysisUpdateData() and the initial payload read
+		// monthBillingGroupCosts through currentDetailedStats — and a bare bump silently
+		// truncated an open Chart besides. With
 		// `currentFullDailyStats` reading stale, _runRefreshCore()'s backfill is still skipped
 		// (it skips whenever a chart panel is open), `mergeIntoFullDailyStats()` early-returns,
 		// and the chart then re-renders from the 30-day fallback — losing its week, month and
 		// all-history ranges after nothing more than a Usage Analysis refresh.
+		const detailedWasCurrent = isComputedStatsCurrent(this._statsGeneration.detailed, this._cacheGeneration);
 		const dailyWasCurrent = isComputedStatsCurrent(this._statsGeneration.daily, this._cacheGeneration);
 		const fullDailyWasCurrent = isComputedStatsCurrent(this._statsGeneration.fullDaily, this._cacheGeneration);
 		this._cacheGeneration++;
+		if (detailedWasCurrent) { this._statsGeneration.detailed = this._cacheGeneration; }
 		if (dailyWasCurrent) { this._statsGeneration.daily = this._cacheGeneration; }
 		if (fullDailyWasCurrent) { this._statsGeneration.fullDaily = this._cacheGeneration; }
 		await this.loadAnalysisStatsInBackground(this.analysisPanel);
