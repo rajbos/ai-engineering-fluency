@@ -18,7 +18,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import type { MemoryFileEntry, MemoryFilesAnalysis, MemoryFilesWorkspaceSummary } from './types';
+import type { MemoryFileEntry, MemoryFilesAnalysis, MemoryFilesAnalysisView, MemoryFilesWorkspaceSummary } from './types';
 import { parseWorkspaceStorageJsonFile } from './workspaceHelpers';
 import { getVSCodeUserPaths, getWSLWindowsPathsSync, isWSL } from './adapters/copilotChatAdapter';
 
@@ -283,5 +283,33 @@ export function analyzeMemoryFiles(
 		totalBytes: files.reduce((sum, f) => sum + f.sizeBytes, 0),
 		staleFileCount: files.filter(f => f.mtimeMs < staleThresholdMs).length,
 		largeFileCount: files.filter(f => f.sizeBytes > largeFileBytes).length,
+	};
+}
+
+/**
+ * Project a full {@link MemoryFilesAnalysis} down to the compact {@link MemoryFilesAnalysisView}
+ * the Usage Analysis webview actually renders: counts and rollup scalars, without the full
+ * `files` list or each workspace's `staleFiles`/`largestFile`/`oldestMtimeMs` (absolute paths,
+ * session IDs, per-file objects). Keeps the raw `analysis` available to the extension host
+ * (e.g. the insights engine) and the CLI, which still need the full per-file detail.
+ */
+export function toMemoryFilesAnalysisView(analysis: MemoryFilesAnalysis | null): MemoryFilesAnalysisView | null {
+	if (!analysis) { return null; }
+	return {
+		staleDays: analysis.staleDays,
+		largeFileBytes: analysis.largeFileBytes,
+		byWorkspace: analysis.byWorkspace.map(ws => ({
+			workspaceHash: ws.workspaceHash,
+			workspaceName: ws.workspaceName,
+			repoCount: ws.repoCount,
+			sessionCount: ws.sessionCount,
+			totalBytes: ws.totalBytes,
+			newestMtimeMs: ws.newestMtimeMs,
+			staleFileCount: ws.staleFiles.length,
+		})),
+		totalFiles: analysis.totalFiles,
+		totalBytes: analysis.totalBytes,
+		staleFileCount: analysis.staleFileCount,
+		largeFileCount: analysis.largeFileCount,
 	};
 }

@@ -79,6 +79,7 @@ import type {
   CorrectionSessionEntry,
   RepeatedTaskReport,
   MemoryFilesAnalysis,
+  MemoryFilesAnalysisView,
 } from '../../src/types';
 import {
 	ensureContextPressure,
@@ -122,6 +123,7 @@ import {
 import {
   discoverAllMemoryFiles as _discoverAllMemoryFiles,
   analyzeMemoryFiles as _analyzeMemoryFiles,
+  toMemoryFilesAnalysisView as _toMemoryFilesAnalysisView,
 } from '../../src/copilotMemoryFiles';
 
 /**
@@ -9183,7 +9185,7 @@ private computeFallbackDailyRollup(
 			correctionReport: analysisStats.correctionReport ?? null,
 			repeatedTasks: analysisStats.repeatedTasks ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
-			memoryFilesAnalysis: analysisStats.memoryFilesAnalysis ?? null,
+			memoryFilesAnalysis: _toMemoryFilesAnalysisView(analysisStats.memoryFilesAnalysis ?? null),
 			copilotApiBalance: this._buildCopilotApiBalance(),
 			monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
 			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
@@ -14298,7 +14300,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       insights: this.buildCurrentInsights(stats),
       correctionReport: stats.correctionReport ?? null,
       curationAnalysis: stats.curationAnalysis ?? null,
-      memoryFilesAnalysis: stats.memoryFilesAnalysis ?? null,
+      memoryFilesAnalysis: _toMemoryFilesAnalysisView(stats.memoryFilesAnalysis ?? null),
       sessionColumnSettings,
       copilotApiBalance: this._buildCopilotApiBalance(),
       monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,

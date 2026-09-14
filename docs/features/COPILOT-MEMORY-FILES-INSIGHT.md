@@ -86,22 +86,32 @@ and `analyzeMemoryFiles()` (metadata-only, default thresholds) once per stats
 build and populates `UsageAnalysisStats.memoryFilesAnalysis`, threaded through
 both `InsightContext` builders (toast/badge path and the Insights-tab path) and
 all three webview payload builders (silent refresh, full refresh, initial
-load) alongside `curationAnalysis`. The webview (`webview/usage/main.ts`)
-sanitizes and renders it as a "Copilot Memory Files" section on the Tools tab,
-right after Tool Curation, listing per-workspace file counts/size/staleness —
-following the same persist-across-refresh caching pattern already used for
+load) alongside `curationAnalysis`. The underlying scan is a synchronous
+`readdirSync`/`statSync` walk, so `computeMemoryFilesAnalysis()` throttles it
+to at most once per `MEMORY_FILES_SCAN_TTL_MS` (5 minutes) via the pure
+`isMemoryFilesScanFresh()` helper, reusing the cached result across recomputes
+in between; an explicit Usage Analysis refresh or `clearCache()` resets the
+scan timestamp so the user always gets current data on demand. The two
+webview payload builders never send the full `MemoryFilesAnalysis` (which
+carries every file's absolute path and session ID) — `toMemoryFilesAnalysisView()`
+projects it down to a compact `MemoryFilesAnalysisView` (counts/rollup scalars
+only) first, keeping the full analysis for the host-side insight context and
+the CLI. The webview (`webview/usage/main.ts`) sanitizes and renders that view
+as a "Copilot Memory Files" section on the Tools tab, right after Tool
+Curation, listing per-workspace file counts/size/staleness — following the
+same persist-across-refresh caching pattern already used for
 `curationAnalysis`.
 
 ## What's implemented
 
 | Piece | Location |
 |---|---|
-| Discovery + analysis (pure, shared) | `src/copilotMemoryFiles.ts` — `discoverAllMemoryFiles()`, `discoverMemoryFilesInUserPath()`, `analyzeMemoryFiles()`, `decodeSessionFolderName()` |
-| Types | `src/types.ts` — `MemoryFileEntry`, `MemoryFilesWorkspaceSummary`, `MemoryFilesAnalysis` |
+| Discovery + analysis (pure, shared) | `src/copilotMemoryFiles.ts` — `discoverAllMemoryFiles()`, `discoverMemoryFilesInUserPath()`, `analyzeMemoryFiles()`, `toMemoryFilesAnalysisView()`, `decodeSessionFolderName()` |
+| Types | `src/types.ts` — `MemoryFileEntry`, `MemoryFilesWorkspaceSummary`, `MemoryFilesAnalysis`, `MemoryFilesAnalysisView` (compact webview projection) |
 | Unit tests | `vscode-extension/test/unit/copilotMemoryFiles.test.ts` |
 | Insight card | `vscode-extension/src/insightsEngine.ts` — id `stale-memory-files`, fires when `InsightContext.memoryFilesAnalysis` has stale or oversized files; tests in `insightsEngine.test.ts` |
 | CLI command | `cli/src/commands/memory-files.ts` — `copilot-token-tracker memory-files [--json] [--stale-days] [--large-kb]`, registered in `cli/src/cli.ts` |
-| Runtime wiring | `vscode-extension/src/extension.ts` — `computeMemoryFilesAnalysis()`, threaded into both insight-context builders and all `updateStats`/initial-payload builders |
+| Runtime wiring | `vscode-extension/src/extension.ts` — `computeMemoryFilesAnalysis()` (TTL-cached via `isMemoryFilesScanFresh()`), threaded into both insight-context builders and all `updateStats`/initial-payload builders (projected to `MemoryFilesAnalysisView` before being sent) |
 | Tools-tab UI | `vscode-extension/src/webview/usage/main.ts` — `buildMemoryFilesSectionHtml()`, `_sanitizeMemoryFilesAnalysis()`, `#section-memory-files` |
 
 The CLI command scans this machine's real `workspaceStorage`/`globalStorage`

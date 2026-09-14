@@ -16,7 +16,7 @@ import {
 // Imported from the shared contract rather than re-declared locally, so a shape
 // change in src/types.ts surfaces here as a type error instead of silently
 // drifting out of sync with what the extension host actually sends.
-import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysis } from '../../../../src/types';
+import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysisView } from '../../../../src/types';
 import { CONTEXT_NEAR_LIMIT_RATIO } from '../../../../src/types';
 import { getSessionContextFillPercent, isSessionNearContextLimit } from '../../../../src/utils/contextFill';
 
@@ -220,8 +220,8 @@ type UsageAnalysisStats = {
 	/** Repeated-task candidates (skill suggestions). Null when no repeated task was found. */
 	repeatedTasks?: RepeatedTaskReport | null;
 	curationAnalysis?: ToolCurationAnalysis | null;
-	/** Copilot memory-files hygiene analysis (metadata-only: counts, staleness, size). Null when none found. */
-	memoryFilesAnalysis?: MemoryFilesAnalysis | null;
+	/** Compact projection of the memory-files hygiene analysis (counts/rollup scalars only — no per-file paths). Null when none found. */
+	memoryFilesAnalysis?: MemoryFilesAnalysisView | null;
 	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
 	sessionColumnSettings?: { enabledColumns?: string[] };
 	/** Copilot API quota balance snapshot (available when the extension has fetched quota data). */
@@ -443,7 +443,7 @@ let currentCorrectionReport: CorrectionReport | null | undefined = undefined;
 // when a periodic updateStats message omits curationAnalysis.
 let currentCurationAnalysis: ToolCurationAnalysis | null = null;
 // Same rationale for the memory-files hygiene analysis.
-let currentMemoryFilesAnalysis: MemoryFilesAnalysis | null = null;
+let currentMemoryFilesAnalysis: MemoryFilesAnalysisView | null = null;
 
 type WorktreeResult = {
 	path: string;
@@ -1922,16 +1922,23 @@ function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null 
 	};
 }
 
-/** Normalize an optional memory-files hygiene analysis (metadata-only) so rendering never throws on a partial payload. */
-function _sanitizeMemoryFilesAnalysis(raw: unknown): MemoryFilesAnalysis | null {
+/** Normalize an optional memory-files hygiene analysis (compact webview projection: counts/rollup scalars only) so rendering never throws on a partial payload. */
+function _sanitizeMemoryFilesAnalysis(raw: unknown): MemoryFilesAnalysisView | null {
 	if (!raw || typeof raw !== 'object') { return null; }
-	const ma = raw as Partial<MemoryFilesAnalysis>;
+	const ma = raw as Partial<MemoryFilesAnalysisView>;
 	if (!Array.isArray(ma.byWorkspace)) { return null; }
 	return {
 		staleDays: typeof ma.staleDays === 'number' ? ma.staleDays : 90,
 		largeFileBytes: typeof ma.largeFileBytes === 'number' ? ma.largeFileBytes : 10 * 1024,
-		files: Array.isArray(ma.files) ? ma.files : [],
-		byWorkspace: ma.byWorkspace,
+		byWorkspace: ma.byWorkspace.map(ws => ({
+			workspaceHash: ws?.workspaceHash,
+			workspaceName: ws?.workspaceName,
+			repoCount: typeof ws?.repoCount === 'number' ? ws.repoCount : 0,
+			sessionCount: typeof ws?.sessionCount === 'number' ? ws.sessionCount : 0,
+			totalBytes: typeof ws?.totalBytes === 'number' ? ws.totalBytes : 0,
+			newestMtimeMs: typeof ws?.newestMtimeMs === 'number' ? ws.newestMtimeMs : null,
+			staleFileCount: typeof ws?.staleFileCount === 'number' ? ws.staleFileCount : 0,
+		})),
 		totalFiles: typeof ma.totalFiles === 'number' ? ma.totalFiles : 0,
 		totalBytes: typeof ma.totalBytes === 'number' ? ma.totalBytes : 0,
 		staleFileCount: typeof ma.staleFileCount === 'number' ? ma.staleFileCount : 0,
@@ -3460,7 +3467,7 @@ function buildBuiltinToolsHtml(builtinTools: AvailableToolEntry[], bloat: ToolCu
 	</details>`;
 }
 
-function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysis | null | undefined): string {
+function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysisView | null | undefined): string {
 	try {
 		if (!analysis || analysis.totalFiles === 0) { return ''; }
 
@@ -3469,7 +3476,7 @@ function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysis | null | unde
 			.sort((a, b) => b.totalBytes - a.totalBytes)
 			.map(ws => {
 				const name = escapeHtml(ws.workspaceName ?? ws.workspaceHash ?? localize('memoryFiles.unknownWorkspace'));
-				const staleCount = ws.staleFiles.length;
+				const staleCount = ws.staleFileCount;
 				const newest = ws.newestMtimeMs ? formatAbsoluteDate(new Date(ws.newestMtimeMs).toISOString()) : '—';
 				return `<tr style="border-bottom:1px solid var(--border-color);">
 					<td style="padding:5px 8px; color:var(--text-primary);">${name}</td>

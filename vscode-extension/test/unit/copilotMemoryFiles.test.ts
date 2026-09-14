@@ -9,6 +9,7 @@ import {
 	discoverMemoryFilesInUserPath,
 	discoverAllMemoryFiles,
 	analyzeMemoryFiles,
+	toMemoryFilesAnalysisView,
 } from '../../../src/copilotMemoryFiles';
 
 // ---------------------------------------------------------------------------
@@ -220,4 +221,66 @@ test('analyzeMemoryFiles groups the user (global) scope separately from workspac
 	assert.equal(analysis.byWorkspace.length, 1);
 	assert.equal(analysis.byWorkspace[0].workspaceName, 'User (global)');
 	assert.equal(analysis.byWorkspace[0].workspaceHash, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// toMemoryFilesAnalysisView — compact webview projection
+// ---------------------------------------------------------------------------
+
+test('toMemoryFilesAnalysisView returns null for a null analysis', () => {
+	assert.equal(toMemoryFilesAnalysisView(null), null);
+});
+
+test('toMemoryFilesAnalysisView drops per-file detail (files, staleFiles entries, largestFile, oldestMtimeMs) but keeps every scalar and count the webview renders', () => {
+	const userPath = mkTmpDir('memowl-user-');
+	const hash = 'view-projection-hash';
+
+	writeFile(
+		path.join(userPath, 'workspaceStorage', hash, 'GitHub.copilot-chat', 'memory-tool', 'memories', 'repo', 'fresh.md'),
+		'# Fresh',
+		1,
+	);
+	writeFile(
+		path.join(userPath, 'workspaceStorage', hash, 'GitHub.copilot-chat', 'memory-tool', 'memories', 'repo', 'stale.md'),
+		'# Stale',
+		200,
+	);
+
+	const files = discoverMemoryFilesInUserPath(userPath);
+	const analysis = analyzeMemoryFiles(files, { staleDays: 90, largeFileBytes: 10 * 1024 });
+	const view = toMemoryFilesAnalysisView(analysis);
+
+	assert.ok(view);
+	// Scalars the webview table/summary line reads must survive the projection unchanged.
+	assert.equal(view!.staleDays, analysis.staleDays);
+	assert.equal(view!.largeFileBytes, analysis.largeFileBytes);
+	assert.equal(view!.totalFiles, analysis.totalFiles);
+	assert.equal(view!.totalBytes, analysis.totalBytes);
+	assert.equal(view!.staleFileCount, analysis.staleFileCount);
+	assert.equal(view!.largeFileCount, analysis.largeFileCount);
+
+	// Never send the full per-file entries (absolute paths, session IDs) to the webview.
+	assert.equal((view as unknown as { files?: unknown }).files, undefined);
+
+	assert.equal(view!.byWorkspace.length, 1);
+	const [ws] = view!.byWorkspace;
+	const [rawWs] = analysis.byWorkspace;
+	assert.equal(ws.workspaceHash, rawWs.workspaceHash);
+	assert.equal(ws.workspaceName, rawWs.workspaceName);
+	assert.equal(ws.repoCount, rawWs.repoCount);
+	assert.equal(ws.sessionCount, rawWs.sessionCount);
+	assert.equal(ws.totalBytes, rawWs.totalBytes);
+	assert.equal(ws.newestMtimeMs, rawWs.newestMtimeMs);
+	// The count the table needs, projected from the full staleFiles array without keeping it.
+	assert.equal(ws.staleFileCount, rawWs.staleFiles.length);
+	assert.equal((ws as unknown as { staleFiles?: unknown }).staleFiles, undefined);
+	assert.equal((ws as unknown as { largestFile?: unknown }).largestFile, undefined);
+	assert.equal((ws as unknown as { oldestMtimeMs?: unknown }).oldestMtimeMs, undefined);
+});
+
+test('toMemoryFilesAnalysisView handles an analysis with no workspaces', () => {
+	const view = toMemoryFilesAnalysisView(analyzeMemoryFiles([]));
+	assert.ok(view);
+	assert.deepEqual(view!.byWorkspace, []);
+	assert.equal(view!.totalFiles, 0);
 });

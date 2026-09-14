@@ -1519,6 +1519,39 @@ export interface MemoryFilesAnalysis {
 }
 
 /**
+ * Compact per-workspace rollup for {@link MemoryFilesAnalysisView} — the counts/rollup scalars
+ * the Usage Analysis webview table renders, without the per-file `staleFiles`/`largestFile`
+ * entries (absolute paths, session IDs) `MemoryFilesWorkspaceSummary` carries for the CLI/host.
+ */
+export interface MemoryFilesWorkspaceViewSummary {
+  workspaceHash?: string;
+  workspaceName?: string;
+  repoCount: number;
+  sessionCount: number;
+  totalBytes: number;
+  newestMtimeMs: number | null;
+  /** `MemoryFilesWorkspaceSummary.staleFiles.length` — the webview table only ever shows the count. */
+  staleFileCount: number;
+}
+
+/**
+ * Compact projection of {@link MemoryFilesAnalysis} sent to the Usage Analysis webview: counts
+ * and rollup scalars only. Omits the full `files` list and each workspace's `staleFiles`/
+ * `largestFile`/`oldestMtimeMs` — metadata (absolute paths, session IDs, per-file objects) the
+ * webview UI never reads, but which inflates the IPC/HTML payload for a large memory store.
+ * Produced by `toMemoryFilesAnalysisView()` in the VS Code extension host.
+ */
+export interface MemoryFilesAnalysisView {
+  staleDays: number;
+  largeFileBytes: number;
+  byWorkspace: MemoryFilesWorkspaceViewSummary[];
+  totalFiles: number;
+  totalBytes: number;
+  staleFileCount: number;
+  largeFileCount: number;
+}
+
+/**
  * One conversation returned by Mistral's (beta) Agents `/v1/conversations` listing.
  * The Mistral Agents/Conversations API is in beta — fields are best-effort and may change.
  * Only fields the extension actually consumes are typed; the raw `metadata` object is
