@@ -9129,16 +9129,26 @@ private computeFallbackDailyRollup(
 			this.statusBarItem.tooltip = l10n.t('statusBar.loadingInPanel');
 			panel.webview.html = this.getLoadingHtml(panel.webview, this._updateTokenStatsStartedAt ?? Date.now());
 
+			const startedAtGeneration = this._cacheGeneration;
 			stats = await this.updateTokenStats();
 
-			this._detailsPanelIsLoading = false;
-			this._refreshLoadingPanels.delete(panel);
 			// this.detailsPanel !== panel catches a close-then-reopen during the await above:
 			// this call's result belongs to a panel that's gone, and the replacement's own
 			// showDetails() call owns rendering it — nothing to do here either way.
 			if (this.detailsPanel !== panel) {
 				return;
 			}
+			if (!stats && this.isRefreshSuperseded(startedAtGeneration)) {
+				// A cache clear invalidated this run while it was in flight, not a genuine
+				// failure — whatever triggered the clear already starts a fresh refresh, which
+				// will call updateDetailsPanelIfOpen() and render real content here once it
+				// completes. Stay on the loading screen (still registered in
+				// _refreshLoadingPanels, so its progress keeps landing) instead of flashing an
+				// error page for a run that was deliberately discarded, not failed.
+				return;
+			}
+			this._detailsPanelIsLoading = false;
+			this._refreshLoadingPanels.delete(panel);
 			if (!stats) {
 				panel.webview.html = this.getRefreshFailedHtml(panel.webview);
 				return;
@@ -9213,9 +9223,16 @@ private computeFallbackDailyRollup(
 			panel.webview.html = this.getLoadingHtml(panel.webview, this._updateTokenStatsStartedAt ?? Date.now());
 		}
 		void (async () => {
+			const startedAtGeneration = this._cacheGeneration;
 			const stats = this.currentDetailedStats ?? await this.updateTokenStats();
-			this._refreshLoadingPanels.delete(panel);
 			if (this.environmentalPanel !== panel) { return; }
+			if (!stats && this.isRefreshSuperseded(startedAtGeneration)) {
+				// Same reasoning as showDetails(): a cache clear discarded this run, not a
+				// genuine failure. Stay on the loading screen (still registered in
+				// _refreshLoadingPanels) for the fresh refresh already under way to render into.
+				return;
+			}
+			this._refreshLoadingPanels.delete(panel);
 			if (!stats) {
 				panel.webview.html = this.getRefreshFailedHtml(panel.webview);
 				return;

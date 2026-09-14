@@ -272,13 +272,15 @@ test('wiring: every computed-stat cache is stamped with the generation its build
 	]) {
 		assert.ok(EXTENSION_SRC.includes(marker), `missing generation stamp: ${marker}`);
 	}
-	// Seven captures: the six producers of a stamped cache, plus loadAnalysisStatsInBackground(),
-	// which stamps nothing but posts its walk's result straight to the panel and so needs the same
-	// capture to gate on. The count is the tripwire — a new one added by re-reading the live
+	// Nine captures: the six producers of a stamped cache, loadAnalysisStatsInBackground() (which
+	// stamps nothing but posts its walk's result straight to the panel and so needs the same
+	// capture to gate on), and showDetails()/showEnvironmental() (which gate whether a failed
+	// updateTokenStats() means a genuine error or a discarded, superseded run — see
+	// isRefreshSuperseded()). The count is the tripwire — a new one added by re-reading the live
 	// generation at write time is the bug this whole scheme exists for.
 	assert.equal(
 		EXTENSION_SRC.split('const startedAtGeneration = ').length - 1,
-		7,
+		9,
 		'every producer of a stamped cache or a gated publication must capture before its first await',
 	);
 	// A refresh's results belong to the generation its *inputs* were gathered in, not the one in

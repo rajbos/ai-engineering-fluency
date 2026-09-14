@@ -261,11 +261,18 @@ export class CacheManager {
 
 	/**
 	 * Reset checkpoint counters (call this at the start of a new refresh cycle).
+	 *
+	 * Deliberately does not touch checkpointInProgress. A checkpoint from the previous cycle can
+	 * still be mid-flight (its own saveCacheToStorage() awaiting) when this runs — forcing the
+	 * flag false here would let maybeCheckpointCache() start a second, overlapping checkpoint
+	 * before the first one's own `.finally()` gets a chance to clear it, defeating the "at most
+	 * one checkpoint at a time" invariant this flag exists for. checkpointCacheInternal()'s
+	 * `.finally()` always clears it once that save actually settles, so there is nothing for this
+	 * method to do here.
 	 */
 	resetCheckpointCounters(): void {
 		this.lastCheckpointTime = Date.now();
 		this.entriesSinceLastCheckpoint = 0;
-		this.checkpointInProgress = false;
 		this.checkpointCounterGeneration++;
 	}
 
