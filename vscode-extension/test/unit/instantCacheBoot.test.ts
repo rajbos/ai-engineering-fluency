@@ -422,10 +422,18 @@ test('_runRefreshCore() skips the one-time full-year chart backfill when discove
 test('renderInstantStatsFromCache() never overwrites a real refresh that already completed while it was still computing', () => {
 	const instantBody = extractBracesBlock(EXTENSION_SRC, 'private async renderInstantStatsFromCache(): Promise<void> {');
 	const calcIndex = instantBody.indexOf('await this.calculateDetailedStats(undefined, preloaded)');
-	const guardIndex = instantBody.indexOf('if (this._hasCompletedRealRefresh || this._disposed || this.isSampleDataModeActive()) { return; }');
-	const commitIndex = instantBody.indexOf('this.lastDetailedStats = stats;');
+	const guardIndex = instantBody.indexOf('if (!this.canPublishInstantPaint(startedAtGeneration)) { return; }');
+	const commitIndex = instantBody.indexOf('this.recordDetailedStats(stats, startedAtGeneration);');
 	assert.ok(calcIndex !== -1 && guardIndex !== -1 && commitIndex !== -1 && calcIndex < guardIndex && guardIndex < commitIndex,
-		'renderInstantStatsFromCache() must check _hasCompletedRealRefresh, _disposed (dispose() can run during that same await), AND isSampleDataModeActive() (a regression run could start during that same, potentially slow await) after awaiting calculateDetailedStats but before committing its own results — otherwise a real refresh that finishes first, a window that closed mid-await, or a regression run that started mid-await can be silently overwritten by/resumed into/contaminated by this slower, stale cache-only computation');
+		'renderInstantStatsFromCache() must re-check whether it may still publish after awaiting calculateDetailedStats and before committing its own results — otherwise a real refresh that finishes first, a window that closed mid-await, or a regression run that started mid-await can be silently overwritten by/resumed into/contaminated by this slower, stale cache-only computation');
+
+	// The checks themselves live in canPublishInstantPaint() (extracted so the added generation
+	// check did not push this method over the complexity ceiling), so assert them there.
+	const publishGuard = extractBracesBlock(EXTENSION_SRC, 'private canPublishInstantPaint(startedAtGeneration: number): boolean {');
+	assert.ok(publishGuard.includes('if (this._hasCompletedRealRefresh || this._disposed || this.isSampleDataModeActive()) { return false; }'),
+		'canPublishInstantPaint() must check _hasCompletedRealRefresh, _disposed (dispose() can run during that same await), AND isSampleDataModeActive() (a regression run could start during that same, potentially slow await)');
+	assert.ok(publishGuard.includes('isComputedStatsCurrent(startedAtGeneration, this._cacheGeneration)'),
+		'canPublishInstantPaint() must also reject a paint the caches were cleared under — _hasCompletedRealRefresh is still false while the clear\'s own refresh is running');
 
 	// The flag must be set as soon as _runRefreshCore()'s own verified result exists — right after
 	// its own calculateDetailedStats() resolves — and specifically BEFORE updateStatusBarAndTooltip()

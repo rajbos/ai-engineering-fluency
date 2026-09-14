@@ -7,6 +7,9 @@ import {
 	chainBuild,
 	isComputedStatsCurrent,
 	makeLivePanelSink,
+	mergeDailyStatsIntoFullYear,
+	planEfficiencyRebuild,
+	webviewDocumentLanguage,
 	type PostablePanel,
 } from '../../src/extension';
 
@@ -227,6 +230,7 @@ test('wiring: every computed-stat cache is stamped with the generation its build
 	// Captured before the first await, never re-read at the write — re-reading would stamp a
 	// pre-clear result with the *post*-clear generation and make it look current.
 	for (const marker of [
+		'this._statsGeneration.detailed = originGeneration;',
 		'this._statsGeneration.daily = startedAtGeneration;',
 		'this._statsGeneration.fullDaily = startedAtGeneration;',
 		'this._statsGeneration.usage = startedAtGeneration;',
@@ -257,8 +261,33 @@ test('wiring: every computed-stat cache is stamped with the generation its build
 	);
 });
 
+test('wiring: the full-year merge is handed its input\'s origin generation, not the live one', () => {
+	// The guard is only a guard if the caller passes the generation its *rows* came from. Passing
+	// this._cacheGeneration would make the check trivially true at every call and restore exactly
+	// the bug: a pre-clear refresh splicing its rows into a post-clear, current-stamped year.
+	assert.ok(
+		EXTENSION_SRC.includes('private mergeIntoFullDailyStats(dailyStats: DailyTokenStats[], originGeneration: number): void {'),
+		'mergeIntoFullDailyStats() must take the incoming rows\' origin generation',
+	);
+	assert.equal(
+		EXTENSION_SRC.split('this.mergeIntoFullDailyStats(dailyStats, startedAtGeneration);').length - 1,
+		2,
+		'both callers (the instant paint and the refresh) must pass their own pre-await capture',
+	);
+	assert.equal(
+		EXTENSION_SRC.split('this.mergeIntoFullDailyStats(').length - 1,
+		2,
+		'no third caller may merge without an origin generation',
+	);
+	assert.ok(
+		!/mergeIntoFullDailyStats\([^)]*this\._cacheGeneration/.test(EXTENSION_SRC),
+		'a caller must never re-read the live generation as its input\'s origin — that is the bug',
+	);
+});
+
 test('wiring: every computed-stat cache is reachable only through a generation-guarded accessor', () => {
 	for (const [accessor, key, field] of [
+		['currentDetailedStats', 'detailed', 'lastDetailedStats'],
 		['currentDailyStats', 'daily', 'lastDailyStats'],
 		['currentFullDailyStats', 'fullDaily', 'lastFullDailyStats'],
 		['currentUsageAnalysisStats', 'usage', 'lastUsageAnalysisStats'],
@@ -289,9 +318,19 @@ test('wiring: the Efficiency sink and build queue use the tested helpers', () =>
 		5,
 		'each Efficiency render path must keep its own panel-identity check',
 	);
+	// The build is wrapped rather than passed straight through, so the queue can tell a build that
+	// has not started yet (and will therefore read the live generation) from one already running.
 	assert.ok(
-		EXTENSION_SRC.includes('const { result, chain } = chainBuild(this._efficiencyBuildChain, build);'),
+		/const \{ result, chain \} = chainBuild\(this\._efficiencyBuildChain, \(\) => \{\s*this\._efficiencyBuildsQueued--;\s*return build\(\);\s*\}\);/
+			.test(EXTENSION_SRC),
 		'runEfficiencyBuild() must delegate to the tested serialization helper',
+	);
+	// The decrement has to be the last thing before build() runs: every caller captures
+	// _cacheGeneration as its callback's first statement, and an await in between would let a
+	// clear land after the count said a build would still see it.
+	assert.ok(
+		EXTENSION_SRC.includes('this._efficiencyBuildsQueued++;'),
+		'runEfficiencyBuild() must count the build from the moment it is queued',
 	);
 	// The caller's promise and the queue's chain must not be the same object: the chain has to
 	// absorb failures so one failed build cannot wedge every build queued after it.
@@ -306,7 +345,10 @@ test('wiring: the raw computed-stat fields are never read outside their accessor
 	// raw field must be an assignment to it or the single read inside its own accessor — anything
 	// else is a consumer silently opted out of the generation check, which is how this guard was
 	// half-applied the first time.
-	for (const field of ['lastDailyStats', 'lastFullDailyStats', 'lastUsageAnalysisStats', 'lastEfficiencySessionInputs']) {
+	for (const field of [
+		'lastDetailedStats', 'lastDailyStats', 'lastFullDailyStats',
+		'lastUsageAnalysisStats', 'lastEfficiencySessionInputs',
+	]) {
 		const offenders = EXTENSION_SRC.split('\n')
 			.map((line, i) => ({ line: line.trim(), no: i + 1 }))
 			.filter(({ line }) => line.includes(`this.${field}`))
@@ -364,9 +406,22 @@ test('wiring: a cache invalidation queues at most one automatic Efficiency rebui
 		'the automatic rebuild must go through a single coalescing entry point',
 	);
 	assert.ok(
-		EXTENSION_SRC.includes('if (this._efficiencyRebuildRequestedFor === this._cacheGeneration) { return; }')
+		EXTENSION_SRC.includes('const plan = planEfficiencyRebuild(')
+		&& EXTENSION_SRC.includes("if (plan === 'already-requested') { return; }")
 		&& EXTENSION_SRC.includes('this._efficiencyRebuildRequestedFor = this._cacheGeneration;'),
 		'it must record the generation it requested for, so a second caller at the same generation no-ops',
+	);
+	// The queued-build arm must mark the invalidation answered too, or the *next* caller at this
+	// same generation walks straight past 'already-requested' and queues the second walk anyway.
+	assert.ok(
+		EXTENSION_SRC.indexOf('this._efficiencyRebuildRequestedFor = this._cacheGeneration;')
+		< EXTENSION_SRC.indexOf("if (plan === 'coalesce-onto-queued') {"),
+		'the requested-for stamp must be recorded before the coalescing arm returns',
+	);
+	assert.ok(
+		EXTENSION_SRC.includes('this._efficiencyBuildsQueued++;')
+		&& EXTENSION_SRC.includes('this._efficiencyBuildsQueued--;'),
+		'runEfficiencyBuild() must track builds that are queued but have not started yet',
 	);
 	// Exactly one caller may start a rebuild directly: refreshEfficiencyPanel() is also the panel's
 	// own Refresh button, which must never be coalesced away.
@@ -374,5 +429,259 @@ test('wiring: a cache invalidation queues at most one automatic Efficiency rebui
 		EXTENSION_SRC.split('void this.refreshEfficiencyPanel()').length - 1,
 		1,
 		'both automatic triggers must route through requestEfficiencyRebuild(), not call the refresh directly',
+	);
+});
+
+// ---------------------------------------------------------------------------
+// mergeDailyStatsIntoFullYear — the destination's stamp is not enough. The rows
+// being merged in carry a generation of their own, and merging stale rows into a
+// current-stamped array is worse than no guard: it certifies the mixture.
+// ---------------------------------------------------------------------------
+
+const day = (date: string, tokens: number) => ({ date, tokens }) as never;
+
+test('mergeDailyStatsIntoFullYear: merges current rows by date and keeps the result sorted', () => {
+	const merged = mergeDailyStatsIntoFullYear(
+		[day('2026-01-01', 1), day('2026-01-03', 3)],
+		[day('2026-01-03', 30), day('2026-01-02', 20)],
+		4, 4,
+	);
+	assert.deepEqual(
+		merged?.map((d: { date: string; tokens: number }) => [d.date, d.tokens]),
+		[['2026-01-01', 1], ['2026-01-02', 20], ['2026-01-03', 30]],
+		'incoming rows overwrite the same date and the array stays date-ordered',
+	);
+});
+
+test('mergeDailyStatsIntoFullYear: nothing to merge into is not a merge', () => {
+	assert.equal(mergeDailyStatsIntoFullYear(undefined, [day('2026-01-01', 1)], 4, 4), undefined);
+});
+
+test('mergeDailyStatsIntoFullYear: rows older than the live generation are refused', () => {
+	// The exact sequence the guard exists for. A refresh starts at generation 4; clearCache()
+	// bumps to 5 and a post-clear build repopulates the full year at 5, so the *destination* is
+	// legitimately current. The pre-clear refresh then arrives with its own 30-day rows.
+	const postClearYear = [day('2026-01-01', 100), day('2026-01-02', 200)];
+	const preClearRows = [day('2026-01-02', 2), day('2026-01-09', 9)];
+
+	assert.equal(
+		mergeDailyStatsIntoFullYear(postClearYear, preClearRows, 4, 5),
+		undefined,
+		'a merge whose input predates the destination must be refused, not spliced in',
+	);
+	// Same inputs, same generation: this is the ordinary case and must still merge, or the guard
+	// would have broken the merge instead of the corruption.
+	assert.ok(mergeDailyStatsIntoFullYear(postClearYear, preClearRows, 5, 5));
+});
+
+// ---------------------------------------------------------------------------
+// planEfficiencyRebuild — `requestedFor` alone cannot see the build queue, so a
+// clear landing while a build is queued-but-not-started costs a second full walk.
+// ---------------------------------------------------------------------------
+
+test('planEfficiencyRebuild: a fresh invalidation with an idle queue starts a rebuild', () => {
+	assert.equal(planEfficiencyRebuild(undefined, 0, 0), 'start');
+	assert.equal(planEfficiencyRebuild(3, 4, 0), 'start');
+});
+
+test('planEfficiencyRebuild: a second request at the same generation no-ops', () => {
+	assert.equal(planEfficiencyRebuild(4, 4, 0), 'already-requested');
+	// Even with a build queued: the first request already decided what to do about this clear.
+	assert.equal(planEfficiencyRebuild(4, 4, 1), 'already-requested');
+});
+
+test('planEfficiencyRebuild: a queued build satisfies the invalidation instead of a second walk', () => {
+	// Close/reopen queues an initial build; clearCache() then bumps the generation and asks for a
+	// rebuild. The queued build captures the live generation when it starts, so it already
+	// produces post-clear data — queuing a rebuild behind it walks the full year twice for one clear.
+	assert.equal(planEfficiencyRebuild(undefined, 5, 1), 'coalesce-onto-queued');
+	assert.equal(planEfficiencyRebuild(4, 5, 2), 'coalesce-onto-queued');
+});
+
+test('planEfficiencyRebuild: a build that is already running does not satisfy it', () => {
+	// runEfficiencyBuild() decrements the count as the build starts, precisely because a running
+	// build captured an older generation and its payload will be discarded by
+	// recordEfficiencyPayload(). Only a not-yet-started build is going to read the live one.
+	assert.equal(planEfficiencyRebuild(undefined, 5, 0), 'start');
+});
+
+// ---------------------------------------------------------------------------
+// webviewDocumentLanguage — every view in extension.ts renders localized text, so
+// a hardcoded lang="en" has assistive technology announce it as English.
+// ---------------------------------------------------------------------------
+
+test('webviewDocumentLanguage: passes through a real VS Code locale', () => {
+	assert.equal(webviewDocumentLanguage('en'), 'en');
+	assert.equal(webviewDocumentLanguage('zh-cn'), 'zh-cn');
+	assert.equal(webviewDocumentLanguage('pt-BR'), 'pt-BR');
+});
+
+test('webviewDocumentLanguage: falls back to en for a missing or empty locale', () => {
+	assert.equal(webviewDocumentLanguage(undefined), 'en');
+	assert.equal(webviewDocumentLanguage(''), 'en');
+	assert.equal(webviewDocumentLanguage('   '), 'en');
+});
+
+test('webviewDocumentLanguage: anything that is not a language tag cannot reach the attribute', () => {
+	// The value is interpolated into a double-quoted HTML attribute, so a non-tag must not be
+	// passed through at all rather than relying on it never containing a quote.
+	assert.equal(webviewDocumentLanguage('en" onload="alert(1)'), 'en');
+	assert.equal(webviewDocumentLanguage('en><script>'), 'en');
+	assert.equal(webviewDocumentLanguage('en_US'), 'en', 'underscores are not BCP-47 separators');
+});
+
+// ---------------------------------------------------------------------------
+// Wiring for the publication gate. The stamps make a later *read* of a
+// superseded result recompute; they do nothing about the run that produced it
+// publishing straight to the panels.
+// ---------------------------------------------------------------------------
+
+test('wiring: a refresh superseded by a clear publishes nothing at all', () => {
+	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async _runRefreshCore('));
+	const core = body.slice(0, body.indexOf('\n\t/**\n\t * Persist results after a refresh.'));
+
+	const gateAt = core.indexOf('if (this.isRefreshSuperseded(startedAtGeneration)) { return undefined; }');
+	assert.ok(gateAt !== -1, '_runRefreshCore() must gate on the generation its inputs were gathered in');
+
+	// Everything that leaves this function — the status bar, the four panel publications, the
+	// persisted snapshot — must sit behind the gate, not merely the cache stamps.
+	for (const published of [
+		'this._hasCompletedRealRefresh = true;',
+		'this.updateStatusBarAndTooltip(detailedStats);',
+		'this.updateDetailsPanelIfOpen(detailedStats, silent);',
+		'await this.updateAnalysisPanelIfOpen(silent, preloaded, startedAtGeneration);',
+		'this.updateEnvironmentalPanelIfOpen(detailedStats, silent);',
+		'this.recordDetailedStats(detailedStats, startedAtGeneration);',
+		'this.persistRefreshResult(isLeader);',
+	]) {
+		const at = core.indexOf(published);
+		assert.ok(at !== -1, `_runRefreshCore() no longer contains: ${published}`);
+		assert.ok(at > gateAt, `${published} must come after the superseded-run gate`);
+	}
+	// _hasCompletedRealRefresh in particular: it tells renderInstantStatsFromCache() that verified
+	// data has already been published, so a discarded run must never set it.
+	assert.ok(
+		core.indexOf('this._hasCompletedRealRefresh = true;') > gateAt,
+		'a discarded run must not claim a real refresh completed',
+	);
+});
+
+test('wiring: the superseded-run gate reuses the tested generation predicate', () => {
+	assert.ok(
+		EXTENSION_SRC.includes('private isRefreshSuperseded(startedAtGeneration: number): boolean {')
+		&& EXTENSION_SRC.includes('if (isComputedStatsCurrent(startedAtGeneration, this._cacheGeneration)) { return false; }'),
+		'isRefreshSuperseded() must decide with isComputedStatsCurrent(), not an ad-hoc comparison',
+	);
+});
+
+test('wiring: the instant paint checks the live generation before publishing', () => {
+	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async renderInstantStatsFromCache('));
+	const render = body.slice(0, body.indexOf('\n\tprivate async queueMissingOpenCodeDbSessionsFromCache('));
+
+	const gateAt = render.indexOf('if (!this.canPublishInstantPaint(startedAtGeneration)) { return; }');
+	assert.ok(gateAt !== -1, 'the provisional paint must be gated on the generation it started in');
+	for (const published of [
+		'this.recordDetailedStats(stats, startedAtGeneration);',
+		'this.updateStatusBarAndTooltip(stats);',
+		'this.updateDetailsPanelIfOpen(stats, true);',
+		'this.updateChartPanelIfOpen(true);',
+	]) {
+		assert.ok(render.indexOf(published) > gateAt, `${published} must come after the generation gate`);
+	}
+	// _hasCompletedRealRefresh is a different question from "were the caches cleared": the clear's
+	// own refresh may not have published yet, so that flag can still be false here.
+	assert.ok(
+		EXTENSION_SRC.includes('private canPublishInstantPaint(startedAtGeneration: number): boolean {')
+		&& /canPublishInstantPaint[\s\S]{0,400}?isComputedStatsCurrent\(startedAtGeneration, this\._cacheGeneration\)/.test(EXTENSION_SRC),
+		'canPublishInstantPaint() must test the generation, not only _hasCompletedRealRefresh',
+	);
+});
+
+test('wiring: a caller past a cache clear does not coalesce onto a run that will discard', () => {
+	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('public async updateTokenStats('));
+	const fn = body.slice(0, body.indexOf('\n\t/**\n\t * Seeds a preload queue'));
+
+	assert.ok(
+		fn.includes('if (this._updateTokenStatsInFlightGeneration === this._cacheGeneration) {'),
+		'coalescing must be conditional on the in-flight run belonging to the caller\'s generation',
+	);
+	assert.ok(
+		fn.includes('await inFlight.catch(() => undefined);'),
+		'a superseded run must be waited out, not raced — see the refresh-leader lock',
+	);
+	// Overlapping two runs in one window would have the second lose acquireRefreshLock() to the
+	// first and parse as a follower, on a miss budget, over the cache the clear just emptied.
+	assert.ok(
+		fn.indexOf('await inFlight.catch(() => undefined);') < fn.indexOf('const run = this._runUpdateTokenStats(silent);'),
+		'the fresh run must start only after the superseded one has settled',
+	);
+	// Registration is identity-checked on both sides, so a superseded run settling late cannot
+	// deregister the fresh run that replaced it.
+	assert.ok(
+		EXTENSION_SRC.includes('if (this._updateTokenStatsInFlight !== run) { return; }'),
+		'clearInFlightRefresh() must only clear the registration it owns',
+	);
+	assert.equal(
+		fn.split('this.clearInFlightRefresh(').length - 1, 2,
+		'both the wait loop and the run\'s own finally must deregister through the identity check',
+	);
+});
+
+test('wiring: the in-flight generation tracks the capture that governs the discard', () => {
+	// updateTokenStats() registers its own capture before the cache load, snapshot warm and leader
+	// election. _runRefreshCore() captures again afterwards, and *that* is the number it discards
+	// on — so it republishes it, or a caller declines to coalesce onto a run that is in fact going
+	// to publish current data and pays for a second full parse.
+	assert.ok(
+		EXTENSION_SRC.includes('const startedAtGeneration = this.beginRefreshGeneration();'),
+		'_runRefreshCore() must capture through beginRefreshGeneration()',
+	);
+	assert.ok(
+		/private beginRefreshGeneration\(\): number \{\s*this\._updateTokenStatsInFlightGeneration = this\._cacheGeneration;\s*return this\._cacheGeneration;/
+			.test(EXTENSION_SRC),
+		'beginRefreshGeneration() must publish its capture as the in-flight run\'s generation',
+	);
+});
+
+test('wiring: the Efficiency build threads its origin generation into both later walks', () => {
+	// The full-year walk repopulates the raw session cache. A clear landing during it leaves
+	// pre-clear entries there, and these two then read them as cache hits while starting *after*
+	// the bump — stamping pre-clear data with the new generation.
+	assert.ok(
+		EXTENSION_SRC.includes('const usage = await this.calculateUsageAnalysisStats(!forceRecalc, undefined, originGeneration);'),
+		'the Efficiency usage walk must stamp with the build\'s origin generation',
+	);
+	assert.ok(
+		EXTENSION_SRC.includes('const sessionInputs = await this.collectEfficiencySessionInputs(12, !forceRecalc, originGeneration);'),
+		'the Efficiency session-input walk must stamp with the build\'s origin generation',
+	);
+	assert.equal(
+		EXTENSION_SRC.split('const startedAtGeneration = originGeneration ?? this._cacheGeneration;').length - 1,
+		2,
+		'both walks must prefer a caller-supplied origin generation over their own start',
+	);
+	// And the generation actually reaching them is the one each build captured for its payload
+	// check, not a second, later read.
+	for (const call of [
+		'return this.buildEfficiencyViewData(false, this.efficiencyLoadingSink(), generation);',
+		'return this.buildEfficiencyViewData(true, this.efficiencyLoadingSink(), generation);',
+	]) {
+		assert.ok(EXTENSION_SRC.includes(call), `build must pass its captured generation: ${call}`);
+	}
+});
+
+test('wiring: no webview document declares a hardcoded language', () => {
+	// Every view in this file renders localized text — a localized <title>, localized headings, or
+	// a `localization` payload its bundle renders from — so lang="en" has assistive technology
+	// announce localized content with English pronunciation rules.
+	assert.equal(
+		EXTENSION_SRC.split('<html lang="en">').length - 1, 0,
+		'no webview HTML may hardcode lang="en"',
+	);
+	const declared = EXTENSION_SRC.split('<html lang="${webviewDocumentLanguage(vscode.env.language)}">').length - 1;
+	assert.equal(declared, 13, 'every webview document must declare the viewer\'s language');
+	assert.equal(
+		EXTENSION_SRC.split('<html lang=').length - 1, declared,
+		'and no other spelling of the lang attribute may survive',
 	);
 });
