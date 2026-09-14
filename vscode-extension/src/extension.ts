@@ -678,6 +678,62 @@ export function formatTooltipStatsTable(
 	);
 }
 
+/**
+ * The Copilot Budget gauge row's rendered pieces. Built by the tracker rather than by
+ * formatProviderCostTable() because they depend on the live API balance and on SVG rendering,
+ * which would drag an extension host into what is otherwise a pure string formatter.
+ */
+export interface CopilotBudgetGauge {
+	/** Total spend against budget, e.g. "$794.07 / $1250.00". */
+	usedOfBudget: string;
+	/** Markdown image cell holding the two-segment (tracked + untracked) bar. */
+	barCell: string;
+	/** Indented sub-row labels, from buildCopilotBudgetSubRowLabels(). */
+	subRowLabels: string[];
+	/** Where the budget figure came from, named in the table's footnote. */
+	source: string;
+}
+
+/**
+ * Formats the "💰 Costs by Provider" table for the status bar hover tooltip: the Copilot Budget
+ * gauge and its sub-rows on top (when a budget is set), then every provider's share of total
+ * monthly spend, then the footnote naming the budget's source.
+ *
+ * The section title doubles as the table's header row. A title line above an empty `|  |  |  |`
+ * header left a blank band between the two, wasting vertical space in a popup narrow enough that
+ * rows already wrap. Costs are right-aligned (`---:`) with the same trailing gutter as the period
+ * table, so every amount ends at the same offset instead of drifting with each provider name's
+ * length.
+ *
+ * Returns an empty string when there are no providers, so the caller appends nothing.
+ */
+export function formatProviderCostTable(
+	monthCosts: Record<string, number>,
+	totalCost: number,
+	gauge: CopilotBudgetGauge | null,
+	shareBarCell: (ratio: number) => string,
+): string {
+	const providers = Object.keys(monthCosts).sort((a, b) => (monthCosts[b] ?? 0) - (monthCosts[a] ?? 0));
+	if (providers.length === 0) { return ''; }
+	const pad = (cell: string) => `${cell}${TOOLTIP_COLUMN_GUTTER}`;
+	let markdown = `\n| 💰 ${l10n.t('tooltip.costsByProvider')} |  |  |\n|:---|---:|:---|\n`;
+	if (gauge) {
+		markdown += `| 🎯 ${pad(l10n.t('tooltip.copilotBudgetLabel'))} | ${pad(gauge.usedOfBudget)} | ${gauge.barCell} |\n`;
+		for (const label of gauge.subRowLabels) {
+			markdown += `| &nbsp;&nbsp;↳ ${label} |  |  |\n`;
+		}
+		markdown += `| **${l10n.t('tooltip.shareOfTotalSpend')}** |  |  |\n`;
+	}
+	for (const provider of providers) {
+		const cost = monthCosts[provider] ?? 0;
+		markdown += `| ${pad(provider)} | ${pad(`$${cost.toFixed(2)}`)} | ${shareBarCell(totalCost > 0 ? cost / totalCost : 0)} |\n`;
+	}
+	if (gauge) {
+		markdown += `\n*${l10n.t('tooltip.budgetFromSource', gauge.source)}*\n`;
+	}
+	return markdown;
+}
+
 // ── extension.ts module-level helpers ────────────────────────────────────────
 
 /** Type guard for the social platforms supported by `shareTextToSocialPlatform`. */
@@ -4801,53 +4857,40 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *  the bar scales and where the budget value comes from. */
 	private appendProviderCostSection(tooltip: vscode.MarkdownString, detailedStats: DetailedStats): void {
 		const monthCosts = detailedStats.month.billingGroupCosts ?? {};
-		const providers = Object.keys(monthCosts).sort((a, b) => (monthCosts[b] ?? 0) - (monthCosts[a] ?? 0));
-		if (providers.length === 0) { return; }
-		const totalCost = this.sumBillingGroupCosts(monthCosts);
-		// The section title doubles as the table's header row: a title line above an empty
-		// `|  |  |  |` header left a blank band between the two, wasting vertical space in a
-		// popup narrow enough that rows already wrap. Costs are right-aligned so every amount
-		// ends at the same offset instead of drifting with each provider name's length.
-		tooltip.appendMarkdown(`\n| 💰 ${l10n.t('tooltip.costsByProvider')} |  |  |\n|:---|---:|:---|\n`);
+		if (Object.keys(monthCosts).length === 0) { return; }
 		const { budget, source } = this.getEffectiveMonthlyBudgetWithSource();
-		if (budget > 0) {
-			this.appendCopilotBudgetRow(tooltip, monthCosts['GitHub Copilot'] ?? 0, budget);
-			tooltip.appendMarkdown(`| **${l10n.t('tooltip.shareOfTotalSpend')}** |  |  |\n`);
-		}
-		for (const provider of providers) {
-			const cost = monthCosts[provider] ?? 0;
-			const ratio = totalCost > 0 ? cost / totalCost : 0;
-			const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildBarSvg(ratio, '#5B9BD5'))})`;
-			tooltip.appendMarkdown(`| ${provider}${TOOLTIP_COLUMN_GUTTER} | $${cost.toFixed(2)}${TOOLTIP_COLUMN_GUTTER} | ${barCell} |\n`);
-		}
-		if (budget > 0) {
-			tooltip.appendMarkdown(`\n*${l10n.t('tooltip.budgetFromSource', source)}*\n`);
-		}
+		tooltip.appendMarkdown(formatProviderCostTable(
+			monthCosts,
+			this.sumBillingGroupCosts(monthCosts),
+			budget > 0 ? this.buildCopilotBudgetGauge(monthCosts['GitHub Copilot'] ?? 0, budget, source) : null,
+			(ratio) => `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildBarSvg(ratio, '#5B9BD5'))})`,
+		));
 	}
 
-	/** Appends the "🎯 Copilot Budget" gauge row plus its sub-rows (the tracked/untracked split
-	 *  when there is a gap, and always the remaining budget). The API balance (when available)
-	 *  reports usage across all channels — other
+	/** Builds the "🎯 Copilot Budget" gauge row's parts (the rendered pieces that need live state,
+	 *  so formatProviderCostTable() itself stays pure and testable). The API balance (when
+	 *  available) reports usage across all channels — other
 	 *  PCs/VDIs, WSL, web chat, cloud agent, review agent — not just this device's local
 	 *  session logs. The gap between that total and our local copilotCost is usage we can't
 	 *  attribute to a tracked session, so it gets its own hatched bar segment instead of
 	 *  silently inflating (or understating) the "tracked" portion. */
-	private appendCopilotBudgetRow(tooltip: vscode.MarkdownString, copilotCost: number, budget: number): void {
+	private buildCopilotBudgetGauge(copilotCost: number, budget: number, source: string): CopilotBudgetGauge {
 		const apiBalance = this._buildCopilotApiBalance();
 		const apiUsedUsd = apiBalance ? aiuToUsd(apiBalance.usedAiCredits) : null;
 		const { totalUsed, remaining, trackedRatio, gapRatio, gapUsd } = computeCopilotBudgetDisplay(copilotCost, budget, apiUsedUsd);
 		const totalRatio = trackedRatio + gapRatio;
 		const color = totalRatio >= 0.9 ? '#EF5350' : totalRatio >= 0.75 ? '#FFA726' : '#4CAF50';
-		const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildTwoSegmentBarSvg(trackedRatio, gapRatio, color))})`;
-		// The headline figure is total spend (tracked + untracked) against budget, so it agrees
-		// with the bar's percentage. Remaining budget is deliberately NOT appended here: in a
-		// hover popup this narrow, "$X / $Y · $Z left" wraps onto a second line, and the figure
-		// is already implied by the "$X / $Y" pair. It gets its own sub-row below instead, next
-		// to the tracked/untracked split — see buildCopilotBudgetSubRowLabels().
-		tooltip.appendMarkdown(`| 🎯 ${l10n.t('tooltip.copilotBudgetLabel')}${TOOLTIP_COLUMN_GUTTER} | $${totalUsed.toFixed(2)} / $${budget.toFixed(2)}${TOOLTIP_COLUMN_GUTTER} | ${barCell} |\n`);
-		for (const label of buildCopilotBudgetSubRowLabels(copilotCost, remaining, gapUsd)) {
-			tooltip.appendMarkdown(`| &nbsp;&nbsp;↳ ${label} |  |  |\n`);
-		}
+		return {
+			// The headline figure is total spend (tracked + untracked) against budget, so it
+			// agrees with the bar's percentage. Remaining budget is deliberately not part of it:
+			// in a hover popup this narrow, "$X / $Y · $Z left" wraps onto a second line, and
+			// the figure is already implied by the "$X / $Y" pair. It is a sub-row instead —
+			// see buildCopilotBudgetSubRowLabels().
+			usedOfBudget: `$${totalUsed.toFixed(2)} / $${budget.toFixed(2)}`,
+			barCell: `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildTwoSegmentBarSvg(trackedRatio, gapRatio, color))})`,
+			subRowLabels: buildCopilotBudgetSubRowLabels(copilotCost, remaining, gapUsd),
+			source,
+		};
 	}
 
 	/** Generates a small SVG progress bar with two fill segments sharing one color: a solid

@@ -6,6 +6,7 @@ import {
 	formatTooltipStatsTable,
 	computeCopilotBudgetDisplay,
 	buildCopilotBudgetSubRowLabels,
+	formatProviderCostTable,
 	TOOLTIP_COLUMN_GUTTER,
 	type StatusBarDisplaySetting
 } from '../../src/extension';
@@ -265,4 +266,80 @@ test('buildCopilotBudgetSubRowLabels: overspending reads as "over", not a negati
 		buildCopilotBudgetSubRowLabels(750, -12.34, 62.34),
 		['$750.00 tracked here', '$62.34 untracked (other devices/cloud)', '$12.34 over'],
 	);
+});
+
+// The "💰 Costs by Provider" table renders the section title as its own header row and pads and
+// right-aligns the cost column. Both are easy to regress into a table that still parses but looks
+// wrong, and neither shows up in a test of the period table, so assert the rendered Markdown.
+const MONTH_COSTS = { 'GitHub Copilot': 668.74, 'Mistral AI': 67.03, 'Anthropic': 56.52, 'Other': 0 };
+const MONTH_TOTAL = 668.74 + 67.03 + 56.52;
+const GAUGE = {
+	usedOfBudget: '$794.07 / $1250.00',
+	barCell: '[bar]',
+	subRowLabels: ['$668.74 tracked here', '$125.33 untracked (other devices/cloud)', '$455.93 left'],
+	source: 'Copilot plan quota',
+};
+/** Records the ratio each provider row asked for, so share math is observable without SVG. */
+function shareBarSpy(seen: number[]) {
+	return (ratio: number) => { seen.push(ratio); return `[${Math.round(ratio * 100)}%]`; };
+}
+
+test('formatProviderCostTable: the section title is the table header, with a right-aligned cost column', () => {
+	const lines = formatProviderCostTable(MONTH_COSTS, MONTH_TOTAL, GAUGE, shareBarSpy([])).split('\n');
+
+	// A separate title line above an empty `|  |  |  |` header is what this replaced — the title
+	// must be inside the header row, immediately above the alignment row.
+	assert.equal(lines[1], '| 💰 Costs by Provider — Current Month |  |  |');
+	assert.equal(lines[2], '|:---|---:|:---|');
+	assert.ok(!lines.includes('|  |  |  |'), 'the empty header row should be gone');
+});
+
+test('formatProviderCostTable: provider rows are ordered by cost and carry the column gutter', () => {
+	const g = TOOLTIP_COLUMN_GUTTER;
+	const markdown = formatProviderCostTable(MONTH_COSTS, MONTH_TOTAL, GAUGE, shareBarSpy([]));
+
+	const providerRows = markdown.split('\n').filter((line) => line.includes(g) && line.startsWith('| ') && !line.includes('🎯'));
+	assert.deepEqual(providerRows, [
+		`| GitHub Copilot${g} | $668.74${g} | [84%] |`,
+		`| Mistral AI${g} | $67.03${g} | [8%] |`,
+		`| Anthropic${g} | $56.52${g} | [7%] |`,
+		`| Other${g} | $0.00${g} | [0%] |`,
+	]);
+});
+
+test('formatProviderCostTable: the budget gauge, its sub-rows and the share heading render in order', () => {
+	const g = TOOLTIP_COLUMN_GUTTER;
+	const markdown = formatProviderCostTable(MONTH_COSTS, MONTH_TOTAL, GAUGE, shareBarSpy([]));
+
+	const gaugeIndex = markdown.indexOf(`| 🎯 Copilot Budget${g} | $794.07 / $1250.00${g} | [bar] |`);
+	assert.ok(gaugeIndex > 0, 'expected the gauge row');
+	const subRows = GAUGE.subRowLabels.map((label) => markdown.indexOf(`| &nbsp;&nbsp;↳ ${label} |  |  |`));
+	assert.deepEqual(subRows, [...subRows].sort((a, b) => a - b), 'sub-rows keep their given order');
+	assert.ok(subRows[0] > gaugeIndex, 'sub-rows follow the gauge row');
+	// The heading separates the gauge block from the per-provider rows; it must not drift above it.
+	const headingIndex = markdown.indexOf('| **Share of total spend** |  |  |');
+	assert.ok(headingIndex > subRows[2], 'the share heading follows the sub-rows');
+	assert.ok(headingIndex < markdown.indexOf('| GitHub Copilot'), 'the share heading precedes the providers');
+	assert.ok(markdown.trimEnd().endsWith('*Budget from Copilot plan quota*'), 'expected the budget-source footnote');
+});
+
+test('formatProviderCostTable: with no budget there is no gauge, share heading or footnote', () => {
+	const markdown = formatProviderCostTable(MONTH_COSTS, MONTH_TOTAL, null, shareBarSpy([]));
+
+	assert.ok(!markdown.includes('🎯'), 'no gauge row without a budget');
+	assert.ok(!markdown.includes('Share of total spend'), 'the heading only labels the gauge block');
+	assert.ok(!markdown.includes('Budget from'), 'no footnote without a budget');
+	assert.ok(markdown.includes('| GitHub Copilot'), 'provider rows still render');
+});
+
+test('formatProviderCostTable: a zero total spends no ratio rather than dividing by zero', () => {
+	const seen: number[] = [];
+	const markdown = formatProviderCostTable({ 'GitHub Copilot': 0, 'Anthropic': 0 }, 0, null, shareBarSpy(seen));
+
+	assert.deepEqual(seen, [0, 0], 'every share is 0, never NaN or Infinity');
+	assert.ok(!markdown.includes('NaN'));
+});
+
+test('formatProviderCostTable: no providers renders nothing at all', () => {
+	assert.equal(formatProviderCostTable({}, 0, GAUGE, shareBarSpy([])), '');
 });
