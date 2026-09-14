@@ -16,14 +16,29 @@ import type { MemoryFilesAnalysis } from '../../../src/types';
 
 const DEFAULT_LARGE_KB = DEFAULT_LARGE_FILE_BYTES / 1024;
 
+/**
+ * Resolve `--stale-days`/`--large-kb` CLI option strings to their clamped numeric values.
+ *
+ * An explicit `0` is a valid (if degenerate) threshold and must be clamped to the `1` floor,
+ * not silently replaced by the default — `parseInt(...) || DEFAULT` would do exactly that
+ * since `0` is falsy. Only a genuinely non-numeric value (missing/garbage input) falls back
+ * to the default.
+ */
+export function resolveMemoryFilesThresholds(options: { staleDays?: string; largeKb?: string }): { staleDays: number; largeFileBytes: number } {
+	const parsedStaleDays = parseInt(options.staleDays ?? String(DEFAULT_STALE_DAYS), 10);
+	const staleDays = Math.max(1, Number.isNaN(parsedStaleDays) ? DEFAULT_STALE_DAYS : parsedStaleDays);
+	const parsedLargeKb = parseInt(options.largeKb ?? String(DEFAULT_LARGE_KB), 10);
+	const largeFileBytes = Math.max(1, Number.isNaN(parsedLargeKb) ? DEFAULT_LARGE_KB : parsedLargeKb) * 1024;
+	return { staleDays, largeFileBytes };
+}
+
 export const memoryFilesCommand = new Command('memory-files')
 	.description('Report on GitHub Copilot agent memory files on this machine (counts, staleness, size)')
 	.option('--json', 'Output raw JSON (for machine consumption)')
 	.option('--stale-days <days>', `Days since last edit before a memory file is flagged stale (default: ${DEFAULT_STALE_DAYS})`, String(DEFAULT_STALE_DAYS))
 	.option('--large-kb <kb>', `Size in KB above which a memory file is flagged large (default: ${DEFAULT_LARGE_KB})`, String(DEFAULT_LARGE_KB))
 	.action((options) => {
-		const staleDays = Math.max(1, parseInt(options.staleDays ?? String(DEFAULT_STALE_DAYS), 10) || DEFAULT_STALE_DAYS);
-		const largeFileBytes = Math.max(1, parseInt(options.largeKb ?? String(DEFAULT_LARGE_KB), 10) || DEFAULT_LARGE_KB) * 1024;
+		const { staleDays, largeFileBytes } = resolveMemoryFilesThresholds(options);
 
 		const files = discoverAllMemoryFiles();
 		const analysis = analyzeMemoryFiles(files, { staleDays, largeFileBytes });
