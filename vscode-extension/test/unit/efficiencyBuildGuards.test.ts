@@ -226,6 +226,40 @@ test('chainBuild: a rejected predecessor chain still runs the next build', async
 // rootDir is the repo root), so walk back up to the package root, then down into src/.
 const EXTENSION_SRC = fs.readFileSync(path.join(__dirname, '../../../../src/extension.ts'), 'utf8');
 
+/**
+ * The full brace-balanced body of one method, or a loud failure.
+ *
+ * These tests used to bound a method by naming the method that follows it. That is silently
+ * wrong the moment either one moves: `evaluateAndSurfaceInsights`'s end marker named
+ * `refreshInsightBadgeFromState`, which sits ~1500 lines *earlier* in the file, so `indexOf`
+ * returned -1, `slice(0, -1)` swallowed the rest of the file, and the guard-count assertion was
+ * measuring the whole remainder. It passed for the wrong reason until an unrelated guard was
+ * added elsewhere. Brace-balancing cannot drift that way, and a missing marker asserts.
+ */
+function methodBody(marker: string): string {
+	const markerIndex = EXTENSION_SRC.indexOf(marker);
+	assert.notEqual(markerIndex, -1, `marker not found in extension.ts: ${marker}`);
+	const braceStart = EXTENSION_SRC.indexOf('{', markerIndex);
+	let depth = 0;
+	for (let i = braceStart; i < EXTENSION_SRC.length; i++) {
+		if (EXTENSION_SRC[i] === '{') { depth++; }
+		else if (EXTENSION_SRC[i] === '}') {
+			depth--;
+			if (depth === 0) { return EXTENSION_SRC.slice(markerIndex, i + 1); }
+		}
+	}
+	throw new Error(`unbalanced braces while scanning for marker: ${marker}`);
+}
+
+/** A span between two markers, asserting the end really follows the start. */
+function sliceBetween(startMarker: string, endMarker: string): string {
+	const startIndex = EXTENSION_SRC.indexOf(startMarker);
+	assert.notEqual(startIndex, -1, `start marker not found in extension.ts: ${startMarker}`);
+	const endIndex = EXTENSION_SRC.indexOf(endMarker, startIndex + startMarker.length);
+	assert.notEqual(endIndex, -1, `end marker does not follow the start marker: ${endMarker}`);
+	return EXTENSION_SRC.slice(startIndex, endIndex);
+}
+
 test('wiring: every computed-stat cache is stamped with the generation its build started at', () => {
 	// Captured before the first await, never re-read at the write — re-reading would stamp a
 	// pre-clear result with the *post*-clear generation and make it look current.
@@ -747,22 +781,21 @@ test('wiring: a helper that publishes after its own await checks the generation 
 		&& EXTENSION_SRC.includes('return originGeneration === undefined || isComputedStatsCurrent(originGeneration, this._cacheGeneration);'),
 		'the inner guard must defer to the tested generation predicate, and stay inert for callers outside a refresh',
 	);
-	for (const [entry, until, awaited, publication] of [
+	for (const [entry, awaited, publication] of [
 		[
-			'private async updateAnalysisPanelIfOpen(', '\n\tprivate async computeAndUploadFluencyScore(',
+			'private async updateAnalysisPanelIfOpen(',
 			'await this.calculateUsageAnalysisStats(false, preloaded, originGeneration);', 'if (silent) {',
 		],
 		[
-			'private async computeAndUploadFluencyScore(', '\n\tprivate updateEnvironmentalPanelIfOpen(',
+			'private async computeAndUploadFluencyScore(',
 			'await this.calculateMaturityScores(false, preloaded, originGeneration)', 'this.maturityPanel.webview.html =',
 		],
 		[
-			'private async evaluateAndSurfaceInsights(', '\n\tprivate refreshInsightBadgeFromState(',
+			'private async evaluateAndSurfaceInsights(',
 			"await this.context.globalState.update('insights.state', this._insightStateBag);", 'command: \'updateInsights\'',
 		],
 	]) {
-		const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf(entry));
-		const fn = body.slice(0, body.indexOf(until));
+		const fn = methodBody(entry);
 		const guardAt = fn.indexOf('if (!this.mayPublishAt(originGeneration)) { return; }');
 		assert.ok(guardAt !== -1, `${entry} must check the generation before publishing`);
 		assert.ok(fn.indexOf(awaited) < guardAt, `${entry}'s guard must come after its own await, not before it`);
@@ -770,8 +803,7 @@ test('wiring: a helper that publishes after its own await checks the generation 
 	}
 	// The insight pass publishes twice — the panel post, then the toast after a second state
 	// write — so one guard is not enough for it.
-	const insightBody = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async evaluateAndSurfaceInsights('));
-	const insights = insightBody.slice(0, insightBody.indexOf('\n\tprivate refreshInsightBadgeFromState('));
+	const insights = methodBody('private async evaluateAndSurfaceInsights(');
 	assert.equal(
 		insights.split('if (!this.mayPublishAt(originGeneration)) { return; }').length - 1,
 		2,
@@ -787,6 +819,45 @@ test('wiring: a helper that publishes after its own await checks the generation 
 	assert.ok(
 		EXTENSION_SRC.includes('await this.evaluateAndSurfaceInsights(startedAtGeneration);'),
 		'publishRefreshResult() must thread its generation into the insight pass',
+	);
+});
+
+test('wiring: a superseded walk stops narrating its progress too', () => {
+	// Gating only the terminal ready/error messages left the curation stages ungated: they come
+	// from computeCurationAnalysis(), called *inside* calculateUsageAnalysisStats(), so a walk a
+	// clear had superseded could still post curation:* stages and counts to the live panel and
+	// regress the replacement refresh's loading UI back to its own stale progress.
+	assert.ok(
+		EXTENSION_SRC.includes('private postUsageLoadingProgress(stage: string, details?: Record<string, unknown>, originGeneration?: number): void {'),
+		'the progress poster must be able to take the generation its walk belongs to',
+	);
+	const poster = methodBody('private postUsageLoadingProgress(');
+	assert.ok(
+		poster.includes('if (!this.mayPublishAt(originGeneration)) { return; }'),
+		'and must gate on it, through the same predicate every other publication uses',
+	);
+	assert.ok(
+		poster.indexOf('if (!this.analysisPanel) { return; }') < poster.indexOf('mayPublishAt'),
+		'the panel check stays first — a closed panel is cheaper to rule out than a generation',
+	);
+
+	// Every curation stage must carry it, not just the ones that report counts.
+	const curationAt = EXTENSION_SRC.indexOf('private computeCurationAnalysis(');
+	assert.ok(
+		EXTENSION_SRC.slice(curationAt).startsWith('private computeCurationAnalysis(last30Days: UsageAnalysisPeriod, originGeneration?: number)'),
+		'computeCurationAnalysis() must take the generation to pass on',
+	);
+	const curation = methodBody('private computeCurationAnalysis(');
+	const stages = curation.split("this.postUsageLoadingProgress('curation:").length - 1;
+	assert.ok(stages >= 10, `expected the curation stages to still be there, found ${stages}`);
+	assert.equal(
+		curation.split(', originGeneration);').length - 1, stages,
+		'every curation progress post must carry its walk\'s generation, not just some of them',
+	);
+	// And the walk must hand it the generation it stamps its own result with.
+	assert.ok(
+		EXTENSION_SRC.includes('curationAnalysis: this.computeCurationAnalysis(last30DaysStats, startedAtGeneration),'),
+		'calculateUsageAnalysisStats() must pass the generation it stamps with, not re-read the live one',
 	);
 });
 
@@ -1039,18 +1110,30 @@ test('wiring: every rejected Efficiency payload queues the rebuild that replaces
 	);
 });
 
-test('wiring: no webview document declares a hardcoded language', () => {
-	// Every view in this file renders localized text — a localized <title>, localized headings, or
-	// a `localization` payload its bundle renders from — so lang="en" has assistive technology
+test('wiring: every webview document that renders localized text declares the viewer\'s language', () => {
+	// Those views render localized text — a localized <title>, localized headings, or a
+	// `localization` payload their bundle renders from — so lang="en" has assistive technology
 	// announce localized content with English pronunciation rules.
-	assert.equal(
-		EXTENSION_SRC.split('<html lang="en">').length - 1, 0,
-		'no webview HTML may hardcode lang="en"',
-	);
 	const declared = EXTENSION_SRC.split('<html lang="${webviewDocumentLanguage(vscode.env.language)}">').length - 1;
-	assert.equal(declared, 13, 'every webview document must declare the viewer\'s language');
+	assert.equal(declared, 12, 'every localized webview document must declare the viewer\'s language');
+
+	// Exactly one document is the exception, and it is the loading screen: its body comes from
+	// loadingHtml.getLoadingHtmlBody(), which emits hardcoded English throughout. `lang` names a
+	// document's predominant language, so deriving the viewer's locale there would mislabel the
+	// whole page — worse than the two localized elements (<title>, runtime subtitle) that lang="en"
+	// mislabels. Pinned by count *and* by location so a second document cannot quietly join it.
+	const hardcoded = EXTENSION_SRC.split('<html lang="en">').length - 1;
+	assert.equal(hardcoded, 1, 'only the loading screen may hardcode lang="en"');
+	const loadingAt = EXTENSION_SRC.indexOf('private getLoadingHtml(webview: vscode.Webview');
+	assert.ok(loadingAt !== -1, 'getLoadingHtml() must be findable for this assertion');
+	const loadingEnd = EXTENSION_SRC.indexOf('\n  private ', loadingAt + 10);
+	assert.ok(
+		EXTENSION_SRC.slice(loadingAt, loadingEnd).includes('<html lang="en">'),
+		'the one hardcoded lang="en" must be the loading screen, not some other document',
+	);
+
 	assert.equal(
-		EXTENSION_SRC.split('<html lang=').length - 1, declared,
+		EXTENSION_SRC.split('<html lang=').length - 1, declared + hardcoded,
 		'and no other spelling of the lang attribute may survive',
 	);
 });

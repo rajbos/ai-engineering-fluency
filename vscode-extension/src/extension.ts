@@ -4305,7 +4305,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private isRefreshSuperseded(startedAtGeneration: number): boolean {
 		if (isComputedStatsCurrent(startedAtGeneration, this._cacheGeneration)) { return false; }
-		this.log('Refresh superseded by a cache clear; discarding its results');
+		this.log('Refresh superseded by a cache invalidation; discarding its results');
 		return true;
 	}
 
@@ -5860,7 +5860,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			recentSessions,
 			correctionReport,
 			repeatedTasks,
-			curationAnalysis: this.computeCurationAnalysis(last30DaysStats),
+			curationAnalysis: this.computeCurationAnalysis(last30DaysStats, startedAtGeneration),
 			agenticDailyTrend,
 			autoCompactionsLast7Days,
 		};
@@ -5873,23 +5873,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Build a ToolCurationAnalysis from runtime tools + workspace files + recent usage.
 	 * Returns null when there are no available tools to analyse.
 	 */
-	private computeCurationAnalysis(last30Days: UsageAnalysisPeriod): ToolCurationAnalysis | null {
+	private computeCurationAnalysis(last30Days: UsageAnalysisPeriod, originGeneration?: number): ToolCurationAnalysis | null {
 		try {
 			const windowDays = vscode.workspace.getConfiguration('aiEngineeringFluency').get<number>('curation.timeWindowDays', 30);
 			const workspaceFolderPaths = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
 			this.postUsageLoadingProgress('curation:start', {
 				workspaces: workspaceFolderPaths.length,
-			});
+			}, originGeneration);
 
 			// Collect available tools: VS Code runtime tools + mcp.json + extension-contributed + settings + skills.
 			const runtimeEntries = _enumerateRuntimeTools(vscode.lm.tools);
 			this.postUsageLoadingProgress('curation:runtimeTools', {
 				count: runtimeEntries.length,
-			});
+			}, originGeneration);
 			const mcpEntries = _buildMcpEntriesFromJson(workspaceFolderPaths);
 			this.postUsageLoadingProgress('curation:mcpJson', {
 				count: mcpEntries.length,
-			});
+			}, originGeneration);
 			// Build the set of MCP servers that currently have at least one tool enabled in
 			// `vscode.lm.tools`. Extension-contributed entries cross-reference against this
 			// set so we can mark them as enabled or disabled (and avoid recommending the user
@@ -5904,18 +5904,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.postUsageLoadingProgress('curation:mcpSources', {
 				extensionEntries: extensionMcpEntries.length,
 				settingsEntries: settingsMcpEntries.length,
-			});
+			}, originGeneration);
 			const configuredSkillDirsRaw = vscode.workspace.getConfiguration('chat').get<unknown>('agentSkillsLocations', []);
 			const configuredSkillDirs = Array.isArray(configuredSkillDirsRaw)
 				? configuredSkillDirsRaw.filter((dir): dir is string => typeof dir === 'string')
 				: [];
 			this.postUsageLoadingProgress('curation:skillsScanStart', {
 				configuredLocations: configuredSkillDirs.length,
-			});
+			}, originGeneration);
 			const skillEntries = _discoverSkillEntries(workspaceFolderPaths, { additionalSkillDirs: configuredSkillDirs });
 			this.postUsageLoadingProgress('curation:skillsScanDone', {
 				skills: skillEntries.length,
-			});
+			}, originGeneration);
 
 			// Merge: runtime entries already include MCP tools from vscode.lm.tools.
 			// Deduplicate MCP server entries (prefer runtime over all static sources).
@@ -5930,24 +5930,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			const availableTools = [...runtimeEntries, ...uniqueMcpEntries, ...uniqueExtensionMcpEntries, ...uniqueSettingsMcpEntries, ...skillEntries];
 			if (availableTools.length === 0) {
-				this.postUsageLoadingProgress('curation:done', { availableTools: 0 });
+				this.postUsageLoadingProgress('curation:done', { availableTools: 0 }, originGeneration);
 				return null;
 			}
 			this.postUsageLoadingProgress('curation:analyzing', {
 				availableTools: availableTools.length,
 				skills: skillEntries.length,
-			});
+			}, originGeneration);
 
 			const result = _analyzeToolCuration(availableTools, last30Days, windowDays);
 			this.postUsageLoadingProgress('curation:done', {
 				availableTools: availableTools.length,
 				unusedTools: result.unusedTools.length,
-			});
+			}, originGeneration);
 			return result;
 		} catch (err) {
 			this.postUsageLoadingProgress('curation:error', {
 				error: String(err),
-			});
+			}, originGeneration);
 			this.log(`⚠️ Tool curation analysis failed: ${String(err)}`);
 			return null;
 		}
@@ -9504,8 +9504,21 @@ private computeFallbackDailyRollup(
 		}
 	}
 
-	private postUsageLoadingProgress(stage: string, details?: Record<string, unknown>): void {
+	/**
+	 * Posts one loading-progress stage to the Usage Analysis panel.
+	 *
+	 * `originGeneration` gates the post the same way mayPublishAt() gates a result: a walk that a
+	 * clear has superseded must not keep narrating its progress to the live panel. The terminal
+	 * `ready`/`error` messages were gated first, but the curation stages come from
+	 * computeCurationAnalysis() *inside* the walk — so a superseded walk could still regress the
+	 * replacement refresh's loading UI back to its own stale stages and counts until it finished.
+	 *
+	 * `undefined` means the caller is not part of a generation-owned walk and always posts, the
+	 * same convention mayPublishAt() uses.
+	 */
+	private postUsageLoadingProgress(stage: string, details?: Record<string, unknown>, originGeneration?: number): void {
 		if (!this.analysisPanel) { return; }
+		if (!this.mayPublishAt(originGeneration)) { return; }
 		void this.analysisPanel.webview.postMessage({
 			command: 'usageLoadingProgress',
 			stage,
@@ -11791,11 +11804,25 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     return '';
   }
 
+  /**
+   * The shared loading screen — the one document that deliberately still declares `lang="en"`.
+   *
+   * `lang` names the predominant language of a document's content, and this body is
+   * loadingHtml.getLoadingHtmlBody(), which emits hardcoded English throughout: "Analyzing Your
+   * AI Activity", "Building Activity Index", the four step labels, the chips. Only the `<title>`
+   * and the subtitle (replaced at runtime with `loading.efficiency.*`) are localized.
+   *
+   * Deriving the viewer's locale here would therefore mislabel the *whole page* on a zh-CN
+   * install, where declaring `en` mislabels only those two elements — which is the state this
+   * document was already in. Twelve documents render localized bodies and do derive it; this one
+   * is the exception until its fragment is localized, which is its own change: the fragment is
+   * shared with the desktop tray app and has no localization payload to draw on.
+   */
   private getLoadingHtml(webview: vscode.Webview, startedAtMs: number = Date.now()): string {
     const nonce = getNonce();
     const iconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'robot-icon.png'));
     return `<!DOCTYPE html>
-<html lang="${webviewDocumentLanguage(vscode.env.language)}">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
