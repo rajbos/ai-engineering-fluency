@@ -238,10 +238,14 @@ test('wiring: every computed-stat cache is stamped with the generation its build
 	]) {
 		assert.ok(EXTENSION_SRC.includes(marker), `missing generation stamp: ${marker}`);
 	}
+	// Seven captures: the six producers of a stamped cache, plus loadAnalysisStatsInBackground(),
+	// which stamps nothing but posts its walk's result straight to the panel and so needs the same
+	// capture to gate on. The count is the tripwire — a new one added by re-reading the live
+	// generation at write time is the bug this whole scheme exists for.
 	assert.equal(
 		EXTENSION_SRC.split('const startedAtGeneration = ').length - 1,
-		6,
-		'every producer of a stamped cache must capture the generation before its first await',
+		7,
+		'every producer of a stamped cache or a gated publication must capture before its first await',
 	);
 	// A refresh's results belong to the generation its *inputs* were gathered in, not the one in
 	// effect when a particular calculation happens to start. calculateUsageAnalysisStats() can be
@@ -738,6 +742,34 @@ test('wiring: a helper that publishes after its own await checks the generation 
 		EXTENSION_SRC.includes('await this.evaluateAndSurfaceInsights(startedAtGeneration);'),
 		'publishRefreshResult() must thread its generation into the insight pass',
 	);
+});
+
+test('wiring: the background Usage Analysis load gates its own post', () => {
+	// loadAnalysisStatsInBackground() is the fourth helper of the same shape: it awaits the
+	// usage-analysis walk and then posts updateStats straight to the panel. The stamp on
+	// lastUsageAnalysisStats makes currentUsageAnalysisStats reject the cached result but does
+	// nothing to stop *this* result reaching the view, so a clear landing during the walk could
+	// land this post after the clear's replacement refresh and overwrite it.
+	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async loadAnalysisStatsInBackground('));
+	const fn = body.slice(0, body.indexOf('\n\tprivate postUsageLoadingProgress('));
+	assert.ok(fn.length > 0, 'loadAnalysisStatsInBackground() must be findable for this assertion');
+
+	const captureAt = fn.indexOf('const startedAtGeneration = this._cacheGeneration;');
+	assert.ok(captureAt !== -1, 'it must capture the generation its inputs belong to');
+	const awaitAt = fn.indexOf('await this.calculateUsageAnalysisStats(true, undefined, startedAtGeneration);');
+	assert.ok(
+		awaitAt !== -1,
+		'the walk must be handed that capture, so the stamp and the gate are the same number by construction',
+	);
+	const guardAt = fn.indexOf('if (!this.mayPublishAt(startedAtGeneration)) { return; }');
+	assert.ok(guardAt !== -1, 'it must check the generation before publishing');
+	assert.ok(captureAt < awaitAt && awaitAt < guardAt, 'the guard must come after its own await, not before it');
+	// Both publications are behind it: the progress card's tool counts come from the same walk.
+	for (const publication of ["this.postUsageLoadingProgress('ready'", "command: 'updateStats'"]) {
+		const at = fn.indexOf(publication);
+		assert.ok(at !== -1, `missing publication: ${publication}`);
+		assert.ok(guardAt < at, `${publication} must sit behind the guard`);
+	}
 });
 
 test('wiring: a caller does not re-refresh when the run it waited for already covered it', () => {

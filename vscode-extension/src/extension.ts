@@ -9442,10 +9442,20 @@ private computeFallbackDailyRollup(
 	}
 
 	private async loadAnalysisStatsInBackground(panel: vscode.WebviewPanel): Promise<void> {
+		// Captured before the walk and handed to it, so the generation this result is stamped with
+		// and the one gated on below are the same number by construction rather than by timing.
+		const startedAtGeneration = this._cacheGeneration;
 		try {
 			this.postUsageLoadingProgress('start');
-			const analysisStats = await this.calculateUsageAnalysisStats(true);
+			const analysisStats = await this.calculateUsageAnalysisStats(true, undefined, startedAtGeneration);
 			if (!this.analysisPanel || this.analysisPanel !== panel) { return; }
+			// Same boundary as the helpers publishRefreshResult() gates: this posts straight to the
+			// panel, so the stamp that makes currentUsageAnalysisStats reject the cached result does
+			// nothing to stop the result itself reaching the view. A clear landing during the walk
+			// would otherwise let this land *after* the clear's replacement refresh and overwrite it.
+			// Nothing is stranded by dropping it: that refresh's updateAnalysisPanelIfOpen() posts
+			// updateStats to this panel, which leaves the loading state on its own.
+			if (!this.mayPublishAt(startedAtGeneration)) { return; }
 			this.postUsageLoadingProgress('ready', {
 				availableTools: analysisStats.curationAnalysis?.availableTools.length ?? 0,
 				unusedTools: analysisStats.curationAnalysis?.unusedTools.length ?? 0,
