@@ -469,6 +469,15 @@ test('loadSharedSnapshotIfChanged() clears a stale tombstone when accepting a ne
 	const windowB = makeManager(dir);
 	windowB.setCachedSessionData('/a.json', entry(5000), 10);
 	await windowB.writeSharedSnapshot();
+	// Window A recorded its own snapshot's mtime when it wrote above, and
+	// loadSharedSnapshotIfChanged() short-circuits on `mtimeMs <= lastLoadedSnapshotMtime`. These
+	// two writes can land in the same millisecond, which reads as "nothing changed" and makes the
+	// merge below return 0 — the test then fails on "the newer /a.json entry must be merged in".
+	// Express "window B published something newer" explicitly rather than relying on the clock
+	// advancing between two back-to-back writes. The production `mtimeMs <=` rule is right as it
+	// stands: real windows do not publish twice within a millisecond.
+	const newer = new Date(Date.now() + 1000);
+	await fs.promises.utimes(windowB.getSharedSnapshotPath(), newer, newer);
 
 	// Window A picks up window B's newer snapshot via the merge path, not setCachedSessionData().
 	const merged = await windowA.loadSharedSnapshotIfChanged();
