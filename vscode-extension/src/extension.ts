@@ -10662,14 +10662,22 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				if (this.efficiencyPanel === panel) { panel.webview.html = this.getLoadingHtml(panel.webview); }
 				return this.buildEfficiencyViewData(true, this.efficiencyLoadingSink(), generation);
 			});
-			// Same reasoning as the initial build, minus the rebuild: this *is* the refresh, so
-			// re-entering it on a clear that landed mid-build would loop. Fall back to the last
-			// good payload if the clear left one, else show the failure state.
+			// Same reasoning as the initial build: show something now — the last good payload if
+			// the clear left one, else the failure state — and queue the rebuild that replaces it.
+			//
+			// This path used to queue nothing, on the grounds that "this *is* the refresh, so
+			// re-entering it would loop". That was wrong: requestEfficiencyRebuild() records the
+			// generation it requested for, so a second request at the same generation no-ops and a
+			// loop would need a fresh bump every round. clearCache() hid the gap by requesting the
+			// rebuild itself; refreshAnalysisPanel() bumps the generation and does not, so an
+			// Efficiency refresh spanning one was left showing the fallback or the staleAfterClear
+			// state with nothing queued to correct it.
 			if (!this.recordEfficiencyPayload(data, generation)) {
 				if (this.efficiencyPanel !== panel) { return; }
 				const afterClear = this._lastEfficiencyViewData;
 				if (afterClear) { panel.webview.html = this.getEfficiencyHtml(panel.webview, afterClear); }
 				else { this.showEfficiencyError(panel, new Error(l10n.t('efficiency.error.staleAfterClear'))); }
+				this.requestEfficiencyRebuild();
 				return;
 			}
 		} catch (error) {

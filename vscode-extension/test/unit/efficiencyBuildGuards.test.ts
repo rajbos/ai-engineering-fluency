@@ -709,6 +709,35 @@ test('wiring: the Efficiency build threads its origin generation into both later
 	}
 });
 
+test('wiring: every rejected Efficiency payload queues the rebuild that replaces it', () => {
+	// Both rejection paths must queue one. showEfficiency()'s always did; refreshEfficiencyPanel()'s
+	// did not, on the stated grounds that re-entering the refresh "would loop". It cannot:
+	// requestEfficiencyRebuild() records the generation it requested for, so a second request at
+	// the same generation no-ops and a loop would need a fresh bump every round. clearCache() hid
+	// the gap by requesting the rebuild itself; refreshAnalysisPanel() bumps and does not, leaving
+	// an Efficiency refresh that spanned it showing a fallback with nothing queued to correct it.
+	for (const [entry, until] of [
+		['public async showEfficiency()', '\n\tprivate async refreshEfficiencyPanel()'],
+		['private async refreshEfficiencyPanel()', '\n\t/** Maps one cached session'],
+	]) {
+		const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf(entry));
+		const fn = body.slice(0, body.indexOf(until));
+		const rejectedAt = fn.indexOf('if (!this.recordEfficiencyPayload(data, generation)) {');
+		assert.ok(rejectedAt !== -1, `${entry} must check recordEfficiencyPayload()`);
+		const requestAt = fn.indexOf('requestEfficiencyRebuild()', rejectedAt);
+		assert.ok(
+			requestAt !== -1,
+			`${entry} must queue a rebuild when its payload is rejected — nothing else will redraw the panel`,
+		);
+	}
+	// And it must go through the coalescing entry point, which is what bounds the re-entry.
+	assert.equal(
+		EXTENSION_SRC.split('void this.refreshEfficiencyPanel()').length - 1,
+		1,
+		'the rebuild must be requested, not by calling the refresh directly — that is what could loop',
+	);
+});
+
 test('wiring: no webview document declares a hardcoded language', () => {
 	// Every view in this file renders localized text — a localized <title>, localized headings, or
 	// a `localization` payload its bundle renders from — so lang="en" has assistive technology
