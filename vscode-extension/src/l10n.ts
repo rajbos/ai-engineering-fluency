@@ -42,7 +42,10 @@ function formatMessage(template: string, args: Array<string | number | boolean>)
 /** The id of the inlined bundle that serves `language`, or undefined when none does. */
 function resolveLocaleId(language: string): string | undefined {
 	const lang = (language || '').toLowerCase();
-	if (LOCALE_BUNDLES[lang]) {
+	// Own-property check, not a bare lookup: LOCALE_BUNDLES is a plain object, so a lowercase
+	// prototype key ('constructor', '__proto__') reads back truthy and would be reported as a
+	// shipped locale — which for `<html lang>` means emitting lang="constructor".
+	if (Object.prototype.hasOwnProperty.call(LOCALE_BUNDLES, lang)) {
 		return lang;
 	}
 	// A bare language tag ('zh') may match a more specific bundle ('zh-cn'),

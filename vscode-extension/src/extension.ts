@@ -990,6 +990,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * run will discard its results rather than publish them. See updateTokenStats().
 	 */
 	private _updateTokenStatsInFlightGeneration: number | undefined;
+	/**
+	 * The generation of the last refresh that published successfully. A caller that waited out a
+	 * superseded run consults it before starting its own: that run can have retagged itself to the
+	 * caller's generation in its preamble (see beginRefreshGeneration()) and published valid data,
+	 * in which case a second full refresh is pure duplicate work.
+	 */
+	private _lastPublishedRefreshGeneration: number | undefined;
 	// Timed-out preloads continue in the background; skip duplicate work until their cache entries settle.
 	private readonly _deferredSessionPreloadFiles = new Set<string>();
 	private _deferredSessionPreloadCount = 0;
@@ -3728,10 +3735,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 				return inFlight;
 			}
 			this.log('updateTokenStats in progress but predates a cache clear; waiting it out before refreshing');
-			await inFlight.catch(() => undefined);
+			const settled = await inFlight.catch(() => undefined);
 			// Its owner clears the registration in its own finally. Clearing it here too is what
 			// stops this loop spinning on a promise that has already settled.
 			this.clearInFlightRefresh(inFlight);
+			// That run was registered before this caller's generation, but it captures again once
+			// past its cache-load/snapshot/lock preamble (beginRefreshGeneration()). A clear landing
+			// inside that preamble therefore leaves it publishing valid post-clear data — and
+			// starting a second full refresh here would double the work for one clear.
+			if (settled !== undefined && this._lastPublishedRefreshGeneration === this._cacheGeneration) {
+				this.log('updateTokenStats: the run we waited for already covered this generation; reusing its result');
+				return settled;
+			}
 		}
 
 		const startedAt = Date.now();
@@ -4210,6 +4225,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return true;
 	}
 
+	/**
+	 * Whether a publication belonging to `originGeneration` may still reach a panel.
+	 *
+	 * The outer gates in publishRefreshResult() run *between* helpers, which is too late for a
+	 * helper that awaits and then publishes on its way back: updateAnalysisPanelIfOpen() posts
+	 * after calculateUsageAnalysisStats(), computeAndUploadFluencyScore() renders the Maturity
+	 * panel after calculateMaturityScores(), and evaluateAndSurfaceInsights() posts after writing
+	 * globalState. A clear landing inside any of those is already on screen by the time the caller
+	 * re-checks. So each of them asks this immediately before publishing.
+	 *
+	 * `undefined` means the caller is not part of a generation-owned refresh (showUsageAnalysis()
+	 * and friends), and is always allowed to publish.
+	 */
+	private mayPublishAt(originGeneration: number | undefined): boolean {
+		return originGeneration === undefined || isComputedStatsCurrent(originGeneration, this._cacheGeneration);
+	}
+
 	/** Publishes a detailed-stats result, stamped with the generation its inputs were gathered in. */
 	private recordDetailedStats(stats: DetailedStats, originGeneration: number): void {
 		this.lastDetailedStats = stats;
@@ -4257,11 +4289,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);
 		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
 		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
-		await this.evaluateAndSurfaceInsights();
+		await this.evaluateAndSurfaceInsights(startedAtGeneration);
 		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
 
 		this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
 		this.persistRefreshResult(isLeader);
+		this._lastPublishedRefreshGeneration = startedAtGeneration;
 		return true;
 	}
 
@@ -4749,6 +4782,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async updateAnalysisPanelIfOpen(silent: boolean, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<void> {
 		if (!this.analysisPanel) { return; }
 		const analysisStats = await this.calculateUsageAnalysisStats(false, preloaded, originGeneration);
+		if (!this.mayPublishAt(originGeneration)) { return; }
 		if (silent) {
 			// Reuse the same payload builder as the full-refresh paths (_buildAnalysisUpdateData)
 			// so every field the webview renders (correctionReport, repeatedTasks, curationAnalysis, …)
@@ -4770,6 +4804,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const freshMaturityData = (!silent || this.maturityPanel)
 			? await this.calculateMaturityScores(false, preloaded, originGeneration)
 			: undefined;
+		if (!this.mayPublishAt(originGeneration)) { return; }
 		if (this.maturityPanel && !silent && freshMaturityData) {
 			this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, freshMaturityData);
 		}
@@ -4784,6 +4819,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			})),
 			computedAt: new Date().toISOString(),
 		};
+		// Gated on the way in, not ordered on the way out: this upload is detached, so two of them
+		// can still land out of order and leave the server holding the older score. Making that
+		// safe needs the server to reject an older version, which is not this PR's to change.
+		if (!this.mayPublishAt(originGeneration)) { return; }
 		void (async () => {
 			try { await this.backend!.uploadFluencyScoreToSharingServer(settings, scorePayload); }
 			catch (err: unknown) { this.warn(`Failed to upload fluency score to sharing server: ${err}`); }
@@ -4807,7 +4846,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private async evaluateAndSurfaceInsights(): Promise<void> {
+	private async evaluateAndSurfaceInsights(originGeneration?: number): Promise<void> {
 		const stats = this.currentUsageAnalysisStats;
 		if (!stats) { return; }
 
@@ -4833,6 +4872,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.refreshInsightBadgeFromState(now, evaluated);
 
 		await this.context.globalState.update('insights.state', this._insightStateBag);
+		if (!this.mayPublishAt(originGeneration)) { return; }
 
 		// Push updated insights to the analysis panel if it is open
 		if (this.analysisPanel) {

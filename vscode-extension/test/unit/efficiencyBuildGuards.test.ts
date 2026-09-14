@@ -582,6 +582,15 @@ test('webviewDocumentLanguage: anything that is not a known locale cannot reach 
 	assert.equal(webviewDocumentLanguage('zh-cn" onload="alert(1)'), 'en');
 });
 
+test('webviewDocumentLanguage: a prototype key is not a shipped locale', () => {
+	// LOCALE_BUNDLES is a plain object, so a *lowercase* prototype key reads back truthy from a
+	// bare lookup and would be reported as a locale — emitting lang="constructor". The lookup is
+	// own-property checked, which is also what makes the "closed set of bundle ids" claim true.
+	assert.equal(webviewDocumentLanguage('constructor'), 'en');
+	assert.equal(webviewDocumentLanguage('__proto__'), 'en');
+	assert.equal(webviewDocumentLanguage('CONSTRUCTOR'), 'en', 'the lookup lowercases, so casing cannot smuggle it past');
+});
+
 test('webviewDocumentLanguage: tracks the bundles that actually ship', () => {
 	// If a package.nls.<locale>.json is added, this must start returning it — otherwise the new
 	// translation ships while every view still declares English.
@@ -660,6 +669,68 @@ test('wiring: a refresh superseded by a clear publishes nothing at all', () => {
 	assert.ok(
 		run.includes('const published = await this.publishRefreshResult(') && run.includes('if (!published) { return undefined; }'),
 		'_runRefreshCore() must publish through publishRefreshResult() and abandon the run when it declines',
+	);
+});
+
+test('wiring: a helper that publishes after its own await checks the generation itself', () => {
+	// The gates in publishRefreshResult() run *between* helpers, which is too late for one that
+	// awaits and then publishes on the way back: the pre-clear data is already on screen by the
+	// time the caller re-checks. Each such helper asks mayPublishAt() immediately before publishing.
+	assert.ok(
+		EXTENSION_SRC.includes('private mayPublishAt(originGeneration: number | undefined): boolean {')
+		&& EXTENSION_SRC.includes('return originGeneration === undefined || isComputedStatsCurrent(originGeneration, this._cacheGeneration);'),
+		'the inner guard must defer to the tested generation predicate, and stay inert for callers outside a refresh',
+	);
+	for (const [entry, until, awaited, publication] of [
+		[
+			'private async updateAnalysisPanelIfOpen(', '\n\tprivate async computeAndUploadFluencyScore(',
+			'await this.calculateUsageAnalysisStats(false, preloaded, originGeneration);', 'if (silent) {',
+		],
+		[
+			'private async computeAndUploadFluencyScore(', '\n\tprivate updateEnvironmentalPanelIfOpen(',
+			'await this.calculateMaturityScores(false, preloaded, originGeneration)', 'this.maturityPanel.webview.html =',
+		],
+		[
+			'private async evaluateAndSurfaceInsights(', '\n\tprivate refreshInsightBadgeFromState(',
+			"await this.context.globalState.update('insights.state', this._insightStateBag);", 'command: \'updateInsights\'',
+		],
+	]) {
+		const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf(entry));
+		const fn = body.slice(0, body.indexOf(until));
+		const guardAt = fn.indexOf('if (!this.mayPublishAt(originGeneration)) { return; }');
+		assert.ok(guardAt !== -1, `${entry} must check the generation before publishing`);
+		assert.ok(fn.indexOf(awaited) < guardAt, `${entry}'s guard must come after its own await, not before it`);
+		assert.ok(guardAt < fn.indexOf(publication), `${entry}'s guard must come before it publishes`);
+	}
+	// The insight pass only gets a generation because the refresh hands it one.
+	assert.ok(
+		EXTENSION_SRC.includes('await this.evaluateAndSurfaceInsights(startedAtGeneration);'),
+		'publishRefreshResult() must thread its generation into the insight pass',
+	);
+});
+
+test('wiring: a caller does not re-refresh when the run it waited for already covered it', () => {
+	// The awaited run was registered before this caller's generation, but beginRefreshGeneration()
+	// re-captures once it is past its cache-load/snapshot/lock preamble — so a clear landing inside
+	// that preamble leaves it publishing valid post-clear data, and a second full refresh here
+	// would be pure duplicate work for one clear.
+	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('public async updateTokenStats('));
+	const fn = body.slice(0, body.indexOf('\n\t/**\n\t * Seeds a preload queue'));
+	assert.ok(
+		fn.includes('if (settled !== undefined && this._lastPublishedRefreshGeneration === this._cacheGeneration) {')
+		&& fn.includes('return settled;'),
+		'a waiter must reuse the completed run\'s result when that run ended up covering its generation',
+	);
+	assert.ok(
+		fn.indexOf('const settled = await inFlight.catch(() => undefined);') < fn.indexOf('return settled;'),
+		'the reuse check must read the state left behind after the await',
+	);
+	// And only a run that actually published may set that marker.
+	const publish = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async publishRefreshResult('));
+	const pub = publish.slice(0, publish.indexOf('\n\t/** Core discover → parse → compute → render → persist pass'));
+	assert.ok(
+		pub.indexOf('this._lastPublishedRefreshGeneration = startedAtGeneration;') > pub.indexOf('this.persistRefreshResult(isLeader);'),
+		'the published-generation marker must be set only on the success path, after persistence',
 	);
 });
 
