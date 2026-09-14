@@ -39,19 +39,44 @@ function formatMessage(template: string, args: Array<string | number | boolean>)
 	});
 }
 
-function resolveLocaleBundle(language: string): Record<string, string> | undefined {
+/** The id of the inlined bundle that serves `language`, or undefined when none does. */
+function resolveLocaleId(language: string): string | undefined {
 	const lang = (language || '').toLowerCase();
-	if (LOCALE_BUNDLES[lang]) {
-		return LOCALE_BUNDLES[lang];
+	// Own-property check, not a bare lookup: LOCALE_BUNDLES is a plain object, so a lowercase
+	// prototype key ('constructor', '__proto__') reads back truthy and would be reported as a
+	// shipped locale — which for `<html lang>` means emitting lang="constructor".
+	if (Object.prototype.hasOwnProperty.call(LOCALE_BUNDLES, lang)) {
+		return lang;
 	}
 	// A bare language tag ('zh') may match a more specific bundle ('zh-cn'),
 	// but never the other way around ('zh-tw' must not get Simplified Chinese).
 	for (const locale of Object.keys(LOCALE_BUNDLES)) {
 		if (lang === locale.split('-')[0]) {
-			return LOCALE_BUNDLES[locale];
+			return locale;
 		}
 	}
 	return undefined;
+}
+
+function resolveLocaleBundle(language: string): Record<string, string> | undefined {
+	const id = resolveLocaleId(language);
+	return id === undefined ? undefined : LOCALE_BUNDLES[id];
+}
+
+/**
+ * The locale the runtime strings are actually rendered in.
+ *
+ * Not the same question as "what is VS Code's display language": t() falls back to the English
+ * bundle for every language this extension has no `package.nls.<locale>.json` for, so on a French
+ * or Brazilian-Portuguese install the strings on screen are English. Anything that has to *declare*
+ * the language of rendered text — a webview's `<html lang>` above all — must ask this rather than
+ * `vscode.env.language`, or it labels English text as French and sends assistive technology down
+ * the wrong pronunciation rules, which is the very mismatch declaring the language is meant to fix.
+ *
+ * The result is always either an id from LOCALE_BUNDLES or `en`, so it is safe to interpolate.
+ */
+export function resolvedLocale(language: string): string {
+	return resolveLocaleId(language) ?? 'en';
 }
 
 /**

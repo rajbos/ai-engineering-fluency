@@ -8,7 +8,7 @@ import * as crypto from 'crypto';
 
 // Localization support (key-based resolver over package.nls*.json — see l10n.ts
 // for why vscode.l10n.t() cannot be used directly with key-based strings)
-import { t as l10nT } from './l10n';
+import { t as l10nT, resolvedLocale } from './l10n';
 const l10n = { t: l10nT };
 
 // --- JSON data files ---
@@ -437,7 +437,7 @@ export function defaultSumBillingGroupCosts(billingGroupCosts: Record<string, nu
 }
 
 /** The computed-stat caches that carry a generation stamp. */
-export type ComputedStatsKey = 'daily' | 'fullDaily' | 'usage' | 'sessionInputs';
+export type ComputedStatsKey = 'detailed' | 'daily' | 'fullDaily' | 'usage' | 'sessionInputs';
 
 /**
  * Whether a computed-stat cache stamped at `stampedGeneration` may still be read.
@@ -454,6 +454,15 @@ export function isComputedStatsCurrent(
 	currentGeneration: number,
 ): boolean {
 	return stampedGeneration === currentGeneration;
+}
+
+/** The verified output of one refresh pass, as handed to publishRefreshResult(). */
+interface RefreshPublication {
+	detailedStats: DetailedStats;
+	dailyStats: DailyTokenStats[];
+	preloaded: SessionFilePreload[];
+	silent: boolean;
+	isLeader: boolean;
 }
 
 /** The minimum of a webview panel this module needs in order to post to it. */
@@ -493,6 +502,89 @@ export function chainBuild<T>(
 ): { result: Promise<T>; chain: Promise<void> } {
 	const result = previous.then(build, build);
 	return { result, chain: result.then(() => undefined, () => undefined) };
+}
+
+/**
+ * Merges `incoming` day rows into the full-year `current` array, or refuses the merge.
+ *
+ * The destination's own stamp is not enough. `current` comes from a generation-guarded
+ * accessor, so it is by construction current — but the rows being merged *into* it carry a
+ * generation of their own, and a run that started before a clear can reach here after a
+ * post-clear build has already repopulated the destination at the new generation. Merging
+ * then splices pre-clear rows into a current-stamped array and leaves the stamp untouched,
+ * so later reads accept the mixture as fully current. That is worse than no guard at all:
+ * the scheme actively certifies corrupted data. Refusing the merge leaves the destination
+ * holding only post-clear rows, which is what the clear asked for.
+ *
+ * Returns `undefined` when there is nothing to merge into or the input is superseded, so the
+ * caller leaves the destination untouched rather than writing a partial result.
+ */
+export function mergeDailyStatsIntoFullYear(
+	current: DailyTokenStats[] | undefined,
+	incoming: DailyTokenStats[],
+	originGeneration: number,
+	currentGeneration: number,
+): DailyTokenStats[] | undefined {
+	if (!current) { return undefined; }
+	if (!isComputedStatsCurrent(originGeneration, currentGeneration)) { return undefined; }
+	const fullMap = new Map(current.map(d => [d.date, d]));
+	for (const day of incoming) { fullMap.set(day.date, day); }
+	return Array.from(fullMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * Decides what one automatic Efficiency-rebuild request should do.
+ *
+ * `requestedFor` collapses two requests raised at the same generation. It cannot see the build
+ * queue, though, and a build sitting in that queue captures the live generation at the moment
+ * it starts running — so its result already answers an invalidation raised before it started.
+ * Close/reopen queues an initial build, `clearCache()` bumps the generation and asks for a
+ * rebuild, and without `queuedBuilds` that rebuild runs a second full-year walk immediately
+ * behind a queued build that was already going to produce post-clear data.
+ *
+ * A build that is already *running* counts only when it captured this same generation — see
+ * `runningFor`. An earlier draft assumed a running build always captured an *older* one and could
+ * never satisfy the invalidation, which is false: `clearCache()` bumps the generation and only
+ * then awaits `updateTokenStats()`, so a build starting inside that await captures the *bumped*
+ * generation, takes `queuedBuilds` back to zero on its way in, and is still running when the
+ * rebuild is finally requested. Counting queued builds alone then starts a second full-year walk
+ * behind a running build that was already going to produce exactly that payload. A running build
+ * at an older generation still does not count: its result will be discarded.
+ */
+export function planEfficiencyRebuild(
+	requestedFor: number | undefined,
+	currentGeneration: number,
+	queuedBuilds: number,
+	completedFor?: number,
+	runningFor?: number,
+): 'start' | 'coalesce-onto-queued' | 'coalesce-onto-running' | 'already-built' | 'already-requested' {
+	if (requestedFor === currentGeneration) { return 'already-requested'; }
+	// A build that already *finished* at this generation answers the invalidation just as well as
+	// one still queued. clearCache() requests its rebuild only after awaiting updateTokenStats(),
+	// which is long enough for a queued build to start (dropping `queuedBuilds` to zero), capture
+	// the bumped generation and complete — after which counting queued builds alone would start a
+	// second full-year walk over data that is already current.
+	if (completedFor === currentGeneration) { return 'already-built'; }
+	if (queuedBuilds > 0) { return 'coalesce-onto-queued'; }
+	return runningFor === currentGeneration ? 'coalesce-onto-running' : 'start';
+}
+
+/**
+ * The document language for a webview's `<html lang>`.
+ *
+ * Every view in this file renders localized text — a localized `<title>`, localized headings, or a
+ * `localization` payload the view bundle renders from — so a hardcoded `lang="en"` tells assistive
+ * technology to announce translated text with English pronunciation rules.
+ *
+ * Derived from the bundle that actually serves those strings, not from `vscode.env.language`:
+ * `l10n.t()` falls back to the English bundle for every language without a
+ * `package.nls.<locale>.json`, so on a French or Brazilian-Portuguese install the rendered text is
+ * English and `lang="fr"` would be the same mismatch pointing the other way. `resolvedLocale()`
+ * returns a LOCALE_BUNDLES id or `en`, a closed set of compile-time constants, so the value is
+ * safe to interpolate into the quoted attribute.
+ */
+export function webviewDocumentLanguage(vscodeLanguage: string | undefined): string {
+	return resolvedLocale((vscodeLanguage ?? '').trim());
 }
 
 /**
@@ -880,6 +972,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * so `efficiencyBuildGuards.test.ts` asserts the fields appear nowhere but their writes and
 	 * these accessors.
 	 */
+	private get currentDetailedStats(): DetailedStats | undefined {
+		return isComputedStatsCurrent(this._statsGeneration.detailed, this._cacheGeneration) ? this.lastDetailedStats : undefined;
+	}
 	private get currentDailyStats(): DailyTokenStats[] | undefined {
 		return isComputedStatsCurrent(this._statsGeneration.daily, this._cacheGeneration) ? this.lastDailyStats : undefined;
 	}
@@ -935,6 +1030,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// In-flight updateTokenStats promise — coalesces concurrent callers onto the same run
 	private _updateTokenStatsInFlight: Promise<DetailedStats | undefined> | undefined;
+	/**
+	 * The `_cacheGeneration` the in-flight run's results will belong to — registered when the run
+	 * starts and narrowed to _runRefreshCore()'s own capture once it gathers its inputs. A caller
+	 * on the far side of a clear this number predates must not coalesce onto that run, because the
+	 * run will discard its results rather than publish them. See updateTokenStats().
+	 */
+	private _updateTokenStatsInFlightGeneration: number | undefined;
+	/**
+	 * The generation of the last refresh that published successfully. A caller that waited out a
+	 * superseded run consults it before starting its own: that run can have retagged itself to the
+	 * caller's generation in its preamble (see beginRefreshGeneration()) and published valid data,
+	 * in which case a second full refresh is pure duplicate work.
+	 */
+	private _lastPublishedRefreshGeneration: number | undefined;
 	// Timed-out preloads continue in the background; skip duplicate work until their cache entries settle.
 	private readonly _deferredSessionPreloadFiles = new Set<string>();
 	private _deferredSessionPreloadCount = 0;
@@ -981,6 +1090,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _loadingEditors: { icon: string; name: string }[] = [];
 	/** Generation the last automatic Efficiency rebuild was requested for; see requestEfficiencyRebuild(). */
 	private _efficiencyRebuildRequestedFor: number | undefined;
+	/**
+	 * Efficiency builds queued through runEfficiencyBuild() that have not started running yet.
+	 * Each will capture the live `_cacheGeneration` when it does, so while this is non-zero an
+	 * invalidation needs no rebuild of its own — see planEfficiencyRebuild().
+	 */
+	private _efficiencyBuildsQueued = 0;
+	/**
+	 * The generation of the last Efficiency payload that was recorded rather than discarded. An
+	 * invalidation it already covers needs no rebuild — see planEfficiencyRebuild().
+	 */
+	private _efficiencyBuildCompletedFor: number | undefined;
+	/**
+	 * The generation captured by the Efficiency build currently running, or undefined when none is.
+	 * A running build that captured *this* generation is already producing the payload an
+	 * invalidation wants — see planEfficiencyRebuild().
+	 */
+	private _efficiencyBuildRunningFor: number | undefined;
 	/** Tail of the serialized Efficiency build queue; see runEfficiencyBuild(). */
 	private _efficiencyBuildChain: Promise<void> = Promise.resolve();
 	// Previous progress percentage used to animate the progress bar smoothly between tooltip updates
@@ -2132,7 +2258,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const initialData = JSON.stringify(this.buildWhatsNewViewData()).replace(/</g, '\\u003c');
 
 		return `<!DOCTYPE html>
-		<html lang="en">
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -2389,6 +2515,28 @@ class CopilotTokenTracker implements vscode.Disposable {
 			&& Number.isFinite(sessionData.mtime) && sessionData.mtime >= cutoffMs;
 	}
 
+	/**
+	 * Whether the provisional cache-only paint may still be published.
+	 *
+	 * The real refresh (kicked off 3s later in scheduleInitialUpdate()) runs concurrently with this
+	 * and normally publishes first, but there is no hard ordering guarantee: if it already
+	 * committed verified data, never overwrite it with these older, cache-only numbers. Also bail
+	 * if the window closed, or sample-data mode turned on (e.g. runLocalViewRegression() started
+	 * during this same, potentially slow aggregation) — publishing real cached stats now would
+	 * contaminate a regression/screenshot run that expects only its fixture data.
+	 *
+	 * `_hasCompletedRealRefresh` is no substitute for the generation check: a clearCache() landing
+	 * while calculateDetailedStats() was awaiting leaves that flag false — the clear's own refresh
+	 * has not published yet — while the status bar, Details and Chart would all be handed pre-clear
+	 * data stamped as current.
+	 */
+	private canPublishInstantPaint(startedAtGeneration: number): boolean {
+		if (this._hasCompletedRealRefresh || this._disposed || this.isSampleDataModeActive()) { return false; }
+		if (isComputedStatsCurrent(startedAtGeneration, this._cacheGeneration)) { return true; }
+		this.log('⚡ Discarding the instant cache-only paint: the caches were cleared while it ran');
+		return false;
+	}
+
 	private async renderInstantStatsFromCache(): Promise<void> {
 		// Captured before any await: what this paints is only as current as the cache it started
 		// from, so a clearCache() landing mid-aggregation must leave the stamp behind it.
@@ -2433,18 +2581,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (preloaded.length === 0) { return; }
 
 			const { stats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
-			// The real refresh (kicked off 3s later in scheduleInitialUpdate()) runs concurrently
-			// with this and is normally far faster to actually publish results once it starts, but
-			// there's no hard ordering guarantee. If it already committed verified data while this
-			// was still aggregating, never overwrite it with these older, cache-only numbers.
-			// Also bail if the window closed, or sample-data mode turned on (e.g. runLocalViewRegression()
-			// started during this same, potentially slow aggregation) — publishing real cached stats now
-			// would contaminate a regression/screenshot run that expects only its fixture data.
-			if (this._hasCompletedRealRefresh || this._disposed || this.isSampleDataModeActive()) { return; }
-			this.lastDetailedStats = stats;
+			if (!this.canPublishInstantPaint(startedAtGeneration)) { return; }
+			this.recordDetailedStats(stats, startedAtGeneration);
 			this.lastDailyStats = dailyStats;
 			this._statsGeneration.daily = startedAtGeneration;
-			this.mergeIntoFullDailyStats(dailyStats);
+			this.mergeIntoFullDailyStats(dailyStats, startedAtGeneration);
 			this.updateStatusBarAndTooltip(stats);
 			this.updateDetailsPanelIfOpen(stats, true);
 			this.updateChartPanelIfOpen(true);
@@ -2800,15 +2941,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Serializes Efficiency builds.
-	 *
-	 * Two builds overlapping is not only a render race: they write shared caches
-	 * (`lastUsageAnalysisStats`, `lastEfficiencySessionInputs`, `lastFullDailyStats`), so an
-	 * older build finishing second leaves stale data behind for every later view. Running
-	 * them one at a time removes that ordering problem at the source, and a queued refresh
-	 * then reuses whatever the build ahead of it just cached.
-	 */
-	/**
 	 * Requests the one automatic Efficiency rebuild a cache invalidation is owed.
 	 *
 	 * Two paths independently notice an invalidation and want the panel rebuilt: `clearCache()`,
@@ -2821,13 +2953,78 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private requestEfficiencyRebuild(): void {
 		if (!this.efficiencyPanel) { return; }
-		if (this._efficiencyRebuildRequestedFor === this._cacheGeneration) { return; }
+		const plan = planEfficiencyRebuild(
+			this._efficiencyRebuildRequestedFor, this._cacheGeneration, this._efficiencyBuildsQueued,
+			this._efficiencyBuildCompletedFor, this._efficiencyBuildRunningFor,
+		);
+		if (plan === 'already-requested') { return; }
 		this._efficiencyRebuildRequestedFor = this._cacheGeneration;
+		if (plan === 'already-built') {
+			this.log('⚡ [Efficiency] A build has already produced data for this generation; nothing to rebuild');
+			return;
+		}
+		if (plan === 'coalesce-onto-queued') {
+			this.log('⚡ [Efficiency] A queued build will capture this invalidation; not queuing a second walk');
+			return;
+		}
+		if (plan === 'coalesce-onto-running') {
+			this.log('⚡ [Efficiency] The running build already captured this invalidation; not queuing a second walk');
+			return;
+		}
 		void this.refreshEfficiencyPanel();
 	}
 
-	private runEfficiencyBuild<T>(build: () => Promise<T>): Promise<T> {
-		const { result, chain } = chainBuild(this._efficiencyBuildChain, build);
+	/**
+	 * Releases the automatic-rebuild stamp after a build fails.
+	 *
+	 * requestEfficiencyRebuild() marks a generation satisfied when it defers to a build that is
+	 * already queued — which assumes that build publishes. If it throws instead, the panel is left
+	 * on its error or fallback state and the stamp would keep every later request for that same
+	 * generation coalescing into nothing. Clearing it re-opens the retry without auto-retrying,
+	 * which could loop on a build that fails every time.
+	 *
+	 * Identity-checked on the failed build's own generation, exactly as clearInFlightRefresh() is
+	 * on its run. An unconditional clear lets a *stale* build's failure erase a stamp a newer
+	 * invalidation has already set — and once that newer replacement starts, dropping the queued
+	 * count to zero, the next automatic request queues a duplicate full-year walk.
+	 */
+	private releaseEfficiencyRebuildRequest(failedAtGeneration: number): void {
+		if (this._efficiencyRebuildRequestedFor !== failedAtGeneration) { return; }
+		this._efficiencyRebuildRequestedFor = undefined;
+	}
+
+	/**
+	 * Serializes Efficiency builds, tracking how many are queued but not yet started.
+	 *
+	 * Two builds overlapping is not only a render race: they write shared caches
+	 * (`lastUsageAnalysisStats`, `lastEfficiencySessionInputs`, `lastFullDailyStats`), so an older
+	 * build finishing second leaves stale data behind for every later view. Running them one at a
+	 * time removes that ordering problem at the source, and a queued refresh then reuses whatever
+	 * the build ahead of it just cached.
+	 *
+	 * The count is decremented immediately before `build` runs, so a non-zero count means at least
+	 * one build is still going to read the live generation. That is what lets
+	 * requestEfficiencyRebuild() coalesce onto it instead of queuing a second walk.
+	 *
+	 * Once a build starts, that count no longer describes it, so its captured generation is
+	 * recorded in `_efficiencyBuildRunningFor` for as long as it runs — a build that captured the
+	 * live generation answers an invalidation just as well while running as it did while queued.
+	 * The capture is taken here and *handed* to `build`, rather than each caller re-reading
+	 * `_cacheGeneration` as its first statement: one capture cannot drift from the other if there
+	 * is only one. It is cleared identity-checked, so a build settling after its successor started
+	 * cannot erase the successor's registration.
+	 */
+	private runEfficiencyBuild<T>(build: (generation: number) => Promise<T>): Promise<T> {
+		this._efficiencyBuildsQueued++;
+		const { result, chain } = chainBuild(this._efficiencyBuildChain, async () => {
+			this._efficiencyBuildsQueued--;
+			const generation = this._cacheGeneration;
+			this._efficiencyBuildRunningFor = generation;
+			try { return await build(generation); }
+			finally {
+				if (this._efficiencyBuildRunningFor === generation) { this._efficiencyBuildRunningFor = undefined; }
+			}
+		});
 		this._efficiencyBuildChain = chain;
 		return result;
 	}
@@ -3406,7 +3603,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// (via captureQuotaEntitlement). The status bar tooltip flyout is only rebuilt
 		// during token refreshes, so refresh it now so the freshly-fetched budget shows
 		// up immediately after sign-in instead of only on the next 5-minute refresh.
-		if (this.lastDetailedStats) {
+		if (this.currentDetailedStats) {
 		this.refreshBudgetDependentUi();
 	}
 	}
@@ -3416,7 +3613,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *  right after GitHub sign-in — is reflected without waiting for the next refresh.
 	 *  No-op until the first stats computation has produced a tooltip to update. */
 	private refreshBudgetDependentUi(): void {
-		const stats = this.lastDetailedStats;
+		const stats = this.currentDetailedStats;
 		if (!stats) { return; }
 		this.updateStatusBarBackgroundColor(stats);
 		this.statusBarItem.tooltip = this.buildTooltipMarkdown(stats);
@@ -3617,26 +3814,65 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.logFieldIfDefined('Unlimited PR summaries', planInfo.unlimited_pr_summaries);
 	}
 
+	/** Forgets the in-flight refresh registration, but only if `run` is still the registered one. */
+	private clearInFlightRefresh(run: Promise<DetailedStats | undefined>): void {
+		if (this._updateTokenStatsInFlight !== run) { return; }
+		this._updateTokenStatsInFlight = undefined;
+		this._updateTokenStatsInFlightGeneration = undefined;
+	}
+
 	public async updateTokenStats(silent: boolean = false, skipIfBusy = false): Promise<DetailedStats | undefined> {
 		// Coalesce concurrent callers onto the same in-flight run to prevent
 		// multiple executions from racing to update the status bar simultaneously.
 		// Background/timer callers pass skipIfBusy=true to drop the call rather than queue.
-		if (this._updateTokenStatsInFlight) {
+		//
+		// Coalescing is only sound while the run's results are still publishable. A run that
+		// gathered its inputs before a cache clear discards them rather than publishing
+		// (_runRefreshCore()), so handing it to a caller on the far side of that clear would leave
+		// clearCache() — which awaits this — having refreshed nothing at all. Such a caller waits
+		// the superseded run out and starts a fresh one below.
+		//
+		// Waiting rather than running the two concurrently is deliberate. acquireRefreshLock() is a
+		// cross-window file lock this window would still be holding, so an overlapping second run
+		// would lose the leader election to the very run it is replacing and parse as a follower —
+		// on FOLLOWER_MISS_BUDGET, over the cache the clear just emptied — and the first run's
+		// stopRefreshHeartbeat()/releaseRefreshLock() would fire underneath it.
+		while (this._updateTokenStatsInFlight) {
+			const inFlight = this._updateTokenStatsInFlight;
 			if (skipIfBusy) {
 				this.log('updateTokenStats already in progress, skipping background refresh');
 				return undefined;
 			}
-			this.log('updateTokenStats already in progress, coalescing onto existing run');
-			return this._updateTokenStatsInFlight;
+			if (this._updateTokenStatsInFlightGeneration === this._cacheGeneration) {
+				this.log('updateTokenStats already in progress, coalescing onto existing run');
+				return inFlight;
+			}
+			this.log('updateTokenStats in progress but predates a cache clear; waiting it out before refreshing');
+			const settled = await inFlight.catch(() => undefined);
+			// Its owner clears the registration in its own finally. Clearing it here too is what
+			// stops this loop spinning on a promise that has already settled.
+			this.clearInFlightRefresh(inFlight);
+			// That run was registered before this caller's generation, but it captures again once
+			// past its cache-load/snapshot/lock preamble (beginRefreshGeneration()). A clear landing
+			// inside that preamble therefore leaves it publishing valid post-clear data — and
+			// starting a second full refresh here would double the work for one clear.
+			if (settled !== undefined && this._lastPublishedRefreshGeneration === this._cacheGeneration) {
+				this.log('updateTokenStats: the run we waited for already covered this generation; reusing its result');
+				return settled;
+			}
 		}
 
 		const startedAt = Date.now();
 		this._updateTokenStatsStartedAt = startedAt;
-		this._updateTokenStatsInFlight = this._runUpdateTokenStats(silent);
+		const run = this._runUpdateTokenStats(silent);
+		this._updateTokenStatsInFlight = run;
+		this._updateTokenStatsInFlightGeneration = this._cacheGeneration;
 		try {
-			return await this._updateTokenStatsInFlight;
+			return await run;
 		} finally {
-			this._updateTokenStatsInFlight = undefined;
+			// Identity-checked: a superseded run settling after the fresh run that replaced it must
+			// not deregister the fresh run.
+			this.clearInFlightRefresh(run);
 			if (this._updateTokenStatsStartedAt === startedAt) {
 				this._updateTokenStatsStartedAt = undefined;
 			}
@@ -4092,12 +4328,141 @@ class CopilotTokenTracker implements vscode.Disposable {
 			|| (sessionFiles.length === 0 && (preloaded.length > 0 || this.cacheManager.cache.size > 0));
 	}
 
+	/**
+	 * Captures the generation this refresh's inputs belong to.
+	 *
+	 * Also republishes it as the in-flight run's generation: updateTokenStats() registered its own
+	 * capture before the cache load, snapshot warm and leader election this runs after, so a clear
+	 * landing in that preamble would otherwise leave a later caller declining to coalesce onto a
+	 * run that is in fact going to publish current data — and paying for a second full parse.
+	 */
+	private beginRefreshGeneration(): number {
+		this._updateTokenStatsInFlightGeneration = this._cacheGeneration;
+		return this._cacheGeneration;
+	}
+
+	/**
+	 * Whether a cache clear landed after this refresh gathered its inputs.
+	 *
+	 * The per-cache stamps make a later *read* of a superseded result recompute, but nothing in
+	 * them stops the run that produced it from publishing: updateDetailsPanelIfOpen(),
+	 * updateAnalysisPanelIfOpen() and updateEnvironmentalPanelIfOpen() post straight to their
+	 * panels, and no second refresh is started behind them. A run that fails this publishes
+	 * nothing at all — `_hasCompletedRealRefresh` included, since that flag tells the instant paint
+	 * that verified data has already reached the status bar.
+	 *
+	 * This keys on `_cacheGeneration` itself, not on the per-cache stamps, so a *scoped*
+	 * invalidation trips it too: refreshAnalysisPanel() bumps the same global counter while
+	 * meaning to invalidate usage-analysis state only, and carries the daily/full-year stamps
+	 * across its bump for exactly that reason. A token refresh in flight across one of those is
+	 * therefore discarded even though its inputs are fine — never wrong data, but a redundant
+	 * parse, since that method's own trailing updateTokenStats() then starts a fresh run.
+	 * Narrowing this wants a clear-generation the emptying writers (clearCache(),
+	 * runLocalViewRegression()) bump and the scoped ones do not; deliberately not built here.
+	 */
+	private isRefreshSuperseded(startedAtGeneration: number): boolean {
+		if (isComputedStatsCurrent(startedAtGeneration, this._cacheGeneration)) { return false; }
+		this.log('Refresh superseded by a cache invalidation; discarding its results');
+		return true;
+	}
+
+	/**
+	 * Whether a publication belonging to `originGeneration` may still reach a panel.
+	 *
+	 * The outer gates in publishRefreshResult() run *between* helpers, which is too late for a
+	 * helper that awaits and then publishes on its way back: updateAnalysisPanelIfOpen() posts
+	 * after calculateUsageAnalysisStats(), computeAndUploadFluencyScore() renders the Maturity
+	 * panel after calculateMaturityScores(), and evaluateAndSurfaceInsights() posts after writing
+	 * globalState. A clear landing inside any of those is already on screen by the time the caller
+	 * re-checks. So each of them asks this immediately before publishing.
+	 *
+	 * `undefined` means the caller is not part of a generation-owned refresh (showUsageAnalysis()
+	 * and friends), and is always allowed to publish.
+	 */
+	private mayPublishAt(originGeneration: number | undefined): boolean {
+		return originGeneration === undefined || isComputedStatsCurrent(originGeneration, this._cacheGeneration);
+	}
+
+	/** Publishes a detailed-stats result, stamped with the generation its inputs were gathered in. */
+	private recordDetailedStats(stats: DetailedStats, originGeneration: number): void {
+		this.lastDetailedStats = stats;
+		this._statsGeneration.detailed = originGeneration;
+	}
+
+	/**
+	 * Publishes one refresh's verified result, abandoning the sequence as soon as a cache clear
+	 * supersedes it.
+	 *
+	 * The generation is re-checked at every async boundary, not only on entry. Between the first
+	 * check and the last step this awaits calculateUsageAnalysisStats(), calculateMaturityScores()
+	 * and the insight pass — each long enough for a clearCache() to land — and everything after
+	 * such a bump (the Environmental panel, the persisted snapshot) would otherwise carry pre-clear
+	 * data that the clear waiting on this run is about to recompute anyway. What has already been
+	 * posted when a bump lands cannot be unposted, but every cache this writes is stamped with the
+	 * superseded generation, so no later read treats any of it as current.
+	 *
+	 * Returns false once superseded, so the caller reports the run as having published nothing.
+	 */
+	private async publishRefreshResult(result: RefreshPublication, startedAtGeneration: number): Promise<boolean> {
+		const { detailedStats, dailyStats, preloaded, silent, isLeader } = result;
+		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
+		// Set as soon as the verified result exists, before any of the (some awaited, some
+		// network-bound — see computeAndUploadFluencyScore below) publication steps that follow.
+		// renderInstantStatsFromCache() (if still in flight) checks this right before committing
+		// its own, older cache-only results — it must never see this as false once real data has
+		// already started being published, or it can overwrite an already-correct status bar.
+		this._hasCompletedRealRefresh = true;
+		this.lastDailyStats = dailyStats;
+		this._statsGeneration.daily = startedAtGeneration;
+		this.mergeIntoFullDailyStats(dailyStats, startedAtGeneration);
+		// Recorded *before* the panels publish, not after. _buildAnalysisUpdateData() and the
+		// initial Usage Analysis payload both read monthBillingGroupCosts through
+		// currentDetailedStats, and that accessor reads empty until this stamp lands — so
+		// publishing first dropped the Copilot Billing Coverage section from the very refresh
+		// that was holding the figure.
+		this.recordDetailedStats(detailedStats, startedAtGeneration);
+
+		this.updateStatusBarAndTooltip(detailedStats);
+		this.updateDetailsPanelIfOpen(detailedStats, silent);
+		this.updateChartPanelIfOpen(silent);
+		// The remaining sub-steps report real sub-progress on a loading screen that (for a panel
+		// like Environmental, which doesn't replace its own HTML until this whole function
+		// returns) otherwise sits parked at one fixed percentage for their entire duration —
+		// including computeAndUploadFluencyScore, which runs calculateMaturityScores() and an
+		// optional network upload on every non-silent refresh regardless of whether the Maturity
+		// panel is even open (see that method).
+		this.sendLoadingPanelMessage({
+			command: 'loadingStep', step: 'computing',
+			percentage: CopilotTokenTracker.REFRESH_STEP_PCT.analysis, label: l10n.t('loading.refresh.analyzingUsage'),
+		});
+		await this.updateAnalysisPanelIfOpen(silent, preloaded, startedAtGeneration);
+		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
+		this.sendLoadingPanelMessage({
+			command: 'loadingStep', step: 'computing',
+			percentage: CopilotTokenTracker.REFRESH_STEP_PCT.fluency, label: l10n.t('loading.refresh.scoringFluency'),
+		});
+		await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);
+		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
+		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
+		this.sendLoadingPanelMessage({
+			command: 'loadingStep', step: 'computing',
+			percentage: CopilotTokenTracker.REFRESH_STEP_PCT.insights, label: l10n.t('loading.refresh.finalizing'),
+		});
+		await this.evaluateAndSurfaceInsights(startedAtGeneration);
+		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
+
+		this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
+		this.persistRefreshResult(isLeader);
+		this._lastPublishedRefreshGeneration = startedAtGeneration;
+		return true;
+	}
+
 	/** Core discover → parse → compute → render → persist pass for one refresh. */
 	private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {
 		this.log(isLeader ? 'Updating token stats (leader)...' : 'Updating token stats (follower)...');
 		// Captured before the preload: this run's output belongs to the generation its inputs were
 		// gathered in, not the one each later calculation starts in (see calculateUsageAnalysisStats).
-		const startedAtGeneration = this._cacheGeneration;
+		const startedAtGeneration = this.beginRefreshGeneration();
 
 		// Reset checkpoint counters at the start of each refresh cycle
 		if (isLeader) {
@@ -4109,7 +4474,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this._loadingEditors = [];
 		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'discovering' });
-		if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('discovering'); }
+		this.showLoadingTooltipForStep('discovering', silent);
 
 		// Streaming pipeline: discovery and parsing run concurrently.
 		// Workers start processing files as each adapter batch arrives.
@@ -4128,43 +4493,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.warn(`Failed to update seen-editor state: ${error}`);
 		}
 
-		const refreshStepPct = CopilotTokenTracker.REFRESH_STEP_PCT;
-		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing', percentage: refreshStepPct.stats, label: l10n.t('loading.refresh.calculatingStats') });
-		if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('computing'); }
+		this.sendLoadingPanelMessage({
+			command: 'loadingStep', step: 'computing',
+			percentage: CopilotTokenTracker.REFRESH_STEP_PCT.stats, label: l10n.t('loading.refresh.calculatingStats'),
+		});
+		this.showLoadingTooltipForStep('computing', silent);
 
 		const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
-		// Set as soon as the verified result exists, before any of the (some awaited, some
-		// network-bound — see computeAndUploadFluencyScore below) publication steps that follow.
-		// renderInstantStatsFromCache() (if still in flight) checks this right before committing
-		// its own, older cache-only results — it must never see this as false once real data has
-		// already started being published, or it can overwrite an already-correct status bar.
-		this._hasCompletedRealRefresh = true;
-		this.lastDailyStats = dailyStats;
-		this._statsGeneration.daily = startedAtGeneration;
-		this.mergeIntoFullDailyStats(dailyStats);
-
-		this.updateStatusBarAndTooltip(detailedStats);
-
-		this.updateDetailsPanelIfOpen(detailedStats, silent);
-		this.updateChartPanelIfOpen(silent);
-		// The remaining sub-steps report real sub-progress on a loading screen that (for a panel
-		// like Environmental, which doesn't replace its own HTML until this whole function
-		// returns) otherwise sits parked at one fixed percentage for their entire duration —
-		// including computeAndUploadFluencyScore, which runs calculateMaturityScores() and an
-		// optional network upload on every non-silent refresh regardless of whether the Maturity
-		// panel is even open (see that method).
-		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing', percentage: refreshStepPct.analysis, label: l10n.t('loading.refresh.analyzingUsage') });
-		await this.updateAnalysisPanelIfOpen(silent, preloaded, startedAtGeneration);
-		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing', percentage: refreshStepPct.fluency, label: l10n.t('loading.refresh.scoringFluency') });
-		await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);
-		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
-		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing', percentage: refreshStepPct.insights, label: l10n.t('loading.refresh.finalizing') });
-		await this.evaluateAndSurfaceInsights();
-
-		this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
-		this.lastDetailedStats = detailedStats;
-
-		this.persistRefreshResult(isLeader);
+		const published = await this.publishRefreshResult(
+			{ detailedStats, dailyStats, preloaded, silent, isLeader }, startedAtGeneration,
+		);
+		if (!published) { return undefined; }
 
 		// Skip the one-time full-year backfill when this run's discovery can't be trusted to be
 		// complete — see isDiscoveryUntrustworthyForBackfill() for why. Leader-only: unlike the
@@ -4313,12 +4652,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return getEditorIconByName(editorName);
 	}
 
-	private mergeIntoFullDailyStats(dailyStats: DailyTokenStats[]): void {
-		const current = this.currentFullDailyStats;
-		if (!current) { return; }
-		const fullMap = new Map(current.map(d => [d.date, d]));
-		for (const day of dailyStats) { fullMap.set(day.date, day); }
-		this.lastFullDailyStats = Array.from(fullMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+	/**
+	 * Splices a just-computed 30-day window into the cached full year.
+	 *
+	 * `originGeneration` is the generation the incoming rows' inputs were gathered in, and the
+	 * merge is refused when it is stale — see mergeDailyStatsIntoFullYear() for why guarding the
+	 * destination alone lets pre-clear rows into a current-stamped array.
+	 */
+	private mergeIntoFullDailyStats(dailyStats: DailyTokenStats[], originGeneration: number): void {
+		const merged = mergeDailyStatsIntoFullYear(
+			this.currentFullDailyStats, dailyStats, originGeneration, this._cacheGeneration,
+		);
+		if (merged) { this.lastFullDailyStats = merged; }
 	}
 
 	private updateStatusBarAndTooltip(detailedStats: DetailedStats): void {
@@ -4330,6 +4675,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		this.statusBarItem.tooltip = this.buildTooltipMarkdown(detailedStats);
 		this.updateStatusBarBackgroundColor(detailedStats);
+	}
+
+	/**
+	 * Shows the loading tooltip for `step`, unless this is a silent refresh or the Details panel is
+	 * already showing its own loading screen (which owns the tooltip while it is up).
+	 */
+	private showLoadingTooltipForStep(step: 'discovering' | 'computing', silent: boolean): void {
+		if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown(step); }
 	}
 
 	private buildLoadingTooltipMarkdown(step: 'discovering' | 'parsing' | 'computing', percentage?: number): vscode.MarkdownString {
@@ -4593,6 +4946,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async updateAnalysisPanelIfOpen(silent: boolean, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<void> {
 		if (!this.analysisPanel) { return; }
 		const analysisStats = await this.calculateUsageAnalysisStats(false, preloaded, originGeneration);
+		if (!this.mayPublishAt(originGeneration)) { return; }
 		if (silent) {
 			// Reuse the same payload builder as the full-refresh paths (_buildAnalysisUpdateData)
 			// so every field the webview renders (correctionReport, repeatedTasks, curationAnalysis, …)
@@ -4614,6 +4968,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const freshMaturityData = (!silent || this.maturityPanel)
 			? await this.calculateMaturityScores(false, preloaded, originGeneration)
 			: undefined;
+		if (!this.mayPublishAt(originGeneration)) { return; }
 		if (this.maturityPanel && !silent && freshMaturityData) {
 			this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, freshMaturityData);
 		}
@@ -4628,6 +4983,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			})),
 			computedAt: new Date().toISOString(),
 		};
+		// Gated on the way in, not ordered on the way out: this upload is detached, so two of them
+		// can still land out of order and leave the server holding the older score. Making that
+		// safe needs the server to reject an older version, which is not this PR's to change.
+		if (!this.mayPublishAt(originGeneration)) { return; }
 		void (async () => {
 			try { await this.backend!.uploadFluencyScoreToSharingServer(settings, scorePayload); }
 			catch (err: unknown) { this.warn(`Failed to upload fluency score to sharing server: ${err}`); }
@@ -4651,7 +5010,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private async evaluateAndSurfaceInsights(): Promise<void> {
+	private async evaluateAndSurfaceInsights(originGeneration?: number): Promise<void> {
 		const stats = this.currentUsageAnalysisStats;
 		if (!stats) { return; }
 
@@ -4677,6 +5036,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.refreshInsightBadgeFromState(now, evaluated);
 
 		await this.context.globalState.update('insights.state', this._insightStateBag);
+		if (!this.mayPublishAt(originGeneration)) { return; }
 
 		// Push updated insights to the analysis panel if it is open
 		if (this.analysisPanel) {
@@ -4696,6 +5056,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this._lastInsightNudgeAt = now;
 		await this.context.globalState.update('insights.lastNudgeAt', now);
+		// Second check, for the same reason as the first: the toast is a publication too, and this
+		// await is another window for a clear to land in.
+		if (!this.mayPublishAt(originGeneration)) { return; }
 
 		const view = l10n.t('button.openInsightsTab');
 		const dismiss = l10n.t('button.dismiss');
@@ -5252,7 +5615,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private refreshOpenPanelsForSettingChange(): void {
-		const stats = this.lastDetailedStats;
+		const stats = this.currentDetailedStats;
 		if (!stats) { return; }
 		// Refresh status bar text and background color (respects new display settings)
 		this.setStatusBarText(this.buildStatusBarText(stats));
@@ -5502,7 +5865,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * exists because stamping with this function's own start would be wrong for a refresh: the
 	 * entries can predate a clear that landed while the refresh was still preloading, and a
 	 * calculation starting *after* that clear would otherwise stamp pre-clear inputs as current.
-	 * Callers that pass no preloaded data have nothing older than this call to account for.
+	 * A caller that passes no `preloaded` can still have older inputs: the Efficiency build's
+	 * full-year walk repopulates the raw session cache before this runs, so it passes its own
+	 * origin generation too. Only a caller with nothing older than this call may omit it.
 	 */
 	private async calculateUsageAnalysisStats(useCache = true, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<UsageAnalysisStats> {
 		const cachedUsage = this.currentUsageAnalysisStats;
@@ -5573,7 +5938,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			recentSessions,
 			correctionReport,
 			repeatedTasks,
-			curationAnalysis: this.computeCurationAnalysis(last30DaysStats),
+			curationAnalysis: this.computeCurationAnalysis(last30DaysStats, startedAtGeneration),
 			agenticDailyTrend,
 			autoCompactionsLast7Days,
 		};
@@ -5586,23 +5951,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Build a ToolCurationAnalysis from runtime tools + workspace files + recent usage.
 	 * Returns null when there are no available tools to analyse.
 	 */
-	private computeCurationAnalysis(last30Days: UsageAnalysisPeriod): ToolCurationAnalysis | null {
+	private computeCurationAnalysis(last30Days: UsageAnalysisPeriod, originGeneration?: number): ToolCurationAnalysis | null {
 		try {
 			const windowDays = vscode.workspace.getConfiguration('aiEngineeringFluency').get<number>('curation.timeWindowDays', 30);
 			const workspaceFolderPaths = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
 			this.postUsageLoadingProgress('curation:start', {
 				workspaces: workspaceFolderPaths.length,
-			});
+			}, originGeneration);
 
 			// Collect available tools: VS Code runtime tools + mcp.json + extension-contributed + settings + skills.
 			const runtimeEntries = _enumerateRuntimeTools(vscode.lm.tools);
 			this.postUsageLoadingProgress('curation:runtimeTools', {
 				count: runtimeEntries.length,
-			});
+			}, originGeneration);
 			const mcpEntries = _buildMcpEntriesFromJson(workspaceFolderPaths);
 			this.postUsageLoadingProgress('curation:mcpJson', {
 				count: mcpEntries.length,
-			});
+			}, originGeneration);
 			// Build the set of MCP servers that currently have at least one tool enabled in
 			// `vscode.lm.tools`. Extension-contributed entries cross-reference against this
 			// set so we can mark them as enabled or disabled (and avoid recommending the user
@@ -5617,18 +5982,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.postUsageLoadingProgress('curation:mcpSources', {
 				extensionEntries: extensionMcpEntries.length,
 				settingsEntries: settingsMcpEntries.length,
-			});
+			}, originGeneration);
 			const configuredSkillDirsRaw = vscode.workspace.getConfiguration('chat').get<unknown>('agentSkillsLocations', []);
 			const configuredSkillDirs = Array.isArray(configuredSkillDirsRaw)
 				? configuredSkillDirsRaw.filter((dir): dir is string => typeof dir === 'string')
 				: [];
 			this.postUsageLoadingProgress('curation:skillsScanStart', {
 				configuredLocations: configuredSkillDirs.length,
-			});
+			}, originGeneration);
 			const skillEntries = _discoverSkillEntries(workspaceFolderPaths, { additionalSkillDirs: configuredSkillDirs });
 			this.postUsageLoadingProgress('curation:skillsScanDone', {
 				skills: skillEntries.length,
-			});
+			}, originGeneration);
 
 			// Merge: runtime entries already include MCP tools from vscode.lm.tools.
 			// Deduplicate MCP server entries (prefer runtime over all static sources).
@@ -5643,24 +6008,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			const availableTools = [...runtimeEntries, ...uniqueMcpEntries, ...uniqueExtensionMcpEntries, ...uniqueSettingsMcpEntries, ...skillEntries];
 			if (availableTools.length === 0) {
-				this.postUsageLoadingProgress('curation:done', { availableTools: 0 });
+				this.postUsageLoadingProgress('curation:done', { availableTools: 0 }, originGeneration);
 				return null;
 			}
 			this.postUsageLoadingProgress('curation:analyzing', {
 				availableTools: availableTools.length,
 				skills: skillEntries.length,
-			});
+			}, originGeneration);
 
 			const result = _analyzeToolCuration(availableTools, last30Days, windowDays);
 			this.postUsageLoadingProgress('curation:done', {
 				availableTools: availableTools.length,
 				unusedTools: result.unusedTools.length,
-			});
+			}, originGeneration);
 			return result;
 		} catch (err) {
 			this.postUsageLoadingProgress('curation:error', {
 				error: String(err),
-			});
+			}, originGeneration);
 			this.log(`⚠️ Tool curation analysis failed: ${String(err)}`);
 			return null;
 		}
@@ -8675,7 +9040,7 @@ private computeFallbackDailyRollup(
 		});
 
 		// Use cached stats if available, otherwise show loading screen while calculating
-		let stats = this.lastDetailedStats;
+		let stats = this.currentDetailedStats;
 		if (!stats) {
 			this.log('No cached stats — showing loading screen while calculating...');
 			this._detailsPanelIsLoading = true;
@@ -8745,7 +9110,7 @@ private computeFallbackDailyRollup(
 		});
 
 		const panel = this.environmentalPanel;
-		if (this.lastDetailedStats) {
+		if (this.currentDetailedStats) {
 			// Cached stats exist — updateTokenStats() below is a no-op (see the ?? short-circuit),
 			// so this loading screen is only ever painted for an instant before being replaced and
 			// never needs to receive progress messages.
@@ -8757,7 +9122,7 @@ private computeFallbackDailyRollup(
 			panel.webview.html = this.getLoadingHtml(panel.webview, this._updateTokenStatsStartedAt ?? Date.now());
 		}
 		void (async () => {
-			const stats = this.lastDetailedStats ?? await this.updateTokenStats();
+			const stats = this.currentDetailedStats ?? await this.updateTokenStats();
 			this._refreshLoadingPanels.delete(panel);
 			if (this.environmentalPanel !== panel || !stats) { return; }
 			panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
@@ -8779,7 +9144,7 @@ private computeFallbackDailyRollup(
 		const initialData = JSON.stringify(dataWithBackend).replace(/</g, '\\u003c');
 
 		return `<!DOCTYPE html>
-		<html lang="en">
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9174,7 +9539,7 @@ private computeFallbackDailyRollup(
 			repeatedTasks: analysisStats.repeatedTasks ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
 			copilotApiBalance: this._buildCopilotApiBalance(),
-			monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
+			monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
 			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
 		};
 	}
@@ -9198,17 +9563,33 @@ private computeFallbackDailyRollup(
 	}
 
 	private async loadAnalysisStatsInBackground(panel: vscode.WebviewPanel): Promise<void> {
+		// Captured before the walk and handed to it, so the generation this result is stamped with
+		// and the one gated on below are the same number by construction rather than by timing.
+		const startedAtGeneration = this._cacheGeneration;
 		try {
 			this.postUsageLoadingProgress('start');
-			const analysisStats = await this.calculateUsageAnalysisStats(true);
+			const analysisStats = await this.calculateUsageAnalysisStats(true, undefined, startedAtGeneration);
 			if (!this.analysisPanel || this.analysisPanel !== panel) { return; }
+			// Same boundary as the helpers publishRefreshResult() gates: this posts straight to the
+			// panel, so the stamp that makes currentUsageAnalysisStats reject the cached result does
+			// nothing to stop the result itself reaching the view. A clear landing during the walk
+			// would otherwise let this land *after* the clear's replacement refresh and overwrite it.
+			// Nothing is stranded by dropping it: that refresh's updateAnalysisPanelIfOpen() posts
+			// updateStats to this panel, which leaves the loading state on its own.
+			if (!this.mayPublishAt(startedAtGeneration)) { return; }
 			this.postUsageLoadingProgress('ready', {
 				availableTools: analysisStats.curationAnalysis?.availableTools.length ?? 0,
 				unusedTools: analysisStats.curationAnalysis?.unusedTools.length ?? 0,
 			});
 			void this.analysisPanel.webview.postMessage({ command: 'updateStats', data: this._buildAnalysisUpdateData(analysisStats) });
 		} catch (err) {
+			// Logged unconditionally — the failure is real and worth recording whatever its
+			// generation. The two *panel-facing* messages are not: a superseded load failing is
+			// no reason to replace the replacement refresh's loading state, or the valid content
+			// it already rendered, with an error about a walk whose result was going to be
+			// discarded anyway. Same gate as the success path, for the same reason.
 			this.error(`Failed to load usage analysis stats: ${err}`);
+			if (!this.mayPublishAt(startedAtGeneration)) { return; }
 			this.postUsageLoadingProgress('error', { error: String(err) });
 			if (this.analysisPanel && this.analysisPanel === panel) {
 				void this.analysisPanel.webview.postMessage({ command: 'updateStatsError', error: String(err) });
@@ -9216,8 +9597,21 @@ private computeFallbackDailyRollup(
 		}
 	}
 
-	private postUsageLoadingProgress(stage: string, details?: Record<string, unknown>): void {
+	/**
+	 * Posts one loading-progress stage to the Usage Analysis panel.
+	 *
+	 * `originGeneration` gates the post the same way mayPublishAt() gates a result: a walk that a
+	 * clear has superseded must not keep narrating its progress to the live panel. The terminal
+	 * `ready`/`error` messages were gated first, but the curation stages come from
+	 * computeCurationAnalysis() *inside* the walk — so a superseded walk could still regress the
+	 * replacement refresh's loading UI back to its own stale stages and counts until it finished.
+	 *
+	 * `undefined` means the caller is not part of a generation-owned walk and always posts, the
+	 * same convention mayPublishAt() uses.
+	 */
+	private postUsageLoadingProgress(stage: string, details?: Record<string, unknown>, originGeneration?: number): void {
 		if (!this.analysisPanel) { return; }
+		if (!this.mayPublishAt(originGeneration)) { return; }
 		void this.analysisPanel.webview.postMessage({
 			command: 'usageLoadingProgress',
 			stage,
@@ -9756,7 +10150,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const initialData = JSON.stringify({ ...logData, focusedTurnNumber, compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }).replace(/</g, '\\u003c');
 
 		return `<!DOCTYPE html>
-		<html lang="en">
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9815,15 +10209,20 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		// would only guarantee the failure state on the way there.
 		//
 		// The generation is global, but this refresh is not: it invalidates usage-analysis
-		// state and nothing else. The daily and full-year caches are carried across the bump
-		// so they stay readable, because a bare bump silently truncated an open Chart. With
+		// state and nothing else. The detailed, daily and full-year caches are carried across the
+		// bump so they stay readable. Dropping the detailed one costs this panel's own Copilot
+		// Billing Coverage section — _buildAnalysisUpdateData() and the initial payload read
+		// monthBillingGroupCosts through currentDetailedStats — and a bare bump silently
+		// truncated an open Chart besides. With
 		// `currentFullDailyStats` reading stale, _runRefreshCore()'s backfill is still skipped
 		// (it skips whenever a chart panel is open), `mergeIntoFullDailyStats()` early-returns,
 		// and the chart then re-renders from the 30-day fallback — losing its week, month and
 		// all-history ranges after nothing more than a Usage Analysis refresh.
+		const detailedWasCurrent = isComputedStatsCurrent(this._statsGeneration.detailed, this._cacheGeneration);
 		const dailyWasCurrent = isComputedStatsCurrent(this._statsGeneration.daily, this._cacheGeneration);
 		const fullDailyWasCurrent = isComputedStatsCurrent(this._statsGeneration.fullDaily, this._cacheGeneration);
 		this._cacheGeneration++;
+		if (detailedWasCurrent) { this._statsGeneration.detailed = this._cacheGeneration; }
 		if (dailyWasCurrent) { this._statsGeneration.daily = this._cacheGeneration; }
 		if (fullDailyWasCurrent) { this._statsGeneration.fullDaily = this._cacheGeneration; }
 		await this.loadAnalysisStatsInBackground(this.analysisPanel);
@@ -10379,7 +10778,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     );
 
     return `<!DOCTYPE html>
-	<html lang="en">
+	<html lang="${webviewDocumentLanguage(vscode.env.language)}">
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10447,7 +10846,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     );
 
     return `<!DOCTYPE html>
-		<html lang="en">
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10517,9 +10916,9 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		void (async () => {
 			let generation = this._cacheGeneration;
 			try {
-				const data = await this.runEfficiencyBuild(() => {
-					generation = this._cacheGeneration;
-					return this.buildEfficiencyViewData(false, this.efficiencyLoadingSink());
+				const data = await this.runEfficiencyBuild(startedAt => {
+					generation = startedAt;
+					return this.buildEfficiencyViewData(false, this.efficiencyLoadingSink(), generation);
 				});
 				// Record the payload even if this panel is gone: it is valid data, and a later
 				// refresh falls back to it rather than stranding its panel on the loading screen.
@@ -10537,6 +10936,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				this.log('⚡ Efficiency view rendered');
 			} catch (error) {
 				this.error('Error building Efficiency view:', error);
+				this.releaseEfficiencyRebuildRequest(generation);
 				this.showEfficiencyError(panel, error);
 			}
 		})();
@@ -10554,27 +10954,36 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// wait leaves it building from post-clear state, not stale state.
 		let generation = this._cacheGeneration;
 		try {
-			data = await this.runEfficiencyBuild(async () => {
-				generation = this._cacheGeneration;
+			data = await this.runEfficiencyBuild(async startedAt => {
+				generation = startedAt;
 				// Swap in the loading screen only once this refresh actually starts; queued
 				// behind an initial build, it would otherwise blank the panel and sit there.
 				if (this.efficiencyPanel === panel) { panel.webview.html = this.getLoadingHtml(panel.webview); }
-				return this.buildEfficiencyViewData(true, this.efficiencyLoadingSink());
+				return this.buildEfficiencyViewData(true, this.efficiencyLoadingSink(), generation);
 			});
-			// Same reasoning as the initial build, minus the rebuild: this *is* the refresh, so
-			// re-entering it on a clear that landed mid-build would loop. Fall back to the last
-			// good payload if the clear left one, else show the failure state.
+			// Same reasoning as the initial build: show something now — the last good payload if
+			// the clear left one, else the failure state — and queue the rebuild that replaces it.
+			//
+			// This path used to queue nothing, on the grounds that "this *is* the refresh, so
+			// re-entering it would loop". That was wrong: requestEfficiencyRebuild() records the
+			// generation it requested for, so a second request at the same generation no-ops and a
+			// loop would need a fresh bump every round. clearCache() hid the gap by requesting the
+			// rebuild itself; refreshAnalysisPanel() bumps the generation and does not, so an
+			// Efficiency refresh spanning one was left showing the fallback or the staleAfterClear
+			// state with nothing queued to correct it.
 			if (!this.recordEfficiencyPayload(data, generation)) {
 				if (this.efficiencyPanel !== panel) { return; }
 				const afterClear = this._lastEfficiencyViewData;
 				if (afterClear) { panel.webview.html = this.getEfficiencyHtml(panel.webview, afterClear); }
 				else { this.showEfficiencyError(panel, new Error(l10n.t('efficiency.error.staleAfterClear'))); }
+				this.requestEfficiencyRebuild();
 				return;
 			}
 		} catch (error) {
 			// Never strand the panel on the loading screen: fall back to the last good payload,
 			// which the initial build records even when its own render was skipped.
 			this.error('Error refreshing Efficiency view:', error);
+			this.releaseEfficiencyRebuildRequest(generation);
 			const previous = this._lastEfficiencyViewData;
 			if (this.efficiencyPanel !== panel) { return; }
 			if (previous) { panel.webview.html = this.getEfficiencyHtml(panel.webview, previous); }
@@ -10615,13 +11024,15 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * building the Efficiency view, so the result is memoized alongside the other
 	 * `last*` stat caches and invalidated by the same paths.
 	 */
-	private async collectEfficiencySessionInputs(weeksBack = 12, useCache = true): Promise<EfficiencySessionInput[]> {
+	private async collectEfficiencySessionInputs(
+		weeksBack = 12, useCache = true, originGeneration?: number,
+	): Promise<EfficiencySessionInput[]> {
 		const cachedInputs = this.currentEfficiencySessionInputs;
 		if (useCache && cachedInputs) {
 			this.log('⚡ [Efficiency] Using cached session inputs');
 			return cachedInputs;
 		}
-		const startedAtGeneration = this._cacheGeneration;
+		const startedAtGeneration = originGeneration ?? this._cacheGeneration;
 		const now = new Date();
 		const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - weeksBack * 7);
 		const inputs: EfficiencySessionInput[] = [];
@@ -10721,7 +11132,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 		const detail = esc(String(error instanceof Error ? error.message : error));
 		return `<!DOCTYPE html>
-		<html lang="en">
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10758,6 +11169,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			return false;
 		}
 		this._lastEfficiencyViewData = data;
+		this._efficiencyBuildCompletedFor = builtAtGeneration;
 		return true;
 	}
 
@@ -10781,7 +11193,9 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * fills, so per-file progress is reported from that walk rather than from a separate
 	 * warm-up pass over the same corpus.
 	 */
-	private async collectEfficiencyInputs(forceRecalc: boolean, send: (msg: object) => void): Promise<{
+	private async collectEfficiencyInputs(
+		forceRecalc: boolean, send: (msg: object) => void, originGeneration: number | undefined,
+	): Promise<{
 		dailyStats: DailyTokenStats[]; usage: UsageAnalysisStats; sessionInputs: EfficiencySessionInput[];
 	}> {
 		const stepPct = CopilotTokenTracker.EFFICIENCY_STEP_PCT;
@@ -10814,9 +11228,13 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			this.postEfficiencyStep(send, stepPct.daily, l10n.t('loading.efficiency.dailyActivity'));
 		}
 		this.postEfficiencyStep(send, stepPct.usage, l10n.t('loading.efficiency.usageAnalysis'));
-		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
+		// Both of these start *after* the full-year walk above, which repopulates the raw session
+		// cache. A clearCache() landing during that walk leaves pre-clear entries in it, and these
+		// two then read them as cache hits — so they are stamped with the generation this build's
+		// inputs were gathered in, not the newer one they happen to start in.
+		const usage = await this.calculateUsageAnalysisStats(!forceRecalc, undefined, originGeneration);
 		this.postEfficiencyStep(send, stepPct.sessions, l10n.t('loading.efficiency.sessionSignals'));
-		const sessionInputs = await this.collectEfficiencySessionInputs(12, !forceRecalc);
+		const sessionInputs = await this.collectEfficiencySessionInputs(12, !forceRecalc, originGeneration);
 		this.postEfficiencyStep(send, stepPct.trends, l10n.t('loading.efficiency.buildingTrends'));
 		return { dailyStats, usage, sessionInputs };
 	}
@@ -10824,9 +11242,10 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	private async buildEfficiencyViewData(
 		forceRecalc = false,
 		send: (msg: object) => void = () => { /* no loading screen to report to */ },
+		originGeneration?: number,
 	): Promise<EfficiencyViewData> {
 		const now = new Date();
-		const { dailyStats, usage, sessionInputs } = await this.collectEfficiencyInputs(forceRecalc, send);
+		const { dailyStats, usage, sessionInputs } = await this.collectEfficiencyInputs(forceRecalc, send, originGeneration);
 		const deps = {
 			calculateEstimatedCost: (mu: ModelUsage, src: 'provider' | 'copilot') => this.calculateEstimatedCost(mu, src),
 			now,
@@ -10907,7 +11326,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		};
 		const initialData = JSON.stringify(dataWithLocalization).replace(/</g, '\\u003c');
 		return `<!DOCTYPE html>
-		<html lang="en">
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11416,6 +11835,19 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       : "";
     const configScript = `<script nonce="${nonce}">window.__DASHBOARD_CONFIG__ = ${JSON.stringify(backendConfig).replace(/</g, "\\u003c")};</script>`;
 
+    // The second document that deliberately declares `lang="en"`, for the same reason as
+    // getLoadingHtml(): its content is English, not the viewer's language.
+    //
+    // The `localization` payload above looks like it makes this view localized, but it is behind
+    // `data ?` and the only call site (`getDashboardHtml(webview, undefined)`) passes undefined —
+    // so `window.__INITIAL_DASHBOARD__` is never emitted, `initializeWebviewLocalization()` in
+    // dashboard/main.ts never runs, and the stats arrive later by postMessage carrying no
+    // localization. That bundle renders raw English literals ("Synced Tokens", "Estimated Cost",
+    // "Loading dashboard data…"), and this <title> is hardcoded English too.
+    //
+    // Emitting the payload unconditionally would not fix it: nothing in dashboard/main.ts reads
+    // the table. Localizing that bundle is the real fix and is the same follow-up the loading
+    // fragment needs.
     return `<!DOCTYPE html>
 		<html lang="en">
 		<head>
@@ -11489,6 +11921,20 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     return '';
   }
 
+  /**
+   * The shared loading screen — the one document that deliberately still declares `lang="en"`.
+   *
+   * `lang` names the predominant language of a document's content, and this body is
+   * loadingHtml.getLoadingHtmlBody(), which emits hardcoded English throughout: "Analyzing Your
+   * AI Activity", "Building Activity Index", the four step labels, the chips. Only the `<title>`
+   * and the subtitle (replaced at runtime with `loading.efficiency.*`) are localized.
+   *
+   * Deriving the viewer's locale here would therefore mislabel the *whole page* on a zh-CN
+   * install, where declaring `en` mislabels only those two elements — which is the state this
+   * document was already in. Twelve documents render localized bodies and do derive it; this one
+   * is the exception until its fragment is localized, which is its own change: the fragment is
+   * shared with the desktop tray app and has no localization payload to draw on.
+   */
   private getLoadingHtml(webview: vscode.Webview, startedAtMs: number = Date.now()): string {
     const nonce = getNonce();
     const iconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'robot-icon.png'));
@@ -11551,7 +11997,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     );
 
     return `<!DOCTYPE html>
-		<html lang="en">
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -13561,7 +14007,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
 
       const { backendStorageInfo, githubAuthStatus } = await this.sendBackendStorageInfoEarly(panel);
 
-      if (!this.lastDetailedStats) {
+      if (!this.currentDetailedStats) {
         this.log(
           "⚡ No cached stats found - forcing initial stats calculation to populate cache...",
         );
@@ -14129,7 +14575,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
-		<html lang="en">
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14227,7 +14673,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     const initialData = JSON.stringify(chartData).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
-		<html lang="en">
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14296,7 +14742,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       curationAnalysis: stats.curationAnalysis ?? null,
       sessionColumnSettings,
       copilotApiBalance: this._buildCopilotApiBalance(),
-      monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
+      monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
       worktreeScanRoots: this.buildInitialWorktreeRoots(),
       localization: this.getWebviewLocalization(),
       worktreeBackgroundScan: this.context.globalState.get<WorktreeBackgroundScanResult>(CopilotTokenTracker.WORKTREE_BG_SCAN_RESULT_KEY) ?? null,
@@ -14316,7 +14762,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     const initialData = this._buildUsageAnalysisInitialData(stats, detectedLocale);
 
     return `<!DOCTYPE html>
-		<html lang="en">
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
