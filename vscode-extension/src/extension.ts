@@ -161,7 +161,7 @@ import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { analyzeHydraFusionSession, aiuToUsd } from '../../src/hydrafusion';
 import type { HydraFusionSummary } from '../../src/hydrafusion';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
-import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout } from './utils/promises';
+import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout, type WakeupGate } from './utils/promises';
 import { WebviewMessageReplay } from './webviewMessageReplay';
 
 // --- Session parsing & token estimation ---
@@ -699,6 +699,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private static readonly CACHE_VERSION = 72;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
+	/**
+	 * Caps how many timed-out ("deferred") parses may keep running in the background at once.
+	 * Deferring a slow parse does not cancel it — it keeps running to completion — and without
+	 * this cap, every worker that hits SESSION_PRELOAD_TIMEOUT_MS immediately grabs the next
+	 * file while the slow one keeps consuming CPU, so a scan with hundreds of slow files
+	 * accumulates hundreds of concurrent CPU-bound parses competing for the same single-threaded
+	 * event loop the webview's postMessage delivery and rendering also depend on — the likely
+	 * cause of a loading flow that looks frozen despite work still happening. See
+	 * _deferredParsePressureGate.
+	 */
+	private static readonly MAX_CONCURRENT_DEFERRED_PARSES = 20;
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -927,6 +938,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Timed-out preloads continue in the background; skip duplicate work until their cache entries settle.
 	private readonly _deferredSessionPreloadFiles = new Set<string>();
 	private _deferredSessionPreloadCount = 0;
+	// Wakes worker()s parked in _preloadSessionFiles() while _deferredSessionPreloadFiles is at
+	// MAX_CONCURRENT_DEFERRED_PARSES, signaled whenever a background parse finishes and frees a
+	// slot. A single persistent gate (not recreated per run) because a deferred parse from a
+	// previous run settling must still be able to wake a worker parked in the next one.
+	private readonly _deferredParsePressureGate: WakeupGate = createWakeupGate();
 	private _deferredSessionRefreshTimer: NodeJS.Timeout | undefined;
 	private _updateTokenStatsStartedAt: number | undefined;
 
@@ -950,6 +966,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Flag to track if details panel is currently showing the loading screen
 	private _detailsPanelIsLoading = false;
+
+	/**
+	 * Panels currently showing getLoadingHtml() while waiting on this exact same
+	 * updateTokenStats()/_runRefreshCore() run — Details and Environmental, the two views
+	 * that directly await it before rendering. sendLoadingPanelMessage() broadcasts to all of
+	 * them, since they are all watching the same operation (see that method's own doc comment
+	 * on why the same broadcast must NOT reach a panel waiting on a different operation, like
+	 * Efficiency's own build or the Log Viewer/Maturity's independent loads).
+	 */
+	private readonly _refreshLoadingPanels = new Set<vscode.WebviewPanel>();
 
 	// Editor list captured during the last (or current) log analysis, used to render the loading tooltip SVG
 	private _loadingEditors: { icon: string; name: string }[] = [];
@@ -2734,18 +2760,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Send a loading-screen message to the details panel's loading screen.
+	 * Send a loading-screen message to every panel waiting on this same
+	 * updateTokenStats()/_runRefreshCore() run.
 	 *
-	 * Deliberately narrow. Loading-screen messages are not addressed to anyone, and the
-	 * script renders each one over the whole screen — subtitle, file counters, parse
-	 * checklist and editor pills, not just the bar. Broadcasting them to every open
-	 * loading screen therefore lets one operation's counts and labels appear on a panel
-	 * waiting for a completely different operation. Each build sends to its own panel
-	 * instead; see `efficiencyLoadingSink()`.
+	 * Deliberately narrow to `_refreshLoadingPanels`, not every open loading screen: the
+	 * script renders each message over the whole screen — subtitle, file counters, parse
+	 * checklist and editor pills, not just the bar — so broadcasting to a panel waiting on a
+	 * *different* operation would show that operation's counts and labels as if they were its
+	 * own. `_refreshLoadingPanels` only ever holds panels (Details, Environmental) that awaited
+	 * this exact call chain, so broadcasting to all of them is safe. Every other loading screen
+	 * (Efficiency's own build, Log Viewer/Maturity's independent loads) sends to itself instead;
+	 * see `efficiencyLoadingSink()`.
 	 */
 	private sendLoadingPanelMessage(msg: object): void {
-		if (this.detailsPanel && this._detailsPanelIsLoading) {
-			void this.detailsPanel.webview.postMessage(msg);
+		for (const panel of this._refreshLoadingPanels) {
+			void panel.webview.postMessage(msg);
 		}
 	}
 
@@ -3722,7 +3751,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		cutoffMs: number,
 		progressCallback?: (completed: number, total: number) => void,
 		editorSet?: Set<string>,
-		missBudget?: { remaining: number }
+		missBudget?: { remaining: number },
+		isLeader: boolean = true
 	): Promise<{ sessionFiles: string[]; preloaded: SessionFilePreload[] }> {
 		// --- Streaming pipeline: overlap discovery with parsing ---
 		// Discovery pushes file batches into a shared queue as each adapter completes.
@@ -3786,6 +3816,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 					await gate.wait();
 					continue;
 				}
+				// Backpressure: don't start new files while MAX_CONCURRENT_DEFERRED_PARSES slow
+				// parses are already running in the background — see that constant's doc comment.
+				// Deferring doesn't cancel a slow parse, so without this a run with many slow
+				// files accumulates unbounded concurrent work instead of a bounded pipeline.
+				// The wait is capped: a background parse stuck on a pathological file (rather
+				// than merely slow) would otherwise never signal relief, stalling every worker
+				// still holding queued work behind it. Falling through after the cap re-checks
+				// the condition and, in the worst case, degrades to the old unbounded behavior
+				// for this one file instead of hanging the whole preload pass.
+				if (this._deferredSessionPreloadFiles.size >= CopilotTokenTracker.MAX_CONCURRENT_DEFERRED_PARSES) {
+					await Promise.race([
+						this._deferredParsePressureGate.wait(),
+						new Promise<void>(resolve => setTimeout(resolve, 3_000)),
+					]);
+					continue;
+				}
 				const sessionFile = queue[readIndex++];
 				await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget);
 				processed++;
@@ -3793,7 +3839,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// Checkpoint cache periodically during long-running preload. Skipped in sample-data
 				// mode for the same reason persistRefreshResult() never saves there — a mid-parse
 				// checkpoint writes straight to the shared on-disk snapshot too, bypassing that guard.
-				if (processed % 25 === 0 && !this.isSampleDataModeActive()) {
+				// Leader-only, matching persistRefreshResult()'s invariant (see
+				// .github/instructions/vscode-extension.instructions.md) that only the leader writes
+				// the shared snapshot during a refresh — a follower checkpointing here was writing a
+				// deliberately partial (FOLLOWER_MISS_BUDGET-bounded) in-memory cache to the same
+				// shared file the leader is concurrently building, on every one of its own first 25
+				// files (a follower never resets lastCheckpointTime, so it always starts past the time
+				// threshold).
+				if (processed % 25 === 0 && isLeader && !this.isSampleDataModeActive()) {
 					this.cacheManager.maybeCheckpointCache();
 				}
 			}
@@ -3879,6 +3932,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			.catch(error => this.debugCrashLog(`error(background) ${sessionFile}: ${error}`))
 			.finally(() => {
 				this._deferredSessionPreloadFiles.delete(sessionFile);
+				// Wake any worker() parked on the MAX_CONCURRENT_DEFERRED_PARSES backpressure
+				// gate now that this slot is free, regardless of whether the whole batch has
+				// drained yet.
+				this._deferredParsePressureGate.signal();
 				if (this._deferredSessionPreloadFiles.size === 0) {
 					this.scheduleDeferredSessionRefresh();
 				}
@@ -4061,7 +4118,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			[...discoveredEditorSet].map(name => ({ icon: this.getEditorIconForLoader(name), name }))
 		);
 		const missBudget = isLeader ? undefined : { remaining: CopilotTokenTracker.FOLLOWER_MISS_BUDGET };
-		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget);
+		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget, isLeader);
 		if (!isLeader && preloaded.length < sessionFiles.length) {
 			this.log(`Follower with cold cache: stats below are partial (${preloaded.length}/${sessionFiles.length} files within date range parsed within the follower budget). Will resync once the leader publishes its snapshot.`);
 		}
@@ -4071,7 +4128,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.warn(`Failed to update seen-editor state: ${error}`);
 		}
 
-		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
+		const refreshStepPct = CopilotTokenTracker.REFRESH_STEP_PCT;
+		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing', percentage: refreshStepPct.stats, label: l10n.t('loading.refresh.calculatingStats') });
 		if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('computing'); }
 
 		const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
@@ -4089,9 +4147,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this.updateDetailsPanelIfOpen(detailedStats, silent);
 		this.updateChartPanelIfOpen(silent);
+		// The remaining sub-steps report real sub-progress on a loading screen that (for a panel
+		// like Environmental, which doesn't replace its own HTML until this whole function
+		// returns) otherwise sits parked at one fixed percentage for their entire duration —
+		// including computeAndUploadFluencyScore, which runs calculateMaturityScores() and an
+		// optional network upload on every non-silent refresh regardless of whether the Maturity
+		// panel is even open (see that method).
+		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing', percentage: refreshStepPct.analysis, label: l10n.t('loading.refresh.analyzingUsage') });
 		await this.updateAnalysisPanelIfOpen(silent, preloaded, startedAtGeneration);
+		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing', percentage: refreshStepPct.fluency, label: l10n.t('loading.refresh.scoringFluency') });
 		await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);
 		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
+		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing', percentage: refreshStepPct.insights, label: l10n.t('loading.refresh.finalizing') });
 		await this.evaluateAndSurfaceInsights();
 
 		this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
@@ -8602,6 +8669,7 @@ private computeFallbackDailyRollup(
 		// Handle panel disposal
 		this.detailsPanel.onDidDispose(() => {
 			this.log('📊 Details panel closed');
+			if (this.detailsPanel) { this._refreshLoadingPanels.delete(this.detailsPanel); }
 			this.detailsPanel = undefined;
 			this._detailsPanelIsLoading = false;
 		});
@@ -8611,12 +8679,14 @@ private computeFallbackDailyRollup(
 		if (!stats) {
 			this.log('No cached stats — showing loading screen while calculating...');
 			this._detailsPanelIsLoading = true;
+			this._refreshLoadingPanels.add(this.detailsPanel);
 			this.statusBarItem.tooltip = l10n.t('statusBar.loadingInPanel');
 			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview, this._updateTokenStatsStartedAt ?? Date.now());
 
 			stats = await this.updateTokenStats();
 
 			this._detailsPanelIsLoading = false;
+			if (this.detailsPanel) { this._refreshLoadingPanels.delete(this.detailsPanel); }
 			if (!stats || !this.detailsPanel) {
 				return;
 			}
@@ -8670,13 +8740,25 @@ private computeFallbackDailyRollup(
 
 		this.environmentalPanel.onDidDispose(() => {
 			this.log('🌿 Environmental Impact view closed');
+			this._refreshLoadingPanels.delete(panel);
 			this.environmentalPanel = undefined;
 		});
 
 		const panel = this.environmentalPanel;
-		panel.webview.html = this.getLoadingHtml(panel.webview);
+		if (this.lastDetailedStats) {
+			// Cached stats exist — updateTokenStats() below is a no-op (see the ?? short-circuit),
+			// so this loading screen is only ever painted for an instant before being replaced and
+			// never needs to receive progress messages.
+			panel.webview.html = this.getLoadingHtml(panel.webview);
+		} else {
+			// No stats yet: this panel is about to await the same updateTokenStats() run Details
+			// waits on below, so it joins the same broadcast — see _refreshLoadingPanels.
+			this._refreshLoadingPanels.add(panel);
+			panel.webview.html = this.getLoadingHtml(panel.webview, this._updateTokenStatsStartedAt ?? Date.now());
+		}
 		void (async () => {
 			const stats = this.lastDetailedStats ?? await this.updateTokenStats();
+			this._refreshLoadingPanels.delete(panel);
 			if (this.environmentalPanel !== panel || !stats) { return; }
 			panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
 		})();
@@ -10612,6 +10694,17 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 */
 	private static readonly EFFICIENCY_STEP_PCT = {
 		daily: 88, usage: 92, sessions: 96, trends: 98,
+	} as const;
+
+	/**
+	 * Percentages the main updateTokenStats() refresh reports for its own compute sub-steps,
+	 * mirroring EFFICIENCY_STEP_PCT above. Parsing owns everything below the first of these
+	 * (see loadingHtml.ts's 85%/compute-phase split); without sub-steps here the bar parked at
+	 * a fixed 96% for the whole compute phase on any panel (Environmental) that doesn't swap
+	 * away from the loading screen until this run fully returns.
+	 */
+	private static readonly REFRESH_STEP_PCT = {
+		stats: 88, analysis: 92, fluency: 96, insights: 99,
 	} as const;
 
 	/**

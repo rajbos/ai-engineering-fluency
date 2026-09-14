@@ -93,13 +93,17 @@ export class CacheManager {
 		if (typeof fileSize === 'number') {
 			data.size = fileSize;
 		}
-		const isActualNewEntry = isNewEntry && !this.sessionFileCache.has(filePath);
 		this.sessionFileCache.set(filePath, data);
 		// A path can be legitimately rediscovered after being deleted (see deleteCachedSessionData);
 		// a stale tombstone must not keep blocking it from ever being persisted again.
 		this.deletedFilePaths.delete(filePath);
 		this.policy.evict(this.sessionFileCache);
-		if (isActualNewEntry) {
+		// The caller (extension.ts setCachedSessionData) already determined isNewEntry by comparing
+		// mtime/size against what was cached before — "new or changed", not merely "first time seen".
+		// Counting only brand-new paths here used to undercount real writes (a re-parsed, changed
+		// file never nudged the checkpoint threshold), one of the reasons a checkpoint could still
+		// fire on the time threshold alone with nothing dirty to save.
+		if (isNewEntry) {
 			this.entriesSinceLastCheckpoint++;
 		}
 	}
@@ -122,6 +126,12 @@ export class CacheManager {
 		// baseline down to 0, letting any stale disk entry with a positive mtime pass the
 		// newer-than-tombstone check and be resurrected. Keep the strongest (highest) baseline seen.
 		this.deletedFilePaths.set(filePath, Math.max(previousTombstoneMtime ?? 0, existing?.mtime ?? 0));
+		// A tombstone is dirty state too — it must reach the next snapshot save just like a new or
+		// changed entry, or a deleted path can sit unpersisted until an unrelated write happens to
+		// trigger a checkpoint.
+		if (existing !== undefined) {
+			this.entriesSinceLastCheckpoint++;
+		}
 	}
 
 	async clearExpiredCache(): Promise<void> {
@@ -178,6 +188,13 @@ export class CacheManager {
 	 * Returns true if checkpoint was triggered.
 	 */
 	maybeCheckpointCache(): boolean {
+		// Nothing to save: a time-threshold-only trigger with zero dirty entries used to still
+		// take the full read-merge-stringify-write round trip (see checkpointCacheInternal) for
+		// no effect — a wasted, blocking write every CHECKPOINT_INTERVAL_MS while a run is 100%
+		// cache hits. Bail out before that work even if the time threshold has elapsed.
+		if (this.entriesSinceLastCheckpoint <= 0) {
+			return false;
+		}
 		const now = Date.now();
 		const timeElapsed = now - this.lastCheckpointTime;
 		const entriesThresholdReached = this.entriesSinceLastCheckpoint >= CacheManager.CHECKPOINT_NEW_ENTRIES_THRESHOLD;

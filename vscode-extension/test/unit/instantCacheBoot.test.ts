@@ -475,7 +475,7 @@ test('sample-data mode never writes to the shared on-disk cache snapshot: neithe
 		'persistRefreshResult() must skip saveCacheToStorage() in sample-data mode, before attempting the save — a regression/screenshot fixture refresh must never let its fixture data survive on disk past the run, where a later normal boot\'s cache-only instant paint would show it as real stats');
 
 	const preloadBody = extractBracesBlock(EXTENSION_SRC, 'preloaded: SessionFilePreload[] }> {');
-	assert.ok(/processed % 25 === 0 && !this\.isSampleDataModeActive\(\)/.test(preloadBody),
+	assert.ok(/processed % 25 === 0 && isLeader && !this\.isSampleDataModeActive\(\)/.test(preloadBody),
 		'the mid-parse checkpoint (maybeCheckpointCache(), which also writes the shared snapshot directly) must skip sample-data mode too, or it can persist fixture data even when persistRefreshResult() itself is correctly guarded');
 
 	// dispose()'s own shutdown save is a third, independent write path to the shared snapshot,
