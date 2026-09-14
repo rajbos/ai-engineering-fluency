@@ -378,6 +378,21 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: efficiency loading step labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'loading.efficiency.dailyActivity': 'Aggregating daily activity…',
+		'loading.efficiency.usageAnalysis': 'Analysing usage patterns…',
+		'loading.efficiency.sessionSignals': 'Reading session signals…',
+		'loading.efficiency.buildingTrends': 'Building efficiency trends…',
+		'efficiency.error.title': 'Could not build the Efficiency view',
+		'efficiency.error.retry': 'Try again',
+		'efficiency.error.staleAfterClear': 'The cached data was cleared while this view was being built.',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
 // Diagnostics — Mistral Cloud (Beta) tab (PR #2057 follow-up) — guards against
 // raw English literals resurfacing in the new tab for non-English locales.
 test('l10n: Mistral Cloud tab labels resolve in English', () => {
@@ -477,6 +492,26 @@ test('l10n: HydraFusion routing keys resolve in English', () => {
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: efficiency loading step labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'loading.efficiency.dailyActivity': '正在汇总每日活动…',
+			'loading.efficiency.usageAnalysis': '正在分析使用模式…',
+			'loading.efficiency.sessionSignals': '正在读取会话信号…',
+			'loading.efficiency.buildingTrends': '正在构建效率趋势…',
+			'efficiency.error.title': '无法构建效率视图',
+			'efficiency.error.retry': '重试',
+			'efficiency.error.staleAfterClear': '构建此视图时缓存数据已被清除。',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
 	}
 });
 
