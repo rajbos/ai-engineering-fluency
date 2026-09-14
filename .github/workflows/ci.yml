@@ -455,3 +455,48 @@ jobs:
           visual-output/current/
           visual-output/diff/
         retention-days: 14
+
+  # Stable required-check anchor for this workflow. Require "CI result" in
+  # branch protection rather than the individual jobs: it is the only name that
+  # exists in every case, and the only one that fails when the path gate breaks.
+  ci-result:
+    name: CI result
+    runs-on: ubuntu-latest
+    needs: [check-changes, test-coverage-check, build, package, ui-checks]
+    if: always()
+    steps:
+      - name: Check the gated job results
+        env:
+          GATE_NAME: check-changes
+          GATE: ${{ needs.check-changes.result }}
+          # skipped is legitimate here for a PR the gate filtered out, for the
+          # PR-only jobs on a push, and for package outside main.
+          RESULTS: |
+            test-coverage-check=${{ needs.test-coverage-check.result }}
+            build=${{ needs.build.result }}
+            package=${{ needs.package.result }}
+            ui-checks=${{ needs.ui-checks.result }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          # A job downstream of a FAILED `needs` reports as "skipped", not
+          # "failure" (verified: run 34755094802, where validate-agent-mirror's
+          # propose-fix went skipped after check failed). Since branch
+          # protection counts a skipped required check as passing, accepting
+          # "skipped" without first proving the gate itself succeeded would let
+          # a transient checkout/paths-filter failure wave a PR through with no
+          # CI at all. So: the gate must have succeeded before any downstream
+          # skip is read as a deliberate decision.
+          if [ "$GATE" != "success" ]; then
+            echo "::error::$GATE_NAME did not succeed (result: $GATE) - a job skipped downstream of a broken gate is not a pass"
+            exit 1
+          fi
+          status=0
+          while IFS='=' read -r job result; do
+            [ -z "$job" ] && continue
+            case "$result" in
+              success|skipped) echo "ok    $job: $result" ;;
+              *) echo "::error::$job: $result"; status=1 ;;
+            esac
+          done <<< "$RESULTS"
+          exit "$status"
