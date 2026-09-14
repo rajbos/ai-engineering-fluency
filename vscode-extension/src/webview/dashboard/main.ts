@@ -443,6 +443,7 @@ function buildLeaderboardMemberRow(member: TeamMemberStats, stats: DashboardStat
 		};
 		row.addEventListener("click", toggleExpanded);
 		row.addEventListener("keydown", (e) => {
+			if (e.target !== row) { return; }
 			if (e.key === "Enter" || e.key === " ") {
 				e.preventDefault();
 				toggleExpanded();
