@@ -20,7 +20,14 @@ jobs:
   check-changes:
     runs-on: ubuntu-latest
     outputs:
+      # Two predicates, one runner slot. The expensive jobs (build, ui-checks)
+      # only care about the extension and its shared sources; the cheap
+      # coverage guard additionally has to see cli/src, which the extension
+      # build does not depend on at all. Gating both on one flag made a
+      # CLI-only source change schedule the full extension build and the
+      # Playwright suite for nothing.
       ci-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.ci-relevant == 'true' }}
+      coverage-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.coverage-relevant == 'true' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -35,27 +42,40 @@ jobs:
         id: filter
         with:
           filters: |
+            # Gates build + ui-checks: what the extension is actually built from.
             ci-relevant:
               - 'vscode-extension/**'
               # The extension compiles the shared sources from the repo-root
               # src/ (see vscode-extension/tsconfig.json).
               - 'src/**'
-              # test-coverage-check inspects cli/src changes too. Only
-              # cli/src counts as production source to check-test-coverage.sh
-              # (is_source_file), and nothing here consumes the rest of cli/,
-              # so a cli/README.md or lock-file edit must not drag in the
-              # whole extension build.
-              - 'cli/src/**'
-              # scripts/parse-lint-output.js and scripts/parse-test-output.js
-              # run as part of the build job.
+              # Not just the two parse-*.js files invoked directly below: the
+              # npm scripts this job runs reach repo-root scripts/ indirectly -
+              # lint:json -> validate-json.js, lint:l10n ->
+              # validate-localization.js, compile-tests -> prepare-test-output.js,
+              # test -> run-node-unit-tests.js, check:contract ->
+              # validate-webview-contract.js, check:duplicates ->
+              # check-code-duplication.js, check:interaction ->
+              # interaction-smoke.js. Narrowing this glob would let a change to
+              # the unit-test runner or the contract validator skip CI, so the
+              # whole directory stays in scope deliberately.
               - 'scripts/**'
               - '.nvmrc'
               # Harnesses invoked by the build and ui-checks jobs.
               - '.github/skills/visual-view-diff/**'
               - '.github/skills/sync-host-views/**'
               - '.github/workflows/ci.yml'
-              - '.github/workflows/scripts/check-test-coverage.sh'
               - '.github/workflows/dependencies/playwright/**'
+            # Gates test-coverage-check only: the production-source trees that
+            # check-test-coverage.sh's is_source_file() recognises. cli/src is
+            # here and NOT in ci-relevant, because the coverage guard must see
+            # CLI source changes while the extension build must not be dragged
+            # in by them (cli/ is built by cli-build.yml).
+            coverage-relevant:
+              - 'vscode-extension/src/**'
+              - 'src/**'
+              - 'cli/src/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/scripts/check-test-coverage.sh'
 
   # Deterministic guard against "new source logic without test changes" — the
   # class of finding the agent-review Test Expert agent would otherwise have to
@@ -66,7 +86,7 @@ jobs:
     name: Test coverage companion check
     runs-on: ubuntu-latest
     needs: check-changes
-    if: github.event_name == 'pull_request' && needs.check-changes.outputs.ci-relevant == 'true'
+    if: github.event_name == 'pull_request' && needs.check-changes.outputs.coverage-relevant == 'true'
     steps:
     - name: Harden the runner (Block all outbound calls except allowed)
       uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1

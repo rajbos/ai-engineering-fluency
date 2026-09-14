@@ -40,8 +40,16 @@ jobs:
               # The extension compiles the shared sources from the repo-root
               # src/ (see vscode-extension/tsconfig.json).
               - 'src/**'
-              # scripts/parse-lint-output.js and scripts/parse-test-output.js
-              # run as part of this job.
+              # Not just the two parse-*.js files invoked directly below: the
+              # npm scripts this job runs reach repo-root scripts/ indirectly -
+              # lint:json -> validate-json.js, lint:l10n ->
+              # validate-localization.js, compile-tests -> prepare-test-output.js,
+              # test -> run-node-unit-tests.js, check:contract ->
+              # validate-webview-contract.js, check:duplicates ->
+              # check-code-duplication.js, check:interaction ->
+              # interaction-smoke.js. Narrowing this glob would let a change to
+              # the unit-test runner or the contract validator skip CI, so the
+              # whole directory stays in scope deliberately.
               - 'scripts/**'
               - '.nvmrc'
               - '.github/workflows/build.yml'
