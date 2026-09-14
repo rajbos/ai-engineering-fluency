@@ -158,7 +158,7 @@ import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
-import { analyzeHydraFusionSession } from '../../src/hydrafusion';
+import { analyzeHydraFusionSession, aiuToUsd } from '../../src/hydrafusion';
 import type { HydraFusionSummary } from '../../src/hydrafusion';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
 import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout } from './utils/promises';
@@ -4245,7 +4245,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *  silently inflating (or understating) the "tracked" portion. */
 	private appendCopilotBudgetRow(tooltip: vscode.MarkdownString, copilotCost: number, budget: number): void {
 		const apiBalance = this._buildCopilotApiBalance();
-		const apiUsedUsd = apiBalance ? apiBalance.usedAiCredits * 0.01 : null;
+		const apiUsedUsd = apiBalance ? aiuToUsd(apiBalance.usedAiCredits) : null;
 		const { totalUsed, remaining, trackedRatio, gapRatio, gapUsd } = computeCopilotBudgetDisplay(copilotCost, budget, apiUsedUsd);
 		const totalRatio = trackedRatio + gapRatio;
 		const color = totalRatio >= 0.9 ? '#EF5350' : totalRatio >= 0.75 ? '#FFA726' : '#4CAF50';
