@@ -106,9 +106,9 @@ run the type/build/headless interaction checks separately as described there.
 
 # Or from the sharing-server/ directory:
 cd sharing-server
-npm ci
-npm run build            # development build
-npm run build:production # minified build
+pnpm install --frozen-lockfile
+pnpm run build            # development build
+pnpm run build:production # minified build
 ```
 
 ## Running locally (without Docker)

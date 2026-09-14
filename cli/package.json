@@ -28,7 +28,7 @@
     "bundle-exe": "pwsh -NoProfile -File bundle-exe.ps1",
     "lint": "eslint src",
     "check-types": "tsc --noEmit",
-    "test": "node dist/cli.js --help && node dist/cli.js --version && npm run test:unit",
+    "test": "node dist/cli.js --help && node dist/cli.js --version && pnpm run test:unit",
     "test:unit": "node esbuild.tests.js && node --test \"out/test/*.test.js\""
   },
   "devDependencies": {
@@ -42,5 +42,6 @@
   },
   "engines": {
     "node": ">=22.14.0"
-  }
+  },
+  "packageManager": "pnpm@11.2.2"
 }

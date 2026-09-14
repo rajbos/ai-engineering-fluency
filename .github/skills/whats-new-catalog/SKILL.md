@@ -30,7 +30,7 @@ node .github/skills/whats-new-catalog/whats-new-catalog.js --json   # machine-re
 
 Dependency-free apart from the repo's own TypeScript — it transpiles and
 evaluates `catalog.ts` rather than pattern-matching its prose, so multi-line
-descriptions containing braces and quotes can never confuse it. Run `npm ci` in
+descriptions containing braces and quotes can never confuse it. Run `pnpm install` in
 `vscode-extension/` first if it complains.
 
 ### What it checks

@@ -1,0 +1,19 @@
+allowBuilds:
+  '@vscode/vsce-sign': true
+  core-js: true
+  esbuild: true
+  keytar: true
+
+overrides:
+  '@azure/msal-node': '5.1.4'
+  '@babel/core': '>=7.29.6'
+  brace-expansion: '>=5.0.9'
+  js-yaml: '>=4.3.2 <5.0.0'
+  diff: '>=8.0.3'
+  dompurify: '>=3.4.13'
+  fast-uri: '>=4.1.4'
+  qs: '>=6.15.2'
+  serialize-javascript: '>=7.0.3'
+  cheerio>undici: '7.29.0'
+  uuid: '^14.0.0'
+

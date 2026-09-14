@@ -54,15 +54,15 @@ jobs:
 
       - name: Install extension dependencies
         working-directory: vscode-extension
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Build CLI
         working-directory: cli
-        run: npm run build
+        run: pnpm run build
 
       - name: Validate CLI --help
         working-directory: cli
@@ -106,7 +106,7 @@ jobs:
 
       - name: Build production bundle
         working-directory: cli
-        run: npm run build:production
+        run: pnpm run build:production
 
       - name: Verify production bundle runs
         working-directory: cli

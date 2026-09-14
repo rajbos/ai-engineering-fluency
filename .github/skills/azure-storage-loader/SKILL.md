@@ -104,7 +104,7 @@ Fetch token usage data from Azure Table Storage and output as JSON for analysis.
 cd .github/skills/azure-storage-loader
 
 # Install dependencies (first time only)
-npm install
+pnpm install
 
 # Load data with Entra ID auth
 node load-table-data.js \
@@ -314,7 +314,7 @@ Key extension modules referenced:
 When running as the GitHub Copilot Coding Agent, the `load-table-data.js` script is executed automatically during the `copilot-setup-steps.yml` workflow. The aggregated usage data is downloaded to `./usage-data/usage-agg-daily.json` in the workspace root.
 
 **How it works:**
-1. The workflow installs dependencies: `cd .github/skills/azure-storage-loader && npm install --production`
+1. The workflow installs dependencies: `cd .github/skills/azure-storage-loader && pnpm install --prod`
 2. Runs `load-table-data.js` with env vars from the `copilot` GitHub environment
 3. Outputs JSON to `./usage-data/usage-agg-daily.json`
 4. Uses shared key (`COPILOT_STORAGE_KEY` secret) or Entra ID authentication

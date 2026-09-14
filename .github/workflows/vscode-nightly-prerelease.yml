@@ -90,33 +90,39 @@ jobs:
         "
         echo "✅ package.json version set to ${{ steps.version.outputs.version }} for build"
 
+    - name: Setup pnpm
+      if: steps.check_changes.outputs.has_changes == 'true'
+      uses: pnpm/action-setup@v4
+      with:
+        version: '11.2.2'
+
     - name: Setup Node.js
       if: steps.check_changes.outputs.has_changes == 'true'
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version-file: '.nvmrc'
-        cache: 'npm'
-        cache-dependency-path: vscode-extension/package-lock.json
+        cache: 'pnpm'
+        cache-dependency-path: vscode-extension/pnpm-lock.yaml
 
     - name: Install dependencies
       if: steps.check_changes.outputs.has_changes == 'true'
       working-directory: vscode-extension
-      run: npm ci --ignore-scripts
+      run: pnpm install --frozen-lockfile --ignore-scripts
 
     - name: Run linting
       if: steps.check_changes.outputs.has_changes == 'true'
       working-directory: vscode-extension
-      run: npm run lint
+      run: pnpm run lint
 
     - name: Run type checking
       if: steps.check_changes.outputs.has_changes == 'true'
       working-directory: vscode-extension
-      run: npm run check-types
+      run: pnpm run check-types
 
     - name: Build production bundle
       if: steps.check_changes.outputs.has_changes == 'true'
       working-directory: vscode-extension
-      run: npm run package
+      run: pnpm run package
 
     - name: Create pre-release VSIX
       if: steps.check_changes.outputs.has_changes == 'true'
@@ -128,7 +134,7 @@ jobs:
     - name: Validate localization bundle in VSIX
       if: steps.check_changes.outputs.has_changes == 'true'
       working-directory: vscode-extension
-      run: npm run validate:l10n -- --vsix "$(find . -maxdepth 1 -name 'ai-engineering-fluency-*.vsix' | head -n 1)"
+      run: pnpm run validate:l10n -- --vsix "$(find . -maxdepth 1 -name 'ai-engineering-fluency-*.vsix' | head -n 1)"
 
     - name: Get VSIX filename
       if: steps.check_changes.outputs.has_changes == 'true'

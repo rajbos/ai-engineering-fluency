@@ -52,12 +52,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
-          cache-dependency-path: cli/package-lock.json
+          cache: 'pnpm'
+          cache-dependency-path: cli/pnpm-lock.yaml
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Build and bundle Windows executable
         working-directory: cli
@@ -93,12 +93,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
-          cache-dependency-path: cli/package-lock.json
+          cache: 'pnpm'
+          cache-dependency-path: cli/pnpm-lock.yaml
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Build production bundle
         working-directory: cli
@@ -143,12 +143,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
-          cache-dependency-path: cli/package-lock.json
+          cache: 'pnpm'
+          cache-dependency-path: cli/pnpm-lock.yaml
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Build production bundle
         working-directory: cli
@@ -192,12 +192,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
-          cache-dependency-path: cli/package-lock.json
+          cache: 'pnpm'
+          cache-dependency-path: cli/pnpm-lock.yaml
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Build production bundle
         working-directory: cli
@@ -240,16 +240,16 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: '.nvmrc'
-          cache: 'npm'
-          cache-dependency-path: vscode-extension/package-lock.json
+          cache: 'pnpm'
+          cache-dependency-path: vscode-extension/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: vscode-extension
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Build webview bundles
         working-directory: vscode-extension
-        run: npm run compile
+        run: pnpm run compile
 
       - name: Upload webview bundle artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -39,6 +39,10 @@ jobs:
         path: vscode-copilot-chat
         fetch-depth: 1
         
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: '11.2.2'
     - name: Setup Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
@@ -66,6 +70,9 @@ jobs:
           exit 1
         fi
 
+    - name: Install dependencies
+      working-directory: current-repo/vscode-extension
+      run: pnpm install --frozen-lockfile
     - name: Check Copilot CLI version
       env:
         GH_TOKEN: ${{ secrets.GH_PAT }}
