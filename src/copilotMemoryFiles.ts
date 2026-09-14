@@ -19,7 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import type { MemoryFileEntry, MemoryFilesAnalysis, MemoryFilesAnalysisView, MemoryFilesWorkspaceSummary } from './types';
-import { parseWorkspaceStorageJsonFile } from './workspaceHelpers';
+import { parseWorkspaceStorageJsonFile } from './workspacePathResolver';
 import { getVSCodeUserPaths, getWSLWindowsPathsSync, isWSL } from './adapters/copilotChatAdapter';
 
 /** Extension-folder spellings Copilot Chat's memory-tool directory has shipped under. */
@@ -209,7 +209,10 @@ function getDefaultUserPaths(): string[] {
 	if (isWSL()) {
 		paths.push(...getWSLWindowsPathsSync());
 	}
-	return paths;
+	// getVSCodeUserPaths() can yield duplicates (e.g. when os.homedir() is already /tmp or
+	// /workspace, which are also appended explicitly for remote hosts). Dedupe before walking
+	// so a single memory file isn't counted/scanned twice, inflating totals/stale/large counts.
+	return Array.from(new Set(paths));
 }
 
 /**

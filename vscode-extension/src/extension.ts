@@ -79,7 +79,6 @@ import type {
   CorrectionSessionEntry,
   RepeatedTaskReport,
   MemoryFilesAnalysis,
-  MemoryFilesAnalysisView,
 } from '../../src/types';
 import {
 	ensureContextPressure,
@@ -454,7 +453,7 @@ export function defaultSumBillingGroupCosts(billingGroupCosts: Record<string, nu
 }
 
 /** The computed-stat caches that carry a generation stamp. */
-export type ComputedStatsKey = 'daily' | 'fullDaily' | 'usage' | 'sessionInputs';
+export type ComputedStatsKey = 'daily' | 'fullDaily' | 'usage' | 'sessionInputs' | 'memoryFiles';
 
 /**
  * Whether a computed-stat cache stamped at `stampedGeneration` may still be read.
@@ -5575,7 +5574,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats),
 			agenticDailyTrend,
 			autoCompactionsLast7Days,
-			memoryFilesAnalysis: this.computeMemoryFilesAnalysis(),
+			memoryFilesAnalysis: this.computeMemoryFilesAnalysis(startedAtGeneration),
 		};
 		this.lastUsageAnalysisStats = stats;
 		this._statsGeneration.usage = startedAtGeneration;
@@ -5677,20 +5676,35 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * {@link MEMORY_FILES_SCAN_TTL_MS} and reused across recomputes in between (e.g.
 	 * periodic Usage Analysis refreshes) rather than re-walking the filesystem every time.
 	 */
-	private computeMemoryFilesAnalysis(): MemoryFilesAnalysis | null {
+	private computeMemoryFilesAnalysis(originGeneration: number): MemoryFilesAnalysis | null {
 		const now = Date.now();
-		if (isMemoryFilesScanFresh(this._memoryFilesAnalysisScannedAt, now, MEMORY_FILES_SCAN_TTL_MS)) {
+		// The TTL alone isn't enough: a calculation that started before a clearCache()/
+		// refreshAnalysisPanel() generation bump can resume afterwards and still reach this
+		// point, where a fresh-looking scan it performs would otherwise satisfy a later,
+		// post-clear read without ever re-scanning. Gating reuse on the generation this scan
+		// was cached *under* (mirroring the `_statsGeneration`/`isComputedStatsCurrent` guard
+		// used for the other computed-stat caches) rejects that stale-origin result.
+		const generationCurrent = isComputedStatsCurrent(this._statsGeneration.memoryFiles, this._cacheGeneration);
+		if (generationCurrent && isMemoryFilesScanFresh(this._memoryFilesAnalysisScannedAt, now, MEMORY_FILES_SCAN_TTL_MS)) {
 			return this._memoryFilesAnalysisCache ?? null;
 		}
+		let result: MemoryFilesAnalysis | null;
 		try {
 			const files = _discoverAllMemoryFiles();
-			this._memoryFilesAnalysisCache = files.length === 0 ? null : _analyzeMemoryFiles(files);
+			result = files.length === 0 ? null : _analyzeMemoryFiles(files);
 		} catch (err) {
 			this.log(`⚠️ Memory files analysis failed: ${String(err)}`);
-			this._memoryFilesAnalysisCache = null;
+			result = null;
 		}
-		this._memoryFilesAnalysisScannedAt = now;
-		return this._memoryFilesAnalysisCache;
+		// Only let a calculation whose origin generation is still current update the shared
+		// scan cache — a stale (pre-clear) calculation must not let its result be reused by a
+		// post-clear read, even though the scan it just ran reflects the current filesystem.
+		if (originGeneration === this._cacheGeneration) {
+			this._memoryFilesAnalysisCache = result;
+			this._memoryFilesAnalysisScannedAt = now;
+			this._statsGeneration.memoryFiles = originGeneration;
+		}
+		return result;
 	}
 
 	async openMcpJson(): Promise<void> {

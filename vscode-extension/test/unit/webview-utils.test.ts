@@ -505,7 +505,12 @@ test('getTimeSince: formats seconds, minutes, hours and days', () => {
 // ── formatAbsoluteDate ──────────────────────────────────────────────────
 
 test('formatAbsoluteDate: renders a fixed timestamp as a locale-formatted absolute date', () => {
-	assert.equal(formatAbsoluteDate('2026-01-15T10:00:00.000Z'), 'Jan 15, 2026');
+	setFormatLocale('en-US');
+	try {
+		assert.equal(formatAbsoluteDate('2026-01-15T10:00:00.000Z'), 'Jan 15, 2026');
+	} finally {
+		setFormatLocale(undefined);
+	}
 });
 
 test('formatAbsoluteDate: returns "—" for invalid ISO values instead of "Invalid Date"', () => {
