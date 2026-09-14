@@ -497,10 +497,10 @@
         border: 2px solid currentColor;
 }
 
-.fluency-category-badge.stage-1 { color: #f0abfc; }
-.fluency-category-badge.stage-2 { color: #2dd4bf; }
-.fluency-category-badge.stage-3 { color: #facc15; }
-.fluency-category-badge.stage-4 { color: #fb7185; }
+.fluency-category-badge.stage-1 { color: var(--stage-1-color); }
+.fluency-category-badge.stage-2 { color: var(--stage-2-color); }
+.fluency-category-badge.stage-3 { color: var(--stage-3-color); }
+.fluency-category-badge.stage-4 { color: var(--stage-4-color); }
 
 .fluency-stage-bar {
         display: flex;
@@ -514,10 +514,10 @@
         background-color: transparent;
 }
 
-.stage-pip.filled.stage-pip-1 { background-color: #f0abfc; border-color: #f0abfc; }
-.stage-pip.filled.stage-pip-2 { background-color: #2dd4bf; border-color: #2dd4bf; }
-.stage-pip.filled.stage-pip-3 { background-color: #facc15; border-color: #facc15; }
-.stage-pip.filled.stage-pip-4 { background-color: #fb7185; border-color: #fb7185; }
+.stage-pip.filled.stage-pip-1 { background-color: var(--stage-1-color); border-color: var(--stage-1-color); }
+.stage-pip.filled.stage-pip-2 { background-color: var(--stage-2-color); border-color: var(--stage-2-color); }
+.stage-pip.filled.stage-pip-3 { background-color: var(--stage-3-color); border-color: var(--stage-3-color); }
+.stage-pip.filled.stage-pip-4 { background-color: var(--stage-4-color); border-color: var(--stage-4-color); }
 
 .fluency-tips {
         font-size: 12px;
