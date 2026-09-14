@@ -1115,22 +1115,27 @@ test('wiring: every webview document that renders localized text declares the vi
 	// `localization` payload their bundle renders from — so lang="en" has assistive technology
 	// announce localized content with English pronunciation rules.
 	const declared = EXTENSION_SRC.split('<html lang="${webviewDocumentLanguage(vscode.env.language)}">').length - 1;
-	assert.equal(declared, 12, 'every localized webview document must declare the viewer\'s language');
+	assert.equal(declared, 11, 'every localized webview document must declare the viewer\'s language');
 
-	// Exactly one document is the exception, and it is the loading screen: its body comes from
-	// loadingHtml.getLoadingHtmlBody(), which emits hardcoded English throughout. `lang` names a
-	// document's predominant language, so deriving the viewer's locale there would mislabel the
-	// whole page — worse than the two localized elements (<title>, runtime subtitle) that lang="en"
-	// mislabels. Pinned by count *and* by location so a second document cannot quietly join it.
+	// Two documents are the exception, and both render English regardless of the viewer's
+	// language. `lang` names a document's predominant language, so deriving the viewer's locale
+	// on these would mislabel the whole page:
+	//
+	//   getLoadingHtml    — body is loadingHtml.getLoadingHtmlBody(), hardcoded English throughout.
+	//   getDashboardHtml  — its `localization` payload sits behind `data ?` and the only call site
+	//                       passes undefined, so the bundle never initializes localization and
+	//                       renders raw English literals.
+	//
+	// Pinned by count *and* by location, so a third cannot quietly join them and neither can
+	// silently become the wrong one.
 	const hardcoded = EXTENSION_SRC.split('<html lang="en">').length - 1;
-	assert.equal(hardcoded, 1, 'only the loading screen may hardcode lang="en"');
-	const loadingAt = EXTENSION_SRC.indexOf('private getLoadingHtml(webview: vscode.Webview');
-	assert.ok(loadingAt !== -1, 'getLoadingHtml() must be findable for this assertion');
-	const loadingEnd = EXTENSION_SRC.indexOf('\n  private ', loadingAt + 10);
-	assert.ok(
-		EXTENSION_SRC.slice(loadingAt, loadingEnd).includes('<html lang="en">'),
-		'the one hardcoded lang="en" must be the loading screen, not some other document',
-	);
+	assert.equal(hardcoded, 2, 'only the loading screen and the Dashboard may hardcode lang="en"');
+	for (const marker of ['private getLoadingHtml(webview: vscode.Webview', 'private getDashboardHtml(']) {
+		assert.ok(
+			methodBody(marker).includes('<html lang="en">'),
+			`a hardcoded lang="en" must belong to ${marker}, not some other document`,
+		);
+	}
 
 	assert.equal(
 		EXTENSION_SRC.split('<html lang=').length - 1, declared + hardcoded,

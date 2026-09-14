@@ -11731,8 +11731,21 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       : "";
     const configScript = `<script nonce="${nonce}">window.__DASHBOARD_CONFIG__ = ${JSON.stringify(backendConfig).replace(/</g, "\\u003c")};</script>`;
 
+    // The second document that deliberately declares `lang="en"`, for the same reason as
+    // getLoadingHtml(): its content is English, not the viewer's language.
+    //
+    // The `localization` payload above looks like it makes this view localized, but it is behind
+    // `data ?` and the only call site (`getDashboardHtml(webview, undefined)`) passes undefined —
+    // so `window.__INITIAL_DASHBOARD__` is never emitted, `initializeWebviewLocalization()` in
+    // dashboard/main.ts never runs, and the stats arrive later by postMessage carrying no
+    // localization. That bundle renders raw English literals ("Synced Tokens", "Estimated Cost",
+    // "Loading dashboard data…"), and this <title> is hardcoded English too.
+    //
+    // Emitting the payload unconditionally would not fix it: nothing in dashboard/main.ts reads
+    // the table. Localizing that bundle is the real fix and is the same follow-up the loading
+    // fragment needs.
     return `<!DOCTYPE html>
-		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
+		<html lang="en">
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
