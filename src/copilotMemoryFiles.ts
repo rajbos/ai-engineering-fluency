@@ -31,9 +31,9 @@ const MEMORY_TOOL_SEGMENTS = ['memory-tool', 'memories'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Default look-back threshold (days) beyond which a memory file is flagged as stale. */
-const DEFAULT_STALE_DAYS = 90;
+export const DEFAULT_STALE_DAYS = 90;
 /** Default size threshold (bytes) beyond which a memory file is flagged as unusually large. */
-const DEFAULT_LARGE_FILE_BYTES = 10 * 1024;
+export const DEFAULT_LARGE_FILE_BYTES = 10 * 1024;
 
 /**
  * Attempt to decode a memory-store session-scope folder name back to the chat session UUID
@@ -238,6 +238,7 @@ function getOrCreateWorkspaceSummary(
 			workspaceName: file.scope === 'user' ? 'User (global)' : file.workspaceName,
 			repoCount: 0,
 			sessionCount: 0,
+			userCount: 0,
 			totalBytes: 0,
 			newestMtimeMs: null,
 			oldestMtimeMs: null,
@@ -252,6 +253,7 @@ function getOrCreateWorkspaceSummary(
 function foldFileIntoSummary(summary: MemoryFilesWorkspaceSummary, file: MemoryFileEntry, staleThresholdMs: number): void {
 	if (file.scope === 'repo') { summary.repoCount++; }
 	else if (file.scope === 'session') { summary.sessionCount++; }
+	else if (file.scope === 'user') { summary.userCount++; }
 	summary.totalBytes += file.sizeBytes;
 	summary.newestMtimeMs = summary.newestMtimeMs === null ? file.mtimeMs : Math.max(summary.newestMtimeMs, file.mtimeMs);
 	summary.oldestMtimeMs = summary.oldestMtimeMs === null ? file.mtimeMs : Math.min(summary.oldestMtimeMs, file.mtimeMs);
@@ -306,6 +308,7 @@ export function toMemoryFilesAnalysisView(analysis: MemoryFilesAnalysis | null):
 			workspaceName: ws.workspaceName,
 			repoCount: ws.repoCount,
 			sessionCount: ws.sessionCount,
+			userCount: ws.userCount,
 			totalBytes: ws.totalBytes,
 			newestMtimeMs: ws.newestMtimeMs,
 			staleFileCount: ws.staleFiles.length,

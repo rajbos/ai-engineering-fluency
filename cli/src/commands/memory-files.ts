@@ -11,11 +11,10 @@
  */
 import { Command } from 'commander';
 import { shouldOutputJson } from '../commandUtils';
-import { discoverAllMemoryFiles, analyzeMemoryFiles } from '../../../src/copilotMemoryFiles';
+import { discoverAllMemoryFiles, analyzeMemoryFiles, DEFAULT_STALE_DAYS, DEFAULT_LARGE_FILE_BYTES } from '../../../src/copilotMemoryFiles';
 import type { MemoryFilesAnalysis } from '../../../src/types';
 
-const DEFAULT_STALE_DAYS = 90;
-const DEFAULT_LARGE_KB = 10;
+const DEFAULT_LARGE_KB = DEFAULT_LARGE_FILE_BYTES / 1024;
 
 export const memoryFilesCommand = new Command('memory-files')
 	.description('Report on GitHub Copilot agent memory files on this machine (counts, staleness, size)')
@@ -54,7 +53,7 @@ function printMemoryFilesReport(analysis: MemoryFilesAnalysis): void {
 	for (const ws of analysis.byWorkspace) {
 		const label = ws.workspaceName ?? ws.workspaceHash ?? 'unknown';
 		process.stdout.write(`  • ${label}\n`);
-		process.stdout.write(`      repo-scope: ${ws.repoCount}, session-scope: ${ws.sessionCount}, size: ${(ws.totalBytes / 1024).toFixed(1)} KB\n`);
+		process.stdout.write(`      repo-scope: ${ws.repoCount}, session-scope: ${ws.sessionCount}, global-scope: ${ws.userCount}, size: ${(ws.totalBytes / 1024).toFixed(1)} KB\n`);
 		if (ws.staleFiles.length > 0) {
 			process.stdout.write(`      stale: ${ws.staleFiles.map(f => f.title).join(', ')}\n`);
 		}

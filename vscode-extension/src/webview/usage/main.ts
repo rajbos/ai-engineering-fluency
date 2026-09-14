@@ -1935,6 +1935,7 @@ function _sanitizeMemoryFilesAnalysis(raw: unknown): MemoryFilesAnalysisView | n
 			workspaceName: ws?.workspaceName,
 			repoCount: typeof ws?.repoCount === 'number' ? ws.repoCount : 0,
 			sessionCount: typeof ws?.sessionCount === 'number' ? ws.sessionCount : 0,
+			userCount: typeof ws?.userCount === 'number' ? ws.userCount : 0,
 			totalBytes: typeof ws?.totalBytes === 'number' ? ws.totalBytes : 0,
 			newestMtimeMs: typeof ws?.newestMtimeMs === 'number' ? ws.newestMtimeMs : null,
 			staleFileCount: typeof ws?.staleFileCount === 'number' ? ws.staleFileCount : 0,
@@ -3482,6 +3483,7 @@ function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysisView | null | 
 					<td style="padding:5px 8px; color:var(--text-primary);">${name}</td>
 					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${ws.repoCount}</td>
 					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${ws.sessionCount}</td>
+					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${ws.userCount}</td>
 					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${formatFileSize(ws.totalBytes)}</td>
 					<td style="padding:5px 8px; text-align:right; color:${staleCount > 0 ? 'var(--vscode-editorWarning-foreground, #cca700)' : 'var(--text-primary)'};">${staleCount}</td>
 					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${newest}</td>
@@ -3505,6 +3507,7 @@ function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysisView | null | 
 							<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.workspace'))}</th>
 							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.repo'))}</th>
 							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.session'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.global'))}</th>
 							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.size'))}</th>
 							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.stale'))}</th>
 							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.lastUpdated'))}</th>

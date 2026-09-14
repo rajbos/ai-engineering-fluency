@@ -344,6 +344,7 @@
   "memoryFiles.table.workspace": "Workspace",
   "memoryFiles.table.repo": "Repo",
   "memoryFiles.table.session": "Session",
+  "memoryFiles.table.global": "Global",
   "memoryFiles.table.size": "Size",
   "memoryFiles.table.stale": "Stale",
   "memoryFiles.table.lastUpdated": "Last updated",

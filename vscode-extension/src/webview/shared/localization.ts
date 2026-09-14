@@ -162,6 +162,7 @@ export interface WebviewLocalization {
 	'memoryFiles.table.workspace': string;
 	'memoryFiles.table.repo': string;
 	'memoryFiles.table.session': string;
+	'memoryFiles.table.global': string;
 	'memoryFiles.table.size': string;
 	'memoryFiles.table.stale': string;
 	'memoryFiles.table.lastUpdated': string;
@@ -307,6 +308,7 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'memoryFiles.table.workspace': 'Workspace',
 	'memoryFiles.table.repo': 'Repo',
 	'memoryFiles.table.session': 'Session',
+	'memoryFiles.table.global': 'Global',
 	'memoryFiles.table.size': 'Size',
 	'memoryFiles.table.stale': 'Stale',
 	'memoryFiles.table.lastUpdated': 'Last updated',

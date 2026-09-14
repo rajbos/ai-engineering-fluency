@@ -197,6 +197,7 @@ test('analyzeMemoryFiles flags stale and large files and groups by workspace', (
 	const summary = analysis.byWorkspace[0];
 	assert.equal(summary.repoCount, 3);
 	assert.equal(summary.sessionCount, 0);
+	assert.equal(summary.userCount, 0);
 	assert.equal(summary.staleFiles.length, 1);
 	assert.equal(summary.staleFiles[0].title, 'stale');
 	assert.ok(summary.largestFile);
@@ -221,6 +222,9 @@ test('analyzeMemoryFiles groups the user (global) scope separately from workspac
 	assert.equal(analysis.byWorkspace.length, 1);
 	assert.equal(analysis.byWorkspace[0].workspaceName, 'User (global)');
 	assert.equal(analysis.byWorkspace[0].workspaceHash, undefined);
+	assert.equal(analysis.byWorkspace[0].userCount, 1);
+	assert.equal(analysis.byWorkspace[0].repoCount, 0);
+	assert.equal(analysis.byWorkspace[0].sessionCount, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -269,6 +273,7 @@ test('toMemoryFilesAnalysisView drops per-file detail (files, staleFiles entries
 	assert.equal(ws.workspaceName, rawWs.workspaceName);
 	assert.equal(ws.repoCount, rawWs.repoCount);
 	assert.equal(ws.sessionCount, rawWs.sessionCount);
+	assert.equal(ws.userCount, rawWs.userCount);
 	assert.equal(ws.totalBytes, rawWs.totalBytes);
 	assert.equal(ws.newestMtimeMs, rawWs.newestMtimeMs);
 	// The count the table needs, projected from the full staleFiles array without keeping it.

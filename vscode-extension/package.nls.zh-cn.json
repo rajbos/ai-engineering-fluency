@@ -346,6 +346,7 @@
   "memoryFiles.table.workspace": "工作区",
   "memoryFiles.table.repo": "仓库",
   "memoryFiles.table.session": "会话",
+  "memoryFiles.table.global": "全局",
   "memoryFiles.table.size": "大小",
   "memoryFiles.table.stale": "过期",
   "memoryFiles.table.lastUpdated": "最近更新",

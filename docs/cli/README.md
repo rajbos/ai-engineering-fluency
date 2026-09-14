@@ -194,10 +194,10 @@ Large (>10KB):       1
 
 By workspace:
   • ai-engineering-fluency
-      repo-scope: 2, session-scope: 4, size: 18.2 KB
+      repo-scope: 2, session-scope: 4, global-scope: 0, size: 18.2 KB
       stale: onboarding-notes, legacy-api-plan
-  • user
-      repo-scope: 0, session-scope: 6, size: 30.1 KB
+  • User (global)
+      repo-scope: 0, session-scope: 0, global-scope: 6, size: 30.1 KB
 ```
 
 ---

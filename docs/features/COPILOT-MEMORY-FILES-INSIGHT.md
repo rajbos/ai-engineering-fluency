@@ -41,15 +41,19 @@ no `globalStorage` (user-scope) memories were present.
 
 ## Reusable code in this repo
 
-`src/workspaceHelpers.ts` (shared, not VS Code-specific) already exposes
+`src/workspacePathResolver.ts` (shared, not VS Code-specific) already exposes
 `parseWorkspaceStorageJsonFile()`, which reads a `workspace.json`/`meta.json`
 file and extracts the real workspace folder path from its candidate keys.
 `copilotMemoryFiles.ts` reuses this directly to resolve a `workspaceStorage/<hash>`
 back to a friendly folder name, instead of re-implementing the JSON parsing.
 
 `src/adapters/copilotChatAdapter.ts` also already exposes `getVSCodeUserPaths()`,
-which enumerates every VS Code variant's "User" root across Windows/macOS/Linux
-(including WSL) — reused as the default scan scope for `discoverAllMemoryFiles()`.
+which enumerates every VS Code variant's "User" root across Windows/macOS/Linux.
+Under WSL it does not include the native Windows-side roots on its own —
+`copilotMemoryFiles.ts`'s `getDefaultUserPaths()` additionally calls the
+separate `getWSLWindowsPathsSync()` helper and merges its results in, so full
+WSL coverage is a two-step combination of both functions, not
+`getVSCodeUserPaths()` alone.
 
 ## Proposed insight: "Memory Files"
 
@@ -110,7 +114,7 @@ same persist-across-refresh caching pattern already used for
 | Types | `src/types.ts` — `MemoryFileEntry`, `MemoryFilesWorkspaceSummary`, `MemoryFilesAnalysis`, `MemoryFilesAnalysisView` (compact webview projection) |
 | Unit tests | `vscode-extension/test/unit/copilotMemoryFiles.test.ts` |
 | Insight card | `vscode-extension/src/insightsEngine.ts` — id `stale-memory-files`, fires when `InsightContext.memoryFilesAnalysis` has stale or oversized files; tests in `insightsEngine.test.ts` |
-| CLI command | `cli/src/commands/memory-files.ts` — `copilot-token-tracker memory-files [--json] [--stale-days] [--large-kb]`, registered in `cli/src/cli.ts` |
+| CLI command | `cli/src/commands/memory-files.ts` — `ai-engineering-fluency memory-files [--json] [--stale-days] [--large-kb]`, registered in `cli/src/cli.ts` |
 | Runtime wiring | `vscode-extension/src/extension.ts` — `computeMemoryFilesAnalysis()` (TTL-cached via `isMemoryFilesScanFresh()`), threaded into both insight-context builders and all `updateStats`/initial-payload builders (projected to `MemoryFilesAnalysisView` before being sent) |
 | Tools-tab UI | `vscode-extension/src/webview/usage/main.ts` — `buildMemoryFilesSectionHtml()`, `_sanitizeMemoryFilesAnalysis()`, `#section-memory-files` |
 

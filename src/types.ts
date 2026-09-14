@@ -1494,6 +1494,8 @@ export interface MemoryFilesWorkspaceSummary {
   workspaceName?: string;
   repoCount: number;
   sessionCount: number;
+  /** User (global)-scope files folded into this bucket — only ever non-zero for the `__user__` row. */
+  userCount: number;
   totalBytes: number;
   newestMtimeMs: number | null;
   oldestMtimeMs: number | null;
@@ -1528,6 +1530,8 @@ export interface MemoryFilesWorkspaceViewSummary {
   workspaceName?: string;
   repoCount: number;
   sessionCount: number;
+  /** User (global)-scope files folded into this bucket — only ever non-zero for the `__user__` row. */
+  userCount: number;
   totalBytes: number;
   newestMtimeMs: number | null;
   /** `MemoryFilesWorkspaceSummary.staleFiles.length` — the webview table only ever shows the count. */
