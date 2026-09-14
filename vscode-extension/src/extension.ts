@@ -1865,7 +1865,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Also removes the legacy unscoped keys ('sessionFileCache', 'sessionFileCacheVersion').
 	 */
 
-	private async saveCacheToStorage(): Promise<void> {
+	private async saveCacheToStorage(): Promise<boolean> {
 		return this.cacheManager.saveCacheToStorage();
 	}
 
@@ -9017,6 +9017,12 @@ private computeFallbackDailyRollup(
 		);
 
 		this.log('✅ Details panel created successfully');
+		// Captured once, right after creation: the loading-registry bookkeeping and the
+		// post-await continuation below must track *this* panel specifically, not whatever
+		// `this.detailsPanel` happens to hold by the time they run — a close-then-reopen while
+		// `await this.updateTokenStats()` is still pending would otherwise let this call's
+		// continuation delete/overwrite the *replacement* panel instead of a no-op on its own.
+		const panel = this.detailsPanel;
 
 		// Track when the panel becomes active or inactive
 		this.detailsPanel.onDidChangeViewState((e) => { this.log(`📊 Details panel view state changed: active=${e.webviewPanel.active}, visible=${e.webviewPanel.visible}`); });
@@ -9050,22 +9056,25 @@ private computeFallbackDailyRollup(
 		if (!stats) {
 			this.log('No cached stats — showing loading screen while calculating...');
 			this._detailsPanelIsLoading = true;
-			this._refreshLoadingPanels.add(this.detailsPanel);
+			this._refreshLoadingPanels.add(panel);
 			this.statusBarItem.tooltip = l10n.t('statusBar.loadingInPanel');
-			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview, this._updateTokenStatsStartedAt ?? Date.now());
+			panel.webview.html = this.getLoadingHtml(panel.webview, this._updateTokenStatsStartedAt ?? Date.now());
 
 			stats = await this.updateTokenStats();
 
 			this._detailsPanelIsLoading = false;
-			if (this.detailsPanel) { this._refreshLoadingPanels.delete(this.detailsPanel); }
-			if (!stats || !this.detailsPanel) {
+			this._refreshLoadingPanels.delete(panel);
+			// this.detailsPanel !== panel (not just falsy) also catches a close-then-reopen during
+			// the await above: rendering this stale result into the replacement panel would race
+			// its own, still-in-flight showDetails() call.
+			if (!stats || this.detailsPanel !== panel) {
 				return;
 			}
 		}
 
 		// Set the HTML content
 		try {
-			this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, stats);
+			panel.webview.html = this.getDetailsHtml(panel.webview, stats);
 			this.log('✅ Details panel HTML set successfully');
 		} catch (err) {
 			this.error('❌ Failed to set Details panel HTML', err);

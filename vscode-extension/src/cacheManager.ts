@@ -210,18 +210,26 @@ export class CacheManager {
 
 	/**
 	 * Internal method to perform the checkpoint save.
+	 *
+	 * Only resets the dirty counter/timer on an actual persisted write. saveCacheToStorage()
+	 * never throws — it resolves `false` on a skipped (lock held by another window) or failed
+	 * save — so resetting unconditionally here would let a lock-contended tick (an expected,
+	 * routine occurrence, not a rare error) silently drop its dirty count. Combined with
+	 * maybeCheckpointCache()'s "skip when nothing is dirty" guard, that would leave the change
+	 * unpersisted with no future tick ever retrying it, dependent entirely on some *other*,
+	 * later write happening to bump the counter again.
 	 */
 	private async checkpointCacheInternal(): Promise<void> {
 		const now = Date.now();
 		const entriesCount = this.entriesSinceLastCheckpoint;
 		this.deps.log(`Checkpointing cache: ${entriesCount} new entries since last checkpoint (${((now - this.lastCheckpointTime) / 1000).toFixed(1)}s elapsed)`);
 
-		try {
-			await this.saveCacheToStorage();
+		const saved = await this.saveCacheToStorage();
+		if (saved) {
 			this.lastCheckpointTime = now;
 			this.entriesSinceLastCheckpoint = 0;
-		} catch (error) {
-			this.deps.warn(`Checkpoint cache save failed: ${error}`);
+		} else {
+			this.deps.log('Checkpoint save was skipped or failed; leaving the dirty count intact so the next checkpoint retries it');
 		}
 	}
 
@@ -667,11 +675,18 @@ export class CacheManager {
 		);
 	}
 
-	async saveCacheToStorage(): Promise<void> {
+	/**
+	 * Returns whether the cache was actually written to disk — `false` on a skipped (lock held by
+	 * another window) or failed save, distinct from "resolved without throwing" (this never
+	 * throws either way). checkpointCacheInternal() needs this distinction: it must not reset
+	 * entriesSinceLastCheckpoint on a save that didn't happen, or a dirty checkpoint that lost a
+	 * lock race can be mistaken for a persisted one and never retried.
+	 */
+	async saveCacheToStorage(): Promise<boolean> {
 		const acquired = await this.acquireCacheLock();
 		if (!acquired) {
 			this.deps.log('Cache lock held by another VS Code window, skipping save');
-			return;
+			return false;
 		}
 		try {
 			const cacheId = this.getCacheIdentifier();
@@ -679,9 +694,10 @@ export class CacheManager {
 			// Persist to the shared on-disk snapshot only (no globalState write to
 			// avoid VS Code's large-extension-state warning).
 			this.deps.log(`Saving ${this.sessionFileCache.size} cached session files to disk snapshot (version ${this.cacheVersion}, ${cacheId})`);
-			await this.writeSharedSnapshot();
+			return await this.writeSharedSnapshot();
 		} catch (error) {
 			this.deps.error(`Error saving cache to storage: ${error}`);
+			return false;
 		} finally {
 			await this.releaseCacheLock();
 		}
@@ -710,8 +726,12 @@ export class CacheManager {
 	 * mtime) so that a window with a partial/stale cache can never regress a richer
 	 * snapshot published by another window. Must be called while holding the cache
 	 * lock to keep the read-modify-write atomic across windows.
+	 *
+	 * Never throws — a write failure is logged and reported via the `false` return instead,
+	 * so a caller like checkpointCacheInternal() can distinguish "actually persisted" from
+	 * "swallowed an error" without needing its own try/catch around this.
 	 */
-	async writeSharedSnapshot(): Promise<void> {
+	async writeSharedSnapshot(): Promise<boolean> {
 		const snapshotPath = this.getSharedSnapshotPath();
 		const tmpPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
 		try {
@@ -732,9 +752,11 @@ export class CacheManager {
 				const stat = await fs.promises.stat(snapshotPath);
 				this.lastLoadedSnapshotMtime = stat.mtimeMs;
 			} catch { /* best-effort */ }
+			return true;
 		} catch (error) {
 			this.deps.warn(`Failed to write shared cache snapshot: ${error}`);
 			try { await fs.promises.unlink(tmpPath); } catch { /* best-effort cleanup */ }
+			return false;
 		}
 	}
 
