@@ -395,7 +395,7 @@
         display: inline-block;
         margin-right: 6px;
         font-size: 10px;
-        color: var(--vscode-foreground);
+        color: inherit;
 }
 
 .hidden { display: none; }
@@ -545,5 +545,5 @@
         font-size: 12px;
         font-weight: bold;
         text-transform: uppercase;
-        color: #4ade80;
+        color: var(--success-fg, #4ade80);
 }
