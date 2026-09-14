@@ -148,7 +148,6 @@
   "loading.refresh.calculatingStats": "Calculating usage statistics…",
   "loading.refresh.analyzingUsage": "Analysing usage patterns…",
   "loading.refresh.scoringFluency": "Scoring AI fluency…",
-  "loading.refresh.finalizing": "Finalizing insights…",
   "efficiency.error.title": "Could not build the Efficiency view",
   "efficiency.error.retry": "Try again",
   "efficiency.error.staleAfterClear": "The cached data was cleared while this view was being built.",

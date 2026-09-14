@@ -398,7 +398,6 @@ test('l10n: main refresh loading step labels resolve in English', () => {
 		'loading.refresh.calculatingStats': 'Calculating usage statistics…',
 		'loading.refresh.analyzingUsage': 'Analysing usage patterns…',
 		'loading.refresh.scoringFluency': 'Scoring AI fluency…',
-		'loading.refresh.finalizing': 'Finalizing insights…',
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
@@ -534,7 +533,6 @@ test('l10n: main refresh loading step labels resolve in zh-cn', () => {
 			'loading.refresh.calculatingStats': '正在计算使用统计…',
 			'loading.refresh.analyzingUsage': '正在分析使用模式…',
 			'loading.refresh.scoringFluency': '正在评估 AI 熟练度…',
-			'loading.refresh.finalizing': '正在完成洞察分析…',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);

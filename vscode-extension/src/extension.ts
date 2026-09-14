@@ -4331,6 +4331,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.error('Error updating token stats:', error);
 			this.setStatusBarText(l10n.t('statusBar.tokenError'));
 			this.statusBarItem.tooltip = l10n.t('statusBar.errorTooltip');
+			// A genuine throw here (unlike publishRefreshResult() returning false for a
+			// superseded run, which never reaches this catch) means no later refresh is already
+			// under way to resolve a panel left waiting on this one — see showDetails()/
+			// showEnvironmental()'s isRefreshSuperseded() branch, which deliberately leaves a
+			// superseded run's panel registered for exactly such a replacement to publish into.
+			// Without this, a panel whose refresh genuinely failed while it was in the "stay on
+			// the loading screen, a replacement will handle it" state would never get one.
+			this.resolveStuckLoadingPanelsAsFailed();
 			return undefined;
 		} finally {
 			this.stopRefreshHeartbeat();
@@ -4462,13 +4470,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this.updateStatusBarAndTooltip(detailedStats);
 		this.updateChartPanelIfOpen(silent);
-		// The remaining sub-steps report real sub-progress on the Details/Environmental loading
-		// screen — including computeAndUploadFluencyScore, which runs calculateMaturityScores()
-		// and an optional network upload on every non-silent refresh regardless of whether the
-		// Maturity panel is even open (see that method). Both panels' real HTML/data is published
-		// only once every step below has run (see the two calls after evaluateAndSurfaceInsights),
-		// not here: publishing Details early used to swap its loading screen away before these
-		// later sub-steps were even sent, so it never actually showed the progress they report.
+		// These sub-steps report real sub-progress on the Details/Environmental loading screen —
+		// including computeAndUploadFluencyScore, which runs calculateMaturityScores() and an
+		// optional network upload on every non-silent refresh regardless of whether the Maturity
+		// panel is even open (see that method). Both panels' real HTML/data is published right
+		// after, not before: publishing Details earlier than this used to swap its loading screen
+		// away before these sub-steps were even sent, so it never actually showed the progress
+		// they report.
 		this.sendLoadingPanelMessage({
 			command: 'loadingStep', step: 'computing',
 			percentage: CopilotTokenTracker.REFRESH_STEP_PCT.analysis, label: l10n.t('loading.refresh.analyzingUsage'),
@@ -4481,15 +4489,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 		});
 		await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);
 		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
-		this.sendLoadingPanelMessage({
-			command: 'loadingStep', step: 'computing',
-			percentage: CopilotTokenTracker.REFRESH_STEP_PCT.insights, label: l10n.t('loading.refresh.finalizing'),
-		});
-		await this.evaluateAndSurfaceInsights(startedAtGeneration);
-		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
 
+		// Published here, before evaluateAndSurfaceInsights() rather than after: that call can
+		// await an interactive insight toast (vscode.window.showInformationMessage()) that only
+		// resolves once the user acts on or dismisses it — sitting behind that await would leave
+		// Details/Environmental stuck on the loading screen for as long as the toast sits
+		// unanswered, even though the refresh itself finished. The "finalizing insights" sub-step
+		// this displaces was never going to be visible on the loading screen after this anyway.
 		this.updateDetailsPanelIfOpen(detailedStats, silent);
 		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
+
+		await this.evaluateAndSurfaceInsights(startedAtGeneration);
+		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
 
 		this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
 		this.persistRefreshResult(isLeader);
@@ -4969,6 +4980,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 				},
 			});
 		} else {
+			// Whichever refresh reaches here first owns clearing this panel's loading-tracking
+			// state, not only the one showDetails() itself awaited: a run that gets superseded by
+			// a cache clear deliberately leaves the panel registered as loading (see
+			// isRefreshSuperseded() call sites in showDetails()) so it keeps receiving progress
+			// from whatever run replaces it — that replacement's own publish, right here, is what
+			// finally clears it. Without this, a superseded run leaves _detailsPanelIsLoading
+			// stuck true (suppressing the normal status-bar tooltip) and the panel stuck in
+			// _refreshLoadingPanels (a future loadingStep broadcast would hit its real content).
+			this._refreshLoadingPanels.delete(this.detailsPanel);
+			this._detailsPanelIsLoading = false;
 			this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, detailedStats);
 		}
 	}
@@ -5046,6 +5067,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 				},
 			});
 		} else {
+			// See the matching comment in updateDetailsPanelIfOpen(): whichever refresh reaches
+			// here first clears this panel's loading-tracking state, since a superseded run
+			// deliberately leaves it registered for the replacement run to publish into.
+			this._refreshLoadingPanels.delete(this.environmentalPanel);
 			this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, detailedStats);
 		}
 	}
@@ -9050,6 +9075,24 @@ private computeFallbackDailyRollup(
 		</html>`;
 	}
 
+	/**
+	 * Resolves every panel still registered in _refreshLoadingPanels with the failure state,
+	 * for a refresh that genuinely threw (see this method's call site in _runUpdateTokenStats()).
+	 *
+	 * A panel can be sitting in this set for one of two reasons: its own showDetails()/
+	 * showEnvironmental() call is still awaiting this exact run, or an earlier run that produced
+	 * it was superseded and deliberately left the panel registered for *this* replacement to
+	 * resolve (see isRefreshSuperseded() call sites in showDetails()/showEnvironmental()) —
+	 * either way, this run failing outright means nothing else is coming to rescue it.
+	 */
+	private resolveStuckLoadingPanelsAsFailed(): void {
+		for (const panel of this._refreshLoadingPanels) {
+			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+			if (this.detailsPanel === panel) { this._detailsPanelIsLoading = false; }
+		}
+		this._refreshLoadingPanels.clear();
+	}
+
 	public async showDetails(): Promise<void> {
 		this.log('📊 Opening Details panel');
 		this.recordViewVisit('details');
@@ -11224,10 +11267,13 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * mirroring EFFICIENCY_STEP_PCT above. Parsing owns everything below the first of these
 	 * (see loadingHtml.ts's 85%/compute-phase split); without sub-steps here the bar parked at
 	 * a fixed 96% for the whole compute phase on any panel (Environmental) that doesn't swap
-	 * away from the loading screen until this run fully returns.
+	 * away from the loading screen until this run fully returns. Stops at `fluency`: Details/
+	 * Environmental are published right after that step (see publishRefreshResult()), before
+	 * evaluateAndSurfaceInsights() — which can await an interactive toast — ever runs, so a
+	 * fourth "finalizing insights" sub-step would never actually be seen on a loading screen.
 	 */
 	private static readonly REFRESH_STEP_PCT = {
-		stats: 88, analysis: 92, fluency: 96, insights: 99,
+		stats: 88, analysis: 92, fluency: 96,
 	} as const;
 
 	/**

@@ -148,7 +148,6 @@
   "loading.refresh.calculatingStats": "正在计算使用统计…",
   "loading.refresh.analyzingUsage": "正在分析使用模式…",
   "loading.refresh.scoringFluency": "正在评估 AI 熟练度…",
-  "loading.refresh.finalizing": "正在完成洞察分析…",
   "efficiency.error.title": "无法构建效率视图",
   "efficiency.error.retry": "重试",
   "efficiency.error.staleAfterClear": "构建此视图时缓存数据已被清除。",
