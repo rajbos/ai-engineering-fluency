@@ -166,3 +166,33 @@ jobs:
           vscode-extension/dist/extension.js.map
           vscode-extension/out/
         retention-days: 7
+
+  # Stable required-check anchor.
+  #
+  # build-and-test keeps a real matrix (3 OSes), and GitHub evaluates a
+  # job-level `if` BEFORE expanding the matrix: when the gate above skips it,
+  # the run reports one skipped check named "build-and-test", not the three
+  # "build-and-test (<os>, 24.x)" names it reports when it runs. A required
+  # status check cannot match both spellings, so gating alone would hang
+  # docs-only PRs on a name that never appears.
+  #
+  # This job always runs and always reports under one name, so it - not the
+  # matrix entries - is what branch protection should require.
+  build-result:
+    name: Build result
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: always()
+    steps:
+      - name: Check the matrix result
+        env:
+          RESULT: ${{ needs.build-and-test.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RESULT" in
+            # skipped = deliberately gated out by check-changes for a PR that
+            # touches nothing this workflow builds.
+            success|skipped) echo "build-and-test: $RESULT" ;;
+            *) echo "::error::build-and-test: $RESULT"; exit 1 ;;
+          esac
