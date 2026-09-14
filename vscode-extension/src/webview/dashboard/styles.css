@@ -275,6 +275,12 @@
         to { transform: rotate(360deg); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+        .spinner {
+                animation: none;
+        }
+}
+
 .loading-text {
         color: var(--vscode-foreground);
         font-size: 16px;
