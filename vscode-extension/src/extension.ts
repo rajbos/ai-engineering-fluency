@@ -4978,8 +4978,28 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'logviewer.hydrafusion.modelChangedTitle': l10n.t('logviewer.hydrafusion.modelChangedTitle'),
 			'logviewer.hydrafusion.expandStepNote': l10n.t('logviewer.hydrafusion.expandStepNote'),
 			...this.getEfficiencyModelsLocalization(),
+			...this.getMemoryFilesLocalization(),
 			// Current language for reference
 			'__language__': language
+		};
+	}
+
+	/** Usage view — Copilot Memory Files section strings. Templates with {0}/{1} are resolved webview-side by localizeFormat(). */
+	private getMemoryFilesLocalization(): Record<string, string> {
+		return {
+			'memoryFiles.sectionTitle': l10n.t('memoryFiles.sectionTitle'),
+			'memoryFiles.sectionSubtitle': l10n.t('memoryFiles.sectionSubtitle'),
+			'memoryFiles.summary': l10n.t('memoryFiles.summary'),
+			'memoryFiles.staleSummary': l10n.t('memoryFiles.staleSummary'),
+			'memoryFiles.largeSummary': l10n.t('memoryFiles.largeSummary'),
+			'memoryFiles.table.workspace': l10n.t('memoryFiles.table.workspace'),
+			'memoryFiles.table.repo': l10n.t('memoryFiles.table.repo'),
+			'memoryFiles.table.session': l10n.t('memoryFiles.table.session'),
+			'memoryFiles.table.size': l10n.t('memoryFiles.table.size'),
+			'memoryFiles.table.stale': l10n.t('memoryFiles.table.stale'),
+			'memoryFiles.table.lastUpdated': l10n.t('memoryFiles.table.lastUpdated'),
+			'memoryFiles.unknownWorkspace': l10n.t('memoryFiles.unknownWorkspace'),
+			'memoryFiles.renderError': l10n.t('memoryFiles.renderError'),
 		};
 	}
 

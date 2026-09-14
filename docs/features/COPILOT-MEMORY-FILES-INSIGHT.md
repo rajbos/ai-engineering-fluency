@@ -64,11 +64,11 @@ per known workspace:
 | Size | file size, flagged if unusually large (e.g. the observed 20KB file) |
 | Linked session | decode session-folder name → cross-reference existing chat-session parsing, if the session log is also ingested |
 
-No content of the memory files themselves would be surfaced beyond title/first
-line — this is metadata/insight only, not a memory browser (memowl already
-does that well). Scope is intentionally narrow: help users notice **memory
-files piling up, going stale, or growing unexpectedly large**, as a hygiene
-signal, not to duplicate memowl's read/manage UI.
+No content of the memory files themselves would be surfaced beyond a
+filename-derived title — this is metadata/insight only, not a memory browser
+(memowl already does that well). Scope is intentionally narrow: help users
+notice **memory files piling up, going stale, or growing unexpectedly
+large**, as a hygiene signal, not to duplicate memowl's read/manage UI.
 
 ## Resolved design decisions
 
@@ -82,7 +82,7 @@ signal, not to duplicate memowl's read/manage UI.
 
 
 `extension.ts`'s `computeMemoryFilesAnalysis()` calls `discoverAllMemoryFiles()`
-+ `analyzeMemoryFiles()` (metadata-only, default thresholds) once per stats
+and `analyzeMemoryFiles()` (metadata-only, default thresholds) once per stats
 build and populates `UsageAnalysisStats.memoryFilesAnalysis`, threaded through
 both `InsightContext` builders (toast/badge path and the Insights-tab path) and
 all three webview payload builders (silent refresh, full refresh, initial

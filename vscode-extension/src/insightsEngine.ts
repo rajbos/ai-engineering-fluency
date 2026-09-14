@@ -1457,7 +1457,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 			}
 			return `Copilot's agent writes its own memory notes to disk (project conventions, decisions, scratch plans). ` +
 				`${parts.join(' and ')}. Stale or oversized memory files can carry outdated context into future sessions. ` +
-				`Review them under \`workspaceStorage/<hash>/GitHub.copilot-chat/memory-tool/memories/\` and delete or refresh ones that no longer apply.`;
+				`Review them under any \`memory-tool/memories/\` folder inside your VS Code user data (\`globalStorage\` for user-scope, \`workspaceStorage/<hash>\` for per-workspace) and delete or refresh ones that no longer apply.`;
 		},
 		appliesTo: (ctx) => {
 			const analysis = ctx.memoryFilesAnalysis;

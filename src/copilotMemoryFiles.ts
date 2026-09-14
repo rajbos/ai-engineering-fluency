@@ -20,7 +20,7 @@ import * as path from 'path';
 
 import type { MemoryFileEntry, MemoryFilesAnalysis, MemoryFilesWorkspaceSummary } from './types';
 import { parseWorkspaceStorageJsonFile } from './workspaceHelpers';
-import { getVSCodeUserPaths } from './adapters/copilotChatAdapter';
+import { getVSCodeUserPaths, getWSLWindowsPathsSync, isWSL } from './adapters/copilotChatAdapter';
 
 /** Extension-folder spellings Copilot Chat's memory-tool directory has shipped under. */
 const COPILOT_EXTENSION_FOLDERS = ['GitHub.copilot-chat', 'github.copilot-chat', 'GitHub.copilot', 'github.copilot'];
@@ -87,22 +87,48 @@ function toEntry(filePath: string, scope: MemoryFileEntry['scope'], extra: Parti
 	}
 }
 
-/** Find the first existing `memory-tool/memories` directory under a "User" root's `globalStorage`. */
-function findGlobalMemoriesDir(userPath: string): string | undefined {
-	for (const extFolder of COPILOT_EXTENSION_FOLDERS) {
-		const candidate = path.join(userPath, 'globalStorage', extFolder, ...MEMORY_TOOL_SEGMENTS);
-		if (fs.existsSync(candidate)) { return candidate; }
-	}
-	return undefined;
+/**
+ * Filter `COPILOT_EXTENSION_FOLDERS` down to the spellings that actually exist as directory
+ * entries directly under `parentDir`, matched with exact case via a single `readdirSync`. Using
+ * `fs.existsSync(candidate)` per spelling would false-positive on case-insensitive filesystems
+ * (Windows, default macOS) — e.g. `github.copilot-chat` would appear to "exist" merely because
+ * `GitHub.copilot-chat` does, causing every file under it to be discovered and counted twice.
+ * Reading the real directory entries once and matching by exact name (as
+ * `adapters/copilotChatAdapter.ts`'s session-file discovery does) avoids that duplication while
+ * still finding every spelling that is genuinely present (e.g. on a case-sensitive filesystem
+ * after an extension id migration).
+ */
+function matchedExtensionFolders(parentDir: string): string[] {
+	const entrySet = new Set(listSubDirNames(parentDir));
+	return COPILOT_EXTENSION_FOLDERS.filter(f => entrySet.has(f));
 }
 
-/** Find the first existing `memory-tool/memories` directory under a specific `workspaceStorage/<hash>`. */
-function findWorkspaceMemoriesDir(userPath: string, hash: string): string | undefined {
-	for (const extFolder of COPILOT_EXTENSION_FOLDERS) {
-		const candidate = path.join(userPath, 'workspaceStorage', hash, extFolder, ...MEMORY_TOOL_SEGMENTS);
-		if (fs.existsSync(candidate)) { return candidate; }
-	}
-	return undefined;
+/**
+ * Find every existing `memory-tool/memories` directory under a "User" root's `globalStorage`,
+ * across all known extension-folder spellings. Multiple spellings can coexist on the same
+ * machine (e.g. after an extension id migration, or on case-sensitive filesystems), so all
+ * matches are returned rather than stopping at the first hit — otherwise files under the
+ * later folder(s) would be silently dropped. Mirrors the multi-folder scan pattern in
+ * `adapters/copilotChatAdapter.ts`'s session-file discovery.
+ */
+function findGlobalMemoriesDirs(userPath: string): string[] {
+	const globalStorageDir = path.join(userPath, 'globalStorage');
+	return matchedExtensionFolders(globalStorageDir)
+		.map(extFolder => path.join(globalStorageDir, extFolder, ...MEMORY_TOOL_SEGMENTS))
+		.filter(candidate => fs.existsSync(candidate));
+}
+
+/**
+ * Find every existing `memory-tool/memories` directory under a specific
+ * `workspaceStorage/<hash>`, across all known extension-folder spellings. See
+ * {@link findGlobalMemoriesDirs} for why matching is done against real directory entries
+ * instead of per-spelling `existsSync` calls.
+ */
+function findWorkspaceMemoriesDirs(userPath: string, hash: string): string[] {
+	const hashDir = path.join(userPath, 'workspaceStorage', hash);
+	return matchedExtensionFolders(hashDir)
+		.map(extFolder => path.join(hashDir, extFolder, ...MEMORY_TOOL_SEGMENTS))
+		.filter(candidate => fs.existsSync(candidate));
 }
 
 /**
@@ -126,22 +152,24 @@ function resolveWorkspaceName(userPath: string, hash: string): string | undefine
 
 /** Discover memory files for one `workspaceStorage/<hash>` folder (repo + session scope subdirs). */
 function discoverWorkspaceHashMemoryFiles(userPath: string, hash: string): MemoryFileEntry[] {
-	const memoriesDir = findWorkspaceMemoriesDir(userPath, hash);
-	if (!memoriesDir) { return []; }
+	const memoriesDirs = findWorkspaceMemoriesDirs(userPath, hash);
+	if (memoriesDirs.length === 0) { return []; }
 	const workspaceName = resolveWorkspaceName(userPath, hash);
 
 	const entries: MemoryFileEntry[] = [];
-	for (const subDir of listSubDirNames(memoriesDir)) {
-		const isRepoScope = subDir === 'repo';
-		const sessionId = isRepoScope ? undefined : decodeSessionFolderName(subDir);
-		// Anything under memories/ that isn't "repo" and doesn't decode to a session UUID is an
-		// unrecognized layout (future memory-tool version?) — skip it rather than misclassify it.
-		if (!isRepoScope && !sessionId) { continue; }
-		const scope: MemoryFileEntry['scope'] = isRepoScope ? 'repo' : 'session';
+	for (const memoriesDir of memoriesDirs) {
+		for (const subDir of listSubDirNames(memoriesDir)) {
+			const isRepoScope = subDir === 'repo';
+			const sessionId = isRepoScope ? undefined : decodeSessionFolderName(subDir);
+			// Anything under memories/ that isn't "repo" and doesn't decode to a session UUID is an
+			// unrecognized layout (future memory-tool version?) — skip it rather than misclassify it.
+			if (!isRepoScope && !sessionId) { continue; }
+			const scope: MemoryFileEntry['scope'] = isRepoScope ? 'repo' : 'session';
 
-		for (const file of listMdFiles(path.join(memoriesDir, subDir))) {
-			const entry = toEntry(file, scope, { workspaceHash: hash, workspaceName, sessionId });
-			if (entry) { entries.push(entry); }
+			for (const file of listMdFiles(path.join(memoriesDir, subDir))) {
+				const entry = toEntry(file, scope, { workspaceHash: hash, workspaceName, sessionId });
+				if (entry) { entries.push(entry); }
+			}
 		}
 	}
 	return entries;
@@ -154,8 +182,7 @@ function discoverWorkspaceHashMemoryFiles(userPath: string, hash: string): Memor
 export function discoverMemoryFilesInUserPath(userPath: string): MemoryFileEntry[] {
 	const entries: MemoryFileEntry[] = [];
 
-	const globalDir = findGlobalMemoriesDir(userPath);
-	if (globalDir) {
+	for (const globalDir of findGlobalMemoriesDirs(userPath)) {
 		for (const file of listMdFiles(globalDir)) {
 			const entry = toEntry(file, 'user');
 			if (entry) { entries.push(entry); }
@@ -171,11 +198,27 @@ export function discoverMemoryFilesInUserPath(userPath: string): MemoryFileEntry
 }
 
 /**
- * Discover Copilot memory files across every known VS Code "User" root on this machine
- * (Code, Code - Insiders, Code - Exploration, VSCodium, Cursor). Pass `userPaths` to restrict
- * the scan, e.g. in tests, or to a single workspace's own storage.
+ * Default set of "User" root paths to scan: every known VS Code variant, plus — when running
+ * inside WSL — the Windows-side roots (`/mnt/c/Users/<name>/AppData/Roaming/...`) so memory
+ * files written by a native Windows VS Code window are also discovered. Mirrors
+ * `resolveAllVSCodePaths()` / `getCandidatePaths()` in `adapters/copilotChatAdapter.ts`, using
+ * the synchronous WSL-path variant since this module's discovery API is synchronous.
  */
-export function discoverAllMemoryFiles(userPaths: string[] = getVSCodeUserPaths()): MemoryFileEntry[] {
+function getDefaultUserPaths(): string[] {
+	const paths = getVSCodeUserPaths();
+	if (isWSL()) {
+		paths.push(...getWSLWindowsPathsSync());
+	}
+	return paths;
+}
+
+/**
+ * Discover Copilot memory files across every known VS Code "User" root on this machine
+ * (Code, Code - Insiders, Code - Exploration, VSCodium, Cursor), including WSL Windows-side
+ * roots when applicable. Pass `userPaths` to restrict the scan, e.g. in tests, or to a single
+ * workspace's own storage.
+ */
+export function discoverAllMemoryFiles(userPaths: string[] = getDefaultUserPaths()): MemoryFileEntry[] {
 	return userPaths.flatMap(discoverMemoryFilesInUserPath);
 }
 

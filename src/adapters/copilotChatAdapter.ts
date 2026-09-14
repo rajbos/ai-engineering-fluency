@@ -163,7 +163,7 @@ export async function getWSLWindowsPaths(): Promise<string[]> {
  * Windows-side WSL candidates without an await. Mirrors getWSLWindowsPaths
  * but tolerates a missing /mnt/c by returning an empty list.
  */
-function getWSLWindowsPathsSync(): string[] {
+export function getWSLWindowsPathsSync(): string[] {
 	if (!isWSL()) { return []; }
 	const out: string[] = [];
 	const windowsUsersDir = '/mnt/c/Users';

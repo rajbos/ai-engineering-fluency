@@ -955,5 +955,52 @@
         ]
       }
     ]
+  },
+  "memoryFilesAnalysis": {
+    "staleDays": 90,
+    "largeFileBytes": 10240,
+    "totalFiles": 4,
+    "totalBytes": 24576,
+    "staleFileCount": 2,
+    "largeFileCount": 1,
+    "files": [],
+    "byWorkspace": [
+      {
+        "workspaceName": "<script>alert('xss')</script> & \"my-repo\"",
+        "workspaceHash": "abc123",
+        "repoCount": 3,
+        "sessionCount": 1,
+        "totalBytes": 20480,
+        "newestMtimeMs": 1710000000000,
+        "oldestMtimeMs": 1700000000000,
+        "staleFiles": [
+          {
+            "path": "/home/user/.config/Code/User/workspaceStorage/abc123/GitHub.copilot-chat/memory-tool/memories/repo/old-notes.md",
+            "scope": "repo",
+            "workspaceHash": "abc123",
+            "sizeBytes": 12000,
+            "mtimeMs": 1700000000000,
+            "title": "old-notes"
+          },
+          {
+            "path": "/home/user/.config/Code/User/workspaceStorage/abc123/GitHub.copilot-chat/memory-tool/memories/repo/another-old-note.md",
+            "scope": "repo",
+            "workspaceHash": "abc123",
+            "sizeBytes": 8480,
+            "mtimeMs": 1700100000000,
+            "title": "another-old-note"
+          }
+        ]
+      },
+      {
+        "workspaceName": "User (global)",
+        "repoCount": 0,
+        "sessionCount": 0,
+        "totalBytes": 4096,
+        "newestMtimeMs": 1710500000000,
+        "oldestMtimeMs": 1710500000000,
+        "staleFiles": []
+      }
+    ]
   }
 }

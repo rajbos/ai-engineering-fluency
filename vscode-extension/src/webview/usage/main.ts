@@ -1964,11 +1964,13 @@ function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
 	}
 }
 
-/** Pass through the memory-files hygiene analysis (metadata-only: paths/sizes/mtimes) onto sanitized stats. */
+/** Pass through the memory-files hygiene analysis (metadata-only: paths/sizes/mtimes) onto sanitized stats.
+ * Only assigns when the raw payload explicitly includes the key — omitting it (e.g. a partial/silent
+ * refresh) must not clobber a previously-cached value, so we don't default to `null` here. Whether the
+ * field was explicitly `null` (all files gone) vs. omitted (no change) is resolved in `handleUpdateStats`. */
 function applyMemoryFilesAnalysis(sanitized: UsageAnalysisStats, raw: any): void {
-	const memoryFilesAnalysis = _sanitizeMemoryFilesAnalysis(raw.memoryFilesAnalysis);
-	if (memoryFilesAnalysis) {
-		sanitized.memoryFilesAnalysis = memoryFilesAnalysis;
+	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'memoryFilesAnalysis')) {
+		sanitized.memoryFilesAnalysis = _sanitizeMemoryFilesAnalysis(raw.memoryFilesAnalysis);
 	}
 }
 
@@ -3466,7 +3468,7 @@ function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysis | null | unde
 			.slice()
 			.sort((a, b) => b.totalBytes - a.totalBytes)
 			.map(ws => {
-				const name = escapeHtml(ws.workspaceName ?? ws.workspaceHash ?? 'Unknown workspace');
+				const name = escapeHtml(ws.workspaceName ?? ws.workspaceHash ?? localize('memoryFiles.unknownWorkspace'));
 				const staleCount = ws.staleFiles.length;
 				const newest = ws.newestMtimeMs ? getTimeSince(new Date(ws.newestMtimeMs).toISOString()) : '—';
 				return `<tr style="border-bottom:1px solid var(--border-color);">
@@ -3483,22 +3485,22 @@ function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysis | null | unde
 		return `
 			<!-- Memory Files Section -->
 			<div id="section-memory-files" class="section">
-				<div class="section-title"><span>🦉</span><span>Copilot Memory Files</span></div>
-				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Agent-written memory notes on disk (project conventions, decisions, scratch plans) — metadata only, content is never read</div>
+				<div class="section-title"><span>🦉</span><span>${escapeHtml(localize('memoryFiles.sectionTitle'))}</span></div>
+				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">${escapeHtml(localize('memoryFiles.sectionSubtitle'))}</div>
 				<div style="margin-bottom:8px; font-size:13px; color:var(--text-primary);">
-					${formatNumber(analysis.totalFiles)} file${analysis.totalFiles !== 1 ? 's' : ''} · ${formatFileSize(analysis.totalBytes)} total
-					${analysis.staleFileCount > 0 ? ` · <span style="color:var(--vscode-editorWarning-foreground, #cca700);">${analysis.staleFileCount} stale (>${analysis.staleDays}d)</span>` : ''}
-					${analysis.largeFileCount > 0 ? ` · <span style="color:var(--vscode-editorWarning-foreground, #cca700);">${analysis.largeFileCount} unusually large (>${Math.round(analysis.largeFileBytes / 1024)}KB)</span>` : ''}
+					${escapeHtml(localizeFormat('memoryFiles.summary', formatNumber(analysis.totalFiles), formatFileSize(analysis.totalBytes)))}
+					${analysis.staleFileCount > 0 ? ` · <span style="color:var(--vscode-editorWarning-foreground, #cca700);">${escapeHtml(localizeFormat('memoryFiles.staleSummary', analysis.staleFileCount, analysis.staleDays))}</span>` : ''}
+					${analysis.largeFileCount > 0 ? ` · <span style="color:var(--vscode-editorWarning-foreground, #cca700);">${escapeHtml(localizeFormat('memoryFiles.largeSummary', analysis.largeFileCount, Math.round(analysis.largeFileBytes / 1024)))}</span>` : ''}
 				</div>
 				<div style="overflow-x:auto;">
 					<table style="width:100%; border-collapse:collapse; font-size:12px;">
 						<thead><tr style="border-bottom:1px solid var(--border-color);">
-							<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600;">Workspace</th>
-							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">Repo</th>
-							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">Session</th>
-							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">Size</th>
-							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">Stale</th>
-							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">Last updated</th>
+							<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.workspace'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.repo'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.session'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.size'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.stale'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.lastUpdated'))}</th>
 						</tr></thead>
 						<tbody>${rows}</tbody>
 					</table>
@@ -3508,8 +3510,8 @@ function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysis | null | unde
 		console.error(`[usage-webview] buildMemoryFilesSectionHtml failed: ${error instanceof Error ? error.message : String(error)}`);
 		return `
 			<div id="section-memory-files" class="section">
-				<div class="section-title"><span>🦉</span><span>Copilot Memory Files</span></div>
-				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Memory files are temporarily unavailable due to a rendering error. Try Refresh.</div>
+				<div class="section-title"><span>🦉</span><span>${escapeHtml(localize('memoryFiles.sectionTitle'))}</span></div>
+				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">${escapeHtml(localize('memoryFiles.renderError'))}</div>
 			</div>`;
 	}
 }
@@ -5701,10 +5703,10 @@ function syncRenderLayoutState(stats: UsageAnalysisStats): WorkspaceCustomizatio
 	} else {
 		traceCurationOnce('render-no-curation-update', 'renderLayout.curation.notProvidedInUpdate');
 	}
-	// Persist memory-files analysis across refreshes for the same reason.
-	if (stats.memoryFilesAnalysis) {
-		currentMemoryFilesAnalysis = stats.memoryFilesAnalysis;
-	}
+	// Persist memory-files analysis across refreshes for the same reason. Whether the field was
+	// omitted (keep cache) vs. explicitly cleared to null (all files gone) is resolved upstream in
+	// handleUpdateStats before this runs, so a plain overwrite here is safe either way.
+	currentMemoryFilesAnalysis = stats.memoryFilesAnalysis ?? null;
 	return matrix;
 }
 
@@ -5935,6 +5937,9 @@ function handleUpdateStats(message: any): void {
 		_ulLoadingActive = false;
 		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'correctionReport')) {
 			sanitized.correctionReport = currentCorrectionReport;
+		}
+		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'memoryFilesAnalysis')) {
+			sanitized.memoryFilesAnalysis = currentMemoryFilesAnalysis;
 		}
 		// CLI-backed hosts include all buckets; VS Code omits them and keeps using lazy loading.
 		replaceRecentSessionsCache(sanitized.recentSessions);

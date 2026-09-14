@@ -122,6 +122,29 @@ test('discoverMemoryFilesInUserPath returns [] for a nonexistent user path', () 
 	assert.deepEqual(discoverMemoryFilesInUserPath(path.join(os.tmpdir(), 'does-not-exist-memowl')), []);
 });
 
+test('discoverMemoryFilesInUserPath merges memory files across multiple coexisting extension-folder spellings, not just the first match', () => {
+	const userPath = mkTmpDir('memowl-user-');
+
+	// Global scope files under two distinct extension-id spellings that can coexist on disk
+	// (e.g. after an extension id migration). Both must be discovered, not just the first.
+	writeFile(path.join(userPath, 'globalStorage', 'GitHub.copilot-chat', 'memory-tool', 'memories', 'chat-note.md'), '# Chat note');
+	writeFile(path.join(userPath, 'globalStorage', 'GitHub.copilot', 'memory-tool', 'memories', 'copilot-note.md'), '# Copilot note');
+
+	// Per-workspace repo-scope files, same two spellings, same workspace hash.
+	const hash = 'multi-spelling-hash';
+	writeFile(
+		path.join(userPath, 'workspaceStorage', hash, 'GitHub.copilot-chat', 'memory-tool', 'memories', 'repo', 'from-chat.md'),
+		'# From chat',
+	);
+	writeFile(
+		path.join(userPath, 'workspaceStorage', hash, 'GitHub.copilot', 'memory-tool', 'memories', 'repo', 'from-copilot.md'),
+		'# From copilot',
+	);
+
+	const entries = discoverMemoryFilesInUserPath(userPath);
+	assert.deepEqual(entries.map(e => e.title).sort(), ['chat-note', 'copilot-note', 'from-chat', 'from-copilot']);
+});
+
 // ---------------------------------------------------------------------------
 // discoverAllMemoryFiles
 // ---------------------------------------------------------------------------
