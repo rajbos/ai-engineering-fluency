@@ -702,6 +702,7 @@ test('l10n: Copilot Memory Files section strings resolve in English and zh-cn', 
 		'memoryFiles.table.stale': 'Stale',
 		'memoryFiles.table.lastUpdated': 'Last updated',
 		'memoryFiles.unknownWorkspace': 'Unknown workspace',
+		'memoryFiles.globalWorkspaceLabel': 'User (global)',
 		'memoryFiles.renderError': 'Memory files are temporarily unavailable due to a rendering error. Try Refresh.',
 	};
 	for (const [key, value] of Object.entries(english)) {
@@ -727,6 +728,7 @@ test('l10n: Copilot Memory Files section strings resolve in English and zh-cn', 
 			'memoryFiles.table.stale': '\u8fc7\u671f',
 			'memoryFiles.table.lastUpdated': '\u6700\u8fd1\u66f4\u65b0',
 			'memoryFiles.unknownWorkspace': '\u672a\u77e5\u5de5\u4f5c\u533a',
+			'memoryFiles.globalWorkspaceLabel': '\u7528\u6237\uff08\u5168\u5c40\uff09',
 			'memoryFiles.renderError': '\u7531\u4e8e\u6e32\u67d3\u9519\u8bef\uff0c\u8bb0\u5fc6\u6587\u4ef6\u6682\u65f6\u4e0d\u53ef\u7528\u3002\u8bf7\u5c1d\u8bd5\u5237\u65b0\u3002',
 		};
 		for (const [key, value] of Object.entries(chinese)) {

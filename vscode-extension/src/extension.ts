@@ -5406,10 +5406,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'memoryFiles.table.workspace': l10n.t('memoryFiles.table.workspace'),
 			'memoryFiles.table.repo': l10n.t('memoryFiles.table.repo'),
 			'memoryFiles.table.session': l10n.t('memoryFiles.table.session'),
+			'memoryFiles.table.global': l10n.t('memoryFiles.table.global'),
 			'memoryFiles.table.size': l10n.t('memoryFiles.table.size'),
 			'memoryFiles.table.stale': l10n.t('memoryFiles.table.stale'),
 			'memoryFiles.table.lastUpdated': l10n.t('memoryFiles.table.lastUpdated'),
 			'memoryFiles.unknownWorkspace': l10n.t('memoryFiles.unknownWorkspace'),
+			'memoryFiles.globalWorkspaceLabel': l10n.t('memoryFiles.globalWorkspaceLabel'),
 			'memoryFiles.renderError': l10n.t('memoryFiles.renderError'),
 		};
 	}

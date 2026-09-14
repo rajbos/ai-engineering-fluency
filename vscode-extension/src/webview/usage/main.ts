@@ -3476,7 +3476,12 @@ function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysisView | null | 
 			.slice()
 			.sort((a, b) => b.totalBytes - a.totalBytes)
 			.map(ws => {
-				const name = escapeHtml(ws.workspaceName ?? ws.workspaceHash ?? localize('memoryFiles.unknownWorkspace'));
+				// The __user__ bucket is the only one that ever carries userCount > 0; its
+				// data-layer workspaceName ("User (global)", used verbatim by the CLI report)
+				// is not localized, so render the localized label here instead.
+				const name = ws.userCount > 0
+					? escapeHtml(localize('memoryFiles.globalWorkspaceLabel'))
+					: escapeHtml(ws.workspaceName ?? ws.workspaceHash ?? localize('memoryFiles.unknownWorkspace'));
 				const staleCount = ws.staleFileCount;
 				const newest = ws.newestMtimeMs ? formatAbsoluteDate(new Date(ws.newestMtimeMs).toISOString()) : '—';
 				return `<tr style="border-bottom:1px solid var(--border-color);">

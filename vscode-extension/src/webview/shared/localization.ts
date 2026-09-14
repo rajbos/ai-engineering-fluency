@@ -167,6 +167,7 @@ export interface WebviewLocalization {
 	'memoryFiles.table.stale': string;
 	'memoryFiles.table.lastUpdated': string;
 	'memoryFiles.unknownWorkspace': string;
+	'memoryFiles.globalWorkspaceLabel': string;
 	'memoryFiles.renderError': string;
 
 	// Add other webview-localizable strings here as needed
@@ -313,6 +314,7 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'memoryFiles.table.stale': 'Stale',
 	'memoryFiles.table.lastUpdated': 'Last updated',
 	'memoryFiles.unknownWorkspace': 'Unknown workspace',
+	'memoryFiles.globalWorkspaceLabel': 'User (global)',
 	'memoryFiles.renderError': 'Memory files are temporarily unavailable due to a rendering error. Try Refresh.'
 };
 
