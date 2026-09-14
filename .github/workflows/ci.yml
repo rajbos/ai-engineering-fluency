@@ -10,6 +10,49 @@ permissions:
   contents: read
 
 jobs:
+  # Path gate. Everything in this workflow builds, tests or renders the VS Code
+  # extension, so a PR touching only docs/, sharing-server/, jetbrains-plugin/,
+  # visualstudio-extension/, omp-segment/ or assets/ has nothing here to run.
+  # Filtering in a gate job rather than with a `paths:` trigger keeps the gated
+  # jobs reporting a (skipped) result, so they can stay required status checks -
+  # a `paths:` trigger would leave those PRs waiting on checks that never
+  # arrive. Mirrors the same pattern in cli-build.yml.
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      ci-relevant: ${{ github.event_name == 'push' || steps.filter.outputs.ci-relevant == 'true' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check for CI-relevant file changes
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            ci-relevant:
+              - 'vscode-extension/**'
+              # The extension compiles the shared sources from the repo-root
+              # src/ (see vscode-extension/tsconfig.json).
+              - 'src/**'
+              # test-coverage-check inspects cli/src changes too.
+              - 'cli/**'
+              # scripts/parse-lint-output.js and scripts/parse-test-output.js
+              # run as part of the build job.
+              - 'scripts/**'
+              - '.nvmrc'
+              # Harnesses invoked by the build and ui-checks jobs.
+              - '.github/skills/visual-view-diff/**'
+              - '.github/skills/sync-host-views/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/scripts/check-test-coverage.sh'
+              - '.github/workflows/dependencies/playwright/**'
+
   # Deterministic guard against "new source logic without test changes" — the
   # class of finding the agent-review Test Expert agent would otherwise have to
   # catch with an LLM. Fails the PR when production source under
@@ -18,7 +61,8 @@ jobs:
   test-coverage-check:
     name: Test coverage companion check
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    needs: check-changes
+    if: github.event_name == 'pull_request' && needs.check-changes.outputs.ci-relevant == 'true'
     steps:
     - name: Harden the runner (Block all outbound calls except allowed)
       uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -44,11 +88,19 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    
+    needs: check-changes
+    if: needs.check-changes.outputs.ci-relevant == 'true'
+
     strategy:
       fail-fast: false
       matrix:
-        node-version: [22.x, 24.x]
+        # Single-entry matrix: 22.x was dropped. .nvmrc pins 24, and every
+        # other job here (package, ui-checks) already builds on 24 only, so
+        # the 22.x row was duplicating the 24.x row's work rather than
+        # covering a version anything targets. Kept as a matrix so the job
+        # name stays "build (24.x)" and a version can be added back by
+        # editing one line.
+        node-version: [24.x]
     
     steps:
     - name: Harden the runner (Block all outbound calls except allowed)
@@ -315,7 +367,8 @@ jobs:
   ui-checks:
     name: Webview UI checks
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    needs: check-changes
+    if: github.event_name == 'pull_request' && needs.check-changes.outputs.ci-relevant == 'true'
     steps:
     - name: Harden the runner (Audit all outbound calls)
       uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -334,19 +387,40 @@ jobs:
       with:
         node-version: '24.x'
         cache: 'npm'
-        cache-dependency-path: vscode-extension/package-lock.json
+        cache-dependency-path: |
+          vscode-extension/package-lock.json
+          .github/workflows/dependencies/playwright/package-lock.json
 
     - name: Install dependencies
       working-directory: vscode-extension
       run: npm ci --ignore-scripts
 
+    # The Chromium build Playwright downloads is pinned by the locked Playwright
+    # version, so the lock file hash is an exact cache key - a hit means the
+    # cached browser is the one this run would have downloaded.
+    - name: Cache Playwright browsers
+      id: playwright-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ runner.os }}-playwright-${{ hashFiles('.github/workflows/dependencies/playwright/package-lock.json') }}
+
     # Playwright is deliberately not a dependency of the extension - it is
     # tooling, not shipped code - so the harness uses a dedicated locked install.
+    # The browser download is skipped on a cache hit; the apt-level system
+    # libraries it needs live outside ~/.cache/ms-playwright and are installed
+    # either way.
     - name: Install Playwright Chromium
       working-directory: .github/workflows/dependencies/playwright
+      env:
+        CACHE_HIT: ${{ steps.playwright-cache.outputs.cache-hit }}
       run: |
         npm ci --ignore-scripts --no-audit --no-fund
-        npx --no-install playwright install --with-deps chromium
+        if [ "$CACHE_HIT" = "true" ]; then
+          npx --no-install playwright install-deps chromium
+        else
+          npx --no-install playwright install --with-deps chromium
+        fi
 
     - name: Compile webview bundles
       working-directory: vscode-extension
