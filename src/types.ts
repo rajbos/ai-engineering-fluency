@@ -877,6 +877,8 @@ correctionReport?: CorrectionReport;
  * cluster reached the minimum size.
  */
 repeatedTasks?: RepeatedTaskReport;
+/** Optional Copilot memory-files hygiene analysis (VS Code only; absent in CLI/VS/JetBrains). */
+memoryFilesAnalysis?: MemoryFilesAnalysis | null;
 }
 
 /** One day's worth of multi-agent/delegation signal, used to render a trend sparkline. */

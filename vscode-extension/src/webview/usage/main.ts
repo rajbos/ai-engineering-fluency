@@ -16,7 +16,7 @@ import {
 // Imported from the shared contract rather than re-declared locally, so a shape
 // change in src/types.ts surfaces here as a type error instead of silently
 // drifting out of sync with what the extension host actually sends.
-import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats } from '../../../../src/types';
+import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysis } from '../../../../src/types';
 import { CONTEXT_NEAR_LIMIT_RATIO } from '../../../../src/types';
 import { getSessionContextFillPercent, isSessionNearContextLimit } from '../../../../src/utils/contextFill';
 
@@ -220,6 +220,8 @@ type UsageAnalysisStats = {
 	/** Repeated-task candidates (skill suggestions). Null when no repeated task was found. */
 	repeatedTasks?: RepeatedTaskReport | null;
 	curationAnalysis?: ToolCurationAnalysis | null;
+	/** Copilot memory-files hygiene analysis (metadata-only: counts, staleness, size). Null when none found. */
+	memoryFilesAnalysis?: MemoryFilesAnalysis | null;
 	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
 	sessionColumnSettings?: { enabledColumns?: string[] };
 	/** Copilot API quota balance snapshot (available when the extension has fetched quota data). */
@@ -440,6 +442,8 @@ let currentCorrectionReport: CorrectionReport | null | undefined = undefined;
 // Persisted across stats refreshes so the curation section doesn't disappear
 // when a periodic updateStats message omits curationAnalysis.
 let currentCurationAnalysis: ToolCurationAnalysis | null = null;
+// Same rationale for the memory-files hygiene analysis.
+let currentMemoryFilesAnalysis: MemoryFilesAnalysis | null = null;
 
 type WorktreeResult = {
 	path: string;
@@ -1918,6 +1922,23 @@ function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null 
 	};
 }
 
+/** Normalize an optional memory-files hygiene analysis (metadata-only) so rendering never throws on a partial payload. */
+function _sanitizeMemoryFilesAnalysis(raw: unknown): MemoryFilesAnalysis | null {
+	if (!raw || typeof raw !== 'object') { return null; }
+	const ma = raw as Partial<MemoryFilesAnalysis>;
+	if (!Array.isArray(ma.byWorkspace)) { return null; }
+	return {
+		staleDays: typeof ma.staleDays === 'number' ? ma.staleDays : 90,
+		largeFileBytes: typeof ma.largeFileBytes === 'number' ? ma.largeFileBytes : 10 * 1024,
+		files: Array.isArray(ma.files) ? ma.files : [],
+		byWorkspace: ma.byWorkspace,
+		totalFiles: typeof ma.totalFiles === 'number' ? ma.totalFiles : 0,
+		totalBytes: typeof ma.totalBytes === 'number' ? ma.totalBytes : 0,
+		staleFileCount: typeof ma.staleFileCount === 'number' ? ma.staleFileCount : 0,
+		largeFileCount: typeof ma.largeFileCount === 'number' ? ma.largeFileCount : 0,
+	};
+}
+
 /** Sanitize the optional correction/repeated-task reports onto the stats object. */
 function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void {
 	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'correctionReport')) {
@@ -1940,6 +1961,14 @@ function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
 			last30: TodaySessionSummary[];
 			currentMonth: TodaySessionSummary[];
 		};
+	}
+}
+
+/** Pass through the memory-files hygiene analysis (metadata-only: paths/sizes/mtimes) onto sanitized stats. */
+function applyMemoryFilesAnalysis(sanitized: UsageAnalysisStats, raw: any): void {
+	const memoryFilesAnalysis = _sanitizeMemoryFilesAnalysis(raw.memoryFilesAnalysis);
+	if (memoryFilesAnalysis) {
+		sanitized.memoryFilesAnalysis = memoryFilesAnalysis;
 	}
 }
 
@@ -2003,6 +2032,9 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 		} else {
 			traceCurationOnce('sanitize-no-curation', 'sanitizeStats.curation.missing');
 		}
+
+		// Pass through the memory-files hygiene analysis (metadata-only: paths/sizes/mtimes).
+		applyMemoryFilesAnalysis(sanitized, raw);
 
 		// Pass through the Copilot API quota balance and current-month billing costs.
 		// Without this, periodic updateStats refreshes rebuild the stats object without
@@ -3424,6 +3456,62 @@ function buildBuiltinToolsHtml(builtinTools: AvailableToolEntry[], bloat: ToolCu
 			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">💡 These tools are provided by VS Code itself and cannot be disabled. They are excluded from the actionable overhead total above.</div>
 		</div>
 	</details>`;
+}
+
+function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysis | null | undefined): string {
+	try {
+		if (!analysis || analysis.totalFiles === 0) { return ''; }
+
+		const rows = analysis.byWorkspace
+			.slice()
+			.sort((a, b) => b.totalBytes - a.totalBytes)
+			.map(ws => {
+				const name = escapeHtml(ws.workspaceName ?? ws.workspaceHash ?? 'Unknown workspace');
+				const staleCount = ws.staleFiles.length;
+				const newest = ws.newestMtimeMs ? getTimeSince(new Date(ws.newestMtimeMs).toISOString()) : '—';
+				return `<tr style="border-bottom:1px solid var(--border-color);">
+					<td style="padding:5px 8px; color:var(--text-primary);">${name}</td>
+					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${ws.repoCount}</td>
+					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${ws.sessionCount}</td>
+					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${formatFileSize(ws.totalBytes)}</td>
+					<td style="padding:5px 8px; text-align:right; color:${staleCount > 0 ? 'var(--vscode-editorWarning-foreground, #cca700)' : 'var(--text-primary)'};">${staleCount}</td>
+					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${newest}</td>
+				</tr>`;
+			})
+			.join('');
+
+		return `
+			<!-- Memory Files Section -->
+			<div id="section-memory-files" class="section">
+				<div class="section-title"><span>🦉</span><span>Copilot Memory Files</span></div>
+				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Agent-written memory notes on disk (project conventions, decisions, scratch plans) — metadata only, content is never read</div>
+				<div style="margin-bottom:8px; font-size:13px; color:var(--text-primary);">
+					${formatNumber(analysis.totalFiles)} file${analysis.totalFiles !== 1 ? 's' : ''} · ${formatFileSize(analysis.totalBytes)} total
+					${analysis.staleFileCount > 0 ? ` · <span style="color:var(--vscode-editorWarning-foreground, #cca700);">${analysis.staleFileCount} stale (>${analysis.staleDays}d)</span>` : ''}
+					${analysis.largeFileCount > 0 ? ` · <span style="color:var(--vscode-editorWarning-foreground, #cca700);">${analysis.largeFileCount} unusually large (>${Math.round(analysis.largeFileBytes / 1024)}KB)</span>` : ''}
+				</div>
+				<div style="overflow-x:auto;">
+					<table style="width:100%; border-collapse:collapse; font-size:12px;">
+						<thead><tr style="border-bottom:1px solid var(--border-color);">
+							<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600;">Workspace</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">Repo</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">Session</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">Size</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">Stale</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">Last updated</th>
+						</tr></thead>
+						<tbody>${rows}</tbody>
+					</table>
+				</div>
+			</div>`;
+	} catch (error) {
+		console.error(`[usage-webview] buildMemoryFilesSectionHtml failed: ${error instanceof Error ? error.message : String(error)}`);
+		return `
+			<div id="section-memory-files" class="section">
+				<div class="section-title"><span>🦉</span><span>Copilot Memory Files</span></div>
+				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Memory files are temporarily unavailable due to a rendering error. Try Refresh.</div>
+			</div>`;
+	}
 }
 
 function buildCurationSectionHtml(curation: ToolCurationAnalysis | null | undefined): string {
@@ -5550,6 +5638,7 @@ function buildToolsTabPanelHtml(
 
 			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
 			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
+			${buildMemoryFilesSectionHtml(currentMemoryFilesAnalysis ?? stats.memoryFilesAnalysis)}
 			${buildSkillSuggestionsSectionHtml(stats.repeatedTasks ?? null)}
 			<!-- Multi-Model Usage Section -->
 			<div class="section">
@@ -5611,6 +5700,10 @@ function syncRenderLayoutState(stats: UsageAnalysisStats): WorkspaceCustomizatio
 		});
 	} else {
 		traceCurationOnce('render-no-curation-update', 'renderLayout.curation.notProvidedInUpdate');
+	}
+	// Persist memory-files analysis across refreshes for the same reason.
+	if (stats.memoryFilesAnalysis) {
+		currentMemoryFilesAnalysis = stats.memoryFilesAnalysis;
 	}
 	return matrix;
 }

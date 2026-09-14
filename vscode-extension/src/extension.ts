@@ -78,6 +78,7 @@ import type {
   CorrectionRepoGroup,
   CorrectionSessionEntry,
   RepeatedTaskReport,
+  MemoryFilesAnalysis,
 } from '../../src/types';
 import {
 	ensureContextPressure,
@@ -116,6 +117,12 @@ import {
   analyzeToolCuration as _analyzeToolCuration,
   findSkillDescriptionInWorkspaces as _findSkillDescriptionInWorkspaces,
 } from '../../src/toolCuration';
+
+// --- Copilot memory files (hygiene analysis) ---
+import {
+  discoverAllMemoryFiles as _discoverAllMemoryFiles,
+  analyzeMemoryFiles as _analyzeMemoryFiles,
+} from '../../src/copilotMemoryFiles';
 
 // --- Insights engine ---
 import type { TaskCategory, TaskCategoryBreakdown } from '../../src/taskClassification';
@@ -4579,6 +4586,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			autoCompactionsLast7Days: stats.autoCompactionsLast7Days,
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
+			memoryFilesAnalysis: stats.memoryFilesAnalysis ?? null,
 		};
 
 		const evaluated = _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
@@ -4641,6 +4649,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			todaySessions: stats.todaySessions,
 			curationAnalysis: stats.curationAnalysis ?? null,
 			repeatedTasks: stats.repeatedTasks ?? null,
+			memoryFilesAnalysis: stats.memoryFilesAnalysis ?? null,
 		};
 		return _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
 	}
@@ -5486,6 +5495,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats),
 			agenticDailyTrend,
 			autoCompactionsLast7Days,
+			memoryFilesAnalysis: this.computeMemoryFilesAnalysis(),
 		};
 		this.lastUsageAnalysisStats = stats;
 		this._statsGeneration.usage = startedAtGeneration;
@@ -5572,6 +5582,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 				error: String(err),
 			});
 			this.log(`⚠️ Tool curation analysis failed: ${String(err)}`);
+			return null;
+		}
+	}
+
+	/**
+	 * Discover and analyze Copilot's on-disk agent memory files (memory-tool/memories,
+	 * user/repo/session scope) for a hygiene insight. Metadata-only (path/size/mtime),
+	 * never reads memory file content. Returns null when no memory files were found or
+	 * on any scan error, so a failure here never breaks the rest of the stats build.
+	 */
+	private computeMemoryFilesAnalysis(): MemoryFilesAnalysis | null {
+		try {
+			const files = _discoverAllMemoryFiles();
+			if (files.length === 0) { return null; }
+			return _analyzeMemoryFiles(files);
+		} catch (err) {
+			this.log(`⚠️ Memory files analysis failed: ${String(err)}`);
 			return null;
 		}
 	}
@@ -9068,6 +9095,7 @@ private computeFallbackDailyRollup(
 			correctionReport: analysisStats.correctionReport ?? null,
 			repeatedTasks: analysisStats.repeatedTasks ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
+			memoryFilesAnalysis: analysisStats.memoryFilesAnalysis ?? null,
 			copilotApiBalance: this._buildCopilotApiBalance(),
 			monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
 			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
@@ -14178,6 +14206,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       insights: this.buildCurrentInsights(stats),
       correctionReport: stats.correctionReport ?? null,
       curationAnalysis: stats.curationAnalysis ?? null,
+      memoryFilesAnalysis: stats.memoryFilesAnalysis ?? null,
       sessionColumnSettings,
       copilotApiBalance: this._buildCopilotApiBalance(),
       monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
