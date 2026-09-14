@@ -511,7 +511,7 @@
         flex: 1;
         height: 6px;
         border: 1px solid var(--vscode-foreground);
-        background-color: transparent;
+        background-color: var(--stage-pip-empty-bg, transparent);
 }
 
 .stage-pip.filled.stage-pip-1 { background-color: var(--stage-1-color); border-color: var(--stage-1-color); }
