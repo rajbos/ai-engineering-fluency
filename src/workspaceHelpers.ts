@@ -86,12 +86,6 @@ interface CustomizationPatternsConfig {
 }
 
 /**
- * Resolve the workspace folder full path from a session file path.
- * Looks for a `workspaceStorage/<id>/` segment and reads `workspace.json` or `meta.json`.
- * Synchronous by design to keep the analysis flow simple and cached.
- */
-
-/**
  * Extract workspace ID from a session file path, if it's workspace-scoped.
  * Returns the workspace ID or undefined if not a workspace-scoped session.
  */
