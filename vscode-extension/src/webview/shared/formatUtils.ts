@@ -255,6 +255,20 @@ export function getTimeSince(isoString: string): string {
 }
 
 /**
+ * Formats an ISO timestamp as a locale-aware absolute date (e.g. "Sep 14, 2026").
+ * Unlike {@link getTimeSince}, this is deterministic (does not depend on `Date.now()`)
+ * and honors the caller's locale, making it safe for fixture-driven screenshots.
+ * Returns "—" when the value is missing or invalid.
+ */
+export function formatAbsoluteDate(isoString: string): string {
+	const then = new Date(isoString);
+	if (!Number.isFinite(then.getTime())) {
+		return '—';
+	}
+	return then.toLocaleDateString(currentLocale, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/**
  * Converts markdown links to HTML anchor tags while escaping other HTML.
  * Converts [text](url) to <a href="url" target="_blank" rel="noopener noreferrer">text</a>
  */

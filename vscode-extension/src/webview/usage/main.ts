@@ -3,7 +3,7 @@ import { el, setHtml } from '../shared/domUtils';
 import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
-import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
+import { escapeHtml, formatAbsoluteDate, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
 import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
@@ -3470,7 +3470,7 @@ function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysis | null | unde
 			.map(ws => {
 				const name = escapeHtml(ws.workspaceName ?? ws.workspaceHash ?? localize('memoryFiles.unknownWorkspace'));
 				const staleCount = ws.staleFiles.length;
-				const newest = ws.newestMtimeMs ? getTimeSince(new Date(ws.newestMtimeMs).toISOString()) : '—';
+				const newest = ws.newestMtimeMs ? formatAbsoluteDate(new Date(ws.newestMtimeMs).toISOString()) : '—';
 				return `<tr style="border-bottom:1px solid var(--border-color);">
 					<td style="padding:5px 8px; color:var(--text-primary);">${name}</td>
 					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${ws.repoCount}</td>
