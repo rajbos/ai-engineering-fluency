@@ -2900,15 +2900,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Serializes Efficiency builds.
-	 *
-	 * Two builds overlapping is not only a render race: they write shared caches
-	 * (`lastUsageAnalysisStats`, `lastEfficiencySessionInputs`, `lastFullDailyStats`), so an
-	 * older build finishing second leaves stale data behind for every later view. Running
-	 * them one at a time removes that ordering problem at the source, and a queued refresh
-	 * then reuses whatever the build ahead of it just cached.
-	 */
-	/**
 	 * Requests the one automatic Efficiency rebuild a cache invalidation is owed.
 	 *
 	 * Two paths independently notice an invalidation and want the panel rebuilt: `clearCache()`,
@@ -2939,14 +2930,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Queues one Efficiency build, tracking how many are queued but not yet started.
-	 *
-	 * The count is decremented immediately before `build` runs — and every caller captures
-	 * `_cacheGeneration` as the first statement of its callback, with no await in between — so a
-	 * non-zero count means at least one build is still going to read the live generation. That is
-	 * what lets requestEfficiencyRebuild() coalesce onto it instead of queuing a second walk.
-	 */
-	/**
 	 * Releases the automatic-rebuild stamp after a build fails.
 	 *
 	 * requestEfficiencyRebuild() marks a generation satisfied when it defers to a build that is
@@ -2959,6 +2942,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._efficiencyRebuildRequestedFor = undefined;
 	}
 
+	/**
+	 * Serializes Efficiency builds, tracking how many are queued but not yet started.
+	 *
+	 * Two builds overlapping is not only a render race: they write shared caches
+	 * (`lastUsageAnalysisStats`, `lastEfficiencySessionInputs`, `lastFullDailyStats`), so an older
+	 * build finishing second leaves stale data behind for every later view. Running them one at a
+	 * time removes that ordering problem at the source, and a queued refresh then reuses whatever
+	 * the build ahead of it just cached.
+	 *
+	 * The count is decremented immediately before `build` runs — and every caller captures
+	 * `_cacheGeneration` as the first statement of its callback, with no await in between — so a
+	 * non-zero count means at least one build is still going to read the live generation. That is
+	 * what lets requestEfficiencyRebuild() coalesce onto it instead of queuing a second walk.
+	 */
 	private runEfficiencyBuild<T>(build: () => Promise<T>): Promise<T> {
 		this._efficiencyBuildsQueued++;
 		const { result, chain } = chainBuild(this._efficiencyBuildChain, () => {
