@@ -4181,6 +4181,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * panels, and no second refresh is started behind them. A run that fails this publishes
 	 * nothing at all — `_hasCompletedRealRefresh` included, since that flag tells the instant paint
 	 * that verified data has already reached the status bar.
+	 *
+	 * This keys on `_cacheGeneration` itself, not on the per-cache stamps, so a *scoped*
+	 * invalidation trips it too: refreshAnalysisPanel() bumps the same global counter while
+	 * meaning to invalidate usage-analysis state only, and carries the daily/full-year stamps
+	 * across its bump for exactly that reason. A token refresh in flight across one of those is
+	 * therefore discarded even though its inputs are fine — never wrong data, but a redundant
+	 * parse, since that method's own trailing updateTokenStats() then starts a fresh run.
+	 * Narrowing this wants a clear-generation the emptying writers (clearCache(),
+	 * runLocalViewRegression()) bump and the scoped ones do not; deliberately not built here.
 	 */
 	private isRefreshSuperseded(startedAtGeneration: number): boolean {
 		if (isComputedStatsCurrent(startedAtGeneration, this._cacheGeneration)) { return false; }
@@ -5074,6 +5083,44 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
+	 * Log viewer summary card labels. Templates with {0}/{1} (otherCount,
+	 * contextRefsBreakdown) are resolved webview-side by localizeFormat().
+	 */
+	private getLogViewerSummaryLocalization(): Record<string, string> {
+		return {
+			'logviewer.summary.interactions': l10n.t('logviewer.summary.interactions'),
+			'logviewer.summary.editorMode': l10n.t('logviewer.summary.editorMode'),
+			'logviewer.summary.estimatedTokens': l10n.t('logviewer.summary.estimatedTokens'),
+			'logviewer.summary.actualTokens': l10n.t('logviewer.summary.actualTokens'),
+			'logviewer.summary.modelTurns': l10n.t('logviewer.summary.modelTurns'),
+			'logviewer.summary.inputTokens': l10n.t('logviewer.summary.inputTokens'),
+			'logviewer.summary.outputTokens': l10n.t('logviewer.summary.outputTokens'),
+			'logviewer.summary.cachedInput': l10n.t('logviewer.summary.cachedInput'),
+			'logviewer.summary.thinkingTokens': l10n.t('logviewer.summary.thinkingTokens'),
+			'logviewer.summary.thinkingEffort': l10n.t('logviewer.summary.thinkingEffort'),
+			'logviewer.summary.subAgents': l10n.t('logviewer.summary.subAgents'),
+			'logviewer.summary.contextTruncated': l10n.t('logviewer.summary.contextTruncated'),
+			'logviewer.summary.sessionHierarchy': l10n.t('logviewer.summary.sessionHierarchy'),
+			'logviewer.summary.toolCalls': l10n.t('logviewer.summary.toolCalls'),
+			'logviewer.summary.mcpTools': l10n.t('logviewer.summary.mcpTools'),
+			'logviewer.summary.contextRefs': l10n.t('logviewer.summary.contextRefs'),
+			'logviewer.summary.fileName': l10n.t('logviewer.summary.fileName'),
+			'logviewer.summary.editor': l10n.t('logviewer.summary.editor'),
+			'logviewer.summary.editorSource': l10n.t('logviewer.summary.editorSource'),
+			'logviewer.summary.mcpAndContextRefs': l10n.t('logviewer.summary.mcpAndContextRefs'),
+			'logviewer.summary.noModeData': l10n.t('logviewer.summary.noModeData'),
+			'logviewer.summary.noneShort': l10n.t('logviewer.summary.noneShort'),
+			'logviewer.summary.otherCount': l10n.t('logviewer.summary.otherCount'),
+			'logviewer.summary.contextRefsBreakdown': l10n.t('logviewer.summary.contextRefsBreakdown'),
+			'logviewer.summary.fileSize': l10n.t('logviewer.summary.fileSize'),
+			'logviewer.summary.modified': l10n.t('logviewer.summary.modified'),
+			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
+			'logviewer.summary.started': l10n.t('logviewer.summary.started'),
+			'logviewer.summary.lastActivity': l10n.t('logviewer.summary.lastActivity'),
+		};
+	}
+
+	/**
 	 * Get localization strings for webviews based on the current VS Code language.
 	 * This provides localized button labels and other UI strings for webview panels.
 	 */
@@ -5110,33 +5157,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Details view — collapsible "Usage by Editor" section heading tooltips
 			'details.editorSection.show': l10n.t('details.editorSection.show'),
 			'details.editorSection.hide': l10n.t('details.editorSection.hide'),
-			// Log viewer summary card labels
-			'logviewer.summary.interactions': l10n.t('logviewer.summary.interactions'),
-			'logviewer.summary.editorMode': l10n.t('logviewer.summary.editorMode'),
-			'logviewer.summary.estimatedTokens': l10n.t('logviewer.summary.estimatedTokens'),
-			'logviewer.summary.actualTokens': l10n.t('logviewer.summary.actualTokens'),
-			'logviewer.summary.modelTurns': l10n.t('logviewer.summary.modelTurns'),
-			'logviewer.summary.inputTokens': l10n.t('logviewer.summary.inputTokens'),
-			'logviewer.summary.outputTokens': l10n.t('logviewer.summary.outputTokens'),
-			'logviewer.summary.cachedInput': l10n.t('logviewer.summary.cachedInput'),
-			'logviewer.summary.thinkingTokens': l10n.t('logviewer.summary.thinkingTokens'),
-			'logviewer.summary.thinkingEffort': l10n.t('logviewer.summary.thinkingEffort'),
-			'logviewer.summary.subAgents': l10n.t('logviewer.summary.subAgents'),
-			'logviewer.summary.contextTruncated': l10n.t('logviewer.summary.contextTruncated'),
-			'logviewer.summary.sessionHierarchy': l10n.t('logviewer.summary.sessionHierarchy'),
-			'logviewer.summary.toolCalls': l10n.t('logviewer.summary.toolCalls'),
-			'logviewer.summary.mcpTools': l10n.t('logviewer.summary.mcpTools'),
-			'logviewer.summary.contextRefs': l10n.t('logviewer.summary.contextRefs'),
-			'logviewer.summary.fileName': l10n.t('logviewer.summary.fileName'),
-			'logviewer.summary.editor': l10n.t('logviewer.summary.editor'),
-			'logviewer.summary.editorSource': l10n.t('logviewer.summary.editorSource'),
-			'logviewer.summary.mcpAndContextRefs': l10n.t('logviewer.summary.mcpAndContextRefs'),
-			'logviewer.summary.noModeData': l10n.t('logviewer.summary.noModeData'),
-			'logviewer.summary.fileSize': l10n.t('logviewer.summary.fileSize'),
-			'logviewer.summary.modified': l10n.t('logviewer.summary.modified'),
-			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
-			'logviewer.summary.started': l10n.t('logviewer.summary.started'),
-			'logviewer.summary.lastActivity': l10n.t('logviewer.summary.lastActivity'),
+			...this.getLogViewerSummaryLocalization(),
 			...this.getMistralCloudLocalization(),
 			...this.getEfficiencyAttributionLocalization(),
 			// HydraFusion Routing section + Session Steps Overview leg toggle. Templates
@@ -9893,7 +9914,19 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		// `_lastEfficiencyViewData` as clearCache() does: this leaves the session cache
 		// intact, so an Efficiency rebuild will succeed, and dropping the last good payload
 		// would only guarantee the failure state on the way there.
+		//
+		// The generation is global, but this refresh is not: it invalidates usage-analysis
+		// state and nothing else. The daily and full-year caches are carried across the bump
+		// so they stay readable, because a bare bump silently truncated an open Chart. With
+		// `currentFullDailyStats` reading stale, _runRefreshCore()'s backfill is still skipped
+		// (it skips whenever a chart panel is open), `mergeIntoFullDailyStats()` early-returns,
+		// and the chart then re-renders from the 30-day fallback — losing its week, month and
+		// all-history ranges after nothing more than a Usage Analysis refresh.
+		const dailyWasCurrent = isComputedStatsCurrent(this._statsGeneration.daily, this._cacheGeneration);
+		const fullDailyWasCurrent = isComputedStatsCurrent(this._statsGeneration.fullDaily, this._cacheGeneration);
 		this._cacheGeneration++;
+		if (dailyWasCurrent) { this._statsGeneration.daily = this._cacheGeneration; }
+		if (fullDailyWasCurrent) { this._statsGeneration.fullDaily = this._cacheGeneration; }
 		await this.loadAnalysisStatsInBackground(this.analysisPanel);
 		// Refresh token stats so the status bar and tooltip stay in sync
 		await this.updateTokenStats();

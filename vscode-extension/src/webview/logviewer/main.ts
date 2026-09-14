@@ -6,6 +6,7 @@ import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 import { buildTurnOverviewRows, hashModelToHue } from './turnsOverview';
 import { renderHydraFusionSection, renderLegsTable, formatFusionCost } from './hydraFusionSection';
+import { buildMcpAndContextRefsCard, formatTopListWithOther } from './summaryCards';
 import { matchHydraFusionTurnsToChatTurns } from '../../../../src/hydrafusion';
 import type { HydraFusionSummary, HydraFusionTurn } from '../../../../src/hydrafusion';
 // CSS imported as text via esbuild
@@ -404,21 +405,6 @@ if (!entries.length) { return 'None'; }
 return entries.map(e => `<div>${escapeHtml(mapper ? mapper(e.key) : e.key)}: ${e.value}</div>`).join('');
 }
 
-/**
- * Renders a top-N list with an "Other: N" row appended when the total exceeds the listed sum.
- * @security All keys are passed through `escapeHtml`.
- */
-function formatTopListWithOther(entries: { key: string; value: number }[], total: number, mapper?: (k: string) => string): string {
-if (!entries.length) { return 'None'; }
-const lines = entries.map(e => `<div>${escapeHtml(mapper ? mapper(e.key) : e.key)}: ${e.value}</div>`);
-const topSum = entries.reduce((sum, e) => sum + e.value, 0);
-const other = total - topSum;
-if (other > 0) {
-lines.push(`<div>Other: ${other}</div>`);
-}
-return lines.join('');
-}
-
 // ── Shared render helpers ────────────────────────────────────────────────────
 
 /**
@@ -724,28 +710,6 @@ function buildEditorIdentityCard(data: SessionLogData, stats: SummaryStats): str
 }
 
 /**
- * Combined "MCP tools & context references" card: merges the previous MCP Tools
- * and Context Refs cards into a single compact card, since both describe the
- * external context a session pulled in (tool servers vs. editor references).
- */
-function buildMcpAndContextRefsCard(data: SessionLogData, stats: SummaryStats): string {
-	const { usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit, usageContextExplicit } = stats;
-	const mcpSub = usageMcpTotal === 0 ? 'None' : formatTopListWithOther(usageTopMcpTools, usageMcpTotal);
-	const refsSub = usageContextTotal === 0 ? 'None' : `implicit ${usageContextImplicit}, explicit ${usageContextExplicit}`;
-	return `<div class="summary-card summary-card--compact summary-card--combined">
-<div class="summary-label">🔌 ${localize('logviewer.summary.mcpAndContextRefs')}</div>
-<div class="summary-compact-rows">
-<div class="summary-compact-row"><span class="summary-compact-key">🔌 ${localize('logviewer.summary.mcpTools')}</span><span class="summary-compact-val">${usageMcpTotal}</span></div>
-<div class="summary-compact-row"><span class="summary-compact-key">🔗 ${localize('logviewer.summary.contextRefs')}</span><span class="summary-compact-val">${usageContextTotal}</span></div>
-</div>
-<div class="summary-sub combined-card-sub">
-<div class="combined-card-sub-line">🔌 <span class="combined-card-sub-label">${localize('logviewer.summary.mcpTools')}:</span> ${mcpSub}</div>
-<div class="combined-card-sub-line">🔗 <span class="combined-card-sub-label">${localize('logviewer.summary.contextRefs')}:</span> ${refsSub}</div>
-</div>
-</div>`;
-}
-
-/**
  * Per-editor notes for the Estimated Tokens card. When an editor is present in
  * this map the card renders a `ⓘ` hint with hover text explaining why the count
  * is an estimate (no actual API token counts persisted by that editor).
@@ -963,7 +927,7 @@ function renderEditorInfoPanel(data: SessionLogData): string {
  * @security All user-controlled strings (editorName, file path) are escaped via `escapeHtml`.
  */
 function renderSummaryCards(data: SessionLogData, stats: SummaryStats): string {
-	const { usageToolTotal, usageTopTools, usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit, usageContextExplicit } = stats;
+	const { usageToolTotal, usageTopTools } = stats;
 	return `
 <div class="summary-cards">
 ${buildEditorIdentityCard(data, stats)}
@@ -982,7 +946,7 @@ ${buildHierarchyCard(data)}
 <div class="summary-value">${usageToolTotal}</div>
 <div class="summary-sub">${formatTopListWithOther(usageTopTools, usageToolTotal, lookupToolName)}</div>
 </div>
-${buildMcpAndContextRefsCard(data, stats)}
+${buildMcpAndContextRefsCard(stats)}
 <div class="summary-card">
 <div class="summary-label">📦 ${localize('logviewer.summary.fileSize')}</div>
 <div class="summary-value">${formatFileSize(data.size)}</div>

@@ -255,8 +255,15 @@ test('wiring: every computed-stat cache is stamped with the generation its build
 		&& EXTENSION_SRC.includes('await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);'),
 		'_runRefreshCore() must pass its pre-preload generation down both paths that consume preloaded',
 	);
+	// A *producer* must never stamp its result with the generation read at write time — that is
+	// the bug this whole scheme exists for. refreshAnalysisPanel() is the one legitimate use of
+	// that shape and is excluded: it is not recording a computed result, it is carrying an
+	// already-current stamp across its own deliberate bump (see the scoped-invalidation test).
+	const refreshAt = EXTENSION_SRC.indexOf('private async refreshAnalysisPanel()');
+	const withoutScopedBump = EXTENSION_SRC.slice(0, refreshAt)
+		+ EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('\n\tprivate ', refreshAt + 1));
 	assert.ok(
-		!/_statsGeneration\.\w+ = this\._cacheGeneration/.test(EXTENSION_SRC),
+		!/_statsGeneration\.\w+ = this\._cacheGeneration/.test(withoutScopedBump),
 		'a cache must never be stamped with the generation read at write time — that is the bug',
 	);
 });
@@ -430,6 +437,38 @@ test('wiring: a cache invalidation queues at most one automatic Efficiency rebui
 		1,
 		'both automatic triggers must route through requestEfficiencyRebuild(), not call the refresh directly',
 	);
+});
+
+test('wiring: a Usage Analysis refresh does not invalidate the daily or full-year caches', () => {
+	// The generation counter is global but refreshAnalysisPanel()'s invalidation is not: it
+	// discards usage-analysis state only. A bare bump silently truncated an open Chart —
+	// _runRefreshCore()'s backfill skips whenever a chart panel is open, so nothing rebuilt the
+	// full year, and the chart re-rendered from the 30-day fallback after nothing more than a
+	// Usage Analysis refresh.
+	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async refreshAnalysisPanel()'));
+	const refresh = body.slice(0, body.indexOf('\n\tprivate ', 1));
+
+	assert.ok(refresh.includes('this._cacheGeneration++;'), 'the bump itself must stay — recordEfficiencyPayload() keys on it');
+
+	for (const key of ['daily', 'fullDaily']) {
+		assert.ok(
+			refresh.includes(`isComputedStatsCurrent(this._statsGeneration.${key}, this._cacheGeneration)`),
+			`refreshAnalysisPanel() must record whether ${key} was current before the bump`,
+		);
+		assert.ok(
+			refresh.includes(`this._statsGeneration.${key} = this._cacheGeneration;`),
+			`refreshAnalysisPanel() must carry a current ${key} stamp across the bump`,
+		);
+	}
+
+	// Order matters: both reads must precede the bump, or they compare against the new value
+	// and every cache looks stale regardless.
+	const bumpAt = refresh.indexOf('this._cacheGeneration++;');
+	const lastRead = Math.max(
+		refresh.indexOf('const dailyWasCurrent'),
+		refresh.indexOf('const fullDailyWasCurrent'),
+	);
+	assert.ok(lastRead !== -1 && lastRead < bumpAt, 'the was-current reads must be taken before the bump');
 });
 
 // ---------------------------------------------------------------------------

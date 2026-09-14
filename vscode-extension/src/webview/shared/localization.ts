@@ -76,6 +76,9 @@ export interface WebviewLocalization {
 	'logviewer.summary.editorSource': string;
 	'logviewer.summary.mcpAndContextRefs': string;
 	'logviewer.summary.noModeData': string;
+	'logviewer.summary.noneShort': string;
+	'logviewer.summary.otherCount': string;
+	'logviewer.summary.contextRefsBreakdown': string;
 	'logviewer.summary.fileSize': string;
 	'logviewer.summary.modified': string;
 	'logviewer.summary.timeline': string;
@@ -213,6 +216,9 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'logviewer.summary.editorSource': 'Source',
 	'logviewer.summary.mcpAndContextRefs': 'MCP Tools & Context Refs',
 	'logviewer.summary.noModeData': 'No mode data',
+	'logviewer.summary.noneShort': 'None',
+	'logviewer.summary.otherCount': 'Other: {0}',
+	'logviewer.summary.contextRefsBreakdown': 'implicit {0}, explicit {1}',
 	'logviewer.summary.fileSize': 'File Size',
 	'logviewer.summary.modified': 'Modified',
 	'logviewer.summary.timeline': 'Timeline',
