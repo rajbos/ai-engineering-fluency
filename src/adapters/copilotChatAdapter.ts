@@ -159,8 +159,10 @@ export async function getWSLWindowsPaths(): Promise<string[]> {
 }
 
 /**
- * Synchronous flavour used only by the diagnostics panel so it can render
- * Windows-side WSL candidates without an await. Mirrors getWSLWindowsPaths
+ * Synchronous flavour originally added for the diagnostics panel so it can render
+ * Windows-side WSL candidates without an await; `src/copilotMemoryFiles.ts` also calls
+ * it (from `getDefaultUserPaths()`) to discover Windows-side memory files under WSL, since
+ * memory-file discovery is itself synchronous end to end. Mirrors getWSLWindowsPaths
  * but tolerates a missing /mnt/c by returning an empty list.
  */
 export function getWSLWindowsPathsSync(): string[] {
