@@ -702,6 +702,21 @@ test('wiring: a helper that publishes after its own await checks the generation 
 		assert.ok(fn.indexOf(awaited) < guardAt, `${entry}'s guard must come after its own await, not before it`);
 		assert.ok(guardAt < fn.indexOf(publication), `${entry}'s guard must come before it publishes`);
 	}
+	// The insight pass publishes twice — the panel post, then the toast after a second state
+	// write — so one guard is not enough for it.
+	const insightBody = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async evaluateAndSurfaceInsights('));
+	const insights = insightBody.slice(0, insightBody.indexOf('\n\tprivate refreshInsightBadgeFromState('));
+	assert.equal(
+		insights.split('if (!this.mayPublishAt(originGeneration)) { return; }').length - 1,
+		2,
+		'every publication in the insight pass must be guarded, not only the first',
+	);
+	assert.ok(
+		insights.indexOf("await this.context.globalState.update('insights.lastNudgeAt', now);")
+		< insights.lastIndexOf('if (!this.mayPublishAt(originGeneration)) { return; }')
+		&& insights.lastIndexOf('if (!this.mayPublishAt(originGeneration)) { return; }') < insights.indexOf('showInformationMessage('),
+		'the toast must be guarded after its own state write, not before it',
+	);
 	// The insight pass only gets a generation because the refresh hands it one.
 	assert.ok(
 		EXTENSION_SRC.includes('await this.evaluateAndSurfaceInsights(startedAtGeneration);'),
@@ -864,6 +879,21 @@ test('wiring: every rejected Efficiency payload queues the rebuild that replaces
 		EXTENSION_SRC.split('void this.refreshEfficiencyPanel()').length - 1,
 		1,
 		'the rebuild must be requested, not by calling the refresh directly — that is what could loop',
+	);
+});
+
+test('wiring: the English-only loading fragment declares its own language', () => {
+	// The loading body is hardcoded English (loadingHtml.ts has no localization at all) while the
+	// document around it now declares the viewer's locale — so without this the one document whose
+	// body is entirely English would be the one announced in the wrong language.
+	const LOADING_SRC = fs.readFileSync(path.join(__dirname, '../../../../src/loadingHtml.ts'), 'utf8');
+	assert.ok(
+		LOADING_SRC.includes('return `<body lang="en">'),
+		'the loading fragment must declare English, since its strings are not localized',
+	);
+	assert.equal(
+		/\bl10n\b|\blocalize\b|\blocalization\b/.test(LOADING_SRC), false,
+		'if these strings get localized, drop the lang="en" instead of leaving it lying about them',
 	);
 });
 

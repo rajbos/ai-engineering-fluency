@@ -4892,6 +4892,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this._lastInsightNudgeAt = now;
 		await this.context.globalState.update('insights.lastNudgeAt', now);
+		// Second check, for the same reason as the first: the toast is a publication too, and this
+		// await is another window for a clear to land in.
+		if (!this.mayPublishAt(originGeneration)) { return; }
 
 		const view = l10n.t('button.openInsightsTab');
 		const dismiss = l10n.t('button.dismiss');
