@@ -1115,7 +1115,7 @@ test('wiring: every webview document that renders localized text declares the vi
 	// `localization` payload their bundle renders from — so lang="en" has assistive technology
 	// announce localized content with English pronunciation rules.
 	const declared = EXTENSION_SRC.split('<html lang="${webviewDocumentLanguage(vscode.env.language)}">').length - 1;
-	assert.equal(declared, 11, 'every localized webview document must declare the viewer\'s language');
+	assert.equal(declared, 12, 'every localized webview document must declare the viewer\'s language');
 
 	// Two documents are the exception, and both render English regardless of the viewer's
 	// language. `lang` names a document's predominant language, so deriving the viewer's locale

@@ -161,7 +161,7 @@ import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { analyzeHydraFusionSession, aiuToUsd } from '../../src/hydrafusion';
 import type { HydraFusionSummary } from '../../src/hydrafusion';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
-import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout, type WakeupGate } from './utils/promises';
+import { createWakeupGate, createSemaphore, TimeoutError as _TimeoutError, withTimeout as _withTimeout, type Semaphore } from './utils/promises';
 import { WebviewMessageReplay } from './webviewMessageReplay';
 
 // --- Session parsing & token estimation ---
@@ -792,14 +792,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
-	 * Caps how many timed-out ("deferred") parses may keep running in the background at once.
-	 * Deferring a slow parse does not cancel it — it keeps running to completion — and without
-	 * this cap, every worker that hits SESSION_PRELOAD_TIMEOUT_MS immediately grabs the next
-	 * file while the slow one keeps consuming CPU, so a scan with hundreds of slow files
-	 * accumulates hundreds of concurrent CPU-bound parses competing for the same single-threaded
-	 * event loop the webview's postMessage delivery and rendering also depend on — the likely
-	 * cause of a loading flow that looks frozen despite work still happening. See
-	 * _deferredParsePressureGate.
+	 * Size of _deferredParseSemaphore: how many session-file parses (fast or eventually deferred)
+	 * may be in flight at once. Deferring a slow parse does not cancel it — it keeps running to
+	 * completion — and without a real cap, every worker that hits SESSION_PRELOAD_TIMEOUT_MS
+	 * immediately grabs the next file while the slow one keeps consuming CPU, so a scan with
+	 * hundreds of slow files accumulates hundreds of concurrent CPU-bound parses competing for
+	 * the same single-threaded event loop the webview's postMessage delivery and rendering also
+	 * depend on — the likely cause of a loading flow that looks frozen despite work still
+	 * happening. Currently matches CONCURRENCY, the worker pool size in _preloadSessionFiles()
+	 * (a separate constant there, not structurally linked to this one): with every file — not
+	 * just deferred ones — holding a permit for its own duration, a run where every file is fast
+	 * never contends for one as long as permits >= worker count, and contention only appears
+	 * once files actually start piling up in the background.
 	 */
 	private static readonly MAX_CONCURRENT_DEFERRED_PARSES = 20;
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
@@ -1047,11 +1051,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Timed-out preloads continue in the background; skip duplicate work until their cache entries settle.
 	private readonly _deferredSessionPreloadFiles = new Set<string>();
 	private _deferredSessionPreloadCount = 0;
-	// Wakes worker()s parked in _preloadSessionFiles() while _deferredSessionPreloadFiles is at
-	// MAX_CONCURRENT_DEFERRED_PARSES, signaled whenever a background parse finishes and frees a
-	// slot. A single persistent gate (not recreated per run) because a deferred parse from a
-	// previous run settling must still be able to wake a worker parked in the next one.
-	private readonly _deferredParsePressureGate: WakeupGate = createWakeupGate();
+	/**
+	 * Bounds how many session-file parses (see MAX_CONCURRENT_DEFERRED_PARSES) may be in flight
+	 * across worker() calls in _preloadSessionFiles(), including ones that end up deferred to the
+	 * background. A worker acquires a permit before starting a file and releases it either
+	 * immediately (the file completed or errored within its own turn) or later, from
+	 * deferSessionPreloadRefresh()'s completion handler, once ownership has been handed off to a
+	 * deferred parse still running past the worker's turn — see processPreloadQueueFileWithCrashLog.
+	 * A single persistent semaphore (not recreated per run) because a deferred parse from a
+	 * previous run releasing its permit must still be able to admit a worker parked in the next one.
+	 */
+	private readonly _deferredParseSemaphore: Semaphore = createSemaphore(CopilotTokenTracker.MAX_CONCURRENT_DEFERRED_PARSES);
 	private _deferredSessionRefreshTimer: NodeJS.Timeout | undefined;
 	private _updateTokenStatsStartedAt: number | undefined;
 
@@ -4050,30 +4060,26 @@ class CopilotTokenTracker implements vscode.Disposable {
 					await gate.wait();
 					continue;
 				}
-				// Backpressure: pause briefly before starting a new file while
-				// MAX_CONCURRENT_DEFERRED_PARSES slow parses are already running in the background
-				// — see that constant's doc comment. Deferring doesn't cancel a slow parse, so
-				// without this a run with many slow files accumulates unbounded concurrent work
-				// instead of a bounded-ish pipeline.
+				// Backpressure: hold a permit from a MAX_CONCURRENT_DEFERRED_PARSES-sized semaphore
+				// for the whole duration of this file's processing — brief for a normal file,
+				// however long it takes for one that gets deferred. Deferring doesn't cancel a slow
+				// parse; it keeps running in the background, so without this a run with many slow
+				// files accumulates unbounded concurrent work. Unlike racing a plain timer against
+				// the old WakeupGate-based wait (which woke every parked worker on one release, and
+				// left the losing side of the race registered forever — see git history), this is a
+				// real reservation: acquire() hands the freed permit to exactly one waiter per
+				// release(), and a timed-out acquire() removes its own registration.
 				//
-				// This is a soft, best-effort throttle, not a hard semaphore: a signal() wakes
-				// every worker parked here at once (see _deferredParsePressureGate's doc comment),
-				// so several can observe the same just-freed slot and proceed together — bounded in
-				// practice by CONCURRENCY (the total number of workers), not by this cap alone.
-				// Reserving an exact slot would need real semaphore bookkeeping this pipeline
-				// doesn't have. The wait always falls through rather than looping back to re-check:
-				// on a signal, re-checking wouldn't reliably reserve a slot anyway, and on the 3s
-				// timeout (no signal at all — e.g. every deferred parse is stuck, not merely slow)
-				// looping back would spin/wait forever and the whole preload pass would never
-				// resolve. Either way, proceed to the next file afterwards.
-				if (this._deferredSessionPreloadFiles.size >= CopilotTokenTracker.MAX_CONCURRENT_DEFERRED_PARSES) {
-					await Promise.race([
-						this._deferredParsePressureGate.wait(),
-						new Promise<void>(resolve => setTimeout(resolve, 3_000)),
-					]);
-				}
+				// The 3s timeout is a safety valve, not the common case: if every held permit is
+				// stuck on a pathologically hung parse (not merely slow) rather than a genuinely
+				// freed slot, proceeding without one here — never released, since heldPermit tracks
+				// it below — avoids the alternative of hanging the whole preload pass forever.
+				const heldPermit = await this._deferredParseSemaphore.acquire(3_000);
 				const sessionFile = queue[readIndex++];
-				await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget);
+				const wasDeferred = await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget, heldPermit);
+				if (heldPermit && !wasDeferred) {
+					this._deferredParseSemaphore.release();
+				}
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
 				// Checkpoint cache periodically during long-running preload. Skipped in sample-data
@@ -4138,11 +4144,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * (see debugCrashLog) so a hard native crash mid-scan still leaves a trace of
 	 * which file(s) were in flight. A "start" line with no matching "done"/"error"
 	 * for the same file means the process died while processing it.
+	 *
+	 * Returns whether this file ended up deferred to the background, so the caller (worker())
+	 * knows whether it still owns `heldPermit` (release it immediately) or ownership has
+	 * transferred to the deferred parse's own completion (deferSessionPreloadRefresh() releases
+	 * it there instead) — see _deferredParseSemaphore's doc comment at its declaration.
 	 */
-	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
+	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget: { remaining: number } | undefined, heldPermit: boolean): Promise<boolean> {
 		if (this._deferredSessionPreloadFiles.has(sessionFile)) {
 			this.debugCrashLog(`deferred ${sessionFile}`);
-			return;
+			return false;
 		}
 		this.debugCrashLog(`start ${sessionFile}`);
 		const processing = this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
@@ -4150,14 +4161,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 		try {
 			await _withTimeout(processing, CopilotTokenTracker.SESSION_PRELOAD_TIMEOUT_MS, operation);
 			this.debugCrashLog(`done  ${sessionFile}`);
+			return false;
 		} catch (e) {
 			if (e instanceof _TimeoutError) {
 				this.debugCrashLog(`deferred ${sessionFile}`);
 				this._deferredSessionPreloadCount++;
-				this.deferSessionPreloadRefresh(sessionFile, processing);
-				return;
+				this.deferSessionPreloadRefresh(sessionFile, processing, heldPermit);
+				return true;
 			}
 			this.debugCrashLog(`error ${sessionFile}: ${e}`);
+			return false;
 		}
 	}
 
@@ -4165,17 +4178,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Keeps a timed-out preload alive without holding the initial statistics pass. Once every
 	 * deferred parse has filled its cache entry, a single refresh incorporates those results.
 	 */
-	private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>): void {
+	private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>, heldPermit: boolean): void {
 		this._deferredSessionPreloadFiles.add(sessionFile);
 		void processing
 			.then(() => this.debugCrashLog(`done(background)  ${sessionFile}`))
 			.catch(error => this.debugCrashLog(`error(background) ${sessionFile}: ${error}`))
 			.finally(() => {
 				this._deferredSessionPreloadFiles.delete(sessionFile);
-				// Wake any worker() parked on the MAX_CONCURRENT_DEFERRED_PARSES backpressure
-				// gate now that this slot is free, regardless of whether the whole batch has
-				// drained yet.
-				this._deferredParsePressureGate.signal();
+				// The worker that started this file didn't release its semaphore permit because
+				// this parse turned out to be deferred (see processPreloadQueueFileWithCrashLog);
+				// release it now that the background work it was held for has actually finished.
+				// A worker whose own acquire() timed out (heldPermit=false) never took a permit
+				// for this file, so there is nothing to release on its behalf.
+				if (heldPermit) { this._deferredParseSemaphore.release(); }
 				if (this._deferredSessionPreloadFiles.size === 0) {
 					this.scheduleDeferredSessionRefresh();
 				}
@@ -8987,6 +9002,35 @@ private computeFallbackDailyRollup(
 		return _estimateTokensFromText(text, model, this.tokenEstimators);
 	}
 
+	/**
+	 * Failure state for a panel that was showing the loading screen when updateTokenStats()
+	 * returned no data. _runUpdateTokenStats() already caught the error and reported it via the
+	 * status bar, but nothing else tells an open panel — without this, a panel left registered in
+	 * _refreshLoadingPanels through the whole compute phase would otherwise be stuck showing a
+	 * frozen "Building Activity Index" screen forever, since nothing will ever replace it.
+	 * Reuses existing l10n strings rather than adding new ones purely for this fallback.
+	 */
+	private getRefreshFailedHtml(webview: vscode.Webview): string {
+		const nonce = getNonce();
+		return `<!DOCTYPE html>
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
+		<head>
+			<meta charset="UTF-8" />
+			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+			${buildCspMeta(webview, nonce)}
+			<title>${l10n.t('aiEngineeringFluency')}</title>
+		</head>
+		<body style="font-family:var(--vscode-font-family);padding:24px;color:var(--vscode-foreground);">
+			<h2 style="margin:0 0 8px;">${l10n.t('statusBar.errorTooltip')}</h2>
+			<button id="retry" style="padding:6px 14px;cursor:pointer;border:none;border-radius:2px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);">${l10n.t('efficiency.error.retry')}</button>
+			<script nonce="${nonce}">
+				const vscodeApi = acquireVsCodeApi();
+				document.getElementById('retry').addEventListener('click', () => vscodeApi.postMessage({ command: 'refresh' }));
+			</script>
+		</body>
+		</html>`;
+	}
+
 	public async showDetails(): Promise<void> {
 		this.log('📊 Opening Details panel');
 		this.recordViewVisit('details');
@@ -9064,10 +9108,14 @@ private computeFallbackDailyRollup(
 
 			this._detailsPanelIsLoading = false;
 			this._refreshLoadingPanels.delete(panel);
-			// this.detailsPanel !== panel (not just falsy) also catches a close-then-reopen during
-			// the await above: rendering this stale result into the replacement panel would race
-			// its own, still-in-flight showDetails() call.
-			if (!stats || this.detailsPanel !== panel) {
+			// this.detailsPanel !== panel catches a close-then-reopen during the await above:
+			// this call's result belongs to a panel that's gone, and the replacement's own
+			// showDetails() call owns rendering it — nothing to do here either way.
+			if (this.detailsPanel !== panel) {
+				return;
+			}
+			if (!stats) {
+				panel.webview.html = this.getRefreshFailedHtml(panel.webview);
 				return;
 			}
 		}
@@ -9139,7 +9187,11 @@ private computeFallbackDailyRollup(
 		void (async () => {
 			const stats = this.currentDetailedStats ?? await this.updateTokenStats();
 			this._refreshLoadingPanels.delete(panel);
-			if (this.environmentalPanel !== panel || !stats) { return; }
+			if (this.environmentalPanel !== panel) { return; }
+			if (!stats) {
+				panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+				return;
+			}
 			panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
 		})();
 	}

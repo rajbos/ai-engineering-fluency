@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { createWakeupGate, TimeoutError, withTimeout } from '../../src/utils/promises';
+import { createSemaphore, createWakeupGate, TimeoutError, withTimeout } from '../../src/utils/promises';
 
 test('createWakeupGate: signal resolves all currently parked waiters', async () => {
 	const gate = createWakeupGate();
@@ -96,4 +96,61 @@ test('withTimeout: does not cancel work that can be deferred after a timeout', a
 
 	resolveWork?.('cached');
 	assert.equal(await work, 'cached');
+});
+
+test('createSemaphore: acquire() resolves immediately while permits remain', async () => {
+	const sem = createSemaphore(2);
+	assert.equal(await sem.acquire(), true);
+	assert.equal(await sem.acquire(), true);
+});
+
+test('createSemaphore: acquire() blocks once permits are exhausted, until a release()', async () => {
+	const sem = createSemaphore(1);
+	assert.equal(await sem.acquire(), true);
+
+	let acquired = false;
+	const pending = sem.acquire().then((ok) => { acquired = ok; });
+	await new Promise(r => setTimeout(r, 5));
+	assert.equal(acquired, false, 'must not acquire while the sole permit is still held');
+
+	sem.release();
+	await pending;
+	assert.equal(acquired, true);
+});
+
+test('createSemaphore: release() admits exactly one waiter, not every parked caller', async () => {
+	// The bug this guards against: a WakeupGate-style "wake everyone" release would let every
+	// parked acquire() past a single release(), so the count of concurrent holders could grow
+	// unbounded instead of by exactly one per release — see createSemaphore's own doc comment.
+	const sem = createSemaphore(1);
+	assert.equal(await sem.acquire(), true); // the only permit is now held
+
+	const results: boolean[] = [];
+	const waiterA = sem.acquire().then((ok) => { results.push(ok); return ok; });
+	const waiterB = sem.acquire().then((ok) => { results.push(ok); return ok; });
+	await new Promise(r => setTimeout(r, 5));
+	assert.deepEqual(results, [], 'neither waiter may acquire before a release()');
+
+	sem.release();
+	// Give the microtask queue a turn to settle whichever waiter the release granted.
+	await new Promise(r => setTimeout(r, 5));
+	assert.equal(results.length, 1, 'exactly one waiter must be admitted per release()');
+
+	sem.release();
+	await Promise.all([waiterA, waiterB]);
+	assert.deepEqual(results.sort(), [true, true], 'the second release() admits the remaining waiter');
+});
+
+test('createSemaphore: a timed-out acquire() resolves false and does not consume a later release()', async () => {
+	const sem = createSemaphore(1);
+	assert.equal(await sem.acquire(), true); // hold the only permit
+
+	const timedOut = await sem.acquire(5);
+	assert.equal(timedOut, false, 'must resolve false once the timeout elapses without a release()');
+
+	// The timed-out waiter must have unregistered itself: a later release() should return the
+	// permit to the pool (available for a fresh acquire()), not resolve the already-settled,
+	// abandoned waiter a second time.
+	sem.release();
+	assert.equal(await sem.acquire(), true, 'the released permit must be available to a brand-new acquire()');
 });

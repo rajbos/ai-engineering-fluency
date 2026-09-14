@@ -123,13 +123,19 @@ export class CacheManager {
 		// so `existing?.mtime ?? 0` alone would silently weaken an already-recorded, stronger
 		// baseline down to 0, letting any stale disk entry with a positive mtime pass the
 		// newer-than-tombstone check and be resurrected. Keep the strongest (highest) baseline seen.
-		this.deletedFilePaths.set(filePath, Math.max(previousTombstoneMtime ?? 0, existing?.mtime ?? 0));
+		const newTombstoneMtime = Math.max(previousTombstoneMtime ?? 0, existing?.mtime ?? 0);
+		this.deletedFilePaths.set(filePath, newTombstoneMtime);
 		// A tombstone is dirty state too — it must reach the next snapshot save just like a new or
 		// changed entry, or a deleted path can sit unpersisted until an unrelated write happens to
-		// trigger a checkpoint. Counted unconditionally, even with no prior `existing` in-memory
-		// entry: the tombstone map mutation above is itself real state a crash could lose, and
-		// still affects the merge against whatever the disk copy currently holds for this path.
-		this.entriesSinceLastCheckpoint++;
+		// trigger a checkpoint. But only when something actually changed: an in-memory entry was
+		// really removed, or the tombstone's baseline mtime actually advanced. The repeated,
+		// independent-deletion race described above is expected and can fire often on the very
+		// same already-gone path — counting every one of those no-op calls as dirty would keep
+		// nudging the checkpoint threshold with nothing new to save, reproducing the wasted-write
+		// problem this dirty-tracking rework exists to fix.
+		if (existing !== undefined || newTombstoneMtime !== (previousTombstoneMtime ?? 0)) {
+			this.entriesSinceLastCheckpoint++;
+		}
 	}
 
 	async clearExpiredCache(): Promise<void> {
@@ -211,23 +217,30 @@ export class CacheManager {
 	/**
 	 * Internal method to perform the checkpoint save.
 	 *
-	 * Only resets the dirty counter/timer on an actual persisted write. saveCacheToStorage()
-	 * never throws — it resolves `false` on a skipped (lock held by another window) or failed
-	 * save — so resetting unconditionally here would let a lock-contended tick (an expected,
-	 * routine occurrence, not a rare error) silently drop its dirty count. Combined with
-	 * maybeCheckpointCache()'s "skip when nothing is dirty" guard, that would leave the change
-	 * unpersisted with no future tick ever retrying it, dependent entirely on some *other*,
-	 * later write happening to bump the counter again.
+	 * Only clears the dirty count on an actual persisted write, and only the portion of it this
+	 * save actually captured. saveCacheToStorage() never throws — it resolves `false` on a
+	 * skipped (lock held by another window) or failed save — so resetting unconditionally here
+	 * would let a lock-contended tick (an expected, routine occurrence, not a rare error)
+	 * silently drop its dirty count. Combined with maybeCheckpointCache()'s "skip when nothing is
+	 * dirty" guard, that would leave the change unpersisted with no future tick ever retrying it.
+	 *
+	 * Subtracting rather than zeroing on success matters too: workers keep calling
+	 * setCachedSessionData()/deleteCachedSessionData() while saveCacheToStorage() is in flight,
+	 * and buildMergedSnapshotEntries() (inside writeSharedSnapshot()) reads the live cache Map at
+	 * the start of that write — an entry added after that read is not necessarily reflected in
+	 * what actually reached disk. Zeroing the whole counter here would wrongly mark that
+	 * in-flight write as checkpointed too, the same "lost on a crash before the next save" risk
+	 * this whole checkpoint-dirty-tracking rework exists to close.
 	 */
 	private async checkpointCacheInternal(): Promise<void> {
 		const now = Date.now();
-		const entriesCount = this.entriesSinceLastCheckpoint;
-		this.deps.log(`Checkpointing cache: ${entriesCount} new entries since last checkpoint (${((now - this.lastCheckpointTime) / 1000).toFixed(1)}s elapsed)`);
+		const entriesCountAtStart = this.entriesSinceLastCheckpoint;
+		this.deps.log(`Checkpointing cache: ${entriesCountAtStart} new entries since last checkpoint (${((now - this.lastCheckpointTime) / 1000).toFixed(1)}s elapsed)`);
 
 		const saved = await this.saveCacheToStorage();
 		if (saved) {
 			this.lastCheckpointTime = now;
-			this.entriesSinceLastCheckpoint = 0;
+			this.entriesSinceLastCheckpoint = Math.max(0, this.entriesSinceLastCheckpoint - entriesCountAtStart);
 		} else {
 			this.deps.log('Checkpoint save was skipped or failed; leaving the dirty count intact so the next checkpoint retries it');
 		}

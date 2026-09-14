@@ -74,3 +74,64 @@ export function createWakeupGate(): WakeupGate {
     },
   };
 }
+
+/** A counting semaphore bounding how many holders may be admitted at once. */
+export interface Semaphore {
+  /**
+   * Resolves `true` once a permit is acquired. If `timeoutMs` is given and elapses first,
+   * resolves `false` instead and this waiter is removed from the queue — unlike racing a plain
+   * `setTimeout` against a WakeupGate.wait(), the losing attempt does not linger.
+   */
+  acquire(timeoutMs?: number): Promise<boolean>;
+  /** Releases a permit, handing it directly to the longest-waiting acquirer if any (FIFO), else returning it to the pool. */
+  release(): void;
+}
+
+/**
+ * Creates a counting semaphore with `permits` concurrent holders.
+ *
+ * Distinct from WakeupGate above: `signal()`/`wait()` there wakes *every* parked waiter on one
+ * event, which is the right shape for "work is available, whoever's free can take it" but the
+ * wrong one for "exactly N holders at a time" — every waiter can see the same just-freed slot and
+ * proceed together, letting the count of concurrent holders drift past N. `release()` here wakes
+ * at most one waiter per freed permit, so admissions are bounded by the number of releases, not
+ * by however many happened to be parked.
+ */
+export function createSemaphore(permits: number): Semaphore {
+  let available = permits;
+  const waiters: Array<(acquired: boolean) => void> = [];
+  return {
+    acquire(timeoutMs?: number): Promise<boolean> {
+      if (available > 0) {
+        available--;
+        return Promise.resolve(true);
+      }
+      return new Promise<boolean>((resolve) => {
+        let timeoutHandle: NodeJS.Timeout | undefined;
+        const settle = (acquired: boolean) => {
+          if (timeoutHandle) { clearTimeout(timeoutHandle); }
+          resolve(acquired);
+        };
+        waiters.push(settle);
+        if (timeoutMs !== undefined) {
+          timeoutHandle = setTimeout(() => {
+            const idx = waiters.indexOf(settle);
+            if (idx !== -1) { waiters.splice(idx, 1); }
+            settle(false);
+          }, timeoutMs);
+        }
+      });
+    },
+    release(): void {
+      // Hand the permit directly to the next waiter rather than incrementing `available` and
+      // letting it re-acquire — that would leave a window where a *different* concurrent
+      // acquire() could grab the just-freed permit first, starving the longest-waiting caller.
+      const next = waiters.shift();
+      if (next) {
+        next(true);
+        return;
+      }
+      available++;
+    },
+  };
+}
