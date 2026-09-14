@@ -406,7 +406,11 @@ function buildLeaderboardMemberRow(member: TeamMemberStats, stats: DashboardStat
 	const hasCategories = !!member.fluencyCategories?.length;
 	const row = el("tr", "leaderboard-row");
 	if (isCurrentUser) { row.classList.add("current-user"); }
-	if (hasCategories) { row.classList.add("expandable"); row.setAttribute("aria-expanded", "false"); }
+	if (hasCategories) {
+		row.classList.add("expandable");
+		row.setAttribute("aria-expanded", "false");
+		row.tabIndex = 0;
+	}
 	const rankCell = el("td", "rank-cell", `${member.rank}`);
 	if (hasCategories) { rankCell.prepend(el("span", "expand-toggle", "▶")); }
 	const deleteBtn = document.createElement("button");
@@ -430,12 +434,20 @@ function buildLeaderboardMemberRow(member: TeamMemberStats, stats: DashboardStat
 	detailCell.colSpan = colSpan; detailCell.className = "detail-cell";
 	if (hasCategories) {
 		detailCell.append(buildFluencyDetailPanel(member));
-		row.addEventListener("click", () => {
+		const toggleExpanded = (): void => {
 			const expanded = row.getAttribute("aria-expanded") === "true";
 			row.setAttribute("aria-expanded", expanded ? "false" : "true");
 			const toggle = row.querySelector(".expand-toggle");
 			if (toggle) { toggle.textContent = expanded ? "▶" : "▼"; }
 			detailRow.classList.toggle("hidden", expanded);
+		};
+		row.addEventListener("click", toggleExpanded);
+		row.addEventListener("keydown", (e) => {
+			if (e.target !== row) { return; }
+			if (e.key === "Enter" || e.key === " ") {
+				e.preventDefault();
+				toggleExpanded();
+			}
 		});
 	}
 	detailRow.append(detailCell);
@@ -468,7 +480,7 @@ function buildFluencyDetailPanel(member: TeamMemberStats): HTMLElement {
   const grid = el("div", "fluency-categories-grid");
 
   for (const cat of member.fluencyCategories ?? []) {
-    const card = el("div", `fluency-category-card stage-border-${cat.stage}`);
+    const card = el("div", "fluency-category-card");
 
     const cardHeader = el("div", "fluency-category-header");
     const catLabel = el("span", "fluency-category-label", `${cat.icon} ${cat.category}`);

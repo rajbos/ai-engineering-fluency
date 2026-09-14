@@ -390,3 +390,161 @@
 }
 
 .leaderboard-row.expandable { cursor: pointer; }
+.leaderboard-row.expandable:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: -2px; }
+
+.expand-toggle {
+        display: inline-block;
+        margin-right: 6px;
+        font-size: 10px;
+        color: inherit;
+}
+
+.hidden { display: none; }
+
+.detail-row td.detail-cell {
+        border: 2px solid var(--vscode-foreground);
+        border-top: none;
+        padding: 0;
+        background-color: transparent;
+}
+
+/* Button row / tab navigation */
+.button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+}
+
+.tab-nav {
+        display: flex;
+        gap: 0;
+        margin: 20px 0 0;
+}
+
+.tab-btn {
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--vscode-foreground);
+        background-color: transparent;
+        border: 2px solid var(--vscode-foreground);
+        border-bottom: none;
+        padding: 8px 16px;
+        cursor: pointer;
+        margin-right: -2px;
+}
+
+.tab-btn:hover {
+        background-color: var(--vscode-list-hoverBackground);
+}
+
+.tab-btn.tab-btn-active {
+        background-color: var(--vscode-foreground);
+        color: var(--vscode-editor-background);
+}
+
+/* Fluency score breakdown panel (expandable leaderboard row) */
+.fluency-detail-panel {
+        padding: 20px;
+}
+
+.fluency-detail-heading {
+        font-size: 14px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 16px;
+        color: var(--vscode-foreground);
+}
+
+.fluency-categories-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+}
+
+.fluency-category-card {
+        border: 2px solid var(--vscode-foreground);
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+}
+
+.fluency-category-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+}
+
+.fluency-category-label {
+        font-size: 13px;
+        font-weight: bold;
+        text-transform: uppercase;
+        color: var(--vscode-foreground);
+}
+
+.fluency-category-badge {
+        display: inline-block;
+        white-space: nowrap;
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 900;
+        text-transform: uppercase;
+        border: 2px solid currentColor;
+}
+
+.fluency-category-badge.stage-1 { color: var(--stage-1-color); }
+.fluency-category-badge.stage-2 { color: var(--stage-2-color); }
+.fluency-category-badge.stage-3 { color: var(--stage-3-color); }
+.fluency-category-badge.stage-4 { color: var(--stage-4-color); }
+
+.fluency-stage-bar {
+        display: flex;
+        gap: 4px;
+}
+
+.stage-pip {
+        flex: 1;
+        height: 6px;
+        border: 1px solid var(--vscode-foreground);
+        background-color: var(--stage-pip-empty-bg, transparent);
+}
+
+.stage-pip.filled.stage-pip-1 { background-color: var(--stage-1-color); border-color: var(--stage-1-color); }
+.stage-pip.filled.stage-pip-2 { background-color: var(--stage-2-color); border-color: var(--stage-2-color); }
+.stage-pip.filled.stage-pip-3 { background-color: var(--stage-3-color); border-color: var(--stage-3-color); }
+.stage-pip.filled.stage-pip-4 { background-color: var(--stage-4-color); border-color: var(--stage-4-color); }
+
+.fluency-tips {
+        font-size: 12px;
+        color: var(--vscode-foreground);
+        border-top: 2px dotted var(--vscode-foreground);
+        padding-top: 8px;
+}
+
+.fluency-tips-label {
+        font-weight: bold;
+        text-transform: uppercase;
+        margin-bottom: 4px;
+}
+
+.fluency-tip {
+        margin-top: 4px;
+        line-height: 1.4;
+}
+
+.fluency-tip a {
+        color: var(--vscode-textLink-foreground);
+}
+
+.fluency-achieved {
+        font-size: 12px;
+        font-weight: bold;
+        text-transform: uppercase;
+        color: var(--success-fg, #4ade80);
+}
