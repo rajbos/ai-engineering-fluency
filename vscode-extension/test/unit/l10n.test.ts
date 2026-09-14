@@ -285,6 +285,9 @@ test('l10n: log viewer summary card labels resolve in English', () => {
 		'logviewer.summary.editorSource': 'Source',
 		'logviewer.summary.mcpAndContextRefs': 'MCP Tools & Context Refs',
 		'logviewer.summary.noModeData': 'No mode data',
+		'logviewer.summary.noneShort': 'None',
+		'logviewer.summary.otherCount': 'Other: {0}',
+		'logviewer.summary.contextRefsBreakdown': 'implicit {0}, explicit {1}',
 		'logviewer.summary.fileSize': 'File Size',
 		'logviewer.summary.modified': 'Modified',
 		'logviewer.summary.timeline': 'Timeline',
@@ -358,6 +361,9 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 			'logviewer.summary.editorSource': '来源',
 			'logviewer.summary.mcpAndContextRefs': 'MCP 工具与上下文引用',
 			'logviewer.summary.noModeData': '无模式数据',
+			'logviewer.summary.noneShort': '无',
+			'logviewer.summary.otherCount': '其他：{0}',
+			'logviewer.summary.contextRefsBreakdown': '隐式 {0}，显式 {1}',
 			'logviewer.summary.fileSize': '文件大小',
 			'logviewer.summary.modified': '修改时间',
 			'logviewer.summary.timeline': '时间线',
@@ -369,6 +375,66 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 		}
 	} finally {
 		mock.setLanguage('en');
+	}
+});
+
+test('l10n: efficiency loading step labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'loading.efficiency.dailyActivity': 'Aggregating daily activity…',
+		'loading.efficiency.usageAnalysis': 'Analysing usage patterns…',
+		'loading.efficiency.sessionSignals': 'Reading session signals…',
+		'loading.efficiency.buildingTrends': 'Building efficiency trends…',
+		'efficiency.error.title': 'Could not build the Efficiency view',
+		'efficiency.error.retry': 'Try again',
+		'efficiency.error.staleAfterClear': 'The cached data was cleared while this view was being built.',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+// Diagnostics — Mistral Cloud (Beta) tab (PR #2057 follow-up) — guards against
+// raw English literals resurfacing in the new tab for non-English locales.
+test('l10n: Mistral Cloud tab labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'mistral.tabCaption': '🔥 Mistral Cloud (Beta)',
+		'mistral.tabTitle': '🔥 Mistral Vibe Cloud Sessions',
+		'mistral.betaBadge': 'Beta',
+		'mistral.description.intro': 'Lists conversations from your Mistral account via the beta {0} API on {1}.',
+		'mistral.description.scope': 'This is the closest available surface to Vibe Code Web (cloud) sessions; it is {0} and may not include all cloud sessions.',
+		'mistral.description.undocumented': 'undocumented for Vibe Code Web specifically',
+		'mistral.description.keyStorage': 'Requires a Mistral API key stored locally; it is sent only to {0} over HTTPS.',
+		'mistral.status.label': 'Status',
+		'mistral.status.configured': 'API key configured',
+		'mistral.status.notConfigured': 'No API key configured',
+		'mistral.status.checking': 'Checking…',
+		'mistral.status.checkFailed': "Couldn't check whether an API key is configured.",
+		'mistral.summary.conversations': 'Conversations',
+		'mistral.summary.ofCount': '{0} of {1}',
+		'mistral.summary.atLeastCount': '{0}+',
+		'mistral.summary.lastFetched': 'Last fetched',
+		'mistral.error.label': 'Error:',
+		'mistral.error.storeFailed': 'Failed to store the Mistral API key.',
+		'mistral.error.keyCheckFailed': "Couldn't verify the Mistral API key is still current; try Refresh again.",
+		'mistral.error.removeFailed': 'Failed to remove the Mistral API key.',
+		'mistral.button.refresh': 'Refresh',
+		'mistral.button.retry': 'Retry',
+		'mistral.button.removeApiKey': 'Remove API key',
+		'mistral.button.connectApiKey': 'Connect Mistral API key',
+		'mistral.prompt.title': 'Mistral API Key',
+		'mistral.prompt.enterApiKey': 'Enter your Mistral API key (stored in VS Code SecretStorage, used to call api.mistral.ai):',
+		'mistral.prompt.required': 'API key is required',
+		'mistral.table.id': 'ID',
+		'mistral.table.name': 'Name',
+		'mistral.table.agentId': 'Agent ID',
+		'mistral.table.version': 'Version',
+		'mistral.table.created': 'Created',
+		'mistral.table.updated': 'Updated',
+		'mistral.table.description': 'Description',
+		'mistral.table.untitled': '(untitled)',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
 	}
 });
 
@@ -429,6 +495,74 @@ test('l10n: HydraFusion routing keys resolve in English', () => {
 	}
 });
 
+test('l10n: efficiency loading step labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'loading.efficiency.dailyActivity': '正在汇总每日活动…',
+			'loading.efficiency.usageAnalysis': '正在分析使用模式…',
+			'loading.efficiency.sessionSignals': '正在读取会话信号…',
+			'loading.efficiency.buildingTrends': '正在构建效率趋势…',
+			'efficiency.error.title': '无法构建效率视图',
+			'efficiency.error.retry': '重试',
+			'efficiency.error.staleAfterClear': '构建此视图时缓存数据已被清除。',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: Mistral Cloud tab labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'mistral.tabCaption': '🔥 Mistral 云(测试版)',
+			'mistral.tabTitle': '🔥 Mistral Vibe 云会话',
+			'mistral.betaBadge': '测试版',
+			'mistral.description.intro': '通过测试版 {0} API（位于 {1}）列出你的 Mistral 账户中的对话。',
+			'mistral.description.scope': '这是最接近 Vibe Code Web(云端)会话的可用的途径，{0}，且可能无法包含所有云端会话。',
+			'mistral.description.undocumented': '未针对 Vibe Code Web 专门提供文档',
+			'mistral.description.keyStorage': '需要在本地存储的 Mistral API 密钥;它仅通过 HTTPS 发送到 {0}。',
+			'mistral.status.label': '状态',
+			'mistral.status.configured': '已配置 API 密钥',
+			'mistral.status.notConfigured': '未配置 API 密钥',
+			'mistral.status.checking': '检查中…',
+			'mistral.status.checkFailed': '无法检查是否已配置 API 密钥。',
+			'mistral.summary.conversations': '对话数',
+			'mistral.summary.ofCount': '{1} 个中的 {0} 个',
+			'mistral.summary.atLeastCount': '{0}+',
+			'mistral.summary.lastFetched': '最后获取时间',
+			'mistral.error.label': '错误:',
+			'mistral.error.storeFailed': '存储 Mistral API 密钥失败。',
+			'mistral.error.keyCheckFailed': '无法确认 Mistral API 密钥是否仍然有效，请重新点击刷新。',
+			'mistral.error.removeFailed': '无法移除 Mistral API 密钥。',
+			'mistral.prompt.title': 'Mistral API 密钥',
+			'mistral.prompt.enterApiKey': '输入你的 Mistral API 密钥(存储在 VS Code SecretStorage 中,用于调用 api.mistral.ai):',
+			'mistral.prompt.required': '需要输入 API 密钥',
+			'mistral.button.refresh': '刷新',
+			'mistral.button.retry': '重试',
+			'mistral.button.removeApiKey': '移除 API 密钥',
+			'mistral.button.connectApiKey': '连接 Mistral API 密钥',
+			'mistral.table.id': 'ID',
+			'mistral.table.name': '名称',
+			'mistral.table.agentId': '代理 ID',
+			'mistral.table.version': '版本',
+			'mistral.table.created': '创建时间',
+			'mistral.table.updated': '更新时间',
+			'mistral.table.description': '描述',
+			'mistral.table.untitled': '(未命名)',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: HydraFusion routing keys resolve in zh-cn', () => {
 	mock.setLanguage('zh-cn');
 	try {
@@ -447,6 +581,30 @@ test('l10n: HydraFusion routing keys resolve in zh-cn', () => {
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
 		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: Mistral Cloud description templates format {0}/{1} placeholders', () => {
+	assert.equal(
+		t('mistral.description.intro', '<code>GET /v1/conversations</code>', '<code>api.mistral.ai</code>'),
+		'Lists conversations from your Mistral account via the beta <code>GET /v1/conversations</code> API on <code>api.mistral.ai</code>.',
+	);
+	assert.equal(
+		t('mistral.description.keyStorage', '<code>api.mistral.ai</code>'),
+		'Requires a Mistral API key stored locally; it is sent only to <code>api.mistral.ai</code> over HTTPS.',
+	);
+	assert.equal(t('mistral.summary.ofCount', '3', '12'), '3 of 12');
+	assert.equal(t('mistral.summary.atLeastCount', '2000'), '2000+');
+});
+
+test('l10n: Mistral Cloud ofCount reorders placeholders in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		// Mirrors usage.contextPressure.ofCount: the Chinese phrasing puts the total
+		// before the count, so a plain concatenation would silently misorder it.
+		assert.equal(t('mistral.summary.ofCount', '3', '12'), '12 个中的 3 个');
 	} finally {
 		mock.setLanguage('en');
 	}
@@ -523,6 +681,35 @@ test('l10n: Efficiency Models tab control labels resolve in English and zh-cn', 
 		for (const [key, value] of Object.entries(chinese)) {
 			assert.equal(t(key), value, `zh-cn value for ${key}`);
 		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: Copilot Budget gauge keys resolve in English', () => {
+	// Back the "🎯 Copilot Budget" tooltip row, which folds untracked (other
+	// devices/cloud) usage into the headline total so it agrees with the bar's
+	// percentage, plus states remaining budget explicitly. A missing key would
+	// put a raw key like `tooltip.budgetRemaining` in the hover tooltip.
+	assert.equal(t('tooltip.copilotBudgetLabel'), 'Copilot Budget');
+	assert.equal(t('tooltip.budgetRemaining', '$40.79'), '$40.79 left');
+	assert.equal(t('tooltip.budgetOverBy', '$12.34'), '$12.34 over');
+	assert.equal(
+		t('tooltip.budgetTrackedVsUntracked', '$556.61', '$202.60'),
+		'$556.61 tracked here + $202.60 untracked (other devices/cloud)',
+	);
+});
+
+test('l10n: Copilot Budget gauge keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('tooltip.copilotBudgetLabel'), 'Copilot 预算');
+		assert.equal(t('tooltip.budgetRemaining', '$40.79'), '剩余 $40.79');
+		assert.equal(t('tooltip.budgetOverBy', '$12.34'), '超出 $12.34');
+		assert.equal(
+			t('tooltip.budgetTrackedVsUntracked', '$556.61', '$202.60'),
+			'本设备跟踪 $556.61 + 未跟踪(其他设备/云端) $202.60',
+		);
 	} finally {
 		mock.setLanguage('en');
 	}

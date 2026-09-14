@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as childProcess from 'child_process';
+import * as crypto from 'crypto';
 
 // Localization support (key-based resolver over package.nls*.json — see l10n.ts
 // for why vscode.l10n.t() cannot be used directly with key-based strings)
@@ -66,6 +67,7 @@ import type {
   SessionLogData,
   WorkspaceCustomizationSummary,
   AgentSessionsResult,
+  MistralCloudSessionsResult,
   TokenEstimator,
   SessionRelationRef,
   EvaluatedInsight,
@@ -156,7 +158,7 @@ import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
-import { analyzeHydraFusionSession } from '../../src/hydrafusion';
+import { analyzeHydraFusionSession, aiuToUsd } from '../../src/hydrafusion';
 import type { HydraFusionSummary } from '../../src/hydrafusion';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
 import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout } from './utils/promises';
@@ -312,6 +314,10 @@ import {
 } from './githubPrService';
 import { collectAgentSessions } from './agentSessionsService';
 import {
+	collectMistralCloudSessions,
+	MISTRAL_API_KEY_SECRET,
+} from './mistralCloudSessionsService';
+import {
 	AGENT_TASKS_CACHE_SCHEMA_VERSION,
 	AGENT_TASKS_REFRESH_INTERVAL_MS,
 	canServeAgentTasksSnapshot,
@@ -428,6 +434,86 @@ export function tooltipSecondaryPeriod(
 /** Sums per-provider costs into a total-across-all-providers figure. */
 export function defaultSumBillingGroupCosts(billingGroupCosts: Record<string, number> | undefined): number {
 	return Object.values(billingGroupCosts ?? {}).reduce((s, v) => s + v, 0);
+}
+
+/** The computed-stat caches that carry a generation stamp. */
+export type ComputedStatsKey = 'daily' | 'fullDaily' | 'usage' | 'sessionInputs';
+
+/**
+ * Whether a computed-stat cache stamped at `stampedGeneration` may still be read.
+ *
+ * The stamp is the cache generation in effect when the computation that produced the value
+ * *started*, not when it finished, and that distinction is the whole point. A build already
+ * running when the caches are cleared finishes afterwards and assigns its result — data
+ * derived from the pre-clear session cache — so the presence of a value proves nothing about
+ * whether it survived the clear. Stamping at the start makes such a result carry the old
+ * generation, and this rejects it. An unstamped cache (`undefined`) is never current.
+ */
+export function isComputedStatsCurrent(
+	stampedGeneration: number | undefined,
+	currentGeneration: number,
+): boolean {
+	return stampedGeneration === currentGeneration;
+}
+
+/** The minimum of a webview panel this module needs in order to post to it. */
+export interface PostablePanel { webview: { postMessage(msg: object): unknown } }
+
+/**
+ * A loading-screen sink that reports to whichever panel is live at send time, and drops
+ * everything when none is.
+ *
+ * `getLive` is read per message rather than captured, so a build that outlives the panel that
+ * started it keeps reporting to the panel the user is actually looking at. That is only sound
+ * where at most one producer can be running — see `efficiencyLoadingSink()`, whose builds are
+ * serialized — and it governs the loading screen only: rendering a *result* into a panel still
+ * needs its own identity check, because a result belongs to the build that asked for it.
+ */
+export function makeLivePanelSink<P extends PostablePanel>(
+	getLive: () => P | undefined,
+): (msg: object) => void {
+	return (msg: object) => {
+		const live = getLive();
+		if (!live) { return; }
+		void live.webview.postMessage(msg);
+	};
+}
+
+/**
+ * Queues `build` behind `previous` so only one runs at a time.
+ *
+ * Returns the caller's result separately from the chain the next caller should queue behind.
+ * The two differ in their failure handling on purpose: the result rejects so the caller can
+ * render a failure, while the chain always resolves, so one failed build does not wedge every
+ * build queued after it.
+ */
+export function chainBuild<T>(
+	previous: Promise<unknown>,
+	build: () => Promise<T>,
+): { result: Promise<T>; chain: Promise<void> } {
+	const result = previous.then(build, build);
+	return { result, chain: result.then(() => undefined, () => undefined) };
+}
+
+/**
+ * Computes the figures for the Copilot Budget gauge row: total spend against budget
+ * (locally-tracked usage plus any usage the Copilot API reports that this device has no
+ * local session data for) and how much budget remains. Folding the untracked gap into the
+ * headline total keeps the "$X / $Y" figure consistent with the bar's percentage, so a
+ * reader doesn't have to read a second row and subtract to find out how much budget is
+ * actually left.
+ */
+export function computeCopilotBudgetDisplay(
+	copilotCost: number,
+	budget: number,
+	apiUsedUsd: number | null,
+): { totalUsed: number; remaining: number; trackedRatio: number; gapRatio: number; gapUsd: number } {
+	const gapUsd = apiUsedUsd !== null ? Math.max(0, apiUsedUsd - copilotCost) : 0;
+	const totalUsed = copilotCost + gapUsd;
+	const remaining = budget - totalUsed;
+	const trackedRatio = budget > 0 ? copilotCost / budget : 0;
+	const gapRatio = budget > 0 ? gapUsd / budget : 0;
+	return { totalUsed, remaining, trackedRatio, gapRatio, gapUsd };
 }
 
 /**
@@ -626,6 +712,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Full, unfiltered session file paths from the last diagnostics load (no 14-day/500-file cap) —
 	// the TTFT scan-range picker filters this list itself instead of relying on diagnosticsCachedFiles.
 	private diagnosticsAllSessionFiles: string[] = [];
+	// BETA: last Mistral cloud (web) sessions result fetched for the diagnostics Research tab.
+	private _lastMistralCloudSessions?: MistralCloudSessionsResult;
+	// BETA: non-reversible fingerprint of the API key `_lastMistralCloudSessions` was fetched
+	// under (see fingerprintMistralApiKey). A plain "is a key configured" boolean can't tell one
+	// configured key from another, so this lets sendBackendStorageInfoEarly detect a key changed
+	// in another VS Code window (whose own generation counter this window never sees) before
+	// rehydrating a cached listing that actually belongs to a different account.
+	private _lastMistralCloudSessionsKeyFingerprint?: string;
+	// BETA: bumped on every refresh/clear so a slow in-flight refresh can detect it was superseded
+	// (e.g. by "Remove API key") and discard its result instead of repopulating stale data.
+	private _mistralCloudRefreshGeneration = 0;
+	// BETA: aborts the in-flight collectMistralCloudSessions() call (if any) so clearing/replacing
+	// the key doesn't leave the old key's listing making up to MAX_PAGES sequential requests in the
+	// background after this window has stopped caring about the result.
+	private _mistralCloudAbortController?: AbortController;
+	// BETA: fingerprint of the key the currently in-flight fetch (if any) was started with — lets
+	// rehydrateOrInvalidateMistralCloudSessionsCache detect and abort a request that's still running
+	// under a since-superseded key even when there's no completed listing cached yet to compare
+	// against (e.g. the very first refresh in this window, still in flight when another VS Code
+	// window replaces the key).
+	private _mistralCloudInFlightKeyFingerprint?: string;
+
+	/** BETA: aborts any in-flight Mistral cloud sessions fetch — called whenever the configured key
+	 * changes or clears, and internally before a new refresh starts one of its own. */
+	private abortInFlightMistralCloudSessionsFetch(): void {
+		this._mistralCloudAbortController?.abort();
+		this._mistralCloudInFlightKeyFingerprint = undefined;
+	}
 	// Per scan-range TTFT result cache. Granularity changes reuse the cached sample set instantly.
 	private readonly diagnosticsTtftCache = new TtftScanResultCache();
 	// Cache of the last diagnostic report text for copy/issue operations
@@ -733,6 +847,40 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _whatsNewReady: Promise<void> | undefined;
 	/** Memoized per-session efficiency inputs; cleared wherever the daily/usage stat caches are. */
 	private lastEfficiencySessionInputs: EfficiencySessionInput[] | undefined;
+	/** Last successfully rendered Efficiency payload, restored if a refresh build fails. */
+	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
+	/** Bumped whenever the computed stat caches are invalidated; see recordEfficiencyPayload(). */
+	private _cacheGeneration = 0;
+	/**
+	 * Per-cache generation stamps: for each computed-stat cache, the `_cacheGeneration` that was
+	 * in effect when the computation now holding it *began*. Read through
+	 * `isComputedStatsCurrent()` before reusing a cache, so a build that was already running
+	 * when the caches were cleared cannot have its pre-clear result read back as current.
+	 */
+	private _statsGeneration: Partial<Record<ComputedStatsKey, number>> = {};
+
+	/**
+	 * The computed-stat caches, readable only while they are still current.
+	 *
+	 * Every consumer goes through these rather than touching the `last*` fields, so the
+	 * generation check cannot be half-applied: a stamp that no longer matches reads as
+	 * `undefined`, which every caller already handles because these caches start empty and are
+	 * emptied again by `clearCache()`. Reading a raw field would silently opt that caller out,
+	 * so `efficiencyBuildGuards.test.ts` asserts the fields appear nowhere but their writes and
+	 * these accessors.
+	 */
+	private get currentDailyStats(): DailyTokenStats[] | undefined {
+		return isComputedStatsCurrent(this._statsGeneration.daily, this._cacheGeneration) ? this.lastDailyStats : undefined;
+	}
+	private get currentFullDailyStats(): DailyTokenStats[] | undefined {
+		return isComputedStatsCurrent(this._statsGeneration.fullDaily, this._cacheGeneration) ? this.lastFullDailyStats : undefined;
+	}
+	private get currentUsageAnalysisStats(): UsageAnalysisStats | undefined {
+		return isComputedStatsCurrent(this._statsGeneration.usage, this._cacheGeneration) ? this.lastUsageAnalysisStats : undefined;
+	}
+	private get currentEfficiencySessionInputs(): EfficiencySessionInput[] | undefined {
+		return isComputedStatsCurrent(this._statsGeneration.sessionInputs, this._cacheGeneration) ? this.lastEfficiencySessionInputs : undefined;
+	}
 	private outputChannel!: vscode.OutputChannel;
 	private lastDetailedStats: DetailedStats | undefined;
 	private lastDailyStats: DailyTokenStats[] | undefined;
@@ -805,6 +953,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Editor list captured during the last (or current) log analysis, used to render the loading tooltip SVG
 	private _loadingEditors: { icon: string; name: string }[] = [];
+	/** Generation the last automatic Efficiency rebuild was requested for; see requestEfficiencyRebuild(). */
+	private _efficiencyRebuildRequestedFor: number | undefined;
+	/** Tail of the serialized Efficiency build queue; see runEfficiencyBuild(). */
+	private _efficiencyBuildChain: Promise<void> = Promise.resolve();
 	// Previous progress percentage used to animate the progress bar smoothly between tooltip updates
 	private _prevLoadingPercentage = 0;
 
@@ -1366,6 +1518,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.sessionDiscovery.clearCache();
 		this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = undefined;
 		this.lastEfficiencySessionInputs = undefined;
+		this._lastEfficiencyViewData = undefined;
+		this._cacheGeneration++;
 		const results: LocalViewRegressionResult[] = [];
 		let dataSourceLabel = 'local session data';
 		// Populated once setupRegressionSessionFiles() resolves, so the finally block can evict
@@ -1412,6 +1566,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			}
 			this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = this.lastDashboardData = undefined;
 			this.lastEfficiencySessionInputs = undefined;
+			this._lastEfficiencyViewData = undefined;
+			this._cacheGeneration++;
 		}
 		await this.reportLocalViewRegressionResults(results, dataSourceLabel);
 	}
@@ -1464,7 +1620,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async computeRegressionStats(dataSourceLabel: string, sessionFiles: string[]): Promise<{ detailedStats: any; dailyStats: any; usageStats: any; maturityData: any; diagnosticReport: string; fluencyLevelData: any; chartTotals: any }> {
 		const detailedStats = await this.updateTokenStats(true);
 		if (!detailedStats) { throw new Error(`Failed to calculate detailed stats from ${dataSourceLabel}.`); }
-		const dailyStats = this.lastDailyStats ?? await this.calculateDailyStats();
+		const dailyStats = this.currentDailyStats ?? await this.calculateDailyStats();
 		const usageStats = await this.calculateUsageAnalysisStats(false);
 		const maturityData = await this.calculateMaturityScores(false);
 		const diagnosticReport = await this.generateDiagnosticReport();
@@ -1572,6 +1728,29 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const cacheSize = this.cacheManager.cache.size;
 			this.cacheManager.cache.clear();
 
+			// Everything invalidating happens before the first await. Bumping the generation
+			// alone was not enough: a build starting during the await would capture the *new*
+			// generation, read the computed caches that had not been cleared yet, and so pass
+			// the check with pre-clear data. Clearing the caches here closes that window —
+			// after the await there is nothing left for such a build to read.
+			//
+			// The writes are a separate problem, and the generation bump below is what answers
+			// them: calculateDailyStats() and calculateUsageAnalysisStats() assign
+			// lastFullDailyStats and lastUsageAnalysisStats when they finish, so a build already
+			// in flight repopulates them from pre-clear data after this runs. Nothing here can
+			// unwind those assignments, so instead each cache carries the generation its
+			// computation *started* in (_statsGeneration), and every reuse goes through
+			// isComputedStatsCurrent(). Such a write lands stamped with the generation this
+			// bump just superseded, and the next read recomputes rather than serving it.
+			this.lastDetailedStats = undefined;
+			this.lastDailyStats = undefined;
+			this.lastFullDailyStats = undefined;
+			this.lastUsageAnalysisStats = undefined;
+			this.lastDashboardData = undefined;
+			this.lastEfficiencySessionInputs = undefined;
+			this._lastEfficiencyViewData = undefined;
+			this._cacheGeneration++;
+
 			// Delete the on-disk snapshot so it isn't reloaded after restart.
 			await this.cacheManager.deleteSharedSnapshot();
 
@@ -1580,13 +1759,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.diagnosticsCachedFiles = [];
 			this.diagnosticsAllSessionFiles = [];
 			this.diagnosticsTtftCache.clear();
-			// Clear cached computed stats so details panel doesn't show stale data
-			this.lastDetailedStats = undefined;
-			this.lastDailyStats = undefined;
-			this.lastFullDailyStats = undefined;
-			this.lastUsageAnalysisStats = undefined;
-			this.lastDashboardData = undefined;
-			this.lastEfficiencySessionInputs = undefined;
 
 			this.log(`Cache cleared successfully. Removed ${cacheSize} entries.`);
 			vscode.window.showInformationMessage('Cache cleared successfully. Reloading statistics...');
@@ -1595,6 +1767,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('Reloading token statistics...');
 			await this.updateTokenStats();
 			this.log('Token statistics reloaded successfully.');
+
+			// The Efficiency panel is not part of that refresh — _runRefreshCore() publishes to the
+			// details, chart, analysis and environmental panels, not this one — and showEfficiency()
+			// returns early for an already-open panel. Without this, an open Efficiency view keeps
+			// showing pre-clear numbers indefinitely until the user clicks Refresh. Detached
+			// deliberately: the rebuild is a full walk, and the panel puts up its own loading screen
+			// with live progress while it runs, so there is nothing for clearCache() to wait on.
+			if (this.efficiencyPanel) {
+				this.log('⚡ Rebuilding the open Efficiency view after the clear...');
+				this.requestEfficiencyRebuild();
+			}
 		} catch (error) {
 			this.error('Error clearing cache:', error);
 			vscode.window.showErrorMessage('Failed to clear cache: ' + error);
@@ -1609,8 +1792,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			await this.context.globalState.update('insights.lastNudgeAt', undefined);
 			this.refreshStatusBarInsightBadge(0);
 
-			if (this.lastUsageAnalysisStats && this.analysisPanel && this.isPanelOpen(this.analysisPanel)) {
-				const insights = this.buildCurrentInsights(this.lastUsageAnalysisStats);
+			const usageForInsights = this.currentUsageAnalysisStats;
+			if (usageForInsights && this.analysisPanel && this.isPanelOpen(this.analysisPanel)) {
+				const insights = this.buildCurrentInsights(usageForInsights);
 				void this.analysisPanel.webview.postMessage({ command: 'updateInsights', insights });
 			}
 
@@ -2180,6 +2364,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private async renderInstantStatsFromCache(): Promise<void> {
+		// Captured before any await: what this paints is only as current as the cache it started
+		// from, so a clearCache() landing mid-aggregation must leave the stamp behind it.
+		const startedAtGeneration = this._cacheGeneration;
 		try {
 			// Sample-data mode (screenshot/regression fixtures, see runLocalViewRegression()
 			// and the aiEngineeringFluency.sampleDataDirectory setting) intentionally bypasses
@@ -2230,6 +2417,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (this._hasCompletedRealRefresh || this._disposed || this.isSampleDataModeActive()) { return; }
 			this.lastDetailedStats = stats;
 			this.lastDailyStats = dailyStats;
+			this._statsGeneration.daily = startedAtGeneration;
 			this.mergeIntoFullDailyStats(dailyStats);
 			this.updateStatusBarAndTooltip(stats);
 			this.updateDetailsPanelIfOpen(stats, true);
@@ -2531,7 +2719,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * is the bag the only thing left to go on.
 	 */
 	private refreshInsightBadgeFromState(now: string, evaluated?: EvaluatedInsight[]): void {
-		const stats = this.lastUsageAnalysisStats;
+		const stats = this.currentUsageAnalysisStats;
 		const list = evaluated ?? (stats ? this.buildCurrentInsights(stats) : undefined);
 		if (!list) {
 			this.refreshStatusBarInsightBadge(_countNewInsights(this._insightStateBag, now));
@@ -2545,10 +2733,74 @@ class CopilotTokenTracker implements vscode.Disposable {
 		);
 	}
 
+	/**
+	 * Send a loading-screen message to the details panel's loading screen.
+	 *
+	 * Deliberately narrow. Loading-screen messages are not addressed to anyone, and the
+	 * script renders each one over the whole screen — subtitle, file counters, parse
+	 * checklist and editor pills, not just the bar. Broadcasting them to every open
+	 * loading screen therefore lets one operation's counts and labels appear on a panel
+	 * waiting for a completely different operation. Each build sends to its own panel
+	 * instead; see `efficiencyLoadingSink()`.
+	 */
 	private sendLoadingPanelMessage(msg: object): void {
 		if (this.detailsPanel && this._detailsPanelIsLoading) {
 			void this.detailsPanel.webview.postMessage(msg);
 		}
+	}
+
+	/**
+	 * The Efficiency loading screen's sink: reports to whichever Efficiency panel is live.
+	 *
+	 * It used to be bound to the panel that started the build, so that a build outliving a
+	 * closed panel could not paint onto the replacement a reopen created. That protected
+	 * against two Efficiency builds reporting at once — which `runEfficiencyBuild()` had
+	 * already made impossible, since both entry points queue through it. What it did instead
+	 * was leave a reopened panel with a dead loading screen for the whole of the previous
+	 * build's walk, while its own build sat queued behind it: the frozen bar this view was
+	 * changed to stop showing, arrived at from the other direction.
+	 *
+	 * With at most one build in flight, its progress is the only Efficiency work happening,
+	 * and so is by definition what the live panel is waiting on — its own build, or the one
+	 * ahead of it in the queue. Rendering is unaffected: every render path checks
+	 * `efficiencyPanel === panel` separately, so a stale build still cannot draw its result
+	 * over the replacement's.
+	 */
+	private efficiencyLoadingSink(): (msg: object) => void {
+		return makeLivePanelSink(() => this.efficiencyPanel);
+	}
+
+	/**
+	 * Serializes Efficiency builds.
+	 *
+	 * Two builds overlapping is not only a render race: they write shared caches
+	 * (`lastUsageAnalysisStats`, `lastEfficiencySessionInputs`, `lastFullDailyStats`), so an
+	 * older build finishing second leaves stale data behind for every later view. Running
+	 * them one at a time removes that ordering problem at the source, and a queued refresh
+	 * then reuses whatever the build ahead of it just cached.
+	 */
+	/**
+	 * Requests the one automatic Efficiency rebuild a cache invalidation is owed.
+	 *
+	 * Two paths independently notice an invalidation and want the panel rebuilt: `clearCache()`,
+	 * and a detached build discovering on completion that its payload predates the clear. Both
+	 * are correct to want it and neither can be dropped — `clearCache()` is not the only writer
+	 * that bumps the generation, so the build-side retry still covers the others — but together
+	 * they queued two full walks for a single clear, doubling exactly the wait this view exists
+	 * to make legible. Recording the generation a rebuild was requested for collapses them: the
+	 * first caller through wins, the second no-ops, and a *later* invalidation gets its own.
+	 */
+	private requestEfficiencyRebuild(): void {
+		if (!this.efficiencyPanel) { return; }
+		if (this._efficiencyRebuildRequestedFor === this._cacheGeneration) { return; }
+		this._efficiencyRebuildRequestedFor = this._cacheGeneration;
+		void this.refreshEfficiencyPanel();
+	}
+
+	private runEfficiencyBuild<T>(build: () => Promise<T>): Promise<T> {
+		const { result, chain } = chainBuild(this._efficiencyBuildChain, build);
+		this._efficiencyBuildChain = chain;
+		return result;
 	}
 
 	/**
@@ -3767,8 +4019,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * adapter throws, even if other adapters still returned a non-empty partial sessionFiles list.
 	 * Either way, calculateDailyStats(365, sessionFiles) would compute and store a
 	 * truncated/incomplete year and, since an empty *or partial* array is truthy, showChart()'s
-	 * `!!this.lastFullDailyStats` / `?? this.lastDailyStats` checks would treat that as complete
-	 * data and get stuck instead of falling back to the real lastDailyStats or retrying on a later,
+	 * `!!this.currentFullDailyStats` / `?? this.currentDailyStats` checks would treat that as complete
+	 * data and get stuck instead of falling back to the real 30-day stats or retrying on a later,
 	 * successful refresh. A genuine first-ever user with zero session files (sessionFiles and the
 	 * cache both empty, no discovery error) is unaffected.
 	 *
@@ -3786,6 +4038,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Core discover → parse → compute → render → persist pass for one refresh. */
 	private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {
 		this.log(isLeader ? 'Updating token stats (leader)...' : 'Updating token stats (follower)...');
+		// Captured before the preload: this run's output belongs to the generation its inputs were
+		// gathered in, not the one each later calculation starts in (see calculateUsageAnalysisStats).
+		const startedAtGeneration = this._cacheGeneration;
 
 		// Reset checkpoint counters at the start of each refresh cycle
 		if (isLeader) {
@@ -3827,14 +4082,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// already started being published, or it can overwrite an already-correct status bar.
 		this._hasCompletedRealRefresh = true;
 		this.lastDailyStats = dailyStats;
+		this._statsGeneration.daily = startedAtGeneration;
 		this.mergeIntoFullDailyStats(dailyStats);
 
 		this.updateStatusBarAndTooltip(detailedStats);
 
 		this.updateDetailsPanelIfOpen(detailedStats, silent);
 		this.updateChartPanelIfOpen(silent);
-		await this.updateAnalysisPanelIfOpen(silent, preloaded);
-		await this.computeAndUploadFluencyScore(silent, preloaded);
+		await this.updateAnalysisPanelIfOpen(silent, preloaded, startedAtGeneration);
+		await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);
 		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
 		await this.evaluateAndSurfaceInsights();
 
@@ -3852,7 +4108,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// cost this PR exists to cut. A follower that skips this still renders correctly: every
 		// lastFullDailyStats read elsewhere already falls back to lastDailyStats or computes its own
 		// full-year data lazily on demand (e.g. when Chart is opened).
-		if (isLeader && !this.lastFullDailyStats && !this.chartPanel && !this.isDiscoveryUntrustworthyForBackfill(sessionFiles, preloaded)) {
+		if (isLeader && !this.currentFullDailyStats && !this.chartPanel && !this.isDiscoveryUntrustworthyForBackfill(sessionFiles, preloaded)) {
 			void this.calculateDailyStats(365, sessionFiles);
 		}
 
@@ -3931,7 +4187,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (typeof this._followerResyncTimer.unref === 'function') { this._followerResyncTimer.unref(); }
 	}
 
-	private buildProgressCallback(silent: boolean, getEditors?: () => { icon: string; name: string }[]): (completed: number, total: number) => void {
+	private buildProgressCallback(
+		silent: boolean,
+		getEditors?: () => { icon: string; name: string }[],
+		send: (msg: object) => void = (msg) => this.sendLoadingPanelMessage(msg),
+	): (completed: number, total: number) => void {
 		// Always build a callback regardless of `silent` so that a silent background
 		// refresh that coalesces with an open loading panel still sends progress
 		// messages to it.  Status-bar updates remain gated on !silent; loading-panel
@@ -3956,7 +4216,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const editors = getEditors?.() ?? [];
 				this._loadingEditors = editors;
 				const msg: Record<string, unknown> = { command: 'loadingStep', step: 'parsing', total, editors };
-				this.sendLoadingPanelMessage(msg);
+				send(msg);
 				if (!silent) {
 					// Set the hover tooltip exactly once when parsing starts, using the
 					// indeterminate (self-animating SMIL) variant. The tooltip is never
@@ -3976,7 +4236,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (now - lastProgressSentMs >= 500 || completed === total) {
 				lastProgressSentMs = now;
 				const editors = getEditors?.() ?? [];
-				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage, editors });
+				send({ command: 'loadingProgress', completed, total, percentage, editors });
 			}
 		};
 	}
@@ -3987,8 +4247,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private mergeIntoFullDailyStats(dailyStats: DailyTokenStats[]): void {
-		if (!this.lastFullDailyStats) { return; }
-		const fullMap = new Map(this.lastFullDailyStats.map(d => [d.date, d]));
+		const current = this.currentFullDailyStats;
+		if (!current) { return; }
+		const fullMap = new Map(current.map(d => [d.date, d]));
 		for (const day of dailyStats) { fullMap.set(day.date, day); }
 		this.lastFullDailyStats = Array.from(fullMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 	}
@@ -4190,19 +4451,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *  silently inflating (or understating) the "tracked" portion. */
 	private appendCopilotBudgetRow(tooltip: vscode.MarkdownString, copilotCost: number, budget: number): void {
 		const apiBalance = this._buildCopilotApiBalance();
-		const apiUsedUsd = apiBalance ? apiBalance.usedAiCredits * 0.01 : 0;
-		const gapUsd = apiBalance ? Math.max(0, apiUsedUsd - copilotCost) : 0;
-		const trackedRatio = copilotCost / budget;
-		const gapRatio = gapUsd / budget;
+		const apiUsedUsd = apiBalance ? aiuToUsd(apiBalance.usedAiCredits) : null;
+		const { totalUsed, remaining, trackedRatio, gapRatio, gapUsd } = computeCopilotBudgetDisplay(copilotCost, budget, apiUsedUsd);
 		const totalRatio = trackedRatio + gapRatio;
 		const color = totalRatio >= 0.9 ? '#EF5350' : totalRatio >= 0.75 ? '#FFA726' : '#4CAF50';
 		const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildTwoSegmentBarSvg(trackedRatio, gapRatio, color))})`;
-		// Budget row first, then a sub-header row labelling the section below, so the
-		// "these bars are a different scale" context sits right where it's needed
-		// instead of a footnote read only after the bars already look confusing.
-		tooltip.appendMarkdown(`| 🎯 Copilot Budget | $${copilotCost.toFixed(2)} / $${budget.toFixed(2)} | ${barCell} |\n`);
+		const remainingLabel = remaining >= 0
+			? l10n.t('tooltip.budgetRemaining', `$${remaining.toFixed(2)}`)
+			: l10n.t('tooltip.budgetOverBy', `$${Math.abs(remaining).toFixed(2)}`);
+		// The headline figure is total spend (tracked + untracked) against budget, so it
+		// agrees with the bar's percentage and states plainly how much budget is left —
+		// instead of showing only the tracked amount and leaving the reader to read the
+		// untracked sub-row and subtract it themselves to find the true remaining budget.
+		tooltip.appendMarkdown(`| 🎯 ${l10n.t('tooltip.copilotBudgetLabel')} | $${totalUsed.toFixed(2)} / $${budget.toFixed(2)} · ${remainingLabel} | ${barCell} |\n`);
 		if (gapUsd > 0.005) {
-			tooltip.appendMarkdown(`| &nbsp;&nbsp;↳ untracked (other devices/cloud) | $${gapUsd.toFixed(2)} |  |\n`);
+			tooltip.appendMarkdown(`| &nbsp;&nbsp;↳ ${l10n.t('tooltip.budgetTrackedVsUntracked', `$${copilotCost.toFixed(2)}`, `$${gapUsd.toFixed(2)}`)} |  |  |\n`);
 		}
 	}
 
@@ -4251,8 +4514,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private updateChartPanelIfOpen(silent: boolean): void {
-		if (!this.chartPanel || (!this.lastFullDailyStats && !this.lastDailyStats)) { return; }
-		const chartStats = this.lastFullDailyStats ?? this.lastDailyStats!;
+		if (!this.chartPanel || (!this.currentFullDailyStats && !this.currentDailyStats)) { return; }
+		const chartStats = this.currentFullDailyStats ?? this.currentDailyStats!;
 		if (silent) {
 			void this.chartPanel.webview.postMessage({ command: 'updateChartData', data: { ...this.buildChartData(chartStats), compactNumbers: this.getCompactNumbersSetting(), monthlyBudget: this.getEffectiveMonthlyBudget() } });
 		} else {
@@ -4260,9 +4523,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private async updateAnalysisPanelIfOpen(silent: boolean, preloaded?: SessionFilePreload[]): Promise<void> {
+	private async updateAnalysisPanelIfOpen(silent: boolean, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<void> {
 		if (!this.analysisPanel) { return; }
-		const analysisStats = await this.calculateUsageAnalysisStats(false, preloaded);
+		const analysisStats = await this.calculateUsageAnalysisStats(false, preloaded, originGeneration);
 		if (silent) {
 			// Reuse the same payload builder as the full-refresh paths (_buildAnalysisUpdateData)
 			// so every field the webview renders (correctionReport, repeatedTasks, curationAnalysis, …)
@@ -4280,9 +4543,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private async computeAndUploadFluencyScore(silent: boolean, preloaded?: SessionFilePreload[]): Promise<void> {
+	private async computeAndUploadFluencyScore(silent: boolean, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<void> {
 		const freshMaturityData = (!silent || this.maturityPanel)
-			? await this.calculateMaturityScores(false, preloaded)
+			? await this.calculateMaturityScores(false, preloaded, originGeneration)
 			: undefined;
 		if (this.maturityPanel && !silent && freshMaturityData) {
 			this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, freshMaturityData);
@@ -4322,7 +4585,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private async evaluateAndSurfaceInsights(): Promise<void> {
-		const stats = this.lastUsageAnalysisStats;
+		const stats = this.currentUsageAnalysisStats;
 		if (!stats) { return; }
 
 		const insightsEnabled = vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('insights.enabled', true);
@@ -4639,6 +4902,44 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
+	 * Log viewer summary card labels. Templates with {0}/{1} (otherCount,
+	 * contextRefsBreakdown) are resolved webview-side by localizeFormat().
+	 */
+	private getLogViewerSummaryLocalization(): Record<string, string> {
+		return {
+			'logviewer.summary.interactions': l10n.t('logviewer.summary.interactions'),
+			'logviewer.summary.editorMode': l10n.t('logviewer.summary.editorMode'),
+			'logviewer.summary.estimatedTokens': l10n.t('logviewer.summary.estimatedTokens'),
+			'logviewer.summary.actualTokens': l10n.t('logviewer.summary.actualTokens'),
+			'logviewer.summary.modelTurns': l10n.t('logviewer.summary.modelTurns'),
+			'logviewer.summary.inputTokens': l10n.t('logviewer.summary.inputTokens'),
+			'logviewer.summary.outputTokens': l10n.t('logviewer.summary.outputTokens'),
+			'logviewer.summary.cachedInput': l10n.t('logviewer.summary.cachedInput'),
+			'logviewer.summary.thinkingTokens': l10n.t('logviewer.summary.thinkingTokens'),
+			'logviewer.summary.thinkingEffort': l10n.t('logviewer.summary.thinkingEffort'),
+			'logviewer.summary.subAgents': l10n.t('logviewer.summary.subAgents'),
+			'logviewer.summary.contextTruncated': l10n.t('logviewer.summary.contextTruncated'),
+			'logviewer.summary.sessionHierarchy': l10n.t('logviewer.summary.sessionHierarchy'),
+			'logviewer.summary.toolCalls': l10n.t('logviewer.summary.toolCalls'),
+			'logviewer.summary.mcpTools': l10n.t('logviewer.summary.mcpTools'),
+			'logviewer.summary.contextRefs': l10n.t('logviewer.summary.contextRefs'),
+			'logviewer.summary.fileName': l10n.t('logviewer.summary.fileName'),
+			'logviewer.summary.editor': l10n.t('logviewer.summary.editor'),
+			'logviewer.summary.editorSource': l10n.t('logviewer.summary.editorSource'),
+			'logviewer.summary.mcpAndContextRefs': l10n.t('logviewer.summary.mcpAndContextRefs'),
+			'logviewer.summary.noModeData': l10n.t('logviewer.summary.noModeData'),
+			'logviewer.summary.noneShort': l10n.t('logviewer.summary.noneShort'),
+			'logviewer.summary.otherCount': l10n.t('logviewer.summary.otherCount'),
+			'logviewer.summary.contextRefsBreakdown': l10n.t('logviewer.summary.contextRefsBreakdown'),
+			'logviewer.summary.fileSize': l10n.t('logviewer.summary.fileSize'),
+			'logviewer.summary.modified': l10n.t('logviewer.summary.modified'),
+			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
+			'logviewer.summary.started': l10n.t('logviewer.summary.started'),
+			'logviewer.summary.lastActivity': l10n.t('logviewer.summary.lastActivity'),
+		};
+	}
+
+	/**
 	 * Get localization strings for webviews based on the current VS Code language.
 	 * This provides localized button labels and other UI strings for webview panels.
 	 */
@@ -4675,33 +4976,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Details view — collapsible "Usage by Editor" section heading tooltips
 			'details.editorSection.show': l10n.t('details.editorSection.show'),
 			'details.editorSection.hide': l10n.t('details.editorSection.hide'),
-			// Log viewer summary card labels
-			'logviewer.summary.interactions': l10n.t('logviewer.summary.interactions'),
-			'logviewer.summary.editorMode': l10n.t('logviewer.summary.editorMode'),
-			'logviewer.summary.estimatedTokens': l10n.t('logviewer.summary.estimatedTokens'),
-			'logviewer.summary.actualTokens': l10n.t('logviewer.summary.actualTokens'),
-			'logviewer.summary.modelTurns': l10n.t('logviewer.summary.modelTurns'),
-			'logviewer.summary.inputTokens': l10n.t('logviewer.summary.inputTokens'),
-			'logviewer.summary.outputTokens': l10n.t('logviewer.summary.outputTokens'),
-			'logviewer.summary.cachedInput': l10n.t('logviewer.summary.cachedInput'),
-			'logviewer.summary.thinkingTokens': l10n.t('logviewer.summary.thinkingTokens'),
-			'logviewer.summary.thinkingEffort': l10n.t('logviewer.summary.thinkingEffort'),
-			'logviewer.summary.subAgents': l10n.t('logviewer.summary.subAgents'),
-			'logviewer.summary.contextTruncated': l10n.t('logviewer.summary.contextTruncated'),
-			'logviewer.summary.sessionHierarchy': l10n.t('logviewer.summary.sessionHierarchy'),
-			'logviewer.summary.toolCalls': l10n.t('logviewer.summary.toolCalls'),
-			'logviewer.summary.mcpTools': l10n.t('logviewer.summary.mcpTools'),
-			'logviewer.summary.contextRefs': l10n.t('logviewer.summary.contextRefs'),
-			'logviewer.summary.fileName': l10n.t('logviewer.summary.fileName'),
-			'logviewer.summary.editor': l10n.t('logviewer.summary.editor'),
-			'logviewer.summary.editorSource': l10n.t('logviewer.summary.editorSource'),
-			'logviewer.summary.mcpAndContextRefs': l10n.t('logviewer.summary.mcpAndContextRefs'),
-			'logviewer.summary.noModeData': l10n.t('logviewer.summary.noModeData'),
-			'logviewer.summary.fileSize': l10n.t('logviewer.summary.fileSize'),
-			'logviewer.summary.modified': l10n.t('logviewer.summary.modified'),
-			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
-			'logviewer.summary.started': l10n.t('logviewer.summary.started'),
-			'logviewer.summary.lastActivity': l10n.t('logviewer.summary.lastActivity'),
+			...this.getLogViewerSummaryLocalization(),
+			...this.getMistralCloudLocalization(),
 			...this.getEfficiencyAttributionLocalization(),
 			// HydraFusion Routing section + Session Steps Overview leg toggle. Templates
 			// with {0} are resolved webview-side by localizeFormat().
@@ -4718,6 +4994,41 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...this.getEfficiencyModelsLocalization(),
 			// Current language for reference
 			'__language__': language
+		};
+	}
+
+	/** Diagnostics — Mistral Cloud (Beta) tab strings. Templates with {0}/{1} are resolved webview-side by localizeFormat(), so they are passed through unformatted here. */
+	private getMistralCloudLocalization(): Record<string, string> {
+		return {
+			'mistral.tabCaption': l10n.t('mistral.tabCaption'),
+			'mistral.tabTitle': l10n.t('mistral.tabTitle'),
+			'mistral.betaBadge': l10n.t('mistral.betaBadge'),
+			'mistral.description.intro': l10n.t('mistral.description.intro'),
+			'mistral.description.scope': l10n.t('mistral.description.scope'),
+			'mistral.description.undocumented': l10n.t('mistral.description.undocumented'),
+			'mistral.description.keyStorage': l10n.t('mistral.description.keyStorage'),
+			'mistral.status.label': l10n.t('mistral.status.label'),
+			'mistral.status.configured': l10n.t('mistral.status.configured'),
+			'mistral.status.notConfigured': l10n.t('mistral.status.notConfigured'),
+			'mistral.status.checking': l10n.t('mistral.status.checking'),
+			'mistral.status.checkFailed': l10n.t('mistral.status.checkFailed'),
+			'mistral.button.retry': l10n.t('mistral.button.retry'),
+			'mistral.summary.conversations': l10n.t('mistral.summary.conversations'),
+			'mistral.summary.ofCount': l10n.t('mistral.summary.ofCount'),
+			'mistral.summary.atLeastCount': l10n.t('mistral.summary.atLeastCount'),
+			'mistral.summary.lastFetched': l10n.t('mistral.summary.lastFetched'),
+			'mistral.error.label': l10n.t('mistral.error.label'),
+			'mistral.button.refresh': l10n.t('mistral.button.refresh'),
+			'mistral.button.removeApiKey': l10n.t('mistral.button.removeApiKey'),
+			'mistral.button.connectApiKey': l10n.t('mistral.button.connectApiKey'),
+			'mistral.table.id': l10n.t('mistral.table.id'),
+			'mistral.table.name': l10n.t('mistral.table.name'),
+			'mistral.table.agentId': l10n.t('mistral.table.agentId'),
+			'mistral.table.version': l10n.t('mistral.table.version'),
+			'mistral.table.created': l10n.t('mistral.table.created'),
+			'mistral.table.updated': l10n.t('mistral.table.updated'),
+			'mistral.table.description': l10n.t('mistral.table.description'),
+			'mistral.table.untitled': l10n.t('mistral.table.untitled'),
 		};
 	}
 
@@ -4886,11 +5197,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (this.environmentalPanel) {
 			this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, stats);
 		}
-		if (this.chartPanel && (this.lastFullDailyStats || this.lastDailyStats)) {
-			this.chartPanel.webview.html = this.getChartHtml(this.chartPanel.webview, this.lastFullDailyStats ?? this.lastDailyStats!);
+		if (this.chartPanel && (this.currentFullDailyStats || this.currentDailyStats)) {
+			this.chartPanel.webview.html = this.getChartHtml(this.chartPanel.webview, this.currentFullDailyStats ?? this.currentDailyStats!);
 		}
-		if (this.analysisPanel && this.lastUsageAnalysisStats) {
-			void this.analysisPanel.webview.postMessage({ command: 'updateStats', data: this._buildAnalysisUpdateData(this.lastUsageAnalysisStats) });
+		const usageForPanel = this.currentUsageAnalysisStats;
+		if (this.analysisPanel && usageForPanel) {
+			void this.analysisPanel.webview.postMessage({ command: 'updateStats', data: this._buildAnalysisUpdateData(usageForPanel) });
 		}
 	}
 
@@ -4898,7 +5210,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *  (actualTokens > estimatedTokens) and UTC date assignment as calculateDetailedStats
 	 *  so all chart period views are consistent. Stores the result in
 	 *  `lastFullDailyStats` and returns it. Zero-fill is handled per-period in buildChartData. */
-	private async calculateDailyStats(daysBack = 365, knownSessionFiles?: string[]): Promise<DailyTokenStats[]> {
+	private async calculateDailyStats(
+		daysBack = 365,
+		knownSessionFiles?: string[],
+		onProgress?: (completed: number, total: number, editors: ReadonlySet<string>) => void,
+	): Promise<DailyTokenStats[]> {
+		// Captured before the first await: the result is only as current as the state this walk
+		// started from, so a clearCache() landing mid-walk must leave this stamp behind it.
+		const startedAtGeneration = this._cacheGeneration;
 		const now = new Date();
 		const cutoffStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack);
 		const cutoffStartKey = toLocalDayKey(cutoffStart);
@@ -4909,13 +5228,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const sessionFiles = knownSessionFiles ?? await this.sessionDiscovery.getCopilotSessionFiles();
 			this.log(`📈 Preparing chart data (${daysBack}d) from ${sessionFiles.length} session file(s)...`);
 
+			let completed = 0;
+			// Accumulated here rather than by the caller, so every tick carries the whole set
+			// so far and a reporter does not have to rebuild it from the single file each
+			// tick names.
+			const editors = new Set<string>();
 			const dailyResults = await this.runWithConcurrency(sessionFiles, async (sessionFile) => {
-				const fileStats = await this.statSessionFile(sessionFile);
-				const mtime = fileStats.mtime.getTime();
-				const fileSize = fileStats.size;
-				if (mtime < cutoffMs) { return null; }
-				const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-				return { sessionFile, sessionData, mtime };
+				try {
+					const fileStats = await this.statSessionFile(sessionFile);
+					const mtime = fileStats.mtime.getTime();
+					const fileSize = fileStats.size;
+					if (mtime < cutoffMs) { return null; }
+					return { sessionFile, sessionData: await this.getSessionFileDataCached(sessionFile, mtime, fileSize), mtime };
+				} finally {
+					if (onProgress) {
+						const editor = this.detectEditorSource(sessionFile);
+						if (editor && editor !== 'Unknown') { editors.add(editor); }
+						onProgress(++completed, sessionFiles.length, editors);
+					}
+				}
 			});
 
 			for (const r of dailyResults) {
@@ -4939,6 +5270,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		const result = Array.from(dailyStatsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 		this.lastFullDailyStats = result;
+		this._statsGeneration.fullDaily = startedAtGeneration;
 		return result;
 	}
 
@@ -5098,11 +5430,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Calculate usage analysis statistics for today and last 30 days
 	 * @param useCache If true, return cached stats if available. If false, force recalculation.
 	 */
-	private async calculateUsageAnalysisStats(useCache = true, preloaded?: SessionFilePreload[]): Promise<UsageAnalysisStats> {
-		if (useCache && this.lastUsageAnalysisStats) {
+	/**
+	 * `originGeneration` is the generation the caller's `preloaded` entries were gathered in. It
+	 * exists because stamping with this function's own start would be wrong for a refresh: the
+	 * entries can predate a clear that landed while the refresh was still preloading, and a
+	 * calculation starting *after* that clear would otherwise stamp pre-clear inputs as current.
+	 * Callers that pass no preloaded data have nothing older than this call to account for.
+	 */
+	private async calculateUsageAnalysisStats(useCache = true, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<UsageAnalysisStats> {
+		const cachedUsage = this.currentUsageAnalysisStats;
+		if (useCache && cachedUsage) {
 			this.log('🔍 [Usage Analysis] Using cached stats');
-			return this.lastUsageAnalysisStats;
+			return cachedUsage;
 		}
+		const startedAtGeneration = originGeneration ?? this._cacheGeneration;
 		const now = new Date();
 		const { todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(now);
 		const cutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
@@ -5170,6 +5511,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			autoCompactionsLast7Days,
 		};
 		this.lastUsageAnalysisStats = stats;
+		this._statsGeneration.usage = startedAtGeneration;
 		return stats;
 	}
 
@@ -5651,7 +5993,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				sessions = this.buildRecentSessionBucket(results, getTimeWindowStartDayKey(period, now));
 				await this.applyDbContextToSessions(sessions);
 			} else {
-				const stats = this.lastUsageAnalysisStats ?? await this.calculateUsageAnalysisStats(true);
+				const stats = this.currentUsageAnalysisStats ?? await this.calculateUsageAnalysisStats(true);
 				sessions = stats.recentSessions?.[period] ?? [];
 			}
 		} catch (error) {
@@ -5972,7 +6314,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private _buildSkillDescriptions(): Record<string, string> {
 		const descriptions: Record<string, string> = {};
-		for (const t of this.lastUsageAnalysisStats?.curationAnalysis?.availableTools ?? []) {
+		for (const t of this.currentUsageAnalysisStats?.curationAnalysis?.availableTools ?? []) {
 			if (t.source === 'skill' && t.description) { descriptions[t.name] = t.description; }
 		}
 		const builtins = builtinCommandDescriptionsData as { [key: string]: string };
@@ -8387,8 +8729,13 @@ private computeFallbackDailyRollup(
 
 		// Open the panel IMMEDIATELY with whatever daily stats are already in memory.
 		// Full-year data (needed for Week/Month views) is computed in the background below.
-		const hasFullData = !!this.lastFullDailyStats;
-		const initialStats = this.lastFullDailyStats ?? this.lastDailyStats ?? [];
+		// A truthy lastFullDailyStats is not enough: a build already running when clearCache()
+		// fires finishes afterwards and repopulates it with pre-clear data, stamped with the
+		// generation the clear just superseded. currentFullDailyStats rejects that stamp so
+		// this falls back to the 30-day cache (or triggers a fresh full-year calculation below)
+		// instead of rendering stale data.
+		const hasFullData = !!this.currentFullDailyStats;
+		const initialStats = this.currentFullDailyStats ?? this.currentDailyStats ?? [];
 
 		// Create webview panel now so the tab appears without waiting for I/O
 		this.chartPanel = vscode.window.createWebviewPanel(
@@ -8490,8 +8837,13 @@ private computeFallbackDailyRollup(
 			if (await this.dispatchSharedCommand(message)) { return; }
 			await this.handleAnalysisMessage(message);
 		});
-		this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, this.lastUsageAnalysisStats ?? null);
-		if (!this.lastUsageAnalysisStats) { void this.loadAnalysisStatsInBackground(this.analysisPanel); }
+		// A truthy lastUsageAnalysisStats is not enough: a build already running when
+		// clearCache() fires finishes afterwards and repopulates it with pre-clear data,
+		// stamped with the generation the clear just superseded. currentUsageAnalysisStats
+		// rejects that stamp so this falls back to loading fresh data instead of rendering it.
+		const usageForOpen = this.currentUsageAnalysisStats;
+		this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, usageForOpen ?? null);
+		if (!usageForOpen) { void this.loadAnalysisStatsInBackground(this.analysisPanel); }
 		this.analysisPanel.onDidDispose(() => {
 			this.log('📊 Usage Analysis dashboard closed');
 			this.analysisPanel = undefined;
@@ -8565,7 +8917,7 @@ private computeFallbackDailyRollup(
 	 */
 	public async askCopilotAboutCorrections(): Promise<void> {
 		await this.showUsageAnalysisOnCorrectionsTab();
-		const repos = this.lastUsageAnalysisStats?.correctionReport?.repos ?? [];
+		const repos = this.currentUsageAnalysisStats?.correctionReport?.repos ?? [];
 		if (repos.length === 0) { return; }
 		const topRepo = repos.reduce((best, repo) =>
 			this.correctionMomentCount(repo.counts) > this.correctionMomentCount(best.counts) ? repo : best
@@ -8714,7 +9066,7 @@ private computeFallbackDailyRollup(
 		await this.context.globalState.update('insights.state', this._insightStateBag);
 		// Re-evaluate once and use it for both surfaces: the insight just acted on may no longer be
 		// the top 'new' one, and a badge left naming it would send a click to the wrong card.
-		const evaluated = this.lastUsageAnalysisStats ? this.buildCurrentInsights(this.lastUsageAnalysisStats) : undefined;
+		const evaluated = this.currentUsageAnalysisStats ? this.buildCurrentInsights(this.currentUsageAnalysisStats) : undefined;
 		this.refreshInsightBadgeFromState(now, evaluated);
 		// Push refreshed state back to the webview
 		if (this.analysisPanel && evaluated) {
@@ -9374,6 +9726,24 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		// the cached stats so loadAnalysisStatsInBackground performs a full recalculation.
 		void this.analysisPanel.webview.postMessage({ command: 'usageRefreshing' });
 		this.lastUsageAnalysisStats = undefined;
+		// An Efficiency build spanning this refresh was built on the stats just discarded, so
+		// bump the generation to stop its result being recorded. Deliberately *not* clearing
+		// `_lastEfficiencyViewData` as clearCache() does: this leaves the session cache
+		// intact, so an Efficiency rebuild will succeed, and dropping the last good payload
+		// would only guarantee the failure state on the way there.
+		//
+		// The generation is global, but this refresh is not: it invalidates usage-analysis
+		// state and nothing else. The daily and full-year caches are carried across the bump
+		// so they stay readable, because a bare bump silently truncated an open Chart. With
+		// `currentFullDailyStats` reading stale, _runRefreshCore()'s backfill is still skipped
+		// (it skips whenever a chart panel is open), `mergeIntoFullDailyStats()` early-returns,
+		// and the chart then re-renders from the 30-day fallback — losing its week, month and
+		// all-history ranges after nothing more than a Usage Analysis refresh.
+		const dailyWasCurrent = isComputedStatsCurrent(this._statsGeneration.daily, this._cacheGeneration);
+		const fullDailyWasCurrent = isComputedStatsCurrent(this._statsGeneration.fullDaily, this._cacheGeneration);
+		this._cacheGeneration++;
+		if (dailyWasCurrent) { this._statsGeneration.daily = this._cacheGeneration; }
+		if (fullDailyWasCurrent) { this._statsGeneration.fullDaily = this._cacheGeneration; }
 		await this.loadAnalysisStatsInBackground(this.analysisPanel);
 		// Refresh token stats so the status bar and tooltip stay in sync
 		await this.updateTokenStats();
@@ -9388,7 +9758,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 * Overall stage = median of the 6 category scores.
 	 * @param useCache If true, use cached usage stats. If false, force recalculation.
 	 */
-	private async calculateMaturityScores(useCache = true, preloaded?: SessionFilePreload[]): Promise<{
+	private async calculateMaturityScores(useCache = true, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<{
 		overallStage: number;
 		overallLabel: string;
 		categories: { category: string; icon: string; stage: number; evidence: string[]; tips: string[] }[];
@@ -9396,7 +9766,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		lastUpdated: string;
 		agenticTrend?: AgenticTrendPoint[];
 	}> {
-		return _calculateMaturityScores(this._lastCustomizationMatrix, (useCache) => this.calculateUsageAnalysisStats(useCache, preloaded), useCache, this._copilotPlanResolved?.isMCPEnabled);
+		return _calculateMaturityScores(this._lastCustomizationMatrix, (useCache) => this.calculateUsageAnalysisStats(useCache, preloaded, originGeneration), useCache, this._copilotPlanResolved?.isMCPEnabled);
 	}
 
 	/**
@@ -10056,7 +10426,6 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 
 		const panel = this.efficiencyPanel;
 		panel.webview.html = this.getLoadingHtml(panel.webview);
-		void panel.webview.postMessage({ command: 'loadingStep', step: 'computing' });
 
 		// Build the data in the background rather than awaiting it here: showEfficiency() is
 		// wrapped in dispatch()'s in-flight guard, which only releases the 'showEfficiency' key
@@ -10064,19 +10433,74 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// key locked — if the user closes the panel and reopens it before the build finishes, the
 		// reopen would be silently dropped as "already in flight" (same fix as showChart above).
 		void (async () => {
-			const data = await this.buildEfficiencyViewData();
-			// The user may have closed the panel while the data was being computed.
-			if (this.efficiencyPanel !== panel) { return; }
-			panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
-			this.log('⚡ Efficiency view rendered');
+			let generation = this._cacheGeneration;
+			try {
+				const data = await this.runEfficiencyBuild(() => {
+					generation = this._cacheGeneration;
+					return this.buildEfficiencyViewData(false, this.efficiencyLoadingSink());
+				});
+				// Record the payload even if this panel is gone: it is valid data, and a later
+				// refresh falls back to it rather than stranding its panel on the loading screen.
+				// A payload the caches have outlived is not rendered: the clear that invalidated
+				// it is precisely a statement that this data is no longer current. Nothing else
+				// will redraw this panel though — clearCache() refreshes the token stats, not
+				// this view — so rebuild rather than leaving the loading screen up forever.
+				if (!this.recordEfficiencyPayload(data, generation)) {
+					if (this.efficiencyPanel === panel) { this.requestEfficiencyRebuild(); }
+					return;
+				}
+				// The user may have closed the panel while the data was being computed.
+				if (this.efficiencyPanel !== panel) { return; }
+				panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
+				this.log('⚡ Efficiency view rendered');
+			} catch (error) {
+				this.error('Error building Efficiency view:', error);
+				this.showEfficiencyError(panel, error);
+			}
 		})();
 	}
 
 	private async refreshEfficiencyPanel(): Promise<void> {
-		if (!this.efficiencyPanel) { return; }
+		const panel = this.efficiencyPanel;
+		if (!panel) { return; }
 		this.log('🔄 Refreshing Efficiency view');
-		const data = await this.buildEfficiencyViewData(true);
-		this.efficiencyPanel.webview.html = this.getEfficiencyHtml(this.efficiencyPanel.webview, data);
+		// Refresh forces all three walks to recompute, so it is as slow as a cold open —
+		// show the same loading screen with live progress rather than a frozen view.
+		let data: EfficiencyViewData;
+		// Captured inside the queued callback, not here: a refresh waiting behind another build
+		// reads the caches as they are when it finally runs, so a clear that lands during that
+		// wait leaves it building from post-clear state, not stale state.
+		let generation = this._cacheGeneration;
+		try {
+			data = await this.runEfficiencyBuild(async () => {
+				generation = this._cacheGeneration;
+				// Swap in the loading screen only once this refresh actually starts; queued
+				// behind an initial build, it would otherwise blank the panel and sit there.
+				if (this.efficiencyPanel === panel) { panel.webview.html = this.getLoadingHtml(panel.webview); }
+				return this.buildEfficiencyViewData(true, this.efficiencyLoadingSink());
+			});
+			// Same reasoning as the initial build, minus the rebuild: this *is* the refresh, so
+			// re-entering it on a clear that landed mid-build would loop. Fall back to the last
+			// good payload if the clear left one, else show the failure state.
+			if (!this.recordEfficiencyPayload(data, generation)) {
+				if (this.efficiencyPanel !== panel) { return; }
+				const afterClear = this._lastEfficiencyViewData;
+				if (afterClear) { panel.webview.html = this.getEfficiencyHtml(panel.webview, afterClear); }
+				else { this.showEfficiencyError(panel, new Error(l10n.t('efficiency.error.staleAfterClear'))); }
+				return;
+			}
+		} catch (error) {
+			// Never strand the panel on the loading screen: fall back to the last good payload,
+			// which the initial build records even when its own render was skipped.
+			this.error('Error refreshing Efficiency view:', error);
+			const previous = this._lastEfficiencyViewData;
+			if (this.efficiencyPanel !== panel) { return; }
+			if (previous) { panel.webview.html = this.getEfficiencyHtml(panel.webview, previous); }
+			else { this.showEfficiencyError(panel, error); }
+			return;
+		}
+		if (this.efficiencyPanel !== panel) { return; }
+		panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
 	}
 
 	/** Maps one cached session to the pure-module input shape for efficiency trends. */
@@ -10110,10 +10534,12 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * `last*` stat caches and invalidated by the same paths.
 	 */
 	private async collectEfficiencySessionInputs(weeksBack = 12, useCache = true): Promise<EfficiencySessionInput[]> {
-		if (useCache && this.lastEfficiencySessionInputs) {
+		const cachedInputs = this.currentEfficiencySessionInputs;
+		if (useCache && cachedInputs) {
 			this.log('⚡ [Efficiency] Using cached session inputs');
-			return this.lastEfficiencySessionInputs;
+			return cachedInputs;
 		}
+		const startedAtGeneration = this._cacheGeneration;
 		const now = new Date();
 		const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - weeksBack * 7);
 		const inputs: EfficiencySessionInput[] = [];
@@ -10124,6 +10550,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				inputs.push(this.toEfficiencySessionInput(r.sessionData, r.mtime));
 			}
 			this.lastEfficiencySessionInputs = inputs;
+			this._statsGeneration.sessionInputs = startedAtGeneration;
 		} catch (error) {
 			this.error('Error collecting efficiency session inputs:', error);
 		}
@@ -10178,11 +10605,135 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		}
 	}
 
-	private async buildEfficiencyViewData(forceRecalc = false): Promise<EfficiencyViewData> {
-		const now = new Date();
-		const dailyStats = (!forceRecalc && this.lastFullDailyStats) ? this.lastFullDailyStats : await this.calculateDailyStats();
+	/**
+	 * Percentages the Efficiency build reports for its compute sub-steps. The file walk
+	 * owns everything below the first of these, so the bar climbs with parsing and then
+	 * keeps moving through aggregation instead of parking at one number for the wait.
+	 */
+	private static readonly EFFICIENCY_STEP_PCT = {
+		daily: 88, usage: 92, sessions: 96, trends: 98,
+	} as const;
+
+	/**
+	 * The Efficiency panel's failure state.
+	 *
+	 * Every path that swaps in the loading screen needs somewhere to land when the build
+	 * throws and there is no last-good payload to fall back to — a first open that fails, or
+	 * a refresh after the caches were cleared. Returning silently in those cases left the
+	 * panel on the loading screen for the rest of the session.
+	 */
+	private getEfficiencyErrorHtml(webview: vscode.Webview, error: unknown): string {
+		const nonce = getNonce();
+		// The detail is an error message, which can carry a file path or arbitrary text.
+		const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		const detail = esc(String(error instanceof Error ? error.message : error));
+		return `<!DOCTYPE html>
+		<html lang="en">
+		<head>
+			<meta charset="UTF-8" />
+			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+			${buildCspMeta(webview, nonce)}
+			<title>${l10n.t('efficiency.error.title')}</title>
+		</head>
+		<body style="font-family:var(--vscode-font-family);padding:24px;color:var(--vscode-foreground);">
+			<h2 style="margin:0 0 8px;">${esc(l10n.t('efficiency.error.title'))}</h2>
+			<p style="color:var(--vscode-descriptionForeground);margin:0 0 16px;">${detail}</p>
+			<button id="retry" style="padding:6px 14px;cursor:pointer;border:none;border-radius:2px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);">${esc(l10n.t('efficiency.error.retry'))}</button>
+			<script nonce="${nonce}">
+				const vscodeApi = acquireVsCodeApi();
+				document.getElementById('retry').addEventListener('click', () => vscodeApi.postMessage({ command: 'refresh' }));
+			</script>
+		</body>
+		</html>`;
+	}
+
+	/** Renders the failure state on `panel`, if it is still the live Efficiency panel. */
+	private showEfficiencyError(panel: vscode.WebviewPanel, error: unknown): void {
+		if (this.efficiencyPanel !== panel) { return; }
+		panel.webview.html = this.getEfficiencyErrorHtml(panel.webview, error);
+	}
+
+	/**
+	 * Records a built payload as the fallback a failed refresh renders, unless the caches it
+	 * was computed from have been invalidated since the build began. Without that check a
+	 * build started before `clearCache()` could finish after it and reinstate pre-clear data
+	 * as the "last good" result.
+	 */
+	private recordEfficiencyPayload(data: EfficiencyViewData, builtAtGeneration: number): boolean {
+		if (builtAtGeneration !== this._cacheGeneration) {
+			this.log('⚡ [Efficiency] Discarding a payload built before the caches were cleared');
+			return false;
+		}
+		this._lastEfficiencyViewData = data;
+		return true;
+	}
+
+	/**
+	 * Reports one Efficiency compute sub-step to the panel showing *its* loading screen.
+	 *
+	 * Deliberately not routed through sendLoadingPanelMessage(): that also reaches the details
+	 * panel, whose loading screen is tracking updateTokenStats() rather than this build, so
+	 * these labels would describe work it is not doing.
+	 */
+	private postEfficiencyStep(send: (msg: object) => void, percentage: number, label: string): void {
+		send({ command: 'loadingStep', step: 'computing', percentage, label });
+	}
+
+	/**
+	 * The three aggregation passes behind the Efficiency view, reporting each as a named
+	 * sub-step so the loading bar keeps moving through them.
+	 *
+	 * Only the first parses cold files. It covers the widest window (a full year), and the
+	 * other two read strict subsets of it straight out of the in-memory session cache it
+	 * fills, so per-file progress is reported from that walk rather than from a separate
+	 * warm-up pass over the same corpus.
+	 */
+	private async collectEfficiencyInputs(forceRecalc: boolean, send: (msg: object) => void): Promise<{
+		dailyStats: DailyTokenStats[]; usage: UsageAnalysisStats; sessionInputs: EfficiencySessionInput[];
+	}> {
+		const stepPct = CopilotTokenTracker.EFFICIENCY_STEP_PCT;
+		let dailyStats: DailyTokenStats[];
+		const cachedDaily = this.currentFullDailyStats;
+		if (!forceRecalc && cachedDaily) {
+			this.postEfficiencyStep(send, stepPct.daily, l10n.t('loading.efficiency.dailyActivity'));
+			dailyStats = cachedDaily;
+		} else {
+			// No compute sub-step before the walk. The bar is monotonic and parsing owns only
+			// its lower band, so posting one here would pin the bar above that band and freeze
+			// it for the whole parse — the exact failure this view had at 96%. The walk's own
+			// parsing ticks drive the bar instead.
+			// The walk hands over the editors it has seen, so the Efficiency loader grows the
+			// same pills the details loader does instead of an always-empty row.
+			let seen: ReadonlySet<string> = new Set<string>();
+			const report = this.buildProgressCallback(
+				true,
+				() => [...seen].map(name => ({ icon: this.getEditorIconForLoader(name), name })),
+				send,
+			);
+			dailyStats = await this.calculateDailyStats(365, undefined, (completed, total, editors) => {
+				seen = editors;
+				report(completed, total);
+			});
+			// Announced *after* the walk, not before it. Before, it would pin the bar above
+			// parsing's band and freeze it for the whole parse; after, it is a step up from 85%
+			// and the phase the PR advertises is shown on the cold open too, not only when the
+			// year was already cached.
+			this.postEfficiencyStep(send, stepPct.daily, l10n.t('loading.efficiency.dailyActivity'));
+		}
+		this.postEfficiencyStep(send, stepPct.usage, l10n.t('loading.efficiency.usageAnalysis'));
 		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
+		this.postEfficiencyStep(send, stepPct.sessions, l10n.t('loading.efficiency.sessionSignals'));
 		const sessionInputs = await this.collectEfficiencySessionInputs(12, !forceRecalc);
+		this.postEfficiencyStep(send, stepPct.trends, l10n.t('loading.efficiency.buildingTrends'));
+		return { dailyStats, usage, sessionInputs };
+	}
+
+	private async buildEfficiencyViewData(
+		forceRecalc = false,
+		send: (msg: object) => void = () => { /* no loading screen to report to */ },
+	): Promise<EfficiencyViewData> {
+		const now = new Date();
+		const { dailyStats, usage, sessionInputs } = await this.collectEfficiencyInputs(forceRecalc, send);
 		const deps = {
 			calculateEstimatedCost: (mu: ModelUsage, src: 'provider' | 'copilot') => this.calculateEstimatedCost(mu, src),
 			now,
@@ -10740,13 +11291,15 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
   }
 
   private async getLocalStatsForWindow(lookbackDays: number): Promise<{ localTokens: number | undefined; localInteractions: number | undefined }> {
+    const startedAtGeneration = this._cacheGeneration;
     try {
       const { dailyStats: freshDailyStats } = await this.calculateDetailedStats(undefined);
       this.lastDailyStats = freshDailyStats;
+      this._statsGeneration.daily = startedAtGeneration;
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - lookbackDays);
       const cutoffStr = toLocalDayKey(cutoffDate);
-      const inWindow = (this.lastDailyStats ?? []).filter(d => d.date >= cutoffStr);
+      const inWindow = freshDailyStats.filter(d => d.date >= cutoffStr);
       return { localTokens: inWindow.reduce((sum, d) => sum + d.tokens, 0), localInteractions: inWindow.reduce((sum, d) => sum + d.interactions, 0) };
     } catch { return { localTokens: undefined, localInteractions: undefined }; }
   }
@@ -11089,7 +11642,19 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     this.log("✅ Diagnostic Report panel created");
     this.diagnosticsPanel.webview.onDidReceiveMessage(async (message) => { await this.handleDiagnosticMessage(message); });
     this.diagnosticsPanel.webview.html = this.getDiagnosticReportHtml(this.diagnosticsPanel.webview, "Loading...", [], [], [], null);
-    this.diagnosticsPanel.onDidDispose(() => { this.log("🔍 Diagnostic Report closed"); this.diagnosticsPanel = undefined; });
+    this.diagnosticsPanel.onDidDispose(() => {
+      this.log("🔍 Diagnostic Report closed");
+      this.diagnosticsPanel = undefined;
+      // Bump the generation *before* aborting: aborting alone only tears down the transport, it
+      // doesn't invalidate diagHandleRefreshMistralCloudSessions' own generation check. Without
+      // this, a quick dispose-then-recreate (a new diagnosticsPanel object) would let the old,
+      // now-aborted refresh's still-current generation pass that check once its promise settles,
+      // posting a stale error result through the *new* panel instead of a no-op.
+      this._mistralCloudRefreshGeneration++;
+      // A fetch left running after the panel is gone would keep issuing serial page requests
+      // (up to MAX_PAGES/20s) against the beta endpoint for a UI nobody can see anymore.
+      this.abortInFlightMistralCloudSessionsFetch();
+    });
     this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
   }
 
@@ -11114,6 +11679,10 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       analyzeFolder: () => this.dispatch('analyzeFolder:diagnostics', () => this.diagHandleAnalyzeFolder(message)),
       analyzeModelUsage: () => this.dispatch('analyzeModelUsage:diagnostics', () => this.diagHandleAnalyzeModelUsage(message)),
       analyzeTtft: () => this.dispatch('analyzeTtft:diagnostics', () => this.diagHandleAnalyzeTtft(message)),
+      refreshMistralCloudSessions: () => this.dispatch('refreshMistralCloudSessions:diagnostics', () => this.diagHandleRefreshMistralCloudSessions()),
+      promptMistralApiKey: () => this.dispatch('promptMistralApiKey:diagnostics', () => this.diagHandlePromptMistralApiKey()),
+      clearMistralApiKey: () => this.dispatch('clearMistralApiKey:diagnostics', () => this.diagHandleClearMistralApiKey()),
+      retryMistralCloudSessionsStatus: () => this.dispatch('retryMistralCloudSessionsStatus:diagnostics', () => this.diagHandleRetryMistralCloudSessionsStatus()),
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
     await this.handleDiagnosticConditionalCommand(message);
@@ -11294,6 +11863,321 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (signIn) { await this.authenticateWithGitHub(); } else { await this.signOutFromGitHub(); }
     if (this.diagnosticsPanel) {
       this.diagnosticsPanel.webview.postMessage({ command: 'githubAuthUpdated', githubAuth: this.getGitHubAuthStatus() });
+    }
+  }
+
+  /**
+   * BETA: re-attempt the SecretStorage status read after `postMistralCloudSessionsStatusEarly`
+   * (or the final diagnostics pipeline read) failed — the webview offers this as a Retry action
+   * since neither Connect nor Refresh ever render while the status is unknown, so a persistently
+   * failing read would otherwise leave the tab permanently stuck with no way to recover.
+   */
+  private async diagHandleRetryMistralCloudSessionsStatus(): Promise<void> {
+    // Not gated on isPanelOpen(): the panel is retained while merely hidden
+    // (retainContextWhenHidden), and a retry triggered just before the tab is backgrounded should
+    // still resolve so the correct state is there once it's revealed again.
+    if (this.diagnosticsPanel) {
+      await this.postMistralCloudSessionsStatusEarly(this.diagnosticsPanel);
+    }
+  }
+
+  /**
+   * BETA: prompt for the Mistral API key via the native VS Code input box (masked, extension-host
+   * side) rather than a webview `window.prompt()`, which would show the credential as clear text
+   * in the page and keep it in page JavaScript.
+   */
+  private async diagHandlePromptMistralApiKey(): Promise<void> {
+    const key = await vscode.window.showInputBox({
+      title: l10n.t('mistral.prompt.title'),
+      prompt: l10n.t('mistral.prompt.enterApiKey'),
+      password: true,
+      ignoreFocusOut: true,
+      validateInput: (v) => (v && v.trim() ? undefined : l10n.t('mistral.prompt.required')),
+    });
+    if (key) {
+      await this.diagHandleSetMistralApiKey(key);
+    } else if (this.diagnosticsPanel) {
+      // The webview disables the Connect button while this prompt is in flight (to stop rapid
+      // clicks from stacking multiple input boxes); the key/set path re-enables it via the
+      // eventual mistralCloudSessionsResult message, but a cancelled prompt never produces one, so
+      // tell the webview explicitly to re-enable it here. Not gated on isPanelOpen(): the panel is
+      // retained while merely hidden, and this terminal message must still reach it there too, or
+      // Connect stays disabled indefinitely once the tab is revealed again.
+      this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudPromptCancelled' });
+    }
+  }
+
+  /** BETA: store the Mistral API key in SecretStorage, then refresh. */
+  private async diagHandleSetMistralApiKey(apiKey: string): Promise<void> {
+    const key = apiKey.trim();
+    if (!key) { return; }
+    try {
+      await this.context.secrets.store(MISTRAL_API_KEY_SECRET, key);
+      this.log('Mistral API key stored.');
+      // Stop any in-flight listing under the previous key immediately — otherwise it keeps making
+      // page requests against a key that's no longer configured, in the background, even though
+      // the refresh below will discard its result anyway once it resolves.
+      this.abortInFlightMistralCloudSessionsFetch();
+      // Drop the previous key's cached listing now, synchronously with the store: otherwise it
+      // stays around until the refresh below resolves, and closing/reopening the panel during
+      // that window would have let sendBackendStorageInfoEarly rehydrate the old account's
+      // conversations under the newly-entered key.
+      this._lastMistralCloudSessions = undefined;
+      this._lastMistralCloudSessionsKeyFingerprint = undefined;
+      await this.diagHandleRefreshMistralCloudSessions();
+    } catch (error) {
+      this.error('Failed to store Mistral API key:', error);
+      vscode.window.showErrorMessage(l10n.t('mistral.error.storeFailed'));
+      // The webview disabled Connect while this was in flight; without a terminal message here it
+      // would stay disabled forever since the store failed before any refresh could send one.
+      // Not gated on isPanelOpen() — see diagHandlePromptMistralApiKey's cancel branch above.
+      if (this.diagnosticsPanel) {
+        this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudPromptCancelled' });
+      }
+    }
+  }
+
+  /** BETA: delete the stored Mistral API key and clear the cached cloud sessions. */
+  private async diagHandleClearMistralApiKey(): Promise<void> {
+    try {
+      await this.context.secrets.delete(MISTRAL_API_KEY_SECRET);
+      // Stop any in-flight listing under the key just removed — otherwise it keeps making page
+      // requests against the deleted key in the background even though its result will be
+      // discarded (via the generation bump below) once it eventually resolves.
+      this.abortInFlightMistralCloudSessionsFetch();
+      this._mistralCloudRefreshGeneration++;
+      this._lastMistralCloudSessions = undefined;
+      this._lastMistralCloudSessionsKeyFingerprint = undefined;
+      this.log('Mistral API key removed.');
+      // Not gated on isPanelOpen() — see diagHandlePromptMistralApiKey's cancel branch above.
+      if (this.diagnosticsPanel) {
+        this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result: this.buildEmptyMistralCloudSessionsResult() });
+      }
+    } catch (error) {
+      this.error('Failed to remove Mistral API key:', error);
+      // Unlike the store path, a silent log line here leaves the user thinking the key was
+      // removed when the configured state (and any cached listing) is actually unchanged.
+      vscode.window.showErrorMessage(l10n.t('mistral.error.removeFailed'));
+    }
+  }
+
+  /** BETA: empty result shape used when no key is configured or the key was cleared. */
+  private buildEmptyMistralCloudSessionsResult(): MistralCloudSessionsResult {
+    return { conversations: [], totalCount: 0, totalIsLowerBound: false, authenticated: false, fetchedAt: '', error: '' };
+  }
+
+  // BETA: random, process-local salt for fingerprintMistralApiKey — generated once per extension
+  // host lifetime, never persisted or exposed. Plain `sha256(apiKey)` would let anyone who ever saw
+  // a fingerprint (e.g. in a future log line or crash dump) attempt to recover the key via a
+  // rainbow table, since API keys are a fairly low-entropy, fixed-format secret; a random per-
+  // process salt closes that off, and PBKDF2 (rather than a bare hash) satisfies CodeQL's
+  // insufficient-password-hash check, which flags any fast digest of a credential-like value —
+  // an HMAC keyed with this same salt was tried first and still flagged, since the underlying
+  // primitive is still a fast hash rather than one of the check's recognized slow KDFs.
+  private static _mistralFingerprintSalt?: Buffer;
+
+  private static getMistralFingerprintSalt(): Buffer {
+    if (!CopilotTokenTracker._mistralFingerprintSalt) {
+      CopilotTokenTracker._mistralFingerprintSalt = crypto.randomBytes(32);
+    }
+    return CopilotTokenTracker._mistralFingerprintSalt;
+  }
+
+  /**
+   * BETA: cheap non-reversible fingerprint of an API key, used only to detect whether
+   * `_lastMistralCloudSessions` still belongs to the currently configured key — never used for
+   * authentication, logged, or persisted anywhere. A modest iteration count keeps this fast enough
+   * to call synchronously on every refresh/status check; this fingerprint's threat model (an
+   * in-memory-only value, never persisted or exposed) doesn't call for a real password-hashing
+   * cost, only for not being a bare fast hash of the raw key.
+   */
+  private static fingerprintMistralApiKey(key: string): string {
+    return crypto.pbkdf2Sync(key, CopilotTokenTracker.getMistralFingerprintSalt(), 10_000, 32, 'sha256').toString('hex');
+  }
+
+  /**
+   * BETA: fingerprint of the currently stored Mistral API key. `readFailed: true` (fingerprint
+   * always undefined in that case) is distinct from a genuinely absent key — a transient
+   * SecretStorage read failure must not be treated as "the key changed", which would otherwise
+   * make a caller clear a still-valid cached listing and expose an unwarranted overwrite path.
+   */
+  private async getCurrentMistralApiKeyFingerprint(): Promise<{ fingerprint?: string; readFailed: boolean }> {
+    try {
+      const key = await this.context.secrets.get(MISTRAL_API_KEY_SECRET);
+      return { fingerprint: key ? CopilotTokenTracker.fingerprintMistralApiKey(key) : undefined, readFailed: false };
+    } catch {
+      return { readFailed: true };
+    }
+  }
+
+  /**
+   * BETA: whether a Mistral API key is currently stored. Sent as initial data to the webview.
+   * Returns undefined (rather than collapsing into `apiKeyConfigured: false`) when the read
+   * itself failed — a rejected SecretStorage.get is not the same as a genuinely missing key, and
+   * treating it as "not configured" would render Connect and risk the user overwriting a key that
+   * is actually still there. Callers should simply omit the status field on undefined, leaving the
+   * webview's last-known state (or its "not yet known" default) alone instead of downgrading it.
+   */
+  private async getMistralCloudSessionsStatus(): Promise<{ apiKeyConfigured: boolean } | undefined> {
+    try {
+      const key = await this.context.secrets.get(MISTRAL_API_KEY_SECRET);
+      return { apiKeyConfigured: !!key };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * BETA: `getMistralCloudSessionsStatus()`, but re-read once if the key was set/cleared while
+   * that read was itself in flight (mirrors the generation check the refresh path uses). Without
+   * this, a status snapshot read moments before a concurrent set/clear could still win a race
+   * against the clear/set handler's own, more current, status message.
+   */
+  private async getFreshMistralCloudSessionsStatus(): Promise<{ apiKeyConfigured: boolean } | undefined> {
+    const generationBefore = this._mistralCloudRefreshGeneration;
+    let status = await this.getMistralCloudSessionsStatus();
+    if (this._mistralCloudRefreshGeneration !== generationBefore) {
+      status = await this.getMistralCloudSessionsStatus();
+    }
+    return status;
+  }
+
+  /**
+   * BETA: the `diagnosticDataLoaded` message's optional Mistral status field — an empty object
+   * (which spreads into nothing) when the read failed, rather than synthesizing a false
+   * "not configured" value that would flip the webview to Connect over a key that may still be
+   * there. Also reconciles the cached listing against the current key: the diagnostics pipeline
+   * this gates can take a while, during which the key can change in another VS Code window
+   * without this window's own generation counter ever seeing it, and `apiKeyConfigured: true`
+   * alone can't tell "still the same key" from "a different key that also happens to be
+   * configured".
+   */
+  private async getMistralCloudSessionsStatusMessageField(panel: vscode.WebviewPanel): Promise<{ mistralCloudSessionsStatus?: { apiKeyConfigured: boolean } }> {
+    const generationBefore = this._mistralCloudRefreshGeneration;
+    const status = await this.getFreshMistralCloudSessionsStatus();
+    let reconciledApiKeyConfigured: boolean | undefined;
+    if (status?.apiKeyConfigured) {
+      reconciledApiKeyConfigured = await this.rehydrateOrInvalidateMistralCloudSessionsCache(panel);
+    } else if (status && !status.apiKeyConfigured) {
+      // Mirrors postMistralCloudSessionsStatusEarly: this fresh read can be the first place in the
+      // whole diagnostics pipeline to observe the key is gone (e.g. removed in another VS Code
+      // window after the early status check already passed). Reporting that alone doesn't stop an
+      // existing collection still running under the now-removed key, which would otherwise keep
+      // sending that credential and issuing paginated requests in the background regardless of
+      // what this diagnosticDataLoaded message now says.
+      this.abortInFlightMistralCloudSessionsFetch();
+    }
+    // The rehydrate await above can span a local Remove/Set, which bumps
+    // _mistralCloudRefreshGeneration and posts its own authoritative status. The snapshot
+    // captured before that await is now stale — re-read (generation-guarded) so the
+    // diagnosticDataLoaded message carries the current key state instead of resurrecting a
+    // removed key and flipping the webview back to Refresh/Remove after the key was removed.
+    if (this._mistralCloudRefreshGeneration !== generationBefore) {
+      const refreshedStatus = await this.getFreshMistralCloudSessionsStatus();
+      return refreshedStatus ? { mistralCloudSessionsStatus: refreshedStatus } : {};
+    }
+    // The rehydrate call above doesn't bump the generation counter on this path (there was no
+    // concurrent set/clear here — it discovered the removal itself, purely from the fingerprint
+    // check), so the generation guard above can't catch this case: without this, the `status`
+    // snapshot captured before rehydrate ran (still `apiKeyConfigured: true`) would silently
+    // overwrite the corrective `false` rehydrate already posted directly to the webview.
+    if (reconciledApiKeyConfigured === false) {
+      return { mistralCloudSessionsStatus: { apiKeyConfigured: false } };
+    }
+    return status ? { mistralCloudSessionsStatus: status } : {};
+  }
+
+  /**
+   * BETA: post a terminal error result when a post-fetch key check couldn't be confirmed (a
+   * transient SecretStorage read failure, not a genuine key change). The webview already has the
+   * interim "loading" marker up, so it needs a terminal message either way to re-enable Refresh.
+   */
+  private postMistralKeyCheckFailedResult(): void {
+    // Not gated on isPanelOpen() — see diagHandlePromptMistralApiKey's cancel branch above.
+    if (this.diagnosticsPanel) {
+      this.diagnosticsPanel.webview.postMessage({
+        command: 'mistralCloudSessionsResult',
+        result: { ...this.buildEmptyMistralCloudSessionsResult(), error: l10n.t('mistral.error.keyCheckFailed') },
+      });
+      // This error result alone leaves `apiKeyConfigured` at whatever it was before (the webview
+      // can't tell "definitely still false" from "we just don't know anymore" from an error result
+      // alone) — if that stale value happened to be false, the tab would render Connect and let the
+      // user overwrite a key that a transient read failure merely couldn't verify. Transition the
+      // status itself to unknown so only Retry is offered until a fresh read actually succeeds.
+      this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsStatusCheckFailed' });
+    }
+  }
+
+  /** BETA: fetch Mistral cloud conversations and post the result to the diagnostics webview. */
+  private async diagHandleRefreshMistralCloudSessions(): Promise<void> {
+    // Not gated on isPanelOpen() anywhere in this method: the panel is retained while merely
+    // hidden, and a refresh started (or a key entered) just before the tab is backgrounded must
+    // still resolve and post its terminal message, or the button stays disabled indefinitely once
+    // the tab is revealed again. Disposal (this.diagnosticsPanel becoming undefined) still stops it.
+    if (!this.diagnosticsPanel) { return; }
+    const generation = ++this._mistralCloudRefreshGeneration;
+    let apiKey: string | undefined;
+    let initialKeyReadFailed = false;
+    try { apiKey = await this.context.secrets.get(MISTRAL_API_KEY_SECRET); } catch { initialKeyReadFailed = true; }
+    if (generation !== this._mistralCloudRefreshGeneration || !this.diagnosticsPanel) { return; }
+    if (initialKeyReadFailed) {
+      // A rejected read is not the same as a genuinely absent key — treating it as "no key" would
+      // post the empty/unconfigured result below, which the webview reads as "removed", prompting
+      // the user to re-enter (and potentially overwrite) a key that may still be there.
+      this.postMistralKeyCheckFailedResult();
+      return;
+    }
+    if (!apiKey) {
+      // A previous refresh's fetch (under a key that has since been removed through some path
+      // other than diagHandleClearMistralApiKey/diagHandleSetMistralApiKey, which already abort
+      // this themselves) could still be running — its generation is already superseded so its
+      // eventual result would be discarded, but the transport itself would otherwise keep sending
+      // the stale credential and issuing paginated requests in the background regardless.
+      this.abortInFlightMistralCloudSessionsFetch();
+      this._lastMistralCloudSessions = this.buildEmptyMistralCloudSessionsResult();
+      this._lastMistralCloudSessionsKeyFingerprint = undefined;
+      this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result: this._lastMistralCloudSessions });
+      return;
+    }
+    this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result: { ...this.buildEmptyMistralCloudSessionsResult(), authenticated: true } });
+    // Any previous listing (under a now-superseded key/generation) should stop making requests
+    // rather than keep running in the background — see diagHandleClearMistralApiKey/
+    // diagHandleSetMistralApiKey, which also abort this on a key change.
+    this.abortInFlightMistralCloudSessionsFetch();
+    const abortController = new AbortController();
+    this._mistralCloudAbortController = abortController;
+    this._mistralCloudInFlightKeyFingerprint = CopilotTokenTracker.fingerprintMistralApiKey(apiKey);
+    const result = await collectMistralCloudSessions(apiKey, { signal: abortController.signal });
+    if (this._mistralCloudAbortController === abortController) {
+      // Still the active fetch (not superseded by a newer one while this was in flight) — it's no
+      // longer in-flight now that it has settled, one way or another.
+      this._mistralCloudInFlightKeyFingerprint = undefined;
+    }
+    // The key may have been removed or changed while this fetch was in flight (e.g. "Remove API
+    // key" clicked mid-refresh) — discard a now-stale result instead of repopulating the UI with
+    // data fetched under a key that is no longer the configured one.
+    let currentKey: string | undefined;
+    let currentKeyReadFailed = false;
+    try { currentKey = await this.context.secrets.get(MISTRAL_API_KEY_SECRET); } catch { currentKeyReadFailed = true; }
+    if (generation !== this._mistralCloudRefreshGeneration) { return; }
+    if (currentKeyReadFailed) {
+      this.postMistralKeyCheckFailedResult();
+      return;
+    }
+    if (currentKey !== apiKey) {
+      // The key changed to something else while this fetch was in flight, but not through a path
+      // that bumped this window's generation counter — e.g. Connect/Remove used in a different VS
+      // Code window, which has its own separate in-memory counter untouched by this one. A silent
+      // return here would leave this window's cache and the webview's in-flight state stuck
+      // reflecting neither the old nor the new key; re-run the refresh so it settles on whatever
+      // key is actually current now instead.
+      await this.diagHandleRefreshMistralCloudSessions();
+      return;
+    }
+    this._lastMistralCloudSessions = result;
+    this._lastMistralCloudSessionsKeyFingerprint = CopilotTokenTracker.fingerprintMistralApiKey(apiKey);
+    if (this.diagnosticsPanel) {
+      this.diagnosticsPanel.webview.postMessage({ command: 'mistralCloudSessionsResult', result });
     }
   }
 
@@ -12430,11 +13314,24 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    * These are cheap relative to the stats/usage-analysis/report pipeline, so sending them early
    * lets the Settings > Backend Storage tab populate right away instead of showing a "not
    * available" placeholder for the several seconds the rest of diagnostics load takes.
-   * Returns the computed values so the caller can reuse them in the final diagnosticDataLoaded message.
+   * Returns backendStorageInfo/githubAuthStatus so the caller can reuse them in the final
+   * diagnosticDataLoaded message; mistralCloudSessionsStatus is NOT returned for reuse there —
+   * the diagnostics pipeline this gates can take a while, so the final message re-reads it fresh
+   * instead of risking a stale snapshot overwriting a key connected/removed in the meantime.
    */
   private async sendBackendStorageInfoEarly(
     panel: vscode.WebviewPanel,
-  ): Promise<{ backendStorageInfo: any; githubAuthStatus: { authenticated: boolean; username?: string } }> {
+  ): Promise<{
+    backendStorageInfo: any;
+    githubAuthStatus: { authenticated: boolean; username?: string };
+  }> {
+    // BETA: kick off independently of getBackendStorageInfo() below (which performs session
+    // discovery and can take a while) and post its own message as soon as it resolves, rather than
+    // gating it behind Promise.all with backendStorageInfo — otherwise a user with an existing key
+    // would see "No API key configured" and a clickable Connect button for however long that scan
+    // takes, long enough to click through and overwrite the real key before its status arrives.
+    const mistralStatusDone = this.postMistralCloudSessionsStatusEarly(panel);
+
     const backendStorageInfo = await this.getBackendStorageInfo();
     this.log(
       `Backend storage info retrieved: azure.enabled=${backendStorageInfo.azure?.enabled}, azure.configured=${backendStorageInfo.azure?.isConfigured}, teamServer.enabled=${backendStorageInfo.teamServer?.enabled}, teamServer.configured=${backendStorageInfo.teamServer?.isConfigured}`,
@@ -12447,7 +13344,113 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         githubAuth: githubAuthStatus,
       });
     }
+    await mistralStatusDone;
     return { backendStorageInfo, githubAuthStatus };
+  }
+
+  /**
+   * BETA: reads the Mistral SecretStorage status and posts it (plus any cached-listing
+   * rehydration) as soon as it resolves — decoupled from getBackendStorageInfo()'s session
+   * discovery so it isn't held back by an unrelated, potentially slow scan. Generation-guarded
+   * (see getFreshMistralCloudSessionsStatus) so a set/clear landing while this read is in flight
+   * can't win a race against that handler's own, more current, status message.
+   */
+  private async postMistralCloudSessionsStatusEarly(panel: vscode.WebviewPanel): Promise<void> {
+    const mistralCloudSessionsStatus = await this.getFreshMistralCloudSessionsStatus();
+    if (!this.isMistralPanelAlive(panel)) { return; }
+    if (!mistralCloudSessionsStatus) {
+      // A synthesized `apiKeyConfigured: false` would render Connect over a key that may still be
+      // there, so the key status itself stays unknown — but the read failure must still reach the
+      // webview (rather than being dropped entirely) so it can offer a retry, since neither button
+      // renders while the status is unknown and a persistently failing read would otherwise leave
+      // the tab permanently stuck on "Checking…" with no way to recover.
+      panel.webview.postMessage({ command: "mistralCloudSessionsStatusCheckFailed" });
+      return;
+    }
+    if (!mistralCloudSessionsStatus.apiKeyConfigured) {
+      // A status read observing the key has disappeared (e.g. removed in another VS Code window)
+      // only reports that to the webview — it doesn't by itself stop an existing collection still
+      // running under the now-removed key, which would otherwise keep sending that credential and
+      // issuing paginated requests in the background regardless of what this window now shows.
+      this.abortInFlightMistralCloudSessionsFetch();
+    }
+    panel.webview.postMessage({ command: "mistralCloudSessionsStatus", mistralCloudSessionsStatus });
+    if (mistralCloudSessionsStatus.apiKeyConfigured) {
+      await this.rehydrateOrInvalidateMistralCloudSessionsCache(panel);
+    }
+  }
+
+  /**
+   * BETA: rehydrates a previously fetched conversation listing (kept in memory across panel
+   * close/reopen within the same extension host session) so it doesn't disappear until the user
+   * clicks Refresh again — or invalidates it if it no longer belongs to the currently configured
+   * key. `apiKeyConfigured` alone can't tell "still the same key" from "a different key that also
+   * happens to be configured" (e.g. changed in another VS Code window, whose own generation
+   * counter this window never sees), so this also verifies the cached listing's key fingerprint
+   * before rehydrating. Called both right after an early/status read reports a key configured, and
+   * again at the tail of the full diagnostics pipeline (see loadDiagnosticDataInBackground) —
+   * that pipeline can take a while, during which the key can change in another window without
+   * this window's own generation counter ever seeing it.
+   *
+   * Returns `false` when this reconciliation discovers the key was genuinely removed (having
+   * already posted the corrective status itself), `undefined` otherwise — callers that captured
+   * an `apiKeyConfigured: true` status snapshot *before* awaiting this method (which doesn't bump
+   * `_mistralCloudRefreshGeneration` itself on this path, only on a genuinely concurrent set/clear)
+   * need this to override that now-stale snapshot in whatever they send next, rather than letting
+   * it silently resurrect a configured state the webview was just told is gone.
+   */
+  private async rehydrateOrInvalidateMistralCloudSessionsCache(panel: vscode.WebviewPanel): Promise<boolean | undefined> {
+    // Also run this reconciliation when a fetch is still in flight but nothing has completed yet —
+    // otherwise the very first refresh in this window (no cached result to compare against) can
+    // keep sending a since-superseded key (changed in another VS Code window) for up to the full
+    // fetch timeout before the in-flight request's own post-fetch key check would notice.
+    if (!this._lastMistralCloudSessions && !this._mistralCloudInFlightKeyFingerprint) { return; }
+    const generationBeforeFingerprintCheck = this._mistralCloudRefreshGeneration;
+    const currentKeyFingerprint = await this.getCurrentMistralApiKeyFingerprint();
+    if (this._mistralCloudRefreshGeneration !== generationBeforeFingerprintCheck) {
+      // Superseded by a concurrent set/clear while this read was in flight — that handler
+      // already posted its own authoritative message; don't risk resurrecting stale data
+      // on top of it.
+      return;
+    }
+    if (!this.isMistralPanelAlive(panel)) { return; }
+    if (currentKeyFingerprint.readFailed) {
+      // A transient SecretStorage read failure is not evidence the key changed — clearing the
+      // cache or aborting an active fetch here would expose an unwarranted "no key configured" /
+      // Connect state over a key that may still be there. Leave everything alone.
+      return;
+    }
+    if (this._mistralCloudInFlightKeyFingerprint && this._mistralCloudInFlightKeyFingerprint !== currentKeyFingerprint.fingerprint) {
+      // An active fetch is still running under a key that is no longer the configured one (e.g.
+      // replaced in another VS Code window whose own generation counter this window never sees) —
+      // stop it instead of letting it keep paginating under a stale credential until it settles.
+      this.abortInFlightMistralCloudSessionsFetch();
+    }
+    if (!this._lastMistralCloudSessions) { return; }
+    if (currentKeyFingerprint.fingerprint && currentKeyFingerprint.fingerprint === this._lastMistralCloudSessionsKeyFingerprint) {
+      panel.webview.postMessage({ command: "mistralCloudSessionsResult", result: this._lastMistralCloudSessions });
+      return;
+    }
+    this._lastMistralCloudSessions = undefined;
+    this._lastMistralCloudSessionsKeyFingerprint = undefined;
+    if (!currentKeyFingerprint.fingerprint) {
+      // The key was genuinely removed (not just replaced by a different one) — the status message
+      // this reconciliation's callers already sent (postMistralCloudSessionsStatusEarly's earlier
+      // snapshot, or the final diagnosticDataLoaded assembly's) predates this observation and still
+      // says `apiKeyConfigured: true`. Post the corrected status so the webview drops to Connect
+      // instead of being left believing a key is configured when it no longer is; this also clears
+      // the cached conversations client-side (see handleMistralCloudSessionsStatus).
+      panel.webview.postMessage({ command: "mistralCloudSessionsStatus", mistralCloudSessionsStatus: { apiKeyConfigured: false } });
+      return false;
+    }
+    // The webview may already be showing this stale listing from an earlier message (e.g. a
+    // previous panel-open rehydration) — explicitly clear the display instead of leaving it until
+    // manual Refresh. This is a distinct message from `mistralCloudSessionsResult`, not an empty
+    // result: the status message alongside this still (correctly) reports a key configured — just
+    // a different one — and `mistralCloudSessionsResult`'s own "empty, no error" shape is what the
+    // webview reads as "no key configured" for a genuine unconfigured result; reusing it here would
+    // flip the tab to Connect over a key that is, in fact, still configured.
+    panel.webview.postMessage({ command: "mistralCloudSessionsCacheInvalidated" });
   }
 
   /**
@@ -12473,7 +13476,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         this.log("✅ Cache populated, proceeding with diagnostics load");
       }
 
-      if (!this.lastUsageAnalysisStats) {
+      if (!this.currentUsageAnalysisStats) {
         this.log("⚡ No usage analysis stats cached - computing for tool analysis tab...");
         await this.calculateUsageAnalysisStats(false);
         this.log("✅ Usage analysis stats computed");
@@ -12498,6 +13501,11 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       this.log(
         `Sending backend info to webview: ${backendStorageInfo ? "present" : "missing"}`,
       );
+      // Re-read (generation-guarded, see getFreshMistralCloudSessionsStatus) rather than reuse the
+      // value captured at the top of this method: the pipeline above can take a while, during
+      // which the key may have been connected or removed, and a stale snapshot here would
+      // overwrite that already-live state with an outdated one.
+      const mistralStatusField = await this.getMistralCloudSessionsStatusMessageField(panel);
       panel.webview.postMessage({
         command: "diagnosticDataLoaded",
         report,
@@ -12506,12 +13514,13 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         candidatePaths,
         backendStorageInfo,
         githubAuth: githubAuthStatus,
-        toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
-        skillCallStats: this.lastUsageAnalysisStats?.last30Days?.skillCalls ?? null,
+        toolCallStats: this.currentUsageAnalysisStats?.last30Days?.toolCalls ?? null,
+        skillCallStats: this.currentUsageAnalysisStats?.last30Days?.skillCalls ?? null,
         skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
         skillDescriptions: this._buildSkillDescriptions(),
         toolFamilies: getToolFamilies(),
         otelComparison,
+        ...mistralStatusField,
       });
 
       this.log("✅ Diagnostic data loaded and sent to webview");
@@ -12578,6 +13587,19 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    */
   private isPanelOpen(panel: vscode.WebviewPanel): boolean {
     return panel.viewColumn !== undefined;
+  }
+
+  /**
+   * BETA: true while `this.diagnosticsPanel` still refers to this exact panel — i.e. it has not
+   * been disposed (onDidDispose clears the field) — regardless of whether it's currently the
+   * visible/active tab. Deliberately laxer than isPanelOpen(), which also reads false while the
+   * panel is merely hidden (the right check for gating expensive background work): the diagnostics
+   * panel sets `retainContextWhenHidden: true`, so a hidden-but-alive webview keeps its in-flight
+   * Mistral state and must still receive terminal status/result messages, or it can get stuck
+   * showing a stale "Checking…"/disabled-button state once revealed again.
+   */
+  private isMistralPanelAlive(panel: vscode.WebviewPanel): boolean {
+    return this.diagnosticsPanel === panel;
   }
 
   /**
@@ -13005,8 +14027,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       backendConfigured: this.isBackendConfigured(), isDebugMode, globalStateCounters,
       displaySettings: { showTokens: this.getStatusBarShowTokensSetting(), showCost: this.getStatusBarShowCostSetting(), monthlyBudget: this.getMonthlyBudgetSetting() },
       quotaEntitlements: this._copilotQuotaEntitlements,
-      toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
-      skillCallStats: this.lastUsageAnalysisStats?.last30Days?.skillCalls ?? null,
+      toolCallStats: this.currentUsageAnalysisStats?.last30Days?.toolCalls ?? null,
+      skillCallStats: this.currentUsageAnalysisStats?.last30Days?.skillCalls ?? null,
       skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
       skillDescriptions: this._buildSkillDescriptions(),
       toolFamilies: getToolFamilies(),
