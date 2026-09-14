@@ -874,14 +874,22 @@ test('wiring: a failed Efficiency build does not leave its generation marked sat
 	// That assumes the build publishes; if it throws, the panel sits on its error/fallback state
 	// and the stamp would coalesce away every later request for the same generation.
 	assert.ok(
-		EXTENSION_SRC.includes('private releaseEfficiencyRebuildRequest(): void {')
+		EXTENSION_SRC.includes('private releaseEfficiencyRebuildRequest(failedAtGeneration: number): void {')
 		&& EXTENSION_SRC.includes('this._efficiencyRebuildRequestedFor = undefined;'),
 		'a failed build must be able to release the rebuild stamp',
 	);
+	// And release only the stamp it owns, exactly as clearInFlightRefresh() deregisters only its
+	// own run. An unconditional clear lets a stale build's failure erase a stamp a newer
+	// invalidation already set, and the next request for that newer generation queues a duplicate
+	// full-year walk once the replacement build has started and the queued count is back to zero.
+	assert.ok(
+		EXTENSION_SRC.includes('if (this._efficiencyRebuildRequestedFor !== failedAtGeneration) { return; }'),
+		'releaseEfficiencyRebuildRequest() must only release the stamp its own generation set',
+	);
 	assert.equal(
-		EXTENSION_SRC.split('this.releaseEfficiencyRebuildRequest();').length - 1,
+		EXTENSION_SRC.split('this.releaseEfficiencyRebuildRequest(generation);').length - 1,
 		2,
-		'both Efficiency build paths must release the stamp when their build throws',
+		'both Efficiency build paths must release the stamp, for the generation their build ran at',
 	);
 	for (const [errorLog, until] of [
 		["this.error('Error building Efficiency view:', error);", '\n\tprivate async refreshEfficiencyPanel('],
@@ -890,7 +898,10 @@ test('wiring: a failed Efficiency build does not leave its generation marked sat
 		const at = EXTENSION_SRC.indexOf(errorLog);
 		assert.ok(at !== -1, `missing catch block: ${errorLog}`);
 		const rest = EXTENSION_SRC.slice(at, EXTENSION_SRC.indexOf(until, at));
-		assert.ok(rest.includes('this.releaseEfficiencyRebuildRequest();'), `${errorLog} must release the stamp`);
+		assert.ok(
+			rest.includes('this.releaseEfficiencyRebuildRequest(generation);'),
+			`${errorLog} must release the stamp for its own build's generation`,
+		);
 	}
 	// And only a payload that was actually recorded may mark its generation built.
 	assert.ok(

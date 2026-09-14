@@ -2937,8 +2937,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * on its error or fallback state and the stamp would keep every later request for that same
 	 * generation coalescing into nothing. Clearing it re-opens the retry without auto-retrying,
 	 * which could loop on a build that fails every time.
+	 *
+	 * Identity-checked on the failed build's own generation, exactly as clearInFlightRefresh() is
+	 * on its run. An unconditional clear lets a *stale* build's failure erase a stamp a newer
+	 * invalidation has already set — and once that newer replacement starts, dropping the queued
+	 * count to zero, the next automatic request queues a duplicate full-year walk.
 	 */
-	private releaseEfficiencyRebuildRequest(): void {
+	private releaseEfficiencyRebuildRequest(failedAtGeneration: number): void {
+		if (this._efficiencyRebuildRequestedFor !== failedAtGeneration) { return; }
 		this._efficiencyRebuildRequestedFor = undefined;
 	}
 
@@ -10780,7 +10786,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				this.log('⚡ Efficiency view rendered');
 			} catch (error) {
 				this.error('Error building Efficiency view:', error);
-				this.releaseEfficiencyRebuildRequest();
+				this.releaseEfficiencyRebuildRequest(generation);
 				this.showEfficiencyError(panel, error);
 			}
 		})();
@@ -10827,7 +10833,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			// Never strand the panel on the loading screen: fall back to the last good payload,
 			// which the initial build records even when its own render was skipped.
 			this.error('Error refreshing Efficiency view:', error);
-			this.releaseEfficiencyRebuildRequest();
+			this.releaseEfficiencyRebuildRequest(generation);
 			const previous = this._lastEfficiencyViewData;
 			if (this.efficiencyPanel !== panel) { return; }
 			if (previous) { panel.webview.html = this.getEfficiencyHtml(panel.webview, previous); }
