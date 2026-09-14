@@ -1462,6 +1462,60 @@ export interface ToolCurationAnalysis {
   recommendations: ToolCurationRecommendation[];
 }
 
+// ---------------------------------------------------------------------------
+// Copilot Memory Files
+// ---------------------------------------------------------------------------
+
+/** A single Copilot agent memory Markdown file discovered on disk. */
+export interface MemoryFileEntry {
+  /** Absolute path to the memory `.md` file. */
+  path: string;
+  /** Scope this file belongs to — see docs/features/COPILOT-MEMORY-FILES-INSIGHT.md. */
+  scope: 'user' | 'repo' | 'session';
+  /** The `workspaceStorage/<hash>` this file was discovered under. Undefined for `scope === 'user'`. */
+  workspaceHash?: string;
+  /** Resolved friendly workspace folder path, when recorded in `workspace.json`/`meta.json`. */
+  workspaceName?: string;
+  /** Decoded chat-session UUID when `scope === 'session'` (the folder name is `base64(sessionId)`). */
+  sessionId?: string;
+  /** File size in bytes. */
+  sizeBytes: number;
+  /** Last-modified time, in milliseconds since epoch. */
+  mtimeMs: number;
+  /** File name without extension, used as a display title (content is never read beyond this). */
+  title: string;
+}
+
+/** Per-workspace rollup of discovered memory files, used by `MemoryFilesAnalysis.byWorkspace`. */
+export interface MemoryFilesWorkspaceSummary {
+  workspaceHash?: string;
+  workspaceName?: string;
+  repoCount: number;
+  sessionCount: number;
+  totalBytes: number;
+  newestMtimeMs: number | null;
+  oldestMtimeMs: number | null;
+  largestFile?: MemoryFileEntry;
+  /** Files older than the analysis's `staleDays` threshold. */
+  staleFiles: MemoryFileEntry[];
+}
+
+/** Full result of a Copilot memory-files hygiene analysis run. */
+export interface MemoryFilesAnalysis {
+  /** Look-back threshold (days) used to flag a file as stale. */
+  staleDays: number;
+  /** Size threshold (bytes) used to flag a file as unusually large. */
+  largeFileBytes: number;
+  /** Every discovered memory file (metadata only — content is never included). */
+  files: MemoryFileEntry[];
+  /** Rollup grouped by workspace (and one entry for the `user` global scope). */
+  byWorkspace: MemoryFilesWorkspaceSummary[];
+  totalFiles: number;
+  totalBytes: number;
+  staleFileCount: number;
+  largeFileCount: number;
+}
+
 /**
  * One conversation returned by Mistral's (beta) Agents `/v1/conversations` listing.
  * The Mistral Agents/Conversations API is in beta — fields are best-effort and may change.

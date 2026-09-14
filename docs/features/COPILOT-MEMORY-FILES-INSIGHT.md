@@ -1,6 +1,9 @@
-# Copilot Memory Files Insight (Proposal)
+# Copilot Memory Files Insight
 
-Status: **Draft / not implemented**
+Status: **Partially implemented** — shared analysis module, VS Code insight card,
+and CLI command are done; wiring the analysis into `extension.ts`'s stats
+pipeline (so the insight card and a dedicated tab actually populate in the
+running extension) is the remaining follow-up.
 
 ## Background
 
@@ -39,14 +42,15 @@ no `globalStorage` (user-scope) memories were present.
 
 ## Reusable code in this repo
 
-`vscode-extension/src/backend/services/utilityService.ts` already:
-- `extractWorkspaceIdFromSessionPath()` — pulls the `<hash>` out of any path
-  under `workspaceStorage/<hash>/...`.
-- `tryResolveWorkspaceNameFromSessionPath()` — reads that hash's
-  `workspace.json`/`meta.json` to recover the real folder path.
+`src/workspaceHelpers.ts` (shared, not VS Code-specific) already exposes
+`parseWorkspaceStorageJsonFile()`, which reads a `workspace.json`/`meta.json`
+file and extracts the real workspace folder path from its candidate keys.
+`copilotMemoryFiles.ts` reuses this directly to resolve a `workspaceStorage/<hash>`
+back to a friendly folder name, instead of re-implementing the JSON parsing.
 
-Both can be reused as-is to map a memory file's hash back to a friendly
-workspace name, avoiding re-implementing memowl's hash-mapping logic.
+`src/adapters/copilotChatAdapter.ts` also already exposes `getVSCodeUserPaths()`,
+which enumerates every VS Code variant's "User" root across Windows/macOS/Linux
+(including WSL) — reused as the default scan scope for `discoverAllMemoryFiles()`.
 
 ## Proposed insight: "Memory Files"
 
@@ -79,6 +83,25 @@ signal, not to duplicate memowl's read/manage UI.
 
 ## Next step
 
-Get sign-off on scope/questions above, then implement as a small, isolated
-module (mirroring `utilityService.ts` conventions) with unit tests using a
-temporary fixture directory tree — no reliance on real user data in tests.
+The shared module (`src/copilotMemoryFiles.ts`), its unit tests, the
+`stale-memory-files` insight card in `insightsEngine.ts`, and the CLI's
+`memory-files` command are implemented (see below). What's left is plumbing
+`discoverAllMemoryFiles()` + `analyzeMemoryFiles()` into `extension.ts`'s
+stats-collection pipeline (mirroring `computeCurationAnalysis`) and adding a
+UI surface — get sign-off on the open questions above before that lands, since
+it touches the already-oversized `extension.ts` and the webview.
+
+## What's implemented
+
+| Piece | Location |
+|---|---|
+| Discovery + analysis (pure, shared) | `src/copilotMemoryFiles.ts` — `discoverAllMemoryFiles()`, `discoverMemoryFilesInUserPath()`, `analyzeMemoryFiles()`, `decodeSessionFolderName()` |
+| Types | `src/types.ts` — `MemoryFileEntry`, `MemoryFilesWorkspaceSummary`, `MemoryFilesAnalysis` |
+| Unit tests | `vscode-extension/test/unit/copilotMemoryFiles.test.ts` |
+| Insight card | `vscode-extension/src/insightsEngine.ts` — id `stale-memory-files`, fires when `InsightContext.memoryFilesAnalysis` has stale or oversized files; tests in `insightsEngine.test.ts` |
+| CLI command | `cli/src/commands/memory-files.ts` — `copilot-token-tracker memory-files [--json] [--stale-days] [--large-kb]`, registered in `cli/src/cli.ts` |
+
+The CLI command scans this machine's real `workspaceStorage`/`globalStorage`
+folders (no fixtures needed) and was manually verified against the memory
+files already present on this machine.
+
