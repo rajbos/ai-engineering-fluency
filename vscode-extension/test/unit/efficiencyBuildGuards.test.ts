@@ -438,3 +438,26 @@ test('wiring: a Usage Analysis refresh does not invalidate the daily or full-yea
 	);
 	assert.ok(lastRead !== -1 && lastRead < bumpAt, 'the was-current reads must be taken before the bump');
 });
+
+test('wiring: an explicit refresh always re-scans memory files, even within the TTL', () => {
+	// computeMemoryFilesAnalysis() throttles its filesystem walk to once per
+	// MEMORY_FILES_SCAN_TTL_MS and reuses the cached result in between — but a user who presses
+	// Refresh (or clears the cache) is explicitly asking for current data, so both paths must
+	// reset the scan timestamp rather than silently serving a within-TTL result that ignores
+	// files added or deleted since the last scan.
+	for (const [fnSignature, label] of [
+		['private async refreshAnalysisPanel()', 'refreshAnalysisPanel()'],
+		['public async clearCache()', 'clearCache()'],
+	] as const) {
+		const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf(fnSignature));
+		const nextPrivate = body.indexOf('\n\tprivate ', 1);
+		const nextPublic = body.indexOf('\n\tpublic ', 1);
+		const candidates = [nextPrivate, nextPublic].filter(i => i !== -1);
+		const end = candidates.length > 0 ? Math.min(...candidates) : body.length;
+		const fn = body.slice(0, end);
+		assert.ok(
+			fn.includes('this._memoryFilesAnalysisScannedAt = undefined;'),
+			`${label} must reset _memoryFilesAnalysisScannedAt so the next recompute forces a fresh memory-files scan`,
+		);
+	}
+});

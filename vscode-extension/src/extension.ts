@@ -928,7 +928,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private lastUsageAnalysisStats: UsageAnalysisStats | undefined;
 	/** Cached result of the last memory-files filesystem scan, reused across recomputes within {@link MEMORY_FILES_SCAN_TTL_MS}. */
 	private _memoryFilesAnalysisCache: MemoryFilesAnalysis | null | undefined;
-	/** Wall-clock time (ms) of the last memory-files scan, used to throttle repeated `readdirSync`/`statSync` walks. */
+	/**
+	 * Wall-clock time (ms) of the last memory-files scan, used to throttle repeated
+	 * `readdirSync`/`statSync` walks. Reset to `undefined` by `refreshAnalysisPanel()` and
+	 * `clearCache()` so an explicit refresh always re-scans rather than serving a
+	 * within-TTL result the user is specifically asking to update.
+	 */
 	private _memoryFilesAnalysisScannedAt: number | undefined;
 	private lastDashboardData: any | undefined;
 	/** Insight engine: persisted state for all surfaced insights. */
@@ -1785,6 +1790,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.lastDashboardData = undefined;
 			this.lastEfficiencySessionInputs = undefined;
 			this._lastEfficiencyViewData = undefined;
+			this._memoryFilesAnalysisScannedAt = undefined;
 			this._cacheGeneration++;
 
 			// Delete the on-disk snapshot so it isn't reloaded after restart.
@@ -9813,6 +9819,10 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		// the cached stats so loadAnalysisStatsInBackground performs a full recalculation.
 		void this.analysisPanel.webview.postMessage({ command: 'usageRefreshing' });
 		this.lastUsageAnalysisStats = undefined;
+		// An explicit refresh should re-scan memory files too, even if the last scan is
+		// still within its TTL: the user is asking for current data, so a stale cache here
+		// would silently ignore files added/removed since the last scan.
+		this._memoryFilesAnalysisScannedAt = undefined;
 		// An Efficiency build spanning this refresh was built on the stats just discarded, so
 		// bump the generation to stop its result being recorded. Deliberately *not* clearing
 		// `_lastEfficiencyViewData` as clearCache() does: this leaves the session cache
