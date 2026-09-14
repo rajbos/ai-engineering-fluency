@@ -5,6 +5,8 @@ import {
 	tooltipSecondaryPeriod,
 	formatTooltipStatsTable,
 	computeCopilotBudgetDisplay,
+	buildCopilotBudgetSubRowLabels,
+	TOOLTIP_COLUMN_GUTTER,
 	type StatusBarDisplaySetting
 } from '../../src/extension';
 import type { DetailedStats, PeriodStats } from '../../../src/types';
@@ -78,33 +80,36 @@ test('formatTooltipStatsTable renders 3 columns: Today, Current Month, and Last 
 
 	const markdown = formatTooltipStatsTable(stats);
 
-	// Check table header and 4-column alignment
-	assert.ok(markdown.includes('|  | 📅 Today | 📊 Current Month | 📈 Last 30 Days |'));
+	// Check table header and 4-column alignment. The gutter rides on the header cells too, so
+	// each header and its values agree on one column width instead of the values alone being
+	// padded (which left the header labels butting up against the next column).
+	const g = TOOLTIP_COLUMN_GUTTER;
+	assert.ok(markdown.includes(`| ${g} | 📅 Today${g} | 📊 Current Month${g} | 📈 Last 30 Days |`));
 	assert.ok(markdown.includes('|:---|:---|:---|:---|'));
 
 	// Check Tokens row
 	const tToday = (44042172).toLocaleString();
 	const tMonth = (656117347).toLocaleString();
 	const t30Days = (712000000).toLocaleString();
-	assert.ok(markdown.includes(`| Tokens : | ${tToday}&nbsp;&nbsp;&nbsp;&nbsp; | ${tMonth}&nbsp;&nbsp;&nbsp;&nbsp; | ${t30Days} |`));
+	assert.ok(markdown.includes(`| Tokens :${g} | ${tToday}${g} | ${tMonth}${g} | ${t30Days} |`));
 
 	// Check GitHub Copilot cost row
-	assert.ok(markdown.includes('| GitHub Copilot cost : | $ 20.54&nbsp;&nbsp;&nbsp;&nbsp; | $ 221.94&nbsp;&nbsp;&nbsp;&nbsp; | $ 245.50 |'));
+	assert.ok(markdown.includes(`| GitHub Copilot cost :${g} | $ 20.54${g} | $ 221.94${g} | $ 245.50 |`));
 
 	// Check All providers cost row (summed)
-	assert.ok(markdown.includes('| All providers cost : | $ 40.39&nbsp;&nbsp;&nbsp;&nbsp; | $ 286.81&nbsp;&nbsp;&nbsp;&nbsp; | $ 315.50 |'));
+	assert.ok(markdown.includes(`| All providers cost :${g} | $ 40.39${g} | $ 286.81${g} | $ 315.50 |`));
 
 	// Check CO2 estimated row (>= 1000 hides decimals)
 	const co2Today = formatExpectedUsage(8808, 2, 'grams');
 	const co2Month = formatExpectedUsage(131223, 2, 'grams');
 	const co230Days = formatExpectedUsage(142000, 2, 'grams');
-	assert.ok(markdown.includes(`| CO₂ estimated : | ${co2Today}&nbsp;&nbsp;&nbsp;&nbsp; | ${co2Month}&nbsp;&nbsp;&nbsp;&nbsp; | ${co230Days} |`));
+	assert.ok(markdown.includes(`| CO₂ estimated :${g} | ${co2Today}${g} | ${co2Month}${g} | ${co230Days} |`));
 
 	// Check Water estimated row (>= 1000 hides decimals)
 	const waterToday = formatExpectedUsage(13213, 3, 'liters');
 	const waterMonth = formatExpectedUsage(196835, 3, 'liters');
 	const water30Days = formatExpectedUsage(213000, 3, 'liters');
-	assert.ok(markdown.includes(`| Water estimated : | ${waterToday}&nbsp;&nbsp;&nbsp;&nbsp; | ${waterMonth}&nbsp;&nbsp;&nbsp;&nbsp; | ${water30Days} |`));
+	assert.ok(markdown.includes(`| Water estimated :${g} | ${waterToday}${g} | ${waterMonth}${g} | ${water30Days} |`));
 });
 
 test('formatTooltipStatsTable formats small CO2 and water values with decimals', () => {
@@ -115,16 +120,17 @@ test('formatTooltipStatsTable formats small CO2 and water values with decimals',
 	});
 
 	const markdown = formatTooltipStatsTable(stats);
+	const g = TOOLTIP_COLUMN_GUTTER;
 
 	const co2Today = formatExpectedUsage(12.345, 2, 'grams');
 	const co2Month = formatExpectedUsage(99.5, 2, 'grams');
 	const co230Days = formatExpectedUsage(150.25, 2, 'grams');
-	assert.ok(markdown.includes(`| CO₂ estimated : | ${co2Today}&nbsp;&nbsp;&nbsp;&nbsp; | ${co2Month}&nbsp;&nbsp;&nbsp;&nbsp; | ${co230Days} |`));
+	assert.ok(markdown.includes(`| CO₂ estimated :${g} | ${co2Today}${g} | ${co2Month}${g} | ${co230Days} |`));
 
 	const waterToday = formatExpectedUsage(0.123, 3, 'liters');
 	const waterMonth = formatExpectedUsage(5.678, 3, 'liters');
 	const water30Days = formatExpectedUsage(12.345, 3, 'liters');
-	assert.ok(markdown.includes(`| Water estimated : | ${waterToday}&nbsp;&nbsp;&nbsp;&nbsp; | ${waterMonth}&nbsp;&nbsp;&nbsp;&nbsp; | ${water30Days} |`));
+	assert.ok(markdown.includes(`| Water estimated :${g} | ${waterToday}${g} | ${waterMonth}${g} | ${water30Days} |`));
 });
 
 test('formatTooltipStatsTable hides decimals when value rounds to 1000+', () => {
@@ -135,16 +141,17 @@ test('formatTooltipStatsTable hides decimals when value rounds to 1000+', () => 
 	});
 
 	const markdown = formatTooltipStatsTable(stats);
+	const g = TOOLTIP_COLUMN_GUTTER;
 
 	const co2Today = formatExpectedUsage(999.996, 2, 'grams');
 	const co2Month = formatExpectedUsage(1000, 2, 'grams');
 	const co230Days = formatExpectedUsage(1001, 2, 'grams');
-	assert.ok(markdown.includes(`| CO₂ estimated : | ${co2Today}&nbsp;&nbsp;&nbsp;&nbsp; | ${co2Month}&nbsp;&nbsp;&nbsp;&nbsp; | ${co230Days} |`));
+	assert.ok(markdown.includes(`| CO₂ estimated :${g} | ${co2Today}${g} | ${co2Month}${g} | ${co230Days} |`));
 
 	const waterToday = formatExpectedUsage(999.9996, 3, 'liters');
 	const waterMonth = formatExpectedUsage(1000, 3, 'liters');
 	const water30Days = formatExpectedUsage(1001, 3, 'liters');
-	assert.ok(markdown.includes(`| Water estimated : | ${waterToday}&nbsp;&nbsp;&nbsp;&nbsp; | ${waterMonth}&nbsp;&nbsp;&nbsp;&nbsp; | ${water30Days} |`));
+	assert.ok(markdown.includes(`| Water estimated :${g} | ${waterToday}${g} | ${waterMonth}${g} | ${water30Days} |`));
 });
 
 test('tooltipSecondaryPeriod: default both/none shows last30days', () => {
@@ -232,4 +239,30 @@ test('computeCopilotBudgetDisplay: over budget yields a negative remaining', () 
 	const result = computeCopilotBudgetDisplay(750, 800, 812.34);
 	assert.ok(Math.abs(result.gapUsd - 62.34) < 1e-9);
 	assert.ok(Math.abs(result.remaining - -12.34) < 1e-9);
+});
+
+// The Copilot Budget gauge row got too wide to fit the hover popup on one line, so the figures
+// that used to share it are now one short sub-row each: remaining budget moved off the gauge
+// row entirely, and the tracked/untracked pair no longer share a single run-on line.
+test('buildCopilotBudgetSubRowLabels: tracked, untracked and remaining each get their own line', () => {
+	assert.deepEqual(
+		buildCopilotBudgetSubRowLabels(668.74, 455.93, 125.33),
+		['$668.74 tracked here', '$125.33 untracked (other devices/cloud)', '$455.93 left'],
+	);
+});
+
+test('buildCopilotBudgetSubRowLabels: no gap leaves only the remaining-budget line', () => {
+	// With nothing untracked, "tracked here" would just restate the gauge row's own total.
+	assert.deepEqual(buildCopilotBudgetSubRowLabels(100, 700, 0), ['$700.00 left']);
+});
+
+test('buildCopilotBudgetSubRowLabels: a sub-cent gap is not worth a split', () => {
+	assert.deepEqual(buildCopilotBudgetSubRowLabels(100, 699.99, 0.004), ['$699.99 left']);
+});
+
+test('buildCopilotBudgetSubRowLabels: overspending reads as "over", not a negative "left"', () => {
+	assert.deepEqual(
+		buildCopilotBudgetSubRowLabels(750, -12.34, 62.34),
+		['$750.00 tracked here', '$62.34 untracked (other devices/cloud)', '$12.34 over'],
+	);
 });

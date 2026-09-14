@@ -689,15 +689,14 @@ test('l10n: Efficiency Models tab control labels resolve in English and zh-cn', 
 test('l10n: Copilot Budget gauge keys resolve in English', () => {
 	// Back the "🎯 Copilot Budget" tooltip row, which folds untracked (other
 	// devices/cloud) usage into the headline total so it agrees with the bar's
-	// percentage, plus states remaining budget explicitly. A missing key would
-	// put a raw key like `tooltip.budgetRemaining` in the hover tooltip.
+	// percentage, plus its sub-rows: the tracked/untracked split on one line each
+	// and remaining budget on its own. A missing key would put a raw key like
+	// `tooltip.budgetRemaining` in the hover tooltip.
 	assert.equal(t('tooltip.copilotBudgetLabel'), 'Copilot Budget');
 	assert.equal(t('tooltip.budgetRemaining', '$40.79'), '$40.79 left');
 	assert.equal(t('tooltip.budgetOverBy', '$12.34'), '$12.34 over');
-	assert.equal(
-		t('tooltip.budgetTrackedVsUntracked', '$556.61', '$202.60'),
-		'$556.61 tracked here + $202.60 untracked (other devices/cloud)',
-	);
+	assert.equal(t('tooltip.budgetTrackedHere', '$556.61'), '$556.61 tracked here');
+	assert.equal(t('tooltip.budgetUntracked', '$202.60'), '$202.60 untracked (other devices/cloud)');
 });
 
 test('l10n: Copilot Budget gauge keys resolve in zh-cn', () => {
@@ -706,10 +705,8 @@ test('l10n: Copilot Budget gauge keys resolve in zh-cn', () => {
 		assert.equal(t('tooltip.copilotBudgetLabel'), 'Copilot 预算');
 		assert.equal(t('tooltip.budgetRemaining', '$40.79'), '剩余 $40.79');
 		assert.equal(t('tooltip.budgetOverBy', '$12.34'), '超出 $12.34');
-		assert.equal(
-			t('tooltip.budgetTrackedVsUntracked', '$556.61', '$202.60'),
-			'本设备跟踪 $556.61 + 未跟踪(其他设备/云端) $202.60',
-		);
+		assert.equal(t('tooltip.budgetTrackedHere', '$556.61'), '本设备跟踪 $556.61');
+		assert.equal(t('tooltip.budgetUntracked', '$202.60'), '未跟踪(其他设备/云端) $202.60');
 	} finally {
 		mock.setLanguage('en');
 	}

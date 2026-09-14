@@ -592,8 +592,8 @@ export function webviewDocumentLanguage(vscodeLanguage: string | undefined): str
  * (locally-tracked usage plus any usage the Copilot API reports that this device has no
  * local session data for) and how much budget remains. Folding the untracked gap into the
  * headline total keeps the "$X / $Y" figure consistent with the bar's percentage, so a
- * reader doesn't have to read a second row and subtract to find out how much budget is
- * actually left.
+ * reader doesn't have to subtract the untracked sub-row themselves to find out how much
+ * budget is actually left — that figure is rendered as its own sub-row.
  */
 export function computeCopilotBudgetDisplay(
 	copilotCost: number,
@@ -609,6 +609,37 @@ export function computeCopilotBudgetDisplay(
 }
 
 /**
+ * Labels for the indented sub-rows rendered under the "🎯 Copilot Budget" gauge row, in order.
+ *
+ * Each figure gets its own short line rather than being crammed into one: the tracked and
+ * untracked amounts used to share a single "$X tracked here + $Y untracked (other
+ * devices/cloud)" row that wrapped mid-parenthetical, and remaining budget used to be appended
+ * to the gauge row itself, where "$X / $Y · $Z left" pushed that row onto a second line too.
+ * Remaining budget is always listed; the tracked/untracked split only when there is a gap
+ * worth a cent to split.
+ */
+export function buildCopilotBudgetSubRowLabels(copilotCost: number, remaining: number, gapUsd: number): string[] {
+	const labels: string[] = [];
+	if (gapUsd > 0.005) {
+		labels.push(l10n.t('tooltip.budgetTrackedHere', `$${copilotCost.toFixed(2)}`));
+		labels.push(l10n.t('tooltip.budgetUntracked', `$${gapUsd.toFixed(2)}`));
+	}
+	labels.push(remaining >= 0
+		? l10n.t('tooltip.budgetRemaining', `$${remaining.toFixed(2)}`)
+		: l10n.t('tooltip.budgetOverBy', `$${Math.abs(remaining).toFixed(2)}`));
+	return labels;
+}
+
+/**
+ * Trailing spacer appended to every non-final cell of the hover tooltip's Markdown tables.
+ *
+ * VS Code renders tooltip Markdown without any stylesheet this extension can reach, so table
+ * cells sit flush against each other and columns of long numbers visually run together.
+ * Widening each cell with non-breaking spaces is the only column gutter available.
+ */
+export const TOOLTIP_COLUMN_GUTTER = '&nbsp;'.repeat(6);
+
+/**
  * Formats the main stats table in Markdown for the status bar hover tooltip.
  * Renders Today, Current Month, and Last 30 Days columns side by side.
  */
@@ -616,9 +647,11 @@ export function formatTooltipStatsTable(
 	detailedStats: DetailedStats,
 	sumCosts: (costs: Record<string, number> | undefined) => number = defaultSumBillingGroupCosts
 ): string {
-	// Trailing &nbsp; padding on "Today" and "Current Month" columns widens them a bit,
-	// giving the value columns visual breathing room without VS Code table cell CSS to lean on.
-	const pad = (cell: string) => `${cell}&nbsp;&nbsp;&nbsp;&nbsp;`;
+	// Gutter padding on every column but the last — the header row included, so a header and its
+	// values agree on one column width — keeps the three period columns from running together.
+	const pad = (cell: string) => `${cell}${TOOLTIP_COLUMN_GUTTER}`;
+	const row = (label: string, today: string, month: string, last30Days: string) =>
+		`| ${pad(label)} | ${pad(today)} | ${pad(month)} | ${last30Days} |\n`;
 	// Hide decimals once the rounded display value reaches 1000+ so large totals stay readable.
 	const formatUsageValue = (n: number, fractionDigits: number, unit: string) => {
 		const rounded = Math.round(n * (10 ** fractionDigits)) / (10 ** fractionDigits);
@@ -629,15 +662,19 @@ export function formatTooltipStatsTable(
 	};
 	const grams = (n: number) => formatUsageValue(n, 2, 'grams');
 	const liters = (n: number) => formatUsageValue(n, 3, 'liters');
+	const tokens = (period: PeriodStats) => period.tokens.toLocaleString();
+	const copilotCost = (period: PeriodStats) => `$ ${(period.estimatedCostCopilot ?? 0).toFixed(2)}`;
+	const allProvidersCost = (period: PeriodStats) => `$ ${sumCosts(period.billingGroupCosts).toFixed(2)}`;
+	const { today, month, last30Days } = detailedStats;
 
 	return (
-		`|  | 📅 ${l10n.t('tooltip.todayLabel')} | 📊 ${l10n.t('tooltip.currentMonthLabel')} | 📈 ${l10n.t('tooltip.last30DaysLabel')} |\n` +
+		row('', `📅 ${l10n.t('tooltip.todayLabel')}`, `📊 ${l10n.t('tooltip.currentMonthLabel')}`, `📈 ${l10n.t('tooltip.last30DaysLabel')}`) +
 		`|:---|:---|:---|:---|\n` +
-		`| ${l10n.t('tooltip.tokensLabel')} : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${pad(detailedStats.month.tokens.toLocaleString())} | ${detailedStats.last30Days.tokens.toLocaleString()} |\n` +
-		`| ${l10n.t('tooltip.copilotCostLabel')} : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | ${pad(`$ ${(detailedStats.month.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(detailedStats.last30Days.estimatedCostCopilot ?? 0).toFixed(2)} |\n` +
-		`| ${l10n.t('tooltip.allProvidersCostLabel')} : | ${pad(`$ ${sumCosts(detailedStats.today.billingGroupCosts).toFixed(2)}`)} | ${pad(`$ ${sumCosts(detailedStats.month.billingGroupCosts).toFixed(2)}`)} | $ ${sumCosts(detailedStats.last30Days.billingGroupCosts).toFixed(2)} |\n` +
-		`| ${l10n.t('tooltip.co2Label')} : | ${pad(grams(detailedStats.today.co2))} | ${pad(grams(detailedStats.month.co2))} | ${grams(detailedStats.last30Days.co2)} |\n` +
-		`| ${l10n.t('tooltip.waterLabel')} : | ${pad(liters(detailedStats.today.waterUsage))} | ${pad(liters(detailedStats.month.waterUsage))} | ${liters(detailedStats.last30Days.waterUsage)} |\n`
+		row(`${l10n.t('tooltip.tokensLabel')} :`, tokens(today), tokens(month), tokens(last30Days)) +
+		row(`${l10n.t('tooltip.copilotCostLabel')} :`, copilotCost(today), copilotCost(month), copilotCost(last30Days)) +
+		row(`${l10n.t('tooltip.allProvidersCostLabel')} :`, allProvidersCost(today), allProvidersCost(month), allProvidersCost(last30Days)) +
+		row(`${l10n.t('tooltip.co2Label')} :`, grams(today.co2), grams(month.co2), grams(last30Days.co2)) +
+		row(`${l10n.t('tooltip.waterLabel')} :`, liters(today.waterUsage), liters(month.waterUsage), liters(last30Days.waterUsage))
 	);
 }
 
@@ -4767,8 +4804,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const providers = Object.keys(monthCosts).sort((a, b) => (monthCosts[b] ?? 0) - (monthCosts[a] ?? 0));
 		if (providers.length === 0) { return; }
 		const totalCost = this.sumBillingGroupCosts(monthCosts);
-		tooltip.appendMarkdown(`💰 ${l10n.t('tooltip.costsByProvider')}  \n`);
-		tooltip.appendMarkdown(`|  |  |  |\n|---|---|---|\n`);
+		// The section title doubles as the table's header row: a title line above an empty
+		// `|  |  |  |` header left a blank band between the two, wasting vertical space in a
+		// popup narrow enough that rows already wrap. Costs are right-aligned so every amount
+		// ends at the same offset instead of drifting with each provider name's length.
+		tooltip.appendMarkdown(`\n| 💰 ${l10n.t('tooltip.costsByProvider')} |  |  |\n|:---|---:|:---|\n`);
 		const { budget, source } = this.getEffectiveMonthlyBudgetWithSource();
 		if (budget > 0) {
 			this.appendCopilotBudgetRow(tooltip, monthCosts['GitHub Copilot'] ?? 0, budget);
@@ -4778,15 +4818,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const cost = monthCosts[provider] ?? 0;
 			const ratio = totalCost > 0 ? cost / totalCost : 0;
 			const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildBarSvg(ratio, '#5B9BD5'))})`;
-			tooltip.appendMarkdown(`| ${provider} | $${cost.toFixed(2)} | ${barCell} |\n`);
+			tooltip.appendMarkdown(`| ${provider}${TOOLTIP_COLUMN_GUTTER} | $${cost.toFixed(2)}${TOOLTIP_COLUMN_GUTTER} | ${barCell} |\n`);
 		}
 		if (budget > 0) {
 			tooltip.appendMarkdown(`\n*${l10n.t('tooltip.budgetFromSource', source)}*\n`);
 		}
 	}
 
-	/** Appends the "🎯 Copilot Budget" gauge row (and, when applicable, an untracked-usage
-	 *  sub-row). The API balance (when available) reports usage across all channels — other
+	/** Appends the "🎯 Copilot Budget" gauge row plus its sub-rows (the tracked/untracked split
+	 *  when there is a gap, and always the remaining budget). The API balance (when available)
+	 *  reports usage across all channels — other
 	 *  PCs/VDIs, WSL, web chat, cloud agent, review agent — not just this device's local
 	 *  session logs. The gap between that total and our local copilotCost is usage we can't
 	 *  attribute to a tracked session, so it gets its own hatched bar segment instead of
@@ -4798,16 +4839,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const totalRatio = trackedRatio + gapRatio;
 		const color = totalRatio >= 0.9 ? '#EF5350' : totalRatio >= 0.75 ? '#FFA726' : '#4CAF50';
 		const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildTwoSegmentBarSvg(trackedRatio, gapRatio, color))})`;
-		const remainingLabel = remaining >= 0
-			? l10n.t('tooltip.budgetRemaining', `$${remaining.toFixed(2)}`)
-			: l10n.t('tooltip.budgetOverBy', `$${Math.abs(remaining).toFixed(2)}`);
-		// The headline figure is total spend (tracked + untracked) against budget, so it
-		// agrees with the bar's percentage and states plainly how much budget is left —
-		// instead of showing only the tracked amount and leaving the reader to read the
-		// untracked sub-row and subtract it themselves to find the true remaining budget.
-		tooltip.appendMarkdown(`| 🎯 ${l10n.t('tooltip.copilotBudgetLabel')} | $${totalUsed.toFixed(2)} / $${budget.toFixed(2)} · ${remainingLabel} | ${barCell} |\n`);
-		if (gapUsd > 0.005) {
-			tooltip.appendMarkdown(`| &nbsp;&nbsp;↳ ${l10n.t('tooltip.budgetTrackedVsUntracked', `$${copilotCost.toFixed(2)}`, `$${gapUsd.toFixed(2)}`)} |  |  |\n`);
+		// The headline figure is total spend (tracked + untracked) against budget, so it agrees
+		// with the bar's percentage. Remaining budget is deliberately NOT appended here: in a
+		// hover popup this narrow, "$X / $Y · $Z left" wraps onto a second line, and the figure
+		// is already implied by the "$X / $Y" pair. It gets its own sub-row below instead, next
+		// to the tracked/untracked split — see buildCopilotBudgetSubRowLabels().
+		tooltip.appendMarkdown(`| 🎯 ${l10n.t('tooltip.copilotBudgetLabel')}${TOOLTIP_COLUMN_GUTTER} | $${totalUsed.toFixed(2)} / $${budget.toFixed(2)}${TOOLTIP_COLUMN_GUTTER} | ${barCell} |\n`);
+		for (const label of buildCopilotBudgetSubRowLabels(copilotCost, remaining, gapUsd)) {
+			tooltip.appendMarkdown(`| &nbsp;&nbsp;↳ ${label} |  |  |\n`);
 		}
 	}
 
