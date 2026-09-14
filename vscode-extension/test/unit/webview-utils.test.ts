@@ -15,6 +15,7 @@ import {
 	formatDurationShort,
 	formatFileSize,
 	getTimeSince,
+	formatAbsoluteDate,
 	escapeHtml,
 	safeSectionHtml,
 	markdownToHtml,
@@ -499,4 +500,24 @@ test('getTimeSince: formats seconds, minutes, hours and days', () => {
 	assert.equal(getTimeSince(new Date(Date.now() - 3 * 60_000).toISOString()), '3 minutes ago');
 	assert.equal(getTimeSince(new Date(Date.now() - 2 * 3_600_000).toISOString()), '2 hours ago');
 	assert.equal(getTimeSince(new Date(Date.now() - 4 * 86_400_000).toISOString()), '4 days ago');
+});
+
+// ── formatAbsoluteDate ──────────────────────────────────────────────────
+
+test('formatAbsoluteDate: renders a fixed timestamp as a locale-formatted absolute date', () => {
+	assert.equal(formatAbsoluteDate('2026-01-15T10:00:00.000Z'), 'Jan 15, 2026');
+});
+
+test('formatAbsoluteDate: returns "—" for invalid ISO values instead of "Invalid Date"', () => {
+	assert.equal(formatAbsoluteDate('not-a-date'), '—');
+	assert.equal(formatAbsoluteDate(''), '—');
+});
+
+test('formatAbsoluteDate: honors setFormatLocale for a fixed timestamp', () => {
+	setFormatLocale('de-DE');
+	try {
+		assert.equal(formatAbsoluteDate('2026-01-15T10:00:00.000Z'), '15. Jan. 2026');
+	} finally {
+		setFormatLocale(undefined);
+	}
 });
