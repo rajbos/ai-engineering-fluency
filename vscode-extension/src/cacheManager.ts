@@ -86,10 +86,15 @@ export class CacheManager {
 	}
 
 	/**
-	 * Sets the cache entry for a session file, including file size.
-	 * Also tracks new entries for checkpointing purposes.
+	 * Sets the cache entry for a session file, including file size. Every call is a real write —
+	 * a fresh parse, or an existing entry enriched in place with the same mtime/size (e.g. the
+	 * debug-log supplement path marking `debugLogChecked`/reconciling exact tokens) — so every
+	 * call marks the cache dirty for checkpointing purposes. An earlier version gated this on an
+	 * mtime/size-based "isNewEntry" flag the caller computed; that missed exactly the in-place
+	 * enrichment case, so a checkpoint could skip persisting it and lose it to a crash before the
+	 * next full save.
 	 */
-	setCachedSessionData(filePath: string, data: SessionFileCache, fileSize?: number, isNewEntry: boolean = false): void {
+	setCachedSessionData(filePath: string, data: SessionFileCache, fileSize?: number): void {
 		if (typeof fileSize === 'number') {
 			data.size = fileSize;
 		}
@@ -98,14 +103,7 @@ export class CacheManager {
 		// a stale tombstone must not keep blocking it from ever being persisted again.
 		this.deletedFilePaths.delete(filePath);
 		this.policy.evict(this.sessionFileCache);
-		// The caller (extension.ts setCachedSessionData) already determined isNewEntry by comparing
-		// mtime/size against what was cached before — "new or changed", not merely "first time seen".
-		// Counting only brand-new paths here used to undercount real writes (a re-parsed, changed
-		// file never nudged the checkpoint threshold), one of the reasons a checkpoint could still
-		// fire on the time threshold alone with nothing dirty to save.
-		if (isNewEntry) {
-			this.entriesSinceLastCheckpoint++;
-		}
+		this.entriesSinceLastCheckpoint++;
 	}
 
 	/**
@@ -128,10 +126,10 @@ export class CacheManager {
 		this.deletedFilePaths.set(filePath, Math.max(previousTombstoneMtime ?? 0, existing?.mtime ?? 0));
 		// A tombstone is dirty state too — it must reach the next snapshot save just like a new or
 		// changed entry, or a deleted path can sit unpersisted until an unrelated write happens to
-		// trigger a checkpoint.
-		if (existing !== undefined) {
-			this.entriesSinceLastCheckpoint++;
-		}
+		// trigger a checkpoint. Counted unconditionally, even with no prior `existing` in-memory
+		// entry: the tombstone map mutation above is itself real state a crash could lose, and
+		// still affects the merge against whatever the disk copy currently holds for this path.
+		this.entriesSinceLastCheckpoint++;
 	}
 
 	async clearExpiredCache(): Promise<void> {

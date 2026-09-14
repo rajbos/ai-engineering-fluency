@@ -1828,9 +1828,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Sets the cache entry for a session file, including file size.
 	 */
 	private setCachedSessionData(filePath: string, data: SessionFileCache, fileSize?: number): void {
-		const cached = this.getCachedSessionData(filePath);
-		const isNewEntry = cached === undefined || cached.mtime !== data.mtime || cached.size !== data.size;
-		return this.cacheManager.setCachedSessionData(filePath, data, fileSize, isNewEntry);
+		return this.cacheManager.setCachedSessionData(filePath, data, fileSize);
 	}
 
 
@@ -4052,21 +4050,27 @@ class CopilotTokenTracker implements vscode.Disposable {
 					await gate.wait();
 					continue;
 				}
-				// Backpressure: don't start new files while MAX_CONCURRENT_DEFERRED_PARSES slow
-				// parses are already running in the background — see that constant's doc comment.
-				// Deferring doesn't cancel a slow parse, so without this a run with many slow
-				// files accumulates unbounded concurrent work instead of a bounded pipeline.
-				// The wait is capped: a background parse stuck on a pathological file (rather
-				// than merely slow) would otherwise never signal relief, stalling every worker
-				// still holding queued work behind it. Falling through after the cap re-checks
-				// the condition and, in the worst case, degrades to the old unbounded behavior
-				// for this one file instead of hanging the whole preload pass.
+				// Backpressure: pause briefly before starting a new file while
+				// MAX_CONCURRENT_DEFERRED_PARSES slow parses are already running in the background
+				// — see that constant's doc comment. Deferring doesn't cancel a slow parse, so
+				// without this a run with many slow files accumulates unbounded concurrent work
+				// instead of a bounded-ish pipeline.
+				//
+				// This is a soft, best-effort throttle, not a hard semaphore: a signal() wakes
+				// every worker parked here at once (see _deferredParsePressureGate's doc comment),
+				// so several can observe the same just-freed slot and proceed together — bounded in
+				// practice by CONCURRENCY (the total number of workers), not by this cap alone.
+				// Reserving an exact slot would need real semaphore bookkeeping this pipeline
+				// doesn't have. The wait always falls through rather than looping back to re-check:
+				// on a signal, re-checking wouldn't reliably reserve a slot anyway, and on the 3s
+				// timeout (no signal at all — e.g. every deferred parse is stuck, not merely slow)
+				// looping back would spin/wait forever and the whole preload pass would never
+				// resolve. Either way, proceed to the next file afterwards.
 				if (this._deferredSessionPreloadFiles.size >= CopilotTokenTracker.MAX_CONCURRENT_DEFERRED_PARSES) {
 					await Promise.race([
 						this._deferredParsePressureGate.wait(),
 						new Promise<void>(resolve => setTimeout(resolve, 3_000)),
 					]);
-					continue;
 				}
 				const sessionFile = queue[readIndex++];
 				await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget);
@@ -4423,14 +4427,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.recordDetailedStats(detailedStats, startedAtGeneration);
 
 		this.updateStatusBarAndTooltip(detailedStats);
-		this.updateDetailsPanelIfOpen(detailedStats, silent);
 		this.updateChartPanelIfOpen(silent);
-		// The remaining sub-steps report real sub-progress on a loading screen that (for a panel
-		// like Environmental, which doesn't replace its own HTML until this whole function
-		// returns) otherwise sits parked at one fixed percentage for their entire duration —
-		// including computeAndUploadFluencyScore, which runs calculateMaturityScores() and an
-		// optional network upload on every non-silent refresh regardless of whether the Maturity
-		// panel is even open (see that method).
+		// The remaining sub-steps report real sub-progress on the Details/Environmental loading
+		// screen — including computeAndUploadFluencyScore, which runs calculateMaturityScores()
+		// and an optional network upload on every non-silent refresh regardless of whether the
+		// Maturity panel is even open (see that method). Both panels' real HTML/data is published
+		// only once every step below has run (see the two calls after evaluateAndSurfaceInsights),
+		// not here: publishing Details early used to swap its loading screen away before these
+		// later sub-steps were even sent, so it never actually showed the progress they report.
 		this.sendLoadingPanelMessage({
 			command: 'loadingStep', step: 'computing',
 			percentage: CopilotTokenTracker.REFRESH_STEP_PCT.analysis, label: l10n.t('loading.refresh.analyzingUsage'),
@@ -4443,13 +4447,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 		});
 		await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);
 		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
-		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
 		this.sendLoadingPanelMessage({
 			command: 'loadingStep', step: 'computing',
 			percentage: CopilotTokenTracker.REFRESH_STEP_PCT.insights, label: l10n.t('loading.refresh.finalizing'),
 		});
 		await this.evaluateAndSurfaceInsights(startedAtGeneration);
 		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
+
+		this.updateDetailsPanelIfOpen(detailedStats, silent);
+		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
 
 		this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
 		this.persistRefreshResult(isLeader);
