@@ -24,11 +24,17 @@ lightweight insight in this extension, since we already resolve the same
 <User>/globalStorage/GitHub.copilot-chat/memory-tool/memories/                <- User (global) scope
 <User>/workspaceStorage/<hash>/GitHub.copilot-chat/memory-tool/memories/
     repo/<name>.md                                                             <- Repository scope (literal "repo" folder)
-    <base64(sessionId)>/<name>.md                                              <- Session scope (folder name is the
-                                                                                    base64-encoded chat session UUID,
-                                                                                    NOT a literal "session" folder —
-                                                                                    this diverges from memowl's README
-                                                                                    wording and must be handled explicitly)
+    <base64(sessionId)>/<name>.md                                              <- Session scope, common/observed layout
+                                                                                    (folder name is the base64-encoded
+                                                                                    chat session UUID, NOT a literal
+                                                                                    "session" folder — this diverges
+                                                                                    from memowl's README wording and
+                                                                                    must be handled explicitly)
+    session/<name>.md                                                          <- Session scope, older/alternate layout
+                                                                                    (literal "session" folder, no UUID
+                                                                                    to decode). Both layouts are
+                                                                                    recognized and folded into
+                                                                                    session-scope counts.
 ```
 
 The session-scope folder name decodes (base64) to the same session UUID used
@@ -55,7 +61,14 @@ separate `getWSLWindowsPathsSync()` helper and merges its results in, so full
 WSL coverage is a two-step combination of both functions, not
 `getVSCodeUserPaths()` alone.
 
-## Proposed insight: "Memory Files"
+## Original design proposal (historical)
+
+> The section below is the original design proposal written before this
+> feature was implemented. It is kept for historical context; see
+> "What's implemented" further down for the actual shipped surface — a
+> Tools-tab section, not a new panel/tab, and without the linked-session
+> cross-reference described here (session data is not correlated back to
+> chat-session logs in the shipped UI).
 
 A new read-only panel/tab (or a card in an existing insights view) showing,
 per known workspace:

@@ -507,7 +507,11 @@ test('getTimeSince: formats seconds, minutes, hours and days', () => {
 test('formatAbsoluteDate: renders a fixed timestamp as a locale-formatted absolute date', () => {
 	setFormatLocale('en-US');
 	try {
-		assert.equal(formatAbsoluteDate('2026-01-15T10:00:00.000Z'), 'Jan 15, 2026');
+		// Built from local Y/M/D at noon (not a fixed UTC string) so the asserted calendar date
+		// holds regardless of the test runner's timezone — a fixed "...T10:00:00Z" would render
+		// as a different local date on UTC+14/UTC-12 hosts.
+		const localJan15Noon = new Date(2026, 0, 15, 12, 0, 0).toISOString();
+		assert.equal(formatAbsoluteDate(localJan15Noon), 'Jan 15, 2026');
 	} finally {
 		setFormatLocale(undefined);
 	}
@@ -521,7 +525,9 @@ test('formatAbsoluteDate: returns "—" for invalid ISO values instead of "Inval
 test('formatAbsoluteDate: honors setFormatLocale for a fixed timestamp', () => {
 	setFormatLocale('de-DE');
 	try {
-		assert.equal(formatAbsoluteDate('2026-01-15T10:00:00.000Z'), '15. Jan. 2026');
+		// See the timezone note on the en-US test above — construct from local components.
+		const localJan15Noon = new Date(2026, 0, 15, 12, 0, 0).toISOString();
+		assert.equal(formatAbsoluteDate(localJan15Noon), '15. Jan. 2026');
 	} finally {
 		setFormatLocale(undefined);
 	}

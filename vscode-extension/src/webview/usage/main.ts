@@ -3483,7 +3483,9 @@ function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysisView | null | 
 					? escapeHtml(localize('memoryFiles.globalWorkspaceLabel'))
 					: escapeHtml(ws.workspaceName ?? ws.workspaceHash ?? localize('memoryFiles.unknownWorkspace'));
 				const staleCount = ws.staleFileCount;
-				const newest = ws.newestMtimeMs ? formatAbsoluteDate(new Date(ws.newestMtimeMs).toISOString()) : '—';
+				// newestMtimeMs is nullable (no files at all), not merely falsy — a real epoch
+				// timestamp of 0 must still be formatted, not treated as "no data".
+				const newest = ws.newestMtimeMs !== null ? formatAbsoluteDate(new Date(ws.newestMtimeMs).toISOString()) : '—';
 				return `<tr style="border-bottom:1px solid var(--border-color);">
 					<td style="padding:5px 8px; color:var(--text-primary);">${name}</td>
 					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${ws.repoCount}</td>
