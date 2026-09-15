@@ -623,6 +623,13 @@ export class CacheManager {
 		} catch (error) {
 			this.deps.error(`Error loading cache from storage: ${error}`);
 			this.sessionFileCache = new Map();
+		} finally {
+			// Re-check after the load completes, not just before it started: a clear that lands on
+			// another window WHILE this call was reading the snapshot would otherwise go unnoticed
+			// until the next refresh cycle, letting this window's first paint show the pre-clear
+			// entries it just finished loading. Runs on every path above (including the early
+			// returns), and is a safe no-op when nothing changed since the seed above.
+			await this.checkClearEpoch();
 		}
 	}
 
@@ -748,21 +755,37 @@ export class CacheManager {
 	 * treat a non-advancing epoch as "no clear happened". A bare `Date.now()` can fail to advance
 	 * across two back-to-back calls (millisecond-granularity clock, or a backward NTP/VM time step),
 	 * so the floor is always one past whatever is already on disk.
+	 *
+	 * The read-then-write is itself a race across windows (two peers could both read the same
+	 * persisted value before either writes), so it runs under the existing cache lock — the same
+	 * lock `saveCacheToStorage()` already holds around its own read-modify-write of the shared
+	 * snapshot — to serialize concurrent clears. Best-effort: if the lock is currently held by a
+	 * peer's unrelated save, this still proceeds without it rather than silently skipping the bump
+	 * (a clear must never appear to succeed while leaving the fence un-advanced); that residual
+	 * unlocked race is the same narrow, already-documented window as a save landing exactly at a
+	 * clear (see getClearEpochPath()'s doc comment and the CHANGELOG).
 	 */
 	private async bumpClearEpoch(): Promise<void> {
 		const epochPath = this.getClearEpochPath();
-		const persisted = await this.readClearEpoch();
-		const newEpoch = Math.max(Date.now(), persisted + 1);
-		const tmpPath = `${epochPath}.${process.pid}.${newEpoch}.tmp`;
+		const locked = await this.acquireCacheLock();
 		try {
-			await fs.promises.mkdir(path.dirname(epochPath), { recursive: true });
-			await fs.promises.writeFile(tmpPath, JSON.stringify({ epoch: newEpoch }));
-			await fs.promises.rename(tmpPath, epochPath);
-		} catch (error) {
-			this.deps.warn(`Failed to persist clear epoch: ${error}`);
-			try { await fs.promises.unlink(tmpPath); } catch { /* best-effort cleanup */ }
+			const persisted = await this.readClearEpoch();
+			const newEpoch = Math.max(Date.now(), persisted + 1);
+			const tmpPath = `${epochPath}.${process.pid}.${newEpoch}.tmp`;
+			try {
+				await fs.promises.mkdir(path.dirname(epochPath), { recursive: true });
+				await fs.promises.writeFile(tmpPath, JSON.stringify({ epoch: newEpoch }));
+				await fs.promises.rename(tmpPath, epochPath);
+			} catch (error) {
+				this.deps.warn(`Failed to persist clear epoch: ${error}`);
+				try { await fs.promises.unlink(tmpPath); } catch { /* best-effort cleanup */ }
+			}
+			this.clearEpoch = newEpoch;
+		} finally {
+			if (locked) {
+				await this.releaseCacheLock();
+			}
 		}
-		this.clearEpoch = newEpoch;
 	}
 
 	/**
@@ -784,6 +807,11 @@ export class CacheManager {
 		this.sessionFileCache = new Map();
 		this.deletedFilePaths = new Map();
 		this.clearEpoch = persisted;
+		// Without this, a post-clear snapshot recreated with an mtime at or below this bookmark
+		// (coarse or backward-moving filesystem clocks — the same clocks the cross-window tests
+		// above already account for) would make loadSharedSnapshotIfChanged()'s own mtime check
+		// wrongly believe it already has the latest snapshot and skip loading the new one.
+		this.lastLoadedSnapshotMtime = 0;
 		return true;
 	}
 

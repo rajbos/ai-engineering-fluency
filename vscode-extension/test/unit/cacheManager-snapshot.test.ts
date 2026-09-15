@@ -685,6 +685,62 @@ test('deleteSharedSnapshot() advances the clear epoch strictly, including two cl
 		`the second clear's epoch (${second}) must be strictly greater than the first (${first}) — a non-advancing epoch would let checkClearEpoch() silently miss the second clear`);
 });
 
+// A follow-up Copilot review noted bumpClearEpoch()'s read-modify-write is itself a cross-window
+// race (two windows could both read the same persisted epoch before either writes) and asked for it
+// to be serialized. It now runs under the same cache lock saveCacheToStorage() already uses — but
+// that lock is acquired best-effort (never blocks), so a clear must still succeed and advance the
+// epoch even when a peer window is mid-save and already holds it.
+test('deleteSharedSnapshot() still advances the clear epoch when the cache lock is already held by a peer window', async () => {
+	const dir = tmpDir();
+	const peer = makeManager(dir);
+	assert.equal(await peer.acquireCacheLock(), true, 'peer window holds the cache lock, simulating a save in progress');
+
+	const m = makeManager(dir);
+	await assert.doesNotReject(() => m.deleteSharedSnapshot(),
+		'a clear must not hang or throw just because a peer window currently holds the cache lock');
+
+	const epoch = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+	assert.equal(typeof epoch, 'number', 'the epoch marker must still be advanced even without the lock');
+
+	await peer.releaseCacheLock();
+});
+
+// A follow-up Copilot review found that checkClearEpoch() dropped the in-memory cache on a
+// detected peer clear but left lastLoadedSnapshotMtime pointing at the pre-clear snapshot. On a
+// coarse or backward-moving filesystem clock (the same class of clock behavior the cross-window
+// tombstone test above already has to account for), a freshly recreated post-clear snapshot can get
+// an mtime at or below that stale bookmark — which would make loadSharedSnapshotIfChanged()'s own
+// mtime short-circuit believe it already has the latest snapshot and never load the new one.
+test('a detected peer clear resets lastLoadedSnapshotMtime, so a post-clear snapshot with a non-advancing mtime still loads', async () => {
+	const dir = tmpDir();
+
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/old.json', entry(1000), 10);
+	await windowA.writeSharedSnapshot();
+	const snapshotPath = windowA.getSharedSnapshotPath();
+	const bookmarkedMtimeMs = (await fs.promises.stat(snapshotPath)).mtimeMs;
+	await windowA.loadSharedSnapshotIfChanged(); // records windowA's own lastLoadedSnapshotMtime === bookmarkedMtimeMs
+
+	const windowB = makeManager(dir);
+	await windowB.deleteSharedSnapshot(); // peer clear: advances the epoch, removes the old snapshot
+	windowB.setCachedSessionData('/new.json', entry(2000), 10);
+	await windowB.writeSharedSnapshot(); // republish a post-clear snapshot
+
+	// Force the freshly recreated snapshot's mtime BELOW windowA's already-recorded bookmark — the
+	// coarse/backward-clock scenario the fix targets. Without the reset this makes
+	// loadSharedSnapshotIfChanged()'s `mtimeMs <= lastLoadedSnapshotMtime` check believe nothing
+	// changed, even though the clear resolved to entirely different content. A full second earlier
+	// (not merely equal) avoids relying on exact mtime-resolution rounding across filesystems.
+	const backdatedMtime = new Date(bookmarkedMtimeMs - 1000);
+	await fs.promises.utimes(snapshotPath, backdatedMtime, backdatedMtime);
+
+	const merged = await windowA.loadSharedSnapshotIfChanged();
+
+	assert.ok(!windowA.cache.has('/old.json'), 'the detected peer clear must drop the pre-clear entry');
+	assert.equal(merged, 1, 'the post-clear snapshot must still be loaded despite its non-advancing mtime');
+	assert.ok(windowA.cache.has('/new.json'), 'the post-clear entry must be merged in');
+});
+
 test('a missing or corrupt clear-epoch marker fails open (writeSharedSnapshot still publishes)', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
