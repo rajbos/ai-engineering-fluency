@@ -22,3 +22,8 @@
 # start of a run, so an edit here redirects all future agent behaviour.
 /AGENTS.md    @rajbos @FokkoVeegens
 /CLAUDE.md    @rajbos @FokkoVeegens
+
+# The devcontainer runs commands, and `initializeCommand` runs them on the
+# developer's own machine before the container is even built - an edit here
+# executes on a host, not just in CI.
+/.devcontainer/ @rajbos @FokkoVeegens

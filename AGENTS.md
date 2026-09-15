@@ -162,8 +162,11 @@ Notes:
 - The graph covers **code only**. Docs, PDFs and images are skipped — semantic
   extraction needs an LLM backend and an API key, which this setup deliberately
   does not use. Read docs directly.
-- It is a snapshot from setup time. After large edits, refresh with
-  `GRAPHIFY_OUT=.graphify-agent graphify update .` (also LLM-free).
+- It is a snapshot from setup time. After large edits, refresh by re-running the
+  build: `GRAPHIFY_OUT=.graphify-agent graphify extract . --code-only --no-viz`
+  (also LLM-free). Do **not** use `graphify update .` for this: it honours
+  `GRAPHIFY_OUT` for the graph itself but still rewrites the committed
+  `graphify-out/cache/stat-index.json`, leaving a tracked modification behind.
 - Never build into the default `graphify-out/` — that directory's `manifest.json`
   and `cache/` are committed, and a newer graphify prunes them as a stale version.
 - If `.graphify-agent/graph.json` is missing the build failed; fall back to
