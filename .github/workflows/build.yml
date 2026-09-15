@@ -53,6 +53,10 @@ jobs:
               # grep for `run: node scripts/...`, which misses every indirect
               # call.
               - 'scripts/**'
+              - '.vscode/*.json'
+              - '.devcontainer/devcontainer.json'
+              - 'docs/logFilesSchema/session-file-schema.json'
+              - 'docs/logFilesSchema/session-file-schema-analysis.json'
               - '.nvmrc'
               - '.github/workflows/build.yml'
 
