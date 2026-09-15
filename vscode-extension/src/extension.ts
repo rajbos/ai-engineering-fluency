@@ -9131,7 +9131,13 @@ private computeFallbackDailyRollup(
 		const startedAtGeneration = this._cacheGeneration;
 		const stats = await this.updateTokenStats();
 
-		if (this.detailsPanel !== panel) { return; }
+		if (this.detailsPanel !== panel) {
+			// panel was replaced (never disposed without going through onDidDispose, which already
+			// unconditionally deletes it from the registry) — but drop it defensively too, so a
+			// future refactor of that invariant can't leave a stale panel registered for broadcast.
+			this._refreshLoadingPanels.delete(panel);
+			return;
+		}
 		if (!stats && this.isRefreshSuperseded(startedAtGeneration)) { return; }
 		this._detailsPanelIsLoading = false;
 		this._refreshLoadingPanels.delete(panel);
@@ -9155,7 +9161,12 @@ private computeFallbackDailyRollup(
 		const startedAtGeneration = this._cacheGeneration;
 		const stats = await this.updateTokenStats();
 
-		if (this.environmentalPanel !== panel) { return; }
+		if (this.environmentalPanel !== panel) {
+			// See loadDetailsIntoPanel()'s identical guard: defensive-only, since onDidDispose()
+			// already unconditionally removes a disposed panel from the registry.
+			this._refreshLoadingPanels.delete(panel);
+			return;
+		}
 		if (!stats && this.isRefreshSuperseded(startedAtGeneration)) { return; }
 		this._refreshLoadingPanels.delete(panel);
 		if (!stats) {

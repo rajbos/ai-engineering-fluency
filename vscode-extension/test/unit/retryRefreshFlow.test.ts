@@ -60,8 +60,10 @@ test('loadDetailsIntoPanel() shows the loading screen before awaiting, and the f
 
 	// The loading-registry bookkeeping must be cleared once resolved one way or the other,
 	// otherwise a panel that failed (or succeeded) stays registered for resolveStuckLoadingPanelsAsFailed()
-	// to hit again on a later, unrelated failure.
-	const registryClearIndex = body.indexOf('this._refreshLoadingPanels.delete(panel);');
+	// to hit again on a later, unrelated failure. Searched from supersededGuardIndex: an earlier
+	// occurrence also runs defensively in the `this.detailsPanel !== panel` branch above (a stale,
+	// already-replaced panel), which is a separate code path this assertion isn't about.
+	const registryClearIndex = body.indexOf('this._refreshLoadingPanels.delete(panel);', supersededGuardIndex);
 	assert.ok(registryClearIndex !== -1 && supersededGuardIndex < registryClearIndex && registryClearIndex < failureHtmlIndex,
 		'must remove the panel from _refreshLoadingPanels before rendering the failure page, once the run is confirmed to actually belong to this call');
 });

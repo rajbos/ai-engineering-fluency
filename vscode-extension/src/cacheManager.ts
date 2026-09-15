@@ -308,6 +308,14 @@ export class CacheManager {
 	 * count against it afterwards could wrongly erase dirty entries the new cycle has genuinely
 	 * accumulated since. checkpointCounterGeneration detects that and skips the update entirely
 	 * in that case, leaving the new cycle's own counter (and its own future checkpoint) untouched.
+	 *
+	 * saveCacheToStorage() is documented never to throw, but this awaits it inside a try/catch
+	 * anyway: forceCheckpointCache()/awaitInFlightCheckpoint() now await this method's settle
+	 * promise directly (unlike the original fire-and-forget-only caller, maybeCheckpointCache()),
+	 * so a rejection here would no longer just be an unhandled-rejection warning — it would
+	 * propagate into a caller like _runRefreshCore()'s flushPendingCheckpointBeforeReset() and can
+	 * fail an otherwise-healthy refresh outright. Treating a thrown error the same as `saved =
+	 * false` keeps that contract true in practice, not just by convention.
 	 */
 	private async checkpointCacheInternal(): Promise<void> {
 		const now = Date.now();
@@ -315,7 +323,13 @@ export class CacheManager {
 		const generationAtStart = this.checkpointCounterGeneration;
 		this.deps.log(`Checkpointing cache: ${entriesCountAtStart} dirty entries (new, changed, or deleted) since last checkpoint (${((now - this.lastCheckpointTime) / 1000).toFixed(1)}s elapsed)`);
 
-		const saved = await this.saveCacheToStorage();
+		let saved: boolean;
+		try {
+			saved = await this.saveCacheToStorage();
+		} catch (error) {
+			this.deps.error(`Checkpoint save threw unexpectedly: ${error}`);
+			saved = false;
+		}
 		if (saved && this.checkpointCounterGeneration === generationAtStart) {
 			this.lastCheckpointTime = now;
 			this.entriesSinceLastCheckpoint = Math.max(0, this.entriesSinceLastCheckpoint - entriesCountAtStart);
