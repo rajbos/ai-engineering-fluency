@@ -131,7 +131,12 @@ export function createSemaphore(permits: number): Semaphore {
         next(true);
         return;
       }
-      available++;
+      // Clamped rather than incremented unconditionally: a caller bug that releases more times
+      // than it successfully acquired (a double-release on one code path, say) would otherwise
+      // silently admit more concurrent holders than `permits` ever allows — exactly the unbounded
+      // concurrency this primitive exists to prevent. This can only be reached with no waiters
+      // parked, so clamping here never withholds a permit a genuine acquire() is waiting on.
+      available = Math.min(permits, available + 1);
     },
   };
 }

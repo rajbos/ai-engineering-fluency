@@ -154,3 +154,25 @@ test('createSemaphore: a timed-out acquire() resolves false and does not consume
 	sem.release();
 	assert.equal(await sem.acquire(), true, 'the released permit must be available to a brand-new acquire()');
 });
+
+test('createSemaphore: an over-release (more release() calls than successful acquire()s) does not widen the permit count', async () => {
+	const sem = createSemaphore(1);
+	assert.equal(await sem.acquire(), true); // the only permit is now held
+
+	// A caller bug — releasing twice for one acquire — must not let two concurrent holders in.
+	sem.release();
+	sem.release();
+	sem.release();
+
+	assert.equal(await sem.acquire(), true, 'a fresh acquire() must still succeed after the (clamped) over-releases');
+
+	let secondAcquired = false;
+	const pending = sem.acquire().then((ok) => { secondAcquired = ok; });
+	await new Promise(r => setTimeout(r, 5));
+	assert.equal(secondAcquired, false,
+		'a second concurrent acquire() must still block — the over-releases above must not have widened the cap past its original 1 permit');
+
+	sem.release();
+	await pending;
+	assert.equal(secondAcquired, true);
+});

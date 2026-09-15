@@ -9147,6 +9147,11 @@ private computeFallbackDailyRollup(
 			this.log('✅ Details panel HTML set successfully');
 		} catch (err) {
 			this.error('❌ Failed to set Details panel HTML', err);
+			// A real `stats` result means this run succeeded — only the render itself failed. The
+			// panel is already out of _refreshLoadingPanels by this point, so without a fallback here
+			// it would otherwise stay frozen on the loading screen (or blank, from showDetails()'s
+			// cached-stats path) with no further messages and no way to retry.
+			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
 		}
 	}
 
@@ -9170,7 +9175,13 @@ private computeFallbackDailyRollup(
 			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
 			return;
 		}
-		panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
+		try {
+			panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
+		} catch (err) {
+			// See loadDetailsIntoPanel()'s identical catch for why this fallback matters.
+			this.error('❌ Failed to set Environmental panel HTML', err);
+			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+		}
 	}
 
 	/**
@@ -9280,7 +9291,10 @@ private computeFallbackDailyRollup(
 			panel.webview.html = this.getDetailsHtml(panel.webview, stats);
 			this.log('✅ Details panel HTML set successfully');
 		} catch (err) {
+			// See loadDetailsIntoPanel()'s identical catch: without this fallback the panel would be
+			// left blank forever (this branch never painted a loading screen first) with no retry.
 			this.error('❌ Failed to set Details panel HTML', err);
+			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
 		}
 	}
 
@@ -9344,7 +9358,14 @@ private computeFallbackDailyRollup(
 			void (async () => {
 				const stats = this.currentDetailedStats;
 				if (this.environmentalPanel !== panel || !stats) { return; }
-				panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
+				try {
+					panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
+				} catch (err) {
+					// See loadDetailsIntoPanel()'s identical catch: without this fallback the panel
+					// would be left frozen on the loading screen forever, with no retry.
+					this.error('❌ Failed to set Environmental panel HTML', err);
+					panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+				}
 			})();
 		} else {
 			void this.loadEnvironmentalIntoPanel(panel);
