@@ -111,13 +111,32 @@ ${getLoadingHtmlScript(startedAtMs)}
 }
 
 /**
- * Setup + shared helper functions for the loading screen's inline script (timer, checklist
- * step transitions). Split out from getLoadingHtmlScript() purely to keep that function's own
- * line count down — this text is concatenated straight into the same IIFE body at runtime, so
- * everything declared here is still in scope for getLoadingHtmlScriptListener()'s handler.
+ * The loading screen's inline script.
+ *
+ * On the 'computing' step the host may send a `percentage` and `label` per compute
+ * sub-step so the bar keeps moving through a long aggregation phase; a host that
+ * computes in one opaque block sends neither and gets the historical fixed 96%.
+ *
+ * `barPct` is the value behind the bar, fed by both phases: parsing progress is scaled
+ * into the lower 85% and compute sub-steps occupy the rest. Parsing always ends on a
+ * 100% tick, so without that split the first compute step would drop the bar (to 88%,
+ * or to 96% for a host that sends no sub-steps at all).
+ *
+ * The clamp applies only once the compute phase has begun, not within parsing itself.
+ * A parsing percentage can legitimately fall — `_preloadSessionFiles` reports against a
+ * discovery total that grows as adapter batches arrive, so an early batch can read 1/1
+ * and a later tick 2/400 — and clamping that would freeze the bar at the high-water mark
+ * for the rest of the parse. After a compute sub-step, a parsing tick is stale (a
+ * concurrent background refresh shares this channel) and must not drag the bar back.
+ *
+ * Kept as one function (not split further) deliberately: scripts/check-hardcoded-strings.mjs
+ * scans this file's own string/template literals for embedded HTML tag structure, and splitting
+ * this script across multiple functions/literals broke its ability to recognize the content as
+ * a single opaque script body — see this PR's own history for the CI failure that caused.
  */
-function getLoadingHtmlScriptHelpers(startedAtMs: number): string {
-	return `    var t0 = ${Math.floor(startedAtMs)};
+export function getLoadingHtmlScript(startedAtMs: number = Date.now()): string {
+	return `(function () {
+    var t0 = ${Math.floor(startedAtMs)};
     var EDITORS = [];
     var editorsSeen = 0, barPct = 0, computing = false;
     function updateElapsed() {
@@ -155,31 +174,8 @@ function getLoadingHtmlScriptHelpers(startedAtMs: number): string {
             var chips = document.getElementById('chips'); if (chips) chips.style.display = 'flex';
         }
         if (total) { var sc = document.getElementById('sc-discover'); if (sc) sc.textContent = '(' + total + ' found)'; }
-    }`;
-}
-
-/**
- * The loading screen's `message` listener. Split out from getLoadingHtmlScript() purely to keep
- * that function's own line count down — see getLoadingHtmlScriptHelpers()'s doc comment.
- *
- * On the 'computing' step the host may send a `percentage` and `label` per compute
- * sub-step so the bar keeps moving through a long aggregation phase; a host that
- * computes in one opaque block sends neither and gets the historical fixed 96%.
- *
- * `barPct` is the value behind the bar, fed by both phases: parsing progress is scaled
- * into the lower 85% and compute sub-steps occupy the rest. Parsing always ends on a
- * 100% tick, so without that split the first compute step would drop the bar (to 88%,
- * or to 96% for a host that sends no sub-steps at all).
- *
- * The clamp applies only once the compute phase has begun, not within parsing itself.
- * A parsing percentage can legitimately fall — `_preloadSessionFiles` reports against a
- * discovery total that grows as adapter batches arrive, so an early batch can read 1/1
- * and a later tick 2/400 — and clamping that would freeze the bar at the high-water mark
- * for the rest of the parse. After a compute sub-step, a parsing tick is stale (a
- * concurrent background refresh shares this channel) and must not drag the bar back.
- */
-function getLoadingHtmlScriptListener(): string {
-	return `    window.addEventListener('message', function (ev) {
+    }
+    window.addEventListener('message', function (ev) {
         var m = ev.data; if (!m) return;
         if (m.command === 'loadingStep') {
             if (m.step === 'discovering') {
@@ -236,12 +232,6 @@ function getLoadingHtmlScriptListener(): string {
                 if (row) { var pill = document.createElement('div'); pill.className = 'chip'; pill.style.animation = 'pop-in 0.35s ease both'; pill.innerHTML = '<span>' + editor.icon + '</span>\\u00a0<span class="chip-value">' + esc(editor.name) + '</span>'; row.appendChild(pill); }
             }
         }
-    });`;
-}
-
-export function getLoadingHtmlScript(startedAtMs: number = Date.now()): string {
-	return `(function () {
-${getLoadingHtmlScriptHelpers(startedAtMs)}
-${getLoadingHtmlScriptListener()}
+    });
 }());`;
 }
