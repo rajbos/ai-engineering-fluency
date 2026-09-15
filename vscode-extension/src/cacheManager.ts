@@ -261,6 +261,7 @@ export class CacheManager {
 		this.checkpointInProgress = true;
 		this.checkpointSettlePromise = this.checkpointCacheInternal().finally(() => {
 			this.checkpointInProgress = false;
+			this.checkpointSettlePromise = undefined;
 		});
 	}
 
