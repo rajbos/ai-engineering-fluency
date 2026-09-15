@@ -34,6 +34,16 @@ function extractBracesBlock(source: string, marker: string): string {
 	throw new Error(`unbalanced braces while scanning for marker: ${marker}`);
 }
 
+/**
+ * Index of the "stay on the loading screen, a superseded run isn't a genuine failure" guard,
+ * tolerant of whitespace/formatting differences (unlike a plain `indexOf` on an exact source
+ * string) since this exact statement shape is checked in more than one place below.
+ */
+function indexOfSupersededGuard(body: string): number {
+	const match = body.match(/if\s*\(\s*!stats\s*&&\s*this\.isRefreshSuperseded\(startedAtGeneration\)\s*\)\s*\{\s*return;\s*\}/);
+	return match?.index ?? -1;
+}
+
 test('getRefreshFailedHtml() wires its retry button to post retryRefresh', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private getRefreshFailedHtml(webview: vscode.Webview): string {');
 	assert.ok(body.includes("command: 'retryRefresh'"),
@@ -50,8 +60,7 @@ test('loadDetailsIntoPanel() shows the loading screen before awaiting, and the f
 
 	// A superseded run (a newer refresh already bumped the generation) must return without
 	// touching the panel — the replacement run owns resolving it, not this stale one.
-	const supersededGuardMatch = /if\s*\(\s*!stats\s*&&\s*this\.isRefreshSuperseded\(startedAtGeneration\)\s*\)\s*\{\s*return;\s*\}/.exec(body);
-	const supersededGuardIndex = supersededGuardMatch?.index ?? -1;
+	const supersededGuardIndex = indexOfSupersededGuard(body);
 	assert.ok(supersededGuardIndex !== -1 && awaitIndex < supersededGuardIndex,
 		'must check isRefreshSuperseded() after awaiting updateTokenStats(), before ever treating a missing result as a genuine failure');
 
@@ -74,7 +83,7 @@ test('loadEnvironmentalIntoPanel() mirrors loadDetailsIntoPanel()\'s loading/fai
 
 	const loadingHtmlIndex = body.indexOf('panel.webview.html = this.getLoadingHtml(');
 	const awaitIndex = body.indexOf('await this.updateTokenStats()');
-	const supersededGuardIndex = body.indexOf('if (!stats && this.isRefreshSuperseded(startedAtGeneration)) { return; }');
+	const supersededGuardIndex = indexOfSupersededGuard(body);
 	const failureHtmlIndex = body.indexOf('panel.webview.html = this.getRefreshFailedHtml(panel.webview);');
 
 	assert.ok(loadingHtmlIndex !== -1 && awaitIndex !== -1 && supersededGuardIndex !== -1 && failureHtmlIndex !== -1,

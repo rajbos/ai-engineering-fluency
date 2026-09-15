@@ -259,10 +259,15 @@ export class CacheManager {
 	 * maybeCheckpointCache() (fire-and-forget) and forceCheckpointCache() (awaited). */
 	private startCheckpoint(): void {
 		this.checkpointInProgress = true;
-		this.checkpointSettlePromise = this.checkpointCacheInternal().finally(() => {
+		const settling = this.checkpointCacheInternal().finally(() => {
 			this.checkpointInProgress = false;
-			this.checkpointSettlePromise = undefined;
+			// Only clear the field if it's still pointing at *this* checkpoint's promise — a new
+			// checkpoint could already have started and reassigned it by the time this settles.
+			if (this.checkpointSettlePromise === settling) {
+				this.checkpointSettlePromise = undefined;
+			}
 		});
+		this.checkpointSettlePromise = settling;
 	}
 
 	/**
