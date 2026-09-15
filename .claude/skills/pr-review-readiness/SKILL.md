@@ -84,25 +84,27 @@ fallback and work anywhere.
      `sha`.
    Either way, the response is paginated too — a PR with enough checks can
    fill one page without including the run you want, which would wrongly
-   land on the "absent entirely" row below. Page through with `page`/
-   `perPage` (max `perPage`, capped at a sane number of pages, same bound as
-   step 4) before deciding it's really absent — and pagination must actually
-   **finish** to draw that conclusion: it finishes when a page comes back
-   with fewer results than requested (a genuine last page), not merely when
-   the page cap is reached. Hitting the cap without a short final page means
-   the search was inconclusive, not that the check run is absent — treat
-   that the same as **not yet started** (reschedule; don't conclude "no
-   findings").
+   land on the "absent entirely" row below. Page through it (REST:
+   `page`/`per_page`; the MCP tool: `page`/`perPage` — the parameter name
+   differs by which one you're calling, don't copy one into the other) with
+   a sane page cap, same bound as step 4, before deciding it's really
+   absent — and pagination must actually **finish** to draw that
+   conclusion: it finishes when a page comes back with fewer results than
+   requested (a genuine last page), not merely when the page cap is
+   reached. Hitting the cap without a short final page means the search was
+   inconclusive, not that the check run is absent — treat that the same as
+   **not yet started** (reschedule; don't conclude "no findings").
 
    **Multiple runs can share the name.** `name` doesn't uniquely identify a
    check run — a rerun produces another `copilot-pull-request-reviewer`
    entry for the same `sha`, so don't just grab the first match. Among all
    entries named exactly `copilot-pull-request-reviewer` for `sha`: if
-   **any** of them has a `status` other than exactly `completed` — this
-   includes `queued` and `in_progress`, but also less common non-terminal
-   values the Checks API can return (`waiting`, `requested`, `pending`, and
-   any future addition) — treat the whole thing as still running (a caller
-   that happened to inspect an older completed-and-successful entry while a
+   **any** of them has a `status` other than exactly `completed` (the
+   Checks API's `status` field is `queued`, `in_progress`, or `completed` —
+   treat any value that isn't `completed` as in-flight, rather than trying
+   to enumerate every non-terminal one, so this doesn't go stale if the API
+   adds another), treat the whole thing as still running (a caller that
+   happened to inspect an older completed-and-successful entry while a
    newer rerun is still non-terminal would otherwise pass the gate on stale
    grounds). Only once every matching run is `completed` do you pick one to
    evaluate — the newest by `started_at` (check runs don't expose a
