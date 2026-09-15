@@ -135,7 +135,13 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles(
+          # Folded block scalar (>-), not a plain multi-line value: a plain
+          # YAML scalar's continuation lines can't start with a reserved
+          # indicator character, and every line below starts with a single
+          # quote - that broke the YAML parse (reproduced with both actionlint
+          # and PyYAML) even though it looked like ordinary multi-line syntax.
+          key: >-
+            ${{ runner.os }}-nuget-${{ hashFiles(
             'visualstudio-extension/**/*.csproj',
             'visualstudio-extension/**/Directory.Packages.props',
             'visualstudio-extension/**/NuGet.config',
@@ -143,7 +149,7 @@ jobs:
             'Directory.Packages.props',
             'NuGet.config',
             'global.json'
-          ) }}
+            ) }}
           restore-keys: |
             ${{ runner.os }}-nuget-
 
