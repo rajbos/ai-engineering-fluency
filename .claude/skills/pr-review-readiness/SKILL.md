@@ -109,26 +109,36 @@ notes inline and the final step.
      `gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/reviews`),
      reading each entry's `user.login`, `id`, and `commit_id`.
    - Across every page, look for a review authored by
-     `copilot-pull-request-reviewer[bot]` whose `commit_id` equals `sha`
-     (not merely "the most recent bot review" — on a PR with prior rounds,
+     `copilot-pull-request-reviewer[bot]` whose `commit_id` equals `sha` **and**
+     whose `state` is a submitted state (e.g. `COMMENTED`, `APPROVED`,
+     `CHANGES_REQUESTED` — anything but `PENDING`). `get_reviews` can include
+     a `PENDING` review that already carries the current `commit_id` but
+     hasn't actually been submitted yet; matching on author + `commit_id`
+     alone can mistake that still-in-progress review for a finished one. Also
+     don't rely on "the most recent bot review" — on a PR with prior rounds,
      the most recent bot review can belong to an older commit even when the
      current-head review genuinely produced no comments, which would
-     otherwise read as permanently stale).
-   - **A review with `commit_id == sha` exists, and the check run's
-     `conclusion` is exactly `success` or `neutral`** → the review is current
-     *and* complete. Safe to act on findings — but scope which findings:
+     otherwise read as permanently stale.
+   - **A submitted review with `commit_id == sha` exists, and the check
+     run's `conclusion` is exactly `success` or `neutral`** → the review is
+     current *and* complete. Safe to act on findings — but scope which
+     findings, and know the tooling gap here:
      `get_review_comments` (or the REST review-comments list) returns every
      thread on the PR, including older, already-superseded ones, so don't
-     treat its whole response as "this review's findings". Filtering by
-     author and a `submitted_at` cutoff is **not** review-specific enough — a
-     later review by the same bot against an older, since-superseded commit
-     can post comments after that timestamp too, misattributing stale
-     findings to the current review. Instead require an exact match on the
-     matched review's own id: either call the comments-for-this-review form
-     (`GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments`,
-     using the matched review's own id) or filter the general response to
-     comments whose `pull_request_review_id` equals that matched review's
-     `id`.
+     treat its whole response as "this review's findings". The precise fix —
+     filtering by the matched review's own id — is only reliable via REST:
+     `GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments`
+     (also paginated; apply the same page-exhaustion rule as above), or
+     filtering a full comments list by `pull_request_review_id` equal to
+     that id. The MCP `get_review_comments` method cannot do this: it takes
+     no `review_id` parameter and its thread payload exposes no
+     `pull_request_review_id`, so an MCP-only caller has no exact way to
+     attribute a given thread to the matched review. When only MCP tooling
+     is available, prefer reading the matched review's own `body` (returned
+     directly by `get_reviews` — inherently scoped to that one review, no
+     attribution problem) as the current round's finding summary, and treat
+     individual `get_review_comments` threads as approximate, best-effort
+     context rather than a reliable "these are this round's findings" list.
    - **A review with `commit_id == sha` exists, but the check run's
      `conclusion` is anything else** → `commit_id == sha` only proves the
      review is *current*, not that it's *complete* (a review can be
