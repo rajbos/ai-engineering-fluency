@@ -599,6 +599,120 @@ test('writeSharedSnapshot() does not let a stale tombstone strip a newer entry a
 	assert.equal(entries!['/a.json'].mtime, 9000);
 });
 
+// ---------------------------------------------------------------------------
+// Durable cross-window clear epoch (getClearEpochPath() / deleteSharedSnapshot() /
+// writeSharedSnapshot() / loadSharedSnapshotIfChanged()): a peer window's later,
+// independent save — built from its own untouched, pre-clear in-memory cache — must not
+// republish stale data after another window's clearCache(), and that peer must stop
+// *serving* the stale data from memory too, not just stop persisting it.
+// ---------------------------------------------------------------------------
+
+test('writeSharedSnapshot() skips publishing a save assembled before a peer window\'s clear', async () => {
+	const dir = tmpDir();
+
+	// Window A parses a session into memory but has not saved yet.
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/a.json', entry(1000), 10);
+
+	// Window B clears the cache, which advances the durable clear epoch.
+	const windowB = makeManager(dir);
+	await windowB.deleteSharedSnapshot();
+
+	// Window A's save was built entirely before window B's clear and must not land.
+	await windowA.writeSharedSnapshot();
+
+	const entries = await windowA.readSharedSnapshot();
+	assert.ok(!entries || !('/a.json' in entries!),
+		'a save assembled before a peer window\'s clear must not republish stale data to the shared snapshot');
+});
+
+test('loadSharedSnapshotIfChanged() drops a window\'s in-memory cache once a peer\'s clear is detected, even with nothing to publish', async () => {
+	const dir = tmpDir();
+
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/a.json', entry(1000), 10);
+	assert.equal(windowA.cache.size, 1);
+
+	const windowB = makeManager(dir);
+	await windowB.deleteSharedSnapshot();
+
+	// Window A never saves anything — this only exercises the loader half of the fence.
+	await windowA.loadSharedSnapshotIfChanged();
+
+	assert.equal(windowA.cache.size, 0,
+		'a detected peer clear must drop the in-memory cache so window A stops SERVING stale data, not just stop persisting it');
+});
+
+test('a save that started before the clear epoch is skipped only once; the next save (after re-syncing) succeeds normally', async () => {
+	const dir = tmpDir();
+
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/a.json', entry(1000), 10);
+
+	const windowB = makeManager(dir);
+	await windowB.deleteSharedSnapshot();
+
+	await windowA.writeSharedSnapshot(); // skipped: pre-clear data
+	assert.equal(windowA.cache.size, 0, 'the stale in-memory cache was dropped by the skipped save');
+
+	// Window A resumes normal operation and parses fresh (post-clear) data.
+	windowA.setCachedSessionData('/c.json', entry(9000), 10);
+	await windowA.writeSharedSnapshot();
+
+	const entries = await windowA.readSharedSnapshot();
+	assert.ok(entries && '/c.json' in entries!, 'a save made after re-syncing with the clear epoch must publish normally');
+});
+
+test('a missing or corrupt clear-epoch marker fails open (writeSharedSnapshot still publishes)', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+
+	// No epoch marker exists yet at all (fresh install / older extension version).
+	await m.writeSharedSnapshot();
+	let entries = await m.readSharedSnapshot();
+	assert.ok(entries && '/a.json' in entries!, 'a missing epoch marker must not block a normal save');
+
+	// A corrupt epoch marker must likewise not block a normal save.
+	fs.mkdirSync(path.dirname(m.getClearEpochPath()), { recursive: true });
+	fs.writeFileSync(m.getClearEpochPath(), '{ not valid json');
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+	await m.writeSharedSnapshot();
+	entries = await m.readSharedSnapshot();
+	assert.ok(entries && '/b.json' in entries!, 'a corrupt epoch marker must fail open, not block saving');
+});
+
+test('a missing or corrupt clear-epoch marker fails open (loadSharedSnapshotIfChanged keeps the in-memory cache)', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+
+	fs.mkdirSync(path.dirname(m.getClearEpochPath()), { recursive: true });
+	fs.writeFileSync(m.getClearEpochPath(), 'not even json');
+
+	await m.loadSharedSnapshotIfChanged();
+	assert.equal(m.cache.size, 1, 'a corrupt epoch marker must not be treated as a detected clear');
+	assert.equal(m.cache.get('/a.json')?.mtime, 1000);
+});
+
+test('loadCacheFromStorage() seeds the clear epoch so freshly-loaded post-clear data is not immediately treated as stale', async () => {
+	const dir = tmpDir();
+
+	const first = makeManager(dir);
+	first.setCachedSessionData('/a.json', entry(1000), 10);
+	await first.writeSharedSnapshot();
+	await first.deleteSharedSnapshot(); // simulates clearCache(): advances the durable epoch
+
+	const second = makeManager(dir);
+	await second.loadCacheFromStorage(); // must seed local epoch to the post-clear value, not 0
+	second.setCachedSessionData('/b.json', entry(2000), 10);
+	await second.writeSharedSnapshot();
+
+	const entries = await second.readSharedSnapshot();
+	assert.ok(entries && '/b.json' in entries!,
+		'a save made after loadCacheFromStorage() seeded the epoch must not be wrongly treated as predating a past clear');
+});
+
 test('writeSharedSnapshot() still strips a disk entry that is the same age as or older than the tombstoned deletion', async () => {
 	const dir = tmpDir();
 	const writer = makeManager(dir);

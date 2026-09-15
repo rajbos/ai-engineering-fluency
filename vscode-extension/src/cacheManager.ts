@@ -47,6 +47,11 @@ export class CacheManager {
 	private readonly cacheVersion: number;
 	private readonly policy: CachePolicy<SessionFileCache>;
 	private lastLoadedSnapshotMtime = 0;
+	// The durable clear epoch (see getClearEpochPath()) this window's in-memory cache is known
+	// consistent with. Starts at 0 (nothing loaded yet) and is seeded from disk by
+	// loadCacheFromStorage(), advanced locally by deleteSharedSnapshot() (this window clearing),
+	// and advanced from disk by checkClearEpoch() (another window clearing).
+	private clearEpoch = 0;
 	// Checkpoint tracking
 	private lastCheckpointTime = 0;
 	private entriesSinceLastCheckpoint = 0;
@@ -557,6 +562,11 @@ export class CacheManager {
 	 */
 	async loadCacheFromStorage(): Promise<void> {
 		const loadStartedAt = Date.now();
+		// Seed the local clear-epoch baseline from disk before loading anything, so a clear that
+		// happened before this window even started does not immediately look like a *new* clear to
+		// checkClearEpoch() and wrongly discard the (already post-clear) data this call is about to
+		// load. See getClearEpochPath()'s doc comment for the full cross-window contract.
+		this.clearEpoch = await this.readClearEpoch();
 		try {
 			const cacheId = this.getCacheIdentifier();
 
@@ -689,14 +699,103 @@ export class CacheManager {
 	}
 
 	/**
+	 * Get the path for the durable cross-window clear-epoch marker.
+	 *
+	 * Deleting the shared snapshot only stops THIS window's own data from being reloaded after a
+	 * restart. It does nothing about a PEER window: that window's in-memory cache and its own
+	 * checkpoint/save bookkeeping are entirely its own process's state, so a save it later builds
+	 * from data assembled before this clear — from its own untouched cache — can still republish
+	 * stale data to the (now-supposedly-empty) shared snapshot. Worse, that peer can keep *serving*
+	 * its stale in-memory cache to its own UI even before it ever saves anything, which a write-side
+	 * fix alone cannot touch.
+	 *
+	 * This marker is the durable, cross-window fence for both halves: `deleteSharedSnapshot()`
+	 * advances it whenever a clear happens (in this window), `writeSharedSnapshot()` checks it
+	 * immediately before publishing (the writer half), and `loadSharedSnapshotIfChanged()` checks
+	 * it once per refresh cycle (the loader half, so a peer window stops serving pre-clear data
+	 * from memory, not just stops persisting it). See `checkClearEpoch()` for the shared check.
+	 */
+	getClearEpochPath(): string {
+		const cacheId = this.getCacheIdentifier();
+		return path.join(this.context.globalStorageUri.fsPath, `cache_${cacheId}.epoch.json`);
+	}
+
+	/**
+	 * Read the persisted clear epoch. Missing, corrupt, or unparseable content fails open as epoch
+	 * 0 (i.e. "no clear known") rather than blocking cache loading or saving — consistent with this
+	 * file's general lock-staleness handling (see `handleExistingLock()`).
+	 */
+	private async readClearEpoch(): Promise<number> {
+		try {
+			const content = await fs.promises.readFile(this.getClearEpochPath(), 'utf-8');
+			const parsed = JSON.parse(content);
+			return typeof parsed?.epoch === 'number' && Number.isFinite(parsed.epoch) ? parsed.epoch : 0;
+		} catch {
+			return 0;
+		}
+	}
+
+	/**
+	 * Advance the durable clear epoch past whatever any window (including this one) has seen so
+	 * far, and adopt it locally. Best-effort: on a write failure the local epoch still advances, so
+	 * this process at least does not itself republish or keep serving what it just cleared — but a
+	 * peer that never sees the new file falls back to the same-process protections that already
+	 * existed (this is a strict addition, not a replacement for them).
+	 */
+	private async bumpClearEpoch(): Promise<void> {
+		const epochPath = this.getClearEpochPath();
+		const newEpoch = Date.now();
+		const tmpPath = `${epochPath}.${process.pid}.${newEpoch}.tmp`;
+		try {
+			await fs.promises.mkdir(path.dirname(epochPath), { recursive: true });
+			await fs.promises.writeFile(tmpPath, JSON.stringify({ epoch: newEpoch }));
+			await fs.promises.rename(tmpPath, epochPath);
+		} catch (error) {
+			this.deps.warn(`Failed to persist clear epoch: ${error}`);
+			try { await fs.promises.unlink(tmpPath); } catch { /* best-effort cleanup */ }
+		}
+		this.clearEpoch = newEpoch;
+	}
+
+	/**
+	 * Check whether a clear has happened (in this window or a peer's) since this window's
+	 * in-memory cache was last known consistent, and if so, drop the now-possibly-stale in-memory
+	 * state so this window stops *serving* pre-clear data, not just stops persisting it.
+	 *
+	 * Cheap — one small file read — and meant to be called once per publish/refresh cycle (see
+	 * `writeSharedSnapshot()` and `loadSharedSnapshotIfChanged()`), never per parsed file.
+	 *
+	 * Returns true if a newer epoch was found and the in-memory cache was dropped.
+	 */
+	private async checkClearEpoch(): Promise<boolean> {
+		const persisted = await this.readClearEpoch();
+		if (persisted <= this.clearEpoch) {
+			return false;
+		}
+		this.deps.log(`Detected cache clear from another window (epoch ${this.clearEpoch} -> ${persisted}); dropping in-memory cache`);
+		this.sessionFileCache = new Map();
+		this.deletedFilePaths = new Map();
+		this.clearEpoch = persisted;
+		return true;
+	}
+
+	/**
 	 * Atomically write the in-memory cache to the shared snapshot file.
 	 *
 	 * The write MERGES with whatever is already on disk (keeping the newer entry by
 	 * mtime) so that a window with a partial/stale cache can never regress a richer
 	 * snapshot published by another window. Must be called while holding the cache
 	 * lock to keep the read-modify-write atomic across windows.
+	 *
+	 * Checks the durable clear epoch first: a save built from data assembled before a clear (in
+	 * this window or a peer's) must not publish that stale data after the clear. See
+	 * `getClearEpochPath()` for the full contract.
 	 */
 	async writeSharedSnapshot(): Promise<void> {
+		if (await this.checkClearEpoch()) {
+			this.deps.log('Skipping shared snapshot publish: in-memory cache predates a detected clear');
+			return;
+		}
 		const snapshotPath = this.getSharedSnapshotPath();
 		const tmpPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
 		try {
@@ -724,8 +823,13 @@ export class CacheManager {
 	}
 
 	/**
-	 * Delete the shared on-disk snapshot and reset the loaded-mtime bookmark.
-	 * Called by clearCache() so that restarting VS Code does not restore cleared data.
+	 * Delete the shared on-disk snapshot, reset the loaded-mtime bookmark, and advance the durable
+	 * clear epoch. Called by clearCache() so that restarting VS Code does not restore cleared data,
+	 * and so that no peer window's later save (built from data it assembled before this clear) can
+	 * republish stale data, and no peer window keeps serving that stale data from its own memory
+	 * past its next check — see `getClearEpochPath()` for the full cross-window contract. The epoch
+	 * is advanced even when there was no snapshot file to delete, since the fence must hold
+	 * regardless of what was on disk at the time.
 	 */
 	async deleteSharedSnapshot(): Promise<void> {
 		const snapshotPath = this.getSharedSnapshotPath();
@@ -738,6 +842,7 @@ export class CacheManager {
 				this.deps.warn(`Failed to delete shared cache snapshot: ${err}`);
 			}
 		}
+		await this.bumpClearEpoch();
 	}
 
 	/**
@@ -811,6 +916,11 @@ export class CacheManager {
 	 */
 	async loadSharedSnapshotIfChanged(): Promise<number> {
 		const loadStartedAt = Date.now();
+		// The loader half of the clear-epoch fence: a clear published from another window must stop
+		// THIS window from continuing to serve its own pre-clear in-memory cache, not merely stop it
+		// from publishing. Called once per refresh cycle (this function's own call sites), not per
+		// file, matching writeSharedSnapshot()'s check on the write side. See getClearEpochPath().
+		await this.checkClearEpoch();
 		const snapshotPath = this.getSharedSnapshotPath();
 		let mtimeMs: number;
 		try {
