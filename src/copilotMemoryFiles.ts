@@ -30,6 +30,15 @@ const MEMORY_TOOL_SEGMENTS = ['memory-tool', 'memories'];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Standard base64 alphabet (RFC 4648 §4), with optional `=`/`==` padding. `Buffer.from(...,
+ * 'base64')` silently ignores characters outside this set instead of throwing, so a folder name
+ * with stray characters (e.g. a valid encoded UUID plus a trailing `!`) would otherwise decode to
+ * the same UUID and be misclassified as session scope. Reject anything that isn't valid base64
+ * before decoding.
+ */
+const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
 /** Default look-back threshold (days) beyond which a memory file is flagged as stale. */
 export const DEFAULT_STALE_DAYS = 90;
 /** Default size threshold (bytes) beyond which a memory file is flagged as unusually large. */
@@ -42,7 +51,7 @@ export const DEFAULT_LARGE_FILE_BYTES = 10 * 1024;
  * (e.g. the literal "repo" folder, or an unrecognized layout).
  */
 export function decodeSessionFolderName(folderName: string): string | undefined {
-	if (!folderName || folderName === 'repo') { return undefined; }
+	if (!folderName || folderName === 'repo' || !BASE64_RE.test(folderName)) { return undefined; }
 	try {
 		const decoded = Buffer.from(folderName, 'base64').toString('utf8');
 		return UUID_RE.test(decoded) ? decoded : undefined;
@@ -160,10 +169,14 @@ function discoverWorkspaceHashMemoryFiles(userPath: string, hash: string): Memor
 	for (const memoriesDir of memoriesDirs) {
 		for (const subDir of listSubDirNames(memoriesDir)) {
 			const isRepoScope = subDir === 'repo';
-			const sessionId = isRepoScope ? undefined : decodeSessionFolderName(subDir);
-			// Anything under memories/ that isn't "repo" and doesn't decode to a session UUID is an
-			// unrecognized layout (future memory-tool version?) — skip it rather than misclassify it.
-			if (!isRepoScope && !sessionId) { continue; }
+			// Some memory-tool layouts (per current VS Code agent-memory docs) use a literal
+			// "session" folder rather than encoding the session UUID into the folder name.
+			const isLiteralSessionScope = subDir === 'session';
+			const sessionId = (isRepoScope || isLiteralSessionScope) ? undefined : decodeSessionFolderName(subDir);
+			// Anything under memories/ that isn't "repo"/"session" and doesn't decode to a session
+			// UUID is an unrecognized layout (future memory-tool version?) — skip it rather than
+			// misclassify it.
+			if (!isRepoScope && !isLiteralSessionScope && !sessionId) { continue; }
 			const scope: MemoryFileEntry['scope'] = isRepoScope ? 'repo' : 'session';
 
 			for (const file of listMdFiles(path.join(memoriesDir, subDir))) {
@@ -292,11 +305,26 @@ export function analyzeMemoryFiles(
 }
 
 /**
+ * Reduce a workspace folder path to its final path segment (basename), tolerating both POSIX
+ * and Windows separators regardless of the host OS `path` module in use (a WSL-discovered
+ * Windows path may use `\` while running on a POSIX `path` implementation, and vice versa).
+ * Used to keep only a non-identifying project-folder name in {@link MemoryFilesAnalysisView} —
+ * never the full absolute path.
+ */
+function basenameOfWorkspacePath(workspacePath: string): string {
+	const normalized = workspacePath.replace(/[/\\]+$/, '');
+	const segments = normalized.split(/[/\\]/);
+	return segments[segments.length - 1] || normalized;
+}
+
+/**
  * Project a full {@link MemoryFilesAnalysis} down to the compact {@link MemoryFilesAnalysisView}
  * the Usage Analysis webview actually renders: counts and rollup scalars, without the full
  * `files` list or each workspace's `staleFiles`/`largestFile`/`oldestMtimeMs` (absolute paths,
- * session IDs, per-file objects). Keeps the raw `analysis` available to the extension host
- * (e.g. the insights engine) and the CLI, which still need the full per-file detail.
+ * session IDs, per-file objects). `workspaceName` is reduced to its basename — the raw analysis
+ * carries the full workspace folder path (needed by the extension host's insights engine and the
+ * CLI report), but the webview's privacy/compact contract must not ship absolute paths for
+ * projects that may not even be open.
  */
 export function toMemoryFilesAnalysisView(analysis: MemoryFilesAnalysis | null): MemoryFilesAnalysisView | null {
 	if (!analysis) { return null; }
@@ -305,7 +333,7 @@ export function toMemoryFilesAnalysisView(analysis: MemoryFilesAnalysis | null):
 		largeFileBytes: analysis.largeFileBytes,
 		byWorkspace: analysis.byWorkspace.map(ws => ({
 			workspaceHash: ws.workspaceHash,
-			workspaceName: ws.workspaceName,
+			workspaceName: ws.workspaceName ? basenameOfWorkspacePath(ws.workspaceName) : ws.workspaceName,
 			repoCount: ws.repoCount,
 			sessionCount: ws.sessionCount,
 			userCount: ws.userCount,

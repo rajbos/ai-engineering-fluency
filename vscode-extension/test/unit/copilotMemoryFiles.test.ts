@@ -58,6 +58,13 @@ test('decodeSessionFolderName returns undefined for non-base64 / non-UUID names'
 	assert.equal(decodeSessionFolderName(''), undefined);
 });
 
+test('decodeSessionFolderName rejects a valid encoded UUID with trailing invalid characters', () => {
+	// Buffer.from(..., 'base64') silently ignores characters outside the base64 alphabet, so
+	// without alphabet validation this would previously decode to SESSION_UUID and be
+	// misclassified as a valid session folder.
+	assert.equal(decodeSessionFolderName(`${SESSION_FOLDER_NAME}!`), undefined);
+});
+
 // ---------------------------------------------------------------------------
 // discoverMemoryFilesInUserPath
 // ---------------------------------------------------------------------------
@@ -121,6 +128,22 @@ test('discoverMemoryFilesInUserPath skips unrecognized memory subfolders', () =>
 
 test('discoverMemoryFilesInUserPath returns [] for a nonexistent user path', () => {
 	assert.deepEqual(discoverMemoryFilesInUserPath(path.join(os.tmpdir(), 'does-not-exist-memowl')), []);
+});
+
+test('discoverMemoryFilesInUserPath treats a literal "session" folder as session scope', () => {
+	// Some memory-tool layouts use a literal "session" folder rather than encoding the session
+	// UUID into the folder name (per current VS Code agent-memory documentation).
+	const userPath = mkTmpDir('memowl-user-');
+	const hash = 'literal-session-hash';
+	writeFile(
+		path.join(userPath, 'workspaceStorage', hash, 'GitHub.copilot-chat', 'memory-tool', 'memories', 'session', 'plan.md'),
+		'# Plan',
+	);
+
+	const entries = discoverMemoryFilesInUserPath(userPath);
+	assert.equal(entries.length, 1);
+	assert.equal(entries[0].scope, 'session');
+	assert.equal(entries[0].sessionId, undefined);
 });
 
 test('discoverMemoryFilesInUserPath merges memory files across multiple coexisting extension-folder spellings, not just the first match', () => {
@@ -288,4 +311,28 @@ test('toMemoryFilesAnalysisView handles an analysis with no workspaces', () => {
 	assert.ok(view);
 	assert.deepEqual(view!.byWorkspace, []);
 	assert.equal(view!.totalFiles, 0);
+});
+
+test('toMemoryFilesAnalysisView reduces workspaceName to its basename, never the full path', () => {
+	const userPath = mkTmpDir('memowl-user-');
+	const hash = 'privacy-basename-hash';
+	writeFile(
+		path.join(userPath, 'workspaceStorage', hash, 'GitHub.copilot-chat', 'memory-tool', 'memories', 'repo', 'notes.md'),
+		'# Notes',
+	);
+	writeFile(
+		path.join(userPath, 'workspaceStorage', hash, 'workspace.json'),
+		JSON.stringify({ folder: 'file:///c%3A/Users/dev/some-secret-project' }),
+	);
+
+	const files = discoverMemoryFilesInUserPath(userPath);
+	const analysis = analyzeMemoryFiles(files);
+
+	// The raw analysis (consumed by the extension host / CLI) still carries the full path.
+	assert.match(analysis.byWorkspace[0].workspaceName ?? '', /some-secret-project$/);
+	assert.ok((analysis.byWorkspace[0].workspaceName ?? '').includes('Users'));
+
+	// The webview-facing view must never see anything beyond the final path segment.
+	const view = toMemoryFilesAnalysisView(analysis);
+	assert.equal(view!.byWorkspace[0].workspaceName, 'some-secret-project');
 });

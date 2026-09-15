@@ -167,20 +167,36 @@ export async function getWSLWindowsPaths(): Promise<string[]> {
  */
 export function getWSLWindowsPathsSync(): string[] {
 	if (!isWSL()) { return []; }
-	const out: string[] = [];
 	const windowsUsersDir = '/mnt/c/Users';
+	const windowsUsernames: string[] = [];
+
+	// USERPROFILE in WSL is sometimes set to a /mnt/c/Users/<name> path. Collect it before
+	// (and independently of) directory enumeration so a profile-derived root is still found
+	// when /mnt/c/Users itself can't be listed (see getWSLWindowsPaths above).
+	const userprofile = process.env.USERPROFILE;
+	if (userprofile) {
+		const match = userprofile.match(/^\/mnt\/[a-z]\/Users\/([^/]+)/);
+		if (match) { windowsUsernames.push(match[1]); }
+	}
+
 	try {
 		const entries = fs.readdirSync(windowsUsersDir, { withFileTypes: true });
 		for (const entry of entries) {
 			if (!entry.isDirectory() || entry.name.startsWith('.') || SYSTEM_USER_FOLDERS.has(entry.name)) {
 				continue;
 			}
-			for (const variant of VSCODE_VARIANTS) {
-				out.push(path.join(windowsUsersDir, entry.name, 'AppData', 'Roaming', variant, 'User'));
-			}
+			if (!windowsUsernames.includes(entry.name)) { windowsUsernames.push(entry.name); }
 		}
 	} catch {
-		/* /mnt/c not accessible — skip */
+		/* /mnt/c not accessible — fall through with whatever USERPROFILE gave us */
+	}
+
+	const out: string[] = [];
+	for (const winUser of windowsUsernames) {
+		const appData = path.join(windowsUsersDir, winUser, 'AppData', 'Roaming');
+		for (const variant of VSCODE_VARIANTS) {
+			out.push(path.join(appData, variant, 'User'));
+		}
 	}
 	return out;
 }
