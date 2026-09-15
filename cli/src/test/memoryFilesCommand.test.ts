@@ -39,3 +39,11 @@ test('resolveMemoryFilesThresholds clamps negative values to the 1 floor', () =>
 	assert.equal(result.staleDays, 1);
 	assert.equal(result.largeFileBytes, 1024);
 });
+
+test('resolveMemoryFilesThresholds falls back to defaults for a value with trailing non-digit characters', () => {
+	// parseInt('30days', 10) === 30 — strict validation must reject this instead of
+	// silently truncating it to a numeric prefix.
+	const result = resolveMemoryFilesThresholds({ staleDays: '30days', largeKb: '5kb' });
+	assert.equal(result.staleDays, DEFAULT_STALE_DAYS);
+	assert.equal(result.largeFileBytes, DEFAULT_LARGE_FILE_BYTES);
+});

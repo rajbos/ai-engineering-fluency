@@ -319,7 +319,10 @@ export function analyzeMemoryFiles(
 function basenameOfWorkspacePath(workspacePath: string): string {
 	const normalized = workspacePath.replace(/[/\\]+$/, '');
 	const segments = normalized.split(/[/\\]/);
-	return segments[segments.length - 1] || normalized;
+	// A root path (e.g. "/" or "C:\") has its trailing separator trimmed away entirely,
+	// leaving `normalized` (and therefore the last segment) empty. Fall back to the original,
+	// untrimmed path so a root workspace still renders a label instead of an empty string.
+	return segments[segments.length - 1] || normalized || workspacePath;
 }
 
 /**

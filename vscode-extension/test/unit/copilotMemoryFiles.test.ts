@@ -11,6 +11,7 @@ import {
 	analyzeMemoryFiles,
 	toMemoryFilesAnalysisView,
 } from '../../../src/copilotMemoryFiles';
+import type { MemoryFilesAnalysis } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Temp directory registry — all dirs created via mkTmpDir() are removed after
@@ -335,4 +336,33 @@ test('toMemoryFilesAnalysisView reduces workspaceName to its basename, never the
 	// The webview-facing view must never see anything beyond the final path segment.
 	const view = toMemoryFilesAnalysisView(analysis);
 	assert.equal(view!.byWorkspace[0].workspaceName, 'some-secret-project');
+});
+
+test('toMemoryFilesAnalysisView falls back to the original path for a root workspace, instead of an empty label', () => {
+	// A root path ("/" or "C:\") has its trailing separator trimmed away entirely by
+	// basenameOfWorkspacePath's normalization step, leaving nothing to take a "last segment"
+	// from — this must fall back to the original path rather than rendering an empty string.
+	const analysis: MemoryFilesAnalysis = {
+		staleDays: 90,
+		largeFileBytes: 1024,
+		files: [],
+		byWorkspace: [{
+			workspaceHash: 'root-hash',
+			workspaceName: '/',
+			repoCount: 1,
+			sessionCount: 0,
+			userCount: 0,
+			totalBytes: 0,
+			newestMtimeMs: null,
+			oldestMtimeMs: null,
+			staleFiles: [],
+		}],
+		totalFiles: 0,
+		totalBytes: 0,
+		staleFileCount: 0,
+		largeFileCount: 0,
+	};
+
+	const view = toMemoryFilesAnalysisView(analysis);
+	assert.equal(view!.byWorkspace[0].workspaceName, '/');
 });
