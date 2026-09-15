@@ -122,3 +122,32 @@ test('resolveStuckLoadingPanelsAsFailed() installs the failure page on every reg
 	assert.ok(clearIndex !== -1 && failureAssignIndex < clearIndex,
 		'must clear _refreshLoadingPanels only after every panel in it has been resolved with the failure page');
 });
+
+test('updateDetailsPanelIfOpen() falls back to the failure page if rendering real content throws', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private updateDetailsPanelIfOpen(detailedStats: DetailedStats, silent: boolean): void {');
+
+	// The panel is removed from _refreshLoadingPanels (and _detailsPanelIsLoading cleared) before
+	// the render is attempted, so resolveStuckLoadingPanelsAsFailed() can no longer find it if that
+	// render throws — this method must handle its own failure instead of relying on that fallback.
+	const registryClearIndex = body.indexOf('this._refreshLoadingPanels.delete(this.detailsPanel);');
+	const tryIndex = body.indexOf('try {');
+	const renderIndex = body.indexOf('this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, detailedStats);');
+	const catchFailureHtmlIndex = body.indexOf('this.detailsPanel.webview.html = this.getRefreshFailedHtml(this.detailsPanel.webview);');
+	assert.ok(registryClearIndex !== -1 && tryIndex !== -1 && renderIndex !== -1 && catchFailureHtmlIndex !== -1,
+		'must remove the panel from the loading registry, then attempt the real render inside a try, with a getRefreshFailedHtml() fallback in the catch');
+	assert.ok(registryClearIndex < tryIndex && tryIndex < renderIndex && renderIndex < catchFailureHtmlIndex,
+		'the failure fallback must run after a real render throws, not before or in place of attempting it');
+});
+
+test('updateEnvironmentalPanelIfOpen() falls back to the failure page if rendering real content throws', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private updateEnvironmentalPanelIfOpen(detailedStats: DetailedStats, silent: boolean): void {');
+
+	const registryClearIndex = body.indexOf('this._refreshLoadingPanels.delete(this.environmentalPanel);');
+	const tryIndex = body.indexOf('try {');
+	const renderIndex = body.indexOf('this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, detailedStats);');
+	const catchFailureHtmlIndex = body.indexOf('this.environmentalPanel.webview.html = this.getRefreshFailedHtml(this.environmentalPanel.webview);');
+	assert.ok(registryClearIndex !== -1 && tryIndex !== -1 && renderIndex !== -1 && catchFailureHtmlIndex !== -1,
+		'must remove the panel from the loading registry, then attempt the real render inside a try, with a getRefreshFailedHtml() fallback in the catch');
+	assert.ok(registryClearIndex < tryIndex && tryIndex < renderIndex && renderIndex < catchFailureHtmlIndex,
+		'the failure fallback must run after a real render throws, not before or in place of attempting it');
+});

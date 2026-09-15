@@ -5172,7 +5172,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// _refreshLoadingPanels (a future loadingStep broadcast would hit its real content).
 			this._refreshLoadingPanels.delete(this.detailsPanel);
 			this._detailsPanelIsLoading = false;
-			this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, detailedStats);
+			try {
+				this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, detailedStats);
+			} catch (err) {
+				this.error('❌ Failed to render Details panel after refresh', err);
+				// Already out of _refreshLoadingPanels above — without this fallback a render
+				// exception here would leave the panel frozen on the loading screen with no
+				// further messages and no way to retry (see loadDetailsIntoPanel()'s own catch).
+				this.detailsPanel.webview.html = this.getRefreshFailedHtml(this.detailsPanel.webview);
+			}
 		}
 	}
 
@@ -5253,7 +5261,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// here first clears this panel's loading-tracking state, since a superseded run
 			// deliberately leaves it registered for the replacement run to publish into.
 			this._refreshLoadingPanels.delete(this.environmentalPanel);
-			this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, detailedStats);
+			try {
+				this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, detailedStats);
+			} catch (err) {
+				this.error('❌ Failed to render Environmental panel after refresh', err);
+				// Same rationale as updateDetailsPanelIfOpen()'s catch: already out of
+				// _refreshLoadingPanels above, so a render exception here needs its own fallback
+				// or the panel is left frozen on the loading screen with no way to retry.
+				this.environmentalPanel.webview.html = this.getRefreshFailedHtml(this.environmentalPanel.webview);
+			}
 		}
 	}
 
