@@ -1,0 +1,24 @@
+# Code owners for CI and agent configuration.
+#
+# Why this file exists: on a `pull_request` event GitHub runs the PR's own copy
+# of the workflow files and of any local composite action they call. A pull
+# request can therefore rewrite the logic behind a required status check - the
+# "CI result", "Build result" and "CodeQL result" anchors call
+# ./.github/actions/check-gated-results out of the PR's checkout - and have it
+# report success while the real jobs are broken.
+#
+# No amount of hardening inside the workflow closes that, because the workflow
+# itself is equally PR-controlled. Human review of these paths is the control.
+#
+# This takes effect only when branch protection (or a ruleset) on the default
+# branch has "Require review from Code Owners" enabled. Without that toggle
+# these entries request reviewers but block nothing.
+
+# Workflows, composite actions, and the instructions/skills/agents that both
+# Copilot and Claude Code load automatically.
+/.github/     @rajbos @FokkoVeegens
+
+# Repository-wide agent instructions. Every coding agent reads these at the
+# start of a run, so an edit here redirects all future agent behaviour.
+/AGENTS.md    @rajbos @FokkoVeegens
+/CLAUDE.md    @rajbos @FokkoVeegens
