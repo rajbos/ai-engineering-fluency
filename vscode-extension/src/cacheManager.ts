@@ -741,10 +741,18 @@ export class CacheManager {
 	 * this process at least does not itself republish or keep serving what it just cleared — but a
 	 * peer that never sees the new file falls back to the same-process protections that already
 	 * existed (this is a strict addition, not a replacement for them).
+	 *
+	 * The new epoch is `max(Date.now(), persisted + 1)`, not a bare timestamp: two clears close
+	 * together (this window twice, or racing a peer's own clear) must never produce the same or a
+	 * lower value — checkClearEpoch()'s `persisted <= this.clearEpoch` comparison would silently
+	 * treat a non-advancing epoch as "no clear happened". A bare `Date.now()` can fail to advance
+	 * across two back-to-back calls (millisecond-granularity clock, or a backward NTP/VM time step),
+	 * so the floor is always one past whatever is already on disk.
 	 */
 	private async bumpClearEpoch(): Promise<void> {
 		const epochPath = this.getClearEpochPath();
-		const newEpoch = Date.now();
+		const persisted = await this.readClearEpoch();
+		const newEpoch = Math.max(Date.now(), persisted + 1);
 		const tmpPath = `${epochPath}.${process.pid}.${newEpoch}.tmp`;
 		try {
 			await fs.promises.mkdir(path.dirname(epochPath), { recursive: true });

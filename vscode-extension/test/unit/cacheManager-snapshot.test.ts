@@ -663,6 +663,28 @@ test('a save that started before the clear epoch is skipped only once; the next 
 	assert.ok(entries && '/c.json' in entries!, 'a save made after re-syncing with the clear epoch must publish normally');
 });
 
+// GitHub Copilot review on PR #2107 flagged two risks: the epoch write relying on rename() to
+// overwrite an already-existing marker file (a concern on Windows for some replace strategies),
+// and the epoch not being guaranteed to strictly advance across two close-together clears (e.g. a
+// millisecond-granularity clock, or a backward NTP/VM time step). This test exercises both at
+// once: two back-to-back clears necessarily rename over the marker the first clear just wrote, and
+// must still produce a strictly greater epoch each time — on every platform CI runs this suite on,
+// Windows included.
+test('deleteSharedSnapshot() advances the clear epoch strictly, including two clears back-to-back', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	await m.deleteSharedSnapshot();
+	const first = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+	assert.equal(typeof first, 'number');
+
+	await m.deleteSharedSnapshot();
+	const second = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+
+	assert.ok(second > first,
+		`the second clear's epoch (${second}) must be strictly greater than the first (${first}) — a non-advancing epoch would let checkClearEpoch() silently miss the second clear`);
+});
+
 test('a missing or corrupt clear-epoch marker fails open (writeSharedSnapshot still publishes)', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
