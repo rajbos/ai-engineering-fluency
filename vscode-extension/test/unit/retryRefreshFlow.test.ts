@@ -14,26 +14,10 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { extractBracesBlock } from './sourceStructureTestHelpers';
 
 const EXTENSION_SRC_PATH = path.join(__dirname, '../../../../src/extension.ts');
 const EXTENSION_SRC = fs.readFileSync(EXTENSION_SRC_PATH, 'utf8');
-
-/** Extract the full `{ ... }` block starting at the first `{` found after `marker` (brace-balanced). */
-function extractBracesBlock(source: string, marker: string): string {
-	const markerIndex = source.indexOf(marker);
-	assert.notEqual(markerIndex, -1, `marker not found in extension.ts: ${marker}`);
-	const braceStart = source.indexOf('{', markerIndex);
-	assert.notEqual(braceStart, -1, `no '{' found after marker in extension.ts: ${marker}`);
-	let depth = 0;
-	for (let i = braceStart; i < source.length; i++) {
-		if (source[i] === '{') { depth++; }
-		else if (source[i] === '}') {
-			depth--;
-			if (depth === 0) { return source.slice(markerIndex, i + 1); }
-		}
-	}
-	throw new Error(`unbalanced braces while scanning for marker: ${marker}`);
-}
 
 /**
  * Index of the "stay on the loading screen, a superseded run isn't a genuine failure" guard,

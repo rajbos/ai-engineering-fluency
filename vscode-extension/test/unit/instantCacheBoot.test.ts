@@ -41,29 +41,13 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { normalizePathForDedup, dedupeByNormalizedKeyKeepGreatest } from '../../../src/utils/pathUtils';
+import { extractBracesBlock } from './sourceStructureTestHelpers';
 
 // Compiled test output lives under out/vscode-extension/test/unit (tsconfig.tests.json's
 // rootDir is the repo root), so __dirname does not sit next to the real source tree —
 // walk back up to the vscode-extension package root, then down into src/.
 const EXTENSION_SRC_PATH = path.join(__dirname, '../../../../src/extension.ts');
 const EXTENSION_SRC = fs.readFileSync(EXTENSION_SRC_PATH, 'utf8');
-
-/** Extract the full `{ ... }` block starting at the first `{` found after `marker` (brace-balanced). */
-function extractBracesBlock(source: string, marker: string): string {
-	const markerIndex = source.indexOf(marker);
-	assert.notEqual(markerIndex, -1, `marker not found in extension.ts: ${marker}`);
-	const braceStart = source.indexOf('{', markerIndex);
-	assert.notEqual(braceStart, -1, `no '{' found after marker in extension.ts: ${marker}`);
-	let depth = 0;
-	for (let i = braceStart; i < source.length; i++) {
-		if (source[i] === '{') { depth++; }
-		else if (source[i] === '}') {
-			depth--;
-			if (depth === 0) { return source.slice(markerIndex, i + 1); }
-		}
-	}
-	throw new Error(`unbalanced braces while scanning for marker: ${marker}`);
-}
 
 /** Slice the source between two unique markers (inclusive of both), for spans that aren't a single balanced-brace block (e.g. a few statements inside a larger function). */
 function sliceBetween(source: string, startMarker: string, endMarker: string): string {

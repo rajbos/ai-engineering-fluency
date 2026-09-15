@@ -114,9 +114,12 @@ export function createSemaphore(permits: number): Semaphore {
       // NaN/negative/Infinity would otherwise reach setTimeout() uncaught: Node coerces an
       // invalid delay to 0, so a caller error here would surface as a confusing immediate
       // false timeout (or, for Infinity, a delay so large it behaves as if never passed) rather
-      // than a clear failure at the call site that got it wrong.
+      // than a clear failure at the call site that got it wrong. Returned as a rejection rather
+      // than thrown: acquire() is typed as always returning a Promise, so a synchronous throw here
+      // would force every caller to handle both a sync exception and an async rejection instead of
+      // just awaiting and catching one consistent failure mode.
       if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs < 0)) {
-        throw new RangeError('acquire() timeoutMs must be a finite non-negative number');
+        return Promise.reject(new RangeError('acquire() timeoutMs must be a finite non-negative number'));
       }
       if (available > 0) {
         available--;
