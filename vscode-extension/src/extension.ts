@@ -4076,6 +4076,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 					await gate.wait();
 					continue;
 				}
+				// Reserve this worker's queue item before awaiting anything below: the length check
+				// above and this increment must run in the same synchronous tick (no `await` between
+				// them), or multiple workers can pass that check against the same stale `readIndex`
+				// — a final batch with fewer items than parked workers — and only the first to resume
+				// after acquiring a permit claims a real file; the rest each get `queue[readIndex]`
+				// past the end (`undefined`), wasting a permit and never processing anything.
+				const sessionFile = queue[readIndex++];
 				// Backpressure: hold a permit from a MAX_CONCURRENT_DEFERRED_PARSES-sized semaphore
 				// for the whole duration of this file's processing — brief for a normal file,
 				// however long it takes for one that gets deferred. Deferring doesn't cancel a slow
@@ -4100,7 +4107,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 					await this._deferredParseReserve.acquire();
 					release = () => this._deferredParseReserve.release();
 				}
-				const sessionFile = queue[readIndex++];
 				const wasDeferred = await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget, release);
 				if (!wasDeferred) {
 					release();

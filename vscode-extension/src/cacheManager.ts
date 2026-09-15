@@ -943,10 +943,12 @@ export class CacheManager {
 	 * file instead closes both gaps: any writer, in this window or a peer's, holds this exact lock
 	 * for the small window between its own read and its rename, so acquiring it first guarantees no
 	 * writer's rename can land after this delete. Proceeds anyway once the retry budget is spent
-	 * rather than blocking "Clear Cache" indefinitely on a peer holding a stuck lock.
+	 * (see acquireCacheLockWithRetry()) rather than blocking "Clear Cache" forever on a peer
+	 * holding a stuck lock — that residual gap only matters against a writer that neither finishes
+	 * nor gets its stale lock broken within that budget, an accepted trade-off documented there.
 	 */
-	async deleteSharedSnapshot(): Promise<void> {
-		const lockAcquired = await this.acquireCacheLockWithRetry();
+	async deleteSharedSnapshot(retryOptions?: { attempts: number; delayMs: number }): Promise<void> {
+		const lockAcquired = await this.acquireCacheLockWithRetry(retryOptions);
 		try {
 			const snapshotPath = this.getSharedSnapshotPath();
 			try {
@@ -964,14 +966,28 @@ export class CacheManager {
 	}
 
 	/**
-	 * Retries acquireCacheLock() briefly instead of giving up on the first miss. A legitimate
-	 * writer (this window's own checkpoint/refresh save, or another window's) only holds this lock
-	 * for the duration of a small JSON read+write+rename — milliseconds — so a short bounded retry
-	 * is enough to wait it out without risking an indefinite hang if a peer's lock is stuck.
+	 * Retries acquireCacheLock() instead of giving up on the first miss.
+	 *
+	 * A legitimate writer holds this lock for its full read+merge+serialize+write+rename
+	 * sequence — normally milliseconds, but a large snapshot (SNAPSHOT_MAX_ENTRIES caps it at
+	 * 20,000 entries) on a slow disk can meaningfully exceed that. The retry budget here (10s) is
+	 * sized for that realistic case, not just the fast common one, so deleteSharedSnapshot() does
+	 * not race a legitimate large-cache write nearly as often as a short retry would.
+	 *
+	 * It remains a bounded retry, not an indefinite wait, for a genuinely stuck peer (e.g. a lock
+	 * orphaned by a crashed window): acquireCacheLock() already breaks a lock whose owner process
+	 * is dead, and handleExistingLock()'s own 5-minute staleness threshold breaks one whose owner
+	 * is merely idle-but-alive, so this retry only ever waits out a lock actively being renewed by
+	 * a live, legitimately-working writer or a fixed worst case. Proceeding once this budget is
+	 * spent, rather than blocking "Clear Cache" indefinitely, is an accepted trade-off — the same
+	 * shape as the unbounded-reserve-wait trade-off already accepted elsewhere in this PR for the
+	 * deferred-parse semaphore.
 	 */
-	private async acquireCacheLockWithRetry(): Promise<boolean> {
-		const RETRY_ATTEMPTS = 10;
-		const RETRY_DELAY_MS = 50;
+	private async acquireCacheLockWithRetry(retryOptions?: { attempts: number; delayMs: number }): Promise<boolean> {
+		// Overridable only for tests, to exercise the retry/give-up behavior without a real test
+		// waiting out the full production budget above.
+		const RETRY_ATTEMPTS = retryOptions?.attempts ?? 100;
+		const RETRY_DELAY_MS = retryOptions?.delayMs ?? 100;
 		for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
 			if (await this.acquireCacheLock()) { return true; }
 			await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));

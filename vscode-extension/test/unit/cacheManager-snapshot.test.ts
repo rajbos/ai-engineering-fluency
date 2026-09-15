@@ -877,10 +877,11 @@ test('deleteSharedSnapshot() proceeds anyway once its retry budget is spent agai
 	await m.writeSharedSnapshot();
 
 	// A lock that is never released (simulating a genuinely stuck peer) must not hang "Clear
-	// Cache" forever.
+	// Cache" forever. A small retry budget here exercises the same give-up path as production's
+	// 10s/100ms default without a real test waiting out the full 10 seconds.
 	fs.writeFileSync(m.getCacheLockPath(), JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
 
-	await m.deleteSharedSnapshot();
+	await m.deleteSharedSnapshot({ attempts: 3, delayMs: 5 });
 
 	assert.equal(fs.existsSync(m.getSharedSnapshotPath()), false, 'the snapshot must still be deleted even without the lock, rather than leaving Clear Cache stuck');
 });
