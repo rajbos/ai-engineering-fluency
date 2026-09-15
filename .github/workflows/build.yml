@@ -192,9 +192,9 @@ jobs:
 
   # Stable required-check anchor.
   #
-  # build-and-test keeps a real matrix (3 OSes), and GitHub evaluates a
+  # build-and-test keeps a real matrix (2 OSes), and GitHub evaluates a
   # job-level `if` BEFORE expanding the matrix: when the gate skips it, the run
-  # reports one skipped check named "build-and-test", not the three
+  # reports one skipped check named "build-and-test", not the two
   # "build-and-test (<os>, 24.x)" names it reports when it runs. A required
   # status check cannot match both spellings.
   #
