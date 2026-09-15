@@ -195,6 +195,8 @@ export function getLoadingHtmlScript(startedAtMs: number = Date.now()): string {
                 var sub0 = document.getElementById('subtitle'); if (sub0) sub0.textContent = 'Discovering session files...';
                 var bf0 = document.getElementById('badge-files'); if (bf0) bf0.textContent = '– files';
                 var row0 = document.getElementById('editors-row'); if (row0) row0.innerHTML = '';
+                var scd0 = document.getElementById('sc-discover'); if (scd0) scd0.textContent = '';
+                var scp0 = document.getElementById('sc-parse'); if (scp0) scp0.textContent = '';
             } else if (m.step === 'parsing') {
                 var total = m.total || 0;
                 if (m.editors !== undefined) { EDITORS = m.editors; editorsSeen = 0; }

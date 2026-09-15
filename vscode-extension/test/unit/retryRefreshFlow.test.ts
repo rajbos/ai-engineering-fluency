@@ -61,6 +61,17 @@ test('loadDetailsIntoPanel() shows the loading screen before awaiting, and the f
 	const registryClearIndex = body.indexOf('this._refreshLoadingPanels.delete(panel);', supersededGuardIndex);
 	assert.ok(registryClearIndex !== -1 && supersededGuardIndex < registryClearIndex && registryClearIndex < failureHtmlIndex,
 		'must remove the panel from _refreshLoadingPanels before rendering the failure page, once the run is confirmed to actually belong to this call');
+
+	// Once past the superseded check, a successful (or genuinely failed) result can still have
+	// already been handled elsewhere: publishRefreshResult()'s own non-silent render already
+	// deletes this same panel from the registry as part of the very updateTokenStats() call this
+	// method itself awaited, and a genuine failure is instead resolved by
+	// resolveStuckLoadingPanelsAsFailed(). Re-rendering here regardless would overwrite already-
+	// current content (including any UI state the user changed while evaluateAndSurfaceInsights()
+	// awaited an interactive insight toast) for no benefit.
+	const alreadyHandledGuardIndex = body.indexOf('if (!this._refreshLoadingPanels.has(panel)) {');
+	assert.ok(alreadyHandledGuardIndex !== -1 && supersededGuardIndex < alreadyHandledGuardIndex && alreadyHandledGuardIndex < registryClearIndex,
+		'must skip taking ownership of the render when the panel was already removed from _refreshLoadingPanels by someone else, checked after the superseded guard and before claiming the panel for this call\'s own render');
 });
 
 test('loadEnvironmentalIntoPanel() mirrors loadDetailsIntoPanel()\'s loading/failure sequencing', () => {
@@ -75,6 +86,13 @@ test('loadEnvironmentalIntoPanel() mirrors loadDetailsIntoPanel()\'s loading/fai
 		'loadEnvironmentalIntoPanel() must show the loading screen, await a refresh, guard against a superseded run, and fall back to the failure page — same as loadDetailsIntoPanel()');
 	assert.ok(loadingHtmlIndex < awaitIndex && awaitIndex < supersededGuardIndex && supersededGuardIndex < failureHtmlIndex,
 		'loadEnvironmentalIntoPanel() must keep the same ordering as loadDetailsIntoPanel(): paint loading, await, check superseded, then (only then) render the failure page');
+
+	// Same already-handled guard as loadDetailsIntoPanel() — see that test's own rationale.
+	const registryClearIndex = body.indexOf('this._refreshLoadingPanels.delete(panel);', supersededGuardIndex);
+	const alreadyHandledGuardIndex = body.indexOf('if (!this._refreshLoadingPanels.has(panel)) {');
+	assert.ok(alreadyHandledGuardIndex !== -1 && registryClearIndex !== -1 &&
+		supersededGuardIndex < alreadyHandledGuardIndex && alreadyHandledGuardIndex < registryClearIndex,
+		'must skip taking ownership of the render when the panel was already removed from _refreshLoadingPanels by someone else');
 });
 
 test('the Details panel message handler routes retryRefresh to loadDetailsIntoPanel(panel), not plain refreshDetailsPanel()', () => {

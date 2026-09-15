@@ -387,8 +387,15 @@ test('isDiscoveryUntrustworthyForBackfill() detects the empty-discovery-but-cach
 test('_runRefreshCore() skips the one-time full-year chart backfill when discovery is untrustworthy, or this window is a follower', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {');
 
-	const backfillCallIndex = body.indexOf('void this.calculateDailyStats(365, sessionFiles);');
+	const backfillCallIndex = body.indexOf('const backfill = this.calculateDailyStats(365, sessionFiles);');
 	assert.ok(backfillCallIndex !== -1, '_runRefreshCore() must still perform the one-time full-year backfill call');
+
+	// Tracked (not just detached with a bare `void`) so clearCache() can wait it out — see
+	// _pendingFullYearBackfill's own doc comment: this backfill reparses files and calls
+	// setCachedSessionData() well after _runRefreshCore()'s own promise has already resolved, so a
+	// clear landing during it could otherwise be silently repopulated.
+	assert.ok(body.indexOf('this._pendingFullYearBackfill = backfill;', backfillCallIndex) !== -1,
+		'the backfill promise must be tracked in _pendingFullYearBackfill, not just fired with a bare `void`, or clearCache() cannot wait for it');
 
 	// calculateDailyStats(365, sessionFiles) reparses every discovered file with no missBudget/
 	// follower awareness at all, unlike the regular per-refresh preload just above it (which passes
@@ -600,9 +607,21 @@ test('clearCache() waits for in-flight deferred parses before clearing, so a str
 	// _updateTokenStatsInFlight with a run a single, non-looped pass would never have captured. Both
 	// waits must therefore sit inside a loop that only exits once one full pass finds nothing left
 	// outstanding, not run once each.
-	const loopIndex = body.indexOf('while (this._updateTokenStatsInFlight || this._deferredSessionPreloadPromises.size > 0) {');
+	const loopMatch = body.match(/while\s*\(\s*this\._updateTokenStatsInFlight\s*\|\|\s*this\._deferredSessionPreloadPromises\.size > 0/);
+	const loopIndex = loopMatch?.index ?? -1;
 	assert.ok(loopIndex !== -1 && loopIndex < preClearRefreshIndex && preClearRefreshIndex < awaitDeferredIndex,
 		'must loop the in-flight-refresh wait and awaitAllDeferredParses() together until a full pass finds nothing left to wait for — a single pass of each can miss a refresh that starts while the other is still awaiting real I/O');
+
+	// The one-time full-year chart backfill (see _pendingFullYearBackfill's own doc comment) is a
+	// third source invisible to both the in-flight-refresh wait and awaitAllDeferredParses(): it is
+	// dispatched fire-and-forget only after the refresh that started it has already returned. The
+	// loop condition and the loop body must both account for it, or a backfill still running at the
+	// moment of a clear could keep writing pre-clear entries into the cache this clears.
+	assert.ok(/while\s*\([^)]*this\._pendingFullYearBackfill/.test(body),
+		'the loop condition must also check _pendingFullYearBackfill, or the loop could exit while a backfill is still running');
+	const pendingBackfillWaitIndex = body.indexOf('const pendingBackfill = this._pendingFullYearBackfill;');
+	assert.ok(pendingBackfillWaitIndex !== -1 && preClearRefreshIndex < pendingBackfillWaitIndex && pendingBackfillWaitIndex < awaitDeferredIndex,
+		'must await a pending full-year backfill inside the loop, between the in-flight-refresh wait and awaitAllDeferredParses()');
 });
 
 test('deferSessionPreloadRefresh() tracks each deferred parse\'s settle promise for awaitAllDeferredParses() to await, and untracks it once settled', () => {

@@ -1145,6 +1145,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private _pendingLeaderSnapshotSave: Promise<void> | undefined;
 	/**
+	 * The one-time, detached full-year chart backfill `_runRefreshCore()` fires after a leader
+	 * refresh publishes (see its own call site), if any is currently running. It reparses every
+	 * discovered session file unconditionally, calling getSessionFileDataCached()/
+	 * setCachedSessionData() the same as any other parse — but it is dispatched fire-and-forget
+	 * *after* the refresh that started it has already returned, so it is invisible to both
+	 * `_updateTokenStatsInFlight` and `_deferredSessionPreloadPromises`. clearCache() awaits this
+	 * too before clearing, or a backfill still running at the moment of a clear could keep writing
+	 * pre-clear entries into the cache it just emptied.
+	 */
+	private _pendingFullYearBackfill: Promise<unknown> | undefined;
+	/**
 	 * The `_cacheGeneration` the in-flight run's results will belong to — registered when the run
 	 * starts and narrowed to _runRefreshCore()'s own capture once it gathers its inputs. A caller
 	 * on the far side of a clear this number predates must not coalesce onto that run, because the
@@ -2026,10 +2037,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// unrelated timer-triggered refresh to start and populate _updateTokenStatsInFlight with
 			// a run this call never captured. Re-checking after every pass closes that window; the
 			// loop only exits once one full pass finds nothing left to wait for.
-			while (this._updateTokenStatsInFlight || this._deferredSessionPreloadPromises.size > 0) {
+			while (this._updateTokenStatsInFlight || this._deferredSessionPreloadPromises.size > 0 || this._pendingFullYearBackfill) {
 				const preClearRefresh = this._updateTokenStatsInFlight;
 				if (preClearRefresh) {
 					await preClearRefresh.catch(() => undefined);
+				}
+
+				// The one-time full-year chart backfill a leader refresh can fire after it publishes
+				// (see _pendingFullYearBackfill's own doc comment) is invisible to the wait above —
+				// it's dispatched fire-and-forget only after that refresh's own promise already
+				// resolved. Without this, it could still be reparsing older session files and calling
+				// setCachedSessionData() well after the wait above returns, repopulating the cache
+				// this command is about to empty.
+				const pendingBackfill = this._pendingFullYearBackfill;
+				if (pendingBackfill) {
+					await pendingBackfill.catch(() => undefined);
 				}
 
 				// Wait out any deferred (backgrounded) parse still finishing from a refresh that
@@ -4545,6 +4567,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 					await this._pendingLeaderSnapshotSave;
 					this._pendingLeaderSnapshotSave = undefined;
 				}
+				// Also await a still-running *periodic* mid-parse checkpoint (maybeCheckpointCache(),
+				// fire-and-forget, holds the same cache lock persistRefreshResult()'s save needs) —
+				// otherwise that checkpoint can still be serializing when the refresh-leader lock is
+				// released here. A new leader elected in the gap would then lose its own save to that
+				// same lock too, leaving the older, partial checkpoint as the on-disk snapshot even
+				// though a full refresh (this one or the new leader's) has already completed.
+				await this.cacheManager.awaitInFlightCheckpoint();
 				try { await this.cacheManager.releaseRefreshLock(); }
 				catch (err) { this.warn(`Failed to release refresh lock: ${err}`); }
 			}
@@ -4800,7 +4829,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// lastFullDailyStats read elsewhere already falls back to lastDailyStats or computes its own
 		// full-year data lazily on demand (e.g. when Chart is opened).
 		if (isLeader && !this.currentFullDailyStats && !this.chartPanel && !this.isDiscoveryUntrustworthyForBackfill(sessionFiles, preloaded)) {
-			void this.calculateDailyStats(365, sessionFiles);
+			// Tracked (not just detached) so clearCache() can wait it out — see
+			// _pendingFullYearBackfill's own doc comment.
+			const backfill = this.calculateDailyStats(365, sessionFiles);
+			this._pendingFullYearBackfill = backfill;
+			void backfill.finally(() => {
+				if (this._pendingFullYearBackfill === backfill) { this._pendingFullYearBackfill = undefined; }
+			});
 		}
 
 		return detailedStats;
@@ -9341,6 +9376,18 @@ private computeFallbackDailyRollup(
 		}
 		if (!stats && this.isRefreshSuperseded(startedAtGeneration)) { return; }
 		this._detailsPanelIsLoading = false;
+		if (!this._refreshLoadingPanels.has(panel)) {
+			// Already given its terminal state by someone else: a successful, non-superseded
+			// `stats` result means publishRefreshResult() already ran updateDetailsPanelIfOpen()'s
+			// non-silent branch as part of this same updateTokenStats() call — it deletes the panel
+			// from this registry right after rendering the real content. A genuine failure instead
+			// means resolveStuckLoadingPanelsAsFailed() already installed the failure page and
+			// cleared the whole registry. Either way, taking ownership of the render again here
+			// would overwrite already-current content — including any sort/tab/expansion state the
+			// user changed while evaluateAndSurfaceInsights() was awaiting an interactive toast —
+			// for no benefit.
+			return;
+		}
 		this._refreshLoadingPanels.delete(panel);
 		if (!stats) {
 			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
@@ -9374,6 +9421,13 @@ private computeFallbackDailyRollup(
 			return;
 		}
 		if (!stats && this.isRefreshSuperseded(startedAtGeneration)) { return; }
+		if (!this._refreshLoadingPanels.has(panel)) {
+			// See loadDetailsIntoPanel()'s identical check for why: already given its terminal
+			// state by publishRefreshResult()'s own non-silent render or, on a genuine failure, by
+			// resolveStuckLoadingPanelsAsFailed() — taking ownership of the render again here would
+			// overwrite already-current content for no benefit.
+			return;
+		}
 		this._refreshLoadingPanels.delete(panel);
 		if (!stats) {
 			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
