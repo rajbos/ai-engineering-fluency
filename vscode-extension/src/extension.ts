@@ -1897,7 +1897,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('Clearing session file cache...');
 
 			const cacheSize = this.cacheManager.cache.size;
-			this.cacheManager.cache.clear();
+			this.cacheManager.clearAllCachedData();
 
 			// Everything invalidating happens before the first await. Bumping the generation
 			// alone was not enough: a build starting during the await would capture the *new*
@@ -1921,6 +1921,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.lastEfficiencySessionInputs = undefined;
 			this._lastEfficiencyViewData = undefined;
 			this._cacheGeneration++;
+
+			// A checkpoint already mid-flight was reading/merging on-disk and in-memory state from
+			// before the clearAllCachedData() call above — writeSharedSnapshot() aborts that write
+			// once it notices the bumped clear generation, but only up to its own rename step. Wait
+			// for it to fully settle before deleting, so its write (whether it self-aborted or, in
+			// the narrowest of windows, still landed) can never complete *after* the delete below and
+			// resurrect the data this clear is removing.
+			await this.cacheManager.awaitInFlightCheckpoint();
 
 			// Delete the on-disk snapshot so it isn't reloaded after restart.
 			await this.cacheManager.deleteSharedSnapshot();
@@ -4508,6 +4516,36 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return true;
 	}
 
+	/**
+	 * Flushes any dirty cache state left behind by a previous leader cycle before
+	 * resetCheckpointCounters() zeroes the counter that is its only record of being unpersisted.
+	 *
+	 * A leader cycle that throws (see _runUpdateTokenStats's catch) never reaches
+	 * persistRefreshResult() — its only other chance to checkpoint is the periodic every-25-files
+	 * call in _preloadSessionFiles(), so up to 24 parsed-but-uncheckpointed files can be left
+	 * dirty when it fails. Without this, the next cycle's unconditional resetCheckpointCounters()
+	 * zeroed that dirty count while the underlying entries were still only in memory: a
+	 * cache-hit-only next cycle (nothing new to re-dirty the counter) would then never checkpoint
+	 * them again, so a crash before some unrelated future write finally does would lose parses
+	 * that had, in fact, already succeeded.
+	 *
+	 * Only resets once nothing is left dirty. If the flush itself is skipped or fails (e.g. another
+	 * window holds the cache lock), the counters are left untouched rather than reset — this cycle's
+	 * own threshold-based checkpointing then still owns that debt instead of it being silently
+	 * forgotten.
+	 */
+	private async flushPendingCheckpointBeforeReset(): Promise<void> {
+		await this.cacheManager.awaitInFlightCheckpoint();
+		if (this.cacheManager.hasUnflushedCheckpointWork()) {
+			await this.cacheManager.forceCheckpointCache();
+		}
+		if (this.cacheManager.hasUnflushedCheckpointWork()) {
+			this.log('Pending cache checkpoint from a previous cycle could not be flushed; leaving checkpoint counters intact so this cycle retries it');
+			return;
+		}
+		this.cacheManager.resetCheckpointCounters();
+	}
+
 	/** Core discover → parse → compute → render → persist pass for one refresh. */
 	private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {
 		this.log(isLeader ? 'Updating token stats (leader)...' : 'Updating token stats (follower)...');
@@ -4515,9 +4553,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// gathered in, not the one each later calculation starts in (see calculateUsageAnalysisStats).
 		const startedAtGeneration = this.beginRefreshGeneration();
 
-		// Reset checkpoint counters at the start of each refresh cycle
+		// Reset checkpoint counters at the start of each refresh cycle — but only once any
+		// unpersisted work from a previous cycle (e.g. one that threw before persistRefreshResult()
+		// ever ran) has actually reached disk. See flushPendingCheckpointBeforeReset().
 		if (isLeader) {
-			this.cacheManager.resetCheckpointCounters();
+			await this.flushPendingCheckpointBeforeReset();
 		}
 
 		const { last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(new Date());

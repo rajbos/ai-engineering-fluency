@@ -56,6 +56,17 @@ export class CacheManager {
 	// under it while its own save was awaiting, so it doesn't subtract its now-stale captured
 	// count against a counter that has since started fresh.
 	private checkpointCounterGeneration = 0;
+	// The currently in-flight checkpoint's own settle promise (set by maybeCheckpointCache()/
+	// forceCheckpointCache(), resolved once checkpointCacheInternal() and its `.finally()` have
+	// both run). Lets a caller that must not race a checkpoint's write — clearCache() deleting
+	// the snapshot, or a new refresh cycle about to reset the counters that write depends on —
+	// await its completion instead of merely polling checkpointInProgress.
+	private checkpointSettlePromise: Promise<void> | undefined;
+	// Bumped by clearAllCachedData(). writeSharedSnapshot() captures this before it reads the
+	// (possibly about-to-be-cleared) on-disk snapshot and re-checks it right before the atomic
+	// rename — if a clear landed in between, that write is built from stale, pre-clear data and
+	// would resurrect exactly what the clear just removed, so it aborts instead of persisting.
+	private cacheClearGeneration = 0;
 
 	constructor(
 		context: vscode.ExtensionContext,
@@ -71,6 +82,18 @@ export class CacheManager {
 
 	get cache(): Map<string, SessionFileCache> {
 		return this.sessionFileCache;
+	}
+
+	/**
+	 * Clears every in-memory cache entry and bumps cacheClearGeneration, so a checkpoint already
+	 * mid-flight (built from pre-clear data) discards its write instead of resurrecting it — see
+	 * writeSharedSnapshot()'s doc comment. Callers that must not race that in-flight checkpoint's
+	 * own write to the shared snapshot file (e.g. clearCache() deleting it right after) should
+	 * also await awaitInFlightCheckpoint() before doing so.
+	 */
+	clearAllCachedData(): void {
+		this.sessionFileCache.clear();
+		this.cacheClearGeneration++;
 	}
 
 	// Cache management methods
@@ -210,13 +233,55 @@ export class CacheManager {
 		const timeThresholdReached = timeElapsed >= CacheManager.CHECKPOINT_INTERVAL_MS;
 
 		if ((entriesThresholdReached || timeThresholdReached) && !this.checkpointInProgress) {
-			this.checkpointInProgress = true;
-			void this.checkpointCacheInternal().finally(() => {
-				this.checkpointInProgress = false;
-			});
+			this.startCheckpoint();
 			return true;
 		}
 		return false;
+	}
+
+	/** Marks a checkpoint in progress and kicks off checkpointCacheInternal(), tracking its
+	 * settle promise so awaitInFlightCheckpoint() can observe completion. Shared by
+	 * maybeCheckpointCache() (fire-and-forget) and forceCheckpointCache() (awaited). */
+	private startCheckpoint(): void {
+		this.checkpointInProgress = true;
+		this.checkpointSettlePromise = this.checkpointCacheInternal().finally(() => {
+			this.checkpointInProgress = false;
+		});
+	}
+
+	/**
+	 * Whether there is parsed/changed/deleted cache state that has not yet reached disk. Exposed
+	 * for callers like _runRefreshCore() that need to know whether resetCheckpointCounters()
+	 * would clobber real, unpersisted dirty state before calling it.
+	 */
+	hasUnflushedCheckpointWork(): boolean {
+		return this.entriesSinceLastCheckpoint > 0;
+	}
+
+	/**
+	 * Resolves once a checkpoint already mid-flight (started by maybeCheckpointCache() or this
+	 * method) has fully settled. A no-op if none is in progress. Used wherever a caller's own
+	 * write must not race a checkpoint's — see checkpointSettlePromise's doc comment.
+	 */
+	async awaitInFlightCheckpoint(): Promise<void> {
+		if (this.checkpointSettlePromise) {
+			await this.checkpointSettlePromise;
+		}
+	}
+
+	/**
+	 * Force an immediate checkpoint save, bypassing maybeCheckpointCache()'s time/entry
+	 * thresholds, and await its completion. A no-op if one is already in progress (callers that
+	 * care should await awaitInFlightCheckpoint() first) or if nothing is dirty. Used by
+	 * _runRefreshCore() to flush a previous cycle's unpersisted work before resetting the
+	 * counters that are its only record of being dirty.
+	 */
+	async forceCheckpointCache(): Promise<void> {
+		if (this.entriesSinceLastCheckpoint <= 0 || this.checkpointInProgress) {
+			return;
+		}
+		this.startCheckpoint();
+		await this.checkpointSettlePromise;
 	}
 
 	/**
@@ -764,12 +829,23 @@ export class CacheManager {
 	 * Never throws — a write failure is logged and reported via the `false` return instead,
 	 * so a caller like checkpointCacheInternal() can distinguish "actually persisted" from
 	 * "swallowed an error" without needing its own try/catch around this.
+	 *
+	 * Also aborts (returns `false`, without touching disk) if clearAllCachedData() runs while this
+	 * is building or about to persist its snapshot: `entries` above is built from a disk read and
+	 * in-memory state captured before the clear, so persisting it would resurrect exactly what the
+	 * clear just removed. Checked once after that read and again right before the rename, since a
+	 * clear landing in either window makes the captured data equally stale.
 	 */
 	async writeSharedSnapshot(): Promise<boolean> {
 		const snapshotPath = this.getSharedSnapshotPath();
 		const tmpPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
+		const clearGenerationAtStart = this.cacheClearGeneration;
 		try {
 			const entries = await this.buildMergedSnapshotEntries();
+			if (this.cacheClearGeneration !== clearGenerationAtStart) {
+				this.deps.log('Skipping shared-snapshot write: cache was cleared while this checkpoint was building it');
+				return false;
+			}
 			const envelope = {
 				schemaVersion: CacheManager.SNAPSHOT_SCHEMA_VERSION,
 				cacheVersion: this.cacheVersion,
@@ -780,6 +856,11 @@ export class CacheManager {
 			};
 			await fs.promises.mkdir(path.dirname(snapshotPath), { recursive: true });
 			await fs.promises.writeFile(tmpPath, JSON.stringify(envelope));
+			if (this.cacheClearGeneration !== clearGenerationAtStart) {
+				this.deps.log('Skipping shared-snapshot write: cache was cleared while this checkpoint was about to persist');
+				try { await fs.promises.unlink(tmpPath); } catch { /* best-effort cleanup */ }
+				return false;
+			}
 			await fs.promises.rename(tmpPath, snapshotPath);
 			// Record our own write so we don't redundantly reload it later.
 			try {

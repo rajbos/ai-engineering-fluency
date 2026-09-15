@@ -674,3 +674,128 @@ test('deleteCachedSessionData() marks the cache dirty for a real removal, but a 
 	assert.equal(m.maybeCheckpointCache(), false,
 		'100 repeated no-op tombstones of already-removed, already-tombstoned paths must not trigger a checkpoint');
 });
+
+// ---------------------------------------------------------------------------
+// Round-8 review finding #1: a leader refresh cycle that parses files but throws before ever
+// reaching persistRefreshResult() (and before a periodic mid-parse checkpoint fires) leaves
+// genuinely dirty, unpersisted entries in the cache. The old _runRefreshCore() called
+// resetCheckpointCounters() unconditionally at the top of the *next* leader cycle, zeroing that
+// dirty count while the underlying data was still only in memory — a cache-hit-only next cycle
+// would then never checkpoint it again. The fix (flushPendingCheckpointBeforeReset() in
+// extension.ts) must flush first, and only reset once nothing is left dirty.
+// ---------------------------------------------------------------------------
+
+test('forceCheckpointCache() flushes pending dirty entries from a previous, uncheckpointed cycle before counters are reset', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	// Simulate a leader cycle that parsed files (dirty entries) but crashed/threw before
+	// persistRefreshResult() or a periodic checkpoint ever ran — the data exists only in memory.
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+	assert.equal(m.hasUnflushedCheckpointWork(), true, 'the failed cycle left dirty, unpersisted entries behind');
+
+	// This is the fix's own sequence, as _runRefreshCore() now runs it via
+	// flushPendingCheckpointBeforeReset() before ever calling resetCheckpointCounters().
+	await m.awaitInFlightCheckpoint(); // nothing in flight yet on a fresh manager — a no-op
+	if (m.hasUnflushedCheckpointWork()) {
+		await m.forceCheckpointCache();
+	}
+	assert.equal(m.hasUnflushedCheckpointWork(), false, 'forceCheckpointCache() must fully flush the pending work');
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(entries, 'the previous cycle\'s parsed data must have reached disk before the counters are reset');
+	assert.equal(Object.keys(entries!).length, 2);
+
+	// Only safe to reset once nothing dirty remains — and here it genuinely doesn't, because it
+	// was flushed first rather than silently discarded.
+	m.resetCheckpointCounters();
+	assert.equal(m.maybeCheckpointCache(), false, 'nothing dirty right after reset, because it was actually flushed rather than dropped');
+});
+
+test('when the flush itself fails (e.g. another window holds the cache lock), the dirty entries stay tracked instead of being silently dropped', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+
+	// Simulate another window holding the cache save lock: same PID (so checkOwnerAlive treats it
+	// as alive) but a different sessionId (so this manager does not recognize it as its own), with
+	// a fresh timestamp so it isn't treated as stale either.
+	fs.writeFileSync(m.getCacheLockPath(), JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
+
+	await m.forceCheckpointCache();
+	assert.equal(m.hasUnflushedCheckpointWork(), true,
+		'a flush that could not acquire the lock must leave the dirty entries tracked, not silently dropped — the caller must not reset the counters in this case');
+});
+
+// ---------------------------------------------------------------------------
+// Round-8 review finding #2: clearCache() deletes the shared on-disk snapshot after clearing the
+// in-memory cache. If a checkpoint's writeSharedSnapshot() is already mid-flight at that moment —
+// built from on-disk/in-memory state read *before* the clear — its write could complete after the
+// delete and resurrect the data the clear just removed. writeSharedSnapshot() now aborts once it
+// notices clearAllCachedData() bumped the clear generation since it started reading, and
+// clearCache() now awaits any in-flight checkpoint before deleting so its own delete always lands
+// last regardless of exactly when the abort check fires.
+// ---------------------------------------------------------------------------
+
+test('writeSharedSnapshot() aborts instead of persisting when clearAllCachedData() runs mid-write', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot();
+
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+
+	const originalReadFile = fs.promises.readFile;
+	let intercepted = false;
+	(fs.promises as any).readFile = async (...args: unknown[]) => {
+		const result = await (originalReadFile as (...a: unknown[]) => Promise<unknown>).apply(fs.promises, args);
+		// Simulate clearCache() landing exactly while this checkpoint is reading the on-disk
+		// snapshot it's about to merge with — a real interleaving, not just a contrived ordering.
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			m.clearAllCachedData();
+		}
+		return result;
+	};
+	let persisted: boolean;
+	try {
+		persisted = await m.writeSharedSnapshot();
+	} finally {
+		(fs.promises as any).readFile = originalReadFile;
+	}
+	assert.equal(persisted, false, 'a write racing a concurrent clear must abort rather than persist stale, pre-clear data');
+	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(!entries || !('/b.json' in entries), 'the cleared cache must not be resurrected with data captured before the clear');
+});
+
+test('clearCache()-style sequence (clearAllCachedData + awaitInFlightCheckpoint + deleteSharedSnapshot) is not resurrected by a slow in-flight checkpoint', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+
+	const originalWriteFile = fs.promises.writeFile;
+	(fs.promises as any).writeFile = async (...args: unknown[]) => {
+		// Simulate a slow disk write so the checkpoint is still mid-flight when the clear below runs.
+		await new Promise(r => setTimeout(r, 30));
+		return (originalWriteFile as (...a: unknown[]) => Promise<unknown>).apply(fs.promises, args);
+	};
+
+	try {
+		assert.equal(m.maybeCheckpointCache(), true, 'a dirty write plus the always-elapsed time threshold must start a checkpoint');
+
+		// Mirrors clearCache(): clear in-memory state, wait for the in-flight checkpoint to settle,
+		// then delete the on-disk snapshot — in that order.
+		m.clearAllCachedData();
+		await m.awaitInFlightCheckpoint();
+		await m.deleteSharedSnapshot();
+	} finally {
+		(fs.promises as any).writeFile = originalWriteFile;
+	}
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(!entries, 'the cleared snapshot must not be resurrected by a checkpoint that was in flight when the clear ran');
+	assert.equal(fs.existsSync(m.getSharedSnapshotPath()), false, 'the snapshot file must stay deleted');
+});
