@@ -7,9 +7,13 @@
  *   - User (global):  <User>/globalStorage/{GitHub,github}.copilot-chat/memory-tool/memories/*.md
  *   - Repo (per-workspace):    <User>/workspaceStorage/<hash>/{GitHub,github}.copilot-chat/memory-tool/memories/repo/*.md
  *   - Session (per-workspace): .../memory-tool/memories/<base64(sessionId)>/*.md
+ *                              .../memory-tool/memories/session/*.md  (literal folder, older/alt layout)
  *
- * The session-scope folder name is the base64-encoded chat-session UUID, NOT a literal
- * "session" folder — this must be decoded explicitly (see `decodeSessionFolderName`).
+ * Session-scope folders come in two layouts: most commonly the folder name is the
+ * base64-encoded chat-session UUID and must be decoded explicitly (see
+ * `decodeSessionFolderName`), but some memory-tool versions use a literal "session" folder
+ * instead (no session UUID to decode). Both are recognized and folded into session scope;
+ * anything else under memories/ is an unrecognized layout and is skipped.
  *
  * This module discovers those files and produces a metadata-only hygiene analysis (counts,
  * staleness, size). It never reads a memory file's *content* beyond deriving a display title
@@ -45,10 +49,11 @@ export const DEFAULT_STALE_DAYS = 90;
 export const DEFAULT_LARGE_FILE_BYTES = 10 * 1024;
 
 /**
- * Attempt to decode a memory-store session-scope folder name back to the chat session UUID
- * it was derived from. Session-scope folders are named `base64(sessionId)` rather than a
- * literal "session" folder. Returns undefined for anything that doesn't decode to a UUID
- * (e.g. the literal "repo" folder, or an unrecognized layout).
+ * Attempt to decode a base64-encoded session-scope folder name back to the chat session UUID
+ * it was derived from. This is the more common session-scope layout; some memory-tool versions
+ * instead use a literal "session" folder with no UUID to decode (see `discoverWorkspaceHashMemoryFiles`,
+ * which recognizes that layout separately). Returns undefined for anything that doesn't decode to
+ * a UUID (e.g. the literal "repo"/"session" folders, or an unrecognized layout).
  */
 export function decodeSessionFolderName(folderName: string): string | undefined {
 	if (!folderName || folderName === 'repo' || !BASE64_RE.test(folderName)) { return undefined; }
