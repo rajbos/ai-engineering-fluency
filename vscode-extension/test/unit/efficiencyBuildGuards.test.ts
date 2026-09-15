@@ -414,7 +414,7 @@ test('wiring: the Efficiency cold path announces the daily phase after its walk,
 	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async collectEfficiencyInputs('));
 	const inputs = body.slice(0, body.indexOf('\n\tprivate async buildEfficiencyViewData('));
 
-	const walkAt = inputs.indexOf('dailyStats = await this.calculateDailyStats(365,');
+	const walkAt = inputs.indexOf('dailyStats = await this.trackFullYearBackfill(this.calculateDailyStats(365,');
 	assert.ok(walkAt !== -1, 'the cold path must still perform the full-year walk');
 
 	const dailySteps = [...inputs.matchAll(/postEfficiencyStep\(send, stepPct\.daily/g)].map(m => m.index!);
