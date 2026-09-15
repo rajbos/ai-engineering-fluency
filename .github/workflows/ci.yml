@@ -59,6 +59,10 @@ jobs:
               # the unit-test runner or the contract validator skip CI, so the
               # whole directory stays in scope deliberately.
               - 'scripts/**'
+              - '.vscode/*.json'
+              - '.devcontainer/devcontainer.json'
+              - 'docs/logFilesSchema/session-file-schema.json'
+              - 'docs/logFilesSchema/session-file-schema-analysis.json'
               - '.nvmrc'
               # Harnesses invoked by the build and ui-checks jobs.
               - '.github/skills/visual-view-diff/**'
