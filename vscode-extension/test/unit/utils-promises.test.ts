@@ -162,6 +162,19 @@ test('createSemaphore: a timed-out acquire() resolves false and does not consume
 	assert.equal(await sem.acquire(), true, 'the released permit must be available to a brand-new acquire()');
 });
 
+test('createSemaphore: rejects a zero-capacity request instead of silently accepting a permit count release() cannot actually enforce', () => {
+	// release() hands a freed permit straight to the longest-waiting acquire() without re-checking
+	// the cap, so a semaphore constructed with 0 permits would still admit a waiter on any
+	// release() call, defeating the "zero concurrent holders" invariant such a caller would want.
+	assert.throws(() => createSemaphore(0), RangeError);
+});
+
+test('createSemaphore: rejects negative and non-integer permit counts', () => {
+	assert.throws(() => createSemaphore(-1), RangeError);
+	assert.throws(() => createSemaphore(1.5), RangeError);
+	assert.throws(() => createSemaphore(Infinity), RangeError);
+});
+
 test('createSemaphore: an over-release (more release() calls than successful acquire()s) does not widen the permit count', async () => {
 	const sem = createSemaphore(1);
 	assert.equal(await sem.acquire(), true); // the only permit is now held

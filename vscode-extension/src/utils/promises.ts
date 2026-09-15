@@ -98,8 +98,14 @@ export interface Semaphore {
  * by however many happened to be parked.
  */
 export function createSemaphore(permits: number): Semaphore {
-  if (!Number.isFinite(permits) || !Number.isInteger(permits) || permits < 0) {
-    throw new RangeError('createSemaphore permits must be a finite non-negative integer');
+  // Rejected at 0, not just negative/non-integer: release() below hands a freed permit directly
+  // to the longest-waiting acquire() without re-checking the cap, so a semaphore with zero
+  // capacity would still let a waiter through on any release() (legitimate or an over-release bug)
+  // — silently defeating the "zero concurrent holders" invariant a caller asking for 0 would want.
+  // No call site needs a zero-capacity semaphore, so it is simpler to disallow it here than to add
+  // a capacity check to release()'s hot path for a configuration nothing uses.
+  if (!Number.isFinite(permits) || !Number.isInteger(permits) || permits < 1) {
+    throw new RangeError('createSemaphore permits must be a finite positive integer');
   }
   let available = permits;
   const waiters: Array<(acquired: boolean) => void> = [];
