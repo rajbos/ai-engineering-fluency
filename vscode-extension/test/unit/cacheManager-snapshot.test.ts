@@ -599,6 +599,234 @@ test('writeSharedSnapshot() does not let a stale tombstone strip a newer entry a
 	assert.equal(entries!['/a.json'].mtime, 9000);
 });
 
+// ---------------------------------------------------------------------------
+// Durable cross-window clear epoch (getClearEpochPath() / deleteSharedSnapshot() /
+// writeSharedSnapshot() / loadSharedSnapshotIfChanged()): a peer window's later,
+// independent save — built from its own untouched, pre-clear in-memory cache — must not
+// republish stale data after another window's clearCache(), and that peer must stop
+// *serving* the stale data from memory too, not just stop persisting it.
+// ---------------------------------------------------------------------------
+
+test('writeSharedSnapshot() skips publishing a save assembled before a peer window\'s clear', async () => {
+	const dir = tmpDir();
+
+	// Window A parses a session into memory but has not saved yet.
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/a.json', entry(1000), 10);
+
+	// Window B clears the cache, which advances the durable clear epoch.
+	const windowB = makeManager(dir);
+	await windowB.deleteSharedSnapshot();
+
+	// Window A's save was built entirely before window B's clear and must not land.
+	await windowA.writeSharedSnapshot();
+
+	const entries = await windowA.readSharedSnapshot();
+	assert.ok(!entries || !('/a.json' in entries!),
+		'a save assembled before a peer window\'s clear must not republish stale data to the shared snapshot');
+});
+
+test('loadSharedSnapshotIfChanged() drops a window\'s in-memory cache once a peer\'s clear is detected, even with nothing to publish', async () => {
+	const dir = tmpDir();
+
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/a.json', entry(1000), 10);
+	assert.equal(windowA.cache.size, 1);
+
+	const windowB = makeManager(dir);
+	await windowB.deleteSharedSnapshot();
+
+	// Window A never saves anything — this only exercises the loader half of the fence.
+	await windowA.loadSharedSnapshotIfChanged();
+
+	assert.equal(windowA.cache.size, 0,
+		'a detected peer clear must drop the in-memory cache so window A stops SERVING stale data, not just stop persisting it');
+});
+
+// A follow-up Copilot review found that the epoch check at the top of loadSharedSnapshotIfChanged()
+// only guards the moment the call starts: a peer's clear landing anywhere during the subsequent
+// stat/read/merge sequence would still get its pre-clear entries merged into this window's cache
+// with no second check to catch it, letting the window serve (and later republish) that stale data
+// until some unrelated later refresh cycle happened to call checkClearEpoch() again.
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail)
+// rather than a manual monkeypatch-plus-try/finally, so the patch cannot leak into another test.
+test('loadSharedSnapshotIfChanged() re-checks the epoch after merging, so a clear landing mid-load is not resurrected', async (t) => {
+	const dir = tmpDir();
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot(); // pre-clear content on disk to (almost) resurrect
+
+	const m = makeManager(dir);
+
+	const originalReadFile = fs.promises.readFile.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'readFile', async (...args: unknown[]) => {
+		const result = await originalReadFile(...args);
+		// Simulate a peer window's clear landing exactly while this call is reading the snapshot
+		// it's about to merge — a real interleaving, not just a contrived ordering.
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			const peer = makeManager(dir);
+			await peer.deleteSharedSnapshot();
+		}
+		return result;
+	});
+	const merged = await m.loadSharedSnapshotIfChanged();
+	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
+	assert.equal(merged, 0, 'entries read from a snapshot that turned out to predate a clear must not be reported as usefully merged');
+	assert.equal(m.cache.size, 0, 'the pre-clear entry must not survive in memory once the mid-load clear is detected');
+});
+
+test('a save that started before the clear epoch is skipped only once; the next save (after re-syncing) succeeds normally', async () => {
+	const dir = tmpDir();
+
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/a.json', entry(1000), 10);
+
+	const windowB = makeManager(dir);
+	await windowB.deleteSharedSnapshot();
+
+	await windowA.writeSharedSnapshot(); // skipped: pre-clear data
+	assert.equal(windowA.cache.size, 0, 'the stale in-memory cache was dropped by the skipped save');
+
+	// Window A resumes normal operation and parses fresh (post-clear) data.
+	windowA.setCachedSessionData('/c.json', entry(9000), 10);
+	await windowA.writeSharedSnapshot();
+
+	const entries = await windowA.readSharedSnapshot();
+	assert.ok(entries && '/c.json' in entries!, 'a save made after re-syncing with the clear epoch must publish normally');
+});
+
+// GitHub Copilot review on PR #2107 flagged two risks: the epoch write relying on rename() to
+// overwrite an already-existing marker file (a concern on Windows for some replace strategies),
+// and the epoch not being guaranteed to strictly advance across two close-together clears (e.g. a
+// millisecond-granularity clock, or a backward NTP/VM time step). This test exercises both at
+// once: two back-to-back clears necessarily rename over the marker the first clear just wrote, and
+// must still produce a strictly greater epoch each time — on every platform CI runs this suite on,
+// Windows included.
+test('deleteSharedSnapshot() advances the clear epoch strictly, including two clears back-to-back', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	await m.deleteSharedSnapshot();
+	const first = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+	assert.equal(typeof first, 'number');
+
+	await m.deleteSharedSnapshot();
+	const second = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+
+	assert.ok(second > first,
+		`the second clear's epoch (${second}) must be strictly greater than the first (${first}) — a non-advancing epoch would let checkClearEpoch() silently miss the second clear`);
+});
+
+// A follow-up Copilot review noted the epoch's read-modify-write is itself a cross-window race (two
+// windows could both read the same persisted epoch before either writes) and asked for it to be
+// serialized. deleteSharedSnapshot() now bumps the epoch inside the same cache-lock section it
+// already retries into before deleting (see its own doc comment) rather than acquiring the lock a
+// second time — but that retry eventually gives up (see acquireCacheLockWithRetry()), so a clear
+// must still succeed and advance the epoch even when a peer window never releases the lock at all.
+// A tiny retryOptions budget keeps this test from waiting out the real (10s) production budget.
+test('deleteSharedSnapshot() still advances the clear epoch once its lock retry budget is spent, with a peer holding the lock', async () => {
+	const dir = tmpDir();
+	const peer = makeManager(dir);
+	assert.equal(await peer.acquireCacheLock(), true, 'peer window holds the cache lock, simulating a save in progress');
+
+	const m = makeManager(dir);
+	await assert.doesNotReject(() => m.deleteSharedSnapshot({ attempts: 2, delayMs: 5 }),
+		'a clear must not hang or throw just because a peer window currently holds the cache lock');
+
+	const epoch = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+	assert.equal(typeof epoch, 'number', 'the epoch marker must still be advanced even without the lock');
+
+	await peer.releaseCacheLock();
+});
+
+// A follow-up Copilot review found that checkClearEpoch() dropped the in-memory cache on a
+// detected peer clear but left lastLoadedSnapshotMtime pointing at the pre-clear snapshot. On a
+// coarse or backward-moving filesystem clock (the same class of clock behavior the cross-window
+// tombstone test above already has to account for), a freshly recreated post-clear snapshot can get
+// an mtime at or below that stale bookmark — which would make loadSharedSnapshotIfChanged()'s own
+// mtime short-circuit believe it already has the latest snapshot and never load the new one.
+test('a detected peer clear resets lastLoadedSnapshotMtime, so a post-clear snapshot with a non-advancing mtime still loads', async () => {
+	const dir = tmpDir();
+
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/old.json', entry(1000), 10);
+	await windowA.writeSharedSnapshot();
+	const snapshotPath = windowA.getSharedSnapshotPath();
+	const bookmarkedMtimeMs = (await fs.promises.stat(snapshotPath)).mtimeMs;
+	await windowA.loadSharedSnapshotIfChanged(); // records windowA's own lastLoadedSnapshotMtime === bookmarkedMtimeMs
+
+	const windowB = makeManager(dir);
+	await windowB.deleteSharedSnapshot(); // peer clear: advances the epoch, removes the old snapshot
+	windowB.setCachedSessionData('/new.json', entry(2000), 10);
+	await windowB.writeSharedSnapshot(); // republish a post-clear snapshot
+
+	// Force the freshly recreated snapshot's mtime BELOW windowA's already-recorded bookmark — the
+	// coarse/backward-clock scenario the fix targets. Without the reset this makes
+	// loadSharedSnapshotIfChanged()'s `mtimeMs <= lastLoadedSnapshotMtime` check believe nothing
+	// changed, even though the clear resolved to entirely different content. A full second earlier
+	// (not merely equal) avoids relying on exact mtime-resolution rounding across filesystems.
+	const backdatedMtime = new Date(bookmarkedMtimeMs - 1000);
+	await fs.promises.utimes(snapshotPath, backdatedMtime, backdatedMtime);
+
+	const merged = await windowA.loadSharedSnapshotIfChanged();
+
+	assert.ok(!windowA.cache.has('/old.json'), 'the detected peer clear must drop the pre-clear entry');
+	assert.equal(merged, 1, 'the post-clear snapshot must still be loaded despite its non-advancing mtime');
+	assert.ok(windowA.cache.has('/new.json'), 'the post-clear entry must be merged in');
+});
+
+test('a missing or corrupt clear-epoch marker fails open (writeSharedSnapshot still publishes)', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+
+	// No epoch marker exists yet at all (fresh install / older extension version).
+	await m.writeSharedSnapshot();
+	let entries = await m.readSharedSnapshot();
+	assert.ok(entries && '/a.json' in entries!, 'a missing epoch marker must not block a normal save');
+
+	// A corrupt epoch marker must likewise not block a normal save.
+	fs.mkdirSync(path.dirname(m.getClearEpochPath()), { recursive: true });
+	fs.writeFileSync(m.getClearEpochPath(), '{ not valid json');
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+	await m.writeSharedSnapshot();
+	entries = await m.readSharedSnapshot();
+	assert.ok(entries && '/b.json' in entries!, 'a corrupt epoch marker must fail open, not block saving');
+});
+
+test('a missing or corrupt clear-epoch marker fails open (loadSharedSnapshotIfChanged keeps the in-memory cache)', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+
+	fs.mkdirSync(path.dirname(m.getClearEpochPath()), { recursive: true });
+	fs.writeFileSync(m.getClearEpochPath(), 'not even json');
+
+	await m.loadSharedSnapshotIfChanged();
+	assert.equal(m.cache.size, 1, 'a corrupt epoch marker must not be treated as a detected clear');
+	assert.equal(m.cache.get('/a.json')?.mtime, 1000);
+});
+
+test('loadCacheFromStorage() seeds the clear epoch so freshly-loaded post-clear data is not immediately treated as stale', async () => {
+	const dir = tmpDir();
+
+	const first = makeManager(dir);
+	first.setCachedSessionData('/a.json', entry(1000), 10);
+	await first.writeSharedSnapshot();
+	await first.deleteSharedSnapshot(); // simulates clearCache(): advances the durable epoch
+
+	const second = makeManager(dir);
+	await second.loadCacheFromStorage(); // must seed local epoch to the post-clear value, not 0
+	second.setCachedSessionData('/b.json', entry(2000), 10);
+	await second.writeSharedSnapshot();
+
+	const entries = await second.readSharedSnapshot();
+	assert.ok(entries && '/b.json' in entries!,
+		'a save made after loadCacheFromStorage() seeded the epoch must not be wrongly treated as predating a past clear');
+});
+
 test('writeSharedSnapshot() still strips a disk entry that is the same age as or older than the tombstoned deletion', async () => {
 	const dir = tmpDir();
 	const writer = makeManager(dir);
@@ -785,6 +1013,75 @@ test('writeSharedSnapshot() aborts instead of persisting when clearAllCachedData
 	assert.ok(!entries || !('/b.json' in entries), 'the cleared cache must not be resurrected with data captured before the clear');
 });
 
+// A follow-up Copilot review found that checkClearEpoch() (the cross-window counterpart to
+// clearAllCachedData() above) dropped the in-memory cache and adopted the new epoch, but never
+// bumped cacheClearGeneration — so an in-flight writeSharedSnapshot() that had already passed its
+// own first checkClearEpoch() check, and is now mid-buildMergedSnapshotEntries(), would find its
+// own local clearEpoch already caught up by the time it re-checks, see no NEW clear, and still
+// abort-check only against an unchanged generation. checkClearEpoch() now bumps the same
+// generation counter, so this race aborts the same way the same-window one above does.
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail)
+// rather than a manual monkeypatch-plus-try/finally, so the patch cannot leak into another test.
+test('writeSharedSnapshot() aborts when checkClearEpoch() detects a peer clear mid-write, via the generation bump', async (t) => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot(); // publish once, so there is pre-clear content on disk to resurrect
+
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+
+	const originalReadFile = fs.promises.readFile.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'readFile', async (...args: unknown[]) => {
+		const result = await originalReadFile(...args);
+		// Simulate a peer window's clear landing, and a concurrent task on this same instance (e.g.
+		// loadSharedSnapshotIfChanged() on its own refresh timer) noticing it via checkClearEpoch(),
+		// exactly while this write is reading the on-disk snapshot it's about to merge with.
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			const peer = makeManager(dir);
+			await peer.deleteSharedSnapshot();
+			await m.loadSharedSnapshotIfChanged();
+		}
+		return result;
+	});
+	const persisted = await m.writeSharedSnapshot();
+	assert.equal(persisted, false,
+		'a write racing a concurrently-detected peer clear must abort rather than resurrect pre-clear data');
+	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(!entries || !('/a.json' in entries),
+		'the peer\'s clear must not be undone by a write that only learned of it through the generation bump, not its own epoch check');
+});
+
+// The same review also found bumpClearEpochLocked()'s monotonic floor only used the freshly-read
+// `persisted` value, not this window's own already-known `clearEpoch` — so a corrupt/missing marker
+// (readClearEpoch() fails open to 0) combined with a backward clock step could write a regressing
+// epoch that a peer who already observed the higher value would fail to recognize as new.
+test('bumpClearEpochLocked() floors on the local epoch too, so a corrupt marker plus a backward clock cannot regress it', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	await m.deleteSharedSnapshot();
+	const firstEpoch = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+
+	// Corrupt the marker so the next read fails open to 0, and force the clock backward below the
+	// already-known epoch — the compound condition the fix targets.
+	fs.writeFileSync(m.getClearEpochPath(), 'not json');
+	const originalNow = Date.now;
+	Date.now = () => 1;
+	try {
+		await m.deleteSharedSnapshot();
+	} finally {
+		Date.now = originalNow;
+	}
+
+	const secondEpoch = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+	assert.ok(secondEpoch > firstEpoch,
+		`a corrupt marker plus a backward clock must still floor on this window's own already-known epoch (${firstEpoch}), not regress to ${secondEpoch}`);
+});
+
 test('clearCache()-style sequence (clearAllCachedData + awaitInFlightCheckpoint + deleteSharedSnapshot) is not resurrected by a slow in-flight checkpoint', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
@@ -936,4 +1233,23 @@ test('clearAllCachedData() resets the checkpoint dirty count too, so the next cy
 
 	assert.equal(m.hasUnflushedCheckpointWork(), false,
 		'a clear must reset the dirty count along with the entries it was tracking — otherwise the next leader cycle sees stale dirty state and performs a full checkpoint save of the now-empty cache before parsing anything of its own');
+});
+
+// A follow-up Copilot review found that checkClearEpoch() — the cross-window counterpart to
+// clearAllCachedData() above — dropped the in-memory cache but never reset the checkpoint dirty
+// count, for the exact same reason the test above exists: the next leader cycle would otherwise see
+// a stale positive count and force a redundant checkpoint write of the now-empty cache.
+test('checkClearEpoch() resets the checkpoint dirty count too, on a detected peer clear', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	assert.equal(m.hasUnflushedCheckpointWork(), true, 'dirty before the peer clear is detected');
+
+	const peer = makeManager(dir);
+	await peer.deleteSharedSnapshot();
+
+	await m.loadSharedSnapshotIfChanged(); // detects the peer's clear via checkClearEpoch()
+
+	assert.equal(m.hasUnflushedCheckpointWork(), false,
+		'a detected peer clear must reset the dirty count along with the entries it was tracking, the same as clearAllCachedData() does for this window\'s own clear');
 });
