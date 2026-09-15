@@ -50,9 +50,14 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           BASE_REF: ${{ github.base_ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          # JSON, not a comma-joined string: label names may themselves contain
+          # commas, which would make a delimiter match lie in both directions.
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
-          set -uo pipefail
+          # -e matters here: without it a failed `git fetch` left the later diff
+          # empty, and an empty diff reads as "no protected paths" - a guard that
+          # fails OPEN exactly when git is broken.
+          set -euo pipefail
 
           git fetch --quiet origin "$BASE_REF"
 
@@ -72,18 +77,23 @@ jobs:
 
           # Who wrote it? Commit author is useless here: an agent running with
           # the maintainer's git identity authors commits as the maintainer.
-          # The co-author trailer and the branch prefix are what actually differ.
+          # Deliberately NOT treating dependabot/github-actions as agents - their
+          # changes are mechanical version bumps, not an AI editing its own
+          # configuration, and gating them would add friction on every bump.
           signal=""
           case "$HEAD_REF" in
             claude/*|copilot/*|agent-review/*) signal="branch prefix ${HEAD_REF%%/*}/" ;;
           esac
           if [ -z "$signal" ]; then
             case "$PR_AUTHOR" in
-              *'[bot]'|Copilot|copilot-swe-agent) signal="PR author $PR_AUTHOR" ;;
+              Copilot|copilot-swe-agent|copilot-swe-agent'[bot]') signal="PR author $PR_AUTHOR" ;;
             esac
           fi
+          # Matched anywhere after the colon, not just at the start: the trailers
+          # this repo actually carries include "Copilot App", "Claude Opus 5",
+          # "Mistral Vibe", "Vibe Nuage Agent" and "Vibe Code".
           if [ -z "$signal" ] && git log "origin/$BASE_REF..HEAD" --format='%b' \
-              | grep -qiE '^co-authored-by: *(claude|copilot)'; then
+              | grep -qiE '^co-authored-by:.*(claude|copilot|gpt|codex|gemini|mistral|vibe|devin|cursor|aider)'; then
             signal="AI co-author trailer"
           fi
 
@@ -94,12 +104,11 @@ jobs:
 
           echo "Agent-authorship signal: $signal"
 
-          case ",$PR_LABELS," in
-            *",$APPROVAL_LABEL,"*)
-              echo "Label '$APPROVAL_LABEL' is present - a human accepted this change. Allowed."
-              exit 0
-              ;;
-          esac
+          if printf '%s' "$PR_LABELS_JSON" \
+              | jq -e --arg want "$APPROVAL_LABEL" 'any(.[]; . == $want)' >/dev/null; then
+            echo "Label '$APPROVAL_LABEL' is present - a human accepted this change. Allowed."
+            exit 0
+          fi
 
           echo "::error::This PR changes agent/CI configuration and looks agent-authored ($signal). A human must review those paths and add the '$APPROVAL_LABEL' label to merge."
           exit 1

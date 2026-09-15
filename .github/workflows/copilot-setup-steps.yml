@@ -245,7 +245,7 @@ jobs:
           # so floating it would silently change what gets installed.
           python-version: '3.12'
 
-      - name: Install graphify
+      - name: "Install graphify (PyPI distribution: graphifyy)"
         continue-on-error: true
         run: |
           # --only-binary :all: refuses source distributions, so no dependency

@@ -140,8 +140,9 @@ To check if data is available:
 ### Code knowledge graph (graphify)
 
 `copilot-setup-steps.yml` also builds a graphify knowledge graph of the repository's
-code before the agent starts, at **`.graphify-agent/graph.json`** (~9,200 nodes /
-~21,900 edges). It needs no secrets — it is local AST parsing (`--code-only`).
+code before the agent starts, at **`.graphify-agent/graph.json`** (order of
+10k nodes; the exact size tracks the repo, so don't read a precise figure into
+it). It needs no secrets — it is local AST parsing (`--code-only`).
 The build is the last thing setup does and is deliberately non-blocking, so it is
 attempted whenever the earlier setup steps succeed (a failure in one of those makes
 Copilot skip everything after it, this group included). Treat the graph as normally
