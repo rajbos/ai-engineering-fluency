@@ -133,6 +133,38 @@ jobs:
             find ./session-logs -name "*.gz" -exec gunzip {} \;
             echo "✅ Session logs ready in ./session-logs"
           fi
+          
+          # Build editor-type manifest from blob metadata
+          # The upload stores editorType as blob metadata; download-batch does not
+          # preserve it, so we fetch it separately and write a JSON manifest that
+          # maps each session file's relative path to its source editor.
+          if [ "$FILE_COUNT" -gt 0 ]; then
+            echo "🏷️ Building editor-type manifest from blob metadata..."
+            az storage blob list \
+              --account-name "$AZURE_STORAGE_ACCOUNT" \
+              --container-name "$AZURE_STORAGE_CONTAINER" \
+              --prefix "${AZURE_DATASET_ID}/" \
+              --include metadata \
+              --auth-mode login \
+              --num-results 5000 \
+              --output json 2>/dev/null | \
+              node -e "
+                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                const manifest = {};
+                for (const blob of data) {
+                  const editorType = blob.metadata?.editorType;
+                  if (!editorType) continue;
+                  // Strip .gz to match the decompressed local path
+                  const localPath = blob.name.replace(/\\.gz$/, '');
+                  manifest[localPath] = editorType;
+                }
+                require('fs').writeFileSync('./session-logs/.editor-types.json', JSON.stringify(manifest, null, 2));
+                const count = Object.keys(manifest).length;
+                console.log(count > 0
+                  ? '✅ Editor-type manifest written: ' + count + ' entries'
+                  : '⚠️ No editorType metadata found on blobs (older uploads predate this feature)');
+              " || echo "⚠️ Failed to build editor-type manifest, continuing without it"
+          fi
 
       - name: Display session log summary
         if: ${{ vars.COPILOT_STORAGE_ACCOUNT != '' }}
@@ -140,6 +172,9 @@ jobs:
           if [ -d ./session-logs ]; then
             echo "📊 Session log summary:"
             echo "Total files: $(find ./session-logs -name "*.json" | wc -l)"
+            if [ -f ./session-logs/.editor-types.json ]; then
+              echo "Editor types: $(node -e "const m=require('./session-logs/.editor-types.json'); const counts={}; for(const v of Object.values(m)) counts[v]=(counts[v]||0)+1; console.log(Object.entries(counts).map(([k,v])=>k+': '+v).join(', '))")"
+            fi
             echo "Directory structure:"
             tree -L 3 ./session-logs || ls -R ./session-logs
           else
