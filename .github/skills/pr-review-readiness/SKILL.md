@@ -54,16 +54,21 @@ notes inline and the final step.
 
 1. **Get the PR's current head commit SHA** (call it `sha`).
    `mcp__github__pull_request_read` with `method: "get"` (the `head.sha` field).
-2. **Fetch check runs for the PR's head** and find the one named exactly
+2. **Fetch check runs for `sha`** and find the one named exactly
    `copilot-pull-request-reviewer`.
-   `mcp__github__pull_request_read` with `method: "get_check_runs"`.
-   (Raw REST equivalent, for non-MCP tooling:
-   `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`, or
-   `gh api repos/{owner}/{repo}/commits/{sha}/check-runs`.)
-   This call is PR-scoped, not pinned to the `sha` from step 1 — it reads
-   whatever the head is *at call time*. If a push can have landed between
-   steps 1 and 2, re-fetch `head.sha` now and restart from step 1 if it
-   changed, so the rest of this algorithm reasons about one consistent `sha`.
+   The two ways to do this differ in scoping — know which one you're calling:
+   - `mcp__github__pull_request_read` with `method: "get_check_runs"` is
+     **PR-scoped, not SHA-scoped**: it has no SHA parameter and always reads
+     check runs for whatever the PR's head is *at call time*. If a push can
+     have landed between steps 1 and 2, re-fetch `head.sha` right after this
+     call and restart from step 1 if it changed, so the rest of this
+     algorithm reasons about one consistent `sha`.
+   - The raw REST equivalent, for non-MCP tooling, **is SHA-scoped** and
+     avoids this race entirely by construction: `GET
+     /repos/{owner}/{repo}/commits/{sha}/check-runs` (or `gh api
+     repos/{owner}/{repo}/commits/{sha}/check-runs`), called with the exact
+     `sha` from step 1. Prefer this form when you can choose, since it makes
+     the re-check above unnecessary.
 3. **Decide from its state:**
 
    | State | Meaning | What to do |
@@ -77,9 +82,13 @@ notes inline and the final step.
    review API by a few seconds, or have failed instead of finishing normally:
    - Fetch **all pages** of the PR's submitted reviews:
      `mcp__github__pull_request_read` with `method: "get_reviews"`, paging with
-     `page`/`perPage` until a page comes back short. `get_reviews` is
-     paginated — reading only the first page can miss the review you need,
-     especially on a PR with many review rounds.
+     `page`/`perPage` (use the maximum `perPage` the tool allows, e.g. `100`)
+     until a page comes back with fewer results than requested — that's the
+     last page. `get_reviews` is paginated — reading only the first page can
+     miss the review you need, especially on a PR with many review rounds.
+     Cap it at a sane bound (e.g. 20 pages) so a bug elsewhere can't turn
+     this into an unbounded loop; hitting that bound without finding a match
+     is itself a sign something is off, not a silent "no comments".
    - Across every page, look for a review authored by
      `copilot-pull-request-reviewer[bot]` whose `commit_id` equals `sha`
      (not merely "the most recent bot review" — on a PR with prior rounds,
@@ -90,10 +99,12 @@ notes inline and the final step.
      Safe to read `get_review_comments` / the review body and act on
      findings.
    - **No such review exists, and the check run's `conclusion` is anything
-     other than `success` or `neutral`** (e.g. `failure`, `cancelled`,
-     `timed_out`, `action_required`) → the review did not finish cleanly.
-     Treat as **not yet ready** — do not conclude "no findings"; investigate
-     or reschedule rather than trusting an aborted run.
+     other than exactly `success` or `neutral`** — treat every other value as
+     not clean, not just the common examples (`failure`, `cancelled`,
+     `timed_out`, `action_required`, `skipped`, or a missing/`null`
+     conclusion all count). The review did not finish cleanly. Treat as
+     **not yet ready** — do not conclude "no findings"; investigate or
+     reschedule rather than trusting an aborted run.
    - **No such review exists, and the check run's `conclusion` is `success`
      or `neutral`** → could be brief API propagation lag. Retry once, short
      delay. Still no matching review after that retry → valid terminal state
