@@ -3,6 +3,13 @@ import * as assert from 'node:assert/strict';
 
 import { createSemaphore, createWakeupGate, TimeoutError, withTimeout } from '../../src/utils/promises';
 
+/**
+ * Deterministic event-loop yield for "confirm nothing resolved yet"/"let a pending .then() run"
+ * assertions below — unlike a wall-clock `setTimeout(..., N)`, this has no timing window that can
+ * flake under CI load and doesn't slow the suite down waiting out an arbitrary delay.
+ */
+const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
 test('createWakeupGate: signal resolves all currently parked waiters', async () => {
 	const gate = createWakeupGate();
 	const order: number[] = [];
@@ -19,7 +26,7 @@ test('createWakeupGate: signal with no waiters is a no-op and does not affect la
 	let resolved = false;
 	const p = gate.wait().then(() => { resolved = true; });
 	// The earlier signal must NOT satisfy this later wait.
-	await new Promise(r => setTimeout(r, 5));
+	await tick();
 	assert.equal(resolved, false);
 	gate.signal();
 	await p;
@@ -34,7 +41,7 @@ test('createWakeupGate: a fresh wait after signal stays parked until the next si
 
 	let secondResolved = false;
 	const second = gate.wait().then(() => { secondResolved = true; });
-	await new Promise(r => setTimeout(r, 5));
+	await tick();
 	assert.equal(secondResolved, false);
 	gate.signal();
 	await second;
@@ -61,7 +68,7 @@ test('createWakeupGate: producer/consumer drains all items without polling', asy
 
 	const producer = (async () => {
 		for (let i = 0; i < 5; i++) {
-			await new Promise(r => setTimeout(r, 1));
+			await tick();
 			queue.push(i);
 			gate.signal();
 		}
@@ -110,7 +117,7 @@ test('createSemaphore: acquire() blocks once permits are exhausted, until a rele
 
 	let acquired = false;
 	const pending = sem.acquire().then((ok) => { acquired = ok; });
-	await new Promise(r => setTimeout(r, 5));
+	await tick();
 	assert.equal(acquired, false, 'must not acquire while the sole permit is still held');
 
 	sem.release();
@@ -128,12 +135,12 @@ test('createSemaphore: release() admits exactly one waiter, not every parked cal
 	const results: boolean[] = [];
 	const waiterA = sem.acquire().then((ok) => { results.push(ok); return ok; });
 	const waiterB = sem.acquire().then((ok) => { results.push(ok); return ok; });
-	await new Promise(r => setTimeout(r, 5));
+	await tick();
 	assert.deepEqual(results, [], 'neither waiter may acquire before a release()');
 
 	sem.release();
-	// Give the microtask queue a turn to settle whichever waiter the release granted.
-	await new Promise(r => setTimeout(r, 5));
+	// Give the event loop a turn to settle whichever waiter the release granted.
+	await tick();
 	assert.equal(results.length, 1, 'exactly one waiter must be admitted per release()');
 
 	sem.release();
@@ -168,7 +175,7 @@ test('createSemaphore: an over-release (more release() calls than successful acq
 
 	let secondAcquired = false;
 	const pending = sem.acquire().then((ok) => { secondAcquired = ok; });
-	await new Promise(r => setTimeout(r, 5));
+	await tick();
 	assert.equal(secondAcquired, false,
 		'a second concurrent acquire() must still block — the over-releases above must not have widened the cap past its original 1 permit');
 
