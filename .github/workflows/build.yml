@@ -205,6 +205,16 @@ jobs:
     needs: [check-changes, build-and-test]
     if: always()
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      # The composite action below is a local action (./.github/actions/...),
+      # which needs the repo checked out at this path to be found at all -
+      # without this, the step fails with "Can't find 'action.yml' ...".
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Check the gated job results
         uses: ./.github/actions/check-gated-results
         with:
