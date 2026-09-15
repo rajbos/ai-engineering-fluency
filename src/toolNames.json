@@ -1282,4 +1282,5 @@
   ,"zread_search_doc": "ZR Search Doc"
   ,"SendUserFile": "GitHub MCP (Local): Send User File"
   ,"kilo_local_recall": "Kilo Local Recall"
+  ,"get_sessions_status": "Playwright MCP: Get Sessions Status"
 }
