@@ -53,6 +53,7 @@ function extractBracesBlock(source: string, marker: string): string {
 	const markerIndex = source.indexOf(marker);
 	assert.notEqual(markerIndex, -1, `marker not found in extension.ts: ${marker}`);
 	const braceStart = source.indexOf('{', markerIndex);
+	assert.notEqual(braceStart, -1, `no '{' found after marker in extension.ts: ${marker}`);
 	let depth = 0;
 	for (let i = braceStart; i < source.length; i++) {
 		if (source[i] === '{') { depth++; }

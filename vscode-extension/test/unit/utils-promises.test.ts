@@ -162,6 +162,18 @@ test('createSemaphore: a timed-out acquire() resolves false and does not consume
 	assert.equal(await sem.acquire(), true, 'the released permit must be available to a brand-new acquire()');
 });
 
+test('createSemaphore: acquire() rejects an invalid timeoutMs instead of letting it reach setTimeout() uncoerced', async () => {
+	const sem = createSemaphore(1);
+	await sem.acquire(); // hold the only permit so the next acquire() would actually need timeoutMs
+
+	// Node coerces an invalid setTimeout delay (NaN, negative, Infinity) rather than throwing, which
+	// would otherwise surface as a confusing immediate false timeout instead of a clear failure at
+	// the call site that got it wrong.
+	await assert.rejects(async () => sem.acquire(NaN), RangeError);
+	await assert.rejects(async () => sem.acquire(-1), RangeError);
+	await assert.rejects(async () => sem.acquire(Infinity), RangeError);
+});
+
 test('createSemaphore: rejects a zero-capacity request instead of silently accepting a permit count release() cannot actually enforce', () => {
 	// release() hands a freed permit straight to the longest-waiting acquire() without re-checking
 	// the cap, so a semaphore constructed with 0 permits would still admit a waiter on any

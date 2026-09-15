@@ -635,7 +635,7 @@ test('a dirty write on a fresh manager is eligible to checkpoint via the always-
 	assert.equal(m.maybeCheckpointCache(), true, 'one dirty write plus the always-elapsed time threshold must trigger a checkpoint');
 
 	// Let the fire-and-forget save settle before the test (and its tmp dir) goes away.
-	await new Promise(r => setTimeout(r, 20));
+	await m.awaitInFlightCheckpoint();
 });
 
 test('maybeCheckpointCache() counts a changed existing entry as dirty, not just brand-new paths', async () => {
@@ -654,7 +654,7 @@ test('maybeCheckpointCache() counts a changed existing entry as dirty, not just 
 	}
 	assert.equal(m.maybeCheckpointCache(), true, 'reaching the entries threshold via changed-entry writes alone must trigger a checkpoint');
 
-	await new Promise(r => setTimeout(r, 20));
+	await m.awaitInFlightCheckpoint();
 });
 
 test('deleteCachedSessionData() marks the cache dirty for a real removal, but a repeated no-op tombstone of the same path does not', async () => {
@@ -673,7 +673,7 @@ test('deleteCachedSessionData() marks the cache dirty for a real removal, but a 
 		m.deleteCachedSessionData(`/file${i}.json`);
 	}
 	assert.equal(m.maybeCheckpointCache(), true, 'reaching the entries threshold via real deletions alone must trigger a checkpoint');
-	await new Promise(r => setTimeout(r, 20)); // let the fire-and-forget save settle
+	await m.awaitInFlightCheckpoint(); // let the fire-and-forget save settle
 
 	m.resetCheckpointCounters();
 	assert.equal(m.maybeCheckpointCache(), false, 'nothing dirty right after reset');

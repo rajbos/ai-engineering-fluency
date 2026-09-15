@@ -4223,24 +4223,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// left the losing side of the race registered forever — see git history), this is a
 				// real reservation: acquire() hands the freed permit to exactly one waiter per
 				// release(), and a timed-out acquire() removes its own registration.
-				let release: () => void;
-				if (await this._deferredParseSemaphore.acquire(3_000)) {
-					release = () => this._deferredParseSemaphore.release();
+				// A file already being parsed by a still-running background parse from an earlier
+				// run is a pure no-op here (processPreloadQueueFileWithCrashLog() used to discover
+				// this itself, after a permit was already held) — checked before acquiring so this
+				// worker never blocks waiting for a permit only to find out there was nothing to do,
+				// competing with genuinely slow parses for the exact capacity this semaphore exists
+				// to ration.
+				if (this._deferredSessionPreloadFiles.has(sessionFile)) {
+					this.debugCrashLog(`deferred ${sessionFile}`);
 				} else {
-					// The 3s timeout won: every primary permit is held by a parse that has shown no
-					// sign of ever finishing (merely slow files settle well within a handful of these
-					// waits). Falling back to running unreserved here would let total concurrency
-					// creep past the cap by a full worker-pool's width on every such wave — the exact
-					// drift the primary semaphore exists to prevent (see git history). Instead, wait
-					// (uncapped) on a small, separately bounded reserve — see
-					// DEFERRED_PARSE_RESERVE_PERMITS — so the worst case is a bigger but still fixed
-					// ceiling, not unbounded growth.
-					await this._deferredParseReserve.acquire();
-					release = () => this._deferredParseReserve.release();
-				}
-				const wasDeferred = await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget, release);
-				if (!wasDeferred) {
-					release();
+					let release: () => void;
+					if (await this._deferredParseSemaphore.acquire(3_000)) {
+						release = () => this._deferredParseSemaphore.release();
+					} else {
+						// The 3s timeout won: every primary permit is held by a parse that has shown no
+						// sign of ever finishing (merely slow files settle well within a handful of these
+						// waits). Falling back to running unreserved here would let total concurrency
+						// creep past the cap by a full worker-pool's width on every such wave — the exact
+						// drift the primary semaphore exists to prevent (see git history). Instead, wait
+						// (uncapped) on a small, separately bounded reserve — see
+						// DEFERRED_PARSE_RESERVE_PERMITS — so the worst case is a bigger but still fixed
+						// ceiling, not unbounded growth.
+						await this._deferredParseReserve.acquire();
+						release = () => this._deferredParseReserve.release();
+					}
+					const wasDeferred = await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget, release);
+					if (!wasDeferred) {
+						release();
+					}
 				}
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
@@ -4307,6 +4317,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * which file(s) were in flight. A "start" line with no matching "done"/"error"
 	 * for the same file means the process died while processing it.
 	 *
+	 * Callers only reach this once the worker loop has already confirmed `sessionFile` isn't
+	 * still being handled by an earlier run's deferred parse — see that loop's own
+	 * `_deferredSessionPreloadFiles` check, made before acquiring a permit for exactly this file.
+	 *
 	 * `release` is the permit worker() acquired for this file (from whichever pool — the primary
 	 * semaphore or the reserve, see their declarations), called exactly once total regardless of
 	 * outcome: either here-and-now by the caller when this returns `false` (not deferred), or
@@ -4314,10 +4328,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * returns `true` and ownership has transferred.
 	 */
 	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget: { remaining: number } | undefined, release: () => void): Promise<boolean> {
-		if (this._deferredSessionPreloadFiles.has(sessionFile)) {
-			this.debugCrashLog(`deferred ${sessionFile}`);
-			return false;
-		}
 		this.debugCrashLog(`start ${sessionFile}`);
 		const processing = this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
 		const operation = `Parsing session "${sessionFile}"`;
