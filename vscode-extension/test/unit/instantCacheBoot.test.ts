@@ -581,6 +581,15 @@ test('clearCache() waits for in-flight deferred parses before clearing, so a str
 	const clearIndex = body.indexOf('this.cacheManager.clearAllCachedData();');
 	assert.ok(awaitDeferredIndex !== -1 && clearIndex !== -1 && awaitDeferredIndex < clearIndex,
 		'must await every deferred (backgrounded) parse still running from an earlier refresh before clearing — otherwise one finishing after the clear could call setCachedSessionData() and silently repopulate the cache this command just emptied');
+
+	// A pre-existing refresh that hasn't deferred anything yet — its workers are still on their
+	// ordinary (non-timed-out) pass over files — is invisible to awaitAllDeferredParses(), since
+	// that only tracks parses already registered as deferred. Awaiting the whole in-flight run
+	// first closes that gap: only after it settles (or defers work of its own, which the
+	// subsequent awaitAllDeferredParses() then covers) is it safe to read _deferredSessionPreloadPromises.
+	const preClearRefreshIndex = body.indexOf('const preClearRefresh = this._updateTokenStatsInFlight;');
+	assert.ok(preClearRefreshIndex !== -1 && preClearRefreshIndex < awaitDeferredIndex,
+		'must wait out any pre-existing in-flight updateTokenStats() run before awaiting deferred parses — otherwise a foreground worker still on its ordinary (non-deferred) pass over a file could call setCachedSessionData() after the clear');
 });
 
 test('deferSessionPreloadRefresh() tracks each deferred parse\'s settle promise for awaitAllDeferredParses() to await, and untracks it once settled', () => {

@@ -1158,6 +1158,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * path. clearCache() awaits all of these (a snapshot at the moment it runs) before clearing,
 	 * so a parse that is still running from a refresh that already returned cannot call
 	 * setCachedSessionData() after the clear and silently repopulate the cache it just emptied.
+	 * This only covers parses that already timed out into the background by the time clearCache()
+	 * takes its snapshot — a foreground worker still on its ordinary (non-deferred) pass over a
+	 * file is not registered here yet, which is why clearCache() also awaits the whole in-flight
+	 * refresh (`_updateTokenStatsInFlight`) before reading this map; see clearCache()'s own comment.
 	 * Populated/cleared alongside _deferredSessionPreloadFiles in deferSessionPreloadRefresh().
 	 */
 	private readonly _deferredSessionPreloadPromises = new Map<string, Promise<void>>();
@@ -1997,9 +2001,27 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.outputChannel.show(true);
 			this.log('Clearing session file cache...');
 
+			// Wait out a pre-existing refresh (a timer or an earlier manual Refresh, never this
+			// call's own — that one is started below, after clearing) that is still mid-
+			// _preloadSessionFiles() first: its foreground workers call setCachedSessionData()
+			// directly for every file that hasn't hit the deferred-parse timeout yet, and
+			// awaitAllDeferredParses() below only knows about parses already registered as
+			// deferred — a worker still on its first, ordinary (non-deferred) pass over a file is
+			// invisible to it. Settling this promise doesn't require the run to actually finish
+			// quickly: its own isRefreshSuperseded() check (against the generation this clear is
+			// about to bump) makes it discard its results without publishing once it notices,
+			// exactly as a caller of updateTokenStats() arriving after a clear already waits it
+			// out (see updateTokenStats()'s own "waiting it out before refreshing" branch above).
+			const preClearRefresh = this._updateTokenStatsInFlight;
+			if (preClearRefresh) {
+				await preClearRefresh.catch(() => undefined);
+			}
+
 			// Wait out any deferred (backgrounded) parse still finishing from a refresh that already
 			// returned — without this, its setCachedSessionData() call could land after the
 			// synchronous clear below and silently repopulate the cache this command just emptied.
+			// Run after the wait above: that run's own workers can defer new parses to the
+			// background while this call was waiting on it, and those need to be covered too.
 			// Safe to await before the invalidation block: the generation hasn't bumped yet, so a
 			// build reading the cache during this wait sees the pre-clear generation it would have
 			// seen anyway, not the "new generation, stale data" combination the comment below guards.
@@ -4342,10 +4364,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Resolves once every deferred parse in flight at the moment this is called has settled — a
 	 * snapshot of `_deferredSessionPreloadPromises`, not a live wait: a parse that starts fresh
 	 * after this snapshot is taken is not included, but that is fine here, since clearCache()
-	 * calls this immediately before its own synchronous clearAllCachedData(), so nothing new can
-	 * legitimately race in between on the same tick. Used by clearCache() so a deferred parse from
-	 * a refresh that already returned cannot call setCachedSessionData() after the clear and
-	 * silently repopulate the cache it just emptied.
+	 * calls this immediately before its own synchronous clearAllCachedData(), with nothing else
+	 * awaited in between — clearCache() awaits any pre-existing in-flight refresh first (see its
+	 * own comment), so by the time this runs that run's workers are done handing parses off to the
+	 * background, and nothing new can legitimately race in between this call and the synchronous
+	 * clear that follows it. Used by clearCache() so a deferred parse from a refresh that already
+	 * returned cannot call setCachedSessionData() after the clear and silently repopulate the
+	 * cache it just emptied.
 	 */
 	private async awaitAllDeferredParses(): Promise<void> {
 		if (this._deferredSessionPreloadPromises.size === 0) { return; }
