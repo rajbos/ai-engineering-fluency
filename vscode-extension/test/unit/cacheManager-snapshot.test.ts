@@ -643,6 +643,43 @@ test('loadSharedSnapshotIfChanged() drops a window\'s in-memory cache once a pee
 		'a detected peer clear must drop the in-memory cache so window A stops SERVING stale data, not just stop persisting it');
 });
 
+// A follow-up Copilot review found that the epoch check at the top of loadSharedSnapshotIfChanged()
+// only guards the moment the call starts: a peer's clear landing anywhere during the subsequent
+// stat/read/merge sequence would still get its pre-clear entries merged into this window's cache
+// with no second check to catch it, letting the window serve (and later republish) that stale data
+// until some unrelated later refresh cycle happened to call checkClearEpoch() again.
+test('loadSharedSnapshotIfChanged() re-checks the epoch after merging, so a clear landing mid-load is not resurrected', async () => {
+	const dir = tmpDir();
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot(); // pre-clear content on disk to (almost) resurrect
+
+	const m = makeManager(dir);
+
+	const originalReadFile = fs.promises.readFile;
+	let intercepted = false;
+	(fs.promises as any).readFile = async (...args: unknown[]) => {
+		const result = await (originalReadFile as (...a: unknown[]) => Promise<unknown>).apply(fs.promises, args);
+		// Simulate a peer window's clear landing exactly while this call is reading the snapshot
+		// it's about to merge — a real interleaving, not just a contrived ordering.
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			const peer = makeManager(dir);
+			await peer.deleteSharedSnapshot();
+		}
+		return result;
+	};
+	let merged: number;
+	try {
+		merged = await m.loadSharedSnapshotIfChanged();
+	} finally {
+		(fs.promises as any).readFile = originalReadFile;
+	}
+	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
+	assert.equal(merged, 0, 'entries read from a snapshot that turned out to predate a clear must not be reported as usefully merged');
+	assert.equal(m.cache.size, 0, 'the pre-clear entry must not survive in memory once the mid-load clear is detected');
+});
+
 test('a save that started before the clear epoch is skipped only once; the next save (after re-syncing) succeeds normally', async () => {
 	const dir = tmpDir();
 
@@ -1202,4 +1239,23 @@ test('clearAllCachedData() resets the checkpoint dirty count too, so the next cy
 
 	assert.equal(m.hasUnflushedCheckpointWork(), false,
 		'a clear must reset the dirty count along with the entries it was tracking — otherwise the next leader cycle sees stale dirty state and performs a full checkpoint save of the now-empty cache before parsing anything of its own');
+});
+
+// A follow-up Copilot review found that checkClearEpoch() — the cross-window counterpart to
+// clearAllCachedData() above — dropped the in-memory cache but never reset the checkpoint dirty
+// count, for the exact same reason the test above exists: the next leader cycle would otherwise see
+// a stale positive count and force a redundant checkpoint write of the now-empty cache.
+test('checkClearEpoch() resets the checkpoint dirty count too, on a detected peer clear', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	assert.equal(m.hasUnflushedCheckpointWork(), true, 'dirty before the peer clear is detected');
+
+	const peer = makeManager(dir);
+	await peer.deleteSharedSnapshot();
+
+	await m.loadSharedSnapshotIfChanged(); // detects the peer's clear via checkClearEpoch()
+
+	assert.equal(m.hasUnflushedCheckpointWork(), false,
+		'a detected peer clear must reset the dirty count along with the entries it was tracking, the same as clearAllCachedData() does for this window\'s own clear');
 });

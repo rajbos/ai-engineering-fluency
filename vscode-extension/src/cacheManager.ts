@@ -1000,6 +1000,14 @@ export class CacheManager {
 	 * clear does, regardless of which of the two signals (generation or epoch) it happens to be
 	 * mid-checking.
 	 *
+	 * Also resets the checkpoint dirty-count accounting via resetCheckpointCounters(), the same
+	 * call clearAllCachedData() makes: entriesSinceLastCheckpoint otherwise keeps describing the
+	 * pre-clear cache this call just emptied, so the next leader cycle's
+	 * flushPendingCheckpointBeforeReset() would see a stale positive count and force a redundant
+	 * checkpoint write of the (now-empty) cache before parsing anything of its own — reintroducing
+	 * the exact no-op-write case the checkpoint dirty-tracking rework exists to skip. Safe to call
+	 * with a checkpoint already mid-flight (see that method's own doc comment).
+	 *
 	 * Returns true if a newer epoch was found and the in-memory cache was dropped.
 	 */
 	private async checkClearEpoch(): Promise<boolean> {
@@ -1012,6 +1020,7 @@ export class CacheManager {
 		this.deletedFilePaths = new Map();
 		this.clearEpoch = persisted;
 		this.cacheClearGeneration++;
+		this.resetCheckpointCounters();
 		// Without this, a post-clear snapshot recreated with an mtime at or below this bookmark
 		// (coarse or backward-moving filesystem clocks — the same clocks the cross-window tests
 		// above already account for) would make loadSharedSnapshotIfChanged()'s own mtime check
@@ -1272,6 +1281,15 @@ export class CacheManager {
 		}
 		const merged = this.mergeSnapshotEntries(entries);
 		this.lastLoadedSnapshotMtime = mtimeMs;
+		// Re-check after merging, not just before starting: a peer's clear can land anywhere during
+		// the stat/read/merge sequence above, and the entries just merged in were read from a
+		// snapshot that predates it. Without this, this window would keep serving (and could later
+		// republish) those pre-clear entries until its next unrelated refresh cycle happened to call
+		// checkClearEpoch() again. A detected clear here means what was just merged is already
+		// stale, so it is dropped along with the rest of the cache — report 0, not `merged`.
+		if (await this.checkClearEpoch()) {
+			return 0;
+		}
 		if (merged > 0) {
 			this.deps.log(`Warmed cache from shared snapshot: merged ${merged} entr${merged === 1 ? 'y' : 'ies'} in ${Date.now() - loadStartedAt}ms`);
 		}
