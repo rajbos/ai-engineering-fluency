@@ -1,27 +1,31 @@
 # Code owners for CI and agent configuration.
 #
 # Why this file exists: on a `pull_request` event GitHub runs the PR's own copy
-# of the workflow files and of any local composite action they call. A pull
-# request can therefore rewrite the logic behind a required status check - the
-# "CI result", "Build result" and "CodeQL result" anchors call
-# ./.github/actions/check-gated-results out of the PR's checkout - and have it
-# report success while the real jobs are broken.
+# of the workflow files, and of any local composite action (`uses: ./...`) they
+# call out of the PR's checkout. A pull request can therefore rewrite the logic
+# behind a required status check and have it report success while the real jobs
+# are broken. Nothing inside a workflow closes that, because the workflow itself
+# is equally PR-controlled - so human review of these paths is the control.
 #
-# No amount of hardening inside the workflow closes that, because the workflow
-# itself is equally PR-controlled. Human review of these paths is the control.
+# The same reasoning covers the files agents load as instructions: an unreviewed
+# edit there redirects what every future agent run does.
 #
 # This takes effect only when branch protection (or a ruleset) on the default
 # branch has "Require review from Code Owners" enabled. Without that toggle
 # these entries request reviewers but block nothing.
 
-# Workflows, composite actions, and the instructions/skills/agents that both
-# Copilot and Claude Code load automatically.
-/.github/     @rajbos @FokkoVeegens
+# Workflows, composite actions, and the Copilot-side instructions/skills/agents.
+/.github/       @rajbos @FokkoVeegens
+
+# The Claude Code side of the same configuration. AGENTS.md requires these to be
+# kept mirrored with their .github/ counterparts, and Claude Code loads them
+# automatically - so they need the same review as the files they mirror.
+/.claude/       @rajbos @FokkoVeegens
 
 # Repository-wide agent instructions. Every coding agent reads these at the
-# start of a run, so an edit here redirects all future agent behaviour.
-/AGENTS.md    @rajbos @FokkoVeegens
-/CLAUDE.md    @rajbos @FokkoVeegens
+# start of a run.
+/AGENTS.md      @rajbos @FokkoVeegens
+/CLAUDE.md      @rajbos @FokkoVeegens
 
 # The devcontainer runs commands, and `initializeCommand` runs them on the
 # developer's own machine before the container is even built - an edit here
