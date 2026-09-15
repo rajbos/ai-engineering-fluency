@@ -154,7 +154,7 @@ export class CacheManager {
 	 * writeSharedSnapshot()'s merge (which starts from whatever is already on disk) the next time
 	 * the cache is saved. Prefer this over `cache.delete(path)` directly for any deletion whose
 	 * effect must actually survive a save — an in-memory-only delete is undone by the very next
-	 * saveCacheToStorage()/checkpoint.
+	 * trySaveCacheToStorage()/checkpoint.
 	 */
 	deleteCachedSessionData(filePath: string): void {
 		const existing = this.sessionFileCache.get(filePath);
@@ -309,14 +309,14 @@ export class CacheManager {
 	 * Internal method to perform the checkpoint save.
 	 *
 	 * Only clears the dirty count on an actual persisted write, and only the portion of it this
-	 * save actually captured. saveCacheToStorage() never throws — it resolves `false` on a
+	 * save actually captured. trySaveCacheToStorage() never throws — it resolves `false` on a
 	 * skipped (lock held by another window) or failed save — so resetting unconditionally here
 	 * would let a lock-contended tick (an expected, routine occurrence, not a rare error)
 	 * silently drop its dirty count. Combined with maybeCheckpointCache()'s "skip when nothing is
 	 * dirty" guard, that would leave the change unpersisted with no future tick ever retrying it.
 	 *
 	 * Subtracting rather than zeroing on success matters too: workers keep calling
-	 * setCachedSessionData()/deleteCachedSessionData() while saveCacheToStorage() is in flight,
+	 * setCachedSessionData()/deleteCachedSessionData() while trySaveCacheToStorage() is in flight,
 	 * and buildMergedSnapshotEntries() (inside writeSharedSnapshot()) reads the live cache Map at
 	 * the start of that write — an entry added after that read is not necessarily reflected in
 	 * what actually reached disk. Zeroing the whole counter here would wrongly mark that
@@ -330,7 +330,7 @@ export class CacheManager {
 	 * accumulated since. checkpointCounterGeneration detects that and skips the update entirely
 	 * in that case, leaving the new cycle's own counter (and its own future checkpoint) untouched.
 	 *
-	 * saveCacheToStorage() is documented never to throw, but this awaits it inside a try/catch
+	 * trySaveCacheToStorage() is documented never to throw, but this awaits it inside a try/catch
 	 * anyway: forceCheckpointCache()/awaitInFlightCheckpoint() now await this method's settle
 	 * promise directly (unlike the original fire-and-forget-only caller, maybeCheckpointCache()),
 	 * so a rejection here would no longer just be an unhandled-rejection warning — it would
@@ -358,7 +358,7 @@ export class CacheManager {
 
 		let saved: boolean;
 		try {
-			saved = await this.saveCacheToStorage();
+			saved = await this.trySaveCacheToStorage();
 		} catch (error) {
 			this.deps.error(`Cache save threw unexpectedly: ${error}`);
 			saved = false;
@@ -379,7 +379,7 @@ export class CacheManager {
 	 * reports `false`, the same outcome as any other lock-contended save, never a correctness
 	 * problem). Used by persistRefreshResult() at the end of every leader refresh.
 	 *
-	 * persistRefreshResult()'s save used to call saveCacheToStorage() directly, bypassing
+	 * persistRefreshResult()'s save used to call trySaveCacheToStorage() directly, bypassing
 	 * checkpoint accounting entirely: entriesSinceLastCheckpoint stayed exactly as dirty as it was
 	 * before that fully successful save. The *next* leader cycle's flushPendingCheckpointBeforeReset()
 	 * then saw that stale dirty count and performed a redundant extra checkpoint read/merge/write
@@ -396,7 +396,7 @@ export class CacheManager {
 	 * Reset checkpoint counters (call this at the start of a new refresh cycle).
 	 *
 	 * Deliberately does not touch checkpointInProgress. A checkpoint from the previous cycle can
-	 * still be mid-flight (its own saveCacheToStorage() awaiting) when this runs — forcing the
+	 * still be mid-flight (its own trySaveCacheToStorage() awaiting) when this runs — forcing the
 	 * flag false here would let maybeCheckpointCache() start a second, overlapping checkpoint
 	 * before the first one's own `.finally()` gets a chance to clear it, defeating the "at most
 	 * one checkpoint at a time" invariant this flag exists for. checkpointCacheInternal()'s
@@ -849,7 +849,7 @@ export class CacheManager {
 	 * entriesSinceLastCheckpoint on a save that didn't happen, or a dirty checkpoint that lost a
 	 * lock race can be mistaken for a persisted one and never retried.
 	 */
-	async saveCacheToStorage(): Promise<boolean> {
+	async trySaveCacheToStorage(): Promise<boolean> {
 		const acquired = await this.acquireCacheLock();
 		if (!acquired) {
 			this.deps.log('Cache lock held by another VS Code window, skipping save');

@@ -165,7 +165,7 @@ if (cacheData) {
 ```
 
 ### Saving Cache
-**Method**: `saveCacheToStorage()`
+**Method**: `trySaveCacheToStorage()`
 **Location**: `src/extension.ts` (lines 352-360)
 
 Saves the cache to VS Code's global state:
@@ -207,7 +207,7 @@ for (const [filePath, _] of this.sessionFileCache) {
 2. **Cache Check**: For each file, checks if cache is valid via `isCacheValid()`
 3. **Read or Compute**: If valid, uses cache; otherwise, reads and parses the file
 4. **Cache Update**: New statistics are stored in cache via `setCachedSessionData()`
-5. **Persistence**: Cache is saved to global state via `saveCacheToStorage()`
+5. **Persistence**: Cache is saved to global state via `trySaveCacheToStorage()`
 6. **Cleanup**: Expired entries are removed via `clearExpiredCache()`
 
 ## Example Use Cases

@@ -815,7 +815,7 @@ test('clearCache()-style sequence (clearAllCachedData + awaitInFlightCheckpoint 
 });
 
 // ---------------------------------------------------------------------------
-// Follow-up review finding: persistRefreshResult() used to call saveCacheToStorage() directly,
+// Follow-up review finding: persistRefreshResult() used to call trySaveCacheToStorage() directly,
 // bypassing checkpoint accounting entirely — a fully successful end-of-refresh save left
 // entriesSinceLastCheckpoint exactly as dirty as before it, so the *next* leader cycle's
 // flushPendingCheckpointBeforeReset() saw stale dirty state and performed a redundant extra

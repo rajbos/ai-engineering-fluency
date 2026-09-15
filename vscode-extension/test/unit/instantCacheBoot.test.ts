@@ -454,7 +454,7 @@ test('renderInstantStatsFromCache() never overwrites a real refresh that already
 test('reconcilePreloadedAgainstDiscovery() evicts every raw cache key for an unconfirmed path, via the tombstone-aware deleteCachedSessionData()', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {');
 	assert.ok(body.includes('this.cacheManager.deleteCachedSessionData(rawPath)'),
-		'must evict via cacheManager.deleteCachedSessionData() (which tombstones the path), not a plain cache.delete() — a plain delete is silently resurrected by the very next saveCacheToStorage(), whose merge starts from whatever is already on disk (see cacheManager-snapshot.test.ts)');
+		'must evict via cacheManager.deleteCachedSessionData() (which tombstones the path), not a plain cache.delete() — a plain delete is silently resurrected by the very next trySaveCacheToStorage(), whose merge starts from whatever is already on disk (see cacheManager-snapshot.test.ts)');
 	assert.ok(!/this\.cacheManager\.cache\.delete\(/.test(body),
 		'must not touch cacheManager.cache directly — deletions here must always go through the tombstone-aware deleteCachedSessionData()');
 
@@ -495,9 +495,9 @@ test('sample-data mode never writes to the shared on-disk cache snapshot: neithe
 	// fixture data into the developer's real, shared production snapshot.
 	const disposeBody = extractBracesBlock(EXTENSION_SRC, 'public dispose(): void {');
 	const disposeSampleGuardIndex = disposeBody.indexOf('if (!this.isSampleDataModeActive()) {');
-	const disposeSaveIndex = disposeBody.indexOf('await this.saveCacheToStorage()');
+	const disposeSaveIndex = disposeBody.indexOf('await this.trySaveCacheToStorage()');
 	assert.ok(disposeSampleGuardIndex !== -1 && disposeSaveIndex !== -1 && disposeSampleGuardIndex < disposeSaveIndex,
-		'dispose() must also skip its shutdown saveCacheToStorage() call in sample-data mode, same as persistRefreshResult()');
+		'dispose() must also skip its shutdown trySaveCacheToStorage() call in sample-data mode, same as persistRefreshResult()');
 });
 
 test('persistRefreshResult() tracks its detached end-of-refresh save so _runUpdateTokenStats() can await it before releasing the refresh-leader lock', () => {
@@ -569,10 +569,10 @@ test('evictRegressionSessionFilesFromCache() sweeps by normalized key and persis
 
 	const evictionIndex = body.indexOf('this.cacheManager.deleteCachedSessionData(rawPath);');
 	const evictedAnyIndex = body.indexOf('evictedAny = true;');
-	const saveIndex = body.indexOf('await this.saveCacheToStorage();');
+	const saveIndex = body.indexOf('await this.trySaveCacheToStorage();');
 	assert.ok(evictionIndex !== -1 && evictedAnyIndex !== -1 && saveIndex !== -1
 		&& evictedAnyIndex > evictionIndex && saveIndex > evictedAnyIndex,
-		'must persist the tombstones (via saveCacheToStorage()) after evicting fixture entries, so a stale on-disk copy from before this eviction existed does not linger until some other save happens to occur');
+		'must persist the tombstones (via trySaveCacheToStorage()) after evicting fixture entries, so a stale on-disk copy from before this eviction existed does not linger until some other save happens to occur');
 
 	const guardIndex = body.indexOf('if (evictedAny && !this.isSampleDataModeActive()) {');
 	assert.ok(guardIndex !== -1 && guardIndex > evictedAnyIndex && guardIndex < saveIndex,

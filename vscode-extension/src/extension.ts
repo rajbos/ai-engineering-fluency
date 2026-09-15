@@ -1913,7 +1913,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// confirmed off again (runLocalViewRegression()'s finally block just restored the previous
 		// sample dir before calling this), so the tombstones actually reach disk.
 		if (evictedAny && !this.isSampleDataModeActive()) {
-			try { await this.saveCacheToStorage(); }
+			try { await this.trySaveCacheToStorage(); }
 			catch (err) { console.error(`Failed to persist regression cache eviction: ${err}`); }
 		}
 	}
@@ -2026,8 +2026,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Also removes the legacy unscoped keys ('sessionFileCache', 'sessionFileCacheVersion').
 	 */
 
-	private async saveCacheToStorage(): Promise<boolean> {
-		return this.cacheManager.saveCacheToStorage();
+	private async trySaveCacheToStorage(): Promise<boolean> {
+		return this.cacheManager.trySaveCacheToStorage();
 	}
 
 	public async clearCache(): Promise<void> {
@@ -4874,6 +4874,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (this.isSampleDataModeActive()) { return; }
 			// Tracked (not just detached) so _runUpdateTokenStats()'s finally can await it before
 			// releasing the refresh-leader lock — see _pendingLeaderSnapshotSave's own doc comment.
+			//
+			// The `false` a lock-contended or failed save resolves with is deliberately not handled
+			// here (no retry, no explicit branch): saveAndAccountForRefresh() already leaves the
+			// dirty count intact on that outcome (see its own doc comment), and
+			// flushPendingCheckpointBeforeReset() — run at the start of every subsequent leader
+			// cycle, before that cycle resets those same counters — forces a checkpoint for exactly
+			// that leftover debt. A skipped save here is retried within one refresh cycle, never
+			// silently dropped.
 			this._pendingLeaderSnapshotSave = (async () => {
 				try { await this.cacheManager.saveAndAccountForRefresh(); }
 				catch (err) { this.warn(`Failed to save cache: ${err}`); }
@@ -15342,14 +15350,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     // We can't await here since dispose() is synchronous
     //
     // Must skip this save in sample-data mode, same as persistRefreshResult() does before its own
-    // saveCacheToStorage() call: if the Extension Development Host closes while
+    // trySaveCacheToStorage() call: if the Extension Development Host closes while
     // runLocalViewRegression() is still mid-flight (fixture entries already in cacheManager.cache,
     // but its own finally block hasn't evicted them yet), this unconditional save would otherwise
     // persist fixture data into the developer's real, shared production snapshot.
     if (!this.isSampleDataModeActive()) {
       void (async () => {
         try {
-          await this.saveCacheToStorage();
+          await this.trySaveCacheToStorage();
         } catch (err) {
           // Output channel will be disposed, so log to console as fallback
           console.error("Error saving cache during disposal:", err);
