@@ -648,7 +648,9 @@ test('loadSharedSnapshotIfChanged() drops a window\'s in-memory cache once a pee
 // stat/read/merge sequence would still get its pre-clear entries merged into this window's cache
 // with no second check to catch it, letting the window serve (and later republish) that stale data
 // until some unrelated later refresh cycle happened to call checkClearEpoch() again.
-test('loadSharedSnapshotIfChanged() re-checks the epoch after merging, so a clear landing mid-load is not resurrected', async () => {
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail)
+// rather than a manual monkeypatch-plus-try/finally, so the patch cannot leak into another test.
+test('loadSharedSnapshotIfChanged() re-checks the epoch after merging, so a clear landing mid-load is not resurrected', async (t) => {
 	const dir = tmpDir();
 	const publisher = makeManager(dir);
 	publisher.setCachedSessionData('/a.json', entry(1000), 10);
@@ -656,10 +658,10 @@ test('loadSharedSnapshotIfChanged() re-checks the epoch after merging, so a clea
 
 	const m = makeManager(dir);
 
-	const originalReadFile = fs.promises.readFile;
+	const originalReadFile = fs.promises.readFile.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
 	let intercepted = false;
-	(fs.promises as any).readFile = async (...args: unknown[]) => {
-		const result = await (originalReadFile as (...a: unknown[]) => Promise<unknown>).apply(fs.promises, args);
+	t.mock.method(fs.promises as any, 'readFile', async (...args: unknown[]) => {
+		const result = await originalReadFile(...args);
 		// Simulate a peer window's clear landing exactly while this call is reading the snapshot
 		// it's about to merge — a real interleaving, not just a contrived ordering.
 		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
@@ -668,13 +670,8 @@ test('loadSharedSnapshotIfChanged() re-checks the epoch after merging, so a clea
 			await peer.deleteSharedSnapshot();
 		}
 		return result;
-	};
-	let merged: number;
-	try {
-		merged = await m.loadSharedSnapshotIfChanged();
-	} finally {
-		(fs.promises as any).readFile = originalReadFile;
-	}
+	});
+	const merged = await m.loadSharedSnapshotIfChanged();
 	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
 	assert.equal(merged, 0, 'entries read from a snapshot that turned out to predate a clear must not be reported as usefully merged');
 	assert.equal(m.cache.size, 0, 'the pre-clear entry must not survive in memory once the mid-load clear is detected');
@@ -1023,7 +1020,9 @@ test('writeSharedSnapshot() aborts instead of persisting when clearAllCachedData
 // own local clearEpoch already caught up by the time it re-checks, see no NEW clear, and still
 // abort-check only against an unchanged generation. checkClearEpoch() now bumps the same
 // generation counter, so this race aborts the same way the same-window one above does.
-test('writeSharedSnapshot() aborts when checkClearEpoch() detects a peer clear mid-write, via the generation bump', async () => {
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail)
+// rather than a manual monkeypatch-plus-try/finally, so the patch cannot leak into another test.
+test('writeSharedSnapshot() aborts when checkClearEpoch() detects a peer clear mid-write, via the generation bump', async (t) => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
 	m.setCachedSessionData('/a.json', entry(1000), 10);
@@ -1031,10 +1030,10 @@ test('writeSharedSnapshot() aborts when checkClearEpoch() detects a peer clear m
 
 	m.setCachedSessionData('/b.json', entry(2000), 10);
 
-	const originalReadFile = fs.promises.readFile;
+	const originalReadFile = fs.promises.readFile.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
 	let intercepted = false;
-	(fs.promises as any).readFile = async (...args: unknown[]) => {
-		const result = await (originalReadFile as (...a: unknown[]) => Promise<unknown>).apply(fs.promises, args);
+	t.mock.method(fs.promises as any, 'readFile', async (...args: unknown[]) => {
+		const result = await originalReadFile(...args);
 		// Simulate a peer window's clear landing, and a concurrent task on this same instance (e.g.
 		// loadSharedSnapshotIfChanged() on its own refresh timer) noticing it via checkClearEpoch(),
 		// exactly while this write is reading the on-disk snapshot it's about to merge with.
@@ -1045,13 +1044,8 @@ test('writeSharedSnapshot() aborts when checkClearEpoch() detects a peer clear m
 			await m.loadSharedSnapshotIfChanged();
 		}
 		return result;
-	};
-	let persisted: boolean;
-	try {
-		persisted = await m.writeSharedSnapshot();
-	} finally {
-		(fs.promises as any).readFile = originalReadFile;
-	}
+	});
+	const persisted = await m.writeSharedSnapshot();
 	assert.equal(persisted, false,
 		'a write racing a concurrently-detected peer clear must abort rather than resurrect pre-clear data');
 	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');

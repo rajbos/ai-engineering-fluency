@@ -960,11 +960,15 @@ export class CacheManager {
 	 * regressing epoch that a peer already past that higher value would fail to recognize as new.
 	 *
 	 * The read-then-write is itself a race across windows (two peers could both read the same
-	 * persisted value before either writes), so the caller must already hold the cache lock — the
-	 * same lock every writer holds around its own read-modify-write of the shared snapshot — for
-	 * the duration of this call. `deleteSharedSnapshot()` is the only caller: it does the unlink and
-	 * this bump under one held lock (see its own doc comment), not two separate acquisitions, so no
-	 * writer waiting on that lock can slip in between the delete and the fence actually advancing.
+	 * persisted value before either writes), so this expects the caller to already hold the cache
+	 * lock — the same lock every writer holds around its own read-modify-write of the shared
+	 * snapshot — for the duration of this call, and is serialized against other writers only when
+	 * that holds. `deleteSharedSnapshot()` is the only caller, and does the unlink and this bump
+	 * under one held lock (see its own doc comment) whenever it actually acquired one; when its own
+	 * retry budget was spent first, it calls this anyway, unlocked, on the same best-effort
+	 * reasoning as the write failure case above — the fence must still advance rather than silently
+	 * staying behind, even though this specific call can no longer be serialized against a
+	 * concurrent writer. See `deleteSharedSnapshot()`'s doc comment for that fallback's own tradeoff.
 	 */
 	private async bumpClearEpochLocked(): Promise<void> {
 		const epochPath = this.getClearEpochPath();
@@ -1117,11 +1121,15 @@ export class CacheManager {
 	 * holding a stuck lock — that residual gap only matters against a writer that neither finishes
 	 * nor gets its stale lock broken within that budget, an accepted trade-off documented there.
 	 *
-	 * The epoch bump happens inside this SAME held lock, not after releasing it: a writer blocked on
-	 * the lock above is only let through once both the delete and the bump have landed, so it always
-	 * sees the fresh epoch via checkClearEpoch() before it can publish anything. Bumping after
-	 * releasing the lock would reopen a gap of its own — a writer could acquire the lock in between,
-	 * find the pre-bump epoch, and publish before the bump ever catches it.
+	 * When the lock above was actually acquired, the epoch bump happens inside that SAME held lock,
+	 * not after releasing it: a writer blocked on it is only let through once both the delete and
+	 * the bump have landed, so it always sees the fresh epoch via checkClearEpoch() before it can
+	 * publish anything. Bumping after releasing the lock would reopen a gap of its own — a writer
+	 * could acquire the lock in between, find the pre-bump epoch, and publish before the bump ever
+	 * catches it. When the retry budget above was spent instead (lock never acquired), the bump
+	 * still runs — unlocked, best-effort — because the fence must advance regardless; that call is
+	 * not serialized against a concurrent writer the way the held-lock case is. See
+	 * `bumpClearEpochLocked()`'s own doc comment for that narrower, already-accepted fallback gap.
 	 */
 	async deleteSharedSnapshot(retryOptions?: { attempts: number; delayMs: number }): Promise<void> {
 		const lockAcquired = await this.acquireCacheLockWithRetry(retryOptions);
