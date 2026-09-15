@@ -95,11 +95,20 @@ export class CacheManager {
 	 * applied by buildMergedSnapshotEntries() on a later save, stripping an entry that a window
 	 * legitimately republishes at or below that stale baseline mtime — a "Clear Cache" is meant to
 	 * reset all cache state, deletion decisions included, not just the live entries.
+	 *
+	 * Also resets the checkpoint dirty-count accounting (same fields resetCheckpointCounters()
+	 * touches). Without this, dirty work left over from before the clear stayed counted as dirty
+	 * against a now-empty cache: the next leader refresh's flushPendingCheckpointBeforeReset()
+	 * would see that stale count and perform a full checkpoint save of the just-cleared (empty)
+	 * cache before parsing anything of its own — harmless in effect, since there is genuinely
+	 * nothing to lose, but a wasted disk round trip that defeats the "skip when nothing changed"
+	 * optimization on the very next cycle after every clear.
 	 */
 	clearAllCachedData(): void {
 		this.sessionFileCache.clear();
 		this.deletedFilePaths.clear();
 		this.cacheClearGeneration++;
+		this.resetCheckpointCounters();
 	}
 
 	// Cache management methods

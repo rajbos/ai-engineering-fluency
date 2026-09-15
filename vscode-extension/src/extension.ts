@@ -1154,6 +1154,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private readonly _deferredSessionPreloadFiles = new Set<string>();
 	private _deferredSessionPreloadCount = 0;
 	/**
+	 * The in-flight promise of every deferred (backgrounded) session-file parse, keyed by file
+	 * path. clearCache() awaits all of these (a snapshot at the moment it runs) before clearing,
+	 * so a parse that is still running from a refresh that already returned cannot call
+	 * setCachedSessionData() after the clear and silently repopulate the cache it just emptied.
+	 * Populated/cleared alongside _deferredSessionPreloadFiles in deferSessionPreloadRefresh().
+	 */
+	private readonly _deferredSessionPreloadPromises = new Map<string, Promise<void>>();
+	/**
 	 * Bounds how many session-file parses (see MAX_CONCURRENT_DEFERRED_PARSES) may be in flight
 	 * across worker() calls in _preloadSessionFiles(), including ones that end up deferred to the
 	 * background. A worker acquires a permit before starting a file and releases it either
@@ -1989,10 +1997,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.outputChannel.show(true);
 			this.log('Clearing session file cache...');
 
+			// Wait out any deferred (backgrounded) parse still finishing from a refresh that already
+			// returned — without this, its setCachedSessionData() call could land after the
+			// synchronous clear below and silently repopulate the cache this command just emptied.
+			// Safe to await before the invalidation block: the generation hasn't bumped yet, so a
+			// build reading the cache during this wait sees the pre-clear generation it would have
+			// seen anyway, not the "new generation, stale data" combination the comment below guards.
+			await this.awaitAllDeferredParses();
+
 			const cacheSize = this.cacheManager.cache.size;
 			this.cacheManager.clearAllCachedData();
 
-			// Everything invalidating happens before the first await. Bumping the generation
+			// Everything invalidating happens before the next await. Bumping the generation
 			// alone was not enough: a build starting during the await would capture the *new*
 			// generation, read the computed caches that had not been cleared yet, and so pass
 			// the check with pre-clear data. Clearing the caches here closes that window —
@@ -4305,11 +4321,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>, release: () => void): void {
 		this._deferredSessionPreloadFiles.add(sessionFile);
-		void processing
+		const settled = processing
 			.then(() => this.debugCrashLog(`done(background)  ${sessionFile}`))
 			.catch(error => this.debugCrashLog(`error(background) ${sessionFile}: ${error}`))
 			.finally(() => {
 				this._deferredSessionPreloadFiles.delete(sessionFile);
+				this._deferredSessionPreloadPromises.delete(sessionFile);
 				// The worker that started this file didn't release its permit because this parse
 				// turned out to be deferred (see processPreloadQueueFileWithCrashLog) — release it
 				// now that the background work it was held for has actually finished.
@@ -4318,6 +4335,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 					this.scheduleDeferredSessionRefresh();
 				}
 			});
+		this._deferredSessionPreloadPromises.set(sessionFile, settled);
+	}
+
+	/**
+	 * Resolves once every deferred parse in flight at the moment this is called has settled — a
+	 * snapshot of `_deferredSessionPreloadPromises`, not a live wait: a parse that starts fresh
+	 * after this snapshot is taken is not included, but that is fine here, since clearCache()
+	 * calls this immediately before its own synchronous clearAllCachedData(), so nothing new can
+	 * legitimately race in between on the same tick. Used by clearCache() so a deferred parse from
+	 * a refresh that already returned cannot call setCachedSessionData() after the clear and
+	 * silently repopulate the cache it just emptied.
+	 */
+	private async awaitAllDeferredParses(): Promise<void> {
+		if (this._deferredSessionPreloadPromises.size === 0) { return; }
+		await Promise.all(this._deferredSessionPreloadPromises.values());
 	}
 
 	private scheduleDeferredSessionRefresh(): void {

@@ -573,3 +573,21 @@ test('setupRegressionSessionFiles() reports whether it fell back to bundled fixt
 	assert.ok(body.includes("return { sessionFiles, dataSourceLabel: `bundled sample data (${sampleDir})`, usedBundledFixtures: true };"),
 		'must report usedBundledFixtures: true only on the bundled-fixture fallback path');
 });
+
+test('clearCache() waits for in-flight deferred parses before clearing, so a straggler cannot repopulate the cache it just emptied', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'public async clearCache(): Promise<void> {');
+
+	const awaitDeferredIndex = body.indexOf('await this.awaitAllDeferredParses();');
+	const clearIndex = body.indexOf('this.cacheManager.clearAllCachedData();');
+	assert.ok(awaitDeferredIndex !== -1 && clearIndex !== -1 && awaitDeferredIndex < clearIndex,
+		'must await every deferred (backgrounded) parse still running from an earlier refresh before clearing — otherwise one finishing after the clear could call setCachedSessionData() and silently repopulate the cache this command just emptied');
+});
+
+test('deferSessionPreloadRefresh() tracks each deferred parse\'s settle promise for awaitAllDeferredParses() to await, and untracks it once settled', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>, release: () => void): void {');
+
+	assert.ok(body.includes('this._deferredSessionPreloadPromises.set(sessionFile, settled);'),
+		'must register this parse\'s settle promise for awaitAllDeferredParses() to observe');
+	assert.ok(body.includes('this._deferredSessionPreloadPromises.delete(sessionFile);'),
+		'must untrack the promise once it settles (inside the .finally()), or the map would grow unboundedly across a long session');
+});

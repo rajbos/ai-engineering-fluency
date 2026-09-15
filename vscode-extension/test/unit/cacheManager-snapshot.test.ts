@@ -926,3 +926,14 @@ test('clearAllCachedData() clears tombstones too, so a pre-clear deletion cannot
 	assert.ok(entries && '/a.json' in entries,
 		'a tombstone recorded before clearAllCachedData() must not survive it and strip a path republished afterward');
 });
+
+test('clearAllCachedData() resets the checkpoint dirty count too, so the next cycle does not redundantly checkpoint an empty cache', () => {
+	const m = makeManager(tmpDir());
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	assert.equal(m.hasUnflushedCheckpointWork(), true, 'dirty before the clear');
+
+	m.clearAllCachedData();
+
+	assert.equal(m.hasUnflushedCheckpointWork(), false,
+		'a clear must reset the dirty count along with the entries it was tracking — otherwise the next leader cycle sees stale dirty state and performs a full checkpoint save of the now-empty cache before parsing anything of its own');
+});
