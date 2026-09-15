@@ -40,18 +40,18 @@ jobs:
               # The extension compiles the shared sources from the repo-root
               # src/ (see vscode-extension/tsconfig.json).
               - 'src/**'
-              # Not just the two parse-*.js files invoked directly below. This
-              # job also reaches repo-root scripts/ through npm: lint:json ->
-              # validate-json.js and compile-tests -> prepare-test-output.js.
-              # (The wider set - validate-localization.js,
-              # validate-webview-contract.js, check-code-duplication.js,
-              # interaction-smoke.js - is reached by ci.yml, not here; this
-              # workflow runs neither lint:l10n, check:contract,
-              # check:duplicates, check:interaction nor npm test.)
-              # The glob stays whole-directory anyway: both indirect
-              # dependencies are non-obvious, and a narrowed list would go
-              # stale the moment an npm script picks up another root helper -
-              # failing open, with a silently skipped build.
+              # Deliberately the whole directory, not just the two parse-*.js
+              # files invoked directly below: this job also reaches repo-root
+              # scripts/ indirectly through npm (today lint:json ->
+              # validate-json.js, compile-tests -> prepare-test-output.js, and
+              # the unit-test step would pick up run-node-unit-tests.js if it
+              # ever switched from `node --test` to `npm test` the way ci.yml
+              # runs it). Enumerating that set here would be a filter that
+              # fails OPEN - the day an npm script picks up another root
+              # helper, an explicit list silently stops triggering this build.
+              # Re-derive the set before narrowing this glob; don't trust a
+              # grep for `run: node scripts/...`, which misses every indirect
+              # call.
               - 'scripts/**'
               - '.nvmrc'
               - '.github/workflows/build.yml'
@@ -63,11 +63,24 @@ jobs:
     
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # ubuntu + windows only. macos-latest was dropped: its unique test
+        # coverage is one path-layout assertion in toolCuration.test.ts (the
+        # ~/Library/Application Support VS Code settings location), and that
+        # test mirrors the production code's own conditional, so it would not
+        # catch the two agreeing on a wrong path. Every other darwin
+        # expectation is parameterised - normalizePathForDedup(p, 'darwin') -
+        # and therefore runs on ubuntu already.
+        #
+        # windows-latest STAYS: cacheManager-snapshot.test.ts has a test gated
+        # `skip: process.platform !== 'win32'` (the recycled-PID stale-lock
+        # case), and ci.yml runs the unit suite on ubuntu only - so this row is
+        # the single place in all of CI where that test executes. Dropping it
+        # would not fail; the test would silently stop running. The UNC
+        # backslash assertions in workspacePathResolver.test.ts are the same
+        # story.
+        os: [ubuntu-latest, windows-latest]
         # Single-entry matrix: 22.x was dropped - .nvmrc pins 24 and the rest
-        # of CI builds on 24 only. This halves the job count, which matters
-        # most for the windows/macos rows: those runners are the scarcest and
-        # were the slowest to be scheduled.
+        # of CI builds on 24 only.
         node-version: [24.x]
     
     steps:
