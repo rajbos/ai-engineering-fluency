@@ -21,6 +21,8 @@ on:
 
 permissions:
   contents: read
+  # Read-only: the freshness check below reads the PR's label events.
+  pull-requests: read
 
 env:
   # Applied by a human on the PR to accept an agent-authored change to these
@@ -44,6 +46,9 @@ jobs:
 
       - name: Check for agent-authored changes to protected paths
         env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           # Every one of these is attacker-controllable (a branch name, a login,
           # a label). They go through `env:` so the shell never interpolates
           # them as code - see .github/instructions/workflows.instructions.md.
@@ -54,14 +59,17 @@ jobs:
           # commas, which would make a delimiter match lie in both directions.
           PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
-          # -e matters here: without it a failed `git fetch` left the later diff
-          # empty, and an empty diff reads as "no protected paths" - a guard that
-          # fails OPEN exactly when git is broken.
+          # Every git command below is evaluated on its own line. A pipeline
+          # with `|| true`, or one used as an `if` condition, hides its exit
+          # status from errexit - and a git failure that reads as "nothing
+          # changed" or "no trailer found" makes this guard fail OPEN, which is
+          # the one way it must never fail.
           set -euo pipefail
 
           git fetch --quiet origin "$BASE_REF"
 
-          protected=$(git diff --name-only "origin/$BASE_REF...HEAD" \
+          changed=$(git diff --name-only "origin/$BASE_REF...HEAD")
+          protected=$(printf '%s\n' "$changed" \
             | grep -E '^(\.github/|\.claude/|\.devcontainer/|AGENTS\.md$|CLAUDE\.md$)' || true)
 
           if [ -z "$protected" ]; then
@@ -92,7 +100,9 @@ jobs:
           # Matched anywhere after the colon, not just at the start: the trailers
           # this repo actually carries include "Copilot App", "Claude Opus 5",
           # "Mistral Vibe", "Vibe Nuage Agent" and "Vibe Code".
-          if [ -z "$signal" ] && git log "origin/$BASE_REF..HEAD" --format='%b' \
+          trailers=$(git log "origin/$BASE_REF..HEAD" --format='%b')
+          if [ -z "$signal" ] \
+            && printf '%s\n' "$trailers" \
               | grep -qiE '^co-authored-by:.*(claude|copilot|gpt|codex|gemini|mistral|vibe|devin|cursor|aider)'; then
             signal="AI co-author trailer"
           fi
@@ -104,11 +114,33 @@ jobs:
 
           echo "Agent-authorship signal: $signal"
 
-          if printf '%s' "$PR_LABELS_JSON" \
+          if ! printf '%s' "$PR_LABELS_JSON" \
               | jq -e --arg want "$APPROVAL_LABEL" 'any(.[]; . == $want)' >/dev/null; then
-            echo "Label '$APPROVAL_LABEL' is present - a human accepted this change. Allowed."
-            exit 0
+            echo "::error::This PR changes agent/CI configuration and looks agent-authored ($signal). A human must review those paths and add the '$APPROVAL_LABEL' label to merge."
+            exit 1
           fi
 
-          echo "::error::This PR changes agent/CI configuration and looks agent-authored ($signal). A human must review those paths and add the '$APPROVAL_LABEL' label to merge."
-          exit 1
+          # The label persists across pushes, so presence alone would let an
+          # agent append further changes to these paths after a human approved
+          # an earlier state. Approval has to be newer than what it approves.
+          events=$(curl -fsS \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/events?per_page=100")
+
+          approved_at=$(printf '%s' "$events" | jq -r --arg want "$APPROVAL_LABEL" \
+            '[.[] | select(.event == "labeled" and .label.name == $want) | .created_at] | last // ""')
+
+          if [ -z "$approved_at" ]; then
+            echo "::error::The '$APPROVAL_LABEL' label is set but no labeling event was found, so its age cannot be established. Remove and re-apply it."
+            exit 1
+          fi
+
+          head_at=$(git show -s --format=%cI "$HEAD_SHA")
+
+          if [ "$(date -d "$approved_at" +%s)" -lt "$(date -d "$head_at" +%s)" ]; then
+            echo "::error::The '$APPROVAL_LABEL' label was added at $approved_at, before the current head $HEAD_SHA (committed $head_at). Re-apply it after reviewing the newer commits."
+            exit 1
+          fi
+
+          echo "Label '$APPROVAL_LABEL' added $approved_at, after head commit $head_at. A human accepted this state. Allowed."
