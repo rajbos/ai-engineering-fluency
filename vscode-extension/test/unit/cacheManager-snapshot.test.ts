@@ -1,5 +1,5 @@
 import './vscode-shim-register';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -71,6 +71,88 @@ test('readSharedSnapshot returns undefined on corrupt snapshot', async () => {
 	fs.writeFileSync(m.getSharedSnapshotPath(), '{ this is not valid json');
 	const entries = await m.readSharedSnapshot();
 	assert.equal(entries, undefined);
+});
+
+// `typeof null === 'object'`, so a naive `typeof envelope.entries === 'object'` check accepts
+// `entries: null` and then crashes in Object.entries(null) on every poll. The validation must
+// reject null entries and treat the snapshot as malformed.
+test('readSharedSnapshot returns undefined when entries is null (typeof null === "object")', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	fs.mkdirSync(path.dirname(m.getSharedSnapshotPath()), { recursive: true });
+	fs.writeFileSync(m.getSharedSnapshotPath(), JSON.stringify({
+		schemaVersion: 1, cacheVersion: 1, cacheId: 'prod', generatedAt: Date.now(), publishSeq: 1, entryCount: 0, entries: null,
+	}));
+	const entries = await m.readSharedSnapshot();
+	assert.equal(entries, undefined, 'an envelope with entries: null must be rejected as malformed, not crash in Object.entries');
+});
+
+// A transiently unreadable sidecar (EACCES/corrupt, NOT missing) must not make the next writer
+// restart the generation at 1 after peers already loaded a higher seq — on a same-mtime/same-size
+// replacement they'd see seq <= their bookmark and skip the update forever. The writer recovers
+// the generation from the existing snapshot body instead.
+test('writeSharedSnapshot() recovers the publish generation from the snapshot body when the sidecar is unreadable', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot(); // generation 1
+	const seqPath = (writer as any).getSnapshotSeqPath();
+
+	// Corrupt the sidecar with a numeric prefix — parseInt('4garbage') === 4, which would bypass
+	// the recovery path and publish a wrong sequence. Strict validation must treat it as unknown.
+	await fs.promises.writeFile(seqPath, 'not-a-number');
+
+	// The next write must continue from the body's generation (1 -> 2), not restart at 1.
+	writer.setCachedSessionData('/b.json', entry(2000), 10);
+	await writer.writeSharedSnapshot();
+	const seq = await fs.promises.readFile(seqPath, 'utf-8');
+	assert.equal(seq.trim(), '2', 'an unreadable sidecar must recover the generation from the body, not restart at 1');
+});
+
+// A sidecar whose contents have a numeric prefix (e.g. '4garbage') must be treated as corrupt
+// (undefined -> recover from the body), not parsed as generation 4 via parseInt's prefix matching.
+test('writeSharedSnapshot() treats a numeric-prefix sidecar as corrupt and recovers from the body', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot(); // generation 1
+	const seqPath = (writer as any).getSnapshotSeqPath();
+
+	// '4garbage' would parseInt to 4 — strictly validating the whole value must reject it.
+	await fs.promises.writeFile(seqPath, '4garbage');
+
+	writer.setCachedSessionData('/b.json', entry(2000), 10);
+	await writer.writeSharedSnapshot();
+	const seq = await fs.promises.readFile(seqPath, 'utf-8');
+	assert.equal(seq.trim(), '2', 'a numeric-prefix sidecar must be treated as corrupt and recovered from the body (1 -> 2), not parsed as 4');
+});
+
+// A legacy/pre-sidecar writer can leave the body's embedded publishSeq AHEAD of the sidecar. If
+// the next new writer continued from the sidecar alone, it would publish a sequence a peer
+// already bookmarked, and a same-mtime/same-size replacement would be skipped. The writer must
+// continue from the MAX of the readable sidecar and the body's generation.
+test('writeSharedSnapshot() continues from the max of sidecar and body generations (legacy body ahead of sidecar)', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot(); // generation 1
+
+	// A legacy writer bumps the body's publishSeq to 5 but leaves the sidecar at 1.
+	const snapshotPath = writer.getSharedSnapshotPath();
+	const seqPath = (writer as any).getSnapshotSeqPath();
+	const body = JSON.parse(await fs.promises.readFile(snapshotPath, 'utf-8'));
+	body.publishSeq = 5;
+	await fs.promises.writeFile(snapshotPath, JSON.stringify(body));
+	assert.equal((await fs.promises.readFile(seqPath, 'utf-8')).trim(), '1', 'test setup: sidecar still at 1');
+
+	// The next new write must publish 6 (max(1, 5) + 1), not 2 — so a peer bookmarked at 5 is
+	// still superseded.
+	writer.setCachedSessionData('/b.json', entry(2000), 10);
+	await writer.writeSharedSnapshot();
+	const seq = await fs.promises.readFile(seqPath, 'utf-8');
+	assert.equal(seq.trim(), '6', 'the writer must continue from max(sidecar=1, body=5) = 5, publishing 6');
+	const published = JSON.parse(await fs.promises.readFile(snapshotPath, 'utf-8'));
+	assert.equal(published.publishSeq, 6, 'the published body carries generation 6');
 });
 
 test('loadSharedSnapshotIfChanged merges fresher entries and is idempotent', async () => {
@@ -252,6 +334,84 @@ test('loadCacheFromStorage: loads entries from existing snapshot', async () => {
 		'should log load duration');
 });
 
+// Regression test for the startup TOCTOU the reviewer flagged: loadCacheFromStorage() used to
+// readFile() the snapshot and only then stat() it, so a same-tick republish landing between the
+// two got bookmarked with the NEWER file's identity while sessionFileCache still held the OLDER
+// bytes — and the next loadSharedSnapshotIfChanged() would see the matching bookmark and skip the
+// update permanently. This test drives a REAL interleave: it wraps fs.promises.readFile so a
+// republish fires after the pre-read stat but before the content is read, then asserts the next
+// guarded load still picks the republished entry up. With the old post-read ordering the bookmark
+// would already match the republished file and the reload would be skipped.
+test('loadCacheFromStorage() bookmarks the pre-read identity, so a mid-read republish is still picked up', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot();
+
+	const snapshotPath = writer.getSharedSnapshotPath();
+	const reader = makeManager(dir);
+
+	// Interleave a republish between the pre-read stat and the readFile inside
+	// loadCacheFromStorage(): the first readFile of the snapshot triggers a republish with a
+	// NEWER entry that keeps the JSON length identical (mtime 1000 -> 5000, same digit count),
+	// then pins the republished file's mtime back to the reader's pre-read value — the
+	// coarse-mtime tie. With the stat fields identical, ONLY the publish generation can reveal
+	// the republish; a post-read-stat implementation would have bookmarked the new identity and
+	// the next load would wrongly skip it.
+	const republisher = makeManager(dir);
+	republisher.setCachedSessionData('/a.json', entry(5000), 10);
+	const realReadFile = fs.promises.readFile;
+	const realStat = fs.promises.stat;
+	// The snapshot's true pre-read mtime — captured when the reader stats it inside
+	// loadCacheFromStorage(), before the republish fires.
+	let preReadMtime = 0;
+	const statMock = mock.method(fs.promises, 'stat', async (p: any, opts?: any) => {
+		const s = await realStat.call(fs.promises, p, opts);
+		// Capture only the reader's pre-republish stat (before the interleave fires); the
+		// republisher's own write is also mocked here and must not overwrite it.
+		if (s && typeof p === 'string' && p === snapshotPath && preReadMtime === 0 && !interleaved) {
+			preReadMtime = Number(s.mtimeMs);
+		}
+		return s;
+	});
+	let interleaved = false;
+	const readFileMock = mock.method(fs.promises, 'readFile', async (p: any, opts?: any) => {
+		const content = await realReadFile.call(fs.promises, p, opts);
+		if (!interleaved && typeof p === 'string' && p === snapshotPath) {
+			interleaved = true;
+			// The reader has already stat()'d (pre-read). Republish now, before returning the
+			// OLD bytes the reader is about to parse — the mid-read window — and pin the
+			// republish's mtime to the pre-read value so the stat tie is exercised.
+			await republisher.writeSharedSnapshot();
+			const cur = await realStat.call(fs.promises, snapshotPath);
+			await fs.promises.utimes(snapshotPath, Number(cur?.atimeMs ?? Date.now()) / 1000, preReadMtime / 1000);
+		}
+		return content;
+	});
+
+	try {
+		await reader.loadCacheFromStorage();
+	} finally {
+		readFileMock.mock.restore();
+		statMock.mock.restore();
+	}
+
+	assert.ok(interleaved, 'test setup: the republish must be interleaved into the startup read');
+	assert.ok(preReadMtime > 0, 'test setup: the pre-read mtime must be captured');
+	// The reader loaded the OLD bytes (mtime 1000); the on-disk file is now the republish. Pin
+	// the republish's mtime to the pre-read value (utimes quantizes ~0.5 µs), then re-stat and
+	// align the reader's mtime bookmark to the produced value so the stat tie is EXACT — only
+	// the publish generation can now reveal the republish.
+	assert.equal(reader.cache.get('/a.json')?.mtime, 1000, 'startup loaded the pre-republish bytes');
+	const afterPin = await fs.promises.stat(snapshotPath);
+	(reader as any).lastLoadedSnapshotMtime = afterPin.mtimeMs; // exact mtime tie
+	const onDisk = await fs.promises.stat(snapshotPath);
+	assert.equal(onDisk.size, (reader as any).lastLoadedSnapshotSize, 'test setup: the republish must keep the same size (stat tie)');
+	const merged = await reader.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 1, 'a mid-read republish must be picked up — a post-read bookmark would have suppressed it');
+	assert.equal(reader.cache.get('/a.json')?.mtime, 5000);
+});
+
 test('loadCacheFromStorage: starts with empty cache when no snapshot exists', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
@@ -318,6 +478,64 @@ test('deleteSharedSnapshot: removes the snapshot file', async () => {
 
 	await m.deleteSharedSnapshot();
 	assert.equal(fs.existsSync(m.getSharedSnapshotPath()), false, 'snapshot should be removed');
+});
+
+// Writers hold the cache lock around writeSharedSnapshot(); the delete takes the same lock so a
+// writer that already read the old snapshot cannot rename its body after the unlink and resurrect
+// pre-clear entries that clearCache() would then reload/persist. This verifies the observable
+// contract: the delete completes correctly while another window holds the lock (the lock is a
+// best-effort coordination hint — a clearCache must not deadlock — so this asserts correct
+// behavior under contention, not a hard guarantee).
+test('deleteSharedSnapshot: deletes correctly while a writer holds the cache lock', async () => {
+	const dir = tmpDir();
+	const clearer = makeManager(dir);
+	clearer.setCachedSessionData('/a.json', entry(1000), 10);
+	await clearer.writeSharedSnapshot();
+	assert.ok(fs.existsSync(clearer.getSharedSnapshotPath()), 'snapshot should exist before delete');
+
+	// A writer window holds the cache lock during the delete.
+	const writer = makeManager(dir);
+	assert.equal(await writer.acquireCacheLock(), true, 'writer holds the cache lock');
+	try {
+		await clearer.deleteSharedSnapshot();
+		assert.equal(fs.existsSync(clearer.getSharedSnapshotPath()), false,
+			'the delete must complete (not deadlock) while a writer holds the lock');
+		// The clearer's own bookmark is reset so it won't serve the deleted data.
+		assert.equal((clearer as any).lastLoadedSnapshotPublishSeq, 0, 'clearer bookmark reset after delete');
+	} finally {
+		await writer.releaseCacheLock();
+	}
+});
+
+// The publish generation lives in a sidecar that deleteSharedSnapshot() deliberately keeps, so a
+// recreated snapshot continues the sequence instead of restarting at 1. Otherwise a window that
+// already loaded generation N would see the recreated file's generation restart below N and skip
+// it (publishSeq <= N) on a same-mtime/same-size recreate. This covers clear-in-one-window while
+// another polls.
+test('deleteSharedSnapshot: a recreated snapshot continues the publish generation, so a polling window still picks it up', async () => {
+	const dir = tmpDir();
+	const clearer = makeManager(dir);
+	clearer.setCachedSessionData('/a.json', entry(1000), 10);
+	await clearer.writeSharedSnapshot(); // generation 1
+
+	// A polling window loads generation 1.
+	const poller = makeManager(dir);
+	await poller.loadCacheFromStorage();
+	assert.equal((poller as any).lastLoadedSnapshotPublishSeq, 1, 'poller loaded generation 1');
+
+	// The clearer deletes the snapshot (clearCache) and a window recreates it with new content.
+	await clearer.deleteSharedSnapshot();
+	const recreator = makeManager(dir);
+	recreator.setCachedSessionData('/a.json', entry(5000), 10);
+	await recreator.writeSharedSnapshot(); // must be generation 2, not a restart at 1
+
+	assert.equal((recreator as any).lastLoadedSnapshotPublishSeq, 2,
+		'the recreated snapshot must continue the generation, not restart at 1 (the sidecar survives delete)');
+
+	// The polling window detects and merges the recreated snapshot despite the delete/recreate.
+	const merged = await poller.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 1, 'a recreated snapshot must be picked up by a window that loaded the pre-delete generation');
+	assert.equal(poller.cache.get('/a.json')?.mtime, 5000);
 });
 
 test('deleteSharedSnapshot: is a no-op when snapshot does not exist', async () => {
@@ -504,6 +722,201 @@ test('loadSharedSnapshotIfChanged() clears a stale tombstone when accepting a ne
 	assert.ok(entries && '/a.json' in entries!,
 		'a stale tombstone must not survive accepting a newer merged-in entry — otherwise this window\'s own next save silently destroys another window\'s valid publish');
 	assert.equal(entries!['/a.json'].mtime, 5000);
+});
+
+// Regression test for the Windows CI flake: when window B republishes the snapshot within the
+// same filesystem timestamp tick as window A's last write (coarse mtime granularity — NTFS can
+// report identical mtimes for writes milliseconds apart), the file mtime does not advance past
+// the exact value window A bookmarked for its own write. An mtime-only
+// `mtimeMs <= lastLoadedSnapshotMtime` guard would then suppress B's publish. The guard
+// therefore pairs the mtime with the file SIZE: an unchanged snapshot (same mtime AND size) is
+// skipped, but a same-tick republish with different content — hence a different size — is
+// reloaded. Here we FORCE the identical mtime with fs.utimes instead of hoping the runner's
+// clock resolution cooperates.
+test('loadSharedSnapshotIfChanged() picks up a same-tick republish from another window (identical file mtime, different size)', async () => {
+	const dir = tmpDir();
+	const windowA = makeManager(dir);
+	windowA.setCachedSessionData('/a.json', entry(1000), 10);
+	await windowA.writeSharedSnapshot();
+	// Window A's exact write mtime — what its (exact-mtime) bookmark holds.
+	const snapshotPath = windowA.getSharedSnapshotPath();
+	const exactWriteMtimeMs = (await fs.promises.stat(snapshotPath)).mtimeMs;
+	const sizeA = (await fs.promises.stat(snapshotPath)).size;
+	windowA.deleteCachedSessionData('/a.json');
+
+	// Window B republishes with different content (an extra entry), so the snapshot bytes — and
+	// size — differ even if the mtime does not.
+	const windowB = makeManager(dir);
+	windowB.setCachedSessionData('/a.json', entry(5000), 10);
+	windowB.setCachedSessionData('/b.json', entry(5000), 10); // extra entry -> different size
+	await windowB.writeSharedSnapshot();
+	const sizeB = (await fs.promises.stat(snapshotPath)).size;
+	assert.notEqual(sizeB, sizeA, 'test setup: a same-tick republish with different content must differ in size');
+
+	// Force the coarse-timestamp tie: pin B's snapshot to A's exact write mtime, then align A's
+	// bookmark to the value utimes actually produced (NTFS quantizes to ~0.5 µs, so the written
+	// mtime can land a hair off the target). This yields a guaranteed tie — statAfter.mtimeMs
+	// === A's bookmark. An mtime-only `mtimeMs <= bookmark` guard sees equality and skips the
+	// reload; the mtime+size guard reloads because the size differs.
+	const statBefore = await fs.promises.stat(snapshotPath);
+	await fs.promises.utimes(snapshotPath, statBefore.atimeMs / 1000, exactWriteMtimeMs / 1000);
+	const statAfter = await fs.promises.stat(snapshotPath);
+	(windowA as any).lastLoadedSnapshotMtime = statAfter.mtimeMs; // the tie: bookmark == file mtime
+	assert.notEqual(statAfter.size, (windowA as any).lastLoadedSnapshotSize,
+		'test setup: the republished snapshot must differ in size from the one window A bookmarked');
+
+	const merged = await windowA.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 2, 'a same-tick republish with different size must still be merged — an mtime-only guard would suppress it');
+	assert.equal(windowA.cache.get('/a.json')?.mtime, 5000);
+	assert.equal(windowA.cache.get('/b.json')?.mtime, 5000);
+});
+
+// The size-aware guard must not regress into re-parsing an unchanged snapshot on every refresh:
+// when neither the mtime nor the size moved, loadSharedSnapshotIfChanged() returns 0 without
+// touching the cache. (A rounded-down bookmark would always re-read; exact mtime + size does not.)
+test('loadSharedSnapshotIfChanged() skips an unchanged snapshot (same mtime and size) without re-merging', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot();
+
+	const reader = makeManager(dir);
+	const first = await reader.loadSharedSnapshotIfChanged();
+	assert.equal(first, 1, 'the first load merges the published entry');
+
+	// Locally overwrite with a NEWER in-memory entry, then call again on an unchanged snapshot:
+	// the guard must skip the reload entirely, leaving the newer local data untouched.
+	reader.setCachedSessionData('/a.json', entry(9000), 10);
+	const second = await reader.loadSharedSnapshotIfChanged();
+	assert.equal(second, 0, 'an unchanged snapshot must be skipped, not re-merged');
+	assert.equal(reader.cache.get('/a.json')?.mtime, 9000, 'a skipped reload must not clobber newer in-memory data');
+});
+
+// The exact loophole the reviewer flagged: a same-tick republish can change content WITHOUT
+// changing the JSON length (here /a.json's mtime goes 1000 -> 5000, both four digits, so the
+// serialized envelope is the same size). An mtime+size guard alone would see both stat fields
+// tie and skip the reload, silently losing the newer entry. The publish generation (the .seq
+// sidecar) distinguishes this from an unchanged snapshot.
+test('loadSharedSnapshotIfChanged() picks up a same-tick, same-size republish via the publish generation', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot();
+
+	const reader = makeManager(dir);
+	const first = await reader.loadSharedSnapshotIfChanged();
+	assert.equal(first, 1, 'the first load merges the published entry');
+	reader.cache.delete('/a.json'); // simulate the entry being dropped locally
+
+	// Republish the SAME path with a value that keeps the JSON length identical (1000 -> 5000:
+	// same digit count), so mtime+size alone cannot tell the republish apart.
+	const republisher = makeManager(dir);
+	republisher.setCachedSessionData('/a.json', entry(5000), 10);
+	await republisher.writeSharedSnapshot();
+	const snapshotPath = reader.getSharedSnapshotPath();
+	const sizeBefore = (await fs.promises.stat(snapshotPath)).size;
+
+	// Force the full stat tie: pin the republish's mtime to the reader's bookmarked value. Size
+	// already matches. Only the publish generation can now detect the change.
+	const bookmarkMtime = (reader as any).lastLoadedSnapshotMtime;
+	const statPre = await fs.promises.stat(snapshotPath);
+	await fs.promises.utimes(snapshotPath, statPre.atimeMs / 1000, bookmarkMtime / 1000);
+	const statAfter = await fs.promises.stat(snapshotPath);
+	(reader as any).lastLoadedSnapshotMtime = statAfter.mtimeMs; // exact mtime tie
+	assert.equal(statAfter.size, sizeBefore, 'test setup: the republish must keep the same size');
+	assert.equal(statAfter.size, (reader as any).lastLoadedSnapshotSize, 'test setup: full stat tie (mtime and size)');
+
+	const merged = await reader.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 1, 'a same-size, same-tick republish must be detected via the publish generation — mtime+size alone would skip it');
+	assert.equal(reader.cache.get('/a.json')?.mtime, 5000);
+});
+
+// The sidecar is written BEFORE the snapshot body, so a reader on a stat tie can observe the new
+// generation in the sidecar while readSharedSnapshot() still returns the previous body. If the
+// reader then bookmarked that new seq against the old bytes, the next poll (seq <= bookmark)
+// would skip the real publish forever. The tie path therefore validates the body's embedded
+// publishSeq against the sidecar and, on disagreement, leaves the bookmark untouched to retry.
+test('loadSharedSnapshotIfChanged() retries instead of bookmarking when the sidecar seq is ahead of the body (mid-write)', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot(); // body + sidecar at generation 1
+
+	const reader = makeManager(dir);
+	await reader.loadSharedSnapshotIfChanged();
+	assert.equal((reader as any).lastLoadedSnapshotPublishSeq, 1, 'reader is at generation 1');
+	reader.cache.delete('/a.json');
+
+	// Simulate a publish caught mid-write: bump the sidecar to generation 2 while the body on
+	// disk still carries generation 1 (and pin the body to the reader's mtime+size so we hit the
+	// tie branch). The reader must NOT advance its bookmark to 2 against the stale body.
+	const snapshotPath = reader.getSharedSnapshotPath();
+	const seqPath = (reader as any).getSnapshotSeqPath();
+	const bookmarkMtime = (reader as any).lastLoadedSnapshotMtime;
+	const statPre = await fs.promises.stat(snapshotPath);
+	await fs.promises.utimes(snapshotPath, statPre.atimeMs / 1000, bookmarkMtime / 1000);
+	const statAfter = await fs.promises.stat(snapshotPath);
+	(reader as any).lastLoadedSnapshotMtime = statAfter.mtimeMs; // exact mtime tie
+	assert.equal(statAfter.size, (reader as any).lastLoadedSnapshotSize, 'test setup: body unchanged, full stat tie');
+	await fs.promises.writeFile(seqPath, '2'); // sidecar ahead of the body's embedded publishSeq 1
+
+	const firstTry = await reader.loadSharedSnapshotIfChanged();
+	assert.equal(firstTry, 0, 'a sidecar ahead of the body must not be merged against stale bytes');
+	assert.equal((reader as any).lastLoadedSnapshotPublishSeq, 1,
+		'the bookmark must NOT advance to the sidecar generation while the body is still the old one');
+
+	// Once the body catches up (a real publish completes), the next poll merges it.
+	const finisher = makeManager(dir);
+	finisher.setCachedSessionData('/a.json', entry(5000), 10);
+	await finisher.writeSharedSnapshot(); // body + sidecar now agree at generation 3
+	const cur = await fs.promises.stat(snapshotPath);
+	await fs.promises.utimes(snapshotPath, cur.atimeMs / 1000, bookmarkMtime / 1000);
+	const reStat = await fs.promises.stat(snapshotPath);
+	(reader as any).lastLoadedSnapshotMtime = reStat.mtimeMs; // keep the stat tie
+	const secondTry = await reader.loadSharedSnapshotIfChanged();
+	assert.equal(secondTry, 1, 'once the body catches up to the sidecar, the publish is merged');
+	assert.equal(reader.cache.get('/a.json')?.mtime, 5000);
+});
+
+// Migration hazard the reviewer flagged: a pre-sidecar window (old extension version) can
+// republish the schema-1 body WITHOUT touching the sidecar. The body still carries a publishSeq
+// (the field predates the sidecar), so on a same-mtime/same-size tie a reader that trusts only
+// the sidecar would see a stale seq and skip the legacy update forever. When the body's embedded
+// publishSeq is HIGHER than the sidecar's, the body is newer than the sidecar knows — trust it.
+test('loadSharedSnapshotIfChanged() trusts a body whose embedded publishSeq is ahead of the sidecar (legacy pre-sidecar writer)', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot(); // body + sidecar at generation 1
+
+	const reader = makeManager(dir);
+	await reader.loadSharedSnapshotIfChanged();
+	assert.equal((reader as any).lastLoadedSnapshotPublishSeq, 1, 'reader is at generation 1');
+	reader.cache.delete('/a.json');
+
+	// A legacy (pre-sidecar) writer predates the sidecar entirely, so remove it, then republish
+	// the body with a HIGHER publishSeq. Keep the JSON length identical (entry mtime 1000 ->
+	// 5000, same digit count) and pin the mtime to the reader's bookmark, so the stat ties and
+	// only the body reveals the update.
+	const snapshotPath = reader.getSharedSnapshotPath();
+	const seqPath = (reader as any).getSnapshotSeqPath();
+	await fs.promises.unlink(seqPath); // legacy deployment: no sidecar exists
+	const body = JSON.parse(await fs.promises.readFile(snapshotPath, 'utf-8'));
+	body.publishSeq = 5; // legacy writer bumps the body generation only
+	body.entries['/a.json'] = entry(5000); // 1000 -> 5000: same digit count, same size
+	await fs.promises.writeFile(snapshotPath, JSON.stringify(body));
+	// Pin the body to the reader's mtime so the stat ties.
+	const bookmarkMtime = (reader as any).lastLoadedSnapshotMtime;
+	const statPre = await fs.promises.stat(snapshotPath);
+	await fs.promises.utimes(snapshotPath, statPre.atimeMs / 1000, bookmarkMtime / 1000);
+	const statAfter = await fs.promises.stat(snapshotPath);
+	(reader as any).lastLoadedSnapshotMtime = statAfter.mtimeMs; // exact mtime tie
+	assert.equal(statAfter.size, (reader as any).lastLoadedSnapshotSize, 'test setup: full stat tie (mtime and size)');
+	assert.ok(!fs.existsSync(seqPath), 'test setup: no sidecar exists in the legacy deployment');
+
+	const merged = await reader.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 1, 'a body whose embedded publishSeq is ahead of the sidecar must be merged — a legacy pre-sidecar writer');
+	assert.equal(reader.cache.get('/a.json')?.mtime, 5000);
 });
 
 // Distinct from the "clears a stale tombstone when accepting a NEWER entry" test above: this
