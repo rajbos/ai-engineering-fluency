@@ -187,7 +187,12 @@ test('createSemaphore: rejects negative and non-integer permit counts', () => {
 	assert.throws(() => createSemaphore(Infinity), RangeError);
 });
 
-test('createSemaphore: an over-release (more release() calls than successful acquire()s) does not widen the permit count', async () => {
+test('createSemaphore: an over-release with no waiter parked does not widen the permit count', async () => {
+	// Scoped to the no-waiter case deliberately: release() cannot in general tell a legitimate
+	// release apart from a spurious/duplicate one (it takes no token identifying which acquire()
+	// it corresponds to), so an over-release racing a *parked* waiter can still admit an extra
+	// holder — see release()'s own "KNOWN LIMITATION" comment. This test covers what the clamp
+	// below actually closes: a caller bug that releases extra times with nothing waiting.
 	const sem = createSemaphore(1);
 	assert.equal(await sem.acquire(), true); // the only permit is now held
 

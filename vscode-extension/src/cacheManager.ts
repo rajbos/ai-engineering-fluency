@@ -971,7 +971,20 @@ export class CacheManager {
 				this.lastLoadedSnapshotMtime = 0;
 				this.deps.log(`Deleted shared cache snapshot (${this.getCacheIdentifier()})`);
 			} catch (err: unknown) {
-				if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+				if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+					// Another window (or an earlier call here) already deleted it — same postcondition
+					// this method promises (no snapshot left) even though this call didn't do the
+					// deleting. loadSharedSnapshotIfChanged() only reloads once a snapshot's mtime
+					// exceeds this bookmark, so leaving it at its pre-delete value here could make a
+					// newly published snapshot with an equal-or-lower mtime (coarse filesystem
+					// timestamp resolution, or clock rollback) look already-loaded, leaving this
+					// instance on stale/empty in-memory state until some later mtime change finally
+					// exceeds it.
+					this.lastLoadedSnapshotMtime = 0;
+				} else {
+					// A genuine failure (e.g. permissions): the file is presumably still there,
+					// unchanged, so the bookmark is left alone rather than forcing a needless reload
+					// of a snapshot that was never actually removed.
 					this.deps.warn(`Failed to delete shared cache snapshot: ${err}`);
 				}
 			}

@@ -145,6 +145,17 @@ export function createSemaphore(permits: number): Semaphore {
       // Hand the permit directly to the next waiter rather than incrementing `available` and
       // letting it re-acquire — that would leave a window where a *different* concurrent
       // acquire() could grab the just-freed permit first, starving the longest-waiting caller.
+      //
+      // KNOWN LIMITATION: this does not by itself stop an over-release from admitting an extra
+      // holder when a waiter is already parked — release() has no way to tell a legitimate
+      // release (matching a real, currently-held permit) apart from a spurious/duplicate one, so
+      // handing a parked waiter's `settle(true)` here can grant a permit backed by nothing. Fixing
+      // that fully needs each acquire() to return a single-use release token that release() checks
+      // against, rejecting an already-consumed or never-issued one — a breaking change to this
+      // module's public API that no call site in this codebase currently needs (see the over-release
+      // test below and its own note). What the clamp a few lines down *does* close is the simpler,
+      // realistic case: a caller bug that calls release() extra times with no waiter parked (e.g.
+      // forgetting it already released) cannot widen how many holders `available` alone admits.
       const next = waiters.shift();
       if (next) {
         next(true);

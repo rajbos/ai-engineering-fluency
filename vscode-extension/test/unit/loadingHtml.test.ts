@@ -173,3 +173,25 @@ test('a late parsing tick cannot drag the bar back below a compute sub-step', ()
 	assert.equal(ui.pct(), '92%', 'bar must not follow the unrelated refresh backwards');
 	assert.equal(ui.barWidth(), '92%');
 });
+
+test('a fresh discovering step resets the bar/checklist state left behind by a superseded run', () => {
+	// A panel a superseded run left registered for its replacement (see isRefreshSuperseded()
+	// callers in extension.ts) keeps this exact script instance running rather than getting a
+	// fresh getLoadingHtml() paint — so the replacement's own 'discovering' message is the only
+	// signal this script gets that a new refresh has started, and must reset everything the old
+	// run advanced. Without it, the old run's clamped `computing`/`barPct` would hold the bar at a
+	// stale high percentage straight through the new run's own early parsing ticks.
+	const ui = runLoadingScript();
+
+	ui.post({ command: 'loadingStep', step: 'computing', percentage: 92, label: 'Analysing usage patterns…' });
+	assert.equal(ui.pct(), '92%');
+
+	ui.post({ command: 'loadingStep', step: 'discovering' });
+	assert.equal(ui.pct(), '–', 'must reset to the initial "not started" display, not stay clamped at the old run\'s percentage');
+	assert.equal(ui.subtitle(), 'Discovering session files...');
+
+	// The critical behavioral check: a real, low parsing percentage from the new run must now be
+	// able to render as low, instead of being clamped to (or above) the old run's 92%.
+	ui.post({ command: 'loadingProgress', completed: 10, total: 400, percentage: 3 });
+	assert.equal(ui.pct(), '3%', 'a fresh run\'s own early parsing tick must not be clamped by the superseded run\'s compute percentage');
+});
