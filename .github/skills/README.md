@@ -293,7 +293,7 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 
 **Contents:**
 - The two-check-run-families distinction: GitHub's native `copilot-pull-request-reviewer` check run (the one that gates this skill) vs. this repo's own CI-driven review agents (`Architecture agent`, `Code Quality agent`, `Test Expert agent`, `Performance agent`, `Review risk`), which are unrelated
-- The exact state-machine algorithm using `mcp__github__pull_request_read`'s `get_check_runs` and `get_reviews` methods (with raw REST/`gh api` equivalents for non-MCP tooling), including the `commit_id` cross-check that catches a completed-but-stale check run
+- The exact state-machine algorithm using GitHub's `pull_request_read` action's `get_check_runs` and `get_reviews` methods (the MCP identifier for this action is client-specific — Claude Code, VS Code and Copilot CLI each spell it differently — so the skill also gives raw REST/`gh api` equivalents that work everywhere), including the `commit_id` cross-check that catches a completed-but-stale check run
 - Guidance to stand down and reschedule rather than poll tightly when a review is still queued or in progress
 
 ### whats-new-catalog

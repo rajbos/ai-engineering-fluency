@@ -52,9 +52,19 @@ between any two calls, treat the SHA as pinned for the duration of one gate
 run and re-confirm it rather than assuming it's still current — see the race
 notes inline and the final step.
 
+Steps below call GitHub's `pull_request_read` action (`method: "get"` /
+`"get_check_runs"` / `"get_reviews"`) generically. The exact identifier for
+that action is client-specific, not a fixed string — Claude Code spells it
+`mcp__<server>__pull_request_read`, VS Code Copilot Chat truncates the server
+name to 13 characters (`mcp_<server-13ch>_pull_request_read`), and Copilot
+CLI uses `<server>-pull_request_read` (see
+`.github/agents/tool-names.agent.md`'s "How Each Client Encodes MCP Tool IDs"
+table). The REST endpoints given alongside each step are the client-neutral
+fallback and work anywhere.
+
 1. **Get the PR's current head commit SHA** (call it `sha`).
-   `mcp__github__pull_request_read` with `method: "get"` (the `head.sha`
-   field). Non-MCP equivalent: `GET /repos/{owner}/{repo}/pulls/{pull_number}`
+   `pull_request_read` with `method: "get"` (the `head.sha` field). Non-MCP
+   equivalent: `GET /repos/{owner}/{repo}/pulls/{pull_number}`
    (or `gh api repos/{owner}/{repo}/pulls/{pull_number}`), read `.head.sha`.
 2. **Fetch check runs for `sha`** and find the one named exactly
    `copilot-pull-request-reviewer`. Two ways to do this, pick one as your
@@ -65,7 +75,7 @@ notes inline and the final step.
      called with the exact `sha` from step 1. Because you pass `sha`
      explicitly, there's no race to guard against here.
    - **If you can only use the MCP tool**:
-     `mcp__github__pull_request_read` with `method: "get_check_runs"` — but
+     `pull_request_read` with `method: "get_check_runs"` — but
      this method is **PR-scoped, not SHA-scoped** (no SHA parameter; it
      always reads check runs for whatever the PR's head is *at call time*).
      Treat the re-check as part of this flow, not optional: immediately
@@ -83,19 +93,29 @@ notes inline and the final step.
    the search was inconclusive, not that the check run is absent — treat
    that the same as **not yet started** (reschedule; don't conclude "no
    findings").
-3. **Decide from its state:**
+
+   **Multiple runs can share the name.** `name` doesn't uniquely identify a
+   check run — a rerun produces another `copilot-pull-request-reviewer`
+   entry for the same `sha`, so don't just grab the first match. Among all
+   entries named exactly `copilot-pull-request-reviewer` for `sha`: if
+   **any** of them is `queued` or `in_progress`, treat the whole thing as
+   still running (a caller that happened to inspect an older completed-and-
+   successful entry while a newer rerun is still in flight would otherwise
+   pass the gate on stale grounds). Only once none are active do you pick
+   one to evaluate — the newest by creation time.
+3. **Decide from the selected run's state:**
 
    | State | Meaning | What to do |
    |---|---|---|
-   | Check run absent entirely | No automatic review has been queued yet for this push (there is typically a delay of a few minutes after a push before GitHub queues it) | Treat as **not yet started** — do not conclude "no findings"; reschedule a later check |
-   | `status: "queued"` or `"in_progress"` | A review is actively running against the current head | **Stand down** — do not act on the PR's review comments this cycle (they may be for a stale prior commit); reschedule a check-in |
-   | `status: "completed"` | The check finished — cross-check before trusting it (step 4) | See step 4 |
+   | No run named `copilot-pull-request-reviewer` for `sha` | No automatic review has been queued yet for this push (there is typically a delay of a few minutes after a push before GitHub queues it) | Treat as **not yet started** — do not conclude "no findings"; reschedule a later check |
+   | Any matching run is `status: "queued"` or `"in_progress"` | A review is actively running against the current head (possibly a rerun) | **Stand down** — do not act on the PR's review comments this cycle (they may be for a stale prior commit); reschedule a check-in |
+   | All matching runs `status: "completed"` | Evaluate the newest one — cross-check before trusting it (step 4) | See step 4 |
 
 4. **Cross-check a `completed` run against `sha`** before trusting it, since a
    completed check can still be stale (completed for an older push), lag the
    review API by a few seconds, or have failed instead of finishing normally:
    - Fetch **all pages** of the PR's submitted reviews:
-     `mcp__github__pull_request_read` with `method: "get_reviews"`, paging with
+     `pull_request_read` with `method: "get_reviews"`, paging with
      `page`/`perPage` (use the maximum `perPage` the tool allows, e.g. `100`)
      until a page comes back with fewer results than requested — that's the
      last page, and pagination has genuinely **finished**. `get_reviews` is
@@ -111,15 +131,23 @@ notes inline and the final step.
      reading each entry's `user.login`, `id`, and `commit_id`.
    - Across every page, look for a review authored by
      `copilot-pull-request-reviewer[bot]` whose `commit_id` equals `sha` **and**
-     whose `state` is a submitted state (e.g. `COMMENTED`, `APPROVED`,
-     `CHANGES_REQUESTED` — anything but `PENDING`). `get_reviews` can include
-     a `PENDING` review that already carries the current `commit_id` but
-     hasn't actually been submitted yet; matching on author + `commit_id`
-     alone can mistake that still-in-progress review for a finished one. Also
-     don't rely on "the most recent bot review" — on a PR with prior rounds,
-     the most recent bot review can belong to an older commit even when the
+     whose `state` is exactly one of `COMMENTED`, `APPROVED`, or
+     `CHANGES_REQUESTED` — an explicit allowlist, not "anything but
+     `PENDING`". `get_reviews` can also return `PENDING` (drafted but not
+     submitted) and `DISMISSED` (submitted, then withdrawn) reviews; neither
+     is a current, standing result, so a looser "not PENDING" predicate would
+     wrongly accept a dismissed review as this round's answer. Also don't
+     rely on "the most recent bot review" — on a PR with prior rounds, the
+     most recent bot review can belong to an older commit even when the
      current-head review genuinely produced no comments, which would
      otherwise read as permanently stale.
+   - **Separately, check whether a `PENDING` review for `sha` exists** (same
+     author, `commit_id == sha`, `state: "PENDING"`). If so, the review is
+     still being drafted — treat this the same as the check run's
+     `queued`/`in_progress` row: **stand down and reschedule**, regardless of
+     what the rest of this step finds. Don't let this fall through to the
+     "no matching review" terminal case below — an in-progress draft is not
+     the same as no review existing at all.
    - **A submitted review with `commit_id == sha` exists, and the check
      run's `conclusion` is exactly `success` or `neutral`** → the review is
      current *and* complete. Safe to act on findings — but scope which
@@ -145,24 +173,31 @@ notes inline and the final step.
      review is *current*, not that it's *complete* (a review can be
      submitted and then the run still fail or get cancelled). Fall through
      to the next two cases as if no matching review existed.
-   - **No matching-and-complete review, and the check run's `conclusion` is
-     anything other than exactly `success` or `neutral`** — treat every
-     other value as not clean, not just the common examples (`failure`,
-     `cancelled`, `timed_out`, `action_required`, `skipped`, or a
-     missing/`null` conclusion all count). The review did not finish
-     cleanly. Treat as **not yet ready** — do not conclude "no findings";
-     investigate or reschedule rather than trusting an aborted run.
-   - **No matching-and-complete review, and the check run's `conclusion` is
-     `success` or `neutral`** → could be brief API propagation lag, *but only
-     if pagination genuinely finished* (reached a short final page, per
-     above — not merely hit the page cap). If it finished: retry once, short
-     delay. Still no matching review after that retry → valid terminal state
-     meaning the review found nothing to say for `sha`: "done, no comments",
-     not "still running". If pagination did **not** finish (hit the cap on
-     full pages): the search was inconclusive, not clean — treat as **not
-     yet ready**, the same as the check-run pagination cap case in step 2,
-     rather than declaring "no comments" over a PR too large to have been
-     fully searched.
+   The remaining two cases assume no `PENDING` review for `sha` was found
+   either (per the separate check above) — a current-head `PENDING` review
+   already means **stand down**, full stop, whatever else is true here.
+
+   - **No matching-and-complete review (and no current-head `PENDING`
+     review), and the check run's `conclusion` is anything other than
+     exactly `success` or `neutral`** — treat every other value as not
+     clean, not just the common examples (`failure`, `cancelled`,
+     `timed_out`, `action_required`, `skipped`, or a missing/`null`
+     conclusion all count). The review did not finish cleanly. Treat as
+     **not yet ready** — do not conclude "no findings"; investigate or
+     reschedule rather than trusting an aborted run.
+   - **No matching-and-complete review (and no current-head `PENDING`
+     review), and the check run's `conclusion` is `success` or `neutral`** →
+     could be brief API propagation lag, *but only if pagination genuinely
+     finished* (reached a short final page, per above — not merely hit the
+     page cap). If it finished: retry once, short delay — re-running the
+     `PENDING` check too, since a draft can appear between polls. Still no
+     matching review and no `PENDING` review after that retry → valid
+     terminal state meaning the review found nothing to say for `sha`:
+     "done, no comments", not "still running". If pagination did **not**
+     finish (hit the cap on full pages): the search was inconclusive, not
+     clean — treat as **not yet ready**, the same as the check-run
+     pagination cap case in step 2, rather than declaring "no comments" over
+     a PR too large to have been fully searched.
 
 ## How this changes agent behavior
 
