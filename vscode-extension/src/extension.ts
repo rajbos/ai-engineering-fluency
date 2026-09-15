@@ -161,7 +161,7 @@ import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { analyzeHydraFusionSession, aiuToUsd } from '../../src/hydrafusion';
 import type { HydraFusionSummary } from '../../src/hydrafusion';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
-import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout } from './utils/promises';
+import { createWakeupGate, createSemaphore, TimeoutError as _TimeoutError, withTimeout as _withTimeout, type Semaphore } from './utils/promises';
 import { WebviewMessageReplay } from './webviewMessageReplay';
 
 // --- Session parsing & token estimation ---
@@ -884,6 +884,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private static readonly CACHE_VERSION = 72;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
+	/**
+	 * Size of _deferredParseSemaphore: how many session-file parses (fast or eventually deferred)
+	 * may be in flight at once. Deferring a slow parse does not cancel it — it keeps running to
+	 * completion — and without a real cap, every worker that hits SESSION_PRELOAD_TIMEOUT_MS
+	 * immediately grabs the next file while the slow one keeps consuming CPU, so a scan with
+	 * hundreds of slow files accumulates hundreds of concurrent CPU-bound parses competing for
+	 * the same single-threaded event loop the webview's postMessage delivery and rendering also
+	 * depend on — the likely cause of a loading flow that looks frozen despite work still
+	 * happening. Currently matches CONCURRENCY, the worker pool size in _preloadSessionFiles()
+	 * (a separate constant there, not structurally linked to this one): with every file — not
+	 * just deferred ones — holding a permit for its own duration, a run where every file is fast
+	 * never contends for one as long as permits >= worker count, and contention only appears
+	 * once files actually start piling up in the background.
+	 */
+	private static readonly MAX_CONCURRENT_DEFERRED_PARSES = 20;
+	/**
+	 * Size of _deferredParseReserve: a second, smaller pool a worker falls back to only once it
+	 * has waited 3s for a primary permit and gotten nothing — meaning every primary permit is
+	 * currently held by a parse showing no sign of ever finishing, not merely a slow one (those
+	 * settle well within that window). Acquiring from the reserve has no timeout, so total
+	 * concurrent parses stays bounded at MAX_CONCURRENT_DEFERRED_PARSES + this reserve instead of
+	 * growing without limit as more workers hit the same stuck wall across successive waves.
+	 */
+	private static readonly DEFERRED_PARSE_RESERVE_PERMITS = 10;
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -1113,6 +1137,41 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// In-flight updateTokenStats promise — coalesces concurrent callers onto the same run
 	private _updateTokenStatsInFlight: Promise<DetailedStats | undefined> | undefined;
 	/**
+	 * persistRefreshResult()'s detached end-of-refresh snapshot save for the leader cycle currently
+	 * finishing up, if any. _runUpdateTokenStats() awaits this in its `finally` before releasing the
+	 * refresh-leader lock — otherwise the lock (and the leader role with it) could pass to a second
+	 * window while this window's own save was still mid-flight, letting that window publish its own
+	 * snapshot and then have this window's stale save land after it and be merged back in on top.
+	 */
+	private _pendingLeaderSnapshotSave: Promise<void> | undefined;
+	/**
+	 * Every currently-running full-year `calculateDailyStats(365, ...)` call, tracked so
+	 * clearCache() can wait all of them out before clearing. There are two call sites: the
+	 * one-time, detached backfill `_runRefreshCore()` fires after a leader refresh publishes (see
+	 * its own call site), dispatched fire-and-forget *after* the refresh that started it has
+	 * already returned — invisible to both `_updateTokenStatsInFlight` and
+	 * `_deferredSessionPreloadPromises`; and the foreground full-year walk `collectEfficiencyInputs()`
+	 * awaits directly on a cold Efficiency view open. Both reparse every discovered session file
+	 * unconditionally, calling getSessionFileDataCached()/setCachedSessionData() the same as any
+	 * other parse. A `Set` rather than a single slot: two overlapping calls (e.g. a second leader
+	 * refresh's own backfill starting before an earlier one settles) must each be tracked and
+	 * awaited, not have the newer one silently overwrite the older one's tracking. See
+	 * trackFullYearBackfill().
+	 */
+	private readonly _pendingFullYearBackfills = new Set<Promise<unknown>>();
+
+	/**
+	 * Registers a full-year `calculateDailyStats(365, ...)` call in `_pendingFullYearBackfills` for
+	 * the duration of its run and returns the same promise unchanged, so callers can still await it
+	 * directly. See that field's doc comment for why every such call must be tracked, not just the
+	 * most recently started one.
+	 */
+	private trackFullYearBackfill<T>(backfill: Promise<T>): Promise<T> {
+		this._pendingFullYearBackfills.add(backfill);
+		backfill.finally(() => { this._pendingFullYearBackfills.delete(backfill); }).catch(() => undefined);
+		return backfill;
+	}
+	/**
 	 * The `_cacheGeneration` the in-flight run's results will belong to — registered when the run
 	 * starts and narrowed to _runRefreshCore()'s own capture once it gathers its inputs. A caller
 	 * on the far side of a clear this number predates must not coalesce onto that run, because the
@@ -1129,6 +1188,31 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Timed-out preloads continue in the background; skip duplicate work until their cache entries settle.
 	private readonly _deferredSessionPreloadFiles = new Set<string>();
 	private _deferredSessionPreloadCount = 0;
+	/**
+	 * The in-flight promise of every deferred (backgrounded) session-file parse, keyed by file
+	 * path. clearCache() awaits all of these (a snapshot at the moment it runs) before clearing,
+	 * so a parse that is still running from a refresh that already returned cannot call
+	 * setCachedSessionData() after the clear and silently repopulate the cache it just emptied.
+	 * This only covers parses that already timed out into the background by the time clearCache()
+	 * takes its snapshot — a foreground worker still on its ordinary (non-deferred) pass over a
+	 * file is not registered here yet, which is why clearCache() also awaits the whole in-flight
+	 * refresh (`_updateTokenStatsInFlight`) before reading this map; see clearCache()'s own comment.
+	 * Populated/cleared alongside _deferredSessionPreloadFiles in deferSessionPreloadRefresh().
+	 */
+	private readonly _deferredSessionPreloadPromises = new Map<string, Promise<void>>();
+	/**
+	 * Bounds how many session-file parses (see MAX_CONCURRENT_DEFERRED_PARSES) may be in flight
+	 * across worker() calls in _preloadSessionFiles(), including ones that end up deferred to the
+	 * background. A worker acquires a permit before starting a file and releases it either
+	 * immediately (the file completed or errored within its own turn) or later, from
+	 * deferSessionPreloadRefresh()'s completion handler, once ownership has been handed off to a
+	 * deferred parse still running past the worker's turn — see processPreloadQueueFileWithCrashLog.
+	 * A single persistent semaphore (not recreated per run) because a deferred parse from a
+	 * previous run releasing its permit must still be able to admit a worker parked in the next one.
+	 */
+	private readonly _deferredParseSemaphore: Semaphore = createSemaphore(CopilotTokenTracker.MAX_CONCURRENT_DEFERRED_PARSES);
+	/** See DEFERRED_PARSE_RESERVE_PERMITS — the bounded fallback for when the primary semaphore above is entirely stuck. */
+	private readonly _deferredParseReserve: Semaphore = createSemaphore(CopilotTokenTracker.DEFERRED_PARSE_RESERVE_PERMITS);
 	private _deferredSessionRefreshTimer: NodeJS.Timeout | undefined;
 	private _updateTokenStatsStartedAt: number | undefined;
 
@@ -1152,6 +1236,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Flag to track if details panel is currently showing the loading screen
 	private _detailsPanelIsLoading = false;
+
+	/**
+	 * Panels currently showing getLoadingHtml() while waiting on this exact same
+	 * updateTokenStats()/_runRefreshCore() run — Details and Environmental, the two views
+	 * that directly await it before rendering. sendLoadingPanelMessage() broadcasts to all of
+	 * them, since they are all watching the same operation (see that method's own doc comment
+	 * on why the same broadcast must NOT reach a panel waiting on a different operation, like
+	 * Efficiency's own build or the Log Viewer/Maturity's independent loads).
+	 */
+	private readonly _refreshLoadingPanels = new Set<vscode.WebviewPanel>();
 
 	// Editor list captured during the last (or current) log analysis, used to render the loading tooltip SVG
 	private _loadingEditors: { icon: string; name: string }[] = [];
@@ -1819,7 +1913,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// confirmed off again (runLocalViewRegression()'s finally block just restored the previous
 		// sample dir before calling this), so the tombstones actually reach disk.
 		if (evictedAny && !this.isSampleDataModeActive()) {
-			try { await this.saveCacheToStorage(); }
+			try { await this.trySaveCacheToStorage(); }
 			catch (err) { console.error(`Failed to persist regression cache eviction: ${err}`); }
 		}
 	}
@@ -1839,7 +1933,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async computeRegressionStats(dataSourceLabel: string, sessionFiles: string[]): Promise<{ detailedStats: any; dailyStats: any; usageStats: any; maturityData: any; diagnosticReport: string; fluencyLevelData: any; chartTotals: any }> {
 		const detailedStats = await this.updateTokenStats(true);
 		if (!detailedStats) { throw new Error(`Failed to calculate detailed stats from ${dataSourceLabel}.`); }
-		const dailyStats = this.currentDailyStats ?? await this.calculateDailyStats();
+		const dailyStats = this.currentDailyStats ?? await this.trackFullYearBackfill(this.calculateDailyStats());
 		const usageStats = await this.calculateUsageAnalysisStats(false);
 		const maturityData = await this.calculateMaturityScores(false);
 		const diagnosticReport = await this.generateDiagnosticReport();
@@ -1895,9 +1989,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Sets the cache entry for a session file, including file size.
 	 */
 	private setCachedSessionData(filePath: string, data: SessionFileCache, fileSize?: number): void {
-		const cached = this.getCachedSessionData(filePath);
-		const isNewEntry = cached === undefined || cached.mtime !== data.mtime || cached.size !== data.size;
-		return this.cacheManager.setCachedSessionData(filePath, data, fileSize, isNewEntry);
+		return this.cacheManager.setCachedSessionData(filePath, data, fileSize);
 	}
 
 
@@ -1934,8 +2026,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Also removes the legacy unscoped keys ('sessionFileCache', 'sessionFileCacheVersion').
 	 */
 
-	private async saveCacheToStorage(): Promise<void> {
-		return this.cacheManager.saveCacheToStorage();
+	private async trySaveCacheToStorage(): Promise<boolean> {
+		return this.cacheManager.trySaveCacheToStorage();
 	}
 
 	public async clearCache(): Promise<void> {
@@ -1944,10 +2036,57 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.outputChannel.show(true);
 			this.log('Clearing session file cache...');
 
-			const cacheSize = this.cacheManager.cache.size;
-			this.cacheManager.cache.clear();
+			// Wait out a pre-existing refresh (a timer or an earlier manual Refresh, never this
+			// call's own — that one is started below, after clearing) that is still mid-
+			// _preloadSessionFiles(): its foreground workers call setCachedSessionData() directly
+			// for every file that hasn't hit the deferred-parse timeout yet, and
+			// awaitAllDeferredParses() only knows about parses already registered as deferred — a
+			// worker still on its first, ordinary (non-deferred) pass over a file is invisible to
+			// it. Settling this promise doesn't require the run to actually finish quickly: its own
+			// isRefreshSuperseded() check (against the generation this clear is about to bump) makes
+			// it discard its results without publishing once it notices, exactly as a caller of
+			// updateTokenStats() arriving after a clear already waits it out (see that method's own
+			// "waiting it out before refreshing" branch).
+			//
+			// Looped rather than a single pass: awaitAllDeferredParses() below can await real,
+			// I/O-bound parses, which yields to the event loop for real time — long enough for an
+			// unrelated timer-triggered refresh to start and populate _updateTokenStatsInFlight with
+			// a run this call never captured. Re-checking after every pass closes that window; the
+			// loop only exits once one full pass finds nothing left to wait for.
+			while (this._updateTokenStatsInFlight || this._deferredSessionPreloadPromises.size > 0 || this._pendingFullYearBackfills.size > 0) {
+				const preClearRefresh = this._updateTokenStatsInFlight;
+				if (preClearRefresh) {
+					await preClearRefresh.catch(() => undefined);
+				}
 
-			// Everything invalidating happens before the first await. Bumping the generation
+				// Every full-year chart backfill currently running (see _pendingFullYearBackfills'
+				// own doc comment for its two call sites) is invisible to the wait above — one is
+				// dispatched fire-and-forget only after its refresh's own promise already resolved,
+				// and the other runs on a separate foreground call chain entirely. Without this, any
+				// of them could still be reparsing older session files and calling
+				// setCachedSessionData() well after the wait above returns, repopulating the cache
+				// this command is about to empty. Snapshotted before awaiting: a backfill that
+				// finishes deletes itself from the live set mid-loop, and a new one can start while
+				// we wait — the outer while-loop's re-check catches that.
+				const pendingBackfills = [...this._pendingFullYearBackfills];
+				await Promise.all(pendingBackfills.map(backfill => backfill.catch(() => undefined)));
+
+				// Wait out any deferred (backgrounded) parse still finishing from a refresh that
+				// already returned — without this, its setCachedSessionData() call could land after
+				// the synchronous clear below and silently repopulate the cache this command just
+				// emptied. Run after the wait above: that run's own workers can defer new parses to
+				// the background while this call was waiting on it, and those need to be covered too.
+				// Safe to await before the invalidation block: the generation hasn't bumped yet, so a
+				// build reading the cache during this wait sees the pre-clear generation it would
+				// have seen anyway, not the "new generation, stale data" combination the comment
+				// below guards.
+				await this.awaitAllDeferredParses();
+			}
+
+			const cacheSize = this.cacheManager.cache.size;
+			this.cacheManager.clearAllCachedData();
+
+			// Everything invalidating happens before the next await. Bumping the generation
 			// alone was not enough: a build starting during the await would capture the *new*
 			// generation, read the computed caches that had not been cleared yet, and so pass
 			// the check with pre-clear data. Clearing the caches here closes that window —
@@ -1970,7 +2109,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this._lastEfficiencyViewData = undefined;
 			this._cacheGeneration++;
 
-			// Delete the on-disk snapshot so it isn't reloaded after restart.
+			// Delete the on-disk snapshot so it isn't reloaded after restart. deleteSharedSnapshot()
+			// itself now serializes on the shared cache lock before deleting, so a writer already
+			// mid-flight when clearAllCachedData() ran above — this window's own checkpoint or
+			// persistRefreshResult() save, or another window's entirely — cannot land its rename
+			// after this delete and resurrect the data this clear is removing. See that method's
+			// doc comment for why the lock, not just the in-memory clear generation, is required.
 			await this.cacheManager.deleteSharedSnapshot();
 
 			// Reset diagnostics loaded flag so the diagnostics view will reload files
@@ -2968,18 +3112,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Send a loading-screen message to the details panel's loading screen.
+	 * Send a loading-screen message to every panel waiting on this same
+	 * updateTokenStats()/_runRefreshCore() run.
 	 *
-	 * Deliberately narrow. Loading-screen messages are not addressed to anyone, and the
-	 * script renders each one over the whole screen — subtitle, file counters, parse
-	 * checklist and editor pills, not just the bar. Broadcasting them to every open
-	 * loading screen therefore lets one operation's counts and labels appear on a panel
-	 * waiting for a completely different operation. Each build sends to its own panel
-	 * instead; see `efficiencyLoadingSink()`.
+	 * Deliberately narrow to `_refreshLoadingPanels`, not every open loading screen: the
+	 * script renders each message over the whole screen — subtitle, file counters, parse
+	 * checklist and editor pills, not just the bar — so broadcasting to a panel waiting on a
+	 * *different* operation would show that operation's counts and labels as if they were its
+	 * own. `_refreshLoadingPanels` only ever holds panels (Details, Environmental) that awaited
+	 * this exact call chain, so broadcasting to all of them is safe. Every other loading screen
+	 * (Efficiency's own build, Log Viewer/Maturity's independent loads) sends to itself instead;
+	 * see `efficiencyLoadingSink()`.
 	 */
 	private sendLoadingPanelMessage(msg: object): void {
-		if (this.detailsPanel && this._detailsPanelIsLoading) {
-			void this.detailsPanel.webview.postMessage(msg);
+		for (const panel of this._refreshLoadingPanels) {
+			void panel.webview.postMessage(msg);
 		}
 	}
 
@@ -4051,7 +4198,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		cutoffMs: number,
 		progressCallback?: (completed: number, total: number) => void,
 		editorSet?: Set<string>,
-		missBudget?: { remaining: number }
+		missBudget?: { remaining: number },
+		isLeader: boolean = true
 	): Promise<{ sessionFiles: string[]; preloaded: SessionFilePreload[] }> {
 		// --- Streaming pipeline: overlap discovery with parsing ---
 		// Discovery pushes file batches into a shared queue as each adapter completes.
@@ -4115,14 +4263,68 @@ class CopilotTokenTracker implements vscode.Disposable {
 					await gate.wait();
 					continue;
 				}
+				// Reserve this worker's queue item before awaiting anything below: the length check
+				// above and this increment must run in the same synchronous tick (no `await` between
+				// them), or multiple workers can pass that check against the same stale `readIndex`
+				// — a final batch with fewer items than parked workers — and only the first to resume
+				// after acquiring a permit claims a real file; the rest each get `queue[readIndex]`
+				// past the end (`undefined`), wasting a permit and never processing anything.
 				const sessionFile = queue[readIndex++];
-				await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget);
+				// Backpressure: hold a permit from a MAX_CONCURRENT_DEFERRED_PARSES-sized semaphore
+				// for the whole duration of this file's processing — brief for a normal file,
+				// however long it takes for one that gets deferred. Deferring doesn't cancel a slow
+				// parse; it keeps running in the background, so without this a run with many slow
+				// files accumulates unbounded concurrent work. Unlike racing a plain timer against
+				// the old WakeupGate-based wait (which woke every parked worker on one release, and
+				// left the losing side of the race registered forever — see git history), this is a
+				// real reservation: acquire() hands the freed permit to exactly one waiter per
+				// release(), and a timed-out acquire() removes its own registration.
+				// A file already being parsed by a still-running background parse from an earlier
+				// run is a pure no-op here (processPreloadQueueFileWithCrashLog() used to discover
+				// this itself, after a permit was already held) — checked before acquiring so this
+				// worker never blocks waiting for a permit only to find out there was nothing to do,
+				// competing with genuinely slow parses for the exact capacity this semaphore exists
+				// to ration. Normalized like every other cross-batch/cross-run comparison of session
+				// paths (see seedPreloadQueueFromCache()'s doc comment): the same physical file can
+				// be discovered under a different separator/case spelling than the one the earlier
+				// run deferred it under, and a raw-string comparison would miss that, starting a
+				// duplicate slow parse instead of recognizing the file as already in flight.
+				if (this._deferredSessionPreloadFiles.has(_normalizePathForDedup(sessionFile))) {
+					this.debugCrashLog(`deferred ${sessionFile}`);
+				} else {
+					let release: () => void;
+					if (await this._deferredParseSemaphore.acquire(3_000)) {
+						release = () => this._deferredParseSemaphore.release();
+					} else {
+						// The 3s timeout won: every primary permit is held by a parse that has shown no
+						// sign of ever finishing (merely slow files settle well within a handful of these
+						// waits). Falling back to running unreserved here would let total concurrency
+						// creep past the cap by a full worker-pool's width on every such wave — the exact
+						// drift the primary semaphore exists to prevent (see git history). Instead, wait
+						// (uncapped) on a small, separately bounded reserve — see
+						// DEFERRED_PARSE_RESERVE_PERMITS — so the worst case is a bigger but still fixed
+						// ceiling, not unbounded growth.
+						await this._deferredParseReserve.acquire();
+						release = () => this._deferredParseReserve.release();
+					}
+					const wasDeferred = await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget, release);
+					if (!wasDeferred) {
+						release();
+					}
+				}
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
 				// Checkpoint cache periodically during long-running preload. Skipped in sample-data
 				// mode for the same reason persistRefreshResult() never saves there — a mid-parse
 				// checkpoint writes straight to the shared on-disk snapshot too, bypassing that guard.
-				if (processed % 25 === 0 && !this.isSampleDataModeActive()) {
+				// Leader-only, matching persistRefreshResult()'s invariant (see
+				// .github/instructions/vscode-extension.instructions.md) that only the leader writes
+				// the shared snapshot during a refresh — a follower checkpointing here was writing a
+				// deliberately partial (FOLLOWER_MISS_BUDGET-bounded) in-memory cache to the same
+				// shared file the leader is concurrently building, on every one of its own first 25
+				// files (a follower never resets lastCheckpointTime, so it always starts past the time
+				// threshold).
+				if (processed % 25 === 0 && isLeader && !this.isSampleDataModeActive()) {
 					this.cacheManager.maybeCheckpointCache();
 				}
 			}
@@ -4174,26 +4376,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * (see debugCrashLog) so a hard native crash mid-scan still leaves a trace of
 	 * which file(s) were in flight. A "start" line with no matching "done"/"error"
 	 * for the same file means the process died while processing it.
+	 *
+	 * Callers only reach this once the worker loop has already confirmed `sessionFile` isn't
+	 * still being handled by an earlier run's deferred parse — see that loop's own
+	 * `_deferredSessionPreloadFiles` check, made before acquiring a permit for exactly this file.
+	 *
+	 * `release` is the permit worker() acquired for this file (from whichever pool — the primary
+	 * semaphore or the reserve, see their declarations), called exactly once total regardless of
+	 * outcome: either here-and-now by the caller when this returns `false` (not deferred), or
+	 * later by deferSessionPreloadRefresh() once the deferred parse itself finishes, when this
+	 * returns `true` and ownership has transferred.
 	 */
-	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
-		if (this._deferredSessionPreloadFiles.has(sessionFile)) {
-			this.debugCrashLog(`deferred ${sessionFile}`);
-			return;
-		}
+	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget: { remaining: number } | undefined, release: () => void): Promise<boolean> {
 		this.debugCrashLog(`start ${sessionFile}`);
 		const processing = this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
 		const operation = `Parsing session "${sessionFile}"`;
 		try {
 			await _withTimeout(processing, CopilotTokenTracker.SESSION_PRELOAD_TIMEOUT_MS, operation);
 			this.debugCrashLog(`done  ${sessionFile}`);
+			return false;
 		} catch (e) {
 			if (e instanceof _TimeoutError) {
 				this.debugCrashLog(`deferred ${sessionFile}`);
 				this._deferredSessionPreloadCount++;
-				this.deferSessionPreloadRefresh(sessionFile, processing);
-				return;
+				this.deferSessionPreloadRefresh(sessionFile, processing, release);
+				return true;
 			}
 			this.debugCrashLog(`error ${sessionFile}: ${e}`);
+			return false;
 		}
 	}
 
@@ -4201,17 +4411,43 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Keeps a timed-out preload alive without holding the initial statistics pass. Once every
 	 * deferred parse has filled its cache entry, a single refresh incorporates those results.
 	 */
-	private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>): void {
-		this._deferredSessionPreloadFiles.add(sessionFile);
-		void processing
+	private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>, release: () => void): void {
+		// Normalized key: see the worker loop's matching _deferredSessionPreloadFiles.has() check —
+		// the same physical file can be discovered under a different separator/case spelling by a
+		// later run, and a raw-string key would make that lookup miss this entry.
+		const deferredKey = _normalizePathForDedup(sessionFile);
+		this._deferredSessionPreloadFiles.add(deferredKey);
+		const settled = processing
 			.then(() => this.debugCrashLog(`done(background)  ${sessionFile}`))
 			.catch(error => this.debugCrashLog(`error(background) ${sessionFile}: ${error}`))
 			.finally(() => {
-				this._deferredSessionPreloadFiles.delete(sessionFile);
+				this._deferredSessionPreloadFiles.delete(deferredKey);
+				this._deferredSessionPreloadPromises.delete(sessionFile);
+				// The worker that started this file didn't release its permit because this parse
+				// turned out to be deferred (see processPreloadQueueFileWithCrashLog) — release it
+				// now that the background work it was held for has actually finished.
+				release();
 				if (this._deferredSessionPreloadFiles.size === 0) {
 					this.scheduleDeferredSessionRefresh();
 				}
 			});
+		this._deferredSessionPreloadPromises.set(sessionFile, settled);
+	}
+
+	/**
+	 * Resolves once every deferred parse in flight at the moment this is called has settled — a
+	 * snapshot of `_deferredSessionPreloadPromises`, not a live wait: a parse that starts fresh
+	 * after this snapshot is taken is not included. clearCache() accounts for that itself by
+	 * looping this call together with its in-flight-refresh wait until one full pass finds nothing
+	 * left outstanding, rather than relying on a single call here to be enough — awaiting real,
+	 * I/O-bound parses yields to the event loop for real time, long enough for an unrelated
+	 * timer-triggered refresh to start and defer parses of its own in between. Used by clearCache()
+	 * so a deferred parse from a refresh that already returned cannot call setCachedSessionData()
+	 * after the clear and silently repopulate the cache it just emptied.
+	 */
+	private async awaitAllDeferredParses(): Promise<void> {
+		if (this._deferredSessionPreloadPromises.size === 0) { return; }
+		await Promise.all(this._deferredSessionPreloadPromises.values());
 	}
 
 	private scheduleDeferredSessionRefresh(): void {
@@ -4329,12 +4565,45 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.error('Error updating token stats:', error);
 			this.setStatusBarText(l10n.t('statusBar.tokenError'));
 			this.statusBarItem.tooltip = l10n.t('statusBar.errorTooltip');
+			// A genuine throw here (unlike publishRefreshResult() returning false for a
+			// superseded run, which never reaches this catch) means no later refresh is already
+			// under way to resolve a panel left waiting on this one — see showDetails()/
+			// showEnvironmental()'s isRefreshSuperseded() branch, which deliberately leaves a
+			// superseded run's panel registered for exactly such a replacement to publish into.
+			// Without this, a panel whose refresh genuinely failed while it was in the "stay on
+			// the loading screen, a replacement will handle it" state would never get one.
+			this.resolveStuckLoadingPanelsAsFailed();
 			return undefined;
 		} finally {
-			this.stopRefreshHeartbeat();
 			if (isLeader) {
+				// Deliberately NOT stopping the heartbeat yet: it renews the refresh-lock's
+				// timestamp every 30s so a legitimately long save/checkpoint here isn't mistaken for
+				// an abandoned lock by handleExistingLock()'s 5-minute staleness check. Stopping it
+				// before these awaits (as this used to) leaves the lock's timestamp frozen for their
+				// entire duration — a slow enough snapshot write (a large cache, a slow filesystem)
+				// could then let another window break the lock and start its own leader cycle while
+				// this window is still mid-save, the exact stale-snapshot race this wait exists to
+				// prevent in the first place.
+				//
+				// Await this cycle's own end-of-refresh snapshot save (if this run reached
+				// persistRefreshResult()) before releasing the lock — see
+				// _pendingLeaderSnapshotSave's own doc comment for why releasing first is unsafe.
+				if (this._pendingLeaderSnapshotSave) {
+					await this._pendingLeaderSnapshotSave;
+					this._pendingLeaderSnapshotSave = undefined;
+				}
+				// Also await a still-running *periodic* mid-parse checkpoint (maybeCheckpointCache(),
+				// fire-and-forget, holds the same cache lock persistRefreshResult()'s save needs) —
+				// otherwise that checkpoint can still be serializing when the refresh-leader lock is
+				// released here. A new leader elected in the gap would then lose its own save to that
+				// same lock too, leaving the older, partial checkpoint as the on-disk snapshot even
+				// though a full refresh (this one or the new leader's) has already completed.
+				await this.cacheManager.awaitInFlightCheckpoint();
+				this.stopRefreshHeartbeat();
 				try { await this.cacheManager.releaseRefreshLock(); }
 				catch (err) { this.warn(`Failed to release refresh lock: ${err}`); }
+			} else {
+				this.stopRefreshHeartbeat();
 			}
 		}
 	}
@@ -4459,13 +4728,36 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.recordDetailedStats(detailedStats, startedAtGeneration);
 
 		this.updateStatusBarAndTooltip(detailedStats);
-		this.updateDetailsPanelIfOpen(detailedStats, silent);
 		this.updateChartPanelIfOpen(silent);
+		// These sub-steps report real sub-progress on the Details/Environmental loading screen —
+		// including computeAndUploadFluencyScore, which runs calculateMaturityScores() and an
+		// optional network upload on every non-silent refresh regardless of whether the Maturity
+		// panel is even open (see that method). Both panels' real HTML/data is published right
+		// after, not before: publishing Details earlier than this used to swap its loading screen
+		// away before these sub-steps were even sent, so it never actually showed the progress
+		// they report.
+		this.sendLoadingPanelMessage({
+			command: 'loadingStep', step: 'computing',
+			percentage: CopilotTokenTracker.REFRESH_STEP_PCT.analysis, label: l10n.t('loading.refresh.analyzingUsage'),
+		});
 		await this.updateAnalysisPanelIfOpen(silent, preloaded, startedAtGeneration);
 		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
+		this.sendLoadingPanelMessage({
+			command: 'loadingStep', step: 'computing',
+			percentage: CopilotTokenTracker.REFRESH_STEP_PCT.fluency, label: l10n.t('loading.refresh.scoringFluency'),
+		});
 		await this.computeAndUploadFluencyScore(silent, preloaded, startedAtGeneration);
 		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
+
+		// Published here, before evaluateAndSurfaceInsights() rather than after: that call can
+		// await an interactive insight toast (vscode.window.showInformationMessage()) that only
+		// resolves once the user acts on or dismisses it — sitting behind that await would leave
+		// Details/Environmental stuck on the loading screen for as long as the toast sits
+		// unanswered, even though the refresh itself finished. The "finalizing insights" sub-step
+		// this displaces was never going to be visible on the loading screen after this anyway.
+		this.updateDetailsPanelIfOpen(detailedStats, silent);
 		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
+
 		await this.evaluateAndSurfaceInsights(startedAtGeneration);
 		if (this.isRefreshSuperseded(startedAtGeneration)) { return false; }
 
@@ -4475,6 +4767,36 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return true;
 	}
 
+	/**
+	 * Flushes any dirty cache state left behind by a previous leader cycle before
+	 * resetCheckpointCounters() zeroes the counter that is its only record of being unpersisted.
+	 *
+	 * A leader cycle that throws (see _runUpdateTokenStats's catch) never reaches
+	 * persistRefreshResult() — its only other chance to checkpoint is the periodic every-25-files
+	 * call in _preloadSessionFiles(), so up to 24 parsed-but-uncheckpointed files can be left
+	 * dirty when it fails. Without this, the next cycle's unconditional resetCheckpointCounters()
+	 * zeroed that dirty count while the underlying entries were still only in memory: a
+	 * cache-hit-only next cycle (nothing new to re-dirty the counter) would then never checkpoint
+	 * them again, so a crash before some unrelated future write finally does would lose parses
+	 * that had, in fact, already succeeded.
+	 *
+	 * Only resets once nothing is left dirty. If the flush itself is skipped or fails (e.g. another
+	 * window holds the cache lock), the counters are left untouched rather than reset — this cycle's
+	 * own threshold-based checkpointing then still owns that debt instead of it being silently
+	 * forgotten.
+	 */
+	private async flushPendingCheckpointBeforeReset(): Promise<void> {
+		await this.cacheManager.awaitInFlightCheckpoint();
+		if (this.cacheManager.hasUnflushedCheckpointWork()) {
+			await this.cacheManager.forceCheckpointCache();
+		}
+		if (this.cacheManager.hasUnflushedCheckpointWork()) {
+			this.log('Pending cache checkpoint from a previous cycle could not be flushed; leaving checkpoint counters intact so this cycle retries it');
+			return;
+		}
+		this.cacheManager.resetCheckpointCounters();
+	}
+
 	/** Core discover → parse → compute → render → persist pass for one refresh. */
 	private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {
 		this.log(isLeader ? 'Updating token stats (leader)...' : 'Updating token stats (follower)...');
@@ -4482,9 +4804,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// gathered in, not the one each later calculation starts in (see calculateUsageAnalysisStats).
 		const startedAtGeneration = this.beginRefreshGeneration();
 
-		// Reset checkpoint counters at the start of each refresh cycle
+		// Reset checkpoint counters at the start of each refresh cycle — but only once any
+		// unpersisted work from a previous cycle (e.g. one that threw before persistRefreshResult()
+		// ever ran) has actually reached disk. See flushPendingCheckpointBeforeReset().
 		if (isLeader) {
-			this.cacheManager.resetCheckpointCounters();
+			await this.flushPendingCheckpointBeforeReset();
 		}
 
 		const { last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(new Date());
@@ -4501,7 +4825,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			[...discoveredEditorSet].map(name => ({ icon: this.getEditorIconForLoader(name), name }))
 		);
 		const missBudget = isLeader ? undefined : { remaining: CopilotTokenTracker.FOLLOWER_MISS_BUDGET };
-		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget);
+		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget, isLeader);
 		if (!isLeader && preloaded.length < sessionFiles.length) {
 			this.log(`Follower with cold cache: stats below are partial (${preloaded.length}/${sessionFiles.length} files within date range parsed within the follower budget). Will resync once the leader publishes its snapshot.`);
 		}
@@ -4511,7 +4835,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.warn(`Failed to update seen-editor state: ${error}`);
 		}
 
-		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
+		this.sendLoadingPanelMessage({
+			command: 'loadingStep', step: 'computing',
+			percentage: CopilotTokenTracker.REFRESH_STEP_PCT.stats, label: l10n.t('loading.refresh.calculatingStats'),
+		});
 		this.showLoadingTooltipForStep('computing', silent);
 
 		const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
@@ -4530,7 +4857,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// lastFullDailyStats read elsewhere already falls back to lastDailyStats or computes its own
 		// full-year data lazily on demand (e.g. when Chart is opened).
 		if (isLeader && !this.currentFullDailyStats && !this.chartPanel && !this.isDiscoveryUntrustworthyForBackfill(sessionFiles, preloaded)) {
-			void this.calculateDailyStats(365, sessionFiles);
+			// Tracked (not just detached) so clearCache() can wait it out — see
+			// _pendingFullYearBackfills' own doc comment.
+			this.trackFullYearBackfill(this.calculateDailyStats(365, sessionFiles));
 		}
 
 		return detailedStats;
@@ -4554,8 +4883,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private persistRefreshResult(isLeader: boolean): void {
 		if (isLeader) {
 			if (this.isSampleDataModeActive()) { return; }
-			void (async () => {
-				try { await this.saveCacheToStorage(); }
+			// Tracked (not just detached) so _runUpdateTokenStats()'s finally can await it before
+			// releasing the refresh-leader lock — see _pendingLeaderSnapshotSave's own doc comment.
+			//
+			// The `false` a lock-contended or failed save resolves with is deliberately not handled
+			// here (no retry, no explicit branch): saveAndAccountForRefresh() already leaves the
+			// dirty count intact on that outcome (see its own doc comment), and
+			// flushPendingCheckpointBeforeReset() — run at the start of every subsequent leader
+			// cycle, before that cycle resets those same counters — forces a checkpoint for exactly
+			// that leftover debt. A skipped save here is retried within one refresh cycle, never
+			// silently dropped.
+			this._pendingLeaderSnapshotSave = (async () => {
+				try { await this.cacheManager.saveAndAccountForRefresh(); }
 				catch (err) { this.warn(`Failed to save cache: ${err}`); }
 			})();
 		} else {
@@ -4933,7 +5272,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 				},
 			});
 		} else {
-			this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, detailedStats);
+			// Whichever refresh reaches here first owns clearing this panel's loading-tracking
+			// state, not only the one showDetails() itself awaited: a run that gets superseded by
+			// a cache clear deliberately leaves the panel registered as loading (see
+			// isRefreshSuperseded() call sites in showDetails()) so it keeps receiving progress
+			// from whatever run replaces it — that replacement's own publish, right here, is what
+			// finally clears it. Without this, a superseded run leaves _detailsPanelIsLoading
+			// stuck true (suppressing the normal status-bar tooltip) and the panel stuck in
+			// _refreshLoadingPanels (a future loadingStep broadcast would hit its real content).
+			this._refreshLoadingPanels.delete(this.detailsPanel);
+			this._detailsPanelIsLoading = false;
+			try {
+				this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, detailedStats);
+			} catch (err) {
+				this.error('❌ Failed to render Details panel after refresh', err);
+				// Already out of _refreshLoadingPanels above — without this fallback a render
+				// exception here would leave the panel frozen on the loading screen with no
+				// further messages and no way to retry (see loadDetailsIntoPanel()'s own catch).
+				this.detailsPanel.webview.html = this.getRefreshFailedHtml(this.detailsPanel.webview);
+			}
 		}
 	}
 
@@ -5010,7 +5367,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 				},
 			});
 		} else {
-			this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, detailedStats);
+			// See the matching comment in updateDetailsPanelIfOpen(): whichever refresh reaches
+			// here first clears this panel's loading-tracking state, since a superseded run
+			// deliberately leaves it registered for the replacement run to publish into.
+			this._refreshLoadingPanels.delete(this.environmentalPanel);
+			try {
+				this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, detailedStats);
+			} catch (err) {
+				this.error('❌ Failed to render Environmental panel after refresh', err);
+				// Same rationale as updateDetailsPanelIfOpen()'s catch: already out of
+				// _refreshLoadingPanels above, so a render exception here needs its own fallback
+				// or the panel is left frozen on the loading screen with no way to retry.
+				this.environmentalPanel.webview.html = this.getRefreshFailedHtml(this.environmentalPanel.webview);
+			}
 		}
 	}
 
@@ -8985,6 +9354,151 @@ private computeFallbackDailyRollup(
 		return _estimateTokensFromText(text, model, this.tokenEstimators);
 	}
 
+	/**
+	 * Failure state for a panel that was showing the loading screen when updateTokenStats()
+	 * returned no data. _runUpdateTokenStats() already caught the error and reported it via the
+	 * status bar, but nothing else tells an open panel — without this, a panel left registered in
+	 * _refreshLoadingPanels through the whole compute phase would otherwise be stuck showing a
+	 * frozen "Building Activity Index" screen forever, since nothing will ever replace it.
+	 * Reuses existing l10n strings rather than adding new ones purely for this fallback.
+	 */
+	private getRefreshFailedHtml(webview: vscode.Webview): string {
+		const nonce = getNonce();
+		return `<!DOCTYPE html>
+		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
+		<head>
+			<meta charset="UTF-8" />
+			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+			${buildCspMeta(webview, nonce)}
+			<title>${l10n.t('aiEngineeringFluency')}</title>
+		</head>
+		<body style="font-family:var(--vscode-font-family);padding:24px;color:var(--vscode-foreground);">
+			<h2 style="margin:0 0 8px;">${l10n.t('statusBar.errorTooltip')}</h2>
+			<button id="retry" style="padding:6px 14px;cursor:pointer;border:none;border-radius:2px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);">${l10n.t('efficiency.error.retry')}</button>
+			<script nonce="${nonce}">
+				const vscodeApi = acquireVsCodeApi();
+				document.getElementById('retry').addEventListener('click', () => vscodeApi.postMessage({ command: 'retryRefresh' }));
+			</script>
+		</body>
+		</html>`;
+	}
+
+	/**
+	 * Shows the loading screen on `panel`, awaits a fresh updateTokenStats(), and renders the
+	 * result — success, "stay on loading" for a superseded run, or the failure/retry page.
+	 * Shared by showDetails()'s initial load and the failure page's retry button, so retrying
+	 * after a genuine failure gets the same loading feedback the first load did, instead of
+	 * sitting on the stale error page with no visible progress until the fetch finishes.
+	 */
+	private async loadDetailsIntoPanel(panel: vscode.WebviewPanel): Promise<void> {
+		this._detailsPanelIsLoading = true;
+		this._refreshLoadingPanels.add(panel);
+		this.statusBarItem.tooltip = l10n.t('statusBar.loadingInPanel');
+		panel.webview.html = this.getLoadingHtml(panel.webview, this._updateTokenStatsStartedAt ?? Date.now());
+
+		const startedAtGeneration = this._cacheGeneration;
+		const stats = await this.updateTokenStats();
+
+		if (this.detailsPanel !== panel) {
+			// panel was replaced (never disposed without going through onDidDispose, which already
+			// unconditionally deletes it from the registry) — but drop it defensively too, so a
+			// future refactor of that invariant can't leave a stale panel registered for broadcast.
+			this._refreshLoadingPanels.delete(panel);
+			return;
+		}
+		if (!stats && this.isRefreshSuperseded(startedAtGeneration)) { return; }
+		this._detailsPanelIsLoading = false;
+		if (!this._refreshLoadingPanels.has(panel)) {
+			// Already given its terminal state by someone else: a successful, non-superseded
+			// `stats` result means publishRefreshResult() already ran updateDetailsPanelIfOpen()'s
+			// non-silent branch as part of this same updateTokenStats() call — it deletes the panel
+			// from this registry right after rendering the real content. A genuine failure instead
+			// means resolveStuckLoadingPanelsAsFailed() already installed the failure page and
+			// cleared the whole registry. Either way, taking ownership of the render again here
+			// would overwrite already-current content — including any sort/tab/expansion state the
+			// user changed while evaluateAndSurfaceInsights() was awaiting an interactive toast —
+			// for no benefit.
+			return;
+		}
+		this._refreshLoadingPanels.delete(panel);
+		if (!stats) {
+			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+			return;
+		}
+		try {
+			panel.webview.html = this.getDetailsHtml(panel.webview, stats);
+			this.log('✅ Details panel HTML set successfully');
+		} catch (err) {
+			this.error('❌ Failed to set Details panel HTML', err);
+			// A real `stats` result means this run succeeded — only the render itself failed. The
+			// panel is already out of _refreshLoadingPanels by this point, so without a fallback here
+			// it would otherwise stay frozen on the loading screen (or blank, from showDetails()'s
+			// cached-stats path) with no further messages and no way to retry.
+			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+		}
+	}
+
+	/** Environmental's counterpart to loadDetailsIntoPanel() — see that method's doc comment. */
+	private async loadEnvironmentalIntoPanel(panel: vscode.WebviewPanel): Promise<void> {
+		this._refreshLoadingPanels.add(panel);
+		panel.webview.html = this.getLoadingHtml(panel.webview, this._updateTokenStatsStartedAt ?? Date.now());
+
+		const startedAtGeneration = this._cacheGeneration;
+		const stats = await this.updateTokenStats();
+
+		if (this.environmentalPanel !== panel) {
+			// See loadDetailsIntoPanel()'s identical guard: defensive-only, since onDidDispose()
+			// already unconditionally removes a disposed panel from the registry.
+			this._refreshLoadingPanels.delete(panel);
+			return;
+		}
+		if (!stats && this.isRefreshSuperseded(startedAtGeneration)) { return; }
+		if (!this._refreshLoadingPanels.has(panel)) {
+			// See loadDetailsIntoPanel()'s identical check for why: already given its terminal
+			// state by publishRefreshResult()'s own non-silent render or, on a genuine failure, by
+			// resolveStuckLoadingPanelsAsFailed() — taking ownership of the render again here would
+			// overwrite already-current content for no benefit.
+			return;
+		}
+		this._refreshLoadingPanels.delete(panel);
+		if (!stats) {
+			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+			return;
+		}
+		try {
+			panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
+		} catch (err) {
+			// See loadDetailsIntoPanel()'s identical catch for why this fallback matters.
+			this.error('❌ Failed to set Environmental panel HTML', err);
+			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+		}
+	}
+
+	/**
+	 * Resolves every panel still registered in _refreshLoadingPanels with the failure state,
+	 * for a refresh that genuinely threw (see this method's call site in _runUpdateTokenStats()).
+	 *
+	 * A panel can be sitting in this set for one of two reasons: its own showDetails()/
+	 * showEnvironmental() call is still awaiting this exact run, or an earlier run that produced
+	 * it was superseded and deliberately left the panel registered for *this* replacement to
+	 * resolve (see isRefreshSuperseded() call sites in showDetails()/showEnvironmental()) —
+	 * either way, this run failing outright means nothing else is coming to rescue it.
+	 */
+	private resolveStuckLoadingPanelsAsFailed(): void {
+		try {
+			for (const panel of this._refreshLoadingPanels) {
+				try {
+					panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+				} catch (err) {
+					this.error('❌ Failed to resolve stuck loading panel with failure HTML', err);
+				}
+				if (this.detailsPanel === panel) { this._detailsPanelIsLoading = false; }
+			}
+		} finally {
+			this._refreshLoadingPanels.clear();
+		}
+	}
+
 	public async showDetails(): Promise<void> {
 		this.log('📊 Opening Details panel');
 		this.recordViewVisit('details');
@@ -9015,6 +9529,12 @@ private computeFallbackDailyRollup(
 		);
 
 		this.log('✅ Details panel created successfully');
+		// Captured once, right after creation: the loading-registry bookkeeping and the
+		// post-await continuation below must track *this* panel specifically, not whatever
+		// `this.detailsPanel` happens to hold by the time they run — a close-then-reopen while
+		// `await this.updateTokenStats()` is still pending would otherwise let this call's
+		// continuation delete/overwrite the *replacement* panel instead of a no-op on its own.
+		const panel = this.detailsPanel;
 
 		// Track when the panel becomes active or inactive
 		this.detailsPanel.onDidChangeViewState((e) => { this.log(`📊 Details panel view state changed: active=${e.webviewPanel.active}, visible=${e.webviewPanel.visible}`); });
@@ -9027,6 +9547,12 @@ private computeFallbackDailyRollup(
 				case 'refresh':
 					await this.dispatch('refresh:details', () => this.refreshDetailsPanel());
 					break;
+				case 'retryRefresh':
+					// From getRefreshFailedHtml()'s retry button — unlike plain 'refresh' above,
+					// this shows the loading screen (with real progress) while it retries, instead
+					// of leaving the failure page up with no feedback until it finishes.
+					await this.dispatch('retryRefresh:details', () => this.loadDetailsIntoPanel(panel));
+					break;
 				case 'saveSortSettings':
 					await this.dispatch('saveSortSettings:details', () =>
 						this.context.globalState.update('details.sortSettings', message.settings)
@@ -9038,32 +9564,34 @@ private computeFallbackDailyRollup(
 		// Handle panel disposal
 		this.detailsPanel.onDidDispose(() => {
 			this.log('📊 Details panel closed');
-			this.detailsPanel = undefined;
-			this._detailsPanelIsLoading = false;
+			// Always remove this specific panel from the registry, but only clear the tracked
+			// fields when they still point at it — a stale dispose callback for a panel that has
+			// already been replaced (this.detailsPanel !== panel) must not clear the replacement's
+			// own state out from under its own, still-in-flight showDetails() call.
+			this._refreshLoadingPanels.delete(panel);
+			if (this.detailsPanel === panel) {
+				this.detailsPanel = undefined;
+				this._detailsPanelIsLoading = false;
+			}
 		});
 
 		// Use cached stats if available, otherwise show loading screen while calculating
-		let stats = this.currentDetailedStats;
+		const stats = this.currentDetailedStats;
 		if (!stats) {
 			this.log('No cached stats — showing loading screen while calculating...');
-			this._detailsPanelIsLoading = true;
-			this.statusBarItem.tooltip = l10n.t('statusBar.loadingInPanel');
-			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview, this._updateTokenStatsStartedAt ?? Date.now());
-
-			stats = await this.updateTokenStats();
-
-			this._detailsPanelIsLoading = false;
-			if (!stats || !this.detailsPanel) {
-				return;
-			}
+			await this.loadDetailsIntoPanel(panel);
+			return;
 		}
 
 		// Set the HTML content
 		try {
-			this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, stats);
+			panel.webview.html = this.getDetailsHtml(panel.webview, stats);
 			this.log('✅ Details panel HTML set successfully');
 		} catch (err) {
+			// See loadDetailsIntoPanel()'s identical catch: without this fallback the panel would be
+			// left blank forever (this branch never painted a loading screen first) with no retry.
 			this.error('❌ Failed to set Details panel HTML', err);
+			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
 		}
 	}
 
@@ -9101,21 +9629,44 @@ private computeFallbackDailyRollup(
 						this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, refreshed);
 					}
 				});
+			} else if (message.command === 'retryRefresh') {
+				// From getRefreshFailedHtml()'s retry button — unlike plain 'refresh' above, this
+				// shows the loading screen (with real progress) while it retries, instead of
+				// leaving the failure page up with no feedback until it finishes.
+				await this.dispatch('retryRefresh:environmental', () => this.loadEnvironmentalIntoPanel(panel));
 			}
 		});
 
 		this.environmentalPanel.onDidDispose(() => {
 			this.log('🌿 Environmental Impact view closed');
-			this.environmentalPanel = undefined;
+			// Same guard as showDetails()'s dispose handler: a stale callback for an
+			// already-replaced panel (this.environmentalPanel !== panel) must not clear the
+			// replacement's own tracked reference.
+			this._refreshLoadingPanels.delete(panel);
+			if (this.environmentalPanel === panel) { this.environmentalPanel = undefined; }
 		});
 
 		const panel = this.environmentalPanel;
-		panel.webview.html = this.getLoadingHtml(panel.webview);
-		void (async () => {
-			const stats = this.currentDetailedStats ?? await this.updateTokenStats();
-			if (this.environmentalPanel !== panel || !stats) { return; }
-			panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
-		})();
+		if (this.currentDetailedStats) {
+			// Cached stats exist — updateTokenStats() below is a no-op (see the ?? short-circuit),
+			// so this loading screen is only ever painted for an instant before being replaced and
+			// never needs to receive progress messages.
+			panel.webview.html = this.getLoadingHtml(panel.webview);
+			void (async () => {
+				const stats = this.currentDetailedStats;
+				if (this.environmentalPanel !== panel || !stats) { return; }
+				try {
+					panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
+				} catch (err) {
+					// See loadDetailsIntoPanel()'s identical catch: without this fallback the panel
+					// would be left frozen on the loading screen forever, with no retry.
+					this.error('❌ Failed to set Environmental panel HTML', err);
+					panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+				}
+			})();
+		} else {
+			void this.loadEnvironmentalIntoPanel(panel);
+		}
 	}
 
 	private getEnvironmentalHtml(webview: vscode.Webview, stats: DetailedStats): string {
@@ -9216,7 +9767,9 @@ private computeFallbackDailyRollup(
 		// before the calculation finishes, the reopen would be silently dropped as "already in flight".
 		if (!hasFullData) {
 			void (async () => {
-				const fullStats = await this.calculateDailyStats();
+				// Tracked (not just detached) so clearCache() can wait it out — see
+				// _pendingFullYearBackfills' own doc comment.
+				const fullStats = await this.trackFullYearBackfill(this.calculateDailyStats());
 				if (this.chartPanel) {
 					void this.chartPanel.webview.postMessage({
 						command: 'updateChartData',
@@ -10176,8 +10729,10 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 
 		this.log('🔄 Refreshing Chart view');
-		// Refresh the full-year daily stats so week/month period views are up to date
-		await this.calculateDailyStats();
+		// Refresh the full-year daily stats so week/month period views are up to date. Tracked (not
+		// just awaited locally) so a concurrent clearCache() can wait it out too — see
+		// _pendingFullYearBackfills' own doc comment.
+		await this.trackFullYearBackfill(this.calculateDailyStats());
 		// Refresh all stats so the status bar and tooltip stay in sync
 		await this.updateTokenStats();
 		this.log('✅ Chart view refreshed');
@@ -11097,6 +11652,20 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	} as const;
 
 	/**
+	 * Percentages the main updateTokenStats() refresh reports for its own compute sub-steps,
+	 * mirroring EFFICIENCY_STEP_PCT above. Parsing owns everything below the first of these
+	 * (see loadingHtml.ts's 85%/compute-phase split); without sub-steps here the bar parked at
+	 * a fixed 96% for the whole compute phase on any panel (Environmental) that doesn't swap
+	 * away from the loading screen until this run fully returns. Stops at `fluency`: Details/
+	 * Environmental are published right after that step (see publishRefreshResult()), before
+	 * evaluateAndSurfaceInsights() — which can await an interactive toast — ever runs, so a
+	 * fourth "finalizing insights" sub-step would never actually be seen on a loading screen.
+	 */
+	private static readonly REFRESH_STEP_PCT = {
+		stats: 88, analysis: 92, fluency: 96,
+	} as const;
+
+	/**
 	 * The Efficiency panel's failure state.
 	 *
 	 * Every path that swaps in the loading screen needs somewhere to land when the build
@@ -11195,10 +11764,12 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				() => [...seen].map(name => ({ icon: this.getEditorIconForLoader(name), name })),
 				send,
 			);
-			dailyStats = await this.calculateDailyStats(365, undefined, (completed, total, editors) => {
+			// Tracked (not just awaited locally) so a concurrent clearCache() can wait it out too —
+			// see _pendingFullYearBackfills' own doc comment.
+			dailyStats = await this.trackFullYearBackfill(this.calculateDailyStats(365, undefined, (completed, total, editors) => {
 				seen = editors;
 				report(completed, total);
-			});
+			}));
 			// Announced *after* the walk, not before it. Before, it would pin the bar above
 			// parsing's band and freeze it for the whole parse; after, it is a step up from 85%
 			// and the phase the PR advertises is shown on the cold open too, not only when the
@@ -14794,14 +15365,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     // We can't await here since dispose() is synchronous
     //
     // Must skip this save in sample-data mode, same as persistRefreshResult() does before its own
-    // saveCacheToStorage() call: if the Extension Development Host closes while
+    // trySaveCacheToStorage() call: if the Extension Development Host closes while
     // runLocalViewRegression() is still mid-flight (fixture entries already in cacheManager.cache,
     // but its own finally block hasn't evicted them yet), this unconditional save would otherwise
     // persist fixture data into the developer's real, shared production snapshot.
     if (!this.isSampleDataModeActive()) {
       void (async () => {
         try {
-          await this.saveCacheToStorage();
+          await this.trySaveCacheToStorage();
         } catch (err) {
           // Output channel will be disposed, so log to console as fallback
           console.error("Error saving cache during disposal:", err);

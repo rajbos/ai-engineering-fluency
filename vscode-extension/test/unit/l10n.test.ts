@@ -393,6 +393,17 @@ test('l10n: efficiency loading step labels resolve in English', () => {
 	}
 });
 
+test('l10n: main refresh loading step labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'loading.refresh.calculatingStats': 'Calculating usage statistics…',
+		'loading.refresh.analyzingUsage': 'Analysing usage patterns…',
+		'loading.refresh.scoringFluency': 'Scoring AI fluency…',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
 // Diagnostics — Mistral Cloud (Beta) tab (PR #2057 follow-up) — guards against
 // raw English literals resurfacing in the new tab for non-English locales.
 test('l10n: Mistral Cloud tab labels resolve in English', () => {
@@ -506,6 +517,22 @@ test('l10n: efficiency loading step labels resolve in zh-cn', () => {
 			'efficiency.error.title': '无法构建效率视图',
 			'efficiency.error.retry': '重试',
 			'efficiency.error.staleAfterClear': '构建此视图时缓存数据已被清除。',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: main refresh loading step labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'loading.refresh.calculatingStats': '正在计算使用统计…',
+			'loading.refresh.analyzingUsage': '正在分析使用模式…',
+			'loading.refresh.scoringFluency': '正在评估 AI 熟练度…',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
