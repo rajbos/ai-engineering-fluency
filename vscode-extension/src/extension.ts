@@ -9069,10 +9069,60 @@ private computeFallbackDailyRollup(
 			<button id="retry" style="padding:6px 14px;cursor:pointer;border:none;border-radius:2px;background:var(--vscode-button-background);color:var(--vscode-button-foreground);">${l10n.t('efficiency.error.retry')}</button>
 			<script nonce="${nonce}">
 				const vscodeApi = acquireVsCodeApi();
-				document.getElementById('retry').addEventListener('click', () => vscodeApi.postMessage({ command: 'refresh' }));
+				document.getElementById('retry').addEventListener('click', () => vscodeApi.postMessage({ command: 'retryRefresh' }));
 			</script>
 		</body>
 		</html>`;
+	}
+
+	/**
+	 * Shows the loading screen on `panel`, awaits a fresh updateTokenStats(), and renders the
+	 * result — success, "stay on loading" for a superseded run, or the failure/retry page.
+	 * Shared by showDetails()'s initial load and the failure page's retry button, so retrying
+	 * after a genuine failure gets the same loading feedback the first load did, instead of
+	 * sitting on the stale error page with no visible progress until the fetch finishes.
+	 */
+	private async loadDetailsIntoPanel(panel: vscode.WebviewPanel): Promise<void> {
+		this._detailsPanelIsLoading = true;
+		this._refreshLoadingPanels.add(panel);
+		this.statusBarItem.tooltip = l10n.t('statusBar.loadingInPanel');
+		panel.webview.html = this.getLoadingHtml(panel.webview, this._updateTokenStatsStartedAt ?? Date.now());
+
+		const startedAtGeneration = this._cacheGeneration;
+		const stats = await this.updateTokenStats();
+
+		if (this.detailsPanel !== panel) { return; }
+		if (!stats && this.isRefreshSuperseded(startedAtGeneration)) { return; }
+		this._detailsPanelIsLoading = false;
+		this._refreshLoadingPanels.delete(panel);
+		if (!stats) {
+			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+			return;
+		}
+		try {
+			panel.webview.html = this.getDetailsHtml(panel.webview, stats);
+			this.log('✅ Details panel HTML set successfully');
+		} catch (err) {
+			this.error('❌ Failed to set Details panel HTML', err);
+		}
+	}
+
+	/** Environmental's counterpart to loadDetailsIntoPanel() — see that method's doc comment. */
+	private async loadEnvironmentalIntoPanel(panel: vscode.WebviewPanel): Promise<void> {
+		this._refreshLoadingPanels.add(panel);
+		panel.webview.html = this.getLoadingHtml(panel.webview, this._updateTokenStatsStartedAt ?? Date.now());
+
+		const startedAtGeneration = this._cacheGeneration;
+		const stats = await this.updateTokenStats();
+
+		if (this.environmentalPanel !== panel) { return; }
+		if (!stats && this.isRefreshSuperseded(startedAtGeneration)) { return; }
+		this._refreshLoadingPanels.delete(panel);
+		if (!stats) {
+			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+			return;
+		}
+		panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
 	}
 
 	/**
@@ -9141,6 +9191,12 @@ private computeFallbackDailyRollup(
 				case 'refresh':
 					await this.dispatch('refresh:details', () => this.refreshDetailsPanel());
 					break;
+				case 'retryRefresh':
+					// From getRefreshFailedHtml()'s retry button — unlike plain 'refresh' above,
+					// this shows the loading screen (with real progress) while it retries, instead
+					// of leaving the failure page up with no feedback until it finishes.
+					await this.dispatch('retryRefresh:details', () => this.loadDetailsIntoPanel(panel));
+					break;
 				case 'saveSortSettings':
 					await this.dispatch('saveSortSettings:details', () =>
 						this.context.globalState.update('details.sortSettings', message.settings)
@@ -9164,38 +9220,11 @@ private computeFallbackDailyRollup(
 		});
 
 		// Use cached stats if available, otherwise show loading screen while calculating
-		let stats = this.currentDetailedStats;
+		const stats = this.currentDetailedStats;
 		if (!stats) {
 			this.log('No cached stats — showing loading screen while calculating...');
-			this._detailsPanelIsLoading = true;
-			this._refreshLoadingPanels.add(panel);
-			this.statusBarItem.tooltip = l10n.t('statusBar.loadingInPanel');
-			panel.webview.html = this.getLoadingHtml(panel.webview, this._updateTokenStatsStartedAt ?? Date.now());
-
-			const startedAtGeneration = this._cacheGeneration;
-			stats = await this.updateTokenStats();
-
-			// this.detailsPanel !== panel catches a close-then-reopen during the await above:
-			// this call's result belongs to a panel that's gone, and the replacement's own
-			// showDetails() call owns rendering it — nothing to do here either way.
-			if (this.detailsPanel !== panel) {
-				return;
-			}
-			if (!stats && this.isRefreshSuperseded(startedAtGeneration)) {
-				// A cache clear invalidated this run while it was in flight, not a genuine
-				// failure — whatever triggered the clear already starts a fresh refresh, which
-				// will call updateDetailsPanelIfOpen() and render real content here once it
-				// completes. Stay on the loading screen (still registered in
-				// _refreshLoadingPanels, so its progress keeps landing) instead of flashing an
-				// error page for a run that was deliberately discarded, not failed.
-				return;
-			}
-			this._detailsPanelIsLoading = false;
-			this._refreshLoadingPanels.delete(panel);
-			if (!stats) {
-				panel.webview.html = this.getRefreshFailedHtml(panel.webview);
-				return;
-			}
+			await this.loadDetailsIntoPanel(panel);
+			return;
 		}
 
 		// Set the HTML content
@@ -9241,6 +9270,11 @@ private computeFallbackDailyRollup(
 						this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, refreshed);
 					}
 				});
+			} else if (message.command === 'retryRefresh') {
+				// From getRefreshFailedHtml()'s retry button — unlike plain 'refresh' above, this
+				// shows the loading screen (with real progress) while it retries, instead of
+				// leaving the failure page up with no feedback until it finishes.
+				await this.dispatch('retryRefresh:environmental', () => this.loadEnvironmentalIntoPanel(panel));
 			}
 		});
 
@@ -9259,29 +9293,14 @@ private computeFallbackDailyRollup(
 			// so this loading screen is only ever painted for an instant before being replaced and
 			// never needs to receive progress messages.
 			panel.webview.html = this.getLoadingHtml(panel.webview);
+			void (async () => {
+				const stats = this.currentDetailedStats;
+				if (this.environmentalPanel !== panel || !stats) { return; }
+				panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
+			})();
 		} else {
-			// No stats yet: this panel is about to await the same updateTokenStats() run Details
-			// waits on below, so it joins the same broadcast — see _refreshLoadingPanels.
-			this._refreshLoadingPanels.add(panel);
-			panel.webview.html = this.getLoadingHtml(panel.webview, this._updateTokenStatsStartedAt ?? Date.now());
+			void this.loadEnvironmentalIntoPanel(panel);
 		}
-		void (async () => {
-			const startedAtGeneration = this._cacheGeneration;
-			const stats = this.currentDetailedStats ?? await this.updateTokenStats();
-			if (this.environmentalPanel !== panel) { return; }
-			if (!stats && this.isRefreshSuperseded(startedAtGeneration)) {
-				// Same reasoning as showDetails(): a cache clear discarded this run, not a
-				// genuine failure. Stay on the loading screen (still registered in
-				// _refreshLoadingPanels) for the fresh refresh already under way to render into.
-				return;
-			}
-			this._refreshLoadingPanels.delete(panel);
-			if (!stats) {
-				panel.webview.html = this.getRefreshFailedHtml(panel.webview);
-				return;
-			}
-			panel.webview.html = this.getEnvironmentalHtml(panel.webview, stats);
-		})();
 	}
 
 	private getEnvironmentalHtml(webview: vscode.Webview, stats: DetailedStats): string {
