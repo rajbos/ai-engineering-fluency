@@ -57,31 +57,32 @@ notes inline and the final step.
    field). Non-MCP equivalent: `GET /repos/{owner}/{repo}/pulls/{pull_number}`
    (or `gh api repos/{owner}/{repo}/pulls/{pull_number}`), read `.head.sha`.
 2. **Fetch check runs for `sha`** and find the one named exactly
-   `copilot-pull-request-reviewer`. This response is paginated too — a PR
-   with enough checks can fill one page without including it, which would
-   wrongly land on the "absent entirely" row below. Page through with
-   `page`/`perPage` (max `perPage`, capped at a sane number of pages, same
-   bound as step 4) before deciding it's really absent — and pagination must
-   actually **finish** to draw that conclusion: it finishes when a page comes
-   back with fewer results than requested (a genuine last page), not merely
-   when the page cap is reached. Hitting the cap without a short final page
-   means the search was inconclusive, not that the check run is absent —
-   treat that the same as **not yet started** (reschedule; don't conclude
-   "no findings").
-   The two ways to do this differ in scoping — know which one you're calling:
-   - `mcp__github__pull_request_read` with `method: "get_check_runs"` is
-     **PR-scoped, not SHA-scoped**: it has no SHA parameter and always reads
-     check runs for whatever the PR's head is *at call time*. If a push can
-     have landed between steps 1 and 2, re-fetch `head.sha` right after this
-     call and restart from step 1 if it changed, so the rest of this
-     algorithm reasons about one consistent `sha`.
-   - The raw REST equivalent, for non-MCP tooling, **is SHA-scoped** and
-     avoids this race entirely by construction:
+   `copilot-pull-request-reviewer`. Two ways to do this, pick one as your
+   primary flow rather than treating the scoping difference as a footnote:
+   - **Preferred: the raw REST endpoint, SHA-scoped by construction** —
      `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`
      (or `gh api --paginate repos/{owner}/{repo}/commits/{sha}/check-runs`),
-     called with the exact `sha` from step 1. Prefer this form when you can
-     choose, since it makes the re-check above unnecessary. It's still
-     paginated (`per_page`/`page`), so apply the same page cap.
+     called with the exact `sha` from step 1. Because you pass `sha`
+     explicitly, there's no race to guard against here.
+   - **If you can only use the MCP tool**:
+     `mcp__github__pull_request_read` with `method: "get_check_runs"` — but
+     this method is **PR-scoped, not SHA-scoped** (no SHA parameter; it
+     always reads check runs for whatever the PR's head is *at call time*).
+     Treat the re-check as part of this flow, not optional: immediately
+     after this call, re-fetch `head.sha` and restart from step 1 if it
+     changed, so the rest of the algorithm reasons about one consistent
+     `sha`.
+   Either way, the response is paginated too — a PR with enough checks can
+   fill one page without including the run you want, which would wrongly
+   land on the "absent entirely" row below. Page through with `page`/
+   `perPage` (max `perPage`, capped at a sane number of pages, same bound as
+   step 4) before deciding it's really absent — and pagination must actually
+   **finish** to draw that conclusion: it finishes when a page comes back
+   with fewer results than requested (a genuine last page), not merely when
+   the page cap is reached. Hitting the cap without a short final page means
+   the search was inconclusive, not that the check run is absent — treat
+   that the same as **not yet started** (reschedule; don't conclude "no
+   findings").
 3. **Decide from its state:**
 
    | State | Meaning | What to do |
