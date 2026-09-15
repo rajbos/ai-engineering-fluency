@@ -98,6 +98,9 @@ export interface Semaphore {
  * by however many happened to be parked.
  */
 export function createSemaphore(permits: number): Semaphore {
+  if (!Number.isFinite(permits) || !Number.isInteger(permits) || permits < 0) {
+    throw new RangeError('createSemaphore permits must be a finite non-negative integer');
+  }
   let available = permits;
   const waiters: Array<(acquired: boolean) => void> = [];
   return {
