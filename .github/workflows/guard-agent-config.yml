@@ -65,7 +65,9 @@ jobs:
           fi
 
           echo "Protected paths in this PR:"
-          echo "$protected" | sed 's/^/  /'
+          while IFS= read -r path; do
+            echo "  $path"
+          done <<< "$protected"
           echo
 
           # Who wrote it? Commit author is useless here: an agent running with
@@ -73,14 +75,16 @@ jobs:
           # The co-author trailer and the branch prefix are what actually differ.
           signal=""
           case "$HEAD_REF" in
-            claude/*|copilot/*|agent-review/*) signal="branch prefix '${HEAD_REF%%/*}/'" ;;
+            claude/*|copilot/*|agent-review/*) signal="branch prefix ${HEAD_REF%%/*}/" ;;
           esac
-          case "$PR_AUTHOR" in
-            *'[bot]'|Copilot|copilot-swe-agent) signal="${signal:-PR author '$PR_AUTHOR'}" ;;
-          esac
-          if git log "origin/$BASE_REF..HEAD" --format='%b' \
+          if [ -z "$signal" ]; then
+            case "$PR_AUTHOR" in
+              *'[bot]'|Copilot|copilot-swe-agent) signal="PR author $PR_AUTHOR" ;;
+            esac
+          fi
+          if [ -z "$signal" ] && git log "origin/$BASE_REF..HEAD" --format='%b' \
               | grep -qiE '^co-authored-by: *(claude|copilot)'; then
-            signal="${signal:-AI co-author trailer}"
+            signal="AI co-author trailer"
           fi
 
           if [ -z "$signal" ]; then
