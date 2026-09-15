@@ -979,6 +979,78 @@ test('writeSharedSnapshot() aborts instead of persisting when clearAllCachedData
 	assert.ok(!entries || !('/b.json' in entries), 'the cleared cache must not be resurrected with data captured before the clear');
 });
 
+// A follow-up Copilot review found that checkClearEpoch() (the cross-window counterpart to
+// clearAllCachedData() above) dropped the in-memory cache and adopted the new epoch, but never
+// bumped cacheClearGeneration — so an in-flight writeSharedSnapshot() that had already passed its
+// own first checkClearEpoch() check, and is now mid-buildMergedSnapshotEntries(), would find its
+// own local clearEpoch already caught up by the time it re-checks, see no NEW clear, and still
+// abort-check only against an unchanged generation. checkClearEpoch() now bumps the same
+// generation counter, so this race aborts the same way the same-window one above does.
+test('writeSharedSnapshot() aborts when checkClearEpoch() detects a peer clear mid-write, via the generation bump', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot(); // publish once, so there is pre-clear content on disk to resurrect
+
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+
+	const originalReadFile = fs.promises.readFile;
+	let intercepted = false;
+	(fs.promises as any).readFile = async (...args: unknown[]) => {
+		const result = await (originalReadFile as (...a: unknown[]) => Promise<unknown>).apply(fs.promises, args);
+		// Simulate a peer window's clear landing, and a concurrent task on this same instance (e.g.
+		// loadSharedSnapshotIfChanged() on its own refresh timer) noticing it via checkClearEpoch(),
+		// exactly while this write is reading the on-disk snapshot it's about to merge with.
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			const peer = makeManager(dir);
+			await peer.deleteSharedSnapshot();
+			await m.loadSharedSnapshotIfChanged();
+		}
+		return result;
+	};
+	let persisted: boolean;
+	try {
+		persisted = await m.writeSharedSnapshot();
+	} finally {
+		(fs.promises as any).readFile = originalReadFile;
+	}
+	assert.equal(persisted, false,
+		'a write racing a concurrently-detected peer clear must abort rather than resurrect pre-clear data');
+	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(!entries || !('/a.json' in entries),
+		'the peer\'s clear must not be undone by a write that only learned of it through the generation bump, not its own epoch check');
+});
+
+// The same review also found bumpClearEpochLocked()'s monotonic floor only used the freshly-read
+// `persisted` value, not this window's own already-known `clearEpoch` — so a corrupt/missing marker
+// (readClearEpoch() fails open to 0) combined with a backward clock step could write a regressing
+// epoch that a peer who already observed the higher value would fail to recognize as new.
+test('bumpClearEpochLocked() floors on the local epoch too, so a corrupt marker plus a backward clock cannot regress it', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	await m.deleteSharedSnapshot();
+	const firstEpoch = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+
+	// Corrupt the marker so the next read fails open to 0, and force the clock backward below the
+	// already-known epoch — the compound condition the fix targets.
+	fs.writeFileSync(m.getClearEpochPath(), 'not json');
+	const originalNow = Date.now;
+	Date.now = () => 1;
+	try {
+		await m.deleteSharedSnapshot();
+	} finally {
+		Date.now = originalNow;
+	}
+
+	const secondEpoch = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+	assert.ok(secondEpoch > firstEpoch,
+		`a corrupt marker plus a backward clock must still floor on this window's own already-known epoch (${firstEpoch}), not regress to ${secondEpoch}`);
+});
+
 test('clearCache()-style sequence (clearAllCachedData + awaitInFlightCheckpoint + deleteSharedSnapshot) is not resurrected by a slow in-flight checkpoint', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);

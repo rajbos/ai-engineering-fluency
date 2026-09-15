@@ -947,12 +947,17 @@ export class CacheManager {
 	 * peer that never sees the new file falls back to the same-process protections that already
 	 * existed (this is a strict addition, not a replacement for them).
 	 *
-	 * The new epoch is `max(Date.now(), persisted + 1)`, not a bare timestamp: two clears close
-	 * together (this window twice, or racing a peer's own clear) must never produce the same or a
-	 * lower value — checkClearEpoch()'s `persisted <= this.clearEpoch` comparison would silently
-	 * treat a non-advancing epoch as "no clear happened". A bare `Date.now()` can fail to advance
-	 * across two back-to-back calls (millisecond-granularity clock, or a backward NTP/VM time step),
-	 * so the floor is always one past whatever is already on disk.
+	 * The new epoch is `max(Date.now(), persisted + 1, this.clearEpoch + 1)`, not a bare timestamp:
+	 * two clears close together (this window twice, or racing a peer's own clear) must never
+	 * produce the same or a lower value — checkClearEpoch()'s `persisted <= this.clearEpoch`
+	 * comparison would silently treat a non-advancing epoch as "no clear happened". A bare
+	 * `Date.now()` can fail to advance across two back-to-back calls (millisecond-granularity
+	 * clock, or a backward NTP/VM time step), so the floor is always one past whatever is already
+	 * on disk — and also one past whatever THIS window already knows (`this.clearEpoch`), not just
+	 * the freshly-read `persisted` value: if the marker is missing/corrupt at the moment of this
+	 * read (readClearEpoch() fails open to 0) while this window has already observed a real,
+	 * higher epoch from an earlier bump or a peer's, flooring on `persisted` alone could write a
+	 * regressing epoch that a peer already past that higher value would fail to recognize as new.
 	 *
 	 * The read-then-write is itself a race across windows (two peers could both read the same
 	 * persisted value before either writes), so the caller must already hold the cache lock — the
@@ -964,7 +969,7 @@ export class CacheManager {
 	private async bumpClearEpochLocked(): Promise<void> {
 		const epochPath = this.getClearEpochPath();
 		const persisted = await this.readClearEpoch();
-		const newEpoch = Math.max(Date.now(), persisted + 1);
+		const newEpoch = Math.max(Date.now(), persisted + 1, this.clearEpoch + 1);
 		const tmpPath = `${epochPath}.${process.pid}.${newEpoch}.tmp`;
 		try {
 			await fs.promises.mkdir(path.dirname(epochPath), { recursive: true });
@@ -985,6 +990,16 @@ export class CacheManager {
 	 * Cheap — one small file read — and meant to be called once per publish/refresh cycle (see
 	 * `writeSharedSnapshot()` and `loadSharedSnapshotIfChanged()`), never per parsed file.
 	 *
+	 * Also bumps `cacheClearGeneration`, the same in-memory counter clearAllCachedData() bumps: a
+	 * detected clear here can land WHILE a same-process writeSharedSnapshot() is still mid-flight —
+	 * already past its own first checkClearEpoch() check, and off building `entries` from the
+	 * sessionFileCache Map this call is about to replace. That writer's own generation check would
+	 * otherwise see nothing wrong (this call's epoch update alone doesn't touch the generation it
+	 * compares against), pass, and rename pre-clear entries built from the map this call just
+	 * abandoned. Bumping the generation here forces that in-flight write to abort like any other
+	 * clear does, regardless of which of the two signals (generation or epoch) it happens to be
+	 * mid-checking.
+	 *
 	 * Returns true if a newer epoch was found and the in-memory cache was dropped.
 	 */
 	private async checkClearEpoch(): Promise<boolean> {
@@ -996,6 +1011,7 @@ export class CacheManager {
 		this.sessionFileCache = new Map();
 		this.deletedFilePaths = new Map();
 		this.clearEpoch = persisted;
+		this.cacheClearGeneration++;
 		// Without this, a post-clear snapshot recreated with an mtime at or below this bookmark
 		// (coarse or backward-moving filesystem clocks — the same clocks the cross-window tests
 		// above already account for) would make loadSharedSnapshotIfChanged()'s own mtime check
