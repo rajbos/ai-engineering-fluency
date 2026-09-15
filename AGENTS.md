@@ -137,6 +137,36 @@ To check if data is available:
 [ -f ./usage-data/usage-agg-daily.json ] && echo "Aggregated data available"
 ```
 
+### Code knowledge graph (graphify)
+
+`copilot-setup-steps.yml` also builds a graphify knowledge graph of the repository's
+code before the agent starts, at **`.graphify-agent/graph.json`** (~9,200 nodes /
+~21,900 edges). This one needs no secrets — it is local AST parsing (`--code-only`),
+so it is present on every coding agent run.
+
+Query it instead of fanning `grep`/read across the tree when the question is
+structural — what calls a symbol, what a change reaches, how two areas connect:
+
+```bash
+export GRAPHIFY_OUT=.graphify-agent          # or pass --graph .graphify-agent/graph.json
+
+graphify query "how does the CLI attribute per-model cost"   # BFS context for a question
+graphify explain "getModelUsageFromSession"                  # one node and its neighbors
+graphify affected "src/tokenEstimation.ts"                   # reverse traversal: blast radius
+graphify path "extension.ts" "modelPricing.json"             # shortest path between two nodes
+```
+
+Notes:
+- The graph covers **code only**. Docs, PDFs and images are skipped — semantic
+  extraction needs an LLM backend and an API key, which this setup deliberately
+  does not use. Read docs directly.
+- It is a snapshot from setup time. After large edits, refresh with
+  `GRAPHIFY_OUT=.graphify-agent graphify update .` (also LLM-free).
+- Never build into the default `graphify-out/` — that directory's `manifest.json`
+  and `cache/` are committed, and a newer graphify prunes them as a stale version.
+- If `.graphify-agent/graph.json` is missing the build failed; fall back to
+  ordinary file search.
+
 ## Keep Claude Code's Mirrored Agents & Skills in Sync
 
 This repo also ships Claude Code equivalents of the Copilot customizations below, kept as separate files because the two tools use different formats/locations:

@@ -66,6 +66,45 @@ jobs:
           cd vscode-extension && npm ci --ignore-scripts
           cd ../cli && npm ci --ignore-scripts
 
+      # Build a queryable code knowledge graph (graphify) so the agent can ask
+      # structural questions - what calls X, what a change to Y reaches - instead
+      # of fanning grep/read out across ~600 source files. `--code-only` is local
+      # AST parsing: no LLM backend, no API key, no login. ~20s on this repo.
+      - name: Set up Python for graphify
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.x'
+
+      - name: Install graphify
+        run: |
+          pip install "graphifyy==0.9.61"
+          # setup-python only puts its bin dir on PATH for later workflow steps,
+          # not for the shell Copilot gets once setup finishes. Symlink into
+          # /usr/local/bin so the agent can just run `graphify`.
+          sudo ln -sf "$(command -v graphify)" /usr/local/bin/graphify
+          graphify --version
+
+      - name: Build code knowledge graph
+        # Non-blocking: if graphify breaks, the agent should still start and fall
+        # back to plain file search. The step still goes red so it stays visible
+        # rather than silently exiting 0.
+        continue-on-error: true
+        env:
+          # Write every artifact to .graphify-agent/ (gitignored) instead of the
+          # default graphify-out/. The repo commits graphify-out/manifest.json and
+          # a v0.9.27 AST cache; a newer graphify rewrites the manifest and prunes
+          # that cache as a stale version, leaving ~180 tracked deletions in
+          # `git status` for the agent to commit by accident.
+          GRAPHIFY_OUT: .graphify-agent
+        run: |
+          graphify extract . --code-only --no-viz
+
+          if [ -f .graphify-agent/graph.json ]; then
+            echo "Code graph ready: .graphify-agent/graph.json ($(du -h .graphify-agent/graph.json | cut -f1))"
+          else
+            echo "::warning::graphify wrote no graph.json - the agent will fall back to plain file search"
+          fi
+
       # Download session log files from Azure Blob Storage (optional)
       # This step only runs if Azure Storage credentials are configured in the `copilot` environment
       - name: Download Copilot session logs from Azure Blob Storage
