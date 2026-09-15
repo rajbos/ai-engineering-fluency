@@ -491,6 +491,25 @@ test('sample-data mode never writes to the shared on-disk cache snapshot: neithe
 		'dispose() must also skip its shutdown saveCacheToStorage() call in sample-data mode, same as persistRefreshResult()');
 });
 
+test('persistRefreshResult() tracks its detached end-of-refresh save so _runUpdateTokenStats() can await it before releasing the refresh-leader lock', () => {
+	const persistBody = extractBracesBlock(EXTENSION_SRC, 'private persistRefreshResult(isLeader: boolean): void {');
+	assert.ok(persistBody.includes('this._pendingLeaderSnapshotSave = (async () => {'),
+		'must assign the detached save to _pendingLeaderSnapshotSave instead of a bare `void (async () => {...})()` — otherwise nothing can observe when it settles');
+
+	// A second window winning the refresh-leader lock while this window's own end-of-refresh save
+	// is still mid-flight can publish its own snapshot first; this window's stale save landing
+	// afterward would then merge pre-existing (same-mtime) data back on top of it. Awaiting the
+	// tracked save before releasing the lock closes that window.
+	const updateBody = extractBracesBlock(EXTENSION_SRC, 'private async _runUpdateTokenStats(silent: boolean): Promise<DetailedStats | undefined> {');
+	const finallyIndex = updateBody.indexOf('} finally {');
+	const awaitSaveIndex = updateBody.indexOf('await this._pendingLeaderSnapshotSave;');
+	const releaseLockIndex = updateBody.indexOf('await this.cacheManager.releaseRefreshLock();');
+	assert.ok(finallyIndex !== -1 && awaitSaveIndex !== -1 && releaseLockIndex !== -1,
+		'_runUpdateTokenStats() must await _pendingLeaderSnapshotSave before releasing the refresh lock in its finally block');
+	assert.ok(finallyIndex < awaitSaveIndex && awaitSaveIndex < releaseLockIndex,
+		'must await the pending snapshot save (inside the finally block) before releasing the refresh-leader lock, not after — releasing first would let a second window become leader and publish while this window\'s save is still in flight');
+});
+
 test('runLocalViewRegression() evicts its own session files from the cache when it finishes, only when bundled fixtures were used', () => {
 	// Skipping the on-disk save (see the sample-data-mode test above) does not stop a regression
 	// pass from writing fixture entries into the IN-MEMORY cache — computeRegressionStats() runs
@@ -575,6 +594,15 @@ test('clearCache() waits for in-flight deferred parses before clearing, so a str
 	const preClearRefreshIndex = body.indexOf('const preClearRefresh = this._updateTokenStatsInFlight;');
 	assert.ok(preClearRefreshIndex !== -1 && preClearRefreshIndex < awaitDeferredIndex,
 		'must wait out any pre-existing in-flight updateTokenStats() run before awaiting deferred parses — otherwise a foreground worker still on its ordinary (non-deferred) pass over a file could call setCachedSessionData() after the clear');
+
+	// awaitAllDeferredParses() can await real, I/O-bound parses, which yields to the event loop for
+	// real time — long enough for an unrelated timer-triggered refresh to start and populate
+	// _updateTokenStatsInFlight with a run a single, non-looped pass would never have captured. Both
+	// waits must therefore sit inside a loop that only exits once one full pass finds nothing left
+	// outstanding, not run once each.
+	const loopIndex = body.indexOf('while (this._updateTokenStatsInFlight || this._deferredSessionPreloadPromises.size > 0) {');
+	assert.ok(loopIndex !== -1 && loopIndex < preClearRefreshIndex && preClearRefreshIndex < awaitDeferredIndex,
+		'must loop the in-flight-refresh wait and awaitAllDeferredParses() together until a full pass finds nothing left to wait for — a single pass of each can miss a refresh that starts while the other is still awaiting real I/O');
 });
 
 test('deferSessionPreloadRefresh() tracks each deferred parse\'s settle promise for awaitAllDeferredParses() to await, and untracks it once settled', () => {

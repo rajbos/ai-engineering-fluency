@@ -1137,6 +1137,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// In-flight updateTokenStats promise — coalesces concurrent callers onto the same run
 	private _updateTokenStatsInFlight: Promise<DetailedStats | undefined> | undefined;
 	/**
+	 * persistRefreshResult()'s detached end-of-refresh snapshot save for the leader cycle currently
+	 * finishing up, if any. _runUpdateTokenStats() awaits this in its `finally` before releasing the
+	 * refresh-leader lock — otherwise the lock (and the leader role with it) could pass to a second
+	 * window while this window's own save was still mid-flight, letting that window publish its own
+	 * snapshot and then have this window's stale save land after it and be merged back in on top.
+	 */
+	private _pendingLeaderSnapshotSave: Promise<void> | undefined;
+	/**
 	 * The `_cacheGeneration` the in-flight run's results will belong to — registered when the run
 	 * starts and narrowed to _runRefreshCore()'s own capture once it gathers its inputs. A caller
 	 * on the far side of a clear this number predates must not coalesce onto that run, because the
@@ -2003,29 +2011,38 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			// Wait out a pre-existing refresh (a timer or an earlier manual Refresh, never this
 			// call's own — that one is started below, after clearing) that is still mid-
-			// _preloadSessionFiles() first: its foreground workers call setCachedSessionData()
-			// directly for every file that hasn't hit the deferred-parse timeout yet, and
-			// awaitAllDeferredParses() below only knows about parses already registered as
-			// deferred — a worker still on its first, ordinary (non-deferred) pass over a file is
-			// invisible to it. Settling this promise doesn't require the run to actually finish
-			// quickly: its own isRefreshSuperseded() check (against the generation this clear is
-			// about to bump) makes it discard its results without publishing once it notices,
-			// exactly as a caller of updateTokenStats() arriving after a clear already waits it
-			// out (see updateTokenStats()'s own "waiting it out before refreshing" branch above).
-			const preClearRefresh = this._updateTokenStatsInFlight;
-			if (preClearRefresh) {
-				await preClearRefresh.catch(() => undefined);
-			}
+			// _preloadSessionFiles(): its foreground workers call setCachedSessionData() directly
+			// for every file that hasn't hit the deferred-parse timeout yet, and
+			// awaitAllDeferredParses() only knows about parses already registered as deferred — a
+			// worker still on its first, ordinary (non-deferred) pass over a file is invisible to
+			// it. Settling this promise doesn't require the run to actually finish quickly: its own
+			// isRefreshSuperseded() check (against the generation this clear is about to bump) makes
+			// it discard its results without publishing once it notices, exactly as a caller of
+			// updateTokenStats() arriving after a clear already waits it out (see that method's own
+			// "waiting it out before refreshing" branch).
+			//
+			// Looped rather than a single pass: awaitAllDeferredParses() below can await real,
+			// I/O-bound parses, which yields to the event loop for real time — long enough for an
+			// unrelated timer-triggered refresh to start and populate _updateTokenStatsInFlight with
+			// a run this call never captured. Re-checking after every pass closes that window; the
+			// loop only exits once one full pass finds nothing left to wait for.
+			while (this._updateTokenStatsInFlight || this._deferredSessionPreloadPromises.size > 0) {
+				const preClearRefresh = this._updateTokenStatsInFlight;
+				if (preClearRefresh) {
+					await preClearRefresh.catch(() => undefined);
+				}
 
-			// Wait out any deferred (backgrounded) parse still finishing from a refresh that already
-			// returned — without this, its setCachedSessionData() call could land after the
-			// synchronous clear below and silently repopulate the cache this command just emptied.
-			// Run after the wait above: that run's own workers can defer new parses to the
-			// background while this call was waiting on it, and those need to be covered too.
-			// Safe to await before the invalidation block: the generation hasn't bumped yet, so a
-			// build reading the cache during this wait sees the pre-clear generation it would have
-			// seen anyway, not the "new generation, stale data" combination the comment below guards.
-			await this.awaitAllDeferredParses();
+				// Wait out any deferred (backgrounded) parse still finishing from a refresh that
+				// already returned — without this, its setCachedSessionData() call could land after
+				// the synchronous clear below and silently repopulate the cache this command just
+				// emptied. Run after the wait above: that run's own workers can defer new parses to
+				// the background while this call was waiting on it, and those need to be covered too.
+				// Safe to await before the invalidation block: the generation hasn't bumped yet, so a
+				// build reading the cache during this wait sees the pre-clear generation it would
+				// have seen anyway, not the "new generation, stale data" combination the comment
+				// below guards.
+				await this.awaitAllDeferredParses();
+			}
 
 			const cacheSize = this.cacheManager.cache.size;
 			this.cacheManager.clearAllCachedData();
@@ -4228,8 +4245,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// this itself, after a permit was already held) — checked before acquiring so this
 				// worker never blocks waiting for a permit only to find out there was nothing to do,
 				// competing with genuinely slow parses for the exact capacity this semaphore exists
-				// to ration.
-				if (this._deferredSessionPreloadFiles.has(sessionFile)) {
+				// to ration. Normalized like every other cross-batch/cross-run comparison of session
+				// paths (see seedPreloadQueueFromCache()'s doc comment): the same physical file can
+				// be discovered under a different separator/case spelling than the one the earlier
+				// run deferred it under, and a raw-string comparison would miss that, starting a
+				// duplicate slow parse instead of recognizing the file as already in flight.
+				if (this._deferredSessionPreloadFiles.has(_normalizePathForDedup(sessionFile))) {
 					this.debugCrashLog(`deferred ${sessionFile}`);
 				} else {
 					let release: () => void;
@@ -4352,12 +4373,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * deferred parse has filled its cache entry, a single refresh incorporates those results.
 	 */
 	private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>, release: () => void): void {
-		this._deferredSessionPreloadFiles.add(sessionFile);
+		// Normalized key: see the worker loop's matching _deferredSessionPreloadFiles.has() check —
+		// the same physical file can be discovered under a different separator/case spelling by a
+		// later run, and a raw-string key would make that lookup miss this entry.
+		const deferredKey = _normalizePathForDedup(sessionFile);
+		this._deferredSessionPreloadFiles.add(deferredKey);
 		const settled = processing
 			.then(() => this.debugCrashLog(`done(background)  ${sessionFile}`))
 			.catch(error => this.debugCrashLog(`error(background) ${sessionFile}: ${error}`))
 			.finally(() => {
-				this._deferredSessionPreloadFiles.delete(sessionFile);
+				this._deferredSessionPreloadFiles.delete(deferredKey);
 				this._deferredSessionPreloadPromises.delete(sessionFile);
 				// The worker that started this file didn't release its permit because this parse
 				// turned out to be deferred (see processPreloadQueueFileWithCrashLog) — release it
@@ -4373,14 +4398,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/**
 	 * Resolves once every deferred parse in flight at the moment this is called has settled — a
 	 * snapshot of `_deferredSessionPreloadPromises`, not a live wait: a parse that starts fresh
-	 * after this snapshot is taken is not included, but that is fine here, since clearCache()
-	 * calls this immediately before its own synchronous clearAllCachedData(), with nothing else
-	 * awaited in between — clearCache() awaits any pre-existing in-flight refresh first (see its
-	 * own comment), so by the time this runs that run's workers are done handing parses off to the
-	 * background, and nothing new can legitimately race in between this call and the synchronous
-	 * clear that follows it. Used by clearCache() so a deferred parse from a refresh that already
-	 * returned cannot call setCachedSessionData() after the clear and silently repopulate the
-	 * cache it just emptied.
+	 * after this snapshot is taken is not included. clearCache() accounts for that itself by
+	 * looping this call together with its in-flight-refresh wait until one full pass finds nothing
+	 * left outstanding, rather than relying on a single call here to be enough — awaiting real,
+	 * I/O-bound parses yields to the event loop for real time, long enough for an unrelated
+	 * timer-triggered refresh to start and defer parses of its own in between. Used by clearCache()
+	 * so a deferred parse from a refresh that already returned cannot call setCachedSessionData()
+	 * after the clear and silently repopulate the cache it just emptied.
 	 */
 	private async awaitAllDeferredParses(): Promise<void> {
 		if (this._deferredSessionPreloadPromises.size === 0) { return; }
@@ -4514,6 +4538,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		} finally {
 			this.stopRefreshHeartbeat();
 			if (isLeader) {
+				// Await this cycle's own end-of-refresh snapshot save (if this run reached
+				// persistRefreshResult()) before releasing the lock — see
+				// _pendingLeaderSnapshotSave's own doc comment for why releasing first is unsafe.
+				if (this._pendingLeaderSnapshotSave) {
+					await this._pendingLeaderSnapshotSave;
+					this._pendingLeaderSnapshotSave = undefined;
+				}
 				try { await this.cacheManager.releaseRefreshLock(); }
 				catch (err) { this.warn(`Failed to release refresh lock: ${err}`); }
 			}
@@ -4793,7 +4824,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private persistRefreshResult(isLeader: boolean): void {
 		if (isLeader) {
 			if (this.isSampleDataModeActive()) { return; }
-			void (async () => {
+			// Tracked (not just detached) so _runUpdateTokenStats()'s finally can await it before
+			// releasing the refresh-leader lock — see _pendingLeaderSnapshotSave's own doc comment.
+			this._pendingLeaderSnapshotSave = (async () => {
 				try { await this.cacheManager.saveAndAccountForRefresh(); }
 				catch (err) { this.warn(`Failed to save cache: ${err}`); }
 			})();
