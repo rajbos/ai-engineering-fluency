@@ -61,7 +61,13 @@ notes inline and the final step.
    with enough checks can fill one page without including it, which would
    wrongly land on the "absent entirely" row below. Page through with
    `page`/`perPage` (max `perPage`, capped at a sane number of pages, same
-   bound as step 4) before deciding it's really absent.
+   bound as step 4) before deciding it's really absent — and pagination must
+   actually **finish** to draw that conclusion: it finishes when a page comes
+   back with fewer results than requested (a genuine last page), not merely
+   when the page cap is reached. Hitting the cap without a short final page
+   means the search was inconclusive, not that the check run is absent —
+   treat that the same as **not yet started** (reschedule; don't conclude
+   "no findings").
    The two ways to do this differ in scoping — know which one you're calling:
    - `mcp__github__pull_request_read` with `method: "get_check_runs"` is
      **PR-scoped, not SHA-scoped**: it has no SHA parameter and always reads
@@ -91,14 +97,17 @@ notes inline and the final step.
      `mcp__github__pull_request_read` with `method: "get_reviews"`, paging with
      `page`/`perPage` (use the maximum `perPage` the tool allows, e.g. `100`)
      until a page comes back with fewer results than requested — that's the
-     last page. `get_reviews` is paginated — reading only the first page can
-     miss the review you need, especially on a PR with many review rounds.
-     Cap it at a sane bound (e.g. 20 pages) so a bug elsewhere can't turn
-     this into an unbounded loop; hitting that bound without finding a match
-     is itself a sign something is off, not a silent "no comments". Non-MCP
-     equivalent: `GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews` (or
+     last page, and pagination has genuinely **finished**. `get_reviews` is
+     paginated — reading only the first page can miss the review you need,
+     especially on a PR with many review rounds. Cap it at a sane bound (e.g.
+     20 pages) so a bug elsewhere can't turn this into an unbounded loop —
+     but hitting that cap *without* reaching a short final page is not the
+     same as having searched everything: it means the search is
+     **inconclusive**, not that there's no matching review, and must not
+     feed the "no comments" terminal state below. Non-MCP equivalent:
+     `GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews` (or
      `gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/reviews`),
-     reading each entry's `user.login` and `commit_id`.
+     reading each entry's `user.login`, `id`, and `commit_id`.
    - Across every page, look for a review authored by
      `copilot-pull-request-reviewer[bot]` whose `commit_id` equals `sha`
      (not merely "the most recent bot review" — on a PR with prior rounds,
@@ -110,12 +119,16 @@ notes inline and the final step.
      *and* complete. Safe to act on findings — but scope which findings:
      `get_review_comments` (or the REST review-comments list) returns every
      thread on the PR, including older, already-superseded ones, so don't
-     treat its whole response as "this review's findings". Either call the
-     comments-for-this-review form
+     treat its whole response as "this review's findings". Filtering by
+     author and a `submitted_at` cutoff is **not** review-specific enough — a
+     later review by the same bot against an older, since-superseded commit
+     can post comments after that timestamp too, misattributing stale
+     findings to the current review. Instead require an exact match on the
+     matched review's own id: either call the comments-for-this-review form
      (`GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments`,
      using the matched review's own id) or filter the general response to
-     comments authored by `copilot-pull-request-reviewer[bot]` at or after
-     that review's `submitted_at`.
+     comments whose `pull_request_review_id` equals that matched review's
+     `id`.
    - **A review with `commit_id == sha` exists, but the check run's
      `conclusion` is anything else** → `commit_id == sha` only proves the
      review is *current*, not that it's *complete* (a review can be
@@ -129,10 +142,16 @@ notes inline and the final step.
      cleanly. Treat as **not yet ready** — do not conclude "no findings";
      investigate or reschedule rather than trusting an aborted run.
    - **No matching-and-complete review, and the check run's `conclusion` is
-     `success` or `neutral`** → could be brief API propagation lag. Retry
-     once, short delay. Still no matching review after that retry → valid
-     terminal state meaning the review found nothing to say for `sha`:
-     "done, no comments", not "still running".
+     `success` or `neutral`** → could be brief API propagation lag, *but only
+     if pagination genuinely finished* (reached a short final page, per
+     above — not merely hit the page cap). If it finished: retry once, short
+     delay. Still no matching review after that retry → valid terminal state
+     meaning the review found nothing to say for `sha`: "done, no comments",
+     not "still running". If pagination did **not** finish (hit the cap on
+     full pages): the search was inconclusive, not clean — treat as **not
+     yet ready**, the same as the check-run pagination cap case in step 2,
+     rather than declaring "no comments" over a PR too large to have been
+     fully searched.
 
 ## How this changes agent behavior
 
