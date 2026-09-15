@@ -135,7 +135,15 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('visualstudio-extension/**/*.csproj') }}
+          key: ${{ runner.os }}-nuget-${{ hashFiles(
+            'visualstudio-extension/**/*.csproj',
+            'visualstudio-extension/**/Directory.Packages.props',
+            'visualstudio-extension/**/NuGet.config',
+            'visualstudio-extension/**/packages.lock.json',
+            'Directory.Packages.props',
+            'NuGet.config',
+            'global.json'
+          ) }}
           restore-keys: |
             ${{ runner.os }}-nuget-
 
