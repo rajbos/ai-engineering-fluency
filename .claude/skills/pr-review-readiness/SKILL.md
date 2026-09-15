@@ -47,14 +47,23 @@ skill is about.
 
 ## The algorithm
 
-1. **Get the PR's current head commit SHA.**
+Every step below reasons about one specific head SHA. Because a push can land
+between any two calls, treat the SHA as pinned for the duration of one gate
+run and re-confirm it rather than assuming it's still current — see the race
+notes inline and the final step.
+
+1. **Get the PR's current head commit SHA** (call it `sha`).
    `mcp__github__pull_request_read` with `method: "get"` (the `head.sha` field).
-2. **Fetch check runs for that head SHA** and find the one named exactly
+2. **Fetch check runs for the PR's head** and find the one named exactly
    `copilot-pull-request-reviewer`.
    `mcp__github__pull_request_read` with `method: "get_check_runs"`.
    (Raw REST equivalent, for non-MCP tooling:
    `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`, or
    `gh api repos/{owner}/{repo}/commits/{sha}/check-runs`.)
+   This call is PR-scoped, not pinned to the `sha` from step 1 — it reads
+   whatever the head is *at call time*. If a push can have landed between
+   steps 1 and 2, re-fetch `head.sha` now and restart from step 1 if it
+   changed, so the rest of this algorithm reasons about one consistent `sha`.
 3. **Decide from its state:**
 
    | State | Meaning | What to do |
@@ -63,21 +72,33 @@ skill is about.
    | `status: "queued"` or `"in_progress"` | A review is actively running against the current head | **Stand down** — do not act on the PR's review comments this cycle (they may be for a stale prior commit); reschedule a check-in |
    | `status: "completed"` | The check finished — cross-check before trusting it (step 4) | See step 4 |
 
-4. **Cross-check a `completed` run against the current head** before trusting
-   it, since a completed check can still be stale (completed for an older
-   push) or lag the review API by a few seconds:
-   - Fetch the PR's submitted reviews:
-     `mcp__github__pull_request_read` with `method: "get_reviews"`.
-   - Find the most recent review authored by `copilot-pull-request-reviewer[bot]`
-     and compare its `commit_id` to the PR's current head SHA (step 1).
-   - **Match** → the review is current. Safe to read `get_review_comments` /
-     the review body and act on findings.
-   - **No match** (check run completed for an older head, or brief API
-     propagation lag) → treat as **not yet ready**; one short retry is
-     reasonable.
-   - **No `copilot-pull-request-reviewer[bot]` review at all**, with the check
-     run `completed` → valid terminal state meaning the review found nothing
-     to say. This is "done, no comments", not "still running".
+4. **Cross-check a `completed` run against `sha`** before trusting it, since a
+   completed check can still be stale (completed for an older push), lag the
+   review API by a few seconds, or have failed instead of finishing normally:
+   - Fetch **all pages** of the PR's submitted reviews:
+     `mcp__github__pull_request_read` with `method: "get_reviews"`, paging with
+     `page`/`perPage` until a page comes back short. `get_reviews` is
+     paginated — reading only the first page can miss the review you need,
+     especially on a PR with many review rounds.
+   - Across every page, look for a review authored by
+     `copilot-pull-request-reviewer[bot]` whose `commit_id` equals `sha`
+     (not merely "the most recent bot review" — on a PR with prior rounds,
+     the most recent bot review can belong to an older commit even when the
+     current-head review genuinely produced no comments, which would
+     otherwise read as permanently stale).
+   - **A review with `commit_id == sha` exists** → the review is current.
+     Safe to read `get_review_comments` / the review body and act on
+     findings.
+   - **No such review exists, and the check run's `conclusion` is anything
+     other than `success` or `neutral`** (e.g. `failure`, `cancelled`,
+     `timed_out`, `action_required`) → the review did not finish cleanly.
+     Treat as **not yet ready** — do not conclude "no findings"; investigate
+     or reschedule rather than trusting an aborted run.
+   - **No such review exists, and the check run's `conclusion` is `success`
+     or `neutral`** → could be brief API propagation lag. Retry once, short
+     delay. Still no matching review after that retry → valid terminal state
+     meaning the review found nothing to say for `sha`: "done, no comments",
+     not "still running".
 
 ## How this changes agent behavior
 
@@ -92,8 +113,13 @@ review state this cycle. Reschedule a later check-in instead of polling
 tightly in a loop — the check run typically takes several minutes, so a tight
 poll wastes cycles without changing the answer any sooner.
 
-If the gate says **current and complete** (a matching review, or a completed
-check run with no review at all): the review state is safe to read and act on.
+If the gate says **current and complete** (a matching review for `sha`, or a
+successfully completed check run with no review at all): the review state is
+safe to read and act on — but re-check the PR's head SHA immediately before
+taking that action (replying to or resolving a thread, or recording "no
+findings"). A push can land after the gate passes and before you act on it;
+if the head moved, the gate's answer is for a commit that is no longer
+current, so rerun the gate against the new head instead.
 
 ## Verified against
 
