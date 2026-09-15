@@ -799,3 +799,88 @@ test('clearCache()-style sequence (clearAllCachedData + awaitInFlightCheckpoint 
 	assert.ok(!entries, 'the cleared snapshot must not be resurrected by a checkpoint that was in flight when the clear ran');
 	assert.equal(fs.existsSync(m.getSharedSnapshotPath()), false, 'the snapshot file must stay deleted');
 });
+
+// ---------------------------------------------------------------------------
+// Follow-up review finding: persistRefreshResult() used to call saveCacheToStorage() directly,
+// bypassing checkpoint accounting entirely — a fully successful end-of-refresh save left
+// entriesSinceLastCheckpoint exactly as dirty as before it, so the *next* leader cycle's
+// flushPendingCheckpointBeforeReset() saw stale dirty state and performed a redundant extra
+// checkpoint read/merge/write before doing anything of its own. saveAndAccountForRefresh() (what
+// persistRefreshResult() now calls) must leave nothing dirty behind a successful save.
+// ---------------------------------------------------------------------------
+
+test('saveAndAccountForRefresh() persists and fully clears the dirty counter, so the next cycle has nothing left to flush', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+	assert.equal(m.hasUnflushedCheckpointWork(), true, 'dirty before the refresh-end save');
+
+	const saved = await m.saveAndAccountForRefresh();
+	assert.equal(saved, true, 'an uncontended save must succeed');
+	assert.equal(m.hasUnflushedCheckpointWork(), false,
+		'a fully successful end-of-refresh save must leave nothing dirty — otherwise the next leader cycle redundantly re-checkpoints before it has parsed anything of its own');
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(entries && Object.keys(entries).length === 2, 'the data must actually have reached disk');
+});
+
+test('saveAndAccountForRefresh() leaves the dirty count intact when the save is skipped (lock contention)', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+
+	fs.writeFileSync(m.getCacheLockPath(), JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
+
+	const saved = await m.saveAndAccountForRefresh();
+	assert.equal(saved, false, 'lock contention must be reported as not-saved');
+	assert.equal(m.hasUnflushedCheckpointWork(), true, 'a skipped save must not be mistaken for a persisted one');
+});
+
+// ---------------------------------------------------------------------------
+// Follow-up review findings: clearCache()'s previous protection (awaiting only this window's own
+// in-flight *checkpoint* promise) missed two real writers — this window's own persistRefreshResult()
+// save (which never went through that promise) and any other VS Code window's save entirely, since
+// cacheClearGeneration lives only in this process's memory. deleteSharedSnapshot() now serializes
+// on the shared cache lock file itself (with a bounded retry) before deleting, which every writer —
+// in-process or cross-window — already holds for the small window between its read and its rename.
+// ---------------------------------------------------------------------------
+
+test('deleteSharedSnapshot() waits for a held cache lock (e.g. another window mid-write) before deleting, rather than racing it', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot();
+
+	// Simulate another window holding the cache lock while it's mid-write: same PID (so
+	// checkOwnerAlive treats it as alive) but a different sessionId, with a fresh timestamp.
+	fs.writeFileSync(m.getCacheLockPath(), JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
+
+	const deletePromise = m.deleteSharedSnapshot();
+
+	// Release the simulated peer's lock shortly after — well within deleteSharedSnapshot()'s
+	// retry budget (10 x 50ms = 500ms) — to prove it actually waited rather than deleting
+	// immediately alongside the "held" lock.
+	await new Promise(r => setTimeout(r, 100));
+	fs.unlinkSync(m.getCacheLockPath());
+
+	await deletePromise;
+
+	assert.equal(fs.existsSync(m.getSharedSnapshotPath()), false, 'the snapshot must be deleted once the lock was actually available');
+	assert.equal(fs.existsSync(m.getCacheLockPath()), false, 'deleteSharedSnapshot() must release the lock it acquired');
+});
+
+test('deleteSharedSnapshot() proceeds anyway once its retry budget is spent against a permanently stuck lock', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot();
+
+	// A lock that is never released (simulating a genuinely stuck peer) must not hang "Clear
+	// Cache" forever.
+	fs.writeFileSync(m.getCacheLockPath(), JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
+
+	await m.deleteSharedSnapshot();
+
+	assert.equal(fs.existsSync(m.getSharedSnapshotPath()), false, 'the snapshot must still be deleted even without the lock, rather than leaving Clear Cache stuck');
+});

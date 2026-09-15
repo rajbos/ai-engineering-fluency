@@ -1922,15 +1922,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this._lastEfficiencyViewData = undefined;
 			this._cacheGeneration++;
 
-			// A checkpoint already mid-flight was reading/merging on-disk and in-memory state from
-			// before the clearAllCachedData() call above — writeSharedSnapshot() aborts that write
-			// once it notices the bumped clear generation, but only up to its own rename step. Wait
-			// for it to fully settle before deleting, so its write (whether it self-aborted or, in
-			// the narrowest of windows, still landed) can never complete *after* the delete below and
-			// resurrect the data this clear is removing.
-			await this.cacheManager.awaitInFlightCheckpoint();
-
-			// Delete the on-disk snapshot so it isn't reloaded after restart.
+			// Delete the on-disk snapshot so it isn't reloaded after restart. deleteSharedSnapshot()
+			// itself now serializes on the shared cache lock before deleting, so a writer already
+			// mid-flight when clearAllCachedData() ran above — this window's own checkpoint or
+			// persistRefreshResult() save, or another window's entirely — cannot land its rename
+			// after this delete and resurrect the data this clear is removing. See that method's
+			// doc comment for why the lock, not just the in-memory clear generation, is required.
 			await this.cacheManager.deleteSharedSnapshot();
 
 			// Reset diagnostics loaded flag so the diagnostics view will reload files
@@ -4631,7 +4628,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (isLeader) {
 			if (this.isSampleDataModeActive()) { return; }
 			void (async () => {
-				try { await this.saveCacheToStorage(); }
+				try { await this.cacheManager.saveAndAccountForRefresh(); }
 				catch (err) { this.warn(`Failed to save cache: ${err}`); }
 			})();
 		} else {

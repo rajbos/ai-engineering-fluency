@@ -486,9 +486,9 @@ test('_preloadSessionFiles() always schedules clearExpiredCache(), even when thi
 test('sample-data mode never writes to the shared on-disk cache snapshot: neither the end-of-refresh save nor mid-parse checkpointing', () => {
 	const persistBody = extractBracesBlock(EXTENSION_SRC, 'private persistRefreshResult(isLeader: boolean): void {');
 	const sampleGuardIndex = persistBody.indexOf('if (this.isSampleDataModeActive()) { return; }');
-	const saveIndex = persistBody.indexOf('await this.saveCacheToStorage()');
+	const saveIndex = persistBody.indexOf('await this.cacheManager.saveAndAccountForRefresh()');
 	assert.ok(sampleGuardIndex !== -1 && saveIndex !== -1 && sampleGuardIndex < saveIndex,
-		'persistRefreshResult() must skip saveCacheToStorage() in sample-data mode, before attempting the save — a regression/screenshot fixture refresh must never let its fixture data survive on disk past the run, where a later normal boot\'s cache-only instant paint would show it as real stats');
+		'persistRefreshResult() must skip its cache save in sample-data mode, before attempting it — a regression/screenshot fixture refresh must never let its fixture data survive on disk past the run, where a later normal boot\'s cache-only instant paint would show it as real stats');
 
 	const preloadBody = extractBracesBlock(EXTENSION_SRC, 'preloaded: SessionFilePreload[] }> {');
 	assert.ok(/processed % 25 === 0 && isLeader && !this\.isSampleDataModeActive\(\)/.test(preloadBody),

@@ -318,24 +318,57 @@ export class CacheManager {
 	 * false` keeps that contract true in practice, not just by convention.
 	 */
 	private async checkpointCacheInternal(): Promise<void> {
+		const entriesCountAtStart = this.entriesSinceLastCheckpoint;
+		this.deps.log(`Checkpointing cache: ${entriesCountAtStart} dirty entries (new, changed, or deleted) since last checkpoint (${((Date.now() - this.lastCheckpointTime) / 1000).toFixed(1)}s elapsed)`);
+		await this.saveAndAccount();
+	}
+
+	/**
+	 * Shared save+accounting core for every full-snapshot persist — a periodic mid-parse
+	 * checkpoint and the unconditional end-of-refresh save alike (see saveAndAccountForRefresh()).
+	 * Captures the dirty count/generation before saving and only subtracts/updates
+	 * lastCheckpointTime once the save actually succeeded and no reset landed mid-save (see
+	 * checkpointCounterGeneration's doc comment). Never throws.
+	 */
+	private async saveAndAccount(): Promise<boolean> {
 		const now = Date.now();
 		const entriesCountAtStart = this.entriesSinceLastCheckpoint;
 		const generationAtStart = this.checkpointCounterGeneration;
-		this.deps.log(`Checkpointing cache: ${entriesCountAtStart} dirty entries (new, changed, or deleted) since last checkpoint (${((now - this.lastCheckpointTime) / 1000).toFixed(1)}s elapsed)`);
 
 		let saved: boolean;
 		try {
 			saved = await this.saveCacheToStorage();
 		} catch (error) {
-			this.deps.error(`Checkpoint save threw unexpectedly: ${error}`);
+			this.deps.error(`Cache save threw unexpectedly: ${error}`);
 			saved = false;
 		}
 		if (saved && this.checkpointCounterGeneration === generationAtStart) {
 			this.lastCheckpointTime = now;
 			this.entriesSinceLastCheckpoint = Math.max(0, this.entriesSinceLastCheckpoint - entriesCountAtStart);
 		} else if (!saved) {
-			this.deps.log('Checkpoint save was skipped or failed; leaving the dirty count intact so the next checkpoint retries it');
+			this.deps.log('Cache save was skipped or failed; leaving the dirty count intact so the next checkpoint retries it');
 		}
+		return saved;
+	}
+
+	/**
+	 * Save the cache to disk and account for it exactly like a checkpoint, unconditionally
+	 * (regardless of dirty-count/time thresholds, and regardless of whether a periodic checkpoint
+	 * happens to be mid-flight — that concurrent attempt simply loses the cache-file lock race and
+	 * reports `false`, the same outcome as any other lock-contended save, never a correctness
+	 * problem). Used by persistRefreshResult() at the end of every leader refresh.
+	 *
+	 * persistRefreshResult()'s save used to call saveCacheToStorage() directly, bypassing
+	 * checkpoint accounting entirely: entriesSinceLastCheckpoint stayed exactly as dirty as it was
+	 * before that fully successful save. The *next* leader cycle's flushPendingCheckpointBeforeReset()
+	 * then saw that stale dirty count and performed a redundant extra checkpoint read/merge/write
+	 * before it had done anything of its own — for any refresh under the 100-entry threshold, on
+	 * every single cycle — defeating the "skip when nothing changed" optimization this whole
+	 * checkpoint rework exists for. Routing this save through the same accounting as a checkpoint
+	 * closes that gap: a successful end-of-refresh save now leaves nothing dirty behind it.
+	 */
+	async saveAndAccountForRefresh(): Promise<boolean> {
+		return this.saveAndAccount();
 	}
 
 	/**
@@ -892,18 +925,53 @@ export class CacheManager {
 	/**
 	 * Delete the shared on-disk snapshot and reset the loaded-mtime bookmark.
 	 * Called by clearCache() so that restarting VS Code does not restore cleared data.
+	 *
+	 * Acquires the same cache save lock writeSharedSnapshot() holds while it builds and renames a
+	 * snapshot — retrying briefly rather than the usual single-shot acquire, since this specific
+	 * caller must not proceed while any writer (this window's own periodic checkpoint or
+	 * persistRefreshResult() save, or another window's) could still be mid-write. cacheClearGeneration
+	 * (bumped by clearAllCachedData(), checked inside writeSharedSnapshot()) only lives in this
+	 * process's memory, so it can abort a same-process write that hasn't reached its rename yet, but
+	 * it cannot reach into another window's process at all, and can't undo a same-process write
+	 * whose generation check already passed before the bump landed. Serializing on the shared lock
+	 * file instead closes both gaps: any writer, in this window or a peer's, holds this exact lock
+	 * for the small window between its own read and its rename, so acquiring it first guarantees no
+	 * writer's rename can land after this delete. Proceeds anyway once the retry budget is spent
+	 * rather than blocking "Clear Cache" indefinitely on a peer holding a stuck lock.
 	 */
 	async deleteSharedSnapshot(): Promise<void> {
-		const snapshotPath = this.getSharedSnapshotPath();
+		const lockAcquired = await this.acquireCacheLockWithRetry();
 		try {
-			await fs.promises.unlink(snapshotPath);
-			this.lastLoadedSnapshotMtime = 0;
-			this.deps.log(`Deleted shared cache snapshot (${this.getCacheIdentifier()})`);
-		} catch (err: unknown) {
-			if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-				this.deps.warn(`Failed to delete shared cache snapshot: ${err}`);
+			const snapshotPath = this.getSharedSnapshotPath();
+			try {
+				await fs.promises.unlink(snapshotPath);
+				this.lastLoadedSnapshotMtime = 0;
+				this.deps.log(`Deleted shared cache snapshot (${this.getCacheIdentifier()})`);
+			} catch (err: unknown) {
+				if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+					this.deps.warn(`Failed to delete shared cache snapshot: ${err}`);
+				}
 			}
+		} finally {
+			if (lockAcquired) { await this.releaseCacheLock(); }
 		}
+	}
+
+	/**
+	 * Retries acquireCacheLock() briefly instead of giving up on the first miss. A legitimate
+	 * writer (this window's own checkpoint/refresh save, or another window's) only holds this lock
+	 * for the duration of a small JSON read+write+rename — milliseconds — so a short bounded retry
+	 * is enough to wait it out without risking an indefinite hang if a peer's lock is stuck.
+	 */
+	private async acquireCacheLockWithRetry(): Promise<boolean> {
+		const RETRY_ATTEMPTS = 10;
+		const RETRY_DELAY_MS = 50;
+		for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
+			if (await this.acquireCacheLock()) { return true; }
+			await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+		}
+		this.deps.warn('Could not acquire cache lock before deleting shared snapshot after retrying; proceeding without it');
+		return false;
 	}
 
 	/**
