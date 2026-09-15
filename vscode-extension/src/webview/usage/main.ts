@@ -1972,7 +1972,8 @@ function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
 	}
 }
 
-/** Pass through the memory-files hygiene analysis (metadata-only: paths/sizes/mtimes) onto sanitized stats.
+/** Pass through the memory-files hygiene analysis (compact `MemoryFilesAnalysisView` rollup:
+ * counts/rollup scalars only — no paths and no per-file metadata) onto sanitized stats.
  * Only assigns when the raw payload explicitly includes the key — omitting it (e.g. a partial/silent
  * refresh) must not clobber a previously-cached value, so we don't default to `null` here. Whether the
  * field was explicitly `null` (all files gone) vs. omitted (no change) is resolved in `handleUpdateStats`. */
@@ -2043,7 +2044,8 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			traceCurationOnce('sanitize-no-curation', 'sanitizeStats.curation.missing');
 		}
 
-		// Pass through the memory-files hygiene analysis (metadata-only: paths/sizes/mtimes).
+		// Pass through the memory-files hygiene analysis (compact MemoryFilesAnalysisView
+		// rollup: counts/rollup scalars only — no paths and no per-file metadata).
 		applyMemoryFilesAnalysis(sanitized, raw);
 
 		// Pass through the Copilot API quota balance and current-month billing costs.
@@ -3485,7 +3487,7 @@ function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysisView | null | 
 				const staleCount = ws.staleFileCount;
 				// newestMtimeMs is nullable (no files at all), not merely falsy — a real epoch
 				// timestamp of 0 must still be formatted, not treated as "no data".
-				const newest = ws.newestMtimeMs !== null ? formatAbsoluteDate(new Date(ws.newestMtimeMs).toISOString()) : '—';
+				const newest = ws.newestMtimeMs !== null ? formatAbsoluteDate(ws.newestMtimeMs) : '—';
 				return `<tr style="border-bottom:1px solid var(--border-color);">
 					<td style="padding:5px 8px; color:var(--text-primary);">${name}</td>
 					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${ws.repoCount}</td>

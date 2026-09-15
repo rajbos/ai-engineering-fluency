@@ -255,13 +255,15 @@ export function getTimeSince(isoString: string): string {
 }
 
 /**
- * Formats an ISO timestamp as a locale-aware absolute date (e.g. "Sep 14, 2026").
+ * Formats a timestamp as a locale-aware absolute date (e.g. "Sep 14, 2026"). Accepts an ISO
+ * string, epoch milliseconds, or a `Date` directly so callers with a raw `mtimeMs` number don't
+ * need an extra `new Date(ms).toISOString()` round-trip just to hand this a string.
  * Unlike {@link getTimeSince}, this is deterministic (does not depend on `Date.now()`)
  * and honors the caller's locale, making it safe for fixture-driven screenshots.
  * Returns "—" when the value is missing or invalid.
  */
-export function formatAbsoluteDate(isoString: string): string {
-	const then = new Date(isoString);
+export function formatAbsoluteDate(input: string | number | Date): string {
+	const then = input instanceof Date ? input : new Date(input);
 	if (!Number.isFinite(then.getTime())) {
 		return '—';
 	}
