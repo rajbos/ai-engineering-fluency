@@ -53,9 +53,15 @@ run and re-confirm it rather than assuming it's still current — see the race
 notes inline and the final step.
 
 1. **Get the PR's current head commit SHA** (call it `sha`).
-   `mcp__github__pull_request_read` with `method: "get"` (the `head.sha` field).
+   `mcp__github__pull_request_read` with `method: "get"` (the `head.sha`
+   field). Non-MCP equivalent: `GET /repos/{owner}/{repo}/pulls/{pull_number}`
+   (or `gh api repos/{owner}/{repo}/pulls/{pull_number}`), read `.head.sha`.
 2. **Fetch check runs for `sha`** and find the one named exactly
-   `copilot-pull-request-reviewer`.
+   `copilot-pull-request-reviewer`. This response is paginated too — a PR
+   with enough checks can fill one page without including it, which would
+   wrongly land on the "absent entirely" row below. Page through with
+   `page`/`perPage` (max `perPage`, capped at a sane number of pages, same
+   bound as step 4) before deciding it's really absent.
    The two ways to do this differ in scoping — know which one you're calling:
    - `mcp__github__pull_request_read` with `method: "get_check_runs"` is
      **PR-scoped, not SHA-scoped**: it has no SHA parameter and always reads
@@ -65,10 +71,11 @@ notes inline and the final step.
      algorithm reasons about one consistent `sha`.
    - The raw REST equivalent, for non-MCP tooling, **is SHA-scoped** and
      avoids this race entirely by construction: `GET
-     /repos/{owner}/{repo}/commits/{sha}/check-runs` (or `gh api
+     /repos/{owner}/{repo}/commits/{sha}/check-runs` (or `gh api --paginate
      repos/{owner}/{repo}/commits/{sha}/check-runs`), called with the exact
      `sha` from step 1. Prefer this form when you can choose, since it makes
-     the re-check above unnecessary.
+     the re-check above unnecessary. It's still paginated (`per_page`/`page`),
+     so apply the same page cap.
 3. **Decide from its state:**
 
    | State | Meaning | What to do |
@@ -88,28 +95,44 @@ notes inline and the final step.
      miss the review you need, especially on a PR with many review rounds.
      Cap it at a sane bound (e.g. 20 pages) so a bug elsewhere can't turn
      this into an unbounded loop; hitting that bound without finding a match
-     is itself a sign something is off, not a silent "no comments".
+     is itself a sign something is off, not a silent "no comments". Non-MCP
+     equivalent: `GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews` (or
+     `gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/reviews`),
+     reading each entry's `user.login` and `commit_id`.
    - Across every page, look for a review authored by
      `copilot-pull-request-reviewer[bot]` whose `commit_id` equals `sha`
      (not merely "the most recent bot review" — on a PR with prior rounds,
      the most recent bot review can belong to an older commit even when the
      current-head review genuinely produced no comments, which would
      otherwise read as permanently stale).
-   - **A review with `commit_id == sha` exists** → the review is current.
-     Safe to read `get_review_comments` / the review body and act on
-     findings.
-   - **No such review exists, and the check run's `conclusion` is anything
-     other than exactly `success` or `neutral`** — treat every other value as
-     not clean, not just the common examples (`failure`, `cancelled`,
-     `timed_out`, `action_required`, `skipped`, or a missing/`null`
-     conclusion all count). The review did not finish cleanly. Treat as
-     **not yet ready** — do not conclude "no findings"; investigate or
-     reschedule rather than trusting an aborted run.
-   - **No such review exists, and the check run's `conclusion` is `success`
-     or `neutral`** → could be brief API propagation lag. Retry once, short
-     delay. Still no matching review after that retry → valid terminal state
-     meaning the review found nothing to say for `sha`: "done, no comments",
-     not "still running".
+   - **A review with `commit_id == sha` exists, and the check run's
+     `conclusion` is exactly `success` or `neutral`** → the review is current
+     *and* complete. Safe to act on findings — but scope which findings:
+     `get_review_comments` (or the REST review-comments list) returns every
+     thread on the PR, including older, already-superseded ones, so don't
+     treat its whole response as "this review's findings". Either call the
+     comments-for-this-review form (`GET
+     /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments`,
+     using the matched review's own id) or filter the general response to
+     comments authored by `copilot-pull-request-reviewer[bot]` at or after
+     that review's `submitted_at`.
+   - **A review with `commit_id == sha` exists, but the check run's
+     `conclusion` is anything else** → `commit_id == sha` only proves the
+     review is *current*, not that it's *complete* (a review can be
+     submitted and then the run still fail or get cancelled). Fall through
+     to the next two cases as if no matching review existed.
+   - **No matching-and-complete review, and the check run's `conclusion` is
+     anything other than exactly `success` or `neutral`** — treat every
+     other value as not clean, not just the common examples (`failure`,
+     `cancelled`, `timed_out`, `action_required`, `skipped`, or a
+     missing/`null` conclusion all count). The review did not finish
+     cleanly. Treat as **not yet ready** — do not conclude "no findings";
+     investigate or reschedule rather than trusting an aborted run.
+   - **No matching-and-complete review, and the check run's `conclusion` is
+     `success` or `neutral`** → could be brief API propagation lag. Retry
+     once, short delay. Still no matching review after that retry → valid
+     terminal state meaning the review found nothing to say for `sha`:
+     "done, no comments", not "still running".
 
 ## How this changes agent behavior
 
