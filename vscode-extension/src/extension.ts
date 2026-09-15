@@ -9315,11 +9315,18 @@ private computeFallbackDailyRollup(
 	 * either way, this run failing outright means nothing else is coming to rescue it.
 	 */
 	private resolveStuckLoadingPanelsAsFailed(): void {
-		for (const panel of this._refreshLoadingPanels) {
-			panel.webview.html = this.getRefreshFailedHtml(panel.webview);
-			if (this.detailsPanel === panel) { this._detailsPanelIsLoading = false; }
+		try {
+			for (const panel of this._refreshLoadingPanels) {
+				try {
+					panel.webview.html = this.getRefreshFailedHtml(panel.webview);
+				} catch (err) {
+					this.error('❌ Failed to resolve stuck loading panel with failure HTML', err);
+				}
+				if (this.detailsPanel === panel) { this._detailsPanelIsLoading = false; }
+			}
+		} finally {
+			this._refreshLoadingPanels.clear();
 		}
-		this._refreshLoadingPanels.clear();
 	}
 
 	public async showDetails(): Promise<void> {
