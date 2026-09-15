@@ -50,7 +50,8 @@ test('loadDetailsIntoPanel() shows the loading screen before awaiting, and the f
 
 	// A superseded run (a newer refresh already bumped the generation) must return without
 	// touching the panel — the replacement run owns resolving it, not this stale one.
-	const supersededGuardIndex = body.indexOf('if (!stats && this.isRefreshSuperseded(startedAtGeneration)) { return; }');
+	const supersededGuardMatch = /if\s*\(\s*!stats\s*&&\s*this\.isRefreshSuperseded\(startedAtGeneration\)\s*\)\s*\{\s*return;\s*\}/.exec(body);
+	const supersededGuardIndex = supersededGuardMatch?.index ?? -1;
 	assert.ok(supersededGuardIndex !== -1 && awaitIndex < supersededGuardIndex,
 		'must check isRefreshSuperseded() after awaiting updateTokenStats(), before ever treating a missing result as a genuine failure');
 
