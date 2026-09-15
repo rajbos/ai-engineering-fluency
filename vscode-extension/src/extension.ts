@@ -1933,7 +1933,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async computeRegressionStats(dataSourceLabel: string, sessionFiles: string[]): Promise<{ detailedStats: any; dailyStats: any; usageStats: any; maturityData: any; diagnosticReport: string; fluencyLevelData: any; chartTotals: any }> {
 		const detailedStats = await this.updateTokenStats(true);
 		if (!detailedStats) { throw new Error(`Failed to calculate detailed stats from ${dataSourceLabel}.`); }
-		const dailyStats = this.currentDailyStats ?? await this.calculateDailyStats();
+		const dailyStats = this.currentDailyStats ?? await this.trackFullYearBackfill(this.calculateDailyStats());
 		const usageStats = await this.calculateUsageAnalysisStats(false);
 		const maturityData = await this.calculateMaturityScores(false);
 		const diagnosticReport = await this.generateDiagnosticReport();
@@ -4575,8 +4575,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.resolveStuckLoadingPanelsAsFailed();
 			return undefined;
 		} finally {
-			this.stopRefreshHeartbeat();
 			if (isLeader) {
+				// Deliberately NOT stopping the heartbeat yet: it renews the refresh-lock's
+				// timestamp every 30s so a legitimately long save/checkpoint here isn't mistaken for
+				// an abandoned lock by handleExistingLock()'s 5-minute staleness check. Stopping it
+				// before these awaits (as this used to) leaves the lock's timestamp frozen for their
+				// entire duration — a slow enough snapshot write (a large cache, a slow filesystem)
+				// could then let another window break the lock and start its own leader cycle while
+				// this window is still mid-save, the exact stale-snapshot race this wait exists to
+				// prevent in the first place.
+				//
 				// Await this cycle's own end-of-refresh snapshot save (if this run reached
 				// persistRefreshResult()) before releasing the lock — see
 				// _pendingLeaderSnapshotSave's own doc comment for why releasing first is unsafe.
@@ -4591,8 +4599,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// same lock too, leaving the older, partial checkpoint as the on-disk snapshot even
 				// though a full refresh (this one or the new leader's) has already completed.
 				await this.cacheManager.awaitInFlightCheckpoint();
+				this.stopRefreshHeartbeat();
 				try { await this.cacheManager.releaseRefreshLock(); }
 				catch (err) { this.warn(`Failed to release refresh lock: ${err}`); }
+			} else {
+				this.stopRefreshHeartbeat();
 			}
 		}
 	}
@@ -9756,7 +9767,9 @@ private computeFallbackDailyRollup(
 		// before the calculation finishes, the reopen would be silently dropped as "already in flight".
 		if (!hasFullData) {
 			void (async () => {
-				const fullStats = await this.calculateDailyStats();
+				// Tracked (not just detached) so clearCache() can wait it out — see
+				// _pendingFullYearBackfills' own doc comment.
+				const fullStats = await this.trackFullYearBackfill(this.calculateDailyStats());
 				if (this.chartPanel) {
 					void this.chartPanel.webview.postMessage({
 						command: 'updateChartData',
@@ -10716,8 +10729,10 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 
 		this.log('🔄 Refreshing Chart view');
-		// Refresh the full-year daily stats so week/month period views are up to date
-		await this.calculateDailyStats();
+		// Refresh the full-year daily stats so week/month period views are up to date. Tracked (not
+		// just awaited locally) so a concurrent clearCache() can wait it out too — see
+		// _pendingFullYearBackfills' own doc comment.
+		await this.trackFullYearBackfill(this.calculateDailyStats());
 		// Refresh all stats so the status bar and tooltip stay in sync
 		await this.updateTokenStats();
 		this.log('✅ Chart view refreshed');

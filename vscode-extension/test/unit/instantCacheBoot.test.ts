@@ -519,6 +519,40 @@ test('persistRefreshResult() tracks its detached end-of-refresh save so _runUpda
 		'must await the pending snapshot save (inside the finally block) before releasing the refresh-leader lock, not after — releasing first would let a second window become leader and publish while this window\'s save is still in flight');
 });
 
+test('_runUpdateTokenStats() keeps the refresh-lock heartbeat alive through the end-of-refresh save/checkpoint waits, stopping it only right before release', () => {
+	// startRefreshHeartbeat() renews the refresh lock's timestamp every 30s so
+	// handleExistingLock()'s 5-minute staleness check doesn't break a lock still legitimately held.
+	// Stopping the heartbeat before the awaits above (as an earlier version of this finally block
+	// did) freezes that timestamp for their entire duration — a slow enough snapshot write could
+	// then let another window break the lock and start its own leader cycle while this window is
+	// still mid-save, exactly the stale-snapshot race those awaits exist to prevent.
+	const updateBody = extractBracesBlock(EXTENSION_SRC, 'private async _runUpdateTokenStats(silent: boolean): Promise<DetailedStats | undefined> {');
+	const finallyIndex = updateBody.indexOf('} finally {');
+	const awaitSaveIndex = updateBody.indexOf('await this._pendingLeaderSnapshotSave;');
+	const awaitCheckpointIndex = updateBody.indexOf('await this.cacheManager.awaitInFlightCheckpoint();');
+	const stopHeartbeatIndices = [...updateBody.matchAll(/this\.stopRefreshHeartbeat\(\);/g)].map(m => m.index!);
+	const releaseLockIndex = updateBody.indexOf('await this.cacheManager.releaseRefreshLock();');
+
+	assert.ok(finallyIndex !== -1 && awaitSaveIndex !== -1 && awaitCheckpointIndex !== -1 && releaseLockIndex !== -1,
+		'the finally block must still await the pending snapshot save and the in-flight checkpoint before releasing the lock');
+
+	// The leader path's stopRefreshHeartbeat() call must sit strictly after both awaits and
+	// strictly before releaseRefreshLock() — not at the very top of the finally block, where it
+	// would stop renewing the lock before either wait even starts.
+	const leaderStopIndex = stopHeartbeatIndices.find(i => i > awaitCheckpointIndex && i < releaseLockIndex);
+	assert.ok(leaderStopIndex !== undefined,
+		'stopRefreshHeartbeat() on the leader path must run after awaiting the snapshot save/checkpoint and before releaseRefreshLock() — stopping it any earlier lets the lock go stale while this window is still writing');
+	assert.ok(!stopHeartbeatIndices.some(i => i > finallyIndex && i < awaitSaveIndex),
+		'stopRefreshHeartbeat() must not run before the end-of-refresh save/checkpoint waits on the leader path');
+
+	// A follower never starts the heartbeat in the first place (startRefreshHeartbeat() no-ops for
+	// non-leaders), but the finally block must still stop it unconditionally on that path too, in
+	// case this run only became a follower after already having heartbeat state from an earlier
+	// leader cycle in the same window.
+	assert.ok(stopHeartbeatIndices.some(i => i > releaseLockIndex),
+		'the non-leader (else) branch must still call stopRefreshHeartbeat()');
+});
+
 test('runLocalViewRegression() evicts its own session files from the cache when it finishes, only when bundled fixtures were used', () => {
 	// Skipping the on-disk save (see the sample-data-mode test above) does not stop a regression
 	// pass from writing fixture entries into the IN-MEMORY cache — computeRegressionStats() runs
@@ -628,6 +662,28 @@ test('clearCache() waits for in-flight deferred parses before clearing, so a str
 		'must await every pending full-year backfill inside the loop, between the in-flight-refresh wait and awaitAllDeferredParses()');
 	assert.ok(body.indexOf('await Promise.all(pendingBackfills.map(backfill => backfill.catch(() => undefined)));', pendingBackfillWaitIndex) !== -1,
 		'must await all snapshotted backfills together, not just the first one');
+});
+
+test('every call site of calculateDailyStats() is routed through trackFullYearBackfill(), not called bare', () => {
+	// Regression guard for a review finding on this exact tracking mechanism: the Chart view's
+	// showChart()/refreshChartPanel() (each defaulting daysBack to 365 via a bare, argument-less
+	// call) and computeRegressionStats() all called calculateDailyStats() directly, invisible to
+	// _pendingFullYearBackfills and therefore to clearCache()'s wait loop — the same class of gap
+	// the leader-refresh and Efficiency-view call sites were already fixed for. Every call site,
+	// present and future, must go through the shared tracking helper instead of being fixed up
+	// one at a time as each new gap is found.
+	const lines = EXTENSION_SRC.split('\n');
+	const offenders: string[] = [];
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (trimmed.startsWith('//') || trimmed.startsWith('*')) { continue; }
+		if (!trimmed.includes('this.calculateDailyStats(')) { continue; }
+		if (!trimmed.includes('this.trackFullYearBackfill(this.calculateDailyStats(')) {
+			offenders.push(trimmed);
+		}
+	}
+	assert.deepEqual(offenders, [],
+		'every this.calculateDailyStats(...) call site must be wrapped as this.trackFullYearBackfill(this.calculateDailyStats(...)), or clearCache() cannot wait it out');
 });
 
 test('deferSessionPreloadRefresh() tracks each deferred parse\'s settle promise for awaitAllDeferredParses() to await, and untracks it once settled', () => {
