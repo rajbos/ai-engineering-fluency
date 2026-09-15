@@ -173,6 +173,20 @@ Notes:
 - If `.graphify-agent/graph.json` is missing the build failed; fall back to
   ordinary file search.
 
+## Agent Changes to CI and Agent Configuration Need a Human
+
+`.github/workflows/guard-agent-config.yml` fails a pull request that both
+(a) touches `.github/**`, `.claude/**`, `.devcontainer/**`, `AGENTS.md` or
+`CLAUDE.md`, and (b) looks agent-authored — an agent branch prefix
+(`claude/`, `copilot/`, `agent-review/`), a bot PR author, or an
+`Co-authored-by: Claude…`/`Copilot…` trailer on any commit.
+
+These are the files that decide what automation is allowed to do, so an agent
+must not be able to change them unattended. If your PR trips this check, that
+is the check working: say what you changed and why, and ask the maintainer to
+review those paths and add the `agent-config-approved` label. Do not try to
+route around it by renaming the branch or dropping the co-author trailer.
+
 ## Keep Claude Code's Mirrored Agents & Skills in Sync
 
 This repo also ships Claude Code equivalents of the Copilot customizations below, kept as separate files because the two tools use different formats/locations:

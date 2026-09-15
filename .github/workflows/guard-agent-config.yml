@@ -1,0 +1,101 @@
+name: Guard agent config
+
+# CI, agent instructions and the devcontainer are the files that decide what
+# automation does and what it is allowed to do. An AI agent editing them can
+# widen its own permissions or rewrite the checks that watch it, so those paths
+# need a deliberate human act before an agent-authored PR can merge.
+#
+# CODEOWNERS cannot express that: requiring code-owner review would also block
+# the owner's own pull requests, since an author never satisfies their own
+# code-owner review. This check keys on who wrote the change instead.
+#
+# It is a guardrail, not a security boundary: a `pull_request` event runs the
+# PR's own copy of this workflow, and an agent could drop its co-author trailer
+# or push to a differently-named branch. It stops the ordinary case - an agent
+# quietly editing its own configuration - not a determined bypass.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+env:
+  # Applied by a human on the PR to accept an agent-authored change to these
+  # paths. The point is the deliberate act, not the label itself.
+  APPROVAL_LABEL: agent-config-approved
+
+jobs:
+  guard-agent-config:
+    name: Agent config guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Check for agent-authored changes to protected paths
+        env:
+          # Every one of these is attacker-controllable (a branch name, a login,
+          # a label). They go through `env:` so the shell never interpolates
+          # them as code - see .github/instructions/workflows.instructions.md.
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -uo pipefail
+
+          git fetch --quiet origin "$BASE_REF"
+
+          protected=$(git diff --name-only "origin/$BASE_REF...HEAD" \
+            | grep -E '^(\.github/|\.claude/|\.devcontainer/|AGENTS\.md$|CLAUDE\.md$)' || true)
+
+          if [ -z "$protected" ]; then
+            echo "No protected paths touched - nothing to guard."
+            exit 0
+          fi
+
+          echo "Protected paths in this PR:"
+          echo "$protected" | sed 's/^/  /'
+          echo
+
+          # Who wrote it? Commit author is useless here: an agent running with
+          # the maintainer's git identity authors commits as the maintainer.
+          # The co-author trailer and the branch prefix are what actually differ.
+          signal=""
+          case "$HEAD_REF" in
+            claude/*|copilot/*|agent-review/*) signal="branch prefix '${HEAD_REF%%/*}/'" ;;
+          esac
+          case "$PR_AUTHOR" in
+            *'[bot]'|Copilot|copilot-swe-agent) signal="${signal:-PR author '$PR_AUTHOR'}" ;;
+          esac
+          if git log "origin/$BASE_REF..HEAD" --format='%b' \
+              | grep -qiE '^co-authored-by: *(claude|copilot)'; then
+            signal="${signal:-AI co-author trailer}"
+          fi
+
+          if [ -z "$signal" ]; then
+            echo "No agent-authorship signal - treating as a human-authored change. Allowed."
+            exit 0
+          fi
+
+          echo "Agent-authorship signal: $signal"
+
+          case ",$PR_LABELS," in
+            *",$APPROVAL_LABEL,"*)
+              echo "Label '$APPROVAL_LABEL' is present - a human accepted this change. Allowed."
+              exit 0
+              ;;
+          esac
+
+          echo "::error::This PR changes agent/CI configuration and looks agent-authored ($signal). A human must review those paths and add the '$APPROVAL_LABEL' label to merge."
+          exit 1
