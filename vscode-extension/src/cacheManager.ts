@@ -85,14 +85,20 @@ export class CacheManager {
 	}
 
 	/**
-	 * Clears every in-memory cache entry and bumps cacheClearGeneration, so a checkpoint already
-	 * mid-flight (built from pre-clear data) discards its write instead of resurrecting it — see
-	 * writeSharedSnapshot()'s doc comment. Callers that must not race that in-flight checkpoint's
-	 * own write to the shared snapshot file (e.g. clearCache() deleting it right after) should
-	 * also await awaitInFlightCheckpoint() before doing so.
+	 * Clears every in-memory cache entry and tombstone, and bumps cacheClearGeneration so a
+	 * checkpoint already mid-flight (built from pre-clear data) discards its write instead of
+	 * resurrecting it — see writeSharedSnapshot()'s doc comment. Callers that must not race that
+	 * in-flight checkpoint's own write to the shared snapshot file (e.g. clearCache() deleting it
+	 * right after) should also await awaitInFlightCheckpoint() before doing so.
+	 *
+	 * Also clears deletedFilePaths: a pre-clear tombstone left behind would otherwise still be
+	 * applied by buildMergedSnapshotEntries() on a later save, stripping an entry that a window
+	 * legitimately republishes at or below that stale baseline mtime — a "Clear Cache" is meant to
+	 * reset all cache state, deletion decisions included, not just the live entries.
 	 */
 	clearAllCachedData(): void {
 		this.sessionFileCache.clear();
+		this.deletedFilePaths.clear();
 		this.cacheClearGeneration++;
 	}
 

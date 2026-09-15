@@ -884,3 +884,30 @@ test('deleteSharedSnapshot() proceeds anyway once its retry budget is spent agai
 
 	assert.equal(fs.existsSync(m.getSharedSnapshotPath()), false, 'the snapshot must still be deleted even without the lock, rather than leaving Clear Cache stuck');
 });
+
+// ---------------------------------------------------------------------------
+// Follow-up review finding: clearAllCachedData() cleared sessionFileCache but left deletedFilePaths
+// (tombstones from deletions decided *before* the clear) intact. A "Clear Cache" is meant to reset
+// all cache state, deletion decisions included — a stale, pre-clear tombstone surviving the clear
+// would otherwise keep stripping a path that some window legitimately republishes afterward at or
+// below that old baseline mtime, exactly the "clear doesn't actually reset everything" bug.
+// ---------------------------------------------------------------------------
+
+test('clearAllCachedData() clears tombstones too, so a pre-clear deletion cannot keep stripping a path republished after the clear', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot();
+	m.deleteCachedSessionData('/a.json'); // tombstone baseline = mtime 1000, pre-clear
+
+	m.clearAllCachedData();
+
+	// Some window (this one or another) republishes '/a.json' at or below the old tombstone's
+	// baseline mtime — plausible after a clear, since the file on disk hasn't necessarily changed.
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot();
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(entries && '/a.json' in entries,
+		'a tombstone recorded before clearAllCachedData() must not survive it and strip a path republished afterward');
+});
