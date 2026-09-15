@@ -18,7 +18,7 @@ answers, act accordingly.
 ## When to Use This Skill
 
 - Before treating "no new review comments" as a real signal while driving a PR to green
-- Before replying to or resolving a review thread, to confirm the review content is current
+- Before replying to or resolving a thread that belongs to the matched native Copilot review, to confirm that review is current for `sha` — this gate establishes only that; it says nothing about whether an arbitrary human or older-bot thread targets the current commit, which needs its own check
 - On any PR-activity webhook event that might race a fresh push against GitHub's review
 - Any time you're about to read a PR's review state right after a push
 
@@ -102,7 +102,9 @@ fallback and work anywhere.
    still running (a caller that happened to inspect an older completed-and-
    successful entry while a newer rerun is still in flight would otherwise
    pass the gate on stale grounds). Only once none are active do you pick
-   one to evaluate — the newest by creation time.
+   one to evaluate — the newest by `started_at` (check runs don't expose a
+   `created_at`; `started_at`/`completed_at` are the timestamps actually
+   returned).
 3. **Decide from the selected run's state:**
 
    | State | Meaning | What to do |
@@ -129,25 +131,32 @@ fallback and work anywhere.
      `GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews` (or
      `gh api --paginate repos/{owner}/{repo}/pulls/{pull_number}/reviews`),
      reading each entry's `user.login`, `id`, and `commit_id`.
-   - Across every page, look for a review authored by
+   - Across every page, collect reviews authored by
      `copilot-pull-request-reviewer[bot]` whose `commit_id` equals `sha` **and**
      whose `state` is exactly one of `COMMENTED`, `APPROVED`, or
      `CHANGES_REQUESTED` — an explicit allowlist, not "anything but
-     `PENDING`". `get_reviews` can also return `PENDING` (drafted but not
-     submitted) and `DISMISSED` (submitted, then withdrawn) reviews; neither
-     is a current, standing result, so a looser "not PENDING" predicate would
-     wrongly accept a dismissed review as this round's answer. Also don't
-     rely on "the most recent bot review" — on a PR with prior rounds, the
-     most recent bot review can belong to an older commit even when the
-     current-head review genuinely produced no comments, which would
-     otherwise read as permanently stale.
-   - **Separately, check whether a `PENDING` review for `sha` exists** (same
-     author, `commit_id == sha`, `state: "PENDING"`). If so, the review is
-     still being drafted — treat this the same as the check run's
-     `queued`/`in_progress` row: **stand down and reschedule**, regardless of
-     what the rest of this step finds. Don't let this fall through to the
-     "no matching review" terminal case below — an in-progress draft is not
-     the same as no review existing at all.
+     `PENDING`". A rerun can leave more than one submitted review for the
+     same `sha`; if more than one matches, take the newest by
+     `submitted_at` as this round's review — don't just use whichever one
+     the scan happens to reach first. Also don't rely on "the most recent
+     bot review" **without the `commit_id == sha` filter** — on a PR with
+     prior rounds, the most recent bot review overall can belong to an
+     older commit even when the current-head review genuinely produced no
+     comments, which would otherwise read as permanently stale.
+   - **Separately, check whether a `PENDING` or `DISMISSED` review for
+     `sha` exists** (same author, `commit_id == sha`, `state: "PENDING"` or
+     `"DISMISSED"`). Neither is a current, standing "no findings" result:
+     - `PENDING` means the review is still being drafted — treat this the
+       same as the check run's `queued`/`in_progress` row: **stand down and
+       reschedule**.
+     - `DISMISSED` means a review *was* submitted for `sha` — possibly with
+       real findings — and was later withdrawn; that a review once existed
+       and got dismissed proves nothing about whether the code is clean.
+       Treat this the same as `PENDING`: **not yet ready**, not "done, no
+       comments".
+     Either way, don't let this fall through to the "no matching review"
+     terminal case below — a still-drafting or since-withdrawn review is
+     not the same as no review existing at all.
    - **A submitted review with `commit_id == sha` exists, and the check
      run's `conclusion` is exactly `success` or `neutral`** → the review is
      current *and* complete. Safe to act on findings — but scope which
@@ -173,29 +182,31 @@ fallback and work anywhere.
      review is *current*, not that it's *complete* (a review can be
      submitted and then the run still fail or get cancelled). Fall through
      to the next two cases as if no matching review existed.
-   The remaining two cases assume no `PENDING` review for `sha` was found
-   either (per the separate check above) — a current-head `PENDING` review
-   already means **stand down**, full stop, whatever else is true here.
+   The remaining two cases assume no current-head `PENDING` or `DISMISSED`
+   review was found either (per the separate check above) — either one
+   already means **stand down / not yet ready**, full stop, whatever else
+   is true here.
 
-   - **No matching-and-complete review (and no current-head `PENDING`
-     review), and the check run's `conclusion` is anything other than
-     exactly `success` or `neutral`** — treat every other value as not
-     clean, not just the common examples (`failure`, `cancelled`,
+   - **No matching-and-complete review (and no current-head `PENDING` or
+     `DISMISSED` review), and the check run's `conclusion` is anything
+     other than exactly `success` or `neutral`** — treat every other value
+     as not clean, not just the common examples (`failure`, `cancelled`,
      `timed_out`, `action_required`, `skipped`, or a missing/`null`
      conclusion all count). The review did not finish cleanly. Treat as
      **not yet ready** — do not conclude "no findings"; investigate or
      reschedule rather than trusting an aborted run.
-   - **No matching-and-complete review (and no current-head `PENDING`
-     review), and the check run's `conclusion` is `success` or `neutral`** →
-     could be brief API propagation lag, *but only if pagination genuinely
-     finished* (reached a short final page, per above — not merely hit the
-     page cap). If it finished: retry once, short delay — re-running the
-     `PENDING` check too, since a draft can appear between polls. Still no
-     matching review and no `PENDING` review after that retry → valid
-     terminal state meaning the review found nothing to say for `sha`:
-     "done, no comments", not "still running". If pagination did **not**
-     finish (hit the cap on full pages): the search was inconclusive, not
-     clean — treat as **not yet ready**, the same as the check-run
+   - **No matching-and-complete review (and no current-head `PENDING` or
+     `DISMISSED` review), and the check run's `conclusion` is `success` or
+     `neutral`** → could be brief API propagation lag, *but only if
+     pagination genuinely finished* (reached a short final page, per above
+     — not merely hit the page cap). If it finished: retry once, short
+     delay — re-running the `PENDING`/`DISMISSED` check too, since either
+     can appear between polls. Still no matching, `PENDING`, or `DISMISSED`
+     review after that retry → valid terminal state meaning the review
+     found nothing to say for `sha`: "done, no comments", not "still
+     running". If pagination did **not** finish (hit the cap on full
+     pages): the search was inconclusive, not clean — treat as **not yet
+     ready**, the same as the check-run
      pagination cap case in step 2, rather than declaring "no comments" over
      a PR too large to have been fully searched.
 
