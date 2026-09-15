@@ -225,3 +225,68 @@ jobs:
         with:
           path: ./usage-data/agent-sessions.json
           key: agent-sessions-${{ github.repository }}-${{ steps.cache-date.outputs.date }}
+
+      # Build a queryable code knowledge graph (graphify) so the agent can ask
+      # structural questions - what calls X, what a change to Y reaches - instead
+      # of fanning grep/read out across ~600 source files. `--code-only` is local
+      # AST parsing: no LLM backend, no API key, no login. ~20s on this repo.
+      #
+      # Deliberately the last group in the job, and every step is
+      # continue-on-error. A setup step that exits non-zero makes Copilot skip
+      # the *remaining* setup steps and start with whatever the environment
+      # holds - so an unreachable PyPI here must not cost the session-log and
+      # usage-data hydration above, or the agent's own start. Failures still go
+      # red on the step so they stay visible instead of passing silently.
+      - name: Set up Python for graphify
+        continue-on-error: true
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # Pinned, not '3.x': the interpreter minor decides which wheels resolve,
+          # so floating it would silently change what gets installed.
+          python-version: '3.12'
+
+      - name: "Install graphify (PyPI distribution: graphifyy)"
+        continue-on-error: true
+        run: |
+          # Drop the checkout credential before any third-party code runs. A
+          # malicious wheel executing during the install or the extract below
+          # could otherwise read it straight out of .git/config, and this group
+          # runs last, after the Azure session-log and usage-data hydration.
+          # Nothing after this point needs authenticated git.
+          git config --local --unset-all 'http.https://github.com/.extraheader' || true
+
+          # --only-binary :all: refuses source distributions, so no dependency
+          # gets to execute setup.py in this runner - the pip counterpart of the
+          # `npm ci --ignore-scripts` above. Verified to resolve for the whole
+          # graphifyy 0.9.61 tree.
+          pip install --only-binary :all: "graphifyy==0.9.61"
+
+          # setup-python only puts its bin dir on PATH for later workflow steps,
+          # not for the shell Copilot gets once setup finishes. Symlink into
+          # /usr/local/bin so the agent can just run `graphify`.
+          sudo ln -sf "$(command -v graphify)" /usr/local/bin/graphify
+          graphify --version
+
+      - name: Build code knowledge graph
+        continue-on-error: true
+        env:
+          # Write every artifact to .graphify-agent/ (gitignored) instead of the
+          # default graphify-out/. The repo commits graphify-out/manifest.json and
+          # a v0.9.27 AST cache; a newer graphify rewrites the manifest and prunes
+          # that cache as a stale version, leaving ~180 tracked deletions in
+          # `git status` for the agent to commit by accident.
+          GRAPHIFY_OUT: .graphify-agent
+        run: |
+          # `run` executes under `bash -e`, so capture the status instead of
+          # letting a failed extract skip the reporting below.
+          set +e
+          graphify extract . --code-only --no-viz
+          rc=$?
+          set -e
+
+          if [ "$rc" -ne 0 ] || [ ! -f .graphify-agent/graph.json ]; then
+            echo "::warning::graphify built no graph (exit $rc) - the agent falls back to plain file search"
+            exit 1
+          fi
+
+          echo "Code graph ready: .graphify-agent/graph.json ($(du -h .graphify-agent/graph.json | cut -f1))"

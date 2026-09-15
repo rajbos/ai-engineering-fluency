@@ -137,6 +137,57 @@ To check if data is available:
 [ -f ./usage-data/usage-agg-daily.json ] && echo "Aggregated data available"
 ```
 
+### Code knowledge graph (graphify)
+
+`copilot-setup-steps.yml` also builds a graphify knowledge graph of the repository's
+code before the agent starts, at **`.graphify-agent/graph.json`** (order of
+10k nodes; the exact size tracks the repo, so don't read a precise figure into
+it). It needs no secrets — it is local AST parsing (`--code-only`).
+The build is the last thing setup does and is deliberately non-blocking, so it is
+attempted whenever the earlier setup steps succeed (a failure in one of those makes
+Copilot skip everything after it, this group included). Treat the graph as normally
+available rather than guaranteed, and check for it before relying on it.
+
+Query it instead of fanning `grep`/read across the tree when the question is
+structural — what calls a symbol, what a change reaches, how two areas connect:
+
+```bash
+export GRAPHIFY_OUT=.graphify-agent          # or pass --graph .graphify-agent/graph.json
+
+graphify query "how does the CLI attribute per-model cost"   # BFS context for a question
+graphify explain "getModelUsageFromSession"                  # one node and its neighbors
+graphify affected "src/tokenEstimation.ts"                   # reverse traversal: blast radius
+graphify path "extension.ts" "modelPricing.json"             # shortest path between two nodes
+```
+
+Notes:
+- The graph covers **code only**. Docs, PDFs and images are skipped — semantic
+  extraction needs an LLM backend and an API key, which this setup deliberately
+  does not use. Read docs directly.
+- It is a snapshot from setup time. After large edits, refresh by re-running the
+  build: `GRAPHIFY_OUT=.graphify-agent graphify extract . --code-only --no-viz`
+  (also LLM-free). Do **not** use `graphify update .` for this: it honours
+  `GRAPHIFY_OUT` for the graph itself but still rewrites the committed
+  `graphify-out/cache/stat-index.json`, leaving a tracked modification behind.
+- Never build into the default `graphify-out/` — that directory's `manifest.json`
+  and `cache/` are committed, and a newer graphify prunes them as a stale version.
+- If `.graphify-agent/graph.json` is missing the build failed; fall back to
+  ordinary file search.
+
+## Agent Changes to CI and Agent Configuration Need a Human
+
+`.github/workflows/guard-agent-config.yml` fails a pull request that both
+(a) touches `.github/**`, `.claude/**`, `.devcontainer/**`, `AGENTS.md` or
+`CLAUDE.md`, and (b) looks agent-authored — an agent branch prefix
+(`claude/`, `copilot/`, `agent-review/`), a bot PR author, or an
+`Co-authored-by: Claude…`/`Copilot…` trailer on any commit.
+
+These are the files that decide what automation is allowed to do, so an agent
+must not be able to change them unattended. If your PR trips this check, that
+is the check working: say what you changed and why, and ask the maintainer to
+review those paths and add the `agent-config-approved` label. Do not try to
+route around it by renaming the branch or dropping the co-author trailer.
+
 ## Keep Claude Code's Mirrored Agents & Skills in Sync
 
 This repo also ships Claude Code equivalents of the Copilot customizations below, kept as separate files because the two tools use different formats/locations:
