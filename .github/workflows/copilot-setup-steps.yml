@@ -248,6 +248,13 @@ jobs:
       - name: "Install graphify (PyPI distribution: graphifyy)"
         continue-on-error: true
         run: |
+          # Drop the checkout credential before any third-party code runs. A
+          # malicious wheel executing during the install or the extract below
+          # could otherwise read it straight out of .git/config, and this group
+          # runs last, after the Azure session-log and usage-data hydration.
+          # Nothing after this point needs authenticated git.
+          git config --local --unset-all 'http.https://github.com/.extraheader' || true
+
           # --only-binary :all: refuses source distributions, so no dependency
           # gets to execute setup.py in this runner - the pip counterpart of the
           # `npm ci --ignore-scripts` above. Verified to resolve for the whole

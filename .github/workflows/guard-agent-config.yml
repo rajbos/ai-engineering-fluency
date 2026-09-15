@@ -21,13 +21,18 @@ on:
 
 permissions:
   contents: read
-  # Read-only: the freshness check below reads the PR's label events.
-  pull-requests: read
+  # Needed to REMOVE a stale approval label when new commits arrive. Approval
+  # has to die on every push, and the server doing the removing is the only
+  # party that cannot be lied to about when a push happened.
+  issues: write
 
 env:
   # Applied by a human on the PR to accept an agent-authored change to these
   # paths. The point is the deliberate act, not the label itself.
   APPROVAL_LABEL: agent-config-approved
+  # Only these logins can grant that approval. Anyone who can label a PR could
+  # otherwise satisfy the gate, bots included.
+  APPROVERS: rajbos
 
 jobs:
   guard-agent-config:
@@ -48,7 +53,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_ACTION: ${{ github.event.action }}
+          SENDER: ${{ github.event.sender.login }}
           # Every one of these is attacker-controllable (a branch name, a login,
           # a label). They go through `env:` so the shell never interpolates
           # them as code - see .github/instructions/workflows.instructions.md.
@@ -114,33 +120,51 @@ jobs:
 
           echo "Agent-authorship signal: $signal"
 
-          if ! printf '%s' "$PR_LABELS_JSON" \
+          has_label=false
+          if printf '%s' "$PR_LABELS_JSON" \
               | jq -e --arg want "$APPROVAL_LABEL" 'any(.[]; . == $want)' >/dev/null; then
+            has_label=true
+          fi
+
+          # New commits void any prior approval. Rather than reason about
+          # timestamps - commit dates are set by whoever makes the commit, so an
+          # agent could backdate one to sit behind an old approval - the label is
+          # deleted server-side whenever the head moves. The human re-applies it
+          # after looking at the new commits.
+          if [ "$EVENT_ACTION" = "synchronize" ]; then
+            if [ "$has_label" = true ]; then
+              curl -fsS -X DELETE \
+                -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/$APPROVAL_LABEL" \
+                >/dev/null
+              echo "::error::New commits arrived, so the '$APPROVAL_LABEL' approval was removed. Review the new changes to the protected paths and re-apply it."
+            else
+              echo "::error::This PR changes agent/CI configuration and looks agent-authored ($signal). A human must review those paths and add the '$APPROVAL_LABEL' label to merge."
+            fi
+            exit 1
+          fi
+
+          if [ "$has_label" != true ]; then
             echo "::error::This PR changes agent/CI configuration and looks agent-authored ($signal). A human must review those paths and add the '$APPROVAL_LABEL' label to merge."
             exit 1
           fi
 
-          # The label persists across pushes, so presence alone would let an
-          # agent append further changes to these paths after a human approved
-          # an earlier state. Approval has to be newer than what it approves.
-          events=$(curl -fsS \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/events?per_page=100")
-
-          approved_at=$(printf '%s' "$events" | jq -r --arg want "$APPROVAL_LABEL" \
-            '[.[] | select(.event == "labeled" and .label.name == $want) | .created_at] | last // ""')
-
-          if [ -z "$approved_at" ]; then
-            echo "::error::The '$APPROVAL_LABEL' label is set but no labeling event was found, so its age cannot be established. Remove and re-apply it."
-            exit 1
+          # Who applied it matters: the gate is "a human accepted this", not
+          # "the label exists". On the labeling event the sender is the labeller.
+          if [ "$EVENT_ACTION" = "labeled" ]; then
+            case " $APPROVERS " in
+              *" $SENDER "*) : ;;
+              *)
+                curl -fsS -X DELETE \
+                  -H "Authorization: Bearer $GITHUB_TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/$APPROVAL_LABEL" \
+                  >/dev/null
+                echo "::error::'$SENDER' is not an approver for agent configuration changes, so the label was removed. Approvers: $APPROVERS."
+                exit 1
+                ;;
+            esac
           fi
 
-          head_at=$(git show -s --format=%cI "$HEAD_SHA")
-
-          if [ "$(date -d "$approved_at" +%s)" -lt "$(date -d "$head_at" +%s)" ]; then
-            echo "::error::The '$APPROVAL_LABEL' label was added at $approved_at, before the current head $HEAD_SHA (committed $head_at). Re-apply it after reviewing the newer commits."
-            exit 1
-          fi
-
-          echo "Label '$APPROVAL_LABEL' added $approved_at, after head commit $head_at. A human accepted this state. Allowed."
+          echo "Approved by a human via '$APPROVAL_LABEL', and no new commits have arrived since. Allowed."
