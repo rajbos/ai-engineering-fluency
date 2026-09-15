@@ -70,12 +70,12 @@ notes inline and the final step.
      call and restart from step 1 if it changed, so the rest of this
      algorithm reasons about one consistent `sha`.
    - The raw REST equivalent, for non-MCP tooling, **is SHA-scoped** and
-     avoids this race entirely by construction: `GET
-     /repos/{owner}/{repo}/commits/{sha}/check-runs` (or `gh api --paginate
-     repos/{owner}/{repo}/commits/{sha}/check-runs`), called with the exact
-     `sha` from step 1. Prefer this form when you can choose, since it makes
-     the re-check above unnecessary. It's still paginated (`per_page`/`page`),
-     so apply the same page cap.
+     avoids this race entirely by construction:
+     `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`
+     (or `gh api --paginate repos/{owner}/{repo}/commits/{sha}/check-runs`),
+     called with the exact `sha` from step 1. Prefer this form when you can
+     choose, since it makes the re-check above unnecessary. It's still
+     paginated (`per_page`/`page`), so apply the same page cap.
 3. **Decide from its state:**
 
    | State | Meaning | What to do |
@@ -111,8 +111,8 @@ notes inline and the final step.
      `get_review_comments` (or the REST review-comments list) returns every
      thread on the PR, including older, already-superseded ones, so don't
      treat its whole response as "this review's findings". Either call the
-     comments-for-this-review form (`GET
-     /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments`,
+     comments-for-this-review form
+     (`GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments`,
      using the matched review's own id) or filter the general response to
      comments authored by `copilot-pull-request-reviewer[bot]` at or after
      that review's `submitted_at`.
