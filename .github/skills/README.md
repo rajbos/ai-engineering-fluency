@@ -282,6 +282,20 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 
 **Runs in CI as:** [`.github/workflows/pr-risk-review.yml`](../workflows/pr-risk-review.yml) — gates on the PR author being a known repository contributor, drives this skill through the GitHub Copilot CLI, then applies a `risk: *` label and posts the comment. Advisory; it never blocks a merge.
 
+### pr-review-readiness
+
+**Purpose**: Determine whether GitHub's native automatic Copilot PR review (`copilot-pull-request-reviewer[bot]`) has finished for a PR's current head commit, so an agent doesn't act on stale or incomplete review state.
+
+**Use this skill when:**
+- Driving a PR to green and deciding whether "no new review comments" is a real signal or the review just hasn't posted yet
+- Handling a PR-activity webhook event that might race a fresh push against GitHub's automatic review
+- About to reply to or resolve a review thread and needing to confirm the review content is current, not for a stale commit
+
+**Contents:**
+- The two-check-run-families distinction: GitHub's native `copilot-pull-request-reviewer` check run (the one that gates this skill) vs. this repo's own CI-driven review agents (`Architecture agent`, `Code Quality agent`, `Test Expert agent`, `Performance agent`, `Review risk`), which are unrelated
+- The exact state-machine algorithm using `mcp__github__pull_request_read`'s `get_check_runs` and `get_reviews` methods (with raw REST/`gh api` equivalents for non-MCP tooling), including the `commit_id` cross-check that catches a completed-but-stale check run
+- Guidance to stand down and reschedule rather than poll tightly when a review is still queued or in progress
+
 ### whats-new-catalog
 
 **Purpose**: Keep the What's New release catalog (`vscode-extension/src/whatsNew/catalog.ts`) — the hand-written prose behind the What's New view and the one-a-day new-feature notifications — in step with what the extension actually ships.
