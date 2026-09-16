@@ -745,6 +745,55 @@ test('loadSharedSnapshotIfChanged() wipes what it just merged when this window\'
 	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
 	assert.equal(merged, 0, 'entries merged into an already-cleared cache must not be reported as usefully merged');
 	assert.equal(m.cache.size, 0, 'the pre-clear entry must not survive in the now-current (post-clear) cache map');
+
+	// The wipe above must also reset lastLoadedSnapshotMtime, the same way loadCacheFromStorage()
+	// guards the equivalent race on its own load path: left pointing at the pre-clear snapshot's
+	// mtime, a post-clear snapshot recreated with an equal-or-lower mtime (coarse/backward clock)
+	// would be wrongly skipped by this same method's own mtime shortcut on the next call.
+	publisher.setCachedSessionData('/b.json', entry(2000), 10);
+	await publisher.writeSharedSnapshot();
+	const snapshotPath = m.getSharedSnapshotPath();
+	const stat = fs.statSync(snapshotPath);
+	fs.utimesSync(snapshotPath, new Date(stat.mtimeMs - 1000), new Date(stat.mtimeMs - 1000));
+	const secondMerged = await m.loadSharedSnapshotIfChanged();
+	assert.ok(secondMerged > 0, 'the mtime bookmark must have been reset by the wipe above, not left pointing at the pre-clear snapshot');
+	assert.ok(m.cache.has('/b.json'), 'the newly published entry must load despite its backdated mtime');
+});
+
+// A further Copilot review found the generation baseline was captured *after* the initial
+// checkClearEpoch() call, so an *external* clearAllCachedData() (a different call chain, e.g. this
+// window's own clearCache()) landing while that call's own internal epoch-marker read was still in
+// flight went uncaught: the baseline already included the race by the time it was captured. Fixed by
+// capturing a pre-call baseline too, and only advancing it to checkClearEpoch()'s own post-detection
+// value when that same call is what produced the bump — checkClearEpoch() also legitimately bumps
+// this counter on every real peer clear it detects, which must not be treated as a race with itself
+// (see the comment at the capture site).
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail).
+test('loadSharedSnapshotIfChanged() catches an external clearAllCachedData() landing during its own top-level epoch check', async (t) => {
+	const dir = tmpDir();
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot(); // pre-clear content on disk to (almost) resurrect
+
+	const m = makeManager(dir);
+	const originalReadFile = fs.promises.readFile.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'readFile', async (...args: unknown[]) => {
+		if (!intercepted && String(args[0]).endsWith('.epoch.json')) {
+			intercepted = true;
+			// Simulate an unrelated call chain's clearCache() landing exactly while this call's own
+			// top-level checkClearEpoch() is reading the epoch marker — a purely in-memory,
+			// same-process clear that touches no files, so this read (and its own checkClearEpoch()
+			// call) sees no epoch change and returns false.
+			m.clearAllCachedData();
+		}
+		return originalReadFile(...args);
+	});
+
+	const merged = await m.loadSharedSnapshotIfChanged();
+	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
+	assert.equal(merged, 0, 'entries merged into an already-cleared cache must not be reported as usefully merged');
+	assert.equal(m.cache.size, 0, 'the pre-clear entry must not survive the external clear that raced this call\'s own top-level epoch check');
 });
 
 test('a save that started before the clear epoch is skipped only once; the next save (after re-syncing) succeeds normally', async () => {
@@ -877,6 +926,70 @@ test('a missing or corrupt clear-epoch marker fails open (loadSharedSnapshotIfCh
 	await m.loadSharedSnapshotIfChanged();
 	assert.equal(m.cache.size, 1, 'a corrupt epoch marker must not be treated as a detected clear');
 	assert.equal(m.cache.get('/a.json')?.mtime, 1000);
+});
+
+// A further Copilot review found readClearEpoch() accepted any finite JSON number, but a corrupt
+// marker like 1e100 is finite while not being a safe integer: `persisted + 1` on a value that large
+// loses precision and rounds back to the same float, so bumpClearEpochLocked()'s new-epoch
+// computation could fail to strictly advance, breaking the documented monotonicity guarantee despite
+// the marker technically "parsing".
+test('a clear-epoch marker with a finite but unsafe-integer value fails open, so the epoch still strictly advances', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	fs.mkdirSync(path.dirname(m.getClearEpochPath()), { recursive: true });
+	fs.writeFileSync(m.getClearEpochPath(), JSON.stringify({ epoch: 1e100 }));
+
+	await m.deleteSharedSnapshot();
+	const persisted = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+	assert.ok(Number.isSafeInteger(persisted), 'the marker must be rewritten with a safe integer, not the unsafe 1e100 plus one');
+	assert.ok(persisted > 0, 'a finite-but-unsafe marker must fail open to 0, so the next clear still advances from a sane baseline');
+});
+
+// A further Copilot review found that when this branch fires, sessionFileCache is wiped but
+// lastLoadedSnapshotMtime is not reset — a concurrent deleteSharedSnapshot() can reset that bookmark
+// to 0 *before* this in-flight load's own stat() writes the pre-clear snapshot's (now stale) mtime
+// back over it, so a post-clear snapshot recreated with an equal-or-lower mtime would then be wrongly
+// skipped by loadSharedSnapshotIfChanged()'s own mtime shortcut.
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail).
+test('loadCacheFromStorage() resets the mtime bookmark too, when clearAllCachedData() lands mid-load', async (t) => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot();
+
+	const m = makeManager(dir);
+	const originalReadFile = fs.promises.readFile.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'readFile', async (...args: unknown[]) => {
+		const result = await originalReadFile(...args);
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			m.clearAllCachedData();
+		}
+		return result;
+	});
+
+	await m.loadCacheFromStorage();
+	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
+	assert.equal(m.cache.size, 0, 'the pre-clear snapshot must not be loaded on top of a clear that landed mid-load');
+
+	// A post-clear snapshot recreated with a non-advancing mtime (coarse/backward filesystem clock)
+	// must still be eligible to load — it would not be if the bookmark still pointed at the old one.
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/b.json', entry(2000), 10);
+	await publisher.writeSharedSnapshot();
+	const snapshotPath = m.getSharedSnapshotPath();
+	const stat = fs.statSync(snapshotPath);
+	fs.utimesSync(snapshotPath, new Date(stat.mtimeMs - 1000), new Date(stat.mtimeMs - 1000));
+
+	// publisher's write merges with whatever is already on disk (the pre-clear /a.json entry is
+	// still there — nothing in this test ever deleted it), so the exact merged count isn't the point;
+	// what matters is that /b.json actually loads despite its backdated mtime. Left unfixed, the
+	// stale bookmark from the pre-clear snapshot could exceed it and skip the load entirely.
+	const merged = await m.loadSharedSnapshotIfChanged();
+	assert.ok(merged > 0, 'the mtime bookmark must have been reset, not left pointing at the pre-clear snapshot');
+	assert.ok(m.cache.has('/b.json'), 'the newly published entry must load despite its backdated mtime');
 });
 
 test('loadCacheFromStorage() seeds the clear epoch so freshly-loaded post-clear data is not immediately treated as stale', async () => {

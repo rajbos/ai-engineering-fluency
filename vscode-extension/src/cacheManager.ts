@@ -752,18 +752,20 @@ export class CacheManager {
 	 */
 	async loadCacheFromStorage(): Promise<void> {
 		const loadStartedAt = Date.now();
+		// Captured before any await in this method, not after the epoch seed below: this call only
+		// ever runs once, from the constructor, before clearCache() could plausibly be invoked — but
+		// its promise is not awaited there, so a clearCache() reachable the instant activation
+		// finishes can land while the very first read (readClearEpoch(), immediately below) is still
+		// in flight. Capturing the baseline after that await would already include such a clear,
+		// leaving the comparison in the `finally` block below blind to it. checkClearEpoch() alone
+		// cannot be trusted to notice this race either way: it only reports a clear this window has
+		// not yet accounted for, and this window's own clearAllCachedData() already means it has.
+		const clearGenerationAtStart = this.cacheClearGeneration;
 		// Seed the local clear-epoch baseline from disk before loading anything, so a clear that
 		// happened before this window even started does not immediately look like a *new* clear to
 		// checkClearEpoch() and wrongly discard the (already post-clear) data this call is about to
 		// load. See getClearEpochPath()'s doc comment for the full cross-window contract.
 		this.clearEpoch = await this.readClearEpoch();
-		// This call only ever runs once, from the constructor, before clearCache() could plausibly
-		// be invoked — but its promise is not awaited there, so a clearCache() reachable the instant
-		// activation finishes (before this async disk read settles) can still land while it is in
-		// flight. checkClearEpoch() alone cannot be trusted to notice: it only reports a clear this
-		// window has not yet accounted for, and this window's own clearAllCachedData() already means
-		// it has (see the generation comparison in the `finally` block below).
-		const clearGenerationAtStart = this.cacheClearGeneration;
 		try {
 			const cacheId = this.getCacheIdentifier();
 
@@ -833,6 +835,14 @@ export class CacheManager {
 				// is captured) — whatever this load just assigned to sessionFileCache above needs to
 				// be wiped explicitly, the same way loadSharedSnapshotIfChanged() guards this race.
 				this.sessionFileCache = new Map();
+				// Also reset the mtime bookmark: the stat() above (if it ran) recorded the pre-clear
+				// snapshot's mtime, possibly *after* the concurrent deleteSharedSnapshot() already
+				// reset it to 0, silently restoring the stale value. Left in place, a post-clear
+				// snapshot recreated with an equal-or-lower mtime (a coarse or backward-moving
+				// filesystem clock) would then be wrongly skipped by loadSharedSnapshotIfChanged()'s
+				// own mtime shortcut — the same failure mode checkClearEpoch() already guards against
+				// for a peer's clear.
+				this.lastLoadedSnapshotMtime = 0;
 			}
 		}
 	}
@@ -948,7 +958,13 @@ export class CacheManager {
 		try {
 			const content = await fs.promises.readFile(this.getClearEpochPath(), 'utf-8');
 			const parsed = JSON.parse(content);
-			return typeof parsed?.epoch === 'number' && Number.isFinite(parsed.epoch) ? parsed.epoch : 0;
+			// Number.isFinite() alone is not enough: a corrupt marker like 1e100 is finite but not a
+			// safe integer, and `persisted + 1` on a value that large rounds back to the same float —
+			// bumpClearEpochLocked()'s new-epoch computation would then fail to strictly advance,
+			// letting a real clear go undetected despite the documented monotonicity guarantee.
+			return typeof parsed?.epoch === 'number' && Number.isSafeInteger(parsed.epoch) && parsed.epoch >= 0
+				? parsed.epoch
+				: 0;
 		} catch {
 			return 0;
 		}
@@ -1070,13 +1086,19 @@ export class CacheManager {
 	 * equally stale.
 	 */
 	async writeSharedSnapshot(): Promise<boolean> {
+		// Captured before the checkClearEpoch() await just below, not after: a same-process
+		// clearAllCachedData() landing while that marker read is pending would otherwise already be
+		// reflected in this baseline, leaving the mid-build comparison below blind to it — entries
+		// could then be assembled from state captured before the clear (including a pre-clear
+		// on-disk snapshot read by buildMergedSnapshotEntries()) and pass every later check that only
+		// looks for a generation change *after* this point.
+		const clearGenerationAtStart = this.cacheClearGeneration;
 		if (await this.checkClearEpoch()) {
 			this.deps.log('Skipping shared snapshot publish: in-memory cache predates a detected clear');
 			return false;
 		}
 		const snapshotPath = this.getSharedSnapshotPath();
 		const tmpPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
-		const clearGenerationAtStart = this.cacheClearGeneration;
 		try {
 			const entries = await this.buildMergedSnapshotEntries();
 			if (this.cacheClearGeneration !== clearGenerationAtStart) {
@@ -1291,15 +1313,24 @@ export class CacheManager {
 		// THIS window from continuing to serve its own pre-clear in-memory cache, not merely stop it
 		// from publishing. Called once per refresh cycle (this function's own call sites), not per
 		// file, matching writeSharedSnapshot()'s check on the write side. See getClearEpochPath().
-		await this.checkClearEpoch();
-		// Captured after the check above (same pattern as writeSharedSnapshot()'s
-		// clearGenerationAtStart): this window's own clearAllCachedData() can land during the
-		// stat/read/merge sequence below, and checkClearEpoch() alone cannot be trusted to notice —
-		// it only reports a clear this window has not yet accounted for, and a same-process clear
-		// means it already has (this.clearEpoch gets updated in step by deleteSharedSnapshot(), not
-		// only by observing the persisted marker), so it can return false immediately afterward. See
-		// the comparison below for why that matters here specifically.
-		const clearGenerationAtStart = this.cacheClearGeneration;
+		// Captured before the checkClearEpoch() call just below, not simply after it: an *external*
+		// clearAllCachedData() (e.g. this window's own clearCache(), a different call chain entirely)
+		// can land while that call's internal marker read is pending, without necessarily also being
+		// visible through the epoch it checks — so capturing the baseline only after it returns could
+		// already include such a bump, leaving the comparison below blind to it for the rest of this
+		// call's own stat/read/merge sequence.
+		//
+		// But checkClearEpoch() can *also* bump the same counter itself, as an expected, already-
+		// handled side effect of detecting a genuine peer clear right here — it resets sessionFileCache
+		// to a fresh empty map before returning, and the stat/read/merge sequence below is then
+		// legitimately repopulating that map from the post-clear snapshot, not racing anything. Treating
+		// that self-bump as "something else raced this call" would wipe the very entries this method
+		// exists to load. So: if this call's own checkClearEpoch() detected and handled a clear, the
+		// baseline moves forward to the generation it just produced; only a bump happening *outside*
+		// this line (before or after) still needs the original, pre-call baseline to be caught.
+		const clearGenerationBeforeCheck = this.cacheClearGeneration;
+		const clearDetectedAtStart = await this.checkClearEpoch();
+		const clearGenerationAtStart = clearDetectedAtStart ? this.cacheClearGeneration : clearGenerationBeforeCheck;
 		const snapshotPath = this.getSharedSnapshotPath();
 		let mtimeMs: number | undefined;
 		try {
@@ -1337,6 +1368,11 @@ export class CacheManager {
 			// checkClearEpoch() does not catch this (see above), so it is not enough on its own to have
 			// wiped it — wipe explicitly.
 			this.sessionFileCache = new Map();
+			// Also reset the mtime bookmark: the assignment above (if it ran) recorded the pre-clear
+			// snapshot's mtime, possibly *after* the concurrent deleteSharedSnapshot() already reset it
+			// to 0, silently restoring the stale value — the same failure mode
+			// loadCacheFromStorage() guards against for the equivalent race on its own load path.
+			this.lastLoadedSnapshotMtime = 0;
 			return 0;
 		}
 		if (epochDetected) {
