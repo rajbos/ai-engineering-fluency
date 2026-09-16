@@ -734,9 +734,11 @@ test('loadSharedSnapshotIfChanged() wipes what it just merged when this window\'
 		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
 			intercepted = true;
 			// Simulate this window's own clearCache() landing exactly while this load is reading the
-			// snapshot it's about to merge — a same-process clear, so only the generation counter
-			// moves; the durable epoch marker is untouched (deleteSharedSnapshot() hasn't run).
+			// snapshot it's about to merge — the same two calls clearCache() always makes back to
+			// back, so clearInProgress is true only for this narrow window and cleared again once
+			// deleteSharedSnapshot() finishes, matching production behavior.
 			m.clearAllCachedData();
+			await m.deleteSharedSnapshot();
 		}
 		return result;
 	});
@@ -750,6 +752,12 @@ test('loadSharedSnapshotIfChanged() wipes what it just merged when this window\'
 	// guards the equivalent race on its own load path: left pointing at the pre-clear snapshot's
 	// mtime, a post-clear snapshot recreated with an equal-or-lower mtime (coarse/backward clock)
 	// would be wrongly skipped by this same method's own mtime shortcut on the next call.
+	// publisher's own epoch still predates the real clear m just made (deleteSharedSnapshot() above
+	// now genuinely advances the durable marker), so its first write is skipped and only resyncs it
+	// (wiping publisher's own cache as a side effect) — the same "skipped once, resynced" pattern as
+	// the dedicated test for that behavior elsewhere in this file.
+	publisher.setCachedSessionData('/b.json', entry(2000), 10);
+	await publisher.writeSharedSnapshot();
 	publisher.setCachedSessionData('/b.json', entry(2000), 10);
 	await publisher.writeSharedSnapshot();
 	const snapshotPath = m.getSharedSnapshotPath();
@@ -965,7 +973,11 @@ test('loadCacheFromStorage() resets the mtime bookmark too, when clearAllCachedD
 		const result = await originalReadFile(...args);
 		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
 			intercepted = true;
+			// The same two calls clearCache() always makes back to back, so clearInProgress is true
+			// only for this narrow window and cleared again once deleteSharedSnapshot() finishes,
+			// matching production behavior.
 			m.clearAllCachedData();
+			await m.deleteSharedSnapshot();
 		}
 		return result;
 	});
@@ -976,16 +988,20 @@ test('loadCacheFromStorage() resets the mtime bookmark too, when clearAllCachedD
 
 	// A post-clear snapshot recreated with a non-advancing mtime (coarse/backward filesystem clock)
 	// must still be eligible to load — it would not be if the bookmark still pointed at the old one.
+	// publisher's own epoch predates the real clear m just made (deleteSharedSnapshot() above now
+	// genuinely advances the durable marker and unlinks the pre-clear snapshot), so its first write
+	// is skipped and only resyncs it (wiping publisher's own cache as a side effect) — the same
+	// "skipped once, resynced" pattern as the dedicated test for that behavior elsewhere in this file.
 	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/b.json', entry(2000), 10);
+	await publisher.writeSharedSnapshot();
 	publisher.setCachedSessionData('/b.json', entry(2000), 10);
 	await publisher.writeSharedSnapshot();
 	const snapshotPath = m.getSharedSnapshotPath();
 	const stat = fs.statSync(snapshotPath);
 	fs.utimesSync(snapshotPath, new Date(stat.mtimeMs - 1000), new Date(stat.mtimeMs - 1000));
 
-	// publisher's write merges with whatever is already on disk (the pre-clear /a.json entry is
-	// still there — nothing in this test ever deleted it), so the exact merged count isn't the point;
-	// what matters is that /b.json actually loads despite its backdated mtime. Left unfixed, the
+	// What matters is that /b.json actually loads despite its backdated mtime; left unfixed, the
 	// stale bookmark from the pre-clear snapshot could exceed it and skip the load entirely.
 	const merged = await m.loadSharedSnapshotIfChanged();
 	assert.ok(merged > 0, 'the mtime bookmark must have been reset, not left pointing at the pre-clear snapshot');
@@ -1445,6 +1461,40 @@ test('deleteSharedSnapshot() proceeds anyway once its retry budget is spent agai
 	await m.deleteSharedSnapshot({ attempts: 3, delayMs: 5 });
 
 	assert.equal(fs.existsSync(m.getSharedSnapshotPath()), false, 'the snapshot must still be deleted even without the lock, rather than leaving Clear Cache stuck');
+});
+
+// A further Copilot review found a gap neither the generation-baseline fix nor the epoch check can
+// close on their own: clearAllCachedData() runs synchronously (bumping the generation immediately),
+// but the durable epoch only advances later, inside deleteSharedSnapshot() — which can be stuck
+// retrying for the cache lock for its whole retry budget (up to 10s in production) against a peer
+// that holds it. A loader starting in exactly that window captures a baseline that already reflects
+// the generation bump (nothing further changes it during the loader's own run), while the epoch has
+// not advanced either — so the still-present, pre-clear on-disk snapshot can be read and merged
+// straight back into the cache clearAllCachedData() just emptied. clearInProgress, true for exactly
+// this window, is the third signal that closes it.
+test('loadSharedSnapshotIfChanged() rejects a merge started while deleteSharedSnapshot() is still stuck on a peer lock', async (t) => {
+	const dir = tmpDir();
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot(); // pre-clear content stays on disk for the whole race below
+
+	const m = makeManager(dir); // never loaded yet, so its own mtime bookmark starts at 0
+
+	// Simulate a peer holding the cache lock, so deleteSharedSnapshot() below is stuck retrying —
+	// it has not yet unlinked the snapshot or bumped the epoch by the time the load races it.
+	fs.writeFileSync(m.getCacheLockPath(), JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
+
+	m.clearAllCachedData(); // the first of clearCache()'s two calls
+	const deletePromise = m.deleteSharedSnapshot({ attempts: 20, delayMs: 20 }); // ~400ms retry budget
+
+	// A concurrent load lands squarely inside the gap: clearAllCachedData() already ran, but
+	// deleteSharedSnapshot() has not yet unlinked the snapshot or bumped the epoch.
+	const merged = await m.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 0, 'a load landing while the clear is still mid-flight must not report a stale merge as useful');
+	assert.equal(m.cache.size, 0, 'the pre-clear snapshot must not be reinstated while the clear transition is still in progress');
+
+	fs.unlinkSync(m.getCacheLockPath()); // let deleteSharedSnapshot() finish rather than exhaust its budget
+	await deletePromise;
 });
 
 // ---------------------------------------------------------------------------

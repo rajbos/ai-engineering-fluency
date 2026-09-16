@@ -72,6 +72,18 @@ export class CacheManager {
 	// rename — if a clear landed in between, that write is built from stale, pre-clear data and
 	// would resurrect exactly what the clear just removed, so it aborts instead of persisting.
 	private cacheClearGeneration = 0;
+	// True from the moment clearAllCachedData() runs until deleteSharedSnapshot() finishes advancing
+	// (or, on a write failure, failing to advance) the durable epoch marker — the two calls clearCache()
+	// always makes back to back. In between, the in-memory cache has already been emptied, but the
+	// on-disk snapshot and the durable epoch have not caught up yet: deleteSharedSnapshot() can be
+	// stuck retrying for the cache lock for its whole retry budget (up to 10s in production) if a peer
+	// holds it. A loader (loadSharedSnapshotIfChanged(), loadCacheFromStorage()) that starts in that
+	// exact window captures a clear-generation baseline that already reflects the clearAllCachedData()
+	// bump — so its own generation check alone sees no *further* change — while the epoch, not yet
+	// advanced, also reports nothing new. Neither of those two checks can see this specific gap; this
+	// flag is a third, independent signal that closes it regardless of which of the other two would
+	// otherwise have caught (or missed) the same interleaving.
+	private clearInProgress = false;
 
 	constructor(
 		context: vscode.ExtensionContext,
@@ -108,12 +120,18 @@ export class CacheManager {
 	 * cache before parsing anything of its own — harmless in effect, since there is genuinely
 	 * nothing to lose, but a wasted disk round trip that defeats the "skip when nothing changed"
 	 * optimization on the very next cycle after every clear.
+	 *
+	 * Also sets clearInProgress, cleared again once deleteSharedSnapshot() (which every real caller
+	 * — clearCache() — invokes right after this) finishes advancing the durable epoch marker. See
+	 * that field's own doc comment for the same-process race this closes that neither the generation
+	 * counter nor the epoch alone can catch.
 	 */
 	clearAllCachedData(): void {
 		this.sessionFileCache.clear();
 		this.deletedFilePaths.clear();
 		this.cacheClearGeneration++;
 		this.resetCheckpointCounters();
+		this.clearInProgress = true;
 	}
 
 	// Cache management methods
@@ -829,11 +847,16 @@ export class CacheManager {
 			// entries it just finished loading. Runs on every path above (including the early
 			// returns), and is a safe no-op when nothing changed since the seed above.
 			await this.checkClearEpoch();
-			if (this.cacheClearGeneration !== clearGenerationAtStart) {
+			if (this.cacheClearGeneration !== clearGenerationAtStart || this.clearInProgress) {
 				// This window's own clearCache() landed while the load above was in flight.
 				// checkClearEpoch() does not catch this (see the comment where clearGenerationAtStart
 				// is captured) — whatever this load just assigned to sessionFileCache above needs to
 				// be wiped explicitly, the same way loadSharedSnapshotIfChanged() guards this race.
+				// The clearInProgress check additionally covers the case where clearAllCachedData()
+				// (and this method's baseline capture) both happened entirely *before* this call even
+				// started, but deleteSharedSnapshot() has not yet advanced the epoch by the time this
+				// load finishes — the generation comparison alone sees nothing further change in that
+				// case, since the baseline already reflects the earlier bump.
 				this.sessionFileCache = new Map();
 				// Also reset the mtime bookmark: the stat() above (if it ran) recorded the pre-clear
 				// snapshot's mtime, possibly *after* the concurrent deleteSharedSnapshot() already
@@ -1204,6 +1227,10 @@ export class CacheManager {
 			await this.bumpClearEpochLocked();
 		} finally {
 			if (lockAcquired) { await this.releaseCacheLock(); }
+			// The durable epoch has now been advanced (or, on a write failure inside
+			// bumpClearEpochLocked(), at least adopted locally) — the same-process race window
+			// clearInProgress guards is over regardless of which outcome landed.
+			this.clearInProgress = false;
 		}
 	}
 
@@ -1360,13 +1387,17 @@ export class CacheManager {
 		// synchronously right after leaves no gap for a same-process clear landing during that await to
 		// slip past a comparison that ran before it happened.
 		const epochDetected = await this.checkClearEpoch();
-		if (this.cacheClearGeneration !== clearGenerationAtStart) {
+		if (this.cacheClearGeneration !== clearGenerationAtStart || this.clearInProgress) {
 			// This window's own clearCache() (clearAllCachedData(), synchronous) already replaced
 			// sessionFileCache with a fresh, empty Map before the merge above ran — mergeSnapshotEntries()
 			// reads `this.sessionFileCache` at call time, so what was merged went straight into that new
 			// map, silently reinserting pre-clear entries into an otherwise-just-cleared cache.
 			// checkClearEpoch() does not catch this (see above), so it is not enough on its own to have
-			// wiped it — wipe explicitly.
+			// wiped it — wipe explicitly. The clearInProgress check additionally covers the narrower gap
+			// where this whole method's own baseline was captured *after* clearAllCachedData() already
+			// landed (i.e. entirely before this call started, not during it) but deleteSharedSnapshot()
+			// has not yet advanced the epoch: the generation comparison above sees nothing further
+			// change, and the epoch hasn't moved either, so neither of those two checks alone catches it.
 			this.sessionFileCache = new Map();
 			// Also reset the mtime bookmark: the assignment above (if it ran) recorded the pre-clear
 			// snapshot's mtime, possibly *after* the concurrent deleteSharedSnapshot() already reset it
