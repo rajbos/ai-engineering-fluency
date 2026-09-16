@@ -1271,30 +1271,30 @@ export class CacheManager {
 		// file, matching writeSharedSnapshot()'s check on the write side. See getClearEpochPath().
 		await this.checkClearEpoch();
 		const snapshotPath = this.getSharedSnapshotPath();
-		let mtimeMs: number;
+		let mtimeMs: number | undefined;
 		try {
 			const stat = await fs.promises.stat(snapshotPath);
 			mtimeMs = stat.mtimeMs;
 		} catch {
-			return 0; // No snapshot yet.
+			mtimeMs = undefined; // No snapshot yet (or a peer's clear just deleted it).
 		}
-		if (mtimeMs <= this.lastLoadedSnapshotMtime) {
-			return 0; // Already loaded this (or a newer) version.
-		}
-		const entries = await this.readSharedSnapshot();
-		if (!entries) {
-			// Remember the mtime so we don't repeatedly retry an incompatible snapshot.
+		let merged = 0;
+		if (mtimeMs !== undefined && mtimeMs > this.lastLoadedSnapshotMtime) {
+			const entries = await this.readSharedSnapshot();
+			if (entries) {
+				merged = this.mergeSnapshotEntries(entries);
+			}
+			// Remember the mtime either way, so a corrupt/incompatible snapshot isn't retried every cycle.
 			this.lastLoadedSnapshotMtime = mtimeMs;
-			return 0;
 		}
-		const merged = this.mergeSnapshotEntries(entries);
-		this.lastLoadedSnapshotMtime = mtimeMs;
-		// Re-check after merging, not just before starting: a peer's clear can land anywhere during
-		// the stat/read/merge sequence above, and the entries just merged in were read from a
-		// snapshot that predates it. Without this, this window would keep serving (and could later
-		// republish) those pre-clear entries until its next unrelated refresh cycle happened to call
-		// checkClearEpoch() again. A detected clear here means what was just merged is already
-		// stale, so it is dropped along with the rest of the cache — report 0, not `merged`.
+		// Re-check after the stat/read/merge sequence above, not just before starting — on every path,
+		// not only the one that merged something. A peer's clear can land anywhere in that sequence:
+		// mid-stat (the snapshot vanishes, or its mtime no longer looks newer), mid-read (the entries
+		// just merged in predate the clear), or between the two. Without a check on every exit, this
+		// window would keep serving (and could later republish) pre-clear in-memory data until its next
+		// unrelated refresh cycle happened to call checkClearEpoch() again. A detected clear here means
+		// anything just merged is already stale, so it is dropped along with the rest of the cache —
+		// report 0, not `merged`.
 		if (await this.checkClearEpoch()) {
 			return 0;
 		}

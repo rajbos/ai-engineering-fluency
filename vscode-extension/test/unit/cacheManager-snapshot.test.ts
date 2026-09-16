@@ -677,6 +677,38 @@ test('loadSharedSnapshotIfChanged() re-checks the epoch after merging, so a clea
 	assert.equal(m.cache.size, 0, 'the pre-clear entry must not survive in memory once the mid-load clear is detected');
 });
 
+// A further Copilot review pass found the mid-load re-check above only covers the merge-succeeded
+// path: the earlier `stat`-failure, stale-mtime, and corrupt-entries returns all exit before that
+// check runs, so a peer's clear landing during `stat()` itself — including the case where the clear's
+// own delete of the snapshot is what makes `stat()` throw — left this window's pre-clear in-memory
+// cache untouched on the "no snapshot" early return. Fixed by centralizing the re-check to run before
+// every return, not just the one after a successful merge.
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail).
+test('loadSharedSnapshotIfChanged() drops the stale in-memory cache on a peer clear landing during stat(), even with no snapshot on disk', async (t) => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10); // pre-clear in-memory data, never published
+
+	const originalStat = fs.promises.stat.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'stat', async (...args: unknown[]) => {
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			// Simulate a peer window's clear landing exactly while this call is stat-ing the
+			// snapshot — a real interleaving: there was never a snapshot on disk to begin with,
+			// so stat() throws ENOENT either way, but the clear must still be detected here.
+			const peer = makeManager(dir);
+			await peer.deleteSharedSnapshot();
+		}
+		return originalStat(...args);
+	});
+
+	const merged = await m.loadSharedSnapshotIfChanged();
+	assert.ok(intercepted, 'the stat interception must actually have fired for this assertion to be meaningful');
+	assert.equal(merged, 0, 'nothing to merge — there was never a snapshot on disk');
+	assert.equal(m.cache.size, 0, 'the pre-clear in-memory entry must be dropped once the mid-stat clear is detected, even on the no-snapshot early-return path');
+});
+
 test('a save that started before the clear epoch is skipped only once; the next save (after re-syncing) succeeds normally', async () => {
 	const dir = tmpDir();
 
