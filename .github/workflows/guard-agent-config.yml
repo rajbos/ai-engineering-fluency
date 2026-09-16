@@ -24,7 +24,14 @@ permissions:
   # Needed to REMOVE a stale approval label when new commits arrive. Approval
   # has to die on every push, and the server doing the removing is the only
   # party that cannot be lied to about when a push happened.
+  #
+  # A pull request's labels are read and written through the shared
+  # `issues/{number}/labels` endpoint, but on a PR that endpoint is authorized
+  # as a PULL REQUEST write: `issues: write` on its own returns 403. Both are
+  # declared because the endpoint is shared between the two resource types -
+  # `pr-risk-review.yml` pairs them the same way to apply its `risk: *` labels.
   issues: write
+  pull-requests: write
 
 env:
   # Applied by a human on the PR to accept an agent-authored change to these
@@ -136,6 +143,27 @@ jobs:
             has_label=true
           fi
 
+          # Removing the approval is this guard's whole job, so a removal that
+          # silently failed must not read like one that worked. `curl -fsS`
+          # exits non-zero on an HTTP error, which under `set -e` would abort
+          # the step before it printed anything a human could act on.
+          #
+          # Letting `if` suspend errexit is safe here, unlike elsewhere in this
+          # file: every caller exits 1 immediately afterwards, so this only
+          # decides which message is printed, never whether the guard passes.
+          revoke_label() {
+            local why="$1"
+            if curl -fsS -X DELETE \
+                -H "Authorization: Bearer $GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/$APPROVAL_LABEL" \
+                >/dev/null; then
+              echo "::error::${why} The '$APPROVAL_LABEL' label was removed."
+            else
+              echo "::error::${why} The '$APPROVAL_LABEL' label could NOT be removed automatically - the GitHub API rejected the call (see the log above). Remove it by hand before approving again."
+            fi
+          }
+
           # New commits void any prior approval. Rather than reason about
           # timestamps - commit dates are set by whoever makes the commit, so an
           # agent could backdate one to sit behind an old approval - the label is
@@ -143,12 +171,7 @@ jobs:
           # after looking at the new commits.
           if [ "$EVENT_ACTION" = "synchronize" ]; then
             if [ "$has_label" = true ]; then
-              curl -fsS -X DELETE \
-                -H "Authorization: Bearer $GITHUB_TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/$APPROVAL_LABEL" \
-                >/dev/null
-              echo "::error::New commits arrived, so the '$APPROVAL_LABEL' approval was removed. Review the new changes to the protected paths and re-apply it."
+              revoke_label "New commits arrived, so the earlier approval no longer applies. Review the new changes to the protected paths and approve again."
             else
               echo "::error::This PR changes agent/CI configuration and looks agent-authored ($signal). A human must review those paths and add the '$APPROVAL_LABEL' label to merge."
             fi
@@ -166,12 +189,7 @@ jobs:
             case " $APPROVERS " in
               *" $SENDER "*) : ;;
               *)
-                curl -fsS -X DELETE \
-                  -H "Authorization: Bearer $GITHUB_TOKEN" \
-                  -H "Accept: application/vnd.github+json" \
-                  "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels/$APPROVAL_LABEL" \
-                  >/dev/null
-                echo "::error::'$SENDER' is not an approver for agent configuration changes, so the label was removed. Approvers: $APPROVERS."
+                revoke_label "'$SENDER' is not an approver for agent configuration changes (approvers: $APPROVERS)."
                 exit 1
                 ;;
             esac
