@@ -1054,20 +1054,7 @@ function renderModelOverviewBadge(model: string | null): string {
 	return `<span class="overview-model-badge" style="${style}" title="${escapeHtml(model)}">${escapeHtml(getModelDisplayName(model))}</span>`;
 }
 
-/**
- * Renders the turns-overview table shown above the chat-turns list: one compact,
- * clickable row per turn with its mode, model, and input/cached/output token
- * usage, so a multi-model session (e.g. model-routing research) can be scanned
- * at a glance without opening every turn card. A row's model badge differing
- * from the one above it is flagged with ⇄ to spot model switches quickly.
- * Clicking a row scrolls to and briefly highlights the matching turn card.
- *
- * When a turn was routed through HydraFusion (`hydraTurnMatches` places it), its
- * row also gets a ⚡ toggle that expands the same leg-by-leg table shown in the
- * HydraFusion section above — see `matchHydraFusionTurnsToChatTurns`. This is the
- * only difference from a plain session's table: everything else here runs exactly
- * as before for the overwhelming majority of sessions, which never used the router.
- */
+// Layout flags for the turns-overview table, derived once from its row list.
 type TurnsOverviewTableFlags = {
 	hasCached: boolean;
 	hasModelSwitches: boolean;
@@ -1158,6 +1145,20 @@ ${costCell(row.cost)}
 </tr>${childRows}${legsRow}`;
 }
 
+/**
+ * Renders the turns-overview table shown above the chat-turns list: one compact,
+ * clickable row per turn with its mode, model, and input/cached/output token
+ * usage, so a multi-model session (e.g. model-routing research) can be scanned
+ * at a glance without opening every turn card. A row's model badge differing
+ * from the one above it is flagged with ⇄ to spot model switches quickly.
+ * Clicking a row scrolls to and briefly highlights the matching turn card.
+ *
+ * When a turn was routed through HydraFusion (`hydraTurnMatches` places it), its
+ * row also gets a ⚡ toggle that expands the same leg-by-leg table shown in the
+ * HydraFusion section above — see `matchHydraFusionTurnsToChatTurns`. This is the
+ * only difference from a plain session's table: everything else here runs exactly
+ * as before for the overwhelming majority of sessions, which never used the router.
+ */
 function renderTurnsOverviewTable(data: SessionLogData, hydraTurnMatches?: Map<number, number>): string {
 	if (data.turns.length === 0) { return ''; }
 	const rows = buildTurnOverviewRows(data.turns, data.hydraFusion, hydraTurnMatches);
