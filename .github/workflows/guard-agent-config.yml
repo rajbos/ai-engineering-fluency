@@ -17,7 +17,7 @@ name: Guard agent config
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-    branches: [main, develop]
+    branches: main
 
 permissions:
   contents: read
