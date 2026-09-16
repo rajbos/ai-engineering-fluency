@@ -75,8 +75,18 @@ jobs:
           git fetch --quiet origin "$BASE_REF"
 
           changed=$(git diff --name-only "origin/$BASE_REF...HEAD")
+          set +e
           protected=$(printf '%s\n' "$changed" \
-            | grep -E '^(\.github/|\.claude/|\.devcontainer/|AGENTS\.md$|CLAUDE\.md$)' || true)
+            | grep -E '^(\.github/|\.claude/|\.devcontainer/|AGENTS\.md$|CLAUDE\.md$)')
+          grep_status=$?
+          set -e
+
+          if [ "$grep_status" -eq 1 ]; then
+            protected=""
+          elif [ "$grep_status" -ne 0 ]; then
+            echo "grep failed while checking protected paths" >&2
+            exit "$grep_status"
+          fi
 
           if [ -z "$protected" ]; then
             echo "No protected paths touched - nothing to guard."
