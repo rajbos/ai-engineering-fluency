@@ -179,8 +179,11 @@ Notes:
 `.github/workflows/guard-agent-config.yml` fails a pull request that both
 (a) touches `.github/**`, `.claude/**`, `.devcontainer/**`, `AGENTS.md` or
 `CLAUDE.md`, and (b) looks agent-authored — an agent branch prefix
-(`claude/`, `copilot/`, `agent-review/`), a bot PR author, or an
-`Co-authored-by: Claude…`/`Copilot…` trailer on any commit.
+(`claude/`, `copilot/`, `agent-review/`), a bot PR author other than
+dependabot or github-actions, or an AI `Co-authored-by:` trailer on any
+commit. That trailer match is not limited to Claude and Copilot — it also
+covers GPT, Codex, Gemini, Mistral, Vibe, Devin, Cursor and Aider, so do not
+read the two examples as the whole list.
 
 These are the files that decide what automation is allowed to do, so an agent
 must not be able to change them unattended. If your PR trips this check, that
