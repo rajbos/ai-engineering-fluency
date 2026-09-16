@@ -229,3 +229,12 @@ When adding or changing runtime localization keys (entries in `vscode-extension/
 ## File-size ceiling (`max-lines`)
 
 `vscode-extension/eslint.config.mjs` enforces `"max-lines": ["warn", { max: 6000, ... }]` alongside the existing complexity rules. The per-function rules (`max-lines-per-function`, `complexity`, `sonarjs/cognitive-complexity`) were all satisfied while `vscode-extension/src/extension.ts` grew to 12,332 lines and 553 methods — proof that small functions alone don't stop a file from becoming unmanageable. New code should not push any linted file past 6000 lines; if you're about to, split it instead. `extension.ts` is today's sole (known) outlier, and stays that way on purpose until it's decomposed — see `docs/adr/EXTENSION-TS-DECOMPOSITION.md` for the extraction plan. Ratchet the 6000 number down as files shrink; don't raise it to accommodate growth.
+
+## Pre-PR self-review checklist
+
+PR #2107 took ~12 rounds of Copilot review-agent feedback over ~22 hours to land, with every fix pushed as its own commit (never amended, never force-pushed). The many-rounds loop wasn't caused by amending or force-pushing — it never did that. It happened because each fix commit closed only the single race condition or edge case the reviewer had named (e.g. one `await` point where a peer clear/write could interleave), instead of enumerating and closing the whole class of similar cases at once. The reviewer kept finding the next adjacent gap in the same state machine, round after round.
+
+Before pushing a fix for review feedback, agents must:
+
+- **Close the whole class, not just the cited instance.** When a review comment flags one case of a bug (one race condition, one edge case, one unguarded call site), explicitly enumerate the full set of cases/call-sites/interleavings/state transitions that issue belongs to (e.g. every `await` point in the same state machine where a concurrent clear/write/reset could interleave), and fix all of them in that same pass — not just the one instance the reviewer pointed at.
+- **Batch a full round into one push.** Before pushing, collect and address every currently-open review comment together, then push once for that round. Don't push a commit per individual fix as each comment trickles in — that's what turns a handful of review rounds into a dozen.
