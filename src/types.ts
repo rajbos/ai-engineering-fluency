@@ -877,6 +877,8 @@ correctionReport?: CorrectionReport;
  * cluster reached the minimum size.
  */
 repeatedTasks?: RepeatedTaskReport;
+/** Optional Copilot memory-files hygiene analysis (VS Code only; absent in CLI/VS/JetBrains). */
+memoryFilesAnalysis?: MemoryFilesAnalysis | null;
 }
 
 /** One day's worth of multi-agent/delegation signal, used to render a trend sparkline. */
@@ -1460,6 +1462,97 @@ export interface ToolCurationAnalysis {
   estimatedPromptBloat: { totalTokens: number; byServer: Record<string, number> };
   /** Prioritised list of recommendations. */
   recommendations: ToolCurationRecommendation[];
+}
+
+// ---------------------------------------------------------------------------
+// Copilot Memory Files
+// ---------------------------------------------------------------------------
+
+/** A single Copilot agent memory Markdown file discovered on disk. */
+export interface MemoryFileEntry {
+  /** Absolute path to the memory `.md` file. */
+  path: string;
+  /** Scope this file belongs to — see docs/features/COPILOT-MEMORY-FILES-INSIGHT.md. */
+  scope: 'user' | 'repo' | 'session';
+  /** The `workspaceStorage/<hash>` this file was discovered under. Undefined for `scope === 'user'`. */
+  workspaceHash?: string;
+  /** Resolved friendly workspace folder path, when recorded in `workspace.json`/`meta.json`. */
+  workspaceName?: string;
+  /** Decoded chat-session UUID when `scope === 'session'` (the folder name is `base64(sessionId)`). */
+  sessionId?: string;
+  /** File size in bytes. */
+  sizeBytes: number;
+  /** Last-modified time, in milliseconds since epoch. */
+  mtimeMs: number;
+  /** File name without extension, used as a display title (content is never read beyond this). */
+  title: string;
+}
+
+/** Per-workspace rollup of discovered memory files, used by `MemoryFilesAnalysis.byWorkspace`. */
+export interface MemoryFilesWorkspaceSummary {
+  workspaceHash?: string;
+  workspaceName?: string;
+  repoCount: number;
+  sessionCount: number;
+  /** User (global)-scope files folded into this bucket — only ever non-zero for the `__user__` row. */
+  userCount: number;
+  totalBytes: number;
+  newestMtimeMs: number | null;
+  oldestMtimeMs: number | null;
+  largestFile?: MemoryFileEntry;
+  /** Files older than the analysis's `staleDays` threshold. */
+  staleFiles: MemoryFileEntry[];
+}
+
+/** Full result of a Copilot memory-files hygiene analysis run. */
+export interface MemoryFilesAnalysis {
+  /** Look-back threshold (days) used to flag a file as stale. */
+  staleDays: number;
+  /** Size threshold (bytes) used to flag a file as unusually large. */
+  largeFileBytes: number;
+  /** Every discovered memory file (metadata only — content is never included). */
+  files: MemoryFileEntry[];
+  /** Rollup grouped by workspace (and one entry for the `user` global scope). */
+  byWorkspace: MemoryFilesWorkspaceSummary[];
+  totalFiles: number;
+  totalBytes: number;
+  staleFileCount: number;
+  largeFileCount: number;
+}
+
+/**
+ * Compact per-workspace rollup for {@link MemoryFilesAnalysisView} — the counts/rollup scalars
+ * the Usage Analysis webview table renders, without the per-file `staleFiles`/`largestFile`
+ * entries (absolute paths, session IDs) `MemoryFilesWorkspaceSummary` carries for the CLI/host.
+ */
+export interface MemoryFilesWorkspaceViewSummary {
+  workspaceHash?: string;
+  workspaceName?: string;
+  repoCount: number;
+  sessionCount: number;
+  /** User (global)-scope files folded into this bucket — only ever non-zero for the `__user__` row. */
+  userCount: number;
+  totalBytes: number;
+  newestMtimeMs: number | null;
+  /** `MemoryFilesWorkspaceSummary.staleFiles.length` — the webview table only ever shows the count. */
+  staleFileCount: number;
+}
+
+/**
+ * Compact projection of {@link MemoryFilesAnalysis} sent to the Usage Analysis webview: counts
+ * and rollup scalars only. Omits the full `files` list and each workspace's `staleFiles`/
+ * `largestFile`/`oldestMtimeMs` — metadata (absolute paths, session IDs, per-file objects) the
+ * webview UI never reads, but which inflates the IPC/HTML payload for a large memory store.
+ * Produced by `toMemoryFilesAnalysisView()` in the VS Code extension host.
+ */
+export interface MemoryFilesAnalysisView {
+  staleDays: number;
+  largeFileBytes: number;
+  byWorkspace: MemoryFilesWorkspaceViewSummary[];
+  totalFiles: number;
+  totalBytes: number;
+  staleFileCount: number;
+  largeFileCount: number;
 }
 
 /**

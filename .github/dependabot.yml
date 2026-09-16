@@ -32,6 +32,16 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # @types/vscode bumps the minimum VS Code version enterprise users need
+    # (engines.vscode must be >= @types/vscode or vsce refuses to package —
+    # see the incident that broke the nightly pre-release for over a week).
+    # Give each release 6 weeks before Dependabot even proposes it, so users
+    # on an older VS Code build keep working; engines.vscode is bumped by hand
+    # only when the code actually needs a newer API.
+    cooldown:
+      default-days: 42
+      include:
+        - "@types/vscode"
     # Allow both devDependencies and dependencies updates
     ignore:
       # Ignore major version updates for stable dependencies
