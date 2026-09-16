@@ -2158,7 +2158,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// persistRefreshResult() save, or another window's entirely — cannot land its rename
 			// after this delete and resurrect the data this clear is removing. See that method's
 			// doc comment for why the lock, not just the in-memory clear generation, is required.
-			await this.cacheManager.deleteSharedSnapshot();
+			//
+			// Its return value distinguishes a fully durable clear from one where the epoch marker
+			// itself failed to write: this window's own cache is empty either way, but only the
+			// former is visible to a peer window at all — see deleteSharedSnapshot()'s doc comment.
+			const epochPersisted = await this.cacheManager.deleteSharedSnapshot();
 
 			// Reset diagnostics loaded flag so the diagnostics view will reload files
 			this.diagnosticsHasLoadedFiles = false;
@@ -2167,7 +2171,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.diagnosticsTtftCache.clear();
 
 			this.log(`Cache cleared successfully. Removed ${cacheSize} entries.`);
-			vscode.window.showInformationMessage('Cache cleared successfully. Reloading statistics...');
+			if (epochPersisted) {
+				vscode.window.showInformationMessage('Cache cleared successfully. Reloading statistics...');
+			} else {
+				this.warn('Cache cleared locally, but the cross-window clear marker could not be saved to disk.');
+				vscode.window.showWarningMessage('Cache cleared, but could not confirm the clear to other open windows — they may still show stale data until they restart or you clear the cache again. Reloading statistics...');
+			}
 
 			// Trigger a refresh after clearing the cache
 			this.log('Reloading token statistics...');

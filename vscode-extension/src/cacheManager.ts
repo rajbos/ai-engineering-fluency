@@ -1021,6 +1021,10 @@ export class CacheManager {
 	 * the floor exists at all) would successfully persist it, and this window's `checkClearEpoch()`
 	 * would then see `persisted <= this.clearEpoch` and silently miss that real, successful clear.
 	 *
+	 * Returns whether the marker was actually written: `false` means no peer (or this window, after
+	 * a restart) can learn about this clear through the epoch file at all, so `deleteSharedSnapshot()`
+	 * propagates this instead of reporting an unqualified success — see its own doc comment.
+	 *
 	 * The new epoch is `max(Date.now(), persisted + 1, this.clearEpoch + 1)`, not a bare timestamp:
 	 * two clears close together (this window twice, or racing a peer's own clear) must never
 	 * produce the same or a lower value — checkClearEpoch()'s `persisted <= this.clearEpoch`
@@ -1044,7 +1048,7 @@ export class CacheManager {
 	 * staying behind, even though this specific call can no longer be serialized against a
 	 * concurrent writer. See `deleteSharedSnapshot()`'s doc comment for that fallback's own tradeoff.
 	 */
-	private async bumpClearEpochLocked(): Promise<void> {
+	private async bumpClearEpochLocked(): Promise<boolean> {
 		const epochPath = this.getClearEpochPath();
 		const persisted = await this.readClearEpoch();
 		// A value at or beyond Number.MAX_SAFE_INTEGER cannot be safely incremented: float64 rounds
@@ -1078,9 +1082,11 @@ export class CacheManager {
 			await fs.promises.writeFile(tmpPath, JSON.stringify({ epoch: newEpoch }));
 			await fs.promises.rename(tmpPath, epochPath);
 			this.clearEpoch = newEpoch;
+			return true;
 		} catch (error) {
 			this.deps.warn(`Failed to persist clear epoch: ${error}`);
 			try { await fs.promises.unlink(tmpPath); } catch { /* best-effort cleanup */ }
+			return false;
 		}
 	}
 
@@ -1247,8 +1253,14 @@ export class CacheManager {
 	 * still runs — unlocked, best-effort — because the fence must advance regardless; that call is
 	 * not serialized against a concurrent writer the way the held-lock case is. See
 	 * `bumpClearEpochLocked()`'s own doc comment for that narrower, already-accepted fallback gap.
+	 *
+	 * Returns whether the durable epoch was actually persisted (`bumpClearEpochLocked()`'s own
+	 * result). `false` means the on-disk snapshot was still deleted for this window, but no peer —
+	 * and not even this window after a restart — has any durable record that a clear happened at
+	 * all, so a peer's pre-clear in-memory cache can pass every check and republish stale data
+	 * indefinitely. The caller must not treat this method as having unconditionally succeeded.
 	 */
-	async deleteSharedSnapshot(retryOptions?: { attempts: number; delayMs: number }): Promise<void> {
+	async deleteSharedSnapshot(retryOptions?: { attempts: number; delayMs: number }): Promise<boolean> {
 		const lockAcquired = await this.acquireCacheLockWithRetry(retryOptions);
 		try {
 			const snapshotPath = this.getSharedSnapshotPath();
@@ -1274,7 +1286,7 @@ export class CacheManager {
 					this.deps.warn(`Failed to delete shared cache snapshot: ${err}`);
 				}
 			}
-			await this.bumpClearEpochLocked();
+			return await this.bumpClearEpochLocked();
 		} finally {
 			if (lockAcquired) { await this.releaseCacheLock(); }
 			// The durable epoch has now been advanced (or, on a write failure inside

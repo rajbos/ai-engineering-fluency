@@ -1399,6 +1399,33 @@ test('bumpClearEpochLocked() leaves the local epoch untouched on a write failure
 	}
 });
 
+// A further Copilot review found deleteSharedSnapshot() reported unconditional success (a resolved
+// `Promise<void>`) even when the epoch marker write failed — the on-disk snapshot was still deleted
+// for this window, but with no durable record of the clear at all, no peer (and not even this window
+// after a restart) has any way to learn it happened, defeating the cross-window fence entirely on a
+// disk failure. Fixed by having deleteSharedSnapshot() (via bumpClearEpochLocked()) return whether the
+// marker was actually persisted, so a caller like clearCache() can tell a fully durable clear apart
+// from one that only cleared this window's own memory and warn instead of silently claiming success.
+test('deleteSharedSnapshot() reports false, not unconditional success, when the epoch marker write fails', async (t) => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	const originalWriteFile = fs.promises.writeFile.bind(fs.promises) as (...a: unknown[]) => Promise<void>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'writeFile', async (...args: unknown[]) => {
+		if (!intercepted && String(args[0]).includes('.epoch.json.')) {
+			intercepted = true;
+			throw new Error('simulated disk failure');
+		}
+		return originalWriteFile(...args);
+	});
+
+	const persisted = await m.deleteSharedSnapshot();
+	assert.ok(intercepted, 'the write interception must actually have fired for this assertion to be meaningful');
+	assert.equal(persisted, false,
+		'a failed epoch write must be reported to the caller, not silently treated as a successful clear');
+});
+
 test('clearCache()-style sequence (clearAllCachedData + awaitInFlightCheckpoint + deleteSharedSnapshot) is not resurrected by a slow in-flight checkpoint', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
