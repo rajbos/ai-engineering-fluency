@@ -1497,6 +1497,112 @@ test('loadSharedSnapshotIfChanged() rejects a merge started while deleteSharedSn
 	await deletePromise;
 });
 
+// A further Copilot review found writeSharedSnapshot() never checked clearInProgress at all: a save
+// (e.g. a periodic checkpoint) whose baseline is captured after an external clearAllCachedData() has
+// already landed, but while deleteSharedSnapshot() is still stuck on a peer's lock, sees no generation
+// change and no epoch change either — the exact same shape of gap the two loaders were fixed against,
+// just on the write side. Left unfixed, buildMergedSnapshotEntries() would read the still-present
+// pre-clear on-disk snapshot and rename it right back, undoing the clear entirely.
+test('writeSharedSnapshot() rejects a write started while deleteSharedSnapshot() is still stuck on a peer lock', async (t) => {
+	const dir = tmpDir();
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot(); // pre-clear content stays on disk for the whole race below
+
+	const m = makeManager(dir);
+
+	fs.writeFileSync(m.getCacheLockPath(), JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
+
+	m.clearAllCachedData();
+	const deletePromise = m.deleteSharedSnapshot({ attempts: 20, delayMs: 20 });
+
+	// A concurrent checkpoint lands squarely inside the gap, same as the loader race above.
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+	const persisted = await m.writeSharedSnapshot();
+	assert.equal(persisted, false, 'a write started while the clear is still mid-flight must not persist');
+
+	fs.unlinkSync(m.getCacheLockPath());
+	await deletePromise;
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(!entries || !('/a.json' in entries), 'the clear must not be undone by a write that raced its still-in-progress transition');
+});
+
+// A further Copilot review found clearInProgress (then a plain boolean) could report "no clear in
+// progress" while a *second*, overlapping clearCache() was still mid-flight: nothing today serializes
+// concurrent clearCache() calls, so if the first deleteSharedSnapshot() finishes (setting the flag to
+// false) while the second clearAllCachedData() has already run but its own deleteSharedSnapshot() is
+// still stuck on the lock, a load landing in that instant would see clearInProgress as false and could
+// merge stale data back in. A counter, decremented rather than reset, fixes this: it only returns to
+// zero once every outstanding clearAllCachedData() has been matched by its own finished
+// deleteSharedSnapshot().
+test('clearInProgress reports true until every overlapping clearCache() sequence finishes, not just the first', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	// Two overlapping clearCache() sequences, as if the command fired twice in quick succession —
+	// run sequentially here since the fix is about the counter's own bookkeeping, not about forcing a
+	// specific interleaving of the underlying lock-retry mechanics (already covered elsewhere).
+	m.clearAllCachedData();
+	m.clearAllCachedData();
+	await m.deleteSharedSnapshot(); // matches only the FIRST clearAllCachedData()
+
+	// publisher's own epoch predates the real clear m's first deleteSharedSnapshot() just made, so its
+	// first write after it is skipped and only resyncs it (the same "skipped once, resynced" pattern
+	// used elsewhere in this file) — the second attempt is what actually lands content on disk that
+	// a plain boolean would wrongly let the check below resurrect.
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot();
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot();
+
+	// A plain boolean would already report "no clear in progress" here, even though the second
+	// clearAllCachedData()'s own deleteSharedSnapshot() has not run yet — a load landing at this
+	// instant would incorrectly be allowed to merge (neither the generation nor the epoch check
+	// catches it either, since this same instance already caught up to both on its own first call).
+	const merged = await m.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 0, 'a load landing between the two overlapping clears\' own deleteSharedSnapshot() calls must still be rejected');
+	assert.equal(m.cache.size, 0, 'the content published while the second clear was still outstanding must not be merged in yet');
+
+	await m.deleteSharedSnapshot(); // matches the SECOND clearAllCachedData() — bumps the epoch again
+
+	// Published only now, after the whole transition has finished — publishing beforehand would just
+	// get deleted by the second deleteSharedSnapshot() call above, same as the first snapshot was by
+	// the first one. publisher's epoch is stale yet again (the second delete just advanced it further
+	// than what publisher resynced to earlier), so it needs one more skip-and-resync round first.
+	publisher.setCachedSessionData('/b.json', entry(2000), 10);
+	await publisher.writeSharedSnapshot();
+	publisher.setCachedSessionData('/b.json', entry(2000), 10);
+	await publisher.writeSharedSnapshot();
+
+	const mergedAfter = await m.loadSharedSnapshotIfChanged();
+	assert.ok(mergedAfter > 0, 'once every outstanding clear has finished, a normal load must succeed again');
+	assert.ok(m.cache.has('/b.json'), 'content published once the whole transition finished must load normally');
+});
+
+// A further Copilot review found readClearEpoch() accepted Number.MAX_SAFE_INTEGER as a valid epoch,
+// but bumpClearEpochLocked() computes the next value as `persisted + 1` — at that exact boundary,
+// float64 rounds the result back down to the same unsafe value it started from, so two consecutive
+// clears from an exhausted/corrupted marker could write the identical "new" epoch, breaking the
+// strictly-advancing guarantee this method exists to provide.
+test('bumpClearEpochLocked() still strictly advances from a marker at the Number.MAX_SAFE_INTEGER boundary', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	fs.mkdirSync(path.dirname(m.getClearEpochPath()), { recursive: true });
+	fs.writeFileSync(m.getClearEpochPath(), JSON.stringify({ epoch: Number.MAX_SAFE_INTEGER }));
+
+	await m.deleteSharedSnapshot();
+	const first = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+
+	await m.deleteSharedSnapshot();
+	const second = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+
+	assert.ok(second > first,
+		`two clears starting from an exhausted marker must still strictly advance (got ${first} then ${second}) — a non-advancing epoch at this boundary would let checkClearEpoch() silently miss the second clear`);
+});
+
 // ---------------------------------------------------------------------------
 // Follow-up review finding: clearAllCachedData() cleared sessionFileCache but left deletedFilePaths
 // (tombstones from deletions decided *before* the clear) intact. A "Clear Cache" is meant to reset

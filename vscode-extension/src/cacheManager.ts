@@ -72,18 +72,27 @@ export class CacheManager {
 	// rename — if a clear landed in between, that write is built from stale, pre-clear data and
 	// would resurrect exactly what the clear just removed, so it aborts instead of persisting.
 	private cacheClearGeneration = 0;
-	// True from the moment clearAllCachedData() runs until deleteSharedSnapshot() finishes advancing
-	// (or, on a write failure, failing to advance) the durable epoch marker — the two calls clearCache()
-	// always makes back to back. In between, the in-memory cache has already been emptied, but the
-	// on-disk snapshot and the durable epoch have not caught up yet: deleteSharedSnapshot() can be
-	// stuck retrying for the cache lock for its whole retry budget (up to 10s in production) if a peer
-	// holds it. A loader (loadSharedSnapshotIfChanged(), loadCacheFromStorage()) that starts in that
-	// exact window captures a clear-generation baseline that already reflects the clearAllCachedData()
-	// bump — so its own generation check alone sees no *further* change — while the epoch, not yet
-	// advanced, also reports nothing new. Neither of those two checks can see this specific gap; this
-	// flag is a third, independent signal that closes it regardless of which of the other two would
-	// otherwise have caught (or missed) the same interleaving.
-	private clearInProgress = false;
+	// Counts clearAllCachedData() calls not yet matched by a finished deleteSharedSnapshot() — the two
+	// calls clearCache() always makes back to back. In between, the in-memory cache has already been
+	// emptied, but the on-disk snapshot and the durable epoch have not caught up yet:
+	// deleteSharedSnapshot() can be stuck retrying for the cache lock for its whole retry budget (up
+	// to 10s in production) if a peer holds it. A loader (loadSharedSnapshotIfChanged(),
+	// loadCacheFromStorage()) that starts in that exact window captures a clear-generation baseline
+	// that already reflects the clearAllCachedData() bump — so its own generation check alone sees no
+	// *further* change — while the epoch, not yet advanced, also reports nothing new. Neither of
+	// those two checks can see this specific gap; checking this counter is a third, independent
+	// signal that closes it regardless of which of the other two would otherwise have caught (or
+	// missed) the same interleaving.
+	//
+	// A counter, not a boolean: two clearCache() calls can overlap (nothing today serializes them —
+	// e.g. a double-invoked command), and a plain boolean set false by whichever deleteSharedSnapshot()
+	// finishes first would wrongly report "no clear in progress" while the other one is still mid-flight,
+	// stuck on the lock with the epoch not yet advanced. Only once every outstanding clearAllCachedData()
+	// has been matched by its own finished deleteSharedSnapshot() does the count return to zero.
+	private clearInProgressCount = 0;
+	private get clearInProgress(): boolean {
+		return this.clearInProgressCount > 0;
+	}
 
 	constructor(
 		context: vscode.ExtensionContext,
@@ -121,17 +130,18 @@ export class CacheManager {
 	 * nothing to lose, but a wasted disk round trip that defeats the "skip when nothing changed"
 	 * optimization on the very next cycle after every clear.
 	 *
-	 * Also sets clearInProgress, cleared again once deleteSharedSnapshot() (which every real caller
-	 * — clearCache() — invokes right after this) finishes advancing the durable epoch marker. See
-	 * that field's own doc comment for the same-process race this closes that neither the generation
-	 * counter nor the epoch alone can catch.
+	 * Also increments clearInProgressCount, decremented again once deleteSharedSnapshot() (which
+	 * every real caller — clearCache() — invokes right after this) finishes advancing the durable
+	 * epoch marker. See that field's own doc comment for the same-process race this closes that
+	 * neither the generation counter nor the epoch alone can catch, and for why it is a counter
+	 * rather than a boolean.
 	 */
 	clearAllCachedData(): void {
 		this.sessionFileCache.clear();
 		this.deletedFilePaths.clear();
 		this.cacheClearGeneration++;
 		this.resetCheckpointCounters();
-		this.clearInProgress = true;
+		this.clearInProgressCount++;
 	}
 
 	// Cache management methods
@@ -1026,7 +1036,18 @@ export class CacheManager {
 	private async bumpClearEpochLocked(): Promise<void> {
 		const epochPath = this.getClearEpochPath();
 		const persisted = await this.readClearEpoch();
-		const newEpoch = Math.max(Date.now(), persisted + 1, this.clearEpoch + 1);
+		// A value at or beyond Number.MAX_SAFE_INTEGER cannot be safely incremented: float64 rounds
+		// `n + 1` back down to `n` at that magnitude, so flooring on it directly could produce the
+		// exact same "new" epoch as last time, breaking the strict-advance guarantee this method
+		// exists to provide. readClearEpoch() already validates on read, but `this.clearEpoch` is
+		// assigned the raw computed value below, bypassing that check — so a marker that reaches
+		// this boundary (corrupt, or genuinely exhausted after an astronomical number of clears)
+		// stays reachable through this window's own in-memory value too. Treat either input as
+		// exhausted and fall back to Date.now() alone, which stays many orders of magnitude below
+		// this threshold under any realistic clock.
+		const safePersisted = persisted < Number.MAX_SAFE_INTEGER ? persisted : 0;
+		const safeLocalEpoch = this.clearEpoch < Number.MAX_SAFE_INTEGER ? this.clearEpoch : 0;
+		const newEpoch = Math.max(Date.now(), safePersisted + 1, safeLocalEpoch + 1);
 		const tmpPath = `${epochPath}.${process.pid}.${newEpoch}.tmp`;
 		try {
 			await fs.promises.mkdir(path.dirname(epochPath), { recursive: true });
@@ -1124,7 +1145,12 @@ export class CacheManager {
 		const tmpPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
 		try {
 			const entries = await this.buildMergedSnapshotEntries();
-			if (this.cacheClearGeneration !== clearGenerationAtStart) {
+			if (this.cacheClearGeneration !== clearGenerationAtStart || this.clearInProgress) {
+				// clearInProgress catches the same gap here as in the two loaders: this call's baseline
+				// can have been captured *after* an external clearAllCachedData() already landed (not
+				// during buildMergedSnapshotEntries()'s own await), with deleteSharedSnapshot() still
+				// stuck on the cache lock and the epoch not yet advanced — neither the generation
+				// comparison nor an epoch check would catch that on their own.
 				this.deps.log('Skipping shared-snapshot write: cache was cleared while this checkpoint was building it');
 				return false;
 			}
@@ -1146,7 +1172,7 @@ export class CacheManager {
 			// checkClearEpoch() first and comparing the generation synchronously right after leaves no
 			// such gap.
 			const epochDetectedBeforeRename = await this.checkClearEpoch();
-			if (this.cacheClearGeneration !== clearGenerationAtStart || epochDetectedBeforeRename) {
+			if (this.cacheClearGeneration !== clearGenerationAtStart || epochDetectedBeforeRename || this.clearInProgress) {
 				this.deps.log('Skipping shared-snapshot write: cache was cleared while this checkpoint was about to persist');
 				try { await fs.promises.unlink(tmpPath); } catch { /* best-effort cleanup */ }
 				return false;
@@ -1228,9 +1254,12 @@ export class CacheManager {
 		} finally {
 			if (lockAcquired) { await this.releaseCacheLock(); }
 			// The durable epoch has now been advanced (or, on a write failure inside
-			// bumpClearEpochLocked(), at least adopted locally) — the same-process race window
-			// clearInProgress guards is over regardless of which outcome landed.
-			this.clearInProgress = false;
+			// bumpClearEpochLocked(), at least adopted locally) — this call's own contribution to the
+			// race window clearInProgress guards is over regardless of which outcome landed. Decremented,
+			// not reset to zero: an overlapping clearCache() (nothing serializes them today) can still
+			// have its own clearAllCachedData()-to-deleteSharedSnapshot() pair in flight, and the counter
+			// must stay positive until that one finishes too — see clearInProgressCount's own doc comment.
+			this.clearInProgressCount = Math.max(0, this.clearInProgressCount - 1);
 		}
 	}
 
