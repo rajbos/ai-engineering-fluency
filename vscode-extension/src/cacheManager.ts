@@ -1042,12 +1042,25 @@ export class CacheManager {
 		// exists to provide. readClearEpoch() already validates on read, but `this.clearEpoch` is
 		// assigned the raw computed value below, bypassing that check — so a marker that reaches
 		// this boundary (corrupt, or genuinely exhausted after an astronomical number of clears)
-		// stays reachable through this window's own in-memory value too. Treat either input as
-		// exhausted and fall back to Date.now() alone, which stays many orders of magnitude below
-		// this threshold under any realistic clock.
-		const safePersisted = persisted < Number.MAX_SAFE_INTEGER ? persisted : 0;
-		const safeLocalEpoch = this.clearEpoch < Number.MAX_SAFE_INTEGER ? this.clearEpoch : 0;
-		const newEpoch = Math.max(Date.now(), safePersisted + 1, safeLocalEpoch + 1);
+		// stays reachable through this window's own in-memory value too.
+		//
+		// An earlier version of this fix fell back to `Date.now()` once exhausted — but that can
+		// *regress* the epoch below a value some peer has already adopted into its own in-memory
+		// `clearEpoch` (any Date.now()-based value is many orders of magnitude smaller than
+		// Number.MAX_SAFE_INTEGER), and a regressing epoch is worse than a stalled one: that peer's
+		// own `persisted <= this.clearEpoch` check would then treat every subsequent real clear as
+		// old and keep serving/republishing stale data indefinitely, not just miss the one clear that
+		// hit this boundary. There is no larger *safe* float64 integer to advance to once genuinely
+		// exhausted — that is what "exhausted" means here — so this holds at the ceiling instead of
+		// picking a smaller replacement value: a write that fails to advance is the same narrow,
+		// already-documented failure mode a corrupt-but-unsafe marker (e.g. `1e100`) has always had,
+		// not a new one. Properly resolving exhaustion needs a wider representation (BigInt or a
+		// decimal string) that can keep counting past this ceiling — tracked as a documented
+		// follow-up, not attempted here.
+		const exhausted = persisted >= Number.MAX_SAFE_INTEGER || this.clearEpoch >= Number.MAX_SAFE_INTEGER;
+		const newEpoch = exhausted
+			? Number.MAX_SAFE_INTEGER
+			: Math.max(Date.now(), persisted + 1, this.clearEpoch + 1);
 		const tmpPath = `${epochPath}.${process.pid}.${newEpoch}.tmp`;
 		try {
 			await fs.promises.mkdir(path.dirname(epochPath), { recursive: true });

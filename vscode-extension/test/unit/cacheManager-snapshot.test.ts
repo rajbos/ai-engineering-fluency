@@ -1586,7 +1586,15 @@ test('clearInProgress reports true until every overlapping clearCache() sequence
 // float64 rounds the result back down to the same unsafe value it started from, so two consecutive
 // clears from an exhausted/corrupted marker could write the identical "new" epoch, breaking the
 // strictly-advancing guarantee this method exists to provide.
-test('bumpClearEpochLocked() still strictly advances from a marker at the Number.MAX_SAFE_INTEGER boundary', async () => {
+// A follow-up Copilot review found the first version of this fix could *regress* the epoch once
+// exhausted (falling back to Date.now(), far smaller than Number.MAX_SAFE_INTEGER) — worse than the
+// original bug, since a peer that already adopted the ceiling value into its own in-memory clearEpoch
+// would then treat every subsequent real clear as old, not just the one that hit the boundary. There
+// is no larger safe float64 integer to advance to once genuinely exhausted, so the fix now holds at
+// the ceiling instead: a write that fails to advance further (the same narrow, already-accepted
+// failure mode an unsafe-but-finite corrupt marker like `1e100` already had), never one that goes
+// backward.
+test('bumpClearEpochLocked() never regresses the epoch once exhausted at the Number.MAX_SAFE_INTEGER boundary', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
 
@@ -1595,12 +1603,12 @@ test('bumpClearEpochLocked() still strictly advances from a marker at the Number
 
 	await m.deleteSharedSnapshot();
 	const first = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+	assert.equal(first, Number.MAX_SAFE_INTEGER,
+		'an exhausted marker must hold at the ceiling, not fall back to a smaller value a peer holding the ceiling would treat as old');
 
 	await m.deleteSharedSnapshot();
 	const second = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
-
-	assert.ok(second > first,
-		`two clears starting from an exhausted marker must still strictly advance (got ${first} then ${second}) — a non-advancing epoch at this boundary would let checkClearEpoch() silently miss the second clear`);
+	assert.equal(second, Number.MAX_SAFE_INTEGER, 'a second clear from the same exhausted state must not regress it either');
 });
 
 // ---------------------------------------------------------------------------
