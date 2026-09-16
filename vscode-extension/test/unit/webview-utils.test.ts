@@ -15,6 +15,7 @@ import {
 	formatDurationShort,
 	formatFileSize,
 	getTimeSince,
+	formatAbsoluteDate,
 	escapeHtml,
 	safeSectionHtml,
 	markdownToHtml,
@@ -499,4 +500,54 @@ test('getTimeSince: formats seconds, minutes, hours and days', () => {
 	assert.equal(getTimeSince(new Date(Date.now() - 3 * 60_000).toISOString()), '3 minutes ago');
 	assert.equal(getTimeSince(new Date(Date.now() - 2 * 3_600_000).toISOString()), '2 hours ago');
 	assert.equal(getTimeSince(new Date(Date.now() - 4 * 86_400_000).toISOString()), '4 days ago');
+});
+
+// ── formatAbsoluteDate ──────────────────────────────────────────────────
+
+test('formatAbsoluteDate: renders a fixed timestamp as a locale-formatted absolute date', () => {
+	setFormatLocale('en-US');
+	try {
+		// Built from local Y/M/D at noon (not a fixed UTC string) so the asserted calendar date
+		// holds regardless of the test runner's timezone — a fixed "...T10:00:00Z" would render
+		// as a different local date on UTC+14/UTC-12 hosts.
+		const localJan15Noon = new Date(2026, 0, 15, 12, 0, 0);
+		// Compute the expected string via the same toLocaleDateString call rather than a
+		// hard-coded literal, since exact month/punctuation formatting is ICU-version-dependent.
+		const expected = localJan15Noon.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+		assert.equal(formatAbsoluteDate(localJan15Noon.toISOString()), expected);
+	} finally {
+		setFormatLocale(undefined);
+	}
+});
+
+test('formatAbsoluteDate: returns "—" for invalid ISO values instead of "Invalid Date"', () => {
+	assert.equal(formatAbsoluteDate('not-a-date'), '—');
+	assert.equal(formatAbsoluteDate(''), '—');
+});
+
+test('formatAbsoluteDate: also accepts epoch milliseconds or a Date directly, not just an ISO string', () => {
+	setFormatLocale('en-US');
+	try {
+		const localJan15Noon = new Date(2026, 0, 15, 12, 0, 0);
+		const expected = localJan15Noon.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+		assert.equal(formatAbsoluteDate(localJan15Noon.getTime()), expected);
+		assert.equal(formatAbsoluteDate(localJan15Noon), expected);
+	} finally {
+		setFormatLocale(undefined);
+	}
+});
+
+test('formatAbsoluteDate: honors setFormatLocale for a fixed timestamp', () => {
+	setFormatLocale('de-DE');
+	try {
+		// See the timezone note on the en-US test above — construct from local components.
+		const localJan15Noon = new Date(2026, 0, 15, 12, 0, 0);
+		// Compute the expected string via the same toLocaleDateString call rather than a
+		// hard-coded literal — de-DE month abbreviation/punctuation can vary across Node/ICU
+		// versions, which made a hard-coded '15. Jan. 2026' flaky across environments.
+		const expected = localJan15Noon.toLocaleDateString('de-DE', { year: 'numeric', month: 'short', day: 'numeric' });
+		assert.equal(formatAbsoluteDate(localJan15Noon.toISOString()), expected);
+	} finally {
+		setFormatLocale(undefined);
+	}
 });

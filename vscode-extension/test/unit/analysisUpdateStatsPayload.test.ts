@@ -59,7 +59,7 @@ test('_buildAnalysisUpdateData still includes every field the Usage Analysis web
 	const body = extractBracesBlock(EXTENSION_SRC, 'private _buildAnalysisUpdateData(');
 	const requiredFields = [
 		'today:', 'last30Days:', 'month:', 'lastMonth:',
-		'insights:', 'correctionReport:', 'repeatedTasks:', 'curationAnalysis:',
+		'insights:', 'correctionReport:', 'repeatedTasks:', 'curationAnalysis:', 'memoryFilesAnalysis:',
 	];
 	for (const field of requiredFields) {
 		assert.ok(body.includes(field), `_buildAnalysisUpdateData() is missing '${field}' — the webview will blank the section that reads it`);

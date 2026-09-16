@@ -78,6 +78,7 @@ import type {
   CorrectionRepoGroup,
   CorrectionSessionEntry,
   RepeatedTaskReport,
+  MemoryFilesAnalysis,
 } from '../../src/types';
 import {
 	ensureContextPressure,
@@ -116,6 +117,21 @@ import {
   analyzeToolCuration as _analyzeToolCuration,
   findSkillDescriptionInWorkspaces as _findSkillDescriptionInWorkspaces,
 } from '../../src/toolCuration';
+
+// --- Copilot memory files (hygiene analysis) ---
+import {
+  discoverAllMemoryFiles as _discoverAllMemoryFiles,
+  analyzeMemoryFiles as _analyzeMemoryFiles,
+  toMemoryFilesAnalysisView as _toMemoryFilesAnalysisView,
+} from '../../src/copilotMemoryFiles';
+
+/**
+ * Minimum time between memory-files filesystem scans (readdirSync/statSync across every
+ * VS Code User root and workspace hash). Memory file hygiene changes slowly, so reusing a
+ * recent scan avoids repeating a synchronous filesystem walk on every uncached recompute
+ * (e.g. periodic Usage Analysis refreshes while the panel is open).
+ */
+const MEMORY_FILES_SCAN_TTL_MS = 5 * 60 * 1000;
 
 // --- Insights engine ---
 import type { TaskCategory, TaskCategoryBreakdown } from '../../src/taskClassification';
@@ -437,7 +453,7 @@ export function defaultSumBillingGroupCosts(billingGroupCosts: Record<string, nu
 }
 
 /** The computed-stat caches that carry a generation stamp. */
-export type ComputedStatsKey = 'detailed' | 'daily' | 'fullDaily' | 'usage' | 'sessionInputs';
+export type ComputedStatsKey = 'detailed' | 'daily' | 'fullDaily' | 'usage' | 'sessionInputs' | 'memoryFiles';
 
 /**
  * Whether a computed-stat cache stamped at `stampedGeneration` may still be read.
@@ -454,6 +470,23 @@ export function isComputedStatsCurrent(
 	currentGeneration: number,
 ): boolean {
 	return stampedGeneration === currentGeneration;
+}
+
+/**
+ * Whether a previous memory-files filesystem scan (readdirSync/statSync across every VS
+ * Code User root and workspace hash) may be reused instead of re-walking the filesystem.
+ *
+ * `lastScannedAt` of `undefined` means no scan has ever completed, so it is never reusable.
+ * Otherwise the cached result is reusable while `now - lastScannedAt` is still within
+ * `ttlMs`, throttling a synchronous filesystem walk that would otherwise repeat on every
+ * uncached recompute (e.g. periodic Usage Analysis refreshes while the panel is open).
+ */
+export function isMemoryFilesScanFresh(
+	lastScannedAt: number | undefined,
+	now: number,
+	ttlMs: number,
+): boolean {
+	return lastScannedAt !== undefined && (now - lastScannedAt) < ttlMs;
 }
 
 /** The verified output of one refresh pass, as handed to publishRefreshResult(). */
@@ -1106,6 +1139,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private lastChartSplit: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' | 'taskCategory' = 'total';
 	private lastChartTimeWindow: ChartTimeWindow = 'last30';
 	private lastUsageAnalysisStats: UsageAnalysisStats | undefined;
+	/** Cached result of the last memory-files filesystem scan, reused across recomputes within {@link MEMORY_FILES_SCAN_TTL_MS}. */
+	private _memoryFilesAnalysisCache: MemoryFilesAnalysis | null | undefined;
+	/**
+	 * Wall-clock time (ms) of the last memory-files scan, used to throttle repeated
+	 * `readdirSync`/`statSync` walks. Reset to `undefined` by `refreshAnalysisPanel()` and
+	 * `clearCache()` so an explicit refresh always re-scans rather than serving a
+	 * within-TTL result the user is specifically asking to update.
+	 */
+	private _memoryFilesAnalysisScannedAt: number | undefined;
 	private lastDashboardData: any | undefined;
 	/** Insight engine: persisted state for all surfaced insights. */
 	private _insightStateBag: InsightStateBag = {};
@@ -2107,6 +2149,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.lastDashboardData = undefined;
 			this.lastEfficiencySessionInputs = undefined;
 			this._lastEfficiencyViewData = undefined;
+			this._memoryFilesAnalysisScannedAt = undefined;
 			this._cacheGeneration++;
 
 			// Delete the on-disk snapshot so it isn't reloaded after restart. deleteSharedSnapshot()
@@ -5401,6 +5444,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			autoCompactionsLast7Days: stats.autoCompactionsLast7Days,
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
+			memoryFilesAnalysis: stats.memoryFilesAnalysis ?? null,
 		};
 
 		const evaluated = _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
@@ -5467,6 +5511,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			todaySessions: stats.todaySessions,
 			curationAnalysis: stats.curationAnalysis ?? null,
 			repeatedTasks: stats.repeatedTasks ?? null,
+			memoryFilesAnalysis: stats.memoryFilesAnalysis ?? null,
 		};
 		return _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
 	}
@@ -5795,8 +5840,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'logviewer.hydrafusion.modelChangedTitle': l10n.t('logviewer.hydrafusion.modelChangedTitle'),
 			'logviewer.hydrafusion.expandStepNote': l10n.t('logviewer.hydrafusion.expandStepNote'),
 			...this.getEfficiencyModelsLocalization(),
+			...this.getMemoryFilesLocalization(),
 			// Current language for reference
 			'__language__': language
+		};
+	}
+
+	/** Usage view — Copilot Memory Files section strings. Templates with {0}/{1} are resolved webview-side by localizeFormat(). */
+	private getMemoryFilesLocalization(): Record<string, string> {
+		return {
+			'memoryFiles.sectionTitle': l10n.t('memoryFiles.sectionTitle'),
+			'memoryFiles.sectionSubtitle': l10n.t('memoryFiles.sectionSubtitle'),
+			'memoryFiles.summary': l10n.t('memoryFiles.summary'),
+			'memoryFiles.staleSummary': l10n.t('memoryFiles.staleSummary'),
+			'memoryFiles.largeSummary': l10n.t('memoryFiles.largeSummary'),
+			'memoryFiles.table.workspace': l10n.t('memoryFiles.table.workspace'),
+			'memoryFiles.table.repo': l10n.t('memoryFiles.table.repo'),
+			'memoryFiles.table.session': l10n.t('memoryFiles.table.session'),
+			'memoryFiles.table.global': l10n.t('memoryFiles.table.global'),
+			'memoryFiles.table.size': l10n.t('memoryFiles.table.size'),
+			'memoryFiles.table.stale': l10n.t('memoryFiles.table.stale'),
+			'memoryFiles.table.lastUpdated': l10n.t('memoryFiles.table.lastUpdated'),
+			'memoryFiles.unknownWorkspace': l10n.t('memoryFiles.unknownWorkspace'),
+			'memoryFiles.globalWorkspaceLabel': l10n.t('memoryFiles.globalWorkspaceLabel'),
+			'memoryFiles.renderError': l10n.t('memoryFiles.renderError'),
 		};
 	}
 
@@ -6314,6 +6381,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats, startedAtGeneration),
 			agenticDailyTrend,
 			autoCompactionsLast7Days,
+			memoryFilesAnalysis: this.computeMemoryFilesAnalysis(startedAtGeneration),
 		};
 		this.lastUsageAnalysisStats = stats;
 		this._statsGeneration.usage = startedAtGeneration;
@@ -6402,6 +6470,48 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log(`⚠️ Tool curation analysis failed: ${String(err)}`);
 			return null;
 		}
+	}
+
+	/**
+	 * Discover and analyze Copilot's on-disk agent memory files (memory-tool/memories,
+	 * user/repo/session scope) for a hygiene insight. Metadata-only (path/size/mtime),
+	 * never reads memory file content. Returns null when no memory files were found or
+	 * on any scan error, so a failure here never breaks the rest of the stats build.
+	 *
+	 * The underlying scan is a synchronous `readdirSync`/`statSync` walk across every VS
+	 * Code User root and workspace hash, so it is throttled to at most once per
+	 * {@link MEMORY_FILES_SCAN_TTL_MS} and reused across recomputes in between (e.g.
+	 * periodic Usage Analysis refreshes) rather than re-walking the filesystem every time.
+	 */
+	private computeMemoryFilesAnalysis(originGeneration: number): MemoryFilesAnalysis | null {
+		const now = Date.now();
+		// The TTL alone isn't enough: a calculation that started before a clearCache()/
+		// refreshAnalysisPanel() generation bump can resume afterwards and still reach this
+		// point, where a fresh-looking scan it performs would otherwise satisfy a later,
+		// post-clear read without ever re-scanning. Gating reuse on the generation this scan
+		// was cached *under* (mirroring the `_statsGeneration`/`isComputedStatsCurrent` guard
+		// used for the other computed-stat caches) rejects that stale-origin result.
+		const generationCurrent = isComputedStatsCurrent(this._statsGeneration.memoryFiles, this._cacheGeneration);
+		if (generationCurrent && isMemoryFilesScanFresh(this._memoryFilesAnalysisScannedAt, now, MEMORY_FILES_SCAN_TTL_MS)) {
+			return this._memoryFilesAnalysisCache ?? null;
+		}
+		let result: MemoryFilesAnalysis | null;
+		try {
+			const files = _discoverAllMemoryFiles();
+			result = files.length === 0 ? null : _analyzeMemoryFiles(files);
+		} catch (err) {
+			this.log(`⚠️ Memory files analysis failed: ${String(err)}`);
+			result = null;
+		}
+		// Only let a calculation whose origin generation is still current update the shared
+		// scan cache — a stale (pre-clear) calculation must not let its result be reused by a
+		// post-clear read, even though the scan it just ran reflects the current filesystem.
+		if (originGeneration === this._cacheGeneration) {
+			this._memoryFilesAnalysisCache = result;
+			this._memoryFilesAnalysisScannedAt = now;
+			this._statsGeneration.memoryFiles = originGeneration;
+		}
+		return result;
 	}
 
 	async openMcpJson(): Promise<void> {
@@ -10080,6 +10190,7 @@ private computeFallbackDailyRollup(
 			correctionReport: analysisStats.correctionReport ?? null,
 			repeatedTasks: analysisStats.repeatedTasks ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
+			memoryFilesAnalysis: _toMemoryFilesAnalysisView(analysisStats.memoryFilesAnalysis ?? null),
 			copilotApiBalance: this._buildCopilotApiBalance(),
 			monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
 			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
@@ -10746,6 +10857,10 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		// the cached stats so loadAnalysisStatsInBackground performs a full recalculation.
 		void this.analysisPanel.webview.postMessage({ command: 'usageRefreshing' });
 		this.lastUsageAnalysisStats = undefined;
+		// An explicit refresh should re-scan memory files too, even if the last scan is
+		// still within its TTL: the user is asking for current data, so a stale cache here
+		// would silently ignore files added/removed since the last scan.
+		this._memoryFilesAnalysisScannedAt = undefined;
 		// An Efficiency build spanning this refresh was built on the stats just discarded, so
 		// bump the generation to stop its result being recorded. Deliberately *not* clearing
 		// `_lastEfficiencyViewData` as clearCache() does: this leaves the session cache
@@ -15289,6 +15404,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       insights: this.buildCurrentInsights(stats),
       correctionReport: stats.correctionReport ?? null,
       curationAnalysis: stats.curationAnalysis ?? null,
+      memoryFilesAnalysis: _toMemoryFilesAnalysisView(stats.memoryFilesAnalysis ?? null),
       sessionColumnSettings,
       copilotApiBalance: this._buildCopilotApiBalance(),
       monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,

@@ -713,6 +713,59 @@ test('l10n: Efficiency Models tab control labels resolve in English and zh-cn', 
 	}
 });
 
+test('l10n: Copilot Memory Files section strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	const english: Record<string, string> = {
+		'memoryFiles.sectionTitle': 'Copilot Memory Files',
+		'memoryFiles.sectionSubtitle': 'Agent-written memory notes on disk (project conventions, decisions, scratch plans) \u2014 metadata only, content is never read',
+		'memoryFiles.summary': '{0} files \u00b7 {1} total',
+		'memoryFiles.staleSummary': '{0} stale (>{1}d)',
+		'memoryFiles.largeSummary': '{0} unusually large (>{1}KB)',
+		'memoryFiles.table.workspace': 'Workspace',
+		'memoryFiles.table.repo': 'Repo',
+		'memoryFiles.table.session': 'Session',
+		'memoryFiles.table.global': 'Global',
+		'memoryFiles.table.size': 'Size',
+		'memoryFiles.table.stale': 'Stale',
+		'memoryFiles.table.lastUpdated': 'Last updated',
+		'memoryFiles.unknownWorkspace': 'Unknown workspace',
+		'memoryFiles.globalWorkspaceLabel': 'User (global)',
+		'memoryFiles.renderError': 'Memory files are temporarily unavailable due to a rendering error. Try Refresh.',
+	};
+	for (const [key, value] of Object.entries(english)) {
+		assert.equal(t(key), value, `English value for ${key}`);
+	}
+	assert.equal(t('memoryFiles.summary', '4', '24 KB'), '4 files \u00b7 24 KB total');
+	assert.equal(t('memoryFiles.staleSummary', '2', '90'), '2 stale (>90d)');
+	assert.equal(t('memoryFiles.largeSummary', '1', '10'), '1 unusually large (>10KB)');
+
+	mock.setLanguage('zh-cn');
+	try {
+		const chinese: Record<string, string> = {
+			'memoryFiles.sectionTitle': 'Copilot \u8bb0\u5fc6\u6587\u4ef6',
+			'memoryFiles.sectionSubtitle': '\u4ee3\u7406\u5199\u5165\u78c1\u76d8\u7684\u8bb0\u5fc6\u7b14\u8bb0\uff08\u9879\u76ee\u7ea6\u5b9a\u3001\u51b3\u7b56\u3001\u8349\u7a3f\u8ba1\u5212\uff09\u2014 \u4ec5\u5143\u6570\u636e\uff0c\u4ece\u4e0d\u8bfb\u53d6\u6587\u4ef6\u5185\u5bb9',
+			'memoryFiles.summary': '{0} \u4e2a\u6587\u4ef6 \u00b7 \u5171 {1}',
+			'memoryFiles.staleSummary': '{0} \u4e2a\u8fc7\u671f\uff08\u8d85\u8fc7 {1} \u5929\uff09',
+			'memoryFiles.largeSummary': '{0} \u4e2a\u5f02\u5e38\u5927\uff08\u8d85\u8fc7 {1}KB\uff09',
+			'memoryFiles.table.workspace': '\u5de5\u4f5c\u533a',
+			'memoryFiles.table.repo': '\u4ed3\u5e93',
+			'memoryFiles.table.session': '\u4f1a\u8bdd',
+			'memoryFiles.table.global': '\u5168\u5c40',
+			'memoryFiles.table.size': '\u5927\u5c0f',
+			'memoryFiles.table.stale': '\u8fc7\u671f',
+			'memoryFiles.table.lastUpdated': '\u6700\u8fd1\u66f4\u65b0',
+			'memoryFiles.unknownWorkspace': '\u672a\u77e5\u5de5\u4f5c\u533a',
+			'memoryFiles.globalWorkspaceLabel': '\u7528\u6237\uff08\u5168\u5c40\uff09',
+			'memoryFiles.renderError': '\u7531\u4e8e\u6e32\u67d3\u9519\u8bef\uff0c\u8bb0\u5fc6\u6587\u4ef6\u6682\u65f6\u4e0d\u53ef\u7528\u3002\u8bf7\u5c1d\u8bd5\u5237\u65b0\u3002',
+		};
+		for (const [key, value] of Object.entries(chinese)) {
+			assert.equal(t(key), value, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: Copilot Budget gauge keys resolve in English', () => {
 	// Back the "🎯 Copilot Budget" tooltip row, which folds untracked (other
 	// devices/cloud) usage into the headline total so it agrees with the bar's

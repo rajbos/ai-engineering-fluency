@@ -341,5 +341,20 @@
   "efficiency.models.controls.comparedWith": "对比时段",
   "efficiency.models.controls.window": "时间窗口",
   "efficiency.models.mode.models": "对比两个模型",
-  "efficiency.models.mode.periods": "单个模型，两个时段"
+  "efficiency.models.mode.periods": "单个模型，两个时段",
+  "memoryFiles.sectionTitle": "Copilot 记忆文件",
+  "memoryFiles.sectionSubtitle": "代理写入磁盘的记忆笔记（项目约定、决策、草稿计划）— 仅元数据，从不读取文件内容",
+  "memoryFiles.summary": "{0} 个文件 · 共 {1}",
+  "memoryFiles.staleSummary": "{0} 个过期（超过 {1} 天）",
+  "memoryFiles.largeSummary": "{0} 个异常大（超过 {1}KB）",
+  "memoryFiles.table.workspace": "工作区",
+  "memoryFiles.table.repo": "仓库",
+  "memoryFiles.table.session": "会话",
+  "memoryFiles.table.global": "全局",
+  "memoryFiles.table.size": "大小",
+  "memoryFiles.table.stale": "过期",
+  "memoryFiles.table.lastUpdated": "最近更新",
+  "memoryFiles.unknownWorkspace": "未知工作区",
+  "memoryFiles.globalWorkspaceLabel": "用户（全局）",
+  "memoryFiles.renderError": "由于渲染错误，记忆文件暂时不可用。请尝试刷新。"
 }

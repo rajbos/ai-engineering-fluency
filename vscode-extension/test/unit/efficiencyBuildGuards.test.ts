@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import {
 	chainBuild,
 	isComputedStatsCurrent,
+	isMemoryFilesScanFresh,
 	makeLivePanelSink,
 	mergeDailyStatsIntoFullYear,
 	planEfficiencyRebuild,
@@ -63,6 +64,28 @@ test('isComputedStatsCurrent: the in-flight-build race is rejected end to end', 
 	// 5. A build that starts after the clear stamps the live generation and is reusable.
 	const rebuildStamp = cacheGeneration;
 	assert.equal(isComputedStatsCurrent(rebuildStamp, cacheGeneration), true);
+});
+
+// ---------------------------------------------------------------------------
+// isMemoryFilesScanFresh — throttles the synchronous readdirSync/statSync walk that
+// discovers Copilot memory files, so it does not repeat on every uncached recompute
+// (e.g. a periodic Usage Analysis refresh while the panel is open).
+// ---------------------------------------------------------------------------
+
+test('isMemoryFilesScanFresh: a scan that has never run is never fresh', () => {
+	assert.equal(isMemoryFilesScanFresh(undefined, Date.now(), 5 * 60 * 1000), false);
+});
+
+test('isMemoryFilesScanFresh: a scan within the TTL window is reused', () => {
+	const now = 1_000_000;
+	assert.equal(isMemoryFilesScanFresh(now - 1000, now, 5 * 60 * 1000), true, 'well within TTL');
+	assert.equal(isMemoryFilesScanFresh(now - (5 * 60 * 1000 - 1), now, 5 * 60 * 1000), true, 'just under the TTL boundary');
+});
+
+test('isMemoryFilesScanFresh: a scan at or past the TTL is stale and must rescan', () => {
+	const now = 1_000_000;
+	assert.equal(isMemoryFilesScanFresh(now - 5 * 60 * 1000, now, 5 * 60 * 1000), false, 'exactly at the TTL boundary');
+	assert.equal(isMemoryFilesScanFresh(now - 6 * 60 * 1000, now, 5 * 60 * 1000), false, 'past the TTL');
 });
 
 // ---------------------------------------------------------------------------
@@ -538,6 +561,29 @@ test('wiring: a Usage Analysis refresh does not invalidate the daily or full-yea
 		refresh.indexOf('const fullDailyWasCurrent'),
 	);
 	assert.ok(lastRead !== -1 && lastRead < bumpAt, 'the was-current reads must be taken before the bump');
+});
+
+test('wiring: an explicit refresh always re-scans memory files, even within the TTL', () => {
+	// computeMemoryFilesAnalysis() throttles its filesystem walk to once per
+	// MEMORY_FILES_SCAN_TTL_MS and reuses the cached result in between — but a user who presses
+	// Refresh (or clears the cache) is explicitly asking for current data, so both paths must
+	// reset the scan timestamp rather than silently serving a within-TTL result that ignores
+	// files added or deleted since the last scan.
+	for (const [fnSignature, label] of [
+		['private async refreshAnalysisPanel()', 'refreshAnalysisPanel()'],
+		['public async clearCache()', 'clearCache()'],
+	] as const) {
+		const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf(fnSignature));
+		const nextPrivate = body.indexOf('\n\tprivate ', 1);
+		const nextPublic = body.indexOf('\n\tpublic ', 1);
+		const candidates = [nextPrivate, nextPublic].filter(i => i !== -1);
+		const end = candidates.length > 0 ? Math.min(...candidates) : body.length;
+		const fn = body.slice(0, end);
+		assert.ok(
+			fn.includes('this._memoryFilesAnalysisScannedAt = undefined;'),
+			`${label} must reset _memoryFilesAnalysisScannedAt so the next recompute forces a fresh memory-files scan`,
+		);
+	}
 });
 
 // ---------------------------------------------------------------------------
