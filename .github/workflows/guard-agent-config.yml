@@ -16,7 +16,12 @@ name: Guard agent config
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # `edited` is in the list because it is the activity GitHub emits when a
+    # PR's BASE BRANCH changes. Without it, a protected-path PR opened against
+    # an unguarded target could be retargeted at main and merged with the guard
+    # never having run once. It also fires on title/body edits, which just
+    # re-runs a cheap check.
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
     branches: main
 
 permissions:
@@ -67,6 +72,10 @@ jobs:
           # non-approver adding an unrelated triage label to an already
           # approved PR would revoke that approval.
           ADDED_LABEL: ${{ github.event.label.name }}
+          # Only set when an `edited` event changed the BASE BRANCH (it holds
+          # the previous ref). Empty for a title/body edit, which lets the
+          # revocation below tell a retarget apart from a typo fix.
+          BASE_CHANGED_FROM: ${{ github.event.changes.base.ref.from }}
           # Every one of these is attacker-controllable (a branch name, a login,
           # a label). They go through `env:` so the shell never interpolates
           # them as code - see .github/instructions/workflows.instructions.md.
@@ -218,9 +227,14 @@ jobs:
           # non-revoking event would read it as a live approval for a head it
           # never covered, so reopening re-runs the revocation rather than
           # trusting what is still attached.
-          if [ "$EVENT_ACTION" = "synchronize" ] || [ "$EVENT_ACTION" = "reopened" ]; then
+          # A base change is voided for the same reason a push is: the diff
+          # that was approved is not the diff being merged any more. A
+          # title/body edit leaves BASE_CHANGED_FROM empty and changes nothing.
+          if [ "$EVENT_ACTION" = "synchronize" ] \
+            || [ "$EVENT_ACTION" = "reopened" ] \
+            || { [ "$EVENT_ACTION" = "edited" ] && [ -n "${BASE_CHANGED_FROM:-}" ]; }; then
             if [ "$has_label" = true ]; then
-              revoke_label "The earlier approval no longer applies to this head ($EVENT_ACTION). Review the changes to the protected paths and approve again."
+              revoke_label "The earlier approval no longer applies ($EVENT_ACTION). Review the changes to the protected paths and approve again."
             else
               echo "::error::This PR changes agent/CI configuration and looks agent-authored ($signal). A human must review those paths and add the '$APPROVAL_LABEL' label to merge."
             fi

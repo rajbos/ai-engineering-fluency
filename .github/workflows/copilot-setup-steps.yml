@@ -109,9 +109,15 @@ jobs:
         if: steps.graphify-python.outcome == 'success'
         continue-on-error: true
         run: |
-          # Drop the checkout credential before any third-party code runs. A
-          # malicious wheel executing during the install or the extract below
-          # could otherwise read it straight out of .git/config.
+          # Drop the checkout credential before GRAPHIFY's install and extract
+          # run, so a malicious wheel cannot read it straight out of
+          # .git/config.
+          #
+          # Not "before any third-party code": actions/setup-node,
+          # actions/setup-python and two `npm ci` runs have already executed by
+          # this point, with the credential present. Disabling credential
+          # persistence at checkout is what would cover those; this covers the
+          # pip install and extract below.
           #
           # Safe to drop this early: no later step uses authenticated git. The
           # Azure steps authenticate with `az`, and `Fetch Copilot agent
