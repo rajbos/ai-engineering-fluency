@@ -24,6 +24,15 @@ on:
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
     branches: main
 
+# Serialize per PR. These events mutate shared label state and all post the same
+# check, so an in-flight `labeled` run could otherwise finish "Allowed" from its
+# own (now stale) payload after a `synchronize` run had already revoked that
+# label - a green result for a head with no live approval. Cancelling the older
+# run leaves it cancelled rather than passing.
+concurrency:
+  group: agent-config-guard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   # Needed to REMOVE a stale approval label when new commits arrive. Approval
@@ -101,7 +110,15 @@ jobs:
           # ci.yml lists just "ci.yml" - no protected path matches and the
           # guard waves the change through. --no-renames reports the pair as a
           # delete plus an add, so the original path is still seen.
-          changed=$(git diff --no-renames --name-only "origin/$BASE_REF...HEAD")
+          #
+          # -z because `git diff --name-only` QUOTES any path with non-ASCII or
+          # control characters: `.github/workflows/é.yml` comes out as
+          # ".github/workflows/\303\251.yml", which starts with a quote and so
+          # never matches the protected pattern below. -z emits raw NUL-delimited
+          # paths; `tr` turns them back into lines before the scan, and keeps the
+          # NULs away from the command substitution, which would drop them.
+          # git's own exit status still reaches errexit through pipefail.
+          changed=$(git diff --no-renames --name-only -z "origin/$BASE_REF...HEAD" | tr '\0' '\n')
           set +e
           protected=$(printf '%s\n' "$changed" \
             | grep -E '^(\.github/|\.claude/|\.devcontainer/|AGENTS\.md$|CLAUDE\.md$)')
