@@ -146,9 +146,17 @@ jobs:
             # this pipeline would have errexit suspended, so a grep ERROR would
             # read as "no trailer found" and let the change through. Capture the
             # status instead - only exit 1 means "no match".
+            #
+            # Not `grep -q`: with pipefail, -q makes grep exit on the first
+            # match while printf is still writing, printf takes SIGPIPE, and
+            # the pipeline reports 141 - which the "scan error" branch below
+            # would then treat as a failure and block a PR that in fact
+            # matched. Reproduced with a large log and an early match.
+            # Reading all input and discarding it keeps the status honest.
             set +e
             printf '%s\n' "$trailers" \
-              | grep -qiE '^[[:space:]]*co-authored-by:.*(claude|copilot|gpt|codex|gemini|mistral|vibe|devin|cursor|aider)'
+              | grep -iE '^[[:space:]]*co-authored-by:.*(claude|copilot|gpt|codex|gemini|mistral|vibe|devin|cursor|aider)' \
+                >/dev/null
             trailer_rc=$?
             set -e
 

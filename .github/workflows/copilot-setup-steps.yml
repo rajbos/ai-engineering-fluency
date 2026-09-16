@@ -86,6 +86,7 @@ jobs:
       # instead of passing silently. (`Fetch Copilot agent sessions` relies on
       # the same mechanism mid-job.)
       - name: Set up Python for graphify
+        id: graphify-python
         continue-on-error: true
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -95,6 +96,11 @@ jobs:
 
       - name: "Install graphify (PyPI distribution: graphifyy)"
         id: graphify-install
+        # Without this, `continue-on-error` on the setup-python step would let
+        # pip run against whatever interpreter happens to be on PATH - so the
+        # pinned 3.12 and the wheel set it resolves would silently not be the
+        # ones described above.
+        if: steps.graphify-python.outcome == 'success'
         continue-on-error: true
         run: |
           # Drop the checkout credential before any third-party code runs. A
@@ -112,8 +118,19 @@ jobs:
           # *verified* rather than attempted, and the step aborts before any
           # third-party code if the credential is still there.
           git config --local --unset-all 'http.https://github.com/.extraheader' || true
-          if git config --local --get-all 'http.https://github.com/.extraheader' >/dev/null 2>&1; then
+          # Status, not a bare `if`: `--get-all` exits 1 for "key not found"
+          # but other non-zero codes mean it could not read the config at all.
+          # As an `if` condition every one of those reads as "absent", which is
+          # the fail-open this check exists to prevent. Only 1 is acceptable.
+          set +e
+          git config --local --get-all 'http.https://github.com/.extraheader' >/dev/null 2>&1
+          cred_rc=$?
+          set -e
+          if [ "$cred_rc" -eq 0 ]; then
             echo "::error::The checkout credential is still present in .git/config - refusing to run third-party code."
+            exit 1
+          elif [ "$cred_rc" -ne 1 ]; then
+            echo "::error::Could not confirm the checkout credential was removed (git config exited $cred_rc) - refusing to run third-party code."
             exit 1
           fi
 
