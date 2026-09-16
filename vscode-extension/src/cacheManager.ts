@@ -1273,6 +1273,16 @@ export class CacheManager {
 			// have its own clearAllCachedData()-to-deleteSharedSnapshot() pair in flight, and the counter
 			// must stay positive until that one finishes too — see clearInProgressCount's own doc comment.
 			this.clearInProgressCount = Math.max(0, this.clearInProgressCount - 1);
+			// Also bump cacheClearGeneration here, a second time independent of clearAllCachedData()'s
+			// own bump: clearInProgress is a *live* signal (true only while this call has not yet
+			// finished), so it cannot catch a load or save whose stat/read/build sequence straddles the
+			// exact moment this call completes — started while a clear was genuinely in flight, but by
+			// the time that caller's own final check runs, this call has already finished and the
+			// counter is back to zero. That caller's generation baseline, captured before this
+			// completion, still differs from the now-bumped value, so the existing
+			// `cacheClearGeneration !== clearGenerationAtStart` check every loader and writeSharedSnapshot()
+			// already runs catches it without any further special-casing.
+			this.cacheClearGeneration++;
 		}
 	}
 

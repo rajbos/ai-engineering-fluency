@@ -1581,6 +1581,70 @@ test('clearInProgress reports true until every overlapping clearCache() sequence
 	assert.ok(m.cache.has('/b.json'), 'content published once the whole transition finished must load normally');
 });
 
+// A further Copilot review found clearInProgress is a *live* signal — true only while
+// deleteSharedSnapshot() has not yet finished — so it cannot catch a load whose stat/read sequence
+// straddles the exact moment that call completes: started while a clear was genuinely in flight (the
+// generation baseline already reflects clearAllCachedData()'s bump), but by the time this load's own
+// final check runs, deleteSharedSnapshot() has already finished and the counter is back to zero. The
+// epoch check also sees nothing new, since this same instance already adopted the bump itself. Fixed
+// by having deleteSharedSnapshot() bump cacheClearGeneration a second time on its own completion (in
+// addition to clearAllCachedData()'s own bump), so a baseline captured before that completion is still
+// caught by the existing generation-mismatch check every loader and writeSharedSnapshot() already runs.
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail).
+test('loadSharedSnapshotIfChanged() catches a clear whose deleteSharedSnapshot() completes entirely during this call\'s own read', async (t) => {
+	const dir = tmpDir();
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot(); // pre-clear content on disk to (almost) resurrect
+
+	const m = makeManager(dir);
+	m.clearAllCachedData(); // this load's baseline will already reflect this bump
+
+	const originalReadFile = fs.promises.readFile.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'readFile', async (...args: unknown[]) => {
+		const result = await originalReadFile(...args); // the stale read itself completes normally...
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			// ...but the rest of this window's own clearCache() sequence — deleteSharedSnapshot() —
+			// finishes entirely before control returns to loadSharedSnapshotIfChanged()'s merge step.
+			await m.deleteSharedSnapshot();
+		}
+		return result;
+	});
+
+	const merged = await m.loadSharedSnapshotIfChanged();
+	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
+	assert.equal(merged, 0, 'a load whose read raced a clear that finished before this call\'s own final check must not report a stale merge as useful');
+	assert.equal(m.cache.size, 0, 'the pre-clear entry must not survive a clear that completed during this call\'s own read');
+});
+
+// Same race, on loadCacheFromStorage()'s own load path.
+test('loadCacheFromStorage() catches a clear whose deleteSharedSnapshot() completes entirely during this call\'s own read', async (t) => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot();
+
+	const m = makeManager(dir);
+	m.clearAllCachedData();
+
+	const originalReadFile = fs.promises.readFile.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'readFile', async (...args: unknown[]) => {
+		const result = await originalReadFile(...args);
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			await m.deleteSharedSnapshot();
+		}
+		return result;
+	});
+
+	await m.loadCacheFromStorage();
+	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
+	assert.equal(m.cache.size, 0, 'the pre-clear snapshot must not be loaded on top of a clear that completed during this call\'s own read');
+});
+
 // A further Copilot review found readClearEpoch() accepted Number.MAX_SAFE_INTEGER as a valid epoch,
 // but bumpClearEpochLocked() computes the next value as `persisted + 1` — at that exact boundary,
 // float64 rounds the result back down to the same unsafe value it started from, so two consecutive
