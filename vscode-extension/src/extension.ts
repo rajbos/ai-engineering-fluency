@@ -2319,6 +2319,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 					this.log('⚡ Rebuilding the open Efficiency view after a peer window\'s clear...');
 					this.requestEfficiencyRebuild();
 				}
+
+				// Resetting diagnosticsHasLoadedFiles alone only affects the *next* request a webview
+				// happens to send — it does not itself make one happen. An already-open panel's next
+				// modelUsageResult/ttftResult request would just see the reset flag and reply with
+				// stillLoading: true forever, with nothing having scheduled a real load to eventually
+				// flip it back. Proactively kicking off the same background load
+				// showDiagnosticReport() already triggers whenever the panel is revealed closes that
+				// gap, mirroring the Efficiency panel's own explicit rebuild above.
+				if (this.diagnosticsPanel) {
+					this.log('🔍 Reloading the open Diagnostic Report after a peer window\'s clear...');
+					this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
+				}
 			},
 		}, CopilotTokenTracker.CACHE_VERSION);
 		this.hookManager = new HookManager(context.globalState, (msg) => this.log(msg));
@@ -2866,6 +2878,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 				try { await this._cacheFileLoadPromise; } catch { /* already logged in loadCacheFromStorage */ }
 			}
 			if (this.shouldAbandonInstantPaintAfterCacheLoad()) { return; }
+			// _cacheFileLoadPromise settling only means loadCacheFromStorage() re-synchronized with
+			// the epoch as of ITS OWN completion — a peer clear landing in the gap between that and
+			// this line would leave the in-memory cache about to be read below stale, with nothing
+			// having bumped _cacheGeneration to make canPublishInstantPaint()'s check further down
+			// catch it. This re-checks immediately before that read, the same way every other reader
+			// of `cache` (loadSharedSnapshotIfChanged(), writeSharedSnapshot()) already does.
+			await this.cacheManager.checkClearEpoch();
 			if (this.cacheManager.cache.size === 0) { return; }
 
 			// Same window the real refresh bounds `preloaded` to (see _preloadSessionFiles()'s own

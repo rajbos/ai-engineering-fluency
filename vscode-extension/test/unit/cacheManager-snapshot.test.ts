@@ -1574,6 +1574,50 @@ test('deleteSharedSnapshot() falls back to replacing the snapshot with an empty 
 	assert.equal(merged, 0, 'a peer loading the replaced snapshot must not find the pre-clear entry to merge');
 });
 
+// A further Copilot review found that if the empty-replace fallback's own writeFile() succeeded but
+// its rename() then failed, the catch handling that failure couldn't clean up the temp file it had
+// just written — the path was scoped to the inner try, out of reach in the catch. Repeated Clear
+// Cache failures under that exact condition would leave orphaned temp files accumulating in
+// globalStorage. Fixed by hoisting the temp path out of the try so the catch can best-effort unlink
+// it too, the same cleanup pattern every other tmp-file-plus-rename write in this file already has.
+test('deleteSharedSnapshot() cleans up its own orphaned temp file when the empty-replace fallback\'s rename fails', async (t) => {
+	const dir = tmpDir();
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot();
+
+	const m = makeManager(dir);
+	const originalUnlink = fs.promises.unlink.bind(fs.promises) as (...a: unknown[]) => Promise<void>;
+	let unlinkIntercepted = false;
+	t.mock.method(fs.promises as any, 'unlink', async (...args: unknown[]) => {
+		if (!unlinkIntercepted && String(args[0]).endsWith('.snapshot.json')) {
+			unlinkIntercepted = true;
+			const err = new Error('simulated permission failure') as NodeJS.ErrnoException;
+			err.code = 'EPERM';
+			throw err;
+		}
+		return originalUnlink(...args);
+	});
+	const originalRename = fs.promises.rename.bind(fs.promises) as (...a: unknown[]) => Promise<void>;
+	let renameIntercepted = false;
+	t.mock.method(fs.promises as any, 'rename', async (...args: unknown[]) => {
+		if (!renameIntercepted && String(args[0]).includes('.snapshot.json.')) {
+			renameIntercepted = true;
+			throw new Error('simulated rename failure for the empty-replace fallback');
+		}
+		return originalRename(...args);
+	});
+
+	const persisted = await m.deleteSharedSnapshot();
+	assert.ok(unlinkIntercepted && renameIntercepted,
+		'both interceptions must actually have fired for this assertion to be meaningful');
+	assert.equal(persisted, false, 'a failed replace-fallback rename must still be reported as not durable');
+
+	const leftoverTmpFiles = fs.readdirSync(dir).filter(f => f.includes('.snapshot.json.') && f.endsWith('.tmp'));
+	assert.deepEqual(leftoverTmpFiles, [],
+		'a failed replace-fallback rename must not leave an orphaned temp file behind in globalStorage');
+});
+
 // A further Copilot review found checkClearEpoch() only invalidated CacheManager's own raw session
 // cache — a caller with its own separate, generation-stamped derived caches (the extension's per-view
 // stats) has no way to know a peer's clear was just detected, so it could keep serving statistics

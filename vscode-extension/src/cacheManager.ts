@@ -1123,9 +1123,15 @@ export class CacheManager {
 	 * the exact no-op-write case the checkpoint dirty-tracking rework exists to skip. Safe to call
 	 * with a checkpoint already mid-flight (see that method's own doc comment).
 	 *
+	 * Public (not just used internally by writeSharedSnapshot()/loadSharedSnapshotIfChanged()/
+	 * loadCacheFromStorage()) so a caller that reads `cache` directly outside those methods — e.g. a
+	 * provisional/instant paint built straight from the in-memory cache after awaiting an earlier
+	 * load — has a way to re-synchronize with a peer's clear immediately before that read, rather
+	 * than only picking one up whenever the next load/write cycle happens to run.
+	 *
 	 * Returns true if a newer epoch was found and the in-memory cache was dropped.
 	 */
-	private async checkClearEpoch(): Promise<boolean> {
+	async checkClearEpoch(): Promise<boolean> {
 		const persisted = await this.readClearEpoch();
 		if (persisted <= this.clearEpoch) {
 			return false;
@@ -1306,6 +1312,7 @@ export class CacheManager {
 					// real chance to still land durably — with an empty on-disk snapshot, a later write's
 					// buildMergedSnapshotEntries() has nothing pre-clear left to merge back in — instead
 					// of immediately downgrading to the non-durable fallback below.
+					const replaceTmpPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
 					try {
 						const emptyEnvelope = {
 							schemaVersion: CacheManager.SNAPSHOT_SCHEMA_VERSION,
@@ -1315,13 +1322,17 @@ export class CacheManager {
 							entryCount: 0,
 							entries: {},
 						};
-						const tmpPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
-						await fs.promises.writeFile(tmpPath, JSON.stringify(emptyEnvelope));
-						await fs.promises.rename(tmpPath, snapshotPath);
+						await fs.promises.writeFile(replaceTmpPath, JSON.stringify(emptyEnvelope));
+						await fs.promises.rename(replaceTmpPath, snapshotPath);
 						this.lastLoadedSnapshotMtime = 0;
 						this.deps.log(`Replaced shared cache snapshot with an empty one after a failed delete (${this.getCacheIdentifier()})`);
 					} catch (replaceErr) {
 						this.deps.warn(`Could not replace the shared cache snapshot with an empty one either: ${replaceErr}`);
+						// A partial failure here (writeFile succeeded but rename didn't) would otherwise
+						// leave an orphaned temp file behind on every such failure, accumulating in
+						// globalStorage across repeated Clear Cache attempts — best-effort cleanup, same
+						// as every other tmp-file-plus-rename write in this file already does.
+						try { await fs.promises.unlink(replaceTmpPath); } catch { /* best-effort cleanup */ }
 						// Advancing the epoch here would tell every peer "a clear happened" while the
 						// pre-clear snapshot is still fully present on disk — a peer's checkClearEpoch()
 						// would detect it, reset its own mtime bookmark to 0, and its very next
