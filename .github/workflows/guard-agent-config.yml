@@ -86,7 +86,13 @@ jobs:
 
           git fetch --quiet origin "$BASE_REF"
 
-          changed=$(git diff --name-only "origin/$BASE_REF...HEAD")
+          # --no-renames is load-bearing, not tidiness. With rename detection
+          # on (the default), `git diff --name-only` reports a rename under its
+          # DESTINATION path only, so moving .github/workflows/ci.yml to
+          # ci.yml lists just "ci.yml" - no protected path matches and the
+          # guard waves the change through. --no-renames reports the pair as a
+          # delete plus an add, so the original path is still seen.
+          changed=$(git diff --no-renames --name-only "origin/$BASE_REF...HEAD")
           set +e
           protected=$(printf '%s\n' "$changed" \
             | grep -E '^(\.github/|\.claude/|\.devcontainer/|AGENTS\.md$|CLAUDE\.md$)')

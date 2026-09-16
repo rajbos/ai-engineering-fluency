@@ -72,13 +72,19 @@ jobs:
       # AST parsing: no LLM backend, no API key, no login. ~20s on this repo.
       #
       # Deliberately placed BEFORE the Azure session-log / usage-data hydration
-      # and the agent-sessions fetch below. `pip install` and `graphify extract`
-      # are the only third-party code this job executes, and --only-binary stops
-      # a source distribution running setup.py but does NOT stop an installed
-      # wheel reading whatever is already on disk. Running it while ./session-logs
-      # and ./usage-data do not yet exist means there is nothing sensitive for a
-      # compromised dependency to find - which the checkout-credential drop below
-      # cannot achieve on its own.
+      # and the agent-sessions fetch below. --only-binary stops a source
+      # distribution running setup.py but does NOT stop an installed wheel
+      # reading whatever is already on disk, so running graphify while
+      # ./session-logs and ./usage-data do not yet exist means there is nothing
+      # sensitive for a compromised graphify dependency to find - which the
+      # checkout-credential drop below cannot achieve on its own.
+      #
+      # Scope note: this covers GRAPHIFY's dependency tree, not the job as a
+      # whole. The azure-storage-loader's own `npm ci` and the `node` calls that
+      # follow it, plus scripts/fetch-agent-sessions.js, all run third-party
+      # code AFTER the hydration. Treat this as one path contained, not a
+      # supply-chain boundary for the job - anything added later needs its own
+      # containment rather than inheriting this one.
       #
       # Every step is continue-on-error, which is what makes this ordering safe:
       # a step that exits non-zero would otherwise fail the job and cost the
