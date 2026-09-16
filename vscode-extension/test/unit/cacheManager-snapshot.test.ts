@@ -9,13 +9,13 @@ import { CacheManager } from '../../src/cacheManager';
 import type { SessionFileCache } from '../../../src/types';
 import { createMockMemento } from './vscode-test-helpers';
 
-function makeManager(dir: string, cacheVersion = 1): CacheManager {
+function makeManager(dir: string, cacheVersion = 1, depsOverride?: Partial<{ onPeerClearDetected: () => void }>): CacheManager {
 	const context: any = {
 		extensionMode: 1, // Production -> cache id 'prod'
 		globalStorageUri: { fsPath: dir },
 		globalState: createMockMemento(),
 	};
-	const deps = { log: () => {}, warn: () => {}, error: () => {} };
+	const deps = { log: () => {}, warn: () => {}, error: () => {}, ...depsOverride };
 	return new CacheManager(context, deps, cacheVersion);
 }
 
@@ -1473,6 +1473,72 @@ test('deleteSharedSnapshot() does not advance the epoch when unlinking the snaps
 	assert.equal(mergedAfter, 0,
 		'the peer must not detect a clear (the epoch never advanced) and so must not reload the still-present pre-clear snapshot');
 	assert.ok(peer.cache.has('/a.json'), 'the peer\'s already-loaded cache must be undisturbed by the failed clear attempt');
+});
+
+// A further Copilot review found that a failed snapshot delete, even after the fix above stops it
+// from misleading peers, could still resurrect the pre-clear data in THIS SAME window: clearCache()'s
+// very next step after deleteSharedSnapshot() returns is a refresh that calls
+// loadSharedSnapshotIfChanged(), and if this window had never loaded the snapshot itself (mtime
+// bookmark still at its initial value — e.g. the file appeared from a peer after this window
+// started), that load would see the still-present file's mtime as new and merge the exact content
+// clearAllCachedData() just emptied straight back in. No peer required — a single window hitting a
+// transient unlink failure is enough.
+test('deleteSharedSnapshot() bookmarks the still-present snapshot on a failed unlink, so this window\'s own next load does not resurrect it either', async (t) => {
+	const dir = tmpDir();
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot();
+
+	// m never loads the snapshot itself before attempting the clear — its mtime bookmark starts at
+	// 0, exactly the "never bookmarked yet" case the finding describes.
+	const m = makeManager(dir);
+	const originalUnlink = fs.promises.unlink.bind(fs.promises) as (...a: unknown[]) => Promise<void>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'unlink', async (...args: unknown[]) => {
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			const err = new Error('simulated permission failure') as NodeJS.ErrnoException;
+			err.code = 'EPERM';
+			throw err;
+		}
+		return originalUnlink(...args);
+	});
+
+	const persisted = await m.deleteSharedSnapshot();
+	assert.ok(intercepted, 'the unlink interception must actually have fired for this assertion to be meaningful');
+	assert.equal(persisted, false, 'a failed snapshot delete must still be reported as not durable');
+
+	const mergedAfter = await m.loadSharedSnapshotIfChanged();
+	assert.equal(mergedAfter, 0,
+		'this window\'s own next load must not treat the still-present, unchanged snapshot as newly-arrived content');
+	assert.ok(!m.cache.has('/a.json'),
+		'the cache clearAllCachedData() would have emptied must stay empty, not be resurrected by this window\'s own post-clear refresh');
+});
+
+// A further Copilot review found checkClearEpoch() only invalidated CacheManager's own raw session
+// cache — a caller with its own separate, generation-stamped derived caches (the extension's per-view
+// stats) has no way to know a peer's clear was just detected, so it could keep serving statistics
+// computed before that clear indefinitely, even though the underlying session cache was correctly
+// dropped. Fixed by adding an optional onPeerClearDetected hook to CacheManagerDeps, invoked whenever
+// checkClearEpoch() detects and drops a peer's clear.
+test('checkClearEpoch() invokes onPeerClearDetected exactly when it detects a peer clear, not otherwise', async () => {
+	const dir = tmpDir();
+	let calls = 0;
+	const m = makeManager(dir, 1, { onPeerClearDetected: () => { calls++; } });
+
+	// No clear has happened yet: an ordinary load must not fire the hook.
+	await m.loadSharedSnapshotIfChanged();
+	assert.equal(calls, 0, 'the hook must not fire when nothing has actually cleared');
+
+	const peer = makeManager(dir);
+	await peer.deleteSharedSnapshot(); // a genuine peer clear
+
+	await m.loadSharedSnapshotIfChanged(); // routes through checkClearEpoch()
+	assert.equal(calls, 1, 'the hook must fire exactly once when a real peer clear is detected');
+
+	// A second load with nothing new must not fire it again.
+	await m.loadSharedSnapshotIfChanged();
+	assert.equal(calls, 1, 'the hook must not fire again for a load that detects no further clear');
 });
 
 test('clearCache()-style sequence (clearAllCachedData + awaitInFlightCheckpoint + deleteSharedSnapshot) is not resurrected by a slow in-flight checkpoint', async () => {

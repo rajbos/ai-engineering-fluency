@@ -2159,10 +2159,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// after this delete and resurrect the data this clear is removing. See that method's
 			// doc comment for why the lock, not just the in-memory clear generation, is required.
 			//
-			// Its return value distinguishes a fully durable clear from one where the epoch marker
-			// itself failed to write: this window's own cache is empty either way, but only the
-			// former is visible to a peer window at all — see deleteSharedSnapshot()'s doc comment.
-			const epochPersisted = await this.cacheManager.deleteSharedSnapshot();
+			// Its return value distinguishes a fully durable clear (both the on-disk snapshot delete
+			// and the epoch marker write actually landed) from one that only cleared this window's
+			// own memory: this window's own cache is empty either way, but only the former is visible
+			// to a peer window at all — see deleteSharedSnapshot()'s doc comment for both failure
+			// branches this can mean.
+			const durablyCleared = await this.cacheManager.deleteSharedSnapshot();
 
 			// Reset diagnostics loaded flag so the diagnostics view will reload files
 			this.diagnosticsHasLoadedFiles = false;
@@ -2170,11 +2172,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.diagnosticsAllSessionFiles = [];
 			this.diagnosticsTtftCache.clear();
 
-			this.log(`Cache cleared successfully. Removed ${cacheSize} entries.`);
-			if (epochPersisted) {
+			if (durablyCleared) {
+				this.log(`Cache cleared successfully. Removed ${cacheSize} entries.`);
 				vscode.window.showInformationMessage('Cache cleared successfully. Reloading statistics...');
 			} else {
-				this.warn('Cache cleared locally, but the cross-window clear marker could not be saved to disk.');
+				// Deliberately generic: durablyCleared is false for either failure branch inside
+				// deleteSharedSnapshot() (the epoch write itself failing, or the snapshot delete
+				// failing before the epoch is even touched), and this message must not claim to know
+				// which one happened.
+				this.warn(`Cache cleared locally (removed ${cacheSize} entries), but could not durably record the clear for other open windows.`);
 				vscode.window.showWarningMessage(l10n.t('cacheClear.epochNotPersistedWarning'));
 			}
 
@@ -2272,7 +2278,29 @@ class CopilotTokenTracker implements vscode.Disposable {
 			isMcpTool: (t) => this.isMcpTool(t),
 			extractMcpServerName: (t) => this.extractMcpServerName(t),
 		});
-		this.cacheManager = new CacheManager(context, { log: (m: string) => this.log(m), warn: (m: string) => this.warn(m), error: (m: string) => this.error(m) }, CopilotTokenTracker.CACHE_VERSION);
+		this.cacheManager = new CacheManager(context, {
+			log: (m: string) => this.log(m),
+			warn: (m: string) => this.warn(m),
+			error: (m: string) => this.error(m),
+			// Mirrors clearCache()'s own local-clear invalidation block: a peer's clear, detected
+			// asynchronously by CacheManager during a refresh/save cycle, drops its raw session cache
+			// but has no visibility into this class's separate, generation-stamped derived-stat
+			// caches. Without this, a view like showDetails() could keep rendering statistics
+			// computed before the peer's clear even though the underlying session cache was
+			// correctly dropped. Only invalidates — does not proactively rebuild any open panel; the
+			// existing generation-stamped reuse checks already force a recompute on next read.
+			onPeerClearDetected: () => {
+				this.lastDetailedStats = undefined;
+				this.lastDailyStats = undefined;
+				this.lastFullDailyStats = undefined;
+				this.lastUsageAnalysisStats = undefined;
+				this.lastDashboardData = undefined;
+				this.lastEfficiencySessionInputs = undefined;
+				this._lastEfficiencyViewData = undefined;
+				this._memoryFilesAnalysisScannedAt = undefined;
+				this._cacheGeneration++;
+			},
+		}, CopilotTokenTracker.CACHE_VERSION);
 		this.hookManager = new HookManager(context.globalState, (msg) => this.log(msg));
 		this.sessionDiscovery = new SessionDiscovery({
 			log: (m) => this.log(m),

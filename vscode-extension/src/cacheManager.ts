@@ -14,6 +14,13 @@ export interface CacheManagerDeps {
 	log: (msg: string) => void;
 	warn: (msg: string) => void;
 	error: (msg: string) => void;
+	// Called synchronously whenever checkClearEpoch() detects and drops a peer's clear. This
+	// class's own session cache is dropped either way; this hook exists so a caller with its own,
+	// separate derived/computed caches gated by their own generation stamp (e.g. the extension's
+	// per-view stats caches) can invalidate those too — see checkClearEpoch()'s own doc comment for
+	// why a peer-detected clear would otherwise leave them silently stale. Optional so existing
+	// callers with no such caches (and every test's makeManager()) need not supply it.
+	onPeerClearDetected?: () => void;
 }
 
 export class CacheManager {
@@ -1134,6 +1141,9 @@ export class CacheManager {
 		// above already account for) would make loadSharedSnapshotIfChanged()'s own mtime check
 		// wrongly believe it already has the latest snapshot and skip loading the new one.
 		this.lastLoadedSnapshotMtime = 0;
+		// See CacheManagerDeps.onPeerClearDetected's own doc comment: this class's cache is dropped
+		// above either way, but a caller with its own separate derived caches needs this signal too.
+		this.deps.onPeerClearDetected?.();
 		return true;
 	}
 
@@ -1283,8 +1293,7 @@ export class CacheManager {
 					this.lastLoadedSnapshotMtime = 0;
 				} else {
 					// A genuine failure (e.g. permissions): the file is presumably still there,
-					// unchanged, so the bookmark is left alone rather than forcing a needless reload
-					// of a snapshot that was never actually removed.
+					// unchanged.
 					this.deps.warn(`Failed to delete shared cache snapshot: ${err}`);
 					// Advancing the epoch here would tell every peer "a clear happened" while the
 					// pre-clear snapshot is still fully present on disk — a peer's checkClearEpoch()
@@ -1294,6 +1303,20 @@ export class CacheManager {
 					// the bump leaves this clear attempt unrecorded to peers instead — the same "not
 					// yet propagated" state as before this call ran, rather than a durable, misleading
 					// claim that the fence held.
+					//
+					// Bookmarking the bookmark to the file's current (unchanged) mtime — rather than
+					// leaving it alone — matters for THIS window's own next load, not just peers': the
+					// caller here is clearCache(), whose very next step (after this returns) is a
+					// refresh that calls loadSharedSnapshotIfChanged(). If this window had never loaded
+					// this snapshot itself (bookmark still at its initial value), that load would see
+					// the still-present file's mtime as new and merge the exact pre-clear content
+					// clearAllCachedData() just emptied straight back into this window's own cache —
+					// a self-inflicted resurrection that needs no peer at all. The file didn't change,
+					// so bookmarking its current mtime now is accurate, not merely a workaround.
+					try {
+						const stat = await fs.promises.stat(snapshotPath);
+						this.lastLoadedSnapshotMtime = stat.mtimeMs;
+					} catch { /* best-effort; if even stat fails the file is presumably gone some other way */ }
 					return false;
 				}
 			}
