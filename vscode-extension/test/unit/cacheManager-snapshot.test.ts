@@ -1433,9 +1433,11 @@ test('deleteSharedSnapshot() reports false, not unconditional success, when the 
 // still-present stale snapshot, resurrecting exactly the data this clear was meant to remove — a
 // deterministic failure mode, not just a race. Fixed by skipping the epoch bump entirely when the
 // unlink genuinely fails, so this clear attempt goes unrecorded to peers instead of misleadingly
-// recorded as having succeeded.
+// recorded as having succeeded. A later fix added a replace-with-empty fallback for exactly this
+// failure (a failed unlink is often a transient file lock, which a tmp-file + rename can still get
+// past), so this test also fails that fallback to keep exercising the "nothing worked" path.
 // Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail).
-test('deleteSharedSnapshot() does not advance the epoch when unlinking the snapshot genuinely fails, so a peer does not reload the still-present stale snapshot', async (t) => {
+test('deleteSharedSnapshot() does not advance the epoch when unlinking AND the empty-replace fallback both genuinely fail, so a peer does not reload the still-present stale snapshot', async (t) => {
 	const dir = tmpDir();
 	const publisher = makeManager(dir);
 	publisher.setCachedSessionData('/a.json', entry(1000), 10);
@@ -1458,6 +1460,13 @@ test('deleteSharedSnapshot() does not advance the epoch when unlinking the snaps
 			throw err;
 		}
 		return originalUnlink(...args);
+	});
+	const originalWriteFile = fs.promises.writeFile.bind(fs.promises) as (...a: unknown[]) => Promise<void>;
+	t.mock.method(fs.promises as any, 'writeFile', async (...args: unknown[]) => {
+		if (String(args[0]).includes('.snapshot.json.')) {
+			throw new Error('simulated disk failure for the empty-replace fallback too');
+		}
+		return originalWriteFile(...args);
 	});
 
 	const persisted = await m.deleteSharedSnapshot();
@@ -1482,8 +1491,9 @@ test('deleteSharedSnapshot() does not advance the epoch when unlinking the snaps
 // bookmark still at its initial value — e.g. the file appeared from a peer after this window
 // started), that load would see the still-present file's mtime as new and merge the exact content
 // clearAllCachedData() just emptied straight back in. No peer required — a single window hitting a
-// transient unlink failure is enough.
-test('deleteSharedSnapshot() bookmarks the still-present snapshot on a failed unlink, so this window\'s own next load does not resurrect it either', async (t) => {
+// transient unlink failure is enough. Also fails the later empty-replace fallback, to keep exercising
+// the "nothing worked" path that still bookmarks the mtime.
+test('deleteSharedSnapshot() bookmarks the still-present snapshot when unlinking AND the empty-replace fallback both fail, so this window\'s own next load does not resurrect it either', async (t) => {
 	const dir = tmpDir();
 	const publisher = makeManager(dir);
 	publisher.setCachedSessionData('/a.json', entry(1000), 10);
@@ -1503,6 +1513,13 @@ test('deleteSharedSnapshot() bookmarks the still-present snapshot on a failed un
 		}
 		return originalUnlink(...args);
 	});
+	const originalWriteFile = fs.promises.writeFile.bind(fs.promises) as (...a: unknown[]) => Promise<void>;
+	t.mock.method(fs.promises as any, 'writeFile', async (...args: unknown[]) => {
+		if (String(args[0]).includes('.snapshot.json.')) {
+			throw new Error('simulated disk failure for the empty-replace fallback too');
+		}
+		return originalWriteFile(...args);
+	});
 
 	const persisted = await m.deleteSharedSnapshot();
 	assert.ok(intercepted, 'the unlink interception must actually have fired for this assertion to be meaningful');
@@ -1513,6 +1530,48 @@ test('deleteSharedSnapshot() bookmarks the still-present snapshot on a failed un
 		'this window\'s own next load must not treat the still-present, unchanged snapshot as newly-arrived content');
 	assert.ok(!m.cache.has('/a.json'),
 		'the cache clearAllCachedData() would have emptied must stay empty, not be resurrected by this window\'s own post-clear refresh');
+});
+
+// A further Copilot review found a failed unlink could leave the pre-clear snapshot's entries
+// mergeable back into a later write (buildMergedSnapshotEntries() reads whatever is still on disk).
+// Fixed with a replace-with-empty fallback: a failed unlink is often a transient file lock (e.g.
+// Windows holding a read handle open) rather than a genuine permissions failure, and the same
+// tmp-file + rename pattern writeSharedSnapshot() already uses to publish can still land here, since
+// it only needs to replace the directory entry, not touch whatever is holding the original open. When
+// this fallback succeeds, the clear is fully durable — same as a normal successful unlink.
+test('deleteSharedSnapshot() falls back to replacing the snapshot with an empty one when the direct unlink fails, landing a fully durable clear', async (t) => {
+	const dir = tmpDir();
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot();
+
+	const m = makeManager(dir);
+	const originalUnlink = fs.promises.unlink.bind(fs.promises) as (...a: unknown[]) => Promise<void>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'unlink', async (...args: unknown[]) => {
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			const err = new Error('simulated transient file lock') as NodeJS.ErrnoException;
+			err.code = 'EBUSY';
+			throw err;
+		}
+		return originalUnlink(...args);
+	});
+
+	const persisted = await m.deleteSharedSnapshot();
+	assert.ok(intercepted, 'the unlink interception must actually have fired for this assertion to be meaningful');
+	assert.equal(persisted, true,
+		'a failed unlink whose empty-replace fallback succeeds must still be reported as a fully durable clear');
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(entries && Object.keys(entries).length === 0,
+		'the on-disk snapshot must have been replaced with an empty one, not left with the pre-clear entry');
+	assert.ok(fs.existsSync(m.getClearEpochPath()),
+		'the epoch must have been advanced normally, since the clear landed durably via the fallback');
+
+	const peer = makeManager(dir);
+	const merged = await peer.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 0, 'a peer loading the replaced snapshot must not find the pre-clear entry to merge');
 });
 
 // A further Copilot review found checkClearEpoch() only invalidated CacheManager's own raw session

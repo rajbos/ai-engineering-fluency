@@ -2282,13 +2282,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 			log: (m: string) => this.log(m),
 			warn: (m: string) => this.warn(m),
 			error: (m: string) => this.error(m),
-			// Mirrors clearCache()'s own local-clear invalidation block: a peer's clear, detected
-			// asynchronously by CacheManager during a refresh/save cycle, drops its raw session cache
-			// but has no visibility into this class's separate, generation-stamped derived-stat
-			// caches. Without this, a view like showDetails() could keep rendering statistics
-			// computed before the peer's clear even though the underlying session cache was
-			// correctly dropped. Only invalidates — does not proactively rebuild any open panel; the
-			// existing generation-stamped reuse checks already force a recompute on next read.
+			// Mirrors clearCache()'s own local-clear invalidation, minus the two steps that are
+			// clearCache()-specific rather than cache-state invalidation: clearAllCachedData() (the
+			// CacheManager whose own detection this is reacting to already dropped its session cache)
+			// and deleteSharedSnapshot()/the success-or-warning message (this window isn't the one
+			// that cleared, so there's nothing here for it to delete or announce). Everything else
+			// clearCache() does to make sure THIS window stops serving pre-clear data applies equally
+			// to a peer-detected clear:
+			// - The derived-stat caches: CacheManager has no visibility into this class's separate,
+			//   generation-stamped caches, so without this a view like showDetails() could keep
+			//   rendering statistics computed before the peer's clear even though the underlying
+			//   session cache was correctly dropped.
+			// - The diagnostics caches: same shape of staleness, for the diagnostics view's own
+			//   loaded-files tracking and model-usage handlers.
+			// - The open Efficiency panel: unlike the other panels (which get republished by the next
+			//   periodic refresh once the generation bump above forces a recompute), showEfficiency()
+			//   returns immediately for an already-open panel and the regular refresh never publishes
+			//   to it — nothing else would ever push it a rebuild.
 			onPeerClearDetected: () => {
 				this.lastDetailedStats = undefined;
 				this.lastDailyStats = undefined;
@@ -2299,6 +2309,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this._lastEfficiencyViewData = undefined;
 				this._memoryFilesAnalysisScannedAt = undefined;
 				this._cacheGeneration++;
+
+				this.diagnosticsHasLoadedFiles = false;
+				this.diagnosticsCachedFiles = [];
+				this.diagnosticsAllSessionFiles = [];
+				this.diagnosticsTtftCache.clear();
+
+				if (this.efficiencyPanel) {
+					this.log('⚡ Rebuilding the open Efficiency view after a peer window\'s clear...');
+					this.requestEfficiencyRebuild();
+				}
 			},
 		}, CopilotTokenTracker.CACHE_VERSION);
 		this.hookManager = new HookManager(context.globalState, (msg) => this.log(msg));

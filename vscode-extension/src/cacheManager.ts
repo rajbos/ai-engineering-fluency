@@ -1267,10 +1267,11 @@ export class CacheManager {
 	 * `bumpClearEpochLocked()`'s own doc comment for that narrower, already-accepted fallback gap.
 	 *
 	 * Returns whether this window's clear is now durably visible to peers: the on-disk snapshot was
-	 * actually removed (or already gone) AND the epoch marker was actually persisted. `false` on
-	 * either half means a peer must not be told a clear happened at all — see the two failure
-	 * branches below for why each one skips the epoch bump rather than reporting an unqualified
-	 * success. The caller must not treat this method as having unconditionally succeeded.
+	 * actually removed, replaced with an empty one, or already gone, AND the epoch marker was
+	 * actually persisted. `false` means neither the delete nor its empty-snapshot fallback could land
+	 * — a peer must not be told a clear happened at all in that case, so the epoch bump is skipped
+	 * too; see the unlink failure branch below for why. The caller must not treat this method as
+	 * having unconditionally succeeded.
 	 */
 	async deleteSharedSnapshot(retryOptions?: { attempts: number; delayMs: number }): Promise<boolean> {
 		const lockAcquired = await this.acquireCacheLockWithRetry(retryOptions);
@@ -1295,29 +1296,56 @@ export class CacheManager {
 					// A genuine failure (e.g. permissions): the file is presumably still there,
 					// unchanged.
 					this.deps.warn(`Failed to delete shared cache snapshot: ${err}`);
-					// Advancing the epoch here would tell every peer "a clear happened" while the
-					// pre-clear snapshot is still fully present on disk — a peer's checkClearEpoch()
-					// would detect it, reset its own mtime bookmark to 0, and its very next
-					// loadSharedSnapshotIfChanged() would immediately reload that still-present stale
-					// snapshot, resurrecting exactly the data this clear was meant to remove. Skipping
-					// the bump leaves this clear attempt unrecorded to peers instead — the same "not
-					// yet propagated" state as before this call ran, rather than a durable, misleading
-					// claim that the fence held.
-					//
-					// Bookmarking the bookmark to the file's current (unchanged) mtime — rather than
-					// leaving it alone — matters for THIS window's own next load, not just peers': the
-					// caller here is clearCache(), whose very next step (after this returns) is a
-					// refresh that calls loadSharedSnapshotIfChanged(). If this window had never loaded
-					// this snapshot itself (bookmark still at its initial value), that load would see
-					// the still-present file's mtime as new and merge the exact pre-clear content
-					// clearAllCachedData() just emptied straight back into this window's own cache —
-					// a self-inflicted resurrection that needs no peer at all. The file didn't change,
-					// so bookmarking its current mtime now is accurate, not merely a workaround.
+					// A failed unlink is often a transient file lock (e.g. Windows holding a read
+					// handle open on the file — the exact scenario a concurrent loadSharedSnapshotIfChanged()
+					// read can cause) rather than a genuine permissions failure. The same tmp-file +
+					// rename pattern writeSharedSnapshot() already uses to publish can still succeed
+					// here: renaming a fresh, unlocked temp file over the path only replaces the
+					// directory entry, it doesn't need to touch whatever is holding the original file's
+					// data open. Falling back to "replace with an empty snapshot" gives this clear a
+					// real chance to still land durably — with an empty on-disk snapshot, a later write's
+					// buildMergedSnapshotEntries() has nothing pre-clear left to merge back in — instead
+					// of immediately downgrading to the non-durable fallback below.
 					try {
-						const stat = await fs.promises.stat(snapshotPath);
-						this.lastLoadedSnapshotMtime = stat.mtimeMs;
-					} catch { /* best-effort; if even stat fails the file is presumably gone some other way */ }
-					return false;
+						const emptyEnvelope = {
+							schemaVersion: CacheManager.SNAPSHOT_SCHEMA_VERSION,
+							cacheVersion: this.cacheVersion,
+							cacheId: this.getCacheIdentifier(),
+							generatedAt: Date.now(),
+							entryCount: 0,
+							entries: {},
+						};
+						const tmpPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
+						await fs.promises.writeFile(tmpPath, JSON.stringify(emptyEnvelope));
+						await fs.promises.rename(tmpPath, snapshotPath);
+						this.lastLoadedSnapshotMtime = 0;
+						this.deps.log(`Replaced shared cache snapshot with an empty one after a failed delete (${this.getCacheIdentifier()})`);
+					} catch (replaceErr) {
+						this.deps.warn(`Could not replace the shared cache snapshot with an empty one either: ${replaceErr}`);
+						// Advancing the epoch here would tell every peer "a clear happened" while the
+						// pre-clear snapshot is still fully present on disk — a peer's checkClearEpoch()
+						// would detect it, reset its own mtime bookmark to 0, and its very next
+						// loadSharedSnapshotIfChanged() would immediately reload that still-present stale
+						// snapshot, resurrecting exactly the data this clear was meant to remove. Skipping
+						// the bump leaves this clear attempt unrecorded to peers instead — the same "not
+						// yet propagated" state as before this call ran, rather than a durable, misleading
+						// claim that the fence held.
+						//
+						// Bookmarking the bookmark to the file's current (unchanged) mtime — rather than
+						// leaving it alone — matters for THIS window's own next load, not just peers': the
+						// caller here is clearCache(), whose very next step (after this returns) is a
+						// refresh that calls loadSharedSnapshotIfChanged(). If this window had never loaded
+						// this snapshot itself (bookmark still at its initial value), that load would see
+						// the still-present file's mtime as new and merge the exact pre-clear content
+						// clearAllCachedData() just emptied straight back into this window's own cache —
+						// a self-inflicted resurrection that needs no peer at all. The file didn't change,
+						// so bookmarking its current mtime now is accurate, not merely a workaround.
+						try {
+							const stat = await fs.promises.stat(snapshotPath);
+							this.lastLoadedSnapshotMtime = stat.mtimeMs;
+						} catch { /* best-effort; if even stat fails the file is presumably gone some other way */ }
+						return false;
+					}
 				}
 			}
 			return await this.bumpClearEpochLocked();
