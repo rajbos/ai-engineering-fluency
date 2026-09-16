@@ -1426,6 +1426,55 @@ test('deleteSharedSnapshot() reports false, not unconditional success, when the 
 		'a failed epoch write must be reported to the caller, not silently treated as a successful clear');
 });
 
+// A further Copilot review found that when unlinking the snapshot fails for a genuine (non-ENOENT)
+// reason, deleteSharedSnapshot() still advanced the epoch and reported success — but the pre-clear
+// snapshot is still fully present on disk. A peer would then detect the epoch, reset its own mtime
+// bookmark to 0, and its very next loadSharedSnapshotIfChanged() would immediately reload that
+// still-present stale snapshot, resurrecting exactly the data this clear was meant to remove — a
+// deterministic failure mode, not just a race. Fixed by skipping the epoch bump entirely when the
+// unlink genuinely fails, so this clear attempt goes unrecorded to peers instead of misleadingly
+// recorded as having succeeded.
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail).
+test('deleteSharedSnapshot() does not advance the epoch when unlinking the snapshot genuinely fails, so a peer does not reload the still-present stale snapshot', async (t) => {
+	const dir = tmpDir();
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot();
+
+	// A peer that has already loaded the pre-clear snapshot, so it is fully caught up before m's
+	// failed clear attempt below — the state that would be wrongly disturbed by a phantom epoch bump.
+	const peer = makeManager(dir);
+	const initialMerge = await peer.loadSharedSnapshotIfChanged();
+	assert.equal(initialMerge, 1, 'the peer must have actually loaded the snapshot for this test to be meaningful');
+
+	const m = makeManager(dir);
+	const originalUnlink = fs.promises.unlink.bind(fs.promises) as (...a: unknown[]) => Promise<void>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'unlink', async (...args: unknown[]) => {
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			const err = new Error('simulated permission failure') as NodeJS.ErrnoException;
+			err.code = 'EPERM';
+			throw err;
+		}
+		return originalUnlink(...args);
+	});
+
+	const persisted = await m.deleteSharedSnapshot();
+	assert.ok(intercepted, 'the unlink interception must actually have fired for this assertion to be meaningful');
+	assert.equal(persisted, false,
+		'a failed snapshot delete must be reported to the caller, not silently treated as a successful clear');
+	assert.ok(fs.existsSync(m.getSharedSnapshotPath()),
+		'the pre-clear snapshot must genuinely still be on disk for this test to be meaningful');
+	assert.ok(!fs.existsSync(m.getClearEpochPath()),
+		'a failed snapshot delete must not advance the epoch at all — doing so would tell peers a clear happened while the stale snapshot is still fully present');
+
+	const mergedAfter = await peer.loadSharedSnapshotIfChanged();
+	assert.equal(mergedAfter, 0,
+		'the peer must not detect a clear (the epoch never advanced) and so must not reload the still-present pre-clear snapshot');
+	assert.ok(peer.cache.has('/a.json'), 'the peer\'s already-loaded cache must be undisturbed by the failed clear attempt');
+});
+
 test('clearCache()-style sequence (clearAllCachedData + awaitInFlightCheckpoint + deleteSharedSnapshot) is not resurrected by a slow in-flight checkpoint', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);

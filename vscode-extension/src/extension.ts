@@ -2175,7 +2175,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				vscode.window.showInformationMessage('Cache cleared successfully. Reloading statistics...');
 			} else {
 				this.warn('Cache cleared locally, but the cross-window clear marker could not be saved to disk.');
-				vscode.window.showWarningMessage('Cache cleared, but could not confirm the clear to other open windows — they may still show stale data until they restart or you clear the cache again. Reloading statistics...');
+				vscode.window.showWarningMessage(l10n.t('cacheClear.epochNotPersistedWarning'));
 			}
 
 			// Trigger a refresh after clearing the cache

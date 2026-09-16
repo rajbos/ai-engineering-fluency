@@ -526,6 +526,19 @@ test('l10n: efficiency loading step labels resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: cache-clear epoch-not-persisted warning resolves in English and zh-cn', () => {
+	assert.equal(t('cacheClear.epochNotPersistedWarning'),
+		'Cache cleared, but could not confirm the clear to other open windows — they may still show stale data until they restart or you clear the cache again. Reloading statistics...');
+
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('cacheClear.epochNotPersistedWarning'),
+			'缓存已清除，但无法确认其他打开的窗口已收到清除通知——在重启或再次清除缓存之前，它们可能仍显示旧数据。正在重新加载统计数据……');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: main refresh loading step labels resolve in zh-cn', () => {
 	mock.setLanguage('zh-cn');
 	try {

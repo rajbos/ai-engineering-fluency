@@ -1226,8 +1226,10 @@ export class CacheManager {
 	 * clear epoch (see `getClearEpochPath()`). Called by clearCache() so that restarting VS Code
 	 * does not restore cleared data, no peer window's later save (built from data it assembled
 	 * before this clear) can republish stale data, and no peer window keeps serving that stale data
-	 * from its own memory past its next check. The epoch is advanced even when there was no
-	 * snapshot file to delete, since the fence must hold regardless of what was on disk at the time.
+	 * from its own memory past its next check. The epoch is advanced even when there was no snapshot
+	 * file to delete (or it was already gone), since the fence must hold regardless of what was on
+	 * disk at the time — but NOT when the delete genuinely fails and the snapshot is still there; see
+	 * the unlink failure branch below and this method's "Returns" note.
 	 *
 	 * Acquires the same cache save lock writeSharedSnapshot() holds while it builds and renames a
 	 * snapshot — retrying briefly rather than the usual single-shot acquire, since this specific
@@ -1254,11 +1256,11 @@ export class CacheManager {
 	 * not serialized against a concurrent writer the way the held-lock case is. See
 	 * `bumpClearEpochLocked()`'s own doc comment for that narrower, already-accepted fallback gap.
 	 *
-	 * Returns whether the durable epoch was actually persisted (`bumpClearEpochLocked()`'s own
-	 * result). `false` means the on-disk snapshot was still deleted for this window, but no peer —
-	 * and not even this window after a restart — has any durable record that a clear happened at
-	 * all, so a peer's pre-clear in-memory cache can pass every check and republish stale data
-	 * indefinitely. The caller must not treat this method as having unconditionally succeeded.
+	 * Returns whether this window's clear is now durably visible to peers: the on-disk snapshot was
+	 * actually removed (or already gone) AND the epoch marker was actually persisted. `false` on
+	 * either half means a peer must not be told a clear happened at all — see the two failure
+	 * branches below for why each one skips the epoch bump rather than reporting an unqualified
+	 * success. The caller must not treat this method as having unconditionally succeeded.
 	 */
 	async deleteSharedSnapshot(retryOptions?: { attempts: number; delayMs: number }): Promise<boolean> {
 		const lockAcquired = await this.acquireCacheLockWithRetry(retryOptions);
@@ -1284,6 +1286,15 @@ export class CacheManager {
 					// unchanged, so the bookmark is left alone rather than forcing a needless reload
 					// of a snapshot that was never actually removed.
 					this.deps.warn(`Failed to delete shared cache snapshot: ${err}`);
+					// Advancing the epoch here would tell every peer "a clear happened" while the
+					// pre-clear snapshot is still fully present on disk — a peer's checkClearEpoch()
+					// would detect it, reset its own mtime bookmark to 0, and its very next
+					// loadSharedSnapshotIfChanged() would immediately reload that still-present stale
+					// snapshot, resurrecting exactly the data this clear was meant to remove. Skipping
+					// the bump leaves this clear attempt unrecorded to peers instead — the same "not
+					// yet propagated" state as before this call ran, rather than a durable, misleading
+					// claim that the fence held.
+					return false;
 				}
 			}
 			return await this.bumpClearEpochLocked();
