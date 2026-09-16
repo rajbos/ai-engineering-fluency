@@ -143,10 +143,13 @@ To check if data is available:
 code before the agent starts, at **`.graphify-agent/graph.json`** (order of
 10k nodes; the exact size tracks the repo, so don't read a precise figure into
 it). It needs no secrets — it is local AST parsing (`--code-only`).
-The build is the last thing setup does and is deliberately non-blocking, so it is
-attempted whenever the earlier setup steps succeed (a failure in one of those makes
-Copilot skip everything after it, this group included). Treat the graph as normally
-available rather than guaranteed, and check for it before relying on it.
+The build runs early — before the Azure session-log and usage-data hydration —
+so that the only third-party code in the job executes while there is no
+sensitive data on disk for a compromised dependency to read. It is deliberately
+non-blocking (every step is `continue-on-error`), which is what lets it run
+first without a PyPI outage costing the hydration that follows. Treat the graph
+as normally available rather than guaranteed, and check for it before relying
+on it.
 
 Query it instead of fanning `grep`/read across the tree when the question is
 structural — what calls a symbol, what a change reaches, how two areas connect:
