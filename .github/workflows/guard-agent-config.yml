@@ -22,7 +22,7 @@ on:
     # never having run once. It also fires on title/body edits, which just
     # re-runs a cheap check.
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
-    branches: main
+    branches: [main]
 
 # Serialize per PR. These events mutate shared label state and all post the same
 # check, so an in-flight `labeled` run could otherwise finish "Allowed" from its

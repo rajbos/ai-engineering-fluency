@@ -39,6 +39,16 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Never write the token to .git/config in the first place, rather than
+          # writing it and deleting it later. Removing it in the graphify step
+          # was conditional twice over - that step is continue-on-error AND now
+          # gated on setup-python succeeding, so a failed interpreter setup
+          # skipped the removal entirely and the credential survived the whole
+          # job. Nothing here needs authenticated git: neither package has a
+          # git-URL dependency, the Azure steps use `az`, and the agent-sessions
+          # fetch reads GITHUB_TOKEN from the environment.
+          persist-credentials: false
 
       # Copilot code review runs these setup steps against the PR head checkout,
       # which can be an old branch that predates the root .nvmrc file. Resolve the
@@ -109,15 +119,12 @@ jobs:
         if: steps.graphify-python.outcome == 'success'
         continue-on-error: true
         run: |
-          # Drop the checkout credential before GRAPHIFY's install and extract
-          # run, so a malicious wheel cannot read it straight out of
-          # .git/config.
-          #
-          # Not "before any third-party code": actions/setup-node,
-          # actions/setup-python and two `npm ci` runs have already executed by
-          # this point, with the credential present. Disabling credential
-          # persistence at checkout is what would cover those; this covers the
-          # pip install and extract below.
+          # Second line of defence. `persist-credentials: false` on the
+          # checkout above means the token is never written to .git/config, so
+          # these two commands should find nothing - but they stay because they
+          # cost nothing and they FAIL CLOSED: if a future change re-enables
+          # credential persistence, this aborts before any third-party code
+          # rather than silently handing a wheel the token.
           #
           # Safe to drop this early: no later step uses authenticated git. The
           # Azure steps authenticate with `az`, and `Fetch Copilot agent
