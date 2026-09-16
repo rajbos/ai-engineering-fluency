@@ -228,6 +228,12 @@ type UsageAnalysisStats = {
 	copilotApiBalance?: CopilotApiBalance | null;
 	/** Current-month billing group costs in USD from the extension's local session tracking. */
 	monthBillingGroupCosts?: Record<string, number> | null;
+	/**
+	 * How many Claude Desktop sessions have a transcript this machine can actually read. Drives the
+	 * note explaining why Claude Desktop's own session list is longer than this table. Null/absent
+	 * when no Claude Desktop sessions exist here.
+	 */
+	claudeDesktopCoverage?: { knownSessions: number; withTranscript: number; missingTranscript: number } | null;
 };
 
 // ── Tool Curation types ──────────────────────────────────────────────────────
@@ -1970,6 +1976,20 @@ function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
 			currentMonth: TodaySessionSummary[];
 		};
 	}
+	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'claudeDesktopCoverage')) {
+		sanitized.claudeDesktopCoverage = sanitizeClaudeDesktopCoverage(raw.claudeDesktopCoverage);
+	}
+}
+
+/** Validate the Claude Desktop coverage counts; returns null for any non-numeric or incoherent payload. */
+function sanitizeClaudeDesktopCoverage(raw: any): UsageAnalysisStats['claudeDesktopCoverage'] {
+	if (!raw || typeof raw !== 'object') { return null; }
+	const known = raw.knownSessions;
+	const withTranscript = raw.withTranscript;
+	const missing = raw.missingTranscript;
+	const valid = [known, withTranscript, missing].every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0);
+	if (!valid || withTranscript + missing !== known) { return null; }
+	return { knownSessions: known, withTranscript, missingTranscript: missing };
 }
 
 /** Pass through the memory-files hygiene analysis (compact `MemoryFilesAnalysisView` rollup:
@@ -4674,6 +4694,30 @@ function buildSubAgentSummaryHtml(sessions: TodaySessionSummary[]): string {
 	</div>`;
 }
 
+/**
+ * Note below the Recent Sessions header explaining why Claude Desktop's own session list is longer
+ * than this table. Claude Desktop keeps a lightweight record of every Cowork session, but the
+ * transcript this extension measures lives elsewhere and does not always exist on this machine:
+ * Claude Code prunes old transcripts on its own retention schedule, and cloud-run sessions never
+ * write one here. Those sessions can therefore never be counted — saying so with a real number is
+ * better than letting the difference read as missing data.
+ *
+ * Only rendered when there is actually a shortfall to explain.
+ */
+function buildClaudeDesktopCoverageHtml(coverage: UsageAnalysisStats['claudeDesktopCoverage']): string {
+	if (!coverage || coverage.missingTranscript <= 0) { return ''; }
+	const { knownSessions, missingTranscript } = coverage;
+	const tooltip = 'Claude Desktop lists every session it knows about, but this extension can only measure sessions '
+		+ 'whose transcript is still on this machine. Two things remove a transcript from local disk:\n\n'
+		+ '• Claude Code deletes transcripts older than its retention window (the cleanupPeriodDays setting, 30 days by default). '
+		+ 'Raise it in ~/.claude/settings.json to keep more history measurable.\n'
+		+ '• Sessions that ran in the cloud never write a transcript to this machine at all.\n\n'
+		+ 'These sessions are not missing from your account — they are just not measurable locally.';
+	return `<div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">
+		<span title="${escapeHtml(tooltip)}" style="cursor:help;">🖥️ <strong>${formatNumber(missingTranscript)}</strong> of ${formatNumber(knownSessions)} Claude Desktop session${knownSessions === 1 ? '' : 's'} known to this machine have no local transcript left, so they cannot be measured here<span style="font-size:0.75em; opacity:0.6;"> ℹ️</span></span>
+	</div>`;
+}
+
 function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 	// Guard against silent host updates that omit todaySessions (e.g. a stale payload
 	// shape): keep showing the last known sessions instead of clearing the table.
@@ -4695,6 +4739,7 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 				</div>
 				<div class="section-subtitle">Individual session breakdown for the selected period — sorted by number of interactions (most active first).</div>
 				${subAgentBanner}
+				${buildClaudeDesktopCoverageHtml(stats.claudeDesktopCoverage)}
 				<div id="sessions-panel-body" style="margin-top: 12px;">
 					${bodyHtml}
 				</div>
