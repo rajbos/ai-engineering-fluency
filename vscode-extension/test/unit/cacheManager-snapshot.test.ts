@@ -709,6 +709,44 @@ test('loadSharedSnapshotIfChanged() drops the stale in-memory cache on a peer cl
 	assert.equal(m.cache.size, 0, 'the pre-clear in-memory entry must be dropped once the mid-stat clear is detected, even on the no-snapshot early-return path');
 });
 
+// A further Copilot review found the epoch re-check above only guards against a *cross-window* clear:
+// this window's own clearAllCachedData() (its own clearCache(), same process) landing during the
+// stat/read/merge sequence bumps cacheClearGeneration, but deleteSharedSnapshot() — the call that
+// actually advances the durable marker — may not have run yet (or already has, in which case this
+// window's own clearEpoch already reflects it), so checkClearEpoch() can return false immediately
+// afterward even though the cache was just synchronously emptied. Without a generation check too,
+// mergeSnapshotEntries() (which reads `this.sessionFileCache` at call time, after the clear already
+// ran) merges straight into that now-current, freshly-cleared map, silently reinserting pre-clear
+// entries into what should be an empty cache.
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail).
+test('loadSharedSnapshotIfChanged() wipes what it just merged when this window\'s own clearAllCachedData() lands mid-load', async (t) => {
+	const dir = tmpDir();
+	const publisher = makeManager(dir);
+	publisher.setCachedSessionData('/a.json', entry(1000), 10);
+	await publisher.writeSharedSnapshot(); // pre-clear content on disk to (almost) resurrect
+
+	const m = makeManager(dir);
+
+	const originalReadFile = fs.promises.readFile.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'readFile', async (...args: unknown[]) => {
+		const result = await originalReadFile(...args);
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			// Simulate this window's own clearCache() landing exactly while this load is reading the
+			// snapshot it's about to merge — a same-process clear, so only the generation counter
+			// moves; the durable epoch marker is untouched (deleteSharedSnapshot() hasn't run).
+			m.clearAllCachedData();
+		}
+		return result;
+	});
+
+	const merged = await m.loadSharedSnapshotIfChanged();
+	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
+	assert.equal(merged, 0, 'entries merged into an already-cleared cache must not be reported as usefully merged');
+	assert.equal(m.cache.size, 0, 'the pre-clear entry must not survive in the now-current (post-clear) cache map');
+});
+
 test('a save that started before the clear epoch is skipped only once; the next save (after re-syncing) succeeds normally', async () => {
 	const dir = tmpDir();
 
@@ -857,6 +895,39 @@ test('loadCacheFromStorage() seeds the clear epoch so freshly-loaded post-clear 
 	const entries = await second.readSharedSnapshot();
 	assert.ok(entries && '/b.json' in entries!,
 		'a save made after loadCacheFromStorage() seeded the epoch must not be wrongly treated as predating a past clear');
+});
+
+// A further Copilot review found the only-once-per-process constructor call to loadCacheFromStorage()
+// can still race this same instance's own clearCache(): the promise it returns is never awaited by
+// the constructor, so a clearCache() invoked before that disk read settles can land while it is still
+// in flight. checkClearEpoch() in the `finally` block only reports a *cross-window* clear it has not
+// yet accounted for — a same-process clearAllCachedData() bumps the generation but not necessarily
+// the durable marker (deleteSharedSnapshot() may not have run yet), so it alone cannot be trusted to
+// have wiped what this load just assigned to sessionFileCache above it.
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail).
+test('loadCacheFromStorage() wipes what it just loaded when clearAllCachedData() lands mid-load, same process', async (t) => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000), 10);
+	await writer.writeSharedSnapshot();
+
+	const m = makeManager(dir);
+	const originalReadFile = fs.promises.readFile.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'readFile', async (...args: unknown[]) => {
+		const result = await originalReadFile(...args);
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			// Simulate this window's own clearCache() landing exactly while the constructor's
+			// loadCacheFromStorage() call is still reading the on-disk snapshot.
+			m.clearAllCachedData();
+		}
+		return result;
+	});
+
+	await m.loadCacheFromStorage();
+	assert.ok(intercepted, 'the read interception must actually have fired for this assertion to be meaningful');
+	assert.equal(m.cache.size, 0, 'the pre-clear snapshot must not be loaded on top of a clear that landed mid-load');
 });
 
 test('writeSharedSnapshot() still strips a disk entry that is the same age as or older than the tombstoned deletion', async () => {
@@ -1085,6 +1156,40 @@ test('writeSharedSnapshot() aborts when checkClearEpoch() detects a peer clear m
 	const entries = await m.readSharedSnapshot();
 	assert.ok(!entries || !('/a.json' in entries),
 		'the peer\'s clear must not be undone by a write that only learned of it through the generation bump, not its own epoch check');
+});
+
+// A further Copilot review found the pre-rename check combined the generation comparison and the
+// epoch check into one `a || await b()`: the synchronous generation comparison ran and evaluated
+// false *before* the await for checkClearEpoch() even started, so a same-process clear landing during
+// that await (which only bumps the generation — the durable epoch marker is untouched) was invisible
+// by the time the comparison had already run. Fixed by awaiting checkClearEpoch() unconditionally
+// first and comparing the generation synchronously right after, closing the gap.
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail).
+test('writeSharedSnapshot() catches a same-process clear landing during its own pre-rename epoch check', async (t) => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+
+	const originalReadFile = fs.promises.readFile.bind(fs.promises) as (...a: unknown[]) => Promise<unknown>;
+	let epochReadCount = 0;
+	t.mock.method(fs.promises as any, 'readFile', async (...args: unknown[]) => {
+		if (String(args[0]).endsWith('.epoch.json')) {
+			epochReadCount++;
+			// The second epoch read is the pre-rename check (the first is the top-of-function one).
+			// Simulate this window's own clearCache() landing exactly during that read.
+			if (epochReadCount === 2) {
+				m.clearAllCachedData();
+			}
+		}
+		return originalReadFile(...args);
+	});
+
+	const persisted = await m.writeSharedSnapshot();
+	assert.equal(epochReadCount, 2, 'the interception must have targeted the pre-rename epoch check for this assertion to be meaningful');
+	assert.equal(persisted, false, 'a write racing its own pre-rename clear must abort rather than persist stale, pre-clear data');
+
+	const entries = await m.readSharedSnapshot();
+	assert.ok(!entries || !('/a.json' in entries), 'the clear must not be undone by a write whose generation check ran before the clear, not after');
 });
 
 // The same review also found bumpClearEpochLocked()'s monotonic floor only used the freshly-read

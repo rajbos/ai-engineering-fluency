@@ -757,6 +757,13 @@ export class CacheManager {
 		// checkClearEpoch() and wrongly discard the (already post-clear) data this call is about to
 		// load. See getClearEpochPath()'s doc comment for the full cross-window contract.
 		this.clearEpoch = await this.readClearEpoch();
+		// This call only ever runs once, from the constructor, before clearCache() could plausibly
+		// be invoked — but its promise is not awaited there, so a clearCache() reachable the instant
+		// activation finishes (before this async disk read settles) can still land while it is in
+		// flight. checkClearEpoch() alone cannot be trusted to notice: it only reports a clear this
+		// window has not yet accounted for, and this window's own clearAllCachedData() already means
+		// it has (see the generation comparison in the `finally` block below).
+		const clearGenerationAtStart = this.cacheClearGeneration;
 		try {
 			const cacheId = this.getCacheIdentifier();
 
@@ -820,6 +827,13 @@ export class CacheManager {
 			// entries it just finished loading. Runs on every path above (including the early
 			// returns), and is a safe no-op when nothing changed since the seed above.
 			await this.checkClearEpoch();
+			if (this.cacheClearGeneration !== clearGenerationAtStart) {
+				// This window's own clearCache() landed while the load above was in flight.
+				// checkClearEpoch() does not catch this (see the comment where clearGenerationAtStart
+				// is captured) — whatever this load just assigned to sessionFileCache above needs to
+				// be wiped explicitly, the same way loadSharedSnapshotIfChanged() guards this race.
+				this.sessionFileCache = new Map();
+			}
 		}
 	}
 
@@ -1079,7 +1093,15 @@ export class CacheManager {
 			};
 			await fs.promises.mkdir(path.dirname(snapshotPath), { recursive: true });
 			await fs.promises.writeFile(tmpPath, JSON.stringify(envelope));
-			if (this.cacheClearGeneration !== clearGenerationAtStart || await this.checkClearEpoch()) {
+			// checkClearEpoch() is awaited first, unconditionally, rather than combined into one `||`
+			// with the generation comparison short-circuiting it: `a || await b()` only evaluates `b`
+			// when `a` is already false, checked synchronously before that await even starts — a clear
+			// landing in THIS window during the await (bumping the generation) would then be invisible,
+			// since the generation was already compared as unchanged before the clear happened. Awaiting
+			// checkClearEpoch() first and comparing the generation synchronously right after leaves no
+			// such gap.
+			const epochDetectedBeforeRename = await this.checkClearEpoch();
+			if (this.cacheClearGeneration !== clearGenerationAtStart || epochDetectedBeforeRename) {
 				this.deps.log('Skipping shared-snapshot write: cache was cleared while this checkpoint was about to persist');
 				try { await fs.promises.unlink(tmpPath); } catch { /* best-effort cleanup */ }
 				return false;
@@ -1270,6 +1292,14 @@ export class CacheManager {
 		// from publishing. Called once per refresh cycle (this function's own call sites), not per
 		// file, matching writeSharedSnapshot()'s check on the write side. See getClearEpochPath().
 		await this.checkClearEpoch();
+		// Captured after the check above (same pattern as writeSharedSnapshot()'s
+		// clearGenerationAtStart): this window's own clearAllCachedData() can land during the
+		// stat/read/merge sequence below, and checkClearEpoch() alone cannot be trusted to notice —
+		// it only reports a clear this window has not yet accounted for, and a same-process clear
+		// means it already has (this.clearEpoch gets updated in step by deleteSharedSnapshot(), not
+		// only by observing the persisted marker), so it can return false immediately afterward. See
+		// the comparison below for why that matters here specifically.
+		const clearGenerationAtStart = this.cacheClearGeneration;
 		const snapshotPath = this.getSharedSnapshotPath();
 		let mtimeMs: number | undefined;
 		try {
@@ -1294,8 +1324,22 @@ export class CacheManager {
 		// window would keep serving (and could later republish) pre-clear in-memory data until its next
 		// unrelated refresh cycle happened to call checkClearEpoch() again. A detected clear here means
 		// anything just merged is already stale, so it is dropped along with the rest of the cache —
-		// report 0, not `merged`.
-		if (await this.checkClearEpoch()) {
+		// report 0, not `merged`. checkClearEpoch() is awaited unconditionally, before the generation
+		// comparison below, not combined into one `||` — awaiting it first and comparing the generation
+		// synchronously right after leaves no gap for a same-process clear landing during that await to
+		// slip past a comparison that ran before it happened.
+		const epochDetected = await this.checkClearEpoch();
+		if (this.cacheClearGeneration !== clearGenerationAtStart) {
+			// This window's own clearCache() (clearAllCachedData(), synchronous) already replaced
+			// sessionFileCache with a fresh, empty Map before the merge above ran — mergeSnapshotEntries()
+			// reads `this.sessionFileCache` at call time, so what was merged went straight into that new
+			// map, silently reinserting pre-clear entries into an otherwise-just-cleared cache.
+			// checkClearEpoch() does not catch this (see above), so it is not enough on its own to have
+			// wiped it — wipe explicitly.
+			this.sessionFileCache = new Map();
+			return 0;
+		}
+		if (epochDetected) {
 			return 0;
 		}
 		if (merged > 0) {
