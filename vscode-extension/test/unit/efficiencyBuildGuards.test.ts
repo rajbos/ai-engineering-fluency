@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import {
 	chainBuild,
 	isComputedStatsCurrent,
+	isMemoryFilesScanFresh,
 	makeLivePanelSink,
 	mergeDailyStatsIntoFullYear,
 	planEfficiencyRebuild,
@@ -63,6 +64,28 @@ test('isComputedStatsCurrent: the in-flight-build race is rejected end to end', 
 	// 5. A build that starts after the clear stamps the live generation and is reusable.
 	const rebuildStamp = cacheGeneration;
 	assert.equal(isComputedStatsCurrent(rebuildStamp, cacheGeneration), true);
+});
+
+// ---------------------------------------------------------------------------
+// isMemoryFilesScanFresh — throttles the synchronous readdirSync/statSync walk that
+// discovers Copilot memory files, so it does not repeat on every uncached recompute
+// (e.g. a periodic Usage Analysis refresh while the panel is open).
+// ---------------------------------------------------------------------------
+
+test('isMemoryFilesScanFresh: a scan that has never run is never fresh', () => {
+	assert.equal(isMemoryFilesScanFresh(undefined, Date.now(), 5 * 60 * 1000), false);
+});
+
+test('isMemoryFilesScanFresh: a scan within the TTL window is reused', () => {
+	const now = 1_000_000;
+	assert.equal(isMemoryFilesScanFresh(now - 1000, now, 5 * 60 * 1000), true, 'well within TTL');
+	assert.equal(isMemoryFilesScanFresh(now - (5 * 60 * 1000 - 1), now, 5 * 60 * 1000), true, 'just under the TTL boundary');
+});
+
+test('isMemoryFilesScanFresh: a scan at or past the TTL is stale and must rescan', () => {
+	const now = 1_000_000;
+	assert.equal(isMemoryFilesScanFresh(now - 5 * 60 * 1000, now, 5 * 60 * 1000), false, 'exactly at the TTL boundary');
+	assert.equal(isMemoryFilesScanFresh(now - 6 * 60 * 1000, now, 5 * 60 * 1000), false, 'past the TTL');
 });
 
 // ---------------------------------------------------------------------------
@@ -272,13 +295,15 @@ test('wiring: every computed-stat cache is stamped with the generation its build
 	]) {
 		assert.ok(EXTENSION_SRC.includes(marker), `missing generation stamp: ${marker}`);
 	}
-	// Seven captures: the six producers of a stamped cache, plus loadAnalysisStatsInBackground(),
-	// which stamps nothing but posts its walk's result straight to the panel and so needs the same
-	// capture to gate on. The count is the tripwire — a new one added by re-reading the live
+	// Nine captures: the six producers of a stamped cache, loadAnalysisStatsInBackground() (which
+	// stamps nothing but posts its walk's result straight to the panel and so needs the same
+	// capture to gate on), and showDetails()/showEnvironmental() (which gate whether a failed
+	// updateTokenStats() means a genuine error or a discarded, superseded run — see
+	// isRefreshSuperseded()). The count is the tripwire — a new one added by re-reading the live
 	// generation at write time is the bug this whole scheme exists for.
 	assert.equal(
 		EXTENSION_SRC.split('const startedAtGeneration = ').length - 1,
-		7,
+		9,
 		'every producer of a stamped cache or a gated publication must capture before its first await',
 	);
 	// A refresh's results belong to the generation its *inputs* were gathered in, not the one in
@@ -412,7 +437,7 @@ test('wiring: the Efficiency cold path announces the daily phase after its walk,
 	const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf('private async collectEfficiencyInputs('));
 	const inputs = body.slice(0, body.indexOf('\n\tprivate async buildEfficiencyViewData('));
 
-	const walkAt = inputs.indexOf('dailyStats = await this.calculateDailyStats(365,');
+	const walkAt = inputs.indexOf('dailyStats = await this.trackFullYearBackfill(this.calculateDailyStats(365,');
 	assert.ok(walkAt !== -1, 'the cold path must still perform the full-year walk');
 
 	const dailySteps = [...inputs.matchAll(/postEfficiencyStep\(send, stepPct\.daily/g)].map(m => m.index!);
@@ -536,6 +561,29 @@ test('wiring: a Usage Analysis refresh does not invalidate the daily or full-yea
 		refresh.indexOf('const fullDailyWasCurrent'),
 	);
 	assert.ok(lastRead !== -1 && lastRead < bumpAt, 'the was-current reads must be taken before the bump');
+});
+
+test('wiring: an explicit refresh always re-scans memory files, even within the TTL', () => {
+	// computeMemoryFilesAnalysis() throttles its filesystem walk to once per
+	// MEMORY_FILES_SCAN_TTL_MS and reuses the cached result in between — but a user who presses
+	// Refresh (or clears the cache) is explicitly asking for current data, so both paths must
+	// reset the scan timestamp rather than silently serving a within-TTL result that ignores
+	// files added or deleted since the last scan.
+	for (const [fnSignature, label] of [
+		['private async refreshAnalysisPanel()', 'refreshAnalysisPanel()'],
+		['public async clearCache()', 'clearCache()'],
+	] as const) {
+		const body = EXTENSION_SRC.slice(EXTENSION_SRC.indexOf(fnSignature));
+		const nextPrivate = body.indexOf('\n\tprivate ', 1);
+		const nextPublic = body.indexOf('\n\tpublic ', 1);
+		const candidates = [nextPrivate, nextPublic].filter(i => i !== -1);
+		const end = candidates.length > 0 ? Math.min(...candidates) : body.length;
+		const fn = body.slice(0, end);
+		assert.ok(
+			fn.includes('this._memoryFilesAnalysisScannedAt = undefined;'),
+			`${label} must reset _memoryFilesAnalysisScannedAt so the next recompute forces a fresh memory-files scan`,
+		);
+	}
 });
 
 // ---------------------------------------------------------------------------
@@ -1115,7 +1163,7 @@ test('wiring: every webview document that renders localized text declares the vi
 	// `localization` payload their bundle renders from — so lang="en" has assistive technology
 	// announce localized content with English pronunciation rules.
 	const declared = EXTENSION_SRC.split('<html lang="${webviewDocumentLanguage(vscode.env.language)}">').length - 1;
-	assert.equal(declared, 11, 'every localized webview document must declare the viewer\'s language');
+	assert.equal(declared, 12, 'every localized webview document must declare the viewer\'s language');
 
 	// Two documents are the exception, and both render English regardless of the viewer's
 	// language. `lang` names a document's predominant language, so deriving the viewer's locale

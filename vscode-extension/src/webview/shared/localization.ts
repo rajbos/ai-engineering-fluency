@@ -153,6 +153,23 @@ export interface WebviewLocalization {
 	'efficiency.models.mode.models': string;
 	'efficiency.models.mode.periods': string;
 
+	// Usage view — Copilot Memory Files section
+	'memoryFiles.sectionTitle': string;
+	'memoryFiles.sectionSubtitle': string;
+	'memoryFiles.summary': string;
+	'memoryFiles.staleSummary': string;
+	'memoryFiles.largeSummary': string;
+	'memoryFiles.table.workspace': string;
+	'memoryFiles.table.repo': string;
+	'memoryFiles.table.session': string;
+	'memoryFiles.table.global': string;
+	'memoryFiles.table.size': string;
+	'memoryFiles.table.stale': string;
+	'memoryFiles.table.lastUpdated': string;
+	'memoryFiles.unknownWorkspace': string;
+	'memoryFiles.globalWorkspaceLabel': string;
+	'memoryFiles.renderError': string;
+
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
 }
@@ -283,7 +300,22 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'efficiency.models.controls.comparedWith': 'Compared with',
 	'efficiency.models.controls.window': 'Window',
 	'efficiency.models.mode.models': 'Compare two models',
-	'efficiency.models.mode.periods': 'One model, two periods'
+	'efficiency.models.mode.periods': 'One model, two periods',
+	'memoryFiles.sectionTitle': 'Copilot Memory Files',
+	'memoryFiles.sectionSubtitle': 'Agent-written memory notes on disk (project conventions, decisions, scratch plans) — metadata only, content is never read',
+	'memoryFiles.summary': '{0} files · {1} total',
+	'memoryFiles.staleSummary': '{0} stale (>{1}d)',
+	'memoryFiles.largeSummary': '{0} unusually large (>{1}KB)',
+	'memoryFiles.table.workspace': 'Workspace',
+	'memoryFiles.table.repo': 'Repo',
+	'memoryFiles.table.session': 'Session',
+	'memoryFiles.table.global': 'Global',
+	'memoryFiles.table.size': 'Size',
+	'memoryFiles.table.stale': 'Stale',
+	'memoryFiles.table.lastUpdated': 'Last updated',
+	'memoryFiles.unknownWorkspace': 'Unknown workspace',
+	'memoryFiles.globalWorkspaceLabel': 'User (global)',
+	'memoryFiles.renderError': 'Memory files are temporarily unavailable due to a rendering error. Try Refresh.'
 };
 
 // Current localization strings, initialized with defaults
