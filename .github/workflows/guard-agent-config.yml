@@ -136,11 +136,28 @@ jobs:
           # Matched anywhere after the colon, not just at the start: the trailers
           # this repo actually carries include "Copilot App", "Claude Opus 5",
           # "Mistral Vibe", "Vibe Nuage Agent" and "Vibe Code".
-          trailers=$(git log "origin/$BASE_REF..HEAD" --format='%b')
-          if [ -z "$signal" ] \
-            && printf '%s\n' "$trailers" \
-              | grep -qiE '^[[:space:]]*co-authored-by:.*(claude|copilot|gpt|codex|gemini|mistral|vibe|devin|cursor|aider)'; then
-            signal="AI co-author trailer"
+          #
+          # %B, not %b: %b is the body alone, so a trailer that ended up in the
+          # subject line would not be scanned at all, against the documented
+          # "on any commit" rule. %B is the whole message.
+          trailers=$(git log "origin/$BASE_REF..HEAD" --format='%B')
+          if [ -z "$signal" ]; then
+            # Same hazard as the protected-path scan: used as an `if` condition
+            # this pipeline would have errexit suspended, so a grep ERROR would
+            # read as "no trailer found" and let the change through. Capture the
+            # status instead - only exit 1 means "no match".
+            set +e
+            printf '%s\n' "$trailers" \
+              | grep -qiE '^[[:space:]]*co-authored-by:.*(claude|copilot|gpt|codex|gemini|mistral|vibe|devin|cursor|aider)'
+            trailer_rc=$?
+            set -e
+
+            if [ "$trailer_rc" -eq 0 ]; then
+              signal="AI co-author trailer"
+            elif [ "$trailer_rc" -gt 1 ]; then
+              echo "::error::Could not scan commit messages for AI co-author trailers (grep exited $trailer_rc). Failing closed."
+              exit 1
+            fi
           fi
 
           if [ -z "$signal" ]; then

@@ -94,6 +94,7 @@ jobs:
           python-version: '3.12'
 
       - name: "Install graphify (PyPI distribution: graphifyy)"
+        id: graphify-install
         continue-on-error: true
         run: |
           # Drop the checkout credential before any third-party code runs. A
@@ -104,7 +105,17 @@ jobs:
           # Azure steps authenticate with `az`, and `Fetch Copilot agent
           # sessions` reads GITHUB_TOKEN from the environment rather than from
           # the git config this removes.
+          # `--unset-all` exits 5 when the key is simply absent, which is a
+          # success for our purposes - hence `|| true`. But `|| true` would
+          # equally swallow a real failure, leaving the token in .git/config
+          # while pip and the extract below still ran. So the removal is
+          # *verified* rather than attempted, and the step aborts before any
+          # third-party code if the credential is still there.
           git config --local --unset-all 'http.https://github.com/.extraheader' || true
+          if git config --local --get-all 'http.https://github.com/.extraheader' >/dev/null 2>&1; then
+            echo "::error::The checkout credential is still present in .git/config - refusing to run third-party code."
+            exit 1
+          fi
 
           # --only-binary :all: refuses source distributions, so no dependency
           # gets to execute setup.py in this runner - the pip counterpart of the
@@ -119,6 +130,11 @@ jobs:
           graphify --version
 
       - name: Build code knowledge graph
+        # Only run if the install step got as far as succeeding. Without this,
+        # `continue-on-error` on the step above would let the extract run even
+        # when the credential removal aborted it - which is exactly the state
+        # the abort exists to prevent.
+        if: steps.graphify-install.outcome == 'success'
         continue-on-error: true
         env:
           # Write every artifact to .graphify-agent/ (gitignored) instead of the
