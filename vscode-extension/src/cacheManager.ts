@@ -1011,10 +1011,15 @@ export class CacheManager {
 
 	/**
 	 * Advance the durable clear epoch past whatever any window (including this one) has seen so
-	 * far, and adopt it locally. Best-effort: on a write failure the local epoch still advances, so
-	 * this process at least does not itself republish or keep serving what it just cleared — but a
-	 * peer that never sees the new file falls back to the same-process protections that already
-	 * existed (this is a strict addition, not a replacement for them).
+	 * far, and adopt it locally once the write actually lands on disk. On a write failure,
+	 * `this.clearEpoch` is deliberately left unchanged rather than adopting `newEpoch` anyway: this
+	 * window's own same-process protection against republishing or serving what it just cleared
+	 * already comes entirely from `cacheClearGeneration`/`clearInProgress` (bumped independently of
+	 * this method), so adopting a value the disk never actually received would add no protection for
+	 * this window while creating one for a peer — a later peer clear that computes that exact same
+	 * `persisted + 1` value (routine whenever two clears land in the same millisecond, which is why
+	 * the floor exists at all) would successfully persist it, and this window's `checkClearEpoch()`
+	 * would then see `persisted <= this.clearEpoch` and silently miss that real, successful clear.
 	 *
 	 * The new epoch is `max(Date.now(), persisted + 1, this.clearEpoch + 1)`, not a bare timestamp:
 	 * two clears close together (this window twice, or racing a peer's own clear) must never
@@ -1072,11 +1077,11 @@ export class CacheManager {
 			await fs.promises.mkdir(path.dirname(epochPath), { recursive: true });
 			await fs.promises.writeFile(tmpPath, JSON.stringify({ epoch: newEpoch }));
 			await fs.promises.rename(tmpPath, epochPath);
+			this.clearEpoch = newEpoch;
 		} catch (error) {
 			this.deps.warn(`Failed to persist clear epoch: ${error}`);
 			try { await fs.promises.unlink(tmpPath); } catch { /* best-effort cleanup */ }
 		}
-		this.clearEpoch = newEpoch;
 	}
 
 	/**
@@ -1273,8 +1278,9 @@ export class CacheManager {
 		} finally {
 			if (lockAcquired) { await this.releaseCacheLock(); }
 			// The durable epoch has now been advanced (or, on a write failure inside
-			// bumpClearEpochLocked(), at least adopted locally) — this call's own contribution to the
-			// race window clearInProgress guards is over regardless of which outcome landed. Decremented,
+			// bumpClearEpochLocked(), left unchanged rather than adopted — see that method's own doc
+			// comment) — this call's own contribution to the race window clearInProgress guards is
+			// over regardless of which outcome landed. Decremented,
 			// not reset to zero: an overlapping clearCache() (nothing serializes them today) can still
 			// have its own clearAllCachedData()-to-deleteSharedSnapshot() pair in flight, and the counter
 			// must stay positive until that one finishes too — see clearInProgressCount's own doc comment.

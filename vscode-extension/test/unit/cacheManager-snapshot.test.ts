@@ -1348,6 +1348,57 @@ test('bumpClearEpochLocked() floors on the local epoch too, so a corrupt marker 
 		`a corrupt marker plus a backward clock must still floor on this window's own already-known epoch (${firstEpoch}), not regress to ${secondEpoch}`);
 });
 
+// A further Copilot review found bumpClearEpochLocked() adopted `newEpoch` into `this.clearEpoch`
+// even when the marker write/rename failed and was only logged as a warning. If a later peer's real,
+// successful clear computes that exact same `persisted + 1` value — routine whenever two clears land
+// close together, which is the whole reason the floor exists — this window's checkClearEpoch() would
+// see `persisted <= this.clearEpoch` and wrongly conclude nothing new happened, letting a later
+// writeSharedSnapshot() resurrect pre-clear data right past the peer's real clear.
+// Uses t.mock.method() (auto-restored by the test runner when this test ends, pass or fail) for the
+// write interception, and the same Date.now() backward-clock forcing as the floor test above to make
+// the "two clears compute the identical value" collision deterministic rather than timing-dependent.
+test('bumpClearEpochLocked() leaves the local epoch untouched on a write failure, so a peer clear computing the same value is still detected', async (t) => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	await m.deleteSharedSnapshot(); // establish a real, persisted baseline epoch
+	const baseline = JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch;
+
+	const originalWriteFile = fs.promises.writeFile.bind(fs.promises) as (...a: unknown[]) => Promise<void>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'writeFile', async (...args: unknown[]) => {
+		if (!intercepted && String(args[0]).includes('.epoch.json.')) {
+			intercepted = true;
+			throw new Error('simulated disk failure');
+		}
+		return originalWriteFile(...args);
+	});
+
+	const originalNow = Date.now;
+	Date.now = () => 1;
+	try {
+		m.setCachedSessionData('/a.json', entry(1000), 10);
+		await m.deleteSharedSnapshot(); // epoch write fails; must not adopt the value it failed to persist
+		assert.ok(intercepted, 'the write interception must actually have fired for this assertion to be meaningful');
+		assert.equal(JSON.parse(fs.readFileSync(m.getClearEpochPath(), 'utf-8')).epoch, baseline,
+			'a failed write must leave the on-disk epoch at its last successfully-persisted value');
+
+		// A peer, with no knowledge of m's failed write, does a genuine, unrelated clear that computes
+		// the exact same value m's failed write would have produced.
+		const peer = makeManager(dir);
+		await peer.deleteSharedSnapshot();
+		const peerEpoch = JSON.parse(fs.readFileSync(peer.getClearEpochPath(), 'utf-8')).epoch;
+		assert.ok(peerEpoch > baseline,
+			'the peer\'s real clear must actually advance the persisted epoch for this test to be meaningful');
+
+		const persisted = await m.writeSharedSnapshot();
+		assert.equal(persisted, false,
+			'm must still recognize the peer\'s real clear and refuse to republish pre-clear data, not silently treat a phantom locally-adopted epoch as already caught up');
+	} finally {
+		Date.now = originalNow;
+	}
+});
+
 test('clearCache()-style sequence (clearAllCachedData + awaitInFlightCheckpoint + deleteSharedSnapshot) is not resurrected by a slow in-flight checkpoint', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
