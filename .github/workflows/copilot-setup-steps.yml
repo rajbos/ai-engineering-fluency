@@ -39,6 +39,16 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Never write the token to .git/config in the first place, rather than
+          # writing it and deleting it later. Removing it in the graphify step
+          # was conditional twice over - that step is continue-on-error AND now
+          # gated on setup-python succeeding, so a failed interpreter setup
+          # skipped the removal entirely and the credential survived the whole
+          # job. Nothing here needs authenticated git: neither package has a
+          # git-URL dependency, the Azure steps use `az`, and the agent-sessions
+          # fetch reads GITHUB_TOKEN from the environment.
+          persist-credentials: false
 
       # Copilot code review runs these setup steps against the PR head checkout,
       # which can be an old branch that predates the root .nvmrc file. Resolve the
@@ -65,6 +75,125 @@ jobs:
         run: |
           cd vscode-extension && npm ci --ignore-scripts
           cd ../cli && npm ci --ignore-scripts
+
+      # Build a queryable code knowledge graph (graphify) so the agent can ask
+      # structural questions - what calls X, what a change to Y reaches - instead
+      # of fanning grep/read out across ~600 source files. `--code-only` is local
+      # AST parsing: no LLM backend, no API key, no login. ~20s on this repo.
+      #
+      # Deliberately placed BEFORE the Azure session-log / usage-data hydration
+      # and the agent-sessions fetch below. --only-binary stops a source
+      # distribution running setup.py but does NOT stop an installed wheel
+      # reading whatever is already on disk, so running graphify while
+      # ./session-logs and ./usage-data do not yet exist means there is nothing
+      # sensitive for a compromised graphify dependency to find - which the
+      # checkout-credential drop below cannot achieve on its own.
+      #
+      # Scope note: this covers GRAPHIFY's dependency tree, not the job as a
+      # whole. The azure-storage-loader's own `npm ci` and the `node` calls that
+      # follow it, plus scripts/fetch-agent-sessions.js, all run third-party
+      # code AFTER the hydration. Treat this as one path contained, not a
+      # supply-chain boundary for the job - anything added later needs its own
+      # containment rather than inheriting this one.
+      #
+      # Every step is continue-on-error, which is what makes this ordering safe:
+      # a step that exits non-zero would otherwise fail the job and cost the
+      # hydration below. Failures still go red on the step so they stay visible
+      # instead of passing silently. (`Fetch Copilot agent sessions` relies on
+      # the same mechanism mid-job.)
+      - name: Set up Python for graphify
+        id: graphify-python
+        continue-on-error: true
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # Pinned, not '3.x': the interpreter minor decides which wheels resolve,
+          # so floating it would silently change what gets installed.
+          python-version: '3.12'
+
+      - name: "Install graphify (PyPI distribution: graphifyy)"
+        id: graphify-install
+        # Without this, `continue-on-error` on the setup-python step would let
+        # pip run against whatever interpreter happens to be on PATH - so the
+        # pinned 3.12 and the wheel set it resolves would silently not be the
+        # ones described above.
+        if: steps.graphify-python.outcome == 'success'
+        continue-on-error: true
+        run: |
+          # Second line of defence. `persist-credentials: false` on the
+          # checkout above means the token is never written to .git/config, so
+          # these two commands should find nothing - but they stay because they
+          # cost nothing and they FAIL CLOSED: if a future change re-enables
+          # credential persistence, this aborts before any third-party code
+          # rather than silently handing a wheel the token.
+          #
+          # Safe to drop this early: no later step uses authenticated git. The
+          # Azure steps authenticate with `az`, and `Fetch Copilot agent
+          # sessions` reads GITHUB_TOKEN from the environment rather than from
+          # the git config this removes.
+          # `--unset-all` exits 5 when the key is simply absent, which is a
+          # success for our purposes - hence `|| true`. But `|| true` would
+          # equally swallow a real failure, leaving the token in .git/config
+          # while pip and the extract below still ran. So the removal is
+          # *verified* rather than attempted, and the step aborts before any
+          # third-party code if the credential is still there.
+          git config --local --unset-all 'http.https://github.com/.extraheader' || true
+          # Status, not a bare `if`: `--get-all` exits 1 for "key not found"
+          # but other non-zero codes mean it could not read the config at all.
+          # As an `if` condition every one of those reads as "absent", which is
+          # the fail-open this check exists to prevent. Only 1 is acceptable.
+          set +e
+          git config --local --get-all 'http.https://github.com/.extraheader' >/dev/null 2>&1
+          cred_rc=$?
+          set -e
+          if [ "$cred_rc" -eq 0 ]; then
+            echo "::error::The checkout credential is still present in .git/config - refusing to run third-party code."
+            exit 1
+          elif [ "$cred_rc" -ne 1 ]; then
+            echo "::error::Could not confirm the checkout credential was removed (git config exited $cred_rc) - refusing to run third-party code."
+            exit 1
+          fi
+
+          # --only-binary :all: refuses source distributions, so no dependency
+          # gets to execute setup.py in this runner - the pip counterpart of the
+          # `npm ci --ignore-scripts` above. Verified to resolve for the whole
+          # graphifyy 0.9.61 tree.
+          pip install --only-binary :all: "graphifyy==0.9.61"
+
+          # setup-python only puts its bin dir on PATH for later workflow steps,
+          # not for the shell Copilot gets once setup finishes. Symlink into
+          # /usr/local/bin so the agent can just run `graphify`.
+          sudo ln -sf "$(command -v graphify)" /usr/local/bin/graphify
+          graphify --version
+
+      - name: Build code knowledge graph
+        # Only run if the install step got as far as succeeding. Without this,
+        # `continue-on-error` on the step above would let the extract run even
+        # when the credential removal aborted it - which is exactly the state
+        # the abort exists to prevent.
+        if: steps.graphify-install.outcome == 'success'
+        continue-on-error: true
+        env:
+          # Write every artifact to .graphify-agent/ (gitignored) instead of the
+          # default graphify-out/. The repo commits graphify-out/manifest.json and
+          # a v0.9.27 AST cache; a newer graphify rewrites the manifest and prunes
+          # that cache as a stale version, leaving ~180 tracked deletions in
+          # `git status` for the agent to commit by accident.
+          GRAPHIFY_OUT: .graphify-agent
+        run: |
+          # `run` executes under `bash -e`, so capture the status instead of
+          # letting a failed extract skip the reporting below.
+          set +e
+          graphify extract . --code-only --no-viz
+          rc=$?
+          set -e
+
+          if [ "$rc" -ne 0 ] || [ ! -f .graphify-agent/graph.json ]; then
+            echo "::warning::graphify built no graph (exit $rc) - the agent falls back to plain file search"
+            exit 1
+          fi
+
+          echo "Code graph ready: .graphify-agent/graph.json ($(du -h .graphify-agent/graph.json | cut -f1))"
+
 
       # Download session log files from Azure Blob Storage (optional)
       # This step only runs if Azure Storage credentials are configured in the `copilot` environment
@@ -133,13 +262,47 @@ jobs:
             find ./session-logs -name "*.gz" -exec gunzip {} \;
             echo "✅ Session logs ready in ./session-logs"
           fi
+          
+          # Build editor-type manifest from blob metadata
+          # The upload stores editorType as blob metadata; download-batch does not
+          # preserve it, so we fetch it separately and write a JSON manifest that
+          # maps each session file's relative path to its source editor.
+          if [ "$FILE_COUNT" -gt 0 ]; then
+            echo "🏷️ Building editor-type manifest from blob metadata..."
+            az storage blob list \
+              --account-name "$AZURE_STORAGE_ACCOUNT" \
+              --container-name "$AZURE_STORAGE_CONTAINER" \
+              --prefix "${AZURE_DATASET_ID}/" \
+              --include metadata \
+              --auth-mode login \
+              --output json 2>/dev/null | \
+              node -e "
+                const data = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+                const manifest = {};
+                for (const blob of data) {
+                  const editorType = blob.metadata?.editorType;
+                  if (!editorType) continue;
+                  // Strip .gz to match the decompressed local path
+                  const localPath = blob.name.replace(/\\.gz$/, '');
+                  manifest[localPath] = editorType;
+                }
+                require('fs').writeFileSync('./session-logs/.editor-types.json', JSON.stringify(manifest, null, 2));
+                const count = Object.keys(manifest).length;
+                console.log(count > 0
+                  ? '✅ Editor-type manifest written: ' + count + ' entries'
+                  : '⚠️ No editorType metadata found on blobs (older uploads predate this feature)');
+              " || echo "⚠️ Failed to build editor-type manifest, continuing without it"
+          fi
 
       - name: Display session log summary
         if: ${{ vars.COPILOT_STORAGE_ACCOUNT != '' }}
         run: |
           if [ -d ./session-logs ]; then
             echo "📊 Session log summary:"
-            echo "Total files: $(find ./session-logs -name "*.json" | wc -l)"
+            echo "Total files: $(find ./session-logs -name "*.json" ! -name ".editor-types.json" | wc -l)"
+            if [ -f ./session-logs/.editor-types.json ]; then
+              echo "Editor types: $(node -e "const m=require('./session-logs/.editor-types.json'); const counts={}; for(const v of Object.values(m)) counts[v]=(counts[v]||0)+1; console.log(Object.entries(counts).map(([k,v])=>k+': '+v).join(', '))")"
+            fi
             echo "Directory structure:"
             tree -L 3 ./session-logs || ls -R ./session-logs
           else

@@ -172,6 +172,36 @@ Total: 56 files across 3 editors
 
 ---
 
+### `memory-files` — Copilot Memory Files Hygiene Report
+
+Report on GitHub Copilot agent memory files on this machine (`memory-tool/memories/` notes written by the Copilot agent) — counts, staleness, and unusually large files, broken down by workspace. Metadata only: file *content* is never read, only filename, size and last-modified time.
+
+```bash
+ai-engineering-fluency memory-files
+ai-engineering-fluency memory-files --json               # Machine-readable JSON output
+ai-engineering-fluency memory-files --stale-days 30       # Flag files not edited in 30+ days (default: 90)
+ai-engineering-fluency memory-files --large-kb 5          # Flag files larger than 5 KB (default: 10)
+```
+
+```
+Copilot Memory Files Report
+==================================================
+
+Total memory files: 12
+Total size:          48.3 KB
+Stale (>90d):        3
+Large (>10KB):       1
+
+By workspace:
+  • ai-engineering-fluency
+      repo-scope: 2, session-scope: 4, global-scope: 0, size: 18.2 KB
+      stale: onboarding-notes, legacy-api-plan
+  • User (global)
+      repo-scope: 0, session-scope: 0, global-scope: 6, size: 30.1 KB
+```
+
+---
+
 ## Data Sources
 
 The CLI scans the same session files as the [VS Code extension](../vscode-extension/README.md):

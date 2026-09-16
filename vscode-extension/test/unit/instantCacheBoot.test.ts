@@ -41,28 +41,13 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { normalizePathForDedup, dedupeByNormalizedKeyKeepGreatest } from '../../../src/utils/pathUtils';
+import { extractBracesBlock } from './sourceStructureTestHelpers';
 
 // Compiled test output lives under out/vscode-extension/test/unit (tsconfig.tests.json's
 // rootDir is the repo root), so __dirname does not sit next to the real source tree —
 // walk back up to the vscode-extension package root, then down into src/.
 const EXTENSION_SRC_PATH = path.join(__dirname, '../../../../src/extension.ts');
 const EXTENSION_SRC = fs.readFileSync(EXTENSION_SRC_PATH, 'utf8');
-
-/** Extract the full `{ ... }` block starting at the first `{` found after `marker` (brace-balanced). */
-function extractBracesBlock(source: string, marker: string): string {
-	const markerIndex = source.indexOf(marker);
-	assert.notEqual(markerIndex, -1, `marker not found in extension.ts: ${marker}`);
-	const braceStart = source.indexOf('{', markerIndex);
-	let depth = 0;
-	for (let i = braceStart; i < source.length; i++) {
-		if (source[i] === '{') { depth++; }
-		else if (source[i] === '}') {
-			depth--;
-			if (depth === 0) { return source.slice(markerIndex, i + 1); }
-		}
-	}
-	throw new Error(`unbalanced braces while scanning for marker: ${marker}`);
-}
 
 /** Slice the source between two unique markers (inclusive of both), for spans that aren't a single balanced-brace block (e.g. a few statements inside a larger function). */
 function sliceBetween(source: string, startMarker: string, endMarker: string): string {
@@ -402,8 +387,17 @@ test('isDiscoveryUntrustworthyForBackfill() detects the empty-discovery-but-cach
 test('_runRefreshCore() skips the one-time full-year chart backfill when discovery is untrustworthy, or this window is a follower', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {');
 
-	const backfillCallIndex = body.indexOf('void this.calculateDailyStats(365, sessionFiles);');
+	const backfillCallIndex = body.indexOf('this.trackFullYearBackfill(this.calculateDailyStats(365, sessionFiles));');
 	assert.ok(backfillCallIndex !== -1, '_runRefreshCore() must still perform the one-time full-year backfill call');
+
+	// Tracked (not just detached with a bare `void`) so clearCache() can wait it out — see
+	// _pendingFullYearBackfills' own doc comment: this backfill reparses files and calls
+	// setCachedSessionData() well after _runRefreshCore()'s own promise has already resolved, so a
+	// clear landing during it could otherwise be silently repopulated. Routed through
+	// trackFullYearBackfill() (a shared Set, not a single overwritable slot) so a second overlapping
+	// backfill from a later leader refresh can't drop this one's tracking.
+	assert.ok(backfillCallIndex !== -1,
+		'the backfill promise must be tracked via trackFullYearBackfill(), not just fired with a bare `void`, or clearCache() cannot wait for it');
 
 	// calculateDailyStats(365, sessionFiles) reparses every discovered file with no missBudget/
 	// follower awareness at all, unlike the regular per-refresh preload just above it (which passes
@@ -422,10 +416,18 @@ test('_runRefreshCore() skips the one-time full-year chart backfill when discove
 test('renderInstantStatsFromCache() never overwrites a real refresh that already completed while it was still computing', () => {
 	const instantBody = extractBracesBlock(EXTENSION_SRC, 'private async renderInstantStatsFromCache(): Promise<void> {');
 	const calcIndex = instantBody.indexOf('await this.calculateDetailedStats(undefined, preloaded)');
-	const guardIndex = instantBody.indexOf('if (this._hasCompletedRealRefresh || this._disposed || this.isSampleDataModeActive()) { return; }');
-	const commitIndex = instantBody.indexOf('this.lastDetailedStats = stats;');
+	const guardIndex = instantBody.indexOf('if (!this.canPublishInstantPaint(startedAtGeneration)) { return; }');
+	const commitIndex = instantBody.indexOf('this.recordDetailedStats(stats, startedAtGeneration);');
 	assert.ok(calcIndex !== -1 && guardIndex !== -1 && commitIndex !== -1 && calcIndex < guardIndex && guardIndex < commitIndex,
-		'renderInstantStatsFromCache() must check _hasCompletedRealRefresh, _disposed (dispose() can run during that same await), AND isSampleDataModeActive() (a regression run could start during that same, potentially slow await) after awaiting calculateDetailedStats but before committing its own results — otherwise a real refresh that finishes first, a window that closed mid-await, or a regression run that started mid-await can be silently overwritten by/resumed into/contaminated by this slower, stale cache-only computation');
+		'renderInstantStatsFromCache() must re-check whether it may still publish after awaiting calculateDetailedStats and before committing its own results — otherwise a real refresh that finishes first, a window that closed mid-await, or a regression run that started mid-await can be silently overwritten by/resumed into/contaminated by this slower, stale cache-only computation');
+
+	// The checks themselves live in canPublishInstantPaint() (extracted so the added generation
+	// check did not push this method over the complexity ceiling), so assert them there.
+	const publishGuard = extractBracesBlock(EXTENSION_SRC, 'private canPublishInstantPaint(startedAtGeneration: number): boolean {');
+	assert.ok(publishGuard.includes('if (this._hasCompletedRealRefresh || this._disposed || this.isSampleDataModeActive()) { return false; }'),
+		'canPublishInstantPaint() must check _hasCompletedRealRefresh, _disposed (dispose() can run during that same await), AND isSampleDataModeActive() (a regression run could start during that same, potentially slow await)');
+	assert.ok(publishGuard.includes('isComputedStatsCurrent(startedAtGeneration, this._cacheGeneration)'),
+		'canPublishInstantPaint() must also reject a paint the caches were cleared under — _hasCompletedRealRefresh is still false while the clear\'s own refresh is running');
 
 	// The flag must be set as soon as _runRefreshCore()'s own verified result exists — right after
 	// its own calculateDetailedStats() resolves — and specifically BEFORE updateStatusBarAndTooltip()
@@ -433,18 +435,26 @@ test('renderInstantStatsFromCache() never overwrites a real refresh that already
 	// steps like computeAndUploadFluencyScore that follow) would leave a wide window where the real
 	// refresh has already redrawn the status bar, but renderInstantStatsFromCache() still sees the
 	// flag as false and can overwrite that already-correct UI with its own, older cache-only result.
+	// The publication sequence lives in publishRefreshResult() (extracted so the generation can be
+	// re-checked at every async boundary); _runRefreshCore() hands its result straight to it, so
+	// "immediately after calculateDetailedStats()" spans the two.
 	const refreshBody = extractBracesBlock(EXTENSION_SRC, 'private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {');
 	const refreshCalcIndex = refreshBody.indexOf('await this.calculateDetailedStats(undefined, preloaded)');
-	const flagSetIndex = refreshBody.indexOf('this._hasCompletedRealRefresh = true;');
-	const statusBarIndex = refreshBody.indexOf('this.updateStatusBarAndTooltip(detailedStats);');
-	assert.ok(refreshCalcIndex !== -1 && flagSetIndex !== -1 && statusBarIndex !== -1 && refreshCalcIndex < flagSetIndex && flagSetIndex < statusBarIndex,
-		'_runRefreshCore() must set _hasCompletedRealRefresh immediately after its own calculateDetailedStats() resolves, before updateStatusBarAndTooltip() (and every slower step after it) — not after the UI is already published');
+	const publishIndex = refreshBody.indexOf('await this.publishRefreshResult(');
+	assert.ok(refreshCalcIndex !== -1 && publishIndex !== -1 && refreshCalcIndex < publishIndex,
+		'_runRefreshCore() must publish its verified result through publishRefreshResult() as soon as calculateDetailedStats() resolves');
+
+	const publishBody = extractBracesBlock(EXTENSION_SRC, 'private async publishRefreshResult(');
+	const flagSetIndex = publishBody.indexOf('this._hasCompletedRealRefresh = true;');
+	const statusBarIndex = publishBody.indexOf('this.updateStatusBarAndTooltip(detailedStats);');
+	assert.ok(flagSetIndex !== -1 && statusBarIndex !== -1 && flagSetIndex < statusBarIndex,
+		'publishRefreshResult() must set _hasCompletedRealRefresh before updateStatusBarAndTooltip() (and every slower step after it) — not after the UI is already published');
 });
 
 test('reconcilePreloadedAgainstDiscovery() evicts every raw cache key for an unconfirmed path, via the tombstone-aware deleteCachedSessionData()', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private reconcilePreloadedAgainstDiscovery(preloaded: SessionFilePreload[], sessionFiles: string[]): SessionFilePreload[] {');
 	assert.ok(body.includes('this.cacheManager.deleteCachedSessionData(rawPath)'),
-		'must evict via cacheManager.deleteCachedSessionData() (which tombstones the path), not a plain cache.delete() — a plain delete is silently resurrected by the very next saveCacheToStorage(), whose merge starts from whatever is already on disk (see cacheManager-snapshot.test.ts)');
+		'must evict via cacheManager.deleteCachedSessionData() (which tombstones the path), not a plain cache.delete() — a plain delete is silently resurrected by the very next trySaveCacheToStorage(), whose merge starts from whatever is already on disk (see cacheManager-snapshot.test.ts)');
 	assert.ok(!/this\.cacheManager\.cache\.delete\(/.test(body),
 		'must not touch cacheManager.cache directly — deletions here must always go through the tombstone-aware deleteCachedSessionData()');
 
@@ -470,12 +480,12 @@ test('_preloadSessionFiles() always schedules clearExpiredCache(), even when thi
 test('sample-data mode never writes to the shared on-disk cache snapshot: neither the end-of-refresh save nor mid-parse checkpointing', () => {
 	const persistBody = extractBracesBlock(EXTENSION_SRC, 'private persistRefreshResult(isLeader: boolean): void {');
 	const sampleGuardIndex = persistBody.indexOf('if (this.isSampleDataModeActive()) { return; }');
-	const saveIndex = persistBody.indexOf('await this.saveCacheToStorage()');
+	const saveIndex = persistBody.indexOf('await this.cacheManager.saveAndAccountForRefresh()');
 	assert.ok(sampleGuardIndex !== -1 && saveIndex !== -1 && sampleGuardIndex < saveIndex,
-		'persistRefreshResult() must skip saveCacheToStorage() in sample-data mode, before attempting the save — a regression/screenshot fixture refresh must never let its fixture data survive on disk past the run, where a later normal boot\'s cache-only instant paint would show it as real stats');
+		'persistRefreshResult() must skip its cache save in sample-data mode, before attempting it — a regression/screenshot fixture refresh must never let its fixture data survive on disk past the run, where a later normal boot\'s cache-only instant paint would show it as real stats');
 
 	const preloadBody = extractBracesBlock(EXTENSION_SRC, 'preloaded: SessionFilePreload[] }> {');
-	assert.ok(/processed % 25 === 0 && !this\.isSampleDataModeActive\(\)/.test(preloadBody),
+	assert.ok(/processed % 25 === 0 && isLeader && !this\.isSampleDataModeActive\(\)/.test(preloadBody),
 		'the mid-parse checkpoint (maybeCheckpointCache(), which also writes the shared snapshot directly) must skip sample-data mode too, or it can persist fixture data even when persistRefreshResult() itself is correctly guarded');
 
 	// dispose()'s own shutdown save is a third, independent write path to the shared snapshot,
@@ -485,9 +495,62 @@ test('sample-data mode never writes to the shared on-disk cache snapshot: neithe
 	// fixture data into the developer's real, shared production snapshot.
 	const disposeBody = extractBracesBlock(EXTENSION_SRC, 'public dispose(): void {');
 	const disposeSampleGuardIndex = disposeBody.indexOf('if (!this.isSampleDataModeActive()) {');
-	const disposeSaveIndex = disposeBody.indexOf('await this.saveCacheToStorage()');
+	const disposeSaveIndex = disposeBody.indexOf('await this.trySaveCacheToStorage()');
 	assert.ok(disposeSampleGuardIndex !== -1 && disposeSaveIndex !== -1 && disposeSampleGuardIndex < disposeSaveIndex,
-		'dispose() must also skip its shutdown saveCacheToStorage() call in sample-data mode, same as persistRefreshResult()');
+		'dispose() must also skip its shutdown trySaveCacheToStorage() call in sample-data mode, same as persistRefreshResult()');
+});
+
+test('persistRefreshResult() tracks its detached end-of-refresh save so _runUpdateTokenStats() can await it before releasing the refresh-leader lock', () => {
+	const persistBody = extractBracesBlock(EXTENSION_SRC, 'private persistRefreshResult(isLeader: boolean): void {');
+	assert.ok(persistBody.includes('this._pendingLeaderSnapshotSave = (async () => {'),
+		'must assign the detached save to _pendingLeaderSnapshotSave instead of a bare `void (async () => {...})()` — otherwise nothing can observe when it settles');
+
+	// A second window winning the refresh-leader lock while this window's own end-of-refresh save
+	// is still mid-flight can publish its own snapshot first; this window's stale save landing
+	// afterward would then merge pre-existing (same-mtime) data back on top of it. Awaiting the
+	// tracked save before releasing the lock closes that window.
+	const updateBody = extractBracesBlock(EXTENSION_SRC, 'private async _runUpdateTokenStats(silent: boolean): Promise<DetailedStats | undefined> {');
+	const finallyIndex = updateBody.indexOf('} finally {');
+	const awaitSaveIndex = updateBody.indexOf('await this._pendingLeaderSnapshotSave;');
+	const releaseLockIndex = updateBody.indexOf('await this.cacheManager.releaseRefreshLock();');
+	assert.ok(finallyIndex !== -1 && awaitSaveIndex !== -1 && releaseLockIndex !== -1,
+		'_runUpdateTokenStats() must await _pendingLeaderSnapshotSave before releasing the refresh lock in its finally block');
+	assert.ok(finallyIndex < awaitSaveIndex && awaitSaveIndex < releaseLockIndex,
+		'must await the pending snapshot save (inside the finally block) before releasing the refresh-leader lock, not after — releasing first would let a second window become leader and publish while this window\'s save is still in flight');
+});
+
+test('_runUpdateTokenStats() keeps the refresh-lock heartbeat alive through the end-of-refresh save/checkpoint waits, stopping it only right before release', () => {
+	// startRefreshHeartbeat() renews the refresh lock's timestamp every 30s so
+	// handleExistingLock()'s 5-minute staleness check doesn't break a lock still legitimately held.
+	// Stopping the heartbeat before the awaits above (as an earlier version of this finally block
+	// did) freezes that timestamp for their entire duration — a slow enough snapshot write could
+	// then let another window break the lock and start its own leader cycle while this window is
+	// still mid-save, exactly the stale-snapshot race those awaits exist to prevent.
+	const updateBody = extractBracesBlock(EXTENSION_SRC, 'private async _runUpdateTokenStats(silent: boolean): Promise<DetailedStats | undefined> {');
+	const finallyIndex = updateBody.indexOf('} finally {');
+	const awaitSaveIndex = updateBody.indexOf('await this._pendingLeaderSnapshotSave;');
+	const awaitCheckpointIndex = updateBody.indexOf('await this.cacheManager.awaitInFlightCheckpoint();');
+	const stopHeartbeatIndices = [...updateBody.matchAll(/this\.stopRefreshHeartbeat\(\);/g)].map(m => m.index!);
+	const releaseLockIndex = updateBody.indexOf('await this.cacheManager.releaseRefreshLock();');
+
+	assert.ok(finallyIndex !== -1 && awaitSaveIndex !== -1 && awaitCheckpointIndex !== -1 && releaseLockIndex !== -1,
+		'the finally block must still await the pending snapshot save and the in-flight checkpoint before releasing the lock');
+
+	// The leader path's stopRefreshHeartbeat() call must sit strictly after both awaits and
+	// strictly before releaseRefreshLock() — not at the very top of the finally block, where it
+	// would stop renewing the lock before either wait even starts.
+	const leaderStopIndex = stopHeartbeatIndices.find(i => i > awaitCheckpointIndex && i < releaseLockIndex);
+	assert.ok(leaderStopIndex !== undefined,
+		'stopRefreshHeartbeat() on the leader path must run after awaiting the snapshot save/checkpoint and before releaseRefreshLock() — stopping it any earlier lets the lock go stale while this window is still writing');
+	assert.ok(!stopHeartbeatIndices.some(i => i > finallyIndex && i < awaitSaveIndex),
+		'stopRefreshHeartbeat() must not run before the end-of-refresh save/checkpoint waits on the leader path');
+
+	// A follower never starts the heartbeat in the first place (startRefreshHeartbeat() no-ops for
+	// non-leaders), but the finally block must still stop it unconditionally on that path too, in
+	// case this run only became a follower after already having heartbeat state from an earlier
+	// leader cycle in the same window.
+	assert.ok(stopHeartbeatIndices.some(i => i > releaseLockIndex),
+		'the non-leader (else) branch must still call stopRefreshHeartbeat()');
 });
 
 test('runLocalViewRegression() evicts its own session files from the cache when it finishes, only when bundled fixtures were used', () => {
@@ -540,10 +603,10 @@ test('evictRegressionSessionFilesFromCache() sweeps by normalized key and persis
 
 	const evictionIndex = body.indexOf('this.cacheManager.deleteCachedSessionData(rawPath);');
 	const evictedAnyIndex = body.indexOf('evictedAny = true;');
-	const saveIndex = body.indexOf('await this.saveCacheToStorage();');
+	const saveIndex = body.indexOf('await this.trySaveCacheToStorage();');
 	assert.ok(evictionIndex !== -1 && evictedAnyIndex !== -1 && saveIndex !== -1
 		&& evictedAnyIndex > evictionIndex && saveIndex > evictedAnyIndex,
-		'must persist the tombstones (via saveCacheToStorage()) after evicting fixture entries, so a stale on-disk copy from before this eviction existed does not linger until some other save happens to occur');
+		'must persist the tombstones (via trySaveCacheToStorage()) after evicting fixture entries, so a stale on-disk copy from before this eviction existed does not linger until some other save happens to occur');
 
 	const guardIndex = body.indexOf('if (evictedAny && !this.isSampleDataModeActive()) {');
 	assert.ok(guardIndex !== -1 && guardIndex > evictedAnyIndex && guardIndex < saveIndex,
@@ -556,4 +619,78 @@ test('setupRegressionSessionFiles() reports whether it fell back to bundled fixt
 		'must report usedBundledFixtures: false on the real-session-data path (sessionFiles.length > 0)');
 	assert.ok(body.includes("return { sessionFiles, dataSourceLabel: `bundled sample data (${sampleDir})`, usedBundledFixtures: true };"),
 		'must report usedBundledFixtures: true only on the bundled-fixture fallback path');
+});
+
+test('clearCache() waits for in-flight deferred parses before clearing, so a straggler cannot repopulate the cache it just emptied', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'public async clearCache(): Promise<void> {');
+
+	const awaitDeferredIndex = body.indexOf('await this.awaitAllDeferredParses();');
+	const clearIndex = body.indexOf('this.cacheManager.clearAllCachedData();');
+	assert.ok(awaitDeferredIndex !== -1 && clearIndex !== -1 && awaitDeferredIndex < clearIndex,
+		'must await every deferred (backgrounded) parse still running from an earlier refresh before clearing — otherwise one finishing after the clear could call setCachedSessionData() and silently repopulate the cache this command just emptied');
+
+	// A pre-existing refresh that hasn't deferred anything yet — its workers are still on their
+	// ordinary (non-timed-out) pass over files — is invisible to awaitAllDeferredParses(), since
+	// that only tracks parses already registered as deferred. Awaiting the whole in-flight run
+	// first closes that gap: only after it settles (or defers work of its own, which the
+	// subsequent awaitAllDeferredParses() then covers) is it safe to read _deferredSessionPreloadPromises.
+	const preClearRefreshIndex = body.indexOf('const preClearRefresh = this._updateTokenStatsInFlight;');
+	assert.ok(preClearRefreshIndex !== -1 && preClearRefreshIndex < awaitDeferredIndex,
+		'must wait out any pre-existing in-flight updateTokenStats() run before awaiting deferred parses — otherwise a foreground worker still on its ordinary (non-deferred) pass over a file could call setCachedSessionData() after the clear');
+
+	// awaitAllDeferredParses() can await real, I/O-bound parses, which yields to the event loop for
+	// real time — long enough for an unrelated timer-triggered refresh to start and populate
+	// _updateTokenStatsInFlight with a run a single, non-looped pass would never have captured. Both
+	// waits must therefore sit inside a loop that only exits once one full pass finds nothing left
+	// outstanding, not run once each.
+	const loopMatch = body.match(/while\s*\(\s*this\._updateTokenStatsInFlight\s*\|\|\s*this\._deferredSessionPreloadPromises\.size > 0/);
+	const loopIndex = loopMatch?.index ?? -1;
+	assert.ok(loopIndex !== -1 && loopIndex < preClearRefreshIndex && preClearRefreshIndex < awaitDeferredIndex,
+		'must loop the in-flight-refresh wait and awaitAllDeferredParses() together until a full pass finds nothing left to wait for — a single pass of each can miss a refresh that starts while the other is still awaiting real I/O');
+
+	// Every full-year chart backfill (see _pendingFullYearBackfills' own doc comment) is a third
+	// source invisible to both the in-flight-refresh wait and awaitAllDeferredParses(): one call
+	// site is dispatched fire-and-forget only after the refresh that started it has already
+	// returned, the other runs on a separate foreground call chain. The loop condition and the loop
+	// body must both account for every such backfill (a Set, not a single overwritable slot), or a
+	// backfill still running at the moment of a clear could keep writing pre-clear entries into the
+	// cache this clears.
+	assert.ok(/while\s*\([^)]*this\._pendingFullYearBackfills\.size > 0/.test(body),
+		'the loop condition must also check _pendingFullYearBackfills.size > 0, or the loop could exit while a backfill is still running');
+	const pendingBackfillWaitIndex = body.indexOf('const pendingBackfills = [...this._pendingFullYearBackfills];');
+	assert.ok(pendingBackfillWaitIndex !== -1 && preClearRefreshIndex < pendingBackfillWaitIndex && pendingBackfillWaitIndex < awaitDeferredIndex,
+		'must await every pending full-year backfill inside the loop, between the in-flight-refresh wait and awaitAllDeferredParses()');
+	assert.ok(body.indexOf('await Promise.all(pendingBackfills.map(backfill => backfill.catch(() => undefined)));', pendingBackfillWaitIndex) !== -1,
+		'must await all snapshotted backfills together, not just the first one');
+});
+
+test('every call site of calculateDailyStats() is routed through trackFullYearBackfill(), not called bare', () => {
+	// Regression guard for a review finding on this exact tracking mechanism: the Chart view's
+	// showChart()/refreshChartPanel() (each defaulting daysBack to 365 via a bare, argument-less
+	// call) and computeRegressionStats() all called calculateDailyStats() directly, invisible to
+	// _pendingFullYearBackfills and therefore to clearCache()'s wait loop — the same class of gap
+	// the leader-refresh and Efficiency-view call sites were already fixed for. Every call site,
+	// present and future, must go through the shared tracking helper instead of being fixed up
+	// one at a time as each new gap is found.
+	const lines = EXTENSION_SRC.split('\n');
+	const offenders: string[] = [];
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (trimmed.startsWith('//') || trimmed.startsWith('*')) { continue; }
+		if (!trimmed.includes('this.calculateDailyStats(')) { continue; }
+		if (!trimmed.includes('this.trackFullYearBackfill(this.calculateDailyStats(')) {
+			offenders.push(trimmed);
+		}
+	}
+	assert.deepEqual(offenders, [],
+		'every this.calculateDailyStats(...) call site must be wrapped as this.trackFullYearBackfill(this.calculateDailyStats(...)), or clearCache() cannot wait it out');
+});
+
+test('deferSessionPreloadRefresh() tracks each deferred parse\'s settle promise for awaitAllDeferredParses() to await, and untracks it once settled', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>, release: () => void): void {');
+
+	assert.ok(body.includes('this._deferredSessionPreloadPromises.set(sessionFile, settled);'),
+		'must register this parse\'s settle promise for awaitAllDeferredParses() to observe');
+	assert.ok(body.includes('this._deferredSessionPreloadPromises.delete(sessionFile);'),
+		'must untrack the promise once it settles (inside the .finally()), or the map would grow unboundedly across a long session');
 });

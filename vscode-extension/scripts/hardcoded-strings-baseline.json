@@ -1565,6 +1565,13 @@
     },
     {
       "file": "vscode-extension/src/loadingHtml.ts",
+      "hash": "a90825c66ef1",
+      "count": 1,
+      "line": 159,
+      "sample": "'; }\\n    }\\n    function setPending(id) {\\n        var el = document.getElement"
+    },
+    {
+      "file": "vscode-extension/src/loadingHtml.ts",
       "hash": "0b32509472c7",
       "count": 2,
       "line": 206,
