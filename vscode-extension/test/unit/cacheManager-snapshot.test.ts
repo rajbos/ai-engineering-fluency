@@ -1691,6 +1691,12 @@ test('clearAllCachedData() clears tombstones too, so a pre-clear deletion cannot
 	m.deleteCachedSessionData('/a.json'); // tombstone baseline = mtime 1000, pre-clear
 
 	m.clearAllCachedData();
+	// Paired immediately, the same as clearCache()'s real call sequence: clearAllCachedData() alone
+	// leaves clearInProgressCount permanently incremented (see its own doc comment), which would
+	// otherwise make the writeSharedSnapshot() below silently abort every time — this test would then
+	// keep passing for the wrong reason, since the '/a.json' entry asserted below would just be
+	// leftover from the write before the clear, not proof the post-clear republish actually persisted.
+	await m.deleteSharedSnapshot();
 
 	// Some window (this one or another) republishes '/a.json' at or below the old tombstone's
 	// baseline mtime — plausible after a clear, since the file on disk hasn't necessarily changed.
@@ -1700,6 +1706,39 @@ test('clearAllCachedData() clears tombstones too, so a pre-clear deletion cannot
 	const entries = await m.readSharedSnapshot();
 	assert.ok(entries && '/a.json' in entries,
 		'a tombstone recorded before clearAllCachedData() must not survive it and strip a path republished afterward');
+});
+
+// A further Copilot review found clearAllCachedData() is a public method, and its own doc comment
+// only says clearInProgressCount is "decremented again once deleteSharedSnapshot() ... finishes" —
+// nothing stops a caller (a future feature wanting only an in-memory reset, or a test) from calling
+// it standalone. Since only deleteSharedSnapshot() ever decrements the counter, such a call wedges
+// it above zero permanently: every later writeSharedSnapshot() call on that instance aborts, and
+// every later loadSharedSnapshotIfChanged()/loadCacheFromStorage() call wipes whatever it just
+// merged, both silently (no exception, no log a caller would necessarily notice) and irrecoverably
+// short of recreating the manager. This is accepted for now rather than fixed with a broader public
+// API change (e.g. a single method guaranteeing the pairing) — clearCache(), the only production
+// caller, already invokes these two back to back with no await in between, so the gap this test
+// documents does not occur there today. See CHANGELOG.md's cross-window clear-epoch entry for the
+// broader follow-up this still leaves open for any other caller.
+test('clearAllCachedData() called standalone, without a paired deleteSharedSnapshot(), permanently wedges snapshot I/O', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+
+	m.clearAllCachedData(); // no matching deleteSharedSnapshot() call follows
+
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+	const persisted = await m.writeSharedSnapshot();
+	assert.equal(persisted, false,
+		'an unpaired clearAllCachedData() leaves clearInProgressCount stuck above zero, so every later write aborts');
+
+	const other = makeManager(dir);
+	other.setCachedSessionData('/c.json', entry(3000), 10);
+	await other.writeSharedSnapshot();
+
+	const merged = await m.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 0,
+		'the same stuck counter also makes every later load report nothing merged, even once real content is on disk');
 });
 
 test('clearAllCachedData() resets the checkpoint dirty count too, so the next cycle does not redundantly checkpoint an empty cache', () => {

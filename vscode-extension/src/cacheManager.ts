@@ -135,6 +135,12 @@ export class CacheManager {
 	 * epoch marker. See that field's own doc comment for the same-process race this closes that
 	 * neither the generation counter nor the epoch alone can catch, and for why it is a counter
 	 * rather than a boolean.
+	 *
+	 * MUST be followed by a matching deleteSharedSnapshot() call. Nothing else decrements
+	 * clearInProgressCount, so calling this standalone leaves every later writeSharedSnapshot() call
+	 * aborting and every later loadSharedSnapshotIfChanged()/loadCacheFromStorage() call discarding
+	 * what it just merged, permanently, for the life of this instance — see the dedicated regression
+	 * test documenting this in cacheManager-snapshot.test.ts for the exact failure shape.
 	 */
 	clearAllCachedData(): void {
 		this.sessionFileCache.clear();
