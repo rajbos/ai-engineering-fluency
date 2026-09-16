@@ -109,7 +109,7 @@ jobs:
           trailers=$(git log "origin/$BASE_REF..HEAD" --format='%b')
           if [ -z "$signal" ] \
             && printf '%s\n' "$trailers" \
-              | grep -qiE '^co-authored-by:.*(claude|copilot|gpt|codex|gemini|mistral|vibe|devin|cursor|aider)'; then
+              | grep -qiE '^[[:space:]]*co-authored-by:.*(claude|copilot|gpt|codex|gemini|mistral|vibe|devin|cursor|aider)'; then
             signal="AI co-author trailer"
           fi
 
