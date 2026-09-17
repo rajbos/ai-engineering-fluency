@@ -90,6 +90,39 @@ interface Harness {
 }
 
 /**
+ * The locale every webview test renders under.
+ *
+ * A bare `toLocaleString()` resolves against the *realm's* default locale, and the realm here is
+ * Node — so without this pin these tests would format numbers and dates using the host's Windows
+ * regional format (`en-NL` on a Dutch machine → "2.000"). A real webview is a Chromium renderer,
+ * whose locale comes from VS Code's display language and ignores the Windows regional format
+ * entirely (`en-GB` on that same machine → "2,000"). Pinning keeps the tests deterministic
+ * everywhere *and* keeps them describing what the shipped webview actually renders; English
+ * locales agree on the comma thousands separator, so assertions on it are safe to hardcode.
+ *
+ * Dates are a different story: en-US renders 1/2/2026 where en-GB renders 02/01/2026. Assert on
+ * formatted dates only if you accept this pinned locale as the contract.
+ */
+const WEBVIEW_TEST_LOCALE = 'en-US';
+
+/**
+ * Makes locale-less `toLocale*()` calls inside the jsdom realm resolve to {@link WEBVIEW_TEST_LOCALE}
+ * instead of the host's locale. Must run before the bundle is evaluated.
+ */
+function pinRealmLocale(window: any): void {
+	const pin = (proto: any, method: string): void => {
+		const original = proto[method];
+		proto[method] = function (this: unknown, locales?: unknown, options?: unknown) {
+			return original.call(this, locales ?? WEBVIEW_TEST_LOCALE, options);
+		};
+	};
+	pin(window.Number.prototype, 'toLocaleString');
+	pin(window.Date.prototype, 'toLocaleString');
+	pin(window.Date.prototype, 'toLocaleDateString');
+	pin(window.Date.prototype, 'toLocaleTimeString');
+}
+
+/**
  * Boots the bundled webview in jsdom. `initialData` mirrors `window.__INITIAL_DIAGNOSTICS__`.
  * Unlike the usage-panel harness, this does NOT await settling before returning — callers that
  * need to dispatch a message *before* `bootstrap()`'s pending dynamic import resolves (i.e.
@@ -103,6 +136,7 @@ function bootWebviewUnsettled(initialData: Record<string, unknown> | null, saved
 		url: 'https://example.org/',
 	});
 	const window = dom.window as any;
+	pinRealmLocale(window);
 	const posted: any[] = [];
 	window.acquireVsCodeApi = () => ({
 		postMessage: (message: unknown) => { posted.push(message); },
@@ -516,8 +550,11 @@ test('Mistral Cloud tab: a totalIsLowerBound result renders "N+" instead of a fa
 	await harness.settle();
 
 	const rendered = harness.text('#tab-mistral-cloud');
-	assert.ok(rendered?.includes('2,000+'), `expected a lower-bound "2,000+" count, got: ${rendered}`);
-	assert.ok(!rendered?.includes('2,000 of'), `expected no fabricated "of" total, got: ${rendered}`);
+	// The count goes through toLocaleString(), so the separator here is the one
+	// WEBVIEW_TEST_LOCALE produces rather than the host's — see pinRealmLocale.
+	const formattedTotal = (2000).toLocaleString(WEBVIEW_TEST_LOCALE);
+	assert.ok(rendered?.includes(`${formattedTotal}+`), `expected a lower-bound "${formattedTotal}+" count, got: ${rendered}`);
+	assert.ok(!rendered?.includes(`${formattedTotal} of`), `expected no fabricated "of" total, got: ${rendered}`);
 });
 
 test('Mistral Cloud tab: a status update reporting the key removed clears a previously cached result', async () => {
