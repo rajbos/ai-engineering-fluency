@@ -142,11 +142,7 @@ function writeBaselineRegistry(worktreeDir, outRoot) {
 	const baseSkillDir = path.join(worktreeDir, '.github', 'skills', 'visual-view-diff');
 	let base = null;
 	if (fs.existsSync(path.join(baseSkillDir, 'views.config.json'))) {
-		try {
-			base = readConfig(baseSkillDir);
-		} catch (error) {
-			console.warn(`\n⚠️  Ignoring the base commit's views.config.json: ${error && error.message || error}`);
-		}
+		base = readConfig(baseSkillDir);
 	}
 	const merged = baselineRegistry(readConfig(SKILL_DIR), base, {
 		baseFixtureDir: path.join(baseSkillDir, 'fixtures'),
