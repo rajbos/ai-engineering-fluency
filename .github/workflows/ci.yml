@@ -516,9 +516,14 @@ jobs:
     #     the repository's GH_PAT secret - the same one pr-risk-review.yml
     #     already relies on - and the comment is authored by that user. The
     #     PAT is exposed to the posting step only; nothing that builds or
-    #     renders the PR's code can read it. Without the secret (or if the
-    #     upload fails) the comment is still posted with GITHUB_TOKEN, minus
-    #     the inline images, pointing at the artifact instead.
+    #     renders the PR's code can read it. Attaching files needs push access
+    #     (https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli),
+    #     which on a fine-grained PAT is Contents: write; gh's pre-flight
+    #     checks the user's role, not the token's grants, so a token short of
+    #     that fails at upload time with "not accessible by personal access
+    #     token". Without the secret (or if the upload fails) the comment is
+    #     still posted with GITHUB_TOKEN, minus the inline images, pointing at
+    #     the artifact instead.
     #   - Fork PRs get a read-only token and no secrets, so they are skipped
     #     here; their screenshots stay in the artifact.
     # The three publishing steps are report-only, like the diff they publish:
@@ -648,8 +653,14 @@ jobs:
             args+=(--attach "$line")
           done < visual-comment/attachments.txt
           [ "${#args[@]}" -gt 0 ] || return 1
-          GH_TOKEN="$GH_ATTACH_TOKEN" gh pr comment "$PR_NUMBER" --repo "$REPO" \
-            --body-file visual-comment/comment.md "${args[@]}"
+          # gh's own explanation is the diagnosis (which file, which HTTP
+          # status, what the endpoint said); keep it for the annotation so
+          # the reason is on the checks page, not buried in the job log.
+          if ! upload_error="$(GH_TOKEN="$GH_ATTACH_TOKEN" gh pr comment "$PR_NUMBER" --repo "$REPO" \
+            --body-file visual-comment/comment.md "${args[@]}" 2>&1 >/dev/null)"; then
+            printf '%s\n' "$upload_error"
+            return 1
+          fi
         }
 
         post_plain() {
@@ -661,9 +672,18 @@ jobs:
           echo "Posted the screenshot comment with ${ATTACHMENTS} inline image(s)."
         else
           if [ -z "${GH_ATTACH_TOKEN:-}" ]; then
-            echo "::notice::GH_PAT is not configured, so the screenshot comment links to the artifact instead of embedding images. Add a user PAT with write access as the GH_PAT secret to inline them."
+            echo "::notice::GH_PAT is not configured, so the screenshot comment links to the artifact instead of embedding images. Add a user PAT with push access (Contents: write on a fine-grained token) as the GH_PAT secret to inline them."
           elif [ "${ATTACHMENTS:-0}" -gt 0 ]; then
-            echo "::warning::Uploading the screenshots with gh --attach failed; posting the comment without inline images."
+            # One line, so it survives as a workflow annotation.
+            reason="$(printf '%s' "${upload_error:-}" | grep -m1 -E 'upload|HTTP|attach' || printf '%s' "${upload_error:-}" | head -n1)"
+            hint=""
+            case "$reason" in
+              *"not accessible by personal access token"*)
+                hint=" The fine-grained GH_PAT is missing a permission: attaching files needs push access, i.e. Contents: write on this repository." ;;
+              *"requires write access"*)
+                hint=" The GH_PAT user needs write access to this repository." ;;
+            esac
+            echo "::warning::Uploading the screenshots with gh --attach failed; posting the comment without inline images. ${reason:-gh gave no reason}.${hint}"
           fi
           post_plain
           echo "Posted the screenshot comment without inline images."

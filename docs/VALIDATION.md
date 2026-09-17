@@ -231,8 +231,14 @@ Two things to know about that comment:
   On a `pull_request` run the workflow file and the publisher script both come
   from the PR head, so any same-repository contributor can already change what
   runs next to that secret — the same trust the risk-review workflow extends.
-  Keep `GH_PAT` narrow: a fine-grained token limited to this repository with
-  *Pull requests: write* (and *Contents: read*) is all the upload needs.
+  Keep `GH_PAT` narrow, but not narrower than the upload: attaching files
+  [needs push access](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli),
+  so a fine-grained token limited to this repository needs *Contents: write*
+  (that is push access) plus *Pull requests: write* to author the comment.
+  gh's pre-flight checks the user's role on the repository, not the token's
+  own grants, so a token without *Contents: write* passes that check and then
+  fails at upload with `HTTP 403: Resource not accessible by personal access
+  token`; the job's warning annotation quotes that error when it happens.
 - Fork PRs get a read-only token and no secrets, so they only get the artifact.
 - Only a comment whose body *starts* with the marker **and** is either
   authored by one of the workflow's own identities (the Actions bot, the PAT's
