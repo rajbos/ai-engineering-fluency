@@ -24,7 +24,7 @@ function parseArgs(argv) {
 /**
  * Reads the view registry. `configPath` overrides the skill's own
  * `views.config.json`, which is how the visual diff renders a baseline from a
- * registry merged with the base commit's (see `mergeRegistries`).
+ * registry built from the base commit's (see `baselineRegistry`).
  */
 function readConfig(skillDir, configPath) {
 	const config = JSON.parse(fs.readFileSync(configPath || path.join(skillDir, 'views.config.json'), 'utf8'));

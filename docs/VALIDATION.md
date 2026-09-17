@@ -240,11 +240,12 @@ Two things to know about that comment:
   fails at upload with `HTTP 403: Resource not accessible by personal access
   token`; the job's warning annotation quotes that error when it happens.
 - Fork PRs get a read-only token and no secrets, so they only get the artifact.
-- Only a comment whose body *starts* with the marker **and** is either
-  authored by one of the workflow's own identities (the Actions bot, the PAT's
-  user) or carries the renderer's footer sentence is ever replaced; the newest
-  one survives, so two runs that race still converge on a single comment, and
-  a comment posted under a since-rotated PAT is still recognised.
+- Only a comment authored by one of the workflow's own identities (the Actions
+  bot, the PAT's user) **and** whose body *starts* with the marker is ever
+  replaced; the newest one survives, so two runs that race still converge on a
+  single comment. Identity is the ownership proof, never body text: a comment
+  someone else writes to look like ours is left alone. After a PAT rotation the
+  previous user's comment is no longer recognised and needs deleting by hand.
 
 ## What is deliberately not covered
 

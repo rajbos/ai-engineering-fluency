@@ -62,8 +62,10 @@ function screenshotsRoot(): { root: string; cleanup: () => void } {
 	fs.writeFileSync(path.join(root, 'baseline', 'usage--tools.dark.png'), png);
 	fs.writeFileSync(path.join(root, 'current', 'usage--tools.dark.png'), png);
 	fs.writeFileSync(path.join(root, 'diff', 'usage--tools.dark.diff.png'), png);
-	// A symlink with a screenshot-looking name pointing outside the root.
-	fs.symlinkSync(path.join(os.tmpdir()), path.join(root, 'current', 'link.dark.png'));
+	// A symlink with a screenshot-looking name pointing outside the root. A
+	// junction on Windows, where a real symlink needs Developer Mode or admin
+	// rights the CI runner does not have; `lstat` reports both as links.
+	fs.symlinkSync(os.tmpdir(), path.join(root, 'current', 'link.dark.png'), process.platform === 'win32' ? 'junction' : 'dir');
 	// A directory with a screenshot-looking name.
 	fs.mkdirSync(path.join(root, 'current', 'dir.dark.png'));
 	return { root, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };

@@ -237,7 +237,12 @@ async function main() {
 						// screenshot behind is what lets the diff call the current
 						// one "added" instead of the whole run failing. A target both
 						// registries declare is never skipped: its failure is real.
-						result = { ...result, status: 'skipped' };
+						// A render that got as far as the capture and then failed the
+						// empty-root check has written its PNG already; drop it, or
+						// the diff would compare against a blank baseline.
+						const { file, ...rest } = result;
+						if (file) { fs.rmSync(path.join(outDir, file), { force: true }); }
+						result = { ...rest, status: 'skipped' };
 					}
 					results.push(result);
 					const icon = { ok: '✅', warn: '⚠️ ', skipped: '⏭️ ' }[result.status] || '❌';
