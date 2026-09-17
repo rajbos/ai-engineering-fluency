@@ -129,6 +129,23 @@ updates:
           - "minor"
           - "patch"
 
+  # Hash-pinned Python requirements installed by copilot-setup-steps.yml
+  # (.github/requirements/*.txt). Dependabot rewrites the --hash lines when it
+  # bumps a version, so the pins stay installable under --require-hashes.
+  - package-ecosystem: "pip"
+    directory: "/.github/requirements"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "UTC"
+    reviewers:
+      - "rajbos"
+    assignees:
+      - "rajbos"
+    labels:
+      - "dependencies"
+
   # Enable version updates for the dev container configuration
   - package-ecosystem: "devcontainers"
     directory: "/"

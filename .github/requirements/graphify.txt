@@ -1,0 +1,95 @@
+# Hash-pinned install set for graphify (PyPI distribution: graphifyy) as used by
+# .github/workflows/copilot-setup-steps.yml. Installed with
+#   pip install --require-hashes --only-binary :all: -r .github/requirements/graphify.txt
+# so pip refuses any wheel whose sha256 is not listed here (Scorecard
+# Pinned-Dependencies), on top of the version pin that was already in place.
+#
+# Every package graphifyy==0.9.61 resolves to on the CI interpreter (CPython 3.12,
+# ubuntu x86_64) is listed, because --require-hashes demands the full closure.
+# Hashes cover the manylinux x86_64 and pure-Python (none-any) wheels of each
+# version, so glibc-tag selection on a newer runner image still matches.
+#
+# To regenerate after bumping graphifyy: resolve with
+#   pip download --only-binary :all: --python-version 3.12 --implementation cp \
+#     --abi cp312 --abi abi3 --abi none --platform manylinux_2_28_x86_64 \
+#     --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 \
+#     --platform manylinux1_x86_64 --platform any -d wheels graphifyy==<ver>
+# then take each resolved package's wheel sha256 digests from
+#   https://pypi.org/pypi/<name>/<version>/json
+
+graphifyy==0.9.61 \
+    --hash=sha256:7e11f2fd61b61552a17f8db1d4dadf8318b295436e61d997b5d85318cceccc6e
+networkx==3.6.1 \
+    --hash=sha256:d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762
+numpy==2.5.3 \
+    --hash=sha256:6f24021b9f22bc6301c37b196974a92c1c18dccedb6fef3dd252e95f2d6adbe4 \
+    --hash=sha256:93e1f5447e2b1e479d7bd74701e84746b86450cff1fc368b132d195e2b8f8211 \
+    --hash=sha256:a5fa86b80fd24bcd1aff83ad23be44ea323de3f787be8f8b15d4a65621e25321 \
+    --hash=sha256:b0521d0f4aebb6e06189451025fa17a913287b13c03d5fe05c017333b654ea5b \
+    --hash=sha256:b7e18c623bb5c95acb3b3328861272816ba199fb531921c5d6d0b675f1fde9e3 \
+    --hash=sha256:ffdc76bfcae6b255dff75202c5e7feaf95b40246bc0a17944facc1fecf9f79ab
+rapidfuzz==3.14.6 \
+    --hash=sha256:08bc63b88048376114d1e66cf8fa6926495d03bb873eb87854fa74cf6848a70b \
+    --hash=sha256:0debb5f43662ea84d2f0228a0c7407ff647f9c3d13f3b692efff0cde46eebce0 \
+    --hash=sha256:2bc7af3a699371a941aac86dc8a79ac92adeb3c2add2aab02230e76068a0029e \
+    --hash=sha256:3d5d90bae3c6fb7ea34da968c9f23070e8440edb827a28b242580e0108110b14 \
+    --hash=sha256:6bb896f89a387219c671ebc33c4a636b222010cc3c5c83884a7fc8707bf0bbf9 \
+    --hash=sha256:6f9ad513e3a3e045b60b421d5cd3887ae0a33b38fc6c6db3ea5e27c0a2e0412c \
+    --hash=sha256:b42536675c930cb76b7998bfc4d8e59cb35d8df47f2103020265743b6b2ccd2a \
+    --hash=sha256:b82c21c30568e096ef2a9dda7d45c379e6141694e0472dac73bc4372ce13ccee
+tree-sitter==0.25.2 \
+    --hash=sha256:20b570690f87f1da424cd690e51cc56728d21d63f4abd4b326d382a30353acc7 \
+    --hash=sha256:260586381b23be33b6191a07cea3d44ecbd6c01aa4c6b027a0439145fcbc3358 \
+    --hash=sha256:3e65ae456ad0d210ee71a89ee112ac7e72e6c2e5aac1b95846ecc7afa68a194c \
+    --hash=sha256:b43a9e4c89d4d0839de27cd4d6902d33396de700e9ff4c5ab7631f277a85ead9 \
+    --hash=sha256:b878e296e63661c8e124177cc3084b041ba3f5936b43076d57c487822426f614
+tree-sitter-bash==0.25.1 \
+    --hash=sha256:3f484c4bb8796cde7a87ca351e6116f09653edac0eb3c6d238566359dd28b117
+tree-sitter-c==0.24.2 \
+    --hash=sha256:5041ef67eb68ce6bc8bb0b1f8ef3a5585ce523dae0c7eec109ab0627dd75aede
+tree-sitter-c-sharp==0.23.5 \
+    --hash=sha256:aa88a780204cd153c4c1ae2d59c654cee1402212fa0d069823d6d34301587438
+tree-sitter-cpp==0.23.4 \
+    --hash=sha256:773d2cafc08bbc0f998687fa33f42f378c1a371cdb582870c4d13abb06092706
+tree-sitter-elixir==0.3.5 \
+    --hash=sha256:ebfe3491a3d00ac50b12a3bfcabb1c564f3809ed8a095099fe87f49d6b3987e6
+tree-sitter-fortran==0.6.0 \
+    --hash=sha256:ac4800b4abc1b25e6e7ab4a3f2eae274c5b19107beb18d3a473c0f67509c7486
+tree-sitter-go==0.25.0 \
+    --hash=sha256:04b3b3cb4aff18e74e28d49b716c6f24cb71ddfdd66768987e26e4d0fa812f74
+tree-sitter-groovy==0.1.2 \
+    --hash=sha256:9e938e9c2cd5fdb08fd1b28d7d621d15ea959a17a4bc0b77833e07a94fe7d263
+tree-sitter-java==0.23.5 \
+    --hash=sha256:370b204b9500b847f6d0c5ad584045831cee69e9a3e4d878535d39e4a7e4c4f1
+tree-sitter-javascript==0.25.0 \
+    --hash=sha256:9dc04ba91fc8583344e57c1f1ed5b2c97ecaaf47480011b92fbeab8dda96db75
+tree-sitter-json==0.24.8 \
+    --hash=sha256:85cca779872f7278f3a74eb38533d34b9c4de4fd548615e3361fa64fe350ad0a
+tree-sitter-julia==0.23.1 \
+    --hash=sha256:7d4f6ae938198fc0be9b6ea76313ade24fcdb89be01a791e0cc90c88fae5743d
+tree-sitter-kotlin==1.1.0 \
+    --hash=sha256:9a92afe24b634cf914c5812af0f5c53184b1c18bdf6ee5505c83afac81f6bf6c
+tree-sitter-lua==0.5.0 \
+    --hash=sha256:5ec448c854fea32414a0449147d648bc5baddf7a0357008c4abe3269db35370a
+tree-sitter-objc==3.0.2 \
+    --hash=sha256:e71282ac9c096a966bf2fa6a4ecdbea4bd037d3e01ea4aa9bbc64d9a4c0022f6
+tree-sitter-php==0.24.1 \
+    --hash=sha256:7a1404a30f2972498ace040b0029738b8dac45d0a12932ccb8b605eb94bafbe4
+tree-sitter-powershell==0.26.4 \
+    --hash=sha256:56508e4ac7aad1e3b26f2ef96b8d2b60b149c4efa0c23742e91e809a11db73ee
+tree-sitter-python==0.25.0 \
+    --hash=sha256:86f118e5eecad616ecdb81d171a36dde9bef5a0b21ed71ea9c3e390813c3baf5
+tree-sitter-ruby==0.23.1 \
+    --hash=sha256:f7bcd93972b4ca2803856d4fe0fbd04123ff29c4592bbb9f12a27528bd252341
+tree-sitter-rust==0.24.2 \
+    --hash=sha256:e033c5a93b57c88e0a835880de39fc802909ff69f57aaff6000211c196ea5190
+tree-sitter-scala==0.26.2 \
+    --hash=sha256:0e68e55c50fa7e7f2866ce7ca590df8df6407dd7a85e484e9f20e974cbc6d8f2
+tree-sitter-swift==0.7.3 \
+    --hash=sha256:f38feeb4f7350c8b30d567a0dc08bf1eeaa67c241b6888d72a45a8b1a4aa7187
+tree-sitter-typescript==0.23.2 \
+    --hash=sha256:e96d36b85bcacdeb8ff5c2618d75593ef12ebaf1b4eace3477e2bdb2abb1752c
+tree-sitter-verilog==1.0.3 \
+    --hash=sha256:747dd7d4bc95fb389bc37225f82d16f0c40549856e9a244be3ff9d7bfe62b730
+tree-sitter-zig==1.1.2 \
+    --hash=sha256:e924509dcac5a6054da357e3d6bcf37ea82984ee1d2a376569753d32f61ea8bb

@@ -206,9 +206,13 @@ jobs:
 
           # --only-binary :all: refuses source distributions, so no dependency
           # gets to execute setup.py in this runner - the pip counterpart of the
-          # `npm ci --ignore-scripts` above. Verified to resolve for the whole
-          # graphifyy 0.9.61 tree.
-          pip install --only-binary :all: "graphifyy==0.9.61"
+          # `npm ci --ignore-scripts` above. --require-hashes makes pip reject
+          # any wheel whose sha256 is not in the requirements file, so a
+          # re-published or substituted release cannot slip in under the same
+          # version number (Scorecard Pinned-Dependencies). The file pins the
+          # whole graphifyy 0.9.61 closure for this interpreter; see its header
+          # for how to regenerate it when bumping the version.
+          pip install --require-hashes --only-binary :all:             -r .github/requirements/graphify.txt
 
           # setup-python only puts its bin dir on PATH for later workflow steps,
           # not for the shell Copilot gets once setup finishes. Symlink into
