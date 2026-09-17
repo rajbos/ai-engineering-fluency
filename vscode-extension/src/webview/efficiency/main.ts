@@ -457,8 +457,17 @@ function renderValueTab(d: EfficiencyViewData): string {
 				<div class="value-sub">PRs opened by an AI bot account (Copilot coding agent, Claude, Codex). ${v.aiPrs === 0 ? 'Zero is expected when you drive AI locally and open PRs yourself — your work is counted under Merged PRs.' : 'These ran autonomously in the cloud rather than in your editor.'}</div>
 			</div>`);
 	}
+	// The empty state stays explanatory, but the destination it names is one click away:
+	// the button asks the host to reveal Usage Analysis *on* the Repository PRs tab, which
+	// is what actually fills these cards.
+	// `{0}` is the emphasized destination name; the bundle's own text is the only markup
+	// interpolated into it, and the destination itself is escaped before emphasis.
+	const destination = `<b>${escapeHtml(localize('efficiency.value.prsHintDestination'))}</b>`;
 	const hint = v.userPrs === null
-		? `<div class="value-hint">💡 Connect GitHub and open <b>Usage Analysis → Repository PRs</b> once to add pull-request metrics here — merged PRs are a far better value signal than lines of code.</div>`
+		? `<div class="value-hint">
+				<span class="value-hint-text">${localizeFormat('efficiency.value.prsHint', destination)}</span>
+				<vscode-button id="btn-open-repo-prs" appearance="secondary">${escapeHtml(localize('efficiency.value.openRepositoryPrs'))}</vscode-button>
+			</div>`
 		: '';
 	return `
 		<p class="eff-section-note">Efficiency only counts when output holds up. These metrics measure what your AI usage produced, not what it consumed.</p>
@@ -1202,6 +1211,8 @@ function wireEvents(): void {
 	document.getElementById('btn-environmental')?.addEventListener('click', () => { vscode.postMessage({ command: 'showEnvironmental' }); });
 	document.getElementById('btn-diagnostics')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDiagnostics' }); });
 	document.getElementById('btn-dashboard')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDashboard' }); });
+	// Value tab empty state: reveal Usage Analysis already on the Repository PRs tab.
+	document.getElementById('btn-open-repo-prs')?.addEventListener('click', () => { vscode.postMessage({ command: 'showUsageAnalysisRepoPrs' }); });
 	wireExtensionPointButtons(vscode);
 }
 

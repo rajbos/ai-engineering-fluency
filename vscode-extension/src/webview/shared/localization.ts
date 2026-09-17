@@ -54,6 +54,11 @@ export interface WebviewLocalization {
 	'details.editorSection.show': string;
 	'details.editorSection.hide': string;
 
+	// Efficiency view — Value tab empty state
+	'efficiency.value.openRepositoryPrs': string;
+	'efficiency.value.prsHint': string;
+	'efficiency.value.prsHintDestination': string;
+
 	// Log viewer summary card labels
 	'logviewer.summary.interactions': string;
 	'logviewer.summary.editorMode': string;
@@ -212,6 +217,9 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'efficiency.modelMix.canonicalId': 'Model ID: {0}',
 	'details.editorSection.show': 'Show Usage by Editor',
 	'details.editorSection.hide': 'Hide Usage by Editor',
+	'efficiency.value.openRepositoryPrs': 'Open Repository PRs',
+	'efficiency.value.prsHint': '💡 Connect GitHub and open {0} once to add pull-request metrics here — merged PRs are a far better value signal than lines of code.',
+	'efficiency.value.prsHintDestination': 'Usage Analysis → Repository PRs',
 	'logviewer.summary.interactions': 'Interactions',
 	'logviewer.summary.editorMode': 'Editor Mode',
 	'logviewer.summary.estimatedTokens': 'Estimated Tokens',

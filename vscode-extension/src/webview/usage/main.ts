@@ -602,6 +602,10 @@ function renderUsageLoadingState(initialMessage = 'Loading usage analysis...'): 
 	const root = document.getElementById('root');
 	if (!root) { return; }
 	_ulLoadingActive = true;
+	// The tab bar is about to be replaced, so the next layout is a fresh one: a switchTab
+	// arriving while this loading UI is up has no button to click, and only setupTabs can
+	// start that tab's fetch once the layout comes back.
+	layoutLazyTabLoadStarted = false;
 
 	const stepsHtml = USAGE_LOADING_STEPS.map((s, i) => {
 		const isFirst = i === 0;
@@ -743,6 +747,8 @@ function showLoadError(message: string): void {
 
 // State for the Repository PRs tab
 let repoPrStatsLoaded = false;
+/** True once the layout currently on screen has kicked off its active tab's lazy fetch. */
+let layoutLazyTabLoadStarted = false;
 let repoPrStatsData: RepoPrStatsResult | null = null;
 
 // State for the Cloud Agent tab
@@ -2519,11 +2525,36 @@ function reportTabOpened(tab: string): void {
 	vscode.postMessage({ command: 'viewTabOpened', view: 'usage', tab });
 }
 
+/**
+ * Starts a tab's one-time data fetch. Called on a tab click and, once, for whichever tab the
+ * layout first renders on: a tab the host requested while the tab bar did not exist yet (see
+ * `handleSwitchTab`) has no button to click, so nothing else would ever start its fetch.
+ */
+function startLazyTabLoad(tab: string): void {
+	// Lazy-load repo PR stats on first visit to the tab
+	if (tab === 'repos' && !repoPrStatsLoaded) {
+		repoPrStatsLoaded = true;
+		vscode.postMessage({ command: 'loadRepoPrStats' });
+	}
+	// Lazy-load cloud agent sessions on first visit to the tab
+	if (tab === 'agent' && !agentSessionsLoaded) {
+		agentSessionsLoaded = true;
+		vscode.postMessage({ command: 'loadAgentSessions' });
+	}
+}
+
 function setupTabs(): void {
 	const tabButtons = document.querySelectorAll<HTMLElement>('.tab-button');
 	// The tab that is already on screen counts as opened — the user is reading it
 	// right now, whether or not they clicked anything to get here.
 	reportTabOpened(activeTab);
+	// Once per rendered layout, so a stats refresh that rebuilds the same layout does not
+	// re-fire a fetch the user never asked for again, while a layout rebuilt after the
+	// loading state still starts the tab it lands on.
+	if (!layoutLazyTabLoadStarted) {
+		layoutLazyTabLoadStarted = true;
+		startLazyTabLoad(activeTab);
+	}
 	tabButtons.forEach(button => {
 		button.addEventListener('click', () => {
 			const tab = button.getAttribute('data-tab');
@@ -2540,16 +2571,7 @@ function setupTabs(): void {
 			});
 			const activePanel = document.getElementById(`tab-panel-${tab}`);
 			if (activePanel) { activePanel.style.display = 'block'; }
-			// Lazy-load repo PR stats on first visit to the tab
-			if (tab === 'repos' && !repoPrStatsLoaded) {
-				repoPrStatsLoaded = true;
-				vscode.postMessage({ command: 'loadRepoPrStats' });
-			}
-			// Lazy-load cloud agent sessions on first visit to the tab
-			if (tab === 'agent' && !agentSessionsLoaded) {
-				agentSessionsLoaded = true;
-				vscode.postMessage({ command: 'loadAgentSessions' });
-			}
+			startLazyTabLoad(tab);
 			// Mark new insights as seen when visiting the Insights tab
 			if (tab === 'insights') {
 				currentInsights

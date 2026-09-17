@@ -7,13 +7,17 @@ import { JSDOM } from 'jsdom';
 import type { ValueSignals } from '../../../src/efficiencyAnalysis';
 
 /**
- * End-to-end message-flow tests for the Efficiency webview's Value tab.
+ * End-to-end message-flow and click tests for the Efficiency webview's Value tab.
  *
  * These bundle and execute the *real* `src/webview/efficiency/main.ts` in jsdom and drive it the
- * way the extension host does. The Value tab used to keep its "open Usage Analysis → Repository
- * PRs" hint forever once the panel had been rendered before that data loaded — a class of bug no
- * unit test on either side could catch, because each half was individually correct and only the
- * hand-off was missing.
+ * way the extension host does — two classes of bug that no unit test on either side can catch,
+ * because each half is individually correct and only the hand-off breaks:
+ *
+ *  - The Value tab used to keep its "open Usage Analysis → Repository PRs" hint forever once the
+ *    panel had been rendered before that data loaded (#1962): the host had no way to update it.
+ *  - The empty state's "Open Repository PRs" button (#1963) is the shape of bug the contract
+ *    checker cannot see: the host handler can exist and the markup can be perfect while nobody
+ *    ever called `addEventListener` on the button.
  */
 
 // Compiled tests live at <ext>/out/vscode-extension/test/unit, so four levels up is <ext>.
@@ -73,8 +77,17 @@ function loadedValue(overrides: Partial<ValueSignals> = {}): ValueSignals {
 	};
 }
 
-function buildEfficiencyData(value: ValueSignals): Record<string, unknown> {
+/** The Value-tab strings the host sends; without them the webview falls back to its defaults. */
+const VALUE_LOCALIZATION: Record<string, string> = {
+	'efficiency.value.openRepositoryPrs': 'Open Repository PRs',
+	'efficiency.value.prsHint': '💡 Connect GitHub and open {0} once to add pull-request metrics here.',
+	'efficiency.value.prsHintDestination': 'Usage Analysis → Repository PRs',
+	'__language__': 'en',
+};
+
+function buildEfficiencyData(value: ValueSignals, localization?: Record<string, string>): Record<string, unknown> {
 	return {
+		...(localization ? { localization } : {}),
 		weekly: [{
 			weekKey: '2026-03-02', label: 'Mar 2–8', sessions: 4, interactions: 40, tokens: 400_000,
 			cost: 20, loc: 8000, costPerKloc: 2.5, tokensPerSession: 100_000, turnsPerSession: 10,
@@ -112,7 +125,7 @@ interface Harness {
 
 async function bootWebview(
 	value: ValueSignals,
-	options: { postBeforeSettle?: Record<string, unknown> } = {},
+	options: { postBeforeSettle?: Record<string, unknown>; localization?: Record<string, string> } = {},
 ): Promise<Harness> {
 	const bundle = await bundleEfficiencyWebview();
 	const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
@@ -131,7 +144,7 @@ async function bootWebview(
 	window.HTMLElement.prototype.attachInternals = () => ({
 		setFormValue() { /* no-op */ }, setValidity() { /* no-op */ }, form: null, states: new Set(), role: null,
 	});
-	window.__INITIAL_EFFICIENCY__ = buildEfficiencyData(value);
+	window.__INITIAL_EFFICIENCY__ = buildEfficiencyData(value, options.localization);
 
 	const postFromHost = (message: Record<string, unknown>): void => {
 		const event = new window.MessageEvent('message', { data: message, origin: window.location.origin });
@@ -279,4 +292,67 @@ test('cloud-agent and malformed messages never touch the Value tab', async () =>
 	assert.equal(harness.window.document.querySelector('.value-card'), firstCard, 'no re-render');
 	assert.match(harness.tabText(), new RegExp(HINT));
 	assert.doesNotMatch(harness.tabText(), /Invalid Date/);
+});
+
+// ── Empty-state action (#1963) ─────────────────────────────────────────────────
+// The hint names a destination; the button next to it is what actually gets the user there.
+
+test('the Value empty state offers a working Open Repository PRs button', async () => {
+	const harness = await bootWebview(neverLoadedValue(), { localization: VALUE_LOCALIZATION });
+	harness.clickTab('value');
+	await harness.settle();
+
+	const hint = harness.window.document.querySelector('.value-hint-text');
+	assert.equal(
+		hint?.textContent.trim(),
+		'💡 Connect GitHub and open Usage Analysis → Repository PRs once to add pull-request metrics here.',
+		'the explanation comes from the localization payload, with the destination interpolated',
+	);
+	assert.equal(
+		hint?.querySelector('b')?.textContent,
+		'Usage Analysis → Repository PRs',
+		'the destination stays emphasized rather than arriving as escaped markup',
+	);
+
+	const button = harness.window.document.getElementById('btn-open-repo-prs');
+	assert.ok(button, 'expected the Open Repository PRs button in the Value tab empty state');
+	assert.equal(button.textContent.trim(), 'Open Repository PRs', 'button carries the localized label');
+
+	button.dispatchEvent(new harness.window.MouseEvent('click', { bubbles: true }));
+	await harness.settle();
+
+	const commands = harness.posted.map((m: any) => m.command);
+	assert.ok(
+		commands.includes('showUsageAnalysisRepoPrs'),
+		`expected showUsageAnalysisRepoPrs to be posted, got: ${JSON.stringify(commands)}`,
+	);
+});
+
+test('the empty-state action disappears once PR metrics are available', async () => {
+	const harness = await bootWebview(loadedValue(), { localization: VALUE_LOCALIZATION });
+	harness.clickTab('value');
+	await harness.settle();
+
+	assert.equal(
+		harness.window.document.getElementById('btn-open-repo-prs'),
+		null,
+		'the empty-state action must not shadow the real PR cards',
+	);
+});
+
+test('a Value update that fills the cards retires the empty-state action', async () => {
+	// The two features meet here: #1962's live update has to take #1963's button away with the
+	// hint it belongs to, and bring it back when a sign-out empties the cards again.
+	const harness = await bootWebview(neverLoadedValue(), { localization: VALUE_LOCALIZATION });
+	harness.clickTab('value');
+	await harness.settle();
+	assert.ok(harness.window.document.getElementById('btn-open-repo-prs'), 'starts on the empty state');
+
+	harness.postFromHost({ command: 'valueSignalsUpdated', value: loadedValue() });
+	await harness.settle();
+	assert.equal(harness.window.document.getElementById('btn-open-repo-prs'), null, 'button goes with the hint');
+
+	harness.postFromHost({ command: 'valueSignalsUpdated', value: neverLoadedValue() });
+	await harness.settle();
+	assert.ok(harness.window.document.getElementById('btn-open-repo-prs'), 'and returns on sign-out');
 });

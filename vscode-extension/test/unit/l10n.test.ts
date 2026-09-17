@@ -196,6 +196,33 @@ test('l10n: usage context-pressure keys resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: efficiency Value empty-state keys resolve in English', () => {
+	// These back the Value tab's empty state: the explanation and the "Open Repository PRs"
+	// button beside it. A missing key would render a raw `efficiency.value.*` in the panel.
+	assert.equal(t('efficiency.value.openRepositoryPrs'), 'Open Repository PRs');
+	assert.equal(t('efficiency.value.prsHintDestination'), 'Usage Analysis → Repository PRs');
+	assert.equal(
+		t('efficiency.value.prsHint', '<b>Usage Analysis → Repository PRs</b>'),
+		'💡 Connect GitHub and open <b>Usage Analysis → Repository PRs</b> once to add pull-request metrics here — merged PRs are a far better value signal than lines of code.',
+	);
+});
+
+test('l10n: efficiency Value empty-state keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('efficiency.value.openRepositoryPrs'), '打开仓库 PR');
+		assert.equal(t('efficiency.value.prsHintDestination'), '使用分析 → 仓库 PR');
+		// The Chinese phrasing puts the destination after the verb rather than before "once",
+		// so the placeholder is not positional in the same way as English.
+		assert.equal(
+			t('efficiency.value.prsHint', '<b>使用分析 → 仓库 PR</b>'),
+			'💡 连接 GitHub 并打开一次 <b>使用分析 → 仓库 PR</b>，即可在此处添加拉取请求指标——已合并的 PR 是比代码行数更好的价值信号。',
+		);
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: Recent Sessions context-fill keys resolve in English', () => {
 	// These back the Recent Sessions "Context" column and the "near context
 	// limit" filter pill the context-pressure insight links to. A missing key

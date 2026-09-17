@@ -901,11 +901,11 @@ interface WorktreeCleanupDiagnostics {
 	untrackedFiles?: number;
 }
 
-type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'worktrees' | 'insights' | 'corrections';
+type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'repos' | 'worktrees' | 'insights' | 'corrections';
 
 /** Narrows an arbitrary tab name (e.g. from the what's-new catalog) to one `showUsageAnalysisOnTab` accepts. */
 function isUsageAnalysisTab(tab: string): tab is UsageAnalysisTab {
-	return (['activity', 'sessions', 'tools', 'health', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
+	return (['activity', 'sessions', 'tools', 'health', 'repos', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
 }
 
 /**
@@ -1643,6 +1643,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			showDetails:            () => this.showDetails(),
 			showChart:              () => this.showChart(),
 			showUsageAnalysis:      () => this.showUsageAnalysis(),
+			// Distinct from showUsageAnalysis: that handler deliberately ignores payload
+			// properties, so a tab can only be requested through its own command.
+			showUsageAnalysisRepoPrs: () => this.showUsageAnalysisOnReposTab(),
 			showDiagnostics:        () => this.showDiagnosticReport(),
 			showMaturity:           () => this.showMaturity(),
 			showDashboard:          () => this.showDashboard(),
@@ -5926,6 +5929,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Details view — collapsible "Usage by Editor" section heading tooltips
 			'details.editorSection.show': l10n.t('details.editorSection.show'),
 			'details.editorSection.hide': l10n.t('details.editorSection.hide'),
+			// Efficiency view — Value tab empty state. `prsHint` carries a {0} placeholder
+			// resolved webview-side by localizeFormat(), so it is passed through unformatted.
+			'efficiency.value.openRepositoryPrs': l10n.t('efficiency.value.openRepositoryPrs'),
+			'efficiency.value.prsHint': l10n.t('efficiency.value.prsHint'),
+			'efficiency.value.prsHintDestination': l10n.t('efficiency.value.prsHintDestination'),
 			...this.getLogViewerSummaryLocalization(),
 			...this.getMistralCloudLocalization(),
 			...this.getEfficiencyAttributionLocalization(),
@@ -10103,6 +10111,15 @@ private computeFallbackDailyRollup(
 
 	public async showUsageAnalysisOnHealthTab(): Promise<void> {
 		await this.showUsageAnalysisOnTab('health');
+	}
+
+	/**
+	 * Opens the Usage Analysis panel and activates the Repository PRs tab. The webview's own
+	 * tab handler owns the lazy PR-statistics fetch, so this only has to get the tab selected —
+	 * whether the panel was closed, still rendering its loading state, or already on another tab.
+	 */
+	public async showUsageAnalysisOnReposTab(): Promise<void> {
+		await this.showUsageAnalysisOnTab('repos');
 	}
 
 	public async showUsageAnalysisOnCorrectionsTab(): Promise<void> {
