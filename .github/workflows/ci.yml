@@ -525,7 +525,10 @@ jobs:
     # known-good build and verify its checksum rather than trusting whatever
     # the image ships; the download is skipped when the image is new enough.
     - name: Ensure the GitHub CLI can attach images
-      if: always() && steps.visual-comment.outputs.has_report == 'true'
+      # The has_report output is empty when the render step was skipped for a
+      # fork, so this is already fork-safe; the explicit guard keeps it so if
+      # the render step's condition ever changes.
+      if: always() && github.event.pull_request.head.repo.full_name == github.repository && steps.visual-comment.outputs.has_report == 'true'
       env:
         GH_CLI_VERSION: "2.101.0"
         GH_CLI_SHA256: "9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8"
@@ -547,7 +550,7 @@ jobs:
         "$RUNNER_TEMP/gh_${GH_CLI_VERSION}_linux_amd64/bin/gh" --version
 
     - name: Post the screenshot comment on the PR
-      if: always() && steps.visual-comment.outputs.has_report == 'true'
+      if: always() && github.event.pull_request.head.repo.full_name == github.repository && steps.visual-comment.outputs.has_report == 'true'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # User token for the uploads; see the note above. Optional.
