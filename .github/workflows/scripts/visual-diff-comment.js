@@ -386,4 +386,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { planAttachments, renderBody, safeAlt };
+module.exports = { planAttachments, renderBody, resolveAttachment, normalizeComparison, safeAlt, safeId, safeText };
