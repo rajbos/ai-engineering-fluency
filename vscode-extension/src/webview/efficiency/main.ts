@@ -31,9 +31,12 @@ import {
 	reconcileModelSelection,
 	resolveModelCompareWindow,
 	selectDaysInWindow,
+	valueSignalsEqual,
 	windowHasModelData,
 } from '../../../../src/efficiencyAnalysis';
 import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
+import { registerMessageHandler } from '../shared/messageHandler';
+import { createEfficiencyWebviewReadyNotifier, isValueSignalsPayload } from './valueUpdate';
 import { renderModelMixTable } from './modelMixTable';
 import { buildAttributionTooltip } from './attributionText';
 
@@ -49,7 +52,12 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 };
 
 const vscode = acquireVsCodeApi();
-const data = getWindowData<EfficiencyViewData & { localization?: Record<string, string> }>('__INITIAL_EFFICIENCY__');
+const notifyEfficiencyWebviewReady = createEfficiencyWebviewReadyNotifier(
+	(message) => vscode.postMessage(message),
+);
+// Mutable: the host pushes a fresh Value snapshot when Repository PR data lands after this
+// document was rendered (see `valueSignalsUpdated` below), which must survive tab switches.
+let data = getWindowData<EfficiencyViewData & { localization?: Record<string, string> }>('__INITIAL_EFFICIENCY__');
 
 // Initialize localization for webview
 if (data?.localization) {
@@ -449,8 +457,17 @@ function renderValueTab(d: EfficiencyViewData): string {
 				<div class="value-sub">PRs opened by an AI bot account (Copilot coding agent, Claude, Codex). ${v.aiPrs === 0 ? 'Zero is expected when you drive AI locally and open PRs yourself — your work is counted under Merged PRs.' : 'These ran autonomously in the cloud rather than in your editor.'}</div>
 			</div>`);
 	}
+	// The empty state stays explanatory, but the destination it names is one click away:
+	// the button asks the host to reveal Usage Analysis *on* the Repository PRs tab, which
+	// is what actually fills these cards.
+	// `{0}` is the emphasized destination name; the bundle's own text is the only markup
+	// interpolated into it, and the destination itself is escaped before emphasis.
+	const destination = `<b>${escapeHtml(localize('efficiency.value.prsHintDestination'))}</b>`;
 	const hint = v.userPrs === null
-		? `<div class="value-hint">💡 Connect GitHub and open <b>Usage Analysis → Repository PRs</b> once to add pull-request metrics here — merged PRs are a far better value signal than lines of code.</div>`
+		? `<div class="value-hint">
+				<span class="value-hint-text">${localizeFormat('efficiency.value.prsHint', destination)}</span>
+				<vscode-button id="btn-open-repo-prs" appearance="secondary">${escapeHtml(localize('efficiency.value.openRepositoryPrs'))}</vscode-button>
+			</div>`
 		: '';
 	return `
 		<p class="eff-section-note">Efficiency only counts when output holds up. These metrics measure what your AI usage produced, not what it consumed.</p>
@@ -1194,8 +1211,38 @@ function wireEvents(): void {
 	document.getElementById('btn-environmental')?.addEventListener('click', () => { vscode.postMessage({ command: 'showEnvironmental' }); });
 	document.getElementById('btn-diagnostics')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDiagnostics' }); });
 	document.getElementById('btn-dashboard')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDashboard' }); });
+	// Value tab empty state: reveal Usage Analysis already on the Repository PRs tab.
+	document.getElementById('btn-open-repo-prs')?.addEventListener('click', () => { vscode.postMessage({ command: 'showUsageAnalysisRepoPrs' }); });
 	wireExtensionPointButtons(vscode);
 }
+
+// ── Host messages ──────────────────────────────────────────────────────
+
+/**
+ * Applies a Value snapshot pushed by the host after Repository PR data loaded.
+ *
+ * Deliberately *not* a full re-render: the selected tab, the Models-tab controls and the live
+ * Chart.js instances all live in this document and a re-render would tear them down. When Value
+ * is the active tab only its fragment is replaced; otherwise the new state is simply retained
+ * and picked up by the next tab switch.
+ */
+function applyValueSignals(next: EfficiencyViewData['value']): void {
+	if (!data || valueSignalsEqual(data.value, next)) { return; }
+	data = { ...data, value: next };
+	if (activeTab !== 'value') { return; }
+	// Before the first render there is no `#eff-tab-content` yet; `setHtml` no-ops on a missing
+	// element, and the state assigned above is what that render then picks up.
+	setHtml(document.getElementById('eff-tab-content'), renderValueTab(data));
+}
+
+registerMessageHandler<{ command?: string; value?: unknown }>((message) => {
+	// Repository PR results are the only host push this view consumes. Cloud-agent task loads
+	// publish their own message and must not touch Value: `aiPrs` counts bot-authored pull
+	// requests, not cloud-agent tasks.
+	if (message?.command !== 'valueSignalsUpdated' || !isValueSignalsPayload(message.value)) { return; }
+	applyValueSignals(message.value);
+});
+notifyEfficiencyWebviewReady('listener-registered');
 
 async function bootstrap(): Promise<void> {
 	await import('@vscode-elements/elements/dist/vscode-button/index.js');
@@ -1205,6 +1252,9 @@ async function bootstrap(): Promise<void> {
 		return;
 	}
 	render();
+	// The first announcement above necessarily happens before anything is rendered, so a replay
+	// it triggered found no `#eff-tab-content` to update. Announce again now that there is one.
+	notifyEfficiencyWebviewReady('content-rendered');
 }
 
 void bootstrap();

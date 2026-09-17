@@ -196,6 +196,33 @@ test('l10n: usage context-pressure keys resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: efficiency Value empty-state keys resolve in English', () => {
+	// These back the Value tab's empty state: the explanation and the "Open Repository PRs"
+	// button beside it. A missing key would render a raw `efficiency.value.*` in the panel.
+	assert.equal(t('efficiency.value.openRepositoryPrs'), 'Open Repository PRs');
+	assert.equal(t('efficiency.value.prsHintDestination'), 'Usage Analysis → Repository PRs');
+	assert.equal(
+		t('efficiency.value.prsHint', '<b>Usage Analysis → Repository PRs</b>'),
+		'💡 Connect GitHub and open <b>Usage Analysis → Repository PRs</b> once to add pull-request metrics here — merged PRs are a far better value signal than lines of code.',
+	);
+});
+
+test('l10n: efficiency Value empty-state keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('efficiency.value.openRepositoryPrs'), '打开仓库 PR');
+		assert.equal(t('efficiency.value.prsHintDestination'), '使用分析 → 仓库 PR');
+		// The Chinese phrasing puts the destination after the verb rather than before "once",
+		// so the placeholder is not positional in the same way as English.
+		assert.equal(
+			t('efficiency.value.prsHint', '<b>使用分析 → 仓库 PR</b>'),
+			'💡 连接 GitHub 并打开一次 <b>使用分析 → 仓库 PR</b>，即可在此处添加拉取请求指标——已合并的 PR 是比代码行数更好的价值信号。',
+		);
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: Recent Sessions context-fill keys resolve in English', () => {
 	// These back the Recent Sessions "Context" column and the "near context
 	// limit" filter pill the context-pressure insight links to. A missing key
@@ -800,6 +827,44 @@ test('l10n: Copilot Budget gauge keys resolve in zh-cn', () => {
 		assert.equal(t('tooltip.budgetOverBy', '$12.34'), '超出 $12.34');
 		assert.equal(t('tooltip.budgetTrackedHere', '$556.61'), '本设备跟踪 $556.61');
 		assert.equal(t('tooltip.budgetUntracked', '$202.60'), '未跟踪(其他设备/云端) $202.60');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: Claude Desktop coverage keys resolve in English', () => {
+	// Back the Recent Sessions banner that explains why Claude Desktop lists more
+	// sessions than this machine can measure. The three summary variants exist
+	// because both counts drive agreement independently.
+	assert.equal(
+		t('usage.claudeDesktopCoverage.summary.oneOfOne', '1', '1'),
+		'1 of 1 Claude Desktop session known to this machine has no local transcript left, so it cannot be measured here',
+	);
+	assert.equal(
+		t('usage.claudeDesktopCoverage.summary.singular', '1', '12'),
+		'1 of 12 Claude Desktop sessions known to this machine has no local transcript left, so it cannot be measured here',
+	);
+	assert.equal(
+		t('usage.claudeDesktopCoverage.summary.plural', '69', '145'),
+		'69 of 145 Claude Desktop sessions known to this machine have no local transcript left, so they cannot be measured here',
+	);
+	assert.match(t('usage.claudeDesktopCoverage.tooltip'), /cleanupPeriodDays/);
+	assert.match(t('usage.claudeDesktopCoverage.tooltip'), /never write a transcript to this machine/);
+});
+
+test('l10n: Claude Desktop coverage keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		// Chinese has no verb agreement, so all three variants share one phrasing —
+		// but each key must still resolve, or the banner renders a raw key.
+		for (const key of ['oneOfOne', 'singular', 'plural']) {
+			assert.equal(
+				t(`usage.claudeDesktopCoverage.summary.${key}`, '69', '145'),
+				'此计算机已知的 145 个 Claude Desktop 会话中，有 69 个已没有本地记录，因此无法在此处统计',
+				`zh-cn value for summary.${key}`,
+			);
+		}
+		assert.match(t('usage.claudeDesktopCoverage.tooltip'), /cleanupPeriodDays/);
 	} finally {
 		mock.setLanguage('en');
 	}

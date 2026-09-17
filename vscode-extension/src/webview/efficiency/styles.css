@@ -262,6 +262,22 @@
 	border-left: 3px solid var(--vscode-textLink-foreground);
 	font-size: 0.85em;
 	line-height: 1.5;
+	/* Explanation left, action right; the button wraps under the text on narrow panels
+	   instead of squeezing the sentence into a column. */
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.value-hint-text {
+	flex: 1 1 260px;
+	min-width: 0;
+}
+
+.value-hint vscode-button {
+	flex: 0 0 auto;
 }
 
 /* ── Tools & Skills tab ── */

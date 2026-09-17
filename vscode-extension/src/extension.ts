@@ -54,6 +54,7 @@ import type {
   MissedPotentialWorkspace,
   UsageAnalysisStats,
   TodaySessionSummary,
+  ClaudeDesktopCoverage,
   CustomizationTypeStatus,
   WorkspaceCustomizationRow,
   WorkspaceCustomizationMatrix,
@@ -248,6 +249,9 @@ import {
   type EfficiencyViewData,
   type ModelDailyInput,
   type PeriodVolumeTotals,
+  valueSignalsEqual as _valueSignalsEqual,
+  type ValueSignals,
+  type ValueSignalsInput,
 } from '../../src/efficiencyAnalysis';
 
 import { scanDarkFactoryReadiness } from './darkFactoryService';
@@ -347,7 +351,9 @@ import {
 	REPO_PRS_REFRESH_INTERVAL_MS,
 	canServeRepoPrSnapshot,
 	getRepoPrCachePath,
+	isRealRepoPrSnapshot,
 	isRepoPrEnvelopeUsable,
+	shouldPublishRepoPrStats,
 	readRepoPrSnapshot,
 	shouldPreserveRepoPrSnapshotForEmptyDiscovery,
 	writeRepoPrSnapshot,
@@ -897,11 +903,11 @@ interface WorktreeCleanupDiagnostics {
 	untrackedFiles?: number;
 }
 
-type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'worktrees' | 'insights' | 'corrections';
+type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'repos' | 'worktrees' | 'insights' | 'corrections';
 
 /** Narrows an arbitrary tab name (e.g. from the what's-new catalog) to one `showUsageAnalysisOnTab` accepts. */
 function isUsageAnalysisTab(tab: string): tab is UsageAnalysisTab {
-	return (['activity', 'sessions', 'tools', 'health', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
+	return (['activity', 'sessions', 'tools', 'health', 'repos', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
 }
 
 /**
@@ -1006,6 +1012,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private continue_!: ContinueDataAccess;
 	private claudeCode!: ClaudeCodeDataAccess;
 	private claudeDesktop!: ClaudeDesktopDataAccess;
+	/** Cached Claude Desktop local-transcript coverage (see computeClaudeDesktopCoverage). */
+	private _claudeDesktopCoverage?: { value: ClaudeDesktopCoverage; computedAt: number };
 	private mistralVibe!: MistralVibeDataAccess;
 	private geminiCli!: GeminiCliDataAccess;
 	public windsurf!: WindsurfDataAccess;
@@ -1080,6 +1088,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private fluencyLevelViewerPanel: vscode.WebviewPanel | undefined;
 	private environmentalPanel: vscode.WebviewPanel | undefined;
 	private efficiencyPanel: vscode.WebviewPanel | undefined;
+	/**
+	 * Replay channel for the Efficiency panel's Value updates. Reset on every HTML replacement and
+	 * on disposal: a retained snapshot is only valid for the document it was derived for.
+	 */
+	private readonly efficiencyMessageReplay = new WebviewMessageReplay(
+		(message) => this.efficiencyPanel?.webview.postMessage(message) ?? false,
+		2_000,
+		(error) => this.warn(`Efficiency message delivery failed: ${error}`),
+	);
 	private whatsNewPanel: vscode.WebviewPanel | undefined;
 	/** What the user has already been told about; see `src/whatsNew/announcer.ts`. */
 	private _whatsNewState: WhatsNewState = { ...EMPTY_WHATS_NEW_STATE };
@@ -1089,7 +1106,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _whatsNewReady: Promise<void> | undefined;
 	/** Memoized per-session efficiency inputs; cleared wherever the daily/usage stat caches are. */
 	private lastEfficiencySessionInputs: EfficiencySessionInput[] | undefined;
-	/** Last successfully rendered Efficiency payload, restored if a refresh build fails. */
+	/**
+	 * Last successfully rendered Efficiency payload — restored if a refresh build fails, and the
+	 * base for Value-only updates.
+	 */
 	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
 	/** Bumped whenever the computed stat caches are invalidated; see recordEfficiencyPayload(). */
 	private _cacheGeneration = 0;
@@ -1627,6 +1647,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			showDetails:            () => this.showDetails(),
 			showChart:              () => this.showChart(),
 			showUsageAnalysis:      () => this.showUsageAnalysis(),
+			// Distinct from showUsageAnalysis: that handler deliberately ignores payload
+			// properties, so a tab can only be requested through its own command.
+			showUsageAnalysisRepoPrs: () => this.showUsageAnalysisOnReposTab(),
 			showDiagnostics:        () => this.showDiagnosticReport(),
 			showMaturity:           () => this.showMaturity(),
 			showDashboard:          () => this.showDashboard(),
@@ -3400,11 +3423,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('✅ Successfully signed out from GitHub');
 			vscode.window.showInformationMessage('Signed out from GitHub successfully.');
 
-			// Notify the analysis panel so the Repository PRs tab shows "not authenticated"
+			const since = new Date();
+			since.setDate(since.getDate() - 30);
+			// Record the unauthenticated PR result regardless of which panels are open: the
+			// Efficiency view's Value tab derives its PR metrics from this same snapshot, and
+			// sign-out is also reachable from Diagnostics and the command palette. Leaving the
+			// authenticated snapshot in place would keep those cards showing PR metrics the user
+			// just signed out of. publishRepoPrStats() tolerates a closed Analysis panel (the
+			// message is retained for replay) and notifies Efficiency itself.
+			await this.publishRepoPrStats(this.buildEmptyRepoPrStatsResult(since, false));
+			// Cloud-agent data has no such cross-panel consumer, so it stays panel-conditional.
 			if (this.analysisPanel) {
-				const since = new Date();
-				since.setDate(since.getDate() - 30);
-				await this.publishRepoPrStats(this.buildEmptyRepoPrStatsResult(since, false));
 				await this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			}
 		} catch (error) {
@@ -3469,21 +3498,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * cache policy.
 	 */
 	private async publishRepoPrStats(result: RepoPrStatsResult): Promise<void> {
+		// A refresh already in flight when the user signs out finishes with an authenticated result,
+		// and publishing it would repopulate both the Repository PRs tab and the Efficiency Value
+		// cards that the sign-out just cleared. The guard in maybeRefreshRepoPrStats() only covers
+		// refreshes that have not started yet, so drop the late result here.
+		if (!shouldPublishRepoPrStats(result, this._githubSignedOutByUser)) {
+			this.log('🔎 Dropping an authenticated repository PR result — the user signed out while it was in flight');
+			return;
+		}
 		const stamped: RepoPrStatsResult = { ...result, refreshIntervalMs: REPO_PRS_REFRESH_INTERVAL_MS };
 		this._lastRepoPrStats = stamped;
 		const { delivered, wasReady } = await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: stamped });
 		this.log(`🔎 Repository PR stats posted for ${stamped.repos.length} repo(s) (delivered=${delivered}, webviewReady=${wasReady}, ${this._describeAnalysisPanel()})`);
 
-		// `fetchedAt` is only set on real (cache-read or freshly-fetched) snapshots — the instant
-		// placeholder served on cold open uses ''. If the Efficiency panel is already open and its
-		// Value tab was rendered before this real data landed (e.g. the user opened Repository PRs
-		// after Efficiency), its "no data" hint would otherwise persist until an explicit Refresh
-		// click, since showEfficiency() deliberately doesn't recompute on reveal. Push the update.
-		if (stamped.fetchedAt && this.efficiencyPanel) {
-			void this.dispatch('refresh:efficiency', () => this.refreshEfficiencyPanel()).catch((err) => {
-				this.warn(`Failed to refresh Efficiency view after repository PR stats update: ${err}`);
-			});
-		}
+		// The Efficiency view's Value tab is derived from this same snapshot, and it is routinely
+		// rendered before Repository PRs are loaded from the Usage Analysis panel. Push a
+		// Value-only update so its "no data" hint doesn't persist until an explicit Refresh click
+		// (showEfficiency() deliberately doesn't recompute on reveal, and `retainContextWhenHidden`
+		// means revealing a hidden panel re-renders nothing).
+		await this.notifyEfficiencyValueSignals();
 	}
 
 	/**
@@ -5828,6 +5861,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'usage.sessions.contextFill.used': l10n.t('usage.sessions.contextFill.used'),
 			'usage.sessions.contextFill.usedNearLimit': l10n.t('usage.sessions.contextFill.usedNearLimit'),
 			'usage.sessions.contextFill.noData': l10n.t('usage.sessions.contextFill.noData'),
+			// Recent Sessions — Claude Desktop local-transcript coverage banner. The three
+			// summary variants cover the singular/plural agreement of both counts.
+			'usage.claudeDesktopCoverage.summary.oneOfOne': l10n.t('usage.claudeDesktopCoverage.summary.oneOfOne'),
+			'usage.claudeDesktopCoverage.summary.singular': l10n.t('usage.claudeDesktopCoverage.summary.singular'),
+			'usage.claudeDesktopCoverage.summary.plural': l10n.t('usage.claudeDesktopCoverage.summary.plural'),
+			'usage.claudeDesktopCoverage.tooltip': l10n.t('usage.claudeDesktopCoverage.tooltip'),
 		};
 	}
 
@@ -5906,6 +5945,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Details view — collapsible "Usage by Editor" section heading tooltips
 			'details.editorSection.show': l10n.t('details.editorSection.show'),
 			'details.editorSection.hide': l10n.t('details.editorSection.hide'),
+			// Efficiency view — Value tab empty state. `prsHint` carries a {0} placeholder
+			// resolved webview-side by localizeFormat(), so it is passed through unformatted.
+			'efficiency.value.openRepositoryPrs': l10n.t('efficiency.value.openRepositoryPrs'),
+			'efficiency.value.prsHint': l10n.t('efficiency.value.prsHint'),
+			'efficiency.value.prsHintDestination': l10n.t('efficiency.value.prsHintDestination'),
 			...this.getLogViewerSummaryLocalization(),
 			...this.getMistralCloudLocalization(),
 			...this.getEfficiencyAttributionLocalization(),
@@ -6464,10 +6508,35 @@ class CopilotTokenTracker implements vscode.Disposable {
 			agenticDailyTrend,
 			autoCompactionsLast7Days,
 			memoryFilesAnalysis: this.computeMemoryFilesAnalysis(startedAtGeneration),
+			claudeDesktopCoverage: await this.computeClaudeDesktopCoverage(),
 		};
 		this.lastUsageAnalysisStats = stats;
 		this._statsGeneration.usage = startedAtGeneration;
 		return stats;
+	}
+
+	/**
+	 * Measure how many of the Claude Desktop sessions Desktop itself still lists have a transcript
+	 * this extension can actually read, so the Recent Sessions view can explain — with a real number —
+	 * why Desktop's own session list is longer than the table below it.
+	 *
+	 * Cached for an hour: it reads ~150 small metadata files, which is cheap but pointless to repeat
+	 * on every refresh, and the underlying retention/cloud split moves on the order of days.
+	 */
+	private async computeClaudeDesktopCoverage(): Promise<ClaudeDesktopCoverage | undefined> {
+		const ttlMs = 60 * 60 * 1000;
+		if (this._claudeDesktopCoverage && Date.now() - this._claudeDesktopCoverage.computedAt < ttlMs) {
+			return this._claudeDesktopCoverage.value;
+		}
+		try {
+			const value = await this.claudeDesktop.getDesktopLocalCoverage(this.claudeCode.getClaudeCodeProjectsDir());
+			if (value.knownSessions === 0) { return undefined; }
+			this._claudeDesktopCoverage = { value, computedAt: Date.now() };
+			return value;
+		} catch (error) {
+			this.error('Error computing Claude Desktop local coverage:', error);
+			return undefined;
+		}
 	}
 
 	/**
@@ -10085,6 +10154,15 @@ private computeFallbackDailyRollup(
 		await this.showUsageAnalysisOnTab('health');
 	}
 
+	/**
+	 * Opens the Usage Analysis panel and activates the Repository PRs tab. The webview's own
+	 * tab handler owns the lazy PR-statistics fetch, so this only has to get the tab selected —
+	 * whether the panel was closed, still rendering its loading state, or already on another tab.
+	 */
+	public async showUsageAnalysisOnReposTab(): Promise<void> {
+		await this.showUsageAnalysisOnTab('repos');
+	}
+
 	public async showUsageAnalysisOnCorrectionsTab(): Promise<void> {
 		await this.showUsageAnalysisOnTab('corrections');
 	}
@@ -10268,6 +10346,7 @@ private computeFallbackDailyRollup(
 			backendConfigured: this.isBackendConfigured(),
 			currentWorkspacePaths: workspacePaths,
 			todaySessions: analysisStats.todaySessions || [],
+			claudeDesktopCoverage: analysisStats.claudeDesktopCoverage ?? null,
 			insights: this.buildCurrentInsights(analysisStats),
 			correctionReport: analysisStats.correctionReport ?? null,
 			repeatedTasks: analysisStats.repeatedTasks ?? null,
@@ -11643,11 +11722,22 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			if (this.handleLocalViewRegressionMessage(message)) { return; }
 			if (await this.dispatchSharedCommand(message)) { return; }
 			if (message.command === 'refresh') { await this.dispatch('refresh:efficiency', () => this.refreshEfficiencyPanel()); }
+			if (message.command === 'efficiencyWebviewReady') {
+				const replayed = await this.efficiencyMessageReplay.markReady();
+				this.log(`📨 Efficiency webview ready (${message.reason ?? 'unknown'}); replayed: ${replayed.length ? replayed.join(', ') : 'nothing buffered'}`);
+			}
 		});
-		this.efficiencyPanel.onDidDispose(() => { this.log('⚡ Efficiency view closed'); this.efficiencyPanel = undefined; });
+		this.efficiencyPanel.onDidDispose(() => {
+			this.log('⚡ Efficiency view closed');
+			this.efficiencyPanel = undefined;
+			// Transient per-document state: a later cold open derives Value from the latest
+			// Repository PR snapshot on its own.
+			this.efficiencyMessageReplay.reset();
+			this._lastEfficiencyViewData = undefined;
+		});
 
 		const panel = this.efficiencyPanel;
-		panel.webview.html = this.getLoadingHtml(panel.webview);
+		this.installEfficiencyDocument(panel, this.getLoadingHtml(panel.webview));
 
 		// Build the data in the background rather than awaiting it here: showEfficiency() is
 		// wrapped in dispatch()'s in-flight guard, which only releases the 'showEfficiency' key
@@ -11673,7 +11763,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				}
 				// The user may have closed the panel while the data was being computed.
 				if (this.efficiencyPanel !== panel) { return; }
-				panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
+				await this.renderEfficiencyData(panel, data);
 				this.log('⚡ Efficiency view rendered');
 			} catch (error) {
 				this.error('Error building Efficiency view:', error);
@@ -11699,7 +11789,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				generation = startedAt;
 				// Swap in the loading screen only once this refresh actually starts; queued
 				// behind an initial build, it would otherwise blank the panel and sit there.
-				if (this.efficiencyPanel === panel) { panel.webview.html = this.getLoadingHtml(panel.webview); }
+				if (this.efficiencyPanel === panel) { this.installEfficiencyDocument(panel, this.getLoadingHtml(panel.webview)); }
 				return this.buildEfficiencyViewData(true, this.efficiencyLoadingSink(), generation);
 			});
 			// Same reasoning as the initial build: show something now — the last good payload if
@@ -11715,7 +11805,11 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			if (!this.recordEfficiencyPayload(data, generation)) {
 				if (this.efficiencyPanel !== panel) { return; }
 				const afterClear = this._lastEfficiencyViewData;
-				if (afterClear) { panel.webview.html = this.getEfficiencyHtml(panel.webview, afterClear); }
+				// A fallback is still a freshly installed document, so it goes through the same
+				// door as a normal render: buffer reset, then Value re-derived for it. Rendering
+				// it directly would leave the previous document's retained snapshot armed and the
+				// new one showing whatever PR data the fallback payload was built with.
+				if (afterClear) { await this.renderEfficiencyData(panel, afterClear); }
 				else { this.showEfficiencyError(panel, new Error(l10n.t('efficiency.error.staleAfterClear'))); }
 				this.requestEfficiencyRebuild();
 				return;
@@ -11727,12 +11821,105 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			this.releaseEfficiencyRebuildRequest(generation);
 			const previous = this._lastEfficiencyViewData;
 			if (this.efficiencyPanel !== panel) { return; }
-			if (previous) { panel.webview.html = this.getEfficiencyHtml(panel.webview, previous); }
+			if (previous) { await this.renderEfficiencyData(panel, previous); }
 			else { this.showEfficiencyError(panel, error); }
 			return;
 		}
 		if (this.efficiencyPanel !== panel) { return; }
-		panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
+		await this.renderEfficiencyData(panel, data);
+	}
+
+	/**
+	 * Installs a freshly built Efficiency document and reconciles its Value tab.
+	 *
+	 * Both render paths are async, so a Repository PRs result can land *while* the data is being
+	 * built — it would then be baked into neither the replaced document (built too early) nor a
+	 * live update (the old document is gone). Re-deriving Value here from the current snapshot and
+	 * publishing it when it disagrees with what was just rendered closes that race; the replay
+	 * buffer holds the message until the new document announces readiness.
+	 */
+	private async renderEfficiencyData(panel: vscode.WebviewPanel, data: EfficiencyViewData): Promise<void> {
+		this._lastEfficiencyViewData = data;
+		this.installEfficiencyDocument(panel, this.getEfficiencyHtml(panel.webview, data));
+		await this.notifyEfficiencyValueSignals();
+	}
+
+	/**
+	 * The one place the Efficiency panel's HTML is replaced.
+	 *
+	 * Installing a document invalidates the Value replay buffer: a retained snapshot is only
+	 * meaningful for the document it was derived for. Routing every swap through here — the two
+	 * loading screens, the failure state, and the rendered view — is what keeps that true without
+	 * each call site remembering to, and keeps "does this path reset?" answerable by grep.
+	 */
+	private installEfficiencyDocument(panel: vscode.WebviewPanel, html: string): void {
+		this.efficiencyMessageReplay.reset();
+		panel.webview.html = html;
+	}
+
+	/**
+	 * Posts a Value-only update to the live Efficiency document when the Repository PR snapshot
+	 * moves its metrics.
+	 *
+	 * Only the Value fragment is derived and sent: no log scan, no trend recomputation and no
+	 * `webview.html` replacement, so the selected tab, the Models-tab controls and the live charts
+	 * all survive. Cloud-agent task loads deliberately never reach here — `aiPrs` counts
+	 * bot-authored pull requests, not cloud-agent tasks.
+	 */
+	private async notifyEfficiencyValueSignals(): Promise<void> {
+		const rendered = this._lastEfficiencyViewData;
+		if (!this.efficiencyPanel || !rendered) { return; }
+		const stats = this._lastRepoPrStats;
+		// The instant placeholder served on cold open carries no PR data at all, so it says nothing
+		// about the Value metrics. An unauthenticated snapshot *is* definitive though: it means "no
+		// PR data", which is what turns populated cards back into the hint.
+		if (stats && stats.authenticated && !isRealRepoPrSnapshot(stats)) { return; }
+		const value = this.deriveEfficiencyValueSignals(rendered);
+		if (_valueSignalsEqual(value, rendered.value)) { return; }
+		this._lastEfficiencyViewData = { ...rendered, value };
+		const { delivered, wasReady } = await this.efficiencyMessageReplay.publish(
+			'valueSignals', { command: 'valueSignalsUpdated', value },
+		);
+		this.log(`⚡ Efficiency Value signals posted (prs=${value.userPrs ?? 'none'}, delivered=${delivered}, webviewReady=${wasReady})`);
+	}
+
+	/**
+	 * Rebuilds the Value snapshot from the rendered view's own cost / apply / LOC totals plus the
+	 * current PR aggregate — the lightweight alternative to re-running `buildEfficiencyViewData()`.
+	 *
+	 * `now` comes from the rendered snapshot so repeated derivations over an unchanged PR
+	 * aggregate produce a byte-identical result (`prsPerWeek` divides by elapsed time), which is
+	 * what makes the "did anything change?" comparison meaningful.
+	 */
+	private deriveEfficiencyValueSignals(rendered: EfficiencyViewData): ValueSignals {
+		const v = rendered.value;
+		return _computeValueSignals({
+			...this.repoPrValueInputs(),
+			periodCost: v.periodCost,
+			applyUsage: { totalApplies: v.appliedBlocks, totalCodeBlocks: v.totalBlocks, applyRate: v.applyRate ?? 0 },
+			linesChanged: v.linesChanged,
+			now: new Date(rendered.lastUpdated),
+		});
+	}
+
+	/**
+	 * The PR half of the Value metrics. Null counts mean "Repository PRs were never loaded", which
+	 * the Value tab renders as its actionable hint rather than as zeroes.
+	 */
+	private repoPrValueInputs(): Pick<ValueSignalsInput, 'userPrs' | 'mergedPrs' | 'aiPrs' | 'prsSince'> {
+		// Same "is there really PR data?" test the update path uses: summing the cold-open
+		// placeholder's empty repo list would render 0-PR cards instead of the never-loaded hint,
+		// while an authenticated snapshot that really was fetched renders its zeroes as zeroes.
+		const last = this._lastRepoPrStats;
+		const prStats = last?.authenticated && isRealRepoPrSnapshot(last) ? last : undefined;
+		const sumRepos = (pick: (r: RepoPrInfo) => number | undefined): number | null =>
+			prStats ? prStats.repos.reduce((s, r) => s + (pick(r) ?? 0), 0) : null;
+		return {
+			userPrs: sumRepos(r => r.userAuthoredPrs),
+			mergedPrs: sumRepos(r => r.userMergedPrs),
+			aiPrs: sumRepos(r => r.aiAuthoredPrs),
+			prsSince: prStats?.since ?? null,
+		};
 	}
 
 	/** Maps one cached session to the pure-module input shape for efficiency trends. */
@@ -11898,7 +12085,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	/** Renders the failure state on `panel`, if it is still the live Efficiency panel. */
 	private showEfficiencyError(panel: vscode.WebviewPanel, error: unknown): void {
 		if (this.efficiencyPanel !== panel) { return; }
-		panel.webview.html = this.getEfficiencyErrorHtml(panel.webview, error);
+		this.installEfficiencyDocument(panel, this.getEfficiencyErrorHtml(panel.webview, error));
 	}
 
 	/**
@@ -12013,14 +12200,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		);
 		const curCost = curDays.reduce((s, d) => s + this.calculateEstimatedCost(d.modelUsage, 'copilot'), 0);
 		const curLoc = curDays.reduce((s, d) => s + (d.linesAdded ?? 0) + (d.linesRemoved ?? 0), 0);
-		const prStats = this._lastRepoPrStats?.authenticated ? this._lastRepoPrStats : undefined;
-		const sumRepos = (pick: (r: RepoPrInfo) => number | undefined): number | null =>
-			prStats ? prStats.repos.reduce((s, r) => s + (pick(r) ?? 0), 0) : null;
 		const value = _computeValueSignals({
-			userPrs: sumRepos(r => r.userAuthoredPrs),
-			mergedPrs: sumRepos(r => r.userMergedPrs),
-			aiPrs: sumRepos(r => r.aiAuthoredPrs),
-			prsSince: prStats?.since ?? null,
+			...this.repoPrValueInputs(),
 			periodCost: curCost,
 			applyUsage: usage.last30Days.applyUsage,
 			linesChanged: curLoc,
@@ -15481,6 +15662,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
       suppressedUnknownTools,
       todaySessions: stats.todaySessions || [],
+      claudeDesktopCoverage: stats.claudeDesktopCoverage ?? null,
       use24HourTime: this.getUse24HourTimeSetting(),
       hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
       insights: this.buildCurrentInsights(stats),

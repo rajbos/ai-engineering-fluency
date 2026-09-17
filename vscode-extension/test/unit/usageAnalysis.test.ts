@@ -3,6 +3,7 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { makeWorkspaceFixtureDir } from './tmpFixtureDirs';
 import {
     mergeUsageAnalysis,
     analyzeContextReferences,
@@ -2586,7 +2587,7 @@ test('analyzeSessionUsage: CLI session.model_change event is processed without e
 
 function writeCliSessionFixture(t: test.TestContext, clientName: string): string {
     // The split only applies under ~/.copilot/session-state/, so mirror that layout.
-    const dir = fs.mkdtempSync(path.join(process.cwd(), 'cliapp-split-'));
+    const dir = makeWorkspaceFixtureDir('cliapp-split-');
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const sessionDir = path.join(dir, '.copilot', 'session-state', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
     fs.mkdirSync(sessionDir, { recursive: true });
