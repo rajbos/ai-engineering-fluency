@@ -1105,11 +1105,11 @@ test('maybeCheckpointCache() counts a changed existing entry as dirty, not just 
 	m.resetCheckpointCounters(); // start counting fresh, as _runRefreshCore() does per leader refresh
 	assert.equal(m.maybeCheckpointCache(), false, 'nothing dirty right after reset');
 
-	// Reach the entries threshold (100) via repeated *changes to the same already-cached path*,
+	// Reach the entries threshold (300) via repeated *changes to the same already-cached path*,
 	// not new paths — this is exactly what an earlier version of setCachedSessionData()
 	// undercounted (only brand-new paths nudged the checkpoint threshold), so a long scan that
 	// only re-parses already-known, changed files never checkpointed at all.
-	for (let i = 0; i < 100; i++) {
+	for (let i = 0; i < 300; i++) {
 		m.setCachedSessionData('/a.json', entry(2000 + i), 10);
 	}
 	assert.equal(m.maybeCheckpointCache(), true, 'reaching the entries threshold via changed-entry writes alone must trigger a checkpoint');
@@ -1120,16 +1120,16 @@ test('maybeCheckpointCache() counts a changed existing entry as dirty, not just 
 test('deleteCachedSessionData() marks the cache dirty for a real removal, but a repeated no-op tombstone of the same path does not', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
-	for (let i = 0; i < 100; i++) {
+	for (let i = 0; i < 300; i++) {
 		m.setCachedSessionData(`/file${i}.json`, entry(1000 + i), 10);
 	}
 	m.resetCheckpointCounters(); // start counting fresh, as _runRefreshCore() does per leader refresh
 	assert.equal(m.maybeCheckpointCache(), false, 'nothing dirty right after reset');
 
-	// 100 real, distinct deletions reach the entries threshold on their own (independent of the
+	// 300 real, distinct deletions reach the entries threshold on their own (independent of the
 	// time threshold, which a fresh reset leaves unmet) — proving a tombstone counts as dirty
 	// just like a new/changed entry.
-	for (let i = 0; i < 100; i++) {
+	for (let i = 0; i < 300; i++) {
 		m.deleteCachedSessionData(`/file${i}.json`);
 	}
 	assert.equal(m.maybeCheckpointCache(), true, 'reaching the entries threshold via real deletions alone must trigger a checkpoint');
@@ -1138,15 +1138,15 @@ test('deleteCachedSessionData() marks the cache dirty for a real removal, but a 
 	m.resetCheckpointCounters();
 	assert.equal(m.maybeCheckpointCache(), false, 'nothing dirty right after reset');
 
-	// Repeating the same 100 deletions again — the documented clearExpiredCache()/
+	// Repeating the same 300 deletions again — the documented clearExpiredCache()/
 	// reconcilePreloadedAgainstDiscovery() race, an already-gone, already-tombstoned path deleted
 	// a second time — must not re-mark the cache dirty, since none of these tombstone baselines
 	// actually change.
-	for (let i = 0; i < 100; i++) {
+	for (let i = 0; i < 300; i++) {
 		m.deleteCachedSessionData(`/file${i}.json`);
 	}
 	assert.equal(m.maybeCheckpointCache(), false,
-		'100 repeated no-op tombstones of already-removed, already-tombstoned paths must not trigger a checkpoint');
+		'300 repeated no-op tombstones of already-removed, already-tombstoned paths must not trigger a checkpoint');
 });
 
 // ---------------------------------------------------------------------------

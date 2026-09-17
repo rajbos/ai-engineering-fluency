@@ -91,3 +91,5 @@ pr-risk/
 # Generated cloud-agent session cache from copilot-setup-steps; contains only
 # ephemeral fetched timestamps/counts and is recreated on demand.
 usage-data/agent-sessions.json
+vscode-extension/ctt-snapshot-*
+vscode-extension/ctt-lock-test-*

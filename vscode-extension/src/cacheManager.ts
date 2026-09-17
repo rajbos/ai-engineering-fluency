@@ -27,9 +27,17 @@ export class CacheManager {
 	private static readonly SNAPSHOT_SCHEMA_VERSION = 1;
 	private static readonly SNAPSHOT_MAX_ENTRIES = 20_000;
 
-	// Checkpoint constants: save every N new entries or every M milliseconds, whichever comes first
-	private static readonly CHECKPOINT_NEW_ENTRIES_THRESHOLD = 100;
-	private static readonly CHECKPOINT_INTERVAL_MS = 20_000;
+	// Checkpoint constants: save every N new entries or every M milliseconds, whichever comes first.
+	// Each checkpoint serializes the ENTIRE merged cache (buildMergedSnapshotEntries() reads the
+	// full sessionFileCache Map, not just the dirty entries), so its cost scales with total cache
+	// size, not with how much actually changed. On a large, long-lived cache (thousands of session
+	// files) that full JSON.parse/merge/JSON.stringify/write round trip can itself take several
+	// seconds, and it blocks the event loop for that entire window — during a big cold-start scan
+	// with many dirty entries, checkpointing too eagerly compounds into a real chunk of the scan's
+	// wall-clock time. These were tuned up from 100/20_000 accordingly; still frequent enough to
+	// bound crash-loss to well under a minute of unsaved parses.
+	private static readonly CHECKPOINT_NEW_ENTRIES_THRESHOLD = 300;
+	private static readonly CHECKPOINT_INTERVAL_MS = 45_000;
 
 	private sessionFileCache: Map<string, SessionFileCache> = new Map();
 	// Paths explicitly removed via deleteCachedSessionData(), for the lifetime of this
