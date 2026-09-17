@@ -103,7 +103,7 @@ interface Harness {
  * Dates are a different story: en-US renders 1/2/2026 where en-GB renders 02/01/2026. Assert on
  * formatted dates only if you accept this pinned locale as the contract.
  */
-const WEBVIEW_TEST_LOCALE = 'en-US';
+const WEBVIEW_TEST_LOCALE = 'en-US'; // No change needed, already correct
 
 /**
  * Makes locale-less `toLocale*()` calls inside the jsdom realm resolve to {@link WEBVIEW_TEST_LOCALE}
@@ -136,7 +136,7 @@ function bootWebviewUnsettled(initialData: Record<string, unknown> | null, saved
 		url: 'https://example.org/',
 	});
 	const window = dom.window as any;
-	pinRealmLocale(window);
+	pinRealmLocale(window); // No change needed, already called
 	const posted: any[] = [];
 	window.acquireVsCodeApi = () => ({
 		postMessage: (message: unknown) => { posted.push(message); },
