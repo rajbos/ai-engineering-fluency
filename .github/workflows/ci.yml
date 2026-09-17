@@ -588,11 +588,14 @@ jobs:
         fi
 
         # Marker comments by our own identities, oldest first. The marker is an
-        # HTML comment the renderer emits from its own template.
+        # HTML comment the renderer emits as the very first line of its own
+        # template, so only a body that STARTS with it counts - a comment that
+        # merely quotes the marker (a review reply discussing it, say) is not
+        # ours, even when the PAT's user wrote it.
         list_ours() {
           GH_TOKEN="$GITHUB_TOKEN" gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
             --paginate \
-            --jq "[.[] | select(.user.login | IN(${posters})) | select(.body | contains(\"<!-- ${COMMENT_MARKER} -->\")) | .id] | sort | join(\" \")"
+            --jq "[.[] | select(.user.login | IN(${posters})) | select(.body | startswith(\"<!-- ${COMMENT_MARKER} -->\")) | .id] | sort | join(\" \")"
         }
         existing="$(list_ours)"
 
