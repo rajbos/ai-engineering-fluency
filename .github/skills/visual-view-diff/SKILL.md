@@ -190,12 +190,16 @@ click/select steps replayed on a fresh page before the screenshot:
 diff will never see what you built. Reach a nested tab by clicking its group
 first (the diagnostics Research and Settings groups do this).
 
-The baseline is rendered with the *current* `views.config.json`, so a state
-(or a whole view) this branch introduced has nothing to render at the base
-commit. `visual-diff.js` renders the baseline with `--allow-missing`, which
-skips those instead of failing the run, and the comparison then reports the
-current screenshot as **added**. The current-tree render stays strict: a state
-that cannot be reached in *your* build is still an error.
+The baseline is rendered from the current `views.config.json` **merged with the
+base commit's**: a state (or a whole view) this branch introduced has nothing
+to render at the base commit, so `visual-diff.js` renders the baseline with
+`--allow-missing` and the comparison reports the current screenshot as
+**added**; a state or view this branch removed or renamed is still rendered on
+the baseline side (from the base commit's registry and fixtures) and reported
+as **removed**, rather than vanishing from both sides as "no change". The
+current-tree render stays strict: a state that cannot be reached in *your*
+build is still an error. View and state ids are file names, so the registry
+refuses anything but letters, digits, `_` and single dashes, and duplicates.
 
 ## Determinism
 

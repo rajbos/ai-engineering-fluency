@@ -8,6 +8,11 @@
  * Usage:
  *   node render-views.js --out <dir> [--view <id>] [--theme dark|light|both]
  *                        [--dist <dir>] [--repo-root <dir>] [--allow-missing]
+ *                        [--config <views.config.json>]
+ *
+ * `--config` renders from another registry than the skill's own — the visual
+ * diff passes a registry merged with the base commit's, so a view or state the
+ * branch removed still renders on the baseline side and shows up as removed.
  *
  * `--allow-missing` is for rendering a *baseline* build: a view or state that
  * this build cannot produce (a bundle that did not exist yet, a tab whose
@@ -80,8 +85,10 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 		};
 	}
 
-	const fixturePath = path.join(__dirname, 'fixtures', view.fixture);
-	if (!fs.existsSync(fixturePath)) {
+	// A base-only view (see mergeRegistries) carries the base commit's fixture
+	// directory, since the current tree may have deleted its fixture too.
+	const fixturePath = path.join(view.fixtureDir || path.join(__dirname, 'fixtures'), path.basename(String(view.fixture || '')));
+	if (!view.fixture || !fs.existsSync(fixturePath)) {
 		return { view: view.id, state: state ? state.id : null, theme, status: 'error', error: `Missing fixture ${view.fixture}` };
 	}
 
@@ -199,7 +206,7 @@ async function main() {
 	const outDir = path.resolve(args.out || path.join(REPO_ROOT, 'visual-output', 'current'));
 	const repoRoot = path.resolve(args['repo-root'] || REPO_ROOT);
 	const distDir = path.resolve(args.dist || path.join(repoRoot, 'vscode-extension', 'dist', 'webview'));
-	const config = readConfig(__dirname);
+	const config = readConfig(__dirname, typeof args.config === 'string' ? path.resolve(args.config) : undefined);
 	const views = selectViews(config, args.view);
 	const themes = args.theme === 'both' ? ['dark', 'light'] : [args.theme || 'dark'];
 	const allowMissing = args['allow-missing'] === true;

@@ -234,9 +234,11 @@ Two things to know about that comment:
   Keep `GH_PAT` narrow: a fine-grained token limited to this repository with
   *Pull requests: write* (and *Contents: read*) is all the upload needs.
 - Fork PRs get a read-only token and no secrets, so they only get the artifact.
-- Only comments carrying the marker **and** authored by the workflow's own
-  identities (the Actions bot, the PAT's user) are ever replaced; the newest
-  one survives, so two runs that race still converge on a single comment.
+- Only a comment whose body *starts* with the marker **and** is either
+  authored by one of the workflow's own identities (the Actions bot, the PAT's
+  user) or carries the renderer's footer sentence is ever replaced; the newest
+  one survives, so two runs that race still converge on a single comment, and
+  a comment posted under a since-rotated PAT is still recognised.
 
 ## What is deliberately not covered
 
