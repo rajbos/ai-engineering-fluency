@@ -2,7 +2,7 @@ import './vscode-shim-register';
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
+import { makeTmpFixtureDir } from './tmpFixtureDirs';
 import * as path from 'node:path';
 
 import { CacheManager } from '../../src/cacheManager';
@@ -20,7 +20,7 @@ function makeManager(dir: string, cacheVersion = 1, depsOverride?: Partial<{ onP
 }
 
 function tmpDir(): string {
-	return fs.mkdtempSync(path.join(process.cwd(), 'ctt-snapshot-test-'));
+	return makeTmpFixtureDir('ctt-snapshot-test-');
 }
 
 function entry(mtime: number, tokens = 100): SessionFileCache {
