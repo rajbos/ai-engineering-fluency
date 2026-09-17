@@ -20,6 +20,7 @@ import type { ModelUsage, EditorUsage, SessionFileCache, DailyRollupEntry } from
 import { scaleModelUsage, preserveAutoRouting, reconcileDebugLogModelUsage } from '../../../src/statsHelpers';
 import { calculateEstimatedCost } from '../../../src/tokenEstimation';
 import { TASK_CATEGORIES, type TaskCategory, type TaskCategoryBreakdown } from '../../../src/taskClassification';
+import { getTimeWindowStartDayKey } from '../../../src/timeWindows';
 
 /** Builds a full TaskCategoryBreakdown (all categories present) from a partial map of non-zero shares. */
 function makeShares(partial: Partial<Record<TaskCategory, number>>): TaskCategoryBreakdown {
@@ -463,24 +464,42 @@ assert.ok(fileAtWindowStart >= ranges.last30DaysStartMs,
 'mtime at window start boundary should not be excluded');
 });
 
-test('computeUtcDateRanges: last30DaysUtcStartKey is 30 local days before todayUtcKey', () => {
+test('computeUtcDateRanges: last30DaysUtcStartKey is 30 calendar dates including today', () => {
 const now = new Date(2024, 4, 15, 12, 0, 0); // local May 15
 const ranges = computeUtcDateRanges(now);
-// April 15 is 30 days before May 15
-assert.equal(ranges.last30DaysUtcStartKey, '2024-04-15');
+// April 16..May 15 inclusive is 30 calendar dates.
+assert.equal(ranges.last30DaysUtcStartKey, '2024-04-16');
 });
 
 test('computeUtcDateRanges: 30-day window crosses a month boundary correctly', () => {
 const now = new Date(2024, 2, 10, 12, 0, 0); // local March 10
 const ranges = computeUtcDateRanges(now);
-// Feb 9 is 30 days before Mar 10
-assert.equal(ranges.last30DaysUtcStartKey, '2024-02-09');
+// Feb 10..Mar 10 inclusive is 30 calendar dates (2024 is a leap year: Feb has 29 days).
+assert.equal(ranges.last30DaysUtcStartKey, '2024-02-10');
+});
+
+test('computeUtcDateRanges: last30DaysUtcStartKey always agrees with the Recent Sessions last30 lookback', () => {
+// The two used to disagree by one day (this function started the window at
+// `now - 30`, getTimeWindowStartDayKey('last30') at `now - 30 + 1`), so a
+// session active exactly on the older boundary day could be counted in a
+// "Last 30 Days" total without appearing in a same-labelled Recent Sessions
+// list. computeUtcDateRanges now derives its boundary from the same helper,
+// so this can no longer drift — this test guards that sharing.
+for (const now of [
+new Date(2024, 4, 15, 12, 0, 0),
+new Date(2024, 2, 10, 12, 0, 0),
+new Date(2025, 0, 1, 0, 0, 0),
+new Date(2026, 4, 13, 10, 0, 0),
+]) {
+const ranges = computeUtcDateRanges(now);
+assert.equal(ranges.last30DaysUtcStartKey, getTimeWindowStartDayKey('last30', now));
+}
 });
 
 test('computeUtcDateRanges: last30DaysStartMs equals the local midnight of last30DaysUtcStartKey', () => {
 const now = new Date(2024, 4, 15, 12, 0, 0); // local May 15 at noon
 const ranges = computeUtcDateRanges(now);
-// last30DaysStartKey is April 15; local midnight of April 15
+// last30DaysStartKey is April 16; local midnight of April 16
 const [year, month, day] = ranges.last30DaysUtcStartKey.split('-').map(Number);
 const expectedMs = new Date(year, month - 1, day).getTime();
 assert.equal(ranges.last30DaysStartMs, expectedMs);
@@ -496,7 +515,7 @@ assert.equal(ranges.lastMonthUtcStartKey, '2026-04-01');
 });
 
 test('computeUtcDateRanges: lastMonthStartMs is earlier than last30DaysStartMs when today is May 13', () => {
-// On May 13, last30Days starts Apr 13 but previous month starts Apr 1.
+// On May 13, last30Days starts Apr 14 but previous month starts Apr 1.
 // The file-load cutoff should be Apr 1 (lastMonthStartMs < last30DaysStartMs).
 const now = new Date(2026, 4, 13, 0, 0, 0); // local May 13, 2026
 const ranges = computeUtcDateRanges(now);

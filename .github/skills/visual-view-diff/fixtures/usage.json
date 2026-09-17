@@ -955,5 +955,34 @@
         ]
       }
     ]
+  },
+  "memoryFilesAnalysis": {
+    "staleDays": 90,
+    "largeFileBytes": 10240,
+    "totalFiles": 4,
+    "totalBytes": 24576,
+    "staleFileCount": 2,
+    "largeFileCount": 1,
+    "byWorkspace": [
+      {
+        "workspaceName": "<script>alert('xss')</script> & \"my-repo\"",
+        "workspaceHash": "abc123",
+        "repoCount": 3,
+        "sessionCount": 1,
+        "userCount": 0,
+        "totalBytes": 20480,
+        "newestMtimeMs": 1710000000000,
+        "staleFileCount": 2
+      },
+      {
+        "workspaceName": "User (global)",
+        "repoCount": 0,
+        "sessionCount": 0,
+        "userCount": 1,
+        "totalBytes": 4096,
+        "newestMtimeMs": 1710500000000,
+        "staleFileCount": 0
+      }
+    ]
   }
 }

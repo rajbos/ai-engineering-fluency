@@ -184,8 +184,18 @@ interface Harness {
 	settleScroll: () => Promise<void>;
 }
 
-/** Boots the bundled webview in jsdom. `initialData` mirrors `window.__INITIAL_USAGE__`. */
-async function bootWebview(initialData: Record<string, unknown> | null): Promise<Harness> {
+/**
+ * Boots the bundled webview in jsdom. `initialData` mirrors `window.__INITIAL_USAGE__`.
+ *
+ * `duringBootstrap` is dispatched immediately after the bundle is evaluated and
+ * before anything is awaited — i.e. while `bootstrap()` is still suspended on its
+ * dynamic import, which is exactly when the extension host's pending messages
+ * arrive in practice.
+ */
+async function bootWebview(
+	initialData: Record<string, unknown> | null,
+	duringBootstrap?: Record<string, unknown>,
+): Promise<Harness> {
 	const bundle = await bundleUsageWebview();
 	const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
 		runScripts: 'outside-only',
@@ -210,6 +220,12 @@ async function bootWebview(initialData: Record<string, unknown> | null): Promise
 	if (initialData) { window.__INITIAL_USAGE__ = initialData; }
 
 	window.eval(bundle);
+
+	if (duringBootstrap) {
+		const event = new window.MessageEvent('message', { data: duringBootstrap });
+		Object.defineProperty(event, 'source', { value: null });
+		window.dispatchEvent(event);
+	}
 
 	const settle = async (): Promise<void> => {
 		for (let i = 0; i < 20; i++) { await new Promise((resolve) => setImmediate(resolve)); }
@@ -655,6 +671,113 @@ test('Recent Sessions pill filters narrow the table by editor, vendor, model, an
 	clearButton.click();
 	assert.deepEqual(titles(), ['CLI session', 'VS Code session', 'HydraFusion session']);
 	assert.equal(doc.getElementById('sessions-filter-clear'), null, 'the clear button disappears once no filters are active');
+});
+
+test('the Context column reports each session\'s window fill and flags the near-limit ones', async () => {
+	const stats = buildStats();
+	const baseSession = {
+		interactions: 10, toolCalls: 5, inputTokens: 1000, outputTokens: 500, thinkingTokens: 0,
+		cachedTokens: 0, totalTokens: 1500, estimatedCost: 0.5, lastActivity: '2026-09-06T11:00:00.000Z',
+		editor: 'Copilot CLI (App)', models: ['gpt-5.6-terra'],
+	};
+	stats.todaySessions = [
+		{ ...baseSession, title: 'Near limit', filePath: 'a.jsonl', contextWindowLimit: 200000, contextReachedTokens: 190000 },
+		{ ...baseSession, title: 'Plenty of room', filePath: 'b.jsonl', contextWindowLimit: 200000, contextReachedTokens: 40000 },
+		// Compaction resets the fill a near-limit judgement would rest on, so a
+		// compacted session is shown but never flagged.
+		{ ...baseSession, title: 'Compacted', filePath: 'c.jsonl', contextWindowLimit: 200000, contextReachedTokens: 199000, truncationCount: 2 },
+		{ ...baseSession, title: 'No fill data', filePath: 'd.jsonl' },
+	];
+	const harness = await bootWebview(stats);
+	const doc = harness.window.document;
+
+	const contextCells = [...doc.querySelectorAll('.sessions-table tbody tr')].map((row: any) => {
+		const cells = [...row.cells];
+		return `${row.querySelector('.session-title-link').textContent} => ${cells[cells.length - 2].textContent.trim()}`;
+	});
+	assert.deepEqual(contextCells, [
+		'Near limit => ⚠️ 95%',
+		'Plenty of room => 20%',
+		'Compacted => 99%',
+		'No fill data => —',
+	]);
+});
+
+test('the near-limit pill and the insight\'s switchTab preset both narrow Recent Sessions to the flagged sessions', async () => {
+	const stats = buildStats();
+	const baseSession = {
+		interactions: 10, toolCalls: 5, inputTokens: 1000, outputTokens: 500, thinkingTokens: 0,
+		cachedTokens: 0, totalTokens: 1500, estimatedCost: 0.5, lastActivity: '2026-09-06T11:00:00.000Z',
+		editor: 'Copilot CLI (App)', models: ['gpt-5.6-terra'],
+	};
+	const sessions = [
+		{ ...baseSession, title: 'Near limit A', filePath: 'a.jsonl', contextWindowLimit: 200000, contextReachedTokens: 190000 },
+		{ ...baseSession, title: 'Plenty of room', filePath: 'b.jsonl', contextWindowLimit: 200000, contextReachedTokens: 40000 },
+		{ ...baseSession, title: 'Near limit B', filePath: 'c.jsonl', contextWindowLimit: 128000, contextReachedTokens: 120000 },
+	];
+	stats.todaySessions = sessions;
+	stats.recentSessions = { last7: sessions, last30: sessions, currentMonth: sessions };
+	const harness = await bootWebview(stats);
+	const doc = harness.window.document;
+	const titles = () => [...doc.querySelectorAll('.sessions-table tbody tr .session-title-link')].map((a: any) => a.textContent);
+	const pill = () => doc.querySelector('.session-filter-pill[data-filter-type="nearcontextlimit"]');
+
+	assert.equal(pill()?.textContent.replace(/\s+/g, ' ').trim(), '🧠 Near context limit 2',
+		'the pill counts only the sessions the insight counts');
+
+	pill().click();
+	assert.deepEqual(titles(), ['Near limit A', 'Near limit B']);
+	assert.equal(pill()?.getAttribute('aria-pressed'), 'true');
+
+	// Back to the unfiltered list, then take the path the insight's
+	// "Show these N sessions" button drives.
+	pill().click();
+	assert.deepEqual(titles(), ['Near limit A', 'Plenty of room', 'Near limit B']);
+
+	harness.post({ command: 'switchTab', tab: 'sessions', sessionsPreset: { filter: 'nearContextLimit', lookback: 'last30' } });
+	await harness.settle();
+
+	assert.equal(doc.querySelector('.tab-button.active')?.getAttribute('data-tab'), 'sessions');
+	assert.deepEqual(titles(), ['Near limit A', 'Near limit B']);
+	assert.equal(pill()?.getAttribute('aria-pressed'), 'true');
+	// A user who had hidden the Context column must not be left with a filtered
+	// table whose checkbox disagrees with what is on screen.
+	const checkbox = doc.querySelector('#sessions-columns-menu input[data-column="contextFill"]');
+	assert.equal(checkbox?.checked, true, 'the preset ticks the Columns menu checkbox it turned on');
+});
+
+test('a preset-forced column survives the saved column settings restored by bootstrap', async () => {
+	// bootstrap() yields on a dynamic import before it restores saved settings,
+	// while the message listener is live from module evaluation — so the host's
+	// pending switchTab preset routinely lands first and the restore replaces the
+	// whole column Set. Without re-applying, a user who had hidden the Context
+	// column lands on a near-limit-filtered table with no fill percentage on it.
+	const stats = buildStats() as any;
+	const baseSession = {
+		interactions: 10, toolCalls: 5, inputTokens: 1000, outputTokens: 500, thinkingTokens: 0,
+		cachedTokens: 0, totalTokens: 1500, estimatedCost: 0.5, lastActivity: '2026-09-06T11:00:00.000Z',
+		editor: 'Copilot CLI (App)', models: ['gpt-5.6-terra'],
+	};
+	const sessions = [
+		{ ...baseSession, title: 'Near limit', filePath: 'a.jsonl', contextWindowLimit: 200000, contextReachedTokens: 190000 },
+		{ ...baseSession, title: 'Plenty of room', filePath: 'b.jsonl', contextWindowLimit: 200000, contextReachedTokens: 40000 },
+	];
+	stats.todaySessions = sessions;
+	// The preset switches to the 30-day lookback, which renders from this cache.
+	stats.recentSessions = { last7: sessions, last30: sessions, currentMonth: sessions };
+	// Saved settings from a user who had hidden the Context column.
+	stats.sessionColumnSettings = { enabledColumns: ['interactions', 'totalTokens', 'editor', 'lastActivity'] };
+
+	const harness = await bootWebview(
+		stats,
+		{ command: 'switchTab', tab: 'sessions', sessionsPreset: { filter: 'nearContextLimit', lookback: 'last30' } },
+	);
+	const doc = harness.window.document;
+
+	assert.equal(doc.querySelector('#sessions-columns-menu input[data-column="contextFill"]')?.checked, true,
+		'the preset\'s column must survive the saved settings restored after it arrived');
+	const headers = [...doc.querySelectorAll('.sessions-table thead th')].map((th: any) => th.textContent.replace(/[▼▲]/g, '').trim());
+	assert.ok(headers.includes('Context'), `the Context column is visible; got ${headers.join(', ')}`);
 });
 
 test('renders cloud agent session results', async () => {

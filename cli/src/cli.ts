@@ -15,6 +15,7 @@ import { usageAnalysisCommand } from './commands/usage-analysis';
 import { allCommand } from './commands/all';
 import { segmentCommand } from './commands/segment';
 import { curationCommand } from './commands/curation';
+import { memoryFilesCommand } from './commands/memory-files';
 import { loadCache, saveCache, disableCache } from './helpers';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -50,5 +51,6 @@ program.addCommand(usageAnalysisCommand);
 program.addCommand(allCommand);
 program.addCommand(segmentCommand);
 program.addCommand(curationCommand);
+program.addCommand(memoryFilesCommand);
 
 program.parse();

@@ -10,6 +10,7 @@ import type { TaskCategory, TaskCategoryBreakdown } from './taskClassification';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { toLocalDayKey } from './utils/dayKeys';
 import { getCustomProviderGroup } from './webview/shared/modelUtils';
+import { getTimeWindowStartDate } from './timeWindows';
 
 /**
  * Editor display names that bill through GitHub Copilot's AI-Credit system.
@@ -373,6 +374,15 @@ lastMonthStartMs: number;
  * All calculations use the local timezone so that "today", "this month", and
  * "last 30 days" reflect the user's local clock rather than UTC. This prevents
  * counters from resetting at UTC midnight for users in non-UTC timezones.
+ *
+ * The 30-day window is derived from `getTimeWindowStartDate('last30', now)` —
+ * the same helper the Recent Sessions lookback selector and the chart's rolling
+ * windows use — rather than reimplementing "N days back" here. The two used to
+ * disagree by one day (this function started the window at `now - 30`, that
+ * helper at `now - 30 + 1`, i.e. 31 vs. 30 calendar dates), so a session active
+ * exactly on the older boundary day could be counted in a "Last 30 Days" total
+ * without appearing in a same-labelled Recent Sessions list. Sharing one
+ * implementation makes that class of drift impossible instead of merely tested.
  */
 export function computeUtcDateRanges(now: Date): UtcDateRanges {
 const todayUtcKey = toLocalDayKey(now);
@@ -383,7 +393,9 @@ const lastMonthLastDay = new Date(now.getFullYear(), now.getMonth(), 0); // day 
 const lastMonthUtcEndKey = toLocalDayKey(lastMonthLastDay);
 const lastMonthUtcStartKey = toLocalDayKey(new Date(lastMonthLastDay.getFullYear(), lastMonthLastDay.getMonth(), 1));
 
-const last30DaysStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+// Non-null assertion: 'last30' is always defined in ROLLING_WINDOW_DAYS, so
+// getTimeWindowStartDate only returns null for 'allTime'/an unknown window.
+const last30DaysStart = getTimeWindowStartDate('last30', now)!;
 const last30DaysUtcStartKey = toLocalDayKey(last30DaysStart);
 const last30DaysStartMs = last30DaysStart.getTime();
 
