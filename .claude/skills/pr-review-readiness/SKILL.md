@@ -12,8 +12,12 @@ that checks a PR seconds after a push can see stale or incomplete review state
 and conclude "no findings" when the review simply hasn't posted yet, or act on
 comments left against an older commit.
 
-This is a lookup skill, not a workflow: run the check, get one of three
-answers, act accordingly.
+This is a lookup skill, not a workflow: run the check, get one of the
+outcomes below — one **safe-to-act** outcome, and several distinct
+**not-ready** outcomes (still running, a draft or dismissed review, a failed
+or cancelled run, inconclusive pagination) that all mean the same thing in
+practice — don't act yet — but for different reasons worth telling apart
+when you're deciding whether to reschedule, investigate, or just retry.
 
 ## When to Use This Skill
 
@@ -107,9 +111,18 @@ fallback and work anywhere.
    happened to inspect an older completed-and-successful entry while a
    newer rerun is still non-terminal would otherwise pass the gate on stale
    grounds). Only once every matching run is `completed` do you pick one to
-   evaluate — the newest by `started_at` (check runs don't expose a
-   `created_at`; `started_at`/`completed_at` are the timestamps actually
-   returned).
+   evaluate — the newest one. Check runs don't expose a `created_at`, so use
+   `started_at` for that ordering, but `started_at` is **not guaranteed
+   present on a completed run**: a run can be `completed` with
+   `conclusion: "cancelled"` (or `"skipped"`) without ever having started,
+   leaving `started_at` null. Fall back to `completed_at` when `started_at`
+   is missing on a given run (every completed run has one). If a matching
+   run has neither timestamp — which shouldn't happen for a genuinely
+   `completed` run, but the API is the API — don't guess an order: **fail
+   closed** and treat the state as inconclusive/not-ready rather than
+   silently picking an arbitrary one, since ordering by a missing timestamp
+   is exactly how an older successful run gets selected over a newer
+   cancelled one.
 
    **Name alone doesn't prove origin.** A check run named
    `copilot-pull-request-reviewer` is strong evidence but not authenticated
