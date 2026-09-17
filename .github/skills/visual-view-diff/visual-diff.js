@@ -147,8 +147,6 @@ function writeBaselineRegistry(worktreeDir, outRoot) {
 	// every real before/after comparison.
 	let base = null;
 	if (fs.existsSync(path.join(baseSkillDir, 'views.config.json'))) {
-	let base = null;
-	if (fs.existsSync(path.join(baseSkillDir, 'views.config.json'))) {
 		base = readConfig(baseSkillDir);
 	}
 	}
