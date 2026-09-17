@@ -352,6 +352,7 @@ import {
 	getRepoPrCachePath,
 	isRealRepoPrSnapshot,
 	isRepoPrEnvelopeUsable,
+	shouldPublishRepoPrStats,
 	readRepoPrSnapshot,
 	shouldPreserveRepoPrSnapshotForEmptyDiscovery,
 	writeRepoPrSnapshot,
@@ -3498,7 +3499,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// and publishing it would repopulate both the Repository PRs tab and the Efficiency Value
 		// cards that the sign-out just cleared. The guard in maybeRefreshRepoPrStats() only covers
 		// refreshes that have not started yet, so drop the late result here.
-		if (result.authenticated && this._githubSignedOutByUser) {
+		if (!shouldPublishRepoPrStats(result, this._githubSignedOutByUser)) {
 			this.log('🔎 Dropping an authenticated repository PR result — the user signed out while it was in flight');
 			return;
 		}

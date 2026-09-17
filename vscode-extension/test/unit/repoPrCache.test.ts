@@ -13,6 +13,7 @@ import {
 	nextRepoPrRefreshAt,
 	readRepoPrSnapshot,
 	shouldPreserveRepoPrSnapshotForEmptyDiscovery,
+	shouldPublishRepoPrStats,
 	writeRepoPrSnapshot,
 	type RepoPrCacheEnvelope,
 } from '../../src/repoPrCache';
@@ -176,4 +177,24 @@ test('isRealRepoPrSnapshot: a populated repo list counts without a fetch timesta
 	// "never loaded" hint.
 	const repo = { owner: 'a', repo: 'b', repoUrl: 'https://github.com/a/b', totalPrs: 3, aiAuthoredPrs: 1, aiReviewRequestedPrs: 0, aiDetails: [] };
 	assert.equal(isRealRepoPrSnapshot({ repos: [repo], fetchedAt: undefined }), true);
+});
+
+// ── shouldPublishRepoPrStats ─────────────────────────────────────────────────
+// The other half of "which snapshots may reach the Value cards": a refresh that was already in
+// flight when the user signed out finishes with an authenticated result the signed-out check at
+// the *start* of a refresh cannot see.
+
+test('shouldPublishRepoPrStats: an authenticated result is dropped once the user signed out', () => {
+	assert.equal(shouldPublishRepoPrStats(makeResult({ authenticated: true }), true), false);
+});
+
+test('shouldPublishRepoPrStats: the sign-out\'s own unauthenticated result still publishes', () => {
+	// Sign-out sets the flag *before* publishing its empty snapshot, so dropping on the flag alone
+	// would leave the cards showing pre-sign-out numbers — the opposite of the intent.
+	assert.equal(shouldPublishRepoPrStats(makeResult({ authenticated: false }), true), true);
+});
+
+test('shouldPublishRepoPrStats: nothing is dropped while signed in', () => {
+	assert.equal(shouldPublishRepoPrStats(makeResult({ authenticated: true }), false), true);
+	assert.equal(shouldPublishRepoPrStats(makeResult({ authenticated: false }), false), true);
 });

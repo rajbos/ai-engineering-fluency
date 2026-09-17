@@ -121,6 +121,24 @@ export function isRealRepoPrSnapshot(
 	return Boolean(result.fetchedAt) || (Array.isArray(result.repos) && result.repos.length > 0);
 }
 
+/**
+ * Whether a freshly collected Repository PR result may still be published.
+ *
+ * Sits beside {@link isRealRepoPrSnapshot} on purpose: between them they decide which snapshots
+ * are allowed to reach the Repository PRs tab and the Efficiency view's Value cards.
+ *
+ * A refresh already in flight when the user signs out finishes with an authenticated result — the
+ * signed-out check that gates *starting* a refresh cannot see it — and publishing that result
+ * would repopulate the very cards the sign-out just cleared. The unauthenticated result the
+ * sign-out itself publishes is unaffected: only authenticated ones are dropped.
+ */
+export function shouldPublishRepoPrStats(
+	result: Pick<RepoPrStatsResult, 'authenticated'>,
+	signedOutByUser: boolean,
+): boolean {
+	return !(result.authenticated && signedOutByUser);
+}
+
 /** When the next refresh becomes due, as an ISO timestamp (undefined when it is due now). */
 export function nextRepoPrRefreshAt(
 	fetchedAt: string | undefined,
