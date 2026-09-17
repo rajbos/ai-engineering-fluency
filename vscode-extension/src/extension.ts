@@ -1093,8 +1093,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		2_000,
 		(error) => this.warn(`Efficiency message delivery failed: ${error}`),
 	);
-	/** The data the live Efficiency document was rendered with; the base for Value-only updates. */
-	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
 	private whatsNewPanel: vscode.WebviewPanel | undefined;
 	/** What the user has already been told about; see `src/whatsNew/announcer.ts`. */
 	private _whatsNewState: WhatsNewState = { ...EMPTY_WHATS_NEW_STATE };
@@ -1104,7 +1102,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _whatsNewReady: Promise<void> | undefined;
 	/** Memoized per-session efficiency inputs; cleared wherever the daily/usage stat caches are. */
 	private lastEfficiencySessionInputs: EfficiencySessionInput[] | undefined;
-	/** Last successfully rendered Efficiency payload, restored if a refresh build fails. */
+	/**
+	 * Last successfully rendered Efficiency payload — restored if a refresh build fails, and the
+	 * base for Value-only updates.
+	 */
 	private _lastEfficiencyViewData: EfficiencyViewData | undefined;
 	/** Bumped whenever the computed stat caches are invalidated; see recordEfficiencyPayload(). */
 	private _cacheGeneration = 0;
