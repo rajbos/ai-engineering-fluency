@@ -3,7 +3,7 @@ import { el, setHtml } from '../shared/domUtils';
 import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
-import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
+import { escapeHtml, formatAbsoluteDate, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
 import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
@@ -16,7 +16,7 @@ import {
 // Imported from the shared contract rather than re-declared locally, so a shape
 // change in src/types.ts surfaces here as a type error instead of silently
 // drifting out of sync with what the extension host actually sends.
-import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats } from '../../../../src/types';
+import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysisView } from '../../../../src/types';
 import { CONTEXT_NEAR_LIMIT_RATIO } from '../../../../src/types';
 import { getSessionContextFillPercent, isSessionNearContextLimit } from '../../../../src/utils/contextFill';
 
@@ -220,6 +220,8 @@ type UsageAnalysisStats = {
 	/** Repeated-task candidates (skill suggestions). Null when no repeated task was found. */
 	repeatedTasks?: RepeatedTaskReport | null;
 	curationAnalysis?: ToolCurationAnalysis | null;
+	/** Compact projection of the memory-files hygiene analysis (counts/rollup scalars only — no per-file paths). Null when none found. */
+	memoryFilesAnalysis?: MemoryFilesAnalysisView | null;
 	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
 	sessionColumnSettings?: { enabledColumns?: string[] };
 	/** Copilot API quota balance snapshot (available when the extension has fetched quota data). */
@@ -440,6 +442,8 @@ let currentCorrectionReport: CorrectionReport | null | undefined = undefined;
 // Persisted across stats refreshes so the curation section doesn't disappear
 // when a periodic updateStats message omits curationAnalysis.
 let currentCurationAnalysis: ToolCurationAnalysis | null = null;
+// Same rationale for the memory-files hygiene analysis.
+let currentMemoryFilesAnalysis: MemoryFilesAnalysisView | null = null;
 
 type WorktreeResult = {
 	path: string;
@@ -1918,6 +1922,31 @@ function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null 
 	};
 }
 
+/** Normalize an optional memory-files hygiene analysis (compact webview projection: counts/rollup scalars only) so rendering never throws on a partial payload. */
+function _sanitizeMemoryFilesAnalysis(raw: unknown): MemoryFilesAnalysisView | null {
+	if (!raw || typeof raw !== 'object') { return null; }
+	const ma = raw as Partial<MemoryFilesAnalysisView>;
+	if (!Array.isArray(ma.byWorkspace)) { return null; }
+	return {
+		staleDays: typeof ma.staleDays === 'number' ? ma.staleDays : 90,
+		largeFileBytes: typeof ma.largeFileBytes === 'number' ? ma.largeFileBytes : 10 * 1024,
+		byWorkspace: ma.byWorkspace.map(ws => ({
+			workspaceHash: ws?.workspaceHash,
+			workspaceName: ws?.workspaceName,
+			repoCount: typeof ws?.repoCount === 'number' ? ws.repoCount : 0,
+			sessionCount: typeof ws?.sessionCount === 'number' ? ws.sessionCount : 0,
+			userCount: typeof ws?.userCount === 'number' ? ws.userCount : 0,
+			totalBytes: typeof ws?.totalBytes === 'number' ? ws.totalBytes : 0,
+			newestMtimeMs: typeof ws?.newestMtimeMs === 'number' ? ws.newestMtimeMs : null,
+			staleFileCount: typeof ws?.staleFileCount === 'number' ? ws.staleFileCount : 0,
+		})),
+		totalFiles: typeof ma.totalFiles === 'number' ? ma.totalFiles : 0,
+		totalBytes: typeof ma.totalBytes === 'number' ? ma.totalBytes : 0,
+		staleFileCount: typeof ma.staleFileCount === 'number' ? ma.staleFileCount : 0,
+		largeFileCount: typeof ma.largeFileCount === 'number' ? ma.largeFileCount : 0,
+	};
+}
+
 /** Sanitize the optional correction/repeated-task reports onto the stats object. */
 function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void {
 	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'correctionReport')) {
@@ -1940,6 +1969,17 @@ function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
 			last30: TodaySessionSummary[];
 			currentMonth: TodaySessionSummary[];
 		};
+	}
+}
+
+/** Pass through the memory-files hygiene analysis (compact `MemoryFilesAnalysisView` rollup:
+ * counts/rollup scalars only — no paths and no per-file metadata) onto sanitized stats.
+ * Only assigns when the raw payload explicitly includes the key — omitting it (e.g. a partial/silent
+ * refresh) must not clobber a previously-cached value, so we don't default to `null` here. Whether the
+ * field was explicitly `null` (all files gone) vs. omitted (no change) is resolved in `handleUpdateStats`. */
+function applyMemoryFilesAnalysis(sanitized: UsageAnalysisStats, raw: any): void {
+	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'memoryFilesAnalysis')) {
+		sanitized.memoryFilesAnalysis = _sanitizeMemoryFilesAnalysis(raw.memoryFilesAnalysis);
 	}
 }
 
@@ -2003,6 +2043,10 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 		} else {
 			traceCurationOnce('sanitize-no-curation', 'sanitizeStats.curation.missing');
 		}
+
+		// Pass through the memory-files hygiene analysis (compact MemoryFilesAnalysisView
+		// rollup: counts/rollup scalars only — no paths and no per-file metadata).
+		applyMemoryFilesAnalysis(sanitized, raw);
 
 		// Pass through the Copilot API quota balance and current-month billing costs.
 		// Without this, periodic updateStats refreshes rebuild the stats object without
@@ -3424,6 +3468,71 @@ function buildBuiltinToolsHtml(builtinTools: AvailableToolEntry[], bloat: ToolCu
 			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">💡 These tools are provided by VS Code itself and cannot be disabled. They are excluded from the actionable overhead total above.</div>
 		</div>
 	</details>`;
+}
+
+function buildMemoryFilesSectionHtml(analysis: MemoryFilesAnalysisView | null | undefined): string {
+	try {
+		if (!analysis || analysis.totalFiles === 0) { return ''; }
+
+		const rows = analysis.byWorkspace
+			.slice()
+			.sort((a, b) => b.totalBytes - a.totalBytes)
+			.map(ws => {
+				// The __user__ bucket is the only one that ever carries userCount > 0; its
+				// data-layer workspaceName ("User (global)", used verbatim by the CLI report)
+				// is not localized, so render the localized label here instead.
+				const name = ws.userCount > 0
+					? escapeHtml(localize('memoryFiles.globalWorkspaceLabel'))
+					: escapeHtml(ws.workspaceName ?? ws.workspaceHash ?? localize('memoryFiles.unknownWorkspace'));
+				const staleCount = ws.staleFileCount;
+				// newestMtimeMs is nullable (no files at all), not merely falsy — a real epoch
+				// timestamp of 0 must still be formatted, not treated as "no data".
+				const newest = ws.newestMtimeMs !== null ? formatAbsoluteDate(ws.newestMtimeMs) : '—';
+				return `<tr style="border-bottom:1px solid var(--border-color);">
+					<td style="padding:5px 8px; color:var(--text-primary);">${name}</td>
+					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${ws.repoCount}</td>
+					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${ws.sessionCount}</td>
+					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${ws.userCount}</td>
+					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${formatFileSize(ws.totalBytes)}</td>
+					<td style="padding:5px 8px; text-align:right; color:${staleCount > 0 ? 'var(--vscode-editorWarning-foreground, #cca700)' : 'var(--text-primary)'};">${staleCount}</td>
+					<td style="padding:5px 8px; text-align:right; color:var(--text-primary);">${newest}</td>
+				</tr>`;
+			})
+			.join('');
+
+		return `
+			<!-- Memory Files Section -->
+			<div id="section-memory-files" class="section">
+				<div class="section-title"><span>🦉</span><span>${escapeHtml(localize('memoryFiles.sectionTitle'))}</span></div>
+				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">${escapeHtml(localize('memoryFiles.sectionSubtitle'))}</div>
+				<div style="margin-bottom:8px; font-size:13px; color:var(--text-primary);">
+					${escapeHtml(localizeFormat('memoryFiles.summary', formatNumber(analysis.totalFiles), formatFileSize(analysis.totalBytes)))}
+					${analysis.staleFileCount > 0 ? ` · <span style="color:var(--vscode-editorWarning-foreground, #cca700);">${escapeHtml(localizeFormat('memoryFiles.staleSummary', analysis.staleFileCount, analysis.staleDays))}</span>` : ''}
+					${analysis.largeFileCount > 0 ? ` · <span style="color:var(--vscode-editorWarning-foreground, #cca700);">${escapeHtml(localizeFormat('memoryFiles.largeSummary', analysis.largeFileCount, Math.round(analysis.largeFileBytes / 1024)))}</span>` : ''}
+				</div>
+				<div style="overflow-x:auto;">
+					<table style="width:100%; border-collapse:collapse; font-size:12px;">
+						<thead><tr style="border-bottom:1px solid var(--border-color);">
+							<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.workspace'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.repo'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.session'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.global'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.size'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.stale'))}</th>
+							<th style="padding:5px 8px; text-align:right; color:var(--text-primary); font-weight:600;">${escapeHtml(localize('memoryFiles.table.lastUpdated'))}</th>
+						</tr></thead>
+						<tbody>${rows}</tbody>
+					</table>
+				</div>
+			</div>`;
+	} catch (error) {
+		console.error(`[usage-webview] buildMemoryFilesSectionHtml failed: ${error instanceof Error ? error.message : String(error)}`);
+		return `
+			<div id="section-memory-files" class="section">
+				<div class="section-title"><span>🦉</span><span>${escapeHtml(localize('memoryFiles.sectionTitle'))}</span></div>
+				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">${escapeHtml(localize('memoryFiles.renderError'))}</div>
+			</div>`;
+	}
 }
 
 function buildCurationSectionHtml(curation: ToolCurationAnalysis | null | undefined): string {
@@ -5550,6 +5659,7 @@ function buildToolsTabPanelHtml(
 
 			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
 			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
+			${buildMemoryFilesSectionHtml(currentMemoryFilesAnalysis ?? stats.memoryFilesAnalysis)}
 			${buildSkillSuggestionsSectionHtml(stats.repeatedTasks ?? null)}
 			<!-- Multi-Model Usage Section -->
 			<div class="section">
@@ -5612,6 +5722,10 @@ function syncRenderLayoutState(stats: UsageAnalysisStats): WorkspaceCustomizatio
 	} else {
 		traceCurationOnce('render-no-curation-update', 'renderLayout.curation.notProvidedInUpdate');
 	}
+	// Persist memory-files analysis across refreshes for the same reason. Whether the field was
+	// omitted (keep cache) vs. explicitly cleared to null (all files gone) is resolved upstream in
+	// handleUpdateStats before this runs, so a plain overwrite here is safe either way.
+	currentMemoryFilesAnalysis = stats.memoryFilesAnalysis ?? null;
 	return matrix;
 }
 
@@ -5842,6 +5956,9 @@ function handleUpdateStats(message: any): void {
 		_ulLoadingActive = false;
 		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'correctionReport')) {
 			sanitized.correctionReport = currentCorrectionReport;
+		}
+		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'memoryFilesAnalysis')) {
+			sanitized.memoryFilesAnalysis = currentMemoryFilesAnalysis;
 		}
 		// CLI-backed hosts include all buckets; VS Code omits them and keeps using lazy loading.
 		replaceRecentSessionsCache(sanitized.recentSessions);

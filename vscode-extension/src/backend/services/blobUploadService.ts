@@ -44,7 +44,8 @@ export interface IBlobUploadService {
 		credential: TokenCredential | StorageSharedKeyCredential,
 		sessionFiles: string[],
 		machineId: string,
-		datasetId: string
+		datasetId: string,
+		editorTypeByFile?: Map<string, string>
 	): Promise<{ success: boolean; filesUploaded: number; message: string }>;
 	shouldUpload(machineId: string, settings: BlobUploadSettings): boolean;
 	getUploadStatus(machineId: string): UploadStatus | undefined;
@@ -130,7 +131,8 @@ export class BlobUploadService {
 		credential: TokenCredential | StorageSharedKeyCredential,
 		sessionFiles: string[],
 		machineId: string,
-		datasetId: string
+		datasetId: string,
+		editorTypeByFile?: Map<string, string>
 	): Promise<{ success: boolean; filesUploaded: number; message: string }> {
 		try {
 			if (!settings.enabled) {
@@ -148,7 +150,7 @@ export class BlobUploadService {
 			}
 
 			const containerClient = await this.getContainerClient(storageAccount, settings.containerName, credential);
-			const result = await this.uploadAllFiles(containerClient, sessionFiles, machineId, datasetId, settings.compressFiles, credential);
+			const result = await this.uploadAllFiles(containerClient, sessionFiles, machineId, datasetId, settings.compressFiles, credential, editorTypeByFile);
 
 			if (result.earlyReturn) { return result.earlyReturn; }
 
@@ -181,13 +183,15 @@ export class BlobUploadService {
 		machineId: string,
 		datasetId: string,
 		compress: boolean,
-		credential: TokenCredential | StorageSharedKeyCredential
+		credential: TokenCredential | StorageSharedKeyCredential,
+		editorTypeByFile?: Map<string, string>
 	): Promise<{ filesUploaded: number; errors: string[]; earlyReturn?: { success: boolean; filesUploaded: number; message: string } }> {
 		let filesUploaded = 0;
 		const errors: string[] = [];
 		for (const sessionFile of sessionFiles) {
 			try {
-				await this.uploadFile(containerClient, sessionFile, machineId, datasetId, compress);
+				const editorType = editorTypeByFile?.get(sessionFile);
+				await this.uploadFile(containerClient, sessionFile, machineId, datasetId, compress, editorType);
 				filesUploaded++;
 			} catch (error: unknown) {
 				const fileName = path.basename(sessionFile);
@@ -218,7 +222,8 @@ export class BlobUploadService {
 		sessionFilePath: string,
 		machineId: string,
 		datasetId: string,
-		compress: boolean
+		compress: boolean,
+		editorType?: string
 	): Promise<void> {
 		const fileName = path.basename(sessionFilePath);
 		// Open once and stat/read the same file handle (not the path) so the
@@ -251,7 +256,8 @@ export class BlobUploadService {
 				machineId: machineId, // Full machine ID (Azure metadata supports up to 8KB)
 				datasetId: datasetId,
 				uploadedAt: new Date().toISOString(),
-				compressed: compress.toString()
+				compressed: compress.toString(),
+				...(editorType ? { editorType } : {})
 			}
 		});
 	}

@@ -2,7 +2,7 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import { INSIGHT_CATALOG, evaluateInsights } from '../../src/insightsEngine';
 import type { InsightContext } from '../../src/insightsEngine';
-import type { ToolCurationAnalysis, UsageAnalysisPeriod } from '../../../src/types';
+import type { ToolCurationAnalysis, UsageAnalysisPeriod, MemoryFilesAnalysis } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -360,6 +360,59 @@ test('stale-skills: does not fire when no unused skills exist', () => {
 	const results = evaluateInsights(ctx, {}, 7, null);
 	const insight = results.find(i => i.id === STALE_SKILLS_ID);
 	assert.equal(insight, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// stale-memory-files insight tests
+// ---------------------------------------------------------------------------
+
+const STALE_MEMORY_FILES_ID = 'stale-memory-files';
+
+function makeMemoryFilesCtx(overrides: Partial<MemoryFilesAnalysis>): InsightContext {
+	return {
+		today: emptyPeriod(),
+		last30Days: emptyPeriod(),
+		missedPotential: [],
+		memoryFilesAnalysis: {
+			staleDays: 90,
+			largeFileBytes: 10 * 1024,
+			files: [],
+			byWorkspace: [],
+			totalFiles: 0,
+			totalBytes: 0,
+			staleFileCount: 0,
+			largeFileCount: 0,
+			...overrides,
+		},
+	};
+}
+
+test('stale-memory-files: fires when there are stale memory files', () => {
+	const ctx = makeMemoryFilesCtx({ staleFileCount: 2, totalFiles: 2 });
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === STALE_MEMORY_FILES_ID);
+	assert.ok(insight, 'stale-memory-files should trigger with stale files present');
+});
+
+test('stale-memory-files: fires when there are unusually large memory files', () => {
+	const ctx = makeMemoryFilesCtx({ largeFileCount: 1, totalFiles: 1 });
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === STALE_MEMORY_FILES_ID);
+	assert.ok(insight, 'stale-memory-files should trigger with a large file present');
+});
+
+test('stale-memory-files: does not fire when analysis is clean', () => {
+	const ctx = makeMemoryFilesCtx({ totalFiles: 3 });
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === STALE_MEMORY_FILES_ID);
+	assert.equal(insight, undefined);
+});
+
+test('stale-memory-files: does not fire without memoryFilesAnalysis in context', () => {
+	const insight = evaluateInsights(makeCtx(), {}, 7, null).find(i => i.id === STALE_MEMORY_FILES_ID);
+	assert.equal(insight, undefined);
+});
+
+test('stale-memory-files: has category=customization', () => {
+	const def = INSIGHT_CATALOG.find(d => d.id === STALE_MEMORY_FILES_ID);
+	assert.equal(def?.category, 'customization');
 });
 
 // ---------------------------------------------------------------------------

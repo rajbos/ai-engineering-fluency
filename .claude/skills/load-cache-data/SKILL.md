@@ -152,63 +152,77 @@ Since the extension stores cache in VS Code's globalState (internal SQLite datab
 
 ## Cache Management Methods
 
-### Loading Cache
-**Method**: `loadCacheFromStorage()`
-**Location**: `src/extension.ts` (lines 336-350)
+All cache persistence and validation logic lives in `CacheManager`
+(`src/cacheManager.ts`), not `extension.ts` — `extension.ts` only holds a thin
+`private trySaveCacheToStorage()` wrapper that delegates to it.
 
-Loads the cache from VS Code's global state on extension activation:
+### Loading Cache
+**Method**: `CacheManager.loadCacheFromStorage()`
+**Location**: `src/cacheManager.ts`
+
+Loads the cache from the shared on-disk snapshot file (not VS Code's global
+state — the cache moved off `globalState` to avoid its ~2-3 MB size warning):
 ```typescript
-const cacheData = this.context.globalState.get<Record<string, SessionFileCache>>('sessionFileCache');
-if (cacheData) {
-  this.sessionFileCache = new Map(Object.entries(cacheData));
-}
+const snapshotPath = this.getSharedSnapshotPath(); // globalStorageUri/cache_<id>.snapshot.json
+const content = await fs.promises.readFile(snapshotPath, 'utf-8');
+const envelope = JSON.parse(content);
+// ...validates schema/cache version, then populates this.sessionFileCache
 ```
 
 ### Saving Cache
-**Method**: `saveCacheToStorage()`
-**Location**: `src/extension.ts` (lines 352-360)
+**Method**: `CacheManager.trySaveCacheToStorage()`
+**Location**: `src/cacheManager.ts`
 
-Saves the cache to VS Code's global state:
+Writes the shared on-disk snapshot, guarded by a cross-window file lock so
+concurrent VS Code windows never corrupt each other's write. Returns `false`
+(never throws) when the lock is held by another window or the write fails,
+so callers can tell "skipped/failed" from "persisted":
 ```typescript
-const cacheData = Object.fromEntries(this.sessionFileCache);
-await this.context.globalState.update('sessionFileCache', cacheData);
+async trySaveCacheToStorage(): Promise<boolean> {
+  const acquired = await this.acquireCacheLock();
+  if (!acquired) { return false; } // another window holds the lock
+  try { return await this.writeSharedSnapshot(); }
+  finally { await this.releaseCacheLock(); }
+}
 ```
 
 ### Cache Validation
-**Method**: `isCacheValid()`
-**Location**: `src/extension.ts` (lines 285-290)
+**Method**: `CacheManager.isCacheValid()`
+**Location**: `src/cacheManager.ts`
 
-Validates cache entries by comparing modification times:
+Validates cache entries by comparing both modification time and file size:
 ```typescript
-private isCacheValid(filePath: string, currentMtime: number): boolean {
+isCacheValid(filePath: string, currentMtime: number, currentSize: number): boolean {
   const cached = this.sessionFileCache.get(filePath);
-  return cached !== undefined && cached.mtime === currentMtime;
+  if (!cached) { return false; }
+  return this.policy.isValid(cached, currentMtime, currentSize);
 }
 ```
 
 ### Clearing Cache
-**Method**: `clearExpiredCache()`
-**Location**: `src/extension.ts` (lines 308-333)
+**Method**: `CacheManager.clearExpiredCache()`
+**Location**: `src/cacheManager.ts`
 
-Removes cache entries for files that no longer exist:
+Removes cache entries for files that no longer exist on disk (batched,
+async, and skips virtual session paths like `<db-file>#<session-id>` that
+`fs.access()` can't validate):
 ```typescript
-const sessionFiles = await this.getCopilotSessionFiles();
-const validPaths = new Set(sessionFiles);
-for (const [filePath, _] of this.sessionFileCache) {
-  if (!validPaths.has(filePath)) {
-    this.sessionFileCache.delete(filePath);
-  }
+const filesToCheck = Array.from(this.sessionFileCache.keys());
+for (const filePath of filesToCheck) {
+  if (CacheManager.isVirtualSessionPath(filePath)) { continue; }
+  try { await fs.promises.access(filePath); }
+  catch { /* only ENOENT/ENOTDIR tombstone the entry — see the method's own doc comment */ }
 }
 ```
 
 ## Cache Entry Lifecycle
 
 1. **Session File Discovery**: Extension finds session files via `getCopilotSessionFiles()`
-2. **Cache Check**: For each file, checks if cache is valid via `isCacheValid()`
+2. **Cache Check**: For each file, checks if cache is valid via `CacheManager.isCacheValid()`
 3. **Read or Compute**: If valid, uses cache; otherwise, reads and parses the file
-4. **Cache Update**: New statistics are stored in cache via `setCachedSessionData()`
-5. **Persistence**: Cache is saved to global state via `saveCacheToStorage()`
-6. **Cleanup**: Expired entries are removed via `clearExpiredCache()`
+4. **Cache Update**: New statistics are stored in cache via `CacheManager.setCachedSessionData()`
+5. **Persistence**: Cache is saved to the shared on-disk snapshot via `CacheManager.trySaveCacheToStorage()` (periodically, and unconditionally at the end of a leader refresh)
+6. **Cleanup**: Expired entries are removed via `CacheManager.clearExpiredCache()`
 
 ## Example Use Cases
 
