@@ -984,5 +984,10 @@
         "staleFileCount": 0
       }
     ]
+  },
+  "claudeDesktopCoverage": {
+    "knownSessions": 145,
+    "withTranscript": 76,
+    "missingTranscript": 69
   }
 }

@@ -228,6 +228,12 @@ type UsageAnalysisStats = {
 	copilotApiBalance?: CopilotApiBalance | null;
 	/** Current-month billing group costs in USD from the extension's local session tracking. */
 	monthBillingGroupCosts?: Record<string, number> | null;
+	/**
+	 * How many Claude Desktop sessions have a transcript this machine can actually read. Drives the
+	 * note explaining why Claude Desktop's own session list is longer than this table. Null/absent
+	 * when no Claude Desktop sessions exist here.
+	 */
+	claudeDesktopCoverage?: { knownSessions: number; withTranscript: number; missingTranscript: number } | null;
 };
 
 // ── Tool Curation types ──────────────────────────────────────────────────────
@@ -1976,6 +1982,20 @@ function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
 			currentMonth: TodaySessionSummary[];
 		};
 	}
+	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'claudeDesktopCoverage')) {
+		sanitized.claudeDesktopCoverage = sanitizeClaudeDesktopCoverage(raw.claudeDesktopCoverage);
+	}
+}
+
+/** Validate the Claude Desktop coverage counts; returns null for any non-numeric or incoherent payload. */
+function sanitizeClaudeDesktopCoverage(raw: any): UsageAnalysisStats['claudeDesktopCoverage'] {
+	if (!raw || typeof raw !== 'object') { return null; }
+	const known = raw.knownSessions;
+	const withTranscript = raw.withTranscript;
+	const missing = raw.missingTranscript;
+	const valid = [known, withTranscript, missing].every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0);
+	if (!valid || withTranscript + missing !== known) { return null; }
+	return { knownSessions: known, withTranscript, missingTranscript: missing };
 }
 
 /** Pass through the memory-files hygiene analysis (compact `MemoryFilesAnalysisView` rollup:
@@ -4696,6 +4716,41 @@ function buildSubAgentSummaryHtml(sessions: TodaySessionSummary[]): string {
 	</div>`;
 }
 
+/**
+ * Note below the Recent Sessions header explaining why Claude Desktop's own session list is longer
+ * than this table. Claude Desktop keeps a lightweight record of every Cowork session, but the
+ * transcript this extension measures lives elsewhere and does not always exist on this machine:
+ * Claude Code prunes old transcripts on its own retention schedule, and cloud-run sessions never
+ * write one here. Those sessions can therefore never be counted — saying so with a real number is
+ * better than letting the difference read as missing data.
+ *
+ * Only rendered when there is actually a shortfall to explain.
+ */
+function buildClaudeDesktopCoverageHtml(coverage: UsageAnalysisStats['claudeDesktopCoverage']): string {
+	if (!coverage || coverage.missingTranscript <= 0) { return ''; }
+	const { knownSessions, missingTranscript } = coverage;
+	const tooltip = localize('usage.claudeDesktopCoverage.tooltip');
+	// Three sentence shapes, because both counts drive agreement and they move independently:
+	// one-of-one keeps the noun singular, one-of-many keeps the verb singular ("has … it"),
+	// and anything above one is fully plural ("have … they"). missingTranscript > 1 implies
+	// knownSessions > 1, so there is no fourth combination to cover.
+	let summaryKey = 'usage.claudeDesktopCoverage.summary.plural';
+	if (missingTranscript === 1) {
+		summaryKey = knownSessions === 1
+			? 'usage.claudeDesktopCoverage.summary.oneOfOne'
+			: 'usage.claudeDesktopCoverage.summary.singular';
+	}
+	// Bold only the missing count. The number is substituted after escaping via a sentinel the
+	// translated text can never contain, so the emphasis never depends on the two counts differing
+	// and never re-escapes the surrounding prose.
+	const boldSlot = '\u0001';
+	const summary = escapeHtml(localizeFormat(summaryKey, boldSlot, formatNumber(knownSessions)))
+		.replace(boldSlot, `<strong>${escapeHtml(formatNumber(missingTranscript))}</strong>`);
+	return `<div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">
+		<span title="${escapeHtml(tooltip)}" style="cursor:help;">🖥️ ${summary}<span style="font-size:0.75em; opacity:0.6;"> ℹ️</span></span>
+	</div>`;
+}
+
 function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 	// Guard against silent host updates that omit todaySessions (e.g. a stale payload
 	// shape): keep showing the last known sessions instead of clearing the table.
@@ -4717,6 +4772,7 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 				</div>
 				<div class="section-subtitle">Individual session breakdown for the selected period — sorted by number of interactions (most active first).</div>
 				${subAgentBanner}
+				${buildClaudeDesktopCoverageHtml(stats.claudeDesktopCoverage)}
 				<div id="sessions-panel-body" style="margin-top: 12px;">
 					${bodyHtml}
 				</div>

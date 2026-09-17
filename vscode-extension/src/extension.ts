@@ -54,6 +54,7 @@ import type {
   MissedPotentialWorkspace,
   UsageAnalysisStats,
   TodaySessionSummary,
+  ClaudeDesktopCoverage,
   CustomizationTypeStatus,
   WorkspaceCustomizationRow,
   WorkspaceCustomizationMatrix,
@@ -1011,6 +1012,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private continue_!: ContinueDataAccess;
 	private claudeCode!: ClaudeCodeDataAccess;
 	private claudeDesktop!: ClaudeDesktopDataAccess;
+	/** Cached Claude Desktop local-transcript coverage (see computeClaudeDesktopCoverage). */
+	private _claudeDesktopCoverage?: { value: ClaudeDesktopCoverage; computedAt: number };
 	private mistralVibe!: MistralVibeDataAccess;
 	private geminiCli!: GeminiCliDataAccess;
 	public windsurf!: WindsurfDataAccess;
@@ -5852,6 +5855,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'usage.sessions.contextFill.used': l10n.t('usage.sessions.contextFill.used'),
 			'usage.sessions.contextFill.usedNearLimit': l10n.t('usage.sessions.contextFill.usedNearLimit'),
 			'usage.sessions.contextFill.noData': l10n.t('usage.sessions.contextFill.noData'),
+			// Recent Sessions — Claude Desktop local-transcript coverage banner. The three
+			// summary variants cover the singular/plural agreement of both counts.
+			'usage.claudeDesktopCoverage.summary.oneOfOne': l10n.t('usage.claudeDesktopCoverage.summary.oneOfOne'),
+			'usage.claudeDesktopCoverage.summary.singular': l10n.t('usage.claudeDesktopCoverage.summary.singular'),
+			'usage.claudeDesktopCoverage.summary.plural': l10n.t('usage.claudeDesktopCoverage.summary.plural'),
+			'usage.claudeDesktopCoverage.tooltip': l10n.t('usage.claudeDesktopCoverage.tooltip'),
 		};
 	}
 
@@ -6493,10 +6502,35 @@ class CopilotTokenTracker implements vscode.Disposable {
 			agenticDailyTrend,
 			autoCompactionsLast7Days,
 			memoryFilesAnalysis: this.computeMemoryFilesAnalysis(startedAtGeneration),
+			claudeDesktopCoverage: await this.computeClaudeDesktopCoverage(),
 		};
 		this.lastUsageAnalysisStats = stats;
 		this._statsGeneration.usage = startedAtGeneration;
 		return stats;
+	}
+
+	/**
+	 * Measure how many of the Claude Desktop sessions Desktop itself still lists have a transcript
+	 * this extension can actually read, so the Recent Sessions view can explain — with a real number —
+	 * why Desktop's own session list is longer than the table below it.
+	 *
+	 * Cached for an hour: it reads ~150 small metadata files, which is cheap but pointless to repeat
+	 * on every refresh, and the underlying retention/cloud split moves on the order of days.
+	 */
+	private async computeClaudeDesktopCoverage(): Promise<ClaudeDesktopCoverage | undefined> {
+		const ttlMs = 60 * 60 * 1000;
+		if (this._claudeDesktopCoverage && Date.now() - this._claudeDesktopCoverage.computedAt < ttlMs) {
+			return this._claudeDesktopCoverage.value;
+		}
+		try {
+			const value = await this.claudeDesktop.getDesktopLocalCoverage(this.claudeCode.getClaudeCodeProjectsDir());
+			if (value.knownSessions === 0) { return undefined; }
+			this._claudeDesktopCoverage = { value, computedAt: Date.now() };
+			return value;
+		} catch (error) {
+			this.error('Error computing Claude Desktop local coverage:', error);
+			return undefined;
+		}
 	}
 
 	/**
@@ -10306,6 +10340,7 @@ private computeFallbackDailyRollup(
 			backendConfigured: this.isBackendConfigured(),
 			currentWorkspacePaths: workspacePaths,
 			todaySessions: analysisStats.todaySessions || [],
+			claudeDesktopCoverage: analysisStats.claudeDesktopCoverage ?? null,
 			insights: this.buildCurrentInsights(analysisStats),
 			correctionReport: analysisStats.correctionReport ?? null,
 			repeatedTasks: analysisStats.repeatedTasks ?? null,
@@ -15605,6 +15640,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
       suppressedUnknownTools,
       todaySessions: stats.todaySessions || [],
+      claudeDesktopCoverage: stats.claudeDesktopCoverage ?? null,
       use24HourTime: this.getUse24HourTimeSetting(),
       hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
       insights: this.buildCurrentInsights(stats),

@@ -831,3 +831,41 @@ test('l10n: Copilot Budget gauge keys resolve in zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: Claude Desktop coverage keys resolve in English', () => {
+	// Back the Recent Sessions banner that explains why Claude Desktop lists more
+	// sessions than this machine can measure. The three summary variants exist
+	// because both counts drive agreement independently.
+	assert.equal(
+		t('usage.claudeDesktopCoverage.summary.oneOfOne', '1', '1'),
+		'1 of 1 Claude Desktop session known to this machine has no local transcript left, so it cannot be measured here',
+	);
+	assert.equal(
+		t('usage.claudeDesktopCoverage.summary.singular', '1', '12'),
+		'1 of 12 Claude Desktop sessions known to this machine has no local transcript left, so it cannot be measured here',
+	);
+	assert.equal(
+		t('usage.claudeDesktopCoverage.summary.plural', '69', '145'),
+		'69 of 145 Claude Desktop sessions known to this machine have no local transcript left, so they cannot be measured here',
+	);
+	assert.match(t('usage.claudeDesktopCoverage.tooltip'), /cleanupPeriodDays/);
+	assert.match(t('usage.claudeDesktopCoverage.tooltip'), /never write a transcript to this machine/);
+});
+
+test('l10n: Claude Desktop coverage keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		// Chinese has no verb agreement, so all three variants share one phrasing —
+		// but each key must still resolve, or the banner renders a raw key.
+		for (const key of ['oneOfOne', 'singular', 'plural']) {
+			assert.equal(
+				t(`usage.claudeDesktopCoverage.summary.${key}`, '69', '145'),
+				'此计算机已知的 145 个 Claude Desktop 会话中，有 69 个已没有本地记录，因此无法在此处统计',
+				`zh-cn value for summary.${key}`,
+			);
+		}
+		assert.match(t('usage.claudeDesktopCoverage.tooltip'), /cleanupPeriodDays/);
+	} finally {
+		mock.setLanguage('en');
+	}
+});

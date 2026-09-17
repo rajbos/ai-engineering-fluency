@@ -40,6 +40,12 @@ export interface WebviewLocalization {
 	'usage.sessions.contextFill.usedNearLimit': string;
 	'usage.sessions.contextFill.noData': string;
 
+	// Usage view — Recent Sessions Claude Desktop coverage banner
+	'usage.claudeDesktopCoverage.summary.oneOfOne': string;
+	'usage.claudeDesktopCoverage.summary.singular': string;
+	'usage.claudeDesktopCoverage.summary.plural': string;
+	'usage.claudeDesktopCoverage.tooltip': string;
+
 	// Efficiency view — Cost Attribution model-mix table
 	'efficiency.modelMix.heading': string;
 	'efficiency.modelMix.caption': string;
@@ -207,6 +213,10 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'usage.sessions.contextFill.used': '{0} of {1} context tokens used',
 	'usage.sessions.contextFill.usedNearLimit': '{0} of {1} context tokens used — at or past {2}% of the window',
 	'usage.sessions.contextFill.noData': 'No context-window fill recorded for this session (only GitHub Copilot CLI sessions report one)',
+	'usage.claudeDesktopCoverage.summary.oneOfOne': '{0} of {1} Claude Desktop session known to this machine has no local transcript left, so it cannot be measured here',
+	'usage.claudeDesktopCoverage.summary.singular': '{0} of {1} Claude Desktop sessions known to this machine has no local transcript left, so it cannot be measured here',
+	'usage.claudeDesktopCoverage.summary.plural': '{0} of {1} Claude Desktop sessions known to this machine have no local transcript left, so they cannot be measured here',
+	'usage.claudeDesktopCoverage.tooltip': 'Claude Desktop lists every session it knows about, but this extension can only measure sessions whose transcript is still on this machine. Two things remove a transcript from local disk:\n\n• Claude Code deletes transcripts older than its retention window (the cleanupPeriodDays setting, 30 days by default). Raise it in ~/.claude/settings.json to keep more history measurable.\n• Sessions that ran in the cloud never write a transcript to this machine at all.\n\nThese sessions are not missing from your account — they are just not measurable locally.',
 	'efficiency.modelMix.heading': 'Model mix movement',
 	'efficiency.modelMix.caption': 'Token share per model, {0} compared with {1}',
 	'efficiency.modelMix.model': 'Model',

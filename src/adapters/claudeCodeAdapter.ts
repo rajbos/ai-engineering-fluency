@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import type { ModelUsage, ChatTurn, ActualUsage } from '../types';
+import { isHumanUserTurn } from '../utils/claudeUserTurns';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
 import { ClaudeCodeDataAccess, normalizeClaudeModelId } from '../claudecode';
 import { readClaudeCodeEventsForAnalysis, createEmptySessionUsageAnalysis, applyModelTierClassification, addSkillCall } from '../usageAnalysis';
@@ -203,12 +204,7 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	}
 
 	private isRealUserMessage(event: any): boolean {
-		const content = event.message?.content;
-		if (typeof content === 'string') { return !!content.trim(); }
-		if (!Array.isArray(content)) { return false; }
-		const hasText = content.some((c: any) => c.type === 'text');
-		const hasToolResult = content.some((c: any) => c.type === 'tool_result');
-		return hasText && !hasToolResult;
+		return isHumanUserTurn(event);
 	}
 
 	private buildTurnFromEvents(userEvent: any, pendingAssistantEvents: any[], turnNumber: number): ChatTurn | null {
