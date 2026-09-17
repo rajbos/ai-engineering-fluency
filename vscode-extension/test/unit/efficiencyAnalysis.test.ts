@@ -8,6 +8,7 @@ import {
 	computeSkillImpact,
 	computeEfficiencyDeltas,
 	computeValueSignals,
+	valueSignalsEqual,
 	getTrailingWindowBoundaries,
 	splitTrailingWindows,
 	computeModelPeriodMetrics,
@@ -828,6 +829,27 @@ test('windowHasModelData: ignores data outside the window bounds', () => {
 	assert.equal(windowHasModelData(days, resolveModelCompareWindow('thisMonth', NOW)), false);
 });
 
+// ── valueSignalsEqual ────────────────────────────────────────────────────────
+// Both sides of the Efficiency panel's Value update use this to decide whether anything actually
+// moved: the host to avoid posting churn on every Repository PRs refresh, the webview to leave the
+// rendered Value fragment alone.
+
+test('valueSignalsEqual: an unchanged snapshot is a no-op', () => {
+	const base = computeValueSignals({
+		userPrs: 18, mergedPrs: 14, aiPrs: 3, prsSince: '2026-02-14T00:00:00.000Z',
+		periodCost: 41.8, applyUsage: { totalApplies: 186, totalCodeBlocks: 300, applyRate: 0.62 },
+		linesChanged: 14740, now: new Date('2026-03-12T10:00:00.000Z'),
+	});
+	const same = { ...base };
+	assert.ok(valueSignalsEqual(base, same));
+	assert.ok(valueSignalsEqual(undefined, undefined));
+	assert.equal(valueSignalsEqual(base, undefined), false);
+	assert.equal(valueSignalsEqual(base, { ...base, mergedPrs: 15 }), false);
+	// Losing PR data (sign-out) is a change, not a no-op: the cards must go back to the hint.
+	assert.equal(valueSignalsEqual(base, { ...base, userPrs: null }), false);
+	// Non-PR totals matter too — a refreshed cost changes cost-per-merged-PR.
+	assert.equal(valueSignalsEqual(base, { ...base, periodCost: 50 }), false);
+});
 
 // ── Models tab eligibility and selection reconciliation ──────────────────────
 

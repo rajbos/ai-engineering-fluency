@@ -838,6 +838,20 @@ export interface TodaySessionSummary {
   subAgentCalls?: number;
 }
 
+/**
+ * How many of the Claude Desktop sessions Desktop itself lists are backed by a transcript on this
+ * disk. The shortfall is expected, not data loss: Claude Code prunes old transcripts on its own
+ * retention schedule, and cloud-run sessions never write one to this machine at all.
+ */
+export interface ClaudeDesktopCoverage {
+  /** Claude Desktop session records found on this machine. */
+  knownSessions: number;
+  /** Records whose transcript is readable here, so they can be measured. */
+  withTranscript: number;
+  /** Records with no local transcript — listed by Desktop, invisible to a local scanner. */
+  missingTranscript: number;
+}
+
 export interface UsageAnalysisStats {
 today: UsageAnalysisPeriod;
 last30Days: UsageAnalysisPeriod;
@@ -879,6 +893,12 @@ correctionReport?: CorrectionReport;
 repeatedTasks?: RepeatedTaskReport;
 /** Optional Copilot memory-files hygiene analysis (VS Code only; absent in CLI/VS/JetBrains). */
 memoryFilesAnalysis?: MemoryFilesAnalysis | null;
+/**
+ * Optional Claude Desktop local-transcript coverage, used to explain why Claude Desktop's own
+ * session list is longer than what a local-disk scanner can report. Absent when no Claude
+ * Desktop session records exist on this machine.
+ */
+claudeDesktopCoverage?: ClaudeDesktopCoverage;
 }
 
 /** One day's worth of multi-agent/delegation signal, used to render a trend sparkline. */
