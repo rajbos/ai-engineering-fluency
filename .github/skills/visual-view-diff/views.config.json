@@ -11,6 +11,13 @@
     "shell passes (the __INITIAL_*__ payload) into a fixture, and run",
     "`node render-views.js --view <id>` to check it renders.",
     "",
+    "scenarios: optional scripted click/select flows replayed by",
+    "scripts/interaction-smoke.js. The one-pass control crawl cannot change a",
+    "<select> or reach a control that only appears after another one was used,",
+    "so a view declares those flows here: each step is a `click` or a `select`",
+    "(with an optional `value`; otherwise the next enabled option is taken), and",
+    "`expect` is a selector the view must still be showing after every step.",
+    "",
     "noiseFloorPixels: how many differing pixels count as run-to-run noise",
     "rather than a real change. Only views that draw to a <canvas> need it —",
     "anti-aliasing there is not perfectly reproducible. Omit it (default 0) so",
@@ -72,7 +79,31 @@
       "title": "Efficiency",
       "bundle": "efficiency",
       "global": "__INITIAL_EFFICIENCY__",
-      "fixture": "efficiency.json"
+      "fixture": "efficiency.json",
+      "scenarios": [
+        {
+          "name": "Models tab: every mode/window/model combination still compares",
+          "expect": ".model-sides",
+          "$comment": [
+            "claude-haiku-4.5 is only in the fixture's February and March days, so",
+            "selecting it and then moving to a window it never appears in is the",
+            "stale-selection case that used to leave one side permanently empty."
+          ],
+          "steps": [
+            { "click": "[data-tab=\"models\"]" },
+            { "select": "#model-a" },
+            { "select": "#model-b", "value": "claude-haiku-4.5" },
+            { "select": "#window", "value": "prev30" },
+            { "select": "#window", "value": "last90" },
+            { "select": "#model-mode", "value": "periods" },
+            { "select": "#window-a", "value": "thisMonth" },
+            { "select": "#window-b", "value": "lastMonth" },
+            { "select": "#model-a", "value": "claude-haiku-4.5" },
+            { "select": "#window-b", "value": "prev30" },
+            { "select": "#model-mode", "value": "models" }
+          ]
+        }
+      ]
     },
     {
       "id": "whatsnew",

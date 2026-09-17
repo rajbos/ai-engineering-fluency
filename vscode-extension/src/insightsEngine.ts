@@ -12,6 +12,7 @@ import type {
 	TodaySessionSummary,
 	ToolCurationAnalysis,
 	RepeatedTaskReport,
+	MemoryFilesAnalysis,
 } from '../../src/types';
 import toolNamesData from '../../src/toolNames.json';
 import modelPricingData from '../../src/modelPricing.json';
@@ -290,6 +291,8 @@ export interface InsightContext {
 	curationAnalysis?: ToolCurationAnalysis | null;
 	/** Optional — populated when repeated-task detection found candidates. */
 	repeatedTasks?: RepeatedTaskReport | null;
+	/** Optional — populated when Copilot memory-files discovery has run. */
+	memoryFilesAnalysis?: MemoryFilesAnalysis | null;
 }
 
 export interface InsightState {
@@ -976,6 +979,10 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 				`Once a window fills, the client silently drops or summarizes earlier turns — answers start losing detail you already gave. ` +
 				`Head it off by starting a fresh chat (\`/new\`) per task with a short handoff summary, running \`/compact\` yourself while you still control what's kept, and narrowing context to the files that matter instead of whole-repo references.`;
 		},
+		// Always plural: `appliesTo` below only fires this insight from two
+		// near-limit sessions up, so there is no one-session case to word for.
+		actionLabel: (ctx) => `Show these ${nearLimitSessionCount(ctx)} sessions`,
+		actionCommand: 'aiEngineeringFluency.showContextPressureSessions',
 		appliesTo: (ctx) => {
 			// Don't double up with the auto-compaction insight, which already covers
 			// sessions that went past the line.
@@ -1431,6 +1438,33 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 			return stale.length >= 1;
 		},
 		weight: 40,
+	},
+	{
+		id: 'stale-memory-files',
+		category: 'customization',
+		severity: 'tip',
+		title: '🦉 Copilot memory files are piling up or going stale',
+		buildBody: (ctx) => {
+			const analysis = ctx.memoryFilesAnalysis;
+			const staleCount = analysis?.staleFileCount ?? 0;
+			const largeCount = analysis?.largeFileCount ?? 0;
+			const parts: string[] = [];
+			if (staleCount > 0) {
+				parts.push(`${staleCount} memory file${staleCount !== 1 ? 's' : ''} ${staleCount !== 1 ? 'haven\'t' : 'hasn\'t'} been updated in over ${analysis?.staleDays ?? 90} days`);
+			}
+			if (largeCount > 0) {
+				parts.push(`${largeCount} ${largeCount !== 1 ? 'are' : 'is'} unusually large (over ${Math.round((analysis?.largeFileBytes ?? 0) / 1024)}KB)`);
+			}
+			return `Copilot's agent writes its own memory notes to disk (project conventions, decisions, scratch plans). ` +
+				`${parts.join(' and ')}. Stale or oversized memory files can carry outdated context into future sessions. ` +
+				`Review them under any \`memory-tool/memories/\` folder inside your VS Code user data (\`globalStorage\` for user-scope, \`workspaceStorage/<hash>\` for per-workspace) and delete or refresh ones that no longer apply.`;
+		},
+		appliesTo: (ctx) => {
+			const analysis = ctx.memoryFilesAnalysis;
+			if (!analysis) { return false; }
+			return analysis.staleFileCount > 0 || analysis.largeFileCount > 0;
+		},
+		weight: 25,
 	},
 
 	// ── Corrections ─────────────────────────────────────────────────────────

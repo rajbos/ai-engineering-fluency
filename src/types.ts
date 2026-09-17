@@ -877,6 +877,8 @@ correctionReport?: CorrectionReport;
  * cluster reached the minimum size.
  */
 repeatedTasks?: RepeatedTaskReport;
+/** Optional Copilot memory-files hygiene analysis (VS Code only; absent in CLI/VS/JetBrains). */
+memoryFilesAnalysis?: MemoryFilesAnalysis | null;
 }
 
 /** One day's worth of multi-agent/delegation signal, used to render a trend sparkline. */
@@ -1460,4 +1462,150 @@ export interface ToolCurationAnalysis {
   estimatedPromptBloat: { totalTokens: number; byServer: Record<string, number> };
   /** Prioritised list of recommendations. */
   recommendations: ToolCurationRecommendation[];
+}
+
+// ---------------------------------------------------------------------------
+// Copilot Memory Files
+// ---------------------------------------------------------------------------
+
+/** A single Copilot agent memory Markdown file discovered on disk. */
+export interface MemoryFileEntry {
+  /** Absolute path to the memory `.md` file. */
+  path: string;
+  /** Scope this file belongs to — see docs/features/COPILOT-MEMORY-FILES-INSIGHT.md. */
+  scope: 'user' | 'repo' | 'session';
+  /** The `workspaceStorage/<hash>` this file was discovered under. Undefined for `scope === 'user'`. */
+  workspaceHash?: string;
+  /** Resolved friendly workspace folder path, when recorded in `workspace.json`/`meta.json`. */
+  workspaceName?: string;
+  /** Decoded chat-session UUID when `scope === 'session'` (the folder name is `base64(sessionId)`). */
+  sessionId?: string;
+  /** File size in bytes. */
+  sizeBytes: number;
+  /** Last-modified time, in milliseconds since epoch. */
+  mtimeMs: number;
+  /** File name without extension, used as a display title (content is never read beyond this). */
+  title: string;
+}
+
+/** Per-workspace rollup of discovered memory files, used by `MemoryFilesAnalysis.byWorkspace`. */
+export interface MemoryFilesWorkspaceSummary {
+  workspaceHash?: string;
+  workspaceName?: string;
+  repoCount: number;
+  sessionCount: number;
+  /** User (global)-scope files folded into this bucket — only ever non-zero for the `__user__` row. */
+  userCount: number;
+  totalBytes: number;
+  newestMtimeMs: number | null;
+  oldestMtimeMs: number | null;
+  largestFile?: MemoryFileEntry;
+  /** Files older than the analysis's `staleDays` threshold. */
+  staleFiles: MemoryFileEntry[];
+}
+
+/** Full result of a Copilot memory-files hygiene analysis run. */
+export interface MemoryFilesAnalysis {
+  /** Look-back threshold (days) used to flag a file as stale. */
+  staleDays: number;
+  /** Size threshold (bytes) used to flag a file as unusually large. */
+  largeFileBytes: number;
+  /** Every discovered memory file (metadata only — content is never included). */
+  files: MemoryFileEntry[];
+  /** Rollup grouped by workspace (and one entry for the `user` global scope). */
+  byWorkspace: MemoryFilesWorkspaceSummary[];
+  totalFiles: number;
+  totalBytes: number;
+  staleFileCount: number;
+  largeFileCount: number;
+}
+
+/**
+ * Compact per-workspace rollup for {@link MemoryFilesAnalysisView} — the counts/rollup scalars
+ * the Usage Analysis webview table renders, without the per-file `staleFiles`/`largestFile`
+ * entries (absolute paths, session IDs) `MemoryFilesWorkspaceSummary` carries for the CLI/host.
+ */
+export interface MemoryFilesWorkspaceViewSummary {
+  workspaceHash?: string;
+  workspaceName?: string;
+  repoCount: number;
+  sessionCount: number;
+  /** User (global)-scope files folded into this bucket — only ever non-zero for the `__user__` row. */
+  userCount: number;
+  totalBytes: number;
+  newestMtimeMs: number | null;
+  /** `MemoryFilesWorkspaceSummary.staleFiles.length` — the webview table only ever shows the count. */
+  staleFileCount: number;
+}
+
+/**
+ * Compact projection of {@link MemoryFilesAnalysis} sent to the Usage Analysis webview: counts
+ * and rollup scalars only. Omits the full `files` list and each workspace's `staleFiles`/
+ * `largestFile`/`oldestMtimeMs` — metadata (absolute paths, session IDs, per-file objects) the
+ * webview UI never reads, but which inflates the IPC/HTML payload for a large memory store.
+ * Produced by `toMemoryFilesAnalysisView()` in the VS Code extension host.
+ */
+export interface MemoryFilesAnalysisView {
+  staleDays: number;
+  largeFileBytes: number;
+  byWorkspace: MemoryFilesWorkspaceViewSummary[];
+  totalFiles: number;
+  totalBytes: number;
+  staleFileCount: number;
+  largeFileCount: number;
+}
+
+/**
+ * One conversation returned by Mistral's (beta) Agents `/v1/conversations` listing.
+ * The Mistral Agents/Conversations API is in beta — fields are best-effort and may change.
+ * Only fields the extension actually consumes are typed; the raw `metadata` object is
+ * preserved verbatim so new server-side fields surface without a type bump.
+ */
+export interface MistralCloudConversation {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  agentId: string;
+  name: string | null;
+  description: string | null;
+  /** Optional agent version reported by the API (string or number). */
+  agentVersion: string | null;
+  /** Verbatim `metadata` object from the API, for forward compatibility. */
+  metadata: Record<string, unknown> | null;
+}
+
+/**
+ * Result of loading Mistral Vibe cloud (web) sessions via the beta Agents Conversations API.
+ * `authenticated` mirrors the GitHub AgentSessionsResult convention: true only when an API key
+ * is configured AND the listing call succeeded (even partially). `false` covers both "no key
+ * configured / user declined to provide one" AND any fetch failure (HTTP error, transport
+ * failure, timeout, parse error) that occurred while a key was configured — so callers MUST
+ * inspect `error` before treating `false` as "no key": a non-empty `error` means a key may still
+ * be there and the connect UI should NOT be offered (show retry/error instead).
+ */
+export interface MistralCloudSessionsResult {
+  /**
+   * Conversations (newest first), aggregated across every page fetched (see
+   * `mistralCloudSessionsService.ts`'s bounded pagination) — not limited to a single page.
+   */
+  conversations: MistralCloudConversation[];
+  /** Total conversations reported by the listing, when the API returns it. */
+  totalCount: number;
+  /**
+   * True when `totalCount` is only a lower bound, not an exact total: the API never reported a
+   * `total` and the bounded page cap (see `mistralCloudSessionsService.ts`) was hit while the last
+   * fetched page was still full. `totalCount` then equals `conversations.length` and callers should
+   * render it as "at least this many" (e.g. "2000+") rather than an exact "N of totalCount".
+   */
+  totalIsLowerBound: boolean;
+  /** True when an API key is configured and the listing call succeeded (even partially). */
+  authenticated: boolean;
+  /** ISO timestamp of the fetch; empty when never fetched. */
+  fetchedAt: string;
+  /**
+   * Error message when the fetch failed (auth, network, API error), or when a later page failed
+   * mid-pagination — in that case `conversations` still holds the pages fetched before the
+   * failure, and this describes why the listing is incomplete. Empty on a fully successful fetch.
+   */
+  error: string;
 }

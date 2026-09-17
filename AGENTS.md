@@ -137,6 +137,66 @@ To check if data is available:
 [ -f ./usage-data/usage-agg-daily.json ] && echo "Aggregated data available"
 ```
 
+### Code knowledge graph (graphify)
+
+`copilot-setup-steps.yml` also builds a graphify knowledge graph of the repository's
+code before the agent starts, at **`.graphify-agent/graph.json`** (order of
+10k nodes; the exact size tracks the repo, so don't read a precise figure into
+it). It needs no secrets — it is local AST parsing (`--code-only`).
+The build runs early — before the Azure session-log and usage-data hydration —
+so that graphify's dependency tree is installed and executed while there is no
+sensitive data on disk for a compromised wheel to read. That covers graphify
+only: the azure-storage-loader's own npm dependencies and
+`scripts/fetch-agent-sessions.js` still run *after* those files exist, so this
+is one contained path rather than a supply-chain boundary for the whole job.
+The build is deliberately non-blocking (every step is `continue-on-error`),
+which is what lets it run first without a PyPI outage costing the hydration
+that follows. Treat the graph as normally available rather than guaranteed, and
+check for it before relying on it.
+
+Query it instead of fanning `grep`/read across the tree when the question is
+structural — what calls a symbol, what a change reaches, how two areas connect:
+
+```bash
+export GRAPHIFY_OUT=.graphify-agent          # or pass --graph .graphify-agent/graph.json
+
+graphify query "how does the CLI attribute per-model cost"   # BFS context for a question
+graphify explain "getModelUsageFromSession"                  # one node and its neighbors
+graphify affected "src/tokenEstimation.ts"                   # reverse traversal: blast radius
+graphify path "extension.ts" "modelPricing.json"             # shortest path between two nodes
+```
+
+Notes:
+- The graph covers **code only**. Docs, PDFs and images are skipped — semantic
+  extraction needs an LLM backend and an API key, which this setup deliberately
+  does not use. Read docs directly.
+- It is a snapshot from setup time. After large edits, refresh by re-running the
+  build: `GRAPHIFY_OUT=.graphify-agent graphify extract . --code-only --no-viz`
+  (also LLM-free). Do **not** use `graphify update .` for this: it honours
+  `GRAPHIFY_OUT` for the graph itself but still rewrites the committed
+  `graphify-out/cache/stat-index.json`, leaving a tracked modification behind.
+- Never build into the default `graphify-out/` — that directory's `manifest.json`
+  and `cache/` are committed, and a newer graphify prunes them as a stale version.
+- If `.graphify-agent/graph.json` is missing the build failed; fall back to
+  ordinary file search.
+
+## Agent Changes to CI and Agent Configuration Need a Human
+
+`.github/workflows/guard-agent-config.yml` fails a pull request that both
+(a) touches `.github/**`, `.claude/**`, `.devcontainer/**`, `AGENTS.md` or
+`CLAUDE.md`, and (b) looks agent-authored — an agent branch prefix
+(`claude/`, `copilot/`, `agent-review/`), a bot PR author other than
+dependabot or github-actions, or an AI `Co-authored-by:` trailer on any
+commit. That trailer match is not limited to Claude and Copilot — it also
+covers GPT, Codex, Gemini, Mistral, Vibe, Devin, Cursor and Aider, so do not
+read the two examples as the whole list.
+
+These are the files that decide what automation is allowed to do, so an agent
+must not be able to change them unattended. If your PR trips this check, that
+is the check working: say what you changed and why, and ask the maintainer to
+review those paths and add the `agent-config-approved` label. Do not try to
+route around it by renaming the branch or dropping the co-author trailer.
+
 ## Keep Claude Code's Mirrored Agents & Skills in Sync
 
 This repo also ships Claude Code equivalents of the Copilot customizations below, kept as separate files because the two tools use different formats/locations:
@@ -229,3 +289,12 @@ When adding or changing runtime localization keys (entries in `vscode-extension/
 ## File-size ceiling (`max-lines`)
 
 `vscode-extension/eslint.config.mjs` enforces `"max-lines": ["warn", { max: 6000, ... }]` alongside the existing complexity rules. The per-function rules (`max-lines-per-function`, `complexity`, `sonarjs/cognitive-complexity`) were all satisfied while `vscode-extension/src/extension.ts` grew to 12,332 lines and 553 methods — proof that small functions alone don't stop a file from becoming unmanageable. New code should not push any linted file past 6000 lines; if you're about to, split it instead. `extension.ts` is today's sole (known) outlier, and stays that way on purpose until it's decomposed — see `docs/adr/EXTENSION-TS-DECOMPOSITION.md` for the extraction plan. Ratchet the 6000 number down as files shrink; don't raise it to accommodate growth.
+
+## Pre-PR self-review checklist
+
+PR #2107 took ~12 rounds of Copilot review-agent feedback over ~22 hours to land, with every fix pushed as its own commit (never amended, never force-pushed). The many-rounds loop wasn't caused by amending or force-pushing — it never did that. It happened because each fix commit closed only the single race condition or edge case the reviewer had named (e.g. one `await` point where a peer clear/write could interleave), instead of enumerating and closing the whole class of similar cases at once. The reviewer kept finding the next adjacent gap in the same state machine, round after round.
+
+Before pushing a fix for review feedback, agents must:
+
+- **Close the whole class, not just the cited instance.** When a review comment flags one case of a bug (one race condition, one edge case, one unguarded call site), explicitly enumerate the full set of cases/call-sites/interleavings/state transitions that issue belongs to (e.g. every `await` point in the same state machine where a concurrent clear/write/reset could interleave), and fix all of them in that same pass — not just the one instance the reviewer pointed at.
+- **Batch a full round into one push.** Before pushing, collect and address every currently-open review comment together, then push once for that round. Don't push a commit per individual fix as each comment trickles in — that's what turns a handful of review rounds into a dozen.
