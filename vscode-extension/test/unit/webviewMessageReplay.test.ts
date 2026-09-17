@@ -164,3 +164,28 @@ test('reset() during a replay stops the entries it has not reached yet', async (
 	assert.equal(sent.length, 1, 'the reset in the first delivery ends the loop');
 	assert.deepEqual(replayed, ['repoPrStats']);
 });
+
+test('publishing with no panel attached is a no-op, not a throw', async () => {
+	// Sign-out now publishes the unauthenticated repository-PR result unconditionally, so this
+	// channel is routinely used with no panel open — `panel?.webview.postMessage(...) ?? false`
+	// is what the host passes as `send`. That must report an undelivered message rather than
+	// throwing, and must still buffer it for whichever document opens next.
+	const delivered: string[] = [];
+	let panelOpen = false;
+	const replay = new WebviewMessageReplay((message) => {
+		if (!panelOpen) { return false; }
+		delivered.push(message.command);
+		return true;
+	});
+
+	const result = await replay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: { authenticated: false, repos: [] } });
+
+	assert.equal(result.delivered, false, 'nothing was listening');
+	assert.equal(result.wasReady, false);
+	assert.deepEqual(delivered, []);
+
+	// A panel opening afterwards gets the sign-out result rather than the pre-sign-out state.
+	panelOpen = true;
+	assert.deepEqual(await replay.markReady(), ['repoPrStats']);
+	assert.deepEqual(delivered, ['repoPrStatsLoaded']);
+});
