@@ -22,7 +22,8 @@
     "screenshots. A view is otherwise captured only in its initial render, so a",
     "change on any other tab diffs as 'unchanged'. Each state has an `id` (the",
     "screenshot is <view>--<id>.<theme>.png), a `title`, `steps` in the same",
-    "click/select format as scenarios (replayed on a fresh page), and an",
+    "click/select/post format as scenarios (replayed on a fresh page; `post`",
+    "delivers a host message for a tab that loads its content on open), and an",
     "`expect` selector that must be showing afterwards, or the render is an",
     "error. Optional `settleMs` overrides the wait after the steps (a tab that",
     "lazily loads Chart.js and animates in needs more than the default), and",
@@ -108,14 +109,30 @@
         {
           "id": "repos",
           "title": "Repository PRs tab",
-          "steps": [{ "click": ".tab-button[data-tab=\"repos\"]" }],
-          "expect": "#tab-panel-repos"
+          "$comment": [
+            "Opening the tab asks the host for PR statistics and shows a placeholder",
+            "until they arrive. The `post` step plays the host so the loaded table is",
+            "what gets screenshotted; `since` is fixed and `fetchedAt` is omitted so",
+            "nothing on the panel depends on the wall clock."
+          ],
+          "steps": [
+            { "click": ".tab-button[data-tab=\"repos\"]" },
+            { "post": {"command": "repoPrStatsLoaded", "data": {"authenticated": true, "since": "2026-02-13T00:00:00.000Z", "repos": [{"owner": "rajbos", "repo": "ai-engineering-fluency", "repoUrl": "https://github.com/rajbos/ai-engineering-fluency", "totalPrs": 99, "aiAuthoredPrs": 7, "aiReviewRequestedPrs": 3, "userAuthoredPrs": 40, "userMergedPrs": 38, "aiDetails": [{"number": 2094, "title": "Copilot memory-files hygiene", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2094", "aiType": "copilot", "role": "author"}, {"number": 2071, "title": "Improve Cost Attribution model-mix table", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2071", "aiType": "claude", "role": "reviewer-requested"}]}, {"owner": "xebia", "repo": "xms-techradar", "repoUrl": "https://github.com/xebia/xms-techradar", "totalPrs": 0, "aiAuthoredPrs": 0, "aiReviewRequestedPrs": 0, "userAuthoredPrs": 0, "userMergedPrs": 0, "aiDetails": [], "error": "Repo not found or not accessible with current token"}]}} }
+          ],
+          "expect": "#repos-pr-content .customization-matrix"
         },
         {
           "id": "agent",
           "title": "Cloud Agent tab",
-          "steps": [{ "click": ".tab-button[data-tab=\"agent\"]" }],
-          "expect": "#tab-panel-agent"
+          "$comment": [
+            "Same as the Repository PRs tab: the host answer is declared here. Omitting",
+            "`fetchedAt` keeps the 'updated n minutes ago' line off the screenshot."
+          ],
+          "steps": [
+            { "click": ".tab-button[data-tab=\"agent\"]" },
+            { "post": {"command": "agentSessionsLoaded", "data": {"authenticated": true, "since": "2026-02-13T00:00:00.000Z", "totalTasks": 6, "totalSessions": 9, "totalCredits": 42, "totalPremiumRequests": 12, "accountTasksAvailable": true, "partial": false, "repos": [{"owner": "rajbos", "repo": "ai-engineering-fluency", "totalTasks": 4, "totalSessions": 6, "totalCredits": 30, "totalPremiumRequests": 8, "tasksScanned": 4, "tasksTotal": 4, "partial": false, "discovery": "both", "unassigned": false}, {"owner": "xebia", "repo": "xms-techradar", "totalTasks": 2, "totalSessions": 3, "totalCredits": 12, "totalPremiumRequests": 4, "tasksScanned": 2, "tasksTotal": 2, "partial": false, "discovery": "account", "unassigned": false}]}} }
+          ],
+          "expect": "#agent-sessions-content .customization-matrix"
         },
         {
           "id": "worktrees",
@@ -152,7 +169,7 @@
           "id": "skills",
           "title": "Tools & Skills tab",
           "steps": [{ "click": ".eff-tab[data-tab=\"skills\"]" }],
-          "expect": "#eff-tab-content",
+          "expect": ".eff-tab.active[data-tab=\"skills\"]",
           "settleMs": 3000,
           "noiseFloorPixels": 400
         },
@@ -160,25 +177,25 @@
           "id": "deltas",
           "title": "Month vs Month tab",
           "steps": [{ "click": ".eff-tab[data-tab=\"deltas\"]" }],
-          "expect": "#eff-tab-content"
+          "expect": ".eff-tab.active[data-tab=\"deltas\"]"
         },
         {
           "id": "attribution",
           "title": "Cost Attribution tab",
           "steps": [{ "click": ".eff-tab[data-tab=\"attribution\"]" }],
-          "expect": "#eff-tab-content"
+          "expect": ".eff-tab.active[data-tab=\"attribution\"]"
         },
         {
           "id": "cache",
           "title": "Prompt Cache tab",
           "steps": [{ "click": ".eff-tab[data-tab=\"cache\"]" }],
-          "expect": "#eff-tab-content"
+          "expect": ".eff-tab.active[data-tab=\"cache\"]"
         },
         {
           "id": "models",
           "title": "Models tab",
           "steps": [{ "click": ".eff-tab[data-tab=\"models\"]" }],
-          "expect": "#eff-tab-content",
+          "expect": ".eff-tab.active[data-tab=\"models\"]",
           "settleMs": 3000,
           "noiseFloorPixels": 400
         },
@@ -186,13 +203,13 @@
           "id": "value",
           "title": "Value tab",
           "steps": [{ "click": ".eff-tab[data-tab=\"value\"]" }],
-          "expect": "#eff-tab-content"
+          "expect": ".eff-tab.active[data-tab=\"value\"]"
         },
         {
           "id": "combined",
           "title": "Combined tab",
           "steps": [{ "click": ".eff-tab[data-tab=\"combined\"]" }],
-          "expect": "#eff-tab-content",
+          "expect": ".eff-tab.active[data-tab=\"combined\"]",
           "settleMs": 3000,
           "noiseFloorPixels": 400
         }

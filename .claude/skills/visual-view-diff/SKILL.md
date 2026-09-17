@@ -172,7 +172,12 @@ click/select steps replayed on a fresh page before the screenshot:
 ```
 
 - `steps` use the same `click` / `select` (+ optional `value`) vocabulary as
-  interaction-smoke scenarios.
+  interaction-smoke scenarios, plus `post`: a message delivered to the view as
+  if the extension host sent it. A tab that asks the host for data when it
+  opens (Repository PRs, Cloud Agent) would otherwise only ever screenshot its
+  loading placeholder, so its state declares the answer. Keep that answer
+  deterministic — fixed dates, no `fetchedAt` — or the screenshot diffs
+  against itself.
 - `expect` is what the state must be showing afterwards. If it is not, the
   render is an **error**, not a screenshot of the previous tab that would pass
   as "unchanged" forever.

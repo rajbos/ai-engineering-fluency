@@ -416,6 +416,12 @@ jobs:
         # The visual diff builds the merge base in a temporary worktree, which
         # needs real history rather than a shallow clone.
         fetch-depth: 0
+        # This job holds pull-requests: write, and everything after checkout
+        # runs code from the PR (npm scripts, esbuild, the harness). Nothing
+        # here needs authenticated git - the worktree and merge-base are
+        # local operations on the full clone - so the token is never written
+        # to .git/config where that code could read it.
+        persist-credentials: false
 
     - name: Setup Node.js
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -515,9 +521,13 @@ jobs:
     #     the inline images, pointing at the artifact instead.
     #   - Fork PRs get a read-only token and no secrets, so they are skipped
     #     here; their screenshots stay in the artifact.
+    # The three publishing steps are report-only, like the diff they publish:
+    # a GitHub API hiccup or a failed upload must not turn the required UI
+    # gate red. Each one warns and lets the job continue.
     - name: Render the screenshot comment
       id: visual-comment
       if: always() && github.event.pull_request.head.repo.full_name == github.repository
+      continue-on-error: true
       env:
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -539,6 +549,7 @@ jobs:
       # fork, so this is already fork-safe; the explicit guard keeps it so if
       # the render step's condition ever changes.
       if: always() && github.event.pull_request.head.repo.full_name == github.repository && steps.visual-comment.outputs.has_report == 'true'
+      continue-on-error: true
       env:
         GH_CLI_VERSION: "2.101.0"
         GH_CLI_SHA256: "9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8"
@@ -561,6 +572,7 @@ jobs:
 
     - name: Post the screenshot comment on the PR
       if: always() && github.event.pull_request.head.repo.full_name == github.repository && steps.visual-comment.outputs.has_report == 'true'
+      continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # User token for the uploads; see the note above. Optional.

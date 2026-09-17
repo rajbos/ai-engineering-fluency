@@ -3,10 +3,18 @@
 /**
  * Replays declared UI steps on a rendered view page.
  *
- * A step is `{ "click": "<selector>" }` or `{ "select": "<selector>", "value"?: "<option>" }`
- * — the same shape `views.config.json` uses for interaction-smoke `scenarios`,
- * so a view's `states` (the tabs and modes the visual diff screenshots) and its
- * scenarios read alike and share one vocabulary.
+ * A step is `{ "click": "<selector>" }`, `{ "select": "<selector>", "value"?: "<option>" }`
+ * or `{ "post": { "command": "...", ... } }` — the same shape `views.config.json`
+ * uses for interaction-smoke `scenarios`, so a view's `states` (the tabs and
+ * modes the visual diff screenshots) and its scenarios read alike and share one
+ * vocabulary.
+ *
+ * `post` plays the extension host: it delivers a message to the view exactly
+ * as VS Code would relay one, for the tabs that ask the host for data on open
+ * and would otherwise only ever screenshot their loading placeholder. The
+ * harness records what the view posts but answers nothing on its own, so the
+ * answer has to be declared with the state, and it has to be deterministic
+ * (fixed dates, no `fetchedAt` that renders as "n minutes ago").
  *
  * This module only drives the page. What to conclude from a step — a smoke
  * finding, a screenshot, an error — is the caller's business.
@@ -50,8 +58,20 @@ const IS_SHOWING = (selector) => {
 };
 
 function describeStep(step) {
-	return step.click ? `click ${step.click}` : `select ${step.select}${step.value ? ` = ${step.value}` : ''}`;
+	if (step.click) { return `click ${step.click}`; }
+	if (step.post) { return `post ${step.post && step.post.command ? step.post.command : 'message'}`; }
+	return `select ${step.select}${step.value ? ` = ${step.value}` : ''}`;
 }
+
+/**
+ * Runs inside the page. A MessageEvent with no `source` is what the shared
+ * message handler treats as the host itself (rule 1 in
+ * `webview/shared/messageHandler.ts`), the same way the unit-test harness
+ * delivers host messages.
+ */
+const DISPATCH_HOST_MESSAGE = (message) => {
+	window.dispatchEvent(new MessageEvent('message', { data: message }));
+};
 
 /**
  * Applies one step. Resolves to `null` on success or a short reason string on
@@ -66,6 +86,15 @@ async function applyStep(page, step) {
 			return `could not click: ${String(error && error.message || error).split('\n')[0]}`;
 		}
 	}
+	if (step.post) {
+		if (!step.post || typeof step.post !== 'object') { return '"post" must be a message object'; }
+		try {
+			await page.evaluate(DISPATCH_HOST_MESSAGE, step.post);
+			return null;
+		} catch (error) {
+			return `could not deliver the message: ${String(error && error.message || error).split('\n')[0]}`;
+		}
+	}
 	if (step.select) {
 		const pick = await page.evaluate(PICK_OPTION, [step.select, step.value ?? null]);
 		if (pick.missing) { return 'the select is not on screen'; }
@@ -78,7 +107,7 @@ async function applyStep(page, step) {
 			return `could not change: ${String(error && error.message || error).split('\n')[0]}`;
 		}
 	}
-	return 'step has neither "click" nor "select"';
+	return 'step has none of "click", "select" or "post"';
 }
 
 /**
