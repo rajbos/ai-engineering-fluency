@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
-    "hono": "^4.13.7"
+    "hono": "^4.13.8"
   },
   "peerDependencies": {
     "chart.js": "^4.4.7"
@@ -62,7 +62,7 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.1",
     "chart.js": "^4.4.7",
     "esbuild": "^0.28.2",
     "typescript": "^5.8.0"

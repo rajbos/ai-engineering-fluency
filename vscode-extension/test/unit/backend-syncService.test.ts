@@ -1629,3 +1629,87 @@ test('parseConsentTimestamp returned Date matches input ISO string', () => {
 	assert.ok(result instanceof Date);
 	assert.equal((result as Date).toISOString(), isoString);
 });
+
+// ── blob upload: editor type map integration ────────────────────────────
+
+test('syncToBackendStore passes editor type map to blob upload service', async () => {
+	const now = new Date();
+	const timestamp = now.getTime() - 60000;
+	const sessionContent = JSON.stringify({
+		requests: [{
+			timestamp,
+			message: { parts: [{ text: 'hello world' }] },
+			response: [{ value: 'response text' }]
+		}]
+	});
+	const tmpFile = createTempFile(sessionContent);
+	try {
+		let capturedEditorMap: Map<string, string> | undefined;
+		let uploadCalled = false;
+
+		const mockBlobSvc = {
+			shouldUpload: () => true,
+			getUploadStatus: () => undefined,
+			uploadSessionFiles: async (
+				_account: string, _settings: any, _cred: any, _files: string[],
+				_machineId: string, _datasetId: string, editorTypeByFile?: Map<string, string>
+			) => {
+				uploadCalled = true;
+				capturedEditorMap = editorTypeByFile;
+				return { success: true, filesUploaded: 1, message: 'ok' };
+			},
+		};
+
+		const svc = makeServiceWithServices(
+			{
+				log: () => {},
+				warn: () => {},
+				getCopilotSessionFiles: async () => [tmpFile.filePath],
+				estimateTokensFromText: (text: string) => text.length,
+				getModelFromRequest: () => 'gpt-4o',
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+				getEditorLabel: () => 'VS Code',
+			},
+			{
+				getBackendDataPlaneCredentials: async () => ({
+					tableCredential: { getToken: async () => ({ token: 'test', expiresOnTimestamp: Date.now() + 3600000 }) },
+					blobCredential: {},
+					secretsToRedact: [],
+				}),
+				getBackendSecretsToRedactForError: async () => [],
+			},
+			{
+				ensureTableExists: async () => {},
+				validateAccess: async () => {},
+				createTableClient: () => ({
+					async *listEntities() {},
+					upsertEntity: async () => ({}),
+					deleteEntity: async () => ({}),
+				}),
+				upsertEntitiesBatch: async () => ({ successCount: 1, errors: [] }),
+			},
+			mockBlobSvc
+		);
+		await svc.syncToBackendStore(true, {
+			enabled: true,
+			sharingProfile: 'soloFull',
+			shareWorkspaceMachineNames: false,
+			subscriptionId: 'sub1',
+			resourceGroup: 'rg1',
+			storageAccount: 'sa1',
+			aggTable: 'usageAgg',
+			datasetId: 'ds1',
+			lookbackDays: 7,
+			blobUploadEnabled: true,
+			blobContainerName: 'copilot-session-logs',
+			blobUploadFrequencyHours: 24,
+			blobCompressFiles: true,
+		} as any, true);
+
+		assert.ok(uploadCalled, 'blob upload service was not called');
+		assert.ok(capturedEditorMap, 'editorTypeByFile map was not passed');
+		assert.equal(capturedEditorMap!.get(tmpFile.filePath), 'VS Code');
+	} finally {
+		tmpFile.cleanup();
+	}
+});

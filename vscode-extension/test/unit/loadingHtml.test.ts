@@ -22,6 +22,7 @@ function runLoadingScript(): {
 	pct: () => string;
 	barWidth: () => string;
 	subtitle: () => string;
+	text: (id: string) => string;
 } {
 	const makeEl = () => ({
 		textContent: '',
@@ -57,6 +58,7 @@ function runLoadingScript(): {
 		pct: () => read('pct', 'textContent'),
 		barWidth: () => els.get('prog-fill')?.style.width ?? '',
 		subtitle: () => read('subtitle', 'textContent'),
+		text: (id) => read(id, 'textContent'),
 	};
 }
 
@@ -172,4 +174,35 @@ test('a late parsing tick cannot drag the bar back below a compute sub-step', ()
 
 	assert.equal(ui.pct(), '92%', 'bar must not follow the unrelated refresh backwards');
 	assert.equal(ui.barWidth(), '92%');
+});
+
+test('a fresh discovering step resets the bar/checklist state left behind by a superseded run', () => {
+	// A panel a superseded run left registered for its replacement (see isRefreshSuperseded()
+	// callers in extension.ts) keeps this exact script instance running rather than getting a
+	// fresh getLoadingHtml() paint — so the replacement's own 'discovering' message is the only
+	// signal this script gets that a new refresh has started, and must reset everything the old
+	// run advanced. Without it, the old run's clamped `computing`/`barPct` would hold the bar at a
+	// stale high percentage straight through the new run's own early parsing ticks.
+	const ui = runLoadingScript();
+
+	// Drive the old run through discovery and parsing first, so both step counters (sc-discover's
+	// "(N found)" and sc-parse's "(completed/total)") have real leftover text to reset, not just
+	// their initial empty state.
+	ui.post({ command: 'loadingStep', step: 'parsing', total: 500, editors: [] });
+	assert.equal(ui.text('sc-discover'), '(500 found)');
+	ui.post({ command: 'loadingProgress', completed: 250, total: 500, percentage: 50 });
+	assert.equal(ui.text('sc-parse'), '(250/500)');
+	ui.post({ command: 'loadingStep', step: 'computing', percentage: 92, label: 'Analysing usage patterns…' });
+	assert.equal(ui.pct(), '92%');
+
+	ui.post({ command: 'loadingStep', step: 'discovering' });
+	assert.equal(ui.pct(), '–', 'must reset to the initial "not started" display, not stay clamped at the old run\'s percentage');
+	assert.equal(ui.subtitle(), 'Discovering session files...');
+	assert.equal(ui.text('sc-discover'), '', 'the old run\'s "(N found)" count must not linger on the fresh discovering screen');
+	assert.equal(ui.text('sc-parse'), '', 'the old run\'s "(completed/total)" count must not linger on the fresh discovering screen');
+
+	// The critical behavioral check: a real, low parsing percentage from the new run must now be
+	// able to render as low, instead of being clamped to (or above) the old run's 92%.
+	ui.post({ command: 'loadingProgress', completed: 10, total: 400, percentage: 3 });
+	assert.equal(ui.pct(), '3%', 'a fresh run\'s own early parsing tick must not be clamped by the superseded run\'s compute percentage');
 });

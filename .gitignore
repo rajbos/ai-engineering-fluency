@@ -74,6 +74,11 @@ graphify-out/*
 # Stray/misplaced graphify cache (wrong working directory on a past run)
 src/graphify-out/
 
+# Graphify graph built by copilot-setup-steps for the Copilot coding agent
+# (GRAPHIFY_OUT=.graphify-agent). Kept out of the default graphify-out/ so the
+# build never touches the committed manifest.json / cache/ above.
+.graphify-agent/
+
 # Visual view-diff output (screenshots, diff images and reports produced by
 # .github/skills/visual-view-diff). Regenerable from any checkout — the fixtures
 # that drive the renders are committed, the rendered PNGs are not.
