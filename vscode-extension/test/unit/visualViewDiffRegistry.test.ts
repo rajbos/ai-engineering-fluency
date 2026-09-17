@@ -25,16 +25,20 @@ function findRepoRoot(): string {
 const REPO_ROOT = findRepoRoot();
 const SKILL_DIR = path.join(REPO_ROOT, '.github', 'skills', 'visual-view-diff');
 
-type State = { id: string; title?: string; steps?: unknown[]; expect?: string; baseOnly?: boolean };
-type View = { id: string; title?: string; bundle?: string; global?: string; fixture?: string; states?: State[]; baseOnly?: boolean; fixtureDir?: string };
+type State = { id: string; title?: string; steps?: unknown[]; expect?: string; currentOnly?: boolean };
+type View = { id: string; title?: string; bundle?: string; global?: string; fixture?: string; enabled?: boolean; states?: State[]; currentOnly?: boolean; fixtureDir?: string };
 type Registry = { defaults?: Record<string, unknown>; views: View[] };
+
+type Dirs = { baseFixtureDir: string; currentFixtureDir: string };
 
 const config = requireFromHere(path.join(SKILL_DIR, 'lib', 'config.js')) as {
 	readConfig: (skillDir: string, configPath?: string) => Registry;
 	validateRegistry: (registry: Registry) => Registry;
-	mergeRegistries: (current: Registry, base: Registry, baseFixtureDir: string) => Registry;
+	baselineRegistry: (current: Registry, base: Registry | null, dirs: Dirs) => Registry;
 	ID_PATTERN: RegExp;
 };
+
+const DIRS: Dirs = { baseFixtureDir: '/base/fixtures', currentFixtureDir: '/current/fixtures' };
 
 function registry(views: View[]): Registry {
 	return { defaults: { viewport: { width: 1280, height: 900 }, fullPage: true, settleMs: 100 }, views };
@@ -56,36 +60,73 @@ test('validateRegistry refuses ids that could escape or collide as file names', 
 	assert.doesNotThrow(() => config.validateRegistry(registry([{ id: 'fluency-level-viewer', states: [{ id: 'path-analyzer' }, { id: 'tab_2' }] }])));
 });
 
-test('mergeRegistries carries base-only views and states so the diff can report them as removed', () => {
+test('baselineRegistry renders the base commit\'s own definitions, plus current-only targets flagged', () => {
 	const current = registry([
-		{ id: 'usage', fixture: 'usage.json', states: [{ id: 'tools' }] },
-		{ id: 'details', fixture: 'details.json' },
+		{ id: 'usage', fixture: 'usage.json', bundle: 'usage', states: [
+			{ id: 'tools', steps: [{ click: '.new-selector' }], expect: '#new-panel' },
+			{ id: 'insights', steps: [{ click: '[data-tab="insights"]' }], expect: '#tab-panel-insights' },
+		] },
+		{ id: 'details', fixture: 'details-renamed.json', bundle: 'details-v2' },
+		{ id: 'brand-new', fixture: 'brand-new.json', bundle: 'brand-new' },
 	]);
 	const base = registry([
-		{ id: 'usage', fixture: 'usage.json', states: [{ id: 'tools' }, { id: 'legacy-tab' }] },
-		{ id: 'details', fixture: 'details.json' },
-		{ id: 'retired', fixture: 'retired.json' },
+		{ id: 'usage', fixture: 'usage.json', bundle: 'usage', states: [
+			{ id: 'tools', steps: [{ click: '.old-selector' }], expect: '#old-panel' },
+			{ id: 'legacy-tab', steps: [{ click: '.legacy' }], expect: '#legacy' },
+		] },
+		{ id: 'details', fixture: 'details.json', bundle: 'details' },
+		{ id: 'retired', fixture: 'retired.json', bundle: 'retired' },
 	]);
-	const merged = config.mergeRegistries(current, base, '/base/fixtures');
+	const merged = config.baselineRegistry(current, base, DIRS);
 
-	assert.deepEqual(merged.views.map((v) => v.id), ['usage', 'details', 'retired']);
-	const retired = merged.views.find((v) => v.id === 'retired');
-	assert.equal(retired?.baseOnly, true);
-	assert.equal(retired?.fixtureDir, '/base/fixtures', 'a retired view keeps the base commit\'s fixture directory');
+	assert.deepEqual(merged.views.map((v) => v.id), ['usage', 'details', 'retired', 'brand-new']);
+
+	// A view both sides declare keeps the BASE definition: its bundle, its fixture, its fixture directory.
+	const details = merged.views.find((v) => v.id === 'details');
+	assert.equal(details?.bundle, 'details');
+	assert.equal(details?.fixture, 'details.json');
+	assert.equal(details?.fixtureDir, DIRS.baseFixtureDir);
+	assert.equal(details?.currentOnly, undefined);
+
+	// A state both sides declare keeps the BASE steps and expect, so the old bundle is driven the old way.
 	const usageStates = merged.views.find((v) => v.id === 'usage')?.states || [];
-	assert.deepEqual(usageStates.map((s) => s.id), ['tools', 'legacy-tab']);
-	assert.equal(usageStates[1].baseOnly, true);
-	assert.equal(usageStates[0].baseOnly, undefined, 'a state both sides declare is not marked base-only');
+	assert.deepEqual(usageStates.map((s) => s.id), ['tools', 'legacy-tab', 'insights']);
+	assert.deepEqual(usageStates[0].steps, [{ click: '.old-selector' }]);
+	assert.equal(usageStates[0].expect, '#old-panel');
+	assert.equal(usageStates[0].currentOnly, undefined);
 
-	// The inputs are not mutated: the current registry still renders only its own targets.
-	assert.equal(current.views.length, 2);
-	assert.deepEqual(current.views[0].states?.map((s) => s.id), ['tools']);
+	// A base-only state stays, unflagged, so its failure on the base bundle would be a real error.
+	assert.equal(usageStates[1].currentOnly, undefined);
+
+	// A current-only state rides along flagged, with the current definition (the only one there is).
+	assert.equal(usageStates[2].currentOnly, true);
+	assert.equal(usageStates[2].expect, '#tab-panel-insights');
+
+	// A retired view stays with the base fixture directory; a brand-new view is flagged and uses the current one.
+	const retired = merged.views.find((v) => v.id === 'retired');
+	assert.equal(retired?.fixtureDir, DIRS.baseFixtureDir);
+	assert.equal(retired?.currentOnly, undefined);
+	const brandNew = merged.views.find((v) => v.id === 'brand-new');
+	assert.equal(brandNew?.currentOnly, true);
+	assert.equal(brandNew?.fixtureDir, DIRS.currentFixtureDir);
+
+	// Inputs are not mutated.
+	assert.equal(base.views[0].states?.length, 2);
+	assert.equal(current.views[0].states?.length, 2);
 });
 
-test('mergeRegistries ignores base entries with unsafe ids instead of importing them', () => {
+test('baselineRegistry flags everything current-only when the base commit has no registry', () => {
+	const current = registry([{ id: 'usage', fixture: 'usage.json', states: [{ id: 'tools' }] }]);
+	const merged = config.baselineRegistry(current, null, DIRS);
+	assert.equal(merged.views[0].currentOnly, true);
+	assert.equal(merged.views[0].fixtureDir, DIRS.currentFixtureDir);
+	assert.equal(merged.views[0].states?.[0].currentOnly, undefined, 'the flag on the view covers its states');
+});
+
+test('baselineRegistry drops base entries with unsafe ids instead of importing them', () => {
 	const current = registry([{ id: 'usage', fixture: 'usage.json' }]);
-	const base = registry([{ id: '../escape', fixture: 'x.json' }, { id: 'usage', states: [{ id: 'a/b' }] }]);
-	const merged = config.mergeRegistries(current, base, '/base/fixtures');
+	const base = registry([{ id: '../escape', fixture: 'x.json' }, { id: 'usage', fixture: 'usage.json', states: [{ id: 'a/b' }] }]);
+	const merged = config.baselineRegistry(current, base, DIRS);
 	assert.deepEqual(merged.views.map((v) => v.id), ['usage']);
 	assert.deepEqual(merged.views[0].states || [], []);
 });

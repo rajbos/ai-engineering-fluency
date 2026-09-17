@@ -65,35 +65,58 @@ function validateRegistry(config) {
 }
 
 /**
- * The registry to render a *baseline* from: the current registry, plus every
- * view and state the base commit's registry declared that the current one no
- * longer does. Rendering the baseline from the current registry alone would
- * silently drop a view or tab the branch removed or renamed — nothing on the
- * baseline side, nothing on the current side, "no change". With the base's
- * entries carried over, that screenshot exists only on the baseline side and
- * the comparison reports it as **removed**.
+ * The registry to render a *baseline* from.
  *
- * Base-only entries keep the base commit's own fixture directory (`fixtureDir`),
- * since the current tree may have deleted the fixture along with the view.
+ * The baseline is the base commit's own registry — its view definitions,
+ * state steps, fixtures and bundles — so that an old bundle is always driven
+ * the way the old registry drove it. Rendering the baseline from the current
+ * registry would replay the branch's edited selectors, fixtures and expects
+ * against the old code and misreport a changed tab as skipped or added.
+ *
+ * On top of that, every view and state only the *current* registry declares is
+ * added and flagged `currentOnly`, so the branch's additions are attempted on
+ * the old bundle and, when they cannot render there, skipped by
+ * `--allow-missing` — which skips those targets and nothing else. A target
+ * both registries declare that fails on the base bundle stays an error, so a
+ * broken baseline is never quietly reported as "added".
+ *
+ * Views and states only the base declares stay in, with the base commit's
+ * fixture directory, so a view or tab the branch removed still renders on the
+ * baseline side and the comparison reports it as **removed**.
+ *
+ * Without a base registry (a base commit that predates it) every current
+ * target is flagged `currentOnly`.
  */
-function mergeRegistries(current, base, baseFixtureDir) {
-	const views = current.views.map((v) => ({ ...v, states: (v.states || []).map((s) => ({ ...s })) }));
+function baselineRegistry(current, base, { baseFixtureDir, currentFixtureDir }) {
+	const clone = (v) => ({ ...v, states: (v.states || []).map((s) => ({ ...s })) });
+	if (!base) {
+		return validateRegistry({
+			defaults: current.defaults,
+			views: current.views.map((v) => ({ ...clone(v), currentOnly: true, fixtureDir: currentFixtureDir })),
+		});
+	}
+	const views = (base.views || [])
+		.filter((v) => ID_PATTERN.test(String(v.id)))
+		.map((v) => ({
+			...clone(v),
+			states: (v.states || []).filter((s) => ID_PATTERN.test(String(s.id))).map((s) => ({ ...s })),
+			fixtureDir: baseFixtureDir,
+		}));
 	const byId = new Map(views.map((v) => [v.id, v]));
-	for (const baseView of base.views || []) {
-		if (!ID_PATTERN.test(String(baseView.id))) { continue; }
-		const currentView = byId.get(baseView.id);
-		if (!currentView) {
-			views.push({ ...baseView, fixtureDir: baseFixtureDir, baseOnly: true });
+	for (const currentView of current.views) {
+		const baseView = byId.get(currentView.id);
+		if (!baseView) {
+			views.push({ ...clone(currentView), currentOnly: true, fixtureDir: currentFixtureDir });
 			continue;
 		}
-		const currentStates = new Set((currentView.states || []).map((s) => s.id));
-		for (const baseState of baseView.states || []) {
-			if (ID_PATTERN.test(String(baseState.id)) && !currentStates.has(baseState.id)) {
-				currentView.states = [...(currentView.states || []), { ...baseState, baseOnly: true }];
+		const baseStates = new Set(baseView.states.map((s) => s.id));
+		for (const state of currentView.states || []) {
+			if (!baseStates.has(state.id)) {
+				baseView.states.push({ ...state, currentOnly: true });
 			}
 		}
 	}
-	return validateRegistry({ defaults: current.defaults, views });
+	return validateRegistry({ defaults: base.defaults || current.defaults, views });
 }
 
 /**
@@ -111,4 +134,4 @@ function selectViews(config, filter) {
 	return config.views.filter((v) => v.enabled !== false);
 }
 
-module.exports = { parseArgs, readConfig, selectViews, validateRegistry, mergeRegistries, ID_PATTERN };
+module.exports = { parseArgs, readConfig, selectViews, validateRegistry, baselineRegistry, ID_PATTERN };

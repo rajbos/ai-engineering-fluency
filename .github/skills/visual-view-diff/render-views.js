@@ -14,11 +14,14 @@
  * diff passes a registry merged with the base commit's, so a view or state the
  * branch removed still renders on the baseline side and shows up as removed.
  *
- * `--allow-missing` is for rendering a *baseline* build: a view or state that
- * this build cannot produce (a bundle that did not exist yet, a tab whose
- * selector the old code never rendered) is skipped rather than failed, so the
- * comparison can report the current screenshot as "added". Without it, every
- * failed render is an error and the exit code is non-zero.
+ * `--allow-missing` is for rendering a *baseline* build from a registry
+ * produced by `baselineRegistry()`: a view or state flagged `currentOnly` (one
+ * only the current registry declares) that this build cannot produce — a
+ * bundle that did not exist yet, a tab whose selector the old code never
+ * rendered — is skipped rather than failed, so the comparison can report the
+ * current screenshot as "added". Any other failed render stays an error, with
+ * a non-zero exit, so a baseline that breaks on a view both sides declare is
+ * never quietly reported as an addition.
  *
  * `--dist` and `--repo-root` point the render at a different checkout's build,
  * which is how `visual-diff.js` renders the baseline commit: the fixtures and
@@ -85,11 +88,12 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 		};
 	}
 
-	// A base-only view (see mergeRegistries) carries the base commit's fixture
-	// directory, since the current tree may have deleted its fixture too.
+	// A registry from baselineRegistry() pins each view to the fixture directory
+	// of the commit that declared it, so a base view renders with the base
+	// commit's fixture even when the current tree renamed or deleted it.
 	const fixturePath = path.join(view.fixtureDir || path.join(__dirname, 'fixtures'), path.basename(String(view.fixture || '')));
 	if (!view.fixture || !fs.existsSync(fixturePath)) {
-		return { view: view.id, state: state ? state.id : null, theme, status: 'error', error: `Missing fixture ${view.fixture}` };
+		return { view: view.id, state: state ? state.id : null, theme, status: 'error', missing: true, error: `Missing fixture ${view.fixture}` };
 	}
 
 	const html = buildPageHtml({
@@ -227,10 +231,12 @@ async function main() {
 			for (const state of renderTargets(view)) {
 				for (const theme of themes) {
 					let result = await renderView({ browser, view, state, theme, outDir, tmpDir, defaults: config.defaults, distDir, repoRoot });
-					if (allowMissing && result.status === 'error' && result.missing) {
+					const currentOnly = Boolean(view.currentOnly || (state && state.currentOnly));
+					if (allowMissing && result.status === 'error' && currentOnly) {
 						// The baseline simply does not have this yet. Leaving no
 						// screenshot behind is what lets the diff call the current
-						// one "added" instead of the whole run failing.
+						// one "added" instead of the whole run failing. A target both
+						// registries declare is never skipped: its failure is real.
 						result = { ...result, status: 'skipped' };
 					}
 					results.push(result);

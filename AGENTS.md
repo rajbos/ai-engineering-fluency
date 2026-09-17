@@ -283,10 +283,12 @@ at the result before opening the PR:
 
 ```bash
 cd vscode-extension
-npm run visual:diff        # renders merge base vs working tree; report in visual-output/diff/
+npm run visual:diff        # renders merge base vs working tree
 ```
 
-Read `visual-output/diff/report.md` and the diff PNGs. The views you changed
+The output lands at the **repository root**, in `visual-output/` (so
+`../visual-output/` from `vscode-extension/`). Read
+`visual-output/diff/report.md` there and the diff PNGs. The views you changed
 should show as changed and nothing else should — an unexpected "changed" row is
 a regression to fix before pushing, and an expected change showing as
 "unchanged" means the harness is not looking at what you built (see the next

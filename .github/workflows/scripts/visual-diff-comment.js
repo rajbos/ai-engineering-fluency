@@ -245,9 +245,11 @@ function planAttachments(comparisons, roots, budget, titles) {
     const label = `${describe(c, titles)} ${c.theme}`;
     const files = [];
     if (c.status === 'changed') {
+      // A changed row always has a diff image; one without is malformed and
+      // is not attached at all rather than as a before/after pair.
       files.push({ kind: 'Before', file: resolveAttachment(roots.root, 'baseline', c.baseline), alt: `Before: ${label}` });
       files.push({ kind: 'After', file: resolveAttachment(roots.root, 'current', c.current), alt: `After: ${label}` });
-      if (c.diff) files.push({ kind: 'Diff', file: resolveAttachment(roots.root, 'diff', c.diff), alt: `Diff: ${label}` });
+      files.push({ kind: 'Diff', file: c.diff ? resolveAttachment(roots.root, 'diff', c.diff) : null, alt: `Diff: ${label}` });
     } else if (c.status === 'added') {
       files.push({ kind: 'After', file: resolveAttachment(roots.root, 'current', c.current), alt: `New view: ${label}` });
     } else if (c.status === 'removed') {

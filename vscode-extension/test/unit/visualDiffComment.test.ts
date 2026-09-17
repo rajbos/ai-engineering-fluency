@@ -140,6 +140,18 @@ test('planAttachments attaches a changed view as a complete before/after/diff tr
 	}
 });
 
+test('planAttachments refuses a changed row that has no diff image', () => {
+	const { root, cleanup } = screenshotsRoot();
+	try {
+		const noDiff: Comparison = { view: 'usage', state: 'tools', theme: 'dark', status: 'changed', baseline: 'usage--tools.dark.png', current: 'usage--tools.dark.png', changedPixels: 10, changedPercent: 1 };
+		const plan = publisher.planAttachments([noDiff], { root }, 48, new Map());
+		assert.equal(plan.attachments.length, 0, 'a before/after pair without its diff is malformed, not a partial triple');
+		assert.equal(plan.inline.size, 0);
+	} finally {
+		cleanup();
+	}
+});
+
 test('planAttachments honours the budget and prefers the dark theme', () => {
 	const { root, cleanup } = screenshotsRoot();
 	try {

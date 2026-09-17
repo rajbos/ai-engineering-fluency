@@ -190,16 +190,20 @@ click/select steps replayed on a fresh page before the screenshot:
 diff will never see what you built. Reach a nested tab by clicking its group
 first (the diagnostics Research and Settings groups do this).
 
-The baseline is rendered from the current `views.config.json` **merged with the
-base commit's**: a state (or a whole view) this branch introduced has nothing
-to render at the base commit, so `visual-diff.js` renders the baseline with
-`--allow-missing` and the comparison reports the current screenshot as
-**added**; a state or view this branch removed or renamed is still rendered on
-the baseline side (from the base commit's registry and fixtures) and reported
-as **removed**, rather than vanishing from both sides as "no change". The
-current-tree render stays strict: a state that cannot be reached in *your*
-build is still an error. View and state ids are file names, so the registry
-refuses anything but letters, digits, `_` and single dashes, and duplicates.
+The baseline is rendered from the **base commit's own** `views.config.json`
+— its definitions, steps, fixtures and bundles — plus every view and state
+only the current registry declares. So a state (or a whole view) this branch
+introduced is attempted on the old bundle and, where it cannot render there,
+skipped by `--allow-missing` and reported as **added**; a state or view this
+branch removed or renamed still renders on the baseline side and is reported
+as **removed**, rather than vanishing from both sides as "no change"; and a
+state whose selector or fixture this branch changed is still driven the old
+way on the old bundle, so the comparison shows the real before and after.
+`--allow-missing` skips only those current-only targets: a view both sides
+declare that fails on the base bundle is an error, never a silent "added".
+The current-tree render stays strict too. View and state ids are file names,
+so the registry refuses anything but letters, digits, `_` and single dashes,
+and duplicates.
 
 ## Determinism
 
