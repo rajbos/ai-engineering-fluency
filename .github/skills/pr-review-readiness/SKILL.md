@@ -115,12 +115,18 @@ fallback and work anywhere.
    `copilot-pull-request-reviewer` is strong evidence but not authenticated
    proof that GitHub's native reviewer produced it — nothing stops another
    workflow from registering a check run under the same name. Over REST,
-   also confirm the run's `app` object identifies the Copilot reviewer
-   (its `app.slug`, not just the run `name`) before trusting it. The MCP
-   `get_check_runs` method doesn't expose an app identity in its result
-   here — for MCP-only callers this is a known gap in this skill's
-   precision; treat a name-only match as best-effort, not authenticated,
-   and prefer the REST form when this distinction matters.
+   filter to runs whose `app.slug` equals exactly `copilot-pull-request-reviewer`
+   (ideally cross-checked against the app's numeric id, which is stable
+   across renames) **before** applying the status/recency selection above —
+   an impostor run must never be allowed to influence "any active" or "the
+   newest completed one". The MCP `get_check_runs` method doesn't expose an
+   app identity in its result here, so this filter isn't available to
+   MCP-only callers. Don't call that "best-effort and move on": when the
+   identity can't be verified, **fail closed** — treat the result as
+   inconclusive/not-ready rather than trusting a name-only match to reach
+   "completed" or "done, no comments". Prefer the REST form whenever this
+   distinction matters, since it's the only path that can actually verify
+   it.
 3. **Decide from the selected run's state:**
 
    | State | Meaning | What to do |
@@ -206,9 +212,11 @@ fallback and work anywhere.
      - `COMMENTED` / `APPROVED` / `CHANGES_REQUESTED`, but the check run's
        `conclusion` is anything else → `commit_id == sha` only proves the
        review is *current*, not that it's *complete* (a review can be
-       submitted and then the run still fail or get cancelled). Fall
-       through to the terminal cases below as if no matching review
-       existed.
+       submitted and then the run still fail or get cancelled). This is its
+       own outcome, **not yet ready** — do **not** fall through to the
+       terminal cases below, which are defined only for the "no bot review
+       exists at all" situation and have no defined meaning for a review
+       that does exist but whose run didn't finish cleanly.
 
    One more known limitation: this selection ties the review to `sha`, not
    to the specific check-run attempt selected in step 3. On the rare rerun
@@ -220,8 +228,9 @@ fallback and work anywhere.
    the algorithm can use, not an absolute guarantee.
 
    The terminal cases below apply only when there is **no** bot review for
-   `sha` at all (not `PENDING`, not `DISMISSED`, not a submitted one) —
-   any of those is handled above and never reaches here.
+   `sha` at all (not `PENDING`, not `DISMISSED`, not a submitted-but-run-
+   didn't-finish-cleanly one, not a submitted-and-clean one) — every other
+   case is handled above and never reaches here.
 
    - **No bot review at all for `sha`, and the check run's `conclusion` is
      anything other than exactly `success` or `neutral`** — treat every
@@ -255,13 +264,22 @@ review state this cycle. Reschedule a later check-in instead of polling
 tightly in a loop — the check run typically takes several minutes, so a tight
 poll wastes cycles without changing the answer any sooner.
 
-If the gate says **current and complete** (a matching review for `sha`, or a
-successfully completed check run with no review at all): the review state is
-safe to read and act on — but re-check the PR's head SHA immediately before
-taking that action (replying to or resolving a thread, or recording "no
-findings"). A push can land after the gate passes and before you act on it;
-if the head moved, the gate's answer is for a commit that is no longer
-current, so rerun the gate against the new head instead.
+If the gate says **current and complete** — a `COMMENTED`/`APPROVED`/
+`CHANGES_REQUESTED` review for `sha` whose check run's `conclusion` is
+`success` or `neutral` (never a `PENDING` or `DISMISSED` review, and never
+one paired with a non-clean conclusion — those are handled above as their
+own not-ready outcomes), or a successfully completed check run with no bot
+review at all: the review state is safe to read and act on — but re-check
+immediately before taking that action (replying to or resolving a thread, or
+recording "no findings"), and not just the head SHA. Rerunning this
+algorithm again covers both: a push can land after the gate passes (the head
+moved, so the gate's answer is for a commit that's no longer current), and
+so can a fresh check-run attempt or bot review for the *same* `sha` (the
+reruns this algorithm explicitly supports) — the head SHA alone doesn't
+detect that second race. Re-run the full gate right before acting rather
+than only re-checking `head.sha`, and if anything about the matched
+check-run or review has changed, treat the earlier verdict as stale and act
+on the new one instead.
 
 ## Verified against
 
