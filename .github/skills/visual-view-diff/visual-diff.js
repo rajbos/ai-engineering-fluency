@@ -147,11 +147,10 @@ function writeBaselineRegistry(worktreeDir, outRoot) {
 	// every real before/after comparison.
 	let base = null;
 	if (fs.existsSync(path.join(baseSkillDir, 'views.config.json'))) {
-		try {
-			base = readConfig(baseSkillDir);
-		} catch (error) {
-			throw new Error(`The base commit's views.config.json could not be used: ${error && error.message || error}`);
-		}
+	let base = null;
+	if (fs.existsSync(path.join(baseSkillDir, 'views.config.json'))) {
+		base = readConfig(baseSkillDir);
+	}
 	}
 	const merged = baselineRegistry(readConfig(SKILL_DIR), base, {
 		baseFixtureDir: path.join(baseSkillDir, 'fixtures'),
