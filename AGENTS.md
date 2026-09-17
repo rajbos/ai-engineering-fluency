@@ -145,8 +145,10 @@ code before the agent starts, at **`.graphify-agent/graph.json`** (order of
 it). It needs no secrets — it is local AST parsing (`--code-only`).
 The build runs early — before the Azure session-log and usage-data hydration —
 so that graphify's dependency tree is installed and executed while there is no
-sensitive data on disk for a compromised wheel to read. That covers graphify
-only: the azure-storage-loader's own npm dependencies and
+sensitive data on disk for a compromised wheel to read. The pinned Playwright
+install and Chromium download that the webview harnesses need sit in the same
+early slot for the same reason. That covers graphify and Playwright only: the
+azure-storage-loader's own npm dependencies and
 `scripts/fetch-agent-sessions.js` still run *after* those files exist, so this
 is one contained path rather than a supply-chain boundary for the whole job.
 The build is deliberately non-blocking (every step is `continue-on-error`),
@@ -273,11 +275,39 @@ normal suite. `check:interaction` renders the real bundles headlessly via the
 `visual-view-diff` harness — it never opens an editor window, so it is safe for
 agents to run (see "Never Launch a Real Editor/IDE Instance" above).
 
+### UI changes come with before/after screenshots
+
+A reviewer cannot judge a UI change from a diff of template strings. For any
+change that alters what a panel *looks like*, also run the visual diff and look
+at the result before opening the PR:
+
+```bash
+cd vscode-extension
+npm run visual:diff        # renders merge base vs working tree; report in visual-output/diff/
+```
+
+Read `visual-output/diff/report.md` and the diff PNGs. The views you changed
+should show as changed and nothing else should — an unexpected "changed" row is
+a regression to fix before pushing, and an expected change showing as
+"unchanged" means the harness is not looking at what you built (see the next
+paragraph). Then, in the PR body, name the views and tabs you expect to change.
+
+CI posts the screenshots for you: the `ui-checks` job runs the same diff and
+attaches the before/after/diff images as one comment on the PR, replaced on
+every push (`gh pr comment --attach`, via
+`.github/workflows/scripts/visual-diff-comment.js`). Do not commit PNGs to the
+repo and do not try to upload images by hand; make the CI comment say what the
+PR body promised. Uploading needs a user token, so the workflow uses the
+`GH_PAT` secret and falls back to an image-free comment without it.
+
 **Adding a new webview panel means adding it to
 `.github/skills/visual-view-diff/views.config.json`**, with a fixture capturing
 its `__INITIAL_*__` payload. That one registry feeds the visual diff, the CI
 screenshots and the interaction crawl — a view missing from it is silently
-unvalidated by all three.
+unvalidated by all three. **Adding a tab or mode to an existing panel means
+adding a `state` for it** in the same file — the harness screenshots a view in
+its initial render plus its declared states only, so a new section on a tab
+with no state diffs as "unchanged" and ships without a screenshot.
 
 The full picture of what each check catches, and the one-command release
 preflight, is in [docs/VALIDATION.md](docs/VALIDATION.md).

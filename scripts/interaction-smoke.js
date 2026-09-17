@@ -61,6 +61,9 @@ const DIST_DIR = path.join(REPO_ROOT, 'vscode-extension', 'dist', 'webview');
 const { buildPageHtml, loadFixture } = require(path.join(SKILL_DIR, 'lib', 'harness.js'));
 const { loadChromium } = require(path.join(SKILL_DIR, 'lib', 'browser.js'));
 const { parseArgs, readConfig, selectViews } = require(path.join(SKILL_DIR, 'lib', 'config.js'));
+// The `select` step's option picking is shared with the visual diff's `states`,
+// so a scenario and a screenshot state read the same step vocabulary.
+const { PICK_OPTION } = require(path.join(SKILL_DIR, 'lib', 'steps.js'));
 
 const { collectHandledCommandsFromAst, widenHandledFromText, collectTsFiles } = require('./validate-webview-contract.js');
 
@@ -276,24 +279,6 @@ async function clickControl(page, control) {
   }
   return { status: 'dead', posted, domChanged: false, quiet };
 }
-
-/**
- * Picks the value a `select` step should switch to: the declared one, or the
- * first enabled option that is not already selected. Returns null when the
- * select has nothing else to offer, which is a legitimate no-op, not a failure.
- */
-const PICK_OPTION = ([selector, wanted]) => {
-  const el = document.querySelector(selector);
-  if (!el) {
-    return { missing: true };
-  }
-  const options = Array.from(el.options).filter((o) => !o.disabled);
-  if (wanted !== null && wanted !== undefined) {
-    return options.some((o) => o.value === wanted) ? { value: wanted } : { unavailable: true };
-  }
-  const next = options.find((o) => o.value !== el.value);
-  return next ? { value: next.value } : { noop: true };
-};
 
 /** Replays one declared scenario on a fresh page and reports what each step did. */
 async function runScenario(page, view, scenario) {

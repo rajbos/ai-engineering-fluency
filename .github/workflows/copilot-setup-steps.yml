@@ -76,6 +76,47 @@ jobs:
           cd vscode-extension && npm ci --ignore-scripts
           cd ../cli && npm ci --ignore-scripts
 
+      # The webview harnesses (`npm run check:interaction`, `npm run visual:diff`,
+      # the visual-view-diff skill) render the real webview bundles in headless
+      # Chromium. Playwright is deliberately not a dependency of the extension,
+      # so without this the agent cannot click a control or screenshot a panel
+      # and every UI change ships unverified. Same pinned install and browser
+      # cache as the `ui-checks` job in ci.yml; lib/browser.js in the skill
+      # resolves this location explicitly.
+      #
+      # Placed before the Azure hydration below for the same reason graphify
+      # is: a browser download and its npm tree are third-party code, and here
+      # they run while ./session-logs and ./usage-data do not yet exist.
+      # continue-on-error keeps a Playwright CDN outage from costing the rest of
+      # the setup; the agent then simply lacks the headless checks for that run.
+      - name: Install the pinned Playwright for the webview harnesses
+        id: playwright-install
+        continue-on-error: true
+        working-directory: .github/workflows/dependencies/playwright
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        if: steps.playwright-install.outcome == 'success'
+        continue-on-error: true
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('.github/workflows/dependencies/playwright/package-lock.json') }}
+
+      - name: Install Playwright Chromium
+        if: steps.playwright-install.outcome == 'success'
+        continue-on-error: true
+        working-directory: .github/workflows/dependencies/playwright
+        env:
+          CACHE_HIT: ${{ steps.playwright-cache.outputs.cache-hit }}
+        run: |
+          if [ "$CACHE_HIT" = "true" ]; then
+            npx --no-install playwright install-deps chromium
+          else
+            npx --no-install playwright install --with-deps chromium
+          fi
+
       # Build a queryable code knowledge graph (graphify) so the agent can ask
       # structural questions - what calls X, what a change to Y reaches - instead
       # of fanning grep/read out across ~600 source files. `--code-only` is local

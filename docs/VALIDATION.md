@@ -211,11 +211,24 @@ can trust. The CI job checks out with `fetch-depth: 0` for the same reason.
 | `build` | types, lint, json, l10n, compile, **contract**, unit tests |
 | `ui-checks` (PRs only) | **interaction smoke**, **visual view diff vs the merge base** |
 
-`ui-checks` uploads before/after/diff screenshots as the `webview-screenshots`
-artifact and writes the visual report into the job summary, so a reviewer can
-see a UI change instead of inferring it from a CSS diff. The visual diff
-reports rather than gates — a visual change is usually intended — while the
-interaction smoke does gate, because a dead control never is.
+`ui-checks` renders every view in its initial state and in each tab/mode it
+declares as a `state` in `views.config.json`, then **posts the before/after/diff
+images as a comment on the PR** (one comment, replaced on every push) with
+`gh pr comment --attach`, rendered by
+`.github/workflows/scripts/visual-diff-comment.js`. A reviewer sees the UI
+change where they review, instead of inferring it from a CSS diff. The full set
+of screenshots is also uploaded as the `webview-screenshots` artifact and the
+report table goes into the job summary. The visual diff reports rather than
+gates — a visual change is usually intended — while the interaction smoke does
+gate, because a dead control never is.
+
+Two things to know about that comment:
+
+- `gh --attach` only uploads with a **user** token (OAuth or a PAT); the Actions
+  installation token is refused. The job uses the repository's `GH_PAT` secret
+  for the upload, so the comment is authored by that user. Without the secret
+  the comment still posts, minus the inline images, linking to the artifact.
+- Fork PRs get a read-only token and no secrets, so they only get the artifact.
 
 ## What is deliberately not covered
 

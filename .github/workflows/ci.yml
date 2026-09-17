@@ -391,6 +391,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: check-changes
     if: github.event_name == 'pull_request' && needs.check-changes.outputs.ci-relevant == 'true'
+    permissions:
+      contents: read
+      pull-requests: write # post the before/after screenshot comment
     steps:
     - name: Harden the runner (Audit all outbound calls)
       uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -457,7 +460,11 @@ jobs:
       # A visual change is usually intended, so this reports rather than gates;
       # the report and the images are the deliverable for the reviewer.
       continue-on-error: true
-      run: node .github/skills/visual-view-diff/visual-diff.js --theme both
+      run: node .github/skills/visual-view-diff/visual-diff.js --theme both --base "$BASE_REF"
+      env:
+        # The PR's base branch, not origin/main: the merge base is computed
+        # against whatever the PR is actually targeting.
+        BASE_REF: origin/${{ github.event.pull_request.base.ref }}
 
     - name: Publish visual diff to the job summary
       if: always()
@@ -479,6 +486,129 @@ jobs:
           visual-output/current/
           visual-output/diff/
         retention-days: 14
+
+    # ── Put the screenshots where the reviewer is: on the PR ──────────────
+    # An artifact zip and a job summary table are where screenshots went to
+    # die: nobody opened them, so UI PRs shipped with no visual review. The
+    # steps below post the before/after/diff images as one comment on the PR,
+    # replaced on every push, using `gh pr comment --attach` (GitHub CLI
+    # 2.99+, https://github.blog/changelog/2026-09-01-github-cli-media-in-issues-pull-requests-and-comments/).
+    #
+    # Two constraints shape this:
+    #   - gh only uploads with a user token (OAuth, classic or fine-grained
+    #     PAT). The Actions installation token is refused, so the upload uses
+    #     the repository's GH_PAT secret - the same one pr-risk-review.yml
+    #     already relies on - and the comment is authored by that user. The
+    #     PAT is exposed to the posting step only; nothing that builds or
+    #     renders the PR's code can read it. Without the secret (or if the
+    #     upload fails) the comment is still posted with GITHUB_TOKEN, minus
+    #     the inline images, pointing at the artifact instead.
+    #   - Fork PRs get a read-only token and no secrets, so they are skipped
+    #     here; their screenshots stay in the artifact.
+    - name: Render the screenshot comment
+      id: visual-comment
+      if: always() && github.event.pull_request.head.repo.full_name == github.repository
+      env:
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -euo pipefail
+        node .github/workflows/scripts/visual-diff-comment.js \
+          --report visual-output/diff/report.json \
+          --screenshots visual-output \
+          --out-dir visual-comment \
+          --run-url "$RUN_URL" \
+          --artifact webview-screenshots \
+          --base "$BASE_SHA"
+
+    # ubuntu-latest may lag behind the gh release that added --attach. Pin a
+    # known-good build and verify its checksum rather than trusting whatever
+    # the image ships; the download is skipped when the image is new enough.
+    - name: Ensure the GitHub CLI can attach images
+      if: always() && steps.visual-comment.outputs.has_report == 'true'
+      env:
+        GH_CLI_VERSION: "2.101.0"
+        GH_CLI_SHA256: "9bca2d1c16825f109907a23307628a2f0698fbf99662b73a5cf0b020293072b8"
+        GH_CLI_MIN_VERSION: "2.99.0"
+      run: |
+        set -euo pipefail
+        have="$(gh --version 2>/dev/null | head -n1 | awk '{print $3}' || true)"
+        if [ -n "$have" ] && [ "$(printf '%s\n%s\n' "$GH_CLI_MIN_VERSION" "$have" | sort -V | head -n1)" = "$GH_CLI_MIN_VERSION" ]; then
+          echo "gh $have already supports --attach (needs $GH_CLI_MIN_VERSION+)."
+          exit 0
+        fi
+        echo "gh ${have:-<missing>} is older than $GH_CLI_MIN_VERSION; installing $GH_CLI_VERSION."
+        archive="$RUNNER_TEMP/gh_${GH_CLI_VERSION}_linux_amd64.tar.gz"
+        curl -fsSL --retry 3 -o "$archive" \
+          "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_amd64.tar.gz"
+        echo "${GH_CLI_SHA256}  ${archive}" | sha256sum -c -
+        tar -xzf "$archive" -C "$RUNNER_TEMP"
+        echo "$RUNNER_TEMP/gh_${GH_CLI_VERSION}_linux_amd64/bin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/gh_${GH_CLI_VERSION}_linux_amd64/bin/gh" --version
+
+    - name: Post the screenshot comment on the PR
+      if: always() && steps.visual-comment.outputs.has_report == 'true'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # User token for the uploads; see the note above. Optional.
+        GH_ATTACH_TOKEN: ${{ secrets.GH_PAT }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        HAS_CHANGES: ${{ steps.visual-comment.outputs.has_changes }}
+        ATTACHMENTS: ${{ steps.visual-comment.outputs.attachments }}
+        COMMENT_MARKER: visual-view-diff
+      run: |
+        set -euo pipefail
+
+        # One comment per PR. gh can only upload into a NEW comment, so the
+        # previous one is removed and a fresh one posted on every push rather
+        # than edited in place. The marker is an HTML comment the renderer
+        # emits from its own template - no PR text ever reaches the body.
+        existing="$(GH_TOKEN="$GITHUB_TOKEN" gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+          --paginate \
+          --jq "[.[] | select(.body | contains(\"<!-- ${COMMENT_MARKER} -->\")) | .id] | join(\" \")")"
+
+        # A PR with no visual change gets no comment - unless an earlier push
+        # did change something, in which case the stale comment is replaced by
+        # the all-clear rather than silently deleted.
+        if [ "$HAS_CHANGES" != "true" ] && [ -z "$existing" ]; then
+          echo "No visual changes and no earlier screenshot comment; nothing to post."
+          exit 0
+        fi
+
+        post_with_images() {
+          [ -n "${GH_ATTACH_TOKEN:-}" ] || return 1
+          [ "${ATTACHMENTS:-0}" -gt 0 ] || return 1
+          args=()
+          while IFS= read -r line; do
+            [ -n "$line" ] && args+=(--attach "$line")
+          done < visual-comment/attachments.txt
+          GH_TOKEN="$GH_ATTACH_TOKEN" gh pr comment "$PR_NUMBER" --repo "$REPO" \
+            --body-file visual-comment/comment.md "${args[@]}"
+        }
+
+        post_plain() {
+          GH_TOKEN="$GITHUB_TOKEN" gh api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            -F body=@visual-comment/comment-plain.md > /dev/null
+        }
+
+        if post_with_images; then
+          echo "Posted the screenshot comment with ${ATTACHMENTS} inline image(s)."
+        else
+          if [ -z "${GH_ATTACH_TOKEN:-}" ]; then
+            echo "::notice::GH_PAT is not configured, so the screenshot comment links to the artifact instead of embedding images. Add a user PAT with write access as the GH_PAT secret to inline them."
+          elif [ "${ATTACHMENTS:-0}" -gt 0 ]; then
+            echo "::warning::Uploading the screenshots with gh --attach failed; posting the comment without inline images."
+          fi
+          post_plain
+          echo "Posted the screenshot comment without inline images."
+        fi
+
+        for id in $existing; do
+          GH_TOKEN="$GITHUB_TOKEN" gh api --method DELETE "repos/${REPO}/issues/comments/${id}" > /dev/null \
+            && echo "Removed the previous screenshot comment ${id}." \
+            || echo "::warning::Could not remove the previous screenshot comment ${id}."
+        done
 
   # Stable required-check anchor for this workflow. Require "CI result" in
   # branch protection rather than the individual jobs: it is the only name that

@@ -248,7 +248,7 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 
 ### visual-view-diff
 
-**Purpose**: Render the extension's webview panels headlessly, screenshot them, and report which views changed visually against a baseline commit. Produces the images and a Markdown report only — publishing them (a PR comment, a job summary, an artifact) is deliberately a separate concern.
+**Purpose**: Render the extension's webview panels headlessly — each in its initial render and in every tab/mode declared as a `state` — screenshot them, and report which views changed visually against a baseline commit. Produces the images and a Markdown report only — publishing them is deliberately a separate concern; on pull requests the `ui-checks` job in `ci.yml` posts them as a comment with `gh pr comment --attach`.
 
 **Use this skill when:**
 - A change touches `vscode-extension/src/webview/**`, the shared webview CSS, or a `get*Html` method in `extension.ts`

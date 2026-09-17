@@ -211,7 +211,7 @@
       {
         "weekKey": "2026-02-01",
         "label": "Week 1",
-        "byCanonicalSkill": {
+        "byName": {
           "graphify": 2,
           "code-review": 1
         },
@@ -220,7 +220,7 @@
       {
         "weekKey": "2026-02-02",
         "label": "Week 2",
-        "byCanonicalSkill": {
+        "byName": {
           "graphify": 3,
           "code-review": 2
         },
@@ -229,7 +229,7 @@
       {
         "weekKey": "2026-02-03",
         "label": "Week 3",
-        "byCanonicalSkill": {
+        "byName": {
           "graphify": 4,
           "code-review": 3
         },
@@ -238,7 +238,7 @@
       {
         "weekKey": "2026-02-04",
         "label": "Week 4",
-        "byCanonicalSkill": {
+        "byName": {
           "graphify": 5,
           "code-review": 1
         },
@@ -247,7 +247,7 @@
       {
         "weekKey": "2026-02-05",
         "label": "Week 5",
-        "byCanonicalSkill": {
+        "byName": {
           "graphify": 6,
           "code-review": 2
         },
@@ -256,7 +256,7 @@
       {
         "weekKey": "2026-02-06",
         "label": "Week 6",
-        "byCanonicalSkill": {
+        "byName": {
           "graphify": 7,
           "code-review": 3
         },
