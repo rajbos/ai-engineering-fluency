@@ -5825,6 +5825,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'usage.sessions.contextFill.used': l10n.t('usage.sessions.contextFill.used'),
 			'usage.sessions.contextFill.usedNearLimit': l10n.t('usage.sessions.contextFill.usedNearLimit'),
 			'usage.sessions.contextFill.noData': l10n.t('usage.sessions.contextFill.noData'),
+			// Recent Sessions — Claude Desktop local-transcript coverage banner. The three
+			// summary variants cover the singular/plural agreement of both counts.
+			'usage.claudeDesktopCoverage.summary.oneOfOne': l10n.t('usage.claudeDesktopCoverage.summary.oneOfOne'),
+			'usage.claudeDesktopCoverage.summary.singular': l10n.t('usage.claudeDesktopCoverage.summary.singular'),
+			'usage.claudeDesktopCoverage.summary.plural': l10n.t('usage.claudeDesktopCoverage.summary.plural'),
+			'usage.claudeDesktopCoverage.tooltip': l10n.t('usage.claudeDesktopCoverage.tooltip'),
 		};
 	}
 

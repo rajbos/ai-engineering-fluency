@@ -844,12 +844,12 @@ export interface TodaySessionSummary {
  * retention schedule, and cloud-run sessions never write one to this machine at all.
  */
 export interface ClaudeDesktopCoverage {
-/** Claude Desktop session records found on this machine. */
-knownSessions: number;
-/** Records whose transcript is readable here, so they can be measured. */
-withTranscript: number;
-/** Records with no local transcript — listed by Desktop, invisible to a local scanner. */
-missingTranscript: number;
+  /** Claude Desktop session records found on this machine. */
+  knownSessions: number;
+  /** Records whose transcript is readable here, so they can be measured. */
+  withTranscript: number;
+  /** Records with no local transcript — listed by Desktop, invisible to a local scanner. */
+  missingTranscript: number;
 }
 
 export interface UsageAnalysisStats {

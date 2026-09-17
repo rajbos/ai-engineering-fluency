@@ -4707,14 +4707,25 @@ function buildSubAgentSummaryHtml(sessions: TodaySessionSummary[]): string {
 function buildClaudeDesktopCoverageHtml(coverage: UsageAnalysisStats['claudeDesktopCoverage']): string {
 	if (!coverage || coverage.missingTranscript <= 0) { return ''; }
 	const { knownSessions, missingTranscript } = coverage;
-	const tooltip = 'Claude Desktop lists every session it knows about, but this extension can only measure sessions '
-		+ 'whose transcript is still on this machine. Two things remove a transcript from local disk:\n\n'
-		+ '• Claude Code deletes transcripts older than its retention window (the cleanupPeriodDays setting, 30 days by default). '
-		+ 'Raise it in ~/.claude/settings.json to keep more history measurable.\n'
-		+ '• Sessions that ran in the cloud never write a transcript to this machine at all.\n\n'
-		+ 'These sessions are not missing from your account — they are just not measurable locally.';
+	const tooltip = localize('usage.claudeDesktopCoverage.tooltip');
+	// Three sentence shapes, because both counts drive agreement and they move independently:
+	// one-of-one keeps the noun singular, one-of-many keeps the verb singular ("has … it"),
+	// and anything above one is fully plural ("have … they"). missingTranscript > 1 implies
+	// knownSessions > 1, so there is no fourth combination to cover.
+	let summaryKey = 'usage.claudeDesktopCoverage.summary.plural';
+	if (missingTranscript === 1) {
+		summaryKey = knownSessions === 1
+			? 'usage.claudeDesktopCoverage.summary.oneOfOne'
+			: 'usage.claudeDesktopCoverage.summary.singular';
+	}
+	// Bold only the missing count. The number is substituted after escaping via a sentinel the
+	// translated text can never contain, so the emphasis never depends on the two counts differing
+	// and never re-escapes the surrounding prose.
+	const boldSlot = '\u0001';
+	const summary = escapeHtml(localizeFormat(summaryKey, boldSlot, formatNumber(knownSessions)))
+		.replace(boldSlot, `<strong>${escapeHtml(formatNumber(missingTranscript))}</strong>`);
 	return `<div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">
-		<span title="${escapeHtml(tooltip)}" style="cursor:help;">🖥️ <strong>${formatNumber(missingTranscript)}</strong> of ${formatNumber(knownSessions)} Claude Desktop session${knownSessions === 1 ? '' : 's'} known to this machine have no local transcript left, so they cannot be measured here<span style="font-size:0.75em; opacity:0.6;"> ℹ️</span></span>
+		<span title="${escapeHtml(tooltip)}" style="cursor:help;">🖥️ ${summary}<span style="font-size:0.75em; opacity:0.6;"> ℹ️</span></span>
 	</div>`;
 }
 
