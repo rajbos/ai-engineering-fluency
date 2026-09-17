@@ -11731,7 +11731,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		});
 
 		const panel = this.efficiencyPanel;
-		panel.webview.html = this.getLoadingHtml(panel.webview);
+		this.installEfficiencyDocument(panel, this.getLoadingHtml(panel.webview));
 
 		// Build the data in the background rather than awaiting it here: showEfficiency() is
 		// wrapped in dispatch()'s in-flight guard, which only releases the 'showEfficiency' key
@@ -11783,7 +11783,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 				generation = startedAt;
 				// Swap in the loading screen only once this refresh actually starts; queued
 				// behind an initial build, it would otherwise blank the panel and sit there.
-				if (this.efficiencyPanel === panel) { panel.webview.html = this.getLoadingHtml(panel.webview); }
+				if (this.efficiencyPanel === panel) { this.installEfficiencyDocument(panel, this.getLoadingHtml(panel.webview)); }
 				return this.buildEfficiencyViewData(true, this.efficiencyLoadingSink(), generation);
 			});
 			// Same reasoning as the initial build: show something now — the last good payload if
@@ -11799,7 +11799,11 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			if (!this.recordEfficiencyPayload(data, generation)) {
 				if (this.efficiencyPanel !== panel) { return; }
 				const afterClear = this._lastEfficiencyViewData;
-				if (afterClear) { panel.webview.html = this.getEfficiencyHtml(panel.webview, afterClear); }
+				// A fallback is still a freshly installed document, so it goes through the same
+				// door as a normal render: buffer reset, then Value re-derived for it. Rendering
+				// it directly would leave the previous document's retained snapshot armed and the
+				// new one showing whatever PR data the fallback payload was built with.
+				if (afterClear) { await this.renderEfficiencyData(panel, afterClear); }
 				else { this.showEfficiencyError(panel, new Error(l10n.t('efficiency.error.staleAfterClear'))); }
 				this.requestEfficiencyRebuild();
 				return;
@@ -11811,7 +11815,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			this.releaseEfficiencyRebuildRequest(generation);
 			const previous = this._lastEfficiencyViewData;
 			if (this.efficiencyPanel !== panel) { return; }
-			if (previous) { panel.webview.html = this.getEfficiencyHtml(panel.webview, previous); }
+			if (previous) { await this.renderEfficiencyData(panel, previous); }
 			else { this.showEfficiencyError(panel, error); }
 			return;
 		}
@@ -11829,10 +11833,22 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * buffer holds the message until the new document announces readiness.
 	 */
 	private async renderEfficiencyData(panel: vscode.WebviewPanel, data: EfficiencyViewData): Promise<void> {
-		this.efficiencyMessageReplay.reset();
 		this._lastEfficiencyViewData = data;
-		panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
+		this.installEfficiencyDocument(panel, this.getEfficiencyHtml(panel.webview, data));
 		await this.notifyEfficiencyValueSignals();
+	}
+
+	/**
+	 * The one place the Efficiency panel's HTML is replaced.
+	 *
+	 * Installing a document invalidates the Value replay buffer: a retained snapshot is only
+	 * meaningful for the document it was derived for. Routing every swap through here — the two
+	 * loading screens, the failure state, and the rendered view — is what keeps that true without
+	 * each call site remembering to, and keeps "does this path reset?" answerable by grep.
+	 */
+	private installEfficiencyDocument(panel: vscode.WebviewPanel, html: string): void {
+		this.efficiencyMessageReplay.reset();
+		panel.webview.html = html;
 	}
 
 	/**
@@ -12063,7 +12079,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	/** Renders the failure state on `panel`, if it is still the live Efficiency panel. */
 	private showEfficiencyError(panel: vscode.WebviewPanel, error: unknown): void {
 		if (this.efficiencyPanel !== panel) { return; }
-		panel.webview.html = this.getEfficiencyErrorHtml(panel.webview, error);
+		this.installEfficiencyDocument(panel, this.getEfficiencyErrorHtml(panel.webview, error));
 	}
 
 	/**
