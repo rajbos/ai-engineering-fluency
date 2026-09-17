@@ -612,6 +612,22 @@ export function computeValueSignals(input: ValueSignalsInput): ValueSignals {
 	};
 }
 
+/**
+ * True when two Value snapshots say the same thing, so re-rendering would be a no-op.
+ *
+ * Both sides of the Efficiency panel's Value update check this: the extension host to avoid
+ * posting churn on every Repository PRs refresh, the webview to leave the rendered DOM (and the
+ * user's scroll position) alone when a replayed or duplicate update carries nothing new.
+ */
+export function valueSignalsEqual(a: ValueSignals | undefined, b: ValueSignals | undefined): boolean {
+	if (!a || !b) { return a === b; }
+	const keys: (keyof ValueSignals)[] = [
+		'userPrs', 'mergedPrs', 'aiPrs', 'prsSince', 'prsPerWeek', 'costPerMergedPr',
+		'applyRate', 'appliedBlocks', 'totalBlocks', 'locPerDollar', 'linesChanged', 'periodCost',
+	];
+	return keys.every((key) => a[key] === b[key]);
+}
+
 // ---------------------------------------------------------------------------
 // Skill / tool usage trends
 // ---------------------------------------------------------------------------

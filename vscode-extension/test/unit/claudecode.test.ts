@@ -3,6 +3,7 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { makeWorkspaceFixtureDir } from './tmpFixtureDirs';
 
 import { ClaudeCodeDataAccess, normalizeClaudeModelId } from '../../../src/claudecode';
 import { ClaudeCodeAdapter } from '../../../src/adapters/claudeCodeAdapter';
@@ -84,7 +85,7 @@ test('getProjectPathFromHash: Windows path reversal', async () => {
 function createTempSession(events: any[]): string {
 	// Keep synthetic session files outside the OS temp directory so the secure file-read guard
 	// in src/utils/safeFileRead.ts still permits the parser to exercise actual session logic.
-	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'claude-test-'));
+	const tmpDir = makeWorkspaceFixtureDir('claude-test-');
 	const projectDir = path.join(tmpDir, '.claude', 'projects', 'test-project');
 	fs.mkdirSync(projectDir, { recursive: true });
 	const filePath = path.join(projectDir, 'test-session.jsonl');
@@ -93,12 +94,18 @@ function createTempSession(events: any[]): string {
 	return filePath;
 }
 
-function cleanup(filePath: string) {
-	try {
-		// Walk up to the temp dir root and remove
-		const tmpRoot = filePath.split('.claude')[0];
-		fs.rmSync(tmpRoot, { recursive: true, force: true });
-	} catch { /* ignore */ }
+function cleanup(filePath: string): void {
+	// Deliberately a no-op on the path: makeWorkspaceFixtureDir registers the
+	// directory it created and removes it when the file finishes, so there is
+	// nothing to derive here.
+	//
+	// This used to be `fs.rmSync(filePath.split('.claude')[0], { recursive: true,
+	// force: true })`, which guessed the fixture root by splitting on a path
+	// segment that also occurs in the fixture's own path. A checkout whose own
+	// path contains `.claude` — a git worktree under `~/.claude/worktrees/`, say —
+	// made that expression resolve to the user's home directory and try to delete
+	// it recursively, with the failure swallowed by the surrounding catch.
+	void filePath;
 }
 
 test('getTokensFromClaudeCodeSession: counts actual API tokens', async () => {
