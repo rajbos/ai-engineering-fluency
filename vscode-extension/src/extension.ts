@@ -4952,6 +4952,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Core discover → parse → compute → render → persist pass for one refresh. */
 	private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {
 		this.log(isLeader ? 'Updating token stats (leader)...' : 'Updating token stats (follower)...');
+		// Covers the whole cycle below (discovery + preload/parse + stats), not just discovery —
+		// see the completion log near this method's return.
+		const refreshStartMs = Date.now();
 		// Captured before the preload: this run's output belongs to the generation its inputs were
 		// gathered in, not the one each later calculation starts in (see calculateUsageAnalysisStats).
 		const startedAtGeneration = this.beginRefreshGeneration();
@@ -4998,6 +5001,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			{ detailedStats, dailyStats, preloaded, silent, isLeader }, startedAtGeneration,
 		);
 		if (!published) { return undefined; }
+
+		const refreshElapsedSec = ((Date.now() - refreshStartMs) / 1000).toFixed(1);
+		this.log(`⏱️ Full refresh (${isLeader ? 'leader' : 'follower'}) completed in ${refreshElapsedSec}s: ${sessionFiles.length} session file(s) discovered, ${preloaded.length} loaded`);
 
 		// Skip the one-time full-year backfill when this run's discovery can't be trusted to be
 		// complete — see isDiscoveryUntrustworthyForBackfill() for why. Leader-only: unlike the

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
+import { makeTmpFixtureDir } from './tmpFixtureDirs';
 import * as path from 'node:path';
 
 import { BackendFacade } from '../../src/backend/facade';
@@ -10,7 +10,7 @@ import type { DailyRollupMapEntryLike } from '../../src/backend/rollups';
 test('BackendFacade computes daily rollups from JSONL and JSON sessions (and skips malformed/out-of-range)', async () => {
 	const warnings: string[] = [];
 	const now = Date.now();
-	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'ctt-rollups-'));
+	const tmpDir = makeTmpFixtureDir('ctt-rollups-');
 
 	const jsonlPath = path.join(tmpDir, '.copilot', 'session-state', 's.jsonl');
 	fs.mkdirSync(path.dirname(jsonlPath), { recursive: true });
