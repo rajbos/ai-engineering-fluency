@@ -228,7 +228,15 @@ Two things to know about that comment:
   installation token is refused. The job uses the repository's `GH_PAT` secret
   for the upload, so the comment is authored by that user. Without the secret
   the comment still posts, minus the inline images, linking to the artifact.
+  On a `pull_request` run the workflow file and the publisher script both come
+  from the PR head, so any same-repository contributor can already change what
+  runs next to that secret — the same trust the risk-review workflow extends.
+  Keep `GH_PAT` narrow: a fine-grained token limited to this repository with
+  *Pull requests: write* (and *Contents: read*) is all the upload needs.
 - Fork PRs get a read-only token and no secrets, so they only get the artifact.
+- Only comments carrying the marker **and** authored by the workflow's own
+  identities (the Actions bot, the PAT's user) are ever replaced; the newest
+  one survives, so two runs that race still converge on a single comment.
 
 ## What is deliberately not covered
 

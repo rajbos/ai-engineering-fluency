@@ -117,10 +117,14 @@ function buildWebviews(checkoutRoot, label) {
 	run(process.execPath, ['esbuild.js'], extensionDir);
 }
 
-function renderInto(outDir, { distDir, repoRoot, theme, view }) {
+function renderInto(outDir, { distDir, repoRoot, theme, view, allowMissing }) {
 	const args = [path.join(SKILL_DIR, 'render-views.js'), '--out', outDir, '--dist', distDir, '--repo-root', repoRoot];
 	if (theme) { args.push('--theme', theme); }
 	if (view) { args.push('--view', view); }
+	// The baseline is rendered with the *current* views.config.json, so a view
+	// or state this branch introduced has nothing to render at the base commit.
+	// That is an "added" screenshot, not a failed run.
+	if (allowMissing) { args.push('--allow-missing'); }
 	run(process.execPath, args, REPO_ROOT);
 }
 
@@ -156,6 +160,7 @@ function main() {
 			repoRoot: worktreeDir,
 			theme,
 			view,
+			allowMissing: true,
 		});
 
 		buildWebviews(REPO_ROOT, 'working tree');

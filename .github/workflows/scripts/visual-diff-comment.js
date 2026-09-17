@@ -84,12 +84,18 @@ function parseArgs(argv) {
     else if (arg === '--marker') opts.marker = next();
     else if (arg === '--run-url') opts.runUrl = next();
     else if (arg === '--artifact') opts.artifact = next();
-    else if (arg === '--base') opts.base = next();
+    else if (arg === '--base') opts.base = next().replace(/[^0-9a-f]/gi, '');
     else if (arg === '--max-attachments') opts.maxAttachments = Number(next());
     else {
       console.error(`Unknown option: ${arg}`);
       process.exit(2);
     }
+  }
+  opts.marker = safeId(opts.marker);
+  opts.artifact = safeId(opts.artifact);
+  if (opts.runUrl && !/^https:\/\/[A-Za-z0-9./_-]+$/.test(opts.runUrl)) {
+    console.error('--run-url must be a plain https URL');
+    process.exit(2);
   }
   if (!Number.isInteger(opts.maxAttachments) || opts.maxAttachments < 0 || opts.maxAttachments > 50) {
     console.error('--max-attachments must be a whole number between 0 and 50 (gh attaches at most 50 files)');
@@ -105,9 +111,9 @@ function loadTitles() {
   try {
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     for (const view of config.views || []) {
-      titles.set(view.id, view.title || view.id);
+      titles.set(safeId(view.id), safeText(view.title || view.id));
       for (const state of view.states || []) {
-        titles.set(`${view.id}--${state.id}`, state.title || state.id);
+        titles.set(`${safeId(view.id)}--${safeId(state.id)}`, safeText(state.title || state.id));
       }
     }
   } catch {
@@ -125,6 +131,26 @@ function safeAlt(text) {
   return String(text).replace(/[^A-Za-z0-9 ,.:_-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
 }
 
+/**
+ * Everything rendered into the comment comes from files the PR controls —
+ * views.config.json, report.json — and the comment is posted by a privileged
+ * identity. So nothing from those files may carry markup, a table pipe, a
+ * mention, a link or our own sticky marker into the body. Ids get a strict
+ * allowlist; titles keep readable punctuation and lose anything that means
+ * something to Markdown or HTML.
+ */
+function safeId(text) {
+  return String(text).replace(/[^A-Za-z0-9_.-]+/g, '_').slice(0, 80);
+}
+
+function safeText(text) {
+  return String(text)
+    .replace(/[<>|`\\[\]()@#*_~\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
 function formatPercent(value) {
   if (value === 0) return '0%';
   if (value < 0.01) return '<0.01%';
@@ -138,6 +164,59 @@ function formatChange(c) {
 /** `usage` or `usage--tools`, the screenshot's identity across the report. */
 function key(c) {
   return c.state ? `${c.view}--${c.state}` : c.view;
+}
+
+/**
+ * One comparison from report.json with every field this script renders
+ * reduced to something safe to put in a comment. Numbers are coerced, strings
+ * are allowlisted, and anything else is dropped.
+ */
+function normalizeComparison(raw) {
+  const theme = raw.theme === 'light' ? 'light' : 'dark';
+  const status = ['changed', 'unchanged', 'added', 'removed'].includes(raw.status) ? raw.status : 'unchanged';
+  const size = (v) => (typeof v === 'string' && /^\d+×\d+$/.test(v) ? v : '');
+  const file = (v) => (typeof v === 'string' ? path.posix.basename(v) : '');
+  return {
+    view: safeId(raw.view || ''),
+    state: raw.state ? safeId(raw.state) : null,
+    theme,
+    status,
+    changedPixels: Number.isFinite(raw.changedPixels) ? Math.max(0, Math.floor(raw.changedPixels)) : 0,
+    changedPercent: Number.isFinite(raw.changedPercent) ? Math.max(0, raw.changedPercent) : 0,
+    resized: raw.resized === true,
+    baselineSize: size(raw.baselineSize),
+    currentSize: size(raw.currentSize),
+    baseline: file(raw.baseline),
+    current: file(raw.current),
+    diff: file(raw.diff),
+  };
+}
+
+/**
+ * Resolves a screenshot for attaching. The path is rebuilt from the report's
+ * *basename* only, then resolved on disk and required to be a regular file
+ * inside the screenshots root — never a symlink, never `../`, never an
+ * absolute path smuggled through report.json. A file that fails any of that
+ * is simply not attached; the report still lists the view.
+ */
+function resolveAttachment(rootDir, subDir, fileName) {
+  if (!fileName || !/^[A-Za-z0-9_.-]+\.png$/.test(fileName) || fileName.includes('..')) {
+    return null;
+  }
+  const relative = path.posix.join(rootDir, subDir, fileName);
+  let real;
+  try {
+    if (fs.lstatSync(relative).isSymbolicLink()) { return null; }
+    real = fs.realpathSync(relative);
+    if (!fs.statSync(real).isFile()) { return null; }
+  } catch {
+    return null;
+  }
+  const rootReal = (() => { try { return fs.realpathSync(rootDir); } catch { return null; } })();
+  if (!rootReal || !real.startsWith(rootReal + path.sep)) {
+    return null;
+  }
+  return relative;
 }
 
 function describe(c, titles) {
@@ -166,15 +245,17 @@ function planAttachments(comparisons, roots, budget, titles) {
     const label = `${describe(c, titles)} ${c.theme}`;
     const files = [];
     if (c.status === 'changed') {
-      files.push({ kind: 'Before', file: path.posix.join(roots.baseline, c.baseline), alt: `Before: ${label}` });
-      files.push({ kind: 'After', file: path.posix.join(roots.current, c.current), alt: `After: ${label}` });
-      if (c.diff) files.push({ kind: 'Diff', file: path.posix.join(roots.diff, c.diff), alt: `Diff: ${label}` });
+      files.push({ kind: 'Before', file: resolveAttachment(roots.root, 'baseline', c.baseline), alt: `Before: ${label}` });
+      files.push({ kind: 'After', file: resolveAttachment(roots.root, 'current', c.current), alt: `After: ${label}` });
+      if (c.diff) files.push({ kind: 'Diff', file: resolveAttachment(roots.root, 'diff', c.diff), alt: `Diff: ${label}` });
     } else if (c.status === 'added') {
-      files.push({ kind: 'After', file: path.posix.join(roots.current, c.current), alt: `New view: ${label}` });
+      files.push({ kind: 'After', file: resolveAttachment(roots.root, 'current', c.current), alt: `New view: ${label}` });
     } else if (c.status === 'removed') {
-      files.push({ kind: 'Before', file: path.posix.join(roots.baseline, c.baseline), alt: `Removed view: ${label}` });
+      files.push({ kind: 'Before', file: resolveAttachment(roots.root, 'baseline', c.baseline), alt: `Removed view: ${label}` });
     }
-    const present = files.filter((f) => fs.existsSync(f.file));
+    // A changed view takes before, after and diff together or not at all;
+    // one that fails validation drops the whole row from the inline set.
+    const present = files.filter((f) => f.file);
     if (present.length !== files.length || present.length === 0) {
       continue;
     }
@@ -265,14 +346,19 @@ function main() {
   }
 
   const report = JSON.parse(fs.readFileSync(opts.report, 'utf8'));
-  const comparisons = Array.isArray(report.comparisons) ? report.comparisons : [];
-  const summary = report.summary || { changed: 0, unchanged: comparisons.length, added: 0, removed: 0 };
-  const titles = loadTitles();
-  const roots = {
-    baseline: path.posix.join(opts.screenshots, 'baseline'),
-    current: path.posix.join(opts.screenshots, 'current'),
-    diff: path.posix.join(opts.screenshots, 'diff'),
+  const comparisons = (Array.isArray(report.comparisons) ? report.comparisons : [])
+    .filter((c) => c && typeof c === 'object')
+    .map(normalizeComparison)
+    .filter((c) => c.view);
+  // Summary counts are recomputed from the rows rather than trusted from the file.
+  const summary = {
+    changed: comparisons.filter((c) => c.status === 'changed').length,
+    unchanged: comparisons.filter((c) => c.status === 'unchanged').length,
+    added: comparisons.filter((c) => c.status === 'added').length,
+    removed: comparisons.filter((c) => c.status === 'removed').length,
   };
+  const titles = loadTitles();
+  const roots = { root: opts.screenshots };
 
   const plan = planAttachments(comparisons, roots, opts.maxAttachments, titles);
   const hasChanges = summary.changed + summary.added + summary.removed > 0;

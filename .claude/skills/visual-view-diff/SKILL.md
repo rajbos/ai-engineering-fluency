@@ -185,6 +185,13 @@ click/select steps replayed on a fresh page before the screenshot:
 diff will never see what you built. Reach a nested tab by clicking its group
 first (the diagnostics Research and Settings groups do this).
 
+The baseline is rendered with the *current* `views.config.json`, so a state
+(or a whole view) this branch introduced has nothing to render at the base
+commit. `visual-diff.js` renders the baseline with `--allow-missing`, which
+skips those instead of failing the run, and the comparison then reports the
+current screenshot as **added**. The current-tree render stays strict: a state
+that cannot be reached in *your* build is still an error.
+
 ## Determinism
 
 Two runs of unchanged code produce identical screenshots. That is load-bearing —

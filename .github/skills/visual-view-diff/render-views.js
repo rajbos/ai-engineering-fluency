@@ -7,7 +7,13 @@
  *
  * Usage:
  *   node render-views.js --out <dir> [--view <id>] [--theme dark|light|both]
- *                        [--dist <dir>] [--repo-root <dir>]
+ *                        [--dist <dir>] [--repo-root <dir>] [--allow-missing]
+ *
+ * `--allow-missing` is for rendering a *baseline* build: a view or state that
+ * this build cannot produce (a bundle that did not exist yet, a tab whose
+ * selector the old code never rendered) is skipped rather than failed, so the
+ * comparison can report the current screenshot as "added". Without it, every
+ * failed render is an error and the exit code is non-zero.
  *
  * `--dist` and `--repo-root` point the render at a different checkout's build,
  * which is how `visual-diff.js` renders the baseline commit: the fixtures and
@@ -69,6 +75,7 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 			state: state ? state.id : null,
 			theme,
 			status: 'error',
+			missing: true,
 			error: `Missing bundle ${bundlePath} — run \`npm run compile\` in vscode-extension/ first.`,
 		};
 	}
@@ -117,7 +124,7 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 			const applied = await applySteps(page, state.steps);
 			if (!applied.ok) {
 				return {
-					view: view.id, state: state.id, theme, status: 'error',
+					view: view.id, state: state.id, theme, status: 'error', missing: true,
 					error: `State '${state.id}' could not be reached (${applied.step}: ${applied.reason}).`,
 				};
 			}
@@ -127,7 +134,7 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 			// as "unchanged" forever.
 			if (state.expect && !(await isShowing(page, state.expect))) {
 				return {
-					view: view.id, state: state.id, theme, status: 'error',
+					view: view.id, state: state.id, theme, status: 'error', missing: true,
 					error: `State '${state.id}' was reached but '${state.expect}' is not showing.`,
 				};
 			}
@@ -195,6 +202,7 @@ async function main() {
 	const config = readConfig(__dirname);
 	const views = selectViews(config, args.view);
 	const themes = args.theme === 'both' ? ['dark', 'light'] : [args.theme || 'dark'];
+	const allowMissing = args['allow-missing'] === true;
 
 	if (views.length === 0) {
 		console.error(`No enabled views matched${args.view ? ` "${args.view}"` : ''}.`);
@@ -211,9 +219,15 @@ async function main() {
 		for (const view of views) {
 			for (const state of renderTargets(view)) {
 				for (const theme of themes) {
-					const result = await renderView({ browser, view, state, theme, outDir, tmpDir, defaults: config.defaults, distDir, repoRoot });
+					let result = await renderView({ browser, view, state, theme, outDir, tmpDir, defaults: config.defaults, distDir, repoRoot });
+					if (allowMissing && result.status === 'error' && result.missing) {
+						// The baseline simply does not have this yet. Leaving no
+						// screenshot behind is what lets the diff call the current
+						// one "added" instead of the whole run failing.
+						result = { ...result, status: 'skipped' };
+					}
 					results.push(result);
-					const icon = result.status === 'ok' ? '✅' : result.status === 'warn' ? '⚠️ ' : '❌';
+					const icon = { ok: '✅', warn: '⚠️ ', skipped: '⏭️ ' }[result.status] || '❌';
 					const detail = result.status === 'ok'
 						? `${result.bodyTextLength} chars of text`
 						: (result.error || (result.errors || []).join(' | '));
@@ -232,7 +246,9 @@ async function main() {
 	);
 
 	const failed = results.filter((r) => r.status === 'error');
-	console.log(`\n${results.length - failed.length}/${results.length} renders succeeded → ${path.relative(process.cwd(), outDir) || outDir}`);
+	const skipped = results.filter((r) => r.status === 'skipped');
+	const skippedNote = skipped.length ? ` (${skipped.length} not in this build, skipped)` : '';
+	console.log(`\n${results.length - failed.length - skipped.length}/${results.length} renders succeeded${skippedNote} → ${path.relative(process.cwd(), outDir) || outDir}`);
 	if (failed.length > 0) {
 		process.exitCode = 1;
 	}

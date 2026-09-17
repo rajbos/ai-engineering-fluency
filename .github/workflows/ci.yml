@@ -69,6 +69,9 @@ jobs:
               - '.github/skills/sync-host-views/**'
               - '.github/workflows/ci.yml'
               - '.github/workflows/dependencies/playwright/**'
+              # The screenshot-comment publisher ui-checks runs; a change to
+              # it must exercise the job that executes it.
+              - '.github/workflows/scripts/visual-diff-comment.js'
             # Gates test-coverage-check only: the production-source trees that
             # check-test-coverage.sh's is_source_file() recognises. cli/src is
             # here and NOT in ci-relevant, because the coverage guard must see
@@ -394,6 +397,13 @@ jobs:
     permissions:
       contents: read
       pull-requests: write # post the before/after screenshot comment
+    # One ui-checks run per PR at a time. Two runs for rapid pushes would race
+    # on replacing the screenshot comment and could leave two behind; the
+    # older head's screenshots are obsolete the moment a new push lands, so
+    # cancelling the in-flight run loses nothing.
+    concurrency:
+      group: ui-checks-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
     - name: Harden the runner (Audit all outbound calls)
       uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -563,13 +573,28 @@ jobs:
       run: |
         set -euo pipefail
 
-        # One comment per PR. gh can only upload into a NEW comment, so the
-        # previous one is removed and a fresh one posted on every push rather
-        # than edited in place. The marker is an HTML comment the renderer
-        # emits from its own template - no PR text ever reaches the body.
-        existing="$(GH_TOKEN="$GITHUB_TOKEN" gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
-          --paginate \
-          --jq "[.[] | select(.body | contains(\"<!-- ${COMMENT_MARKER} -->\")) | .id] | join(\" \")")"
+        # The identities this workflow posts as: the Actions bot, and the PAT's
+        # user when one is configured. Only their comments are ever replaced,
+        # so a person quoting the marker in their own comment keeps it.
+        posters='"github-actions[bot]"'
+        if [ -n "${GH_ATTACH_TOKEN:-}" ]; then
+          pat_login="$(GH_TOKEN="$GH_ATTACH_TOKEN" gh api user --jq .login 2>/dev/null || true)"
+          if [ -z "$pat_login" ]; then
+            echo "::warning::GH_PAT is set but 'gh api user' failed with it; posting without inline images."
+            GH_ATTACH_TOKEN=""
+          else
+            posters="${posters},\"${pat_login}\""
+          fi
+        fi
+
+        # Marker comments by our own identities, oldest first. The marker is an
+        # HTML comment the renderer emits from its own template.
+        list_ours() {
+          GH_TOKEN="$GITHUB_TOKEN" gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            --paginate \
+            --jq "[.[] | select(.user.login | IN(${posters})) | select(.body | contains(\"<!-- ${COMMENT_MARKER} -->\")) | .id] | sort | join(\" \")"
+        }
+        existing="$(list_ours)"
 
         # A PR with no visual change gets no comment - unless an earlier push
         # did change something, in which case the stale comment is replaced by
@@ -579,13 +604,30 @@ jobs:
           exit 0
         fi
 
+        # Re-check every attachment here, with the token in hand: only a
+        # regular, non-symlinked PNG directly under one of the three screenshot
+        # directories is ever handed to gh. The renderer already enforces this;
+        # the step it produced its list in did not hold the token, this one does.
         post_with_images() {
           [ -n "${GH_ATTACH_TOKEN:-}" ] || return 1
           [ "${ATTACHMENTS:-0}" -gt 0 ] || return 1
           args=()
           while IFS= read -r line; do
-            [ -n "$line" ] && args+=(--attach "$line")
+            [ -n "$line" ] || continue
+            file="${line%%#*}"
+            case "$file" in
+              visual-output/baseline/*.png|visual-output/current/*.png|visual-output/diff/*.png) ;;
+              *) echo "::error::Refusing to attach '${file}': not a screenshot path."; return 1 ;;
+            esac
+            case "${file#visual-output/*/}" in
+              */*|*..*) echo "::error::Refusing to attach '${file}': nested or relative path."; return 1 ;;
+            esac
+            if [ -L "$file" ] || [ ! -f "$file" ]; then
+              echo "::error::Refusing to attach '${file}': not a regular file."; return 1
+            fi
+            args+=(--attach "$line")
           done < visual-comment/attachments.txt
+          [ "${#args[@]}" -gt 0 ] || return 1
           GH_TOKEN="$GH_ATTACH_TOKEN" gh pr comment "$PR_NUMBER" --repo "$REPO" \
             --body-file visual-comment/comment.md "${args[@]}"
         }
@@ -607,7 +649,14 @@ jobs:
           echo "Posted the screenshot comment without inline images."
         fi
 
-        for id in $existing; do
+        # Keep only the newest of our marker comments. Listing again after
+        # posting (rather than deleting the ids captured before) means two
+        # runs that raced past the concurrency group still converge on one
+        # surviving comment instead of each sparing its own.
+        all="$(list_ours)"
+        newest="${all##* }"
+        for id in $all; do
+          [ "$id" = "$newest" ] && continue
           GH_TOKEN="$GITHUB_TOKEN" gh api --method DELETE "repos/${REPO}/issues/comments/${id}" > /dev/null \
             && echo "Removed the previous screenshot comment ${id}." \
             || echo "::warning::Could not remove the previous screenshot comment ${id}."
