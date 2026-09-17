@@ -61,9 +61,11 @@ const DIST_DIR = path.join(REPO_ROOT, 'vscode-extension', 'dist', 'webview');
 const { buildPageHtml, loadFixture } = require(path.join(SKILL_DIR, 'lib', 'harness.js'));
 const { loadChromium } = require(path.join(SKILL_DIR, 'lib', 'browser.js'));
 const { parseArgs, readConfig, selectViews } = require(path.join(SKILL_DIR, 'lib', 'config.js'));
-// The `select` step's option picking is shared with the visual diff's `states`,
-// so a scenario and a screenshot state read the same step vocabulary.
-const { PICK_OPTION } = require(path.join(SKILL_DIR, 'lib', 'steps.js'));
+// The step vocabulary (`click`, `select`, `post`) is shared with the visual
+// diff's `states`, so a scenario and a screenshot state read alike. The
+// `select` picking stays inline here because this runner also has to tell a
+// legitimate no-op (nothing else to select) from a change.
+const { PICK_OPTION, applyStep, describeStep } = require(path.join(SKILL_DIR, 'lib', 'steps.js'));
 
 const { collectHandledCommandsFromAst, widenHandledFromText, collectTsFiles } = require('./validate-webview-contract.js');
 
@@ -287,7 +289,7 @@ async function runScenario(page, view, scenario) {
   const fail = (control, detail) => findings.push({ view: view.id, kind: 'scenario-step-failed', control, detail });
 
   for (const step of scenario.steps) {
-    const label = `${scenario.name}: ${step.click ? `click ${step.click}` : `select ${step.select}`}`;
+    const label = `${scenario.name}: ${describeStep(step)}`;
     // A select with nothing else to offer changes nothing, but the step still
     // has to clear the shared checks below — a broken single-option state is
     // exactly what `expect` is there to catch.
@@ -299,11 +301,10 @@ async function runScenario(page, view, scenario) {
       window.__HARNESS_ERRORS__.length = 0;
     });
 
-    if (step.click) {
-      try {
-        await page.locator(step.click).first().click({ timeout: 2000, noWaitAfter: true });
-      } catch (error) {
-        fail(label, `could not click: ${String(error.message).split('\n')[0]}`);
+    if (step.click || step.post) {
+      const reason = await applyStep(page, step);
+      if (reason) {
+        fail(label, reason);
         break;
       }
     } else {

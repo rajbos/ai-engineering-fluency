@@ -59,6 +59,12 @@ function validateRegistry(config) {
 				throw new Error(`views.config.json: duplicate state id "${state.id}" on view "${view.id}"`);
 			}
 			seenStates.add(state.id);
+			// Without `expect`, a state whose steps silently fail to switch tabs
+			// would screenshot the initial tab and pass as "unchanged" forever —
+			// the exact blind spot states exist to remove.
+			if (typeof state.expect !== 'string' || state.expect.trim() === '') {
+				throw new Error(`views.config.json: state "${state.id}" on view "${view.id}" must declare a non-empty "expect" selector`);
+			}
 		}
 	}
 	return config;

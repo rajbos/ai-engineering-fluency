@@ -178,9 +178,10 @@ click/select steps replayed on a fresh page before the screenshot:
   loading placeholder, so its state declares the answer. Keep that answer
   deterministic — fixed dates, no `fetchedAt` — or the screenshot diffs
   against itself.
-- `expect` is what the state must be showing afterwards. If it is not, the
-  render is an **error**, not a screenshot of the previous tab that would pass
-  as "unchanged" forever.
+- `expect` (required) is what the state must be showing afterwards. If it is
+  not, the render is an **error**, not a screenshot of the previous tab that
+  would pass as "unchanged" forever; a state without it is refused when the
+  registry loads.
 - `settleMs` overrides the wait after the steps for a tab that lazily loads a
   chart library and animates in (the efficiency Models tab needs ~3s).
 - `noiseFloorPixels` gives a canvas-drawing state its own tolerance, so the

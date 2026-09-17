@@ -53,11 +53,25 @@ test('the committed registry validates', () => {
 test('validateRegistry refuses ids that could escape or collide as file names', () => {
 	for (const bad of ['../etc', 'a/b', 'a.b', 'a--b', '', 'a b', 'a\\b']) {
 		assert.throws(() => config.validateRegistry(registry([{ id: bad }])), new RegExp('view id'), `view id ${JSON.stringify(bad)}`);
-		assert.throws(() => config.validateRegistry(registry([{ id: 'ok', states: [{ id: bad }] }])), new RegExp('state id'), `state id ${JSON.stringify(bad)}`);
+		assert.throws(() => config.validateRegistry(registry([{ id: 'ok', states: [{ id: bad, expect: '#x' }] }])), new RegExp('state id'), `state id ${JSON.stringify(bad)}`);
 	}
 	assert.throws(() => config.validateRegistry(registry([{ id: 'dup' }, { id: 'dup' }])), /duplicate view id/);
-	assert.throws(() => config.validateRegistry(registry([{ id: 'v', states: [{ id: 's' }, { id: 's' }] }])), /duplicate state id/);
-	assert.doesNotThrow(() => config.validateRegistry(registry([{ id: 'fluency-level-viewer', states: [{ id: 'path-analyzer' }, { id: 'tab_2' }] }])));
+	assert.throws(() => config.validateRegistry(registry([{ id: 'v', states: [{ id: 's', expect: '#a' }, { id: 's', expect: '#b' }] }])), /duplicate state id/);
+	assert.doesNotThrow(() => config.validateRegistry(registry([{ id: 'fluency-level-viewer', states: [{ id: 'path-analyzer', expect: '#p' }, { id: 'tab_2', expect: '#t' }] }])));
+});
+
+test('validateRegistry refuses a state that does not say what it expects to see', () => {
+	// Without `expect`, steps that fail to switch tabs would screenshot the
+	// initial tab and pass as "unchanged" — the blind spot states exist to close.
+	for (const missing of [{ id: 's' }, { id: 's', expect: '' }, { id: 's', expect: '   ' }, { id: 's', expect: 42 as unknown as string }]) {
+		assert.throws(() => config.validateRegistry(registry([{ id: 'v', states: [missing] }])), /must declare a non-empty "expect"/);
+	}
+	const committed = config.readConfig(SKILL_DIR);
+	for (const view of committed.views) {
+		for (const state of view.states || []) {
+			assert.ok(state.expect && state.expect.trim(), `${view.id}--${state.id} declares expect`);
+		}
+	}
 });
 
 test('baselineRegistry renders the base commit\'s own definitions, plus current-only targets flagged', () => {
@@ -116,7 +130,7 @@ test('baselineRegistry renders the base commit\'s own definitions, plus current-
 });
 
 test('baselineRegistry flags everything current-only when the base commit has no registry', () => {
-	const current = registry([{ id: 'usage', fixture: 'usage.json', states: [{ id: 'tools' }] }]);
+	const current = registry([{ id: 'usage', fixture: 'usage.json', states: [{ id: 'tools', expect: '#tab-panel-tools' }] }]);
 	const merged = config.baselineRegistry(current, null, DIRS);
 	assert.equal(merged.views[0].currentOnly, true);
 	assert.equal(merged.views[0].fixtureDir, DIRS.currentFixtureDir);

@@ -140,12 +140,17 @@ function renderInto(outDir, { distDir, repoRoot, theme, view, allowMissing, conf
  */
 function writeBaselineRegistry(worktreeDir, outRoot) {
 	const baseSkillDir = path.join(worktreeDir, '.github', 'skills', 'visual-view-diff');
+	// Only a base commit that predates the registry takes the no-base path.
+	// A registry that exists but cannot be read or validated must fail the
+	// run: treating it as absent would flag every target current-only and
+	// let the diff finish with an all-"added" report that hides removals and
+	// every real before/after comparison.
 	let base = null;
 	if (fs.existsSync(path.join(baseSkillDir, 'views.config.json'))) {
 		try {
 			base = readConfig(baseSkillDir);
 		} catch (error) {
-			console.warn(`\n⚠️  Ignoring the base commit's views.config.json: ${error && error.message || error}`);
+			throw new Error(`The base commit's views.config.json could not be used: ${error && error.message || error}`);
 		}
 	}
 	const merged = baselineRegistry(readConfig(SKILL_DIR), base, {

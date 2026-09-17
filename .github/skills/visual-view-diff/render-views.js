@@ -96,16 +96,24 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 		return { view: view.id, state: state ? state.id : null, theme, status: 'error', missing: true, error: `Missing fixture ${view.fixture}` };
 	}
 
-	const html = buildPageHtml({
-		globalName: view.global,
-		fixture: loadFixture(fixturePath, repoRoot),
-		theme,
-		bundlePath,
-		repoRoot,
-	});
-
+	// Building the page reads the fixture and the repo JSON it references
+	// (`$fromRepoJson`) from `repoRoot`. On the baseline side that root is the
+	// base commit, which may not have a file this branch introduced; that is a
+	// per-target error (skippable for a current-only target), not a reason to
+	// abort the whole render.
 	const pageFile = path.join(tmpDir, `${id}-${theme}.html`);
-	fs.writeFileSync(pageFile, html);
+	try {
+		const html = buildPageHtml({
+			globalName: view.global,
+			fixture: loadFixture(fixturePath, repoRoot),
+			theme,
+			bundlePath,
+			repoRoot,
+		});
+		fs.writeFileSync(pageFile, html);
+	} catch (error) {
+		return { view: view.id, state: state ? state.id : null, theme, status: 'error', missing: true, error: `Could not build the page for ${id}: ${String(error && error.message || error)}` };
+	}
 
 	const viewport = view.viewport || defaults.viewport;
 	const page = await browser.newPage({
@@ -143,7 +151,7 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 			// `expect` names what the state must be showing. A tab whose panel
 			// never appeared would otherwise screenshot the previous tab and pass
 			// as "unchanged" forever.
-			if (state.expect && !(await isShowing(page, state.expect))) {
+			if (!(await isShowing(page, state.expect))) {
 				return {
 					view: view.id, state: state.id, theme, status: 'error', missing: true,
 					error: `State '${state.id}' was reached but '${state.expect}' is not showing.`,

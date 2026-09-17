@@ -576,7 +576,10 @@ jobs:
         "$RUNNER_TEMP/gh_${GH_CLI_VERSION}_linux_amd64/bin/gh" --version
 
     - name: Post the screenshot comment on the PR
-      if: always() && github.event.pull_request.head.repo.full_name == github.repository && steps.visual-comment.outputs.has_report == 'true'
+      # Runs without a report too (the render or the diff failed on this
+      # push): an earlier push's screenshot comment would otherwise stay up,
+      # showing before/after images that no longer describe this head.
+      if: always() && github.event.pull_request.head.repo.full_name == github.repository
       continue-on-error: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -584,6 +587,8 @@ jobs:
         GH_ATTACH_TOKEN: ${{ secrets.GH_PAT }}
         REPO: ${{ github.repository }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        HAS_REPORT: ${{ steps.visual-comment.outputs.has_report }}
         HAS_CHANGES: ${{ steps.visual-comment.outputs.has_changes }}
         ATTACHMENTS: ${{ steps.visual-comment.outputs.attachments }}
         COMMENT_MARKER: visual-view-diff
@@ -625,10 +630,19 @@ jobs:
         }
         existing="$(list_ours)"
 
+        # No report on this push (the render or the diff failed): nothing to
+        # show, but a comment from an earlier push must not keep describing
+        # screenshots this head never produced, so one that exists is replaced
+        # by a notice below.
+        if [ "$HAS_REPORT" != "true" ] && [ -z "$existing" ]; then
+          echo "No visual diff report and no earlier screenshot comment; nothing to post."
+          exit 0
+        fi
+
         # A PR with no visual change gets no comment - unless an earlier push
         # did change something, in which case the stale comment is replaced by
         # the all-clear rather than silently deleted.
-        if [ "$HAS_CHANGES" != "true" ] && [ -z "$existing" ]; then
+        if [ "$HAS_REPORT" = "true" ] && [ "$HAS_CHANGES" != "true" ] && [ -z "$existing" ]; then
           echo "No visual changes and no earlier screenshot comment; nothing to post."
           exit 0
         fi
@@ -672,7 +686,13 @@ jobs:
             -F body=@visual-comment/comment-plain.md > /dev/null
         }
 
-        if post_with_images; then
+        if [ "$HAS_REPORT" != "true" ]; then
+          mkdir -p visual-comment
+          printf '<!-- %s -->\n### Webview screenshots\n\nThe visual diff produced no report on this push (the render or the diff step failed), so the screenshots from the previous push no longer apply. See the [workflow run](%s).\n' \
+            "$COMMENT_MARKER" "$RUN_URL" > visual-comment/comment-plain.md
+          post_plain
+          echo "Replaced the earlier screenshot comment with a no-report notice."
+        elif post_with_images; then
           echo "Posted the screenshot comment with ${ATTACHMENTS} inline image(s)."
         else
           if [ -z "${GH_ATTACH_TOKEN:-}" ]; then
