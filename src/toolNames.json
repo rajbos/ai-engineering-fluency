@@ -1283,4 +1283,11 @@
   ,"SendUserFile": "GitHub MCP (Local): Send User File"
   ,"kilo_local_recall": "Kilo Local Recall"
   ,"get_sessions_status": "Playwright MCP: Get Sessions Status"
+  ,"Claude_Browser": "Claude Browser"
+  ,"ExitWorktree": "Exit Worktree"
+  ,"ccd_pr": "Context7 MCP: Create/Update Pull Request"
+  ,"ccd_session_mgmt": "Context7 MCP: Manage Session"
+  ,"mcp__ccd_pr__get_status": "Context7 MCP: Get Status of Pull Request"
+  ,"mcp__ccd_session_mgmt__send_message": "Context7 MCP: Send Message to Session"
+  ,"mcp__ccd_session_mgmt__unarchive_session": "Context7 MCP: Unarchive Session"
 }
