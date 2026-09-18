@@ -108,11 +108,19 @@ export const WHATS_NEW_MAX_ANNOUNCEMENT_AGE_DAYS = 60;
  */
 export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 	{
-		version: '0.17.3',
+		version: '0.18.0',
 		date: null,
 		headline:
-			'This release is about noticing patterns you would otherwise have to spot yourself: what a model router did off screen, where the agent had to backtrack, which prompts you keep retyping, and how quickly models actually start answering.',
+			'This release is about noticing patterns you would otherwise have to spot yourself: what a model router did off screen, where the agent had to backtrack, which prompts you keep retyping, how quickly models actually start answering, and how much Copilot agent memory has piled up on disk.',
 		features: [
+			{
+				id: 'usage.memory-files-hygiene',
+				title: 'Copilot Memory Files',
+				description:
+					'A new section on the Tools tab showing how much Copilot agent memory has accumulated on disk — per workspace, repo, session, and global scope — with counts for stale and oversized files so you know what is safe to clear out.',
+				kind: 'section',
+				surface: { view: 'usage', tab: 'tools', anchor: 'section-memory-files' },
+			},
 			{
 				id: 'logviewer.hydrafusion-routing',
 				title: 'HydraFusion Routing',
