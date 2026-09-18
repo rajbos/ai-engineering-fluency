@@ -28,6 +28,20 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>0.5.0</h3>
+        <ul>
+            <li>Add the Scoring Guide view, matching the VS Code and Visual Studio hosts</li>
+        </ul>
+        <h3>0.4.4</h3>
+        <ul>
+            <li>Internal compatibility fixes for the latest IntelliJ Platform APIs</li>
+        </ul>
+        <h3>0.2.0</h3>
+        <ul>
+            <li>Usage charts with weekly/monthly periods, dark theme support, and instant view switching via CLI prefetch</li>
+            <li>Application-level settings, budget visualization, and retry/wait-longer handling on slow CLI startups</li>
+            <li>macOS ARM64 support</li>
+        </ul>
         <h3>0.1.0</h3>
         <ul>
             <li>Initial scaffold: tool window + JCEF host + CLI bridge</li>
