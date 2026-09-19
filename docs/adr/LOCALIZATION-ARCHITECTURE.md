@@ -111,10 +111,25 @@ artifacts, not just the source: it is called in `dist/webview/usage.js` and
 `dist/webview/efficiency.js` only, so the other ten panels ship with
 `currentLocale` left `undefined` and fall back to the runtime locale.
 
-One resolved locale travels as a first-class `locale` field on the payload —
-not as a fake entry in the string dictionary — and feeds `<html lang>`,
-`setFormatLocale()` and all number/date formatting. Bare `toLocale*()` without
-an explicit locale is banned in webview and CLI code.
+**Corrected during implementation.** The original rule said one resolved locale
+should feed `<html lang>`, `setFormatLocale()` and all number/date formatting
+alike. That is wrong, and collapsing them would have been a regression. There
+are **two** legitimately different questions:
+
+| Field | Question | Source | Drives |
+|---|---|---|---|
+| `language` | *Which strings?* | `resolvedLocale(vscode.env.language)` | `<html lang>`, `localize()` |
+| `locale` | *How are numbers and dates written?* | `stats.locale` → `LC_ALL`/`LC_NUMERIC`/`LANG` → `Intl` default | `setFormatLocale()` |
+
+A German developer running an English VS Code legitimately wants `1.234,56`
+*and* English UI. `_detectUsageAnalysisLocale` in `extension.ts` already made
+this distinction; the mistake was in this document, not in that code.
+
+So: **both** travel as first-class payload fields, and neither is smuggled
+through the string dictionary as `__language__`. What was genuinely broken is
+that `setFormatLocale()` reached only 2 of 12 bundles, leaving the other ten on
+the runtime default. Bare `toLocale*()` with no explicit locale is banned in
+webview and CLI code, ratcheted like the hardcoded-string check.
 
 ### S5 — proper nouns are not translated, and that is written down
 

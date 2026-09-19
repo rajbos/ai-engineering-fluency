@@ -558,7 +558,8 @@
     "cli:fluency": "cd cli && node dist/cli.js fluency",
     "cli": "cd cli && node dist/cli.js",
     "generate:webview-strings": "node scripts/generate-webview-strings.mjs",
-    "check:webview-strings": "node scripts/generate-webview-strings.mjs --check"
+    "check:webview-strings": "node scripts/generate-webview-strings.mjs --check",
+    "lint:locale": "node scripts/check-bare-tolocale.mjs"
   },
   "devDependencies": {
     "@github/copilot": "^1.0.85",

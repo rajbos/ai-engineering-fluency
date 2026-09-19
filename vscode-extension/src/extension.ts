@@ -2553,7 +2553,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			currentVersion: packageJson.version,
 			releases: WHATS_NEW_RELEASES.slice(0, WHATS_NEW_MAX_RELEASES).map(projectRelease),
 			backendConfigured: this.isBackendConfigured(),
-			localization: this.getWebviewLocalization(),
+			...this.getWebviewLocaleFields(),
 		};
 	}
 
@@ -5857,10 +5857,29 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private getWebviewLocalization(): Record<string, string> {
 		return {
 			...buildWebviewLocalization(l10nT),
-			// Current language for reference. Smuggling it through the string
-			// dictionary is a wart (S4 moves it to its own payload field); kept
-			// here so this change stays a pure refactor of the dictionary itself.
-			'__language__': vscode.env.language,
+			// Kept for the JetBrains and Visual Studio hosts, which receive the
+			// dictionary as a prebuilt JSON sidecar and so have nowhere else to put
+			// the language. The `language` field below always wins where it exists.
+			'__language__': resolvedLocale(vscode.env.language),
+		};
+	}
+
+	/**
+	 * The locale-related fields every webview payload carries.
+	 *
+	 * Two, not one, because they answer different questions: `language` decides
+	 * *which strings*, `locale` decides *how numbers and dates are written*. A
+	 * German developer on an English VS Code wants `1.234,56` with English UI,
+	 * so collapsing them would be a regression. See
+	 * docs/adr/LOCALIZATION-ARCHITECTURE.md (S4).
+	 *
+	 * `language` is the resolved locale, not the raw display language, so English
+	 * text is never labelled `lang="fr"` on a locale we ship no bundle for.
+	 */
+	private getWebviewLocaleFields(): { localization: Record<string, string>; language: string } {
+		return {
+			...this.getWebviewLocaleFields(),
+			language: resolvedLocale(vscode.env.language),
 		};
 	}
 
@@ -9733,7 +9752,7 @@ private computeFallbackDailyRollup(
 			...stats,
 			backendConfigured: this.isBackendConfigured(),
 			compactNumbers: this.getCompactNumbersSetting(),
-			localization: this.getWebviewLocalization(),
+			...this.getWebviewLocaleFields(),
 		};
 		const initialData = JSON.stringify(dataWithBackend).replace(/</g, '\\u003c');
 
@@ -10754,7 +10773,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const nonce = getNonce();
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'logviewer.js'));
 
-		const initialData = JSON.stringify({ ...logData, focusedTurnNumber, compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }).replace(/</g, '\\u003c');
+		const initialData = JSON.stringify({ ...logData, focusedTurnNumber, compactNumbers: this.getCompactNumbersSetting(), ...this.getWebviewLocaleFields() }).replace(/</g, '\\u003c');
 
 		return `<!DOCTYPE html>
 		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
@@ -11383,7 +11402,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const dataWithBackend = {
       ...data,
       backendConfigured: this.isBackendConfigured(),
-      localization: this.getWebviewLocalization(),
+      ...this.getWebviewLocaleFields(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -11451,7 +11470,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const dataWithBackend = {
       ...data,
       backendConfigured: this.isBackendConfigured(),
-      localization: this.getWebviewLocalization(),
+      ...this.getWebviewLocaleFields(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -12042,7 +12061,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		);
 		const dataWithLocalization = {
 			...data,
-			localization: this.getWebviewLocalization(),
+			...this.getWebviewLocaleFields(),
 		};
 		const initialData = JSON.stringify(dataWithLocalization).replace(/</g, '\\u003c');
 		return `<!DOCTYPE html>
@@ -12548,7 +12567,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const backendConfig = this.getDashboardBackendConfig();
 
     const dataWithBackend = data
-      ? { ...data, backendConfigured: this.isBackendConfigured(), compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }
+      ? { ...data, backendConfigured: this.isBackendConfigured(), compactNumbers: this.getCompactNumbersSetting(), ...this.getWebviewLocaleFields() }
       : undefined;
     const initialDataScript = dataWithBackend
       ? `<script nonce="${nonce}">window.__INITIAL_DASHBOARD__ = ${JSON.stringify(dataWithBackend).replace(/</g, "\\u003c")};</script>`
@@ -12709,7 +12728,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       sortSettings,
       compactNumbers: this.getCompactNumbersSetting(),
       copilotPlan: this._copilotPlanResolved,
-      localization: this.getWebviewLocalization(),
+      ...this.getWebviewLocaleFields(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -15291,7 +15310,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
       skillDescriptions: this._buildSkillDescriptions(),
       toolFamilies: getToolFamilies(),
-      localization: this.getWebviewLocalization(),
+      ...this.getWebviewLocaleFields(),
     }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
@@ -15387,7 +15406,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       initialMetric: this.lastChartMetric, 
       initialSplit: this.normalizeLegacyChartPreference(this.lastChartSplit, ['total', 'model', 'editor', 'repository', 'language', 'provider', 'task']) ?? 'total', 
       monthlyBudget: this.getEffectiveMonthlyBudget(),
-      localization: this.getWebviewLocalization()
+      ...this.getWebviewLocaleFields()
     };
 
     const initialData = JSON.stringify(chartData).replace(/</g, "\\u003c");
@@ -15466,7 +15485,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       copilotApiBalance: this._buildCopilotApiBalance(),
       monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
       worktreeScanRoots: this.buildInitialWorktreeRoots(),
-      localization: this.getWebviewLocalization(),
+      ...this.getWebviewLocaleFields(),
       worktreeBackgroundScan: this.context.globalState.get<WorktreeBackgroundScanResult>(CopilotTokenTracker.WORKTREE_BG_SCAN_RESULT_KEY) ?? null,
     }).replace(/</g, "\\u003c");
   }

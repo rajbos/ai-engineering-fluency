@@ -6,7 +6,7 @@ import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { createPeriodSelector, PERIOD_LABELS } from '../shared/periodSelector';
 import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
 import { createViewStateManager } from '../shared/viewState';
-import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { applyWebviewLocale } from '../shared/webviewLocale';
 import type { ChartTimeWindow } from '../../../../src/types';
 import { getTimeWindowStartDayKey, getTimeWindowStartMonthKey } from '../../../../src/timeWindows';
 // CSS imported as text via esbuild
@@ -108,11 +108,7 @@ const vscode: VSCodeApi = acquireVsCodeApi();
 const initialData = getWindowData<InitialChartData & { localization?: Record<string, string> }>('__INITIAL_CHART__');
 
 // Initialize localization for webview
-if (initialData?.localization) {
-	initializeWebviewLocalization(initialData.localization);
-	const language = initialData.localization['__language__'] || 'en';
-	setCurrentLanguage(language);
-}
+applyWebviewLocale(initialData);
 
 let chart: ChartInstance | undefined;
 let Chart: ChartConstructor | undefined;

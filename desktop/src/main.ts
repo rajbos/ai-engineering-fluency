@@ -315,7 +315,14 @@ function desktopWebviewLocalization(): Record<string, string> {
  * escaping that each call site previously repeated.
  */
 function panelPayloadScript(windowKey: string, data: object): string {
-    const payload = { ...data, localization: desktopWebviewLocalization() };
+    const payload = {
+        ...data,
+        localization: desktopWebviewLocalization(),
+        // Display language — which strings. Separate from `locale` below, which
+        // some panels set for number/date formatting: a German user on an English
+        // system wants 1.234,56 with English UI.
+        language: resolvedLocale(app.getLocale()),
+    };
     return `window.${windowKey}=${JSON.stringify(payload).replace(/</g, '\u003c')};`;
 }
 

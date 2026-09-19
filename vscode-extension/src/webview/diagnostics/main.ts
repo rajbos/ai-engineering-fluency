@@ -12,7 +12,8 @@ import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import { registerMessageHandler } from "../shared/messageHandler";
 import { getModelColor } from "../../../../src/chartDataBuilder";
 import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
-import { initializeWebviewLocalization, setCurrentLanguage, localize, localizeFormat } from "../shared/localization";
+import { localize, localizeFormat } from "../shared/localization";
+import { applyWebviewLocale } from "../shared/webviewLocale";
 import type { MistralCloudConversation, MistralCloudSessionsResult } from "../../../../src/types";
 
 // Constants
@@ -233,11 +234,7 @@ const vscode = acquireVsCodeApi<DiagnosticsViewState>();
 const initialData = getWindowData<DiagnosticsData & { localization?: Record<string, string> }>('__INITIAL_DIAGNOSTICS__');
 
 // Initialize localization for webview
-if (initialData?.localization) {
-	initializeWebviewLocalization(initialData.localization);
-	const language = initialData.localization['__language__'] || 'en';
-	setCurrentLanguage(language);
-}
+applyWebviewLocale(initialData);
 
 const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   activeTab: undefined,
