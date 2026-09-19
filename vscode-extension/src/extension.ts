@@ -143,7 +143,7 @@ import {
   parseRepoFromRemoteUrl as _parseRepoFromRemoteUrl,
   toServerMemoriesAnalysisView as _toServerMemoriesAnalysisView,
 } from '../../src/copilotServerMemories';
-import { readGitOriginUrl as _readGitOriginUrl } from '../../src/darkFactorySignals';
+import { readGitOriginUrl as _readGitOriginUrl, isGitRepoRoot as _isGitRepoRoot } from '../../src/darkFactorySignals';
 
 /**
  * Minimum time between reads of a repository's server-side memory store.
@@ -6868,12 +6868,33 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// A virtual workspace has no local git config or working tree to inspect, and
 			// `fsPath` on a non-file URI is not a usable filesystem path.
 			if (folder.uri.scheme !== 'file') { continue; }
-			const repoRoot = folder.uri.fsPath;
+			const repoRoot = this.findGitRepoRoot(folder.uri.fsPath);
+			if (!repoRoot) { continue; }
 			const originUrl = _readGitOriginUrl(repoRoot);
 			const repo = originUrl ? _parseRepoFromRemoteUrl(originUrl) : undefined;
 			if (repo) { return { repoRoot, repo }; }
 		}
 		return undefined;
+	}
+
+	/**
+	 * Walk up from `startPath` to the nearest ancestor that is a git repository root.
+	 *
+	 * An open workspace folder is often *not* the repository root — opening a subdirectory
+	 * of a checkout is ordinary. `readGitOriginUrl()` only looks for `<dir>/.git`, so
+	 * without this the section would silently vanish for those workspaces, which reads
+	 * exactly like "this repository has no memories". The root also has to be right for its
+	 * own sake: citation staleness resolves repo-relative paths against it, so a
+	 * subdirectory base would make every citation look missing.
+	 */
+	private findGitRepoRoot(startPath: string): string | undefined {
+		const path = require('path') as typeof import('path');
+		let current = path.resolve(startPath);
+		// Stop at the filesystem root, where `dirname` becomes a fixed point.
+		for (let parent = path.dirname(current); ; current = parent, parent = path.dirname(current)) {
+			if (_isGitRepoRoot(current)) { return current; }
+			if (parent === current) { return undefined; }
+		}
 	}
 
 	/**

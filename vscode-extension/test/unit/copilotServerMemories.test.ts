@@ -609,6 +609,30 @@ test('renderPromotionMarkdown notes repeats and says so when there is nothing to
 // API that cannot be exercised offline, and it regresses silently.
 // ---------------------------------------------------------------------------
 
+test('the repo resolver walks up to the real git root rather than trusting the folder', () => {
+	// Opening a subdirectory of a checkout is ordinary, and readGitOriginUrl() only looks at
+	// `<dir>/.git`. Without the walk the section silently vanishes for those workspaces —
+	// indistinguishable from "this repository has no memories" — and the wrong base would
+	// also make every citation look missing.
+	const fs = require('node:fs') as typeof import('node:fs');
+	const path = require('node:path') as typeof import('node:path');
+	const extensionSrc = fs.readFileSync(path.join(__dirname, '../../../../src/extension.ts'), 'utf8');
+
+	const resolverStart = extensionSrc.indexOf('private resolveWorkspaceRepoSlug()');
+	const resolverBody = extensionSrc.slice(resolverStart, extensionSrc.indexOf('\n\t}', resolverStart));
+	assert.ok(
+		/this\.findGitRepoRoot\(folder\.uri\.fsPath\)/.test(resolverBody),
+		'the folder path must be resolved to a git root before the remote is read',
+	);
+
+	const walkerStart = extensionSrc.indexOf('private findGitRepoRoot(');
+	assert.ok(walkerStart >= 0, 'expected a findGitRepoRoot() helper');
+	const walkerBody = extensionSrc.slice(walkerStart, extensionSrc.indexOf('\n\t}', walkerStart));
+	assert.ok(/_isGitRepoRoot\(current\)/.test(walkerBody), 'the walk must test each ancestor');
+	// A walk with no stop condition hangs at the filesystem root, where dirname is a fixed point.
+	assert.ok(/parent === current/.test(walkerBody), 'the walk must terminate at the filesystem root');
+});
+
 test('the server-memory cache is invalidated on public-session and setting changes', () => {
 	// The cache identity is repository + checkout root, which answers "is this the same
 	// store?" but says nothing about *who we asked as*, nor whether the feature is still

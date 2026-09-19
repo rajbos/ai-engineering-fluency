@@ -153,12 +153,12 @@ fields the typed shape does not know about. Use it when the API changes.
 
 | Piece | Location |
 |---|---|
-| Fetch + analysis (shared) | `src/copilotServerMemories.ts` — `fetchRepoMemories()`, `analyzeServerMemories()`, `toServerMemoriesAnalysisView()`, `renderPromotionMarkdown()`, `parseRepoFromRemoteUrl()` |
+| Fetch + analysis (shared) | `src/copilotServerMemories.ts` — `fetchRepoMemories()`, `analyzeServerMemories()`, `toServerMemoriesAnalysisView()`, `renderPromotionMarkdown()`, `parseRepoFromRemoteUrl()`, `isValidRepoSlug()`, `isSafeRepoRelativePath()` |
 | Types | `src/types.ts` — `ServerMemory`, `ServerMemoryPromotionGroup`, `ServerMemoryStaleCitation`, `ServerMemoriesAnalysis`, `ServerMemoriesAnalysisView` |
 | Unit tests | `vscode-extension/test/unit/copilotServerMemories.test.ts` (offline — `fetch` and `fileExists` are both injected) |
 | CLI | `cli/src/commands/memory-files.ts` — `--server`, `--repo`, `--limit`, `--promote` |
-| Runtime wiring | `vscode-extension/src/extension.ts` — `scheduleServerMemoriesRefresh()`, `buildServerMemoriesView()`, TTL `SERVER_MEMORIES_FETCH_TTL_MS` |
-| Tools-tab UI | `vscode-extension/src/webview/usage/main.ts` — `buildServerMemoriesSectionHtml()`, `_sanitizeServerMemoriesAnalysis()`, `#section-server-memories` |
+| Runtime wiring | `vscode-extension/src/extension.ts` — `scheduleServerMemoriesRefresh()`, `decideServerMemoriesRefresh()` (pure, exported), `buildServerMemoriesView()`, `resolveWorkspaceRepoSlug()`, `invalidateServerMemoriesCache()`, TTL `SERVER_MEMORIES_FETCH_TTL_MS` |
+| Tools-tab UI | `vscode-extension/src/webview/usage/serverMemories.ts` — `buildServerMemoriesSectionHtml()`, `sanitizeServerMemoriesAnalysis()`, `#section-server-memories`. Split out of `main.ts`, which would otherwise have crossed the 6000-line `max-lines` ceiling; `main.ts` imports both and holds the cross-refresh cache. |
 | Raw probe | `scripts/fetch-copilot-memories.js` |
 | Setting | `aiEngineeringFluency.serverMemories.enabled` (default `true`) |
 
