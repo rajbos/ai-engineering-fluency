@@ -76,9 +76,23 @@ function parseArgs(argv) {
 		if (arg === '--json') {
 			options.json = true;
 		} else if (arg === '--repo') {
-			options.repo = argv[++i];
+			// A missing value must be rejected, not stored as undefined: main() falls back to
+			// the origin remote when `repo` is unset, so `--repo` as the final argument would
+			// silently report on the current checkout instead of the repository the user
+			// thought they had named — a wrong answer presented as a right one.
+			const value = argv[++i];
+			if (value === undefined) {
+				throw new Error('--repo requires a value (owner/name).');
+			}
+			options.repo = value;
 		} else if (arg === '--limit') {
-			const value = Number(argv[++i]);
+			// `Number(undefined)` is NaN, so a missing value already fails the check below;
+			// rejecting it explicitly keeps the two options reading the same way.
+			const raw = argv[++i];
+			if (raw === undefined) {
+				throw new Error('--limit requires a value.');
+			}
+			const value = Number(raw);
 			if (!Number.isInteger(value) || value < 1) {
 				throw new Error('--limit must be a positive integer');
 			}

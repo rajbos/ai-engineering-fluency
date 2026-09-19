@@ -142,6 +142,14 @@ test('memoryUrl builds the v0 routes and adds limit only when given', () => {
 test('parseArgs rejects a non-positive or non-integer limit', () => {
 	assert.deepEqual(parseArgs(['--repo', 'o/n', '--json']), { repo: 'o/n', limit: 20, json: true });
 	assert.throws(() => parseArgs(['--limit', '0']), /positive integer/);
+	// A trailing flag with no value must be rejected, not silently ignored: main() falls back
+	// to the origin remote when `repo` is unset, so `--repo` at the end of the line would
+	// report on the current checkout instead of the repository the user meant to name.
+	assert.throws(() => parseArgs(['--repo']), /--repo requires a value/);
+	assert.throws(() => parseArgs(['--json', '--repo']), /--repo requires a value/);
+	assert.throws(() => parseArgs(['--limit']), /--limit requires a value/);
+	// And a valid trailing value still parses.
+	assert.deepEqual(parseArgs(['--repo', 'o/n']), { repo: 'o/n', limit: 20, json: false });
 	assert.throws(() => parseArgs(['--limit', 'abc']), /positive integer/);
 	assert.throws(() => parseArgs(['--nope']), /Unknown argument/);
 });
