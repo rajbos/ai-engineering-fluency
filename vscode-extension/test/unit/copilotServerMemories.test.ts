@@ -701,6 +701,38 @@ test('the repo resolver walks up to the real git root rather than trusting the f
 	assert.ok(/parent === current/.test(walkerBody), 'the walk must terminate at the filesystem root');
 });
 
+test('explicit sign-out clears the cache and stops the silent token lookup', () => {
+	// Signing out in this extension does not revoke the provider session — getSession() would
+	// still hand one back — so the user's decision has to be honoured explicitly, at every
+	// point where cached data or a new fetch could outlive it.
+	const fs = require('node:fs') as typeof import('node:fs');
+	const path = require('node:path') as typeof import('node:path');
+	const extensionSrc = fs.readFileSync(path.join(__dirname, '../../../../src/extension.ts'), 'utf8');
+
+	const signOutStart = extensionSrc.indexOf('public async signOutFromGitHub()');
+	assert.ok(signOutStart >= 0, 'expected signOutFromGitHub()');
+	const signOutBody = extensionSrc.slice(signOutStart, extensionSrc.indexOf('\n\t}', signOutStart));
+	assert.ok(/this\.invalidateServerMemoriesCache\(\);/.test(signOutBody), 'sign-out must clear the cache');
+
+	const tokenStart = extensionSrc.indexOf('private async getPublicGitHubTokenSilently()');
+	const tokenBody = extensionSrc.slice(tokenStart, extensionSrc.indexOf('\n\t}', tokenStart));
+	assert.ok(
+		/if \(this\._githubSignedOutByUser\) \{ return undefined; \}/.test(tokenBody),
+		'the silent lookup must honour the explicit sign-out flag',
+	);
+	assert.ok(
+		// The real call, not the word: the explanatory comment above the guard mentions
+		// getSession() too, and matching that would make this assertion pass on prose.
+		tokenBody.indexOf('_githubSignedOutByUser') < tokenBody.indexOf('vscode.authentication.getSession'),
+		'the flag must be checked before a session is requested',
+	);
+
+	// And an in-flight fetch cannot publish after sign-out.
+	const checkStart = extensionSrc.indexOf('private isServerMemoriesContextCurrent(');
+	const checkBody = extensionSrc.slice(checkStart, extensionSrc.indexOf('\n\t}', checkStart));
+	assert.ok(/this\._githubSignedOutByUser/.test(checkBody), 'publishing must be gated on the sign-out flag');
+});
+
 test('the server-memory cache is invalidated on public-session and setting changes', () => {
 	// The cache identity is repository + checkout root, which answers "is this the same
 	// store?" but says nothing about *who we asked as*, nor whether the feature is still

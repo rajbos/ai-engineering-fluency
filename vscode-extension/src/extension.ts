@@ -3529,6 +3529,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (session) {
 				this.githubSession = session;
 				this._githubSignedOutByUser = false;
+				// Symmetric with sign-out: the flag that suppressed the memory fetch has just
+				// been lifted, so re-render rather than leaving the section blank until the
+				// next periodic refresh happens to come round.
+				this.invalidateServerMemoriesCache();
 				await this.context.globalState.update('github.signedOutByUser', false);
 				this.log(`✅ Successfully authenticated as ${session.account.label}`);
 				vscode.window.showInformationMessage(`GitHub authentication successful! Logged in as ${session.account.label}`);
@@ -3553,6 +3557,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			await this.context.globalState.update('github.authenticated', false);
 			await this.context.globalState.update('github.username', undefined);
 			await this.context.globalState.update('github.signedOutByUser', true);
+			// Clear the repository-memory cache with the other GitHub-derived snapshots below.
+			// Explicit sign-out revokes nothing at the provider — the VS Code session survives —
+			// so without this an already-fetched analysis stays renderable, and the next refresh
+			// would happily reuse that still-valid session.
+			this.invalidateServerMemoriesCache();
 			this.log('✅ Successfully signed out from GitHub');
 			vscode.window.showInformationMessage('Signed out from GitHub successfully.');
 
@@ -6940,6 +6949,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * would come back empty for users who have already granted the narrower one.
 	 */
 	private async getPublicGitHubTokenSilently(): Promise<string | undefined> {
+		// Signing out in this extension does not revoke the provider session, so getSession()
+		// would still hand one back. Honour the user's decision instead: they asked us to stop
+		// using their GitHub identity, and a background fetch is exactly the kind of thing they
+		// meant. The flag is cleared when they authenticate again.
+		if (this._githubSignedOutByUser) { return undefined; }
 		const session = await vscode.authentication.getSession(PUBLIC_GITHUB_AUTH_PROVIDER_ID, ['read:user'], { silent: true });
 		return session?.accessToken;
 	}
@@ -7033,6 +7047,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * than published over the current context.
 	 */
 	private isServerMemoriesContextCurrent(context: { repo: string; repoRoot: string }, generation: number): boolean {
+		// A fetch begun before an explicit sign-out must not publish after it. The generation
+		// bump from invalidateServerMemoriesCache() already covers this, but the flag is
+		// checked directly so the guarantee does not depend on that one call site.
+		if (this._githubSignedOutByUser) { return false; }
 		// The generation is the part the other three cannot express: signing out or switching
 		// account leaves the setting, repository and root all identical, so without it a
 		// response fetched under the previous token would publish into the new session's view.
