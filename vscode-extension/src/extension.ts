@@ -5552,6 +5552,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const now = new Date().toISOString();
 
 		const ctx = {
+			// insightsEngine.ts stays VS Code-free, so it cannot reach l10n's t()
+			// itself — the host injects it (issue #2081).
+			translate: l10nT,
 			today: stats.today,
 			last30Days: stats.last30Days,
 			month: stats.month,
@@ -5616,6 +5619,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private buildCurrentInsights(stats: UsageAnalysisStats): EvaluatedInsight[] {
 		const cadenceDays = vscode.workspace.getConfiguration('aiEngineeringFluency').get<number>('insights.cadenceDays', 2);
 		const ctx = {
+			// See evaluateAndSurfaceInsights above: the engine is injected with t().
+			translate: l10nT,
 			today: stats.today,
 			last30Days: stats.last30Days,
 			month: stats.month,

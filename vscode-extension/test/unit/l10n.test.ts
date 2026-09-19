@@ -1,8 +1,13 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import * as vscode from 'vscode';
 import { t } from '../../src/l10n';
+import { ENGLISH_BUNDLE } from '../../src/l10nCore';
+import { INSIGHT_CATALOG, evaluateInsights } from '../../src/insightsEngine';
+import { insightFixtureContexts } from './fixtures/insightContexts';
 
 const mock = (vscode as any).__mock;
 
@@ -868,4 +873,156 @@ test('l10n: Claude Desktop coverage keys resolve in zh-cn', () => {
 	} finally {
 		mock.setLanguage('en');
 	}
+});
+
+// ---------------------------------------------------------------------------
+// Personalized Insights catalog (issue #2081)
+//
+// insightsEngine.ts holds 50+ user-facing insights whose titles, bodies and
+// action labels all resolve through injected `ctx.translate`. Per AGENTS.md's
+// "Localization changes require test coverage" rule, that whole surface needs
+// English + zh-CN coverage — table-driven over the catalog and the bundle
+// rather than one assertion per key, because there are ~180 of them.
+// ---------------------------------------------------------------------------
+
+const INSIGHT_PREFIX = 'insight.';
+
+/** Every `insight.*` key shipped in the English bundle. */
+function insightKeys(): string[] {
+	return Object.keys(ENGLISH_BUNDLE).filter(k => k.startsWith(INSIGHT_PREFIX));
+}
+
+/** The `{0}`, `{1}` … indices a template uses, as a sorted array. */
+function placeholders(template: string): string[] {
+	return [...new Set([...template.matchAll(/\{(\d+)\}/g)].map(m => m[1]))].sort();
+}
+
+test('insights l10n: the catalog actually has keys to cover', () => {
+	// Guards the tests below against silently passing on an empty set if the
+	// catalog is ever refactored to a different key prefix.
+	assert.ok(insightKeys().length > 150, `expected the insight catalog's keys, got ${insightKeys().length}`);
+	assert.equal(INSIGHT_CATALOG.length, 53, 'catalog size changed — update the expected count deliberately');
+});
+
+test('insights l10n: every catalog title and action label resolves in English', () => {
+	for (const def of INSIGHT_CATALOG) {
+		for (const key of [def.titleKey, def.actionLabelKey, def.secondaryActionLabelKey]) {
+			if (key === undefined) { continue; }
+			const value = t(key);
+			assert.notEqual(value, key, `${def.id}: "${key}" has no entry in package.nls.json`);
+			assert.ok(value.length > 0, `${def.id}: "${key}" resolved to an empty string`);
+		}
+	}
+});
+
+test('insights l10n: every catalog title and action label resolves in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		for (const def of INSIGHT_CATALOG) {
+			for (const key of [def.titleKey, def.actionLabelKey, def.secondaryActionLabelKey]) {
+				if (key === undefined) { continue; }
+				const value = t(key);
+				assert.notEqual(value, key, `${def.id}: "${key}" missing from package.nls.zh-cn.json`);
+				// Not asserting the text differs from English: a few labels are
+				// product names or command names that correctly stay identical.
+				assert.ok(value.length > 0, `${def.id}: "${key}" resolved to an empty string in zh-cn`);
+			}
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('insights l10n: every insight key has a zh-cn translation', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const untranslated = insightKeys().filter(k => t(k) === ENGLISH_BUNDLE[k]);
+		// Every insight string is prose, so unlike the two known product-name keys
+		// elsewhere in the bundle, none of these may fall back to English.
+		assert.deepEqual(untranslated, [], 'these insight keys fall back to English on a zh-cn install');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('insights l10n: zh-cn templates use exactly the English placeholder set', () => {
+	// Order may differ — zh-CN deliberately reorders clauses in several of these
+	// (e.g. lowContextDiversity puts the session count before the percentage) —
+	// but a *missing* index silently drops a live number from the sentence, and
+	// an *extra* one renders a literal "{3}" to the user.
+	const mismatches: string[] = [];
+	for (const key of insightKeys()) {
+		mock.setLanguage('zh-cn');
+		const zh = t(key);
+		mock.setLanguage('en');
+		const en = t(key);
+		const a = placeholders(en).join(','), b = placeholders(zh).join(',');
+		if (a !== b) { mismatches.push(`${key}: en={${a}} zh-cn={${b}}`); }
+	}
+	mock.setLanguage('en');
+	assert.deepEqual(mismatches, []);
+});
+
+test('insights l10n: the bundle carries no orphaned insight keys', () => {
+	// A key nobody references is dead weight a translator still pays for. Keys
+	// are built dynamically (`plural()` appends `.one`/`.other`, and a couple of
+	// insights compose `.oneSession.otherEvents`-style suffixes), so a key counts
+	// as referenced when it — or the prefix it is derived from — appears in the
+	// engine's source.
+	// Tests run compiled out of `out/`, so __dirname does not sit next to the
+	// real source tree — same hop the other source-reading tests use.
+	const source = readFileSync(join(__dirname, '../../../../src/insightsEngine.ts'), 'utf8');
+	const orphans = insightKeys().filter(key => {
+		const parts = key.split('.');
+		// Try the full key, then progressively shorter prefixes, down to the two
+		// dynamic suffix segments this file actually builds.
+		for (let drop = 0; drop <= 2; drop++) {
+			const candidate = parts.slice(0, parts.length - drop).join('.');
+			if (candidate.length <= INSIGHT_PREFIX.length) { continue; }
+			// Either a plain `'insight.x.y'` literal or the fixed head of a
+			// template literal whose suffix is computed (`` `insight.x.${form}` ``).
+			// Anchoring on the opening quote character keeps a key from matching a
+			// longer, unrelated key that merely starts with the same text.
+			if (source.includes(`'${candidate}`) || source.includes(`\`${candidate}`)) { return false; }
+		}
+		return true;
+	});
+	assert.deepEqual(orphans, [], 'these insight keys are in the bundle but never referenced');
+});
+
+test('insights l10n: evaluated insights never leak a raw key into the UI', () => {
+	// The end-to-end guard the per-key tests cannot give: t() falls back to
+	// returning the key itself for an unknown key, so a typo inside buildBody
+	// ships "insight.foo.body" as the visible body text rather than throwing.
+	const seen: string[] = [];
+	for (const lang of ['en', 'zh-cn']) {
+		mock.setLanguage(lang);
+		try {
+			for (const ctx of insightFixtureContexts(t)) {
+				for (const insight of evaluateInsights(ctx, {}, 7, null)) {
+					for (const text of [insight.title, insight.body, insight.actionLabel, insight.secondaryActionLabel]) {
+						if (text && text.includes(INSIGHT_PREFIX)) {
+							seen.push(`${lang}/${insight.id}: ${text}`);
+						}
+					}
+				}
+			}
+		} finally {
+			mock.setLanguage('en');
+		}
+	}
+	assert.deepEqual(seen, [], 'unresolved localization keys rendered as insight text');
+});
+
+test('insights l10n: the fixtures render every insight in the catalog', () => {
+	// The guarantee the "never leak a raw key" test above depends on: it can only
+	// catch a bad key inside an insight that actually fires. Without this, adding
+	// an insight with no matching fixture would quietly shrink that test's reach
+	// instead of failing.
+	const fired = new Set<string>();
+	for (const ctx of insightFixtureContexts(t)) {
+		for (const insight of evaluateInsights(ctx, {}, 7, null)) { fired.add(insight.id); }
+	}
+	const never = INSIGHT_CATALOG.map(d => d.id).filter(id => !fired.has(id));
+	assert.deepEqual(never, [], 'add a fixture context to test/unit/fixtures/insightContexts.ts for these');
 });
