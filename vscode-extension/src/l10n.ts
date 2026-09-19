@@ -25,25 +25,16 @@
  * there instead of importing this file.
  */
 import * as vscode from 'vscode';
-import { resolveLocaleId, translate } from './l10nCore';
+import { translate } from './l10nCore';
 
 export type { Translate } from './l10nCore';
 
 /**
- * The locale the runtime strings are actually rendered in.
- *
- * Not the same question as "what is VS Code's display language": t() falls back to the English
- * bundle for every language this extension has no `package.nls.<locale>.json` for, so on a French
- * or Brazilian-Portuguese install the strings on screen are English. Anything that has to *declare*
- * the language of rendered text — a webview's `<html lang>` above all — must ask this rather than
- * `vscode.env.language`, or it labels English text as French and sends assistive technology down
- * the wrong pronunciation rules, which is the very mismatch declaring the language is meant to fix.
- *
- * The result is always either an id from LOCALE_BUNDLES or `en`, so it is safe to interpolate.
+ * Re-exported from `l10nCore` so existing callers keep working. It lives there
+ * because the desktop, JetBrains and Visual Studio hosts need it to declare
+ * `<html lang>` and cannot import `vscode`.
  */
-export function resolvedLocale(language: string): string {
-	return resolveLocaleId(language) ?? 'en';
-}
+export { resolvedLocale } from './l10nCore';
 
 /**
  * Look up a localized string by its package.nls.json key. Resolution order:

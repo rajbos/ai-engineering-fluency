@@ -64,6 +64,29 @@ export function resolveLocaleId(language: string): string | undefined {
 	return undefined;
 }
 
+/**
+ * The locale the runtime strings are actually rendered in.
+ *
+ * Not the same question as "what is the host's display language": resolution
+ * falls back to the English bundle for every language this extension has no
+ * `package.nls.<locale>.json` for, so on a French or Brazilian-Portuguese
+ * install the strings on screen are English. Anything that has to *declare* the
+ * language of rendered text — a webview's `<html lang>` above all — must ask
+ * this rather than the raw display language, or it labels English text as
+ * French and sends assistive technology down the wrong pronunciation rules,
+ * which is the very mismatch declaring the language is meant to fix.
+ *
+ * Lives here rather than in `l10n.ts` so the desktop, JetBrains and Visual
+ * Studio hosts — which cannot import `vscode` — can declare `<html lang>`
+ * correctly too. `l10n.ts` re-exports it for existing callers.
+ *
+ * The result is always either an id from LOCALE_BUNDLES or `en`, so it is safe
+ * to interpolate.
+ */
+export function resolvedLocale(language: string): string {
+	return resolveLocaleId(language) ?? 'en';
+}
+
 export function resolveLocaleBundle(language: string): Record<string, string> | undefined {
 	const id = resolveLocaleId(language);
 	return id === undefined ? undefined : LOCALE_BUNDLES[id];
