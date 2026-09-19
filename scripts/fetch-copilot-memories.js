@@ -93,29 +93,41 @@ function parseArgs(argv) {
 const GITHUB_HOSTS = new Set(['github.com', 'www.github.com', 'ssh.github.com']);
 
 /**
- * Replace any `user:password@` userinfo in a remote URL with `***@`.
+ * Reduce a remote URL to the parts that are safe to print: scheme, host and path.
  *
- * A git remote can carry an embedded credential (`https://user:token@host/owner/repo`), and
- * this script promises above that it never prints one. An error message quoting the remote
- * verbatim would break that promise for the one remote shape most likely to be misconfigured,
- * so the URL is redacted before it is ever shown. Falls back to dropping the whole URL if it
- * cannot be parsed, since an unparseable string cannot be redacted with confidence.
+ * A git remote can carry an embedded credential, and this script promises above that it never
+ * prints one. An error message quoting the remote verbatim would break that promise for the
+ * remote shapes most likely to be misconfigured, so everything that can hold a secret is
+ * removed first — the `user:password@` userinfo, and also the query and fragment, since
+ * `https://host/o/r?token=secret` is just as much a leak and a remote never needs either for
+ * the host/owner/repo this message is about. Dropping them wholesale beats trying to
+ * recognize which parameter is the secret one.
  */
 function redactRemoteUrl(remoteUrl) {
 	const scpMatch = /^([^@/]+)@([^/:]+):(.+)$/.exec(remoteUrl);
 	if (scpMatch) {
 		// scp-style (`user@host:path`) carries a username but never a password.
-		return `***@${scpMatch[2]}:${scpMatch[3]}`;
+		return `***@${scpMatch[2]}:${stripSecretBearingSuffix(scpMatch[3])}`;
 	}
 	try {
 		const url = new URL(remoteUrl);
-		if (!url.username && !url.password) { return remoteUrl; }
-		url.username = '***';
+		url.username = url.username ? '***' : '';
 		url.password = '';
+		// Userinfo is not the only place a credential hides: `?token=…` and `#…` can carry
+		// one too, and a remote never needs either for the host/owner/repo this message is
+		// about. Dropping them wholesale beats trying to recognize which parameter is secret.
+		url.search = '';
+		url.hash = '';
 		return url.toString();
 	} catch {
+		// An unparseable string cannot be redacted with confidence, so none of it is shown.
 		return '<unparseable remote URL>';
 	}
+}
+
+/** Drop a `?query` or `#fragment` from a path, either of which can carry a token. */
+function stripSecretBearingSuffix(remotePath) {
+	return remotePath.replace(/[?#].*$/, '');
 }
 
 /**

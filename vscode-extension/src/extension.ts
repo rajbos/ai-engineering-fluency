@@ -154,6 +154,16 @@ import { readGitOriginUrl as _readGitOriginUrl } from '../../src/darkFactorySign
  */
 const SERVER_MEMORIES_FETCH_TTL_MS = 60 * 60 * 1000;
 
+/**
+ * VS Code's built-in **public** GitHub authentication provider.
+ *
+ * Named separately from `getGitHubAuthProviderId()`, which resolves to `github-enterprise`
+ * when `github-enterprise.uri` is set. The memory feature is pinned to public GitHub at both
+ * ends — it only parses github.com remotes and only calls api.githubcopilot.com — so it must
+ * not pick up an Enterprise token that was never issued for that host.
+ */
+const PUBLIC_GITHUB_AUTH_PROVIDER_ID = 'github';
+
 // --- Insights engine ---
 import type { TaskCategory, TaskCategoryBreakdown } from '../../src/taskClassification';
 import {
@@ -6841,6 +6851,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 			try {
 				const result = await _fetchRepoMemories(context.repo, {
 					getToken: async () => {
+						// The public `github` provider specifically, NOT getGitHubAuthProviderId().
+						// That helper follows the `github-enterprise.uri` setting, but this feature is
+						// fixed to public GitHub at both ends: the remote parser only accepts
+						// github.com repositories, and the request always goes to
+						// api.githubcopilot.com. With an Enterprise endpoint configured and a public
+						// checkout open, the helper would hand us a GHES token to send to a host it
+						// was never issued for. An Enterprise-only user simply gets no session here,
+						// which surfaces as a readable reason in the section.
+						//
 						// Deliberately the same `read:user` scope every other getSession() call in this
 						// file uses, not a broader one. `silent: true` only returns a session that
 						// already covers the requested scopes, so asking for anything wider than what
@@ -6848,8 +6867,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 						// stay empty forever with no visible reason, which is the one failure mode this
 						// feature exists to avoid. If the memory API ever refuses a token minted for
 						// this scope, that surfaces as a readable HTTP error in the section instead.
-						const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
-						if (!session) { throw new Error('not signed in to GitHub'); }
+						const session = await vscode.authentication.getSession(PUBLIC_GITHUB_AUTH_PROVIDER_ID, ['read:user'], { silent: true });
+						if (!session) { throw new Error('not signed in to public GitHub'); }
 						return session.accessToken;
 					},
 				});
