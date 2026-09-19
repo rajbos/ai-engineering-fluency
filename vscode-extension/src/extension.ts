@@ -155,6 +155,15 @@ import { readGitOriginUrl as _readGitOriginUrl, isGitRepoRoot as _isGitRepoRoot 
 const SERVER_MEMORIES_FETCH_TTL_MS = 60 * 60 * 1000;
 
 /**
+ * How long the silent GitHub session lookup may take before it is treated as "no session".
+ *
+ * A local, non-prompting call, so this is generous only to avoid flapping on a busy host —
+ * its job is to make sure a stalled auth provider cannot leave the in-flight guard set and
+ * silently disable the section for the rest of the session.
+ */
+const SERVER_MEMORIES_AUTH_TIMEOUT_MS = 10 * 1000;
+
+/**
  * VS Code's built-in **public** GitHub authentication provider.
  *
  * Named separately from `getGitHubAuthProviderId()`, which resolves to `github-enterprise`
@@ -6954,8 +6963,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// using their GitHub identity, and a background fetch is exactly the kind of thing they
 		// meant. The flag is cleared when they authenticate again.
 		if (this._githubSignedOutByUser) { return undefined; }
-		const session = await vscode.authentication.getSession(PUBLIC_GITHUB_AUTH_PROVIDER_ID, ['read:user'], { silent: true });
-		return session?.accessToken;
+		// Bounded, and never throws. This call is awaited inside the same in-flight promise as
+		// the memory requests, which are themselves timed out — but an auth provider that
+		// stalls would wedge the guard just as surely as a hung socket, and one that rejects
+		// would reach the outer catch, which stamps a fresh one-hour timestamp and so hides
+		// the failure while suppressing every retry. Returning undefined instead routes both
+		// cases through the no-session path, which deliberately does not mark the cache fresh.
+		try {
+			const session = await Promise.race([
+				vscode.authentication.getSession(PUBLIC_GITHUB_AUTH_PROVIDER_ID, ['read:user'], { silent: true }),
+				new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), SERVER_MEMORIES_AUTH_TIMEOUT_MS)),
+			]);
+			return session?.accessToken;
+		} catch (err) {
+			this.log(`⚠️ Server memories: GitHub session lookup failed: ${String(err)}`);
+			return undefined;
+		}
 	}
 
 	private scheduleServerMemoriesRefresh(): void {

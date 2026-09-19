@@ -664,13 +664,31 @@ export function renderPromotionMarkdown(analysis: ServerMemoriesAnalysis, limit:
  * ordinary facts about `*` globs or `_` names unreadable.
  */
 function flattenForMarkdown(value: string): string {
-	return value
-		// `\s` covers every JavaScript line terminator, including U+2028/U+2029, so this one
-		// pass removes the structural escape. It can only ever insert a space, never delete
-		// one, so it cannot fabricate a `-->` that the input did not already contain.
-		.replace(/\s+/g, ' ')
+	return sanitizeForDisplay(value)
 		.replace(/--+>/g, '-- >')
-		.replace(/<!--+/g, '< !--')
+		.replace(/<!--+/g, '< !--');
+}
+
+/**
+ * Reduce a server-supplied string to a single line of printable text.
+ *
+ * Every consumer of this data eventually writes it somewhere that interprets control
+ * characters — a terminal for the CLI report and the probe, a Markdown file for
+ * `--promote`. Memory text is agent-written from repository content, so an ESC/OSC/CSI
+ * sequence can arrive in a `fact` and, printed verbatim, reprogram the reader's terminal:
+ * set its title, drive the clipboard, or hide text that is actually there. A report whose
+ * job is to tell you what an agent learned must not be able to act on the machine reading
+ * it.
+ *
+ * So: strip C0 controls (including ESC and BEL), DEL and the C1 range, then collapse all
+ * remaining whitespace — which also removes the line breaks that would otherwise let a fact
+ * escape its list item or report line. Tabs and newlines are collapsed rather than kept,
+ * because every caller renders one line per field.
+ */
+export function sanitizeForDisplay(value: string): string {
+	return value
+		.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ')
+		.replace(/\s+/g, ' ')
 		.trim();
 }
 

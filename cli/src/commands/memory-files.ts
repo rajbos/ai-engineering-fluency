@@ -21,6 +21,7 @@ import {
 	parseRepoFromRemoteUrl,
 	renderPromotionMarkdown,
 	isValidRepoSlug,
+	sanitizeForDisplay,
 	INVALID_REPO_LABEL,
 	DEFAULT_MEMORY_LIMIT,
 } from '../../../src/copilotServerMemories';
@@ -92,7 +93,7 @@ export const memoryFilesCommand = new Command('memory-files')
 				// memories it prints "every stored memory already cites an instruction file",
 				// so a 401, a missing `gh` or a dropped connection would read as "you have
 				// nothing left to document" — the most misleading answer this command can give.
-				process.stderr.write(`Could not read ${serverAnalysis.repo}: ${serverAnalysis.error}\n`);
+				process.stderr.write(`Could not read ${sanitizeForDisplay(serverAnalysis.repo)}: ${sanitizeForDisplay(serverAnalysis.error)}\n`);
 				process.exitCode = 1;
 			} else {
 				process.stdout.write(renderPromotionMarkdown(serverAnalysis));
@@ -194,11 +195,15 @@ function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined)
 		return;
 	}
 	if (analysis.error) {
-		process.stdout.write(`Could not read ${analysis.repo}: ${analysis.error}\n`);
+		process.stdout.write(`Could not read ${sanitizeForDisplay(analysis.repo)}: ${sanitizeForDisplay(analysis.error)}\n`);
 		return;
 	}
 
-	process.stdout.write(`Repository:           ${analysis.repo}\n`);
+	// Every field below comes from the server. Memory text is agent-written from repository
+	// content, so a fact can carry an ESC/OSC sequence that reprograms the reader's terminal
+	// when printed verbatim — a report about what an agent learned must not be able to act on
+	// the machine reading it. JSON mode is safe by construction; this path was not.
+	process.stdout.write(`Repository:           ${sanitizeForDisplay(analysis.repo)}\n`);
 	process.stdout.write(`Memory enabled:       ${analysis.enabled ?? 'unknown'}\n`);
 	process.stdout.write(`Stored memories:      ${analysis.totalMemories} across ${analysis.distinctSubjects} subjects\n`);
 	process.stdout.write(`Already documented:   ${analysis.documentedCount} (cite AGENTS.md or another instruction file)\n`);
@@ -218,15 +223,15 @@ function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined)
 	process.stdout.write('Top promotion candidates (consider adding these to AGENTS.md):\n');
 	for (const group of analysis.promotionGroups.slice(0, 10)) {
 		const repeats = group.repeatCount > 1 ? ` (re-learned ${group.repeatCount}x)` : '';
-		process.stdout.write(`  • ${group.displaySubject}${repeats}\n`);
-		process.stdout.write(`      ${group.representativeFact}\n`);
+		process.stdout.write(`  • ${sanitizeForDisplay(group.displaySubject)}${repeats}\n`);
+		process.stdout.write(`      ${sanitizeForDisplay(group.representativeFact)}\n`);
 	}
 	process.stdout.write('\n  Run with --promote for a Markdown block you can paste in.\n');
 
 	if (analysis.fullyStaleCount > 0) {
 		process.stdout.write('\nMemories whose every cited file is gone:\n');
 		for (const stale of analysis.staleCitations.filter(c => c.fullyStale).slice(0, 10)) {
-			process.stdout.write(`  • ${stale.subject}: ${stale.missingPaths.join(', ')}\n`);
+			process.stdout.write(`  • ${sanitizeForDisplay(stale.subject)}: ${sanitizeForDisplay(stale.missingPaths.join(', '))}\n`);
 		}
 	}
 	process.stdout.write('\n');

@@ -277,8 +277,26 @@ async function getJson(url, token) {
 	}
 }
 
+/**
+ * Reduce a server-supplied string to a single line of printable text.
+ *
+ * Memory text is agent-written from repository content, so a `fact` can carry an ESC/OSC
+ * sequence that reprograms the reader's terminal when printed verbatim — set its title,
+ * drive the clipboard, hide text that is really there. This diagnostic is authenticated and
+ * may well be pointed at a shared or untrusted repository, so its output must not be able to
+ * act on the machine reading it. `JSON.stringify` already escapes the `source`/`extra`
+ * fields; these are the ones printed raw. Mirrors sanitizeForDisplay() in
+ * `src/copilotServerMemories.ts`.
+ */
+function sanitizeForDisplay(value) {
+	return String(value)
+		.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
 function printReport(repo, enabled, memories) {
-	process.stdout.write(`\nCopilot Server Memories — ${repo}\n`);
+	process.stdout.write(`\nCopilot Server Memories — ${sanitizeForDisplay(repo)}\n`);
 	process.stdout.write('='.repeat(50) + '\n\n');
 	process.stdout.write(`Memory enabled for repo: ${enabled === undefined ? 'unknown' : enabled}\n`);
 	process.stdout.write(`Memories returned:       ${memories.length}\n\n`);
@@ -287,11 +305,11 @@ function printReport(repo, enabled, memories) {
 		const citations = Array.isArray(memory.citations) && memory.citations.length > 0
 			? memory.citations.join(', ')
 			: '<none>';
-		process.stdout.write(`• ${memory.subject ?? '<no subject>'}\n`);
-		process.stdout.write(`    fact:      ${memory.fact ?? ''}\n`);
-		process.stdout.write(`    citations: ${citations}\n`);
+		process.stdout.write(`• ${sanitizeForDisplay(memory.subject ?? '<no subject>')}\n`);
+		process.stdout.write(`    fact:      ${sanitizeForDisplay(memory.fact ?? '')}\n`);
+		process.stdout.write(`    citations: ${sanitizeForDisplay(citations)}\n`);
 		if (memory.reason) {
-			process.stdout.write(`    reason:    ${memory.reason}\n`);
+			process.stdout.write(`    reason:    ${sanitizeForDisplay(memory.reason)}\n`);
 		}
 		if (memory.source) {
 			process.stdout.write(`    source:    ${JSON.stringify(memory.source)}\n`);
@@ -360,4 +378,4 @@ if (require.main === module) {
 	});
 }
 
-module.exports = { redactRemoteUrl, parseRepoFromRemote, isValidRepoSlug, resolveRepoFromGit, memoryUrl, parseArgs };
+module.exports = { redactRemoteUrl, parseRepoFromRemote, isValidRepoSlug, sanitizeForDisplay, resolveRepoFromGit, memoryUrl, parseArgs };

@@ -15,6 +15,7 @@ import {
 	isSafeRepoRelativePath,
 	isValidRepoSlug,
 	safeRepoLabel,
+	sanitizeForDisplay,
 	INVALID_REPO_LABEL,
 } from '../../../src/copilotServerMemories';
 import { decideServerMemoriesRefresh } from '../../src/extension';
@@ -810,6 +811,53 @@ test('the server-memories fetch requests no broader OAuth scope than the rest of
 // repository content, so it is untrusted — and this output is offered for AGENTS.md,
 // where an escaped line stops being text and becomes an instruction.
 // ---------------------------------------------------------------------------
+
+test('sanitizeForDisplay strips terminal control sequences', () => {
+	// Memory text is agent-written from repository content, so a fact can carry an ESC/OSC
+	// sequence that reprograms the reader's terminal when printed verbatim — set its title,
+	// drive the clipboard, hide text that is really there. A report about what an agent
+	// learned must not be able to act on the machine reading it.
+	const osc = `before${String.fromCharCode(27)}]0;pwned${String.fromCharCode(7)}after`;
+	assert.equal(sanitizeForDisplay(osc), 'before ]0;pwned after');
+	assert.ok(!hasControlCharacter(sanitizeForDisplay(osc)), 'the OSC introducer and its BEL must be gone');
+
+	const csi = `red${String.fromCharCode(27)}[31mtext`;
+	assert.ok(!hasControlCharacter(sanitizeForDisplay(csi)));
+	// A carriage return can overwrite an already-printed line; it goes too.
+	assert.equal(sanitizeForDisplay('visible' + String.fromCharCode(13) + 'hidden'), 'visible hidden');
+	assert.equal(sanitizeForDisplay(`nul${String.fromCharCode(0)}byte`), 'nul byte');
+	// Ordinary text, including punctuation and non-ASCII, is untouched apart from trimming.
+	assert.equal(sanitizeForDisplay('  a normal — fact, with “quotes”  '), 'a normal — fact, with “quotes”');
+});
+
+/** Any C0 control, DEL or C1 byte — the set a terminal can be driven with. Newlines count. */
+function hasControlCharacter(value: string): boolean {
+	return value.split('').some(ch => {
+		const code = ch.charCodeAt(0);
+		return code < 32 || (code >= 127 && code <= 159);
+	});
+}
+
+test('renderPromotionMarkdown strips control sequences as well as structure', () => {
+	// --promote writes to stdout before anyone pastes it, so flattening line breaks is not
+	// enough on its own.
+	const analysis = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [memory({
+			id: '1',
+			subject: `subj${String.fromCharCode(27)}]0;title${String.fromCharCode(7)}`,
+			fact: `fact${String.fromCharCode(27)}[31m red`,
+			citations: [`src/a.ts:1${String.fromCharCode(27)}]0;x${String.fromCharCode(7)}`],
+		})],
+	}, alwaysExists);
+
+	const markdown = renderPromotionMarkdown(analysis);
+	// The block's own line breaks are structure, not content, so they are removed before the
+	// check — what must not survive is a control character inside a field.
+	const withoutLineBreaks = markdown.split(String.fromCharCode(10)).join('');
+	assert.ok(!hasControlCharacter(withoutLineBreaks), 'no control characters may survive into the block');
+});
 
 test('renderPromotionMarkdown keeps a hostile fact inside its list item', () => {
 	const analysis = analyzeServerMemories({
