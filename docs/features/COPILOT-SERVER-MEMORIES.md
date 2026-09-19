@@ -171,6 +171,16 @@ cannot delay any other number on the view. The TTL is one hour — far longer th
 the local scan's five minutes, because this costs a network round trip and a
 memory store only changes when a coding-agent run stores something.
 
+The feature is gated on **workspace trust**, matching
+`ensureWorkspaceTrustedForGitAccess()`. Everything downstream is driven by a file
+the checkout controls: `.git/config` names the repository, which decides what we
+ask the Copilot API for with the user's token, and the citations that come back
+decide which local paths get probed. Opening a hostile repository must not be
+enough to start that, so an untrusted or virtual (non-`file`) workspace resolves
+to no repository and the section simply does not appear. Unlike the hygiene
+analysis this returns rather than throwing — that one is an explicit user action
+deserving an explanation, while this runs on a background refresh.
+
 Authentication is **silent-only**: `getSession(..., { silent: true })`. A user with
 no existing GitHub session gets an empty section rather than a sign-in prompt for a
 secondary insight. This is also the only part of the Usage Analysis view that

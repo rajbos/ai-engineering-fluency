@@ -6827,7 +6827,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * which mean there is no memory store to ask about.
 	 */
 	private resolveWorkspaceRepoSlug(): { repoRoot: string; repo: string } | undefined {
+		// Workspace trust gates this, for the same reason it gates the repository hygiene
+		// analysis in ensureWorkspaceTrustedForGitAccess(). Everything downstream is driven by
+		// a file the checkout controls: `.git/config` names the repository, which decides what
+		// this asks the Copilot API for with the user's token, and the citations that come
+		// back decide which local paths get probed. Merely *opening* a hostile repository
+		// should not be enough to start authenticated network work on its behalf.
+		//
+		// This returns undefined rather than throwing, unlike the hygiene analysis: that one
+		// is an explicit user action that deserves an explanation, while this runs on a
+		// background refresh, where the right outcome is simply no section.
+		if (!vscode.workspace.isTrusted) { return undefined; }
 		for (const folder of vscode.workspace.workspaceFolders ?? []) {
+			// A virtual workspace has no local git config or working tree to inspect, and
+			// `fsPath` on a non-file URI is not a usable filesystem path.
+			if (folder.uri.scheme !== 'file') { continue; }
 			const repoRoot = folder.uri.fsPath;
 			const originUrl = _readGitOriginUrl(repoRoot);
 			const repo = originUrl ? _parseRepoFromRemoteUrl(originUrl) : undefined;

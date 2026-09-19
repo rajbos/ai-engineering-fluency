@@ -609,6 +609,30 @@ test('renderPromotionMarkdown notes repeats and says so when there is nothing to
 // API that cannot be exercised offline, and it regresses silently.
 // ---------------------------------------------------------------------------
 
+test('the workspace repo resolver refuses untrusted and virtual workspaces', () => {
+	// Everything downstream is driven by a file the checkout controls: `.git/config` names
+	// the repository, which decides what we ask the Copilot API for with the user's token,
+	// and the citations that come back decide which local paths get probed. Opening a
+	// hostile repository must not be enough to start that. A source-scan because the guard
+	// sits in a private method behind the VS Code workspace API.
+	const fs = require('node:fs') as typeof import('node:fs');
+	const path = require('node:path') as typeof import('node:path');
+	const extensionSrc = fs.readFileSync(path.join(__dirname, '../../../../src/extension.ts'), 'utf8');
+
+	const start = extensionSrc.indexOf('private resolveWorkspaceRepoSlug()');
+	assert.ok(start >= 0, 'expected to find resolveWorkspaceRepoSlug()');
+	const body = extensionSrc.slice(start, extensionSrc.indexOf('\n\t}', start));
+
+	assert.ok(
+		/if \(!vscode\.workspace\.isTrusted\)\s*\{\s*return undefined; \}/.test(body),
+		'resolveWorkspaceRepoSlug() must bail out of an untrusted workspace',
+	);
+	assert.ok(
+		/folder\.uri\.scheme !== 'file'/.test(body),
+		'resolveWorkspaceRepoSlug() must skip folders that are not file-backed',
+	);
+});
+
 test('the server-memories fetch requests no broader OAuth scope than the rest of the extension', () => {
 	// Compiled test output lives under out/vscode-extension/test/unit, so walk back up to the
 	// package root and into src/ the way the other source-scanning tests do.
