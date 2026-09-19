@@ -170,6 +170,40 @@ test('fetchRepoMemories treats 204 as an empty store, not an error', async () =>
 	assert.equal(result.enabled, true);
 });
 
+test('fetchRepoMemories does not request memories when the repository has it switched off', async () => {
+	// A disabled store can answer `recent` with a 403, which would surface as "could not be
+	// read" — and the renderer checks `error` before `enabled`, so the honest "memory is
+	// turned off here" answer would lose to a misleading one.
+	const urls: string[] = [];
+	const result = await fetchRepoMemories('o/n', {
+		getToken: async () => 'tok',
+		fetchFn: (async (input: RequestInfo | URL) => {
+			urls.push(String(input));
+			return { ok: true, status: 200, json: async () => ({ enabled: false }), text: async () => '' } as Response;
+		}) as unknown as typeof fetch,
+	});
+
+	assert.equal(urls.length, 1, `only the enablement check should be issued, got: ${urls.join(', ')}`);
+	assert.ok(urls[0].endsWith('/enabled'));
+	assert.equal(result.enabled, false);
+	assert.equal(result.error, undefined, 'a disabled repository is not an error');
+	assert.deepEqual(result.memories, []);
+});
+
+test('fetchRepoMemories still requests memories when the enablement check was inconclusive', async () => {
+	// `undefined` means we could not ask, not that it is off — the store may well answer.
+	const urls: string[] = [];
+	await fetchRepoMemories('o/n', {
+		getToken: async () => 'tok',
+		fetchFn: (async (input: RequestInfo | URL) => {
+			urls.push(String(input));
+			const enabled = String(input).endsWith('/enabled');
+			return { ok: !enabled, status: enabled ? 500 : 200, json: async () => [], text: async () => '' } as Response;
+		}) as unknown as typeof fetch,
+	});
+	assert.equal(urls.length, 2, 'the recent list is still requested');
+});
+
 test('fetchRepoMemories reports a 403 body so a rejected client is distinguishable from an empty store', async () => {
 	const result = await fetchRepoMemories('o/n', {
 		getToken: async () => 'tok',
@@ -579,7 +613,7 @@ test('renderPromotionMarkdown flattens a hostile repo slug in the header', () =>
 // a network or a VS Code host.
 // ---------------------------------------------------------------------------
 
-const REFRESH_BASE = { enabled: true, currentRepo: 'o/a', cachedRepo: 'o/a', fetchedAt: 1_000, fetchInFlight: false, now: 1_500, ttlMs: 10_000 };
+const REFRESH_BASE = { enabled: true, currentRepo: 'o/a', currentRepoRoot: '/w/a', cachedRepo: 'o/a', cachedRepoRoot: '/w/a', fetchedAt: 1_000, fetchInFlight: false, now: 1_500, ttlMs: 10_000 };
 
 test('decideServerMemoriesRefresh serves a fresh same-repo cache without refetching', () => {
 	assert.deepEqual(decideServerMemoriesRefresh(REFRESH_BASE), { clearCache: false, startFetch: false });
@@ -628,6 +662,19 @@ test('decideServerMemoriesRefresh clears when disabled or when the folder is not
 		decideServerMemoriesRefresh({ ...REFRESH_BASE, enabled: false, fetchInFlight: true }),
 		{ clearCache: true, startFetch: false },
 	);
+});
+
+test('decideServerMemoriesRefresh treats two worktrees of one repo as different contexts', () => {
+	// The slug is identical across worktrees, but the stale-citation counts are file-existence
+	// results from one specific tree. Keying on the slug alone would serve the other
+	// checkout's answers for up to the full TTL — and this repository's own workflow makes
+	// several worktrees of one repo an everyday situation.
+	assert.deepEqual(
+		decideServerMemoriesRefresh({ ...REFRESH_BASE, currentRepoRoot: '/w/a-worktree-2' }),
+		{ clearCache: true, startFetch: true },
+	);
+	// Still fresh when both the slug and the root match.
+	assert.deepEqual(decideServerMemoriesRefresh(REFRESH_BASE), { clearCache: false, startFetch: false });
 });
 
 test('decideServerMemoriesRefresh starts the first fetch when nothing is cached', () => {

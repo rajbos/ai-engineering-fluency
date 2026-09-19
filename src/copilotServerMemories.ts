@@ -241,6 +241,15 @@ export async function fetchRepoMemories(
 	};
 
 	const enabled = await readEnabledFlag(buildMemoryApiUrl(repo, 'enabled', undefined, apiBase), headers, fetchFn);
+	// Only on an explicit `false` — `undefined` means the enablement check itself failed, and
+	// the store may well still answer. A disabled repository can reject the `recent` route
+	// with a 403, which would come back as an `error` and render as "could not be read"; the
+	// renderer checks `error` before `enabled`, so the honest "memory is turned off here"
+	// answer would lose to a misleading one. Skipping the request also saves a pointless
+	// authenticated round trip.
+	if (enabled === false) {
+		return { repo, enabled: false, memories: [] };
+	}
 
 	let response: Response;
 	try {

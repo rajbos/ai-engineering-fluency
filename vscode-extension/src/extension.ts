@@ -531,8 +531,16 @@ export interface ServerMemoriesRefreshInputs {
 	enabled: boolean;
 	/** `owner/name` the workspace currently resolves to, or undefined for a non-GitHub folder. */
 	currentRepo: string | undefined;
+	/** Checkout root the workspace currently resolves to. */
+	currentRepoRoot: string | undefined;
 	/** `owner/name` the cached analysis belongs to. */
 	cachedRepo: string | undefined;
+	/**
+	 * Checkout root the cached analysis was computed against. Part of the identity because
+	 * the stale-citation counts are file-existence results from *that* tree: two worktrees of
+	 * one repository share a slug but not their working files.
+	 */
+	cachedRepoRoot: string | undefined;
 	/** When the cached analysis was stored. */
 	fetchedAt: number | undefined;
 	/** Whether a fetch is already running. */
@@ -563,12 +571,14 @@ export function decideServerMemoriesRefresh(input: ServerMemoriesRefreshInputs):
 	// A non-GitHub folder has no store to show, including any left over from a folder that did.
 	if (!input.currentRepo) { return { clearCache: true, startFetch: false }; }
 
-	const movedRepo = input.cachedRepo !== undefined && input.cachedRepo !== input.currentRepo;
-	// Drop the old repository's result now; only the fetch itself has to wait for a free slot.
-	if (movedRepo) { return { clearCache: true, startFetch: !input.fetchInFlight }; }
+	const moved = input.cachedRepo !== undefined
+		&& (input.cachedRepo !== input.currentRepo || input.cachedRepoRoot !== input.currentRepoRoot);
+	// Drop the old context's result now; only the fetch itself has to wait for a free slot.
+	if (moved) { return { clearCache: true, startFetch: !input.fetchInFlight }; }
 
 	if (input.fetchInFlight) { return { clearCache: false, startFetch: false }; }
 	const fresh = input.cachedRepo === input.currentRepo
+		&& input.cachedRepoRoot === input.currentRepoRoot
 		&& input.fetchedAt !== undefined
 		&& (input.now - input.fetchedAt) < input.ttlMs;
 	return { clearCache: false, startFetch: !fresh };
@@ -1263,6 +1273,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * switch would keep showing the previous repository's memories until the hour elapsed.
 	 */
 	private _serverMemoriesRepo: string | undefined;
+	/**
+	 * Checkout root {@link _serverMemoriesAnalysis} was computed against. The slug alone is not
+	 * enough either: the stale-citation counts are file-existence results from a specific tree,
+	 * and two worktrees of one repository share a slug while having different files on disk —
+	 * which this repository's own workflow makes a routine case rather than a corner one.
+	 */
+	private _serverMemoriesRepoRoot: string | undefined;
 	/** In-flight fetch, so concurrent refreshes coalesce into one request rather than racing. */
 	private _serverMemoriesFetchInFlight: Promise<void> | undefined;
 	private lastDashboardData: any | undefined;
@@ -6855,7 +6872,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const decision = decideServerMemoriesRefresh({
 			enabled: this.getServerMemoriesEnabledSetting(),
 			currentRepo: context?.repo,
+			currentRepoRoot: context?.repoRoot,
 			cachedRepo: this._serverMemoriesRepo,
+			cachedRepoRoot: this._serverMemoriesRepoRoot,
 			fetchedAt: this._serverMemoriesFetchedAt,
 			fetchInFlight: this._serverMemoriesFetchInFlight !== undefined,
 			now: Date.now(),
@@ -6865,6 +6884,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (decision.clearCache) {
 			this._serverMemoriesAnalysis = null;
 			this._serverMemoriesRepo = undefined;
+			this._serverMemoriesRepoRoot = undefined;
 			this._serverMemoriesFetchedAt = undefined;
 		}
 		if (!decision.startFetch || !context) { return; }
@@ -6878,9 +6898,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// failure still surfaces, which is the case worth showing.
 				const token = await this.getPublicGitHubTokenSilently();
 				if (!token) {
-					if (this.isServerMemoriesContextCurrent(context.repo)) {
+					if (this.isServerMemoriesContextCurrent(context)) {
 						this._serverMemoriesAnalysis = null;
 						this._serverMemoriesRepo = context.repo;
+						this._serverMemoriesRepoRoot = context.repoRoot;
 						this._serverMemoriesFetchedAt = Date.now();
 					}
 					return;
@@ -6898,16 +6919,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// The workspace can change, or the user can switch the feature off, while this
 				// request is in flight. Publishing unconditionally would then put one repository's
 				// memories on screen for another — or restore a section the user just disabled.
-				if (this.isServerMemoriesContextCurrent(context.repo)) {
+				if (this.isServerMemoriesContextCurrent(context)) {
 					this._serverMemoriesAnalysis = analysis;
 					this._serverMemoriesRepo = context.repo;
+					this._serverMemoriesRepoRoot = context.repoRoot;
 					this._serverMemoriesFetchedAt = Date.now();
 				}
 			} catch (err) {
 				this.log(`⚠️ Server memories fetch failed: ${String(err)}`);
-				if (this.isServerMemoriesContextCurrent(context.repo)) {
+				if (this.isServerMemoriesContextCurrent(context)) {
 					this._serverMemoriesAnalysis = null;
 					this._serverMemoriesRepo = context.repo;
+					this._serverMemoriesRepoRoot = context.repoRoot;
 					this._serverMemoriesFetchedAt = Date.now();
 				}
 			} finally {
@@ -6923,8 +6946,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * resolved to a different repository — in either case the result must be dropped rather
 	 * than published over the current context.
 	 */
-	private isServerMemoriesContextCurrent(repo: string): boolean {
-		return this.getServerMemoriesEnabledSetting() && this.resolveWorkspaceRepoSlug()?.repo === repo;
+	private isServerMemoriesContextCurrent(context: { repo: string; repoRoot: string }): boolean {
+		if (!this.getServerMemoriesEnabledSetting()) { return false; }
+		const current = this.resolveWorkspaceRepoSlug();
+		return current?.repo === context.repo && current?.repoRoot === context.repoRoot;
 	}
 
 	/**

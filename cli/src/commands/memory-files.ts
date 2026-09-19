@@ -83,9 +83,18 @@ export const memoryFilesCommand = new Command('memory-files')
 		}
 
 		if (options.promote) {
-			process.stdout.write(serverAnalysis
-				? renderPromotionMarkdown(serverAnalysis)
-				: 'Not a GitHub repository checkout — pass --repo owner/name.\n');
+			if (!serverAnalysis) {
+				process.stdout.write('Not a GitHub repository checkout — pass --repo owner/name.\n');
+			} else if (serverAnalysis.error) {
+				// A failed read must not fall through to renderPromotionMarkdown(): with no
+				// memories it prints "every stored memory already cites an instruction file",
+				// so a 401, a missing `gh` or a dropped connection would read as "you have
+				// nothing left to document" — the most misleading answer this command can give.
+				process.stderr.write(`Could not read ${serverAnalysis.repo}: ${serverAnalysis.error}\n`);
+				process.exitCode = 1;
+			} else {
+				process.stdout.write(renderPromotionMarkdown(serverAnalysis));
+			}
 			return;
 		}
 
