@@ -2794,6 +2794,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private setupGitHubAuthListener(context: vscode.ExtensionContext): void {
 		context.subscriptions.push(
 			vscode.authentication.onDidChangeSessions(async (e) => {
+				// Checked against the *public* provider, and before either early return below:
+				// the repository-memory cache is keyed by repository and checkout root, not by
+				// identity, so a sign-out or account switch would otherwise keep showing data
+				// fetched under the old session for up to the full TTL. The handler below filters
+				// on getGitHubAuthProviderId(), which names the Enterprise provider on a GHES
+				// install — a provider this feature deliberately never authenticates with.
+				if (e.provider.id === PUBLIC_GITHUB_AUTH_PROVIDER_ID) { this.invalidateServerMemoriesCache(); }
 				const authProviderId = getGitHubAuthProviderId();
 				if (e.provider.id !== authProviderId) { return; }
 				if (this._githubSignedOutByUser) { return; }
@@ -2834,6 +2841,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		context.subscriptions.push(
 			vscode.workspace.onDidChangeConfiguration(e => {
 				if (e.affectsConfiguration('aiEngineeringFluency.display')) { this.refreshOpenPanelsForSettingChange(); }
+				// Without this the opt-out only takes effect on the next periodic refresh, so a
+				// user who switches it off keeps looking at the card they just disabled.
+				if (e.affectsConfiguration('aiEngineeringFluency.serverMemories')) { this.invalidateServerMemoriesCache(); }
 				if (e.affectsConfiguration('aiEngineeringFluency.backend')) {
 					this.startBackendSyncAfterInitialAnalysis();
 					const backend = this.backend;
@@ -6826,6 +6836,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * no folder open, no origin remote, or the remote is not a GitHub repository — all of
 	 * which mean there is no memory store to ask about.
 	 */
+	/**
+	 * Drop any cached repository-memory analysis and re-render the open panel.
+	 *
+	 * Called when something the cache identity does *not* cover changes: the signed-in
+	 * account, or the feature's own setting. The identity is repository + checkout root,
+	 * which is right for "is this the same store?" but says nothing about who we asked as, so
+	 * those two need an explicit nudge rather than waiting out the TTL.
+	 */
+	private invalidateServerMemoriesCache(): void {
+		this._serverMemoriesAnalysis = undefined;
+		this._serverMemoriesRepo = undefined;
+		this._serverMemoriesRepoRoot = undefined;
+		this._serverMemoriesFetchedAt = undefined;
+		if (this.analysisPanel) { this.refreshOpenPanelsForSettingChange(); }
+	}
+
 	private resolveWorkspaceRepoSlug(): { repoRoot: string; repo: string } | undefined {
 		// Workspace trust gates this, for the same reason it gates the repository hygiene
 		// analysis in ensureWorkspaceTrustedForGitAccess(). Everything downstream is driven by

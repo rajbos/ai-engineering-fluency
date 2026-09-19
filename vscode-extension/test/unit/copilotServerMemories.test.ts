@@ -609,6 +609,32 @@ test('renderPromotionMarkdown notes repeats and says so when there is nothing to
 // API that cannot be exercised offline, and it regresses silently.
 // ---------------------------------------------------------------------------
 
+test('the server-memory cache is invalidated on public-session and setting changes', () => {
+	// The cache identity is repository + checkout root, which answers "is this the same
+	// store?" but says nothing about *who we asked as*, nor whether the feature is still
+	// switched on. Both need an explicit nudge rather than waiting out the hour-long TTL.
+	const fs = require('node:fs') as typeof import('node:fs');
+	const path = require('node:path') as typeof import('node:path');
+	const extensionSrc = fs.readFileSync(path.join(__dirname, '../../../../src/extension.ts'), 'utf8');
+
+	assert.ok(
+		/e\.provider\.id === PUBLIC_GITHUB_AUTH_PROVIDER_ID\) \{ this\.invalidateServerMemoriesCache\(\); \}/.test(extensionSrc),
+		'a public GitHub session change must invalidate the cache',
+	);
+	assert.ok(
+		/affectsConfiguration\('aiEngineeringFluency\.serverMemories'\)\) \{ this\.invalidateServerMemoriesCache\(\); \}/.test(extensionSrc),
+		'toggling the setting must invalidate the cache',
+	);
+
+	// The session check must sit ahead of the handler's own early returns, which filter on
+	// getGitHubAuthProviderId() — the Enterprise provider on a GHES install, and one this
+	// feature deliberately never authenticates with.
+	const handlerStart = extensionSrc.indexOf('vscode.authentication.onDidChangeSessions');
+	const invalidateAt = extensionSrc.indexOf('invalidateServerMemoriesCache', handlerStart);
+	const firstReturnAt = extensionSrc.indexOf('if (e.provider.id !== authProviderId) { return; }', handlerStart);
+	assert.ok(invalidateAt > handlerStart && invalidateAt < firstReturnAt, 'invalidation must precede the provider filter');
+});
+
 test('the workspace repo resolver refuses untrusted and virtual workspaces', () => {
 	// Everything downstream is driven by a file the checkout controls: `.git/config` names
 	// the repository, which decides what we ask the Copilot API for with the user's token,
