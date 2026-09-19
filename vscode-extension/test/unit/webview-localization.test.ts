@@ -89,3 +89,33 @@ test('localize: the model-mix table defaults are present without any payload', (
 	assert.equal(localizeFormat('efficiency.modelMix.shiftPoints', '+1.5'), '+1.5 pt');
 	assert.equal(localizeFormat('efficiency.modelMix.canonicalId', 'gpt-4o'), 'Model ID: gpt-4o');
 });
+
+// ---------------------------------------------------------------------------
+// Host coverage. A declared key the extension host never maps is invisible: the
+// webview silently falls back to the English default compiled into
+// localization.ts, so every translation for that key is dead weight and the bug
+// shows up only to a reviewer reading a non-English UI. A source-scan is the only
+// way to see it, since the host's l10n.t() mappings cannot be exercised offline.
+// ---------------------------------------------------------------------------
+
+test('every declared webview localization key is mapped by the extension host', () => {
+	const fs = require('node:fs') as typeof import('node:fs');
+	const path = require('node:path') as typeof import('node:path');
+	const read = (relative: string) => fs.readFileSync(path.join(__dirname, '../../../../src', relative), 'utf8');
+
+	const localizationSrc = read('webview/shared/localization.ts');
+	const interfaceStart = localizationSrc.indexOf('export interface WebviewLocalization');
+	assert.ok(interfaceStart >= 0, 'expected to find the WebviewLocalization interface');
+	const interfaceBody = localizationSrc.slice(interfaceStart, localizationSrc.indexOf('\n}', interfaceStart));
+	const declaredKeys = Array.from(interfaceBody.matchAll(/'([^']+)':\s*string;/g)).map(m => m[1]);
+	assert.ok(declaredKeys.length > 0, 'expected to find declared localization keys');
+
+	const hostMapped = new Set(Array.from(read('extension.ts').matchAll(/'([^']+)':\s*l10n\.t\(/g)).map(m => m[1]));
+	const unmapped = declaredKeys.filter(key => !hostMapped.has(key));
+
+	assert.deepEqual(
+		unmapped,
+		[],
+		`these keys are declared for the webview but never sent by the host, so their translations can never appear: ${unmapped.join(', ')}`,
+	);
+});

@@ -53,4 +53,11 @@ program.addCommand(segmentCommand);
 program.addCommand(curationCommand);
 program.addCommand(memoryFilesCommand);
 
-program.parse();
+// parseAsync, not parse: `memory-files --server/--promote` has an async action handler, and
+// Commander does not await async handlers through parse(). Without this the command can
+// finish outside the CLI lifecycle and a rejected promise would surface as an unhandled
+// rejection rather than a non-zero exit with a readable message.
+program.parseAsync().catch((error: unknown) => {
+	process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+	process.exitCode = 1;
+});
