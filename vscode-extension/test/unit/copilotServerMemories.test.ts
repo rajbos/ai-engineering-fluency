@@ -657,7 +657,12 @@ test('analyzeServerMemories survives reserved words as agent or model names', ()
 		memories: [
 			memory({ id: '1', source: { agent: 'constructor', baseModel: '__proto__' } }),
 			memory({ id: '2', source: { agent: 'prototype', baseModel: 'gpt-5.6-luna' } }),
-			memory({ id: '3', source: { agent: 'copilot-code-review', baseModel: 'gpt-5.6-luna' } }),
+			// Not just the pollution-dangerous three: every member of Object.prototype reads
+			// back as an inherited function, so a skip-list of `__proto__`/`constructor`/
+			// `prototype` left `toString` and friends still producing a string count.
+			memory({ id: '3', source: { agent: 'toString', baseModel: 'valueOf' } }),
+			memory({ id: '4', source: { agent: 'hasOwnProperty', baseModel: 'gpt-5.6-luna' } }),
+			memory({ id: '5', source: { agent: 'copilot-code-review', baseModel: 'gpt-5.6-luna' } }),
 		],
 	}, alwaysExists);
 
@@ -668,8 +673,19 @@ test('analyzeServerMemories survives reserved words as agent or model names', ()
 			assert.equal(typeof value, 'number', `non-numeric count: ${JSON.stringify(counts)}`);
 		}
 	}
-	assert.deepEqual(analysis.byAgent, { 'copilot-code-review': 1 });
-	assert.deepEqual(analysis.byModel, { 'gpt-5.6-luna': 2 });
+	// A Map has no inherited keys, so these now count correctly rather than being skipped.
+	assert.deepEqual(analysis.byAgent, {
+		constructor: 1, prototype: 1, toString: 1, hasOwnProperty: 1, 'copilot-code-review': 1,
+	});
+	// Compared as sorted entries, not against an object literal: `{ '__proto__': 1 }` sets the
+	// literal's prototype instead of creating a key, so the expectation could not even be
+	// written that way — the same hazard this test exists for, one level up.
+	assert.deepEqual(
+		Object.entries(analysis.byModel).sort(),
+		[['__proto__', 1], ['gpt-5.6-luna', 3], ['valueOf', 1]],
+	);
+	assert.equal(Object.prototype.hasOwnProperty.call(analysis.byModel, '__proto__'), true,
+		'__proto__ must be an own data property, not a prototype assignment');
 	// And nothing leaked onto the shared prototype.
 	assert.equal(({} as Record<string, unknown>).polluted, undefined);
 });
@@ -683,6 +699,9 @@ test('analyzeServerMemories counts by agent and model, skipping records without 
 			memory({ id: '2', source: { agent: 'copilot-code-review', baseModel: 'gpt-5.6-luna' } }),
 			memory({ id: '3', source: { agent: 'sweagent' } }),
 			memory({ id: '4' }),
+			// A non-string slips past the type at runtime: `source` is server-supplied and
+			// isServerMemory() does not validate its members.
+			memory({ id: '5', source: { agent: 42 as unknown as string } }),
 		],
 	}, alwaysExists);
 

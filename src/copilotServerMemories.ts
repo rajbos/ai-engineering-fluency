@@ -51,7 +51,6 @@
  *     An unrecognized id (`vscode-chat`, for one) returns `403 memory is disabled for
  *     this client`, which reads like a repository setting but is not.
  */
-import { isUnsafeObjectKey } from './utils/protoGuard';
 import type {
 	ServerMemory,
 	ServerMemoriesAnalysis,
@@ -679,22 +678,31 @@ export function analyzeServerMemories(
 	};
 }
 
-/** Count occurrences of a derived key, skipping records the key is absent on. */
+/**
+ * Count occurrences of a server-supplied key.
+ *
+ * Accumulates in a `Map`, not a plain object. An object inherits from
+ * `Object.prototype`, so `counts[key]` for any of its members — `toString`, `valueOf`,
+ * `hasOwnProperty`, `constructor` — reads the inherited function rather than undefined;
+ * it is truthy, `?? 0` keeps it, and the count becomes a string. A skip-list of the three
+ * pollution-dangerous keys (the earlier fix here) covered only part of that set, because
+ * the problem is inheritance generally and not prototype pollution specifically. A Map has
+ * no inherited keys at all, so every name counts correctly and none of them can reach a
+ * shared prototype. `Object.fromEntries` then materializes own data properties, including
+ * for `__proto__`, leaving `Object.prototype` untouched.
+ *
+ * The runtime `typeof` check is not redundant with the type: `source` comes from the
+ * server and `isServerMemory()` does not validate its members, so a non-string can arrive
+ * — and coercing an arbitrary object to a key can itself throw.
+ */
 function countBy(memories: ServerMemory[], keyOf: (memory: ServerMemory) => string | undefined): Record<string, number> {
-	const counts: Record<string, number> = {};
+	const counts = new Map<string, number>();
 	for (const memory of memories) {
 		const key = keyOf(memory);
-		if (!key) { continue; }
-		// `source.agent`/`source.baseModel` are server-supplied strings used here as bracket
-		// keys. Without this guard `constructor` reads Object.prototype.constructor — truthy,
-		// so `?? 0` keeps it and the count becomes a string — and `__proto__` resolves through
-		// the inherited accessor and is silently dropped. Either way the numeric contract on
-		// `byAgent`/`byModel` breaks. Skipped like any other malformed field, per the
-		// convention documented in `utils/protoGuard.ts`.
-		if (isUnsafeObjectKey(key)) { continue; }
-		counts[key] = (counts[key] ?? 0) + 1;
+		if (typeof key !== 'string' || key === '') { continue; }
+		counts.set(key, (counts.get(key) ?? 0) + 1);
 	}
-	return counts;
+	return Object.fromEntries(counts);
 }
 
 /** How many promotion groups the webview projection carries. */

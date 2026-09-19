@@ -829,6 +829,7 @@ test('l10n: Copilot Repository Memories section strings resolve in English and z
 		'serverMemories.unavailable': 'Repository memories could not be read: {0}',
 		'serverMemories.renderError': 'Repository memories are temporarily unavailable due to a rendering error. Try Refresh.',
 		'serverMemories.truncated': 'Partial — more may exist',
+		'serverMemories.truncatedTooltip': 'The server returned a full page of memories, so the counts above describe what was read, not the whole store. These routes have no pagination, so the rest cannot be fetched.',
 	};
 	for (const [key, value] of Object.entries(english)) {
 		assert.equal(t(key), value, `English value for ${key}`);
@@ -858,6 +859,7 @@ test('l10n: Copilot Repository Memories section strings resolve in English and z
 			'serverMemories.unavailable': '\u65e0\u6cd5\u8bfb\u53d6\u4ed3\u5e93\u8bb0\u5fc6\uff1a{0}',
 			'serverMemories.renderError': '\u7531\u4e8e\u6e32\u67d3\u9519\u8bef\uff0c\u4ed3\u5e93\u8bb0\u5fc6\u6682\u65f6\u4e0d\u53ef\u7528\u3002\u8bf7\u5c1d\u8bd5\u5237\u65b0\u3002',
 			'serverMemories.truncated': '部分结果 — 可能还有更多',
+			'serverMemories.truncatedTooltip': '服务器返回了整页记忆，因此上述计数只反映已读取的部分，而非全部。该接口不支持分页，因此无法获取剩余内容。',
 		};
 		for (const [key, value] of Object.entries(chinese)) {
 			assert.equal(t(key), value, `zh-cn value for ${key}`);
