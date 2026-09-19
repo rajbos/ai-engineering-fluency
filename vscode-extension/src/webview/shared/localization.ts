@@ -360,6 +360,19 @@ export function initializeWebviewLocalization(localization: Partial<WebviewLocal
  * Get a localized string for the webview.
  * Falls back to the default English string if not found.
  */
+/**
+ * The keys this module ships a built-in English fallback for.
+ *
+ * Exported so the fallback can be checked against `package.nls.json` — the two
+ * are separate hand-written copies of the same English text and nothing else
+ * compares them (see docs/adr/LOCALIZATION-ARCHITECTURE.md, S1). Reading the
+ * keys from the object itself avoids duplicating the list a fifth time, and
+ * gives the eventual code generator the same entry point.
+ */
+export function webviewLocalizationKeys(): string[] {
+	return Object.keys(DEFAULT_LOCALIZATION);
+}
+
 export function localize(key: string): string {
 	return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
 }
