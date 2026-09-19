@@ -17,7 +17,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { redactRemoteUrl, parseRepoFromRemote, memoryUrl, parseArgs } = require('./fetch-copilot-memories.js');
+const { redactRemoteUrl, parseRepoFromRemote, isValidRepoSlug, memoryUrl, parseArgs } = require('./fetch-copilot-memories.js');
 
 test('redactRemoteUrl strips an embedded password from an https remote', () => {
 	// The reported case: a non-GitHub remote carrying real credentials, quoted back in an
@@ -83,6 +83,16 @@ test('parseRepoFromRemote matches the host exactly and validates each segment', 
 	assert.equal(parseRepoFromRemote('https://github.com/owner/repo/blob/main/x.ts'), undefined);
 	assert.equal(parseRepoFromRemote('git@github.com:owner/re%2fpo'), undefined);
 	assert.equal(parseRepoFromRemote('git@github.com:owner/..'), undefined);
+});
+
+test('isValidRepoSlug gates the --repo value the same way a remote is gated', () => {
+	// `--repo` skips parseRepoFromRemote() entirely but reaches the same URL builder, so a
+	// malformed value would otherwise steer the authenticated request.
+	assert.equal(isValidRepoSlug('rajbos/ai-engineering-fluency'), true);
+	assert.equal(isValidRepoSlug('owner/repo?token=secret'), false);
+	assert.equal(isValidRepoSlug('owner/repo/extra'), false);
+	assert.equal(isValidRepoSlug('owner'), false);
+	assert.equal(isValidRepoSlug('owner/..'), false);
 });
 
 test('memoryUrl builds the v0 routes and adds limit only when given', () => {

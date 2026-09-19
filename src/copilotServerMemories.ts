@@ -211,6 +211,20 @@ function isValidRepoSegment(segment: string): boolean {
 	return /^[A-Za-z0-9._-]+$/.test(segment) && segment !== '.' && segment !== '..';
 }
 
+/**
+ * Is this an `owner/name` slug safe to interpolate into a request URL?
+ *
+ * Exported because a slug does not only arrive from a git remote: both the CLI and the
+ * probe accept `--repo`, and an unvalidated value there reaches the same URL builder that
+ * {@link parseRepoFromRemoteUrl} guards so carefully. Validating once here, and enforcing it
+ * in {@link fetchRepoMemories}, means no caller can skip the check by taking a different
+ * route to the same request.
+ */
+export function isValidRepoSlug(slug: string): boolean {
+	const segments = slug.split('/');
+	return segments.length === 2 && segments.every(isValidRepoSegment);
+}
+
 /** Host and path of a parseable absolute URL, or empty strings when it is not one. */
 function parseUrlHostAndPath(candidate: string): { host: string; path: string } {
 	try {
@@ -238,6 +252,12 @@ export async function fetchRepoMemories(
 	const fetchFn = deps.fetchFn ?? fetch;
 	const apiBase = deps.apiBase ?? COPILOT_API_BASE;
 	const timeoutMs = deps.timeoutMs ?? DEFAULT_MEMORY_TIMEOUT_MS;
+
+	// Refuse to build a URL from a slug we have not vetted. A remote-derived slug is already
+	// validated, but `--repo` is not a remote — this is the one place every path converges.
+	if (!isValidRepoSlug(repo)) {
+		return { repo, enabled: undefined, memories: [], error: `Not a valid owner/name repository: ${repo}` };
+	}
 
 	let token: string;
 	try {
@@ -566,6 +586,15 @@ export function toServerMemoriesAnalysisView(analysis: ServerMemoriesAnalysis | 
 export function renderPromotionMarkdown(analysis: ServerMemoriesAnalysis, limit: number = VIEW_PROMOTION_GROUP_LIMIT): string {
 	const groups = analysis.promotionGroups.slice(0, limit);
 	if (groups.length === 0) {
+		// "Every memory is already documented" is only true when there were memories to begin
+		// with. A disabled repository and an empty store also produce zero groups, and
+		// reporting either as "nothing left to write down" is a flattering lie.
+		if (analysis.enabled === false) {
+			return '_Memory is turned off for this repository, so there is nothing to promote._\n';
+		}
+		if (analysis.totalMemories === 0) {
+			return '_This repository has no stored memories yet, so there is nothing to promote._\n';
+		}
 		return '_No promotion candidates: every stored memory already cites an instruction file._\n';
 	}
 	const lines = [

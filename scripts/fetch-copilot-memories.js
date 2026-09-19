@@ -170,11 +170,26 @@ function parseRepoFromRemote(url) {
 	// name. Without the suffix strip above, `git@github.com:owner/repo.git?token=secret`
 	// would yield a "name" carrying that credential and send it to the API — past the
 	// redaction, which only guards what gets printed.
-	const validSegment = (segment) => /^[A-Za-z0-9._-]+$/.test(segment) && segment !== '.' && segment !== '..';
-	if (!GITHUB_HOSTS.has(host.toLowerCase()) || segments.length !== 2 || !segments.every(validSegment)) {
+	if (!GITHUB_HOSTS.has(host.toLowerCase()) || !isValidRepoSlug(segments.join('/'))) {
 		return undefined;
 	}
 	return `${segments[0]}/${segments[1]}`;
+}
+
+/**
+ * Is this an `owner/name` slug safe to interpolate into a request URL?
+ *
+ * The slug goes straight into the request path, so an unconstrained segment is an
+ * injection point: a stray `?`, `%2f`, `@` or space would let it steer the request
+ * somewhere other than the repository it names. GitHub's own names use this character set,
+ * so anything outside it is rejected rather than escaped. Mirrors `isValidRepoSlug()` in
+ * `src/copilotServerMemories.ts`; the duplication is deliberate, since this probe is
+ * dependency-free CommonJS that does not need the TypeScript build.
+ */
+function isValidRepoSlug(slug) {
+	const segments = slug.split('/');
+	return segments.length === 2
+		&& segments.every((segment) => /^[A-Za-z0-9._-]+$/.test(segment) && segment !== '.' && segment !== '..');
 }
 
 function resolveRepoFromGit() {
@@ -266,6 +281,13 @@ function printReport(repo, enabled, memories) {
 
 async function main() {
 	const options = parseArgs(process.argv.slice(2));
+	// A `--repo` value is not a remote, so it never went through parseRepoFromRemote()'s
+	// validation — yet it reaches the same URL builder. Vet it on the same terms, or a
+	// malformed value (extra segments, a query, a fragment) would steer the authenticated
+	// request somewhere other than the repository it names.
+	if (options.repo !== undefined && !isValidRepoSlug(options.repo)) {
+		throw new Error(`--repo must be owner/name, got: ${options.repo}`);
+	}
 	const repo = options.repo ?? resolveRepoFromGit();
 	const token = readToken();
 
@@ -307,4 +329,4 @@ if (require.main === module) {
 	});
 }
 
-module.exports = { redactRemoteUrl, parseRepoFromRemote, resolveRepoFromGit, memoryUrl, parseArgs };
+module.exports = { redactRemoteUrl, parseRepoFromRemote, isValidRepoSlug, resolveRepoFromGit, memoryUrl, parseArgs };

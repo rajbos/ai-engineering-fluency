@@ -13,6 +13,7 @@ import {
 	VIEW_PROMOTION_GROUP_LIMIT,
 	MEMORY_INTEGRATION_ID,
 	isSafeRepoRelativePath,
+	isValidRepoSlug,
 } from '../../../src/copilotServerMemories';
 import { decideServerMemoriesRefresh } from '../../src/extension';
 import type { ServerMemory } from '../../../src/types';
@@ -533,6 +534,48 @@ test('toServerMemoriesAnalysisView caps the groups it ships but keeps the fact t
 
 test('toServerMemoriesAnalysisView passes null through', () => {
 	assert.equal(toServerMemoriesAnalysisView(null), null);
+});
+
+test('fetchRepoMemories refuses a slug it has not vetted', async () => {
+	// A `--repo` value never goes through the remote parser, but reaches the same URL
+	// builder. This is where every path converges, so the check belongs here too.
+	let called = false;
+	const result = await fetchRepoMemories('owner/repo?token=secret', {
+		getToken: async () => 'tok',
+		fetchFn: (async () => { called = true; return { ok: true, status: 200, json: async () => [], text: async () => '' } as Response; }) as unknown as typeof fetch,
+	});
+	assert.equal(called, false, 'no request may be issued for an unvetted slug');
+	assert.match(result.error ?? '', /valid owner\/name/);
+});
+
+test('isValidRepoSlug accepts owner/name and nothing else', () => {
+	assert.equal(isValidRepoSlug('rajbos/ai-engineering-fluency'), true);
+	assert.equal(isValidRepoSlug('o/r_1.2'), true);
+	assert.equal(isValidRepoSlug('owner/repo?token=secret'), false);
+	assert.equal(isValidRepoSlug('owner/repo/extra'), false);
+	assert.equal(isValidRepoSlug('owner'), false);
+	assert.equal(isValidRepoSlug('owner/..'), false);
+	assert.equal(isValidRepoSlug('own er/repo'), false);
+});
+
+test('renderPromotionMarkdown distinguishes disabled and empty from all-documented', () => {
+	// Zero promotion groups has three very different causes, and reporting a disabled or
+	// empty store as "everything is already documented" is a flattering lie.
+	const base = { repo: 'o/n', memories: [] };
+	assert.match(
+		renderPromotionMarkdown(analyzeServerMemories({ ...base, enabled: false }, alwaysExists)),
+		/turned off for this repository/,
+	);
+	assert.match(
+		renderPromotionMarkdown(analyzeServerMemories({ ...base, enabled: true }, alwaysExists)),
+		/no stored memories yet/,
+	);
+	const allDocumented = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [memory({ id: '1', citations: ['AGENTS.md:1'] })],
+	}, alwaysExists);
+	assert.match(renderPromotionMarkdown(allDocumented), /already cites an instruction file/);
 });
 
 test('renderPromotionMarkdown notes repeats and says so when there is nothing to promote', () => {

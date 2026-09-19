@@ -104,7 +104,7 @@
   "config.insights.enabled.description": "在使用分析仪表板和状态栏中启用个性化 AI 使用洞察和提醒。",
   "config.insights.toastsEnabled.description": "显示偶尔的高价值洞察通知（例如缺少 copilot-instructions.md、新的熟练度阶段）。遵循 cadenceDays 限制。",
   "config.whatsNew.notificationsEnabled.description": "更新后提示新增的视图、选项卡和板块。每天最多一条，每个版本最多三条，且不会提示您已经打开过的内容。",
-  "config.serverMemories.enabled.description": "在使用分析中显示当前仓库的 Copilot 编码代理服务端记忆。这是该视图中唯一会连接 GitHub 的部分；它使用已有的 GitHub 登录，不会主动弹出登录提示。",
+  "config.serverMemories.enabled.description": "在使用分析中显示当前仓库的 Copilot 编码代理服务端记忆。该板块使用已有的 GitHub 登录从 GitHub 读取这些记忆，不会主动弹出登录提示。",
   "whatsNew.takeMeThere": "带我去看看",
   "whatsNew.seeAll": "查看其他新增内容",
   "config.insights.cadenceDays.description": "洞察通知之间的最少天数。",

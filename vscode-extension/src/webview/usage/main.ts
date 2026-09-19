@@ -6055,6 +6055,12 @@ function handleUpdateStats(message: any): void {
 		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'memoryFilesAnalysis')) {
 			sanitized.memoryFilesAnalysis = currentMemoryFilesAnalysis;
 		}
+		// Same rule for the server memories, and it matters more here: this card is filled by
+		// an out-of-band background fetch, so a partial refresh arriving between fetches would
+		// otherwise blank a section the host is not going to re-send until its TTL expires.
+		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'serverMemoriesAnalysis')) {
+			sanitized.serverMemoriesAnalysis = currentServerMemoriesAnalysis;
+		}
 		// CLI-backed hosts include all buckets; VS Code omits them and keeps using lazy loading.
 		replaceRecentSessionsCache(sanitized.recentSessions);
 		renderLayout(sanitized);

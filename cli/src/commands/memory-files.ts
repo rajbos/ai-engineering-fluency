@@ -20,6 +20,7 @@ import {
 	analyzeServerMemories,
 	parseRepoFromRemoteUrl,
 	renderPromotionMarkdown,
+	isValidRepoSlug,
 	DEFAULT_MEMORY_LIMIT,
 } from '../../../src/copilotServerMemories';
 import type { MemoryFilesAnalysis, ServerMemoriesAnalysis } from '../../../src/types';
@@ -145,6 +146,15 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 	const context = resolveRepoContext(cwd);
 	const repo = repoOverride ?? context?.repo;
 	if (!repo) { return undefined; }
+	// `--repo` never went through the remote parser's validation but reaches the same URL
+	// builder. fetchRepoMemories() rejects an invalid slug too; failing here as well turns a
+	// typo into an immediate, specific message instead of a generic read failure.
+	if (repoOverride !== undefined && !isValidRepoSlug(repoOverride)) {
+		return { repo, enabled: undefined, error: `--repo must be owner/name, got: ${repoOverride}`,
+			totalMemories: 0, distinctSubjects: 0, documentedCount: 0, promotionCandidateCount: 0,
+			repeatedGroupCount: 0, promotionGroups: [], staleCitations: [], fullyStaleCount: 0,
+			byAgent: {}, byModel: {} };
+	}
 	const root = context?.root ?? cwd;
 	const analyzingThisCheckout = !repoOverride || repoOverride === context?.repo;
 
@@ -187,7 +197,12 @@ function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined)
 	process.stdout.write(`Stale citations:      ${analysis.staleCitations.length} memories, ${analysis.fullyStaleCount} with no surviving source\n\n`);
 
 	if (analysis.totalMemories === 0) {
-		process.stdout.write('This repository has no stored memories yet.\n');
+		// A zero count is not evidence the store is empty: fetchRepoMemories() deliberately
+		// skips the `recent` request when the repository has memory switched off, so a
+		// disabled repository reaches here too and deserves the accurate answer.
+		process.stdout.write(analysis.enabled === false
+			? 'Memory is turned off for this repository.\n'
+			: 'This repository has no stored memories yet.\n');
 		return;
 	}
 

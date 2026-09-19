@@ -104,7 +104,7 @@
   "config.insights.enabled.description": "Enable personalized AI usage insights and nudges in the Usage Analysis dashboard and status bar.",
   "config.insights.toastsEnabled.description": "Show occasional toast notifications for high-value insights (e.g. missing copilot-instructions.md, new fluency stage). Respects the cadenceDays limit.",
   "config.whatsNew.notificationsEnabled.description": "Point out new views, tabs and sections after an update. At most one a day, at most three per release, and never one you have already opened.",
-  "config.serverMemories.enabled.description": "Show the Copilot coding agent's server-side memories for the current repository in Usage Analysis. This is the only part of the view that contacts GitHub; it uses an existing GitHub sign-in and never prompts for one.",
+  "config.serverMemories.enabled.description": "Show the Copilot coding agent's server-side memories for the current repository in Usage Analysis. This section reads them from GitHub using an existing GitHub sign-in, and never prompts for one.",
   "whatsNew.takeMeThere": "Take me there",
   "whatsNew.seeAll": "See what else is new",
   "config.insights.cadenceDays.description": "Minimum number of days between insight toast notifications.",

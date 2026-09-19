@@ -6903,11 +6903,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// failure still surfaces, which is the case worth showing.
 				const token = await this.getPublicGitHubTokenSilently();
 				if (!token) {
+					// Deliberately NOT marked fresh. Signing in is something the user can do at
+					// any moment, and stamping a full TTL here would leave the section empty for
+					// an hour afterwards even though a session is now available. Leaving the
+					// timestamp unset makes the next refresh retry; the retry is a local,
+					// non-prompting getSession() call, so repeating it costs nothing.
 					if (this.isServerMemoriesContextCurrent(context)) {
 						this._serverMemoriesAnalysis = null;
-						this._serverMemoriesRepo = context.repo;
-						this._serverMemoriesRepoRoot = context.repoRoot;
-						this._serverMemoriesFetchedAt = Date.now();
+						this._serverMemoriesRepo = undefined;
+						this._serverMemoriesRepoRoot = undefined;
+						this._serverMemoriesFetchedAt = undefined;
 					}
 					return;
 				}
