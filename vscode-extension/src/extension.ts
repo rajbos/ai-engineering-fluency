@@ -515,6 +515,55 @@ export function isMemoryFilesScanFresh(
 	return lastScannedAt !== undefined && (now - lastScannedAt) < ttlMs;
 }
 
+/** Inputs to {@link decideServerMemoriesRefresh}, all read from tracker state at call time. */
+export interface ServerMemoriesRefreshInputs {
+	/** The `serverMemories.enabled` setting. */
+	enabled: boolean;
+	/** `owner/name` the workspace currently resolves to, or undefined for a non-GitHub folder. */
+	currentRepo: string | undefined;
+	/** `owner/name` the cached analysis belongs to. */
+	cachedRepo: string | undefined;
+	/** When the cached analysis was stored. */
+	fetchedAt: number | undefined;
+	/** Whether a fetch is already running. */
+	fetchInFlight: boolean;
+	now: number;
+	ttlMs: number;
+}
+
+/**
+ * Decide what a server-memories refresh pass should do, kept pure so the ordering rules can
+ * be tested without a workspace, a network or a VS Code host — the same reason
+ * {@link isMemoryFilesScanFresh} exists.
+ *
+ * The ordering is the whole point, and two orderings that look equivalent are not:
+ *
+ *  - **The repository is resolved before anything else is consulted.** The TTL answers "is
+ *    *this repository's* store still fresh?", so checking it first lets a workspace switch
+ *    keep showing the previous repository's memories until the hour elapses.
+ *  - **A stale repository is cleared even while a fetch is in flight.** Returning early on
+ *    the in-flight guard leaves the previous repository's analysis in place, so it keeps
+ *    being rendered until that request *and* a later refresh both finish. Whether we may
+ *    start a new request is a separate question from whether what we are showing is still
+ *    the right repository's.
+ */
+export function decideServerMemoriesRefresh(input: ServerMemoriesRefreshInputs): { clearCache: boolean; startFetch: boolean } {
+	// Switching the feature off must hide what was already fetched, not merely stop fetching.
+	if (!input.enabled) { return { clearCache: true, startFetch: false }; }
+	// A non-GitHub folder has no store to show, including any left over from a folder that did.
+	if (!input.currentRepo) { return { clearCache: true, startFetch: false }; }
+
+	const movedRepo = input.cachedRepo !== undefined && input.cachedRepo !== input.currentRepo;
+	// Drop the old repository's result now; only the fetch itself has to wait for a free slot.
+	if (movedRepo) { return { clearCache: true, startFetch: !input.fetchInFlight }; }
+
+	if (input.fetchInFlight) { return { clearCache: false, startFetch: false }; }
+	const fresh = input.cachedRepo === input.currentRepo
+		&& input.fetchedAt !== undefined
+		&& (input.now - input.fetchedAt) < input.ttlMs;
+	return { clearCache: false, startFetch: !fresh };
+}
+
 /** The verified output of one refresh pass, as handed to publishRefreshResult(). */
 interface RefreshPublication {
 	detailedStats: DetailedStats;
@@ -6767,39 +6816,26 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * stays empty rather than popping a sign-in prompt at them for a secondary insight.
 	 */
 	private scheduleServerMemoriesRefresh(): void {
-		if (!this.getServerMemoriesEnabledSetting()) {
-			// Switching the setting off has to hide what was already fetched, not merely stop
-			// fetching more. Without this the cached analysis keeps being projected into every
-			// later render and the opt-out appears to do nothing.
-			this._serverMemoriesAnalysis = undefined;
-			this._serverMemoriesFetchedAt = undefined;
-			this._serverMemoriesRepo = undefined;
-			return;
-		}
-		if (this._serverMemoriesFetchInFlight) { return; }
-
-		// Resolve the repository *before* the TTL check. The TTL answers "is this repository's
-		// store still fresh?", so consulting it first would let a workspace switch keep showing
-		// the previous repository's memories for up to an hour.
+		// The workspace is resolved unconditionally, before any early return, so that a switch
+		// away from a repository clears what is on screen even while that repository's own
+		// fetch is still running. See decideServerMemoriesRefresh() for why the order matters.
 		const context = this.resolveWorkspaceRepoSlug();
-		if (!context) {
-			// Not a GitHub checkout: record the attempt so we don't re-resolve the remote on
-			// every refresh, and clear any analysis left over from a repository we have moved
-			// away from, so the section renders nothing.
-			this._serverMemoriesFetchedAt = Date.now();
-			this._serverMemoriesRepo = undefined;
-			this._serverMemoriesAnalysis = null;
-			return;
-		}
+		const decision = decideServerMemoriesRefresh({
+			enabled: this.getServerMemoriesEnabledSetting(),
+			currentRepo: context?.repo,
+			cachedRepo: this._serverMemoriesRepo,
+			fetchedAt: this._serverMemoriesFetchedAt,
+			fetchInFlight: this._serverMemoriesFetchInFlight !== undefined,
+			now: Date.now(),
+			ttlMs: SERVER_MEMORIES_FETCH_TTL_MS,
+		});
 
-		const now = Date.now();
-		const sameRepo = this._serverMemoriesRepo === context.repo;
-		if (sameRepo && this._serverMemoriesFetchedAt !== undefined && (now - this._serverMemoriesFetchedAt) < SERVER_MEMORIES_FETCH_TTL_MS) { return; }
-		if (!sameRepo) {
-			// Drop the previous repository's result immediately rather than leaving it on screen
-			// until the new fetch lands.
+		if (decision.clearCache) {
 			this._serverMemoriesAnalysis = null;
+			this._serverMemoriesRepo = undefined;
+			this._serverMemoriesFetchedAt = undefined;
 		}
+		if (!decision.startFetch || !context) { return; }
 
 		this._serverMemoriesFetchInFlight = (async () => {
 			try {

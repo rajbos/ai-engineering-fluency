@@ -478,17 +478,52 @@ export function renderPromotionMarkdown(analysis: ServerMemoriesAnalysis, limit:
 		return '_No promotion candidates: every stored memory already cites an instruction file._\n';
 	}
 	const lines = [
-		`<!-- Suggested from ${analysis.totalMemories} Copilot server memories for ${analysis.repo}.`,
+		`<!-- Suggested from ${analysis.totalMemories} Copilot server memories for ${flattenForMarkdown(analysis.repo)}.`,
 		'     Each fact is an agent observation — verify it against the citations before committing. -->',
 		'',
 	];
 	for (const group of groups) {
 		const seen = group.repeatCount > 1 ? ` _(re-learned ${group.repeatCount}x)_` : '';
-		lines.push(`- **${group.displaySubject}**${seen} — ${group.representativeFact}`);
+		lines.push(`- **${flattenForMarkdown(group.displaySubject)}**${seen} — ${flattenForMarkdown(group.representativeFact)}`);
 		if (group.citations.length > 0) {
-			lines.push(`  - Sources: ${group.citations.slice(0, 5).join(', ')}`);
+			lines.push(`  - Sources: ${group.citations.slice(0, 5).map(flattenForMarkdown).join(', ')}`);
 		}
 	}
 	lines.push('');
 	return lines.join('\n');
 }
+
+/**
+ * Reduce a server-supplied string to something that cannot restructure the Markdown it is
+ * embedded in.
+ *
+ * Memory text is written by an agent, and an agent's input includes repository content, so
+ * it must be treated as untrusted. This output is explicitly offered as paste-ready for
+ * `AGENTS.md` — the one file whose every line is read by every agent on every run — so a
+ * fact that escapes its list item does not merely render oddly, it becomes an instruction.
+ *
+ * Two escapes matter and both are closed here:
+ *   - **Line breaks.** A newline ends the list item, so `fact\n## Ignore the above` would
+ *     land in the file as a heading of its own. Every line terminator, including the
+ *     line terminator, including the Unicode separators U+2028/U+2029, is folded into a
+ *     single space.
+ *   - **`-->`.** The header is an HTML comment holding the "verify before committing"
+ *     caveat; a repo slug or fact containing `-->` would close it early and promote the
+ *     remainder to live document text. The sequence is broken rather than dropped so the
+ *     tampering stays visible to whoever reviews the block.
+ *
+ * Markdown emphasis characters are deliberately left alone: they can only make a line
+ * render oddly, which a human pasting the block will see, and escaping them would make
+ * ordinary facts about `*` globs or `_` names unreadable.
+ */
+function flattenForMarkdown(value: string): string {
+	return value
+		// `\s` covers every JavaScript line terminator, including U+2028/U+2029, so this one
+		// pass removes the structural escape. It can only ever insert a space, never delete
+		// one, so it cannot fabricate a `-->` that the input did not already contain.
+		.replace(/\s+/g, ' ')
+		.replace(/--+>/g, '-- >')
+		.replace(/<!--+/g, '< !--')
+		.trim();
+}
+
