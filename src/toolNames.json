@@ -1290,4 +1290,9 @@
   ,"mcp__ccd_pr__get_status": "Context7 MCP: Get Status of Pull Request"
   ,"mcp__ccd_session_mgmt__send_message": "Context7 MCP: Send Message to Session"
   ,"mcp__ccd_session_mgmt__unarchive_session": "Context7 MCP: Unarchive Session"
+  ,"jarvis": "Jarvis"
+  ,"mcp__terminal__read_terminal": "MCP Terminal Read Terminal"
+  ,"mcp_jarvis_github_local_repos": "GitHub MCP (Local): Repositories"
+  ,"mcp_jarvis_github_search_files": "GitHub MCP (Local): Search Files"
+  ,"mcp_jarvis_ruddr_customer_budget": "Ruddr Customer Budget"
 }

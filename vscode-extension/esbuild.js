@@ -100,6 +100,45 @@ async function main() {
 		}
 	}
 
+	// Emit one resolved localization dictionary per shipped locale into
+	// dist/webview/, for the hosts that cannot build it themselves.
+	//
+	// The VS Code extension and the desktop app call buildWebviewLocalization()
+	// directly, but the JetBrains plugin is Kotlin and the Visual Studio
+	// extension is C# — neither can run our TypeScript. They redistribute these
+	// same bundles, and a bundle only localizes itself if the host puts a
+	// `localization` dictionary in the panel payload. Without these files they
+	// had no way to, which is why both shipped English regardless of IDE
+	// language. Each host reads the file matching its own display language and
+	// completes the payload it already builds.
+	//
+	// Written as fully resolved key→text maps rather than the raw nls bundles
+	// so the hosts need no fallback logic: the English file already carries the
+	// English text for any key a locale has not translated.
+	{
+		// webviewKeys.json is the single manifest of which keys the webviews need —
+		// the same one the generated English fallback is built from, so the sidecars
+		// and that fallback can never cover different key sets.
+		const keys = require('./src/webview/shared/webviewKeys.json');
+		if (keys.length < 100) {
+			throw new Error(`webviewKeys.json lists only ${keys.length} keys — refusing to ship a near-empty dictionary.`);
+		}
+		const englishBundle = require('./package.nls.json');
+		const locales = { 'en': englishBundle, 'zh-cn': require('./package.nls.zh-cn.json') };
+		for (const [locale, bundle] of Object.entries(locales)) {
+			const dictionary = {};
+			for (const key of keys) {
+				dictionary[key] = bundle[key] ?? englishBundle[key] ?? key;
+			}
+			dictionary['__language__'] = locale;
+			fs.writeFileSync(
+				path.join(webviewDistDir, `localization.${locale}.json`),
+				`${JSON.stringify(dictionary, null, 2)}\n`,
+			);
+		}
+		console.log(`[build] wrote ${Object.keys(locales).length} webview localization sidecar(s), ${keys.length} keys each`);
+	}
+
 	// Copy the codicon font (icon font VS Code itself uses) into dist/webview/codicons/ so
 	// webview panels can load it via webview.asWebviewUri() and render `.codicon-*` icons.
 	// Placed under dist/webview because most panels restrict localResourceRoots to that folder.

@@ -616,6 +616,21 @@ test('detectEditorSource: detects Visual Studio', () => {
         assert.equal(detectEditorSource('/project/.vs/solution.sln/copilot-chat/hash/sessions/uuid'), 'Visual Studio');
 });
 
+test('detectEditorSource: detects Visual Studio from the VSGitHubCopilot AppData store', () => {
+        // Chats started without a solution open — no .vs folder exists (issue #2137).
+        assert.equal(
+                detectEditorSource('C:/Users/u/AppData/Local/Microsoft/VisualStudio/18.0_0a408795/VSGitHubCopilot/copilot-chat/b6662ded/sessions/80720523'),
+                'Visual Studio'
+        );
+});
+
+test('detectEditorSource: labels SSMS sessions as SSMS, not Visual Studio', () => {
+        assert.equal(
+                detectEditorSource('C:/Users/u/AppData/Local/Microsoft/SSMS/22.0_82a729ff/SSMSGitHubCopilot/copilot-chat/ca1642fb/sessions/7bb52dc2'),
+                'SSMS'
+        );
+});
+
 test('detectEditorSource: detects Claude Desktop Cowork', () => {
         assert.equal(detectEditorSource('/home/user/.config/local-agent-mode-sessions/session.json'), 'Claude Desktop Cowork');
         assert.equal(detectEditorSource('/home/user/.config/claude-code-sessions/session.json'), 'Claude Desktop Cowork');
@@ -1017,6 +1032,37 @@ test('getEditorTypeFromPath: detects VS Code Server (Insiders)', () => {
 
 test('getEditorTypeFromPath: detects Visual Studio', () => {
     assert.equal(getEditorTypeFromPath('/project/.vs/mysolution.sln/copilot-chat/abc123/sessions/uuid'), 'Visual Studio');
+});
+
+test('getEditorTypeFromPath: detects Visual Studio from the VSGitHubCopilot AppData store', () => {
+    assert.equal(
+        getEditorTypeFromPath('C:/Users/u/AppData/Local/Microsoft/VisualStudio/18.0_0a408795/VSGitHubCopilot/copilot-chat/b6662ded/sessions/80720523'),
+        'Visual Studio'
+    );
+});
+
+test('getEditorTypeFromPath: labels SSMS sessions as SSMS, not Visual Studio', () => {
+    assert.equal(
+        getEditorTypeFromPath('C:/Users/u/AppData/Local/Microsoft/SSMS/22.0_82a729ff/SSMSGitHubCopilot/copilot-chat/ca1642fb/sessions/7bb52dc2'),
+        'SSMS'
+    );
+});
+
+test('getEditorTypeFromPath: a copilot-chat path without /sessions/ is not Visual Studio', () => {
+    // The `/sessions/` requirement must hold in every consumer, including the CLI's
+    // getEditorSourceFromPath — a bare copilot-chat folder is not a session file.
+    assert.notEqual(
+        getEditorTypeFromPath('C:/Users/u/AppData/Local/Microsoft/VisualStudio/18.0/VSGitHubCopilot/copilot-chat/b6662ded/index.json'),
+        'Visual Studio'
+    );
+});
+
+test('getEditorTypeFromPath: an unrelated folder named VSGitHubCopilot is not Visual Studio', () => {
+    // Anchored against copilot-chat, so a project that merely has this name cannot match.
+    assert.notEqual(
+        getEditorTypeFromPath('C:/repos/vsgithubcopilot/docs/copilot-chat/notes/sessions/readme.md'),
+        'Visual Studio'
+    );
 });
 
 test('getEditorTypeFromPath: detects Antigravity', () => {

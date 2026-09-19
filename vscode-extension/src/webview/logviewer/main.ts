@@ -13,7 +13,8 @@ import type { HydraFusionSummary, HydraFusionTurn } from '../../../../src/hydraf
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
-import { initializeWebviewLocalization, setCurrentLanguage, localize, localizeFormat } from '../shared/localization';
+import { localize, localizeFormat } from '../shared/localization';
+import { applyWebviewLocale } from '../shared/webviewLocale';
 
 // ── Type definitions ──────────────────────────────────────────────────────────
 
@@ -176,11 +177,7 @@ const vscode = acquireVsCodeApi();
 const initialData = getWindowData<SessionLogData & { focusedTurnNumber?: number; localization?: Record<string, string> }>('__INITIAL_LOGDATA__');
 
 // Initialize localization for webview
-if (initialData?.localization) {
-	initializeWebviewLocalization(initialData.localization);
-	const language = initialData.localization['__language__'] || 'en';
-	setCurrentLanguage(language);
-}
+applyWebviewLocale(initialData);
 
 import { resolveGuidMcpToolName, resolveMcpFamilyToolName, lookupKnownToolName } from '../../../../src/utils/toolUtils';
 

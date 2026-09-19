@@ -4,7 +4,8 @@ import { getEditorIcon, getCharsPerToken, formatFixed, formatPercent, formatNumb
 import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
-import { initializeWebviewLocalization, setCurrentLanguage, localize } from '../shared/localization';
+import { localize } from '../shared/localization';
+import { applyWebviewLocale } from '../shared/webviewLocale';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -121,12 +122,7 @@ const initialData = getWindowData<DetailedStats & { localization?: Record<string
 console.log('[CopilotTokenTracker] details webview loaded');
 
 // Initialize localization for webview
-if (initialData?.localization) {
-	initializeWebviewLocalization(initialData.localization);
-	const language = initialData.localization['__language__'] || 'en';
-	setCurrentLanguage(language);
-	console.log('[CopilotTokenTracker] Webview localization initialized for language:', language);
-}
+applyWebviewLocale(initialData);
 
 const _initSort = initialData?.sortSettings;
 let editorSortKey: TableSortKey = (_initSort?.editor?.key as TableSortKey) ?? 'name';

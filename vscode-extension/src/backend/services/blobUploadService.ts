@@ -12,6 +12,7 @@ import type { TokenCredential } from '@azure/core-auth';
 import { BlobServiceClient, ContainerClient, StorageSharedKeyCredential } from '@azure/storage-blob';
 import { safeStringifyError, isAuthError } from '../../../../src/utils/errors';
 import { getAzureBlobStorageEndpoint } from '../../utils/azureEndpoints';
+import { withoutLeakedFatalHandlers } from '../../utils/processHandlerGuard';
 
 const gzip = promisify(zlib.gzip);
 
@@ -150,7 +151,16 @@ export class BlobUploadService {
 			}
 
 			const containerClient = await this.getContainerClient(storageAccount, settings.containerName, credential);
-			const result = await this.uploadAllFiles(containerClient, sessionFiles, machineId, datasetId, settings.compressFiles, credential, editorTypeByFile);
+			// The Azure SDK's Emscripten CRC64 module installs rethrowing process-global
+			// crash handlers on first use, which would make any other extension's stray
+			// rejection fatal for the whole shared extension host (issue #2137).
+			const result = await withoutLeakedFatalHandlers(
+				() => this.uploadAllFiles(containerClient, sessionFiles, machineId, datasetId, settings.compressFiles, credential, editorTypeByFile),
+				({ removed, kept }) => this.warn(
+					`Blob upload: removed ${removed} rethrowing process-global crash handler(s) installed during upload`
+					+ (kept > 0 ? `; left ${kept} other newly-added handler(s) in place` : '')
+				)
+			);
 
 			if (result.earlyReturn) { return result.earlyReturn; }
 

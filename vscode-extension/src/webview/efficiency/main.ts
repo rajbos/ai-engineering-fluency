@@ -34,7 +34,8 @@ import {
 	valueSignalsEqual,
 	windowHasModelData,
 } from '../../../../src/efficiencyAnalysis';
-import { initializeWebviewLocalization, localize, localizeFormat, setCurrentLanguage } from '../shared/localization';
+import { localize, localizeFormat } from '../shared/localization';
+import { applyWebviewLocale } from '../shared/webviewLocale';
 import { registerMessageHandler } from '../shared/messageHandler';
 import { createEfficiencyWebviewReadyNotifier, isValueSignalsPayload } from './valueUpdate';
 import { renderModelMixTable } from './modelMixTable';
@@ -60,11 +61,7 @@ const notifyEfficiencyWebviewReady = createEfficiencyWebviewReadyNotifier(
 let data = getWindowData<EfficiencyViewData & { localization?: Record<string, string> }>('__INITIAL_EFFICIENCY__');
 
 // Initialize localization for webview
-if (data?.localization) {
-	initializeWebviewLocalization(data.localization);
-	const language = data.localization['__language__'] || 'en';
-	setCurrentLanguage(language);
-}
+applyWebviewLocale(data);
 
 let Chart: ChartConstructor | undefined;
 const liveCharts: ChartInstance[] = [];
