@@ -82,6 +82,18 @@ export const MEMORY_INTEGRATION_ID = 'copilot-developer-cli';
 export const DEFAULT_MEMORY_LIMIT = 500;
 
 /**
+ * How long either memory request may take before it is aborted.
+ *
+ * A timeout is not merely polite here. The extension host guards against concurrent
+ * fetches with an in-flight promise, so a request that *stalls* rather than fails never
+ * settles, the guard never clears, and every later refresh skips the fetch — leaving the
+ * section empty or stale until the window is reloaded. One hung socket would disable the
+ * feature for the rest of the session. Fifteen seconds is far longer than this API takes
+ * in practice while still bounding that failure.
+ */
+export const DEFAULT_MEMORY_TIMEOUT_MS = 15_000;
+
+/**
  * Path fragments that mean "this fact is already written down somewhere an agent reads
  * anyway". A memory citing one of these is not a promotion candidate — at best it is
  * redundant with the instruction file it cites.
@@ -108,6 +120,8 @@ export interface ServerMemoryFetchDeps {
 	fetchFn?: typeof fetch;
 	/** Overrides the API host, for a proxy or an enterprise endpoint. */
 	apiBase?: string;
+	/** Overrides {@link DEFAULT_MEMORY_TIMEOUT_MS}. */
+	timeoutMs?: number;
 }
 
 /** Outcome of one memory-store read, including the failures that are not errors. */
@@ -223,6 +237,7 @@ export async function fetchRepoMemories(
 ): Promise<RepoMemoriesResult> {
 	const fetchFn = deps.fetchFn ?? fetch;
 	const apiBase = deps.apiBase ?? COPILOT_API_BASE;
+	const timeoutMs = deps.timeoutMs ?? DEFAULT_MEMORY_TIMEOUT_MS;
 
 	let token: string;
 	try {
@@ -240,7 +255,7 @@ export async function fetchRepoMemories(
 		Accept: 'application/json',
 	};
 
-	const enabled = await readEnabledFlag(buildMemoryApiUrl(repo, 'enabled', undefined, apiBase), headers, fetchFn);
+	const enabled = await readEnabledFlag(buildMemoryApiUrl(repo, 'enabled', undefined, apiBase), headers, fetchFn, timeoutMs);
 	// Only on an explicit `false` — `undefined` means the enablement check itself failed, and
 	// the store may well still answer. A disabled repository can reject the `recent` route
 	// with a 403, which would come back as an `error` and render as "could not be read"; the
@@ -253,7 +268,7 @@ export async function fetchRepoMemories(
 
 	let response: Response;
 	try {
-		response = await fetchFn(buildMemoryApiUrl(repo, 'recent', limit, apiBase), { headers });
+		response = await fetchFn(buildMemoryApiUrl(repo, 'recent', limit, apiBase), { headers, signal: requestTimeoutSignal(timeoutMs) });
 	} catch (error) {
 		return { repo, enabled, memories: [], error: `Memory request failed: ${errorMessage(error)}` };
 	}
@@ -281,15 +296,24 @@ export async function fetchRepoMemories(
 }
 
 /** Read the `enabled` flag, collapsing every failure to `undefined` ("could not ask"). */
-async function readEnabledFlag(url: string, headers: Record<string, string>, fetchFn: typeof fetch): Promise<boolean | undefined> {
+async function readEnabledFlag(url: string, headers: Record<string, string>, fetchFn: typeof fetch, timeoutMs: number): Promise<boolean | undefined> {
 	try {
-		const response = await fetchFn(url, { headers });
+		const response = await fetchFn(url, { headers, signal: requestTimeoutSignal(timeoutMs) });
 		if (!response.ok) { return undefined; }
 		const body = await response.json() as { enabled?: unknown };
 		return typeof body?.enabled === 'boolean' ? body.enabled : undefined;
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * An abort signal that fires after `timeoutMs`, or undefined where the runtime has no
+ * `AbortSignal.timeout` — in which case the request simply runs unbounded, as it did
+ * before, rather than failing outright.
+ */
+function requestTimeoutSignal(timeoutMs: number): AbortSignal | undefined {
+	return typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(timeoutMs) : undefined;
 }
 
 async function safeText(response: Response): Promise<string> {

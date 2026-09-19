@@ -160,6 +160,40 @@ test('fetchRepoMemories sends Bearer auth and a recognized integration id', asyn
 	}
 });
 
+test('fetchRepoMemories bounds both requests with an abort signal', async () => {
+	// Without one, a request that *stalls* rather than fails never settles. The extension
+	// host's in-flight guard would then never clear, every later refresh would skip the
+	// fetch, and one hung socket would disable the section for the rest of the session.
+	const signals: (AbortSignal | null | undefined)[] = [];
+	await fetchRepoMemories('o/n', {
+		getToken: async () => 'tok',
+		fetchFn: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+			signals.push(init?.signal);
+			return { ok: true, status: 200, json: async () => [], text: async () => '' } as Response;
+		}) as unknown as typeof fetch,
+	});
+
+	assert.equal(signals.length, 2, 'both the enablement check and the recent list are bounded');
+	for (const signal of signals) {
+		assert.ok(signal instanceof AbortSignal, 'each request must carry an AbortSignal');
+		assert.equal(signal.aborted, false, 'the signal should not be pre-aborted');
+	}
+});
+
+test('fetchRepoMemories reports an aborted request instead of hanging', async () => {
+	const result = await fetchRepoMemories('o/n', {
+		getToken: async () => 'tok',
+		timeoutMs: 1,
+		fetchFn: (async (_input: RequestInfo | URL, init?: RequestInit) =>
+			new Promise<Response>((_resolve, reject) => {
+				// Never settles on its own — only the signal can end it, which is the point.
+				init?.signal?.addEventListener('abort', () => reject(new Error('aborted by timeout')));
+			})) as unknown as typeof fetch,
+	});
+	assert.match(result.error ?? '', /abort/i);
+	assert.deepEqual(result.memories, []);
+});
+
 test('fetchRepoMemories treats 204 as an empty store, not an error', async () => {
 	const result = await fetchRepoMemories('o/n', {
 		getToken: async () => 'tok',
