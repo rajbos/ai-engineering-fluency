@@ -372,3 +372,31 @@ test('renderPromotionMarkdown notes repeats and says so when there is nothing to
 	}, alwaysExists);
 	assert.match(renderPromotionMarkdown(empty), /No promotion candidates/);
 });
+
+// ---------------------------------------------------------------------------
+// Host wiring. A source-scan rather than a behavioural test, matching the idiom in
+// efficiencyBuildGuards.test.ts: the invariant lives in a single argument to a VS Code
+// API that cannot be exercised offline, and it regresses silently.
+// ---------------------------------------------------------------------------
+
+test('the server-memories fetch requests no broader OAuth scope than the rest of the extension', () => {
+	// Compiled test output lives under out/vscode-extension/test/unit, so walk back up to the
+	// package root and into src/ the way the other source-scanning tests do.
+	const fs = require('node:fs') as typeof import('node:fs');
+	const path = require('node:path') as typeof import('node:path');
+	const extensionSrc = fs.readFileSync(path.join(__dirname, '../../../../src/extension.ts'), 'utf8');
+
+	const scopes = Array.from(extensionSrc.matchAll(/getSession\([^,]+,\s*(\[[^\]]*\])/g)).map(m => m[1]);
+	assert.ok(scopes.length > 0, 'expected to find getSession() scope arrays to check');
+
+	// `silent: true` only returns a session that already covers the requested scopes. A scope
+	// wider than the one the user has already granted therefore yields `undefined`, and the
+	// Repository Memories section stays permanently empty with nothing to explain why —
+	// indistinguishable from a repository that genuinely has no memories.
+	const distinct = Array.from(new Set(scopes));
+	assert.deepEqual(
+		distinct,
+		["['read:user']"],
+		`every getSession() call must request the same scope; found ${distinct.join(', ')}`,
+	);
+});

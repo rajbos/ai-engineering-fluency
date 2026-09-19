@@ -6751,7 +6751,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 			try {
 				const result = await _fetchRepoMemories(context.repo, {
 					getToken: async () => {
-						const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['repo'], { silent: true });
+						// Deliberately the same `read:user` scope every other getSession() call in this
+						// file uses, not a broader one. `silent: true` only returns a session that
+						// already covers the requested scopes, so asking for anything wider than what
+						// the user has already granted returns undefined — and this section would then
+						// stay empty forever with no visible reason, which is the one failure mode this
+						// feature exists to avoid. If the memory API ever refuses a token minted for
+						// this scope, that surfaces as a readable HTTP error in the section instead.
+						const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 						if (!session) { throw new Error('not signed in to GitHub'); }
 						return session.accessToken;
 					},
