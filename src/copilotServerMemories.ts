@@ -136,6 +136,12 @@ export interface RepoMemoriesResult {
 	 */
 	enabled: boolean | undefined;
 	memories: ServerMemory[];
+	/**
+	 * The response filled the requested `limit`, so the store may hold more than was read.
+	 * These routes have no pagination cursor, so this is the only signal available — and
+	 * without it the counts derived from a clipped page would be reported as totals.
+	 */
+	truncated?: boolean;
 	/** A human-readable reason the read did not produce memories, if it did not. */
 	error?: string;
 }
@@ -341,7 +347,13 @@ export async function fetchRepoMemories(
 	if (!Array.isArray(parsed)) {
 		return { repo, enabled, memories: [], error: 'Memory response was not an array.' };
 	}
-	return { repo, enabled, memories: parsed.filter(isServerMemory) };
+	// `recent` is bounded by `limit` and these routes carry no pagination cursor, so a store
+	// larger than the limit comes back silently clipped. Compare against the raw array, not
+	// the filtered one: dropping a malformed record must not disguise a full page as a
+	// partial one. The caller needs this because every number downstream — totalMemories,
+	// the subject count, the stale scan, the promotion ranking — would otherwise be
+	// presented as describing the whole store when it describes a prefix of it.
+	return { repo, enabled, memories: parsed.filter(isServerMemory), truncated: parsed.length >= limit };
 }
 
 /** Read the `enabled` flag, collapsing every failure to `undefined` ("could not ask"). */
@@ -609,6 +621,7 @@ export function analyzeServerMemories(
 		repo: result.repo,
 		enabled: result.enabled,
 		error: result.error,
+		truncated: result.truncated === true,
 		totalMemories: memories.length,
 		distinctSubjects: bySubject.size,
 		documentedCount: documentedIds.size,
@@ -658,6 +671,7 @@ export function toServerMemoriesAnalysisView(analysis: ServerMemoriesAnalysis | 
 		repo: analysis.repo,
 		enabled: analysis.enabled,
 		error: analysis.error,
+		truncated: analysis.truncated,
 		totalMemories: analysis.totalMemories,
 		distinctSubjects: analysis.distinctSubjects,
 		documentedCount: analysis.documentedCount,
@@ -698,7 +712,7 @@ export function renderPromotionMarkdown(analysis: ServerMemoriesAnalysis, limit:
 		return '_No promotion candidates: every stored memory already cites an instruction file._\n';
 	}
 	const lines = [
-		`<!-- Suggested from ${analysis.totalMemories} Copilot server memories for ${flattenForMarkdown(analysis.repo)}.`,
+		`<!-- Suggested from ${analysis.totalMemories}${analysis.truncated ? '+ (truncated)' : ''} Copilot server memories for ${flattenForMarkdown(analysis.repo)}.`,
 		'     Each fact is an agent observation — verify it against the citations before committing. -->',
 		'',
 	];

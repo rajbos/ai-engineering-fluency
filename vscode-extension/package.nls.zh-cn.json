@@ -379,6 +379,8 @@
   "serverMemories.table.sources": "来源",
   "serverMemories.disabled": "本仓库已关闭记忆功能。",
   "serverMemories.unavailable": "无法读取仓库记忆：{0}",
+  "serverMemories.truncated": "部分结果 — 可能还有更多",
+  "serverMemories.truncatedTooltip": "服务器返回了整页记忆，因此上述计数只反映已读取的部分，而非全部。该接口不支持分页，因此无法获取剩余内容。",
   "serverMemories.renderError": "由于渲染错误，仓库记忆暂时不可用。请尝试刷新。",
 
   "insight.shared.listSeparator": "、",

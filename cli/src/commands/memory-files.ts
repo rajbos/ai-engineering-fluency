@@ -153,7 +153,7 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 	if (repoOverride !== undefined && !isValidRepoSlug(repoOverride)) {
 		// The rejected value is untrusted and may carry a credential, so neither the label nor
 		// the message echoes it — `--json` serializes both.
-		return { repo: INVALID_REPO_LABEL, enabled: undefined, error: '--repo must be owner/name.',
+		return { repo: INVALID_REPO_LABEL, enabled: undefined, error: '--repo must be owner/name.', truncated: false,
 			totalMemories: 0, distinctSubjects: 0, documentedCount: 0, promotionCandidateCount: 0,
 			repeatedGroupCount: 0, promotionGroups: [], staleCitations: [], fullyStaleCount: 0,
 			byAgent: {}, byModel: {} };
@@ -205,10 +205,16 @@ function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined)
 	// the machine reading it. JSON mode is safe by construction; this path was not.
 	process.stdout.write(`Repository:           ${sanitizeForDisplay(analysis.repo)}\n`);
 	process.stdout.write(`Memory enabled:       ${analysis.enabled ?? 'unknown'}\n`);
-	process.stdout.write(`Stored memories:      ${analysis.totalMemories} across ${analysis.distinctSubjects} subjects\n`);
+	// Say so when the page was full: these routes have no pagination cursor, so every number
+	// below describes the prefix that was read, not the whole store.
+	process.stdout.write(`Stored memories:      ${analysis.totalMemories}${analysis.truncated ? '+ (truncated at the request limit)' : ''} across ${analysis.distinctSubjects} subjects\n`);
 	process.stdout.write(`Already documented:   ${analysis.documentedCount} (cite AGENTS.md or another instruction file)\n`);
 	process.stdout.write(`Promotion candidates: ${analysis.promotionCandidateCount} in ${analysis.promotionGroups.length} groups, ${analysis.repeatedGroupCount} re-learned more than once\n`);
 	process.stdout.write(`Stale citations:      ${analysis.staleCitations.length} memories, ${analysis.fullyStaleCount} with no surviving source\n\n`);
+	if (analysis.truncated) {
+		process.stdout.write('Note: the server returned a full page, so more memories may exist than are counted here.\n'
+			+ '      Raise --limit to read further.\n\n');
+	}
 
 	if (analysis.totalMemories === 0) {
 		// A zero count is not evidence the store is empty: fetchRepoMemories() deliberately

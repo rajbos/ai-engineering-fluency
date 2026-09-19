@@ -215,6 +215,56 @@ test('fetchRepoMemories reports an aborted request instead of hanging', async ()
 	assert.deepEqual(result.memories, []);
 });
 
+test('fetchRepoMemories flags a response that filled the requested limit', async () => {
+	// These routes have no pagination cursor, so a full page is the only signal that the
+	// store is larger than what was read. Without it the counts derived from a prefix —
+	// totalMemories, subject count, stale scan, promotion ranking — get reported as totals.
+	const page = Array.from({ length: 3 }, (_, i) => ({ id: String(i), subject: 's', fact: 'f', citations: [] }));
+	const full = await fetchRepoMemories('o/n', {
+		getToken: async () => 'tok',
+		fetchFn: stubFetch({ recent: { json: async () => page } }),
+	}, 3);
+	assert.equal(full.truncated, true);
+	assert.equal(analyzeServerMemories(full, alwaysExists).truncated, true);
+
+	const partial = await fetchRepoMemories('o/n', {
+		getToken: async () => 'tok',
+		fetchFn: stubFetch({ recent: { json: async () => page.slice(0, 2) } }),
+	}, 3);
+	assert.equal(partial.truncated, false);
+	assert.equal(analyzeServerMemories(partial, alwaysExists).truncated, false);
+});
+
+test('a dropped malformed record cannot disguise a full page as a partial one', async () => {
+	// The check compares the raw array, not the filtered one: one bad record in a full page
+	// would otherwise make the read look complete when it is not.
+	const page = [
+		{ id: 'a', subject: 's', fact: 'f', citations: [] },
+		{ id: 'b', subject: 's' },
+		{ id: 'c', subject: 's', fact: 'f', citations: [] },
+	];
+	const result = await fetchRepoMemories('o/n', {
+		getToken: async () => 'tok',
+		fetchFn: stubFetch({ recent: { json: async () => page } }),
+	}, 3);
+	assert.equal(result.memories.length, 2, 'the malformed record is still dropped');
+	assert.equal(result.truncated, true, 'but the page was full');
+});
+
+test('renderPromotionMarkdown does not present a truncated read as a total', async () => {
+	const truncated = analyzeServerMemories({
+		repo: 'o/n', enabled: true, truncated: true,
+		memories: [memory({ id: '1', subject: 'caching', fact: 'Cache via snapshots.' })],
+	}, alwaysExists);
+	assert.match(renderPromotionMarkdown(truncated), /1\+ \(truncated\)/);
+
+	const complete = analyzeServerMemories({
+		repo: 'o/n', enabled: true, truncated: false,
+		memories: [memory({ id: '1', subject: 'caching', fact: 'Cache via snapshots.' })],
+	}, alwaysExists);
+	assert.ok(!renderPromotionMarkdown(complete).includes('truncated'));
+});
+
 test('fetchRepoMemories treats 204 as an empty store, not an error', async () => {
 	const result = await fetchRepoMemories('o/n', {
 		getToken: async () => 'tok',

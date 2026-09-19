@@ -377,6 +377,8 @@
   "serverMemories.table.sources": "Sources",
   "serverMemories.disabled": "Memory is turned off for this repository.",
   "serverMemories.unavailable": "Repository memories could not be read: {0}",
+  "serverMemories.truncated": "Partial — more may exist",
+  "serverMemories.truncatedTooltip": "The server returned a full page of memories, so the counts above describe what was read, not the whole store. These routes have no pagination, so the rest cannot be fetched.",
   "serverMemories.renderError": "Repository memories are temporarily unavailable due to a rendering error. Try Refresh.",
 
   "insight.shared.listSeparator": ", ",

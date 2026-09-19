@@ -29,6 +29,7 @@ export function sanitizeServerMemoriesAnalysis(raw: unknown): ServerMemoriesAnal
 		// the same as the repository having memory switched off.
 		enabled: typeof sm.enabled === 'boolean' ? sm.enabled : undefined,
 		error: typeof sm.error === 'string' ? sm.error : undefined,
+		truncated: sm.truncated === true,
 		totalMemories: count(sm.totalMemories),
 		distinctSubjects: count(sm.distinctSubjects),
 		documentedCount: count(sm.documentedCount),
@@ -115,6 +116,7 @@ export function buildServerMemoriesSectionHtml(analysis: ServerMemoriesAnalysisV
 				${header}
 				<div style="margin-bottom:8px; font-size:13px; color:var(--text-primary);">
 					${escapeHtml(localizeFormat('serverMemories.summary', formatNumber(analysis.totalMemories), formatNumber(analysis.distinctSubjects)))}
+					${analysis.truncated ? ` · <span title="${escapeHtml(localize('serverMemories.truncatedTooltip'))}">${escapeHtml(localize('serverMemories.truncated'))}</span>` : ''}
 					${analysis.documentedCount > 0 ? ` · ${escapeHtml(localizeFormat('serverMemories.documentedSummary', analysis.documentedCount))}` : ''}
 					${analysis.fullyStaleCount > 0 ? ` · <span style="color:${warn};">${escapeHtml(localizeFormat('serverMemories.staleSummary', analysis.fullyStaleCount))}</span>` : ''}
 				</div>

@@ -1658,6 +1658,12 @@ export interface ServerMemoriesAnalysis {
   enabled: boolean | undefined;
   /** Why the read produced nothing, when it produced nothing. */
   error?: string;
+  /**
+   * The read filled its requested limit, so these numbers describe a prefix of the store
+   * rather than all of it. The routes carry no pagination cursor, so there is no way to
+   * fetch the remainder — the honest move is to say the figures are partial.
+   */
+  truncated: boolean;
   totalMemories: number;
   distinctSubjects: number;
   /** Memories citing an instruction/doc file — already written down somewhere agents read. */
@@ -1696,6 +1702,8 @@ export interface ServerMemoriesAnalysisView {
   repo: string;
   enabled: boolean | undefined;
   error?: string;
+  /** See {@link ServerMemoriesAnalysis.truncated}; the counts below are a prefix when true. */
+  truncated: boolean;
   totalMemories: number;
   distinctSubjects: number;
   documentedCount: number;

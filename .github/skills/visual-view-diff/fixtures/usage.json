@@ -988,6 +988,7 @@
   "serverMemoriesAnalysis": {
     "repo": "rajbos/ai-engineering-fluency",
     "enabled": true,
+    "truncated": true,
     "totalMemories": 340,
     "distinctSubjects": 191,
     "documentedCount": 99,

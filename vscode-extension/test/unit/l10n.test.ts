@@ -828,6 +828,7 @@ test('l10n: Copilot Repository Memories section strings resolve in English and z
 		'serverMemories.disabled': 'Memory is turned off for this repository.',
 		'serverMemories.unavailable': 'Repository memories could not be read: {0}',
 		'serverMemories.renderError': 'Repository memories are temporarily unavailable due to a rendering error. Try Refresh.',
+		'serverMemories.truncated': 'Partial — more may exist',
 	};
 	for (const [key, value] of Object.entries(english)) {
 		assert.equal(t(key), value, `English value for ${key}`);
@@ -856,6 +857,7 @@ test('l10n: Copilot Repository Memories section strings resolve in English and z
 			'serverMemories.disabled': '\u672c\u4ed3\u5e93\u5df2\u5173\u95ed\u8bb0\u5fc6\u529f\u80fd\u3002',
 			'serverMemories.unavailable': '\u65e0\u6cd5\u8bfb\u53d6\u4ed3\u5e93\u8bb0\u5fc6\uff1a{0}',
 			'serverMemories.renderError': '\u7531\u4e8e\u6e32\u67d3\u9519\u8bef\uff0c\u4ed3\u5e93\u8bb0\u5fc6\u6682\u65f6\u4e0d\u53ef\u7528\u3002\u8bf7\u5c1d\u8bd5\u5237\u65b0\u3002',
+			'serverMemories.truncated': '部分结果 — 可能还有更多',
 		};
 		for (const [key, value] of Object.entries(chinese)) {
 			assert.equal(t(key), value, `zh-cn value for ${key}`);

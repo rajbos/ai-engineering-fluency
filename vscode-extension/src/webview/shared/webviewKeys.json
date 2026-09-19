@@ -159,5 +159,7 @@
   "serverMemories.table.sources",
   "serverMemories.disabled",
   "serverMemories.unavailable",
+  "serverMemories.truncated",
+  "serverMemories.truncatedTooltip",
   "serverMemories.renderError"
 ]
