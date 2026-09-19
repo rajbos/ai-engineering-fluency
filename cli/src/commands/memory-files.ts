@@ -163,8 +163,14 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 
 	const result = await fetchRepoMemories(repo, {
 		getToken: async () => {
-			const token = tryRun('gh', ['auth', 'token'], cwd);
-			if (!token) { throw new Error('`gh auth token` is unavailable — install the GitHub CLI and run `gh auth login`.'); }
+			// Pinned to github.com, not the GitHub CLI's default host. `gh auth token` honours
+			// GH_HOST and the CLI's active context, so on a machine configured for GHES it
+			// would hand back an Enterprise token — which this would then send to
+			// api.githubcopilot.com, a host it was never issued for. The remote parser only
+			// accepts github.com repositories, so pinning here keeps both ends consistent, and
+			// a user with no github.com auth fails closed with the message below.
+			const token = tryRun('gh', ['auth', 'token', '--hostname', 'github.com'], cwd);
+			if (!token) { throw new Error('No github.com token from the GitHub CLI — install it and run `gh auth login --hostname github.com`.'); }
 			return token;
 		},
 	}, limit);

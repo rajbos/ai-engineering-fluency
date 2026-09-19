@@ -107,6 +107,18 @@ test('a rejected --repo value is never echoed back', () => {
 	assert.ok(!/--repo must be owner\/name, got/.test(src), 'the rejection must not interpolate the value');
 });
 
+test('the token lookup is pinned to github.com, not the CLI default host', () => {
+	// `gh auth token` honours GH_HOST and the active CLI context, so on a machine configured
+	// for GHES an unpinned lookup returns an Enterprise token — which this script would then
+	// send to api.githubcopilot.com, a host it was never issued for.
+	const src = require('node:fs').readFileSync(require('node:path').join(__dirname, 'fetch-copilot-memories.js'), 'utf8');
+	assert.ok(
+		/\['auth', 'token', '--hostname', 'github\.com'\]/.test(src),
+		'the token lookup must name the public host explicitly',
+	);
+	assert.ok(!/\['auth', 'token'\]/.test(src), 'no unpinned token lookup may remain');
+});
+
 test('memoryUrl builds the v0 routes and adds limit only when given', () => {
 	assert.equal(
 		memoryUrl('o/n', 'enabled'),

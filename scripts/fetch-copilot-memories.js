@@ -16,9 +16,10 @@
  *
  * Reverse-engineered from the shipped Copilot CLI bundle
  * (`~/.copilot/pkg/universal/<version>/index.js`), which is the authoritative
- * consumer — there is no public documentation for these routes. Base URL is the
- * Copilot API host (`https://api.githubcopilot.com`), or the agent endpoint with a
- * trailing `/agent` stripped when one is configured:
+ * consumer — there is no public documentation for these routes. The base URL is the
+ * public Copilot API host, hard-coded below as COPILOT_API_BASE. (The Copilot CLI also
+ * supports deriving it from a configured agent endpoint; this probe deliberately does
+ * not, and is public-GitHub only throughout.)
  *
  *   GET  {base}/agents/swe/internal/memory/v0/{owner}/{repo}/enabled
  *        -> 200 `{ "enabled": boolean }`
@@ -204,9 +205,13 @@ function resolveRepoFromGit() {
 
 /** Read the GitHub token from the `gh` CLI. The value is returned for header use only. */
 function readToken() {
-	const token = execFileSync('gh', ['auth', 'token'], { encoding: 'utf8' }).trim();
+	// Pinned to github.com rather than the GitHub CLI's default host: `gh auth token` honours
+	// GH_HOST and the active CLI context, so on a machine configured for GHES it would return
+	// an Enterprise token, and this script would send it to api.githubcopilot.com — a host it
+	// was never issued for. The remote parser only accepts github.com repositories anyway.
+	const token = execFileSync('gh', ['auth', 'token', '--hostname', 'github.com'], { encoding: 'utf8' }).trim();
 	if (!token) {
-		throw new Error('`gh auth token` returned nothing — run `gh auth login` first.');
+		throw new Error('No github.com token — run `gh auth login --hostname github.com` first.');
 	}
 	return token;
 }

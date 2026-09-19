@@ -6832,8 +6832,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Is the server-memories section switched on? Defaults to on, but it is the only part of
-	 * this view that talks to the network, so it gets its own opt-out.
+	 * Is the server-memories section switched on? Defaults to on, with its own opt-out because
+	 * this section reads from GitHub on a background refresh. That is not a claim the view is
+	 * otherwise offline — the same refresh path already fetches Repository PR and Cloud Agent
+	 * data — only that this section has a switch of its own.
 	 */
 	private getServerMemoriesEnabledSetting(): boolean {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('serverMemories.enabled', true);
