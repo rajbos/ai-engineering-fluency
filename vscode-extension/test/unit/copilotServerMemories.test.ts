@@ -13,6 +13,7 @@ import {
 	VIEW_PROMOTION_GROUP_LIMIT,
 	MEMORY_INTEGRATION_ID,
 	isSafeRepoRelativePath,
+	createRepoFileExists,
 	isValidRepoSlug,
 	safeRepoLabel,
 	sanitizeForDisplay,
@@ -472,6 +473,55 @@ test('isSafeRepoRelativePath rejects anything that could escape the checkout', (
 	// A directory merely *starting* with dots is an ordinary path.
 	assert.equal(isSafeRepoRelativePath('.github/workflows/ci.yml'), true);
 	assert.equal(isSafeRepoRelativePath('src/..hidden/a.ts'), true);
+});
+
+test('createRepoFileExists refuses a path that leaves the checkout through a symlink', () => {
+	// The lexical guard is necessary but not sufficient: `existsSync` follows links, so a
+	// repository containing `link -> /etc` makes `link/passwd` innocent-looking and still a
+	// probe of a path outside the checkout — with the answer flowing back to whoever wrote
+	// the citation. Driven through injected fs/path so the case is exercised without needing
+	// symlink privileges on the test machine.
+	const links: Record<string, string> = {
+		'/repo': '/repo',
+		'/repo/src/real.ts': '/repo/src/real.ts',
+		'/repo/link/passwd': '/etc/passwd',   // the symlinked escape
+	};
+	const io = {
+		realpathSync: (target: string) => {
+			if (!(target in links)) { throw new Error(`ENOENT: ${target}`); }
+			return links[target];
+		},
+		resolve: (...parts: string[]) => parts.join('/').replace(/\/+/g, '/'),
+		relative: (from: string, to: string) => (to === from ? '' : to.startsWith(from + '/') ? to.slice(from.length + 1) : `../${to}`),
+		isAbsolute: (target: string) => target.startsWith('/'),
+	};
+	const fileExists = createRepoFileExists('/repo', io);
+
+	assert.equal(fileExists('src/real.ts'), true, 'a real file inside the checkout still counts');
+	assert.equal(fileExists('link/passwd'), false, 'a symlinked escape must not be confirmed');
+	assert.equal(fileExists('src/missing.ts'), false, 'a missing file is missing');
+	// The lexical guard still applies inside the helper, not only in the caller.
+	assert.equal(fileExists('../outside.txt'), false);
+	assert.equal(fileExists('/etc/passwd'), false);
+});
+
+test('createRepoFileExists tolerates a checkout that is itself behind a symlink', () => {
+	// Worktrees and macOS /tmp paths resolve to a different real root; comparing a real path
+	// against the symlinked root would otherwise reject every file in the repository.
+	const links: Record<string, string> = {
+		'/link-to-repo': '/real/repo',
+		'/real/repo/src/a.ts': '/real/repo/src/a.ts',
+	};
+	const io = {
+		realpathSync: (target: string) => {
+			if (!(target in links)) { throw new Error(`ENOENT: ${target}`); }
+			return links[target];
+		},
+		resolve: (...parts: string[]) => parts.join('/').replace(/\/+/g, '/'),
+		relative: (from: string, to: string) => (to === from ? '' : to.startsWith(from + '/') ? to.slice(from.length + 1) : `../${to}`),
+		isAbsolute: (target: string) => target.startsWith('/'),
+	};
+	assert.equal(createRepoFileExists('/link-to-repo', io)('src/a.ts'), true);
 });
 
 test('analyzeServerMemories never probes a citation path that escapes the checkout', () => {

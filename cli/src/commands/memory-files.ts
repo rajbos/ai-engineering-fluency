@@ -10,8 +10,6 @@
  * filename-derived title.
  */
 import { execFileSync } from 'child_process';
-import { existsSync } from 'fs';
-import * as path from 'path';
 import { Command } from 'commander';
 import { shouldOutputJson } from '../commandUtils';
 import { discoverAllMemoryFiles, analyzeMemoryFiles, DEFAULT_STALE_DAYS, DEFAULT_LARGE_FILE_BYTES } from '../../../src/copilotMemoryFiles';
@@ -21,6 +19,7 @@ import {
 	parseRepoFromRemoteUrl,
 	renderPromotionMarkdown,
 	isValidRepoSlug,
+	createRepoFileExists,
 	sanitizeForDisplay,
 	INVALID_REPO_LABEL,
 	DEFAULT_MEMORY_LIMIT,
@@ -180,9 +179,10 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 		// Only check citations against the working tree when the analyzed repo is the one
 		// checked out here. With `--repo` pointing elsewhere, the local tree says nothing
 		// about that repo's files, so every citation would look missing — report none instead.
-		fileExists: analyzingThisCheckout
-			? (relativePath) => existsSync(path.resolve(root, relativePath))
-			: () => true,
+		//
+		// createRepoFileExists() rather than a bare existsSync(): that follows symlinks, so a
+		// repository symlink out of the checkout would let a citation probe an arbitrary path.
+		fileExists: analyzingThisCheckout ? createRepoFileExists(root) : () => true,
 	});
 }
 

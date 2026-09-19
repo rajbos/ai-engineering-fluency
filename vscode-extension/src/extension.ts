@@ -142,6 +142,7 @@ import {
   analyzeServerMemories as _analyzeServerMemories,
   parseRepoFromRemoteUrl as _parseRepoFromRemoteUrl,
   toServerMemoriesAnalysisView as _toServerMemoriesAnalysisView,
+  createRepoFileExists as _createRepoFileExists,
 } from '../../src/copilotServerMemories';
 import { readGitOriginUrl as _readGitOriginUrl, isGitRepoRoot as _isGitRepoRoot } from '../../src/darkFactorySignals';
 
@@ -7032,12 +7033,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const result = await _fetchRepoMemories(context.repo, {
 					getToken: async () => token,
 				});
-				const fs = require('fs') as typeof import('fs');
-				const path = require('path') as typeof import('path');
+				// Symlink-safe: existsSync() follows links, so a repository symlink pointing out of
+				// the checkout would turn a lexically-innocent citation into a probe of an
+				// arbitrary path. createRepoFileExists() resolves the real path and requires it
+				// to stay under the real root.
 				const analysis = _analyzeServerMemories(result, {
-					fileExists: (relativePath) => {
-						try { return fs.existsSync(path.resolve(context.repoRoot, relativePath)); } catch { return false; }
-					},
+					fileExists: _createRepoFileExists(context.repoRoot),
 				});
 				// The workspace can change, or the user can switch the feature off, while this
 				// request is in flight. Publishing unconditionally would then put one repository's

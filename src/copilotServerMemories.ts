@@ -442,6 +442,70 @@ export function isSafeRepoRelativePath(citationPath: string): boolean {
 	return !citationPath.split(/[/\\]/).includes('..');
 }
 
+/** The `fs`/`path` surface {@link createRepoFileExists} needs, injected so it can be tested. */
+export interface RepoFileExistsDeps {
+	realpathSync: (target: string) => string;
+	resolve: (...parts: string[]) => string;
+	relative: (from: string, to: string) => string;
+	isAbsolute: (target: string) => boolean;
+}
+
+/**
+ * Build the `fileExists` callback for a checkout, one that cannot be walked out of.
+ *
+ * {@link isSafeRepoRelativePath} is a *lexical* check: it rejects absolute paths and `..`
+ * segments, which is necessary but not sufficient. `existsSync` follows symlinks, so a
+ * repository containing `link-to-outside -> /etc` makes the citation
+ * `link-to-outside/passwd:1` lexically innocent and yet a probe of a path outside the
+ * checkout — and the answer comes back to the server's author as a stale-citation flag.
+ *
+ * So the real path is resolved and required to stay under the real root. The root is
+ * realpath'd too, since a checkout can itself live behind a symlink (a macOS `/tmp` path,
+ * a linked worktree) and comparing a real path against a symlinked root would then reject
+ * everything.
+ *
+ * A path that does not exist throws from `realpathSync` and is reported as missing, which
+ * is exactly what the staleness check wants. A path that exists but resolves outside is
+ * reported missing too: we will not confirm to a remote server that a file beyond the
+ * checkout is there.
+ *
+ * Lives here rather than in each host because the same mistake has now been made
+ * independently in both, and the callers are the ones this helper exists to protect.
+ */
+export function createRepoFileExists(repoRoot: string, deps?: RepoFileExistsDeps): (relativePath: string) => boolean {
+	const io: RepoFileExistsDeps = deps ?? defaultRepoFileExistsDeps();
+	let realRoot: string;
+	try {
+		realRoot = io.realpathSync(io.resolve(repoRoot));
+	} catch {
+		// An unresolvable root (deleted, permission-denied) still gives a usable lexical base.
+		realRoot = io.resolve(repoRoot);
+	}
+
+	return (relativePath: string): boolean => {
+		// Re-checked here, not just in the caller, so the helper is safe on its own terms.
+		if (!isSafeRepoRelativePath(relativePath)) { return false; }
+		try {
+			const real = io.realpathSync(io.resolve(realRoot, relativePath));
+			const rel = io.relative(realRoot, real);
+			return rel === '' || (!rel.startsWith('..') && !io.isAbsolute(rel));
+		} catch {
+			return false;
+		}
+	};
+}
+
+function defaultRepoFileExistsDeps(): RepoFileExistsDeps {
+	const fs = require('fs') as typeof import('fs');
+	const path = require('path') as typeof import('path');
+	return {
+		realpathSync: (target) => fs.realpathSync(target),
+		resolve: (...parts) => path.resolve(...parts),
+		relative: (from, to) => path.relative(from, to),
+		isAbsolute: (target) => path.isAbsolute(target),
+	};
+}
+
 /**
  * Normalize a subject for grouping. The agent writes free-text 1-2 word subjects, so
  * the same topic arrives as `Usage tab groups`, `usage tab groups` and `usage tabs` —
