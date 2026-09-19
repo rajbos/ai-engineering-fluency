@@ -9,10 +9,20 @@
  * Metadata only — file *content* is never read or printed beyond the
  * filename-derived title.
  */
+import { execFileSync } from 'child_process';
+import { existsSync } from 'fs';
+import * as path from 'path';
 import { Command } from 'commander';
 import { shouldOutputJson } from '../commandUtils';
 import { discoverAllMemoryFiles, analyzeMemoryFiles, DEFAULT_STALE_DAYS, DEFAULT_LARGE_FILE_BYTES } from '../../../src/copilotMemoryFiles';
-import type { MemoryFilesAnalysis } from '../../../src/types';
+import {
+	fetchRepoMemories,
+	analyzeServerMemories,
+	parseRepoFromRemoteUrl,
+	renderPromotionMarkdown,
+	DEFAULT_MEMORY_LIMIT,
+} from '../../../src/copilotServerMemories';
+import type { MemoryFilesAnalysis, ServerMemoriesAnalysis } from '../../../src/types';
 
 const DEFAULT_LARGE_KB = DEFAULT_LARGE_FILE_BYTES / 1024;
 
@@ -48,18 +58,146 @@ export const memoryFilesCommand = new Command('memory-files')
 	.option('--json', 'Output raw JSON (for machine consumption)')
 	.option('--stale-days <days>', `Days since last edit before a memory file is flagged stale (default: ${DEFAULT_STALE_DAYS})`, String(DEFAULT_STALE_DAYS))
 	.option('--large-kb <kb>', `Size in KB above which a memory file is flagged large (default: ${DEFAULT_LARGE_KB})`, String(DEFAULT_LARGE_KB))
-	.action((options) => {
+	.option('--server', "Also fetch this repository's server-side Copilot memories (requires network and the GitHub CLI)")
+	.option('--repo <owner/name>', "Repository to read server memories for (default: this checkout's origin remote)")
+	.option('--limit <n>', `Maximum server memories to request (default: ${DEFAULT_MEMORY_LIMIT})`, String(DEFAULT_MEMORY_LIMIT))
+	.option('--promote', 'Print the server-memory promotion candidates as a Markdown block for AGENTS.md')
+	.action(async (options) => {
 		const { staleDays, largeFileBytes } = resolveMemoryFilesThresholds(options);
 
 		const files = discoverAllMemoryFiles();
 		const analysis = analyzeMemoryFiles(files, { staleDays, largeFileBytes });
 
+		// `--promote` and `--repo` are only meaningful against a server store, so either one
+		// implies `--server` rather than silently doing nothing.
+		const wantsServer = Boolean(options.server || options.promote || options.repo);
+		const parsedLimit = parseStrictInt(options.limit ?? String(DEFAULT_MEMORY_LIMIT));
+		const limit = Math.max(1, Number.isNaN(parsedLimit) ? DEFAULT_MEMORY_LIMIT : parsedLimit);
+		const serverAnalysis = wantsServer
+			? await buildServerMemoriesAnalysis(process.cwd(), options.repo, limit)
+			: undefined;
+
 		if (shouldOutputJson(options)) {
-			process.stdout.write(JSON.stringify(analysis));
-		} else {
-			printMemoryFilesReport(analysis);
+			process.stdout.write(JSON.stringify(wantsServer ? { ...analysis, serverMemories: serverAnalysis ?? null } : analysis));
+			return;
+		}
+
+		if (options.promote) {
+			process.stdout.write(serverAnalysis
+				? renderPromotionMarkdown(serverAnalysis)
+				: 'Not a GitHub repository checkout — pass --repo owner/name.\n');
+			return;
+		}
+
+		printMemoryFilesReport(analysis);
+		if (wantsServer) {
+			printServerMemoriesReport(serverAnalysis);
 		}
 	});
+
+/**
+ * Run a command and return its trimmed stdout, or `undefined` if it is missing or fails.
+ *
+ * Used for the optional `git`/`gh` lookups behind `--server`: neither is a dependency of
+ * this CLI, so an absent binary must downgrade the server section to an explanatory
+ * message rather than crash a report whose local half works fine without them.
+ */
+function tryRun(command: string, args: string[], cwd: string): string | undefined {
+	try {
+		return execFileSync(command, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Resolve the repository root and `owner/name` for the current working directory.
+ *
+ * The root matters as much as the slug: citation staleness is checked by resolving each
+ * repo-relative citation path against it, so running the command from a subdirectory must
+ * not make every citation look missing.
+ */
+function resolveRepoContext(cwd: string): { root: string; repo: string } | undefined {
+	const root = tryRun('git', ['rev-parse', '--show-toplevel'], cwd);
+	const remote = tryRun('git', ['remote', 'get-url', 'origin'], cwd);
+	if (!root || !remote) { return undefined; }
+	const repo = parseRepoFromRemoteUrl(remote);
+	return repo ? { root, repo } : undefined;
+}
+
+/**
+ * Fetch and analyze the current repository's server-side memory store.
+ *
+ * Returns `undefined` only when there is no repository to ask about; every other failure
+ * (no `gh`, no Copilot access, memory disabled) comes back as an analysis carrying an
+ * `error`, so the report can say *why* it is empty.
+ */
+async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | undefined, limit: number): Promise<ServerMemoriesAnalysis | undefined> {
+	const context = resolveRepoContext(cwd);
+	const repo = repoOverride ?? context?.repo;
+	if (!repo) { return undefined; }
+	const root = context?.root ?? cwd;
+	const analyzingThisCheckout = !repoOverride || repoOverride === context?.repo;
+
+	const result = await fetchRepoMemories(repo, {
+		getToken: async () => {
+			const token = tryRun('gh', ['auth', 'token'], cwd);
+			if (!token) { throw new Error('`gh auth token` is unavailable — install the GitHub CLI and run `gh auth login`.'); }
+			return token;
+		},
+	}, limit);
+
+	return analyzeServerMemories(result, {
+		// Only check citations against the working tree when the analyzed repo is the one
+		// checked out here. With `--repo` pointing elsewhere, the local tree says nothing
+		// about that repo's files, so every citation would look missing — report none instead.
+		fileExists: analyzingThisCheckout
+			? (relativePath) => existsSync(path.resolve(root, relativePath))
+			: () => true,
+	});
+}
+
+function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined): void {
+	process.stdout.write('\nCopilot Server Memories (this repository)\n');
+	process.stdout.write('='.repeat(50) + '\n\n');
+
+	if (!analysis) {
+		process.stdout.write('Not a GitHub repository checkout — pass --repo owner/name to pick one.\n');
+		return;
+	}
+	if (analysis.error) {
+		process.stdout.write(`Could not read ${analysis.repo}: ${analysis.error}\n`);
+		return;
+	}
+
+	process.stdout.write(`Repository:           ${analysis.repo}\n`);
+	process.stdout.write(`Memory enabled:       ${analysis.enabled ?? 'unknown'}\n`);
+	process.stdout.write(`Stored memories:      ${analysis.totalMemories} across ${analysis.distinctSubjects} subjects\n`);
+	process.stdout.write(`Already documented:   ${analysis.documentedCount} (cite AGENTS.md or another instruction file)\n`);
+	process.stdout.write(`Promotion candidates: ${analysis.promotionCandidateCount} in ${analysis.promotionGroups.length} groups, ${analysis.repeatedGroupCount} re-learned more than once\n`);
+	process.stdout.write(`Stale citations:      ${analysis.staleCitations.length} memories, ${analysis.fullyStaleCount} with no surviving source\n\n`);
+
+	if (analysis.totalMemories === 0) {
+		process.stdout.write('This repository has no stored memories yet.\n');
+		return;
+	}
+
+	process.stdout.write('Top promotion candidates (consider adding these to AGENTS.md):\n');
+	for (const group of analysis.promotionGroups.slice(0, 10)) {
+		const repeats = group.repeatCount > 1 ? ` (re-learned ${group.repeatCount}x)` : '';
+		process.stdout.write(`  • ${group.displaySubject}${repeats}\n`);
+		process.stdout.write(`      ${group.representativeFact}\n`);
+	}
+	process.stdout.write('\n  Run with --promote for a Markdown block you can paste in.\n');
+
+	if (analysis.fullyStaleCount > 0) {
+		process.stdout.write('\nMemories whose every cited file is gone:\n');
+		for (const stale of analysis.staleCitations.filter(c => c.fullyStale).slice(0, 10)) {
+			process.stdout.write(`  • ${stale.subject}: ${stale.missingPaths.join(', ')}\n`);
+		}
+	}
+	process.stdout.write('\n');
+}
 
 function printMemoryFilesReport(analysis: MemoryFilesAnalysis): void {
 	process.stdout.write(`\nCopilot Memory Files Report\n`);

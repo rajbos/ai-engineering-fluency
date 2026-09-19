@@ -82,6 +82,7 @@ Detailed documentation for individual features.
 | [features/CORRECTIONS.md](features/CORRECTIONS.md) | Corrections tab — detect moments where the agent or the user had to correct the conversation |
 | [features/REPEATED-TASKS.md](features/REPEATED-TASKS.md) | Skill Suggestions — find tasks you keep prompting for across sessions and turn them into skills |
 | [features/COPILOT-MEMORY-FILES-INSIGHT.md](features/COPILOT-MEMORY-FILES-INSIGHT.md) | Copilot memory-files hygiene: shared analysis module, insight card, CLI `memory-files` command, and a Tools-tab UI section |
+| [features/COPILOT-SERVER-MEMORIES.md](features/COPILOT-SERVER-MEMORIES.md) | Copilot's server-side per-repository memory store: undocumented API contract, and turning re-learned facts into `AGENTS.md` entries |
 | [features/CLOUD-AGENT-COST.md](features/CLOUD-AGENT-COST.md) | Cloud Agent tab — per-repository AI credits, and the hourly cached snapshot behind it |
 | [features/DARK-FACTORY-READINESS.md](features/DARK-FACTORY-READINESS.md) | Dark Factory Readiness — per-repository governance control scan on the Fluency Score view |
 | [features/TTFT-TRENDS.md](features/TTFT-TRENDS.md) | Research > TTFT diagnostics tab — time-to-first-token averages and per-model trendlines from VS Code Chat's debug log |

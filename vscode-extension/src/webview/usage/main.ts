@@ -16,7 +16,7 @@ import {
 // Imported from the shared contract rather than re-declared locally, so a shape
 // change in src/types.ts surfaces here as a type error instead of silently
 // drifting out of sync with what the extension host actually sends.
-import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysisView } from '../../../../src/types';
+import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysisView, ServerMemoriesAnalysisView } from '../../../../src/types';
 import { CONTEXT_NEAR_LIMIT_RATIO } from '../../../../src/types';
 import { getSessionContextFillPercent, isSessionNearContextLimit } from '../../../../src/utils/contextFill';
 
@@ -42,6 +42,7 @@ import { isSwitchableTab } from './switchableTabs';
 import { insightCardElementId, isInsightCardAnchor } from '../../insightAnchors';
 import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from './modelLeaderboard';
 import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
+import { sanitizeServerMemoriesAnalysis as _sanitizeServerMemoriesAnalysis, buildServerMemoriesSectionHtml } from './serverMemories';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -222,6 +223,13 @@ type UsageAnalysisStats = {
 	curationAnalysis?: ToolCurationAnalysis | null;
 	/** Compact projection of the memory-files hygiene analysis (counts/rollup scalars only — no per-file paths). Null when none found. */
 	memoryFilesAnalysis?: MemoryFilesAnalysisView | null;
+	/**
+	 * Compact projection of this repository's server-side Copilot memory store. Unlike
+	 * `memoryFilesAnalysis` this carries fact text, because for server memories the fact is
+	 * the finding. Null when the workspace is not a GitHub repository, memory is off, or the
+	 * store could not be read.
+	 */
+	serverMemoriesAnalysis?: ServerMemoriesAnalysisView | null;
 	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
 	sessionColumnSettings?: { enabledColumns?: string[] };
 	/** Copilot API quota balance snapshot (available when the extension has fetched quota data). */
@@ -450,6 +458,10 @@ let currentCorrectionReport: CorrectionReport | null | undefined = undefined;
 let currentCurationAnalysis: ToolCurationAnalysis | null = null;
 // Same rationale for the memory-files hygiene analysis.
 let currentMemoryFilesAnalysis: MemoryFilesAnalysisView | null = null;
+// And for the server-side repository memories, which additionally cost a network round
+// trip — a refresh that omits them must keep showing the last good read rather than blank
+// the section while the next fetch is in flight.
+let currentServerMemoriesAnalysis: ServerMemoriesAnalysisView | null = null;
 
 type WorktreeResult = {
 	path: string;
@@ -2006,6 +2018,9 @@ function sanitizeClaudeDesktopCoverage(raw: any): UsageAnalysisStats['claudeDesk
 function applyMemoryFilesAnalysis(sanitized: UsageAnalysisStats, raw: any): void {
 	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'memoryFilesAnalysis')) {
 		sanitized.memoryFilesAnalysis = _sanitizeMemoryFilesAnalysis(raw.memoryFilesAnalysis);
+	}
+	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'serverMemoriesAnalysis')) {
+		sanitized.serverMemoriesAnalysis = _sanitizeServerMemoriesAnalysis(raw.serverMemoriesAnalysis);
 	}
 }
 
@@ -5738,6 +5753,7 @@ function buildToolsTabPanelHtml(
 			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
 			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
 			${buildMemoryFilesSectionHtml(currentMemoryFilesAnalysis ?? stats.memoryFilesAnalysis)}
+			${buildServerMemoriesSectionHtml(currentServerMemoriesAnalysis ?? stats.serverMemoriesAnalysis)}
 			${buildSkillSuggestionsSectionHtml(stats.repeatedTasks ?? null)}
 			<!-- Multi-Model Usage Section -->
 			<div class="section">
@@ -5804,6 +5820,7 @@ function syncRenderLayoutState(stats: UsageAnalysisStats): WorkspaceCustomizatio
 	// omitted (keep cache) vs. explicitly cleared to null (all files gone) is resolved upstream in
 	// handleUpdateStats before this runs, so a plain overwrite here is safe either way.
 	currentMemoryFilesAnalysis = stats.memoryFilesAnalysis ?? null;
+	currentServerMemoriesAnalysis = stats.serverMemoriesAnalysis ?? null;
 	return matrix;
 }
 

@@ -180,6 +180,20 @@ export interface WebviewLocalization {
 	'memoryFiles.unknownWorkspace': string;
 	'memoryFiles.globalWorkspaceLabel': string;
 	'memoryFiles.renderError': string;
+	'serverMemories.sectionTitle': string;
+	'serverMemories.sectionSubtitle': string;
+	'serverMemories.summary': string;
+	'serverMemories.documentedSummary': string;
+	'serverMemories.staleSummary': string;
+	'serverMemories.promoteHeading': string;
+	'serverMemories.promoteHint': string;
+	'serverMemories.repeatBadge': string;
+	'serverMemories.table.subject': string;
+	'serverMemories.table.fact': string;
+	'serverMemories.table.sources': string;
+	'serverMemories.disabled': string;
+	'serverMemories.unavailable': string;
+	'serverMemories.renderError': string;
 
 	// Add other webview-localizable strings here as needed
 	[key: string]: string;
@@ -333,7 +347,21 @@ const DEFAULT_LOCALIZATION: WebviewLocalization = {
 	'memoryFiles.table.lastUpdated': 'Last updated',
 	'memoryFiles.unknownWorkspace': 'Unknown workspace',
 	'memoryFiles.globalWorkspaceLabel': 'User (global)',
-	'memoryFiles.renderError': 'Memory files are temporarily unavailable due to a rendering error. Try Refresh.'
+	'memoryFiles.renderError': 'Memory files are temporarily unavailable due to a rendering error. Try Refresh.',
+	'serverMemories.sectionTitle': 'Copilot Repository Memories',
+	'serverMemories.sectionSubtitle': 'Facts the Copilot coding agent has stored server-side for this repository (GitHub Settings → Copilot → Memory)',
+	'serverMemories.summary': '{0} memories · {1} subjects',
+	'serverMemories.documentedSummary': '{0} already cite an instruction file',
+	'serverMemories.staleSummary': '{0} cite only files that no longer exist',
+	'serverMemories.promoteHeading': 'Worth adding to AGENTS.md',
+	'serverMemories.promoteHint': 'The agent learned these from code alone, so it re-derives them every run. Writing them into an instruction file makes them free.',
+	'serverMemories.repeatBadge': 're-learned {0}×',
+	'serverMemories.table.subject': 'Subject',
+	'serverMemories.table.fact': 'Fact',
+	'serverMemories.table.sources': 'Sources',
+	'serverMemories.disabled': 'Memory is turned off for this repository.',
+	'serverMemories.unavailable': 'Repository memories could not be read: {0}',
+	'serverMemories.renderError': 'Repository memories are temporarily unavailable due to a rendering error. Try Refresh.'
 };
 
 // Current localization strings, initialized with defaults

@@ -806,6 +806,61 @@ test('l10n: Copilot Memory Files section strings resolve in English and zh-cn', 
 	}
 });
 
+test('l10n: Copilot Repository Memories section strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	const english: Record<string, string> = {
+		'serverMemories.sectionTitle': 'Copilot Repository Memories',
+		'serverMemories.sectionSubtitle': 'Facts the Copilot coding agent has stored server-side for this repository (GitHub Settings \u2192 Copilot \u2192 Memory)',
+		'serverMemories.summary': '{0} memories \u00b7 {1} subjects',
+		'serverMemories.documentedSummary': '{0} already cite an instruction file',
+		'serverMemories.staleSummary': '{0} cite only files that no longer exist',
+		'serverMemories.promoteHeading': 'Worth adding to AGENTS.md',
+		'serverMemories.promoteHint': 'The agent learned these from code alone, so it re-derives them every run. Writing them into an instruction file makes them free.',
+		'serverMemories.repeatBadge': 're-learned {0}\u00d7',
+		'serverMemories.table.subject': 'Subject',
+		'serverMemories.table.fact': 'Fact',
+		'serverMemories.table.sources': 'Sources',
+		'serverMemories.disabled': 'Memory is turned off for this repository.',
+		'serverMemories.unavailable': 'Repository memories could not be read: {0}',
+		'serverMemories.renderError': 'Repository memories are temporarily unavailable due to a rendering error. Try Refresh.',
+	};
+	for (const [key, value] of Object.entries(english)) {
+		assert.equal(t(key), value, `English value for ${key}`);
+	}
+	// The placeholder-bearing keys are the ones a typo silently breaks: a wrong index leaves
+	// a literal "{0}" in the rendered section rather than failing anywhere visible.
+	assert.equal(t('serverMemories.summary', '340', '191'), '340 memories \u00b7 191 subjects');
+	assert.equal(t('serverMemories.documentedSummary', '99'), '99 already cite an instruction file');
+	assert.equal(t('serverMemories.staleSummary', '4'), '4 cite only files that no longer exist');
+	assert.equal(t('serverMemories.repeatBadge', '12'), 're-learned 12\u00d7');
+	assert.equal(t('serverMemories.unavailable', 'HTTP 403'), 'Repository memories could not be read: HTTP 403');
+
+	mock.setLanguage('zh-cn');
+	try {
+		const chinese: Record<string, string> = {
+			'serverMemories.sectionTitle': 'Copilot \u4ed3\u5e93\u8bb0\u5fc6',
+			'serverMemories.sectionSubtitle': 'Copilot \u7f16\u7801\u4ee3\u7406\u4e3a\u672c\u4ed3\u5e93\u5b58\u50a8\u5728\u670d\u52a1\u7aef\u7684\u4e8b\u5b9e\uff08GitHub \u8bbe\u7f6e \u2192 Copilot \u2192 \u8bb0\u5fc6\uff09',
+			'serverMemories.summary': '{0} \u6761\u8bb0\u5fc6 \u00b7 {1} \u4e2a\u4e3b\u9898',
+			'serverMemories.documentedSummary': '{0} \u6761\u5df2\u5f15\u7528\u6307\u4ee4\u6587\u4ef6',
+			'serverMemories.staleSummary': '{0} \u6761\u4ec5\u5f15\u7528\u4e86\u5df2\u4e0d\u5b58\u5728\u7684\u6587\u4ef6',
+			'serverMemories.promoteHeading': '\u5efa\u8bae\u5199\u5165 AGENTS.md',
+			'serverMemories.repeatBadge': '\u91cd\u590d\u5b66\u4e60 {0} \u6b21',
+			'serverMemories.table.subject': '\u4e3b\u9898',
+			'serverMemories.table.fact': '\u4e8b\u5b9e',
+			'serverMemories.table.sources': '\u6765\u6e90',
+			'serverMemories.disabled': '\u672c\u4ed3\u5e93\u5df2\u5173\u95ed\u8bb0\u5fc6\u529f\u80fd\u3002',
+			'serverMemories.unavailable': '\u65e0\u6cd5\u8bfb\u53d6\u4ed3\u5e93\u8bb0\u5fc6\uff1a{0}',
+			'serverMemories.renderError': '\u7531\u4e8e\u6e32\u67d3\u9519\u8bef\uff0c\u4ed3\u5e93\u8bb0\u5fc6\u6682\u65f6\u4e0d\u53ef\u7528\u3002\u8bf7\u5c1d\u8bd5\u5237\u65b0\u3002',
+		};
+		for (const [key, value] of Object.entries(chinese)) {
+			assert.equal(t(key), value, `zh-cn value for ${key}`);
+		}
+		assert.equal(t('serverMemories.summary', '340', '191'), '340 \u6761\u8bb0\u5fc6 \u00b7 191 \u4e2a\u4e3b\u9898');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: Copilot Budget gauge keys resolve in English', () => {
 	// Back the "🎯 Copilot Budget" tooltip row, which folds untracked (other
 	// devices/cloud) usage into the headline total so it agrees with the bar's

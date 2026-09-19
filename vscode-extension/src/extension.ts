@@ -80,6 +80,8 @@ import type {
   CorrectionSessionEntry,
   RepeatedTaskReport,
   MemoryFilesAnalysis,
+  ServerMemoriesAnalysis,
+  ServerMemoriesAnalysisView,
 } from '../../src/types';
 import {
 	ensureContextPressure,
@@ -133,6 +135,24 @@ import {
  * (e.g. periodic Usage Analysis refreshes while the panel is open).
  */
 const MEMORY_FILES_SCAN_TTL_MS = 5 * 60 * 1000;
+
+// --- Copilot server-side repository memories ---
+import {
+  fetchRepoMemories as _fetchRepoMemories,
+  analyzeServerMemories as _analyzeServerMemories,
+  parseRepoFromRemoteUrl as _parseRepoFromRemoteUrl,
+  toServerMemoriesAnalysisView as _toServerMemoriesAnalysisView,
+} from '../../src/copilotServerMemories';
+import { readGitOriginUrl as _readGitOriginUrl } from '../../src/darkFactorySignals';
+
+/**
+ * Minimum time between reads of a repository's server-side memory store.
+ *
+ * Far longer than {@link MEMORY_FILES_SCAN_TTL_MS} because this one costs a network round
+ * trip to GitHub rather than a local filesystem walk, and a memory store only changes when
+ * a coding-agent run stores something — on the order of hours, not minutes.
+ */
+const SERVER_MEMORIES_FETCH_TTL_MS = 60 * 60 * 1000;
 
 // --- Insights engine ---
 import type { TaskCategory, TaskCategoryBreakdown } from '../../src/taskClassification';
@@ -1168,6 +1188,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * within-TTL result the user is specifically asking to update.
 	 */
 	private _memoryFilesAnalysisScannedAt: number | undefined;
+	/**
+	 * Last successful read of the workspace repository's server-side memory store.
+	 *
+	 * Held separately from the computed-stats caches because it is fetched out of band: the
+	 * stats build is synchronous and must not wait on a network call, so it renders whatever
+	 * this field holds and a background refresh updates it for the *next* render.
+	 */
+	private _serverMemoriesAnalysis: ServerMemoriesAnalysis | null | undefined;
+	/** Wall-clock time (ms) of the last server-memory fetch attempt, successful or not. */
+	private _serverMemoriesFetchedAt: number | undefined;
+	/** In-flight fetch, so concurrent refreshes coalesce into one request rather than racing. */
+	private _serverMemoriesFetchInFlight: Promise<void> | undefined;
 	private lastDashboardData: any | undefined;
 	/** Insight engine: persisted state for all surfaced insights. */
 	private _insightStateBag: InsightStateBag = {};
@@ -6665,6 +6697,91 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return result;
 	}
 
+	/**
+	 * Is the server-memories section switched on? Defaults to on, but it is the only part of
+	 * this view that talks to the network, so it gets its own opt-out.
+	 */
+	private getServerMemoriesEnabledSetting(): boolean {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('serverMemories.enabled', true);
+	}
+
+	/**
+	 * Resolve the workspace's `owner/name`, reusing the shared git-config reader rather than
+	 * spawning `git remote get-url` (see `readGitOriginUrl`). Returns undefined when there is
+	 * no folder open, no origin remote, or the remote is not a GitHub repository — all of
+	 * which mean there is no memory store to ask about.
+	 */
+	private resolveWorkspaceRepoSlug(): { repoRoot: string; repo: string } | undefined {
+		for (const folder of vscode.workspace.workspaceFolders ?? []) {
+			const repoRoot = folder.uri.fsPath;
+			const originUrl = _readGitOriginUrl(repoRoot);
+			const repo = originUrl ? _parseRepoFromRemoteUrl(originUrl) : undefined;
+			if (repo) { return { repoRoot, repo }; }
+		}
+		return undefined;
+	}
+
+	/**
+	 * Refresh {@link _serverMemoriesAnalysis} in the background when it is stale.
+	 *
+	 * Fire-and-forget on purpose: the stats build that calls this is synchronous, so the
+	 * result lands in the *next* render rather than this one. That is acceptable for a panel
+	 * that refreshes periodically, and it keeps a slow or unreachable GitHub from delaying
+	 * every other number on the view.
+	 *
+	 * Authentication is silent-only. If the user has no GitHub session already, the section
+	 * stays empty rather than popping a sign-in prompt at them for a secondary insight.
+	 */
+	private scheduleServerMemoriesRefresh(): void {
+		if (!this.getServerMemoriesEnabledSetting()) { return; }
+		if (this._serverMemoriesFetchInFlight) { return; }
+		const now = Date.now();
+		if (this._serverMemoriesFetchedAt !== undefined && (now - this._serverMemoriesFetchedAt) < SERVER_MEMORIES_FETCH_TTL_MS) { return; }
+
+		const context = this.resolveWorkspaceRepoSlug();
+		if (!context) {
+			// Not a GitHub checkout: record the attempt so we don't re-resolve the remote on
+			// every refresh, and leave the analysis null so the section renders nothing.
+			this._serverMemoriesFetchedAt = now;
+			this._serverMemoriesAnalysis = null;
+			return;
+		}
+
+		this._serverMemoriesFetchInFlight = (async () => {
+			try {
+				const result = await _fetchRepoMemories(context.repo, {
+					getToken: async () => {
+						const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['repo'], { silent: true });
+						if (!session) { throw new Error('not signed in to GitHub'); }
+						return session.accessToken;
+					},
+				});
+				const fs = require('fs') as typeof import('fs');
+				const path = require('path') as typeof import('path');
+				this._serverMemoriesAnalysis = _analyzeServerMemories(result, {
+					fileExists: (relativePath) => {
+						try { return fs.existsSync(path.resolve(context.repoRoot, relativePath)); } catch { return false; }
+					},
+				});
+			} catch (err) {
+				this.log(`⚠️ Server memories fetch failed: ${String(err)}`);
+				this._serverMemoriesAnalysis = null;
+			} finally {
+				this._serverMemoriesFetchedAt = Date.now();
+				this._serverMemoriesFetchInFlight = undefined;
+			}
+		})();
+	}
+
+	/**
+	 * The server-memories projection for a webview payload, kicking off a background refresh
+	 * when the cached read has aged out.
+	 */
+	private buildServerMemoriesView(): ServerMemoriesAnalysisView | null {
+		this.scheduleServerMemoriesRefresh();
+		return _toServerMemoriesAnalysisView(this._serverMemoriesAnalysis ?? null);
+	}
+
 	async openMcpJson(): Promise<void> {
 		const fs = require('fs') as typeof import('fs');
 		const path = require('path') as typeof import('path');
@@ -10352,6 +10469,7 @@ private computeFallbackDailyRollup(
 			repeatedTasks: analysisStats.repeatedTasks ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
 			memoryFilesAnalysis: _toMemoryFilesAnalysisView(analysisStats.memoryFilesAnalysis ?? null),
+			serverMemoriesAnalysis: this.buildServerMemoriesView(),
 			copilotApiBalance: this._buildCopilotApiBalance(),
 			monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
 			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
@@ -15669,6 +15787,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       correctionReport: stats.correctionReport ?? null,
       curationAnalysis: stats.curationAnalysis ?? null,
       memoryFilesAnalysis: _toMemoryFilesAnalysisView(stats.memoryFilesAnalysis ?? null),
+      serverMemoriesAnalysis: this.buildServerMemoriesView(),
       sessionColumnSettings,
       copilotApiBalance: this._buildCopilotApiBalance(),
       monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,

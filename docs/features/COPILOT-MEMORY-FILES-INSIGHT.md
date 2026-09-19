@@ -4,6 +4,12 @@ Status: **Implemented** — shared analysis module, VS Code insight card, CLI
 command, `extension.ts` runtime wiring, and a Tools-tab UI section are all
 live.
 
+> **Local memory only.** This document covers the Markdown memory files Copilot
+> Chat writes on *this machine*. Copilot also keeps a separate, server-side memory
+> store per repository — see
+> [COPILOT-SERVER-MEMORIES.md](COPILOT-SERVER-MEMORIES.md). The metadata-only rule
+> below applies here and not there.
+
 ## Background
 
 GitHub Copilot's agent (`GitHub.copilot-chat`) writes its own Markdown "memory"

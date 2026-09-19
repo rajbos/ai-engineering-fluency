@@ -104,6 +104,7 @@
   "config.insights.enabled.description": "在使用分析仪表板和状态栏中启用个性化 AI 使用洞察和提醒。",
   "config.insights.toastsEnabled.description": "显示偶尔的高价值洞察通知（例如缺少 copilot-instructions.md、新的熟练度阶段）。遵循 cadenceDays 限制。",
   "config.whatsNew.notificationsEnabled.description": "更新后提示新增的视图、选项卡和板块。每天最多一条，每个版本最多三条，且不会提示您已经打开过的内容。",
+  "config.serverMemories.enabled.description": "在使用分析中显示当前仓库的 Copilot 编码代理服务端记忆。这是该视图中唯一会连接 GitHub 的部分；它使用已有的 GitHub 登录，不会主动弹出登录提示。",
   "whatsNew.takeMeThere": "带我去看看",
   "whatsNew.seeAll": "查看其他新增内容",
   "config.insights.cadenceDays.description": "洞察通知之间的最少天数。",
@@ -364,5 +365,19 @@
   "memoryFiles.table.lastUpdated": "最近更新",
   "memoryFiles.unknownWorkspace": "未知工作区",
   "memoryFiles.globalWorkspaceLabel": "用户（全局）",
-  "memoryFiles.renderError": "由于渲染错误，记忆文件暂时不可用。请尝试刷新。"
+  "memoryFiles.renderError": "由于渲染错误，记忆文件暂时不可用。请尝试刷新。",
+  "serverMemories.sectionTitle": "Copilot 仓库记忆",
+  "serverMemories.sectionSubtitle": "Copilot 编码代理为本仓库存储在服务端的事实（GitHub 设置 → Copilot → 记忆）",
+  "serverMemories.summary": "{0} 条记忆 · {1} 个主题",
+  "serverMemories.documentedSummary": "{0} 条已引用指令文件",
+  "serverMemories.staleSummary": "{0} 条仅引用了已不存在的文件",
+  "serverMemories.promoteHeading": "建议写入 AGENTS.md",
+  "serverMemories.promoteHint": "代理仅从代码中学到这些事实，因此每次运行都要重新推导。把它们写入指令文件即可免除这一开销。",
+  "serverMemories.repeatBadge": "重复学习 {0} 次",
+  "serverMemories.table.subject": "主题",
+  "serverMemories.table.fact": "事实",
+  "serverMemories.table.sources": "来源",
+  "serverMemories.disabled": "本仓库已关闭记忆功能。",
+  "serverMemories.unavailable": "无法读取仓库记忆：{0}",
+  "serverMemories.renderError": "由于渲染错误，仓库记忆暂时不可用。请尝试刷新。"
 }

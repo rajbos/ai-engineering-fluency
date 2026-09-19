@@ -1,0 +1,449 @@
+/**
+ * GitHub Copilot **server-side** repository memories — discovery and analysis.
+ *
+ * Companion to `copilotMemoryFiles.ts`, which covers the *local* half: the Markdown
+ * notes Copilot Chat's memory-tool writes under `workspaceStorage/<hash>/` on this
+ * machine. This module covers the other half: the per-repository memory store GitHub
+ * keeps server-side for the Copilot coding agent, the same list that renders under a
+ * repository's `Settings -> Copilot -> Memory` page (in preview at time of writing).
+ *
+ * The two differ in a way that matters for how they may be surfaced. Local memory
+ * files are reported **metadata-only** — their content is deliberately never read.
+ * Server memories *are* content: the API returns the fact text, its citations and the
+ * reasoning behind it, and there is nothing else to report. So this module reads and
+ * renders that content, and the metadata-only rule from `copilotMemoryFiles.ts` does
+ * not carry over. Nothing here is uploaded anywhere; it is fetched for the signed-in
+ * user and analyzed in-process.
+ *
+ * ## Why analyze rather than just list
+ *
+ * A live repository's store is not a tidy set of facts. On this repository the store
+ * held 340 memories in which the same graphify-setup fact appeared 14 times in
+ * slightly different words, and roughly a third of all memories cited `AGENTS.md` or
+ * another instruction file — the agent paying, repeatedly, to re-learn something it
+ * had already been told. That repetition is the useful signal: a fact the agent keeps
+ * rediscovering from code is a fact that belongs in a checked-in customization file
+ * (`AGENTS.md`, `.github/copilot-instructions.md`, `.github/instructions/*`), where
+ * every agent reads it for free on every run. {@link analyzeServerMemories} turns the
+ * raw list into exactly that recommendation.
+ *
+ * ## API
+ *
+ * There is no public documentation for these routes; the contract below was taken
+ * from the shipped Copilot CLI bundle (`~/.copilot/pkg/universal/<version>/index.js`),
+ * which is their authoritative consumer, and verified against live repositories.
+ *
+ *   GET {base}/agents/swe/internal/memory/v0/{owner}/{repo}/enabled
+ *       -> 200 `{ enabled: boolean }`
+ *   GET {base}/agents/swe/internal/memory/v0/{owner}/{repo}/recent?limit=N
+ *       -> 200 `ServerMemory[]`, or 204 No Content when the repository has none
+ *
+ * A PUT on the collection stores a memory. It is intentionally not implemented here:
+ * this repository only ever reports on a memory store, so no code path of ours can
+ * write to one.
+ *
+ * Two non-obvious requirements, both of which fail in ways that look like "there are
+ * no memories" rather than like an error:
+ *   - The scheme must be `Bearer`. A GitHub OAuth token works, but the `token` scheme
+ *     that `gh api` sends is rejected with 401, as is `gh api`'s automatic
+ *     `X-GitHub-Api-Version` header (`400 invalid apiVersion`).
+ *   - `Copilot-Integration-Id` must name an integration the memory service recognizes.
+ *     An unrecognized id (`vscode-chat`, for one) returns `403 memory is disabled for
+ *     this client`, which reads like a repository setting but is not.
+ */
+import type {
+	ServerMemory,
+	ServerMemoriesAnalysis,
+	ServerMemoriesAnalysisView,
+	ServerMemoryPromotionGroup,
+	ServerMemoryStaleCitation,
+} from './types';
+
+/** Copilot API host the memory routes live under. */
+export const COPILOT_API_BASE = 'https://api.githubcopilot.com';
+
+/** Path prefix for the SWE-agent memory routes, including the API generation (`v0`). */
+export const MEMORY_API_PREFIX = 'agents/swe/internal/memory/v0';
+
+/**
+ * Integration id sent as `Copilot-Integration-Id`. This is the Copilot CLI's own id,
+ * chosen because it is known to be accepted by these routes — an unrecognized id turns
+ * every request into a 403 that is easily misread as "memory is off for this repo".
+ */
+export const MEMORY_INTEGRATION_ID = 'copilot-developer-cli';
+
+/**
+ * How many memories to request. The Copilot CLI asks for 20 because that is all it
+ * wants to paste into a prompt; we are reporting on the whole store, so we ask for far
+ * more. The server caps the response on its own (a live repository returned 340 for
+ * both `limit=500` and `limit=1000`), so this is an upper bound, not a page size —
+ * there is no pagination cursor on these routes.
+ */
+export const DEFAULT_MEMORY_LIMIT = 500;
+
+/**
+ * Path fragments that mean "this fact is already written down somewhere an agent reads
+ * anyway". A memory citing one of these is not a promotion candidate — at best it is
+ * redundant with the instruction file it cites.
+ *
+ * `docs/` is included because this repository's `AGENTS.md` points agents at
+ * `docs/README.md` as the documentation index, so a fact cited to `docs/` is reachable
+ * from the instruction files rather than only from code.
+ */
+const INSTRUCTION_PATH_PATTERN = /(^|\/)(AGENTS\.md|CLAUDE\.md|copilot-instructions\.md)$|(^|\/)\.github\/(instructions|skills|agents)\/|(^|\/)docs\//i;
+
+/** Citations the agent writes for facts learned from a person, which have no file to check. */
+const USER_INPUT_CITATION_PATTERN = /^user input:/i;
+
+/** Dependencies {@link fetchRepoMemories} needs from its host, so the module itself stays testable. */
+export interface ServerMemoryFetchDeps {
+	/**
+	 * Returns a GitHub token for the signed-in user. Kept as a callback rather than a
+	 * plain string so each host supplies it its own way — the CLI shells out to
+	 * `gh auth token`, the extension uses VS Code's GitHub authentication provider —
+	 * and so the token is only materialized at request time.
+	 */
+	getToken: () => Promise<string>;
+	/** Injected for tests; defaults to the global `fetch`. */
+	fetchFn?: typeof fetch;
+	/** Overrides the API host, for a proxy or an enterprise endpoint. */
+	apiBase?: string;
+}
+
+/** Outcome of one memory-store read, including the failures that are not errors. */
+export interface RepoMemoriesResult {
+	/** `owner/name` the store was read for. */
+	repo: string;
+	/**
+	 * Whether the repository has memory enabled, or `undefined` when the `enabled`
+	 * route itself failed — deliberately tri-state, because "we could not ask" is a
+	 * different answer from "the repository has it switched off".
+	 */
+	enabled: boolean | undefined;
+	memories: ServerMemory[];
+	/** A human-readable reason the read did not produce memories, if it did not. */
+	error?: string;
+}
+
+/** Build one memory-route URL. `suffix` is `'enabled'`, `'recent'`, or `''` for the collection. */
+export function buildMemoryApiUrl(repo: string, suffix: string, limit?: number, apiBase: string = COPILOT_API_BASE): string {
+	const url = new URL(`${apiBase}/${MEMORY_API_PREFIX}/${repo}/${suffix}`);
+	if (limit !== undefined) {
+		url.searchParams.set('limit', String(limit));
+	}
+	return url.toString();
+}
+
+/**
+ * Parse `owner/name` out of a git remote URL, accepting both the SSH
+ * (`git@github.com:owner/name.git`) and HTTPS (`https://github.com/owner/name`)
+ * spellings. Returns `undefined` for a remote that is not a GitHub repository, so a
+ * caller can report "not a GitHub repo" rather than issuing a doomed request.
+ */
+export function parseRepoFromRemoteUrl(remoteUrl: string): string | undefined {
+	const match = /github\.com[:/]([^/]+)\/(.+?)(?:\.git)?\/?$/.exec(remoteUrl.trim());
+	return match ? `${match[1]}/${match[2]}` : undefined;
+}
+
+/**
+ * Read one repository's memory store.
+ *
+ * Never throws: every failure — no token, a rejected integration id, a repository the
+ * token cannot see — comes back as a `RepoMemoriesResult` with an `error` and no
+ * memories. This is a reporting feature layered onto an undocumented preview API, so a
+ * server-side change must degrade the memory section rather than fail the command or
+ * the view around it.
+ */
+export async function fetchRepoMemories(
+	repo: string,
+	deps: ServerMemoryFetchDeps,
+	limit: number = DEFAULT_MEMORY_LIMIT,
+): Promise<RepoMemoriesResult> {
+	const fetchFn = deps.fetchFn ?? fetch;
+	const apiBase = deps.apiBase ?? COPILOT_API_BASE;
+
+	let token: string;
+	try {
+		token = await deps.getToken();
+	} catch (error) {
+		return { repo, enabled: undefined, memories: [], error: `Could not get a GitHub token: ${errorMessage(error)}` };
+	}
+	if (!token) {
+		return { repo, enabled: undefined, memories: [], error: 'No GitHub token available.' };
+	}
+
+	const headers = {
+		Authorization: `Bearer ${token}`,
+		'Copilot-Integration-Id': MEMORY_INTEGRATION_ID,
+		Accept: 'application/json',
+	};
+
+	const enabled = await readEnabledFlag(buildMemoryApiUrl(repo, 'enabled', undefined, apiBase), headers, fetchFn);
+
+	let response: Response;
+	try {
+		response = await fetchFn(buildMemoryApiUrl(repo, 'recent', limit, apiBase), { headers });
+	} catch (error) {
+		return { repo, enabled, memories: [], error: `Memory request failed: ${errorMessage(error)}` };
+	}
+
+	// 204 is the server's "this repository has no memories" — a successful empty read,
+	// not a failure, and it has no body to parse.
+	if (response.status === 204) {
+		return { repo, enabled, memories: [] };
+	}
+	if (!response.ok) {
+		const body = await safeText(response);
+		return { repo, enabled, memories: [], error: `HTTP ${response.status}: ${body}` };
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = await response.json();
+	} catch (error) {
+		return { repo, enabled, memories: [], error: `Malformed memory response: ${errorMessage(error)}` };
+	}
+	if (!Array.isArray(parsed)) {
+		return { repo, enabled, memories: [], error: 'Memory response was not an array.' };
+	}
+	return { repo, enabled, memories: parsed.filter(isServerMemory) };
+}
+
+/** Read the `enabled` flag, collapsing every failure to `undefined` ("could not ask"). */
+async function readEnabledFlag(url: string, headers: Record<string, string>, fetchFn: typeof fetch): Promise<boolean | undefined> {
+	try {
+		const response = await fetchFn(url, { headers });
+		if (!response.ok) { return undefined; }
+		const body = await response.json() as { enabled?: unknown };
+		return typeof body?.enabled === 'boolean' ? body.enabled : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+async function safeText(response: Response): Promise<string> {
+	try { return (await response.text()).slice(0, 500); } catch { return '<unreadable body>'; }
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Narrow one element of the API response to a {@link ServerMemory}.
+ *
+ * Only the fields this module actually uses are required. The response carries more
+ * than that (`scope`, `billingOrganizationId`, `billingEnterpriseId`, and a `source`
+ * whose exact members have already drifted from what the CLI writes), and this is an
+ * undocumented preview API, so an unexpectedly-shaped record is dropped rather than
+ * allowed to crash a report — and an added field is simply carried along.
+ */
+function isServerMemory(value: unknown): value is ServerMemory {
+	if (typeof value !== 'object' || value === null) { return false; }
+	const candidate = value as Partial<ServerMemory>;
+	return typeof candidate.id === 'string'
+		&& typeof candidate.subject === 'string'
+		&& typeof candidate.fact === 'string'
+		&& Array.isArray(candidate.citations);
+}
+
+/** Does this citation point at a file an agent already reads as instructions? */
+export function isInstructionCitation(citation: string): boolean {
+	return INSTRUCTION_PATH_PATTERN.test(citationFilePath(citation) ?? '');
+}
+
+/**
+ * Extract the file path from a citation, which the agent writes as `path/file.ts:12-30`
+ * or `path/file.ts:12`. Returns `undefined` for a `User input: ...` citation, which
+ * names no file and must not be treated as one — a fact learned from a person has no
+ * path to check for staleness and no instruction file to have come from.
+ *
+ * Windows drive letters are handled by ignoring a single-character first segment, so
+ * `C:/x/y.ts` does not get truncated to `C`.
+ */
+export function citationFilePath(citation: string): string | undefined {
+	const trimmed = citation.trim();
+	if (!trimmed || USER_INPUT_CITATION_PATTERN.test(trimmed)) { return undefined; }
+	const colonIndex = trimmed.indexOf(':', trimmed.length > 1 && trimmed[1] === ':' ? 2 : 0);
+	const filePath = (colonIndex === -1 ? trimmed : trimmed.slice(0, colonIndex)).trim();
+	return filePath || undefined;
+}
+
+/**
+ * Normalize a subject for grouping. The agent writes free-text 1-2 word subjects, so
+ * the same topic arrives as `Usage tab groups`, `usage tab groups` and `usage tabs` —
+ * case and punctuation differences alone accounted for several apparent "distinct"
+ * subjects on a live store.
+ */
+function normalizeSubject(subject: string): string {
+	return subject.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/** Dependencies {@link analyzeServerMemories} needs, kept injectable so the analysis is pure. */
+export interface ServerMemoryAnalysisDeps {
+	/**
+	 * Whether a repo-relative citation path still exists in the working tree. Injected
+	 * rather than calling `fs` directly so the analysis can be unit-tested without a
+	 * fixture tree, and so a host that has no checkout (or only a virtual one) can opt
+	 * out of staleness detection by returning `true`.
+	 */
+	fileExists: (repoRelativePath: string) => boolean;
+}
+
+/**
+ * Turn a raw memory list into the report the feature actually shows.
+ *
+ * The headline output is {@link ServerMemoriesAnalysis.promotionGroups}: memories
+ * grouped by normalized subject, keeping only groups where *no* member cites an
+ * instruction file, ranked by how many times the agent has re-learned the same thing.
+ * A group of one is a fact learned once; a group of fourteen is the agent burning a
+ * code-review pass rediscovering something `AGENTS.md` could have told it. Both are
+ * promotion candidates, but the repeats are the ones worth acting on first, so the
+ * ranking is by repeat count rather than by recency — which is also the only ranking
+ * available, since the API returns no timestamps.
+ */
+export function analyzeServerMemories(
+	result: RepoMemoriesResult,
+	deps: ServerMemoryAnalysisDeps,
+): ServerMemoriesAnalysis {
+	const memories = result.memories;
+
+	const staleCitations: ServerMemoryStaleCitation[] = [];
+	const documentedIds = new Set<string>();
+	const bySubject = new Map<string, ServerMemory[]>();
+
+	for (const memory of memories) {
+		const key = normalizeSubject(memory.subject);
+		const group = bySubject.get(key);
+		if (group) { group.push(memory); } else { bySubject.set(key, [memory]); }
+
+		const checkable: string[] = [];
+		for (const citation of memory.citations) {
+			if (isInstructionCitation(citation)) { documentedIds.add(memory.id); }
+			const filePath = citationFilePath(citation);
+			if (filePath) { checkable.push(filePath); }
+		}
+
+		const missing = checkable.filter(filePath => !deps.fileExists(filePath));
+		if (missing.length > 0) {
+			staleCitations.push({
+				id: memory.id,
+				subject: memory.subject,
+				fact: memory.fact,
+				missingPaths: missing,
+				// A memory every one of whose checkable citations has vanished is not just
+				// partly out of date — there is nothing left in the tree backing it, so it
+				// is the one an agent should stop being told.
+				fullyStale: missing.length === checkable.length && checkable.length > 0,
+			});
+		}
+	}
+
+	const promotionGroups: ServerMemoryPromotionGroup[] = [];
+	for (const [subjectKey, group] of bySubject) {
+		if (group.some(memory => documentedIds.has(memory.id))) { continue; }
+		promotionGroups.push({
+			subject: subjectKey,
+			displaySubject: group[0].subject,
+			repeatCount: group.length,
+			// The longest fact is kept as the representative: when the agent restates one
+			// fact many times the wordings differ mainly by how much detail survived, and
+			// the fullest wording is the most useful starting text for an instruction file.
+			representativeFact: group.reduce((longest, m) => (m.fact.length > longest.length ? m.fact : longest), group[0].fact),
+			citations: Array.from(new Set(group.flatMap(m => m.citations))).sort(),
+			memoryIds: group.map(m => m.id),
+		});
+	}
+	promotionGroups.sort((a, b) => b.repeatCount - a.repeatCount || a.subject.localeCompare(b.subject));
+
+	return {
+		repo: result.repo,
+		enabled: result.enabled,
+		error: result.error,
+		totalMemories: memories.length,
+		distinctSubjects: bySubject.size,
+		documentedCount: documentedIds.size,
+		promotionCandidateCount: promotionGroups.reduce((sum, g) => sum + g.repeatCount, 0),
+		repeatedGroupCount: promotionGroups.filter(g => g.repeatCount > 1).length,
+		promotionGroups,
+		staleCitations,
+		fullyStaleCount: staleCitations.filter(c => c.fullyStale).length,
+		byAgent: countBy(memories, m => m.source?.agent),
+		byModel: countBy(memories, m => m.source?.baseModel),
+	};
+}
+
+/** Count occurrences of a derived key, skipping records the key is absent on. */
+function countBy(memories: ServerMemory[], keyOf: (memory: ServerMemory) => string | undefined): Record<string, number> {
+	const counts: Record<string, number> = {};
+	for (const memory of memories) {
+		const key = keyOf(memory);
+		if (!key) { continue; }
+		counts[key] = (counts[key] ?? 0) + 1;
+	}
+	return counts;
+}
+
+/** How many promotion groups the webview projection carries. */
+export const VIEW_PROMOTION_GROUP_LIMIT = 10;
+
+/**
+ * Project the analysis down to what the Usage Analysis webview renders.
+ *
+ * Unlike {@link toMemoryFilesAnalysisView}, this keeps fact text — for server memories
+ * the fact *is* the finding, and a promotion suggestion the user cannot read is not a
+ * suggestion. What it drops is bulk: only the top {@link VIEW_PROMOTION_GROUP_LIMIT}
+ * groups travel, since a store of several hundred memories would otherwise push a
+ * payload far larger than the rest of the view through `postMessage`.
+ */
+export function toServerMemoriesAnalysisView(analysis: ServerMemoriesAnalysis | null): ServerMemoriesAnalysisView | null {
+	if (!analysis) { return null; }
+	return {
+		repo: analysis.repo,
+		enabled: analysis.enabled,
+		error: analysis.error,
+		totalMemories: analysis.totalMemories,
+		distinctSubjects: analysis.distinctSubjects,
+		documentedCount: analysis.documentedCount,
+		promotionCandidateCount: analysis.promotionCandidateCount,
+		repeatedGroupCount: analysis.repeatedGroupCount,
+		fullyStaleCount: analysis.fullyStaleCount,
+		topPromotionGroups: analysis.promotionGroups.slice(0, VIEW_PROMOTION_GROUP_LIMIT).map(group => ({
+			displaySubject: group.displaySubject,
+			repeatCount: group.repeatCount,
+			representativeFact: group.representativeFact,
+			citationCount: group.citations.length,
+		})),
+	};
+}
+
+/**
+ * Render the promotion groups as a Markdown block ready to paste into `AGENTS.md` or
+ * `.github/copilot-instructions.md`.
+ *
+ * Deliberately produced as text for a human to edit and commit rather than written to
+ * the instruction file directly: these facts are an agent's unverified observations —
+ * some of a live store's memories cited files that no longer exist — and an
+ * instruction file is the one place in the repository where a wrong statement is read
+ * by every agent on every run.
+ */
+export function renderPromotionMarkdown(analysis: ServerMemoriesAnalysis, limit: number = VIEW_PROMOTION_GROUP_LIMIT): string {
+	const groups = analysis.promotionGroups.slice(0, limit);
+	if (groups.length === 0) {
+		return '_No promotion candidates: every stored memory already cites an instruction file._\n';
+	}
+	const lines = [
+		`<!-- Suggested from ${analysis.totalMemories} Copilot server memories for ${analysis.repo}.`,
+		'     Each fact is an agent observation — verify it against the citations before committing. -->',
+		'',
+	];
+	for (const group of groups) {
+		const seen = group.repeatCount > 1 ? ` _(re-learned ${group.repeatCount}x)_` : '';
+		lines.push(`- **${group.displaySubject}**${seen} — ${group.representativeFact}`);
+		if (group.citations.length > 0) {
+			lines.push(`  - Sources: ${group.citations.slice(0, 5).join(', ')}`);
+		}
+	}
+	lines.push('');
+	return lines.join('\n');
+}
