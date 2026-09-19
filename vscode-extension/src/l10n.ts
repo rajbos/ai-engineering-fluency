@@ -17,51 +17,17 @@
  *
  * `vscode.l10n.t()` is still consulted first, so if proper l10n bundles are
  * ever shipped, real VS Code-provided translations take precedence.
+ *
+ * The bundle lookup itself lives in `l10nCore.ts`, which imports no `vscode`
+ * — this file adds only the two things that genuinely need the API: the
+ * `vscode.l10n.t()` precedence check and `vscode.env.language`. Modules that
+ * must stay VS Code-free (see `insightsEngine.ts`) take a `Translate` from
+ * there instead of importing this file.
  */
 import * as vscode from 'vscode';
-import englishBundleData from '../package.nls.json';
-import zhCnBundleData from '../package.nls.zh-cn.json';
+import { resolveLocaleId, translate } from './l10nCore';
 
-const ENGLISH_BUNDLE = englishBundleData as Record<string, string>;
-
-/** Locale id (lowercase, from the package.nls.<locale>.json filename) → bundle. */
-const LOCALE_BUNDLES: Record<string, Record<string, string>> = {
-	'zh-cn': zhCnBundleData as Record<string, string>
-};
-
-const missingKeyWarnings = new Set<string>();
-
-/** Replace {0}, {1}, ... placeholders, mirroring vscode.l10n.t() formatting. */
-function formatMessage(template: string, args: Array<string | number | boolean>): string {
-	return template.replace(/\{(\d+)\}/g, (match, index) => {
-		const i = Number(index);
-		return i < args.length ? String(args[i]) : match;
-	});
-}
-
-/** The id of the inlined bundle that serves `language`, or undefined when none does. */
-function resolveLocaleId(language: string): string | undefined {
-	const lang = (language || '').toLowerCase();
-	// Own-property check, not a bare lookup: LOCALE_BUNDLES is a plain object, so a lowercase
-	// prototype key ('constructor', '__proto__') reads back truthy and would be reported as a
-	// shipped locale — which for `<html lang>` means emitting lang="constructor".
-	if (Object.prototype.hasOwnProperty.call(LOCALE_BUNDLES, lang)) {
-		return lang;
-	}
-	// A bare language tag ('zh') may match a more specific bundle ('zh-cn'),
-	// but never the other way around ('zh-tw' must not get Simplified Chinese).
-	for (const locale of Object.keys(LOCALE_BUNDLES)) {
-		if (lang === locale.split('-')[0]) {
-			return locale;
-		}
-	}
-	return undefined;
-}
-
-function resolveLocaleBundle(language: string): Record<string, string> | undefined {
-	const id = resolveLocaleId(language);
-	return id === undefined ? undefined : LOCALE_BUNDLES[id];
-}
+export type { Translate } from './l10nCore';
 
 /**
  * The locale the runtime strings are actually rendered in.
@@ -90,13 +56,5 @@ export function t(key: string, ...args: Array<string | number | boolean>): strin
 	if (value !== key) {
 		return value;
 	}
-	const template = resolveLocaleBundle(vscode.env.language)?.[key] ?? ENGLISH_BUNDLE[key];
-	if (template === undefined) {
-		if (!missingKeyWarnings.has(key)) {
-			missingKeyWarnings.add(key);
-			console.warn(`[ai-engineering-fluency] No localization found for key "${key}" — add it to package.nls.json.`);
-		}
-		return key;
-	}
-	return formatMessage(template, args);
+	return translate(vscode.env.language, key, ...args);
 }

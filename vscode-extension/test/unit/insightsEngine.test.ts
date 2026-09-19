@@ -2,7 +2,15 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import { INSIGHT_CATALOG, evaluateInsights } from '../../src/insightsEngine';
 import type { InsightContext } from '../../src/insightsEngine';
+import { createTranslator } from '../../src/l10nCore';
 import type { ToolCurationAnalysis, UsageAnalysisPeriod, MemoryFilesAnalysis } from '../../../src/types';
+
+/**
+ * Real English resolution against the shipped `package.nls.json`, not a stub —
+ * so these tests fail if an insight references a key that was never added to
+ * the bundle, which a `key => key` identity stub would happily let through.
+ */
+const EN = createTranslator('en');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,6 +54,7 @@ function makeCtx(overrides?: { autoCompact?: number; manualCompact?: number }): 
 		last30Days.toolCalls.byTool['__slash__compact'] = overrides.manualCompact;
 	}
 	return {
+		translate: EN,
 		today: emptyPeriod(),
 		last30Days,
 		...(overrides?.autoCompact !== undefined ? {
@@ -316,6 +325,7 @@ const STALE_SKILLS_ID = 'stale-skills';
 
 test('stale-skills: fires when exactly one unused skill exists', () => {
 	const ctx: InsightContext = {
+		translate: EN,
 		today: emptyPeriod(),
 		last30Days: emptyPeriod(),
 		missedPotential: [],
@@ -342,6 +352,7 @@ test('stale-skills: fires when exactly one unused skill exists', () => {
 
 test('stale-skills: does not fire when no unused skills exist', () => {
 	const ctx: InsightContext = {
+		translate: EN,
 		today: emptyPeriod(),
 		last30Days: emptyPeriod(),
 		missedPotential: [],
@@ -370,6 +381,7 @@ const STALE_MEMORY_FILES_ID = 'stale-memory-files';
 
 function makeMemoryFilesCtx(overrides: Partial<MemoryFilesAnalysis>): InsightContext {
 	return {
+		translate: EN,
 		today: emptyPeriod(),
 		last30Days: emptyPeriod(),
 		missedPotential: [],
@@ -436,6 +448,7 @@ function makeTodaySession(overrides: Partial<TodaySessionSummary>): TodaySession
 
 function makeLcCtx(sessions: TodaySessionSummary[]): InsightContext {
 	return {
+		translate: EN,
 		today: emptyPeriod(),
 		last30Days: emptyPeriod(),
 		missedPotential: [],
