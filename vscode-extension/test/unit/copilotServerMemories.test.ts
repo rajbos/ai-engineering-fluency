@@ -558,6 +558,34 @@ test('a memory citing only user input is never reported as stale', () => {
 	assert.equal(analysis.fullyStaleCount, 0);
 });
 
+test('analyzeServerMemories survives reserved words as agent or model names', () => {
+	// `source.agent`/`source.baseModel` are server-supplied strings used as bracket keys.
+	// Unguarded, `constructor` reads Object.prototype.constructor — truthy, so `?? 0` keeps it
+	// and the count becomes a string — while `__proto__` resolves through the inherited
+	// accessor and is dropped. Either way the numeric contract on byAgent/byModel breaks.
+	const analysis = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [
+			memory({ id: '1', source: { agent: 'constructor', baseModel: '__proto__' } }),
+			memory({ id: '2', source: { agent: 'prototype', baseModel: 'gpt-5.6-luna' } }),
+			memory({ id: '3', source: { agent: 'copilot-code-review', baseModel: 'gpt-5.6-luna' } }),
+		],
+	}, alwaysExists);
+
+	// Every surviving value is a number, and the reserved keys are skipped like any other
+	// malformed field rather than corrupting the tally.
+	for (const counts of [analysis.byAgent, analysis.byModel]) {
+		for (const value of Object.values(counts)) {
+			assert.equal(typeof value, 'number', `non-numeric count: ${JSON.stringify(counts)}`);
+		}
+	}
+	assert.deepEqual(analysis.byAgent, { 'copilot-code-review': 1 });
+	assert.deepEqual(analysis.byModel, { 'gpt-5.6-luna': 2 });
+	// And nothing leaked onto the shared prototype.
+	assert.equal(({} as Record<string, unknown>).polluted, undefined);
+});
+
 test('analyzeServerMemories counts by agent and model, skipping records without a source', () => {
 	const analysis = analyzeServerMemories({
 		repo: 'o/n',

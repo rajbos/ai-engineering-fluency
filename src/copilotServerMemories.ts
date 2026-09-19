@@ -51,6 +51,7 @@
  *     An unrecognized id (`vscode-chat`, for one) returns `403 memory is disabled for
  *     this client`, which reads like a repository setting but is not.
  */
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import type {
 	ServerMemory,
 	ServerMemoriesAnalysis,
@@ -627,6 +628,13 @@ function countBy(memories: ServerMemory[], keyOf: (memory: ServerMemory) => stri
 	for (const memory of memories) {
 		const key = keyOf(memory);
 		if (!key) { continue; }
+		// `source.agent`/`source.baseModel` are server-supplied strings used here as bracket
+		// keys. Without this guard `constructor` reads Object.prototype.constructor — truthy,
+		// so `?? 0` keeps it and the count becomes a string — and `__proto__` resolves through
+		// the inherited accessor and is silently dropped. Either way the numeric contract on
+		// `byAgent`/`byModel` breaks. Skipped like any other malformed field, per the
+		// convention documented in `utils/protoGuard.ts`.
+		if (isUnsafeObjectKey(key)) { continue; }
 		counts[key] = (counts[key] ?? 0) + 1;
 	}
 	return counts;
