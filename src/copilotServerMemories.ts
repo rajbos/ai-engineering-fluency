@@ -561,33 +561,52 @@ export interface ServerMemoryAnalysisDeps {
  * ranking is by repeat count rather than by recency — which is also the only ranking
  * available, since the API returns no timestamps.
  */
-export function analyzeServerMemories(
-	result: RepoMemoriesResult,
-	deps: ServerMemoryAnalysisDeps,
-): ServerMemoriesAnalysis {
-	const memories = result.memories;
+/** What one pass over the memory list establishes, before any grouping or ranking. */
+interface MemoryScan {
+	/** Memories grouped by normalized subject, in first-seen order. */
+	bySubject: Map<string, ServerMemory[]>;
+	/** Ids of memories citing an instruction file — already written down somewhere. */
+	documentedIds: Set<string>;
+	/**
+	 * Ids of memories with at least one citation naming a verifiable file in this repository.
+	 * The promotion pitch is "the agent keeps re-deriving this from code, so write it down",
+	 * which is only true of a fact that came from code and can be checked against it.
+	 */
+	codeDerivedIds: Set<string>;
+	staleCitations: ServerMemoryStaleCitation[];
+}
 
-	const staleCitations: ServerMemoryStaleCitation[] = [];
-	const documentedIds = new Set<string>();
-	const bySubject = new Map<string, ServerMemory[]>();
+/** Classify every memory once: subject, whether it is documented, code-derived, and stale. */
+function scanMemories(memories: ServerMemory[], deps: ServerMemoryAnalysisDeps): MemoryScan {
+	const scan: MemoryScan = {
+		bySubject: new Map<string, ServerMemory[]>(),
+		documentedIds: new Set<string>(),
+		codeDerivedIds: new Set<string>(),
+		staleCitations: [],
+	};
 
 	for (const memory of memories) {
 		const key = normalizeSubject(memory.subject);
-		const group = bySubject.get(key);
-		if (group) { group.push(memory); } else { bySubject.set(key, [memory]); }
+		const group = scan.bySubject.get(key);
+		if (group) { group.push(memory); } else { scan.bySubject.set(key, [memory]); }
 
 		const checkable: string[] = [];
 		for (const citation of memory.citations) {
-			if (isInstructionCitation(citation)) { documentedIds.add(memory.id); }
+			if (isInstructionCitation(citation)) { scan.documentedIds.add(memory.id); }
 			const filePath = citationFilePath(citation);
 			// Only repo-relative paths are ever handed to the host's `fileExists`: see
 			// isSafeRepoRelativePath() for why this guard belongs here and not in the callback.
 			if (filePath && isSafeRepoRelativePath(filePath)) { checkable.push(filePath); }
 		}
 
+		// `checkable` holds only citations that name a safe repo-relative path. A memory with
+		// none — one citing `User input: ...`, or nothing but an absolute/traversing path — has
+		// no code evidence behind it at all.
+		if (checkable.length > 0) { scan.codeDerivedIds.add(memory.id); }
+
 		const missing = checkable.filter(filePath => !deps.fileExists(filePath));
 		if (missing.length > 0) {
-			staleCitations.push({
+			scan.staleCitations.push({
 				id: memory.id,
 				subject: memory.subject,
 				fact: memory.fact,
@@ -595,15 +614,27 @@ export function analyzeServerMemories(
 				// A memory every one of whose checkable citations has vanished is not just
 				// partly out of date — there is nothing left in the tree backing it, so it
 				// is the one an agent should stop being told.
-				fullyStale: missing.length === checkable.length && checkable.length > 0,
+				fullyStale: missing.length === checkable.length,
 			});
 		}
 	}
+	return scan;
+}
 
-	const promotionGroups: ServerMemoryPromotionGroup[] = [];
-	for (const [subjectKey, group] of bySubject) {
-		if (group.some(memory => documentedIds.has(memory.id))) { continue; }
-		promotionGroups.push({
+/**
+ * Rank the subjects worth writing into an instruction file.
+ *
+ * A subject qualifies only when nothing in it already cites an instruction file (it would
+ * be redundant) and something in it cites verifiable code (otherwise the "the agent keeps
+ * re-deriving this" pitch is simply untrue). Ranked by how often the same thing has been
+ * re-learned, which is also the only ranking available — the API returns no timestamps.
+ */
+function buildPromotionGroups(scan: MemoryScan): ServerMemoryPromotionGroup[] {
+	const groups: ServerMemoryPromotionGroup[] = [];
+	for (const [subjectKey, group] of scan.bySubject) {
+		if (group.some(memory => scan.documentedIds.has(memory.id))) { continue; }
+		if (!group.some(memory => scan.codeDerivedIds.has(memory.id))) { continue; }
+		groups.push({
 			subject: subjectKey,
 			displaySubject: group[0].subject,
 			repeatCount: group.length,
@@ -615,7 +646,17 @@ export function analyzeServerMemories(
 			memoryIds: group.map(m => m.id),
 		});
 	}
-	promotionGroups.sort((a, b) => b.repeatCount - a.repeatCount || a.subject.localeCompare(b.subject));
+	groups.sort((a, b) => b.repeatCount - a.repeatCount || a.subject.localeCompare(b.subject));
+	return groups;
+}
+
+export function analyzeServerMemories(
+	result: RepoMemoriesResult,
+	deps: ServerMemoryAnalysisDeps,
+): ServerMemoriesAnalysis {
+	const memories = result.memories;
+	const scan = scanMemories(memories, deps);
+	const promotionGroups = buildPromotionGroups(scan);
 
 	return {
 		repo: result.repo,
@@ -623,13 +664,16 @@ export function analyzeServerMemories(
 		error: result.error,
 		truncated: result.truncated === true,
 		totalMemories: memories.length,
-		distinctSubjects: bySubject.size,
-		documentedCount: documentedIds.size,
+		distinctSubjects: scan.bySubject.size,
+		documentedCount: scan.documentedIds.size,
 		promotionCandidateCount: promotionGroups.reduce((sum, g) => sum + g.repeatCount, 0),
 		repeatedGroupCount: promotionGroups.filter(g => g.repeatCount > 1).length,
 		promotionGroups,
-		staleCitations,
-		fullyStaleCount: staleCitations.filter(c => c.fullyStale).length,
+		// Memories with no verifiable file citation — user-stated preferences and the like.
+		// Never promoted; surfaced so the report does not appear to have simply lost them.
+		unverifiableCount: memories.filter(memory => !scan.codeDerivedIds.has(memory.id)).length,
+		staleCitations: scan.staleCitations,
+		fullyStaleCount: scan.staleCitations.filter(c => c.fullyStale).length,
 		byAgent: countBy(memories, m => m.source?.agent),
 		byModel: countBy(memories, m => m.source?.baseModel),
 	};

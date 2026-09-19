@@ -155,7 +155,7 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 		// the message echoes it — `--json` serializes both.
 		return { repo: INVALID_REPO_LABEL, enabled: undefined, error: '--repo must be owner/name.', truncated: false,
 			totalMemories: 0, distinctSubjects: 0, documentedCount: 0, promotionCandidateCount: 0,
-			repeatedGroupCount: 0, promotionGroups: [], staleCitations: [], fullyStaleCount: 0,
+			repeatedGroupCount: 0, promotionGroups: [], unverifiableCount: 0, staleCitations: [], fullyStaleCount: 0,
 			byAgent: {}, byModel: {} };
 	}
 	const root = context?.root ?? cwd;
@@ -209,6 +209,11 @@ function printServerMemoriesReport(analysis: ServerMemoriesAnalysis | undefined)
 	// below describes the prefix that was read, not the whole store.
 	process.stdout.write(`Stored memories:      ${analysis.totalMemories}${analysis.truncated ? '+ (truncated at the request limit)' : ''} across ${analysis.distinctSubjects} subjects\n`);
 	process.stdout.write(`Already documented:   ${analysis.documentedCount} (cite AGENTS.md or another instruction file)\n`);
+	// Reported rather than silently dropped: a reader comparing the totals should be able to
+	// see where the difference went.
+	if (analysis.unverifiableCount > 0) {
+		process.stdout.write(`Not promotable:       ${analysis.unverifiableCount} (no verifiable file citation, e.g. "User input: ...")\n`);
+	}
 	process.stdout.write(`Promotion candidates: ${analysis.promotionCandidateCount} in ${analysis.promotionGroups.length} groups, ${analysis.repeatedGroupCount} re-learned more than once\n`);
 	process.stdout.write(`Stale citations:      ${analysis.staleCitations.length} memories, ${analysis.fullyStaleCount} with no surviving source\n\n`);
 	if (analysis.truncated) {

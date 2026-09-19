@@ -595,6 +595,44 @@ test('analyzeServerMemories never probes a citation path that escapes the checko
 	assert.equal(analysis.fullyStaleCount, 1);
 });
 
+test('a memory with no verifiable file citation is never a promotion candidate', () => {
+	// The promotion pitch is "the agent keeps re-deriving this from code, so write it down".
+	// That is not true of a fact a person stated, and `--promote` writes into the one file
+	// every agent reads on every run — an unverifiable claim does not belong there.
+	const analysis = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		truncated: false,
+		memories: [
+			memory({ id: 'said', subject: 'tabs', citations: ['User input: prefer tabs'] }),
+			memory({ id: 'hostile', subject: 'escape', citations: ['/etc/passwd:1'] }),
+			memory({ id: 'empty', subject: 'nothing', citations: [] }),
+			memory({ id: 'real', subject: 'caching', citations: ['src/cacheManager.ts:10'] }),
+		],
+	}, alwaysExists);
+
+	assert.deepEqual(analysis.promotionGroups.map(g => g.subject), ['caching']);
+	assert.equal(analysis.unverifiableCount, 3, 'the other three are counted, not silently lost');
+});
+
+test('one code citation is enough to make a subject promotable', () => {
+	// A subject where a person confirmed something the agent also saw in code is still a
+	// code-derived fact; only a group with no file evidence at all drops out.
+	const analysis = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		truncated: false,
+		memories: [
+			memory({ id: '1', subject: 'caching', citations: ['User input: yes really'] }),
+			memory({ id: '2', subject: 'caching', citations: ['src/cacheManager.ts:10'] }),
+		],
+	}, alwaysExists);
+
+	assert.deepEqual(analysis.promotionGroups.map(g => g.subject), ['caching']);
+	assert.equal(analysis.promotionGroups[0].repeatCount, 2);
+	assert.equal(analysis.unverifiableCount, 1);
+});
+
 test('a memory citing only user input is never reported as stale', () => {
 	// It has no checkable path at all; a `fileExists` that says "no" to everything must
 	// still leave it alone rather than declaring it fully stale.

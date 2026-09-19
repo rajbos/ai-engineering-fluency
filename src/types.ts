@@ -1674,6 +1674,14 @@ export interface ServerMemoriesAnalysis {
   repeatedGroupCount: number;
   /** Ranked by `repeatCount` descending; the API returns no timestamps to rank by instead. */
   promotionGroups: ServerMemoryPromotionGroup[];
+  /**
+   * Memories with no citation naming a verifiable file in the repository — typically
+   * `User input: ...`, i.e. something a person told the agent rather than something it
+   * derived from code. Excluded from {@link promotionGroups}: the promotion pitch is that
+   * the agent keeps re-deriving a fact from code, which is not true of these, and an
+   * unverifiable claim does not belong in a file every agent reads on every run.
+   */
+  unverifiableCount: number;
   staleCitations: ServerMemoryStaleCitation[];
   fullyStaleCount: number;
   /** Memory counts keyed by storing agent. */
