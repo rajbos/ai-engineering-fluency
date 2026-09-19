@@ -38,8 +38,12 @@ PUT {base}/agents/swe/internal/memory/v0/{owner}/{repo}
     -> stores one memory
 ```
 
-`{base}` is `https://api.githubcopilot.com`, or a configured agent endpoint with a
-trailing `/agent` stripped.
+`{base}` is always `https://api.githubcopilot.com` in what ships here. The Copilot CLI
+additionally derives it from a configured agent endpoint with a trailing `/agent`
+stripped; this feature deliberately does not, and is public-GitHub only at both ends —
+the remote parser accepts only github.com repositories and the token lookup is pinned to
+that host. `fetchRepoMemories()` takes an `apiBase` override, but it exists for tests and
+has no user-facing setting or CLI option behind it.
 
 **The PUT is deliberately not implemented.** This repository only ever *reports* on
 a memory store, so no code path of ours can write to one.

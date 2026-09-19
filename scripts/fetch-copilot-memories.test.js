@@ -73,6 +73,15 @@ test('parseRepoFromRemote strips a credential-bearing suffix from the slug', () 
 	assert.equal(parseRepoFromRemote('git@github.com:owner/repo#secret'), 'owner/repo');
 });
 
+test('parseRepoFromRemote rejects transports that are not git remotes', () => {
+	// Same guard as the shared parser: the two authenticated entry points must not diverge.
+	assert.equal(parseRepoFromRemote('file://github.com/owner/repo'), undefined);
+	assert.equal(parseRepoFromRemote('ftp://github.com/owner/repo'), undefined);
+	assert.equal(parseRepoFromRemote('https://github.com/owner/repo'), 'owner/repo');
+	assert.equal(parseRepoFromRemote('ssh://git@github.com/owner/repo.git'), 'owner/repo');
+	assert.equal(parseRepoFromRemote('git@github.com:owner/repo.git'), 'owner/repo');
+});
+
 test('parseRepoFromRemote matches the host exactly and validates each segment', () => {
 	assert.equal(parseRepoFromRemote('git@github.com:rajbos/ai-engineering-fluency.git'), 'rajbos/ai-engineering-fluency');
 	assert.equal(parseRepoFromRemote('https://github.com/rajbos/ai_engineering.fluency'), 'rajbos/ai_engineering.fluency');

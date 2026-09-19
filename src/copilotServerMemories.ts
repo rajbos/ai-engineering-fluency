@@ -152,6 +152,16 @@ export function buildMemoryApiUrl(repo: string, suffix: string, limit?: number, 
 const GITHUB_HOSTS = new Set(['github.com', 'www.github.com', 'ssh.github.com']);
 
 /**
+ * URL schemes a git remote may legitimately use to reach GitHub.
+ *
+ * Checking the host alone is not enough: `file://github.com/owner/repo` and
+ * `ftp://github.com/owner/repo` both pass a hostname test while naming something that is
+ * not a GitHub remote at all. Accepting one would make us send the user's token to the
+ * Copilot API asking about a repository this checkout has no relationship to.
+ */
+const GIT_REMOTE_SCHEMES = new Set(['https:', 'http:', 'ssh:', 'git:', 'git+ssh:']);
+
+/**
  * Parse `owner/name` out of a git remote URL, accepting the SSH
  * (`git@github.com:owner/name.git`), `ssh://` and HTTPS
  * (`https://github.com/owner/name`) spellings. Returns `undefined` for a remote that is
@@ -244,6 +254,7 @@ export function isValidRepoSlug(slug: string): boolean {
 function parseUrlHostAndPath(candidate: string): { host: string; path: string } {
 	try {
 		const url = new URL(candidate);
+		if (!GIT_REMOTE_SCHEMES.has(url.protocol)) { return { host: '', path: '' }; }
 		return { host: url.hostname, path: url.pathname };
 	} catch {
 		return { host: '', path: '' };

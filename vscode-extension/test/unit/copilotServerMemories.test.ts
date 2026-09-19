@@ -95,6 +95,22 @@ test('parseRepoFromRemoteUrl matches the host exactly, not as a substring', () =
 	assert.equal(parseRepoFromRemoteUrl('https://github.com/owner/repo/blob/main/x.ts'), undefined);
 });
 
+test('parseRepoFromRemoteUrl rejects transports that are not git remotes', () => {
+	// A hostname check alone accepts these: they name a local or unrelated resource, not a
+	// GitHub remote, and accepting one would send the user's token to the Copilot API asking
+	// about a repository this checkout has no relationship to.
+	assert.equal(parseRepoFromRemoteUrl('file://github.com/owner/repo'), undefined);
+	assert.equal(parseRepoFromRemoteUrl('ftp://github.com/owner/repo'), undefined);
+	assert.equal(parseRepoFromRemoteUrl('data:text/plain,github.com/owner/repo'), undefined);
+	// The transports a GitHub remote actually uses still parse.
+	assert.equal(parseRepoFromRemoteUrl('https://github.com/owner/repo'), 'owner/repo');
+	assert.equal(parseRepoFromRemoteUrl('http://github.com/owner/repo'), 'owner/repo');
+	assert.equal(parseRepoFromRemoteUrl('ssh://git@github.com/owner/repo.git'), 'owner/repo');
+	assert.equal(parseRepoFromRemoteUrl('git://github.com/owner/repo.git'), 'owner/repo');
+	// And the scp-style form, which is not a URL at all, is unaffected.
+	assert.equal(parseRepoFromRemoteUrl('git@github.com:owner/repo.git'), 'owner/repo');
+});
+
 test('parseRepoFromRemoteUrl never lets a remote smuggle a credential into the slug', () => {
 	// The slug is interpolated straight into the API request URL. The scp-style branch does
 	// not go through the URL parser, so without stripping the suffix this would yield a

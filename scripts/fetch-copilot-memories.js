@@ -94,6 +94,15 @@ function parseArgs(argv) {
 const GITHUB_HOSTS = new Set(['github.com', 'www.github.com', 'ssh.github.com']);
 
 /**
+ * URL schemes a git remote may legitimately use to reach GitHub. Checking the host alone
+ * would accept `file://github.com/owner/repo`, which names a local remote, not a GitHub one
+ * — and this script would then send its token to the API for that unrelated slug. Mirrors
+ * GIT_REMOTE_SCHEMES in `src/copilotServerMemories.ts`; the two authenticated entry points
+ * must not diverge.
+ */
+const GIT_REMOTE_SCHEMES = new Set(['https:', 'http:', 'ssh:', 'git:', 'git+ssh:']);
+
+/**
  * Reduce a remote URL to the parts that are safe to print: scheme, host and path.
  *
  * A git remote can carry an embedded credential, and this script promises above that it never
@@ -155,6 +164,7 @@ function parseRepoFromRemote(url) {
 	} else {
 		try {
 			const parsed = new URL(url);
+			if (!GIT_REMOTE_SCHEMES.has(parsed.protocol)) { return undefined; }
 			host = parsed.hostname;
 			repoPath = parsed.pathname;
 		} catch {
