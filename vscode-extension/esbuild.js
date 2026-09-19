@@ -116,18 +116,12 @@ async function main() {
 	// so the hosts need no fallback logic: the English file already carries the
 	// English text for any key a locale has not translated.
 	{
-		// Read the key list out of DEFAULT_LOCALIZATION's source rather than
-		// importing the compiled module: `npm run compile` must not depend on
-		// `compile-tests` having run first. The count assertion below is what
-		// turns a silently-broken parse into a failed build instead of a
-		// shipped, empty dictionary.
-		const localizationSrc = fs.readFileSync(
-			path.join(__dirname, 'src', 'webview', 'shared', 'localization.ts'), 'utf8');
-		const defaultStart = localizationSrc.indexOf('const DEFAULT_LOCALIZATION');
-		const defaultBody = localizationSrc.slice(defaultStart, localizationSrc.indexOf('\n};', defaultStart));
-		const keys = [...defaultBody.matchAll(/^\t'([^']+)':/gm)].map((m) => m[1]);
+		// webviewKeys.json is the single manifest of which keys the webviews need —
+		// the same one the generated English fallback is built from, so the sidecars
+		// and that fallback can never cover different key sets.
+		const keys = require('./src/webview/shared/webviewKeys.json');
 		if (keys.length < 100) {
-			throw new Error(`Parsed only ${keys.length} webview localization keys from localization.ts — the DEFAULT_LOCALIZATION parse is broken.`);
+			throw new Error(`webviewKeys.json lists only ${keys.length} keys — refusing to ship a near-empty dictionary.`);
 		}
 		const englishBundle = require('./package.nls.json');
 		const locales = { 'en': englishBundle, 'zh-cn': require('./package.nls.zh-cn.json') };
