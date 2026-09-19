@@ -138,7 +138,13 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/vscodium/')) { return 'VSCodium'; }
 	if (normalized.includes('.vscode-server-insiders/')) { return 'VS Code Server (Insiders)'; }
 	if (normalized.includes('.vscode-server')) { return 'VS Code Server'; }
-	if (normalized.includes('/.vs/') && normalized.includes('/copilot-chat/')) { return 'Visual Studio'; }
+	// Visual Studio / SSMS Copilot Chat sessions. Mirrors isVisualStudioPath() and
+	// isSsmsPath() in src/workspaceHelpers.ts — keep the three roots and the
+	// `/sessions/` requirement in step across both.
+	if (normalized.includes('/copilot-chat/') && normalized.includes('/sessions/')) {
+		if (normalized.includes('/ssmsgithubcopilot/copilot-chat/')) { return 'SSMS'; }
+		if (normalized.includes('/.vs/') || normalized.includes('/vsgithubcopilot/copilot-chat/')) { return 'Visual Studio'; }
+	}
 	return 'VS Code';
 }
 
