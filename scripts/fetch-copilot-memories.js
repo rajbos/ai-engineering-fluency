@@ -358,10 +358,12 @@ async function main() {
 	}
 
 	if (enabledResult.error) {
-		process.stdout.write(`\n[enabled] HTTP ${enabledResult.status}: ${enabledResult.error}\n`);
+		// The response body is network-controlled too — a server or an intercepting proxy can
+		// put control characters in an error just as a memory can. Same guard as the fields.
+		process.stdout.write(`\n[enabled] HTTP ${enabledResult.status}: ${sanitizeForDisplay(enabledResult.error)}\n`);
 	}
 	if (recentResult.error) {
-		process.stdout.write(`[recent]  HTTP ${recentResult.status}: ${recentResult.error}\n`);
+		process.stdout.write(`[recent]  HTTP ${recentResult.status}: ${sanitizeForDisplay(recentResult.error)}\n`);
 	}
 	printReport(repo, enabled, memories);
 	if (recentResult.status === 204) {
@@ -373,7 +375,9 @@ async function main() {
 // test doing so to reach the helpers below would — performs a live authenticated request.
 if (require.main === module) {
 	main().catch((error) => {
-		process.stderr.write(`${error.message}\n`);
+		// Sanitized as well: this message can quote a redacted git remote, and a remote URL is
+	// just a string in a config file that something else may have written.
+	process.stderr.write(`${sanitizeForDisplay(error.message)}\n`);
 		process.exitCode = 1;
 	});
 }

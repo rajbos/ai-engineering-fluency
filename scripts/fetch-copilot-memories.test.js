@@ -17,7 +17,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { redactRemoteUrl, parseRepoFromRemote, isValidRepoSlug, memoryUrl, parseArgs } = require('./fetch-copilot-memories.js');
+const { redactRemoteUrl, parseRepoFromRemote, isValidRepoSlug, sanitizeForDisplay, memoryUrl, parseArgs } = require('./fetch-copilot-memories.js');
 
 test('redactRemoteUrl strips an embedded password from an https remote', () => {
 	// The reported case: a non-GitHub remote carrying real credentials, quoted back in an
@@ -126,6 +126,38 @@ test('the token lookup is pinned to github.com, not the CLI default host', () =>
 		'the token lookup must name the public host explicitly',
 	);
 	assert.ok(!/\['auth', 'token'\]/.test(src), 'no unpinned token lookup may remain');
+});
+
+test('sanitizeForDisplay strips terminal control sequences', () => {
+	// Memory text is agent-written from repository content, and HTTP error bodies come from the
+	// network, so either can carry an ESC/OSC sequence. Printed verbatim it can set the
+	// terminal title, drive the clipboard, or hide text that is really there — this probe is
+	// authenticated and may well be pointed at a shared repository.
+	const ESC = String.fromCharCode(27);
+	const BEL = String.fromCharCode(7);
+	const hostile = `fact${ESC}]0;PWNED${BEL} and${ESC}[31m red`;
+	const clean = sanitizeForDisplay(hostile);
+	const hasControl = (v) => v.split('').some((ch) => {
+		const code = ch.charCodeAt(0);
+		return code < 32 || (code >= 127 && code <= 159);
+	});
+	assert.ok(!hasControl(clean), `control characters survived: ${JSON.stringify(clean)}`);
+	assert.equal(clean, 'fact ]0;PWNED and [31m red');
+	// Ordinary text keeps its meaning.
+	assert.equal(sanitizeForDisplay('  a normal — fact  '), 'a normal — fact');
+});
+
+test('every raw write in the report path goes through the sanitizer', () => {
+	// A source scan because the printing happens against a live response. The memory fields
+	// were guarded first and the HTTP error bodies were missed, so this pins the whole set
+	// rather than the fields alone.
+	const src = require('node:fs').readFileSync(require('node:path').join(__dirname, 'fetch-copilot-memories.js'), 'utf8');
+	for (const field of ['repo)', 'memory.subject', 'memory.fact', 'citations)', 'memory.reason', 'enabledResult.error', 'recentResult.error', 'error.message']) {
+		assert.ok(
+			src.includes(`sanitizeForDisplay(${field}`),
+			`${field} must be written through sanitizeForDisplay()`,
+		);
+	}
 });
 
 test('memoryUrl builds the v0 routes and adds limit only when given', () => {
