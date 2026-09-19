@@ -131,7 +131,7 @@ function stripSecretBearingSuffix(remotePath) {
 }
 
 /**
- * Resolve `owner/name` from the `origin` remote, accepting the scp-style SSH
+ * Parse `owner/name` from a remote URL, accepting the scp-style SSH
  * (`git@github.com:owner/name.git`), `ssh://` and HTTPS
  * (`https://github.com/owner/name`) spellings.
  *
@@ -140,9 +140,11 @@ function stripSecretBearingSuffix(remotePath) {
  * API asking about an unrelated repository. Mirrors `parseRepoFromRemoteUrl()` in
  * `src/copilotServerMemories.ts` — kept as its own copy because this probe is a dependency-free
  * CommonJS script that deliberately does not need the TypeScript build.
+ *
+ * Returns undefined rather than throwing so the git-shelling wrapper below owns the one
+ * error message, and this half stays a pure function the tests can exercise directly.
  */
-function resolveRepoFromGit() {
-	const url = execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim();
+function parseRepoFromRemote(url) {
 	const scpMatch = /^(?:[^@/]+@)?([^/:]+):(?!\/)(.+)$/.exec(url);
 	let host = '';
 	let repoPath = '';
@@ -155,16 +157,35 @@ function resolveRepoFromGit() {
 			host = parsed.hostname;
 			repoPath = parsed.pathname;
 		} catch {
-			// Leave both empty; the shared failure below reports it with the URL redacted.
+			return undefined;
 		}
 	}
 
-	const segments = repoPath.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/i, '').split('/');
-	if (!GITHUB_HOSTS.has(host.toLowerCase()) || segments.length !== 2 || !segments[0] || !segments[1]) {
-		throw new Error(`Could not parse a GitHub owner/repo from the origin remote: ${redactRemoteUrl(url)}`);
+	const segments = stripSecretBearingSuffix(repoPath)
+		.replace(/^\/+/, '')
+		.replace(/\/+$/, '')
+		.replace(/\.git$/i, '')
+		.split('/');
+	// The slug goes straight into the request URL, so each segment must look like a GitHub
+	// name. Without the suffix strip above, `git@github.com:owner/repo.git?token=secret`
+	// would yield a "name" carrying that credential and send it to the API — past the
+	// redaction, which only guards what gets printed.
+	const validSegment = (segment) => /^[A-Za-z0-9._-]+$/.test(segment) && segment !== '.' && segment !== '..';
+	if (!GITHUB_HOSTS.has(host.toLowerCase()) || segments.length !== 2 || !segments.every(validSegment)) {
+		return undefined;
 	}
 	return `${segments[0]}/${segments[1]}`;
 }
+
+function resolveRepoFromGit() {
+	const url = execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim();
+	const repo = parseRepoFromRemote(url);
+	if (!repo) {
+		throw new Error(`Could not parse a GitHub owner/repo from the origin remote: ${redactRemoteUrl(url)}`);
+	}
+	return repo;
+}
+
 
 /** Read the GitHub token from the `gh` CLI. The value is returned for header use only. */
 function readToken() {
@@ -286,4 +307,4 @@ if (require.main === module) {
 	});
 }
 
-module.exports = { redactRemoteUrl, resolveRepoFromGit, memoryUrl, parseArgs };
+module.exports = { redactRemoteUrl, parseRepoFromRemote, resolveRepoFromGit, memoryUrl, parseArgs };

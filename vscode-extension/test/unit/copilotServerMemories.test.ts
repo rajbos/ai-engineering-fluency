@@ -92,6 +92,27 @@ test('parseRepoFromRemoteUrl matches the host exactly, not as a substring', () =
 	assert.equal(parseRepoFromRemoteUrl('https://github.com/owner/repo/blob/main/x.ts'), undefined);
 });
 
+test('parseRepoFromRemoteUrl never lets a remote smuggle a credential into the slug', () => {
+	// The slug is interpolated straight into the API request URL. The scp-style branch does
+	// not go through the URL parser, so without stripping the suffix this would yield a
+	// "name" of `repo.git?token=secret` and send that credential to the Copilot API —
+	// past the redaction, which only guards what gets printed.
+	assert.equal(parseRepoFromRemoteUrl('git@github.com:owner/repo.git?token=secret'), 'owner/repo');
+	assert.equal(parseRepoFromRemoteUrl('git@github.com:owner/repo#secret'), 'owner/repo');
+	assert.equal(parseRepoFromRemoteUrl('https://github.com/owner/repo.git?token=secret'), 'owner/repo');
+});
+
+test('parseRepoFromRemoteUrl rejects segments that are not plausible GitHub names', () => {
+	// Anything outside GitHub's own character set could steer the request elsewhere once
+	// interpolated into the URL, so it is rejected rather than escaped.
+	assert.equal(parseRepoFromRemoteUrl('git@github.com:owner/re po'), undefined);
+	assert.equal(parseRepoFromRemoteUrl('git@github.com:owner/re%2fpo'), undefined);
+	assert.equal(parseRepoFromRemoteUrl('git@github.com:owner/..'), undefined);
+	assert.equal(parseRepoFromRemoteUrl('https://github.com/owner/.'), undefined);
+	// Ordinary names with dots, dashes and underscores still parse.
+	assert.equal(parseRepoFromRemoteUrl('https://github.com/raj-bos/ai_engineering.fluency'), 'raj-bos/ai_engineering.fluency');
+});
+
 test('citationFilePath strips the line range and ignores "User input" citations', () => {
 	assert.equal(citationFilePath('vscode-extension/src/cacheManager.ts:1017-1049'), 'vscode-extension/src/cacheManager.ts');
 	assert.equal(citationFilePath('src/a.ts:12'), 'src/a.ts');

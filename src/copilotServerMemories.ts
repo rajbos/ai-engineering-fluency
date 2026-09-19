@@ -164,10 +164,37 @@ export function parseRepoFromRemoteUrl(remoteUrl: string): string | undefined {
 
 	// Trailing slashes come off before the `.git` suffix, not after: `…/name.git/` is a real
 	// remote spelling, and stripping in the other order leaves the `.git` on the name.
-	const segments = path.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/i, '').split('/');
+	const segments = path
+		// A `?query` or `#fragment` is not part of the repository name. The scp-style branch
+		// never goes through the URL parser, so without this
+		// `git@github.com:owner/repo.git?token=secret` yields a "name" of
+		// `repo.git?token=secret`, and buildMemoryApiUrl() then sends that credential to the
+		// Copilot API inside the request URL — right past the redaction that only guards
+		// diagnostics. Both branches are stripped here so neither can carry one through.
+		.replace(/[?#].*$/, '')
+		.replace(/^\/+/, '')
+		.replace(/\/+$/, '')
+		.replace(/\.git$/i, '')
+		.split('/');
 	// Exactly owner/name — anything deeper is a URL into a repository (a blob, an issue),
-	// not the repository remote itself.
-	return segments.length === 2 && segments[0] && segments[1] ? `${segments[0]}/${segments[1]}` : undefined;
+	// not the repository remote itself — and each segment must look like a GitHub name.
+	return segments.length === 2 && segments.every(isValidRepoSegment)
+		? `${segments[0]}/${segments[1]}`
+		: undefined;
+}
+
+/**
+ * Does this look like a GitHub owner or repository name?
+ *
+ * The slug is interpolated into the request URL, so an unconstrained segment is an
+ * injection point: a stray `?`, `%2f`, `@` or space would let a remote steer the request
+ * somewhere other than the repository it names. GitHub's own names are limited to this
+ * character set, so anything outside it is rejected rather than escaped, and the relative
+ * path segments `.` and `..` are excluded explicitly since the charset would otherwise
+ * admit them.
+ */
+function isValidRepoSegment(segment: string): boolean {
+	return /^[A-Za-z0-9._-]+$/.test(segment) && segment !== '.' && segment !== '..';
 }
 
 /** Host and path of a parseable absolute URL, or empty strings when it is not one. */

@@ -6825,6 +6825,28 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Authentication is silent-only. If the user has no GitHub session already, the section
 	 * stays empty rather than popping a sign-in prompt at them for a secondary insight.
 	 */
+	/**
+	 * A public-GitHub access token for the signed-in user, or undefined when there is no
+	 * session to reuse.
+	 *
+	 * The public `github` provider specifically, NOT getGitHubAuthProviderId(). That helper
+	 * follows the `github-enterprise.uri` setting, but this feature is fixed to public GitHub
+	 * at both ends: the remote parser only accepts github.com repositories, and the request
+	 * always goes to api.githubcopilot.com. With an Enterprise endpoint configured and a
+	 * public checkout open, the helper would hand us a GHES token to send to a host it was
+	 * never issued for.
+	 *
+	 * `silent: true` never prompts, so a user without a session sees nothing rather than a
+	 * sign-in dialog for a secondary insight. It also only returns a session that already
+	 * covers the requested scopes, which is why this asks for the same `read:user` scope every
+	 * other getSession() call in this file uses rather than anything wider: a broader request
+	 * would come back empty for users who have already granted the narrower one.
+	 */
+	private async getPublicGitHubTokenSilently(): Promise<string | undefined> {
+		const session = await vscode.authentication.getSession(PUBLIC_GITHUB_AUTH_PROVIDER_ID, ['read:user'], { silent: true });
+		return session?.accessToken;
+	}
+
 	private scheduleServerMemoriesRefresh(): void {
 		// The workspace is resolved unconditionally, before any early return, so that a switch
 		// away from a repository clears what is on screen even while that repository's own
@@ -6849,28 +6871,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this._serverMemoriesFetchInFlight = (async () => {
 			try {
+				// Resolved up front rather than inside getToken() so "the user is not signed in"
+				// stays distinct from "the request failed". Both would otherwise arrive as a
+				// `result.error` and render the unavailable card, contradicting the documented
+				// behaviour that a user without a session simply sees nothing. A genuine request
+				// failure still surfaces, which is the case worth showing.
+				const token = await this.getPublicGitHubTokenSilently();
+				if (!token) {
+					if (this.isServerMemoriesContextCurrent(context.repo)) {
+						this._serverMemoriesAnalysis = null;
+						this._serverMemoriesRepo = context.repo;
+						this._serverMemoriesFetchedAt = Date.now();
+					}
+					return;
+				}
 				const result = await _fetchRepoMemories(context.repo, {
-					getToken: async () => {
-						// The public `github` provider specifically, NOT getGitHubAuthProviderId().
-						// That helper follows the `github-enterprise.uri` setting, but this feature is
-						// fixed to public GitHub at both ends: the remote parser only accepts
-						// github.com repositories, and the request always goes to
-						// api.githubcopilot.com. With an Enterprise endpoint configured and a public
-						// checkout open, the helper would hand us a GHES token to send to a host it
-						// was never issued for. An Enterprise-only user simply gets no session here,
-						// which surfaces as a readable reason in the section.
-						//
-						// Deliberately the same `read:user` scope every other getSession() call in this
-						// file uses, not a broader one. `silent: true` only returns a session that
-						// already covers the requested scopes, so asking for anything wider than what
-						// the user has already granted returns undefined — and this section would then
-						// stay empty forever with no visible reason, which is the one failure mode this
-						// feature exists to avoid. If the memory API ever refuses a token minted for
-						// this scope, that surfaces as a readable HTTP error in the section instead.
-						const session = await vscode.authentication.getSession(PUBLIC_GITHUB_AUTH_PROVIDER_ID, ['read:user'], { silent: true });
-						if (!session) { throw new Error('not signed in to public GitHub'); }
-						return session.accessToken;
-					},
+					getToken: async () => token,
 				});
 				const fs = require('fs') as typeof import('fs');
 				const path = require('path') as typeof import('path');

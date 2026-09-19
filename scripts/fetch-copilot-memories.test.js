@@ -17,7 +17,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { redactRemoteUrl, memoryUrl, parseArgs } = require('./fetch-copilot-memories.js');
+const { redactRemoteUrl, parseRepoFromRemote, memoryUrl, parseArgs } = require('./fetch-copilot-memories.js');
 
 test('redactRemoteUrl strips an embedded password from an https remote', () => {
 	// The reported case: a non-GitHub remote carrying real credentials, quoted back in an
@@ -62,6 +62,27 @@ test('redactRemoteUrl leaves a credential-free remote readable', () => {
 test('redactRemoteUrl drops a remote it cannot parse rather than guessing', () => {
 	// An unparseable string cannot be redacted with confidence, so none of it is shown.
 	assert.equal(redactRemoteUrl('not a url at all'), '<unparseable remote URL>');
+});
+
+test('parseRepoFromRemote strips a credential-bearing suffix from the slug', () => {
+	// The scp-style branch skips the URL parser, so without the strip this yields a "name"
+	// of `repo.git?token=secret` — which then goes into the API request URL, past the
+	// redaction that only guards what gets printed.
+	assert.equal(parseRepoFromRemote('git@github.com:owner/repo.git?token=secret'), 'owner/repo');
+	assert.equal(parseRepoFromRemote('https://github.com/owner/repo.git?token=secret'), 'owner/repo');
+	assert.equal(parseRepoFromRemote('git@github.com:owner/repo#secret'), 'owner/repo');
+});
+
+test('parseRepoFromRemote matches the host exactly and validates each segment', () => {
+	assert.equal(parseRepoFromRemote('git@github.com:rajbos/ai-engineering-fluency.git'), 'rajbos/ai-engineering-fluency');
+	assert.equal(parseRepoFromRemote('https://github.com/rajbos/ai_engineering.fluency'), 'rajbos/ai_engineering.fluency');
+	// A substring host match would accept these and query an unrelated repository.
+	assert.equal(parseRepoFromRemote('https://notgithub.com/owner/repo'), undefined);
+	assert.equal(parseRepoFromRemote('https://github.com.evil.test/owner/repo'), undefined);
+	// Deeper paths are URLs into a repo, not a remote; odd characters could steer the request.
+	assert.equal(parseRepoFromRemote('https://github.com/owner/repo/blob/main/x.ts'), undefined);
+	assert.equal(parseRepoFromRemote('git@github.com:owner/re%2fpo'), undefined);
+	assert.equal(parseRepoFromRemote('git@github.com:owner/..'), undefined);
 });
 
 test('memoryUrl builds the v0 routes and adds limit only when given', () => {
