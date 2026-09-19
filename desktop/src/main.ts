@@ -323,7 +323,7 @@ function panelPayloadScript(windowKey: string, data: object): string {
         // system wants 1.234,56 with English UI.
         language: resolvedLocale(app.getLocale()),
     };
-    return `window.${windowKey}=${JSON.stringify(payload).replace(/</g, '\u003c')};`;
+    return `window.${windowKey}=${JSON.stringify(payload).replace(/</g, '\\u003c')};`;
 }
 
 async function buildPanelHtml(panel: PanelId): Promise<string> {

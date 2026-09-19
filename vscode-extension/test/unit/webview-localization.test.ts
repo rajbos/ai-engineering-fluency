@@ -133,8 +133,12 @@ function requestedWebviewKeys(): Map<string, string> {
 			if (entry.isDirectory()) { walk(full); continue; }
 			if (!entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) { continue; }
 			const text = readFileSync(full, 'utf8');
-			for (const m of text.matchAll(/\blocalize(?:Format)?\(\s*'([^']+)'/g)) {
-				if (!found.has(m[1])) { found.set(m[1], relative(webviewRoot, full).split(sep).join('/')); }
+			// Both quote styles: most of the webview uses single quotes, but
+			// diagnostics/main.ts uses double. Matching only one silently shrank
+			// this scan to a subset and let the invariant go unenforced.
+			for (const m of text.matchAll(/\blocalize(?:Format)?\(\s*(['"])(.*?)\1/g)) {
+				const key = m[2];
+				if (!found.has(key)) { found.set(key, relative(webviewRoot, full).split(sep).join('/')); }
 			}
 		}
 	};

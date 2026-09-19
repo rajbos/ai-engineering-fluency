@@ -5878,7 +5878,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private getWebviewLocaleFields(): { localization: Record<string, string>; language: string } {
 		return {
-			...this.getWebviewLocaleFields(),
+			localization: this.getWebviewLocalization(),
 			language: resolvedLocale(vscode.env.language),
 		};
 	}

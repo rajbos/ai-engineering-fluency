@@ -54,14 +54,42 @@ export function resolveLocaleId(language: string): string | undefined {
 	if (Object.prototype.hasOwnProperty.call(LOCALE_BUNDLES, lang)) {
 		return lang;
 	}
-	// A bare language tag ('zh') may match a more specific bundle ('zh-cn'),
-	// but never the other way around ('zh-tw' must not get Simplified Chinese).
+	// Otherwise match on language + script, after asking Intl to fill in what the
+	// tag left implicit. Comparing raw tags is not enough: `zh-Hans`, `zh-Hans-CN`
+	// and a bare `zh` are all Simplified Chinese and should get `zh-cn`, but none
+	// of them is a prefix match for it.
+	//
+	// Script, not region, is the deciding part. `zh-SG` is Simplified Chinese in
+	// Singapore — closer to our `zh-cn` bundle than English is — while `zh-TW`
+	// and `zh-HK` are Traditional and must never get it, which comparing full
+	// maximized tags would get right by luck and comparing languages would get
+	// wrong.
+	const wanted = languageAndScript(lang);
+	if (wanted === undefined) {
+		return undefined;
+	}
 	for (const locale of Object.keys(LOCALE_BUNDLES)) {
-		if (lang === locale.split('-')[0]) {
+		if (languageAndScript(locale) === wanted) {
 			return locale;
 		}
 	}
 	return undefined;
+}
+
+/**
+ * `zh-Hans` for any Simplified Chinese tag, `en-Latn` for any English one, and
+ * so on — or undefined for a tag Intl cannot parse.
+ *
+ * `Intl.Locale` throws on a malformed tag, which is also what keeps a hostile
+ * value like `constructor` from reaching the comparison above.
+ */
+function languageAndScript(tag: string): string | undefined {
+	try {
+		const maximized = new Intl.Locale(tag).maximize();
+		return `${maximized.language}-${maximized.script}`;
+	} catch {
+		return undefined;
+	}
 }
 
 /**

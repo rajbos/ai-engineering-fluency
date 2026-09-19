@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import * as vscode from 'vscode';
 import { t } from '../../src/l10n';
-import { ENGLISH_BUNDLE } from '../../src/l10nCore';
+import { ENGLISH_BUNDLE, resolvedLocale } from '../../src/l10nCore';
 import { INSIGHT_CATALOG, evaluateInsights } from '../../src/insightsEngine';
 import { insightFixtureContexts } from './fixtures/insightContexts';
 
@@ -983,7 +983,9 @@ test('insights l10n: the bundle carries no orphaned insight keys', () => {
 			// template literal whose suffix is computed (`` `insight.x.${form}` ``).
 			// Anchoring on the opening quote character keeps a key from matching a
 			// longer, unrelated key that merely starts with the same text.
-			if (source.includes(`'${candidate}`) || source.includes(`\`${candidate}`)) { return false; }
+			// Every quote style, not just the one insightsEngine.ts happens to use
+			// today — matching one silently turns a style change into false orphans.
+			if (["'", '\"', '`'].some((q) => source.includes(q + candidate))) { return false; }
 		}
 		return true;
 	});
@@ -1025,4 +1027,44 @@ test('insights l10n: the fixtures render every insight in the catalog', () => {
 	}
 	const never = INSIGHT_CATALOG.map(d => d.id).filter(id => !fired.has(id));
 	assert.deepEqual(never, [], 'add a fixture context to test/unit/fixtures/insightContexts.ts for these');
+});
+// ---------------------------------------------------------------------------
+// Locale resolution across script and region variants
+//
+// Raised in review on #2138: the native hosts (and resolveLocaleId itself) only
+// tried the full tag and its bare language, so `zh-Hans` — Simplified Chinese
+// with a script but no region — fell through to English even though a zh-cn
+// bundle ships. Matching on language + script after Intl maximization fixes the
+// whole family at once, while keeping Traditional Chinese out.
+// ---------------------------------------------------------------------------
+
+test('l10n: Simplified Chinese tags all resolve to the zh-cn bundle', () => {
+	for (const tag of ['zh', 'zh-cn', 'zh-CN', 'zh-Hans', 'zh-Hans-CN', 'zh-SG']) {
+		assert.equal(resolvedLocale(tag), 'zh-cn', `${tag} should get Simplified Chinese`);
+	}
+});
+
+test('l10n: Traditional Chinese tags never get the Simplified bundle', () => {
+	// The regression this guards is worse than showing English: Traditional
+	// readers would be served Simplified text as if it were their language.
+	for (const tag of ['zh-TW', 'zh-Hant', 'zh-Hant-TW', 'zh-HK', 'zh-MO']) {
+		assert.equal(resolvedLocale(tag), 'en', `${tag} must not get Simplified Chinese`);
+	}
+});
+
+test('l10n: unshipped and malformed tags fall back to English', () => {
+	// `constructor`/`__proto__` also cover the prototype-pollution guard: a
+	// lowercase prototype key must not read back as a shipped locale.
+	for (const tag of ['fr', 'de-DE', 'pt-BR', 'constructor', '__proto__', 'not a tag', '']) {
+		assert.equal(resolvedLocale(tag), 'en', `${tag || '(empty)'} should fall back to English`);
+	}
+});
+
+test('l10n: zh-Hans actually renders Chinese strings, not just resolves', () => {
+	mock.setLanguage('zh-Hans');
+	try {
+		assert.equal(t('nav.btnRefresh'), '刷新');
+	} finally {
+		mock.setLanguage('en');
+	}
 });

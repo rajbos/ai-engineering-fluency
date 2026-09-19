@@ -65,7 +65,15 @@ export function buildWebviewStrings() {
 function main() {
 	const content = buildWebviewStrings();
 	const check = process.argv.includes('--check');
-	const current = fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : null;
+	// Read directly and treat "missing" as an outcome of the read, rather than
+	// asking existsSync first: the check-then-read pair is a file-system race
+	// (CodeQL flagged it), and "not there" is the only failure worth tolerating.
+	let current = null;
+	try {
+		current = fs.readFileSync(outputPath, 'utf8');
+	} catch (error) {
+		if (error.code !== 'ENOENT') { throw error; }
+	}
 
 	if (check) {
 		if (current !== content) {

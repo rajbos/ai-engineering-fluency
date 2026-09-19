@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Reflection;
 
@@ -354,15 +355,50 @@ html, body {{
             return string.Empty;
         }
 
-        /// <summary>Display-language candidates, most specific first, always ending in English.</summary>
+        /// <summary>
+        /// Display-language candidates, most specific first, always ending in English.
+        /// </summary>
+        /// <remarks>
+        /// The exact-tag-then-bare-language list this replaced sent <c>zh-Hans</c> and
+        /// <c>zh-Hans-CN</c> to English even though a <c>zh-cn</c> sidecar ships, because
+        /// neither is a prefix of it (raised in review on #2138). Script decides, not
+        /// region: <c>zh-SG</c> is Simplified and should get the bundle, while
+        /// <c>zh-TW</c>, <c>zh-HK</c> and <c>zh-MO</c> are Traditional and must not —
+        /// serving Traditional readers Simplified text is worse than serving English.
+        ///
+        /// Mirrors resolveLocaleId() in vscode-extension/src/l10nCore.ts, which reaches
+        /// the same answer through Intl.Locale.maximize().
+        /// </remarks>
         private static string[] LocalizationCandidates()
         {
             var culture = CultureInfo.CurrentUICulture;
-            var full = culture.Name.ToLowerInvariant();
-            var language = culture.TwoLetterISOLanguageName.ToLowerInvariant();
-            return full == language
-                ? new[] { language, "en" }
-                : new[] { full, language, "en" };
+            var candidates = new System.Collections.Generic.List<string> { culture.Name.ToLowerInvariant() };
+            if (IsSimplifiedChinese(culture)) { candidates.Add("zh-cn"); }
+            candidates.Add("en");
+            return candidates.Distinct().ToArray();
+        }
+
+        /// <summary>
+        /// True for Chinese cultures written in Simplified script.
+        /// </summary>
+        /// <remarks>
+        /// An explicit Hans/Hant script subtag wins. With no script, the region decides:
+        /// Taiwan, Hong Kong and Macau are Traditional, everything else Simplified.
+        /// </remarks>
+        private static bool IsSimplifiedChinese(CultureInfo culture)
+        {
+            if (!string.Equals(culture.TwoLetterISOLanguageName, "zh", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            var parts = culture.Name.Split('-');
+            foreach (var part in parts)
+            {
+                if (string.Equals(part, "Hans", StringComparison.OrdinalIgnoreCase)) { return true; }
+                if (string.Equals(part, "Hant", StringComparison.OrdinalIgnoreCase)) { return false; }
+            }
+            var region = parts.Length > 1 ? parts[parts.Length - 1].ToUpperInvariant() : string.Empty;
+            return region != "TW" && region != "HK" && region != "MO";
         }
 
         private static string LocalizationFilePath(string locale)

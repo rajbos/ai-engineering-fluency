@@ -316,19 +316,49 @@ object WebviewResources {
     /**
      * The webview string dictionary for the IDE's display language, as raw JSON.
      *
-     * Tries the full language tag first (`zh-cn`), then the bare language
-     * (`zh`), then English. Returning English rather than null on a miss is
-     * deliberate: every locale file is complete — esbuild fills untranslated
-     * keys with their English text — so a partially-populated dictionary can
-     * never reach a bundle.
+     * Tries the exact tag first, then falls back to the shipped Simplified
+     * Chinese bundle for any Simplified locale, then English.
+     *
+     * The exact-tag-then-bare-language lookup this replaced sent `zh-Hans` and
+     * `zh-Hans-CN` to English even though a `zh-cn` sidecar ships, because
+     * neither is a prefix of it (raised in review on #2138). Script is what
+     * decides, not region: `zh-SG` is Simplified and should get the bundle,
+     * while `zh-TW`, `zh-HK` and `zh-MO` are Traditional and must not — serving
+     * Traditional readers Simplified text is worse than serving them English.
+     *
+     * Mirrors `resolveLocaleId()` in vscode-extension/src/l10nCore.ts, which
+     * gets the same answer via `Intl.Locale.maximize()`. The JVM has no
+     * equivalent in `java.util.Locale`, so the rule is spelled out here rather
+     * than pulling ICU onto the classpath for one comparison.
+     *
+     * Returning English on a miss is deliberate: every locale file is complete
+     * (esbuild fills untranslated keys with their English text), so a partially
+     * populated dictionary can never reach a bundle.
      */
     private fun loadWebviewLocalization(): String? {
-        val tag = java.util.Locale.getDefault().toLanguageTag().lowercase()
-        val candidates = listOf(tag, tag.substringBefore('-'), "en").distinct()
-        for (candidate in candidates) {
-            loadResource("/webview/localization.$candidate.json")?.let { return it.trim() }
+        val ideLocale = java.util.Locale.getDefault()
+        loadResource("/webview/localization.${ideLocale.toLanguageTag().lowercase()}.json")
+            ?.let { return it.trim() }
+        if (isSimplifiedChinese(ideLocale)) {
+            loadResource("/webview/localization.zh-cn.json")?.let { return it.trim() }
         }
-        return null
+        return loadResource("/webview/localization.en.json")?.trim()
+    }
+
+    /**
+     * True for Chinese locales written in Simplified script.
+     *
+     * An explicit `Hans`/`Hant` script wins. With no script, the region decides:
+     * Taiwan, Hong Kong and Macau are Traditional, everything else Simplified —
+     * which is also what `Intl.Locale.maximize()` concludes.
+     */
+    private fun isSimplifiedChinese(locale: java.util.Locale): Boolean {
+        if (!locale.language.equals("zh", ignoreCase = true)) { return false }
+        return when {
+            locale.script.equals("Hans", ignoreCase = true) -> true
+            locale.script.equals("Hant", ignoreCase = true) -> false
+            else -> locale.country.uppercase() !in setOf("TW", "HK", "MO")
+        }
     }
 
     private fun loadResource(path: String): String? =
