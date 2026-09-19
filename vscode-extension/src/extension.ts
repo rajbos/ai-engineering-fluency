@@ -2469,12 +2469,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!announcement) { return; }
 
 		const { feature, release } = announcement;
-		this.log(`📣 What's New: announcing "${feature.title}" from ${release.version}`);
+		this.log(`📣 What's New: announcing "${l10nT(feature.titleKey)}" from ${release.version}`);
 		const kindLabel = feature.kind === 'view' ? 'view' : feature.kind === 'tab' ? 'tab' : 'section';
 		const takeMeThere = l10n.t('whatsNew.takeMeThere');
 		const seeAll = l10n.t('whatsNew.seeAll');
 		const choice = await vscode.window.showInformationMessage(
-			`✨ New ${kindLabel}: ${feature.title} — ${feature.description}`,
+			`✨ New ${kindLabel}: ${l10nT(feature.titleKey)} — ${l10nT(feature.descriptionKey)}`,
 			takeMeThere,
 			seeAll,
 		);
@@ -2534,8 +2534,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	} {
 		const projectFeature = (feature: WhatsNewFeature) => ({
 			id: feature.id,
-			title: feature.title,
-			description: feature.description,
+			// Resolved here, at the render boundary: catalog.ts is pure and holds keys.
+			title: l10nT(feature.titleKey),
+			description: l10nT(feature.descriptionKey),
 			kind: feature.kind,
 			// "Not opened yet" is measured from when this build first ran, not from
 			// the dawn of time: a tab visited a year ago on an older version says
@@ -2545,7 +2546,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const projectRelease = (release: WhatsNewRelease) => ({
 			version: release.version,
 			date: release.date,
-			headline: release.headline,
+			headline: l10nT(release.headlineKey),
 			isCurrent: release.version === packageJson.version,
 			features: release.features.map(projectFeature),
 		});
