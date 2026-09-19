@@ -12,6 +12,23 @@ import {
 import { compareVersions } from '../../src/whatsNew/announcer';
 import { SWITCHABLE_TABS } from '../../src/webview/usage/switchableTabs';
 
+import { ENGLISH_BUNDLE } from '../../src/l10nCore';
+
+/**
+ * The shipped English for a catalog key.
+ *
+ * catalog.ts holds `package.nls.json` keys rather than prose — it is a pure
+ * module and cannot resolve strings itself. Asserting on the resolved text
+ * keeps these checks about editorial quality while also failing if a key has
+ * no bundle entry at all.
+ */
+function englishFor(key: string): string {
+	const value = ENGLISH_BUNDLE[key];
+	assert.ok(value !== undefined, `${key} has no package.nls.json entry`);
+	return value;
+}
+
+
 const extensionPackageJson = JSON.parse(
 	fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8'),
 ) as { version: string };
@@ -51,7 +68,10 @@ test('catalog integrity', async (t) => {
 
 	await t.test('every release carries a headline and a usable date', () => {
 		for (const release of WHATS_NEW_RELEASES) {
-			assert.ok(release.headline.trim().length > 20, `${release.version} needs a real headline`);
+			// Resolved, not raw: the catalog holds nls keys now, so this checks the
+			// shipped English is real prose *and* that the key resolves at all.
+			const headline = englishFor(release.headlineKey);
+			assert.ok(headline.trim().length > 20, `${release.version} needs a real headline`);
 			if (release.date !== null) {
 				assert.match(release.date, /^\d{4}-\d{2}-\d{2}$/, `${release.version} date must be YYYY-MM-DD`);
 			}
@@ -77,8 +97,8 @@ test('catalog integrity', async (t) => {
 	await t.test('every feature is described in prose, not changelog shorthand', () => {
 		for (const release of WHATS_NEW_RELEASES) {
 			for (const feature of release.features) {
-				assert.ok(feature.title.trim().length > 0, `${feature.id} needs a title`);
-				assert.ok(feature.description.trim().length > 40, `${feature.id} needs a real description`);
+				assert.ok(englishFor(feature.titleKey).trim().length > 0, `${feature.id} needs a title`);
+				assert.ok(englishFor(feature.descriptionKey).trim().length > 40, `${feature.id} needs a real description`);
 			}
 		}
 	});

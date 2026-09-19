@@ -8,6 +8,7 @@ import { t } from '../../src/l10n';
 import { ENGLISH_BUNDLE, resolvedLocale } from '../../src/l10nCore';
 import { INSIGHT_CATALOG, evaluateInsights } from '../../src/insightsEngine';
 import { insightFixtureContexts } from './fixtures/insightContexts';
+import { WHATS_NEW_RELEASES } from '../../src/whatsNew/catalog';
 
 const mock = (vscode as any).__mock;
 
@@ -1064,6 +1065,39 @@ test('l10n: zh-Hans actually renders Chinese strings, not just resolves', () => 
 	mock.setLanguage('zh-Hans');
 	try {
 		assert.equal(t('nav.btnRefresh'), '刷新');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+// ---------------------------------------------------------------------------
+// What's New catalog (step 5 of the localization ADR)
+//
+// catalog.ts is a pure module holding nls keys rather than prose; extension.ts
+// resolves them at the render boundary. These keys reach two surfaces — the
+// What's New view and the one-a-day toast — so an unresolved one is doubly
+// visible.
+// ---------------------------------------------------------------------------
+
+test('whats-new l10n: every catalog key resolves in English and zh-cn', () => {
+	const keys: string[] = [];
+	for (const release of WHATS_NEW_RELEASES) {
+		keys.push(release.headlineKey);
+		for (const feature of release.features) {
+			keys.push(feature.titleKey, feature.descriptionKey);
+		}
+	}
+	assert.ok(keys.length > 20, `expected the whole catalog's keys, got ${keys.length}`);
+
+	for (const key of keys) {
+		assert.notEqual(t(key), key, `${key} has no package.nls.json entry`);
+	}
+
+	mock.setLanguage('zh-cn');
+	try {
+		const untranslated = keys.filter(k => t(k) === ENGLISH_BUNDLE[k]);
+		// Release headlines and feature copy are prose; none may fall back.
+		assert.deepEqual(untranslated, [], 'these What\'s New keys fall back to English on zh-cn');
 	} finally {
 		mock.setLanguage('en');
 	}
