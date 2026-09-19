@@ -160,6 +160,24 @@ test('every raw write in the report path goes through the sanitizer', () => {
 	}
 });
 
+test('both authenticated requests are bounded by a timeout', () => {
+	// A stalled socket would otherwise leave this diagnostic waiting forever with nothing on
+	// screen — the worst possible behaviour for a script whose job is to report what the API
+	// returned. The shared module was bounded first and this mirrored copy was missed, so the
+	// assertion is on the request path rather than on one call.
+	const src = require('node:fs').readFileSync(require('node:path').join(__dirname, 'fetch-copilot-memories.js'), 'utf8');
+	assert.ok(/AbortSignal\?\.timeout === 'function'/.test(src), 'the signal must degrade where AbortSignal.timeout is absent');
+	assert.ok(/signal: typeof AbortSignal/.test(src), 'the fetch must carry a signal');
+	// Every fetch call site must carry the signal, not just some line of the file: the first
+	// version of this assertion matched the bounded code too and so proved nothing.
+	const callSites = [...src.matchAll(/fetch\(/g)].map((m) => m.index);
+	assert.ok(callSites.length > 0, 'expected at least one fetch call');
+	for (const at of callSites) {
+		const call = src.slice(at, src.indexOf('});', at));
+		assert.ok(call.includes('signal:'), `an unbounded fetch remains at offset ${at}`);
+	}
+});
+
 test('memoryUrl builds the v0 routes and adds limit only when given', () => {
 	assert.equal(
 		memoryUrl('o/n', 'enabled'),

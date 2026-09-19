@@ -69,6 +69,15 @@ const DEFAULT_LIMIT = 20;
  */
 const INTEGRATION_ID = 'copilot-developer-cli';
 
+/**
+ * How long either request may take before it is aborted.
+ *
+ * A stalled connection would otherwise leave this diagnostic waiting forever with nothing
+ * on screen — the worst possible behaviour for a script whose whole job is to tell you what
+ * the API returned. Mirrors DEFAULT_MEMORY_TIMEOUT_MS in `src/copilotServerMemories.ts`.
+ */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 function parseArgs(argv) {
 	const options = { repo: undefined, limit: DEFAULT_LIMIT, json: false };
 	for (let i = 0; i < argv.length; i++) {
@@ -256,13 +265,25 @@ function memoryUrl(repo, suffix, limit) {
  * are very different answers to "are there memories here?".
  */
 async function getJson(url, token) {
-	const response = await fetch(url, {
-		headers: {
-			Authorization: `Bearer ${token}`,
-			'Copilot-Integration-Id': INTEGRATION_ID,
-			Accept: 'application/json',
-		},
-	});
+	let response;
+	try {
+		response = await fetch(url, {
+			headers: {
+				Authorization: `Bearer ${token}`,
+				'Copilot-Integration-Id': INTEGRATION_ID,
+				Accept: 'application/json',
+			},
+			// Bounded for the same reason the shared module bounds its requests: without a
+			// signal a stalled socket hangs the process indefinitely. Degrades to no signal
+			// where AbortSignal.timeout is unavailable, so an older runtime behaves as before
+			// rather than failing outright.
+			signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(REQUEST_TIMEOUT_MS) : undefined,
+		});
+	} catch (error) {
+		// Reported rather than thrown: main() prints both routes' outcomes, and a failure on
+		// one should not hide the other.
+		return { status: 0, body: null, error: `Request failed: ${error instanceof Error ? error.message : String(error)}` };
+	}
 	if (response.status === 204) {
 		return { status: 204, body: null };
 	}
