@@ -11,7 +11,7 @@ import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage, Ca
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
-import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { applyWebviewLocale } from '../shared/webviewLocale';
 
 type UsageAnalysisPeriod = {
 	sessions: number;
@@ -76,11 +76,7 @@ const vscode = acquireVsCodeApi();
 const initialData = getWindowData<MaturityData & { localization?: Record<string, string> }>('__INITIAL_MATURITY__');
 
 // Initialize localization for webview
-if (initialData?.localization) {
-	initializeWebviewLocalization(initialData.localization);
-	const language = initialData.localization['__language__'] || 'en';
-	setCurrentLanguage(language);
-}
+applyWebviewLocale(initialData);
 
 // ── Demo mode state ─────────────────────────────────────────────────────
 

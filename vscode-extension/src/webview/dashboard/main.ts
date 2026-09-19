@@ -9,7 +9,7 @@ import styles from "./styles.css";
 import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import type { ModelUsage } from "../shared/types";
 import { registerMessageHandler } from "../shared/messageHandler";
-import { initializeWebviewLocalization, setCurrentLanguage } from "../shared/localization";
+import { applyWebviewLocale } from "../shared/webviewLocale";
 
 interface UserSummary {
   userId: string;
@@ -84,12 +84,7 @@ const initialData = getWindowData<DashboardStats & { localization?: Record<strin
 console.log("[CopilotTokenTracker] dashboard webview loaded");
 
 // Initialize localization for webview
-if (initialData?.localization) {
-	initializeWebviewLocalization(initialData.localization);
-	const language = initialData.localization['__language__'] || 'en';
-	setCurrentLanguage(language);
-	console.log("[CopilotTokenTracker] Dashboard localization initialized for language:", language);
-}
+applyWebviewLocale(initialData);
 
 /** Active backend config, set once from __DASHBOARD_CONFIG__ during bootstrap. */
 let currentConfig: DashboardConfig | null = null;

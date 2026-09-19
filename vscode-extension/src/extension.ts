@@ -9,6 +9,7 @@ import * as crypto from 'crypto';
 // Localization support (key-based resolver over package.nls*.json — see l10n.ts
 // for why vscode.l10n.t() cannot be used directly with key-based strings)
 import { t as l10nT, resolvedLocale } from './l10n';
+import { buildWebviewLocalization } from './webviewLocalization';
 const l10n = { t: l10nT };
 
 // --- JSON data files ---
@@ -2552,7 +2553,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			currentVersion: packageJson.version,
 			releases: WHATS_NEW_RELEASES.slice(0, WHATS_NEW_MAX_RELEASES).map(projectRelease),
 			backendConfigured: this.isBackendConfigured(),
-			localization: this.getWebviewLocalization(),
+			...this.getWebviewLocaleFields(),
 		};
 	}
 
@@ -5845,234 +5846,40 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Usage view strings: the Context Window section's context-pressure rows and
-	 * the Recent Sessions context-fill column with its "near context limit"
-	 * filter pill. Templates carrying {0}/{1} are resolved webview-side by
-	 * localizeFormat(), so they are passed through unformatted here.
-	 */
-	private getUsageViewLocalization(): Record<string, string> {
-		return {
-			'usage.contextPressure.compactedLabel': l10n.t('usage.contextPressure.compactedLabel'),
-			'usage.contextPressure.ofCount': l10n.t('usage.contextPressure.ofCount'),
-			'usage.contextPressure.compactedShare': l10n.t('usage.contextPressure.compactedShare'),
-			'usage.contextPressure.noneCompacted': l10n.t('usage.contextPressure.noneCompacted'),
-			'usage.contextPressure.compactedTooltip': l10n.t('usage.contextPressure.compactedTooltip'),
-			'usage.contextPressure.nearLimitLabel': l10n.t('usage.contextPressure.nearLimitLabel'),
-			'usage.contextPressure.worstFill': l10n.t('usage.contextPressure.worstFill'),
-			'usage.contextPressure.nearLimitTooltip': l10n.t('usage.contextPressure.nearLimitTooltip'),
-			'usage.sessions.contextFill.columnLabel': l10n.t('usage.sessions.contextFill.columnLabel'),
-			'usage.sessions.contextFill.nearLimitFilter': l10n.t('usage.sessions.contextFill.nearLimitFilter'),
-			'usage.sessions.contextFill.nearLimitFilterTooltip': l10n.t('usage.sessions.contextFill.nearLimitFilterTooltip'),
-			'usage.sessions.contextFill.used': l10n.t('usage.sessions.contextFill.used'),
-			'usage.sessions.contextFill.usedNearLimit': l10n.t('usage.sessions.contextFill.usedNearLimit'),
-			'usage.sessions.contextFill.noData': l10n.t('usage.sessions.contextFill.noData'),
-			// Recent Sessions — Claude Desktop local-transcript coverage banner. The three
-			// summary variants cover the singular/plural agreement of both counts.
-			'usage.claudeDesktopCoverage.summary.oneOfOne': l10n.t('usage.claudeDesktopCoverage.summary.oneOfOne'),
-			'usage.claudeDesktopCoverage.summary.singular': l10n.t('usage.claudeDesktopCoverage.summary.singular'),
-			'usage.claudeDesktopCoverage.summary.plural': l10n.t('usage.claudeDesktopCoverage.summary.plural'),
-			'usage.claudeDesktopCoverage.tooltip': l10n.t('usage.claudeDesktopCoverage.tooltip'),
-		};
-	}
-
-	/**
-	 * Log viewer summary card labels. Templates with {0}/{1} (otherCount,
-	 * contextRefsBreakdown) are resolved webview-side by localizeFormat().
-	 */
-	private getLogViewerSummaryLocalization(): Record<string, string> {
-		return {
-			'logviewer.summary.interactions': l10n.t('logviewer.summary.interactions'),
-			'logviewer.summary.editorMode': l10n.t('logviewer.summary.editorMode'),
-			'logviewer.summary.estimatedTokens': l10n.t('logviewer.summary.estimatedTokens'),
-			'logviewer.summary.actualTokens': l10n.t('logviewer.summary.actualTokens'),
-			'logviewer.summary.modelTurns': l10n.t('logviewer.summary.modelTurns'),
-			'logviewer.summary.inputTokens': l10n.t('logviewer.summary.inputTokens'),
-			'logviewer.summary.outputTokens': l10n.t('logviewer.summary.outputTokens'),
-			'logviewer.summary.cachedInput': l10n.t('logviewer.summary.cachedInput'),
-			'logviewer.summary.thinkingTokens': l10n.t('logviewer.summary.thinkingTokens'),
-			'logviewer.summary.thinkingEffort': l10n.t('logviewer.summary.thinkingEffort'),
-			'logviewer.summary.subAgents': l10n.t('logviewer.summary.subAgents'),
-			'logviewer.summary.contextTruncated': l10n.t('logviewer.summary.contextTruncated'),
-			'logviewer.summary.sessionHierarchy': l10n.t('logviewer.summary.sessionHierarchy'),
-			'logviewer.summary.toolCalls': l10n.t('logviewer.summary.toolCalls'),
-			'logviewer.summary.mcpTools': l10n.t('logviewer.summary.mcpTools'),
-			'logviewer.summary.contextRefs': l10n.t('logviewer.summary.contextRefs'),
-			'logviewer.summary.fileName': l10n.t('logviewer.summary.fileName'),
-			'logviewer.summary.editor': l10n.t('logviewer.summary.editor'),
-			'logviewer.summary.editorSource': l10n.t('logviewer.summary.editorSource'),
-			'logviewer.summary.mcpAndContextRefs': l10n.t('logviewer.summary.mcpAndContextRefs'),
-			'logviewer.summary.noModeData': l10n.t('logviewer.summary.noModeData'),
-			'logviewer.summary.noneShort': l10n.t('logviewer.summary.noneShort'),
-			'logviewer.summary.otherCount': l10n.t('logviewer.summary.otherCount'),
-			'logviewer.summary.contextRefsBreakdown': l10n.t('logviewer.summary.contextRefsBreakdown'),
-			'logviewer.summary.fileSize': l10n.t('logviewer.summary.fileSize'),
-			'logviewer.summary.modified': l10n.t('logviewer.summary.modified'),
-			'logviewer.summary.timeline': l10n.t('logviewer.summary.timeline'),
-			'logviewer.summary.started': l10n.t('logviewer.summary.started'),
-			'logviewer.summary.lastActivity': l10n.t('logviewer.summary.lastActivity'),
-		};
-	}
-
-	/**
-	 * Get localization strings for webviews based on the current VS Code language.
-	 * This provides localized button labels and other UI strings for webview panels.
+	 * The localization dictionary every webview panel receives in its payload.
+	 *
+	 * Delegates to {@link buildWebviewLocalization}, which the desktop, JetBrains
+	 * and Visual Studio hosts call too — they ship the same bundles and each has
+	 * to supply this itself. This used to be a 147-entry literal here plus six
+	 * helper methods that existed only to keep it under `max-lines-per-function`.
+	 * See docs/adr/LOCALIZATION-ARCHITECTURE.md (S2).
 	 */
 	private getWebviewLocalization(): Record<string, string> {
-		const language = vscode.env.language;
-		
-		// Return navigation button labels and other webview-localizable strings
 		return {
-			// Navigation button labels
-			'nav.btnRefresh': l10n.t('nav.btnRefresh'),
-			'nav.btnDetails': l10n.t('nav.btnDetails'),
-			'nav.btnChart': l10n.t('nav.btnChart'),
-			'nav.btnUsage': l10n.t('nav.btnUsage'),
-			'nav.btnDiagnostics': l10n.t('nav.btnDiagnostics'),
-			'nav.btnMaturity': l10n.t('nav.btnMaturity'),
-			'nav.btnDashboard': l10n.t('nav.btnDashboard'),
-			'nav.btnLevelViewer': l10n.t('nav.btnLevelViewer'),
-			'nav.btnEnvironmental': l10n.t('nav.btnEnvironmental'),
-			'nav.btnEfficiency': l10n.t('nav.btnEfficiency'),
-			// Share/export card strings (rendered into the PNG image)
-			'share.exportTitle': l10n.t('share.exportTitle'),
-			'share.exportReportLabel': l10n.t('share.exportReportLabel'),
-			...this.getUsageViewLocalization(),
-			// Efficiency view — Cost Attribution model-mix table. Templates with
-			// {0}/{1} are resolved webview-side by localizeFormat().
-			'efficiency.modelMix.heading': l10n.t('efficiency.modelMix.heading'),
-			'efficiency.modelMix.caption': l10n.t('efficiency.modelMix.caption'),
-			'efficiency.modelMix.model': l10n.t('efficiency.modelMix.model'),
-			'efficiency.modelMix.previous': l10n.t('efficiency.modelMix.previous'),
-			'efficiency.modelMix.current': l10n.t('efficiency.modelMix.current'),
-			'efficiency.modelMix.shift': l10n.t('efficiency.modelMix.shift'),
-			'efficiency.modelMix.shiftPoints': l10n.t('efficiency.modelMix.shiftPoints'),
-			'efficiency.modelMix.canonicalId': l10n.t('efficiency.modelMix.canonicalId'),
-			// Details view — collapsible "Usage by Editor" section heading tooltips
-			'details.editorSection.show': l10n.t('details.editorSection.show'),
-			'details.editorSection.hide': l10n.t('details.editorSection.hide'),
-			// Efficiency view — Value tab empty state. `prsHint` carries a {0} placeholder
-			// resolved webview-side by localizeFormat(), so it is passed through unformatted.
-			'efficiency.value.openRepositoryPrs': l10n.t('efficiency.value.openRepositoryPrs'),
-			'efficiency.value.prsHint': l10n.t('efficiency.value.prsHint'),
-			'efficiency.value.prsHintDestination': l10n.t('efficiency.value.prsHintDestination'),
-			...this.getLogViewerSummaryLocalization(),
-			...this.getMistralCloudLocalization(),
-			...this.getEfficiencyAttributionLocalization(),
-			// HydraFusion Routing section + Session Steps Overview leg toggle. Templates
-			// with {0} are resolved webview-side by localizeFormat().
-			'logviewer.hydrafusion.cost': l10n.t('logviewer.hydrafusion.cost'),
-			'logviewer.hydrafusion.costForTurn': l10n.t('logviewer.hydrafusion.costForTurn'),
-			'logviewer.hydrafusion.jumpToStepTitle': l10n.t('logviewer.hydrafusion.jumpToStepTitle'),
-			'logviewer.hydrafusion.jumpToStepLabel': l10n.t('logviewer.hydrafusion.jumpToStepLabel'),
-			'logviewer.hydrafusion.turnDetailIntro': l10n.t('logviewer.hydrafusion.turnDetailIntro'),
-			'logviewer.hydrafusion.toggleLegsAriaLabel': l10n.t('logviewer.hydrafusion.toggleLegsAriaLabel'),
-			'logviewer.hydrafusion.showLegsTitle': l10n.t('logviewer.hydrafusion.showLegsTitle'),
-			'logviewer.hydrafusion.legsCaptionTotal': l10n.t('logviewer.hydrafusion.legsCaptionTotal'),
-			'logviewer.hydrafusion.modelChangedTitle': l10n.t('logviewer.hydrafusion.modelChangedTitle'),
-			'logviewer.hydrafusion.expandStepNote': l10n.t('logviewer.hydrafusion.expandStepNote'),
-			...this.getEfficiencyModelsLocalization(),
-			...this.getMemoryFilesLocalization(),
-			// Current language for reference
-			'__language__': language
-		};
-	}
-
-	/** Usage view — Copilot Memory Files section strings. Templates with {0}/{1} are resolved webview-side by localizeFormat(). */
-	private getMemoryFilesLocalization(): Record<string, string> {
-		return {
-			'memoryFiles.sectionTitle': l10n.t('memoryFiles.sectionTitle'),
-			'memoryFiles.sectionSubtitle': l10n.t('memoryFiles.sectionSubtitle'),
-			'memoryFiles.summary': l10n.t('memoryFiles.summary'),
-			'memoryFiles.staleSummary': l10n.t('memoryFiles.staleSummary'),
-			'memoryFiles.largeSummary': l10n.t('memoryFiles.largeSummary'),
-			'memoryFiles.table.workspace': l10n.t('memoryFiles.table.workspace'),
-			'memoryFiles.table.repo': l10n.t('memoryFiles.table.repo'),
-			'memoryFiles.table.session': l10n.t('memoryFiles.table.session'),
-			'memoryFiles.table.global': l10n.t('memoryFiles.table.global'),
-			'memoryFiles.table.size': l10n.t('memoryFiles.table.size'),
-			'memoryFiles.table.stale': l10n.t('memoryFiles.table.stale'),
-			'memoryFiles.table.lastUpdated': l10n.t('memoryFiles.table.lastUpdated'),
-			'memoryFiles.unknownWorkspace': l10n.t('memoryFiles.unknownWorkspace'),
-			'memoryFiles.globalWorkspaceLabel': l10n.t('memoryFiles.globalWorkspaceLabel'),
-			'memoryFiles.renderError': l10n.t('memoryFiles.renderError'),
-		};
-	}
-
-	/** Diagnostics — Mistral Cloud (Beta) tab strings. Templates with {0}/{1} are resolved webview-side by localizeFormat(), so they are passed through unformatted here. */
-	private getMistralCloudLocalization(): Record<string, string> {
-		return {
-			'mistral.tabCaption': l10n.t('mistral.tabCaption'),
-			'mistral.tabTitle': l10n.t('mistral.tabTitle'),
-			'mistral.betaBadge': l10n.t('mistral.betaBadge'),
-			'mistral.description.intro': l10n.t('mistral.description.intro'),
-			'mistral.description.scope': l10n.t('mistral.description.scope'),
-			'mistral.description.undocumented': l10n.t('mistral.description.undocumented'),
-			'mistral.description.keyStorage': l10n.t('mistral.description.keyStorage'),
-			'mistral.status.label': l10n.t('mistral.status.label'),
-			'mistral.status.configured': l10n.t('mistral.status.configured'),
-			'mistral.status.notConfigured': l10n.t('mistral.status.notConfigured'),
-			'mistral.status.checking': l10n.t('mistral.status.checking'),
-			'mistral.status.checkFailed': l10n.t('mistral.status.checkFailed'),
-			'mistral.button.retry': l10n.t('mistral.button.retry'),
-			'mistral.summary.conversations': l10n.t('mistral.summary.conversations'),
-			'mistral.summary.ofCount': l10n.t('mistral.summary.ofCount'),
-			'mistral.summary.atLeastCount': l10n.t('mistral.summary.atLeastCount'),
-			'mistral.summary.lastFetched': l10n.t('mistral.summary.lastFetched'),
-			'mistral.error.label': l10n.t('mistral.error.label'),
-			'mistral.button.refresh': l10n.t('mistral.button.refresh'),
-			'mistral.button.removeApiKey': l10n.t('mistral.button.removeApiKey'),
-			'mistral.button.connectApiKey': l10n.t('mistral.button.connectApiKey'),
-			'mistral.table.id': l10n.t('mistral.table.id'),
-			'mistral.table.name': l10n.t('mistral.table.name'),
-			'mistral.table.agentId': l10n.t('mistral.table.agentId'),
-			'mistral.table.version': l10n.t('mistral.table.version'),
-			'mistral.table.created': l10n.t('mistral.table.created'),
-			'mistral.table.updated': l10n.t('mistral.table.updated'),
-			'mistral.table.description': l10n.t('mistral.table.description'),
-			'mistral.table.untitled': l10n.t('mistral.table.untitled'),
+			...buildWebviewLocalization(l10nT),
+			// Kept for the JetBrains and Visual Studio hosts, which receive the
+			// dictionary as a prebuilt JSON sidecar and so have nowhere else to put
+			// the language. The `language` field below always wins where it exists.
+			'__language__': resolvedLocale(vscode.env.language),
 		};
 	}
 
 	/**
-	 * Models-tab strings for the Efficiency view. Kept in its own method so
-	 * `getWebviewLocalization` stays inside the function-size ceiling. Templates
-	 * with {0}..{3} are resolved webview-side by `localizeFormat()`, so they pass
-	 * through unformatted here.
+	 * The locale-related fields every webview payload carries.
+	 *
+	 * Two, not one, because they answer different questions: `language` decides
+	 * *which strings*, `locale` decides *how numbers and dates are written*. A
+	 * German developer on an English VS Code wants `1.234,56` with English UI,
+	 * so collapsing them would be a regression. See
+	 * docs/adr/LOCALIZATION-ARCHITECTURE.md (S4).
+	 *
+	 * `language` is the resolved locale, not the raw display language, so English
+	 * text is never labelled `lang="fr"` on a locale we ship no bundle for.
 	 */
-	private getEfficiencyModelsLocalization(): { [key: string]: string } {
+	private getWebviewLocaleFields(): { localization: Record<string, string>; language: string } {
 		return {
-			'efficiency.models.noPairInWindow': l10n.t('efficiency.models.noPairInWindow'),
-			'efficiency.models.noModelsInWindow': l10n.t('efficiency.models.noModelsInWindow'),
-			'efficiency.models.noSharedModel': l10n.t('efficiency.models.noSharedModel'),
-			'efficiency.models.noSecondModel': l10n.t('efficiency.models.noSecondModel'),
-			'efficiency.models.controls.mode': l10n.t('efficiency.models.controls.mode'),
-			'efficiency.models.controls.modelA': l10n.t('efficiency.models.controls.modelA'),
-			'efficiency.models.controls.modelB': l10n.t('efficiency.models.controls.modelB'),
-			'efficiency.models.controls.model': l10n.t('efficiency.models.controls.model'),
-			'efficiency.models.controls.baseline': l10n.t('efficiency.models.controls.baseline'),
-			'efficiency.models.controls.comparedWith': l10n.t('efficiency.models.controls.comparedWith'),
-			'efficiency.models.controls.window': l10n.t('efficiency.models.controls.window'),
-			'efficiency.models.mode.models': l10n.t('efficiency.models.mode.models'),
-			'efficiency.models.mode.periods': l10n.t('efficiency.models.mode.periods'),
-		};
-	}
-
-	/**
-	 * Cost Attribution labels for the Efficiency webview, kept out of the
-	 * {@link getWebviewLocalization} literal to hold that method under the
-	 * `max-lines-per-function` ceiling. Templates with {0}/{1}/{2} are resolved
-	 * webview-side by `localizeFormat()`, so they are passed through unformatted.
-	 */
-	private getEfficiencyAttributionLocalization(): Record<string, string> {
-		return {
-			'efficiency.attribution.costEffect': l10n.t('efficiency.attribution.costEffect'),
-			'efficiency.attribution.costEffectLine': l10n.t('efficiency.attribution.costEffectLine'),
-			'efficiency.attribution.change': l10n.t('efficiency.attribution.change'),
-			'efficiency.attribution.periodSub': l10n.t('efficiency.attribution.periodSub'),
-			'efficiency.attribution.blendedRate': l10n.t('efficiency.attribution.blendedRate'),
-			'efficiency.attribution.tooltip.volume': l10n.t('efficiency.attribution.tooltip.volume'),
-			'efficiency.attribution.tooltip.size': l10n.t('efficiency.attribution.tooltip.size'),
-			'efficiency.attribution.tooltip.mix': l10n.t('efficiency.attribution.tooltip.mix'),
+			localization: this.getWebviewLocalization(),
+			language: resolvedLocale(vscode.env.language),
 		};
 	}
 
@@ -9945,7 +9752,7 @@ private computeFallbackDailyRollup(
 			...stats,
 			backendConfigured: this.isBackendConfigured(),
 			compactNumbers: this.getCompactNumbersSetting(),
-			localization: this.getWebviewLocalization(),
+			...this.getWebviewLocaleFields(),
 		};
 		const initialData = JSON.stringify(dataWithBackend).replace(/</g, '\\u003c');
 
@@ -10966,7 +10773,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const nonce = getNonce();
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'logviewer.js'));
 
-		const initialData = JSON.stringify({ ...logData, focusedTurnNumber, compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }).replace(/</g, '\\u003c');
+		const initialData = JSON.stringify({ ...logData, focusedTurnNumber, compactNumbers: this.getCompactNumbersSetting(), ...this.getWebviewLocaleFields() }).replace(/</g, '\\u003c');
 
 		return `<!DOCTYPE html>
 		<html lang="${webviewDocumentLanguage(vscode.env.language)}">
@@ -11595,7 +11402,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const dataWithBackend = {
       ...data,
       backendConfigured: this.isBackendConfigured(),
-      localization: this.getWebviewLocalization(),
+      ...this.getWebviewLocaleFields(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -11663,7 +11470,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const dataWithBackend = {
       ...data,
       backendConfigured: this.isBackendConfigured(),
-      localization: this.getWebviewLocalization(),
+      ...this.getWebviewLocaleFields(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -12254,7 +12061,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		);
 		const dataWithLocalization = {
 			...data,
-			localization: this.getWebviewLocalization(),
+			...this.getWebviewLocaleFields(),
 		};
 		const initialData = JSON.stringify(dataWithLocalization).replace(/</g, '\\u003c');
 		return `<!DOCTYPE html>
@@ -12760,7 +12567,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const backendConfig = this.getDashboardBackendConfig();
 
     const dataWithBackend = data
-      ? { ...data, backendConfigured: this.isBackendConfigured(), compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }
+      ? { ...data, backendConfigured: this.isBackendConfigured(), compactNumbers: this.getCompactNumbersSetting(), ...this.getWebviewLocaleFields() }
       : undefined;
     const initialDataScript = dataWithBackend
       ? `<script nonce="${nonce}">window.__INITIAL_DASHBOARD__ = ${JSON.stringify(dataWithBackend).replace(/</g, "\\u003c")};</script>`
@@ -12921,7 +12728,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       sortSettings,
       compactNumbers: this.getCompactNumbersSetting(),
       copilotPlan: this._copilotPlanResolved,
-      localization: this.getWebviewLocalization(),
+      ...this.getWebviewLocaleFields(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -15503,7 +15310,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
       skillDescriptions: this._buildSkillDescriptions(),
       toolFamilies: getToolFamilies(),
-      localization: this.getWebviewLocalization(),
+      ...this.getWebviewLocaleFields(),
     }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
@@ -15599,7 +15406,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       initialMetric: this.lastChartMetric, 
       initialSplit: this.normalizeLegacyChartPreference(this.lastChartSplit, ['total', 'model', 'editor', 'repository', 'language', 'provider', 'task']) ?? 'total', 
       monthlyBudget: this.getEffectiveMonthlyBudget(),
-      localization: this.getWebviewLocalization()
+      ...this.getWebviewLocaleFields()
     };
 
     const initialData = JSON.stringify(chartData).replace(/</g, "\\u003c");
@@ -15678,7 +15485,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       copilotApiBalance: this._buildCopilotApiBalance(),
       monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
       worktreeScanRoots: this.buildInitialWorktreeRoots(),
-      localization: this.getWebviewLocalization(),
+      ...this.getWebviewLocaleFields(),
       worktreeBackgroundScan: this.context.globalState.get<WorktreeBackgroundScanResult>(CopilotTokenTracker.WORKTREE_BG_SCAN_RESULT_KEY) ?? null,
     }).replace(/</g, "\\u003c");
   }

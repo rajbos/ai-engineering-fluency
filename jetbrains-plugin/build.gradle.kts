@@ -135,6 +135,11 @@ val prepareBundledAssets by tasks.registering(Copy::class) {
         include(
             "details.js", "chart.js", "usage.js", "diagnostics.js", "environmental.js", "maturity.js",
             "fluency-level-viewer.js",
+            // Resolved webview string dictionaries, one per shipped locale. The bundles
+            // only localize themselves if the host puts one in the panel payload, and
+            // this plugin is Kotlin so it cannot build one from package.nls*.json itself.
+            // esbuild writes these next to the bundles for exactly this reason.
+            "localization.en.json", "localization.zh-cn.json",
         )
         into("webview")
     }
