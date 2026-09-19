@@ -286,7 +286,9 @@ async function main() {
 	// malformed value (extra segments, a query, a fragment) would steer the authenticated
 	// request somewhere other than the repository it names.
 	if (options.repo !== undefined && !isValidRepoSlug(options.repo)) {
-		throw new Error(`--repo must be owner/name, got: ${options.repo}`);
+		// Deliberately does not echo the value: a rejected slug is untrusted input that may
+		// carry a credential, and this script promises above never to print one.
+		throw new Error('--repo must be owner/name.');
 	}
 	const repo = options.repo ?? resolveRepoFromGit();
 	const token = readToken();

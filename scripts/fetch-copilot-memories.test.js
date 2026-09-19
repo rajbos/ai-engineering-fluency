@@ -95,6 +95,18 @@ test('isValidRepoSlug gates the --repo value the same way a remote is gated', ()
 	assert.equal(isValidRepoSlug('owner/..'), false);
 });
 
+test('a rejected --repo value is never echoed back', () => {
+	// Validating the value and then printing it would leak exactly the credential the
+	// rejection just refused to send — the same mistake redactRemoteUrl() exists to prevent
+	// for remotes, one step further along.
+	const { parseArgs: _parseArgs } = require('./fetch-copilot-memories.js');
+	assert.ok(_parseArgs);
+	const src = require('node:fs').readFileSync(require('node:path').join(__dirname, 'fetch-copilot-memories.js'), 'utf8');
+	const thrown = /--repo must be owner\/name\.'\)/.test(src);
+	assert.ok(thrown, 'the --repo rejection must use a generic message');
+	assert.ok(!/--repo must be owner\/name, got/.test(src), 'the rejection must not interpolate the value');
+});
+
 test('memoryUrl builds the v0 routes and adds limit only when given', () => {
 	assert.equal(
 		memoryUrl('o/n', 'enabled'),

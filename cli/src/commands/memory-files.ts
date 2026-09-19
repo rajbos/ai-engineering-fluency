@@ -21,6 +21,7 @@ import {
 	parseRepoFromRemoteUrl,
 	renderPromotionMarkdown,
 	isValidRepoSlug,
+	INVALID_REPO_LABEL,
 	DEFAULT_MEMORY_LIMIT,
 } from '../../../src/copilotServerMemories';
 import type { MemoryFilesAnalysis, ServerMemoriesAnalysis } from '../../../src/types';
@@ -150,7 +151,9 @@ async function buildServerMemoriesAnalysis(cwd: string, repoOverride: string | u
 	// builder. fetchRepoMemories() rejects an invalid slug too; failing here as well turns a
 	// typo into an immediate, specific message instead of a generic read failure.
 	if (repoOverride !== undefined && !isValidRepoSlug(repoOverride)) {
-		return { repo, enabled: undefined, error: `--repo must be owner/name, got: ${repoOverride}`,
+		// The rejected value is untrusted and may carry a credential, so neither the label nor
+		// the message echoes it — `--json` serializes both.
+		return { repo: INVALID_REPO_LABEL, enabled: undefined, error: '--repo must be owner/name.',
 			totalMemories: 0, distinctSubjects: 0, documentedCount: 0, promotionCandidateCount: 0,
 			repeatedGroupCount: 0, promotionGroups: [], staleCitations: [], fullyStaleCount: 0,
 			byAgent: {}, byModel: {} };

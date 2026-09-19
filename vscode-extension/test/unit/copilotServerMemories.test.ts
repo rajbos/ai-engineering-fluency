@@ -14,6 +14,8 @@ import {
 	MEMORY_INTEGRATION_ID,
 	isSafeRepoRelativePath,
 	isValidRepoSlug,
+	safeRepoLabel,
+	INVALID_REPO_LABEL,
 } from '../../../src/copilotServerMemories';
 import { decideServerMemoriesRefresh } from '../../src/extension';
 import type { ServerMemory } from '../../../src/types';
@@ -546,6 +548,17 @@ test('fetchRepoMemories refuses a slug it has not vetted', async () => {
 	});
 	assert.equal(called, false, 'no request may be issued for an unvetted slug');
 	assert.match(result.error ?? '', /valid owner\/name/);
+	// The rejected value must not survive into anything printable. Validating it and then
+	// echoing it back would leak exactly the credential the rejection just refused to send.
+	assert.ok(!result.error?.includes('secret'), `error echoed the rejected slug: ${result.error}`);
+	assert.ok(!result.repo.includes('secret'), `repo label echoed the rejected slug: ${result.repo}`);
+	assert.equal(result.repo, INVALID_REPO_LABEL);
+});
+
+test('safeRepoLabel passes a valid slug through and masks anything else', () => {
+	assert.equal(safeRepoLabel('rajbos/ai-engineering-fluency'), 'rajbos/ai-engineering-fluency');
+	assert.equal(safeRepoLabel('owner/repo?token=secret'), INVALID_REPO_LABEL);
+	assert.equal(safeRepoLabel(''), INVALID_REPO_LABEL);
 });
 
 test('isValidRepoSlug accepts owner/name and nothing else', () => {

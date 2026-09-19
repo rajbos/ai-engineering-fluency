@@ -220,6 +220,21 @@ function isValidRepoSegment(segment: string): boolean {
  * in {@link fetchRepoMemories}, means no caller can skip the check by taking a different
  * route to the same request.
  */
+export const INVALID_REPO_LABEL = '<invalid repository>';
+
+/**
+ * A repository label safe to print. Returns the slug when it is well formed, and a fixed
+ * placeholder otherwise.
+ *
+ * A rejected `--repo` value is untrusted input that may itself carry a credential
+ * (`owner/repo?token=secret`), so echoing it back in an error would leak exactly what the
+ * validation just refused to send — the same mistake `redactRemoteUrl()` exists to prevent
+ * for git remotes, one step further along.
+ */
+export function safeRepoLabel(slug: string): string {
+	return isValidRepoSlug(slug) ? slug : INVALID_REPO_LABEL;
+}
+
 export function isValidRepoSlug(slug: string): boolean {
 	const segments = slug.split('/');
 	return segments.length === 2 && segments.every(isValidRepoSegment);
@@ -256,7 +271,9 @@ export async function fetchRepoMemories(
 	// Refuse to build a URL from a slug we have not vetted. A remote-derived slug is already
 	// validated, but `--repo` is not a remote — this is the one place every path converges.
 	if (!isValidRepoSlug(repo)) {
-		return { repo, enabled: undefined, memories: [], error: `Not a valid owner/name repository: ${repo}` };
+		// Neither the label nor the message may carry the rejected value: a caller that prints
+		// this result would otherwise surface the credential the request was blocked over.
+		return { repo: INVALID_REPO_LABEL, enabled: undefined, memories: [], error: 'Not a valid owner/name repository.' };
 	}
 
 	let token: string;
