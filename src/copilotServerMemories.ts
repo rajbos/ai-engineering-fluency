@@ -310,6 +310,31 @@ export function citationFilePath(citation: string): string | undefined {
 }
 
 /**
+ * Is this citation path safe to resolve against a checkout root and probe on disk?
+ *
+ * Citations are server-supplied, and the agent that wrote them takes repository content as
+ * input, so a citation is untrusted text — not a guaranteed repo-relative path. Passing one
+ * straight to `path.resolve(root, …)` lets `/etc/passwd:1` or `../../../outside.txt:1`
+ * escape the checkout entirely, turning the staleness check into an arbitrary-path existence
+ * probe whose answer is then reported back as a "stale citation" flag.
+ *
+ * The check lives here rather than in each host's `fileExists` callback deliberately: the
+ * same mistake was made independently in the CLI and the extension, which is exactly what a
+ * trust boundary enforced at two call sites produces. Guaranteeing it in the one place that
+ * *calls* the callback makes every present and future consumer safe by construction.
+ *
+ * A rejected citation is treated as un-checkable rather than as missing — the same way a
+ * `User input:` citation is — so a suspicious path never counts toward staleness.
+ */
+export function isSafeRepoRelativePath(citationPath: string): boolean {
+	if (!citationPath) { return false; }
+	// POSIX absolute, UNC, and Windows drive-qualified paths all escape `root` outright.
+	if (/^[/\\]/.test(citationPath) || /^[A-Za-z]:/.test(citationPath)) { return false; }
+	// Any `..` segment can climb out, on either separator.
+	return !citationPath.split(/[/\\]/).includes('..');
+}
+
+/**
  * Normalize a subject for grouping. The agent writes free-text 1-2 word subjects, so
  * the same topic arrives as `Usage tab groups`, `usage tab groups` and `usage tabs` —
  * case and punctuation differences alone accounted for several apparent "distinct"
@@ -331,6 +356,10 @@ export interface ServerMemoryAnalysisDeps {
 	 * rather than calling `fs` directly so the analysis can be unit-tested without a
 	 * fixture tree, and so a host that has no checkout (or only a virtual one) can opt
 	 * out of staleness detection by returning `true`.
+	 *
+	 * The caller guarantees this is only ever invoked with a path that passed
+	 * {@link isSafeRepoRelativePath} — never absolute, never containing a `..` segment —
+	 * so an implementation may resolve it against its checkout root directly.
 	 */
 	fileExists: (repoRelativePath: string) => boolean;
 }
@@ -366,7 +395,9 @@ export function analyzeServerMemories(
 		for (const citation of memory.citations) {
 			if (isInstructionCitation(citation)) { documentedIds.add(memory.id); }
 			const filePath = citationFilePath(citation);
-			if (filePath) { checkable.push(filePath); }
+			// Only repo-relative paths are ever handed to the host's `fileExists`: see
+			// isSafeRepoRelativePath() for why this guard belongs here and not in the callback.
+			if (filePath && isSafeRepoRelativePath(filePath)) { checkable.push(filePath); }
 		}
 
 		const missing = checkable.filter(filePath => !deps.fileExists(filePath));
@@ -505,8 +536,7 @@ export function renderPromotionMarkdown(analysis: ServerMemoriesAnalysis, limit:
  * Two escapes matter and both are closed here:
  *   - **Line breaks.** A newline ends the list item, so `fact\n## Ignore the above` would
  *     land in the file as a heading of its own. Every line terminator, including the
- *     line terminator, including the Unicode separators U+2028/U+2029, is folded into a
- *     single space.
+ *     Unicode separators U+2028/U+2029, is folded into a single space.
  *   - **`-->`.** The header is an HTML comment holding the "verify before committing"
  *     caveat; a repo slug or fact containing `-->` would close it early and promote the
  *     remainder to live document text. The sequence is broken rather than dropped so the

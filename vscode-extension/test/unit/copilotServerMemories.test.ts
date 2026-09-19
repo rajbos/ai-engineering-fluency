@@ -12,6 +12,7 @@ import {
 	renderPromotionMarkdown,
 	VIEW_PROMOTION_GROUP_LIMIT,
 	MEMORY_INTEGRATION_ID,
+	isSafeRepoRelativePath,
 } from '../../../src/copilotServerMemories';
 import { decideServerMemoriesRefresh } from '../../src/extension';
 import type { ServerMemory } from '../../../src/types';
@@ -344,6 +345,44 @@ test('analyzeServerMemories flags missing citation paths and marks fully-stale m
 	assert.deepEqual(analysis.staleCitations.map(c => c.id), ['partial', 'gone']);
 	assert.equal(analysis.staleCitations[0].fullyStale, false);
 	assert.equal(analysis.staleCitations[1].fullyStale, true);
+	assert.equal(analysis.fullyStaleCount, 1);
+});
+
+test('isSafeRepoRelativePath rejects anything that could escape the checkout', () => {
+	assert.equal(isSafeRepoRelativePath('src/a.ts'), true);
+	assert.equal(isSafeRepoRelativePath('vscode-extension/src/deep/a.ts'), true);
+	// Absolute, UNC and drive-qualified paths all resolve outside `root` outright.
+	assert.equal(isSafeRepoRelativePath('/etc/passwd'), false);
+	assert.equal(isSafeRepoRelativePath('\\\\server\\share\\x'), false);
+	assert.equal(isSafeRepoRelativePath('C:/Windows/System32/config/SAM'), false);
+	// A `..` segment climbs out, on either separator.
+	assert.equal(isSafeRepoRelativePath('../../outside.txt'), false);
+	assert.equal(isSafeRepoRelativePath('src/../../outside.txt'), false);
+	assert.equal(isSafeRepoRelativePath('src\\..\\..\\outside.txt'), false);
+	assert.equal(isSafeRepoRelativePath(''), false);
+	// A directory merely *starting* with dots is an ordinary path.
+	assert.equal(isSafeRepoRelativePath('.github/workflows/ci.yml'), true);
+	assert.equal(isSafeRepoRelativePath('src/..hidden/a.ts'), true);
+});
+
+test('analyzeServerMemories never probes a citation path that escapes the checkout', () => {
+	// A citation is server-supplied text, and the agent that wrote it takes repository
+	// content as input. Resolving one against the checkout root unchecked turns the
+	// staleness check into an arbitrary-path existence probe whose answer is reported back.
+	const probed: string[] = [];
+	const analysis = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [
+			memory({ id: 'hostile', subject: 'a', citations: ['/etc/passwd:1', '../../outside.txt:2', 'C:/Windows/win.ini:3'] }),
+			memory({ id: 'ok', subject: 'b', citations: ['src/real.ts:1'] }),
+		],
+	}, { fileExists: (p) => { probed.push(p); return false; } });
+
+	assert.deepEqual(probed, ['src/real.ts'], `unsafe paths were probed: ${probed.join(', ')}`);
+	// The hostile memory has nothing checkable, so it is neither stale nor fully stale —
+	// an unverifiable citation must not be reported as a missing file.
+	assert.deepEqual(analysis.staleCitations.map(c => c.id), ['ok']);
 	assert.equal(analysis.fullyStaleCount, 1);
 });
 
