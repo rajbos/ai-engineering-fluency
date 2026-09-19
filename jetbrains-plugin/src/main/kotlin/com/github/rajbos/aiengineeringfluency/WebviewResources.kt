@@ -35,6 +35,28 @@ object WebviewResources {
             ?.replace("</", "<\\/")
             ?: "undefined"
 
+        // The webview bundles localize themselves from `initialData.localization`.
+        // Only the VS Code extension used to supply that, so this plugin — which
+        // redistributes the very same bundles — rendered their built-in English
+        // fallback no matter what language the IDE was running in. The dictionary
+        // is staged next to the bundles by esbuild (see the localization sidecar
+        // block in vscode-extension/esbuild.js); we pick the one matching the IDE
+        // locale and complete the payload rather than rebuilding it in Kotlin.
+        //
+        // Written as a guarded assignment instead of being merged into the JSON so
+        // it is a no-op when there is no initial payload yet, rather than creating
+        // an empty object the bundle would mistake for real data.
+        val localizationScript = loadWebviewLocalization()
+            ?.let { dictionary ->
+                """
+                (function () {
+                    var data = window.$globalKey;
+                    if (data && typeof data === 'object') { data.localization = ${dictionary.replace("</", "<\\/")}; }
+                })();
+                """.trimIndent()
+            }
+            ?: "/* webview localization dictionary missing from plugin resources */"
+
         // Bridge bootstrap:
         //   * defines window.chrome.webview.postMessage(...) which forwards
         //     to the JBCefJSQuery via the inject() snippet
@@ -171,6 +193,7 @@ object WebviewResources {
                 <script>$bridgeBootstrap</script>
                 <script>$shim</script>
                 <script>window.$globalKey = $safeInitialData;</script>
+                <script>$localizationScript</script>
             </head>
             <body>
                 <div id="loading-overlay">
@@ -288,6 +311,24 @@ object WebviewResources {
         "maturity" -> "__INITIAL_MATURITY__"
         "fluency-level-viewer" -> "__INITIAL_FLUENCY_LEVEL_DATA__"
         else -> "__INITIAL_DETAILS__"
+    }
+
+    /**
+     * The webview string dictionary for the IDE's display language, as raw JSON.
+     *
+     * Tries the full language tag first (`zh-cn`), then the bare language
+     * (`zh`), then English. Returning English rather than null on a miss is
+     * deliberate: every locale file is complete — esbuild fills untranslated
+     * keys with their English text — so a partially-populated dictionary can
+     * never reach a bundle.
+     */
+    private fun loadWebviewLocalization(): String? {
+        val tag = java.util.Locale.getDefault().toLanguageTag().lowercase()
+        val candidates = listOf(tag, tag.substringBefore('-'), "en").distinct()
+        for (candidate in candidates) {
+            loadResource("/webview/localization.$candidate.json")?.let { return it.trim() }
+        }
+        return null
     }
 
     private fun loadResource(path: String): String? =
