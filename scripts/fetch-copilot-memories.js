@@ -89,18 +89,69 @@ function parseArgs(argv) {
 	return options;
 }
 
+/** Hosts whose remotes name a repository on GitHub.com. */
+const GITHUB_HOSTS = new Set(['github.com', 'www.github.com', 'ssh.github.com']);
+
 /**
- * Resolve `owner/name` from the `origin` remote. Handles both SSH
- * (`git@github.com:owner/name.git`) and HTTPS (`https://github.com/owner/name`)
- * remote spellings, since this repo's checkouts use both.
+ * Replace any `user:password@` userinfo in a remote URL with `***@`.
+ *
+ * A git remote can carry an embedded credential (`https://user:token@host/owner/repo`), and
+ * this script promises above that it never prints one. An error message quoting the remote
+ * verbatim would break that promise for the one remote shape most likely to be misconfigured,
+ * so the URL is redacted before it is ever shown. Falls back to dropping the whole URL if it
+ * cannot be parsed, since an unparseable string cannot be redacted with confidence.
+ */
+function redactRemoteUrl(remoteUrl) {
+	const scpMatch = /^([^@/]+)@([^/:]+):(.+)$/.exec(remoteUrl);
+	if (scpMatch) {
+		// scp-style (`user@host:path`) carries a username but never a password.
+		return `***@${scpMatch[2]}:${scpMatch[3]}`;
+	}
+	try {
+		const url = new URL(remoteUrl);
+		if (!url.username && !url.password) { return remoteUrl; }
+		url.username = '***';
+		url.password = '';
+		return url.toString();
+	} catch {
+		return '<unparseable remote URL>';
+	}
+}
+
+/**
+ * Resolve `owner/name` from the `origin` remote, accepting the scp-style SSH
+ * (`git@github.com:owner/name.git`), `ssh://` and HTTPS
+ * (`https://github.com/owner/name`) spellings.
+ *
+ * The host is matched exactly rather than found as a substring: `https://notgithub.com/o/r`
+ * contains "github.com/o/r", and accepting it would send this script's token to the Copilot
+ * API asking about an unrelated repository. Mirrors `parseRepoFromRemoteUrl()` in
+ * `src/copilotServerMemories.ts` — kept as its own copy because this probe is a dependency-free
+ * CommonJS script that deliberately does not need the TypeScript build.
  */
 function resolveRepoFromGit() {
 	const url = execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim();
-	const match = /github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/.exec(url);
-	if (!match) {
-		throw new Error(`Could not parse owner/repo from origin remote: ${url}`);
+	const scpMatch = /^(?:[^@/]+@)?([^/:]+):(?!\/)(.+)$/.exec(url);
+	let host = '';
+	let repoPath = '';
+	if (scpMatch) {
+		host = scpMatch[1];
+		repoPath = scpMatch[2];
+	} else {
+		try {
+			const parsed = new URL(url);
+			host = parsed.hostname;
+			repoPath = parsed.pathname;
+		} catch {
+			// Leave both empty; the shared failure below reports it with the URL redacted.
+		}
 	}
-	return `${match[1]}/${match[2]}`;
+
+	const segments = repoPath.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/i, '').split('/');
+	if (!GITHUB_HOSTS.has(host.toLowerCase()) || segments.length !== 2 || !segments[0] || !segments[1]) {
+		throw new Error(`Could not parse a GitHub owner/repo from the origin remote: ${redactRemoteUrl(url)}`);
+	}
+	return `${segments[0]}/${segments[1]}`;
 }
 
 /** Read the GitHub token from the `gh` CLI. The value is returned for header use only. */
@@ -214,7 +265,13 @@ async function main() {
 	}
 }
 
-main().catch((error) => {
-	process.stderr.write(`${error.message}\n`);
-	process.exitCode = 1;
-});
+// Only run when invoked directly. Without this guard, merely requiring the file — which a
+// test doing so to reach the helpers below would — performs a live authenticated request.
+if (require.main === module) {
+	main().catch((error) => {
+		process.stderr.write(`${error.message}\n`);
+		process.exitCode = 1;
+	});
+}
+
+module.exports = { redactRemoteUrl, resolveRepoFromGit, memoryUrl, parseArgs };
