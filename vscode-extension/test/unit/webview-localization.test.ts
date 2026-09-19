@@ -7,6 +7,8 @@ import {
 	webviewLocalizationKeys,
 } from '../../src/webview/shared/localization';
 import { ENGLISH_BUNDLE } from '../../src/l10nCore';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 
 // The webview gets its strings as a flat payload from the extension host, so
 // these helpers are the last hop before a label reaches the DOM. Everything
@@ -112,6 +114,34 @@ test('localize: the model-mix table defaults are present without any payload', (
 // from the bundle rather than hand-written, these become unnecessary.
 // ---------------------------------------------------------------------------
 
+/**
+ * Every localization key the webview bundles request with a literal argument,
+ * mapped to the file that requests it.
+ *
+ * Read from source rather than from the built bundles: the point is to fail in
+ * the PR that introduces a bad key, not after a build. Keys built dynamically
+ * (a computed `localize(someVar)`) are out of reach here by construction — the
+ * same boundary the hardcoded-string ratchet has.
+ */
+function requestedWebviewKeys(): Map<string, string> {
+	// Tests run compiled out of `out/`, so __dirname is not next to the source.
+	const webviewRoot = join(__dirname, '../../../../src/webview');
+	const found = new Map<string, string>();
+	const walk = (dir: string): void => {
+		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+			const full = join(dir, entry.name);
+			if (entry.isDirectory()) { walk(full); continue; }
+			if (!entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) { continue; }
+			const text = readFileSync(full, 'utf8');
+			for (const m of text.matchAll(/\blocalize(?:Format)?\(\s*'([^']+)'/g)) {
+				if (!found.has(m[1])) { found.set(m[1], relative(webviewRoot, full).split(sep).join('/')); }
+			}
+		}
+	};
+	walk(webviewRoot);
+	return found;
+}
+
 /** The fallback English text, read through the same path the webview uses. */
 function fallbackValue(key: string): string {
 	// An empty payload leaves `currentLocalization` at DEFAULT_LOCALIZATION, so
@@ -141,4 +171,28 @@ test('webview fallback: the key set is non-trivial', () => {
 	// Guards the two tests above against silently passing if the parsing below
 	// ever stops finding keys (e.g. the interface is reformatted).
 	assert.ok(webviewLocalizationKeys().length > 100, `expected the full webview key set, got ${webviewLocalizationKeys().length}`);
+});
+
+test('webview fallback: every key the webview asks for has a fallback entry', () => {
+	// The other direction, and the one that actually reaches users. The tests
+	// above check that what the fallback *declares* matches the bundle; this
+	// checks that what the webview *requests* is declared at all.
+	//
+	// A key with no fallback entry renders as the raw key on any host that does
+	// not send the payload dictionary — which today is three of the four hosts
+	// shipping these bundles (desktop, JetBrains, Visual Studio). On VS Code the
+	// host dictionary covers it, so the bug would be invisible in development
+	// and visible only in the products nobody runs locally.
+	const declared = new Set(webviewLocalizationKeys());
+	const missing: string[] = [];
+	for (const [key, file] of requestedWebviewKeys()) {
+		if (!declared.has(key)) { missing.push(`${key} (${file})`); }
+	}
+	assert.deepEqual(missing, [], 'these keys are requested by webview code but have no English fallback');
+});
+
+test('webview fallback: the requested-key scan finds a realistic number of call sites', () => {
+	// Same guard as above: if the scan silently stops matching, the test above
+	// passes vacuously.
+	assert.ok(requestedWebviewKeys().size > 50, `expected the webview's localize() call sites, got ${requestedWebviewKeys().size}`);
 });

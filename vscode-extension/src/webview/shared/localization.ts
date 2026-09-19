@@ -357,10 +357,6 @@ export function initializeWebviewLocalization(localization: Partial<WebviewLocal
 }
 
 /**
- * Get a localized string for the webview.
- * Falls back to the default English string if not found.
- */
-/**
  * The keys this module ships a built-in English fallback for.
  *
  * Exported so the fallback can be checked against `package.nls.json` — the two
@@ -373,6 +369,10 @@ export function webviewLocalizationKeys(): string[] {
 	return Object.keys(DEFAULT_LOCALIZATION);
 }
 
+/**
+ * Get a localized string for the webview.
+ * Falls back to the default English string if not found.
+ */
 export function localize(key: string): string {
 	return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
 }
