@@ -609,6 +609,45 @@ test('renderPromotionMarkdown notes repeats and says so when there is nothing to
 // API that cannot be exercised offline, and it regresses silently.
 // ---------------------------------------------------------------------------
 
+test('an in-flight fetch cannot publish across a cache invalidation', () => {
+	// Signing out or switching account leaves the setting, repository and root all identical,
+	// so the identity checks cannot see it. Only a generation captured at fetch start and
+	// re-checked at publish time stops a response fetched under the previous token from
+	// landing in the new session's view. Same idea as the _cacheGeneration guard used for the
+	// other computed-stat caches.
+	const fs = require('node:fs') as typeof import('node:fs');
+	const path = require('node:path') as typeof import('node:path');
+	const extensionSrc = fs.readFileSync(path.join(__dirname, '../../../../src/extension.ts'), 'utf8');
+
+	// Invalidation must bump the generation, and do it before clearing, so a request already
+	// running is disqualified rather than overwriting the clear when it returns.
+	const invalidateStart = extensionSrc.indexOf('private invalidateServerMemoriesCache()');
+	assert.ok(invalidateStart >= 0, 'expected invalidateServerMemoriesCache()');
+	const invalidateBody = extensionSrc.slice(invalidateStart, extensionSrc.indexOf('\n\t}', invalidateStart));
+	assert.ok(/this\._serverMemoriesGeneration\+\+;/.test(invalidateBody), 'invalidation must bump the generation');
+	assert.ok(
+		invalidateBody.indexOf('_serverMemoriesGeneration++') < invalidateBody.indexOf('_serverMemoriesAnalysis = undefined'),
+		'the bump must come before the clear',
+	);
+
+	// The generation is captured once, before the async body starts. Checked as two ordered
+	// substrings rather than one regex, so no newline has to live inside a pattern.
+	const captureAt = extensionSrc.indexOf('const generation = this._serverMemoriesGeneration;');
+	const asyncBodyAt = extensionSrc.indexOf('this._serverMemoriesFetchInFlight = (async () => {');
+	assert.ok(captureAt >= 0, 'the fetch must capture the generation');
+	assert.ok(captureAt < asyncBodyAt, 'the capture must precede the async body');
+
+	// And every publish site is gated on it.
+	assert.equal(
+		(extensionSrc.match(/isServerMemoriesContextCurrent\(context, generation\)/g) ?? []).length,
+		3,
+		'all three publish sites must check the captured generation',
+	);
+	const checkStart = extensionSrc.indexOf('private isServerMemoriesContextCurrent(');
+	const checkBody = extensionSrc.slice(checkStart, extensionSrc.indexOf('\n\t}', checkStart));
+	assert.ok(/generation !== this\._serverMemoriesGeneration/.test(checkBody), 'the check must compare generations');
+});
+
 test('the repo resolver walks up to the real git root rather than trusting the folder', () => {
 	// Opening a subdirectory of a checkout is ordinary, and readGitOriginUrl() only looks at
 	// `<dir>/.git`. Without the walk the section silently vanishes for those workspaces —

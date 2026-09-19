@@ -1280,6 +1280,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * which this repository's own workflow makes a routine case rather than a corner one.
 	 */
 	private _serverMemoriesRepoRoot: string | undefined;
+	/**
+	 * Bumped by {@link invalidateServerMemoriesCache}. A fetch captures this when it starts
+	 * and must still match to publish, which is the only thing that can stop a request begun
+	 * under one account from landing after the user has switched to another — the identity
+	 * checks cannot see that change, since the setting, repository and root are all unchanged.
+	 * Mirrors the `_cacheGeneration`/`isComputedStatsCurrent()` guard used for the other
+	 * computed-stat caches.
+	 */
+	private _serverMemoriesGeneration = 0;
 	/** In-flight fetch, so concurrent refreshes coalesce into one request rather than racing. */
 	private _serverMemoriesFetchInFlight: Promise<void> | undefined;
 	private lastDashboardData: any | undefined;
@@ -6845,6 +6854,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * those two need an explicit nudge rather than waiting out the TTL.
 	 */
 	private invalidateServerMemoriesCache(): void {
+		// Bump first: any request already in flight captured the previous value and is now
+		// disqualified from publishing, rather than overwriting this clear when it returns.
+		this._serverMemoriesGeneration++;
 		this._serverMemoriesAnalysis = undefined;
 		this._serverMemoriesRepo = undefined;
 		this._serverMemoriesRepoRoot = undefined;
@@ -6955,6 +6967,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		if (!decision.startFetch || !context) { return; }
 
+		const generation = this._serverMemoriesGeneration;
 		this._serverMemoriesFetchInFlight = (async () => {
 			try {
 				// Resolved up front rather than inside getToken() so "the user is not signed in"
@@ -6969,7 +6982,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					// an hour afterwards even though a session is now available. Leaving the
 					// timestamp unset makes the next refresh retry; the retry is a local,
 					// non-prompting getSession() call, so repeating it costs nothing.
-					if (this.isServerMemoriesContextCurrent(context)) {
+					if (this.isServerMemoriesContextCurrent(context, generation)) {
 						this._serverMemoriesAnalysis = null;
 						this._serverMemoriesRepo = undefined;
 						this._serverMemoriesRepoRoot = undefined;
@@ -6990,7 +7003,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// The workspace can change, or the user can switch the feature off, while this
 				// request is in flight. Publishing unconditionally would then put one repository's
 				// memories on screen for another — or restore a section the user just disabled.
-				if (this.isServerMemoriesContextCurrent(context)) {
+				if (this.isServerMemoriesContextCurrent(context, generation)) {
 					this._serverMemoriesAnalysis = analysis;
 					this._serverMemoriesRepo = context.repo;
 					this._serverMemoriesRepoRoot = context.repoRoot;
@@ -6998,7 +7011,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				}
 			} catch (err) {
 				this.log(`⚠️ Server memories fetch failed: ${String(err)}`);
-				if (this.isServerMemoriesContextCurrent(context)) {
+				if (this.isServerMemoriesContextCurrent(context, generation)) {
 					this._serverMemoriesAnalysis = null;
 					this._serverMemoriesRepo = context.repo;
 					this._serverMemoriesRepoRoot = context.repoRoot;
@@ -7017,7 +7030,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * resolved to a different repository — in either case the result must be dropped rather
 	 * than published over the current context.
 	 */
-	private isServerMemoriesContextCurrent(context: { repo: string; repoRoot: string }): boolean {
+	private isServerMemoriesContextCurrent(context: { repo: string; repoRoot: string }, generation: number): boolean {
+		// The generation is the part the other three cannot express: signing out or switching
+		// account leaves the setting, repository and root all identical, so without it a
+		// response fetched under the previous token would publish into the new session's view.
+		if (generation !== this._serverMemoriesGeneration) { return false; }
 		if (!this.getServerMemoriesEnabledSetting()) { return false; }
 		const current = this.resolveWorkspaceRepoSlug();
 		return current?.repo === context.repo && current?.repoRoot === context.repoRoot;
