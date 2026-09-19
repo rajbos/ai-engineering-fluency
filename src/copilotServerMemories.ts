@@ -409,7 +409,16 @@ function isServerMemory(value: unknown): value is ServerMemory {
 
 /** Does this citation point at a file an agent already reads as instructions? */
 export function isInstructionCitation(citation: string): boolean {
-	return INSTRUCTION_PATH_PATTERN.test(citationFilePath(citation) ?? '');
+	const filePath = citationFilePath(citation);
+	// The same safety gate the staleness scan applies, for the same reason: a citation that
+	// does not name a file inside this checkout is evidence about this repository of no kind.
+	// Without it `../../AGENTS.md` or `/etc/AGENTS.md` marks a memory "already documented",
+	// which both inflates documentedCount and — worse — suppresses an otherwise valid
+	// promotion group, since one documented member disqualifies the whole subject. A
+	// server-supplied citation could therefore quietly switch the feature off, subject by
+	// subject, and the report would look entirely healthy while doing it.
+	if (!filePath || !isSafeRepoRelativePath(filePath)) { return false; }
+	return INSTRUCTION_PATH_PATTERN.test(filePath);
 }
 
 /**

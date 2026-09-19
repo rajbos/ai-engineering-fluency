@@ -159,6 +159,35 @@ test('isInstructionCitation recognizes the files agents already read as instruct
 	assert.equal(isInstructionCitation('src/agentsMdParser.ts:10'), false);
 });
 
+test('isInstructionCitation ignores instruction paths that leave the checkout', () => {
+	// An unsafe path names a file outside this repository, so it is evidence about this
+	// repository of no kind. Accepting one does more than inflate documentedCount: a single
+	// documented member disqualifies its whole subject from promotion, so a server-supplied
+	// `../../AGENTS.md` could quietly switch the feature off subject by subject while the
+	// report still looked healthy.
+	assert.equal(isInstructionCitation('../../AGENTS.md:1'), false);
+	assert.equal(isInstructionCitation('/etc/AGENTS.md:1'), false);
+	assert.equal(isInstructionCitation('C:/other/AGENTS.md:1'), false);
+	assert.equal(isInstructionCitation('src/../../docs/x.md:1'), false);
+	// The ordinary repo-relative forms still count.
+	assert.equal(isInstructionCitation('AGENTS.md:1'), true);
+	assert.equal(isInstructionCitation('docs/features/X.md:1'), true);
+});
+
+test('an unsafe instruction citation cannot suppress a promotion group', () => {
+	const analysis = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		truncated: false,
+		memories: [
+			memory({ id: '1', subject: 'caching', citations: ['../../AGENTS.md:1', 'src/cacheManager.ts:10'] }),
+		],
+	}, alwaysExists);
+
+	assert.deepEqual(analysis.promotionGroups.map(g => g.subject), ['caching']);
+	assert.equal(analysis.documentedCount, 0, 'an out-of-checkout citation documents nothing');
+});
+
 // ---------------------------------------------------------------------------
 // fetchRepoMemories — the failure modes that look like "no memories"
 // ---------------------------------------------------------------------------
