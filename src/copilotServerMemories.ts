@@ -134,15 +134,50 @@ export function buildMemoryApiUrl(repo: string, suffix: string, limit?: number, 
 	return url.toString();
 }
 
+/** Hosts whose remotes name a repository on GitHub.com. */
+const GITHUB_HOSTS = new Set(['github.com', 'www.github.com', 'ssh.github.com']);
+
 /**
- * Parse `owner/name` out of a git remote URL, accepting both the SSH
- * (`git@github.com:owner/name.git`) and HTTPS (`https://github.com/owner/name`)
- * spellings. Returns `undefined` for a remote that is not a GitHub repository, so a
- * caller can report "not a GitHub repo" rather than issuing a doomed request.
+ * Parse `owner/name` out of a git remote URL, accepting the SSH
+ * (`git@github.com:owner/name.git`), `ssh://` and HTTPS
+ * (`https://github.com/owner/name`) spellings. Returns `undefined` for a remote that is
+ * not a GitHub.com repository, so a caller can report "not a GitHub repo" rather than
+ * issuing a doomed request.
+ *
+ * The host is matched **exactly**, not merely found in the string. A substring match
+ * would accept `https://notgithub.com/owner/repo` and `https://github.com.evil.test/x/y`,
+ * and the caller would then send the user's token to api.githubcopilot.com asking for an
+ * unrelated repository's memories — surfacing another repo's facts as if they were this
+ * checkout's.
  */
 export function parseRepoFromRemoteUrl(remoteUrl: string): string | undefined {
-	const match = /github\.com[:/]([^/]+)\/(.+?)(?:\.git)?\/?$/.exec(remoteUrl.trim());
-	return match ? `${match[1]}/${match[2]}` : undefined;
+	const trimmed = remoteUrl.trim();
+	if (!trimmed) { return undefined; }
+
+	// scp-style SSH (`[user@]host:owner/name`) is not a URL and must be split by hand; the
+	// colon separating host from path is the first one, and a `//` marks a real URL instead.
+	const scpMatch = /^(?:[^@/]+@)?([^/:]+):(?!\/)(.+)$/.exec(trimmed);
+	const { host, path } = scpMatch
+		? { host: scpMatch[1], path: scpMatch[2] }
+		: parseUrlHostAndPath(trimmed);
+	if (!host || !GITHUB_HOSTS.has(host.toLowerCase())) { return undefined; }
+
+	// Trailing slashes come off before the `.git` suffix, not after: `…/name.git/` is a real
+	// remote spelling, and stripping in the other order leaves the `.git` on the name.
+	const segments = path.replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/i, '').split('/');
+	// Exactly owner/name — anything deeper is a URL into a repository (a blob, an issue),
+	// not the repository remote itself.
+	return segments.length === 2 && segments[0] && segments[1] ? `${segments[0]}/${segments[1]}` : undefined;
+}
+
+/** Host and path of a parseable absolute URL, or empty strings when it is not one. */
+function parseUrlHostAndPath(candidate: string): { host: string; path: string } {
+	try {
+		const url = new URL(candidate);
+		return { host: url.hostname, path: url.pathname };
+	} catch {
+		return { host: '', path: '' };
+	}
 }
 
 /**
@@ -244,7 +279,12 @@ function isServerMemory(value: unknown): value is ServerMemory {
 	return typeof candidate.id === 'string'
 		&& typeof candidate.subject === 'string'
 		&& typeof candidate.fact === 'string'
-		&& Array.isArray(candidate.citations);
+		// Every element must be a string, not merely the array itself an array: the analysis
+		// calls `.trim()` on each citation, so a single `null` element would throw out of
+		// `analyzeServerMemories()` and take the whole report with it — rejecting the CLI
+		// command, or blanking the webview section, over one malformed record.
+		&& Array.isArray(candidate.citations)
+		&& candidate.citations.every(citation => typeof citation === 'string');
 }
 
 /** Does this citation point at a file an agent already reads as instructions? */
@@ -276,7 +316,12 @@ export function citationFilePath(citation: string): string | undefined {
  * subjects on a live store.
  */
 function normalizeSubject(subject: string): string {
-	return subject.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+	// Unicode-aware on purpose. An `[^a-z0-9]` class deletes every non-ASCII letter, so a
+	// repository whose agent writes Chinese or Japanese subjects would collapse all of them
+	// to the empty string and group entirely unrelated memories into one bogus "subject",
+	// while accented Latin subjects would silently lose characters. Both corrupt
+	// `distinctSubjects` and the promotion ranking that is the whole point of the report.
+	return subject.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
 /** Dependencies {@link analyzeServerMemories} needs, kept injectable so the analysis is pure. */

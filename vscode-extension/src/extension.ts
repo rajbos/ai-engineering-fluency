@@ -1198,6 +1198,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _serverMemoriesAnalysis: ServerMemoriesAnalysis | null | undefined;
 	/** Wall-clock time (ms) of the last server-memory fetch attempt, successful or not. */
 	private _serverMemoriesFetchedAt: number | undefined;
+	/**
+	 * `owner/name` that {@link _serverMemoriesAnalysis} belongs to. The TTL alone is not enough:
+	 * it answers "is this repository's store still fresh?", so without the slug a workspace
+	 * switch would keep showing the previous repository's memories until the hour elapsed.
+	 */
+	private _serverMemoriesRepo: string | undefined;
 	/** In-flight fetch, so concurrent refreshes coalesce into one request rather than racing. */
 	private _serverMemoriesFetchInFlight: Promise<void> | undefined;
 	private lastDashboardData: any | undefined;
@@ -5999,6 +6005,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'logviewer.hydrafusion.expandStepNote': l10n.t('logviewer.hydrafusion.expandStepNote'),
 			...this.getEfficiencyModelsLocalization(),
 			...this.getMemoryFilesLocalization(),
+			...this.getServerMemoriesLocalization(),
 			// Current language for reference
 			'__language__': language
 		};
@@ -6022,6 +6029,33 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'memoryFiles.unknownWorkspace': l10n.t('memoryFiles.unknownWorkspace'),
 			'memoryFiles.globalWorkspaceLabel': l10n.t('memoryFiles.globalWorkspaceLabel'),
 			'memoryFiles.renderError': l10n.t('memoryFiles.renderError'),
+		};
+	}
+
+	/**
+	 * Tools tab — Copilot Repository Memories strings.
+	 *
+	 * Without this the webview falls back to the English defaults compiled into
+	 * `shared/localization.ts`, so the zh-CN entries in `package.nls.zh-cn.json` would never
+	 * reach a Chinese user. Templates carrying {0}/{1} are resolved webview-side by
+	 * localizeFormat(), so they are passed through unformatted here.
+	 */
+	private getServerMemoriesLocalization(): Record<string, string> {
+		return {
+			'serverMemories.sectionTitle': l10n.t('serverMemories.sectionTitle'),
+			'serverMemories.sectionSubtitle': l10n.t('serverMemories.sectionSubtitle'),
+			'serverMemories.summary': l10n.t('serverMemories.summary'),
+			'serverMemories.documentedSummary': l10n.t('serverMemories.documentedSummary'),
+			'serverMemories.staleSummary': l10n.t('serverMemories.staleSummary'),
+			'serverMemories.promoteHeading': l10n.t('serverMemories.promoteHeading'),
+			'serverMemories.promoteHint': l10n.t('serverMemories.promoteHint'),
+			'serverMemories.repeatBadge': l10n.t('serverMemories.repeatBadge'),
+			'serverMemories.table.subject': l10n.t('serverMemories.table.subject'),
+			'serverMemories.table.fact': l10n.t('serverMemories.table.fact'),
+			'serverMemories.table.sources': l10n.t('serverMemories.table.sources'),
+			'serverMemories.disabled': l10n.t('serverMemories.disabled'),
+			'serverMemories.unavailable': l10n.t('serverMemories.unavailable'),
+			'serverMemories.renderError': l10n.t('serverMemories.renderError'),
 		};
 	}
 
@@ -6733,18 +6767,38 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * stays empty rather than popping a sign-in prompt at them for a secondary insight.
 	 */
 	private scheduleServerMemoriesRefresh(): void {
-		if (!this.getServerMemoriesEnabledSetting()) { return; }
+		if (!this.getServerMemoriesEnabledSetting()) {
+			// Switching the setting off has to hide what was already fetched, not merely stop
+			// fetching more. Without this the cached analysis keeps being projected into every
+			// later render and the opt-out appears to do nothing.
+			this._serverMemoriesAnalysis = undefined;
+			this._serverMemoriesFetchedAt = undefined;
+			this._serverMemoriesRepo = undefined;
+			return;
+		}
 		if (this._serverMemoriesFetchInFlight) { return; }
-		const now = Date.now();
-		if (this._serverMemoriesFetchedAt !== undefined && (now - this._serverMemoriesFetchedAt) < SERVER_MEMORIES_FETCH_TTL_MS) { return; }
 
+		// Resolve the repository *before* the TTL check. The TTL answers "is this repository's
+		// store still fresh?", so consulting it first would let a workspace switch keep showing
+		// the previous repository's memories for up to an hour.
 		const context = this.resolveWorkspaceRepoSlug();
 		if (!context) {
 			// Not a GitHub checkout: record the attempt so we don't re-resolve the remote on
-			// every refresh, and leave the analysis null so the section renders nothing.
-			this._serverMemoriesFetchedAt = now;
+			// every refresh, and clear any analysis left over from a repository we have moved
+			// away from, so the section renders nothing.
+			this._serverMemoriesFetchedAt = Date.now();
+			this._serverMemoriesRepo = undefined;
 			this._serverMemoriesAnalysis = null;
 			return;
+		}
+
+		const now = Date.now();
+		const sameRepo = this._serverMemoriesRepo === context.repo;
+		if (sameRepo && this._serverMemoriesFetchedAt !== undefined && (now - this._serverMemoriesFetchedAt) < SERVER_MEMORIES_FETCH_TTL_MS) { return; }
+		if (!sameRepo) {
+			// Drop the previous repository's result immediately rather than leaving it on screen
+			// until the new fetch lands.
+			this._serverMemoriesAnalysis = null;
 		}
 
 		this._serverMemoriesFetchInFlight = (async () => {
@@ -6765,19 +6819,41 @@ class CopilotTokenTracker implements vscode.Disposable {
 				});
 				const fs = require('fs') as typeof import('fs');
 				const path = require('path') as typeof import('path');
-				this._serverMemoriesAnalysis = _analyzeServerMemories(result, {
+				const analysis = _analyzeServerMemories(result, {
 					fileExists: (relativePath) => {
 						try { return fs.existsSync(path.resolve(context.repoRoot, relativePath)); } catch { return false; }
 					},
 				});
+				// The workspace can change, or the user can switch the feature off, while this
+				// request is in flight. Publishing unconditionally would then put one repository's
+				// memories on screen for another — or restore a section the user just disabled.
+				if (this.isServerMemoriesContextCurrent(context.repo)) {
+					this._serverMemoriesAnalysis = analysis;
+					this._serverMemoriesRepo = context.repo;
+					this._serverMemoriesFetchedAt = Date.now();
+				}
 			} catch (err) {
 				this.log(`⚠️ Server memories fetch failed: ${String(err)}`);
-				this._serverMemoriesAnalysis = null;
+				if (this.isServerMemoriesContextCurrent(context.repo)) {
+					this._serverMemoriesAnalysis = null;
+					this._serverMemoriesRepo = context.repo;
+					this._serverMemoriesFetchedAt = Date.now();
+				}
 			} finally {
-				this._serverMemoriesFetchedAt = Date.now();
 				this._serverMemoriesFetchInFlight = undefined;
 			}
 		})();
+	}
+
+	/**
+	 * Is a finished fetch for `repo` still the one the view wants?
+	 *
+	 * False when the feature was switched off mid-flight, or when the workspace has since
+	 * resolved to a different repository — in either case the result must be dropped rather
+	 * than published over the current context.
+	 */
+	private isServerMemoriesContextCurrent(repo: string): boolean {
+		return this.getServerMemoriesEnabledSetting() && this.resolveWorkspaceRepoSlug()?.repo === repo;
 	}
 
 	/**

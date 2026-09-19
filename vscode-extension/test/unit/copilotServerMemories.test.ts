@@ -73,7 +73,21 @@ test('parseRepoFromRemoteUrl accepts SSH and HTTPS remotes and rejects non-GitHu
 	assert.equal(parseRepoFromRemoteUrl('git@github.com:rajbos/ai-engineering-fluency.git'), 'rajbos/ai-engineering-fluency');
 	assert.equal(parseRepoFromRemoteUrl('https://github.com/rajbos/ai-engineering-fluency'), 'rajbos/ai-engineering-fluency');
 	assert.equal(parseRepoFromRemoteUrl('https://github.com/rajbos/ai-engineering-fluency.git/'), 'rajbos/ai-engineering-fluency');
+	assert.equal(parseRepoFromRemoteUrl('ssh://git@github.com/rajbos/ai-engineering-fluency.git'), 'rajbos/ai-engineering-fluency');
+	assert.equal(parseRepoFromRemoteUrl('https://user@github.com/rajbos/thing'), 'rajbos/thing');
 	assert.equal(parseRepoFromRemoteUrl('https://gitlab.com/rajbos/thing.git'), undefined);
+	assert.equal(parseRepoFromRemoteUrl(''), undefined);
+});
+
+test('parseRepoFromRemoteUrl matches the host exactly, not as a substring', () => {
+	// A substring match would accept all of these, and the caller would then send the user's
+	// token to the Copilot API asking for an unrelated repository's memories — surfacing
+	// another repo's facts as if they belonged to this checkout.
+	assert.equal(parseRepoFromRemoteUrl('https://notgithub.com/owner/repo'), undefined);
+	assert.equal(parseRepoFromRemoteUrl('https://github.com.evil.test/owner/repo'), undefined);
+	assert.equal(parseRepoFromRemoteUrl('git@evil.test:github.com/owner/repo.git'), undefined);
+	// A URL pointing *into* a repository is not a repository remote either.
+	assert.equal(parseRepoFromRemoteUrl('https://github.com/owner/repo/blob/main/x.ts'), undefined);
 });
 
 test('citationFilePath strips the line range and ignores "User input" citations', () => {
@@ -181,6 +195,50 @@ test('fetchRepoMemories drops malformed records instead of failing the whole rea
 	assert.deepEqual(result.memories.map(m => m.id), ['a', 'c']);
 	// An added server field rides along rather than being stripped by the guard.
 	assert.equal((result.memories[1] as unknown as { somethingNew: number }).somethingNew, 42);
+});
+
+test('fetchRepoMemories rejects a record whose citations are not all strings', async () => {
+	// `Array.isArray` alone is not enough: the analysis calls `.trim()` on every citation, so
+	// one `null` element would throw out of analyzeServerMemories() and take the entire
+	// report with it rather than costing a single record.
+	const result = await fetchRepoMemories('o/n', {
+		getToken: async () => 'tok',
+		fetchFn: stubFetch({
+			recent: {
+				json: async () => [
+					{ id: 'bad', subject: 's', fact: 'f', citations: [null] },
+					{ id: 'alsobad', subject: 's', fact: 'f', citations: ['ok.ts:1', 42] },
+					{ id: 'good', subject: 's', fact: 'f', citations: ['ok.ts:1'] },
+				],
+			},
+		}),
+	});
+	assert.deepEqual(result.memories.map(m => m.id), ['good']);
+	// And the surviving set analyzes without throwing.
+	assert.doesNotThrow(() => analyzeServerMemories(result, alwaysExists));
+});
+
+test('subject grouping is Unicode-aware', () => {
+	// An ASCII-only normalizer maps every non-Latin subject to the empty string, merging
+	// unrelated memories into one bogus group and corrupting both distinctSubjects and the
+	// promotion ranking.
+	const analysis = analyzeServerMemories({
+		repo: 'o/n',
+		enabled: true,
+		memories: [
+			memory({ id: '1', subject: '缓存策略' }),
+			memory({ id: '2', subject: '缓存策略' }),
+			memory({ id: '3', subject: 'テスト規約' }),
+			memory({ id: '4', subject: 'café conventions' }),
+		],
+	}, alwaysExists);
+
+	assert.equal(analysis.distinctSubjects, 3, 'three genuinely different subjects');
+	const byCount = Object.fromEntries(analysis.promotionGroups.map(g => [g.displaySubject, g.repeatCount]));
+	assert.equal(byCount['缓存策略'], 2);
+	assert.equal(byCount['テスト規約'], 1);
+	// The accented subject keeps its character rather than being silently truncated.
+	assert.ok(analysis.promotionGroups.some(g => g.subject === 'café conventions'));
 });
 
 // ---------------------------------------------------------------------------
