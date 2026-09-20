@@ -86,7 +86,7 @@
 			"10-20s of clean speech and put the exact transcript beside it.",
 			"See assets/voice/README.md."
 		],
-		"engine": "mistral",
+		"engine": "command",
 
 		"voicebox": {
 			"endpoint": "http://127.0.0.1:8000",
@@ -145,6 +145,11 @@
 				"",
 				"Swap -m for en_US-ryan-high for a slower, higher-quality US voice.",
 				"",
+				"This is the shipped default because it is local, free and needs no",
+				"key. To clone a real voice, either set engine to \"mistral\" (hosted,",
+				"billed, fast) or point argv at scripts/chatterbox-speak.py (local,",
+				"free, minutes per paragraph on CPU). See README.md.",
+				"",
 				"--length-scale is pace: 1.0 is the model's own, lower is faster.",
 				"0.88 reads at about the speed of a presenter who knows the",
 				"material. Below ~0.8 it starts to clip its own consonants.",
@@ -155,14 +160,14 @@
 			],
 			"argv": [
 				".venv-tts/Scripts/python.exe",
-				"scripts/chatterbox-speak.py",
-				"--text-file", "{{textFile}}",
-				"--out", "{{out}}",
-				"--reference", "{{referenceWav}}",
-				"--exaggeration", "0.5",
-				"--cfg-weight", "0.5"
+				"-m", "piper",
+				"-m", "en_GB-alan-medium",
+				"--data-dir", "assets/voice/piper",
+				"--length-scale", "0.84",
+				"--sentence-silence", "0.25",
+				"-f", "{{out}}"
 			],
-			"stdinText": false
+			"stdinText": true
 		}
 	},
 

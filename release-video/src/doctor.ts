@@ -38,22 +38,38 @@ export async function doctor(config: Config): Promise<boolean> {
 		const encoders = await capture(config.tools.ffmpeg, ['-hide_banner', '-encoders']);
 		const filters = await capture(config.tools.ffmpeg, ['-hide_banner', '-filters']);
 
-		const wantsNvenc = config.encode.encoder.includes('nvenc');
+		// The *configured* encoder is required, even though a CPU fallback
+		// exists. Nothing selects that fallback automatically, so marking this
+		// optional let `doctor` print "Ready to render" for a build that was
+		// then guaranteed to fail. The fallback belongs in the remediation
+		// text, not in the pass/fail decision.
 		const hasEncoder = encoders.includes(config.encode.encoder);
+		const cpuHint = config.encode.encoder.includes('nvenc')
+			? ' — set encode.encoder to libx264 to render on the CPU instead'
+			: '';
 		push({
 			name: `encoder ${config.encode.encoder}`,
 			ok: hasEncoder,
-			detail: hasEncoder ? 'available' : `this build has no ${config.encode.encoder}`,
-			...(wantsNvenc ? { optional: 'set encode.encoder to libx264 to render on the CPU' } : {}),
+			detail: hasEncoder ? 'available' : `this build has no ${config.encode.encoder}${cpuHint}`,
 		});
 
-		for (const filter of ['zoompan', 'xfade', 'subtitles', 'loudnorm', 'amix', 'adelay']) {
+		// `concat` joins scenes across a hard cut, so it is as load-bearing as
+		// xfade whenever a manifest contains a "none" transition.
+		for (const filter of ['zoompan', 'xfade', 'concat', 'subtitles', 'loudnorm', 'amix', 'adelay']) {
 			const has = new RegExp(`\\b${filter}\\b`).test(filters);
+			// Subtitles are only genuinely optional when they are switched off.
+			// With `subtitles.enabled` true, a build without libass fails during
+			// render, so reporting it as a soft warning would be wrong.
+			const subtitlesOptional = filter === 'subtitles' && !config.subtitles.enabled;
 			push({
 				name: `filter ${filter}`,
 				ok: has,
-				detail: has ? 'available' : 'missing from this FFmpeg build',
-				...(filter === 'subtitles' ? { optional: 'set subtitles.enabled to false to render without captions or titles' } : {}),
+				detail: has
+					? 'available'
+					: filter === 'subtitles' && config.subtitles.enabled
+						? 'missing from this FFmpeg build — captions and titles are enabled, so the render will fail'
+						: 'missing from this FFmpeg build',
+				...(subtitlesOptional ? { optional: 'subtitles are disabled, so this is not needed' } : {}),
 			});
 		}
 	}

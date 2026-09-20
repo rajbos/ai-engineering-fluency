@@ -37,9 +37,12 @@ test('an image outside the project root is refused', () => {
 });
 
 test('an absolute image path is refused', () => {
+	// Two different guards catch this depending on the host: on Windows the
+	// containment check, on POSIX the foreign-absolute check (where "C:/..."
+	// is not absolute at all). Both refuse it, which is the point.
 	assert.throws(
 		() => validateManifest({ project, scenes: [sceneWith({ image: 'C:/Windows/System32/x.png' })] }),
-		/resolves outside the project root/,
+		/outside the project root|absolute path from another platform/,
 	);
 });
 

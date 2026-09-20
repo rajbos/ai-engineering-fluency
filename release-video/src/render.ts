@@ -281,7 +281,7 @@ async function assemble(
  * original clips — the whole reason the timeline module exists. Each fade
  * happens `transitionOut` seconds before the accumulated chain ends.
  */
-function assemblyFilterGraph(
+export function assemblyFilterGraph(
 	timeline: Timeline,
 	clipCount: number,
 	audioCount: number,
@@ -307,9 +307,16 @@ function assemblyFilterGraph(
 		const outLabel = `vx${i}`;
 
 		if (transition <= 0) {
-			// A hard cut still has to go through xfade to keep one linear chain;
-			// a zero-length fade is exactly a cut.
-			lines.push(`[${currentLabel}][${i}:v]xfade=transition=fade:duration=0:offset=${offset.toFixed(3)}[${outLabel}]`);
+			// A hard cut uses concat, NOT xfade with duration=0.
+			//
+			// `xfade=duration=0` looks like a cut and exits 0, but it discards
+			// the second input entirely: joining two three-second clips that
+			// way yields 3.03s rather than 6s. Because it fails silently, the
+			// only symptom is a scene missing from the finished video.
+			//
+			// concat appends exactly, which is what the timeline already
+			// assumes for a zero-length transition, so no offset is involved.
+			lines.push(`[${currentLabel}][${i}:v]concat=n=2:v=1:a=0[${outLabel}]`);
 		} else {
 			const name = previous.transitionName === 'none' ? 'fade' : previous.transitionName;
 			lines.push(

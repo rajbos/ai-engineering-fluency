@@ -128,6 +128,7 @@ export async function isRunnable(command: string, args: readonly string[] = ['-v
  * suggested all pass through here before any I/O happens.
  */
 export function resolveInProject(candidate: string, label = 'path'): string {
+	rejectForeignAbsolute(candidate, label);
 	const resolved = path.resolve(PROJECT_ROOT, candidate);
 	const relative = path.relative(PROJECT_ROOT, resolved);
 	if (relative.startsWith('..') || path.isAbsolute(relative)) {
@@ -146,12 +147,38 @@ export function resolveInProject(candidate: string, label = 'path'): string {
  * the repository is refused exactly as one escaping the project would be.
  */
 export function resolveInRepo(candidate: string, label = 'path'): string {
+	rejectForeignAbsolute(candidate, label);
 	const resolved = path.resolve(REPO_ROOT, candidate);
 	const relative = path.relative(REPO_ROOT, resolved);
 	if (relative.startsWith('..') || path.isAbsolute(relative)) {
 		throw new Error(`${label} "${candidate}" resolves outside the repository (${resolved})`);
 	}
 	return resolved;
+}
+
+/**
+ * Refuses an absolute path belonging to a *different* platform.
+ *
+ * `path.resolve` applies the host's rules, so on Linux `C:/Windows/x.png` is
+ * not absolute — it is a directory literally named `C:` — and resolving it
+ * against the project root yields a path *inside* the project that the
+ * containment check then happily accepts. Without this, the allowlist is
+ * strictly weaker on Linux than on Windows, which is the opposite of what a
+ * reader of these functions would assume.
+ *
+ * A natively-absolute path is left alone: the containment check that follows
+ * is already the right test for it.
+ */
+function rejectForeignAbsolute(candidate: string, label: string): void {
+	if (path.isAbsolute(candidate)) { return; }
+	// win32.isAbsolute covers drive roots and UNC shares; the pattern also
+	// catches drive-relative forms such as "C:notes.png".
+	if (path.win32.isAbsolute(candidate) || /^[A-Za-z]:/.test(candidate)) {
+		throw new Error(
+			`${label} "${candidate}" is an absolute path from another platform, ` +
+			'so it would escape the project root rather than resolve inside it',
+		);
+	}
 }
 
 /**
