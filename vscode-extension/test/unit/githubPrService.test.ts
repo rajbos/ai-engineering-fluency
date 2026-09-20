@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import * as childProcess from 'node:child_process';
 import type * as http from 'node:http';
 import { EventEmitter } from 'node:events';
-import { detectAiType, detectCoAuthorAiType, fetchPrCommitMessages, fetchRepoPrs, fetchRepoPrsPage, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, fetchPrCopilotReviews, fetchPrCopilotReviewRequests, fetchPrCopilotReviewActivity, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
+import { detectAiType, detectCoAuthorAiType, fetchPrCommitMessages, fetchRepoPrs, fetchRepoPrsPage, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, fetchPrCopilotReviews, fetchPrCopilotReviewRequests, fetchPrCopilotReviewActivity, isCompletedCopilotReview, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
 
 /**
  * Minimal stand-in for `http.ClientRequest`, exercising exactly the surface
@@ -128,6 +128,29 @@ test('fetchPrCommitMessages: propagates error from fetcher', async () => {
 	const { messages, error } = await fetchPrCommitMessages('owner', 'repo', 42, 'token', mockFetcher);
 	assert.deepEqual(messages, []);
 	assert.equal(error, 'Not Found');
+});
+
+// ---------------------------------------------------------------------------
+// isCompletedCopilotReview — pure function, no I/O
+// ---------------------------------------------------------------------------
+
+test('isCompletedCopilotReview: true for a submitted Copilot review', () => {
+	assert.equal(isCompletedCopilotReview({ user: { login: 'copilot-pull-request-reviewer[bot]' }, state: 'COMMENTED' }), true);
+	assert.equal(isCompletedCopilotReview({ user: { login: 'copilot-pull-request-reviewer[bot]' }, state: 'APPROVED' }), true);
+});
+
+test('isCompletedCopilotReview: false for a PENDING (drafted, not yet submitted) Copilot review', () => {
+	assert.equal(isCompletedCopilotReview({ user: { login: 'copilot-pull-request-reviewer[bot]' }, state: 'PENDING' }), false);
+});
+
+test('isCompletedCopilotReview: false for a submitted review from someone other than Copilot', () => {
+	assert.equal(isCompletedCopilotReview({ user: { login: 'octocat' }, state: 'COMMENTED' }), false);
+});
+
+test('isCompletedCopilotReview: false for missing user/state', () => {
+	assert.equal(isCompletedCopilotReview({}), false);
+	assert.equal(isCompletedCopilotReview(null), false);
+	assert.equal(isCompletedCopilotReview(undefined), false);
 });
 
 // ---------------------------------------------------------------------------

@@ -539,6 +539,16 @@ export type PrCopilotReviewActivity = {
 	error?: string;
 };
 
+/**
+ * True when a review row from `GET /pulls/{number}/reviews` is both Copilot's and actually
+ * submitted. GitHub's reviews endpoint can include a `PENDING` review — one drafted but not yet
+ * submitted, with no real `submitted_at` — which is not a billable CCR event yet and must not be
+ * counted as completed activity.
+ */
+export function isCompletedCopilotReview(review: { user?: { login?: string }; state?: string } | null | undefined): boolean {
+	return review?.user?.login === COPILOT_REVIEWER_BOT_LOGIN && review?.state !== 'PENDING';
+}
+
 /** Fetch completed Copilot code reviews for one PR via `GET /pulls/{number}/reviews`. */
 function fetchPrCopilotReviewsPage(owner: string, repo: string, prNumber: number, token: string): Promise<{ reviews: CcrReview[]; statusCode?: number; error?: string }> {
 	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
@@ -564,7 +574,7 @@ function fetchPrCopilotReviewsPage(owner: string, repo: string, prNumber: number
 							return;
 						}
 						const reviews: CcrReview[] = parsed
-							.filter((r: any) => r?.user?.login === COPILOT_REVIEWER_BOT_LOGIN)
+							.filter(isCompletedCopilotReview)
 							.map((r: any) => ({ submittedAt: r.submitted_at, state: r.state }));
 						resolve({ reviews, statusCode: res.statusCode });
 					} catch (e) {
