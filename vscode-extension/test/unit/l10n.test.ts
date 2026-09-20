@@ -264,6 +264,33 @@ test('l10n: Recent Sessions context-fill keys resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: Repository PRs on-demand CCR activity keys resolve in English', () => {
+	// Back the "Check actual CCR activity" button and its result rendering on the
+	// Repository PRs tab. A missing key would put a raw
+	// `usage.repoPrs.ccrCheckButton` on the button.
+	assert.equal(t('usage.repoPrs.ccrCheckButton'), 'Check actual CCR activity');
+	assert.equal(t('usage.repoPrs.ccrChecking'), 'Checking…');
+	assert.equal(t('usage.repoPrs.ccrFailedToLoad'), 'Failed to load');
+	assert.equal(t('usage.repoPrs.ccrNoReviews'), 'No completed Copilot reviews found on this PR yet.');
+	assert.equal(t('usage.repoPrs.ccrReviewCount', '5'), '5 completed review(s)');
+	assert.equal(t('usage.repoPrs.ccrRequestedBy', 'rajbos'), ' — requested by rajbos');
+	assert.match(t('usage.repoPrs.ccrInfoTooltip'), /Not the AI-credit dollar cost/);
+});
+
+test('l10n: Repository PRs on-demand CCR activity keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.repoPrs.ccrCheckButton'), '检查实际的 CCR 活动');
+		assert.equal(t('usage.repoPrs.ccrChecking'), '正在检查…');
+		assert.equal(t('usage.repoPrs.ccrFailedToLoad'), '加载失败');
+		assert.equal(t('usage.repoPrs.ccrNoReviews'), '此 PR 尚未发现已完成的 Copilot 审查。');
+		assert.equal(t('usage.repoPrs.ccrReviewCount', '5'), '5 次已完成的审查');
+		assert.equal(t('usage.repoPrs.ccrRequestedBy', 'rajbos'), ' — 由 rajbos 请求');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test("l10n: what's-new notification keys resolve in English", () => {
 	// The two buttons on the one-a-day new-feature notification. A missing key
 	// here would put a raw `whatsNew.takeMeThere` on the button, which is the

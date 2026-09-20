@@ -1,5 +1,6 @@
 import { setHtml } from '../shared/domUtils';
 import { escapeHtml } from '../shared/formatUtils';
+import { localize, localizeFormat } from '../shared/localization';
 
 /**
  * Inline "Check actual CCR activity" button + result placeholder for one reviewer-requested PR
@@ -9,7 +10,8 @@ import { escapeHtml } from '../shared/formatUtils';
 export function renderCcrCheckButtonHtml(owner: string, repo: string, prNumber: number): string {
 	const o = escapeHtml(owner);
 	const r = escapeHtml(repo);
-	return ` <button class="btn-check-ccr" data-owner="${o}" data-repo="${r}" data-pr="${prNumber}" style="font-size:10px; padding:1px 6px; cursor:pointer; background:var(--bg-tertiary); color:var(--text-secondary); border:1px solid var(--border-color); border-radius:4px;">Check actual CCR activity</button><span class="ccr-activity-result" data-ccr-result="${o}/${r}#${prNumber}" style="margin-left:6px; font-size:11px; color:var(--text-secondary);"></span>`;
+	const label = escapeHtml(localize('usage.repoPrs.ccrCheckButton'));
+	return ` <button class="btn-check-ccr" data-owner="${o}" data-repo="${r}" data-pr="${prNumber}" style="font-size:10px; padding:1px 6px; cursor:pointer; background:var(--bg-tertiary); color:var(--text-secondary); border:1px solid var(--border-color); border-radius:4px;">${label}</button><span class="ccr-activity-result" data-ccr-result="${o}/${r}#${prNumber}" style="margin-left:6px; font-size:11px; color:var(--text-secondary);"></span>`;
 }
 
 /**
@@ -27,7 +29,7 @@ export function wireCcrActivityButtons(containerId: string, postMessage: (messag
 		if (!owner || !repo || !Number.isFinite(prNumber)) { return; }
 		btn.setAttribute('disabled', 'true');
 		const resultEl = document.querySelector<HTMLElement>(`[data-ccr-result="${owner}/${repo}#${prNumber}"]`);
-		if (resultEl) { resultEl.textContent = 'Checking…'; }
+		if (resultEl) { resultEl.textContent = localize('usage.repoPrs.ccrChecking'); }
 		postMessage({ command: 'checkCcrActivity', owner, repo, prNumber });
 	});
 }
@@ -39,22 +41,23 @@ export function renderCcrActivityResult(owner: string, repo: string, prNumber: n
 	btn?.removeAttribute('disabled');
 	if (!resultEl) { return; }
 	if (message.command === 'ccrActivityError') {
-		resultEl.textContent = `⚠️ ${typeof message.error === 'string' ? message.error : 'Failed to load'}`;
+		const reason = typeof message.error === 'string' ? message.error : localize('usage.repoPrs.ccrFailedToLoad');
+		resultEl.textContent = `⚠️ ${reason}`;
 		resultEl.style.color = 'var(--text-secondary)';
 		return;
 	}
 	const reviews = Array.isArray(message.reviews) ? message.reviews : [];
 	const requests = Array.isArray(message.requests) ? message.requests : [];
 	if (reviews.length === 0) {
-		resultEl.textContent = 'No completed Copilot reviews found on this PR yet.';
+		resultEl.textContent = localize('usage.repoPrs.ccrNoReviews');
 		return;
 	}
 	const requesterNames: string[] = requests.map((req: any) => String(req.requestedBy ?? 'unknown'));
 	const requesters = [...new Set(requesterNames)];
-	const requestedBy = requesters.length > 0 ? ` — requested by ${requesters.map((name) => escapeHtml(name)).join(', ')}` : '';
-	const infoTitle = 'Not the AI-credit dollar cost — GitHub does not expose that to a non-admin user. '
-		+ 'Each completed review is a billable CCR event; who actually pays for it depends on whether it '
-		+ 'was requested manually (requester pays) or via repo-wide auto-review (PR author pays), which '
-		+ "this API can't distinguish.";
-	setHtml(resultEl, `${reviews.length} completed review${reviews.length === 1 ? '' : 's'}${requestedBy} <span title="${escapeHtml(infoTitle)}">ℹ️</span>`);
+	const requestedBy = requesters.length > 0
+		? localizeFormat('usage.repoPrs.ccrRequestedBy', requesters.map((name) => escapeHtml(name)).join(', '))
+		: '';
+	const reviewCount = escapeHtml(localizeFormat('usage.repoPrs.ccrReviewCount', String(reviews.length)));
+	const infoTitle = escapeHtml(localize('usage.repoPrs.ccrInfoTooltip'));
+	setHtml(resultEl, `${reviewCount}${requestedBy} <span title="${infoTitle}">ℹ️</span>`);
 }
