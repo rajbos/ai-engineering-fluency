@@ -622,11 +622,13 @@ jobs:
         # `--slurp` gathers every page into one array before the jq filter
         # runs; with `--paginate` alone the filter runs once per page and the
         # output is one line per page, which the "newest" pick below would
-        # misread on a PR with more than a page of comments.
+        # misread on a PR with more than a page of comments. `gh api` refuses
+        # to combine `--slurp` with its own `--jq`, so slurp via `gh api` and
+        # filter with a separate `jq` invocation instead.
         list_ours() {
           GH_TOKEN="$GITHUB_TOKEN" gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
             --paginate --slurp \
-            --jq "[.[][] | select(.user.login | IN(${posters})) | select(.body | startswith(\"<!-- ${COMMENT_MARKER} -->\")) | .id] | sort | join(\" \")"
+            | jq "[.[][] | select(.user.login | IN(${posters})) | select(.body | startswith(\"<!-- ${COMMENT_MARKER} -->\")) | .id] | sort | join(\" \")" -r
         }
         existing="$(list_ours)"
 

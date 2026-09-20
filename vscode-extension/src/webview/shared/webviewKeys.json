@@ -152,5 +152,21 @@
   "memoryFiles.table.lastUpdated",
   "memoryFiles.unknownWorkspace",
   "memoryFiles.globalWorkspaceLabel",
-  "memoryFiles.renderError"
+  "memoryFiles.renderError",
+  "serverMemories.sectionTitle",
+  "serverMemories.sectionSubtitle",
+  "serverMemories.summary",
+  "serverMemories.documentedSummary",
+  "serverMemories.staleSummary",
+  "serverMemories.promoteHeading",
+  "serverMemories.promoteHint",
+  "serverMemories.repeatBadge",
+  "serverMemories.table.subject",
+  "serverMemories.table.fact",
+  "serverMemories.table.sources",
+  "serverMemories.disabled",
+  "serverMemories.unavailable",
+  "serverMemories.truncated",
+  "serverMemories.truncatedTooltip",
+  "serverMemories.renderError"
 ]

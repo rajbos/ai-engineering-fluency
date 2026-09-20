@@ -486,6 +486,11 @@
           "default": true,
           "description": "%config.whatsNew.notificationsEnabled.description%"
         },
+        "aiEngineeringFluency.serverMemories.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.serverMemories.enabled.description%"
+        },
         "aiEngineeringFluency.insights.cadenceDays": {
           "type": "number",
           "default": 2,

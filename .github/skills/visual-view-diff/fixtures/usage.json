@@ -985,6 +985,37 @@
       }
     ]
   },
+  "serverMemoriesAnalysis": {
+    "repo": "rajbos/ai-engineering-fluency",
+    "enabled": true,
+    "truncated": true,
+    "totalMemories": 340,
+    "distinctSubjects": 191,
+    "documentedCount": 99,
+    "promotionCandidateCount": 231,
+    "repeatedGroupCount": 40,
+    "fullyStaleCount": 4,
+    "topPromotionGroups": [
+      {
+        "displaySubject": "snapshot identity",
+        "repeatCount": 12,
+        "representativeFact": "CacheManager shared snapshots use mtime+size plus a durable cache_<id>.seq publish generation; writers update the sidecar before the body.",
+        "citationCount": 9
+      },
+      {
+        "displaySubject": "<script>alert('xss')</script> & \"quoted\"",
+        "repeatCount": 3,
+        "representativeFact": "Escaping check: subject & fact both carry markup that must render as text, not HTML.",
+        "citationCount": 2
+      },
+      {
+        "displaySubject": "CLI versioning",
+        "repeatCount": 1,
+        "representativeFact": "The CLI's `--version` output is sourced from cli/package.json, not hard-coded in TypeScript.",
+        "citationCount": 2
+      }
+    ]
+  },
   "claudeDesktopCoverage": {
     "knownSessions": 145,
     "withTranscript": 76,

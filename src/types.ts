@@ -1576,6 +1576,152 @@ export interface MemoryFilesAnalysisView {
 }
 
 /**
+ * One memory from a repository's **server-side** Copilot memory store, as returned by
+ * `GET /agents/swe/internal/memory/v0/{owner}/{repo}/recent`. See
+ * `src/copilotServerMemories.ts` for the route contract.
+ *
+ * Distinct from {@link MemoryFileEntry}, which describes a *local* memory file's metadata
+ * on this machine. This is the remote, per-repository store shared by everyone working on
+ * the repository, and it carries content rather than metadata.
+ *
+ * Only `id`, `subject`, `fact` and `citations` are required — the rest of the payload comes
+ * from an undocumented preview API and has already been observed to differ from what the
+ * Copilot CLI writes (the CLI sends a `source.integrationId` that reads back absent), so
+ * everything else is optional and additional fields are tolerated.
+ */
+export interface ServerMemory {
+  id: string;
+  /** Free-text 1-2 word topic, e.g. `graphify setup`. Not drawn from a fixed vocabulary. */
+  subject: string;
+  /** The learned fact itself; the agent is instructed to keep it under 200 characters. */
+  fact: string;
+  /** Where the fact came from: `path/file.ts:12-30` entries, or a `User input: ...` string. */
+  citations: string[];
+  /** Why the agent thought this was worth remembering. */
+  reason?: string;
+  /** Observed as `"repository"`; the API generation suggests other scopes may follow. */
+  scope?: string;
+  source?: {
+    /** Tool-call id of the interaction that stored the memory. */
+    interactionId?: string;
+    /** Which agent stored it, e.g. `copilot-code-review`. */
+    agent?: string;
+    /** Model that stored it, e.g. `gpt-5.6-luna`. */
+    baseModel?: string;
+  };
+  billingOrganizationId?: number;
+  billingEnterpriseId?: number;
+}
+
+/**
+ * A group of server memories on one subject that no member cites an instruction file for —
+ * i.e. a fact the agent learned from code alone, and therefore a candidate for promotion
+ * into `AGENTS.md` / `.github/copilot-instructions.md`.
+ */
+export interface ServerMemoryPromotionGroup {
+  /** Normalized (lowercased, punctuation-collapsed) subject used for grouping. */
+  subject: string;
+  /** The first member's original subject text, for display. */
+  displaySubject: string;
+  /**
+   * How many memories restate this subject. Greater than one means the agent re-learned
+   * the same thing across separate runs, which is the strongest signal it belongs in a
+   * checked-in instruction file.
+   */
+  repeatCount: number;
+  /** The longest fact in the group — the fullest wording, used as the suggested text. */
+  representativeFact: string;
+  /** Every distinct citation across the group, sorted. */
+  citations: string[];
+  memoryIds: string[];
+}
+
+/** A server memory citing one or more files that no longer exist in the working tree. */
+export interface ServerMemoryStaleCitation {
+  id: string;
+  subject: string;
+  fact: string;
+  missingPaths: string[];
+  /** True when *every* checkable citation is missing — nothing in the tree backs this memory. */
+  fullyStale: boolean;
+}
+
+/**
+ * Full analysis of one repository's server-side memory store, produced by
+ * `analyzeServerMemories()`. Consumed by the CLI report and the VS Code extension host;
+ * the webview gets the smaller {@link ServerMemoriesAnalysisView} instead.
+ */
+export interface ServerMemoriesAnalysis {
+  /** `owner/name` the store was read for. */
+  repo: string;
+  /** `undefined` means the enablement check itself failed, not that memory is off. */
+  enabled: boolean | undefined;
+  /** Why the read produced nothing, when it produced nothing. */
+  error?: string;
+  /**
+   * The read filled its requested limit, so these numbers describe a prefix of the store
+   * rather than all of it. The routes carry no pagination cursor, so there is no way to
+   * fetch the remainder — the honest move is to say the figures are partial.
+   */
+  truncated: boolean;
+  totalMemories: number;
+  distinctSubjects: number;
+  /** Memories citing an instruction/doc file — already written down somewhere agents read. */
+  documentedCount: number;
+  /** Total memories sitting inside a promotion group. */
+  promotionCandidateCount: number;
+  /** Promotion groups with more than one member, i.e. facts re-learned at least twice. */
+  repeatedGroupCount: number;
+  /** Ranked by `repeatCount` descending; the API returns no timestamps to rank by instead. */
+  promotionGroups: ServerMemoryPromotionGroup[];
+  /**
+   * Memories with no citation naming a verifiable file in the repository — typically
+   * `User input: ...`, i.e. something a person told the agent rather than something it
+   * derived from code. Excluded from {@link promotionGroups}: the promotion pitch is that
+   * the agent keeps re-deriving a fact from code, which is not true of these, and an
+   * unverifiable claim does not belong in a file every agent reads on every run.
+   */
+  unverifiableCount: number;
+  staleCitations: ServerMemoryStaleCitation[];
+  fullyStaleCount: number;
+  /** Memory counts keyed by storing agent. */
+  byAgent: Record<string, number>;
+  /** Memory counts keyed by storing model. */
+  byModel: Record<string, number>;
+}
+
+/** One promotion group as the webview renders it — see {@link ServerMemoriesAnalysisView}. */
+export interface ServerMemoryPromotionGroupView {
+  displaySubject: string;
+  repeatCount: number;
+  representativeFact: string;
+  citationCount: number;
+}
+
+/**
+ * Compact projection of {@link ServerMemoriesAnalysis} sent to the Usage Analysis webview.
+ *
+ * Unlike {@link MemoryFilesAnalysisView} this keeps fact text, because for server memories the
+ * fact is the finding — a promotion suggestion the user cannot read is not a suggestion. What
+ * it drops is bulk: only the top few promotion groups travel, and the per-memory stale-citation
+ * list stays on the host side.
+ */
+export interface ServerMemoriesAnalysisView {
+  repo: string;
+  enabled: boolean | undefined;
+  error?: string;
+  /** See {@link ServerMemoriesAnalysis.truncated}; the counts below are a prefix when true. */
+  truncated: boolean;
+  totalMemories: number;
+  distinctSubjects: number;
+  documentedCount: number;
+  promotionCandidateCount: number;
+  repeatedGroupCount: number;
+  fullyStaleCount: number;
+  topPromotionGroups: ServerMemoryPromotionGroupView[];
+}
+
+/**
  * One conversation returned by Mistral's (beta) Agents `/v1/conversations` listing.
  * The Mistral Agents/Conversations API is in beta — fields are best-effort and may change.
  * Only fields the extension actually consumes are typed; the raw `metadata` object is

@@ -81,6 +81,8 @@ import type {
   CorrectionSessionEntry,
   RepeatedTaskReport,
   MemoryFilesAnalysis,
+  ServerMemoriesAnalysis,
+  ServerMemoriesAnalysisView,
 } from '../../src/types';
 import {
 	ensureContextPressure,
@@ -134,6 +136,44 @@ import {
  * (e.g. periodic Usage Analysis refreshes while the panel is open).
  */
 const MEMORY_FILES_SCAN_TTL_MS = 5 * 60 * 1000;
+
+// --- Copilot server-side repository memories ---
+import {
+  fetchRepoMemories as _fetchRepoMemories,
+  analyzeServerMemories as _analyzeServerMemories,
+  parseRepoFromRemoteUrl as _parseRepoFromRemoteUrl,
+  toServerMemoriesAnalysisView as _toServerMemoriesAnalysisView,
+  createRepoFileExists as _createRepoFileExists,
+} from '../../src/copilotServerMemories';
+import { readGitOriginUrl as _readGitOriginUrl, isGitRepoRoot as _isGitRepoRoot } from '../../src/darkFactorySignals';
+
+/**
+ * Minimum time between reads of a repository's server-side memory store.
+ *
+ * Far longer than {@link MEMORY_FILES_SCAN_TTL_MS} because this one costs a network round
+ * trip to GitHub rather than a local filesystem walk, and a memory store only changes when
+ * a coding-agent run stores something — on the order of hours, not minutes.
+ */
+const SERVER_MEMORIES_FETCH_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * How long the silent GitHub session lookup may take before it is treated as "no session".
+ *
+ * A local, non-prompting call, so this is generous only to avoid flapping on a busy host —
+ * its job is to make sure a stalled auth provider cannot leave the in-flight guard set and
+ * silently disable the section for the rest of the session.
+ */
+const SERVER_MEMORIES_AUTH_TIMEOUT_MS = 10 * 1000;
+
+/**
+ * VS Code's built-in **public** GitHub authentication provider.
+ *
+ * Named separately from `getGitHubAuthProviderId()`, which resolves to `github-enterprise`
+ * when `github-enterprise.uri` is set. The memory feature is pinned to public GitHub at both
+ * ends — it only parses github.com remotes and only calls api.githubcopilot.com — so it must
+ * not pick up an Enterprise token that was never issued for that host.
+ */
+const PUBLIC_GITHUB_AUTH_PROVIDER_ID = 'github';
 
 // --- Insights engine ---
 import type { TaskCategory, TaskCategoryBreakdown } from '../../src/taskClassification';
@@ -495,6 +535,65 @@ export function isMemoryFilesScanFresh(
 	ttlMs: number,
 ): boolean {
 	return lastScannedAt !== undefined && (now - lastScannedAt) < ttlMs;
+}
+
+/** Inputs to {@link decideServerMemoriesRefresh}, all read from tracker state at call time. */
+export interface ServerMemoriesRefreshInputs {
+	/** The `serverMemories.enabled` setting. */
+	enabled: boolean;
+	/** `owner/name` the workspace currently resolves to, or undefined for a non-GitHub folder. */
+	currentRepo: string | undefined;
+	/** Checkout root the workspace currently resolves to. */
+	currentRepoRoot: string | undefined;
+	/** `owner/name` the cached analysis belongs to. */
+	cachedRepo: string | undefined;
+	/**
+	 * Checkout root the cached analysis was computed against. Part of the identity because
+	 * the stale-citation counts are file-existence results from *that* tree: two worktrees of
+	 * one repository share a slug but not their working files.
+	 */
+	cachedRepoRoot: string | undefined;
+	/** When the cached analysis was stored. */
+	fetchedAt: number | undefined;
+	/** Whether a fetch is already running. */
+	fetchInFlight: boolean;
+	now: number;
+	ttlMs: number;
+}
+
+/**
+ * Decide what a server-memories refresh pass should do, kept pure so the ordering rules can
+ * be tested without a workspace, a network or a VS Code host — the same reason
+ * {@link isMemoryFilesScanFresh} exists.
+ *
+ * The ordering is the whole point, and two orderings that look equivalent are not:
+ *
+ *  - **The repository is resolved before anything else is consulted.** The TTL answers "is
+ *    *this repository's* store still fresh?", so checking it first lets a workspace switch
+ *    keep showing the previous repository's memories until the hour elapses.
+ *  - **A stale repository is cleared even while a fetch is in flight.** Returning early on
+ *    the in-flight guard leaves the previous repository's analysis in place, so it keeps
+ *    being rendered until that request *and* a later refresh both finish. Whether we may
+ *    start a new request is a separate question from whether what we are showing is still
+ *    the right repository's.
+ */
+export function decideServerMemoriesRefresh(input: ServerMemoriesRefreshInputs): { clearCache: boolean; startFetch: boolean } {
+	// Switching the feature off must hide what was already fetched, not merely stop fetching.
+	if (!input.enabled) { return { clearCache: true, startFetch: false }; }
+	// A non-GitHub folder has no store to show, including any left over from a folder that did.
+	if (!input.currentRepo) { return { clearCache: true, startFetch: false }; }
+
+	const moved = input.cachedRepo !== undefined
+		&& (input.cachedRepo !== input.currentRepo || input.cachedRepoRoot !== input.currentRepoRoot);
+	// Drop the old context's result now; only the fetch itself has to wait for a free slot.
+	if (moved) { return { clearCache: true, startFetch: !input.fetchInFlight }; }
+
+	if (input.fetchInFlight) { return { clearCache: false, startFetch: false }; }
+	const fresh = input.cachedRepo === input.currentRepo
+		&& input.cachedRepoRoot === input.currentRepoRoot
+		&& input.fetchedAt !== undefined
+		&& (input.now - input.fetchedAt) < input.ttlMs;
+	return { clearCache: false, startFetch: !fresh };
 }
 
 /** The verified output of one refresh pass, as handed to publishRefreshResult(). */
@@ -1170,6 +1269,40 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * within-TTL result the user is specifically asking to update.
 	 */
 	private _memoryFilesAnalysisScannedAt: number | undefined;
+	/**
+	 * Last successful read of the workspace repository's server-side memory store.
+	 *
+	 * Held separately from the computed-stats caches because it is fetched out of band: the
+	 * stats build is synchronous and must not wait on a network call, so it renders whatever
+	 * this field holds and a background refresh updates it for the *next* render.
+	 */
+	private _serverMemoriesAnalysis: ServerMemoriesAnalysis | null | undefined;
+	/** Wall-clock time (ms) of the last server-memory fetch attempt, successful or not. */
+	private _serverMemoriesFetchedAt: number | undefined;
+	/**
+	 * `owner/name` that {@link _serverMemoriesAnalysis} belongs to. The TTL alone is not enough:
+	 * it answers "is this repository's store still fresh?", so without the slug a workspace
+	 * switch would keep showing the previous repository's memories until the hour elapsed.
+	 */
+	private _serverMemoriesRepo: string | undefined;
+	/**
+	 * Checkout root {@link _serverMemoriesAnalysis} was computed against. The slug alone is not
+	 * enough either: the stale-citation counts are file-existence results from a specific tree,
+	 * and two worktrees of one repository share a slug while having different files on disk —
+	 * which this repository's own workflow makes a routine case rather than a corner one.
+	 */
+	private _serverMemoriesRepoRoot: string | undefined;
+	/**
+	 * Bumped by {@link invalidateServerMemoriesCache}. A fetch captures this when it starts
+	 * and must still match to publish, which is the only thing that can stop a request begun
+	 * under one account from landing after the user has switched to another — the identity
+	 * checks cannot see that change, since the setting, repository and root are all unchanged.
+	 * Mirrors the `_cacheGeneration`/`isComputedStatsCurrent()` guard used for the other
+	 * computed-stat caches.
+	 */
+	private _serverMemoriesGeneration = 0;
+	/** In-flight fetch, so concurrent refreshes coalesce into one request rather than racing. */
+	private _serverMemoriesFetchInFlight: Promise<void> | undefined;
 	private lastDashboardData: any | undefined;
 	/** Insight engine: persisted state for all surfaced insights. */
 	private _insightStateBag: InsightStateBag = {};
@@ -2470,12 +2603,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!announcement) { return; }
 
 		const { feature, release } = announcement;
-		this.log(`📣 What's New: announcing "${feature.title}" from ${release.version}`);
+		this.log(`📣 What's New: announcing "${l10nT(feature.titleKey)}" from ${release.version}`);
 		const kindLabel = feature.kind === 'view' ? 'view' : feature.kind === 'tab' ? 'tab' : 'section';
 		const takeMeThere = l10n.t('whatsNew.takeMeThere');
 		const seeAll = l10n.t('whatsNew.seeAll');
 		const choice = await vscode.window.showInformationMessage(
-			`✨ New ${kindLabel}: ${feature.title} — ${feature.description}`,
+			`✨ New ${kindLabel}: ${l10nT(feature.titleKey)} — ${l10nT(feature.descriptionKey)}`,
 			takeMeThere,
 			seeAll,
 		);
@@ -2535,8 +2668,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	} {
 		const projectFeature = (feature: WhatsNewFeature) => ({
 			id: feature.id,
-			title: feature.title,
-			description: feature.description,
+			// Resolved here, at the render boundary: catalog.ts is pure and holds keys.
+			title: l10nT(feature.titleKey),
+			description: l10nT(feature.descriptionKey),
 			kind: feature.kind,
 			// "Not opened yet" is measured from when this build first ran, not from
 			// the dawn of time: a tab visited a year ago on an older version says
@@ -2546,7 +2680,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const projectRelease = (release: WhatsNewRelease) => ({
 			version: release.version,
 			date: release.date,
-			headline: release.headline,
+			headline: l10nT(release.headlineKey),
 			isCurrent: release.version === packageJson.version,
 			features: release.features.map(projectFeature),
 		});
@@ -2682,6 +2816,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private setupGitHubAuthListener(context: vscode.ExtensionContext): void {
 		context.subscriptions.push(
 			vscode.authentication.onDidChangeSessions(async (e) => {
+				// Checked against the *public* provider, and before either early return below:
+				// the repository-memory cache is keyed by repository and checkout root, not by
+				// identity, so a sign-out or account switch would otherwise keep showing data
+				// fetched under the old session for up to the full TTL. The handler below filters
+				// on getGitHubAuthProviderId(), which names the Enterprise provider on a GHES
+				// install — a provider this feature deliberately never authenticates with.
+				if (e.provider.id === PUBLIC_GITHUB_AUTH_PROVIDER_ID) { this.invalidateServerMemoriesCache(); }
 				const authProviderId = getGitHubAuthProviderId();
 				if (e.provider.id !== authProviderId) { return; }
 				if (this._githubSignedOutByUser) { return; }
@@ -2722,6 +2863,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		context.subscriptions.push(
 			vscode.workspace.onDidChangeConfiguration(e => {
 				if (e.affectsConfiguration('aiEngineeringFluency.display')) { this.refreshOpenPanelsForSettingChange(); }
+				// Without this the opt-out only takes effect on the next periodic refresh, so a
+				// user who switches it off keeps looking at the card they just disabled.
+				if (e.affectsConfiguration('aiEngineeringFluency.serverMemories')) { this.invalidateServerMemoriesCache(); }
 				if (e.affectsConfiguration('aiEngineeringFluency.backend')) {
 					this.startBackendSyncAfterInitialAnalysis();
 					const backend = this.backend;
@@ -3398,6 +3542,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (session) {
 				this.githubSession = session;
 				this._githubSignedOutByUser = false;
+				// Symmetric with sign-out: the flag that suppressed the memory fetch has just
+				// been lifted, so re-render rather than leaving the section blank until the
+				// next periodic refresh happens to come round.
+				this.invalidateServerMemoriesCache();
 				await this.context.globalState.update('github.signedOutByUser', false);
 				this.log(`✅ Successfully authenticated as ${session.account.label}`);
 				vscode.window.showInformationMessage(`GitHub authentication successful! Logged in as ${session.account.label}`);
@@ -3422,6 +3570,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			await this.context.globalState.update('github.authenticated', false);
 			await this.context.globalState.update('github.username', undefined);
 			await this.context.globalState.update('github.signedOutByUser', true);
+			// Clear the repository-memory cache with the other GitHub-derived snapshots below.
+			// Explicit sign-out revokes nothing at the provider — the VS Code session survives —
+			// so without this an already-fetched analysis stays renderable, and the next refresh
+			// would happily reuse that still-valid session.
+			this.invalidateServerMemoriesCache();
 			this.log('✅ Successfully signed out from GitHub');
 			vscode.window.showInformationMessage('Signed out from GitHub successfully.');
 
@@ -6476,6 +6629,249 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this._statsGeneration.memoryFiles = originGeneration;
 		}
 		return result;
+	}
+
+	/**
+	 * Is the server-memories section switched on? Defaults to on, with its own opt-out because
+	 * this section reads from GitHub on a background refresh. That is not a claim the view is
+	 * otherwise offline — the same refresh path already fetches Repository PR and Cloud Agent
+	 * data — only that this section has a switch of its own.
+	 */
+	private getServerMemoriesEnabledSetting(): boolean {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('serverMemories.enabled', true);
+	}
+
+	/**
+	 * Resolve the workspace's `owner/name`, reusing the shared git-config reader rather than
+	 * spawning `git remote get-url` (see `readGitOriginUrl`). Returns undefined when there is
+	 * no folder open, no origin remote, or the remote is not a GitHub repository — all of
+	 * which mean there is no memory store to ask about.
+	 */
+	/**
+	 * Drop any cached repository-memory analysis and re-render the open panel.
+	 *
+	 * Called when something the cache identity does *not* cover changes: the signed-in
+	 * account, or the feature's own setting. The identity is repository + checkout root,
+	 * which is right for "is this the same store?" but says nothing about who we asked as, so
+	 * those two need an explicit nudge rather than waiting out the TTL.
+	 */
+	private invalidateServerMemoriesCache(): void {
+		// Bump first: any request already in flight captured the previous value and is now
+		// disqualified from publishing, rather than overwriting this clear when it returns.
+		this._serverMemoriesGeneration++;
+		this._serverMemoriesAnalysis = undefined;
+		this._serverMemoriesRepo = undefined;
+		this._serverMemoriesRepoRoot = undefined;
+		this._serverMemoriesFetchedAt = undefined;
+		if (this.analysisPanel) { this.refreshOpenPanelsForSettingChange(); }
+	}
+
+	private resolveWorkspaceRepoSlug(): { repoRoot: string; repo: string } | undefined {
+		// Workspace trust gates this, for the same reason it gates the repository hygiene
+		// analysis in ensureWorkspaceTrustedForGitAccess(). Everything downstream is driven by
+		// a file the checkout controls: `.git/config` names the repository, which decides what
+		// this asks the Copilot API for with the user's token, and the citations that come
+		// back decide which local paths get probed. Merely *opening* a hostile repository
+		// should not be enough to start authenticated network work on its behalf.
+		//
+		// This returns undefined rather than throwing, unlike the hygiene analysis: that one
+		// is an explicit user action that deserves an explanation, while this runs on a
+		// background refresh, where the right outcome is simply no section.
+		if (!vscode.workspace.isTrusted) { return undefined; }
+		for (const folder of vscode.workspace.workspaceFolders ?? []) {
+			// A virtual workspace has no local git config or working tree to inspect, and
+			// `fsPath` on a non-file URI is not a usable filesystem path.
+			if (folder.uri.scheme !== 'file') { continue; }
+			const repoRoot = this.findGitRepoRoot(folder.uri.fsPath);
+			if (!repoRoot) { continue; }
+			const originUrl = _readGitOriginUrl(repoRoot);
+			const repo = originUrl ? _parseRepoFromRemoteUrl(originUrl) : undefined;
+			if (repo) { return { repoRoot, repo }; }
+		}
+		return undefined;
+	}
+
+	/**
+	 * Walk up from `startPath` to the nearest ancestor that is a git repository root.
+	 *
+	 * An open workspace folder is often *not* the repository root — opening a subdirectory
+	 * of a checkout is ordinary. `readGitOriginUrl()` only looks for `<dir>/.git`, so
+	 * without this the section would silently vanish for those workspaces, which reads
+	 * exactly like "this repository has no memories". The root also has to be right for its
+	 * own sake: citation staleness resolves repo-relative paths against it, so a
+	 * subdirectory base would make every citation look missing.
+	 */
+	private findGitRepoRoot(startPath: string): string | undefined {
+		const path = require('path') as typeof import('path');
+		let current = path.resolve(startPath);
+		// Stop at the filesystem root, where `dirname` becomes a fixed point.
+		for (let parent = path.dirname(current); ; current = parent, parent = path.dirname(current)) {
+			if (_isGitRepoRoot(current)) { return current; }
+			if (parent === current) { return undefined; }
+		}
+	}
+
+	/**
+	 * Refresh {@link _serverMemoriesAnalysis} in the background when it is stale.
+	 *
+	 * Fire-and-forget on purpose: the stats build that calls this is synchronous, so the
+	 * result lands in the *next* render rather than this one. That is acceptable for a panel
+	 * that refreshes periodically, and it keeps a slow or unreachable GitHub from delaying
+	 * every other number on the view.
+	 *
+	 * Authentication is silent-only. If the user has no GitHub session already, the section
+	 * stays empty rather than popping a sign-in prompt at them for a secondary insight.
+	 */
+	/**
+	 * A public-GitHub access token for the signed-in user, or undefined when there is no
+	 * session to reuse.
+	 *
+	 * The public `github` provider specifically, NOT getGitHubAuthProviderId(). That helper
+	 * follows the `github-enterprise.uri` setting, but this feature is fixed to public GitHub
+	 * at both ends: the remote parser only accepts github.com repositories, and the request
+	 * always goes to api.githubcopilot.com. With an Enterprise endpoint configured and a
+	 * public checkout open, the helper would hand us a GHES token to send to a host it was
+	 * never issued for.
+	 *
+	 * `silent: true` never prompts, so a user without a session sees nothing rather than a
+	 * sign-in dialog for a secondary insight. It also only returns a session that already
+	 * covers the requested scopes, which is why this asks for the same `read:user` scope every
+	 * other getSession() call in this file uses rather than anything wider: a broader request
+	 * would come back empty for users who have already granted the narrower one.
+	 */
+	private async getPublicGitHubTokenSilently(): Promise<string | undefined> {
+		// Signing out in this extension does not revoke the provider session, so getSession()
+		// would still hand one back. Honour the user's decision instead: they asked us to stop
+		// using their GitHub identity, and a background fetch is exactly the kind of thing they
+		// meant. The flag is cleared when they authenticate again.
+		if (this._githubSignedOutByUser) { return undefined; }
+		// Bounded, and never throws. This call is awaited inside the same in-flight promise as
+		// the memory requests, which are themselves timed out — but an auth provider that
+		// stalls would wedge the guard just as surely as a hung socket, and one that rejects
+		// would reach the outer catch, which stamps a fresh one-hour timestamp and so hides
+		// the failure while suppressing every retry. Returning undefined instead routes both
+		// cases through the no-session path, which deliberately does not mark the cache fresh.
+		try {
+			const session = await Promise.race([
+				vscode.authentication.getSession(PUBLIC_GITHUB_AUTH_PROVIDER_ID, ['read:user'], { silent: true }),
+				new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), SERVER_MEMORIES_AUTH_TIMEOUT_MS)),
+			]);
+			return session?.accessToken;
+		} catch (err) {
+			this.log(`⚠️ Server memories: GitHub session lookup failed: ${String(err)}`);
+			return undefined;
+		}
+	}
+
+	private scheduleServerMemoriesRefresh(): void {
+		// The workspace is resolved unconditionally, before any early return, so that a switch
+		// away from a repository clears what is on screen even while that repository's own
+		// fetch is still running. See decideServerMemoriesRefresh() for why the order matters.
+		const context = this.resolveWorkspaceRepoSlug();
+		const decision = decideServerMemoriesRefresh({
+			enabled: this.getServerMemoriesEnabledSetting(),
+			currentRepo: context?.repo,
+			currentRepoRoot: context?.repoRoot,
+			cachedRepo: this._serverMemoriesRepo,
+			cachedRepoRoot: this._serverMemoriesRepoRoot,
+			fetchedAt: this._serverMemoriesFetchedAt,
+			fetchInFlight: this._serverMemoriesFetchInFlight !== undefined,
+			now: Date.now(),
+			ttlMs: SERVER_MEMORIES_FETCH_TTL_MS,
+		});
+
+		if (decision.clearCache) {
+			this._serverMemoriesAnalysis = null;
+			this._serverMemoriesRepo = undefined;
+			this._serverMemoriesRepoRoot = undefined;
+			this._serverMemoriesFetchedAt = undefined;
+		}
+		if (!decision.startFetch || !context) { return; }
+
+		const generation = this._serverMemoriesGeneration;
+		this._serverMemoriesFetchInFlight = (async () => {
+			try {
+				// Resolved up front rather than inside getToken() so "the user is not signed in"
+				// stays distinct from "the request failed". Both would otherwise arrive as a
+				// `result.error` and render the unavailable card, contradicting the documented
+				// behaviour that a user without a session simply sees nothing. A genuine request
+				// failure still surfaces, which is the case worth showing.
+				const token = await this.getPublicGitHubTokenSilently();
+				if (!token) {
+					// Deliberately NOT marked fresh. Signing in is something the user can do at
+					// any moment, and stamping a full TTL here would leave the section empty for
+					// an hour afterwards even though a session is now available. Leaving the
+					// timestamp unset makes the next refresh retry; the retry is a local,
+					// non-prompting getSession() call, so repeating it costs nothing.
+					if (this.isServerMemoriesContextCurrent(context, generation)) {
+						this._serverMemoriesAnalysis = null;
+						this._serverMemoriesRepo = undefined;
+						this._serverMemoriesRepoRoot = undefined;
+						this._serverMemoriesFetchedAt = undefined;
+					}
+					return;
+				}
+				const result = await _fetchRepoMemories(context.repo, {
+					getToken: async () => token,
+				});
+				// Symlink-safe: existsSync() follows links, so a repository symlink pointing out of
+				// the checkout would turn a lexically-innocent citation into a probe of an
+				// arbitrary path. createRepoFileExists() resolves the real path and requires it
+				// to stay under the real root.
+				const analysis = _analyzeServerMemories(result, {
+					fileExists: _createRepoFileExists(context.repoRoot),
+				});
+				// The workspace can change, or the user can switch the feature off, while this
+				// request is in flight. Publishing unconditionally would then put one repository's
+				// memories on screen for another — or restore a section the user just disabled.
+				if (this.isServerMemoriesContextCurrent(context, generation)) {
+					this._serverMemoriesAnalysis = analysis;
+					this._serverMemoriesRepo = context.repo;
+					this._serverMemoriesRepoRoot = context.repoRoot;
+					this._serverMemoriesFetchedAt = Date.now();
+				}
+			} catch (err) {
+				this.log(`⚠️ Server memories fetch failed: ${String(err)}`);
+				if (this.isServerMemoriesContextCurrent(context, generation)) {
+					this._serverMemoriesAnalysis = null;
+					this._serverMemoriesRepo = context.repo;
+					this._serverMemoriesRepoRoot = context.repoRoot;
+					this._serverMemoriesFetchedAt = Date.now();
+				}
+			} finally {
+				this._serverMemoriesFetchInFlight = undefined;
+			}
+		})();
+	}
+
+	/**
+	 * Is a finished fetch for `repo` still the one the view wants?
+	 *
+	 * False when the feature was switched off mid-flight, or when the workspace has since
+	 * resolved to a different repository — in either case the result must be dropped rather
+	 * than published over the current context.
+	 */
+	private isServerMemoriesContextCurrent(context: { repo: string; repoRoot: string }, generation: number): boolean {
+		// A fetch begun before an explicit sign-out must not publish after it. The generation
+		// bump from invalidateServerMemoriesCache() already covers this, but the flag is
+		// checked directly so the guarantee does not depend on that one call site.
+		if (this._githubSignedOutByUser) { return false; }
+		// The generation is the part the other three cannot express: signing out or switching
+		// account leaves the setting, repository and root all identical, so without it a
+		// response fetched under the previous token would publish into the new session's view.
+		if (generation !== this._serverMemoriesGeneration) { return false; }
+		if (!this.getServerMemoriesEnabledSetting()) { return false; }
+		const current = this.resolveWorkspaceRepoSlug();
+		return current?.repo === context.repo && current?.repoRoot === context.repoRoot;
+	}
+
+	/**
+	 * The server-memories projection for a webview payload, kicking off a background refresh
+	 * when the cached read has aged out.
+	 */
+	private buildServerMemoriesView(): ServerMemoriesAnalysisView | null {
+		this.scheduleServerMemoriesRefresh();
+		return _toServerMemoriesAnalysisView(this._serverMemoriesAnalysis ?? null);
 	}
 
 	async openMcpJson(): Promise<void> {
@@ -10172,6 +10568,7 @@ private computeFallbackDailyRollup(
 			repeatedTasks: analysisStats.repeatedTasks ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
 			memoryFilesAnalysis: _toMemoryFilesAnalysisView(analysisStats.memoryFilesAnalysis ?? null),
+			serverMemoriesAnalysis: this.buildServerMemoriesView(),
 			copilotApiBalance: this._buildCopilotApiBalance(),
 			monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
 			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
@@ -15525,6 +15922,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       correctionReport: stats.correctionReport ?? null,
       curationAnalysis: stats.curationAnalysis ?? null,
       memoryFilesAnalysis: _toMemoryFilesAnalysisView(stats.memoryFilesAnalysis ?? null),
+      serverMemoriesAnalysis: this.buildServerMemoriesView(),
       sessionColumnSettings,
       copilotApiBalance: this._buildCopilotApiBalance(),
       monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
