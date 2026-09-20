@@ -622,7 +622,11 @@ function fetchPrCopilotReviewRequestsPage(owner: string, repo: string, prNumber:
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
-					Accept: GITHUB_API_ACCEPT_V3,
+					// The Timeline API is long-GA on github.com, but some older GitHub Enterprise Server
+					// versions still gate it behind the "mockingbird" preview media type and 415 without
+					// it. Listing both keeps this working on github.com (which ignores the unused
+					// preview type) and on those older GHES instances alike.
+					Accept: `application/vnd.github.mockingbird-preview+json,${GITHUB_API_ACCEPT_V3}`,
 				},
 			},
 			(res) => {
