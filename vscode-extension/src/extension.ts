@@ -328,6 +328,7 @@ import {
 	fetchCopilotTokenEndpointInfo,
 	fetchUserEnterprises,
 	fetchEnterprisePremiumBudgets,
+	fetchPrCopilotReviewActivity,
 	type CopilotPlanInfo,
 	type RepoPrDetail,
 	type RepoPrInfo,
@@ -10050,6 +10051,13 @@ private computeFallbackDailyRollup(
 				return toolName ? this._handleSuppressUnknownTool(toolName) : undefined;
 			},
 			loadRepoPrStats: () => this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats()),
+			checkCcrActivity: (message) => {
+				const owner = typeof message.owner === 'string' ? message.owner : '';
+				const repo = typeof message.repo === 'string' ? message.repo : '';
+				const prNumber = typeof message.prNumber === 'number' ? message.prNumber : Number(message.prNumber);
+				if (!owner || !repo || !Number.isFinite(prNumber) || prNumber <= 0) { return undefined; }
+				return this.dispatch(`checkCcrActivity:${owner}/${repo}#${prNumber}`, () => this.handleCheckCcrActivity(owner, repo, prNumber));
+			},
 			loadAgentSessions: () => this.dispatch('loadAgentSessions', () => this.loadAgentSessions()),
 			loadRecentSessions: (message) => this.dispatch(`loadRecentSessions:${message.period}`, () => this.loadRecentSessions(message.period as ChartTimeWindow)),
 			openSessionFile: (message) => this._handleOpenSessionFile(message),
@@ -10265,6 +10273,42 @@ private computeFallbackDailyRollup(
 				command: 'repoAnalysisError',
 				error: error instanceof Error ? error.message : String(error),
 				workspacePath
+			});
+		}
+	}
+
+	/**
+	 * On-demand only (never part of the hourly `refreshRepoPrStatsSnapshot` bulk pass): fetches one
+	 * PR's actual Copilot Code Review history — every completed review plus who requested each one —
+	 * via `fetchPrCopilotReviewActivity`. This is the fix for the "open PRs only" caveat on the
+	 * Repository PRs tab (`repoPrSnapshotFootnoteHtml`): the bulk snapshot only sees a *pending*
+	 * review request, which GitHub clears once Copilot posts its review, so a merged or already-
+	 * reviewed PR shows nothing there. This call looks at the PR's reviews + issue timeline directly,
+	 * so it works regardless of the PR's current state — at the cost of two extra GitHub API requests,
+	 * which is why it's gated behind the user clicking a specific PR rather than run for every PR.
+	 */
+	private async handleCheckCcrActivity(owner: string, repo: string, prNumber: number): Promise<void> {
+		if (!this.analysisPanel) { return; }
+		try {
+			const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+			if (!session) {
+				this.analysisPanel.webview.postMessage({ command: 'ccrActivityError', owner, repo, prNumber, error: 'Not signed in to GitHub' });
+				return;
+			}
+			const activity = await fetchPrCopilotReviewActivity(owner, repo, prNumber, session.accessToken);
+			if (activity.error) {
+				this.analysisPanel.webview.postMessage({ command: 'ccrActivityError', owner, repo, prNumber, error: activity.error });
+				return;
+			}
+			this.analysisPanel.webview.postMessage({
+				command: 'ccrActivityResult', owner, repo, prNumber,
+				reviews: activity.reviews, requests: activity.requests,
+			});
+		} catch (error) {
+			this.error(`Failed to check Copilot Code Review activity for ${owner}/${repo}#${prNumber}`, error);
+			this.analysisPanel?.webview.postMessage({
+				command: 'ccrActivityError', owner, repo, prNumber,
+				error: error instanceof Error ? error.message : String(error),
 			});
 		}
 	}

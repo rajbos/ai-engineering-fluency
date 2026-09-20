@@ -8,6 +8,7 @@ import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { localize, localizeFormat } from '../shared/localization';
 import { applyWebviewLocale } from '../shared/webviewLocale';
 import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
+import { renderCcrCheckButtonHtml, wireCcrActivityButtons, renderCcrActivityResult } from './ccrActivity';
 import {
 	hasContextWindowData,
 	sanitizeAutomaticCompactions,
@@ -2664,9 +2665,12 @@ function renderRepoPrRow(r: RepoPrInfo, cell: string, cellCenter: string): strin
 	// Collapsible detail list
 	let detailsHtml = '';
 	if (r.aiDetails.length > 0) {
-		const items = r.aiDetails.map(d =>
-			`<li><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d.number} ${escapeHtml(d.title)}</a> — ${AI_PR_LABEL[d.aiType] ?? escapeHtml(String(d.aiType))} (${d.role === 'author' ? 'authored' : 'review requested'})</li>`
-		).join('');
+		const items = r.aiDetails.map(d => {
+			const ccrButton = (d.role === 'reviewer-requested' && d.aiType === 'copilot')
+				? renderCcrCheckButtonHtml(r.owner, r.repo, d.number)
+				: '';
+			return `<li><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d.number} ${escapeHtml(d.title)}</a> — ${AI_PR_LABEL[d.aiType] ?? escapeHtml(String(d.aiType))} (${d.role === 'author' ? 'authored' : 'review requested'})${ccrButton}</li>`;
+		}).join('');
 		detailsHtml = `
 			<details style="margin-top:4px; font-size:11px;">
 				<summary style="cursor:pointer; color:var(--text-secondary);">Show ${r.aiDetails.length} detail(s)</summary>
@@ -2757,7 +2761,8 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 			</table>
 		</div>
 		<div style="margin-top:8px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:8px;">
-			† Copilot Review Agent requested counts are for open PRs only. GitHub removes reviewer data after a PR is merged or closed.<br/>
+			† Copilot Review Agent requested counts are for open PRs only. GitHub removes reviewer data after a PR is merged or closed —
+			click "Check actual CCR activity" on a listed PR to look up its full review history regardless of state.<br/>
 			🤖 Cloud Agent Authored = PR author's GitHub login matches a known cloud agent (e.g. <code>copilot-swe-agent</code>, <code>claude-code-action</code>, <code>openai-code-agent</code>).
 		</div>`;
 }
@@ -5995,6 +6000,10 @@ function wireRepositoryButtons(): void {
 			renderRepositoryHygienePanels();
 		}
 	});
+
+	// Delegated on the persistent container (its innerHTML is replaced wholesale on every
+	// `updateReposPrPanel` re-render) so this keeps working across refreshes without rewiring.
+	wireCcrActivityButtons('repos-pr-content', (message) => vscode.postMessage(message));
 }
 
 /** Wires up copy-to-clipboard buttons (class `cf-copy`). */
@@ -6144,9 +6153,18 @@ function handleRepoAnalysisMessage(message: any): boolean {
 	return false;
 }
 
+function handleCcrActivityMessage(message: any): boolean {
+	if (message.command === 'ccrActivityResult' || message.command === 'ccrActivityError') {
+		renderCcrActivityResult(String(message.owner ?? ''), String(message.repo ?? ''), Number(message.prNumber), message);
+		return true;
+	}
+	return false;
+}
+
 function handleExtensionMessage(message: any): void {
 	if (handleLoadingStateMessage(message)) { return; }
 	if (handleRepoAnalysisMessage(message)) { return; }
+	if (handleCcrActivityMessage(message)) { return; }
 	switch (message.command) {
 		case 'updateStats':
 			handleUpdateStats(message); break;

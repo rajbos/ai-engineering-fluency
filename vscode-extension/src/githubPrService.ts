@@ -503,6 +503,175 @@ function fetchPrCommitMessagesPage(owner: string, repo: string, prNumber: number
 	});
 }
 
+// ---------------------------------------------------------------------------
+// Copilot Code Review (CCR) activity — reviews + who requested them
+// ---------------------------------------------------------------------------
+
+/** Login GitHub's code review bot posts completed reviews as. */
+const COPILOT_REVIEWER_BOT_LOGIN = 'copilot-pull-request-reviewer[bot]';
+/** Name GitHub uses for Copilot on `review_requested` timeline events — distinct from the bot login above. */
+const COPILOT_REVIEWER_REQUEST_NAME = 'Copilot';
+
+export type CcrReview = {
+	/** ISO timestamp the review was submitted. */
+	submittedAt: string;
+	/** GitHub review state, e.g. "COMMENTED", "APPROVED", "CHANGES_REQUESTED". */
+	state: string;
+};
+
+export type CcrReviewRequest = {
+	/** Login of the actor (human or bot) who requested Copilot as a reviewer. */
+	requestedBy: string;
+	/** ISO timestamp the request was made. */
+	requestedAt: string;
+};
+
+export type PrCopilotReviewActivity = {
+	/** Completed Copilot code reviews on the PR — each one is a billable CCR event. */
+	reviews: CcrReview[];
+	/**
+	 * `review_requested` events that named Copilot — the best non-admin-reachable signal for who
+	 * is likely billed for each review. GitHub bills either the requester (manual per-review
+	 * request) or the PR author (repo-wide auto-review setting); this API cannot distinguish the
+	 * two modes, so `requestedBy` is a proxy, not a confirmed billing attribution.
+	 */
+	requests: CcrReviewRequest[];
+	error?: string;
+};
+
+/** Fetch completed Copilot code reviews for one PR via `GET /pulls/{number}/reviews`. */
+function fetchPrCopilotReviewsPage(owner: string, repo: string, prNumber: number, token: string): Promise<{ reviews: CcrReview[]; statusCode?: number; error?: string }> {
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
+	return new Promise((resolve) => {
+		const req = https.request(
+			{
+				hostname,
+				path: `${restPathPrefix}/repos/${owner}/${repo}/pulls/${prNumber}/reviews?per_page=100`,
+				headers: {
+					Authorization: `Bearer ${token}`,
+					'User-Agent': GITHUB_API_USER_AGENT,
+					Accept: GITHUB_API_ACCEPT_V3,
+				},
+			},
+			(res) => {
+				let data = '';
+				res.on('data', (chunk) => (data += chunk));
+				res.on('end', () => {
+					try {
+						const parsed = JSON.parse(data);
+						if (!Array.isArray(parsed)) {
+							resolve({ reviews: [], statusCode: res.statusCode, error: parsed.message ?? 'Unexpected API response' });
+							return;
+						}
+						const reviews: CcrReview[] = parsed
+							.filter((r: any) => r?.user?.login === COPILOT_REVIEWER_BOT_LOGIN)
+							.map((r: any) => ({ submittedAt: r.submitted_at, state: r.state }));
+						resolve({ reviews, statusCode: res.statusCode });
+					} catch (e) {
+						resolve({ reviews: [], statusCode: res.statusCode, error: String(e) });
+					}
+				});
+			},
+		);
+		attachRequestFailureHandling(req, 15000, (message) => resolve({ reviews: [], error: message }));
+		req.end();
+	});
+}
+
+/** Fetch `review_requested` timeline events naming Copilot for one PR via `GET /issues/{number}/timeline`. */
+function fetchPrCopilotReviewRequestsPage(owner: string, repo: string, prNumber: number, token: string): Promise<{ requests: CcrReviewRequest[]; statusCode?: number; error?: string }> {
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
+	return new Promise((resolve) => {
+		const req = https.request(
+			{
+				hostname,
+				path: `${restPathPrefix}/repos/${owner}/${repo}/issues/${prNumber}/timeline?per_page=100`,
+				headers: {
+					Authorization: `Bearer ${token}`,
+					'User-Agent': GITHUB_API_USER_AGENT,
+					Accept: GITHUB_API_ACCEPT_V3,
+				},
+			},
+			(res) => {
+				let data = '';
+				res.on('data', (chunk) => (data += chunk));
+				res.on('end', () => {
+					try {
+						const parsed = JSON.parse(data);
+						if (!Array.isArray(parsed)) {
+							resolve({ requests: [], statusCode: res.statusCode, error: parsed.message ?? 'Unexpected API response' });
+							return;
+						}
+						const requests: CcrReviewRequest[] = parsed
+							.filter((e: any) => e?.event === 'review_requested' && e?.requested_reviewer?.login === COPILOT_REVIEWER_REQUEST_NAME)
+							.map((e: any) => ({ requestedBy: e.actor?.login ?? 'unknown', requestedAt: e.created_at }));
+						resolve({ requests, statusCode: res.statusCode });
+					} catch (e) {
+						resolve({ requests: [], statusCode: res.statusCode, error: String(e) });
+					}
+				});
+			},
+		);
+		attachRequestFailureHandling(req, 15000, (message) => resolve({ requests: [], error: message }));
+		req.end();
+	});
+}
+
+/**
+ * Fetch completed Copilot code reviews for one PR.
+ * @param fetcher Injectable low-level fetcher for testing; defaults to the real HTTPS implementation.
+ */
+export function fetchPrCopilotReviews(
+	owner: string,
+	repo: string,
+	prNumber: number,
+	token: string,
+	fetcher: (owner: string, repo: string, prNumber: number, token: string) => Promise<{ reviews: CcrReview[]; statusCode?: number; error?: string }> = fetchPrCopilotReviewsPage,
+): Promise<{ reviews: CcrReview[]; statusCode?: number; error?: string }> {
+	return fetcher(owner, repo, prNumber, token);
+}
+
+/**
+ * Fetch `review_requested` timeline events naming Copilot for one PR.
+ * @param fetcher Injectable low-level fetcher for testing; defaults to the real HTTPS implementation.
+ */
+export function fetchPrCopilotReviewRequests(
+	owner: string,
+	repo: string,
+	prNumber: number,
+	token: string,
+	fetcher: (owner: string, repo: string, prNumber: number, token: string) => Promise<{ requests: CcrReviewRequest[]; statusCode?: number; error?: string }> = fetchPrCopilotReviewRequestsPage,
+): Promise<{ requests: CcrReviewRequest[]; statusCode?: number; error?: string }> {
+	return fetcher(owner, repo, prNumber, token);
+}
+
+/**
+ * Fetch a PR's full Copilot Code Review activity (reviews + who requested them), one call each,
+ * run concurrently. Deliberately **not** wired into `fetchRepoPrs` / any bulk aggregation path —
+ * same reasoning as `fetchPrCommitMessages` above: this is two extra requests per PR, so callers
+ * must fetch it for a deliberately bounded set of PRs (e.g. the signed-in user's own PRs in the
+ * current window), not from the bulk path.
+ */
+export async function fetchPrCopilotReviewActivity(
+	owner: string,
+	repo: string,
+	prNumber: number,
+	token: string,
+	fetchReviews: typeof fetchPrCopilotReviews = fetchPrCopilotReviews,
+	fetchRequests: typeof fetchPrCopilotReviewRequests = fetchPrCopilotReviewRequests,
+): Promise<PrCopilotReviewActivity> {
+	const [reviewsResult, requestsResult] = await Promise.all([
+		fetchReviews(owner, repo, prNumber, token),
+		fetchRequests(owner, repo, prNumber, token),
+	]);
+	const error = reviewsResult.error ?? requestsResult.error;
+	return {
+		reviews: reviewsResult.reviews,
+		requests: requestsResult.requests,
+		...(error ? { error } : {}),
+	};
+}
+
 /**
  * Fetch a single page of PRs from GitHub REST API.
  * @param requestFn Injectable request factory for testing; defaults to the real HTTPS implementation.

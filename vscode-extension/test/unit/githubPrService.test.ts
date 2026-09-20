@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import * as childProcess from 'node:child_process';
 import type * as http from 'node:http';
 import { EventEmitter } from 'node:events';
-import { detectAiType, detectCoAuthorAiType, fetchPrCommitMessages, fetchRepoPrs, fetchRepoPrsPage, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
+import { detectAiType, detectCoAuthorAiType, fetchPrCommitMessages, fetchRepoPrs, fetchRepoPrsPage, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, fetchPrCopilotReviews, fetchPrCopilotReviewRequests, fetchPrCopilotReviewActivity, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
 
 /**
  * Minimal stand-in for `http.ClientRequest`, exercising exactly the surface
@@ -128,6 +128,64 @@ test('fetchPrCommitMessages: propagates error from fetcher', async () => {
 	const { messages, error } = await fetchPrCommitMessages('owner', 'repo', 42, 'token', mockFetcher);
 	assert.deepEqual(messages, []);
 	assert.equal(error, 'Not Found');
+});
+
+// ---------------------------------------------------------------------------
+// fetchPrCopilotReviews / fetchPrCopilotReviewRequests / fetchPrCopilotReviewActivity
+// ---------------------------------------------------------------------------
+
+test('fetchPrCopilotReviews: returns reviews on success', async () => {
+	const reviews = [{ submittedAt: '2026-09-19T14:18:55Z', state: 'COMMENTED' }];
+	const mockFetcher = async () => ({ reviews, statusCode: 200 });
+	const result = await fetchPrCopilotReviews('owner', 'repo', 42, 'token', mockFetcher);
+	assert.deepEqual(result.reviews, reviews);
+	assert.equal(result.error, undefined);
+});
+
+test('fetchPrCopilotReviews: propagates error from fetcher', async () => {
+	const mockFetcher = async () => ({ reviews: [], statusCode: 404, error: 'Not Found' });
+	const result = await fetchPrCopilotReviews('owner', 'repo', 42, 'token', mockFetcher);
+	assert.deepEqual(result.reviews, []);
+	assert.equal(result.error, 'Not Found');
+});
+
+test('fetchPrCopilotReviewRequests: returns requests on success', async () => {
+	const requests = [{ requestedBy: 'rajbos', requestedAt: '2026-09-19T14:12:18Z' }];
+	const mockFetcher = async () => ({ requests, statusCode: 200 });
+	const result = await fetchPrCopilotReviewRequests('owner', 'repo', 42, 'token', mockFetcher);
+	assert.deepEqual(result.requests, requests);
+	assert.equal(result.error, undefined);
+});
+
+test('fetchPrCopilotReviewRequests: propagates error from fetcher', async () => {
+	const mockFetcher = async () => ({ requests: [], statusCode: 403, error: 'Forbidden' });
+	const result = await fetchPrCopilotReviewRequests('owner', 'repo', 42, 'token', mockFetcher);
+	assert.deepEqual(result.requests, []);
+	assert.equal(result.error, 'Forbidden');
+});
+
+test('fetchPrCopilotReviewActivity: combines reviews and requests from both fetchers', async () => {
+	const reviews = [
+		{ submittedAt: '2026-09-19T10:25:49Z', state: 'COMMENTED' },
+		{ submittedAt: '2026-09-19T14:19:01Z', state: 'COMMENTED' },
+	];
+	const requests = [
+		{ requestedBy: 'rajbos', requestedAt: '2026-09-19T10:20:02Z' },
+		{ requestedBy: 'rajbos', requestedAt: '2026-09-19T14:12:18Z' },
+	];
+	const mockFetchReviews = async () => ({ reviews, statusCode: 200 });
+	const mockFetchRequests = async () => ({ requests, statusCode: 200 });
+	const result = await fetchPrCopilotReviewActivity('owner', 'repo', 42, 'token', mockFetchReviews, mockFetchRequests);
+	assert.deepEqual(result.reviews, reviews);
+	assert.deepEqual(result.requests, requests);
+	assert.equal(result.error, undefined);
+});
+
+test('fetchPrCopilotReviewActivity: surfaces an error from either fetcher', async () => {
+	const mockFetchReviews = async () => ({ reviews: [], statusCode: 500, error: 'Server error' });
+	const mockFetchRequests = async () => ({ requests: [], statusCode: 200 });
+	const result = await fetchPrCopilotReviewActivity('owner', 'repo', 42, 'token', mockFetchReviews, mockFetchRequests);
+	assert.equal(result.error, 'Server error');
 });
 
 // ---------------------------------------------------------------------------
