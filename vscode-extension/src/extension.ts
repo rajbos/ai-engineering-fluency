@@ -10689,7 +10689,7 @@ private computeFallbackDailyRollup(
 		try {
 			const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 			if (!session) {
-				this.analysisPanel.webview.postMessage({ command: 'ccrActivityError', owner, repo, prNumber, error: 'Not signed in to GitHub' });
+				this.analysisPanel.webview.postMessage({ command: 'ccrActivityError', owner, repo, prNumber, error: l10nT('usage.repoPrs.ccrNotSignedIn') });
 				return;
 			}
 			const activity = await fetchPrCopilotReviewActivity(owner, repo, prNumber, session.accessToken);

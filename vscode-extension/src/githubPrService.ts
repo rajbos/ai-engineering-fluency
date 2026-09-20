@@ -546,17 +546,21 @@ export type PrCopilotReviewActivity = {
  * counted as completed activity.
  */
 export function isCompletedCopilotReview(review: { user?: { login?: string }; state?: string } | null | undefined): boolean {
-	return review?.user?.login === COPILOT_REVIEWER_BOT_LOGIN && review?.state !== 'PENDING';
+	return review?.user?.login === COPILOT_REVIEWER_BOT_LOGIN && typeof review?.state === 'string' && review.state !== 'PENDING';
 }
 
-/** Fetch completed Copilot code reviews for one PR via `GET /pulls/{number}/reviews`. */
-function fetchPrCopilotReviewsPage(owner: string, repo: string, prNumber: number, token: string): Promise<{ reviews: CcrReview[]; statusCode?: number; error?: string }> {
+/**
+ * Fetch one page of completed Copilot code reviews for one PR via `GET /pulls/{number}/reviews`.
+ * `pageSize` is the raw item count for this page (before filtering to completed Copilot reviews) —
+ * callers must page on that, not on `reviews.length`, since most reviews on a PR are not Copilot's.
+ */
+function fetchPrCopilotReviewsPage(owner: string, repo: string, prNumber: number, token: string, page: number): Promise<{ reviews: CcrReview[]; pageSize?: number; statusCode?: number; error?: string }> {
 	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
 				hostname,
-				path: `${restPathPrefix}/repos/${owner}/${repo}/pulls/${prNumber}/reviews?per_page=100`,
+				path: `${restPathPrefix}/repos/${owner}/${repo}/pulls/${prNumber}/reviews?per_page=100&page=${page}`,
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
@@ -576,7 +580,7 @@ function fetchPrCopilotReviewsPage(owner: string, repo: string, prNumber: number
 						const reviews: CcrReview[] = parsed
 							.filter(isCompletedCopilotReview)
 							.map((r: any) => ({ submittedAt: r.submitted_at, state: r.state }));
-						resolve({ reviews, statusCode: res.statusCode });
+						resolve({ reviews, pageSize: parsed.length, statusCode: res.statusCode });
 					} catch (e) {
 						resolve({ reviews: [], statusCode: res.statusCode, error: String(e) });
 					}
@@ -588,14 +592,19 @@ function fetchPrCopilotReviewsPage(owner: string, repo: string, prNumber: number
 	});
 }
 
-/** Fetch `review_requested` timeline events naming Copilot for one PR via `GET /issues/{number}/timeline`. */
-function fetchPrCopilotReviewRequestsPage(owner: string, repo: string, prNumber: number, token: string): Promise<{ requests: CcrReviewRequest[]; statusCode?: number; error?: string }> {
+/**
+ * Fetch one page of `review_requested` timeline events naming Copilot for one PR via
+ * `GET /issues/{number}/timeline`. `pageSize` is the raw event count for this page (before
+ * filtering to Copilot review requests) — callers must page on that, not on `requests.length`,
+ * since most timeline events on a PR are not review requests at all.
+ */
+function fetchPrCopilotReviewRequestsPage(owner: string, repo: string, prNumber: number, token: string, page: number): Promise<{ requests: CcrReviewRequest[]; pageSize?: number; statusCode?: number; error?: string }> {
 	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
 				hostname,
-				path: `${restPathPrefix}/repos/${owner}/${repo}/issues/${prNumber}/timeline?per_page=100`,
+				path: `${restPathPrefix}/repos/${owner}/${repo}/issues/${prNumber}/timeline?per_page=100&page=${page}`,
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
@@ -615,7 +624,7 @@ function fetchPrCopilotReviewRequestsPage(owner: string, repo: string, prNumber:
 						const requests: CcrReviewRequest[] = parsed
 							.filter((e: any) => e?.event === 'review_requested' && e?.requested_reviewer?.login === COPILOT_REVIEWER_REQUEST_NAME)
 							.map((e: any) => ({ requestedBy: e.actor?.login ?? 'unknown', requestedAt: e.created_at }));
-						resolve({ requests, statusCode: res.statusCode });
+						resolve({ requests, pageSize: parsed.length, statusCode: res.statusCode });
 					} catch (e) {
 						resolve({ requests: [], statusCode: res.statusCode, error: String(e) });
 					}
@@ -627,32 +636,49 @@ function fetchPrCopilotReviewRequestsPage(owner: string, repo: string, prNumber:
 	});
 }
 
+/** Cap on pages fetched per PR for reviews/timeline events — 500 of each, same bound as {@link fetchRepoPrs}. */
+const MAX_CCR_PAGES = 5;
+
 /**
- * Fetch completed Copilot code reviews for one PR.
- * @param fetcher Injectable low-level fetcher for testing; defaults to the real HTTPS implementation.
+ * Fetch completed Copilot code reviews for one PR, paginating as needed.
+ * @param fetcher Injectable low-level single-page fetcher for testing; defaults to the real HTTPS implementation.
  */
-export function fetchPrCopilotReviews(
+export async function fetchPrCopilotReviews(
 	owner: string,
 	repo: string,
 	prNumber: number,
 	token: string,
-	fetcher: (owner: string, repo: string, prNumber: number, token: string) => Promise<{ reviews: CcrReview[]; statusCode?: number; error?: string }> = fetchPrCopilotReviewsPage,
+	fetcher: (owner: string, repo: string, prNumber: number, token: string, page: number) => Promise<{ reviews: CcrReview[]; statusCode?: number; error?: string }> = fetchPrCopilotReviewsPage,
 ): Promise<{ reviews: CcrReview[]; statusCode?: number; error?: string }> {
-	return fetcher(owner, repo, prNumber, token);
+	const reviews: CcrReview[] = [];
+	for (let page = 1; page <= MAX_CCR_PAGES; page++) {
+		const result = await fetcher(owner, repo, prNumber, token, page);
+		if (result.error) { return { reviews, statusCode: result.statusCode, error: result.error }; }
+		reviews.push(...result.reviews);
+		if (result.reviews.length < 100) { break; }
+	}
+	return { reviews };
 }
 
 /**
- * Fetch `review_requested` timeline events naming Copilot for one PR.
- * @param fetcher Injectable low-level fetcher for testing; defaults to the real HTTPS implementation.
+ * Fetch `review_requested` timeline events naming Copilot for one PR, paginating as needed.
+ * @param fetcher Injectable low-level single-page fetcher for testing; defaults to the real HTTPS implementation.
  */
-export function fetchPrCopilotReviewRequests(
+export async function fetchPrCopilotReviewRequests(
 	owner: string,
 	repo: string,
 	prNumber: number,
 	token: string,
-	fetcher: (owner: string, repo: string, prNumber: number, token: string) => Promise<{ requests: CcrReviewRequest[]; statusCode?: number; error?: string }> = fetchPrCopilotReviewRequestsPage,
+	fetcher: (owner: string, repo: string, prNumber: number, token: string, page: number) => Promise<{ requests: CcrReviewRequest[]; statusCode?: number; error?: string }> = fetchPrCopilotReviewRequestsPage,
 ): Promise<{ requests: CcrReviewRequest[]; statusCode?: number; error?: string }> {
-	return fetcher(owner, repo, prNumber, token);
+	const requests: CcrReviewRequest[] = [];
+	for (let page = 1; page <= MAX_CCR_PAGES; page++) {
+		const result = await fetcher(owner, repo, prNumber, token, page);
+		if (result.error) { return { requests, statusCode: result.statusCode, error: result.error }; }
+		requests.push(...result.requests);
+		if (result.requests.length < 100) { break; }
+	}
+	return { requests };
 }
 
 /**

@@ -32,6 +32,8 @@
   "usage.repoPrs.ccrReviewCount",
   "usage.repoPrs.ccrRequestedBy",
   "usage.repoPrs.ccrInfoTooltip",
+  "usage.repoPrs.aiDetailAuthored",
+  "usage.repoPrs.aiDetailReviewRequested",
   "usage.claudeDesktopCoverage.summary.oneOfOne",
   "usage.claudeDesktopCoverage.summary.singular",
   "usage.claudeDesktopCoverage.summary.plural",

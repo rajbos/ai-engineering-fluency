@@ -147,6 +147,13 @@ test('isCompletedCopilotReview: false for a submitted review from someone other 
 	assert.equal(isCompletedCopilotReview({ user: { login: 'octocat' }, state: 'COMMENTED' }), false);
 });
 
+test('isCompletedCopilotReview: false for a Copilot review with a missing/undefined state', () => {
+	// A partial or unexpected-shape API response must not be treated as completed just because
+	// `undefined !== 'PENDING'` — state has to be a real, non-PENDING string.
+	assert.equal(isCompletedCopilotReview({ user: { login: 'copilot-pull-request-reviewer[bot]' } }), false);
+	assert.equal(isCompletedCopilotReview({ user: { login: 'copilot-pull-request-reviewer[bot]' }, state: undefined }), false);
+});
+
 test('isCompletedCopilotReview: false for missing user/state', () => {
 	assert.equal(isCompletedCopilotReview({}), false);
 	assert.equal(isCompletedCopilotReview(null), false);

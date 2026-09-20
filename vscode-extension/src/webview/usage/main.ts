@@ -2684,7 +2684,8 @@ function renderRepoPrRow(r: RepoPrInfo, cell: string, cellCenter: string): strin
 			const ccrButton = (d.role === 'reviewer-requested' && d.aiType === 'copilot')
 				? renderCcrCheckButtonHtml(r.owner, r.repo, d.number)
 				: '';
-			return `<li><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d.number} ${escapeHtml(d.title)}</a> — ${AI_PR_LABEL[d.aiType] ?? escapeHtml(String(d.aiType))} (${d.role === 'author' ? 'authored' : 'review requested'})${ccrButton}</li>`;
+			const roleLabel = d.role === 'author' ? localize('usage.repoPrs.aiDetailAuthored') : localize('usage.repoPrs.aiDetailReviewRequested');
+			return `<li><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d.number} ${escapeHtml(d.title)}</a> — ${AI_PR_LABEL[d.aiType] ?? escapeHtml(String(d.aiType))} (${escapeHtml(roleLabel)})${ccrButton}</li>`;
 		}).join('');
 		detailsHtml = `
 			<details style="margin-top:4px; font-size:11px;">

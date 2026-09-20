@@ -276,6 +276,9 @@ test('l10n: Repository PRs on-demand CCR activity keys resolve in English', () =
 	assert.equal(t('usage.repoPrs.ccrReviewCount', '5'), '5 completed review(s)');
 	assert.equal(t('usage.repoPrs.ccrRequestedBy', 'rajbos'), ' — requested by rajbos');
 	assert.match(t('usage.repoPrs.ccrInfoTooltip'), /Not the AI-credit dollar cost/);
+	assert.equal(t('usage.repoPrs.ccrNotSignedIn'), 'Not signed in to GitHub');
+	assert.equal(t('usage.repoPrs.aiDetailAuthored'), 'authored');
+	assert.equal(t('usage.repoPrs.aiDetailReviewRequested'), 'review requested');
 });
 
 test('l10n: Repository PRs on-demand CCR activity keys resolve in zh-cn', () => {
@@ -287,6 +290,9 @@ test('l10n: Repository PRs on-demand CCR activity keys resolve in zh-cn', () => 
 		assert.equal(t('usage.repoPrs.ccrNoReviews'), '此 PR 尚未发现已完成的 Copilot 审查。');
 		assert.equal(t('usage.repoPrs.ccrReviewCount', '5'), '5 次已完成的审查');
 		assert.equal(t('usage.repoPrs.ccrRequestedBy', 'rajbos'), ' — 由 rajbos 请求');
+		assert.equal(t('usage.repoPrs.ccrNotSignedIn'), '尚未登录 GitHub');
+		assert.equal(t('usage.repoPrs.aiDetailAuthored'), '已创建');
+		assert.equal(t('usage.repoPrs.aiDetailReviewRequested'), '已请求审查');
 	} finally {
 		mock.setLanguage('en');
 	}
