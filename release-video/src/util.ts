@@ -260,7 +260,13 @@ function rejectForeignAbsolute(candidate: string, label: string): void {
  * paired with a failing render.
  */
 export function resolveExecutable(command: string, label = 'command'): string {
-	return /[\/]/.test(command) ? resolveInProject(command, label) : command;
+	// Both separators, and deliberately not a regex: the character class that
+	// was here read `[\/]` — only a forward slash, because the backslash had
+	// been lost to one escaping layer too many. A Windows path such as
+	// `.venv-tts\Scripts\python.exe` was therefore treated as a bare PATH
+	// command and left relative, which is precisely the case this exists for.
+	const hasSeparator = command.includes(path.posix.sep) || command.includes(path.win32.sep);
+	return hasSeparator ? resolveInProject(command, label) : command;
 }
 
 /**

@@ -69,9 +69,19 @@ export async function qa(file: string, manifest: Manifest, config: Config): Prom
 		add('ok', 'audio stream', summary.audioCodec);
 	}
 
+	// A failure, not a warning. `passed` ignores warnings, so a render that
+	// silently lost a scene — which is exactly what the old `xfade duration=0`
+	// hard cut did — would otherwise be reported as a successful build. The
+	// whole point of this stage is that the file matches the plan; a file
+	// materially shorter than the timeline does not.
 	const drift = summary.durationSeconds - timeline.totalSeconds;
 	if (Math.abs(drift) > DURATION_TOLERANCE_SECONDS) {
-		add('warn', 'duration', `planned ${formatClock(timeline.totalSeconds)}, rendered ${formatClock(summary.durationSeconds)} (${drift > 0 ? '+' : ''}${drift.toFixed(2)}s)`);
+		add(
+			'fail',
+			'duration',
+			`planned ${formatClock(timeline.totalSeconds)}, rendered ${formatClock(summary.durationSeconds)} ` +
+			`(${drift > 0 ? '+' : ''}${drift.toFixed(2)}s) — a scene is likely missing or truncated`,
+		);
 	} else {
 		add('ok', 'duration', `${formatClock(summary.durationSeconds)} (planned ${formatClock(timeline.totalSeconds)})`);
 	}
