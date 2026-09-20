@@ -648,14 +648,16 @@ export async function fetchPrCopilotReviews(
 	repo: string,
 	prNumber: number,
 	token: string,
-	fetcher: (owner: string, repo: string, prNumber: number, token: string, page: number) => Promise<{ reviews: CcrReview[]; statusCode?: number; error?: string }> = fetchPrCopilotReviewsPage,
+	fetcher: (owner: string, repo: string, prNumber: number, token: string, page: number) => Promise<{ reviews: CcrReview[]; pageSize?: number; statusCode?: number; error?: string }> = fetchPrCopilotReviewsPage,
 ): Promise<{ reviews: CcrReview[]; statusCode?: number; error?: string }> {
 	const reviews: CcrReview[] = [];
 	for (let page = 1; page <= MAX_CCR_PAGES; page++) {
 		const result = await fetcher(owner, repo, prNumber, token, page);
 		if (result.error) { return { reviews, statusCode: result.statusCode, error: result.error }; }
 		reviews.push(...result.reviews);
-		if (result.reviews.length < 100) { break; }
+		// Page on the raw item count, not the filtered `reviews.length` — most reviews on a PR
+		// are not Copilot's, so a full page can still filter down to zero matches.
+		if ((result.pageSize ?? result.reviews.length) < 100) { break; }
 	}
 	return { reviews };
 }
@@ -669,14 +671,16 @@ export async function fetchPrCopilotReviewRequests(
 	repo: string,
 	prNumber: number,
 	token: string,
-	fetcher: (owner: string, repo: string, prNumber: number, token: string, page: number) => Promise<{ requests: CcrReviewRequest[]; statusCode?: number; error?: string }> = fetchPrCopilotReviewRequestsPage,
+	fetcher: (owner: string, repo: string, prNumber: number, token: string, page: number) => Promise<{ requests: CcrReviewRequest[]; pageSize?: number; statusCode?: number; error?: string }> = fetchPrCopilotReviewRequestsPage,
 ): Promise<{ requests: CcrReviewRequest[]; statusCode?: number; error?: string }> {
 	const requests: CcrReviewRequest[] = [];
 	for (let page = 1; page <= MAX_CCR_PAGES; page++) {
 		const result = await fetcher(owner, repo, prNumber, token, page);
 		if (result.error) { return { requests, statusCode: result.statusCode, error: result.error }; }
 		requests.push(...result.requests);
-		if (result.requests.length < 100) { break; }
+		// Page on the raw item count, not the filtered `requests.length` — most timeline events
+		// on a PR are not review requests at all, so a full page can still filter to zero matches.
+		if ((result.pageSize ?? result.requests.length) < 100) { break; }
 	}
 	return { requests };
 }

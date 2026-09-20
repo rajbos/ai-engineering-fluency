@@ -179,12 +179,62 @@ test('fetchPrCopilotReviews: propagates error from fetcher', async () => {
 	assert.equal(result.error, 'Not Found');
 });
 
+test('fetchPrCopilotReviews: pages through a full first page to collect reviews from a second page', async () => {
+	// A full page of 100 raw reviews with only one of them Copilot's must not be mistaken for
+	// "no more pages" just because the filtered `reviews.length` (1) is well under 100.
+	const pages = [
+		{ reviews: [{ submittedAt: '2026-09-19T10:00:00Z', state: 'COMMENTED' }], pageSize: 100, statusCode: 200 },
+		{ reviews: [{ submittedAt: '2026-09-19T11:00:00Z', state: 'APPROVED' }], pageSize: 3, statusCode: 200 },
+	];
+	const calledPages: number[] = [];
+	const mockFetcher = async (_o: string, _r: string, _n: number, _t: string, page: number) => {
+		calledPages.push(page);
+		return pages[page - 1];
+	};
+	const result = await fetchPrCopilotReviews('owner', 'repo', 42, 'token', mockFetcher);
+	assert.deepEqual(calledPages, [1, 2]);
+	assert.deepEqual(result.reviews, [...pages[0].reviews, ...pages[1].reviews]);
+	assert.equal(result.error, undefined);
+});
+
+test('fetchPrCopilotReviews: stops at the page cap rather than paginating forever', async () => {
+	let calls = 0;
+	const countingFetcher = async () => { calls++; return { reviews: [], pageSize: 100, statusCode: 200 }; };
+	await fetchPrCopilotReviews('owner', 'repo', 42, 'token', countingFetcher);
+	assert.equal(calls, 5);
+});
+
 test('fetchPrCopilotReviewRequests: returns requests on success', async () => {
 	const requests = [{ requestedBy: 'rajbos', requestedAt: '2026-09-19T14:12:18Z' }];
 	const mockFetcher = async () => ({ requests, statusCode: 200 });
 	const result = await fetchPrCopilotReviewRequests('owner', 'repo', 42, 'token', mockFetcher);
 	assert.deepEqual(result.requests, requests);
 	assert.equal(result.error, undefined);
+});
+
+test('fetchPrCopilotReviewRequests: pages through a full first page to collect requests from a second page', async () => {
+	// A full page of 100 raw timeline events with only one review request must not be mistaken
+	// for "no more pages" just because the filtered `requests.length` (1) is well under 100.
+	const pages = [
+		{ requests: [{ requestedBy: 'rajbos', requestedAt: '2026-09-19T10:00:00Z' }], pageSize: 100, statusCode: 200 },
+		{ requests: [{ requestedBy: 'octocat', requestedAt: '2026-09-19T11:00:00Z' }], pageSize: 3, statusCode: 200 },
+	];
+	const calledPages: number[] = [];
+	const mockFetcher = async (_o: string, _r: string, _n: number, _t: string, page: number) => {
+		calledPages.push(page);
+		return pages[page - 1];
+	};
+	const result = await fetchPrCopilotReviewRequests('owner', 'repo', 42, 'token', mockFetcher);
+	assert.deepEqual(calledPages, [1, 2]);
+	assert.deepEqual(result.requests, [...pages[0].requests, ...pages[1].requests]);
+	assert.equal(result.error, undefined);
+});
+
+test('fetchPrCopilotReviewRequests: stops at the page cap rather than paginating forever', async () => {
+	let calls = 0;
+	const countingFetcher = async () => { calls++; return { requests: [], pageSize: 100, statusCode: 200 }; };
+	await fetchPrCopilotReviewRequests('owner', 'repo', 42, 'token', countingFetcher);
+	assert.equal(calls, 5);
 });
 
 test('fetchPrCopilotReviewRequests: propagates error from fetcher', async () => {
