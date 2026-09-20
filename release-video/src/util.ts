@@ -171,20 +171,35 @@ export function resolveInRepo(candidate: string, label = 'path'): string {
  * file can only escape the root if some directory above it already does.
  */
 function assertRealPathContained(resolved: string, root: string, candidate: string, label: string): void {
+	// `lstat`, not `existsSync`. `existsSync` follows links, so a *dangling*
+	// symlink reports "does not exist" — the walk below would then skip past it,
+	// accept its in-root parent, and a later write would follow the link
+	// straight out of the root. lstat sees the link itself.
 	let existing = resolved;
-	while (!fs.existsSync(existing)) {
+	while (!linkAwareExists(existing)) {
 		const parent = path.dirname(existing);
 		if (parent === existing) { return; } // Reached the filesystem root; nothing to resolve.
 		existing = parent;
 	}
 
-	let realPath: string;
 	let realRoot: string;
 	try {
-		realPath = fs.realpathSync(existing);
 		realRoot = fs.realpathSync(root);
 	} catch {
-		return; // Unreadable here means unreadable later; the caller's own I/O will fail.
+		return; // The root itself is unreadable; the caller's own I/O will fail.
+	}
+
+	let realPath: string;
+	try {
+		realPath = fs.realpathSync(existing);
+	} catch {
+		// Something is there — lstat just said so — but it cannot be resolved:
+		// a dangling or looping symlink. Unverifiable is not the same as safe,
+		// so this is refused rather than waved through.
+		throw new Error(
+			`${label} "${candidate}" points at a link that cannot be resolved (${existing}), ` +
+			'so it cannot be shown to stay inside the root',
+		);
 	}
 
 	const relative = path.relative(realRoot, realPath);
@@ -192,6 +207,16 @@ function assertRealPathContained(resolved: string, root: string, candidate: stri
 		throw new Error(
 			`${label} "${candidate}" is inside the root only lexically — it links out to ${realPath}`,
 		);
+	}
+}
+
+/** True when the path itself exists, even as a symlink with no target. */
+function linkAwareExists(file: string): boolean {
+	try {
+		fs.lstatSync(file);
+		return true;
+	} catch {
+		return false;
 	}
 }
 

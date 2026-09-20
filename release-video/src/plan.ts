@@ -50,6 +50,22 @@ function shotTargetFor(feature: ResolvedFeature): ShotTarget {
 	};
 }
 
+/**
+ * The provenance block a scene carries.
+ *
+ * This is not only documentation: the capture stage reads `view` and `tab` to
+ * decide which panel and which tab to screenshot. A scene that omits it leaves
+ * the capture stage inferring from the filename, which cannot recover a tab.
+ */
+function sourceOf(feature: ResolvedFeature): NonNullable<Scene['source']> {
+	return {
+		featureId: feature.id,
+		view: feature.surface.view,
+		...(feature.surface.tab !== undefined ? { tab: feature.surface.tab } : {}),
+		...(feature.surface.anchor !== undefined ? { anchor: feature.surface.anchor } : {}),
+	};
+}
+
 /** Alternates the Ken Burns direction so consecutive scenes do not feel identical. */
 function motionFor(index: number, config: Config): Scene['motion'] {
 	const directions = ['zoom-in', 'pan-right', 'zoom-in', 'pan-left'] as const;
@@ -99,6 +115,12 @@ export async function plan(config: Config, options: PlanOptions = {}): Promise<M
 		motion: { type: 'zoom-in', from: 1.0, to: 1.16, focusX: 0.5, focusY: 0.42 },
 		transition: 'fade',
 		transitionSeconds: 0.5,
+		// The hero's surface travels with the scene. Without it the capture
+		// stage has only the filename to go on, and `usage--tools.png` infers
+		// back to the bare view `usage` — so it captured an extra screenshot
+		// that nothing referenced, and would have captured the *wrong* one had
+		// no other scene needed that tab.
+		...(heroFeature ? { source: sourceOf(heroFeature) } : {}),
 	});
 
 	// The logo sting. A hard cut into it, so it lands rather than dissolves.
@@ -127,12 +149,7 @@ export async function plan(config: Config, options: PlanOptions = {}): Promise<M
 			motion: motionFor(index, config),
 			transition: config.motion.transition as Scene['transition'],
 			transitionSeconds: config.motion.transitionSeconds,
-			source: {
-				featureId: feature.id,
-				view: feature.surface.view,
-				...(feature.surface.tab !== undefined ? { tab: feature.surface.tab } : {}),
-				...(feature.surface.anchor !== undefined ? { anchor: feature.surface.anchor } : {}),
-			},
+			source: sourceOf(feature),
 		});
 	});
 
