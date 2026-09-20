@@ -119,7 +119,7 @@ function engineFingerprint(config: Config): unknown {
 				cfgWeight: voicebox.cfgWeight,
 				// The reference recording itself is part of the identity of the
 				// voice: swapping it must invalidate every cached line.
-				reference: reference ? digest(fs.readFileSync(reference)) : 'none',
+				reference: reference ? fingerprintFile(reference) ?? 'unreadable' : 'none',
 			};
 		}
 		case 'mistral': {
@@ -141,7 +141,7 @@ function engineFingerprint(config: Config): unknown {
 				argv: config.voice.command.argv,
 				stdinText: config.voice.command.stdinText,
 				files: referencedFileFingerprints(config.voice.command.argv),
-				reference: reference ? digest(fs.readFileSync(reference)) : 'none',
+				reference: reference ? fingerprintFile(reference) ?? 'unreadable' : 'none',
 			};
 		}
 		case 'silence':
@@ -177,18 +177,47 @@ function referencedFileFingerprints(tokens: readonly string[]): Record<string, s
 		} catch {
 			continue; // Not a project-relative path — a flag or a bare command.
 		}
-		let stats: fs.Stats;
-		try {
-			stats = fs.statSync(resolved);
-		} catch {
-			continue;
-		}
-		if (!stats.isFile()) { continue; }
-		fingerprints[token] = stats.size <= CONTENT_HASH_LIMIT_BYTES
-			? digest(fs.readFileSync(resolved))
-			: `${stats.size}:${Math.round(stats.mtimeMs)}`;
+		const fingerprint = fingerprintFile(resolved);
+		if (fingerprint !== null) { fingerprints[token] = fingerprint; }
 	}
 	return fingerprints;
+}
+
+/**
+ * Fingerprints one file through a single file descriptor.
+ *
+ * Deliberately *not* `statSync` followed by `readFileSync`. Those are two
+ * independent lookups of the same name, and between them the name can be
+ * repointed at something else — so the size that chose the strategy and the
+ * bytes that were hashed need not describe the same file. Opening once and
+ * calling `fstat` on that descriptor closes the window: there is only ever one
+ * file object, whatever happens to the path afterwards.
+ *
+ * Returns null when the path cannot be read or is not a regular file, which
+ * the callers treat as "nothing to fingerprint".
+ */
+function fingerprintFile(file: string): string | null {
+	let handle: number;
+	try {
+		handle = fs.openSync(file, 'r');
+	} catch {
+		return null;
+	}
+
+	try {
+		const stats = fs.fstatSync(handle);
+		if (!stats.isFile()) { return null; }
+		// Content for small files, metadata for large ones: digesting a hundred
+		// megabytes of model weights once per scene would cost far more than
+		// the regeneration it prevents.
+		return stats.size <= CONTENT_HASH_LIMIT_BYTES
+			? digest(fs.readFileSync(handle))
+			: `${stats.size}:${Math.round(stats.mtimeMs)}`;
+	} catch {
+		return null;
+	} finally {
+		fs.closeSync(handle);
+	}
 }
 
 async function synthesize(engine: VoiceEngine, text: string, outFile: string, config: Config): Promise<void> {
