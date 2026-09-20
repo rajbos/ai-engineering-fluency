@@ -169,6 +169,37 @@ async function synthesize(engine: VoiceEngine, text: string, outFile: string, co
 }
 
 /**
+ * Refuses to send a bearer token anywhere it could be read in transit.
+ *
+ * `endpoint` is a config value, so a tampered or carelessly edited
+ * `config.json` could otherwise point an authenticated request at plain HTTP,
+ * or at someone else's host, and the key would go with it. HTTPS is required;
+ * loopback is allowed as the one exception, so a local proxy or a recorded
+ * fixture can still be pointed at during development.
+ *
+ * This does not make the endpoint trusted — it is still whatever the config
+ * says. It only removes the case where the key is readable by anything on the
+ * path.
+ */
+export function assertSafeKeyDestination(url: string, keyEnvName: string): void {
+	let parsed: URL;
+	try {
+		parsed = new URL(url);
+	} catch {
+		throw new Error(`voice.mistral endpoint is not a valid URL: ${url}`);
+	}
+
+	const isLoopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(parsed.hostname);
+	if (parsed.protocol !== 'https:' && !isLoopback) {
+		throw new Error(
+			`refusing to send ${keyEnvName} to ${parsed.protocol}//${parsed.host} — ` +
+			'an API key may only go to an https endpoint (or loopback for local testing). ' +
+			'Check voice.mistral.endpoint in config.json.',
+		);
+	}
+}
+
+/**
  * Mistral's hosted TTS, with a voice cloned in their console.
  *
  * The one engine here that is not local: the narration text is sent to
@@ -196,6 +227,8 @@ async function synthesizeMistral(text: string, outFile: string, config: Config):
 	}
 
 	const url = `${mistral.endpoint.replace(/\/+$/, '')}${mistral.path}`;
+	assertSafeKeyDestination(url, mistral.apiKeyEnv);
+
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), mistral.timeoutMs);
 
