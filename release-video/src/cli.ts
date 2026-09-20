@@ -28,7 +28,7 @@ import { countWords, estimateSeconds } from './speech';
 import { qa } from './qa';
 import { render } from './render';
 import { captureShots } from './shots';
-import { generateSubtitles } from './subtitles';
+import { generateSubtitles, subtitleFileFor } from './subtitles';
 import { buildTimeline } from './timeline';
 import { formatClock, generateVoice, speakOnce } from './voice';
 import { log, PROJECT_ROOT, resolveInProject, run, writeJson } from './util';
@@ -304,7 +304,7 @@ function requireManifest(options?: { requireAssets?: boolean }): Manifest {
 }
 
 function existingSubtitleFile(manifest: Manifest): string | null {
-	const file = path.join(paths.subtitles, `${manifest.project.version}.ass`);
+	const file = subtitleFileFor(manifest);
 	return fs.existsSync(file) ? file : null;
 }
 

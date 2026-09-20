@@ -116,6 +116,30 @@ function asEnum<T extends string>(value: unknown, label: string, allowed: readon
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
+ * A release identifier that is safe to interpolate into a filename.
+ *
+ * `project.version` names the subtitle file, so validating it only as a
+ * non-empty string was not enough: a hand-edited or model-produced manifest
+ * with `"../../outside"` would have written the `.ass` outside the project and
+ * quietly broken the containment contract this module exists to hold.
+ *
+ * Deliberately narrow — digits, letters, dot, dash, underscore — because the
+ * only thing that ever legitimately appears here is a version number.
+ */
+const VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function asVersion(value: unknown): string {
+	const version = asString(value, 'project.version', { max: 40 });
+	if (!VERSION_PATTERN.test(version) || version.includes('..')) {
+		fail(
+			`project.version "${version}" is not a filename-safe release identifier ` +
+			'(letters, digits, dot, dash and underscore only) — it is used to name generated files',
+		);
+	}
+	return version;
+}
+
+/**
  * Validates and normalizes a parsed manifest.
  *
  * `requireAssets` is off while planning (screenshots have not been captured
@@ -129,7 +153,7 @@ export function validateManifest(raw: unknown, { requireAssets = false } = {}): 
 
 	const normalizedProject = {
 		title: asString(project.title, 'project.title', { max: 200 }),
-		version: asString(project.version, 'project.version', { max: 40 }),
+		version: asVersion(project.version),
 		width: asNumber(project.width, 'project.width', 320, 7680, 1920),
 		height: asNumber(project.height, 'project.height', 240, 4320, 1080),
 		fps: asNumber(project.fps, 'project.fps', 10, 120, 30),

@@ -65,6 +65,10 @@ export interface Config {
 			readonly responseFormat: string;
 			/** Name of the env var holding the key. Never the key itself. */
 			readonly apiKeyEnv: string;
+			/** The only host the key is sent to, matched exactly. */
+			readonly expectedHost: string;
+			/** Opt in to sending the key to a different host entirely. */
+			readonly allowOtherHosts: boolean;
 			readonly timeoutMs: number;
 		};
 		readonly sapi: { readonly voiceName: string; readonly rate: number };

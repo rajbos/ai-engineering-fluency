@@ -134,6 +134,7 @@ export function resolveInProject(candidate: string, label = 'path'): string {
 	if (relative.startsWith('..') || path.isAbsolute(relative)) {
 		throw new Error(`${label} "${candidate}" resolves outside the project root (${resolved})`);
 	}
+	assertRealPathContained(resolved, PROJECT_ROOT, candidate, label);
 	return resolved;
 }
 
@@ -153,7 +154,45 @@ export function resolveInRepo(candidate: string, label = 'path'): string {
 	if (relative.startsWith('..') || path.isAbsolute(relative)) {
 		throw new Error(`${label} "${candidate}" resolves outside the repository (${resolved})`);
 	}
+	assertRealPathContained(resolved, REPO_ROOT, candidate, label);
 	return resolved;
+}
+
+/**
+ * Containment that survives symlinks.
+ *
+ * `path.relative` is purely lexical, so `assets/screenshots/link.png` passes it
+ * while the link points anywhere at all — and FFmpeg would then happily read
+ * the target. Since these functions are documented as the allowlist the whole
+ * pipeline leans on, the check has to look at what the path *actually* reaches.
+ *
+ * The target itself often does not exist yet (an output file, a cache entry),
+ * so this resolves the deepest ancestor that does. That is sufficient: a new
+ * file can only escape the root if some directory above it already does.
+ */
+function assertRealPathContained(resolved: string, root: string, candidate: string, label: string): void {
+	let existing = resolved;
+	while (!fs.existsSync(existing)) {
+		const parent = path.dirname(existing);
+		if (parent === existing) { return; } // Reached the filesystem root; nothing to resolve.
+		existing = parent;
+	}
+
+	let realPath: string;
+	let realRoot: string;
+	try {
+		realPath = fs.realpathSync(existing);
+		realRoot = fs.realpathSync(root);
+	} catch {
+		return; // Unreadable here means unreadable later; the caller's own I/O will fail.
+	}
+
+	const relative = path.relative(realRoot, realPath);
+	if (relative !== '' && (relative.startsWith('..') || path.isAbsolute(relative))) {
+		throw new Error(
+			`${label} "${candidate}" is inside the root only lexically — it links out to ${realPath}`,
+		);
+	}
 }
 
 /**

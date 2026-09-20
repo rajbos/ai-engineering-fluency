@@ -233,7 +233,11 @@ async function synthesize(engine: VoiceEngine, text: string, outFile: string, co
  * says. It only removes the case where the key is readable by anything on the
  * path.
  */
-export function assertSafeKeyDestination(url: string, keyEnvName: string): void {
+export function assertSafeKeyDestination(
+	url: string,
+	keyEnvName: string,
+	options: { expectedHost?: string; allowOtherHosts?: boolean } = {},
+): void {
 	let parsed: URL;
 	try {
 		parsed = new URL(url);
@@ -248,6 +252,23 @@ export function assertSafeKeyDestination(url: string, keyEnvName: string): void 
 			'an API key may only go to an https endpoint (or loopback for local testing). ' +
 			'Check voice.mistral.endpoint in config.json.',
 		);
+	}
+
+	// https alone is not enough. It says nobody on the path can read the key,
+	// not that the host at the other end should have it: `api.mistral.ai.evil`
+	// has a perfectly good certificate for itself. The host is therefore
+	// matched *exactly* against the one this adapter is written for — a suffix
+	// or substring test is precisely what that hostname is designed to defeat.
+	const { expectedHost, allowOtherHosts = false } = options;
+	if (expectedHost && !isLoopback && parsed.hostname !== expectedHost && !allowOtherHosts) {
+		throw new Error(
+			`refusing to send ${keyEnvName} to ${parsed.hostname} — this adapter is for ${expectedHost}. ` +
+			'If you really mean to use a different provider, set voice.mistral.allowOtherHosts to true ' +
+			'in config.json, and be sure you trust that host with your key.',
+		);
+	}
+	if (expectedHost && !isLoopback && parsed.hostname !== expectedHost && allowOtherHosts) {
+		log.warn(`Sending ${keyEnvName} to ${parsed.hostname}, which is not ${expectedHost} (allowOtherHosts is on)`);
 	}
 }
 
@@ -279,7 +300,10 @@ async function synthesizeMistral(text: string, outFile: string, config: Config):
 	}
 
 	const url = `${mistral.endpoint.replace(/\/+$/, '')}${mistral.path}`;
-	assertSafeKeyDestination(url, mistral.apiKeyEnv);
+	assertSafeKeyDestination(url, mistral.apiKeyEnv, {
+		expectedHost: mistral.expectedHost,
+		allowOtherHosts: mistral.allowOtherHosts,
+	});
 
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), mistral.timeoutMs);

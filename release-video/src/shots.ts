@@ -42,6 +42,22 @@ export interface ShotTarget {
 	readonly anchor?: string;
 }
 
+/**
+ * The state definition a tab gets when the registry does not declare one.
+ *
+ * Every registered tab state in `views.config.json` follows the same shape —
+ * click `.tab-button[data-tab="x"]`, expect `#tab-panel-x` — so a tab that is
+ * simply not listed (a panel's initial tab, typically) can be driven by that
+ * same convention rather than being refused.
+ */
+function implicitState(stateId: string): { id: string; steps: unknown[]; expect: string; settleMs?: number } {
+	return {
+		id: stateId,
+		steps: [{ click: `.tab-button[data-tab="${stateId}"]` }],
+		expect: `#tab-panel-${stateId}`,
+	};
+}
+
 /** Stable key for a screenshot. Anchors share a screenshot; only the focus differs. */
 export function shotKey(target: ShotTarget): string {
 	return target.state ? `${target.view}--${target.state}` : target.view;
@@ -203,13 +219,20 @@ export async function captureShots(manifest: Manifest, config: Config, options: 
 				await page.waitForTimeout(view.settleMs ?? DEFAULT_SETTLE_MS);
 
 				if (target.state) {
-					const state = (view.states ?? []).find((candidate) => candidate.id === target.state);
-					if (!state) {
-						throw new Error(
-							`view "${target.view}" has no state "${target.state}" in views.config.json. ` +
-							'A catalogued tab must be declared there or it cannot be screenshotted.',
-						);
-					}
+					// An unregistered tab is not necessarily a mistake. A panel's
+					// *initial* tab is deliberately absent from `states`, because
+					// the harness already captures the initial render — `usage`
+					// has no `activity` state for exactly that reason, and the
+					// 0.17.0 and 0.13.0 catalog entries both point at it. Failing
+					// here would make those releases unbuildable.
+					//
+					// So an unregistered tab falls back to the convention every
+					// registered state already follows: click the tab button,
+					// expect the matching panel. It is still a hard failure if
+					// that tab does not exist — which is the guarantee that
+					// mattered — it just no longer requires a registry entry.
+					const state = (view.states ?? []).find((candidate) => candidate.id === target.state)
+						?? implicitState(target.state);
 					const applied = await applySteps(page, (state.steps ?? []) as unknown[]);
 					if (!applied.ok) {
 						throw new Error(`could not open ${key}: ${applied.reason} (${applied.step})`);

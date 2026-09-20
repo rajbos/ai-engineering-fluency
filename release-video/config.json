@@ -120,6 +120,8 @@
 			"voiceId": "d82c75e2-55bc-4ab8-998a-fa0249dfb53e",
 			"responseFormat": "mp3",
 			"apiKeyEnv": "MISTRAL_API_KEY",
+			"expectedHost": "api.mistral.ai",
+			"allowOtherHosts": false,
 			"timeoutMs": 180000
 		},
 

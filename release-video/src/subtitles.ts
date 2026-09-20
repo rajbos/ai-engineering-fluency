@@ -34,7 +34,7 @@ import { paths, type Config } from './config';
 import type { Manifest } from './manifest';
 import { countWords, splitSentences } from './speech';
 import { buildTimeline, type TimelineEntry } from './timeline';
-import { assTime, ensureDir, log, PROJECT_ROOT, run } from './util';
+import { assTime, ensureDir, log, PROJECT_ROOT, resolveInProject, run } from './util';
 
 interface Cue {
 	readonly start: number;
@@ -45,6 +45,19 @@ interface Cue {
 
 /** How long a scene's title band stays on screen before it fades out. */
 const TITLE_SECONDS = 3.4;
+
+/**
+ * Where a release's captions are written.
+ *
+ * `project.version` is validated as filename-safe by the manifest, and the
+ * result is then resolved through the project allowlist anyway: this path is
+ * built by string interpolation, and that is exactly the kind of place a
+ * containment guarantee should not rest on a single upstream check.
+ */
+export function subtitleFileFor(manifest: Manifest): string {
+	const relative = path.posix.join('cache', 'subtitles', `${manifest.project.version}.ass`);
+	return resolveInProject(relative, 'subtitle file');
+}
 
 /** Writes the ASS file and returns its path, or null when subtitles are off. */
 export async function generateSubtitles(manifest: Manifest, config: Config): Promise<string | null> {
@@ -65,7 +78,7 @@ export async function generateSubtitles(manifest: Manifest, config: Config): Pro
 	}
 
 	ensureDir(paths.subtitles);
-	const file = path.join(paths.subtitles, `${manifest.project.version}.ass`);
+	const file = subtitleFileFor(manifest);
 	fs.writeFileSync(file, renderAss(cues, manifest, config), 'utf8');
 	log.info(`${cues.length} cue(s) → ${path.relative(process.cwd(), file)}`);
 	log.groupEnd();

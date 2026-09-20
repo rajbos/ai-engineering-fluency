@@ -54,3 +54,43 @@ test('the error names the variable but never its value', () => {
 test('a malformed endpoint is reported rather than silently used', () => {
 	assert.throws(() => assertSafeKeyDestination('not a url', 'MISTRAL_API_KEY'), /not a valid URL/);
 });
+
+/* ------------------------------------------------ which host, not just https */
+
+const MISTRAL = { expectedHost: 'api.mistral.ai' };
+
+test('the expected host is allowed', () => {
+	assert.doesNotThrow(
+		() => assertSafeKeyDestination('https://api.mistral.ai/v1/audio/speech', 'MISTRAL_API_KEY', MISTRAL),
+	);
+});
+
+test('a lookalike host is refused even over https', () => {
+	// The case https alone does not cover: this host has a perfectly valid
+	// certificate for itself, and any suffix or substring test would pass it.
+	assert.throws(
+		() => assertSafeKeyDestination('https://api.mistral.ai.evil.test/v1/audio/speech', 'MISTRAL_API_KEY', MISTRAL),
+		/this adapter is for api\.mistral\.ai/,
+	);
+});
+
+test('a prefix lookalike is refused too', () => {
+	assert.throws(
+		() => assertSafeKeyDestination('https://evil-api.mistral.ai.test/x', 'MISTRAL_API_KEY', MISTRAL),
+		/this adapter is for api\.mistral\.ai/,
+	);
+});
+
+test('another host needs an explicit opt-in', () => {
+	const other = 'https://tts.example.test/v1/audio/speech';
+	assert.throws(() => assertSafeKeyDestination(other, 'MISTRAL_API_KEY', MISTRAL), /allowOtherHosts/);
+	assert.doesNotThrow(
+		() => assertSafeKeyDestination(other, 'MISTRAL_API_KEY', { ...MISTRAL, allowOtherHosts: true }),
+	);
+});
+
+test('loopback stays usable regardless of the expected host', () => {
+	assert.doesNotThrow(
+		() => assertSafeKeyDestination('http://127.0.0.1:8000/v1/audio/speech', 'MISTRAL_API_KEY', MISTRAL),
+	);
+});
