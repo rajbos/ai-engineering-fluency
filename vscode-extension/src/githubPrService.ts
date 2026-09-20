@@ -593,6 +593,20 @@ function fetchPrCopilotReviewsPage(owner: string, repo: string, prNumber: number
 }
 
 /**
+ * True when a timeline event is a `review_requested` naming Copilot AND has a real actor login to
+ * attribute it to. An event with no real actor login (e.g. a deleted account) is not attributable —
+ * it is dropped rather than synthesized into a fake "unknown" requester, which would have no real
+ * meaning to a viewer and would leak into the UI as if it were data.
+ */
+export function isAttributableCopilotReviewRequest(
+	event: { event?: string; requested_reviewer?: { login?: string }; actor?: { login?: string } } | null | undefined,
+): boolean {
+	return event?.event === 'review_requested'
+		&& event?.requested_reviewer?.login === COPILOT_REVIEWER_REQUEST_NAME
+		&& typeof event?.actor?.login === 'string' && event.actor.login.length > 0;
+}
+
+/**
  * Fetch one page of `review_requested` timeline events naming Copilot for one PR via
  * `GET /issues/{number}/timeline`. `pageSize` is the raw event count for this page (before
  * filtering to Copilot review requests) — callers must page on that, not on `requests.length`,
@@ -622,8 +636,8 @@ function fetchPrCopilotReviewRequestsPage(owner: string, repo: string, prNumber:
 							return;
 						}
 						const requests: CcrReviewRequest[] = parsed
-							.filter((e: any) => e?.event === 'review_requested' && e?.requested_reviewer?.login === COPILOT_REVIEWER_REQUEST_NAME)
-							.map((e: any) => ({ requestedBy: e.actor?.login ?? 'unknown', requestedAt: e.created_at }));
+							.filter(isAttributableCopilotReviewRequest)
+							.map((e: any) => ({ requestedBy: e.actor.login, requestedAt: e.created_at }));
 						resolve({ requests, pageSize: parsed.length, statusCode: res.statusCode });
 					} catch (e) {
 						resolve({ requests: [], statusCode: res.statusCode, error: String(e) });

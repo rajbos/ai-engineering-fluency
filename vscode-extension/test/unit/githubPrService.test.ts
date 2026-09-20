@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import * as childProcess from 'node:child_process';
 import type * as http from 'node:http';
 import { EventEmitter } from 'node:events';
-import { detectAiType, detectCoAuthorAiType, fetchPrCommitMessages, fetchRepoPrs, fetchRepoPrsPage, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, fetchPrCopilotReviews, fetchPrCopilotReviewRequests, fetchPrCopilotReviewActivity, isCompletedCopilotReview, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
+import { detectAiType, detectCoAuthorAiType, fetchPrCommitMessages, fetchRepoPrs, fetchRepoPrsPage, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, fetchPrCopilotReviews, fetchPrCopilotReviewRequests, fetchPrCopilotReviewActivity, isCompletedCopilotReview, isAttributableCopilotReviewRequest, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
 
 /**
  * Minimal stand-in for `http.ClientRequest`, exercising exactly the surface
@@ -158,6 +158,52 @@ test('isCompletedCopilotReview: false for missing user/state', () => {
 	assert.equal(isCompletedCopilotReview({}), false);
 	assert.equal(isCompletedCopilotReview(null), false);
 	assert.equal(isCompletedCopilotReview(undefined), false);
+});
+
+// ---------------------------------------------------------------------------
+// isAttributableCopilotReviewRequest — pure function, no I/O
+// ---------------------------------------------------------------------------
+
+test('isAttributableCopilotReviewRequest: true for a review_requested event naming Copilot with a real actor login', () => {
+	assert.equal(
+		isAttributableCopilotReviewRequest({ event: 'review_requested', requested_reviewer: { login: 'Copilot' }, actor: { login: 'rajbos' } }),
+		true,
+	);
+});
+
+test('isAttributableCopilotReviewRequest: false when the actor login is missing (e.g. a deleted account) — not synthesized into "unknown"', () => {
+	assert.equal(
+		isAttributableCopilotReviewRequest({ event: 'review_requested', requested_reviewer: { login: 'Copilot' }, actor: {} }),
+		false,
+	);
+	assert.equal(
+		isAttributableCopilotReviewRequest({ event: 'review_requested', requested_reviewer: { login: 'Copilot' } }),
+		false,
+	);
+	assert.equal(
+		isAttributableCopilotReviewRequest({ event: 'review_requested', requested_reviewer: { login: 'Copilot' }, actor: { login: '' } }),
+		false,
+	);
+});
+
+test('isAttributableCopilotReviewRequest: false for a review_requested event naming a different reviewer', () => {
+	assert.equal(
+		isAttributableCopilotReviewRequest({ event: 'review_requested', requested_reviewer: { login: 'octocat' }, actor: { login: 'rajbos' } }),
+		false,
+	);
+});
+
+test('isAttributableCopilotReviewRequest: false for a non-review_requested timeline event', () => {
+	assert.equal(
+		isAttributableCopilotReviewRequest({ event: 'commented', requested_reviewer: { login: 'Copilot' }, actor: { login: 'rajbos' } }),
+		false,
+	);
+});
+
+test('isAttributableCopilotReviewRequest: false for missing/null/undefined input', () => {
+	assert.equal(isAttributableCopilotReviewRequest({}), false);
+	assert.equal(isAttributableCopilotReviewRequest(null), false);
+	assert.equal(isAttributableCopilotReviewRequest(undefined), false);
 });
 
 // ---------------------------------------------------------------------------

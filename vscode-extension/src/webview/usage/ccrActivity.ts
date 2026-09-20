@@ -52,7 +52,12 @@ export function renderCcrActivityResult(owner: string, repo: string, prNumber: n
 		resultEl.textContent = localize('usage.repoPrs.ccrNoReviews');
 		return;
 	}
-	const requesterNames: string[] = requests.map((req: any) => String(req.requestedBy ?? 'unknown'));
+	// The host already drops any review-request event with no real actor login (see
+	// fetchPrCopilotReviewRequestsPage) rather than sending a placeholder — filter defensively
+	// here too so a malformed message can't put a blank/"unknown" name in front of the user.
+	const requesterNames: string[] = requests
+		.map((req: any) => (typeof req.requestedBy === 'string' ? req.requestedBy : ''))
+		.filter((name: string) => name.length > 0);
 	const requesters = [...new Set(requesterNames)];
 	const requestedBy = requesters.length > 0
 		? localizeFormat('usage.repoPrs.ccrRequestedBy', requesters.map((name) => escapeHtml(name)).join(', '))
