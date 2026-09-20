@@ -113,6 +113,49 @@ test('narration always finishes before the crossfade into the next scene', () =>
 	}
 });
 
+test('a transition is clamped against the next scene even when it omits durationSeconds', () => {
+	// The regression: the clamp used to fall back to the *current* scene's
+	// duration when the next one had none, so a long scene followed by a short
+	// audio-less one kept a transition longer than half the next clip — and
+	// xfade then gets an offset it cannot honour.
+	const { entries } = buildTimeline(
+		manifestOf([
+			scene('a', { durationSeconds: 20, audioSeconds: 4, transitionSeconds: 4 }),
+			// No durationSeconds: its real length is the 3s minimum.
+			scene('b', { durationSeconds: undefined, audioSeconds: 0 }),
+		]),
+		config,
+	);
+
+	const next = entries[1];
+	assert.ok(next, 'expected a second scene');
+	assert.ok(
+		(entries[0]?.transitionOut ?? 0) <= next.duration / 2 + 1e-9,
+		`transition ${entries[0]?.transitionOut}s exceeds half of the ${next.duration}s scene it fades into`,
+	);
+});
+
+test('no scene ever fades for longer than half of either neighbour', () => {
+	const { entries } = buildTimeline(
+		manifestOf([
+			scene('a', { durationSeconds: 18, transitionSeconds: 5 }),
+			scene('b', { durationSeconds: undefined, audioSeconds: 0.2 }),
+			scene('c', { durationSeconds: 30, audioSeconds: 25 }),
+			scene('d', { durationSeconds: undefined, audioSeconds: 0 }),
+		]),
+		config,
+	);
+
+	for (let i = 0; i < entries.length - 1; i++) {
+		const here = entries[i];
+		const next = entries[i + 1];
+		if (!here || !next) { continue; }
+		assert.ok(here.transitionOut <= here.duration / 2 + 1e-9, `${here.scene.id} over-fades itself`);
+		assert.ok(here.transitionOut <= next.duration / 2 + 1e-9, `${here.scene.id} over-fades into ${next.scene.id}`);
+		assert.ok(next.start >= here.start, 'scenes must not run backwards');
+	}
+});
+
 test('a scene with no measured audio still gets a minimum length', () => {
 	const { entries } = buildTimeline(
 		manifestOf([scene('a', { audioSeconds: 0, durationSeconds: undefined })]),

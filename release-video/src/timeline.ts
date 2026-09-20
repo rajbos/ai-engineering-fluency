@@ -52,21 +52,41 @@ const LEAD_IN_SHARE = 0.55;
 /** Silence kept between the last word and the start of the crossfade. */
 const TAIL_SECONDS = 0.15;
 
+/**
+ * A scene's length before any transition-driven extension.
+ *
+ * Every scene has one of these whether or not the manifest states it, which is
+ * what lets a scene be clamped against its *neighbour's* real length rather
+ * than against a stand-in.
+ */
+function baseDuration(scene: Manifest['scenes'][number], config: Config): number {
+	return scene.durationSeconds
+		?? Math.max(config.motion.minSceneSeconds, (scene.audioSeconds ?? 0) + config.motion.paddingSeconds);
+}
+
 export function buildTimeline(manifest: Manifest, config: Config): Timeline {
 	const entries: TimelineEntry[] = [];
 	let cursor = 0;
 
+	// Computed for every scene up front, because clamping scene N's transition
+	// needs scene N+1's length. Falling back to the *current* scene's duration
+	// when the next one omitted `durationSeconds` — as this used to — meant a
+	// long scene followed by a short, audio-less one could keep a transition
+	// longer than half the next clip, which is exactly the case the clamp is
+	// there to prevent. Extending a scene later only ever makes it longer, so
+	// clamping against these pre-extension lengths stays conservative.
+	const baseDurations = manifest.scenes.map((scene) => baseDuration(scene, config));
+
 	manifest.scenes.forEach((scene, index) => {
 		const audioDuration = scene.audioSeconds ?? 0;
-		let duration = scene.durationSeconds
-			?? Math.max(config.motion.minSceneSeconds, audioDuration + config.motion.paddingSeconds);
+		let duration = baseDurations[index] ?? baseDuration(scene, config);
 
 		const isLast = index === manifest.scenes.length - 1;
 		// A transition can never eat more than the shorter neighbouring scene,
 		// or xfade's offset would go negative and FFmpeg would fail late, deep
 		// in the graph, with a message that does not name the scene.
 		const requested = isLast || scene.transition === 'none' ? 0 : scene.transitionSeconds;
-		const nextDuration = manifest.scenes[index + 1]?.durationSeconds ?? duration;
+		const nextDuration = baseDurations[index + 1] ?? duration;
 		let transitionOut = Math.max(0, Math.min(requested, duration / 2, nextDuration / 2));
 
 		const padding = Math.max(0, duration - audioDuration);

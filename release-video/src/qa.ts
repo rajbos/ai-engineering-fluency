@@ -54,9 +54,18 @@ export async function qa(file: string, manifest: Manifest, config: Config): Prom
 	}
 
 	const hasNarration = manifest.scenes.some((scene) => scene.audio);
-	if (!summary.audioCodec && hasNarration) {
+	if (!hasNarration) {
+		// Not one scene has audio, so there is nothing to compare the file
+		// against and every earlier version of this check passed trivially.
+		// That is the blind spot: re-running `plan` rewrites the manifest
+		// without the fields the `voice` stage fills in, so `build --from
+		// render` then produces a silent video at the minimum scene length and
+		// reports success. Even the `silence` engine writes real WAVs, so an
+		// empty manifest always means the voice stage did not run.
+		add('fail', 'narration', 'no scene has audio — run the `voice` stage (a re-plan clears it)');
+	} else if (!summary.audioCodec) {
 		add('fail', 'audio stream', 'narration was generated but the rendered file is silent');
-	} else if (summary.audioCodec) {
+	} else {
 		add('ok', 'audio stream', summary.audioCodec);
 	}
 

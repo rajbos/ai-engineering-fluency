@@ -317,10 +317,17 @@ with no state diffs as "unchanged" and ships without a screenshot.
 That registry now feeds a fourth consumer: `release-video/` screenshots each
 release's features by looking up the `view` and `tab` from its **What's New**
 catalog entry in this same file, where a `state` id *is* the `data-tab` value.
-So a catalog feature pointing at a tab with no matching `state` fails the video
-build outright — which is the intended behaviour, since the alternative is a
-release video that silently shows the wrong screen. Keep the two in step: a
-catalogued surface needs a registry entry.
+A catalogued tab with no matching `state` does **not** fail the build: the
+video generator falls back to the convention every registered state already
+uses — click `.tab-button[data-tab="…"]`, expect `#tab-panel-…`. That fallback
+exists because a panel's *initial* tab is deliberately absent from `states`
+(the harness captures the initial render separately), and several older
+catalog entries point at exactly such a tab. What still fails, hard, is a tab
+that cannot actually be opened — which is the guarantee that matters, since
+the alternative is a release video that silently shows the wrong screen.
+
+Registering a state is still worth doing: it is what gets the tab into the
+visual diff, the CI screenshots and the interaction crawl.
 
 The full picture of what each check catches, and the one-command release
 preflight, is in [docs/VALIDATION.md](docs/VALIDATION.md).
