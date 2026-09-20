@@ -27,7 +27,7 @@ import * as path from 'node:path';
 import { renderCards } from './cards';
 import { paths, type Config } from './config';
 import { validateManifest, type Manifest } from './manifest';
-import { ensureDir, log, REPO_ROOT, writeJson } from './util';
+import { ensureDir, log, REPO_ROOT, resolveInProject, writeJson } from './util';
 
 const SKILL_DIR = path.join(REPO_ROOT, '.github', 'skills', 'visual-view-diff');
 
@@ -165,7 +165,11 @@ export async function captureShots(manifest: Manifest, config: Config, options: 
 
 		for (const target of targets.values()) {
 			const key = shotKey(target);
-			const outFile = path.join(paths.screenshots, `${key}.png`);
+			// Through the allowlist, not just path.join: the key is built from
+			// the manifest's source.view/source.tab, and path.join happily
+			// resolves a traversal segment. The manifest validates those fields
+			// too — this is the second lock on the same door.
+			const outFile = resolveInProject(screenshotRelativePath(target), `screenshot for ${key}`);
 			const view = byId.get(target.view);
 			if (!view) {
 				throw new Error(

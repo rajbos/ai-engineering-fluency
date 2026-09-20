@@ -128,6 +128,59 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  */
 const VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+/**
+ * A view or tab id, matching the pattern the harness registry enforces on its
+ * own ids. No dots, no separators — these become part of a screenshot's file
+ * name.
+ */
+const SURFACE_ID_PATTERN = /^[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*$/;
+
+/** A DOM id. Slightly looser than a surface id, still filename-safe. */
+const ANCHOR_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/** A catalog feature id, which is dotted (`usage.corrections-tab`). */
+const FEATURE_ID_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
+/**
+ * Validates a scene's provenance block.
+ *
+ * `source.view` and `source.tab` are not just documentation: the capture stage
+ * joins them into the screenshot's file name, so a manifest with
+ * `view: "../outside"` would write outside `assets/screenshots` and defeat the
+ * containment the rest of the pipeline relies on. This block used to be cast
+ * straight through without a single check.
+ */
+function asSource(raw: unknown, label: string): Scene['source'] {
+	if (!raw || typeof raw !== 'object') {
+		fail(`${label}.source must be an object`);
+	}
+	const source = raw as Record<string, unknown>;
+
+	const identifier = (key: string, pattern: RegExp): string | undefined => {
+		if (source[key] === undefined) { return undefined; }
+		const value = asString(source[key], `${label}.source.${key}`, { max: 120 });
+		if (!pattern.test(value) || value.includes('..')) {
+			fail(
+				`${label}.source.${key} "${value}" must be a plain identifier — ` +
+				'it becomes part of a generated file name',
+			);
+		}
+		return value;
+	};
+
+	const featureId = identifier('featureId', FEATURE_ID_PATTERN);
+	const view = identifier('view', SURFACE_ID_PATTERN);
+	const tab = identifier('tab', SURFACE_ID_PATTERN);
+	const anchor = identifier('anchor', ANCHOR_PATTERN);
+
+	return {
+		...(featureId !== undefined ? { featureId } : {}),
+		...(view !== undefined ? { view } : {}),
+		...(tab !== undefined ? { tab } : {}),
+		...(anchor !== undefined ? { anchor } : {}),
+	};
+}
+
 function asVersion(value: unknown): string {
 	const version = asString(value, 'project.version', { max: 40 });
 	if (!VERSION_PATTERN.test(version) || version.includes('..')) {
@@ -215,7 +268,7 @@ export function validateManifest(raw: unknown, { requireAssets = false } = {}): 
 			...(scene.durationSeconds !== undefined
 				? { durationSeconds: asNumber(scene.durationSeconds, `${label}.durationSeconds`, 0.5, 600) }
 				: {}),
-			...(scene.source !== undefined ? { source: scene.source as Scene['source'] } : {}),
+			...(scene.source !== undefined ? { source: asSource(scene.source, label) } : {}),
 		};
 		return normalized;
 	});

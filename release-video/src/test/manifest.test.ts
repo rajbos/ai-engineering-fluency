@@ -97,6 +97,57 @@ test('missing motion fields fall back to sane defaults', () => {
 	assert.deepEqual(manifest.scenes[0]?.motion, { type: 'zoom-in', from: 1, to: 1.07, focusX: 0.5, focusY: 0.5 });
 });
 
+/* --------------------------------------------- provenance becomes a filename */
+
+test('a traversal segment in source.view is refused', () => {
+	// source.view is joined into the screenshot's file name, so this used to be
+	// a way out of assets/screenshots entirely.
+	assert.throws(
+		() => validateManifest({ project, scenes: [sceneWith({ source: { view: '../outside' } })] }),
+		/must be a plain identifier/,
+	);
+});
+
+test('a traversal segment in source.tab is refused', () => {
+	assert.throws(
+		() => validateManifest({ project, scenes: [sceneWith({ source: { view: 'usage', tab: '../../etc' } })] }),
+		/must be a plain identifier/,
+	);
+});
+
+test('a separator in source.anchor is refused', () => {
+	assert.throws(
+		() => validateManifest({ project, scenes: [sceneWith({ source: { view: 'usage', anchor: 'a/b' } })] }),
+		/must be a plain identifier/,
+	);
+});
+
+test('real catalog provenance still validates', () => {
+	// The dotted feature id and the dashed view/tab/anchor the catalog actually
+	// produces must all survive.
+	const manifest = validateManifest({
+		project,
+		scenes: [sceneWith({
+			source: {
+				featureId: 'usage.memory-files-hygiene',
+				view: 'usage',
+				tab: 'tools',
+				anchor: 'section-memory-files',
+			},
+		})],
+	});
+	assert.equal(manifest.scenes[0]?.source?.view, 'usage');
+	assert.equal(manifest.scenes[0]?.source?.anchor, 'section-memory-files');
+});
+
+test('unknown keys in source are dropped rather than carried through', () => {
+	const manifest = validateManifest({
+		project,
+		scenes: [sceneWith({ source: { view: 'usage', somethingElse: '../evil' } })],
+	});
+	assert.deepEqual(Object.keys(manifest.scenes[0]?.source ?? {}), ['view']);
+});
+
 test('requireAssets turns a missing screenshot into an error, not a black frame', () => {
 	assert.throws(
 		() => validateManifest({ project, scenes: [sceneWith({ image: 'assets/screenshots/nope.png' })] }, { requireAssets: true }),
