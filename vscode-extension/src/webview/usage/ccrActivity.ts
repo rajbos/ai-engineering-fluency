@@ -1,4 +1,3 @@
-import { setHtml } from '../shared/domUtils';
 import { escapeHtml } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
 
@@ -6,12 +5,16 @@ import { localize, localizeFormat } from '../shared/localization';
  * Inline "Check actual CCR activity" button + result placeholder for one reviewer-requested PR
  * detail row. On-demand only — see `handleCheckCcrActivity` in `extension.ts` for why this isn't
  * part of the bulk Repository PRs snapshot.
+ *
+ * `type="button"` is explicit: this markup can land inside a `<form>`-bearing ancestor elsewhere
+ * on the panel, and a `<button>` with no type defaults to `type="submit"`, which would fire that
+ * form instead of just running the click handler below.
  */
 export function renderCcrCheckButtonHtml(owner: string, repo: string, prNumber: number): string {
 	const o = escapeHtml(owner);
 	const r = escapeHtml(repo);
 	const label = escapeHtml(localize('usage.repoPrs.ccrCheckButton'));
-	return ` <button class="btn-check-ccr" data-owner="${o}" data-repo="${r}" data-pr="${prNumber}" style="font-size:10px; padding:1px 6px; cursor:pointer; background:var(--bg-tertiary); color:var(--text-secondary); border:1px solid var(--border-color); border-radius:4px;">${label}</button><span class="ccr-activity-result" data-ccr-result="${o}/${r}#${prNumber}" style="margin-left:6px; font-size:11px; color:var(--text-secondary);"></span>`;
+	return ` <button type="button" class="btn-check-ccr" data-owner="${o}" data-repo="${r}" data-pr="${prNumber}" style="font-size:10px; padding:1px 6px; cursor:pointer; background:var(--bg-tertiary); color:var(--text-secondary); border:1px solid var(--border-color); border-radius:4px;">${label}</button><span class="ccr-activity-result" data-ccr-result="${o}/${r}#${prNumber}" style="margin-left:6px; font-size:11px; color:var(--text-secondary);"></span>`;
 }
 
 /**
@@ -60,9 +63,17 @@ export function renderCcrActivityResult(owner: string, repo: string, prNumber: n
 		.filter((name: string) => name.length > 0);
 	const requesters = [...new Set(requesterNames)];
 	const requestedBy = requesters.length > 0
-		? localizeFormat('usage.repoPrs.ccrRequestedBy', requesters.map((name) => escapeHtml(name)).join(', '))
+		? localizeFormat('usage.repoPrs.ccrRequestedBy', requesters.join(', '))
 		: '';
-	const reviewCount = escapeHtml(localizeFormat('usage.repoPrs.ccrReviewCount', String(reviews.length)));
-	const infoTitle = escapeHtml(localize('usage.repoPrs.ccrInfoTooltip'));
-	setHtml(resultEl, `${reviewCount}${requestedBy} <span title="${infoTitle}">ℹ️</span>`);
+	const reviewCount = localizeFormat('usage.repoPrs.ccrReviewCount', String(reviews.length));
+
+	// Built as real DOM nodes rather than an innerHTML/setHtml() string: every value here is plain
+	// text (a review count, requester logins, a tooltip), so there is no HTML to render and no
+	// reason to route it through the parser at all.
+	resultEl.replaceChildren();
+	resultEl.appendChild(document.createTextNode(`${reviewCount}${requestedBy} `));
+	const infoIcon = document.createElement('span');
+	infoIcon.title = localize('usage.repoPrs.ccrInfoTooltip');
+	infoIcon.textContent = 'ℹ️';
+	resultEl.appendChild(infoIcon);
 }
