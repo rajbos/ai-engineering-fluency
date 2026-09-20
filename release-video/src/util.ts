@@ -254,6 +254,46 @@ export function slug(value: string): string {
 	return cleaned || 'scene';
 }
 
+/** Files over this size are fingerprinted by metadata rather than content. */
+const CONTENT_HASH_LIMIT_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Fingerprints one file through a single file descriptor.
+ *
+ * Deliberately *not* `statSync` followed by `readFileSync`. Those are two
+ * independent lookups of the same name, and between them the name can be
+ * repointed at something else — so the size that chose the strategy and the
+ * bytes that were hashed need not describe the same file. Opening once and
+ * calling `fstat` on that descriptor closes the window: there is only ever one
+ * file object, whatever happens to the path afterwards.
+ *
+ * Returns null when the path cannot be read or is not a regular file, which
+ * the callers treat as "nothing to fingerprint".
+ */
+export function fingerprintFile(file: string): string | null {
+	let handle: number;
+	try {
+		handle = fs.openSync(file, 'r');
+	} catch {
+		return null;
+	}
+
+	try {
+		const stats = fs.fstatSync(handle);
+		if (!stats.isFile()) { return null; }
+		// Content for small files, metadata for large ones: digesting a hundred
+		// megabytes of model weights once per scene would cost far more than
+		// the regeneration it prevents.
+		return stats.size <= CONTENT_HASH_LIMIT_BYTES
+			? digest(fs.readFileSync(handle))
+			: `${stats.size}:${Math.round(stats.mtimeMs)}`;
+	} catch {
+		return null;
+	} finally {
+		fs.closeSync(handle);
+	}
+}
+
 /** Short stable digest, for content-addressed caching. */
 export function digest(...parts: readonly unknown[]): string {
 	const hash = createHash('sha256');
@@ -320,11 +360,22 @@ export const log = {
 
 /** Formats seconds as `H:MM:SS.cc`, the form ASS timestamps take. */
 export function assTime(seconds: number): string {
-	const clamped = Math.max(0, seconds);
-	const hours = Math.floor(clamped / 3600);
-	const minutes = Math.floor((clamped % 3600) / 60);
-	const secs = Math.floor(clamped % 60);
-	const centis = Math.round((clamped - Math.floor(clamped)) * 100);
+	// Round to centiseconds *once*, then derive every field from that total.
+	//
+	// Rounding the fraction separately and clamping an overflowing 100 back to
+	// 99 makes a timestamp just under a boundary move backwards: 1.9999 became
+	// 0:00:01.99 rather than 0:00:02.00, and the carry never reached minutes or
+	// hours either — 59.999 became 0:00:59.99 and 3599.9999 became 0:59:59.99.
+	// A cue could therefore end fractionally before the time it was computed to
+	// end at.
+	const totalCentis = Math.round(Math.max(0, seconds) * 100);
+	const centis = totalCentis % 100;
+	const totalSeconds = (totalCentis - centis) / 100;
+
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const secs = totalSeconds % 60;
+
 	const pad = (n: number, width: number) => String(n).padStart(width, '0');
-	return `${hours}:${pad(minutes, 2)}:${pad(secs, 2)}.${pad(Math.min(centis, 99), 2)}`;
+	return `${hours}:${pad(minutes, 2)}:${pad(secs, 2)}.${pad(centis, 2)}`;
 }

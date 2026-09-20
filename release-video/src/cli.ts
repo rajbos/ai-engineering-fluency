@@ -223,7 +223,13 @@ ${polished.scenes.length} scenes, ${words} words, roughly ${formatClock(spoken)}
 
 		case 'qa': {
 			const manifest = requireManifest({ requireAssets: true });
-			const file = args.output ?? defaultOutputFor(manifest);
+			// Through the allowlist, like every other path this CLI accepts.
+			// `render --output` was already contained and this was not, which
+			// made the same flag mean two different things depending on the
+			// subcommand.
+			const file = args.output
+				? resolveInProject(args.output, '--output')
+				: defaultOutputFor(manifest);
 			const report = await qa(file, manifest, config);
 			return report.passed ? 0 : 1;
 		}

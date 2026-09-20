@@ -27,7 +27,7 @@ import * as path from 'node:path';
 import { renderCards } from './cards';
 import { paths, type Config } from './config';
 import { validateManifest, type Manifest } from './manifest';
-import { ensureDir, log, REPO_ROOT, resolveInProject, writeJson } from './util';
+import { digest, ensureDir, fingerprintFile, log, REPO_ROOT, resolveInProject, writeJson } from './util';
 
 const SKILL_DIR = path.join(REPO_ROOT, '.github', 'skills', 'visual-view-diff');
 
@@ -155,6 +155,13 @@ export async function captureShots(manifest: Manifest, config: Config, options: 
 	ensureDir(paths.cache);
 	const pageDir = ensureDir(path.join(paths.cache, 'pages'));
 
+	// Fingerprints of the inputs each screenshot was last captured from.
+	const inputIndexFile = path.join(paths.cache, 'shot-inputs.json');
+	const previousInputs: Record<string, string> = fs.existsSync(inputIndexFile)
+		? JSON.parse(fs.readFileSync(inputIndexFile, 'utf8')) as Record<string, string>
+		: {};
+	const currentInputs: Record<string, string> = {};
+
 	const chromium = loadChromium();
 	const browser = await chromium.launch();
 	/** shotKey -> anchor id -> focus point, measured in this run. */
@@ -178,11 +185,41 @@ export async function captureShots(manifest: Manifest, config: Config, options: 
 				);
 			}
 
+			const bundlePath = path.join(harness.WEBVIEW_DIST, `${view.bundle}.js`);
+			const fixturePath = path.join(SKILL_DIR, 'fixtures', view.fixture);
+			const stateDefinition = target.state
+				? (view.states ?? []).find((candidate) => candidate.id === target.state) ?? implicitState(target.state)
+				: null;
+
+			// The cache key is the *inputs*, not merely whether a PNG is there.
+			//
+			// Keyed on existence alone, a normal `build` after rebuilding the
+			// webview bundles reused the old screenshot and the video shipped
+			// the previous UI — silently, because the stale PNG then looks
+			// unchanged to the scene renderer too. Everything that can alter
+			// the pixels goes in here.
+			const inputFingerprint = digest(
+				fingerprintFile(bundlePath) ?? 'no-bundle',
+				fingerprintFile(fixturePath) ?? 'no-fixture',
+				JSON.stringify({
+					global: view.global,
+					settleMs: view.settleMs ?? null,
+					state: stateDefinition,
+				}),
+				`${cssWidth}x${cssHeight}@${scale}`,
+				config.project.theme,
+			);
+			currentInputs[key] = inputFingerprint;
+
+			const stale = previousInputs[key] !== inputFingerprint;
 			const anchors = anchorsFor(manifest, key);
-			const needsCapture = options.force || !fs.existsSync(outFile);
+			const needsCapture = options.force || !fs.existsSync(outFile) || stale;
 			if (!needsCapture && anchors.length === 0) {
 				log.info(`${key} — cached`);
 				continue;
+			}
+			if (stale && fs.existsSync(outFile) && !options.force) {
+				log.info(`${key} — inputs changed, re-capturing`);
 			}
 
 			const context = await browser.newContext({
@@ -203,8 +240,7 @@ export async function captureShots(manifest: Manifest, config: Config, options: 
 			page.on('pageerror', (error: Error) => { consoleErrors.push(String(error.stack ?? error)); });
 
 			try {
-				const bundlePath = path.join(harness.WEBVIEW_DIST, `${view.bundle}.js`);
-				const fixture = harness.loadFixture(path.join(SKILL_DIR, 'fixtures', view.fixture), harness.REPO_ROOT);
+				const fixture = harness.loadFixture(fixturePath, harness.REPO_ROOT);
 				const html = harness.buildPageHtml({
 					globalName: view.global,
 					fixture,
@@ -276,6 +312,8 @@ export async function captureShots(manifest: Manifest, config: Config, options: 
 		log.groupEnd();
 	}
 
+	// Merged, so a key this run did not touch keeps its recorded fingerprint.
+	writeJson(inputIndexFile, { ...previousInputs, ...currentInputs });
 	writeJson(focusIndexPath(), focusIndex);
 	return applyFocus(manifest, focusIndex);
 }
