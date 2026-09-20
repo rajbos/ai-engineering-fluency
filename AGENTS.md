@@ -22,6 +22,9 @@ This document provides top-level guidance for AI agents contributing to this rep
 │                                   webview bundles and cli/vscode-extension stats logic
 ├── sharing-server/              ← Self-hosted API server + web dashboard for sharing
 │                                   fluency data across a team (TypeScript, SQLite, Docker)
+├── release-video/               ← Local release-video generator: the What's New
+│                                   catalog + the visual-view-diff harness ->
+│                                   narrated MP4 (TypeScript, FFmpeg, local TTS)
 ├── scripts/                     ← Build/release/CI helper scripts (Node, PowerShell, Python)
 ├── omp-segment/                 ← Oh My Posh terminal prompt segment showing token usage
 ├── assets/                      ← Logos and other static brand assets
@@ -310,6 +313,14 @@ unvalidated by all three. **Adding a tab or mode to an existing panel means
 adding a `state` for it** in the same file — the harness screenshots a view in
 its initial render plus its declared states only, so a new section on a tab
 with no state diffs as "unchanged" and ships without a screenshot.
+
+That registry now feeds a fourth consumer: `release-video/` screenshots each
+release's features by looking up the `view` and `tab` from its **What's New**
+catalog entry in this same file, where a `state` id *is* the `data-tab` value.
+So a catalog feature pointing at a tab with no matching `state` fails the video
+build outright — which is the intended behaviour, since the alternative is a
+release video that silently shows the wrong screen. Keep the two in step: a
+catalogued surface needs a registry entry.
 
 The full picture of what each check catches, and the one-command release
 preflight, is in [docs/VALIDATION.md](docs/VALIDATION.md).
