@@ -383,7 +383,11 @@ async function measureLoudness(
 	// the audio input indices start at zero rather than after the clips.
 	const graph = assemblyFilterGraph(timeline, clipCount, audioFiles.length, null, config, `${LOUDNORM_TARGET}:print_format=json`)
 		.split(';\n')
-		.filter((line) => /^\[\d+:a\]|amix=|loudnorm=/.test(line))
+		// Audio input lines, the mix, and the loudness filter. Written as three
+		// explicit tests rather than one alternation: in
+		// `/^\[\d+:a\]|amix=|loudnorm=/` the anchor binds only to the first
+		// branch, which is what was meant but is not what it looks like.
+		.filter((line) => /^\[\d+:a\]/.test(line) || line.includes('amix=') || line.includes('loudnorm='))
 		.join(';\n')
 		.replace(/\[(\d+):a\]/g, (_match, index: string) => `[${Number(index) - clipCount}:a]`);
 
@@ -492,12 +496,19 @@ function encoderArgs(config: Config, { quality }: { quality: 'intermediate' | 'f
  * filter's options — so a drive letter's colon needs escaping even though the
  * graph comes from a file and never touches a shell.
  */
-function escapeFilterPath(file: string): string {
-	return file
-		.split(path.sep).join('/')
-		.replace(/\\/g, '/')
-		.replace(/:/g, '\\:')
-		.replace(/'/g, "\\'");
+export function escapeFilterPath(file: string): string {
+	// Separators first: ffmpeg accepts forward slashes everywhere, and on
+	// Windows this also disposes of the backslashes that would otherwise need
+	// escaping below. Deliberately `path.sep` rather than a blanket backslash
+	// replacement — on POSIX a backslash is a legal character *in* a filename,
+	// and rewriting it to a slash would silently point at a different file.
+	const normalised = file.split(path.sep).join('/');
+
+	// Then a single pass over every character the filter-graph parser treats
+	// specially. Escaping them in separate passes is the classic incomplete
+	// escape: whichever pass runs second adds backslashes the first would have
+	// had to escape, so both orderings are wrong in different ways.
+	return normalised.replace(/[\\':]/g, (character) => `\\${character}`);
 }
 
 function slugForFile(title: string): string {

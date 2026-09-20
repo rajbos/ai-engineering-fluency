@@ -203,8 +203,10 @@ Two things to know:
   failing inside a kernel launch. Expect minutes per paragraph — fine for
   auditioning, slow for a full render.
 
-Because it is slow and non-deterministic, Piper stays the default for building
-videos; swap to Chatterbox when you want the finished article in your voice.
+Because it is slow and non-deterministic, Chatterbox is best kept for the final
+cut rather than for iterating. The engine `config.json` currently ships with is
+`mistral`, which clones the same voice far faster; `piper` is the one to switch
+to when you want a build that stays offline and free.
 
 #### Switching engines
 
