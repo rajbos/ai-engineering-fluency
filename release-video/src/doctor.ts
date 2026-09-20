@@ -15,7 +15,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import type { Config } from './config';
-import { isRunnable, log, PROJECT_ROOT, REPO_ROOT, resolveInProject, run } from './util';
+import { isRunnable, log, PROJECT_ROOT, REPO_ROOT, resolveExecutable, resolveInProject, run } from './util';
 
 interface Check {
 	readonly name: string;
@@ -152,9 +152,18 @@ export async function doctor(config: Config): Promise<boolean> {
 			break;
 		}
 		case 'command': {
-			const command = config.voice.command.argv[0];
+			const raw = config.voice.command.argv[0];
+			// Resolved exactly the way the adapter resolves it, so this reports
+			// on the command that will actually run rather than on a relative
+			// name that happens to work from wherever doctor was started.
+			let command: string | undefined;
+			try {
+				command = raw ? resolveExecutable(raw, 'voice.command.argv[0]') : undefined;
+			} catch {
+				command = undefined;
+			}
 			const ok = command ? await isRunnable(command, ['--help']) : false;
-			push({ name: `tts command "${command ?? '(unset)'}"`, ok, detail: ok ? 'runnable' : 'not runnable — check voice.command.argv' });
+			push({ name: `tts command "${raw ?? '(unset)'}"`, ok, detail: ok ? 'runnable' : 'not runnable — check voice.command.argv' });
 			break;
 		}
 		case 'silence':

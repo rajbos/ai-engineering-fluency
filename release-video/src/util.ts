@@ -246,6 +246,24 @@ function rejectForeignAbsolute(candidate: string, label: string): void {
 }
 
 /**
+ * Resolves the executable named by an argv template.
+ *
+ * A command containing a path separator is a file in this project — a Python
+ * interpreter in a TTS virtualenv, typically — and must be made absolute:
+ * Windows resolves a relative executable against the *parent* process's
+ * working directory, not the child's, so `.venv-tts/...` would be looked up
+ * wherever the CLI happened to be invoked from. A bare name is left alone for
+ * PATH lookup.
+ *
+ * Shared so that `doctor` tests exactly the command the voice adapter will
+ * run; checking one thing and running another is how a green doctor ends up
+ * paired with a failing render.
+ */
+export function resolveExecutable(command: string, label = 'command'): string {
+	return /[\/]/.test(command) ? resolveInProject(command, label) : command;
+}
+
+/**
  * A filename-safe slug. Used for cache keys and scene ids, which become real
  * file names, so the character set is an allowlist rather than a blocklist.
  */

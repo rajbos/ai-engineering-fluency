@@ -162,6 +162,12 @@ export async function captureShots(manifest: Manifest, config: Config, options: 
 		: {};
 	const currentInputs: Record<string, string> = {};
 
+	// The harness's own rendering inputs, shared by every shot in this run.
+	const harnessFingerprint = digest(
+		fingerprintFile(path.join(SKILL_DIR, 'lib', 'harness.js')) ?? 'no-harness',
+		fingerprintFile(path.join(SKILL_DIR, 'lib', `theme-${config.project.theme}.css`)) ?? 'no-theme',
+	);
+
 	const chromium = loadChromium();
 	const browser = await chromium.launch();
 	/** shotKey -> anchor id -> focus point, measured in this run. */
@@ -201,6 +207,10 @@ export async function captureShots(manifest: Manifest, config: Config, options: 
 			const inputFingerprint = digest(
 				fingerprintFile(bundlePath) ?? 'no-bundle',
 				fingerprintFile(fixturePath) ?? 'no-fixture',
+				// The harness draws the page, so its shell and the theme it
+				// injects are inputs too: change the VS Code theme stand-in and
+				// every screenshot changes without any bundle moving.
+				harnessFingerprint,
 				JSON.stringify({
 					global: view.global,
 					settleMs: view.settleMs ?? null,

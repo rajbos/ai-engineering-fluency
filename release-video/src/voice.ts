@@ -35,7 +35,7 @@ import { paths, type Config, type VoiceEngine } from './config';
 import { normalizeWav, probeDuration, writeSilence } from './media';
 import { validateManifest, type Manifest, type Scene } from './manifest';
 import { applyPronunciation, estimateSeconds, type PronunciationMap } from './speech';
-import { digest, ensureDir, fingerprintFile, log, PROJECT_ROOT, readJson, run, resolveInProject } from './util';
+import { digest, ensureDir, fingerprintFile, log, PROJECT_ROOT, readJson, resolveExecutable, run, resolveInProject } from './util';
 
 export interface VoiceOptions {
 	/** Regenerate every WAV even when a cached one matches. */
@@ -435,6 +435,28 @@ async function synthesizeSapi(text: string, outFile: string, config: Config): Pr
 	}
 }
 
+/** The placeholders an argv template may use. */
+const PLACEHOLDER_PATTERN = /\{\{(text|textFile|out|referenceWav|referenceText)\}\}/g;
+
+/**
+ * Fills placeholders in one argv token.
+ *
+ * Both details here are load-bearing, and the naive
+ * `.replace('{{text}}', text)` chain got both wrong:
+ *
+ *   - **A function replacer, not a string.** In a string replacement `$&`,
+ *     `` $` `` and `$'` are substitution patterns. Narration containing `$&`
+ *     therefore had the literal `{{text}}` spliced into it and *spoken*, and
+ *     `$'` duplicated the surrounding text. A replacer function's return value
+ *     is used verbatim.
+ *   - **A global pattern.** A string pattern replaces only the first match, so
+ *     a template using `{{out}}` twice left the second one as literal text for
+ *     the TTS command to choke on.
+ */
+export function substitutePlaceholders(token: string, values: Record<string, string>): string {
+	return token.replace(PLACEHOLDER_PATTERN, (_match, name: string) => values[name] ?? '');
+}
+
 /**
  * Any TTS CLI. `{{text}}`, `{{out}}`, `{{referenceWav}}` and
  * `{{referenceText}}` are substituted as whole argv entries, so the text is
@@ -459,24 +481,20 @@ async function synthesizeCommand(text: string, outFile: string, config: Config):
 		fs.writeFileSync(textFile, text, 'utf8');
 	}
 
-	const argv = template.map((token) => token
-		.replace('{{text}}', text)
-		.replace('{{textFile}}', textFile ?? '')
-		.replace('{{out}}', outFile)
-		.replace('{{referenceWav}}', referenceWav)
-		.replace('{{referenceText}}', referenceText));
+	const argv = template.map((token) => substitutePlaceholders(token, {
+		text,
+		textFile: textFile ?? '',
+		out: outFile,
+		referenceWav,
+		referenceText,
+	}));
 
 	const [rawCommand, ...args] = argv;
 	if (!rawCommand) { throw new Error('voice.command.argv has no command'); }
 
-	// A command containing a path separator is a file in this project — an
-	// interpreter in a TTS virtualenv, typically. It has to be resolved to an
-	// absolute path here: Windows resolves a relative executable against the
-	// *parent's* working directory rather than the child's, so `.venv-tts/...`
-	// would be looked up wherever npm happened to be invoked from.
-	const command = /[\\/]/.test(rawCommand)
-		? resolveInProject(rawCommand, 'voice.command.argv[0]')
-		: rawCommand;
+	// Shared with `doctor`, so the command it reports on is the command that
+	// actually runs. See `resolveExecutable`.
+	const command = resolveExecutable(rawCommand, 'voice.command.argv[0]');
 
 	try {
 		await run(command, args, {
