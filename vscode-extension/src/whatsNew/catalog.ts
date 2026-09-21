@@ -153,13 +153,6 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 				surface: { view: 'diagnostics', tab: 'ttft' },
 			},
 			{
-				id: 'diagnostics.mistral-cloud-tab',
-				titleKey: 'whatsNew.feature.diagnostics.mistral-cloud-tab.title',
-				descriptionKey: 'whatsNew.feature.diagnostics.mistral-cloud-tab.description',
-				kind: 'tab',
-				surface: { view: 'diagnostics', tab: 'mistral-cloud' },
-			},
-			{
 				// Listed last on purpose: the per-release cap means this is never
 				// announced, and it does not need to be — the notification's second
 				// button is a link to this very page.

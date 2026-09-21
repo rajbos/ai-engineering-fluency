@@ -308,12 +308,6 @@
           "expect": "#tab-otel-delta"
         },
         {
-          "id": "mistral-cloud",
-          "title": "Research › Mistral Cloud tab",
-          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"mistral-cloud\"]" }],
-          "expect": "#tab-mistral-cloud"
-        },
-        {
           "id": "ttft",
           "title": "Research › TTFT tab",
           "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"ttft\"]" }],

@@ -10,6 +10,12 @@
         "retrievedDate": "2026-04-24"
       },
       {
+        "name": "Mistral Vibe CLI reported rates",
+        "url": "https://docs.mistral.ai/vibe/code/cli/",
+        "retrievedDate": "2026-09-20",
+        "note": "input/output/cached_input_price_per_million read from ~/.vibe/logs/session/*/meta.json stats; cross-checked against the existing mistral-medium-3.5 entry, which matched exactly. Source of the devstral-2, glm-5-2 and Mistral Medium 3.5 cached-read rates."
+      },
+      {
         "name": "Mistral AI API Pricing",
         "url": "https://pricepertoken.com/pricing-page/provider/mistral-ai",
         "retrievedDate": "2026-05-06",
@@ -863,6 +869,7 @@
     },
     "mistral-medium-3-5": {
       "inputCostPerMillion": 1.5,
+      "cachedInputCostPerMillion": 0.15,
       "outputCostPerMillion": 7.5,
       "category": "Mistral models",
       "tier": "unknown",
@@ -872,11 +879,30 @@
     },
     "mistral-medium-3.5": {
       "inputCostPerMillion": 1.5,
+      "cachedInputCostPerMillion": 0.15,
       "outputCostPerMillion": 7.5,
       "category": "Mistral models",
       "tier": "unknown",
       "displayNames": [
         "Mistral Medium 3.5"
+      ]
+    },
+    "devstral-2": {
+      "inputCostPerMillion": 0.4,
+      "outputCostPerMillion": 2.0,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "displayNames": [
+        "Devstral 2"
+      ]
+    },
+    "glm-5-2": {
+      "inputCostPerMillion": 1.4,
+      "outputCostPerMillion": 4.4,
+      "category": "Z.ai GLM models",
+      "tier": "unknown",
+      "displayNames": [
+        "GLM 5.2"
       ]
     },
     "mistral-medium-2505": {
