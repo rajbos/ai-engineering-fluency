@@ -254,6 +254,28 @@ test('CLI daily, history, weekly, monthly and billing aggregates retain Auto dis
 	assert.deepEqual(days, originalDays);
 });
 
+test('CLI groups GLM sessions under Z.ai, matching the shared billing helper', () => {
+	// The CLI used to keep its own copy of chartDataBuilder's provider-prefix table, which
+	// never gained `glm` — so a Mistral Vibe session routed to GLM billed to "Other" here
+	// while the extension showed Z.ai. Guards against that copy reappearing.
+	const usage: ModelUsage = { 'glm-5-2': { inputTokens: 4000, outputTokens: 800, sessions: 0 } };
+	const entry: DailyEntry = {
+		tokens: 4800, sessions: 1, modelUsage: usage,
+		editorUsage: { 'Mistral Vibe': { tokens: 4800, sessions: 1 } },
+		editorModelUsage: { 'Mistral Vibe': usage },
+	};
+	const today = new Date();
+	const key = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+	const payload = buildChartPayload([key], [entry]) as { periods: Record<string, CostPeriod> };
+	for (const period of Object.values(payload.periods)) {
+		assert.equal(period.billingGroupCostDatasets[0].label, 'Z.ai', 'GLM must not fall into the "Other" bucket');
+		assert.ok(
+			period.billingGroupCostDatasets[0].data.reduce((sum, cost) => sum + cost, 0) > 0,
+			'glm-5-2 is priced, so it must contribute non-zero cost',
+		);
+	}
+});
+
 test('CLI provider editor and billing costs remain undiscounted with Auto metadata', () => {
 	const usage: ModelUsage = {
 		[AUTO_MODEL]: { inputTokens: 4000, outputTokens: 800, sessions: 0, autoRouting: { inputTokens: 1000, outputTokens: 200 } },
