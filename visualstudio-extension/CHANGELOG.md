@@ -4,8 +4,10 @@ All notable changes to the Visual Studio extension will be documented in this fi
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-09-21
+
 ### ✨ Features & Improvements
-- New "Scoring Guide" view — the full fluency rubric: all four stages for each of the six categories, with the explicit thresholds required to reach each stage and the next steps to get there. Reached from the "📊 How is my score calculated?" button on the Fluency Score view, which was previously hidden in Visual Studio because the view did not exist here
+- Updated webview bundles with latest shared-view changes: removed the dead Mistral Cloud tab and fixed Mistral Vibe cost attribution in the Diagnostics view, surfaced Copilot's server-side repository memories in the Usage view, and picked up additional friendly tool-name mappings
 
 ## [1.0.5] - 2026-04-11
 
