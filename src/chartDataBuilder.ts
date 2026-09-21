@@ -20,6 +20,7 @@ const MODEL_PROVIDER_PREFIXES: Array<[string, string]> = [
 	['codestral', 'Mistral AI'],
 	['devstral', 'Mistral AI'],
 	['gemini', 'Google'],
+	['glm', 'Z.ai'],
 	['goldeneye', 'xAI'],
 	['google', 'Google'],
 	['gpt', 'OpenAI'],
