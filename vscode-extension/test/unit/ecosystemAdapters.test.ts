@@ -358,6 +358,17 @@ test('MistralVibeDataAccess.getModelUsage: glm-5-2 and devstral-2 are priced rat
     }
 });
 
+test('modelPricing: every Mistral Medium 3.5 spelling carries the same cached-read rate', () => {
+    // `mistral-medium-latest`, `mistral-medium-3.5` and `mistral-medium-3-5` are the same
+    // model at the same rates. A cached rate on only some of them means a session reporting
+    // one of the others still bills cache reads at the full input rate.
+    const pricing = modelPricing.pricing as Record<string, { inputCostPerMillion: number; cachedInputCostPerMillion?: number }>;
+    for (const id of ['mistral-medium-latest', 'mistral-medium-3.5', 'mistral-medium-3-5']) {
+        assert.equal(pricing[id].inputCostPerMillion, 1.5, `${id} input rate`);
+        assert.equal(pricing[id].cachedInputCostPerMillion, 0.15, `${id} must carry the cached-read rate`);
+    }
+});
+
 test('MistralVibeDataAccess.getModelUsage: cached tokens exceeding prompt tokens are clamped', async () => {
     const { metaPath, cleanup } = writeVibeSession(
         { session_prompt_tokens: 100, session_completion_tokens: 10, session_cached_tokens: 5000 },

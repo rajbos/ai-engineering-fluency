@@ -4,7 +4,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as childProcess from 'child_process';
-import * as crypto from 'crypto';
 
 // Localization support (key-based resolver over package.nls*.json — see l10n.ts
 // for why vscode.l10n.t() cannot be used directly with key-based strings)
@@ -1014,8 +1013,10 @@ type SessionsTabPreset = { filter: 'nearContextLimit'; lookback: 'last30' };
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation.
-	// Rebuild model usage with the per-request Auto-routing subset used by Copilot estimates.
-	private static readonly CACHE_VERSION = 72;
+	// Rebuild Mistral Vibe model usage so it carries cachedReadTokens: getSessionFileDataCached()
+	// returns an mtime/size hit without re-running getModelUsage(), so without this bump existing
+	// entries would keep billing the whole prompt at the full input rate until their file changed.
+	private static readonly CACHE_VERSION = 73;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**

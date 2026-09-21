@@ -5,7 +5,9 @@
  * Mistral Vibe (https://github.com/mistralai/mistral-vibe) is a terminal-based coding agent.
  * Sessions are stored as individual directories under ~/.vibe/logs/session/
  * Each session directory contains:
- *   - meta.json: session metadata including stats (token counts), config (active_model), timestamps
+ *   - meta.json: session metadata including stats (token counts, of which session_cached_tokens is
+ *     the cache-read portion already counted inside session_prompt_tokens), config (active_model),
+ *     timestamps
  *   - messages.jsonl: one JSON object per line (LLMMessage objects)
  *
  * Session path format: ~/.vibe/logs/session/session_<YYYYMMDD>_<HHMMSS>_<session_id[:8]>/meta.json
@@ -182,7 +184,7 @@ outputTokens: completionTokens,
 // Clamp: a malformed meta.json reporting more cached than prompt tokens would otherwise
 // drive uncachedInput negative (Math.max(0, …) in calculateEstimatedCost already floors
 // it, but clamping here keeps the reported breakdown internally consistent too).
-...(cachedTokens > 0 ? { cachedReadTokens: Math.min(cachedTokens, promptTokens) } : {}),
+...(cachedTokens > 0 ? { cachedReadTokens: Math.max(0, Math.min(cachedTokens, promptTokens)) } : {}),
 sessions: 0,
 }
 };
