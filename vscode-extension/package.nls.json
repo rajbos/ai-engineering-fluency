@@ -537,6 +537,7 @@
   "insight.repeatedTaskSkillCandidate.body": "You started {0} sessions with a similar prompt: \"{1}\". Turning a repeated task like this into a skill or prompt file saves you from re-explaining it and makes the outcome more consistent. {2}",
 
   "//": "── Personalized Insights catalog (insightsEngine.ts) — see issue #2081 ──",
+  "whatsNew.release.0.18.1.headline": "A maintenance release: friendly tool names, localization groundwork, and a Mistral Vibe cost-attribution fix. No new screens.",
   "whatsNew.release.0.18.0.headline": "This release is about noticing patterns you would otherwise have to spot yourself: what a model router did off screen, where the agent had to backtrack, which prompts you keep retyping, how quickly models actually start answering, and how much Copilot agent memory has piled up on disk.",
   "whatsNew.feature.usage.memory-files-hygiene.title": "Copilot Memory Files",
   "whatsNew.feature.usage.memory-files-hygiene.description": "A new section on the Tools tab showing how much Copilot agent memory has accumulated on disk — per workspace, repo, session, and global scope — with counts for stale and oversized files so you know what is safe to clear out.",

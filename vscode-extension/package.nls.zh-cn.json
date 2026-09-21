@@ -539,6 +539,7 @@
   "insight.repeatedTaskSkillCandidate.body": "你用相似的提示开启了 {0} 个会话：“{1}”。把这类重复任务做成技能或提示文件，可以省去反复解释，并让结果更加一致。{2}",
 
   "//": "── Personalized Insights catalog (insightsEngine.ts) — see issue #2081 ──",
+  "whatsNew.release.0.18.1.headline": "一个维护版本：友好的工具名称、本地化基础工作，以及一个 Mistral Vibe 成本归因修复。没有新增界面。",
   "whatsNew.release.0.18.0.headline": "这个版本关注的是那些你原本得自己留意的规律：模型路由器在幕后做了什么、智能体在哪里不得不回退、哪些提示你在反复重输、模型实际上多快开始作答，以及 Copilot 智能体在磁盘上积累了多少记忆。",
   "whatsNew.feature.usage.memory-files-hygiene.title": "Copilot 记忆文件",
   "whatsNew.feature.usage.memory-files-hygiene.description": "工具标签页中的新板块，显示 Copilot 智能体在磁盘上积累了多少记忆——按工作区、仓库、会话和全局范围划分——并统计过时和过大的文件，让你知道哪些可以放心清理。",
