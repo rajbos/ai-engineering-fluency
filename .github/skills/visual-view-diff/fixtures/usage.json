@@ -1016,6 +1016,58 @@
       }
     ]
   },
+  "repeatedTasks": {
+    "minClusterSize": 2,
+    "sessionsScanned": 42,
+    "clusters": [
+      {
+        "representativePrompt": "Bump the changelog and tag a release for the web app",
+        "sessionCount": 3,
+        "repositories": ["acme/web-app"],
+        "sharedKeywords": ["changelog", "release", "tag"],
+        "sessions": [
+          {
+            "file": "/sessions/release-notes-3.jsonl",
+            "title": "Release notes for 2.4.0",
+            "lastInteraction": "2026-03-13T16:05:00.000Z",
+            "repository": "acme/web-app"
+          },
+          {
+            "file": "/sessions/release-notes-2.jsonl",
+            "title": "Release notes for 2.3.1",
+            "lastInteraction": "2026-03-06T11:20:00.000Z",
+            "repository": "acme/web-app"
+          },
+          {
+            "file": "/sessions/release-notes-1.jsonl",
+            "title": "Release notes for 2.3.0",
+            "lastInteraction": "2026-02-27T09:45:00.000Z",
+            "repository": "acme/web-app"
+          }
+        ]
+      },
+      {
+        "representativePrompt": "Write unit tests for the new parser helper",
+        "sessionCount": 2,
+        "repositories": ["acme/web-app", "acme/data-tools"],
+        "sharedKeywords": ["tests", "parser"],
+        "sessions": [
+          {
+            "file": "/sessions/parser-tests-2.jsonl",
+            "title": "Tests for the CSV parser",
+            "lastInteraction": "2026-03-11T14:00:00.000Z",
+            "repository": "acme/data-tools"
+          },
+          {
+            "file": "/sessions/parser-tests-1.jsonl",
+            "title": "Tests for the config parser",
+            "lastInteraction": "2026-03-02T10:15:00.000Z",
+            "repository": "acme/web-app"
+          }
+        ]
+      }
+    ]
+  },
   "claudeDesktopCoverage": {
     "knownSessions": 145,
     "withTranscript": 76,
