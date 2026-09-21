@@ -8,13 +8,7 @@
 import { calculateEstimatedCost } from '../../src/tokenEstimation';
 import { addModelUsage, scaleModelUsage } from '../../src/statsHelpers';
 import { normalizePathForComparison, detectClaudeCodeEditorVariant } from '../../src/workspaceHelpers';
-import { getCustomProviderGroup } from '../../src/webview/shared/modelUtils';
-import {
-	COPILOT_EDITOR_NAMES,
-	getPricingSourceForEditor,
-	getModelBillingProvider,
-	getBillingGroup,
-} from '../../src/chartDataBuilder';
+import { getPricingSourceForEditor, getBillingGroup } from '../../src/chartDataBuilder';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import type { ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../src/types';
 export type { PeriodStats, UsageAnalysisPeriod } from '../../src/types';
