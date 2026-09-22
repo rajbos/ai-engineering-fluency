@@ -1325,4 +1325,7 @@
   ,"plugin_power-automate_flowagent": "Power Automate Flowagent"
   ,"plugin_power-automate_microsoft-learn": "Microsoft Learn"
   ,"get_web_pages": "Get Web Pages"
+  ,"github-pull-request_doSearch": "GitHub MCP (Remote): Do Search"
+  ,"github-pull-request_resolveReviewThread": "GitHub MCP (Remote): Resolve Review Thread"
+  ,"sonarqube_setup_connected_mode": "SonarQube Setup: Connected Mode"
 }
