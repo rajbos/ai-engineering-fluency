@@ -2066,3 +2066,68 @@ test('checkClearEpoch() resets the checkpoint dirty count too, on a detected pee
 	assert.equal(m.hasUnflushedCheckpointWork(), false,
 		'a detected peer clear must reset the dirty count along with the entries it was tracking, the same as clearAllCachedData() does for this window\'s own clear');
 });
+
+test('loadCacheFromStorage: starts with an empty cache on a snapshot whose schema version does not match', async () => {
+	const dir = tmpDir();
+	const logs: string[] = [];
+	const m = makeManager(dir);
+	const snapshotPath = m.getSharedSnapshotPath();
+	fs.writeFileSync(snapshotPath, JSON.stringify({
+		schemaVersion: 999,
+		cacheVersion: 1,
+		cacheId: 'prod',
+		generatedAt: Date.now(),
+		entryCount: 1,
+		entries: { '/a.json': entry(1000) },
+	}));
+
+	const reader = new CacheManager(
+		{ extensionMode: 1, globalStorageUri: { fsPath: dir }, globalState: createMockMemento() } as any,
+		{ log: (msg: string) => logs.push(msg), warn: () => {}, error: () => {} },
+		1,
+	);
+	await reader.loadCacheFromStorage();
+
+	assert.equal(reader.cache.size, 0, 'entries written under a different snapshot schema must not be loaded');
+	assert.ok(logs.some(l => l.includes('Snapshot schema mismatch')), 'should log the schema mismatch');
+});
+
+test('loadCacheFromStorage: starts with an empty cache when the snapshot parses to a non-object', async () => {
+	const dir = tmpDir();
+	const logs: string[] = [];
+	const m = makeManager(dir);
+	fs.writeFileSync(m.getSharedSnapshotPath(), 'null');
+
+	const reader = new CacheManager(
+		{ extensionMode: 1, globalStorageUri: { fsPath: dir }, globalState: createMockMemento() } as any,
+		{ log: (msg: string) => logs.push(msg), warn: () => {}, error: () => {} },
+		1,
+	);
+	await reader.loadCacheFromStorage();
+
+	assert.equal(reader.cache.size, 0, 'a non-object envelope must not produce any entries');
+	assert.ok(logs.some(l => l.includes('No valid snapshot found')), 'should log the unusable envelope');
+});
+
+test('loadCacheFromStorage: a non-ENOENT read failure empties the cache instead of leaving stale entries behind', async () => {
+	const dir = tmpDir();
+	const errors: string[] = [];
+	const m = makeManager(dir);
+	// A directory where the snapshot file belongs makes readFile fail with something
+	// other than ENOENT (EISDIR/EPERM), the branch that rethrows rather than treating
+	// the snapshot as merely absent.
+	fs.mkdirSync(m.getSharedSnapshotPath());
+
+	const reader = new CacheManager(
+		{ extensionMode: 1, globalStorageUri: { fsPath: dir }, globalState: createMockMemento() } as any,
+		{ log: () => {}, warn: () => {}, error: (msg: string) => errors.push(msg) },
+		1,
+	);
+	reader.setCachedSessionData('/stale.json', entry(1000), 10);
+	await reader.loadCacheFromStorage();
+
+	assert.equal(reader.cache.size, 0,
+		'an unreadable snapshot must fall back to an empty cache, not keep whatever was already in memory');
+	assert.ok(errors.some(e => e.includes('Error loading cache from storage')),
+		'the read failure should surface through deps.error');
+});
