@@ -1335,4 +1335,6 @@
   ,"mcp_desktop-comma_write_file": "Desktop Command Line: Write File"
   ,"mcp_desktop-comma_write_pdf": "Desktop Command Line: Write PDF"
   ,"mcp_markitdown_convert_to_markdown": "Markdown Editor: Convert to Markdown"
+  ,"request_user_input": "Request User Input"
+  ,"write_stdin": "Write StdIn"
 }
