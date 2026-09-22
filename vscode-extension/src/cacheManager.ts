@@ -823,81 +823,100 @@ export class CacheManager {
 			this.migrateOldCacheKeys(cacheId);
 
 			// Load from the shared on-disk snapshot (globalStorageUri).
-			const snapshotPath = this.getSharedSnapshotPath();
-			try {
-				const content = await fs.promises.readFile(snapshotPath, 'utf-8');
-				const envelope = JSON.parse(content);
-
-				if (!envelope || typeof envelope !== 'object') {
-					this.deps.log(`No valid snapshot found for ${cacheId}, starting with empty cache`);
-					return;
-				}
-
-				// Cache version mismatch: reset stale-entity cleanup flag so the next
-				// sync will re-verify and delete obsolete Azure entities.
-				if (envelope.cacheVersion !== this.cacheVersion) {
-					this.deps.log(`Cache version mismatch (stored: ${envelope.cacheVersion}, current: ${this.cacheVersion}) for ${cacheId}. Clearing cache.`);
-					this.sessionFileCache = new Map();
-					try { this.context.globalState.update('backend.lastCleanSyncVersion', undefined); } catch { /* best-effort */ }
-					return;
-				}
-
-				if (
-					envelope.schemaVersion !== CacheManager.SNAPSHOT_SCHEMA_VERSION ||
-					typeof envelope.entries !== 'object'
-				) {
-					this.deps.log(`Snapshot schema mismatch or missing entries for ${cacheId}, starting with empty cache`);
-					return;
-				}
-
-				this.sessionFileCache = new Map(
-					Object.entries(envelope.entries as Record<string, SessionFileCache>),
-				);
-				this.deps.log(`Loaded ${this.sessionFileCache.size} cached session files from disk snapshot (${cacheId}) in ${Date.now() - loadStartedAt}ms`);
-
-				// Record the snapshot mtime so loadSharedSnapshotIfChanged won't reload it redundantly.
-				try {
-					const stat = await fs.promises.stat(snapshotPath);
-					this.lastLoadedSnapshotMtime = stat.mtimeMs;
-				} catch { /* best-effort */ }
-
-			} catch (readErr: unknown) {
-				if ((readErr as NodeJS.ErrnoException).code === 'ENOENT') {
-					this.deps.log(`No snapshot found for ${cacheId}, starting with empty cache`);
-				} else {
-					throw readErr;
-				}
-			}
+			await this._loadEntriesFromSharedSnapshot(cacheId, loadStartedAt);
 		} catch (error) {
 			this.deps.error(`Error loading cache from storage: ${error}`);
 			this.sessionFileCache = new Map();
 		} finally {
-			// Re-check after the load completes, not just before it started: a clear that lands on
-			// another window WHILE this call was reading the snapshot would otherwise go unnoticed
-			// until the next refresh cycle, letting this window's first paint show the pre-clear
-			// entries it just finished loading. Runs on every path above (including the early
-			// returns), and is a safe no-op when nothing changed since the seed above.
-			await this.checkClearEpoch();
-			if (this.cacheClearGeneration !== clearGenerationAtStart || this.clearInProgress) {
-				// This window's own clearCache() landed while the load above was in flight.
-				// checkClearEpoch() does not catch this (see the comment where clearGenerationAtStart
-				// is captured) — whatever this load just assigned to sessionFileCache above needs to
-				// be wiped explicitly, the same way loadSharedSnapshotIfChanged() guards this race.
-				// The clearInProgress check additionally covers the case where clearAllCachedData()
-				// (and this method's baseline capture) both happened entirely *before* this call even
-				// started, but deleteSharedSnapshot() has not yet advanced the epoch by the time this
-				// load finishes — the generation comparison alone sees nothing further change in that
-				// case, since the baseline already reflects the earlier bump.
-				this.sessionFileCache = new Map();
-				// Also reset the mtime bookmark: the stat() above (if it ran) recorded the pre-clear
-				// snapshot's mtime, possibly *after* the concurrent deleteSharedSnapshot() already
-				// reset it to 0, silently restoring the stale value. Left in place, a post-clear
-				// snapshot recreated with an equal-or-lower mtime (a coarse or backward-moving
-				// filesystem clock) would then be wrongly skipped by loadSharedSnapshotIfChanged()'s
-				// own mtime shortcut — the same failure mode checkClearEpoch() already guards against
-				// for a peer's clear.
-				this.lastLoadedSnapshotMtime = 0;
+			await this._discardLoadIfClearedDuringLoad(clearGenerationAtStart);
+		}
+	}
+
+	/**
+	 * Reads the shared on-disk snapshot and, when its envelope is usable, replaces
+	 * sessionFileCache with its entries and bookmarks the file's mtime.
+	 *
+	 * Returns without touching the cache when no snapshot exists yet or the envelope is
+	 * unusable; a cache-version mismatch empties the cache instead. A non-ENOENT read error
+	 * is rethrown so loadCacheFromStorage()'s own handler applies its empty-cache fallback.
+	 */
+	private async _loadEntriesFromSharedSnapshot(cacheId: string, loadStartedAt: number): Promise<void> {
+		const snapshotPath = this.getSharedSnapshotPath();
+		try {
+			const content = await fs.promises.readFile(snapshotPath, 'utf-8');
+			const envelope = JSON.parse(content);
+
+			if (!envelope || typeof envelope !== 'object') {
+				this.deps.log(`No valid snapshot found for ${cacheId}, starting with empty cache`);
+				return;
 			}
+
+			// Cache version mismatch: reset stale-entity cleanup flag so the next
+			// sync will re-verify and delete obsolete Azure entities.
+			if (envelope.cacheVersion !== this.cacheVersion) {
+				this.deps.log(`Cache version mismatch (stored: ${envelope.cacheVersion}, current: ${this.cacheVersion}) for ${cacheId}. Clearing cache.`);
+				this.sessionFileCache = new Map();
+				try { this.context.globalState.update('backend.lastCleanSyncVersion', undefined); } catch { /* best-effort */ }
+				return;
+			}
+
+			if (
+				envelope.schemaVersion !== CacheManager.SNAPSHOT_SCHEMA_VERSION ||
+				typeof envelope.entries !== 'object'
+			) {
+				this.deps.log(`Snapshot schema mismatch or missing entries for ${cacheId}, starting with empty cache`);
+				return;
+			}
+
+			this.sessionFileCache = new Map(
+				Object.entries(envelope.entries as Record<string, SessionFileCache>),
+			);
+			this.deps.log(`Loaded ${this.sessionFileCache.size} cached session files from disk snapshot (${cacheId}) in ${Date.now() - loadStartedAt}ms`);
+
+			// Record the snapshot mtime so loadSharedSnapshotIfChanged won't reload it redundantly.
+			try {
+				const stat = await fs.promises.stat(snapshotPath);
+				this.lastLoadedSnapshotMtime = stat.mtimeMs;
+			} catch { /* best-effort */ }
+
+		} catch (readErr: unknown) {
+			if ((readErr as NodeJS.ErrnoException).code === 'ENOENT') {
+				this.deps.log(`No snapshot found for ${cacheId}, starting with empty cache`);
+			} else {
+				throw readErr;
+			}
+		}
+	}
+
+	/**
+	 * Clear guard run on every exit path of loadCacheFromStorage(), including its early returns.
+	 */
+	private async _discardLoadIfClearedDuringLoad(clearGenerationAtStart: number): Promise<void> {
+		// Re-check after the load completes, not just before it started: a clear that lands on
+		// another window WHILE this call was reading the snapshot would otherwise go unnoticed
+		// until the next refresh cycle, letting this window's first paint show the pre-clear
+		// entries it just finished loading. Runs on every path above (including the early
+		// returns), and is a safe no-op when nothing changed since the seed above.
+		await this.checkClearEpoch();
+		if (this.cacheClearGeneration !== clearGenerationAtStart || this.clearInProgress) {
+			// This window's own clearCache() landed while the load above was in flight.
+			// checkClearEpoch() does not catch this (see the comment where clearGenerationAtStart
+			// is captured) — whatever this load just assigned to sessionFileCache above needs to
+			// be wiped explicitly, the same way loadSharedSnapshotIfChanged() guards this race.
+			// The clearInProgress check additionally covers the case where clearAllCachedData()
+			// (and this method's baseline capture) both happened entirely *before* this call even
+			// started, but deleteSharedSnapshot() has not yet advanced the epoch by the time this
+			// load finishes — the generation comparison alone sees nothing further change in that
+			// case, since the baseline already reflects the earlier bump.
+			this.sessionFileCache = new Map();
+			// Also reset the mtime bookmark: the stat() above (if it ran) recorded the pre-clear
+			// snapshot's mtime, possibly *after* the concurrent deleteSharedSnapshot() already
+			// reset it to 0, silently restoring the stale value. Left in place, a post-clear
+			// snapshot recreated with an equal-or-lower mtime (a coarse or backward-moving
+			// filesystem clock) would then be wrongly skipped by loadSharedSnapshotIfChanged()'s
+			// own mtime shortcut — the same failure mode checkClearEpoch() already guards against
+			// for a peer's clear.
+			this.lastLoadedSnapshotMtime = 0;
 		}
 	}
 
