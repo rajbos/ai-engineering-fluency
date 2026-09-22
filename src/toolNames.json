@@ -1328,4 +1328,11 @@
   ,"github-pull-request_doSearch": "GitHub MCP (Remote): Do Search"
   ,"github-pull-request_resolveReviewThread": "GitHub MCP (Remote): Resolve Review Thread"
   ,"sonarqube_setup_connected_mode": "SonarQube Setup: Connected Mode"
+  ,"desktop-comma": "Desktop Command Line"
+  ,"markitdown": "Markdown Editor"
+  ,"mcp__claude_ai_Gmail__search_threads": "Claude Code: Search Threads"
+  ,"mcp_desktop-comma_read_file": "Desktop Command Line: Read File"
+  ,"mcp_desktop-comma_write_file": "Desktop Command Line: Write File"
+  ,"mcp_desktop-comma_write_pdf": "Desktop Command Line: Write PDF"
+  ,"mcp_markitdown_convert_to_markdown": "Markdown Editor: Convert to Markdown"
 }
