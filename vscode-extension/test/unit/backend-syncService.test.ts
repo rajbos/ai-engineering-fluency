@@ -1398,6 +1398,31 @@ test('syncToSharingServer reports failure when the upload does not succeed', asy
 	assert.equal(uploaded, false, 'syncToSharingServer must report false when entries existed but did not reach the server');
 });
 
+test('syncToSharingServer reports failure when session files exist but none could be read', async () => {
+	// An empty rollup map is ambiguous: it is also what a scan produces when every
+	// discovered session file fails to stat/read/parse. Treating that as a
+	// successful no-op would advance "Last Sync" while local data never left the
+	// machine — the same false signal, one layer earlier.
+	const svc = new SyncService(
+		makeDeps({
+			getGithubToken: () => 'github-token',
+			getCopilotSessionFiles: async () => ['/home/user/.copilot/session-state/s/events.jsonl'],
+			statSessionFile: async () => { throw new Error('EACCES: permission denied'); },
+		}),
+		{} as any,
+		{} as any,
+		undefined,
+		BackendUtility,
+		{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+	);
+
+	const uploaded = await (svc as any).syncToSharingServer(
+		{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+		{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+	);
+	assert.equal(uploaded, false, 'Unreadable session files are a failed scan, not an empty one');
+});
+
 test('syncToSharingServer treats having nothing to upload as a successful sync', async () => {
 	const svc = new SyncService(
 		makeDeps({

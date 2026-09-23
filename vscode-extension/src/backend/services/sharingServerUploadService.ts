@@ -25,13 +25,49 @@ const BATCH_SIZE = 500;
 
 export class SharingServerUploadService {
 	/**
+	 * How many entries of a batch the server confirmed it stored.
+	 *
+	 * Only a parsed `uploaded` number counts as evidence of delivery. A 2xx whose
+	 * body will not parse, or that carries no `uploaded` count, is what a proxy or
+	 * a misconfigured endpoint returns, so it contributes nothing and is recorded
+	 * in `serverErrors`.
+	 */
+	private async readStoredCount(
+		response: Response,
+		batchSize: number,
+		warn: (msg: string) => void,
+		serverErrors: string[],
+	): Promise<number> {
+		let result: { uploaded?: number; errors?: string[] };
+		try {
+			result = await response.json() as { uploaded?: number; errors?: string[] };
+		} catch {
+			warn(`Sharing server upload: ${response.status} response is not JSON — treating the batch as not stored`);
+			serverErrors.push(`Unparseable ${response.status} response`);
+			return 0;
+		}
+		if (result.errors && result.errors.length > 0) {
+			warn(`Sharing server upload: server rejected ${batchSize - (result.uploaded ?? 0)} entries: ${result.errors.slice(0, 3).join('; ')}`);
+			serverErrors.push(...result.errors);
+		}
+		if (typeof result.uploaded !== 'number') {
+			warn(`Sharing server upload: ${response.status} response has no "uploaded" count — treating the batch as not stored`);
+			serverErrors.push(`${response.status} response without an "uploaded" count`);
+			return 0;
+		}
+		return result.uploaded;
+	}
+
+	/**
 	 * Upload daily rollup entries in batches.
 	 *
 	 * `success` means every entry was reported stored by the server. It is not a
 	 * synonym for "got a 2xx": the upload endpoint returns HTTP 200 with
 	 * `uploaded: 0` plus an `errors` array when entries fail validation or a
-	 * dataset transaction rolls back. Errors are reported through `warn` rather
-	 * than thrown, so callers must check this result.
+	 * dataset transaction rolls back, and a proxy or misconfigured endpoint can
+	 * answer 200 with a body that is not an upload result at all. Only a parsed
+	 * `uploaded` count is treated as evidence of delivery. Errors are reported
+	 * through `warn` rather than thrown, so callers must check this result.
 	 */
 	async uploadRollups(
 		endpointUrl: string,
@@ -64,17 +100,9 @@ export class SharingServerUploadService {
 					return { success: false, entriesUploaded: totalUploaded, message };
 				}
 
-				// Read actual uploaded count — server may reject entries that fail validation
-				let serverUploaded = batch.length;
-				try {
-					const result = await response.json() as { uploaded?: number; errors?: string[] };
-					if (typeof result.uploaded === 'number') { serverUploaded = result.uploaded; }
-					if (result.errors && result.errors.length > 0) {
-						warn(`Sharing server upload: server rejected ${batch.length - serverUploaded} entries: ${result.errors.slice(0, 3).join('; ')}`);
-						serverErrors.push(...result.errors);
-					}
-				} catch { /* response not JSON, use batch.length */ }
-				totalUploaded += serverUploaded;
+				// Read the actual stored count — a 2xx alone is not evidence of
+				// delivery, so only a parsed `uploaded` number counts.
+				totalUploaded += await this.readStoredCount(response, batch.length, warn, serverErrors);
 			}
 
 			// A 2xx response does not mean the data was stored. The server answers

@@ -1166,6 +1166,13 @@ return true;
 		workspaceNamesById: Record<string, string>;
 		machineNamesById: Record<string, string>;
 		editorTypeByFile: Map<string, string>;
+		/**
+		 * Number of discovered session files that could not be read, parsed or
+		 * stat'ed. These failures are logged and skipped, so an empty `rollups`
+		 * map on its own cannot tell "the user genuinely has no data" apart from
+		 * "the data is there but none of it could be read".
+		 */
+		filesFailed: number;
 	}> {
 		const lookbackDays = args.lookbackDays;
 		const skipMtimeFilter = args.skipMtimeFilter === true;
@@ -1192,7 +1199,7 @@ return true;
 
 		const sessionFiles = args.sessionFiles ?? await this.deps.sessionHandlers.getCopilotSessionFiles();
 		const useCachedData = !!this.deps.sessionHandlers.getSessionFileDataCached;
-		const progress = { filesSkipped: 0, filesProcessed: 0, cacheHits: 0, cacheMisses: 0 };
+		const progress = { filesSkipped: 0, filesProcessed: 0, cacheHits: 0, cacheMisses: 0, filesFailed: 0 };
 		const totalFiles = sessionFiles.length;
 		this.deps.logger.log(`Backend sync: analyzing ${totalFiles} session files`);
 
@@ -1207,7 +1214,10 @@ return true;
 
 		if (useCachedData) { this.logCachePerformance(progress.cacheHits, progress.cacheMisses); }
 		this.deps.logger.log(`Backend sync: processed ${progress.filesProcessed} files, skipped ${progress.filesSkipped} files outside lookback period`);
-		return { rollups, workspaceNamesById, machineNamesById, editorTypeByFile };
+		if (progress.filesFailed > 0) {
+			this.deps.logger.warn(`Backend sync: ${progress.filesFailed} session file(s) could not be read or parsed and were left out of the rollups`);
+		}
+		return { rollups, workspaceNamesById, machineNamesById, editorTypeByFile, filesFailed: progress.filesFailed };
 	}
 
 	private async tryProcessSpecialSession(
@@ -1215,13 +1225,17 @@ return true;
 		sessionArgs: ReturnType<typeof this.makeSessionRollupArgs>,
 		isType: (f: string) => boolean,
 		process: (f: string, mtime: number, args: ReturnType<typeof this.makeSessionRollupArgs>) => Promise<boolean>,
-		filesSkipped: { count: number }
+		filesSkipped: { count: number },
+		filesFailed: { count: number }
 	): Promise<boolean> {
 		if (!isType(sessionFile)) { return false; }
 		try {
 			const processed = await process(sessionFile, fileMtimeMs, sessionArgs);
 			if (!processed) { filesSkipped.count++; }
-		} catch (e) { this.deps.logger.warn(`Backend sync: failed to process session ${sessionFile}: ${e}`); }
+		} catch (e) {
+			this.deps.logger.warn(`Backend sync: failed to process session ${sessionFile}: ${e}`);
+			filesFailed.count++;
+		}
 		return true;
 	}
 
@@ -1233,7 +1247,7 @@ return true;
 			rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>;
 			workspaceNamesById: Record<string, string>; totalFiles: number;
 			onProgress: ((processed: number, total: number, daysFound: number) => void) | undefined;
-			progress: { filesSkipped: number; filesProcessed: number; cacheHits: number; cacheMisses: number };
+			progress: { filesSkipped: number; filesProcessed: number; cacheHits: number; cacheMisses: number; filesFailed: number };
 			editorTypeByFile: Map<string, string>;
 			collectEditorType: boolean;
 		}
@@ -1257,8 +1271,9 @@ return true;
 		if (this.isVSSessionFileType(sessionFile)) { ctx.progress.filesSkipped++; return; }
 		const sessionArgs = this.makeSessionRollupArgs(ctx.machineId, ctx.userId, editorForRollup, ctx.workspaceNamesById, ctx.rollups, ctx.startMs);
 		const skipped = { count: 0 };
-		if (await this.tryProcessSpecialSession(sessionFile, fileMtimeMs, sessionArgs, this.isOpenCodeSessionType.bind(this), this.processOpenCodeSession.bind(this), skipped)) { ctx.progress.filesSkipped += skipped.count; return; }
-		if (await this.tryProcessSpecialSession(sessionFile, fileMtimeMs, sessionArgs, this.isCrushSessionType.bind(this), this.processCrushSession.bind(this), skipped)) { ctx.progress.filesSkipped += skipped.count; return; }
+		const failed = { count: 0 };
+		if (await this.tryProcessSpecialSession(sessionFile, fileMtimeMs, sessionArgs, this.isOpenCodeSessionType.bind(this), this.processOpenCodeSession.bind(this), skipped, failed)) { ctx.progress.filesSkipped += skipped.count; ctx.progress.filesFailed += failed.count; return; }
+		if (await this.tryProcessSpecialSession(sessionFile, fileMtimeMs, sessionArgs, this.isCrushSessionType.bind(this), this.processCrushSession.bind(this), skipped, failed)) { ctx.progress.filesSkipped += skipped.count; ctx.progress.filesFailed += failed.count; return; }
 		const workspaceId = this.utility.extractWorkspaceIdFromSessionPath(sessionFile);
 		await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, ctx.workspaceNamesById);
 		if (ctx.useCachedData) {
@@ -1272,13 +1287,16 @@ return true;
 			content = await fs.promises.readFile(sessionFile, 'utf8');
 		} catch (e) {
 			this.deps.logger.warn(`Backend sync: failed to read session file ${sessionFile}: ${e}`);
+			ctx.progress.filesFailed++;
 			return;
 		}
 		if (sessionFile.endsWith('.jsonl') || isJsonlContent(content)) {
 			this.processJsonlSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForRollup, ctx.rollups);
 			return;
 		}
-		this.processJsonSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForRollup, ctx.rollups);
+		if (!this.processJsonSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForRollup, ctx.rollups)) {
+			ctx.progress.filesFailed++;
+		}
 	}
 
 	private async statSessionFileForRollup(
@@ -1287,7 +1305,7 @@ return true;
 			skipMtimeFilter: boolean; startMs: number; totalFiles: number;
 			onProgress: ((processed: number, total: number, daysFound: number) => void) | undefined;
 			rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>;
-			progress: { filesSkipped: number; filesProcessed: number; cacheHits: number; cacheMisses: number };
+			progress: { filesSkipped: number; filesProcessed: number; cacheHits: number; cacheMisses: number; filesFailed: number };
 		}
 	): Promise<number | undefined> {
 		try {
@@ -1302,6 +1320,7 @@ return true;
 			return fileMtimeMs;
 		} catch (e) {
 			this.deps.logger.warn(`Backend sync: failed to stat session file ${sessionFile}: ${e}`);
+			ctx.progress.filesFailed++;
 			return undefined;
 		}
 	}
@@ -1621,7 +1640,7 @@ return true;
 			settings,
 			sharingPolicy.includeUserDimension,
 		);
-		const { rollups, workspaceNamesById, machineNamesById } =
+		const { rollups, workspaceNamesById, machineNamesById, filesFailed } =
 			await this.computeDailyRollupsFromLocalSessions({
 				lookbackDays: settings.lookbackDays,
 				userId: resolvedIdentity.userId,
@@ -1629,11 +1648,20 @@ return true;
 			});
 
 		if (rollups.size === 0) {
+			// An empty scan is only a successful no-op when it is a *genuine* empty
+			// scan. Unreadable or unparseable session files are logged and skipped,
+			// so local data can exist and still produce no rollups — reporting that
+			// as a successful sync is the same false "all good" signal this guards
+			// against, just one layer earlier.
+			if (filesFailed > 0) {
+				this.deps.logger.warn(`Sharing server upload: nothing to upload, but ${filesFailed} session file(s) could not be read — not treating this as a successful sync`);
+				return false;
+			}
 			this.deps.logger.log('Sharing server upload: no data to upload');
-			// Having nothing to send is a successful no-op, not a failure: the sync
-			// ran and the server is already up to date, so the marker should still
-			// advance. The failure this guards against is data that exists and does
-			// not arrive, which is handled by the upload result below.
+			// Nothing to send and nothing failed: the sync ran and the server is
+			// already up to date, so the marker should still advance. The failure
+			// this guards against is data that exists and does not arrive, which is
+			// handled by the upload result below.
 			return true;
 		}
 

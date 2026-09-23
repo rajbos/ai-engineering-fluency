@@ -289,26 +289,54 @@ test('uploadRollups: sends entries as JSON body', async () => {
 	assert.ok(body?.includes('gpt-4'));
 });
 
-test('uploadRollups: handles non-JSON response gracefully', async () => {
+test('uploadRollups: reports failure when a 2xx response is not a JSON upload result', async () => {
 	const service = new SharingServerUploadService();
 	const entries = [createTestEntry()];
 	
-	// Mock response with non-JSON body
-	mockFetchResponse = new Response('Not JSON', {
+	// A proxy or misconfigured endpoint answering 200 with HTML used to be
+	// counted as a full delivery, which is exactly the "healthy sync but no
+	// data on the server" symptom this guards against.
+	mockFetchResponse = new Response('<html>Not JSON</html>', {
 		status: 200,
 		statusText: 'OK'
 	});
 	
+	const warnMsgs: string[] = [];
 	const result = await service.uploadRollups(
 		'https://server.example.com',
 		'github-token',
 		entries,
 		() => {},
-		() => {}
+		(msg) => warnMsgs.push(msg)
 	);
 	
-	assert.equal(result.success, true);
-	assert.equal(result.entriesUploaded, 1); // Falls back to batch.length
+	assert.equal(result.success, false);
+	assert.equal(result.entriesUploaded, 0);
+	assert.ok(warnMsgs.some(msg => msg.includes('not JSON')));
+});
+
+test('uploadRollups: reports failure when a 2xx JSON response has no uploaded count', async () => {
+	const service = new SharingServerUploadService();
+	const entries = [createTestEntry()];
+	
+	// Valid JSON, but nothing in it says the entries were stored.
+	mockFetchResponse = new Response(JSON.stringify({ ok: true }), {
+		status: 200,
+		statusText: 'OK'
+	});
+	
+	const warnMsgs: string[] = [];
+	const result = await service.uploadRollups(
+		'https://server.example.com',
+		'github-token',
+		entries,
+		() => {},
+		(msg) => warnMsgs.push(msg)
+	);
+	
+	assert.equal(result.success, false);
+	assert.equal(result.entriesUploaded, 0);
+	assert.ok(warnMsgs.some(msg => msg.includes('no "uploaded" count')));
 });
 
 // Test suite for uploadFluencyScore
