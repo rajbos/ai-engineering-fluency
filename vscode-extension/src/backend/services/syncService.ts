@@ -1397,8 +1397,13 @@ return true;
 	/** Runs the Team Server (sharing server) sync in isolation, logging (but not throwing) on failure. */
 	private async runSharingServerSyncIndependently(settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<void> {
 		try {
-			await this.syncToSharingServer(settings, sharingPolicy);
-			await this.tryUpdateSharingServerLastSyncAt();
+			// Only advance the marker when data actually reached the server. The
+			// upload service swallows HTTP and network errors and returns normally,
+			// so updating this unconditionally made "Last Sync" report a healthy
+			// recent sync while nothing had been uploaded for hours.
+			if (await this.syncToSharingServer(settings, sharingPolicy)) {
+				await this.tryUpdateSharingServerLastSyncAt();
+			}
 		} catch (ssErr: unknown) {
 			this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`);
 		}
@@ -1600,16 +1605,16 @@ return true;
 	private async syncToSharingServer(
 		settings: BackendSettings,
 		sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>,
-	): Promise<void> {
+	): Promise<boolean> {
 		if (!this.sharingServerUploadService) {
 			this.deps.logger.warn('Sharing server upload: service not available');
-			return;
+			return false;
 		}
 
 		const githubToken = this.deps.getGithubToken?.();
 		if (!githubToken) {
 			this.deps.logger.log('Sharing server upload: skipping (no GitHub token — authenticate with GitHub in VS Code first)');
-			return;
+			return false;
 		}
 
 		const resolvedIdentity = await this.resolveEffectiveUserIdentityForSync(
@@ -1625,7 +1630,11 @@ return true;
 
 		if (rollups.size === 0) {
 			this.deps.logger.log('Sharing server upload: no data to upload');
-			return;
+			// Having nothing to send is a successful no-op, not a failure: the sync
+			// ran and the server is already up to date, so the marker should still
+			// advance. The failure this guards against is data that exists and does
+			// not arrive, which is handled by the upload result below.
+			return true;
 		}
 
 		const includeNames = sharingPolicy.includeNames;
@@ -1650,13 +1659,14 @@ return true;
 		const totalInputTokens = entries.reduce((s, e) => s + e.inputTokens, 0);
 		const totalOutputTokens = entries.reduce((s, e) => s + e.outputTokens, 0);
 		this.deps.logger.log(`Sharing server upload: uploading ${entries.length} rollup entries (${(totalInputTokens + totalOutputTokens).toLocaleString()} tokens total)`);
-		await this.sharingServerUploadService.uploadRollups(
+		const result = await this.sharingServerUploadService.uploadRollups(
 			settings.sharingServerEndpointUrl,
 			githubToken,
 			entries,
 			this.deps.logger.log,
 			this.deps.logger.warn,
 		);
+		return result.success;
 	}
 
 	/**
@@ -1674,14 +1684,16 @@ return true;
 		const githubToken = this.deps.getGithubToken?.();
 		if (!githubToken) { return; }
 
-		await this.sharingServerUploadService.uploadFluencyScore(
+		const uploaded = await this.sharingServerUploadService.uploadFluencyScore(
 			settings.sharingServerEndpointUrl,
 			githubToken,
 			score,
 			this.deps.logger.log,
 			this.deps.logger.warn,
 		);
-		await this.tryUpdateSharingServerLastSyncAt();
+		if (uploaded) {
+			await this.tryUpdateSharingServerLastSyncAt();
+		}
 	}
 
 	/**

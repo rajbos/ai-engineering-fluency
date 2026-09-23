@@ -79,6 +79,10 @@ export class SharingServerUploadService {
 	/**
 	 * Upload the extension's locally-computed fluency score so the server dashboard
 	 * shows the exact same result as the extension's AI Fluency Score panel.
+	 *
+	 * Returns whether the score actually reached the server. Failures are reported
+	 * through `warn` rather than thrown, so a caller cannot use try/catch to tell
+	 * success from failure and must check this value.
 	 */
 	async uploadFluencyScore(
 		endpointUrl: string,
@@ -86,7 +90,7 @@ export class SharingServerUploadService {
 		score: Record<string, unknown>,
 		log: (msg: string) => void,
 		warn: (msg: string) => void,
-	): Promise<void> {
+	): Promise<boolean> {
 		const baseUrl = endpointUrl.replace(/\/$/, '');
 		const url = `${baseUrl}/api/fluency-score`;
 		try {
@@ -101,11 +105,13 @@ export class SharingServerUploadService {
 			if (!response.ok) {
 				const errorText = await response.text().catch(() => '');
 				warn(`Sharing server fluency-score upload: HTTP ${response.status}: ${errorText}`);
-				return;
+				return false;
 			}
 			log('Sharing server fluency-score upload: ok');
+			return true;
 		} catch (e: unknown) {
 			warn(`Sharing server fluency-score upload failed: ${safeStringifyError(e)}`);
+			return false;
 		}
 	}
 }

@@ -1170,7 +1170,7 @@ test('syncToBackendStore handles ensureTableExists or validateAccess failure gra
 test('syncToBackendStore still attempts sharing server sync when Azure sync fails', async () => {
 	const logs: string[] = [];
 	const warns: string[] = [];
-	const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+	const sharingServerSvc = { uploadRollups: async () => ({ success: true, entriesUploaded: 1, message: 'Uploaded 1 entries' }), uploadFluencyScore: async () => true };
 	const svc = new SyncService(
 		makeDeps({
 			log: (m) => logs.push(m),
@@ -1239,7 +1239,7 @@ test('syncToBackendStore tracks Azure and Team Server "last sync" independently 
 		},
 		globalStorageUri: { fsPath: lockDir },
 	} as unknown as vscode.ExtensionContext;
-	const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+	const sharingServerSvc = { uploadRollups: async () => ({ success: true, entriesUploaded: 1, message: 'Uploaded 1 entries' }), uploadFluencyScore: async () => true };
 	const svc = new SyncService(
 		makeDeps({
 			context: mockContext,
@@ -1303,7 +1303,7 @@ test('uploadFluencyScoreToSharingServer updates the Team Server lastSync marker 
 			update: async (key: string, value: unknown) => { globalState.set(key, value); },
 		},
 	} as unknown as vscode.ExtensionContext;
-	const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+	const sharingServerSvc = { uploadRollups: async () => ({ success: true, entriesUploaded: 1, message: 'Uploaded 1 entries' }), uploadFluencyScore: async () => true };
 	const svc = new SyncService(
 		makeDeps({
 			context: mockContext,
@@ -1323,6 +1323,120 @@ test('uploadFluencyScoreToSharingServer updates the Team Server lastSync marker 
 		globalState.get('backend.sharingServerLastSyncAt'),
 		'A successful fluency-score upload is a real Team Server sync and must update its own lastSync marker'
 	);
+});
+
+test('uploadFluencyScoreToSharingServer does NOT update the lastSync marker when the upload fails', async () => {
+	const globalState = new Map<string, unknown>();
+	const mockContext = {
+		globalState: {
+			get: (key: string) => globalState.get(key),
+			update: async (key: string, value: unknown) => { globalState.set(key, value); },
+		},
+	} as unknown as vscode.ExtensionContext;
+	// The upload service reports failures through its warn callback and returns
+	// normally, so a completed call says nothing about whether the score landed.
+	const sharingServerSvc = { uploadRollups: async () => ({ success: true, entriesUploaded: 1, message: 'Uploaded 1 entries' }), uploadFluencyScore: async () => false };
+	const svc = new SyncService(
+		makeDeps({
+			context: mockContext,
+			getGithubToken: () => 'fake-token',
+		}),
+		{} as any,
+		{} as any,
+		undefined,
+		BackendUtility,
+		sharingServerSvc as any,
+	);
+	await svc.uploadFluencyScoreToSharingServer({
+		sharingServerEnabled: true,
+		sharingServerEndpointUrl: 'https://test-sharing-server/',
+	} as any, { overallStage: 'exploring' });
+	assert.equal(
+		globalState.get('backend.sharingServerLastSyncAt'),
+		undefined,
+		'A failed fluency-score upload must not report a successful sync'
+	);
+});
+
+test('syncToSharingServer reports failure when the upload does not succeed', async () => {
+	const dayKey = new Date().toISOString().slice(0, 10);
+	// Rollups must actually exist: an upload that fails with data to send is the
+	// case that matters, and it is invisible to the caller otherwise because the
+	// upload service reports errors through warn and returns normally.
+	const svc = new SyncService(
+		makeDeps({
+			getGithubToken: () => 'github-token',
+			getCopilotSessionFiles: async () => ['/home/user/.copilot/session-state/s/events.jsonl'],
+			statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+			getSessionFileDataCached: async () => ({
+				tokens: 300,
+				mtime: Date.now(),
+				interactions: 1,
+				modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+				dailyRollups: {
+					[dayKey]: {
+						tokens: 300,
+						actualTokens: 300,
+						thinkingTokens: 0,
+						interactions: 1,
+						modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+					},
+				},
+			}),
+		}),
+		{} as any,
+		{} as any,
+		undefined,
+		BackendUtility,
+		{ uploadRollups: async () => ({ success: false, entriesUploaded: 0, message: 'Upload failed: fetch failed' }) } as any,
+	);
+
+	const uploaded = await (svc as any).syncToSharingServer(
+		{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+		{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+	);
+	assert.equal(uploaded, false, 'syncToSharingServer must report false when entries existed but did not reach the server');
+});
+
+test('syncToSharingServer treats having nothing to upload as a successful sync', async () => {
+	const svc = new SyncService(
+		makeDeps({
+			getGithubToken: () => 'github-token',
+			getCopilotSessionFiles: async () => [],
+		}),
+		{} as any,
+		{} as any,
+		undefined,
+		BackendUtility,
+		{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+	);
+
+	const uploaded = await (svc as any).syncToSharingServer(
+		{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+		{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+	);
+	assert.equal(uploaded, true, 'No local data is a no-op, not a failed sync');
+});
+
+test('syncToSharingServer reports failure when no GitHub token is available', async () => {
+	const svc = new SyncService(
+		makeDeps({ getGithubToken: () => undefined }),
+		{} as any,
+		{} as any,
+		undefined,
+		BackendUtility,
+		{ uploadRollups: async () => ({ success: true, entriesUploaded: 1, message: 'Uploaded' }) } as any,
+	);
+	const uploaded = await (svc as any).syncToSharingServer(
+		{
+			sharingServerEnabled: true,
+			sharingServerEndpointUrl: 'https://test-sharing-server/',
+			lookbackDays: 7,
+			datasetId: 'default',
+		} as any,
+		{ allowCloudSync: true, includeNames: false, includeUserDimension: false } as any,
+	);
+	assert.equal(uploaded, false, 'Skipping the upload for lack of a token is not a successful sync');
 });
 
 // ── Sync lock management ─────────────────────────────────────────────────
@@ -1505,7 +1619,7 @@ test(`syncToBackendStore also syncs to sharing server when backend=storageTables
 			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
 			deleteEntitiesForUserDataset: async () => ({ deletedCount: 0, errors: [] }),
 		};
-		const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+		const sharingServerSvc = { uploadRollups: async () => ({ success: true, entriesUploaded: 1, message: 'Uploaded 1 entries' }), uploadFluencyScore: async () => true };
 		const svc = new SyncService(deps, credSvc as any, dataSvc as any, undefined, BackendUtility, sharingServerSvc as any);
 		await svc.syncToBackendStore(true, {
 			enabled: true,
