@@ -169,9 +169,17 @@ describe('member dashboard privacy boundary', () => {
 		assert.ok(html.includes('No data yet.'));
 		// Must match the contributed Command Palette title (vscode-extension/package.nls.json).
 		assert.ok(html.includes('AI Engineering Fluency: Configure Team Server Backend'));
-		// The endpoint URL alone leaves uploads disabled: both settings must be named.
-		assert.ok(html.includes('aiEngineeringFluency.backend.sharingServer.enabled'));
-		assert.ok(html.includes('aiEngineeringFluency.backend.sharingServer.endpointUrl'));
+		// Every gate on the extension's upload path must be named: the endpoint URL alone leaves
+		// uploads disabled, and cloud sync also needs backend.enabled plus a non-off sharing profile.
+		for (const setting of [
+			'aiEngineeringFluency.backend.sharingServer.enabled',
+			'aiEngineeringFluency.backend.sharingServer.endpointUrl',
+			'aiEngineeringFluency.backend.sharingProfile',
+			'aiEngineeringFluency.backend.enabled',
+		]) {
+			assert.ok(html.includes(`<code>${setting}</code>`), `missing ${setting}`);
+		}
+		assert.ok(html.includes('any value other than <code>off</code>'));
 		// The extension has no status-bar sync; saving the settings is the trigger.
 		assert.ok(!html.includes('status bar'));
 		assertNoPeerMetadata(html);
