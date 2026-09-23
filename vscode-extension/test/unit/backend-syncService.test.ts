@@ -1439,6 +1439,107 @@ test('syncToSharingServer reports failure when no GitHub token is available', as
 	assert.equal(uploaded, false, 'Skipping the upload for lack of a token is not a successful sync');
 });
 
+test('syncToBackendStore does NOT update the Team Server lastSync marker when a non-empty rollup upload fails', async () => {
+	// End-to-end guard on the user-visible bug: driving the public sync path with
+	// real rollup data and a failing upload must leave "Last Sync" untouched. The
+	// unit tests above only cover syncToSharingServer's return value, so they
+	// would still pass if the marker call site were made unconditional again.
+	const dayKey = new Date().toISOString().slice(0, 10);
+	const globalState = new Map<string, unknown>();
+	const lockDir = fs.mkdtempSync(path.join(process.cwd(), 'sync-lock-fail-test-'));
+	const mockContext = {
+		globalState: {
+			get: (key: string) => globalState.get(key),
+			update: async (key: string, value: unknown) => { globalState.set(key, value); },
+		},
+		globalStorageUri: { fsPath: lockDir },
+	} as unknown as vscode.ExtensionContext;
+	let uploadAttempts = 0;
+	const sharingServerSvc = {
+		uploadRollups: async () => {
+			uploadAttempts++;
+			return { success: false, entriesUploaded: 0, message: 'Upload failed: fetch failed' };
+		},
+		uploadFluencyScore: async () => false,
+	};
+	const svc = new SyncService(
+		makeDeps({
+			context: mockContext,
+			getGithubToken: () => 'fake-token',
+			getCopilotSessionFiles: async () => ['/home/user/.copilot/session-state/s/events.jsonl'],
+			statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+			getSessionFileDataCached: async () => ({
+				tokens: 300,
+				mtime: Date.now(),
+				interactions: 1,
+				modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+				dailyRollups: {
+					[dayKey]: {
+						tokens: 300,
+						actualTokens: 300,
+						thinkingTokens: 0,
+						interactions: 1,
+						modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+					},
+				},
+			}),
+		}),
+		{
+			getBackendDataPlaneCredentials: async () => ({
+				tableCredential: {},
+				blobCredential: {},
+				secretsToRedact: [],
+			}),
+			getBackendSecretsToRedactForError: async () => [],
+		} as any,
+		{
+			ensureTableExists: async () => {},
+			validateAccess: async () => {},
+			createTableClient: () => ({}),
+			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
+		} as any,
+		undefined,
+		BackendUtility,
+		sharingServerSvc as any,
+	);
+	try {
+		await svc.syncToBackendStore(true, {
+			enabled: true,
+			backend: 'storageTables',
+			sharingProfile: 'teamAnonymized',
+			shareWorkspaceMachineNames: false,
+			storageAccount: 'sa1',
+			subscriptionId: 'sub1',
+			resourceGroup: 'rg1',
+			aggTable: 'usageAgg',
+			eventsTable: 'usageEvents',
+			lookbackDays: 7,
+			sharingServerEnabled: true,
+			sharingServerEndpointUrl: 'https://test-sharing-server/',
+			shareWithTeam: false,
+			userIdentityMode: 'pseudonymous',
+			userId: '',
+			userIdMode: 'alias',
+			datasetId: 'default',
+			shareConsentAt: '',
+			includeMachineBreakdown: false,
+			blobUploadEnabled: false,
+			blobContainerName: '',
+			blobUploadFrequencyHours: 24,
+			blobCompressFiles: true,
+			authMode: 'entraId',
+		} as any, true);
+		assert.ok(uploadAttempts > 0, 'The test must exercise a real upload attempt, not the no-data short circuit');
+		assert.equal(
+			globalState.get('backend.sharingServerLastSyncAt'),
+			undefined,
+			'A failed rollup upload must leave "Last Sync" unset rather than reporting a healthy recent sync'
+		);
+	} finally {
+		fs.rmSync(lockDir, { recursive: true, force: true });
+	}
+});
+
 // ── Sync lock management ─────────────────────────────────────────────────
 
 test('acquireSyncLock succeeds when no context is provided', async () => {
