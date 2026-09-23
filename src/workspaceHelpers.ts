@@ -8,7 +8,12 @@ import * as path from 'path';
 import type { CustomizationFileEntry } from './types';
 import * as packageJson from '../vscode-extension/package.json';
 import customizationPatternsData from './customizationPatterns.json';
-import { resolveFileUri } from './workspacePathResolver';
+import { parseWorkspaceStorageJsonFile, resolveFileUri } from './workspacePathResolver';
+
+// Re-exported for backward compatibility: this helper now lives in workspacePathResolver.ts
+// (a VS Code-free module) so that src/copilotMemoryFiles.ts — a shared Node module consumed
+// by both the CLI and the extension — can use it without pulling in the `vscode` API.
+export { parseWorkspaceStorageJsonFile };
 import {
 	fileUriToPath,
 	getRepoNameFromWorkspacePath,
@@ -25,6 +30,7 @@ import { isGuidMcpTool, lookupKnownToolName } from './utils/toolUtils';
 import { isCopilotAppClientName } from './copilotCliStore';
 
 export {
+	dedupeByNormalizedKeyKeepGreatest,
 	fileUriToPath,
 	normalizePath,
 	normalizePathForComparison,
@@ -77,36 +83,6 @@ interface CustomizationPatternsConfig {
 	stalenessThresholdDays?: number;
 	excludeDirs?: string[];
 	patterns?: CustomizationPattern[];
-}
-
-/**
- * Resolve the workspace folder full path from a session file path.
- * Looks for a `workspaceStorage/<id>/` segment and reads `workspace.json` or `meta.json`.
- * Synchronous by design to keep the analysis flow simple and cached.
- */
-// Helper: read a workspaceStorage JSON file and extract a candidate folder path from configured keys
-export function parseWorkspaceStorageJsonFile(jsonPath: string, candidateKeys: string[]): string | undefined {
-	if (typeof jsonPath !== 'string' || !jsonPath || !Array.isArray(candidateKeys)) { return undefined; }
-	try {
-		const raw = fs.readFileSync(jsonPath, 'utf8');
-		const obj = JSON.parse(raw);
-		if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) { return undefined; }
-		for (const key of candidateKeys) {
-			const candidate = obj[key];
-			if (typeof candidate !== 'string') { continue; }
-			// Resolve file:// URIs using the safe resolver (handles Windows, POSIX, UNC, encoded chars).
-			if (candidate.startsWith('file://')) {
-				const resolved = resolveFileUri(candidate);
-				if (resolved) { return resolved; }
-				continue;
-			}
-			// Non-URI value — treat as a plain filesystem path.
-			return candidate;
-		}
-	} catch {
-		// ignore parse/read errors
-	}
-	return undefined;
 }
 
 /**
@@ -1037,11 +1013,23 @@ function isVSCodeServerPath(lowerPath: string): boolean {
 	return lowerPath.includes('.vscode-server/') || lowerPath.includes('.vscode-remote/');
 }
 
-/** Returns true for Visual Studio path segments (`/.vs/.../copilot-chat/.../sessions/`). */
+/**
+ * Returns true for Visual Studio path segments: `/copilot-chat/.../sessions/` under either
+ * a solution's `/.vs/` folder or VS's own `/vsgithubcopilot/` AppData folder (solution-less chats).
+ */
 function isVisualStudioPath(lowerPath: string): boolean {
-	return lowerPath.includes('/.vs/') &&
-		lowerPath.includes('/copilot-chat/') &&
-		lowerPath.includes('/sessions/');
+	if (!lowerPath.includes('/copilot-chat/') || !lowerPath.includes('/sessions/')) { return false; }
+	return lowerPath.includes('/.vs/') || lowerPath.includes('/vsgithubcopilot/copilot-chat/');
+}
+
+/**
+ * Returns true for SQL Server Management Studio Copilot Chat sessions
+ * (`…/SSMS/<version>/SSMSGitHubCopilot/copilot-chat/<hash>/sessions/<uuid>`).
+ * Checked before {@link isVisualStudioPath} so SSMS keeps its own label — the same
+ * split `VisualStudioAdapter.getDisplayName()` makes.
+ */
+function isSsmsPath(lowerPath: string): boolean {
+	return lowerPath.includes('/ssmsgithubcopilot/copilot-chat/') && lowerPath.includes('/sessions/');
 }
 
 /** Returns true for VS Code Insiders via loose substring match (used by detectEditorSource). */
@@ -1187,6 +1175,7 @@ function detectVSCodeVariantFromPath(lowerPath: string): string | undefined {
 	if (lowerPath.includes('/cursor/')) { return 'Cursor'; }
 	if (lowerPath.includes('.vscode-server-insiders/')) { return 'VS Code Server (Insiders)'; }
 	if (isVSCodeServerPath(lowerPath)) { return 'VS Code Server'; }
+	if (isSsmsPath(lowerPath)) { return 'SSMS'; }
 	if (isVisualStudioPath(lowerPath)) { return 'Visual Studio'; }
 	if (lowerPath.includes('/code/')) { return 'VS Code'; }
 	return undefined;
@@ -1291,6 +1280,7 @@ function detectIDEEditorSource(lowerPath: string): string | undefined {
 	// irrelevant here (disjoint word), but Devin's own data folder is named '.devin'.
 	if (lowerPath.includes('devin')) { return 'Devin'; }
 	if (lowerPath.includes('windsurf')) { return 'Windsurf'; }
+	if (isSsmsPath(lowerPath)) { return 'SSMS'; }
 	if (isVisualStudioPath(lowerPath)) { return 'Visual Studio'; }
 	if (lowerPath.includes('code')) { return 'VS Code'; }
 	return undefined;

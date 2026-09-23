@@ -11,6 +11,24 @@
     "shell passes (the __INITIAL_*__ payload) into a fixture, and run",
     "`node render-views.js --view <id>` to check it renders.",
     "",
+    "scenarios: optional scripted click/select flows replayed by",
+    "scripts/interaction-smoke.js. The one-pass control crawl cannot change a",
+    "<select> or reach a control that only appears after another one was used,",
+    "so a view declares those flows here: each step is a `click` or a `select`",
+    "(with an optional `value`; otherwise the next enabled option is taken), and",
+    "`expect` is a selector the view must still be showing after every step.",
+    "",
+    "states: optional per-view list of the tabs and modes the visual diff also",
+    "screenshots. A view is otherwise captured only in its initial render, so a",
+    "change on any other tab diffs as 'unchanged'. Each state has an `id` (the",
+    "screenshot is <view>--<id>.<theme>.png), a `title`, `steps` in the same",
+    "click/select/post format as scenarios (replayed on a fresh page; `post`",
+    "delivers a host message for a tab that loads its content on open), and an",
+    "`expect` selector that must be showing afterwards, or the render is an",
+    "error. Optional `settleMs` overrides the wait after the steps (a tab that",
+    "lazily loads Chart.js and animates in needs more than the default), and",
+    "optional `noiseFloorPixels` gives a canvas-drawing state its own tolerance.",
+    "",
     "noiseFloorPixels: how many differing pixels count as run-to-run noise",
     "rather than a real change. Only views that draw to a <canvas> need it —",
     "anti-aliasing there is not perfectly reproducible. Omit it (default 0) so",
@@ -65,14 +83,161 @@
       "title": "Usage Analysis",
       "bundle": "usage",
       "global": "__INITIAL_USAGE__",
-      "fixture": "usage.json"
+      "fixture": "usage.json",
+      "$statesComment": [
+        "Every tab of the usage panel; 'activity' is the initial render."
+      ],
+      "states": [
+        {
+          "id": "sessions",
+          "title": "Recent Sessions tab",
+          "steps": [{ "click": ".tab-button[data-tab=\"sessions\"]" }],
+          "expect": "#tab-panel-sessions"
+        },
+        {
+          "id": "tools",
+          "title": "Tools & Integrations tab",
+          "steps": [{ "click": ".tab-button[data-tab=\"tools\"]" }],
+          "expect": "#tab-panel-tools"
+        },
+        {
+          "id": "health",
+          "title": "Workspace Health tab",
+          "steps": [{ "click": ".tab-button[data-tab=\"health\"]" }],
+          "expect": "#tab-panel-health"
+        },
+        {
+          "id": "repos",
+          "title": "Repository PRs tab",
+          "$comment": [
+            "Opening the tab asks the host for PR statistics and shows a placeholder",
+            "until they arrive. The `post` step plays the host so the loaded table is",
+            "what gets screenshotted; `since` is fixed and `fetchedAt` is omitted so",
+            "nothing on the panel depends on the wall clock."
+          ],
+          "steps": [
+            { "click": ".tab-button[data-tab=\"repos\"]" },
+            { "post": {"command": "repoPrStatsLoaded", "data": {"authenticated": true, "since": "2026-02-13T00:00:00.000Z", "repos": [{"owner": "rajbos", "repo": "ai-engineering-fluency", "repoUrl": "https://github.com/rajbos/ai-engineering-fluency", "totalPrs": 99, "aiAuthoredPrs": 7, "aiReviewRequestedPrs": 3, "userAuthoredPrs": 40, "userMergedPrs": 38, "aiDetails": [{"number": 2094, "title": "Copilot memory-files hygiene", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2094", "aiType": "copilot", "role": "author"}, {"number": 2071, "title": "Improve Cost Attribution model-mix table", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2071", "aiType": "claude", "role": "reviewer-requested"}]}, {"owner": "xebia", "repo": "xms-techradar", "repoUrl": "https://github.com/xebia/xms-techradar", "totalPrs": 0, "aiAuthoredPrs": 0, "aiReviewRequestedPrs": 0, "userAuthoredPrs": 0, "userMergedPrs": 0, "aiDetails": [], "error": "Repo not found or not accessible with current token"}]}} }
+          ],
+          "expect": "#repos-pr-content .customization-matrix"
+        },
+        {
+          "id": "agent",
+          "title": "Cloud Agent tab",
+          "$comment": [
+            "Same as the Repository PRs tab: the host answer is declared here. Omitting",
+            "`fetchedAt` keeps the 'updated n minutes ago' line off the screenshot."
+          ],
+          "steps": [
+            { "click": ".tab-button[data-tab=\"agent\"]" },
+            { "post": {"command": "agentSessionsLoaded", "data": {"authenticated": true, "since": "2026-02-13T00:00:00.000Z", "totalTasks": 6, "totalSessions": 9, "totalCredits": 42, "totalPremiumRequests": 12, "accountTasksAvailable": true, "partial": false, "repos": [{"owner": "rajbos", "repo": "ai-engineering-fluency", "totalTasks": 4, "totalSessions": 6, "totalCredits": 30, "totalPremiumRequests": 8, "tasksScanned": 4, "tasksTotal": 4, "partial": false, "discovery": "both", "unassigned": false}, {"owner": "xebia", "repo": "xms-techradar", "totalTasks": 2, "totalSessions": 3, "totalCredits": 12, "totalPremiumRequests": 4, "tasksScanned": 2, "tasksTotal": 2, "partial": false, "discovery": "account", "unassigned": false}]}} }
+          ],
+          "expect": "#agent-sessions-content .customization-matrix"
+        },
+        {
+          "id": "worktrees",
+          "title": "Worktrees tab",
+          "steps": [{ "click": ".tab-button[data-tab=\"worktrees\"]" }],
+          "expect": "#tab-panel-worktrees"
+        },
+        {
+          "id": "insights",
+          "title": "Insights tab",
+          "steps": [{ "click": ".tab-button[data-tab=\"insights\"]" }],
+          "expect": "#tab-panel-insights"
+        },
+        {
+          "id": "corrections",
+          "title": "Corrections tab",
+          "steps": [{ "click": ".tab-button[data-tab=\"corrections\"]" }],
+          "expect": "#tab-panel-corrections"
+        }
+      ]
     },
     {
       "id": "efficiency",
       "title": "Efficiency",
       "bundle": "efficiency",
       "global": "__INITIAL_EFFICIENCY__",
-      "fixture": "efficiency.json"
+      "fixture": "efficiency.json",
+      "$statesComment": [
+        "Every tab of the efficiency panel; 'trends' is the initial render. The Prompt",
+        "Cache tab only exists because the fixture carries cacheBreakage data."
+      ],
+      "states": [
+        {
+          "id": "skills",
+          "title": "Tools & Skills tab",
+          "steps": [{ "click": ".eff-tab[data-tab=\"skills\"]" }],
+          "expect": ".eff-tab.active[data-tab=\"skills\"]",
+          "settleMs": 3000,
+          "noiseFloorPixels": 400
+        },
+        {
+          "id": "deltas",
+          "title": "Month vs Month tab",
+          "steps": [{ "click": ".eff-tab[data-tab=\"deltas\"]" }],
+          "expect": ".eff-tab.active[data-tab=\"deltas\"]"
+        },
+        {
+          "id": "attribution",
+          "title": "Cost Attribution tab",
+          "steps": [{ "click": ".eff-tab[data-tab=\"attribution\"]" }],
+          "expect": ".eff-tab.active[data-tab=\"attribution\"]"
+        },
+        {
+          "id": "cache",
+          "title": "Prompt Cache tab",
+          "steps": [{ "click": ".eff-tab[data-tab=\"cache\"]" }],
+          "expect": ".eff-tab.active[data-tab=\"cache\"]"
+        },
+        {
+          "id": "models",
+          "title": "Models tab",
+          "steps": [{ "click": ".eff-tab[data-tab=\"models\"]" }],
+          "expect": ".eff-tab.active[data-tab=\"models\"]",
+          "settleMs": 3000,
+          "noiseFloorPixels": 400
+        },
+        {
+          "id": "value",
+          "title": "Value tab",
+          "steps": [{ "click": ".eff-tab[data-tab=\"value\"]" }],
+          "expect": ".eff-tab.active[data-tab=\"value\"]"
+        },
+        {
+          "id": "combined",
+          "title": "Combined tab",
+          "steps": [{ "click": ".eff-tab[data-tab=\"combined\"]" }],
+          "expect": ".eff-tab.active[data-tab=\"combined\"]",
+          "settleMs": 3000,
+          "noiseFloorPixels": 400
+        }
+      ],
+      "scenarios": [
+        {
+          "name": "Models tab: every mode/window/model combination still compares",
+          "expect": ".model-sides",
+          "$comment": [
+            "claude-haiku-4.5 is only in the fixture's February and March days, so",
+            "selecting it and then moving to a window it never appears in is the",
+            "stale-selection case that used to leave one side permanently empty."
+          ],
+          "steps": [
+            { "click": "[data-tab=\"models\"]" },
+            { "select": "#model-a" },
+            { "select": "#model-b", "value": "claude-haiku-4.5" },
+            { "select": "#window", "value": "prev30" },
+            { "select": "#window", "value": "last90" },
+            { "select": "#model-mode", "value": "periods" },
+            { "select": "#window-a", "value": "thisMonth" },
+            { "select": "#window-b", "value": "lastMonth" },
+            { "select": "#model-a", "value": "claude-haiku-4.5" },
+            { "select": "#window-b", "value": "prev30" },
+            { "select": "#model-mode", "value": "models" }
+          ]
+        }
+      ]
     },
     {
       "id": "whatsnew",
@@ -86,7 +251,87 @@
       "title": "Diagnostics",
       "bundle": "diagnostics",
       "global": "__INITIAL_DIAGNOSTICS__",
-      "fixture": "diagnostics.json"
+      "fixture": "diagnostics.json",
+      "$statesComment": [
+        "Every leaf tab across the three groups; 'report' is the initial render. The",
+        "Research and Settings leaf bars stay hidden until their group tab is clicked,",
+        "so those states click the group first. The Debug tab needs isDebugMode and",
+        "is deliberately not covered."
+      ],
+      "states": [
+        {
+          "id": "sessions",
+          "title": "Session Files tab",
+          "steps": [{ "click": ".tab[data-tab=\"sessions\"]" }],
+          "expect": "#tab-sessions"
+        },
+        {
+          "id": "cache",
+          "title": "Cache tab",
+          "steps": [{ "click": ".tab[data-tab=\"cache\"]" }],
+          "expect": "#tab-cache"
+        },
+        {
+          "id": "path-analyzer",
+          "title": "Path Analyzer tab",
+          "steps": [{ "click": ".tab[data-tab=\"path-analyzer\"]" }],
+          "expect": "#tab-path-analyzer"
+        },
+        {
+          "id": "share",
+          "title": "Share Card tab",
+          "steps": [{ "click": ".tab[data-tab=\"share\"]" }],
+          "expect": "#tab-share"
+        },
+        {
+          "id": "model-usage",
+          "title": "Research › Model Usage tab",
+          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"model-usage\"]" }],
+          "expect": "#tab-model-usage"
+        },
+        {
+          "id": "tool-analysis",
+          "title": "Research › Tool Analysis tab",
+          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"tool-analysis\"]" }],
+          "expect": "#tab-tool-analysis"
+        },
+        {
+          "id": "skill-usage",
+          "title": "Research › Skill Usage tab",
+          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"skill-usage\"]" }],
+          "expect": "#tab-skill-usage"
+        },
+        {
+          "id": "otel-delta",
+          "title": "Research › OTel Delta tab",
+          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"otel-delta\"]" }],
+          "expect": "#tab-otel-delta"
+        },
+        {
+          "id": "ttft",
+          "title": "Research › TTFT tab",
+          "steps": [{ "click": ".group-tab[data-group=\"research\"]" }, { "click": ".tab[data-tab=\"ttft\"]" }],
+          "expect": "#tab-ttft"
+        },
+        {
+          "id": "display",
+          "title": "Settings › Display tab",
+          "steps": [{ "click": ".group-tab[data-group=\"settings\"]" }, { "click": ".tab[data-tab=\"display\"]" }],
+          "expect": "#tab-display"
+        },
+        {
+          "id": "backend",
+          "title": "Settings › Backend Storage tab",
+          "steps": [{ "click": ".group-tab[data-group=\"settings\"]" }, { "click": ".tab[data-tab=\"backend\"]" }],
+          "expect": "#tab-backend"
+        },
+        {
+          "id": "github",
+          "title": "Settings › GitHub Auth tab",
+          "steps": [{ "click": ".group-tab[data-group=\"settings\"]" }, { "click": ".tab[data-tab=\"github\"]" }],
+          "expect": "#tab-github"
+        }
+      ]
     },
     {
       "id": "logviewer",

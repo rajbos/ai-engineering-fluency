@@ -26,6 +26,8 @@ import {
 } from '../../vscode-extension/src/loadingHtml';
 import { detectEditorSource } from '../../src/workspaceHelpers';
 import { getEditorIconByName } from '../../vscode-extension/src/editorIcons';
+import { buildWebviewLocalization } from '../../vscode-extension/src/webviewLocalization';
+import { createTranslator, resolvedLocale } from '../../vscode-extension/src/l10nCore';
 
 // JSON config data embedded into every panel HTML (mirrors extension's getJsonConfigScript)
 import tokenEstimatorsData from '../../src/tokenEstimators.json';
@@ -279,6 +281,51 @@ const JSON_CONFIG_SCRIPT = [
     `window.__EXTENSION_POINT_BUTTONS__=[];`,
 ].join('');
 
+/**
+ * The localization dictionary and resolved locale for this app's webviews.
+ *
+ * The desktop app reuses the VS Code extension's webview bundles verbatim, and
+ * those bundles only localize themselves if the host puts this dictionary in
+ * the panel's initial payload. It did not, so every panel rendered the bundles'
+ * built-in English fallback regardless of the user's system language — silently,
+ * because each bundle guards with `if (initialData?.localization)` and simply
+ * skips initialization when it is absent.
+ *
+ * Resolved once: `app.getLocale()` does not change while the app is running,
+ * and rebuilding 147 strings per panel open would be wasted work.
+ */
+let cachedWebviewLocalization: Record<string, string> | undefined;
+function desktopWebviewLocalization(): Record<string, string> {
+    if (!cachedWebviewLocalization) {
+        const language = app.getLocale();
+        cachedWebviewLocalization = {
+            ...buildWebviewLocalization(createTranslator(language)),
+            '__language__': language,
+        };
+    }
+    return cachedWebviewLocalization;
+}
+
+/**
+ * Serializes a panel's initial payload into its `window.__INITIAL_*__` script.
+ *
+ * Every payload goes through here so the localization dictionary cannot be
+ * omitted from one of them — which is exactly how the desktop app came to ship
+ * seven panels that were all unlocalizable. It also centralizes the `<`
+ * escaping that each call site previously repeated.
+ */
+function panelPayloadScript(windowKey: string, data: object): string {
+    const payload = {
+        ...data,
+        localization: desktopWebviewLocalization(),
+        // Display language — which strings. Separate from `locale` below, which
+        // some panels set for number/date formatting: a German user on an English
+        // system wants 1.234,56 with English UI.
+        language: resolvedLocale(app.getLocale()),
+    };
+    return `window.${windowKey}=${JSON.stringify(payload).replace(/</g, '\\u003c')};`;
+}
+
 async function buildPanelHtml(panel: PanelId): Promise<string> {
     const isDark = nativeTheme.shouldUseDarkColors;
     const themeKind = isDark ? 'vscode-dark' : 'vscode-light';
@@ -304,7 +351,7 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
                 },
             } : {}),
         };
-        initialDataScript = `window.${windowKey}=${JSON.stringify(dataWithMeta).replace(/</g, '\\u003c')};`;
+        initialDataScript = panelPayloadScript(windowKey, dataWithMeta);
 
     } else if (panel === 'chart') {
         title = 'Token Usage Chart';
@@ -319,7 +366,7 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
             initialSplit: 'total',
             monthlyBudget: 0,
         };
-        initialDataScript = `window.__INITIAL_CHART__=${JSON.stringify(chartData).replace(/</g, '\\u003c')};`;
+        initialDataScript = panelPayloadScript('__INITIAL_CHART__', chartData);
 
     } else if (panel === 'usage') {
         title = 'Usage Analysis';
@@ -342,7 +389,7 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
             insights: [],
             curationAnalysis: null,
         };
-        initialDataScript = `window.__INITIAL_USAGE__=${JSON.stringify(usageData).replace(/</g, '\\u003c')};`;
+        initialDataScript = panelPayloadScript('__INITIAL_USAGE__', usageData);
 
     } else if (panel === 'diagnostics') {
         title = 'Diagnostics';
@@ -373,7 +420,7 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
             toolFamilies,
             diagnosticPaths,
         };
-        initialDataScript = `window.__INITIAL_DIAGNOSTICS__=${JSON.stringify(diagData).replace(/</g, '\\u003c')};`;
+        initialDataScript = panelPayloadScript('__INITIAL_DIAGNOSTICS__', diagData);
 
     } else if (panel === 'maturity') {
         title = 'AI Engineering Fluency Score';
@@ -382,20 +429,20 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
             () => getUsageStats()
         );
         const maturityWithMeta = { ...maturityData, backendConfigured: false, dismissedTips: [], isDebugMode: false };
-        initialDataScript = `window.__INITIAL_MATURITY__=${JSON.stringify(maturityWithMeta).replace(/</g, '\\u003c')};`;
+        initialDataScript = panelPayloadScript('__INITIAL_MATURITY__', maturityWithMeta);
 
     } else if (panel === 'fluency-level-viewer') {
         title = 'Scoring Guide';
         scriptFile = 'fluency-level-viewer.js';
         const fluencyData = { ...getFluencyLevelData(false), backendConfigured: false };
-        initialDataScript = `window.__INITIAL_FLUENCY_LEVEL_DATA__=${JSON.stringify(fluencyData).replace(/</g, '\\u003c')};`;
+        initialDataScript = panelPayloadScript('__INITIAL_FLUENCY_LEVEL_DATA__', fluencyData);
     }
 
     // Set data-vscode-theme-kind on the body so the existing CSS selectors in theme.css work
     const themeScript = `document.body.setAttribute('data-vscode-theme-kind','${themeKind}');`;
 
     return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${resolvedLocale(app.getLocale())}">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -429,7 +476,7 @@ function getLoadingIconDataUri(): string | undefined {
  */
 function buildLoadingHtml(): string {
     return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${resolvedLocale(app.getLocale())}">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -449,7 +496,7 @@ function buildErrorHtml(panel: string, err: unknown): string {
     const message = err instanceof Error ? (err.stack || err.message) : String(err);
     const escaped = message.replace(/&/g, '&amp;').replace(/</g, '&lt;');
     return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${resolvedLocale(app.getLocale())}">
 <head>
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';" />

@@ -41,7 +41,10 @@ export function getCopilotCliSessionStateDir(): string {
 export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'copilotcli';
 	readonly displayName = 'Copilot CLI';
-	private static readonly WORKSPACE_YAML_CONCURRENCY = 20;
+	// Bounded so large session histories don't saturate disk, but the pathExists() pre-check
+	// above (added alongside this) makes each miss a cheap access() instead of an open()+error-log,
+	// so a higher bound is safe now — was 20, too low for histories with thousands of sessions.
+	private static readonly WORKSPACE_YAML_CONCURRENCY = 64;
 
 	private readonly store = new CopilotCliStoreAccess();
 	/** UUIDs of sessions discovered to have been created by Microsoft Scout. */
@@ -98,6 +101,10 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	 */
 	async getWorkspacePathForDiscoveredPath(sessionFile: string): Promise<string | undefined> {
 		const yamlPath = path.join(path.dirname(sessionFile), 'workspace.yaml');
+		// pathExists() pre-check: see _tryMarkScoutFromWorkspaceYaml()'s doc comment — this is
+		// called once per discovered Copilot CLI session file, and older sessions routinely
+		// predate workspace.yaml.
+		if (!await pathExists(yamlPath)) { return undefined; }
 		const content = await readTextFileWithSizeGuard(yamlPath, 'copilotCliAdapter');
 		if (content === undefined) { return undefined; }
 		const match = content.match(/^cwd:\s*(.+)$/m);
@@ -231,9 +238,19 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	 * _scoutSessionIds if the cwd indicates a Microsoft Scout session, and/or to
 	 * _appSessionIds if client_name indicates the Copilot desktop app.
 	 * Silently ignores missing or unreadable files.
+	 *
+	 * The pathExists() pre-check (same pattern as usageAnalysis.ts's
+	 * _asuApplyCopilotAppSplit()) matters at this call site's scale: many
+	 * historical sessions predate workspace.yaml, so this is called across
+	 * thousands of session dirs where the file is routinely absent — without
+	 * the pre-check, readTextFileWithSizeGuard() logs a console.error() on
+	 * every miss, which is measurably slow under a debugger/Extension
+	 * Development Host and was the dominant cost of a multi-minute discovery
+	 * scan on a large session history.
 	 */
 	private async _tryMarkScoutFromWorkspaceYaml(uuidDir: string, uuid: string): Promise<void> {
 		const yamlPath = path.join(uuidDir, 'workspace.yaml');
+		if (!await pathExists(yamlPath)) { return; }
 		const content = await readTextFileWithSizeGuard(yamlPath, 'copilotCliAdapter');
 		if (content === undefined) { return; }
 		const cwdMatch = content.match(/^cwd:\s*(.+)$/m);

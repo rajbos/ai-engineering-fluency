@@ -22,7 +22,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const { REPO_ROOT } = require('./lib/harness');
-const { parseArgs } = require('./lib/config');
+const { parseArgs, readConfig, baselineRegistry } = require('./lib/config');
 
 const SKILL_DIR = __dirname;
 
@@ -117,11 +117,62 @@ function buildWebviews(checkoutRoot, label) {
 	run(process.execPath, ['esbuild.js'], extensionDir);
 }
 
-function renderInto(outDir, { distDir, repoRoot, theme, view }) {
+function renderInto(outDir, { distDir, repoRoot, theme, view, allowMissing, configPath }) {
 	const args = [path.join(SKILL_DIR, 'render-views.js'), '--out', outDir, '--dist', distDir, '--repo-root', repoRoot];
 	if (theme) { args.push('--theme', theme); }
 	if (view) { args.push('--view', view); }
+	// The baseline is rendered from the base commit's registry plus the
+	// current-only targets (see writeBaselineRegistry). A view or state this
+	// branch introduced has nothing to render at the base commit — an "added"
+	// screenshot, not a failed run — and one the branch removed still renders
+	// there, so the comparison can call it "removed".
+	if (allowMissing) { args.push('--allow-missing'); }
+	if (configPath) { args.push('--config', configPath); }
 	run(process.execPath, args, REPO_ROOT);
+}
+
+/**
+ * Writes the registry the baseline renders from: the base commit's own
+ * registry (its definitions, fixtures and bundles) plus every view and state
+ * only the current registry declares, flagged so `--allow-missing` skips
+ * exactly those when the old bundle cannot produce them. See
+ * `baselineRegistry` in lib/config.js.
+ */
+function writeBaselineRegistry(worktreeDir, outRoot) {
+	const baseSkillDir = path.join(worktreeDir, '.github', 'skills', 'visual-view-diff');
+	// Only a base commit that predates the registry takes the no-base path.
+	// A registry that exists but cannot be read or validated must fail the
+	// run: treating it as absent would flag every target current-only and
+	// let the diff finish with an all-"added" report that hides removals and
+	// every real before/after comparison.
+	let base = null;
+	if (fs.existsSync(path.join(baseSkillDir, 'views.config.json'))) {
+		base = readConfig(baseSkillDir);
+	}
+	const merged = baselineRegistry(readConfig(SKILL_DIR), base, {
+		baseFixtureDir: path.join(baseSkillDir, 'fixtures'),
+		currentFixtureDir: path.join(SKILL_DIR, 'fixtures'),
+	});
+	const label = (v, s) => (s ? `${v.id}--${s.id}` : v.id);
+	const currentOnly = merged.views.flatMap((v) => v.currentOnly
+		? [label(v)]
+		: (v.states || []).filter((s) => s.currentOnly).map((s) => label(v, s)));
+	const currentIds = new Set(readConfig(SKILL_DIR).views.map((v) => v.id));
+	const baseOnly = merged.views.flatMap((v) => !currentIds.has(v.id)
+		? [label(v)]
+		: []);
+	if (!base) {
+		console.log('The base commit has no views.config.json; every view and state counts as new there.');
+	}
+	if (currentOnly.length > 0 && base) {
+		console.log(`Only this branch declares ${currentOnly.length} view/state(s): ${currentOnly.join(', ')} — rendered on the baseline where the old bundle allows, skipped otherwise.`);
+	}
+	if (baseOnly.length > 0) {
+		console.log(`Only the base commit declares ${baseOnly.length} view(s): ${baseOnly.join(', ')} — rendered on the baseline side so the diff can report them as removed.`);
+	}
+	const file = path.join(outRoot, '.baseline-registry.json');
+	fs.writeFileSync(file, JSON.stringify(merged, null, 2));
+	return file;
 }
 
 function main() {
@@ -156,6 +207,8 @@ function main() {
 			repoRoot: worktreeDir,
 			theme,
 			view,
+			allowMissing: true,
+			configPath: writeBaselineRegistry(worktreeDir, outRoot),
 		});
 
 		buildWebviews(REPO_ROOT, 'working tree');
@@ -175,6 +228,7 @@ function main() {
 			'--out', diffDir,
 		], REPO_ROOT);
 	} finally {
+		fs.rmSync(path.join(outRoot, '.baseline-registry.json'), { force: true });
 		// Always remove the worktree, or the next run trips over a stale one.
 		try {
 			git(['worktree', 'remove', '--force', worktreeDir]);

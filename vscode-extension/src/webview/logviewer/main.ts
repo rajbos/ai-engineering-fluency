@@ -4,15 +4,17 @@ import { setHtml } from '../shared/domUtils';
 import { escapeHtml, formatCompact, formatCost, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
-import { buildTurnOverviewRows, hashModelToHue } from './turnsOverview';
+import { buildTurnOverviewRows, hashModelToHue, type TurnOverviewRow } from './turnsOverview';
 import { renderHydraFusionSection, renderLegsTable, formatFusionCost } from './hydraFusionSection';
+import { buildMcpAndContextRefsCard, formatTopListWithOther } from './summaryCards';
 import { matchHydraFusionTurnsToChatTurns } from '../../../../src/hydrafusion';
 import type { HydraFusionSummary, HydraFusionTurn } from '../../../../src/hydrafusion';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
-import { initializeWebviewLocalization, setCurrentLanguage, localize } from '../shared/localization';
+import { localize, localizeFormat } from '../shared/localization';
+import { applyWebviewLocale } from '../shared/webviewLocale';
 
 // ── Type definitions ──────────────────────────────────────────────────────────
 
@@ -175,11 +177,7 @@ const vscode = acquireVsCodeApi();
 const initialData = getWindowData<SessionLogData & { focusedTurnNumber?: number; localization?: Record<string, string> }>('__INITIAL_LOGDATA__');
 
 // Initialize localization for webview
-if (initialData?.localization) {
-	initializeWebviewLocalization(initialData.localization);
-	const language = initialData.localization['__language__'] || 'en';
-	setCurrentLanguage(language);
-}
+applyWebviewLocale(initialData);
 
 import { resolveGuidMcpToolName, resolveMcpFamilyToolName, lookupKnownToolName } from '../../../../src/utils/toolUtils';
 
@@ -402,21 +400,6 @@ return n > 0 ? 'delta-over' : n < 0 ? 'delta-under' : 'delta-zero';
 function formatTopList(entries: { key: string; value: number }[], mapper?: (k: string) => string): string {
 if (!entries.length) { return 'None'; }
 return entries.map(e => `<div>${escapeHtml(mapper ? mapper(e.key) : e.key)}: ${e.value}</div>`).join('');
-}
-
-/**
- * Renders a top-N list with an "Other: N" row appended when the total exceeds the listed sum.
- * @security All keys are passed through `escapeHtml`.
- */
-function formatTopListWithOther(entries: { key: string; value: number }[], total: number, mapper?: (k: string) => string): string {
-if (!entries.length) { return 'None'; }
-const lines = entries.map(e => `<div>${escapeHtml(mapper ? mapper(e.key) : e.key)}: ${e.value}</div>`);
-const topSum = entries.reduce((sum, e) => sum + e.value, 0);
-const other = total - topSum;
-if (other > 0) {
-lines.push(`<div>Other: ${other}</div>`);
-}
-return lines.join('');
 }
 
 // ── Shared render helpers ────────────────────────────────────────────────────
@@ -724,28 +707,6 @@ function buildEditorIdentityCard(data: SessionLogData, stats: SummaryStats): str
 }
 
 /**
- * Combined "MCP tools & context references" card: merges the previous MCP Tools
- * and Context Refs cards into a single compact card, since both describe the
- * external context a session pulled in (tool servers vs. editor references).
- */
-function buildMcpAndContextRefsCard(data: SessionLogData, stats: SummaryStats): string {
-	const { usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit, usageContextExplicit } = stats;
-	const mcpSub = usageMcpTotal === 0 ? 'None' : formatTopListWithOther(usageTopMcpTools, usageMcpTotal);
-	const refsSub = usageContextTotal === 0 ? 'None' : `implicit ${usageContextImplicit}, explicit ${usageContextExplicit}`;
-	return `<div class="summary-card summary-card--compact summary-card--combined">
-<div class="summary-label">🔌 ${localize('logviewer.summary.mcpAndContextRefs')}</div>
-<div class="summary-compact-rows">
-<div class="summary-compact-row"><span class="summary-compact-key">🔌 ${localize('logviewer.summary.mcpTools')}</span><span class="summary-compact-val">${usageMcpTotal}</span></div>
-<div class="summary-compact-row"><span class="summary-compact-key">🔗 ${localize('logviewer.summary.contextRefs')}</span><span class="summary-compact-val">${usageContextTotal}</span></div>
-</div>
-<div class="summary-sub combined-card-sub">
-<div class="combined-card-sub-line">🔌 <span class="combined-card-sub-label">${localize('logviewer.summary.mcpTools')}:</span> ${mcpSub}</div>
-<div class="combined-card-sub-line">🔗 <span class="combined-card-sub-label">${localize('logviewer.summary.contextRefs')}:</span> ${refsSub}</div>
-</div>
-</div>`;
-}
-
-/**
  * Per-editor notes for the Estimated Tokens card. When an editor is present in
  * this map the card renders a `ⓘ` hint with hover text explaining why the count
  * is an estimate (no actual API token counts persisted by that editor).
@@ -963,7 +924,7 @@ function renderEditorInfoPanel(data: SessionLogData): string {
  * @security All user-controlled strings (editorName, file path) are escaped via `escapeHtml`.
  */
 function renderSummaryCards(data: SessionLogData, stats: SummaryStats): string {
-	const { usageToolTotal, usageTopTools, usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit, usageContextExplicit } = stats;
+	const { usageToolTotal, usageTopTools } = stats;
 	return `
 <div class="summary-cards">
 ${buildEditorIdentityCard(data, stats)}
@@ -982,7 +943,7 @@ ${buildHierarchyCard(data)}
 <div class="summary-value">${usageToolTotal}</div>
 <div class="summary-sub">${formatTopListWithOther(usageTopTools, usageToolTotal, lookupToolName)}</div>
 </div>
-${buildMcpAndContextRefsCard(data, stats)}
+${buildMcpAndContextRefsCard(stats)}
 <div class="summary-card">
 <div class="summary-label">📦 ${localize('logviewer.summary.fileSize')}</div>
 <div class="summary-value">${formatFileSize(data.size)}</div>
@@ -1090,6 +1051,97 @@ function renderModelOverviewBadge(model: string | null): string {
 	return `<span class="overview-model-badge" style="${style}" title="${escapeHtml(model)}">${escapeHtml(getModelDisplayName(model))}</span>`;
 }
 
+// Layout flags for the turns-overview table, derived once from its row list.
+type TurnsOverviewTableFlags = {
+	hasCached: boolean;
+	hasModelSwitches: boolean;
+	hasCost: boolean;
+	totalChildren: number;
+	hasLegs: boolean;
+	columnCount: number;
+};
+
+function computeTurnsOverviewTableFlags(rows: TurnOverviewRow[]): TurnsOverviewTableFlags {
+	const hasCached = rows.some(r => r.cached !== null);
+	const hasModelSwitches = rows.some((r, i) => i > 0 && r.model && rows[i - 1].model && r.model !== rows[i - 1].model);
+	const hasCost = rows.some(r => r.cost !== null || r.children.some(c => c.cost !== null));
+	const totalChildren = rows.reduce((sum, r) => sum + r.children.length, 0);
+	const hasLegs = rows.some(r => r.legs.length > 0);
+	const columnCount = 7 + (hasCached ? 1 : 0) + (hasCost ? 1 : 0);
+	return { hasCached, hasModelSwitches, hasCost, totalChildren, hasLegs, columnCount };
+}
+
+// Reverse-map chat turn number → this turn's matched HydraFusionTurn, so an expanded
+// row can reuse the exact same leg table the HydraFusion section renders above
+// (instead of re-deriving markup from the trimmed TurnOverviewLegRow) and show the
+// same total: the turn's own rollup `aiu`, not a sum of the legs' individual costs,
+// which `analyzeHydraFusionSession` can legitimately differ from (it prefers
+// `session.fusion_completed.totalNanoAiu` and only falls back to summing legs when
+// that rollup is missing — see buildTurn in src/hydrafusion.ts).
+function buildHydraTurnByChatTurnMap(data: SessionLogData, hydraTurnMatches?: Map<number, number>): Map<number, HydraFusionTurn> {
+	const hydraTurnByChatTurn = new Map<number, HydraFusionTurn>();
+	if (data.hydraFusion && hydraTurnMatches) {
+		for (const [hydraIndex, chatTurnNumber] of hydraTurnMatches) {
+			const hydraTurn = data.hydraFusion.turns[hydraIndex];
+			if (hydraTurn) { hydraTurnByChatTurn.set(chatTurnNumber, hydraTurn); }
+		}
+	}
+	return hydraTurnByChatTurn;
+}
+
+function renderTurnOverviewChildRows(row: TurnOverviewRow, hasCached: boolean, costCell: (cost: number | null) => string): string {
+	return row.children.map(child => `<tr class="turns-overview-row turns-overview-child-row" data-turn="${row.turnNumber}" title="Sub-agent call from step #${row.turnNumber} — jump to turn">
+<td class="turns-overview-num">↳ 🤖</td>
+<td><span class="turn-mode turns-overview-child-tool" title="${escapeHtml(child.toolName)}">${escapeHtml(child.toolName)}</span></td>
+<td>${renderModelOverviewBadge(child.model)}</td>
+<td class="count-cell">${formatCompact(child.input)}</td>
+${hasCached ? '<td class="count-cell">—</td>' : ''}
+<td class="count-cell">${formatCompact(child.output)}</td>
+<td class="count-cell"><strong>${formatCompact(child.total)}</strong></td>
+${costCell(child.cost)}
+<td class="turns-overview-actual" title="Estimated from text">~</td>
+</tr>`).join('');
+}
+
+function renderTurnOverviewLegsRow(row: TurnOverviewRow, hydraTurn: HydraFusionTurn | undefined, columnCount: number): string {
+	if (row.legs.length === 0 || !hydraTurn) { return ''; }
+	return `<tr class="turns-overview-legs-row" data-parent-turn="${row.turnNumber}" style="display: none;">
+<td colspan="${columnCount}">
+<div class="turns-overview-legs-wrap">
+<div class="turns-overview-legs-caption">${escapeHtml(localizeFormat('logviewer.hydrafusion.legsCaptionTotal', row.turnNumber))} <strong>${escapeHtml(formatFusionCost(hydraTurn.aiu))}</strong></div>
+${renderLegsTable(hydraTurn.phases)}
+</div>
+</td>
+</tr>`;
+}
+
+function renderTurnOverviewBodyRow(
+	row: TurnOverviewRow,
+	precedingRow: TurnOverviewRow | undefined,
+	flags: TurnsOverviewTableFlags,
+	hydraTurnByChatTurn: Map<number, HydraFusionTurn>,
+	costCell: (cost: number | null) => string,
+): string {
+	const switched = !!precedingRow && !!row.model && !!precedingRow.model && row.model !== precedingRow.model;
+	const cachedCell = flags.hasCached ? `<td class="count-cell">${row.cached !== null ? formatCompact(row.cached) : '—'}</td>` : '';
+	const childRows = renderTurnOverviewChildRows(row, flags.hasCached, costCell);
+	const legToggle = row.legs.length > 0
+		? `<button type="button" class="turns-overview-leg-toggle" data-turn="${row.turnNumber}" aria-expanded="false" aria-label="${escapeHtml(localizeFormat('logviewer.hydrafusion.toggleLegsAriaLabel', row.turnNumber))}" title="${escapeHtml(localize('logviewer.hydrafusion.showLegsTitle'))}">▸</button> `
+		: '';
+	const legsRow = renderTurnOverviewLegsRow(row, hydraTurnByChatTurn.get(row.turnNumber), flags.columnCount);
+	return `<tr class="turns-overview-row${switched ? ' turns-overview-row-switch' : ''}" data-turn="${row.turnNumber}" title="Jump to turn #${row.turnNumber}">
+<td class="turns-overview-num">${legToggle}#${row.turnNumber}${switched ? ` <span class="overview-switch-icon" title="${escapeHtml(localize('logviewer.hydrafusion.modelChangedTitle'))}">⇄</span>` : ''}</td>
+<td><span class="turn-mode" style="background: ${getModeColor(row.mode)};">${getModeIcon(row.mode)} ${escapeHtml(row.mode)}</span></td>
+<td>${renderModelOverviewBadge(row.model)}</td>
+<td class="count-cell">${formatCompact(row.input)}</td>
+${cachedCell}
+<td class="count-cell">${formatCompact(row.output)}</td>
+<td class="count-cell"><strong>${formatCompact(row.total)}</strong></td>
+${costCell(row.cost)}
+<td class="turns-overview-actual" title="${row.isActual ? 'Actual API usage' : 'Estimated from text'}">${row.isActual ? '✓' : '~'}</td>
+</tr>${childRows}${legsRow}`;
+}
+
 /**
  * Renders the turns-overview table shown above the chat-turns list: one compact,
  * clickable row per turn with its mode, model, and input/cached/output token
@@ -1107,78 +1159,19 @@ function renderModelOverviewBadge(model: string | null): string {
 function renderTurnsOverviewTable(data: SessionLogData, hydraTurnMatches?: Map<number, number>): string {
 	if (data.turns.length === 0) { return ''; }
 	const rows = buildTurnOverviewRows(data.turns, data.hydraFusion, hydraTurnMatches);
-	const hasCached = rows.some(r => r.cached !== null);
-	const hasModelSwitches = rows.some((r, i) => i > 0 && r.model && rows[i - 1].model && r.model !== rows[i - 1].model);
-	const hasCost = rows.some(r => r.cost !== null || r.children.some(c => c.cost !== null));
-	const totalChildren = rows.reduce((sum, r) => sum + r.children.length, 0);
-	const hasLegs = rows.some(r => r.legs.length > 0);
-	const columnCount = 7 + (hasCached ? 1 : 0) + (hasCost ? 1 : 0);
+	const flags = computeTurnsOverviewTableFlags(rows);
+	const hydraTurnByChatTurn = buildHydraTurnByChatTurnMap(data, hydraTurnMatches);
+	const costCell = (cost: number | null): string => flags.hasCost ? `<td class="count-cell">${cost !== null ? formatCost(cost) : '—'}</td>` : '';
 
-	// Reverse-map chat turn number → this turn's matched HydraFusionTurn, so an expanded
-	// row can reuse the exact same leg table the HydraFusion section renders above
-	// (instead of re-deriving markup from the trimmed TurnOverviewLegRow) and show the
-	// same total: the turn's own rollup `aiu`, not a sum of the legs' individual costs,
-	// which `analyzeHydraFusionSession` can legitimately differ from (it prefers
-	// `session.fusion_completed.totalNanoAiu` and only falls back to summing legs when
-	// that rollup is missing — see buildTurn in src/hydrafusion.ts).
-	const hydraTurnByChatTurn = new Map<number, HydraFusionTurn>();
-	if (data.hydraFusion && hydraTurnMatches) {
-		for (const [hydraIndex, chatTurnNumber] of hydraTurnMatches) {
-			const hydraTurn = data.hydraFusion.turns[hydraIndex];
-			if (hydraTurn) { hydraTurnByChatTurn.set(chatTurnNumber, hydraTurn); }
-		}
-	}
-
-	const costCell = (cost: number | null): string => hasCost ? `<td class="count-cell">${cost !== null ? formatCost(cost) : '—'}</td>` : '';
-
-	const bodyRows = rows.map((row, i) => {
-		const switched = i > 0 && !!row.model && !!rows[i - 1].model && row.model !== rows[i - 1].model;
-		const cachedCell = hasCached ? `<td class="count-cell">${row.cached !== null ? formatCompact(row.cached) : '—'}</td>` : '';
-		const childRows = row.children.map(child => `<tr class="turns-overview-row turns-overview-child-row" data-turn="${row.turnNumber}" title="Sub-agent call from step #${row.turnNumber} — jump to turn">
-<td class="turns-overview-num">↳ 🤖</td>
-<td><span class="turn-mode turns-overview-child-tool" title="${escapeHtml(child.toolName)}">${escapeHtml(child.toolName)}</span></td>
-<td>${renderModelOverviewBadge(child.model)}</td>
-<td class="count-cell">${formatCompact(child.input)}</td>
-${hasCached ? '<td class="count-cell">—</td>' : ''}
-<td class="count-cell">${formatCompact(child.output)}</td>
-<td class="count-cell"><strong>${formatCompact(child.total)}</strong></td>
-${costCell(child.cost)}
-<td class="turns-overview-actual" title="Estimated from text">~</td>
-</tr>`).join('');
-		const legToggle = row.legs.length > 0
-			? `<button type="button" class="turns-overview-leg-toggle" data-turn="${row.turnNumber}" aria-expanded="false" aria-label="Toggle HydraFusion legs for step #${row.turnNumber}" title="Show the HydraFusion legs behind this step">▸</button> `
-			: '';
-		const hydraTurn = hydraTurnByChatTurn.get(row.turnNumber);
-		const legsRow = row.legs.length > 0 && hydraTurn
-			? `<tr class="turns-overview-legs-row" data-parent-turn="${row.turnNumber}" style="display: none;">
-<td colspan="${columnCount}">
-<div class="turns-overview-legs-wrap">
-<div class="turns-overview-legs-caption">⚡ HydraFusion legs for step #${row.turnNumber} — total <strong>${escapeHtml(formatFusionCost(hydraTurn.aiu))}</strong></div>
-${renderLegsTable(hydraTurn.phases)}
-</div>
-</td>
-</tr>`
-			: '';
-		return `<tr class="turns-overview-row${switched ? ' turns-overview-row-switch' : ''}" data-turn="${row.turnNumber}" title="Jump to turn #${row.turnNumber}">
-<td class="turns-overview-num">${legToggle}#${row.turnNumber}${switched ? ' <span class="overview-switch-icon" title="Model changed from the previous step">⇄</span>' : ''}</td>
-<td><span class="turn-mode" style="background: ${getModeColor(row.mode)};">${getModeIcon(row.mode)} ${escapeHtml(row.mode)}</span></td>
-<td>${renderModelOverviewBadge(row.model)}</td>
-<td class="count-cell">${formatCompact(row.input)}</td>
-${cachedCell}
-<td class="count-cell">${formatCompact(row.output)}</td>
-<td class="count-cell"><strong>${formatCompact(row.total)}</strong></td>
-${costCell(row.cost)}
-<td class="turns-overview-actual" title="${row.isActual ? 'Actual API usage' : 'Estimated from text'}">${row.isActual ? '✓' : '~'}</td>
-</tr>${childRows}${legsRow}`;
-	}).join('');
+	const bodyRows = rows.map((row, i) => renderTurnOverviewBodyRow(row, rows[i - 1], flags, hydraTurnByChatTurn, costCell)).join('');
 
 	return `
 <div class="turns-overview">
 <div class="turns-overview-header">
 <span>🧭 Session Steps Overview (${rows.length})</span>
-${hasModelSwitches ? '<span class="overview-switch-note">⇄ marks a model change from the previous step</span>' : ''}
-${totalChildren > 0 ? `<span class="overview-switch-note">🤖 ↳ marks a sub-agent/child session delegated from that step</span>` : ''}
-${hasLegs ? '<span class="overview-switch-note">⚡ expand a step to see the HydraFusion legs behind it</span>' : ''}
+${flags.hasModelSwitches ? '<span class="overview-switch-note">⇄ marks a model change from the previous step</span>' : ''}
+${flags.totalChildren > 0 ? `<span class="overview-switch-note">🤖 ↳ marks a sub-agent/child session delegated from that step</span>` : ''}
+${flags.hasLegs ? `<span class="overview-switch-note">${escapeHtml(localize('logviewer.hydrafusion.expandStepNote'))}</span>` : ''}
 </div>
 <div class="turns-overview-table-wrap">
 <table class="turns-overview-table">
@@ -1188,10 +1181,10 @@ ${hasLegs ? '<span class="overview-switch-note">⚡ expand a step to see the Hyd
 <th scope="col">Mode</th>
 <th scope="col">Model</th>
 <th scope="col">Input</th>
-${hasCached ? '<th scope="col">Cached</th>' : ''}
+${flags.hasCached ? '<th scope="col">Cached</th>' : ''}
 <th scope="col">Output</th>
 <th scope="col">Total</th>
-${hasCost ? '<th scope="col">Cost</th>' : ''}
+${flags.hasCost ? `<th scope="col">${localize('logviewer.hydrafusion.cost')}</th>` : ''}
 <th scope="col" title="✓ actual API usage, ~ estimated from text">Src</th>
 </tr>
 </thead>

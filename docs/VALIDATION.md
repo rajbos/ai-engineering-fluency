@@ -172,6 +172,29 @@ which is why it is not the default.
 `.github/skills/visual-view-diff/views.config.json` — the same registry the
 visual diff uses, so a view added for one is picked up by both.
 
+**Scenarios** cover what the one-pass crawl cannot reach: a `<select>`, which is
+changed rather than clicked, and a control that only appears once another one has
+been used. A view declares them in the same registry:
+
+```jsonc
+"scenarios": [{
+  "name": "Models tab: every mode/window/model combination still compares",
+  "expect": ".model-sides",           // must still be on screen after every step
+  "steps": [
+    { "click": "[data-tab=\"models\"]" },
+    { "select": "#model-b", "value": "claude-haiku-4.5" },
+    { "select": "#window", "value": "prev30" }
+  ]
+}]
+```
+
+Each scenario replays on its own fresh page. A `select` step without a `value`
+takes the next enabled option. A step that cannot run, throws, or leaves `expect`
+no longer *showing* is a finding — "showing" means present **and** rendered (not
+`display:none`, `visibility:hidden`, or zero-sized), the same test the control
+crawl uses. That last check is how the Models tab proves a picker reconciles
+instead of dropping to an empty state.
+
 ### A note on the visual diff's baseline
 
 `visual:diff` compares against the merge base with `origin/main`. **On a shallow
@@ -188,11 +211,41 @@ can trust. The CI job checks out with `fetch-depth: 0` for the same reason.
 | `build` | types, lint, json, l10n, compile, **contract**, unit tests |
 | `ui-checks` (PRs only) | **interaction smoke**, **visual view diff vs the merge base** |
 
-`ui-checks` uploads before/after/diff screenshots as the `webview-screenshots`
-artifact and writes the visual report into the job summary, so a reviewer can
-see a UI change instead of inferring it from a CSS diff. The visual diff
-reports rather than gates — a visual change is usually intended — while the
-interaction smoke does gate, because a dead control never is.
+`ui-checks` renders every view in its initial state and in each tab/mode it
+declares as a `state` in `views.config.json`, then **posts the before/after/diff
+images as a comment on the PR** (one comment, replaced on every push) with
+`gh pr comment --attach`, rendered by
+`.github/workflows/scripts/visual-diff-comment.js`. A reviewer sees the UI
+change where they review, instead of inferring it from a CSS diff. The full set
+of screenshots is also uploaded as the `webview-screenshots` artifact and the
+report table goes into the job summary. The visual diff reports rather than
+gates — a visual change is usually intended — while the interaction smoke does
+gate, because a dead control never is.
+
+Two things to know about that comment:
+
+- `gh --attach` only uploads with a **user** token (OAuth or a PAT); the Actions
+  installation token is refused. The job uses the repository's `GH_PAT` secret
+  for the upload, so the comment is authored by that user. Without the secret
+  the comment still posts, minus the inline images, linking to the artifact.
+  On a `pull_request` run the workflow file and the publisher script both come
+  from the PR head, so any same-repository contributor can already change what
+  runs next to that secret — the same trust the risk-review workflow extends.
+  Keep `GH_PAT` narrow, but not narrower than the upload: attaching files
+  [needs push access](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli),
+  so a fine-grained token limited to this repository needs *Contents: write*
+  (that is push access) plus *Pull requests: write* to author the comment.
+  gh's pre-flight checks the user's role on the repository, not the token's
+  own grants, so a token without *Contents: write* passes that check and then
+  fails at upload with `HTTP 403: Resource not accessible by personal access
+  token`; the job's warning annotation quotes that error when it happens.
+- Fork PRs get a read-only token and no secrets, so they only get the artifact.
+- Only a comment authored by one of the workflow's own identities (the Actions
+  bot, the PAT's user) **and** whose body *starts* with the marker is ever
+  replaced; the newest one survives, so two runs that race still converge on a
+  single comment. Identity is the ownership proof, never body text: a comment
+  someone else writes to look like ours is left alone. After a PAT rotation the
+  previous user's comment is no longer recognised and needs deleting by hand.
 
 ## What is deliberately not covered
 

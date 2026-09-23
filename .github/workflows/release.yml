@@ -649,7 +649,10 @@ jobs:
 
     - name: Restore NuGet packages
       working-directory: visualstudio-extension
-      run: nuget restore AIEngineeringFluency.sln
+      # -LockedMode: fail if a PackageReference drifts from the committed
+      # packages.lock.json instead of resolving something new (see
+      # visualstudio-extension/Directory.Build.props).
+      run: nuget restore AIEngineeringFluency.sln -LockedMode
 
     - name: Build solution (Release)
       working-directory: visualstudio-extension

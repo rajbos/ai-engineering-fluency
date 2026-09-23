@@ -13,6 +13,15 @@ job summary, an artifact upload — is deliberately not part of this skill.** It
 answers exactly one question: *what changed visually, and what does it look
 like?* Whoever wants to publish that answer reads `report.md` and the PNGs.
 
+The publisher for pull requests is the `ui-checks` job in
+`.github/workflows/ci.yml`: it runs this diff against the PR's merge base and
+posts the before/after/diff images as one comment on the PR (replaced on every
+push) through `gh pr comment --attach`, rendered by
+`.github/workflows/scripts/visual-diff-comment.js`. An agent opening a UI PR
+does not have to attach screenshots by hand — it has to make sure the change is
+*visible* to this harness (see "States" below) and say in the PR body which
+views it expects to change.
+
 ## When to use it
 
 - A change touches `vscode-extension/src/webview/**`, the shared webview CSS, or
@@ -70,6 +79,9 @@ visual-output/
 └── diff/       <view>.<theme>.diff.png, report.md, report.json
 ```
 
+A view rendered in one of its declared states (a tab, a mode) is named
+`<view>--<state>.<theme>.png`, e.g. `usage--tools.dark.png`.
+
 ### Just screenshot the current state
 
 ```bash
@@ -100,8 +112,12 @@ decide: intended restyle, or accidental regression? The tool reports; you judge.
 
 - **Playwright with Chromium.** Intentionally *not* a dependency of the
   extension — this is developer/CI tooling, not shipped code. `lib/browser.js`
-  finds a local or global install; if none exists:
-  `npm install -g playwright && npx playwright install chromium`.
+  finds a local or global install, or the pinned one CI uses under
+  `.github/workflows/dependencies/playwright`; if none exists:
+  `npm install -g playwright && npx playwright install chromium`. The Copilot
+  coding agent gets that pinned install from `copilot-setup-steps.yml`, and
+  Claude Code's cloud environment ships a global Playwright, so in both an
+  agent can run this skill as-is.
 - **Built webview bundles** in `vscode-extension/dist/webview/`.
 - **`vscode-extension/node_modules`** — the baseline worktree symlinks it rather
   than running a second `npm install`.
@@ -138,6 +154,58 @@ screenshotted blank — a fixture missing a required field would otherwise pass 
 `dashboard` is registered but disabled: it needs a configured team backend to
 show anything, the same reason the in-editor regression runner skips it.
 
+### States — tabs and modes
+
+A view is screenshotted in its **initial render** and in every **state** it
+declares. This matters more than it sounds: the usage panel opens on "My
+Activity", so a whole new section added to its Tools tab once diffed as
+"20 unchanged" — the harness never looked at that tab. A state is a few
+click/select steps replayed on a fresh page before the screenshot:
+
+```json
+{
+  "id": "tools",
+  "title": "Tools & Integrations tab",
+  "steps": [{ "click": ".tab-button[data-tab=\"tools\"]" }],
+  "expect": "#tab-panel-tools"
+}
+```
+
+- `steps` use the same `click` / `select` (+ optional `value`) vocabulary as
+  interaction-smoke scenarios, plus `post`: a message delivered to the view as
+  if the extension host sent it. A tab that asks the host for data when it
+  opens (Repository PRs, Cloud Agent) would otherwise only ever screenshot its
+  loading placeholder, so its state declares the answer. Keep that answer
+  deterministic — fixed dates, no `fetchedAt` — or the screenshot diffs
+  against itself.
+- `expect` (required) is what the state must be showing afterwards. If it is
+  not, the render is an **error**, not a screenshot of the previous tab that
+  would pass as "unchanged" forever; a state without it is refused when the
+  registry loads.
+- `settleMs` overrides the wait after the steps for a tab that lazily loads a
+  chart library and animates in (the efficiency Models tab needs ~3s).
+- `noiseFloorPixels` gives a canvas-drawing state its own tolerance, so the
+  view's DOM-rendered initial state can stay compared exactly.
+
+**Adding a tab to a view means adding a state for it here**, or the visual
+diff will never see what you built. Reach a nested tab by clicking its group
+first (the diagnostics Research and Settings groups do this).
+
+The baseline is rendered from the **base commit's own** `views.config.json`
+— its definitions, steps, fixtures and bundles — plus every view and state
+only the current registry declares. So a state (or a whole view) this branch
+introduced is attempted on the old bundle and, where it cannot render there,
+skipped by `--allow-missing` and reported as **added**; a state or view this
+branch removed or renamed still renders on the baseline side and is reported
+as **removed**, rather than vanishing from both sides as "no change"; and a
+state whose selector or fixture this branch changed is still driven the old
+way on the old bundle, so the comparison shows the real before and after.
+`--allow-missing` skips only those current-only targets: a view both sides
+declare that fails on the base bundle is an error, never a silent "added".
+The current-tree render stays strict too. View and state ids are file names,
+so the registry refuses anything but letters, digits, `_` and single dashes,
+and duplicates.
+
 ## Determinism
 
 Two runs of unchanged code produce identical screenshots. That is load-bearing —
@@ -146,11 +214,16 @@ locale to `en-US` and the timezone to UTC, disabling CSS animations and
 transitions, hiding carets, waiting for fonts to settle, and keeping all
 time-dependent values out of the fixtures.
 
-The two views that draw to a `<canvas>` (`chart`, `maturity`) can still differ
-by a handful of anti-aliased pixels, so they carry a small `noiseFloorPixels`
-tolerance in `views.config.json`. Every other view is compared **exactly** — a
-global tolerance would hide small real changes, such as a restyled badge that
-moves fewer than 200 pixels.
+The viewport is grown to the page's full height *before* the screenshot rather
+than letting the full-page capture do it: that capture-time resize made every
+responsive `<canvas>` (Chart.js) redraw mid-capture, and the efficiency Models
+tab diffed against itself by 2.6% on every other run.
+
+The views that draw to a `<canvas>` (`chart`, `maturity`, the efficiency chart
+tabs) can still differ by a handful of anti-aliased pixels, so they carry a
+small `noiseFloorPixels` tolerance in `views.config.json`. Every other view is
+compared **exactly** — a global tolerance would hide small real changes, such
+as a restyled badge that moves fewer than 200 pixels.
 
 ## Limits
 
@@ -161,5 +234,7 @@ moves fewer than 200 pixels.
   When a webview starts using a new `--vscode-*` token, add it to both files.
 - **Fixtures are hand-authored**, so they can drift from the real payload shape.
   Drift shows up as a render error or a visibly wrong view, not as a silent pass.
-- **Interaction is not covered** — each view is screenshotted in its initial
-  state. Hover, click and tab states are out of scope.
+- **Only declared states are covered** — each view is screenshotted in its
+  initial render plus the tabs and modes listed under `states` in
+  `views.config.json`. Hover, transient dialogs and click sequences beyond
+  those are out of scope.

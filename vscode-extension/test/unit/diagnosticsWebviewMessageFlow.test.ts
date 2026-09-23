@@ -90,12 +90,45 @@ interface Harness {
 }
 
 /**
+ * The locale every webview test renders under.
+ *
+ * A bare `toLocaleString()` resolves against the *realm's* default locale, and the realm here is
+ * Node — so without this pin these tests would format numbers and dates using the host's Windows
+ * regional format (`en-NL` on a Dutch machine → "2.000"). A real webview is a Chromium renderer,
+ * whose locale comes from VS Code's display language and ignores the Windows regional format
+ * entirely (`en-GB` on that same machine → "2,000"). Pinning keeps the tests deterministic
+ * everywhere *and* keeps them describing what the shipped webview actually renders; English
+ * locales agree on the comma thousands separator, so assertions on it are safe to hardcode.
+ *
+ * Dates are a different story: en-US renders 1/2/2026 where en-GB renders 02/01/2026. Assert on
+ * formatted dates only if you accept this pinned locale as the contract.
+ */
+const WEBVIEW_TEST_LOCALE = 'en-US'; // No change needed, already correct
+
+/**
+ * Makes locale-less `toLocale*()` calls inside the jsdom realm resolve to {@link WEBVIEW_TEST_LOCALE}
+ * instead of the host's locale. Must run before the bundle is evaluated.
+ */
+function pinRealmLocale(window: any): void {
+	const pin = (proto: any, method: string): void => {
+		const original = proto[method];
+		proto[method] = function (this: unknown, locales?: unknown, options?: unknown) {
+			return original.call(this, locales ?? WEBVIEW_TEST_LOCALE, options);
+		};
+	};
+	pin(window.Number.prototype, 'toLocaleString');
+	pin(window.Date.prototype, 'toLocaleString');
+	pin(window.Date.prototype, 'toLocaleDateString');
+	pin(window.Date.prototype, 'toLocaleTimeString');
+}
+
+/**
  * Boots the bundled webview in jsdom. `initialData` mirrors `window.__INITIAL_DIAGNOSTICS__`.
  * Unlike the usage-panel harness, this does NOT await settling before returning — callers that
  * need to dispatch a message *before* `bootstrap()`'s pending dynamic import resolves (i.e.
  * before `renderLayout` has run) must do so immediately, then call `settle()` themselves.
  */
-function bootWebviewUnsettled(initialData: Record<string, unknown> | null): Harness {
+function bootWebviewUnsettled(initialData: Record<string, unknown> | null, savedState?: Record<string, unknown>): Harness {
 	const bundle = getSyncBundle();
 	const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
 		runScripts: 'outside-only',
@@ -103,10 +136,11 @@ function bootWebviewUnsettled(initialData: Record<string, unknown> | null): Harn
 		url: 'https://example.org/',
 	});
 	const window = dom.window as any;
+	pinRealmLocale(window); // No change needed, already called
 	const posted: any[] = [];
 	window.acquireVsCodeApi = () => ({
 		postMessage: (message: unknown) => { posted.push(message); },
-		getState: () => undefined,
+		getState: () => savedState,
 		setState: () => undefined,
 	});
 	// jsdom's ElementInternals is a stub; <vscode-button> calls setFormValue on it.
@@ -324,4 +358,65 @@ test('OTel Delta tab shows a detecting message while comparison data is still lo
 	const rendered = harness.text('#tab-otel-delta');
 	assert.ok(rendered?.includes('OpenTelemetry Detection Running'), `expected detecting title, got: ${rendered}`);
 	assert.ok(rendered?.includes('Detecting Copilot CLI OpenTelemetry export data'), `expected detecting body, got: ${rendered}`);
+});
+
+test('restoring the OTel Delta tab reveals the Research leaf bar and marks it active', async () => {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData(), { activeTab: 'otel-delta' });
+	await harness.settle();
+
+	const doc = harness.window.document;
+	const researchGroupTab = doc.querySelector('.group-tab[data-group="research"]');
+	const researchLeafBar = doc.querySelector('.leaf-tabs[data-group="research"]');
+	const otelTabButton = doc.querySelector('.tab[data-tab="otel-delta"]');
+	const otelTabContent = doc.getElementById('tab-otel-delta');
+
+	assert.ok(researchGroupTab?.classList.contains('active'), 'expected the Research group tab to be active');
+	assert.notEqual(researchLeafBar?.style.display, 'none', 'expected the Research leaf tab bar to be visible');
+	assert.ok(otelTabButton?.classList.contains('active'), 'expected the OTel Delta tab button to be active');
+	assert.ok(otelTabContent?.classList.contains('active'), 'expected the OTel Delta tab content to be active');
+});
+
+test('a switchTab message (e.g. the What\'s New "Take me there" action) navigates to the requested tab and group', async () => {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData());
+	await harness.settle();
+
+	harness.post({ command: 'switchTab', tab: 'otel-delta' });
+	await harness.settle();
+
+	const doc = harness.window.document;
+	assert.ok(doc.querySelector('.group-tab[data-group="research"]')?.classList.contains('active'), 'expected the Research group tab to be active');
+	assert.ok(doc.querySelector('.tab[data-tab="otel-delta"]')?.classList.contains('active'), 'expected the OTel Delta tab button to be active');
+	assert.ok(doc.getElementById('tab-otel-delta')?.classList.contains('active'), 'expected the OTel Delta tab content to be active');
+});
+
+test('a switchTab message that arrives before the layout renders still lands on the requested tab', async () => {
+	// Mirrors the backendStorageInfoLoaded early-arrival tests above: the message listener is
+	// registered before renderLayout() runs (bootstrap() awaits a dynamic import first), so a
+	// switchTab request — e.g. from the What's New "Take me there" action — can legitimately
+	// arrive before any tab button exists yet.
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData());
+
+	assert.equal(harness.window.document.getElementById('tab-otel-delta'), null, 'layout must not exist yet');
+	harness.postSync({ command: 'switchTab', tab: 'otel-delta' });
+
+	await harness.settle();
+
+	const doc = harness.window.document;
+	assert.ok(doc.querySelector('.group-tab[data-group="research"]')?.classList.contains('active'), 'expected the Research group tab to be active');
+	assert.ok(doc.querySelector('.tab[data-tab="otel-delta"]')?.classList.contains('active'), 'expected the OTel Delta tab button to be active');
+});
+
+test('a switchTab message naming an unknown tab is ignored rather than breaking navigation', async () => {
+	await preloadBundle();
+	const harness = bootWebviewUnsettled(buildInitialData());
+	await harness.settle();
+
+	harness.post({ command: 'switchTab', tab: 'not-a-real-tab' });
+	await harness.settle();
+
+	const doc = harness.window.document;
+	assert.ok(doc.querySelector('.tab[data-tab="report"]')?.classList.contains('active'), 'expected the default report tab to remain active');
 });

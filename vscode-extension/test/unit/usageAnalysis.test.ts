@@ -3,6 +3,7 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { makeWorkspaceFixtureDir } from './tmpFixtureDirs';
 import {
     mergeUsageAnalysis,
     analyzeContextReferences,
@@ -172,7 +173,14 @@ function makeMockDeps(overrides: Partial<{
     };
 }
 
-const FAKE_JSON_PATH = '/tmp/test-session.json';
+// Fake session paths passed to the analysis functions below. They are never
+// created on disk, but they must NOT live under the OS temp dir: the parsers
+// reach fs.open() via readTextFileWithSizeGuard, and a temp-dir path literal
+// flowing into that call is what CodeQL's js/insecure-temporary-file reports
+// (a world-writable temp path reaching a file-open sink). Keep new fake paths
+// under /fake-sessions/ too; real on-disk fixtures go through
+// makeWorkspaceFixtureDir, which exists for the same reason.
+const FAKE_JSON_PATH = '/fake-sessions/test-session.json';
 // Valid UUID v4 format recognised by isUuidPointerFile
 const UUID_POINTER_CONTENT = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
 
@@ -1321,7 +1329,7 @@ test('analyzeSessionUsage: delta-based JSONL session extracts LOC data from text
     const line0 = JSON.stringify({ kind: 0, v: { version: 3, creationDate: 1700000000000, requests: [] } });
     const line1 = JSON.stringify({ kind: 2, k: ['requests'], v: request });
     const content = [line0, line1].join('\n');
-    const FAKE_JSONL_PATH = '/tmp/test-session.jsonl';
+    const FAKE_JSONL_PATH = '/fake-sessions/test-session.jsonl';
     const deps = makeMockDeps();
     const result = await analyzeSessionUsage(deps, FAKE_JSONL_PATH, content);
     // linesAdded should be populated from the textEditGroup edits
@@ -1508,7 +1516,7 @@ test('analyzeSessionUsage: delta JSONL session produces model efficiency counter
     const line1 = JSON.stringify({ kind: 2, k: ['requests'], v: request });
     const content = [line0, line1].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test-session.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test-session.jsonl', content);
     const c = result.modelEfficiency?.['gpt-4o'];
     assert.ok(c, 'expected efficiency counters for gpt-4o from delta JSONL');
     assert.equal(c.calls, 1);
@@ -2049,7 +2057,7 @@ test('analyzeSessionUsage: delta JSONL request without requestId does not count 
     const lineReq = JSON.stringify({ kind: 2, k: ['requests'], v: { /* no requestId */ message: { text: 'hi' } } });
     const content = [line0, lineReq].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.modeUsage.ask, 0, 'no mode count for request without requestId');
 });
 
@@ -2062,7 +2070,7 @@ test('analyzeSessionUsage: delta JSONL request response with null item is skippe
     const lineReq = JSON.stringify({ kind: 2, k: ['requests'], v: request });
     const content = [line0, lineReq].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.toolCalls.total, 1);
     assert.equal(result.toolCalls.byTool['search_tool'], 1);
 });
@@ -2078,7 +2086,7 @@ test('analyzeSessionUsage: delta JSONL with toolInvocationSerialized in response
     const lineReq = JSON.stringify({ kind: 2, k: ['requests'], v: request });
     const content = [line0, lineReq].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.toolCalls.total, 1);
     assert.equal(result.toolCalls.byTool['read_file'], 1);
 });
@@ -2093,7 +2101,7 @@ test('analyzeSessionUsage: delta JSONL with request.agent.id counts as tool call
     const lineReq = JSON.stringify({ kind: 2, k: ['requests'], v: request });
     const content = [line0, lineReq].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result.toolCalls.total >= 1, 'agent.id should increment toolCalls');
     assert.ok(result.toolCalls.byTool['copilot.editsAgent'] >= 1);
 });
@@ -2106,7 +2114,7 @@ test('analyzeSessionUsage: delta JSONL two requests with different models counts
     const lineR2 = JSON.stringify({ kind: 2, k: ['requests'], v: req2 });
     const content = [line0, lineR1, lineR2].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result.modelSwitching.switchCount >= 1, 'should count model switch between gpt-4o and claude');
     assert.ok(result.modelSwitching.uniqueModels.length >= 2);
 });
@@ -2120,7 +2128,7 @@ test('analyzeSessionUsage: delta JSONL request using result.metadata.modelId for
     const lineR = JSON.stringify({ kind: 2, k: ['requests'], v: req });
     const content = [line0, lineR].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result.modelSwitching.uniqueModels.length >= 1, 'should detect model from metadata.modelId');
 });
 
@@ -2137,7 +2145,7 @@ test('analyzeSessionUsage: delta JSONL with implicit selection increments implic
     });
     const content = line0;
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.contextReferences.implicitSelection, 1);
 });
 
@@ -2304,7 +2312,7 @@ test('calculateModelSwitching: delta JSONL with kind=0 model identifier extracts
     const content = line0;
     const deps = makeMockDeps();
     const analysis = emptyAnalysis();
-    await calculateModelSwitching(deps, '/tmp/test.jsonl', analysis, content);
+    await calculateModelSwitching(deps, '/fake-sessions/test.jsonl', analysis, content);
     assert.ok(analysis.modelSwitching.uniqueModels.includes('gpt-4o'), 'should detect gpt-4o from kind=0');
 });
 
@@ -2314,7 +2322,7 @@ test('calculateModelSwitching: delta JSONL with kind=0 event but no model id sti
     const content = line0;
     const deps = makeMockDeps();
     const analysis = emptyAnalysis();
-    await calculateModelSwitching(deps, '/tmp/test.jsonl', analysis, content);
+    await calculateModelSwitching(deps, '/fake-sessions/test.jsonl', analysis, content);
     assert.ok(analysis.modelSwitching.uniqueModels.includes('gpt-4o'), 'should still detect gpt-4o from modelId');
 });
 
@@ -2326,7 +2334,7 @@ test('calculateModelSwitching: JSONL session identifies models from CLI events',
     const content = events.map(e => JSON.stringify(e)).join('\n');
     const deps = makeMockDeps();
     const analysis = emptyAnalysis();
-    await calculateModelSwitching(deps, '/tmp/test.jsonl', analysis, content);
+    await calculateModelSwitching(deps, '/fake-sessions/test.jsonl', analysis, content);
     assert.ok(analysis.modelSwitching.uniqueModels.includes('gpt-4o'), 'should detect gpt-4o');
     assert.equal(analysis.modelSwitching.tiers.standard.length, 1);
 });
@@ -2520,7 +2528,7 @@ test('analyzeSessionUsage: non-delta JSONL with kind=0 event reads mode and impl
     });
     const content = [cliStart, kind0].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result.contextReferences.implicitSelection > 0, 'kind=0 non-cursor selection should trigger implicitSelection');
 });
 
@@ -2532,7 +2540,7 @@ test('analyzeSessionUsage: non-delta JSONL with kind=1 events updates selections
     const kind1Var = JSON.stringify({ kind: 1, k: ['variableData'], v: { entries: [{ kind: 'vscode.file', name: 'x.ts' }] } });
     const content = [cliStart, kind1Mode, kind1Sel, kind1Refs, kind1Var].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result.contextReferences.implicitSelection > 0, 'kind=1 non-cursor selection should count');
     assert.ok(result.contextReferences.file > 0, 'kind=1 content ref should count file');
 });
@@ -2555,7 +2563,7 @@ test('analyzeSessionUsage: non-delta JSONL with kind=2 requests processes tool c
     });
     const content = [cliStart, kind2Req, kind2Resp].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result.toolCalls.byTool['run_in_terminal'], 'kind=2 request response tool should be counted');
     assert.ok(result.toolCalls.byTool['search_tool'], 'kind=2 response update tool should be counted');
     assert.ok(result.toolCalls.byTool['copilot.edits'], 'kind=2 request agent.id should be counted');
@@ -2566,7 +2574,7 @@ test('analyzeSessionUsage: non-delta JSONL with blank lines skips them gracefull
     const userMsg = JSON.stringify({ type: 'user.message', data: {} });
     const content = [cliStart, '', userMsg, ''].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.modeUsage.cli, 1, 'should count user.message despite blank lines');
 });
 
@@ -2576,7 +2584,7 @@ test('analyzeSessionUsage: CLI session.model_change event is processed without e
     const userMsg = JSON.stringify({ type: 'user.message', data: {} });
     const content = [start, modelChange, userMsg].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.modeUsage.cli, 1, 'user.message after model_change should count');
 });
 
@@ -2586,7 +2594,7 @@ test('analyzeSessionUsage: CLI session.model_change event is processed without e
 
 function writeCliSessionFixture(t: test.TestContext, clientName: string): string {
     // The split only applies under ~/.copilot/session-state/, so mirror that layout.
-    const dir = fs.mkdtempSync(path.join(process.cwd(), 'cliapp-split-'));
+    const dir = makeWorkspaceFixtureDir('cliapp-split-');
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const sessionDir = path.join(dir, '.copilot', 'session-state', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
     fs.mkdirSync(sessionDir, { recursive: true });
@@ -2674,7 +2682,7 @@ test('getModelUsageFromSession: CLI session.model_change updates default model i
     const modelChange = JSON.stringify({ type: 'session.model_change', data: { newModel: 'claude-sonnet-4.5' } });
     const content = [start, modelChange].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result !== undefined, 'should not throw on model_change event');
 });
 
@@ -2684,7 +2692,7 @@ test('getModelUsageFromSession: assistant.message with content estimates output 
     const assistantMsg = JSON.stringify({ type: 'assistant.message', data: { content: 'This is a response with some text', model: 'gpt-4o' } });
     const content = [start, assistantMsg].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result['gpt-4o'] !== undefined, 'gpt-4o model entry should exist');
 });
 
@@ -2693,7 +2701,7 @@ test('getModelUsageFromSession: session.shutdown without modelMetrics field is i
     const shutdown = JSON.stringify({ type: 'session.shutdown', data: { shutdownType: 'routine' } });
     const content = [start, shutdown].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result !== undefined, 'should not throw when modelMetrics is absent');
 });
 
@@ -2709,7 +2717,7 @@ test('getModelUsageFromSession: session.shutdown with metric missing usage field
     });
     const content = [start, shutdown].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.deepEqual(result, {}, 'model with no usage in shutdown metrics should be skipped');
 });
 
@@ -2723,7 +2731,7 @@ test('getModelUsageFromSession: delta JSONL with result.metadata.promptTokens (I
     const lineR = JSON.stringify({ kind: 2, k: ['requests'], v: req });
     const content = [line0, lineR].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result['gpt-4o'] !== undefined, 'gpt-4o entry should exist from INSIDERS format');
     assert.equal(result['gpt-4o'].inputTokens, 200);
     assert.equal(result['gpt-4o'].outputTokens, 80);
@@ -2737,7 +2745,7 @@ test('getModelUsageFromSession: delta JSONL with kind=2 selectedModel update cha
     const lineR = JSON.stringify({ kind: 2, k: ['requests'], v: req });
     const content = [line0, lineModel, lineR].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result['claude-sonnet-4.5'] !== undefined, 'default model should be updated from kind=2 selectedModel event');
 });
 
@@ -2784,7 +2792,7 @@ test('getModelUsageFromSession: non-JSONL content that fails isParsedSessionJson
 test('getModelUsageFromSession: non-existent file path triggers error handler and returns empty', async () => {
     const warns: string[] = [];
     const deps = { ...makeMockDeps(), warn: (m: string) => warns.push(m) };
-    const result = await getModelUsageFromSession(deps, '/tmp/__nonexistent_session_file__.jsonl');
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/__nonexistent_session_file__.jsonl');
     assert.deepEqual(result, {}, 'should return empty on file read error');
     assert.ok(warns.some(w => w.includes('Error getting model usage')), 'should log error');
 });
@@ -2799,7 +2807,7 @@ test('analyzeSessionUsage: non-delta JSONL kind=0 without selections array hits 
     const kind0 = JSON.stringify({ kind: 0, v: { inputState: { mode: 'edits' } } });
     const content = [cliStart, kind0].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     // No selection → implicitSelection unchanged
     assert.equal(result.contextReferences.implicitSelection, 0);
 });
@@ -2816,7 +2824,7 @@ test('analyzeSessionUsage: non-delta JSONL kind=2 requests with null response it
     });
     const content = [cliStart, kind2Req].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.toolCalls.total, 1);
     assert.equal(result.toolCalls.byTool['search_tool'], 1);
 });
@@ -2830,7 +2838,7 @@ test('analyzeSessionUsage: non-delta JSONL kind=2 response update with null item
     });
     const content = [cliStart, kind2Resp].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.toolCalls.total, 1);
     assert.equal(result.toolCalls.byTool['run_in_terminal'], 1);
 });
@@ -2872,7 +2880,7 @@ test('getModelUsageFromSession: delta JSONL with result.metadata.modelId (no top
     const lineR = JSON.stringify({ kind: 2, k: ['requests'], v: req });
     const content = [line0, lineR].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result['gpt-4o'] !== undefined, 'model from result.metadata.modelId should be used');
     assert.equal(result['gpt-4o'].inputTokens, 100);
     assert.equal(result['gpt-4o'].outputTokens, 40);
@@ -2890,7 +2898,7 @@ test('getModelUsageFromSession: delta JSONL request without exact tokens uses te
     const lineR = JSON.stringify({ kind: 2, k: ['requests'], v: req });
     const content = [line0, lineR].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result['gpt-4o'] !== undefined, 'gpt-4o should exist from text estimation');
     assert.ok(result['gpt-4o'].inputTokens > 0, 'should estimate input tokens from message.text');
 });
@@ -2901,7 +2909,7 @@ test('getModelUsageFromSession: delta JSONL with null in requests array is skipp
     const lineReq = JSON.stringify({ kind: 2, k: ['requests'], v: { requestId: 'r1', modelId: 'copilot/gpt-4o', result: { promptTokens: 50, outputTokens: 20 } } });
     const content = [line0, lineNull, lineReq].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result['gpt-4o'] !== undefined, 'valid request should still be processed');
 });
 
@@ -2918,7 +2926,7 @@ test('getModelUsageFromSession: delta JSONL request without tokens estimates fro
     const lineR = JSON.stringify({ kind: 2, k: ['requests'], v: req });
     const content = [line0, lineR].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result['gpt-4o'] !== undefined, 'gpt-4o should exist');
     assert.ok(result['gpt-4o'].outputTokens > 0, 'output tokens should be estimated from response text');
 });
@@ -2940,7 +2948,7 @@ test('trackEnhancedMetrics: non-existent file path triggers error handler', asyn
     const warns: string[] = [];
     const deps = { ...makeMockDeps(), warn: (m: string) => warns.push(m) };
     const analysis = emptyAnalysis();
-    await trackEnhancedMetrics(deps, '/tmp/__nonexistent_metrics_file__.json', analysis);
+    await trackEnhancedMetrics(deps, '/fake-sessions/__nonexistent_metrics_file__.json', analysis);
     assert.ok(warns.some(w => w.includes('Error tracking enhanced metrics')), 'should log error on file read failure');
 });
 
@@ -2950,7 +2958,7 @@ test('trackEnhancedMetrics: non-existent file path triggers error handler', asyn
 
 test('analyzeSessionUsage: JSONL file with whitespace-only content hits _asuIsDeltaBased empty-array path', async () => {
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', '   \n  \n');
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', '   \n  \n');
     assert.equal(result.toolCalls.total, 0, 'empty JSONL should produce empty analysis');
 });
 
@@ -2959,7 +2967,7 @@ test('analyzeSessionUsage: JSONL with invalid first line is treated as non-delta
     const userMsg = JSON.stringify({ type: 'user.message', data: {} });
     const content = [invalid, userMsg].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.modeUsage.cli, 1, 'user.message should be counted even if first line is invalid JSON');
 });
 
@@ -2972,7 +2980,7 @@ test('analyzeSessionUsage: CLI JSONL tool.execution_complete without prior start
     const complete = JSON.stringify({ type: 'tool.execution_complete', data: { toolCallId: 'orphan-1', success: true } });
     const content = [start, complete].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.toolCalls.total, 0, 'orphaned completion without pending start should be ignored');
 });
 
@@ -2983,7 +2991,7 @@ test('analyzeSessionUsage: CLI JSONL edit tool with no new_str counts zero lines
     const toolComplete = JSON.stringify({ type: 'tool.execution_complete', data: { toolCallId, success: true } });
     const content = [start, toolStart, toolComplete].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.editScope?.linesAdded ?? 0, 0, 'missing new_str should result in zero linesAdded');
     assert.equal(result.editScope?.linesRemoved ?? 0, 0, 'missing old_str should result in zero linesRemoved');
 });
@@ -2995,7 +3003,7 @@ test('analyzeSessionUsage: CLI JSONL read tool with string result content estima
     const toolComplete = JSON.stringify({ type: 'tool.execution_complete', data: { toolCallId, success: true, result: { content: 'file contents here\nsome more lines' } } });
     const content = [start, toolStart, toolComplete].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result !== undefined, 'should process without error');
 });
 
@@ -3007,7 +3015,7 @@ test('analyzeSessionUsage: CLI JSONL read tool with non-string non-array result 
     const toolComplete = JSON.stringify({ type: 'tool.execution_complete', data: { toolCallId, success: true, result: { content: 42 } } });
     const content = [start, toolStart, toolComplete].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result !== undefined, 'numeric result content should be handled gracefully');
 });
 
@@ -3024,7 +3032,7 @@ test('calculateModelSwitching: delta JSONL kind=2 selectedModel with identifier 
     const content = [line0, lineModel, lineReq].join('\n');
     const deps = makeMockDeps();
     const analysis = emptyAnalysis();
-    await calculateModelSwitching(deps, '/tmp/test.jsonl', analysis, content);
+    await calculateModelSwitching(deps, '/fake-sessions/test.jsonl', analysis, content);
     assert.ok(analysis.modelSwitching.uniqueModels.includes('gpt-4o'), 'should detect gpt-4o from kind=2 selectedModel');
 });
 
@@ -3037,7 +3045,7 @@ test('calculateModelSwitching: delta JSONL kind=2 selectedModel with no identifi
     const content = [line0, lineModel, lineReq].join('\n');
     const deps = makeMockDeps();
     const analysis = emptyAnalysis();
-    await calculateModelSwitching(deps, '/tmp/test.jsonl', analysis, content);
+    await calculateModelSwitching(deps, '/fake-sessions/test.jsonl', analysis, content);
     assert.ok(analysis.modelSwitching.uniqueModels.includes('gpt-4o'), 'should detect gpt-4o from request modelId');
 });
 
@@ -3049,7 +3057,7 @@ test('calculateModelSwitching: delta JSONL kind=2 requests event with modelId us
     const content = [line0, lineReq].join('\n');
     const deps = makeMockDeps();
     const analysis = emptyAnalysis();
-    await calculateModelSwitching(deps, '/tmp/test.jsonl', analysis, content);
+    await calculateModelSwitching(deps, '/fake-sessions/test.jsonl', analysis, content);
     assert.equal(analysis.modelSwitching.tiers.standard.length, 1, 'gpt-4o should be in standard tier');
     assert.equal(analysis.modelSwitching.standardRequests, 1);
 });
@@ -3062,7 +3070,7 @@ test('calculateModelSwitching: delta JSONL kind=2 requests event with result.met
     const content = [line0, lineReq].join('\n');
     const deps = makeMockDeps();
     const analysis = emptyAnalysis();
-    await calculateModelSwitching(deps, '/tmp/test.jsonl', analysis, content);
+    await calculateModelSwitching(deps, '/fake-sessions/test.jsonl', analysis, content);
     assert.equal(analysis.modelSwitching.tiers.standard.length, 1, 'gpt-4o from metadata.modelId should be in standard tier');
 });
 
@@ -3078,7 +3086,7 @@ test('calculateModelSwitching: UUID pointer content in preloadedContent returns 
     const deps = makeMockDeps();
     const analysis = emptyAnalysis();
     // Pass JSONL for modelUsage extraction, then UUID pointer as the content for tier counting
-    await calculateModelSwitching(deps, '/tmp/test.jsonl', analysis, jsonlContent);
+    await calculateModelSwitching(deps, '/fake-sessions/test.jsonl', analysis, jsonlContent);
     // Then test UUID pointer separately (it's the UUID check at line 1188)
     const analysisForUuid = emptyAnalysis();
     // Simulate: model usage comes from somewhere, but the file content is UUID pointer
@@ -3098,7 +3106,7 @@ test('trackEnhancedMetrics: delta JSONL with lastMessageDate populates timestamp
     const line0 = JSON.stringify({ kind: 0, v: { version: 3, requests: [], lastMessageDate: lastDate, creationDate } });
     const analysis = emptyAnalysis();
     const deps = makeMockDeps();
-    await trackEnhancedMetrics(deps, '/tmp/test.jsonl', analysis, line0);
+    await trackEnhancedMetrics(deps, '/fake-sessions/test.jsonl', analysis, line0);
     assert.ok(analysis.sessionDuration !== undefined || analysis.sessionDuration === undefined, 'should complete without error');
 });
 
@@ -3113,7 +3121,7 @@ test('trackEnhancedMetrics: CLI JSONL tool.execution_complete with no toolCallId
     const content = [toolStart, toolComplete].join('\n');
     const analysis = emptyAnalysis();
     const deps = makeMockDeps();
-    await trackEnhancedMetrics(deps, '/tmp/test.jsonl', analysis, content);
+    await trackEnhancedMetrics(deps, '/fake-sessions/test.jsonl', analysis, content);
     // No matching toolCallId → nothing processed
     assert.equal(analysis.editScope?.totalEditedFiles ?? 0, 0);
 });
@@ -3144,7 +3152,7 @@ test('getModelUsageFromSession: delta JSONL request with sub-agent response item
     const lineR = JSON.stringify({ kind: 2, k: ['requests'], v: req });
     const content = [line0, lineR].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result['gpt-4o'] !== undefined, 'gpt-4o should exist from main request');
     assert.ok(result['gpt-4o'].inputTokens >= 100, 'main request tokens plus sub-agent should be at least 100');
 });
@@ -3170,7 +3178,7 @@ test('getModelUsageFromSession: delta JSONL sub-agent with different model creat
     const lineR = JSON.stringify({ kind: 2, k: ['requests'], v: req });
     const content = [line0, lineR].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result['gpt-4o'] !== undefined, 'main request model should exist');
     assert.ok(Object.keys(result).length >= 1, 'should have model entries');
 });
@@ -3182,7 +3190,7 @@ test('getModelUsageFromSession: delta JSONL request without requestId is skipped
     const lineR = JSON.stringify({ kind: 2, k: ['requests'], v: req });
     const content = [line0, lineR].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result !== undefined, 'should not throw when request has no requestId');
 });
 
@@ -3207,7 +3215,7 @@ test('analyzeSessionUsage: delta JSONL with kind=0 reasoning effort populates th
     const line0 = JSON.stringify({ kind: 0, v: { version: 3, requests: [req], inputState: { selectedModel } } });
     const content = line0;
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result.thinkingEffort !== undefined, 'thinkingEffort should be set');
     assert.equal(result.thinkingEffort!.defaultEffort, 'medium');
     assert.ok(result.thinkingEffort!.byEffort['medium'] > 0, 'should count medium effort');
@@ -3244,7 +3252,7 @@ test('analyzeSessionUsage: delta JSONL per-request reasoning effort populates ef
     });
     const content = [line0, line2].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result.thinkingEffort !== undefined, 'thinkingEffort should be set');
     assert.equal(result.thinkingEffort!.defaultEffort, 'high');
     // byEffort['high'] comes from the effortByRequestId loop (not the defaultEffort path)
@@ -3264,7 +3272,7 @@ test('analyzeSessionUsage: delta JSONL request with result.details but no modelI
     };
     const line0 = JSON.stringify({ kind: 0, v: { version: 3, requests: [req] } });
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', line0);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', line0);
     // Should complete without error; model is determined via getModelFromRequest
     assert.ok(result.modelSwitching !== undefined, 'modelSwitching should be populated');
 });
@@ -3284,7 +3292,7 @@ test('analyzeSessionUsage: non-delta JSONL kind=1 contentReferences with null it
     });
     const content = [cliStart, kind1Refs].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     // The null item is skipped; the valid reference is counted
     assert.ok(result.contextReferences !== undefined, 'contextReferences should exist');
 });
@@ -3302,7 +3310,7 @@ test('getModelUsageFromSession: delta JSONL request with result.details but no m
     };
     const line0 = JSON.stringify({ kind: 0, v: { version: 3, requests: [req] } });
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', line0);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', line0);
     // getModelFromRequest falls back to 'gpt-4' when no display name match
     assert.ok(result !== undefined, 'should return model usage without error');
     const models = Object.keys(result);
@@ -3327,7 +3335,7 @@ test('getModelUsageFromSession: delta JSONL malformed result line triggers regex
     const malformedResult = '{"kind":1,"k":["requests",0,"result"],"v":{"promptTokens":100,"outputTokens":50}}X';
     const content = [line0, lineReq, malformedResult].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     // Fallback extraction should contribute the 100 input / 50 output tokens
     assert.ok(result !== undefined, 'should return model usage without error');
     assert.ok(result['gpt-4o'] !== undefined, 'gpt-4o entry should exist');
@@ -3344,7 +3352,7 @@ test('getModelUsageFromSession: delta JSONL valid result line triggers fallback 
     const validResult = JSON.stringify({ kind: 1, k: ['requests', 0, 'result'], v: { promptTokens: 150, outputTokens: 60 } });
     const content = [line0, lineReq, validResult].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result['gpt-4o'] !== undefined, 'gpt-4o entry should exist');
     // Tokens come from normal delta processing (promptTokens/outputTokens on result)
     assert.equal(result['gpt-4o'].inputTokens, 150, 'tokens from delta processing');
@@ -3358,7 +3366,7 @@ test('getModelUsageFromSession: delta JSONL fallback with null request at index 
     const malformedOob = '{"kind":1,"k":["requests",5,"result"],"v":{"promptTokens":80,"outputTokens":40}}X';
     const content = [line0, malformedOob].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     // The out-of-bounds entry is skipped; result may be empty or have defaults
     assert.ok(result !== undefined, 'should complete without error');
 });
@@ -3374,7 +3382,7 @@ test('getModelUsageFromSession: delta JSONL fallback creates new model entry whe
     const malformedResult = '{"kind":1,"k":["requests",0,"result"],"v":{"promptTokens":90,"outputTokens":45}}X';
     const content = [line0, lineReq, malformedResult].join('\n');
     const deps = makeMockDeps();
-    const result = await getModelUsageFromSession(deps, '/tmp/test.jsonl', content);
+    const result = await getModelUsageFromSession(deps, '/fake-sessions/test.jsonl', content);
     assert.ok(result !== undefined, 'should complete without error');
     // gpt-4o entry created by fallback extraction (lines 2067-2068)
     assert.ok(result['gpt-4o'] !== undefined, 'gpt-4o should be created by fallback');
@@ -3390,7 +3398,7 @@ test('analyzeSessionUsage: delta JSONL with agent mode increments modeUsage.agen
     const req = { requestId: 'r1', modelId: 'copilot/gpt-4o', result: { promptTokens: 50, outputTokens: 20 } };
     const line0 = JSON.stringify({ kind: 0, v: { version: 3, requests: [req], inputState: { mode: 'agent' } } });
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', line0);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', line0);
     assert.equal(result.modeUsage.agent, 1, 'agent mode should be counted via incrementModeUsage');
 });
 
@@ -3398,7 +3406,7 @@ test('analyzeSessionUsage: delta JSONL with edit mode increments modeUsage.edit 
     const req = { requestId: 'r1', modelId: 'copilot/gpt-4o', result: { promptTokens: 50, outputTokens: 20 } };
     const line0 = JSON.stringify({ kind: 0, v: { version: 3, requests: [req], inputState: { mode: 'edit' } } });
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', line0);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', line0);
     assert.equal(result.modeUsage.edit, 1, 'edit mode should be counted via incrementModeUsage');
 });
 
@@ -3408,7 +3416,7 @@ test('analyzeSessionUsage: delta JSONL with plan-agent mode increments modeUsage
     const mode = { kind: 'agent', id: 'file:///workspace/plan-agent/Plan.agent.md' };
     const line0 = JSON.stringify({ kind: 0, v: { version: 3, requests: [req], inputState: { mode } } });
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', line0);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', line0);
     assert.equal(result.modeUsage.plan, 1, 'plan-agent mode should be counted via incrementModeUsage');
 });
 
@@ -3418,7 +3426,7 @@ test('analyzeSessionUsage: delta JSONL with custom-agent mode increments modeUsa
     const mode = { kind: 'agent', id: 'file:///workspace/my-custom.agent.md' };
     const line0 = JSON.stringify({ kind: 0, v: { version: 3, requests: [req], inputState: { mode } } });
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', line0);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', line0);
     assert.equal(result.modeUsage.customAgent, 1, 'custom-agent mode should be counted via incrementModeUsage');
 });
 
@@ -3437,7 +3445,7 @@ test('analyzeSessionUsage: delta JSONL with MCP tool response item increments mc
     };
     const line0 = JSON.stringify({ kind: 0, v: { version: 3, requests: [req] } });
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', line0);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', line0);
     assert.equal(result.mcpTools.total, 1, 'MCP tool should be counted in mcpTools.total');
     assert.ok(result.mcpTools.byTool['mcp.github.list_repos'] >= 1 ||
         result.mcpTools.byTool['mcp.io.github.git.list_repos'] >= 1,
@@ -3560,7 +3568,7 @@ test('calculateModelSwitching: delta JSONL kind=2 requests event with result.det
     const content = [line0, lineReq].join('\n');
     const deps = makeMockDeps();
     const analysis = emptyAnalysis();
-    await calculateModelSwitching(deps, '/tmp/test.jsonl', analysis, content);
+    await calculateModelSwitching(deps, '/fake-sessions/test.jsonl', analysis, content);
     // getModelFromRequest falls back to 'gpt-4' when no display name match
     assert.ok(analysis.modelSwitching.totalRequests >= 1, 'request with result.details should be counted');
 });
@@ -3572,7 +3580,7 @@ test('analyzeSessionUsage: non-delta JSONL classifies testing from shell command
     	JSON.stringify({ type: 'tool.execution_complete', data: { toolCallId: '1', success: true, result: { content: 'ok' } } }),
     ].join('\n');
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', content);
     assert.equal(result.taskClassification.primaryCategory, 'Testing');
     assert.ok((result.taskClassification.categoryShares.Testing ?? 0) > 0);
 });
@@ -3586,7 +3594,7 @@ test('analyzeSessionUsage: delta JSONL classifies coding from edit tool use', as
     };
     const line0 = JSON.stringify({ kind: 0, v: { version: 3, inputState: { mode: 'agent' }, requests: [req] } });
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', line0);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', line0);
     assert.equal(result.taskClassification.primaryCategory, 'Coding');
     assert.equal(result.taskClassification.turnCount, 1);
 });
@@ -3602,6 +3610,6 @@ test('analyzeSessionUsage: plan mode biases primary category to Planning', async
     	v: { version: 3, inputState: { mode: { kind: 'agent', id: 'file:///workspace/plan-agent/Plan.agent.md' } }, requests: [req] }
     });
     const deps = makeMockDeps();
-    const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', line0);
+    const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', line0);
     assert.equal(result.taskClassification.primaryCategory, 'Planning');
 });

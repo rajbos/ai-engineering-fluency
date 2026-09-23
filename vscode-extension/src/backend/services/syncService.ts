@@ -1161,14 +1161,16 @@ return true;
 	 * Compute daily rollups from local session files.
 	 * Uses cached session data when available to avoid re-parsing files.
 	 */
-	private async computeDailyRollupsFromLocalSessions(args: { lookbackDays: number; userId?: string; sessionFiles?: string[]; skipMtimeFilter?: boolean; includeEditorDimension?: boolean; onProgress?: (processed: number, total: number, daysFound: number) => void }): Promise<{
+	private async computeDailyRollupsFromLocalSessions(args: { lookbackDays: number; userId?: string; sessionFiles?: string[]; skipMtimeFilter?: boolean; includeEditorDimension?: boolean; collectEditorType?: boolean; onProgress?: (processed: number, total: number, daysFound: number) => void }): Promise<{
 		rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>;
 		workspaceNamesById: Record<string, string>;
 		machineNamesById: Record<string, string>;
+		editorTypeByFile: Map<string, string>;
 	}> {
 		const lookbackDays = args.lookbackDays;
 		const skipMtimeFilter = args.skipMtimeFilter === true;
 		const includeEditorDimension = args.includeEditorDimension === true;
+		const collectEditorType = args.collectEditorType === true;
 		const onProgress = args.onProgress;
 		const userId = (args.userId ?? '').trim() || undefined;
 		const now = new Date();
@@ -1184,6 +1186,7 @@ return true;
 		const rollups = new Map<string, { key: DailyRollupKey; value: DailyRollupValue }>();
 		const workspaceNamesById: Record<string, string> = {};
 		const machineNamesById: Record<string, string> = {};
+		const editorTypeByFile = new Map<string, string>();
 		const machineName = this.utility.normalizeNameForStorage(this.utility.stripHostnameDomain(os.hostname()));
 		if (machineName) { machineNamesById[machineId] = machineName; }
 
@@ -1197,13 +1200,14 @@ return true;
 			await this.processOneSessionForRollup(sessionFile, {
 				skipMtimeFilter, startMs, now, machineId, userId,
 				includeEditorDimension, useCachedData, rollups,
-				workspaceNamesById, totalFiles, onProgress, progress
+				workspaceNamesById, totalFiles, onProgress, progress,
+				editorTypeByFile, collectEditorType
 			});
 		}
 
 		if (useCachedData) { this.logCachePerformance(progress.cacheHits, progress.cacheMisses); }
 		this.deps.logger.log(`Backend sync: processed ${progress.filesProcessed} files, skipped ${progress.filesSkipped} files outside lookback period`);
-		return { rollups, workspaceNamesById, machineNamesById };
+		return { rollups, workspaceNamesById, machineNamesById, editorTypeByFile };
 	}
 
 	private async tryProcessSpecialSession(
@@ -1230,13 +1234,28 @@ return true;
 			workspaceNamesById: Record<string, string>; totalFiles: number;
 			onProgress: ((processed: number, total: number, daysFound: number) => void) | undefined;
 			progress: { filesSkipped: number; filesProcessed: number; cacheHits: number; cacheMisses: number };
+			editorTypeByFile: Map<string, string>;
+			collectEditorType: boolean;
 		}
 	): Promise<void> {
+		// Classify the editor type before the lookback filter so that every
+		// discovered file — including ones older than the lookback window —
+		// gets an entry in the blob-upload map when the editor type can be
+		// determined.  The upload list is the full discovery list, not just
+		// files within the lookback.
+		// When includeEditorDimension is true the rollup itself needs the
+		// label, so classify unconditionally.  When it is false, only
+		// classify when the blob upload needs the map, to avoid blocking
+		// I/O on every table-only sync.
+		const needsClassification = ctx.includeEditorDimension || ctx.collectEditorType;
+		const editorForFile = needsClassification ? this.getEditorForFile(sessionFile, true) : undefined;
+		if (editorForFile) { ctx.editorTypeByFile.set(sessionFile, editorForFile); }
+
 		const fileMtimeMs = await this.statSessionFileForRollup(sessionFile, ctx);
 		if (fileMtimeMs === undefined) { return; }
-		const editorForFile = this.getEditorForFile(sessionFile, ctx.includeEditorDimension);
+		const editorForRollup = ctx.includeEditorDimension ? editorForFile : undefined;
 		if (this.isVSSessionFileType(sessionFile)) { ctx.progress.filesSkipped++; return; }
-		const sessionArgs = this.makeSessionRollupArgs(ctx.machineId, ctx.userId, editorForFile, ctx.workspaceNamesById, ctx.rollups, ctx.startMs);
+		const sessionArgs = this.makeSessionRollupArgs(ctx.machineId, ctx.userId, editorForRollup, ctx.workspaceNamesById, ctx.rollups, ctx.startMs);
 		const skipped = { count: 0 };
 		if (await this.tryProcessSpecialSession(sessionFile, fileMtimeMs, sessionArgs, this.isOpenCodeSessionType.bind(this), this.processOpenCodeSession.bind(this), skipped)) { ctx.progress.filesSkipped += skipped.count; return; }
 		if (await this.tryProcessSpecialSession(sessionFile, fileMtimeMs, sessionArgs, this.isCrushSessionType.bind(this), this.processCrushSession.bind(this), skipped)) { ctx.progress.filesSkipped += skipped.count; return; }
@@ -1244,7 +1263,7 @@ return true;
 		await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, ctx.workspaceNamesById);
 		if (ctx.useCachedData) {
 			const fileStat = await this.deps.sessionHandlers.statSessionFile(sessionFile);
-			const cacheSuccess = await this.processCachedSessionFile(sessionFile, fileMtimeMs, fileStat.size, workspaceId, ctx.machineId, ctx.userId, ctx.rollups, ctx.startMs, ctx.now, editorForFile);
+			const cacheSuccess = await this.processCachedSessionFile(sessionFile, fileMtimeMs, fileStat.size, workspaceId, ctx.machineId, ctx.userId, ctx.rollups, ctx.startMs, ctx.now, editorForRollup);
 			if (cacheSuccess) { ctx.progress.cacheHits++; return; }
 			ctx.progress.cacheMisses++;
 		}
@@ -1256,10 +1275,10 @@ return true;
 			return;
 		}
 		if (sessionFile.endsWith('.jsonl') || isJsonlContent(content)) {
-			this.processJsonlSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForFile, ctx.rollups);
+			this.processJsonlSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForRollup, ctx.rollups);
 			return;
 		}
-		this.processJsonSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForFile, ctx.rollups);
+		this.processJsonSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForRollup, ctx.rollups);
 	}
 
 	private async statSessionFileForRollup(
@@ -1509,12 +1528,13 @@ return true;
 		return entities;
 	}
 
-	private async performBlobUploadIfNeeded(settings: BackendSettings, creds: any, sessionFiles: string[]): Promise<void> {
+	private async performBlobUploadIfNeeded(settings: BackendSettings, creds: any, sessionFiles: string[], editorTypeByFile: Map<string, string>): Promise<void> {
 		try {
 			const machineId = vscode.env.machineId;
 			const uploadSettings = { enabled: settings.blobUploadEnabled, containerName: settings.blobContainerName, uploadFrequencyHours: settings.blobUploadFrequencyHours, compressFiles: settings.blobCompressFiles };
+
 			this.deps.logger.log('Blob upload: starting');
-			const uploadResult = await this.blobUploadService!.uploadSessionFiles(settings.storageAccount, uploadSettings, creds.blobCredential, sessionFiles, machineId, settings.datasetId);
+			const uploadResult = await this.blobUploadService!.uploadSessionFiles(settings.storageAccount, uploadSettings, creds.blobCredential, sessionFiles, machineId, settings.datasetId, editorTypeByFile);
 			if (uploadResult.success) { this.deps.logger.log(`Blob upload: ${uploadResult.message}`); }
 			else { this.deps.logger.warn(`Blob upload: ${uploadResult.message}`); }
 		} catch (blobError: any) {
@@ -1535,8 +1555,9 @@ return true;
 		const blobUploadNeeded = this.checkBlobUploadNeeded(settings);
 		const sessionFiles = await this.deps.sessionHandlers.getCopilotSessionFiles();
 		const resolvedIdentity = await this.resolveEffectiveUserIdentityForSync(settings, sharingPolicy.includeUserDimension);
-		const { rollups, workspaceNamesById, machineNamesById } = await this.computeDailyRollupsFromLocalSessions({
-			lookbackDays: settings.lookbackDays, userId: resolvedIdentity.userId, sessionFiles
+		const { rollups, workspaceNamesById, machineNamesById, editorTypeByFile } = await this.computeDailyRollupsFromLocalSessions({
+			lookbackDays: settings.lookbackDays, userId: resolvedIdentity.userId, sessionFiles,
+			collectEditorType: blobUploadNeeded
 		});
 
 		const sortedDays = this.getSortedDayKeys(rollups);
@@ -1557,7 +1578,7 @@ return true;
 		await this.tryUpdateAzureLastSyncAt();
 		this.deps.logger.log('Backend sync: completed');
 
-		if (blobUploadNeeded && this.blobUploadService) { await this.performBlobUploadIfNeeded(settings, creds, sessionFiles); }
+		if (blobUploadNeeded && this.blobUploadService) { await this.performBlobUploadIfNeeded(settings, creds, sessionFiles, editorTypeByFile); }
 	}
 
 	/**

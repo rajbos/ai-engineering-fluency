@@ -155,15 +155,21 @@ body {
 	box-shadow: 0 2px 6px rgb(0, 0, 0, 0.15);
 }
 
-/* Summary cards */
+/* Summary cards
+   Flexbox (not grid) is deliberate: with grid's fixed column tracks, a last
+   row that doesn't divide evenly into the same track count as earlier rows
+   leaves a ragged empty gap at the row's end (e.g. 3 cards trailing behind a
+   7-column first row). Flex items on the same line stretch to fill it, so
+   every row — including a short last one — spans the full container width. */
 .summary-cards {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+	display: flex;
+	flex-wrap: wrap;
 	gap: 10px;
 	margin-bottom: 20px;
 }
 
 .summary-card {
+	flex: 1 1 140px;
 	background: var(--bg-secondary);
 	border: 1px solid var(--border-subtle);
 	border-radius: 10px;
@@ -227,14 +233,16 @@ body {
 }
 
 /* Combined compact cards merge several formerly separate summary cards and
-   hold more rows, so span two grid columns for legibility. */
+   hold more rows, so they take roughly double width for legibility: a basis
+   double a normal card's, and a grow factor of 2 so they keep growing at
+   twice the rate of normal cards when a row stretches to fill the width. */
 .summary-card--compact.summary-card--combined {
-	grid-column: span 2;
+	flex: 2 1 290px;
 }
 
 @media (max-width: 330px) {
 	.summary-card--compact.summary-card--combined {
-		grid-column: span 1;
+		flex-basis: 100%;
 	}
 }
 
@@ -250,10 +258,6 @@ body {
 	line-height: 1.5;
 	word-break: break-word;
 	overflow-wrap: anywhere;
-}
-
-.combined-card-sub-label {
-	font-weight: 600;
 }
 
 .summary-compact-rows {

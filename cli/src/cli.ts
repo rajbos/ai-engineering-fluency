@@ -15,6 +15,7 @@ import { usageAnalysisCommand } from './commands/usage-analysis';
 import { allCommand } from './commands/all';
 import { segmentCommand } from './commands/segment';
 import { curationCommand } from './commands/curation';
+import { memoryFilesCommand } from './commands/memory-files';
 import { loadCache, saveCache, disableCache } from './helpers';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -50,5 +51,13 @@ program.addCommand(usageAnalysisCommand);
 program.addCommand(allCommand);
 program.addCommand(segmentCommand);
 program.addCommand(curationCommand);
+program.addCommand(memoryFilesCommand);
 
-program.parse();
+// parseAsync, not parse: `memory-files --server/--promote` has an async action handler, and
+// Commander does not await async handlers through parse(). Without this the command can
+// finish outside the CLI lifecycle and a rejected promise would surface as an unhandled
+// rejection rather than a non-zero exit with a readable message.
+program.parseAsync().catch((error: unknown) => {
+	process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+	process.exitCode = 1;
+});

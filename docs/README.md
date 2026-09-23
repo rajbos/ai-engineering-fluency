@@ -81,6 +81,8 @@ Detailed documentation for individual features.
 | [features/MODEL-EFFICIENCY-COMPARISON.md](features/MODEL-EFFICIENCY-COMPARISON.md) | Models tab — compare two models, or one model across two periods |
 | [features/CORRECTIONS.md](features/CORRECTIONS.md) | Corrections tab — detect moments where the agent or the user had to correct the conversation |
 | [features/REPEATED-TASKS.md](features/REPEATED-TASKS.md) | Skill Suggestions — find tasks you keep prompting for across sessions and turn them into skills |
+| [features/COPILOT-MEMORY-FILES-INSIGHT.md](features/COPILOT-MEMORY-FILES-INSIGHT.md) | Copilot memory-files hygiene: shared analysis module, insight card, CLI `memory-files` command, and a Tools-tab UI section |
+| [features/COPILOT-SERVER-MEMORIES.md](features/COPILOT-SERVER-MEMORIES.md) | Copilot's server-side per-repository memory store: undocumented API contract, and turning re-learned facts into `AGENTS.md` entries |
 | [features/CLOUD-AGENT-COST.md](features/CLOUD-AGENT-COST.md) | Cloud Agent tab — per-repository AI credits, and the hourly cached snapshot behind it |
 | [features/DARK-FACTORY-READINESS.md](features/DARK-FACTORY-READINESS.md) | Dark Factory Readiness — per-repository governance control scan on the Fluency Score view |
 | [features/TTFT-TRENDS.md](features/TTFT-TRENDS.md) | Research > TTFT diagnostics tab — time-to-first-token averages and per-model trendlines from VS Code Chat's debug log |
@@ -98,3 +100,5 @@ Implementation notes and decisions captured during development sessions.
 | [adr/FLUENCY-DATA-IMPLEMENTATION.md](adr/FLUENCY-DATA-IMPLEMENTATION.md) | Fluency data cloud upload — gap analysis and plan |
 | [adr/PR_SUMMARY.md](adr/PR_SUMMARY.md) | PR summary: comprehensive light theme support |
 | [adr/SQLITE-WAL-READS.md](adr/SQLITE-WAL-READS.md) | Why sql.js reads of data.db/opencode.db must merge pending WAL frames first |
+| [adr/LOCALIZATION-ARCHITECTURE.md](adr/LOCALIZATION-ARCHITECTURE.md) | Repo-wide localization standard: the four runtime tiers and one source of truth |
+| [adr/INSIGHTS-CATALOG-LOCALIZATION.md](adr/INSIGHTS-CATALOG-LOCALIZATION.md) | How the Insights catalog is localized without giving up insightsEngine.ts's purity |

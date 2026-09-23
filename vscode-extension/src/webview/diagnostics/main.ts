@@ -12,7 +12,8 @@ import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import { registerMessageHandler } from "../shared/messageHandler";
 import { getModelColor } from "../../../../src/chartDataBuilder";
 import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
-import { initializeWebviewLocalization, setCurrentLanguage } from "../shared/localization";
+import { localize, localizeFormat } from "../shared/localization";
+import { applyWebviewLocale } from "../shared/webviewLocale";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
@@ -230,11 +231,7 @@ const vscode = acquireVsCodeApi<DiagnosticsViewState>();
 const initialData = getWindowData<DiagnosticsData & { localization?: Record<string, string> }>('__INITIAL_DIAGNOSTICS__');
 
 // Initialize localization for webview
-if (initialData?.localization) {
-	initializeWebviewLocalization(initialData.localization);
-	const language = initialData.localization['__language__'] || 'en';
-	setCurrentLanguage(language);
-}
+applyWebviewLocale(initialData);
 
 const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   activeTab: undefined,
@@ -279,6 +276,11 @@ let storedDetailedFiles: SessionFileDetails[] = [];
 let isLoading = true;
 let currentBackendInfo: BackendStorageInfo | undefined;
 let currentGithubAuth: GitHubAuthStatus | undefined;
+// A `switchTab` request (e.g. the What's New "Take me there" action) that arrived before
+// renderLayout() built the tab bar — the message listener is registered before renderLayout()
+// runs (see resolveEarlyBackendState's comment for the same race with backendStorageInfoLoaded),
+// so activateTab() below can silently no-op on first arrival. Applied once renderLayout() runs.
+let pendingSwitchTabTo: string | undefined;
 let currentModelUsageTimeRange = "all";
 
 function removeSessionFilesSection(reportText: string): string {
@@ -1558,6 +1560,28 @@ function groupOfTab(tabId: string): string {
   return "diagnostics";
 }
 
+function isKnownDiagnosticsTab(tabId: string): boolean {
+  return Object.values(TAB_GROUPS).some((tabs) => tabs.includes(tabId));
+}
+
+/**
+ * Requested by the extension host (e.g. the What's New "Take me there" action) to land on a
+ * specific tab, including switching its group's leaf bar into view — a plain tab-button click
+ * only ever needs activateTab() since the user is already looking at that group's leaf bar. If
+ * the tab bar doesn't exist yet (renderLayout() hasn't run — see pendingSwitchTabTo's comment),
+ * stash the request instead of silently dropping it.
+ */
+function handleSwitchTab(message: DiagMessage): void {
+  const tab = String(message.tab ?? "");
+  if (!isKnownDiagnosticsTab(tab)) { return; }
+  if (activateTab(tab)) {
+    activateGroup(groupOfTab(tab));
+    diagState.patch({ activeTab: tab });
+    return;
+  }
+  pendingSwitchTabTo = tab;
+}
+
 /** The first leaf tab in a group that actually has a rendered button (handles the conditional Debug tab). */
 function firstAvailableTabInGroup(groupId: string): string | undefined {
   return TAB_GROUPS[groupId]?.find((id) => document.querySelector(`.tab[data-tab="${id}"]`));
@@ -2603,33 +2627,30 @@ function handleFolderAnalysisResult(message: DiagMessage): void {
   }
 }
 
+const DIAG_MESSAGE_HANDLERS: Record<string, (message: DiagMessage) => void> = {
+  diagnosticDataLoaded: handleDiagnosticDataLoaded,
+  backendStorageInfoLoaded: handleBackendStorageSection,
+  githubAuthUpdated: handleGithubAuthUpdated,
+  diagnosticDataError: handleDiagnosticDataError,
+  sessionFilesLoadProgress: handleSessionFilesLoadProgress,
+  cacheCleared: handleCacheCleared,
+  cacheRefreshed: handleCacheRefreshed,
+  folderPicked: handleFolderPicked,
+  folderAnalysisResult: handleFolderAnalysisResult,
+  modelUsageResult: handleModelUsageResult,
+  ttftResult: handleTtftResult,
+  switchTab: handleSwitchTab,
+};
+
 function setupMessageHandlers(): void {
   registerMessageHandler((message: DiagMessage) => {
-    if (message.command === "diagnosticDataLoaded") {
-      handleDiagnosticDataLoaded(message);
-    } else if (message.command === "backendStorageInfoLoaded") {
-      handleBackendStorageSection(message);
-    } else if (message.command === "githubAuthUpdated") {
-      handleGithubAuthUpdated(message);
-    } else if (message.command === "diagnosticDataError") {
-      handleDiagnosticDataError(message);
-    } else if (message.command === "sessionFilesLoaded" && message.detailedSessionFiles) {
-      handleSessionFilesLoaded(message);
-    } else if (message.command === "sessionFilesLoadProgress") {
-      handleSessionFilesLoadProgress(message);
-    } else if (message.command === "cacheCleared") {
-      handleCacheCleared();
-    } else if (message.command === "cacheRefreshed") {
-      handleCacheRefreshed(message);
-    } else if (message.command === "folderPicked") {
-      handleFolderPicked(message);
-    } else if (message.command === "folderAnalysisResult") {
-      handleFolderAnalysisResult(message);
-    } else if (message.command === "modelUsageResult") {
-      handleModelUsageResult(message);
-    } else if (message.command === "ttftResult") {
-      handleTtftResult(message);
+    // Only one command carries a payload-shaped guard beyond its name, so it stays a special case
+    // rather than forcing every entry in the table above to encode its own dispatch condition.
+    if (message.command === "sessionFilesLoaded") {
+      if (message.detailedSessionFiles) { handleSessionFilesLoaded(message); }
+      return;
     }
+    DIAG_MESSAGE_HANDLERS[message.command]?.(message);
   });
 }
 
@@ -3380,6 +3401,19 @@ function triggerTtftAnalysis(): void {
   vscode.postMessage({ command: "analyzeTtft", granularity: currentTtftGranularity, scanRange: currentTtftScanRange });
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 function setupTtftHandlers(): void {
   document.getElementById("ttft-granularity")?.addEventListener("change", (e) => {
     currentTtftGranularity = (e.target as HTMLSelectElement).value as TtftGranularity;
@@ -3615,9 +3649,23 @@ function renderLayout(data: DiagnosticsData): void {
   setupOtelDeltaPeriodHandler();
   setupTtftHandlers();
 
+  restoreActiveTabAndSubtab();
+}
+
+/**
+ * Applies whichever tab should be active on first render: a `switchTab` request that arrived
+ * before renderLayout() ran (see pendingSwitchTabTo's comment) takes priority over whatever tab
+ * was last open — it's an explicit, just-now navigation request, not stale persisted state.
+ */
+function restoreActiveTabAndSubtab(): void {
   const savedState = diagState.restore();
+  const requestedTab = pendingSwitchTabTo;
+  pendingSwitchTabTo = undefined;
   let restoredTab = "report";
-  if (savedState?.activeTab && activateTab(savedState.activeTab)) {
+  if (requestedTab && activateTab(requestedTab)) {
+    restoredTab = requestedTab;
+    diagState.patch({ activeTab: requestedTab });
+  } else if (savedState?.activeTab && activateTab(savedState.activeTab)) {
     restoredTab = savedState.activeTab;
   } else {
     activateTab("report");
