@@ -1646,7 +1646,7 @@ upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1
 		const blobUploadNeeded = this.checkBlobUploadNeeded(settings);
 		const sessionFiles = await this.deps.sessionHandlers.getCopilotSessionFiles();
 		const resolvedIdentity = await this.resolveEffectiveUserIdentityForSync(settings, sharingPolicy.includeUserDimension);
-		const { rollups, workspaceNamesById, machineNamesById, editorTypeByFile } = await this.computeDailyRollupsFromLocalSessions({
+		const { rollups, workspaceNamesById, machineNamesById, editorTypeByFile, filesFailed } = await this.computeDailyRollupsFromLocalSessions({
 			lookbackDays: settings.lookbackDays, userId: resolvedIdentity.userId, sessionFiles,
 			collectEditorType: blobUploadNeeded
 		});
@@ -1666,10 +1666,31 @@ upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1
 			this.deps.logger.log(`Backend sync: ${successCount} entities synced successfully`);
 		}
 
-		await this.tryUpdateAzureLastSyncAt();
-		this.deps.logger.log('Backend sync: completed');
+		// Same invariant as the Team Server marker: `upsertEntitiesBatch` catches
+		// per entity and returns normally, so every entity can fail without this
+		// method throwing. Advancing unconditionally made the Azure status panel
+		// report a healthy recent sync while nothing had been stored.
+		if (this.isAzureSyncSuccessful(successCount, errors.length, entities.length, filesFailed)) {
+			await this.tryUpdateAzureLastSyncAt();
+			this.deps.logger.log('Backend sync: completed');
+		} else {
+			this.deps.logger.warn('Backend sync: completed with failures - not updating the last sync marker');
+		}
 
 		if (blobUploadNeeded && this.blobUploadService) { await this.performBlobUploadIfNeeded(settings, creds, sessionFiles, editorTypeByFile); }
+	}
+
+	/**
+	 * Whether an Azure Table sync pass delivered everything it found, and so may
+	 * advance the "last successful sync" marker.
+	 *
+	 * Having nothing to store is a successful no-op, but only when the scan that
+	 * produced it was clean: unreadable session files are logged and skipped, so
+	 * local data can exist and still yield zero entities.
+	 */
+	private isAzureSyncSuccessful(successCount: number, errorCount: number, entityCount: number, filesFailed: number): boolean {
+		if (errorCount > 0 || successCount !== entityCount) { return false; }
+		return entityCount > 0 || filesFailed === 0;
 	}
 
 	/**

@@ -1130,6 +1130,112 @@ test('syncToBackendStore logs warning when upsertEntitiesBatch has errors', asyn
 	}
 });
 
+test('syncToBackendStore does NOT update the Azure lastSync marker when every entity fails to upsert', async () => {
+	// `upsertEntitiesBatch` catches per entity and returns normally, so a total
+	// write failure never throws. The Azure status panel used to show a healthy
+	// recent sync in exactly that case — the same defect as the Team Server marker.
+	const globalState = new Map<string, unknown>();
+	const lockDir = fs.mkdtempSync(path.join(process.cwd(), 'azure-marker-test-'));
+	const mockContext = {
+		globalState: {
+			get: (key: string) => globalState.get(key),
+			update: async (key: string, value: unknown) => { globalState.set(key, value); },
+		},
+		globalStorageUri: { fsPath: lockDir },
+	} as unknown as vscode.ExtensionContext;
+	const sessionContent = JSON.stringify({
+		requests: [{ timestamp: Date.now() - 60000, message: { parts: [{ text: 'hello' }] }, response: [{ value: 'world' }] }]
+	});
+	const tmpFile = createTempFile(sessionContent);
+	try {
+		let entityCount = 0;
+		const svc = new SyncService(
+			makeDeps({
+				context: mockContext,
+				getCopilotSessionFiles: async () => [tmpFile.filePath],
+				estimateTokensFromText: (text: string) => text.length,
+				getModelFromRequest: () => 'gpt-4o',
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+			}),
+			{
+				getBackendDataPlaneCredentials: async () => ({ tableCredential: {}, blobCredential: {}, secretsToRedact: [] }),
+				getBackendSecretsToRedactForError: async () => [],
+			} as any,
+			{
+				ensureTableExists: async () => {},
+				validateAccess: async () => {},
+				createTableClient: () => ({}),
+				upsertEntitiesBatch: async (_tc: any, entities: any[]) => {
+					entityCount = entities.length;
+					return { successCount: 0, errors: entities.map((e: any) => ({ entity: e, error: new Error('write failed') })) };
+				},
+			} as any,
+			undefined,
+			BackendUtility,
+			undefined,
+		);
+		await svc.syncToBackendStore(true, {
+			enabled: true, sharingProfile: 'soloFull', shareWorkspaceMachineNames: false,
+			subscriptionId: 'sub1', resourceGroup: 'rg1', storageAccount: 'sa1',
+			aggTable: 'usageAgg', datasetId: 'ds1', lookbackDays: 7, blobUploadEnabled: false,
+		} as any, true);
+		assert.ok(entityCount > 0, 'Test must exercise a real upsert, not the empty-scan path');
+		assert.equal(globalState.get('backend.azureLastSyncAt'), undefined, 'Every entity failed, so the Azure marker must not advance');
+	} finally {
+		tmpFile.cleanup();
+		fs.rmSync(lockDir, { recursive: true, force: true });
+	}
+});
+
+test('syncToBackendStore updates the Azure lastSync marker when every entity is stored', async () => {
+	const globalState = new Map<string, unknown>();
+	const lockDir = fs.mkdtempSync(path.join(process.cwd(), 'azure-marker-ok-test-'));
+	const mockContext = {
+		globalState: {
+			get: (key: string) => globalState.get(key),
+			update: async (key: string, value: unknown) => { globalState.set(key, value); },
+		},
+		globalStorageUri: { fsPath: lockDir },
+	} as unknown as vscode.ExtensionContext;
+	const sessionContent = JSON.stringify({
+		requests: [{ timestamp: Date.now() - 60000, message: { parts: [{ text: 'hello' }] }, response: [{ value: 'world' }] }]
+	});
+	const tmpFile = createTempFile(sessionContent);
+	try {
+		const svc = new SyncService(
+			makeDeps({
+				context: mockContext,
+				getCopilotSessionFiles: async () => [tmpFile.filePath],
+				estimateTokensFromText: (text: string) => text.length,
+				getModelFromRequest: () => 'gpt-4o',
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+			}),
+			{
+				getBackendDataPlaneCredentials: async () => ({ tableCredential: {}, blobCredential: {}, secretsToRedact: [] }),
+				getBackendSecretsToRedactForError: async () => [],
+			} as any,
+			{
+				ensureTableExists: async () => {},
+				validateAccess: async () => {},
+				createTableClient: () => ({}),
+				upsertEntitiesBatch: async (_tc: any, entities: any[]) => ({ successCount: entities.length, errors: [] }),
+			} as any,
+			undefined,
+			BackendUtility,
+			undefined,
+		);
+		await svc.syncToBackendStore(true, {
+			enabled: true, sharingProfile: 'soloFull', shareWorkspaceMachineNames: false,
+			subscriptionId: 'sub1', resourceGroup: 'rg1', storageAccount: 'sa1',
+			aggTable: 'usageAgg', datasetId: 'ds1', lookbackDays: 7, blobUploadEnabled: false,
+		} as any, true);
+		assert.ok(globalState.get('backend.azureLastSyncAt'), 'A fully successful Azure sync must advance its marker');
+	} finally {
+		tmpFile.cleanup();
+		fs.rmSync(lockDir, { recursive: true, force: true });
+	}
+});
+
 test('syncToBackendStore handles ensureTableExists or validateAccess failure gracefully', async () => {
 	const warns: string[] = [];
 	const svc = makeServiceWithServices(
