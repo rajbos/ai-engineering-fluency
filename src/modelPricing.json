@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-09-22",
+    "lastUpdated": "2026-09-23",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -1322,6 +1322,39 @@
         "Grok 4.7"
       ],
       "cachedInputCostPerMillion": 0.5
+    },
+    "gpt-6-luna": {
+      "inputCostPerMillion": 0.1,
+      "outputCostPerMillion": 0.5,
+      "category": "OpenAI models",
+      "tier": "standard",
+      "displayNames": [
+        "GPT-6 Luna"
+      ],
+      "cachedInputCostPerMillion": 0.01,
+      "cacheCreationCostPerMillion": 0.125
+    },
+    "gpt-6-sol": {
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 10.0,
+      "category": "OpenAI models",
+      "tier": "standard",
+      "displayNames": [
+        "GPT-6 Sol"
+      ],
+      "cachedInputCostPerMillion": 0.2,
+      "cacheCreationCostPerMillion": 2.5
+    },
+    "claude-opus-5.5": {
+      "inputCostPerMillion": 4.0,
+      "outputCostPerMillion": 20.0,
+      "category": "Claude models (Anthropic)",
+      "tier": "standard",
+      "displayNames": [
+        "Claude Opus 5.5"
+      ],
+      "cachedInputCostPerMillion": 0.2,
+      "cacheCreationCostPerMillion": 5.0
     }
   }
 }
