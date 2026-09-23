@@ -1666,7 +1666,7 @@ return true;
 			this.deps.logger.log,
 			this.deps.logger.warn,
 		);
-		return result.success;
+return result.success && result.entriesUploaded === entries.length;
 	}
 
 	/**
