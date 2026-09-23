@@ -1423,6 +1423,38 @@ test('syncToSharingServer reports failure when session files exist but none coul
 	assert.equal(uploaded, false, 'Unreadable session files are a failed scan, not an empty one');
 });
 
+test('syncToSharingServer reports failure when a JSONL session file has no parseable lines', async () => {
+	// A .jsonl whose lines are all malformed produces no rollups and used to look
+	// identical to a user with no data: the per-line catches in the JSONL fallback
+	// were silent, so filesFailed stayed 0 and "Last Sync" advanced.
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'jsonl-parse-test-'));
+	const sessionFile = path.join(tmpDir, 'events.jsonl');
+	fs.writeFileSync(sessionFile, 'this is not json\n{"broken": \n<html>nope</html>\n', 'utf8');
+	try {
+		const svc = new SyncService(
+			makeDeps({
+				getGithubToken: () => 'github-token',
+				getCopilotSessionFiles: async () => [sessionFile],
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+				getSessionFileDataCached: undefined,
+			}),
+			{} as any,
+			{} as any,
+			undefined,
+			BackendUtility,
+			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+		);
+
+		const uploaded = await (svc as any).syncToSharingServer(
+			{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+			{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+		);
+		assert.equal(uploaded, false, 'An unparseable session file is a failed scan, not an empty one');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
 test('syncToSharingServer treats having nothing to upload as a successful sync', async () => {
 	const svc = new SyncService(
 		makeDeps({

@@ -27,10 +27,11 @@ export class SharingServerUploadService {
 	/**
 	 * How many entries of a batch the server confirmed it stored.
 	 *
-	 * Only a parsed `uploaded` number counts as evidence of delivery. A 2xx whose
-	 * body will not parse, or that carries no `uploaded` count, is what a proxy or
-	 * a misconfigured endpoint returns, so it contributes nothing and is recorded
-	 * in `serverErrors`.
+	 * Only a parsed `uploaded` number counts as evidence of delivery, and only
+	 * when it is a whole number of entries the batch could actually contain. A
+	 * 2xx whose body will not parse, carries no `uploaded` count, or reports a
+	 * nonsensical one is what a proxy or a misconfigured endpoint returns, so it
+	 * contributes nothing and is recorded in `serverErrors`.
 	 */
 	private async readStoredCount(
 		response: Response,
@@ -53,6 +54,15 @@ export class SharingServerUploadService {
 		if (typeof result.uploaded !== 'number') {
 			warn(`Sharing server upload: ${response.status} response has no "uploaded" count — treating the batch as not stored`);
 			serverErrors.push(`${response.status} response without an "uploaded" count`);
+			return 0;
+		}
+		// A count that is fractional, negative, or larger than what we sent cannot
+		// have come from the real endpoint counting stored rows, so it is not
+		// evidence of anything — and an inflated one would otherwise be clamped up
+		// to a full successful batch.
+		if (!Number.isInteger(result.uploaded) || result.uploaded < 0 || result.uploaded > batchSize) {
+			warn(`Sharing server upload: ${response.status} response reported an impossible "uploaded" count ${result.uploaded} for a batch of ${batchSize} — treating the batch as not stored`);
+			serverErrors.push(`Invalid "uploaded" count ${result.uploaded} for a batch of ${batchSize}`);
 			return 0;
 		}
 		return result.uploaded;
@@ -132,9 +142,11 @@ export class SharingServerUploadService {
 	 * Upload the extension's locally-computed fluency score so the server dashboard
 	 * shows the exact same result as the extension's AI Fluency Score panel.
 	 *
-	 * Returns whether the score actually reached the server. Failures are reported
-	 * through `warn` rather than thrown, so a caller cannot use try/catch to tell
-	 * success from failure and must check this value.
+	 * Returns whether the score actually reached the server. A 2xx alone is not
+	 * enough — the endpoint answers `{ ok: true }`, and anything else behind a 200
+	 * (a proxy's HTML, unrelated JSON) is not evidence the score was stored.
+	 * Failures are reported through `warn` rather than thrown, so a caller cannot
+	 * use try/catch to tell success from failure and must check this value.
 	 */
 	async uploadFluencyScore(
 		endpointUrl: string,
@@ -157,6 +169,17 @@ export class SharingServerUploadService {
 			if (!response.ok) {
 				const errorText = await response.text().catch(() => '');
 				warn(`Sharing server fluency-score upload: HTTP ${response.status}: ${errorText}`);
+				return false;
+			}
+			let body: { ok?: unknown };
+			try {
+				body = await response.json() as { ok?: unknown };
+			} catch {
+				warn(`Sharing server fluency-score upload: ${response.status} response is not JSON — treating the score as not stored`);
+				return false;
+			}
+			if (body?.ok !== true) {
+				warn(`Sharing server fluency-score upload: ${response.status} response did not confirm the score was stored — treating it as not stored`);
 				return false;
 			}
 			log('Sharing server fluency-score upload: ok');

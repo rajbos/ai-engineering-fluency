@@ -32,6 +32,15 @@ test.beforeEach(() => {
 			return mockFetchResponse;
 		}
 		
+		// The fluency-score endpoint confirms with { ok: true }; the upload
+		// endpoint reports how many entries it stored.
+		if (urlStr.includes('/api/fluency-score')) {
+			return new Response(JSON.stringify({ ok: true }), {
+				status: 200,
+				statusText: 'OK'
+			});
+		}
+		
 		// Default to successful response with all entries uploaded
 		return new Response(JSON.stringify({ uploaded: batchSize }), {
 			status: 200,
@@ -339,6 +348,52 @@ test('uploadRollups: reports failure when a 2xx JSON response has no uploaded co
 	assert.ok(warnMsgs.some(msg => msg.includes('no "uploaded" count')));
 });
 
+test('uploadRollups: reports failure when the server reports an impossible uploaded count', async () => {
+	const service = new SharingServerUploadService();
+	const entries = [createTestEntry()];
+	
+	// An inflated count would otherwise be clamped back up to a full batch and
+	// reported as a complete success.
+	mockFetchResponse = new Response(JSON.stringify({ uploaded: 99 }), {
+		status: 200,
+		statusText: 'OK'
+	});
+	
+	const warnMsgs: string[] = [];
+	const result = await service.uploadRollups(
+		'https://server.example.com',
+		'github-token',
+		entries,
+		() => {},
+		(msg) => warnMsgs.push(msg)
+	);
+	
+	assert.equal(result.success, false);
+	assert.equal(result.entriesUploaded, 0);
+	assert.ok(warnMsgs.some(msg => msg.includes('impossible')));
+});
+
+test('uploadRollups: reports failure when the uploaded count is not a whole number', async () => {
+	const service = new SharingServerUploadService();
+	const entries = [createTestEntry(), createTestEntry('2024-01-02')];
+	
+	mockFetchResponse = new Response(JSON.stringify({ uploaded: 1.5 }), {
+		status: 200,
+		statusText: 'OK'
+	});
+	
+	const result = await service.uploadRollups(
+		'https://server.example.com',
+		'github-token',
+		entries,
+		() => {},
+		() => {}
+	);
+	
+	assert.equal(result.success, false);
+	assert.equal(result.entriesUploaded, 0);
+});
+
 // Test suite for uploadFluencyScore
 // ==================================
 
@@ -408,6 +463,52 @@ test('uploadFluencyScore: handles network error', async () => {
 	
 	assert.equal(uploaded, false);
 	assert.ok(warnMsgs.some(msg => msg.includes('failed')));
+});
+
+test('uploadFluencyScore: reports failure when a 2xx response does not confirm the score was stored', async () => {
+	const service = new SharingServerUploadService();
+	const score = { score: 0.85 };
+	
+	// A proxy or misconfigured endpoint answering 200 without the server's
+	// { ok: true } payload is not evidence the score landed.
+	mockFetchResponse = new Response('<html>Logged in</html>', {
+		status: 200,
+		statusText: 'OK'
+	});
+	
+	const warnMsgs: string[] = [];
+	const uploaded = await service.uploadFluencyScore(
+		'https://server.example.com',
+		'github-token',
+		score,
+		() => {},
+		(msg) => warnMsgs.push(msg)
+	);
+	
+	assert.equal(uploaded, false);
+	assert.ok(warnMsgs.some(msg => msg.includes('not JSON')));
+});
+
+test('uploadFluencyScore: reports failure when a 2xx JSON response omits ok:true', async () => {
+	const service = new SharingServerUploadService();
+	const score = { score: 0.85 };
+	
+	mockFetchResponse = new Response(JSON.stringify({ queued: true }), {
+		status: 200,
+		statusText: 'OK'
+	});
+	
+	const warnMsgs: string[] = [];
+	const uploaded = await service.uploadFluencyScore(
+		'https://server.example.com',
+		'github-token',
+		score,
+		() => {},
+		(msg) => warnMsgs.push(msg)
+	);
+	
+	assert.equal(uploaded, false);
+	assert.ok(warnMsgs.some(msg => msg.includes('did not confirm')));
 });
 
 test('uploadFluencyScore: strips trailing slash from endpoint URL', async () => {

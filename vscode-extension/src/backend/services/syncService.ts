@@ -954,6 +954,13 @@ return { inputTokens, outputTokens };
  * Process the fallback JSONL content when cached data is unavailable.
  * Handles both VS Code delta-based and Copilot CLI JSONL formats, computing tokens directly.
  */
+/**
+ * Roll up a JSONL session file.
+ *
+ * Returns the number of lines that could not be parsed or processed. Zero means
+ * the file was read cleanly — which is different from it producing no rollups,
+ * since a valid session file can legitimately contain no billable activity.
+ */
 private processJsonlSessionFallback(
 content: string,
 sessionFile: string,
@@ -964,15 +971,17 @@ machineId: string,
 userId: string | undefined,
 editorForFile: string | undefined,
 rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>
-): void {
+): number {
 const isVsCodeFormat = this.detectFallbackFormat(content);
 const lines = content.trim().split('\n');
 const ctx = { workspaceId, machineId, userId, editorForFile, rollups };
-if (isVsCodeFormat) {
-this.runVsCodeDeltaFallback(lines, fileMtimeMs, startMs, ctx);
-} else {
-this.runCliJsonlFallback(lines, fileMtimeMs, startMs, ctx);
+const failedLines = isVsCodeFormat
+? this.runVsCodeDeltaFallback(lines, fileMtimeMs, startMs, ctx)
+: this.runCliJsonlFallback(lines, fileMtimeMs, startMs, ctx);
+if (failedLines > 0) {
+this.deps.logger.warn(`Backend sync: ${failedLines} unparseable line(s) in ${sessionFile}`);
 }
+return failedLines;
 }
 
 private detectFallbackFormat(content: string): boolean {
@@ -984,23 +993,26 @@ return typeof firstEv.kind === 'number';
 } catch { return false; }
 }
 
+/** Returns the number of lines that could not be parsed or processed. */
 private runVsCodeDeltaFallback(
 lines: string[],
 fileMtimeMs: number,
 startMs: number,
 ctx: { workspaceId: string; machineId: string; userId: string | undefined; editorForFile: string | undefined; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }> }
-): void {
+): number {
 let defaultModel = 'unknown';
+let failedLines = 0;
 const seenReqIds = new Set<string>();
 for (const line of lines) {
 if (!line.trim()) { continue; }
 try {
 const event = JSON.parse(line);
-if (!event || typeof event !== 'object') { continue; }
+if (!event || typeof event !== 'object') { failedLines++; continue; }
 defaultModel = this.updateFallbackVsCodeModel(event, defaultModel);
 this.upsertVsCodeFallbackRequests(event, defaultModel, seenReqIds, fileMtimeMs, startMs, ctx);
-} catch { /* skip */ }
+} catch { failedLines++; }
 }
+return failedLines;
 }
 
 private updateFallbackVsCodeModel(event: any, defaultModel: string): string {
@@ -1059,18 +1071,20 @@ const key: DailyRollupKey = { day: dayKey, model, workspaceId: ctx.workspaceId, 
 upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1 });
 }
 
+/** Returns the number of lines that could not be parsed or processed. */
 private runCliJsonlFallback(
 lines: string[],
 fileMtimeMs: number,
 startMs: number,
 ctx: { workspaceId: string; machineId: string; userId: string | undefined; editorForFile: string | undefined; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }> }
-): void {
+): number {
 let defaultModel = 'unknown';
+let failedLines = 0;
 for (const line of lines) {
 if (!line.trim()) { continue; }
 try {
 const event = JSON.parse(line);
-if (!event || typeof event !== 'object') { continue; }
+if (!event || typeof event !== 'object') { failedLines++; continue; }
 defaultModel = this.updateCliDefaultModel(event, defaultModel);
 const normalizedTs = this.utility.normalizeTimestampToMs(event.timestamp);
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
@@ -1081,8 +1095,9 @@ const { inputTokens, outputTokens, interactions } = this.getCliEventTokenCounts(
 if (inputTokens === 0 && outputTokens === 0 && interactions === 0) { continue; }
 const key: DailyRollupKey = { day: dayKey, model, workspaceId: ctx.workspaceId, machineId: ctx.machineId, userId: ctx.userId, editor: ctx.editorForFile };
 upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions });
-} catch { /* skip */ }
+} catch { failedLines++; }
 }
+return failedLines;
 }
 
 private updateCliDefaultModel(event: any, defaultModel: string): string {
@@ -1290,8 +1305,30 @@ return true;
 			ctx.progress.filesFailed++;
 			return;
 		}
+		this.runContentFallback(content, sessionFile, fileMtimeMs, workspaceId, editorForRollup, ctx);
+	}
+
+	/**
+	 * Roll a session file up from its raw contents, counting a file whose contents
+	 * could not be parsed towards `filesFailed` so that an empty scan can be told
+	 * apart from a failed one.
+	 */
+	private runContentFallback(
+		content: string,
+		sessionFile: string,
+		fileMtimeMs: number,
+		workspaceId: string,
+		editorForRollup: string | undefined,
+		ctx: {
+			startMs: number; machineId: string; userId: string | undefined;
+			rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>;
+			progress: { filesFailed: number };
+		}
+	): void {
 		if (sessionFile.endsWith('.jsonl') || isJsonlContent(content)) {
-			this.processJsonlSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForRollup, ctx.rollups);
+			if (this.processJsonlSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForRollup, ctx.rollups) > 0) {
+				ctx.progress.filesFailed++;
+			}
 			return;
 		}
 		if (!this.processJsonSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForRollup, ctx.rollups)) {
