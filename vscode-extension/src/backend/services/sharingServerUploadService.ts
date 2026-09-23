@@ -24,6 +24,15 @@ export interface SharingServerEntry {
 const BATCH_SIZE = 500;
 
 export class SharingServerUploadService {
+	/**
+	 * Upload daily rollup entries in batches.
+	 *
+	 * `success` means every entry was reported stored by the server. It is not a
+	 * synonym for "got a 2xx": the upload endpoint returns HTTP 200 with
+	 * `uploaded: 0` plus an `errors` array when entries fail validation or a
+	 * dataset transaction rolls back. Errors are reported through `warn` rather
+	 * than thrown, so callers must check this result.
+	 */
 	async uploadRollups(
 		endpointUrl: string,
 		githubToken: string,
@@ -36,6 +45,7 @@ export class SharingServerUploadService {
 
 		try {
 			let totalUploaded = 0;
+			const serverErrors: string[] = [];
 			for (let i = 0; i < entries.length; i += BATCH_SIZE) {
 				const batch = entries.slice(i, i + BATCH_SIZE);
 				const response = await fetch(url, {
@@ -61,9 +71,23 @@ export class SharingServerUploadService {
 					if (typeof result.uploaded === 'number') { serverUploaded = result.uploaded; }
 					if (result.errors && result.errors.length > 0) {
 						warn(`Sharing server upload: server rejected ${batch.length - serverUploaded} entries: ${result.errors.slice(0, 3).join('; ')}`);
+						serverErrors.push(...result.errors);
 					}
 				} catch { /* response not JSON, use batch.length */ }
 				totalUploaded += serverUploaded;
+			}
+
+			// A 2xx response does not mean the data was stored. The server answers
+			// HTTP 200 with `uploaded: 0` and an `errors` array when entries fail
+			// validation or a dataset transaction rolls back, so anything short of
+			// every entry landing has to be reported as a failed upload — otherwise
+			// callers advance the "Last Sync" marker for data that never arrived.
+			const stored = Math.min(totalUploaded, entries.length);
+			if (stored < entries.length || serverErrors.length > 0) {
+				const detail = serverErrors.length > 0 ? `: ${serverErrors.slice(0, 3).join('; ')}` : '';
+				const message = `Server stored ${stored} of ${entries.length} entries${detail}`;
+				warn(`Sharing server upload: ${message}`);
+				return { success: false, entriesUploaded: stored, message };
 			}
 
 			const message = `Uploaded ${totalUploaded} entries`;

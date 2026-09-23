@@ -113,7 +113,7 @@ test('uploadRollups: successful upload with multiple batches', async () => {
 	assert.equal(mockFetchCalls.length, 2); // 2 batches of 500
 });
 
-test('uploadRollups: handles server validation errors', async () => {
+test('uploadRollups: reports failure when the server rejects some entries', async () => {
 	const service = new SharingServerUploadService();
 	const entries = [createTestEntry(), createTestEntry('2024-01-02')];
 	
@@ -135,9 +135,40 @@ test('uploadRollups: handles server validation errors', async () => {
 		(msg) => warnMsgs.push(msg)
 	);
 	
-	assert.equal(result.success, true);
+	// A 2xx is not proof the data landed — a partial store is a failed sync.
+	assert.equal(result.success, false);
 	assert.equal(result.entriesUploaded, 1); // Only 1 uploaded
 	assert.ok(warnMsgs.some(msg => msg.includes('server rejected')));
+	assert.ok(warnMsgs.some(msg => msg.includes('stored 1 of 2')));
+});
+
+test('uploadRollups: reports failure when the server stores nothing despite HTTP 200', async () => {
+	const service = new SharingServerUploadService();
+	const entries = [createTestEntry(), createTestEntry('2024-01-02')];
+	
+	// The real server answers 200 with uploaded: 0 when a dataset transaction
+	// rolls back, which used to be reported as a successful sync.
+	mockFetchResponse = new Response(JSON.stringify({
+		uploaded: 0,
+		errors: ['Dataset "default": database is locked']
+	}), {
+		status: 200,
+		statusText: 'OK'
+	});
+	
+	const warnMsgs: string[] = [];
+	const result = await service.uploadRollups(
+		'https://server.example.com',
+		'github-token',
+		entries,
+		() => {},
+		(msg) => warnMsgs.push(msg)
+	);
+	
+	assert.equal(result.success, false);
+	assert.equal(result.entriesUploaded, 0);
+	assert.ok(result.message.includes('database is locked'));
+	assert.ok(warnMsgs.some(msg => msg.includes('stored 0 of 2')));
 });
 
 test('uploadRollups: handles server error response', async () => {
@@ -290,7 +321,7 @@ test('uploadFluencyScore: successful upload', async () => {
 	const logMsgs: string[] = [];
 	const warnMsgs: string[] = [];
 	
-	await service.uploadFluencyScore(
+	const uploaded = await service.uploadFluencyScore(
 		'https://server.example.com',
 		'github-token',
 		score,
@@ -298,6 +329,7 @@ test('uploadFluencyScore: successful upload', async () => {
 		(msg) => warnMsgs.push(msg)
 	);
 	
+	assert.equal(uploaded, true);
 	assert.equal(mockFetchCalls.length, 1);
 	assert.ok(mockFetchCalls[0].url.includes('/api/fluency-score'));
 	const headers = mockFetchCalls[0].options?.headers as Record<string, string> | undefined;
@@ -316,7 +348,7 @@ test('uploadFluencyScore: handles server error', async () => {
 	});
 	
 	const warnMsgs: string[] = [];
-	await service.uploadFluencyScore(
+	const uploaded = await service.uploadFluencyScore(
 		'https://server.example.com',
 		'github-token',
 		score,
@@ -324,6 +356,7 @@ test('uploadFluencyScore: handles server error', async () => {
 		(msg) => warnMsgs.push(msg)
 	);
 	
+	assert.equal(uploaded, false);
 	assert.ok(warnMsgs.some(msg => msg.includes('HTTP 400')));
 });
 
@@ -337,7 +370,7 @@ test('uploadFluencyScore: handles network error', async () => {
 	};
 	
 	const warnMsgs: string[] = [];
-	await service.uploadFluencyScore(
+	const uploaded = await service.uploadFluencyScore(
 		'https://server.example.com',
 		'github-token',
 		score,
@@ -345,6 +378,7 @@ test('uploadFluencyScore: handles network error', async () => {
 		(msg) => warnMsgs.push(msg)
 	);
 	
+	assert.equal(uploaded, false);
 	assert.ok(warnMsgs.some(msg => msg.includes('failed')));
 });
 

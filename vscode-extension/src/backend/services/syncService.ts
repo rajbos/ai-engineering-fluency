@@ -1666,7 +1666,11 @@ return true;
 			this.deps.logger.log,
 			this.deps.logger.warn,
 		);
-return result.success && result.entriesUploaded === entries.length;
+		// `success` is already false unless the server reported every entry stored:
+		// a 2xx alone is not enough, since the endpoint returns 200 with
+		// `uploaded: 0` for validation or database failures. The count comparison
+		// is kept as a second, local guard on the same invariant.
+		return result.success && result.entriesUploaded === entries.length;
 	}
 
 	/**
