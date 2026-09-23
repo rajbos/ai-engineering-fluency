@@ -698,7 +698,7 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
   <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
 </div>` : `
 <div class="alert alert-warn">
-  No data yet. In the VS Code extension, run <strong>AI Engineering Fluency: Configure Team Server</strong>
+  No data yet. In the VS Code extension, run <strong>AI Engineering Fluency: Configure Team Server Backend</strong>
   and set this server's URL, or set both of these settings directly:
   <ul>
     <li><code>aiEngineeringFluency.backend.sharingServer.enabled</code> — must be <code>true</code></li>
