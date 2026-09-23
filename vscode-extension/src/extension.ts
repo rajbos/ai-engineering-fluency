@@ -272,7 +272,7 @@ import {
   accumulateDailyModelCounters as _accumulateDailyModelCounters,
   buildSessionEfficiencyAttribution as _buildSessionEfficiencyAttribution,
 } from '../../src/modelEfficiency';
-import { calculateEnvironmentalImpact, ENVIRONMENTAL } from '../../src/environmentalImpact';
+import { calculateEnvironmentalImpact, ENVIRONMENTAL_METHODOLOGY_SOURCES } from '../../src/environmentalImpact';
 
 // --- Efficiency analysis ---
 import {
@@ -1289,9 +1289,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Cached last detailed stats for tooltip rebuilding. */
 	private _lastDetailedStats: DetailedStats | undefined;
 	private tokenEstimators: Record<string, TokenEstimator> = tokenEstimatorsData.estimators;
-	private co2Per1kTokens = ENVIRONMENTAL.LEGACY_FALLBACK_CO2_PER_1K_TOKENS; // fallback only when no per-category model usage is available
-	private co2AbsorptionPerTreePerYear = ENVIRONMENTAL.CO2_ABSORPTION_PER_TREE_PER_YEAR;
-	private waterUsagePer1kTokens = ENVIRONMENTAL.WATER_USAGE_PER_1K_TOKENS;
 	private _cacheHits = 0; // Counter for cache hits during usage analysis
 	private _cacheMisses = 0; // Counter for cache misses during usage analysis
 	// Short-term cache to avoid rescanning filesystem during rapid successive calls (e.g., diagnostics load)
@@ -5911,7 +5908,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private buildSinglePeriodStats(acc: ReturnType<typeof makePeriodAccumulator>): PeriodStats {
-		const environmentalImpact = calculateEnvironmentalImpact(acc.modelUsage, acc.tokens);
+		const environmentalImpact = calculateEnvironmentalImpact(acc.modelUsage, acc.tokens, this.modelPricing);
 		const copilotCost = acc.exactCopilotCostDollars + this.calculateEstimatedCost(acc.modelUsageNoExact, 'copilot');
 		return {
 			tokens: acc.tokens, thinkingTokens: acc.thinkingTokens,
@@ -10075,6 +10072,9 @@ private computeFallbackDailyRollup(
 				// shows the loading screen (with real progress) while it retries, instead of
 				// leaving the failure page up with no feedback until it finishes.
 				await this.dispatch('retryRefresh:environmental', () => this.loadEnvironmentalIntoPanel(panel));
+			} else if (message.command === 'openMethodologySource') {
+				const url = ENVIRONMENTAL_METHODOLOGY_SOURCES[message.source as string];
+				if (url) { await vscode.env.openExternal(vscode.Uri.parse(url)); }
 			}
 		});
 
@@ -15701,9 +15701,6 @@ function createBackendFacade(context: vscode.ExtensionContext, tokenTracker: Cop
     warn: (m: string) => tokenTracker.warn(m),
     updateTokenStats: async () => { await tokenTracker.updateTokenStats(); },
     calculateEstimatedCost: (modelUsage: ModelUsage) => tokenTracker.calculateEstimatedCost(modelUsage),
-    co2Per1kTokens: 0.2,
-    waterUsagePer1kTokens: 0.3,
-    co2AbsorptionPerTreePerYear: 21000,
     getCopilotSessionFiles: () =>
       tokenTracker.sessionDiscovery.getCopilotSessionFiles(),
     estimateTokensFromText: (text: string, model?: string) =>

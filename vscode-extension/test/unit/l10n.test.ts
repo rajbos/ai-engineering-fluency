@@ -328,16 +328,19 @@ test("l10n: what's-new notification keys resolve in zh-cn", () => {
 
 test('l10n: environmental methodology keys resolve in English', () => {
 	const expected: Record<string, string> = {
-		'environmental.intro': 'All figures are estimates. CO₂ uses a paper-backed output-equivalent token model; water and analogies use average reference values. Treat these as order-of-magnitude indicators, not precise measurements.',
+		'environmental.intro': 'All figures are estimates. CO₂ and water are derived from a published benchmark of LLM inference energy, weighted by token type and scaled per model; analogies use average reference values. Treat these as order-of-magnitude indicators, not precise measurements.',
 		'environmental.methodology.heading': 'Calculation & Estimates',
-		'environmental.methodology.co2Paper': 'Estimated CO₂ uses Jegham et al., "How Hungry is AI? Benchmarking Energy, Water, and Carbon Footprint of LLM Inference", with a baseline of 840 g CO₂e per 1M output-equivalent tokens.',
-		'environmental.methodology.co2Weights': 'Output-equivalent token weights: output = 1.0, uncached input = 0.05, cache write = 0.0625, cache read = 0.0005. Cache-aware weighting is only used when per-model token breakdowns are available; otherwise the tracker falls back to the legacy flat estimate.',
+		'environmental.methodology.co2Paper': 'CO₂: Jegham et al. estimate 5.671 Wh for one Claude 3.7 Sonnet request with 10,000 input and 1,500 output tokens; at 0.287 kg CO₂e/kWh (AWS) that is about 1.63 g CO₂e. Counting an input token as 1/20 of an output token, that request is 2,000 output-equivalent tokens, giving ~814 g (range 770–857 g) per 1M output-equivalent tokens, rounded up to 840 g.',
+		'environmental.methodology.co2Weights': 'Token weights (output = 1.0, uncached input = 0.05, cache write = 0.0625, cache read = 0.0005) are approximations adopted from neuland/tokendashboard-backend, not values from the paper. The paper does not model prompt caching, and the cache-read weight in particular is a rough guess. Tokens without a per-model breakdown are counted with the reference request\'s input/output mix.',
+		'environmental.methodology.modelScaling': 'Other models are scaled from the Claude Sonnet baseline by the ratio of their output-token price (for example Haiku ⅓×, Opus 1⅔×). Price stands in for model size here; it is not a measurement. Models without a known price use the Sonnet baseline.',
 		'environmental.methodology.cost': 'Cost (UBB) uses GitHub Copilot AI Credit rates (1 credit = $0.01) under Usage Based Billing.',
-		'environmental.methodology.water': 'Estimated water usage remains based on ~0.3 L per 1,000 total tokens (data center cooling estimates).',
+		'environmental.methodology.water': 'Water uses the paper\'s formula: on-site cooling (energy ÷ PUE × 0.18 L/kWh) plus off-site electricity generation (energy × 5.11 L/kWh), with AWS\'s PUE of 1.14. That is about 30 mL for the reference request, or ~15 L per 1M output-equivalent tokens for Claude Sonnet, scaled per model like CO₂.',
 		'environmental.methodology.tree': 'Tree equivalent represents the fraction of a single mature tree\'s annual CO₂ absorption (~21 kg/year).',
 		'environmental.methodology.co2Analogies': 'CO₂ analogies: petrol car ≈ 120 g/km · intercity train ≈ 41 g/km · economy flight ≈ 180 g/km (ICAO avg.) · smartphone charge ≈ 8 g · LED bulb ≈ 3 g/hr (10 W, EU grid) · kettle boil ≈ 20 g.',
 		'environmental.methodology.waterAnalogies': 'Water analogies: shower ≈ 8 L/min · washing machine ≈ 50 L · standard bathtub ≈ 150 L · dishwasher ≈ 12 L · mug of tea ≈ 250 mL · daily drinking water ≈ 2 L/person.',
 		'environmental.methodology.caveat': 'All analogies are order-of-magnitude estimates. Actual values depend on your region\'s energy mix, hardware, model implementation, and caching behavior.',
+		'environmental.methodology.sources': 'Sources:',
+		'environmental.methodology.neulandLink': 'neuland/tokendashboard-backend — CO₂ methodology',
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
@@ -387,16 +390,19 @@ test('l10n: environmental methodology keys resolve in zh-cn', () => {
 	mock.setLanguage('zh-cn');
 	try {
 		const expected: Record<string, string> = {
-			'environmental.intro': '所有数据均为估算值。CO₂ 使用基于论文的“输出当量令牌”模型；用水量和类比值使用平均参考值。请将其视为数量级指标，而非精确测量。',
+			'environmental.intro': '所有数据均为估算值。CO₂ 和用水量基于一项已发表的 LLM 推理能耗基准，按令牌类型加权并按模型缩放；类比值使用平均参考值。请将其视为数量级指标，而非精确测量。',
 			'environmental.methodology.heading': '计算与估算',
-			'environmental.methodology.co2Paper': 'CO₂ 估算采用 Jegham 等人的论文《How Hungry is AI? Benchmarking Energy, Water, and Carbon Footprint of LLM Inference》，并以每 100 万输出当量令牌 840 g CO₂e 为基线。',
-			'environmental.methodology.co2Weights': '输出当量令牌权重：输出 = 1.0，未缓存输入 = 0.05，缓存写入 = 0.0625，缓存读取 = 0.0005。只有在存在按模型拆分的令牌明细时才使用缓存感知权重；否则追踪器会回退到旧的固定估算。',
+			'environmental.methodology.co2Paper': 'CO₂：Jegham 等人估算，一次包含 10,000 个输入令牌和 1,500 个输出令牌的 Claude 3.7 Sonnet 请求耗能 5.671 Wh；按 0.287 kg CO₂e/kWh（AWS）计算约为 1.63 g CO₂e。将一个输入令牌计为输出令牌的 1/20，该请求相当于 2,000 个输出当量令牌，即每 100 万输出当量令牌约 814 g（范围 770–857 g），向上取整为 840 g。',
+			'environmental.methodology.co2Weights': '令牌权重（输出 = 1.0，未缓存输入 = 0.05，缓存写入 = 0.0625，缓存读取 = 0.0005）是采用自 neuland/tokendashboard-backend 的近似值，并非论文中的数值。论文未对提示缓存建模，尤其是缓存读取权重只是粗略估计。没有按模型拆分明细的令牌按参考请求的输入/输出比例计算。',
+			'environmental.methodology.modelScaling': '其他模型以 Claude Sonnet 为基线，按其输出令牌价格之比进行缩放（例如 Haiku ⅓×，Opus 1⅔×）。这里用价格代表模型规模，并非实测值。价格未知的模型使用 Sonnet 基线。',
 			'environmental.methodology.cost': '成本（UBB）在按量计费下使用 GitHub Copilot AI Credit 费率（1 个 credit = $0.01）。',
-			'environmental.methodology.water': '用水量估算仍基于每 1,000 个总令牌约 0.3 L（数据中心冷却估算）。',
+			'environmental.methodology.water': '用水量采用论文中的公式：现场冷却（能耗 ÷ PUE × 0.18 L/kWh）加上场外发电（能耗 × 5.11 L/kWh），AWS 的 PUE 为 1.14。参考请求约为 30 mL，即 Claude Sonnet 每 100 万输出当量令牌约 15 L，并像 CO₂ 一样按模型缩放。',
 			'environmental.methodology.tree': '树木当量表示一棵成熟树一年吸收 CO₂ 的占比（约 21 kg/年）。',
 			'environmental.methodology.co2Analogies': 'CO₂ 类比：汽油车 ≈ 120 g/km · 城际列车 ≈ 41 g/km · 经济舱短途航班 ≈ 180 g/km（ICAO 平均）· 智能手机充满电 ≈ 8 g · LED 灯 ≈ 3 g/小时（10 W，欧盟电网）· 烧开一壶水 ≈ 20 g。',
 			'environmental.methodology.waterAnalogies': '用水类比：淋浴 ≈ 8 L/分钟 · 洗衣机 ≈ 50 L · 标准浴缸 ≈ 150 L · 洗碗机 ≈ 12 L · 一杯茶 ≈ 250 mL · 每人每日饮水 ≈ 2 L。',
 			'environmental.methodology.caveat': '所有类比都只是数量级估算。实际数值取决于你所在地区的能源结构、硬件、模型实现和缓存行为。',
+			'environmental.methodology.sources': '来源：',
+			'environmental.methodology.neulandLink': 'neuland/tokendashboard-backend — CO₂ 方法说明',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);

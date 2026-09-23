@@ -261,6 +261,7 @@ function buildEstimatesSection(): HTMLElement {
 		localize('environmental.methodology.cost'),
 		localize('environmental.methodology.co2Paper'),
 		localize('environmental.methodology.co2Weights'),
+		localize('environmental.methodology.modelScaling'),
 		localize('environmental.methodology.water'),
 		localize('environmental.methodology.tree'),
 		localize('environmental.methodology.co2Analogies'),
@@ -273,9 +274,35 @@ function buildEstimatesSection(): HTMLElement {
 		li.textContent = text;
 		notes.append(li);
 	});
+	notes.append(buildSourcesItem());
 
 	section.append(notes);
 	return section;
+}
+
+/**
+ * Links to the methodology sources. The host maps the id to a fixed URL, so the
+ * webview never asks it to open an arbitrary address.
+ */
+function buildSourcesItem(): HTMLElement {
+	const li = document.createElement('li');
+	li.append(`${localize('environmental.methodology.sources')} `);
+	const links: Array<[string, string]> = [
+		['paper', 'Jegham et al., "How Hungry is AI?" (arXiv:2505.09598)'],
+		['neuland', localize('environmental.methodology.neulandLink')],
+	];
+	links.forEach(([source, label], i) => {
+		if (i > 0) { li.append(' · '); }
+		const a = document.createElement('a');
+		a.href = '#';
+		a.textContent = label;
+		a.addEventListener('click', (event) => {
+			event.preventDefault();
+			vscode.postMessage({ command: 'openMethodologySource', source });
+		});
+		li.append(a);
+	});
+	return li;
 }
 
 function wireButtons(): void {

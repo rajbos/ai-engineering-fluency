@@ -52,9 +52,6 @@ export interface BackendFacadeDeps {
   warn: (message: string) => void;
   updateTokenStats?: () => Promise<void>;
   calculateEstimatedCost: (modelUsage: ModelUsage) => number;
-  co2Per1kTokens: number;
-  waterUsagePer1kTokens: number;
-  co2AbsorptionPerTreePerYear: number;
 
   getCopilotSessionFiles: () => Promise<string[]>;
   estimateTokensFromText: (text: string, model: string) => number;
@@ -121,9 +118,6 @@ export class BackendFacade {
       {
         warn: deps.warn,
         calculateEstimatedCost: deps.calculateEstimatedCost,
-        co2Per1kTokens: deps.co2Per1kTokens,
-        waterUsagePer1kTokens: deps.waterUsagePer1kTokens,
-        co2AbsorptionPerTreePerYear: deps.co2AbsorptionPerTreePerYear,
       },
       this.credentialService,
       this.dataPlaneService,

@@ -54,9 +54,6 @@ interface RollupAccumulator {
 export interface QueryServiceDeps {
 	warn: (message: string) => void;
 	calculateEstimatedCost: (modelUsage: ModelUsage) => number;
-	co2Per1kTokens: number;
-	waterUsagePer1kTokens: number;
-	co2AbsorptionPerTreePerYear: number;
 }
 
 /**
