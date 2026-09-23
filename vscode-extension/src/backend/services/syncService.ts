@@ -30,6 +30,16 @@ import { getEditorTypeFromPath, refineEditorLabelForInteractionModeSplit } from 
 type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };
 
 /**
+ * True when a parsed JSON value is a plain object usable as a session record.
+ * Arrays are rejected: `typeof [] === 'object'`, so a bare `[]` line would
+ * otherwise read as a valid record with no usage on it and a file of such
+ * lines would look like a genuinely empty scan rather than a failed one.
+ */
+function isEventRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
  * Pure consent-timestamp parser — no side effects.
  * Returns a `Date` when `raw` represents a valid, non-future timestamp,
  * or an `Error` describing why the value is invalid.
@@ -1007,7 +1017,7 @@ for (const line of lines) {
 if (!line.trim()) { continue; }
 try {
 const event = JSON.parse(line);
-if (!event || typeof event !== 'object') { failedLines++; continue; }
+if (!isEventRecord(event)) { failedLines++; continue; }
 defaultModel = this.updateFallbackVsCodeModel(event, defaultModel);
 this.upsertVsCodeFallbackRequests(event, defaultModel, seenReqIds, fileMtimeMs, startMs, ctx);
 } catch { failedLines++; }
@@ -1084,7 +1094,7 @@ for (const line of lines) {
 if (!line.trim()) { continue; }
 try {
 const event = JSON.parse(line);
-if (!event || typeof event !== 'object') { failedLines++; continue; }
+if (!isEventRecord(event)) { failedLines++; continue; }
 defaultModel = this.updateCliDefaultModel(event, defaultModel);
 const normalizedTs = this.utility.normalizeTimestampToMs(event.timestamp);
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
@@ -1126,7 +1136,12 @@ return { inputTokens: 0, outputTokens: 0, interactions: 0 };
 /**
  * Process the fallback JSON content when cached data is unavailable.
  * Handles the VS Code Copilot Chat legacy JSON format.
- * Returns false if the JSON cannot be parsed (a warning is logged internally).
+ *
+ * Returns the number of records that could not be parsed or processed: 1 when
+ * the file itself is unparseable or is not a JSON object, otherwise one per
+ * request that threw while being rolled up. A non-zero result means the file's
+ * usage is not fully represented in `rollups`, so an empty scan that includes
+ * it must not be reported as a successful no-op.
  */
 private processJsonSessionFallback(
 content: string,
@@ -1138,39 +1153,54 @@ machineId: string,
 userId: string | undefined,
 editorForFile: string | undefined,
 rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>
-): boolean {
+): number {
 let sessionJson: unknown;
 try {
 sessionJson = JSON.parse(content);
-if (!sessionJson || typeof sessionJson !== 'object') {
+if (!isEventRecord(sessionJson)) {
 this.deps.logger.warn(`Backend sync: session file has invalid JSON structure: ${sessionFile}`);
-return false;
+return 1;
 }
 } catch (e) {
 this.deps.logger.warn(`Backend sync: failed to parse JSON session file ${sessionFile}: ${e}`);
-return false;
+return 1;
 }
 const sessionObj = sessionJson as Record<string, unknown>;
 const requests = Array.isArray(sessionObj.requests) ? (sessionObj.requests as unknown[]) : [];
+let failedRequests = 0;
 for (const request of requests) {
+if (!isEventRecord(request)) {
+this.deps.logger.warn(`Backend sync: skipping malformed request record in ${sessionFile}`);
+failedRequests++;
+continue;
+}
 try {
-const req = request as ChatRequest;
+this.rollUpJsonRequest(request as ChatRequest, sessionObj, { fileMtimeMs, startMs, workspaceId, machineId, userId, editorForFile, rollups });
+} catch (e) {
+this.deps.logger.warn(`Backend sync: failed to process request in ${sessionFile}: ${e}`);
+failedRequests++;
+}
+}
+return failedRequests;
+}
+
+/** Fold a single legacy JSON request into `rollups`, skipping it when it falls outside the window or carries no tokens. */
+private rollUpJsonRequest(
+req: ChatRequest,
+sessionObj: Record<string, unknown>,
+ctx: { fileMtimeMs: number; startMs: number; workspaceId: string; machineId: string; userId: string | undefined; editorForFile: string | undefined; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }> }
+): void {
 const normalizedTs = this.utility.normalizeTimestampToMs(
 typeof req.timestamp !== 'undefined' ? req.timestamp : (sessionObj.lastMessageDate as unknown)
 );
-const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
-if (!eventMs || eventMs < startMs) { continue; }
+const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : ctx.fileMtimeMs;
+if (!eventMs || eventMs < ctx.startMs) { return; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
 const model = this.deps.sessionHandlers.getModelFromRequest(req);
 const { inputTokens, outputTokens } = this.extractTokenCountsFromRequest(req, model);
-if (inputTokens === 0 && outputTokens === 0) { continue; }
-const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
-upsertDailyRollup(rollups, key, { inputTokens, outputTokens, interactions: 1 });
-} catch (e) {
-this.deps.logger.warn(`Backend sync: failed to process request in ${sessionFile}: ${e}`);
-}
-}
-return true;
+if (inputTokens === 0 && outputTokens === 0) { return; }
+const key: DailyRollupKey = { day: dayKey, model, workspaceId: ctx.workspaceId, machineId: ctx.machineId, userId: ctx.userId, editor: ctx.editorForFile };
+upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1 });
 }
 	/**
 	 * Compute daily rollups from local session files.
@@ -1331,7 +1361,7 @@ return true;
 			}
 			return;
 		}
-		if (!this.processJsonSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForRollup, ctx.rollups)) {
+		if (this.processJsonSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForRollup, ctx.rollups) > 0) {
 			ctx.progress.filesFailed++;
 		}
 	}

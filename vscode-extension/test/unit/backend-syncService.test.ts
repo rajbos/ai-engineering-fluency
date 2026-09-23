@@ -1455,6 +1455,100 @@ test('syncToSharingServer reports failure when a JSONL session file has no parse
 	}
 });
 
+test('syncToSharingServer reports failure when a JSONL session file holds only array records', async () => {
+	// `typeof [] === 'object'` and `[]` is truthy, so a bare array line slipped past
+	// the "is this an object" guard and read as a valid event carrying no usage.
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'jsonl-array-test-'));
+	const sessionFile = path.join(tmpDir, 'events.jsonl');
+	fs.writeFileSync(sessionFile, '[]\n[1,2,3]\n[]\n', 'utf8');
+	try {
+		const svc = new SyncService(
+			makeDeps({
+				getGithubToken: () => 'github-token',
+				getCopilotSessionFiles: async () => [sessionFile],
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+				getSessionFileDataCached: undefined,
+			}),
+			{} as any,
+			{} as any,
+			undefined,
+			BackendUtility,
+			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+		);
+
+		const uploaded = await (svc as any).syncToSharingServer(
+			{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+			{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+		);
+		assert.equal(uploaded, false, 'Array-valued JSONL records are malformed, not empty events');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+test('syncToSharingServer reports failure when legacy JSON requests are all malformed', async () => {
+	// The legacy JSON fallback caught each request error and still returned success,
+	// so a session whose every request is unusable produced no rollups and looked
+	// like a user with genuinely no data.
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'json-request-test-'));
+	const sessionFile = path.join(tmpDir, 'session.json');
+	fs.writeFileSync(sessionFile, JSON.stringify({ requests: [null, 'nope', 42] }), 'utf8');
+	try {
+		const svc = new SyncService(
+			makeDeps({
+				getGithubToken: () => 'github-token',
+				getCopilotSessionFiles: async () => [sessionFile],
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+				getSessionFileDataCached: undefined,
+			}),
+			{} as any,
+			{} as any,
+			undefined,
+			BackendUtility,
+			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+		);
+
+		const uploaded = await (svc as any).syncToSharingServer(
+			{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+			{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+		);
+		assert.equal(uploaded, false, 'Unusable request records are a failed scan, not an empty one');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+test('syncToSharingServer still treats a readable session with no billable activity as a successful sync', async () => {
+	// The guard keys off parse failures, not the absence of rollups: a file that
+	// reads cleanly and simply has no usage must not pin the user at "never".
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'json-empty-test-'));
+	const sessionFile = path.join(tmpDir, 'session.json');
+	fs.writeFileSync(sessionFile, JSON.stringify({ requests: [] }), 'utf8');
+	try {
+		const svc = new SyncService(
+			makeDeps({
+				getGithubToken: () => 'github-token',
+				getCopilotSessionFiles: async () => [sessionFile],
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+				getSessionFileDataCached: undefined,
+			}),
+			{} as any,
+			{} as any,
+			undefined,
+			BackendUtility,
+			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+		);
+
+		const uploaded = await (svc as any).syncToSharingServer(
+			{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+			{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+		);
+		assert.equal(uploaded, true, 'A clean scan with no usage is a successful no-op');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
 test('syncToSharingServer treats having nothing to upload as a successful sync', async () => {
 	const svc = new SyncService(
 		makeDeps({
