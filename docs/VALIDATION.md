@@ -241,9 +241,13 @@ Two things to know about that comment:
   token`. A token with *Contents: write* but no *Pull requests: write*
   uploads fine and then fails on the comment with `Resource not accessible by
   personal access token (addComment)`. Whenever images were due but could not
-  be attached, the comment itself opens with a warning quoting gh's error (and
-  the job's warning annotation repeats it), so a missing permission shows up
-  on the PR rather than only on the checks page.
+  be attached, the comment itself opens with a warning saying why, and a job
+  annotation repeats it: that `GH_PAT` is not configured, that
+  it could not be authenticated (with gh's error from `gh api user`, which
+  may be a bad token or a transient GitHub/network failure), or, when gh got
+  as far as the upload, gh's error from `gh pr comment --attach` with a
+  permission hint. A missing permission therefore shows up on the PR rather
+  than only on the checks page.
 - Fork PRs get a read-only token and no secrets, so they only get the artifact.
 - Only a comment authored by one of the workflow's own identities (the Actions
   bot, the PAT's user) **and** whose body *starts* with the marker is ever
