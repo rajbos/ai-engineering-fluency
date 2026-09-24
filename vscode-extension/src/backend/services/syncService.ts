@@ -366,16 +366,25 @@ sessionFile: string,
 fileMtimeMs: number,
 startMs: number,
 now: Date
-): Map<string, Map<string, number>> {
+): Map<string, Map<string, number>> | null {
 const dayModelInteractions = new Map<string, Map<string, number>>();
 const lines = content.trim().split('\n');
 const todayKey = this.utility.toUtcDayKey(now);
 let lineCount = 0;
 let processedLines = 0;
+const failures = { count: 0 };
 for (const line of lines) {
 lineCount++;
 if (!line.trim()) { continue; }
-processedLines = this.processCliJsonlLine(line, fileMtimeMs, startMs, todayKey, sessionFile, lineCount, processedLines, dayModelInteractions);
+processedLines = this.processCliJsonlLine(line, fileMtimeMs, startMs, todayKey, sessionFile, lineCount, processedLines, dayModelInteractions, failures);
+}
+// Any unreadable line means this file's usage is not fully represented here.
+// Returning null makes the caller fall through to the raw-content parser, which
+// counts the file towards filesFailed; swallowing it would let a malformed
+// session look like a clean, empty scan on the cached path.
+if (failures.count > 0) {
+this.deps.logger.warn(`Backend sync: ${failures.count} unreadable line(s) in ${sessionFile} — re-reading without the cache`);
+return null;
 }
 return dayModelInteractions;
 }
@@ -388,11 +397,12 @@ todayKey: string,
 sessionFile: string,
 lineCount: number,
 processedLines: number,
-dayModelInteractions: Map<string, Map<string, number>>
+dayModelInteractions: Map<string, Map<string, number>>,
+failures: { count: number }
 ): number {
 try {
 const event = JSON.parse(line);
-if (!event || typeof event !== 'object') { return processedLines; }
+if (!isEventRecord(event)) { failures.count++; return processedLines; }
 const normalizedTs = this.utility.normalizeTimestampToMs(event.timestamp);
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
 if (!eventMs || eventMs < startMs) { return processedLines; }
@@ -406,7 +416,7 @@ if (!dayModelInteractions.has(dayKey)) { dayModelInteractions.set(dayKey, new Ma
 const dayMap = dayModelInteractions.get(dayKey)!;
 dayMap.set(model, (dayMap.get(model) || 0) + 1);
 } catch {
-// skip malformed line
+failures.count++;
 }
 return processedLines;
 }
@@ -419,24 +429,28 @@ private buildDayModelInteractionsFromDeltaJsonl(
 content: string,
 fileMtimeMs: number,
 startMs: number
-): Map<string, Map<string, number>> {
+): Map<string, Map<string, number>> | null {
 const dayModelInteractions = new Map<string, Map<string, number>>();
 let defaultModel = 'unknown';
 const seenRequestIds = new Set<string>();
 const lines = content.trim().split('\n');
+let failures = 0;
 for (const line of lines) {
 if (!line.trim()) { continue; }
 try {
 const event = JSON.parse(line);
-if (!event || typeof event !== 'object') { continue; }
+if (!isEventRecord(event)) { failures++; continue; }
 defaultModel = this.updateDeltaDefaultModel(event, defaultModel);
 if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'requests' && Array.isArray(event.v)) {
 this.processDeltaRequests(event.v, defaultModel, seenRequestIds, fileMtimeMs, startMs, dayModelInteractions);
 }
 } catch {
-// skip malformed lines
+failures++;
 }
 }
+// Same contract as the other cached parsers: an unreadable line means this file
+// cannot be reported as cleanly empty, so defer to the failure-aware parser.
+if (failures > 0) { return null; }
 return dayModelInteractions;
 }
 
@@ -499,11 +513,17 @@ sessionFile: string
 ): Map<string, Map<string, number>> | null {
 try {
 const sessionJson = JSON.parse(content);
-if (!sessionJson || typeof sessionJson !== 'object') {
+if (!isEventRecord(sessionJson)) {
 return null;
 }
 const sessionObj = sessionJson as Record<string, unknown>;
-const requests = Array.isArray(sessionObj.requests) ? (sessionObj.requests as unknown[]) : [];
+// Mirrors processJsonSessionFallback: a document with no `requests` array is one
+// we cannot extract usage from, so it must not be reported as cleanly empty.
+if (!Array.isArray(sessionObj.requests)) {
+this.deps.logger.warn(`Backend sync: cached session file has no "requests" array: ${sessionFile}`);
+return null;
+}
+const requests = sessionObj.requests as unknown[];
 const dayModelInteractions = new Map<string, Map<string, number>>();
 for (const request of requests) {
 const req = request as ChatRequest;

@@ -764,6 +764,13 @@ test('validateTeamAlias rejects common name patterns', () => {
     a rollup upload, so displaying it would reintroduce the failure it was split to expose.
   - `backend.lastSyncAt` is separate again and is used only to throttle sync attempts, not
     to report health.
+
+  A session file only counts as a clean no-data scan when *every* parser that looked at it
+  understood it. The cached path is the one production normally takes, so its interaction
+  parsers return `null` rather than an empty map when a line or a `requests` array is
+  unreadable; that makes the scan fall through to the raw-content parser, which counts the
+  file towards `filesFailed`. Without this the cached path would report a malformed session
+  as an empty one and advance the markers above.
 - `vscode.window.showQuickPick` - Wizard UI
 - `vscode.env.machineId` - Machine identifier
 - `vscode.workspace.workspaceFolders` - Workspace detection

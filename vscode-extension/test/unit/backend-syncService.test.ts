@@ -1748,6 +1748,50 @@ test('syncToSharingServer reports failure when a legacy JSON session has no requ
 	}
 });
 
+test('syncToSharingServer reports failure for a malformed file even when the cached path handles it', async () => {
+	// The normal extension wiring always supplies getSessionFileDataCached, so a cache
+	// hit returns before the failure-aware raw-content parser ever runs. The cached
+	// JSONL/legacy parsers used to swallow unreadable lines and hand back an empty
+	// map, which made a malformed session indistinguishable from a clean no-data scan
+	// on the exact path production takes.
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'cached-malformed-test-'));
+	const sessionFile = path.join(tmpDir, 'events.jsonl');
+	fs.writeFileSync(sessionFile, 'not json at all\n{"broken":\n', 'utf8');
+	let cacheLookups = 0;
+	try {
+		const svc = new SyncService(
+			makeDeps({
+				getGithubToken: () => 'github-token',
+				getCopilotSessionFiles: async () => [sessionFile],
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+				// Valid cached data with no precomputed dailyRollups, which is what sends
+				// processCachedSessionFile through the content-based interaction parsers.
+				getSessionFileDataCached: async () => {
+					cacheLookups++;
+					return { tokens: 0, mtime: Date.now(), interactions: 0, modelUsage: {} };
+				},
+			}),
+			{} as any,
+			{} as any,
+			undefined,
+			BackendUtility,
+			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+		);
+
+		await assert.rejects(
+			() => (svc as any).syncToSharingServer(
+				{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+				{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+			),
+			/could not be read/,
+			'A malformed session must count as a failed file on the cached path too',
+		);
+		assert.ok(cacheLookups > 0, 'Guard: the cached path must actually have been exercised');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
 test('syncToSharingServer still treats a readable session with no billable activity as a successful sync', async () => {
 	// The guard keys off parse failures, not the absence of rollups: a file that
 	// reads cleanly and simply has no usage must not pin the user at "never".
