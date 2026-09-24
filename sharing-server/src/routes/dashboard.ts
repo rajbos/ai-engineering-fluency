@@ -29,6 +29,7 @@ const BASE_URL = (process.env.BASE_URL ?? 'http://localhost:3000').replace(/\/$/
 const DEPLOY_SHA    = process.env.DEPLOY_SHA    ?? 'unknown';
 const DEPLOY_BRANCH = process.env.DEPLOY_BRANCH ?? 'unknown';
 const DEPLOY_DATE   = process.env.DEPLOY_DATE   ?? 'unknown';
+const { version: packageVersion } = require('../../package.json') as { version: string };
 
 // Load Chart.js UMD bundle once at startup.
 // Bundled build: esbuild.js copies it next to dist/server.js.
@@ -349,11 +350,21 @@ function safeJson(data: unknown): string {
 }
 
 function fmt(n: number): string {
-	if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
-	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+	if (n >= 999_950_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+	if (n >= 999_950) return `${(n / 1_000_000).toFixed(1)}M`;
 	if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
 	return String(n);
 }
+
+const chartFormatterJs = `
+  function formatChartTokens(n) {
+    n = Math.round(n);
+    if (n >= 999950000) return (n / 1000000000).toFixed(1) + 'B';
+    if (n >= 999950) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    return String(n);
+  }
+`;
 
 // ── Fluency Score types (score is computed by the extension and uploaded directly) ──────────
 
@@ -520,7 +531,7 @@ function layout(title: string, body: string): string {
 <body>
 ${body}
 <footer class="deploy-footer">
-  deployed from <code>${h(DEPLOY_BRANCH)}</code> &middot; <code>${h(DEPLOY_SHA)}</code> &middot; ${h(DEPLOY_DATE)}
+  sharing-server <code>v${h(packageVersion)}</code> &middot; deployed from <code>${h(DEPLOY_BRANCH)}</code> &middot; <code>${h(DEPLOY_SHA)}</code> &middot; ${h(DEPLOY_DATE)}
 </footer>
 </body>
 </html>`;
@@ -698,9 +709,17 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
   <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
 </div>` : `
 <div class="alert alert-warn">
-  No data yet. Configure the VS Code extension with this server's endpoint URL
-  (<code>aiEngineeringFluency.backend.sharingServer.endpointUrl</code>) and wait for the
-  next sync (or trigger one from the status bar).
+  No data yet. The VS Code extension uploads to this server when <em>all</em> of these settings are in place:
+  <ul>
+    <li><code>aiEngineeringFluency.backend.sharingServer.enabled</code> — must be <code>true</code></li>
+    <li><code>aiEngineeringFluency.backend.sharingServer.endpointUrl</code> — this server's URL</li>
+    <li><code>aiEngineeringFluency.backend.sharingProfile</code> — any value other than <code>off</code></li>
+  </ul>
+  Running <strong>AI Engineering Fluency: Configure Team Server Backend</strong> sets all three; pick a
+  sharing profile other than <em>Off</em> there. The Azure Storage toggle is not needed for this server.
+  You also need to be signed in to GitHub in VS Code, since uploads are authenticated with that account.
+  Saving the settings triggers an upload straight away; check the extension's output channel for
+  <code>Sharing server upload:</code> if nothing arrives.
 </div>`;
 
 	const tableHtml = uploads.length > 0 ? `
@@ -734,6 +753,7 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
 	// ── Interactive JS ────────────────────────────────────────────────────────
 	const interactiveJs = `
 (function () {
+  ${chartFormatterJs}
   // ── Period tabs ─────────────────────────────────────────────────────────
   function activatePeriod(period) {
     document.querySelectorAll('#period-tabs .tab').forEach(function(b) { b.classList.remove('active'); });
@@ -814,7 +834,7 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
       .map(function(dim) {
         return {
           label: dim,
-          data: labels.map(function(l) { return Math.round((grouped[l] && grouped[l][dim] || 0) / 1000); }),
+          data: labels.map(function(l) { return grouped[l] && grouped[l][dim] || 0; }),
           backgroundColor: colorFn(dim) + 'bb',
           borderColor: colorFn(dim),
           borderWidth: 1,
@@ -848,10 +868,10 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
             var log = Math.log10(v);
             if (Math.abs(log - Math.round(log)) > 0.01) { return null; }
           }
-          return v >= 1000 ? (v/1000).toFixed(1)+'M' : v+'K';
+          return formatChartTokens(v);
         },
       },
-      title: { display: true, text: 'Tokens (K)', color: '#8b949e', font: { size: 11 } },
+      title: { display: true, text: 'Tokens', color: '#8b949e', font: { size: 11 } },
     };
   }
 
@@ -876,11 +896,11 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
           callbacks: {
             label: function(ctx) {
               var v = ctx.parsed.y;
-              return '  ' + ctx.dataset.label + ': ' + (v >= 1000 ? (v/1000).toFixed(1)+'M' : v+'K') + ' tokens';
+              return '  ' + ctx.dataset.label + ': ' + formatChartTokens(v) + ' tokens';
             },
             footer: function(items) {
               var total = items.reduce(function(s,i) { return s + i.parsed.y; }, 0);
-              return 'Total: ' + (total >= 1000 ? (total/1000).toFixed(1)+'M' : total+'K') + ' tokens';
+              return 'Total: ' + formatChartTokens(total) + ' tokens';
             },
           },
         },
@@ -1113,8 +1133,8 @@ var CHART_DATA = ${safeJson(chartData)};
 // Re-compute "Today" stats using browser's local timezone (server pre-renders in UTC)
 (function() {
   function fmtLocal(n) {
-    if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'B';
-    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 999950000) return (n / 1000000000).toFixed(1) + 'B';
+    if (n >= 999950) return (n / 1000000).toFixed(1) + 'M';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
     return String(n);
   }
@@ -1262,6 +1282,7 @@ function adminDashboardPage(
 
 	const adminInteractiveJs = `
 (function () {
+  ${chartFormatterJs}
   // ── Period tabs (stat cards only — chart uses its own period state) ─────────
   var currentPeriod = 30;
   var currentMode = 'total';
@@ -1340,7 +1361,7 @@ function adminDashboardPage(
         data: labels.map(function(day) {
           var total = 0;
           data.forEach(function(r) { if (r.day === day && r.login === login) total += r.inputTokens + r.outputTokens; });
-          return Math.round(total / 1000);
+          return total;
         }),
         backgroundColor: color + 'bb',
         borderColor: color,
@@ -1354,7 +1375,7 @@ function adminDashboardPage(
         data: labels.map(function(day) {
           var total = 0;
           data.forEach(function(r) { if (r.day === day && !topSet[r.login]) total += r.inputTokens + r.outputTokens; });
-          return Math.round(total / 1000);
+          return total;
         }),
         backgroundColor: OTHERS_COLOR + 'bb',
         borderColor: OTHERS_COLOR,
@@ -1378,7 +1399,7 @@ function adminDashboardPage(
         var logins = Object.keys(dayMap[day]).filter(function(l) { return dayMap[day][l] > 0; });
         if (!logins.length) return 0;
         var total = logins.reduce(function(s, l) { return s + dayMap[day][l]; }, 0);
-        return Math.round(total / logins.length / 1000);
+        return total / logins.length;
       }),
       backgroundColor: '#58a6ffbb',
       borderColor: '#58a6ff',
@@ -1392,9 +1413,9 @@ function adminDashboardPage(
       grid: { color: '#21262d' },
       ticks: {
         color: '#8b949e', font: { size: 11 },
-        callback: function(v) { return v >= 1000 ? (v/1000).toFixed(1)+'M' : v+'K'; },
+        callback: function(v) { return formatChartTokens(v); },
       },
-      title: { display: true, text: 'Tokens (K)', color: '#8b949e', font: { size: 11 } },
+      title: { display: true, text: 'Tokens', color: '#8b949e', font: { size: 11 } },
     };
   }
 
@@ -1421,11 +1442,11 @@ function adminDashboardPage(
           callbacks: {
             label: function(ctx) {
               var v = ctx.parsed.y;
-              return '  ' + ctx.dataset.label + ': ' + (v >= 1000 ? (v/1000).toFixed(1)+'M' : v+'K') + ' tokens';
+              return '  ' + ctx.dataset.label + ': ' + formatChartTokens(v) + ' tokens';
             },
             footer: function(items) {
               var total = items.reduce(function(s, i) { return s + i.parsed.y; }, 0);
-              return 'Total: ' + (total >= 1000 ? (total/1000).toFixed(1)+'M' : total+'K') + ' tokens';
+              return 'Total: ' + formatChartTokens(total) + ' tokens';
             },
           },
         },
@@ -1448,7 +1469,7 @@ function adminDashboardPage(
     chart.data.datasets = datasets;
     chart.options.scales.x.stacked = stacked;
     chart.options.scales.y = makeYConfig(stacked);
-    chart.options.scales.y.title.text = currentMode === 'total' ? 'Tokens (K)' : 'Avg Tokens/User (K)';
+    chart.options.scales.y.title.text = currentMode === 'total' ? 'Tokens' : 'Avg Tokens/User';
     chart.update();
   }
 })();`;

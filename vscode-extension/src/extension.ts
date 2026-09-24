@@ -272,6 +272,7 @@ import {
   accumulateDailyModelCounters as _accumulateDailyModelCounters,
   buildSessionEfficiencyAttribution as _buildSessionEfficiencyAttribution,
 } from '../../src/modelEfficiency';
+import { calculateEnvironmentalImpact, ENVIRONMENTAL_METHODOLOGY_SOURCES } from '../../src/environmentalImpact';
 
 // --- Efficiency analysis ---
 import {
@@ -410,6 +411,7 @@ import {
 // --- Backend & UI ---
 import type { AiFluencyExtensionApi, ExtensionPointButton } from './extensionPoints';
 import { REPO_HYGIENE_SKILL } from './backend/repoHygieneSkill';
+import { deferWhileApplyingSettings } from './backend/settingsBatch';
 import { BackendFacade } from './backend/facade';
 import { BackendCommandHandler } from './backend/commands';
 import { TeamServerConfigPanel } from './backend/teamServerConfigPanel';
@@ -1288,9 +1290,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Cached last detailed stats for tooltip rebuilding. */
 	private _lastDetailedStats: DetailedStats | undefined;
 	private tokenEstimators: Record<string, TokenEstimator> = tokenEstimatorsData.estimators;
-	private co2Per1kTokens = 0.2; // gCO2e per 1000 tokens, a rough estimate
-	private co2AbsorptionPerTreePerYear = 21000; // grams of CO2 per tree per year
-	private waterUsagePer1kTokens = 0.3; // liters of water per 1000 tokens, based on data center usage estimates
 	private _cacheHits = 0; // Counter for cache hits during usage analysis
 	private _cacheMisses = 0; // Counter for cache misses during usage analysis
 	// Short-term cache to avoid rescanning filesystem during rapid successive calls (e.g., diagnostics load)
@@ -2836,22 +2835,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// user who switches it off keeps looking at the card they just disabled.
 				if (e.affectsConfiguration('aiEngineeringFluency.serverMemories')) { this.invalidateServerMemoriesCache(); }
 				if (e.affectsConfiguration('aiEngineeringFluency.backend')) {
-					this.startBackendSyncAfterInitialAnalysis();
-					const backend = this.backend;
-					if (backend && typeof backend.syncToBackendStore === 'function') {
-						void (async () => {
-							try {
-								await backend.syncToBackendStore(true);
-								if (this.diagnosticsPanel) { this.loadDiagnosticDataInBackground(this.diagnosticsPanel); }
-							} catch (err: unknown) {
-								this.warn('Backend sync after settings change failed: ' + err);
-							}
-						})();
-					}
-					if (this.diagnosticsPanel) { this.loadDiagnosticDataInBackground(this.diagnosticsPanel); }
+					// A multi-key save defers this until its last write, so no sync ever runs
+					// against a half-applied configuration (see settingsBatch.ts).
+					const onBackendSettingsChanged = () => this.onBackendSettingsChanged();
+					if (!deferWhileApplyingSettings(onBackendSettingsChanged)) { onBackendSettingsChanged(); }
 				}
 			})
 		);
+	}
+
+	/** Restarts the sync timer and forces a sync after backend settings changed. */
+	private onBackendSettingsChanged(): void {
+		this.startBackendSyncAfterInitialAnalysis();
+		const backend = this.backend;
+		if (backend && typeof backend.syncToBackendStore === 'function') {
+			void (async () => {
+				try {
+					await backend.syncToBackendStore(true);
+					if (this.diagnosticsPanel) { this.loadDiagnosticDataInBackground(this.diagnosticsPanel); }
+				} catch (err: unknown) {
+					this.warn('Backend sync after settings change failed: ' + err);
+				}
+			})();
+		}
+		if (this.diagnosticsPanel) { this.loadDiagnosticDataInBackground(this.diagnosticsPanel); }
 	}
 
 	private scheduleInitialUpdate(): void {
@@ -5617,7 +5624,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		if (!this.backend) { return; }
 		const settings = this.backend.getSettings();
-		if (!settings.sharingServerEnabled || !settings.sharingServerEndpointUrl) { return; }
+		// Skip the score computation when the service would refuse the upload anyway.
+		if (!settings.sharingServerEnabled || !settings.sharingServerEndpointUrl || settings.sharingProfile === 'off') { return; }
 		const maturityData = await (freshMaturityData ?? this.calculateMaturityScores(false));
 		const scorePayload: Record<string, unknown> = {
 			overallStage: maturityData.overallStage, overallLabel: maturityData.overallLabel,
@@ -5910,7 +5918,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private buildSinglePeriodStats(acc: ReturnType<typeof makePeriodAccumulator>): PeriodStats {
-		const co2 = (acc.tokens / 1000) * this.co2Per1kTokens;
+		const environmentalImpact = calculateEnvironmentalImpact(acc.modelUsage, acc.tokens, this.modelPricing);
 		const copilotCost = acc.exactCopilotCostDollars + this.calculateEstimatedCost(acc.modelUsageNoExact, 'copilot');
 		return {
 			tokens: acc.tokens, thinkingTokens: acc.thinkingTokens,
@@ -5919,8 +5927,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			avgInteractionsPerSession: acc.sessions > 0 ? Math.round(acc.interactions / acc.sessions) : 0,
 			avgTokensPerSession: acc.sessions > 0 ? Math.round(acc.tokens / acc.sessions) : 0,
 			modelUsage: acc.modelUsage, editorUsage: acc.editorUsage,
-			co2, treesEquivalent: co2 / this.co2AbsorptionPerTreePerYear,
-			waterUsage: (acc.tokens / 1000) * this.waterUsagePer1kTokens,
+			co2: environmentalImpact.co2,
+			treesEquivalent: environmentalImpact.treesEquivalent,
+			waterUsage: environmentalImpact.waterUsage,
 			estimatedCost: this.calculateEstimatedCost(acc.modelUsage),
 			estimatedCostCopilot: copilotCost,
 			billingGroupCosts: this.computeBillingGroupCosts(acc.editorModelUsage, copilotCost),
@@ -10073,6 +10082,9 @@ private computeFallbackDailyRollup(
 				// shows the loading screen (with real progress) while it retries, instead of
 				// leaving the failure page up with no feedback until it finishes.
 				await this.dispatch('retryRefresh:environmental', () => this.loadEnvironmentalIntoPanel(panel));
+			} else if (message.command === 'openMethodologySource') {
+				const url = ENVIRONMENTAL_METHODOLOGY_SOURCES[message.source as string];
+				if (url) { await vscode.env.openExternal(vscode.Uri.parse(url)); }
 			}
 		});
 
@@ -15215,7 +15227,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       subscriptionId: subscriptionId ? subscriptionId.substring(0, 8) + "..." : "",
       resourceGroup: s.resourceGroup ?? "", aggTable: s.aggTable ?? "usageAggDaily",
       eventsTable: s.eventsTable ?? "usageEvents", authMode: s.authMode ?? "entraId",
-      sharingProfile: config.get("backend.sharingProfile", "off") as string,
+      // The effective (inferred) profile, not get()'s 'off' default for an unset value: a Team
+      // Server-only user with no explicit profile uploads as teamAnonymized.
+      sharingProfile: (s.sharingProfile ?? config.get("backend.sharingProfile", "off")) as string,
     };
   }
 
@@ -15706,9 +15720,6 @@ function createBackendFacade(context: vscode.ExtensionContext, tokenTracker: Cop
     warn: (m: string) => tokenTracker.warn(m),
     updateTokenStats: async () => { await tokenTracker.updateTokenStats(); },
     calculateEstimatedCost: (modelUsage: ModelUsage) => tokenTracker.calculateEstimatedCost(modelUsage),
-    co2Per1kTokens: 0.2,
-    waterUsagePer1kTokens: 0.3,
-    co2AbsorptionPerTreePerYear: 21000,
     getCopilotSessionFiles: () =>
       tokenTracker.sessionDiscovery.getCopilotSessionFiles(),
     estimateTokensFromText: (text: string, model?: string) =>

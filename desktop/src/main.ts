@@ -14,6 +14,7 @@ import {
 } from '../../cli/src/helpers';
 import { getEditorSourceFromPath } from '../../cli/src/analysis';
 import type { DetailedStats, UsageAnalysisStats } from '../../src/types';
+import { ENVIRONMENTAL_METHODOLOGY_SOURCES } from '../../src/environmentalImpact';
 import {
     calculateMaturityScores,
     getFluencyLevelData,
@@ -718,6 +719,13 @@ function registerIpcHandlers(): void {
                     shell.openPath(message.path);
                 }
                 break;
+
+            case 'openMethodologySource': {
+                // Fixed id -> URL lookup: the webview never supplies the address itself.
+                const url = typeof message.source === 'string' ? ENVIRONMENTAL_METHODOLOGY_SOURCES[message.source] : undefined;
+                if (url) { void shell.openExternal(url); }
+                break;
+            }
 
             default:
                 break;

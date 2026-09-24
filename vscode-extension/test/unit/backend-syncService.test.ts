@@ -1276,7 +1276,7 @@ test('syncToBackendStore handles ensureTableExists or validateAccess failure gra
 test('syncToBackendStore still attempts sharing server sync when Azure sync fails', async () => {
 	const logs: string[] = [];
 	const warns: string[] = [];
-	const sharingServerSvc = { uploadRollups: async () => ({ success: true, entriesUploaded: 1, message: 'Uploaded 1 entries' }), uploadFluencyScore: async () => true };
+	const sharingServerSvc = { uploadRollups: async (_u: string, _t: string, entries: unknown[]) => ({ success: true, entriesUploaded: entries.length, message: 'ok' }), uploadFluencyScore: async () => true };
 	const svc = new SyncService(
 		makeDeps({
 			log: (m) => logs.push(m),
@@ -1345,7 +1345,7 @@ test('syncToBackendStore tracks Azure and Team Server "last sync" independently 
 		},
 		globalStorageUri: { fsPath: lockDir },
 	} as unknown as vscode.ExtensionContext;
-	const sharingServerSvc = { uploadRollups: async () => ({ success: true, entriesUploaded: 1, message: 'Uploaded 1 entries' }), uploadFluencyScore: async () => true };
+	const sharingServerSvc = { uploadRollups: async (_u: string, _t: string, entries: unknown[]) => ({ success: true, entriesUploaded: entries.length, message: 'ok' }), uploadFluencyScore: async () => true };
 	const svc = new SyncService(
 		makeDeps({
 			context: mockContext,
@@ -1409,7 +1409,7 @@ test('uploadFluencyScoreToSharingServer updates its own fluency marker and leave
 			update: async (key: string, value: unknown) => { globalState.set(key, value); },
 		},
 	} as unknown as vscode.ExtensionContext;
-	const sharingServerSvc = { uploadRollups: async () => ({ success: true, entriesUploaded: 1, message: 'Uploaded 1 entries' }), uploadFluencyScore: async () => true };
+	const sharingServerSvc = { uploadRollups: async (_u: string, _t: string, entries: unknown[]) => ({ success: true, entriesUploaded: entries.length, message: 'ok' }), uploadFluencyScore: async () => true };
 	const svc = new SyncService(
 		makeDeps({
 			context: mockContext,
@@ -1502,11 +1502,14 @@ test('syncToSharingServer reports failure when the upload does not succeed', asy
 		{ uploadRollups: async () => ({ success: false, entriesUploaded: 0, message: 'Upload failed: fetch failed' }) } as any,
 	);
 
-	const uploaded = await (svc as any).syncToSharingServer(
-		{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
-		{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+	await assert.rejects(
+		() => (svc as any).syncToSharingServer(
+			{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+			{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+		),
+		/fetch failed/,
+		'syncToSharingServer must throw when entries existed but did not reach the server',
 	);
-	assert.equal(uploaded, false, 'syncToSharingServer must report false when entries existed but did not reach the server');
 });
 
 test('syncToSharingServer reports failure when session files exist but none could be read', async () => {
@@ -1527,11 +1530,14 @@ test('syncToSharingServer reports failure when session files exist but none coul
 		{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
 	);
 
-	const uploaded = await (svc as any).syncToSharingServer(
-		{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
-		{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+	await assert.rejects(
+		() => (svc as any).syncToSharingServer(
+			{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+			{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+		),
+		/could not be read/,
+		'Unreadable session files are a failed scan, not an empty one',
 	);
-	assert.equal(uploaded, false, 'Unreadable session files are a failed scan, not an empty one');
 });
 
 test('syncToSharingServer reports failure when a JSONL session file has no parseable lines', async () => {
@@ -1556,11 +1562,14 @@ test('syncToSharingServer reports failure when a JSONL session file has no parse
 			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
 		);
 
-		const uploaded = await (svc as any).syncToSharingServer(
-			{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
-			{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+		await assert.rejects(
+			() => (svc as any).syncToSharingServer(
+				{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+				{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+			),
+			/could not be read/,
+			'An unparseable session file is a failed scan, not an empty one',
 		);
-		assert.equal(uploaded, false, 'An unparseable session file is a failed scan, not an empty one');
 	} finally {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	}
@@ -1587,11 +1596,14 @@ test('syncToSharingServer reports failure when a JSONL session file holds only a
 			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
 		);
 
-		const uploaded = await (svc as any).syncToSharingServer(
-			{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
-			{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+		await assert.rejects(
+			() => (svc as any).syncToSharingServer(
+				{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+				{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+			),
+			/could not be read/,
+			'Array-valued JSONL records are malformed, not empty events',
 		);
-		assert.equal(uploaded, false, 'Array-valued JSONL records are malformed, not empty events');
 	} finally {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	}
@@ -1619,11 +1631,14 @@ test('syncToSharingServer reports failure when legacy JSON requests are all malf
 			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
 		);
 
-		const uploaded = await (svc as any).syncToSharingServer(
-			{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
-			{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+		await assert.rejects(
+			() => (svc as any).syncToSharingServer(
+				{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+				{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+			),
+			/could not be read/,
+			'Unusable request records are a failed scan, not an empty one',
 		);
-		assert.equal(uploaded, false, 'Unusable request records are a failed scan, not an empty one');
 	} finally {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	}
@@ -1855,12 +1870,14 @@ test('a successful fluency-score upload does not mask a failing rollup upload', 
 	} as any;
 
 	await svc.uploadFluencyScoreToSharingServer(settings, { overallStage: 'exploring' });
-	const rollupsFailed = await (svc as any).syncToSharingServer(
-		{ ...settings, lookbackDays: 7, datasetId: 'default' },
-		{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+	await assert.rejects(
+		() => (svc as any).syncToSharingServer(
+			{ ...settings, lookbackDays: 7, datasetId: 'default' },
+			{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+		),
+		'Guard: the rollup upload must have failed for this test to mean anything',
 	);
 
-	assert.equal(rollupsFailed, false, 'Guard: the rollup upload must have failed for this test to mean anything');
 	assert.ok(rollupAttempts > 0, 'Guard: a real rollup upload must have been attempted');
 	assert.ok(
 		globalState.get('backend.sharingServerFluencyLastSyncAt'),
@@ -2052,7 +2069,7 @@ test(`syncToBackendStore also syncs to sharing server when backend=storageTables
 			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
 			deleteEntitiesForUserDataset: async () => ({ deletedCount: 0, errors: [] }),
 		};
-		const sharingServerSvc = { uploadRollups: async () => ({ success: true, entriesUploaded: 1, message: 'Uploaded 1 entries' }), uploadFluencyScore: async () => true };
+		const sharingServerSvc = { uploadRollups: async (_u: string, _t: string, entries: unknown[]) => ({ success: true, entriesUploaded: entries.length, message: 'ok' }), uploadFluencyScore: async () => true };
 		const svc = new SyncService(deps, credSvc as any, dataSvc as any, undefined, BackendUtility, sharingServerSvc as any);
 		await svc.syncToBackendStore(true, {
 			enabled: true,

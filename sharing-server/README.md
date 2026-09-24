@@ -82,8 +82,7 @@ In VS Code settings (JSON):
 
 ```json
 {
-  "aiEngineeringFluency.backend.enabled": true,
-  "aiEngineeringFluency.backend.backend": "sharingServer",
+  "aiEngineeringFluency.backend.sharingServer.enabled": true,
   "aiEngineeringFluency.backend.sharingServer.endpointUrl": "https://your-server.example.com"
 }
 ```
@@ -248,6 +247,12 @@ The page includes cohort counts/thresholds, an exact numeric member table and
 expandable exact daily team/own totals. Trend modes compare your own line with
 either team totals or the team average per **daily active uploader**, not all
 registered users or the entire period's active-member count.
+The personal and admin dashboards abbreviate token counts as K, M or B,
+including chart ticks and tooltips; Team Insights keeps exact values in its
+numeric tables and exports.
+The page footer shows the sharing-server package version alongside the
+deployment branch, commit and timestamp, so a deployed instance can be
+compared with the published npm version.
 
 Download the selected period with cookie-authenticated
 `/team/export?days=N&format=csv` or `format=json` (N is 7, 30 or 90).

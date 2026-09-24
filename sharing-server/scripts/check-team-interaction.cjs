@@ -25,7 +25,7 @@ async function main() {
 			stdin: {
 				contents: `
 					export { createApp } from './src/app.ts';
-					export { upsertUser, upsertUpload, closeDb } from './src/db.ts';
+					export { getDb, upsertUser, upsertUpload, closeDb } from './src/db.ts';
 					export { encodeSession, makeClaims, COOKIE_NAME } from './src/session.ts';
 					export { serve } from '@hono/node-server';
 				`,
@@ -137,6 +137,35 @@ async function main() {
 			assert.equal(await plainPage.locator('#team-daily-numbers tbody tr').count(), days);
 			assertPrivate(await plainPage.content());
 		}
+		const boundary = fixture.upsertUser(78005, 'boundary-user', 'Boundary User', null);
+		fixture.upsertUpload(boundary.id, {
+			day: today, workspaceId: 'boundary-workspace', machineId: 'boundary-machine', model: 'boundary-model',
+			inputTokens: 999_949_999, outputTokens: 0, interactions: 1,
+		});
+		fixture.getDb().prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(boundary.id);
+		await context.addCookies([{
+			name: fixture.COOKIE_NAME, value: fixture.encodeSession(fixture.makeClaims(boundary.id)),
+			url: baseUrl, httpOnly: true, sameSite: 'Lax',
+		}]);
+		await page.goto(`${baseUrl}/dashboard`);
+		const personalChart = await page.evaluate(() => {
+			const chart = Chart.getChart(document.getElementById('trend-chart'));
+			const dataset = chart.data.datasets.find(item => item.label === 'boundary-model');
+			const value = dataset.data.at(-1);
+			return { value, tooltip: chart.options.plugins.tooltip.callbacks.label({ parsed: { y: value }, dataset }) };
+		});
+		assert.deepEqual(personalChart, { value: 999_949_999, tooltip: '  boundary-model: 999.9M tokens' });
+		await page.goto(`${baseUrl}/admin`);
+		const adminChart = await page.evaluate(() => {
+			const chart = Chart.getChart(document.getElementById('admin-trend-chart'));
+			const dataset = chart.data.datasets.find(item => item.label === 'boundary-user');
+			const value = dataset.data.at(-1);
+			return { value, tooltip: chart.options.plugins.tooltip.callbacks.label({ parsed: { y: value }, dataset }) };
+		});
+		assert.deepEqual(adminChart, { value: 999_949_999, tooltip: '  boundary-user: 999.9M tokens' });
+		await page.locator('#admin-mode-tabs [data-admin-mode="average"]').click();
+		assert.equal(await page.evaluate(() => Chart.getChart(document.getElementById('admin-trend-chart')).data.datasets[0].data.at(-1)), (999_949_999 + 1000) / 5);
+		assert.deepEqual(errors, [], 'browser runtime errors');
 		console.log('Team interactions passed: period navigation (with/without JS), chart modes, daily table, exports, mobile layout, own dashboard, sign-out, privacy.');
 	} finally {
 		if (browser) await browser.close();

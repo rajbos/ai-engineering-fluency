@@ -23,6 +23,37 @@ export interface SharingServerEntry {
 /** Maximum number of entries per HTTP request (matches server-side limit). */
 const BATCH_SIZE = 500;
 
+/**
+ * Packs entries into requests of at most `maxPerRequest` without ever splitting one
+ * (dataset, day) across requests. The server replaces a user's rows for every day in a request
+ * (delete, then insert), so a day spread over two requests would lose the first request's rows.
+ * A single day larger than the limit cannot be sent atomically and is returned in `oversized`.
+ */
+export function packEntriesByDay<T extends { day: string; datasetId?: string }>(entries: T[], maxPerRequest: number): { batches: T[][]; oversized: Array<{ day: string; datasetId: string; count: number }> } {
+	const byDay = new Map<string, T[]>();
+	for (const entry of entries) {
+		const key = `${entry.datasetId ?? 'default'}\u0000${entry.day}`;
+		const group = byDay.get(key);
+		if (group) { group.push(entry); } else { byDay.set(key, [entry]); }
+	}
+	const batches: T[][] = [];
+	const oversized: Array<{ day: string; datasetId: string; count: number }> = [];
+	let current: T[] = [];
+	for (const group of byDay.values()) {
+		if (group.length > maxPerRequest) {
+			oversized.push({ day: group[0].day, datasetId: group[0].datasetId ?? 'default', count: group.length });
+			continue;
+		}
+		if (current.length + group.length > maxPerRequest) {
+			batches.push(current);
+			current = [];
+		}
+		current.push(...group);
+	}
+	if (current.length > 0) { batches.push(current); }
+	return { batches, oversized };
+}
+
 export class SharingServerUploadService {
 	/**
 	 * How many entries of a batch the server confirmed it stored.
@@ -89,11 +120,15 @@ export class SharingServerUploadService {
 		const baseUrl = endpointUrl.replace(/\/$/, '');
 		const url = `${baseUrl}/api/upload`;
 
+		const { batches, oversized } = packEntriesByDay(entries, BATCH_SIZE);
+		for (const o of oversized) {
+			warn(`Sharing server upload: skipping ${o.day} (${o.count} entries exceeds the ${BATCH_SIZE}-entry request limit; uploading it in parts would overwrite itself)`);
+		}
+
 		try {
 			let totalUploaded = 0;
 			const serverErrors: string[] = [];
-			for (let i = 0; i < entries.length; i += BATCH_SIZE) {
-				const batch = entries.slice(i, i + BATCH_SIZE);
+			for (const batch of batches) {
 				const response = await fetch(url, {
 					method: 'POST',
 					headers: {
@@ -120,14 +155,22 @@ export class SharingServerUploadService {
 			// validation or a dataset transaction rolls back, so anything short of
 			// every entry landing has to be reported as a failed upload — otherwise
 			// callers advance the "Last Sync" marker for data that never arrived.
-			const stored = Math.min(totalUploaded, entries.length);
-			if (stored < entries.length || serverErrors.length > 0) {
+			// The denominator is what was actually attempted: entries belonging to
+			// an oversized day were never sent, and are reported separately below.
+			const attempted = batches.reduce((total, batch) => total + batch.length, 0);
+			const stored = Math.min(totalUploaded, attempted);
+			if (stored < attempted || serverErrors.length > 0) {
 				const detail = serverErrors.length > 0 ? `: ${serverErrors.slice(0, 3).join('; ')}` : '';
-				const message = `Server stored ${stored} of ${entries.length} entries${detail}`;
+				const message = `Server stored ${stored} of ${attempted} entries${detail}`;
 				warn(`Sharing server upload: ${message}`);
 				return { success: false, entriesUploaded: stored, message };
 			}
 
+			if (oversized.length > 0) {
+				const message = `Uploaded ${totalUploaded} entries; skipped ${oversized.length} day(s) over the ${BATCH_SIZE}-entry request limit: ${oversized.map(o => o.day).join(', ')}`;
+				warn(`Sharing server upload: ${message}`);
+				return { success: false, entriesUploaded: totalUploaded, message };
+			}
 			const message = `Uploaded ${totalUploaded} entries`;
 			log(`Sharing server upload: ${message}`);
 			return { success: true, entriesUploaded: totalUploaded, message };
