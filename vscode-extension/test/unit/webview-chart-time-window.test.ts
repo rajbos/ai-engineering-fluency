@@ -78,3 +78,15 @@ test('last7 and allTime on a day period', () => {
 	assert.equal(filterPeriodByTimeWindow(period, 'last7', 'day', NOW).labels.length, 7);
 	assert.equal(filterPeriodByTimeWindow(period, 'allTime', 'day', NOW).labels.length, 365);
 });
+
+test('legacy payload with empty costData yields zero cost, not NaN', () => {
+	const period = { ...buildDayPeriod(60), costData: [], locData: [], linesAddedData: [], linesRemovedData: [], totalLinesAdded: 0, totalLinesRemoved: 0, avgLocPerPeriod: 0 };
+	const filtered = filterPeriodByTimeWindow(period, 'last30', 'day', NOW);
+	assert.equal(filtered.costData.length, 30);
+	assert.ok(filtered.costData.every(v => v === 0));
+	assert.equal(filtered.totalCost, 0);
+	assert.equal(filtered.avgCostPerPeriod, 0);
+	assert.equal(filtered.totalLinesAdded, 0);
+	assert.equal(filtered.totalLinesRemoved, 0);
+	assert.equal(filtered.avgLocPerPeriod, 0);
+});

@@ -2,9 +2,13 @@ import type { ChartPeriodData, ChartTimeWindow } from '../../../../src/types';
 import { getTimeWindowStartDayKey, getTimeWindowStartMonthKey } from '../../../../src/timeWindows';
 import type { ChartPeriod } from './projectionUtils';
 
-function sliceByIndices<T>(arr: T[] | undefined, indices: number[]): T[] | undefined {
+/**
+ * Slice a per-bar numeric series, reading gaps as zero. The legacy payload path sends
+ * `costData: []`, and an `undefined` entry would turn every total built from it into NaN.
+ */
+function sliceNumbersByIndices(arr: number[] | undefined, indices: number[]): number[] | undefined {
 	if (!arr) { return undefined; }
-	return indices.map(i => arr[i]);
+	return indices.map(i => arr[i] ?? 0);
 }
 
 function sliceDatasetsByIndices(datasets: object[] | undefined, indices: number[]): object[] | undefined {
@@ -24,7 +28,8 @@ function getFilterStartKey(timeWindow: ChartTimeWindow, periodType: ChartPeriod,
 function buildCoreFilteredPeriod(period: ChartPeriodData, indices: number[]): ChartPeriodData {
 	const totalTokens = indices.reduce((sum, i) => sum + period.tokensData[i], 0);
 	const totalSessions = indices.reduce((sum, i) => sum + period.sessionsData[i], 0);
-	const costData = indices.map(i => period.costData[i] ?? 0);
+	const costData = sliceNumbersByIndices(period.costData, indices) ?? [];
+	const totalCost = costData.reduce((a, b) => a + b, 0);
 	return {
 		labels: indices.map(i => period.labels[i]),
 		periodKeys: indices.map(i => period.periodKeys[i]),
@@ -44,9 +49,9 @@ function buildCoreFilteredPeriod(period: ChartPeriodData, indices: number[]): Ch
 }
 
 function copyFilteredLocFields(source: ChartPeriodData, target: ChartPeriodData, indices: number[]): void {
-	const locData = sliceByIndices(source.locData, indices);
-	const linesAddedData = sliceByIndices(source.linesAddedData, indices);
-	const linesRemovedData = sliceByIndices(source.linesRemovedData, indices);
+	const locData = sliceNumbersByIndices(source.locData, indices);
+	const linesAddedData = sliceNumbersByIndices(source.linesAddedData, indices);
+	const linesRemovedData = sliceNumbersByIndices(source.linesRemovedData, indices);
 
 	if (locData) { target.locData = locData; }
 	if (linesAddedData) { target.linesAddedData = linesAddedData; }
