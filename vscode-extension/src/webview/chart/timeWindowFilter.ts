@@ -24,8 +24,7 @@ function getFilterStartKey(timeWindow: ChartTimeWindow, periodType: ChartPeriod,
 function buildCoreFilteredPeriod(period: ChartPeriodData, indices: number[]): ChartPeriodData {
 	const totalTokens = indices.reduce((sum, i) => sum + period.tokensData[i], 0);
 	const totalSessions = indices.reduce((sum, i) => sum + period.sessionsData[i], 0);
-	const costData = sliceByIndices(period.costData, indices) as number[];
-	const totalCost = costData.reduce((a, b) => a + b, 0);
+	const costData = indices.map(i => period.costData[i] ?? 0);
 	return {
 		labels: indices.map(i => period.labels[i]),
 		periodKeys: indices.map(i => period.periodKeys[i]),
