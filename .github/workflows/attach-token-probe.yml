@@ -1,0 +1,113 @@
+# THROWAWAY EXPERIMENT - do not merge.
+#
+# Question: can the Actions GITHUB_TOKEN upload an image attachment?
+# `gh pr comment --attach` refuses installation tokens (ghs_...) client-side
+# with "unsupported authentication type" before any request is sent (gh
+# v2.101.0 internal/attachments/client.go), so this probe replays the exact
+# request gh makes - POST uploads.github.com/user-attachments/assets - with
+# curl, to see what the server itself answers. Run once per token permission
+# set, since push access is what the docs say uploads need.
+name: Attach token probe
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/attach-token-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe-contents-read:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+    - name: Upload a PNG with GITHUB_TOKEN via gh (expected client-side refusal)
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        gh --version | head -n1
+        printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==' | base64 -d > probe.png
+        gh pr comment "$PR_NUMBER" --repo "$REPO" \
+          --body "attach-token-probe (gh, contents: read)" \
+          --attach './probe.png#probe' 2>&1 || echo "gh exit code: $?"
+
+    - name: Upload a PNG with GITHUB_TOKEN via the raw endpoint
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPO_ID: ${{ github.event.repository.id }}
+      run: |
+        set -uo pipefail
+        printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==' | base64 -d > probe.png
+        status="$(curl -sS -o response.json -w '%{http_code}' -X POST \
+          "https://uploads.github.com/user-attachments/assets?name=probe.png&content_type=image%2Fpng&repository_id=${REPO_ID}" \
+          -H "Authorization: Bearer ${GH_TOKEN}" \
+          -H 'Accept: application/vnd.github+json' \
+          -H 'Content-Type: application/octet-stream' \
+          --data-binary @probe.png)"
+        echo "HTTP ${status}"
+        cat response.json; echo
+        echo "### contents: read -> HTTP ${status}" >> "$GITHUB_STEP_SUMMARY"
+        if [ "${status}" = "201" ] || [ "${status}" = "200" ]; then
+          url="$(jq -r .url response.json)"
+          body="attach-token-probe (raw endpoint, contents: read): HTTP ${status}"$'\n\n'"![probe](${url})"
+          gh api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" -f body="$body" > /dev/null
+          echo "::notice::GITHUB_TOKEN upload succeeded with contents: read"
+        else
+          echo "::warning::GITHUB_TOKEN upload refused with contents: read: HTTP ${status} $(head -c 300 response.json)"
+        fi
+
+  probe-contents-write:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+    - name: Upload a PNG with GITHUB_TOKEN via gh (expected client-side refusal)
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        gh --version | head -n1
+        printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==' | base64 -d > probe.png
+        gh pr comment "$PR_NUMBER" --repo "$REPO" \
+          --body "attach-token-probe (gh, contents: write)" \
+          --attach './probe.png#probe' 2>&1 || echo "gh exit code: $?"
+
+    - name: Upload a PNG with GITHUB_TOKEN via the raw endpoint
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPO_ID: ${{ github.event.repository.id }}
+      run: |
+        set -uo pipefail
+        printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==' | base64 -d > probe.png
+        status="$(curl -sS -o response.json -w '%{http_code}' -X POST \
+          "https://uploads.github.com/user-attachments/assets?name=probe.png&content_type=image%2Fpng&repository_id=${REPO_ID}" \
+          -H "Authorization: Bearer ${GH_TOKEN}" \
+          -H 'Accept: application/vnd.github+json' \
+          -H 'Content-Type: application/octet-stream' \
+          --data-binary @probe.png)"
+        echo "HTTP ${status}"
+        cat response.json; echo
+        echo "### contents: write -> HTTP ${status}" >> "$GITHUB_STEP_SUMMARY"
+        if [ "${status}" = "201" ] || [ "${status}" = "200" ]; then
+          url="$(jq -r .url response.json)"
+          body="attach-token-probe (raw endpoint, contents: write): HTTP ${status}"$'\n\n'"![probe](${url})"
+          gh api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" -f body="$body" > /dev/null
+          echo "::notice::GITHUB_TOKEN upload succeeded with contents: write"
+        else
+          echo "::warning::GITHUB_TOKEN upload refused with contents: write: HTTP ${status} $(head -c 300 response.json)"
+        fi
