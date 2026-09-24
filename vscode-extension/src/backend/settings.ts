@@ -66,7 +66,8 @@ export function readExplicitSharingProfile(config: vscode.WorkspaceConfiguration
 	const sharingProfileInspect = typeof (config as any).inspect === 'function'
 		? config.inspect<string>('backend.sharingProfile')
 		: undefined;
-	return parseBackendSharingProfile(sharingProfileInspect?.globalValue ?? sharingProfileInspect?.workspaceValue ?? sharingProfileInspect?.workspaceFolderValue);
+	// VS Code precedence: the most specific scope wins (folder → workspace → user).
+	return parseBackendSharingProfile(sharingProfileInspect?.workspaceFolderValue ?? sharingProfileInspect?.workspaceValue ?? sharingProfileInspect?.globalValue);
 }
 
 export function getBackendSettings(): BackendSettings {
