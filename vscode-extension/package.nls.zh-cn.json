@@ -571,5 +571,7 @@
   "backend.syncNow.target.teamServer": "团队服务器",
   "backend.syncNow.target.both": "Azure 和团队服务器",
   "backend.syncNow.progress": "正在同步到{0}...",
-  "backend.syncNow.synced": "已成功同步到{0}"
+  "backend.syncNow.synced": "已成功同步到{0}",
+  "backend.syncNow.failed": "上传到{0}失败。有关详细信息，请查看 AI Engineering Fluency 输出通道。",
+  "backend.syncNow.nothingSent": "未向{0}上传任何数据。可能有另一个 VS Code 窗口正在同步，或者团队服务器需要登录 GitHub。有关详细信息，请查看输出通道。"
 }

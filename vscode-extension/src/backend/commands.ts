@@ -11,7 +11,7 @@ import { computeBackendSharingPolicy } from './sharingProfile';
 import { showBackendError, showBackendSuccess } from './integration';
 import type { DisplayNameStore } from './displayNames';
 import { writeClipboardText } from '../utils/clipboard';
-import type { BackendFacadeInterface } from './types';
+import type { BackendFacadeInterface, SyncResult } from './types';
 import { resolveSyncTargets, type BackendSettings, type SyncTargets } from './settings';
 import { ErrorMessages, SuccessMessages, ConfirmationMessages } from './ui/messages';
 import { MANUAL_SYNC_COOLDOWN_MS } from './constants';
@@ -22,6 +22,24 @@ import { t } from '../l10n';
 function describeSyncTargets(targets: SyncTargets): string {
 	if (targets.azure && targets.sharingServer) { return t('backend.syncNow.target.both'); }
 	return targets.azure ? t('backend.syncNow.target.azure') : t('backend.syncNow.target.teamServer');
+}
+
+/**
+ * Turns a sync pass's per-target result into what Sync Now reports: throws (so the caller shows
+ * an error) when any target failed, returns `false` when nothing was sent, `true` otherwise. A
+ * facade that reports no result is treated as successful.
+ */
+function assessSyncResult(result: SyncResult | void): boolean {
+	if (!result) { return true; }
+	const outcomes = [
+		{ outcome: result.azure, label: t('backend.syncNow.target.azure') },
+		{ outcome: result.sharingServer, label: t('backend.syncNow.target.teamServer') },
+	].filter(o => o.outcome !== undefined);
+	const failed = outcomes.filter(o => o.outcome === 'failed').map(o => o.label);
+	if (failed.length > 0) {
+		throw new Error(t('backend.syncNow.failed', failed.join(', ')));
+	}
+	return outcomes.some(o => o.outcome === 'synced');
 }
 
 async function withBackendErrorHandling(label: string, fn: () => Promise<void>): Promise<void> {
@@ -119,16 +137,20 @@ export class BackendCommandHandler {
 
 		const targetLabel = describeSyncTargets(targets);
 		await withBackendErrorHandling(`sync to ${targetLabel}`, async () => {
-			await vscode.window.withProgress(
+			const result = await vscode.window.withProgress(
 				{
 					location: vscode.ProgressLocation.Notification,
 					title: t('backend.syncNow.progress', targetLabel),
 					cancellable: false
 				},
-				async () => {
-					await this.facade.syncToBackendStore(true);
-				}
+				async () => this.facade.syncToBackendStore(true)
 			);
+			// The sync service logs per-target failures instead of throwing, so check what it
+			// reports rather than treating "returned" as "uploaded".
+			if (!assessSyncResult(result)) {
+				vscode.window.showWarningMessage(t('backend.syncNow.nothingSent', targetLabel));
+				return;
+			}
 			showBackendSuccess(t('backend.syncNow.synced', targetLabel));
 		});
 	}

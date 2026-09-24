@@ -1106,3 +1106,15 @@ test('l10n: backend Sync Now progress and success text resolve in English and zh
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: backend Sync Now failure and nothing-sent text resolve in English and zh-cn', () => {
+	assert.equal(t('backend.syncNow.failed', 'Team Server'), 'Upload to Team Server failed. See the AI Engineering Fluency output channel for details.');
+	assert.equal(t('backend.syncNow.nothingSent', 'Team Server'), 'Nothing was uploaded to Team Server. Another VS Code window may be syncing, or the Team Server needs a GitHub sign-in. See the output channel for details.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('backend.syncNow.failed', '团队服务器'), '上传到团队服务器失败。有关详细信息，请查看 AI Engineering Fluency 输出通道。');
+		assert.equal(t('backend.syncNow.nothingSent', '团队服务器'), '未向团队服务器上传任何数据。可能有另一个 VS Code 窗口正在同步，或者团队服务器需要登录 GitHub。有关详细信息，请查看输出通道。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});

@@ -433,3 +433,32 @@ test('applyIdStrategies: hashes per dataset only when the policy says so', () =>
 	assert.equal(hashed.workspaceId, hashWorkspaceIdForTeam({ datasetId: 'ds', workspaceId: 'ws' }));
 	assert.equal(hashed.machineId, hashMachineIdForTeam({ datasetId: 'ds', machineId: 'm' }));
 });
+
+// ── per-target results reported to Sync Now ──────────────────────────────
+
+test('syncToBackendStore reports each attempted target\'s outcome', async () => {
+	const { svc } = makeService([]);
+	assert.deepEqual(await svc.syncToBackendStore(true, both(), true), { azure: 'synced', sharingServer: 'synced' });
+	assert.deepEqual(await svc.syncToBackendStore(true, teamServerOnly(), true), { sharingServer: 'synced' });
+	assert.deepEqual(await svc.syncToBackendStore(true, { ...both(), sharingProfile: 'off' }, true), {});
+});
+
+test('syncToBackendStore reports a failed Team Server upload as failed, not synced', async () => {
+	const { svc } = makeService([]);
+	(svc as any).sharingServerUploadService.uploadRollups = async () => { throw new Error('HTTP 500'); };
+	assert.deepEqual(await svc.syncToBackendStore(true, both(), true), { azure: 'synced', sharingServer: 'failed' });
+});
+
+test('syncToBackendStore reports a Team Server with no GitHub token as skipped', async () => {
+	const { svc } = makeService([]);
+	(svc as any).deps.getGithubToken = () => undefined;
+	assert.deepEqual(await svc.syncToBackendStore(true, teamServerOnly(), true), { sharingServer: 'skipped' });
+});
+
+test('syncToBackendStore reports a lock held by another window as skipped', async () => {
+	await withLockDir(async (context, dir) => {
+		holdTeamServerLock(dir, TEAM_SERVER.sharingServerEndpointUrl);
+		const { svc } = makeService([], context);
+		assert.deepEqual(await svc.syncToBackendStore(true, teamServerOnly(), true), { sharingServer: 'skipped' });
+	});
+});

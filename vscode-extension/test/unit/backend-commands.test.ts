@@ -105,6 +105,45 @@ describe('backend/commands', { concurrency: false }, () => {
 	assert.ok((vscode as any).__mock.state.lastWarningMessages.some((m: string) => m.includes('sharing profile is set to Off')));
 	});
 
+	const runSyncNow = async (settings: any, result: any) => {
+		(vscode as any).__mock.reset();
+		const handler = new BackendCommandHandler({
+			facade: createMockFacade({ getSettings: () => settings, isConfigured: () => true, syncToBackendStore: async () => result }),
+			integration: {},
+			calculateEstimatedCost: () => 0,
+			warn: () => undefined,
+			log: () => undefined
+		});
+		await handler.handleSyncBackendNow();
+		return (vscode as any).__mock.state;
+	};
+
+	test('handleSyncBackendNow reports a failed Team Server upload as an error, not success', async () => {
+		const state = await runSyncNow({ enabled: false, sharingProfile: 'teamAnonymized', sharingServerEnabled: true, sharingServerEndpointUrl: 'https://team.example.com' }, { sharingServer: 'failed' });
+		assert.deepEqual(state.lastInfoMessages, []);
+		assert.ok(state.lastErrorMessages.some((m: string) => m.includes('Upload to Team Server failed')), JSON.stringify(state.lastErrorMessages));
+	});
+
+	test('handleSyncBackendNow names only the failed target when the other one synced', async () => {
+		const state = await runSyncNow({ enabled: true, sharingProfile: 'teamAnonymized', subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'sa', aggTable: 'agg', sharingServerEnabled: true, sharingServerEndpointUrl: 'https://team.example.com' }, { azure: 'synced', sharingServer: 'failed' });
+		assert.deepEqual(state.lastInfoMessages, []);
+		assert.ok(state.lastErrorMessages.some((m: string) => m.includes('Upload to Team Server failed') && !m.includes('Azure failed')));
+	});
+
+	test('handleSyncBackendNow warns instead of claiming success when nothing was sent', async () => {
+		const state = await runSyncNow({ enabled: false, sharingProfile: 'teamAnonymized', sharingServerEnabled: true, sharingServerEndpointUrl: 'https://team.example.com' }, { sharingServer: 'skipped' });
+		assert.deepEqual(state.lastInfoMessages, []);
+		assert.ok(state.lastWarningMessages.some((m: string) => m.includes('Nothing was uploaded to Team Server')));
+		const idle = await runSyncNow({ enabled: false, sharingProfile: 'teamAnonymized', sharingServerEnabled: true, sharingServerEndpointUrl: 'https://team.example.com' }, {});
+		assert.deepEqual(idle.lastInfoMessages, []);
+		assert.ok(idle.lastWarningMessages.some((m: string) => m.includes('Nothing was uploaded')));
+	});
+
+	test('handleSyncBackendNow reports success when every attempted target synced', async () => {
+		const state = await runSyncNow({ enabled: true, sharingProfile: 'teamAnonymized', subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'sa', aggTable: 'agg', sharingServerEnabled: true, sharingServerEndpointUrl: 'https://team.example.com' }, { azure: 'synced', sharingServer: 'synced' });
+		assert.ok(state.lastInfoMessages.some((m: string) => m.includes('Synced to Azure and Team Server successfully')));
+	});
+
 	test('handleSyncBackendNow runs sync and shows success; errors show error message', async () => {
 	(vscode as any).__mock.reset();
 	let synced = false;

@@ -41,7 +41,7 @@ export interface AzureResourceServiceDeps {
 	updateTokenStats?: () => Promise<void>;
 	getSettings: () => BackendSettings;
 	startTimerIfEnabled: () => void;
-	syncToBackendStore: (force: boolean) => Promise<void>;
+	syncToBackendStore: (force: boolean) => Promise<unknown>;
 	clearQueryCache: () => void;
 }
 

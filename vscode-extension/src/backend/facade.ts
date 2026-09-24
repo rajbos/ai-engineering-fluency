@@ -28,6 +28,7 @@ import { SharingServerUploadService } from "./services/sharingServerUploadServic
 import { SyncService } from "./services/syncService";
 import { BackendUtility } from "./services/utilityService";
 import type { BackendQueryFilters, BackendSettings } from "./settings";
+import type { SyncResult } from "./types";
 import { getBackendSettings, isBackendConfigured, isAnyBackendConfigured } from "./settings";
 import { computeBackendSharingPolicy } from "./sharingProfile";
 import type { BackendAggDailyEntityLike } from "./storageTables";
@@ -302,7 +303,7 @@ export class BackendFacade {
     return BackendUtility.getDayKeysInclusive(startDayKey, endDayKey);
   }
 
-  public get syncQueue(): Promise<void> {
+  public get syncQueue(): Promise<unknown> {
     return this.syncService.getSyncQueue();
   }
 
@@ -492,7 +493,7 @@ export class BackendFacade {
     return this.credentialService.getBackendSecretsToRedactForError(settings);
   }
 
-  public async syncToBackendStore(force: boolean): Promise<void> {
+  public async syncToBackendStore(force: boolean): Promise<SyncResult | void> {
     const settings = this.getSettings();
     const result = await this.syncService.syncToBackendStore(
       force,

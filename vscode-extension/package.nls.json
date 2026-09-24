@@ -569,5 +569,7 @@
   "backend.syncNow.target.teamServer": "Team Server",
   "backend.syncNow.target.both": "Azure and Team Server",
   "backend.syncNow.progress": "Syncing to {0}...",
-  "backend.syncNow.synced": "Synced to {0} successfully"
+  "backend.syncNow.synced": "Synced to {0} successfully",
+  "backend.syncNow.failed": "Upload to {0} failed. See the AI Engineering Fluency output channel for details.",
+  "backend.syncNow.nothingSent": "Nothing was uploaded to {0}. Another VS Code window may be syncing, or the Team Server needs a GitHub sign-in. See the output channel for details."
 }

@@ -14,7 +14,7 @@ import type { DailyRollupKey } from '../rollups';
 import { upsertDailyRollup } from '../rollups';
 import { resolveSyncTargets, type BackendSettings } from '../settings';
 import { BACKEND_SYNC_MIN_INTERVAL_MS } from '../constants';
-import type { DailyRollupValue, ChatRequest, SessionFileCache, ModelUsage } from '../types';
+import type { DailyRollupValue, ChatRequest, SessionFileCache, ModelUsage, SyncResult, SyncTargetOutcome } from '../types';
 import { resolveUserIdentityForSync, type BackendUserIdentityMode } from '../identity';
 import { computeBackendSharingPolicy, hashMachineIdForTeam, hashWorkspaceIdForTeam } from '../sharingProfile';
 import { createDailyAggEntity, type BackendAggDailyEntityLike } from '../storageTables';
@@ -184,7 +184,7 @@ export interface SyncServiceDeps {
  */
 export class SyncService {
 	private backendSyncInProgress = false;
-	private syncQueue = Promise.resolve();
+	private syncQueue: Promise<unknown> = Promise.resolve();
 	private backendSyncInterval: NodeJS.Timeout | undefined;
 	private consecutiveFailures = 0;
 	private readonly MAX_CONSECUTIVE_FAILURES = 5;
@@ -328,7 +328,7 @@ export class SyncService {
 	/**
 	 * Get the current sync queue promise (for testing).
 	 */
-	getSyncQueue(): Promise<void> {
+	getSyncQueue(): Promise<unknown> {
 		return this.syncQueue;
 	}
 
@@ -1400,9 +1400,10 @@ return true;
 	 * @param isConfigured - Whether the backend is fully configured
 	 * @throws Error if sync fails due to network or auth issues
 	 */
-	async syncToBackendStore(force: boolean, settings: BackendSettings, isConfigured: boolean): Promise<void> {
-		this.syncQueue = this.syncQueue.then(() => this.doSyncToBackendStore(force, settings, isConfigured));
-		return this.syncQueue;
+	async syncToBackendStore(force: boolean, settings: BackendSettings, isConfigured: boolean): Promise<SyncResult> {
+		const run = this.syncQueue.then(() => this.doSyncToBackendStore(force, settings, isConfigured));
+		this.syncQueue = run;
+		return run;
 	}
 
 	private logSyncSkipReason(isConfigured: boolean, settings: BackendSettings): void {
@@ -1451,22 +1452,26 @@ return true;
 	}
 
 	/** Runs the Azure Table Storage sync in isolation, logging (but not throwing) on failure. */
-	private async runAzureSyncIndependently(settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<void> {
+	private async runAzureSyncIndependently(settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<SyncTargetOutcome> {
 		try {
 			await this.performAzureTableSync(settings, sharingPolicy);
+			return 'synced';
 		} catch (e: unknown) {
 			const secretsToRedact = await this.credentialService.getBackendSecretsToRedactForError(settings);
 			this.deps.logger.warn(`Backend sync: ${safeStringifyError(e, secretsToRedact)}`);
+			return 'failed';
 		}
 	}
 
 	/** Runs the Team Server (sharing server) sync in isolation, logging (but not throwing) on failure. */
-	private async runSharingServerSyncIndependently(settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<void> {
+	private async runSharingServerSyncIndependently(settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<SyncTargetOutcome> {
 		try {
-			await this.syncToSharingServer(settings, sharingPolicy);
+			if (!await this.syncToSharingServer(settings, sharingPolicy)) { return 'skipped'; }
 			await this.tryUpdateSharingServerLastSyncAt();
+			return 'synced';
 		} catch (ssErr: unknown) {
 			this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`);
+			return 'failed';
 		}
 	}
 
@@ -1475,20 +1480,20 @@ return true;
 	 * uploading to the same endpoint serialize regardless of their other targets, other windows'
 	 * endpoints, or their `backend.backend` selector.
 	 */
-	private async runUnderTargetLock(kind: 'azure' | 'sharingserver', endpoint: string, label: string, run: () => Promise<void>): Promise<void> {
+	private async runUnderTargetLock(kind: 'azure' | 'sharingserver', endpoint: string, label: string, run: () => Promise<SyncTargetOutcome>): Promise<SyncTargetOutcome> {
 		const token = syncTargetLockToken(kind, endpoint);
 		const lockName = targetSyncLockName(kind, token);
 		const skipReason = `Backend sync: skipping ${label} (another VS Code window is currently syncing to the same endpoint)`;
 		if (await this.isLegacyLockHeldFor(token)) {
 			this.deps.logger.log(skipReason);
-			return;
+			return 'skipped';
 		}
 		if (!await this.acquireSyncLock(lockName, token)) {
 			this.deps.logger.log(skipReason);
-			return;
+			return 'skipped';
 		}
 		try {
-			await run();
+			return await run();
 		} finally {
 			await this.releaseSyncLock(lockName);
 		}
@@ -1504,11 +1509,11 @@ return true;
 		return false;
 	}
 
-	private async doSyncToBackendStore(force: boolean, settings: BackendSettings, isConfigured: boolean): Promise<void> {
-		if (this.backendSyncInProgress) { return; }
+	private async doSyncToBackendStore(force: boolean, settings: BackendSettings, isConfigured: boolean): Promise<SyncResult> {
+		if (this.backendSyncInProgress) { return {}; }
 		if (settings.sharingProfile === 'off' || !isConfigured) {
 			this.logSyncSkipReason(isConfigured, settings);
-			return;
+			return {};
 		}
 
 		// Azure Storage and the Team Server are independent sync targets: either, both, or
@@ -1519,9 +1524,9 @@ return true;
 		const { azure: azureConfigured, sharingServer: sharingConfigured } = resolveSyncTargets(settings);
 		if (!azureConfigured && !sharingConfigured) {
 			this.deps.logger.log(`Backend sync: skipping (${NO_SYNC_TARGET_REASON})`);
-			return;
+			return {};
 		}
-		if (await this.checkSyncThrottle(force)) { return; }
+		if (await this.checkSyncThrottle(force)) { return {}; }
 		// Target gating is done above; the policy here only shapes the uploaded payload.
 		const sharingPolicy = computeBackendSharingPolicy({
 			enabled: true,
@@ -1529,21 +1534,23 @@ return true;
 			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
 		});
 
+		const result: SyncResult = {};
 		this.backendSyncInProgress = true;
 		try {
 			await this.tryUpdateLastSyncAt();
 			if (azureConfigured) {
-				await this.runUnderTargetLock('azure', settings.storageAccount, 'Azure Storage',
+				result.azure = await this.runUnderTargetLock('azure', settings.storageAccount, 'Azure Storage',
 					() => this.runAzureSyncIndependently(settings, sharingPolicy));
 			}
 			if (sharingConfigured) {
-				await this.runUnderTargetLock('sharingserver', settings.sharingServerEndpointUrl, 'Team Server',
+				result.sharingServer = await this.runUnderTargetLock('sharingserver', settings.sharingServerEndpointUrl, 'Team Server',
 					() => this.runSharingServerSyncIndependently(settings, sharingPolicy));
 			}
 			this.consecutiveFailures = 0;
 		} finally {
 			this.backendSyncInProgress = false;
 		}
+		return result;
 	}
 
 	private checkBlobUploadNeeded(settings: BackendSettings): boolean {
@@ -1683,21 +1690,23 @@ return true;
 	}
 
 	/**
-	 * Sync daily rollups to the self-hosted sharing server using a GitHub Bearer token.
+	 * Sync daily rollups to the self-hosted sharing server using a GitHub Bearer token. Resolves
+	 * `true` when the pass completed (including "nothing to upload") and `false` when it could not
+	 * run at all (no upload service or no GitHub token).
 	 */
 	private async syncToSharingServer(
 		settings: BackendSettings,
 		sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>,
-	): Promise<void> {
+	): Promise<boolean> {
 		if (!this.sharingServerUploadService) {
 			this.deps.logger.warn('Sharing server upload: service not available');
-			return;
+			return false;
 		}
 
 		const githubToken = this.deps.getGithubToken?.();
 		if (!githubToken) {
 			this.deps.logger.log('Sharing server upload: skipping (no GitHub token — authenticate with GitHub in VS Code first)');
-			return;
+			return false;
 		}
 
 		const resolvedIdentity = await this.resolveEffectiveUserIdentityForSync(
@@ -1713,7 +1722,7 @@ return true;
 
 		if (rollups.size === 0) {
 			this.deps.logger.log('Sharing server upload: no data to upload');
-			return;
+			return true;
 		}
 
 		const includeNames = sharingPolicy.includeNames;
@@ -1748,6 +1757,7 @@ return true;
 			this.deps.logger.log,
 			this.deps.logger.warn,
 		);
+		return true;
 	}
 
 	/**
