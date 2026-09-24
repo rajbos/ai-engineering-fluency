@@ -15,6 +15,7 @@ import {
 import { OAUTH_STATE_MAX_AGE_SECONDS } from '../config.js';
 import { getTeamInsights, parseTeamDays } from '../teamInsights.js';
 import { renderTeamInsights, teamInsightsCsv } from './teamPage.js';
+import { renderNavExtra } from '../nav.js';
 export const dashboard = new Hono();
 
 dashboard.use('*', async (c, next) => {
@@ -286,6 +287,7 @@ dashboard.get('/team', (c) => {
   ${user.is_admin === 1 ? '<a href="/admin">Admin Dashboard</a>' : ''}
   <a href="/dashboard">My Dashboard</a>
   <strong aria-current="page">Team Insights</strong>
+  ${renderNavExtra('/team')}
   <span>${h(user.github_name ?? user.github_login)}</span>
   <a href="/auth/logout">Sign out</a>
 </div>
@@ -1111,6 +1113,7 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
   ${fluencyBadgeHtml}
   ${isAdmin ? `<a href="/admin" style="margin-left:8px;color:#e3b341">Admin Dashboard</a><span style="margin-left:8px;color:#e6edf3;font-size:0.875rem;font-weight:600">My Dashboard</span>` : ''}
   <a href="/team">Team Insights</a>
+  ${renderNavExtra('/dashboard')}
   ${avatarUrl ? `<img src="${avatarUrl}" class="avatar-sm" alt="${login}" style="margin-left:8px">` : ''}
   <span style="color:#c9d1d9;font-size:0.875rem">${displayName}</span>
   <a href="/auth/logout" style="margin-left:8px">Sign out</a>
@@ -1481,6 +1484,7 @@ function adminDashboardPage(
   <span style="color:#e6edf3;font-size:0.875rem;font-weight:600">Admin Dashboard</span>
   <a href="/dashboard" style="margin-left:8px">My Dashboard</a>
   <a href="/team">Team Insights</a>
+  ${renderNavExtra('/admin')}
   ${adminAvatar ? `<img src="${adminAvatar}" class="avatar-sm" alt="${adminLogin}" style="margin-left:8px">` : ''}
   <span style="color:#c9d1d9;font-size:0.875rem">${adminName}</span>
   <a href="/auth/logout" style="margin-left:8px">Sign out</a>

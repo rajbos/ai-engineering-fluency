@@ -344,6 +344,7 @@ routes.post('/upload', requireBearerAuth, async (c) => {
 
 const app = createApp({
 	healthExtra: () => ({ edition: 'my-company' }),
+	navExtra: () => [{ href: '/mine', label: 'My Insights' }],
 	extend: (a) => a.route('/api/mine', routes),
 });
 
@@ -356,11 +357,13 @@ await startServer(app);
 |---|---|
 | `createApp({ extend })` | Register routes **before** the built-in ones. Because Hono matches in registration order, this also lets you override a built-in path. |
 | `createApp({ healthExtra })` | Merge extra fields into `/health`. |
+| `createApp({ navExtra })` | Add links to the built-in page headers, so a page you mount through `extend` is reachable from the UI instead of by URL only. Same-origin paths only; labels are escaped. |
 | `createApp({ mountApi, mountDashboard })` | Opt out of the built-in route groups. |
 | `registerSchemaExtension(name, fn)` | Add tables/indexes/migrations. Call before the first `getDb()`. |
 | `requireBearerAuth` | Authenticate with the same GitHub token as `/api/upload`, so your rows share the same `user_id`. |
 | `getTeamInsights(viewerId, days)`, `parseTeamDays(raw)` | Reuse the safe Team Insights projection and supported-period parsing. Derive `viewerId` only from server-authenticated identity, never request/query input. |
 | `TeamInsights`, `TeamMember`, `UsageCohort` | Public TypeScript types for the identity-free projection. |
+| `renderNavExtra(currentPath)`, `NavLink` | Render the same downstream links inside your own page header, so navigation stays consistent across built-in and custom pages. |
 | `startServer(app, opts)` | Backup/restore, DB init with retry, periodic backup, graceful shutdown. |
 
 ### Guidance
