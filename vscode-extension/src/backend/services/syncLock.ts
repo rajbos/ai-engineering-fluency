@@ -108,6 +108,23 @@ export class SyncLock {
 	}
 
 	/**
+	 * Whether a live (non-stale, parseable) lock at `lockName` is held by *another* window and
+	 * `covers` its recorded server URL. Read-only: never creates, breaks or rewrites the file.
+	 */
+	async isHeldByAnotherWindow(lockName: string | undefined, covers: (lockServerUrl: string | undefined) => boolean): Promise<boolean> {
+		const ctx = this.context;
+		if (!ctx) { return false; }
+		try {
+			const lock = this.parseLockContent(await fs.promises.readFile(SyncLock.lockPath(ctx, lockName), 'utf-8'));
+			if (!lock || lock.sessionId === vscode.env.sessionId) { return false; }
+			if (Date.now() - lock.timestamp > SyncLock.STALE_MS) { return false; }
+			return covers(lock.serverUrl);
+		} catch {
+			return false; // No lock file
+		}
+	}
+
+	/**
 	 * Release the sync lock, but only if we own it.
 	 */
 	async release(lockName?: string): Promise<void> {

@@ -57,19 +57,27 @@ export interface BackendQueryFilters {
 	userId?: string;
 }
 
-export function getBackendSettings(): BackendSettings {
-	const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
+/**
+ * The sharing profile the user explicitly set, or `undefined` when none is persisted. Uses
+ * `inspect()` because `get()` returns the package.json default (`off`) for an unset value,
+ * which would hide that the profile should be inferred.
+ */
+export function readExplicitSharingProfile(config: vscode.WorkspaceConfiguration): BackendSharingProfile | undefined {
 	const sharingProfileInspect = typeof (config as any).inspect === 'function'
 		? config.inspect<string>('backend.sharingProfile')
 		: undefined;
-	const sharingProfileRaw = sharingProfileInspect?.globalValue ?? sharingProfileInspect?.workspaceValue ?? sharingProfileInspect?.workspaceFolderValue;
+	return parseBackendSharingProfile(sharingProfileInspect?.globalValue ?? sharingProfileInspect?.workspaceValue ?? sharingProfileInspect?.workspaceFolderValue);
+}
+
+export function getBackendSettings(): BackendSettings {
+	const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
 
 	const userId = config.get<string>('backend.userId', '').trim();
 	const userIdMode = config.get<'alias' | 'custom'>('backend.userIdMode', 'alias');
 	const userIdentityMode = config.get<BackendUserIdentityMode>('backend.userIdentityMode', 'pseudonymous');
 	const shareWithTeam = config.get<boolean>('backend.shareWithTeam', false);
 
-	const parsedSharingProfile = parseBackendSharingProfile(sharingProfileRaw);
+	const parsedSharingProfile = readExplicitSharingProfile(config);
 	// Default posture is minimizing: when either upload target (Azure Storage or the Team
 	// Server) is enabled without an explicit profile, default to teamAnonymized (hashed IDs,
 	// no user dimension, names off). Enabling the Team Server alone is an explicit opt-in to

@@ -564,5 +564,10 @@
   "whatsNew.feature.usage.context-window.title": "Context Window & Long-Context Pricing",
   "whatsNew.feature.usage.context-window.description": "How full your context windows run, and which requests tipped into long-context pricing. Large contexts are billed differently, and this is where that shows up.",
   "backend.syncNow.profileOff": "Backend sync is off because the sharing profile is set to Off. Choose another profile to upload data.",
-  "backend.syncNow.notConfigured": "Backend is not fully configured. Run \"Configure Backend\" for Azure Storage or \"Configure Team Server Backend\" for the Team Server."
+  "backend.syncNow.notConfigured": "Backend is not fully configured. Run \"Configure Backend\" for Azure Storage or \"Configure Team Server Backend\" for the Team Server.",
+  "backend.syncNow.target.azure": "Azure",
+  "backend.syncNow.target.teamServer": "Team Server",
+  "backend.syncNow.target.both": "Azure and Team Server",
+  "backend.syncNow.progress": "Syncing to {0}...",
+  "backend.syncNow.synced": "Synced to {0} successfully"
 }

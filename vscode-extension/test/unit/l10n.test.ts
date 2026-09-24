@@ -1093,3 +1093,16 @@ test('l10n: backend Sync Now warnings resolve in English and zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: backend Sync Now progress and success text resolve in English and zh-cn', () => {
+	assert.equal(t('backend.syncNow.synced', t('backend.syncNow.target.teamServer')), 'Synced to Team Server successfully');
+	assert.equal(t('backend.syncNow.synced', t('backend.syncNow.target.azure')), 'Synced to Azure successfully');
+	assert.equal(t('backend.syncNow.progress', t('backend.syncNow.target.both')), 'Syncing to Azure and Team Server...');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('backend.syncNow.synced', t('backend.syncNow.target.teamServer')), '已成功同步到团队服务器');
+		assert.equal(t('backend.syncNow.progress', t('backend.syncNow.target.both')), '正在同步到Azure 和团队服务器...');
+	} finally {
+		mock.setLanguage('en');
+	}
+});

@@ -20,8 +20,8 @@ import { t } from '../l10n';
 
 /** Names the targets a manual sync writes to, for its progress, success and error text. */
 function describeSyncTargets(targets: SyncTargets): string {
-	if (targets.azure && targets.sharingServer) { return 'Azure and Team Server'; }
-	return targets.azure ? 'Azure' : 'Team Server';
+	if (targets.azure && targets.sharingServer) { return t('backend.syncNow.target.both'); }
+	return targets.azure ? t('backend.syncNow.target.azure') : t('backend.syncNow.target.teamServer');
 }
 
 async function withBackendErrorHandling(label: string, fn: () => Promise<void>): Promise<void> {
@@ -122,14 +122,14 @@ export class BackendCommandHandler {
 			await vscode.window.withProgress(
 				{
 					location: vscode.ProgressLocation.Notification,
-					title: `Syncing to ${targetLabel}...`,
+					title: t('backend.syncNow.progress', targetLabel),
 					cancellable: false
 				},
 				async () => {
 					await this.facade.syncToBackendStore(true);
 				}
 			);
-			showBackendSuccess(SuccessMessages.synced(targetLabel));
+			showBackendSuccess(t('backend.syncNow.synced', targetLabel));
 		});
 	}
 

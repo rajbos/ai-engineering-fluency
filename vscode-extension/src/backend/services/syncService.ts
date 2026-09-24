@@ -30,7 +30,43 @@ import { getEditorTypeFromPath, refineEditorLabelForInteractionModeSplit } from 
 /** Ecosystem session per-model usage entry (input, output, optional interactions). */
 type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };
 
-/** Logged when neither Azure Storage nor the Team Server is switched on and configured. */
+/**
+ * Canonical form of a Team Server endpoint URL: lower-cased origin plus path without trailing
+ * slashes. The upload service strips a trailing slash before posting, so `https://x` and
+ * `https://x/` hit the same endpoint and must share one cross-window lock.
+ */
+export function canonicalTeamServerUrl(url: string): string {
+	const trimmed = url.trim();
+	try {
+		const parsed = new URL(trimmed);
+		return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
+	} catch {
+		return trimmed.replace(/\/+$/, '');
+	}
+}
+
+/** Canonical lock identity for each sync target; also what the lock file records as its server URL. */
+export function syncTargetLockToken(kind: 'azure' | 'sharingserver', endpoint: string): string {
+	return kind === 'azure' ? `azure:${endpoint.trim().toLowerCase()}` : `share:${canonicalTeamServerUrl(endpoint)}`;
+}
+
+/**
+ * Lock files written by extension versions before per-endpoint locks. Their recorded server URL
+ * is a `|`-joined list of the targets that window was syncing (`azure:<account>|share:<url>`).
+ * While an older window may still be running, a live lock there that covers a target blocks it.
+ */
+const LEGACY_SYNC_LOCK_NAMES: ReadonlyArray<string | undefined> = [undefined, 'sharingserver'];
+
+/** Whether a legacy lock's recorded server URL covers `token`. Unknown formats are treated as covering. */
+export function legacyLockCoversTarget(lockServerUrl: string | undefined, token: string): boolean {
+	if (!lockServerUrl) { return true; }
+	return lockServerUrl.split('|').some(part => {
+		if (part.startsWith('azure:')) { return syncTargetLockToken('azure', part.slice('azure:'.length)) === token; }
+		if (part.startsWith('share:')) { return syncTargetLockToken('sharingserver', part.slice('share:'.length)) === token; }
+		return true;
+	});
+}
+
 /**
  * Lock name for one sync target endpoint: its kind plus a stable hash of the endpoint. One lock
  * file per endpoint means a window syncing to server A can never make two windows syncing to
@@ -40,6 +76,7 @@ export function targetSyncLockName(kind: 'azure' | 'sharingserver', endpoint: st
 	return `${kind}_${createHash('sha256').update(endpoint).digest('hex').slice(0, 16)}`;
 }
 
+/** Logged when neither Azure Storage nor the Team Server is switched on and configured. */
 const NO_SYNC_TARGET_REASON = 'no sync target enabled: Azure Storage needs backend.enabled plus Azure settings; Team Server needs backend.sharingServer.enabled plus an endpoint URL';
 
 /**
@@ -1423,9 +1460,15 @@ return true;
 	 * endpoints, or their `backend.backend` selector.
 	 */
 	private async runUnderTargetLock(kind: 'azure' | 'sharingserver', endpoint: string, label: string, run: () => Promise<void>): Promise<void> {
-		const lockName = targetSyncLockName(kind, endpoint);
-		if (!await this.acquireSyncLock(lockName, endpoint)) {
-			this.deps.logger.log(`Backend sync: skipping ${label} (another VS Code window is currently syncing to the same endpoint)`);
+		const token = syncTargetLockToken(kind, endpoint);
+		const lockName = targetSyncLockName(kind, token);
+		const skipReason = `Backend sync: skipping ${label} (another VS Code window is currently syncing to the same endpoint)`;
+		if (await this.isLegacyLockHeldFor(token)) {
+			this.deps.logger.log(skipReason);
+			return;
+		}
+		if (!await this.acquireSyncLock(lockName, token)) {
+			this.deps.logger.log(skipReason);
 			return;
 		}
 		try {
@@ -1433,6 +1476,16 @@ return true;
 		} finally {
 			await this.releaseSyncLock(lockName);
 		}
+	}
+
+	/** Whether a window still running an older extension version holds a legacy lock covering `token`. */
+	private async isLegacyLockHeldFor(token: string): Promise<boolean> {
+		for (const legacyName of LEGACY_SYNC_LOCK_NAMES) {
+			if (await this.syncLock.isHeldByAnotherWindow(legacyName, (url) => legacyLockCoversTarget(url, token))) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private async doSyncToBackendStore(force: boolean, settings: BackendSettings, isConfigured: boolean): Promise<void> {
@@ -1464,11 +1517,11 @@ return true;
 		try {
 			await this.tryUpdateLastSyncAt();
 			if (azureConfigured) {
-				await this.runUnderTargetLock('azure', `azure:${settings.storageAccount}`, 'Azure Storage',
+				await this.runUnderTargetLock('azure', settings.storageAccount, 'Azure Storage',
 					() => this.runAzureSyncIndependently(settings, sharingPolicy));
 			}
 			if (sharingConfigured) {
-				await this.runUnderTargetLock('sharingserver', `share:${settings.sharingServerEndpointUrl}`, 'Team Server',
+				await this.runUnderTargetLock('sharingserver', settings.sharingServerEndpointUrl, 'Team Server',
 					() => this.runSharingServerSyncIndependently(settings, sharingPolicy));
 			}
 			this.consecutiveFailures = 0;

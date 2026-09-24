@@ -500,3 +500,32 @@ test('TeamServerConfigPanel - renderHtml includes the data-sharing info column',
 	assert.ok(html.includes('dashboard-preview'), 'Should include the dashboard preview mockup');
 	assert.ok(html.includes('not live data'), 'Should label the mockup as illustrative, not live data');
 });
+
+function renderPanelWithProfile(inspected: string | undefined): string {
+	(vscode as any).__mock.reset();
+	const panel = createMockPanel();
+	(vscode.window as any).createWebviewPanel = () => panel;
+	(vscode.workspace as any).getConfiguration = () => ({
+		// get() returns the package.json default for an unset profile, exactly like VS Code.
+		get: (key: string, defaultValue: any) => defaultValue,
+		inspect: (key: string) => key === 'backend.sharingProfile' ? { globalValue: inspected } : undefined,
+	});
+	const { TeamServerConfigPanel } = require('../../src/backend/teamServerConfigPanel');
+	TeamServerConfigPanel.current = undefined;
+	TeamServerConfigPanel.show({ extensionUri: vscode.Uri.parse('file:///extension'), subscriptions: [] } as any);
+	const html = panel.webview.html as string;
+	TeamServerConfigPanel.current?.dispose();
+	TeamServerConfigPanel.current = undefined;
+	return html;
+}
+
+test('TeamServerConfigPanel - an unset sharing profile preselects teamAnonymized, not off', () => {
+	const html = renderPanelWithProfile(undefined);
+	assert.ok(html.includes('<option value="teamAnonymized" selected>'), 'an unchanged save must not persist an explicit off');
+	assert.ok(!html.includes('<option value="off" selected>'));
+});
+
+test('TeamServerConfigPanel - an explicit sharing profile is preserved, including off', () => {
+	assert.ok(renderPanelWithProfile('off').includes('<option value="off" selected>'));
+	assert.ok(renderPanelWithProfile('teamIdentified').includes('<option value="teamIdentified" selected>'));
+});

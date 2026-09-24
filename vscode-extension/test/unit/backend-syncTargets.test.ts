@@ -6,7 +6,7 @@ import * as path from 'node:path';
 
 import * as vscode from 'vscode';
 
-import { SyncService, targetSyncLockName, type SyncServiceDeps } from '../../src/backend/services/syncService';
+import { SyncService, canonicalTeamServerUrl, legacyLockCoversTarget, syncTargetLockToken, targetSyncLockName, type SyncServiceDeps } from '../../src/backend/services/syncService';
 import { BackendUtility } from '../../src/backend/services/utilityService';
 import { getBackendSettings, resolveSyncTargets, type BackendSettings } from '../../src/backend/settings';
 import { inferSharingProfile } from '../../src/backend/settingsValidation';
@@ -273,7 +273,7 @@ function withLockDir(fn: (context: vscode.ExtensionContext, dir: string) => Prom
 
 /** Simulates another window holding the lock for a Team Server endpoint. */
 function holdTeamServerLock(dir: string, endpointUrl: string): void {
-	const serverUrl = `share:${endpointUrl}`;
+	const serverUrl = syncTargetLockToken('sharingserver', endpointUrl);
 	const file = `backend_sync_${targetSyncLockName('sharingserver', serverUrl)}.lock`;
 	fs.writeFileSync(path.join(dir, file), JSON.stringify({ sessionId: 'other-window', timestamp: Date.now(), serverUrl }));
 }
@@ -332,4 +332,54 @@ test('sync lock: each endpoint gets its own lock file, so another endpoint\'s lo
 		await bSync;
 		assert.equal(b.calls.teamServer, 1);
 	});
+});
+
+test('sync lock: Team Server URLs differing only by trailing slash or host case share one lock', async () => {
+	assert.equal(canonicalTeamServerUrl('https://Team.Example.com/'), 'https://team.example.com');
+	assert.equal(canonicalTeamServerUrl('https://team.example.com/base//'), 'https://team.example.com/base');
+	await withLockDir(async (context, dir) => {
+		holdTeamServerLock(dir, 'https://team.example.com');
+		const logs: string[] = [];
+		const { svc, calls } = makeService(logs, context);
+		await svc.syncToBackendStore(true, { ...teamServerOnly(), sharingServerEndpointUrl: 'https://TEAM.example.com/' }, true);
+		assert.equal(calls.teamServer, 0, `Logs:\n${logs.join('\n')}`);
+	});
+});
+
+// ── legacy lock files from extension versions before per-endpoint locks ─
+
+function holdLegacyLock(dir: string, file: string, serverUrl: string | undefined, timestamp = Date.now()): void {
+	fs.writeFileSync(path.join(dir, file), JSON.stringify({ sessionId: 'old-version-window', timestamp, serverUrl }));
+}
+
+for (const file of ['backend_sync.lock', 'backend_sync_sharingserver.lock']) {
+	test(`legacy lock: a live ${file} covering this Team Server blocks it during an upgrade`, async () => {
+		await withLockDir(async (context, dir) => {
+			holdLegacyLock(dir, file, `azure:sa|share:${TEAM_SERVER.sharingServerEndpointUrl}/`);
+			const logs: string[] = [];
+			const { svc, calls } = makeService(logs, context);
+			await svc.syncToBackendStore(true, both(), true);
+			assert.equal(calls.teamServer, 0, `Logs:\n${logs.join('\n')}`);
+			assert.equal(calls.azure, 0, 'the legacy composite lock also covers azure:sa');
+		});
+	});
+}
+
+test('legacy lock: one covering a different endpoint, or stale, does not block', async () => {
+	await withLockDir(async (context, dir) => {
+		holdLegacyLock(dir, 'backend_sync_sharingserver.lock', 'share:https://other-team.example.com');
+		holdLegacyLock(dir, 'backend_sync.lock', `share:${TEAM_SERVER.sharingServerEndpointUrl}`, Date.now() - 60 * 60 * 1000);
+		const { svc, calls } = makeService([], context);
+		await svc.syncToBackendStore(true, teamServerOnly(), true);
+		assert.equal(calls.teamServer, 1);
+	});
+});
+
+test('legacyLockCoversTarget: matches composite entries canonically; unknown formats cover conservatively', () => {
+	const share = syncTargetLockToken('sharingserver', 'https://team.example.com');
+	assert.equal(legacyLockCoversTarget('azure:sa|share:https://team.example.com/', share), true);
+	assert.equal(legacyLockCoversTarget('azure:sa', share), false);
+	assert.equal(legacyLockCoversTarget('azure:SA', syncTargetLockToken('azure', 'sa')), true);
+	assert.equal(legacyLockCoversTarget(undefined, share), true);
+	assert.equal(legacyLockCoversTarget('https://mystorage.table.core.windows.net', share), true);
 });

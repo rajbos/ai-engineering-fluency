@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getNonce } from '../utils/webviewUtils';
+import { readExplicitSharingProfile } from './settings';
 
 export class TeamServerConfigPanel implements vscode.Disposable {
 	private static current: TeamServerConfigPanel | undefined;
@@ -43,7 +44,10 @@ export class TeamServerConfigPanel implements vscode.Disposable {
 		const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
 		const enabled: boolean = config.get<boolean>('backend.sharingServer.enabled', false);
 		const endpointUrl: string = config.get<string>('backend.sharingServer.endpointUrl', '');
-		const sharingProfile: string = config.get<string>('backend.sharingProfile', 'off');
+		// Preselect the explicit profile, or — when none is set — what an enabled Team Server infers
+		// (teamAnonymized). Reading get()'s 'off' default here would make an unchanged save persist
+		// an explicit 'off' and silently disable uploads.
+		const sharingProfile: string = readExplicitSharingProfile(config) ?? 'teamAnonymized';
 
 		this.panel = vscode.window.createWebviewPanel(
 			'copilotTeamServerConfig',
