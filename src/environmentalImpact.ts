@@ -157,10 +157,24 @@ export function getTotalTokensFromModelUsage(modelUsage: ModelUsage): number {
 }
 
 /**
+ * The synthetic bucket `reconcileModelUsageToTotal()` fills when a session has
+ * no usable per-model split. It books every such token as input, so weighting
+ * it would count a whole session at the input rate; treat it as unattributed.
+ */
+const UNATTRIBUTED_MODEL_KEY = 'unknown';
+
+function withoutUnattributedBucket(modelUsage: ModelUsage): ModelUsage {
+	if (!(UNATTRIBUTED_MODEL_KEY in modelUsage)) { return modelUsage; }
+	const { [UNATTRIBUTED_MODEL_KEY]: _unattributed, ...attributed } = modelUsage;
+	return attributed;
+}
+
+/**
  * CO₂, water and tree equivalent for a set of model usage.
  *
  * `totalTokens` may exceed what `modelUsage` accounts for (sessions without a
- * per-model breakdown). That remainder is estimated with the reference
+ * per-model breakdown), and an `unknown` bucket carries no real split. Both
+ * are estimated with the reference
  * prompt's input/output mix at the Sonnet baseline, so it still counts instead
  * of silently dropping out of the total.
  */
@@ -169,13 +183,14 @@ export function calculateEnvironmentalImpact(
 	totalTokens?: number,
 	pricing: PricingTable = DEFAULT_PRICING
 ): EnvironmentalImpact {
-	const attributedTokens = getTotalTokensFromModelUsage(modelUsage);
-	const unattributedTokens = Math.max(0, (totalTokens ?? attributedTokens) - attributedTokens);
+	const attributedUsage = withoutUnattributedBucket(modelUsage);
+	const attributedTokens = getTotalTokensFromModelUsage(attributedUsage);
+	const unattributedTokens = Math.max(0, (totalTokens ?? getTotalTokensFromModelUsage(modelUsage)) - attributedTokens);
 	const unattributedOutputEquivalent = unattributedTokens * ENVIRONMENTAL.UNATTRIBUTED_OUTPUT_EQUIVALENT_PER_TOKEN;
 
 	let outputEquivalentTokens = unattributedOutputEquivalent;
 	let scaledOutputEquivalent = unattributedOutputEquivalent;
-	for (const [model, usage] of Object.entries(modelUsage)) {
+	for (const [model, usage] of Object.entries(attributedUsage)) {
 		const outputEquivalent = outputEquivalentForUsage(usage);
 		outputEquivalentTokens += outputEquivalent;
 		scaledOutputEquivalent += outputEquivalent * getModelEnvironmentalScale(model, pricing);

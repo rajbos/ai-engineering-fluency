@@ -199,6 +199,7 @@
   "environmental.methodology.waterAnalogies": "用水类比：淋浴 ≈ 8 L/分钟 · 洗衣机 ≈ 50 L · 标准浴缸 ≈ 150 L · 洗碗机 ≈ 12 L · 一杯茶 ≈ 250 mL · 每人每日饮水 ≈ 2 L。",
   "environmental.methodology.caveat": "所有类比都只是数量级估算。实际数值取决于你所在地区的能源结构、硬件、模型实现和缓存行为。",
   "environmental.methodology.sources": "来源：",
+  "environmental.methodology.paperLink": "Jegham 等人，《How Hungry is AI?》（arXiv:2505.09598）",
   "environmental.methodology.neulandLink": "neuland/tokendashboard-backend — CO₂ 方法说明",
   "button.openSettings": "打开设置",
   "button.openUsageAnalysis": "打开使用分析",

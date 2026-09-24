@@ -21,6 +21,7 @@
   "environmental.methodology.waterAnalogies": "Water analogies: shower ≈ 8 L/min · washing machine ≈ 50 L · standard bathtub ≈ 150 L · dishwasher ≈ 12 L · mug of tea ≈ 250 mL · daily drinking water ≈ 2 L/person.",
   "environmental.methodology.caveat": "All analogies are order-of-magnitude estimates. Actual values depend on your region's energy mix, hardware, model implementation, and caching behavior.",
   "environmental.methodology.sources": "Sources:",
+  "environmental.methodology.paperLink": "Jegham et al., \"How Hungry is AI?\" (arXiv:2505.09598)",
   "environmental.methodology.neulandLink": "neuland/tokendashboard-backend — CO₂ methodology",
   "share.exportTitle": "AI Engineering Fluency Score",
   "share.exportReportLabel": "Report",

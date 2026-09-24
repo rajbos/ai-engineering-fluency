@@ -42,8 +42,9 @@ export const environmentalCommand = new Command('environmental')
 		console.log(chalk.dim(`  Reference: Claude 3.7 Sonnet, ${PAPER_REFERENCE.PROMPT_INPUT_TOKENS} in / ${PAPER_REFERENCE.PROMPT_OUTPUT_TOKENS} out = ${PAPER_REFERENCE.ENERGY_WH_PER_QUERY} Wh per query`));
 		console.log(chalk.dim(`  CO₂: ${ENVIRONMENTAL.CO2_GRAMS_PER_MILLION_OUTPUT_EQUIVALENT_TOKENS} gCO₂e per 1M output-equivalent tokens (Sonnet), ${PAPER_REFERENCE.CIF_KG_CO2E_PER_KWH} kgCO₂e/kWh`));
 		console.log(chalk.dim(`  Water: ${ENVIRONMENTAL.WATER_LITERS_PER_MILLION_OUTPUT_EQUIVALENT_TOKENS.toFixed(1)} L per 1M output-equivalent tokens (Sonnet), on-site + off-site`));
-		console.log(chalk.dim(`  Approximate weights: output=1, input=${ENVIRONMENTAL.INPUT_TOKEN_OUTPUT_EQUIVALENT_WEIGHT}, cache write=${ENVIRONMENTAL.CACHE_WRITE_OUTPUT_EQUIVALENT_WEIGHT}, cache read=${ENVIRONMENTAL.CACHE_READ_OUTPUT_EQUIVALENT_WEIGHT}`));
+		console.log(chalk.dim(`  Approximate weights: output=1, uncached input=${ENVIRONMENTAL.INPUT_TOKEN_OUTPUT_EQUIVALENT_WEIGHT}, cache write=${ENVIRONMENTAL.CACHE_WRITE_OUTPUT_EQUIVALENT_WEIGHT}, cache read=${ENVIRONMENTAL.CACHE_READ_OUTPUT_EQUIVALENT_WEIGHT}`));
 		console.log(chalk.dim('  Other models scaled from Sonnet by output-token price.'));
+		console.log(chalk.dim('  Tokens without a per-model breakdown use the reference request's input/output mix.'));
 		console.log(chalk.dim(`  Tree absorption: ${formatCo2(ENVIRONMENTAL.CO2_ABSORPTION_PER_TREE_PER_YEAR)} CO₂/year\n`));
 
 		for (const period of periods) {

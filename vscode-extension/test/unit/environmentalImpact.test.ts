@@ -1,10 +1,13 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 import {
 	calculateEnvironmentalImpact,
 	calculateOutputEquivalentTokens,
 	ENVIRONMENTAL,
+	ENVIRONMENTAL_METHODOLOGY_SOURCES,
 	getModelEnvironmentalScale,
 	PAPER_REFERENCE,
 } from '../../../src/environmentalImpact';
@@ -142,4 +145,58 @@ test('totalTokens below the breakdown total does not produce a negative remainde
 	const impact = calculateEnvironmentalImpact(modelUsage, 5_000);
 	assert.equal(impact.unattributedTokens, 0);
 	close(impact.co2, (2_000 / 1_000_000) * 840);
+});
+
+test('the synthetic unknown bucket is estimated with the reference mix, not weighted as all-input', () => {
+	// reconcileModelUsageToActualTokens() books a session with no usable split as
+	// { unknown: { inputTokens: total, outputTokens: 0 } }.
+	const unknownOnly = calculateEnvironmentalImpact({ unknown: { inputTokens: 11_500, outputTokens: 0, sessions: 0 } }, 11_500);
+	const noBreakdown = calculateEnvironmentalImpact({}, 11_500);
+	assert.equal(unknownOnly.attributedTokens, 0);
+	assert.equal(unknownOnly.unattributedTokens, 11_500);
+	close(unknownOnly.co2, noBreakdown.co2);
+
+	// Without totalTokens, the unknown bucket's own size still counts.
+	close(calculateEnvironmentalImpact({ unknown: { inputTokens: 11_500, outputTokens: 0, sessions: 0 } }).co2, noBreakdown.co2);
+});
+
+test('an unknown bucket alongside real models only replaces its own share', () => {
+	const modelUsage: ModelUsage = {
+		'claude-sonnet-4.5': { inputTokens: 10_000, outputTokens: 1_500, sessions: 1 },
+		unknown: { inputTokens: 11_500, outputTokens: 0, sessions: 0 },
+	};
+	const impact = calculateEnvironmentalImpact(modelUsage, 23_000);
+	assert.equal(impact.attributedTokens, 11_500);
+	assert.equal(impact.unattributedTokens, 11_500);
+	close(impact.co2, 2 * (2_000 / 1_000_000) * 840);
+});
+
+// --- Host parity ------------------------------------------------------------
+// The Visual Studio and JetBrains hosts cannot import the TypeScript map, so
+// they carry their own copy of the source links. Fail here if either drifts.
+
+function findRepoRoot(): string {
+	let dir = __dirname;
+	for (let i = 0; i < 10; i++) {
+		if (fs.existsSync(path.join(dir, 'AGENTS.md')) && fs.existsSync(path.join(dir, 'vscode-extension'))) {
+			return dir;
+		}
+		dir = path.dirname(dir);
+	}
+	throw new Error(`Could not locate the repo root from ${__dirname}`);
+}
+
+test('Visual Studio and JetBrains hosts open the same methodology sources as the shared map', () => {
+	const root = findRepoRoot();
+	const hosts: Array<[string, (id: string, url: string) => string]> = [
+		['visualstudio-extension/src/AIEngineeringFluency/ToolWindow/TokenTrackerControl.xaml.cs', (id, url) => `["${id}"] = "${url}"`],
+		['jetbrains-plugin/src/main/kotlin/com/github/rajbos/aiengineeringfluency/TokenTrackerPanel.kt', (id, url) => `"${id}" to "${url}"`],
+	];
+	for (const [file, entry] of hosts) {
+		const source = fs.readFileSync(path.join(root, file), 'utf8');
+		assert.ok(source.includes('"openMethodologySource"'), `${file} handles openMethodologySource`);
+		for (const [id, url] of Object.entries(ENVIRONMENTAL_METHODOLOGY_SOURCES)) {
+			assert.ok(source.includes(entry(id, url)), `${file} maps ${id} to ${url}`);
+		}
+	}
 });

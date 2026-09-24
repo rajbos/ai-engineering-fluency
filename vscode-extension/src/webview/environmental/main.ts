@@ -288,7 +288,7 @@ function buildSourcesItem(): HTMLElement {
 	const li = document.createElement('li');
 	li.append(`${localize('environmental.methodology.sources')} `);
 	const links: Array<[string, string]> = [
-		['paper', 'Jegham et al., "How Hungry is AI?" (arXiv:2505.09598)'],
+		['paper', localize('environmental.methodology.paperLink')],
 		['neuland', localize('environmental.methodology.neulandLink')],
 	];
 	links.forEach(([source, label], i) => {
