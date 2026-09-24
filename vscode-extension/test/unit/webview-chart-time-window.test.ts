@@ -96,3 +96,34 @@ test('legacy payload with empty costData yields zero cost, not NaN', () => {
 	assert.equal(filtered.totalLinesRemoved, 0);
 	assert.equal(filtered.avgLocPerPeriod, 0);
 });
+
+/** A week period of `weeks` bars keyed by Monday, ending with the current week. */
+function buildWeekPeriod(weeks: number): ChartPeriodData {
+	const day = NOW.getDay();
+	const thisMonday = new Date(NOW.getFullYear(), NOW.getMonth(), NOW.getDate() - (day === 0 ? 6 : day - 1));
+	const keys: string[] = [];
+	for (let i = weeks - 1; i >= 0; i--) {
+		keys.push(dayKey(new Date(thisMonday.getFullYear(), thisMonday.getMonth(), thisMonday.getDate() - 7 * i)));
+	}
+	const values = keys.map((_, i) => i + 1);
+	return {
+		labels: [...keys], periodKeys: keys, tokensData: [...values], sessionsData: [...values],
+		modelDatasets: [], editorDatasets: [], repositoryDatasets: [], periodCount: keys.length,
+		totalTokens: values.reduce((a, b) => a + b, 0), totalSessions: values.reduce((a, b) => a + b, 0),
+		avgPerPeriod: 0, costData: [...values], totalCost: values.reduce((a, b) => a + b, 0), avgCostPerPeriod: 0,
+	};
+}
+
+test('today with week aggregation keeps only the current week, not full history', () => {
+	// NOW is a Thursday, so no week key equals today's date.
+	const filtered = filterPeriodByTimeWindow(buildWeekPeriod(52), 'today', 'week', NOW);
+	assert.deepEqual(filtered.periodKeys, ['2026-09-21']);
+});
+
+test('week aggregation keeps the partial week the window starts in', () => {
+	// last7 starts Fri 2026-09-18, which falls in the week of Mon 2026-09-14.
+	const filtered = filterPeriodByTimeWindow(buildWeekPeriod(52), 'last7', 'week', NOW);
+	assert.deepEqual(filtered.periodKeys, ['2026-09-14', '2026-09-21']);
+	// currentMonth starts Tue 2026-09-01, in the week of Mon 2026-08-31.
+	assert.equal(filterPeriodByTimeWindow(buildWeekPeriod(52), 'currentMonth', 'week', NOW).periodKeys[0], '2026-08-31');
+});

@@ -1,5 +1,5 @@
 import type { ChartPeriodData, ChartTimeWindow } from '../../../../src/types';
-import { getTimeWindowStartDayKey, getTimeWindowStartMonthKey } from '../../../../src/timeWindows';
+import { getTimeWindowStartDate, getTimeWindowStartDayKey, getTimeWindowStartMonthKey } from '../../../../src/timeWindows';
 import type { ChartPeriod } from './projectionUtils';
 
 /**
@@ -19,10 +19,27 @@ function sliceDatasetsByIndices(datasets: object[] | undefined, indices: number[
 	});
 }
 
+/**
+ * Week bars are keyed by their Monday, so compare against the Monday of the week that
+ * contains the window start. Comparing against the start date itself drops the week the
+ * window starts in, and for `today` (any day but Monday) matches no bar at all.
+ */
+function getWeekStartKey(timeWindow: ChartTimeWindow, now: Date): string {
+	const start = getTimeWindowStartDate(timeWindow, now);
+	if (!start) { return getTimeWindowStartDayKey(timeWindow, now); }
+	const day = start.getDay();
+	const monday = new Date(start.getFullYear(), start.getMonth(), start.getDate() - (day === 0 ? 6 : day - 1));
+	return [
+		monday.getFullYear(),
+		String(monday.getMonth() + 1).padStart(2, '0'),
+		String(monday.getDate()).padStart(2, '0'),
+	].join('-');
+}
+
 function getFilterStartKey(timeWindow: ChartTimeWindow, periodType: ChartPeriod, now: Date): string {
-	return periodType === 'month'
-		? getTimeWindowStartMonthKey(timeWindow, now)
-		: getTimeWindowStartDayKey(timeWindow, now);
+	if (periodType === 'month') { return getTimeWindowStartMonthKey(timeWindow, now); }
+	if (periodType === 'week') { return getWeekStartKey(timeWindow, now); }
+	return getTimeWindowStartDayKey(timeWindow, now);
 }
 
 function buildCoreFilteredPeriod(period: ChartPeriodData, indices: number[]): ChartPeriodData {
@@ -105,6 +122,9 @@ export function filterPeriodByTimeWindow(period: ChartPeriodData, timeWindow: Ch
 	for (let i = 0; i < period.periodKeys.length; i++) {
 		if (period.periodKeys[i] >= startKey) { indices.push(i); }
 	}
+	// A host payload always ends in the current day/week/month bucket, so every window
+	// matches at least one bar. Only the legacy payload (no `periods`) or a stale fixture
+	// can match none; showing it unfiltered beats rendering an empty chart there.
 	if (indices.length === 0) { return period; }
 
 	const filtered = buildCoreFilteredPeriod(period, indices);
