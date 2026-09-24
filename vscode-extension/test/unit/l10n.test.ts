@@ -679,6 +679,56 @@ test('l10n: Efficiency Models tab control labels resolve in English and zh-cn', 
 	}
 });
 
+test('l10n: Team Server diagnostics card strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	const english: Record<string, string> = {
+		'diagnostics.teamServer.configDetails': 'Configuration Details',
+		'diagnostics.teamServer.serverUrl': 'Server URL',
+		'diagnostics.teamServer.localSessionStats': 'Local Session Statistics',
+		'diagnostics.teamServer.totalSessions': 'Total Sessions',
+		'diagnostics.teamServer.localSessionFiles': 'Local session files',
+		'diagnostics.teamServer.usageData': 'Usage Data',
+		'diagnostics.teamServer.lastRollupUpload': 'Last rollup upload',
+		'diagnostics.teamServer.fluencyScore': 'Fluency Score',
+		'diagnostics.teamServer.uploadedSeparately': 'Uploaded separately',
+		'diagnostics.teamServer.status': 'Status',
+		'diagnostics.teamServer.sharingProfile': 'Sharing Profile',
+		'diagnostics.teamServer.usageSync': 'Usage Sync',
+		'diagnostics.teamServer.rollupUploadOnly': 'Rollup upload only',
+	};
+	for (const [key, value] of Object.entries(english)) {
+		assert.equal(t(key), value, `English value for ${key}`);
+	}
+
+	mock.setLanguage('zh-cn');
+	try {
+		const chinese: Record<string, string> = {
+			'diagnostics.teamServer.configDetails': '\u914d\u7f6e\u8be6\u60c5',
+			'diagnostics.teamServer.serverUrl': '\u670d\u52a1\u5668 URL',
+			'diagnostics.teamServer.localSessionStats': '\u672c\u5730\u4f1a\u8bdd\u7edf\u8ba1',
+			'diagnostics.teamServer.totalSessions': '\u4f1a\u8bdd\u603b\u6570',
+			'diagnostics.teamServer.localSessionFiles': '\u672c\u5730\u4f1a\u8bdd\u6587\u4ef6',
+			'diagnostics.teamServer.usageData': '\u4f7f\u7528\u6570\u636e',
+			'diagnostics.teamServer.lastRollupUpload': '\u4e0a\u6b21\u6c47\u603b\u4e0a\u4f20',
+			'diagnostics.teamServer.fluencyScore': '\u719f\u7ec3\u5ea6\u8bc4\u5206',
+			'diagnostics.teamServer.uploadedSeparately': '\u5355\u72ec\u4e0a\u4f20',
+			'diagnostics.teamServer.status': '\u72b6\u6001',
+			'diagnostics.teamServer.sharingProfile': '\u5171\u4eab\u914d\u7f6e',
+			'diagnostics.teamServer.usageSync': '\u4f7f\u7528\u6570\u636e\u540c\u6b65',
+			'diagnostics.teamServer.rollupUploadOnly': '\u4ec5\u6c47\u603b\u4e0a\u4f20',
+		};
+		for (const [key, value] of Object.entries(chinese)) {
+			assert.equal(t(key), value, `zh-cn value for ${key}`);
+		}
+		// The two labels that carry the fix: the card was misleading because it did
+		// not say which upload it measured, so a translated host losing that
+		// distinction would reintroduce the ambiguity this change removes.
+		assert.notEqual(t('diagnostics.teamServer.usageSync'), t('diagnostics.teamServer.fluencyScore'), 'The two Team Server timestamps must stay distinguishable in zh-cn');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: Copilot Memory Files section strings resolve in English and zh-cn', () => {
 	mock.setLanguage('en');
 	const english: Record<string, string> = {
