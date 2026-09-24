@@ -14,7 +14,7 @@
  */
 
 export { createApp, type CreateAppOptions } from './app.js';
-export { renderNavExtra, setNavExtra, type NavLink } from './nav.js';
+export { renderNavExtra, navExtraMiddleware, type NavLink, type NavVariables } from './nav.js';
 export {
 	startServer,
 	initDbWithRetry,

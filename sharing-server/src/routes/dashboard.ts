@@ -251,7 +251,7 @@ dashboard.get('/dashboard', (c) => {
 	const uploads = getUploadsForUser(user.id, 30);
 	const isAdmin = user.is_admin === 1;
 
-	return c.html(dashboardPage(user, uploads, isAdmin));
+	return c.html(dashboardPage(c, user, uploads, isAdmin));
 });
 
 /** GET /admin — Admin-only dashboard showing all-user token usage and trends. */
@@ -266,7 +266,7 @@ dashboard.get('/admin', (c) => {
 	const userSummaries = getAdminUserSummaries(30);
 	const dailyTotals = getAdminDailyTotals(90);
 
-	return c.html(adminDashboardPage(user, userSummaries, dailyTotals));
+	return c.html(adminDashboardPage(c, user, userSummaries, dailyTotals));
 });
 
 function getSessionUser(c: Context): UserRow | undefined {
@@ -287,7 +287,7 @@ dashboard.get('/team', (c) => {
   ${user.is_admin === 1 ? '<a href="/admin">Admin Dashboard</a>' : ''}
   <a href="/dashboard">My Dashboard</a>
   <strong aria-current="page">Team Insights</strong>
-  ${renderNavExtra('/team')}
+  ${renderNavExtra(c, '/team')}
   <span>${h(user.github_name ?? user.github_login)}</span>
   <a href="/auth/logout">Sign out</a>
 </div>
@@ -562,7 +562,7 @@ function loginPage(): string {
 </div>`);
 }
 
-function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): string {
+function dashboardPage(c: Context, user: UserRow, uploads: UploadRow[], isAdmin: boolean): string {
 	// ── Per-period stats ───────────────────────────────────────────────────────
 	const today = new Date().toISOString().slice(0, 10);
 	const sevenDaysAgo = (() => {
@@ -1113,7 +1113,7 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
   ${fluencyBadgeHtml}
   ${isAdmin ? `<a href="/admin" style="margin-left:8px;color:#e3b341">Admin Dashboard</a><span style="margin-left:8px;color:#e6edf3;font-size:0.875rem;font-weight:600">My Dashboard</span>` : ''}
   <a href="/team">Team Insights</a>
-  ${renderNavExtra('/dashboard')}
+  ${renderNavExtra(c, '/dashboard')}
   ${avatarUrl ? `<img src="${avatarUrl}" class="avatar-sm" alt="${login}" style="margin-left:8px">` : ''}
   <span style="color:#c9d1d9;font-size:0.875rem">${displayName}</span>
   <a href="/auth/logout" style="margin-left:8px">Sign out</a>
@@ -1201,6 +1201,7 @@ function adminStatPanel(stats: AdminPeriodStats, totalUsers: number, panelId: st
 }
 
 function adminDashboardPage(
+	c: Context,
 	adminUser: UserRow,
 	userSummaries: UserUsageSummary[],
 	dailyTotals: AdminDailyRow[],
@@ -1484,7 +1485,7 @@ function adminDashboardPage(
   <span style="color:#e6edf3;font-size:0.875rem;font-weight:600">Admin Dashboard</span>
   <a href="/dashboard" style="margin-left:8px">My Dashboard</a>
   <a href="/team">Team Insights</a>
-  ${renderNavExtra('/admin')}
+  ${renderNavExtra(c, '/admin')}
   ${adminAvatar ? `<img src="${adminAvatar}" class="avatar-sm" alt="${adminLogin}" style="margin-left:8px">` : ''}
   <span style="color:#c9d1d9;font-size:0.875rem">${adminName}</span>
   <a href="/auth/logout" style="margin-left:8px">Sign out</a>
