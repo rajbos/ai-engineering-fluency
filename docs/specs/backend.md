@@ -748,7 +748,12 @@ test('validateTeamAlias rejects common name patterns', () => {
 ### VS Code APIs
 - `vscode.workspace.getConfiguration` - Settings
 - `vscode.ExtensionContext.secrets` - SecretStorage
-- `vscode.ExtensionContext.globalState` - Last sync timestamp
+- `vscode.ExtensionContext.globalState` - Last sync timestamps, tracked per target so a
+  success on one cannot imply a success on another: `backend.azureLastSyncAt` (Azure Table
+  Storage), `backend.sharingServerLastSyncAt` (Team Server usage rollups) and
+  `backend.sharingServerFluencyLastSyncAt` (Team Server fluency score). Each advances only
+  when that upload is confirmed delivered. `backend.lastSyncAt` is separate again and is
+  used only to throttle sync attempts, not to report health.
 - `vscode.window.showQuickPick` - Wizard UI
 - `vscode.env.machineId` - Machine identifier
 - `vscode.workspace.workspaceFolders` - Workspace detection

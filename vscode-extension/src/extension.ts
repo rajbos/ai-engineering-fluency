@@ -15194,11 +15194,16 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     const azureLastSyncTime = azureLastSyncAt ? new Date(azureLastSyncAt).toISOString() : null;
     const teamLastSyncAt = this.context.globalState.get<number>("backend.sharingServerLastSyncAt");
     const teamLastSyncTime = teamLastSyncAt ? new Date(teamLastSyncAt).toISOString() : null;
+    // The rollup upload and the fluency-score upload run on different schedules and
+    // fail independently, so each tracks its own timestamp. Sharing one let a
+    // succeeding score upload hide a failing rollup upload behind a green indicator.
+    const teamFluencyLastSyncAt = this.context.globalState.get<number>("backend.sharingServerFluencyLastSyncAt");
+    const teamFluencyLastSyncTime = teamFluencyLastSyncAt ? new Date(teamFluencyLastSyncAt).toISOString() : null;
     const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
     const workspaceIds = this.extractWorkspaceIdsFromFiles(sessionFiles);
     return {
       azure: { ...azureSettings, isConfigured: settings ? this.backend!.isConfigured(settings) : false, lastSyncTime: azureSettings.enabled ? azureLastSyncTime : null, deviceCount: workspaceIds.size, sessionCount: sessionFiles.length, recordCount: null },
-      teamServer: { ...teamSettings, isConfigured: teamSettings.enabled && !!teamSettings.endpointUrl, lastSyncTime: teamSettings.enabled ? teamLastSyncTime : null, sessionCount: sessionFiles.length },
+      teamServer: { ...teamSettings, isConfigured: teamSettings.enabled && !!teamSettings.endpointUrl, lastSyncTime: teamSettings.enabled ? teamLastSyncTime : null, fluencyLastSyncTime: teamSettings.enabled ? teamFluencyLastSyncTime : null, sessionCount: sessionFiles.length },
     };
   }
 

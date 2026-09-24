@@ -75,7 +75,7 @@ function configuredBackendStorageInfo(): Record<string, unknown> {
 		},
 		teamServer: {
 			enabled: false, isConfigured: false, endpointUrl: '', sharingProfile: 'team',
-			lastSyncTime: null, sessionCount: 0,
+			lastSyncTime: null, fluencyLastSyncTime: null, sessionCount: 0,
 		},
 	};
 }

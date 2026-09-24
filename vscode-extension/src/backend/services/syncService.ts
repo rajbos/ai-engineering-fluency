@@ -1461,12 +1461,28 @@ upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1
 		}
 	}
 
-	/** Updates the Team-Server-specific "last successful sync" marker shown in its own status panel. */
+	/**
+	 * Updates the Team Server "last successful sync" marker shown in its status panel.
+	 *
+	 * This tracks the usage-rollup upload only. The fluency-score upload has its
+	 * own marker: the two run on different schedules and can fail independently,
+	 * and while they shared this key a small score POST succeeding every couple of
+	 * minutes kept the indicator green while rollup uploads failed for hours.
+	 */
 	private async tryUpdateSharingServerLastSyncAt(): Promise<void> {
 		try {
 			await this.deps.context?.globalState.update('backend.sharingServerLastSyncAt', Date.now());
 		} catch (e) {
 			this.deps.logger.warn(`Backend sync: failed to update sharing server lastSyncAt: ${e}`);
+		}
+	}
+
+	/** Updates the Team Server "last successful fluency-score upload" marker, tracked separately from the rollup sync above. */
+	private async tryUpdateSharingServerFluencyLastSyncAt(): Promise<void> {
+		try {
+			await this.deps.context?.globalState.update('backend.sharingServerFluencyLastSyncAt', Date.now());
+		} catch (e) {
+			this.deps.logger.warn(`Backend sync: failed to update sharing server fluency lastSyncAt: ${e}`);
 		}
 	}
 
@@ -1812,7 +1828,7 @@ upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1
 			this.deps.logger.warn,
 		);
 		if (uploaded) {
-			await this.tryUpdateSharingServerLastSyncAt();
+			await this.tryUpdateSharingServerFluencyLastSyncAt();
 		}
 	}
 

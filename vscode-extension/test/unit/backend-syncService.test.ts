@@ -1401,7 +1401,7 @@ test('syncToBackendStore tracks Azure and Team Server "last sync" independently 
 	fs.rmSync(lockDir, { recursive: true, force: true });
 });
 
-test('uploadFluencyScoreToSharingServer updates the Team Server lastSync marker on success', async () => {
+test('uploadFluencyScoreToSharingServer updates its own fluency marker and leaves the rollup marker alone', async () => {
 	const globalState = new Map<string, unknown>();
 	const mockContext = {
 		globalState: {
@@ -1426,8 +1426,13 @@ test('uploadFluencyScoreToSharingServer updates the Team Server lastSync marker 
 		sharingServerEndpointUrl: 'https://test-sharing-server/',
 	} as any, { overallStage: 'exploring' });
 	assert.ok(
+		globalState.get('backend.sharingServerFluencyLastSyncAt'),
+		'A successful fluency-score upload must update the fluency-specific marker'
+	);
+	assert.equal(
 		globalState.get('backend.sharingServerLastSyncAt'),
-		'A successful fluency-score upload is a real Team Server sync and must update its own lastSync marker'
+		undefined,
+		'The score upload says nothing about rollup delivery, so it must not touch the usage-sync marker'
 	);
 });
 
@@ -1458,7 +1463,7 @@ test('uploadFluencyScoreToSharingServer does NOT update the lastSync marker when
 		sharingServerEndpointUrl: 'https://test-sharing-server/',
 	} as any, { overallStage: 'exploring' });
 	assert.equal(
-		globalState.get('backend.sharingServerLastSyncAt'),
+		globalState.get('backend.sharingServerFluencyLastSyncAt'),
 		undefined,
 		'A failed fluency-score upload must not report a successful sync'
 	);
@@ -1797,8 +1802,78 @@ test('syncToBackendStore does NOT update the Team Server lastSync marker when a 
 	}
 });
 
-// ── Sync lock management ─────────────────────────────────────────────────
+test('a successful fluency-score upload does not mask a failing rollup upload', async () => {
+	// The two uploads shared one marker, so the score POST — which runs every couple
+	// of minutes and is tiny — kept "Last Sync" green while rollup uploads had been
+	// failing for hours. This is the exact scenario the split marker prevents.
+	const globalState = new Map<string, unknown>();
+	const mockContext = {
+		globalState: {
+			get: (key: string) => globalState.get(key),
+			update: async (key: string, value: unknown) => { globalState.set(key, value); },
+		},
+	} as unknown as vscode.ExtensionContext;
+	let rollupAttempts = 0;
+	const sharingServerSvc = {
+		uploadRollups: async () => {
+			rollupAttempts++;
+			return { success: false, entriesUploaded: 0, message: 'Upload failed: fetch failed' };
+		},
+		uploadFluencyScore: async () => true,
+	};
+	const svc = new SyncService(
+		makeDeps({
+			context: mockContext,
+			getGithubToken: () => 'fake-token',
+			getCopilotSessionFiles: async () => ['/home/user/.copilot/session-state/s/events.jsonl'],
+			statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+			getSessionFileDataCached: async () => ({
+				tokens: 300,
+				mtime: Date.now(),
+				interactions: 1,
+				modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+				dailyRollups: {
+					[new Date().toISOString().slice(0, 10)]: {
+						tokens: 300,
+						actualTokens: 300,
+						thinkingTokens: 0,
+						interactions: 1,
+						modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+					},
+				},
+			}),
+		}),
+		{} as any,
+		{} as any,
+		undefined,
+		BackendUtility,
+		sharingServerSvc as any,
+	);
+	const settings = {
+		sharingServerEnabled: true,
+		sharingServerEndpointUrl: 'https://test-sharing-server/',
+	} as any;
 
+	await svc.uploadFluencyScoreToSharingServer(settings, { overallStage: 'exploring' });
+	const rollupsFailed = await (svc as any).syncToSharingServer(
+		{ ...settings, lookbackDays: 7, datasetId: 'default' },
+		{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+	);
+
+	assert.equal(rollupsFailed, false, 'Guard: the rollup upload must have failed for this test to mean anything');
+	assert.ok(rollupAttempts > 0, 'Guard: a real rollup upload must have been attempted');
+	assert.ok(
+		globalState.get('backend.sharingServerFluencyLastSyncAt'),
+		'The score upload succeeded, so its own marker should advance'
+	);
+	assert.equal(
+		globalState.get('backend.sharingServerLastSyncAt'),
+		undefined,
+		'The usage-sync marker must stay unset: no rollup data reached the server'
+	);
+});
+
+// ── Sync lock management ─────────────────────────────────────────────────
 test('acquireSyncLock succeeds when no context is provided', async () => {
 	const svc = makeService({ context: undefined });
 	// With no context, acquireSyncLock should return true (allow sync)
