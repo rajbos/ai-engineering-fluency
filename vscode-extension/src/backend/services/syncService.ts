@@ -440,8 +440,11 @@ try {
 const event = JSON.parse(line);
 if (!isEventRecord(event)) { failures++; continue; }
 defaultModel = this.updateDeltaDefaultModel(event, defaultModel);
-if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'requests' && Array.isArray(event.v)) {
-failures += this.processDeltaRequests(event.v, defaultModel, seenRequestIds, fileMtimeMs, startMs, dayModelInteractions);
+const payload = this.readDeltaRequestsPayload(event);
+if (payload === 'malformed') {
+failures++;
+} else if (payload !== 'not-requests') {
+failures += this.processDeltaRequests(payload, defaultModel, seenRequestIds, fileMtimeMs, startMs, dayModelInteractions);
 }
 } catch {
 failures++;
@@ -453,8 +456,27 @@ if (failures > 0) { return null; }
 return dayModelInteractions;
 }
 
-private updateDeltaDefaultModel(event: any, defaultModel: string): string {
-if (event.kind === 0) {
+/**
+ * Classify a delta event's `requests` payload so the cached and raw parsers
+ * cannot disagree about the same event.
+ *
+ * Returns the entries when the event replaces the whole `requests` array,
+ * 'not-requests' when it targets something else, and 'malformed' when it
+ * targets the whole array but carries a value that cannot be read. That last
+ * case used to be silently ignored, so a file of nothing but
+ * `{"kind":2,"k":["requests"],"v":null}` produced an empty map on both paths,
+ * left filesFailed at zero, and let the no-data branch advance the marker.
+ *
+ * Nested updates (`k.length > 1`, e.g. `['requests', 0, 'response']`) legitimately
+ * carry non-array values, so only the top-level path can be malformed.
+ */
+private readDeltaRequestsPayload(event: any): unknown[] | 'not-requests' | 'malformed' {
+if (event.kind !== 2 || !Array.isArray(event.k) || event.k[0] !== 'requests') { return 'not-requests'; }
+if (Array.isArray(event.v)) { return event.v; }
+return event.k.length === 1 ? 'malformed' : 'not-requests';
+}
+
+private updateDeltaDefaultModel(event: any, defaultModel: string): string {if (event.kind === 0) {
 const modelId = this.extractModelIdFromKind0Event(event);
 if (modelId) { return (modelId as string).replace(/^copilot\//, ''); }
 }
@@ -1161,9 +1183,11 @@ fileMtimeMs: number,
 startMs: number,
 ctx: { workspaceId: string; machineId: string; userId: string | undefined; editorForFile: string | undefined; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }> }
 ): number {
-if (event.kind !== 2 || !Array.isArray(event.k) || event.k[0] !== 'requests' || !Array.isArray(event.v)) { return 0; }
+const payload = this.readDeltaRequestsPayload(event);
+if (payload === 'malformed') { return 1; }
+if (payload === 'not-requests') { return 0; }
 let failed = 0;
-for (const request of event.v) {
+for (const request of payload) {
 // Same contract as the cached delta parser: a non-object entry is a record we
 // could not read, not an absent one.
 if (!isEventRecord(request)) { failed++; continue; }

@@ -153,6 +153,7 @@
   "diagnostics.teamServer.sharingProfile": "Sharing Profile",
   "diagnostics.teamServer.usageSync": "Usage Sync",
   "diagnostics.teamServer.rollupUploadOnly": "Rollup upload only",
+  "diagnostics.teamServer.never": "Never",
   "serverMemories.sectionTitle": "Copilot Repository Memories",
   "serverMemories.sectionSubtitle": "Facts the Copilot coding agent has stored server-side for this repository (GitHub Settings → Copilot → Memory)",
   "serverMemories.summary": "{0} memories · {1} subjects",

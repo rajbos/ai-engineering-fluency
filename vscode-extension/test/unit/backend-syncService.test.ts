@@ -1877,6 +1877,89 @@ test('syncToSharingServer reports failure for malformed delta request entries on
 	}
 });
 
+test('syncToSharingServer reports failure when a delta requests event carries a non-array payload', async () => {
+	// `{"kind":2,"k":["requests"],"v":null}` targets the whole requests array but
+	// carries a value neither parser can read. Both used to skip the event, so the
+	// file produced an empty map on the cached path and no failure on the raw path:
+	// filesFailed stayed 0 and the no-data branch could advance the marker.
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'delta-nonarray-test-'));
+	const sessionFile = path.join(tmpDir, 'events.jsonl');
+	fs.writeFileSync(
+		sessionFile,
+		JSON.stringify({ kind: 1, v: { requests: [] } }) + '\n' +
+		JSON.stringify({ kind: 2, k: ['requests'], v: null }) + '\n',
+		'utf8',
+	);
+	let cacheLookups = 0;
+	try {
+		const svc = new SyncService(
+			makeDeps({
+				getGithubToken: () => 'github-token',
+				getCopilotSessionFiles: async () => [sessionFile],
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+				getSessionFileDataCached: async () => {
+					cacheLookups++;
+					return { tokens: 0, mtime: Date.now(), interactions: 0, modelUsage: {} };
+				},
+			}),
+			{} as any,
+			{} as any,
+			undefined,
+			BackendUtility,
+			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+		);
+
+		await assert.rejects(
+			() => (svc as any).syncToSharingServer(
+				{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+				{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+			),
+			/could not be read/,
+			'A requests event with a non-array payload must fail the scan',
+		);
+		assert.ok(cacheLookups > 0, 'Guard: the cached path must actually have been exercised');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+test('syncToSharingServer does not treat a nested delta requests update as malformed', async () => {
+	// Guard against over-correcting: `k: ['requests', 0, 'response']` legitimately
+	// carries a non-array value, so only the whole-array path counts as unreadable.
+	// Without this distinction, ordinary sessions would start failing their sync.
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'delta-nested-test-'));
+	const sessionFile = path.join(tmpDir, 'events.jsonl');
+	fs.writeFileSync(
+		sessionFile,
+		JSON.stringify({ kind: 1, v: { requests: [] } }) + '\n' +
+		JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: 'some text' }) + '\n',
+		'utf8',
+	);
+	try {
+		const svc = new SyncService(
+			makeDeps({
+				getGithubToken: () => 'github-token',
+				getCopilotSessionFiles: async () => [sessionFile],
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+				getSessionFileDataCached: async () => ({ tokens: 0, mtime: Date.now(), interactions: 0, modelUsage: {} }),
+			}),
+			{} as any,
+			{} as any,
+			undefined,
+			BackendUtility,
+			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+		);
+
+		const result = await (svc as any).syncToSharingServer(
+			{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+			{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+		);
+		assert.equal(result, true, 'A nested requests update is readable and must not fail the scan');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
 test('syncToSharingServer still treats a readable session with no billable activity as a successful sync', async () => {
 	// The guard keys off parse failures, not the absence of rollups: a file that
 	// reads cleanly and simply has no usage must not pin the user at "never".

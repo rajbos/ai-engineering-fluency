@@ -368,6 +368,7 @@
   "diagnostics.teamServer.sharingProfile": "共享配置",
   "diagnostics.teamServer.usageSync": "使用数据同步",
   "diagnostics.teamServer.rollupUploadOnly": "仅汇总上传",
+  "diagnostics.teamServer.never": "从不",
   "serverMemories.sectionTitle": "Copilot 仓库记忆",
   "serverMemories.sectionSubtitle": "Copilot 编码代理为本仓库存储在服务端的事实（GitHub 设置 → Copilot → 记忆）",
   "serverMemories.summary": "{0} 条记忆 · {1} 个主题",

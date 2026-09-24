@@ -749,6 +749,7 @@ test('l10n: Team Server diagnostics card strings resolve in English and zh-cn', 
 		'diagnostics.teamServer.sharingProfile': 'Sharing Profile',
 		'diagnostics.teamServer.usageSync': 'Usage Sync',
 		'diagnostics.teamServer.rollupUploadOnly': 'Rollup upload only',
+		'diagnostics.teamServer.never': 'Never',
 	};
 	for (const [key, value] of Object.entries(english)) {
 		assert.equal(t(key), value, `English value for ${key}`);
@@ -770,6 +771,7 @@ test('l10n: Team Server diagnostics card strings resolve in English and zh-cn', 
 			'diagnostics.teamServer.sharingProfile': '\u5171\u4eab\u914d\u7f6e',
 			'diagnostics.teamServer.usageSync': '\u4f7f\u7528\u6570\u636e\u540c\u6b65',
 			'diagnostics.teamServer.rollupUploadOnly': '\u4ec5\u6c47\u603b\u4e0a\u4f20',
+			'diagnostics.teamServer.never': '\u4ece\u4e0d',
 		};
 		for (const [key, value] of Object.entries(chinese)) {
 			assert.equal(t(key), value, `zh-cn value for ${key}`);

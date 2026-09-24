@@ -153,6 +153,7 @@
   "diagnostics.teamServer.sharingProfile",
   "diagnostics.teamServer.usageSync",
   "diagnostics.teamServer.rollupUploadOnly",
+  "diagnostics.teamServer.never",
   "serverMemories.sectionTitle",
   "serverMemories.sectionSubtitle",
   "serverMemories.summary",

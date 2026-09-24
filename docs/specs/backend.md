@@ -771,6 +771,14 @@ test('validateTeamAlias rejects common name patterns', () => {
   unreadable; that makes the scan fall through to the raw-content parser, which counts the
   file towards `filesFailed`. Without this the cached path would report a malformed session
   as an empty one and advance the markers above.
+
+  "Unreadable" covers the container *and* its contents: a missing or non-array `requests`
+  value, a delta `requests` event whose payload is not an array, and any individual record
+  that is not a plain object. Delta events are classified in one place
+  (`readDeltaRequestsPayload`) that both the cached and the raw parser call, so the two
+  cannot drift apart and reach different verdicts about the same file. Nested delta updates
+  such as `['requests', 0, 'response']` legitimately carry non-array values and are *not*
+  failures; only a replacement of the whole `requests` array can be malformed.
 - `vscode.window.showQuickPick` - Wizard UI
 - `vscode.env.machineId` - Machine identifier
 - `vscode.workspace.workspaceFolders` - Workspace detection
