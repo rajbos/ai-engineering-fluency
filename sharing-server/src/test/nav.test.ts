@@ -42,7 +42,7 @@ describe('renderNavExtra', () => {
 	test('escapes the label and title rather than emitting raw markup', () => {
 		setNavExtra(() => [{ href: '/vendor', label: '<script>x</script>', title: 'a"b' }]);
 		const html = renderNavExtra();
-		assert.doesNotMatch(html, /<script>/);
+		assert.ok(!html.includes('<script>'));
 		assert.match(html, /&lt;script&gt;/);
 		// An unescaped quote here would let the title break out into a new attribute.
 		assert.match(html, /title="a&quot;b"/);
