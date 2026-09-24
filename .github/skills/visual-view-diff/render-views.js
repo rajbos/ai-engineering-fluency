@@ -51,6 +51,20 @@ const { applySteps, isShowing } = require('./lib/steps');
 const RESIZE_SETTLE_MS = 750;
 
 /**
+ * The wall-clock time every page sees. Views read `new Date()` — the chart
+ * draws a "projected rest of the current period" bar sized by the minute of
+ * the day, and several views filter to "last N days" — so an unfrozen clock
+ * made identical builds diff against each other depending on when each side
+ * rendered. The fixtures all treat 2026-03-14 as "today" (the chart's
+ * `lastUpdated`), so the clock is pinned there.
+ *
+ * This lives in the harness rather than in views.config.json on purpose: the
+ * baseline render uses the base commit's registry, which would not carry a
+ * newly added setting, and both sides must see the same clock.
+ */
+const FROZEN_NOW = '2026-03-14T09:30:00.000Z';
+
+/**
  * Screenshot file name for a view, optionally in one of its declared states.
  *
  * `<view>.<theme>.png` for the initial render and `<view>--<state>.<theme>.png`
@@ -133,6 +147,9 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 	page.on('pageerror', (err) => { consoleErrors.push(String(err && err.stack || err)); });
 
 	try {
+		// `setFixedTime` pins Date/Date.now but leaves timers running, so the
+		// settle waits and Chart.js's own scheduling behave as before.
+		await page.clock.setFixedTime(new Date(FROZEN_NOW));
 		await page.goto(`file://${pageFile}`, { waitUntil: 'networkidle', timeout: 30_000 });
 		await page.waitForTimeout(view.settleMs ?? defaults.settleMs);
 

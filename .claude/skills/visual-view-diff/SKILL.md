@@ -210,9 +210,17 @@ and duplicates.
 
 Two runs of unchanged code produce identical screenshots. That is load-bearing —
 without it every run reports spurious changes. It is achieved by pinning the
-locale to `en-US` and the timezone to UTC, disabling CSS animations and
-transitions, hiding carets, waiting for fonts to settle, and keeping all
-time-dependent values out of the fixtures.
+locale to `en-US` and the timezone to UTC, freezing the page clock
+(`FROZEN_NOW` in `render-views.js`, the fixtures' shared "today"), disabling
+CSS animations and transitions, hiding carets, waiting for fonts to settle,
+and keeping all time-dependent values out of the fixtures.
+
+The frozen clock matters because views read `new Date()` themselves: the
+chart draws a projected bar for the rest of the current period sized by the
+minute of the day, so an unfrozen clock made the chart diff against itself
+whenever the baseline and current renders straddled a minute boundary. The
+constant lives in the harness rather than the registry because the baseline
+render uses the base commit's registry, and both sides must see the same time.
 
 The viewport is grown to the page's full height *before* the screenshot rather
 than letting the full-page capture do it: that capture-time resize made every
