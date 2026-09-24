@@ -15211,7 +15211,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       subscriptionId: subscriptionId ? subscriptionId.substring(0, 8) + "..." : "",
       resourceGroup: s.resourceGroup ?? "", aggTable: s.aggTable ?? "usageAggDaily",
       eventsTable: s.eventsTable ?? "usageEvents", authMode: s.authMode ?? "entraId",
-      sharingProfile: config.get("backend.sharingProfile", "off") as string,
+      // The effective (inferred) profile, not get()'s 'off' default for an unset value: a Team
+      // Server-only user with no explicit profile uploads as teamAnonymized.
+      sharingProfile: (s.sharingProfile ?? config.get("backend.sharingProfile", "off")) as string,
     };
   }
 

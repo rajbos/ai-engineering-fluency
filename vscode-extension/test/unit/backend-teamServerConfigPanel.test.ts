@@ -501,13 +501,13 @@ test('TeamServerConfigPanel - renderHtml includes the data-sharing info column',
 	assert.ok(html.includes('not live data'), 'Should label the mockup as illustrative, not live data');
 });
 
-function renderPanelWithProfile(inspected: string | undefined): string {
+function renderPanelWithProfile(inspected: string | undefined, values: Record<string, unknown> = {}): string {
 	(vscode as any).__mock.reset();
 	const panel = createMockPanel();
 	(vscode.window as any).createWebviewPanel = () => panel;
 	(vscode.workspace as any).getConfiguration = () => ({
 		// get() returns the package.json default for an unset profile, exactly like VS Code.
-		get: (key: string, defaultValue: any) => defaultValue,
+		get: (key: string, defaultValue: any) => (key in values ? values[key] : defaultValue),
 		inspect: (key: string) => key === 'backend.sharingProfile' ? { globalValue: inspected } : undefined,
 	});
 	const { TeamServerConfigPanel } = require('../../src/backend/teamServerConfigPanel');
@@ -528,4 +528,9 @@ test('TeamServerConfigPanel - an unset sharing profile preselects teamAnonymized
 test('TeamServerConfigPanel - an explicit sharing profile is preserved, including off', () => {
 	assert.ok(renderPanelWithProfile('off').includes('<option value="off" selected>'));
 	assert.ok(renderPanelWithProfile('teamIdentified').includes('<option value="teamIdentified" selected>'));
+});
+
+test('TeamServerConfigPanel - an unset profile follows the same legacy inference as the settings', () => {
+	const html = renderPanelWithProfile(undefined, { 'backend.shareWithTeam': true, 'backend.userIdentityMode': 'teamAlias' });
+	assert.ok(html.includes('<option value="teamIdentified" selected>'));
 });

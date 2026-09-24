@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { getNonce } from '../utils/webviewUtils';
 import { readExplicitSharingProfile } from './settings';
+import { inferSharingProfile } from './settingsValidation';
+import type { BackendUserIdentityMode } from './identity';
 
 export class TeamServerConfigPanel implements vscode.Disposable {
 	private static current: TeamServerConfigPanel | undefined;
@@ -45,9 +47,15 @@ export class TeamServerConfigPanel implements vscode.Disposable {
 		const enabled: boolean = config.get<boolean>('backend.sharingServer.enabled', false);
 		const endpointUrl: string = config.get<string>('backend.sharingServer.endpointUrl', '');
 		// Preselect the explicit profile, or — when none is set — what an enabled Team Server infers
-		// (teamAnonymized). Reading get()'s 'off' default here would make an unchanged save persist
-		// an explicit 'off' and silently disable uploads.
-		const sharingProfile: string = readExplicitSharingProfile(config) ?? 'teamAnonymized';
+		// (the same inference getBackendSettings applies, including legacy shareWithTeam). Reading
+		// get()'s 'off' default here would make an unchanged save persist an explicit 'off' and
+		// silently disable uploads.
+		const sharingProfile: string = readExplicitSharingProfile(config) ?? inferSharingProfile(
+			undefined,
+			true,
+			config.get<boolean>('backend.shareWithTeam', false),
+			config.get<BackendUserIdentityMode>('backend.userIdentityMode', 'pseudonymous'),
+		);
 
 		this.panel = vscode.window.createWebviewPanel(
 			'copilotTeamServerConfig',
