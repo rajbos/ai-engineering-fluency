@@ -515,7 +515,7 @@ export class BackendFacade {
     onProgress?: (processed: number, total: number, daysFound: number) => void,
   ): Promise<void> {
     const settings = this.getSettings();
-    await this.syncService.backfillSync(settings, this.isConfigured(settings), maxLookbackDays, onProgress);
+    await this.syncService.backfillSync(settings, maxLookbackDays, onProgress);
     this.clearQueryCache();
   }
 

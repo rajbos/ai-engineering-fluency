@@ -30,6 +30,10 @@ import { getEditorTypeFromPath, refineEditorLabelForInteractionModeSplit } from 
 type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };
 
 /** Logged when neither Azure Storage nor the Team Server is switched on and configured. */
+/** Lock names for {@link SyncLock}: Azure keeps the original default lock file. */
+const AZURE_SYNC_LOCK = undefined;
+const SHARING_SERVER_SYNC_LOCK = 'sharingserver';
+
 const NO_SYNC_TARGET_REASON = 'no sync target enabled: Azure Storage needs backend.enabled plus Azure settings; Team Server needs backend.sharingServer.enabled plus an endpoint URL';
 
 /**
@@ -152,15 +156,15 @@ export class SyncService {
 	 * *different* server URL, the lock does not apply — both instances are
 	 * syncing to independent endpoints and should not block each other.
 	 */
-	private async acquireSyncLock(backend?: string, serverUrl?: string): Promise<boolean> {
-		return this.syncLock.acquire(backend, serverUrl);
+	private async acquireSyncLock(lockName?: string, serverUrl?: string): Promise<boolean> {
+		return this.syncLock.acquire(lockName, serverUrl);
 	}
 
 	/**
 	 * Release the sync lock, but only if we own it.
 	 */
-	private async releaseSyncLock(backend?: string): Promise<void> {
-		return this.syncLock.release(backend);
+	private async releaseSyncLock(lockName?: string): Promise<void> {
+		return this.syncLock.release(lockName);
 	}
 
 	/**
@@ -1407,13 +1411,21 @@ return true;
 		}
 	}
 
-	/** Builds a composite lock identifier covering whichever backend(s) are configured for this sync pass. */
-	private buildSyncLockTarget(azureConfigured: boolean, sharingConfigured: boolean, settings: BackendSettings): string {
-		const targets = [
-			azureConfigured ? `azure:${settings.storageAccount}` : null,
-			sharingConfigured ? `share:${settings.sharingServerEndpointUrl}` : null,
-		].filter((t): t is string => !!t);
-		return targets.join('|');
+	/**
+	 * Runs one target's sync under that target's own cross-window lock. Each target kind has its
+	 * own lock file, holding the endpoint it writes to, so two windows uploading to the same
+	 * endpoint serialize regardless of their other targets or their `backend.backend` selector.
+	 */
+	private async runUnderTargetLock(lockName: string | undefined, endpoint: string, label: string, run: () => Promise<void>): Promise<void> {
+		if (!await this.acquireSyncLock(lockName, endpoint)) {
+			this.deps.logger.log(`Backend sync: skipping ${label} (another VS Code window is currently syncing to the same endpoint)`);
+			return;
+		}
+		try {
+			await run();
+		} finally {
+			await this.releaseSyncLock(lockName);
+		}
 	}
 
 	private async doSyncToBackendStore(force: boolean, settings: BackendSettings, isConfigured: boolean): Promise<void> {
@@ -1441,20 +1453,20 @@ return true;
 			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
 		});
 
-		const lockTarget = this.buildSyncLockTarget(azureConfigured, sharingConfigured, settings);
-		if (!await this.acquireSyncLock(settings.backend, lockTarget)) {
-			this.deps.logger.log('Backend sync: skipping (another VS Code window is currently syncing to the same server)');
-			return;
-		}
 		this.backendSyncInProgress = true;
 		try {
 			await this.tryUpdateLastSyncAt();
-			if (azureConfigured) { await this.runAzureSyncIndependently(settings, sharingPolicy); }
-			if (sharingConfigured) { await this.runSharingServerSyncIndependently(settings, sharingPolicy); }
+			if (azureConfigured) {
+				await this.runUnderTargetLock(AZURE_SYNC_LOCK, `azure:${settings.storageAccount}`, 'Azure Storage',
+					() => this.runAzureSyncIndependently(settings, sharingPolicy));
+			}
+			if (sharingConfigured) {
+				await this.runUnderTargetLock(SHARING_SERVER_SYNC_LOCK, `share:${settings.sharingServerEndpointUrl}`, 'Team Server',
+					() => this.runSharingServerSyncIndependently(settings, sharingPolicy));
+			}
 			this.consecutiveFailures = 0;
 		} finally {
 			this.backendSyncInProgress = false;
-			await this.releaseSyncLock(settings.backend);
 		}
 	}
 
@@ -1674,7 +1686,8 @@ return true;
 		score: Record<string, unknown>,
 	): Promise<void> {
 		if (!this.sharingServerUploadService) { return; }
-		if (!settings.sharingServerEnabled || !settings.sharingServerEndpointUrl) { return; }
+		// Same gate as rollup sync: toggle + endpoint, and a sharing profile other than 'off'.
+		if (!resolveSyncTargets(settings).sharingServer) { return; }
 
 		const githubToken = this.deps.getGithubToken?.();
 		if (!githubToken) { return; }
@@ -1699,14 +1712,15 @@ return true;
 	 * mtime-based file-age filter (e.g. the backend was configured after a large volume of
 	 * activity had already accumulated locally).
 	 */
-	async backfillSync(settings: BackendSettings, isConfigured: boolean, maxLookbackDays = 365, onProgress?: (processed: number, total: number, daysFound: number) => void): Promise<void> {
+	async backfillSync(settings: BackendSettings, maxLookbackDays = 365, onProgress?: (processed: number, total: number, daysFound: number) => void): Promise<void> {
 		const sharingPolicy = computeBackendSharingPolicy({
 			enabled: settings.enabled,
 			profile: settings.sharingProfile,
 			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
 		});
-		// Backfill writes to Azure Table Storage only, so it is gated on the Azure target.
-		if (!sharingPolicy.allowCloudSync || !isConfigured || !resolveSyncTargets(settings).azure) {
+		// Backfill writes to Azure Table Storage only, so it is gated solely on the Azure target
+		// (backend.enabled + Azure fields + non-off profile), not on the backend.backend selector.
+		if (!resolveSyncTargets(settings).azure) {
 			this.deps.logger.warn('Backfill: skipping (Azure Storage sync disabled or not configured)');
 			return;
 		}

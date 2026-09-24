@@ -1,6 +1,8 @@
 import './vscode-shim-register';
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 import * as vscode from 'vscode';
 
@@ -107,12 +109,12 @@ test('inferSharingProfile: an explicit off profile wins over an enabled target',
 
 // ── SyncService gating ────────────────────────────────────────────────────
 
-interface Calls { azure: number; teamServer: number; backfillAzure: number }
+interface Calls { azure: number; teamServer: number; backfillAzure: number; fluencyScore: number }
 
-function makeService(logs: string[]): { svc: SyncService; calls: Calls } {
-	const calls: Calls = { azure: 0, teamServer: 0, backfillAzure: 0 };
+function makeService(logs: string[], context?: vscode.ExtensionContext): { svc: SyncService; calls: Calls } {
+	const calls: Calls = { azure: 0, teamServer: 0, backfillAzure: 0, fluencyScore: 0 };
 	const deps: SyncServiceDeps = {
-		context: undefined,
+		context,
 		logger: { log: (m) => logs.push(m), warn: (m) => logs.push(m) },
 		sessionHandlers: {
 			getCopilotSessionFiles: async () => [],
@@ -136,7 +138,7 @@ function makeService(logs: string[]): { svc: SyncService; calls: Calls } {
 	};
 	const sharingServerSvc = {
 		uploadRollups: async () => { calls.teamServer++; },
-		uploadFluencyScore: async () => {},
+		uploadFluencyScore: async () => { calls.fluencyScore++; },
 	};
 	const svc = new SyncService(deps, credSvc as any, dataSvc as any, undefined, BackendUtility, sharingServerSvc as any);
 	// Azure table sync and session parsing are exercised elsewhere; here we only need to know
@@ -224,7 +226,7 @@ test('startTimerIfEnabled: no enabled target does not start the timer', () => {
 test('backfillSync: stays Azure-only, so a Team Server-only setup skips it', async () => {
 	const logs: string[] = [];
 	const { svc, calls } = makeService(logs);
-	await svc.backfillSync(teamServerOnly(), true, 30);
+	await svc.backfillSync(teamServerOnly(), 30);
 	assert.equal(calls.backfillAzure, 0, 'backfill must not request Azure credentials');
 	assert.ok(logs.some(m => m.startsWith('Backfill: skipping')));
 });
@@ -232,6 +234,76 @@ test('backfillSync: stays Azure-only, so a Team Server-only setup skips it', asy
 test('backfillSync: Azure only proceeds to fetch Azure credentials', async () => {
 	const logs: string[] = [];
 	const { svc, calls } = makeService(logs);
-	await svc.backfillSync(azureOnly(), true, 30);
+	await svc.backfillSync(azureOnly(), 30);
 	assert.equal(calls.backfillAzure, 1);
+});
+
+test('backfillSync: ignores the legacy backend.backend selector when Azure is enabled', async () => {
+	const logs: string[] = [];
+	const { svc, calls } = makeService(logs);
+	await svc.backfillSync({ ...azureOnly(), backend: 'sharingServer' }, 30);
+	assert.equal(calls.backfillAzure, 1);
+});
+
+// ── fluency-score upload ──────────────────────────────────────────────────
+
+test('uploadFluencyScoreToSharingServer: Team Server only uploads', async () => {
+	const { svc, calls } = makeService([]);
+	await svc.uploadFluencyScoreToSharingServer(teamServerOnly(), { overallStage: 'exploring' });
+	assert.equal(calls.fluencyScore, 1);
+});
+
+test('uploadFluencyScoreToSharingServer: profile off blocks the score upload like rollup sync', async () => {
+	const { svc, calls } = makeService([]);
+	await svc.uploadFluencyScoreToSharingServer({ ...teamServerOnly(), sharingProfile: 'off' }, { overallStage: 'exploring' });
+	assert.equal(calls.fluencyScore, 0);
+});
+
+// ── cross-window locking is keyed by target, not by backend.backend ──────
+
+function withLockDir(fn: (context: vscode.ExtensionContext, dir: string) => Promise<void>): Promise<void> {
+	const dir = fs.mkdtempSync(path.join(process.cwd(), 'sync-targets-lock-'));
+	const state = new Map<string, unknown>();
+	const context = {
+		globalStorageUri: { fsPath: dir },
+		globalState: { get: (k: string) => state.get(k), update: async (k: string, v: unknown) => { state.set(k, v); } },
+	} as unknown as vscode.ExtensionContext;
+	return fn(context, dir).finally(() => fs.rmSync(dir, { recursive: true, force: true }));
+}
+
+function holdLock(dir: string, file: string, serverUrl: string): void {
+	fs.writeFileSync(path.join(dir, file), JSON.stringify({ sessionId: 'other-window', timestamp: Date.now(), serverUrl }));
+}
+
+for (const backend of ['storageTables', 'sharingServer'] as const) {
+	test(`sync lock: another window uploading to the same Team Server blocks it (backend.backend=${backend})`, async () => {
+		await withLockDir(async (context, dir) => {
+			holdLock(dir, 'backend_sync_sharingserver.lock', `share:${TEAM_SERVER.sharingServerEndpointUrl}`);
+			const logs: string[] = [];
+			const { svc, calls } = makeService(logs, context);
+			await svc.syncToBackendStore(true, { ...teamServerOnly(), backend }, true);
+			assert.equal(calls.teamServer, 0, `Logs:\n${logs.join('\n')}`);
+			assert.ok(logs.some(m => m.includes('skipping Team Server')));
+		});
+	});
+}
+
+test('sync lock: a held Team Server lock does not block this window\'s Azure sync', async () => {
+	await withLockDir(async (context, dir) => {
+		holdLock(dir, 'backend_sync_sharingserver.lock', `share:${TEAM_SERVER.sharingServerEndpointUrl}`);
+		const { svc, calls } = makeService([], context);
+		await svc.syncToBackendStore(true, both(), true);
+		assert.equal(calls.azure, 1);
+		assert.equal(calls.teamServer, 0);
+	});
+});
+
+test('sync lock: a lock held for a different Team Server does not block', async () => {
+	await withLockDir(async (context, dir) => {
+		holdLock(dir, 'backend_sync_sharingserver.lock', 'share:https://other-team.example.com');
+		const { svc, calls } = makeService([], context);
+		await svc.syncToBackendStore(true, teamServerOnly(), true);
+		assert.equal(calls.teamServer, 1);
+		assert.ok(!fs.existsSync(path.join(dir, 'backend_sync.lock')), 'Team Server-only sync must not take the Azure lock');
+	});
 });

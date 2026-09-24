@@ -5617,7 +5617,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		if (!this.backend) { return; }
 		const settings = this.backend.getSettings();
-		if (!settings.sharingServerEnabled || !settings.sharingServerEndpointUrl) { return; }
+		// Skip the score computation when the service would refuse the upload anyway.
+		if (!settings.sharingServerEnabled || !settings.sharingServerEndpointUrl || settings.sharingProfile === 'off') { return; }
 		const maturityData = await (freshMaturityData ?? this.calculateMaturityScores(false));
 		const scorePayload: Record<string, unknown> = {
 			overallStage: maturityData.overallStage, overallLabel: maturityData.overallLabel,

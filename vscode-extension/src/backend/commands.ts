@@ -12,10 +12,16 @@ import { showBackendError, showBackendSuccess } from './integration';
 import type { DisplayNameStore } from './displayNames';
 import { writeClipboardText } from '../utils/clipboard';
 import type { BackendFacadeInterface } from './types';
-import { isSharingServerConfigured, type BackendSettings } from './settings';
+import { resolveSyncTargets, type BackendSettings, type SyncTargets } from './settings';
 import { ErrorMessages, SuccessMessages, ConfirmationMessages } from './ui/messages';
 import { MANUAL_SYNC_COOLDOWN_MS } from './constants';
 import { RateLimiter } from '../utils/rateLimiter';
+
+/** Names the targets a manual sync writes to, for its progress, success and error text. */
+function describeSyncTargets(targets: SyncTargets): string {
+	if (targets.azure && targets.sharingServer) { return 'Azure and Team Server'; }
+	return targets.azure ? 'Azure' : 'Team Server';
+}
 
 async function withBackendErrorHandling(label: string, fn: () => Promise<void>): Promise<void> {
 	try {
@@ -91,32 +97,42 @@ export class BackendCommandHandler {
 
 		const settings = this.facade.getSettings() as BackendSettings;
 		// Azure Storage and the Team Server are independent targets; either toggle enables sync.
-		if (!settings.enabled && !isSharingServerConfigured(settings)) {
+		if (!settings.enabled && !settings.sharingServerEnabled) {
 			vscode.window.showWarningMessage(
 				'Backend sync is disabled. Enable it in settings or run "Configure Backend" first.'
 			);
 			return;
 		}
 
-		if (!this.facade.isConfigured(settings) && !isSharingServerConfigured(settings)) {
+		// Gate on the same resolved targets the sync service uses, so the command can never
+		// report success for a pass that uploads nothing.
+		if (settings.sharingProfile === 'off') {
 			vscode.window.showWarningMessage(
-				'Backend is not fully configured. Run "Configure Backend" to set up Azure resources.'
+				'Backend sync is off because the sharing profile is set to Off. Choose another profile to upload data.'
+			);
+			return;
+		}
+		const targets = resolveSyncTargets(settings);
+		if (!targets.azure && !targets.sharingServer) {
+			vscode.window.showWarningMessage(
+				'Backend is not fully configured. Run "Configure Backend" for Azure Storage or "Configure Team Server Backend" for the Team Server.'
 			);
 			return;
 		}
 
-		await withBackendErrorHandling('sync to Azure', async () => {
+		const targetLabel = describeSyncTargets(targets);
+		await withBackendErrorHandling(`sync to ${targetLabel}`, async () => {
 			await vscode.window.withProgress(
 				{
 					location: vscode.ProgressLocation.Notification,
-					title: 'Syncing to backend...',
+					title: `Syncing to ${targetLabel}...`,
 					cancellable: false
 				},
 				async () => {
 					await this.facade.syncToBackendStore(true);
 				}
 			);
-			showBackendSuccess(SuccessMessages.synced());
+			showBackendSuccess(SuccessMessages.synced(targetLabel));
 		});
 	}
 

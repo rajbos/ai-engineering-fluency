@@ -136,9 +136,10 @@ export const SuccessMessages = {
 
   /**
    * Sync completed successfully.
+   * @param target - Which target(s) were synced, e.g. "Azure", "Team Server"
    */
-  synced: (): string => {
-    return "Synced to Azure successfully";
+  synced: (target = "Azure"): string => {
+    return `Synced to ${target} successfully`;
   },
 
   /**

@@ -26,16 +26,15 @@ export class SyncLock {
 	 * Try to acquire an exclusive file lock so only one VS Code window
 	 * can run a backend sync at a time.
 	 *
-	 * If the existing lock was written by an instance configured against a
-	 * *different* server URL, the lock does not apply — both instances are
-	 * syncing to independent endpoints and should not block each other.
+	 * `lockName` selects the lock file, one per sync target kind (see {@link SyncLock.lockPath}),
+	 * so Azure and Team Server syncs don't block each other. If the existing lock was written by
+	 * an instance configured against a *different* server URL, the lock does not apply — both
+	 * instances are syncing to independent endpoints and should not block each other.
 	 */
-	async acquire(backend?: string, serverUrl?: string): Promise<boolean> {
+	async acquire(lockName?: string, serverUrl?: string): Promise<boolean> {
 		const ctx = this.context;
 		if (!ctx) { return true; } // No context → allow (tests)
-		// Use a backend-specific lock so Azure and sharingServer syncs don't block each other.
-		const suffix = backend === 'sharingServer' ? '_sharingserver' : '';
-		const lockPath = path.join(ctx.globalStorageUri.fsPath, `backend_sync${suffix}.lock`);
+		const lockPath = SyncLock.lockPath(ctx, lockName);
 		const lockContent = JSON.stringify({
 			sessionId: vscode.env.sessionId,
 			timestamp: Date.now(),
@@ -77,6 +76,17 @@ export class SyncLock {
 		}
 	}
 
+	/**
+	 * Lock file for a target kind: `backend_sync.lock` (Azure, and the default) or
+	 * `backend_sync_<name>.lock`. Keyed by the target being written to — never by the legacy
+	 * `backend.backend` selector, which says nothing about which targets a window syncs.
+	 */
+	private static lockPath(ctx: vscode.ExtensionContext, lockName?: string): string {
+		const safeName = (lockName ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+		const suffix = safeName ? `_${safeName}` : '';
+		return path.join(ctx.globalStorageUri.fsPath, `backend_sync${suffix}.lock`);
+	}
+
 	private parseLockContent(content: string): { sessionId?: unknown; timestamp: number; serverUrl?: string } | undefined {
 		try {
 			const lock = JSON.parse(content);
@@ -100,11 +110,10 @@ export class SyncLock {
 	/**
 	 * Release the sync lock, but only if we own it.
 	 */
-	async release(backend?: string): Promise<void> {
+	async release(lockName?: string): Promise<void> {
 		const ctx = this.context;
 		if (!ctx) { return; }
-		const suffix = backend === 'sharingServer' ? '_sharingserver' : '';
-		const lockPath = path.join(ctx.globalStorageUri.fsPath, `backend_sync${suffix}.lock`);
+		const lockPath = SyncLock.lockPath(ctx, lockName);
 		try {
 			const content = await fs.promises.readFile(lockPath, 'utf-8');
 			const lock = JSON.parse(content);

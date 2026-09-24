@@ -69,7 +69,7 @@ describe('backend/commands', { concurrency: false }, () => {
 	let synced = false;
 	const handler = new BackendCommandHandler({
 		facade: createMockFacade({
-			getSettings: () => ({ enabled: false, backend: 'storageTables', sharingServerEnabled: true, sharingServerEndpointUrl: 'https://team.example.com' }),
+			getSettings: () => ({ enabled: false, backend: 'storageTables', sharingProfile: 'teamAnonymized', sharingServerEnabled: true, sharingServerEndpointUrl: 'https://team.example.com' }),
 			isConfigured: () => false, // legacy Azure-keyed check
 			syncToBackendStore: async () => { synced = true; }
 		}),
@@ -81,6 +81,28 @@ describe('backend/commands', { concurrency: false }, () => {
 	await handler.handleSyncBackendNow();
 	assert.equal(synced, true);
 	assert.deepEqual((vscode as any).__mock.state.lastWarningMessages, []);
+	// No Azure request ran, so the success text must not claim one did.
+	assert.ok((vscode as any).__mock.state.lastInfoMessages.some((m: string) => m.includes('Synced to Team Server successfully')));
+	});
+
+	test('handleSyncBackendNow refuses a sharing profile of off instead of reporting a no-op as success', async () => {
+	(vscode as any).__mock.reset();
+	let synced = false;
+	const handler = new BackendCommandHandler({
+		facade: createMockFacade({
+			getSettings: () => ({ enabled: false, sharingProfile: 'off', sharingServerEnabled: true, sharingServerEndpointUrl: 'https://team.example.com' }),
+			isConfigured: () => true,
+			syncToBackendStore: async () => { synced = true; }
+		}),
+		integration: {},
+		calculateEstimatedCost: () => 0,
+		warn: () => undefined,
+		log: () => undefined
+	});
+	await handler.handleSyncBackendNow();
+	assert.equal(synced, false);
+	assert.deepEqual((vscode as any).__mock.state.lastInfoMessages, []);
+	assert.ok((vscode as any).__mock.state.lastWarningMessages.some((m: string) => m.includes('sharing profile is set to Off')));
 	});
 
 	test('handleSyncBackendNow runs sync and shows success; errors show error message', async () => {
@@ -88,7 +110,7 @@ describe('backend/commands', { concurrency: false }, () => {
 	let synced = false;
 	const handler = new BackendCommandHandler({
 		facade: createMockFacade({
-			getSettings: () => ({ enabled: true }),
+			getSettings: () => ({ enabled: true, sharingProfile: 'teamAnonymized', subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'sa', aggTable: 'agg' }),
 			isConfigured: () => true,
 			syncToBackendStore: async () => { synced = true; }
 		}),
@@ -105,7 +127,7 @@ describe('backend/commands', { concurrency: false }, () => {
 	(vscode as any).__mock.reset();
 	const handlerFail = new BackendCommandHandler({
 		facade: createMockFacade({
-			getSettings: () => ({ enabled: true }),
+			getSettings: () => ({ enabled: true, sharingProfile: 'teamAnonymized', subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'sa', aggTable: 'agg' }),
 			isConfigured: () => true,
 			syncToBackendStore: async () => { throw new Error('nope'); }
 		}),
@@ -410,7 +432,7 @@ describe('backend/commands', { concurrency: false }, () => {
 	(vscode as any).__mock.reset();
 	const handler = new BackendCommandHandler({
 		facade: createMockFacade({
-			getSettings: () => ({ enabled: true }),
+			getSettings: () => ({ enabled: true, sharingProfile: 'teamAnonymized', subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'sa', aggTable: 'agg' }),
 			isConfigured: () => true,
 			syncToBackendStore: async () => {},
 		}),
