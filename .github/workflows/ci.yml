@@ -595,6 +595,18 @@ jobs:
       run: |
         set -euo pipefail
 
+        # Escape a value for a ::warning::/::error:: workflow command (the
+        # encoding GitHub documents for command data). gh's error text and the
+        # attachment list are outside input: an unescaped newline or %0A in
+        # them would end the annotation early or start a new command.
+        cmd_escape() {
+          local s="$1"
+          s="${s//'%'/%25}"
+          s="${s//$'\r'/%0D}"
+          s="${s//$'\n'/%0A}"
+          printf '%s' "$s"
+        }
+
         # The identities this workflow posts as: the Actions bot, and the PAT's
         # user when one is configured. Only their comments are ever replaced,
         # so a person quoting the marker in their own comment keeps it.
@@ -664,13 +676,13 @@ jobs:
             file="${line%%#*}"
             case "$file" in
               visual-output/baseline/*.png|visual-output/current/*.png|visual-output/diff/*.png) ;;
-              *) echo "::error::Refusing to attach '${file}': not a screenshot path."; return 1 ;;
+              *) echo "::error::Refusing to attach '$(cmd_escape "$file")': not a screenshot path."; return 1 ;;
             esac
             case "${file#visual-output/*/}" in
-              */*|*..*) echo "::error::Refusing to attach '${file}': nested or relative path."; return 1 ;;
+              */*|*..*) echo "::error::Refusing to attach '$(cmd_escape "$file")': nested or relative path."; return 1 ;;
             esac
             if [ -L "$file" ] || [ ! -f "$file" ]; then
-              echo "::error::Refusing to attach '${file}': not a regular file."; return 1
+              echo "::error::Refusing to attach '$(cmd_escape "$file")': not a regular file."; return 1
             fi
             args+=(--attach "$line")
           done < visual-comment/attachments.txt
@@ -706,7 +718,7 @@ jobs:
           if [ -n "$pat_unusable" ]; then
             [ "${ATTACHMENTS:-0}" -gt 0 ] && why="the \`GH_PAT\` secret is set but GitHub rejected it (expired or revoked?)."
           elif [ -z "${GH_ATTACH_TOKEN:-}" ]; then
-            echo "::notice::GH_PAT is not configured, so the screenshot comment links to the artifact instead of embedding images. Add a user PAT with push access (Contents: write on a fine-grained token) as the GH_PAT secret to inline them."
+            echo "::notice::GH_PAT is not configured, so the screenshot comment links to the artifact instead of embedding images. Add a user PAT as the GH_PAT secret to inline them: a classic PAT needs the repo scope; a fine-grained one needs Contents: write (the upload) and Pull requests: write (the comment) on this repository."
             [ "${ATTACHMENTS:-0}" -gt 0 ] && why="the \`GH_PAT\` secret is not configured."
           elif [ "${ATTACHMENTS:-0}" -gt 0 ]; then
             # One line, so it survives as a workflow annotation.
@@ -722,10 +734,10 @@ jobs:
               *"requires write access"*)
                 hint=" The GH_PAT user needs write access to this repository." ;;
             esac
-            echo "::warning::Uploading the screenshots with gh --attach failed; posting the comment without inline images. ${reason:-gh gave no reason}.${hint}"
+            echo "::warning::Uploading the screenshots with gh --attach failed; posting the comment without inline images. $(cmd_escape "${reason:-gh gave no reason}").${hint}"
             # gh's message is server text: keep it on one line and out of
             # Markdown/HTML before it goes into a comment.
-            safe_reason="$(printf '%s' "${reason:-gh gave no reason}" | tr -d '\r' | tr -c 'A-Za-z0-9 .,:;/()?=%_-' ' ' | tr -s ' ' | cut -c1-300)"
+            safe_reason="$(printf '%s' "${reason:-gh gave no reason}" | tr -d '\r' | tr -c 'A-Za-z0-9 .,:;/()?=_-' ' ' | tr -s ' ' | cut -c1-300)"
             why="\`gh --attach\` failed: \`${safe_reason}\`.${hint}"
           fi
           if [ -n "$why" ]; then
