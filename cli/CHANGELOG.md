@@ -4,6 +4,9 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Changed
+- **`environmental` estimates are now based on published research, and for most people they are much lower.** CO₂ and water used to be flat guesses with no source (0.2 g CO₂e and 0.3 L of water per 1,000 tokens). They are now derived from Jegham et al., *How Hungry is AI?* ([arXiv:2505.09598](https://arxiv.org/abs/2505.09598)) via [neuland/tokendashboard-backend](https://github.com/neuland/tokendashboard-backend/blob/main/docs/co2-methodology.md): tokens are weighted by type (output fully, fresh input 1/20, cache reads almost nothing), each model is scaled from Claude Sonnet by its output-token price, and water uses the paper's cooling-plus-generation formula. Expect sharply lower figures for cache-heavy agent use (one real 30-day history: CO₂ about 38× lower, water about 3,000× lower) and smaller changes for sessions without a per-model breakdown. **Some usage can come out higher than before:** output-heavy work on large models counts up to 1,400 g CO₂e per million output tokens for Opus (2,800 g for Fable), against the old flat 200 g per million tokens. The command's methodology header now prints the reference values and weights used
+
 ### Features
 - Group models from user-configured custom endpoints (BYOK) under their own provider group (e.g. `Mistral (Custom)`) in the provider cost chart data
 - Add `--json` flag to `segment` command, so oh-my-posh/prompt hooks can get structured per-period token data from the fast, cached `segment` path instead of the uncached `usage --json` command
