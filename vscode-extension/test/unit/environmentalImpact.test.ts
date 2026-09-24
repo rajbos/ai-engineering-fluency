@@ -8,6 +8,7 @@ import {
 	calculateOutputEquivalentTokens,
 	ENVIRONMENTAL,
 	ENVIRONMENTAL_METHODOLOGY_SOURCES,
+	getEnvironmentalMethodologySourceUrl,
 	getModelEnvironmentalScale,
 	PAPER_REFERENCE,
 } from '../../../src/environmentalImpact';
@@ -198,5 +199,13 @@ test('Visual Studio and JetBrains hosts open the same methodology sources as the
 		for (const [id, url] of Object.entries(ENVIRONMENTAL_METHODOLOGY_SOURCES)) {
 			assert.ok(source.includes(entry(id, url)), `${file} maps ${id} to ${url}`);
 		}
+	}
+});
+
+test('methodology source lookup only resolves ids the map itself defines', () => {
+	assert.equal(getEnvironmentalMethodologySourceUrl('paper'), 'https://arxiv.org/abs/2505.09598');
+	assert.equal(getEnvironmentalMethodologySourceUrl('neuland'), ENVIRONMENTAL_METHODOLOGY_SOURCES.neuland);
+	for (const id of ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'unknown', '', undefined, null, 42, {}]) {
+		assert.equal(getEnvironmentalMethodologySourceUrl(id), undefined, `id ${String(id)} must not resolve`);
 	}
 });

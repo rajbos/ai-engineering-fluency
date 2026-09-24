@@ -272,7 +272,7 @@ import {
   accumulateDailyModelCounters as _accumulateDailyModelCounters,
   buildSessionEfficiencyAttribution as _buildSessionEfficiencyAttribution,
 } from '../../src/modelEfficiency';
-import { calculateEnvironmentalImpact, ENVIRONMENTAL_METHODOLOGY_SOURCES } from '../../src/environmentalImpact';
+import { calculateEnvironmentalImpact, getEnvironmentalMethodologySourceUrl } from '../../src/environmentalImpact';
 
 // --- Efficiency analysis ---
 import {
@@ -10083,7 +10083,7 @@ private computeFallbackDailyRollup(
 				// leaving the failure page up with no feedback until it finishes.
 				await this.dispatch('retryRefresh:environmental', () => this.loadEnvironmentalIntoPanel(panel));
 			} else if (message.command === 'openMethodologySource') {
-				const url = ENVIRONMENTAL_METHODOLOGY_SOURCES[message.source as string];
+				const url = getEnvironmentalMethodologySourceUrl(message.source);
 				if (url) { await vscode.env.openExternal(vscode.Uri.parse(url)); }
 			}
 		});

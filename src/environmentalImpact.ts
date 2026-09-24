@@ -56,6 +56,17 @@ export const ENVIRONMENTAL_METHODOLOGY_SOURCES: Readonly<Record<string, string>>
 	neuland: 'https://github.com/neuland/tokendashboard-backend/blob/main/docs/co2-methodology.md',
 });
 
+/**
+ * Resolve a webview-supplied source id to its fixed URL. Only the map's own
+ * keys match, so ids like `constructor` or `__proto__` cannot pull a
+ * prototype member out and hand a non-URL to the host's open-external call.
+ */
+export function getEnvironmentalMethodologySourceUrl(id: unknown): string | undefined {
+	return typeof id === 'string' && Object.prototype.hasOwnProperty.call(ENVIRONMENTAL_METHODOLOGY_SOURCES, id)
+		? ENVIRONMENTAL_METHODOLOGY_SOURCES[id]
+		: undefined;
+}
+
 const INPUT_WEIGHT = 1 / 20;
 
 /** Output-equivalent tokens for the paper's reference prompt (1,500 + 10,000 / 20 = 2,000). */
