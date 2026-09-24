@@ -31,7 +31,6 @@ import { getEditorTypeFromPath, refineEditorLabelForInteractionModeSplit } from 
 type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };
 
 /**
-/**
  * True when a parsed JSON value is a plain object usable as a session record.
  * Arrays are rejected: `typeof [] === 'object'`, so a bare `[]` line would
  * otherwise read as a valid record with no usage on it and a file of such
