@@ -24,22 +24,25 @@ function describeSyncTargets(targets: SyncTargets): string {
 	return targets.azure ? t('backend.syncNow.target.azure') : t('backend.syncNow.target.teamServer');
 }
 
+/** Which targets ended in each outcome; a field is undefined when no target did. */
+interface PartitionedSyncResult {
+	synced?: SyncTargets;
+	skipped?: SyncTargets;
+	failed?: SyncTargets;
+}
+
 /**
- * Turns a sync pass's per-target result into what Sync Now reports: throws (so the caller shows
- * an error) when any target failed, returns `false` when nothing was sent, `true` otherwise. A
- * facade that reports no result is treated as successful.
+ * Splits a sync pass's per-target result by outcome so Sync Now can report each target honestly:
+ * a partial result is never collapsed into "synced to both". A facade that reports no result is
+ * treated as having synced every attempted target.
  */
-function assessSyncResult(result: SyncResult | void): boolean {
-	if (!result) { return true; }
-	const outcomes = [
-		{ outcome: result.azure, label: t('backend.syncNow.target.azure') },
-		{ outcome: result.sharingServer, label: t('backend.syncNow.target.teamServer') },
-	].filter(o => o.outcome !== undefined);
-	const failed = outcomes.filter(o => o.outcome === 'failed').map(o => o.label);
-	if (failed.length > 0) {
-		throw new Error(t('backend.syncNow.failed', failed.join(', ')));
-	}
-	return outcomes.some(o => o.outcome === 'synced');
+function partitionSyncResult(result: SyncResult | void, attempted: SyncTargets): PartitionedSyncResult {
+	if (!result) { return { synced: attempted }; }
+	const pick = (outcome: 'synced' | 'skipped' | 'failed'): SyncTargets | undefined => {
+		const targets = { azure: result.azure === outcome, sharingServer: result.sharingServer === outcome };
+		return targets.azure || targets.sharingServer ? targets : undefined;
+	};
+	return { synced: pick('synced'), skipped: pick('skipped'), failed: pick('failed') };
 }
 
 async function withBackendErrorHandling(label: string, fn: () => Promise<void>): Promise<void> {
@@ -145,13 +148,18 @@ export class BackendCommandHandler {
 				},
 				async () => this.facade.syncToBackendStore(true)
 			);
-			// The sync service logs per-target failures instead of throwing, so check what it
-			// reports rather than treating "returned" as "uploaded".
-			if (!assessSyncResult(result)) {
-				vscode.window.showWarningMessage(t('backend.syncNow.nothingSent', targetLabel));
-				return;
+			// The sync service logs per-target failures instead of throwing, so report what it
+			// says happened to each target rather than treating "returned" as "uploaded".
+			const { synced, skipped, failed } = partitionSyncResult(result, targets);
+			if (synced) {
+				showBackendSuccess(t('backend.syncNow.synced', describeSyncTargets(synced)));
 			}
-			showBackendSuccess(t('backend.syncNow.synced', targetLabel));
+			if (skipped || (!synced && !failed)) {
+				vscode.window.showWarningMessage(t('backend.syncNow.nothingSent', skipped ? describeSyncTargets(skipped) : targetLabel));
+			}
+			if (failed) {
+				throw new Error(t('backend.syncNow.failed', describeSyncTargets(failed)));
+			}
 		});
 	}
 

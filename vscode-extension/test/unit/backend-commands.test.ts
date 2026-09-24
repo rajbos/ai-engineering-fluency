@@ -124,10 +124,19 @@ describe('backend/commands', { concurrency: false }, () => {
 		assert.ok(state.lastErrorMessages.some((m: string) => m.includes('Upload to Team Server failed')), JSON.stringify(state.lastErrorMessages));
 	});
 
-	test('handleSyncBackendNow names only the failed target when the other one synced', async () => {
+	test('handleSyncBackendNow reports a partial failure per target', async () => {
 		const state = await runSyncNow({ enabled: true, sharingProfile: 'teamAnonymized', subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'sa', aggTable: 'agg', sharingServerEnabled: true, sharingServerEndpointUrl: 'https://team.example.com' }, { azure: 'synced', sharingServer: 'failed' });
-		assert.deepEqual(state.lastInfoMessages, []);
+		assert.ok(state.lastInfoMessages.some((m: string) => m.includes('Synced to Azure successfully')), JSON.stringify(state.lastInfoMessages));
+		assert.ok(!state.lastInfoMessages.some((m: string) => m.includes('Azure and Team Server')));
 		assert.ok(state.lastErrorMessages.some((m: string) => m.includes('Upload to Team Server failed') && !m.includes('Azure failed')));
+	});
+
+	test('handleSyncBackendNow never reports "both" when one target was skipped', async () => {
+		const state = await runSyncNow({ enabled: true, sharingProfile: 'teamAnonymized', subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'sa', aggTable: 'agg', sharingServerEnabled: true, sharingServerEndpointUrl: 'https://team.example.com' }, { azure: 'synced', sharingServer: 'skipped' });
+		assert.ok(state.lastInfoMessages.some((m: string) => m.includes('Synced to Azure successfully')), JSON.stringify(state.lastInfoMessages));
+		assert.ok(!state.lastInfoMessages.some((m: string) => m.includes('Azure and Team Server')));
+		assert.ok(state.lastWarningMessages.some((m: string) => m.includes('Nothing was uploaded to Team Server')));
+		assert.deepEqual(state.lastErrorMessages, []);
 	});
 
 	test('handleSyncBackendNow warns instead of claiming success when nothing was sent', async () => {
