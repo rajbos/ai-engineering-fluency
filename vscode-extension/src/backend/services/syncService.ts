@@ -76,6 +76,22 @@ export function targetSyncLockName(kind: 'azure' | 'sharingserver', endpoint: st
 	return `${kind}_${createHash('sha256').update(endpoint).digest('hex').slice(0, 16)}`;
 }
 
+/**
+ * The workspace/machine IDs to upload for a rollup key under a sharing policy: HMAC-hashed per
+ * dataset for team profiles, raw for soloFull. Every upload target (Azure rows, backfill, Team
+ * Server entries) must go through this so no profile leaks raw IDs to one target but not another.
+ */
+export function applyIdStrategies(
+	key: { workspaceId: string; machineId: string },
+	datasetId: string,
+	policy: Pick<ReturnType<typeof computeBackendSharingPolicy>, 'workspaceIdStrategy' | 'machineIdStrategy'>,
+): { workspaceId: string; machineId: string } {
+	return {
+		workspaceId: policy.workspaceIdStrategy === 'hashed' ? hashWorkspaceIdForTeam({ datasetId, workspaceId: key.workspaceId }) : key.workspaceId,
+		machineId: policy.machineIdStrategy === 'hashed' ? hashMachineIdForTeam({ datasetId, machineId: key.machineId }) : key.machineId,
+	};
+}
+
 /** Logged when neither Azure Storage nor the Team Server is switched on and configured. */
 const NO_SYNC_TARGET_REASON = 'no sync target enabled: Azure Storage needs backend.enabled plus Azure settings; Team Server needs backend.sharingServer.enabled plus an endpoint URL';
 
@@ -1585,12 +1601,7 @@ return true;
 			const effectiveUserId = (key.userId ?? '').trim() || undefined;
 			const includeConsent = sharingPolicy.includeUserDimension && !!effectiveUserId;
 			const includeNames = sharingPolicy.includeNames;
-			const workspaceIdToStore = sharingPolicy.workspaceIdStrategy === 'hashed'
-				? hashWorkspaceIdForTeam({ datasetId: settings.datasetId, workspaceId: key.workspaceId })
-				: key.workspaceId;
-			const machineIdToStore = sharingPolicy.machineIdStrategy === 'hashed'
-				? hashMachineIdForTeam({ datasetId: settings.datasetId, machineId: key.machineId })
-				: key.machineId;
+			const { workspaceId: workspaceIdToStore, machineId: machineIdToStore } = applyIdStrategies(key, settings.datasetId, sharingPolicy);
 			entities.push(createDailyAggEntity({
 				datasetId: settings.datasetId, day: key.day, model: key.model,
 				workspaceId: workspaceIdToStore, workspaceName: includeNames ? workspaceNamesById[key.workspaceId] : undefined,
@@ -1708,12 +1719,15 @@ return true;
 		const includeNames = sharingPolicy.includeNames;
 		const entries: SharingServerEntry[] = [];
 		for (const { key, value } of rollups.values()) {
+			// Same ID strategy as the Azure path: team profiles upload hashed workspace/machine
+			// IDs, only soloFull uploads raw ones. Names are still looked up by the raw ID.
+			const ids = applyIdStrategies(key, settings.datasetId, sharingPolicy);
 			entries.push({
 				day: key.day,
 				model: key.model,
-				workspaceId: key.workspaceId,
+				workspaceId: ids.workspaceId,
 				workspaceName: includeNames ? workspaceNamesById[key.workspaceId] : undefined,
-				machineId: key.machineId,
+				machineId: ids.machineId,
 				machineName: includeNames ? machineNamesById[key.machineId] : undefined,
 				inputTokens: value.inputTokens,
 				outputTokens: value.outputTokens,
@@ -1842,12 +1856,7 @@ return true;
 			const effectiveUserId = (key.userId ?? '').trim() || undefined;
 			const includeConsent = sharingPolicy.includeUserDimension && !!effectiveUserId;
 			const includeNames = sharingPolicy.includeNames;
-			const workspaceIdToStore = sharingPolicy.workspaceIdStrategy === 'hashed'
-				? hashWorkspaceIdForTeam({ datasetId: settings.datasetId, workspaceId: key.workspaceId })
-				: key.workspaceId;
-			const machineIdToStore = sharingPolicy.machineIdStrategy === 'hashed'
-				? hashMachineIdForTeam({ datasetId: settings.datasetId, machineId: key.machineId })
-				: key.machineId;
+			const { workspaceId: workspaceIdToStore, machineId: machineIdToStore } = applyIdStrategies(key, settings.datasetId, sharingPolicy);
 			entities.push(createDailyAggEntity({
 				datasetId: settings.datasetId, day: key.day, model: key.model,
 				workspaceId: workspaceIdToStore, workspaceName: includeNames ? workspaceNamesById[key.workspaceId] : undefined,

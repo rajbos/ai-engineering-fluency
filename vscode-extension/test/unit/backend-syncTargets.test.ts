@@ -6,9 +6,10 @@ import * as path from 'node:path';
 
 import * as vscode from 'vscode';
 
-import { SyncService, canonicalTeamServerUrl, legacyLockCoversTarget, syncTargetLockToken, targetSyncLockName, type SyncServiceDeps } from '../../src/backend/services/syncService';
+import { SyncService, applyIdStrategies, canonicalTeamServerUrl, legacyLockCoversTarget, syncTargetLockToken, targetSyncLockName, type SyncServiceDeps } from '../../src/backend/services/syncService';
 import { BackendUtility } from '../../src/backend/services/utilityService';
 import { getBackendSettings, resolveSyncTargets, type BackendSettings } from '../../src/backend/settings';
+import { hashMachineIdForTeam, hashWorkspaceIdForTeam } from '../../src/backend/sharingProfile';
 import { inferSharingProfile } from '../../src/backend/settingsValidation';
 
 /**
@@ -109,10 +110,10 @@ test('inferSharingProfile: an explicit off profile wins over an enabled target',
 
 // ── SyncService gating ────────────────────────────────────────────────────
 
-interface Calls { azure: number; teamServer: number; backfillAzure: number; fluencyScore: number }
+interface Calls { azure: number; teamServer: number; backfillAzure: number; fluencyScore: number; uploaded: any[] }
 
 function makeService(logs: string[], context?: vscode.ExtensionContext): { svc: SyncService; calls: Calls } {
-	const calls: Calls = { azure: 0, teamServer: 0, backfillAzure: 0, fluencyScore: 0 };
+	const calls: Calls = { azure: 0, teamServer: 0, backfillAzure: 0, fluencyScore: 0, uploaded: [] };
 	const deps: SyncServiceDeps = {
 		context,
 		logger: { log: (m) => logs.push(m), warn: (m) => logs.push(m) },
@@ -137,7 +138,7 @@ function makeService(logs: string[], context?: vscode.ExtensionContext): { svc: 
 		deleteEntitiesForUserDataset: async () => ({ deletedCount: 0, errors: [] }),
 	};
 	const sharingServerSvc = {
-		uploadRollups: async () => { calls.teamServer++; },
+		uploadRollups: async (_url: string, _token: string, entries: any[]) => { calls.teamServer++; calls.uploaded.push(...entries); },
 		uploadFluencyScore: async () => { calls.fluencyScore++; },
 	};
 	const svc = new SyncService(deps, credSvc as any, dataSvc as any, undefined, BackendUtility, sharingServerSvc as any);
@@ -149,8 +150,8 @@ function makeService(logs: string[], context?: vscode.ExtensionContext): { svc: 
 			key: { day: '2026-01-01', model: 'gpt-4o', workspaceId: 'ws', machineId: 'm', editor: 'VS Code' },
 			value: { inputTokens: 10, outputTokens: 20, interactions: 1 },
 		}]]),
-		workspaceNamesById: {},
-		machineNamesById: {},
+		workspaceNamesById: { ws: 'my-repo' },
+		machineNamesById: { m: 'my-laptop' },
 	});
 	return { svc, calls };
 }
@@ -382,4 +383,53 @@ test('legacyLockCoversTarget: matches composite entries canonically; unknown for
 	assert.equal(legacyLockCoversTarget('azure:SA', syncTargetLockToken('azure', 'sa')), true);
 	assert.equal(legacyLockCoversTarget(undefined, share), true);
 	assert.equal(legacyLockCoversTarget('https://mystorage.table.core.windows.net', share), true);
+});
+
+// ── Team Server payloads honour the profile's ID strategy ────────────────
+
+for (const profile of ['teamAnonymized', 'teamPseudonymous', 'teamIdentified'] as const) {
+	test(`Team Server upload: ${profile} sends hashed workspace/machine IDs and no names`, async () => {
+		const { svc, calls } = makeService([]);
+		await svc.syncToBackendStore(true, { ...teamServerOnly(), sharingProfile: profile, datasetId: 'ds1' }, true);
+		assert.equal(calls.uploaded.length, 1);
+		const [entry] = calls.uploaded;
+		assert.equal(entry.workspaceId, hashWorkspaceIdForTeam({ datasetId: 'ds1', workspaceId: 'ws' }));
+		assert.equal(entry.machineId, hashMachineIdForTeam({ datasetId: 'ds1', machineId: 'm' }));
+		assert.notEqual(entry.workspaceId, 'ws');
+		assert.notEqual(entry.machineId, 'm');
+		assert.equal(entry.workspaceName, undefined);
+		assert.equal(entry.machineName, undefined);
+	});
+}
+
+test('Team Server upload: the inferred default profile (Team Server-only, nothing set) hashes IDs', async () => {
+	(vscode as any).__mock.reset();
+	(vscode as any).__mock.setConfig({
+		'aiEngineeringFluency.backend.sharingServer.enabled': true,
+		'aiEngineeringFluency.backend.sharingServer.endpointUrl': 'https://team.example.com',
+	});
+	const settings = getBackendSettings();
+	const { svc, calls } = makeService([]);
+	await svc.syncToBackendStore(true, settings, true);
+	assert.equal(calls.uploaded.length, 1);
+	assert.equal(calls.uploaded[0].workspaceId, hashWorkspaceIdForTeam({ datasetId: settings.datasetId, workspaceId: 'ws' }));
+	assert.equal(calls.uploaded[0].machineId, hashMachineIdForTeam({ datasetId: settings.datasetId, machineId: 'm' }));
+});
+
+test('Team Server upload: soloFull keeps raw IDs and names (personal full fidelity)', async () => {
+	const { svc, calls } = makeService([]);
+	await svc.syncToBackendStore(true, { ...teamServerOnly(), sharingProfile: 'soloFull' }, true);
+	const [entry] = calls.uploaded;
+	assert.equal(entry.workspaceId, 'ws');
+	assert.equal(entry.machineId, 'm');
+	assert.equal(entry.workspaceName, 'my-repo');
+	assert.equal(entry.machineName, 'my-laptop');
+});
+
+test('applyIdStrategies: hashes per dataset only when the policy says so', () => {
+	const key = { workspaceId: 'ws', machineId: 'm' };
+	assert.deepEqual(applyIdStrategies(key, 'ds', { workspaceIdStrategy: 'raw', machineIdStrategy: 'raw' }), key);
+	const hashed = applyIdStrategies(key, 'ds', { workspaceIdStrategy: 'hashed', machineIdStrategy: 'hashed' });
+	assert.equal(hashed.workspaceId, hashWorkspaceIdForTeam({ datasetId: 'ds', workspaceId: 'ws' }));
+	assert.equal(hashed.machineId, hashMachineIdForTeam({ datasetId: 'ds', machineId: 'm' }));
 });
