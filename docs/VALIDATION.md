@@ -238,7 +238,12 @@ Two things to know about that comment:
   gh's pre-flight checks the user's role on the repository, not the token's
   own grants, so a token without *Contents: write* passes that check and then
   fails at upload with `HTTP 403: Resource not accessible by personal access
-  token`; the job's warning annotation quotes that error when it happens.
+  token`. A token with *Contents: write* but no *Pull requests: write*
+  uploads fine and then fails on the comment with `Resource not accessible by
+  personal access token (addComment)`. Whenever images were due but could not
+  be attached, the comment itself opens with a warning quoting gh's error (and
+  the job's warning annotation repeats it), so a missing permission shows up
+  on the PR rather than only on the checks page.
 - Fork PRs get a read-only token and no secrets, so they only get the artifact.
 - Only a comment authored by one of the workflow's own identities (the Actions
   bot, the PAT's user) **and** whose body *starts* with the marker is ever
