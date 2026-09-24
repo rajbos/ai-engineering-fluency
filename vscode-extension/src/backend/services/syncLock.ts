@@ -26,8 +26,8 @@ export class SyncLock {
 	 * Try to acquire an exclusive file lock so only one VS Code window
 	 * can run a backend sync at a time.
 	 *
-	 * `lockName` selects the lock file, one per sync target kind (see {@link SyncLock.lockPath}),
-	 * so Azure and Team Server syncs don't block each other. If the existing lock was written by
+	 * `lockName` selects the lock file (see {@link SyncLock.lockPath}); callers pass one name per
+	 * sync target endpoint, so independent targets never share a file. If the existing lock was written by
 	 * an instance configured against a *different* server URL, the lock does not apply — both
 	 * instances are syncing to independent endpoints and should not block each other.
 	 */
@@ -77,12 +77,12 @@ export class SyncLock {
 	}
 
 	/**
-	 * Lock file for a target kind: `backend_sync.lock` (Azure, and the default) or
-	 * `backend_sync_<name>.lock`. Keyed by the target being written to — never by the legacy
-	 * `backend.backend` selector, which says nothing about which targets a window syncs.
+	 * Lock file for a lock name: `backend_sync.lock` by default, else `backend_sync_<name>.lock`.
+	 * Keyed by the target being written to — never by the legacy `backend.backend` selector,
+	 * which says nothing about which targets a window syncs.
 	 */
 	private static lockPath(ctx: vscode.ExtensionContext, lockName?: string): string {
-		const safeName = (lockName ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+		const safeName = (lockName ?? '').toLowerCase().replace(/[^a-z0-9_]/g, '');
 		const suffix = safeName ? `_${safeName}` : '';
 		return path.join(ctx.globalStorageUri.fsPath, `backend_sync${suffix}.lock`);
 	}

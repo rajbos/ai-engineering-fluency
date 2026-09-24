@@ -6,7 +6,7 @@ import * as path from 'node:path';
 
 import * as vscode from 'vscode';
 
-import { SyncService, type SyncServiceDeps } from '../../src/backend/services/syncService';
+import { SyncService, targetSyncLockName, type SyncServiceDeps } from '../../src/backend/services/syncService';
 import { BackendUtility } from '../../src/backend/services/utilityService';
 import { getBackendSettings, resolveSyncTargets, type BackendSettings } from '../../src/backend/settings';
 import { inferSharingProfile } from '../../src/backend/settingsValidation';
@@ -271,14 +271,17 @@ function withLockDir(fn: (context: vscode.ExtensionContext, dir: string) => Prom
 	return fn(context, dir).finally(() => fs.rmSync(dir, { recursive: true, force: true }));
 }
 
-function holdLock(dir: string, file: string, serverUrl: string): void {
+/** Simulates another window holding the lock for a Team Server endpoint. */
+function holdTeamServerLock(dir: string, endpointUrl: string): void {
+	const serverUrl = `share:${endpointUrl}`;
+	const file = `backend_sync_${targetSyncLockName('sharingserver', serverUrl)}.lock`;
 	fs.writeFileSync(path.join(dir, file), JSON.stringify({ sessionId: 'other-window', timestamp: Date.now(), serverUrl }));
 }
 
 for (const backend of ['storageTables', 'sharingServer'] as const) {
 	test(`sync lock: another window uploading to the same Team Server blocks it (backend.backend=${backend})`, async () => {
 		await withLockDir(async (context, dir) => {
-			holdLock(dir, 'backend_sync_sharingserver.lock', `share:${TEAM_SERVER.sharingServerEndpointUrl}`);
+			holdTeamServerLock(dir, TEAM_SERVER.sharingServerEndpointUrl);
 			const logs: string[] = [];
 			const { svc, calls } = makeService(logs, context);
 			await svc.syncToBackendStore(true, { ...teamServerOnly(), backend }, true);
@@ -290,7 +293,7 @@ for (const backend of ['storageTables', 'sharingServer'] as const) {
 
 test('sync lock: a held Team Server lock does not block this window\'s Azure sync', async () => {
 	await withLockDir(async (context, dir) => {
-		holdLock(dir, 'backend_sync_sharingserver.lock', `share:${TEAM_SERVER.sharingServerEndpointUrl}`);
+		holdTeamServerLock(dir, TEAM_SERVER.sharingServerEndpointUrl);
 		const { svc, calls } = makeService([], context);
 		await svc.syncToBackendStore(true, both(), true);
 		assert.equal(calls.azure, 1);
@@ -300,10 +303,33 @@ test('sync lock: a held Team Server lock does not block this window\'s Azure syn
 
 test('sync lock: a lock held for a different Team Server does not block', async () => {
 	await withLockDir(async (context, dir) => {
-		holdLock(dir, 'backend_sync_sharingserver.lock', 'share:https://other-team.example.com');
+		holdTeamServerLock(dir, 'https://other-team.example.com');
 		const { svc, calls } = makeService([], context);
 		await svc.syncToBackendStore(true, teamServerOnly(), true);
 		assert.equal(calls.teamServer, 1);
-		assert.ok(!fs.existsSync(path.join(dir, 'backend_sync.lock')), 'Team Server-only sync must not take the Azure lock');
+	});
+});
+
+test('sync lock: each endpoint gets its own lock file, so another endpoint\'s lock cannot weaken it', async () => {
+	await withLockDir(async (context, dir) => {
+		// Window A holds server A. Window B takes server B's lock and keeps it while uploading...
+		holdTeamServerLock(dir, 'https://other-team.example.com');
+		let releaseB!: () => void;
+		const bUploading = new Promise<void>(r => { releaseB = r; });
+		const b = makeService([], context);
+		let bStarted!: () => void;
+		const bHasLock = new Promise<void>(r => { bStarted = r; });
+		(b.svc as any).runSharingServerSyncIndependently = async () => { b.calls.teamServer++; bStarted(); await bUploading; };
+		const bSync = b.svc.syncToBackendStore(true, teamServerOnly(), true);
+		await bHasLock;
+		// ...so window C, targeting the same server B, must be blocked rather than run concurrently.
+		const logs: string[] = [];
+		const c = makeService(logs, context);
+		await c.svc.syncToBackendStore(true, teamServerOnly(), true);
+		assert.equal(c.calls.teamServer, 0, `Logs:\n${logs.join('\n')}`);
+		assert.ok(logs.some(m => m.includes('skipping Team Server')));
+		releaseB();
+		await bSync;
+		assert.equal(b.calls.teamServer, 1);
 	});
 });

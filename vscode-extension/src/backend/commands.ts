@@ -16,6 +16,7 @@ import { resolveSyncTargets, type BackendSettings, type SyncTargets } from './se
 import { ErrorMessages, SuccessMessages, ConfirmationMessages } from './ui/messages';
 import { MANUAL_SYNC_COOLDOWN_MS } from './constants';
 import { RateLimiter } from '../utils/rateLimiter';
+import { t } from '../l10n';
 
 /** Names the targets a manual sync writes to, for its progress, success and error text. */
 function describeSyncTargets(targets: SyncTargets): string {
@@ -107,16 +108,12 @@ export class BackendCommandHandler {
 		// Gate on the same resolved targets the sync service uses, so the command can never
 		// report success for a pass that uploads nothing.
 		if (settings.sharingProfile === 'off') {
-			vscode.window.showWarningMessage(
-				'Backend sync is off because the sharing profile is set to Off. Choose another profile to upload data.'
-			);
+			vscode.window.showWarningMessage(t('backend.syncNow.profileOff'));
 			return;
 		}
 		const targets = resolveSyncTargets(settings);
 		if (!targets.azure && !targets.sharingServer) {
-			vscode.window.showWarningMessage(
-				'Backend is not fully configured. Run "Configure Backend" for Azure Storage or "Configure Team Server Backend" for the Team Server.'
-			);
+			vscode.window.showWarningMessage(t('backend.syncNow.notConfigured'));
 			return;
 		}
 

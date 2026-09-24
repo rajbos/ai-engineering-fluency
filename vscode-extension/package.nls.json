@@ -562,5 +562,7 @@
   "whatsNew.feature.chart.cost-by-model-split.description": "The usage chart can now be split by model or by provider, and the By Editor breakdown collapses out of the way when you are not reading it.",
   "whatsNew.release.0.13.0.headline": "Long-context pricing became visible: the extension now knows when a request crossed into long-context rates and what that cost you.",
   "whatsNew.feature.usage.context-window.title": "Context Window & Long-Context Pricing",
-  "whatsNew.feature.usage.context-window.description": "How full your context windows run, and which requests tipped into long-context pricing. Large contexts are billed differently, and this is where that shows up."
+  "whatsNew.feature.usage.context-window.description": "How full your context windows run, and which requests tipped into long-context pricing. Large contexts are billed differently, and this is where that shows up.",
+  "backend.syncNow.profileOff": "Backend sync is off because the sharing profile is set to Off. Choose another profile to upload data.",
+  "backend.syncNow.notConfigured": "Backend is not fully configured. Run \"Configure Backend\" for Azure Storage or \"Configure Team Server Backend\" for the Team Server."
 }

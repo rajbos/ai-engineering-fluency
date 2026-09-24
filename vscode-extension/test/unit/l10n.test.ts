@@ -1081,3 +1081,15 @@ test('whats-new l10n: every catalog key resolves in English and zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: backend Sync Now warnings resolve in English and zh-cn', () => {
+	assert.equal(t('backend.syncNow.profileOff'), 'Backend sync is off because the sharing profile is set to Off. Choose another profile to upload data.');
+	assert.equal(t('backend.syncNow.notConfigured'), 'Backend is not fully configured. Run "Configure Backend" for Azure Storage or "Configure Team Server Backend" for the Team Server.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('backend.syncNow.profileOff'), '后端同步已关闭，因为共享配置文件设置为“关闭”。请选择其他配置文件以上传数据。');
+		assert.equal(t('backend.syncNow.notConfigured'), '后端尚未完全配置。请运行“配置后端”以设置 Azure 存储，或运行“配置团队服务器后端”以设置团队服务器。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});

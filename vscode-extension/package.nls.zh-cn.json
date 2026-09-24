@@ -564,5 +564,7 @@
   "whatsNew.feature.chart.cost-by-model-split.description": "使用量图表现在可以按模型或按提供方拆分，而“按编辑器”明细在你不看它时会自动收起。",
   "whatsNew.release.0.13.0.headline": "长上下文计价变得可见：扩展现在能识别请求何时进入长上下文费率，以及这让你花了多少钱。",
   "whatsNew.feature.usage.context-window.title": "上下文窗口与长上下文计价",
-  "whatsNew.feature.usage.context-window.description": "你的上下文窗口用得有多满，以及哪些请求触发了长上下文计价。大上下文的计费方式不同，这里就是它显现出来的地方。"
+  "whatsNew.feature.usage.context-window.description": "你的上下文窗口用得有多满，以及哪些请求触发了长上下文计价。大上下文的计费方式不同，这里就是它显现出来的地方。",
+  "backend.syncNow.profileOff": "后端同步已关闭，因为共享配置文件设置为“关闭”。请选择其他配置文件以上传数据。",
+  "backend.syncNow.notConfigured": "后端尚未完全配置。请运行“配置后端”以设置 Azure 存储，或运行“配置团队服务器后端”以设置团队服务器。"
 }

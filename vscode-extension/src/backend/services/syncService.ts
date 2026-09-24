@@ -4,6 +4,7 @@
  */
 
 import * as vscode from 'vscode';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -30,9 +31,14 @@ import { getEditorTypeFromPath, refineEditorLabelForInteractionModeSplit } from 
 type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };
 
 /** Logged when neither Azure Storage nor the Team Server is switched on and configured. */
-/** Lock names for {@link SyncLock}: Azure keeps the original default lock file. */
-const AZURE_SYNC_LOCK = undefined;
-const SHARING_SERVER_SYNC_LOCK = 'sharingserver';
+/**
+ * Lock name for one sync target endpoint: its kind plus a stable hash of the endpoint. One lock
+ * file per endpoint means a window syncing to server A can never make two windows syncing to
+ * server B skip serialization (which a single per-kind file, overwritten by A, would allow).
+ */
+export function targetSyncLockName(kind: 'azure' | 'sharingserver', endpoint: string): string {
+	return `${kind}_${createHash('sha256').update(endpoint).digest('hex').slice(0, 16)}`;
+}
 
 const NO_SYNC_TARGET_REASON = 'no sync target enabled: Azure Storage needs backend.enabled plus Azure settings; Team Server needs backend.sharingServer.enabled plus an endpoint URL';
 
@@ -1412,11 +1418,12 @@ return true;
 	}
 
 	/**
-	 * Runs one target's sync under that target's own cross-window lock. Each target kind has its
-	 * own lock file, holding the endpoint it writes to, so two windows uploading to the same
-	 * endpoint serialize regardless of their other targets or their `backend.backend` selector.
+	 * Runs one target's sync under that target endpoint's own cross-window lock, so two windows
+	 * uploading to the same endpoint serialize regardless of their other targets, other windows'
+	 * endpoints, or their `backend.backend` selector.
 	 */
-	private async runUnderTargetLock(lockName: string | undefined, endpoint: string, label: string, run: () => Promise<void>): Promise<void> {
+	private async runUnderTargetLock(kind: 'azure' | 'sharingserver', endpoint: string, label: string, run: () => Promise<void>): Promise<void> {
+		const lockName = targetSyncLockName(kind, endpoint);
 		if (!await this.acquireSyncLock(lockName, endpoint)) {
 			this.deps.logger.log(`Backend sync: skipping ${label} (another VS Code window is currently syncing to the same endpoint)`);
 			return;
@@ -1457,11 +1464,11 @@ return true;
 		try {
 			await this.tryUpdateLastSyncAt();
 			if (azureConfigured) {
-				await this.runUnderTargetLock(AZURE_SYNC_LOCK, `azure:${settings.storageAccount}`, 'Azure Storage',
+				await this.runUnderTargetLock('azure', `azure:${settings.storageAccount}`, 'Azure Storage',
 					() => this.runAzureSyncIndependently(settings, sharingPolicy));
 			}
 			if (sharingConfigured) {
-				await this.runUnderTargetLock(SHARING_SERVER_SYNC_LOCK, `share:${settings.sharingServerEndpointUrl}`, 'Team Server',
+				await this.runUnderTargetLock('sharingserver', `share:${settings.sharingServerEndpointUrl}`, 'Team Server',
 					() => this.runSharingServerSyncIndependently(settings, sharingPolicy));
 			}
 			this.consecutiveFailures = 0;
