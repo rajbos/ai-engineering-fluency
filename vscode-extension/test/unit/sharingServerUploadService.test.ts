@@ -7,7 +7,7 @@ import './vscode-shim-register';
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { SharingServerUploadService } from '../../src/backend/services/sharingServerUploadService';
+import { SharingServerUploadService, packEntriesByDay } from '../../src/backend/services/sharingServerUploadService';
 
 // Mock global fetch
 let mockFetchResponse: Response | undefined;
@@ -110,7 +110,39 @@ test('uploadRollups: successful upload with multiple batches', async () => {
 	
 	assert.equal(result.success, true);
 	assert.equal(result.entriesUploaded, 1000);
-	assert.equal(mockFetchCalls.length, 2); // 2 batches of 500
+	// Whole days per request: 30 days of ~33 entries pack into 3 requests of <= 500.
+	assert.equal(mockFetchCalls.length, 3);
+	const daysPerRequest = mockFetchCalls.map(c => new Set((JSON.parse(c.body!) as Array<{ day: string }>).map(e => e.day)));
+	for (let i = 0; i < daysPerRequest.length; i++) {
+		assert.ok(JSON.parse(mockFetchCalls[i].body!).length <= 500);
+		for (let j = i + 1; j < daysPerRequest.length; j++) {
+			for (const day of daysPerRequest[i]) {
+				assert.ok(!daysPerRequest[j].has(day), `day ${day} split across requests ${i} and ${j} — the server would delete the first part`);
+			}
+		}
+	}
+});
+
+test('uploadRollups: a day over the request limit is skipped and reported, not split', async () => {
+	const service = new SharingServerUploadService();
+	const entries = [];
+	for (let i = 0; i < 501; i++) { entries.push(createTestEntry('2024-02-01')); }
+	entries.push(createTestEntry('2024-02-02'));
+	const warnMsgs: string[] = [];
+	const result = await service.uploadRollups('https://server.example.com', 'github-token', entries, () => {}, (m) => warnMsgs.push(m));
+	assert.equal(result.success, false);
+	assert.equal(result.entriesUploaded, 1);
+	assert.equal(mockFetchCalls.length, 1);
+	assert.ok(!mockFetchCalls[0].body!.includes('2024-02-01'), 'the oversized day must not be sent in parts');
+	assert.ok(warnMsgs.some(m => m.includes('2024-02-01')));
+});
+
+test('packEntriesByDay: keeps each dataset/day whole and fills requests greedily', () => {
+	const e = (day: string, datasetId = 'default') => ({ day, datasetId });
+	const { batches, oversized } = packEntriesByDay([e('d1'), e('d2'), e('d1'), e('d3'), e('d1', 'other')], 3);
+	assert.deepEqual(oversized, []);
+	assert.deepEqual(batches.map(b => b.map(x => `${x.datasetId}/${x.day}`)), [['default/d1', 'default/d1', 'default/d2'], ['default/d3', 'other/d1']]);
+	assert.deepEqual(packEntriesByDay([e('big'), e('big'), e('big')], 2).oversized, [{ day: 'big', datasetId: 'default', count: 3 }]);
 });
 
 test('uploadRollups: handles server validation errors', async () => {

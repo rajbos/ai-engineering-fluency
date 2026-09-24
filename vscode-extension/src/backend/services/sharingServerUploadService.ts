@@ -23,6 +23,37 @@ export interface SharingServerEntry {
 /** Maximum number of entries per HTTP request (matches server-side limit). */
 const BATCH_SIZE = 500;
 
+/**
+ * Packs entries into requests of at most `maxPerRequest` without ever splitting one
+ * (dataset, day) across requests. The server replaces a user's rows for every day in a request
+ * (delete, then insert), so a day spread over two requests would lose the first request's rows.
+ * A single day larger than the limit cannot be sent atomically and is returned in `oversized`.
+ */
+export function packEntriesByDay<T extends { day: string; datasetId?: string }>(entries: T[], maxPerRequest: number): { batches: T[][]; oversized: Array<{ day: string; datasetId: string; count: number }> } {
+	const byDay = new Map<string, T[]>();
+	for (const entry of entries) {
+		const key = `${entry.datasetId ?? 'default'}\u0000${entry.day}`;
+		const group = byDay.get(key);
+		if (group) { group.push(entry); } else { byDay.set(key, [entry]); }
+	}
+	const batches: T[][] = [];
+	const oversized: Array<{ day: string; datasetId: string; count: number }> = [];
+	let current: T[] = [];
+	for (const group of byDay.values()) {
+		if (group.length > maxPerRequest) {
+			oversized.push({ day: group[0].day, datasetId: group[0].datasetId ?? 'default', count: group.length });
+			continue;
+		}
+		if (current.length + group.length > maxPerRequest) {
+			batches.push(current);
+			current = [];
+		}
+		current.push(...group);
+	}
+	if (current.length > 0) { batches.push(current); }
+	return { batches, oversized };
+}
+
 export class SharingServerUploadService {
 	async uploadRollups(
 		endpointUrl: string,
@@ -34,10 +65,14 @@ export class SharingServerUploadService {
 		const baseUrl = endpointUrl.replace(/\/$/, '');
 		const url = `${baseUrl}/api/upload`;
 
+		const { batches, oversized } = packEntriesByDay(entries, BATCH_SIZE);
+		for (const o of oversized) {
+			warn(`Sharing server upload: skipping ${o.day} (${o.count} entries exceeds the ${BATCH_SIZE}-entry request limit; uploading it in parts would overwrite itself)`);
+		}
+
 		try {
 			let totalUploaded = 0;
-			for (let i = 0; i < entries.length; i += BATCH_SIZE) {
-				const batch = entries.slice(i, i + BATCH_SIZE);
+			for (const batch of batches) {
 				const response = await fetch(url, {
 					method: 'POST',
 					headers: {
@@ -66,6 +101,11 @@ export class SharingServerUploadService {
 				totalUploaded += serverUploaded;
 			}
 
+			if (oversized.length > 0) {
+				const message = `Uploaded ${totalUploaded} entries; skipped ${oversized.length} day(s) over the ${BATCH_SIZE}-entry request limit: ${oversized.map(o => o.day).join(', ')}`;
+				warn(`Sharing server upload: ${message}`);
+				return { success: false, entriesUploaded: totalUploaded, message };
+			}
 			const message = `Uploaded ${totalUploaded} entries`;
 			log(`Sharing server upload: ${message}`);
 			return { success: true, entriesUploaded: totalUploaded, message };
