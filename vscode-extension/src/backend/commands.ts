@@ -12,7 +12,7 @@ import { showBackendError, showBackendSuccess } from './integration';
 import type { DisplayNameStore } from './displayNames';
 import { writeClipboardText } from '../utils/clipboard';
 import type { BackendFacadeInterface } from './types';
-import type { BackendSettings } from './settings';
+import { isSharingServerConfigured, type BackendSettings } from './settings';
 import { ErrorMessages, SuccessMessages, ConfirmationMessages } from './ui/messages';
 import { MANUAL_SYNC_COOLDOWN_MS } from './constants';
 import { RateLimiter } from '../utils/rateLimiter';
@@ -90,14 +90,15 @@ export class BackendCommandHandler {
 		this.syncRateLimiter.recordExecution();
 
 		const settings = this.facade.getSettings() as BackendSettings;
-		if (!settings.enabled) {
+		// Azure Storage and the Team Server are independent targets; either toggle enables sync.
+		if (!settings.enabled && !isSharingServerConfigured(settings)) {
 			vscode.window.showWarningMessage(
 				'Backend sync is disabled. Enable it in settings or run "Configure Backend" first.'
 			);
 			return;
 		}
 
-		if (!this.facade.isConfigured(settings)) {
+		if (!this.facade.isConfigured(settings) && !isSharingServerConfigured(settings)) {
 			vscode.window.showWarningMessage(
 				'Backend is not fully configured. Run "Configure Backend" to set up Azure resources.'
 			);

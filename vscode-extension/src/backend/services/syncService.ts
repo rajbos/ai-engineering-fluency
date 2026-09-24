@@ -11,7 +11,7 @@ import { DefaultAzureCredential } from '@azure/identity';
 import { safeStringifyError } from '../../../../src/utils/errors';
 import type { DailyRollupKey } from '../rollups';
 import { upsertDailyRollup } from '../rollups';
-import type { BackendSettings } from '../settings';
+import { resolveSyncTargets, type BackendSettings } from '../settings';
 import { BACKEND_SYNC_MIN_INTERVAL_MS } from '../constants';
 import type { DailyRollupValue, ChatRequest, SessionFileCache, ModelUsage } from '../types';
 import { resolveUserIdentityForSync, type BackendUserIdentityMode } from '../identity';
@@ -28,6 +28,9 @@ import { getEditorTypeFromPath, refineEditorLabelForInteractionModeSplit } from 
 
 /** Ecosystem session per-model usage entry (input, output, optional interactions). */
 type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };
+
+/** Logged when neither Azure Storage nor the Team Server is switched on and configured. */
+const NO_SYNC_TARGET_REASON = 'no sync target enabled: Azure Storage needs backend.enabled plus Azure settings; Team Server needs backend.sharingServer.enabled plus an endpoint URL';
 
 /**
  * Pure consent-timestamp parser — no side effects.
@@ -164,17 +167,17 @@ export class SyncService {
 	 * Determine whether the sync timer is allowed to start, logging the reason when it isn't.
 	 */
 	private _canStartSyncTimer(settings: BackendSettings, isConfigured: boolean): boolean {
-		const sharingPolicy = computeBackendSharingPolicy({
-			enabled: settings.enabled,
-			profile: settings.sharingProfile,
-			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
-		});
-		if (!sharingPolicy.allowCloudSync) {
+		if (settings.sharingProfile === 'off') {
 			this.deps.logger.log(`Backend sync: not starting timer (cloud sync disabled, profile: ${settings.sharingProfile})`);
 			return false;
 		}
 		if (!isConfigured) {
 			this.deps.logger.log('Backend sync: not starting timer (backend not configured)');
+			return false;
+		}
+		const targets = resolveSyncTargets(settings);
+		if (!targets.azure && !targets.sharingServer) {
+			this.deps.logger.log(`Backend sync: not starting timer (${NO_SYNC_TARGET_REASON})`);
 			return false;
 		}
 		return true;
@@ -1339,8 +1342,8 @@ return true;
 		return this.syncQueue;
 	}
 
-	private logSyncSkipReason(sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>, isConfigured: boolean, settings: BackendSettings): void {
-		if (!sharingPolicy.allowCloudSync) {
+	private logSyncSkipReason(isConfigured: boolean, settings: BackendSettings): void {
+		if (settings.sharingProfile === 'off') {
 			this.deps.logger.log(`Backend sync: skipping (sharing policy does not allow cloud sync, profile: ${settings.sharingProfile})`);
 		} else if (!isConfigured) {
 			this.deps.logger.log('Backend sync: skipping (neither Azure Storage nor Team Server is configured)');
@@ -1415,26 +1418,28 @@ return true;
 
 	private async doSyncToBackendStore(force: boolean, settings: BackendSettings, isConfigured: boolean): Promise<void> {
 		if (this.backendSyncInProgress) { return; }
-		const sharingPolicy = computeBackendSharingPolicy({
-			enabled: settings.enabled,
-			profile: settings.sharingProfile,
-			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
-		});
-		if (!sharingPolicy.allowCloudSync || !isConfigured) {
-			this.logSyncSkipReason(sharingPolicy, isConfigured, settings);
+		if (settings.sharingProfile === 'off' || !isConfigured) {
+			this.logSyncSkipReason(isConfigured, settings);
+			return;
+		}
+
+		// Azure Storage and the Team Server are independent sync targets: either, both, or
+		// neither may be enabled at any time, and each must run — and report its own
+		// success/failure and "last sync" timestamp — without the other affecting it.
+		// Azure is gated on `backend.enabled`; the Team Server has its own toggle and must
+		// not depend on the Azure one.
+		const { azure: azureConfigured, sharingServer: sharingConfigured } = resolveSyncTargets(settings);
+		if (!azureConfigured && !sharingConfigured) {
+			this.deps.logger.log(`Backend sync: skipping (${NO_SYNC_TARGET_REASON})`);
 			return;
 		}
 		if (await this.checkSyncThrottle(force)) { return; }
-
-		// Azure Storage and the Team Server are independent sync targets: either, both, or
-		// neither may be configured at any time, and each must run — and report its own
-		// success/failure and "last sync" timestamp — without the other affecting it.
-		const azureConfigured = !!(settings.subscriptionId && settings.resourceGroup && settings.storageAccount && settings.aggTable);
-		const sharingConfigured = !!(settings.sharingServerEnabled && settings.sharingServerEndpointUrl);
-		if (!azureConfigured && !sharingConfigured) {
-			this.deps.logger.log('Backend sync: skipping (neither Azure Storage nor Team Server is configured)');
-			return;
-		}
+		// Target gating is done above; the policy here only shapes the uploaded payload.
+		const sharingPolicy = computeBackendSharingPolicy({
+			enabled: true,
+			profile: settings.sharingProfile,
+			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
+		});
 
 		const lockTarget = this.buildSyncLockTarget(azureConfigured, sharingConfigured, settings);
 		if (!await this.acquireSyncLock(settings.backend, lockTarget)) {
@@ -1700,8 +1705,9 @@ return true;
 			profile: settings.sharingProfile,
 			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
 		});
-		if (!sharingPolicy.allowCloudSync || !isConfigured) {
-			this.deps.logger.warn('Backfill: skipping (cloud sync disabled or backend not configured)');
+		// Backfill writes to Azure Table Storage only, so it is gated on the Azure target.
+		if (!sharingPolicy.allowCloudSync || !isConfigured || !resolveSyncTargets(settings).azure) {
+			this.deps.logger.warn('Backfill: skipping (Azure Storage sync disabled or not configured)');
 			return;
 		}
 

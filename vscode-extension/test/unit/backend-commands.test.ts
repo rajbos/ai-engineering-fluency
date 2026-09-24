@@ -64,6 +64,25 @@ describe('backend/commands', { concurrency: false }, () => {
 	assert.ok((vscode as any).__mock.state.lastWarningMessages.some((m: string) => m.includes('not fully configured')));
 	});
 
+	test('handleSyncBackendNow syncs a Team Server-only setup without backend.enabled', async () => {
+	(vscode as any).__mock.reset();
+	let synced = false;
+	const handler = new BackendCommandHandler({
+		facade: createMockFacade({
+			getSettings: () => ({ enabled: false, backend: 'storageTables', sharingServerEnabled: true, sharingServerEndpointUrl: 'https://team.example.com' }),
+			isConfigured: () => false, // legacy Azure-keyed check
+			syncToBackendStore: async () => { synced = true; }
+		}),
+		integration: {},
+		calculateEstimatedCost: () => 0,
+		warn: () => undefined,
+		log: () => undefined
+	});
+	await handler.handleSyncBackendNow();
+	assert.equal(synced, true);
+	assert.deepEqual((vscode as any).__mock.state.lastWarningMessages, []);
+	});
+
 	test('handleSyncBackendNow runs sync and shows success; errors show error message', async () => {
 	(vscode as any).__mock.reset();
 	let synced = false;

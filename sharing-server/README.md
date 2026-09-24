@@ -82,8 +82,7 @@ In VS Code settings (JSON):
 
 ```json
 {
-  "aiEngineeringFluency.backend.enabled": true,
-  "aiEngineeringFluency.backend.backend": "sharingServer",
+  "aiEngineeringFluency.backend.sharingServer.enabled": true,
   "aiEngineeringFluency.backend.sharingServer.endpointUrl": "https://your-server.example.com"
 }
 ```

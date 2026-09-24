@@ -709,9 +709,17 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
   <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
 </div>` : `
 <div class="alert alert-warn">
-  No data yet. Configure the VS Code extension with this server's endpoint URL
-  (<code>aiEngineeringFluency.backend.sharingServer.endpointUrl</code>) and wait for the
-  next sync (or trigger one from the status bar).
+  No data yet. The VS Code extension uploads to this server when <em>all</em> of these settings are in place:
+  <ul>
+    <li><code>aiEngineeringFluency.backend.sharingServer.enabled</code> — must be <code>true</code></li>
+    <li><code>aiEngineeringFluency.backend.sharingServer.endpointUrl</code> — this server's URL</li>
+    <li><code>aiEngineeringFluency.backend.sharingProfile</code> — any value other than <code>off</code></li>
+  </ul>
+  Running <strong>AI Engineering Fluency: Configure Team Server Backend</strong> sets all three; pick a
+  sharing profile other than <em>Off</em> there. The Azure Storage toggle is not needed for this server.
+  You also need to be signed in to GitHub in VS Code, since uploads are authenticated with that account.
+  Saving the settings triggers an upload straight away; check the extension's output channel for
+  <code>Sharing server upload:</code> if nothing arrives.
 </div>`;
 
 	const tableHtml = uploads.length > 0 ? `
