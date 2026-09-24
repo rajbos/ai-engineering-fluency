@@ -53,6 +53,12 @@ test('last30 on a day period with a year of history keeps only the last 30 days 
 	const expectedTotal = filtered.tokensData.reduce((a, b) => a + b, 0);
 	assert.equal(filtered.totalTokens, expectedTotal);
 	assert.ok(filtered.totalTokens < period.totalTokens);
+	// Cost cards read these too.
+	assert.equal(filtered.costData.length, 30);
+	const expectedCost = filtered.costData.reduce((a, b) => a + b, 0);
+	assert.equal(filtered.totalCost, expectedCost);
+	assert.ok(filtered.totalCost < period.totalCost);
+	assert.equal(filtered.avgCostPerPeriod, expectedCost / 30);
 });
 
 test('every per-bar dataset stays aligned with the filtered labels', () => {
