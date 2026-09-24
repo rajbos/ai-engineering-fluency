@@ -1792,6 +1792,91 @@ test('syncToSharingServer reports failure for a malformed file even when the cac
 	}
 });
 
+test('syncToSharingServer reports failure for malformed request records on the cached legacy-JSON path', async () => {
+	// The cached legacy-JSON parser checked that `requests` was an array but not what
+	// was inside it, so `[[], "bad"]` cast cleanly to ChatRequest, produced no usage
+	// and returned a successful empty map — the raw-content parser rejects exactly
+	// these records, so the two paths disagreed on the same file.
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'cached-json-bad-test-'));
+	const sessionFile = path.join(tmpDir, 'session.json');
+	fs.writeFileSync(sessionFile, JSON.stringify({ requests: [[], 'bad'] }), 'utf8');
+	let cacheLookups = 0;
+	try {
+		const svc = new SyncService(
+			makeDeps({
+				getGithubToken: () => 'github-token',
+				getCopilotSessionFiles: async () => [sessionFile],
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+				getSessionFileDataCached: async () => {
+					cacheLookups++;
+					return { tokens: 0, mtime: Date.now(), interactions: 0, modelUsage: {} };
+				},
+			}),
+			{} as any,
+			{} as any,
+			undefined,
+			BackendUtility,
+			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+		);
+
+		await assert.rejects(
+			() => (svc as any).syncToSharingServer(
+				{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+				{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+			),
+			/could not be read/,
+			'Malformed request records must fail the scan on the cached path too',
+		);
+		assert.ok(cacheLookups > 0, 'Guard: the cached path must actually have been exercised');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+test('syncToSharingServer reports failure for malformed delta request entries on the cached path', async () => {
+	// Delta-format sessions carry their requests inside an event payload, which was
+	// iterated without validating the entries for the same reason.
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'cached-delta-bad-test-'));
+	const sessionFile = path.join(tmpDir, 'events.jsonl');
+	fs.writeFileSync(
+		sessionFile,
+		JSON.stringify({ kind: 1, v: { requests: [] } }) + '\n' +
+		JSON.stringify({ kind: 2, k: ['requests'], v: [[], 'bad'] }) + '\n',
+		'utf8',
+	);
+	let cacheLookups = 0;
+	try {
+		const svc = new SyncService(
+			makeDeps({
+				getGithubToken: () => 'github-token',
+				getCopilotSessionFiles: async () => [sessionFile],
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+				getSessionFileDataCached: async () => {
+					cacheLookups++;
+					return { tokens: 0, mtime: Date.now(), interactions: 0, modelUsage: {} };
+				},
+			}),
+			{} as any,
+			{} as any,
+			undefined,
+			BackendUtility,
+			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+		);
+
+		await assert.rejects(
+			() => (svc as any).syncToSharingServer(
+				{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+				{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+			),
+			/could not be read/,
+			'Malformed delta request entries must fail the scan',
+		);
+		assert.ok(cacheLookups > 0, 'Guard: the cached path must actually have been exercised');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
 test('syncToSharingServer still treats a readable session with no billable activity as a successful sync', async () => {
 	// The guard keys off parse failures, not the absence of rollups: a file that
 	// reads cleanly and simply has no usage must not pin the user at "never".

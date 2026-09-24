@@ -442,7 +442,7 @@ const event = JSON.parse(line);
 if (!isEventRecord(event)) { failures++; continue; }
 defaultModel = this.updateDeltaDefaultModel(event, defaultModel);
 if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'requests' && Array.isArray(event.v)) {
-this.processDeltaRequests(event.v, defaultModel, seenRequestIds, fileMtimeMs, startMs, dayModelInteractions);
+failures += this.processDeltaRequests(event.v, defaultModel, seenRequestIds, fileMtimeMs, startMs, dayModelInteractions);
 }
 } catch {
 failures++;
@@ -483,15 +483,31 @@ seenRequestIds: Set<string>,
 fileMtimeMs: number,
 startMs: number,
 dayModelInteractions: Map<string, Map<string, number>>
-): void {
+): number {
+let failed = 0;
 for (const request of requests) {
-const req = request as ChatRequest;
+// A delta payload entry that is not an object carries no usage and cannot be
+// read; counting it keeps this in step with the raw-content delta parser.
+if (!isEventRecord(request)) { failed++; continue; }
+this.upsertDeltaRequest(request as ChatRequest, defaultModel, seenRequestIds, fileMtimeMs, startMs, dayModelInteractions);
+}
+return failed;
+}
+
+private upsertDeltaRequest(
+req: ChatRequest,
+defaultModel: string,
+seenRequestIds: Set<string>,
+fileMtimeMs: number,
+startMs: number,
+dayModelInteractions: Map<string, Map<string, number>>
+): void {
 const reqId = (req as any).requestId as string | undefined;
-if (reqId && seenRequestIds.has(reqId)) { continue; }
+if (reqId && seenRequestIds.has(reqId)) { return; }
 if (reqId) { seenRequestIds.add(reqId); }
 const normalizedTs = this.utility.normalizeTimestampToMs(req.timestamp);
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
-if (!eventMs || eventMs < startMs) { continue; }
+if (!eventMs || eventMs < startMs) { return; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
 const rawModel = (req as any).modelId || (req as any).result?.metadata?.modelId;
 const model = rawModel ? (rawModel as string).replace(/^copilot\//, '') : defaultModel;
@@ -499,11 +515,12 @@ if (!dayModelInteractions.has(dayKey)) { dayModelInteractions.set(dayKey, new Ma
 const dayMap = dayModelInteractions.get(dayKey)!;
 dayMap.set(model, (dayMap.get(model) ?? 0) + 1);
 }
-}
 
 /**
  * Build day→model interaction counts from regular JSON session format.
- * Returns null if JSON parsing fails (logs a warning internally).
+ * Returns null if the document cannot be read as a session: unparseable JSON, a
+ * missing `requests` array, or any malformed record inside it. The caller treats
+ * null as a cache miss and falls through to the failure-aware parser.
  */
 private buildDayModelInteractionsFromJson(
 content: string,
@@ -526,6 +543,13 @@ return null;
 const requests = sessionObj.requests as unknown[];
 const dayModelInteractions = new Map<string, Map<string, number>>();
 for (const request of requests) {
+// processJsonSessionFallback rejects malformed request records, so this path has
+// to as well: casting `[]` or `"bad"` to a ChatRequest yields no usable fields and
+// silently produced an empty, successful-looking map.
+if (!isEventRecord(request)) {
+this.deps.logger.warn(`Backend sync: malformed request record in cached session ${sessionFile}`);
+return null;
+}
 const req = request as ChatRequest;
 const normalizedTs = this.utility.normalizeTimestampToMs(
 typeof req.timestamp !== 'undefined' ? req.timestamp : (sessionObj.lastMessageDate as unknown)
@@ -1106,7 +1130,7 @@ try {
 const event = JSON.parse(line);
 if (!isEventRecord(event)) { failedLines++; continue; }
 defaultModel = this.updateFallbackVsCodeModel(event, defaultModel);
-this.upsertVsCodeFallbackRequests(event, defaultModel, seenReqIds, fileMtimeMs, startMs, ctx);
+failedLines += this.upsertVsCodeFallbackRequests(event, defaultModel, seenReqIds, fileMtimeMs, startMs, ctx);
 } catch { failedLines++; }
 }
 return failedLines;
@@ -1137,11 +1161,16 @@ seenReqIds: Set<string>,
 fileMtimeMs: number,
 startMs: number,
 ctx: { workspaceId: string; machineId: string; userId: string | undefined; editorForFile: string | undefined; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }> }
-): void {
-if (event.kind !== 2 || !Array.isArray(event.k) || event.k[0] !== 'requests' || !Array.isArray(event.v)) { return; }
+): number {
+if (event.kind !== 2 || !Array.isArray(event.k) || event.k[0] !== 'requests' || !Array.isArray(event.v)) { return 0; }
+let failed = 0;
 for (const request of event.v) {
+// Same contract as the cached delta parser: a non-object entry is a record we
+// could not read, not an absent one.
+if (!isEventRecord(request)) { failed++; continue; }
 this.upsertVsCodeFallbackSingleRequest(request, defaultModel, seenReqIds, fileMtimeMs, startMs, ctx);
 }
+return failed;
 }
 
 private upsertVsCodeFallbackSingleRequest(
