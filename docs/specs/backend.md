@@ -751,9 +751,13 @@ test('validateTeamAlias rejects common name patterns', () => {
 - `vscode.ExtensionContext.globalState` - Last sync timestamps, tracked per target so a
   success on one cannot imply a success on another: `backend.azureLastSyncAt` (Azure Table
   Storage), `backend.sharingServerLastSyncAt` (Team Server usage rollups) and
-  `backend.sharingServerFluencyLastSyncAt` (Team Server fluency score). Each advances only
-  when that upload is confirmed delivered. `backend.lastSyncAt` is separate again and is
-  used only to throttle sync attempts, not to report health.
+  `backend.sharingServerFluencyLastSyncAt` (Team Server fluency score). Each advances in
+  exactly two cases: that upload was confirmed delivered, or the scan found nothing to send
+  and nothing failed while reading it. The second case keeps a legitimately data-free user
+  from being pinned at "never"; it requires a clean scan, because unreadable or unparseable
+  session files are logged and skipped and would otherwise look identical to having no data.
+  `backend.lastSyncAt` is separate again and is used only to throttle sync attempts, not to
+  report health.
 - `vscode.window.showQuickPick` - Wizard UI
 - `vscode.env.machineId` - Machine identifier
 - `vscode.workspace.workspaceFolders` - Workspace detection
