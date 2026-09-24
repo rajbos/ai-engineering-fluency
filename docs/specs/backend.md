@@ -750,7 +750,7 @@ test('validateTeamAlias rejects common name patterns', () => {
 - `vscode.ExtensionContext.secrets` - SecretStorage
 - `vscode.ExtensionContext.globalState` - Last sync timestamps, tracked per target so a
   success on one cannot imply a success on another:
-  - `backend.azureLastSyncAt` (Azure Table Storage) and `backend.sharingServerLastSyncAt`
+  - `backend.azureLastSyncAt` (Azure Table Storage) and `backend.sharingServerRollupLastSyncAt`
     (Team Server usage rollups) are scan-driven. They advance in exactly two cases: the
     upload was confirmed delivered, or the scan found nothing to send and nothing failed
     while reading it. The second case keeps a legitimately data-free user from being pinned
@@ -759,6 +759,9 @@ test('validateTeamAlias rejects common name patterns', () => {
   - `backend.sharingServerFluencyLastSyncAt` (Team Server fluency score) is not scan-driven:
     the score is always computed, so there is no "nothing to send" case. It advances only
     when the server confirms the upload.
+  - `backend.sharingServerLastSyncAt` is the retired key that both Team Server uploads once
+    wrote. It is no longer read: a value left by a score upload cannot be distinguished from
+    a rollup upload, so displaying it would reintroduce the failure it was split to expose.
   - `backend.lastSyncAt` is separate again and is used only to throttle sync attempts, not
     to report health.
 - `vscode.window.showQuickPick` - Wizard UI

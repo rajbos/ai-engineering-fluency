@@ -15204,7 +15204,11 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     // own "last successful sync" timestamp rather than sharing a single value.
     const azureLastSyncAt = this.context.globalState.get<number>("backend.azureLastSyncAt");
     const azureLastSyncTime = azureLastSyncAt ? new Date(azureLastSyncAt).toISOString() : null;
-    const teamLastSyncAt = this.context.globalState.get<number>("backend.sharingServerLastSyncAt");
+    // Deliberately not the legacy "backend.sharingServerLastSyncAt": older versions wrote
+    // that key from both the rollup and the fluency-score upload, so a value left behind
+    // by a score upload would be displayed here as a confirmed usage sync and would keep
+    // a failing rollup upload hidden after upgrade. The rollup marker starts fresh.
+    const teamLastSyncAt = this.context.globalState.get<number>("backend.sharingServerRollupLastSyncAt");
     const teamLastSyncTime = teamLastSyncAt ? new Date(teamLastSyncAt).toISOString() : null;
     // The rollup upload and the fluency-score upload run on different schedules and
     // fail independently, so each tracks its own timestamp. Sharing one let a

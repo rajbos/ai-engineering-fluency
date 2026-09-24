@@ -497,5 +497,5 @@ test('uploadFluencyScoreToSharingServer: a failed score POST does not mark a Tea
 	const { svc } = makeService([], context);
 	(svc as any).sharingServerUploadService.uploadFluencyScore = async () => false;
 	await svc.uploadFluencyScoreToSharingServer(teamServerOnly(), { overallStage: 'exploring' });
-	assert.equal(state.get('backend.sharingServerLastSyncAt'), undefined);
+	assert.equal(state.get('backend.sharingServerRollupLastSyncAt'), undefined);
 });

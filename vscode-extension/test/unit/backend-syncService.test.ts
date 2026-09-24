@@ -1396,7 +1396,7 @@ test('syncToBackendStore tracks Azure and Team Server "last sync" independently 
 		blobCompressFiles: true,
 		authMode: 'entraId',
 	} as any, true);
-	assert.ok(globalState.get('backend.sharingServerLastSyncAt'), 'Team Server sync succeeded and should update its own lastSync marker');
+	assert.ok(globalState.get('backend.sharingServerRollupLastSyncAt'), 'Team Server sync succeeded and should update its own lastSync marker');
 	assert.equal(globalState.get('backend.azureLastSyncAt'), undefined, 'Azure sync failed and must NOT update the Azure-specific lastSync marker');
 	fs.rmSync(lockDir, { recursive: true, force: true });
 });
@@ -1430,9 +1430,78 @@ test('uploadFluencyScoreToSharingServer updates its own fluency marker and leave
 		'A successful fluency-score upload must update the fluency-specific marker'
 	);
 	assert.equal(
-		globalState.get('backend.sharingServerLastSyncAt'),
+		globalState.get('backend.sharingServerRollupLastSyncAt'),
 		undefined,
 		'The score upload says nothing about rollup delivery, so it must not touch the usage-sync marker'
+	);
+});
+
+test('a successful rollup sync writes the new marker and never revives the shared legacy key', async () => {
+	// Older versions wrote backend.sharingServerLastSyncAt from BOTH uploads, so a
+	// value left on disk there may have come from a score upload alone. Reading it
+	// as the Usage Sync timestamp after upgrade would show a fresh, confirmed-looking
+	// rollup sync that never happened — the exact bug this split removes, carried
+	// across the upgrade by persisted state.
+	const legacyValue = Date.parse('2020-01-01T00:00:00.000Z');
+	const globalState = new Map<string, unknown>([['backend.sharingServerLastSyncAt', legacyValue]]);
+	const mockContext = {
+		globalState: {
+			get: (key: string) => globalState.get(key),
+			update: async (key: string, value: unknown) => { globalState.set(key, value); },
+		},
+	} as unknown as vscode.ExtensionContext;
+	let rollupAttempts = 0;
+	const svc = new SyncService(
+		makeDeps({
+			context: mockContext,
+			getGithubToken: () => 'fake-token',
+			getCopilotSessionFiles: async () => ['/home/user/.copilot/session-state/s/events.jsonl'],
+			statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+			getSessionFileDataCached: async () => ({
+				tokens: 300,
+				mtime: Date.now(),
+				interactions: 1,
+				modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+				dailyRollups: {
+					[new Date().toISOString().slice(0, 10)]: {
+						tokens: 300,
+						actualTokens: 300,
+						thinkingTokens: 0,
+						interactions: 1,
+						modelUsage: { 'gpt-4o': { inputTokens: 100, outputTokens: 200 } },
+					},
+				},
+			}),
+		}),
+		{} as any,
+		{} as any,
+		undefined,
+		BackendUtility,
+		{
+			uploadRollups: async (_u: string, _t: string, entries: unknown[]) => {
+				rollupAttempts++;
+				return { success: true, entriesUploaded: entries.length, message: 'ok' };
+			},
+			uploadFluencyScore: async () => true,
+		} as any,
+	);
+
+	await (svc as any).runSharingServerSyncIndependently(
+		{ sharingServerEnabled: true, sharingServerEndpointUrl: 'https://test-sharing-server/', lookbackDays: 7, datasetId: 'default' } as any,
+		{ allowCloudSync: true, includeUserDimension: false, includeNames: false } as any,
+	);
+
+	// Without this the test would pass through the empty-scan no-op, which advances
+	// the marker without ever uploading anything and so proves nothing about delivery.
+	assert.ok(rollupAttempts > 0, 'Guard: a real rollup upload must have been attempted');
+	assert.ok(
+		globalState.get('backend.sharingServerRollupLastSyncAt'),
+		'A successful rollup sync must write the rollup-specific marker'
+	);
+	assert.equal(
+		globalState.get('backend.sharingServerLastSyncAt'),
+		legacyValue,
+		'The retired shared key must be left alone, not written or migrated into the new one'
 	);
 });
 
@@ -1644,6 +1713,41 @@ test('syncToSharingServer reports failure when legacy JSON requests are all malf
 	}
 });
 
+test('syncToSharingServer reports failure when a legacy JSON session has no requests array', async () => {
+	// A document without a `requests` array is one this fallback cannot extract any
+	// usage from, but it used to fall back to `[]` and read as a clean empty file —
+	// indistinguishable from a user with genuinely no data.
+	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'json-norequests-test-'));
+	const sessionFile = path.join(tmpDir, 'session.json');
+	fs.writeFileSync(sessionFile, JSON.stringify({ version: 3, requesterUsername: 'someone' }), 'utf8');
+	try {
+		const svc = new SyncService(
+			makeDeps({
+				getGithubToken: () => 'github-token',
+				getCopilotSessionFiles: async () => [sessionFile],
+				statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
+				getSessionFileDataCached: undefined,
+			}),
+			{} as any,
+			{} as any,
+			undefined,
+			BackendUtility,
+			{ uploadRollups: async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded' }) } as any,
+		);
+
+		await assert.rejects(
+			() => (svc as any).syncToSharingServer(
+				{ lookbackDays: 7, datasetId: 'default', sharingServerEndpointUrl: 'https://sharing.example.com' },
+				{ allowCloudSync: true, includeUserDimension: false, includeNames: false },
+			),
+			/could not be read/,
+			'A session file we cannot understand is a failed scan, not an empty one',
+		);
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
 test('syncToSharingServer still treats a readable session with no billable activity as a successful sync', async () => {
 	// The guard keys off parse failures, not the absence of rollups: a file that
 	// reads cleanly and simply has no usage must not pin the user at "never".
@@ -1808,7 +1912,7 @@ test('syncToBackendStore does NOT update the Team Server lastSync marker when a 
 		} as any, true);
 		assert.ok(uploadAttempts > 0, 'The test must exercise a real upload attempt, not the no-data short circuit');
 		assert.equal(
-			globalState.get('backend.sharingServerLastSyncAt'),
+			globalState.get('backend.sharingServerRollupLastSyncAt'),
 			undefined,
 			'A failed rollup upload must leave "Last Sync" unset rather than reporting a healthy recent sync'
 		);
@@ -1884,7 +1988,7 @@ test('a successful fluency-score upload does not mask a failing rollup upload', 
 		'The score upload succeeded, so its own marker should advance'
 	);
 	assert.equal(
-		globalState.get('backend.sharingServerLastSyncAt'),
+		globalState.get('backend.sharingServerRollupLastSyncAt'),
 		undefined,
 		'The usage-sync marker must stay unset: no rollup data reached the server'
 	);
