@@ -41,7 +41,12 @@ function escapeHtml(text: string): string {
  * escaped, so a header link can never navigate off the server or execute script.
  */
 function isSafeHref(href: string): boolean {
-	return href.startsWith('/') && !href.startsWith('//');
+	try {
+		const url = new URL(href, 'http://same-origin.invalid');
+		return href.startsWith('/') && !href.startsWith('//') && url.origin === 'http://same-origin.invalid';
+	} catch {
+		return false;
+	}
 }
 
 /**
