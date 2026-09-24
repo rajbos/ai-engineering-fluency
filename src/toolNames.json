@@ -1341,4 +1341,5 @@
   ,"mcp_io_github_git_list_releases": "GitHub MCP (Local): List Releases"
   ,"mcp_io_github_git_merge_pull_request": "GitHub MCP (Local): Merge Pull Request"
   ,"mcp_io_github_git_update_pull_request_branch": "GitHub MCP (Local): Update Pull Request Branch"
+  ,"ReadNotifications": "GitHub MCP (Remote): Read Notifications"
 }
