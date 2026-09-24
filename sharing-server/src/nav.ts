@@ -77,7 +77,7 @@ export function renderNavExtra(currentPath?: string): string {
 			return true;
 		})
 		.map((link) => {
-			const title = link.title ? ` title="${escapeHtml(link.title)}"` : '';
+			const title = typeof link.title === 'string' && link.title ? ` title="${escapeHtml(link.title)}"` : '';
 			const current = link.href === currentPath ? ' aria-current="page"' : '';
 			return `<a href="${escapeHtml(link.href)}"${title}${current}>${escapeHtml(link.label)}</a>`;
 		})
