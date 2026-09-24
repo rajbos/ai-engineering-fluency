@@ -410,6 +410,7 @@ import {
 // --- Backend & UI ---
 import type { AiFluencyExtensionApi, ExtensionPointButton } from './extensionPoints';
 import { REPO_HYGIENE_SKILL } from './backend/repoHygieneSkill';
+import { deferWhileApplyingSettings } from './backend/settingsBatch';
 import { BackendFacade } from './backend/facade';
 import { BackendCommandHandler } from './backend/commands';
 import { TeamServerConfigPanel } from './backend/teamServerConfigPanel';
@@ -2836,22 +2837,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// user who switches it off keeps looking at the card they just disabled.
 				if (e.affectsConfiguration('aiEngineeringFluency.serverMemories')) { this.invalidateServerMemoriesCache(); }
 				if (e.affectsConfiguration('aiEngineeringFluency.backend')) {
-					this.startBackendSyncAfterInitialAnalysis();
-					const backend = this.backend;
-					if (backend && typeof backend.syncToBackendStore === 'function') {
-						void (async () => {
-							try {
-								await backend.syncToBackendStore(true);
-								if (this.diagnosticsPanel) { this.loadDiagnosticDataInBackground(this.diagnosticsPanel); }
-							} catch (err: unknown) {
-								this.warn('Backend sync after settings change failed: ' + err);
-							}
-						})();
-					}
-					if (this.diagnosticsPanel) { this.loadDiagnosticDataInBackground(this.diagnosticsPanel); }
+					// A multi-key save defers this until its last write, so no sync ever runs
+					// against a half-applied configuration (see settingsBatch.ts).
+					const onBackendSettingsChanged = () => this.onBackendSettingsChanged();
+					if (!deferWhileApplyingSettings(onBackendSettingsChanged)) { onBackendSettingsChanged(); }
 				}
 			})
 		);
+	}
+
+	/** Restarts the sync timer and forces a sync after backend settings changed. */
+	private onBackendSettingsChanged(): void {
+		this.startBackendSyncAfterInitialAnalysis();
+		const backend = this.backend;
+		if (backend && typeof backend.syncToBackendStore === 'function') {
+			void (async () => {
+				try {
+					await backend.syncToBackendStore(true);
+					if (this.diagnosticsPanel) { this.loadDiagnosticDataInBackground(this.diagnosticsPanel); }
+				} catch (err: unknown) {
+					this.warn('Backend sync after settings change failed: ' + err);
+				}
+			})();
+		}
+		if (this.diagnosticsPanel) { this.loadDiagnosticDataInBackground(this.diagnosticsPanel); }
 	}
 
 	private scheduleInitialUpdate(): void {

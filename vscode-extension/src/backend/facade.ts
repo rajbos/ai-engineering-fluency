@@ -30,6 +30,7 @@ import { BackendUtility } from "./services/utilityService";
 import type { BackendQueryFilters, BackendSettings } from "./settings";
 import type { SyncResult } from "./types";
 import { getBackendSettings, isBackendConfigured, isAnyBackendConfigured } from "./settings";
+import { applySettingsAtomically } from "./settingsBatch";
 import { computeBackendSharingPolicy } from "./sharingProfile";
 import type { BackendAggDailyEntityLike } from "./storageTables";
 import type {
@@ -691,11 +692,12 @@ export class BackendFacade {
       );
     }
     const config = vscode.workspace.getConfiguration("aiEngineeringFluency");
-    await Promise.all([
+    // One batch, so the settings-change sync never runs against a half-applied save.
+    await applySettingsAtomically(() => Promise.all([
       ...this.buildSharingConfigUpdates(config, next),
       ...this.buildAzureConfigUpdates(config, next),
       ...this.buildBlobAndServerConfigUpdates(config, next),
-    ]);
+    ]));
   }
 
   private buildSharingConfigUpdates(

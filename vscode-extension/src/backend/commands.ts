@@ -17,6 +17,7 @@ import { ErrorMessages, SuccessMessages, ConfirmationMessages } from './ui/messa
 import { MANUAL_SYNC_COOLDOWN_MS } from './constants';
 import { RateLimiter } from '../utils/rateLimiter';
 import { t } from '../l10n';
+import { applySettingsAtomically } from './settingsBatch';
 
 /** Names the targets a manual sync writes to, for its progress, success and error text. */
 function describeSyncTargets(targets: SyncTargets): string {
@@ -250,9 +251,11 @@ export class BackendCommandHandler {
 
 		const consentAt = new Date().toISOString();
 		await withBackendErrorHandling('enable team sharing', async () => {
-			await config.update('backend.sharingProfile', 'teamPseudonymous', vscode.ConfigurationTarget.Global);
-			await config.update('backend.shareWithTeam', true, vscode.ConfigurationTarget.Global);
-			await config.update('backend.shareConsentAt', consentAt, vscode.ConfigurationTarget.Global);
+			await applySettingsAtomically(async () => {
+				await config.update('backend.sharingProfile', 'teamPseudonymous', vscode.ConfigurationTarget.Global);
+				await config.update('backend.shareWithTeam', true, vscode.ConfigurationTarget.Global);
+				await config.update('backend.shareConsentAt', consentAt, vscode.ConfigurationTarget.Global);
+			});
 			vscode.window.showInformationMessage(SuccessMessages.completed('Team sharing enabled'));
 		});
 	}
@@ -273,9 +276,11 @@ export class BackendCommandHandler {
 
 		const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
 		await withBackendErrorHandling('disable team sharing', async () => {
-			await config.update('backend.sharingProfile', 'teamAnonymized', vscode.ConfigurationTarget.Global);
-			await config.update('backend.shareWithTeam', false, vscode.ConfigurationTarget.Global);
-			await config.update('backend.shareWorkspaceMachineNames', false, vscode.ConfigurationTarget.Global);
+			await applySettingsAtomically(async () => {
+				await config.update('backend.sharingProfile', 'teamAnonymized', vscode.ConfigurationTarget.Global);
+				await config.update('backend.shareWithTeam', false, vscode.ConfigurationTarget.Global);
+				await config.update('backend.shareWorkspaceMachineNames', false, vscode.ConfigurationTarget.Global);
+			});
 			vscode.window.showInformationMessage(SuccessMessages.completed('Switched to anonymized sharing'));
 		});
 	}

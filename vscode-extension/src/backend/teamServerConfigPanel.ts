@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { getNonce } from '../utils/webviewUtils';
 import { readExplicitSharingProfile } from './settings';
+import { applySettingsAtomically } from './settingsBatch';
 import { inferSharingProfile } from './settingsValidation';
 import type { BackendUserIdentityMode } from './identity';
 
@@ -97,20 +98,22 @@ export class TeamServerConfigPanel implements vscode.Disposable {
 		const validProfiles = ['off', 'soloFull', 'teamAnonymized', 'teamPseudonymous', 'teamIdentified'];
 		const safeProfile = validProfiles.includes(sharingProfile) ? sharingProfile : 'off';
 
-		// Every settings write triggers an immediate sync, so no intermediate state may upload with
-		// a half-applied configuration (e.g. enabled with the new endpoint but the old or inferred
-		// profile). Switch the Team Server off first, apply endpoint and profile, and switch it on
-		// last — only once everything it will upload under is in place.
+		// Every settings write triggers a sync, and the sharing profile is shared with Azure, so the
+		// writes are applied as one batch: the settings-change sync runs once, after the last write,
+		// never against a half-applied configuration. The order is also safe on its own (Team
+		// Server off, then profile, endpoint, and on last) as a second line of defence.
 		const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
 		const target = vscode.ConfigurationTarget.Global;
-		if (!enabled || config.get<boolean>('backend.sharingServer.enabled', false)) {
-			await config.update('backend.sharingServer.enabled', false, target);
-		}
-		await config.update('backend.sharingServer.endpointUrl', endpointUrl, target);
-		await config.update('backend.sharingProfile', safeProfile, target);
-		if (enabled) {
-			await config.update('backend.sharingServer.enabled', true, target);
-		}
+		await applySettingsAtomically(async () => {
+			if (!enabled || config.get<boolean>('backend.sharingServer.enabled', false)) {
+				await config.update('backend.sharingServer.enabled', false, target);
+			}
+			await config.update('backend.sharingProfile', safeProfile, target);
+			await config.update('backend.sharingServer.endpointUrl', endpointUrl, target);
+			if (enabled) {
+				await config.update('backend.sharingServer.enabled', true, target);
+			}
+		});
 
 		vscode.window.showInformationMessage('Team Server configuration saved.');
 		this.panel?.dispose();
