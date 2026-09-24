@@ -138,13 +138,13 @@ function makeService(logs: string[], context?: vscode.ExtensionContext): { svc: 
 		deleteEntitiesForUserDataset: async () => ({ deletedCount: 0, errors: [] }),
 	};
 	const sharingServerSvc = {
-		uploadRollups: async (_url: string, _token: string, entries: any[]) => { calls.teamServer++; calls.uploaded.push(...entries); },
-		uploadFluencyScore: async () => { calls.fluencyScore++; },
+		uploadRollups: async (_url: string, _token: string, entries: any[]) => { calls.teamServer++; calls.uploaded.push(...entries); return { success: true, entriesUploaded: entries.length, message: 'ok' }; },
+		uploadFluencyScore: async () => { calls.fluencyScore++; return true; },
 	};
 	const svc = new SyncService(deps, credSvc as any, dataSvc as any, undefined, BackendUtility, sharingServerSvc as any);
 	// Azure table sync and session parsing are exercised elsewhere; here we only need to know
 	// which targets a sync pass attempts, so give it one rollup to upload.
-	(svc as any).performAzureTableSync = async () => { calls.azure++; };
+	(svc as any).performAzureTableSync = async () => { calls.azure++; return 'synced'; };
 	(svc as any).computeDailyRollupsFromLocalSessions = async () => ({
 		rollups: new Map([['k', {
 			key: { day: '2026-01-01', model: 'gpt-4o', workspaceId: 'ws', machineId: 'm', editor: 'VS Code' },
@@ -461,4 +461,41 @@ test('syncToBackendStore reports a lock held by another window as skipped', asyn
 		const { svc } = makeService([], context);
 		assert.deepEqual(await svc.syncToBackendStore(true, teamServerOnly(), true), { sharingServer: 'skipped' });
 	});
+});
+
+// ── failures reported without a throw must not count as synced ───────────
+
+test('syncToBackendStore: a Team Server HTTP failure (reported, not thrown) is failed', async () => {
+	const { svc } = makeService([]);
+	(svc as any).sharingServerUploadService.uploadRollups = async () => ({ success: false, entriesUploaded: 0, message: 'HTTP 502: bad gateway' });
+	assert.deepEqual(await svc.syncToBackendStore(true, teamServerOnly(), true), { sharingServer: 'failed' });
+});
+
+test('syncToBackendStore: entries the Team Server rejected make the target failed', async () => {
+	const { svc } = makeService([]);
+	(svc as any).sharingServerUploadService.uploadRollups = async () => ({ success: true, entriesUploaded: 0, message: 'Uploaded 0 entries' });
+	assert.deepEqual(await svc.syncToBackendStore(true, teamServerOnly(), true), { sharingServer: 'failed' });
+});
+
+test('syncToBackendStore: missing Azure credentials are reported as failed', async () => {
+	const { svc } = makeService([]);
+	delete (svc as any).performAzureTableSync; // use the real Azure path; the credential stub returns undefined
+	assert.deepEqual(await svc.syncToBackendStore(true, azureOnly(), true), { azure: 'failed' });
+});
+
+test('syncToBackendStore: partial Azure upsert errors are reported as failed', async () => {
+	const { svc } = makeService([]);
+	delete (svc as any).performAzureTableSync;
+	(svc as any).credentialService.getBackendDataPlaneCredentials = async () => ({ tableCredential: {} });
+	(svc as any).dataPlaneService.upsertEntitiesBatch = async () => ({ successCount: 0, errors: [{ error: 'boom' }] });
+	assert.deepEqual(await svc.syncToBackendStore(true, azureOnly(), true), { azure: 'failed' });
+});
+
+test('uploadFluencyScoreToSharingServer: a failed score POST does not mark a Team Server sync', async () => {
+	const state = new Map<string, unknown>();
+	const context = { globalState: { get: (k: string) => state.get(k), update: async (k: string, v: unknown) => { state.set(k, v); } } } as unknown as vscode.ExtensionContext;
+	const { svc } = makeService([], context);
+	(svc as any).sharingServerUploadService.uploadFluencyScore = async () => false;
+	await svc.uploadFluencyScoreToSharingServer(teamServerOnly(), { overallStage: 'exploring' });
+	assert.equal(state.get('backend.sharingServerLastSyncAt'), undefined);
 });

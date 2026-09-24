@@ -1454,8 +1454,7 @@ return true;
 	/** Runs the Azure Table Storage sync in isolation, logging (but not throwing) on failure. */
 	private async runAzureSyncIndependently(settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<SyncTargetOutcome> {
 		try {
-			await this.performAzureTableSync(settings, sharingPolicy);
-			return 'synced';
+			return await this.performAzureTableSync(settings, sharingPolicy);
 		} catch (e: unknown) {
 			const secretsToRedact = await this.credentialService.getBackendSecretsToRedactForError(settings);
 			this.deps.logger.warn(`Backend sync: ${safeStringifyError(e, secretsToRedact)}`);
@@ -1637,12 +1636,17 @@ return true;
 		}
 	}
 
-	private async performAzureTableSync(settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<void> {
+	/**
+	 * Upserts local rollups into Azure Table Storage. Resolves `failed` — without touching the
+	 * Azure "last sync" marker — when credentials are unavailable or any entity failed to upsert,
+	 * so neither case can be reported as a successful sync.
+	 */
+	private async performAzureTableSync(settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<SyncTargetOutcome> {
 		this.deps.logger.log('Backend sync: starting rollup sync');
 		const creds = await this.credentialService.getBackendDataPlaneCredentials(settings);
 		if (!creds) {
 			this.deps.logger.warn('Backend sync: skipping (credentials not available - check authentication mode and secrets)');
-			return;
+			return 'failed';
 		}
 		await this.dataPlaneService.ensureTableExists(settings, creds.tableCredential);
 		await this.dataPlaneService.validateAccess(settings, creds.tableCredential);
@@ -1670,10 +1674,12 @@ return true;
 			this.deps.logger.log(`Backend sync: ${successCount} entities synced successfully`);
 		}
 
-		await this.tryUpdateAzureLastSyncAt();
+		const outcome: SyncTargetOutcome = errors.length > 0 ? 'failed' : 'synced';
+		if (outcome === 'synced') { await this.tryUpdateAzureLastSyncAt(); }
 		this.deps.logger.log('Backend sync: completed');
 
 		if (blobUploadNeeded && this.blobUploadService) { await this.performBlobUploadIfNeeded(settings, creds, sessionFiles, editorTypeByFile); }
+		return outcome;
 	}
 
 	/**
@@ -1750,13 +1756,21 @@ return true;
 		const totalInputTokens = entries.reduce((s, e) => s + e.inputTokens, 0);
 		const totalOutputTokens = entries.reduce((s, e) => s + e.outputTokens, 0);
 		this.deps.logger.log(`Sharing server upload: uploading ${entries.length} rollup entries (${(totalInputTokens + totalOutputTokens).toLocaleString()} tokens total)`);
-		await this.sharingServerUploadService.uploadRollups(
+		// uploadRollups reports HTTP/network failures and server-side rejections in its result
+		// rather than throwing; turn both into errors so the caller records the target as failed.
+		const upload = await this.sharingServerUploadService.uploadRollups(
 			settings.sharingServerEndpointUrl,
 			githubToken,
 			entries,
 			this.deps.logger.log,
 			this.deps.logger.warn,
 		);
+		if (!upload.success) {
+			throw new Error(upload.message);
+		}
+		if (upload.entriesUploaded < entries.length) {
+			throw new Error(`server accepted ${upload.entriesUploaded} of ${entries.length} entries`);
+		}
 		return true;
 	}
 
@@ -1776,14 +1790,14 @@ return true;
 		const githubToken = this.deps.getGithubToken?.();
 		if (!githubToken) { return; }
 
-		await this.sharingServerUploadService.uploadFluencyScore(
+		const uploaded = await this.sharingServerUploadService.uploadFluencyScore(
 			settings.sharingServerEndpointUrl,
 			githubToken,
 			score,
 			this.deps.logger.log,
 			this.deps.logger.warn,
 		);
-		await this.tryUpdateSharingServerLastSyncAt();
+		if (uploaded) { await this.tryUpdateSharingServerLastSyncAt(); }
 	}
 
 	/**

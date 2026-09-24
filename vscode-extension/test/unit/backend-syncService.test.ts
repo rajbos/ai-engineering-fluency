@@ -1170,7 +1170,7 @@ test('syncToBackendStore handles ensureTableExists or validateAccess failure gra
 test('syncToBackendStore still attempts sharing server sync when Azure sync fails', async () => {
 	const logs: string[] = [];
 	const warns: string[] = [];
-	const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+	const sharingServerSvc = { uploadRollups: async (_u: string, _t: string, entries: unknown[]) => ({ success: true, entriesUploaded: entries.length, message: 'ok' }), uploadFluencyScore: async () => true };
 	const svc = new SyncService(
 		makeDeps({
 			log: (m) => logs.push(m),
@@ -1239,7 +1239,7 @@ test('syncToBackendStore tracks Azure and Team Server "last sync" independently 
 		},
 		globalStorageUri: { fsPath: lockDir },
 	} as unknown as vscode.ExtensionContext;
-	const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+	const sharingServerSvc = { uploadRollups: async (_u: string, _t: string, entries: unknown[]) => ({ success: true, entriesUploaded: entries.length, message: 'ok' }), uploadFluencyScore: async () => true };
 	const svc = new SyncService(
 		makeDeps({
 			context: mockContext,
@@ -1303,7 +1303,7 @@ test('uploadFluencyScoreToSharingServer updates the Team Server lastSync marker 
 			update: async (key: string, value: unknown) => { globalState.set(key, value); },
 		},
 	} as unknown as vscode.ExtensionContext;
-	const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+	const sharingServerSvc = { uploadRollups: async (_u: string, _t: string, entries: unknown[]) => ({ success: true, entriesUploaded: entries.length, message: 'ok' }), uploadFluencyScore: async () => true };
 	const svc = new SyncService(
 		makeDeps({
 			context: mockContext,
@@ -1505,7 +1505,7 @@ test(`syncToBackendStore also syncs to sharing server when backend=storageTables
 			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
 			deleteEntitiesForUserDataset: async () => ({ deletedCount: 0, errors: [] }),
 		};
-		const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+		const sharingServerSvc = { uploadRollups: async (_u: string, _t: string, entries: unknown[]) => ({ success: true, entriesUploaded: entries.length, message: 'ok' }), uploadFluencyScore: async () => true };
 		const svc = new SyncService(deps, credSvc as any, dataSvc as any, undefined, BackendUtility, sharingServerSvc as any);
 		await svc.syncToBackendStore(true, {
 			enabled: true,
