@@ -9,6 +9,11 @@ A dark factory is *not* vibe coding at scale. It is a governed, observable produ
 which humans specify intent, constraints, risk and evidence of success, while agents implement and
 validate. The ladder therefore measures **governance and evidence controls**, not AI adoption.
 
+The top of the tab also places each repository on an **adoption × foundations** matrix, setting the
+user's own agent use there against these controls — see
+[Agentic Engineering System signals](AGENTIC-ENGINEERING-SIGNALS.md). That matrix is local only and
+never changes this scan's per-repository, never-per-person report.
+
 ## Two rules that shape the whole design
 
 1. **Measure controls, never claim autonomy.** The scan reports what a repository has. It never

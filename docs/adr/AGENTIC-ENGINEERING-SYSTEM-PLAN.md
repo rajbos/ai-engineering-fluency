@@ -24,6 +24,31 @@ What is missing is the blog's core diagnostic: **adoption set against foundation
 always paired with an error signal.** This document is the plan for six items that close that
 gap. It changes no code; each phase below lands as its own PR.
 
+## Status: implemented
+
+All six items and Phase 0 are implemented; see
+[docs/features/AGENTIC-ENGINEERING-SIGNALS.md](../features/AGENTIC-ENGINEERING-SIGNALS.md) for the
+shipped behaviour. They landed together, one commit per phase, rather than as the seven PRs sketched
+under *Sequencing* below. Where the implementation departs from this plan, it is on purpose:
+
+- **Foundations do not require a stage-2 ceiling.** A single absent stage-1 control (a library with
+  no infrastructure-as-code or devcontainer) blocks the readiness ceiling at stage 1, which would
+  have ruled out "strong" for otherwise solid repositories. The score alone decides.
+- **Exploration is contextual in the participation split:** director before a session's first
+  performer turn (scoping), assessor after it (reading the change back), instead of being dropped
+  when it does not follow an edit.
+- **Review burden uses cloud-agent PR volume**, split across the two halves of the PR window, not
+  `aiReviewRequestedPrs`: GitHub clears requested reviewers once a review is done, so that count
+  under-reports exactly the load the insight is about.
+- **`unreviewed-agent-merges` mostly says "cannot confirm".** `human-review-enforced` is an API-tier
+  control the scan does not collect yet, so it is `unknown`; the insight words that honestly and
+  switches to the firmer wording once the control can be observed as absent.
+- **The Fluency Score strip is built outside `calculateMaturityScores`,** whose result is also what
+  gets uploaded to a sharing server, and is a separate element from the stage banner and radar so
+  exports never include it. It is on-screen only, the default the open question below proposed.
+- **The Repository PRs sanitizer moved out of `webview/usage/main.ts`** into
+  `repoPrStatsSanitizer.ts` to keep that file under the `max-lines` ceiling after the new sections.
+
 ## Guardrails (apply to every phase)
 
 1. **Local only.** Every new signal is computed and shown in the local extension. None of it is

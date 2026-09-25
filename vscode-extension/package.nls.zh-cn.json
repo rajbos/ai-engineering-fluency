@@ -698,5 +698,11 @@
   "insight.unreviewedAgentMerges.body.unknown": "智能体在 {0}{1} 中创建拉取请求，而此扫描无法确认那里的合并需要人工审查。检查通过不等于审查：请确认默认分支要求作者以外的人批准审查。",
   "insight.reviewBurdenRising.title": "📈 来自智能体的审查负担在增加",
   "insight.reviewBurdenRising.body.reverts": "过去 15 天，云端智能体在 {1} 中创建了 {0} 个拉取请求，高于之前 15 天的 {2} 个，且其中 {3} 个已合并的 PR 被回滚。审查负担上升并伴随回滚，通常意味着智能体的任务范围过于宽松或缺少上下文，而不是需要更大的模型。",
-  "insight.reviewBurdenRising.body.rework": "过去 15 天，云端智能体在 {1} 中创建了 {0} 个拉取请求，高于之前 15 天的 {2} 个，同时你自己会话中的纠正次数也在增加。审查负担上升并伴随更多返工，通常意味着任务范围过于宽松或智能体缺少上下文，而不是需要更大的模型。"
+  "insight.reviewBurdenRising.body.rework": "过去 15 天，云端智能体在 {1} 中创建了 {0} 个拉取请求，高于之前 15 天的 {2} 个，同时你自己会话中的纠正次数也在增加。审查负担上升并伴随更多返工，通常意味着任务范围过于宽松或智能体缺少上下文，而不是需要更大的模型。",
+  "whatsNew.feature.usage.agentic-matrix.title": "采用程度 × 基础",
+  "whatsNew.feature.usage.agentic-matrix.description": "在 AI 就绪度顶部，按你在各仓库中使用智能体的程度与其控制措施的支撑程度对仓库进行归类，找出超负荷的仓库（智能体使用超出控制能力），并列出应优先补齐的控制项。",
+  "whatsNew.feature.maturity.quality-strip.title": "质量与采用程度",
+  "whatsNew.feature.maturity.quality-strip.description": "在熟练度评分下方，查看本月更多地使用智能体是否带来了更多返工：每天的智能体会话与每会话纠正次数和一次成功的编辑并列，并与上月对比。它不会改变你的得分，也不包含在任何导出中。",
+  "whatsNew.feature.usage.corrections-repo-summary.title": "各仓库的返工情况",
+  "whatsNew.feature.usage.corrections-repo-summary.description": "在纠正记录标签页中，按仓库比较所有会话（不仅是有纠正的会话）的返工率，并与各仓库的智能体说明文件并列显示，找出缺少上下文代价最大的地方。"
 }

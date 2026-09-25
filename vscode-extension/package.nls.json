@@ -696,5 +696,11 @@
   "insight.unreviewedAgentMerges.body.unknown": "Agents open pull requests in {0}{1}, and this scan cannot confirm that merges there require a human review. A green check is not a review: check that the default branch requires an approving review from someone other than the author.",
   "insight.reviewBurdenRising.title": "📈 Review load from agents is rising",
   "insight.reviewBurdenRising.body.reverts": "Cloud agents opened {0} pull requests in {1} in the last 15 days, up from {2} in the 15 days before, and {3} of their merged PRs were reverted. Rising review load with reverts usually means the agent's tasks are scoped too loosely or it lacks context — not that it needs a bigger model.",
-  "insight.reviewBurdenRising.body.rework": "Cloud agents opened {0} pull requests in {1} in the last 15 days, up from {2} in the 15 days before, while corrections in your own sessions are rising. Rising review load with more rework usually means tasks are scoped too loosely or the agent lacks context — not that it needs a bigger model."
+  "insight.reviewBurdenRising.body.rework": "Cloud agents opened {0} pull requests in {1} in the last 15 days, up from {2} in the 15 days before, while corrections in your own sessions are rising. Rising review load with more rework usually means tasks are scoped too loosely or the agent lacks context — not that it needs a bigger model.",
+  "whatsNew.feature.usage.agentic-matrix.title": "Adoption × foundations",
+  "whatsNew.feature.usage.agentic-matrix.description": "At the top of AI Readiness, see each repository placed by how much you use agents there against how well its controls support that, and which repositories are stretched — agent use ahead of the controls — with the controls to fix first.",
+  "whatsNew.feature.maturity.quality-strip.title": "Quality alongside adoption",
+  "whatsNew.feature.maturity.quality-strip.description": "Under your Fluency Score, see whether using agents more this month came with more rework: agent sessions per day next to corrections per session and one-shot edits, against last month. It never changes your score and is not part of any export.",
+  "whatsNew.feature.usage.corrections-repo-summary.title": "Rework per repository",
+  "whatsNew.feature.usage.corrections-repo-summary.description": "On the Corrections tab, compare rework rates per repository across all your sessions — not only those with corrections — next to each repository's agent instruction files, to see where missing context costs you the most."
 }
