@@ -82,9 +82,14 @@ Items 1, 2, 5 and 6 all need the same thing: session signals grouped by reposito
 
 ### 0a. One repository key
 
-- New `src/repoKey.ts`: `repoKeyFromRemote(url)` → lowercase `owner/repo` (reuse
-  `parseRepoFromRemoteUrl` from `src/copilotServerMemories.ts`) and `repoKeyFromReadiness(report)`
-  (from `nameWithOwner`, falling back to the folder name, marked as a weak key).
+- New `src/repoKey.ts`: `repoKeyFromRemote(url)` → lowercase `owner/repo` from the remote's last
+  two path segments, on **any** host, so GitHub Enterprise remotes join too (unlike
+  `parseRepoFromRemoteUrl`, which is github.com-only by design), and `repoKeyFromSlug(slug)` for
+  readiness `nameWithOwner` and PR stats. The key leaves the host out, so the same `owner/repo` on
+  two hosts would share a row; that is accepted as rare.
+- **No folder-name fallback.** A folder name cannot join reliably to `owner/repo` and can collide,
+  so a readiness report without `nameWithOwner` is shown by name but never joined or classified
+  (it is listed as *not placed: no GitHub remote*).
 - Sessions carry `SessionFileCache.repository` (remote URL); readiness reports carry
   `nameWithOwner`; PR stats carry `owner`/`repo`. All three join on this key.
 
@@ -96,7 +101,7 @@ over the trailing 30 days:
 | Field | Source |
 |---|---|
 | `sessions`, `interactions`, `tokens` | session cache |
-| `agentSessions` (agent-mode share) | `usageAnalysis.modeUsage` |
+| `agenticSessions` — sessions, not interactions: a session counts once when `modeUsage.agent + customAgent + cli > 0` | `usageAnalysis.modeUsage` |
 | `delegationSessions`, `subAgentCalls` | `taskClassification`, `subAgentCalls` |
 | `editTurns`, `oneShotEditTurns`, `retries`, `selfCorrections`, `toolCalls` | sum of `usageAnalysis.modelEfficiency` counters |
 | `sessionsWithCorrections`, `userCorrections`, `toolErrors` | `correctionCounts` |
@@ -136,9 +141,11 @@ Instead, compute a **foundation score** in a new pure `src/agenticFoundations.ts
 
 ### Adoption axis
 
-From Phase 0: `agentSessions + delegationSessions + cloud-agent tasks` (cloud tasks per repo from
-`agentTasksCache.ts`) as a share of the repo's sessions, plus an absolute floor (for example
-≥ 5 agentic sessions in 30 days) so one session doesn't count as "high adoption".
+From Phase 0: `agenticSessions` — a per-session flag, never the `modeUsage` interaction counts,
+which would count a multi-turn session many times — as a share of the repo's sessions, plus an
+absolute floor (≥ 5 agentic sessions in 30 days) so one session doesn't count as "high adoption".
+Cloud-agent tasks are left out of v1: they are a different population from local sessions, and
+adding them to a local-session share would mix denominators.
 
 ### Quadrants and actions (blog wording)
 
@@ -185,9 +192,13 @@ different quadrants.
 - New pure `src/knowledgeSignals.ts`: per repo, from Phase 0:
   `correctionsPerSession`, `oneShotRate = oneShotEditTurns / editTurns`,
   `retriesPerEditTurn`, `toolErrorsPerSession`, `toolCallsPerEditTurn` ("tool-call churn").
-- Split repos into cohorts by whether `agent-instructions` or `copilot-instructions` is present.
-  Source 1: readiness observations (workspace repos). Source 2: the existing
-  `customizationMatrix` (covers more workspaces). Compare cohort medians.
+- Split repos into cohorts by whether they have agent instruction files. The source is the
+  per-workspace customization scan the extension already caches, joined **per session**: each
+  session's resolved workspace folder gives its instruction files, and the session's own remote
+  gives the `owner/repo` key (`collectRepoKnowledge` in `extension.ts`). The
+  `WorkspaceCustomizationMatrix` rows themselves carry no repository identity, so they are not
+  joined directly. A repository with no scanned checkout is *unknown*, not "no instructions".
+  Compare cohort medians.
 - Show the comparison only when each cohort has ≥ 3 repos and ≥ 20 sessions. Otherwise show
   per-repo numbers without a claim. Label it clearly: *correlation in your own data, not
   causation*.
@@ -233,7 +244,10 @@ visual state for the maturity view with the strip.
 
 - **No extra API calls.** `fetchRepoPrsPage()` already lists `pulls?state=all`, and each item
   carries `title`, `body` and `merged_at`. Extend the collector to keep, per repo:
-  - `aiMergedPrs` — AI-authored or co-authored PRs with `merged_at`;
+  - `aiMergedPrs` — PRs **authored by an AI bot account** (cloud agents) with `merged_at`.
+    Co-authored PRs are out of scope: detecting a `Co-authored-by:` trailer needs a commits request
+    per PR, which the bulk path deliberately does not make. Locally driven agent work therefore
+    lands in the baseline, which the UI labels as "others";
   - `aiRevertedPrs` — AI PRs referenced by a later PR whose title matches `^Revert "` and whose
     body matches `Reverts owner/repo#N` (GitHub's revert-button format), or whose title quotes
     the AI PR's title exactly;
@@ -286,9 +300,10 @@ wording), plus l10n tests for both locales.
   - **Director:** `Planning`, `Brainstorming`, plus `Delegation` turns (the human sets intent and
     hands off);
   - **Performer:** `Coding`, `Feature Dev`, `Refactoring`, `Debugging`, `Build/Deploy`, `Git Ops`;
-  - **Assessor:** `Testing`, `Exploration` when it follows an edit turn in the same session
-    (reading the change back), and PR reviews requested from the user (from the PR collector,
-    `role: 'reviewer-requested'`).
+  - **Assessor:** `Testing`, and `Exploration` after the session's first performer turn (reading
+    the change back). PR reviews are **not** counted: the collector's `role: 'reviewer-requested'`
+    means an *AI* reviewer was requested, not the user, so it would invert the signal. A user-review
+    signal would need its own data source and is left for later.
   - `Conversation` is left out of the split.
 - Weight by turns (from `turnCategories`), not sessions, so a long session is not one vote.
 - Show the split overall and per repo (Phase 0), and next to it the delegation share. Signal:
