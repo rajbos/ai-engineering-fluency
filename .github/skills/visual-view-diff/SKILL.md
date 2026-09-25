@@ -151,8 +151,12 @@ A view whose `#root` comes out empty is reported as an **error**, not silently
 screenshotted blank — a fixture missing a required field would otherwise pass as
 "no visual change" forever.
 
-`dashboard` is registered but disabled: it needs a configured team backend to
-show anything, the same reason the in-editor regression runner skips it.
+`dashboard` is enabled with synthetic Azure rollups and an additional
+`__DASHBOARD_CONFIG__` global declared in the registry's `globals` field. Both
+backend tabs render without contacting a live backend. The in-editor regression
+runner still skips it because that runner needs a configured live backend. When
+enabling a previously disabled view, the visual baseline uses the new fixture
+on both bundles to compare layouts rather than a loading screen against data.
 
 ### States — tabs and modes
 
