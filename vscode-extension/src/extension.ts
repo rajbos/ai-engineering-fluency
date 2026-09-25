@@ -108,6 +108,11 @@ import {
   MIN_CLUSTER_SIZE as _MIN_CLUSTER_SIZE,
   type RepeatedTaskInput as _RepeatedTaskInput,
 } from '../../src/repeatedTasks';
+import {
+  buildActivityTrend as _buildActivityTrend,
+  buildRepoAgentActivity as _buildRepoAgentActivity,
+  type ActivitySessionInput as _ActivitySessionInput,
+} from '../../src/repoAgentActivity';
 
 // --- Tool curation ---
 import {
@@ -6410,6 +6415,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
 		let correctionReport: CorrectionReport | undefined;
 		let repeatedTasks: RepeatedTaskReport | undefined;
+		let repoActivity: UsageAnalysisStats['repoActivity'];
+		let activityTrend: UsageAnalysisStats['activityTrend'];
 		let autoCompactionsLast7Days: UsageAnalysisStats['autoCompactionsLast7Days'];
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
@@ -6420,6 +6427,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			autoCompactionsLast7Days = this.buildAutoCompactionStats(usageResults, now);
 			correctionReport = this.buildCorrectionReport(usageResults);
 			repeatedTasks = this.buildRepeatedTaskReport(usageResults);
+			({ repoActivity, activityTrend } = this.buildAgentActivity(usageResults, now, last30DaysStartMs));
 			this._lastSkillCallsByEditor = {};
 			for (const [skillName, byEditor] of this._skillCallsByEditorAccum) {
 				this._lastSkillCallsByEditor[skillName] = Object.fromEntries(byEditor);
@@ -6449,6 +6457,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			recentSessions,
 			correctionReport,
 			repeatedTasks,
+			repoActivity,
+			activityTrend,
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats, startedAtGeneration),
 			agenticDailyTrend,
 			autoCompactionsLast7Days,
@@ -7374,6 +7384,36 @@ class CopilotTokenTracker implements vscode.Disposable {
 			repos.push({ repository, sessions, counts, sessionsWithMoments: sessions.length });
 		}
 		return { sessionsPerRepo: CopilotTokenTracker.CORRECTION_SCAN_SESSIONS_PER_REPO, repos, counts: totals, sessionsWithMoments };
+	}
+
+	/**
+	 * Regroup the already-parsed sessions per repository (last 30 days) and per calendar month,
+	 * so rework can be read against adoption. Pure in-memory work over cached session data —
+	 * see src/repoAgentActivity.ts. Local only: never uploaded or shared.
+	 */
+	private buildAgentActivity(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		now: Date,
+		last30DaysStartMs: number,
+	): Pick<UsageAnalysisStats, 'repoActivity' | 'activityTrend'> {
+		const inputs: _ActivitySessionInput[] = [];
+		for (const r of results) {
+			if (!r) { continue; }
+			const data = r.sessionData;
+			const last = data.lastInteraction ? Date.parse(data.lastInteraction) : NaN;
+			inputs.push({
+				repository: data.repository,
+				lastInteractionMs: Number.isFinite(last) ? last : r.mtime,
+				interactions: data.interactions,
+				tokens: data.actualTokens || data.tokens || 0,
+				subAgentCalls: data.subAgentCalls,
+				usageAnalysis: data.usageAnalysis,
+			});
+		}
+		return {
+			repoActivity: _buildRepoAgentActivity(inputs, { startMs: last30DaysStartMs, endMs: now.getTime() }),
+			activityTrend: _buildActivityTrend(inputs, now),
+		};
 	}
 
 	private correctionMomentCount(counts: CorrectionCounts): number {
