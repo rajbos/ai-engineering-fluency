@@ -817,6 +817,44 @@ export interface RepoAgentActivityReport {
   totals: AgentActivityTotals;
 }
 
+/** How far a repository's controls support delegated agent work (see src/agenticFoundations.ts). */
+export type FoundationLevel = 'strong' | 'partial' | 'weak' | 'unassessed';
+
+/** The four states of GitHub's stock-adoption matrix. */
+export type AgenticQuadrant = 'healthy-agent-native' | 'healthy-underused' | 'underdeveloped' | 'stretched';
+
+/** One repository placed on the adoption × foundations matrix. */
+export interface AgenticMatrixPlacement {
+  /** Display name — `owner/repo` when known, else the folder name. */
+  repository: string;
+  foundation: FoundationLevel;
+  /** present ÷ (present + absent) over the stage 1–3 controls; null when nothing was observed. */
+  foundationScore: number | null;
+  /** Stage 1–3 controls observed (present or absent) and still unknown. */
+  observedControls: number;
+  unknownControls: number;
+  /** Agentic sessions in this repository over the activity window. */
+  agenticSessions: number;
+  sessions: number;
+  highAdoption: boolean;
+  /** Undefined for `unassessed` repositories. */
+  quadrant?: AgenticQuadrant;
+  /** True when foundations are `partial` and the quadrant is the nearer side, not a firm call. */
+  leaning: boolean;
+  /** Absent stage 1–3 controls, lowest stage first — what to repair. */
+  missingControls: { id: string; label: string; stage: number }[];
+  /** Why the repository is unassessed, when it is. */
+  unassessedReason?: 'too-few-controls' | 'no-remote';
+}
+
+/** The adoption × foundations matrix for the repositories open in the workspace. */
+export interface AgenticMatrix {
+  windowDays: number;
+  placements: AgenticMatrixPlacement[];
+  /** Repositories with agent activity but no local checkout scanned — adoption only, never guessed. */
+  adoptionOnly: { repository: string; agenticSessions: number; sessions: number }[];
+}
+
 /** Month-over-month activity, used to pair adoption with rework (see src/speedVsError.ts). */
 export interface ActivityTrendWindows {
   current: AgentActivityTotals;

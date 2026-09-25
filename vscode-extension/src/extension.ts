@@ -79,6 +79,7 @@ import type {
   CorrectionSessionEntry,
   RepeatedTaskReport,
   RepoKnowledgeFiles,
+  AgenticMatrix,
   MemoryFilesAnalysis,
   ServerMemoriesAnalysis,
   ServerMemoriesAnalysisView,
@@ -119,6 +120,7 @@ import {
   mergeKnowledgeFiles as _mergeKnowledgeFiles,
   summarizeInstructionFiles as _summarizeInstructionFiles,
 } from '../../src/knowledgeSignals';
+import { buildAgenticMatrix as _buildAgenticMatrix } from '../../src/agenticFoundations';
 
 // --- Tool curation ---
 import {
@@ -1454,6 +1456,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Cache mapping workspaceFolderPath -> found customization files (avoid re-scanning)
 	private _customizationFilesCache: Map<string, CustomizationFileEntry[]> = new Map();
+	/** Latest AI Readiness scan and its adoption × foundations matrix (see rememberReadinessScan). */
+	private _lastReadinessScan: { report: DarkFactoryReport; matrix: AgenticMatrix; scannedAt: number } | undefined;
 
 	// Last computed customization matrix for usage analysis (typed)
 	private _lastCustomizationMatrix?: WorkspaceCustomizationMatrix;
@@ -11390,6 +11394,36 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		});
 	}
 
+	/**
+	 * Keep the latest readiness scan and its adoption × foundations matrix, so insights can use
+	 * them without re-scanning. The matrix combines repository controls with this user's own
+	 * session activity — local only, never uploaded or shared.
+	 */
+	private rememberReadinessScan(report: DarkFactoryReport): AgenticMatrix {
+		const matrix = _buildAgenticMatrix(report, this.currentUsageAnalysisStats?.repoActivity);
+		this._lastReadinessScan = { report, matrix, scannedAt: Date.now() };
+		return matrix;
+	}
+
+	/**
+	 * The latest readiness scan for insight evaluation. Re-scans (filesystem only, bounded) when
+	 * none is cached or it is over an hour old, and rebuilds the matrix against the current
+	 * activity. Never throws: a failed scan simply leaves the scan-based insights silent.
+	 */
+	private readinessForInsights(repoActivity: UsageAnalysisStats['repoActivity']): { report: DarkFactoryReport; matrix: AgenticMatrix } | null {
+		try {
+			const cached = this._lastReadinessScan;
+			const fresh = !!cached && Date.now() - cached.scannedAt < 60 * 60 * 1000;
+			const report = fresh ? cached!.report : this.runDarkFactoryScan();
+			const matrix = _buildAgenticMatrix(report, repoActivity);
+			this._lastReadinessScan = { report, matrix, scannedAt: fresh ? cached!.scannedAt : Date.now() };
+			return { report, matrix };
+		} catch (err) {
+			this.warn(`AI Readiness scan for insights failed: ${err}`);
+			return null;
+		}
+	}
+
 	/** Opens the AI Readiness tab in the existing Usage Analysis panel. */
 	public async showReadiness(): Promise<void> {
 		await this.showUsageAnalysisOnTab('readiness');
@@ -11404,8 +11438,9 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 		try {
 			const report = this.runDarkFactoryScan();
+			const matrix = this.rememberReadinessScan(report);
 			if (this.analysisPanel === panel) {
-				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report });
+				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report, matrix });
 			}
 		} catch (err) {
 			this.warn(`Dark Factory readiness scan failed: ${err}`);
