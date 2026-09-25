@@ -5,8 +5,9 @@ import { setHtml } from '../shared/domUtils';
 import { escapeHtml, markdownToHtml, safeSectionHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { buildDarkFactorySectionHtml } from './darkFactorySection';
+import { buildAesSectionHtml } from './aesSection';
 import { buildShareCardHeaderHtml, shareCardContainerStyle } from './shareCard';
-import type { DarkFactoryReport } from '../../../../src/types';
+import type { AesWorkflowReport, DarkFactoryReport } from '../../../../src/types';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage, CategoryLevelData } from '../shared/types';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -57,6 +58,8 @@ type MaturityData = {
 	installedHooks?: string[];
 	/** Per-repository Dark Factory readiness scan; absent when the scan could not run. */
 	darkFactory?: DarkFactoryReport;
+	/** Team-reported AES workflow assessment; absent when none could be loaded. */
+	aes?: AesWorkflowReport;
 };
 
 // Maps a category name to the hook id that provides a session reminder for it
@@ -496,6 +499,7 @@ function buildMaturityRootHtml(
       </div>
       <div class="category-grid">${categoryCards}</div>
       ${safeSectionHtml('Dark Factory Readiness', () => buildDarkFactorySectionHtml(data.darkFactory))}
+      ${safeSectionHtml('AES Workflow Assessment', () => buildAesSectionHtml(data.aes))}
       <div class="footer">
         <span class="footer-info">Based on last 30 days of activity &middot; Last updated: ${new Date(data.lastUpdated).toLocaleString()} &middot; Updates every 5 minutes</span>
         ${dismissedTips.length > 0 ? `<button id="btn-reset-tips" class="reset-tips-btn" title="Show all dismissed improvement suggestions again">🔄 Reset Dismissed Tips</button>` : ''}

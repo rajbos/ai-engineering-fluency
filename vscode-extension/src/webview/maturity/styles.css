@@ -1158,3 +1158,237 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
 	color: var(--text-muted);
 	margin-top: 8px;
 }
+
+/* ── AES workflow assessment section ───────────────────────────────────
+   A third, separate lens: a team's own self-assessment of one named
+   workflow, which may span several repositories. Rendered as its own
+   block so it is never mistaken for the personal fluency cards above or
+   the per-repository Dark Factory ladder. */
+
+.aes-section {
+	margin-top: 32px;
+	padding-top: 24px;
+	border-top: 2px solid var(--border-color);
+}
+
+.aes-section-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+
+.aes-section-icon {
+	font-size: 22px;
+}
+
+.aes-section-title {
+	font-size: 18px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.aes-section-badge {
+	font-size: 11px;
+	font-weight: 600;
+	padding: 2px 8px;
+	border-radius: 10px;
+	background: var(--badge-bg);
+	color: var(--badge-fg);
+}
+
+.aes-notice {
+	font-size: 12px;
+	color: var(--text-secondary);
+	margin-bottom: 16px;
+	padding: 8px 12px;
+	border-left: 3px solid var(--warning-fg);
+	background: var(--bg-tertiary);
+}
+
+.aes-workflow-card {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	padding: 16px;
+	margin-bottom: 16px;
+}
+
+.aes-workflow-head {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-bottom: 6px;
+}
+
+.aes-workflow-name {
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.aes-workflow-repos {
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.aes-workflow-description {
+	font-size: 13px;
+	color: var(--text-secondary);
+	margin-bottom: 6px;
+}
+
+.aes-workflow-meta {
+	font-size: 11px;
+	color: var(--text-muted);
+}
+
+.aes-block {
+	margin-bottom: 8px;
+}
+
+.aes-block-title {
+	font-size: 14px;
+	font-weight: 700;
+	color: var(--text-primary);
+	margin: 20px 0 8px;
+}
+
+.aes-outcome {
+	font-size: 13px;
+	color: var(--text-secondary);
+	margin-bottom: 4px;
+}
+
+.aes-posture-banner {
+	border-radius: 8px;
+	padding: 12px 16px;
+	border: 1px solid var(--border-color);
+	background: var(--bg-tertiary);
+}
+
+.aes-posture-label {
+	font-size: 15px;
+	font-weight: 800;
+	color: var(--text-primary);
+}
+
+.aes-posture-guidance {
+	font-size: 12px;
+	color: var(--text-secondary);
+	margin-top: 6px;
+}
+
+.aes-posture-healthy-native {
+	border-color: var(--success-fg);
+}
+
+.aes-posture-underused {
+	border-color: var(--border-color);
+}
+
+.aes-posture-underdeveloped {
+	border-color: var(--error-fg);
+}
+
+.aes-posture-stretched {
+	border-color: var(--warning-fg);
+}
+
+.aes-posture-unclear {
+	border-color: var(--warning-fg);
+}
+
+.aes-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	gap: 12px;
+}
+
+.aes-card {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	padding: 12px 14px;
+}
+
+.aes-card-title {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	font-size: 13px;
+	font-weight: 700;
+	color: var(--text-primary);
+	margin-bottom: 6px;
+}
+
+.aes-card-body {
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.aes-card-signal {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 4px;
+}
+
+.aes-badge {
+	font-size: 10px;
+	font-weight: 600;
+	padding: 2px 8px;
+	border-radius: 10px;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	color: var(--text-secondary);
+	white-space: nowrap;
+}
+
+.aes-rating-strong {
+	border-color: var(--success-fg);
+	color: var(--success-fg);
+}
+
+.aes-rating-developing {
+	border-color: var(--warning-fg);
+	color: var(--warning-fg);
+}
+
+.aes-rating-weak {
+	border-color: var(--error-fg);
+	color: var(--error-fg);
+}
+
+.aes-evidence-list,
+.aes-anti-patterns {
+	list-style: none;
+	margin: 8px 0 0;
+	padding: 0;
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.aes-evidence-list li,
+.aes-anti-patterns li {
+	margin-bottom: 4px;
+}
+
+.aes-evidence-present {
+	color: var(--success-fg);
+}
+
+.aes-evidence-absent {
+	color: var(--error-fg);
+}
+
+.aes-evidence-unknown {
+	color: var(--text-muted);
+}
+
+.aes-footer {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 16px;
+}

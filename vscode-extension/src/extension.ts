@@ -81,6 +81,7 @@ import type {
   MemoryFilesAnalysis,
   ServerMemoriesAnalysis,
   ServerMemoriesAnalysisView,
+  AesWorkflowReport,
 } from '../../src/types';
 import {
 	ensureContextPressure,
@@ -295,6 +296,8 @@ import {
 } from '../../src/efficiencyAnalysis';
 
 import { scanDarkFactoryReadiness } from './darkFactoryService';
+import { buildAesWorkflowReport } from '../../src/aesWorkflowAssessment';
+import { FABLECART_AES_ASSESSMENT } from '../../src/aesFableCartFixture';
 
 // --- Maturity & fluency scoring ---
 import {
@@ -11326,6 +11329,24 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 	}
 
+	/**
+	 * Load the AES workflow assessment shown in the Fluency Score view.
+	 *
+	 * There is no in-product authoring flow yet and no filesystem convention
+	 * for team-reported assessments, so this always renders the same
+	 * FableCart fixture used by the CLI, clearly labelled in the webview as
+	 * an example. Wrapped in try/catch for the same reason as the Dark
+	 * Factory scan: a failure here must never take the whole view down.
+	 */
+	private runAesWorkflowAssessment(): AesWorkflowReport | undefined {
+		try {
+			return buildAesWorkflowReport(FABLECART_AES_ASSESSMENT);
+		} catch (err) {
+			this.warn(`AES workflow assessment failed: ${err}`);
+			return undefined;
+		}
+	}
+
 	public async showMaturity(): Promise<void> {
 		this.log('🎯 Opening Copilot Fluency Score dashboard');
 		this.recordViewVisit('maturity');
@@ -11363,6 +11384,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 				fluencyLevels,
 				installedHooks: this.hookManager.getInstalledHooks(),
 				darkFactory: this.runDarkFactoryScan(),
+				aes: this.runAesWorkflowAssessment(),
 			});
 		})();
 	}
@@ -11449,7 +11471,7 @@ private async refreshMaturityPanel(): Promise<void> {
 	const dismissedTips = await this.getDismissedFluencyTips();
 	const isDebugMode = this.context.extensionMode === vscode.ExtensionMode.Development;
 	const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
-	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks(), darkFactory: this.runDarkFactoryScan() });
+	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks(), darkFactory: this.runDarkFactoryScan(), aes: this.runAesWorkflowAssessment() });
 	this.log('✅ Copilot Fluency Score dashboard refreshed');
 }
 
@@ -11871,6 +11893,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       installedHooks?: string[];
       /** Per-repository Dark Factory readiness scan; omitted when the scan could not run. */
       darkFactory?: DarkFactoryReport;
+      /** Team-reported AES workflow assessment; omitted when none could be loaded. */
+      aes?: AesWorkflowReport;
       fluencyLevels?: Array<{
         category: string;
         icon: string;

@@ -16,6 +16,7 @@ import { allCommand } from './commands/all';
 import { segmentCommand } from './commands/segment';
 import { curationCommand } from './commands/curation';
 import { memoryFilesCommand } from './commands/memory-files';
+import { aesCommand } from './commands/aes';
 import { loadCache, saveCache, disableCache } from './helpers';
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -52,6 +53,7 @@ program.addCommand(allCommand);
 program.addCommand(segmentCommand);
 program.addCommand(curationCommand);
 program.addCommand(memoryFilesCommand);
+program.addCommand(aesCommand);
 
 // parseAsync, not parse: `memory-files --server/--promote` has an async action handler, and
 // Commander does not await async handlers through parse(). Without this the command can

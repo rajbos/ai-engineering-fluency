@@ -1720,3 +1720,155 @@ export interface ServerMemoriesAnalysisView {
   fullyStaleCount: number;
   topPromotionGroups: ServerMemoryPromotionGroupView[];
 }
+
+// ── AES workflow assessment ───────────────────────────────────────────────
+//
+// A team's self-assessment of one delivery workflow against GitHub's Agentic
+// Engineering System (AES) framework (see `src/aesWorkflowAssessment.ts`).
+// This is a deliberately separate lens from Fluency Score (an individual's
+// tool usage) and Dark Factory Readiness (a repository's observable
+// controls):
+//
+// - The unit of assessment is a **named workflow** — how a team defines,
+//   delivers and detects one kind of customer outcome — which may span
+//   several repositories. It is never a repository, and never a person.
+// - Its content — outcome, activities, modes, stocks — is **team-reported**,
+//   not scanned. Nothing here is machine-detected. Repository facts (Dark
+//   Factory control observations) may be attached as supporting evidence for
+//   a team's answer, but they never become the answer themselves.
+
+/** Bumped whenever the shape of {@link AesWorkflowAssessment} changes incompatibly. */
+export const AES_ASSESSMENT_SCHEMA_VERSION = 1;
+
+/** The three activities the AES framework says work moves through. */
+export type AesActivity = 'define' | 'deliver' | 'detect';
+
+/** The three modes the AES framework says people and agents participate in. */
+export type AesMode = 'director' | 'performer' | 'assessor';
+
+/** The three stocks the AES framework says shape whether a system improves over time. */
+export type AesStock = 'governance' | 'sharedKnowledge' | 'customerValue';
+
+/**
+ * A team's self-rated maturity for one stock or activity. Qualitative and
+ * team-reported on purpose — the framework's own signals (incident rates,
+ * documentation freshness, adoption data, ...) are organisation-specific
+ * operational data this scan does not have access to.
+ */
+export type AesMaturityRating = 'strong' | 'developing' | 'weak' | 'unknown';
+
+/** How much of this activity or mode agents currently carry versus people. */
+export type AesDelegationLevel =
+  /** A person does the work; no agent is involved. */
+  | 'human-only'
+  /** An agent assists (drafts, summarizes, suggests) but a person decides and acts. */
+  | 'agent-assisted'
+  /** An agent performs the work; a person reviews and approves before it lands. */
+  | 'agent-performed-reviewed'
+  /** An agent performs the work and it lands with materially reduced human review. */
+  | 'agent-performed-autonomous';
+
+/** One stock's self-assessment: current maturity, the evidence for it, and the signals that were considered. */
+export interface AesStockAssessment {
+  rating: AesMaturityRating;
+  /** Why the team rated it this way — the evidence, not just the label. */
+  evidence: string;
+  /** Which of the framework's own suggested signals the team actually looked at, if any. */
+  signalsConsidered?: string[];
+}
+
+/** One activity's self-assessment: how it happens today, and who/what currently does it. */
+export interface AesActivityAssessment {
+  /** What "define" / "deliver" / "detect" concretely means for this workflow. */
+  description: string;
+  delegation: AesDelegationLevel;
+  /** The framework's suggested signal for this activity, and what the team observes for it. */
+  signal: string;
+  notes?: string;
+}
+
+/** One mode's self-assessment: who holds it today, for this workflow, and any anti-patterns noticed. */
+export interface AesModeAssessment {
+  delegation: AesDelegationLevel;
+  notes?: string;
+  /** Anti-pattern descriptions the team recognises from the framework's own lists, if any apply. */
+  antiPatternsObserved?: string[];
+}
+
+/**
+ * A Dark Factory control observation reused as supporting evidence for one
+ * part of the AES self-assessment. Never a conclusion on its own: `present` /
+ * `absent` / `unknown` states are carried through unchanged, and the field
+ * this informs is still whatever the team answered.
+ */
+export interface AesSupportingEvidence {
+  /** The repository (`owner/repo`, or a local path when unresolved) the observation came from. */
+  repo: string;
+  /** Dark Factory control id, e.g. `ci-test-execution` — see `src/darkFactoryControls.json`. */
+  controlId: string;
+  controlLabel: string;
+  state: DarkFactoryControlState;
+  detail?: string;
+  /** Which part of the AES assessment this observation is offered as evidence for. */
+  informs: AesActivity | AesStock;
+}
+
+/** A named delivery workflow — the unit AES assesses. May span several repositories. */
+export interface AesWorkflowIdentity {
+  name: string;
+  /** What this workflow exists to deliver, in plain language. */
+  description: string;
+  /** `owner/repo` (preferred) or local paths for every repository this workflow touches. */
+  repositories: string[];
+}
+
+/**
+ * One team's self-assessment of one workflow against the AES framework.
+ *
+ * This is team-authored data, not a scan result: `schemaVersion` exists so a
+ * stored assessment can be safely migrated as the shape evolves, the way a
+ * document format would be, rather than treated as disposable scan output.
+ */
+export interface AesWorkflowAssessment {
+  schemaVersion: number;
+  workflow: AesWorkflowIdentity;
+  /** ISO timestamp of when the team completed this self-assessment. */
+  assessedAt: string;
+  /** Who ran the assessment — a name, team, or role. Never an individual performance record. */
+  assessedBy?: string;
+  /** What outcome this workflow serves, and for whom — AES's "customer value" starting point. */
+  outcome: {
+    customerValue: string;
+    customers: string;
+  };
+  activities: Record<AesActivity, AesActivityAssessment>;
+  modes: Record<AesMode, AesModeAssessment>;
+  stocks: Record<AesStock, AesStockAssessment>;
+  supportingEvidence?: AesSupportingEvidence[];
+  notes?: string;
+}
+
+/**
+ * The four postures of the AES "Stock-Adoption matrix": whether current agent
+ * delegation for this workflow matches the strength of its governance and
+ * shared-knowledge stocks. Derived only from the team's own ratings — see
+ * `classifyAesPosture()` — and shown as direction, never a threshold to pass.
+ */
+export type AesPosture =
+  | 'healthy-agent-native'
+  | 'healthy-but-underused'
+  | 'underdeveloped-foundations'
+  | 'stretched-agent-native'
+  | 'unclear';
+
+/** The computed, read-only view of one assessment: everything the report renderer needs. */
+export interface AesWorkflowReport {
+  assessment: AesWorkflowAssessment;
+  posture: AesPosture;
+  /** One-line explanation of why this posture was derived, and what to do next. */
+  postureGuidance: string;
+  /** True when every stock rating is `strong` or `developing` (i.e. none are `weak`/`unknown`). */
+  foundationsSolid: boolean;
+  /** Highest delegation level observed across all activities and modes. */
+  deepestDelegation: AesDelegationLevel;
+}
