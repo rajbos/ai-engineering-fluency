@@ -116,7 +116,15 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 		version: '0.18.1',
 		date: null,
 		headlineKey: 'whatsNew.release.0.18.1.headline',
-		features: [],
+		features: [
+			{
+				id: 'usage.readiness-tab',
+				titleKey: 'whatsNew.feature.usage.readiness-tab.title',
+				descriptionKey: 'whatsNew.feature.usage.readiness-tab.description',
+				kind: 'tab',
+				surface: { view: 'usage', tab: 'readiness' },
+			},
+		],
 	},
 	{
 		version: '0.18.0',

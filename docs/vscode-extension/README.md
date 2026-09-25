@@ -102,6 +102,11 @@ Supported editors shown in the chart:
 
 The extension includes a **Copilot Fluency Score** dashboard that evaluates your GitHub Copilot proficiency across 6 categories with 4 stages each (Skeptic → Explorer → Collaborator → Strategist).
 
+The **AI Readiness** tab in **Usage Analysis** scans repositories in the current workspace for Dark Factory
+governance and delivery controls, not people. Select the tab or run **Show AI Readiness** from the
+Command Palette. See [Dark Factory Readiness](../features/DARK-FACTORY-READINESS.md)
+for the scan's evidence limits.
+
 **Categories Evaluated:**
 - 💬 **Prompt Engineering**: How you structure prompts and use modes
 - 📎 **Context Engineering**: Your use of context references

@@ -380,6 +380,53 @@ test('a switchTab to Repository PRs during a refresh still starts the PR fetch',
 	);
 });
 
+test('AI Readiness scans only on tab visit, refreshes on demand, and survives a layout rebuild', async () => {
+	const stats = { ...buildStats(), readinessAvailable: true };
+	const harness = await bootWebview(stats);
+	assert.ok(harness.window.document.querySelector('.tab-button[data-tab="readiness"]'));
+	assert.ok(!harness.posted.some((m) => m.command === 'loadReadiness'));
+
+	harness.post({ command: 'switchTab', tab: 'readiness' });
+	await harness.settle();
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').length, 1);
+	assert.equal(harness.posted.find((m) => m.command === 'loadReadiness').requestId, 1);
+	const report = { scannedAt: '2026-03-14T09:30:00.000Z', apiSignalsIncluded: false, maxAssessableStage: 4, repos: [], skippedRepoCount: 0 };
+	harness.post({ command: 'readinessLoaded', requestId: 1, report });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /No git repositories were found/);
+
+	harness.post({ command: 'updateStats', data: stats });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /No git repositories were found/);
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').length, 1);
+
+	(harness.window.document.querySelector('#btn-refresh-readiness') as HTMLButtonElement).click();
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').at(-1)?.requestId, 2);
+	harness.post({ command: 'readinessLoaded', requestId: 1, report });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /Scanning repository controls/);
+	harness.post({ command: 'readinessScanFailed', requestId: 2 });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /Could not scan repository readiness/);
+});
+
+test('AI Readiness deep link waits for stats and ignores responses from before a full refresh', async () => {
+	const harness = await bootWebview(null);
+	harness.post({ command: 'switchTab', tab: 'readiness' });
+	harness.post({ command: 'updateStats', data: { ...buildStats(), readinessAvailable: true } });
+	await harness.settle();
+	assert.notEqual(harness.window.document.querySelector('#tab-panel-readiness')?.style.display, 'none');
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').length, 1);
+
+	harness.post({ command: 'usageRefreshing' });
+	harness.post({ command: 'updateStats', data: { ...buildStats(), readinessAvailable: true } });
+	await harness.settle();
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').at(-1)?.requestId, 3);
+	harness.post({ command: 'readinessLoaded', requestId: 1, report: { repos: [] } });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /Scanning repository controls/);
+});
+
 test('a layout re-render repopulates the GitHub activity panels from retained state', async () => {
 	// Any stats refresh rebuilds the whole root, recreating the "Loading…" placeholders. The
 	// already-received PR data must be re-applied instead of being visually lost.
