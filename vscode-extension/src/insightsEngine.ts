@@ -538,6 +538,16 @@ function risingReviewLoad(ctx: InsightContext): AgentPrActivity[] {
 		&& (r.aiRevertedPrs > 0 || reworkUp));
 }
 
+/** Firmer wording once review is observed to be absent; "cannot confirm" while it is unknown. */
+function unreviewedAgentMergesBodyKey(reviewAbsent: boolean): string {
+	return reviewAbsent ? 'insight.unreviewedAgentMerges.body.absent' : 'insight.unreviewedAgentMerges.body.unknown';
+}
+
+/** Cite reverts when there are any, otherwise the rising rework. */
+function reviewBurdenBodyKey(hasReverts: boolean): string {
+	return hasReverts ? 'insight.reviewBurdenRising.body.reverts' : 'insight.reviewBurdenRising.body.rework';
+}
+
 function fixed(value: number | null, digits: number): string {
 	return value === null ? '—' : value.toFixed(digits);
 }
@@ -1679,8 +1689,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 			const absent = repos.filter(r => r.humanReview === 'absent');
 			const shown = absent.length > 0 ? absent : repos;
 			const names = joinNames(ctx, shown.slice(0, 3).map(r => r.repository));
-			const variant = absent.length > 0 ? 'absent' : 'unknown';
-			return ctx.translate(`insight.unreviewedAgentMerges.body.${variant}`, names, moreSuffix(ctx, shown.length, 3));
+			return ctx.translate(unreviewedAgentMergesBodyKey(absent.length > 0), names, moreSuffix(ctx, shown.length, 3));
 		},
 		actionLabelKey: 'insight.action.viewReadiness',
 		actionCommand: 'aiEngineeringFluency.showReadiness',
@@ -1694,8 +1703,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		titleKey: 'insight.reviewBurdenRising.title',
 		buildBody: (ctx) => {
 			const top = risingReviewLoad(ctx).sort((a, b) => b.aiAuthoredRecent - a.aiAuthoredRecent)[0];
-			const variant = top.aiRevertedPrs > 0 ? 'reverts' : 'rework';
-			return ctx.translate(`insight.reviewBurdenRising.body.${variant}`, top.aiAuthoredRecent, top.repository, top.aiAuthoredEarlier, top.aiRevertedPrs);
+			return ctx.translate(reviewBurdenBodyKey(top.aiRevertedPrs > 0), top.aiAuthoredRecent, top.repository, top.aiAuthoredEarlier, top.aiRevertedPrs);
 		},
 		actionLabelKey: 'insight.action.viewRepoPrs',
 		actionCommand: 'aiEngineeringFluency.openReposTab',
