@@ -210,4 +210,55 @@ describe('downstream links reach the built-in page headers', () => {
 		assert.equal(res.status, 200);
 		assert.doesNotMatch(await res.text(), /href="\/vendor"/);
 	});
+
+	// Mirrors the composition documented in README.md "Extending this server".
+	// The link a downstream server advertises has to resolve to a real page.
+	describe('the documented README composition', () => {
+		const buildDocumentedApp = () => {
+			const routes = new Hono();
+			routes.post('/upload', (c) => c.json({ ok: true }));
+
+			const page = new Hono();
+			page.get('/mine', (c) =>
+				c.html(`<!doctype html><html><body>
+					<header>
+						<a href="/dashboard">My Dashboard</a>
+						<a href="/team">Team Insights</a>
+						${renderNavExtra(c, '/mine')}
+					</header>
+					<main>…</main>
+				</body></html>`),
+			);
+
+			return createApp({
+				healthExtra: () => ({ edition: 'my-company' }),
+				navExtra: () => [{ href: '/mine', label: 'My Insights' }],
+				extend: (a) => a.route('/api/mine', routes).route('/', page),
+			});
+		};
+
+		test('the advertised href resolves instead of 404ing', async () => {
+			const res = await buildDocumentedApp().request('/mine');
+			assert.equal(res.status, 200, 'the documented nav target must be a registered route');
+		});
+
+		test('built-in headers link to the documented page', async () => {
+			const res = await buildDocumentedApp().request('/dashboard', {
+				headers: { Cookie: `${COOKIE_NAME}=${encodeSession(makeClaims(user.id))}` },
+			});
+			assert.equal(res.status, 200);
+			assert.ok((await res.text()).includes('<a href="/mine">My Insights</a>'));
+		});
+
+		test('the downstream page renders its own links through renderNavExtra', async () => {
+			const html = await (await buildDocumentedApp().request('/mine')).text();
+			assert.ok(html.includes('My Insights'), 'expected renderNavExtra output in the page header');
+			assert.ok(html.includes('href="/dashboard"'), 'expected the back-links to the built-in pages');
+		});
+
+		test('healthExtra from the documented example is merged', async () => {
+			const res = await buildDocumentedApp().request('/health');
+			assert.equal(((await res.json()) as { edition?: string }).edition, 'my-company');
+		});
+	});
 });

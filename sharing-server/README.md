@@ -317,6 +317,7 @@ import {
 	startServer,
 	registerSchemaExtension,
 	requireBearerAuth,
+	renderNavExtra,
 	getDb,
 } from '@rajbos/ai-engineering-fluency-sharing-server';
 import { Hono } from 'hono';
@@ -342,10 +343,24 @@ routes.post('/upload', requireBearerAuth, async (c) => {
 	return c.json({ ok: true });
 });
 
+// The page the nav link points at. `renderNavExtra` renders the same downstream
+// links here, so your page header stays consistent with the built-in ones.
+const page = new Hono();
+page.get('/mine', (c) =>
+	c.html(`<!doctype html><html><body>
+		<header>
+			<a href="/dashboard">My Dashboard</a>
+			<a href="/team">Team Insights</a>
+			${renderNavExtra(c, '/mine')}
+		</header>
+		<main>…</main>
+	</body></html>`),
+);
+
 const app = createApp({
 	healthExtra: () => ({ edition: 'my-company' }),
 	navExtra: () => [{ href: '/mine', label: 'My Insights' }],
-	extend: (a) => a.route('/api/mine', routes),
+	extend: (a) => a.route('/api/mine', routes).route('/', page),
 });
 
 await startServer(app);
