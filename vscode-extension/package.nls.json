@@ -680,5 +680,21 @@
   "agentic.quality.openReadiness": "Open AI Readiness",
   "agentic.reverts.header": "↩️ Cloud agent PRs reverted",
   "agentic.reverts.headerTitle": "Merged PRs from a cloud agent that a later PR in the same window reverted, as reverted / merged, with everyone else's revert rate below as the baseline. A lower bound: reverts pushed straight to the branch, fix-forwards and rewritten revert titles are not detected.",
-  "agentic.reverts.baseline": "others: {0}"
+  "agentic.reverts.baseline": "others: {0}",
+  "insight.action.viewReadiness": "View AI Readiness",
+  "insight.action.viewRepoPrs": "View repository PRs",
+  "insight.missingInstructions.evidence": "In your own sessions, repositories that have instruction files needed {0}% fewer corrections per session.",
+  "insight.agenticStretched.title": "🧭 Agent use has outrun the controls",
+  "insight.agenticStretched.body.one": "{0} repository ({1}{2}) sees heavy agent use but has weak foundations for it. GitHub's Agentic Engineering System calls this a stretched system: narrow what agents do there and repair the missing controls first, starting with: {3}.",
+  "insight.agenticStretched.body.other": "{0} repositories ({1}{2}) see heavy agent use but have weak foundations for it. GitHub's Agentic Engineering System calls this a stretched system: narrow what agents do there and repair the missing controls first, starting with: {3}.",
+  "insight.speedWithoutQuality.title": "⚖️ More agent use, more rework",
+  "insight.speedWithoutQuality.body": "You are running agents more often this month ({0} → {1} sessions a day), but rework is rising with it: corrections per session {2} → {3}, one-shot edits {4} → {5}. Faster is only better if it does not get weaker — check the Corrections tab for which repositories drive it.",
+  "insight.delegationWithoutObjective.title": "🎯 State the goal before the agent starts",
+  "insight.delegationWithoutObjective.body": "{0} of your {1} agent sessions that opened with a short prompt and no plan needed repeated corrections ({2}%), against {3}% when you described the task or planned first. Stating the goal, the constraints and what done looks like up front cuts the back-and-forth.",
+  "insight.unreviewedAgentMerges.title": "🛡️ Make sure agent PRs get a human review",
+  "insight.unreviewedAgentMerges.body.absent": "Agents open pull requests in {0}{1}, but merges there do not require a human review. A green check is not a review: require an approving review from someone other than the author on the default branch.",
+  "insight.unreviewedAgentMerges.body.unknown": "Agents open pull requests in {0}{1}, and this scan cannot confirm that merges there require a human review. A green check is not a review: check that the default branch requires an approving review from someone other than the author.",
+  "insight.reviewBurdenRising.title": "📈 Review load from agents is rising",
+  "insight.reviewBurdenRising.body.reverts": "Cloud agents opened {0} pull requests in {1} in the last 15 days, up from {2} in the 15 days before, and {3} of their merged PRs were reverted. Rising review load with reverts usually means the agent's tasks are scoped too loosely or it lacks context — not that it needs a bigger model.",
+  "insight.reviewBurdenRising.body.rework": "Cloud agents opened {0} pull requests in {1} in the last 15 days, up from {2} in the 15 days before, while corrections in your own sessions are rising. Rising review load with more rework usually means tasks are scoped too loosely or the agent lacks context — not that it needs a bigger model."
 }

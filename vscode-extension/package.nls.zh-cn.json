@@ -682,5 +682,21 @@
   "agentic.quality.openReadiness": "打开 AI 就绪度",
   "agentic.reverts.header": "↩️ 被回滚的云端智能体 PR",
   "agentic.reverts.headerTitle": "同一时间窗口内被后续 PR 回滚的云端智能体已合并 PR，格式为“已回滚 / 已合并”，下方为其他人的回滚率作为基准。这是下限：直接推送到分支的回滚、向前修复以及改写过标题的回滚无法检测。",
-  "agentic.reverts.baseline": "其他：{0}"
+  "agentic.reverts.baseline": "其他：{0}",
+  "insight.action.viewReadiness": "查看 AI 就绪度",
+  "insight.action.viewRepoPrs": "查看仓库 PR",
+  "insight.missingInstructions.evidence": "在你自己的会话中，带有说明文件的仓库每个会话所需的纠正次数少 {0}%。",
+  "insight.agenticStretched.title": "🧭 智能体使用已超出控制能力",
+  "insight.agenticStretched.body.one": "{0} 个仓库（{1}{2}）的智能体使用较多，但其基础薄弱。GitHub 的 Agentic Engineering System 将此称为超负荷系统：先缩小智能体在其中的工作范围并补齐缺失的控制项，首先是：{3}。",
+  "insight.agenticStretched.body.other": "{0} 个仓库（{1}{2}）的智能体使用较多，但其基础薄弱。GitHub 的 Agentic Engineering System 将此称为超负荷系统：先缩小智能体在其中的工作范围并补齐缺失的控制项，首先是：{3}。",
+  "insight.speedWithoutQuality.title": "⚖️ 智能体使用更多，返工也更多",
+  "insight.speedWithoutQuality.body": "本月你更频繁地运行智能体（每天 {0} → {1} 个会话），但返工也随之增加：每会话纠正次数 {2} → {3}，一次成功的编辑 {4} → {5}。只有不变弱的更快才是更好——请在纠正记录标签页查看是哪些仓库导致的。",
+  "insight.delegationWithoutObjective.title": "🎯 在智能体开始前说明目标",
+  "insight.delegationWithoutObjective.body": "在以简短提示开始且没有计划的 {1} 个智能体会话中，有 {0} 个需要反复纠正（{2}%），而先描述任务或先做计划时只有 {3}%。预先说明目标、约束和完成标准可以减少来回沟通。",
+  "insight.unreviewedAgentMerges.title": "🛡️ 确保智能体 PR 经过人工审查",
+  "insight.unreviewedAgentMerges.body.absent": "智能体在 {0}{1} 中创建拉取请求，但那里的合并不需要人工审查。检查通过不等于审查：请在默认分支上要求作者以外的人批准审查。",
+  "insight.unreviewedAgentMerges.body.unknown": "智能体在 {0}{1} 中创建拉取请求，而此扫描无法确认那里的合并需要人工审查。检查通过不等于审查：请确认默认分支要求作者以外的人批准审查。",
+  "insight.reviewBurdenRising.title": "📈 来自智能体的审查负担在增加",
+  "insight.reviewBurdenRising.body.reverts": "过去 15 天，云端智能体在 {1} 中创建了 {0} 个拉取请求，高于之前 15 天的 {2} 个，且其中 {3} 个已合并的 PR 被回滚。审查负担上升并伴随回滚，通常意味着智能体的任务范围过于宽松或缺少上下文，而不是需要更大的模型。",
+  "insight.reviewBurdenRising.body.rework": "过去 15 天，云端智能体在 {1} 中创建了 {0} 个拉取请求，高于之前 15 天的 {2} 个，同时你自己会话中的纠正次数也在增加。审查负担上升并伴随更多返工，通常意味着任务范围过于宽松或智能体缺少上下文，而不是需要更大的模型。"
 }

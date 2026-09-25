@@ -195,6 +195,7 @@ import {
   mergeInsightStates as _mergeInsightStates,
   countNewInsights as _countNewInsights,
   isToastAllowed as _isToastAllowed,
+  type InsightContext,
 } from './insightsEngine';
 
 // --- Worktree background scan (once-daily, leader-only disk-usage scan) ---
@@ -5715,6 +5716,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
 			memoryFilesAnalysis: stats.memoryFilesAnalysis ?? null,
+			...this.agenticInsightContext(stats),
 		};
 
 		const evaluated = _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
@@ -5767,6 +5769,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	/**
+	 * Insight inputs for the agentic engineering system signals: per-repository activity, the
+	 * month-over-month trend, the latest AI Readiness scan (re-run at most hourly) and the
+	 * repository PR snapshot. All local; none of it is uploaded.
+	 */
+	private agenticInsightContext(stats: UsageAnalysisStats): Pick<InsightContext, 'repoActivity' | 'activityTrend' | 'agenticMatrix' | 'reviewControls' | 'agentPrActivity'> {
+		const readiness = this.readinessForInsights(stats.repoActivity);
+		const controlState = (repo: DarkFactoryReport['repos'][number], id: string) => repo.controls.find(c => c.id === id)?.state ?? 'unknown';
+		return {
+			repoActivity: stats.repoActivity ?? null,
+			activityTrend: stats.activityTrend ?? null,
+			agenticMatrix: readiness?.matrix ?? null,
+			reviewControls: readiness?.report.repos.map(repo => ({
+				repository: repo.nameWithOwner ?? repo.name,
+				agentPullRequests: controlState(repo, 'agent-authored-pull-requests'),
+				humanReview: controlState(repo, 'human-review-enforced'),
+			})) ?? null,
+			agentPrActivity: this._lastRepoPrStats?.repos
+				.filter(r => !r.error && r.aiAuthoredRecent !== undefined)
+				.map(r => ({
+					repository: `${r.owner}/${r.repo}`,
+					aiAuthoredRecent: r.aiAuthoredRecent ?? 0,
+					aiAuthoredEarlier: r.aiAuthoredEarlier ?? 0,
+					aiRevertedPrs: r.aiRevertedPrs ?? 0,
+				})) ?? null,
+		};
+	}
+
 	/** Builds the current evaluated insight list from cached state + latest stats. */
 	private buildCurrentInsights(stats: UsageAnalysisStats): EvaluatedInsight[] {
 		const cadenceDays = vscode.workspace.getConfiguration('aiEngineeringFluency').get<number>('insights.cadenceDays', 2);
@@ -5784,6 +5814,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			curationAnalysis: stats.curationAnalysis ?? null,
 			repeatedTasks: stats.repeatedTasks ?? null,
 			memoryFilesAnalysis: stats.memoryFilesAnalysis ?? null,
+			...this.agenticInsightContext(stats),
 		};
 		return _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
 	}
@@ -15998,6 +16029,7 @@ function registerUsageNavigationCommands(context: vscode.ExtensionContext, token
     ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
     ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
     ["aiEngineeringFluency.openCorrectionsTab", "Open Corrections tab command called", () => tokenTracker.showUsageAnalysisOnCorrectionsTab()],
+    ["aiEngineeringFluency.openReposTab", "Open Repository PRs tab command called", () => tokenTracker.showUsageAnalysisOnReposTab()],
     ["aiEngineeringFluency.askCopilotAboutCorrections", "Ask Copilot about corrections command called", () => tokenTracker.askCopilotAboutCorrections()],
     ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
     ["aiEngineeringFluency.showContextPressureSessions", "Show near-context-limit sessions command called", () => tokenTracker.showContextPressureSessions()],
