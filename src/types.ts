@@ -726,6 +726,144 @@ export interface RepeatedTaskReport {
   clusters: RepeatedTaskCluster[];
 }
 
+// ---------------------------------------------------------------------------
+// Agentic engineering system signals (see docs/adr/AGENTIC-ENGINEERING-SYSTEM-PLAN.md)
+// ---------------------------------------------------------------------------
+
+/** Turn counts per participation mode (see src/participationModes.ts). */
+export interface ParticipationModeCounts {
+  /** Turns that set intent: planning, brainstorming, handing work off. */
+  director: number;
+  /** Turns that execute: coding, debugging, refactoring, build and git work. */
+  performer: number;
+  /** Turns that check work: testing, and reading code back after an edit. */
+  assessor: number;
+}
+
+/**
+ * Additive session signals over a set of sessions. Every rate a consumer
+ * derives must use a denominator from this same object, never a count from a
+ * different population.
+ */
+export interface AgentActivityTotals {
+  sessions: number;
+  interactions: number;
+  tokens: number;
+  /** Sessions with at least one agent, custom-agent or CLI-agent interaction. */
+  agenticSessions: number;
+  /** Sessions classified as `Delegation` or with at least one sub-agent call. */
+  delegationSessions: number;
+  /**
+   * Sessions whose format carries per-turn tool-call detail (`modelEfficiency`
+   * present). The only valid denominator for the rework counters below: a
+   * session without turn detail has *unknown* rework, not zero.
+   */
+  sessionsWithTurnDetail: number;
+  editTurns: number;
+  oneShotEditTurns: number;
+  retries: number;
+  selfCorrections: number;
+  toolCalls: number;
+  /** Turn-detail sessions with at least one correction moment. */
+  sessionsWithCorrections: number;
+  userCorrections: number;
+  toolErrors: number;
+  /** All correction moments (user, edit retry/self-correction, tool error, agent self-correction). */
+  correctionMoments: number;
+  /** Prompt-scoping counters for agentic sessions (see src/promptScoping.ts). */
+  scoping: {
+    /** Agentic turn-detail sessions whose opening prompt is short and not preceded by a plan. */
+    underScoped: number;
+    /** …of which needed repeated user corrections. */
+    underScopedCorrected: number;
+    /** Agentic turn-detail sessions whose opening prompt states the task in more detail. */
+    scoped: number;
+    /** …of which needed repeated user corrections. */
+    scopedCorrected: number;
+  };
+  /** Turns per participation mode. */
+  modes: ParticipationModeCounts;
+}
+
+/** Instruction files found in a repository's local checkout (see src/knowledgeSignals.ts). */
+export interface RepoKnowledgeFiles {
+  /** Agent instruction files: copilot-instructions, scoped instructions, AGENTS.md, CLAUDE.md, other agents' rule files. */
+  instructionFiles: number;
+  /** …of which have not been touched within the staleness threshold. */
+  staleInstructionFiles: number;
+}
+
+/** Activity for one repository. */
+export interface RepoAgentActivity extends AgentActivityTotals {
+  /** Lowercase `owner/repo` join key (see src/repoKey.ts). */
+  key: string;
+  /** Display name, e.g. `rajbos/ai-engineering-fluency`. */
+  repository: string;
+  /**
+   * Instruction files in the checkout. Absent when no local checkout of the
+   * repository was resolved — unknown, not "none".
+   */
+  knowledge?: RepoKnowledgeFiles;
+}
+
+/** Per-repository activity over a trailing window. */
+export interface RepoAgentActivityReport {
+  windowDays: number;
+  /** Repositories, most sessions first. */
+  repos: RepoAgentActivity[];
+  /** Sessions whose repository could not be resolved; shown, never classified. */
+  unattributed: AgentActivityTotals;
+  /** Every session in the window, attributed or not. */
+  totals: AgentActivityTotals;
+}
+
+/** How far a repository's controls support delegated agent work (see src/agenticFoundations.ts). */
+export type FoundationLevel = 'strong' | 'partial' | 'weak' | 'unassessed';
+
+/** The four states of GitHub's stock-adoption matrix. */
+export type AgenticQuadrant = 'healthy-agent-native' | 'healthy-underused' | 'underdeveloped' | 'stretched';
+
+/** One repository placed on the adoption × foundations matrix. */
+export interface AgenticMatrixPlacement {
+  /** Display name — `owner/repo` when known, else the folder name. */
+  repository: string;
+  foundation: FoundationLevel;
+  /** present ÷ (present + absent) over the stage 1–3 controls; null when nothing was observed. */
+  foundationScore: number | null;
+  /** Stage 1–3 controls observed (present or absent) and still unknown. */
+  observedControls: number;
+  unknownControls: number;
+  /** Agentic sessions in this repository over the activity window. */
+  agenticSessions: number;
+  sessions: number;
+  highAdoption: boolean;
+  /** Undefined for `unassessed` repositories. */
+  quadrant?: AgenticQuadrant;
+  /** True when foundations are `partial` and the quadrant is the nearer side, not a firm call. */
+  leaning: boolean;
+  /** Absent stage 1–3 controls, lowest stage first — what to repair. */
+  missingControls: { id: string; label: string; stage: number }[];
+  /** Why the repository is unassessed, when it is. */
+  unassessedReason?: 'too-few-controls' | 'no-remote';
+}
+
+/** The adoption × foundations matrix for the repositories open in the workspace. */
+export interface AgenticMatrix {
+  windowDays: number;
+  placements: AgenticMatrixPlacement[];
+  /** Repositories with agent activity but no local checkout scanned — adoption only, never guessed. */
+  adoptionOnly: { repository: string; agenticSessions: number; sessions: number }[];
+}
+
+/** Month-over-month activity, used to pair adoption with rework (see src/speedVsError.ts). */
+export interface ActivityTrendWindows {
+  current: AgentActivityTotals;
+  /** Calendar days elapsed in the current window (month to date, including today). */
+  currentDays: number;
+  previous: AgentActivityTotals;
+  previousDays: number;
+}
+
 export interface EditScopeUsage {
   singleFileEdits: number; // Edit sessions touching 1 file
   multiFileEdits: number; // Edit sessions touching 2+ files
@@ -891,6 +1029,13 @@ correctionReport?: CorrectionReport;
  * cluster reached the minimum size.
  */
 repeatedTasks?: RepeatedTaskReport;
+/**
+ * Session signals grouped per repository over the last 30 days (see
+ * src/repoAgentActivity.ts). Local only — never uploaded or shared.
+ */
+repoActivity?: RepoAgentActivityReport;
+/** Month-to-date vs last month activity, for pairing adoption with rework. */
+activityTrend?: ActivityTrendWindows;
 /** Optional Copilot memory-files hygiene analysis (VS Code only; absent in CLI/VS/JetBrains). */
 memoryFilesAnalysis?: MemoryFilesAnalysis | null;
 /**

@@ -124,6 +124,27 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 				kind: 'tab',
 				surface: { view: 'usage', tab: 'readiness' },
 			},
+			{
+				id: 'usage.agentic-matrix',
+				titleKey: 'whatsNew.feature.usage.agentic-matrix.title',
+				descriptionKey: 'whatsNew.feature.usage.agentic-matrix.description',
+				kind: 'section',
+				surface: { view: 'usage', tab: 'readiness', anchor: 'agentic-matrix' },
+			},
+			{
+				id: 'maturity.quality-strip',
+				titleKey: 'whatsNew.feature.maturity.quality-strip.title',
+				descriptionKey: 'whatsNew.feature.maturity.quality-strip.description',
+				kind: 'section',
+				surface: { view: 'maturity', anchor: 'quality-strip' },
+			},
+			{
+				id: 'usage.corrections-repo-summary',
+				titleKey: 'whatsNew.feature.usage.corrections-repo-summary.title',
+				descriptionKey: 'whatsNew.feature.usage.corrections-repo-summary.description',
+				kind: 'section',
+				surface: { view: 'usage', tab: 'corrections', anchor: 'corrections-repo-summary' },
+			},
 		],
 	},
 	{

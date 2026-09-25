@@ -62,3 +62,37 @@ test('AI Readiness is a host-gated Usage Analysis tab with a lazy, refreshable s
 		dom.window.close();
 	}
 });
+
+test('AI Readiness renders the adoption × foundations matrix above the report, and drops a malformed one', () => {
+	const dom = new JSDOM('<div id="root"></div>');
+	const previousDocument = globalThis.document;
+	(globalThis as typeof globalThis & { document: Document }).document = dom.window.document;
+	try {
+		const messages: Array<{ command: string; requestId: number }> = [];
+		const tab = new DarkFactoryTab(message => messages.push(message), () => undefined);
+		tab.setAvailable(true);
+		dom.window.document.getElementById('root')!.innerHTML = tab.panel('readiness');
+		tab.attach();
+		tab.startIfNeeded();
+		const matrix = {
+			windowDays: 30,
+			placements: [{
+				repository: 'o/r', foundation: 'weak', foundationScore: 0.2, observedControls: 10, unknownControls: 5,
+				agenticSessions: 8, sessions: 10, highAdoption: true, quadrant: 'stretched', leaning: false, missingControls: [],
+			}],
+			adoptionOnly: [],
+		};
+		tab.handleMessage({ command: 'readinessLoaded', requestId: 1, report: emptyReport, matrix });
+		const content = dom.window.document.getElementById('readiness-content')!;
+		assert.ok(content.querySelector('#agentic-matrix [data-quadrant="stretched"]'));
+		assert.match(content.textContent!, /No git repositories were found/);
+
+		tab.requestScan();
+		tab.handleMessage({ command: 'readinessLoaded', requestId: 2, report: emptyReport, matrix: { placements: 'nope' } });
+		assert.equal(content.querySelector('#agentic-matrix'), null);
+		assert.match(content.textContent!, /No git repositories were found/);
+	} finally {
+		(globalThis as typeof globalThis & { document: Document }).document = previousDocument;
+		dom.window.close();
+	}
+});

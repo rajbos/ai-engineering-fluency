@@ -78,6 +78,8 @@ import type {
   CorrectionRepoGroup,
   CorrectionSessionEntry,
   RepeatedTaskReport,
+  RepoKnowledgeFiles,
+  AgenticMatrix,
   MemoryFilesAnalysis,
   ServerMemoriesAnalysis,
   ServerMemoriesAnalysisView,
@@ -108,6 +110,19 @@ import {
   MIN_CLUSTER_SIZE as _MIN_CLUSTER_SIZE,
   type RepeatedTaskInput as _RepeatedTaskInput,
 } from '../../src/repeatedTasks';
+import {
+  buildActivityTrend as _buildActivityTrend,
+  buildRepoAgentActivity as _buildRepoAgentActivity,
+  type ActivitySessionInput as _ActivitySessionInput,
+} from '../../src/repoAgentActivity';
+import { repoKeyFromRemote as _repoKeyFromRemote } from '../../src/repoKey';
+import {
+  mergeKnowledgeFiles as _mergeKnowledgeFiles,
+  summarizeInstructionFiles as _summarizeInstructionFiles,
+} from '../../src/knowledgeSignals';
+import { buildAgenticMatrix as _buildAgenticMatrix, stretchedPlacements as _stretchedPlacements } from '../../src/agenticFoundations';
+import { compareSpeedAndQuality as _compareSpeedAndQuality } from '../../src/speedVsError';
+import { summarizePrOutcomes as _summarizePrOutcomes } from '../../src/prOutcomes';
 
 // --- Tool curation ---
 import {
@@ -180,6 +195,7 @@ import {
   mergeInsightStates as _mergeInsightStates,
   countNewInsights as _countNewInsights,
   isToastAllowed as _isToastAllowed,
+  type InsightContext,
 } from './insightsEngine';
 
 // --- Worktree background scan (once-daily, leader-only disk-usage scan) ---
@@ -1443,6 +1459,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Cache mapping workspaceFolderPath -> found customization files (avoid re-scanning)
 	private _customizationFilesCache: Map<string, CustomizationFileEntry[]> = new Map();
+	/** Latest AI Readiness scan and its adoption × foundations matrix (see rememberReadinessScan). */
+	private _lastReadinessScan: { report: DarkFactoryReport; matrix: AgenticMatrix; scannedAt: number } | undefined;
 
 	// Last computed customization matrix for usage analysis (typed)
 	private _lastCustomizationMatrix?: WorkspaceCustomizationMatrix;
@@ -3781,7 +3799,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const { prs, error } = await fetchRepoPrs(owner, repo, token, since);
 			this.log(`🔎 Fetched ${prs.length} PR(s) for ${owner}/${repo}${error ? ` — ${error}` : ''}`);
 			const stats = this.collectAiPrStats(prs, error, userLogin);
-			results.push({ owner, repo, repoUrl: `${webOrigin}/${owner}/${repo}`, ...stats, error });
+			// Reverts come from the same PR list — no extra API calls (see src/prOutcomes.ts).
+			const outcomes = error ? {} : _summarizePrOutcomes(prs, pr => !!detectAiType(pr.user), `${owner}/${repo}`, { sinceMs: since.getTime(), nowMs: Date.now() });
+			results.push({ owner, repo, repoUrl: `${webOrigin}/${owner}/${repo}`, ...stats, ...outcomes, error });
 			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsProgress', total: repos.length, done: i + 1 });
 		}
 
@@ -5696,6 +5716,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
 			memoryFilesAnalysis: stats.memoryFilesAnalysis ?? null,
+			...this.agenticInsightContext(stats),
 		};
 
 		const evaluated = _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
@@ -5748,6 +5769,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	/**
+	 * Insight inputs for the agentic engineering system signals: per-repository activity, the
+	 * month-over-month trend, the latest AI Readiness scan (re-run at most hourly) and the
+	 * repository PR snapshot. All local; none of it is uploaded.
+	 */
+	private agenticInsightContext(stats: UsageAnalysisStats): Pick<InsightContext, 'repoActivity' | 'activityTrend' | 'agenticMatrix' | 'reviewControls' | 'agentPrActivity'> {
+		const readiness = this.readinessForInsights(stats.repoActivity);
+		const controlState = (repo: DarkFactoryReport['repos'][number], id: string) => repo.controls.find(c => c.id === id)?.state ?? 'unknown';
+		return {
+			repoActivity: stats.repoActivity ?? null,
+			activityTrend: stats.activityTrend ?? null,
+			agenticMatrix: readiness?.matrix ?? null,
+			reviewControls: readiness?.report.repos.map(repo => ({
+				repository: repo.nameWithOwner ?? repo.name,
+				agentPullRequests: controlState(repo, 'agent-authored-pull-requests'),
+				humanReview: controlState(repo, 'human-review-enforced'),
+			})) ?? null,
+			agentPrActivity: this._lastRepoPrStats?.repos
+				.filter(r => !r.error && r.aiAuthoredRecent !== undefined)
+				.map(r => ({
+					repository: `${r.owner}/${r.repo}`,
+					aiAuthoredRecent: r.aiAuthoredRecent ?? 0,
+					aiAuthoredEarlier: r.aiAuthoredEarlier ?? 0,
+					aiRevertedPrs: r.aiRevertedPrs ?? 0,
+				})) ?? null,
+		};
+	}
+
 	/** Builds the current evaluated insight list from cached state + latest stats. */
 	private buildCurrentInsights(stats: UsageAnalysisStats): EvaluatedInsight[] {
 		const cadenceDays = vscode.workspace.getConfiguration('aiEngineeringFluency').get<number>('insights.cadenceDays', 2);
@@ -5765,6 +5814,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			curationAnalysis: stats.curationAnalysis ?? null,
 			repeatedTasks: stats.repeatedTasks ?? null,
 			memoryFilesAnalysis: stats.memoryFilesAnalysis ?? null,
+			...this.agenticInsightContext(stats),
 		};
 		return _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
 	}
@@ -6408,8 +6458,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._skillWorkspacePathsAccum = new Map();
 		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
 		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
-		let correctionReport: CorrectionReport | undefined;
-		let repeatedTasks: RepeatedTaskReport | undefined;
+		let sessionReports: Pick<UsageAnalysisStats, 'correctionReport' | 'repeatedTasks' | 'repoActivity' | 'activityTrend'> = {};
 		let autoCompactionsLast7Days: UsageAnalysisStats['autoCompactionsLast7Days'];
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
@@ -6418,8 +6467,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
 			recentSessions = this.buildRecentSessionBuckets(usageResults, now);
 			autoCompactionsLast7Days = this.buildAutoCompactionStats(usageResults, now);
-			correctionReport = this.buildCorrectionReport(usageResults);
-			repeatedTasks = this.buildRepeatedTaskReport(usageResults);
+			sessionReports = {
+				correctionReport: this.buildCorrectionReport(usageResults),
+				repeatedTasks: this.buildRepeatedTaskReport(usageResults),
+				...this.buildAgentActivity(usageResults, now, last30DaysStartMs),
+			};
 			this._lastSkillCallsByEditor = {};
 			for (const [skillName, byEditor] of this._skillCallsByEditorAccum) {
 				this._lastSkillCallsByEditor[skillName] = Object.fromEntries(byEditor);
@@ -6447,8 +6499,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			missedPotential: this._lastMissedPotential || [],
 			todaySessions: todaySessionsList.sort((a, b) => b.interactions - a.interactions),
 			recentSessions,
-			correctionReport,
-			repeatedTasks,
+			...sessionReports,
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats, startedAtGeneration),
 			agenticDailyTrend,
 			autoCompactionsLast7Days,
@@ -7374,6 +7425,57 @@ class CopilotTokenTracker implements vscode.Disposable {
 			repos.push({ repository, sessions, counts, sessionsWithMoments: sessions.length });
 		}
 		return { sessionsPerRepo: CopilotTokenTracker.CORRECTION_SCAN_SESSIONS_PER_REPO, repos, counts: totals, sessionsWithMoments };
+	}
+
+	/**
+	 * Regroup the already-parsed sessions per repository (last 30 days) and per calendar month,
+	 * so rework can be read against adoption. Pure in-memory work over cached session data —
+	 * see src/repoAgentActivity.ts. Local only: never uploaded or shared.
+	 */
+	private buildAgentActivity(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		now: Date,
+		last30DaysStartMs: number,
+	): Pick<UsageAnalysisStats, 'repoActivity' | 'activityTrend'> {
+		const inputs: _ActivitySessionInput[] = [];
+		const knowledgeByKey = new Map<string, RepoKnowledgeFiles>();
+		for (const r of results) {
+			// Same rule as aggregateSessionFileIntoStats: an empty session is not a session.
+			if (!r || r.sessionData.interactions === 0) { continue; }
+			const data = r.sessionData;
+			this.collectRepoKnowledge(r.sessionFile, data, knowledgeByKey);
+			const last = data.lastInteraction ? Date.parse(data.lastInteraction) : NaN;
+			inputs.push({
+				repository: data.repository,
+				lastInteractionMs: Number.isFinite(last) ? last : r.mtime,
+				interactions: data.interactions,
+				tokens: data.actualTokens || data.tokens || 0,
+				subAgentCalls: data.subAgentCalls,
+				usageAnalysis: data.usageAnalysis,
+			});
+		}
+		const repoActivity = _buildRepoAgentActivity(inputs, { startMs: last30DaysStartMs, endMs: now.getTime() });
+		for (const row of repoActivity.repos) {
+			const knowledge = knowledgeByKey.get(row.key);
+			if (knowledge) { row.knowledge = knowledge; }
+		}
+		return { repoActivity, activityTrend: _buildActivityTrend(inputs, now) };
+	}
+
+	/**
+	 * Record the instruction files of the local checkout a session ran in, keyed by repository.
+	 * Reads only the customization scan `trackWorkspaceForSession` already cached, so it never
+	 * touches the filesystem itself; a repository whose checkout was not scanned stays unknown.
+	 */
+	private collectRepoKnowledge(sessionFile: string, data: SessionFileCache, knowledgeByKey: Map<string, RepoKnowledgeFiles>): void {
+		const key = _repoKeyFromRemote(data.repository);
+		if (!key) { return; }
+		try {
+			const folder = _resolveWorkspaceFolderWithFallback(sessionFile, this._workspaceIdToFolderCache, data.workspaceFolderPath);
+			const files = folder ? this._customizationFilesCache.get(path.normalize(folder)) : undefined;
+			if (!files) { return; }
+			knowledgeByKey.set(key, _mergeKnowledgeFiles(knowledgeByKey.get(key), _summarizeInstructionFiles(files)));
+		} catch { /* unresolvable workspace: leave this repository's knowledge unknown */ }
 	}
 
 	private correctionMomentCount(counts: CorrectionCounts): number {
@@ -10550,6 +10652,7 @@ private computeFallbackDailyRollup(
 			insights: this.buildCurrentInsights(analysisStats),
 			correctionReport: analysisStats.correctionReport ?? null,
 			repeatedTasks: analysisStats.repeatedTasks ?? null,
+			repoActivity: analysisStats.repoActivity ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
 			memoryFilesAnalysis: _toMemoryFilesAnalysisView(analysisStats.memoryFilesAnalysis ?? null),
 			serverMemoriesAnalysis: this.buildServerMemoriesView(),
@@ -11322,6 +11425,56 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		});
 	}
 
+	/**
+	 * Keep the latest readiness scan and its adoption × foundations matrix, so insights can use
+	 * them without re-scanning. The matrix combines repository controls with this user's own
+	 * session activity — local only, never uploaded or shared.
+	 */
+	private rememberReadinessScan(report: DarkFactoryReport): AgenticMatrix {
+		const matrix = _buildAgenticMatrix(report, this.currentUsageAnalysisStats?.repoActivity);
+		this._lastReadinessScan = { report, matrix, scannedAt: Date.now() };
+		return matrix;
+	}
+
+	/**
+	 * The latest readiness scan for insight evaluation. Re-scans (filesystem only, bounded) when
+	 * none is cached or it is over an hour old, and rebuilds the matrix against the current
+	 * activity. Never throws: a failed scan simply leaves the scan-based insights silent.
+	 */
+	private readinessForInsights(repoActivity: UsageAnalysisStats['repoActivity']): { report: DarkFactoryReport; matrix: AgenticMatrix } | null {
+		try {
+			const cached = this._lastReadinessScan;
+			const fresh = !!cached && Date.now() - cached.scannedAt < 60 * 60 * 1000;
+			const report = fresh ? cached!.report : this.runDarkFactoryScan();
+			const matrix = _buildAgenticMatrix(report, repoActivity);
+			this._lastReadinessScan = { report, matrix, scannedAt: fresh ? cached!.scannedAt : Date.now() };
+			return { report, matrix };
+		} catch (err) {
+			this.warn(`AI Readiness scan for insights failed: ${err}`);
+			return null;
+		}
+	}
+
+	/**
+	 * Adoption paired with rework, and any stretched repositories, for the strip next to the
+	 * Fluency Score. Deliberately built here and not in calculateMaturityScores: that result is
+	 * also what gets uploaded to a sharing server, and none of this may leave the machine.
+	 *
+	 * Opening the Fluency Score never scans repositories (#2194): stretched repositories come only
+	 * from a scan already cached by the AI Readiness tab or the insights pass, and are simply
+	 * omitted until one exists.
+	 */
+	private buildAgenticQualityView(): { comparison: ReturnType<typeof _compareSpeedAndQuality>; stretchedRepos: string[] } | null {
+		const stats = this.currentUsageAnalysisStats;
+		if (!stats) { return null; }
+		const cached = this._lastReadinessScan;
+		const matrix = cached ? _buildAgenticMatrix(cached.report, stats.repoActivity) : null;
+		return {
+			comparison: _compareSpeedAndQuality(stats.activityTrend),
+			stretchedRepos: _stretchedPlacements(matrix).map(p => p.repository),
+		};
+	}
+
 	/** Opens the AI Readiness tab in the existing Usage Analysis panel. */
 	public async showReadiness(): Promise<void> {
 		await this.showUsageAnalysisOnTab('readiness');
@@ -11336,8 +11489,9 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 		try {
 			const report = this.runDarkFactoryScan();
+			const matrix = this.rememberReadinessScan(report);
 			if (this.analysisPanel === panel) {
-				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report });
+				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report, matrix });
 			}
 		} catch (err) {
 			this.warn(`Dark Factory readiness scan failed: ${err}`);
@@ -11398,6 +11552,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			downloadChartImage: () => this.dispatch('downloadChartImage', () => this.downloadChartImage()),
 			exportImageFailed: async () => { vscode.window.showErrorMessage('Failed to export the Fluency Score image. The dashboard was not ready yet; try again once it has finished loading.'); },
 			shareToSocialFailed: async () => { vscode.window.showErrorMessage('Failed to generate share card image.'); },
+			showReadiness: () => this.dispatch('showReadiness:maturity', () => this.showReadiness()),
 		};
 		if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
 		await this.handleMaturityConditionalMessage(message);
@@ -11909,6 +12064,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 
     const dataWithBackend = {
       ...data,
+      // Rendered next to the score, never inside it or its exports (see qualityStrip.ts).
+      agenticQuality: this.buildAgenticQualityView(),
       backendConfigured: this.isBackendConfigured(),
       ...this.getWebviewLocaleFields(),
     };
@@ -15488,6 +15645,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
       insights: this.buildCurrentInsights(stats),
       correctionReport: stats.correctionReport ?? null,
+      repoActivity: stats.repoActivity ?? null,
       curationAnalysis: stats.curationAnalysis ?? null,
       memoryFilesAnalysis: _toMemoryFilesAnalysisView(stats.memoryFilesAnalysis ?? null),
       serverMemoriesAnalysis: this.buildServerMemoriesView(),
@@ -15872,6 +16030,7 @@ function registerUsageNavigationCommands(context: vscode.ExtensionContext, token
     ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
     ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
     ["aiEngineeringFluency.openCorrectionsTab", "Open Corrections tab command called", () => tokenTracker.showUsageAnalysisOnCorrectionsTab()],
+    ["aiEngineeringFluency.openReposTab", "Open Repository PRs tab command called", () => tokenTracker.showUsageAnalysisOnReposTab()],
     ["aiEngineeringFluency.askCopilotAboutCorrections", "Ask Copilot about corrections command called", () => tokenTracker.askCopilotAboutCorrections()],
     ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
     ["aiEngineeringFluency.showContextPressureSessions", "Show near-context-limit sessions command called", () => tokenTracker.showContextPressureSessions()],

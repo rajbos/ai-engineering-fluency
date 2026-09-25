@@ -118,13 +118,18 @@
           ],
           "steps": [
             { "click": ".tab-button[data-tab=\"repos\"]" },
-            { "post": {"command": "repoPrStatsLoaded", "data": {"authenticated": true, "since": "2026-02-13T00:00:00.000Z", "repos": [{"owner": "rajbos", "repo": "ai-engineering-fluency", "repoUrl": "https://github.com/rajbos/ai-engineering-fluency", "totalPrs": 99, "aiAuthoredPrs": 7, "aiReviewRequestedPrs": 3, "userAuthoredPrs": 40, "userMergedPrs": 38, "aiDetails": [{"number": 2094, "title": "Copilot memory-files hygiene", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2094", "aiType": "copilot", "role": "author"}, {"number": 2071, "title": "Improve Cost Attribution model-mix table", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2071", "aiType": "claude", "role": "reviewer-requested"}]}, {"owner": "xebia", "repo": "xms-techradar", "repoUrl": "https://github.com/xebia/xms-techradar", "totalPrs": 0, "aiAuthoredPrs": 0, "aiReviewRequestedPrs": 0, "userAuthoredPrs": 0, "userMergedPrs": 0, "aiDetails": [], "error": "Repo not found or not accessible with current token"}]}} }
+            { "post": {"command": "repoPrStatsLoaded", "data": {"authenticated": true, "since": "2026-02-13T00:00:00.000Z", "repos": [{"owner": "rajbos", "repo": "ai-engineering-fluency", "repoUrl": "https://github.com/rajbos/ai-engineering-fluency", "totalPrs": 99, "aiAuthoredPrs": 7, "aiReviewRequestedPrs": 3, "userAuthoredPrs": 40, "userMergedPrs": 38, "aiMergedPrs": 6, "aiRevertedPrs": 1, "otherMergedPrs": 62, "otherRevertedPrs": 1, "aiAuthoredRecent": 5, "aiAuthoredEarlier": 2, "aiDetails": [{"number": 2094, "title": "Copilot memory-files hygiene", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2094", "aiType": "copilot", "role": "author"}, {"number": 2071, "title": "Improve Cost Attribution model-mix table", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2071", "aiType": "claude", "role": "reviewer-requested"}]}, {"owner": "xebia", "repo": "xms-techradar", "repoUrl": "https://github.com/xebia/xms-techradar", "totalPrs": 0, "aiAuthoredPrs": 0, "aiReviewRequestedPrs": 0, "userAuthoredPrs": 0, "userMergedPrs": 0, "aiDetails": [], "error": "Repo not found or not accessible with current token"}]}} }
           ],
           "expect": "#repos-pr-content .customization-matrix"
         },
         {
           "id": "readiness",
           "title": "AI Readiness tab",
+          "$comment": [
+            "The host sends the adoption x foundations `matrix` alongside the report. It is",
+            "declared independently here so every quadrant, a leaning placement and the",
+            "adoption-only list are on screen; it is not derived from the one-repository report."
+          ],
           "steps": [
             { "click": ".tab-button[data-tab=\"readiness\"]" },
             { "post": { "command": "readinessLoaded", "requestId": 1, "report": {
@@ -150,6 +155,15 @@
                 ],
                 "findings": []
               }]
+            },
+            "matrix": {
+              "windowDays": 30,
+              "placements": [
+                { "repository": "rajbos/ai-engineering-fluency", "foundation": "strong", "foundationScore": 0.85, "observedControls": 13, "unknownControls": 6, "agenticSessions": 41, "sessions": 48, "highAdoption": true, "quadrant": "healthy-agent-native", "leaning": false, "missingControls": [{ "id": "infrastructure-as-code", "label": "Infrastructure as code", "stage": 1 }] },
+                { "repository": "xebia/xms-techradar", "foundation": "weak", "foundationScore": 0.31, "observedControls": 13, "unknownControls": 6, "agenticSessions": 9, "sessions": 12, "highAdoption": true, "quadrant": "stretched", "leaning": false, "missingControls": [{ "id": "ci-test-execution", "label": "Tests executed in CI", "stage": 1 }, { "id": "codeowners", "label": "CODEOWNERS", "stage": 1 }, { "id": "agent-instructions", "label": "Agent instructions (AGENTS.md / CLAUDE.md)", "stage": 2 }] },
+                { "repository": "rajbos/dotfiles", "foundation": "partial", "foundationScore": 0.58, "observedControls": 9, "unknownControls": 10, "agenticSessions": 1, "sessions": 4, "highAdoption": false, "quadrant": "healthy-underused", "leaning": true, "missingControls": [] }
+              ],
+              "adoptionOnly": [{ "repository": "rajbos/blog", "agenticSessions": 6, "sessions": 9 }]
             } } }
           ],
           "expect": "#readiness-content .df-repo-card"
