@@ -120,7 +120,8 @@ import {
   mergeKnowledgeFiles as _mergeKnowledgeFiles,
   summarizeInstructionFiles as _summarizeInstructionFiles,
 } from '../../src/knowledgeSignals';
-import { buildAgenticMatrix as _buildAgenticMatrix } from '../../src/agenticFoundations';
+import { buildAgenticMatrix as _buildAgenticMatrix, stretchedPlacements as _stretchedPlacements } from '../../src/agenticFoundations';
+import { compareSpeedAndQuality as _compareSpeedAndQuality } from '../../src/speedVsError';
 
 // --- Tool curation ---
 import {
@@ -11424,6 +11425,21 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 	}
 
+	/**
+	 * Adoption paired with rework, and any stretched repositories, for the strip next to the
+	 * Fluency Score. Deliberately built here and not in calculateMaturityScores: that result is
+	 * also what gets uploaded to a sharing server, and none of this may leave the machine.
+	 */
+	private buildAgenticQualityView(): { comparison: ReturnType<typeof _compareSpeedAndQuality>; stretchedRepos: string[] } | null {
+		const stats = this.currentUsageAnalysisStats;
+		if (!stats) { return null; }
+		const readiness = this.readinessForInsights(stats.repoActivity);
+		return {
+			comparison: _compareSpeedAndQuality(stats.activityTrend),
+			stretchedRepos: _stretchedPlacements(readiness?.matrix).map(p => p.repository),
+		};
+	}
+
 	/** Opens the AI Readiness tab in the existing Usage Analysis panel. */
 	public async showReadiness(): Promise<void> {
 		await this.showUsageAnalysisOnTab('readiness');
@@ -11501,6 +11517,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			downloadChartImage: () => this.dispatch('downloadChartImage', () => this.downloadChartImage()),
 			exportImageFailed: async () => { vscode.window.showErrorMessage('Failed to export the Fluency Score image. The dashboard was not ready yet; try again once it has finished loading.'); },
 			shareToSocialFailed: async () => { vscode.window.showErrorMessage('Failed to generate share card image.'); },
+			showReadiness: () => this.dispatch('showReadiness:maturity', () => this.showReadiness()),
 		};
 		if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
 		await this.handleMaturityConditionalMessage(message);
@@ -12012,6 +12029,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 
     const dataWithBackend = {
       ...data,
+      // Rendered next to the score, never inside it or its exports (see qualityStrip.ts).
+      agenticQuality: this.buildAgenticQualityView(),
       backendConfigured: this.isBackendConfigured(),
       ...this.getWebviewLocaleFields(),
     };

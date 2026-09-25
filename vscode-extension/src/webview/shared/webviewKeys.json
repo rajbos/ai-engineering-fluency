@@ -229,5 +229,20 @@
   "agentic.matrix.adoptionOnlyTitle",
   "agentic.matrix.agenticSessions",
   "agentic.matrix.howTitle",
-  "agentic.matrix.how"
+  "agentic.matrix.how",
+  "agentic.quality.title",
+  "agentic.quality.note",
+  "agentic.quality.agenticPerDay",
+  "agentic.quality.correctionsPerSession",
+  "agentic.quality.oneShot",
+  "agentic.quality.lastMonth",
+  "agentic.quality.verdict.faster-and-steadier",
+  "agentic.quality.verdict.faster-but-weaker",
+  "agentic.quality.verdict.rework-rising",
+  "agentic.quality.verdict.steady",
+  "agentic.quality.verdict.insufficient-data.too-early-in-month",
+  "agentic.quality.verdict.insufficient-data.too-few-sessions",
+  "agentic.quality.stretched",
+  "agentic.quality.stretchedStage4",
+  "agentic.quality.openReadiness"
 ]

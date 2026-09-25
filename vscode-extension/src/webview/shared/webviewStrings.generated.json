@@ -229,5 +229,20 @@
   "agentic.matrix.adoptionOnlyTitle": "Agent use in repositories not open in this workspace (open one to assess its foundations):",
   "agentic.matrix.agenticSessions": "{0} agent sessions",
   "agentic.matrix.howTitle": "How repositories are placed",
-  "agentic.matrix.how": "Foundations: the share of stage 1–3 controls found present among those the scan could observe; controls it could not check are left out, not counted as missing. Strong is 70% or more; weak is 40% or less, or no tests running in CI, or no agent instruction file at all. Anything between leans to the nearer side (dashed). High agent use: at least 5 agent sessions in the window, making up at least 30% of the repository's sessions. The unit is always the repository; this is not a score of any person."
+  "agentic.matrix.how": "Foundations: the share of stage 1–3 controls found present among those the scan could observe; controls it could not check are left out, not counted as missing. Strong is 70% or more; weak is 40% or less, or no tests running in CI, or no agent instruction file at all. Anything between leans to the nearer side (dashed). High agent use: at least 5 agent sessions in the window, making up at least 30% of the repository's sessions. The unit is always the repository; this is not a score of any person.",
+  "agentic.quality.title": "Quality alongside adoption",
+  "agentic.quality.note": "This month so far vs last month. Does not change your score, and is not part of any export.",
+  "agentic.quality.agenticPerDay": "Agent sessions per day",
+  "agentic.quality.correctionsPerSession": "Corrections per session",
+  "agentic.quality.oneShot": "One-shot edits",
+  "agentic.quality.lastMonth": "last month: {0}",
+  "agentic.quality.verdict.faster-and-steadier": "You are using agents more, and rework is flat or falling. That is the pattern to keep: faster without getting weaker.",
+  "agentic.quality.verdict.faster-but-weaker": "You are using agents more, but rework is rising with it. Speed that comes with more corrections usually means tasks are under-scoped or the agent lacks context.",
+  "agentic.quality.verdict.rework-rising": "Agent use is steady, but rework is rising. Check the Corrections tab for the repositories driving it.",
+  "agentic.quality.verdict.steady": "Agent use and rework are both steady compared with last month.",
+  "agentic.quality.verdict.insufficient-data.too-early-in-month": "Too early in the month to compare — check back after the first week.",
+  "agentic.quality.verdict.insufficient-data.too-few-sessions": "Not enough sessions with per-turn detail in one of the two months to compare yet.",
+  "agentic.quality.stretched": "Agent use has outrun the controls in: {0}.",
+  "agentic.quality.stretchedStage4": "Your stage reflects how much you use AI. In {0}, that use has outrun the repository's controls — worth fixing before expanding further.",
+  "agentic.quality.openReadiness": "Open AI Readiness"
 }
