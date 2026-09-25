@@ -40,6 +40,7 @@ import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
+import { sanitizeRepoPrStatsData, type RepoPrInfo, type RepoPrStatsResult } from './repoPrStatsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
 import { DarkFactoryTab } from './darkFactoryTab';
 import { insightCardElementId, isInsightCardAnchor } from '../../insightAnchors';
@@ -778,41 +779,6 @@ let repoPrStatsData: RepoPrStatsResult | null = null;
 let agentSessionsLoaded = false;
 let agentSessionsData: AgentSessionsResult | null = null;
 
-type RepoPrDetail = {
-  number: number;
-  title: string;
-  url: string;
-  aiType: 'copilot' | 'claude' | 'openai' | 'other-ai';
-  role: 'author' | 'reviewer-requested';
-};
-
-type RepoPrInfo = {
-  owner: string;
-  repo: string;
-  repoUrl: string;
-  totalPrs: number;
-  aiAuthoredPrs: number;
-  aiReviewRequestedPrs: number;
-  aiDetails: RepoPrDetail[];
-  userAuthoredPrs?: number;
-  userMergedPrs?: number;
-  aiMergedPrs?: number;
-  aiRevertedPrs?: number;
-  otherMergedPrs?: number;
-  otherRevertedPrs?: number;
-  error?: string;
-};
-
-type RepoPrStatsResult = {
-  repos: RepoPrInfo[];
-  authenticated: boolean;
-  since: string;
-  error?: string;
-  /** When the snapshot was fetched from GitHub; empty string when it has never been fetched. */
-  fetchedAt?: string;
-  /** How often the snapshot is refreshed, so the UI can say when the next refresh is due. */
-  refreshIntervalMs?: number;
-};
 
 const EFFORT_DISPLAY_NAMES: Record<string, string> = {
 	xhigh: 'Extra High',
@@ -2631,51 +2597,6 @@ function setupTabs(): void {
 	});
 }
 
-function sanitizeRepoPrStatsData(input: unknown): RepoPrStatsResult {
-	const src = (input && typeof input === 'object') ? (input as Record<string, unknown>) : {};
-	const repos = Array.isArray(src.repos) ? src.repos : [];
-	return {
-		authenticated: Boolean(src.authenticated),
-		since: typeof src.since === 'string' || typeof src.since === 'number' ? src.since : Date.now(),
-		error: typeof src.error === 'string' ? escapeHtml(src.error) : undefined,
-		fetchedAt: typeof src.fetchedAt === 'string' ? src.fetchedAt : '',
-		refreshIntervalMs: toSafeNumber(src.refreshIntervalMs),
-		repos: repos.map((repo) => {
-			const r = (repo && typeof repo === 'object') ? (repo as Record<string, unknown>) : {};
-			const aiDetails = Array.isArray(r.aiDetails) ? r.aiDetails : [];
-			return {
-				repoUrl: toSafeHttpUrl(r.repoUrl),
-				owner: escapeHtml(typeof r.owner === 'string' ? r.owner : ''),
-				repo: escapeHtml(typeof r.repo === 'string' ? r.repo : ''),
-				error: typeof r.error === 'string' ? escapeHtml(r.error) : '',
-				totalPrs: toSafeNumber(r.totalPrs),
-				aiAuthoredPrs: toSafeNumber(r.aiAuthoredPrs),
-				aiReviewRequestedPrs: toSafeNumber(r.aiReviewRequestedPrs),
-				userAuthoredPrs: toSafeNumber(r.userAuthoredPrs),
-				userMergedPrs: toSafeNumber(r.userMergedPrs),
-				...sanitizePrOutcomeCounts(r),
-				aiDetails: aiDetails.map((d) => {
-					const detail = (d && typeof d === 'object') ? (d as Record<string, unknown>) : {};
-					const validAiTypes = ['copilot', 'claude', 'openai', 'other-ai'] as const;
-					const validRoles = ['author', 'reviewer-requested'] as const;
-					const aiType = validAiTypes.includes(detail.aiType as typeof validAiTypes[number])
-						? detail.aiType as typeof validAiTypes[number]
-						: 'other-ai';
-					const role = validRoles.includes(detail.role as typeof validRoles[number])
-						? detail.role as typeof validRoles[number]
-						: 'author';
-					return {
-						number: toSafeNumber(detail.number),
-						title: escapeHtml(typeof detail.title === 'string' ? detail.title : ''),
-						url: toSafeHttpUrl(detail.url),
-						aiType,
-						role,
-					};
-				}),
-			};
-		}),
-	} as RepoPrStatsResult;
-}
 
 /** Display label per detected AI agent type, used in the PR detail list. */
 const AI_PR_LABEL: Record<string, string> = {
@@ -6069,6 +5990,17 @@ function wireCopyButtons(): void {
 	});
 }
 
+/**
+ * A partial refresh may omit a report it has not recomputed; keep the one already on screen
+ * instead of blanking its tab.
+ */
+function keepOmittedReports(sanitized: UsageAnalysisStats, raw: unknown): void {
+	const has = (key: string) => Object.prototype.hasOwnProperty.call(raw ?? {}, key);
+	if (!has('correctionReport')) { sanitized.correctionReport = currentCorrectionReport; }
+	if (!has('repoActivity')) { sanitized.repoActivity = currentRepoActivity; }
+	if (!has('memoryFilesAnalysis')) { sanitized.memoryFilesAnalysis = currentMemoryFilesAnalysis; }
+}
+
 function handleUpdateStats(message: any): void {
 	clearLoadingTimeout();
 	if (message.data?.locale) {
@@ -6083,15 +6015,7 @@ function handleUpdateStats(message: any): void {
 	const sanitized = sanitizeStats(message.data);
 	if (sanitized) {
 		_ulLoadingActive = false;
-		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'correctionReport')) {
-			sanitized.correctionReport = currentCorrectionReport;
-		}
-		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'repoActivity')) {
-			sanitized.repoActivity = currentRepoActivity;
-		}
-		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'memoryFilesAnalysis')) {
-			sanitized.memoryFilesAnalysis = currentMemoryFilesAnalysis;
-		}
+		keepOmittedReports(sanitized, message.data);
 		// Same rule for the server memories, and it matters more here: this card is filled by
 		// an out-of-band background fetch, so a partial refresh arriving between fetches would
 		// otherwise blank a section the host is not going to re-send until its TTL expires.

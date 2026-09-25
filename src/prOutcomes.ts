@@ -74,6 +74,13 @@ export function findRevertedPrNumbers(prs: readonly PrListItem[], nameWithOwner:
 	return reverted;
 }
 
+/** Which half of the window a pull request was opened in, or undefined when its date is unusable. */
+function windowHalf(pr: PrListItem, midpoint: number): 'recent' | 'earlier' | undefined {
+	const created = Date.parse(pr.created_at ?? '');
+	if (!Number.isFinite(created)) { return undefined; }
+	return created >= midpoint ? 'recent' : 'earlier';
+}
+
 /**
  * Count merged and reverted pull requests for agents and for everyone else,
  * and split agent-authored pull requests across the two halves of the window.
@@ -91,20 +98,17 @@ export function summarizePrOutcomes<T extends PrListItem>(
 	};
 	for (const pr of prs) {
 		const agent = isAgentAuthored(pr);
-		if (agent) {
-			const created = Date.parse(pr.created_at ?? '');
-			if (Number.isFinite(created)) {
-				if (created >= midpoint) { counts.aiAuthoredRecent++; } else { counts.aiAuthoredEarlier++; }
-			}
-		}
+		const half = agent ? windowHalf(pr, midpoint) : undefined;
+		if (half === 'recent') { counts.aiAuthoredRecent++; }
+		if (half === 'earlier') { counts.aiAuthoredEarlier++; }
 		if (!pr.merged_at || isRevertPr(pr)) { continue; }
-		const wasReverted = reverted.has(pr.number);
+		const wasReverted = reverted.has(pr.number) ? 1 : 0;
 		if (agent) {
 			counts.aiMergedPrs++;
-			if (wasReverted) { counts.aiRevertedPrs++; }
+			counts.aiRevertedPrs += wasReverted;
 		} else {
 			counts.otherMergedPrs++;
-			if (wasReverted) { counts.otherRevertedPrs++; }
+			counts.otherRevertedPrs += wasReverted;
 		}
 	}
 	return counts;

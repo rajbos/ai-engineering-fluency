@@ -82,19 +82,24 @@ export function isDelegationSession(input: ActivitySessionInput): boolean {
 /** Add one session to a running total. */
 export function addSessionToTotals(totals: AgentActivityTotals, input: ActivitySessionInput): void {
 	const analysis = input.usageAnalysis;
+	const agentic = isAgenticSession(analysis);
 	totals.sessions++;
 	totals.interactions += input.interactions || 0;
 	totals.tokens += input.tokens || 0;
-	const agentic = isAgenticSession(analysis);
 	if (agentic) { totals.agenticSessions++; }
 	if (isDelegationSession(input)) { totals.delegationSessions++; }
 	addModeCounts(totals.modes, countParticipationModes(analysis?.taskClassification?.turnCategories));
-
 	// Rework counters are only meaningful where the format records per-turn tool calls.
 	// A session without that detail has unknown rework, so it stays out of the denominator.
 	if (!analysis?.modelEfficiency) { return; }
+	addReworkCounters(totals, analysis);
+	if (agentic) { addScoping(totals, analysis); }
+}
+
+/** Per-turn rework counters for a session that carries turn detail. */
+function addReworkCounters(totals: AgentActivityTotals, analysis: SessionUsageAnalysis): void {
 	totals.sessionsWithTurnDetail++;
-	for (const counters of Object.values(analysis.modelEfficiency)) {
+	for (const counters of Object.values(analysis.modelEfficiency ?? {})) {
 		totals.editTurns += counters.editTurns || 0;
 		totals.oneShotEditTurns += counters.oneShotEditTurns || 0;
 		totals.retries += counters.retries || 0;
@@ -107,11 +112,13 @@ export function addSessionToTotals(totals: AgentActivityTotals, input: ActivityS
 	totals.correctionMoments += moments;
 	totals.userCorrections += counts?.userCorrections ?? 0;
 	totals.toolErrors += counts?.toolErrors ?? 0;
+}
 
-	if (!agentic) { return; }
+/** Whether an agentic session opened with a stated objective, and whether it needed correcting. */
+function addScoping(totals: AgentActivityTotals, analysis: SessionUsageAnalysis): void {
 	const scoping = classifySessionScoping(analysis.firstUserPrompt, analysis.taskClassification?.turnCategories);
 	if (!scoping) { return; }
-	const corrected = (counts?.userCorrections ?? 0) >= CORRECTED_SESSION_MIN_USER_CORRECTIONS;
+	const corrected = (analysis.correctionCounts?.userCorrections ?? 0) >= CORRECTED_SESSION_MIN_USER_CORRECTIONS;
 	if (scoping === 'under-scoped') {
 		totals.scoping.underScoped++;
 		if (corrected) { totals.scoping.underScopedCorrected++; }

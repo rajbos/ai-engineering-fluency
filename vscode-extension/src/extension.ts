@@ -6458,10 +6458,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._skillWorkspacePathsAccum = new Map();
 		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
 		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
-		let correctionReport: CorrectionReport | undefined;
-		let repeatedTasks: RepeatedTaskReport | undefined;
-		let repoActivity: UsageAnalysisStats['repoActivity'];
-		let activityTrend: UsageAnalysisStats['activityTrend'];
+		let sessionReports: Pick<UsageAnalysisStats, 'correctionReport' | 'repeatedTasks' | 'repoActivity' | 'activityTrend'> = {};
 		let autoCompactionsLast7Days: UsageAnalysisStats['autoCompactionsLast7Days'];
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
@@ -6470,9 +6467,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
 			recentSessions = this.buildRecentSessionBuckets(usageResults, now);
 			autoCompactionsLast7Days = this.buildAutoCompactionStats(usageResults, now);
-			correctionReport = this.buildCorrectionReport(usageResults);
-			repeatedTasks = this.buildRepeatedTaskReport(usageResults);
-			({ repoActivity, activityTrend } = this.buildAgentActivity(usageResults, now, last30DaysStartMs));
+			sessionReports = {
+				correctionReport: this.buildCorrectionReport(usageResults),
+				repeatedTasks: this.buildRepeatedTaskReport(usageResults),
+				...this.buildAgentActivity(usageResults, now, last30DaysStartMs),
+			};
 			this._lastSkillCallsByEditor = {};
 			for (const [skillName, byEditor] of this._skillCallsByEditorAccum) {
 				this._lastSkillCallsByEditor[skillName] = Object.fromEntries(byEditor);
@@ -6500,10 +6499,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			missedPotential: this._lastMissedPotential || [],
 			todaySessions: todaySessionsList.sort((a, b) => b.interactions - a.interactions),
 			recentSessions,
-			correctionReport,
-			repeatedTasks,
-			repoActivity,
-			activityTrend,
+			...sessionReports,
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats, startedAtGeneration),
 			agenticDailyTrend,
 			autoCompactionsLast7Days,
