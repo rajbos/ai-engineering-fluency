@@ -9,8 +9,8 @@
  *
  * It issues no network calls of its own. The only GitHub-derived signal it
  * uses is the pull-request statistics the Usage Analysis view already loads,
- * so opening the readiness section costs no extra API requests and cannot slow
- * the existing views down. Everything else in the API tier stays `unknown`,
+ * so opening the readiness view costs no extra API requests and cannot slow
+ * the Fluency Score view down. Everything else in the API tier stays `unknown`,
  * which is the honest state for evidence nothing looked at.
  */
 import * as path from 'path';

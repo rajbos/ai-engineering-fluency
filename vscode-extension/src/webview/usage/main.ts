@@ -41,6 +41,7 @@ import { applyBillingFields, type CopilotApiBalance } from './billingStatsSaniti
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
+import { DarkFactoryTab } from './darkFactoryTab';
 import { insightCardElementId, isInsightCardAnchor } from '../../insightAnchors';
 import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from './modelLeaderboard';
 import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
@@ -210,6 +211,7 @@ type UsageAnalysisStats = {
 	customizationMatrix?: WorkspaceCustomizationMatrix | null;
 	missedPotential?: MissedPotentialWorkspace[];
 	backendConfigured?: boolean;
+	readinessAvailable?: boolean;
 	currentWorkspacePaths?: string[];
 	suppressedUnknownTools?: string[];
 	todaySessions?: TodaySessionSummary[];
@@ -449,6 +451,7 @@ let pendingInsightScrollTimer: ReturnType<typeof setTimeout> | null = null;
 const activeFlashes = new WeakMap<HTMLElement, { shadow: string; transition: string; timer: ReturnType<typeof setTimeout> }>();
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentInsights: EvaluatedInsight[] = [];
+const darkFactoryTab = new DarkFactoryTab((message) => vscode.postMessage(message), traceToHost);
 let activeCorrectionFilter: CorrectionFilter | null = null;
 let currentCorrectionReport: CorrectionReport | null | undefined = undefined;
 // Persisted across stats refreshes so the curation section doesn't disappear
@@ -2036,6 +2039,7 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			lastMonth: sanitizePeriod(raw.lastMonth),
 			lastUpdated: typeof raw.lastUpdated === 'string' ? raw.lastUpdated : '',
 			backendConfigured: !!raw.backendConfigured,
+			readinessAvailable: raw.readinessAvailable === true,
 			locale: typeof raw.locale === 'string' ? raw.locale : undefined,
 			currentWorkspacePaths: Array.isArray(raw.currentWorkspacePaths)
 				? raw.currentWorkspacePaths.filter((p: unknown) => typeof p === 'string') as string[]
@@ -2564,6 +2568,7 @@ function reportTabOpened(tab: string): void {
  * `handleSwitchTab`) has no button to click, so nothing else would ever start its fetch.
  */
 function startLazyTabLoad(tab: string): void {
+	if (tab === 'readiness') { darkFactoryTab.startIfNeeded(); }
 	// Lazy-load repo PR stats on first visit to the tab
 	if (tab === 'repos' && !repoPrStatsLoaded) {
 		repoPrStatsLoaded = true;
@@ -4285,6 +4290,7 @@ function buildUsageRootHtml(
 				<button class="tab-button ${activeTab === 'tools' ? 'active' : ''}" data-tab="tools"><span class="codicon codicon-tools"></span> Tools &amp; Integrations</button>
 				<button class="tab-button ${activeTab === 'health' ? 'active' : ''}" data-tab="health"><span class="codicon codicon-server-environment"></span> Workspace Health</button>
 				<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos"><span class="codicon codicon-git-pull-request"></span> Repository PRs</button>
+				${darkFactoryTab.button(activeTab)}
 				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent"><span class="codicon codicon-cloud"></span> Cloud Agent</button>
 				<button class="tab-button ${activeTab === 'worktrees' ? 'active' : ''}" data-tab="worktrees"><span class="codicon codicon-git-branch"></span> Worktrees</button>
 				<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insights ?? []).filter(i => i.status === 'new').length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter(i => i.status === 'new').length}</span>` : ''}</button>
@@ -4296,6 +4302,7 @@ function buildUsageRootHtml(
 			${safeSectionHtml('Tools & Integrations', () => buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allHighCostModels, allLowCostModels, allMediumCostModels, allUnknownModels))}
 			${safeSectionHtml('Workspace Health', () => buildHealthTabPanelHtml(customizationHtml, stats))}
 			${safeSectionHtml('Repository PRs & Cloud Agent', () => buildReposAndAgentTabPanelsHtml())}
+			${safeSectionHtml('AI Readiness', () => darkFactoryTab.panel(activeTab))}
 			${safeSectionHtml('Worktrees', () => buildWorktreesTabPanelHtml())}
 			${safeSectionHtml('Insights', () => buildInsightsTabPanelHtml(stats.insights ?? []))}
 			${safeSectionHtml('Corrections', () => buildCorrectionsTabPanelHtml(stats.correctionReport))}
@@ -5833,6 +5840,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	}
 
 	const matrix = syncRenderLayoutState(stats);
+	darkFactoryTab.setAvailable(stats.readinessAvailable === true);
 	currentCorrectionReport = stats.correctionReport;
 	const customizationHtml = safeSectionHtml('Workspace Customization', () => buildCustomizationSectionHtml(matrix));
 	// buildUsageAllKeysSets and the context-ref totals are cheap, pure aggregations over
@@ -5878,6 +5886,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	wireCurationButtons();
 	renderRepositoryHygienePanels();
 	setupTabs();
+	darkFactoryTab.attach();
 	setupModelEfficiencySection();
 	renderModelEfficiencyPeriodSelector();
 	renderSessionsLookbackSelector();
@@ -6145,6 +6154,7 @@ function handleLoadingStateMessage(message: any): boolean {
 		case 'usageRefreshing':
 			clearLoadingTimeout();
 			_ulLastStepIdx = 0;
+			darkFactoryTab.invalidate();
 			renderUsageLoadingState('Refreshing Usage Analysis');
 			return true;
 		case 'updateStatsError':
@@ -6176,7 +6186,8 @@ function handleRepoAnalysisMessage(message: any): boolean {
 	return false;
 }
 
-function handleCcrActivityMessage(message: any): boolean {
+function handleTabMessage(message: any): boolean {
+	if (message.command === 'readinessLoaded' || message.command === 'readinessScanFailed') { return darkFactoryTab.handleMessage(message); }
 	if (message.command === 'ccrActivityResult' || message.command === 'ccrActivityError') {
 		renderCcrActivityResult(String(message.owner ?? ''), String(message.repo ?? ''), Number(message.prNumber), message);
 		return true;
@@ -6187,7 +6198,7 @@ function handleCcrActivityMessage(message: any): boolean {
 function handleExtensionMessage(message: any): void {
 	if (handleLoadingStateMessage(message)) { return; }
 	if (handleRepoAnalysisMessage(message)) { return; }
-	if (handleCcrActivityMessage(message)) { return; }
+	if (handleTabMessage(message)) { return; }
 	switch (message.command) {
 		case 'updateStats':
 			handleUpdateStats(message); break;

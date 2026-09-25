@@ -71,6 +71,11 @@
         "category": "AI Engineering Fluency"
       },
       {
+        "command": "aiEngineeringFluency.showReadiness",
+        "title": "%command.showReadiness.title%",
+        "category": "AI Engineering Fluency"
+      },
+      {
         "command": "aiEngineeringFluency.showFluencyLevelViewer",
         "title": "%command.showFluencyLevelViewer.title%",
         "category": "AI Engineering Fluency"

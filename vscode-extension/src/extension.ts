@@ -1000,11 +1000,11 @@ interface WorktreeCleanupDiagnostics {
 	untrackedFiles?: number;
 }
 
-type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'repos' | 'worktrees' | 'insights' | 'corrections';
+type UsageAnalysisTab = 'activity' | 'sessions' | 'tools' | 'health' | 'repos' | 'readiness' | 'worktrees' | 'insights' | 'corrections';
 
 /** Narrows an arbitrary tab name (e.g. from the what's-new catalog) to one `showUsageAnalysisOnTab` accepts. */
 function isUsageAnalysisTab(tab: string): tab is UsageAnalysisTab {
-	return (['activity', 'sessions', 'tools', 'health', 'repos', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
+	return (['activity', 'sessions', 'tools', 'health', 'repos', 'readiness', 'worktrees', 'insights', 'corrections'] as string[]).includes(tab);
 }
 
 /**
@@ -1755,6 +1755,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			showUsageAnalysisRepoPrs: () => this.showUsageAnalysisOnReposTab(),
 			showDiagnostics:        () => this.showDiagnosticReport(),
 			showMaturity:           () => this.showMaturity(),
+			showReadiness:          () => this.showReadiness(),
 			showDashboard:          () => this.showDashboard(),
 			showEnvironmental:      () => this.showEnvironmental(),
 			showEfficiency:         () => this.showEfficiency(),
@@ -10428,6 +10429,7 @@ private computeFallbackDailyRollup(
 				return toolName ? this._handleSuppressUnknownTool(toolName) : undefined;
 			},
 			loadRepoPrStats: () => this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats()),
+			loadReadiness: (message) => this.dispatch('loadReadiness:analysis', () => this.loadReadinessForUsage(message.requestId)),
 			checkCcrActivity: (message) => {
 				const owner = typeof message.owner === 'string' ? message.owner : '';
 				const repo = typeof message.repo === 'string' ? message.repo : '';
@@ -10541,6 +10543,7 @@ private computeFallbackDailyRollup(
 			missedPotential: analysisStats.missedPotential || [],
 			lastUpdated: analysisStats.lastUpdated.toISOString(),
 			backendConfigured: this.isBackendConfigured(),
+			readinessAvailable: true,
 			currentWorkspacePaths: workspacePaths,
 			todaySessions: analysisStats.todaySessions || [],
 			claudeDesktopCoverage: analysisStats.claudeDesktopCoverage ?? null,
@@ -11308,21 +11311,39 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 * Run the Dark Factory readiness scan over the repositories in this workspace.
 	 *
 	 * Filesystem-only plus the pull-request statistics the Usage Analysis view has
-	 * already fetched, so opening the Fluency Score view issues no extra GitHub
-	 * calls. A failure here must never take the whole view down — the section is
-	 * simply omitted and the reason logged.
+	 * already fetched, so opening AI Readiness issues no extra GitHub calls.
 	 */
-	private runDarkFactoryScan(): DarkFactoryReport | undefined {
+	private runDarkFactoryScan(): DarkFactoryReport {
+		const openFolders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+		return scanDarkFactoryReadiness({
+			workspacePaths: [...openFolders, ...this._buildWorkspacePaths()],
+			prStats: this._lastRepoPrStats,
+			enterpriseUri: getConfiguredGitHubEnterpriseUri(),
+		});
+	}
+
+	/** Opens the AI Readiness tab in the existing Usage Analysis panel. */
+	public async showReadiness(): Promise<void> {
+		await this.showUsageAnalysisOnTab('readiness');
+	}
+
+	private loadReadinessForUsage(requestId: unknown): void {
+		const panel = this.analysisPanel;
+		if (!panel) { return; }
+		if (typeof requestId !== 'number' || !Number.isSafeInteger(requestId) || requestId < 1) {
+			this.warn('AI Readiness: received an invalid scan request id');
+			return;
+		}
 		try {
-			const openFolders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
-			return scanDarkFactoryReadiness({
-				workspacePaths: [...openFolders, ...this._buildWorkspacePaths()],
-				prStats: this._lastRepoPrStats,
-				enterpriseUri: getConfiguredGitHubEnterpriseUri(),
-			});
+			const report = this.runDarkFactoryScan();
+			if (this.analysisPanel === panel) {
+				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report });
+			}
 		} catch (err) {
 			this.warn(`Dark Factory readiness scan failed: ${err}`);
-			return undefined;
+			if (this.analysisPanel === panel) {
+				void panel.webview.postMessage({ command: 'readinessScanFailed', requestId });
+			}
 		}
 	}
 
@@ -11362,7 +11383,6 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 				isDebugMode,
 				fluencyLevels,
 				installedHooks: this.hookManager.getInstalledHooks(),
-				darkFactory: this.runDarkFactoryScan(),
 			});
 		})();
 	}
@@ -11449,7 +11469,7 @@ private async refreshMaturityPanel(): Promise<void> {
 	const dismissedTips = await this.getDismissedFluencyTips();
 	const isDebugMode = this.context.extensionMode === vscode.ExtensionMode.Development;
 	const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
-	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks(), darkFactory: this.runDarkFactoryScan() });
+	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks() });
 	this.log('✅ Copilot Fluency Score dashboard refreshed');
 }
 
@@ -11869,8 +11889,6 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       dismissedTips?: string[];
       isDebugMode?: boolean;
       installedHooks?: string[];
-      /** Per-repository Dark Factory readiness scan; omitted when the scan could not run. */
-      darkFactory?: DarkFactoryReport;
       fluencyLevels?: Array<{
         category: string;
         icon: string;
@@ -15461,6 +15479,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       missedPotential: stats.missedPotential || [],
       lastUpdated: stats.lastUpdated.toISOString(),
       backendConfigured: this.isBackendConfigured(),
+      readinessAvailable: true,
       currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
       suppressedUnknownTools,
       todaySessions: stats.todaySessions || [],
@@ -15798,6 +15817,12 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
       await tokenTracker.showMaturity();
     },
   );
+  const showReadinessCommand = vscode.commands.registerCommand(
+    "aiEngineeringFluency.showReadiness",
+    async () => {
+      await tokenTracker.showReadiness();
+    },
+  );
   const showDashboardCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.showDashboard",
     async () => {
@@ -15833,7 +15858,7 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
       await tokenTracker.openMcpJson();
     },
   );
-  context.subscriptions.push(showMaturityCommand, showDashboardCommand, showEnvironmentalCommand, showEfficiencyCommand, showWhatsNewCommand, openMcpJsonCommand);
+  context.subscriptions.push(showMaturityCommand, showReadinessCommand, showDashboardCommand, showEnvironmentalCommand, showEfficiencyCommand, showWhatsNewCommand, openMcpJsonCommand);
 }
 
 function registerUsageNavigationCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {

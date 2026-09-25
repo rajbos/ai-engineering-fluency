@@ -122,6 +122,38 @@
           "expect": "#repos-pr-content .customization-matrix"
         },
         {
+          "id": "readiness",
+          "title": "AI Readiness tab",
+          "steps": [
+            { "click": ".tab-button[data-tab=\"readiness\"]" },
+            { "post": { "command": "readinessLoaded", "requestId": 1, "report": {
+              "scannedAt": "2026-03-14T09:30:00.000Z",
+              "apiSignalsIncluded": false,
+              "maxAssessableStage": 4,
+              "skippedRepoCount": 0,
+              "repos": [{
+                "name": "ai-engineering-fluency",
+                "repoRoot": "/fixtures/ai-engineering-fluency",
+                "nameWithOwner": "rajbos/ai-engineering-fluency",
+                "confirmedStage": 0,
+                "ceilingStage": 2,
+                "fullyEvidenced": false,
+                "unknownCount": 1,
+                "stages": [
+                  { "stage": 1, "name": "Standardized software delivery", "summary": "Delivery checks are incomplete", "verdict": "blocked", "present": [], "missing": ["ci-test-execution"], "unknown": ["required-reviews"] },
+                  { "stage": 2, "name": "AI-assisted engineers", "summary": "AI assistance has guardrails", "verdict": "indeterminate", "present": [], "missing": [], "unknown": [] }
+                ],
+                "controls": [
+                  { "id": "ci-test-execution", "stage": 1, "label": "Tests executed in CI", "tier": "filesystem", "evidence": "heuristic", "why": "Each change should be validated.", "remediation": "Run the test suite from a workflow step so every change is validated.", "state": "absent" },
+                  { "id": "required-reviews", "stage": 1, "label": "Required reviews", "tier": "github-api", "evidence": "direct", "why": "Review prevents unchecked changes.", "remediation": "Require a review before merging.", "state": "unknown", "detail": "Needs a GitHub token." }
+                ],
+                "findings": []
+              }]
+            } } }
+          ],
+          "expect": "#readiness-content .df-repo-card"
+        },
+        {
           "id": "agent",
           "title": "Cloud Agent tab",
           "$comment": [

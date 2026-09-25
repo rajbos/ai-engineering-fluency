@@ -1,4 +1,5 @@
 {
+  "readinessAvailable": true,
   "today": {
     "sessions": 24,
     "toolCalls": {
