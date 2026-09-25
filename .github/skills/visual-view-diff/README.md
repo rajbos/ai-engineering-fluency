@@ -68,4 +68,8 @@ Ask Copilot something like:
   "Never Launch a Real Editor/IDE Instance" rule in `.github/copilot-instructions.md`.
 - Fixtures use fixed timestamps and synthetic values so unchanged code always
   produces identical screenshots.
+- The Team Dashboard fixture supplies synthetic Azure rollups and a Team Server
+  configuration; both tabs render without contacting a live backend. When a
+  previously disabled view gains a fixture, the baseline bundle uses the same
+  fixture so its visual diff compares layouts rather than a loader with data.
 - See SKILL.md for adding a view, fixture conventions, and known limits.

@@ -222,6 +222,8 @@ Alternatively, use the Command Palette:
 
 The cloud backend is **disabled by default**. When enabled, the extension periodically uploads daily aggregates to Azure Storage Tables and queries them for cross-device reporting.
 
+The Team Dashboard presents synced personal totals, model usage, and a team comparison in the same theme-aware cards and tables as the other extension views. When both backends are configured, its Team Server tab opens the separately configured dashboard in a browser.
+
 ### Session Log Upload (Optional)
 
 The extension can also upload your local session log files to Azure Blob Storage. This enables:

@@ -115,6 +115,14 @@ function baselineRegistry(current, base, { baseFixtureDir, currentFixtureDir }) 
 			views.push({ ...clone(currentView), currentOnly: true, fixtureDir: currentFixtureDir });
 			continue;
 		}
+		// A newly enabled view had no meaningful baseline fixture. Render both
+		// bundles with the same new fixture instead of comparing data to a loader.
+		if (baseView.enabled === false && currentView.enabled !== false) {
+			baseView.fixture = currentView.fixture;
+			baseView.fixtureDir = currentFixtureDir;
+			baseView.globals = currentView.globals;
+			baseView.enabled = true;
+		}
 		const baseStates = new Set(baseView.states.map((s) => s.id));
 		for (const state of currentView.states || []) {
 			if (!baseStates.has(state.id)) {

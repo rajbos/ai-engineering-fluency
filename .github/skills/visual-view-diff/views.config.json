@@ -5,6 +5,7 @@
     "Each entry mirrors one panel's HTML shell in vscode-extension/src/extension.ts:",
     "  bundle  — the esbuild entry point name in esbuild.js (dist/webview/<bundle>.js)",
     "  global  — the window global that shell assigns the view's data to",
+    "  globals — optional additional globals the panel shell sets before its bundle",
     "  fixture — a JSON file in ./fixtures holding that data",
     "",
     "To add a view: add its esbuild entry point name here, capture the data its",
@@ -346,8 +347,46 @@
       "bundle": "dashboard",
       "global": "__INITIAL_DASHBOARD__",
       "fixture": "dashboard.json",
-      "enabled": false,
-      "disabledReason": "Needs a configured team backend to produce meaningful data; the local view regression runner skips it for the same reason."
+      "globals": {
+        "__DASHBOARD_CONFIG__": {
+          "azureConfigured": true,
+          "azureStorageUrl": "https://azure.example.invalid",
+          "teamServerConfigured": true,
+          "teamServerUrl": "https://team.example.invalid"
+        }
+      },
+      "states": [
+        {
+          "id": "team-server",
+          "title": "Team Server tab",
+          "steps": [{ "click": ".tab-btn[data-tab=\"teamServer\"]" }],
+          "expect": ".team-server-card"
+        },
+        {
+          "id": "fluency-detail",
+          "title": "Expanded leaderboard row",
+          "steps": [{ "click": ".leaderboard-row.expandable" }],
+          "expect": ".fluency-detail-panel"
+        },
+        {
+          "id": "loading",
+          "title": "Loading data",
+          "steps": [{ "post": { "command": "dashboardLoading" } }],
+          "expect": ".loading-indicator"
+        },
+        {
+          "id": "error",
+          "title": "Azure error",
+          "steps": [{ "post": { "command": "dashboardError", "message": "Unable to load sample data." } }],
+          "expect": ".dashboard-failure"
+        },
+        {
+          "id": "server-only",
+          "title": "Team Server only",
+          "steps": [{ "post": { "command": "dashboardTeamServerFallback", "url": "https://team.example.invalid" } }],
+          "expect": ".team-server-card"
+        }
+      ]
     }
   ]
 }
