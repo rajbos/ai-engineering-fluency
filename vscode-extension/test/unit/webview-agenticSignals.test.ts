@@ -62,7 +62,8 @@ test('buildCorrectionsRepoSummaryHtml: renders rates, unknown knowledge and the 
 
 test('buildCorrectionsRepoSummaryHtml: escapes repository names and is empty without data', () => {
 	const html = buildCorrectionsRepoSummaryHtml(activityReport([repoRow('o/<script>', { sessions: 1, sessionsWithTurnDetail: 1 })]));
-	assert.doesNotMatch(html, /<script>/);
+	assert.ok(!html.includes('<script>'), 'raw tag must not reach the HTML');
+	assert.ok(html.includes('o/&lt;script&gt;'), 'the name is escaped instead');
 	assert.equal(buildCorrectionsRepoSummaryHtml(null), '');
 	assert.equal(buildCorrectionsRepoSummaryHtml(activityReport([])), '');
 });

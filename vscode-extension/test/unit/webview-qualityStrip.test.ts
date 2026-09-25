@@ -39,5 +39,6 @@ test('sanitizeAgenticQuality: rejects unknown classifications and non-string rep
 	assert.equal(sanitizeAgenticQuality(undefined), null);
 	assert.deepEqual(sanitizeAgenticQuality({ comparison, stretchedRepos: ['a/b', 3, '<x>'] })?.stretchedRepos, ['a/b', '<x>']);
 	assert.equal(sanitizeAgenticQuality({ comparison: { ...comparison, agenticPerDay: { current: -1, previous: 'x' } } })?.comparison.agenticPerDay.current, null);
-	assert.doesNotMatch(buildQualityStripHtml(sanitizeAgenticQuality({ comparison, stretchedRepos: ['<x>'] }), 2), /<x>/);
+	const escaped = buildQualityStripHtml(sanitizeAgenticQuality({ comparison, stretchedRepos: ['<x>'] }), 2);
+	assert.ok(!escaped.includes('<x>') && escaped.includes('&lt;x&gt;'), 'repository names are escaped');
 });

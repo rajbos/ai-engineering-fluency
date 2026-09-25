@@ -44,8 +44,9 @@ test('buildAgenticMatrixHtml: empty when there is nothing to place', () => {
 
 test('buildAgenticMatrixHtml: escapes repository and control names', () => {
 	const html = buildAgenticMatrixHtml({ windowDays: 30, adoptionOnly: [], placements: [placement({ repository: '<img src=x>', missingControls: [{ id: 'x', label: '<b>', stage: 1 }] })] });
-	assert.doesNotMatch(html, /<img src=x>/);
-	assert.doesNotMatch(html, /<b>/);
+	assert.ok(!html.includes('<img src=x>'), 'raw repository name must not reach the HTML');
+	assert.ok(!html.includes('<b>'), 'raw control label must not reach the HTML');
+	assert.ok(html.includes('&lt;img src=x&gt;') && html.includes('&lt;b&gt;'), 'both are escaped instead');
 });
 
 test('sanitizeAgenticMatrix: keeps valid placements and drops malformed ones', () => {
