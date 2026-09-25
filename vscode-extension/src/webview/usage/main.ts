@@ -18,7 +18,7 @@ import {
 // Imported from the shared contract rather than re-declared locally, so a shape
 // change in src/types.ts surfaces here as a type error instead of silently
 // drifting out of sync with what the extension host actually sends.
-import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysisView, ServerMemoriesAnalysisView } from '../../../../src/types';
+import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysisView, ServerMemoriesAnalysisView, RepoAgentActivityReport } from '../../../../src/types';
 import { CONTEXT_NEAR_LIMIT_RATIO } from '../../../../src/types';
 import { getSessionContextFillPercent, isSessionNearContextLimit } from '../../../../src/utils/contextFill';
 
@@ -46,6 +46,7 @@ import { insightCardElementId, isInsightCardAnchor } from '../../insightAnchors'
 import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from './modelLeaderboard';
 import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
 import { sanitizeServerMemoriesAnalysis as _sanitizeServerMemoriesAnalysis, buildServerMemoriesSectionHtml } from './serverMemories';
+import { buildCorrectionsRepoSummaryHtml, buildParticipationModesCardHtml, sanitizeRepoActivity } from './agenticSignals';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -224,6 +225,8 @@ type UsageAnalysisStats = {
 	correctionReport?: CorrectionReport | null;
 	/** Repeated-task candidates (skill suggestions). Null when no repeated task was found. */
 	repeatedTasks?: RepeatedTaskReport | null;
+	/** Per-repository agent activity (last 30 days) for the rework summary and participation modes. */
+	repoActivity?: RepoAgentActivityReport | null;
 	curationAnalysis?: ToolCurationAnalysis | null;
 	/** Compact projection of the memory-files hygiene analysis (counts/rollup scalars only — no per-file paths). Null when none found. */
 	memoryFilesAnalysis?: MemoryFilesAnalysisView | null;
@@ -454,6 +457,7 @@ let currentInsights: EvaluatedInsight[] = [];
 const darkFactoryTab = new DarkFactoryTab((message) => vscode.postMessage(message), traceToHost);
 let activeCorrectionFilter: CorrectionFilter | null = null;
 let currentCorrectionReport: CorrectionReport | null | undefined = undefined;
+let currentRepoActivity: RepoAgentActivityReport | null = null;
 // Persisted across stats refreshes so the curation section doesn't disappear
 // when a periodic updateStats message omits curationAnalysis.
 let currentCurationAnalysis: ToolCurationAnalysis | null = null;
@@ -1978,6 +1982,9 @@ function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void 
 		sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
 	}
 	sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
+	if (Object.prototype.hasOwnProperty.call(raw ?? {}, 'repoActivity')) {
+		sanitized.repoActivity = sanitizeRepoActivity(raw.repoActivity);
+	}
 	sanitized.autoCompactionsLast7Days = sanitizeAutomaticCompactions(raw?.autoCompactionsLast7Days);
 }
 
@@ -3791,6 +3798,7 @@ function buildInsightsTabPanelHtml(insights: EvaluatedInsight[]): string {
 					${allSection}
 				</div>
 			</div>
+			${safeSectionHtml('Participation modes', () => buildParticipationModesCardHtml(currentRepoActivity))}
 		</div>`;
 }
 
@@ -4011,6 +4019,7 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 		</div>`;
 	}
 
+	const repoSummary = safeSectionHtml('Rework per repository', () => buildCorrectionsRepoSummaryHtml(currentRepoActivity));
 	if (!report || report.repos.length === 0) {
 		return `
 		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
@@ -4020,6 +4029,7 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 				<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
 					✨ No correction moments detected in your recent sessions — nice and smooth!
 				</div>
+				${repoSummary}
 			</div>
 		</div>`;
 	}
@@ -4045,6 +4055,7 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 					sessions without corrections are not listed. Summary counts include all detected moments; long sessions show a capped detail sample.
 					Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
 				</div>
+				${repoSummary}
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:12px;">Filter the list below — select a pill to drill down, select it again to clear.</div>
 				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">${summaryChips}</div>
 				${statusBar}
@@ -5842,6 +5853,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	const matrix = syncRenderLayoutState(stats);
 	darkFactoryTab.setAvailable(stats.readinessAvailable === true);
 	currentCorrectionReport = stats.correctionReport;
+	currentRepoActivity = stats.repoActivity ?? null;
 	const customizationHtml = safeSectionHtml('Workspace Customization', () => buildCustomizationSectionHtml(matrix));
 	// buildUsageAllKeysSets and the context-ref totals are cheap, pure aggregations over
 	// already-validated stats — not worth isolating individually. buildUsageRootHtml (and each
@@ -6066,6 +6078,9 @@ function handleUpdateStats(message: any): void {
 		_ulLoadingActive = false;
 		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'correctionReport')) {
 			sanitized.correctionReport = currentCorrectionReport;
+		}
+		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'repoActivity')) {
+			sanitized.repoActivity = currentRepoActivity;
 		}
 		if (!Object.prototype.hasOwnProperty.call(message.data ?? {}, 'memoryFilesAnalysis')) {
 			sanitized.memoryFilesAnalysis = currentMemoryFilesAnalysis;

@@ -1500,3 +1500,165 @@ background: var(--bg-tertiary);
 	color: var(--text-muted);
 	margin-top: 8px;
 }
+
+/* Agentic engineering system signals (agenticSignals.ts, agenticMatrixSection.ts) */
+.agentic-muted {
+	font-size: 11px;
+	color: var(--text-muted);
+}
+
+.agentic-note {
+	margin-top: 8px;
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.agentic-note-strong {
+	padding: 8px 10px;
+	border-left: 3px solid var(--accent-color);
+	background: var(--bg-tertiary);
+	border-radius: 4px;
+	color: var(--text-primary);
+}
+
+.agentic-table td,
+.agentic-table th {
+	padding: 4px 8px;
+}
+
+.agentic-modes {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 10px;
+	max-width: 560px;
+}
+
+.agentic-mode-row {
+	display: grid;
+	grid-template-columns: 90px 1fr 110px;
+	align-items: center;
+	gap: 8px;
+	font-size: 12px;
+}
+
+.agentic-mode-label {
+	color: var(--text-primary);
+	font-weight: 600;
+}
+
+.agentic-mode-bar {
+	height: 10px;
+	border-radius: 5px;
+	background: var(--bg-tertiary);
+	overflow: hidden;
+}
+
+.agentic-mode-fill {
+	display: block;
+	height: 100%;
+	border-radius: 5px;
+}
+
+.agentic-mode-director { background: var(--link-color); }
+.agentic-mode-performer { background: var(--success-fg); }
+.agentic-mode-assessor { background: var(--warning-fg); }
+
+.agentic-mode-value {
+	color: var(--text-secondary);
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+.agentic-definition {
+	margin-top: 8px;
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.agentic-definition summary {
+	cursor: pointer;
+	color: var(--link-color);
+}
+
+.agentic-matrix {
+	display: grid;
+	grid-template-columns: auto 1fr 1fr;
+	gap: 8px;
+	margin-top: 10px;
+	align-items: stretch;
+}
+
+.agentic-matrix-axis {
+	font-size: 11px;
+	color: var(--text-muted);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	align-self: center;
+	text-align: center;
+}
+
+.agentic-quadrant {
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	padding: 10px;
+	background: var(--bg-tertiary);
+	min-height: 84px;
+}
+
+.agentic-quadrant-title {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.agentic-quadrant-action {
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-top: 2px;
+}
+
+.agentic-quadrant-stretched {
+	border-color: var(--error-fg);
+}
+
+.agentic-quadrant-healthy {
+	border-color: var(--success-fg);
+}
+
+.agentic-repo-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-top: 8px;
+}
+
+.agentic-repo-chip {
+	font-size: 11px;
+	padding: 2px 8px;
+	border-radius: 10px;
+	border: 1px solid var(--border-subtle);
+	background: var(--bg-secondary);
+	color: var(--text-primary);
+}
+
+.agentic-repo-chip-leaning {
+	border-style: dashed;
+}
+
+.agentic-stretched-list {
+	margin: 8px 0 0;
+	padding-left: 18px;
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+	.agentic-matrix {
+		grid-template-columns: 1fr;
+	}
+	.agentic-matrix-axis {
+		display: none;
+	}
+}

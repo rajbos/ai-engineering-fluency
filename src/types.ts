@@ -785,12 +785,25 @@ export interface AgentActivityTotals {
   modes: ParticipationModeCounts;
 }
 
+/** Instruction files found in a repository's local checkout (see src/knowledgeSignals.ts). */
+export interface RepoKnowledgeFiles {
+  /** Agent instruction files: copilot-instructions, scoped instructions, AGENTS.md, CLAUDE.md, other agents' rule files. */
+  instructionFiles: number;
+  /** …of which have not been touched within the staleness threshold. */
+  staleInstructionFiles: number;
+}
+
 /** Activity for one repository. */
 export interface RepoAgentActivity extends AgentActivityTotals {
   /** Lowercase `owner/repo` join key (see src/repoKey.ts). */
   key: string;
   /** Display name, e.g. `rajbos/ai-engineering-fluency`. */
   repository: string;
+  /**
+   * Instruction files in the checkout. Absent when no local checkout of the
+   * repository was resolved — unknown, not "none".
+   */
+  knowledge?: RepoKnowledgeFiles;
 }
 
 /** Per-repository activity over a trailing window. */

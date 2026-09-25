@@ -78,6 +78,7 @@ import type {
   CorrectionRepoGroup,
   CorrectionSessionEntry,
   RepeatedTaskReport,
+  RepoKnowledgeFiles,
   MemoryFilesAnalysis,
   ServerMemoriesAnalysis,
   ServerMemoriesAnalysisView,
@@ -113,6 +114,11 @@ import {
   buildRepoAgentActivity as _buildRepoAgentActivity,
   type ActivitySessionInput as _ActivitySessionInput,
 } from '../../src/repoAgentActivity';
+import { repoKeyFromRemote as _repoKeyFromRemote } from '../../src/repoKey';
+import {
+  mergeKnowledgeFiles as _mergeKnowledgeFiles,
+  summarizeInstructionFiles as _summarizeInstructionFiles,
+} from '../../src/knowledgeSignals';
 
 // --- Tool curation ---
 import {
@@ -7397,9 +7403,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		last30DaysStartMs: number,
 	): Pick<UsageAnalysisStats, 'repoActivity' | 'activityTrend'> {
 		const inputs: _ActivitySessionInput[] = [];
+		const knowledgeByKey = new Map<string, RepoKnowledgeFiles>();
 		for (const r of results) {
-			if (!r) { continue; }
+			// Same rule as aggregateSessionFileIntoStats: an empty session is not a session.
+			if (!r || r.sessionData.interactions === 0) { continue; }
 			const data = r.sessionData;
+			this.collectRepoKnowledge(r.sessionFile, data, knowledgeByKey);
 			const last = data.lastInteraction ? Date.parse(data.lastInteraction) : NaN;
 			inputs.push({
 				repository: data.repository,
@@ -7410,10 +7419,28 @@ class CopilotTokenTracker implements vscode.Disposable {
 				usageAnalysis: data.usageAnalysis,
 			});
 		}
-		return {
-			repoActivity: _buildRepoAgentActivity(inputs, { startMs: last30DaysStartMs, endMs: now.getTime() }),
-			activityTrend: _buildActivityTrend(inputs, now),
-		};
+		const repoActivity = _buildRepoAgentActivity(inputs, { startMs: last30DaysStartMs, endMs: now.getTime() });
+		for (const row of repoActivity.repos) {
+			const knowledge = knowledgeByKey.get(row.key);
+			if (knowledge) { row.knowledge = knowledge; }
+		}
+		return { repoActivity, activityTrend: _buildActivityTrend(inputs, now) };
+	}
+
+	/**
+	 * Record the instruction files of the local checkout a session ran in, keyed by repository.
+	 * Reads only the customization scan `trackWorkspaceForSession` already cached, so it never
+	 * touches the filesystem itself; a repository whose checkout was not scanned stays unknown.
+	 */
+	private collectRepoKnowledge(sessionFile: string, data: SessionFileCache, knowledgeByKey: Map<string, RepoKnowledgeFiles>): void {
+		const key = _repoKeyFromRemote(data.repository);
+		if (!key) { return; }
+		try {
+			const folder = _resolveWorkspaceFolderWithFallback(sessionFile, this._workspaceIdToFolderCache, data.workspaceFolderPath);
+			const files = folder ? this._customizationFilesCache.get(path.normalize(folder)) : undefined;
+			if (!files) { return; }
+			knowledgeByKey.set(key, _mergeKnowledgeFiles(knowledgeByKey.get(key), _summarizeInstructionFiles(files)));
+		} catch { /* unresolvable workspace: leave this repository's knowledge unknown */ }
 	}
 
 	private correctionMomentCount(counts: CorrectionCounts): number {
@@ -10590,6 +10617,7 @@ private computeFallbackDailyRollup(
 			insights: this.buildCurrentInsights(analysisStats),
 			correctionReport: analysisStats.correctionReport ?? null,
 			repeatedTasks: analysisStats.repeatedTasks ?? null,
+			repoActivity: analysisStats.repoActivity ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
 			memoryFilesAnalysis: _toMemoryFilesAnalysisView(analysisStats.memoryFilesAnalysis ?? null),
 			serverMemoriesAnalysis: this.buildServerMemoriesView(),
@@ -15528,6 +15556,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
       insights: this.buildCurrentInsights(stats),
       correctionReport: stats.correctionReport ?? null,
+      repoActivity: stats.repoActivity ?? null,
       curationAnalysis: stats.curationAnalysis ?? null,
       memoryFilesAnalysis: _toMemoryFilesAnalysisView(stats.memoryFilesAnalysis ?? null),
       serverMemoriesAnalysis: this.buildServerMemoriesView(),
