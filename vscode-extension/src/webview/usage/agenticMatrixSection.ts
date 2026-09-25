@@ -71,7 +71,9 @@ function quadrantHtml(quadrant: AgenticQuadrant, placements: readonly AgenticMat
 	const chips = inQuadrant.length > 0
 		? `<div class="agentic-repo-chips">${inQuadrant.map(chipHtml).join('')}</div>`
 		: `<div class="agentic-muted" style="margin-top:8px;">${escapeHtml(localize('agentic.matrix.emptyQuadrant'))}</div>`;
-	return `<div class="agentic-quadrant${modifier}" data-quadrant="${quadrant}">
+	// Each quadrant is its own labelled group; its title already names both axes
+	// ("Healthy but underused"), so the visual axis labels are hidden from assistive technology.
+	return `<div class="agentic-quadrant${modifier}" data-quadrant="${quadrant}" role="group" aria-label="${escapeHtml(localize(`agentic.matrix.quadrant.${quadrant}`))}">
 		<div class="agentic-quadrant-title">${escapeHtml(localize(`agentic.matrix.quadrant.${quadrant}`))}</div>
 		<div class="agentic-quadrant-action">${escapeHtml(localize(`agentic.matrix.action.${quadrant}`))}</div>
 		${chips}
@@ -114,14 +116,14 @@ export function buildAgenticMatrixHtml(matrix: AgenticMatrix | null | undefined)
 	return `<div class="section" id="agentic-matrix">
 		<div class="section-title"><span class="codicon codicon-graph-scatter"></span><span>${escapeHtml(localize('agentic.matrix.title'))}</span></div>
 		<div class="section-subtitle">${escapeHtml(localizeFormat('agentic.matrix.subtitle', matrix.windowDays))}</div>
-		<div class="agentic-matrix" role="table" aria-label="${escapeHtml(localize('agentic.matrix.title'))}">
-			<span></span>
-			<span class="agentic-matrix-axis">${escapeHtml(localize('agentic.matrix.axisLowAdoption'))}</span>
-			<span class="agentic-matrix-axis">${escapeHtml(localize('agentic.matrix.axisHighAdoption'))}</span>
-			<span class="agentic-matrix-axis">${escapeHtml(localize('agentic.matrix.axisStrong'))}</span>
+		<div class="agentic-matrix" role="group" aria-label="${escapeHtml(localize('agentic.matrix.title'))}">
+			<span aria-hidden="true"></span>
+			<span class="agentic-matrix-axis" aria-hidden="true">${escapeHtml(localize('agentic.matrix.axisLowAdoption'))}</span>
+			<span class="agentic-matrix-axis" aria-hidden="true">${escapeHtml(localize('agentic.matrix.axisHighAdoption'))}</span>
+			<span class="agentic-matrix-axis" aria-hidden="true">${escapeHtml(localize('agentic.matrix.axisStrong'))}</span>
 			${quadrantHtml('healthy-underused', placed)}
 			${quadrantHtml('healthy-agent-native', placed)}
-			<span class="agentic-matrix-axis">${escapeHtml(localize('agentic.matrix.axisWeak'))}</span>
+			<span class="agentic-matrix-axis" aria-hidden="true">${escapeHtml(localize('agentic.matrix.axisWeak'))}</span>
 			${quadrantHtml('underdeveloped', placed)}
 			${quadrantHtml('stretched', placed)}
 		</div>

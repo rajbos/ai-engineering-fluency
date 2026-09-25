@@ -60,3 +60,11 @@ test('sanitizeAgenticMatrix: keeps valid placements and drops malformed ones', (
 	assert.equal(sanitizeAgenticMatrix(null), null);
 	assert.equal(sanitizeAgenticMatrix({ placements: [] }), null);
 });
+
+test('buildAgenticMatrixHtml: exposes labelled groups, not a table without rows or cells', () => {
+	const html = buildAgenticMatrixHtml(matrix);
+	assert.ok(!html.includes('role="table"'));
+	assert.match(html, /class="agentic-matrix" role="group" aria-label="Adoption × foundations"/);
+	assert.match(html, /data-quadrant="stretched" role="group" aria-label="Stretched"/);
+	assert.match(html, /class="agentic-matrix-axis" aria-hidden="true"/);
+});

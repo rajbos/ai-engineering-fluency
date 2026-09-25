@@ -11459,14 +11459,19 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 * Adoption paired with rework, and any stretched repositories, for the strip next to the
 	 * Fluency Score. Deliberately built here and not in calculateMaturityScores: that result is
 	 * also what gets uploaded to a sharing server, and none of this may leave the machine.
+	 *
+	 * Opening the Fluency Score never scans repositories (#2194): stretched repositories come only
+	 * from a scan already cached by the AI Readiness tab or the insights pass, and are simply
+	 * omitted until one exists.
 	 */
 	private buildAgenticQualityView(): { comparison: ReturnType<typeof _compareSpeedAndQuality>; stretchedRepos: string[] } | null {
 		const stats = this.currentUsageAnalysisStats;
 		if (!stats) { return null; }
-		const readiness = this.readinessForInsights(stats.repoActivity);
+		const cached = this._lastReadinessScan;
+		const matrix = cached ? _buildAgenticMatrix(cached.report, stats.repoActivity) : null;
 		return {
 			comparison: _compareSpeedAndQuality(stats.activityTrend),
-			stretchedRepos: _stretchedPlacements(readiness?.matrix).map(p => p.repository),
+			stretchedRepos: _stretchedPlacements(matrix).map(p => p.repository),
 		};
 	}
 

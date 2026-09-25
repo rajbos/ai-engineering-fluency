@@ -21,6 +21,7 @@ import type {
 	SessionUsageAnalysis,
 } from './types';
 import { repoDisplayFromRemote } from './repoKey';
+import { cliTotal } from './maturityScoring';
 import { addModeCounts, countParticipationModes, createEmptyModeCounts } from './participationModes';
 import { classifySessionScoping, CORRECTED_SESSION_MIN_USER_CORRECTIONS } from './promptScoping';
 
@@ -67,10 +68,13 @@ export function totalCorrectionMoments(counts: CorrectionCounts | undefined): nu
 		+ counts.toolErrors + counts.agentSelfCorrections;
 }
 
-/** True when the session ran an agent: agent mode, a custom agent, or a CLI agent. */
+/**
+ * True when the session ran an agent: agent mode, a custom agent, or a CLI agent on any surface
+ * (terminal, the Copilot desktop app, Claude Desktop, Claude in an IDE — see `cliTotal`).
+ */
 export function isAgenticSession(analysis: SessionUsageAnalysis | undefined): boolean {
 	const modes = analysis?.modeUsage;
-	return !!modes && (modes.agent + modes.customAgent + modes.cli) > 0;
+	return !!modes && (modes.agent + modes.customAgent + cliTotal(modes)) > 0;
 }
 
 /** True when the session handed work to another agent. */

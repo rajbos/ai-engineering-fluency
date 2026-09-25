@@ -59,7 +59,7 @@ are grouped by a lowercase `owner/repo` key derived from the workspace's git rem
 (`src/repoKey.ts`). Sessions with no resolvable remote go to an *unattributed* bucket whose size is
 shown. A second pass groups this month to date and all of last month for the trend.
 
-- **Agentic session:** any agent, custom-agent or CLI-agent interaction.
+- **Agentic session:** any agent, custom-agent or CLI-agent interaction, on every CLI surface (terminal, the Copilot desktop app, Claude Desktop, Claude in an IDE).
 - **Delegation session:** task category `Delegation`, or at least one sub-agent call.
 
 ### Adoption × foundations (`src/agenticFoundations.ts`)
@@ -127,7 +127,7 @@ corrections, and their rate is at least 1.5× and 10 points above the scoped ses
 | `unreviewed-agent-merges` | Agents open PRs in a workspace repository whose `human-review-enforced` control is not present. Today that control is API-only and not yet collected, so the wording says the scan *cannot confirm* review |
 | `review-burden-rising` | A repository's cloud-agent PRs in the recent half of the PR window are ≥ 5 and ≥ 1.5× the earlier half, together with reverts there or rising rework |
 
-The readiness scan behind the scan-based insights is cached and re-run at most once an hour.
+The readiness scan behind the scan-based insights is cached and re-run at most once an hour. Opening the Fluency Score never scans: its stretched-repository note uses only a scan already cached by the AI Readiness tab or the insights pass, and is left out until one exists.
 
 ## Tests
 

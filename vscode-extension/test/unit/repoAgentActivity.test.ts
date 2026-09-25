@@ -3,6 +3,7 @@ import * as assert from 'node:assert/strict';
 import {
     buildActivityTrend,
     buildRepoAgentActivity,
+    isAgenticSession,
     summarizeActivity,
     totalCorrectionMoments,
     type ActivitySessionInput,
@@ -153,4 +154,13 @@ test('buildActivityTrend: January compares against the previous December', () =>
     const trend = buildActivityTrend([{ ...session(), lastInteractionMs: Date.UTC(2026, 11, 20) }], now);
     assert.equal(trend.previous.sessions, 1);
     assert.equal(trend.previousDays, 31);
+});
+
+test('isAgenticSession: every CLI surface counts, not only the terminal bucket', () => {
+	const base = { ask: 1, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 };
+	for (const bucket of ['cliApp', 'claudeDesktop', 'claudeVsCode'] as const) {
+		const analysis = { modeUsage: { ...base, [bucket]: 2 } } as unknown as SessionUsageAnalysis;
+		assert.equal(isAgenticSession(analysis), true, bucket);
+	}
+	assert.equal(isAgenticSession({ modeUsage: base } as unknown as SessionUsageAnalysis), false);
 });
