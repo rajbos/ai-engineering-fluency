@@ -244,5 +244,8 @@
   "agentic.quality.verdict.insufficient-data.too-few-sessions": "Not enough sessions with per-turn detail in one of the two months to compare yet.",
   "agentic.quality.stretched": "Agent use has outrun the controls in: {0}.",
   "agentic.quality.stretchedStage4": "Your stage reflects how much you use AI. In {0}, that use has outrun the repository's controls — worth fixing before expanding further.",
-  "agentic.quality.openReadiness": "Open AI Readiness"
+  "agentic.quality.openReadiness": "Open AI Readiness",
+  "agentic.reverts.header": "↩️ Cloud agent PRs reverted",
+  "agentic.reverts.headerTitle": "Merged PRs from a cloud agent that a later PR in the same window reverted, as reverted / merged, with everyone else's revert rate below as the baseline. A lower bound: reverts pushed straight to the branch, fix-forwards and rewritten revert titles are not detected.",
+  "agentic.reverts.baseline": "others: {0}"
 }

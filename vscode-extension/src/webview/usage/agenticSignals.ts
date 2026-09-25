@@ -249,3 +249,50 @@ export function buildParticipationModesCardHtml(report: RepoAgentActivityReport 
 		</details>
 	</div>`;
 }
+
+// ---------------------------------------------------------------------------
+// Repository PRs tab: what happened after merge
+// ---------------------------------------------------------------------------
+
+export type PrOutcomeView = {
+	aiMergedPrs?: number;
+	aiRevertedPrs?: number;
+	otherMergedPrs?: number;
+	otherRevertedPrs?: number;
+};
+
+/** Keep only coherent counts (reverted never above merged); older snapshots simply lack them. */
+export function sanitizePrOutcomeCounts(raw: Record<string, unknown>): PrOutcomeView {
+	const pair = (merged: unknown, reverted: unknown): [number, number] | null => {
+		const m = count(merged);
+		const r = count(reverted);
+		return m !== null && r !== null && r <= m ? [m, r] : null;
+	};
+	const ai = pair(raw.aiMergedPrs, raw.aiRevertedPrs);
+	const other = pair(raw.otherMergedPrs, raw.otherRevertedPrs);
+	return {
+		...(ai ? { aiMergedPrs: ai[0], aiRevertedPrs: ai[1] } : {}),
+		...(other ? { otherMergedPrs: other[0], otherRevertedPrs: other[1] } : {}),
+	};
+}
+
+export function buildRevertHeaderHtml(): string {
+	return `<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="${escapeHtml(localize('agentic.reverts.headerTitle'))}">${escapeHtml(localize('agentic.reverts.header'))}</th>`;
+}
+
+function revertRate(reverted: number, merged: number): string {
+	return merged > 0 ? formatPercent((reverted / merged) * 100, 0) : DASH;
+}
+
+/** "reverted / merged" for cloud-agent PRs, with everyone else's rate as the baseline. */
+export function buildRevertCellHtml(r: PrOutcomeView): string {
+	if (r.aiMergedPrs === undefined && r.otherMergedPrs === undefined) { return DASH; }
+	const agent = r.aiMergedPrs === undefined
+		? DASH
+		: `${formatNumber(r.aiRevertedPrs ?? 0)} / ${formatNumber(r.aiMergedPrs)}`;
+	const flag = (r.aiRevertedPrs ?? 0) > 0 ? ' style="font-weight:600; color:var(--warning-fg);"' : '';
+	const baseline = r.otherMergedPrs === undefined
+		? ''
+		: `<div class="agentic-muted">${escapeHtml(localizeFormat('agentic.reverts.baseline', revertRate(r.otherRevertedPrs ?? 0, r.otherMergedPrs)))}</div>`;
+	return `<span${flag}>${agent}</span>${baseline}`;
+}

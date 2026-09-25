@@ -3,6 +3,8 @@ import * as assert from 'node:assert/strict';
 import {
 	buildCorrectionsRepoSummaryHtml,
 	buildParticipationModesCardHtml,
+	buildRevertCellHtml,
+	sanitizePrOutcomeCounts,
 	isDelegationWithoutAssessment,
 	sanitizeActivityTotals,
 	sanitizeRepoActivity,
@@ -85,4 +87,19 @@ test('isDelegationWithoutAssessment: needs both high delegation and a thin asses
 	assert.equal(isDelegationWithoutAssessment(totals({ ...base, delegationSessions: 5 })), false);
 	assert.equal(isDelegationWithoutAssessment(totals({ sessions: 10, delegationSessions: 1, modes: { director: 10, performer: 29, assessor: 1 } })), false);
 	assert.equal(isDelegationWithoutAssessment(totals({ sessions: 10, delegationSessions: 5, modes: { director: 10, performer: 29, assessor: 1 } })), true);
+});
+
+
+test('sanitizePrOutcomeCounts: keeps coherent pairs only', () => {
+	assert.deepEqual(sanitizePrOutcomeCounts({ aiMergedPrs: 4, aiRevertedPrs: 1, otherMergedPrs: 10, otherRevertedPrs: 11 }), { aiMergedPrs: 4, aiRevertedPrs: 1 });
+	assert.deepEqual(sanitizePrOutcomeCounts({}), {});
+});
+
+test('buildRevertCellHtml: agent reverted / merged with the baseline rate, dash for old snapshots', () => {
+	const html = buildRevertCellHtml({ aiMergedPrs: 4, aiRevertedPrs: 1, otherMergedPrs: 20, otherRevertedPrs: 1 });
+	assert.match(html, /1 \/ 4/);
+	assert.match(html, /warning-fg/);
+	assert.match(html, /others: 5%/);
+	assert.equal(buildRevertCellHtml({}), '—');
+	assert.match(buildRevertCellHtml({ otherMergedPrs: 0, otherRevertedPrs: 0 }), /others: —/);
 });

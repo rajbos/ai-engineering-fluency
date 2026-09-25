@@ -122,6 +122,7 @@ import {
 } from '../../src/knowledgeSignals';
 import { buildAgenticMatrix as _buildAgenticMatrix, stretchedPlacements as _stretchedPlacements } from '../../src/agenticFoundations';
 import { compareSpeedAndQuality as _compareSpeedAndQuality } from '../../src/speedVsError';
+import { summarizePrOutcomes as _summarizePrOutcomes } from '../../src/prOutcomes';
 
 // --- Tool curation ---
 import {
@@ -3797,7 +3798,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const { prs, error } = await fetchRepoPrs(owner, repo, token, since);
 			this.log(`🔎 Fetched ${prs.length} PR(s) for ${owner}/${repo}${error ? ` — ${error}` : ''}`);
 			const stats = this.collectAiPrStats(prs, error, userLogin);
-			results.push({ owner, repo, repoUrl: `${webOrigin}/${owner}/${repo}`, ...stats, error });
+			// Reverts come from the same PR list — no extra API calls (see src/prOutcomes.ts).
+			const outcomes = error ? {} : _summarizePrOutcomes(prs, pr => !!detectAiType(pr.user), `${owner}/${repo}`, { sinceMs: since.getTime(), nowMs: Date.now() });
+			results.push({ owner, repo, repoUrl: `${webOrigin}/${owner}/${repo}`, ...stats, ...outcomes, error });
 			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsProgress', total: repos.length, done: i + 1 });
 		}
 

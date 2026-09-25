@@ -679,5 +679,8 @@
   "agentic.quality.verdict.insufficient-data.too-few-sessions": "两个月中有一个月带逐轮详情的会话不足，暂无法比较。",
   "agentic.quality.stretched": "以下仓库的智能体使用已超出其控制能力：{0}。",
   "agentic.quality.stretchedStage4": "你的阶段反映的是你使用 AI 的程度。在 {0} 中，这种使用已经超出了仓库的控制能力——在进一步扩展之前值得先解决。",
-  "agentic.quality.openReadiness": "打开 AI 就绪度"
+  "agentic.quality.openReadiness": "打开 AI 就绪度",
+  "agentic.reverts.header": "↩️ 被回滚的云端智能体 PR",
+  "agentic.reverts.headerTitle": "同一时间窗口内被后续 PR 回滚的云端智能体已合并 PR，格式为“已回滚 / 已合并”，下方为其他人的回滚率作为基准。这是下限：直接推送到分支的回滚、向前修复以及改写过标题的回滚无法检测。",
+  "agentic.reverts.baseline": "其他：{0}"
 }

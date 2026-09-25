@@ -46,7 +46,7 @@ import { insightCardElementId, isInsightCardAnchor } from '../../insightAnchors'
 import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from './modelLeaderboard';
 import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
 import { sanitizeServerMemoriesAnalysis as _sanitizeServerMemoriesAnalysis, buildServerMemoriesSectionHtml } from './serverMemories';
-import { buildCorrectionsRepoSummaryHtml, buildParticipationModesCardHtml, sanitizeRepoActivity } from './agenticSignals';
+import { buildCorrectionsRepoSummaryHtml, buildParticipationModesCardHtml, buildRevertCellHtml, buildRevertHeaderHtml, sanitizePrOutcomeCounts, sanitizeRepoActivity } from './agenticSignals';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -796,6 +796,10 @@ type RepoPrInfo = {
   aiDetails: RepoPrDetail[];
   userAuthoredPrs?: number;
   userMergedPrs?: number;
+  aiMergedPrs?: number;
+  aiRevertedPrs?: number;
+  otherMergedPrs?: number;
+  otherRevertedPrs?: number;
   error?: string;
 };
 
@@ -2649,6 +2653,7 @@ function sanitizeRepoPrStatsData(input: unknown): RepoPrStatsResult {
 				aiReviewRequestedPrs: toSafeNumber(r.aiReviewRequestedPrs),
 				userAuthoredPrs: toSafeNumber(r.userAuthoredPrs),
 				userMergedPrs: toSafeNumber(r.userMergedPrs),
+				...sanitizePrOutcomeCounts(r),
 				aiDetails: aiDetails.map((d) => {
 					const detail = (d && typeof d === 'object') ? (d as Record<string, unknown>) : {};
 					const validAiTypes = ['copilot', 'claude', 'openai', 'other-ai'] as const;
@@ -2686,7 +2691,7 @@ function renderRepoPrRow(r: RepoPrInfo, cell: string, cellCenter: string): strin
 	if (r.error) {
 		return `<tr>
 			<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
-			<td colspan="4" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${escapeHtml(r.error)}</td>
+			<td colspan="5" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${escapeHtml(r.error)}</td>
 		</tr>`;
 	}
 	// Collapsible detail list
@@ -2714,6 +2719,7 @@ function renderRepoPrRow(r: RepoPrInfo, cell: string, cellCenter: string): strin
 		<td style="${cellCenter}">${yours}</td>
 		<td style="${cellCenter}">${r.aiAuthoredPrs > 0 ? `<span style="font-weight:600;">${r.aiAuthoredPrs}</span>` : '0'}</td>
 		<td style="${cellCenter}">${r.aiReviewRequestedPrs > 0 ? `<span style="font-weight:600;">${r.aiReviewRequestedPrs}</span>` : '0'}</td>
+		<td style="${cellCenter}">${buildRevertCellHtml(r)}</td>
 	</tr>`;
 }
 
@@ -2781,6 +2787,7 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="PRs you opened yourself, shown as merged / opened. Work driven by a local AI assistant lands here, not under Cloud Agent Authored.">🚢 Yours (merged / opened)</th>
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="PRs where the PR author's GitHub login matches a known AI agent (e.g. copilot-swe-agent, claude-code-action, openai-code-agent)">🤖 Cloud Agent Authored</th>
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="Open PRs where an AI agent was listed as a requested reviewer">👁 Copilot Review Agent requested†</th>
+						${buildRevertHeaderHtml()}
 					</tr>
 				</thead>
 				<tbody>
