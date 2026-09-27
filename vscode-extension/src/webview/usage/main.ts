@@ -3937,7 +3937,7 @@ function buildCorrectionClearFilterButtonHtml(): string {
 
 /** One filter pill. Active pills are outlined, bold and carry a ✕ so the active state is unmistakable. */
 function correctionFilterChipHtml(count: number, label: string, filter: CorrectionFilter, accent?: string): string {
-	if (count <= 0) { return ''; }
+	if (!(count > 0)) { return ''; }
 	const active = activeCorrectionFilter === filter;
 	const border = active ? 'var(--vscode-focusBorder)' : (accent ?? 'transparent');
 	const background = active ? 'var(--vscode-button-secondaryBackground, var(--bg-tertiary))' : (accent ? accent.replace('0.85', '0.12') : 'var(--bg-tertiary)');
@@ -6993,6 +6993,11 @@ async function bootstrap(): Promise<void> {
 		const valid = savedColumns.filter((c): c is SessionColumnId => (ALL_SESSION_COLUMN_IDS as string[]).includes(c));
 		enabledSessionColumns = new Set(valid);
 		reapplyPresetForcedColumns();
+	}
+	// The initial payload skips sanitizeStats, but the correction report can come from an older
+	// cache that predates newer counts (e.g. escalatedUserCorrections) — normalize it the same way.
+	if (Object.prototype.hasOwnProperty.call(initialData, 'correctionReport')) {
+		initialData.correctionReport = sanitizeCorrectionReport(initialData.correctionReport);
 	}
 	renderLayout(initialData);
 	setupSessionsTableSort();
