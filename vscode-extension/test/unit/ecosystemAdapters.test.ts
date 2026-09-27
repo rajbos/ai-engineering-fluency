@@ -50,6 +50,8 @@ import { ClineDataAccess } from '../../../src/cline';
 import { CodexCliDataAccess } from '../../../src/codexcli';
 import { HermesDataAccess } from '../../../src/hermes';
 import { KiloDataAccess } from '../../../src/kilo';
+import { calculateEstimatedCost } from '../../../src/tokenEstimation';
+import * as modelPricing from '../../../src/modelPricing.json';
 
 // Stub functions for adapters requiring callbacks
 const noopEstimateTokens = (_text: string, _model?: string) => 0;
@@ -289,6 +291,95 @@ test('MistralVibeAdapter.handles: recognises ~/.vibe/logs/session paths', () => 
 
 test('MistralVibeAdapter.handles: rejects unrelated paths', () => {
     assert.ok(!mistralVibeAdapter.handles(path.join(os.homedir(), '.claude', 'projects', 'hash', 'abc.jsonl')));
+});
+
+/** Writes a Mistral Vibe session fixture and returns its meta.json path plus a cleanup fn. */
+function writeVibeSession(stats: Record<string, unknown>, activeModel: string): { metaPath: string; cleanup: () => void } {
+    const dir = fs.mkdtempSync(path.join(process.cwd(), 'vibe-session-'));
+    const metaPath = path.join(dir, 'meta.json');
+    fs.writeFileSync(metaPath, JSON.stringify({ config: { active_model: activeModel }, stats }));
+    return { metaPath, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+test('MistralVibeDataAccess.getModelUsage: reports session_cached_tokens as cachedReadTokens', async () => {
+    // Real shape from ~/.vibe/logs/session/*/meta.json: session_prompt_tokens already
+    // INCLUDES session_cached_tokens, so the cached figure is a breakdown of the input
+    // total, never an addition to it.
+    const { metaPath, cleanup } = writeVibeSession(
+        { session_prompt_tokens: 646563, session_completion_tokens: 5161, session_cached_tokens: 598272 },
+        'mistral-medium-3.5',
+    );
+    try {
+        const usage = await mistralVibeDA.getModelUsage(metaPath);
+        assert.equal(usage['mistral-medium-3.5'].inputTokens, 646563, 'inputTokens stays the full prompt total');
+        assert.equal(usage['mistral-medium-3.5'].outputTokens, 5161);
+        assert.equal(usage['mistral-medium-3.5'].cachedReadTokens, 598272, 'cached portion is reported separately');
+    } finally {
+        cleanup();
+    }
+});
+
+test('MistralVibeDataAccess.getModelUsage: cost matches Vibe\'s own session_cost for a cache-heavy session', async () => {
+    // Guards the regression this fix closed: without cachedReadTokens the whole prompt
+    // total is billed at the full input rate, which overstated this session ~5x
+    // ($1.0086 instead of $0.2009). Expected value is the `session_cost` Vibe itself
+    // recorded for this exact session.
+    const { metaPath, cleanup } = writeVibeSession(
+        { session_prompt_tokens: 646563, session_completion_tokens: 5161, session_cached_tokens: 598272 },
+        'mistral-medium-3.5',
+    );
+    try {
+        const usage = await mistralVibeDA.getModelUsage(metaPath);
+        const cost = calculateEstimatedCost(usage, modelPricing.pricing as any);
+        assert.ok(Math.abs(cost - 0.200885) < 1e-5, `expected Vibe's reported $0.200885, got $${cost.toFixed(6)}`);
+    } finally {
+        cleanup();
+    }
+});
+
+test('MistralVibeDataAccess.getModelUsage: glm-5-2 and devstral-2 are priced rather than costing $0', async () => {
+    // Both are models Vibe routes to that had no modelPricing.json entry, so every
+    // session using them silently contributed $0 to cost totals.
+    for (const [model, prompt, completion, expected] of [
+        ['glm-5-2', 250694, 2930, 0.3638636],
+        ['devstral-2', 1_000_000, 100_000, 0.6],
+    ] as const) {
+        const { metaPath, cleanup } = writeVibeSession(
+            { session_prompt_tokens: prompt, session_completion_tokens: completion },
+            model,
+        );
+        try {
+            const cost = calculateEstimatedCost(await mistralVibeDA.getModelUsage(metaPath), modelPricing.pricing as any);
+            assert.ok(cost > 0, `${model} must be priced, got $0`);
+            assert.ok(Math.abs(cost - expected) < 1e-5, `${model}: expected $${expected}, got $${cost.toFixed(7)}`);
+        } finally {
+            cleanup();
+        }
+    }
+});
+
+test('modelPricing: every Mistral Medium 3.5 spelling carries the same cached-read rate', () => {
+    // `mistral-medium-latest`, `mistral-medium-3.5` and `mistral-medium-3-5` are the same
+    // model at the same rates. A cached rate on only some of them means a session reporting
+    // one of the others still bills cache reads at the full input rate.
+    const pricing = modelPricing.pricing as Record<string, { inputCostPerMillion: number; cachedInputCostPerMillion?: number }>;
+    for (const id of ['mistral-medium-latest', 'mistral-medium-3.5', 'mistral-medium-3-5']) {
+        assert.equal(pricing[id].inputCostPerMillion, 1.5, `${id} input rate`);
+        assert.equal(pricing[id].cachedInputCostPerMillion, 0.15, `${id} must carry the cached-read rate`);
+    }
+});
+
+test('MistralVibeDataAccess.getModelUsage: cached tokens exceeding prompt tokens are clamped', async () => {
+    const { metaPath, cleanup } = writeVibeSession(
+        { session_prompt_tokens: 100, session_completion_tokens: 10, session_cached_tokens: 5000 },
+        'mistral-medium-3.5',
+    );
+    try {
+        const usage = await mistralVibeDA.getModelUsage(metaPath);
+        assert.equal(usage['mistral-medium-3.5'].cachedReadTokens, 100, 'cached read is capped at the input total');
+    } finally {
+        cleanup();
+    }
 });
 
 test('GeminiCliAdapter.handles: recognises ~/.gemini session paths', () => {

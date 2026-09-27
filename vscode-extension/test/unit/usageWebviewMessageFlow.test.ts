@@ -380,6 +380,53 @@ test('a switchTab to Repository PRs during a refresh still starts the PR fetch',
 	);
 });
 
+test('AI Readiness scans only on tab visit, refreshes on demand, and survives a layout rebuild', async () => {
+	const stats = { ...buildStats(), readinessAvailable: true };
+	const harness = await bootWebview(stats);
+	assert.ok(harness.window.document.querySelector('.tab-button[data-tab="readiness"]'));
+	assert.ok(!harness.posted.some((m) => m.command === 'loadReadiness'));
+
+	harness.post({ command: 'switchTab', tab: 'readiness' });
+	await harness.settle();
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').length, 1);
+	assert.equal(harness.posted.find((m) => m.command === 'loadReadiness').requestId, 1);
+	const report = { scannedAt: '2026-03-14T09:30:00.000Z', apiSignalsIncluded: false, maxAssessableStage: 4, repos: [], skippedRepoCount: 0 };
+	harness.post({ command: 'readinessLoaded', requestId: 1, report });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /No git repositories were found/);
+
+	harness.post({ command: 'updateStats', data: stats });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /No git repositories were found/);
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').length, 1);
+
+	(harness.window.document.querySelector('#btn-refresh-readiness') as HTMLButtonElement).click();
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').at(-1)?.requestId, 2);
+	harness.post({ command: 'readinessLoaded', requestId: 1, report });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /Scanning repository controls/);
+	harness.post({ command: 'readinessScanFailed', requestId: 2 });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /Could not scan repository readiness/);
+});
+
+test('AI Readiness deep link waits for stats and ignores responses from before a full refresh', async () => {
+	const harness = await bootWebview(null);
+	harness.post({ command: 'switchTab', tab: 'readiness' });
+	harness.post({ command: 'updateStats', data: { ...buildStats(), readinessAvailable: true } });
+	await harness.settle();
+	assert.notEqual(harness.window.document.querySelector('#tab-panel-readiness')?.style.display, 'none');
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').length, 1);
+
+	harness.post({ command: 'usageRefreshing' });
+	harness.post({ command: 'updateStats', data: { ...buildStats(), readinessAvailable: true } });
+	await harness.settle();
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').at(-1)?.requestId, 3);
+	harness.post({ command: 'readinessLoaded', requestId: 1, report: { repos: [] } });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /Scanning repository controls/);
+});
+
 test('a layout re-render repopulates the GitHub activity panels from retained state', async () => {
 	// Any stats refresh rebuilds the whole root, recreating the "Loading…" placeholders. The
 	// already-received PR data must be re-applied instead of being visually lost.
@@ -1026,6 +1073,36 @@ test('the escalating pill is a filter that narrows the list to escalated moments
 	assert.match(harness.text('#corrections-filter-status') ?? '', /Showing 1 of 2 listed correction moments/);
 	assert.match(harness.text('#corrections-filter-status') ?? '', /Escalating corrections/);
 });
+
+/** Every correction pill's leading count, e.g. "1 user corrections" → "1". */
+function correctionPillCounts(harness: Harness): string[] {
+	return [...harness.window.document.querySelectorAll('button[data-correction-filter]')]
+		.map((pill: any) => pill.textContent.trim().split(/\s+/)[0]);
+}
+
+for (const [label, boot] of [
+	['the initial payload', () => bootWebview(buildStatsWithCorrections())],
+	['an updateStats message', async () => {
+		const harness = await bootWebview(buildStats());
+		harness.post({ command: 'updateStats', data: buildStatsWithCorrections() });
+		await harness.settle();
+		return harness;
+	}],
+] as const) {
+	test(`a correction report without escalatedUserCorrections renders numeric pill counts (via ${label})`, async () => {
+		// Reports cached before the escalating count existed lack the field. It must default to 0
+		// (no pill) rather than rendering "undefined 📈 escalating".
+		const harness = await boot();
+		harness.window.document.querySelector('.tab-button[data-tab="corrections"]')?.click();
+
+		const counts = correctionPillCounts(harness);
+		assert.ok(counts.length > 0, 'expects the correction pills to render');
+		for (const count of counts) { assert.match(count, /^\d+$/, `every pill must lead with a number, got "${count}"`); }
+		assert.equal(harness.window.document.querySelector('button[data-correction-filter="escalated"]'), null,
+			'a missing escalated count is zero, so its pill is hidden');
+		assert.ok(!(harness.text('#tab-panel-corrections') ?? '').includes('undefined'));
+	});
+}
 
 // ── Insight deep-linking ───────────────────────────────────────────────────
 // A toast ("💡 <title>" → View) and the status-bar insights badge both open the Insights tab for

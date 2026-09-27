@@ -8,7 +8,7 @@ import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUt
 import { createViewStateManager } from '../shared/viewState';
 import { applyWebviewLocale } from '../shared/webviewLocale';
 import type { ChartTimeWindow } from '../../../../src/types';
-import { getTimeWindowStartDayKey, getTimeWindowStartMonthKey } from '../../../../src/timeWindows';
+import { filterPeriodByTimeWindow } from './timeWindowFilter';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -157,103 +157,6 @@ let editorListCollapsed = false;
 
 function saveWebviewState(): void {
 	chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode, editorListCollapsed });
-}
-
-function sliceByIndices<T>(arr: T[] | undefined, indices: number[]): T[] | undefined {
-	if (!arr) { return undefined; }
-	return indices.map(i => arr[i]);
-}
-
-function sliceDatasetsByIndices(datasets: object[] | undefined, indices: number[]): object[] | undefined {
-	if (!datasets) { return undefined; }
-	return datasets.map(ds => {
-		const d = ds as { data: number[] };
-		return { ...d, data: indices.map(i => d.data[i]) };
-	});
-}
-
-function getFilterStartKey(timeWindow: ChartTimeWindow, periodType: ChartPeriod, now: Date): string {
-	return periodType === 'month'
-		? getTimeWindowStartMonthKey(timeWindow, now)
-		: getTimeWindowStartDayKey(timeWindow, now);
-}
-
-function buildCoreFilteredPeriod(period: ChartPeriodData, indices: number[]): ChartPeriodData {
-	const totalTokens = indices.reduce((sum, i) => sum + period.tokensData[i], 0);
-	const totalSessions = indices.reduce((sum, i) => sum + period.sessionsData[i], 0);
-	const costData = sliceByIndices(period.costData, indices) as number[];
-	const totalCost = costData.reduce((a, b) => a + b, 0);
-	return {
-		labels: indices.map(i => period.labels[i]),
-		periodKeys: indices.map(i => period.periodKeys[i]),
-		tokensData: indices.map(i => period.tokensData[i]),
-		sessionsData: indices.map(i => period.sessionsData[i]),
-		modelDatasets: sliceDatasetsByIndices(period.modelDatasets, indices) as ModelDataset[],
-		editorDatasets: sliceDatasetsByIndices(period.editorDatasets, indices) as EditorDataset[],
-		repositoryDatasets: sliceDatasetsByIndices(period.repositoryDatasets, indices) as RepositoryDataset[],
-		periodCount: indices.length,
-		totalTokens,
-		totalSessions,
-		avgPerPeriod: indices.length > 0 ? Math.round(totalTokens / indices.length) : 0,
-		costData,
-		totalCost,
-		avgCostPerPeriod: indices.length > 0 ? totalCost / indices.length : 0,
-	};
-}
-
-function copyFilteredLocFields(source: ChartPeriodData, target: ChartPeriodData, indices: number[]): void {
-	const locData = sliceByIndices(source.locData, indices);
-	const linesAddedData = sliceByIndices(source.linesAddedData, indices);
-	const linesRemovedData = sliceByIndices(source.linesRemovedData, indices);
-
-	if (locData) { target.locData = locData as number[]; }
-	if (linesAddedData) { target.linesAddedData = linesAddedData as number[]; }
-	if (linesRemovedData) { target.linesRemovedData = linesRemovedData as number[]; }
-	if (source.totalLinesAdded !== undefined) { target.totalLinesAdded = (linesAddedData as number[] ?? []).reduce((a, b) => a + b, 0); }
-	if (source.totalLinesRemoved !== undefined) { target.totalLinesRemoved = (linesRemovedData as number[] ?? []).reduce((a, b) => a + b, 0); }
-	if (source.avgLocPerPeriod !== undefined) {
-		target.avgLocPerPeriod = locData && locData.length > 0 ? (locData as number[]).reduce((a, b) => a + b, 0) / locData.length : 0;
-	}
-}
-
-function copyFilteredDatasetFields(source: ChartPeriodData, target: ChartPeriodData, indices: number[]): void {
-	const datasetFields: Array<{ key: keyof ChartPeriodData; source: object[] | undefined }> = [
-		{ key: 'languageDatasets', source: source.languageDatasets },
-		{ key: 'locEditorDatasets', source: source.locEditorDatasets },
-		{ key: 'locRepositoryDatasets', source: source.locRepositoryDatasets },
-		{ key: 'editorCostDatasets', source: source.editorCostDatasets },
-		{ key: 'billingGroupCostDatasets', source: source.billingGroupCostDatasets },
-		{ key: 'modelCostDatasets', source: source.modelCostDatasets },
-		{ key: 'modelSessionsDatasets', source: source.modelSessionsDatasets },
-		{ key: 'editorSessionsDatasets', source: source.editorSessionsDatasets },
-		{ key: 'providerSessionsDatasets', source: source.providerSessionsDatasets },
-		{ key: 'providerTokensDatasets', source: source.providerTokensDatasets },
-		{ key: 'taskCategoryDatasets', source: source.taskCategoryDatasets },
-	];
-	for (const { key, source: ds } of datasetFields) {
-		if (ds) { (target as Record<string, object[]>)[key] = sliceDatasetsByIndices(ds, indices) as object[]; }
-	}
-}
-
-function copyFilteredOptionalFields(source: ChartPeriodData, target: ChartPeriodData, indices: number[]): void {
-	copyFilteredLocFields(source, target, indices);
-	copyFilteredDatasetFields(source, target, indices);
-}
-
-function filterPeriodByTimeWindow(period: ChartPeriodData, timeWindow: ChartTimeWindow, periodType: ChartPeriod): ChartPeriodData {
-	if (timeWindow === 'last30' && periodType === 'day') {
-		return period;
-	}
-	const startKey = getFilterStartKey(timeWindow, periodType, new Date());
-	const indices: number[] = [];
-	for (let i = 0; i < period.periodKeys.length; i++) {
-		if (period.periodKeys[i] >= startKey) { indices.push(i); }
-	}
-	if (indices.length === 0) { return period; }
-
-	const filtered = buildCoreFilteredPeriod(period, indices);
-	copyFilteredOptionalFields(period, filtered, indices);
-	return filtered;
 }
 
 const ROLLING_WINDOW: Record<ChartPeriod, number> = { day: 7, week: 4, month: 3 };

@@ -43,6 +43,28 @@ test('l10n: resolves zh-cn strings when the display language is zh-cn', () => {
 	mock.setLanguage('en');
 });
 
+test('l10n: AI Readiness command and navigation labels resolve in both languages', () => {
+	assert.equal(t('command.showReadiness.title'), 'Show AI Readiness');
+	assert.equal(t('nav.btnReadiness'), 'AI Readiness');
+	assert.equal(t('readiness.loading'), 'Scanning repository controls…');
+	assert.equal(t('readiness.scanFailed'), 'Could not scan repository readiness. Check the AI Engineering Fluency output for details, then try Refresh.');
+	assert.equal(t('whatsNew.release.0.18.1.headline'), 'See which repository controls are in place, and which still need evidence, in the new AI Readiness tab.');
+	assert.equal(t('whatsNew.feature.usage.readiness-tab.title'), 'AI Readiness');
+	assert.equal(t('whatsNew.feature.usage.readiness-tab.description'), "In Usage Analysis, scan each repository's delivery and governance controls to see what blocks its next stage and what could not be checked. Separate from your personal Fluency Score.");
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('command.showReadiness.title'), '显示 AI 就绪度');
+		assert.equal(t('nav.btnReadiness'), 'AI 就绪度');
+		assert.equal(t('readiness.loading'), '正在扫描仓库控制措施…');
+		assert.equal(t('readiness.scanFailed'), '无法扫描仓库就绪度。请查看 AI 工程熟练度输出中的详细信息，然后重试刷新。');
+		assert.equal(t('whatsNew.release.0.18.1.headline'), '在新的 AI 就绪度标签页中，查看仓库已具备的控制措施以及仍需核实的证据。');
+		assert.equal(t('whatsNew.feature.usage.readiness-tab.title'), 'AI 就绪度');
+		assert.equal(t('whatsNew.feature.usage.readiness-tab.description'), '在使用分析中逐个扫描仓库的交付与治理控制措施，查看进入下一阶段的阻碍和无法核实的项目。与个人熟练度评分分开显示。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: bare language tag zh matches the zh-cn bundle', () => {
 	mock.setLanguage('zh');
 	assert.equal(t('nav.btnRefresh'), '刷新');
@@ -326,6 +348,33 @@ test("l10n: what's-new notification keys resolve in zh-cn", () => {
 	}
 });
 
+test('l10n: environmental methodology keys resolve in English', () => {
+	mock.setLanguage('en');
+	try {
+		const expected: Record<string, string> = {
+			'environmental.intro': 'All figures are estimates. CO₂ and water are derived from a published benchmark of LLM inference energy, weighted by token type and scaled per model; analogies use average reference values. Treat these as order-of-magnitude indicators, not precise measurements.',
+			'environmental.methodology.heading': 'Calculation & Estimates',
+			'environmental.methodology.co2Paper': 'CO₂: Jegham et al. estimate 5.671 Wh for one Claude 3.7 Sonnet request with 10,000 input and 1,500 output tokens; at 0.287 kg CO₂e/kWh (AWS) that is about 1.63 g CO₂e. Counting an input token as 1/20 of an output token, that request is 2,000 output-equivalent tokens, giving ~814 g (range 770–857 g) per 1M output-equivalent tokens, rounded up to 840 g.',
+			'environmental.methodology.co2Weights': 'Token weights (output = 1.0, uncached input = 0.05, cache write = 0.0625, cache read = 0.0005) are approximations adopted from neuland/tokendashboard-backend, not values from the paper. The paper does not model prompt caching, and the cache-read weight in particular is a rough guess. Tokens without a per-model breakdown are counted with the reference request\'s input/output mix.',
+			'environmental.methodology.modelScaling': 'Other models are scaled from the Claude Sonnet baseline by the ratio of their output-token price (for example Haiku ⅓×, Opus 1⅔×). Price stands in for model size here; it is not a measurement. Models without a known price use the Sonnet baseline.',
+			'environmental.methodology.cost': 'Cost (UBB) uses GitHub Copilot AI Credit rates (1 credit = $0.01) under Usage Based Billing.',
+			'environmental.methodology.water': 'Water uses the paper\'s formula: on-site cooling (energy ÷ PUE × 0.18 L/kWh) plus off-site electricity generation (energy × 5.11 L/kWh), with AWS\'s PUE of 1.14. That is about 30 mL for the reference request, or ~15 L per 1M output-equivalent tokens for Claude Sonnet, scaled per model like CO₂.',
+			'environmental.methodology.tree': 'Tree equivalent represents the fraction of a single mature tree\'s annual CO₂ absorption (~21 kg/year).',
+			'environmental.methodology.co2Analogies': 'CO₂ analogies: petrol car ≈ 120 g/km · intercity train ≈ 41 g/km · economy flight ≈ 180 g/km (ICAO avg.) · smartphone charge ≈ 8 g · LED bulb ≈ 3 g/hr (10 W, EU grid) · kettle boil ≈ 20 g.',
+			'environmental.methodology.waterAnalogies': 'Water analogies: shower ≈ 8 L/min · washing machine ≈ 50 L · standard bathtub ≈ 150 L · dishwasher ≈ 12 L · mug of tea ≈ 250 mL · daily drinking water ≈ 2 L/person.',
+			'environmental.methodology.caveat': 'All analogies are order-of-magnitude estimates. Actual values depend on your region\'s energy mix, hardware, model implementation, and caching behavior.',
+			'environmental.methodology.sources': 'Sources:',
+			'environmental.methodology.paperLink': 'Jegham et al., "How Hungry is AI?" (arXiv:2505.09598)',
+			'environmental.methodology.neulandLink': 'neuland/tokendashboard-backend — CO₂ methodology',
+		};
+		for (const [key, english] of Object.entries(expected)) {
+			assert.equal(t(key), english, `English value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 // Log viewer summary card labels (PR #2045 follow-up) — guards against raw
 // keys resurfacing in the log viewer summary cards for every locale.
 test('l10n: log viewer summary card labels resolve in English', () => {
@@ -362,6 +411,33 @@ test('l10n: log viewer summary card labels resolve in English', () => {
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: environmental methodology keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'environmental.intro': '所有数据均为估算值。CO₂ 和用水量基于一项已发表的 LLM 推理能耗基准，按令牌类型加权并按模型缩放；类比值使用平均参考值。请将其视为数量级指标，而非精确测量。',
+			'environmental.methodology.heading': '计算与估算',
+			'environmental.methodology.co2Paper': 'CO₂：Jegham 等人估算，一次包含 10,000 个输入令牌和 1,500 个输出令牌的 Claude 3.7 Sonnet 请求耗能 5.671 Wh；按 0.287 kg CO₂e/kWh（AWS）计算约为 1.63 g CO₂e。将一个输入令牌计为输出令牌的 1/20，该请求相当于 2,000 个输出当量令牌，即每 100 万输出当量令牌约 814 g（范围 770–857 g），向上取整为 840 g。',
+			'environmental.methodology.co2Weights': '令牌权重（输出 = 1.0，未缓存输入 = 0.05，缓存写入 = 0.0625，缓存读取 = 0.0005）是采用自 neuland/tokendashboard-backend 的近似值，并非论文中的数值。论文未对提示缓存建模，尤其是缓存读取权重只是粗略估计。没有按模型拆分明细的令牌按参考请求的输入/输出比例计算。',
+			'environmental.methodology.modelScaling': '其他模型以 Claude Sonnet 为基线，按其输出令牌价格之比进行缩放（例如 Haiku ⅓×，Opus 1⅔×）。这里用价格代表模型规模，并非实测值。价格未知的模型使用 Sonnet 基线。',
+			'environmental.methodology.cost': '成本（UBB）在按量计费下使用 GitHub Copilot AI Credit 费率（1 个 credit = $0.01）。',
+			'environmental.methodology.water': '用水量采用论文中的公式：现场冷却（能耗 ÷ PUE × 0.18 L/kWh）加上场外发电（能耗 × 5.11 L/kWh），AWS 的 PUE 为 1.14。参考请求约为 30 mL，即 Claude Sonnet 每 100 万输出当量令牌约 15 L，并像 CO₂ 一样按模型缩放。',
+			'environmental.methodology.tree': '树木当量表示一棵成熟树一年吸收 CO₂ 的占比（约 21 kg/年）。',
+			'environmental.methodology.co2Analogies': 'CO₂ 类比：汽油车 ≈ 120 g/km · 城际列车 ≈ 41 g/km · 经济舱短途航班 ≈ 180 g/km（ICAO 平均）· 智能手机充满电 ≈ 8 g · LED 灯 ≈ 3 g/小时（10 W，欧盟电网）· 烧开一壶水 ≈ 20 g。',
+			'environmental.methodology.waterAnalogies': '用水类比：淋浴 ≈ 8 L/分钟 · 洗衣机 ≈ 50 L · 标准浴缸 ≈ 150 L · 洗碗机 ≈ 12 L · 一杯茶 ≈ 250 mL · 每人每日饮水 ≈ 2 L。',
+			'environmental.methodology.caveat': '所有类比都只是数量级估算。实际数值取决于你所在地区的能源结构、硬件、模型实现和缓存行为。',
+			'environmental.methodology.sources': '来源：',
+			'environmental.methodology.paperLink': 'Jegham 等人，《How Hungry is AI?》（arXiv:2505.09598）',
+			'environmental.methodology.neulandLink': 'neuland/tokendashboard-backend — CO₂ 方法说明',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
 	}
 });
 
@@ -470,50 +546,6 @@ test('l10n: main refresh loading step labels resolve in English', () => {
 	}
 });
 
-// Diagnostics — Mistral Cloud (Beta) tab (PR #2057 follow-up) — guards against
-// raw English literals resurfacing in the new tab for non-English locales.
-test('l10n: Mistral Cloud tab labels resolve in English', () => {
-	const expected: Record<string, string> = {
-		'mistral.tabCaption': '🔥 Mistral Cloud (Beta)',
-		'mistral.tabTitle': '🔥 Mistral Vibe Cloud Sessions',
-		'mistral.betaBadge': 'Beta',
-		'mistral.description.intro': 'Lists conversations from your Mistral account via the beta {0} API on {1}.',
-		'mistral.description.scope': 'This is the closest available surface to Vibe Code Web (cloud) sessions; it is {0} and may not include all cloud sessions.',
-		'mistral.description.undocumented': 'undocumented for Vibe Code Web specifically',
-		'mistral.description.keyStorage': 'Requires a Mistral API key stored locally; it is sent only to {0} over HTTPS.',
-		'mistral.status.label': 'Status',
-		'mistral.status.configured': 'API key configured',
-		'mistral.status.notConfigured': 'No API key configured',
-		'mistral.status.checking': 'Checking…',
-		'mistral.status.checkFailed': "Couldn't check whether an API key is configured.",
-		'mistral.summary.conversations': 'Conversations',
-		'mistral.summary.ofCount': '{0} of {1}',
-		'mistral.summary.atLeastCount': '{0}+',
-		'mistral.summary.lastFetched': 'Last fetched',
-		'mistral.error.label': 'Error:',
-		'mistral.error.storeFailed': 'Failed to store the Mistral API key.',
-		'mistral.error.keyCheckFailed': "Couldn't verify the Mistral API key is still current; try Refresh again.",
-		'mistral.error.removeFailed': 'Failed to remove the Mistral API key.',
-		'mistral.button.refresh': 'Refresh',
-		'mistral.button.retry': 'Retry',
-		'mistral.button.removeApiKey': 'Remove API key',
-		'mistral.button.connectApiKey': 'Connect Mistral API key',
-		'mistral.prompt.title': 'Mistral API Key',
-		'mistral.prompt.enterApiKey': 'Enter your Mistral API key (stored in VS Code SecretStorage, used to call api.mistral.ai):',
-		'mistral.prompt.required': 'API key is required',
-		'mistral.table.id': 'ID',
-		'mistral.table.name': 'Name',
-		'mistral.table.agentId': 'Agent ID',
-		'mistral.table.version': 'Version',
-		'mistral.table.created': 'Created',
-		'mistral.table.updated': 'Updated',
-		'mistral.table.description': 'Description',
-		'mistral.table.untitled': '(untitled)',
-	};
-	for (const [key, english] of Object.entries(expected)) {
-		assert.equal(t(key), english, `English value for ${key}`);
-	}
-});
 
 test('l10n: Cost Attribution model-mix table labels resolve in English', () => {
 	const expected: Record<string, string> = {
@@ -621,53 +653,6 @@ test('l10n: main refresh loading step labels resolve in zh-cn', () => {
 	}
 });
 
-test('l10n: Mistral Cloud tab labels resolve in zh-cn', () => {
-	mock.setLanguage('zh-cn');
-	try {
-		const expected: Record<string, string> = {
-			'mistral.tabCaption': '🔥 Mistral 云(测试版)',
-			'mistral.tabTitle': '🔥 Mistral Vibe 云会话',
-			'mistral.betaBadge': '测试版',
-			'mistral.description.intro': '通过测试版 {0} API（位于 {1}）列出你的 Mistral 账户中的对话。',
-			'mistral.description.scope': '这是最接近 Vibe Code Web(云端)会话的可用的途径，{0}，且可能无法包含所有云端会话。',
-			'mistral.description.undocumented': '未针对 Vibe Code Web 专门提供文档',
-			'mistral.description.keyStorage': '需要在本地存储的 Mistral API 密钥;它仅通过 HTTPS 发送到 {0}。',
-			'mistral.status.label': '状态',
-			'mistral.status.configured': '已配置 API 密钥',
-			'mistral.status.notConfigured': '未配置 API 密钥',
-			'mistral.status.checking': '检查中…',
-			'mistral.status.checkFailed': '无法检查是否已配置 API 密钥。',
-			'mistral.summary.conversations': '对话数',
-			'mistral.summary.ofCount': '{1} 个中的 {0} 个',
-			'mistral.summary.atLeastCount': '{0}+',
-			'mistral.summary.lastFetched': '最后获取时间',
-			'mistral.error.label': '错误:',
-			'mistral.error.storeFailed': '存储 Mistral API 密钥失败。',
-			'mistral.error.keyCheckFailed': '无法确认 Mistral API 密钥是否仍然有效，请重新点击刷新。',
-			'mistral.error.removeFailed': '无法移除 Mistral API 密钥。',
-			'mistral.prompt.title': 'Mistral API 密钥',
-			'mistral.prompt.enterApiKey': '输入你的 Mistral API 密钥(存储在 VS Code SecretStorage 中,用于调用 api.mistral.ai):',
-			'mistral.prompt.required': '需要输入 API 密钥',
-			'mistral.button.refresh': '刷新',
-			'mistral.button.retry': '重试',
-			'mistral.button.removeApiKey': '移除 API 密钥',
-			'mistral.button.connectApiKey': '连接 Mistral API 密钥',
-			'mistral.table.id': 'ID',
-			'mistral.table.name': '名称',
-			'mistral.table.agentId': '代理 ID',
-			'mistral.table.version': '版本',
-			'mistral.table.created': '创建时间',
-			'mistral.table.updated': '更新时间',
-			'mistral.table.description': '描述',
-			'mistral.table.untitled': '(未命名)',
-		};
-		for (const [key, chinese] of Object.entries(expected)) {
-			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
-		}
-	} finally {
-		mock.setLanguage('en');
-	}
-});
 
 test('l10n: HydraFusion routing keys resolve in zh-cn', () => {
 	mock.setLanguage('zh-cn');
@@ -692,29 +677,7 @@ test('l10n: HydraFusion routing keys resolve in zh-cn', () => {
 	}
 });
 
-test('l10n: Mistral Cloud description templates format {0}/{1} placeholders', () => {
-	assert.equal(
-		t('mistral.description.intro', '<code>GET /v1/conversations</code>', '<code>api.mistral.ai</code>'),
-		'Lists conversations from your Mistral account via the beta <code>GET /v1/conversations</code> API on <code>api.mistral.ai</code>.',
-	);
-	assert.equal(
-		t('mistral.description.keyStorage', '<code>api.mistral.ai</code>'),
-		'Requires a Mistral API key stored locally; it is sent only to <code>api.mistral.ai</code> over HTTPS.',
-	);
-	assert.equal(t('mistral.summary.ofCount', '3', '12'), '3 of 12');
-	assert.equal(t('mistral.summary.atLeastCount', '2000'), '2000+');
-});
 
-test('l10n: Mistral Cloud ofCount reorders placeholders in zh-cn', () => {
-	mock.setLanguage('zh-cn');
-	try {
-		// Mirrors usage.contextPressure.ofCount: the Chinese phrasing puts the total
-		// before the count, so a plain concatenation would silently misorder it.
-		assert.equal(t('mistral.summary.ofCount', '3', '12'), '12 个中的 3 个');
-	} finally {
-		mock.setLanguage('en');
-	}
-});
 
 // Efficiency view — Models tab empty states. These explain why a window cannot
 // form a comparison, so they must not surface in English for zh-CN users.
@@ -787,6 +750,58 @@ test('l10n: Efficiency Models tab control labels resolve in English and zh-cn', 
 		for (const [key, value] of Object.entries(chinese)) {
 			assert.equal(t(key), value, `zh-cn value for ${key}`);
 		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: Team Server diagnostics card strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	const english: Record<string, string> = {
+		'diagnostics.teamServer.configDetails': 'Configuration Details',
+		'diagnostics.teamServer.serverUrl': 'Server URL',
+		'diagnostics.teamServer.localSessionStats': 'Local Session Statistics',
+		'diagnostics.teamServer.totalSessions': 'Total Sessions',
+		'diagnostics.teamServer.localSessionFiles': 'Local session files',
+		'diagnostics.teamServer.usageData': 'Usage Data',
+		'diagnostics.teamServer.lastRollupUpload': 'Last rollup upload',
+		'diagnostics.teamServer.fluencyScore': 'Fluency Score',
+		'diagnostics.teamServer.uploadedSeparately': 'Uploaded separately',
+		'diagnostics.teamServer.status': 'Status',
+		'diagnostics.teamServer.sharingProfile': 'Sharing Profile',
+		'diagnostics.teamServer.usageSync': 'Usage Sync',
+		'diagnostics.teamServer.rollupUploadOnly': 'Rollup upload only',
+		'diagnostics.teamServer.never': 'Never',
+	};
+	for (const [key, value] of Object.entries(english)) {
+		assert.equal(t(key), value, `English value for ${key}`);
+	}
+
+	mock.setLanguage('zh-cn');
+	try {
+		const chinese: Record<string, string> = {
+			'diagnostics.teamServer.configDetails': '\u914d\u7f6e\u8be6\u60c5',
+			'diagnostics.teamServer.serverUrl': '\u670d\u52a1\u5668 URL',
+			'diagnostics.teamServer.localSessionStats': '\u672c\u5730\u4f1a\u8bdd\u7edf\u8ba1',
+			'diagnostics.teamServer.totalSessions': '\u4f1a\u8bdd\u603b\u6570',
+			'diagnostics.teamServer.localSessionFiles': '\u672c\u5730\u4f1a\u8bdd\u6587\u4ef6',
+			'diagnostics.teamServer.usageData': '\u4f7f\u7528\u6570\u636e',
+			'diagnostics.teamServer.lastRollupUpload': '\u4e0a\u6b21\u6c47\u603b\u4e0a\u4f20',
+			'diagnostics.teamServer.fluencyScore': '\u719f\u7ec3\u5ea6\u8bc4\u5206',
+			'diagnostics.teamServer.uploadedSeparately': '\u5355\u72ec\u4e0a\u4f20',
+			'diagnostics.teamServer.status': '\u72b6\u6001',
+			'diagnostics.teamServer.sharingProfile': '\u5171\u4eab\u914d\u7f6e',
+			'diagnostics.teamServer.usageSync': '\u4f7f\u7528\u6570\u636e\u540c\u6b65',
+			'diagnostics.teamServer.rollupUploadOnly': '\u4ec5\u6c47\u603b\u4e0a\u4f20',
+			'diagnostics.teamServer.never': '\u4ece\u4e0d',
+		};
+		for (const [key, value] of Object.entries(chinese)) {
+			assert.equal(t(key), value, `zh-cn value for ${key}`);
+		}
+		// The two labels that carry the fix: the card was misleading because it did
+		// not say which upload it measured, so a translated host losing that
+		// distinction would reintroduce the ambiguity this change removes.
+		assert.notEqual(t('diagnostics.teamServer.usageSync'), t('diagnostics.teamServer.fluencyScore'), 'The two Team Server timestamps must stay distinguishable in zh-cn');
 	} finally {
 		mock.setLanguage('en');
 	}
@@ -1190,6 +1205,43 @@ test('whats-new l10n: every catalog key resolves in English and zh-cn', () => {
 		const untranslated = keys.filter(k => t(k) === ENGLISH_BUNDLE[k]);
 		// Release headlines and feature copy are prose; none may fall back.
 		assert.deepEqual(untranslated, [], 'these What\'s New keys fall back to English on zh-cn');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: backend Sync Now warnings resolve in English and zh-cn', () => {
+	assert.equal(t('backend.syncNow.profileOff'), 'Backend sync is off because the sharing profile is set to Off. Choose another profile to upload data.');
+	assert.equal(t('backend.syncNow.notConfigured'), 'Backend is not fully configured. Run "Configure Backend" for Azure Storage or "Configure Team Server Backend" for the Team Server.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('backend.syncNow.profileOff'), '后端同步已关闭，因为共享配置文件设置为“关闭”。请选择其他配置文件以上传数据。');
+		assert.equal(t('backend.syncNow.notConfigured'), '后端尚未完全配置。请运行“配置后端”以设置 Azure 存储，或运行“配置团队服务器后端”以设置团队服务器。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: backend Sync Now progress and success text resolve in English and zh-cn', () => {
+	assert.equal(t('backend.syncNow.synced', t('backend.syncNow.target.teamServer')), 'Synced to Team Server successfully');
+	assert.equal(t('backend.syncNow.synced', t('backend.syncNow.target.azure')), 'Synced to Azure successfully');
+	assert.equal(t('backend.syncNow.progress', t('backend.syncNow.target.both')), 'Syncing to Azure and Team Server...');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('backend.syncNow.synced', t('backend.syncNow.target.teamServer')), '已成功同步到团队服务器');
+		assert.equal(t('backend.syncNow.progress', t('backend.syncNow.target.both')), '正在同步到Azure 和团队服务器...');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: backend Sync Now failure and nothing-sent text resolve in English and zh-cn', () => {
+	assert.equal(t('backend.syncNow.failed', 'Team Server'), 'Upload to Team Server failed. See the AI Engineering Fluency output channel for details.');
+	assert.equal(t('backend.syncNow.nothingSent', 'Team Server'), 'Nothing was uploaded to Team Server. Another VS Code window may be syncing, or the Team Server needs a GitHub sign-in. See the output channel for details.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('backend.syncNow.failed', '团队服务器'), '上传到团队服务器失败。有关详细信息，请查看 AI Engineering Fluency 输出通道。');
+		assert.equal(t('backend.syncNow.nothingSent', '团队服务器'), '未向团队服务器上传任何数据。可能有另一个 VS Code 窗口正在同步，或者团队服务器需要登录 GitHub。有关详细信息，请查看输出通道。');
 	} finally {
 		mock.setLanguage('en');
 	}

@@ -113,8 +113,22 @@ export const WHATS_NEW_MAX_ANNOUNCEMENT_AGE_DAYS = 60;
  */
 export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 	{
-		version: '0.18.0',
+		version: '0.18.1',
 		date: null,
+		headlineKey: 'whatsNew.release.0.18.1.headline',
+		features: [
+			{
+				id: 'usage.readiness-tab',
+				titleKey: 'whatsNew.feature.usage.readiness-tab.title',
+				descriptionKey: 'whatsNew.feature.usage.readiness-tab.description',
+				kind: 'tab',
+				surface: { view: 'usage', tab: 'readiness' },
+			},
+		],
+	},
+	{
+		version: '0.18.0',
+		date: '2026-09-18',
 		headlineKey: 'whatsNew.release.0.18.0.headline',
 		features: [
 			{
@@ -151,13 +165,6 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 				descriptionKey: 'whatsNew.feature.diagnostics.ttft-tab.description',
 				kind: 'tab',
 				surface: { view: 'diagnostics', tab: 'ttft' },
-			},
-			{
-				id: 'diagnostics.mistral-cloud-tab',
-				titleKey: 'whatsNew.feature.diagnostics.mistral-cloud-tab.title',
-				descriptionKey: 'whatsNew.feature.diagnostics.mistral-cloud-tab.description',
-				kind: 'tab',
-				surface: { view: 'diagnostics', tab: 'mistral-cloud' },
 			},
 			{
 				// Listed last on purpose: the per-release cap means this is never

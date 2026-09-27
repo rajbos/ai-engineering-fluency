@@ -2,6 +2,11 @@
  * Promise utility helpers.
  */
 
+/** Give pending extension-host messages and timers a chance to run between file parses. */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
 export class TimeoutError extends Error {
   constructor(operation: string, timeoutMs: number) {
     super(`${operation} timed out after ${timeoutMs}ms`);

@@ -1,12 +1,8 @@
 /**
- * Renders the Dark Factory readiness section of the Fluency Score view.
+ * Renders the per-repository Dark Factory readiness scan in Usage Analysis.
  *
- * The rest of that view scores a *person's* fluency from their own session
- * logs. This section scores *repositories*, so it is deliberately rendered as
- * its own block with its own ladder and its own labelling, and it contributes
- * nothing to the personal radar or overall stage. Conflating the two is
- * exactly the individual-performance scoring the underlying research warns
- * against.
+ * Unlike the Fluency Score, this scan scores repositories, not people. It
+ * contributes nothing to the personal radar or overall stage.
  *
  * Pure string building — no DOM access, no messaging — so it can be unit
  * tested directly.

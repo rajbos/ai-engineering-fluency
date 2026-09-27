@@ -8,7 +8,7 @@
 import { calculateEstimatedCost } from '../../src/tokenEstimation';
 import { addModelUsage, scaleModelUsage } from '../../src/statsHelpers';
 import { normalizePathForComparison, detectClaudeCodeEditorVariant } from '../../src/workspaceHelpers';
-import { getCustomProviderGroup } from '../../src/webview/shared/modelUtils';
+import { getPricingSourceForEditor, getBillingGroup } from '../../src/chartDataBuilder';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import type { ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../src/types';
 export type { PeriodStats, UsageAnalysisPeriod } from '../../src/types';
@@ -57,43 +57,14 @@ export interface DailyEntry {
 	editorModelUsage?: { [editor: string]: ModelUsage };
 }
 
-// ── Billing group helpers (mirrors chartDataBuilder.ts) ──────────────────────────────────────
-
-/** Editor display names that bill through GitHub Copilot's AI-Credit system. */
-const COPILOT_EDITOR_NAMES = new Set([
-	'VS Code', 'VS Code Insiders', 'VS Code Exploration',
-	'VS Code Server', 'VS Code Server (Insiders)', 'VSCodium',
-	'Visual Studio', 'JetBrains', 'Copilot CLI', 'Copilot CLI (App)', 'MS Scout (Copilot CLI)',
-]);
-
-const MODEL_PROVIDER_PREFIXES: Array<[string, string]> = [
-	['claude', 'Anthropic'], ['anthropic', 'Anthropic'],
-	['gemini', 'Google'], ['google', 'Google'],
-	['mistral', 'Mistral AI'], ['codestral', 'Mistral AI'], ['magistral', 'Mistral AI'],
-	['ministral', 'Mistral AI'], ['devstral', 'Mistral AI'], ['pixtral', 'Mistral AI'],
-	['gpt', 'OpenAI'], ['o1', 'OpenAI'], ['o3', 'OpenAI'], ['o4', 'OpenAI'],
-	['grok', 'xAI'], ['raptor', 'xAI'], ['goldeneye', 'xAI'],
-	['qwen', 'Alibaba'], ['mai-', 'Microsoft'],
-];
-
-function getPricingSourceForEditor(editor: string): 'provider' | 'copilot' {
-	return COPILOT_EDITOR_NAMES.has(editor) ? 'copilot' : 'provider';
-}
-
-function getModelBillingProvider(modelId: string): string {
-	const customGroup = getCustomProviderGroup(modelId);
-	if (customGroup) { return customGroup; }
-	const id = modelId.toLowerCase();
-	const match = MODEL_PROVIDER_PREFIXES.find(([prefix]) => id.startsWith(prefix));
-	return match ? match[1] : 'Other';
-}
-
-/** Custom endpoints (BYOK) bill the user's own provider, so they keep their own group on Copilot surfaces too. */
-function getBillingGroup(editor: string, modelId: string): string {
-	const customGroup = getCustomProviderGroup(modelId);
-	if (customGroup) { return customGroup; }
-	return COPILOT_EDITOR_NAMES.has(editor) ? 'GitHub Copilot' : getModelBillingProvider(modelId);
-}
+// ── Billing group helpers ────────────────────────────────────────────────────────────────────
+// These used to be a hand-maintained copy of chartDataBuilder.ts's table and helpers. The copy
+// drifted: it never gained the `glm` prefix, so GLM models (which Mistral Vibe routes to, and
+// which are priced in modelPricing.json) billed to the catch-all "Other" group in the CLI while
+// the extension grouped them under Z.ai. It also matched on the raw id rather than
+// getModelLookupCandidates(), so `copilot/`-prefixed and custom-endpoint ids fell through too.
+// Importing the shared implementation removes that whole class of drift — see AGENTS.md,
+// "CLI Must Reuse Shared Functions".
 
 // ── Pure helpers ───────────────────────────────────────────────────────────────────────────────────────
 

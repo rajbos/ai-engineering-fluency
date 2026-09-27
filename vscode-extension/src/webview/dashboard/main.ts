@@ -1,5 +1,5 @@
 // Import shared utilities
-import { BUTTONS } from "../shared/buttonConfig";
+import { BUTTONS, getNavButtons } from "../shared/buttonConfig";
 import { createButton, el, setHtml } from "../shared/domUtils";
 import { escapeHtml, formatCost, formatNumber, formatCompact, setCompactNumbers } from "../shared/formatUtils";
 import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
@@ -203,16 +203,7 @@ function renderShell(root: HTMLElement, stats: DashboardStats): void {
   titleGroup.append(title, period);
   const buttonRow = el("div", "button-row");
 
-  buttonRow.append(
-    createButton(BUTTONS["btn-refresh"]),
-    createButton(BUTTONS["btn-details"]),
-    createButton(BUTTONS["btn-chart"]),
-    createButton(BUTTONS["btn-usage"]),
-    createButton(BUTTONS["btn-efficiency"]),
-    createButton(BUTTONS["btn-environmental"]),
-    createButton(BUTTONS["btn-diagnostics"]),
-    createButton(BUTTONS["btn-maturity"]),
-  );
+  buttonRow.append(...getNavButtons("btn-dashboard", true).map((button) => createButton(button)));
 
   header.append(titleGroup, buttonRow);
 
@@ -227,8 +218,14 @@ function renderShell(root: HTMLElement, stats: DashboardStats): void {
   sections.append(buildTeamSection(stats));
 
   if (hasBothBackends) {
+    sections.id = "azure-content";
+    sections.setAttribute("role", "tabpanel");
+    sections.setAttribute("aria-labelledby", "tab-azure");
     const tabNav = buildTabNav();
     const teamServerPanel = buildTeamServerPanel(currentConfig!.teamServerUrl);
+    teamServerPanel.id = "team-server-content";
+    teamServerPanel.setAttribute("role", "tabpanel");
+    teamServerPanel.setAttribute("aria-labelledby", "tab-team-server");
     teamServerPanel.style.display = "none";
 
     container.append(header, tabNav, sections, footer, teamServerPanel);
@@ -268,18 +265,13 @@ function buildPersonalSection(personal: UserSummary, lookbackDays: number): HTML
   if (showSyncWarning) {
     const syncCoverage = localTokens > 0 ? Math.round((syncedTokens / localTokens) * 100) : 100;
     const warning = el("div", "sync-warning");
-    warning.style.cssText =
-      "margin-top: 12px; padding: 10px 14px; background: var(--vscode-inputValidation-warningBackground, rgba(200,120,0,0.1)); border: 1px solid var(--vscode-inputValidation-warningBorder, rgba(200,120,0,0.5)); border-radius: 6px; font-size: 12px; color: var(--vscode-foreground, #ccc);";
-    const warningTitle = el("div", "");
-    warningTitle.style.cssText = "font-weight: 600; margin-bottom: 4px;";
+    const warningTitle = el("div", "sync-warning-title");
     warningTitle.textContent = `⚠️ Only ${syncCoverage}% of your local activity is synced to cloud (${formatCompact(syncedTokens)} of ${formatCompact(localTokens)} local tokens in last ${lookbackDays} days)`;
-    const warningNote = el("div", "");
-    warningNote.style.cssText = "font-size: 11px; opacity: 0.7; margin-top: 3px;";
+    const warningNote = el("div", "sync-warning-note");
     warningNote.textContent = "To close the gap: increase the lookback window, run a manual sync, or check that blob upload is enabled and configured.";
     const backfillBtn = document.createElement("button");
+    backfillBtn.className = "backfill-btn";
     backfillBtn.textContent = "⏫ Backfill Historical Data";
-    backfillBtn.style.cssText =
-      "margin-top: 10px; padding: 5px 12px; font-size: 12px; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-secondaryBackground, #3a3d41); color: var(--vscode-button-secondaryForeground, #ccc); border-radius: 4px;";
     backfillBtn.title = "Scan all local session files and upload missing daily data to Azure Storage";
     backfillBtn.addEventListener("click", () => {
       vscode.postMessage({ command: "backfillHistoricalData" });
@@ -313,12 +305,9 @@ function buildTeamSection(stats: DashboardStats): HTMLElement {
   let dateInfo: HTMLElement | null = null;
   if (stats.team.firstDate || stats.team.lastDate) {
     dateInfo = el("div", "info-box");
-    dateInfo.style.cssText =
-      "margin-top: 16px; padding: 12px 14px; background: var(--vscode-inputValidation-infoBackground, rgba(0,120,212,0.1)); border: 1px solid var(--vscode-inputValidation-infoBorder, rgba(0,120,212,0.4)); border-radius: 6px; font-size: 13px; color: var(--vscode-foreground, #ccc);";
     const firstDate = stats.team.firstDate;
     const lastDate = stats.team.lastDate;
-    const rangeLabel = el("div", "");
-    rangeLabel.style.cssText = "font-weight: 600; margin-bottom: 4px;";
+    const rangeLabel = el("div", "info-box-title");
     if (firstDate && lastDate) {
       rangeLabel.textContent = `📅 Synced data range: ${firstDate} → ${lastDate}`;
     } else if (firstDate) {
@@ -326,8 +315,7 @@ function buildTeamSection(stats: DashboardStats): HTMLElement {
     } else if (lastDate) {
       rangeLabel.textContent = `📅 Last synced data: ${lastDate}`;
     }
-    const rangeNote = el("div", "");
-    rangeNote.style.cssText = "font-size: 11px; opacity: 0.7; margin-top: 3px;";
+    const rangeNote = el("div", "info-box-note");
     const lookback = stats.lookbackDays ?? 30;
     rangeNote.textContent = `Dashboard is filtered to the last ${lookback} days. This reflects what team members have synced to cloud storage. Older data may exist locally but was outside their configured upload window.`;
     dateInfo.append(rangeLabel, rangeNote);
@@ -551,12 +539,23 @@ function renderTipHtml(tip: string): string {
 /** Builds the tab navigation bar shown when both Azure and Team Server are configured. */
 function buildTabNav(): HTMLElement {
   const nav = el("div", "tab-nav");
+  nav.setAttribute("role", "tablist");
 
   const azureTab = el("button", "tab-btn tab-btn-active", "☁️ Azure Dashboard") as HTMLButtonElement;
+  azureTab.id = "tab-azure";
   azureTab.dataset.tab = "azure";
+  azureTab.setAttribute("role", "tab");
+  azureTab.setAttribute("aria-controls", "azure-content");
+  azureTab.setAttribute("aria-selected", "true");
+  azureTab.tabIndex = 0;
 
   const teamServerTab = el("button", "tab-btn", "🖥️ Team Server") as HTMLButtonElement;
+  teamServerTab.id = "tab-team-server";
   teamServerTab.dataset.tab = "teamServer";
+  teamServerTab.setAttribute("role", "tab");
+  teamServerTab.setAttribute("aria-controls", "team-server-content");
+  teamServerTab.setAttribute("aria-selected", "false");
+  teamServerTab.tabIndex = -1;
 
   nav.append(azureTab, teamServerTab);
   return nav;
@@ -572,12 +571,30 @@ function wireTabNav(
   const tabs = tabNav.querySelectorAll<HTMLButtonElement>(".tab-btn");
   tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
-      tabs.forEach((t) => t.classList.remove("tab-btn-active"));
+      tabs.forEach((t) => {
+        t.classList.remove("tab-btn-active");
+        t.setAttribute("aria-selected", String(t === tab));
+        t.tabIndex = t === tab ? 0 : -1;
+      });
       tab.classList.add("tab-btn-active");
       const isTeamServer = tab.dataset.tab === "teamServer";
       azureContent.style.display = isTeamServer ? "none" : "";
       footer.style.display = isTeamServer ? "none" : "";
       teamServerPanel.style.display = isTeamServer ? "" : "none";
+    });
+    tab.addEventListener("keydown", (event) => {
+      const index = Array.from(tabs).indexOf(tab);
+      let nextIndex: number;
+      switch (event.key) {
+        case "ArrowRight": nextIndex = (index + 1) % tabs.length; break;
+        case "ArrowLeft": nextIndex = (index - 1 + tabs.length) % tabs.length; break;
+        case "Home": nextIndex = 0; break;
+        case "End": nextIndex = tabs.length - 1; break;
+        default: return;
+      }
+      event.preventDefault();
+      tabs[nextIndex].focus();
+      tabs[nextIndex].click();
     });
   });
 }
@@ -631,15 +648,9 @@ function showTeamServerView(url: string, failureMessage?: string): void {
   const header = el("div", "header");
   const title = el("div", "title", "📊 Team Dashboard");
   const buttonRow = el("div", "button-row");
-  buttonRow.append(
-    createButton(BUTTONS["btn-details"]),
-    createButton(BUTTONS["btn-chart"]),
-    createButton(BUTTONS["btn-usage"]),
-    createButton(BUTTONS["btn-efficiency"]),
-    createButton(BUTTONS["btn-environmental"]),
-    createButton(BUTTONS["btn-diagnostics"]),
-    createButton(BUTTONS["btn-maturity"]),
-  );
+  buttonRow.append(...getNavButtons("btn-dashboard", true)
+    .filter((button) => button.id !== "btn-refresh")
+    .map((button) => createButton(button)));
   header.append(title, buttonRow);
 
   const panel = buildTeamServerPanel(url);

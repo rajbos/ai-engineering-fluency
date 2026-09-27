@@ -518,12 +518,14 @@ jobs:
     #     PAT is exposed to the posting step only; nothing that builds or
     #     renders the PR's code can read it. Attaching files needs push access
     #     (https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli),
-    #     which on a fine-grained PAT is Contents: write; gh's pre-flight
-    #     checks the user's role, not the token's grants, so a token short of
-    #     that fails at upload time with "not accessible by personal access
-    #     token". Without the secret (or if the upload fails) the comment is
-    #     still posted with GITHUB_TOKEN, minus the inline images, pointing at
-    #     the artifact instead.
+    #     which on a fine-grained PAT is Contents: write, and the same token
+    #     then posts the comment, which needs Pull requests: write. gh's
+    #     pre-flight checks the user's role, not the token's grants, so a
+    #     token short of either fails mid-command with "not accessible by
+    #     personal access token" (suffixed "(addComment)" for the comment
+    #     half). Without the secret (or if gh fails) the comment is still
+    #     posted with GITHUB_TOKEN, minus the inline images, pointing at the
+    #     artifact and saying why the images are missing.
     #   - Fork PRs get a read-only token and no secrets, so they are skipped
     #     here; their screenshots stay in the artifact.
     # The three publishing steps are report-only, like the diff they publish:
@@ -595,14 +597,39 @@ jobs:
       run: |
         set -euo pipefail
 
+        # Escape a value for a ::warning::/::error:: workflow command (the
+        # encoding GitHub documents for command data). gh's error text and the
+        # attachment list are outside input: an unescaped newline or %0A in
+        # them would end the annotation early or start a new command.
+        cmd_escape() {
+          local s="$1"
+          s="${s//'%'/%25}"
+          s="${s//$'\r'/%0D}"
+          s="${s//$'\n'/%0A}"
+          printf '%s' "$s"
+        }
+
+        # The same outside text for a PR comment: first line only, no
+        # Markdown/HTML/mention/escape characters, bounded length.
+        comment_safe() {
+          printf '%s' "$1" | head -n1 | tr -d '\r' | tr -c 'A-Za-z0-9 .,:;/()?=_-' ' ' | tr -s ' ' | cut -c1-300
+        }
+
         # The identities this workflow posts as: the Actions bot, and the PAT's
         # user when one is configured. Only their comments are ever replaced,
         # so a person quoting the marker in their own comment keeps it.
         posters='"github-actions[bot]"'
+        # gh's error when the PAT could not be used. A failed `gh api user`
+        # can be a bad token or just a GitHub/network hiccup, so this keeps
+        # gh's own words rather than guessing which.
+        pat_error=""
         if [ -n "${GH_ATTACH_TOKEN:-}" ]; then
-          pat_login="$(GH_TOKEN="$GH_ATTACH_TOKEN" gh api user --jq .login 2>/dev/null || true)"
+          pat_err_file="$(mktemp)"
+          pat_login="$(GH_TOKEN="$GH_ATTACH_TOKEN" gh api user --jq .login 2>"$pat_err_file" || true)"
           if [ -z "$pat_login" ]; then
-            echo "::warning::GH_PAT is set but 'gh api user' failed with it; posting without inline images."
+            pat_error="$(head -n1 "$pat_err_file")"
+            pat_error="${pat_error:-gh gave no reason}"
+            echo "::warning::GH_PAT is set but could not be authenticated with 'gh api user' ($(cmd_escape "$pat_error")); posting without inline images."
             GH_ATTACH_TOKEN=""
           else
             posters="${posters},\"${pat_login}\""
@@ -662,13 +689,13 @@ jobs:
             file="${line%%#*}"
             case "$file" in
               visual-output/baseline/*.png|visual-output/current/*.png|visual-output/diff/*.png) ;;
-              *) echo "::error::Refusing to attach '${file}': not a screenshot path."; return 1 ;;
+              *) echo "::error::Refusing to attach '$(cmd_escape "$file")': not a screenshot path."; return 1 ;;
             esac
             case "${file#visual-output/*/}" in
-              */*|*..*) echo "::error::Refusing to attach '${file}': nested or relative path."; return 1 ;;
+              */*|*..*) echo "::error::Refusing to attach '$(cmd_escape "$file")': nested or relative path."; return 1 ;;
             esac
             if [ -L "$file" ] || [ ! -f "$file" ]; then
-              echo "::error::Refusing to attach '${file}': not a regular file."; return 1
+              echo "::error::Refusing to attach '$(cmd_escape "$file")': not a regular file."; return 1
             fi
             args+=(--attach "$line")
           done < visual-comment/attachments.txt
@@ -697,19 +724,41 @@ jobs:
         elif post_with_images; then
           echo "Posted the screenshot comment with ${ATTACHMENTS} inline image(s)."
         else
-          if [ -z "${GH_ATTACH_TOKEN:-}" ]; then
-            echo "::notice::GH_PAT is not configured, so the screenshot comment links to the artifact instead of embedding images. Add a user PAT with push access (Contents: write on a fine-grained token) as the GH_PAT secret to inline them."
+          # Why the images are missing, for the comment itself as well as the
+          # annotation: a warning on the checks page is where this failure
+          # went unnoticed for weeks. Empty when there were no images to show.
+          why=""
+          if [ -n "$pat_error" ]; then
+            [ "${ATTACHMENTS:-0}" -gt 0 ] && why="the \`GH_PAT\` secret could not be authenticated (\`gh api user\`: \`$(comment_safe "$pat_error")\`)."
+          elif [ -z "${GH_ATTACH_TOKEN:-}" ]; then
+            echo "::notice::GH_PAT is not configured, so the screenshot comment links to the artifact instead of embedding images. Add a user PAT as the GH_PAT secret to inline them: a classic PAT needs the repo scope; a fine-grained one needs Contents: write (the upload) and Pull requests: write (the comment) on this repository."
+            [ "${ATTACHMENTS:-0}" -gt 0 ] && why="the \`GH_PAT\` secret is not configured."
           elif [ "${ATTACHMENTS:-0}" -gt 0 ]; then
             # One line, so it survives as a workflow annotation.
-            reason="$(printf '%s' "${upload_error:-}" | grep -m1 -E 'upload|HTTP|attach' || printf '%s' "${upload_error:-}" | head -n1)"
+            reason="$(printf '%s' "${upload_error:-}" | grep -m1 -E 'upload|HTTP|attach|GraphQL' || printf '%s' "${upload_error:-}" | head -n1)"
             hint=""
             case "$reason" in
+              # gh uploads first and then posts the comment with the same
+              # token, so the same 403 text can come from either half.
+              *"(addComment)"*)
+                hint=" The fine-grained GH_PAT can upload but cannot comment: it needs Pull requests: write on this repository." ;;
               *"not accessible by personal access token"*)
-                hint=" The fine-grained GH_PAT is missing a permission: attaching files needs push access, i.e. Contents: write on this repository." ;;
+                hint=" The fine-grained GH_PAT is missing a permission; for the upload that is most likely Contents: write (push access) on this repository." ;;
               *"requires write access"*)
                 hint=" The GH_PAT user needs write access to this repository." ;;
             esac
-            echo "::warning::Uploading the screenshots with gh --attach failed; posting the comment without inline images. ${reason:-gh gave no reason}.${hint}"
+            # Not "uploading failed": gh uploads and then comments, and either
+            # half can be the one that failed; gh's reason says which.
+            echo "::warning::gh pr comment --attach failed; posting the comment without inline images. $(cmd_escape "${reason:-gh gave no reason}").${hint}"
+            why="\`gh pr comment --attach\` failed: \`$(comment_safe "${reason:-gh gave no reason}")\`.${hint}"
+          fi
+          if [ -n "$why" ]; then
+            # Right under the heading; the marker must stay the first line.
+            printf '> [!WARNING]\n> Inline screenshots could not be attached: %s See the [workflow run](%s).\n\n' \
+              "$why" "$RUN_URL" > visual-comment/why.md
+            awk 'NR==FNR { note = note $0 "\n"; next } { print } FNR==3 { printf "%s", note }' \
+              visual-comment/why.md visual-comment/comment-plain.md > visual-comment/comment-plain.tmp
+            mv visual-comment/comment-plain.tmp visual-comment/comment-plain.md
           fi
           post_plain
           echo "Posted the screenshot comment without inline images."

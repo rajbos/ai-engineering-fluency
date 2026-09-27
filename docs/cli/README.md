@@ -110,11 +110,11 @@ GitHub Copilot Token Tracker - Environmental Impact
 
 Based on your last 30 days of usage (520,423 tokens):
 
-  CO₂ emissions    ~  0.42 kg CO₂e
-  Water usage      ~  0.63 L
-  Tree equivalent  ~  0.02 trees/year needed to offset
+  CO₂ emissions    ~  76 g CO₂e
+  Water usage      ~  1.35 L
+  Tree equivalent  ~  0.004 trees/year needed to offset
 
-All figures are estimates based on published AI energy-use research.
+All figures are estimates derived from Jegham et al., *How Hungry is AI?* (arXiv:2505.09598), weighted by token type and scaled per model by output-token price.
 ```
 
 ---

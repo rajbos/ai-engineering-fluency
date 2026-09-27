@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { createSemaphore, createWakeupGate, TimeoutError, withTimeout } from '../../src/utils/promises';
+import { createSemaphore, createWakeupGate, TimeoutError, withTimeout, yieldToEventLoop } from '../../src/utils/promises';
 
 /**
  * Deterministic event-loop yield for "confirm nothing resolved yet"/"let a pending .then() run"
@@ -9,6 +9,14 @@ import { createSemaphore, createWakeupGate, TimeoutError, withTimeout } from '..
  * flake under CI load and doesn't slow the suite down waiting out an arbitrary delay.
  */
 const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+test('yieldToEventLoop lets queued host work run before a file scan continues', async () => {
+	const order: string[] = [];
+	setImmediate(() => { order.push('button command'); });
+	await yieldToEventLoop();
+	order.push('next file');
+	assert.deepEqual(order, ['button command', 'next file']);
+});
 
 test('createWakeupGate: signal resolves all currently parked waiters', async () => {
 	const gate = createWakeupGate();

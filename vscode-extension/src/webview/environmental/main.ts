@@ -8,6 +8,7 @@ import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
+import { localize } from '../shared/localization';
 import { applyWebviewLocale } from '../shared/webviewLocale';
 
 // --- Analogy constants ---
@@ -205,7 +206,7 @@ function buildImpactCards(
 	section.append(heading);
 
 	const intro = el('p', 'section-intro');
-	intro.textContent = 'All figures are estimates based on average data center energy and water consumption figures. Analogies use European averages. Treat these as order-of-magnitude indicators, not precise measurements.';
+	intro.textContent = localize('environmental.intro');
 	section.append(intro);
 
 	const periods: Array<[string, string, AnalogyItem[] | null]>[] = [
@@ -250,20 +251,22 @@ function buildImpactCards(
 
 function buildEstimatesSection(): HTMLElement {
 	const section = el('div', 'section');
-	const heading = iconHeading('h3', 'lightbulb', 'Calculation & Estimates');
+	const heading = iconHeading('h3', 'lightbulb', localize('environmental.methodology.heading'));
 	section.append(heading);
 
 	const notes = document.createElement('ul');
 	notes.className = 'notes';
 
 	const items = [
-		'Cost (UBB) uses GitHub Copilot AI Credit rates (1 credit = $0.01) under Usage Based Billing.',
-		'Estimated CO₂ is based on ~0.2 g CO₂e per 1,000 tokens (average data center energy mix and PUE).',
-		'Estimated water usage is based on ~0.3 L per 1,000 tokens (data center cooling estimates).',
-		'Tree equivalent represents the fraction of a single mature tree\'s annual CO₂ absorption (~21 kg/year).',
-		'CO₂ analogies: petrol car ≈ 120 g/km · intercity train ≈ 41 g/km · economy flight ≈ 180 g/km (ICAO avg.) · smartphone charge ≈ 8 g · LED bulb ≈ 3 g/hr (10 W, EU grid) · kettle boil ≈ 20 g.',
-		'Water analogies: shower ≈ 8 L/min · washing machine ≈ 50 L · standard bathtub ≈ 150 L · dishwasher ≈ 12 L · mug of tea ≈ 250 mL · daily drinking water ≈ 2 L/person.',
-		'All analogies are order-of-magnitude estimates. Actual values depend on your region\'s energy mix and device efficiency.'
+		localize('environmental.methodology.cost'),
+		localize('environmental.methodology.co2Paper'),
+		localize('environmental.methodology.co2Weights'),
+		localize('environmental.methodology.modelScaling'),
+		localize('environmental.methodology.water'),
+		localize('environmental.methodology.tree'),
+		localize('environmental.methodology.co2Analogies'),
+		localize('environmental.methodology.waterAnalogies'),
+		localize('environmental.methodology.caveat'),
 	];
 
 	items.forEach(text => {
@@ -271,9 +274,35 @@ function buildEstimatesSection(): HTMLElement {
 		li.textContent = text;
 		notes.append(li);
 	});
+	notes.append(buildSourcesItem());
 
 	section.append(notes);
 	return section;
+}
+
+/**
+ * Links to the methodology sources. The host maps the id to a fixed URL, so the
+ * webview never asks it to open an arbitrary address.
+ */
+function buildSourcesItem(): HTMLElement {
+	const li = document.createElement('li');
+	li.append(`${localize('environmental.methodology.sources')} `);
+	const links: Array<[string, string]> = [
+		['paper', localize('environmental.methodology.paperLink')],
+		['neuland', localize('environmental.methodology.neulandLink')],
+	];
+	links.forEach(([source, label], i) => {
+		if (i > 0) { li.append(' · '); }
+		const a = document.createElement('a');
+		a.href = '#';
+		a.textContent = label;
+		a.addEventListener('click', (event) => {
+			event.preventDefault();
+			vscode.postMessage({ command: 'openMethodologySource', source });
+		});
+		li.append(a);
+	});
+	return li;
 }
 
 function wireButtons(): void {
