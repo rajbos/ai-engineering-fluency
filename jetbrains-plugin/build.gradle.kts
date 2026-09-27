@@ -17,9 +17,11 @@ import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.TaskAction
 
 plugins {
-    // Pinned below CodeQL's current Kotlin version ceiling: the CodeQL analysis
-    // job fails on 2.4.20 with "Kotlin version 2.4.20 is too recent". Keep the
-    // last known-good Kotlin line until CodeQL adds support for 2.4.20+.
+    // CodeQL support note: Kotlin 2.4.20 needs CodeQL CLI >= 2.27.1, which ships with
+    // codeql-action v4.38.2+ (pinned in .github/workflows/codeql.yml). When bumping
+    // Kotlin again, check the new version against CodeQL's supported-versions list first —
+    // the traced manual build fails with an opaque "Kotlin version X is too recent"
+    // (surfaced as a Kotlin daemon failure) if the extractor doesn't know it yet.
     kotlin("jvm") version "2.4.20"
     id("org.jetbrains.intellij.platform") version "2.19.0"
 }
