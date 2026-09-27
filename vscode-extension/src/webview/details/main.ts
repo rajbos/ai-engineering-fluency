@@ -13,6 +13,7 @@ import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 import type { ModelUsage } from '../shared/types';
 import { getBillingGroup } from '../../../../src/chartDataBuilder';
+import { ALL_PERIODS, getAllProviders, getFilterableProviders, getActiveExcludedProviders } from './providerFilter';
 
 type EditorUsage = Record<string, { tokens: number; sessions: number }>;
 type TableSortKey = 'name' | 'today' | 'last30Days' | 'month' | 'lastMonth' | 'projected';
@@ -134,12 +135,7 @@ let editorOtherExpanded: boolean = (_initSort?.editorOtherExpanded) ?? false;
 let editorSectionCollapsed: boolean = (_initSort?.editorSectionCollapsed) ?? false;
 /** Billing-group (provider) names deselected in the "Cost by Provider" filter. Empty = all providers included. */
 let excludedProviders: Set<string> = new Set(_initSort?.excludedProviders ?? []);
-/**
- * The subset of `excludedProviders` that actually applies to the current render: only providers
- * that have a card in the visible "Cost by Provider" panel. A saved exclusion for a provider with
- * no card (or with the panel hidden entirely) cannot be seen or undone, so it must not silently
- * zero out totals — see issue #2198.
- */
+/** The subset of `excludedProviders` that applies to the current render — see `getActiveExcludedProviders`. */
 let activeExcludedProviders: Set<string> = new Set();
 /** Last rendered stats, kept so provider-filter toggles can trigger a full re-render. */
 let lastStats: DetailedStats | null = null;
@@ -258,8 +254,7 @@ lastStats = stats;
 const root = document.getElementById('root');
 if (!root) { return; }
 
-const filterableProviders = getFilterableProviders(stats);
-activeExcludedProviders = new Set(Array.from(excludedProviders).filter(p => filterableProviders.includes(p)));
+activeExcludedProviders = getActiveExcludedProviders(excludedProviders, getFilterableProviders(stats));
 
 const allProviders = getAllProviders(stats);
 const projectedTokens = Math.round(calculateProjection(stats.last30Days.tokens + stats.last30Days.thinkingTokens));
@@ -616,21 +611,6 @@ excludedProviders: Array.from(excludedProviders)
 // Cost-by-provider helpers
 // ---------------------------------------------------------------------------
 
-const ALL_PERIODS = ['today', 'last30Days', 'month', 'lastMonth'] as const;
-
-/** Returns every billing-group (provider) name seen across all four periods, "GitHub Copilot" first. */
-function getAllProviders(stats: DetailedStats): string[] {
-const set = new Set<string>();
-ALL_PERIODS.forEach(period => {
-Object.keys(stats[period].billingGroupCosts ?? {}).forEach(p => set.add(p));
-});
-return Array.from(set).sort((a, b) => {
-if (a === 'GitHub Copilot') { return -1; }
-if (b === 'GitHub Copilot') { return 1; }
-return a.localeCompare(b);
-});
-}
-
 /**
  * Whether GitHub Copilot is the only provider in play — either it is the single billing
  * group seen, or there is no billing-group breakdown at all (older cached stats, which
@@ -638,16 +618,6 @@ return a.localeCompare(b);
  */
 function isCopilotOnlyProviders(allProviders: string[]): boolean {
 	return allProviders.every(p => p === 'GitHub Copilot');
-}
-
-/**
- * Providers that get a card in the "Cost by Provider" panel (those with cost this month).
- * With zero or one such provider the panel adds no value (nothing to compare or filter)
- * and is hidden, so this returns an empty list — meaning no provider can be filtered out.
- */
-function getFilterableProviders(stats: DetailedStats): string[] {
-	const providersWithMonthlyCost = getAllProviders(stats).filter(provider => (stats.month.billingGroupCosts?.[provider] ?? 0) > 0);
-	return providersWithMonthlyCost.length > 1 ? providersWithMonthlyCost : [];
 }
 
 /** Providers currently selected (not filtered out) from the given full provider list. */
