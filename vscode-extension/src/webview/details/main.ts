@@ -134,6 +134,13 @@ let editorOtherExpanded: boolean = (_initSort?.editorOtherExpanded) ?? false;
 let editorSectionCollapsed: boolean = (_initSort?.editorSectionCollapsed) ?? false;
 /** Billing-group (provider) names deselected in the "Cost by Provider" filter. Empty = all providers included. */
 let excludedProviders: Set<string> = new Set(_initSort?.excludedProviders ?? []);
+/**
+ * The subset of `excludedProviders` that actually applies to the current render: only providers
+ * that have a card in the visible "Cost by Provider" panel. A saved exclusion for a provider with
+ * no card (or with the panel hidden entirely) cannot be seen or undone, so it must not silently
+ * zero out totals — see issue #2198.
+ */
+let activeExcludedProviders: Set<string> = new Set();
 /** Last rendered stats, kept so provider-filter toggles can trigger a full re-render. */
 let lastStats: DetailedStats | null = null;
 
@@ -250,6 +257,9 @@ setCompactNumbers(stats.compactNumbers !== false);
 lastStats = stats;
 const root = document.getElementById('root');
 if (!root) { return; }
+
+const filterableProviders = getFilterableProviders(stats);
+activeExcludedProviders = new Set(Array.from(excludedProviders).filter(p => filterableProviders.includes(p)));
 
 const allProviders = getAllProviders(stats);
 const projectedTokens = Math.round(calculateProjection(stats.last30Days.tokens + stats.last30Days.thinkingTokens));
@@ -394,6 +404,23 @@ function buildPlanBadge(stats: DetailedStats): HTMLElement | null {
 
 type MetricGroup = { heading: string; rows: MetricRow[] };
 
+/** Builds the all/selected-providers cost row (empty when GitHub Copilot is the only provider). */
+function buildProvidersCostRows(stats: DetailedStats, projections: Projections, allProviders: string[]): MetricRow[] {
+	// With GitHub Copilot as the only provider the "selected providers" row is just a
+	// duplicate of the Copilot UBB row below it, so drop it — same reasoning as the
+	// "Cost by Provider" panel hiding itself when there is nothing to compare.
+	// Only mention the provider filter when the "Cost by Provider" panel is actually shown —
+	// otherwise the tooltip points at a filter that does not exist (issue #2198).
+	const hasProviderFilter = getFilterableProviders(stats).length > 0;
+	const providersCostLabel = hasProviderFilter ? 'Estimated cost (selected providers)' : 'Estimated cost (all providers)';
+	const providersCostTooltip = hasProviderFilter
+		? 'Sum of estimated cost across the providers selected in the Cost by Provider filter below — GitHub Copilot uses UBB AI Credit rates, other providers use their own API pricing.'
+		: 'Sum of estimated cost across all providers — GitHub Copilot uses UBB AI Credit rates, other providers (e.g. Claude Code, even on a subscription) use their own API pricing as an API-equivalent estimate.';
+	return isCopilotOnlyProviders(allProviders) ? [] : [
+		{ label: providersCostLabel, labelTooltip: providersCostTooltip, icon: '💵', color: '#7ce38b', today: formatCost(totalCostForPeriod(stats.today, allProviders)), last30Days: formatCost(totalCostForPeriod(stats.last30Days, allProviders)), month: formatCost(totalCostForPeriod(stats.month, allProviders)), lastMonth: formatCost(totalCostForPeriod(stats.lastMonth, allProviders)), projected: formatCost(projections.projectedCost) },
+	];
+}
+
 function buildMetricsGroups(stats: DetailedStats, projections: Projections): MetricGroup[] {
 	const allProviders = getAllProviders(stats);
 	const tokenRows: MetricRow[] = [
@@ -405,12 +432,7 @@ function buildMetricsGroups(stats: DetailedStats, projections: Projections): Met
 		{ label: 'Service overhead %', icon: '☁️', color: '#90a4ae', today: serviceOverheadPct(stats.today), last30Days: serviceOverheadPct(stats.last30Days), month: serviceOverheadPct(stats.month), lastMonth: serviceOverheadPct(stats.lastMonth), projected: '—' },
 		{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
 	];
-	// With GitHub Copilot as the only provider the "selected providers" row is just a
-	// duplicate of the Copilot UBB row below it, so drop it — same reasoning as the
-	// "Cost by Provider" panel hiding itself when there is nothing to compare.
-	const selectedProvidersCostRows: MetricRow[] = isCopilotOnlyProviders(allProviders) ? [] : [
-		{ label: 'Estimated cost (selected providers)', labelTooltip: 'Sum of estimated cost across the providers selected in the Cost by Provider filter below — GitHub Copilot uses UBB AI Credit rates, other providers use their own API pricing.', icon: '💵', color: '#7ce38b', today: formatCost(totalCostForPeriod(stats.today, allProviders)), last30Days: formatCost(totalCostForPeriod(stats.last30Days, allProviders)), month: formatCost(totalCostForPeriod(stats.month, allProviders)), lastMonth: formatCost(totalCostForPeriod(stats.lastMonth, allProviders)), projected: formatCost(projections.projectedCost) },
-	];
+	const selectedProvidersCostRows = buildProvidersCostRows(stats, projections, allProviders);
 	const costRows: MetricRow[] = [
 		...selectedProvidersCostRows,
 		{ label: 'Estimated cost (GitHub Copilot UBB)', labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.', icon: '🟢', color: '#7ce38b', today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) },
@@ -557,11 +579,8 @@ function buildProviderTotalCard(stats: DetailedStats, allProviders: string[]): H
  * further down the page to just the selected provider(s).
  */
 function buildProviderPanel(stats: DetailedStats): HTMLElement | null {
-	const allProviders = getAllProviders(stats);
-	const providersWithMonthlyCost = allProviders.filter(provider => (stats.month.billingGroupCosts?.[provider] ?? 0) > 0);
-	// With zero or one provider the panel adds no value (nothing to compare or
-	// filter), so hide it entirely.
-	if (providersWithMonthlyCost.length <= 1) { return null; }
+	const providersWithMonthlyCost = getFilterableProviders(stats);
+	if (providersWithMonthlyCost.length === 0) { return null; }
 
 	const section = el('div', 'section');
 	section.append(iconHeading('h3', 'credit-card', 'Cost by Provider'));
@@ -621,9 +640,19 @@ function isCopilotOnlyProviders(allProviders: string[]): boolean {
 	return allProviders.every(p => p === 'GitHub Copilot');
 }
 
+/**
+ * Providers that get a card in the "Cost by Provider" panel (those with cost this month).
+ * With zero or one such provider the panel adds no value (nothing to compare or filter)
+ * and is hidden, so this returns an empty list — meaning no provider can be filtered out.
+ */
+function getFilterableProviders(stats: DetailedStats): string[] {
+	const providersWithMonthlyCost = getAllProviders(stats).filter(provider => (stats.month.billingGroupCosts?.[provider] ?? 0) > 0);
+	return providersWithMonthlyCost.length > 1 ? providersWithMonthlyCost : [];
+}
+
 /** Providers currently selected (not filtered out) from the given full provider list. */
 function includedProviders(allProviders: string[]): string[] {
-return allProviders.filter(p => !excludedProviders.has(p));
+return allProviders.filter(p => !activeExcludedProviders.has(p));
 }
 
 /** Sums the billing-group costs for the given providers only. */
@@ -673,9 +702,9 @@ function modelBillingGroups(stats: DetailedStats, model: string): Set<string> {
  * item (e.g. older cached stats), it is never hidden — we only filter what we can attribute.
  */
 function isVisibleForProviderFilter(groups: Set<string>): boolean {
-	if (excludedProviders.size === 0) { return true; }
+	if (activeExcludedProviders.size === 0) { return true; }
 	if (groups.size === 0) { return true; }
-	return Array.from(groups).some(g => !excludedProviders.has(g));
+	return Array.from(groups).some(g => !activeExcludedProviders.has(g));
 }
 
 type EditorItem = {
@@ -1276,7 +1305,7 @@ notes.className = 'notes';
 
 const items = [
 'Cost (UBB) uses GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what you are billed under Usage Based Billing.',
-'"Estimated cost (selected providers)" and the summary cost card sum estimated spend across all providers (GitHub Copilot, Anthropic, Google, OpenAI, …); use the "⚙ Providers" filter in the Cost by Provider section to include/exclude specific providers.',
+'"Estimated cost (selected providers)" and the summary cost card sum estimated spend across all providers (GitHub Copilot, Anthropic, Google, OpenAI, …); when the Cost by Provider section is shown, click a provider card there to include/exclude it. Non-Copilot providers (e.g. Claude Code) are priced at their public API rates as an API-equivalent estimate, even when you use them through a flat-rate subscription.',
 'Estimated CO₂ is based on ~0.2 g CO₂e per 1,000 tokens.',
 'Estimated water usage is based on ~0.3 L per 1,000 tokens.',
 'Tree equivalent represents the fraction of a single mature tree\'s annual CO₂ absorption (~21 kg/year).'
