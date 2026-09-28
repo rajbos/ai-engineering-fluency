@@ -17,6 +17,13 @@ test('getAllProviders: unions every period and sorts GitHub Copilot first', () =
 	assert.deepEqual(result, ['GitHub Copilot', 'Anthropic', 'OpenAI']);
 });
 
+test('getAllProviders: picks up a provider that appears in only one period, for each period', () => {
+	for (const period of ['today', 'last30Days', 'month', 'lastMonth'] as const) {
+		const result = getAllProviders(stats({ month: { 'GitHub Copilot': 1 }, [period]: { 'GitHub Copilot': 1, OpenAI: 2 } }));
+		assert.deepEqual(result, ['GitHub Copilot', 'OpenAI'], `OpenAI only in ${period}`);
+	}
+});
+
 test('getAllProviders: returns an empty list when no period has a breakdown', () => {
 	assert.deepEqual(getAllProviders(stats({})), []);
 });
