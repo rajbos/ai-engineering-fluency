@@ -19,6 +19,12 @@
 #           or the shared src/ folder.
 #   TEST:   any path containing /test/, /tests/ or /__tests__/, or a filename
 #           containing .test. or .spec. — in any directory of the repo.
+#
+# Deletion-only source files (0 added lines: removed dead code or unused
+# imports, or a file deleted outright) add no new logic, so they need no test
+# companion. A PR whose source changes are all deletion-only passes; the
+# existing suite (type-check, lint, tests) still has to pass. Renames count
+# as delete + add (--no-renames), so a moved file still needs a test change.
 set -euo pipefail
 
 BASE_SHA="${BASE_SHA:-}"
@@ -38,10 +44,11 @@ if [ -z "$BASE_SHA" ]; then
   exit 0
 fi
 
-CHANGED_FILES="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" \
-  || git diff --name-only "${BASE_SHA}" "${HEAD_SHA}")"
+# "<added>\t<deleted>\t<path>" per changed file.
+NUMSTAT="$(git diff --numstat --no-renames "${BASE_SHA}...${HEAD_SHA}" \
+  || git diff --numstat --no-renames "${BASE_SHA}" "${HEAD_SHA}")"
 
-if [ -z "$CHANGED_FILES" ]; then
+if [ -z "$NUMSTAT" ]; then
   echo "Empty changeset; nothing to check. PASS."
   exit 0
 fi
@@ -68,18 +75,29 @@ is_source_file() {
 }
 
 SOURCE_FILES=""
+DELETION_ONLY_FILES=""
 TEST_FILES=""
-while IFS= read -r file; do
+while IFS=$'\t' read -r added _deleted file; do
   [ -z "$file" ] && continue
   if is_test_file "$file"; then
     TEST_FILES="${TEST_FILES}${file}"$'\n'
   elif is_source_file "$file"; then
-    SOURCE_FILES="${SOURCE_FILES}${file}"$'\n'
+    if [ "$added" = "0" ]; then
+      DELETION_ONLY_FILES="${DELETION_ONLY_FILES}${file}"$'\n'
+    else
+      SOURCE_FILES="${SOURCE_FILES}${file}"$'\n'
+    fi
   fi
-done <<< "$CHANGED_FILES"
+done <<< "$NUMSTAT"
 
 if [ -z "$SOURCE_FILES" ]; then
-  echo "No production source files changed. PASS."
+  if [ -n "$DELETION_ONLY_FILES" ]; then
+    echo "Source changes only remove code; no test companion needed. PASS."
+    echo "Deletion-only source files:"
+    printf '%s' "$DELETION_ONLY_FILES" | sed 's/^/  - /'
+  else
+    echo "No production source files changed. PASS."
+  fi
   exit 0
 fi
 
