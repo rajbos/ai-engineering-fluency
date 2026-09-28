@@ -68,6 +68,7 @@ jobs:
     if: github.event_name != 'pull_request' && github.actor != 'dependabot[bot]'
     permissions:
       contents: read
+      actions: read # download the previous run's report artifact (trend baseline)
       issues: write # refresh the dashboard issue
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -103,6 +104,29 @@ jobs:
           path: ${{ runner.temp }}/repo-health/report.json
           retention-days: 30
 
+      # The trend baseline is the previous run's own report artifact — a store
+      # only this workflow writes — never the editable dashboard issue body.
+      # Only default-branch schedule/manual runs count; the newest one that
+      # still has the artifact wins (a later job failing doesn't break this).
+      - name: Download the previous run's report (trend baseline)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/previous"
+          candidates=$(gh run list --repo "$REPO" --workflow repo-health-scan.yml --branch "$DEFAULT_BRANCH" \
+            --status completed --limit 10 --json databaseId,event \
+            --jq ".[] | select(.databaseId != $RUN_ID and (.event == \"schedule\" or .event == \"workflow_dispatch\")) | .databaseId")
+          for id in $candidates; do
+            if gh run download "$id" --repo "$REPO" -n repo-health-report -D "$RUNNER_TEMP/previous" 2>/dev/null; then
+              echo "Trend baseline: report from run $id" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done
+          echo "No previous report artifact found; the dashboard has no change column this run." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Refresh the dashboard issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -113,12 +137,8 @@ jobs:
           gh label create technical-debt --repo "$REPO" 2>/dev/null || true
           number=$(gh issue list --repo "$REPO" --label repo-health-dashboard --state open \
             --limit 1 --json number --jq '.[0].number // empty')
-          : > "$RUNNER_TEMP/previous.md"
-          if [ -n "$number" ]; then
-            gh issue view "$number" --repo "$REPO" --json body --jq .body > "$RUNNER_TEMP/previous.md"
-          fi
           node scripts/repo-health-scan.js --dashboard --from "$RUNNER_TEMP/repo-health/report.json" \
-            --previous "$RUNNER_TEMP/previous.md" --out "$RUNNER_TEMP/dashboard.md"
+            --previous "$RUNNER_TEMP/previous/report.json" --out "$RUNNER_TEMP/dashboard.md"
           if [ -n "$number" ]; then
             gh issue edit "$number" --repo "$REPO" --body-file "$RUNNER_TEMP/dashboard.md"
             echo "Updated dashboard issue #$number" >> "$GITHUB_STEP_SUMMARY"

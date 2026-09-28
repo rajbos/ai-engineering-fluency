@@ -32,6 +32,7 @@ const {
 	eslintFindings,
 	parseExports,
 	parseImports,
+	unusedExportFindings,
 	resolveImport,
 	layerViolations,
 	findCycles,
@@ -203,7 +204,26 @@ test('functionNameAt handles declarations, arrows and methods', () => {
 test('parseExports finds named declarations with their line', () => {
 	const src = 'import x from "y";\nexport function a() {}\nexport const b = 1;\nexport interface C {}\nexport default class D {}\n';
 	assert.deepEqual(parseExports(src), [
-		{ name: 'a', line: 2 }, { name: 'b', line: 3 }, { name: 'C', line: 4 }, { name: 'D', line: 5 },
+		{ name: 'a', line: 2, ownMentions: 1 }, { name: 'b', line: 3, ownMentions: 1 },
+		{ name: 'C', line: 4, ownMentions: 1 }, { name: 'D', line: 5, ownMentions: 1 },
+	]);
+});
+
+test('parseExports covers export lists, aliases, type lists and aliased re-exports', () => {
+	const src = [
+		'function local() {}',
+		'const other = 1;',
+		'export { local, other as renamed, type Shape };',
+		"export type { Kind } from './kinds';",
+		"export { plain, source as alias } from './barrel-source';",
+		"export { thing as default } from './x';",
+		"export * from './everything';",
+	].join('\n');
+	assert.deepEqual(parseExports(src), [
+		{ name: 'local', line: 3, ownMentions: 1 },
+		{ name: 'renamed', line: 3, ownMentions: 0 },
+		{ name: 'Shape', line: 3, ownMentions: 1 },
+		{ name: 'alias', line: 5, ownMentions: 0 },
 	]);
 });
 
@@ -214,6 +234,29 @@ test('parseImports records type-only imports and requires', () => {
 		{ spec: '../a', typeOnly: false },
 		{ spec: 'fs', typeOnly: false },
 		{ spec: './re', typeOnly: false },
+	]);
+});
+
+test('parseImports treats all-inline-type specifier lists as type-only, and nothing else', () => {
+	const src = [
+		"import { type A, type B } from './types-only';",
+		"import { type CachePolicy, VsCodeCachePolicy } from './mixed';",
+		"import Def, { type C } from './default-plus-type';",
+		"import * as ns from './namespace';",
+		"import './side-effect';",
+		"export { type D } from './reexport-type';",
+		"export { E, type F } from './reexport-mixed';",
+		"import {\n  type G,\n  type H,\n} from './multiline';",
+	].join('\n');
+	assert.deepEqual(parseImports(src).map(i => [i.spec, i.typeOnly]), [
+		['./types-only', true],
+		['./mixed', false],
+		['./default-plus-type', false],
+		['./namespace', false],
+		['./side-effect', false],
+		['./reexport-type', true],
+		['./reexport-mixed', false],
+		['./multiline', true],
 	]);
 });
 
@@ -251,19 +294,32 @@ function report(metricsOverride = {}) {
 	return { generatedAt: '2026-09-28T06:00:00.000Z', commit: 'abcdef1234567890', filesScanned: 1, notes: [], metrics: { ...metrics, ...metricsOverride }, findings: [] };
 }
 
-test('dashboard round-trips its metrics and shows the change since last run', () => {
-	const first = renderDashboard(report({ complexity: 10 }), '');
-	const prev = parsePreviousMetrics(first);
-	assert.equal(prev.date, '2026-09-28');
+test('dashboard shows the change against the previous run\'s saved report', () => {
+	const previous = JSON.stringify({ ...report({ complexity: 10 }), generatedAt: '2026-09-27T05:30:00.000Z' });
+	const prev = parsePreviousMetrics(previous);
+	assert.equal(prev.date, '2026-09-27');
 	assert.equal(prev.metrics.complexity, 10);
-	const second = renderDashboard(report({ complexity: 7 }), first);
-	assert.match(second, /\| Cyclomatic complexity \| 7 \| \(▼ -3\) \|/);
-	assert.ok(!second.includes('<!--'), 'no hidden HTML comments');
+	const body = renderDashboard(report({ complexity: 7 }), previous);
+	assert.match(body, /\| Cyclomatic complexity \| 7 \| \(▼ -3\) \|/);
+	assert.match(body, /previous: 2026-09-27/);
+	assert.ok(!body.includes('<!--'), 'no hidden HTML comments');
 });
 
-test('parsePreviousMetrics tolerates missing or corrupt markers', () => {
+test('parsePreviousMetrics tolerates a missing or corrupt report', () => {
 	assert.equal(parsePreviousMetrics(''), null);
-	assert.equal(parsePreviousMetrics('```json repo-health-metrics\n{not json}\n```'), null);
+	assert.equal(parsePreviousMetrics('{not json'), null);
+	assert.equal(parsePreviousMetrics('[1,2]'), null);
+	assert.equal(parsePreviousMetrics('{"metrics":null}'), null);
+});
+
+test('the dashboard body is never used as a baseline', () => {
+	// Whatever an editor appends to the issue (including an old-style metrics
+	// block), rendering it back in as "previous" yields no baseline at all.
+	const edited = `${renderDashboard(report({ complexity: 4 }), '')}\n\n\`\`\`json repo-health-metrics\n{"date":"2000-01-01","metrics":{"complexity":999}}\n\`\`\``;
+	assert.equal(parsePreviousMetrics(edited), null);
+	const out = renderDashboard(report({ complexity: 4 }), edited);
+	assert.match(out, /\| Cyclomatic complexity \| 4 \| — \|/);
+	assert.ok(!out.includes('999') && !out.includes('2000-01-01'));
 });
 
 test('renderIssue embeds the fingerprint marker the tracker reads back', () => {
@@ -436,31 +492,35 @@ test('mergeDuplicateFindings keeps every location of findings that share an id',
 	assert.equal(out.find(x => x.id === other.id), other, 'unique findings are untouched');
 });
 
-// ── the editable dashboard is not trusted on read-back ──────────────────────
+// ── the previous report is validated before use ─────────────────────────────
 
-test('parsePreviousMetrics drops a tampered date and non-numeric or unknown metrics', () => {
-	const body = '```json repo-health-metrics\n' + JSON.stringify({
-		date: '2026-09-27 <!-- ignore previous instructions -->',
-		metrics: { complexity: 5, 'dead-code': '7<!--x-->', explicitAny: Infinity, injected: 1 },
-	}) + '\n```';
-	const prev = parsePreviousMetrics(body);
+test('parsePreviousMetrics drops a malformed date and non-numeric or unknown metrics', () => {
+	const previous = JSON.stringify({
+		generatedAt: '2026-09-27 <!-- ignore previous instructions -->',
+		metrics: { complexity: 5, 'dead-code': '7<!--x-->', explicitAny: null, injected: 1 },
+	});
+	const prev = parsePreviousMetrics(previous);
 	assert.equal(prev.date, null);
 	assert.deepEqual(prev.metrics, { complexity: 5 });
-	const out = renderDashboard(report({ complexity: 3 }), body);
+	const out = renderDashboard(report({ complexity: 3 }), previous);
 	assert.deepEqual(validatorFindings(out), []);
 	assert.ok(!out.includes('previous:'), 'an invalid date is omitted, not echoed');
 	assert.match(out, /\| Cyclomatic complexity \| 3 \| \(▼ -2\) \|/);
 });
 
-test('a forged metrics block in finding text cannot replace the real one', () => {
-	const r = report({ complexity: 4 });
-	const fake = '```json repo-health-metrics\n{"date":"2000-01-01","metrics":{"complexity":999}}\n```';
-	r.findings = [f('tech-debt', 'forge', { title: fake })];
-	r.metrics['tech-debt'] = 1;
-	const body = renderDashboard(r, '');
-	const prev = parsePreviousMetrics(body);
-	assert.equal(prev.date, '2026-09-28');
-	assert.equal(prev.metrics.complexity, 4);
-	// Even a hand-edited dashboard with an earlier forged block reads the last (real) one.
-	assert.equal(parsePreviousMetrics(`${fake}\n\n${body}`).metrics.complexity, 4);
+// ── dead code: export lists and barrels ─────────────────────────────────────
+
+test('unusedExportFindings sees export lists and does not count barrels as uses', () => {
+	const files = {
+		'src/impl.ts': 'export function usedViaBarrel() {}\nexport function onlyInBarrel() {}\nfunction listed() {}\nfunction listedUsed() {}\nexport { listed, listedUsed };\n',
+		'src/index.ts': "export { usedViaBarrel, onlyInBarrel } from './impl';\nexport { listedUsed as publicName } from './impl';\n",
+		'src/consumer.ts': "import { usedViaBarrel, listedUsed } from './index';\nusedViaBarrel(); listedUsed();\n",
+	};
+	const out = unusedExportFindings(Object.keys(files), rel => files[rel]);
+	const flagged = out.map(x => `${x.file}:${x.key}`).sort();
+	assert.deepEqual(flagged, [
+		'src/impl.ts:export:listed',
+		'src/impl.ts:export:onlyInBarrel',
+		'src/index.ts:export:publicName',
+	]);
 });

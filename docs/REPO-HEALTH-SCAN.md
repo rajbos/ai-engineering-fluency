@@ -20,7 +20,7 @@ rest.
 | Piece | Role | AI cost |
 |---|---|---|
 | `scripts/repo-health-scan.js` | Deterministic scanner. Reuses ESLint and the duplication detector rather than re-implementing them. | none |
-| `.github/workflows/repo-health-scan.yml` | Daily scan → step summary + the **Repo health dashboard** issue (label `repo-health-dashboard`), with the change since the previous run. | none |
+| `.github/workflows/repo-health-scan.yml` | Daily scan → step summary + the **Repo health dashboard** issue (label `repo-health-dashboard`), with the change since the previous run (measured against that run's report artifact, never the editable issue). | none |
 | `repo-health-scan` agent (`.github/agents/`, `.claude/agents/`) | Picks one untracked finding, opens a `repo-health` issue, fixes it, opens a PR with `Fixes #n`. | one agent run |
 
 Every finding has a stable id (`rh-` + 12 hex characters, derived from topic,

@@ -38,10 +38,11 @@ how the daily run avoids duplicate issues and respects a human's "won't fix".
 ```bash
 cd vscode-extension && npm ci && cd ..
 gh label create repo-health --color 0e8a16 --description "Daily repo-health scan finding" 2>/dev/null || true
-gh pr list --label repo-health --state open --json number --jq length
+open_prs=$(gh pr list --label repo-health --state open --json number --jq length)
+[ "$open_prs" -lt 3 ] || { echo "STOP: $open_prs repo-health PRs already open"; exit 1; }
 ```
 
-If **3 or more** `repo-health` PRs are already open, stop and report that —
+If that exits non-zero (**3 or more** `repo-health` PRs open), stop and report that —
 unreviewed PRs are piling up, and adding another only adds merge conflicts.
 
 ## Step 2 — Scan and pick one finding
@@ -142,10 +143,11 @@ its shape before using it, so the verification step never runs arbitrary text:
 rh_id=$(gh issue view <issue-number> --json body --jq .body | sed -n 's/^repo-health-id: `\(rh-[0-9a-f]\{12\}\)`[[:space:]]*$/\1/p' | tail -1)
 case "$rh_id" in rh-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; *) echo "no valid repo-health-id footer"; exit 1 ;; esac
 node scripts/repo-health-scan.js --json --out .repo-health-after.json
-node -e "const r=require('./.repo-health-after.json');const id=process.argv[1];console.log(r.findings.some(f=>f.id===id)?'STILL PRESENT':'resolved')" "$rh_id"
+node -e "const r=require('./.repo-health-after.json');const id=process.argv[1];if(r.findings.some(f=>f.id===id)){console.error('STILL PRESENT: '+id);process.exit(1)}console.log('resolved')" "$rh_id"
 ```
 
-The id must be `resolved`, and no new finding may appear in the files you
+This exits non-zero while the finding is still reported; do not open a PR until
+it prints `resolved`. No new finding may appear in the files you
 touched. Then re-run the Step 5 baseline commands plus:
 
 ```bash

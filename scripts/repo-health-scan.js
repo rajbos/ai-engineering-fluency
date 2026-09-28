@@ -23,8 +23,8 @@
  * Usage:
  *   node scripts/repo-health-scan.js                        # Markdown report
  *   node scripts/repo-health-scan.js --json                 # full report as JSON
- *   node scripts/repo-health-scan.js --dashboard --previous prev-body.md
- *                                                           # tracking-issue body with trend
+ *   node scripts/repo-health-scan.js --dashboard --previous previous-report.json
+ *                                                           # tracking-issue body, trend vs. a saved report
  *   node scripts/repo-health-scan.js --pick --tracked tracked.txt [--date 2026-09-28]
  *                                                           # one untracked finding + issue text
  *   --skip-eslint   skip the ESLint-backed topics (fast; for local iteration)
@@ -431,18 +431,71 @@ function largeFileFindings(files, root) {
 // ── TypeScript source model: exports and imports ───────────────────────────
 
 const EXPORT_RE = /^export\s+(?:declare\s+)?(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\*?|const|let|var|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/gm;
-const IMPORT_RE = /(?:^|\n)\s*(import|export)\s+(type\s+)?(?:[^'"]*?\sfrom\s+)?['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\)|import\(\s*['"]([^'"]+)['"]\s*\)/g;
+// `export { a, b as c }`, `export type { T }`, `export { x as y } from './z'`.
+const EXPORT_LIST_RE = /^[ \t]*export\s+(?:type\s+)?\{([^}]*)\}(?:\s*from\s*['"]([^'"]+)['"])?[ \t]*;?/gm;
+const IMPORT_RE = /(?:^|\n)\s*(import|export)\s+(type\s+)?(?:([^'"]*?)\s*\bfrom\s+)?['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\)|import\(\s*['"]([^'"]+)['"]\s*\)/g;
 
 function tsSourceFiles(files) {
 	return files.filter(f => TS_TREES.some(t => f.startsWith(`${t}/`)) && /\.tsx?$/.test(f) && !f.endsWith('.d.ts'));
 }
 
+function lineAt(text, index) {
+	return text.slice(0, index).split('\n').length;
+}
+
+/** `a`, `type a`, `a as b` → { local, exported } for each entry of a `{ … }` specifier list. */
+function parseSpecifiers(list) {
+	return list.split(',').map(s => s.replace(/\/\/.*$|\/\*[^]*?\*\//gm, '').trim()).filter(Boolean).map(s => {
+		const m = /^(?:type\s+)?([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/.exec(s);
+		return m ? { local: m[1], exported: m[2] || m[1], typeOnly: /^type\s/.test(s) } : null;
+	}).filter(Boolean);
+}
+
+/**
+ * Exported names with their line and `ownMentions`: how many times the name
+ * legitimately appears in its own file once export lists are stripped (see
+ * `stripExportLists`). A declaration mentions it once; `export { a }` of a local
+ * `a` also once (its declaration); an alias `export { a as b }` or a re-export
+ * alias `export { x as y } from` zero. A plain re-export `export { x } from` is
+ * left to the file that declares `x`.
+ */
 function parseExports(text) {
 	const names = [];
 	EXPORT_RE.lastIndex = 0;
 	let m;
-	while ((m = EXPORT_RE.exec(text)) !== null) { names.push({ name: m[1], line: text.slice(0, m.index).split('\n').length }); }
+	while ((m = EXPORT_RE.exec(text)) !== null) { names.push({ name: m[1], line: lineAt(text, m.index), ownMentions: 1 }); }
+	EXPORT_LIST_RE.lastIndex = 0;
+	while ((m = EXPORT_LIST_RE.exec(text)) !== null) {
+		const reexport = Boolean(m[2]);
+		for (const s of parseSpecifiers(m[1])) {
+			if (s.exported === 'default') { continue; }
+			const aliased = s.exported !== s.local;
+			if (reexport && !aliased) { continue; }
+			names.push({ name: s.exported, line: lineAt(text, m.index), ownMentions: aliased ? 0 : 1 });
+		}
+	}
 	return names;
+}
+
+/**
+ * Remove export-list statements before counting references: listing a name in
+ * `export { … }` (or re-exporting it through a barrel) is not a use of it.
+ */
+function stripExportLists(text) {
+	return text.replace(EXPORT_LIST_RE, '');
+}
+
+/**
+ * True when an import/export clause binds only types: `type`-prefixed as a
+ * whole, or a `{ … }` list whose every specifier is `type`-prefixed. A default
+ * or namespace binding, or any plain specifier, is a runtime dependency.
+ */
+function isTypeOnlyClause(wholeType, clause) {
+	if (wholeType) { return true; }
+	const c = (clause || '').trim();
+	if (!c.startsWith('{') || !c.endsWith('}')) { return false; }
+	const specs = c.slice(1, -1).split(',').map(s => s.trim()).filter(Boolean);
+	return specs.length > 0 && specs.every(s => /^type\s/.test(s));
 }
 
 function parseImports(text) {
@@ -450,8 +503,8 @@ function parseImports(text) {
 	IMPORT_RE.lastIndex = 0;
 	let m;
 	while ((m = IMPORT_RE.exec(text)) !== null) {
-		const spec = m[3] || m[4] || m[5];
-		out.push({ spec, typeOnly: Boolean(m[2]) });
+		const spec = m[4] || m[5] || m[6];
+		out.push({ spec, typeOnly: m[1] ? isTypeOnlyClause(Boolean(m[2]), m[3]) : false });
 	}
 	return out;
 }
@@ -467,21 +520,24 @@ function resolveImport(fromFile, spec, fileSet) {
 // ── dead code: exports nothing references ───────────────────────────────────
 
 function unusedExportFindings(files, read) {
-	const candidates = new Map(); // name -> [{file, line}]
+	const candidates = new Map(); // name -> [{file, line, ownMentions}]
 	for (const file of tsSourceFiles(files)) {
 		if (isTestFile(file)) { continue; }
 		for (const exp of parseExports(read(file) || '')) {
 			if (EXPORT_ALLOWLIST.has(exp.name)) { continue; }
 			if (!candidates.has(exp.name)) { candidates.set(exp.name, []); }
-			candidates.get(exp.name).push({ file, line: exp.line });
+			candidates.get(exp.name).push({ file, line: exp.line, ownMentions: exp.ownMentions });
 		}
 	}
-	// Count word occurrences of candidate names per file, across everything that can reference them.
+	// Count word occurrences of candidate names per file, across everything that
+	// can reference them. Export lists are stripped first: re-exporting a name
+	// through a barrel is not a use of it.
 	const occurrences = new Map(); // name -> Map(file -> count)
 	for (const file of files) {
 		if (!REFERENCE_EXTS.has(path.posix.extname(file))) { continue; }
-		const text = read(file);
-		if (!text) { continue; }
+		const raw = read(file);
+		if (!raw) { continue; }
+		const text = JS_LIKE_EXTS.has(path.posix.extname(file)) ? stripExportLists(raw) : raw;
 		for (const word of text.match(/[A-Za-z_$][\w$]*/g) || []) {
 			if (!candidates.has(word)) { continue; }
 			if (!occurrences.has(word)) { occurrences.set(word, new Map()); }
@@ -495,7 +551,7 @@ function unusedExportFindings(files, read) {
 		for (const decl of decls) {
 			const inOwnFile = perFile.get(decl.file) || 0;
 			const elsewhere = [...perFile.keys()].some(f => f !== decl.file);
-			if (inOwnFile > 1 || elsewhere) { continue; }
+			if (inOwnFile > decl.ownMentions || elsewhere) { continue; }
 			findings.push(makeFinding({
 				category: 'dead-code', file: decl.file, line: decl.line, key: `export:${name}`, effort: 'S',
 				title: `Export \`${name}\` is never referenced`,
@@ -775,11 +831,11 @@ function pickFinding(findings, tracked, isoDate) {
 // non-whitespace control characters and HTML comments.
 const HIDDEN_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F­​-‏‪-‮⁠⁦-⁩︀-️﻿\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 
-// The tokens this script reads back (the issue footer and the dashboard
-// metrics block). Quoted repository text must never carry them verbatim, or a
-// source comment could forge a tracked id and suppress an unrelated finding.
-// U+2011 (non-breaking hyphen) keeps them readable without matching.
-const RESERVED_MARKERS_RE = /repo-health-(id|metrics)/gi;
+// The token this script reads back from issues (the id footer). Quoted
+// repository text must never carry it verbatim, or a source comment could
+// forge a tracked id and suppress an unrelated finding. U+2011 (non-breaking
+// hyphen) keeps it readable without matching.
+const RESERVED_MARKERS_RE = /repo-health-(id)/gi;
 
 function stripHidden(text) {
 	return String(text)
@@ -852,29 +908,24 @@ function renderMarkdown(report, { limit = 15 } = {}) {
 	return out.join('\n');
 }
 
-// Visible (collapsed) rather than an HTML comment: hidden comments in issue
-// bodies are what .github/workflows/validate-input.sh treats as injection.
-// Whole-line fences only, and the LAST block wins: renderDashboard writes it at
-// the very end, after all quoted content (which cannot carry the token anyway).
-const METRICS_MARKER_RE = /^```json repo-health-metrics\n(\{[^\n]*\})\n```[ \t]*$/gm;
-
 /**
- * Read back the previous run's metrics. The dashboard issue is editable by
- * people, so nothing from it is trusted: the date must be YYYY-MM-DD and only
- * known metric keys with finite numeric values are kept. Anything else drops.
+ * The previous run's metrics, from that run's saved `--json` report — the
+ * workflow downloads it from its own artifact, a store only the workflow
+ * writes. The editable dashboard issue is never read back as a baseline.
+ * The report is still validated: the date must be an ISO timestamp and only
+ * known metric keys with finite numeric values are kept.
  */
-function parsePreviousMetrics(text) {
-	const m = [...String(text || '').replace(/\r\n?/g, '\n').matchAll(METRICS_MARKER_RE)].pop();
-	if (!m) { return null; }
+function parsePreviousMetrics(reportText) {
 	let raw;
-	try { raw = JSON.parse(m[1]); } catch { return null; }
-	if (!raw || typeof raw !== 'object') { return null; }
+	try { raw = JSON.parse(String(reportText || '')); } catch { return null; }
+	if (!raw || typeof raw !== 'object' || !raw.metrics || typeof raw.metrics !== 'object') { return null; }
 	const known = new Set([...CATEGORIES.map(c => c.id), 'markers', 'tsSuppressions', 'eslintDisables', 'explicitAny']);
 	const metrics = {};
-	for (const [key, value] of Object.entries(raw.metrics || {})) {
+	for (const [key, value] of Object.entries(raw.metrics)) {
 		if (known.has(key) && typeof value === 'number' && Number.isFinite(value)) { metrics[key] = value; }
 	}
-	const date = typeof raw.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.date) ? raw.date : null;
+	const stamp = typeof raw.generatedAt === 'string' ? raw.generatedAt : '';
+	const date = /^\d{4}-\d{2}-\d{2}T/.test(stamp) ? stamp.slice(0, 10) : null;
 	return { date, metrics };
 }
 
@@ -885,14 +936,17 @@ function formatDelta(now, before) {
 	return d > 0 ? ` (▲ +${d})` : ` (▼ ${d})`;
 }
 
-/** Body of the long-lived tracking issue: current counts, change since the previous run, full report. */
-function renderDashboard(report, previousText) {
-	const prev = parsePreviousMetrics(previousText);
+/**
+ * Body of the long-lived tracking issue: current counts, change since the
+ * previous run (from `previousReportText`, that run's saved report), full report.
+ */
+function renderDashboard(report, previousReportText) {
+	const prev = parsePreviousMetrics(previousReportText);
 	const prevMetrics = prev ? prev.metrics : {};
 	const out = [
 		'# Repo health dashboard',
 		'',
-		'Updated daily by `.github/workflows/repo-health-scan.yml` from `scripts/repo-health-scan.js`.',
+		'Updated daily by `.github/workflows/repo-health-scan.yml` from `scripts/repo-health-scan.js`; changes are measured against the previous run\'s report artifact.',
 		'Individual findings are fixed one per run by the `repo-health-scan` agent; its issues carry the `repo-health` label.',
 		'',
 		`Last scan: ${report.generatedAt.slice(0, 10)} at \`${(report.commit || 'unknown').slice(0, 12)}\`${prev && prev.date ? ` · previous: ${prev.date}` : ''}`,
@@ -905,8 +959,6 @@ function renderDashboard(report, previousText) {
 		out.push(`| ${label} | ${report.metrics[key]} | ${formatDelta(report.metrics[key], prevMetrics[key]).trim() || '—'} |`);
 	}
 	out.push('', renderMarkdown(report, { limit: 10 }).replace(/^## Repo health scan\n/, '## Details\n'));
-	out.push('', '<details><summary>Raw metrics (read back by the next run)</summary>', '', '```json repo-health-metrics',
-		JSON.stringify({ date: report.generatedAt.slice(0, 10), metrics: report.metrics }), '```', '', '</details>');
 	return out.join('\n');
 }
 
@@ -1026,6 +1078,7 @@ module.exports = {
 	eslintFindings,
 	parseExports,
 	parseImports,
+	unusedExportFindings,
 	resolveImport,
 	layerViolations,
 	findCycles,
