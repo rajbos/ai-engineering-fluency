@@ -409,7 +409,7 @@ function buildProvidersCostRows(stats: DetailedStats, projections: Projections, 
 	const hasProviderFilter = getFilterableProviders(stats).length > 0;
 	const providersCostLabel = hasProviderFilter ? 'Estimated cost (selected providers)' : 'Estimated cost (all providers)';
 	const providersCostTooltip = hasProviderFilter
-		? 'Sum of estimated cost across the providers selected in the Cost by Provider filter below — GitHub Copilot uses UBB AI Credit rates, other providers use their own API pricing.'
+		? 'Sum of estimated cost across the providers selected in the Cost by Provider section — GitHub Copilot uses UBB AI Credit rates, other providers use their own API pricing.'
 		: 'Sum of estimated cost across all providers — GitHub Copilot uses UBB AI Credit rates, other providers (e.g. Claude Code, even on a subscription) use their own API pricing as an API-equivalent estimate.';
 	return isCopilotOnlyProviders(allProviders) ? [] : [
 		{ label: providersCostLabel, labelTooltip: providersCostTooltip, icon: '💵', color: '#7ce38b', today: formatCost(totalCostForPeriod(stats.today, allProviders)), last30Days: formatCost(totalCostForPeriod(stats.last30Days, allProviders)), month: formatCost(totalCostForPeriod(stats.month, allProviders)), lastMonth: formatCost(totalCostForPeriod(stats.lastMonth, allProviders)), projected: formatCost(projections.projectedCost) },
