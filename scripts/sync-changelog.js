@@ -25,7 +25,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const { parseSections, serializeSections, detectEol } = require('./release-changelog');
+const { parseSections, serializeSections, detectEol, terminateLast } = require('./release-changelog');
 
 // Resolve every path from the repo root, not the working directory: the script is
 // run from the root (workflow) and from vscode-extension/ (npm run sync-changelog).
@@ -266,15 +266,18 @@ function compareVersions(a, b) {
 /**
  * Add a section for each release whose version is not in the changelog yet.
  * Existing sections — including the curated ones written by
- * release-changelog.js promote — are kept byte-for-byte, in the file's own
- * line ending (CRLF or LF). A new section goes
- * before the first existing section with a lower version, or at the end.
+ * release-changelog.js promote — are kept byte-for-byte, each line with its
+ * own line ending, so even a mixed CRLF/LF file only gains the new lines. New
+ * lines use the file's majority ending. A new section goes before the first
+ * existing section with a lower version, or at the end.
  * @param {string} text     - current changelog ('' when the file is new)
  * @param {Array}  releases - GitHub releases
  * @returns {{ text: string, added: string[] }}
  */
 function mergeReleases(text, releases) {
-  const { preamble, sections } = parseSections(text || DEFAULT_HEADER);
+  const source = text || DEFAULT_HEADER;
+  const { preamble, sections } = parseSections(source);
+  const eol = detectEol(source);
   const added = [];
   for (const release of releases) {
     const version = versionFromTag(release.tagName);
@@ -282,21 +285,18 @@ function mergeReleases(text, releases) {
     const releaseType = release.isPrerelease ? ' - Pre-release' : '';
     const section = {
       name: version,
-      heading: `## [${version}]${releaseType}`,
-      body: ['', ...formatReleaseBody(release, version), ''],
+      heading: `## [${version}]${releaseType}${eol}`,
+      body: [eol, ...formatReleaseBody(release, version).map(line => line + eol)],
     };
     const before = sections.findIndex(s => {
       const cmp = compareVersions(s.name, version);
       return cmp !== null && cmp < 0;
     });
     if (before >= 0) {
+      section.body.push(eol); // blank line before the section that follows
       sections.splice(before, 0, section);
     } else {
-      // Appending: keep a blank line between the previous section and this one.
-      const last = sections[sections.length - 1];
-      if (last && last.body.length > 0 && last.body[last.body.length - 1].trim() !== '') {
-        last.body.push('');
-      }
+      appendBlankLineAfter(sections.length > 0 ? sections[sections.length - 1] : null, preamble, eol);
       sections.push(section);
     }
     added.push(version);
@@ -304,10 +304,24 @@ function mergeReleases(text, releases) {
   if (added.length === 0) {
     return { text, added };
   }
-  const eol = detectEol(text || '');
-  let merged = serializeSections(preamble, sections, eol);
-  if (!merged.endsWith(eol)) { merged += eol; }
-  return { text: merged, added };
+  return { text: serializeSections(preamble, sections), added };
+}
+
+/**
+ * Before appending a section at the end of the file, terminate the file's
+ * last line if it was unterminated and add a blank line unless there is one.
+ */
+function appendBlankLineAfter(lastSection, preamble, eol) {
+  if (lastSection && lastSection.body.length === 0) {
+    if (!lastSection.heading.endsWith('\n')) { lastSection.heading += eol; }
+    lastSection.body.push(eol);
+    return;
+  }
+  const lines = lastSection ? lastSection.body : preamble;
+  terminateLast(lines, eol);
+  if (lines.length > 0 && lines[lines.length - 1].trim() !== '') {
+    lines.push(eol);
+  }
 }
 
 /**

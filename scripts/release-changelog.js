@@ -32,11 +32,16 @@ const HEADING = /^## \[([^\]]+)\](?:\s+-\s+.*)?\s*$/;
 
 /**
  * Split a changelog into its level-2 sections.
+ *
+ * Every line keeps its own terminator ("\r\n", "\n", or none for an
+ * unterminated last line), so serializeSections gives back the exact input —
+ * whatever mix of line endings it has — and a caller's diff shows only the
+ * lines it added.
  * @param {string} text
  * @returns {{ preamble: string[], sections: { name: string, heading: string, body: string[] }[] }}
  */
 function parseSections(text) {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const lines = text.split(/(?<=\n)/).filter(line => line !== '');
   const preamble = [];
   const sections = [];
   for (const line of lines) {
@@ -52,22 +57,40 @@ function parseSections(text) {
   return { preamble, sections };
 }
 
-/** The line ending a changelog uses: CRLF if it has any, otherwise LF. */
+/**
+ * The line ending for lines a caller adds: whichever of CRLF and LF most of
+ * the file's lines use (LF on a tie or an empty file). Existing lines always
+ * keep their own ending.
+ */
 function detectEol(text) {
-  return text.includes('\r\n') ? '\r\n' : '\n';
+  const crlf = (text.match(/\r\n/g) || []).length;
+  const lf = (text.match(/\n/g) || []).length - crlf;
+  return crlf > lf ? '\r\n' : '\n';
+}
+
+/** A line's text without its terminator. */
+function stripEol(line) {
+  return line.replace(/\r?\n$/, '');
 }
 
 /**
- * Join a parsed changelog back into text with `eol` — the inverse of
- * parseSections. Re-serializing a file with its own line ending gives back the
- * same bytes, so only the sections a caller changed show up in the diff.
+ * Make sure the last line of `lines` ends with a terminator, so a line can be
+ * added after it. Needed when that line was the file's unterminated last line.
  */
-function serializeSections(preamble, sections, eol) {
+function terminateLast(lines, eol) {
+  const last = lines.length - 1;
+  if (last >= 0 && !lines[last].endsWith('\n')) {
+    lines[last] += eol;
+  }
+}
+
+/** Join a parsed changelog back into text — the exact inverse of parseSections. */
+function serializeSections(preamble, sections) {
   const out = [...preamble];
   for (const section of sections) {
     out.push(section.heading, ...section.body);
   }
-  return out.join(eol);
+  return out.join('');
 }
 
 /** Trim leading and trailing blank lines. */
@@ -93,12 +116,13 @@ function extractSection(text, version) {
   if (body.length === 0) {
     throw new Error(`The "## [${version}]" section is empty.`);
   }
-  return body.join('\n');
+  return body.map(stripEol).join('\n');
 }
 
 /**
  * Move the [Unreleased] entries into a new `version` section dated `date`.
- * @returns {string} the updated changelog text, in the input's line ending
+ * Every line other than the new heading and blank lines keeps its own bytes.
+ * @returns {string} the updated changelog text
  * @throws if [Unreleased] is missing or empty, or `version` already exists.
  */
 function promoteUnreleased(text, version, date) {
@@ -114,10 +138,16 @@ function promoteUnreleased(text, version, date) {
   if (entries.length === 0) {
     throw new Error('The "## [Unreleased]" section is empty: add the entries for this release first.');
   }
-  const released = { name: version, heading: `## [${version}] - ${date}`, body: ['', ...entries, ''] };
-  const unreleased = { name: UNRELEASED, heading: sections[index].heading, body: [''] };
+  const eol = detectEol(text);
+  const heading = sections[index].heading.endsWith('\n') ? sections[index].heading : sections[index].heading + eol;
+  const unreleased = { name: UNRELEASED, heading, body: [eol] };
+  const released = { name: version, heading: `## [${version}] - ${date}${eol}`, body: [eol, ...entries] };
+  terminateLast(released.body, eol);
+  if (index + 1 < sections.length) {
+    released.body.push(eol); // blank line before the next section
+  }
   const next = [...sections.slice(0, index), unreleased, released, ...sections.slice(index + 1)];
-  return serializeSections(preamble, next, detectEol(text));
+  return serializeSections(preamble, next);
 }
 
 function today() {
@@ -159,4 +189,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { parseSections, serializeSections, detectEol, extractSection, promoteUnreleased };
+module.exports = { parseSections, serializeSections, detectEol, terminateLast, extractSection, promoteUnreleased };
