@@ -153,7 +153,9 @@ jobs:
 
       # Assigning an issue to the Copilot coding agent needs a user token;
       # GITHUB_TOKEN cannot. GH_PAT is the same secret sync-toolnames.yml uses.
-      - name: Open an issue for one finding and assign it to Copilot
+      # The issue is created unassigned, validated, and only then assigned.
+      - name: Open an issue for one finding
+        id: issue
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           REPO: ${{ github.repository }}
@@ -170,20 +172,49 @@ jobs:
           fi
           gh label create repo-health --repo "$REPO" --color 0e8a16 \
             --description "Daily repo-health scan finding" 2>/dev/null || true
-gh api --paginate "repos/$REPO/issues?labels=repo-health&state=all&per_page=100" --jq '.[].body' > "$RUNNER_TEMP/tracked.json"
+          gh api --paginate "repos/$REPO/issues?labels=repo-health&state=all&per_page=100" \
+            --jq '.[].body' > "$RUNNER_TEMP/tracked.json"
           node scripts/repo-health-scan.js --pick --from "$RUNNER_TEMP/repo-health/report.json" \
             --tracked "$RUNNER_TEMP/tracked.json" --out "$RUNNER_TEMP/pick.json"
           if [ "$(jq -r '.finding == null' "$RUNNER_TEMP/pick.json")" = "true" ]; then
             echo "No untracked finding to hand off." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          title=$(jq -r '.issue.title' "$RUNNER_TEMP/pick.json")
+          jq -r '.issue.title' "$RUNNER_TEMP/pick.json" > "$RUNNER_TEMP/issue-title.txt"
           {
             jq -r '.issue.body' "$RUNNER_TEMP/pick.json"
             echo
             echo "_@copilot: work this with \`.github/agents/repo-health-scan.agent.md\`, starting at Step 4._"
           } > "$RUNNER_TEMP/issue.md"
-          url=$(gh issue create --repo "$REPO" --title "$title" --body-file "$RUNNER_TEMP/issue.md" \
-            --label repo-health --label technical-debt)
-          gh issue edit "$url" --repo "$REPO" --add-assignee "@copilot"
-          echo "Handed off $url to the Copilot coding agent." >> "$GITHUB_STEP_SUMMARY"
+          url=$(gh issue create --repo "$REPO" --title "$(cat "$RUNNER_TEMP/issue-title.txt")" \
+            --body-file "$RUNNER_TEMP/issue.md" --label repo-health --label technical-debt)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "number=${url##*/}" >> "$GITHUB_OUTPUT"
+
+      # The finding text is quoted from repository content. The scanner already
+      # strips hidden characters and HTML comments; this is the repo's standard
+      # gate (see workflows.instructions.md), run before an AI agent sees it.
+      # On failure it comments on the issue and fails the job, leaving it unassigned.
+      - name: Validate the issue for hidden content
+        if: steps.issue.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          ITEM_NUMBER: ${{ steps.issue.outputs.number }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          CONTEXT_TYPE: issue
+        run: |
+          INPUT_TEXT="$(cat "$RUNNER_TEMP/issue-title.txt" "$RUNNER_TEMP/issue.md")"
+          export INPUT_TEXT
+          bash .github/workflows/validate-input.sh
+
+      - name: Assign the issue to Copilot
+        if: steps.issue.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          REPO: ${{ github.repository }}
+          ISSUE_URL: ${{ steps.issue.outputs.url }}
+        run: |
+          gh issue edit "$ISSUE_URL" --repo "$REPO" --add-assignee "@copilot"
+          echo "Handed off $ISSUE_URL to the Copilot coding agent." >> "$GITHUB_STEP_SUMMARY"
