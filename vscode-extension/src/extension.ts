@@ -422,7 +422,7 @@ import { ConfirmationMessages } from './backend/ui/messages';
 import { insightCardElementId } from './insightAnchors';
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
 import { getAzureTableStorageEndpoint } from './utils/azureEndpoints';
-import { isGuidMcpTool, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../src/utils/toolUtils';
+import { isGuidMcpTool, isKnownToolDisplayName, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { buildRecentSessionBuckets as bucketRecentSessions, collectSessionModelIds } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
@@ -3239,7 +3239,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const suppressed = new Set<string>(
 			vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', [])
 		);
-		return Array.from(allTools).filter(tool => !lookupKnownToolName(tool, this.toolNameMap) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
+		return Array.from(allTools).filter(tool => !lookupKnownToolName(tool, this.toolNameMap) && !isKnownToolDisplayName(tool, this.toolNameMap) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
 	}
 
 	private async showUnknownMcpToolsBanner(): Promise<void> {
