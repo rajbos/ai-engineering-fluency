@@ -31,17 +31,13 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 - Claude Code sessions are no longer misclassified as CLI in interaction modes
 - Discover Claude Desktop sessions in the renamed `claude-code-sessions` directory
 - Recognise Copilot App's `<repo>.worktrees` worktree layout when attributing sessions to repositories (#1827)
-
-### Performance
-- Faster Copilot CLI session discovery
-
-## [0.5.1] - 2026-07-29
+- Recognise MCP tools by family and action, so the same tool no longer shows up as several unknown tools (#1771)
 
 ### Security
 - Bound untrusted session-file reads and guard JSON merges against prototype pollution across all session parsers (#1767, #1772)
 
-### Bug Fixes
-- Recognise MCP tools by family and action, so the same tool no longer shows up as several unknown tools (#1771)
+### Performance
+- Faster Copilot CLI session discovery
 
 ## [0.5.0] - 2026-07-27
 
@@ -63,7 +59,7 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 ### Bug Fixes
 - Per-model usage now reconciles to the actual token total for event-based sessions without debug logs
 
-## [0.3.0] - 2026-07-18
+## [0.3.0] - 2026-07-17
 
 ### Features
 - Exact Copilot CLI token counts, read from its OpenTelemetry export and the authoritative `session-store.db` billing data instead of estimates (#1637)
