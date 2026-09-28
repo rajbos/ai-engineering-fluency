@@ -67,6 +67,45 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 	}
 });
 
+test('l10n: Dark Factory Readiness overview and Copilot action strings resolve in both languages', () => {
+	assert.equal(t('readiness.summary.missingForStage', 3, 1), '3 missing for Stage 1');
+	assert.equal(t('readiness.summary.unchecked', 9), '9 unchecked');
+	assert.equal(t('readiness.summary.antiPattern', 1), '1 anti-pattern');
+	assert.equal(t('readiness.summary.antiPatterns', 2), '2 anti-patterns');
+	assert.equal(t('readiness.overview.scannedOne', 1), '1 repository scanned');
+	assert.equal(t('readiness.overview.scannedMany', 4), '4 repositories scanned');
+	assert.equal(t('readiness.overview.atStage', 2, 0), '2 at Stage 0');
+	assert.equal(t('readiness.overview.withAntiPatterns', 1), '1 with anti-patterns');
+	assert.equal(t('readiness.overview.hint'), 'Click a repository to see what blocks its next stage.');
+	assert.equal(t('readiness.disclaimer.headline'), 'It never tells you that you are ready to go dark.');
+	assert.equal(t('readiness.disclaimer.body'), 'It reports which governance and evidence controls each repository actually has — Stage 5 (a bounded dark factory) is never awarded.');
+	assert.equal(t('readiness.about.title'), '📋 What this measures');
+	assert.equal(t('readiness.about.weakEvidence'), 'A green build from an unbounded agent is weak evidence.');
+	assert.equal(t('readiness.about.stage5'), 'Stage 5 is never awarded: its defining evidence is not machine-detectable.');
+	assert.equal(t('readiness.action.hint'), 'Pick the items above, then open a new Copilot Chat with a prompt to implement them. Nothing is sent until you press Enter.');
+	assert.equal(t('readiness.action.draft'), '🤖 Draft Copilot Chat prompt');
+	assert.equal(t('readiness.action.selectFirst'), '🤖 Select at least one item first');
+	assert.equal(t('readiness.action.includeItem', 'CODEOWNERS'), 'Include CODEOWNERS in the Copilot prompt');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('readiness.summary.missingForStage', 3, 1), '进入第 1 阶段还缺 3 项');
+		assert.equal(t('readiness.summary.unchecked', 9), '9 项未检查');
+		assert.equal(t('readiness.summary.antiPatterns', 2), '2 个反模式');
+		assert.equal(t('readiness.overview.scannedMany', 4), '已扫描 4 个仓库');
+		assert.equal(t('readiness.overview.atStage', 2, 0), '2 个处于第 0 阶段');
+		assert.equal(t('readiness.overview.withAntiPatterns', 1), '1 个存在反模式');
+		assert.equal(t('readiness.overview.hint'), '点击仓库，查看阻碍其进入下一阶段的因素。');
+		assert.equal(t('readiness.disclaimer.headline'), '它从不告诉你已经可以“无人值守”运行。');
+		assert.equal(t('readiness.about.title'), '📋 衡量内容');
+		assert.equal(t('readiness.about.stage5'), '第 5 阶段永远不会被授予：其决定性证据无法由机器检测。');
+		assert.equal(t('readiness.action.draft'), '🤖 起草 Copilot Chat 提示词');
+		assert.equal(t('readiness.action.selectFirst'), '🤖 请先至少选择一项');
+		assert.equal(t('readiness.action.includeItem', 'CODEOWNERS'), '在 Copilot 提示词中包含 CODEOWNERS');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: bare language tag zh matches the zh-cn bundle', () => {
 	mock.setLanguage('zh');
 	assert.equal(t('nav.btnRefresh'), '刷新');

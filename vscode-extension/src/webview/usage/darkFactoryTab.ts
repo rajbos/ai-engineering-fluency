@@ -1,9 +1,12 @@
 import { setHtml } from '../shared/domUtils';
 import { localize } from '../shared/localization';
-import { buildDarkFactorySectionHtml } from '../maturity/darkFactorySection';
+import { buildDarkFactoryChatPrompt, buildDarkFactorySectionHtml } from '../maturity/darkFactorySection';
 import type { DarkFactoryReport } from '../../../../src/types';
 
 type ReadinessMessage = { command: string; requestId?: unknown; report?: unknown };
+type OutgoingMessage =
+	| { command: 'loadReadiness'; requestId: number }
+	| { command: 'draftCopilotChatWithPrompt'; prompt: string };
 
 export class DarkFactoryTab {
 	private report: DarkFactoryReport | undefined;
@@ -12,7 +15,7 @@ export class DarkFactoryTab {
 	private available = false;
 
 	constructor(
-		private readonly postMessage: (message: { command: 'loadReadiness'; requestId: number }) => void,
+		private readonly postMessage: (message: OutgoingMessage) => void,
 		private readonly trace: (stage: string, details: Record<string, unknown>) => void,
 	) {}
 
@@ -38,7 +41,32 @@ export class DarkFactoryTab {
 
 	attach(): void {
 		document.getElementById('btn-refresh-readiness')?.addEventListener('click', () => this.requestScan());
+		// Delegated: the report re-renders on every scan, the container does not.
+		const content = document.getElementById('readiness-content');
+		if (content && !content.dataset.dfBound) {
+			content.dataset.dfBound = 'true';
+			content.addEventListener('click', event => this.handleContentClick(event));
+		}
 		this.render();
+	}
+
+	/** Opens a new Copilot Chat pre-filled with the items picked in one repository card. */
+	private handleContentClick(event: Event): void {
+		const button = (event.target as HTMLElement | null)?.closest<HTMLElement>('.df-chat-btn');
+		if (!button || !this.report) { return; }
+		const repoIndex = Number(button.dataset.dfRepo);
+		const repo = this.report.repos[repoIndex];
+		const card = button.closest('.df-repo-card');
+		if (!repo || !card) { return; }
+		const picked = (kind: string) => Array.from(card.querySelectorAll<HTMLInputElement>(`.df-pick[data-df-kind="${kind}"]:checked`))
+			.map(input => input.dataset.dfId ?? '');
+		const prompt = buildDarkFactoryChatPrompt(repo, picked('control'), picked('finding'));
+		if (!prompt) {
+			button.textContent = localize('readiness.action.selectFirst');
+			return;
+		}
+		button.textContent = localize('readiness.action.draft');
+		this.postMessage({ command: 'draftCopilotChatWithPrompt', prompt });
 	}
 
 	render(): void {
