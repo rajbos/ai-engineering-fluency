@@ -116,80 +116,38 @@ jobs:
         echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
         echo "Tag name: $TAG_NAME"
 
-    - name: Generate release notes
+    # The changelog is written in the release-prep PR (scripts/release-changelog.js
+    # promote), so it is already on main and inside the VSIX. This step only reads
+    # it back, and refuses to release a version whose section was never written —
+    # before anything is tagged. Nothing here commits to git, so the tag below
+    # lands on the main commit that was actually released.
+    - name: Read release notes from CHANGELOG.md
+      if: inputs.vs_only != true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG_NAME: ${{ steps.tag_name.outputs.tag_name }}
+        VERSION: ${{ steps.extract_version.outputs.tag_version }}
       run: |
-        TAG_NAME="${{ steps.tag_name.outputs.tag_name }}"
-        VERSION="${{ steps.extract_version.outputs.tag_version }}"
-        echo "Generating release notes for $TAG_NAME..."
-        
-        # Use GitHub API to auto-generate notes from merged PRs since last release
-        if gh api repos/${{ github.repository }}/releases/generate-notes \
-          -f tag_name="${TAG_NAME}" \
-          --jq '.body' > /tmp/release_notes.md 2>/tmp/generate_notes_err.txt && [ -s /tmp/release_notes.md ]; then
-          echo "✅ Generated release notes from merged PRs"
-        else
-          echo "Release ${VERSION}" > /tmp/release_notes.md
-          echo "⚠️  Could not auto-generate notes, using fallback"
-          if [ -s /tmp/generate_notes_err.txt ]; then
-            echo "    Error: $(cat /tmp/generate_notes_err.txt)"
-          fi
+        node scripts/release-changelog.js extract vscode-extension/CHANGELOG.md "$VERSION" --out /tmp/release_notes.md
+
+        # Append GitHub's generated PR list (contributors, full diff link) collapsed,
+        # as a supplement to the curated notes. Optional: a failure here is ignored.
+        if gh api "repos/${{ github.repository }}/releases/generate-notes" \
+          -f tag_name="${TAG_NAME}" --jq '.body' > /tmp/generated_notes.md 2>/dev/null \
+          && [ -s /tmp/generated_notes.md ]; then
+          {
+            echo ""
+            echo "<details><summary>All merged pull requests</summary>"
+            echo ""
+            cat /tmp/generated_notes.md
+            echo ""
+            echo "</details>"
+          } >> /tmp/release_notes.md
         fi
-        
+
         echo "--- Release notes preview ---"
         cat /tmp/release_notes.md
         echo "---"
-
-    - name: Update CHANGELOG.md for VSIX packaging
-      if: inputs.vs_only != true
-      run: |
-        VERSION="${{ steps.extract_version.outputs.tag_version }}"
-        node -e "
-          const fs = require('fs');
-          const version = process.argv[1];
-          const notes = fs.readFileSync('/tmp/release_notes.md', 'utf8').trim();
-          let changelog = fs.readFileSync('vscode-extension/CHANGELOG.md', 'utf8');
-          const marker = '## [Unreleased]';
-          const idx = changelog.indexOf(marker);
-          if (idx >= 0) {
-            const insertAt = changelog.indexOf('\n', idx) + 1;
-            const section = '\n## [' + version + ']\n\n' + notes + '\n';
-            changelog = changelog.slice(0, insertAt) + section + changelog.slice(insertAt);
-          }
-          fs.writeFileSync('vscode-extension/CHANGELOG.md', changelog);
-          console.log('✅ Updated vscode-extension/CHANGELOG.md with v' + version + ' notes for VSIX packaging');
-        " "$VERSION"
-
-    - name: Create changelog branch and commit
-      if: steps.trigger_type.outputs.is_manual == 'true' && inputs.vs_only != true
-      id: changelog_branch
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        VERSION="${{ steps.extract_version.outputs.tag_version }}"
-        BRANCH="vscode/changelog/v${VERSION}"
-        echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-
-        git config --local user.name "github-actions[bot]"
-        git config --local user.email "github-actions[bot]@users.noreply.github.com"
-
-        # Check if branch already exists on remote
-        if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
-          echo "ℹ️ Branch $BRANCH already exists on remote — skipping changelog commit"
-          exit 0
-        fi
-
-        if git diff --quiet vscode-extension/CHANGELOG.md; then
-          echo "ℹ️ No changes to vscode-extension/CHANGELOG.md, skipping branch + commit"
-          exit 0
-        fi
-
-        git checkout -b "$BRANCH"
-        git add vscode-extension/CHANGELOG.md
-        git commit -m "docs: update vscode-extension/CHANGELOG.md for v${VERSION}"
-        git push origin "$BRANCH"
-        echo "✅ Pushed vscode-extension/CHANGELOG.md update to $BRANCH"
 
     - name: Create tag for manual trigger
       if: steps.trigger_type.outputs.is_manual == 'true' && inputs.create_tag == true && inputs.vs_only != true

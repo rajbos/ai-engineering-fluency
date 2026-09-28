@@ -1,7 +1,9 @@
 name: Sync Release Notes
 
-# Manual-only trigger — automated changelog sync is handled by the Release workflow.
-# Use this to re-sync CHANGELOG.md from GitHub releases at any time.
+# Manual-only trigger. The VS Code extension's CHANGELOG.md is now the source of
+# its release notes: it is written in the release-prep PR and the Release
+# workflow copies it into the GitHub release, not the other way round. Only use
+# this to backfill CHANGELOG files from older GitHub releases.
 on:
   workflow_dispatch:
 
