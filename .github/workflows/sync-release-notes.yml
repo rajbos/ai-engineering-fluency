@@ -1,9 +1,11 @@
 name: Sync Release Notes
 
-# Manual-only trigger. The VS Code extension's CHANGELOG.md is now the source of
-# its release notes: it is written in the release-prep PR and the Release
-# workflow copies it into the GitHub release, not the other way round. Only use
-# this to backfill CHANGELOG files from older GitHub releases.
+# Manual-only trigger. The per-project CHANGELOG.md files are the source of
+# release notes: they are written in the release-prep PR and the release
+# workflows copy them into the GitHub release, not the other way round. This
+# only backfills: sync-changelog.js adds a section for a GitHub release whose
+# version has no "## [<version>]" section yet, and never rewrites an existing
+# (curated) one.
 on:
   workflow_dispatch:
 

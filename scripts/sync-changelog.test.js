@@ -1,0 +1,111 @@
+#!/usr/bin/env node
+'use strict';
+
+/**
+ * Unit tests for the merge in scripts/sync-changelog.js: backfilling from
+ * GitHub releases must add missing versions and never rewrite a curated one.
+ *
+ * Run with:  node --test scripts/sync-changelog.test.js
+ */
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { mergeReleases, versionFromTag, compareVersions } = require('./sync-changelog');
+
+const CHANGELOG = [
+  '# Change Log',
+  '',
+  'All notable changes.',
+  '',
+  '## [Unreleased]',
+  '',
+  '- Pending thing',
+  '',
+  '## [0.18.2] - 2026-09-28',
+  '',
+  '### Features',
+  '- Curated feature (#2200)',
+  '',
+  '## [0.18.0] - 2026-09-18',
+  '',
+  '### Bug Fixes',
+  '- Curated fix',
+  '',
+].join('\n');
+
+const release = (tagName, body, isPrerelease = false) => ({ tagName, body, isPrerelease });
+
+test('an existing version section is kept byte-for-byte, even when the release body differs', () => {
+  const { text, added } = mergeReleases(CHANGELOG, [
+    release('vscode/v0.18.2', 'Something completely different'),
+    release('vscode/v0.18.0', ''),
+  ]);
+  assert.deepEqual(added, []);
+  assert.equal(text, CHANGELOG);
+});
+
+test('a missing version is inserted in version order without touching its neighbours', () => {
+  const { text, added } = mergeReleases(CHANGELOG, [
+    release('vscode/v0.18.1', '## What changed\r\nFixed a thing\r\n\r\n**Full Changelog**: https://example.test/compare'),
+  ]);
+  assert.deepEqual(added, ['0.18.1']);
+  assert.equal(text, [
+    '# Change Log',
+    '',
+    'All notable changes.',
+    '',
+    '## [Unreleased]',
+    '',
+    '- Pending thing',
+    '',
+    '## [0.18.2] - 2026-09-28',
+    '',
+    '### Features',
+    '- Curated feature (#2200)',
+    '',
+    '## [0.18.1]',
+    '',
+    '## What changed',
+    '- Fixed a thing',
+    '',
+    '## [0.18.0] - 2026-09-18',
+    '',
+    '### Bug Fixes',
+    '- Curated fix',
+    '',
+  ].join('\n'));
+});
+
+test('a version older than every section is appended at the end, pre-release marked', () => {
+  const { text, added } = mergeReleases(CHANGELOG, [release('v0.0.1', '', true)]);
+  assert.deepEqual(added, ['0.0.1']);
+  assert.ok(text.startsWith(CHANGELOG));
+  assert.ok(text.endsWith('\n## [0.0.1] - Pre-release\n\n- Release 0.0.1\n'));
+});
+
+test('a version newer than every section goes after [Unreleased], never above it', () => {
+  const { text } = mergeReleases(CHANGELOG, [release('vscode/v0.19.0', '- New')]);
+  assert.ok(text.indexOf('## [Unreleased]') < text.indexOf('## [0.19.0]'));
+  assert.ok(text.indexOf('## [0.19.0]') < text.indexOf('## [0.18.2]'));
+});
+
+test('a new file gets the default header, [Unreleased] and the release', () => {
+  const { text, added } = mergeReleases('', [release('cli/v0.1.0', '- First')]);
+  assert.deepEqual(added, ['0.1.0']);
+  assert.ok(text.startsWith('# Change Log\n'));
+  assert.ok(text.indexOf('## [Unreleased]') < text.indexOf('## [0.1.0]'));
+  assert.ok(text.endsWith('## [0.1.0]\n\n- First\n'));
+});
+
+test('versionFromTag strips every supported tag prefix', () => {
+  assert.equal(versionFromTag('vscode/v0.18.2'), '0.18.2');
+  assert.equal(versionFromTag('cli/v0.6.1'), '0.6.1');
+  assert.equal(versionFromTag('vs/v1.4.1'), '1.4.1');
+  assert.equal(versionFromTag('v0.0.2'), '0.0.2');
+});
+
+test('compareVersions compares numerically and ignores non-versions', () => {
+  assert.ok(compareVersions('0.18.10', '0.18.9') > 0);
+  assert.equal(compareVersions('1.0.0', '1.0.0'), 0);
+  assert.equal(compareVersions('Unreleased', '1.0.0'), null);
+});

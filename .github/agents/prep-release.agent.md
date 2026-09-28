@@ -116,19 +116,19 @@ For Visual Studio extension (if changed), update the `Version` attribute in the 
 
 ### Step 6b — Write the changelog section
 
-The changelog *is* the release notes. `release.yml` copies the `## [<version>]` section of `vscode-extension/CHANGELOG.md` into the GitHub release, and **refuses to release** (before tagging) when that section is missing. So it must be written in this PR, where it reaches `main` together with the version bump. Nothing else writes it.
+The changelog *is* the release notes. Each release workflow copies the `## [<version>]` section of its component's `CHANGELOG.md` into the GitHub release: `release.yml` (VS Code) **refuses to release** (before tagging) when that section is missing, and `cli-publish.yml` / `visualstudio-publish.yml` fall back to GitHub's generated PR list with a warning. So it must be written in this PR, where it reaches `main` together with the version bump. Nothing else writes it.
 
-For each bumped component whose CHANGELOG has an `## [Unreleased]` section (`vscode-extension/`, `cli/`, `visualstudio-extension/`):
+For each bumped component — `<component>` is `vscode-extension`, `cli` or `visualstudio-extension`, and `<new-version>` is *that component's* new version:
 
 1. Check that `[Unreleased]` covers what is shipping. Compare it with `git log --oneline <last-tag>..origin/main -- <component>/ src/` and add a short, user-facing line for each notable feature or fix that is missing, with its PR number in parentheses. Skip dependency bumps, friendly-name imports and pure refactors. Use the existing `### Changed` / `### Features` / `### Bug Fixes` / `### Chores` headings.
 2. Promote it:
    ```bash
-   node scripts/release-changelog.js promote vscode-extension/CHANGELOG.md <new-version>
+   node scripts/release-changelog.js promote <component>/CHANGELOG.md <new-version>
    ```
    This moves the entries into `## [<new-version>] - <today>` and leaves an empty `## [Unreleased]` above it. It fails when `[Unreleased]` is empty: write the entries (step 1) rather than skipping the section.
 3. Confirm the workflow will accept it:
    ```bash
-   node scripts/release-changelog.js extract vscode-extension/CHANGELOG.md <new-version>
+   node scripts/release-changelog.js extract <component>/CHANGELOG.md <new-version>
    ```
 
 ### Step 7 — Create a release-prep branch
@@ -146,7 +146,7 @@ Stage only the version and changelog files:
 git add vscode-extension/package.json vscode-extension/package-lock.json   # if VS Code changed
 git add cli/package.json cli/package-lock.json                              # if CLI changed
 git add visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest  # if VS changed
-git add vscode-extension/CHANGELOG.md cli/CHANGELOG.md visualstudio-extension/CHANGELOG.md  # the ones promoted in Step 6b
+git add <component>/CHANGELOG.md   # for each component promoted in Step 6b
 ```
 
 Commit with a descriptive message:
@@ -256,7 +256,7 @@ Only set `vscode_only=false` when the Visual Studio extension was *also* bumped 
 - **Always confirm the plan with the user** before creating files/branches/PRs (Step 5).
 - **Dry-run mode**: If the user says "preview", "dry run", or "check only", stop after Step 5 without making any changes.
 - **Only stage version and changelog files** in the commit — do not stage other changes.
-- **Never release without a changelog section.** `release.yml` fails when `vscode-extension/CHANGELOG.md` has no `## [<version>]` section; write it in this PR (Step 6b), not after the release.
+- **Never release without a changelog section.** `release.yml` fails when `vscode-extension/CHANGELOG.md` has no `## [<version>]` section, and the CLI and Visual Studio releases fall back to a bare PR list; write each bumped component's section in this PR (Step 6b), not after the release.
 - **Use `--no-git-tag-version`** with `npm version` to prevent npm from creating a git tag automatically.
 - The VS extension's `<Identity Version="...">` is on a different line than `<PackageManifest Version="2.0.0">` — make sure to update only the `<Identity>` element.
 - After `npm version`, also stage the `package-lock.json` — npm updates both files.

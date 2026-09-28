@@ -170,6 +170,12 @@ jobs:
       shell: bash
       run: node scripts/parse-test-output.js "$RUNNER_TEMP/test-output.txt" >> "$GITHUB_STEP_SUMMARY"
 
+    # The release workflows depend on these scripts to write and read the
+    # changelog sections that become the GitHub release notes.
+    - name: Run changelog script tests
+      shell: bash
+      run: node --test scripts/release-changelog.test.js scripts/sync-changelog.test.js
+
     - name: Verify build outputs exist
       shell: bash
       run: |
