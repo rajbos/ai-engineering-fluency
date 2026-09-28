@@ -1342,4 +1342,8 @@
   ,"mcp_io_github_git_merge_pull_request": "GitHub MCP (Local): Merge Pull Request"
   ,"mcp_io_github_git_update_pull_request_branch": "GitHub MCP (Local): Update Pull Request Branch"
   ,"ReadNotifications": "GitHub MCP (Remote): Read Notifications"
+  ,"ccd_host": "Home Assistant MCP: Host"
+  ,"mcp__ccd_host__sync_with_base_branch": "Home Assistant MCP: Sync with Base Branch"
+  ,"mcp__ccd_pr__bind_pr": "Home Assistant MCP: Bind PR"
+  ,"mcp__ccd_pr__set_monitor": "Home Assistant MCP: Set Monitor"
 }
