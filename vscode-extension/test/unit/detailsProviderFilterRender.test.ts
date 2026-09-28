@@ -20,6 +20,11 @@ const ENTRY = path.join(EXT_ROOT, 'src', 'webview', 'details', 'main.ts');
 const PERIODS = ['today', 'last30Days', 'month', 'lastMonth'] as const;
 type Period = typeof PERIODS[number];
 type Costs = Record<string, number>;
+/** Editor → model id used in every period. Billing group comes from `getBillingGroup(editor, model)`. */
+type EditorModels = Record<string, string>;
+
+/** VS Code is a Copilot surface (→ "GitHub Copilot"); Claude Code bills its Claude model to Anthropic. */
+const DEFAULT_EDITORS: EditorModels = { 'VS Code': 'gpt-5', 'Claude Code': 'claude-sonnet-4' };
 
 let bundlePromise: Promise<string> | undefined;
 
@@ -38,12 +43,20 @@ function bundleDetailsWebview(): Promise<string> {
 	return bundlePromise;
 }
 
-function period(costs: Costs): Record<string, unknown> {
+function period(costs: Costs, editors: EditorModels): Record<string, unknown> {
 	const copilot = costs['GitHub Copilot'] ?? 0;
+	const modelUsage: Record<string, { inputTokens: number; outputTokens: number }> = {};
+	const editorUsage: Record<string, { tokens: number; sessions: number }> = {};
+	const editorModelUsage: Record<string, Record<string, { inputTokens: number; outputTokens: number }>> = {};
+	for (const [editor, model] of Object.entries(editors)) {
+		modelUsage[model] = { inputTokens: 1000, outputTokens: 100 };
+		editorUsage[editor] = { tokens: 1100, sessions: 1 };
+		editorModelUsage[editor] = { [model]: { inputTokens: 1000, outputTokens: 100 } };
+	}
 	return {
 		tokens: 1_000_000, thinkingTokens: 0, estimatedTokens: 1_000_000, actualTokens: 1_000_000,
 		sessions: 3, avgInteractionsPerSession: 4, avgTokensPerSession: 333_333,
-		modelUsage: {}, editorUsage: {}, editorModelUsage: {},
+		modelUsage, editorUsage, editorModelUsage,
 		co2: 0, treesEquivalent: 0, waterUsage: 0,
 		estimatedCost: Object.values(costs).reduce((s, v) => s + v, 0),
 		estimatedCostCopilot: copilot,
@@ -51,12 +64,12 @@ function period(costs: Costs): Record<string, unknown> {
 	};
 }
 
-function detailsData(costs: Record<Period, Costs>, excludedProviders: string[]): Record<string, unknown> {
+function detailsData(costs: Record<Period, Costs>, excludedProviders: string[], editors: EditorModels = DEFAULT_EDITORS): Record<string, unknown> {
 	return {
-		today: period(costs.today),
-		last30Days: period(costs.last30Days),
-		month: period(costs.month),
-		lastMonth: period(costs.lastMonth),
+		today: period(costs.today, editors),
+		last30Days: period(costs.last30Days, editors),
+		month: period(costs.month, editors),
+		lastMonth: period(costs.lastMonth, editors),
 		lastUpdated: '2026-09-27T12:00:00.000Z',
 		backendConfigured: false,
 		compactNumbers: false,
@@ -98,6 +111,17 @@ function providersCostRow(doc: Document): { label: string; tooltip: string; cell
 	return undefined;
 }
 
+/** First-cell text of every body row in the section whose heading contains `heading`. */
+function sectionRowLabels(doc: Document, heading: string): string[] {
+	const h3 = Array.from(doc.querySelectorAll('h3')).find(h => (h.textContent ?? '').includes(heading));
+	const rows = h3?.closest('.section')?.querySelectorAll('table tbody tr') ?? [];
+	return Array.from(rows).map(tr => (tr.querySelector('td')?.textContent ?? '').trim());
+}
+
+function hasRow(labels: string[], name: string): boolean {
+	return labels.some(label => label.includes(name));
+}
+
 function hasCostByProviderPanel(doc: Document): boolean {
 	return Array.from(doc.querySelectorAll('h3')).some(h => (h.textContent ?? '').includes('Cost by Provider'));
 }
@@ -118,6 +142,14 @@ test('hidden panel: a saved exclusion no longer zeroes any period, and the row s
 	assert.match(row.label, /Estimated cost \(all providers\)/);
 	assert.doesNotMatch(row.tooltip, /filter/i, 'tooltip must not point at a filter that is not shown');
 	assert.deepEqual(row.cells, { today: '$40.00', last30Days: '$600.00', month: '$682.00', lastMonth: '$25.00' });
+
+	// The same stale exclusion must not hide Anthropic usage from the Editor / Model lists either.
+	const editors = sectionRowLabels(doc, 'Usage by Editor');
+	assert.ok(hasRow(editors, 'Claude Code'), `Claude Code should stay listed, got ${JSON.stringify(editors)}`);
+	assert.ok(hasRow(editors, 'VS Code'));
+	const models = sectionRowLabels(doc, 'Model Usage');
+	assert.ok(hasRow(models, 'claude-sonnet-4'), `Claude model should stay listed, got ${JSON.stringify(models)}`);
+	assert.ok(hasRow(models, 'gpt-5'));
 });
 
 test('visible panel: an exclusion with a card applies to every period and the row says "selected providers"', async () => {
@@ -135,6 +167,14 @@ test('visible panel: an exclusion with a card applies to every period and the ro
 	assert.match(row.tooltip, /Cost by Provider section/);
 	assert.doesNotMatch(row.tooltip, /below/, 'the panel renders above the table');
 	assert.deepEqual(row.cells, { today: '$3.00', last30Days: '$30.00', month: '$35.00', lastMonth: '$5.00' });
+
+	// A carded exclusion filters the Editor / Model lists too.
+	const editors = sectionRowLabels(doc, 'Usage by Editor');
+	assert.ok(!hasRow(editors, 'Claude Code'), `Claude Code should be filtered out, got ${JSON.stringify(editors)}`);
+	assert.ok(hasRow(editors, 'VS Code'));
+	const models = sectionRowLabels(doc, 'Model Usage');
+	assert.ok(!hasRow(models, 'claude-sonnet-4'), `Claude model should be filtered out, got ${JSON.stringify(models)}`);
+	assert.ok(hasRow(models, 'gpt-5'));
 });
 
 test('visible panel: a saved exclusion for a provider with no card is ignored in every period', async () => {
@@ -144,10 +184,16 @@ test('visible panel: a saved exclusion for a provider with no card is ignored in
 		last30Days: { 'GitHub Copilot': 30, Anthropic: 600, Google: 7 },
 		month: { 'GitHub Copilot': 35, Anthropic: 682 },
 		lastMonth: { 'GitHub Copilot': 5, Anthropic: 20, Google: 9 },
-	}, ['Google']));
+	}, ['Google'], { ...DEFAULT_EDITORS, 'Gemini CLI': 'gemini-2.5-pro' }));
 
 	assert.equal(hasCostByProviderPanel(doc), true);
 	const row = providersCostRow(doc);
 	assert.ok(row);
 	assert.deepEqual(row.cells, { today: '$43.00', last30Days: '$637.00', month: '$717.00', lastMonth: '$34.00' });
+
+	// Google's usage stays listed: its exclusion has no card, so it does not apply.
+	const editors = sectionRowLabels(doc, 'Usage by Editor');
+	assert.ok(hasRow(editors, 'Gemini CLI'), `Gemini CLI should stay listed, got ${JSON.stringify(editors)}`);
+	const models = sectionRowLabels(doc, 'Model Usage');
+	assert.ok(hasRow(models, 'gemini-2.5-pro'), `Gemini model should stay listed, got ${JSON.stringify(models)}`);
 });
