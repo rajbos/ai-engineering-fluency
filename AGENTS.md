@@ -232,11 +232,10 @@ This repository uses a devcontainer (`.devcontainer/devcontainer.json`). When wo
 
 ### What NOT to do
 
-Do not enter retry loops trying to capture terminal output. These patterns waste turns and never converge:
-- Running commands repeatedly hoping output will appear
-- Redirecting output to `/tmp/` files and using `read_file` to read them (the remote FS often fails on newly-written temp files)
-- Spawning background terminals with `sleep && tail` to poll for results
-- Delegating to subagents to "run tests in a clean way"
+Terminal output capture in this devcontainer is unreliable (remote filesystem
+limitation). Don't retry-loop, poll, redirect to temp files, or delegate to a
+subagent hoping for cleaner output — none of that converges. Use the npm
+scripts and `get_errors` below instead.
 
 ### What to do instead
 
@@ -342,7 +341,8 @@ When adding or changing runtime localization keys (entries in `vscode-extension/
 
 ## Pre-PR self-review checklist
 
-PR #2107 took ~12 rounds of Copilot review-agent feedback over ~22 hours to land, with every fix pushed as its own commit (never amended, never force-pushed). The many-rounds loop wasn't caused by amending or force-pushing — it never did that. It happened because each fix commit closed only the single race condition or edge case the reviewer had named (e.g. one `await` point where a peer clear/write could interleave), instead of enumerating and closing the whole class of similar cases at once. The reviewer kept finding the next adjacent gap in the same state machine, round after round.
+A reviewer that flags one case of a bug will keep finding the next adjacent
+case if the fix addresses only the cited instance instead of the whole class.
 
 Before pushing a fix for review feedback, agents must:
 
