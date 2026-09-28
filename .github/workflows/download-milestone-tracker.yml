@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# The issue step checks for an open issue before creating one, which is only
+# safe if runs never overlap. Queue a second run instead of cancelling it.
+concurrency:
+  group: download-milestone-tracker
+  cancel-in-progress: false
+
 jobs:
   check-milestone:
     runs-on: ubuntu-latest
@@ -81,8 +87,8 @@ jobs:
           new_number="${new_url##*/}"
           echo "Created issue #${new_number}: ${new_url}"
 
-          jq -r --arg prefix "$prefix" --arg title "$title" \
-            '.[] | select((.title | startswith($prefix)) and .title != $title) | .number' \
+          jq -r --arg prefix "$prefix" --argjson new "$new_number" \
+            '.[] | select((.title | startswith($prefix)) and .number != $new) | .number' \
             <<< "$open_issues" |
           while read -r previous; do
             echo "Closing #${previous} as superseded by #${new_number}"
