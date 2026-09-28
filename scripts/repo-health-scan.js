@@ -722,9 +722,14 @@ function inlineText(text) {
 	)).join('');
 }
 
-/** Untrusted plain text (an issue title): hidden characters removed, one line. */
+/**
+ * Untrusted plain text (an issue title): hidden characters removed, one line,
+ * and `@name` broken to `@ name` so it can never be a mention. Titles are not
+ * HTML-decoded, so entity escaping would show up literally; `<`, `>` and `&`
+ * are harmless there and are left as typed.
+ */
 function plainText(text) {
-	return stripHidden(text).replace(/\s+/g, ' ').trim();
+	return stripHidden(text).replace(/\s+/g, ' ').replace(/@(?=[\w-])/g, '@ ').trim();
 }
 
 /**

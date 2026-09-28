@@ -319,6 +319,8 @@ test('renderIssue output passes the validate-input.sh checks for hostile finding
 	const { title, body } = renderIssue(finding);
 	assert.deepEqual(validatorFindings(title), []);
 	assert.deepEqual(validatorFindings(body), []);
+	assert.ok(!/@[\w-]/.test(title), 'no live @-mention in the title');
+	assert.match(title, /@ someone/, 'the handle stays readable');
 	assert.deepEqual([...extractTrackedIds(body)], [finding.id], 'the id footer survives');
 });
 

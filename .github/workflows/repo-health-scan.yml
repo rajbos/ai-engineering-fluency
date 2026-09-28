@@ -33,9 +33,14 @@ on:
 permissions:
   contents: read
 
+# Scheduled and manual runs refresh the dashboard and may open an issue, so
+# they share ONE group whatever the ref: two concurrent runs could otherwise
+# pick and open the same finding. They queue rather than cancel, so a handoff
+# is never cut off between creating and assigning its issue. Pull-request runs
+# only run the unit tests and stay isolated per ref.
 concurrency:
-  group: repo-health-scan-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('repo-health-scan-pr-{0}', github.ref) || 'repo-health-scan-mutating' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
