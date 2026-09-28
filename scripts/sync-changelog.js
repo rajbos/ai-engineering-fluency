@@ -25,7 +25,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const { parseSections } = require('./release-changelog');
+const { parseSections, serializeSections, detectEol } = require('./release-changelog');
 
 // Resolve every path from the repo root, not the working directory: the script is
 // run from the root (workflow) and from vscode-extension/ (npm run sync-changelog).
@@ -266,7 +266,8 @@ function compareVersions(a, b) {
 /**
  * Add a section for each release whose version is not in the changelog yet.
  * Existing sections — including the curated ones written by
- * release-changelog.js promote — are kept byte-for-byte. A new section goes
+ * release-changelog.js promote — are kept byte-for-byte, in the file's own
+ * line ending (CRLF or LF). A new section goes
  * before the first existing section with a lower version, or at the end.
  * @param {string} text     - current changelog ('' when the file is new)
  * @param {Array}  releases - GitHub releases
@@ -303,12 +304,9 @@ function mergeReleases(text, releases) {
   if (added.length === 0) {
     return { text, added };
   }
-  const out = [...preamble];
-  for (const section of sections) {
-    out.push(section.heading, ...section.body);
-  }
-  let merged = out.join('\n');
-  if (!merged.endsWith('\n')) { merged += '\n'; }
+  const eol = detectEol(text || '');
+  let merged = serializeSections(preamble, sections, eol);
+  if (!merged.endsWith(eol)) { merged += eol; }
   return { text: merged, added };
 }
 

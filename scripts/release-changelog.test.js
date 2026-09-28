@@ -71,10 +71,18 @@ test('promote refuses a changelog without an Unreleased section', () => {
   assert.throws(() => promoteUnreleased('# Log\n\n## [1.0.0]\n\n- x\n', '1.0.1', '2026-09-28'), /No "## \[Unreleased\]"/);
 });
 
-test('promote normalises CRLF input', () => {
-  const result = promoteUnreleased(CHANGELOG.replace(/\n/g, '\r\n'), '0.18.2', '2026-09-28');
-  assert.ok(!result.includes('\r'));
-  assert.ok(result.includes('## [0.18.2] - 2026-09-28\n\n### Features\n- New thing\n'));
+test('promote keeps a CRLF changelog in CRLF', () => {
+  const crlf = CHANGELOG.replace(/\n/g, '\r\n');
+  const result = promoteUnreleased(crlf, '0.18.2', '2026-09-28');
+  assert.ok(!/[^\r]\n/.test(result), 'every line ending is CRLF');
+  assert.equal(result, promoteUnreleased(CHANGELOG, '0.18.2', '2026-09-28').replace(/\n/g, '\r\n'));
+  assert.ok(result.includes('## [0.18.2] - 2026-09-28\r\n\r\n### Features\r\n- New thing\r\n'));
+});
+
+test('promote leaves the sections it does not change byte-for-byte', () => {
+  const result = promoteUnreleased(CHANGELOG, '0.18.2', '2026-09-28');
+  const untouched = CHANGELOG.slice(CHANGELOG.indexOf('## [0.18.1]'));
+  assert.ok(result.endsWith(untouched));
 });
 
 test('extract returns a dated section body without surrounding blank lines', () => {

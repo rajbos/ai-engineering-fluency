@@ -52,6 +52,24 @@ function parseSections(text) {
   return { preamble, sections };
 }
 
+/** The line ending a changelog uses: CRLF if it has any, otherwise LF. */
+function detectEol(text) {
+  return text.includes('\r\n') ? '\r\n' : '\n';
+}
+
+/**
+ * Join a parsed changelog back into text with `eol` — the inverse of
+ * parseSections. Re-serializing a file with its own line ending gives back the
+ * same bytes, so only the sections a caller changed show up in the diff.
+ */
+function serializeSections(preamble, sections, eol) {
+  const out = [...preamble];
+  for (const section of sections) {
+    out.push(section.heading, ...section.body);
+  }
+  return out.join(eol);
+}
+
 /** Trim leading and trailing blank lines. */
 function trimBlank(lines) {
   let start = 0;
@@ -80,7 +98,7 @@ function extractSection(text, version) {
 
 /**
  * Move the [Unreleased] entries into a new `version` section dated `date`.
- * @returns {string} the updated changelog text
+ * @returns {string} the updated changelog text, in the input's line ending
  * @throws if [Unreleased] is missing or empty, or `version` already exists.
  */
 function promoteUnreleased(text, version, date) {
@@ -99,11 +117,7 @@ function promoteUnreleased(text, version, date) {
   const released = { name: version, heading: `## [${version}] - ${date}`, body: ['', ...entries, ''] };
   const unreleased = { name: UNRELEASED, heading: sections[index].heading, body: [''] };
   const next = [...sections.slice(0, index), unreleased, released, ...sections.slice(index + 1)];
-  const out = [...preamble];
-  for (const section of next) {
-    out.push(section.heading, ...section.body);
-  }
-  return out.join('\n');
+  return serializeSections(preamble, next, detectEol(text));
 }
 
 function today() {
@@ -145,4 +159,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { parseSections, extractSection, promoteUnreleased };
+module.exports = { parseSections, serializeSections, detectEol, extractSection, promoteUnreleased };

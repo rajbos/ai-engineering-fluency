@@ -76,6 +76,26 @@ test('a missing version is inserted in version order without touching its neighb
   ].join('\n'));
 });
 
+test('a CRLF changelog keeps its existing sections byte-for-byte and gets the new one in CRLF', () => {
+  const crlf = CHANGELOG.replace(/\n/g, '\r\n');
+  const releases = [release('vscode/v0.18.1', 'Fixed a thing')];
+  const { text, added } = mergeReleases(crlf, releases);
+  assert.deepEqual(added, ['0.18.1']);
+  assert.ok(!/[^\r]\n/.test(text), 'every line ending is CRLF');
+  assert.equal(text, mergeReleases(CHANGELOG, releases).text.replace(/\n/g, '\r\n'));
+  // Everything before the inserted section, and everything after it, is the original bytes.
+  const insertAt = crlf.indexOf('## [0.18.0]');
+  assert.ok(text.startsWith(crlf.slice(0, insertAt)));
+  assert.ok(text.endsWith(crlf.slice(insertAt)));
+});
+
+test('a CRLF changelog with nothing to add comes back unchanged', () => {
+  const crlf = CHANGELOG.replace(/\n/g, '\r\n');
+  const { text, added } = mergeReleases(crlf, [release('vscode/v0.18.2', 'Different body')]);
+  assert.deepEqual(added, []);
+  assert.equal(text, crlf);
+});
+
 test('a version older than every section is appended at the end, pre-release marked', () => {
   const { text, added } = mergeReleases(CHANGELOG, [release('v0.0.1', '', true)]);
   assert.deepEqual(added, ['0.0.1']);
