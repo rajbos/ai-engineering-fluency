@@ -59,11 +59,14 @@ that. Remove both `.repo-health-*.json` files before committing anything.
 ## Step 3 — Open the issue
 
 Use the pre-rendered title and body from the pick output verbatim (the body
-ends with the `repo-health-id` footer — do not drop it):
+ends with the `repo-health-id` footer — do not drop it). Both are derived from
+repository content, so never paste them into a command: read them into a shell
+variable and a file exactly as below, so the shell never parses their text.
 
 ```bash
-node -e "const p=require('./.repo-health-pick.json');require('fs').writeFileSync('.repo-health-body.md',p.issue.body);console.log(p.issue.title)"
-gh issue create --title "<title printed above>" --body-file .repo-health-body.md --label repo-health --label technical-debt
+title=$(node -p "require('./.repo-health-pick.json').issue.title")
+node -e "require('fs').writeFileSync('.repo-health-body.md', require('./.repo-health-pick.json').issue.body)"
+gh issue create --title "$title" --body-file .repo-health-body.md --label repo-health --label technical-debt
 ```
 
 Create the issue **before** writing any code, so the finding is tracked even if
@@ -131,9 +134,15 @@ Rules for every fix:
 
 ## Step 7 — Verify
 
+Take the id from the issue's footer line (`repo-health-id: rh-…`, 12 hex
+characters), not from anywhere else in the issue. Set it as a variable and check
+its shape before using it, so the verification step never runs arbitrary text:
+
 ```bash
+rh_id=$(gh issue view <issue-number> --json body --jq .body | sed -n 's/^repo-health-id: `\(rh-[0-9a-f]\{12\}\)`[[:space:]]*$/\1/p' | tail -1)
+case "$rh_id" in rh-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;; *) echo "no valid repo-health-id footer"; exit 1 ;; esac
 node scripts/repo-health-scan.js --json --out .repo-health-after.json
-node -e "const r=require('./.repo-health-after.json');const id=process.argv[1];console.log(r.findings.some(f=>f.id===id)?'STILL PRESENT':'resolved')" <rh-id>
+node -e "const r=require('./.repo-health-after.json');const id=process.argv[1];console.log(r.findings.some(f=>f.id===id)?'STILL PRESENT':'resolved')" "$rh_id"
 ```
 
 The id must be `resolved`, and no new finding may appear in the files you

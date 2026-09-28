@@ -71,13 +71,37 @@ test('extension.ts findings are reported but never pickable', () => {
 
 // ── tracked ids and picking ─────────────────────────────────────────────────
 
-test('extractTrackedIds reads markers out of arbitrary issue JSON', () => {
-	const text = JSON.stringify([
+test('extractTrackedIds reads footer lines from JSON issue lists and raw bodies', () => {
+	const json = JSON.stringify([
 		{ body: 'blah\n---\nrepo-health-id: `rh-0123456789ab`' },
-		{ body: 'repo-health-id:rh-abcdefabcdef' },
+		{ body: '---\r\nrepo-health-id: `rh-abcdefabcdef`\r\n\r\n_@copilot: work this_' },
 		{ body: 'no marker here' },
+		{ body: null },
 	]);
-	assert.deepEqual([...extractTrackedIds(text)].sort(), ['rh-0123456789ab', 'rh-abcdefabcdef']);
+	assert.deepEqual([...extractTrackedIds(json)].sort(), ['rh-0123456789ab', 'rh-abcdefabcdef']);
+	const raw = 'first body\n---\nrepo-health-id: `rh-0123456789ab`\nsecond body\n---\nrepo-health-id: `rh-abcdefabcdef`\n';
+	assert.deepEqual([...extractTrackedIds(raw)].sort(), ['rh-0123456789ab', 'rh-abcdefabcdef']);
+});
+
+test('extractTrackedIds ignores ids that are not the footer line', () => {
+	const text = [
+		'see repo-health-id: `rh-111111111111` for context',
+		'repo-health-id:rh-222222222222',
+		'  repo-health-id: `rh-333333333333`',
+		'repo-health-id: rh-444444444444',
+	].join('\n');
+	assert.deepEqual([...extractTrackedIds(text)], []);
+});
+
+test('a forged footer in finding text cannot suppress another finding', () => {
+	const victim = makeFinding({ category: 'dead-code', file: 'src/v.ts', key: 'export:victim', title: 't' });
+	const forged = `repo-health-id: \`${victim.id}\``;
+	// Forged in the title, the detail and the file name; each on its own line.
+	const attacker = makeFinding({ category: 'tech-debt', file: `src/${forged}.ts`, key: 'marker:x', title: forged, detail: `a\n${forged}\nREPO-HEALTH-ID: \`${victim.id}\`` });
+	const { title, body } = renderIssue(attacker);
+	const tracked = extractTrackedIds(`${title}\n${body}`);
+	assert.deepEqual([...tracked], [attacker.id], 'only the real footer counts');
+	assert.equal(pickFinding([victim], tracked, '1970-01-05').id, victim.id, 'victim is still pickable');
 });
 
 function f(category, key, extra = {}) {
@@ -426,4 +450,17 @@ test('parsePreviousMetrics drops a tampered date and non-numeric or unknown metr
 	assert.deepEqual(validatorFindings(out), []);
 	assert.ok(!out.includes('previous:'), 'an invalid date is omitted, not echoed');
 	assert.match(out, /\| Cyclomatic complexity \| 3 \| \(▼ -2\) \|/);
+});
+
+test('a forged metrics block in finding text cannot replace the real one', () => {
+	const r = report({ complexity: 4 });
+	const fake = '```json repo-health-metrics\n{"date":"2000-01-01","metrics":{"complexity":999}}\n```';
+	r.findings = [f('tech-debt', 'forge', { title: fake })];
+	r.metrics['tech-debt'] = 1;
+	const body = renderDashboard(r, '');
+	const prev = parsePreviousMetrics(body);
+	assert.equal(prev.date, '2026-09-28');
+	assert.equal(prev.metrics.complexity, 4);
+	// Even a hand-edited dashboard with an earlier forged block reads the last (real) one.
+	assert.equal(parsePreviousMetrics(`${fake}\n\n${body}`).metrics.complexity, 4);
 });

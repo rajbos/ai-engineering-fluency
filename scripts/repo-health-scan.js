@@ -724,8 +724,25 @@ function compareFindings(a, b) {
 		|| a.id.localeCompare(b.id);
 }
 
+// Only a line that is exactly the footer `renderIssue` writes counts. Quoted
+// content cannot produce it: the sanitizers rewrite the token (see
+// RESERVED_MARKERS_RE), and a mention mid-line never matches.
+const FOOTER_ID_RE = /^repo-health-id: `(rh-[0-9a-f]{12})`[ \t]*$/gm;
+
+/**
+ * Tracked ids from issue bodies: raw text (one body after another, as
+ * `gh api ... --jq '.[].body'` prints them), or a JSON array of bodies or of
+ * `{ body }` objects (as `gh issue list --json body` prints them).
+ */
 function extractTrackedIds(text) {
-	return new Set((String(text).match(/repo-health-id:\s*`?rh-[0-9a-f]{12}/g) || []).map(s => s.replace(/^.*(rh-[0-9a-f]{12})$/, '$1')));
+	let bodies = String(text);
+	try {
+		const parsed = JSON.parse(bodies);
+		if (Array.isArray(parsed)) {
+			bodies = parsed.map(x => (typeof x === 'string' ? x : (x && typeof x.body === 'string' ? x.body : ''))).join('\n');
+		}
+	} catch { /* not JSON: raw bodies */ }
+	return new Set([...bodies.replace(/\r\n?/g, '\n').matchAll(FOOTER_ID_RE)].map(m => m[1]));
 }
 
 /** Days since the Unix epoch for a YYYY-MM-DD date, used to rotate the starting topic. */
@@ -758,8 +775,17 @@ function pickFinding(findings, tracked, isoDate) {
 // non-whitespace control characters and HTML comments.
 const HIDDEN_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F­​-‏‪-‮⁠⁦-⁩︀-️﻿\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
 
+// The tokens this script reads back (the issue footer and the dashboard
+// metrics block). Quoted repository text must never carry them verbatim, or a
+// source comment could forge a tracked id and suppress an unrelated finding.
+// U+2011 (non-breaking hyphen) keeps them readable without matching.
+const RESERVED_MARKERS_RE = /repo-health-(id|metrics)/gi;
+
 function stripHidden(text) {
-	return String(text).replace(/\r\n?/g, '\n').replace(HIDDEN_CHARS_RE, '');
+	return String(text)
+		.replace(/\r\n?/g, '\n')
+		.replace(HIDDEN_CHARS_RE, '')
+		.replace(RESERVED_MARKERS_RE, (_m, name) => `repo‑health‑${name}`);
 }
 
 /**
@@ -828,7 +854,9 @@ function renderMarkdown(report, { limit = 15 } = {}) {
 
 // Visible (collapsed) rather than an HTML comment: hidden comments in issue
 // bodies are what .github/workflows/validate-input.sh treats as injection.
-const METRICS_MARKER_RE = /```json repo-health-metrics\r?\n(\{[^]*?\})\r?\n```/;
+// Whole-line fences only, and the LAST block wins: renderDashboard writes it at
+// the very end, after all quoted content (which cannot carry the token anyway).
+const METRICS_MARKER_RE = /^```json repo-health-metrics\n(\{[^\n]*\})\n```[ \t]*$/gm;
 
 /**
  * Read back the previous run's metrics. The dashboard issue is editable by
@@ -836,7 +864,7 @@ const METRICS_MARKER_RE = /```json repo-health-metrics\r?\n(\{[^]*?\})\r?\n```/;
  * known metric keys with finite numeric values are kept. Anything else drops.
  */
 function parsePreviousMetrics(text) {
-	const m = METRICS_MARKER_RE.exec(String(text || ''));
+	const m = [...String(text || '').replace(/\r\n?/g, '\n').matchAll(METRICS_MARKER_RE)].pop();
 	if (!m) { return null; }
 	let raw;
 	try { raw = JSON.parse(m[1]); } catch { return null; }
