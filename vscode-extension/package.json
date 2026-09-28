@@ -2,7 +2,7 @@
   "name": "ai-engineering-fluency",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.18.1",
+  "version": "0.18.2",
   "publisher": "RobBos",
   "icon": "assets/logo.png",
   "engines": {

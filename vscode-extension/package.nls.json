@@ -569,7 +569,8 @@
   "insight.repeatedTaskSkillCandidate.body": "You started {0} sessions with a similar prompt: \"{1}\". Turning a repeated task like this into a skill or prompt file saves you from re-explaining it and makes the outcome more consistent. {2}",
 
   "//": "── Personalized Insights catalog (insightsEngine.ts) — see issue #2081 ──",
-  "whatsNew.release.0.18.1.headline": "See which repository controls are in place, and which still need evidence, in the new AI Readiness tab.",
+  "whatsNew.release.0.18.2.headline": "See which repository controls are in place, and which still need evidence, in the new AI Readiness tab.",
+  "whatsNew.release.0.18.1.headline": "A maintenance release: friendly tool names, localization groundwork, and a Mistral Vibe cost-attribution fix. No new screens.",
   "whatsNew.feature.usage.readiness-tab.title": "AI Readiness",
   "whatsNew.feature.usage.readiness-tab.description": "In Usage Analysis, scan each repository's delivery and governance controls to see what blocks its next stage and what could not be checked. Separate from your personal Fluency Score.",
   "whatsNew.release.0.18.0.headline": "This release is about noticing patterns you would otherwise have to spot yourself: what a model router did off screen, where the agent had to backtrack, which prompts you keep retyping, how quickly models actually start answering, and how much Copilot agent memory has piled up on disk.",
