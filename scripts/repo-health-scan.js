@@ -67,7 +67,9 @@ const SOURCE_EXTS = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.cs', '.kt',
 const JS_LIKE_EXTS = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs']);
 // Files whose text can reference an exported TS symbol (webview HTML, JSON config).
 const REFERENCE_EXTS = new Set([...JS_LIKE_EXTS, '.html', '.json']);
-const MAX_REFERENCE_FILE_BYTES = 2 * 1024 * 1024;
+// In-memory reads (exports, imports, references, debt markers) skip only
+// pathological files. Large-file counting streams and has no cap at all.
+const MAX_READ_BYTES = 16 * 1024 * 1024;
 
 const EXCLUDED_SEGMENTS = new Set([
 	'node_modules', 'dist', 'out', 'bin', 'obj', 'build', 'coverage', '.gradle',
@@ -146,11 +148,6 @@ function isTestFile(rel) {
 	return /\.(test|spec)\.[cm]?[jt]sx?$/i.test(rel) || /(^|\/)tests?\//i.test(rel);
 }
 
-function countNonBlankLines(text) {
-	let n = 0;
-	for (const line of text.split('\n')) { if (line.trim() !== '') { n++; } }
-	return n;
-}
 
 /**
  * Build a finding. `key` must be stable across unrelated edits (a symbol name,
@@ -195,7 +192,7 @@ function readFileCapped(abs, maxBytes) {
 function makeReader(root) {
 	const cache = new Map();
 	return rel => {
-		if (!cache.has(rel)) { cache.set(rel, readFileCapped(path.join(root, rel), MAX_REFERENCE_FILE_BYTES)); }
+		if (!cache.has(rel)) { cache.set(rel, readFileCapped(path.join(root, rel), MAX_READ_BYTES)); }
 		return cache.get(rel);
 	};
 }
@@ -380,13 +377,45 @@ function namingFindings(files) {
 
 // ── large files ─────────────────────────────────────────────────────────────
 
-function largeFileFindings(files, read) {
+const WHITESPACE_BYTES = new Set([0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x20]);
+
+/**
+ * Non-blank line count of a file, streamed in chunks with no size cap: the
+ * largest files are exactly the ones this topic must not skip. Null if unreadable.
+ */
+function countNonBlankLinesInFile(abs) {
+	let fd;
+	try {
+		fd = fs.openSync(abs, 'r');
+		const buf = Buffer.alloc(1024 * 1024);
+		let count = 0;
+		let lineHasContent = false;
+		let n;
+		while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) {
+			for (let i = 0; i < n; i++) {
+				const b = buf[i];
+				if (b === 0x0A) {
+					if (lineHasContent) { count++; }
+					lineHasContent = false;
+				} else if (!WHITESPACE_BYTES.has(b)) {
+					lineHasContent = true;
+				}
+			}
+		}
+		return lineHasContent ? count + 1 : count;
+	} catch {
+		return null;
+	} finally {
+		if (fd !== undefined) { fs.closeSync(fd); }
+	}
+}
+
+function largeFileFindings(files, root) {
 	const findings = [];
 	for (const file of files) {
 		if (!SOURCE_EXTS.has(path.posix.extname(file))) { continue; }
-		const text = read(file);
-		if (text === null) { continue; }
-		const lines = countNonBlankLines(text);
+		const lines = countNonBlankLinesInFile(path.join(root, file));
+		if (lines === null) { continue; }
 		const warnAt = isTestFile(file) ? LARGE_FILE_WARN * 2 : LARGE_FILE_WARN;
 		if (lines < warnAt) { continue; }
 		findings.push(makeFinding({
@@ -636,6 +665,31 @@ function gitHead(root) {
 	return res.status === 0 ? res.stdout.trim() : null;
 }
 
+/**
+ * Findings that share an id (two identical TODO lines in one file, two
+ * unreachable blocks in one function, ...) become ONE finding listing every
+ * location. Keeping only the first would let fixing it — and tracking its id —
+ * silently suppress the others; merged, the id only disappears once all are gone.
+ */
+function mergeDuplicateFindings(findings) {
+	const byId = new Map();
+	for (const f of findings) {
+		const existing = byId.get(f.id);
+		if (existing) { existing.lines.push(f.line); } else { byId.set(f.id, { finding: f, lines: [f.line] }); }
+	}
+	return [...byId.values()].map(({ finding, lines }) => {
+		if (lines.length === 1) { return finding; }
+		const sorted = [...lines].sort((a, b) => a - b);
+		return {
+			...finding,
+			line: sorted[0],
+			weight: finding.weight + lines.length - 1,
+			title: `${finding.title} (${lines.length} occurrences)`,
+			detail: `${finding.detail}${finding.detail ? '\n\n' : ''}Occurs at lines ${sorted.join(', ')}; resolve all of them.`,
+		};
+	});
+}
+
 function scan({ root = REPO_ROOT, skipEslint = false } = {}) {
 	const files = listTrackedFiles(root);
 	const read = makeReader(root);
@@ -649,16 +703,14 @@ function scan({ root = REPO_ROOT, skipEslint = false } = {}) {
 		if (eslint.note) { notes.push(eslint.note); }
 		findings = findings.concat(eslintFindings(eslint.results, read));
 	}
-	findings = findings.concat(namingFindings(files), largeFileFindings(files, read), unusedExportFindings(files, read));
+	findings = findings.concat(namingFindings(files), largeFileFindings(files, root), unusedExportFindings(files, read));
 	const dup = duplicationFindings(root);
 	if (dup.note) { notes.push(dup.note); }
 	findings = findings.concat(dup.findings, modularizationFindings(files, read));
 	const debt = techDebtScan(files, read);
 	findings = findings.concat(debt.findings);
 
-	// A finding can surface twice (e.g. two identical TODO lines); keep the first.
-	const seen = new Set();
-	findings = findings.filter(f => (seen.has(f.id) ? false : (seen.add(f.id), true)));
+	findings = mergeDuplicateFindings(findings);
 
 	const metrics = { ...debt.metrics };
 	for (const c of CATEGORIES) { metrics[c.id] = findings.filter(f => f.category === c.id).length; }
@@ -778,10 +830,24 @@ function renderMarkdown(report, { limit = 15 } = {}) {
 // bodies are what .github/workflows/validate-input.sh treats as injection.
 const METRICS_MARKER_RE = /```json repo-health-metrics\r?\n(\{[^]*?\})\r?\n```/;
 
+/**
+ * Read back the previous run's metrics. The dashboard issue is editable by
+ * people, so nothing from it is trusted: the date must be YYYY-MM-DD and only
+ * known metric keys with finite numeric values are kept. Anything else drops.
+ */
 function parsePreviousMetrics(text) {
 	const m = METRICS_MARKER_RE.exec(String(text || ''));
 	if (!m) { return null; }
-	try { return JSON.parse(m[1]); } catch { return null; }
+	let raw;
+	try { raw = JSON.parse(m[1]); } catch { return null; }
+	if (!raw || typeof raw !== 'object') { return null; }
+	const known = new Set([...CATEGORIES.map(c => c.id), 'markers', 'tsSuppressions', 'eslintDisables', 'explicitAny']);
+	const metrics = {};
+	for (const [key, value] of Object.entries(raw.metrics || {})) {
+		if (known.has(key) && typeof value === 'number' && Number.isFinite(value)) { metrics[key] = value; }
+	}
+	const date = typeof raw.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.date) ? raw.date : null;
+	return { date, metrics };
 }
 
 function formatDelta(now, before) {
@@ -801,7 +867,7 @@ function renderDashboard(report, previousText) {
 		'Updated daily by `.github/workflows/repo-health-scan.yml` from `scripts/repo-health-scan.js`.',
 		'Individual findings are fixed one per run by the `repo-health-scan` agent; its issues carry the `repo-health` label.',
 		'',
-		`Last scan: ${report.generatedAt.slice(0, 10)} at \`${(report.commit || 'unknown').slice(0, 12)}\`${prev ? ` · previous: ${prev.date}` : ''}`,
+		`Last scan: ${report.generatedAt.slice(0, 10)} at \`${(report.commit || 'unknown').slice(0, 12)}\`${prev && prev.date ? ` · previous: ${prev.date}` : ''}`,
 		'',
 		'| Topic | Findings | Change |',
 		'|---|---:|---|',
@@ -923,6 +989,9 @@ module.exports = {
 	enclosingFunctionName,
 	stableSymbolKey,
 	readFileCapped,
+	countNonBlankLinesInFile,
+	largeFileFindings,
+	mergeDuplicateFindings,
 	stripHidden,
 	inlineText,
 	fencedBlock,
