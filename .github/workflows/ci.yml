@@ -172,6 +172,14 @@ jobs:
       working-directory: vscode-extension
       run: npm run lint:l10n
 
+    # Tests for the repo-root helper scripts (scripts/*.test.js), e.g. the
+    # release-changelog tool release.yml depends on. They are plain node:test
+    # files with no dependencies, so they run here rather than each needing a
+    # workflow of its own. scripts/** is already in the ci-relevant filter.
+    - name: Test repository scripts
+      shell: bash
+      run: node --test scripts/*.test.js
+
     - name: Test hardcoded-string checker
       working-directory: vscode-extension
       run: npm run test:hardcoded-strings
