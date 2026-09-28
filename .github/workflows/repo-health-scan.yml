@@ -170,8 +170,7 @@ jobs:
           fi
           gh label create repo-health --repo "$REPO" --color 0e8a16 \
             --description "Daily repo-health scan finding" 2>/dev/null || true
-          gh issue list --repo "$REPO" --label repo-health --state all --limit 1000 \
-            --json body > "$RUNNER_TEMP/tracked.json"
+gh api --paginate "repos/$REPO/issues?labels=repo-health&state=all&per_page=100" --jq '.[].body' > "$RUNNER_TEMP/tracked.json"
           node scripts/repo-health-scan.js --pick --from "$RUNNER_TEMP/repo-health/report.json" \
             --tracked "$RUNNER_TEMP/tracked.json" --out "$RUNNER_TEMP/pick.json"
           if [ "$(jq -r '.finding == null' "$RUNNER_TEMP/pick.json")" = "true" ]; then
