@@ -381,7 +381,7 @@ function resolveImport(fromFile, spec, fileSet) {
 	const base = path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), spec));
 	const stripped = base.replace(/\.(js|mjs|cjs)$/, '');
 	const candidates = [base, `${stripped}.ts`, `${stripped}.tsx`, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.json`, `${base}/index.ts`, `${base}/index.js`];
-	return candidates.find(c => fileSet.has(c)) || base;
+return candidates.find(c => fileSet.has(c)) || null;
 }
 
 // ── dead code: exports nothing references ───────────────────────────────────
