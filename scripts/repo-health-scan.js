@@ -644,7 +644,7 @@ function pickFinding(findings, tracked, isoDate) {
 // ── rendering ───────────────────────────────────────────────────────────────
 
 function cell(text) {
-	return String(text).replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+	return String(text).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
 }
 
 function categoryTitle(id) {
