@@ -47,7 +47,7 @@ unreviewed PRs are piling up, and adding another only adds merge conflicts.
 ## Step 2 — Scan and pick one finding
 
 ```bash
-gh issue list --label repo-health --state all --limit 1000 --json body > .repo-health-tracked.json
+gh api --paginate 'repos/{owner}/{repo}/issues?labels=repo-health&state=all&per_page=100' --jq '.[].body' > .repo-health-tracked.json
 node scripts/repo-health-scan.js --pick --tracked .repo-health-tracked.json > .repo-health-pick.json
 ```
 
