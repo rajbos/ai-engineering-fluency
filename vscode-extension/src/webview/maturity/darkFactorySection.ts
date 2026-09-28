@@ -8,6 +8,7 @@
  * tested directly.
  */
 import { escapeHtml } from '../shared/formatUtils';
+import { localize, localizeFormat } from '../shared/localization';
 import { DARK_FACTORY_DISCLAIMER, nextStageToClose } from '../../../../src/darkFactoryReadiness';
 import type {
 	DarkFactoryControlResult,
@@ -16,6 +17,14 @@ import type {
 	DarkFactoryReport,
 	DarkFactoryStageResult,
 } from '../../../../src/types';
+
+/**
+ * Localize a `{0}`-style template for HTML: the template is escaped, the
+ * arguments are inserted as-is, so callers pass only markup they built.
+ */
+function localizeHtml(key: string, ...htmlArgs: string[]): string {
+	return escapeHtml(localize(key)).replace(/\{(\d+)\}/g, (match, index) => htmlArgs[Number(index)] ?? match);
+}
 
 /** What a selection box in a repository card refers to. */
 export type DarkFactoryPickKind = 'control' | 'finding';
@@ -63,7 +72,7 @@ function buildBandHtml(repo: DarkFactoryRepoReport): string {
 
 /** Checked-by-default box that selects an item for the Copilot Chat prompt. */
 function buildPickHtml(kind: DarkFactoryPickKind, id: string, label: string): string {
-	return `<input type="checkbox" class="df-pick" data-df-kind="${kind}" data-df-id="${escapeHtml(id)}" checked aria-label="Include ${escapeHtml(label)} in the Copilot prompt">`;
+	return `<input type="checkbox" class="df-pick" data-df-kind="${kind}" data-df-id="${escapeHtml(id)}" checked aria-label="${escapeHtml(localizeFormat('readiness.action.includeItem', label))}">`;
 }
 
 /**
@@ -154,14 +163,14 @@ function buildSummaryStageText(repo: DarkFactoryRepoReport): string {
 function buildSummaryCountsHtml(repo: DarkFactoryRepoReport, nextStage: DarkFactoryStageResult | undefined): string {
 	const parts: string[] = [];
 	if (nextStage && nextStage.missing.length > 0) {
-		parts.push(`<span class="df-count df-count-missing">${nextStage.missing.length} missing for Stage ${nextStage.stage}</span>`);
+		parts.push(`<span class="df-count df-count-missing">${escapeHtml(localizeFormat('readiness.summary.missingForStage', nextStage.missing.length, nextStage.stage))}</span>`);
 	}
 	if (repo.unknownCount > 0) {
-		parts.push(`<span class="df-count df-count-unknown">${repo.unknownCount} unchecked</span>`);
+		parts.push(`<span class="df-count df-count-unknown">${escapeHtml(localizeFormat('readiness.summary.unchecked', repo.unknownCount))}</span>`);
 	}
 	if (repo.findings.length > 0) {
-		const noun = repo.findings.length === 1 ? 'anti-pattern' : 'anti-patterns';
-		parts.push(`<span class="df-count df-count-findings">${repo.findings.length} ${noun}</span>`);
+		const key = repo.findings.length === 1 ? 'readiness.summary.antiPattern' : 'readiness.summary.antiPatterns';
+		parts.push(`<span class="df-count df-count-findings">${escapeHtml(localizeFormat(key, repo.findings.length))}</span>`);
 	}
 	return `<span class="df-counts">${parts.join('')}</span>`;
 }
@@ -171,8 +180,8 @@ function buildActionHtml(repoIndex: number, nextStage: DarkFactoryStageResult | 
 	const actionable = (nextStage?.missing.length ?? 0) + repo.findings.length;
 	if (actionable === 0) { return ''; }
 	return `<div class="df-action">
-		<span class="df-action-text">Pick the items above, then open a new Copilot Chat with a prompt to implement them. Nothing is sent until you press Enter.</span>
-		<button class="button df-chat-btn" data-df-repo="${repoIndex}">🤖 Draft Copilot Chat prompt</button>
+		<span class="df-action-text">${escapeHtml(localize('readiness.action.hint'))}</span>
+		<button class="button df-chat-btn" data-df-repo="${repoIndex}">${escapeHtml(localize('readiness.action.draft'))}</button>
 	</div>`;
 }
 
@@ -215,18 +224,18 @@ function buildOverviewHtml(repos: readonly DarkFactoryRepoReport[]): string {
 	}
 	const stages = [...byStage.entries()]
 		.sort(([a], [b]) => b - a)
-		.map(([stage, count]) => `<span class="df-overview-item"><strong>${count}</strong> at Stage ${stage}</span>`)
+		.map(([stage, count]) => `<span class="df-overview-item">${localizeHtml('readiness.overview.atStage', `<strong>${count}</strong>`, String(stage))}</span>`)
 		.join('');
 	const withFindings = repos.filter(repo => repo.findings.length > 0).length;
 	const findings = withFindings > 0
-		? `<span class="df-overview-item"><strong>${withFindings}</strong> with anti-patterns</span>`
+		? `<span class="df-overview-item">${localizeHtml('readiness.overview.withAntiPatterns', `<strong>${withFindings}</strong>`)}</span>`
 		: '';
-	const noun = repos.length === 1 ? 'repository' : 'repositories';
+	const scannedKey = repos.length === 1 ? 'readiness.overview.scannedOne' : 'readiness.overview.scannedMany';
 	return `<div class="df-overview">
-		<span class="df-overview-item"><strong>${repos.length}</strong> ${noun} scanned</span>
+		<span class="df-overview-item">${localizeHtml(scannedKey, `<strong>${repos.length}</strong>`)}</span>
 		${stages}
 		${findings}
-		<span class="df-overview-hint">Click a repository to see what blocks its next stage.</span>
+		<span class="df-overview-hint">${escapeHtml(localize('readiness.overview.hint'))}</span>
 	</div>`;
 }
 
@@ -261,18 +270,17 @@ export function buildDarkFactorySectionHtml(report: DarkFactoryReport | undefine
 				<span class="df-section-badge">per repository</span>
 			</div>
 			<div class="df-disclaimer">
-				<strong>It never tells you that you are ready to go dark.</strong> It reports which governance and evidence
-				controls each repository actually has &mdash; Stage 5 (a bounded dark factory) is never awarded.
+				<strong>${escapeHtml(localize('readiness.disclaimer.headline'))}</strong> ${escapeHtml(localize('readiness.disclaimer.body'))}
 			</div>
 			<details class="df-about">
-				<summary>📋 What this measures</summary>
+				<summary>${escapeHtml(localize('readiness.about.title'))}</summary>
 				<div class="df-about-body">
 					A dark factory is a governed, observable production system &mdash; humans specify intent, constraints, risk and
 					evidence of success while agents implement and validate. This section reports which of those governance and
 					evidence controls each repository in your workspace actually has, and the specific ones blocking the next stage.
 					<br><br>
-					A green build from an unbounded agent is weak evidence. ${escapeHtml(DARK_FACTORY_DISCLAIMER)} Stage 5 is never
-					awarded: its defining evidence is not machine-detectable.
+					${escapeHtml(localize('readiness.about.weakEvidence'))} ${escapeHtml(DARK_FACTORY_DISCLAIMER)}
+					${escapeHtml(localize('readiness.about.stage5'))}
 				</div>
 			</details>
 			${buildEvidenceNoticeHtml(report)}

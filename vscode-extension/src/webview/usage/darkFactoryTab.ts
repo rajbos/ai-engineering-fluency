@@ -62,10 +62,10 @@ export class DarkFactoryTab {
 			.map(input => input.dataset.dfId ?? '');
 		const prompt = buildDarkFactoryChatPrompt(repo, picked('control'), picked('finding'));
 		if (!prompt) {
-			button.textContent = '🤖 Select at least one item first';
+			button.textContent = localize('readiness.action.selectFirst');
 			return;
 		}
-		button.textContent = '🤖 Draft Copilot Chat prompt';
+		button.textContent = localize('readiness.action.draft');
 		this.postMessage({ command: 'draftCopilotChatWithPrompt', prompt });
 	}
 
