@@ -10424,6 +10424,12 @@ private computeFallbackDailyRollup(
 			openCopilotChatWithPrompt: (message) => this.dispatch('openCopilotChatWithPrompt', () =>
 				vscode.commands.executeCommand('workbench.action.chat.open', { query: message.prompt, isNewChat: true })
 			),
+			// Pre-fills the chat input without submitting, so the user reviews the prompt first.
+			draftCopilotChatWithPrompt: (message) => this.dispatch('draftCopilotChatWithPrompt', () =>
+				typeof message.prompt === 'string'
+					? vscode.commands.executeCommand('workbench.action.chat.open', { query: message.prompt, isNewChat: true, isPartialQuery: true, mode: 'agent' })
+					: undefined
+			),
 			suppressUnknownTool: (message) => {
 				const toolName = message.toolName as string;
 				return toolName ? this._handleSuppressUnknownTool(toolName) : undefined;
