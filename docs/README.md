@@ -24,6 +24,7 @@ Essential reference documents covering the data model, scoring rules, and tracke
 | [COPILOT-CLI-FORMAT-CHANGES.md](COPILOT-CLI-FORMAT-CHANGES.md) | Breaking changes to Copilot CLI session log format and their impact |
 | [COPILOT-CLI-OTEL-EXPORT.md](COPILOT-CLI-OTEL-EXPORT.md) | Enabling Copilot CLI's OpenTelemetry file export for exact token counts |
 | [VALIDATION.md](VALIDATION.md) | What each check catches, and the one-command release preflight (`npm run preflight`) |
+| [REPO-HEALTH-SCAN.md](REPO-HEALTH-SCAN.md) | Daily code-health scan (8 topics) → one issue → one PR, via GitHub Actions or a local Claude Code routine |
 
 ## Component Documentation
 
