@@ -12,7 +12,9 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
 
 - **Details** — the extension's stats table (tokens, cost, activity, environment) for today / last 30 days /
   current month / previous month / projected year, and usage by editor and model. On narrow panels a period
-  picker shows one column at a time (including the projected year).
+  picker shows one column at a time (including the projected year). Each row's label is a table row header, so
+  screen readers announce what a number measures, and the cost explanations open from a focusable ℹ️ button
+  (keyboard and touch included) instead of a hover-only tooltip.
 - **Chart** — the extension's Chart view: summary cards (with a collapsible per-editor breakdown) and a bar/line
   chart aggregated by day / week / month, with a rolling average, the metric (tokens / cost / sessions) and the
   split (total / by model / by editor / by provider; a by-repository split appears only once the CLI sends
@@ -24,7 +26,8 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
   note when a cost split is selected.
 - **Sessions** — every session from the last 30 days across all tracked tools, filterable by
   today / 7 days / 30 days (calendar days from local midnight, the same windows the CLI uses), searchable, sortable
-  by recency, tokens or cost.
+  by recency, tokens or cost. Typing in the search box only updates the results around it, so the caret and input
+  method (IME) composition are never disturbed.
 - **Fluency Score** — overall stage banner, spider (radar) chart of the six categories with the stage reference,
   and per-category cards with a stage badge, progress bar, evidence and next-step tips.
 
@@ -44,7 +47,9 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
   and auto-refreshes every 30 minutes while a panel is open. With no panel open, `get_summary` reads the snapshot
   file again on every call, so it never serves a copy another session has replaced (or that was deleted). Lock files
   ensure only one CLI run at a time across all Copilot sessions; other sessions pick up the new snapshot via a file
-  watcher, which ignores snapshots older than the one it already has. Each run takes the next lock *generation*,
+  watcher, which ignores snapshots older than the one it already has. If the other session's lock ends (released,
+  or its process gone) without a snapshot newer than the one on hand when the wait began, that refresh is reported
+  as failed rather than as a success with the old data. Each run takes the next lock *generation*,
   `refresh.lock.<n>`, published atomically (hard link) with a per-run token, and the highest generation is the
   current lock. A session may only create generation n+1 once generation n is finished (a `refresh.lock.<n>.done`
   marker carrying its token), stale (dead process or past the timeout), or absent. Creating the file is exclusive, so
@@ -74,7 +79,7 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
 | Action        | What it does                                                                 |
 |---------------|------------------------------------------------------------------------------|
 | `get_summary` | Returns cached stats (periods, top models, editors, fluency tips). Session titles and project names are only included with `{ "topSessions": 1-25 }` (top sessions of the last 7 days). The result is sent to the model like any tool result. Never runs the CLI. |
-| `refresh`     | Starts a background refresh. Pass `{ "wait": true }` to block until it finishes (if another Copilot session is already refreshing, it waits for that run's snapshot instead). |
+| `refresh`     | Starts a background refresh. Pass `{ "wait": true }` to block until it finishes (if another Copilot session is already refreshing, it waits for that run's snapshot instead, and fails if that run ends without one). |
 
 Example: `open_canvas({ canvasId: "ai-fluency", instanceId: "fluency" })`, then
 `invoke_canvas_action({ instanceId: "fluency", actionName: "get_summary" })`.

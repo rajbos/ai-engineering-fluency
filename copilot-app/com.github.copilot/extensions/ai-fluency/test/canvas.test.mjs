@@ -121,6 +121,18 @@ test("refresh with wait also waits for a refresh another session is running", as
     assert.equal(result.fetchedAt, "2026-05-05T00:00:00.000Z");
 });
 
+test("refresh with wait fails when another session's refresh ends without a new snapshot", async (t) => {
+    const { dir, action } = await setup(t, { pollMs: 10, runCli: async () => assert.fail("must not run") });
+    await writeSnapshot(buildSnapshot(samplePayload(), { fetchedAt: "2026-01-01T00:00:00.000Z", describe: () => ({ label: null, project: null }) }), dir);
+    await writeFile(join(dir, "refresh.lock.1"), JSON.stringify({ pid: process.ppid, token: "other", startedAt: new Date().toISOString() }));
+    setTimeout(() => void writeFile(join(dir, "refresh.lock.1.done"), JSON.stringify({ token: "other" })), 30);
+    await assert.rejects(action("refresh")({ input: { wait: true } }), (error) => {
+        assert.equal(error.code, "refresh_failed");
+        assert.match(error.message, /ended without new stats/);
+        return true;
+    });
+});
+
 test("opening a panel starts its server, watches the snapshot and refreshes a missing one; closing releases it", async (t) => {
     let runs = 0;
     const { definition, refresher, servers } = await setup(t, { runCli: async () => (runs++, cliResult()) });

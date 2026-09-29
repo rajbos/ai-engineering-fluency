@@ -122,15 +122,18 @@ code { font-family: var(--font-mono, ui-monospace, Consolas, monospace); font-si
 .stats-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; overflow: hidden; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 8px; }
 .stats-table thead { background: var(--list-hover-bg); }
 .stats-table th, .stats-table td { padding: 9px 10px; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; overflow-wrap: anywhere; }
-.stats-table tbody tr:last-child td { border-bottom: 0; }
+.stats-table tbody:last-child tr:last-child > * { border-bottom: 0; }
 .stats-table th { text-align: left; color: var(--text-secondary); font-size: 12px; font-weight: 700; letter-spacing: .1px; }
 .stats-table th:first-child { width: 26%; }
-.stats-table td { color: var(--text-primary); font-size: 12px; }
+.stats-table td, .stats-table tbody th { color: var(--text-primary); font-size: 12px; }
+.stats-table tbody th { font-weight: 400; letter-spacing: normal; }
 .stats-table .align-right { text-align: right; }
-.stats-table tr.group-row td { background: var(--list-hover-bg); color: var(--text-secondary); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-.stats-table tbody tr:not(.group-row):hover td { background: color-mix(in srgb, var(--list-hover-bg) 50%, transparent); }
+.stats-table tr.group-row > * { background: var(--list-hover-bg); color: var(--text-secondary); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+.stats-table tbody tr:not(.group-row):hover > * { background: color-mix(in srgb, var(--list-hover-bg) 50%, transparent); }
 .metric-label { display: inline-flex; align-items: flex-start; gap: 6px; }
-.hint-icon { font-size: 10px; opacity: .7; }
+.hint-button { align-self: center; padding: 0 2px; background: none; border: 0; border-radius: 3px; font-size: 10px; line-height: 1; opacity: .7; }
+.hint-button:hover, .hint-button[aria-expanded="true"] { opacity: 1; }
+.hint-text { margin-top: 4px; }
 
 @container (max-width: 699.98px) {
     .period-picker { display: block; }

@@ -24,6 +24,7 @@ const DISPOSE_WAIT_MS = KILL_GRACE_MS * 2 + 1000;
 const LEGACY_LOCK = "refresh.lock";
 const GENERATION = /^refresh\.lock\.(\d+)(\.done)?$/;
 const LOCK_TEMP = /^refresh\.lock\..+\.tmp$/;
+const OTHER_SESSION_FAILED = "Another Copilot session's refresh ended without new stats (it failed or was stopped). Try Refresh again.";
 
 function pidAlive(pid) {
     try {
@@ -76,6 +77,8 @@ export class Refresher extends EventEmitter {
         this.lockGeneration = null;
         this.lockToken = null;
         this.keptToken = null;
+        this.follow = 0;
+        this.followBaseline = null;
         this.snapshot = null;
         this.loading = null;
         this.loaded = false;
@@ -325,14 +328,8 @@ export class Refresher extends EventEmitter {
             this.setStatus({ state: "error", finishedAt: new Date(this.now()).toISOString(), error, byOtherSession: false });
             return this.state();
         }
-        if (other) {
-            this.setStatus({ state: "running", startedAt: other.startedAt, error: null, byOtherSession: true });
-            return this.state();
-        }
-        if (!(await this.acquireLock())) {
-            this.setStatus({ state: "running", startedAt: new Date(this.now()).toISOString(), error: null, byOtherSession: true });
-            return this.state();
-        }
+        if (other) return this.followOtherSession(other.startedAt);
+        if (!(await this.acquireLock())) return this.followOtherSession(new Date(this.now()).toISOString());
         const startedAt = this.now();
         this.setStatus({ state: "running", startedAt: new Date(startedAt).toISOString(), error: null, byOtherSession: false });
         let keep = false;
@@ -360,12 +357,12 @@ export class Refresher extends EventEmitter {
     }
 
     /**
-     * Waits for another session's refresh to finish: a new snapshot appears, or its lock goes away or expires.
-     * Returns the state as soon as that happens, or after `maxWaitMs` with the status still `running`.
+     * Waits for another session's refresh to finish: a new snapshot appears (`idle`), or its lock goes away or expires
+     * without one (`error`). Returns the state as soon as that happens, or after `maxWaitMs` with the status still `running`.
      */
     async waitForOtherSession({ maxWaitMs = this.staleAfterMs() } = {}) {
         const deadline = Date.now() + maxWaitMs;
-        while (!this.disposed && this.status.state === "running" && this.status.byOtherSession && Date.now() < deadline) {
+        while (!this.disposed && this.followingOtherSession() && Date.now() < deadline) {
             await sleep(this.pollMs);
             await this.onSnapshotFileChanged();
             await this.checkOtherSession();
@@ -385,17 +382,43 @@ export class Refresher extends EventEmitter {
     /** Picks up changes to the snapshot file: another session's refresh, or the file being deleted. */
     async onSnapshotFileChanged() {
         if (!(await this.readFromDisk())) return;
-        if (this.snapshot && this.status.byOtherSession) {
-            this.setStatus({ state: "idle", finishedAt: this.snapshot.fetchedAt, error: null, byOtherSession: false });
-        } else {
-            this.emit("change", this.state());
-        }
+        if (this.followingOtherSession() && this.otherSessionDelivered()) this.settleOtherSession();
+        else this.emit("change", this.state());
     }
 
+    /** Once the other session's lock is gone: its new snapshot means success, no new snapshot means its run failed. */
     async checkOtherSession() {
-        if (this.status.state === "running" && this.status.byOtherSession && !(await this.otherSessionLock())) {
-            await this.onSnapshotFileChanged();
-            if (this.status.byOtherSession) this.setStatus({ state: "idle", byOtherSession: false });
+        const follow = this.follow;
+        if (!this.followingOtherSession() || (await this.otherSessionLock())) return;
+        await this.readFromDisk();
+        // Settled meanwhile: the file watcher saw the snapshot, or a newer refresh started.
+        if (follow !== this.follow || !this.followingOtherSession()) return;
+        this.settleOtherSession();
+    }
+
+    /** Another session is refreshing: remember what was on hand, so the end of its run can be told apart from a failure. */
+    followOtherSession(startedAt) {
+        this.follow++;
+        this.followBaseline = this.snapshot;
+        this.setStatus({ state: "running", startedAt, error: null, byOtherSession: true });
+        return this.state();
+    }
+
+    followingOtherSession() {
+        return this.status.state === "running" && this.status.byOtherSession;
+    }
+
+    /** A snapshot newer than the one on hand when the wait began, or written after the other run started. */
+    otherSessionDelivered() {
+        if (!this.snapshot) return false;
+        return isNewer(this.snapshot, this.followBaseline) || Date.parse(this.snapshot.fetchedAt) >= Date.parse(this.status.startedAt);
+    }
+
+    settleOtherSession() {
+        if (this.otherSessionDelivered()) {
+            this.setStatus({ state: "idle", finishedAt: this.snapshot.fetchedAt, error: null, byOtherSession: false });
+        } else {
+            this.setStatus({ state: "error", finishedAt: new Date(this.now()).toISOString(), error: OTHER_SESSION_FAILED, byOtherSession: false });
         }
     }
 

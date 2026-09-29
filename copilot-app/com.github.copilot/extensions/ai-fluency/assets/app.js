@@ -88,6 +88,7 @@ const ui = {
     chartRolling: storedFlag("chartRolling"),
     editorCardsCollapsed: storedFlag("editorCardsCollapsed"),
     hiddenSeries: new Set(),
+    openTips: new Set(),
 };
 let data = { snapshot: null, status: null };
 const hashTab = location.hash.slice(1);
@@ -266,28 +267,57 @@ function section(heading, ...children) {
     return h("div", { class: "section" }, heading && h("h3", {}, heading), ...children);
 }
 
-/** Extension-style stats table. On narrow panels CSS shows only the selected period's column (`.sel`). */
+let tipIds = 0;
+
+/** A row's label; an explanation sits behind a real button so keyboard, touch and screen-reader users can open it. */
+function rowLabel(row) {
+    const icon = row.icon && h("span", { "aria-hidden": "true" }, row.icon);
+    if (!row.tip) return h("span", { class: "metric-label" }, icon, h("span", {}, row.label));
+    const open = ui.openTips.has(row.label);
+    const id = `metric-tip-${++tipIds}`;
+    const toggle = () => {
+        if (open) ui.openTips.delete(row.label);
+        else ui.openTips.add(row.label);
+        renderPanel();
+    };
+    return [
+        h(
+            "span",
+            { class: "metric-label" },
+            icon,
+            h("span", {}, row.label),
+            h("button", { type: "button", class: "hint-button", title: row.tip, "aria-label": `About ${row.label}`, "aria-expanded": String(open), "aria-controls": id, "data-key": `tip:${row.label}`, onclick: toggle }, "ℹ️"),
+        ),
+        h("div", { class: "muted hint-text", id, hidden: !open }, row.tip),
+    ];
+}
+
+/**
+ * Extension-style stats table. On narrow panels CSS shows only the selected period's column (`.sel`). Each group is its
+ * own `tbody` headed by a row-group header, and each row's label is a row header, so screen readers can name a number.
+ */
 function statsTable(firstHeader, groups) {
-    const cell = (tag, key, ...children) => h(tag, { class: `align-right${key === ui.period ? " sel" : ""}`, "data-col": key }, ...children);
-    const body = h("tbody", {});
-    for (const group of groups) {
-        if (group.heading) body.append(h("tr", { class: "group-row" }, h("td", {}, group.heading), COLUMNS.map(([key]) => cell("td", key))));
-        for (const row of group.rows) {
-            body.append(
+    const cell = (tag, key, ...children) => h(tag, { class: `align-right${key === ui.period ? " sel" : ""}`, "data-col": key, scope: tag === "th" ? "col" : null }, ...children);
+    const bodies = groups.map((group) =>
+        h(
+            "tbody",
+            {},
+            group.heading && h("tr", { class: "group-row" }, h("th", { scope: "rowgroup" }, group.heading), COLUMNS.map(([key]) => cell("td", key))),
+            group.rows.map((row) =>
                 h(
                     "tr",
                     {},
-                    h("td", {}, h("span", { class: "metric-label", title: row.tip }, row.icon && h("span", { "aria-hidden": "true" }, row.icon), h("span", {}, row.label, row.tip && h("span", { class: "hint-icon", "aria-hidden": "true" }, " ℹ️")))),
+                    h("th", { scope: "row" }, rowLabel(row)),
                     COLUMNS.map(([key]) => {
                         const value = row.cells[key];
                         return cell("td", key, value?.main ?? "—", value?.sub && h("div", { class: "muted" }, value.sub));
                     }),
                 ),
-            );
-        }
-    }
-    const head = h("thead", {}, h("tr", {}, h("th", {}, firstHeader), COLUMNS.map(([key, icon, label]) => cell("th", key, `${icon} ${label}`))));
-    return h("table", { class: "stats-table num" }, head, body);
+            ),
+        ),
+    );
+    const head = h("thead", {}, h("tr", {}, h("th", { scope: "col" }, firstHeader), COLUMNS.map(([key, icon, label]) => cell("th", key, `${icon} ${label}`))));
+    return h("table", { class: "stats-table num" }, head, bodies);
 }
 
 function metricGroups(periods) {
@@ -809,61 +839,68 @@ function inRange(session) {
 const sessionTitle = (s) => s.label || `${s.editor} session ${s.shortId}`;
 
 function renderSessions(snapshot) {
-    const q = ui.query.trim().toLowerCase();
     const sorters = {
         recent: (a, b) => String(b.lastActivity).localeCompare(String(a.lastActivity)),
         tokens: (a, b) => b.totalTokens - a.totalTokens,
         cost: (a, b) => b.estimatedCost - a.estimatedCost,
     };
-    const list = snapshot.sessions
-        .filter(inRange)
-        .filter((s) => !q || [sessionTitle(s), s.project, s.editor, ...s.models].some((v) => v && v.toLowerCase().includes(q)))
-        .sort(sorters[ui.sort]);
+    const summary = h("div", { class: "cards" });
+    const results = h("div", {});
+    const fill = () => {
+        const q = ui.query.trim().toLowerCase();
+        const list = snapshot.sessions
+            .filter(inRange)
+            .filter((s) => !q || [sessionTitle(s), s.project, s.editor, ...s.models].some((v) => v && v.toLowerCase().includes(q)))
+            .sort(sorters[ui.sort]);
+        summary.replaceChildren(
+            summaryCard("Sessions", int(list.length)),
+            summaryCard("Total Tokens", compact(sum(list.map((s) => s.totalTokens)))),
+            summaryCard("Estimated cost", usd(sum(list.map((s) => s.estimatedCost))), "API list price"),
+        );
+        const more = list.length > ui.limit && h("button", { type: "button", class: "link", "data-key": "more-sessions", onclick: () => update({ limit: ui.limit + PAGE }) }, `Show ${Math.min(PAGE, list.length - ui.limit)} more`);
+        results.replaceChildren(...[list.length ? h("ul", { class: "sessions" }, list.slice(0, ui.limit).map(sessionItem)) : empty(q ? "No sessions match that filter." : "No sessions in this range."), more].filter(Boolean));
+    };
 
+    // Typing only refreshes the results around the field: it stays mounted, so the caret, the selection and any input
+    // method composition are left alone.
     const search = h("input", { class: "search", type: "search", "data-key": "search", placeholder: "Filter by name, project, tool or model", "aria-label": "Filter sessions", value: ui.query });
     search.addEventListener("input", () => {
         ui.query = search.value;
         ui.limit = PAGE;
-        renderPanel();
+        fill();
     });
     const sort = h("select", { "data-key": "sort", "aria-label": "Sort sessions", onchange: (e) => update({ sort: e.target.value, limit: PAGE }) }, SORTS.map(([v, t]) => h("option", { value: v, selected: v === ui.sort }, t)));
-
-    const items = list.slice(0, ui.limit).map((s) => {
-        const active = minutes(s.activeDurationMs);
-        return h(
-            "li",
-            { class: "session" },
-            h("div", { class: "session-top" }, h("p", { class: `session-title${s.label ? "" : " fallback"}` }, sessionTitle(s)), h("span", { class: "session-when", title: new Date(s.lastActivity).toLocaleString() }, ago(s.lastActivity))),
-            s.project && h("div", { class: "session-sub" }, s.project),
-            h("div", { class: "chips" }, h("span", { class: "chip editor" }, `${editorIcon(s.editor)} ${s.editor}`), s.models.slice(0, 4).map((m) => h("span", { class: "chip" }, m)), s.models.length > 4 && h("span", { class: "chip" }, `+${s.models.length - 4}`)),
-            h(
-                "ul",
-                { class: "metrics num" },
-                h("li", { title: "Tokens" }, "🟣 ", h("strong", {}, compact(s.totalTokens)), " tokens"),
-                h("li", { title: "Estimated cost at API list prices" }, "💵 ", h("strong", {}, usd(s.estimatedCost))),
-                h("li", { title: "Interactions" }, "💬 ", h("strong", {}, int(s.interactions)), " turns"),
-                h("li", { title: "Tool calls" }, "🔧 ", h("strong", {}, int(s.toolCalls)), " tool calls"),
-                active && h("li", { title: "Active time" }, "⏱️ ", h("strong", {}, active)),
-            ),
-        );
-    });
+    fill();
 
     return [
-        h(
-            "div",
-            { class: "cards" },
-            summaryCard("Sessions", int(list.length)),
-            summaryCard("Total Tokens", compact(sum(list.map((s) => s.totalTokens)))),
-            summaryCard("Estimated cost", usd(sum(list.map((s) => s.estimatedCost))), "API list price"),
-        ),
+        summary,
         section(
             null,
             h("div", { class: "toolbar" }, segmented("Time range", RANGES, ui.range, (v) => update({ range: v, limit: PAGE })), h("label", { class: "select-label" }, "Sort", sort)),
             search,
-            list.length ? h("ul", { class: "sessions" }, items) : empty(q ? "No sessions match that filter." : "No sessions in this range."),
-            list.length > ui.limit && h("button", { type: "button", class: "link", "data-key": "more-sessions", onclick: () => update({ limit: ui.limit + PAGE }) }, `Show ${Math.min(PAGE, list.length - ui.limit)} more`),
+            results,
         ),
     ];
+}
+
+function sessionItem(s) {
+    const active = minutes(s.activeDurationMs);
+    return h(
+        "li",
+        { class: "session" },
+        h("div", { class: "session-top" }, h("p", { class: `session-title${s.label ? "" : " fallback"}` }, sessionTitle(s)), h("span", { class: "session-when", title: new Date(s.lastActivity).toLocaleString() }, ago(s.lastActivity))),
+        s.project && h("div", { class: "session-sub" }, s.project),
+        h("div", { class: "chips" }, h("span", { class: "chip editor" }, `${editorIcon(s.editor)} ${s.editor}`), s.models.slice(0, 4).map((m) => h("span", { class: "chip" }, m)), s.models.length > 4 && h("span", { class: "chip" }, `+${s.models.length - 4}`)),
+        h(
+            "ul",
+            { class: "metrics num" },
+            h("li", { title: "Tokens" }, "🟣 ", h("strong", {}, compact(s.totalTokens)), " tokens"),
+            h("li", { title: "Estimated cost at API list prices" }, "💵 ", h("strong", {}, usd(s.estimatedCost))),
+            h("li", { title: "Interactions" }, "💬 ", h("strong", {}, int(s.interactions)), " turns"),
+            h("li", { title: "Tool calls" }, "🔧 ", h("strong", {}, int(s.toolCalls)), " tool calls"),
+            active && h("li", { title: "Active time" }, "⏱️ ", h("strong", {}, active)),
+        ),
+    );
 }
 
 // ---------- fluency ----------
@@ -1002,9 +1039,30 @@ function renderTabs() {
     document.getElementById("header-title").textContent = ui.tab === "chart" && charts?.day ? chartTitle(chartSelection(charts)) : title;
 }
 
+// A rerender replaces the panel's fields; doing that mid-composition would break input-method typing, so it waits.
+let composing = false;
+let panelStale = false;
+document.addEventListener("compositionstart", () => {
+    composing = true;
+});
+document.addEventListener("compositionend", () => {
+    composing = false;
+    // After the composition's final input event, so the rebuilt field gets the committed text.
+    setTimeout(() => {
+        if (panelStale && !composing) renderPanel();
+    });
+});
+
 function renderPanel() {
     const panel = document.getElementById("panel");
-    const focusKey = panel.contains(document.activeElement) ? document.activeElement.dataset?.key : null;
+    const active = panel.contains(document.activeElement) ? document.activeElement : null;
+    if (composing && active) {
+        panelStale = true;
+        return;
+    }
+    panelStale = false;
+    const focusKey = active?.dataset?.key ?? null;
+    const selection = active instanceof HTMLInputElement && active.selectionStart != null ? { value: active.value, start: active.selectionStart, end: active.selectionEnd, direction: active.selectionDirection } : null;
     const { snapshot, status } = data;
     disposeCharts();
     let content;
@@ -1017,7 +1075,11 @@ function renderPanel() {
     if (focusKey) {
         const target = panel.querySelector(`[data-key="${CSS.escape(focusKey)}"]`);
         target?.focus();
-        if (target instanceof HTMLInputElement) target.setSelectionRange(target.value.length, target.value.length);
+        if (target instanceof HTMLInputElement && target.selectionStart != null) {
+            // Same text: put the caret/selection back where it was; otherwise at the end of the new text.
+            if (selection?.value === target.value) target.setSelectionRange(selection.start, selection.end, selection.direction);
+            else target.setSelectionRange(target.value.length, target.value.length);
+        }
     }
 }
 

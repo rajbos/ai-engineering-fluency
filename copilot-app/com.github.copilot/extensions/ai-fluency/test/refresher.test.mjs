@@ -426,3 +426,49 @@ test("waiting for another session's refresh returns when its snapshot lands", as
     const timedOut = await refresher.waitForOtherSession({ maxWaitMs: 30 });
     assert.equal(timedOut.status.state, "running", "gives up after maxWaitMs");
 });
+
+test("another session's refresh that ends without a new snapshot is reported as a failure", async (t) => {
+    const endings = {
+        "releases its lock": (dir) => writeFile(join(dir, "refresh.lock.1.done"), JSON.stringify({ token: "other" })),
+        "dies": (dir) => writeFile(join(dir, "refresh.lock.1"), lockBody({ pid: DEAD_PID, token: "other" })),
+    };
+    for (const [how, end] of Object.entries(endings)) {
+        const dir = await tempDir(t);
+        const previous = sampleAt("2026-01-01T00:00:00.000Z");
+        await writeSnapshot(previous, dir);
+        await writeFile(join(dir, "refresh.lock.1"), lockBody({ pid: process.ppid, token: "other" }));
+        const refresher = new Refresher({ dir, pollMs: 10, runCli: async () => assert.fail("must not run") });
+        assert.equal((await refresher.refresh()).status.byOtherSession, true);
+        setTimeout(() => void end(dir), 30);
+        const { status, snapshot } = await refresher.waitForOtherSession();
+        assert.equal(status.state, "error", `when the other session ${how}`);
+        assert.match(status.error, /ended without new stats/);
+        assert.equal(status.byOtherSession, false);
+        assert.equal(snapshot.fetchedAt, previous.fetchedAt, "the previous snapshot stays on show");
+    }
+});
+
+test("another session's snapshot counts even when it was read before that session's lock ended", async (t) => {
+    const dir = await tempDir(t);
+    await writeSnapshot(sampleAt("2026-01-01T00:00:00.000Z"), dir);
+    const otherStarted = new Date(Date.now() - 60 * 1000).toISOString();
+    await writeFile(join(dir, "refresh.lock.1"), lockBody({ pid: process.ppid, token: "other", startedAt: otherStarted }));
+    const refresher = new Refresher({ dir, runCli: async () => assert.fail("must not run") });
+    assert.equal((await refresher.refresh()).status.byOtherSession, true);
+
+    // get_summary with no panel open reads the new snapshot directly, before the other session releases its lock.
+    const fresh = new Date().toISOString();
+    await writeSnapshot(sampleAt(fresh), dir);
+    assert.equal((await refresher.load()).fetchedAt, fresh);
+    assert.equal(refresher.state().status.state, "running");
+    await writeFile(join(dir, "refresh.lock.1.done"), JSON.stringify({ token: "other" }));
+    await refresher.checkOtherSession();
+    assert.deepEqual([refresher.state().status.state, refresher.state().status.finishedAt], ["idle", fresh]);
+
+    // Already on hand when this session began waiting, but written after the other run started: still that run's result.
+    await writeFile(join(dir, "refresh.lock.2"), lockBody({ pid: process.ppid, token: "other-2", startedAt: otherStarted }));
+    assert.equal((await refresher.refresh()).status.byOtherSession, true);
+    await writeFile(join(dir, "refresh.lock.2.done"), JSON.stringify({ token: "other-2" }));
+    await refresher.checkOtherSession();
+    assert.equal(refresher.state().status.state, "idle");
+});
