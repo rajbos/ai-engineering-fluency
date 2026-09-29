@@ -589,6 +589,7 @@
   "insight.repeatedTaskSkillCandidate.body": "你用相似的提示开启了 {0} 个会话：“{1}”。把这类重复任务做成技能或提示文件，可以省去反复解释，并让结果更加一致。{2}",
 
   "//": "── Personalized Insights catalog (insightsEngine.ts) — see issue #2081 ──",
+  "whatsNew.release.0.18.3.headline": "一个维护版本：AI 就绪度标签页现在将每个仓库折叠为一行，并可为你选中的控制措施起草 Copilot Chat 提示，另外 MCP 工具名称更友好。没有新增界面。",
   "whatsNew.release.0.18.2.headline": "在新的 AI 就绪度标签页中，查看仓库已具备的控制措施以及仍需核实的证据。",
   "whatsNew.release.0.18.1.headline": "一个维护版本：友好的工具名称、本地化基础工作，以及一个 Mistral Vibe 成本归因修复。没有新增界面。",
   "whatsNew.feature.usage.readiness-tab.title": "AI 就绪度",

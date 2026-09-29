@@ -50,6 +50,7 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 	assert.equal(t('readiness.scanFailed'), 'Could not scan repository readiness. Check the AI Engineering Fluency output for details, then try Refresh.');
 	assert.equal(t('whatsNew.release.0.18.1.headline'), 'A maintenance release: friendly tool names, localization groundwork, and a Mistral Vibe cost-attribution fix. No new screens.');
 	assert.equal(t('whatsNew.release.0.18.2.headline'), 'See which repository controls are in place, and which still need evidence, in the new AI Readiness tab.');
+	assert.equal(t('whatsNew.release.0.18.3.headline'), 'A maintenance release: the AI Readiness tab now collapses each repository to one row and can draft a Copilot Chat prompt for the controls you pick, plus friendlier MCP tool names. No new screens.');
 	assert.equal(t('whatsNew.feature.usage.readiness-tab.title'), 'AI Readiness');
 	assert.equal(t('whatsNew.feature.usage.readiness-tab.description'), "In Usage Analysis, scan each repository's delivery and governance controls to see what blocks its next stage and what could not be checked. Separate from your personal Fluency Score.");
 	mock.setLanguage('zh-cn');
@@ -60,6 +61,7 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 		assert.equal(t('readiness.scanFailed'), '无法扫描仓库就绪度。请查看 AI 工程熟练度输出中的详细信息，然后重试刷新。');
 		assert.equal(t('whatsNew.release.0.18.1.headline'), '一个维护版本：友好的工具名称、本地化基础工作，以及一个 Mistral Vibe 成本归因修复。没有新增界面。');
 		assert.equal(t('whatsNew.release.0.18.2.headline'), '在新的 AI 就绪度标签页中，查看仓库已具备的控制措施以及仍需核实的证据。');
+		assert.equal(t('whatsNew.release.0.18.3.headline'), '一个维护版本：AI 就绪度标签页现在将每个仓库折叠为一行，并可为你选中的控制措施起草 Copilot Chat 提示，另外 MCP 工具名称更友好。没有新增界面。');
 		assert.equal(t('whatsNew.feature.usage.readiness-tab.title'), 'AI 就绪度');
 		assert.equal(t('whatsNew.feature.usage.readiness-tab.description'), '在使用分析中逐个扫描仓库的交付与治理控制措施，查看进入下一阶段的阻碍和无法核实的项目。与个人熟练度评分分开显示。');
 	} finally {
