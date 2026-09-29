@@ -43,7 +43,7 @@ Details: [Configuration](https://github.com/rajbos/ai-engineering-fluency/blob/m
 
 ## Privacy
 
-Everything runs locally. The CLI reads session files and writes only its cache. The one network call is the opt-in `memory-files --server`, which goes through your signed-in GitHub CLI.
+Everything runs locally. The CLI reads session files and writes only its cache. The one network call is the opt-in `memory-files --server`, which uses your GitHub CLI sign-in to read the repository's Copilot memories from GitHub's Copilot API (read-only).
 
 ## Also available as
 

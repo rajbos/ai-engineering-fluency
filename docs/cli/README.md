@@ -231,7 +231,7 @@ ai-engineering-fluency memory-files --stale-days 30      # Flag files not edited
 ai-engineering-fluency memory-files --large-kb 5         # Flag files larger than 5 KB (default: 10)
 ```
 
-Optionally also read this repository's **server-side** Copilot memories — the per-repository store GitHub keeps for the Copilot coding agent. This is the CLI's only network access; it needs the [GitHub CLI](https://cli.github.com/) (`gh`) installed and signed in.
+Optionally also read this repository's **server-side** Copilot memories — the per-repository store GitHub keeps for the Copilot coding agent. This is the CLI's only network access. It needs the [GitHub CLI](https://cli.github.com/) (`gh`) installed and signed in to github.com (`gh auth login --hostname github.com`); GitHub Enterprise Server repositories are not supported.
 
 | Option | Effect |
 |---|---|
@@ -240,7 +240,14 @@ Optionally also read this repository's **server-side** Copilot memories — the 
 | `--limit <n>` | Maximum number of server memories to request. |
 | `--promote` | Print the memories worth promoting into `AGENTS.md` as a ready-to-paste Markdown block. Implies `--server`. |
 
-With `--json --server`, the output gains a `serverMemories` key (`null` if the fetch failed). Background: [COPILOT-SERVER-MEMORIES.md](../features/COPILOT-SERVER-MEMORIES.md).
+With `--json` and any of the server options, the output gains a `serverMemories` key:
+
+- `null` only when no repository could be determined — the current directory is not a checkout with a github.com `origin` remote, and no `--repo` was given.
+- Otherwise an object with the analysis. If the read failed (no `gh`, no github.com token, no Copilot access, memory disabled, or an invalid `--repo`), the object has an `error` string and zeroed counts. Check `serverMemories.error` rather than testing for `null`.
+
+`--json` takes precedence over `--promote`: the JSON is printed and no Markdown block is written. Without `--json`, a failed read under `--promote` prints the reason to stderr and exits with code `1`, so an empty promotion list is never mistaken for "nothing to document".
+
+Background: [COPILOT-SERVER-MEMORIES.md](../features/COPILOT-SERVER-MEMORIES.md).
 
 ```
 Copilot Memory Files Report
@@ -427,7 +434,7 @@ Run `ai-engineering-fluency diagnostics` to see exactly which of these locations
 - With `--json`, progress output is suppressed and the result is written to **stdout** as a single JSON document, so `ai-engineering-fluency usage --json > usage.json` is safe. Errors go to **stderr**.
 - Token counts are plain numbers; the `…Formatted` fields in `segment --json` are display strings.
 - `stats --json`, `segment --json` and `memory-files --json` have small, documented shapes (above) that are intended for scripts. The integration payloads (`chart`, `usage-analysis`, `all`, and the `usage` / `fluency` payloads) mirror the extension's views and can change between releases — pin the package version if you depend on them.
-- Exit code is `0` on success, including when no sessions are found (the JSON is then an empty object or empty payload). An unexpected error prints a message to stderr and exits with `1`.
+- Exit code is `0` on success, including when no sessions are found (the JSON is then an empty object or empty payload), and when a `memory-files --json --server` read fails (see `serverMemories.error`). It is `1` when `memory-files --promote` cannot read the server memories, and on any unexpected error, which is printed to stderr.
 
 ---
 
@@ -453,7 +460,7 @@ Every session file is parsed once; later runs only re-parse files that changed.
 ## Privacy
 
 - Everything runs locally. The CLI reads session files from your disk and writes only its [cache files](#cache-files).
-- Nothing is uploaded. The only network call is `memory-files --server` (and `--repo` / `--promote`), which reads your repository's Copilot memories through the GitHub CLI.
+- Nothing is uploaded. The only network call is `memory-files --server` (and `--repo` / `--promote`), which takes your github.com token from the GitHub CLI (`gh auth token`) and reads the repository's Copilot memories from `api.githubcopilot.com`. It is read-only.
 - `memory-files` reads local memory files' metadata only, never their content.
 
 ---
