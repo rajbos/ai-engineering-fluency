@@ -245,7 +245,7 @@ With `--json` and any of the server options, the output gains a `serverMemories`
 - `null` only when no repository could be determined — the current directory is not a checkout with a github.com `origin` remote, and no `--repo` was given.
 - Otherwise an object with the analysis. If the read failed (no `gh`, no github.com token, no Copilot access, memory disabled, or an invalid `--repo`), the object has an `error` string and zeroed counts. Check `serverMemories.error` rather than testing for `null`.
 
-`--json` takes precedence over `--promote`: the JSON is printed and no Markdown block is written. Without `--json`, a failed read under `--promote` prints the reason to stderr and exits with code `1`, so an empty promotion list is never mistaken for "nothing to document".
+`--json` takes precedence over `--promote`: the JSON is printed and no Markdown block is written. Without `--json`, a server read failure under `--promote` prints the reason to stderr and exits with code `1`, so an empty promotion list is never mistaken for "nothing to document". If no repository can be determined, the command instead prints guidance to stdout and exits with code `0`.
 
 Background: [COPILOT-SERVER-MEMORIES.md](../features/COPILOT-SERVER-MEMORIES.md).
 
