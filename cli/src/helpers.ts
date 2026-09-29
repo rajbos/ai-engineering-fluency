@@ -9,7 +9,7 @@ import chalk from 'chalk';
 import { SessionDiscovery } from '../../src/sessionDiscovery';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
-import { isMcpTool, extractMcpServerName } from '../../src/workspaceHelpers';
+import { isMcpTool, extractMcpServerName, resolveDebugLogCandidatePaths } from '../../src/workspaceHelpers';
 import { resolveFileUri } from '../../src/workspacePathResolver';
 import { parseSessionFileContent } from '../../src/sessionParser';
 import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost, extractAllTokensFromDebugLog } from '../../src/tokenEstimation';
@@ -221,25 +221,17 @@ async function statSessionFile(filePath: string): Promise<fs.Stats> {
  *
  * Returns null if no debug log exists or if no llm_request events are found.
  */
-async function readDebugLogTokensForSession(sessionFilePath: string, verbose = false): Promise<{
+export async function readDebugLogTokensForSession(sessionFilePath: string, verbose = false): Promise<{
 	inputTokens: number; outputTokens: number; cachedTokens: number;
 	modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>;
 } | null> {
+	// Shared with the VS Code extension: returns undefined unless the file is UUID-named
+	// inside workspaceStorage/<hash>, and keeps the platform's native separators.
+	const candidatePaths = resolveDebugLogCandidatePaths(sessionFilePath);
+	if (!candidatePaths) { return null; }
 	const sessionId = path.basename(sessionFilePath, path.extname(sessionFilePath));
-	if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) { return null; }
-	
-	// Normalize to forward slashes for consistent regex matching
-	const norm = sessionFilePath.replace(/\\/g, '/');
-	const wsHashMatch = norm.match(/^(.*\/workspaceStorage\/[^/]+)\//);
-	if (!wsHashMatch) { return null; }
-	
-	// Use the normalized match length to extract from the normalized path, then convert back
-	const normalizedHashDir = wsHashMatch[1];
-	const workspaceHashDir = normalizedHashDir.replace(/\//g, '\\');
-	
-	const extensionFolders = ['GitHub.copilot-chat', 'github.copilot-chat', 'GitHub.copilot', 'github.copilot'];
-	for (const extFolder of extensionFolders) {
-		const debugLogPath = path.join(workspaceHashDir, extFolder, 'debug-logs', sessionId, 'main.jsonl');
+
+	for (const debugLogPath of candidatePaths) {
 		try {
 			const content = await fs.promises.readFile(debugLogPath, 'utf8');
 			const result = extractAllTokensFromDebugLog(content);
