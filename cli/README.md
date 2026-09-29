@@ -33,7 +33,7 @@ Requires **Node.js 22.14 or later**.
 | `segment` | Cached one-line summary for shell prompts (oh-my-posh) |
 | `chart`, `usage-analysis`, `all` | JSON payloads for integrations |
 
-Most commands accept `--json`. The global `--no-cache` option re-parses everything. Run `ai-engineering-fluency <command> --help` for all options, or see the [command reference](https://github.com/rajbos/ai-engineering-fluency/blob/main/docs/cli/README.md#commands).
+Most commands accept `--json`. The global `--no-cache` option ignores the parsed-session cache and re-parses every file (`segment` keeps its own output cache; use `segment --refresh` to bypass it). Run `ai-engineering-fluency <command> --help` for all options, or see the [command reference](https://github.com/rajbos/ai-engineering-fluency/blob/main/docs/cli/README.md#commands).
 
 ## Configuration
 

@@ -43,7 +43,7 @@ Global options, valid before any command:
 
 | Option | Effect |
 |---|---|
-| `--no-cache` | Ignore the parsed-session cache and re-parse every file. The cache is neither read nor written for that run. |
+| `--no-cache` | Ignore the parsed-session cache (`cli-cache.json`) and re-parse every file; that cache is neither read nor written for the run. It does **not** bypass the `segment` output cache — use `segment --refresh` for that. |
 | `-V, --version` | Print the package version. |
 | `-h, --help` | Help for the CLI, or for one command: `ai-engineering-fluency usage --help`. |
 
@@ -74,9 +74,9 @@ ai-engineering-fluency stats --json     # Machine-readable JSON output
 
 🖥️  By Editor
 ──────────────────────────────────────────────────
-  VS Code                     640 files     96.1M tokens  4,102 interactions
-  Copilot CLI                 311 files    201.4M tokens  2,977 interactions
-  Claude Code                 236 files    115.1M tokens  2,239 interactions
+  VS Code                     640 files     96.1M tokens   4,102 turns
+  Copilot CLI                 311 files    201.4M tokens   2,977 turns
+  Claude Code                 236 files    115.1M tokens   2,239 turns
 ```
 
 With `--json`:
@@ -267,18 +267,25 @@ Compare the MCP servers and skills you have configured with the tools your sessi
 
 ```bash
 ai-engineering-fluency curation
-ai-engineering-fluency curation --window 14   # Look-back window in days (default: 30)
+ai-engineering-fluency curation --window 14   # Window shown in the report text (default: 30) — see note below
 ai-engineering-fluency curation --json
 ```
 
-Run it **from your project folder**: the CLI has no editor to ask for its tool list, so "available tools" come from the file system:
+Run it **from your project folder**: the CLI has no editor to ask for its tool list, so "available tools" come from the file system.
 
-- `.vscode/mcp.json` in the current directory, and `~/.mcp.json`
-- skill folders in the current directory (for example `.github/skills/`)
-- user-level skill folders: `~/.copilot/skills/`, `~/.claude/skills/`, `~/.agents/skills/`
-- skills from VS Code agent plugins (`~/.vscode/agent-plugins/`, `~/.vscode-insiders/agent-plugins/`)
+MCP servers are read from:
 
-Tool usage is taken from the last 30 days of sessions.
+- `.vscode/mcp.json` (VS Code), `.mcp.json` and `.vs/mcp.json` (Visual Studio) and `.cursor/mcp.json` (Cursor) in the current directory
+- `~/.mcp.json` (Visual Studio, user level)
+
+Skills (folders containing a `SKILL.md`) are read from:
+
+- `.github/skills/`, `.claude/skills/` and `.agents/skills/` in the current directory
+- `~/.copilot/skills/`, `~/.claude/skills/` and `~/.agents/skills/`, including nested `skills/` folders up to four levels deep
+- VS Code agent plugins installed under `~/.vscode/agent-plugins/` and `~/.vscode-insiders/agent-plugins/` (only the skills each plugin declares)
+- the folders listed in VS Code's `chat.agentSkillsLocations` setting, read from the Stable and Insiders user `settings.json`
+
+> **Note:** tool usage always comes from the **last 30 days** of sessions. `--window` currently only changes the number of days shown in the report and its recommendations, not the period that is analysed.
 
 ```
 Tool Curation Report (last 30 days)
