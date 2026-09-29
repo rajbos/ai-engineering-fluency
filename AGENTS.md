@@ -16,6 +16,8 @@ This document provides top-level guidance for AI agents contributing to this rep
 │                                    consumed by vscode-extension/ and cli/)
 ├── vscode-extension/            ← VS Code extension (TypeScript / Node.js)
 ├── cli/                         ← Command-line tool  (TypeScript / Node.js)
+├── copilot-app/                 ← GitHub Copilot app canvas, shipped as the `ai-fluency-canvas`
+│                                   Copilot plugin (plain Node .mjs, no build; runs the CLI)
 ├── visualstudio-extension/      ← Visual Studio extension (C# / .NET)
 ├── jetbrains-plugin/            ← JetBrains IDE plugin (Kotlin / Gradle / IntelliJ Platform)
 ├── desktop/                     ← Electron tray app; reuses vscode-extension's built
@@ -31,6 +33,7 @@ This document provides top-level guidance for AI agents contributing to this rep
 ├── docs/                        ← Shared documentation
 └── .github/
     ├── copilot-instructions.md  ← Pointer to this file (`See ../AGENTS.md`)
+    ├── plugin/marketplace.json  ← Copilot plugin marketplace catalog (lists copilot-app/)
     └── instructions/
         ├── vscode-extension.instructions.md   ← VS Code extension guide
         ├── cli.instructions.md                ← CLI guide
