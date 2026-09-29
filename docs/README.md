@@ -33,6 +33,7 @@ Per-component guides and READMEs.
 | Folder | Description |
 |---|---|
 | [cli/](cli/README.md) | CLI tool (npm package) — commands, options, configuration, data sources, troubleshooting and development guide |
+| [copilot-app/](copilot-app/README.md) | GitHub Copilot app canvas (`ai-fluency-canvas` plugin) — one-click and CLI install, usage, updating, troubleshooting |
 | [vscode-extension/](vscode-extension/README.md) | VS Code extension guide |
 | [vscode-extension/DESIGN.md](vscode-extension/DESIGN.md) | VS Code extension UI design system (DESIGN.md spec) |
 | [vscode-extension/WEBVIEW-MESSAGING.md](vscode-extension/WEBVIEW-MESSAGING.md) | How data reaches a webview panel: trust model, readiness/replay, diagnostics, companion-extension impact |
