@@ -179,12 +179,12 @@ ai-engineering-fluency fluency --json  # Machine-readable JSON output
 
 Overall Fluency Score
 ───────────────────────────────────────────────────────
-  ████████████░░░░ Stage 3: AI Collaborator
+  ███░ Stage 3: AI Collaborator
 
 Category Breakdown
 ───────────────────────────────────────────────────────
   💬 Prompt Engineering
-     ████████████░░░░ Stage 3/4
+     ███░ Stage 3/4
      ✓ 412 interactions in the last 30 days
   ...
 
@@ -210,11 +210,11 @@ ai-engineering-fluency diagnostics
 
 📂 Search Locations  (6 found / 24 total)
 ─────────────────────────────────────────────────────────────────
-  Source               Exists   Path
+  Source             │ Exists │ Path
   ────────────────────────────────────────────────────────────────────────────────
-  VS Code              yes      …/AppData/Roaming/Code/User
-  VS Code              no       …/AppData/Roaming/Code - Insiders/User
-  Copilot CLI          yes      …/.copilot/session-state
+  VS Code            │ yes    │ …/AppData/Roaming/Code/User
+  VS Code            │ no     │ …/AppData/Roaming/Code - Insiders/User
+  Copilot CLI        │ yes    │ …/.copilot/session-state
   ...
 ```
 
