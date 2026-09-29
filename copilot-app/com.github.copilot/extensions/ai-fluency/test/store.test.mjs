@@ -65,11 +65,19 @@ test("describeSession derives labels from session metadata", async (t) => {
     assert.deepEqual(describeSession(join(cliDir, "events.jsonl")), { label: "Fix the widget", project: "demo-repo" });
     await writeFile(join(cliDir, "workspace.yaml"), 'cwd: C:\\work\\plain-repo\nname: "**Review** the PRs.\\n\\nThen   report back"\n');
     assert.deepEqual(describeSession(join(cliDir, "events.jsonl")), { label: "Review the PRs. Then report back", project: "plain-repo" });
+    await writeFile(join(cliDir, "workspace.yaml"), "cwd: /home/someone/code/posix-repo/\nname: Tidy up\n");
+    assert.deepEqual(describeSession(join(cliDir, "events.jsonl")), { label: "Tidy up", project: "posix-repo" }, "POSIX cwd, trailing slash");
+    await writeFile(join(cliDir, "workspace.yaml"), "cwd: /home/someone/copilot-worktrees/posix-demo/branch-b\n");
+    assert.deepEqual(describeSession(join(cliDir, "events.jsonl")), { label: null, project: "posix-demo" }, "POSIX worktree cwd");
 
     const wsDir = join(root, "workspaceStorage", "abc123");
     await mkdir(join(wsDir, "chatSessions"), { recursive: true });
     await writeFile(join(wsDir, "workspace.json"), JSON.stringify({ folder: "file:///c%3A/code/sample-project" }));
     assert.deepEqual(describeSession(join(wsDir, "chatSessions", "s.jsonl")), { label: null, project: "sample-project" });
+    await writeFile(join(wsDir, "workspace.json"), JSON.stringify({ workspace: "file:///home/someone/code/team.code-workspace" }));
+    assert.deepEqual(describeSession(join(wsDir, "chatSessions", "s.jsonl")), { label: null, project: "team" }, "POSIX workspace file URI");
+    await writeFile(join(wsDir, "workspace.json"), JSON.stringify({ folder: "C:\\code\\windows-project\\" }));
+    assert.deepEqual(describeSession(join(wsDir, "chatSessions", "s.jsonl")), { label: null, project: "windows-project" }, "Windows folder path");
 
     assert.deepEqual(describeSession(join(root, "C--Users-someone-code-repos-org-app--claude-worktrees-feature-x", "s.jsonl")), {
         label: "feature-x",

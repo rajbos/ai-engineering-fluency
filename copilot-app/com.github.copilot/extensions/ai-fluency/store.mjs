@@ -141,10 +141,19 @@ export function cleanLabel(value) {
     return text.length > 200 ? `${text.slice(0, 199)}…` : text;
 }
 
+/**
+ * Last segment of a path recorded in session metadata. Unlike `path.basename`,
+ * this splits on both `\` and `/`, because the recorded path may come from a
+ * different OS than the one running the canvas.
+ */
+function lastSegment(path) {
+    return String(path).replace(/[\\/]+$/, "").split(/[\\/]/).pop() || null;
+}
+
 function projectFromCwd(cwd) {
     if (!cwd) return null;
     const worktree = cwd.match(/copilot-worktrees[\\/]([^\\/]+)/i);
-    return worktree ? worktree[1] : basename(cwd.replace(/[\\/]+$/, "")) || null;
+    return worktree ? worktree[1] : lastSegment(cwd);
 }
 
 function readJson(path) {
@@ -172,7 +181,7 @@ export function describeSession(filePath = "") {
             if (existsSync(workspaceJson)) {
                 const { folder, workspace } = readJson(workspaceJson);
                 const uri = decodeURIComponent(String(folder ?? workspace ?? ""));
-                return { label: null, project: basename(uri.replace(/[\\/]+$/, "")).replace(/\.code-workspace$/, "") || null };
+                return { label: null, project: lastSegment(uri)?.replace(/\.code-workspace$/, "") || null };
             }
         }
         const folder = basename(dirname(filePath));
