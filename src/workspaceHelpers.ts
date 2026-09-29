@@ -22,6 +22,7 @@ import {
 	normalizePath,
 	normalizePathForComparison,
 	normalizePathForDedup,
+	joinedChildPrefixForComparison,
 	splitNormalizedPath,
 	stripWindowsDriveUriPrefix,
 	toPlatformPath
@@ -1104,31 +1105,21 @@ export function detectClaudeCodeEditorVariant(filePath: string): string {
 	return 'Claude Code';
 }
 
-/** Lower-case, forward-slash, no-trailing-slash form of an agent home for prefix matching. */
-function agentHomeForComparison(home: string): string {
-	return normalizePathForComparison(home).replace(/\/+$/, '');
-}
-
 /**
  * $CODEX_HOME / $HERMES_HOME as their adapters use them (codexcli.ts getCodexHome,
  * hermes.ts getConfigDir): the raw value when non-blank — relative values stay relative,
- * no `~` expansion — joined with sub-paths, so `path.normalize` gives the same prefix.
+ * no `~` expansion.
  */
-function rawAgentHomeForComparison(value: string | undefined): string | undefined {
-	if (!value || !value.trim()) { return undefined; }
-	return agentHomeForComparison(path.normalize(value));
+function rawAgentHome(value: string | undefined): string | undefined {
+	return value && value.trim() ? value : undefined;
 }
+
+/** Session entries Codex keeps directly under its home: rollout dirs and `state_<N>.sqlite#<id>` thread paths. */
+const CODEX_HOME_OWNED_CHILD_RE = /^(sessions\/|archived_sessions\/|state_\d+\.sqlite#)/;
 
 /** $VIBE_HOME as mistralvibe.ts getVibeHomeDir uses it: `~` expanded, then resolved to absolute. */
-function vibeHomeForComparison(value: string | undefined): string | undefined {
-	if (!value) { return undefined; }
-	return agentHomeForComparison(path.resolve(value.replace(/^~/, os.homedir())));
-}
-
-/** True for a Codex virtual thread path `<home>/state_<N>.sqlite#<thread-id>` directly under `home`. */
-function isCodexStateDbVirtualPathUnder(lowerPath: string, home: string): boolean {
-	const prefix = `${home}/`;
-	return lowerPath.startsWith(prefix) && /^state_\d+\.sqlite#/.test(lowerPath.slice(prefix.length));
+function vibeAgentHome(value: string | undefined): string | undefined {
+	return value ? path.resolve(value.replace(/^~/, os.homedir())) : undefined;
 }
 
 /**
@@ -1136,22 +1127,21 @@ function isCodexStateDbVirtualPathUnder(lowerPath: string, home: string): boolea
  * $HERMES_HOME to a folder not named like the default (.codex, .vibe, hermes), which the
  * default-name substring checks cannot recognise. Only the adapters' own session
  * sub-paths under the configured root match, so a broad root (e.g. the home dir) does
- * not swallow unrelated files. Each home is interpreted exactly as its adapter does, so
- * the prefixes line up with the paths that adapter discovers. Shared by the extension
- * and the CLI detectors.
+ * not swallow unrelated files. Each home is interpreted exactly as its adapter does and
+ * prefixes are built with `path.join`, like the adapters' own paths, so edge cases such
+ * as `.` or `/` line up with what the adapter discovers. Shared by the extension and the
+ * CLI detectors.
  * @internal
  */
 export function detectRelocatedAgentHomeFromPath(lowerPath: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
-	const codexHome = rawAgentHomeForComparison(env['CODEX_HOME']);
-	if (codexHome && (
-		lowerPath.startsWith(`${codexHome}/sessions/`) ||
-		lowerPath.startsWith(`${codexHome}/archived_sessions/`) ||
-		isCodexStateDbVirtualPathUnder(lowerPath, codexHome)
-	)) { return 'Codex CLI'; }
-	const vibeHome = vibeHomeForComparison(env['VIBE_HOME']);
-	if (vibeHome && lowerPath.startsWith(`${vibeHome}/logs/session/`)) { return 'Mistral Vibe'; }
-	const hermesHome = rawAgentHomeForComparison(env['HERMES_HOME']);
-	if (hermesHome && lowerPath.startsWith(`${hermesHome}/state.db#`)) { return 'Hermes'; }
+	const codexHome = rawAgentHome(env['CODEX_HOME']);
+	const codexPrefix = codexHome === undefined ? undefined : joinedChildPrefixForComparison(codexHome);
+	if (codexPrefix !== undefined && lowerPath.startsWith(codexPrefix) &&
+		CODEX_HOME_OWNED_CHILD_RE.test(lowerPath.slice(codexPrefix.length))) { return 'Codex CLI'; }
+	const vibeHome = vibeAgentHome(env['VIBE_HOME']);
+	if (vibeHome && lowerPath.startsWith(joinedChildPrefixForComparison(path.join(vibeHome, 'logs', 'session')))) { return 'Mistral Vibe'; }
+	const hermesHome = rawAgentHome(env['HERMES_HOME']);
+	if (hermesHome && lowerPath.startsWith(`${normalizePathForComparison(path.join(hermesHome, 'state.db'))}#`)) { return 'Hermes'; }
 	return undefined;
 }
 

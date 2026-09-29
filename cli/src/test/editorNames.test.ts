@@ -134,6 +134,30 @@ test('relative CODEX_HOME / HERMES_HOME match the paths their adapters build', (
 	});
 });
 
+for (const home of ['.', '/']) {
+	test(`CODEX_HOME / HERMES_HOME / VIBE_HOME of '${home}' match the paths their adapters build`, () => {
+		// path.join drops a leading './' and does not double a root '/', so prefixes built
+		// by string concatenation would miss these adapter-built paths.
+		withAgentHomes({ CODEX_HOME: home, HERMES_HOME: home, VIBE_HOME: home }, () => {
+			const codex = new CodexCliDataAccess();
+			const rollout = path.join(codex.getSessionsDir(), '2026', '09', '01', 'rollout-2026-09-01T10-00-00-abc.jsonl');
+			const thread = `${path.join(codex.getCodexHome(), 'state_5.sqlite')}#thread-1`;
+			for (const p of [rollout, thread]) {
+				assertBothDetectors(p, 'Codex CLI');
+				assert.equal(codex.isCodexCliSessionFile(p), true, `Codex handles ${p}`);
+			}
+			const hermes = new HermesDataAccess();
+			const virtualPath = hermes.virtualPath('20260726_204744_427b88');
+			assertBothDetectors(virtualPath, 'Hermes');
+			assert.equal(hermes.isHermesSessionFile(virtualPath), true);
+			const vibe = new MistralVibeDataAccess();
+			const metaJson = path.join(vibe.getSessionLogDir(), 'session_20260901_100000_abcd1234', 'meta.json');
+			assertBothDetectors(metaJson, 'Mistral Vibe');
+			assert.equal(vibe.isVibeSessionFile(metaJson), true);
+		});
+	});
+}
+
 test('relocated VIBE_HOME sessions are labelled and handled as Mistral Vibe', () => {
 	const home = path.join(CUSTOM_ROOT, 'mistral');
 	const metaJson = path.join(home, 'logs', 'session', 'session_20260901_100000_abcd1234', 'meta.json');

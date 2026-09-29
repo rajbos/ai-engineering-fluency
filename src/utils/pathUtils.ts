@@ -39,6 +39,16 @@ export function normalizePathForComparison(p: string): string {
 }
 
 /**
+ * The lower-cased, forward-slash prefix that `path.join(dir, child)` puts in front of
+ * `child`, for matching paths an adapter built by joining onto `dir`. Unlike
+ * `normalizePathForComparison(dir) + '/'` this agrees with `path.join` on the edge
+ * cases: `'.'` gives `''` (join drops the `./`) and `'/'` gives `'/'` (not `'//'`).
+ */
+export function joinedChildPrefixForComparison(dir: string): string {
+	return normalizePathForComparison(path.join(dir, 'x')).slice(0, -1);
+}
+
+/**
  * Normalize a filesystem path for deduplication across adapters.
  */
 export function normalizePathForDedup(

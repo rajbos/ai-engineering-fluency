@@ -52,7 +52,7 @@ import * as path from 'path';
 import * as os from 'os';
 import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
-import { normalizePath } from './utils/pathUtils';
+import { joinedChildPrefixForComparison, normalizePath } from './utils/pathUtils';
 import { toLocalDayKey } from './utils/dayKeys';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
@@ -201,11 +201,16 @@ export class CodexCliDataAccess {
 	 */
 	isCodexCliSessionFile(filePath: string): boolean {
 		const norm = normalizePath(filePath).toLowerCase();
-		const home = normalizePath(this.getCodexHome()).toLowerCase();
-		const inCodexHome = norm.includes('/.codex/') || norm.startsWith(home + '/');
-		if (!inCodexHome) { return false; }
-		if (STATE_DB_VIRTUAL_RE.test(norm)) { return true; }
-		return ROLLOUT_FILE_RE.test(path.basename(norm));
+		if (norm.includes('/.codex/')) {
+			return STATE_DB_VIRTUAL_RE.test(norm) || ROLLOUT_FILE_RE.test(path.basename(norm));
+		}
+		// A relocated $CODEX_HOME: compare against the prefix path.join() puts on this
+		// adapter's own paths, so homes like '.' (join drops the './') and '/' still match.
+		const homePrefix = joinedChildPrefixForComparison(this.getCodexHome());
+		if (!norm.startsWith(homePrefix)) { return false; }
+		const rest = norm.slice(homePrefix.length);
+		if (/^state_\d+\.sqlite#/.test(rest)) { return true; }
+		return rest.includes('/') && ROLLOUT_FILE_RE.test(path.basename(norm));
 	}
 
 	/** Returns true when the path is a virtual DB-thread path (as opposed to a rollout file). */
