@@ -1,7 +1,7 @@
 /**
  * AI Engineering Fluency CLI
  *
- * Command-line interface for analyzing GitHub Copilot token usage
+ * Command-line interface for analyzing AI coding tool token usage
  * from local session files. Can be run via `npx @rajbos/ai-engineering-fluency`.
  */
 import { Command } from 'commander';
@@ -24,8 +24,8 @@ const packageJson = require('../package.json');
 const program = new Command();
 
 program
-	.name('copilot-token-tracker')
-	.description('Analyze GitHub Copilot token usage from local session files')
+	.name('ai-engineering-fluency')
+	.description('Analyze token usage, cost and fluency from local AI coding session files')
 	.version(packageJson.version)
 	.option('--no-cache', 'Bypass the session file cache and re-parse everything');
 
