@@ -133,7 +133,7 @@ same persist-across-refresh caching pattern already used for
 | Types | `src/types.ts` — `MemoryFileEntry`, `MemoryFilesWorkspaceSummary`, `MemoryFilesAnalysis`, `MemoryFilesAnalysisView` (compact webview projection) |
 | Unit tests | `vscode-extension/test/unit/copilotMemoryFiles.test.ts` |
 | Insight card | `vscode-extension/src/insightsEngine.ts` — id `stale-memory-files`, fires when `InsightContext.memoryFilesAnalysis` has stale or oversized files; tests in `insightsEngine.test.ts` |
-| CLI command | `cli/src/commands/memory-files.ts` — `ai-engineering-fluency memory-files [--json] [--stale-days] [--large-kb]`, registered in `cli/src/cli.ts` |
+| CLI command | `cli/src/commands/memory-files.ts` — `ai-engineering-fluency memory-files [--json] [--stale-days] [--large-kb]`, registered in `cli/src/program.ts` |
 | Runtime wiring | `vscode-extension/src/extension.ts` — `computeMemoryFilesAnalysis()` (TTL-cached via `isMemoryFilesScanFresh()`), threaded into both insight-context builders and all `updateStats`/initial-payload builders (projected to `MemoryFilesAnalysisView` before being sent) |
 | Tools-tab UI | `vscode-extension/src/webview/usage/main.ts` — `buildMemoryFilesSectionHtml()`, `_sanitizeMemoryFilesAnalysis()`, `#section-memory-files` |
 
