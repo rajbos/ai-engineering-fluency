@@ -88,7 +88,9 @@ Items 1, 2, 5 and 6 all need the same thing: session signals grouped by reposito
   stats. A remote on any other host keeps its host in the key (`gitlab.com/o/r`), so it is grouped
   on its own and never merged with a GitHub repository of the same `owner/repo`. Only network
   remotes count: `https`, `http`, `ssh`, `git` URLs and scp-style `host:path`. A local path or
-  `file://` remote names a directory, not a repository, and is unattributed.
+  `file://` remote names a directory, not a repository, and is unattributed. Copilot CLI store
+  sessions record a GitHub `owner/repo` slug rather than a remote; the extension marks them from
+  their adapter and `repoDisplayFromSession` reads only those as slugs.
 - **No folder-name fallback.** A folder name cannot join reliably to `owner/repo` and can collide,
   so a readiness report without `nameWithOwner` is shown by name but never joined or classified
   (it is listed as *not placed: no GitHub remote*).

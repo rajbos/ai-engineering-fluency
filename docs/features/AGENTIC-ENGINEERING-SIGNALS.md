@@ -58,7 +58,10 @@ Sessions from the last 30 days (by last interaction; empty sessions skipped, as 
 are grouped by a key derived from the workspace's git remote (`src/repoKey.ts`): lowercase
 `owner/repo` on github.com and the configured GitHub Enterprise host, which is what the readiness
 scan and the PR snapshot use, and `host/path` on any other host, so a GitLab `o/r` never merges with
-a GitHub `o/r`. Only network remotes count; sessions with a local-path or `file://` remote, or none,
+a GitHub `o/r`. Copilot CLI store sessions record the GitHub `owner/repo` slug instead of a remote,
+and are read as that slug because their adapter says so; a bare `a/b` string from anywhere else is
+not trusted, since it may be a relative path. Only network remotes count; sessions with a
+local-path or `file://` remote, or none,
 go to an *unattributed* bucket whose size is shown. A second pass groups this month to date and
 all of last month, overall and per repository, for the trend.
 

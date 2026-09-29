@@ -20,15 +20,17 @@ import type {
 	RepoAgentActivityReport,
 	SessionUsageAnalysis,
 } from './types';
-import { DEFAULT_GITHUB_HOSTS, repoDisplayFromRemote } from './repoKey';
+import { DEFAULT_GITHUB_HOSTS, repoDisplayFromSession } from './repoKey';
 import { cliTotal } from './maturityScoring';
 import { addModeCounts, countParticipationModes, createEmptyModeCounts } from './participationModes';
 import { classifySessionScoping, CORRECTED_SESSION_MIN_USER_CORRECTIONS } from './promptScoping';
 
 /** One cached session, reduced to what the aggregation reads. */
 export interface ActivitySessionInput {
-	/** Git remote URL of the session's workspace, when resolved. */
+	/** Git remote URL of the session's workspace, when resolved — or a GitHub slug, see below. */
 	repository?: string;
+	/** True when `repository` is a GitHub `owner/repo` slug (Copilot CLI store sessions), not a remote URL. */
+	repositoryIsGitHubSlug?: boolean;
 	/** Last interaction (epoch ms); falls back to the file mtime at the call site. */
 	lastInteractionMs: number;
 	interactions: number;
@@ -169,7 +171,7 @@ export function buildRepoAgentActivity(
 	for (const input of inputs) {
 		if (!(input.lastInteractionMs >= window.startMs && input.lastInteractionMs <= window.endMs)) { continue; }
 		addSessionToTotals(totals, input);
-		const display = repoDisplayFromRemote(input.repository, window.githubHosts ?? DEFAULT_GITHUB_HOSTS);
+		const display = repoDisplayFromSession(input.repository, input.repositoryIsGitHubSlug === true, window.githubHosts ?? DEFAULT_GITHUB_HOSTS);
 		if (!display) {
 			addSessionToTotals(unattributed, input);
 			continue;
@@ -210,7 +212,7 @@ export function buildActivityTrend(
 			: t >= previousStart && t < monthStart ? 'previous' : undefined;
 		if (!window) { continue; }
 		addSessionToTotals(window === 'current' ? current : previous, input);
-		const key = repoDisplayFromRemote(input.repository, githubHosts)?.toLowerCase();
+		const key = repoDisplayFromSession(input.repository, input.repositoryIsGitHubSlug === true, githubHosts)?.toLowerCase();
 		if (!key) { continue; }
 		repos[key] ??= { current: createEmptyActivityTotals(), previous: createEmptyActivityTotals() };
 		addSessionToTotals(repos[key][window], input);

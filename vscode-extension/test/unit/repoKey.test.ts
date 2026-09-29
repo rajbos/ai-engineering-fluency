@@ -1,6 +1,6 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
-import { githubHostsFor, repoDisplayFromRemote, repoKeyFromRemote, repoKeyFromSlug } from '../../../src/repoKey';
+import { githubHostsFor, repoDisplayFromRemote, repoDisplayFromSession, repoKeyFromRemote, repoKeyFromSlug } from '../../../src/repoKey';
 
 test('repoDisplayFromRemote: GitHub HTTPS, SSH, scp-style and git:// remotes reduce to owner/repo', () => {
     assert.equal(repoDisplayFromRemote('https://github.com/Owner/Repo.git'), 'Owner/Repo');
@@ -64,4 +64,13 @@ test('repoKeyFromSlug: rejects anything that is not exactly owner/name', () => {
     assert.equal(repoKeyFromSlug('repo'), undefined);
     assert.equal(repoKeyFromSlug('a/b/c'), undefined);
     assert.equal(repoKeyFromSlug('../repo'), undefined);
+});
+
+test('repoDisplayFromSession: a Copilot CLI slug is read as owner/repo only when the source says it is one', () => {
+    assert.equal(repoDisplayFromSession('Owner/Repo', true), 'Owner/Repo');
+    assert.equal(repoDisplayFromSession('owner/repo', false), undefined, 'an unmarked a/b string may be a relative path');
+    assert.equal(repoDisplayFromSession('https://github.com/o/r.git', false), 'o/r');
+    for (const bad of ['../repo', './repo', 'a/b/c', 'repo', '', undefined]) {
+        assert.equal(repoDisplayFromSession(bad, true), undefined, String(bad));
+    }
 });

@@ -115,7 +115,7 @@ import {
   buildRepoAgentActivity as _buildRepoAgentActivity,
   type ActivitySessionInput as _ActivitySessionInput,
 } from '../../src/repoAgentActivity';
-import { githubHostsFor as _githubHostsFor, repoKeyFromRemote as _repoKeyFromRemote } from '../../src/repoKey';
+import { githubHostsFor as _githubHostsFor, repoDisplayFromSession as _repoDisplayFromSession } from '../../src/repoKey';
 import {
   mergeKnowledgeFiles as _mergeKnowledgeFiles,
   summarizeInstructionFiles as _summarizeInstructionFiles,
@@ -7445,10 +7445,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Same rule as aggregateSessionFileIntoStats: an empty session is not a session.
 			if (!r || r.sessionData.interactions === 0) { continue; }
 			const data = r.sessionData;
-			this.collectRepoKnowledge(r.sessionFile, data, knowledgeByKey, githubHosts);
+			// Copilot CLI store sessions record the GitHub owner/repo slug, not a remote URL.
+			const repositoryIsGitHubSlug = this.findEcosystem(r.sessionFile)?.id === 'copilotcli';
+			this.collectRepoKnowledge(r.sessionFile, data, knowledgeByKey, githubHosts, repositoryIsGitHubSlug);
 			const last = data.lastInteraction ? Date.parse(data.lastInteraction) : NaN;
 			inputs.push({
 				repository: data.repository,
+				repositoryIsGitHubSlug,
 				lastInteractionMs: Number.isFinite(last) ? last : r.mtime,
 				interactions: data.interactions,
 				tokens: data.actualTokens || data.tokens || 0,
@@ -7474,8 +7477,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		data: SessionFileCache,
 		knowledgeByKey: Map<string, RepoKnowledgeFiles>,
 		githubHosts: ReadonlySet<string>,
+		repositoryIsGitHubSlug: boolean,
 	): void {
-		const key = _repoKeyFromRemote(data.repository, githubHosts);
+		const key = _repoDisplayFromSession(data.repository, repositoryIsGitHubSlug, githubHosts)?.toLowerCase();
 		if (!key) { return; }
 		try {
 			const folder = _resolveWorkspaceFolderWithFallback(sessionFile, this._workspaceIdToFolderCache, data.workspaceFolderPath);

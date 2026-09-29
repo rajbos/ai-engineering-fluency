@@ -187,3 +187,21 @@ test('buildActivityTrend: keeps the same windows per repository, keyed like the 
     assert.equal(trend.repos?.['o/b'].current.sessions, 1);
     assert.equal(trend.repos?.['gitlab.com/o/a'].current.sessions, 1);
 });
+
+test('buildRepoAgentActivity and buildActivityTrend: Copilot CLI slugs join the same row as remote URLs', () => {
+    const cli = (repository: string): ActivitySessionInput => ({ ...session({ repository }), repositoryIsGitHubSlug: true });
+    const report = buildRepoAgentActivity([
+        session({ repository: 'https://github.com/Owner/Repo.git' }),
+        cli('owner/repo'),
+        { ...session({ repository: 'owner/repo' }) },
+    ], window30);
+    assert.deepEqual(report.repos.map(r => [r.key, r.sessions]), [['owner/repo', 2]]);
+    assert.equal(report.unattributed.sessions, 1, 'an unmarked owner/repo string is not trusted');
+
+    const now = new Date(NOW);
+    const trend = buildActivityTrend([
+        { ...cli('owner/repo'), lastInteractionMs: NOW - DAY },
+        { ...session({ repository: 'git@github.com:owner/repo.git' }), lastInteractionMs: NOW - DAY },
+    ], now);
+    assert.equal(trend.repos?.['owner/repo'].current.sessions, 2);
+});

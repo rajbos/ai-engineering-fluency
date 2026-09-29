@@ -87,12 +87,30 @@ export function repoKeyFromRemote(
 	return repoDisplayFromRemote(remoteUrl, githubHosts)?.toLowerCase();
 }
 
+/** Display form (`owner/repo`) of a GitHub slug, or undefined when it is not exactly two name segments. */
+export function repoDisplayFromSlug(slug: string | undefined | null): string | undefined {
+	const parts = slug?.trim().split('/');
+	return parts && parts.length === 2 && parts.every(isNameSegment) ? `${parts[0]}/${parts[1]}` : undefined;
+}
+
 /** Lowercase join key for a GitHub `owner/repo` slug (readiness `nameWithOwner`, PR stats). */
 export function repoKeyFromSlug(slug: string | undefined | null): string | undefined {
-	const parts = slug?.trim().split('/');
-	return parts && parts.length === 2 && parts.every(isNameSegment)
-		? `${parts[0]}/${parts[1]}`.toLowerCase()
-		: undefined;
+	return repoDisplayFromSlug(slug)?.toLowerCase();
+}
+
+/**
+ * Display name for a session's recorded repository. Most sessions record their
+ * workspace's git remote URL; a Copilot CLI store session records the GitHub
+ * `owner/repo` slug instead, which the caller says with `isGitHubSlug`. Only a
+ * value known to be a slug is read as one: a generic `a/b` string may be a
+ * relative local path, and is rejected like any other non-remote.
+ */
+export function repoDisplayFromSession(
+	repository: string | undefined | null,
+	isGitHubSlug: boolean,
+	githubHosts: ReadonlySet<string> = DEFAULT_GITHUB_HOSTS,
+): string | undefined {
+	return isGitHubSlug ? repoDisplayFromSlug(repository) : repoDisplayFromRemote(repository, githubHosts);
 }
 
 /**
