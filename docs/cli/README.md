@@ -240,7 +240,7 @@ Optionally also read this repository's **server-side** Copilot memories — the 
 | `--limit <n>` | Maximum number of server memories to request. |
 | `--promote` | Print the memories worth promoting into `AGENTS.md` as a ready-to-paste Markdown block. Implies `--server`. |
 
-With `--json` and any of the server options, the output gains a `serverMemories` key:
+With `--json` and `--server`, `--repo` or `--promote`, the output gains a `serverMemories` key (`--limit` only controls a server read requested by one of those options):
 
 - `null` only when no repository could be determined — the current directory is not a checkout with a github.com `origin` remote, and no `--repo` was given.
 - Otherwise an object with the analysis. If the read failed (no `gh`, no github.com token, no Copilot access, memory disabled, or an invalid `--repo`), the object has an `error` string and zeroed counts. Check `serverMemories.error` rather than testing for `null`.
