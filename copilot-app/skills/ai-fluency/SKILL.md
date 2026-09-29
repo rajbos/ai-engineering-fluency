@@ -13,8 +13,9 @@ The `ai-fluency-canvas` plugin provides a canvas with `canvasId` `ai-fluency`.
   It returns the cached snapshot's aggregate numbers and never runs the CLI.
 - Only pass `{ "topSessions": 1-25 }` when the user asks about specific sessions: it adds session titles (often the
   user's first prompt) and project names to the result.
-- To update the numbers, call the `refresh` action. It runs in the background and can take several
-  minutes; pass `{ "wait": true }` only when the user wants to wait for fresh numbers.
+- To update the numbers, call the `refresh` action. It returns once the refresh has begun (`started: false` means
+  another Copilot session is already refreshing and its result is used) and fails at once if it can't start. A run
+  takes several minutes; pass `{ "wait": true }` only when the user wants to wait for fresh numbers.
 - If `get_summary` returns `available: false`, no snapshot exists yet: tell the user the first run
   parses all local session logs and takes a few minutes, then start a `refresh`.
 

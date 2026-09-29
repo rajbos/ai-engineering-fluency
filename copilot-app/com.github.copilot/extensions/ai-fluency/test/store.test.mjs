@@ -36,6 +36,14 @@ test("buildSnapshot trims the payload to what the canvas renders", () => {
     assert.ok(!("curation" in snapshot));
 });
 
+test("buildSnapshot keeps sessions within the last 30 days only", () => {
+    const payload = samplePayload();
+    const old = { ...payload.usage.recentSessions.last30[0], filePath: "/tmp/first-of-month.jsonl", lastActivity: "2026-07-01T09:00:00.000Z" };
+    payload.usage.recentSessions.currentMonth = [...payload.usage.recentSessions.last30, old]; // e.g. on July 31
+    const snapshot = buildSnapshot(payload, { describe: noDescribe });
+    assert.deepEqual(snapshot.sessions.map((s) => s.shortId).sort(), ["a", "b"], "a current-month session outside the 30-day window is not stored");
+});
+
 test("buildSnapshot tolerates an empty CLI payload", () => {
     const snapshot = buildSnapshot({ details: { today: {}, month: {}, lastMonth: {}, last30Days: {} }, chart: { labels: [] }, usage: {}, fluency: {} }, { describe: noDescribe });
     assert.equal(snapshot.periods.today.tokens, 0);

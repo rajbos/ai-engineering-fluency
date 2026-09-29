@@ -76,15 +76,36 @@ test("get_summary serves the cached snapshot without running the CLI, with title
     assert.equal(runs, 0);
 });
 
-test("refresh returns at once by default and runs in the background", async (t) => {
+test("refresh returns once the run has begun and runs in the background", async (t) => {
     let finish;
     const gate = new Promise((resolve) => (finish = resolve));
     const { action, refresher } = await setup(t, { runCli: async () => (await gate, cliResult()) });
     const result = await action("refresh")({ input: {} });
     assert.equal(result.started, true);
-    await until(() => refresher.state().status.state === "running");
+    assert.deepEqual([result.status.state, result.status.byOtherSession], ["running", false]);
+    const again = await action("refresh")({ input: null });
+    assert.deepEqual([again.started, again.status.state], [true, "running"], "a second call joins the run in flight");
     finish();
     await until(() => refresher.state().status.state === "idle");
+});
+
+test("refresh without wait says when it joined another session's run, and fails at once when it can't start", async (t) => {
+    const { dir, action, refresher } = await setup(t, { runCli: async () => assert.fail("must not run") });
+    await writeFile(join(dir, "refresh.lock.1"), JSON.stringify({ pid: process.ppid, token: "other", startedAt: new Date().toISOString() }));
+    const joined = await action("refresh")({ input: {} });
+    assert.equal(joined.started, false);
+    assert.equal(joined.status.byOtherSession, true);
+    assert.match(joined.message, /Another Copilot session is already refreshing/);
+
+    refresher.readSnapshot = async () => ({ snapshot: null, missing: false, unsafe: "not private" });
+    await assert.rejects(action("refresh")({ input: {} }), (error) => {
+        assert.deepEqual([error.code, error.message], ["refresh_failed", "not private"]);
+        return true;
+    });
+
+    await refresher.dispose();
+    await assert.rejects(action("refresh")({ input: {} }), /shutting down/);
+    await assert.rejects(action("refresh")({ input: { wait: true } }), /shutting down/);
 });
 
 test("refresh with wait returns the new snapshot; a failure becomes a CanvasError and a session warning", async (t) => {

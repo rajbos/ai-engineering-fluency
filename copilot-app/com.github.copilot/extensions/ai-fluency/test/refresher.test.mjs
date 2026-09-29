@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm, unlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -457,6 +457,24 @@ test("dispose leaves the lock to expire when the run does not end in time", asyn
     assert.deepEqual(await listDir(dir), ["refresh.lock.1"], "no done marker while the CLI may still be running");
     const other = new Refresher({ dir });
     assert.ok(await other.otherSessionLock(), "other sessions keep waiting");
+});
+
+test("a lock that can't be released is reported, and not mistaken for another session's run", async (t) => {
+    const dir = await tempDir(t);
+    await mkdir(join(dir, "refresh.lock.1.done")); // the done marker can't be written
+    let runs = 0;
+    const refresher = new Refresher({ dir, runCli: async () => (runs++, cliResult()) });
+    const { status, snapshot } = await refresher.refresh();
+    assert.equal(status.state, "error");
+    assert.match(status.error, /refresh lock could not be released/);
+    assert.ok(snapshot, "the new stats are still used");
+    assert.ok(await readSnapshot(dir));
+    assert.ok(await new Refresher({ dir }).otherSessionLock(), "other sessions see the lock as held until it expires");
+
+    const again = await refresher.refresh();
+    assert.deepEqual([again.status.state, again.status.byOtherSession], ["error", false], "this session does not wait for itself");
+    assert.match(again.status.error, /refresh lock could not be released/);
+    assert.equal(runs, 1);
 });
 
 test("waiting for another session's refresh returns when its snapshot lands", async (t) => {

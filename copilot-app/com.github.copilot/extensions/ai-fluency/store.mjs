@@ -19,7 +19,9 @@ export const PRIVATE_FILE_MODE = 0o600;
  * The snapshot holds session titles (often the first prompt) and project names, so the artifacts folder and the
  * snapshot in it are owner-only. This also tightens folders and snapshots written by older versions, and throws when
  * either cannot be made private (for example, a folder owned by another user), so callers can fail closed. POSIX
- * modes do not apply on Windows, where the user profile's ACLs already restrict `~/.copilot`.
+ * modes do not apply on Windows: there the folder inherits the ACLs of `COPILOT_HOME`, by default the user profile,
+ * which only the user, administrators and SYSTEM can read. Windows ACLs are not rewritten here: `COPILOT_HOME` also
+ * holds Copilot's own session logs (the full prompts these titles come from), so it has to be private regardless.
  */
 export async function ensurePrivateDir(dir = artifactsDir()) {
     await mkdir(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
@@ -236,7 +238,8 @@ function shortId(filePath = "") {
 
 function trimSessions(usage = {}, describe) {
     const recent = usage.recentSessions ?? {};
-    const all = [...(recent.last30 ?? []), ...(recent.last7 ?? []), ...(recent.currentMonth ?? []), ...(usage.todaySessions ?? [])];
+    // Not `currentMonth`: early in a month it reaches back past the 30-day window, and this list is the Sessions tab's scope.
+    const all = [...(recent.last30 ?? []), ...(recent.last7 ?? []), ...(usage.todaySessions ?? [])];
     const byPath = new Map();
     for (const session of all) {
         if (!session?.filePath || byPath.has(session.filePath)) continue;

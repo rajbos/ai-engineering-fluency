@@ -38,7 +38,7 @@ different amount than the Total. The canvas shows a note when you pick a cost sp
 - The CLI reads the session log files that your AI tools already write to disk. Session titles come from small
   metadata files next to each session; the canvas never reads transcripts itself.
 - The trimmed snapshot is stored in your own Copilot config folder (see [Where your data lives](#where-your-data-lives)),
-  readable only by your user account.
+  readable only by your user account on macOS and Linux; on Windows it has the same permissions as that folder.
 - The UI is served from `127.0.0.1` only, under a random URL path that is different for every panel (so other
   programs on your machine cannot guess it), with a strict same-origin Content Security Policy.
 - The canvas uploads nothing. Its only network access is downloading the CLI package from npm when it is not
@@ -113,7 +113,7 @@ and how to use its actions:
 | Action | What it does |
 |---|---|
 | `get_summary` | Returns the cached stats (periods, top models, editors, fluency tips). Pass `{ "topSessions": 1-25 }` to also get the top sessions of the last 7 days with their titles and project names. Never runs the CLI. |
-| `refresh` | Re-runs the CLI in the background. Pass `{ "wait": true }` to wait for it to finish. If another session is already refreshing, it waits for that run instead of starting a second one, and reports a failure if that run ends without new stats. |
+| `refresh` | Re-runs the CLI in the background and replies once the run has begun — or, if another session is already refreshing, that this canvas will use that run's result. It fails straight away when a refresh can't start. Pass `{ "wait": true }` to wait for it to finish. If another session is already refreshing, it waits for that run instead of starting a second one, and reports a failure if that run ends without new stats. |
 
 **The first run takes a while.** With no snapshot yet, the CLI parses all of your local session logs, which can take
 several minutes. After that the last snapshot shows instantly, refreshes when you open the canvas and it is older
@@ -179,7 +179,7 @@ A manual copy does not update itself; the plugin install is the recommended rout
 | What | Where |
 |---|---|
 | Plugin code | Managed by Copilot under `~/.copilot/installed-plugins/` — don't edit it there. |
-| Cached snapshot | `$COPILOT_HOME/extensions/ai-fluency/artifacts/snapshot.json` (`COPILOT_HOME` defaults to `~/.copilot`). On macOS and Linux the `artifacts/` folder is owner-only (`0700`) and the snapshot `0600`, because it contains session titles; the canvas also tightens folders written by older versions. If it can't (for example, the folder belongs to another user), the canvas refuses to read or write it and shows an error instead. On Windows your user profile's permissions apply. |
+| Cached snapshot | `$COPILOT_HOME/extensions/ai-fluency/artifacts/snapshot.json` (`COPILOT_HOME` defaults to `~/.copilot`). On macOS and Linux the `artifacts/` folder is owner-only (`0700`) and the snapshot `0600`, because it contains session titles; the canvas also tightens folders written by older versions. If it can't (for example, the folder belongs to another user), the canvas refuses to read or write it and shows an error instead. On Windows the folder inherits the permissions of `COPILOT_HOME`: by default that is inside your user profile, which only you, administrators and the system can read. If you point `COPILOT_HOME` at a shared folder, restrict it to your account yourself — Copilot keeps your full session logs there too. |
 | Refresh locks | `refresh.lock.<n>` files (plus a `.done` marker once a run finishes) in the same folder. Only the newest one is kept; older ones are cleaned up by the next run. |
 
 Delete the `artifacts/` folder to reset the canvas; the next open runs a full refresh again.

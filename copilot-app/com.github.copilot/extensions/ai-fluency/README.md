@@ -41,7 +41,11 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
   (~250 KB; `COPILOT_HOME` defaults to `~/.copilot`). That path is the same for plugin and manual installs, so the
   cached snapshot survives plugin updates and reinstalls. On POSIX the folder is kept `0700` and the snapshot
   `0600` (it contains session titles), written through a uniquely named temp file. Every read and write checks this
-  first and fails closed: a folder or snapshot that can't be made private is neither shown, summarized nor written to. The snapshot includes the day / week / month
+  first and fails closed: a folder or snapshot that can't be made private is neither shown, summarized nor written to.
+  On Windows the folder keeps the ACLs it inherits from `COPILOT_HOME` (by default the user profile); they are not
+  rewritten, since `COPILOT_HOME` holds Copilot's own full session logs and has to be private anyway. Sessions are
+  taken from the CLI's last-30-days, last-7-days and today lists only, so nothing outside the Sessions tab's scope is
+  stored. The snapshot includes the day / week / month
   chart datasets (top 8 series per split plus "Other"). Session titles are
   derived from small metadata files next to each session (Copilot CLI `workspace.yaml`, VS Code
   `workspace.json`, Claude worktree folder names) — transcripts are never read by the canvas.
@@ -63,7 +67,8 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
   On timeout the CLI's whole process tree is stopped (`taskkill /T` on Windows, the process group on macOS/Linux),
   and the lock is left to expire instead of being released, so a CLI that is still exiting cannot overlap the next
   run. On shutdown the refresher stops the running CLI, waits briefly for it to exit, and releases the lock (or, if
-  it has not exited by then, leaves the lock to expire).
+  it has not exited by then, leaves the lock to expire). If the `.done` marker can't be written, the refresh reports
+  that as an error: the lock then stays until it expires, and this session doesn't mistake it for another session's run.
 - `canvas.mjs` registers the canvas and its agent actions and wires up shutdown; `extension.mjs` only passes it the
   Copilot SDK, so the registration is unit-tested with a stub SDK.
 - `panels.mjs` tracks open panels so that concurrent opens and closes start and stop the refresher exactly once each.
@@ -81,7 +86,7 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
 | Action        | What it does                                                                 |
 |---------------|------------------------------------------------------------------------------|
 | `get_summary` | Returns cached stats (periods, top models, editors, fluency tips). Session titles and project names are only included with `{ "topSessions": 1-25 }` (top sessions of the last 7 days). The result is sent to the model like any tool result. Never runs the CLI. |
-| `refresh`     | Starts a background refresh. Pass `{ "wait": true }` to block until it finishes (if another Copilot session is already refreshing, it waits for that run's snapshot instead, and fails if that run ends without one). |
+| `refresh`     | Starts a background refresh and returns once it has begun: `started: true` when it runs in this session, `started: false` with `status.byOtherSession` when another Copilot session is already refreshing (its snapshot is used here). Fails at once when it can't start (for example, a stats folder that isn't private). Pass `{ "wait": true }` to block until it finishes (if another Copilot session is already refreshing, it waits for that run's snapshot instead, and fails if that run ends without one). |
 
 Example: `open_canvas({ canvasId: "ai-fluency", instanceId: "fluency" })`, then
 `invoke_canvas_action({ instanceId: "fluency", actionName: "get_summary" })`.

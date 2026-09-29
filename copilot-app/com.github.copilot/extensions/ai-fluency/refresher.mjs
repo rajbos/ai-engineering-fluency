@@ -25,6 +25,9 @@ const LEGACY_LOCK = "refresh.lock";
 const GENERATION = /^refresh\.lock\.(\d+)(\.done)?$/;
 const LOCK_TEMP = /^refresh\.lock\..+\.tmp$/;
 const OTHER_SESSION_FAILED = "Another Copilot session's refresh ended without new stats (it failed or was stopped). Try Refresh again.";
+const RUN_STILL_STOPPING = "The last CLI run timed out and may still be stopping. Try again in a few minutes.";
+const LOCK_NOT_RELEASED =
+    "The refresh lock could not be released, so no Copilot session can refresh until it expires (within about 20 minutes). Check that the stats folder is writable.";
 
 function pidAlive(pid) {
     try {
@@ -76,7 +79,7 @@ export class Refresher extends EventEmitter {
         this.readSnapshot = readSnapshot;
         this.lockGeneration = null;
         this.lockToken = null;
-        this.keptToken = null;
+        this.kept = null; // { token, reason }: this session's lock, left to expire, so it isn't mistaken for another session's
         this.follow = 0;
         this.followBaseline = null;
         this.snapshot = null;
@@ -327,6 +330,7 @@ export class Refresher extends EventEmitter {
      * Marks this session's generation finished (a `.done` marker carrying its token), which frees the lock for the next
      * generation. Nothing is removed, so this cannot affect a newer lock even when it runs late. With `keep`, the lock
      * is left to expire instead: a run that timed out may still have processes alive, which must not overlap the next run.
+     * Throws when the marker can't be written: the lock then stays live until it expires, which the caller must report.
      */
     async releaseLock({ keep = false } = {}) {
         const generation = this.lockGeneration;
@@ -334,7 +338,12 @@ export class Refresher extends EventEmitter {
         this.lockGeneration = null;
         this.lockToken = null;
         if (!generation || keep) return;
-        await writeFile(`${this.lockFile(generation)}.done`, JSON.stringify({ token }), { mode: PRIVATE_FILE_MODE }).catch(() => {});
+        try {
+            await writeFile(`${this.lockFile(generation)}.done`, JSON.stringify({ token }), { mode: PRIVATE_FILE_MODE });
+        } catch (error) {
+            this.kept = { token, reason: LOCK_NOT_RELEASED };
+            throw new Error(`${LOCK_NOT_RELEASED} (${error.message})`);
+        }
     }
 
     /** Start a refresh (or join the one already running). Resolves with the state when done. */
@@ -352,18 +361,35 @@ export class Refresher extends EventEmitter {
         return this.inflight;
     }
 
+    /**
+     * Starts a refresh (or joins the one in flight) and resolves as soon as it is known how it began, without waiting
+     * for the CLI: `running` here, `running` with `byOtherSession` when it follows another session's run, or the final
+     * state when it ended before either — refused or failed (`error`).
+     */
+    startRefresh() {
+        if (this.inflight && this.status.state === "running") return Promise.resolve(this.state());
+        let onBegin;
+        const began = new Promise((resolve) => this.once("begin", (onBegin = resolve)));
+        return Promise.race([began, this.refresh()]).finally(() => this.off("begin", onBegin));
+    }
+
     async doRefresh() {
         await this.load();
-        if (this.unsafe) throw new Error(this.unsafe); // never write session data into a folder that isn't private
+        // Never write session data into a folder that isn't private. load() has reported it; only report it once.
+        if (this.unsafe) {
+            if (this.status.state !== "error" || this.status.error !== this.unsafe) this.fail(this.unsafe);
+            return this.state();
+        }
         const other = await this.otherSessionLock();
-        if (other && other.token && other.token === this.keptToken) {
-            this.fail("The last CLI run timed out and may still be stopping. Try again in a few minutes.");
+        if (other && other.token && other.token === this.kept?.token) {
+            this.fail(this.kept.reason);
             return this.state();
         }
         if (other) return this.followOtherSession(other.startedAt);
         if (!(await this.acquireLock())) return this.followOtherSession(new Date(this.now()).toISOString());
         const startedAt = this.now();
         this.setStatus({ state: "running", startedAt: new Date(startedAt).toISOString(), error: null, byOtherSession: false });
+        this.emit("begin", this.state());
         let keep = false;
         try {
             const onSpawn = (child) => {
@@ -379,7 +405,7 @@ export class Refresher extends EventEmitter {
         } catch (error) {
             // A timed-out run's processes may outlive the kill: let its lock expire rather than free it right away.
             keep = error?.timedOut === true;
-            if (keep) this.keptToken = this.lockToken;
+            if (keep) this.kept = { token: this.lockToken, reason: RUN_STILL_STOPPING };
             this.fail(error.message);
         } finally {
             this.child = null;
@@ -433,6 +459,7 @@ export class Refresher extends EventEmitter {
         this.follow++;
         this.followBaseline = this.snapshot;
         this.setStatus({ state: "running", startedAt, error: null, byOtherSession: true });
+        this.emit("begin", this.state());
         return this.state();
     }
 
@@ -499,6 +526,7 @@ export class Refresher extends EventEmitter {
             const giveUp = new Promise((resolve) => setTimeout(() => resolve(false), this.disposeWaitMs).unref?.());
             ended = await Promise.race([this.inflight.then(() => true), giveUp]);
         }
-        await this.releaseLock({ keep: !ended });
+        // Shutting down: a lock that can't be released just expires, and there is nobody left to report it to.
+        await this.releaseLock({ keep: !ended }).catch(() => {});
     }
 }

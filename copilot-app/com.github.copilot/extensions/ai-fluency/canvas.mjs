@@ -43,19 +43,30 @@ export function fluencyCanvas({ refresher, panels, CanvasError }) {
             {
                 name: "refresh",
                 description:
-                    "Re-run the CLI in the background to refresh the stats (takes several minutes). Returns immediately with the refresh status; set wait=true to block until it finishes " +
-                    "(including a refresh another Copilot session is already running).",
+                    "Re-run the CLI in the background to refresh the stats (takes several minutes). Returns as soon as the refresh has begun: started=true when it runs in this session, " +
+                    "started=false with status.byOtherSession when another Copilot session is already running one (its result is picked up here). Fails at once when it cannot start. " +
+                    "Set wait=true to block until it finishes instead (including a refresh another Copilot session is already running).",
                 inputSchema: {
                     type: ["object", "null"],
                     properties: { wait: { type: "boolean" } },
                     additionalProperties: false,
                 },
                 handler: async ({ input }) => {
-                    const pending = refresher.refresh();
+                    if (refresher.disposed) throw new CanvasError("refresh_failed", "The AI fluency extension is shutting down; try again in a new session.");
                     if (!input?.wait) {
-                        return { started: true, message: "Refresh is running in the background (several minutes). The canvas updates when it finishes; call get_summary afterwards." };
+                        const { status, snapshot } = await refresher.startRefresh();
+                        if (status.state === "error") throw new CanvasError("refresh_failed", status.error);
+                        if (status.state !== "running") return { started: false, status, fetchedAt: snapshot?.fetchedAt ?? null };
+                        if (status.byOtherSession) {
+                            return {
+                                started: false,
+                                status,
+                                message: "Another Copilot session is already refreshing the stats (several minutes); this canvas picks up its result. Call get_summary afterwards.",
+                            };
+                        }
+                        return { started: true, status, message: "Refresh is running in the background (several minutes). The canvas updates when it finishes; call get_summary afterwards." };
                     }
-                    let { status, snapshot } = await pending;
+                    let { status, snapshot } = await refresher.refresh();
                     if (status.state === "running" && status.byOtherSession) ({ status, snapshot } = await refresher.waitForOtherSession());
                     if (status.state === "error") throw new CanvasError("refresh_failed", status.error);
                     if (status.state === "running") {
