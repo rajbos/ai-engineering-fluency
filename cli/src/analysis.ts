@@ -7,7 +7,7 @@
  */
 import { calculateEstimatedCost } from '../../src/tokenEstimation';
 import { addModelUsage, scaleModelUsage } from '../../src/statsHelpers';
-import { normalizePathForComparison, detectClaudeCodeEditorVariant } from '../../src/workspaceHelpers';
+import { normalizePathForComparison, detectClaudeCodeEditorVariant, detectRelocatedAgentHomeFromPath } from '../../src/workspaceHelpers';
 import { getPricingSourceForEditor, getBillingGroup } from '../../src/chartDataBuilder';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import type { ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../src/types';
@@ -77,12 +77,19 @@ export function effectiveTokens(data: SessionData): number {
 /** Determine editor source from file path, returning the same friendly display names used by the VS Code extension. */
 export function getEditorSourceFromPath(filePath: string): string {
 	const normalized = normalizePathForComparison(filePath);
+	// Eclipse Copilot conversations live in the workspace metadata; check before the
+	// generic VS Code fallthrough (the path can pass through a 'code' folder).
+	if (normalized.includes('com.microsoft.copilot.eclipse')) { return 'Eclipse'; }
 	// JetBrains must be checked before the broad /.copilot/ check (both use /.copilot/).
 	if (normalized.includes('/.copilot/jb/')) { return 'JetBrains'; }
 	// Copilot CLI: check specific sub-paths to avoid misclassifying JetBrains or other /.copilot/ entries.
 	if (normalized.includes('/.copilot/session-store.db#')) { return 'Copilot CLI'; }
 	if (normalized.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
 	if (normalized.includes('/.crush/crush.db#')) { return 'Crush'; }
+	// Hermes (<HERMES_HOME>/state.db#<id>) and Devin CLI (<...>/devin/cli/sessions.db#<id>)
+	// virtual DB session paths — mirrors detectCliAgentStoreFromPath in src/workspaceHelpers.ts.
+	if (normalized.includes('hermes/state.db#')) { return 'Hermes'; }
+	if (normalized.includes('devin/cli/sessions.db#')) { return 'Devin CLI'; }
 	// Cline task files live under <variant>/User/globalStorage/saoudrizwan.claude-dev/
 	// — must be checked before the generic /cursor/ and VS Code fallthrough below.
 	if (normalized.includes('/saoudrizwan.claude-dev/tasks/')) { return 'Cline'; }
@@ -92,6 +99,10 @@ export function getEditorSourceFromPath(filePath: string): string {
 	// OpenAI Codex CLI (~/.codex): must be checked before the generic 'code'-based
 	// fallbacks below ('codex' contains 'code' and would misclassify as VS Code).
 	if (normalized.includes('/.codex/')) { return 'Codex CLI'; }
+	// $CODEX_HOME / $VIBE_HOME / $HERMES_HOME pointing at a folder not named like the default.
+	const relocatedAgent = detectRelocatedAgentHomeFromPath(normalized);
+	if (relocatedAgent) { return relocatedAgent; }
+	if (normalized.includes('/.pi/agent/sessions/')) { return 'Pi'; }
 	// Kiro CLI (~/.kiro/sessions/cli) and Kiro IDE (kiro.kiroagent global storage) are separate editors.
 	if (normalized.includes('/.kiro/sessions/cli/')) { return 'Kiro CLI'; }
 	if (normalized.includes('/kiro.kiroagent/workspace-sessions/')) { return 'Kiro'; }

@@ -5,6 +5,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import type { CustomizationFileEntry } from './types';
 import * as packageJson from '../vscode-extension/package.json';
 import customizationPatternsData from './customizationPatterns.json';
@@ -21,6 +22,7 @@ import {
 	normalizePath,
 	normalizePathForComparison,
 	normalizePathForDedup,
+	joinedChildPrefixForComparison,
 	splitNormalizedPath,
 	stripWindowsDriveUriPrefix,
 	toPlatformPath
@@ -1104,6 +1106,46 @@ export function detectClaudeCodeEditorVariant(filePath: string): string {
 }
 
 /**
+ * $CODEX_HOME / $HERMES_HOME as their adapters use them (codexcli.ts getCodexHome,
+ * hermes.ts getConfigDir): the raw value when non-blank — relative values stay relative,
+ * no `~` expansion.
+ */
+function rawAgentHome(value: string | undefined): string | undefined {
+	return value && value.trim() ? value : undefined;
+}
+
+/** Session entries Codex keeps directly under its home: rollout dirs and `state_<N>.sqlite#<id>` thread paths. */
+const CODEX_HOME_OWNED_CHILD_RE = /^(sessions\/|archived_sessions\/|state_\d+\.sqlite#)/;
+
+/** $VIBE_HOME as mistralvibe.ts getVibeHomeDir uses it: `~` expanded, then resolved to absolute. */
+function vibeAgentHome(value: string | undefined): string | undefined {
+	return value ? path.resolve(value.replace(/^~/, os.homedir())) : undefined;
+}
+
+/**
+ * Detect CLI agents whose data root was relocated with $CODEX_HOME, $VIBE_HOME or
+ * $HERMES_HOME to a folder not named like the default (.codex, .vibe, hermes), which the
+ * default-name substring checks cannot recognise. Only the adapters' own session
+ * sub-paths under the configured root match, so a broad root (e.g. the home dir) does
+ * not swallow unrelated files. Each home is interpreted exactly as its adapter does and
+ * prefixes are built with `path.join`, like the adapters' own paths, so edge cases such
+ * as `.` or `/` line up with what the adapter discovers. Shared by the extension and the
+ * CLI detectors.
+ * @internal
+ */
+export function detectRelocatedAgentHomeFromPath(lowerPath: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+	const codexHome = rawAgentHome(env['CODEX_HOME']);
+	const codexPrefix = codexHome === undefined ? undefined : joinedChildPrefixForComparison(codexHome);
+	if (codexPrefix !== undefined && lowerPath.startsWith(codexPrefix) &&
+		CODEX_HOME_OWNED_CHILD_RE.test(lowerPath.slice(codexPrefix.length))) { return 'Codex CLI'; }
+	const vibeHome = vibeAgentHome(env['VIBE_HOME']);
+	if (vibeHome && lowerPath.startsWith(joinedChildPrefixForComparison(path.join(vibeHome, 'logs', 'session')))) { return 'Mistral Vibe'; }
+	const hermesHome = rawAgentHome(env['HERMES_HOME']);
+	if (hermesHome && lowerPath.startsWith(`${normalizePathForComparison(path.join(hermesHome, 'state.db'))}#`)) { return 'Hermes'; }
+	return undefined;
+}
+
+/**
  * Detect terminal CLI agents with dedicated data stores from a lower-cased normalised path.
  * @internal
  */
@@ -1127,7 +1169,7 @@ function detectCliAgentStoreFromPath(lowerPath: string): string | undefined {
 	// before the loose 'code' substring fallbacks in detectIDEEditorSource /
 	// detectVSCodeVariantFromPath ('codex' contains 'code' and would misclassify as VS Code).
 	if (lowerPath.includes('/.codex/')) { return 'Codex CLI'; }
-	return undefined;
+	return detectRelocatedAgentHomeFromPath(lowerPath);
 }
 
 /**

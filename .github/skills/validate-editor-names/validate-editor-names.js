@@ -379,6 +379,36 @@ const TEST_CASES = [
     expected: 'VS Code Server (Insiders)',
     label: 'VS Code Server (Insiders) session'
   },
+  // Eclipse — must not fall through to the CLI's 'VS Code' default
+  {
+    path: '/home/user/eclipse-workspace/.metadata/.plugins/com.microsoft.copilot.eclipse/conversations/abc.json',
+    expected: 'Eclipse',
+    label: 'Eclipse Copilot conversation'
+  },
+  // Pi — the encoded cwd folder can contain 'code'
+  {
+    path: '/home/user/.pi/agent/sessions/--home-user-code-repo--/2026-09-01T10-00-00_abc.jsonl',
+    expected: 'Pi',
+    label: 'Pi session'
+  },
+  // Devin CLI virtual DB path
+  {
+    path: 'C:/Users/user/AppData/Roaming/devin/cli/sessions.db#sess-123',
+    expected: 'Devin CLI',
+    label: 'Devin CLI sessions.db'
+  },
+  // Hermes virtual DB path
+  {
+    path: 'C:/Users/user/AppData/Local/hermes/state.db#20260726_204744_427b88',
+    expected: 'Hermes',
+    label: 'Hermes state.db'
+  },
+  // Codex CLI — 'codex' contains 'code'
+  {
+    path: '/home/user/.codex/sessions/2026/09/01/rollout-2026-09-01T10-00-00-abc.jsonl',
+    expected: 'Codex CLI',
+    label: 'Codex CLI rollout'
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -468,11 +498,20 @@ function main() {
     process.stderr.write('ERROR: Could not find detectToolEditorFromPath or detectVSCodeVariantFromPath in workspaceHelpers.ts\n');
     process.exit(2);
   }
-  // detectGlobalStorageEditorFromPath (Kiro, Kiro CLI, Cline) is a helper invoked
-  // from detectToolEditorFromPath before the VS Code variant checks; include its
-  // rules first so the simulation matches the real evaluation order.
-  const detectGlobalStorageFnBody = extractFunctionBody(wsHelpersSource, 'detectGlobalStorageEditorFromPath') ?? '';
-  const wsComboBody = detectGlobalStorageFnBody + '\n' + detectToolFnBody + '\n' + detectVSFnBody;
+  // getEditorTypeFromPath's own pre-checks (Eclipse) run first; then the helpers
+  // detectToolEditorFromPath delegates to — detectCopilotFamilyFromPath (JetBrains,
+  // Copilot CLI), detectCliAgentStoreFromPath (Crush, Kilo Code, Hermes, Devin CLI,
+  // Codex CLI) and detectGlobalStorageEditorFromPath (Kiro, Kiro CLI, Cline) — ahead
+  // of the VS Code variant checks, so the simulation matches the real evaluation order.
+  const helperBody = name => extractFunctionBody(wsHelpersSource, name) ?? '';
+  const wsComboBody = [
+    helperBody('getEditorTypeFromPath'),
+    helperBody('detectCopilotFamilyFromPath'),
+    helperBody('detectCliAgentStoreFromPath'),
+    helperBody('detectGlobalStorageEditorFromPath'),
+    detectToolFnBody,
+    detectVSFnBody,
+  ].join('\n');
 
   // -- Extract rules ---------------------------------------------------------
 
