@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -17,14 +17,26 @@ export const PRIVATE_FILE_MODE = 0o600;
 
 /**
  * The snapshot holds session titles (often the first prompt) and project names, so the artifacts folder and the
- * snapshot in it are owner-only. This also tightens folders and snapshots written by older versions. POSIX modes do
- * not apply on Windows, where the user profile's ACLs already restrict `~/.copilot`.
+ * snapshot in it are owner-only. This also tightens folders and snapshots written by older versions, and throws when
+ * either cannot be made private (for example, a folder owned by another user), so callers can fail closed. POSIX
+ * modes do not apply on Windows, where the user profile's ACLs already restrict `~/.copilot`.
  */
 export async function ensurePrivateDir(dir = artifactsDir()) {
     await mkdir(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     if (process.platform === "win32") return;
-    await chmod(dir, PRIVATE_DIR_MODE);
-    await chmod(snapshotPath(dir), PRIVATE_FILE_MODE).catch(() => {});
+    await makePrivate(dir, PRIVATE_DIR_MODE);
+    await makePrivate(snapshotPath(dir), PRIVATE_FILE_MODE, { mayBeMissing: true });
+}
+
+/** `chmod`, except that a path it cannot change (a read-only file system) is fine when it is ours and owner-only already. */
+async function makePrivate(path, mode, { mayBeMissing = false } = {}) {
+    try {
+        await chmod(path, mode);
+    } catch (error) {
+        if (mayBeMissing && error.code === "ENOENT") return;
+        const info = await stat(path).catch(() => null);
+        if (!info || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) throw error;
+    }
 }
 
 const num = (value) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
@@ -138,7 +150,8 @@ function trimFluency(fluency = {}) {
 }
 
 function yamlValue(text, key) {
-    const match = text.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+    // `[ \t]*`, not `\s*`: an empty value must not run on into the next line (`name:\ncwd: …` is not a title).
+    const match = text.match(new RegExp(`^${key}:[ \\t]*(.+)$`, "m"));
     if (!match) return null;
     return match[1].trim().replace(/^(['"])(.*)\1$/, "$2") || null;
 }
@@ -296,6 +309,23 @@ export async function readSnapshotFile(dir = artifactsDir()) {
 
 export async function readSnapshot(dir = artifactsDir()) {
     return (await readSnapshotFile(dir)).snapshot;
+}
+
+/**
+ * Like `readSnapshotFile`, but only after making sure the folder and snapshot are private (`ensurePrivateDir`). When
+ * that fails the file is not read at all and `unsafe` holds the reason, so the canvas never shows or summarizes a
+ * snapshot that other users may be able to read.
+ */
+export async function readPrivateSnapshotFile(dir = artifactsDir()) {
+    try {
+        await ensurePrivateDir(dir);
+    } catch (error) {
+        const unsafe =
+            `The stats folder can't be made private to your user account, so the canvas won't use it (${error.message}). ` +
+            `Make ${dir} and the snapshot.json in it yours and readable only by you, or delete the folder.`;
+        return { snapshot: null, missing: false, unsafe };
+    }
+    return readSnapshotFile(dir);
 }
 
 export async function writeSnapshot(snapshot, dir = artifactsDir()) {

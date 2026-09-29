@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { buildSnapshot, describeSession, ensurePrivateDir, readSnapshot, readSnapshotFile, summarize, topSeries, windowStart, writeSnapshot } from "../store.mjs";
+import { buildSnapshot, describeSession, ensurePrivateDir, readPrivateSnapshotFile, readSnapshot, readSnapshotFile, summarize, topSeries, windowStart, writeSnapshot } from "../store.mjs";
 import { samplePayload } from "./fixtures.mjs";
 
 const noDescribe = () => ({ label: null, project: null });
@@ -69,6 +69,10 @@ test("describeSession derives labels from session metadata", async (t) => {
     assert.deepEqual(describeSession(join(cliDir, "events.jsonl")), { label: "Tidy up", project: "posix-repo" }, "POSIX cwd, trailing slash");
     await writeFile(join(cliDir, "workspace.yaml"), "cwd: /home/someone/copilot-worktrees/posix-demo/branch-b\n");
     assert.deepEqual(describeSession(join(cliDir, "events.jsonl")), { label: null, project: "posix-demo" }, "POSIX worktree cwd");
+    await writeFile(join(cliDir, "workspace.yaml"), "name:\nsummary: From the summary\ncwd: /home/someone/code/empty-name\n");
+    assert.deepEqual(describeSession(join(cliDir, "events.jsonl")), { label: "From the summary", project: "empty-name" }, "an empty name falls back to the summary");
+    await writeFile(join(cliDir, "workspace.yaml"), "name:\r\ncwd: /home/someone/code/no-title\r\nsummary:   \r\n");
+    assert.deepEqual(describeSession(join(cliDir, "events.jsonl")), { label: null, project: "no-title" }, "an empty value never takes the next line");
 
     const wsDir = join(root, "workspaceStorage", "abc123");
     await mkdir(join(wsDir, "chatSessions"), { recursive: true });
@@ -175,4 +179,27 @@ test("writeSnapshot leaves no temp files behind", async (t) => {
     await writeSnapshot(buildSnapshot(samplePayload(), { describe: noDescribe }), dir);
     await writeSnapshot(buildSnapshot(samplePayload(), { describe: noDescribe }), dir);
     assert.deepEqual(await readdir(dir), ["snapshot.json"]);
+});
+
+test("readPrivateSnapshotFile reads a private folder and tolerates a missing snapshot", async (t) => {
+    const dir = join(await mkdtemp(join(tmpdir(), "ai-fluency-")), "artifacts");
+    t.after(() => rm(dirname(dir), { recursive: true, force: true }));
+    assert.deepEqual(await readPrivateSnapshotFile(dir), { snapshot: null, missing: true });
+    await writeSnapshot(buildSnapshot(samplePayload(), { describe: noDescribe }), dir);
+    const { snapshot, missing, unsafe } = await readPrivateSnapshotFile(dir);
+    assert.ok(snapshot);
+    assert.equal(missing, false);
+    assert.equal(unsafe, undefined);
+});
+
+test("readPrivateSnapshotFile refuses a snapshot it can't make private", { skip: (process.platform === "win32" || process.getuid?.() === 0) && "POSIX, non-root only" }, async (t) => {
+    const dir = await mkdtemp(join(tmpdir(), "ai-fluency-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    // Another user's world-readable file, which this user cannot chmod.
+    await symlink("/etc/passwd", join(dir, "snapshot.json"));
+    await assert.rejects(ensurePrivateDir(dir), { code: "EPERM" });
+    const { snapshot, missing, unsafe } = await readPrivateSnapshotFile(dir);
+    assert.equal(snapshot, null);
+    assert.equal(missing, false);
+    assert.match(unsafe, /can't be made private/);
 });

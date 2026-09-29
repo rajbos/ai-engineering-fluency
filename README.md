@@ -3,7 +3,7 @@
 (Previously known as the "GitHub Copilot Token Tracker")
 ![AI Engineering Fluency](https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/assets/AI%20Engineering%20Fluency%20-%20Transparent.png)
 
-Track your GitHub Copilot token usage and AI Fluency across VS Code, Visual Studio, the GitHub Copilot app, and the command line. All data is read from local session logs — nothing leaves your machine unless you opt in to cloud sync.
+Track your GitHub Copilot token usage and AI Fluency across VS Code, Visual Studio, the GitHub Copilot app, and the command line. All data is read from local session logs — nothing leaves your machine unless you opt in to cloud sync, or ask an agent in the GitHub Copilot app about your stats (the numbers it reads are then sent to the model like any other tool result; see [what the agent sees](docs/copilot-app/README.md#what-you-get)).
 
 [![Build](https://github.com/rajbos/ai-engineering-fluency/actions/workflows/build.yml/badge.svg)](https://github.com/rajbos/ai-engineering-fluency/actions/workflows/build.yml) [![Watch the Explainer Video](https://img.shields.io/badge/Watch-Explainer%20Video-FF0000?logo=youtube)](https://youtu.be/Odm3wNursCY)
 

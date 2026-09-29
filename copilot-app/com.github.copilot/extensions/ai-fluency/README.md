@@ -34,12 +34,14 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
 ## How it works
 
 - `cli.mjs` runs `ai-engineering-fluency all --json` (global install preferred, falls back to
-  `npx -y @rajbos/ai-engineering-fluency@latest`). A full run parses every local session log and takes
+  `npx -y @rajbos/ai-engineering-fluency@latest` when it is missing — but not when its `--version` check times out,
+  since that process may still be running). A full run parses every local session log and takes
   several minutes, so it always runs in the background.
 - `store.mjs` trims the ~700 KB payload into `$COPILOT_HOME/extensions/ai-fluency/artifacts/snapshot.json`
   (~250 KB; `COPILOT_HOME` defaults to `~/.copilot`). That path is the same for plugin and manual installs, so the
   cached snapshot survives plugin updates and reinstalls. On POSIX the folder is kept `0700` and the snapshot
-  `0600` (it contains session titles), written through a uniquely named temp file. The snapshot includes the day / week / month
+  `0600` (it contains session titles), written through a uniquely named temp file. Every read and write checks this
+  first and fails closed: a folder or snapshot that can't be made private is neither shown, summarized nor written to. The snapshot includes the day / week / month
   chart datasets (top 8 series per split plus "Other"). Session titles are
   derived from small metadata files next to each session (Copilot CLI `workspace.yaml`, VS Code
   `workspace.json`, Claude worktree folder names) — transcripts are never read by the canvas.

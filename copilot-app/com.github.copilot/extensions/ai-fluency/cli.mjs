@@ -5,13 +5,14 @@ const PACKAGE = "@rajbos/ai-engineering-fluency";
 const GLOBAL_BIN = "ai-engineering-fluency";
 const STDERR_TAIL_BYTES = 4096;
 export const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
+export const PROBE_TIMEOUT_MS = 30 * 1000;
 export const KILL_GRACE_MS = 5000;
 const IS_WINDOWS = process.platform === "win32";
 
 // Commands are fixed strings (no user input), so running through the shell is
 // safe and lets Windows resolve the npm `.cmd` shims. On POSIX the shell gets its
 // own process group, so a timeout can stop everything it started (npx, node).
-function run(command, { spawnImpl = spawn, killImpl = killTree, timeoutMs = DEFAULT_TIMEOUT_MS, graceMs = KILL_GRACE_MS, onSpawn } = {}) {
+function run(command, { spawnImpl = spawn, killImpl = killTree, timeoutMs = DEFAULT_TIMEOUT_MS, graceMs = KILL_GRACE_MS, onSpawn, label = "CLI" } = {}) {
     return new Promise((resolve, reject) => {
         const child = spawnImpl(command, {
             shell: true,
@@ -35,7 +36,7 @@ function run(command, { spawnImpl = spawn, killImpl = killTree, timeoutMs = DEFA
         };
         const timer = setTimeout(() => {
             const seconds = Math.round(timeoutMs / 1000);
-            timeoutError = new Error(`CLI timed out after ${seconds >= 60 ? `${Math.round(seconds / 60)} minutes` : `${seconds} seconds`}`);
+            timeoutError = new Error(`${label} timed out after ${seconds >= 60 ? `${Math.round(seconds / 60)} minutes` : `${seconds} seconds`}`);
             timeoutError.timedOut = true; // the tree may outlive the kill; the refresher lets its lock expire instead of releasing it
             killImpl(child, { graceMs });
             // A descendant that survives the kill can hold stdout/stderr open, so `close` might never fire.
@@ -91,16 +92,22 @@ function lastLine(text) {
     return text.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? "";
 }
 
-/** Prefer the global install; fall back to npx when it is missing. */
-export async function resolveCli(options = {}) {
+/**
+ * Prefer the global install; fall back to npx when it is missing or reports no version. A probe that times out is an
+ * error instead: its process tree may still be running, and starting npx next to it would overlap two CLI runs, so the
+ * refresher keeps its lock until it expires.
+ */
+export async function resolveCli({ probeTimeoutMs = PROBE_TIMEOUT_MS, ...options } = {}) {
+    const probe = `${GLOBAL_BIN} --version`;
     try {
-        const { code, stdout } = await run(`${GLOBAL_BIN} --version`, { ...options, timeoutMs: 30_000 });
+        const { code, stdout } = await run(probe, { ...options, timeoutMs: probeTimeoutMs, label: `\`${probe}\`` });
         const version = lastLine(stdout);
         if (code === 0 && /^\d+\.\d+\.\d+/.test(version)) {
             return { command: GLOBAL_BIN, version, source: "global" };
         }
-    } catch {
-        // fall through to npx
+    } catch (error) {
+        if (error?.timedOut) throw error;
+        // not installed (or not startable): fall through to npx
     }
     return { command: `npx -y ${PACKAGE}@latest`, version: null, source: "npx" };
 }

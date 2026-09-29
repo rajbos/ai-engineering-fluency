@@ -117,6 +117,27 @@ test("falls back to npx when the global install is missing", async () => {
     assert.match((await resolveCli({ spawnImpl: erroring.spawnImpl })).command, /^npx -y @rajbos\/ai-engineering-fluency@latest$/);
 });
 
+test("a global probe that times out fails the run instead of starting npx next to it", async () => {
+    const probe = new EventEmitter();
+    probe.stdout = new PassThrough();
+    probe.stderr = new PassThrough();
+    probe.pid = 4244;
+    probe.exitCode = null;
+    const commands = [];
+    const error = await runFluencyCli({
+        spawnImpl: (command) => (commands.push(command), probe), // hangs until killed
+        killImpl: () => setImmediate(() => probe.emit("close", null)),
+        probeTimeoutMs: 20,
+        graceMs: 1000,
+    }).then(
+        () => assert.fail("must reject"),
+        (e) => e,
+    );
+    assert.match(error.message, /^`ai-engineering-fluency --version` timed out/);
+    assert.equal(error.timedOut, true, "so the refresher keeps its lock until it expires");
+    assert.deepEqual(commands, ["ai-engineering-fluency --version"], "no npx run was started");
+});
+
 test("runs `all --json` and parses output with a BOM and leading noise", async () => {
     const { spawnImpl, calls } = fakeSpawn({
         "ai-engineering-fluency --version": { stdout: "0.6.1" },

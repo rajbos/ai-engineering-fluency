@@ -179,7 +179,7 @@ A manual copy does not update itself; the plugin install is the recommended rout
 | What | Where |
 |---|---|
 | Plugin code | Managed by Copilot under `~/.copilot/installed-plugins/` — don't edit it there. |
-| Cached snapshot | `$COPILOT_HOME/extensions/ai-fluency/artifacts/snapshot.json` (`COPILOT_HOME` defaults to `~/.copilot`). On macOS and Linux the `artifacts/` folder is owner-only (`0700`) and the snapshot `0600`, because it contains session titles; the canvas also tightens folders written by older versions. On Windows your user profile's permissions apply. |
+| Cached snapshot | `$COPILOT_HOME/extensions/ai-fluency/artifacts/snapshot.json` (`COPILOT_HOME` defaults to `~/.copilot`). On macOS and Linux the `artifacts/` folder is owner-only (`0700`) and the snapshot `0600`, because it contains session titles; the canvas also tightens folders written by older versions. If it can't (for example, the folder belongs to another user), the canvas refuses to read or write it and shows an error instead. On Windows your user profile's permissions apply. |
 | Refresh locks | `refresh.lock.<n>` files (plus a `.done` marker once a run finishes) in the same folder. Only the newest one is kept; older ones are cleaned up by the next run. |
 
 Delete the `artifacts/` folder to reset the canvas; the next open runs a full refresh again.
@@ -193,6 +193,8 @@ Delete the `artifacts/` folder to reset the canvas; the next open runs a full re
 | The canvas stays on "refreshing" for minutes | Expected on the first run: every local session log is parsed. Install the CLI globally (`npm install -g @rajbos/ai-engineering-fluency`) to skip the `npx` download on each run. A run is stopped after 20 minutes, including any `npx`/`node` processes it started; the next refresh then waits a couple of minutes so a run that is still exiting can't overlap it. |
 | Refresh fails with an `npx`/`node` error | Install Node.js 22+ and make sure `node` and `npx` are on the `PATH` the Copilot app sees (restart the app after installing). Behind a proxy, `npx` needs access to the npm registry, or install the CLI globally. |
 | "Another Copilot session's refresh ended without new stats" | A different session was already running the CLI, and its run failed or was stopped (for example, that session was closed) before it wrote a snapshot. The last snapshot stays on screen; use **Refresh** to run it again from this session. |
+| "The stats folder can't be made private to your user account" | macOS/Linux only: the `artifacts/` folder (or the `snapshot.json` in it) belongs to another user or can't be set to owner-only, so the canvas won't show or store session data there. Make it yours (`chown`) with mode `700`, or delete the folder; the canvas picks it up again on its own once it is private. |
+| "`ai-engineering-fluency --version` timed out" | The global install did not answer within 30 seconds. The canvas does not fall back to `npx` then, because the stuck process might still be running next to it; like any timed-out run, it holds off the next refresh until that run's lock expires (about 20 minutes). Check that `ai-engineering-fluency --version` works in a terminal, or uninstall the global package to use `npx`. |
 | Numbers look different from the VS Code extension | Both read the same logs, but the canvas shows the snapshot from its last refresh — check "Updated … ago" at the top of the canvas and use **Refresh**. See the [CLI docs](../cli/README.md) for what is counted. |
 
 ## Versioning and releases

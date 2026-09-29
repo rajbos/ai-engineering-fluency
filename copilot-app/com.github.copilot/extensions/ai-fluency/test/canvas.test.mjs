@@ -151,6 +151,17 @@ test("opening a panel starts its server, watches the snapshot and refreshes a mi
     assert.equal(refresher.watching, false);
 });
 
+test("a failure in the refresh started on open becomes an error status and a session warning", async (t) => {
+    const { definition, refresher, logs } = await setup(t);
+    refresher.maybeRefresh = async () => {
+        throw new Error("EACCES: permission denied, scandir");
+    };
+    await definition.open({ instanceId: "a" });
+    await until(() => refresher.state().status.state === "error");
+    assert.match(refresher.state().status.error, /EACCES/);
+    assert.match(logs.at(-1).message, /EACCES/);
+});
+
 test("SIGTERM closes every panel, stops the refresher and exits", async (t) => {
     const { definition, processRef, refresher, servers } = await setup(t);
     await definition.open({ instanceId: "a" });

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Refresher } from "../refresher.mjs";
-import { buildSnapshot, readSnapshot, writeSnapshot } from "../store.mjs";
+import { buildSnapshot, readSnapshot, readSnapshotFile, writeSnapshot } from "../store.mjs";
 import { samplePayload } from "./fixtures.mjs";
 
 async function tempDir(t) {
@@ -371,6 +371,57 @@ test("a slow read that started before the snapshot was deleted cannot bring it b
     assert.equal(await latest, true);
     assert.equal(await slow, false);
     assert.equal(refresher.snapshot, null);
+});
+
+test("snapshot reads fail closed while the folder can't be made private, and recover once it can", async (t) => {
+    const dir = await tempDir(t);
+    await writeSnapshot(sampleAt("2026-01-01T00:00:00.000Z"), dir);
+    let unsafe = null;
+    let runs = 0;
+    const refresher = new Refresher({
+        dir,
+        pollMs: 60_000,
+        readSnapshot: async (d) => (unsafe ? { snapshot: null, missing: false, unsafe } : readSnapshotFile(d)),
+        runCli: async () => (runs++, cliResult()),
+    });
+    refresher.acquire(); // a panel is open, so load() normally reuses its read
+    t.after(() => refresher.release());
+    assert.ok(await refresher.load());
+    const changes = [];
+    refresher.on("change", (s) => changes.push([s.snapshot?.fetchedAt ?? null, s.status.state, s.status.error]));
+
+    unsafe = "not private";
+    await refresher.onSnapshotFileChanged(); // the file watcher path
+    assert.equal(refresher.snapshot, null, "the snapshot on show is dropped");
+    assert.equal(await refresher.load(), null, "get_summary gets nothing either");
+    assert.deepEqual(changes, [[null, "error", "not private"]], "reported once");
+    assert.equal((await refresher.refresh()).status.error, "not private");
+    assert.equal(runs, 0, "no CLI run writes session data into that folder");
+    assert.deepEqual(await listDir(dir), ["snapshot.json"], "not even a lock file");
+
+    unsafe = null;
+    assert.equal((await refresher.load()).fetchedAt, "2026-01-01T00:00:00.000Z", "fixing the folder takes effect without a file change");
+    assert.deepEqual([refresher.state().status.state, refresher.state().status.error], ["idle", null]);
+});
+
+test("a failing periodic check becomes an error status, not an unhandled rejection", async (t) => {
+    const dir = await tempDir(t);
+    const refresher = new Refresher({ dir, runCli: async () => assert.fail("must not run") });
+    refresher.checkOtherSession = async () => {
+        throw Object.assign(new Error("EACCES: permission denied, scandir"), { code: "EACCES" });
+    };
+    const failed = new Promise((resolve) => refresher.once("change", resolve));
+    refresher.tick();
+    const { status } = await failed;
+    assert.equal(status.state, "error");
+    assert.match(status.error, /EACCES/);
+
+    await refresher.dispose();
+    const afterDispose = [];
+    refresher.on("change", (s) => afterDispose.push(s));
+    refresher.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(afterDispose, [], "nothing is reported after dispose");
 });
 
 test("dispose stops the run, waits for it and publishes nothing afterwards", async (t) => {

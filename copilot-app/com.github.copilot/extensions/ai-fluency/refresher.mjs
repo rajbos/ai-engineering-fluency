@@ -4,7 +4,7 @@ import { unwatchFile, watchFile } from "node:fs";
 import { link, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runFluencyCli, DEFAULT_TIMEOUT_MS, KILL_GRACE_MS, killTree } from "./cli.mjs";
-import { artifactsDir, buildSnapshot, ensurePrivateDir, PRIVATE_FILE_MODE, readSnapshotFile, snapshotPath, writeSnapshot } from "./store.mjs";
+import { artifactsDir, buildSnapshot, ensurePrivateDir, PRIVATE_FILE_MODE, readPrivateSnapshotFile, snapshotPath, writeSnapshot } from "./store.mjs";
 
 export const AUTO_REFRESH_MS = 30 * 60 * 1000;
 export const OPEN_REFRESH_MIN_AGE_MS = 5 * 60 * 1000;
@@ -63,7 +63,7 @@ export class Refresher extends EventEmitter {
         timeoutMs = DEFAULT_TIMEOUT_MS,
         pollMs = 5000,
         disposeWaitMs = DISPOSE_WAIT_MS,
-        readSnapshot = readSnapshotFile,
+        readSnapshot = readPrivateSnapshotFile,
     } = {}) {
         super();
         this.dir = dir;
@@ -80,6 +80,7 @@ export class Refresher extends EventEmitter {
         this.follow = 0;
         this.followBaseline = null;
         this.snapshot = null;
+        this.unsafe = null;
         this.loading = null;
         this.loaded = false;
         this.reads = 0;
@@ -96,13 +97,12 @@ export class Refresher extends EventEmitter {
     /**
      * Reads the snapshot from disk; concurrent callers share one read. While a panel is open the file watcher keeps the
      * snapshot current, so the read is reused; with no panel open nothing watches the file, so every call reads it again.
+     * A folder that was not private is checked again on every call, so fixing its permissions takes effect right away.
      */
     load() {
-        if (!this.loading || (!this.watching && this.loaded)) {
+        if (!this.loading || (this.loaded && (!this.watching || this.unsafe))) {
             this.loaded = false;
-            const loading = ensurePrivateDir(this.dir)
-                .catch(() => {})
-                .then(() => this.readFromDisk());
+            const loading = this.readFromDisk();
             this.loading = loading;
             loading
                 .finally(() => {
@@ -117,7 +117,8 @@ export class Refresher extends EventEmitter {
      * Applies the file on disk: a newer snapshot replaces the one in memory (never an older one, even if file events
      * arrive out of order), and a deleted file clears it (unless a refresh replaced it while reading). An unreadable
      * file keeps the last good copy. When reads overlap, only the latest one is applied, so a slow read that started
-     * before the file was deleted cannot bring it back. Returns true when the in-memory snapshot changed.
+     * before the file was deleted cannot bring it back. Every read first makes sure the folder is private and fails
+     * closed when it cannot be. Returns true when the in-memory snapshot changed.
      */
     readFromDisk() {
         const read = this.applyDiskRead(++this.reads);
@@ -127,9 +128,11 @@ export class Refresher extends EventEmitter {
 
     async applyDiskRead(read) {
         const before = this.snapshot;
-        const { snapshot, missing } = await this.readSnapshot(this.dir);
+        const { snapshot, missing, unsafe } = await this.readSnapshot(this.dir);
         // Superseded: wait for the latest read so callers still see the current state once this resolves.
         if (read !== this.reads) return this.latestRead.then(() => false, () => false);
+        if (unsafe) return this.refuseSnapshot(unsafe);
+        if (this.unsafe) this.privacyRestored();
         if (missing) {
             if (!before || this.snapshot !== before) return false;
             this.snapshot = null;
@@ -138,6 +141,22 @@ export class Refresher extends EventEmitter {
         if (!isNewer(snapshot, this.snapshot)) return false;
         this.snapshot = snapshot;
         return true;
+    }
+
+    /** Fail closed: a snapshot that other users may be able to read is neither shown nor summarized. */
+    refuseSnapshot(reason) {
+        const known = this.unsafe === reason && !this.snapshot && this.status.state === "error" && this.status.error === reason;
+        this.unsafe = reason;
+        this.snapshot = null;
+        if (!known) this.fail(reason);
+        return false; // fail() already announced the change
+    }
+
+    /** The folder is private again: clear the error it caused, so the snapshot is used (and refreshed) as normal. */
+    privacyRestored() {
+        const reason = this.unsafe;
+        this.unsafe = null;
+        if (this.status.state === "error" && this.status.error === reason) this.setStatus({ state: "idle", error: null });
     }
 
     state() {
@@ -152,6 +171,19 @@ export class Refresher extends EventEmitter {
     setStatus(patch) {
         this.status = { ...this.status, ...patch };
         this.emit("change", this.state());
+    }
+
+    fail(error) {
+        this.setStatus({ state: "error", finishedAt: new Date(this.now()).toISOString(), error, byOtherSession: false });
+    }
+
+    /** Fire-and-forget work (file watcher, timer, canvas open): a failure becomes the error status, never an unhandled rejection. */
+    background(task) {
+        void Promise.resolve()
+            .then(task)
+            .catch((error) => {
+                if (!this.disposed) this.fail(error?.message ?? String(error));
+            });
     }
 
     staleAfterMs() {
@@ -311,7 +343,7 @@ export class Refresher extends EventEmitter {
         if (this.inflight) return this.inflight;
         this.inflight = this.doRefresh()
             .catch((error) => {
-                this.setStatus({ state: "error", finishedAt: new Date(this.now()).toISOString(), error: error.message });
+                this.fail(error.message);
                 return this.state();
             })
             .finally(() => {
@@ -322,10 +354,10 @@ export class Refresher extends EventEmitter {
 
     async doRefresh() {
         await this.load();
+        if (this.unsafe) throw new Error(this.unsafe); // never write session data into a folder that isn't private
         const other = await this.otherSessionLock();
         if (other && other.token && other.token === this.keptToken) {
-            const error = "The last CLI run timed out and may still be stopping. Try again in a few minutes.";
-            this.setStatus({ state: "error", finishedAt: new Date(this.now()).toISOString(), error, byOtherSession: false });
+            this.fail("The last CLI run timed out and may still be stopping. Try again in a few minutes.");
             return this.state();
         }
         if (other) return this.followOtherSession(other.startedAt);
@@ -348,7 +380,7 @@ export class Refresher extends EventEmitter {
             // A timed-out run's processes may outlive the kill: let its lock expire rather than free it right away.
             keep = error?.timedOut === true;
             if (keep) this.keptToken = this.lockToken;
-            this.setStatus({ state: "error", finishedAt: new Date(this.now()).toISOString(), error: error.message });
+            this.fail(error.message);
         } finally {
             this.child = null;
             await this.releaseLock({ keep });
@@ -418,7 +450,7 @@ export class Refresher extends EventEmitter {
         if (this.otherSessionDelivered()) {
             this.setStatus({ state: "idle", finishedAt: this.snapshot.fetchedAt, error: null, byOtherSession: false });
         } else {
-            this.setStatus({ state: "error", finishedAt: new Date(this.now()).toISOString(), error: OTHER_SESSION_FAILED, byOtherSession: false });
+            this.fail(OTHER_SESSION_FAILED);
         }
     }
 
@@ -428,12 +460,18 @@ export class Refresher extends EventEmitter {
         if (this.users > 1) return;
         // Nothing watched the file while no panel was open, so the next load() reads it again.
         this.loading = null;
-        watchFile(snapshotPath(this.dir), { interval: this.pollMs }, () => void this.onSnapshotFileChanged());
+        watchFile(snapshotPath(this.dir), { interval: this.pollMs }, () => this.background(() => this.onSnapshotFileChanged()));
         this.watching = true;
-        this.timer = setInterval(() => {
-            void this.checkOtherSession().then(() => this.maybeRefresh(AUTO_REFRESH_MS));
-        }, TICK_MS);
+        this.timer = setInterval(() => this.tick(), TICK_MS);
         this.timer.unref?.();
+    }
+
+    /** The periodic check while a panel is open: settle a wait for another session, then auto-refresh when due. */
+    tick() {
+        this.background(async () => {
+            await this.checkOtherSession();
+            await this.maybeRefresh(AUTO_REFRESH_MS);
+        });
     }
 
     release() {

@@ -67,7 +67,7 @@ export function fluencyCanvas({ refresher, panels, CanvasError }) {
         ],
         open: async ({ instanceId }) => {
             const entry = await panels.open(instanceId);
-            void refresher.maybeRefresh(OPEN_REFRESH_MIN_AGE_MS);
+            refresher.background(() => refresher.maybeRefresh(OPEN_REFRESH_MIN_AGE_MS));
             return { title: "AI fluency", url: entry.url };
         },
         onClose: ({ instanceId }) => panels.close(instanceId),
