@@ -4,6 +4,17 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-09-29
+
+### Features
+- The AI Readiness tab is easier to scan across many repositories: each repository is now a collapsed row showing its confirmed stage, per-stage verdict dots and missing/unchecked/anti-pattern counts, and expands to the full detail. You can tick missing controls and anti-patterns and draft an agent-mode Copilot Chat prompt to address them; nothing is sent until you press Enter (#2226)
+
+### Bug Fixes
+- MCP tool ids that differ only by server prefix (for example `mcp__Claude_Browser__…` vs `mcp__claude-in-chrome__…`) now resolve to the same friendly name, and MCP server display names are no longer reported as unknown tools (#2225)
+
+### Chores
+- Friendly tool names from community issues (#2224)
+
 ## [0.18.2] - 2026-09-28
 
 ### Changed
