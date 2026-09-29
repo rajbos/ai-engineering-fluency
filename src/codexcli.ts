@@ -64,8 +64,11 @@ type DbCacheEntry = { db: SqlDatabase; mtimeMs: number; size: number };
 const ROLLOUT_FILE_RE = /^rollout-.*\.jsonl$/i;
 /** Extracts the thread/session uuid from a rollout filename. */
 const ROLLOUT_UUID_RE = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
-/** Matches virtual thread paths that point into a state_<N>.sqlite DB. */
-const STATE_DB_VIRTUAL_RE = /\/state_\d+\.sqlite#/i;
+/**
+ * Matches virtual thread paths that point into a state_<N>.sqlite DB. The DB name may
+ * start the path: with CODEX_HOME='.' path.join drops the './', giving `state_<N>.sqlite#<id>`.
+ */
+const STATE_DB_VIRTUAL_RE = /(?:^|\/)state_\d+\.sqlite#/i;
 /** Newest schema generation observed at implementation time (used only as a diagnostics fallback). */
 const DEFAULT_STATE_DB_NAME = 'state_5.sqlite';
 /** System-injected user messages start with these XML-ish tags and are not real user turns. */

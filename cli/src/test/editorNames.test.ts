@@ -146,6 +146,11 @@ for (const home of ['.', '/']) {
 				assertBothDetectors(p, 'Codex CLI');
 				assert.equal(codex.isCodexCliSessionFile(p), true, `Codex handles ${p}`);
 			}
+			// The thread path must also route to the SQLite DB, not the rollout-JSONL path.
+			assert.equal(codex.isVirtualThreadPath(thread), true, `thread path ${thread}`);
+			assert.equal(codex.getBackingPath(thread), path.join(codex.getCodexHome(), 'state_5.sqlite'));
+			assert.equal(codex.getThreadId(thread), 'thread-1');
+			assert.equal(codex.isVirtualThreadPath(rollout), false);
 			// A rollout-named file outside sessions/ or archived_sessions/ is not Codex's.
 			const stray = path.join(codex.getCodexHome(), 'project', 'rollout-not-codex.jsonl');
 			assert.equal(codex.isCodexCliSessionFile(stray), false, `Codex must not handle ${stray}`);
