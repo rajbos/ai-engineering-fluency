@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
@@ -10,6 +10,21 @@ export const PERIODS = ["today", "last30Days", "month", "lastMonth"];
 export function artifactsDir() {
     const home = process.env.COPILOT_HOME || join(homedir(), ".copilot");
     return join(home, "extensions", "ai-fluency", "artifacts");
+}
+
+export const PRIVATE_DIR_MODE = 0o700;
+export const PRIVATE_FILE_MODE = 0o600;
+
+/**
+ * The snapshot holds session titles (often the first prompt) and project names, so the artifacts folder and the
+ * snapshot in it are owner-only. This also tightens folders and snapshots written by older versions. POSIX modes do
+ * not apply on Windows, where the user profile's ACLs already restrict `~/.copilot`.
+ */
+export async function ensurePrivateDir(dir = artifactsDir()) {
+    await mkdir(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
+    if (process.platform === "win32") return;
+    await chmod(dir, PRIVATE_DIR_MODE);
+    await chmod(snapshotPath(dir), PRIVATE_FILE_MODE).catch(() => {});
 }
 
 const num = (value) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
@@ -269,17 +284,26 @@ export async function readSnapshot(dir = artifactsDir()) {
 }
 
 export async function writeSnapshot(snapshot, dir = artifactsDir()) {
-    await mkdir(dir, { recursive: true });
+    await ensurePrivateDir(dir);
     const target = snapshotPath(dir);
-    const temp = `${target}.${process.pid}.tmp`;
-    await writeFile(temp, JSON.stringify(snapshot), "utf8");
-    await rename(temp, target);
+    // Unique name + exclusive create, so a leftover or planted file is never reused; rename keeps the owner-only mode.
+    const temp = `${target}.${randomUUID()}.tmp`;
+    try {
+        await writeFile(temp, JSON.stringify(snapshot), { encoding: "utf8", flag: "wx", mode: PRIVATE_FILE_MODE });
+        await rename(temp, target);
+    } catch (error) {
+        await unlink(temp).catch(() => {});
+        throw error;
+    }
 }
 
 const round = (value, digits = 2) => Math.round(value * 10 ** digits) / 10 ** digits;
 
-/** Compact, agent-friendly view of a snapshot. */
-export function summarize(snapshot, { topSessions = 5 } = {}) {
+/**
+ * Compact, agent-friendly view of a snapshot. Whatever this returns is sent to the model as a tool result, so session
+ * titles and project names are only included when the caller asks for them (`topSessions` > 0).
+ */
+export function summarize(snapshot, { topSessions = 0 } = {}) {
     if (!snapshot) return { available: false, message: "No snapshot yet — a refresh is needed (it takes several minutes)." };
     const period = (p) => ({
         tokens: p.tokens,

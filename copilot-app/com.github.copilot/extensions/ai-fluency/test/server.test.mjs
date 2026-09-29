@@ -87,3 +87,31 @@ test("streams state changes over server-sent events", async (t) => {
     await readUntil(/"state":"running"/);
     assert.match(text, /event: state/);
 });
+
+test("the first event carries the snapshot even when the disk read is still in progress", async (t) => {
+    const refresher = fakeRefresher();
+    const snapshot = refresher.current.snapshot;
+    refresher.current = { snapshot: null, status: { state: "idle" } };
+    refresher.load = () =>
+        new Promise((resolve) =>
+            setTimeout(() => {
+                refresher.current = { ...refresher.current, snapshot };
+                resolve(snapshot);
+            }, 30),
+        );
+    const { close, url } = await startServer({ refresher });
+    t.after(close);
+    const controller = new AbortController();
+    t.after(() => controller.abort());
+    const res = await fetch(new URL("/events", url), { signal: controller.signal });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    while (!/\n\n/.test(text)) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value);
+    }
+    const first = JSON.parse(text.split("\n").find((line) => line.startsWith("data: ")).slice(6));
+    assert.equal(first.snapshot?.fetchedAt, "2026-01-01T00:00:00.000Z");
+});

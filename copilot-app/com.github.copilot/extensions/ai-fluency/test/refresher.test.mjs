@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -109,4 +109,58 @@ test("reclaims a stale lock left by a dead process", async (t) => {
     const { status } = await refresher.refresh();
     assert.equal(runs, 1);
     assert.equal(status.state, "idle");
+    assert.deepEqual(await readdir(dir), ["snapshot.json"], "no lock, temp or stale files left behind");
+});
+
+test("does not delete a fresh lock that replaced the stale one after it was checked", async (t) => {
+    const dir = await tempDir(t);
+    const lockPath = join(dir, "refresh.lock");
+    const stale = { pid: 2 ** 22 + 12345, startedAt: new Date().toISOString() };
+    const fresh = { pid: process.ppid, token: "other-session", startedAt: new Date().toISOString() };
+    await writeFile(lockPath, JSON.stringify(stale));
+
+    // Another session removes the stale lock and writes its own between our stale check and our cleanup.
+    class RacingRefresher extends Refresher {
+        lockReads = 0;
+        async readLock(path = this.lockPath) {
+            const lock = await super.readLock(path);
+            if (path === this.lockPath && ++this.lockReads === 2) await writeFile(lockPath, JSON.stringify(fresh));
+            return lock;
+        }
+    }
+    let runs = 0;
+    const refresher = new RacingRefresher({ dir, runCli: async () => (runs++, { payload: samplePayload(), cli: null }) });
+    const { status } = await refresher.refresh();
+    assert.equal(runs, 0, "backs off instead of running a second CLI");
+    assert.equal(status.byOtherSession, true);
+    assert.deepEqual(JSON.parse(await readFile(lockPath, "utf8")), fresh, "the other session's lock is intact");
+    assert.deepEqual(await readdir(dir), ["refresh.lock"]);
+});
+
+test("only releases its own lock", async (t) => {
+    const dir = await tempDir(t);
+    const lockPath = join(dir, "refresh.lock");
+    const other = { pid: process.ppid, token: "other-session", startedAt: new Date().toISOString() };
+    const refresher = new Refresher({
+        dir,
+        runCli: async () => {
+            assert.ok(JSON.parse(await readFile(lockPath, "utf8")).token, "our lock carries a token");
+            await writeFile(lockPath, JSON.stringify(other)); // ours was reclaimed by another session
+            return { payload: samplePayload(), cli: null };
+        },
+    });
+    await refresher.refresh();
+    assert.deepEqual(JSON.parse(await readFile(lockPath, "utf8")), other);
+});
+
+test("concurrent loads read the snapshot once and never overwrite a newer one", async (t) => {
+    const dir = await tempDir(t);
+    await writeSnapshot(buildSnapshot(samplePayload(), { fetchedAt: "2026-01-01T00:00:00.000Z", describe: () => ({ label: null, project: null }) }), dir);
+    const refresher = new Refresher({ dir, runCli: async () => ({ payload: samplePayload(), cli: null }) });
+    const first = refresher.load();
+    const shared = refresher.loading;
+    refresher.load();
+    assert.equal(refresher.loading, shared, "concurrent callers share one read");
+    refresher.snapshot = { fetchedAt: "2026-03-03T00:00:00.000Z" }; // a refresh landed while the file was being read
+    assert.equal((await first).fetchedAt, "2026-03-03T00:00:00.000Z");
 });

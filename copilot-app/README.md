@@ -52,14 +52,21 @@ CI runs the same command in [`.github/workflows/copilot-app.yml`](../.github/wor
 
 ## Trying a branch before it is merged
 
-Use an isolated config directory so nothing is installed into your real `~/.copilot`:
+Use a fresh, isolated config directory so nothing is installed into your real `~/.copilot`. The
+`finally` block restores your previous `COPILOT_HOME` and deletes only the folder this run created:
 
 ```powershell
-$env:COPILOT_HOME = Join-Path $env:TEMP "copilot-plugin-test"
-copilot plugin marketplace add rajbos/ai-engineering-fluency#<branch>
-copilot plugin install ai-fluency-canvas@ai-engineering-fluency
-copilot plugin list
-Remove-Item -Recurse -Force $env:COPILOT_HOME
+$testHome = Join-Path ([IO.Path]::GetTempPath()) "copilot-plugin-test-$([guid]::NewGuid())"
+$previousHome = $env:COPILOT_HOME
+try {
+    $env:COPILOT_HOME = $testHome
+    copilot plugin marketplace add rajbos/ai-engineering-fluency#<branch>
+    copilot plugin install ai-fluency-canvas@ai-engineering-fluency
+    copilot plugin list
+} finally {
+    $env:COPILOT_HOME = $previousHome
+    Remove-Item -LiteralPath $testHome -Recurse -Force -ErrorAction SilentlyContinue
+}
 ```
 
 To try it in the Copilot app itself, install into your real config instead (after removing any

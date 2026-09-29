@@ -35,6 +35,8 @@ const COLUMNS = [
     ["lastMonth", "📆", "Previous Month"],
     ["projected", "🌍", "Projected Year"],
 ];
+// Narrow panels show one stats column at a time, so the picker offers every column, including the projection.
+const COLUMN_PICKER = [...PERIODS, ["projected", "Projected year"]];
 const PROJECT = 365 / 30;
 const RANGES = [
     ["today", "Today"],
@@ -74,7 +76,7 @@ const storedFlag = (key) => localStorage.getItem(`ai-fluency.${key}`) === "true"
 const PERSISTED = ["tab", "period", "range", "sort", "chartPeriod", "chartMetric", "chartSplit", "chartRolling", "editorCardsCollapsed"];
 const ui = {
     tab: stored("tab", TABS, "overview"),
-    period: stored("period", PERIODS.map((p) => p[0]), "today"),
+    period: stored("period", COLUMN_PICKER.map((p) => p[0]), "today"),
     range: stored("range", RANGES.map((r) => r[0]), "today"),
     sort: stored("sort", SORTS.map((s) => s[0]), "recent"),
     query: "",
@@ -338,13 +340,15 @@ function usageRows(periods, kind) {
     const totals = Object.fromEntries(PERIOD_KEYS.map((k) => [k, sum(periods[k][kind].map((item) => item.tokens))]));
     const names = new Set(PERIOD_KEYS.flatMap((k) => periods[k][kind].filter((item) => item.tokens > 0).map((item) => item.name)));
     const sub = (item, total) => (kind === "editors" ? `${pct(item?.tokens || 0, total)} · ${int(item?.sessions)} sessions` : pct(item?.tokens || 0, total));
+    // The projected year is extrapolated from the last 30 days, so it sorts like that column.
+    const sortBy = ui.period === "projected" ? "last30Days" : ui.period;
     return [...names]
         .map((name) => {
             const last30 = find("last30Days", name);
             return {
                 icon: kind === "editors" ? editorIcon(name) : null,
                 label: name,
-                order: [find(ui.period, name)?.tokens || 0, last30?.tokens || 0],
+                order: [find(sortBy, name)?.tokens || 0, last30?.tokens || 0],
                 cells: {
                     ...Object.fromEntries(PERIOD_KEYS.map((k) => [k, { main: compact(find(k, name)?.tokens || 0), sub: sub(find(k, name), totals[k]) }])),
                     projected: { main: compact((last30?.tokens || 0) * PROJECT), sub: kind === "editors" ? `${int((last30?.sessions || 0) * PROJECT)} sessions` : null },
@@ -364,7 +368,7 @@ function renderOverview(snapshot) {
     const editors = usageRows(periods, "editors");
     const shownModels = ui.modelsExpanded ? models : models.slice(0, 8);
     return [
-        h("div", { class: "period-picker" }, segmented("Period", PERIODS, ui.period, (v) => update({ period: v }))),
+        h("div", { class: "period-picker" }, segmented("Period", COLUMN_PICKER, ui.period, (v) => update({ period: v }))),
         section("📊 Key Metrics", statsTable("📊 Metric", metricGroups(periods))),
         section("💻 Usage by Editor", editors.length ? statsTable("📝 Editor", [{ rows: editors }]) : empty("No editor activity yet.")),
         section(
@@ -741,6 +745,9 @@ function chartControls(charts, { period, periodKey, metric, split, meta }) {
     const pick = (patch) => update({ ...patch, hiddenSeries: new Set() });
     const group = (label, buttons) => h("div", { class: "control-group", role: "group", "aria-label": label.replace(/:$/, "") }, h("span", { class: "control-label" }, label), buttons);
     const hasSplit = (s) => s === "total" || Boolean(splitSeries(period, metric, s));
+    // The CLI does not send repository datasets yet; only offer that split once some period has them.
+    const hasRepositories = Object.values(charts).some((p) => p && Object.values(p.splits ?? {}).some((bySplit) => bySplit.repository));
+    const splits = SPLITS.filter(([s]) => s !== "repository" || hasRepositories);
     return h(
         "div",
         { class: "chart-controls" },
@@ -762,7 +769,7 @@ function chartControls(charts, { period, periodKey, metric, split, meta }) {
             { class: "chart-controls-row" },
             group(
                 "Split:",
-                SPLITS.map(([s, label]) =>
+                splits.map(([s, label]) =>
                     toggle(`split:${s}`, label, s === split, () => pick({ chartSplit: s }), hasSplit(s) ? { title: s === "total" ? null : "Click a name in the legend to hide its data" } : { disabled: true, title: `No per-${s} ${metric} data from the CLI` }),
                 ),
             ),
@@ -774,9 +781,15 @@ function renderChart(snapshot) {
     if (!snapshot.charts?.day) return [empty(snapshot.charts ? "No chart data in this snapshot." : "Chart data arrives with the next refresh.")];
     const selection = chartSelection(snapshot.charts);
     const spec = chartSpec(selection, snapshot.fetchedAt);
+    // The CLI prices the Total at Copilot AI Credit rates but each editor/provider series at that tool's own rates,
+    // so split cost bars need not add up to the Total. Say so rather than silently switching pricing bases.
+    const costBasisNote =
+        selection.metric === "cost" &&
+        selection.split !== "total" &&
+        h("p", { class: "panel-note" }, "Split cost bars price GitHub Copilot usage at AI Credit rates and other tools and providers at their API list prices, so they can differ from the Total, which prices everything at Copilot AI Credit (UBB) rates.");
     return [
         section("📊 Summary", chartSummary(selection), editorCards(selection.period)),
-        section("📈 Charts", h("div", { class: "chart-shell" }, chartControls(snapshot.charts, selection), seriesChart(spec, chartTitle(selection)))),
+        section("📈 Charts", h("div", { class: "chart-shell" }, chartControls(snapshot.charts, selection), seriesChart(spec, chartTitle(selection))), costBasisNote),
         h("p", { class: "panel-note" }, `${selection.meta.footer} (${selection.meta.agg}) · Last updated: ${new Date(snapshot.fetchedAt).toLocaleString()}`),
     ];
 }

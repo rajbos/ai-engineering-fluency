@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { buildSnapshot, describeSession, readSnapshot, summarize, topSeries, writeSnapshot } from "../store.mjs";
+import { buildSnapshot, describeSession, ensurePrivateDir, readSnapshot, summarize, topSeries, writeSnapshot } from "../store.mjs";
 import { samplePayload } from "./fixtures.mjs";
 
 const noDescribe = () => ({ label: null, project: null });
@@ -103,11 +103,51 @@ test("snapshots round-trip through disk and ignore other schema versions", async
 
 test("summarize returns a compact agent-facing view", () => {
     assert.equal(summarize(null).available, false);
-    const summary = summarize(buildSnapshot(samplePayload(), { describe: noDescribe }), { topSessions: 1 });
+    const snapshot = buildSnapshot(samplePayload(), { describe: noDescribe });
+    const summary = summarize(snapshot, { topSessions: 1 });
     assert.equal(summary.available, true);
     assert.equal(summary.periods.today.estimatedApiCostUsd, 1.25);
     assert.equal(summary.periods.today.topModels.length, 2);
     assert.equal(summary.fluency.overall, "Stage 3: AI Collaborator");
     assert.equal(summary.topSessionsLast7Days.length, 1);
     assert.equal(summary.topSessionsLast7Days[0].label, "Editor A a");
+});
+
+test("summarize leaves session titles and projects out unless asked", () => {
+    const snapshot = buildSnapshot(samplePayload(), { describe: () => ({ label: "secret prompt", project: "private-repo" }) });
+    const summary = summarize(snapshot);
+    assert.deepEqual(summary.topSessionsLast7Days, []);
+    assert.doesNotMatch(JSON.stringify(summary), /secret prompt|private-repo/);
+    assert.match(JSON.stringify(summarize(snapshot, { topSessions: 5 })), /secret prompt/);
+});
+
+test("snapshots are owner-only on POSIX, including folders from older versions", { skip: process.platform === "win32" && "POSIX modes do not apply on Windows" }, async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "ai-fluency-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const snapshot = buildSnapshot(samplePayload(), { describe: noDescribe });
+    const mode = async (path) => (await stat(path)).mode & 0o777;
+
+    const fresh = join(root, "new", "artifacts");
+    await writeSnapshot(snapshot, fresh);
+    assert.equal(await mode(fresh), 0o700);
+    assert.equal(await mode(join(fresh, "snapshot.json")), 0o600);
+
+    const old = join(root, "old");
+    await mkdir(old, { mode: 0o755 });
+    await chmod(old, 0o755);
+    await writeFile(join(old, "snapshot.json"), "{}", { mode: 0o644 });
+    await chmod(join(old, "snapshot.json"), 0o644);
+    await ensurePrivateDir(old);
+    assert.equal(await mode(old), 0o700, "existing folder is tightened");
+    assert.equal(await mode(join(old, "snapshot.json")), 0o600, "existing snapshot is tightened");
+    await writeSnapshot(snapshot, old);
+    assert.equal(await mode(join(old, "snapshot.json")), 0o600);
+});
+
+test("writeSnapshot leaves no temp files behind", async (t) => {
+    const dir = await mkdtemp(join(tmpdir(), "ai-fluency-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    await writeSnapshot(buildSnapshot(samplePayload(), { describe: noDescribe }), dir);
+    await writeSnapshot(buildSnapshot(samplePayload(), { describe: noDescribe }), dir);
+    assert.deepEqual(await readdir(dir), ["snapshot.json"]);
 });

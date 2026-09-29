@@ -65,10 +65,18 @@ export async function startServer({ refresher, keepAliveMs = 25_000 }) {
                 await refresher.load();
                 json(res, 200, refresher.state());
             } else if (path === "/events") {
+                let gone = false;
+                res.on("close", () => {
+                    gone = true;
+                    clients.delete(res);
+                });
+                // Load first: `open()` starts a refresh without waiting, so the snapshot may not be read yet, and a
+                // snapshot that is already fresh emits no later change to correct an initial `snapshot: null`.
+                await refresher.load();
+                if (gone) return;
                 res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", Connection: "keep-alive", ...SECURITY_HEADERS });
                 res.write(`event: state\ndata: ${JSON.stringify(refresher.state())}\n\n`);
                 clients.add(res);
-                req.on("close", () => clients.delete(res));
             } else if (assets.has(path)) {
                 const [file, contentType] = assets.get(path);
                 send(res, 200, contentType, await readFile(new URL(`./assets/${file}`, import.meta.url)));

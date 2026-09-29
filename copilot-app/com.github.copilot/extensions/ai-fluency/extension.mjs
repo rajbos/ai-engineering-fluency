@@ -40,16 +40,24 @@ session = await joinSession({
                 {
                     name: "get_summary",
                     description:
-                        "Return the latest cached stats: per-period tokens/sessions/cost/CO2, top models, editors, fluency stages with tips, and top sessions of the last 7 days. Does not run the CLI.",
+                        "Return the latest cached stats: per-period tokens/sessions/cost/CO2, top models, editors and fluency stages with tips. Does not run the CLI. " +
+                        "Session titles (often the user's first prompt) and project names are only included when topSessions > 0 — request them only when the user asks about specific sessions.",
                     inputSchema: {
                         type: ["object", "null"],
-                        properties: { topSessions: { type: "integer", minimum: 0, maximum: 25 } },
+                        properties: {
+                            topSessions: {
+                                type: "integer",
+                                minimum: 0,
+                                maximum: 25,
+                                description: "Number of top sessions of the last 7 days (by tokens) to include, with their titles and project names. Default 0.",
+                            },
+                        },
                         additionalProperties: false,
                     },
                     handler: async ({ input }) => {
                         await refresher.load();
                         const { status } = refresher.state();
-                        return { ...summarize(refresher.snapshot, { topSessions: input?.topSessions ?? 5 }), refresh: status };
+                        return { ...summarize(refresher.snapshot, { topSessions: input?.topSessions ?? 0 }), refresh: status };
                     },
                 },
                 {

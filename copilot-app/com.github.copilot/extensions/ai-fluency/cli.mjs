@@ -5,51 +5,80 @@ const PACKAGE = "@rajbos/ai-engineering-fluency";
 const GLOBAL_BIN = "ai-engineering-fluency";
 const STDERR_TAIL_BYTES = 4096;
 export const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
+export const KILL_GRACE_MS = 5000;
+const IS_WINDOWS = process.platform === "win32";
 
 // Commands are fixed strings (no user input), so running through the shell is
-// safe and lets Windows resolve the npm `.cmd` shims.
-function run(command, { spawnImpl = spawn, timeoutMs = DEFAULT_TIMEOUT_MS, onSpawn } = {}) {
+// safe and lets Windows resolve the npm `.cmd` shims. On POSIX the shell gets its
+// own process group, so a timeout can stop everything it started (npx, node).
+function run(command, { spawnImpl = spawn, killImpl = killTree, timeoutMs = DEFAULT_TIMEOUT_MS, graceMs = KILL_GRACE_MS, onSpawn } = {}) {
     return new Promise((resolve, reject) => {
         const child = spawnImpl(command, {
             shell: true,
             windowsHide: true,
+            detached: !IS_WINDOWS,
             cwd: homedir(),
             env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
         });
         onSpawn?.(child);
         const stdout = [];
         let stderr = "";
-        let timedOut = false;
+        let timeoutError = null;
+        let giveUp = null;
+        let settled = false;
+        const settle = (fn, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            clearTimeout(giveUp);
+            fn(value);
+        };
         const timer = setTimeout(() => {
-            timedOut = true;
-            killTree(child);
+            const seconds = Math.round(timeoutMs / 1000);
+            timeoutError = new Error(`CLI timed out after ${seconds >= 60 ? `${Math.round(seconds / 60)} minutes` : `${seconds} seconds`}`);
+            killImpl(child, { graceMs });
+            // A descendant that survives the kill can hold stdout/stderr open, so `close` might never fire.
+            giveUp = setTimeout(() => {
+                child.stdout?.destroy();
+                child.stderr?.destroy();
+                settle(reject, timeoutError);
+            }, graceMs * 2);
         }, timeoutMs);
         child.stdout.on("data", (chunk) => stdout.push(chunk));
         child.stderr.on("data", (chunk) => {
             stderr = (stderr + chunk.toString("utf8")).slice(-STDERR_TAIL_BYTES);
         });
-        child.on("error", (error) => {
-            clearTimeout(timer);
-            reject(error);
-        });
+        child.on("error", (error) => settle(reject, error));
         child.on("close", (code) => {
-            clearTimeout(timer);
-            if (timedOut) {
-                reject(new Error(`CLI timed out after ${Math.round(timeoutMs / 60000)} minutes`));
-                return;
-            }
-            resolve({ code, stdout: Buffer.concat(stdout).toString("utf8"), stderr });
+            if (timeoutError) settle(reject, timeoutError);
+            else settle(resolve, { code, stdout: Buffer.concat(stdout).toString("utf8"), stderr });
         });
     });
 }
 
-export function killTree(child) {
-    if (!child?.pid || child.exitCode !== null) return;
-    if (process.platform === "win32") {
-        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).on("error", () => {});
-    } else {
-        child.kill("SIGTERM");
+/**
+ * Stops the CLI and everything it started. Windows: `taskkill /T` walks the tree. POSIX: the shell leads its own
+ * process group (`detached`), so the whole group gets SIGTERM, then SIGKILL if it is still around after `graceMs`.
+ */
+export function killTree(child, { graceMs = KILL_GRACE_MS, killImpl = process.kill, spawnImpl = spawn } = {}) {
+    const pid = child?.pid;
+    if (!Number.isInteger(pid) || pid <= 1) return;
+    if (IS_WINDOWS) {
+        if (child.exitCode !== null) return;
+        spawnImpl("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" }).on("error", () => {});
+        return;
     }
+    // Signal the group even when the shell itself already exited: its children may still be running.
+    const signalGroup = (signal) => {
+        try {
+            killImpl(-pid, signal);
+            return true;
+        } catch {
+            return false; // ESRCH: the group is gone
+        }
+    };
+    if (!signalGroup("SIGTERM")) return;
+    setTimeout(() => signalGroup("SIGKILL"), graceMs).unref?.();
 }
 
 function lastLine(text) {

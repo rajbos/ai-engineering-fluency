@@ -21,22 +21,32 @@ Copilot app's light/dark theme.
 
 | Tab | What it shows |
 |---|---|
-| **Details** | Tokens, estimated cost, activity and environmental impact for today, the last 30 days, this month, last month and a projected year, plus usage by editor and by model. |
-| **Chart** | Usage per day, week or month as tokens, cost or sessions — as a total or split by model, editor, provider or repository — with a rolling average and a projected bar for the current period. |
+| **Details** | Tokens, estimated cost, activity and environmental impact for today, the last 30 days, this month, last month and a projected year, plus usage by editor and by model. On narrow panels a picker shows one of those columns at a time. |
+| **Chart** | Usage per day, week or month as tokens, cost or sessions — as a total or split by model, editor or provider — with a rolling average and a projected bar for the current period. |
 | **Sessions** | Every session of the last 30 days across all tracked tools; filter by today / 7 days / 30 days, search, and sort by recency, tokens or cost. |
 | **Fluency Score** | Your overall stage, a radar chart of the six fluency categories, and per-category evidence and next-step tips. See [FLUENCY-LEVELS.md](../FLUENCY-LEVELS.md). |
 
 The agent can use it too: ask things like *"how many tokens did I use this month?"* and it reads the cached numbers
 through the canvas's `get_summary` action (which never re-runs the CLI), or triggers a `refresh`.
 
-**Privacy.** Everything stays on your machine:
+In the cost chart, the **Total** prices all usage at GitHub Copilot AI Credit (UBB) rates, while the **By Editor** and
+**By Provider** splits price non-Copilot tools at their providers' API list prices — so split bars can add up to a
+different amount than the Total. The canvas shows a note when you pick a cost split.
+
+**Privacy.** The canvas itself sends nothing anywhere:
 
 - The CLI reads the session log files that your AI tools already write to disk. Session titles come from small
   metadata files next to each session; the canvas never reads transcripts itself.
-- The trimmed snapshot is stored in your own Copilot config folder (see [Where your data lives](#where-your-data-lives)).
+- The trimmed snapshot is stored in your own Copilot config folder (see [Where your data lives](#where-your-data-lives)),
+  readable only by your user account.
 - The UI is served from `127.0.0.1` only, with a strict same-origin Content Security Policy.
-- Nothing is uploaded. The only network access is downloading the CLI package from npm when it is not installed
-  globally.
+- The canvas uploads nothing. Its only network access is downloading the CLI package from npm when it is not
+  installed globally.
+- **What the agent sees:** when the agent calls `get_summary`, the result becomes part of the conversation and is sent
+  to the model, like any other tool result. By default that is aggregate numbers only (tokens, cost, sessions, model
+  and editor names, fluency stages and tips). Session titles — often your first prompt — and project names are only
+  included when the agent asks for them with `topSessions`, which the bundled skill tells it to do only when you ask
+  about specific sessions.
 
 ## Requirements
 
@@ -101,7 +111,7 @@ and how to use its actions:
 
 | Action | What it does |
 |---|---|
-| `get_summary` | Returns the cached stats (periods, top models, editors, fluency tips, top sessions of the last 7 days). Never runs the CLI. |
+| `get_summary` | Returns the cached stats (periods, top models, editors, fluency tips). Pass `{ "topSessions": 1-25 }` to also get the top sessions of the last 7 days with their titles and project names. Never runs the CLI. |
 | `refresh` | Re-runs the CLI in the background. Pass `{ "wait": true }` to wait for it to finish. |
 
 **The first run takes a while.** With no snapshot yet, the CLI parses all of your local session logs, which can take
@@ -168,7 +178,7 @@ A manual copy does not update itself; the plugin install is the recommended rout
 | What | Where |
 |---|---|
 | Plugin code | Managed by Copilot under `~/.copilot/installed-plugins/` — don't edit it there. |
-| Cached snapshot | `$COPILOT_HOME/extensions/ai-fluency/artifacts/snapshot.json` (`COPILOT_HOME` defaults to `~/.copilot`). |
+| Cached snapshot | `$COPILOT_HOME/extensions/ai-fluency/artifacts/snapshot.json` (`COPILOT_HOME` defaults to `~/.copilot`). On macOS and Linux the `artifacts/` folder is owner-only (`0700`) and the snapshot `0600`, because it contains session titles; the canvas also tightens folders written by older versions. On Windows your user profile's permissions apply. |
 | Refresh lock | `refresh.lock` in the same folder, only while a CLI run is in progress. |
 
 Delete the `artifacts/` folder to reset the canvas; the next open runs a full refresh again.
@@ -179,7 +189,7 @@ Delete the `artifacts/` folder to reset the canvas; the next open runs a full re
 |---|---|
 | The canvas is not listed / the agent can't open it | Run `copilot plugin list` and check `ai-fluency-canvas` is installed and enabled. Start a new session or restart the app so plugins are loaded again. You can also ask the agent to list the loaded extensions and show the `ai-fluency` extension log. |
 | The agent asks which `ai-fluency` provider to use | Both the plugin and a manual copy are installed — see [Migrating](#migrating-from-a-manually-installed-copy). |
-| The canvas stays on "refreshing" for minutes | Expected on the first run: every local session log is parsed. Install the CLI globally (`npm install -g @rajbos/ai-engineering-fluency`) to skip the `npx` download on each run. A run is stopped after 20 minutes. |
+| The canvas stays on "refreshing" for minutes | Expected on the first run: every local session log is parsed. Install the CLI globally (`npm install -g @rajbos/ai-engineering-fluency`) to skip the `npx` download on each run. A run is stopped after 20 minutes, including any `npx`/`node` processes it started. |
 | Refresh fails with an `npx`/`node` error | Install Node.js 22+ and make sure `node` and `npx` are on the `PATH` the Copilot app sees (restart the app after installing). Behind a proxy, `npx` needs access to the npm registry, or install the CLI globally. |
 | Numbers look different from the VS Code extension | Both read the same logs, but the canvas shows the snapshot from its last refresh — check "Updated … ago" at the top of the canvas and use **Refresh**. See the [CLI docs](../cli/README.md) for what is counted. |
 

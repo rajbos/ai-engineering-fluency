@@ -128,7 +128,7 @@ npx @rajbos/ai-engineering-fluency stats
 
 ### 🧩 GitHub Copilot app canvas
 
-A side-panel canvas for the GitHub Copilot app with your token usage, cost, sessions, usage charts and fluency score — styled like the VS Code extension, powered by the CLI, and fully local. Ships as the `ai-fluency-canvas` Copilot plugin; click both buttons in order (each opens a form you confirm in the app).
+A side-panel canvas for the GitHub Copilot app with your token usage, cost, sessions, usage charts and fluency score — styled like the VS Code extension and powered by the CLI over your local session logs. Ships as the `ai-fluency-canvas` Copilot plugin; click both buttons in order (each opens a form you confirm in the app).
 
 [![Step 1: Add marketplace](https://img.shields.io/badge/Step%201-Add%20marketplace-8957e5?logo=githubcopilot&logoColor=white)](https://github.com/copilot/app/launch?open=ghapp%3A%2F%2Fplugins%2Fmarketplace%2Fadd%3Fsource%3Drajbos%252Fai-engineering-fluency) [![Step 2: Install plugin](https://img.shields.io/badge/Step%202-Install%20plugin-8957e5?logo=githubcopilot&logoColor=white)](https://github.com/copilot/app/launch?open=ghapp%3A%2F%2Fplugins%2Finstall%3Fsource%3Dai-fluency-canvas%2540ai-engineering-fluency)
 

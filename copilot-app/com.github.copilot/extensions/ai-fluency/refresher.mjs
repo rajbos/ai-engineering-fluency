@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { unwatchFile, watchFile } from "node:fs";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { link, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runFluencyCli, DEFAULT_TIMEOUT_MS } from "./cli.mjs";
-import { artifactsDir, buildSnapshot, readSnapshot, snapshotPath, writeSnapshot } from "./store.mjs";
+import { artifactsDir, buildSnapshot, ensurePrivateDir, PRIVATE_FILE_MODE, readSnapshot, snapshotPath, writeSnapshot } from "./store.mjs";
 
 export const AUTO_REFRESH_MS = 30 * 60 * 1000;
 export const OPEN_REFRESH_MIN_AGE_MS = 5 * 60 * 1000;
@@ -16,6 +17,12 @@ function pidAlive(pid) {
     } catch (error) {
         return error.code === "EPERM";
     }
+}
+
+/** Same lock file contents (locks written by older versions have no token, so fall back to pid + start time). */
+function sameLock(a, b) {
+    if (!a || !b) return a === b;
+    return a.token === b.token && a.pid === b.pid && a.startedAt === b.startedAt;
 }
 
 /**
@@ -32,8 +39,9 @@ export class Refresher extends EventEmitter {
         this.timeoutMs = timeoutMs;
         this.pollMs = pollMs;
         this.lockPath = join(dir, "refresh.lock");
+        this.lockToken = null;
         this.snapshot = null;
-        this.loaded = false;
+        this.loading = null;
         this.status = { state: "idle", startedAt: null, finishedAt: null, error: null, byOtherSession: false };
         this.inflight = null;
         this.child = null;
@@ -42,12 +50,15 @@ export class Refresher extends EventEmitter {
         this.watching = false;
     }
 
-    async load() {
-        if (!this.loaded) {
-            this.snapshot = await readSnapshot(this.dir);
-            this.loaded = true;
-        }
-        return this.snapshot;
+    /** Reads the snapshot from disk once; concurrent callers share the same read. */
+    load() {
+        this.loading ??= (async () => {
+            await ensurePrivateDir(this.dir).catch(() => {});
+            const snapshot = await readSnapshot(this.dir);
+            // A refresh or file-watcher update may have landed while reading; never replace it with the older file.
+            if (!this.snapshot) this.snapshot = snapshot;
+        })();
+        return this.loading.then(() => this.snapshot);
     }
 
     state() {
@@ -64,39 +75,92 @@ export class Refresher extends EventEmitter {
         this.emit("change", this.state());
     }
 
-    async otherSessionLock() {
+    async readLock(path = this.lockPath) {
         try {
-            const lock = JSON.parse(await readFile(this.lockPath, "utf8"));
-            const fresh = this.now() - Date.parse(lock.startedAt) < this.timeoutMs + 60_000;
-            if (lock.pid !== process.pid && fresh && pidAlive(lock.pid)) return lock;
+            return JSON.parse(await readFile(path, "utf8"));
         } catch {
-            // no lock or unreadable lock
+            return null; // no lock or unreadable lock
         }
-        return null;
+    }
+
+    /** A lock held by another live session whose run has not exceeded the CLI timeout. */
+    isOtherSessionLock(lock) {
+        if (!lock || lock.pid === process.pid) return false;
+        const fresh = this.now() - Date.parse(lock.startedAt) < this.timeoutMs + 60_000;
+        return fresh && pidAlive(lock.pid);
+    }
+
+    async otherSessionLock() {
+        const lock = await this.readLock();
+        return this.isOtherSessionLock(lock) ? lock : null;
+    }
+
+    /**
+     * Publishes a complete lock file atomically: `link` never overwrites, so exactly one session can create it, and
+     * nobody can read it half-written. Falls back to an exclusive create on file systems without hard links.
+     */
+    async createLock(body, token) {
+        const temp = `${this.lockPath}.${token}.tmp`;
+        await writeFile(temp, body, { flag: "wx", mode: PRIVATE_FILE_MODE });
+        try {
+            await link(temp, this.lockPath);
+            return true;
+        } catch (error) {
+            if (error.code === "EEXIST") return false;
+            try {
+                await writeFile(this.lockPath, body, { flag: "wx", mode: PRIVATE_FILE_MODE });
+                return true;
+            } catch (fallbackError) {
+                if (fallbackError.code === "EEXIST") return false;
+                throw fallbackError;
+            }
+        } finally {
+            await unlink(temp).catch(() => {});
+        }
+    }
+
+    /**
+     * Removes the lock judged stale — and only that one. Several sessions can see the same stale lock; renaming it
+     * aside is atomic, so only one of them moves any given file. If the file moved turns out to be a fresh lock that
+     * another session wrote after our check, it is put back (`link` again never overwrites) and we back off.
+     */
+    async removeStaleLock(stale, token) {
+        const aside = `${this.lockPath}.${token}.stale`;
+        try {
+            await rename(this.lockPath, aside);
+        } catch (error) {
+            return error.code === "ENOENT"; // already removed by someone else: try to create ours
+        }
+        const moved = await this.readLock(aside);
+        if (sameLock(moved, stale)) {
+            await unlink(aside).catch(() => {});
+            return true;
+        }
+        await link(aside, this.lockPath).catch(() => {});
+        await unlink(aside).catch(() => {});
+        return false;
     }
 
     async acquireLock() {
-        await mkdir(this.dir, { recursive: true });
-        const body = JSON.stringify({ pid: process.pid, startedAt: new Date(this.now()).toISOString() });
-        try {
-            await writeFile(this.lockPath, body, { flag: "wx" });
-            return true;
-        } catch (error) {
-            if (error.code !== "EEXIST") throw error;
-            if (await this.otherSessionLock()) return false;
-            await unlink(this.lockPath).catch(() => {});
-            await writeFile(this.lockPath, body, { flag: "wx" }).catch(() => {});
-            return !(await this.otherSessionLock());
+        await ensurePrivateDir(this.dir);
+        const token = randomUUID();
+        const body = JSON.stringify({ pid: process.pid, token, startedAt: new Date(this.now()).toISOString() });
+        let acquired = await this.createLock(body, token);
+        if (!acquired) {
+            const current = await this.readLock();
+            if (this.isOtherSessionLock(current)) return false;
+            acquired = (await this.removeStaleLock(current, token)) && (await this.createLock(body, token));
         }
+        if (acquired) this.lockToken = token;
+        return acquired;
     }
 
     async releaseLock() {
-        try {
-            const lock = JSON.parse(await readFile(this.lockPath, "utf8"));
-            if (lock.pid === process.pid) await unlink(this.lockPath);
-        } catch {
-            // already gone
-        }
+        const token = this.lockToken;
+        this.lockToken = null;
+        if (!token) return;
+        const lock = await this.readLock();
+        if (lock?.token === token) await unlink(this.lockPath).catch(() => {});
     }
 
     /** Start a refresh (or join the one already running). Resolves with the state when done. */
