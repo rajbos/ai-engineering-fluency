@@ -14,7 +14,7 @@ copilot-app/                                  <- plugin root (marketplace "sourc
 ├── skills/ai-fluency/SKILL.md                <- tells the agent when/how to open the canvas
 ├── com.github.copilot/extensions/ai-fluency/ <- the canvas extension (canvasId "ai-fluency")
 │   ├── extension.mjs                         <- registers the canvas and its agent actions
-│   ├── cli.mjs  refresher.mjs  store.mjs  server.mjs
+│   ├── cli.mjs  refresher.mjs  store.mjs  server.mjs  panels.mjs
 │   ├── assets/                               <- UI served on 127.0.0.1 (index.html, app.js, style.css)
 │   ├── copilot-extension.json                <- only for the app's manual "Install extension" flow
 │   ├── test/                                 <- canvas unit tests (synthetic fixtures)

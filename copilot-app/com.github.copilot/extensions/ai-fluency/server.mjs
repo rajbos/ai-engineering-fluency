@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 
@@ -10,6 +11,7 @@ const assets = new Map([
 const SECURITY_HEADERS = {
     "Cache-Control": "private, no-store",
     "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
     // The Copilot app injects its theme (CSS variables + palette) as inline <style> elements, so inline styles must be
     // allowed for the canvas to follow the app theme. Scripts stay same-origin only.
     "Content-Security-Policy":
@@ -23,11 +25,21 @@ function send(res, status, contentType, body) {
 
 const json = (res, status, value) => send(res, status, "application/json; charset=utf-8", JSON.stringify(value));
 
+function hasPrefix(pathname, prefix) {
+    const candidate = Buffer.from(pathname.slice(0, prefix.length));
+    const expected = Buffer.from(prefix);
+    return candidate.length === expected.length && timingSafeEqual(candidate, expected);
+}
+
 /**
  * Loopback-only server for one canvas panel. `refresher` is shared across
  * panels; the server only reads its state and asks it to refresh.
+ *
+ * Any local process can connect to a loopback port, so every route (page, assets, state, events, refresh) lives under
+ * an unguessable per-panel path. Only the canvas gets it, through the URL returned here; requests without it get 404.
  */
 export async function startServer({ refresher, keepAliveMs = 25_000 }) {
+    const base = `/${randomBytes(32).toString("base64url")}/`;
     const clients = new Set();
     const broadcast = (state) => {
         const frame = `event: state\ndata: ${JSON.stringify(state)}\n\n`;
@@ -46,7 +58,17 @@ export async function startServer({ refresher, keepAliveMs = 25_000 }) {
                 send(res, 403, "text/plain; charset=utf-8", "Invalid host");
                 return;
             }
-            const path = new URL(req.url, origin).pathname;
+            const pathname = new URL(req.url, origin).pathname;
+            if (!hasPrefix(pathname, base)) {
+                if (hasPrefix(`${pathname}/`, base) && pathname.length === base.length - 1) {
+                    res.writeHead(308, { Location: base, ...SECURITY_HEADERS });
+                    res.end();
+                } else {
+                    send(res, 404, "text/plain; charset=utf-8", "Not found");
+                }
+                return;
+            }
+            const path = pathname.slice(base.length - 1);
             if (req.method === "POST" && path === "/api/refresh") {
                 if (req.headers.origin !== origin) {
                     send(res, 403, "text/plain; charset=utf-8", "Invalid origin");
@@ -107,5 +129,5 @@ export async function startServer({ refresher, keepAliveMs = 25_000 }) {
             resolve();
         });
     });
-    return { server, close, url: `http://127.0.0.1:${server.address().port}/` };
+    return { server, close, url: `http://127.0.0.1:${server.address().port}${base}` };
 }

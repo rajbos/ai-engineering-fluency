@@ -42,12 +42,17 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
 - `refresher.mjs` shows the last snapshot instantly, refreshes on open when it is older than 5 minutes,
   and auto-refreshes every 30 minutes while a panel is open. A `refresh.lock` file ensures only one CLI run
   at a time across all Copilot sessions; other sessions pick up the new snapshot via a file watcher. The lock is
-  published atomically (hard link) with a per-run token, and a stale lock (dead process or older than the timeout)
-  is moved aside and verified before it is removed, so two sessions cannot both take it over. On timeout the CLI's
-  whole process tree is stopped (`taskkill /T` on Windows, the process group on macOS/Linux).
-- `server.mjs` serves the UI on `127.0.0.1` with a same-origin-only CSP (inline *styles* are allowed because the
-  Copilot app injects its theme as inline `<style>` elements; scripts stay `'self'`), Host-header check, Origin
-  check on `POST /api/refresh`, and pushes state over server-sent events (`/events`).
+  published atomically (hard link) with a per-run token. An unreadable lock is treated as held for a few seconds
+  (it may still be being written). A stale lock (dead process or older than the timeout) is taken over through a
+  per-lock claim file, and the lock is re-read before it is removed, so only one session can take it over. The owner
+  stops removing its own lock shortly before it would count as stale, so a takeover and a release never overlap.
+  On timeout the CLI's whole process tree is stopped (`taskkill /T` on Windows, the process group on macOS/Linux).
+  On shutdown the refresher stops the running CLI, waits briefly for it to exit, and releases the lock.
+- `panels.mjs` tracks open panels so that concurrent opens and closes start and stop the refresher exactly once each.
+- `server.mjs` serves the UI on `127.0.0.1` under a random, per-panel URL path (other local processes cannot
+  guess it), with a same-origin-only CSP (inline *styles* are allowed because the Copilot app injects its theme
+  as inline `<style>` elements; scripts stay `'self'`), Host-header check, Origin check on `POST api/refresh`,
+  `Referrer-Policy: no-referrer`, and pushes state over server-sent events (`events`).
 - Dark mode: `app.js` reads the app's `data-theme-tone` / `data-color-mode` attributes (falling back to the
   luminance of `--background-color-default`, then `prefers-color-scheme`) and sets `data-fluency-theme` on the
   root. A `MutationObserver` keeps it in sync when the app theme changes; dark fallback colours cover any token
@@ -58,7 +63,7 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
 | Action        | What it does                                                                 |
 |---------------|------------------------------------------------------------------------------|
 | `get_summary` | Returns cached stats (periods, top models, editors, fluency tips). Session titles and project names are only included with `{ "topSessions": 1-25 }` (top sessions of the last 7 days). The result is sent to the model like any tool result. Never runs the CLI. |
-| `refresh`     | Starts a background refresh. Pass `{ "wait": true }` to block until it finishes. |
+| `refresh`     | Starts a background refresh. Pass `{ "wait": true }` to block until it finishes (if another Copilot session is already refreshing, it waits for that run's snapshot instead). |
 
 Example: `open_canvas({ canvasId: "ai-fluency", instanceId: "fluency" })`, then
 `invoke_canvas_action({ instanceId: "fluency", actionName: "get_summary" })`.

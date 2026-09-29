@@ -1053,7 +1053,8 @@ document.getElementById("refresh").addEventListener("click", async () => {
     const button = document.getElementById("refresh");
     button.disabled = true;
     try {
-        const res = await fetch("/api/refresh", { method: "POST" });
+        // Relative URLs: every route lives under the panel's private path prefix (see server.mjs).
+        const res = await fetch("api/refresh", { method: "POST" });
         if (res.ok) data = { ...data, status: await res.json() };
     } finally {
         renderHeader();
@@ -1067,7 +1068,7 @@ function applyState(next) {
     else renderHeader();
 }
 
-const events = new EventSource("/events");
+const events = new EventSource("events");
 events.addEventListener("state", (event) => applyState(JSON.parse(event.data)));
 events.addEventListener("error", () => {
     if (!data.status) document.getElementById("subtitle").textContent = "Reconnecting…";

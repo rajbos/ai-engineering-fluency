@@ -6,12 +6,17 @@
 
 import { createCanvas, CanvasError, joinSession } from "@github/copilot-sdk/extension";
 import { killTree } from "./cli.mjs";
+import { Panels } from "./panels.mjs";
 import { OPEN_REFRESH_MIN_AGE_MS, Refresher } from "./refresher.mjs";
 import { startServer } from "./server.mjs";
 import { summarize } from "./store.mjs";
 
 const refresher = new Refresher();
-const servers = new Map();
+const panels = new Panels({
+    start: () => startServer({ refresher }),
+    acquire: () => refresher.acquire(),
+    release: () => refresher.release(),
+});
 
 let session;
 refresher.on("change", ({ status }) => {
@@ -21,9 +26,8 @@ refresher.on("change", ({ status }) => {
 });
 
 async function shutdown() {
+    await panels.closeAll();
     await refresher.dispose(killTree);
-    await Promise.all([...servers.values()].map((entry) => entry.close()));
-    servers.clear();
 }
 process.once("SIGTERM", () => void shutdown().finally(() => process.exit(0)));
 process.once("SIGINT", () => void shutdown().finally(() => process.exit(0)));
@@ -63,7 +67,8 @@ session = await joinSession({
                 {
                     name: "refresh",
                     description:
-                        "Re-run the CLI in the background to refresh the stats (takes several minutes). Returns immediately with the refresh status; set wait=true to block until it finishes.",
+                        "Re-run the CLI in the background to refresh the stats (takes several minutes). Returns immediately with the refresh status; set wait=true to block until it finishes " +
+                        "(including a refresh another Copilot session is already running).",
                     inputSchema: {
                         type: ["object", "null"],
                         properties: { wait: { type: "boolean" } },
@@ -74,29 +79,22 @@ session = await joinSession({
                         if (!input?.wait) {
                             return { started: true, message: "Refresh is running in the background (several minutes). The canvas updates when it finishes; call get_summary afterwards." };
                         }
-                        const { status, snapshot } = await pending;
+                        let { status, snapshot } = await pending;
+                        if (status.state === "running" && status.byOtherSession) ({ status, snapshot } = await refresher.waitForOtherSession());
                         if (status.state === "error") throw new CanvasError("refresh_failed", status.error);
+                        if (status.state === "running") {
+                            return { status, fetchedAt: snapshot?.fetchedAt ?? null, message: "Another Copilot session's refresh is still running; call get_summary later." };
+                        }
                         return { status, fetchedAt: snapshot?.fetchedAt ?? null };
                     },
                 },
             ],
             open: async ({ instanceId }) => {
-                let entry = servers.get(instanceId);
-                if (!entry) {
-                    entry = await startServer({ refresher });
-                    servers.set(instanceId, entry);
-                    refresher.acquire();
-                }
+                const entry = await panels.open(instanceId);
                 void refresher.maybeRefresh(OPEN_REFRESH_MIN_AGE_MS);
                 return { title: "AI fluency", url: entry.url };
             },
-            onClose: async ({ instanceId }) => {
-                const entry = servers.get(instanceId);
-                if (!entry) return;
-                servers.delete(instanceId);
-                refresher.release();
-                await entry.close();
-            },
+            onClose: ({ instanceId }) => panels.close(instanceId),
         }),
     ],
 });

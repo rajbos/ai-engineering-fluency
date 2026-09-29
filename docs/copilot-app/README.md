@@ -39,7 +39,8 @@ different amount than the Total. The canvas shows a note when you pick a cost sp
   metadata files next to each session; the canvas never reads transcripts itself.
 - The trimmed snapshot is stored in your own Copilot config folder (see [Where your data lives](#where-your-data-lives)),
   readable only by your user account.
-- The UI is served from `127.0.0.1` only, with a strict same-origin Content Security Policy.
+- The UI is served from `127.0.0.1` only, under a random URL path that is different for every panel (so other
+  programs on your machine cannot guess it), with a strict same-origin Content Security Policy.
 - The canvas uploads nothing. Its only network access is downloading the CLI package from npm when it is not
   installed globally.
 - **What the agent sees:** when the agent calls `get_summary`, the result becomes part of the conversation and is sent
@@ -112,7 +113,7 @@ and how to use its actions:
 | Action | What it does |
 |---|---|
 | `get_summary` | Returns the cached stats (periods, top models, editors, fluency tips). Pass `{ "topSessions": 1-25 }` to also get the top sessions of the last 7 days with their titles and project names. Never runs the CLI. |
-| `refresh` | Re-runs the CLI in the background. Pass `{ "wait": true }` to wait for it to finish. |
+| `refresh` | Re-runs the CLI in the background. Pass `{ "wait": true }` to wait for it to finish. If another session is already refreshing, it waits for that run instead of starting a second one. |
 
 **The first run takes a while.** With no snapshot yet, the CLI parses all of your local session logs, which can take
 several minutes. After that the last snapshot shows instantly, refreshes when you open the canvas and it is older
