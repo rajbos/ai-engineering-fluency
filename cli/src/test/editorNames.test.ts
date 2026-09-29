@@ -24,6 +24,7 @@ import { getEditorSourceFromPath } from '../analysis';
 import { getEditorTypeFromPath } from '../../../src/workspaceHelpers';
 import { MistralVibeDataAccess } from '../../../src/mistralvibe';
 import { HermesDataAccess } from '../../../src/hermes';
+import { CodexCliDataAccess } from '../../../src/codexcli';
 
 const VS_SOLUTION = '/project/.vs/mysolution.sln/copilot-chat/abc123/sessions/uuid';
 const VS_APPDATA = 'C:/Users/u/AppData/Local/Microsoft/VisualStudio/18.0_0a408795/VSGitHubCopilot/copilot-chat/b6662ded/sessions/80720523';
@@ -113,6 +114,23 @@ test('relocated CODEX_HOME sessions are labelled Codex CLI by both detectors', (
 		assertBothDetectors(`${path.join(home, 'state_5.sqlite')}#thread-1`, 'Codex CLI');
 		// Unrelated files under the relocated root are not claimed.
 		assert.equal(getEditorSourceFromPath(path.join(home, 'config.toml')), 'VS Code');
+		// Only <home>/state_<N>.sqlite#<id> is a thread path, not any state_* entry.
+		assert.equal(getEditorSourceFromPath(`${path.join(home, 'state_x', 'other.sqlite')}#t`), 'VS Code');
+		assert.equal(getEditorSourceFromPath(`${path.join(home, 'nested', 'state_5.sqlite')}#t`), 'VS Code');
+	});
+});
+
+test('relative CODEX_HOME / HERMES_HOME match the paths their adapters build', () => {
+	// Both adapters use a relative home verbatim (no resolve against cwd); the
+	// detectors must compare against those same relative paths.
+	withAgentHomes({ CODEX_HOME: 'agent-data/codex', HERMES_HOME: './agent-data/hermes-state' }, () => {
+		const codex = new CodexCliDataAccess();
+		assertBothDetectors(path.join(codex.getSessionsDir(), '2026', '09', '01', 'rollout-2026-09-01T10-00-00-abc.jsonl'), 'Codex CLI');
+		assertBothDetectors(`${path.join(codex.getCodexHome(), 'state_5.sqlite')}#thread-1`, 'Codex CLI');
+		const hermes = new HermesDataAccess();
+		const virtualPath = hermes.virtualPath('20260726_204744_427b88');
+		assertBothDetectors(virtualPath, 'Hermes');
+		assert.equal(hermes.isHermesSessionFile(virtualPath), true);
 	});
 });
 

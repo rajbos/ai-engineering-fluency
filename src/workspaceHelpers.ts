@@ -1104,11 +1104,31 @@ export function detectClaudeCodeEditorVariant(filePath: string): string {
 	return 'Claude Code';
 }
 
-/** Resolve an agent-home env var the way its adapter does, lower-cased and normalised; undefined when unset. */
-function resolveAgentHomeForComparison(value: string | undefined): string | undefined {
+/** Lower-case, forward-slash, no-trailing-slash form of an agent home for prefix matching. */
+function agentHomeForComparison(home: string): string {
+	return normalizePathForComparison(home).replace(/\/+$/, '');
+}
+
+/**
+ * $CODEX_HOME / $HERMES_HOME as their adapters use them (codexcli.ts getCodexHome,
+ * hermes.ts getConfigDir): the raw value when non-blank — relative values stay relative,
+ * no `~` expansion — joined with sub-paths, so `path.normalize` gives the same prefix.
+ */
+function rawAgentHomeForComparison(value: string | undefined): string | undefined {
 	if (!value || !value.trim()) { return undefined; }
-	const resolved = path.resolve(value.trim().replace(/^~/, os.homedir()));
-	return normalizePathForComparison(resolved).replace(/\/+$/, '');
+	return agentHomeForComparison(path.normalize(value));
+}
+
+/** $VIBE_HOME as mistralvibe.ts getVibeHomeDir uses it: `~` expanded, then resolved to absolute. */
+function vibeHomeForComparison(value: string | undefined): string | undefined {
+	if (!value) { return undefined; }
+	return agentHomeForComparison(path.resolve(value.replace(/^~/, os.homedir())));
+}
+
+/** True for a Codex virtual thread path `<home>/state_<N>.sqlite#<thread-id>` directly under `home`. */
+function isCodexStateDbVirtualPathUnder(lowerPath: string, home: string): boolean {
+	const prefix = `${home}/`;
+	return lowerPath.startsWith(prefix) && /^state_\d+\.sqlite#/.test(lowerPath.slice(prefix.length));
 }
 
 /**
@@ -1116,19 +1136,21 @@ function resolveAgentHomeForComparison(value: string | undefined): string | unde
  * $HERMES_HOME to a folder not named like the default (.codex, .vibe, hermes), which the
  * default-name substring checks cannot recognise. Only the adapters' own session
  * sub-paths under the configured root match, so a broad root (e.g. the home dir) does
- * not swallow unrelated files. Shared by the extension and the CLI detectors.
+ * not swallow unrelated files. Each home is interpreted exactly as its adapter does, so
+ * the prefixes line up with the paths that adapter discovers. Shared by the extension
+ * and the CLI detectors.
  * @internal
  */
 export function detectRelocatedAgentHomeFromPath(lowerPath: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
-	const codexHome = resolveAgentHomeForComparison(env['CODEX_HOME']);
+	const codexHome = rawAgentHomeForComparison(env['CODEX_HOME']);
 	if (codexHome && (
 		lowerPath.startsWith(`${codexHome}/sessions/`) ||
 		lowerPath.startsWith(`${codexHome}/archived_sessions/`) ||
-		(lowerPath.startsWith(`${codexHome}/state_`) && lowerPath.includes('.sqlite#'))
+		isCodexStateDbVirtualPathUnder(lowerPath, codexHome)
 	)) { return 'Codex CLI'; }
-	const vibeHome = resolveAgentHomeForComparison(env['VIBE_HOME']);
+	const vibeHome = vibeHomeForComparison(env['VIBE_HOME']);
 	if (vibeHome && lowerPath.startsWith(`${vibeHome}/logs/session/`)) { return 'Mistral Vibe'; }
-	const hermesHome = resolveAgentHomeForComparison(env['HERMES_HOME']);
+	const hermesHome = rawAgentHomeForComparison(env['HERMES_HOME']);
 	if (hermesHome && lowerPath.startsWith(`${hermesHome}/state.db#`)) { return 'Hermes'; }
 	return undefined;
 }
