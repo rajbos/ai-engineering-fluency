@@ -5,6 +5,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import type { CustomizationFileEntry } from './types';
 import * as packageJson from '../vscode-extension/package.json';
 import customizationPatternsData from './customizationPatterns.json';
@@ -1103,6 +1104,35 @@ export function detectClaudeCodeEditorVariant(filePath: string): string {
 	return 'Claude Code';
 }
 
+/** Resolve an agent-home env var the way its adapter does, lower-cased and normalised; undefined when unset. */
+function resolveAgentHomeForComparison(value: string | undefined): string | undefined {
+	if (!value || !value.trim()) { return undefined; }
+	const resolved = path.resolve(value.trim().replace(/^~/, os.homedir()));
+	return normalizePathForComparison(resolved).replace(/\/+$/, '');
+}
+
+/**
+ * Detect CLI agents whose data root was relocated with $CODEX_HOME, $VIBE_HOME or
+ * $HERMES_HOME to a folder not named like the default (.codex, .vibe, hermes), which the
+ * default-name substring checks cannot recognise. Only the adapters' own session
+ * sub-paths under the configured root match, so a broad root (e.g. the home dir) does
+ * not swallow unrelated files. Shared by the extension and the CLI detectors.
+ * @internal
+ */
+export function detectRelocatedAgentHomeFromPath(lowerPath: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
+	const codexHome = resolveAgentHomeForComparison(env['CODEX_HOME']);
+	if (codexHome && (
+		lowerPath.startsWith(`${codexHome}/sessions/`) ||
+		lowerPath.startsWith(`${codexHome}/archived_sessions/`) ||
+		(lowerPath.startsWith(`${codexHome}/state_`) && lowerPath.includes('.sqlite#'))
+	)) { return 'Codex CLI'; }
+	const vibeHome = resolveAgentHomeForComparison(env['VIBE_HOME']);
+	if (vibeHome && lowerPath.startsWith(`${vibeHome}/logs/session/`)) { return 'Mistral Vibe'; }
+	const hermesHome = resolveAgentHomeForComparison(env['HERMES_HOME']);
+	if (hermesHome && lowerPath.startsWith(`${hermesHome}/state.db#`)) { return 'Hermes'; }
+	return undefined;
+}
+
 /**
  * Detect terminal CLI agents with dedicated data stores from a lower-cased normalised path.
  * @internal
@@ -1127,7 +1157,7 @@ function detectCliAgentStoreFromPath(lowerPath: string): string | undefined {
 	// before the loose 'code' substring fallbacks in detectIDEEditorSource /
 	// detectVSCodeVariantFromPath ('codex' contains 'code' and would misclassify as VS Code).
 	if (lowerPath.includes('/.codex/')) { return 'Codex CLI'; }
-	return undefined;
+	return detectRelocatedAgentHomeFromPath(lowerPath);
 }
 
 /**
