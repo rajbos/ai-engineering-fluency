@@ -146,6 +146,10 @@ for (const home of ['.', '/']) {
 				assertBothDetectors(p, 'Codex CLI');
 				assert.equal(codex.isCodexCliSessionFile(p), true, `Codex handles ${p}`);
 			}
+			// A rollout-named file outside sessions/ or archived_sessions/ is not Codex's.
+			const stray = path.join(codex.getCodexHome(), 'project', 'rollout-not-codex.jsonl');
+			assert.equal(codex.isCodexCliSessionFile(stray), false, `Codex must not handle ${stray}`);
+			assert.notEqual(getEditorSourceFromPath(stray), 'Codex CLI');
 			const hermes = new HermesDataAccess();
 			const virtualPath = hermes.virtualPath('20260726_204744_427b88');
 			assertBothDetectors(virtualPath, 'Hermes');

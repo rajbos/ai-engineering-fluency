@@ -206,11 +206,13 @@ export class CodexCliDataAccess {
 		}
 		// A relocated $CODEX_HOME: compare against the prefix path.join() puts on this
 		// adapter's own paths, so homes like '.' (join drops the './') and '/' still match.
+		// Only Codex's own entries count — a broad home (e.g. '/') must not claim an
+		// unrelated rollout-*.jsonl elsewhere under it.
 		const homePrefix = joinedChildPrefixForComparison(this.getCodexHome());
 		if (!norm.startsWith(homePrefix)) { return false; }
 		const rest = norm.slice(homePrefix.length);
 		if (/^state_\d+\.sqlite#/.test(rest)) { return true; }
-		return rest.includes('/') && ROLLOUT_FILE_RE.test(path.basename(norm));
+		return /^(sessions|archived_sessions)\//.test(rest) && ROLLOUT_FILE_RE.test(path.basename(norm));
 	}
 
 	/** Returns true when the path is a virtual DB-thread path (as opposed to a rollout file). */
