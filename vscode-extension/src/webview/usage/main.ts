@@ -788,7 +788,7 @@ function getEffortDisplayName(level: string): string {
 	return EFFORT_DISPLAY_NAMES[level] ?? level;
 }
 
-import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, lookupKnownToolName } from '../../../../src/utils/toolUtils';
+import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool, lookupKnownToolName, isKnownToolDisplayName } from '../../../../src/utils/toolUtils';
 
 // Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
 const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
@@ -836,7 +836,7 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 	// resolvable via a known GUID/family pattern) and not suppressed. Tools resolved via
 	// isMcpFamilyResolvedTool are a recognized MCP tool under a new server-registration
 	// spelling (see issue #1760) — they shouldn't generate another "add missing name" report.
-	return Array.from(allTools).filter(tool => !(TOOL_NAME_MAP && lookupKnownToolName(tool, TOOL_NAME_MAP)) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
+	return Array.from(allTools).filter(tool => !(TOOL_NAME_MAP && (lookupKnownToolName(tool, TOOL_NAME_MAP) || isKnownToolDisplayName(tool, TOOL_NAME_MAP))) && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
 }
 
 function createMcpToolIssueUrl(unknownTools: string[]): string {
@@ -3873,7 +3873,7 @@ function buildCorrectionClearFilterButtonHtml(): string {
 
 /** One filter pill. Active pills are outlined, bold and carry a ✕ so the active state is unmistakable. */
 function correctionFilterChipHtml(count: number, label: string, filter: CorrectionFilter, accent?: string): string {
-	if (count <= 0) { return ''; }
+	if (!(count > 0)) { return ''; }
 	const active = activeCorrectionFilter === filter;
 	const border = active ? 'var(--vscode-focusBorder)' : (accent ?? 'transparent');
 	const background = active ? 'var(--vscode-button-secondaryBackground, var(--bg-tertiary))' : (accent ? accent.replace('0.85', '0.12') : 'var(--bg-tertiary)');
@@ -6939,6 +6939,11 @@ async function bootstrap(): Promise<void> {
 		const valid = savedColumns.filter((c): c is SessionColumnId => (ALL_SESSION_COLUMN_IDS as string[]).includes(c));
 		enabledSessionColumns = new Set(valid);
 		reapplyPresetForcedColumns();
+	}
+	// The initial payload skips sanitizeStats, but the correction report can come from an older
+	// cache that predates newer counts (e.g. escalatedUserCorrections) — normalize it the same way.
+	if (Object.prototype.hasOwnProperty.call(initialData, 'correctionReport')) {
+		initialData.correctionReport = sanitizeCorrectionReport(initialData.correctionReport);
 	}
 	renderLayout(initialData);
 	setupSessionsTableSort();

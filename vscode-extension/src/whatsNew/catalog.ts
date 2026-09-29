@@ -113,9 +113,9 @@ export const WHATS_NEW_MAX_ANNOUNCEMENT_AGE_DAYS = 60;
  */
 export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 	{
-		version: '0.18.1',
+		version: '0.18.2',
 		date: null,
-		headlineKey: 'whatsNew.release.0.18.1.headline',
+		headlineKey: 'whatsNew.release.0.18.2.headline',
 		features: [
 			{
 				id: 'usage.readiness-tab',
@@ -146,6 +146,12 @@ export const WHATS_NEW_RELEASES: readonly WhatsNewRelease[] = [
 				surface: { view: 'usage', tab: 'corrections', anchor: 'corrections-repo-summary' },
 			},
 		],
+	},
+	{
+		version: '0.18.1',
+		date: '2026-09-21',
+		headlineKey: 'whatsNew.release.0.18.1.headline',
+		features: [],
 	},
 	{
 		version: '0.18.0',

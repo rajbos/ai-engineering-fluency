@@ -1074,6 +1074,36 @@ test('the escalating pill is a filter that narrows the list to escalated moments
 	assert.match(harness.text('#corrections-filter-status') ?? '', /Escalating corrections/);
 });
 
+/** Every correction pill's leading count, e.g. "1 user corrections" → "1". */
+function correctionPillCounts(harness: Harness): string[] {
+	return [...harness.window.document.querySelectorAll('button[data-correction-filter]')]
+		.map((pill: any) => pill.textContent.trim().split(/\s+/)[0]);
+}
+
+for (const [label, boot] of [
+	['the initial payload', () => bootWebview(buildStatsWithCorrections())],
+	['an updateStats message', async () => {
+		const harness = await bootWebview(buildStats());
+		harness.post({ command: 'updateStats', data: buildStatsWithCorrections() });
+		await harness.settle();
+		return harness;
+	}],
+] as const) {
+	test(`a correction report without escalatedUserCorrections renders numeric pill counts (via ${label})`, async () => {
+		// Reports cached before the escalating count existed lack the field. It must default to 0
+		// (no pill) rather than rendering "undefined 📈 escalating".
+		const harness = await boot();
+		harness.window.document.querySelector('.tab-button[data-tab="corrections"]')?.click();
+
+		const counts = correctionPillCounts(harness);
+		assert.ok(counts.length > 0, 'expects the correction pills to render');
+		for (const count of counts) { assert.match(count, /^\d+$/, `every pill must lead with a number, got "${count}"`); }
+		assert.equal(harness.window.document.querySelector('button[data-correction-filter="escalated"]'), null,
+			'a missing escalated count is zero, so its pill is hidden');
+		assert.ok(!(harness.text('#tab-panel-corrections') ?? '').includes('undefined'));
+	});
+}
+
 // ── Insight deep-linking ───────────────────────────────────────────────────
 // A toast ("💡 <title>" → View) and the status-bar insights badge both open the Insights tab for
 // one specific insight. Landing on the tab is not enough: with a dozen look-alike cards the user

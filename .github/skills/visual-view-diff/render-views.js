@@ -123,6 +123,7 @@ async function renderView({ browser, view, state, theme, outDir, tmpDir, default
 			theme,
 			bundlePath,
 			repoRoot,
+			extraGlobals: view.globals,
 		});
 		fs.writeFileSync(pageFile, html);
 	} catch (error) {

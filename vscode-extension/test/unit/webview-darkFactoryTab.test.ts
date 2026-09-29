@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 
 import { DarkFactoryTab } from '../../src/webview/usage/darkFactoryTab';
 import type { DarkFactoryReport } from '../../../src/types';
+import { buildDarkFactoryReport, scoreDarkFactoryReadiness } from '../../../src/darkFactoryReadiness';
 
 const emptyReport: DarkFactoryReport = {
 	scannedAt: '2026-03-14T09:30:00.000Z',
@@ -19,7 +20,7 @@ test('AI Readiness is a host-gated Usage Analysis tab with a lazy, refreshable s
 	const previousDocument = globalThis.document;
 	(globalThis as typeof globalThis & { document: Document }).document = dom.window.document;
 	try {
-		const messages: Array<{ command: string; requestId: number }> = [];
+		const messages: Array<{ command: string; requestId?: number; prompt?: string }> = [];
 		const traces: string[] = [];
 		const tab = new DarkFactoryTab(message => messages.push(message), stage => traces.push(stage));
 		assert.equal(tab.button('activity'), '');
@@ -63,12 +64,52 @@ test('AI Readiness is a host-gated Usage Analysis tab with a lazy, refreshable s
 	}
 });
 
+test('the Copilot button drafts a chat prompt from the items still checked in that repository', () => {
+	const dom = new JSDOM('<div id="root"></div>');
+	const previousDocument = globalThis.document;
+	(globalThis as typeof globalThis & { document: Document }).document = dom.window.document;
+	try {
+		const messages: Array<{ command: string; requestId?: number; prompt?: string }> = [];
+		const tab = new DarkFactoryTab(message => messages.push(message), () => undefined);
+		tab.setAvailable(true);
+		dom.window.document.getElementById('root')!.innerHTML = tab.panel('readiness');
+		tab.attach();
+		tab.attach(); // re-attaching the same container must not double-post
+		tab.startIfNeeded();
+		const repo = scoreDarkFactoryReadiness({
+			name: 'demo', repoRoot: '/tmp/demo',
+			observations: {
+				'codeowners': { state: 'absent', detail: 'none' },
+				'ci-test-execution': { state: 'absent', detail: 'none' },
+			},
+		});
+		const report = buildDarkFactoryReport([repo], { scannedAt: '2026-09-01T12:00:00.000Z', apiSignalsIncluded: false, skippedRepoCount: 0 });
+		tab.handleMessage({ command: 'readinessLoaded', requestId: 1, report });
+
+		const doc = dom.window.document;
+		(doc.querySelector('.df-pick[data-df-id="ci-test-execution"]') as HTMLInputElement).checked = false;
+		(doc.querySelector('.df-chat-btn') as HTMLElement).click();
+		const drafts = messages.filter(m => m.command === 'draftCopilotChatWithPrompt');
+		assert.equal(drafts.length, 1);
+		assert.match(drafts[0].prompt!, /CODEOWNERS/);
+		assert.equal(drafts[0].prompt!.includes('Tests executed in CI'), false);
+
+		Array.from(doc.querySelectorAll('.df-pick')).forEach(input => { (input as HTMLInputElement).checked = false; });
+		(doc.querySelector('.df-chat-btn') as HTMLElement).click();
+		assert.equal(messages.filter(m => m.command === 'draftCopilotChatWithPrompt').length, 1);
+		assert.match(doc.querySelector('.df-chat-btn')!.textContent!, /Select at least one item/);
+	} finally {
+		(globalThis as typeof globalThis & { document: Document }).document = previousDocument;
+		dom.window.close();
+	}
+});
+
 test('AI Readiness renders the adoption × foundations matrix above the report, and drops a malformed one', () => {
 	const dom = new JSDOM('<div id="root"></div>');
 	const previousDocument = globalThis.document;
 	(globalThis as typeof globalThis & { document: Document }).document = dom.window.document;
 	try {
-		const messages: Array<{ command: string; requestId: number }> = [];
+		const messages: Array<{ command: string; requestId?: number; prompt?: string }> = [];
 		const tab = new DarkFactoryTab(message => messages.push(message), () => undefined);
 		tab.setAvailable(true);
 		dom.window.document.getElementById('root')!.innerHTML = tab.panel('readiness');

@@ -5,6 +5,7 @@
     "Each entry mirrors one panel's HTML shell in vscode-extension/src/extension.ts:",
     "  bundle  — the esbuild entry point name in esbuild.js (dist/webview/<bundle>.js)",
     "  global  — the window global that shell assigns the view's data to",
+    "  globals — optional additional globals the panel shell sets before its bundle",
     "  fixture — a JSON file in ./fixtures holding that data",
     "",
     "To add a view: add its esbuild entry point name here, capture the data its",
@@ -166,6 +167,39 @@
             } } }
           ],
           "expect": "#readiness-content .df-repo-card"
+        },
+        {
+          "id": "readiness-expanded",
+          "title": "AI Readiness tab — repository expanded",
+          "steps": [
+            { "click": ".tab-button[data-tab=\"readiness\"]" },
+            { "post": { "command": "readinessLoaded", "requestId": 1, "report": {
+              "scannedAt": "2026-03-14T09:30:00.000Z",
+              "apiSignalsIncluded": false,
+              "maxAssessableStage": 4,
+              "skippedRepoCount": 0,
+              "repos": [{
+                "name": "ai-engineering-fluency",
+                "repoRoot": "/fixtures/ai-engineering-fluency",
+                "nameWithOwner": "rajbos/ai-engineering-fluency",
+                "confirmedStage": 0,
+                "ceilingStage": 2,
+                "fullyEvidenced": false,
+                "unknownCount": 1,
+                "stages": [
+                  { "stage": 1, "name": "Standardized software delivery", "summary": "Delivery checks are incomplete", "verdict": "blocked", "present": [], "missing": ["ci-test-execution"], "unknown": ["required-reviews"] },
+                  { "stage": 2, "name": "AI-assisted engineers", "summary": "AI assistance has guardrails", "verdict": "indeterminate", "present": [], "missing": [], "unknown": [] }
+                ],
+                "controls": [
+                  { "id": "ci-test-execution", "stage": 1, "label": "Tests executed in CI", "tier": "filesystem", "evidence": "heuristic", "why": "Each change should be validated.", "remediation": "Run the test suite from a workflow step so every change is validated.", "state": "absent" },
+                  { "id": "required-reviews", "stage": 1, "label": "Required reviews", "tier": "github-api", "evidence": "direct", "why": "Review prevents unchecked changes.", "remediation": "Require a review before merging.", "state": "unknown", "detail": "Needs a GitHub token." }
+                ],
+                "findings": [{ "id": "no-evaluator-agent", "severity": "medium", "title": "No independent evaluator agent", "detail": "Agents are defined but none reviews another agent's output." }]
+              }]
+            } } },
+            { "click": "#readiness-content .df-repo-summary" }
+          ],
+          "expect": "#readiness-content .df-repo-card[open] .df-chat-btn"
         },
         {
           "id": "agent",
@@ -392,8 +426,46 @@
       "bundle": "dashboard",
       "global": "__INITIAL_DASHBOARD__",
       "fixture": "dashboard.json",
-      "enabled": false,
-      "disabledReason": "Needs a configured team backend to produce meaningful data; the local view regression runner skips it for the same reason."
+      "globals": {
+        "__DASHBOARD_CONFIG__": {
+          "azureConfigured": true,
+          "azureStorageUrl": "https://azure.example.invalid",
+          "teamServerConfigured": true,
+          "teamServerUrl": "https://team.example.invalid"
+        }
+      },
+      "states": [
+        {
+          "id": "team-server",
+          "title": "Team Server tab",
+          "steps": [{ "click": ".tab-btn[data-tab=\"teamServer\"]" }],
+          "expect": ".team-server-card"
+        },
+        {
+          "id": "fluency-detail",
+          "title": "Expanded leaderboard row",
+          "steps": [{ "click": ".leaderboard-row.expandable" }],
+          "expect": ".fluency-detail-panel"
+        },
+        {
+          "id": "loading",
+          "title": "Loading data",
+          "steps": [{ "post": { "command": "dashboardLoading" } }],
+          "expect": ".loading-indicator"
+        },
+        {
+          "id": "error",
+          "title": "Azure error",
+          "steps": [{ "post": { "command": "dashboardError", "message": "Unable to load sample data." } }],
+          "expect": ".dashboard-failure"
+        },
+        {
+          "id": "server-only",
+          "title": "Team Server only",
+          "steps": [{ "post": { "command": "dashboardTeamServerFallback", "url": "https://team.example.invalid" } }],
+          "expect": ".team-server-card"
+        }
+      ]
     }
   ]
 }

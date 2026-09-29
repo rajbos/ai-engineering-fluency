@@ -26,7 +26,7 @@ const REPO_ROOT = findRepoRoot();
 const SKILL_DIR = path.join(REPO_ROOT, '.github', 'skills', 'visual-view-diff');
 
 type State = { id: string; title?: string; steps?: unknown[]; expect?: string; currentOnly?: boolean };
-type View = { id: string; title?: string; bundle?: string; global?: string; fixture?: string; enabled?: boolean; states?: State[]; currentOnly?: boolean; fixtureDir?: string };
+type View = { id: string; title?: string; bundle?: string; global?: string; fixture?: string; globals?: Record<string, unknown>; enabled?: boolean; states?: State[]; currentOnly?: boolean; fixtureDir?: string };
 type Registry = { defaults?: Record<string, unknown>; views: View[] };
 
 type Dirs = { baseFixtureDir: string; currentFixtureDir: string };
@@ -36,6 +36,10 @@ const config = requireFromHere(path.join(SKILL_DIR, 'lib', 'config.js')) as {
 	validateRegistry: (registry: Registry) => Registry;
 	baselineRegistry: (current: Registry, base: Registry | null, dirs: Dirs) => Registry;
 	ID_PATTERN: RegExp;
+};
+
+const harness = requireFromHere(path.join(SKILL_DIR, 'lib', 'harness.js')) as {
+	buildPageHtml: (options: { globalName: string; fixture: unknown; theme: string; bundlePath: string; repoRoot: string; extraGlobals?: Record<string, unknown> }) => string;
 };
 
 const DIRS: Dirs = { baseFixtureDir: '/base/fixtures', currentFixtureDir: '/current/fixtures' };
@@ -48,6 +52,26 @@ test('the committed registry validates', () => {
 	const committed = config.readConfig(SKILL_DIR);
 	assert.ok(committed.views.length > 0);
 	assert.ok(committed.views.some((v) => (v.states || []).length > 0), 'at least one view declares states');
+	const dashboard = committed.views.find((v) => v.id === 'dashboard');
+	assert.equal(dashboard?.enabled, undefined, 'the dashboard fixture renders by default');
+	assert.equal(dashboard?.states?.length, 5, 'all dashboard modes are covered');
+	assert.ok(dashboard?.globals?.__DASHBOARD_CONFIG__, 'the dashboard renders both backend tabs');
+	const fixture = JSON.parse(fs.readFileSync(path.join(SKILL_DIR, 'fixtures', 'dashboard.json'), 'utf8'));
+	assert.ok(fixture.personal && fixture.team?.members?.length > 0, 'the dashboard renders real-shaped synthetic data');
+});
+
+test('the render harness injects additional panel globals without allowing script markup through', () => {
+	const html = harness.buildPageHtml({
+		globalName: '__INITIAL_DASHBOARD__',
+		fixture: {},
+		theme: 'dark',
+		bundlePath: path.join(SKILL_DIR, 'dist', 'dashboard.js'),
+		repoRoot: REPO_ROOT,
+		extraGlobals: { __DASHBOARD_CONFIG__: { teamServerUrl: '</script><script>alert(1)</script>' } },
+	});
+	assert.match(html, /window\["__DASHBOARD_CONFIG__"\]/);
+	assert.match(html, /\\u003c\/script>/);
+	assert.doesNotMatch(html, /<\/script><script>alert/);
 });
 
 test('validateRegistry refuses ids that could escape or collide as file names', () => {
@@ -135,6 +159,17 @@ test('baselineRegistry flags everything current-only when the base commit has no
 	assert.equal(merged.views[0].currentOnly, true);
 	assert.equal(merged.views[0].fixtureDir, DIRS.currentFixtureDir);
 	assert.equal(merged.views[0].states?.[0].currentOnly, undefined, 'the flag on the view covers its states');
+});
+
+test('baselineRegistry uses the new fixture when enabling a previously disabled view', () => {
+	const current = registry([{ id: 'dashboard', fixture: 'dashboard.json', globals: { __DASHBOARD_CONFIG__: { azureConfigured: true } }, states: [{ id: 'team-server', expect: '.team-server-card' }] }]);
+	const base = registry([{ id: 'dashboard', fixture: 'dashboard.json', enabled: false }]);
+	const merged = config.baselineRegistry(current, base, DIRS).views[0];
+	assert.equal(merged.fixtureDir, DIRS.currentFixtureDir);
+	assert.equal(merged.enabled, true);
+	assert.deepEqual(merged.globals, current.views[0].globals);
+	assert.equal(merged.states?.[0].currentOnly, true);
+	assert.equal(base.views[0].enabled, false, 'the base registry is not mutated');
 });
 
 test('baselineRegistry drops base entries with unsafe ids instead of importing them', () => {

@@ -5,7 +5,7 @@ description: Load and display the last 10 cache entries as raw JSON output. DO N
 
 # Load Cache Data Skill
 
-**IMPORTANT: Always output raw JSON only. Do not create extra files for displaying data.**
+Use `--json` for output; don't pretty-print or write extra files — this data feeds analysis, not display.
 
 This skill helps you access and inspect the AI Engineering Fluency's local session file cache. The cache stores pre-computed statistics for session files to avoid re-processing unchanged files.
 
@@ -26,14 +26,6 @@ Use this skill when you need to:
 - Understand what data is being cached
 - Work with real cached data for testing or development
 - Iterate on features that rely on cached statistics
-
-## Output Requirements
-
-**CRITICAL**: When using this skill:
-- **ALWAYS** use the `--json` flag to output raw JSON
-- **NEVER** create extra files just for displaying data
-- **DO NOT** pretty-print or format the output in human-readable text
-- Simply run the script with `--json` and display the raw JSON output
 
 ## Cache Structure
 
@@ -71,7 +63,7 @@ interface SessionUsageAnalysis {
 - Persisted automatically by VS Code
 - Lives in VS Code's internal database (`state.vscdb`)
 
-**Implementation**: `src/extension.ts` (lines 74-80, 194, 336-360)
+**Implementation**: `src/extension.ts` (see `CacheManager` in `src/cacheManager.ts` below for the actual persistence logic)
 
 ## How to Access the Cache
 
@@ -297,18 +289,18 @@ console.log('Cache Statistics:', stats);
 
 The cache is tightly integrated with the extension's token tracking:
 
-1. **Session File Processing**: `getSessionFileDataCached()` (lines 1414-1450)
+1. **Session File Processing**: `getSessionFileDataCached()`
    - Checks cache validity
    - Reads and parses file if needed
    - Updates cache with new data
 
-2. **Statistics Calculation**: `calculateDetailedStats()` (lines 379-693)
+2. **Statistics Calculation**: `calculateDetailedStats()`
    - Uses cached data when available
    - Aggregates statistics across all cached sessions
    - Includes usage analysis from cache
 
 3. **Performance Optimization**:
-   - FIFO cache eviction after 1000 entries (line 305)
+   - FIFO cache eviction after 1000 entries
    - Modification time comparison for validation
    - Automatic cleanup of expired entries
 
@@ -337,14 +329,14 @@ The cache is tightly integrated with the extension's token tracking:
 
 ## Related Files
 
-1. **Cache implementation**: `src/extension.ts`
-   - Cache interface definition (lines 74-80)
-   - Cache management methods (lines 285-360)
-   - Cache usage in statistics (lines 379-693)
+1. **Cache implementation**: `src/cacheManager.ts` (`CacheManager`)
+   - Cache interface definition
+   - Cache management methods
+   - Cache usage in statistics
 
-2. **Session file discovery**: `src/extension.ts`
-   - Session file discovery (lines 975-1073)
-   - File scanning logic (lines 1078-1110)
+2. **Session file discovery**: `src/extension.ts` (via `SessionDiscovery`)
+   - Session file discovery
+   - File scanning logic
 
 3. **Session parsing**: `src/sessionParser.ts`
    - Session file parsing logic
