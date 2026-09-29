@@ -82,11 +82,13 @@ Items 1, 2, 5 and 6 all need the same thing: session signals grouped by reposito
 
 ### 0a. One repository key
 
-- New `src/repoKey.ts`: `repoKeyFromRemote(url)` → lowercase `owner/repo` from the remote's last
-  two path segments, on **any** host, so GitHub Enterprise remotes join too (unlike
-  `parseRepoFromRemoteUrl`, which is github.com-only by design), and `repoKeyFromSlug(slug)` for
-  readiness `nameWithOwner` and PR stats. The key leaves the host out, so the same `owner/repo` on
-  two hosts would share a row; that is accepted as rare.
+- New `src/repoKey.ts`: `repoKeyFromRemote(url, githubHosts)` → lowercase `owner/repo` for a
+  remote on github.com or the configured GitHub Enterprise host (the only hosts the readiness scan
+  and the PR collector see), and `repoKeyFromSlug(slug)` for readiness `nameWithOwner` and PR
+  stats. A remote on any other host keeps its host in the key (`gitlab.com/o/r`), so it is grouped
+  on its own and never merged with a GitHub repository of the same `owner/repo`. Only network
+  remotes count: `https`, `http`, `ssh`, `git` URLs and scp-style `host:path`. A local path or
+  `file://` remote names a directory, not a repository, and is unattributed.
 - **No folder-name fallback.** A folder name cannot join reliably to `owner/repo` and can collide,
   so a readiness report without `nameWithOwner` is shown by name but never joined or classified
   (it is listed as *not placed: no GitHub remote*).
@@ -113,7 +115,8 @@ never classified. Add `repoActivity?: RepoAgentActivityReport` to `UsageAnalysis
 (`src/types.ts`), built next to `buildCorrectionReport`. No parsing changes and no
 `CACHE_VERSION` bump: everything is already in the per-session cache.
 
-**Tests:** `test/unit/repoKey.test.ts` (SSH/HTTPS/GHE remotes, case, `.git` suffix),
+**Tests:** `test/unit/repoKey.test.ts` (SSH/HTTPS/GHE remotes, case, `.git` suffix, local and
+`file://` paths rejected, same `owner/repo` on two hosts kept apart),
 `test/unit/repoAgentActivity.test.ts` (grouping, denominators, unknown-repo bucket, window edges).
 
 **PR 1** = Phase 0 alone (no UI). Low risk, unblocks everything else.

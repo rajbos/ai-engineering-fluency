@@ -647,6 +647,7 @@
   "agentic.repoSummary.cohortFewer": "在你自己的会话中，带有智能体说明文件的仓库每个会话所需的纠正次数少 {0}%（{1} 个有说明的仓库与 {2} 个没有说明的仓库的中位数对比）。",
   "agentic.repoSummary.cohortMore": "在你自己的会话中，带有智能体说明文件的仓库每个会话所需的纠正次数多 {0}%（{1} 个有说明的仓库与 {2} 个没有说明的仓库的中位数对比）——值得检查这些说明是否仍然有效。",
   "agentic.repoSummary.cohortCaveat": "这只是你数据中的相关性，并不能证明因果关系。",
+  "agentic.repoSummary.cohortZeroBaseline": "没有智能体说明文件的仓库每个会话的纠正次数中位数为 0（{0} 个仓库），因此没有可供比较的基线；有说明文件的仓库为 {1}（{2} 个仓库）。",
   "agentic.repoSummary.cohortNotEnough": "当每组至少有 {0} 个仓库和 {1} 个会话（仅统计有 {2} 个及以上会话的仓库）时，将显示有无说明文件的对比。",
   "agentic.repoSummary.unattributed": "{1} 个会话中有 {0} 个无法关联到仓库，未包含在此表中。",
   "agentic.modes.title": "你与智能体的协作方式",

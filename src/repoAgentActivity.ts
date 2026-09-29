@@ -20,7 +20,7 @@ import type {
 	RepoAgentActivityReport,
 	SessionUsageAnalysis,
 } from './types';
-import { repoDisplayFromRemote } from './repoKey';
+import { DEFAULT_GITHUB_HOSTS, repoDisplayFromRemote } from './repoKey';
 import { cliTotal } from './maturityScoring';
 import { addModeCounts, countParticipationModes, createEmptyModeCounts } from './participationModes';
 import { classifySessionScoping, CORRECTED_SESSION_MIN_USER_CORRECTIONS } from './promptScoping';
@@ -161,7 +161,7 @@ export function summarizeActivity(inputs: readonly ActivitySessionInput[]): Agen
  */
 export function buildRepoAgentActivity(
 	inputs: readonly ActivitySessionInput[],
-	window: { startMs: number; endMs: number; windowDays?: number },
+	window: { startMs: number; endMs: number; windowDays?: number; githubHosts?: ReadonlySet<string> },
 ): RepoAgentActivityReport {
 	const byKey = new Map<string, RepoAgentActivity>();
 	const unattributed = createEmptyActivityTotals();
@@ -169,7 +169,7 @@ export function buildRepoAgentActivity(
 	for (const input of inputs) {
 		if (!(input.lastInteractionMs >= window.startMs && input.lastInteractionMs <= window.endMs)) { continue; }
 		addSessionToTotals(totals, input);
-		const display = repoDisplayFromRemote(input.repository);
+		const display = repoDisplayFromRemote(input.repository, window.githubHosts ?? DEFAULT_GITHUB_HOSTS);
 		if (!display) {
 			addSessionToTotals(unattributed, input);
 			continue;
@@ -189,26 +189,37 @@ export function buildRepoAgentActivity(
 /**
  * Month-to-date against the whole previous calendar month (UTC), with the
  * number of days in each so consumers can normalize counts per day. Sessions
- * are placed by their last interaction.
+ * are placed by their last interaction. The same two windows are also kept per
+ * repository (same keys as {@link buildRepoAgentActivity}), so a
+ * repository-specific signal is never judged on another repository's rework.
  */
-export function buildActivityTrend(inputs: readonly ActivitySessionInput[], now: Date): ActivityTrendWindows {
+export function buildActivityTrend(
+	inputs: readonly ActivitySessionInput[],
+	now: Date,
+	githubHosts: ReadonlySet<string> = DEFAULT_GITHUB_HOSTS,
+): ActivityTrendWindows {
 	const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
 	const previousStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1);
 	const dayMs = 24 * 60 * 60 * 1000;
 	const current = createEmptyActivityTotals();
 	const previous = createEmptyActivityTotals();
+	const repos: Record<string, { current: AgentActivityTotals; previous: AgentActivityTotals }> = {};
 	for (const input of inputs) {
 		const t = input.lastInteractionMs;
-		if (t >= monthStart && t <= now.getTime()) {
-			addSessionToTotals(current, input);
-		} else if (t >= previousStart && t < monthStart) {
-			addSessionToTotals(previous, input);
-		}
+		const window = t >= monthStart && t <= now.getTime() ? 'current'
+			: t >= previousStart && t < monthStart ? 'previous' : undefined;
+		if (!window) { continue; }
+		addSessionToTotals(window === 'current' ? current : previous, input);
+		const key = repoDisplayFromRemote(input.repository, githubHosts)?.toLowerCase();
+		if (!key) { continue; }
+		repos[key] ??= { current: createEmptyActivityTotals(), previous: createEmptyActivityTotals() };
+		addSessionToTotals(repos[key][window], input);
 	}
 	return {
 		current,
 		currentDays: now.getUTCDate(),
 		previous,
 		previousDays: Math.round((monthStart - previousStart) / dayMs),
+		repos,
 	};
 }

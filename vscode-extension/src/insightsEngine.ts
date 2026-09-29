@@ -38,6 +38,7 @@ import type {
 import { stretchedPlacements } from '../../src/agenticFoundations';
 import { compareInstructionCohorts } from '../../src/knowledgeSignals';
 import { compareSpeedAndQuality, reworkWorsened } from '../../src/speedVsError';
+import { repoKeyFromSlug } from '../../src/repoKey';
 import toolNamesData from '../../src/toolNames.json';
 import modelPricingData from '../../src/modelPricing.json';
 import { resolveGuidMcpToolName, resolveMcpFamilyToolName, lookupKnownToolName } from '../../src/utils/toolUtils';
@@ -529,13 +530,24 @@ const REVIEW_LOAD_GROWTH = 1.5;
 /** …with at least this many agent PRs in the recent half. Tunable. */
 const MIN_RECENT_AGENT_PRS = 5;
 
+/**
+ * Whether rework rose this month in this one repository, judged on its own sessions with the
+ * same thresholds as the overall trend. False when that repository has too little data.
+ */
+function repoReworkUp(ctx: InsightContext, repository: string): boolean {
+	const trend = ctx.activityTrend;
+	const key = repoKeyFromSlug(repository);
+	const windows = key ? trend?.repos?.[key] : undefined;
+	if (!trend || !windows) { return false; }
+	const c = compareSpeedAndQuality({ ...windows, currentDays: trend.currentDays, previousDays: trend.previousDays });
+	return c.classification !== 'insufficient-data' && reworkWorsened(c.correctionsPerSession, c.oneShotRate);
+}
+
 function risingReviewLoad(ctx: InsightContext): AgentPrActivity[] {
-	const trend = compareSpeedAndQuality(ctx.activityTrend);
-	const reworkUp = trend.classification !== 'insufficient-data' && reworkWorsened(trend.correctionsPerSession, trend.oneShotRate);
 	return (ctx.agentPrActivity ?? []).filter(r =>
 		r.aiAuthoredRecent >= MIN_RECENT_AGENT_PRS
 		&& r.aiAuthoredRecent >= r.aiAuthoredEarlier * REVIEW_LOAD_GROWTH
-		&& (r.aiRevertedPrs > 0 || reworkUp));
+		&& (r.aiRevertedPrs > 0 || repoReworkUp(ctx, r.repository)));
 }
 
 /** Firmer wording once review is observed to be absent; "cannot confirm" while it is unknown. */

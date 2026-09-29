@@ -88,7 +88,17 @@ test('review-burden-rising: needs rising agent PR volume together with reverts o
 	const rising = { repository: 'o/a', aiAuthoredRecent: 8, aiAuthoredEarlier: 4, aiRevertedPrs: 2 };
 	assert.match(body(ctx({ agentPrActivity: [rising] }), 'review-burden-rising'), /^Cloud agents opened 8 pull requests in o\/a .* up from 4 .* and 2 of their merged PRs were reverted/);
 	assert.ok(!ids(ctx({ agentPrActivity: [{ ...rising, aiRevertedPrs: 0 }] })).includes('review-burden-rising'), 'volume alone is not a problem');
-	assert.ok(ids(ctx({ agentPrActivity: [{ ...rising, aiRevertedPrs: 0 }], activityTrend: trend(10, 20) })).includes('review-burden-rising'));
+	// Rework is judged per repository: rising rework in o/a counts for o/a…
+	const reworkInA = (key: string): ActivityTrendWindows => {
+		const t = trend(10, 20);
+		return { ...t, repos: { [key]: { current: t.current, previous: t.previous } } };
+	};
+	assert.ok(ids(ctx({ agentPrActivity: [{ ...rising, aiRevertedPrs: 0 }], activityTrend: reworkInA('o/a') })).includes('review-burden-rising'));
+	// …but not for o/b, even though the overall trend shows rising rework.
+	assert.ok(!ids(ctx({ agentPrActivity: [{ ...rising, repository: 'o/b', aiRevertedPrs: 0 }], activityTrend: reworkInA('o/a') })).includes('review-burden-rising'),
+		'another repository\'s rework must not count');
+	assert.ok(!ids(ctx({ agentPrActivity: [{ ...rising, aiRevertedPrs: 0 }], activityTrend: trend(10, 20) })).includes('review-burden-rising'),
+		'an overall trend without per-repository windows says nothing about o/a');
 	assert.ok(!ids(ctx({ agentPrActivity: [{ ...rising, aiAuthoredRecent: 4 }] })).includes('review-burden-rising'), 'too few recent PRs');
 	assert.ok(!ids(ctx({ agentPrActivity: [{ ...rising, aiAuthoredEarlier: 7 }] })).includes('review-burden-rising'), 'not rising enough');
 });

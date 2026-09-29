@@ -115,7 +115,7 @@ import {
   buildRepoAgentActivity as _buildRepoAgentActivity,
   type ActivitySessionInput as _ActivitySessionInput,
 } from '../../src/repoAgentActivity';
-import { repoKeyFromRemote as _repoKeyFromRemote } from '../../src/repoKey';
+import { githubHostsFor as _githubHostsFor, repoKeyFromRemote as _repoKeyFromRemote } from '../../src/repoKey';
 import {
   mergeKnowledgeFiles as _mergeKnowledgeFiles,
   summarizeInstructionFiles as _summarizeInstructionFiles,
@@ -7439,11 +7439,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	): Pick<UsageAnalysisStats, 'repoActivity' | 'activityTrend'> {
 		const inputs: _ActivitySessionInput[] = [];
 		const knowledgeByKey = new Map<string, RepoKnowledgeFiles>();
+		// The readiness scan and PR collector only see these hosts, so only their remotes join as owner/repo.
+		const githubHosts = _githubHostsFor(getConfiguredGitHubEnterpriseUri());
 		for (const r of results) {
 			// Same rule as aggregateSessionFileIntoStats: an empty session is not a session.
 			if (!r || r.sessionData.interactions === 0) { continue; }
 			const data = r.sessionData;
-			this.collectRepoKnowledge(r.sessionFile, data, knowledgeByKey);
+			this.collectRepoKnowledge(r.sessionFile, data, knowledgeByKey, githubHosts);
 			const last = data.lastInteraction ? Date.parse(data.lastInteraction) : NaN;
 			inputs.push({
 				repository: data.repository,
@@ -7454,12 +7456,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 				usageAnalysis: data.usageAnalysis,
 			});
 		}
-		const repoActivity = _buildRepoAgentActivity(inputs, { startMs: last30DaysStartMs, endMs: now.getTime() });
+		const repoActivity = _buildRepoAgentActivity(inputs, { startMs: last30DaysStartMs, endMs: now.getTime(), githubHosts });
 		for (const row of repoActivity.repos) {
 			const knowledge = knowledgeByKey.get(row.key);
 			if (knowledge) { row.knowledge = knowledge; }
 		}
-		return { repoActivity, activityTrend: _buildActivityTrend(inputs, now) };
+		return { repoActivity, activityTrend: _buildActivityTrend(inputs, now, githubHosts) };
 	}
 
 	/**
@@ -7467,8 +7469,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Reads only the customization scan `trackWorkspaceForSession` already cached, so it never
 	 * touches the filesystem itself; a repository whose checkout was not scanned stays unknown.
 	 */
-	private collectRepoKnowledge(sessionFile: string, data: SessionFileCache, knowledgeByKey: Map<string, RepoKnowledgeFiles>): void {
-		const key = _repoKeyFromRemote(data.repository);
+	private collectRepoKnowledge(
+		sessionFile: string,
+		data: SessionFileCache,
+		knowledgeByKey: Map<string, RepoKnowledgeFiles>,
+		githubHosts: ReadonlySet<string>,
+	): void {
+		const key = _repoKeyFromRemote(data.repository, githubHosts);
 		if (!key) { return; }
 		try {
 			const folder = _resolveWorkspaceFolderWithFallback(sessionFile, this._workspaceIdToFolderCache, data.workspaceFolderPath);

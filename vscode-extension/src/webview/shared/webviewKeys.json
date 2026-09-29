@@ -211,6 +211,7 @@
   "agentic.repoSummary.cohortFewer",
   "agentic.repoSummary.cohortMore",
   "agentic.repoSummary.cohortCaveat",
+  "agentic.repoSummary.cohortZeroBaseline",
   "agentic.repoSummary.cohortNotEnough",
   "agentic.repoSummary.unattributed",
   "agentic.modes.title",

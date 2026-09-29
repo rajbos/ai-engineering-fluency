@@ -862,6 +862,8 @@ export interface ActivityTrendWindows {
   currentDays: number;
   previous: AgentActivityTotals;
   previousDays: number;
+  /** The same two windows per repository, keyed like {@link RepoAgentActivity.key}. */
+  repos?: Record<string, { current: AgentActivityTotals; previous: AgentActivityTotals }>;
 }
 
 export interface EditScopeUsage {

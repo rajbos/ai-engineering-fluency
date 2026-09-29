@@ -211,6 +211,7 @@
   "agentic.repoSummary.cohortFewer": "In your own sessions, repositories with agent instruction files needed {0}% fewer corrections per session (median of {1} repositories with instructions vs {2} without).",
   "agentic.repoSummary.cohortMore": "In your own sessions, repositories with agent instruction files needed {0}% more corrections per session (median of {1} repositories with instructions vs {2} without) — worth checking whether those instructions are current.",
   "agentic.repoSummary.cohortCaveat": "This is a correlation in your data, not proof of cause.",
+  "agentic.repoSummary.cohortZeroBaseline": "Repositories without agent instruction files needed a median of 0 corrections per session ({0} repositories), so there is no baseline to compare against; repositories with instruction files needed {1} ({2} repositories).",
   "agentic.repoSummary.cohortNotEnough": "A with/without instruction files comparison appears once each group has at least {0} repositories and {1} sessions (counting repositories with {2}+ sessions).",
   "agentic.repoSummary.unattributed": "{0} of {1} sessions could not be linked to a repository and are not in this table.",
   "agentic.modes.title": "How you work with agents",

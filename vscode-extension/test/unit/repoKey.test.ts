@@ -1,13 +1,42 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
-import { repoDisplayFromRemote, repoKeyFromRemote, repoKeyFromSlug } from '../../../src/repoKey';
+import { githubHostsFor, repoDisplayFromRemote, repoKeyFromRemote, repoKeyFromSlug } from '../../../src/repoKey';
 
-test('repoDisplayFromRemote: HTTPS, SSH, scp-style and git:// remotes reduce to owner/repo', () => {
+test('repoDisplayFromRemote: GitHub HTTPS, SSH, scp-style and git:// remotes reduce to owner/repo', () => {
     assert.equal(repoDisplayFromRemote('https://github.com/Owner/Repo.git'), 'Owner/Repo');
     assert.equal(repoDisplayFromRemote('https://github.com/owner/repo'), 'owner/repo');
     assert.equal(repoDisplayFromRemote('git@github.com:owner/repo.git'), 'owner/repo');
-    assert.equal(repoDisplayFromRemote('ssh://git@ghe.example.com/owner/repo.git'), 'owner/repo');
     assert.equal(repoDisplayFromRemote('git://github.com/owner/repo.git/'), 'owner/repo');
+    assert.equal(repoDisplayFromRemote('ssh://git@ghe.example.com/owner/repo.git', githubHostsFor('https://ghe.example.com')), 'owner/repo');
+    assert.equal(repoDisplayFromRemote('git@GHE.example.com:owner/repo.git', githubHostsFor('https://ghe.example.com/')), 'owner/repo');
+});
+
+test('repoDisplayFromRemote: local paths and file remotes are not repository identities', () => {
+    for (const local of [
+        '/home/user/repo', '/home/user/repo.git', 'file:///home/user/repo', 'file://host/share/user/repo',
+        'C:\\Users\\me\\repo', 'C:/Users/me/repo', '../user/repo', './user/repo', 'user/repo',
+    ]) {
+        assert.equal(repoDisplayFromRemote(local), undefined, local);
+    }
+});
+
+test('repoDisplayFromRemote: other hosts keep their host, so the same owner/repo never merges across hosts', () => {
+    assert.equal(repoDisplayFromRemote('https://gitlab.com/o/r.git'), 'gitlab.com/o/r');
+    assert.equal(repoDisplayFromRemote('git@gitlab.com:o/r.git'), 'gitlab.com/o/r');
+    assert.equal(repoDisplayFromRemote('https://gitlab.com/group/sub/r'), 'gitlab.com/group/sub/r');
+    assert.notEqual(repoKeyFromRemote('https://gitlab.com/o/r'), repoKeyFromRemote('https://github.com/o/r'));
+    assert.notEqual(repoKeyFromRemote('https://gitlab.com/o/r'), repoKeyFromSlug('o/r'));
+    // A GitHub Enterprise remote only joins as owner/repo when that host is configured.
+    assert.equal(repoKeyFromRemote('https://ghe.example.com/o/r'), 'ghe.example.com/o/r');
+    assert.equal(repoKeyFromRemote('https://ghe.example.com/o/r', githubHostsFor('https://ghe.example.com')), 'o/r');
+    // A GitHub URL with extra path segments is not a repository remote.
+    assert.equal(repoDisplayFromRemote('https://github.com/o/r/tree/main'), undefined);
+});
+
+test('githubHostsFor: github.com plus a valid enterprise host', () => {
+    assert.deepEqual([...githubHostsFor(undefined)], ['github.com']);
+    assert.deepEqual([...githubHostsFor('not a url')], ['github.com']);
+    assert.deepEqual([...githubHostsFor('https://GHE.example.com/api')].sort(), ['ghe.example.com', 'github.com']);
 });
 
 test('repoDisplayFromRemote: credentials in the URL never reach the label', () => {

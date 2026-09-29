@@ -149,10 +149,19 @@ function repoSummaryRowHtml(row: RepoAgentActivity): string {
 /** The cohort sentence, or an explanation of why there is none. */
 export function buildCohortComparisonHtml(report: RepoAgentActivityReport): string {
 	const comparison = compareInstructionCohorts(report.repos);
-	if (!comparison.qualifies || comparison.correctionsReductionPct === null) {
+	if (!comparison.qualifies) {
 		return `<div class="agentic-note">${escapeHtml(localizeFormat(
 			'agentic.repoSummary.cohortNotEnough', MIN_COHORT_REPOS, MIN_COHORT_SESSIONS, MIN_REPO_TURN_DETAIL_SESSIONS,
 		))}</div>`;
+	}
+	if (comparison.correctionsReductionPct === null) {
+		// Enough data, but the without-instructions median is zero: there is no baseline to take a percentage of.
+		return `<div class="agentic-note">${escapeHtml(localizeFormat(
+			'agentic.repoSummary.cohortZeroBaseline',
+			comparison.withoutInstructions.repos,
+			(comparison.withInstructions.medianCorrectionsPerSession ?? 0).toFixed(2),
+			comparison.withInstructions.repos,
+		))} ${escapeHtml(localize('agentic.repoSummary.cohortCaveat'))}</div>`;
 	}
 	const pct = Math.round(Math.abs(comparison.correctionsReductionPct));
 	const key = comparison.correctionsReductionPct >= 0 ? 'agentic.repoSummary.cohortFewer' : 'agentic.repoSummary.cohortMore';

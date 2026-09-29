@@ -1296,6 +1296,7 @@ test('l10n: agentic engineering system labels resolve in both languages', () => 
 		['agentic.matrix.quadrant.stretched', 'Stretched', '超负荷'],
 		['agentic.quality.title', 'Quality alongside adoption', '质量与采用程度'],
 		['agentic.reverts.baseline', 'others: {0}', '其他：{0}'],
+		['agentic.repoSummary.cohortZeroBaseline', 'Repositories without agent instruction files needed a median of 0 corrections per session ({0} repositories), so there is no baseline to compare against; repositories with instruction files needed {1} ({2} repositories).', '没有智能体说明文件的仓库每个会话的纠正次数中位数为 0（{0} 个仓库），因此没有可供比较的基线；有说明文件的仓库为 {1}（{2} 个仓库）。'],
 		['insight.agenticStretched.title', '🧭 Agent use has outrun the controls', '🧭 智能体使用已超出控制能力'],
 		['insight.speedWithoutQuality.title', '⚖️ More agent use, more rework', '⚖️ 智能体使用更多，返工也更多'],
 		['insight.delegationWithoutObjective.title', '🎯 State the goal before the agent starts', '🎯 在智能体开始前说明目标'],

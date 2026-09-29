@@ -1,6 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import {
+	buildCohortComparisonHtml,
 	buildCorrectionsRepoSummaryHtml,
 	buildParticipationModesCardHtml,
 	buildRevertCellHtml,
@@ -103,4 +104,22 @@ test('buildRevertCellHtml: agent reverted / merged with the baseline rate, dash 
 	assert.match(html, /others: 5%/);
 	assert.equal(buildRevertCellHtml({}), '—');
 	assert.match(buildRevertCellHtml({ otherMergedPrs: 0, otherRevertedPrs: 0 }), /others: —/);
+});
+
+test('buildCohortComparisonHtml: not enough data, a zero baseline and a real comparison each say something different', () => {
+	const repo = (name: string, instructionFiles: number, corrections: number) => repoRow(name, {
+		sessions: 10, sessionsWithTurnDetail: 10, correctionMoments: corrections,
+		knowledge: { instructionFiles, staleInstructionFiles: 0 },
+	});
+	const withFiles = (corrections: number) => [repo('a/w1', 1, corrections), repo('a/w2', 1, corrections), repo('a/w3', 1, corrections)];
+	const without = (corrections: number) => [repo('b/n1', 0, corrections), repo('b/n2', 0, corrections), repo('b/n3', 0, corrections)];
+
+	assert.match(buildCohortComparisonHtml(activityReport(withFiles(5))), /appears once each group has at least/);
+
+	const zero = buildCohortComparisonHtml(activityReport([...withFiles(5), ...without(0)]));
+	assert.match(zero, /needed a median of 0 corrections per session \(3 repositories\), so there is no baseline/);
+	assert.match(zero, /with instruction files needed 0\.50 \(3 repositories\)/);
+	assert.doesNotMatch(zero, /appears once each group/, 'enough data is never reported as not enough');
+
+	assert.match(buildCohortComparisonHtml(activityReport([...withFiles(5), ...without(10)])), /needed 50% fewer corrections per session/);
 });

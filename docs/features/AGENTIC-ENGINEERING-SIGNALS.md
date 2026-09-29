@@ -55,9 +55,12 @@ is shaped the way it is, is in [ADR: Agentic Engineering System plan](../adr/AGE
 ### Per-repository activity (`src/repoAgentActivity.ts`)
 
 Sessions from the last 30 days (by last interaction; empty sessions skipped, as everywhere else)
-are grouped by a lowercase `owner/repo` key derived from the workspace's git remote
-(`src/repoKey.ts`). Sessions with no resolvable remote go to an *unattributed* bucket whose size is
-shown. A second pass groups this month to date and all of last month for the trend.
+are grouped by a key derived from the workspace's git remote (`src/repoKey.ts`): lowercase
+`owner/repo` on github.com and the configured GitHub Enterprise host, which is what the readiness
+scan and the PR snapshot use, and `host/path` on any other host, so a GitLab `o/r` never merges with
+a GitHub `o/r`. Only network remotes count; sessions with a local-path or `file://` remote, or none,
+go to an *unattributed* bucket whose size is shown. A second pass groups this month to date and
+all of last month, overall and per repository, for the trend.
 
 - **Agentic session:** any agent, custom-agent or CLI-agent interaction, on every CLI surface (terminal, the Copilot desktop app, Claude Desktop, Claude in an IDE).
 - **Delegation session:** task category `Delegation`, or at least one sub-agent call.
@@ -84,7 +87,9 @@ Instruction files are read from the customization scan the extension already run
 the `instructions` and `non-copilot-instructions` types, plus `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
 and `CODEX.md` wherever they are. The cohort comparison uses repositories with a scanned checkout
 and at least 5 turn-detail sessions; it appears once each cohort has 3 such repositories and 20
-sessions, and compares median corrections per session.
+sessions, and compares median corrections per session. When the repositories without instruction
+files had a median of zero corrections there is no baseline for a percentage, and it says so
+instead of reporting too little data.
 
 ### Quality alongside adoption (`src/speedVsError.ts`)
 
@@ -125,7 +130,7 @@ corrections, and their rate is at least 1.5× and 10 points above the scoped ses
 | `speed-without-quality` | This month is *faster but weaker* |
 | `delegation-without-objective` | See prompt scoping above |
 | `unreviewed-agent-merges` | Agents open PRs in a workspace repository whose `human-review-enforced` control is not present. Today that control is API-only and not yet collected, so the wording says the scan *cannot confirm* review |
-| `review-burden-rising` | A repository's cloud-agent PRs in the recent half of the PR window are ≥ 5 and ≥ 1.5× the earlier half, together with reverts there or rising rework |
+| `review-burden-rising` | A repository's cloud-agent PRs in the recent half of the PR window are ≥ 5 and ≥ 1.5× the earlier half, together with reverts there or rising rework in that same repository (its own month-over-month windows, with the thresholds above) |
 
 The readiness scan behind the scan-based insights is cached and re-run at most once an hour. Opening the Fluency Score never scans: its stretched-repository note uses only a scan already cached by the AI Readiness tab or the insights pass, and is left out until one exists.
 

@@ -164,3 +164,26 @@ test('isAgenticSession: every CLI surface counts, not only the terminal bucket',
 	}
 	assert.equal(isAgenticSession({ modeUsage: base } as unknown as SessionUsageAnalysis), false);
 });
+
+test('buildRepoAgentActivity: a GitLab repository never merges with the GitHub repository of the same name', () => {
+    const report = buildRepoAgentActivity([
+        session({ repository: 'https://github.com/o/r' }),
+        session({ repository: 'https://gitlab.com/o/r' }),
+        session({ repository: '/home/user/o/r' }),
+    ], window30);
+    assert.deepEqual(report.repos.map(r => r.key).sort(), ['gitlab.com/o/r', 'o/r']);
+    assert.equal(report.unattributed.sessions, 1, 'a local path is not a remote');
+});
+
+test('buildActivityTrend: keeps the same windows per repository, keyed like the activity report', () => {
+    const now = new Date(Date.UTC(2026, 8, 10, 12));
+    const at = (repository: string, m: number): ActivitySessionInput => ({ ...session({ repository }), lastInteractionMs: Date.UTC(2026, m, 5, 9) });
+    const trend = buildActivityTrend([
+        at('https://github.com/O/A', 8), at('git@github.com:o/a.git', 7), at('https://github.com/o/b', 8), at('https://gitlab.com/o/a', 8),
+    ], now);
+    assert.equal(trend.current.sessions, 3);
+    assert.equal(trend.repos?.['o/a'].current.sessions, 1);
+    assert.equal(trend.repos?.['o/a'].previous.sessions, 1);
+    assert.equal(trend.repos?.['o/b'].current.sessions, 1);
+    assert.equal(trend.repos?.['gitlab.com/o/a'].current.sessions, 1);
+});
