@@ -38,18 +38,13 @@ function hasPrefix(pathname, prefix) {
  * Any local process can connect to a loopback port, so every route (page, assets, state, events, refresh) lives under
  * an unguessable per-panel path. Only the canvas gets it, through the URL returned here; requests without it get 404.
  */
-export async function startServer({ refresher, keepAliveMs = 25_000 }) {
+export async function startServer({ refresher, keepAliveMs = 25_000, port = 0 }) {
     const base = `/${randomBytes(32).toString("base64url")}/`;
     const clients = new Set();
     const broadcast = (state) => {
         const frame = `event: state\ndata: ${JSON.stringify(state)}\n\n`;
         for (const res of clients) res.write(frame);
     };
-    refresher.on("change", broadcast);
-    const keepAlive = setInterval(() => {
-        for (const res of clients) res.write(": keep-alive\n\n");
-    }, keepAliveMs);
-    keepAlive.unref?.();
 
     const server = createServer((req, res) => {
         void (async () => {
@@ -110,6 +105,19 @@ export async function startServer({ refresher, keepAliveMs = 25_000 }) {
             else res.end();
         });
     });
+    // Bind first: if the port cannot be opened, nothing below has been set up yet, so there is nothing to leak.
+    await new Promise((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(port, "127.0.0.1", () => {
+            server.off("error", reject);
+            resolve();
+        });
+    });
+    refresher.on("change", broadcast);
+    const keepAlive = setInterval(() => {
+        for (const res of clients) res.write(": keep-alive\n\n");
+    }, keepAliveMs);
+    keepAlive.unref?.();
     server.on("close", () => {
         clearInterval(keepAlive);
         refresher.off("change", broadcast);
@@ -122,12 +130,5 @@ export async function startServer({ refresher, keepAliveMs = 25_000 }) {
             server.close(() => resolve());
             server.closeAllConnections?.();
         });
-    await new Promise((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(0, "127.0.0.1", () => {
-            server.off("error", reject);
-            resolve();
-        });
-    });
     return { server, close, url: `http://127.0.0.1:${server.address().port}${base}` };
 }

@@ -13,7 +13,8 @@ copilot-app/                                  <- plugin root (marketplace "sourc
 ├── plugin.json                               <- Agent Plugins 1.0 manifest (closed schema)
 ├── skills/ai-fluency/SKILL.md                <- tells the agent when/how to open the canvas
 ├── com.github.copilot/extensions/ai-fluency/ <- the canvas extension (canvasId "ai-fluency")
-│   ├── extension.mjs                         <- registers the canvas and its agent actions
+│   ├── extension.mjs                         <- entry point: hands the Copilot SDK to canvas.mjs
+│   ├── canvas.mjs                            <- registers the canvas and its agent actions
 │   ├── cli.mjs  refresher.mjs  store.mjs  server.mjs  panels.mjs
 │   ├── assets/                               <- UI served on 127.0.0.1 (index.html, app.js, style.css)
 │   ├── copilot-extension.json                <- only for the app's manual "Install extension" flow
@@ -29,7 +30,7 @@ The extension folder keeps the name `ai-fluency` so the `canvasId` and the snaps
 (`$COPILOT_HOME/extensions/ai-fluency/artifacts/`) stay the same whether the canvas is installed
 as a plugin or copied by hand. Snapshots are **never** written inside this folder; `.gitignore`
 and `test/manifest.test.mjs` both guard against committing an `artifacts/` directory,
-`snapshot.json` or `refresh.lock`.
+`snapshot.json` or `refresh.lock*` files.
 
 ## Tests
 

@@ -3,7 +3,7 @@ import { chmod, mkdtemp, mkdir, readdir, rm, stat, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { buildSnapshot, describeSession, ensurePrivateDir, readSnapshot, summarize, topSeries, writeSnapshot } from "../store.mjs";
+import { buildSnapshot, describeSession, ensurePrivateDir, readSnapshot, readSnapshotFile, summarize, topSeries, windowStart, writeSnapshot } from "../store.mjs";
 import { samplePayload } from "./fixtures.mjs";
 
 const noDescribe = () => ({ label: null, project: null });
@@ -119,6 +119,31 @@ test("summarize leaves session titles and projects out unless asked", () => {
     assert.deepEqual(summary.topSessionsLast7Days, []);
     assert.doesNotMatch(JSON.stringify(summary), /secret prompt|private-repo/);
     assert.match(JSON.stringify(summarize(snapshot, { topSessions: 5 })), /secret prompt/);
+});
+
+test("the last-7-days window counts calendar days from local midnight, like the CLI", () => {
+    const now = new Date(2026, 0, 10, 9, 0); // local Jan 10, 09:00
+    assert.equal(windowStart(1, now), new Date(2026, 0, 10).getTime(), "today starts at local midnight");
+    assert.equal(windowStart(7, now), new Date(2026, 0, 4).getTime(), "7 days = today plus the 6 days before it");
+    const base = buildSnapshot(samplePayload(), { describe: noDescribe });
+    const session = (label, lastActivity) => ({ ...base.sessions[0], label, lastActivity: lastActivity.toISOString() });
+    const snapshot = {
+        ...base,
+        sessions: [session("early on the 4th", new Date(2026, 0, 4, 0, 30)), session("late on the 3rd", new Date(2026, 0, 3, 23, 30))],
+    };
+    const labels = summarize(snapshot, { topSessions: 5, now }).topSessionsLast7Days.map((s) => s.label);
+    assert.deepEqual(labels, ["early on the 4th"], "Jan 3 23:30 is inside a rolling 7x24h window, but not on the last 7 calendar days");
+});
+
+test("readSnapshotFile tells a missing snapshot apart from an unreadable one", async (t) => {
+    const dir = await mkdtemp(join(tmpdir(), "ai-fluency-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    assert.deepEqual(await readSnapshotFile(dir), { snapshot: null, missing: true });
+    await writeFile(join(dir, "snapshot.json"), "{ half written");
+    assert.deepEqual(await readSnapshotFile(dir), { snapshot: null, missing: false });
+    const snapshot = buildSnapshot(samplePayload(), { describe: noDescribe });
+    await writeSnapshot(snapshot, dir);
+    assert.deepEqual(await readSnapshotFile(dir), { snapshot, missing: false });
 });
 
 test("snapshots are owner-only on POSIX, including folders from older versions", { skip: process.platform === "win32" && "POSIX modes do not apply on Windows" }, async (t) => {

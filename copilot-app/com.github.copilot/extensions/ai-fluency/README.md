@@ -23,7 +23,8 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
   Total at Copilot AI Credit rates but the editor/provider cost splits at each tool's own rates, so the canvas shows a
   note when a cost split is selected.
 - **Sessions** — every session from the last 30 days across all tracked tools, filterable by
-  today / 7 days / 30 days, searchable, sortable by recency, tokens or cost.
+  today / 7 days / 30 days (calendar days from local midnight, the same windows the CLI uses), searchable, sortable
+  by recency, tokens or cost.
 - **Fluency Score** — overall stage banner, spider (radar) chart of the six categories with the stage reference,
   and per-category cards with a stage badge, progress bar, evidence and next-step tips.
 
@@ -40,14 +41,24 @@ It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
   derived from small metadata files next to each session (Copilot CLI `workspace.yaml`, VS Code
   `workspace.json`, Claude worktree folder names) — transcripts are never read by the canvas.
 - `refresher.mjs` shows the last snapshot instantly, refreshes on open when it is older than 5 minutes,
-  and auto-refreshes every 30 minutes while a panel is open. A `refresh.lock` file ensures only one CLI run
-  at a time across all Copilot sessions; other sessions pick up the new snapshot via a file watcher. The lock is
-  published atomically (hard link) with a per-run token. An unreadable lock is treated as held for a few seconds
-  (it may still be being written). A stale lock (dead process or older than the timeout) is taken over through a
-  per-lock claim file, and the lock is re-read before it is removed, so only one session can take it over. The owner
-  stops removing its own lock shortly before it would count as stale, so a takeover and a release never overlap.
-  On timeout the CLI's whole process tree is stopped (`taskkill /T` on Windows, the process group on macOS/Linux).
-  On shutdown the refresher stops the running CLI, waits briefly for it to exit, and releases the lock.
+  and auto-refreshes every 30 minutes while a panel is open. With no panel open, `get_summary` reads the snapshot
+  file again on every call, so it never serves a copy another session has replaced (or that was deleted). Lock files
+  ensure only one CLI run at a time across all Copilot sessions; other sessions pick up the new snapshot via a file
+  watcher, which ignores snapshots older than the one it already has. Each run takes the next lock *generation*,
+  `refresh.lock.<n>`, published atomically (hard link) with a per-run token, and the highest generation is the
+  current lock. A session may only create generation n+1 once generation n is finished (a `refresh.lock.<n>.done`
+  marker carrying its token), stale (dead process or past the timeout), or absent. Creating the file is exclusive, so
+  exactly one session wins each generation, and the current lock is never deleted — only lower generations are
+  cleaned up — so a takeover and a late release can never remove someone else's lock. An unreadable lock is treated
+  as held for a few seconds (it may still be being written). A `refresh.lock` from older versions is respected
+  while it is live and never removed — as a best effort only, since an older version doesn't know about
+  generations, so don't run a manual copy next to the plugin.
+  On timeout the CLI's whole process tree is stopped (`taskkill /T` on Windows, the process group on macOS/Linux),
+  and the lock is left to expire instead of being released, so a CLI that is still exiting cannot overlap the next
+  run. On shutdown the refresher stops the running CLI, waits briefly for it to exit, and releases the lock (or, if
+  it has not exited by then, leaves the lock to expire).
+- `canvas.mjs` registers the canvas and its agent actions and wires up shutdown; `extension.mjs` only passes it the
+  Copilot SDK, so the registration is unit-tested with a stub SDK.
 - `panels.mjs` tracks open panels so that concurrent opens and closes start and stop the refresher exactly once each.
 - `server.mjs` serves the UI on `127.0.0.1` under a random, per-panel URL path (other local processes cannot
   guess it), with a same-origin-only CSP (inline *styles* are allowed because the Copilot app injects its theme

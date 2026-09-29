@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { request } from "node:http";
+import { createServer } from "node:net";
 import { test } from "node:test";
 import { startServer } from "../server.mjs";
 
@@ -146,4 +147,13 @@ test("the first event carries the snapshot even when the disk read is still in p
     }
     const first = JSON.parse(text.split("\n").find((line) => line.startsWith("data: ")).slice(6));
     assert.equal(first.snapshot?.fetchedAt, "2026-01-01T00:00:00.000Z");
+});
+
+test("a port that cannot be bound fails cleanly without subscribing to the refresher", async (t) => {
+    const refresher = fakeRefresher();
+    const busy = createServer();
+    await new Promise((resolve) => busy.listen(0, "127.0.0.1", resolve));
+    t.after(() => new Promise((resolve) => busy.close(resolve)));
+    await assert.rejects(startServer({ refresher, port: busy.address().port }), { code: "EADDRINUSE" });
+    assert.equal(refresher.listenerCount("change"), 0, "no listener or keep-alive timer is left behind");
 });

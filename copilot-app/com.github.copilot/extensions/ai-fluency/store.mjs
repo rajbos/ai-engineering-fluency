@@ -274,13 +274,28 @@ export function snapshotPath(dir = artifactsDir()) {
     return join(dir, "snapshot.json");
 }
 
-export async function readSnapshot(dir = artifactsDir()) {
+/**
+ * Reads the snapshot. `missing` is true only when the file does not exist (for example after `artifacts/` was deleted
+ * to reset the canvas); a file that cannot be read or parsed gives `{ snapshot: null, missing: false }`, so callers can
+ * keep the last good copy instead of forgetting it.
+ */
+export async function readSnapshotFile(dir = artifactsDir()) {
+    let text;
     try {
-        const snapshot = JSON.parse(await readFile(snapshotPath(dir), "utf8"));
-        return snapshot?.schemaVersion === SCHEMA_VERSION ? snapshot : null;
-    } catch {
-        return null;
+        text = await readFile(snapshotPath(dir), "utf8");
+    } catch (error) {
+        return { snapshot: null, missing: error.code === "ENOENT" };
     }
+    try {
+        const snapshot = JSON.parse(text);
+        return { snapshot: snapshot?.schemaVersion === SCHEMA_VERSION ? snapshot : null, missing: false };
+    } catch {
+        return { snapshot: null, missing: false };
+    }
+}
+
+export async function readSnapshot(dir = artifactsDir()) {
+    return (await readSnapshotFile(dir)).snapshot;
 }
 
 export async function writeSnapshot(snapshot, dir = artifactsDir()) {
@@ -300,10 +315,18 @@ export async function writeSnapshot(snapshot, dir = artifactsDir()) {
 const round = (value, digits = 2) => Math.round(value * 10 ** digits) / 10 ** digits;
 
 /**
+ * Start (local midnight) of an N-day window that includes today, as a timestamp. Same rule as the CLI's
+ * `getTimeWindowStartDate` (src/timeWindows.ts): calendar days, not a rolling 24-hour count, so DST shifts don't matter.
+ */
+export function windowStart(days, now = new Date()) {
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() - days + 1).getTime();
+}
+
+/**
  * Compact, agent-friendly view of a snapshot. Whatever this returns is sent to the model as a tool result, so session
  * titles and project names are only included when the caller asks for them (`topSessions` > 0).
  */
-export function summarize(snapshot, { topSessions = 0 } = {}) {
+export function summarize(snapshot, { topSessions = 0, now = new Date() } = {}) {
     if (!snapshot) return { available: false, message: "No snapshot yet — a refresh is needed (it takes several minutes)." };
     const period = (p) => ({
         tokens: p.tokens,
@@ -316,7 +339,7 @@ export function summarize(snapshot, { topSessions = 0 } = {}) {
         topModels: p.models.slice(0, 5).map((m) => ({ name: m.name, tokens: m.tokens })),
         editors: p.editors.map((e) => ({ name: e.name, tokens: e.tokens, sessions: e.sessions })),
     });
-    const since = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const since = windowStart(7, now);
     const lastWeek = snapshot.sessions.filter((s) => Date.parse(s.lastActivity) >= since);
     return {
         available: true,

@@ -23,7 +23,7 @@ Copilot app's light/dark theme.
 |---|---|
 | **Details** | Tokens, estimated cost, activity and environmental impact for today, the last 30 days, this month, last month and a projected year, plus usage by editor and by model. On narrow panels a picker shows one of those columns at a time. |
 | **Chart** | Usage per day, week or month as tokens, cost or sessions — as a total or split by model, editor or provider — with a rolling average and a projected bar for the current period. |
-| **Sessions** | Every session of the last 30 days across all tracked tools; filter by today / 7 days / 30 days, search, and sort by recency, tokens or cost. |
+| **Sessions** | Every session of the last 30 days across all tracked tools; filter by today / 7 days / 30 days (calendar days, like the CLI), search, and sort by recency, tokens or cost. |
 | **Fluency Score** | Your overall stage, a radar chart of the six fluency categories, and per-category evidence and next-step tips. See [FLUENCY-LEVELS.md](../FLUENCY-LEVELS.md). |
 
 The agent can use it too: ask things like *"how many tokens did I use this month?"* and it reads the cached numbers
@@ -180,7 +180,7 @@ A manual copy does not update itself; the plugin install is the recommended rout
 |---|---|
 | Plugin code | Managed by Copilot under `~/.copilot/installed-plugins/` — don't edit it there. |
 | Cached snapshot | `$COPILOT_HOME/extensions/ai-fluency/artifacts/snapshot.json` (`COPILOT_HOME` defaults to `~/.copilot`). On macOS and Linux the `artifacts/` folder is owner-only (`0700`) and the snapshot `0600`, because it contains session titles; the canvas also tightens folders written by older versions. On Windows your user profile's permissions apply. |
-| Refresh lock | `refresh.lock` in the same folder, only while a CLI run is in progress. |
+| Refresh locks | `refresh.lock.<n>` files (plus a `.done` marker once a run finishes) in the same folder. Only the newest one is kept; older ones are cleaned up by the next run. |
 
 Delete the `artifacts/` folder to reset the canvas; the next open runs a full refresh again.
 
@@ -190,7 +190,7 @@ Delete the `artifacts/` folder to reset the canvas; the next open runs a full re
 |---|---|
 | The canvas is not listed / the agent can't open it | Run `copilot plugin list` and check `ai-fluency-canvas` is installed and enabled. Start a new session or restart the app so plugins are loaded again. You can also ask the agent to list the loaded extensions and show the `ai-fluency` extension log. |
 | The agent asks which `ai-fluency` provider to use | Both the plugin and a manual copy are installed — see [Migrating](#migrating-from-a-manually-installed-copy). |
-| The canvas stays on "refreshing" for minutes | Expected on the first run: every local session log is parsed. Install the CLI globally (`npm install -g @rajbos/ai-engineering-fluency`) to skip the `npx` download on each run. A run is stopped after 20 minutes, including any `npx`/`node` processes it started. |
+| The canvas stays on "refreshing" for minutes | Expected on the first run: every local session log is parsed. Install the CLI globally (`npm install -g @rajbos/ai-engineering-fluency`) to skip the `npx` download on each run. A run is stopped after 20 minutes, including any `npx`/`node` processes it started; the next refresh then waits a couple of minutes so a run that is still exiting can't overlap it. |
 | Refresh fails with an `npx`/`node` error | Install Node.js 22+ and make sure `node` and `npx` are on the `PATH` the Copilot app sees (restart the app after installing). Behind a proxy, `npx` needs access to the npm registry, or install the CLI globally. |
 | Numbers look different from the VS Code extension | Both read the same logs, but the canvas shows the snapshot from its last refresh — check "Updated … ago" at the top of the canvas and use **Refresh**. See the [CLI docs](../cli/README.md) for what is counted. |
 

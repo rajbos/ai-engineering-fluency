@@ -36,6 +36,7 @@ function run(command, { spawnImpl = spawn, killImpl = killTree, timeoutMs = DEFA
         const timer = setTimeout(() => {
             const seconds = Math.round(timeoutMs / 1000);
             timeoutError = new Error(`CLI timed out after ${seconds >= 60 ? `${Math.round(seconds / 60)} minutes` : `${seconds} seconds`}`);
+            timeoutError.timedOut = true; // the tree may outlive the kill; the refresher lets its lock expire instead of releasing it
             killImpl(child, { graceMs });
             // A descendant that survives the kill can hold stdout/stderr open, so `close` might never fire.
             giveUp = setTimeout(() => {
@@ -59,6 +60,11 @@ function run(command, { spawnImpl = spawn, killImpl = killTree, timeoutMs = DEFA
 /**
  * Stops the CLI and everything it started. Windows: `taskkill /T` walks the tree. POSIX: the shell leads its own
  * process group (`detached`), so the whole group gets SIGTERM, then SIGKILL if it is still around after `graceMs`.
+ *
+ * On Windows an exited shell is left alone: its PID may already belong to an unrelated process, and `/T` cannot find
+ * orphaned descendants through a parent that is gone (that needs a Job Object, which Node cannot create). The CLI
+ * starts no background processes, and after a timeout the refresher keeps its lock until it expires, so a survivor
+ * cannot overlap the next run within that window.
  */
 export function killTree(child, { graceMs = KILL_GRACE_MS, killImpl = process.kill, spawnImpl = spawn } = {}) {
     const pid = child?.pid;

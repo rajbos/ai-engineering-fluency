@@ -85,6 +85,7 @@ src/graphify-out/
 copilot-app/**/artifacts/
 copilot-app/**/snapshot.json
 copilot-app/**/refresh.lock
+copilot-app/**/refresh.lock.*
 
 # Visual view-diff output (screenshots, diff images and reports produced by
 # .github/skills/visual-view-diff). Regenerable from any checkout — the fixtures

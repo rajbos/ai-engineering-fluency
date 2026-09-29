@@ -4,21 +4,26 @@ import { unwatchFile, watchFile } from "node:fs";
 import { link, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runFluencyCli, DEFAULT_TIMEOUT_MS, KILL_GRACE_MS, killTree } from "./cli.mjs";
-import { artifactsDir, buildSnapshot, ensurePrivateDir, PRIVATE_FILE_MODE, readSnapshot, snapshotPath, writeSnapshot } from "./store.mjs";
+import { artifactsDir, buildSnapshot, ensurePrivateDir, PRIVATE_FILE_MODE, readSnapshotFile, snapshotPath, writeSnapshot } from "./store.mjs";
 
 export const AUTO_REFRESH_MS = 30 * 60 * 1000;
 export const OPEN_REFRESH_MIN_AGE_MS = 5 * 60 * 1000;
 const TICK_MS = 60 * 1000;
 /** A live session's lock goes stale this long after the CLI timeout (covers CLI resolution and the kill grace). */
 const LOCK_STALE_GRACE_MS = 2 * 60 * 1000;
-/** The owner only removes its lock while it is at least this far from going stale (see releaseLock). */
-const RELEASE_MARGIN_MS = 30 * 1000;
 /** A lock file that cannot be parsed yet may still be being written (no-hard-link fallback); treat it as held this long. */
 const PARTIAL_LOCK_GRACE_MS = 10 * 1000;
-/** Takeover claims live for milliseconds; one older than this was left behind by a session that crashed. */
-const CLAIM_TTL_MS = 30 * 1000;
-const MAX_CLAIMS = 5;
+/** Temp files live for milliseconds while a lock is published; one older than this was left by a crashed session. */
+const TEMP_TTL_MS = 30 * 1000;
 const DISPOSE_WAIT_MS = KILL_GRACE_MS * 2 + 1000;
+/**
+ * Lock written by versions before generation numbers (`refresh.lock`); respected while live, never removed. Best effort
+ * only: an old version doesn't know about generations, so the two can still overlap if both run at once (the docs
+ * tell users to remove a manual copy when installing the plugin).
+ */
+const LEGACY_LOCK = "refresh.lock";
+const GENERATION = /^refresh\.lock\.(\d+)(\.done)?$/;
+const LOCK_TEMP = /^refresh\.lock\..+\.tmp$/;
 
 function pidAlive(pid) {
     try {
@@ -27,18 +32,6 @@ function pidAlive(pid) {
     } catch (error) {
         return error.code === "EPERM";
     }
-}
-
-/** Same lock file contents (locks written by older versions have no token, so fall back to pid + start time). */
-function sameLock(a, b) {
-    if (!a || !b) return a === b;
-    return a.token === b.token && a.pid === b.pid && a.startedAt === b.startedAt && a.unreadable === b.unreadable;
-}
-
-/** File-name-safe identity of one lock file's contents. */
-function lockId(lock) {
-    const raw = lock.token ?? `${lock.unreadable ? "unreadable" : lock.pid}-${Date.parse(lock.startedAt)}`;
-    return String(raw).replace(/[^\w-]/g, "").slice(0, 64) || "lock";
 }
 
 /** True when `candidate` is a newer snapshot than `current`. */
@@ -53,10 +46,24 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /**
  * Owns the on-disk snapshot and makes sure only one CLI run happens at a time,
  * across every Copilot session on this machine (each session runs its own
- * extension process, so a lock file coordinates them).
+ * extension process, so lock files coordinate them).
+ *
+ * Locking: every run gets the next lock *generation*, `refresh.lock.<n>`, and the highest generation on disk is the
+ * current lock. A session may only start a run by creating generation n+1 after finding generation n finished (a
+ * `.done` marker), stale, or absent. Creating a file is exclusive, so exactly one session wins each generation, and a
+ * lock file is never deleted while it could still be the current one, so there is no check-then-delete race to lose.
  */
 export class Refresher extends EventEmitter {
-    constructor({ dir = artifactsDir(), runCli = runFluencyCli, kill = killTree, now = () => Date.now(), timeoutMs = DEFAULT_TIMEOUT_MS, pollMs = 5000 } = {}) {
+    constructor({
+        dir = artifactsDir(),
+        runCli = runFluencyCli,
+        kill = killTree,
+        now = () => Date.now(),
+        timeoutMs = DEFAULT_TIMEOUT_MS,
+        pollMs = 5000,
+        disposeWaitMs = DISPOSE_WAIT_MS,
+        readSnapshot = readSnapshotFile,
+    } = {}) {
         super();
         this.dir = dir;
         this.runCli = runCli;
@@ -64,10 +71,16 @@ export class Refresher extends EventEmitter {
         this.now = now;
         this.timeoutMs = timeoutMs;
         this.pollMs = pollMs;
-        this.lockPath = join(dir, "refresh.lock");
+        this.disposeWaitMs = disposeWaitMs;
+        this.readSnapshot = readSnapshot;
+        this.lockGeneration = null;
         this.lockToken = null;
+        this.keptToken = null;
         this.snapshot = null;
         this.loading = null;
+        this.loaded = false;
+        this.reads = 0;
+        this.latestRead = null;
         this.status = { state: "idle", startedAt: null, finishedAt: null, error: null, byOtherSession: false };
         this.inflight = null;
         this.child = null;
@@ -78,16 +91,50 @@ export class Refresher extends EventEmitter {
     }
 
     /**
-     * Reads the snapshot from disk once per use of the canvas; concurrent callers share the read. A newer in-memory
-     * snapshot (from a refresh that landed while reading) is never replaced by an older file.
+     * Reads the snapshot from disk; concurrent callers share one read. While a panel is open the file watcher keeps the
+     * snapshot current, so the read is reused; with no panel open nothing watches the file, so every call reads it again.
      */
     load() {
-        this.loading ??= (async () => {
-            await ensurePrivateDir(this.dir).catch(() => {});
-            const snapshot = await readSnapshot(this.dir);
-            if (isNewer(snapshot, this.snapshot)) this.snapshot = snapshot;
-        })();
+        if (!this.loading || (!this.watching && this.loaded)) {
+            this.loaded = false;
+            const loading = ensurePrivateDir(this.dir)
+                .catch(() => {})
+                .then(() => this.readFromDisk());
+            this.loading = loading;
+            loading
+                .finally(() => {
+                    if (this.loading === loading) this.loaded = true;
+                })
+                .catch(() => {});
+        }
         return this.loading.then(() => this.snapshot);
+    }
+
+    /**
+     * Applies the file on disk: a newer snapshot replaces the one in memory (never an older one, even if file events
+     * arrive out of order), and a deleted file clears it (unless a refresh replaced it while reading). An unreadable
+     * file keeps the last good copy. When reads overlap, only the latest one is applied, so a slow read that started
+     * before the file was deleted cannot bring it back. Returns true when the in-memory snapshot changed.
+     */
+    readFromDisk() {
+        const read = this.applyDiskRead(++this.reads);
+        this.latestRead = read;
+        return read;
+    }
+
+    async applyDiskRead(read) {
+        const before = this.snapshot;
+        const { snapshot, missing } = await this.readSnapshot(this.dir);
+        // Superseded: wait for the latest read so callers still see the current state once this resolves.
+        if (read !== this.reads) return this.latestRead.then(() => false, () => false);
+        if (missing) {
+            if (!before || this.snapshot !== before) return false;
+            this.snapshot = null;
+            return true;
+        }
+        if (!isNewer(snapshot, this.snapshot)) return false;
+        this.snapshot = snapshot;
+        return true;
     }
 
     state() {
@@ -108,8 +155,12 @@ export class Refresher extends EventEmitter {
         return this.timeoutMs + LOCK_STALE_GRACE_MS;
     }
 
+    lockFile(generation) {
+        return join(this.dir, `${LEGACY_LOCK}.${generation}`);
+    }
+
     /** The parsed lock, `null` when there is none, or `{ unreadable, startedAt: <mtime> }` when it cannot be parsed. */
-    async readLock(path = this.lockPath) {
+    async readLock(path) {
         let text;
         try {
             text = await readFile(path, "utf8");
@@ -127,17 +178,52 @@ export class Refresher extends EventEmitter {
         return { unreadable: true, startedAt: new Date(mtimeMs).toISOString() };
     }
 
-    /** A lock that must be respected: another live session's run within its time budget, or one still being written. */
+    /** Highest lock generation on disk (0 when there is none), whether it is finished, and every file name. */
+    async listLocks() {
+        const names = await readdir(this.dir).catch((error) => {
+            if (error.code === "ENOENT") return [];
+            throw error;
+        });
+        let generation = 0;
+        const done = new Set();
+        for (const name of names) {
+            const match = GENERATION.exec(name);
+            if (!match) continue;
+            const value = Number(match[1]);
+            if (match[2]) done.add(value);
+            else generation = Math.max(generation, value);
+        }
+        return { generation, done: done.has(generation), names };
+    }
+
+    /** The current lock: the highest generation, with `lock: null` once its owner marked it done (or when there is none). */
+    async currentLock() {
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const { generation, done } = await this.listLocks();
+            if (generation === 0) return { generation, lock: null };
+            const path = this.lockFile(generation);
+            const lock = await this.readLock(path);
+            if (!lock) continue; // gone between listing and reading: a session that lost the race removed its own file
+            // The marker must name this lock's token: a leftover marker from an older holder of the same number doesn't count.
+            if (done && lock.token && (await this.readLock(`${path}.done`))?.token === lock.token) return { generation, lock: null };
+            return { generation, lock };
+        }
+        return { generation: (await this.listLocks()).generation, lock: null };
+    }
+
+    /** A lock that must be respected: another run within its time budget, or a lock file that is still being written. */
     isOtherSessionLock(lock) {
         if (!lock) return false;
+        if (lock.token && lock.token === this.lockToken) return false;
         const age = this.now() - Date.parse(lock.startedAt);
         if (lock.unreadable) return age < PARTIAL_LOCK_GRACE_MS;
-        if (lock.pid === process.pid) return false;
         return age < this.staleAfterMs() && pidAlive(lock.pid);
     }
 
     async otherSessionLock() {
-        const lock = await this.readLock();
+        const legacy = await this.readLock(join(this.dir, LEGACY_LOCK));
+        if (this.isOtherSessionLock(legacy)) return legacy;
+        const { lock } = await this.currentLock();
         return this.isOtherSessionLock(lock) ? lock : null;
     }
 
@@ -146,16 +232,16 @@ export class Refresher extends EventEmitter {
      * nobody can read it half-written. File systems without hard links fall back to an exclusive create; readers
      * treat the brief unparseable state as held (PARTIAL_LOCK_GRACE_MS) rather than stale.
      */
-    async createLock(body, token) {
-        const temp = `${this.lockPath}.${token}.tmp`;
+    async createLock(path, body, token) {
+        const temp = `${path}.${token}.tmp`;
         await writeFile(temp, body, { flag: "wx", mode: PRIVATE_FILE_MODE });
         try {
-            await link(temp, this.lockPath);
+            await link(temp, path);
             return true;
         } catch (error) {
             if (error.code === "EEXIST") return false;
             try {
-                await writeFile(this.lockPath, body, { flag: "wx", mode: PRIVATE_FILE_MODE });
+                await writeFile(path, body, { flag: "wx", mode: PRIVATE_FILE_MODE });
                 return true;
             } catch (fallbackError) {
                 if (fallbackError.code === "EEXIST") return false;
@@ -166,81 +252,54 @@ export class Refresher extends EventEmitter {
         }
     }
 
-    /**
-     * Removes the lock judged stale — and only that one. Every session that wants to remove a given stale lock must
-     * first create its claim file (`wx`, so exactly one succeeds), then re-reads the lock and unlinks it only if it is
-     * still that stale lock. Nothing else can change it meanwhile: creators get EEXIST while it exists, rival takers
-     * are held off by the claim, and the stale owner no longer removes its own lock (see releaseLock). A lock's
-     * contents never reappear once removed, so a late taker's re-read always fails and the claim can then be dropped.
-     */
-    async takeOverStaleLock(stale) {
-        const id = lockId(stale);
-        for (let attempt = 0; attempt < MAX_CLAIMS; attempt++) {
-            const claim = `${this.lockPath}.${id}.${attempt}.claim`;
-            try {
-                await writeFile(claim, "", { flag: "wx", mode: PRIVATE_FILE_MODE });
-            } catch (error) {
-                if (error.code !== "EEXIST") throw error;
-                const { mtimeMs } = await stat(claim).catch(() => ({ mtimeMs: Date.now() }));
-                if (Date.now() - mtimeMs > CLAIM_TTL_MS) continue; // abandoned by a crashed session: use the next one
-                return false; // another session is taking over this lock right now
-            }
-            try {
-                const current = await this.readLock();
-                if (!current) return true;
-                if (!sameLock(current, stale)) return false;
-                await unlink(this.lockPath).catch((error) => {
-                    if (error.code !== "ENOENT") throw error;
-                });
-                return true;
-            } finally {
-                await unlink(claim).catch(() => {});
-            }
-        }
-        return false;
-    }
-
-    /** Deletes claim and temp files left behind by crashed sessions. Only safe while this session holds the lock. */
-    async removeLeftovers() {
-        const prefix = "refresh.lock.";
-        const names = await readdir(this.dir).catch(() => []);
-        for (const name of names) {
-            if (!name.startsWith(prefix) || !/\.(claim|tmp)$/.test(name) || name.includes(this.lockToken)) continue;
-            const path = join(this.dir, name);
-            const { mtimeMs } = await stat(path).catch(() => ({ mtimeMs: Date.now() }));
-            if (Date.now() - mtimeMs > CLAIM_TTL_MS) await unlink(path).catch(() => {});
-        }
-    }
-
     async acquireLock() {
         await ensurePrivateDir(this.dir);
+        if (this.isOtherSessionLock(await this.readLock(join(this.dir, LEGACY_LOCK)))) return false;
+        const { generation, lock } = await this.currentLock();
+        if (this.isOtherSessionLock(lock)) return false;
+        const next = generation + 1;
         const token = randomUUID();
         const body = JSON.stringify({ pid: process.pid, token, startedAt: new Date(this.now()).toISOString() });
-        let acquired = await this.createLock(body, token);
-        if (!acquired) {
-            const current = await this.readLock();
-            if (this.isOtherSessionLock(current)) return false;
-            acquired = (!current || (await this.takeOverStaleLock(current))) && (await this.createLock(body, token));
+        if (!(await this.createLock(this.lockFile(next), body, token))) return false; // another session won `next`
+        // A session that listed the folder long ago can recreate a generation that was already cleaned up. The highest
+        // generation is the lock, so such a late file loses and is removed again (it was never the current lock).
+        const { generation: highest, names } = await this.listLocks();
+        if (highest !== next) {
+            await unlink(this.lockFile(next)).catch(() => {});
+            return false;
         }
-        if (!acquired) return false;
+        this.lockGeneration = next;
         this.lockToken = token;
-        await this.removeLeftovers();
+        await this.removeOldLocks(next, names);
         return true;
     }
 
+    /** Removes lower generations and temp files left by crashed sessions. Never touches the current (highest) lock. */
+    async removeOldLocks(current, names) {
+        for (const name of names) {
+            const match = GENERATION.exec(name);
+            const path = join(this.dir, name);
+            if (match) {
+                if (Number(match[1]) < current) await unlink(path).catch(() => {});
+            } else if (LOCK_TEMP.test(name)) {
+                const { mtimeMs } = await stat(path).catch(() => ({ mtimeMs: Date.now() }));
+                if (Date.now() - mtimeMs > TEMP_TTL_MS) await unlink(path).catch(() => {});
+            }
+        }
+    }
+
     /**
-     * Removes this session's lock. Other sessions only take over a live session's lock once it is staleAfterMs old, so
-     * the read-then-unlink below cannot hit a replacement while the lock is well short of that age. Past that point
-     * the lock is left alone and simply expires.
+     * Marks this session's generation finished (a `.done` marker carrying its token), which frees the lock for the next
+     * generation. Nothing is removed, so this cannot affect a newer lock even when it runs late. With `keep`, the lock
+     * is left to expire instead: a run that timed out may still have processes alive, which must not overlap the next run.
      */
-    async releaseLock() {
+    async releaseLock({ keep = false } = {}) {
+        const generation = this.lockGeneration;
         const token = this.lockToken;
+        this.lockGeneration = null;
         this.lockToken = null;
-        if (!token) return;
-        const lock = await this.readLock();
-        if (lock?.token !== token) return;
-        if (this.now() - Date.parse(lock.startedAt) > this.staleAfterMs() - RELEASE_MARGIN_MS) return;
-        await unlink(this.lockPath).catch(() => {});
+        if (!generation || keep) return;
+        await writeFile(`${this.lockFile(generation)}.done`, JSON.stringify({ token }), { mode: PRIVATE_FILE_MODE }).catch(() => {});
     }
 
     /** Start a refresh (or join the one already running). Resolves with the state when done. */
@@ -261,6 +320,11 @@ export class Refresher extends EventEmitter {
     async doRefresh() {
         await this.load();
         const other = await this.otherSessionLock();
+        if (other && other.token && other.token === this.keptToken) {
+            const error = "The last CLI run timed out and may still be stopping. Try again in a few minutes.";
+            this.setStatus({ state: "error", finishedAt: new Date(this.now()).toISOString(), error, byOtherSession: false });
+            return this.state();
+        }
         if (other) {
             this.setStatus({ state: "running", startedAt: other.startedAt, error: null, byOtherSession: true });
             return this.state();
@@ -271,6 +335,7 @@ export class Refresher extends EventEmitter {
         }
         const startedAt = this.now();
         this.setStatus({ state: "running", startedAt: new Date(startedAt).toISOString(), error: null, byOtherSession: false });
+        let keep = false;
         try {
             const onSpawn = (child) => {
                 this.child = child;
@@ -283,10 +348,13 @@ export class Refresher extends EventEmitter {
             this.snapshot = snapshot;
             this.setStatus({ state: "idle", finishedAt: snapshot.fetchedAt, error: null });
         } catch (error) {
+            // A timed-out run's processes may outlive the kill: let its lock expire rather than free it right away.
+            keep = error?.timedOut === true;
+            if (keep) this.keptToken = this.lockToken;
             this.setStatus({ state: "error", finishedAt: new Date(this.now()).toISOString(), error: error.message });
         } finally {
             this.child = null;
-            await this.releaseLock();
+            await this.releaseLock({ keep });
         }
         return this.state();
     }
@@ -314,13 +382,11 @@ export class Refresher extends EventEmitter {
         return this.refresh();
     }
 
-    /** Picks up snapshots written by another session's refresh. */
+    /** Picks up changes to the snapshot file: another session's refresh, or the file being deleted. */
     async onSnapshotFileChanged() {
-        const snapshot = await readSnapshot(this.dir);
-        if (!snapshot || snapshot.fetchedAt === this.snapshot?.fetchedAt) return;
-        this.snapshot = snapshot;
-        if (this.status.byOtherSession) {
-            this.setStatus({ state: "idle", finishedAt: snapshot.fetchedAt, error: null, byOtherSession: false });
+        if (!(await this.readFromDisk())) return;
+        if (this.snapshot && this.status.byOtherSession) {
+            this.setStatus({ state: "idle", finishedAt: this.snapshot.fetchedAt, error: null, byOtherSession: false });
         } else {
             this.emit("change", this.state());
         }
@@ -337,7 +403,7 @@ export class Refresher extends EventEmitter {
     acquire() {
         this.users++;
         if (this.users > 1) return;
-        // Nothing watched the file while no panel was open, so read it again (load() keeps a newer in-memory copy).
+        // Nothing watched the file while no panel was open, so the next load() reads it again.
         this.loading = null;
         watchFile(snapshotPath(this.dir), { interval: this.pollMs }, () => void this.onSnapshotFileChanged());
         this.watching = true;
@@ -358,18 +424,20 @@ export class Refresher extends EventEmitter {
 
     /**
      * Stop everything (extension shutdown): no new refreshes, stop the running CLI process tree and wait for that run to
-     * end before giving up the lock, so another session cannot start a second CLI while this one is still exiting.
+     * end before giving up the lock, so another session cannot start a second CLI while this one is still exiting. If
+     * the run has not ended when the wait gives up, the lock is left to expire instead.
      */
     async dispose(kill = this.kill) {
         this.disposed = true;
         this.users = 1;
         this.release();
         if (this.child) kill(this.child);
+        let ended = true;
         if (this.inflight) {
             // Unref'd: a run that is already gone must not keep the exiting process alive for the full wait.
-            const giveUp = new Promise((resolve) => setTimeout(resolve, DISPOSE_WAIT_MS).unref?.());
-            await Promise.race([this.inflight, giveUp]);
+            const giveUp = new Promise((resolve) => setTimeout(() => resolve(false), this.disposeWaitMs).unref?.());
+            ended = await Promise.race([this.inflight.then(() => true), giveUp]);
         }
-        await this.releaseLock();
+        await this.releaseLock({ keep: !ended });
     }
 }

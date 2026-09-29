@@ -795,16 +795,15 @@ function renderChart(snapshot) {
 }
 
 // ---------- sessions ----------
+const RANGE_DAYS = { today: 1, "7d": 7, "30d": 30 };
+
+// Same rule as the CLI (src/timeWindows.ts): an N-day window starts at local midnight N-1 calendar days ago.
 function inRange(session) {
     const t = Date.parse(session.lastActivity);
     if (!Number.isFinite(t)) return false;
-    if (ui.range === "today") {
-        const midnight = new Date();
-        midnight.setHours(0, 0, 0, 0);
-        return t >= midnight.getTime();
-    }
-    const days = ui.range === "7d" ? 7 : 30;
-    return t >= Date.now() - days * 86400000;
+    const now = new Date();
+    const days = RANGE_DAYS[ui.range] ?? 30;
+    return t >= new Date(now.getFullYear(), now.getMonth(), now.getDate() - days + 1).getTime();
 }
 
 const sessionTitle = (s) => s.label || `${s.editor} session ${s.shortId}`;

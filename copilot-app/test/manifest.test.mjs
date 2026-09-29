@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { CANVAS_ID } from "../com.github.copilot/extensions/ai-fluency/canvas.mjs";
 
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(pluginRoot, "..");
@@ -60,7 +61,10 @@ test("the canvas extension and its manual-install manifest are present", () => {
         assert.ok(existsSync(join(extensionDir, "assets", asset)), `assets/${asset} is missing`);
     }
     assert.deepEqual(readJson(join(extensionDir, "copilot-extension.json")), { name: "ai-fluency", version: 1 });
-    assert.match(readFileSync(join(extensionDir, "extension.mjs"), "utf8"), /id: "ai-fluency"/, "canvasId must stay ai-fluency");
+    assert.equal(CANVAS_ID, "ai-fluency", "canvasId must stay ai-fluency");
+    const entry = readFileSync(join(extensionDir, "extension.mjs"), "utf8");
+    assert.match(entry, /from "@github\/copilot-sdk\/extension"/, "extension.mjs must load the Copilot SDK");
+    assert.match(entry, /await startExtension\(\{ createCanvas, CanvasError, joinSession \}\)/, "extension.mjs must register the canvas");
 });
 
 test("skills follow the Agent Plugins layout", () => {
@@ -75,6 +79,6 @@ test("skills follow the Agent Plugins layout", () => {
 test("no personal canvas data is shipped in the plugin", () => {
     const leaked = walk(pluginRoot)
         .map((path) => path.slice(pluginRoot.length + 1).replace(/\\/g, "/"))
-        .filter((path) => /(^|\/)artifacts(\/|$)/.test(path) || /(^|\/)(snapshot\.json|refresh\.lock)$/.test(path) || /\.tmp$/.test(path));
+        .filter((path) => /(^|\/)artifacts(\/|$)/.test(path) || /(^|\/)(snapshot\.json|refresh\.lock(\.[^/]*)?)$/.test(path) || /\.tmp$/.test(path));
     assert.deepEqual(leaked, []);
 });
