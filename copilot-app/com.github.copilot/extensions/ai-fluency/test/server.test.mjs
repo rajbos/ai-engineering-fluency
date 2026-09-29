@@ -37,7 +37,13 @@ test("serves assets and state with a strict CSP", async (t) => {
     t.after(close);
     const page = await fetch(url);
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /AI fluency/);
+    const html = await page.text();
+    assert.match(html, /<title>AI Engineering Fluency<\/title>/);
+    assert.match(
+        html,
+        /<a href="https:\/\/github\.com\/rajbos\/ai-engineering-fluency" target="_blank" rel="noopener noreferrer">/,
+        "the footer links back to the repository, opening outside the canvas",
+    );
     const csp = page.headers.get("content-security-policy");
     assert.match(csp, /default-src 'none'/);
     assert.match(csp, /script-src 'self';/, "scripts must stay same-origin only");
@@ -80,7 +86,7 @@ test("every route requires the panel's private path", async (t) => {
         for (const route of ["", "app.js", "api/state", "events"]) {
             const res = await rawRequest(`${origin}${prefix}${route}`);
             assert.equal(res.status, 404, `${prefix}${route}`);
-            assert.doesNotMatch(res.body, /fetchedAt|AI fluency/);
+            assert.doesNotMatch(res.body, /fetchedAt|AI Engineering Fluency/);
         }
         const post = await rawRequest(`${origin}${prefix}api/refresh`, { method: "POST", headers: { Origin: origin } });
         assert.equal(post.status, 404);

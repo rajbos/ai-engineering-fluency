@@ -79,7 +79,7 @@ src/graphify-out/
 # build never touches the committed manifest.json / cache/ above.
 .graphify-agent/
 
-# AI fluency canvas (copilot-app/) writes its snapshot and refresh lock to
+# AI Engineering Fluency canvas (copilot-app/) writes its snapshot and refresh lock to
 # $COPILOT_HOME/extensions/ai-fluency/artifacts/, never into the repo. This is
 # the backstop so a copy run from a checkout can never commit personal usage data.
 copilot-app/**/artifacts/

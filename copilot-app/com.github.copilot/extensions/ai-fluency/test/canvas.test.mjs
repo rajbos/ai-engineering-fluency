@@ -61,6 +61,7 @@ test("registers the ai-fluency canvas with its two agent actions", async (t) => 
     const { definition } = await setup(t);
     assert.equal(CANVAS_ID, "ai-fluency");
     assert.equal(definition.id, CANVAS_ID);
+    assert.equal(definition.displayName, "AI Engineering Fluency");
     assert.deepEqual(definition.actions.map((a) => a.name), ["get_summary", "refresh"]);
 });
 
@@ -127,7 +128,7 @@ test("refresh with wait returns the new snapshot; a failure becomes a CanvasErro
         assert.equal(error.message, "CLI exploded");
         return true;
     });
-    assert.deepEqual(logs, [{ message: "AI fluency refresh failed: CLI exploded", options: { level: "warning", ephemeral: true } }]);
+    assert.deepEqual(logs, [{ message: "AI Engineering Fluency refresh failed: CLI exploded", options: { level: "warning", ephemeral: true } }]);
 });
 
 test("refresh with wait also waits for a refresh another session is running", async (t) => {
@@ -158,7 +159,7 @@ test("opening a panel starts its server, watches the snapshot and refreshes a mi
     let runs = 0;
     const { definition, refresher, servers } = await setup(t, { runCli: async () => (runs++, cliResult()) });
     const opened = await definition.open({ instanceId: "a" });
-    assert.deepEqual(opened, { title: "AI fluency", url: servers[0].url });
+    assert.deepEqual(opened, { title: "AI Engineering Fluency", url: servers[0].url });
     await definition.open({ instanceId: "a" }); // reopening focuses the same panel
     assert.equal(servers.length, 1);
     assert.equal(refresher.users, 1);

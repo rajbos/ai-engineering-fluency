@@ -1,9 +1,10 @@
-# AI fluency canvas
+# AI Engineering Fluency canvas
 
 GitHub Copilot app canvas that shows the output of the
 [`@rajbos/ai-engineering-fluency`](https://github.com/rajbos/ai-engineering-fluency) CLI. The look and feel mirrors
 the extension's VS Code webviews (section cards, stats tables, chart colours, stage colours, radar chart), mapped onto
-the Copilot app's theme tokens so it follows the app's light/dark theme.
+the Copilot app's theme tokens so it follows the app's light/dark theme. The canvas is listed as
+**AI Engineering Fluency** (canvas id `ai-fluency`), and its footer links back to this repository.
 
 It ships as the `ai-fluency-canvas` Copilot plugin (this folder is the plugin's
 `com.github.copilot/extensions/ai-fluency/`), and can also be installed by hand as a user-level extension in

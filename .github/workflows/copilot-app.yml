@@ -1,6 +1,6 @@
 name: Copilot app plugin
 
-# Tests the AI fluency canvas plugin (copilot-app/) and its marketplace entry
+# Tests the AI Engineering Fluency canvas plugin (copilot-app/) and its marketplace entry
 # (.github/plugin/marketplace.json): the canvas unit tests plus the manifest
 # checks (Agent Plugins schema, marketplace version in sync with plugin.json,
 # no personal artifacts/snapshot.json in the plugin). Plain `node --test`, no
