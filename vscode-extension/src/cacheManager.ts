@@ -1272,7 +1272,7 @@ export class CacheManager {
 	 * from its own memory past its next check. The epoch is advanced even when there was no snapshot
 	 * file to delete (or it was already gone), since the fence must hold regardless of what was on
 	 * disk at the time — but NOT when the delete genuinely fails and the snapshot is still there; see
-	 * the unlink failure branch below and this method's "Returns" note.
+	 * _bookmarkUnchangedSnapshotMtime() and this method's "Returns" note.
 	 *
 	 * Acquires the same cache save lock writeSharedSnapshot() holds while it builds and renames a
 	 * snapshot — retrying briefly rather than the usual single-shot acquire, since this specific
@@ -1303,111 +1303,141 @@ export class CacheManager {
 	 * actually removed, replaced with an empty one, or already gone, AND the epoch marker was
 	 * actually persisted. `false` means neither the delete nor its empty-snapshot fallback could land
 	 * — a peer must not be told a clear happened at all in that case, so the epoch bump is skipped
-	 * too; see the unlink failure branch below for why. The caller must not treat this method as
+	 * too; see _bookmarkUnchangedSnapshotMtime() for why. The caller must not treat this method as
 	 * having unconditionally succeeded.
 	 */
 	async deleteSharedSnapshot(retryOptions?: { attempts: number; delayMs: number }): Promise<boolean> {
 		const lockAcquired = await this.acquireCacheLockWithRetry(retryOptions);
 		try {
-			const snapshotPath = this.getSharedSnapshotPath();
-			try {
-				await fs.promises.unlink(snapshotPath);
-				this.lastLoadedSnapshotMtime = 0;
-				this.deps.log(`Deleted shared cache snapshot (${this.getCacheIdentifier()})`);
-			} catch (err: unknown) {
-				if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-					// Another window (or an earlier call here) already deleted it — same postcondition
-					// this method promises (no snapshot left) even though this call didn't do the
-					// deleting. loadSharedSnapshotIfChanged() only reloads once a snapshot's mtime
-					// exceeds this bookmark, so leaving it at its pre-delete value here could make a
-					// newly published snapshot with an equal-or-lower mtime (coarse filesystem
-					// timestamp resolution, or clock rollback) look already-loaded, leaving this
-					// instance on stale/empty in-memory state until some later mtime change finally
-					// exceeds it.
-					this.lastLoadedSnapshotMtime = 0;
-				} else {
-					// A genuine failure (e.g. permissions): the file is presumably still there,
-					// unchanged.
-					this.deps.warn(`Failed to delete shared cache snapshot: ${err}`);
-					// A failed unlink is often a transient file lock (e.g. Windows holding a read
-					// handle open on the file — the exact scenario a concurrent loadSharedSnapshotIfChanged()
-					// read can cause) rather than a genuine permissions failure. The same tmp-file +
-					// rename pattern writeSharedSnapshot() already uses to publish can still succeed
-					// here: renaming a fresh, unlocked temp file over the path only replaces the
-					// directory entry, it doesn't need to touch whatever is holding the original file's
-					// data open. Falling back to "replace with an empty snapshot" gives this clear a
-					// real chance to still land durably — with an empty on-disk snapshot, a later write's
-					// buildMergedSnapshotEntries() has nothing pre-clear left to merge back in — instead
-					// of immediately downgrading to the non-durable fallback below.
-					const replaceTmpPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
-					try {
-						const emptyEnvelope = {
-							schemaVersion: CacheManager.SNAPSHOT_SCHEMA_VERSION,
-							cacheVersion: this.cacheVersion,
-							cacheId: this.getCacheIdentifier(),
-							generatedAt: Date.now(),
-							entryCount: 0,
-							entries: {},
-						};
-						await fs.promises.writeFile(replaceTmpPath, JSON.stringify(emptyEnvelope));
-						await fs.promises.rename(replaceTmpPath, snapshotPath);
-						this.lastLoadedSnapshotMtime = 0;
-						this.deps.log(`Replaced shared cache snapshot with an empty one after a failed delete (${this.getCacheIdentifier()})`);
-					} catch (replaceErr) {
-						this.deps.warn(`Could not replace the shared cache snapshot with an empty one either: ${replaceErr}`);
-						// A partial failure here (writeFile succeeded but rename didn't) would otherwise
-						// leave an orphaned temp file behind on every such failure, accumulating in
-						// globalStorage across repeated Clear Cache attempts — best-effort cleanup, same
-						// as every other tmp-file-plus-rename write in this file already does.
-						try { await fs.promises.unlink(replaceTmpPath); } catch { /* best-effort cleanup */ }
-						// Advancing the epoch here would tell every peer "a clear happened" while the
-						// pre-clear snapshot is still fully present on disk — a peer's checkClearEpoch()
-						// would detect it, reset its own mtime bookmark to 0, and its very next
-						// loadSharedSnapshotIfChanged() would immediately reload that still-present stale
-						// snapshot, resurrecting exactly the data this clear was meant to remove. Skipping
-						// the bump leaves this clear attempt unrecorded to peers instead — the same "not
-						// yet propagated" state as before this call ran, rather than a durable, misleading
-						// claim that the fence held.
-						//
-						// Bookmarking the bookmark to the file's current (unchanged) mtime — rather than
-						// leaving it alone — matters for THIS window's own next load, not just peers': the
-						// caller here is clearCache(), whose very next step (after this returns) is a
-						// refresh that calls loadSharedSnapshotIfChanged(). If this window had never loaded
-						// this snapshot itself (bookmark still at its initial value), that load would see
-						// the still-present file's mtime as new and merge the exact pre-clear content
-						// clearAllCachedData() just emptied straight back into this window's own cache —
-						// a self-inflicted resurrection that needs no peer at all. The file didn't change,
-						// so bookmarking its current mtime now is accurate, not merely a workaround.
-						try {
-							const stat = await fs.promises.stat(snapshotPath);
-							this.lastLoadedSnapshotMtime = stat.mtimeMs;
-						} catch { /* best-effort; if even stat fails the file is presumably gone some other way */ }
-						return false;
-					}
-				}
-			}
+			const cleared = await this._removeSharedSnapshotFile(this.getSharedSnapshotPath());
+			if (!cleared) { return false; }
 			return await this.bumpClearEpochLocked();
 		} finally {
 			if (lockAcquired) { await this.releaseCacheLock(); }
-			// The durable epoch has now been advanced (or, on a write failure inside
-			// bumpClearEpochLocked(), left unchanged rather than adopted — see that method's own doc
-			// comment) — this call's own contribution to the race window clearInProgress guards is
-			// over regardless of which outcome landed. Decremented,
-			// not reset to zero: an overlapping clearCache() (nothing serializes them today) can still
-			// have its own clearAllCachedData()-to-deleteSharedSnapshot() pair in flight, and the counter
-			// must stay positive until that one finishes too — see clearInProgressCount's own doc comment.
-			this.clearInProgressCount = Math.max(0, this.clearInProgressCount - 1);
-			// Also bump cacheClearGeneration here, a second time independent of clearAllCachedData()'s
-			// own bump: clearInProgress is a *live* signal (true only while this call has not yet
-			// finished), so it cannot catch a load or save whose stat/read/build sequence straddles the
-			// exact moment this call completes — started while a clear was genuinely in flight, but by
-			// the time that caller's own final check runs, this call has already finished and the
-			// counter is back to zero. That caller's generation baseline, captured before this
-			// completion, still differs from the now-bumped value, so the existing
-			// `cacheClearGeneration !== clearGenerationAtStart` check every loader and writeSharedSnapshot()
-			// already runs catches it without any further special-casing.
-			this.cacheClearGeneration++;
+			this._finishSharedSnapshotClear();
 		}
+	}
+
+	/**
+	 * Unlinks the shared snapshot, falling back to replacing it with an empty one when the unlink
+	 * fails for a reason other than the file already being gone. Returns `false` only when neither
+	 * the delete nor the empty-snapshot fallback could land.
+	 */
+	private async _removeSharedSnapshotFile(snapshotPath: string): Promise<boolean> {
+		try {
+			await fs.promises.unlink(snapshotPath);
+			this.lastLoadedSnapshotMtime = 0;
+			this.deps.log(`Deleted shared cache snapshot (${this.getCacheIdentifier()})`);
+			return true;
+		} catch (err: unknown) {
+			if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+				// Another window (or an earlier call here) already deleted it — same postcondition
+				// this method promises (no snapshot left) even though this call didn't do the
+				// deleting. loadSharedSnapshotIfChanged() only reloads once a snapshot's mtime
+				// exceeds this bookmark, so leaving it at its pre-delete value here could make a
+				// newly published snapshot with an equal-or-lower mtime (coarse filesystem
+				// timestamp resolution, or clock rollback) look already-loaded, leaving this
+				// instance on stale/empty in-memory state until some later mtime change finally
+				// exceeds it.
+				this.lastLoadedSnapshotMtime = 0;
+				return true;
+			}
+			// A genuine failure (e.g. permissions): the file is presumably still there,
+			// unchanged.
+			this.deps.warn(`Failed to delete shared cache snapshot: ${err}`);
+			return await this._replaceSharedSnapshotWithEmpty(snapshotPath);
+		}
+	}
+
+	/**
+	 * A failed unlink is often a transient file lock (e.g. Windows holding a read
+	 * handle open on the file — the exact scenario a concurrent loadSharedSnapshotIfChanged()
+	 * read can cause) rather than a genuine permissions failure. The same tmp-file +
+	 * rename pattern writeSharedSnapshot() already uses to publish can still succeed
+	 * here: renaming a fresh, unlocked temp file over the path only replaces the
+	 * directory entry, it doesn't need to touch whatever is holding the original file's
+	 * data open. Falling back to "replace with an empty snapshot" gives this clear a
+	 * real chance to still land durably — with an empty on-disk snapshot, a later write's
+	 * buildMergedSnapshotEntries() has nothing pre-clear left to merge back in — instead
+	 * of immediately downgrading to the non-durable fallback in
+	 * _bookmarkUnchangedSnapshotMtime().
+	 */
+	private async _replaceSharedSnapshotWithEmpty(snapshotPath: string): Promise<boolean> {
+		const replaceTmpPath = `${snapshotPath}.${process.pid}.${Date.now()}.tmp`;
+		try {
+			const emptyEnvelope = {
+				schemaVersion: CacheManager.SNAPSHOT_SCHEMA_VERSION,
+				cacheVersion: this.cacheVersion,
+				cacheId: this.getCacheIdentifier(),
+				generatedAt: Date.now(),
+				entryCount: 0,
+				entries: {},
+			};
+			await fs.promises.writeFile(replaceTmpPath, JSON.stringify(emptyEnvelope));
+			await fs.promises.rename(replaceTmpPath, snapshotPath);
+			this.lastLoadedSnapshotMtime = 0;
+			this.deps.log(`Replaced shared cache snapshot with an empty one after a failed delete (${this.getCacheIdentifier()})`);
+			return true;
+		} catch (replaceErr) {
+			this.deps.warn(`Could not replace the shared cache snapshot with an empty one either: ${replaceErr}`);
+			// A partial failure here (writeFile succeeded but rename didn't) would otherwise
+			// leave an orphaned temp file behind on every such failure, accumulating in
+			// globalStorage across repeated Clear Cache attempts — best-effort cleanup, same
+			// as every other tmp-file-plus-rename write in this file already does.
+			try { await fs.promises.unlink(replaceTmpPath); } catch { /* best-effort cleanup */ }
+			await this._bookmarkUnchangedSnapshotMtime(snapshotPath);
+			return false;
+		}
+	}
+
+	/**
+	 * Called when a clear could not land on disk at all; the caller then skips the epoch bump.
+	 * Advancing the epoch here would tell every peer "a clear happened" while the pre-clear
+	 * snapshot is still fully present on disk — a peer's checkClearEpoch() would detect it, reset
+	 * its own mtime bookmark to 0, and its very next loadSharedSnapshotIfChanged() would
+	 * immediately reload that still-present stale snapshot, resurrecting exactly the data this
+	 * clear was meant to remove. Skipping the bump leaves this clear attempt unrecorded to peers
+	 * instead — the same "not yet propagated" state as before this call ran, rather than a
+	 * durable, misleading claim that the fence held.
+	 *
+	 * Bookmarking the bookmark to the file's current (unchanged) mtime — rather than leaving it
+	 * alone — matters for THIS window's own next load, not just peers': the caller here is
+	 * clearCache(), whose very next step (after this returns) is a refresh that calls
+	 * loadSharedSnapshotIfChanged(). If this window had never loaded this snapshot itself
+	 * (bookmark still at its initial value), that load would see the still-present file's mtime
+	 * as new and merge the exact pre-clear content clearAllCachedData() just emptied straight back
+	 * into this window's own cache — a self-inflicted resurrection that needs no peer at all. The
+	 * file didn't change, so bookmarking its current mtime now is accurate, not merely a workaround.
+	 */
+	private async _bookmarkUnchangedSnapshotMtime(snapshotPath: string): Promise<void> {
+		try {
+			const stat = await fs.promises.stat(snapshotPath);
+			this.lastLoadedSnapshotMtime = stat.mtimeMs;
+		} catch { /* best-effort; if even stat fails the file is presumably gone some other way */ }
+	}
+
+	/**
+	 * Runs in deleteSharedSnapshot()'s `finally`. The durable epoch has now been advanced (or, on
+	 * a write failure inside bumpClearEpochLocked(), left unchanged rather than adopted — see that
+	 * method's own doc comment) — this call's own contribution to the race window clearInProgress
+	 * guards is over regardless of which outcome landed. Decremented, not reset to zero: an
+	 * overlapping clearCache() (nothing serializes them today) can still have its own
+	 * clearAllCachedData()-to-deleteSharedSnapshot() pair in flight, and the counter must stay
+	 * positive until that one finishes too — see clearInProgressCount's own doc comment.
+	 *
+	 * Also bumps cacheClearGeneration, a second time independent of clearAllCachedData()'s own
+	 * bump: clearInProgress is a *live* signal (true only while this call has not yet finished), so
+	 * it cannot catch a load or save whose stat/read/build sequence straddles the exact moment this
+	 * call completes — started while a clear was genuinely in flight, but by the time that caller's
+	 * own final check runs, this call has already finished and the counter is back to zero. That
+	 * caller's generation baseline, captured before this completion, still differs from the
+	 * now-bumped value, so the existing `cacheClearGeneration !== clearGenerationAtStart` check
+	 * every loader and writeSharedSnapshot() already runs catches it without any further
+	 * special-casing.
+	 */
+	private _finishSharedSnapshotClear(): void {
+		this.clearInProgressCount = Math.max(0, this.clearInProgressCount - 1);
+		this.cacheClearGeneration++;
 	}
 
 	/**

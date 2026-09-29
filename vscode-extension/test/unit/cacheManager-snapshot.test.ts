@@ -1532,6 +1532,47 @@ test('deleteSharedSnapshot() bookmarks the still-present snapshot when unlinking
 		'the cache clearAllCachedData() would have emptied must stay empty, not be resurrected by this window\'s own post-clear refresh');
 });
 
+// The early `return false` when neither the unlink nor the empty-replace fallback lands must still
+// run deleteSharedSnapshot()'s completion bookkeeping. If it skipped the clearInProgressCount
+// decrement, the clearAllCachedData() paired with it would stay "in progress" forever and every
+// later writeSharedSnapshot() on this instance would silently abort.
+test('deleteSharedSnapshot() still ends the in-progress clear when unlinking AND the empty-replace fallback both fail, so later writes are not wedged', async (t) => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	m.setCachedSessionData('/a.json', entry(1000), 10);
+	await m.writeSharedSnapshot();
+
+	const originalUnlink = fs.promises.unlink.bind(fs.promises) as (...a: unknown[]) => Promise<void>;
+	let intercepted = false;
+	t.mock.method(fs.promises as any, 'unlink', async (...args: unknown[]) => {
+		if (!intercepted && String(args[0]).endsWith('.snapshot.json')) {
+			intercepted = true;
+			const err = new Error('simulated permission failure') as NodeJS.ErrnoException;
+			err.code = 'EPERM';
+			throw err;
+		}
+		return originalUnlink(...args);
+	});
+	const originalWriteFile = fs.promises.writeFile.bind(fs.promises) as (...a: unknown[]) => Promise<void>;
+	t.mock.method(fs.promises as any, 'writeFile', async (...args: unknown[]) => {
+		if (String(args[0]).includes('.snapshot.json.')) {
+			throw new Error('simulated disk failure for the empty-replace fallback too');
+		}
+		return originalWriteFile(...args);
+	});
+
+	m.clearAllCachedData();
+	const cleared = await m.deleteSharedSnapshot();
+	assert.ok(intercepted, 'the unlink interception must actually have fired for this assertion to be meaningful');
+	assert.equal(cleared, false, 'the clear itself must still be reported as not durable');
+
+	t.mock.restoreAll();
+	m.setCachedSessionData('/b.json', entry(2000), 10);
+	const persisted = await m.writeSharedSnapshot();
+	assert.equal(persisted, true,
+		'a failed clear must still release clearInProgress, or every later write on this instance aborts');
+});
+
 // A further Copilot review found a failed unlink could leave the pre-clear snapshot's entries
 // mergeable back into a later write (buildMergedSnapshotEntries() reads whatever is still on disk).
 // Fixed with a replace-with-empty fallback: a failed unlink is often a transient file lock (e.g.
