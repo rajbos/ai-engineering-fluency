@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-09-23",
+    "lastUpdated": "2026-09-29",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -1355,6 +1355,17 @@
       ],
       "cachedInputCostPerMillion": 0.2,
       "cacheCreationCostPerMillion": 5.0
+    },
+    "claude-sonnet-5.5": {
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 10.0,
+      "category": "Claude models (Anthropic)",
+      "tier": "standard",
+      "displayNames": [
+        "Claude Sonnet 5.5"
+      ],
+      "cachedInputCostPerMillion": 0.2,
+      "cacheCreationCostPerMillion": 2.5
     }
   }
 }
