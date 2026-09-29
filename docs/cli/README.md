@@ -27,7 +27,7 @@ Requires **Node.js 22.14 or later**. The first run parses every session file it 
 
 | Command | Purpose | Options |
 |---|---|---|
-| [`stats`](#stats--session-overview) | Discovered files, sessions, turns and tokens | `-v, --verbose`, `--json` |
+| [`stats`](#stats--session-overview) | Discovered session files, chat turns and tokens | `-v, --verbose`, `--json` |
 | [`usage`](#usage--token-usage-report) | Tokens per period, per editor, per model, cost | `-m, --models`, `-c, --cost`, `--json` |
 | [`environmental`](#environmental--environmental-impact) (alias `env`) | CO₂, water and tree estimates | — |
 | [`fluency`](#fluency--fluency-score) | Fluency score per category | `-t, --tips`, `--json` |
@@ -155,9 +155,9 @@ Methodology: Jegham et al., "How Hungry is AI?" (arXiv:2505.09598), via neuland/
 📈 Last 30 Days
 ───────────────────────────────────────────────────────
   Tokens used:          412.6M
-  CO₂ emissions:        1.84 kg
-  Water usage:          0.912 liters
-  Trees to offset:      0.084 trees/year
+  CO₂ emissions:        1.84 kgCO₂e
+  Water usage:          32.719 liters
+  Trees to offset:      0.087619 trees/year
 ```
 
 Figures are estimates: tokens are weighted by type (output fully, fresh input and cache reads much less) and each model is scaled from a Claude Sonnet reference by its output-token price. The command prints the exact reference values and weights it used.
@@ -185,7 +185,7 @@ Category Breakdown
 ───────────────────────────────────────────────────────
   💬 Prompt Engineering
      ███░ Stage 3/4
-     ✓ 412 interactions in the last 30 days
+     ✓ 1,318 total interactions
   ...
 
 📊 Analysis Period (Last 30 Days)
