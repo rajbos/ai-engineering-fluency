@@ -7,7 +7,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { CustomizationFileEntry } from './types';
-import * as packageJson from '../vscode-extension/package.json';
 import customizationPatternsData from './customizationPatterns.json';
 import { parseWorkspaceStorageJsonFile, resolveFileUri } from './workspacePathResolver';
 
@@ -371,12 +370,6 @@ export function scanWorkspaceCustomizationFiles(workspaceFolderPath: string): Cu
 	const uniq: Record<string, CustomizationFileEntry> = {};
 	for (const r of results) { uniq[path.normalize(r.path)] = r; }
 	return Object.values(uniq);
-}
-
-// Helper method to get repository URL from package.json
-export function getRepositoryUrl(): string {
-	const repoUrl = packageJson.repository?.url?.replace(/^git\+/, '').replace(/\.git$/, '');
-	return repoUrl || 'https://github.com/rajbos/ai-engineering-fluency';
 }
 
 function getModeFromAgentKind(id: string | undefined): 'agent' | 'plan' | 'customAgent' {

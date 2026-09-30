@@ -314,7 +314,6 @@ import {
   resolveExactWorkspacePath as _resolveExactWorkspacePath,
   scanWorkspaceCustomizationFiles as _scanWorkspaceCustomizationFiles,
   parseCodeWorkspaceFolders as _parseCodeWorkspaceFolders,
-  getRepositoryUrl as _getRepositoryUrl,
   getModeType as _getModeType,
   extractCustomAgentName as _extractCustomAgentName,
   getEditorTypeFromPath as _getEditorTypeFromPath,
@@ -334,6 +333,7 @@ import {
   getRepoNameFromWorkspacePath as _getRepoNameFromWorkspacePath,
   resolveDebugLogCandidatePaths as _resolveDebugLogCandidatePaths,
 } from '../../src/workspaceHelpers';
+import { getRepositoryUrl as _getRepositoryUrl } from './repositoryUrl';
 
 // --- Chart building ---
 import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup, getPricingSourceForEditor } from '../../src/chartDataBuilder';
