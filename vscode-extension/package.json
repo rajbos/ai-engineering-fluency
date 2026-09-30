@@ -611,7 +611,7 @@
   "overrides": {
     "@azure/msal-node": "5.1.4",
     "@babel/core": ">=7.29.6",
-    "brace-expansion": ">=5.0.9",
+    "brace-expansion": ">=5.0.12",
     "js-yaml": ">=4.3.2 <5.0.0",
     "diff": ">=8.0.3",
     "dompurify": ">=3.4.13",
