@@ -17,7 +17,8 @@ in a side panel next to your sessions. It is shipped as the **`ai-fluency-canvas
 
 The canvas runs the [AI Engineering Fluency CLI](../cli/README.md) (`ai-engineering-fluency all --json`) over the
 session logs on your machine and renders the result with the same look as the VS Code extension. It follows the
-Copilot app's light/dark theme.
+Copilot app's light/dark theme, and its footer links back to the
+[rajbos/ai-engineering-fluency](https://github.com/rajbos/ai-engineering-fluency) repository.
 
 | Tab | What it shows |
 |---|---|
@@ -105,10 +106,10 @@ the CLI shows up in the app. Start a new session (or restart the app) afterwards
 
 Ask the agent in any Copilot app session, for example:
 
-> open the AI fluency canvas
+> open the AI Engineering Fluency canvas
 
-The canvas id is `ai-fluency`. The plugin also ships a small `ai-fluency` skill so the agent knows when to open it
-and how to use its actions:
+The canvas is listed as **AI Engineering Fluency**; its id is `ai-fluency`. The plugin also ships a small
+`ai-fluency` skill so the agent knows when to open it and how to use its actions:
 
 | Action | What it does |
 |---|---|

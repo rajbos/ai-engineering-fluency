@@ -1,9 +1,9 @@
 ---
 name: ai-fluency
-description: Show the user's AI Engineering Fluency stats (token usage, cost, sessions, charts, fluency score) in the AI fluency canvas. Use when the user asks about their AI or Copilot token usage, spend, recent sessions, or fluency score.
+description: Show the user's AI Engineering Fluency stats (token usage, cost, sessions, charts, fluency score) in the AI Engineering Fluency canvas. Use when the user asks about their AI or Copilot token usage, spend, recent sessions, or fluency score.
 ---
 
-# AI fluency canvas
+# AI Engineering Fluency canvas
 
 The `ai-fluency-canvas` plugin provides a canvas with `canvasId` `ai-fluency`.
 

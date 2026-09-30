@@ -7,12 +7,13 @@ import { startServer } from "./server.mjs";
 import { summarize } from "./store.mjs";
 
 export const CANVAS_ID = "ai-fluency";
+export const DISPLAY_NAME = "AI Engineering Fluency";
 
 /** The canvas definition handed to the SDK's `createCanvas()`. */
 export function fluencyCanvas({ refresher, panels, CanvasError }) {
     return {
         id: CANVAS_ID,
-        displayName: "AI fluency",
+        displayName: DISPLAY_NAME,
         description:
             "Your AI Engineering Fluency stats across AI tools: token usage, cost, recent sessions, and fluency score (read from local session logs).",
         inputSchema: { type: ["object", "null"], additionalProperties: false },
@@ -52,7 +53,7 @@ export function fluencyCanvas({ refresher, panels, CanvasError }) {
                     additionalProperties: false,
                 },
                 handler: async ({ input }) => {
-                    if (refresher.disposed) throw new CanvasError("refresh_failed", "The AI fluency extension is shutting down; try again in a new session.");
+                    if (refresher.disposed) throw new CanvasError("refresh_failed", `The ${DISPLAY_NAME} extension is shutting down; try again in a new session.`);
                     if (!input?.wait) {
                         const { status, snapshot } = await refresher.startRefresh();
                         if (status.state === "error") throw new CanvasError("refresh_failed", status.error);
@@ -79,7 +80,7 @@ export function fluencyCanvas({ refresher, panels, CanvasError }) {
         open: async ({ instanceId }) => {
             const entry = await panels.open(instanceId);
             refresher.background(() => refresher.maybeRefresh(OPEN_REFRESH_MIN_AGE_MS));
-            return { title: "AI fluency", url: entry.url };
+            return { title: DISPLAY_NAME, url: entry.url };
         },
         onClose: ({ instanceId }) => panels.close(instanceId),
     };
@@ -98,7 +99,7 @@ export async function startExtension(sdk, { refresher = new Refresher(), start =
     let session;
     refresher.on("change", ({ status }) => {
         if (status.state === "error") {
-            void session?.log(`AI fluency refresh failed: ${status.error}`, { level: "warning", ephemeral: true });
+            void session?.log(`${DISPLAY_NAME} refresh failed: ${status.error}`, { level: "warning", ephemeral: true });
         }
     });
     const shutdown = async () => {

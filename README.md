@@ -138,7 +138,7 @@ copilot plugin marketplace add rajbos/ai-engineering-fluency
 copilot plugin install ai-fluency-canvas@ai-engineering-fluency
 ```
 
-Then ask the agent to "open the AI fluency canvas".
+Then ask the agent to "open the AI Engineering Fluency canvas".
 
 📖 [Copilot app canvas documentation](docs/copilot-app/README.md)
 

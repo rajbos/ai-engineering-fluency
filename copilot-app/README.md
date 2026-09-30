@@ -1,4 +1,4 @@
-# AI fluency canvas — Copilot plugin
+# AI Engineering Fluency canvas — Copilot plugin
 
 This folder is the root of the `ai-fluency-canvas` Copilot plugin: a
 [GitHub Copilot app](https://docs.github.com/en/copilot/how-tos/github-copilot-app) canvas that shows your AI Engineering
