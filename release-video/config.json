@@ -186,6 +186,7 @@
 		"enabled": false,
 		"provider": "ollama",
 		"endpoint": "http://127.0.0.1:11434",
+		"allowRemote": false,
 		"model": "qwen3:8b",
 		"temperature": 0.4,
 		"timeoutMs": 120000,

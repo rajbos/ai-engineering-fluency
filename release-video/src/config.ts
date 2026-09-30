@@ -78,6 +78,11 @@ export interface Config {
 		readonly enabled: boolean;
 		readonly provider: 'ollama' | 'openai-compatible';
 		readonly endpoint: string;
+		/**
+		 * The narration text is sent to `endpoint`. Only loopback is accepted
+		 * unless this is true, so a hosted model is always a deliberate choice.
+		 */
+		readonly allowRemote?: boolean;
 		readonly model: string;
 		readonly temperature: number;
 		readonly timeoutMs: number;
