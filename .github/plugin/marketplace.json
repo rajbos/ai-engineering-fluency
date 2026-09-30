@@ -10,7 +10,7 @@
     {
       "name": "ai-fluency-canvas",
       "description": "AI Engineering Fluency canvas for the GitHub Copilot app: token usage, cost, sessions, charts and fluency score from local session logs.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "Rob Bos",
         "url": "https://github.com/rajbos"
