@@ -14557,7 +14557,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (!result.ok && /modified or untracked/i.test(result.stderr)) {
       return { status: "skipped", reason: "Has uncommitted or untracked changes." };
     }
-    if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr)) {
+    if (!result.ok) {
       result = await this.removeWorktreeDirectoryFallback(validatedMainRepoRoot, worktreePath);
     }
     if (!result.ok) {
