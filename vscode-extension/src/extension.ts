@@ -496,6 +496,11 @@ export function defaultSumBillingGroupCosts(billingGroupCosts: Record<string, nu
 	return Object.values(billingGroupCosts ?? {}).reduce((s, v) => s + v, 0);
 }
 
+/** Whether Git refused to remove a worktree because it contains initialized submodules. */
+export function isSubmoduleWorktreeRemovalFailure(stderr: string): boolean {
+	return /working trees containing submodules cannot be moved or removed/i.test(stderr);
+}
+
 /** The computed-stat caches that carry a generation stamp. */
 export type ComputedStatsKey = 'detailed' | 'daily' | 'fullDaily' | 'usage' | 'sessionInputs' | 'memoryFiles';
 
@@ -14339,13 +14344,30 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
   }
 
   /**
+   * Git refuses to remove a worktree with initialized submodules even with --force. Deinitialize
+   * them from the target worktree first so Git can clean up their administrative metadata, then
+   * retry the forced removal.
+   */
+  private async removeGitWorktreeWithSubmoduleCleanup(mainRepoRoot: string, worktreePath: string): Promise<{ ok: boolean; stderr: string }> {
+    const deinit = await this.runGit(["submodule", "deinit", "--all", "--force"], worktreePath, 120000);
+    if (!deinit.ok) {
+      return {
+        ok: false,
+        stderr: `working trees containing submodules cannot be moved or removed: ${deinit.stderr || "could not deinitialize submodules"}`,
+      };
+    }
+    return this.removeGitWorktree(mainRepoRoot, worktreePath, true);
+  }
+
+  /**
    * Removes a worktree, escalating through a fallback chain: plain removal, then (with user
-   * confirmation) a force removal if uncommitted/untracked changes block it, then an OS-level
-   * directory-removal fallback for git-for-windows junction/long-path failures. Returns the
-   * final result, or `undefined` if the user declined the force-delete confirmation.
+   * confirmation) force removal for dirty or submodule-containing worktrees, then an OS-level
+   * directory-removal fallback for Git-for-Windows junction/long-path failures. Returns the
+   * final result, or `undefined` if the user declined a force-delete confirmation.
    */
   private async _removeWorktreeWithFallback(mainRepoRoot: string, worktreePath: string): Promise<{ ok: boolean; stderr: string } | undefined> {
     let result = await this.removeGitWorktree(mainRepoRoot, worktreePath, false);
+    let forceConfirmed = false;
     if (!result.ok && /modified or untracked/i.test(result.stderr)) {
       const forceChoice = await vscode.window.showWarningMessage(
         `"${worktreePath}" has uncommitted or untracked changes.`,
@@ -14353,10 +14375,26 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         "Force Delete",
       );
       if (forceChoice !== "Force Delete") { return undefined; }
+      forceConfirmed = true;
       result = await this.removeGitWorktree(mainRepoRoot, worktreePath, true);
     }
 
-    if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr)) {
+    if (!result.ok && isSubmoduleWorktreeRemovalFailure(result.stderr)) {
+      if (!forceConfirmed) {
+        const forceChoice = await vscode.window.showWarningMessage(
+          `"${worktreePath}" contains initialized submodules that Git cannot remove directly.`,
+          {
+            modal: true,
+            detail: "Force-deleting will deinitialize the submodules and permanently remove this working copy. Uncommitted or unpushed changes in the worktree or its submodules can be lost.",
+          },
+          "Force Delete",
+        );
+        if (forceChoice !== "Force Delete") { return undefined; }
+      }
+      result = await this.removeGitWorktreeWithSubmoduleCleanup(mainRepoRoot, worktreePath);
+    }
+
+    if (!result.ok && (this.isWorktreeDirectoryRemovalFailure(result.stderr) || isSubmoduleWorktreeRemovalFailure(result.stderr))) {
       result = await this.removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath);
     }
     return result;
