@@ -20,6 +20,8 @@ session logs on your machine and renders the result with the same look as the VS
 Copilot app's light/dark theme, and its footer links back to the
 [rajbos/ai-engineering-fluency](https://github.com/rajbos/ai-engineering-fluency) repository.
 
+![AI Engineering Fluency canvas showing the Fluency Score tab with the stage, the six-category spider chart and the stage reference](../images/copilot-app-canvas-fluency-score.png)
+
 | Tab | What it shows |
 |---|---|
 | **Details** | Tokens, estimated cost, activity and environmental impact for today, the last 30 days, this month, last month and a projected year, plus usage by editor and by model. On narrow panels a picker shows one of those columns at a time. Select the ℹ️ button next to a cost row to see what that estimate means. |
