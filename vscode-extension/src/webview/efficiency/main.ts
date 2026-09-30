@@ -577,6 +577,86 @@ function selectHtml(id: string, options: { value: string; label: string; disable
 	return `<select id="${id}" class="model-select">${opts}</select>`;
 }
 
+/**
+ * A searchable picker for long model lists. The native `<select>` stays in the DOM
+ * (visually hidden) as the single source of truth, so the `change` handler and the
+ * headless harness keep working; the button + filter popup only drive it.
+ */
+function searchableSelectHtml(id: string, options: { value: string; label: string; disabled?: boolean }[], selected: string): string {
+	const current = options.find(o => o.value === selected) ?? options[0];
+	const items = options.map(o =>
+		`<li role="option" class="combo-item${o.value === selected ? ' selected' : ''}${o.disabled ? ' disabled' : ''}" data-value="${escapeHtml(o.value)}" aria-selected="${o.value === selected}">${escapeHtml(o.label)}</li>`
+	).join('');
+	return `<div class="model-combo" data-for="${id}">
+		<button type="button" class="model-select combo-button" aria-haspopup="listbox" aria-expanded="false">${escapeHtml(current?.label ?? '')}</button>
+		<div class="combo-popup" hidden>
+			<input type="text" class="combo-search" placeholder="Search models…" aria-label="Search models" autocomplete="off" spellcheck="false">
+			<ul role="listbox" class="combo-list">${items}</ul>
+			<div class="combo-empty" hidden>No matching models</div>
+		</div>
+		${selectHtml(id, options, selected).replace('class="model-select"', 'class="model-select combo-native" tabindex="-1"')}
+	</div>`;
+}
+
+/** Wires every searchable picker: toggle, live filter, keyboard selection, outside-click dismissal. */
+function wireSearchableSelects(): void {
+	document.querySelectorAll<HTMLElement>('.model-combo').forEach(combo => {
+		const button = combo.querySelector<HTMLButtonElement>('.combo-button')!;
+		const popup = combo.querySelector<HTMLElement>('.combo-popup')!;
+		const search = combo.querySelector<HTMLInputElement>('.combo-search')!;
+		const empty = combo.querySelector<HTMLElement>('.combo-empty')!;
+		const native = combo.querySelector<HTMLSelectElement>('select')!;
+		const items = Array.from(combo.querySelectorAll<HTMLElement>('.combo-item'));
+		const selectable = (): HTMLElement[] => items.filter(i => !i.hidden && !i.classList.contains('disabled'));
+		const setActive = (item: HTMLElement | undefined): void => {
+			items.forEach(i => i.classList.toggle('active', i === item));
+			item?.scrollIntoView({ block: 'nearest' });
+		};
+		const filter = (): void => {
+			const q = search.value.trim().toLowerCase();
+			items.forEach(i => { i.hidden = q !== '' && !(i.textContent ?? '').toLowerCase().includes(q) && !(i.dataset.value ?? '').toLowerCase().includes(q); });
+			const visible = selectable();
+			empty.hidden = visible.length > 0;
+			setActive(visible[0]);
+		};
+		const close = (): void => {
+			popup.hidden = true;
+			button.setAttribute('aria-expanded', 'false');
+			document.removeEventListener('mousedown', onOutside, true);
+		};
+		const onOutside = (ev: MouseEvent): void => { if (!combo.contains(ev.target as Node)) { close(); } };
+		const open = (): void => {
+			popup.hidden = false;
+			button.setAttribute('aria-expanded', 'true');
+			search.value = '';
+			filter();
+			setActive(items.find(i => i.classList.contains('selected')) ?? selectable()[0]);
+			search.focus();
+			document.addEventListener('mousedown', onOutside, true);
+		};
+		const choose = (item: HTMLElement): void => {
+			if (item.classList.contains('disabled')) { return; }
+			close();
+			native.value = item.dataset.value ?? '';
+			native.dispatchEvent(new Event('change', { bubbles: true }));
+		};
+		button.addEventListener('click', ev => { ev.preventDefault(); if (popup.hidden) { open(); } else { close(); } });
+		// Inside a <label>, a click would otherwise be re-dispatched to the button and toggle the popup shut.
+		popup.addEventListener('click', ev => ev.preventDefault());
+		search.addEventListener('input', filter);
+		items.forEach(i => i.addEventListener('click', () => choose(i)));
+		combo.addEventListener('keydown', ev => {
+			if (popup.hidden) { return; }
+			const visible = selectable();
+			const idx = visible.findIndex(i => i.classList.contains('active'));
+			if (ev.key === 'ArrowDown') { ev.preventDefault(); setActive(visible[Math.min(idx + 1, visible.length - 1)]); }
+			else if (ev.key === 'ArrowUp') { ev.preventDefault(); setActive(visible[Math.max(idx - 1, 0)]); }
+			else if (ev.key === 'Enter') { ev.preventDefault(); const a = visible[idx]; if (a) { choose(a); } }
+			else if (ev.key === 'Escape') { ev.preventDefault(); close(); button.focus(); }
+		});
+	});
+}
+
 /** Dropdown options for the model pickers: only models the active window(s) can actually compare. */
 function modelOptions(eligible: ComparableModel[]): { value: string; label: string }[] {
 	return eligible.map(m => ({
@@ -620,12 +700,12 @@ function renderModelControls(d: EfficiencyViewData, eligible: ComparableModel[])
 	const caption = (key: string): string => escapeHtml(localize(`efficiency.models.controls.${key}`));
 	const body = modelState.mode === 'periods'
 		? `
-			<label>${caption('model')} ${selectHtml('model-a', models, modelState.modelA)}</label>
+			<label>${caption('model')} ${searchableSelectHtml('model-a', models, modelState.modelA)}</label>
 			<label>${caption('baseline')} ${selectHtml('window-a', windows, modelState.windowA)}</label>
 			<label>${caption('comparedWith')} ${selectHtml('window-b', windows, modelState.windowB)}</label>`
 		: `
-			<label>${caption('modelA')} ${selectHtml('model-a', models, modelState.modelA)}</label>
-			<label>${caption('modelB')} ${selectHtml('model-b', modelBOptions(models), modelState.modelB)}</label>
+			<label>${caption('modelA')} ${searchableSelectHtml('model-a', models, modelState.modelA)}</label>
+			<label>${caption('modelB')} ${searchableSelectHtml('model-b', modelBOptions(models), modelState.modelB)}</label>
 			<label>${caption('window')} ${selectHtml('window', windows, modelState.window)}</label>`;
 	return `<div class="model-controls"><label>${caption('mode')} ${modeSelect}</label>${body}</div>`;
 }
@@ -1174,6 +1254,7 @@ function render(): void {
 
 /** Wires the Models tab selects; each change updates state and re-renders. */
 function wireModelControls(): void {
+	wireSearchableSelects();
 	const bind = (id: string, apply: (value: string) => void): void => {
 		document.getElementById(id)?.addEventListener('change', ev => {
 			apply((ev.target as HTMLSelectElement).value);
