@@ -99,6 +99,8 @@ export async function polishNarration(
 	const prompt = buildPrompt(manifest, release, config.llm.maxWordsPerScene);
 	log.group(`Polishing narration with ${config.llm.model} (${config.llm.provider})`);
 
+	assertLocalNarrationDestination(config.llm.endpoint, config.llm.allowRemote ?? false);
+
 	let rewritten: Map<string, string>;
 	try {
 		const raw = config.llm.provider === 'ollama'
@@ -120,6 +122,34 @@ export async function polishNarration(
 			narration: rewritten.get(scene.id) ?? capWords(scene.narration, config.llm.maxWordsPerScene),
 		})),
 	});
+}
+
+/**
+ * Refuses to send the narration text to a non-loopback host unless the config
+ * opts in with `llm.allowRemote`.
+ *
+ * `endpoint` is a config value, and the prompt carries the release narration.
+ * Local models are the documented setup, so anything else must be deliberate —
+ * mirrors the `allowOtherHosts` guard on the Mistral adapter in `voice.ts`.
+ */
+export function assertLocalNarrationDestination(endpoint: string, allowRemote: boolean): void {
+	let parsed: URL;
+	try {
+		parsed = new URL(endpoint);
+	} catch {
+		throw new Error(`llm.endpoint is not a valid URL: ${endpoint}`);
+	}
+
+	const isLoopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(parsed.hostname);
+	if (isLoopback) { return; }
+	if (!allowRemote) {
+		throw new Error(
+			`refusing to send narration to ${parsed.hostname} — llm.endpoint must be loopback. ` +
+			'To use a hosted model, set llm.allowRemote to true in config.json, and be sure you ' +
+			'trust that host with the release text.',
+		);
+	}
+	log.warn(`Sending narration to ${parsed.hostname}, which is not loopback (llm.allowRemote is on)`);
 }
 
 async function callOllama(prompt: string, config: Config): Promise<string> {
