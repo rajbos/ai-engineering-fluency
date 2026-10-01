@@ -353,6 +353,8 @@
   "efficiency.models.noModelsInWindow": "{0}（{1}）内未使用任何模型。请选择更大的时间窗口。",
   "efficiency.models.noSharedModel": "没有模型同时在{0}（{1}）和{2}（{3}）内使用过，因此无法跨这两个时段跟踪同一个模型。请选择其他时段，或切换到“对比两个模型”。",
   "efficiency.models.noSecondModel": "— 此时间窗口内没有第二个模型 —",
+  "efficiency.models.search.placeholder": "搜索模型…",
+  "efficiency.models.search.empty": "没有匹配的模型",
   "efficiency.models.controls.mode": "模式",
   "efficiency.models.controls.modelA": "模型 A",
   "efficiency.models.controls.modelB": "模型 B",

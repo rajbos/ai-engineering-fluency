@@ -301,7 +301,7 @@ async function runScenario(page, view, scenario) {
       window.__HARNESS_ERRORS__.length = 0;
     });
 
-    if (step.click || step.post) {
+    if (step.click || step.post || step.type || step.press) {
       const reason = await applyStep(page, step);
       if (reason) {
         fail(label, reason);

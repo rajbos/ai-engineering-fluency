@@ -731,6 +731,8 @@ test('l10n: Efficiency Models tab empty states resolve in English', () => {
 		'efficiency.models.noModelsInWindow': 'No model was used in {0} ({1}). Pick a wider window.',
 		'efficiency.models.noSharedModel': 'No model was used in both {0} ({1}) and {2} ({3}), so there is no model to follow across those periods. Pick different periods, or switch to \u201cCompare two models\u201d.',
 		'efficiency.models.noSecondModel': '\u2014 no second model in this window \u2014',
+		'efficiency.models.search.placeholder': 'Search models\u2026',
+		'efficiency.models.search.empty': 'No matching models',
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
@@ -744,6 +746,8 @@ test('l10n: Efficiency Models tab empty states resolve in zh-cn', () => {
 			'efficiency.models.noPairInWindow': '{0}\uff08{1}\uff09\u5185\u53ea\u4f7f\u7528\u4e86\u4e00\u4e2a\u6a21\u578b\uff0c\u65e0\u6cd5\u7ec4\u6210\u5bf9\u6bd4\u3002\u8bf7\u9009\u62e9\u66f4\u5927\u7684\u65f6\u95f4\u7a97\u53e3\uff0c\u6216\u5207\u6362\u5230\u201c\u5355\u4e2a\u6a21\u578b\uff0c\u4e24\u4e2a\u65f6\u6bb5\u201d\u3002',
 			'efficiency.models.noModelsInWindow': '{0}\uff08{1}\uff09\u5185\u672a\u4f7f\u7528\u4efb\u4f55\u6a21\u578b\u3002\u8bf7\u9009\u62e9\u66f4\u5927\u7684\u65f6\u95f4\u7a97\u53e3\u3002',
 			'efficiency.models.noSecondModel': '\u2014 \u6b64\u65f6\u95f4\u7a97\u53e3\u5185\u6ca1\u6709\u7b2c\u4e8c\u4e2a\u6a21\u578b \u2014',
+			'efficiency.models.search.placeholder': '\u641c\u7d22\u6a21\u578b\u2026',
+			'efficiency.models.search.empty': '\u6ca1\u6709\u5339\u914d\u7684\u6a21\u578b',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);

@@ -3,7 +3,8 @@
 /**
  * Replays declared UI steps on a rendered view page.
  *
- * A step is `{ "click": "<selector>" }`, `{ "select": "<selector>", "value"?: "<option>" }`
+ * A step is `{ "click": "<selector>" }`, `{ "select": "<selector>", "value"?: "<option>" }`,
+ * `{ "type": "<selector>", "text": "..." }` (fill a text input), `{ "press": "<key>" }` (keyboard)
  * or `{ "post": { "command": "...", ... } }` — the same shape `views.config.json`
  * uses for interaction-smoke `scenarios`, so a view's `states` (the tabs and
  * modes the visual diff screenshots) and its scenarios read alike and share one
@@ -60,6 +61,8 @@ const IS_SHOWING = (selector) => {
 function describeStep(step) {
 	if (step.click) { return `click ${step.click}`; }
 	if (step.post) { return `post ${step.post && step.post.command ? step.post.command : 'message'}`; }
+	if (step.type) { return `type "${step.text ?? ''}" into ${step.type}`; }
+	if (step.press) { return `press ${step.press}`; }
 	return `select ${step.select}${step.value ? ` = ${step.value}` : ''}`;
 }
 
@@ -86,6 +89,22 @@ async function applyStep(page, step) {
 			return `could not click: ${String(error && error.message || error).split('\n')[0]}`;
 		}
 	}
+	if (step.type) {
+		try {
+			await page.locator(step.type).first().fill(String(step.text ?? ''), { timeout: 2000 });
+			return null;
+		} catch (error) {
+			return `could not type: ${String(error && error.message || error).split('\n')[0]}`;
+		}
+	}
+	if (step.press) {
+		try {
+			await page.keyboard.press(step.press);
+			return null;
+		} catch (error) {
+			return `could not press: ${String(error && error.message || error).split('\n')[0]}`;
+		}
+	}
 	if (step.post) {
 		if (!step.post || typeof step.post !== 'object') { return '"post" must be a message object'; }
 		try {
@@ -107,7 +126,7 @@ async function applyStep(page, step) {
 			return `could not change: ${String(error && error.message || error).split('\n')[0]}`;
 		}
 	}
-	return 'step has none of "click", "select" or "post"';
+	return 'step has none of "click", "select", "type", "press" or "post"';
 }
 
 /**

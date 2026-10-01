@@ -351,6 +351,8 @@
   "efficiency.models.noModelsInWindow": "No model was used in {0} ({1}). Pick a wider window.",
   "efficiency.models.noSharedModel": "No model was used in both {0} ({1}) and {2} ({3}), so there is no model to follow across those periods. Pick different periods, or switch to “Compare two models”.",
   "efficiency.models.noSecondModel": "— no second model in this window —",
+  "efficiency.models.search.placeholder": "Search models…",
+  "efficiency.models.search.empty": "No matching models",
   "efficiency.models.controls.mode": "Mode",
   "efficiency.models.controls.modelA": "Model A",
   "efficiency.models.controls.modelB": "Model B",
