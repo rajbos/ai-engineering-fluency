@@ -501,6 +501,16 @@ export function isSubmoduleWorktreeRemovalFailure(stderr: string): boolean {
 	return /working trees containing submodules cannot be moved or removed/i.test(stderr);
 }
 
+/** Whether Git reached directory deletion but the operating system rejected that step. */
+export function isWorktreeDirectoryRemovalFailure(stderr: string): boolean {
+	return /failed to (delete|remove) '.*'/i.test(stderr);
+}
+
+/** Forces Git's machine-parsed diagnostics to English regardless of the user's display locale. */
+export function getLocaleStableGitEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	return { ...environment, LC_ALL: 'C', LANG: 'C' };
+}
+
 type WorktreeRemovalResult = { ok: boolean; stderr: string };
 
 type WorktreeForceConfirmation = (
@@ -519,6 +529,7 @@ export async function retrySubmoduleWorktreeRemovalWithConfirmation(
 	result: WorktreeRemovalResult,
 	confirm: WorktreeForceConfirmation,
 	forceRemove: () => Promise<WorktreeRemovalResult>,
+	removeDirectoryFallback: () => Promise<WorktreeRemovalResult>,
 ): Promise<WorktreeRemovalResult | undefined> {
 	if (result.ok || !isSubmoduleWorktreeRemovalFailure(result.stderr)) { return result; }
 
@@ -529,7 +540,14 @@ export async function retrySubmoduleWorktreeRemovalWithConfirmation(
 		forceDelete,
 	);
 	if (forceChoice !== forceDelete) { return undefined; }
-	return forceRemove();
+	const forcedResult = await forceRemove();
+	if (
+		!forcedResult.ok
+		&& (isWorktreeDirectoryRemovalFailure(forcedResult.stderr) || isSubmoduleWorktreeRemovalFailure(forcedResult.stderr))
+	) {
+		return removeDirectoryFallback();
+	}
+	return forcedResult;
 }
 
 /** The computed-stat caches that carry a generation stamp. */
@@ -14189,7 +14207,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       childProcess.execFile(
         "git",
         args,
-        { cwd, encoding: "utf8", timeout: timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+        {
+          cwd,
+          encoding: "utf8",
+          timeout: timeoutMs,
+          windowsHide: true,
+          maxBuffer: 8 * 1024 * 1024,
+          env: getLocaleStableGitEnvironment(),
+        },
         (err, stdout, stderr) => resolve({ ok: !err, stdout: String(stdout ?? "").trim(), stderr: String(stderr ?? "").trim() }),
       );
     });
@@ -14341,10 +14366,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    * safety check, it only swaps out a less capable directory-removal implementation for a
    * more capable one (Node's fs.rm).
    */
-  private isWorktreeDirectoryRemovalFailure(stderr: string): boolean {
-    return /failed to (delete|remove) '.*'/i.test(stderr);
-  }
-
   /** Deletes a worktree's folder directly (Node's fs.rm handles junctions/long paths git's Windows walker sometimes cannot). */
   private async forceRemoveWorktreeDirectory(worktreePath: string): Promise<{ ok: boolean; error?: string }> {
     try {
@@ -14397,11 +14418,12 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       result,
       (message, options, action) => vscode.window.showWarningMessage(message, options, action),
       () => this.removeGitWorktree(mainRepoRoot, worktreePath, true),
+      () => this.removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath),
     );
     if (!submoduleRetry) { return undefined; }
     result = submoduleRetry;
 
-    if (!result.ok && (this.isWorktreeDirectoryRemovalFailure(result.stderr) || isSubmoduleWorktreeRemovalFailure(result.stderr))) {
+    if (!result.ok && isWorktreeDirectoryRemovalFailure(result.stderr)) {
       result = await this.removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath);
     }
     return result;
@@ -14564,7 +14586,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (!result.ok && /modified or untracked/i.test(result.stderr)) {
       return { status: "skipped", reason: "Has uncommitted or untracked changes." };
     }
-    if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr)) {
+    if (!result.ok && isWorktreeDirectoryRemovalFailure(result.stderr)) {
       result = await this.removeWorktreeDirectoryFallback(validatedMainRepoRoot, worktreePath);
     }
     if (!result.ok) {

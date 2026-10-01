@@ -3,7 +3,9 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
+	getLocaleStableGitEnvironment,
 	isSubmoduleWorktreeRemovalFailure,
+	isWorktreeDirectoryRemovalFailure,
 	retrySubmoduleWorktreeRemovalWithConfirmation,
 } from '../../src/extension';
 import { extractBracesBlock } from './sourceStructureTestHelpers';
@@ -29,6 +31,18 @@ test('recognizes only Git submodule worktree removal refusals', () => {
 	);
 });
 
+test('forces locale-stable Git diagnostics without dropping inherited environment variables', () => {
+	const environment = getLocaleStableGitEnvironment({ PATH: 'git-path', LANG: 'de_DE.UTF-8' });
+	assert.equal(environment.PATH, 'git-path');
+	assert.equal(environment.LANG, 'C');
+	assert.equal(environment.LC_ALL, 'C');
+});
+
+test('recognizes only classified OS directory-removal failures', () => {
+	assert.equal(isWorktreeDirectoryRemovalFailure("error: failed to delete 'C:\\repo\\worktree': Access is denied"), true);
+	assert.equal(isWorktreeDirectoryRemovalFailure('fatal: cannot remove a locked working tree'), false);
+});
+
 const submoduleFailure = {
 	ok: false,
 	stderr: 'fatal: working trees containing submodules cannot be moved or removed',
@@ -44,6 +58,7 @@ test('declining submodule force removal makes no destructive retry', async () =>
 			forceCalls++;
 			return { ok: true, stderr: '' };
 		},
+		async () => assert.fail('declining must not invoke the directory fallback'),
 	);
 
 	assert.equal(result, undefined);
@@ -60,6 +75,7 @@ test('confirming submodule force removal makes exactly one destructive retry', a
 			forceCalls++;
 			return { ok: true, stderr: '' };
 		},
+		async () => assert.fail('successful forced removal must not invoke the directory fallback'),
 	);
 
 	assert.deepEqual(result, { ok: true, stderr: '' });
@@ -81,6 +97,7 @@ test('unrelated Git failures are neither confirmed nor force-retried', async () 
 			forceCalls++;
 			return { ok: true, stderr: '' };
 		},
+		async () => assert.fail('unrelated failures must not invoke the directory fallback'),
 	);
 
 	assert.equal(result, lockedFailure);
@@ -88,10 +105,51 @@ test('unrelated Git failures are neither confirmed nor force-retried', async () 
 	assert.equal(forceCalls, 0);
 });
 
+test('confirmed force failure invokes the raw-directory fallback only after the forced retry', async () => {
+	const calls: string[] = [];
+	const result = await retrySubmoduleWorktreeRemovalWithConfirmation(
+		'C:\\repo\\worktree',
+		submoduleFailure,
+		async (_message, _options, action) => {
+			calls.push('confirm');
+			return action;
+		},
+		async () => {
+			calls.push('force');
+			return { ok: false, stderr: "error: failed to delete 'C:\\repo\\worktree': Access is denied" };
+		},
+		async () => {
+			calls.push('fallback');
+			return { ok: true, stderr: '' };
+		},
+	);
+
+	assert.deepEqual(calls, ['confirm', 'force', 'fallback']);
+	assert.deepEqual(result, { ok: true, stderr: '' });
+});
+
+test('confirmed unrelated force failure does not invoke the raw-directory fallback', async () => {
+	let fallbackCalls = 0;
+	const lockedFailure = { ok: false, stderr: 'fatal: cannot remove a locked working tree' };
+	const result = await retrySubmoduleWorktreeRemovalWithConfirmation(
+		'C:\\repo\\worktree',
+		submoduleFailure,
+		async (_message, _options, action) => action,
+		async () => lockedFailure,
+		async () => {
+			fallbackCalls++;
+			return { ok: true, stderr: '' };
+		},
+	);
+
+	assert.equal(result, lockedFailure);
+	assert.equal(fallbackCalls, 0);
+});
+
 test('bulk cleanup only uses filesystem deletion for classified OS removal failures', () => {
 	const cleanup = extractMethodBody('private async cleanupSinglePushedWorktree(');
 	assert.ok(
-		cleanup.includes('if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr))'),
+		cleanup.includes('if (!result.ok && isWorktreeDirectoryRemovalFailure(result.stderr))'),
 		'bulk cleanup must preserve Git safety refusals instead of force-deleting the directory',
 	);
 	assert.ok(
