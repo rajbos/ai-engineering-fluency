@@ -12,7 +12,8 @@ import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import { registerMessageHandler } from "../shared/messageHandler";
 import { getModelColor } from "../../../../src/chartDataBuilder";
 import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
-import { initializeWebviewLocalization, setCurrentLanguage } from "../shared/localization";
+import { localize, localizeFormat } from "../shared/localization";
+import { applyWebviewLocale } from "../shared/webviewLocale";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
@@ -103,7 +104,10 @@ type TeamServerInfo = {
   isConfigured: boolean;
   endpointUrl: string;
   sharingProfile: string;
+  /** Last successful usage-rollup upload. Tracked separately from the fluency score below. */
   lastSyncTime: string | null;
+  /** Last successful fluency-score upload, which runs and fails independently of the rollup sync. */
+  fluencyLastSyncTime: string | null;
   sessionCount: number;
 };
 
@@ -230,11 +234,7 @@ const vscode = acquireVsCodeApi<DiagnosticsViewState>();
 const initialData = getWindowData<DiagnosticsData & { localization?: Record<string, string> }>('__INITIAL_DIAGNOSTICS__');
 
 // Initialize localization for webview
-if (initialData?.localization) {
-	initializeWebviewLocalization(initialData.localization);
-	const language = initialData.localization['__language__'] || 'en';
-	setCurrentLanguage(language);
-}
+applyWebviewLocale(initialData);
 
 const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   activeTab: undefined,
@@ -279,6 +279,11 @@ let storedDetailedFiles: SessionFileDetails[] = [];
 let isLoading = true;
 let currentBackendInfo: BackendStorageInfo | undefined;
 let currentGithubAuth: GitHubAuthStatus | undefined;
+// A `switchTab` request (e.g. the What's New "Take me there" action) that arrived before
+// renderLayout() built the tab bar — the message listener is registered before renderLayout()
+// runs (see resolveEarlyBackendState's comment for the same race with backendStorageInfoLoaded),
+// so activateTab() below can silently no-op on first arrival. Applied once renderLayout() runs.
+let pendingSwitchTabTo: string | undefined;
 let currentModelUsageTimeRange = "all";
 
 function removeSessionFilesSection(reportText: string): string {
@@ -971,7 +976,7 @@ function renderTeamServerDetailsSection(teamInfo: TeamServerInfo): string {
   if (!teamInfo.isConfigured) {
     return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Team Server</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">Deploy the sharing server and configure its URL in the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li><li>Enter the server's base URL in the Backend configuration panel</li><li>Data syncs automatically every 5 minutes once configured</li></ul></div>`;
   }
-  return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Server URL</td><td>${escapeHtml(teamInfo.endpointUrl)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">📁 Total Sessions</div><div class="summary-value">${escapeHtml(String(teamInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">🔄 Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? formatDate(teamInfo.lastSyncTime) : "Never"}</div></div></div></div>`;
+  return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 ${escapeHtml(localize('diagnostics.teamServer.configDetails'))}</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">${escapeHtml(localize('diagnostics.teamServer.serverUrl'))}</td><td>${escapeHtml(teamInfo.endpointUrl)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 ${escapeHtml(localize('diagnostics.teamServer.localSessionStats'))}</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">📁 ${escapeHtml(localize('diagnostics.teamServer.totalSessions'))}</div><div class="summary-value">${escapeHtml(String(teamInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.localSessionFiles'))}</div></div><div class="summary-card"><div class="summary-label">🔄 ${escapeHtml(localize('diagnostics.teamServer.usageData'))}</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? formatDate(teamInfo.lastSyncTime) : escapeHtml(localize('diagnostics.teamServer.never'))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.lastRollupUpload'))}</div></div><div class="summary-card"><div class="summary-label">🎯 ${escapeHtml(localize('diagnostics.teamServer.fluencyScore'))}</div><div class="summary-value" style="font-size: 14px;">${teamInfo.fluencyLastSyncTime ? formatDate(teamInfo.fluencyLastSyncTime) : escapeHtml(localize('diagnostics.teamServer.never'))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.uploadedSeparately'))}</div></div></div></div>`;
 }
 
 function renderTeamServerPanel(teamInfo: TeamServerInfo, githubAuth?: GitHubAuthStatus): string {
@@ -980,7 +985,7 @@ function renderTeamServerPanel(teamInfo: TeamServerInfo, githubAuth?: GitHubAuth
   const authWarning = githubNotAuthenticated ? `<button id="btn-team-server-auth-warning" style="width: 100%; margin-bottom: 16px; padding: 12px 16px; background: rgba(217, 119, 6, 0.15); border: 1px solid #d97706; border-radius: 6px; display: flex; gap: 10px; align-items: center; cursor: pointer; text-align: left;" title="Click to sign in to GitHub"><span style="font-size: 18px; flex-shrink: 0;">⚠️</span><div style="flex: 1;"><div style="color: #fbbf24; font-weight: 600; font-size: 13px; margin-bottom: 4px;">GitHub Authentication Required</div><div style="color: #d4a017; font-size: 12px;">Team server sync will not run until you sign in to GitHub. <strong style="color: #fbbf24;">Click here to sign in.</strong></div></div><span style="color: #fbbf24; font-size: 18px; flex-shrink: 0;">→</span></button>` : '';
   return `<div class="info-box"><div class="info-box-title">🖥️ Team Server Backend</div><div>Sync your token usage data to a self-hosted team server for team-wide reporting.</div></div>
     ${authWarning}
-    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} Status</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div>${renderTeamServerGithubAuthCard(githubAuth, githubNotAuthenticated)}<div class="summary-card"><div class="summary-label">👥 Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(teamInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">🕒 Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : "Never"}</div></div></div>
+    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} ${escapeHtml(localize('diagnostics.teamServer.status'))}</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div>${renderTeamServerGithubAuthCard(githubAuth, githubNotAuthenticated)}<div class="summary-card"><div class="summary-label">👥 ${escapeHtml(localize('diagnostics.teamServer.sharingProfile'))}</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(teamInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">🕒 ${escapeHtml(localize('diagnostics.teamServer.usageSync'))}</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : escapeHtml(localize('diagnostics.teamServer.never'))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.rollupUploadOnly'))}</div></div></div>
     ${renderTeamServerDetailsSection(teamInfo)}
     <div class="button-group"><button class="button" id="btn-configure-backend-team"><span>${teamInfo.isConfigured ? "⚙️" : "🔧"}</span><span>${teamInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span></button></div>`;
 }
@@ -1559,6 +1564,28 @@ function groupOfTab(tabId: string): string {
     if (tabs.includes(tabId)) { return group; }
   }
   return "diagnostics";
+}
+
+function isKnownDiagnosticsTab(tabId: string): boolean {
+  return Object.values(TAB_GROUPS).some((tabs) => tabs.includes(tabId));
+}
+
+/**
+ * Requested by the extension host (e.g. the What's New "Take me there" action) to land on a
+ * specific tab, including switching its group's leaf bar into view — a plain tab-button click
+ * only ever needs activateTab() since the user is already looking at that group's leaf bar. If
+ * the tab bar doesn't exist yet (renderLayout() hasn't run — see pendingSwitchTabTo's comment),
+ * stash the request instead of silently dropping it.
+ */
+function handleSwitchTab(message: DiagMessage): void {
+  const tab = String(message.tab ?? "");
+  if (!isKnownDiagnosticsTab(tab)) { return; }
+  if (activateTab(tab)) {
+    activateGroup(groupOfTab(tab));
+    diagState.patch({ activeTab: tab });
+    return;
+  }
+  pendingSwitchTabTo = tab;
 }
 
 /** The first leaf tab in a group that actually has a rendered button (handles the conditional Debug tab). */
@@ -2606,33 +2633,30 @@ function handleFolderAnalysisResult(message: DiagMessage): void {
   }
 }
 
+const DIAG_MESSAGE_HANDLERS: Record<string, (message: DiagMessage) => void> = {
+  diagnosticDataLoaded: handleDiagnosticDataLoaded,
+  backendStorageInfoLoaded: handleBackendStorageSection,
+  githubAuthUpdated: handleGithubAuthUpdated,
+  diagnosticDataError: handleDiagnosticDataError,
+  sessionFilesLoadProgress: handleSessionFilesLoadProgress,
+  cacheCleared: handleCacheCleared,
+  cacheRefreshed: handleCacheRefreshed,
+  folderPicked: handleFolderPicked,
+  folderAnalysisResult: handleFolderAnalysisResult,
+  modelUsageResult: handleModelUsageResult,
+  ttftResult: handleTtftResult,
+  switchTab: handleSwitchTab,
+};
+
 function setupMessageHandlers(): void {
   registerMessageHandler((message: DiagMessage) => {
-    if (message.command === "diagnosticDataLoaded") {
-      handleDiagnosticDataLoaded(message);
-    } else if (message.command === "backendStorageInfoLoaded") {
-      handleBackendStorageSection(message);
-    } else if (message.command === "githubAuthUpdated") {
-      handleGithubAuthUpdated(message);
-    } else if (message.command === "diagnosticDataError") {
-      handleDiagnosticDataError(message);
-    } else if (message.command === "sessionFilesLoaded" && message.detailedSessionFiles) {
-      handleSessionFilesLoaded(message);
-    } else if (message.command === "sessionFilesLoadProgress") {
-      handleSessionFilesLoadProgress(message);
-    } else if (message.command === "cacheCleared") {
-      handleCacheCleared();
-    } else if (message.command === "cacheRefreshed") {
-      handleCacheRefreshed(message);
-    } else if (message.command === "folderPicked") {
-      handleFolderPicked(message);
-    } else if (message.command === "folderAnalysisResult") {
-      handleFolderAnalysisResult(message);
-    } else if (message.command === "modelUsageResult") {
-      handleModelUsageResult(message);
-    } else if (message.command === "ttftResult") {
-      handleTtftResult(message);
+    // Only one command carries a payload-shaped guard beyond its name, so it stays a special case
+    // rather than forcing every entry in the table above to encode its own dispatch condition.
+    if (message.command === "sessionFilesLoaded") {
+      if (message.detailedSessionFiles) { handleSessionFilesLoaded(message); }
+      return;
     }
+    DIAG_MESSAGE_HANDLERS[message.command]?.(message);
   });
 }
 
@@ -3383,6 +3407,19 @@ function triggerTtftAnalysis(): void {
   vscode.postMessage({ command: "analyzeTtft", granularity: currentTtftGranularity, scanRange: currentTtftScanRange });
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 function setupTtftHandlers(): void {
   document.getElementById("ttft-granularity")?.addEventListener("change", (e) => {
     currentTtftGranularity = (e.target as HTMLSelectElement).value as TtftGranularity;
@@ -3618,9 +3655,23 @@ function renderLayout(data: DiagnosticsData): void {
   setupOtelDeltaPeriodHandler();
   setupTtftHandlers();
 
+  restoreActiveTabAndSubtab();
+}
+
+/**
+ * Applies whichever tab should be active on first render: a `switchTab` request that arrived
+ * before renderLayout() ran (see pendingSwitchTabTo's comment) takes priority over whatever tab
+ * was last open — it's an explicit, just-now navigation request, not stale persisted state.
+ */
+function restoreActiveTabAndSubtab(): void {
   const savedState = diagState.restore();
+  const requestedTab = pendingSwitchTabTo;
+  pendingSwitchTabTo = undefined;
   let restoredTab = "report";
-  if (savedState?.activeTab && activateTab(savedState.activeTab)) {
+  if (requestedTab && activateTab(requestedTab)) {
+    restoredTab = requestedTab;
+    diagState.patch({ activeTab: requestedTab });
+  } else if (savedState?.activeTab && activateTab(savedState.activeTab)) {
     restoredTab = savedState.activeTab;
   } else {
     activateTab("report");

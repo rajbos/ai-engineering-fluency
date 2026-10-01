@@ -75,6 +75,26 @@ find ./session-logs -name "*.json" -exec jq '.requests | length' {} \; | paste -
 find ./session-logs -name "*.json" -exec jq -r '.requests[].result.metadata.modelId // empty' {} \; | sort -u
 ```
 
+### Editor Type Manifest — `./session-logs/.editor-types.json`
+
+**What**: A JSON manifest mapping each downloaded session file's relative path to its source editor type (e.g., "VS Code", "Copilot CLI", "JetBrains"). Built from blob metadata during the download workflow.
+
+**Format**:
+```json
+{
+  "default/machineId/2026-09-14/session-abc123.json": "VS Code",
+  "default/machineId/2026-09-14/events.jsonl": "Copilot CLI"
+}
+```
+
+**Usage**: Load the manifest to classify session files by editor without relying on filename heuristics or content sniffing.
+```javascript
+const editorTypes = require('./session-logs/.editor-types.json');
+// editorTypes['default/machineId/2026-09-14/session-abc123.json'] === 'VS Code'
+```
+
+**Note**: Only blobs uploaded after the `editorType` metadata feature was added will have entries. Older uploads will be absent from the manifest.
+
 ### 2. Aggregated Usage Data — `./usage-data/usage-agg-daily.json`
 
 **What**: Pre-aggregated daily token usage data from Azure Table Storage. This is the same data the extension syncs to the backend — rolled up by day, model, workspace, machine, and user.

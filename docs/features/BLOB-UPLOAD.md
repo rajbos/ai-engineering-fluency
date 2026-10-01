@@ -80,6 +80,11 @@ Each uploaded blob includes metadata:
 - `datasetId`: Dataset identifier (e.g., "default")
 - `uploadedAt`: ISO timestamp when uploaded
 - `compressed`: "true" if file is gzipped
+- `editorType`: Source editor that created the session (e.g., "VS Code", "Copilot CLI", "JetBrains")
+
+### Editor Type in the Download Workflow
+
+The `copilot-setup-steps.yml` workflow downloads blob contents via `az storage blob download-batch`, which does not preserve blob metadata. After decompression, a separate step fetches blob metadata via `az storage blob list` and writes a manifest file at `./session-logs/.editor-types.json` mapping each session file's relative path to its `editorType`. The Copilot Coding Agent can use this manifest to classify session files by editor without relying on filename heuristics or content sniffing.
 
 ## Authentication
 

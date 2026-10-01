@@ -9,7 +9,7 @@ import chalk from 'chalk';
 import { SessionDiscovery } from '../../src/sessionDiscovery';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
-import { isMcpTool, extractMcpServerName } from '../../src/workspaceHelpers';
+import { isMcpTool, extractMcpServerName, resolveDebugLogCandidatePaths } from '../../src/workspaceHelpers';
 import { resolveFileUri } from '../../src/workspacePathResolver';
 import { parseSessionFileContent } from '../../src/sessionParser';
 import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost, extractAllTokensFromDebugLog } from '../../src/tokenEstimation';
@@ -21,11 +21,11 @@ import { parseJetBrainsPartition } from '../../src/jetbrains';
 import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
 import { addModelUsage, scaleModelUsage, preserveAutoRouting, reconcileModelUsageToActualTokens } from '../../src/statsHelpers';
+import { calculateEnvironmentalImpact } from '../../src/environmentalImpact';
 import { withErrorRecovery } from '../../src/utils/errors';
 import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
-import { ENVIRONMENTAL } from './constants';
 
 // Import JSON data files
 import tokenEstimatorsData from '../../src/tokenEstimators.json';
@@ -221,25 +221,17 @@ async function statSessionFile(filePath: string): Promise<fs.Stats> {
  *
  * Returns null if no debug log exists or if no llm_request events are found.
  */
-async function readDebugLogTokensForSession(sessionFilePath: string, verbose = false): Promise<{
+export async function readDebugLogTokensForSession(sessionFilePath: string, verbose = false): Promise<{
 	inputTokens: number; outputTokens: number; cachedTokens: number;
 	modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>;
 } | null> {
+	// Shared with the VS Code extension: returns undefined unless the file is UUID-named
+	// inside workspaceStorage/<hash>, and keeps the platform's native separators.
+	const candidatePaths = resolveDebugLogCandidatePaths(sessionFilePath);
+	if (!candidatePaths) { return null; }
 	const sessionId = path.basename(sessionFilePath, path.extname(sessionFilePath));
-	if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) { return null; }
-	
-	// Normalize to forward slashes for consistent regex matching
-	const norm = sessionFilePath.replace(/\\/g, '/');
-	const wsHashMatch = norm.match(/^(.*\/workspaceStorage\/[^/]+)\//);
-	if (!wsHashMatch) { return null; }
-	
-	// Use the normalized match length to extract from the normalized path, then convert back
-	const normalizedHashDir = wsHashMatch[1];
-	const workspaceHashDir = normalizedHashDir.replace(/\//g, '\\');
-	
-	const extensionFolders = ['GitHub.copilot-chat', 'github.copilot-chat', 'GitHub.copilot', 'github.copilot'];
-	for (const extFolder of extensionFolders) {
-		const debugLogPath = path.join(workspaceHashDir, extFolder, 'debug-logs', sessionId, 'main.jsonl');
+
+	for (const debugLogPath of candidatePaths) {
 		try {
 			const content = await fs.promises.readFile(debugLogPath, 'utf8');
 			const result = extractAllTokensFromDebugLog(content);
@@ -508,9 +500,10 @@ export async function calculateDetailedStats(
 		if (period.sessions > 0) {
 			period.avgTokensPerSession = Math.round(period.tokens / period.sessions);
 		}
-		period.co2 = (period.tokens / 1000) * ENVIRONMENTAL.CO2_PER_1K_TOKENS;
-		period.treesEquivalent = period.co2 / ENVIRONMENTAL.CO2_ABSORPTION_PER_TREE_PER_YEAR;
-		period.waterUsage = (period.tokens / 1000) * ENVIRONMENTAL.WATER_USAGE_PER_1K_TOKENS;
+		const environmentalImpact = calculateEnvironmentalImpact(period.modelUsage, period.tokens);
+		period.co2 = environmentalImpact.co2;
+		period.treesEquivalent = environmentalImpact.treesEquivalent;
+		period.waterUsage = environmentalImpact.waterUsage;
 		period.estimatedCost = calculateEstimatedCost(period.modelUsage, modelPricing);
 		period.estimatedCostCopilot = calculateEstimatedCost(period.modelUsage, modelPricing, 'copilot');
 	}

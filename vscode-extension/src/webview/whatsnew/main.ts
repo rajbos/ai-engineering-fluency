@@ -6,7 +6,7 @@ import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
-import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { applyWebviewLocale } from '../shared/webviewLocale';
 import { registerMessageHandler } from '../shared/messageHandler';
 
 /** One feature as the host projects it for rendering. Mirrors `WhatsNewFeature` plus view state. */
@@ -46,10 +46,7 @@ type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
 const vscode: VSCodeApi = acquireVsCodeApi();
 const initialData = getWindowData<WhatsNewViewData>('__INITIAL_WHATSNEW__');
 
-if (initialData?.localization) {
-	initializeWebviewLocalization(initialData.localization);
-	setCurrentLanguage(initialData.localization['__language__'] || 'en');
-}
+applyWebviewLocale(initialData);
 
 /** Badge text per feature kind — what the user is being pointed at. */
 const KIND_LABEL: Record<WhatsNewViewFeature['kind'], string> = {

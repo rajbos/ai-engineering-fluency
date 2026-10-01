@@ -87,6 +87,37 @@ shape means the side wins on some dimensions and loses on others — which is
 usually the more interesting result. Axes where either side lacks data are
 dropped, and the radar is hidden entirely below three usable axes.
 
+## The Cost Attribution model-mix table
+
+The Cost Attribution tab's **Model mix movement** table is the per-model detail
+behind its "Model mix ($/token)" bar: for each model, its share of the period's
+tokens before and after, and the movement between them in percentage points.
+
+`buildModelShifts()` in `src/efficiencyAnalysis.ts` decides what appears there
+and in what order — movements under **0.5 percentage points** are dropped as
+noise, the rest are sorted by absolute movement and the **top six** are kept.
+The view renders that list as given; it never re-filters or re-sorts.
+
+What the table does *not* carry is names. `ModelMixShift` is deliberately
+canonical — a raw `model` id plus numbers — because the friendly-name resolver
+`getModelDisplayName()` reads the pricing JSON from `window.__MODEL_PRICING__`,
+a global that exists only inside a webview. Resolving in the extension host
+therefore produced raw ids in the shipped UI. The Efficiency webview
+(`vscode-extension/src/webview/efficiency/modelMixTable.ts`) resolves the name
+at render time instead, where the pricing data is present, reusing the one
+shared resolver that already understands pricing aliases, `copilot/` prefixes,
+custom-endpoint ids, org UUID prefixes and dash/dot version variants.
+
+A model with no pricing entry is never relabelled with a guess: its normalized
+identifier is shown as-is, so an unknown or in-house model stays unique and
+inspectable. Where a friendly name and its canonical id differ, both are
+reachable — the id is in the cell's `title` and in the row's screen-reader text.
+
+For readability the table caps at a readable desktop width, uses compact
+Previous/Current headers with the date range as a sub-label, and scrolls
+horizontally inside its own region on narrow panels rather than compressing the
+numbers. Only the model name truncates visually.
+
 ## Where the data comes from
 
 Per-model efficiency counters are accumulated onto `DailyTokenStats.modelEfficiency`,

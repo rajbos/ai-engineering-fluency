@@ -6,10 +6,11 @@
  */
 
 import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage, DailyRollupEntry } from './types';
-import type { TaskCategory } from './taskClassification';
+import type { TaskCategory, TaskCategoryBreakdown } from './taskClassification';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { toLocalDayKey } from './utils/dayKeys';
 import { getCustomProviderGroup } from './webview/shared/modelUtils';
+import { getTimeWindowStartDate } from './timeWindows';
 
 /**
  * Editor display names that bill through GitHub Copilot's AI-Credit system.
@@ -373,6 +374,15 @@ lastMonthStartMs: number;
  * All calculations use the local timezone so that "today", "this month", and
  * "last 30 days" reflect the user's local clock rather than UTC. This prevents
  * counters from resetting at UTC midnight for users in non-UTC timezones.
+ *
+ * The 30-day window is derived from `getTimeWindowStartDate('last30', now)` —
+ * the same helper the Recent Sessions lookback selector and the chart's rolling
+ * windows use — rather than reimplementing "N days back" here. The two used to
+ * disagree by one day (this function started the window at `now - 30`, that
+ * helper at `now - 30 + 1`, i.e. 31 vs. 30 calendar dates), so a session active
+ * exactly on the older boundary day could be counted in a "Last 30 Days" total
+ * without appearing in a same-labelled Recent Sessions list. Sharing one
+ * implementation makes that class of drift impossible instead of merely tested.
  */
 export function computeUtcDateRanges(now: Date): UtcDateRanges {
 const todayUtcKey = toLocalDayKey(now);
@@ -383,7 +393,9 @@ const lastMonthLastDay = new Date(now.getFullYear(), now.getMonth(), 0); // day 
 const lastMonthUtcEndKey = toLocalDayKey(lastMonthLastDay);
 const lastMonthUtcStartKey = toLocalDayKey(new Date(lastMonthLastDay.getFullYear(), lastMonthLastDay.getMonth(), 1));
 
-const last30DaysStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+// Non-null assertion: 'last30' is always defined in ROLLING_WINDOW_DAYS, so
+// getTimeWindowStartDate only returns null for 'allTime'/an unknown window.
+const last30DaysStart = getTimeWindowStartDate('last30', now)!;
 const last30DaysUtcStartKey = toLocalDayKey(last30DaysStart);
 const last30DaysStartMs = last30DaysStart.getTime();
 
@@ -640,7 +652,63 @@ function getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dayK
 	return dailyStatsMap.get(dayKey)!;
 }
 
-function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: ModelUsage, taskCategory?: TaskCategory): void {
+/**
+ * Folds a session/day's task-category attribution into the daily entry. Shared by both
+ * aggregation paths in this file and by extension.ts's own daily-stats path (`addUsageToDailyEntry`
+ * in extension.ts calls this instead of keeping a second copy of the same algorithm), so a fix here
+ * can't drift out of sync between the periodic-refresh and full-refresh pipelines.
+ *
+ * The chart's "By Task" split (buildTaskCategoryTokenDatasets/SessionDatasets/CostDatasets in
+ * chartDataBuilder.ts) reads taskCategoryTokens/taskCategorySessions/taskCategoryModelUsage, not
+ * taskCategoryUsage below — without them the periodic-refresh path (aggregatePeriodStats, used by
+ * calculateDetailedStats()) silently wipes the chart's task-category token/cost/session bars every
+ * time it overwrites the recent day range in lastFullDailyStats (see mergeIntoFullDailyStats in
+ * extension.ts). Weighted by taskCategoryShares when available, falling back to the primary
+ * category and then "Conversation" — so a mixed session's tokens/sessions/cost split across
+ * categories instead of collapsing onto one. `taskCategory` is also the only source for
+ * taskCategoryUsage (consumed by efficiencyAnalysis.ts's model task-mix comparison), so callers
+ * should pass their best-known category here even when it only comes from a broader fallback (e.g.
+ * the session's overall category when a specific day has no per-day classification of its own).
+ */
+export function addTaskCategoryToDailyEntry(entry: DailyTokenStats, tokens: number, modelUsage: ModelUsage, taskCategory?: TaskCategory, taskCategoryShares?: TaskCategoryBreakdown): void {
+	// taskCategory/taskCategoryShares ultimately come from cached/parsed session data, same as
+	// the "model" keys addModelUsage already guards — see protoGuard.ts. A malformed/tampered
+	// "__proto__" category would otherwise index Object.prototype and corrupt every plain object
+	// in the process, so treat it as unrecognised data and skip it, same as any other bad key.
+	// safeTaskCategory also backstops the fallback below: an unsafe taskCategory must not become
+	// the sole (and therefore filtered-out) entry in `shares`, which would leave every chart map
+	// empty for this entry instead of falling back to "Conversation".
+	const safeTaskCategory = taskCategory && !isUnsafeObjectKey(taskCategory) ? taskCategory : undefined;
+	if (safeTaskCategory) {
+		if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
+		if (!entry.taskCategoryUsage[safeTaskCategory]) { entry.taskCategoryUsage[safeTaskCategory] = { tokens: 0, sessions: 0 }; }
+		entry.taskCategoryUsage[safeTaskCategory].tokens += tokens;
+		entry.taskCategoryUsage[safeTaskCategory].sessions += 1;
+	}
+	if (!entry.taskCategoryTokens) { entry.taskCategoryTokens = {}; }
+	if (!entry.taskCategorySessions) { entry.taskCategorySessions = {}; }
+	if (!entry.taskCategoryModelUsage) { entry.taskCategoryModelUsage = {}; }
+	// TaskCategoryBreakdown is always a full, all-categories map (see taskClassification.ts), so
+	// Object.keys(...).length is always 12 — checking it alone would treat an all-zero breakdown
+	// as "meaningful" and skip every category below, leaving no attribution at all. Require at
+	// least one positive share instead.
+	const hasPositiveShare = taskCategoryShares && Object.values(taskCategoryShares).some(v => Number(v) > 0);
+	const shares = hasPositiveShare
+		? taskCategoryShares!
+		: (safeTaskCategory ? { [safeTaskCategory]: 1 } : { Conversation: 1 });
+	for (const [category, shareRaw] of Object.entries(shares)) {
+		if (isUnsafeObjectKey(category)) { continue; }
+		const share = Number(shareRaw) || 0;
+		if (share <= 0) { continue; }
+		const cat = category as TaskCategory;
+		entry.taskCategoryTokens[cat] = (entry.taskCategoryTokens[cat] || 0) + (tokens * share);
+		entry.taskCategorySessions[cat] = (entry.taskCategorySessions[cat] || 0) + share;
+		if (!entry.taskCategoryModelUsage[cat]) { entry.taskCategoryModelUsage[cat] = {}; }
+		addModelUsage(entry.taskCategoryModelUsage[cat]!, scaleModelUsage(modelUsage, share));
+	}
+}
+
+function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: ModelUsage, taskCategory?: TaskCategory, taskCategoryShares?: TaskCategoryBreakdown): void {
 	entry.tokens += tokens; entry.sessions += 1; entry.interactions += interactions;
 	if (!entry.editorUsage[editorType]) { entry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
 	entry.editorUsage[editorType].tokens += tokens; entry.editorUsage[editorType].sessions += 1;
@@ -661,12 +729,7 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 		if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
 		entry.editorModelUsage[editorType][model].sessions += 1;
 	}
-	if (taskCategory) {
-		if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
-		if (!entry.taskCategoryUsage[taskCategory]) { entry.taskCategoryUsage[taskCategory] = { tokens: 0, sessions: 0 }; }
-		entry.taskCategoryUsage[taskCategory].tokens += tokens;
-		entry.taskCategoryUsage[taskCategory].sessions += 1;
-	}
+	addTaskCategoryToDailyEntry(entry, tokens, modelUsage, taskCategory, taskCategoryShares);
 }
 
 /**
@@ -703,7 +766,7 @@ function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: num
 	}
 }
 
-function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLast30Days: boolean; addedToMonth: boolean; addedToLastMonth: boolean; addedToToday: boolean }, acc: PeriodAccumulators, dates: UtcDateRanges, editorType: string, dailyStatsMap: Map<string, DailyTokenStats>, repository: string, taskCategory?: TaskCategory): void {
+function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLast30Days: boolean; addedToMonth: boolean; addedToLastMonth: boolean; addedToToday: boolean }, acc: PeriodAccumulators, dates: UtcDateRanges, editorType: string, dailyStatsMap: Map<string, DailyTokenStats>, repository: string, sessionTaskCategoryFallback?: TaskCategory): void {
 	const inLast30Days = dayKey >= dates.last30DaysUtcStartKey;
 	const inLastMonth = dayKey >= dates.lastMonthUtcStartKey && dayKey <= dates.lastMonthUtcEndKey;
 	if (!inLast30Days && !inLastMonth) { return; }
@@ -712,7 +775,13 @@ function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLas
 	const cached = dayRollup.cachedReadTokens ?? 0;
 	if (inLast30Days) {
 		const entry = getOrCreateDailyEntry(dailyStatsMap, dayKey);
-		addToDailyEntry(entry, dayTokens, dayInteractions, editorType, repository, dayRollup.modelUsage, taskCategory);
+		// Per-day shares/primary category (mirrors extension.ts's rollup-path call to
+		// addUsageToDailyEntry) — a multi-category session is split across categories per
+		// day instead of collapsing the whole session onto one. Falls back to the session's
+		// overall category (rather than silently dropping to "Conversation") for a day
+		// rollup that predates per-day task classification.
+		const taskCategory = dayRollup.primaryTaskCategory ?? sessionTaskCategoryFallback;
+		addToDailyEntry(entry, dayTokens, dayInteractions, editorType, repository, dayRollup.modelUsage, taskCategory, dayRollup.taskCategoryShares);
 		accumulatePeriod(acc.last30DaysStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToLast30Days, editorType, dayRollup.modelUsage, dayRollup.copilotExactCostDollars);
 		flags.addedToLast30Days = true;
 	}
@@ -778,7 +847,7 @@ function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulato
 	if (!inLast30Days && !inLastMonth) { return true; }
 	if (inLast30Days) {
 		const dailyEntry = getOrCreateDailyEntry(dailyStatsMap, lastActivityUtcKey);
-		addToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategory);
+		addToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategory, sessionData.taskCategoryShares);
 		if (sessionData.linesAdded !== undefined) { attributeLocToDay(dailyEntry, sessionData, editorType, repository); }
 		accumulatePeriod(acc.last30DaysStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage, sessionData.copilotExactCostDollars);
 	}
