@@ -2371,6 +2371,18 @@ function handleDiagnosticDataLoaded(message: DiagMessage): void {
 }
 
 function handleAccountBudgetsUpdated(message: DiagMessage): void {
+  const card = document.getElementById("diag-quota-card");
+  if (card && Object.prototype.hasOwnProperty.call(message, "quotaEntitlements")) {
+    // Re-render the whole card: sign-out or a removed account clears the quota figures, not just the list.
+    const rendered = document.createElement("div");
+    setHtml(rendered, renderQuotaCardHtml({
+      quotaEntitlements: message.quotaEntitlements as QuotaEntitlements | undefined,
+      accountBudgets: message.accountBudgets as AccountBudgetView[] | undefined,
+    }));
+    const fresh = rendered.firstElementChild;
+    if (fresh) { card.replaceWith(fresh); }
+    return;
+  }
   const container = document.getElementById("diag-account-budgets");
   if (container) { setHtml(container, renderAccountBudgetsHtml(message.accountBudgets as AccountBudgetView[] | undefined)); }
 }
@@ -2760,7 +2772,7 @@ function renderAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): st
   return `<p><strong>${escapeHtml(localize("accountBudgets.title"))}</strong><br/>${accounts.map(renderAccountBudgetRowHtml).join("")}</p>`;
 }
 
-function renderQuotaCardHtml(data: DiagnosticsData): string {
+function renderQuotaCardHtml(data: Pick<DiagnosticsData, 'quotaEntitlements' | 'accountBudgets'>): string {
   quotaFigureShown = !!data.quotaEntitlements?.premium_interactions;
   const quotaContent = data.quotaEntitlements
     ? `<p>
@@ -2775,7 +2787,7 @@ ${
 }
     </p>`
     : `<p class="hint">No quota information available from the API yet. Sign out and back in to refresh.</p>`;
-  return `<div class="backend-card">
+  return `<div class="backend-card" id="diag-quota-card">
 <h4>📊 API Quota Information</h4>
 ${quotaContent}
 <div id="diag-account-budgets">${renderAccountBudgetsHtml(data.accountBudgets)}</div>

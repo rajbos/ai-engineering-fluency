@@ -2865,7 +2865,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 					await this.context.globalState.update('github.authenticated', false);
 					await this.context.globalState.update('github.username', undefined);
 					this.log('GitHub session removed externally — clearing auth state');
-					// The preferred account is gone, but other accounts may remain (or have been removed too).
+					// The preferred account is gone: drop its quota/plan state so no surface keeps showing its
+					// budget, then re-list whichever accounts remain.
+					this.clearPreferredAccountBudgetState();
+					this.refreshBudgetDependentUi();
+					this.pushAccountBudgetsToPanels();
 					void this.refreshAccountBudgets();
 				}
 			})
@@ -3607,6 +3611,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this._githubSignedOutByUser = true;
 			this._accountBudgets = [];
 			this._accountBudgetsRefreshSeq++;
+			this.clearPreferredAccountBudgetState();
 			this.pushAccountBudgetsToPanels();
 			this.refreshBudgetDependentUi();
 			await this.context.globalState.update('github.authenticated', false);
@@ -4198,11 +4203,28 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	/** Sends the per-account budgets to the open panels that show them. */
+	/** Forgets the plan and quota snapshot of the preferred account (sign-out, or the account was removed). */
+	private clearPreferredAccountBudgetState(): void {
+		this._copilotPlanResolved = undefined;
+		this._copilotQuotaEntitlements = {};
+	}
+
+	/**
+	 * Sends the budget state to the open panels that show it: the per-account list plus the preferred
+	 * account's balance / quota, so clearing or refreshing that state reaches every surface.
+	 */
 	private pushAccountBudgetsToPanels(): void {
 		// Through the replay buffer: a lookup that finishes before the panel's listener is ready is re-sent on readiness.
-		void this.analysisMessageReplay.publish('accountBudgets', { command: 'updateAccountBudgets', accountBudgets: this._accountBudgets });
-		void this.diagnosticsPanel?.webview.postMessage({ command: 'accountBudgetsUpdated', accountBudgets: this._accountBudgets });
+		void this.analysisMessageReplay.publish('accountBudgets', {
+			command: 'updateAccountBudgets',
+			accountBudgets: this._accountBudgets,
+			copilotApiBalance: this._buildCopilotApiBalance(),
+		});
+		void this.diagnosticsPanel?.webview.postMessage({
+			command: 'accountBudgetsUpdated',
+			accountBudgets: this._accountBudgets,
+			quotaEntitlements: this._copilotQuotaEntitlements,
+		});
 	}
 
 	/** Rebuilds the status bar tooltip flyout (and its background color) from the last

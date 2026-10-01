@@ -39,7 +39,7 @@ import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDete
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { shouldListAccountBudgets } from '../../githubAccountBudgets';
-import { applyBillingFields, sanitizeAccountBudgets, type AccountBudgetView, type CopilotApiBalance } from './billingStatsSanitizer';
+import { applyBillingFields, sanitizeAccountBudgets, sanitizeCopilotApiBalance, type AccountBudgetView, type CopilotApiBalance } from './billingStatsSanitizer';
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
@@ -6086,8 +6086,8 @@ function handleUpdateStats(message: any): void {
 }
 
 /** Replaces the per-account budget list in place; the next full `updateStats` carries it too. */
-function handleUpdateAccountBudgets(raw: unknown): void {
-	const accounts = sanitizeAccountBudgets(raw);
+function handleUpdateAccountBudgets(message: { accountBudgets?: unknown; copilotApiBalance?: unknown }): void {
+	const accounts = sanitizeAccountBudgets(message.accountBudgets);
 	const container = document.getElementById('account-budgets');
 	if (!lastRenderedStats) {
 		if (container) { setHtml(container, buildAccountBudgetsHtml(accounts, true)); }
@@ -6095,8 +6095,16 @@ function handleUpdateAccountBudgets(raw: unknown): void {
 	}
 	const wasShown = billingSectionHasContent(lastRenderedStats);
 	lastRenderedStats.accountBudgets = accounts;
-	if (wasShown !== billingSectionHasContent(lastRenderedStats)) {
-		// The accounts alone made the section appear or disappear: re-render it, not just its list.
+	// The preferred account's balance travels with the list so clearing it (sign-out, account removed)
+	// reaches this view too. Absent means "unchanged"; null means "cleared".
+	let balanceChanged = false;
+	if (Object.prototype.hasOwnProperty.call(message, 'copilotApiBalance')) {
+		const balance = sanitizeCopilotApiBalance(message.copilotApiBalance);
+		balanceChanged = JSON.stringify(balance) !== JSON.stringify(lastRenderedStats.copilotApiBalance ?? null);
+		lastRenderedStats.copilotApiBalance = balance;
+	}
+	if (balanceChanged || wasShown !== billingSectionHasContent(lastRenderedStats)) {
+		// The section appeared, disappeared or changed its balance card: re-render it, not just the list.
 		renderLayout(lastRenderedStats);
 		setupSessionsTableSort();
 	} else if (container) {
@@ -6238,7 +6246,7 @@ function handleExtensionMessage(message: any): void {
 		case 'updateInsights':
 			handleUpdateInsights(message.insights); break;
 		case 'updateAccountBudgets':
-			handleUpdateAccountBudgets(message.accountBudgets); break;
+			handleUpdateAccountBudgets(message); break;
 		case 'switchTab':
 			handleSwitchTab(message); break;
 		default:
