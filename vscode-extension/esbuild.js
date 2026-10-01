@@ -49,6 +49,26 @@ async function main() {
 		plugins: [esbuildProblemMatcherPlugin],
 	});
 
+	// Session-analysis worker (Node target). Runs all CPU-heavy parsing off the extension host's
+	// event loop; loaded by src/analysis/analysisWorkerPool.ts as dist/analysisWorker.js.
+	// `vscode` is aliased to a throwing stub because a worker thread has no VS Code API.
+	const workerCtx = await esbuild.context({
+		entryPoints: ['src/analysis/analysisWorker.ts'],
+		bundle: true,
+		format: 'cjs',
+		minify: production,
+		sourcemap: !production,
+		sourcesContent: false,
+		platform: 'node',
+		outfile: 'dist/analysisWorker.js',
+		alias: { vscode: path.join(__dirname, 'src', 'analysis', 'vscodeStub.ts') },
+		nodePaths: [path.join(__dirname, 'node_modules')],
+		logLevel: 'silent',
+		banner: { js: 'var __importMetaUrl = require("url").pathToFileURL(__filename).href;' },
+		define: { 'import.meta.url': '__importMetaUrl' },
+		plugins: [esbuildProblemMatcherPlugin],
+	});
+
 	// Webview bundle(s) (Browser target)
 	const webviewCtx = await esbuild.context({
 		entryPoints: {
@@ -80,10 +100,11 @@ async function main() {
 	});
 
 	if (watch) {
-		await Promise.all([extensionCtx.watch(), webviewCtx.watch()]);
+		await Promise.all([extensionCtx.watch(), workerCtx.watch(), webviewCtx.watch()]);
 	} else {
-		await Promise.all([extensionCtx.rebuild(), webviewCtx.rebuild()]);
+		await Promise.all([extensionCtx.rebuild(), workerCtx.rebuild(), webviewCtx.rebuild()]);
 		await extensionCtx.dispose();
+		await workerCtx.dispose();
 		await webviewCtx.dispose();
 	}
 

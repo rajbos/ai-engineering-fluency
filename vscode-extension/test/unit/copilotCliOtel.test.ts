@@ -15,6 +15,7 @@ import {
 	loadCopilotCliOtelIndex,
 	clearCopilotCliOtelCache,
 	expireCopilotCliOtelCacheForTests,
+	readByteRange,
 } from '../../../src/copilotCliOtel';
 
 type StoreRow = {
@@ -150,6 +151,23 @@ async function withHomedir<T>(t: import('node:test').TestContext, fn: (homeDir: 
 // extractCopilotCliSessionId's events.jsonl branch uses path.dirname/path.basename, which are
 // separator-sensitive — paths here must be built with path.join (not hardcoded Windows-style
 // backslash literals) so these tests are meaningful on POSIX CI runners too.
+test('readByteRange: refuses a range past the in-process limit instead of letting Node abort the host', async () => {
+	// A multi-GB OTel export is real (the file is append-only and unbounded). Asking fs.read for
+	// >2 GiB trips a native assertion that kills the whole process, so this must reject cleanly —
+	// and it must do so before touching the file, so a tiny file is enough to prove it.
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'otel-range-'));
+	const file = path.join(dir, 'copilot-otel.jsonl');
+	fs.writeFileSync(file, '{"a":1}\n');
+	try {
+		await assert.rejects(readByteRange(file, 0, 3_000_000_000), RangeError);
+		const small = await readByteRange(file, 0, 8);
+		assert.equal(small.toString('utf8'), '{"a":1}\n', 'ordinary small reads are unaffected');
+		assert.equal((await readByteRange(file, 5, 5)).length, 0, 'an empty range stays empty');
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test('extractCopilotCliSessionId: matches events.jsonl paths', () => {
 	const file = eventsJsonlPath('C:\\Users\\x', SESSION_ID);
 	assert.equal(extractCopilotCliSessionId(file), SESSION_ID);

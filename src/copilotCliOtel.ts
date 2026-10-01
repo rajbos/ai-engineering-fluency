@@ -227,7 +227,8 @@ function loadOtelRecordsViaWorker(dir: string, plan: OtelReadPlanItem[]): Promis
 	return new Promise<OtelReadResult>((resolve, reject) => {
 		let worker: Worker;
 		try {
-			worker = new Worker(OTEL_WORKER_SOURCE, { eval: true, workerData: { dir, plan } });
+			// execArgv: [] — a worker otherwise inherits the host's node flags (--inspect, --require hooks, ...).
+			worker = new Worker(OTEL_WORKER_SOURCE, { eval: true, execArgv: [], workerData: { dir, plan } });
 		} catch (err) {
 			reject(err);
 			return;
@@ -245,9 +246,20 @@ function loadOtelRecordsViaWorker(dir: string, plan: OtelReadPlanItem[]): Promis
 	});
 }
 
+/**
+ * Largest range the in-process path will load into one Buffer. The OTel export is append-only and
+ * unbounded (multi-GB on a long-lived machine); a request past Node's 2 GiB `fs.read` limit trips a
+ * native assertion that aborts the whole extension host rather than throwing. Refusing up front
+ * turns that into an ordinary rejection, which the callers already treat as "unreadable file".
+ */
+const MAX_IN_PROCESS_RANGE_BYTES = 256 * 1024 * 1024;
+
 /** Reads bytes [start, end) of a file into a Buffer (used for small incremental tails read in-process). */
-async function readByteRange(file: string, start: number, end: number): Promise<Buffer> {
+export async function readByteRange(file: string, start: number, end: number): Promise<Buffer> {
 	if (end <= start) { return Buffer.alloc(0); }
+	if (end - start > MAX_IN_PROCESS_RANGE_BYTES) {
+		throw new RangeError(`Refusing to read ${end - start} bytes of ${file} in-process (limit ${MAX_IN_PROCESS_RANGE_BYTES}); use the worker path.`);
+	}
 	const fh = await fs.promises.open(file, 'r');
 	try {
 		const length = end - start;
