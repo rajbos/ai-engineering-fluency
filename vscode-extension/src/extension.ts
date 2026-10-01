@@ -2472,6 +2472,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			size,
 			log: (m) => this.log(m),
 			warn: (m) => this.warn(m),
+			// One OTel index / session-store copy (this process's) serves every worker; see copilotCliOtel.ts.
+			resolveExactUsage: (sessionFile) => getCopilotCliExactUsage(sessionFile),
 		});
 	}
 

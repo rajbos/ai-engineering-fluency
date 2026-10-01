@@ -15,6 +15,7 @@ import { analyzeSessionFile, type SessionAnalyzerDeps } from '../../src/analysis
 import { AnalysisWorkerPool } from '../../src/analysis/analysisWorkerPool';
 import { computeSessionFileDetails } from '../../src/analysis/sessionDetailsAnalyzer';
 import { scanCustomizationFilesForWorkspace } from '../../src/analysis/workspaceCustomizationScan';
+import type { CopilotCliOtelSessionUsage } from '../../../src/copilotCliOtel';
 
 /**
  * The worker is only safe to ship if it produces exactly what the in-process analyzer does,
@@ -55,8 +56,8 @@ after(() => {
 	if (scratchDir) { fs.rmSync(scratchDir, { recursive: true, force: true }); }
 });
 
-function makePool(size = 2): AnalysisWorkerPool {
-	return new AnalysisWorkerPool({ workerPath, extensionPath: EXTENSION_ROOT, size, log: () => undefined, warn: () => undefined });
+function makePool(size = 2, resolveExactUsage?: (sessionFile: string) => Promise<CopilotCliOtelSessionUsage | null>): AnalysisWorkerPool {
+	return new AnalysisWorkerPool({ workerPath, extensionPath: EXTENSION_ROOT, size, log: () => undefined, warn: () => undefined, resolveExactUsage });
 }
 
 function buildInProcessDeps(): SessionAnalyzerDeps {
@@ -134,6 +135,35 @@ test('an unparseable session yields the same partial details and no cache update
 		assert.deepEqual(normalize(viaWorker), normalize(inProcess));
 	} finally {
 		await pool.dispose();
+	}
+});
+
+test('a Copilot CLI exact-usage lookup is answered by the host, so workers never scan the OTel export themselves', async () => {
+	// A worker has its own module state, so left alone it would build its own copy of the (potentially multi-GB)
+	// OTel index. The host answers instead; here a spy stands in for the host and returns a distinctive usage.
+	const sessionId = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+	const dir = path.join(scratchDir, 'session-state', sessionId);
+	fs.mkdirSync(dir, { recursive: true });
+	const eventsFile = path.join(dir, 'events.jsonl');
+	fs.writeFileSync(eventsFile, JSON.stringify({ type: 'user.message', timestamp: new Date().toISOString(), data: { content: 'hi' } }) + '\n');
+	const stat = fs.statSync(eventsFile);
+
+	const asked: string[] = [];
+	const pool = makePool(1, async (sessionFile) => { asked.push(sessionFile); return null; });
+	try {
+		await pool.analyze(eventsFile, stat.mtimeMs, stat.size);
+		assert.ok(asked.includes(eventsFile), 'the worker asked the host for the exact usage of this session');
+	} finally {
+		await pool.dispose();
+	}
+
+	// A lookup that fails on the host surfaces as the analysis failing, not as a hang.
+	const failing = makePool(1, async () => { throw new Error('index unavailable'); });
+	try {
+		const outcome = await failing.analyze(eventsFile, stat.mtimeMs, stat.size).then(() => 'resolved', (e: Error) => e.message);
+		assert.ok(outcome === 'resolved' || /index unavailable/.test(outcome), `unexpected outcome: ${outcome}`);
+	} finally {
+		await failing.dispose();
 	}
 });
 

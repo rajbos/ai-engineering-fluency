@@ -127,9 +127,14 @@ missing.
   measured machine (23 MB, 6.7k entries) that is ~0.1 s to parse and ~0.2 s to stringify per checkpoint — not a
   user-visible stall — and moving it would mean reworking its clear-epoch race fences. Revisit if the cache
   grows by an order of magnitude; the lag monitor will show it.
-* **Per-worker memory.** Each worker keeps its own in-memory copies of the SQLite stores its adapters read
-  (on the measured machine Copilot's `session-store.db` is 85 MB and `data.db` 127 MB), which is why the pool is
-  capped at two workers rather than scaled to the core count.
+* **Copilot CLI exact usage is answered by the host.** `getCopilotCliExactUsage` (session-store billing rows, then
+  the OTel export) keeps its index and SQLite copy in module state, so a worker would build its own — and the OTel
+  export is append-only and was 9.8 GB on the measured machine. Workers install
+  `setCopilotCliExactUsageResolver` and ask the host over the worker channel (`exactUsage` / `exactUsageReply`), so
+  one index and one database copy serve every worker. The hook is unset everywhere else (CLI, tests, the host).
+* **Remaining per-worker memory.** Adapters that read other SQLite stores (for example Copilot's `data.db`, 127 MB
+  on the measured machine) still hold one in-memory copy per worker, which is why the pool is capped at two
+  workers rather than scaled to the core count.
 * **Windsurf sessions** stay in-process: they come from a gRPC client that needs the VS Code API.
 * **Small remaining host work** (path/editor-label classification per file, a few hundred ms of WAL merge for the
   Copilot CLI database) is each well under a second.

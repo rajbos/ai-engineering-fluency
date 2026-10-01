@@ -6,6 +6,7 @@
  * `SessionFileCache` entry comes out. The worker never touches the cache, the VS Code API
  * or any webview — that separation is what makes it safe to run off the host's thread.
  */
+import type { CopilotCliOtelSessionUsage } from '../../../src/copilotCliOtel';
 import type { CustomizationFileEntry, SessionFileCache, SessionFileDetails } from '../../../src/types';
 import type { SessionDetailsResult } from './sessionDetailsAnalyzer';
 
@@ -21,12 +22,28 @@ export type AnalysisResponse =
 	| { type: 'result'; id: number; ok: true; result: SessionFileCache | SessionDetailsResult | CustomizationFileEntry[] | null }
 	| { type: 'result'; id: number; ok: false; error: string; /** Node error code (e.g. ENOENT) so callers can keep branching on it. */ code?: string };
 
-/** Out-of-band messages the worker sends that are not answers to a request. */
+/**
+ * Out-of-band messages the worker sends that are not answers to a request. `exactUsage` asks the host for a
+ * Copilot CLI session's exact usage, so the host's single OTel index / session-store copy serves every worker.
+ */
 export type AnalysisWorkerEvent =
 	| { type: 'ready' }
-	| { type: 'warn'; message: string };
+	| { type: 'warn'; message: string }
+	| { type: 'exactUsage'; rpcId: number; sessionFile: string };
 
 export type AnalysisWorkerMessage = AnalysisResponse | AnalysisWorkerEvent;
+
+/** The host's answer to an `exactUsage` ask. */
+export interface ExactUsageReply {
+	type: 'exactUsageReply';
+	rpcId: number;
+	usage: CopilotCliOtelSessionUsage | null;
+	/** Set when the host-side lookup threw; the worker rethrows it where it asked. */
+	error?: string;
+}
+
+/** Everything the host can post to a worker. */
+export type AnalysisHostMessage = AnalysisRequest | ExactUsageReply;
 
 /** What the host passes via `workerData` so the worker can build its own adapter registry. */
 export interface AnalysisWorkerData {

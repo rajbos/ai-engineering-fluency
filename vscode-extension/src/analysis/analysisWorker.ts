@@ -15,11 +15,12 @@ import toolNamesData from '../../../src/toolNames.json';
 import type { ModelPricing, TokenEstimator } from '../../../src/types';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../../src/adapters';
 import { estimateTokensFromText } from '../../../src/tokenEstimation';
+import { setCopilotCliExactUsageResolver, type CopilotCliOtelSessionUsage } from '../../../src/copilotCliOtel';
 import { isMcpTool, extractMcpServerName } from '../../../src/workspaceHelpers';
 import { analyzeSessionFile, supplementCacheWithDebugLog, type SessionAnalyzerDeps } from './sessionFileAnalyzer';
 import { computeSessionFileDetails } from './sessionDetailsAnalyzer';
 import { scanCustomizationFilesForWorkspace } from './workspaceCustomizationScan';
-import type { AnalysisRequest, AnalysisResponse, AnalysisWorkerData, AnalysisWorkerMessage } from './analysisProtocol';
+import type { AnalysisHostMessage, AnalysisRequest, AnalysisResponse, AnalysisWorkerData, AnalysisWorkerMessage, ExactUsageReply } from './analysisProtocol';
 
 if (!parentPort) {
 	throw new Error('analysisWorker must be started as a worker thread');
@@ -28,6 +29,23 @@ const port = parentPort;
 const data = workerData as AnalysisWorkerData;
 
 const post = (message: AnalysisWorkerMessage): void => port.postMessage(message);
+
+// Exact-usage lookups for Copilot CLI sessions are answered by the host (see setCopilotCliExactUsageResolver).
+const exactUsageWaiters = new Map<number, { resolve: (usage: CopilotCliOtelSessionUsage | null) => void; reject: (error: Error) => void }>();
+let nextRpcId = 1;
+setCopilotCliExactUsageResolver((sessionFile) => new Promise((resolve, reject) => {
+	const rpcId = nextRpcId++;
+	exactUsageWaiters.set(rpcId, { resolve, reject });
+	post({ type: 'exactUsage', rpcId, sessionFile });
+}));
+
+function onExactUsageReply(reply: ExactUsageReply): void {
+	const waiter = exactUsageWaiters.get(reply.rpcId);
+	if (!waiter) { return; }
+	exactUsageWaiters.delete(reply.rpcId);
+	if (reply.error !== undefined) { waiter.reject(new Error(reply.error)); }
+	else { waiter.resolve(reply.usage); }
+}
 
 const tokenEstimators = tokenEstimatorsData.estimators as Record<string, TokenEstimator>;
 const modelPricing = modelPricingData.pricing as { [key: string]: ModelPricing };
@@ -86,7 +104,11 @@ function respond(response: AnalysisResponse): void {
  * The pool keeps two requests queued here so the next one is already waiting when the current one finishes.
  */
 let inOrder: Promise<void> = Promise.resolve();
-port.on('message', (request: AnalysisRequest) => {
+port.on('message', (message: AnalysisHostMessage) => {
+	// Replies to our own questions are handled immediately, outside the request order: the request being
+	// worked on is waiting for exactly this.
+	if ('type' in message && message.type === 'exactUsageReply') { onExactUsageReply(message); return; }
+	const request = message as AnalysisRequest;
 	inOrder = inOrder.then(() => handle(request)).then(respond);
 });
 

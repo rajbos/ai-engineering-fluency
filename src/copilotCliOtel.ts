@@ -467,6 +467,21 @@ export async function getCopilotCliStoreUsage(
 	return usage;
 }
 
+type ExactUsageResolver = (sessionFile: string) => Promise<CopilotCliOtelSessionUsage | null>;
+let exactUsageResolver: ExactUsageResolver | undefined;
+
+/**
+ * Routes `getCopilotCliExactUsage` somewhere else, or back to the local lookup when given `undefined`.
+ *
+ * The OTel index and the session-store SQLite copy live in this module's state, so a second thread that
+ * imports it gets its own — and the OTel export is append-only and can be multi-GB. The extension's analysis
+ * workers install a resolver that asks the host, so there is one index and one database copy however many
+ * threads are parsing. Unset everywhere else (CLI, tests, the host itself).
+ */
+export function setCopilotCliExactUsageResolver(resolver: ExactUsageResolver | undefined): void {
+	exactUsageResolver = resolver;
+}
+
 /**
  * Returns the most authoritative exact usage data available for a Copilot CLI session.
  * Prefers the always-available `assistant_usage_events` table in session-store.db;
@@ -477,6 +492,7 @@ export async function getCopilotCliExactUsage(
 	sessionFile: string,
 	storeAccess: CopilotCliStoreAccess = cliStoreAccess,
 ): Promise<CopilotCliOtelSessionUsage | null> {
+	if (exactUsageResolver && storeAccess === cliStoreAccess) { return exactUsageResolver(sessionFile); }
 	const storeUsage = await getCopilotCliStoreUsage(sessionFile, storeAccess);
 	if (storeUsage) { return storeUsage; }
 	return getCopilotCliOtelUsage(sessionFile);

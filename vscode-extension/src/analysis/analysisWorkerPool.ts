@@ -23,7 +23,8 @@ import { Worker } from 'worker_threads';
 
 import type { CustomizationFileEntry, SessionFileCache, SessionFileDetails } from '../../../src/types';
 import type { SessionDetailsResult } from './sessionDetailsAnalyzer';
-import type { AnalysisRequest, AnalysisWorkerData, AnalysisWorkerMessage } from './analysisProtocol';
+import type { CopilotCliOtelSessionUsage } from '../../../src/copilotCliOtel';
+import type { AnalysisHostMessage, AnalysisRequest, AnalysisWorkerData, AnalysisWorkerMessage } from './analysisProtocol';
 
 export type AnalysisFailureKind = 'unavailable' | 'timeout' | 'failed';
 
@@ -39,7 +40,7 @@ export interface WorkerLike {
 	on(event: 'message', listener: (message: AnalysisWorkerMessage) => void): unknown;
 	on(event: 'error', listener: (error: Error) => void): unknown;
 	on(event: 'exit', listener: (code: number) => void): unknown;
-	postMessage(message: AnalysisRequest): void;
+	postMessage(message: AnalysisHostMessage): void;
 	terminate(): Promise<number>;
 	unref?(): void;
 }
@@ -57,6 +58,11 @@ export interface AnalysisWorkerPoolOptions {
 	restartWindowMs?: number;
 	log: (message: string) => void;
 	warn: (message: string) => void;
+	/**
+	 * Answers a worker's "what is this Copilot CLI session's exact usage?" using the host's single OTel index and
+	 * session-store copy, so N workers do not each scan a multi-GB export. Without it a worker looks it up itself.
+	 */
+	resolveExactUsage?: (sessionFile: string) => Promise<CopilotCliOtelSessionUsage | null>;
 	/** Test seam. Defaults to a real `worker_threads.Worker`. */
 	createWorker?: (workerPath: string, data: AnalysisWorkerData) => WorkerLike;
 }
@@ -239,6 +245,7 @@ export class AnalysisWorkerPool {
 	private onMessage(slot: Slot, message: AnalysisWorkerMessage): void {
 		if (message.type === 'warn') { this.options.warn(message.message); return; }
 		if (message.type === 'ready') { slot.ready = true; return; }
+		if (message.type === 'exactUsage') { this.answerExactUsage(slot, message.rpcId, message.sessionFile); return; }
 		if (message.type !== 'result') { return; }
 		const pending = slot.pending.get(message.id);
 		if (!pending) { return; }
@@ -266,6 +273,16 @@ export class AnalysisWorkerPool {
 		if (oldest.timer) { clearTimeout(oldest.timer); }
 		oldest.timer = setTimeout(() => this.onTimeout(slot, oldest), this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
 		oldest.timer.unref?.();
+	}
+
+	private answerExactUsage(slot: Slot, rpcId: number, sessionFile: string): void {
+		const reply = (usage: CopilotCliOtelSessionUsage | null, error?: string): void => {
+			// The worker may have died while the host was looking this up; there is no one to tell then.
+			try { slot.worker.postMessage({ type: 'exactUsageReply', rpcId, usage, ...(error !== undefined ? { error } : {}) }); } catch { /* worker gone */ }
+		};
+		const resolve = this.options.resolveExactUsage;
+		if (!resolve) { reply(null); return; }
+		resolve(sessionFile).then((usage) => reply(usage), (error: unknown) => reply(null, error instanceof Error ? error.message : String(error)));
 	}
 
 	private onTimeout(slot: Slot, pending: Pending): void {
