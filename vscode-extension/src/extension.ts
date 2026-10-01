@@ -14344,22 +14344,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
   }
 
   /**
-   * Git refuses to remove a worktree with initialized submodules even with --force. Deinitialize
-   * them from the target worktree first so Git can clean up their administrative metadata, then
-   * retry the forced removal.
-   */
-  private async removeGitWorktreeWithSubmoduleCleanup(mainRepoRoot: string, worktreePath: string): Promise<{ ok: boolean; stderr: string }> {
-    const deinit = await this.runGit(["submodule", "deinit", "--all", "--force"], worktreePath, 120000);
-    if (!deinit.ok) {
-      return {
-        ok: false,
-        stderr: `working trees containing submodules cannot be moved or removed: ${deinit.stderr || "could not deinitialize submodules"}`,
-      };
-    }
-    return this.removeGitWorktree(mainRepoRoot, worktreePath, true);
-  }
-
-  /**
    * Removes a worktree, escalating through a fallback chain: plain removal, then (with user
    * confirmation) force removal for dirty or submodule-containing worktrees, then an OS-level
    * directory-removal fallback for Git-for-Windows junction/long-path failures. Returns the
@@ -14367,7 +14351,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    */
   private async _removeWorktreeWithFallback(mainRepoRoot: string, worktreePath: string): Promise<{ ok: boolean; stderr: string } | undefined> {
     let result = await this.removeGitWorktree(mainRepoRoot, worktreePath, false);
-    let forceConfirmed = false;
     if (!result.ok && /modified or untracked/i.test(result.stderr)) {
       const forceChoice = await vscode.window.showWarningMessage(
         `"${worktreePath}" has uncommitted or untracked changes.`,
@@ -14375,23 +14358,21 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         "Force Delete",
       );
       if (forceChoice !== "Force Delete") { return undefined; }
-      forceConfirmed = true;
       result = await this.removeGitWorktree(mainRepoRoot, worktreePath, true);
     }
 
     if (!result.ok && isSubmoduleWorktreeRemovalFailure(result.stderr)) {
-      if (!forceConfirmed) {
-        const forceChoice = await vscode.window.showWarningMessage(
-          `"${worktreePath}" contains initialized submodules that Git cannot remove directly.`,
-          {
-            modal: true,
-            detail: "Force-deleting will deinitialize the submodules and permanently remove this working copy. Uncommitted or unpushed changes in the worktree or its submodules can be lost.",
-          },
-          "Force Delete",
-        );
-        if (forceChoice !== "Force Delete") { return undefined; }
-      }
-      result = await this.removeGitWorktreeWithSubmoduleCleanup(mainRepoRoot, worktreePath);
+      const forceDelete = l10n.t('worktree.forceDelete');
+      const forceChoice = await vscode.window.showWarningMessage(
+        l10n.t('worktree.submoduleForcePrompt', worktreePath),
+        {
+          modal: true,
+          detail: l10n.t('worktree.submoduleForceDetail'),
+        },
+        forceDelete,
+      );
+      if (forceChoice !== forceDelete) { return undefined; }
+      result = await this.removeGitWorktree(mainRepoRoot, worktreePath, true);
     }
 
     if (!result.ok && (this.isWorktreeDirectoryRemovalFailure(result.stderr) || isSubmoduleWorktreeRemovalFailure(result.stderr))) {

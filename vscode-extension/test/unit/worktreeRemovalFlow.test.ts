@@ -23,24 +23,20 @@ test('recognizes Git submodule worktree removal refusals', () => {
 	assert.equal(isSubmoduleWorktreeRemovalFailure("fatal: failed to remove 'C:\\wt': Permission denied"), false);
 });
 
-test('confirmed force removal deinitializes submodules before retrying Git removal', () => {
-	const cleanup = extractMethodBody('private async removeGitWorktreeWithSubmoduleCleanup(');
-	const deinitIndex = cleanup.indexOf('["submodule", "deinit", "--all", "--force"]');
-	const retryIndex = cleanup.indexOf('this.removeGitWorktree(mainRepoRoot, worktreePath, true)');
-
-	assert.ok(deinitIndex >= 0, 'expected submodules to be deinitialized in the target worktree');
-	assert.ok(retryIndex > deinitIndex, 'expected forced Git removal only after successful submodule deinitialization');
-});
-
 test('submodule refusal requires force confirmation and retains the filesystem fallback', () => {
 	const removal = extractMethodBody('private async _removeWorktreeWithFallback(');
 	const submoduleFailureIndex = removal.indexOf('isSubmoduleWorktreeRemovalFailure(result.stderr)');
-	const confirmationIndex = removal.indexOf('"Force Delete"', submoduleFailureIndex);
-	const cleanupIndex = removal.indexOf('removeGitWorktreeWithSubmoduleCleanup', submoduleFailureIndex);
-	const fallbackIndex = removal.indexOf('removeWorktreeDirectoryFallback', cleanupIndex);
+	const promptIndex = removal.indexOf("l10n.t('worktree.submoduleForcePrompt'", submoduleFailureIndex);
+	const detailIndex = removal.indexOf("l10n.t('worktree.submoduleForceDetail')", promptIndex);
+	const confirmationIndex = removal.indexOf("l10n.t('worktree.forceDelete')", submoduleFailureIndex);
+	const forceRetryIndex = removal.indexOf('removeGitWorktree(mainRepoRoot, worktreePath, true)', confirmationIndex);
+	const fallbackIndex = removal.indexOf('removeWorktreeDirectoryFallback', forceRetryIndex);
 
 	assert.ok(submoduleFailureIndex >= 0, 'expected explicit handling for Git submodule removal refusals');
-	assert.ok(confirmationIndex > submoduleFailureIndex, 'expected explicit force-delete confirmation');
-	assert.ok(cleanupIndex > confirmationIndex, 'expected submodule cleanup only after confirmation');
-	assert.ok(fallbackIndex > cleanupIndex, 'expected filesystem removal and worktree pruning to remain the final fallback');
+	assert.ok(confirmationIndex > submoduleFailureIndex, 'expected a localized force-delete action');
+	assert.ok(promptIndex > confirmationIndex, 'expected a localized submodule confirmation prompt');
+	assert.ok(detailIndex > promptIndex, 'expected localized risk details');
+	assert.ok(forceRetryIndex > detailIndex, 'expected forced Git removal only after confirmation');
+	assert.ok(fallbackIndex > forceRetryIndex, 'expected filesystem removal and worktree pruning to remain the final fallback');
+	assert.ok(!removal.includes('submodule", "deinit'), 'must not mutate shared submodule configuration');
 });

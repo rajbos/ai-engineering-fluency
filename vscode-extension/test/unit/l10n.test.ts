@@ -169,6 +169,32 @@ test('l10n: dialog button and insights status bar keys resolve in zh-cn', () => 
 	}
 });
 
+test('l10n: worktree force-delete dialog resolves in both languages', () => {
+	assert.equal(t('worktree.forceDelete'), 'Force Delete');
+	assert.equal(
+		t('worktree.submoduleForcePrompt', 'C:\\repo\\worktree'),
+		'"C:\\repo\\worktree" contains initialized submodules that Git cannot remove without force.',
+	);
+	assert.equal(
+		t('worktree.submoduleForceDetail'),
+		'Force-deleting will permanently remove this working copy. Uncommitted or unpushed changes in the worktree or its submodules can be lost.',
+	);
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('worktree.forceDelete'), '强制删除');
+		assert.equal(
+			t('worktree.submoduleForcePrompt', 'C:\\repo\\worktree'),
+			'“C:\\repo\\worktree”包含已初始化的子模块，Git 无法在不强制执行的情况下删除它。',
+		);
+		assert.equal(
+			t('worktree.submoduleForceDetail'),
+			'强制删除将永久移除此工作副本。工作树或其子模块中未提交或未推送的更改可能会丢失。',
+		);
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: clipboard-failure keys resolve in English', () => {
 	// Added with the `copyFailed` handler: before it existed the webview posted
 	// this and nothing on the extension side listened, so a failed copy was
