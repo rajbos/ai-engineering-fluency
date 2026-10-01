@@ -96,7 +96,8 @@ async function main() {
 		nodePaths: [path.join(__dirname, 'node_modules')],
 		logLevel: 'silent',
 		plugins: [esbuildProblemMatcherPlugin],
-		loader: { '.css': 'text' },
+		// Tool logos (assets/tool-logos) are inlined so webviews need no extra resources.
+		loader: { '.css': 'text', '.svg': 'dataurl', '.png': 'dataurl' },
 	});
 
 	if (watch) {
