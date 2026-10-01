@@ -1,10 +1,11 @@
 // Import shared utilities
 import { getModelDisplayName, isCustomProviderGroup } from '../../../../src/webview/shared/modelUtils';
-import { getEditorIcon, getCharsPerToken, formatFixed, formatPercent, formatNumber, formatCost, formatCompact, setCompactNumbers } from '../shared/formatUtils';
+import { getCharsPerToken, formatFixed, formatPercent, formatNumber, formatCost, formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { localize } from '../shared/localization';
+import { buildEditorLogo, syncLogoTheme } from '../shared/editorLogos';
 import { applyWebviewLocale } from '../shared/webviewLocale';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -250,6 +251,7 @@ return { thead, updateHeaders };
 
 function render(stats: DetailedStats): void {
 setCompactNumbers(stats.compactNumbers !== false);
+syncLogoTheme();
 lastStats = stats;
 const root = document.getElementById('root');
 if (!root) { return; }
@@ -775,7 +777,7 @@ function buildEditorRow(item: EditorItem, totals: { today: number; last30Days: n
 		indentSpan.style.cssText = 'display:inline-block;width:12px';
 		labelWrapper.append(indentSpan);
 	}
-	labelWrapper.append(document.createTextNode(`${getEditorIcon(editor)} ${editor}`));
+	labelWrapper.append(buildEditorLogo(editor), document.createTextNode(` ${editor}`));
 	if (editor === 'JetBrains' || editor === 'Antigravity' || editor === 'Cursor') { labelWrapper.append(document.createTextNode(' ⓘ')); }
 	labelTd.append(labelWrapper);
 	tr.append(labelTd,
