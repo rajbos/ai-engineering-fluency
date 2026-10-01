@@ -8,7 +8,7 @@
  * ticks — which is the "navigation is blocked for tens of seconds" symptom.
  *
  * Everything here is a plain function over an explicit `SessionAnalyzerDeps`, so the exact
- * same code runs either inside the worker thread (`worker/analysisWorker.ts`, the normal
+ * same code runs either inside the worker thread (`analysisWorker.ts` in this folder, the normal
  * path) or in-process (fallback when the worker is unavailable, and for the host-only
  * Windsurf virtual sessions). Cache reads/writes deliberately stay out of this module: it
  * receives the previous entry as data and returns the new one.

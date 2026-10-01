@@ -379,7 +379,20 @@ export class AnalysisWorkerPool {
 		if (this.deathTimestamps.length > (this.options.maxRestarts ?? DEFAULT_MAX_RESTARTS) && !this.broken) {
 			this.broken = true;
 			this.options.warn('Analysis workers keep dying; falling back to in-process analysis for the rest of this session.');
+			this.retireAllWorkers();
 		}
+	}
+
+	/**
+	 * The pool will never hand out work again, so the workers that are still alive would only sit on their
+	 * per-thread SQLite/WASM caches while the in-process fallback builds another set on the host — the worst time
+	 * to hold memory, since repeated deaths are often memory pressure. Their in-flight and queued requests are
+	 * settled as `unavailable`, so each falls back in-process.
+	 */
+	private retireAllWorkers(): void {
+		const stopped = new AnalysisWorkerError('Analysis workers keep dying; using in-process analysis', 'unavailable');
+		this.rejectQueued(stopped);
+		for (const slot of this.slots.splice(0)) { void this.retire(slot, stopped); }
 	}
 
 	/** Tears a worker down on purpose. The slot is already out of `slots`, so its exit event is ignored. */

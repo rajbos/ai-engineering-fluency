@@ -304,3 +304,18 @@ test('when one request times out, its neighbours are re-sent, not timed out by t
 	assert.equal((await b).tokens, 4);
 	await pool.dispose();
 });
+
+test('when the restart budget trips, the workers that are still alive are retired and their requests fall back', async () => {
+	// Two live workers; one dies and exhausts the budget. The other can never receive work again, so it must not be
+	// left holding its caches, and the request it was running must be sent to the in-process path.
+	const { pool, workers } = makePool({ size: 2, maxRestarts: 0 });
+	const onFirst = pool.analyze('a.json', 1, 1);
+	const onSecond = pool.analyze('b.json', 1, 1);
+	const outcomes = Promise.all([onFirst, onSecond].map((p) => p.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'))));
+	assert.equal(workers.length, 2);
+	workers[0].crash();
+	assert.deepEqual(await outcomes, ['unavailable', 'unavailable']);
+	assert.equal(pool.isAvailable(), false);
+	assert.equal(workers[1].terminated, true, 'the surviving worker is retired, not left running');
+	await pool.dispose();
+});
