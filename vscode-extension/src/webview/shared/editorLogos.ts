@@ -104,8 +104,8 @@ function logoImg(src: string, extraClass: string): HTMLImageElement {
 
 /**
  * Builds the icon element for an editor: its official logo when we have one (two stacked images
- * for light/dark when the logo has a dark variant — CSS shows the right one from the VS Code
- * `vscode-light` / `vscode-dark` body class), otherwise the emoji fallback.
+ * for light/dark when the logo has a dark variant — CSS shows the right one from the
+ * `body[data-logo-theme]` marker that {@link syncLogoTheme} maintains), otherwise the emoji fallback.
  */
 export function buildEditorLogo(editor: string, doc: Document = document): HTMLElement {
 	const wrap = doc.createElement('span');
