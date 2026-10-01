@@ -2550,6 +2550,10 @@ function handleWorktreeMessage(message: any): void {
  * announcer can stay quiet about tabs they already found. Fire-and-forget.
  */
 function reportTabOpened(tab: string): void {
+	// Recorded here rather than at each call site so every announcement path — a click, a
+	// `switchTab` message, the unknown-tools banner, or setupTabs on a fresh layout — keeps
+	// lastAnnouncedTab in step without having to remember to.
+	lastAnnouncedTab = tab;
 	vscode.postMessage({ command: 'viewTabOpened', view: 'usage', tab });
 }
 
@@ -2628,19 +2632,20 @@ function activateUsageTab(tab: string): boolean {
 }
 
 /**
- * Whether a render has already announced its opening tab and run that tab's first-visit effects.
+ * The leaf tab most recently reported to the host as opened, or null before the first report.
  *
  * setupTabs() runs after *every* renderLayout(), including each periodic silent `updateStats`
- * refresh — not just the first. Announcing and replaying unconditionally therefore re-stamped the
- * What's New visit window on every refresh, and worse, re-posted loadRepoPrStats/loadAgentSessions
- * forever whenever an unauthenticated response had reset their loaded flags: refresh → flag is
- * false → post → unauthenticated → flag reset → repeat. Only the first render of a panel is a
- * genuine "the user just arrived here" event; every later one is the same tab still being shown.
+ * refresh — not just the first. Announcing unconditionally re-stamped the What's New visit window
+ * on every refresh even though the user never moved.
  *
- * A real tab switch still goes through activateUsageTab(), which announces and re-runs the effects
- * on every activation — so re-entering a tab after signing in still retries its load.
+ * This tracks the tab rather than a bare "have we announced yet" flag because the panel can return
+ * to the loading state and rebuild (renderUsageLoadingState on a refresh). A `switchTab` deep link
+ * arriving in that window cannot be announced by activateUsageTab() — there is no panel yet — so a
+ * lifetime boolean would suppress the announcement for the rebuilt layout too, and the host would
+ * never record that leaf visit. Comparing against the last announced tab reports the new one and
+ * still stays quiet when a refresh rebuilds the same tab.
  */
-let openingTabAnnounced = false;
+let lastAnnouncedTab: string | null = null;
 
 function setupTabs(): void {
 	// Seed the remembered-leaf map from whatever tab this render opened on. activateUsageTab()
@@ -2649,8 +2654,7 @@ function setupTabs(): void {
 	// loading. Without this, opening on a deep-linked tab (the worktree notification's "Show Me",
 	// say), leaving its group and coming back would drop the user on the group's first tab.
 	lastTabPerGroup[groupOfUsageTab(activeTab)] = activeTab;
-	if (!openingTabAnnounced) {
-		openingTabAnnounced = true;
+	if (lastAnnouncedTab !== activeTab) {
 		// The tab that is already on screen counts as opened — the user is reading it
 		// right now, whether or not they clicked anything to get here.
 		reportTabOpened(activeTab);

@@ -974,6 +974,28 @@ function activeTabState(harness: any): { button: string | undefined; panels: str
 	};
 }
 
+test('a deep link arriving while a rendered panel is reloading is still announced', async () => {
+	// Regression: the announcement guard used to be a lifetime boolean. renderUsageLoadingState()
+	// tears the panel down on a refresh, so a `switchTab` landing in that window could not be
+	// announced by activateUsageTab() (no panel yet) and was then suppressed by the guard when the
+	// layout came back — the host never recorded the visit, and What's New kept treating the
+	// deep-linked tab as unseen. Tracking the last announced tab reports it on the rebuilt layout.
+	const harness = await bootWebview(buildStats());
+	const opened = (): string[] => harness.posted
+		.filter((m: any) => m.command === 'viewTabOpened')
+		.map((m: any) => m.tab);
+	assert.deepEqual(opened(), ['activity'], 'the first render announces the tab it opened on');
+
+	// A refresh tears the panel down, a deep link lands while it is gone, then stats rebuild it.
+	harness.post({ command: 'usageRefreshing' });
+	harness.post({ command: 'switchTab', tab: 'worktrees' });
+	harness.post({ command: 'updateStats', data: buildStats() });
+	await harness.settle();
+
+	assert.equal(activeTabState(harness).button, 'worktrees', 'the deep link decides the rebuilt tab');
+	assert.ok(opened().includes('worktrees'), 'the host must be told the deep-linked tab was opened');
+});
+
 test('a periodic refresh does not re-announce the tab or re-request its data', async () => {
 	// Regression: setupTabs() runs after every renderLayout(), including each silent updateStats.
 	// Announcing + replaying unconditionally re-stamped the What's New visit window on every

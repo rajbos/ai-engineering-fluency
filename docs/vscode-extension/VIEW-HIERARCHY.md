@@ -27,7 +27,7 @@ The shared nav row (`src/webview/shared/buttonConfig.ts`, `NAV_ORDER`) is the ca
 |---|---|---|---|
 | Details | `details` | — | What are my raw token/cost numbers right now? |
 | Token Usage Over Time | `chart` | — | How has that moved over time? |
-| **Usage Analysis** | `usage` | 4 groups → 9 tabs | How do I actually work with AI, and what does it cost? |
+| **Usage Analysis** | `usage` | 4 groups → 10 tabs | How do I actually work with AI, and what does it cost? |
 | Fluency Score | `maturity` | — | How mature is my AI engineering practice? |
 | Efficiency | `efficiency` | 8 tabs | Am I getting more output per dollar over time? |
 | Environmental Impact | `environmental` | — | What is the energy/water/carbon footprint? |
@@ -42,11 +42,15 @@ opened from the Fluency Score view), and **What's New** (`whatsnew`, opened on u
 
 ### Usage Analysis (`usage`) — the big one
 
-Nine tabs under four group tabs. The group strip and leaf strips are built by
+Ten tabs under four group tabs. The group strip and leaf strips are built by
 `buildTabStripHtml`; `USAGE_TAB_GROUPS` in `usage/tabGroups.ts` owns the mapping, and each tab
 panel gets its own `build*TabPanelHtml` function.
 
-Leaf tab ids are deliberately unchanged from the flat nine-tab strip: they are the
+The count moves: AI Readiness joined the view in #2194 and took it from nine to ten. Rather than
+trusting this number, trust the test — `webview-usageTabGroups.test.ts` asserts `USAGE_TAB_GROUPS`
+covers *exactly* `SWITCHABLE_TABS`, so a tab added to one and not the other fails the build.
+
+Leaf tab ids are deliberately unchanged from the flat strip that preceded the groups: they are the
 `viewTabOpened` telemetry key the host records against, the `switchTab` message payload, and the
 target of the What's New view's "Take me there" deep links. Grouping them is chrome; renaming
 them would break those three callers.
@@ -62,6 +66,7 @@ not user settings.
 | | **Recent Sessions** | Lookback selector · filter pills · sessions table (sortable, configurable columns) |
 | 📁 **Workspace** | **Tools & Integrations** | Tool Usage (3 periods) · Multi-Model Usage · MCP Tools · Tool Curation · unknown-tool banner |
 | | **Workspace Health** | Copilot Customization Files matrix |
+| | **AI Readiness** | Per-repo readiness overview (collapsible) · Copilot Chat drafts |
 | | **Worktrees** | scan controls · roots list · progress · results table |
 | 🐙 **GitHub** | **Repository PRs** | AI Activity in Repository PRs |
 | | **Cloud Agent** | Copilot Cloud Agent Sessions |
