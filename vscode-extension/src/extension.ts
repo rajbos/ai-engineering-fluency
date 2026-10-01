@@ -4123,6 +4123,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 				await this.context.globalState.update('github.username', session.account.label);
 				void this.loadAndLogCopilotPlanInfo();
 			} else {
+				// No preferred session here, but other signed-in accounts may exist — list them anyway
+				// so each shows its "sign in" prompt instead of waiting for a later auth event.
+				void this.refreshAccountBudgets();
 				const wasAuthenticated = this.context.globalState.get<boolean>('github.authenticated', false);
 				if (wasAuthenticated) {
 					// Session was present before but is gone now — clear stored state
