@@ -3,6 +3,7 @@ import * as assert from 'node:assert/strict';
 import {
 	sanitizeCopilotApiBalance,
 	sanitizeBillingGroupCosts,
+	sanitizeAccountBudgets,
 	applyBillingFields,
 	type BillingStatsFields,
 	type CopilotApiBalance,
@@ -121,8 +122,7 @@ describe('applyBillingFields (round-trip regression guard)', () => {
 });
 
 describe('account budgets', () => {
-	test('sanitizeAccountBudgets drops malformed entries and normalizes the rest', async () => {
-		const { sanitizeAccountBudgets } = await import('../../src/webview/usage/billingStatsSanitizer');
+	test('sanitizeAccountBudgets drops malformed entries and normalizes the rest', () => {
 		const result = sanitizeAccountBudgets([
 			null, 'x', { status: 'ok' },
 			{ accountId: '1', label: 'alice', status: 'bogus', balance: { budgetUsd: 39, budgetAiCredits: 3900, remainingAiCredits: 100, usedAiCredits: 3800, pctAvailable: 2.5 } },
