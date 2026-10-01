@@ -1346,4 +1346,5 @@
   ,"mcp__ccd_host__sync_with_base_branch": "CCD Host: Sync With Base Branch"
   ,"mcp__ccd_pr__bind_pr": "CCD PR: Bind PR"
   ,"mcp__ccd_pr__set_monitor": "CCD PR: Set Monitor"
+  ,"get_main_session_transcript": "Get Main Session Transcript"
 }
