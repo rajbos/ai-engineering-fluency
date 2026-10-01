@@ -202,6 +202,35 @@ test('folder-scan analysis: the worker returns exactly what the in-process analy
 	}
 });
 
+test('exact usage returned by the host reaches the worker analysis result', async () => {
+	// The positive half of the host round trip: not just that the worker asks, but that a non-null answer is
+	// delivered intact and used (it overrides the ratio-based estimate, exactly as it does in-process).
+	const sessionId = '7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d';
+	const dir = path.join(scratchDir, 'session-state', sessionId);
+	fs.mkdirSync(dir, { recursive: true });
+	const eventsFile = path.join(dir, 'events.jsonl');
+	fs.writeFileSync(eventsFile, JSON.stringify({ type: 'user.message', timestamp: new Date().toISOString(), data: { content: 'hello' } }) + '\n');
+	const stat = fs.statSync(eventsFile);
+
+	const exact: CopilotCliOtelSessionUsage = { modelUsage: {}, actualTokens: 123_456, cacheReadTokens: 789, nanoAiu: 4_000_000_000 };
+	const withExact = makePool(1, async () => exact);
+	const withoutExact = makePool(1, async () => null);
+	try {
+		const [enriched, estimated] = await Promise.all([
+			withExact.analyze(eventsFile, stat.mtimeMs, stat.size),
+			withoutExact.analyze(eventsFile, stat.mtimeMs, stat.size),
+		]);
+		assert.equal(enriched.actualTokens, 123_456, 'the exact token count from the host replaced the estimate');
+		assert.equal(enriched.cacheReadTokens, 789);
+		assert.ok((enriched.copilotExactCostDollars ?? 0) > 0, 'the exact cost derived from the host nano-AIU value is present');
+		assert.notEqual(estimated.actualTokens, 123_456, 'without the host answer the result is the plain estimate');
+		assert.equal(estimated.copilotExactCostDollars, undefined);
+	} finally {
+		await withExact.dispose();
+		await withoutExact.dispose();
+	}
+});
+
 test('a missing file rejects through the worker with the original ENOENT code', async () => {
 	const pool = makePool(1);
 	try {
