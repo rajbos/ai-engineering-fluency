@@ -311,6 +311,9 @@ export class AnalysisWorkerPool {
 
 	private onTimeout(slot: Slot, pending: Pending): void {
 		if (!slot.pending.has(pending.request.id)) { return; }
+		// Only one request per worker is ever the culprit. The other clocks are disarmed below, but if one still
+		// fires while the termination is pending, it is a neighbour, not a second culprit.
+		for (const other of slot.pending.values()) { if (other.timedOut) { return; } }
 		pending.timedOut = true;
 		// Termination is asynchronous. Neighbours submitted alongside this request carry a near-identical clock that
 		// could fire before the worker's exit is observed, make them culprits too, and get them rejected instead of

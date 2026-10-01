@@ -286,7 +286,11 @@ export class SessionDiscovery {
 		if (running) {
 			this.deps.log('🔗 Joining the session-file discovery that is already running');
 			if (onBatch) {
-				for (const batch of running.batches) { onBatch(batch); } // what it has found so far
+				// What it has found so far, isolated like live batches: a throwing late subscriber must not break
+				// the discovery result of the caller that joined (or stop later batches reaching it).
+				for (const batch of running.batches) {
+					try { onBatch(batch); } catch (error) { this.deps.warn(`A session-file discovery subscriber threw: ${error}`); }
+				}
 				running.subscribers.add(onBatch);
 			}
 			return running.promise;

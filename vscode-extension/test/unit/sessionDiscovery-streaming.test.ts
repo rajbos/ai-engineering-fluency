@@ -175,3 +175,23 @@ test('sample-data mode honours clearCache(): a read that was pending across it d
 		fs.rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test('a late subscriber that throws while earlier batches are replayed does not break the join', async () => {
+	const warnings: string[] = [];
+	const fast = makeFakeAdapter('fast', ['/fake/fast.json'], 5);
+	const slow = makeFakeAdapter('slow', ['/fake/slow.json'], 100);
+	const discovery = new SessionDiscovery({ log: () => {}, warn: (m) => warnings.push(m), error: () => {}, ecosystems: [fast, slow] });
+	const first = discovery.getCopilotSessionFiles();
+	await new Promise(resolve => setTimeout(resolve, 40)); // the fast adapter's batch already exists
+	const seen: string[] = [];
+	let calls = 0;
+	const joined = await discovery.getCopilotSessionFilesStreaming((batch) => {
+		calls++;
+		if (calls === 1) { throw new Error('late consumer bug'); } // throws on the replayed batch
+		seen.push(...batch);
+	});
+	await first;
+	assert.deepEqual(joined.sort(), ['/fake/fast.json', '/fake/slow.json'], 'the joined caller still gets the full result');
+	assert.deepEqual(seen, ['/fake/slow.json'], 'and still receives the batches that arrive after the failed replay');
+	assert.ok(warnings.some(w => /late consumer bug/.test(w)));
+});
