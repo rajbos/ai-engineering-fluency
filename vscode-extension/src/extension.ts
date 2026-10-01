@@ -5574,13 +5574,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tooltip.appendMarkdown(formatTooltipStatsTable(detailedStats, (costs) => this.sumBillingGroupCosts(costs)));
 		tooltip.appendMarkdown('\n---\n');
 		this.appendProviderCostSection(tooltip, detailedStats);
+		// The Copilot Budget gauge only renders with local cost groups and a budget; a lone account's row
+		// is redundant only when that gauge is actually there.
+		const gaugeShown = Object.keys(detailedStats.month.billingGroupCosts ?? {}).length > 0 && this.getEffectiveMonthlyBudget() > 0;
 		const accountLines = formatAccountBudgetLines(this._accountBudgets, {
 			usedLeft: (used, budget, pct) => l10n.t('accountBudgets.usedLeft', used, budget, pct),
 			noQuota: l10n.t('accountBudgets.noQuota'),
 			unavailable: l10n.t('accountBudgets.unavailable'),
 			noSession: l10n.t('accountBudgets.noSession'),
 			lookupFailed: (detail) => l10n.t('accountBudgets.lookupFailed', detail),
-		});
+		}, gaugeShown);
 		if (accountLines.length > 0) {
 			tooltip.appendMarkdown(`\n---\n**${l10n.t('accountBudgets.title')}**\n\n${accountLines.join('\n')}\n`);
 		}

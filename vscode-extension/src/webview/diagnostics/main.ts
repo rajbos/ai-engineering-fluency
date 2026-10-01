@@ -2751,13 +2751,17 @@ function renderAccountBudgetRowHtml(b: AccountBudgetView): string {
   return `<strong>${escapeHtml(b.label)}</strong>${plan}: ${detail}<br/>`;
 }
 
+/** Whether the quota card above already shows the budget a lone account would repeat. */
+let quotaFigureShown = false;
+
 function renderAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): string {
   // Same rule as the other surfaces: skip only a lone account with a balance, which the quota figures above already show.
-  if (!accounts || !shouldListAccountBudgets(accounts)) { return ""; }
+  if (!accounts || !shouldListAccountBudgets(accounts, quotaFigureShown)) { return ""; }
   return `<p><strong>${escapeHtml(localize("accountBudgets.title"))}</strong><br/>${accounts.map(renderAccountBudgetRowHtml).join("")}</p>`;
 }
 
 function renderQuotaCardHtml(data: DiagnosticsData): string {
+  quotaFigureShown = !!data.quotaEntitlements?.premium_interactions;
   const quotaContent = data.quotaEntitlements
     ? `<p>
 ${

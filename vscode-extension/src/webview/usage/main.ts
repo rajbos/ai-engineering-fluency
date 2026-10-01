@@ -4876,9 +4876,9 @@ function _accountBudgetRowHtml(b: AccountBudgetView): string {
 }
 
 /** Budget per GitHub account. Omitted only for a lone account with a balance, which the API balance card already shows. */
-function buildAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): string {
+function buildAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined, apiBalanceShown: boolean): string {
 	const list = accounts ?? [];
-	if (!shouldListAccountBudgets(list)) { return ''; }
+	if (!shouldListAccountBudgets(list, apiBalanceShown)) { return ''; }
 	return `
 		<div style="margin-bottom:12px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(localize('accountBudgets.title'))}</div>
@@ -4891,14 +4891,14 @@ function buildAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): str
 /** Whether the AI Billing Coverage section has anything to show for these stats. */
 function billingSectionHasContent(stats: UsageAnalysisStats): boolean {
 	const groupCosts = stats.monthBillingGroupCosts;
-	return !!stats.copilotApiBalance || shouldListAccountBudgets(stats.accountBudgets ?? []) || (!!groupCosts && Object.keys(groupCosts).length > 0);
+	return !!stats.copilotApiBalance || shouldListAccountBudgets(stats.accountBudgets ?? [], !!stats.copilotApiBalance) || (!!groupCosts && Object.keys(groupCosts).length > 0);
 }
 
 function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 	if (!billingSectionHasContent(stats)) { return ''; }
 	const api = stats.copilotApiBalance;
 	const groupCosts = stats.monthBillingGroupCosts;
-	const accountsHtml = buildAccountBudgetsHtml(stats.accountBudgets);
+	const accountsHtml = buildAccountBudgetsHtml(stats.accountBudgets, !!api);
 
 	const copilotCostUsd = groupCosts?.['GitHub Copilot'] ?? 0;
 	const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s, v) => s + v, 0) : 0;
@@ -6090,7 +6090,7 @@ function handleUpdateAccountBudgets(raw: unknown): void {
 	const accounts = sanitizeAccountBudgets(raw);
 	const container = document.getElementById('account-budgets');
 	if (!lastRenderedStats) {
-		if (container) { setHtml(container, buildAccountBudgetsHtml(accounts)); }
+		if (container) { setHtml(container, buildAccountBudgetsHtml(accounts, true)); }
 		return;
 	}
 	const wasShown = billingSectionHasContent(lastRenderedStats);
@@ -6100,7 +6100,7 @@ function handleUpdateAccountBudgets(raw: unknown): void {
 		renderLayout(lastRenderedStats);
 		setupSessionsTableSort();
 	} else if (container) {
-		setHtml(container, buildAccountBudgetsHtml(accounts));
+		setHtml(container, buildAccountBudgetsHtml(accounts, !!lastRenderedStats.copilotApiBalance));
 	}
 }
 

@@ -172,15 +172,22 @@ export function describeAccountBudget(b: AccountBudget, labels: AccountBudgetLab
  * balance, because the existing Copilot Budget gauge / API balance card already shows exactly that.
  * A lone account without a balance (no silent session, failed lookup, no metered quota) has nothing
  * else representing it, so it is listed to explain why.
+ *
+ * `shownElsewhere` says whether the surface in question actually rendered that existing figure. The
+ * tooltip gauge, for instance, is absent when there are no local cost groups or no budget, and a lone
+ * account's budget must not vanish then.
  */
-export function shouldListAccountBudgets(budgets: ReadonlyArray<Pick<AccountBudget, 'status'> & { balance?: unknown }>): boolean {
+export function shouldListAccountBudgets(
+	budgets: ReadonlyArray<{ status: AccountBudgetStatus; balance?: unknown }>,
+	shownElsewhere = true,
+): boolean {
 	if (budgets.length === 0) { return false; }
-	return !(budgets.length === 1 && budgets[0].status === 'ok' && !!budgets[0].balance);
+	return !(shownElsewhere && budgets.length === 1 && budgets[0].status === 'ok' && !!budgets[0].balance);
 }
 
 /** Markdown bullet lines for the status bar tooltip; empty when {@link shouldListAccountBudgets} says so. */
-export function formatAccountBudgetLines(budgets: readonly AccountBudget[], labels: AccountBudgetLabels): string[] {
-	if (!shouldListAccountBudgets(budgets)) { return []; }
+export function formatAccountBudgetLines(budgets: readonly AccountBudget[], labels: AccountBudgetLabels, gaugeShown = true): string[] {
+	if (!shouldListAccountBudgets(budgets, gaugeShown)) { return []; }
 	return budgets.map((b) => {
 		const plan = b.planName ? ` (${b.planName})` : '';
 		return `- **${b.label}**${plan}: ${describeAccountBudget(b, labels)}`;

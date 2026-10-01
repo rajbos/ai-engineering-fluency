@@ -129,8 +129,16 @@ describe('tooltip formatting', () => {
 		assert.equal(shouldListAccountBudgets([ok]), false);
 		// A lone account with no balance has nothing else representing it, so it is listed.
 		assert.equal(shouldListAccountBudgets([other]), true);
-		assert.equal(shouldListAccountBudgets([{ accountId: '9', label: 'z', status: 'no-quota' }]), true);
-		assert.deepEqual(formatAccountBudgetLines([{ accountId: '9', label: 'z', status: 'unavailable', reason: 'no-session' }], labels), ['- **z**: sign in']);
+		assert.equal(shouldListAccountBudgets([{ status: 'no-quota' }]), true);
+		const noSession: AccountBudget = { accountId: '9', label: 'z', status: 'unavailable', reason: 'no-session' };
+		assert.deepEqual(formatAccountBudgetLines([noSession], labels), ['- **z**: sign in']);
+	});
+
+	test('a lone account with a balance is listed when the gauge it would duplicate is not shown', () => {
+		// e.g. a new user: one signed-in account, no tracked local sessions, so no gauge in the tooltip.
+		assert.equal(shouldListAccountBudgets([ok], false), true);
+		assert.deepEqual(formatAccountBudgetLines([ok], labels, false), ['- **alice** (Copilot Pro): $10.00 / $39.00 used · 74.4% left']);
+		assert.deepEqual(formatAccountBudgetLines([ok], labels, true), []);
 		const lines = formatAccountBudgetLines([ok, other], labels);
 		assert.equal(lines.length, 2);
 		assert.equal(lines[0], '- **alice** (Copilot Pro): $10.00 / $39.00 used · 74.4% left');
