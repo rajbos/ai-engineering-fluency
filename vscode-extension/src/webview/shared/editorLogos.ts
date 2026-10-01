@@ -146,12 +146,19 @@ export function detectLogoTheme(doc: Document = document): LogoTheme {
 	return bg !== undefined && bg > 128 ? 'light' : 'dark';
 }
 
-/** Marks `<body data-logo-theme>` for the logo CSS and keeps it current when the host re-themes the page. */
+const observedDocs = new WeakSet<Document>();
+
+/**
+ * Marks `<body data-logo-theme>` for the logo CSS and keeps it current when the host re-themes the page.
+ * Safe to call on every render: the observer is installed once per document, later calls just re-apply.
+ */
 export function syncLogoTheme(doc: Document = document): void {
 	const apply = (): void => { doc.body.setAttribute('data-logo-theme', detectLogoTheme(doc)); };
 	apply();
+	if (observedDocs.has(doc)) { return; }
 	const View = doc.defaultView as (Window & { MutationObserver?: typeof MutationObserver }) | null;
 	if (View?.MutationObserver) {
+		observedDocs.add(doc);
 		new View.MutationObserver(apply).observe(doc.body, { attributes: true, attributeFilter: ['data-vscode-theme-kind'] });
 	}
 }
