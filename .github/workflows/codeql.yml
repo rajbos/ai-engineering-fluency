@@ -192,6 +192,15 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          # Always use the newest CodeQL CLI release instead of the runner
+          # toolcache version. The toolcache lags CodeQL releases, and the
+          # java-kotlin extractor rejects Kotlin versions newer than the CLI
+          # supports ("Kotlin version X is too recent") — this broke on the
+          # Kotlin 2.4.20 Dependabot bump because the toolcache only had
+          # 2.27.0 while 2.27.1 (with 2.4.20 support) was already out. The
+          # bundle-download endpoints (*.githubusercontent.com) are already in
+          # the harden-runner allowlist above for exactly this fallback.
+          tools: latest
           # Use the broader security-extended query suite (adds lower-precision /
           # lower-severity security queries on top of the default security-and-quality
           # set) across every language in the matrix.
