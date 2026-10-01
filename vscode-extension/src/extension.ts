@@ -496,6 +496,60 @@ export function defaultSumBillingGroupCosts(billingGroupCosts: Record<string, nu
 	return Object.values(billingGroupCosts ?? {}).reduce((s, v) => s + v, 0);
 }
 
+/** Whether Git refused to remove a worktree because it contains initialized submodules. */
+export function isSubmoduleWorktreeRemovalFailure(stderr: string): boolean {
+	return /working trees containing submodules cannot be moved or removed/i.test(stderr);
+}
+
+/** Whether Git reached directory deletion but the operating system rejected that step. */
+export function isWorktreeDirectoryRemovalFailure(stderr: string): boolean {
+	return /failed to (delete|remove) '.*'/i.test(stderr);
+}
+
+/** Forces Git's machine-parsed diagnostics to English regardless of the user's display locale. */
+export function getLocaleStableGitEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	return { ...environment, LC_ALL: 'C', LANG: 'C' };
+}
+
+type WorktreeRemovalResult = { ok: boolean; stderr: string };
+
+type WorktreeForceConfirmation = (
+	message: string,
+	options: { modal: true; detail: string },
+	action: string,
+) => PromiseLike<string | undefined>;
+
+/**
+ * Requests explicit confirmation before retrying a submodule-blocked removal with --force.
+ * Keeping the destructive retry behind this injectable boundary makes the decline/confirm
+ * behavior executable in unit tests instead of relying on source-order assertions.
+ */
+export async function retrySubmoduleWorktreeRemovalWithConfirmation(
+	worktreePath: string,
+	result: WorktreeRemovalResult,
+	confirm: WorktreeForceConfirmation,
+	forceRemove: () => Promise<WorktreeRemovalResult>,
+	removeDirectoryFallback: () => Promise<WorktreeRemovalResult>,
+): Promise<WorktreeRemovalResult | undefined> {
+	if (result.ok || !isSubmoduleWorktreeRemovalFailure(result.stderr)) { return result; }
+
+	const forceDelete = l10n.t('worktree.forceDelete');
+	const forceChoice = await confirm(
+		l10n.t('worktree.submoduleForcePrompt', worktreePath),
+		{ modal: true, detail: l10n.t('worktree.submoduleForceDetail') },
+		forceDelete,
+	);
+	if (forceChoice !== forceDelete) { return undefined; }
+	const forcedResult = await forceRemove();
+	if (
+		!forcedResult.ok
+		&& (isWorktreeDirectoryRemovalFailure(forcedResult.stderr) || isSubmoduleWorktreeRemovalFailure(forcedResult.stderr))
+	) {
+		return removeDirectoryFallback();
+	}
+	return forcedResult;
+}
+
 /** The computed-stat caches that carry a generation stamp. */
 export type ComputedStatsKey = 'detailed' | 'daily' | 'fullDaily' | 'usage' | 'sessionInputs' | 'memoryFiles';
 
@@ -14153,7 +14207,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       childProcess.execFile(
         "git",
         args,
-        { cwd, encoding: "utf8", timeout: timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+        {
+          cwd,
+          encoding: "utf8",
+          timeout: timeoutMs,
+          windowsHide: true,
+          maxBuffer: 8 * 1024 * 1024,
+          env: getLocaleStableGitEnvironment(),
+        },
         (err, stdout, stderr) => resolve({ ok: !err, stdout: String(stdout ?? "").trim(), stderr: String(stderr ?? "").trim() }),
       );
     });
@@ -14305,10 +14366,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
    * safety check, it only swaps out a less capable directory-removal implementation for a
    * more capable one (Node's fs.rm).
    */
-  private isWorktreeDirectoryRemovalFailure(stderr: string): boolean {
-    return /failed to (delete|remove) '.*'/i.test(stderr);
-  }
-
   /** Deletes a worktree's folder directly (Node's fs.rm handles junctions/long paths git's Windows walker sometimes cannot). */
   private async forceRemoveWorktreeDirectory(worktreePath: string): Promise<{ ok: boolean; error?: string }> {
     try {
@@ -14340,9 +14397,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
 
   /**
    * Removes a worktree, escalating through a fallback chain: plain removal, then (with user
-   * confirmation) a force removal if uncommitted/untracked changes block it, then an OS-level
-   * directory-removal fallback for git-for-windows junction/long-path failures. Returns the
-   * final result, or `undefined` if the user declined the force-delete confirmation.
+   * confirmation) force removal for dirty or submodule-containing worktrees, then an OS-level
+   * directory-removal fallback for Git-for-Windows junction/long-path failures. Returns the
+   * final result, or `undefined` if the user declined a force-delete confirmation.
    */
   private async _removeWorktreeWithFallback(mainRepoRoot: string, worktreePath: string): Promise<{ ok: boolean; stderr: string } | undefined> {
     let result = await this.removeGitWorktree(mainRepoRoot, worktreePath, false);
@@ -14356,7 +14413,17 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       result = await this.removeGitWorktree(mainRepoRoot, worktreePath, true);
     }
 
-    if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr)) {
+    const submoduleRetry = await retrySubmoduleWorktreeRemovalWithConfirmation(
+      worktreePath,
+      result,
+      (message, options, action) => vscode.window.showWarningMessage(message, options, action),
+      () => this.removeGitWorktree(mainRepoRoot, worktreePath, true),
+      () => this.removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath),
+    );
+    if (!submoduleRetry) { return undefined; }
+    result = submoduleRetry;
+
+    if (!result.ok && isWorktreeDirectoryRemovalFailure(result.stderr)) {
       result = await this.removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath);
     }
     return result;
@@ -14519,7 +14586,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (!result.ok && /modified or untracked/i.test(result.stderr)) {
       return { status: "skipped", reason: "Has uncommitted or untracked changes." };
     }
-    if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr)) {
+    if (!result.ok && isWorktreeDirectoryRemovalFailure(result.stderr)) {
       result = await this.removeWorktreeDirectoryFallback(validatedMainRepoRoot, worktreePath);
     }
     if (!result.ok) {

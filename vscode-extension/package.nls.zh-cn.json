@@ -207,6 +207,9 @@
   "button.openInsightsTab": "打开洞察标签页",
   "button.removeOldExtension": "删除旧扩展",
   "button.dismiss": "忽略",
+  "worktree.forceDelete": "强制删除",
+  "worktree.submoduleForcePrompt": "“{0}”包含已初始化的子模块，Git 无法在不强制执行的情况下删除它。",
+  "worktree.submoduleForceDetail": "强制删除将永久移除此工作副本。工作树或其子模块中未提交或未推送的更改可能会丢失。",
 
   "nav.btnRefresh": "刷新",
   "nav.btnDetails": "详情",
