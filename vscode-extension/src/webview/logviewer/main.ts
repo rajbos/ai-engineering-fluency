@@ -815,7 +815,7 @@ function buildCachedTokensCard(data: SessionLogData): string {
 </div>`;
 }
 
-/** Sums the per-turn estimated costs (own call + sub-agents). Returns 0 when no turn carries a cost. */
+/** Sums the per-turn estimated costs (own call + any sub-agent costs a parser attached). Returns 0 when no turn carries a cost. */
 function sumSessionCost(data: SessionLogData): number {
 	return data.turns.reduce((sum, t) => sum + (t.estimatedCost ?? 0)
 		+ t.toolCalls.reduce((s, tc) => s + (tc.subAgentCost ?? 0), 0), 0);
