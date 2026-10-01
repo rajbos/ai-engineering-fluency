@@ -585,7 +585,7 @@ function selectHtml(id: string, options: { value: string; label: string; disable
 function searchableSelectHtml(id: string, options: { value: string; label: string; disabled?: boolean }[], selected: string): string {
 	const current = options.find(o => o.value === selected) ?? options[0];
 	const items = options.map(o =>
-		`<li role="option" class="combo-item${o.value === selected ? ' selected' : ''}${o.disabled ? ' disabled' : ''}" data-value="${escapeHtml(o.value)}" aria-selected="${o.value === selected}">${escapeHtml(o.label)}</li>`
+		`<li role="option" class="combo-item${o.value === selected ? ' selected' : ''}${o.disabled ? ' disabled' : ''}" data-value="${escapeHtml(o.value)}" aria-selected="${o.value === selected}"${o.disabled ? ' aria-disabled="true"' : ''}>${escapeHtml(o.label)}</li>`
 	).join('');
 	return `<div class="model-combo" data-for="${id}">
 		<button type="button" class="model-select combo-button" aria-haspopup="listbox" aria-expanded="false">${escapeHtml(current?.label ?? '')}</button>
