@@ -287,8 +287,10 @@ export class AnalysisWorkerPool {
 
 	private onTimeout(slot: Slot, pending: Pending): void {
 		if (!slot.pending.has(pending.request.id)) { return; }
-		// A worker parses serially, so a request that is not the oldest in flight is waiting behind it, not
-		// hung. Give it a fresh window; if the oldest really is stuck, its own timer will kill the worker.
+		// Defensive guard. The worker runs requests strictly in arrival order, so only the oldest in flight can be
+		// the one that is stuck, and a younger request's clock is normally re-armed (restartOldestClock) before it
+		// can fire. If one fires anyway, it is waiting behind the oldest rather than hung: give it a fresh window,
+		// and if the oldest really is stuck, its own timer will kill the worker.
 		if (slot.pending.values().next().value !== pending) {
 			pending.timer = setTimeout(() => this.onTimeout(slot, pending), this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
 			pending.timer.unref?.();
