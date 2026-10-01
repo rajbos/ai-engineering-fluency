@@ -314,7 +314,9 @@ test('when the restart budget trips, the workers that are still alive are retire
 	const outcomes = Promise.all([onFirst, onSecond].map((p) => p.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'))));
 	assert.equal(workers.length, 2);
 	workers[0].crash();
-	assert.deepEqual(await outcomes, ['unavailable', 'unavailable']);
+	// Without the retirement the surviving worker's request is never settled; fail fast instead of hanging.
+	const settled = await Promise.race([outcomes, sleep(1_000).then(() => 'a request was left unsettled on the surviving worker')]);
+	assert.deepEqual(settled, ['unavailable', 'unavailable']);
 	assert.equal(pool.isAvailable(), false);
 	assert.equal(workers[1].terminated, true, 'the surviving worker is retired, not left running');
 	await pool.dispose();
