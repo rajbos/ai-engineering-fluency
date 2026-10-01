@@ -1,0 +1,166 @@
+/**
+ * Per-account Copilot budget lookup.
+ *
+ * VS Code can hold several GitHub accounts at once. `authentication.getSession()` without an
+ * `account` only ever returns the one VS Code prefers for this extension, so budget info for
+ * the other accounts was invisible. This module enumerates every signed-in account via
+ * `authentication.getAccounts()`, fetches a session for each (silently, never prompting) and
+ * reads the premium-interactions quota from `copilot_internal/user`.
+ *
+ * Pure of any `vscode` import: the authentication API and plan fetcher are injected, so it is
+ * unit-testable in Node.
+ */
+
+/** The slice of `vscode.authentication` this module needs. */
+export interface AccountAuthApi {
+	getAccounts(providerId: string): PromiseLike<ReadonlyArray<{ id: string; label: string }>>;
+	getSession(
+		providerId: string,
+		scopes: readonly string[],
+		options: { silent: true; account: { id: string; label: string } },
+	): PromiseLike<{ accessToken: string } | undefined>;
+}
+
+/** The slice of the `copilot_internal/user` response we read. */
+export interface AccountPlanInfo {
+	copilot_plan?: string;
+	quota_reset_date_utc?: string;
+	quota_reset_date?: string;
+	quota_snapshots?: Record<string, {
+		/** Typed `string` upstream, but the API sends a number; both are accepted. */
+		entitlement?: number | string | null;
+		quota_remaining?: number | string | null;
+		unlimited?: boolean;
+	} | undefined>;
+}
+
+export type PlanFetchResult = { planInfo?: AccountPlanInfo; statusCode?: number; error?: string };
+
+/** Copilot API quota balance (monthly entitlement vs. what is left), all amounts derived from AI Credits. */
+export interface ApiBalance {
+	/** Monthly budget in USD (entitlement / 100). */
+	budgetUsd: number;
+	/** Monthly budget in AI Credits (budgetUsd * 100). */
+	budgetAiCredits: number;
+	/** Raw quota_remaining from the API (AI Credits). */
+	remainingAiCredits: number;
+	/** budgetAiCredits - remainingAiCredits, never negative. */
+	usedAiCredits: number;
+	/** Percentage of the budget still available. */
+	pctAvailable: number;
+}
+
+/**
+ * Builds the balance from a USD entitlement and optional remaining credits. Without a known
+ * remaining figure the whole budget counts as available. Returns null with no entitlement.
+ */
+export function computeApiBalance(budgetUsd: number | undefined, remainingAiCredits: number | undefined): ApiBalance | null {
+	if (!budgetUsd) { return null; }
+	const budgetAiCredits = Math.round(budgetUsd * 100);
+	const remaining = remainingAiCredits ?? budgetAiCredits;
+	const usedAiCredits = Math.max(0, budgetAiCredits - remaining);
+	const pctAvailable = budgetAiCredits > 0 ? (remaining / budgetAiCredits) * 100 : 0;
+	return { budgetUsd, budgetAiCredits, remainingAiCredits: remaining, usedAiCredits, pctAvailable };
+}
+
+/**
+ * - `ok`: a metered premium quota was found.
+ * - `no-quota`: the account has a Copilot plan but no metered quota (unlimited, or none reported).
+ * - `unavailable`: no token could be obtained silently, or the plan lookup failed.
+ */
+export type AccountBudgetStatus = 'ok' | 'no-quota' | 'unavailable';
+
+export interface AccountBudget {
+	accountId: string;
+	/** The account's GitHub login (VS Code's account label). */
+	label: string;
+	status: AccountBudgetStatus;
+	planId?: string;
+	planName?: string;
+	balance?: ApiBalance;
+	/** ISO date the quota resets, when the API reports it. */
+	resetDate?: string;
+	error?: string;
+}
+
+/** Turns one account's plan response into an AccountBudget (without the identity fields). */
+export function parseAccountBudget(
+	planInfo: AccountPlanInfo,
+	planNames: Record<string, string> = {},
+): Pick<AccountBudget, 'status' | 'planId' | 'planName' | 'balance' | 'resetDate'> {
+	const planId = planInfo.copilot_plan;
+	const planName = planId ? (planNames[planId] ?? planId) : undefined;
+	const resetDate = planInfo.quota_reset_date_utc ?? planInfo.quota_reset_date;
+	const quota = planInfo.quota_snapshots?.premium_interactions;
+	const entitlementRaw = quota && !quota.unlimited && quota.entitlement !== null && quota.entitlement !== '' ? Number(quota.entitlement) : undefined;
+	const entitlement = entitlementRaw !== undefined && Number.isFinite(entitlementRaw) ? entitlementRaw : undefined;
+	const remainingRaw = quota?.quota_remaining;
+	const remaining = remainingRaw === null || remainingRaw === undefined || remainingRaw === '' ? undefined : Number(remainingRaw);
+	const balance = computeApiBalance(
+		entitlement === undefined ? undefined : entitlement / 100,
+		remaining !== undefined && Number.isFinite(remaining) ? remaining : undefined,
+	);
+	return balance
+		? { status: 'ok', planId, planName, balance, resetDate }
+		: { status: 'no-quota', planId, planName, resetDate };
+}
+
+/**
+ * Fetches budget info for every account the user has signed in with in VS Code. One account
+ * failing never affects the others, and no call here ever prompts the user.
+ */
+export async function fetchAllAccountBudgets(
+	auth: AccountAuthApi,
+	providerId: string,
+	fetchPlan: (token: string) => Promise<PlanFetchResult>,
+	planNames: Record<string, string> = {},
+): Promise<AccountBudget[]> {
+	const accounts = await auth.getAccounts(providerId);
+	const results = await Promise.all(accounts.map((account) => fetchOneAccountBudget(auth, providerId, account, fetchPlan, planNames)));
+	return results.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+async function fetchOneAccountBudget(
+	auth: AccountAuthApi,
+	providerId: string,
+	account: { id: string; label: string },
+	fetchPlan: (token: string) => Promise<PlanFetchResult>,
+	planNames: Record<string, string>,
+): Promise<AccountBudget> {
+	const base = { accountId: account.id, label: account.label };
+	try {
+		const session = await auth.getSession(providerId, ['read:user'], { silent: true, account });
+		if (!session) {
+			return { ...base, status: 'unavailable', error: 'No access for this account yet — sign in with it from the Accounts menu.' };
+		}
+		const { planInfo, error, statusCode } = await fetchPlan(session.accessToken);
+		if (error || !planInfo) {
+			return { ...base, status: 'unavailable', error: `Copilot plan lookup failed (HTTP ${statusCode ?? 'n/a'}): ${error ?? 'no data'}` };
+		}
+		return { ...base, ...parseAccountBudget(planInfo, planNames) };
+	} catch (err) {
+		return { ...base, status: 'unavailable', error: err instanceof Error ? err.message : String(err) };
+	}
+}
+
+/** One-line summary of an account's budget, e.g. "$12.30 / $39.00 used · 68.5% left". */
+export function describeAccountBudget(b: AccountBudget): string {
+	if (b.status === 'ok' && b.balance) {
+		const usedUsd = (b.balance.usedAiCredits / 100).toFixed(2);
+		return `$${usedUsd} / $${b.balance.budgetUsd.toFixed(2)} used · ${b.balance.pctAvailable.toFixed(1)}% left`;
+	}
+	if (b.status === 'no-quota') { return 'no metered budget'; }
+	return 'unavailable';
+}
+
+/**
+ * Markdown bullet lines for the status bar tooltip. Empty with fewer than two accounts, since a
+ * single account is already covered by the Copilot Budget gauge above it.
+ */
+export function formatAccountBudgetLines(budgets: readonly AccountBudget[]): string[] {
+	if (budgets.length < 2) { return []; }
+	return budgets.map((b) => {
+		const plan = b.planName ? ` (${b.planName})` : '';
+		return `- **${b.label}**${plan}: ${describeAccountBudget(b)}`;
+	});
+}

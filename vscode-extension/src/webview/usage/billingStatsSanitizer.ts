@@ -23,9 +23,21 @@ export type CopilotApiBalance = {
 	pctAvailable: number;
 };
 
+/** One GitHub account's Copilot budget, as shown in the per-account list (see githubAccountBudgets.ts). */
+export type AccountBudgetView = {
+	accountId: string;
+	label: string;
+	status: 'ok' | 'no-quota' | 'unavailable';
+	planName?: string;
+	resetDate?: string;
+	error?: string;
+	balance?: CopilotApiBalance;
+};
+
 /** The subset of stats fields this module owns (a structural subset of UsageAnalysisStats). */
 export interface BillingStatsFields {
 	copilotApiBalance?: CopilotApiBalance | null;
+	accountBudgets?: AccountBudgetView[];
 	monthBillingGroupCosts?: Record<string, number> | null;
 }
 
@@ -44,6 +56,36 @@ export function sanitizeCopilotApiBalance(raw: unknown): CopilotApiBalance | nul
 		usedAiCredits: finiteNumber(r.usedAiCredits),
 		pctAvailable: finiteNumber(r.pctAvailable),
 	};
+}
+
+const ACCOUNT_STATUSES = ['ok', 'no-quota', 'unavailable'];
+
+function optionalString(value: unknown): string | undefined {
+	return typeof value === 'string' && value ? value : undefined;
+}
+
+/** Sanitizes a raw (untrusted) per-account budget list, dropping malformed entries. */
+export function sanitizeAccountBudgets(raw: unknown): AccountBudgetView[] {
+	if (!Array.isArray(raw)) { return []; }
+	const result: AccountBudgetView[] = [];
+	for (const item of raw) {
+		if (!item || typeof item !== 'object') { continue; }
+		const r = item as Record<string, unknown>;
+		const label = optionalString(r.label);
+		if (!label) { continue; }
+		const status = ACCOUNT_STATUSES.includes(r.status as string) ? (r.status as AccountBudgetView['status']) : 'unavailable';
+		const balance = sanitizeCopilotApiBalance(r.balance);
+		result.push({
+			accountId: optionalString(r.accountId) ?? label,
+			label,
+			status,
+			planName: optionalString(r.planName),
+			resetDate: optionalString(r.resetDate),
+			error: optionalString(r.error),
+			...(balance ? { balance } : {}),
+		});
+	}
+	return result;
 }
 
 /** Sanitizes a raw (untrusted) provider→cost map, keeping only finite numeric entries. */
@@ -70,6 +112,8 @@ export function applyBillingFields(target: BillingStatsFields, raw: unknown): vo
 	const r = raw as Record<string, unknown>;
 	const apiBalance = sanitizeCopilotApiBalance(r.copilotApiBalance);
 	if (apiBalance) { target.copilotApiBalance = apiBalance; }
+	// Always assigned (even when empty): removing the last account must clear the list on refresh.
+	if (Array.isArray(r.accountBudgets)) { target.accountBudgets = sanitizeAccountBudgets(r.accountBudgets); }
 	const billingCosts = sanitizeBillingGroupCosts(r.monthBillingGroupCosts);
 	if (billingCosts) { target.monthBillingGroupCosts = billingCosts; }
 }

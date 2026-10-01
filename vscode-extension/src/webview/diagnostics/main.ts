@@ -13,6 +13,7 @@ import { registerMessageHandler } from "../shared/messageHandler";
 import { getModelColor } from "../../../../src/chartDataBuilder";
 import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
 import { localize, localizeFormat } from "../shared/localization";
+import type { AccountBudgetView } from "../usage/billingStatsSanitizer";
 import { applyWebviewLocale } from "../shared/webviewLocale";
 
 // Constants
@@ -183,6 +184,8 @@ type DiagnosticsData = {
   sessionFolders?: SessionFolder[];
   displaySettings?: DisplaySettings;
   quotaEntitlements?: QuotaEntitlements;
+  /** Copilot budget per GitHub account signed in to VS Code. */
+  accountBudgets?: AccountBudgetView[];
   toolCallStats?: { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } } | null;
   skillCallStats?: { total: number; byName: { [key: string]: number } } | null;
   /** Per-skill, per-editor invocation counts (skillName -> editorSource -> count), for the Skill Usage tab's editor filter. */
@@ -2722,6 +2725,25 @@ function sel(current: string, value: string): string {
   return current === value ? 'selected' : '';
 }
 
+function renderAccountBudgetRowHtml(b: AccountBudgetView): string {
+  const plan = b.planName ? ` (${escapeHtml(b.planName)})` : "";
+  let detail: string;
+  if (b.status === "ok" && b.balance) {
+    const reset = b.resetDate ? `, resets ${escapeHtml(b.resetDate.slice(0, 10))}` : "";
+    detail = `${(b.balance.usedAiCredits / 100).toFixed(2)} of ${b.balance.budgetUsd.toFixed(2)} used (${b.balance.pctAvailable.toFixed(1)}% left${reset})`;
+  } else if (b.status === "no-quota") {
+    detail = "no metered budget on this plan";
+  } else {
+    detail = escapeHtml(b.error ?? "unavailable");
+  }
+  return `<strong>${escapeHtml(b.label)}</strong>${plan}: ${detail}<br/>`;
+}
+
+function renderAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): string {
+  if (!accounts || accounts.length === 0) { return ""; }
+  return `<p><strong>GitHub accounts in VS Code</strong><br/>${accounts.map(renderAccountBudgetRowHtml).join("")}</p>`;
+}
+
 function renderQuotaCardHtml(data: DiagnosticsData): string {
   const quotaContent = data.quotaEntitlements
     ? `<p>
@@ -2739,6 +2761,7 @@ ${
   return `<div class="backend-card">
 <h4>📊 API Quota Information</h4>
 ${quotaContent}
+${renderAccountBudgetsHtml(data.accountBudgets)}
 </div>`;
 }
 

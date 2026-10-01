@@ -373,6 +373,7 @@ import {
 	type RepoPrInfo,
 	type RepoPrStatsResult,
 } from './githubPrService';
+import { computeApiBalance, fetchAllAccountBudgets, formatAccountBudgetLines, type AccountBudget } from './githubAccountBudgets';
 import { collectAgentSessions } from './agentSessionsService';
 import {
 	AGENT_TASKS_CACHE_SCHEMA_VERSION,
@@ -1557,6 +1558,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		/** Raw quota_remaining from the premium_interactions snapshot (in AI Credits). */
 		premium_interactions_remaining?: number;
 	} = {};
+	/** Copilot budget per GitHub account signed in to VS Code (not only the one this extension prefers). */
+	private _accountBudgets: AccountBudget[] = [];
+	/** Monotonic id of the latest account-budget refresh, so a slow stale lookup can't overwrite a newer one. */
+	private _accountBudgetsRefreshSeq = 0;
 
 	// Cached PR stats result for the repos tab (mirrors the shared snapshot on disk)
 	private _lastRepoPrStats?: RepoPrStatsResult;
@@ -2860,6 +2865,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 					await this.context.globalState.update('github.authenticated', false);
 					await this.context.globalState.update('github.username', undefined);
 					this.log('GitHub session removed externally — clearing auth state');
+					// The preferred account is gone, but other accounts may remain (or have been removed too).
+					void this.refreshAccountBudgets();
 				}
 			})
 		);
@@ -3598,6 +3605,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('Signing out from GitHub...');
 			this.githubSession = undefined;
 			this._githubSignedOutByUser = true;
+			this._accountBudgets = [];
+			this._accountBudgetsRefreshSeq++;
+			this.pushAccountBudgetsToPanels();
+			this.refreshBudgetDependentUi();
 			await this.context.globalState.update('github.authenticated', false);
 			await this.context.globalState.update('github.username', undefined);
 			await this.context.globalState.update('github.signedOutByUser', true);
@@ -4148,6 +4159,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			await this.loadAndLogEnterpriseInfo();
 		}
 
+		await this.refreshAccountBudgets();
+
 		// The plan info above may have populated a new Copilot plan quota / budget
 		// (via captureQuotaEntitlement). The status bar tooltip flyout is only rebuilt
 		// during token refreshes, so refresh it now so the freshly-fetched budget shows
@@ -4155,6 +4168,36 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (this.currentDetailedStats) {
 		this.refreshBudgetDependentUi();
 	}
+	}
+
+	/**
+	 * Looks up the Copilot budget for every GitHub account signed in to VS Code, then refreshes the
+	 * tooltip and any open panels. Silent (never prompts) and best-effort: a failure leaves the
+	 * previous result in place. Skipped after an explicit sign-out from this extension.
+	 */
+	private async refreshAccountBudgets(): Promise<void> {
+		if (this._githubSignedOutByUser) {
+			this._accountBudgets = [];
+			return;
+		}
+		const seq = ++this._accountBudgetsRefreshSeq;
+		try {
+			const plans = copilotPlansData.plans as Record<string, { name: string }>;
+			const planNames = Object.fromEntries(Object.entries(plans).map(([id, p]) => [id, p.name]));
+			const budgets = await fetchAllAccountBudgets(vscode.authentication, getGitHubAuthProviderId(), fetchCopilotPlanInfo, planNames);
+			if (seq !== this._accountBudgetsRefreshSeq) { return; }
+			this._accountBudgets = budgets;
+			this.log(`GitHub accounts in VS Code: ${budgets.length === 0 ? 'none' : budgets.map((b) => `${b.label} (${b.status})`).join(', ')}`);
+			this.refreshBudgetDependentUi();
+			this.pushAccountBudgetsToPanels();
+		} catch (error) {
+			this.warn('Failed to load per-account Copilot budgets: ' + String(error));
+		}
+	}
+
+	/** Sends the per-account budgets to the open panels that show them. */
+	private pushAccountBudgetsToPanels(): void {
+		void this.analysisPanel?.webview.postMessage({ command: 'updateAccountBudgets', accountBudgets: this._accountBudgets });
 	}
 
 	/** Rebuilds the status bar tooltip flyout (and its background color) from the last
@@ -5526,6 +5569,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tooltip.appendMarkdown(formatTooltipStatsTable(detailedStats, (costs) => this.sumBillingGroupCosts(costs)));
 		tooltip.appendMarkdown('\n---\n');
 		this.appendProviderCostSection(tooltip, detailedStats);
+		const accountLines = formatAccountBudgetLines(this._accountBudgets);
+		if (accountLines.length > 0) {
+			tooltip.appendMarkdown(`\n---\n**GitHub accounts**\n\n${accountLines.join('\n')}\n`);
+		}
 		return tooltip;
 	}
 
@@ -10614,6 +10661,7 @@ private computeFallbackDailyRollup(
 			memoryFilesAnalysis: _toMemoryFilesAnalysisView(analysisStats.memoryFilesAnalysis ?? null),
 			serverMemoriesAnalysis: this.buildServerMemoriesView(),
 			copilotApiBalance: this._buildCopilotApiBalance(),
+			accountBudgets: this._accountBudgets,
 			monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
 			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
 		};
@@ -10628,13 +10676,7 @@ private computeFallbackDailyRollup(
 	 * Returns null when no entitlement data is available.
 	 */
 	private _buildCopilotApiBalance(): { budgetUsd: number; budgetAiCredits: number; remainingAiCredits: number; usedAiCredits: number; pctAvailable: number } | null {
-		const budgetUsd = this._copilotQuotaEntitlements.premium_interactions;
-		if (!budgetUsd) { return null; }
-		const budgetAiCredits = Math.round(budgetUsd * 100);
-		const remainingAiCredits = this._copilotQuotaEntitlements.premium_interactions_remaining ?? budgetAiCredits;
-		const usedAiCredits = Math.max(0, budgetAiCredits - remainingAiCredits);
-		const pctAvailable = budgetAiCredits > 0 ? (remainingAiCredits / budgetAiCredits) * 100 : 0;
-		return { budgetUsd, budgetAiCredits, remainingAiCredits, usedAiCredits, pctAvailable };
+		return computeApiBalance(this._copilotQuotaEntitlements.premium_interactions, this._copilotQuotaEntitlements.premium_interactions_remaining);
 	}
 
 	private async loadAnalysisStatsInBackground(panel: vscode.WebviewPanel): Promise<void> {
@@ -15386,6 +15428,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       backendConfigured: this.isBackendConfigured(), isDebugMode, globalStateCounters,
       displaySettings: { showTokens: this.getStatusBarShowTokensSetting(), showCost: this.getStatusBarShowCostSetting(), monthlyBudget: this.getMonthlyBudgetSetting() },
       quotaEntitlements: this._copilotQuotaEntitlements,
+      accountBudgets: this._accountBudgets,
       toolCallStats: this.currentUsageAnalysisStats?.last30Days?.toolCalls ?? null,
       skillCallStats: this.currentUsageAnalysisStats?.last30Days?.skillCalls ?? null,
       skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
@@ -15566,6 +15609,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       serverMemoriesAnalysis: this.buildServerMemoriesView(),
       sessionColumnSettings,
       copilotApiBalance: this._buildCopilotApiBalance(),
+      accountBudgets: this._accountBudgets,
       monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
       worktreeScanRoots: this.buildInitialWorktreeRoots(),
       ...this.getWebviewLocaleFields(),

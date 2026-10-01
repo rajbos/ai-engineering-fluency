@@ -119,3 +119,27 @@ describe('applyBillingFields (round-trip regression guard)', () => {
 		assert.equal(target.copilotApiBalance, undefined);
 	});
 });
+
+describe('account budgets', () => {
+	test('sanitizeAccountBudgets drops malformed entries and normalizes the rest', async () => {
+		const { sanitizeAccountBudgets } = await import('../../src/webview/usage/billingStatsSanitizer');
+		const result = sanitizeAccountBudgets([
+			null, 'x', { status: 'ok' },
+			{ accountId: '1', label: 'alice', status: 'bogus', balance: { budgetUsd: 39, budgetAiCredits: 3900, remainingAiCredits: 100, usedAiCredits: 3800, pctAvailable: 2.5 } },
+		]);
+		assert.equal(result.length, 1);
+		assert.equal(result[0].status, 'unavailable');
+		assert.equal(result[0].balance?.usedAiCredits, 3800);
+		assert.deepEqual(sanitizeAccountBudgets('nope'), []);
+	});
+
+	test('applyBillingFields keeps accounts across refreshes and lets an empty list clear them', () => {
+		const target: BillingStatsFields = {};
+		applyBillingFields(target, { accountBudgets: [{ accountId: '1', label: 'alice', status: 'no-quota' }] });
+		assert.equal(target.accountBudgets?.length, 1);
+		applyBillingFields(target, { accountBudgets: [] });
+		assert.deepEqual(target.accountBudgets, []);
+		applyBillingFields(target, {});
+		assert.deepEqual(target.accountBudgets, []);
+	});
+});

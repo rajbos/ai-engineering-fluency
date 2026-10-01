@@ -38,7 +38,7 @@ import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold, compute
 import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDetection';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
-import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
+import { applyBillingFields, sanitizeAccountBudgets, type AccountBudgetView, type CopilotApiBalance } from './billingStatsSanitizer';
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
@@ -239,6 +239,8 @@ type UsageAnalysisStats = {
 	sessionColumnSettings?: { enabledColumns?: string[] };
 	/** Copilot API quota balance snapshot (available when the extension has fetched quota data). */
 	copilotApiBalance?: CopilotApiBalance | null;
+	/** Copilot budget for every GitHub account signed in to VS Code. */
+	accountBudgets?: AccountBudgetView[];
 	/** Current-month billing group costs in USD from the extension's local session tracking. */
 	monthBillingGroupCosts?: Record<string, number> | null;
 	/**
@@ -4840,10 +4842,45 @@ function _billingCoverageAnalysisHtml(api: CopilotApiBalance | null | undefined,
 		</div>`;
 }
 
+/** One account's row in the per-account budget list. */
+function _accountBudgetRowHtml(b: AccountBudgetView): string {
+	const plan = b.planName ? ` <span style="color:var(--text-muted);">(${escapeHtml(b.planName)})</span>` : '';
+	const name = `<span style="font-weight:600;">${escapeHtml(b.label)}</span>${plan}`;
+	if (b.status !== 'ok' || !b.balance) {
+		const note = b.status === 'no-quota' ? 'No metered budget on this plan' : escapeHtml(b.error ?? 'Budget unavailable');
+		return `<div style="display:flex; justify-content:space-between; gap:12px; font-size:12px;"><span>${name}</span><span style="color:var(--text-muted);">${note}</span></div>`;
+	}
+	const usedPct = Math.min(100, Math.max(0, 100 - b.balance.pctAvailable));
+	const color = usedPct > 90 ? 'var(--error-color, #f14c4c)' : usedPct > 75 ? 'var(--warning-color, #cca700)' : 'var(--accent-color, #4d9cf8)';
+	const reset = b.resetDate ? ` · resets ${escapeHtml(b.resetDate.slice(0, 10))}` : '';
+	return `
+		<div style="font-size:12px;">
+			<div style="display:flex; justify-content:space-between; gap:12px; margin-bottom:4px;">
+				<span>${name}</span>
+				<span>${formatFixed(b.balance.usedAiCredits / 100, 2)} / ${formatFixed(b.balance.budgetUsd, 2)} used · ${formatFixed(b.balance.pctAvailable, 1)}% left${reset}</span>
+			</div>
+			<div style="height:6px; border-radius:3px; background:var(--border-subtle); overflow:hidden;"><div style="height:100%; width:${formatFixed(usedPct, 2)}%; background:${color};"></div></div>
+		</div>`;
+}
+
+/** Budget per GitHub account. Shown only with 2+ accounts; a single account is covered by the API balance card. */
+function buildAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): string {
+	const list = accounts ?? [];
+	if (list.length < 2) { return ''; }
+	return `
+		<div style="margin-bottom:12px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">GitHub accounts in VS Code</div>
+			<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:12px 14px; display:flex; flex-direction:column; gap:10px; color:var(--text-primary);">
+				${list.map(_accountBudgetRowHtml).join('')}
+			</div>
+		</div>`;
+}
+
 function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 	const api = stats.copilotApiBalance;
 	const groupCosts = stats.monthBillingGroupCosts;
-	if (!api && (!groupCosts || Object.keys(groupCosts).length === 0)) { return ''; }
+	const accountsHtml = buildAccountBudgetsHtml(stats.accountBudgets);
+	if (!api && !accountsHtml && (!groupCosts || Object.keys(groupCosts).length === 0)) { return ''; }
 
 	const copilotCostUsd = groupCosts?.['GitHub Copilot'] ?? 0;
 	const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s, v) => s + v, 0) : 0;
@@ -4858,6 +4895,7 @@ function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 			<div class="section-title"><span>💳</span><span>AI Billing Coverage</span></div>
 			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs, alongside estimated costs from other AI providers.</div>
 			${apiHtml}
+			<div id="account-budgets">${accountsHtml}</div>
 			${extHtml}
 			${deltaHtml}
 		</div>`;
@@ -6028,6 +6066,12 @@ function handleUpdateStats(message: any): void {
 	}
 }
 
+/** Replaces the per-account budget list in place; the next full `updateStats` carries it too. */
+function handleUpdateAccountBudgets(raw: unknown): void {
+	const container = document.getElementById('account-budgets');
+	if (container) { container.innerHTML = buildAccountBudgetsHtml(sanitizeAccountBudgets(raw)); }
+}
+
 function handleToolSuppressed(toolName: string): void {
 	if (!toolName) { return; }
 	const section = document.getElementById('unknown-mcp-tools-section');
@@ -6161,6 +6205,8 @@ function handleExtensionMessage(message: any): void {
 			break;
 		case 'updateInsights':
 			handleUpdateInsights(message.insights); break;
+		case 'updateAccountBudgets':
+			handleUpdateAccountBudgets(message.accountBudgets); break;
 		case 'switchTab':
 			handleSwitchTab(message); break;
 		default:

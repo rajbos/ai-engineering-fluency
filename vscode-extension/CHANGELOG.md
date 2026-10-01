@@ -5,6 +5,7 @@ All notable changes to the VS Code extension will be documented in this file.
 ## [Unreleased]
 
 ### Features
+- Copilot budget is now shown for every GitHub account signed in to VS Code, not just the one VS Code prefers for the extension: a "GitHub accounts" list in the status bar tooltip, the Usage view's AI Billing Coverage section and the Diagnostics quota card (listed from two accounts up; never prompts to sign in)
 - The Chart view's Summary → "By Editor" cards now show each tool's official logo (VS Code, Claude, Copilot, Codex, Antigravity, Kilo, Hermes, JetBrains, Cursor, Gemini, Kiro and more), falling back to the emoji for tools without one
 
 ### Bug Fixes
