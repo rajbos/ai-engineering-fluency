@@ -122,26 +122,27 @@ test('expanding again is persisted too', async () => {
 });
 
 test('editor cards show the official logo, with the emoji as fallback for tools without one', async () => {
-	const window = await bootChart({ current: undefined }, { 'VS Code': 5, 'Copilot CLI': 4, 'Codex CLI': 3 });
+	const window = await bootChart({ current: undefined }, { 'VS Code': 5, 'Copilot CLI': 4, 'Unknown': 3 });
 	const vscodeCard = window.document.getElementById('editor-VS Code');
 	assert.ok(vscodeCard, 'fixture has a VS Code card');
 	assert.match(vscodeCard.querySelector('img.editor-logo')?.getAttribute('src') ?? '', /^data:image\/svg\+xml/);
 	const copilot = window.document.getElementById('editor-Copilot CLI');
 	assert.equal(copilot.querySelectorAll('img.editor-logo').length, 2, 'light + dark variant');
-	const unknown = window.document.getElementById('editor-Codex CLI');
+	const unknown = window.document.getElementById('editor-Unknown');
 	assert.equal(unknown.querySelector('img'), null);
-	assert.equal(unknown.querySelector('.editor-logo-emoji')?.textContent, '🌀');
+	assert.equal(unknown.querySelector('.editor-logo-emoji')?.textContent, '❓');
 });
 
 test('every tool with an official logo renders an <img>, including dark variants', async () => {
 	const withLogo = ['Claude Code', 'Claude Desktop', 'Cline', 'Continue', 'Copilot CLI', 'Crush', 'Cursor', 'Devin', 'Eclipse',
-		'Gemini CLI', 'JetBrains', 'Kiro', 'Mistral Vibe', 'OpenCode', 'Pi', 'Visual Studio', 'VS Code', 'VSCodium', 'Windsurf'];
+		'Gemini CLI', 'JetBrains', 'Kiro', 'Mistral Vibe', 'OpenCode', 'Pi', 'Visual Studio', 'VS Code', 'VSCodium', 'Windsurf',
+		'Antigravity', 'Codex CLI', 'Hermes', 'Kilo Code', 'SSMS', 'MS Scout (Copilot CLI)'];
 	const window = await bootChart({ current: undefined }, Object.fromEntries(withLogo.map((n) => [n, 1])));
 	for (const name of withLogo) {
 		const imgs = window.document.getElementById(`editor-${name}`).querySelectorAll('img.editor-logo');
 		assert.ok(imgs.length >= 1, `${name} has a logo`);
 	}
-	for (const name of ['Cline', 'Devin', 'Eclipse', 'JetBrains', 'OpenCode', 'Pi', 'Windsurf']) {
+	for (const name of ['Cline', 'Devin', 'Eclipse', 'JetBrains', 'OpenCode', 'Pi', 'Windsurf', 'Codex CLI', 'Hermes', 'Kilo Code']) {
 		assert.equal(window.document.getElementById(`editor-${name}`).querySelectorAll('img.editor-logo').length, 2, `${name} has a dark variant`);
 	}
 });

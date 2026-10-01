@@ -6,6 +6,7 @@
  * `img-src data:` is enough. Editors without an official logo here fall back to the emoji from
  * `editorIcons.ts` — see {@link buildEditorLogo}.
  */
+import antigravity from '../../../../assets/tool-logos/antigravity.svg';
 import claudeCode from '../../../../assets/tool-logos/claude-code.svg';
 import claude from '../../../../assets/tool-logos/claude.svg';
 import clineDark from '../../../../assets/tool-logos/cline-dark.svg';
@@ -20,10 +21,17 @@ import eclipse from '../../../../assets/tool-logos/eclipse.svg';
 import gemini from '../../../../assets/tool-logos/gemini.svg';
 import copilotDark from '../../../../assets/tool-logos/github-copilot-dark.svg';
 import copilotLight from '../../../../assets/tool-logos/github-copilot.svg';
+import hermesDark from '../../../../assets/tool-logos/hermes-dark.svg';
+import hermes from '../../../../assets/tool-logos/hermes.svg';
 import jetbrainsDark from '../../../../assets/tool-logos/jetbrains-dark.svg';
 import jetbrains from '../../../../assets/tool-logos/jetbrains.svg';
+import kiloDark from '../../../../assets/tool-logos/kilo-dark.svg';
+import kilo from '../../../../assets/tool-logos/kilo.svg';
 import kiro from '../../../../assets/tool-logos/kiro.svg';
+import microsoft from '../../../../assets/tool-logos/microsoft.svg';
 import mistral from '../../../../assets/tool-logos/mistral.svg';
+import openaiDark from '../../../../assets/tool-logos/openai-dark.svg';
+import openai from '../../../../assets/tool-logos/openai.svg';
 import opencodeDark from '../../../../assets/tool-logos/opencode-dark.svg';
 import opencode from '../../../../assets/tool-logos/opencode.svg';
 import piDark from '../../../../assets/tool-logos/pi-dark.svg';
@@ -44,15 +52,18 @@ export interface EditorLogo {
 const COPILOT: EditorLogo = { light: copilotLight, dark: copilotDark };
 const CLAUDE_CODE: EditorLogo = { light: claudeCode };
 const CLAUDE: EditorLogo = { light: claude };
+const MICROSOFT: EditorLogo = { light: microsoft };
 const DEVIN: EditorLogo = { light: devin, dark: devinDark };
 const VSCODE: EditorLogo = { light: vscode };
 const KIRO: EditorLogo = { light: kiro };
 
 export const EDITOR_LOGOS: Readonly<Record<string, EditorLogo>> = {
+	'Antigravity': { light: antigravity },
 	'Claude Code': CLAUDE_CODE,
 	'Claude Code CLI': CLAUDE_CODE,
 	'Claude Desktop': CLAUDE,
 	'Claude Desktop Cowork': CLAUDE,
+	'Codex CLI': { light: openai, dark: openaiDark },
 	'Cline': { light: cline, dark: clineDark },
 	'Continue': { light: continueLogo },
 	'Copilot CLI': COPILOT,
@@ -63,12 +74,16 @@ export const EDITOR_LOGOS: Readonly<Record<string, EditorLogo>> = {
 	'Devin CLI': DEVIN,
 	'Eclipse': { light: eclipse, dark: eclipseDark },
 	'Gemini CLI': { light: gemini },
+	'Hermes': { light: hermes, dark: hermesDark },
 	'JetBrains': { light: jetbrains, dark: jetbrainsDark },
+	'Kilo Code': { light: kilo, dark: kiloDark },
 	'Kiro': KIRO,
 	'Kiro CLI': KIRO,
+	'MS Scout (Copilot CLI)': MICROSOFT,
 	'Mistral Vibe': { light: mistral },
 	'OpenCode': { light: opencode, dark: opencodeDark },
 	'Pi': { light: pi, dark: piDark },
+	'SSMS': MICROSOFT,
 	'Visual Studio': { light: visualStudio },
 	'VS Code': VSCODE,
 	'VS Code Insiders': VSCODE,
