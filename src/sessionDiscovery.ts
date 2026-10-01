@@ -56,9 +56,21 @@ export class SessionDiscovery {
 	/** Number of session files found in the most recent discovery scan. */
 	get lastDiscoveryFilesCount(): number { return this._lastDiscoveryFilesCount; }
 
+	/**
+	 * The discovery pass currently running, if any. A pass takes 25–95 s on a machine with a large history, and
+	 * the result cache below is only filled when a pass *finishes*, so without this every view opened during
+	 * that time started its own full pass over all adapters — all competing for the same thread.
+	 */
+	private _inFlight: { promise: Promise<string[]>; batches: string[][]; subscribers: Set<(files: string[]) => void> } | undefined;
+	/** Bumped by clearCache() so a pass that was running across it does not repopulate the cache it just cleared. */
+	private _cacheGeneration = 0;
+
 	clearCache(): void {
 		this._sessionFilesCache = null;
 		this._sessionFilesCacheTime = 0;
+		this._cacheGeneration++;
+		// Callers after an explicit clear want a fresh pass; the running one still completes for those already on it.
+		this._inFlight = undefined;
 	}
 
 	/** Async replacement for fs.existsSync — does not block the event loop. */
@@ -265,16 +277,46 @@ export class SessionDiscovery {
 			if (onBatch) { onBatch(this._sessionFilesCache); }
 			return this._sessionFilesCache;
 		}
+		// Join a pass that is already running instead of starting a second one. Registered before any await so
+		// two callers in the same tick cannot both start one.
+		const running = this._inFlight;
+		if (running) {
+			this.deps.log('🔗 Joining the session-file discovery that is already running');
+			if (onBatch) {
+				for (const batch of running.batches) { onBatch(batch); } // what it has found so far
+				running.subscribers.add(onBatch);
+			}
+			return running.promise;
+		}
+		const run: NonNullable<SessionDiscovery['_inFlight']> = { promise: undefined as unknown as Promise<string[]>, batches: [], subscribers: new Set() };
+		if (onBatch) { run.subscribers.add(onBatch); }
+		const emit = (files: string[]): void => {
+			run.batches.push(files);
+			for (const subscriber of run.subscribers) {
+				try { subscriber(files); } catch (error) { this.deps.warn(`A session-file discovery subscriber threw: ${error}`); }
+			}
+		};
+		const generation = this._cacheGeneration;
+		this._inFlight = run;
+		run.promise = this.runDiscovery(now, emit, generation).finally(() => {
+			if (this._inFlight === run) { this._inFlight = undefined; }
+		});
+		return run.promise;
+	}
+
+	private async runDiscovery(now: number, emit: (files: string[]) => void, generation: number): Promise<string[]> {
 		this._lastDiscoveryHadError = false;
 		this._lastDiscoveryFilesCount = 0;
 		const sampleFiles = await this.tryGetSampleDataFiles(now);
-		if (sampleFiles) { if (onBatch) { onBatch(sampleFiles); } return sampleFiles; }
+		if (sampleFiles) { emit(sampleFiles); return sampleFiles; }
 		const allDeduped: string[] = [];
 		try {
-			const files = await this.discoverFromAdapters(onBatch);
+			const files = await this.discoverFromAdapters(emit);
 			allDeduped.push(...files);
-			this._sessionFilesCache = allDeduped;
-			this._sessionFilesCacheTime = Date.now();
+			if (generation === this._cacheGeneration) {
+				this._sessionFilesCache = allDeduped;
+				this._sessionFilesCacheTime = Date.now();
+			}
 			this._lastDiscoveryFilesCount = allDeduped.length;
 			return allDeduped;
 		} catch (error) {

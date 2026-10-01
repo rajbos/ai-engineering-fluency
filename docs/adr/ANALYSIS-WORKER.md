@@ -61,8 +61,15 @@ host thread is idle ~90% of the time while it runs.
 
 A worker death re-sends its in-flight requests once on a fresh worker; a request that kills two workers is
 rejected as `failed` (it is the likely cause — an out-of-memory kill or native crash — and must not be retried on the
-host). The hang watchdog only ever fires for the *oldest* request in a worker: a younger one is waiting behind it, so it
-gets a fresh window instead of taking the worker down. More than five deaths in a minute
+host). When a request times out, its neighbours on that worker are re-sent without spending their own retry.
+
+Workers run their requests **concurrently** (they are mostly waiting on disk or on the host). A strictly in-order
+worker was tried and reverted: one slow host lookup then froze every request queued behind it. The accepted cost is
+that if a request genuinely hangs the thread while another is in flight, the older one can be the one blamed; the
+other is re-sent and, if it is the culprit, times out on its own next.
+
+The hang watchdog is paused while a worker is waiting on a **host lookup** (see below) and restarted with a full window
+when the last one returns: waiting on the host is not a hung worker. Lookups are themselves bounded (10 minutes). More than five deaths in a minute
 disables the pool for the session (with a warning) and everything runs in-process, as it did before this change.
 
 ### Why a queue and a small in-flight window
@@ -71,6 +78,14 @@ A worker can only parse serially. If twenty requests were posted to it and the p
 at posting, a perfectly healthy but busy worker would be killed for "hanging" because its twentieth request
 waited behind nineteen others. Requests wait in the pool instead, and the timeout starts when a request is
 handed to a worker, where it only waits behind one neighbour.
+
+### Concurrent views share one discovery pass
+
+Finding the session files runs every adapter (25–95 s on a large history on a busy machine) and its result was
+only cached when a pass *finished*. Every view opened meanwhile started its own full pass, all competing for the
+same thread, so opening several views made each of them (and the refresh) slower. `SessionDiscovery` now lets
+concurrent callers join the pass already running — replaying the batches it has produced so far, then streaming the
+rest — and `clearCache()` detaches a running pass so an explicit refresh starts a fresh one.
 
 ### Serialized usage-analysis runs
 

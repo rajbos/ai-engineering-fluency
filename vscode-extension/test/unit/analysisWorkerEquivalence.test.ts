@@ -214,31 +214,29 @@ test('workspace customization scan: the worker finds exactly what the in-process
 	}
 });
 
-test('a worker answers requests in the order it received them, even when a later one is cheaper', async () => {
-	// The hang watchdog blames the oldest in-flight request, which is only fair if the worker really works on
-	// requests in order. A large session followed by a tiny one must come back large-first; with interleaved
-	// handlers the tiny one overtakes it.
-	const large = path.join(scratchDir, 'order-large.json');
-	const requests = Array.from({ length: 8000 }, (_, i) => ({
-		requestId: `req_${i}`, modelId: 'copilot/gpt-4o',
-		message: { text: `q ${i} ${'lorem ipsum '.repeat(30)}`, parts: [{ text: `q ${i} ${'lorem ipsum '.repeat(30)}`, kind: 'text' }] },
-		response: [{ kind: 'markdownContent', content: { value: `a ${i} ${'dolor sit amet '.repeat(40)}` } }],
-		timestamp: Date.now() - (8000 - i) * 1000,
-	}));
-	fs.writeFileSync(large, JSON.stringify({ requests }));
-	const largeStat = fs.statSync(large);
-	const small = FIXTURES[0];
-	const smallStat = fs.statSync(small);
+test('a request waiting on a slow host lookup does not hold up the requests behind it', async () => {
+	// The first Copilot CLI lookup that needs the OTel export can take a minute on the host. Requests that do not
+	// need it must keep flowing through the same worker meanwhile (a strictly in-order worker froze a whole refresh).
+	const sessionId = '5f6e7d8c-9b0a-4c1d-8e2f-3a4b5c6d7e8f';
+	const dir = path.join(scratchDir, 'session-state', sessionId);
+	fs.mkdirSync(dir, { recursive: true });
+	const slowFile = path.join(dir, 'events.jsonl');
+	fs.writeFileSync(slowFile, JSON.stringify({ type: 'user.message', timestamp: new Date().toISOString(), data: { content: 'hi' } }) + '\n');
+	const slowStat = fs.statSync(slowFile);
+	const plain = FIXTURES[0];
+	const plainStat = fs.statSync(plain);
 
-	const pool = makePool(1);
+	const pool = makePool(1, async () => { await new Promise((resolve) => setTimeout(resolve, 1200)); return null; });
 	try {
-		await pool.analyze(small, 1, 1); // warm the worker
-		const order: string[] = [];
+		await pool.analyze(plain, 1, 1); // warm the worker
+		const startedAt = Date.now();
+		const finished: Record<string, number> = {};
 		await Promise.all([
-			pool.analyze(large, largeStat.mtimeMs, largeStat.size).then(() => order.push('large')),
-			pool.analyze(small, smallStat.mtimeMs, smallStat.size).then(() => order.push('small')),
+			pool.analyze(slowFile, slowStat.mtimeMs, slowStat.size).then(() => { finished.slow = Date.now() - startedAt; }),
+			pool.analyze(plain, plainStat.mtimeMs, plainStat.size).then(() => { finished.plain = Date.now() - startedAt; }),
 		]);
-		assert.deepEqual(order, ['large', 'small']);
+		assert.ok(finished.slow >= 1100, `the slow lookup really was slow (${finished.slow}ms)`);
+		assert.ok(finished.plain < 800, `the plain request must not wait for it (took ${finished.plain}ms)`);
 	} finally {
 		await pool.dispose();
 	}

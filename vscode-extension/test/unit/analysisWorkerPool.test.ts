@@ -8,14 +8,19 @@ import {
 	type WorkerLike,
 	type AnalysisWorkerPoolOptions,
 } from '../../src/analysis/analysisWorkerPool';
-import type { AnalysisRequest, AnalysisWorkerMessage } from '../../src/analysis/analysisProtocol';
+import type { AnalysisHostMessage, AnalysisRequest, AnalysisWorkerMessage, ExactUsageReply } from '../../src/analysis/analysisProtocol';
 import type { SessionFileCache } from '../../../src/types';
 
 /** A worker whose behaviour the test drives by hand: no threads, no timing. */
 class FakeWorker extends EventEmitter implements WorkerLike {
 	readonly received: AnalysisRequest[] = [];
+	/** What the host answered to this worker's exact-usage questions. */
+	readonly replies: ExactUsageReply[] = [];
 	terminated = false;
-	postMessage(message: AnalysisRequest): void { this.received.push(message); }
+	postMessage(message: AnalysisHostMessage): void {
+		if ('type' in message && message.type === 'exactUsageReply') { this.replies.push(message); }
+		else { this.received.push(message as AnalysisRequest); }
+	}
 	terminate(): Promise<number> {
 		this.terminated = true;
 		// Like a real worker, termination is observable as an exit event.
@@ -138,44 +143,6 @@ test('a hung analysis times out, its worker is killed, and innocent neighbours a
 	await pool.dispose();
 });
 
-test('a request queued behind a slow neighbour gets its hang clock when the neighbour finishes', async () => {
-	// B is posted while A is still being parsed. A finishes at ~180ms, which is when B actually starts. B's
-	// original deadline (100 + 200 = 300ms) passes while it is mid-parse; it must not be killed for that.
-	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 200 });
-	const a = pool.analyze('a', 1, 1);
-	await sleep(100);
-	const b = pool.analyze('b', 1, 1);
-	await sleep(80);
-	workers[0].reply({ type: 'result', id: workers[0].received[0].id, ok: true, result: entry(1) });
-	await a;
-	await sleep(150); // t≈330: past B's original deadline, inside the fresh window that started at A's completion
-	assert.equal(workers[0].terminated, false, 'B had only been running for ~150ms; it must not be killed');
-	workers[0].reply({ type: 'result', id: workers[0].received[1].id, ok: true, result: entry(2) });
-	assert.equal((await b).tokens, 2);
-	await pool.dispose();
-});
-
-test('a neighbour that already survived one worker death is not blamed when another request is what hangs the replacement', async () => {
-	// A crash re-sends both A and B (retries = 1 each). A then hangs the replacement worker and times out.
-	// B is innocent: it must be re-sent again rather than dropped as a repeat offender.
-	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 250, maxRestarts: 50 });
-	const a = pool.analyze('a', 1, 1);
-	const aOutcome = a.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'));
-	const b = pool.analyze('b', 1, 1);
-	workers[0].crash();
-	await tick();
-	assert.equal(workers.length, 2, 'both requests were re-sent to a replacement worker');
-	workers[1].announceReady(); // started fine, then A hangs it
-	assert.equal(await aOutcome, 'timeout');
-	await tick();
-	assert.equal(workers.length, 3, 'B is re-sent to a third worker instead of being failed');
-	const reSent = workers[2].received.find((r) => 'path' in r && r.path === 'b');
-	assert.ok(reSent, 'B reached the third worker');
-	workers[2].reply({ type: 'result', id: reSent.id, ok: true, result: entry(9) });
-	assert.equal((await b).tokens, 9);
-	await pool.dispose();
-});
-
 test('a worker that dies before it is ready (broken bundle) sends the request to the in-process path, not to a retry', async () => {
 	const { pool, workers } = makePool({ size: 1 });
 	const promise = pool.analyze('a.json', 1, 1);
@@ -191,22 +158,6 @@ test('when only the pool-wide restart budget runs out, the request that happened
 	workers[0].crash();
 	await assert.rejects(promise, (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'unavailable');
 	assert.equal(pool.isAvailable(), false);
-	await pool.dispose();
-});
-
-test('a younger request finishing first does not restart the hang clock of the oldest', async () => {
-	// Inside a worker requests overlap, so B can finish while A is still running. A's clock must keep
-	// counting from when it started, or a hung A would be kept alive by a stream of fast neighbours.
-	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 300 });
-	const a = pool.analyze('a', 1, 1);
-	const aOutcome = a.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'));
-	const b = pool.analyze('b', 1, 1);
-	await sleep(200);
-	workers[0].reply({ type: 'result', id: workers[0].received[1].id, ok: true, result: entry(2) });
-	await b;
-	await sleep(250); // t≈450: past A's original deadline (300) but before a restarted one (500)
-	assert.equal(workers[0].terminated, true, 'A was never answered; its original deadline must still kill the worker');
-	assert.equal(await aOutcome, 'timeout');
 	await pool.dispose();
 });
 
@@ -284,5 +235,51 @@ test('worker warnings are forwarded to the host log', async () => {
 	workers[0].reply({ type: 'result', id: 1, ok: true, result: entry(1) });
 	await p;
 	assert.ok(warnings.includes('adapter hiccup'));
+	await pool.dispose();
+});
+
+test('the hang clock is paused while the worker waits on the host, and restarts with a full window afterwards', async () => {
+	// The first host lookup that needs the OTel export can take minutes; that is the host working, not a hung
+	// worker, and must not get the worker killed (which in practice made a refresh restart workers forever).
+	let finishLookup: () => void = () => undefined;
+	const lookup = new Promise<null>((resolve) => { finishLookup = () => resolve(null); });
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 200, resolveExactUsage: () => lookup });
+	const request = pool.analyze('a.json', 1, 1);
+	const outcome = request.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'));
+	workers[0].announceReady();
+	workers[0].emit('message', { type: 'exactUsage', rpcId: 7, sessionFile: 'a.json' });
+	await sleep(500); // well past the 200ms clock
+	assert.equal(workers[0].terminated, false, 'waiting on the host is not a hang');
+	finishLookup();
+	await tick();
+	assert.equal(workers[0].replies.length, 1, 'the worker gets its answer');
+	assert.equal(workers[0].replies[0].rpcId, 7);
+	await sleep(120); // inside the fresh 200ms window that started when the lookup returned
+	assert.equal(workers[0].terminated, false);
+	await sleep(250); // now genuinely silent for longer than a full window
+	assert.equal(workers[0].terminated, true, 'the clock is running again once the host has answered');
+	assert.equal(await outcome, 'timeout');
+	await pool.dispose();
+});
+
+test('a host lookup that never returns is cut off and reported as an error, so the request cannot wait forever', async () => {
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 5_000, hostLookupTimeoutMs: 100, resolveExactUsage: () => new Promise(() => undefined) });
+	const request = pool.analyze('a.json', 1, 1);
+	void request.catch(() => undefined);
+	workers[0].announceReady();
+	workers[0].emit('message', { type: 'exactUsage', rpcId: 1, sessionFile: 'a.json' });
+	await sleep(250);
+	assert.equal(workers[0].replies.length, 1);
+	assert.match(workers[0].replies[0].error ?? '', /did not finish/);
+	await pool.dispose();
+});
+
+test('a failing host lookup is relayed to the worker as an error', async () => {
+	const { pool, workers } = makePool({ size: 1, resolveExactUsage: async () => { throw new Error('index unavailable'); } });
+	void pool.analyze('a.json', 1, 1).catch(() => undefined);
+	workers[0].announceReady();
+	workers[0].emit('message', { type: 'exactUsage', rpcId: 3, sessionFile: 'a.json' });
+	await tick(); await tick();
+	assert.equal(workers[0].replies[0]?.error, 'index unavailable');
 	await pool.dispose();
 });

@@ -98,18 +98,14 @@ function respond(response: AnalysisResponse): void {
 }
 
 /**
- * Requests are handled strictly one after another, in arrival order. The pool's hang watchdog attributes a
- * stall to the *oldest* request in a worker, which is only right if that is the one actually running; handlers
- * that interleaved at their awaits could let a younger request hang while an older, innocent one is blamed.
- * The pool keeps two requests queued here so the next one is already waiting when the current one finishes.
+ * Requests run concurrently. They are mostly waiting — on disk, and on the host's answer to an exact-usage
+ * lookup that can take a minute the first time — and one request waiting must not hold up the ones behind it.
+ * (Handling them strictly in order was tried; a single slow host lookup then froze every request queued on
+ * the worker, and a whole refresh sat at a few percent.) CPU work still serializes on this thread by itself.
  */
-let inOrder: Promise<void> = Promise.resolve();
 port.on('message', (message: AnalysisHostMessage) => {
-	// Replies to our own questions are handled immediately, outside the request order: the request being
-	// worked on is waiting for exactly this.
 	if ('type' in message && message.type === 'exactUsageReply') { onExactUsageReply(message); return; }
-	const request = message as AnalysisRequest;
-	inOrder = inOrder.then(() => handle(request)).then(respond);
+	void handle(message as AnalysisRequest).then(respond);
 });
 
 post({ type: 'ready' });

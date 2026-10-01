@@ -63,6 +63,8 @@ export interface AnalysisWorkerPoolOptions {
 	 * session-store copy, so N workers do not each scan a multi-GB export. Without it a worker looks it up itself.
 	 */
 	resolveExactUsage?: (sessionFile: string) => Promise<CopilotCliOtelSessionUsage | null>;
+	/** Upper bound on one host lookup; see HOST_LOOKUP_TIMEOUT_MS. */
+	hostLookupTimeoutMs?: number;
 	/** Test seam. Defaults to a real `worker_threads.Worker`. */
 	createWorker?: (workerPath: string, data: AnalysisWorkerData) => WorkerLike;
 }
@@ -85,6 +87,8 @@ interface Slot {
 	pending: Map<number, Pending>;
 	/** Set when the worker posts `ready`, i.e. its bundle loaded and initialised. */
 	ready: boolean;
+	/** Host lookups the worker is currently waiting on. While any are outstanding the hang clocks are paused. */
+	hostLookupsInFlight: number;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 3 * 60 * 1000;
@@ -93,11 +97,12 @@ const DEFAULT_RESTART_WINDOW_MS = 60 * 1000;
 /** A request is re-sent at most once after its worker dies; a second death means it is likely the cause. */
 const MAX_RETRIES_AFTER_WORKER_DEATH = 1;
 /**
- * Requests handed to one worker at a time. The worker runs them strictly in order, so the second is
- * simply queued there: it is ready the moment the first finishes (no round trip to the host), while
- * the backlog beyond that stays in the pool, where it cannot be mistaken for a hang.
+ * Requests handed to one worker at a time. A second request lets one file's disk read or host lookup overlap
+ * another's parse, while the backlog beyond that stays in the pool, where it cannot be mistaken for a hang.
  */
 const MAX_IN_FLIGHT_PER_WORKER = 2;
+/** A host-side exact-usage lookup (which may have to load a multi-GB OTel index) is given this long. */
+const HOST_LOOKUP_TIMEOUT_MS = 10 * 60 * 1000;
 /** Generous: a multi-hundred-MB session file parses to a large object graph, but a runaway must not take the host with it. */
 const WORKER_MAX_OLD_GENERATION_MB = 4096;
 
@@ -204,11 +209,17 @@ export class AnalysisWorkerPool {
 		return best;
 	}
 
-	private post(slot: Slot, pending: Pending): void {
-		const timeoutMs = this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-		pending.timer = setTimeout(() => this.onTimeout(slot, pending), timeoutMs);
+	/** Starts (or restarts) a request's hang clock, unless the worker is waiting on the host, which is not a hang. */
+	private armClock(slot: Slot, pending: Pending): void {
+		if (pending.timer) { clearTimeout(pending.timer); pending.timer = undefined; }
+		if (slot.hostLookupsInFlight > 0) { return; }
+		pending.timer = setTimeout(() => this.onTimeout(slot, pending), this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
 		pending.timer.unref?.();
+	}
+
+	private post(slot: Slot, pending: Pending): void {
 		slot.pending.set(pending.request.id, pending);
+		this.armClock(slot, pending);
 		try {
 			slot.worker.postMessage(pending.request);
 		} catch (error) {
@@ -233,7 +244,7 @@ export class AnalysisWorkerPool {
 			}) as unknown as WorkerLike;
 		// A worker alone must never keep the host process alive.
 		worker.unref?.();
-		const slot: Slot = { worker, pending: new Map(), ready: false };
+		const slot: Slot = { worker, pending: new Map(), ready: false, hostLookupsInFlight: 0 };
 		this.slots.push(slot);
 		worker.on('message', (message) => this.onMessage(slot, message));
 		worker.on('error', (error) => this.onWorkerGone(slot, `worker error: ${error.message}`));
@@ -249,53 +260,47 @@ export class AnalysisWorkerPool {
 		if (message.type !== 'result') { return; }
 		const pending = slot.pending.get(message.id);
 		if (!pending) { return; }
-		// Whether this was the request at the front of the worker's line decides below whether the next
-		// one has just started running (see restartOldestClock).
-		const wasOldest = slot.pending.values().next().value === pending;
 		slot.pending.delete(message.id);
 		if (pending.timer) { clearTimeout(pending.timer); }
 		pending.timer = undefined;
 		if (message.ok) { pending.resolve(message.result); }
 		else { pending.reject(new AnalysisWorkerError(message.error, 'failed', message.code)); }
-		// Requests run concurrently inside a worker (one's disk read overlaps another's parse), so a younger
-		// one can finish first. That says nothing about the oldest, which must keep its running clock.
-		if (wasOldest) { this.restartOldestClock(slot); }
 		this.pump();
 	}
 
 	/**
-	 * A worker parses serially, so the request now at the front of its line only starts being worked on
-	 * when the one ahead of it finishes. Its hang clock starts then, not when it was posted.
+	 * Answers a worker's exact-usage question from the host. The first lookup that needs the Copilot CLI OTel export
+	 * loads a multi-GB index (about a minute on a fast disk, far longer on a busy one). That is the host's work, not
+	 * a hung worker, so every hang clock on this worker is paused while a lookup is outstanding and restarted
+	 * (full window) when the last one returns. The lookup itself is bounded by HOST_LOOKUP_TIMEOUT_MS so a lookup
+	 * that never returns fails the request instead of leaving it waiting forever.
 	 */
-	private restartOldestClock(slot: Slot): void {
-		const oldest = slot.pending.values().next().value;
-		if (!oldest) { return; }
-		if (oldest.timer) { clearTimeout(oldest.timer); }
-		oldest.timer = setTimeout(() => this.onTimeout(slot, oldest), this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
-		oldest.timer.unref?.();
-	}
-
 	private answerExactUsage(slot: Slot, rpcId: number, sessionFile: string): void {
-		const reply = (usage: CopilotCliOtelSessionUsage | null, error?: string): void => {
+		slot.hostLookupsInFlight++;
+		for (const pending of slot.pending.values()) {
+			if (pending.timer) { clearTimeout(pending.timer); pending.timer = undefined; }
+		}
+		let settled = false;
+		const finish = (usage: CopilotCliOtelSessionUsage | null, error?: string): void => {
+			if (settled) { return; }
+			settled = true;
+			clearTimeout(bound);
+			slot.hostLookupsInFlight--;
+			if (slot.hostLookupsInFlight === 0) {
+				for (const pending of slot.pending.values()) { this.armClock(slot, pending); }
+			}
 			// The worker may have died while the host was looking this up; there is no one to tell then.
 			try { slot.worker.postMessage({ type: 'exactUsageReply', rpcId, usage, ...(error !== undefined ? { error } : {}) }); } catch { /* worker gone */ }
 		};
+		const bound = setTimeout(() => finish(null, `Host lookup for ${sessionFile} did not finish within ${HOST_LOOKUP_TIMEOUT_MS / 1000}s`), this.options.hostLookupTimeoutMs ?? HOST_LOOKUP_TIMEOUT_MS);
+		bound.unref?.();
 		const resolve = this.options.resolveExactUsage;
-		if (!resolve) { reply(null); return; }
-		resolve(sessionFile).then((usage) => reply(usage), (error: unknown) => reply(null, error instanceof Error ? error.message : String(error)));
+		if (!resolve) { finish(null); return; }
+		resolve(sessionFile).then((usage) => finish(usage), (error: unknown) => finish(null, error instanceof Error ? error.message : String(error)));
 	}
 
 	private onTimeout(slot: Slot, pending: Pending): void {
 		if (!slot.pending.has(pending.request.id)) { return; }
-		// Defensive guard. The worker runs requests strictly in arrival order, so only the oldest in flight can be
-		// the one that is stuck, and a younger request's clock is normally re-armed (restartOldestClock) before it
-		// can fire. If one fires anyway, it is waiting behind the oldest rather than hung: give it a fresh window,
-		// and if the oldest really is stuck, its own timer will kill the worker.
-		if (slot.pending.values().next().value !== pending) {
-			pending.timer = setTimeout(() => this.onTimeout(slot, pending), this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS);
-			pending.timer.unref?.();
-			return;
-		}
 		pending.timedOut = true;
 		const target = 'path' in pending.request ? pending.request.path : 'workspace' in pending.request ? pending.request.workspace : 'a session';
 		this.options.warn(`Analysis of ${target} exceeded ${(this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS) / 1000}s; restarting its worker`);

@@ -88,3 +88,64 @@ test('SessionDiscovery still reports adapter errors without blocking other batch
 	assert.ok(warnings.some(w => w.includes('broken')));
 	assert.equal(discovery.lastDiscoveryHadError, true);
 });
+
+test('concurrent callers share one discovery pass instead of each scanning every adapter', async () => {
+	// Each view that opens used to start its own full pass (25-95 s on a large history), all on one thread.
+	let passes = 0;
+	const adapter = makeFakeAdapter('slow', ['/fake/a.json', '/fake/b.json'], 60);
+	const discoverOnce = (adapter as any).discover.bind(adapter) as (log: (m: string) => void) => Promise<unknown>;
+	(adapter as any).discover = async (log: (m: string) => void) => { passes++; return discoverOnce(log); };
+
+	const discovery = new SessionDiscovery({ log: () => {}, warn: () => {}, error: () => {}, ecosystems: [adapter] });
+	const lateBatches: string[][] = [];
+	const first = discovery.getCopilotSessionFilesStreaming();
+	await new Promise(resolve => setTimeout(resolve, 20)); // mid-pass
+	const second = discovery.getCopilotSessionFiles();
+	const third = discovery.getCopilotSessionFilesStreaming((batch) => lateBatches.push(batch));
+	const [a, b, c] = await Promise.all([first, second, third]);
+
+	assert.equal(passes, 1, 'one pass for all three callers');
+	assert.deepEqual(b, a);
+	assert.deepEqual(c, a);
+	assert.deepEqual(lateBatches.flat().sort(), ['/fake/a.json', '/fake/b.json'], 'a joining streaming caller still receives every batch');
+});
+
+test('a caller that joins after some batches were already emitted gets them replayed', async () => {
+	const fast = makeFakeAdapter('fast', ['/fake/fast.json'], 5);
+	const slow = makeFakeAdapter('slow', ['/fake/slow.json'], 120);
+	const discovery = new SessionDiscovery({ log: () => {}, warn: () => {}, error: () => {}, ecosystems: [fast, slow] });
+	const first = discovery.getCopilotSessionFiles();
+	await new Promise(resolve => setTimeout(resolve, 50)); // fast adapter done, slow one still running
+	const seen: string[] = [];
+	const joined = discovery.getCopilotSessionFilesStreaming((batch) => seen.push(...batch));
+	assert.ok(seen.includes('/fake/fast.json'), 'batches emitted before joining are replayed immediately');
+	await Promise.all([first, joined]);
+	assert.deepEqual(seen.sort(), ['/fake/fast.json', '/fake/slow.json']);
+});
+
+test('clearCache() makes the next caller start a fresh pass, and a stale pass does not repopulate the cache', async () => {
+	let passes = 0;
+	const adapter = makeFakeAdapter('a', ['/fake/a.json'], 40);
+	const discoverOnce = (adapter as any).discover.bind(adapter) as (log: (m: string) => void) => Promise<unknown>;
+	(adapter as any).discover = async (log: (m: string) => void) => { passes++; return discoverOnce(log); };
+	const discovery = new SessionDiscovery({ log: () => {}, warn: () => {}, error: () => {}, ecosystems: [adapter] });
+
+	const stale = discovery.getCopilotSessionFiles();
+	await new Promise(resolve => setTimeout(resolve, 10));
+	discovery.clearCache();
+	const fresh = discovery.getCopilotSessionFiles();
+	await Promise.all([stale, fresh]);
+	assert.equal(passes, 2, 'the post-clear caller did not join the pre-clear pass');
+
+	// The stale pass finished before the fresh one populated the cache; a third call is served from the fresh cache.
+	await discovery.getCopilotSessionFiles();
+	assert.equal(passes, 2);
+});
+
+test('a subscriber that throws does not abort discovery', async () => {
+	const warnings: string[] = [];
+	const discovery = new SessionDiscovery({ log: () => {}, warn: (m) => warnings.push(m), error: () => {}, ecosystems: [makeFakeAdapter('a', ['/fake/a.json'], 5)] });
+	const files = await discovery.getCopilotSessionFilesStreaming(() => { throw new Error('consumer bug'); });
+	assert.deepEqual(files, ['/fake/a.json']);
+	assert.ok(warnings.some(w => /consumer bug/.test(w)));
+});
