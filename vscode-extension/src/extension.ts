@@ -222,8 +222,7 @@ import { startEventLoopMonitor, type EventLoopMonitor } from './utils/eventLoopM
 import {
 	analyzeSessionFile as _analyzeSessionFile,
 	supplementCacheWithDebugLog as _supplementCacheWithDebugLog,
-	countInteractionsInSession as _countInteractionsInSession,
-	estimateTokensFromSession as _estimateTokensFromSession,
+	quickAnalyzeSessionContent as _quickAnalyzeSessionContent,
 	toUsageAnalysisDeps,
 	type SessionAnalyzerDeps,
 } from './analysis/sessionFileAnalyzer';
@@ -8176,12 +8175,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return supplemented;
 	}
 
-	private countInteractionsInSession(sessionFile: string, preloadedContent?: string, preloadedParsedJson?: any): Promise<number> {
-		return _countInteractionsInSession(this.analyzerDeps, sessionFile, preloadedContent, preloadedParsedJson);
-	}
-
-	private estimateTokensFromSession(sessionFilePath: string, preloadedContent?: string, preloadedParsedJson?: any) {
-		return _estimateTokensFromSession(this.analyzerDeps, sessionFilePath, preloadedContent, preloadedParsedJson);
+	/** Interaction count + token estimate for content the caller already read; parsed off the host thread. */
+	private quickAnalyzeSessionContent(sessionFile: string, content: string) {
+		return this.runOffHostThread(
+			(pool) => pool.quickAnalyze(sessionFile, content),
+			() => _quickAnalyzeSessionContent(this.analyzerDeps, sessionFile, content),
+		);
 	}
 
 	private async getUsageAnalysisFromSessionCached(sessionFile: string, mtime: number, fileSize: number): Promise<SessionUsageAnalysis> {
@@ -14464,8 +14463,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
   /**
    * Analyze a custom folder for session files belonging to any of the supported AI tools.
    * Scans recursively up to depth 5, max 500 files.
-   * Does NOT touch the cache — reads each file once and calls countInteractionsInSession
-   * and estimateTokensFromSession directly with preloaded content.
+   * Does NOT touch the cache — reads each file once and counts its interactions and estimates its tokens
+   * from that content (off the host thread: these are arbitrary user-selected files, any of which can be large).
    */
   private async analyzeFolderPath(panel: vscode.WebviewPanel, folderPath: string, toolType: string): Promise<void> {
     const { allowJson, allowJsonl } = this.resolveFolderScanOptions(toolType);
@@ -14522,8 +14521,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions: 0, tokens: 0, actualTokens: 0 });
         return;
       }
-      const interactions = await this.countInteractionsInSession(full, content);
-      const tokenResult = await this.estimateTokensFromSession(full, content);
+      const { interactions, tokenResult } = await this.quickAnalyzeSessionContent(full, content);
       ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions, tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens });
     } finally {
       await handle.close();

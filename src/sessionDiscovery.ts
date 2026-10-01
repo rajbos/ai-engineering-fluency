@@ -165,7 +165,7 @@ export class SessionDiscovery {
 		return this.getCopilotSessionFilesStreaming();
 	}
 
-	private async tryGetSampleDataFiles(now: number): Promise<string[] | undefined> {
+	private async tryGetSampleDataFiles(now: number, generation: number): Promise<string[] | undefined> {
 		const sampleDir = this.deps.sampleDataDirectoryOverride?.()
 			?? vscode.workspace.getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory');
 		if (!sampleDir || sampleDir.trim().length === 0) { return undefined; }
@@ -179,8 +179,11 @@ export class SessionDiscovery {
 				.filter(f => f.endsWith('.json') || f.endsWith('.jsonl'))
 				.map(f => path.join(resolvedSampleDir, f));
 			this.deps.log(`📸 Sample data mode: using ${sampleFiles.length} file(s) from ${resolvedSampleDir}`);
-			this._sessionFilesCache = sampleFiles;
-			this._sessionFilesCacheTime = now;
+			// Like the adapter pass: a clearCache() that landed while this read was pending must not be undone by it.
+			if (generation === this._cacheGeneration) {
+				this._sessionFilesCache = sampleFiles;
+				this._sessionFilesCacheTime = now;
+			}
 			this._lastDiscoveryFilesCount = sampleFiles.length;
 			return sampleFiles;
 		} catch (err) {
@@ -307,7 +310,7 @@ export class SessionDiscovery {
 	private async runDiscovery(now: number, emit: (files: string[]) => void, generation: number): Promise<string[]> {
 		this._lastDiscoveryHadError = false;
 		this._lastDiscoveryFilesCount = 0;
-		const sampleFiles = await this.tryGetSampleDataFiles(now);
+		const sampleFiles = await this.tryGetSampleDataFiles(now, generation);
 		if (sampleFiles) { emit(sampleFiles); return sampleFiles; }
 		const allDeduped: string[] = [];
 		try {

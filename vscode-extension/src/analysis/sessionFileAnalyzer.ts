@@ -801,6 +801,24 @@ function buildSessionDataObject(
 	};
 }
 
+// ── Quick analysis (folder scan) ────────────────────────────────────────────
+
+export type QuickSessionAnalysis = {
+	interactions: number;
+	tokenResult: Awaited<ReturnType<typeof estimateTokensFromSession>>;
+};
+
+/**
+ * Interaction count and token estimate for one file whose content the caller already has, without touching the
+ * cache or running usage analysis. Used by the Diagnostics "analyze a folder" scan, which parses arbitrary
+ * user-selected files — any one of which can be large.
+ */
+export async function quickAnalyzeSessionContent(deps: SessionAnalyzerDeps, sessionFilePath: string, content: string): Promise<QuickSessionAnalysis> {
+	const interactions = await countInteractionsInSession(deps, sessionFilePath, content);
+	const tokenResult = await estimateTokensFromSession(deps, sessionFilePath, content);
+	return { interactions, tokenResult };
+}
+
 // ── Entry point ─────────────────────────────────────────────────────────────
 
 /**

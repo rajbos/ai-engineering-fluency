@@ -149,3 +149,29 @@ test('a subscriber that throws does not abort discovery', async () => {
 	assert.deepEqual(files, ['/fake/a.json']);
 	assert.ok(warnings.some(w => /consumer bug/.test(w)));
 });
+
+test('sample-data mode honours clearCache(): a read that was pending across it does not restore the old directory', async () => {
+	const fs = await import('node:fs');
+	const os = await import('node:os');
+	const path = await import('node:path');
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sample-discovery-'));
+	const dirA = path.join(root, 'a'); const dirB = path.join(root, 'b');
+	fs.mkdirSync(dirA); fs.mkdirSync(dirB);
+	fs.writeFileSync(path.join(dirA, 'old.json'), '{}');
+	fs.writeFileSync(path.join(dirB, 'new.json'), '{}');
+	let current = dirA;
+	try {
+		const discovery = new SessionDiscovery({
+			log: () => {}, warn: () => {}, error: () => {}, ecosystems: [],
+			sampleDataDirectoryOverride: () => current,
+		});
+		const stale = discovery.getCopilotSessionFiles(); // reading dirA...
+		discovery.clearCache();                           // ...cleared while it is pending
+		current = dirB;
+		await stale;
+		const next = await discovery.getCopilotSessionFiles();
+		assert.deepEqual(next.map((f) => path.basename(f)), ['new.json'], 'the cleared cache must not be repopulated by the stale read');
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});

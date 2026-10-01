@@ -11,7 +11,7 @@ import type { ModelPricing, SessionFileDetails, TokenEstimator } from '../../../
 import { buildAdapterRegistry, createDataAccessInstances } from '../../../src/adapters';
 import { estimateTokensFromText } from '../../../src/tokenEstimation';
 import { isMcpTool, extractMcpServerName } from '../../../src/workspaceHelpers';
-import { analyzeSessionFile, type SessionAnalyzerDeps } from '../../src/analysis/sessionFileAnalyzer';
+import { analyzeSessionFile, quickAnalyzeSessionContent, type SessionAnalyzerDeps } from '../../src/analysis/sessionFileAnalyzer';
 import { AnalysisWorkerPool } from '../../src/analysis/analysisWorkerPool';
 import { computeSessionFileDetails } from '../../src/analysis/sessionDetailsAnalyzer';
 import { scanCustomizationFilesForWorkspace } from '../../src/analysis/workspaceCustomizationScan';
@@ -164,6 +164,23 @@ test('a Copilot CLI exact-usage lookup is answered by the host, so workers never
 		assert.ok(outcome === 'resolved' || /index unavailable/.test(outcome), `unexpected outcome: ${outcome}`);
 	} finally {
 		await failing.dispose();
+	}
+});
+
+test('folder-scan analysis: the worker returns exactly what the in-process analysis returns', async () => {
+	const pool = makePool(1);
+	const deps = buildInProcessDeps();
+	try {
+		for (const file of FIXTURES.filter((f) => fs.existsSync(f))) {
+			const content = fs.readFileSync(file, 'utf8');
+			const [viaWorker, inProcess] = await Promise.all([
+				pool.quickAnalyze(file, content),
+				quickAnalyzeSessionContent(deps, file, content),
+			]);
+			assert.deepEqual(normalize(viaWorker), normalize(inProcess), path.basename(file));
+		}
+	} finally {
+		await pool.dispose();
 	}
 });
 

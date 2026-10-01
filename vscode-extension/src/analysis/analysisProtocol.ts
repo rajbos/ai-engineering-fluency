@@ -9,6 +9,7 @@
 import type { CopilotCliOtelSessionUsage } from '../../../src/copilotCliOtel';
 import type { CustomizationFileEntry, SessionFileCache, SessionFileDetails } from '../../../src/types';
 import type { SessionDetailsResult } from './sessionDetailsAnalyzer';
+import type { QuickSessionAnalysis } from './sessionFileAnalyzer';
 
 export type AnalysisRequest =
 	| { id: number; op: 'analyze'; path: string; mtime: number; size: number; existingRepository?: string }
@@ -16,10 +17,12 @@ export type AnalysisRequest =
 	/** `details` is the host-prepared skeleton (path-derived fields filled); the worker fills in the rest. */
 	| { id: number; op: 'details'; path: string; mtimeMs: number; size: number; details: SessionFileDetails }
 	/** Recursive customization-file discovery for one workspace; a slow synchronous directory walk. */
-	| { id: number; op: 'customization'; workspace: string };
+	| { id: number; op: 'customization'; workspace: string }
+	/** Interaction count + token estimate for content the host already read (the Diagnostics folder scan). */
+	| { id: number; op: 'quick'; path: string; content: string };
 
 export type AnalysisResponse =
-	| { type: 'result'; id: number; ok: true; result: SessionFileCache | SessionDetailsResult | CustomizationFileEntry[] | null }
+	| { type: 'result'; id: number; ok: true; result: SessionFileCache | SessionDetailsResult | CustomizationFileEntry[] | QuickSessionAnalysis | null }
 	| { type: 'result'; id: number; ok: false; error: string; /** Node error code (e.g. ENOENT) so callers can keep branching on it. */ code?: string };
 
 /**

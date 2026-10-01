@@ -17,6 +17,8 @@ class FakeWorker extends EventEmitter implements WorkerLike {
 	/** What the host answered to this worker's exact-usage questions. */
 	readonly replies: ExactUsageReply[] = [];
 	terminated = false;
+	/** How long after terminate() the exit event is delivered; real termination is asynchronous. */
+	exitDelayMs = 0;
 	postMessage(message: AnalysisHostMessage): void {
 		if ('type' in message && message.type === 'exactUsageReply') { this.replies.push(message); }
 		else { this.received.push(message as AnalysisRequest); }
@@ -24,7 +26,8 @@ class FakeWorker extends EventEmitter implements WorkerLike {
 	terminate(): Promise<number> {
 		this.terminated = true;
 		// Like a real worker, termination is observable as an exit event.
-		queueMicrotask(() => this.emit('exit', 1));
+		if (this.exitDelayMs > 0) { setTimeout(() => this.emit('exit', 1), this.exitDelayMs); }
+		else { queueMicrotask(() => this.emit('exit', 1)); }
 		return Promise.resolve(1);
 	}
 	private readySent = false;
@@ -44,7 +47,7 @@ class FakeWorker extends EventEmitter implements WorkerLike {
 const entry = (tokens: number): SessionFileCache => ({ tokens, interactions: 1, modelUsage: {}, mtime: 1, size: 1 });
 const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
-function makePool(overrides: Partial<AnalysisWorkerPoolOptions> = {}) {
+function makePool(overrides: Partial<AnalysisWorkerPoolOptions> = {}, fake: { exitDelayMs?: number } = {}) {
 	const workers: FakeWorker[] = [];
 	const warnings: string[] = [];
 	const pool = new AnalysisWorkerPool({
@@ -53,7 +56,7 @@ function makePool(overrides: Partial<AnalysisWorkerPoolOptions> = {}) {
 		size: 2,
 		log: () => undefined,
 		warn: (m) => warnings.push(m),
-		createWorker: () => { const w = new FakeWorker(); workers.push(w); return w; },
+		createWorker: () => { const w = new FakeWorker(); w.exitDelayMs = fake.exitDelayMs ?? 0; workers.push(w); return w; },
 		...overrides,
 	});
 	return { pool, workers, warnings };
@@ -281,5 +284,23 @@ test('a failing host lookup is relayed to the worker as an error', async () => {
 	workers[0].emit('message', { type: 'exactUsage', rpcId: 3, sessionFile: 'a.json' });
 	await tick(); await tick();
 	assert.equal(workers[0].replies[0]?.error, 'index unavailable');
+	await pool.dispose();
+});
+
+test('when one request times out, its neighbours are re-sent, not timed out by their own near-identical clocks', async () => {
+	// Two requests are posted in the same pump, so their clocks expire together. Termination is asynchronous: the
+	// worker's exit arrives after both callbacks. Only the first is the culprit; the second must be retried.
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 60 }, { exitDelayMs: 40 });
+	const a = pool.analyze('a.json', 1, 1);
+	const b = pool.analyze('b.json', 1, 1);
+	const aOutcome = a.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'));
+	workers[0].announceReady();
+	assert.equal(await aOutcome, 'timeout');
+	await sleep(20);
+	assert.equal(workers.length, 2, 'the innocent neighbour was re-sent to a replacement worker');
+	const reSent = workers[1].received.find((r) => 'path' in r && r.path === 'b.json');
+	assert.ok(reSent, 'b.json reached the replacement worker');
+	workers[1].reply({ type: 'result', id: reSent.id, ok: true, result: entry(4) });
+	assert.equal((await b).tokens, 4);
 	await pool.dispose();
 });

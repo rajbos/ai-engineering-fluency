@@ -23,6 +23,7 @@ import { Worker } from 'worker_threads';
 
 import type { CustomizationFileEntry, SessionFileCache, SessionFileDetails } from '../../../src/types';
 import type { SessionDetailsResult } from './sessionDetailsAnalyzer';
+import type { QuickSessionAnalysis } from './sessionFileAnalyzer';
 import type { CopilotCliOtelSessionUsage } from '../../../src/copilotCliOtel';
 import type { AnalysisHostMessage, AnalysisRequest, AnalysisWorkerData, AnalysisWorkerMessage } from './analysisProtocol';
 
@@ -69,7 +70,7 @@ export interface AnalysisWorkerPoolOptions {
 	createWorker?: (workerPath: string, data: AnalysisWorkerData) => WorkerLike;
 }
 
-type AnalysisResult = SessionFileCache | SessionDetailsResult | CustomizationFileEntry[] | null;
+type AnalysisResult = SessionFileCache | SessionDetailsResult | CustomizationFileEntry[] | QuickSessionAnalysis | null;
 
 interface Pending {
 	request: AnalysisRequest;
@@ -140,6 +141,15 @@ export class AnalysisWorkerPool {
 			.then((result) => {
 				if (!result) { throw new AnalysisWorkerError(`Worker returned no details for ${path}`, 'failed'); }
 				return result as SessionDetailsResult;
+			});
+	}
+
+	/** Interaction count and token estimate for already-read content (see quickAnalyzeSessionContent). */
+	quickAnalyze(path: string, content: string): Promise<QuickSessionAnalysis> {
+		return this.submit((id) => ({ id, op: 'quick', path, content }))
+			.then((result) => {
+				if (!result) { throw new AnalysisWorkerError(`Worker returned no analysis for ${path}`, 'failed'); }
+				return result as QuickSessionAnalysis;
 			});
 	}
 
@@ -302,6 +312,12 @@ export class AnalysisWorkerPool {
 	private onTimeout(slot: Slot, pending: Pending): void {
 		if (!slot.pending.has(pending.request.id)) { return; }
 		pending.timedOut = true;
+		// Termination is asynchronous. Neighbours submitted alongside this request carry a near-identical clock that
+		// could fire before the worker's exit is observed, make them culprits too, and get them rejected instead of
+		// re-sent. This request is the culprit; stop every other clock on the worker now.
+		for (const other of slot.pending.values()) {
+			if (other !== pending && other.timer) { clearTimeout(other.timer); other.timer = undefined; }
+		}
 		const target = 'path' in pending.request ? pending.request.path : 'workspace' in pending.request ? pending.request.workspace : 'a session';
 		this.options.warn(`Analysis of ${target} exceeded ${(this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS) / 1000}s; restarting its worker`);
 		// Killing the worker is the only way to stop a hung synchronous parse. The exit handler

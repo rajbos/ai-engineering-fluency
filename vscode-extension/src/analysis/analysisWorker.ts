@@ -17,7 +17,7 @@ import { buildAdapterRegistry, createDataAccessInstances } from '../../../src/ad
 import { estimateTokensFromText } from '../../../src/tokenEstimation';
 import { setCopilotCliExactUsageResolver, type CopilotCliOtelSessionUsage } from '../../../src/copilotCliOtel';
 import { isMcpTool, extractMcpServerName } from '../../../src/workspaceHelpers';
-import { analyzeSessionFile, supplementCacheWithDebugLog, type SessionAnalyzerDeps } from './sessionFileAnalyzer';
+import { analyzeSessionFile, quickAnalyzeSessionContent, supplementCacheWithDebugLog, type SessionAnalyzerDeps } from './sessionFileAnalyzer';
 import { computeSessionFileDetails } from './sessionDetailsAnalyzer';
 import { scanCustomizationFilesForWorkspace } from './workspaceCustomizationScan';
 import type { AnalysisHostMessage, AnalysisRequest, AnalysisResponse, AnalysisWorkerData, AnalysisWorkerMessage, ExactUsageReply } from './analysisProtocol';
@@ -73,6 +73,9 @@ async function handle(request: AnalysisRequest): Promise<AnalysisResponse> {
 		if (request.op === 'analyze') {
 			const existing = request.existingRepository !== undefined ? { repository: request.existingRepository } : undefined;
 			return { type: 'result', id: request.id, ok: true, result: await analyzeSessionFile(deps, request.path, request.mtime, request.size, existing) };
+		}
+		if (request.op === 'quick') {
+			return { type: 'result', id: request.id, ok: true, result: await quickAnalyzeSessionContent(deps, request.path, request.content) };
 		}
 		if (request.op === 'customization') {
 			return { type: 'result', id: request.id, ok: true, result: scanCustomizationFilesForWorkspace(request.workspace) };
