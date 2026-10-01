@@ -4,6 +4,12 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- The Chart view's Summary → "By Editor" cards now show each tool's official logo (VS Code, Claude, Copilot, JetBrains, Cursor, Gemini, Kiro and more), falling back to the emoji for tools without one
+
+### Bug Fixes
+- The desktop app now remembers whether the Chart view's "By Editor" section was collapsed (and other per-panel UI choices) instead of reopening it expanded every time
+
 ## [0.18.3] - 2026-09-29
 
 ### Features

@@ -113,6 +113,38 @@ body {
 	text-align: center;
 }
 
+.editor-logo-wrap {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 24px;
+	margin-bottom: 6px;
+}
+
+.editor-logo {
+	height: 24px;
+	width: 24px;
+	object-fit: contain;
+}
+
+.editor-logo-emoji {
+	font-size: 20px;
+	line-height: 24px;
+}
+
+/* Flat single-colour marks ship a light and a dark variant; show the one matching the theme. */
+.editor-logo-dark {
+	display: none;
+}
+
+body:not(.vscode-light) .editor-logo-dark {
+	display: inline;
+}
+
+body:not(.vscode-light) .editor-logo-light {
+	display: none;
+}
+
 .card-label {
 	color: var(--text-secondary);
 	font-size: 11px;
