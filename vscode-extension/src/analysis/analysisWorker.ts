@@ -79,8 +79,15 @@ function respond(response: AnalysisResponse): void {
 	}
 }
 
+/**
+ * Requests are handled strictly one after another, in arrival order. The pool's hang watchdog attributes a
+ * stall to the *oldest* request in a worker, which is only right if that is the one actually running; handlers
+ * that interleaved at their awaits could let a younger request hang while an older, innocent one is blamed.
+ * The pool keeps two requests queued here so the next one is already waiting when the current one finishes.
+ */
+let inOrder: Promise<void> = Promise.resolve();
 port.on('message', (request: AnalysisRequest) => {
-	void handle(request).then(respond);
+	inOrder = inOrder.then(() => handle(request)).then(respond);
 });
 
 post({ type: 'ready' });

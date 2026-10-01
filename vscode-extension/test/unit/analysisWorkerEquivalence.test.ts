@@ -184,6 +184,36 @@ test('workspace customization scan: the worker finds exactly what the in-process
 	}
 });
 
+test('a worker answers requests in the order it received them, even when a later one is cheaper', async () => {
+	// The hang watchdog blames the oldest in-flight request, which is only fair if the worker really works on
+	// requests in order. A large session followed by a tiny one must come back large-first; with interleaved
+	// handlers the tiny one overtakes it.
+	const large = path.join(scratchDir, 'order-large.json');
+	const requests = Array.from({ length: 8000 }, (_, i) => ({
+		requestId: `req_${i}`, modelId: 'copilot/gpt-4o',
+		message: { text: `q ${i} ${'lorem ipsum '.repeat(30)}`, parts: [{ text: `q ${i} ${'lorem ipsum '.repeat(30)}`, kind: 'text' }] },
+		response: [{ kind: 'markdownContent', content: { value: `a ${i} ${'dolor sit amet '.repeat(40)}` } }],
+		timestamp: Date.now() - (8000 - i) * 1000,
+	}));
+	fs.writeFileSync(large, JSON.stringify({ requests }));
+	const largeStat = fs.statSync(large);
+	const small = FIXTURES[0];
+	const smallStat = fs.statSync(small);
+
+	const pool = makePool(1);
+	try {
+		await pool.analyze(small, 1, 1); // warm the worker
+		const order: string[] = [];
+		await Promise.all([
+			pool.analyze(large, largeStat.mtimeMs, largeStat.size).then(() => order.push('large')),
+			pool.analyze(small, smallStat.mtimeMs, smallStat.size).then(() => order.push('small')),
+		]);
+		assert.deepEqual(order, ['large', 'small']);
+	} finally {
+		await pool.dispose();
+	}
+});
+
 test('the host event loop stays responsive while the worker parses a large session', async () => {
 	// The reason the worker exists. A large session (tens of MB of chat JSON) takes the host well over
 	// a second of uninterrupted CPU to parse; a click arriving meanwhile would wait that long. Here the

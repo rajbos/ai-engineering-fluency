@@ -87,8 +87,9 @@ const DEFAULT_RESTART_WINDOW_MS = 60 * 1000;
 /** A request is re-sent at most once after its worker dies; a second death means it is likely the cause. */
 const MAX_RETRIES_AFTER_WORKER_DEATH = 1;
 /**
- * Requests handed to one worker at a time. Two lets one file's disk read overlap another's
- * parse without letting a long queue build up inside a thread that can only parse serially.
+ * Requests handed to one worker at a time. The worker runs them strictly in order, so the second is
+ * simply queued there: it is ready the moment the first finishes (no round trip to the host), while
+ * the backlog beyond that stays in the pool, where it cannot be mistaken for a hang.
  */
 const MAX_IN_FLIGHT_PER_WORKER = 2;
 /** Generous: a multi-hundred-MB session file parses to a large object graph, but a runaway must not take the host with it. */
