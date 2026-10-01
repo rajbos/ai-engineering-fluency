@@ -35,6 +35,9 @@ export interface SessionDiscoveryDeps {
 	sampleDataDirectoryOverride?: () => string | undefined;
 }
 
+/** What one discovery pass observed; published to the instance only if the pass is still current. */
+interface DiscoveryPassStatus { hadError: boolean }
+
 export class SessionDiscovery {
 	private deps: SessionDiscoveryDeps;
 	private _sessionFilesCache: string[] | null = null;
@@ -183,8 +186,8 @@ export class SessionDiscovery {
 			if (generation === this._cacheGeneration) {
 				this._sessionFilesCache = sampleFiles;
 				this._sessionFilesCacheTime = now;
+				this._lastDiscoveryFilesCount = sampleFiles.length;
 			}
-			this._lastDiscoveryFilesCount = sampleFiles.length;
 			return sampleFiles;
 		} catch (err) {
 			this.deps.warn(`Error reading sample data directory: ${err}`);
@@ -209,7 +212,7 @@ export class SessionDiscovery {
 	}
 
 	/** Collect deduplicated Windsurf session files and add them to allDeduped. */
-	private async collectWindsurfFiles(seen: Set<string>, allDeduped: string[], onBatch?: (files: string[]) => void): Promise<void> {
+	private async collectWindsurfFiles(seen: Set<string>, allDeduped: string[], status: DiscoveryPassStatus, onBatch?: (files: string[]) => void): Promise<void> {
 		if (!this.deps.windsurf) { return; }
 		try {
 			const windsurfFiles = (await this.deps.windsurf.getWindsurfSessions()).map(session => session.file);
@@ -222,7 +225,7 @@ export class SessionDiscovery {
 			if (batch.length > 0) { allDeduped.push(...batch); if (onBatch) { onBatch(batch); } }
 		} catch (error) {
 			this.deps.warn(`Could not discover Windsurf sessions: ${error}`);
-			this._lastDiscoveryHadError = true;
+			status.hadError = true;
 		}
 	}
 
@@ -239,7 +242,7 @@ export class SessionDiscovery {
 	 * quickly. Awaiting each adapter's own promise independently lets fast
 	 * adapters' files start parsing immediately while slow ones keep running.
 	 */
-	private async discoverFromAdapters(onBatch?: (files: string[]) => void): Promise<string[]> {
+	private async discoverFromAdapters(status: DiscoveryPassStatus, onBatch?: (files: string[]) => void): Promise<string[]> {
 		const seen = new Set<string>();
 		const allDeduped: string[] = [];
 		const discoveryStartMs = Date.now();
@@ -255,11 +258,11 @@ export class SessionDiscovery {
 				},
 				error => {
 					this.deps.warn(`Could not discover ${eco.displayName} sessions: ${error}`);
-					this._lastDiscoveryHadError = true;
+					status.hadError = true;
 				}
 			)
 		);
-		await Promise.all([...adapterTasks, this.collectWindsurfFiles(seen, allDeduped, onBatch)]);
+		await Promise.all([...adapterTasks, this.collectWindsurfFiles(seen, allDeduped, status, onBatch)]);
 
 		const dupCount = totalRaw - allDeduped.length;
 		if (dupCount > 0) { this.deps.log(`🧹 Deduplicated ${dupCount} duplicate session path(s)`); }
@@ -317,19 +320,27 @@ export class SessionDiscovery {
 		const sampleFiles = await this.tryGetSampleDataFiles(now, generation);
 		if (sampleFiles) { emit(sampleFiles); return sampleFiles; }
 		const allDeduped: string[] = [];
+		// Local to this pass and published only if it is still the current generation: a pass that clearCache()
+		// detached must not leave its failures or its count on the status of the fresh pass that replaced it.
+		const status: DiscoveryPassStatus = { hadError: false };
+		const publish = (count: number): void => {
+			if (generation !== this._cacheGeneration) { return; }
+			this._lastDiscoveryHadError = status.hadError;
+			this._lastDiscoveryFilesCount = count;
+		};
 		try {
-			const files = await this.discoverFromAdapters(emit);
+			const files = await this.discoverFromAdapters(status, emit);
 			allDeduped.push(...files);
 			if (generation === this._cacheGeneration) {
 				this._sessionFilesCache = allDeduped;
 				this._sessionFilesCacheTime = Date.now();
 			}
-			this._lastDiscoveryFilesCount = allDeduped.length;
+			publish(allDeduped.length);
 			return allDeduped;
 		} catch (error) {
 			this.deps.error('Error getting session files:', error);
-			this._lastDiscoveryHadError = true;
-			this._lastDiscoveryFilesCount = allDeduped.length;
+			status.hadError = true;
+			publish(allDeduped.length);
 			return allDeduped;
 		}
 	}

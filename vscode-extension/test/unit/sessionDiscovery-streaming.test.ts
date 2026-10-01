@@ -195,3 +195,33 @@ test('a late subscriber that throws while earlier batches are replayed does not 
 	assert.deepEqual(seen, ['/fake/slow.json'], 'and still receives the batches that arrive after the failed replay');
 	assert.ok(warnings.some(w => /late consumer bug/.test(w)));
 });
+
+test('a pass detached by clearCache() does not leave its failure on the status of the fresh pass', async () => {
+	// The old pass's adapter fails after clearCache(); the fresh pass succeeds. The fresh result must not look untrustworthy.
+	let calls = 0;
+	const flaky = makeFakeAdapter('flaky', ['/fake/a.json'], 60);
+	(flaky as any).discover = async () => {
+		calls++;
+		if (calls === 1) { await new Promise(resolve => setTimeout(resolve, 80)); throw new Error('first pass adapter failed'); }
+		await new Promise(resolve => setTimeout(resolve, 10));
+		return { sessionFiles: ['/fake/a.json'], candidatePaths: [] };
+	};
+	const discovery = new SessionDiscovery({ log: () => {}, warn: () => {}, error: () => {}, ecosystems: [flaky] });
+	const stale = discovery.getCopilotSessionFiles();
+	await new Promise(resolve => setTimeout(resolve, 10));
+	discovery.clearCache();
+	const fresh = discovery.getCopilotSessionFiles();
+	await Promise.all([fresh, stale]); // the stale pass fails last
+	assert.equal(discovery.lastDiscoveryHadError, false, 'the stale pass failure must not mark the fresh result as errored');
+	assert.equal(discovery.lastDiscoveryFilesCount, 1);
+});
+
+test('a discovery pass that fails is still reported as errored when it is the current one', async () => {
+	const broken = makeFakeAdapter('broken', [], 5);
+	(broken as any).discover = async () => { throw new Error('adapter failed'); };
+	const discovery = new SessionDiscovery({ log: () => {}, warn: () => {}, error: () => {}, ecosystems: [broken, makeFakeAdapter('ok', ['/fake/ok.json'], 5)] });
+	const files = await discovery.getCopilotSessionFiles();
+	assert.deepEqual(files, ['/fake/ok.json']);
+	assert.equal(discovery.lastDiscoveryHadError, true);
+	assert.equal(discovery.lastDiscoveryFilesCount, 1);
+});
