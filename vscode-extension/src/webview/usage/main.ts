@@ -3,6 +3,7 @@ import { el, setHtml } from '../shared/domUtils';
 import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
+import { buildFilterPillGroupHtml, type SessionFilterOption } from './sessionFilterBar';
 import { escapeHtml, formatAbsoluteDate, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { localize, localizeFormat } from '../shared/localization';
@@ -1339,7 +1340,6 @@ function hasActiveSessionFilters(): boolean {
 		|| sessionFilterEditors.size > 0 || sessionFilterVendors.size > 0 || sessionFilterModels.size > 0;
 }
 
-type SessionFilterOption = { value: string; label: string; count: number };
 
 /** Computes the distinct editor/vendor/model values (with counts) present across the given sessions, used to render filter pills. */
 function computeSessionFilterOptions(sessions: TodaySessionSummary[]): {
@@ -1379,17 +1379,6 @@ function computeSessionFilterOptions(sessions: TodaySessionSummary[]): {
 		hydraFusionCount,
 		nearContextLimitCount,
 	};
-}
-
-/** Renders one labeled group of toggle pills (e.g. "Editor  VS Code (12) JetBrains (3)"), one aligned row per dimension. */
-function buildFilterPillGroupHtml(groupLabel: string, filterType: string, items: SessionFilterOption[], activeSet: Set<string>): string {
-	if (items.length === 0) { return ''; }
-	const pills = items.map(({ value, label, count }) => {
-		const isActive = activeSet.has(value);
-		const safeLabel = escapeHtml(label);
-		return `<button type="button" class="session-filter-pill${isActive ? ' active' : ''}" data-filter-type="${filterType}" data-filter-value="${escapeHtml(value)}" aria-pressed="${isActive}" title="${safeLabel}: ${count} session${count === 1 ? '' : 's'}">${safeLabel} <span class="session-filter-pill-count">${count}</span></button>`;
-	}).join('');
-	return `<div class="session-filter-group"><span class="session-filter-group-label">${escapeHtml(groupLabel)}</span><div class="session-filter-pills">${pills}</div></div>`;
 }
 
 /** Renders the pill filter bar above the Recent Sessions table (Editor / Vendor / Model / HydraFusion). */
