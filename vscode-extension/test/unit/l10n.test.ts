@@ -458,6 +458,7 @@ test('l10n: log viewer summary card labels resolve in English', () => {
 		'logviewer.summary.cachedInput': 'Cached Input',
 		'logviewer.summary.estimatedCost': 'Estimated Cost',
 		'logviewer.summary.estimatedCostSub': 'Summed across all turns',
+		'logviewer.summary.estimatedCostTooltip': 'Estimated USD cost of this session, summed from the per-turn costs (including sub-agents). Based on model pricing; may differ from your actual bill.',
 		'logviewer.summary.thinkingTokens': 'Thinking Tokens',
 		'logviewer.summary.thinkingEffort': 'Thinking Effort',
 		'logviewer.summary.subAgents': 'Sub-Agents',
