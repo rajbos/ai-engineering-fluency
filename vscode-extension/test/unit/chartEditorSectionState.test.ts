@@ -146,3 +146,18 @@ test('every tool with an official logo renders an <img>, including dark variants
 		assert.equal(window.document.getElementById(`editor-${name}`).querySelectorAll('img.editor-logo').length, 2, `${name} has a dark variant`);
 	}
 });
+
+test('logo theme: declared kind wins, otherwise page background, otherwise dark', async () => {
+	const w = await bootChart({ current: undefined });
+	const body = w.document.body;
+	assert.equal(body.getAttribute('data-logo-theme'), 'dark', 'no theme info → dark (VS/JetBrains default)');
+	body.setAttribute('data-vscode-theme-kind', 'vscode-light');
+	await new Promise((r) => setImmediate(r));
+	assert.equal(body.getAttribute('data-logo-theme'), 'light', 'desktop/VS Code light');
+	body.setAttribute('data-vscode-theme-kind', 'vscode-high-contrast-light');
+	await new Promise((r) => setImmediate(r));
+	assert.equal(body.getAttribute('data-logo-theme'), 'light');
+	body.setAttribute('data-vscode-theme-kind', 'vscode-high-contrast');
+	await new Promise((r) => setImmediate(r));
+	assert.equal(body.getAttribute('data-logo-theme'), 'dark');
+});

@@ -2,7 +2,7 @@
 import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
-import { buildEditorLogo } from '../shared/editorLogos';
+import { buildEditorLogo, syncLogoTheme } from '../shared/editorLogos';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { createPeriodSelector, PERIOD_LABELS } from '../shared/periodSelector';
 import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
@@ -569,6 +569,7 @@ function wireEditorListToggle(): void {
 
 function wireInteractions(data: InitialChartData): void {
 	wireEditorListToggle();
+	syncLogoTheme();
 
 	const refresh = document.getElementById('btn-refresh');
 	refresh?.addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));

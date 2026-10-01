@@ -123,3 +123,35 @@ export function buildEditorLogo(editor: string, doc: Document = document): HTMLE
 	}
 	return wrap;
 }
+
+type LogoTheme = 'dark' | 'light';
+
+/** Perceived brightness (0–255) of a CSS `rgb()/rgba()` colour, or undefined if it can't be parsed or is transparent. */
+function brightnessOf(color: string): number | undefined {
+	const m = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)(?:[\s,/]+([\d.]+))?/.exec(color);
+	if (!m || (m[4] !== undefined && Number(m[4]) === 0)) { return undefined; }
+	return (Number(m[1]) * 299 + Number(m[2]) * 587 + Number(m[3]) * 114) / 1000;
+}
+
+/**
+ * Decides which logo variant fits the host theme. VS Code and the desktop app declare it with
+ * `data-vscode-theme-kind`; the Visual Studio and JetBrains shells do not, so fall back to the
+ * actual page background, and to dark (both shells' default) when that can't be read.
+ */
+export function detectLogoTheme(doc: Document = document): LogoTheme {
+	const kind = doc.body.getAttribute('data-vscode-theme-kind');
+	if (kind) { return kind === 'vscode-light' || kind === 'vscode-high-contrast-light' ? 'light' : 'dark'; }
+	const view = doc.defaultView;
+	const bg = view ? brightnessOf(view.getComputedStyle(doc.body).backgroundColor) : undefined;
+	return bg !== undefined && bg > 128 ? 'light' : 'dark';
+}
+
+/** Marks `<body data-logo-theme>` for the logo CSS and keeps it current when the host re-themes the page. */
+export function syncLogoTheme(doc: Document = document): void {
+	const apply = (): void => { doc.body.setAttribute('data-logo-theme', detectLogoTheme(doc)); };
+	apply();
+	const View = doc.defaultView as (Window & { MutationObserver?: typeof MutationObserver }) | null;
+	if (View?.MutationObserver) {
+		new View.MutationObserver(apply).observe(doc.body, { attributes: true, attributeFilter: ['data-vscode-theme-kind'] });
+	}
+}
