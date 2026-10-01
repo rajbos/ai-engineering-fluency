@@ -2729,19 +2729,19 @@ function renderAccountBudgetRowHtml(b: AccountBudgetView): string {
   const plan = b.planName ? ` (${escapeHtml(b.planName)})` : "";
   let detail: string;
   if (b.status === "ok" && b.balance) {
-    const reset = b.resetDate ? `, resets ${escapeHtml(b.resetDate.slice(0, 10))}` : "";
-    detail = `${(b.balance.usedAiCredits / 100).toFixed(2)} of ${b.balance.budgetUsd.toFixed(2)} used (${b.balance.pctAvailable.toFixed(1)}% left${reset})`;
+    const reset = b.resetDate ? `, ${escapeHtml(localizeFormat("accountBudgets.resets", b.resetDate.slice(0, 10)))}` : "";
+    detail = `${escapeHtml(localizeFormat("accountBudgets.usedLeft", "$" + (b.balance.usedAiCredits / 100).toFixed(2), "$" + b.balance.budgetUsd.toFixed(2), b.balance.pctAvailable.toFixed(1)))}${reset}`;
   } else if (b.status === "no-quota") {
-    detail = "no metered budget on this plan";
+    detail = escapeHtml(localize("accountBudgets.noQuota"));
   } else {
-    detail = escapeHtml(b.error ?? "unavailable");
+    detail = escapeHtml(b.error ?? localize("accountBudgets.unavailable"));
   }
   return `<strong>${escapeHtml(b.label)}</strong>${plan}: ${detail}<br/>`;
 }
 
 function renderAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): string {
   if (!accounts || accounts.length === 0) { return ""; }
-  return `<p><strong>GitHub accounts in VS Code</strong><br/>${accounts.map(renderAccountBudgetRowHtml).join("")}</p>`;
+  return `<p><strong>${escapeHtml(localize("accountBudgets.title"))}</strong><br/>${accounts.map(renderAccountBudgetRowHtml).join("")}</p>`;
 }
 
 function renderQuotaCardHtml(data: DiagnosticsData): string {

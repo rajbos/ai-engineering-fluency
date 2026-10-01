@@ -1319,3 +1319,27 @@ test('l10n: backend Sync Now failure and nothing-sent text resolve in English an
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: per-account budget strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	const english: Record<string, string> = {
+		'accountBudgets.title': 'GitHub accounts in VS Code',
+		'accountBudgets.usedLeft': '{0} / {1} used · {2}% left',
+		'accountBudgets.resets': 'resets {0}',
+		'accountBudgets.noQuota': 'No metered budget on this plan',
+		'accountBudgets.unavailable': 'Budget unavailable',
+	};
+	for (const [key, value] of Object.entries(english)) {
+		assert.equal(t(key), value, `English value for ${key}`);
+	}
+
+	mock.setLanguage('zh-cn');
+	try {
+		for (const key of Object.keys(english)) {
+			assert.notEqual(t(key), english[key], `zh-cn translation for ${key}`);
+		}
+		assert.equal(t('accountBudgets.title'), 'VS Code 中的 GitHub 帐户');
+	} finally {
+		mock.setLanguage('en');
+	}
+});

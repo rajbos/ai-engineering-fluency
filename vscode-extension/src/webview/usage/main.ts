@@ -4847,17 +4847,17 @@ function _accountBudgetRowHtml(b: AccountBudgetView): string {
 	const plan = b.planName ? ` <span style="color:var(--text-muted);">(${escapeHtml(b.planName)})</span>` : '';
 	const name = `<span style="font-weight:600;">${escapeHtml(b.label)}</span>${plan}`;
 	if (b.status !== 'ok' || !b.balance) {
-		const note = b.status === 'no-quota' ? 'No metered budget on this plan' : escapeHtml(b.error ?? 'Budget unavailable');
+		const note = b.status === 'no-quota' ? localize('accountBudgets.noQuota') : escapeHtml(b.error ?? localize('accountBudgets.unavailable'));
 		return `<div style="display:flex; justify-content:space-between; gap:12px; font-size:12px;"><span>${name}</span><span style="color:var(--text-muted);">${note}</span></div>`;
 	}
 	const usedPct = Math.min(100, Math.max(0, 100 - b.balance.pctAvailable));
 	const color = usedPct > 90 ? 'var(--error-color, #f14c4c)' : usedPct > 75 ? 'var(--warning-color, #cca700)' : 'var(--accent-color, #4d9cf8)';
-	const reset = b.resetDate ? ` · resets ${escapeHtml(b.resetDate.slice(0, 10))}` : '';
+	const reset = b.resetDate ? ` · ${escapeHtml(localizeFormat('accountBudgets.resets', b.resetDate.slice(0, 10)))}` : '';
 	return `
 		<div style="font-size:12px;">
 			<div style="display:flex; justify-content:space-between; gap:12px; margin-bottom:4px;">
 				<span>${name}</span>
-				<span>${formatFixed(b.balance.usedAiCredits / 100, 2)} / ${formatFixed(b.balance.budgetUsd, 2)} used · ${formatFixed(b.balance.pctAvailable, 1)}% left${reset}</span>
+				<span>${escapeHtml(localizeFormat('accountBudgets.usedLeft', '$' + formatFixed(b.balance.usedAiCredits / 100, 2), '$' + formatFixed(b.balance.budgetUsd, 2), formatFixed(b.balance.pctAvailable, 1)))}${reset}</span>
 			</div>
 			<div style="height:6px; border-radius:3px; background:var(--border-subtle); overflow:hidden;"><div style="height:100%; width:${formatFixed(usedPct, 2)}%; background:${color};"></div></div>
 		</div>`;
@@ -4869,7 +4869,7 @@ function buildAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): str
 	if (list.length < 2) { return ''; }
 	return `
 		<div style="margin-bottom:12px;">
-			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">GitHub accounts in VS Code</div>
+			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(localize('accountBudgets.title'))}</div>
 			<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:12px 14px; display:flex; flex-direction:column; gap:10px; color:var(--text-primary);">
 				${list.map(_accountBudgetRowHtml).join('')}
 			</div>
