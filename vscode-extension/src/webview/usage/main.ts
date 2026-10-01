@@ -38,6 +38,8 @@ import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold, compute
 import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDetection';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
+import { buildTabStripHtml, type UsageTabStripInput } from './tabStripHtml';
+import { renderContextRefTable } from './contextRefTableHtml';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { partitionContextRefRows, type ContextRefRow } from './contextRefRows';
@@ -3879,63 +3881,14 @@ function buildInsightsTabPanelHtml(insights: EvaluatedInsight[]): string {
 		</div>`;
 }
 
-// ── Corrections tab ─────────────────────────────────────────────────────────
-
-/** Badge with the number of sessions carrying correction moments (empty when none). */
-function correctionsCountBadgeHtml(report: CorrectionReport | null | undefined): string {
-	if (!report || report.sessionsWithMoments === 0) { return ''; }
-	return ` <span style="background:rgba(251,191,36,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${report.sessionsWithMoments}</span>`;
-}
-
-/** Corrections tab-bar button (extracted to keep buildUsageRootHtml under the complexity limit). */
-function correctionsTabButtonHtml(report: CorrectionReport | null | undefined): string {
-	return `<button class="tab-button ${activeTab === 'corrections' ? 'active' : ''}" data-tab="corrections"><span class="codicon codicon-debug-restart"></span> Corrections${correctionsCountBadgeHtml(report)}</button>`;
-}
-
-/** The leaf tab buttons, keyed by tab id, so the strip builder can lay them out by group. */
-function usageLeafTabButtons(stats: UsageAnalysisStats): Record<string, string> {
-	const newInsightCount = (stats.insights ?? []).filter(i => i.status === 'new').length;
-	const insightBadge = newInsightCount > 0
-		? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${newInsightCount}</span>`
-		: '';
-	const btn = (tab: string, icon: string, label: string, extra = ''): string =>
-		`<button class="tab-button ${activeTab === tab ? 'active' : ''}" data-tab="${tab}"><span class="codicon codicon-${icon}"></span> ${label}${extra}</button>`;
+/** Gathers what the tab strip needs out of module state and the current stats. */
+function usageTabStripInput(stats: UsageAnalysisStats): UsageTabStripInput {
 	return {
-		activity: btn('activity', 'pulse', 'My Activity'),
-		sessions: btn('sessions', 'history', 'Recent Sessions'),
-		tools: btn('tools', 'tools', 'Tools &amp; Integrations'),
-		health: btn('health', 'server-environment', 'Workspace Health'),
-		repos: btn('repos', 'git-pull-request', 'Repository PRs'),
-		agent: btn('agent', 'cloud', 'Cloud Agent'),
-		readiness: darkFactoryTab.button(activeTab),
-		worktrees: btn('worktrees', 'git-branch', 'Worktrees'),
-		insights: btn('insights', 'lightbulb', 'Insights', insightBadge),
-		corrections: correctionsTabButtonHtml(stats.correctionReport),
+		activeTab,
+		newInsightCount: (stats.insights ?? []).filter(i => i.status === 'new').length,
+		correctionSessionCount: stats.correctionReport?.sessionsWithMoments ?? 0,
+		readinessButtonHtml: darkFactoryTab.button(activeTab),
 	};
-}
-
-/**
- * Two-level tab strip: a row of group tabs above the leaf tabs of whichever group is showing.
- *
- * Only the leaf bar for the active tab's group is rendered visible; the others are laid out but
- * hidden, so `activateUsageTab` can reveal one without a re-render. Leaf tab ids are untouched —
- * see the note in tabGroups.ts for why that matters.
- */
-function buildTabStripHtml(stats: UsageAnalysisStats): string {
-	const buttons = usageLeafTabButtons(stats);
-	const activeGroup = groupOfUsageTab(activeTab);
-	const groupBar = USAGE_TAB_GROUPS.map(group =>
-		`<button class="group-tab ${group.id === activeGroup ? 'active' : ''}" data-group="${group.id}" aria-pressed="${group.id === activeGroup}"><span class="codicon codicon-${group.icon}" aria-hidden="true"></span> ${escapeHtml(localize(group.labelKey))}</button>`
-	).join('\n\t\t\t\t');
-	const leafBars = USAGE_TAB_GROUPS.map(group =>
-		`<div class="tab-bar leaf-tabs" data-group="${group.id}"${group.id === activeGroup ? '' : ' style="display:none"'}>
-				${group.tabs.map(tab => buttons[tab]).join('\n\t\t\t\t')}
-			</div>`
-	).join('\n\t\t\t');
-	return `<div class="tab-bar group-tabs">
-				${groupBar}
-			</div>
-			${leafBars}`;
 }
 
 // ── Skill suggestions (repeated tasks) ──────────────────────────────────────
@@ -4415,7 +4368,7 @@ function buildUsageRootHtml(
 				</div>
 			</div>
 
-			${buildTabStripHtml(stats)}
+			${buildTabStripHtml(usageTabStripInput(stats))}
 
 			${safeSectionHtml('Recent Sessions', () => buildSessionsTabPanelHtml(stats))}
 			${safeSectionHtml('My Activity', () => buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs))}
@@ -5241,110 +5194,8 @@ interface ContextRefDescriptor {
 	get: (cr: ContextReferenceUsage) => number;
 }
 
-function numCell(value: number, extraClass = ''): string {
-	const zeroClass = value > 0 ? '' : ' ctx-ref-zero';
-	const cls = `ctx-ref-num${extraClass ? ' ' + extraClass : ''}${zeroClass}`;
-	return `<td class="${cls}">${value}</td>`;
-}
-
-function sparklineCell(lastMonth: number, month: number, today: number): string {
-	const W = 60, H = 20, PAD = 2;
-	const values = [lastMonth, month, today];
-	const max = Math.max(...values);
-	// Flat line at the bottom when all zeros
-	const points = values.map((v, i) => {
-		const x = PAD + i * ((W - PAD * 2) / (values.length - 1));
-		const y = max === 0 ? H - PAD : PAD + (1 - v / max) * (H - PAD * 2);
-		return `${x.toFixed(1)},${y.toFixed(1)}`;
-	}).join(' ');
-	const isFlat = max === 0;
-	const color = isFlat ? 'var(--text-muted)' : today >= month && month >= lastMonth ? 'var(--link-color)' : today <= month && month <= lastMonth ? '#f87171' : 'var(--text-secondary)';
-	return `<td class="ctx-ref-spark"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>${values.map((v, i) => {
-		const x = PAD + i * ((W - PAD * 2) / (values.length - 1));
-		const y = max === 0 ? H - PAD : PAD + (1 - v / max) * (H - PAD * 2);
-		return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2" fill="${color}"/>`;
-	}).join('')}</svg></td>`;
-}
-
 /** Whether the collapsed "Other references" long-tail group is expanded. Persists across re-renders. */
 let contextRefOtherOpen = false;
-
-function contextRefRowHtml(row: ContextRefRow): string {
-	const titleAttr = row.title ? ` title="${escapeHtml(row.title)}"` : '';
-	return `<tr${titleAttr}><td class="ctx-ref-name">${row.label}</td>${numCell(row.today, row.today > 0 ? 'ctx-ref-today-active' : '')}${numCell(row.month)}${numCell(row.lastMonth)}${numCell(row.last30)}${sparklineCell(row.lastMonth, row.month, row.today)}</tr>`;
-}
-
-const CTX_REF_TABLE_HEAD = `
-				<thead>
-					<tr>
-						<th class="ctx-ref-name">Reference</th>
-						<th class="ctx-ref-num">Today</th>
-						<th class="ctx-ref-num">This Month</th>
-						<th class="ctx-ref-num">Last Month</th>
-						<th class="ctx-ref-num">Last 30 Days</th>
-						<th class="ctx-ref-spark" title="Trend: Last Month → This Month → Today">Trend</th>
-					</tr>
-				</thead>`;
-
-/**
- * The unused-reference long tail, collapsed behind a disclosure.
- *
- * These rows are still rendered — a reference kind you have never used is worth discovering —
- * but they are not worth 14 rows of dead zeroes above the fold.
- */
-function renderContextRefOtherHtml(otherRows: ContextRefRow[]): string {
-	if (otherRows.length === 0) { return ''; }
-	const body = otherRows.map(contextRefRowHtml).join('');
-	return `<details class="ctx-ref-other" id="ctx-ref-other"${contextRefOtherOpen ? ' open' : ''}>
-			<summary>${escapeHtml(localizeFormat('usage.contextRefs.otherSummary', otherRows.length))}</summary>
-			<div class="ctx-ref-table-wrap">
-				<table class="ctx-ref-table">${CTX_REF_TABLE_HEAD}
-					<tbody>${body}</tbody>
-				</table>
-			</div>
-		</details>`;
-}
-
-function renderContextRefTable(
-	rows: ContextRefRow[],
-	totals: { last30: number; month: number; lastMonth: number; today: number },
-): string {
-	const sorted = rows.slice().sort((a, b) => b.last30 - a.last30);
-	// Reference kinds with nothing today and nothing in the last 30 days drop into a collapsed
-	// "Other" group rather than padding the table with zeroes. The footer is computed from the
-	// stats, not from the rows above it, so collapsing the tail never changes what it sums.
-	//
-	// It is not the column sum of this table, and was not before this split either:
-	// getTotalContextRefs() counts the 17 reference-kind fields, while four of the rows here are
-	// derived metrics read from elsewhere on the same stats (Images, Prompt Files and Custom
-	// Prompts from `byKind`, Code Lines from `codeContextLines`). A period whose only activity is
-	// one of those four therefore shows a non-zero row over a zero total. The footer's tooltip
-	// says so rather than quietly presenting it as the table's sum.
-	const { active, other } = partitionContextRefRows(sorted);
-	const bodyRows = active.map(contextRefRowHtml).join('');
-	const emptyRow = active.length === 0
-		? `<tr><td class="ctx-ref-name" colspan="6" style="color: var(--text-muted);">${escapeHtml(localize('usage.contextRefs.noneRecent'))}</td></tr>`
-		: '';
-	return `
-		<div class="ctx-ref-table-wrap">
-			<table class="ctx-ref-table">${CTX_REF_TABLE_HEAD}
-				<tbody>
-					${bodyRows}${emptyRow}
-				</tbody>
-				<tfoot>
-					<tr class="ctx-ref-total" title="${escapeHtml(localize('usage.contextRefs.totalTooltip'))}">
-						<td class="ctx-ref-name">📊 Total References</td>
-						<td class="ctx-ref-num">${totals.today}</td>
-						<td class="ctx-ref-num">${totals.month}</td>
-						<td class="ctx-ref-num">${totals.lastMonth}</td>
-						<td class="ctx-ref-num">${totals.last30}</td>
-						<td class="ctx-ref-spark">${sparklineCell(totals.lastMonth, totals.month, totals.today).replace(/^<td[^>]*>/, '').replace(/<\/td>$/, '')}</td>
-					</tr>
-				</tfoot>
-			</table>
-		</div>
-		${renderContextRefOtherHtml(other)}`;
-}
 
 function buildContextRefCardsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
 	const c = (v: number | undefined): number => v || 0;
@@ -5388,7 +5239,7 @@ function buildContextRefCardsHtml(stats: UsageAnalysisStats, todayTotalRefs: num
 		month: getTotalContextRefs(m),
 		lastMonth: getTotalContextRefs(lm),
 		today: todayTotalRefs,
-	});
+	}, contextRefOtherOpen);
 }
 
 function buildContextRefsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {

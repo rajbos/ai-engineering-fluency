@@ -139,12 +139,22 @@ no tab id. That is the point: it is the one regrouping that costs nothing to try
 
 Use it when a view's tab strip **wraps or exceeds ~8 tabs** and the tabs fall into groups a
 reader picks between before picking a tab. It is what keeps Diagnostics' 14 tabs and Usage
-Analysis' 9 legible.
+Analysis' 10 legible.
 
 Keep the leaf tab ids exactly as they were and this costs no migration at all: the
 `viewTabOpened` telemetry and any deep links keep working, and the owning group is derived from
 the tab rather than stored alongside it. Renaming leaf ids is what would be expensive — so don't,
 unless the rename is the point.
+
+**The one thing grouping does break is the view's `states` in
+`.github/skills/visual-view-diff/views.config.json.`** A non-active group's leaf bar is
+`display:none`, so a state that clicks straight at `.tab-button[data-tab="x"]` can no longer
+reach it and the state fails to render — which silently takes the visual diff, the CI
+screenshots and the release video's shot of that tab with it. Prepend a
+`{ "click": ".group-tab[data-group=\"<group>\"]" }` step to every state outside the group that
+is open on first render, the way the diagnostics states already do, and name the group in the
+state's `title` (`"Workspace › Worktrees tab"`) — `tabName()` in `release-video/src/surfaces.ts`
+splits on the `›` so the narration can say "under Workspace".
 
 ### 3. A new view
 
@@ -160,7 +170,7 @@ them. Three implementations do this, via two different mechanisms:
 
 | List | Disclosure | Mechanism | "Recent" means |
 |---|---|---|---|
-| Context References | `.ctx-ref-other` (`usage/contextRefRows.ts`) | `<details>` + module flag | today + last 30 days > 0 |
+| Context References | `.ctx-ref-other` (`usage/contextRefTableHtml.ts`, split by `usage/contextRefRows.ts`) | `<details>` + module flag | today + last 30 days > 0 |
 | Local Model Leaderboard | `.model-leaderboard-other` | `<details>` + module flag | above the long-tail turn share |
 | Details: Editor / Model Usage | per-table "Other" parent row | expandable row + its own state | non-zero in any shown period |
 

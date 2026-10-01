@@ -308,6 +308,17 @@ test('l10n: usage tab-group, band and context-reference keys resolve in English'
 		'usage.contextWindow.compactionHeading': 'Context compaction',
 		'usage.contextRefs.noneRecent': 'No context references recorded today or in the last 30 days.',
 		'usage.contextRefs.totalTooltip': 'Total across the reference kinds (#file, #selection, @workspace, instructions files and so on). The Images, Prompt Files, Custom Prompts and Code Lines rows are separate metrics and are not included in this total.',
+		// The table's own head and footer labels. They render through `localize()` on every
+		// render rather than from a module constant, so a missing key shows up as a column
+		// titled "usage.contextRefs.colToday".
+		'usage.contextRefs.colReference': 'Reference',
+		'usage.contextRefs.colToday': 'Today',
+		'usage.contextRefs.colThisMonth': 'This Month',
+		'usage.contextRefs.colLastMonth': 'Last Month',
+		'usage.contextRefs.colLast30': 'Last 30 Days',
+		'usage.contextRefs.colTrend': 'Trend',
+		'usage.contextRefs.colTrendTooltip': 'Trend: Last Month → This Month → Today',
+		'usage.contextRefs.totalRow': '📊 Total References',
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
@@ -333,6 +344,13 @@ test('l10n: usage tab-group, band and context-reference keys resolve in zh-cn', 
 			'usage.band.spend.title': '花费与模型',
 			'usage.band.context.title': '上下文',
 			'usage.contextWindow.compactionHeading': '上下文压缩',
+			'usage.contextRefs.colReference': '引用',
+			'usage.contextRefs.colToday': '今天',
+			'usage.contextRefs.colThisMonth': '本月',
+			'usage.contextRefs.colLastMonth': '上月',
+			'usage.contextRefs.colLast30': '最近 30 天',
+			'usage.contextRefs.colTrend': '趋势',
+			'usage.contextRefs.colTrendTooltip': '趋势：上月 → 本月 → 今天',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
@@ -348,6 +366,9 @@ test('l10n: usage tab-group, band and context-reference keys resolve in zh-cn', 
 		assert.equal(t('usage.band.context.subtitle'), "你提供给模型的内容：附加的引用、请求与窗口上限的接近程度，以及被压缩掉的部分。", 'zh-cn value for usage.band.context.subtitle');
 		assert.equal(t('usage.contextRefs.noneRecent'), "今天和最近 30 天均未记录到上下文引用。", 'zh-cn value for usage.contextRefs.noneRecent');
 		assert.equal(t('usage.contextRefs.totalTooltip'), "各引用类型的合计（#file、#selection、@workspace、说明文件等）。图片、提示文件、自定义提示和代码行数这几行属于独立指标，不计入此合计。", 'zh-cn value for usage.contextRefs.totalTooltip');
+		// The emoji is part of the label, not decoration added at render time, so it has to
+		// survive translation along with the words after it.
+		assert.equal(t('usage.contextRefs.totalRow'), "📊 引用合计", 'zh-cn value for usage.contextRefs.totalRow');
 	} finally {
 		mock.setLanguage('en');
 	}
