@@ -5,6 +5,7 @@ import { escapeHtml, formatCompact, formatCost, formatFileSize, setCompactNumber
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 import { buildTurnOverviewRows, hashModelToHue, type TurnOverviewRow } from './turnsOverview';
+import { aiuToUsd } from '../../../../src/hydrafusion';
 import { renderHydraFusionSection, renderLegsTable, formatFusionCost } from './hydraFusionSection';
 import { buildMcpAndContextRefsCard, formatTopListWithOther } from './summaryCards';
 import { matchHydraFusionTurnsToChatTurns } from '../../../../src/hydrafusion';
@@ -815,10 +816,16 @@ function buildCachedTokensCard(data: SessionLogData): string {
 </div>`;
 }
 
-/** Sums the per-turn estimated costs (own call + any sub-agent costs a parser attached). Returns 0 when no turn carries a cost. */
+/**
+ * Session total in USD. HydraFusion's reported AIU is the authoritative spend for the
+ * primary calls (its synthetic router model has no ordinary pricing), so it replaces the
+ * per-turn estimates there; sub-agent costs are separate calls and are always added.
+ * Returns 0 when nothing is known.
+ */
 function sumSessionCost(data: SessionLogData): number {
-	return data.turns.reduce((sum, t) => sum + (t.estimatedCost ?? 0)
-		+ t.toolCalls.reduce((s, tc) => s + (tc.subAgentCost ?? 0), 0), 0);
+	const subAgentTotal = data.turns.reduce((sum, t) => sum + t.toolCalls.reduce((s, tc) => s + (tc.subAgentCost ?? 0), 0), 0);
+	if (data.hydraFusion) { return aiuToUsd(data.hydraFusion.totalAiu) + subAgentTotal; }
+	return data.turns.reduce((sum, t) => sum + (t.estimatedCost ?? 0), 0) + subAgentTotal;
 }
 
 function buildEstimatedCostCard(data: SessionLogData): string {
