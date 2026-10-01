@@ -312,6 +312,7 @@
   "logviewer.summary.inputTokens": "输入令牌",
   "logviewer.summary.outputTokens": "输出令牌",
   "logviewer.summary.cachedInput": "缓存输入",
+  "logviewer.summary.estimatedCost": "预估费用",
   "logviewer.summary.thinkingTokens": "思考令牌",
   "logviewer.summary.thinkingEffort": "思考强度",
   "logviewer.summary.subAgents": "子代理",

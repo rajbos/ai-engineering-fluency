@@ -94,6 +94,7 @@
   "logviewer.summary.inputTokens": "Input Tokens",
   "logviewer.summary.outputTokens": "Output Tokens",
   "logviewer.summary.cachedInput": "Cached Input",
+  "logviewer.summary.estimatedCost": "Estimated Cost",
   "logviewer.summary.thinkingTokens": "Thinking Tokens",
   "logviewer.summary.thinkingEffort": "Thinking Effort",
   "logviewer.summary.subAgents": "Sub-Agents",

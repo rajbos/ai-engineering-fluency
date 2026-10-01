@@ -815,6 +815,22 @@ function buildCachedTokensCard(data: SessionLogData): string {
 </div>`;
 }
 
+/** Sums the per-turn estimated costs (own call + sub-agents). Returns 0 when no turn carries a cost. */
+function sumSessionCost(data: SessionLogData): number {
+	return data.turns.reduce((sum, t) => sum + (t.estimatedCost ?? 0)
+		+ t.toolCalls.reduce((s, tc) => s + (tc.subAgentCost ?? 0), 0), 0);
+}
+
+function buildEstimatedCostCard(data: SessionLogData): string {
+	const total = sumSessionCost(data);
+	if (total <= 0) { return ''; }
+	return `<div class="summary-card" title="Estimated USD cost of this session, summed from the per-turn costs (including sub-agents). Based on model pricing; may differ from your actual bill.">
+<div class="summary-label">💰 ${localize('logviewer.summary.estimatedCost')}</div>
+<div class="summary-value">${formatCost(total)}</div>
+<div class="summary-sub">Summed across all turns</div>
+</div>`;
+}
+
 function buildThinkingTokensCard(data: SessionLogData, stats: SummaryStats): string {
 	if (stats.totalThinkingTokens <= 0) { return ''; }
 	return `<div class="summary-card">
@@ -933,6 +949,7 @@ ${buildActualTokensCard(data, stats)}
 ${buildModelTurnsCard(data)}
 ${buildDebugTokenCards(data)}
 ${buildCachedTokensCard(data)}
+${buildEstimatedCostCard(data)}
 ${buildThinkingTokensCard(data, stats)}
 ${buildEffortCard(stats)}
 ${buildSubAgentsCard(data, stats)}
