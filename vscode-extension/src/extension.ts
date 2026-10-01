@@ -1562,6 +1562,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _accountBudgets: AccountBudget[] = [];
 	/** Monotonic id of the latest account-budget refresh, so a slow stale lookup can't overwrite a newer one. */
 	private _accountBudgetsRefreshSeq = 0;
+	/**
+	 * Bumped whenever the preferred account's plan/quota state is cleared, and at the start of every
+	 * plan load. An in-flight loadAndLogCopilotPlanInfo() holds the value it started with and discards
+	 * its results once it no longer matches (sign-out, account removed or switched, or a newer load).
+	 */
+	private _preferredPlanGeneration = 0;
 
 	// Cached PR stats result for the repos tab (mirrors the shared snapshot on disk)
 	private _lastRepoPrStats?: RepoPrStatsResult;
@@ -4153,21 +4159,29 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Best-effort: each call is independent — a failure in one does not suppress the other.
 	 */
 	private async loadAndLogCopilotPlanInfo(): Promise<void> {
-		if (!this.githubSession) { return; }
+		const session = this.githubSession;
+		if (!session) { return; }
+		const generation = ++this._preferredPlanGeneration;
+		const isStale = (): boolean => generation !== this._preferredPlanGeneration;
 
 		const [planResult, tokenResult] = await Promise.all([
-			fetchCopilotPlanInfo(this.githubSession.accessToken).catch((err): ReturnType<typeof fetchCopilotPlanInfo> => Promise.resolve({ error: String(err) })),
-			fetchCopilotTokenEndpointInfo(this.githubSession.accessToken).catch((err): ReturnType<typeof fetchCopilotTokenEndpointInfo> => Promise.resolve({ error: String(err) })),
+			fetchCopilotPlanInfo(session.accessToken).catch((err): ReturnType<typeof fetchCopilotPlanInfo> => Promise.resolve({ error: String(err) })),
+			fetchCopilotTokenEndpointInfo(session.accessToken).catch((err): ReturnType<typeof fetchCopilotTokenEndpointInfo> => Promise.resolve({ error: String(err) })),
 		]);
+		// Applying the result writes the plan/quota caches, so a lookup that outlived a sign-out, an
+		// account removal/switch, or was superseded by a newer load must not touch them.
+		if (isStale()) { this.log('Copilot plan lookup superseded (sign-out or account change) — discarding its result'); return; }
 
 		const isOrgPlan = this.logCopilotPlanResult(planResult);
 		this.logCopilotTokenResult(tokenResult);
 
 		if (isOrgPlan) {
-			await this.loadAndLogEnterpriseInfo();
+			await this.loadAndLogEnterpriseInfo(session);
+			if (isStale()) { return; }
 		}
 
 		await this.refreshAccountBudgets();
+		if (isStale()) { return; }
 
 		// The plan info above may have populated a new Copilot plan quota / budget
 		// (via captureQuotaEntitlement). The status bar tooltip flyout is only rebuilt
@@ -4205,6 +4219,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Forgets the plan and quota snapshot of the preferred account (sign-out, or the account was removed). */
 	private clearPreferredAccountBudgetState(): void {
+		this._preferredPlanGeneration++;
 		this._copilotPlanResolved = undefined;
 		this._copilotQuotaEntitlements = {};
 	}
@@ -4273,22 +4288,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Uses GraphQL viewer.enterprises and the enterprise billing/budgets endpoint.
 	 * Best-effort: requires enterprise admin or billing manager for budget data.
 	 */
-	private async loadAndLogEnterpriseInfo(): Promise<void> {
-		if (!this.githubSession) { return; }
-
-		const { enterprises, error: entError } = await fetchUserEnterprises(this.githubSession.accessToken);
+	private async loadAndLogEnterpriseInfo(session: vscode.AuthenticationSession): Promise<void> {
+		const { enterprises, error: entError } = await fetchUserEnterprises(session.accessToken);
 		if (entError || !enterprises?.length) {
 			this.warn(`Enterprise discovery unavailable: ${entError ?? 'no enterprises found'}`);
 			return;
 		}
 
-		const username = this.githubSession.account.label;
+		const username = session.account.label;
 		this.log(`  Enterprise(s): ${enterprises.map((e) => `${e.name} (${e.slug})`).join(', ')}`);
 
 		// Fetch budget for each enterprise in parallel
 		const budgetResults = await Promise.all(
 			enterprises.map((e) =>
-				fetchEnterprisePremiumBudgets(e.slug, username, this.githubSession!.accessToken)
+				fetchEnterprisePremiumBudgets(e.slug, username, session.accessToken)
 					.then((r) => ({ enterprise: e, ...r }))
 					.catch((err) => ({ enterprise: e, error: String(err) }))
 			)
