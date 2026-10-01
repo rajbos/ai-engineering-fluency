@@ -132,16 +132,19 @@ body {
 	line-height: 24px;
 }
 
-/* Flat single-colour marks ship a light and a dark variant; show the one matching the theme. */
+/* Flat single-colour marks ship a light and a dark variant. Light is the default; the dark one
+   is used only for explicitly dark themes (same data-vscode-theme-kind attribute theme.css keys on). */
 .editor-logo-dark {
 	display: none;
 }
 
-body:not(.vscode-light) .editor-logo-dark {
+body[data-vscode-theme-kind="vscode-dark"] .editor-logo-dark,
+body[data-vscode-theme-kind="vscode-high-contrast"] .editor-logo-dark {
 	display: inline;
 }
 
-body:not(.vscode-light) .editor-logo-light {
+body[data-vscode-theme-kind="vscode-dark"] .editor-logo-wrap > .editor-logo-light:has(+ .editor-logo-dark),
+body[data-vscode-theme-kind="vscode-high-contrast"] .editor-logo-wrap > .editor-logo-light:has(+ .editor-logo-dark) {
 	display: none;
 }
 
