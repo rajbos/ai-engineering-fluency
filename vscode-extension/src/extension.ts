@@ -79,7 +79,6 @@ import type {
   CorrectionSessionEntry,
   RepeatedTaskReport,
   RepoKnowledgeFiles,
-  AgenticMatrix,
   MemoryFilesAnalysis,
   ServerMemoriesAnalysis,
   ServerMemoriesAnalysisView,
@@ -120,7 +119,6 @@ import {
   mergeKnowledgeFiles as _mergeKnowledgeFiles,
   summarizeInstructionFiles as _summarizeInstructionFiles,
 } from '../../src/knowledgeSignals';
-import { buildAgenticMatrix as _buildAgenticMatrix, stretchedPlacements as _stretchedPlacements } from '../../src/agenticFoundations';
 import { compareSpeedAndQuality as _compareSpeedAndQuality } from '../../src/speedVsError';
 import { summarizePrOutcomes as _summarizePrOutcomes } from '../../src/prOutcomes';
 
@@ -1459,8 +1457,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Cache mapping workspaceFolderPath -> found customization files (avoid re-scanning)
 	private _customizationFilesCache: Map<string, CustomizationFileEntry[]> = new Map();
-	/** Latest AI Readiness scan and its adoption × foundations matrix (see rememberReadinessScan). */
-	private _lastReadinessScan: { report: DarkFactoryReport; matrix: AgenticMatrix; scannedAt: number } | undefined;
+	/** Latest AI Readiness scan, kept so insights can read it without re-scanning (see rememberReadinessScan). */
+	private _lastReadinessScan: { report: DarkFactoryReport; scannedAt: number } | undefined;
 
 	// Last computed customization matrix for usage analysis (typed)
 	private _lastCustomizationMatrix?: WorkspaceCustomizationMatrix;
@@ -5774,13 +5772,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * month-over-month trend, the latest AI Readiness scan (re-run at most hourly) and the
 	 * repository PR snapshot. All local; none of it is uploaded.
 	 */
-	private agenticInsightContext(stats: UsageAnalysisStats): Pick<InsightContext, 'repoActivity' | 'activityTrend' | 'agenticMatrix' | 'reviewControls' | 'agentPrActivity'> {
-		const readiness = this.readinessForInsights(stats.repoActivity);
+	private agenticInsightContext(stats: UsageAnalysisStats): Pick<InsightContext, 'repoActivity' | 'activityTrend' | 'reviewControls' | 'agentPrActivity'> {
+		const readiness = this.readinessForInsights();
 		const controlState = (repo: DarkFactoryReport['repos'][number], id: string) => repo.controls.find(c => c.id === id)?.state ?? 'unknown';
 		return {
 			repoActivity: stats.repoActivity ?? null,
 			activityTrend: stats.activityTrend ?? null,
-			agenticMatrix: readiness?.matrix ?? null,
 			reviewControls: readiness?.report.repos.map(repo => ({
 				repository: repo.nameWithOwner ?? repo.name,
 				agentPullRequests: controlState(repo, 'agent-authored-pull-requests'),
@@ -11442,30 +11439,23 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		});
 	}
 
-	/**
-	 * Keep the latest readiness scan and its adoption × foundations matrix, so insights can use
-	 * them without re-scanning. The matrix combines repository controls with this user's own
-	 * session activity — local only, never uploaded or shared.
-	 */
-	private rememberReadinessScan(report: DarkFactoryReport): AgenticMatrix {
-		const matrix = _buildAgenticMatrix(report, this.currentUsageAnalysisStats?.repoActivity);
-		this._lastReadinessScan = { report, matrix, scannedAt: Date.now() };
-		return matrix;
+	/** Keep the latest readiness scan so insights can use it without re-scanning. */
+	private rememberReadinessScan(report: DarkFactoryReport): void {
+		this._lastReadinessScan = { report, scannedAt: Date.now() };
 	}
 
 	/**
 	 * The latest readiness scan for insight evaluation. Re-scans (filesystem only, bounded) when
-	 * none is cached or it is over an hour old, and rebuilds the matrix against the current
-	 * activity. Never throws: a failed scan simply leaves the scan-based insights silent.
+	 * none is cached or it is over an hour old. Never throws: a failed scan simply leaves the
+	 * scan-based insights silent.
 	 */
-	private readinessForInsights(repoActivity: UsageAnalysisStats['repoActivity']): { report: DarkFactoryReport; matrix: AgenticMatrix } | null {
+	private readinessForInsights(): { report: DarkFactoryReport } | null {
 		try {
 			const cached = this._lastReadinessScan;
-			const fresh = !!cached && Date.now() - cached.scannedAt < 60 * 60 * 1000;
-			const report = fresh ? cached!.report : this.runDarkFactoryScan();
-			const matrix = _buildAgenticMatrix(report, repoActivity);
-			this._lastReadinessScan = { report, matrix, scannedAt: fresh ? cached!.scannedAt : Date.now() };
-			return { report, matrix };
+			if (cached && Date.now() - cached.scannedAt < 60 * 60 * 1000) { return { report: cached.report }; }
+			const report = this.runDarkFactoryScan();
+			this.rememberReadinessScan(report);
+			return { report };
 		} catch (err) {
 			this.warn(`AI Readiness scan for insights failed: ${err}`);
 			return null;
@@ -11473,23 +11463,14 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	}
 
 	/**
-	 * Adoption paired with rework, and any stretched repositories, for the strip next to the
-	 * Fluency Score. Deliberately built here and not in calculateMaturityScores: that result is
-	 * also what gets uploaded to a sharing server, and none of this may leave the machine.
-	 *
-	 * Opening the Fluency Score never scans repositories (#2194): stretched repositories come only
-	 * from a scan already cached by the AI Readiness tab or the insights pass, and are simply
-	 * omitted until one exists.
+	 * Adoption paired with rework, for the strip next to the Fluency Score. Deliberately built
+	 * here and not in calculateMaturityScores: that result is also what gets uploaded to a
+	 * sharing server, and none of this may leave the machine. Never scans repositories (#2194).
 	 */
-	private buildAgenticQualityView(): { comparison: ReturnType<typeof _compareSpeedAndQuality>; stretchedRepos: string[] } | null {
+	private buildAgenticQualityView(): { comparison: ReturnType<typeof _compareSpeedAndQuality> } | null {
 		const stats = this.currentUsageAnalysisStats;
 		if (!stats) { return null; }
-		const cached = this._lastReadinessScan;
-		const matrix = cached ? _buildAgenticMatrix(cached.report, stats.repoActivity) : null;
-		return {
-			comparison: _compareSpeedAndQuality(stats.activityTrend),
-			stretchedRepos: _stretchedPlacements(matrix).map(p => p.repository),
-		};
+		return { comparison: _compareSpeedAndQuality(stats.activityTrend) };
 	}
 
 	/** Opens the AI Readiness tab in the existing Usage Analysis panel. */
@@ -11506,9 +11487,9 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 		try {
 			const report = this.runDarkFactoryScan();
-			const matrix = this.rememberReadinessScan(report);
+			this.rememberReadinessScan(report);
 			if (this.analysisPanel === panel) {
-				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report, matrix });
+				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report });
 			}
 		} catch (err) {
 			this.warn(`Dark Factory readiness scan failed: ${err}`);
@@ -11569,7 +11550,6 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			downloadChartImage: () => this.dispatch('downloadChartImage', () => this.downloadChartImage()),
 			exportImageFailed: async () => { vscode.window.showErrorMessage('Failed to export the Fluency Score image. The dashboard was not ready yet; try again once it has finished loading.'); },
 			shareToSocialFailed: async () => { vscode.window.showErrorMessage('Failed to generate share card image.'); },
-			showReadiness: () => this.dispatch('showReadiness:maturity', () => this.showReadiness()),
 		};
 		if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
 		await this.handleMaturityConditionalMessage(message);

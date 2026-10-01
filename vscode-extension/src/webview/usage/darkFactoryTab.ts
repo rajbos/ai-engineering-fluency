@@ -1,17 +1,15 @@
 import { setHtml } from '../shared/domUtils';
 import { localize } from '../shared/localization';
 import { buildDarkFactoryChatPrompt, buildDarkFactorySectionHtml } from '../maturity/darkFactorySection';
-import { buildAgenticMatrixHtml, sanitizeAgenticMatrix } from './agenticMatrixSection';
-import type { AgenticMatrix, DarkFactoryReport } from '../../../../src/types';
+import type { DarkFactoryReport } from '../../../../src/types';
 
-type ReadinessMessage = { command: string; requestId?: unknown; report?: unknown; matrix?: unknown };
+type ReadinessMessage = { command: string; requestId?: unknown; report?: unknown };
 type OutgoingMessage =
 	| { command: 'loadReadiness'; requestId: number }
 	| { command: 'draftCopilotChatWithPrompt'; prompt: string };
 
 export class DarkFactoryTab {
 	private report: DarkFactoryReport | undefined;
-	private matrix: AgenticMatrix | null = null;
 	private status: 'idle' | 'loading' | 'loaded' | 'error' = 'idle';
 	private requestId = 0;
 	private available = false;
@@ -75,7 +73,7 @@ export class DarkFactoryTab {
 		const content = document.getElementById('readiness-content');
 		if (!content) { return; }
 		const html = this.status === 'loaded' && this.report
-			? buildAgenticMatrixHtml(this.matrix) + buildDarkFactorySectionHtml(this.report)
+			? buildDarkFactorySectionHtml(this.report)
 			: this.status === 'error'
 				? `<div class="df-error" role="alert">${localize('readiness.scanFailed')}</div>`
 				: `<div class="df-empty" role="status">${localize('readiness.loading')}</div>`;
@@ -101,7 +99,6 @@ export class DarkFactoryTab {
 	handleMessage(message: ReadinessMessage): boolean {
 		if (message.command !== 'readinessLoaded' && message.command !== 'readinessScanFailed') { return false; }
 		if (message.requestId !== this.requestId) { return true; }
-		this.matrix = null;
 		if (message.command === 'readinessScanFailed') {
 			this.report = undefined;
 			this.status = 'error';
@@ -111,8 +108,6 @@ export class DarkFactoryTab {
 			this.status = 'error';
 		} else {
 			this.report = message.report as DarkFactoryReport;
-			// The matrix is optional: a malformed one is dropped, the readiness report still renders.
-			this.matrix = sanitizeAgenticMatrix(message.matrix);
 			this.status = 'loaded';
 		}
 		this.render();

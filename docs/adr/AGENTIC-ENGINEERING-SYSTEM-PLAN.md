@@ -26,14 +26,18 @@ gap. It changes no code; each phase below lands as its own PR.
 
 ## Status: implemented
 
-All six items and Phase 0 are implemented; see
+Phase 0 and items 2–6 are implemented; item 1 was dropped (see below). See
 [docs/features/AGENTIC-ENGINEERING-SIGNALS.md](../features/AGENTIC-ENGINEERING-SIGNALS.md) for the
 shipped behaviour. They landed together, one commit per phase, rather than as the seven PRs sketched
 under *Sequencing* below. Where the implementation departs from this plan, it is on purpose:
 
-- **Foundations do not require a stage-2 ceiling.** A single absent stage-1 control (a library with
-  no infrastructure-as-code or devcontainer) blocks the readiness ceiling at stage 1, which would
-  have ruled out "strong" for otherwise solid repositories. The score alone decides.
+- **Item 1 (adoption × foundations matrix) was dropped,** together with the
+  `agentic-system-stretched` insight and the stretched-repository note on the Fluency Score strip.
+  The plan below understated the problem with `confirmedStage`: it is not "at most 1" but 0 for
+  every repository, because stage 1 needs `branch-protection` (API-only, not collected) as well as
+  stage 2 needing `ai-policy`. The substitute score (present ÷ observed, unknowns excluded) rated a
+  repository higher the less the scan could see, so it was not a trustworthy axis. Revisit once
+  those controls can actually be observed.
 - **Exploration is contextual in the participation split:** director before a session's first
   performer turn (scoping), assessor after it (reading the change back), instead of being dropped
   when it does not follow an edit.
@@ -123,15 +127,15 @@ never classified. Add `repoActivity?: RepoAgentActivityReport` to `UsageAnalysis
 
 **PR 1** = Phase 0 alone (no UI). Low risk, unblocks everything else.
 
-## Item 1 — Adoption × Foundations matrix (headline)
+## Item 1 — Adoption × Foundations matrix (dropped — see Status)
 
 **Goal:** place every repository in one of the blog's four states and give the matching action.
 
 ### Foundations axis — do not use `confirmedStage`
 
-`confirmedStage` can never pass 1 in practice: stage 2 requires `ai-policy`, a `governance`
-control that `resolveControl()` always reports as `unknown`, and stage 1 includes
-API/`unknownWhenAbsent` controls that are unknown without a token. A matrix built on it would
+`confirmedStage` is 0 for every repository in practice: stage 1 includes `branch-protection`, an
+API control nothing collects, and stage 2 requires `ai-policy`, a `governance` control that
+`resolveControl()` always reports as `unknown`. A matrix built on it would
 put every repository in the bottom row.
 
 Instead, compute a **foundation score** in a new pure `src/agenticFoundations.ts`:
@@ -231,9 +235,8 @@ reused there.
   one-shot rate). Classify: `faster-and-steadier`, `faster-but-weaker` (adoption ↑ and rework ↑
   beyond a tolerance), `steady`, or `insufficient-data`.
 - **Fluency Score view:** under the stage header, a small "Quality alongside adoption" strip
-  showing one-shot rate and corrections/session with their month-over-month direction. When any
-  of the user's workspace repos is Stretched (Item 1), a Stage-4 result gets a non-blocking note
-  linking to the matrix. **The stage calculation in `maturityScoring.ts` does not change:**
+  showing one-shot rate and corrections/session with their month-over-month direction. (A
+  Stretched-repository note was planned here; it was dropped with Item 1.) **The stage calculation in `maturityScoring.ts` does not change:**
   scoring rules are a documented contract (`docs/FLUENCY-LEVELS.md`) and team uploads depend on
   them.
 - **Insight:** `speed-without-quality` when the class is `faster-but-weaker`.

@@ -476,9 +476,9 @@ export function insightFixtureContexts(translate: Translate): InsightContext[] {
 		contexts.push(ctx);
 	}
 
-	// Agentic engineering system: a stretched repository, adoption up with rework up, short-prompt
-	// sessions needing corrections, agent PRs with no enforced review, and rising agent PR load with
-	// reverts. Each reads only its own optional context field, so one context fires all five.
+	// Agentic engineering system: adoption up with rework up, short-prompt sessions needing
+	// corrections, agent PRs with no enforced review, and rising agent PR load with reverts. Each
+	// reads only its own optional context field, so one context fires all four.
 	{
 		const ctx = base(translate);
 		const zeroTotals = () => ({
@@ -490,11 +490,6 @@ export function insightFixtureContexts(translate: Translate): InsightContext[] {
 		});
 		ctx.activityTrend = { current: { ...zeroTotals(), correctionMoments: 20 }, currentDays: 15, previous: zeroTotals(), previousDays: 30 };
 		ctx.repoActivity = { windowDays: 30, repos: [], unattributed: zeroTotals(), totals: zeroTotals() };
-		ctx.agenticMatrix = { windowDays: 30, adoptionOnly: [], placements: [{
-			repository: 'octo/app', foundation: 'weak', foundationScore: 0.2, observedControls: 10, unknownControls: 5,
-			agenticSessions: 9, sessions: 10, highAdoption: true, quadrant: 'stretched', leaning: false,
-			missingControls: [{ id: 'ci-test-execution', label: 'Tests run in CI', stage: 1 }],
-		}] };
 		ctx.reviewControls = [{ repository: 'octo/app', agentPullRequests: 'present', humanReview: 'unknown' }];
 		ctx.agentPrActivity = [{ repository: 'octo/app', aiAuthoredRecent: 8, aiAuthoredEarlier: 4, aiRevertedPrs: 2 }];
 		contexts.push(ctx);

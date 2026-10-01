@@ -32,10 +32,8 @@ import type {
 	MemoryFilesAnalysis,
 	RepoAgentActivityReport,
 	ActivityTrendWindows,
-	AgenticMatrix,
 	DarkFactoryControlState,
 } from '../../src/types';
-import { stretchedPlacements } from '../../src/agenticFoundations';
 import { compareInstructionCohorts } from '../../src/knowledgeSignals';
 import { compareSpeedAndQuality, reworkWorsened } from '../../src/speedVsError';
 import { repoKeyFromSlug } from '../../src/repoKey';
@@ -364,8 +362,6 @@ export interface InsightContext {
 	repoActivity?: RepoAgentActivityReport | null;
 	/** Optional — this month to date against last month (src/speedVsError.ts). */
 	activityTrend?: ActivityTrendWindows | null;
-	/** Optional — adoption × foundations matrix from the latest AI Readiness scan. */
-	agenticMatrix?: AgenticMatrix | null;
 	/** Optional — per-repository review controls from the latest AI Readiness scan. */
 	reviewControls?: AgenticReviewControls[] | null;
 	/** Optional — per-repository cloud-agent PR volume and reverts from the repository PR snapshot. */
@@ -1644,22 +1640,6 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		weight: 60,
 	},
 	// ── Agentic engineering system ──────────────────────────────────────────
-	{
-		id: 'agentic-system-stretched',
-		category: 'agentic',
-		severity: 'opportunity',
-		titleKey: 'insight.agenticStretched.title',
-		buildBody: (ctx) => {
-			const stretched = stretchedPlacements(ctx.agenticMatrix);
-			const names = joinNames(ctx, stretched.slice(0, 3).map(p => p.repository));
-			const first = stretched[0]?.missingControls.slice(0, 3).map(c => c.label) ?? [];
-			return ctx.translate(plural('insight.agenticStretched.body', stretched.length), stretched.length, names, moreSuffix(ctx, stretched.length, 3), joinNames(ctx, first));
-		},
-		actionLabelKey: 'insight.action.viewReadiness',
-		actionCommand: 'aiEngineeringFluency.showReadiness',
-		appliesTo: (ctx) => stretchedPlacements(ctx.agenticMatrix).some(p => p.missingControls.length > 0),
-		weight: 88,
-	},
 	{
 		id: 'speed-without-quality',
 		category: 'trend',

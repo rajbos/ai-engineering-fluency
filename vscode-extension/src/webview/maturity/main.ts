@@ -480,7 +480,7 @@ function buildMaturityRootHtml(
         <div class="stage-banner-title stage-${data.overallStage}">${escapeHtml(data.overallLabel)}</div>
         <div class="stage-banner-subtitle">${escapeHtml(STAGE_DESCRIPTIONS[data.overallStage] || '')}</div>
       </div>
-      ${buildQualityStripHtml(sanitizeAgenticQuality(data.agenticQuality), data.overallStage)}
+      ${buildQualityStripHtml(sanitizeAgenticQuality(data.agenticQuality))}
       ${data.isDebugMode ? renderDemoControls(data.categories) : ''}
       <div class="radar-wrapper">
         <div class="radar-container">
@@ -718,7 +718,6 @@ function renderLayout(data: MaturityData): void {
 
   wireMaturityNavButtons();
   wireMaturityActionButtons();
-  document.getElementById('btn-show-readiness')?.addEventListener('click', () => vscode.postMessage({ command: 'showReadiness' }));
   wireExportHandlers();
 
   if (data.isDebugMode) {

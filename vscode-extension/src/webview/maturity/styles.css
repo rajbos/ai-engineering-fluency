@@ -1000,9 +1000,3 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
 	color: var(--warning-fg);
 	font-weight: 600;
 }
-
-.quality-stretched {
-	margin-top: 8px;
-	font-size: 12px;
-	color: var(--text-primary);
-}

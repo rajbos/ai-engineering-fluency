@@ -14,7 +14,7 @@ import { escapeHtml, formatFixed, formatPercent } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
 import type { PeriodPair, SpeedQualityClass, SpeedQualityComparison } from '../../../../src/speedVsError';
 
-export type AgenticQualityView = { comparison: SpeedQualityComparison; stretchedRepos: string[] };
+export type AgenticQualityView = { comparison: SpeedQualityComparison };
 
 const CLASSES: readonly SpeedQualityClass[] = ['faster-and-steadier', 'faster-but-weaker', 'rework-rising', 'steady', 'insufficient-data'];
 
@@ -39,7 +39,6 @@ export function sanitizeAgenticQuality(raw: any): AgenticQualityView | null {
 			oneShotRate: sanitizePair(c.oneShotRate),
 			reason,
 		},
-		stretchedRepos: Array.isArray(raw.stretchedRepos) ? raw.stretchedRepos.filter((r: unknown): r is string => typeof r === 'string').slice(0, 5) : [],
 	};
 }
 
@@ -53,19 +52,13 @@ function pairHtml(label: string, pair: PeriodPair, format: (v: number) => string
 }
 
 /** The strip; empty string when there is nothing to show. */
-export function buildQualityStripHtml(view: AgenticQualityView | null | undefined, overallStage: number): string {
+export function buildQualityStripHtml(view: AgenticQualityView | null | undefined): string {
 	if (!view) { return ''; }
-	const { comparison, stretchedRepos } = view;
+	const { comparison } = view;
 	const verdictKey = comparison.classification === 'insufficient-data'
 		? `agentic.quality.verdict.insufficient-data.${comparison.reason ?? 'too-few-sessions'}`
 		: `agentic.quality.verdict.${comparison.classification}`;
 	const warn = comparison.classification === 'faster-but-weaker' || comparison.classification === 'rework-rising';
-	const stretched = stretchedRepos.length > 0
-		? `<div class="quality-stretched">${escapeHtml(localizeFormat(
-			overallStage >= 4 ? 'agentic.quality.stretchedStage4' : 'agentic.quality.stretched',
-			stretchedRepos.join(', '),
-		))} <button class="inline-action-btn" id="btn-show-readiness">${escapeHtml(localize('agentic.quality.openReadiness'))}</button></div>`
-		: '';
 	return `<div class="quality-strip" id="quality-strip">
 		<div class="quality-strip-head">
 			<span class="quality-strip-title">${escapeHtml(localize('agentic.quality.title'))}</span>
@@ -77,6 +70,5 @@ export function buildQualityStripHtml(view: AgenticQualityView | null | undefine
 			${pairHtml(localize('agentic.quality.oneShot'), comparison.oneShotRate, v => formatPercent(v * 100, 0))}
 		</div>
 		<div class="quality-verdict${warn ? ' quality-verdict-warn' : ''}">${escapeHtml(localize(verdictKey))}</div>
-		${stretched}
 	</div>`;
 }

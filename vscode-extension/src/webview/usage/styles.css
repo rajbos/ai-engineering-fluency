@@ -1672,7 +1672,7 @@ background: var(--bg-tertiary);
 	color: var(--text-secondary);
 }
 
-/* Agentic engineering system signals (agenticSignals.ts, agenticMatrixSection.ts) */
+/* Agentic engineering system signals (agenticSignals.ts) */
 .agentic-muted {
 	font-size: 11px;
 	color: var(--text-muted);
@@ -1750,86 +1750,4 @@ background: var(--bg-tertiary);
 .agentic-definition summary {
 	cursor: pointer;
 	color: var(--link-color);
-}
-
-.agentic-matrix {
-	display: grid;
-	grid-template-columns: auto 1fr 1fr;
-	gap: 8px;
-	margin-top: 10px;
-	align-items: stretch;
-}
-
-.agentic-matrix-axis {
-	font-size: 11px;
-	color: var(--text-muted);
-	font-weight: 600;
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
-	align-self: center;
-	text-align: center;
-}
-
-.agentic-quadrant {
-	border: 1px solid var(--border-color);
-	border-radius: 8px;
-	padding: 10px;
-	background: var(--bg-tertiary);
-	min-height: 84px;
-}
-
-.agentic-quadrant-title {
-	font-size: 12px;
-	font-weight: 600;
-	color: var(--text-primary);
-}
-
-.agentic-quadrant-action {
-	font-size: 11px;
-	color: var(--text-secondary);
-	margin-top: 2px;
-}
-
-.agentic-quadrant-stretched {
-	border-color: var(--error-fg);
-}
-
-.agentic-quadrant-healthy {
-	border-color: var(--success-fg);
-}
-
-.agentic-repo-chips {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 4px;
-	margin-top: 8px;
-}
-
-.agentic-repo-chip {
-	font-size: 11px;
-	padding: 2px 8px;
-	border-radius: 10px;
-	border: 1px solid var(--border-subtle);
-	background: var(--bg-secondary);
-	color: var(--text-primary);
-}
-
-.agentic-repo-chip-leaning {
-	border-style: dashed;
-}
-
-.agentic-stretched-list {
-	margin: 8px 0 0;
-	padding-left: 18px;
-	font-size: 12px;
-	color: var(--text-secondary);
-}
-
-@media (max-width: 640px) {
-	.agentic-matrix {
-		grid-template-columns: 1fr;
-	}
-	.agentic-matrix-axis {
-		display: none;
-	}
 }

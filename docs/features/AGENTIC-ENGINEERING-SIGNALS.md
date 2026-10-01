@@ -23,29 +23,28 @@ is shaped the way it is, is in [ADR: Agentic Engineering System plan](../adr/AGE
 
 | Surface | What it shows | Blog concept |
 |---|---|---|
-| Usage Analysis → **AI Readiness** → *Adoption × foundations* | Each scanned repository in one of four states: healthy and agent-native, healthy but underused, underdeveloped, **stretched** | Stock-adoption matrix |
 | Usage Analysis → **Corrections** → *Rework per repository* | Corrections per session, corrected-session share, one-shot edits and tool calls per edit, per repository, next to its instruction files; a with/without instruction files comparison | Shared knowledge: "fast, confident mistakes" |
 | **Fluency Score** → *Quality alongside adoption* | Agent sessions per day against corrections per session and one-shot edits, this month vs last | "Measuring speed without measuring error" |
 | Usage Analysis → **Repository PRs** → *Cloud agent PRs reverted* | Reverted / merged cloud-agent PRs, with everyone else's revert rate as the baseline | Escaped defects |
 | Usage Analysis → **Insights** → *How you work with agents* | Director / performer / assessor split of classified turns | Three modes |
-| Insights | `agentic-system-stretched`, `speed-without-quality`, `delegation-without-objective`, `unreviewed-agent-merges`, `review-burden-rising`; `missing-instructions` cites the user's own cohort numbers | Anti-patterns |
+| Insights | `speed-without-quality`, `delegation-without-objective`, `unreviewed-agent-merges`, `review-burden-rising`; `missing-instructions` cites the user's own cohort numbers | Anti-patterns |
 
 ## Rules that shape it
 
 1. **Local only.** Everything here is computed from the local session cache, the local readiness
    scan and the repository PR snapshot, and rendered locally. None of it is added to backend
-   rollups, Azure uploads or the sharing server. The matrix combines a repository's controls with
-   the user's *own* usage; published, that would become per-person scoring, which the readiness
-   scan ("per product line, never per person") and the
-   [sharing-server contract](../../sharing-server/AGENTS.md) rule out. The Fluency Score strip is
+   rollups, Azure uploads or the sharing server. Per-repository rework is the user's *own* usage;
+   published, that would become per-person scoring, which the readiness scan ("per product line,
+   never per person") and the [sharing-server contract](../../sharing-server/AGENTS.md) rule out.
+   The Fluency Score strip is
    built outside `calculateMaturityScores` — whose result is uploaded — and is a separate element
    from the stage banner and radar, so the PNG, PDF and share exports never carry it.
 2. **Honest denominators.** Rework rates only use sessions whose format records per-turn tool calls
    (`modelEfficiency` present). A session without that detail has *unknown* rework, not zero, and
    the table shows both counts (`10 / 12`).
 3. **Unknown is not absent.** A repository whose checkout was not scanned shows *not scanned*
-   instead of "no instruction files". A readiness control the scan could not observe is left out of
-   the foundation score rather than counted as missing.
+   instead of "no instruction files", and a review control the scan could not observe makes
+   `unreviewed-agent-merges` say it *cannot confirm* review rather than that review is missing.
 4. **Heuristics are labelled.** Every classification is shown with its definition and its counts.
    Cohort comparisons say they are correlations. Small samples are marked or hidden.
 5. **The Fluency Score stage never changes.** The quality strip sits next to it.
@@ -68,21 +67,16 @@ all of last month, overall and per repository, for the trend.
 - **Agentic session:** any agent, custom-agent or CLI-agent interaction, on every CLI surface (terminal, the Copilot desktop app, Claude Desktop, Claude in an IDE).
 - **Delegation session:** task category `Delegation`, or at least one sub-agent call.
 
-### Adoption × foundations (`src/agenticFoundations.ts`)
+### Not included: an adoption × foundations score
 
-- **Foundations** are scored over the readiness controls of stages 1–3 as
-  present ÷ (present + absent). Unknown controls are excluded from both sides and reported.
-  Strong ≥ 70 %; weak ≤ 40 %, or no tests running in CI, or neither `AGENTS.md`-style nor
-  `copilot-instructions.md` instructions. Anything in between is *partial* and leans to the nearer
-  side (shown dashed; the stretched insight ignores leaning placements). Fewer than 6 observed
-  controls is *unassessed*.
-- **Why not the readiness stage band:** `confirmedStage` can never pass 1, because stage 2 requires
-  `ai-policy`, a governance control that is always `unknown`. And the ceiling is blocked by any one
-  absent stage-1 control, such as a library with no infrastructure-as-code.
-- **High adoption:** at least 5 agentic sessions in the window, making up at least 30 % of the
-  repository's sessions.
-- Repositories without a GitHub remote cannot be matched to sessions and are listed as not placed.
-  Repositories with agent sessions that are not open in the workspace are listed as *adoption only*.
+An earlier version placed each scanned repository on GitHub's stock-adoption matrix (healthy and
+agent-native, healthy but underused, underdeveloped, stretched), with a `agentic-system-stretched`
+insight. It was removed before release. The readiness scan cannot give a trustworthy foundations
+axis: its `confirmedStage` is 0 for every repository today, because stage 1 needs
+`branch-protection` (API-only, not collected) and stage 2 needs `ai-policy` (not scannable), so
+both always read `unknown`. A substitute score over only the observable controls would rate a
+repository higher the less the scan could see. Until those controls can be observed, the readiness
+report and the adoption signals stay separate.
 
 ### Rework and instruction files (`src/knowledgeSignals.ts`)
 
@@ -129,18 +123,16 @@ corrections, and their rate is at least 1.5× and 10 points above the scoped ses
 
 | Id | Fires when |
 |---|---|
-| `agentic-system-stretched` | A workspace repository is firmly (not leaning) stretched and has missing controls |
 | `speed-without-quality` | This month is *faster but weaker* |
 | `delegation-without-objective` | See prompt scoping above |
 | `unreviewed-agent-merges` | Agents open PRs in a workspace repository whose `human-review-enforced` control is not present. Today that control is API-only and not yet collected, so the wording says the scan *cannot confirm* review |
 | `review-burden-rising` | A repository's cloud-agent PRs in the recent half of the PR window are ≥ 5 and ≥ 1.5× the earlier half, together with reverts there or rising rework in that same repository (its own month-over-month windows, with the thresholds above) |
 
-The readiness scan behind the scan-based insights is cached and re-run at most once an hour. Opening the Fluency Score never scans: its stretched-repository note uses only a scan already cached by the AI Readiness tab or the insights pass, and is left out until one exists.
+The readiness scan behind `unreviewed-agent-merges` is cached and re-run at most once an hour. Opening the Fluency Score never scans repositories.
 
 ## Tests
 
 `repoKey`, `repoAgentActivity`, `participationModes`, `promptScoping`, `knowledgeSignals`,
-`agenticFoundations`, `speedVsError`, `prOutcomes`, `insightsEngine-agentic`,
-`webview-agenticSignals`, `webview-agenticMatrixSection`, `webview-qualityStrip` and
-`webview-darkFactoryTab` in `vscode-extension/test/unit/`, plus the localization checks in
+`speedVsError`, `prOutcomes`, `insightsEngine-agentic`, `webview-agenticSignals` and
+`webview-qualityStrip` in `vscode-extension/test/unit/`, plus the localization checks in
 `l10n.test.ts`.

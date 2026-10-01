@@ -2,7 +2,7 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import { evaluateInsights, INSIGHT_CATALOG, type InsightContext } from '../../src/insightsEngine';
 import { createTranslator } from '../../src/l10nCore';
-import type { ActivityTrendWindows, AgenticMatrix, AgenticMatrixPlacement, MissedPotentialWorkspace } from '../../../src/types';
+import type { ActivityTrendWindows, MissedPotentialWorkspace } from '../../../src/types';
 import { activityReport, repoRow, totals } from './agenticFixtures';
 import { emptyPeriod } from './fixtures/insightContexts';
 
@@ -22,29 +22,11 @@ function body(c: InsightContext, id: string): string {
 	return evaluateInsights(c, {}, 2, null).find(i => i.id === id)!.body;
 }
 
-const stretched = (repository: string, extra: Partial<AgenticMatrixPlacement> = {}): AgenticMatrixPlacement => ({
-	repository, foundation: 'weak', foundationScore: 0.2, observedControls: 10, unknownControls: 5, agenticSessions: 9, sessions: 10,
-	highAdoption: true, quadrant: 'stretched', leaning: false,
-	missingControls: [{ id: 'ci-test-execution', label: 'Tests run in CI', stage: 1 }, { id: 'codeowners', label: 'CODEOWNERS', stage: 1 }],
-	...extra,
-});
-
 test('agentic insights are in the catalog', () => {
-	for (const id of ['agentic-system-stretched', 'speed-without-quality', 'delegation-without-objective', 'unreviewed-agent-merges', 'review-burden-rising']) {
+	for (const id of ['speed-without-quality', 'delegation-without-objective', 'unreviewed-agent-merges', 'review-burden-rising']) {
 		assert.ok(INSIGHT_CATALOG.some(d => d.id === id), id);
 	}
-});
-
-test('agentic-system-stretched: fires for firmly stretched repositories and names the first controls to repair', () => {
-	const matrix: AgenticMatrix = { windowDays: 30, adoptionOnly: [], placements: [stretched('o/a'), stretched('o/lean', { leaning: true })] };
-	const c = ctx({ agenticMatrix: matrix });
-	assert.ok(ids(c).includes('agentic-system-stretched'));
-	const text = body(c, 'agentic-system-stretched');
-	assert.match(text, /^1 repository \(o\/a\)/);
-	assert.match(text, /Tests run in CI, CODEOWNERS/);
-	assert.doesNotMatch(text, /o\/lean/);
-	assert.ok(!ids(ctx({ agenticMatrix: { windowDays: 30, adoptionOnly: [], placements: [stretched('o/lean', { leaning: true })] } })).includes('agentic-system-stretched'));
-	assert.ok(!ids(ctx()).includes('agentic-system-stretched'));
+	assert.ok(!INSIGHT_CATALOG.some(d => d.id === 'agentic-system-stretched'), 'the foundations-score insight was removed');
 });
 
 function trend(currentAgentic: number, currentCorrections: number): ActivityTrendWindows {
@@ -115,14 +97,13 @@ test('missing-instructions: cites the user\'s own cohort difference when it qual
 
 test('agentic insights resolve in zh-CN without raw keys', () => {
 	const c = ctx({
-		agenticMatrix: { windowDays: 30, adoptionOnly: [], placements: [stretched('o/a')] },
 		activityTrend: trend(15, 20),
 		repoActivity: scoping(10, 4, 10, 1),
 		reviewControls: [{ repository: 'o/a', agentPullRequests: 'present', humanReview: 'absent' }],
 		agentPrActivity: [{ repository: 'o/a', aiAuthoredRecent: 8, aiAuthoredEarlier: 4, aiRevertedPrs: 2 }],
 	}, ZH);
-	const evaluated = evaluateInsights(c, {}, 2, null).filter(i => ['agentic-system-stretched', 'speed-without-quality', 'delegation-without-objective', 'unreviewed-agent-merges', 'review-burden-rising'].includes(i.id));
-	assert.equal(evaluated.length, 5);
+	const evaluated = evaluateInsights(c, {}, 2, null).filter(i => ['speed-without-quality', 'delegation-without-objective', 'unreviewed-agent-merges', 'review-burden-rising'].includes(i.id));
+	assert.equal(evaluated.length, 4);
 	for (const insight of evaluated) {
 		assert.doesNotMatch(`${insight.title} ${insight.body} ${insight.actionLabel}`, /insight\./, insight.id);
 		assert.match(insight.body, /[一-鿿]/, insight.id);
