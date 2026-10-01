@@ -1337,10 +1337,19 @@ test('l10n: per-account budget strings resolve in English and zh-cn', () => {
 
 	mock.setLanguage('zh-cn');
 	try {
-		for (const key of Object.keys(english)) {
-			assert.notEqual(t(key), english[key], `zh-cn translation for ${key}`);
+		const chinese: Record<string, string> = {
+			'accountBudgets.title': 'VS Code 中的 GitHub 帐户',
+			'accountBudgets.usedLeft': '已使用 {0} / {1} · 剩余 {2}%',
+			'accountBudgets.resets': '{0} 重置',
+			'accountBudgets.noQuota': '此计划没有计量预算',
+			'accountBudgets.unavailable': '预算不可用',
+			'accountBudgets.noSession': '请从“帐户”菜单使用此帐户登录以查看其预算',
+			'accountBudgets.lookupFailed': 'Copilot 计划查询失败（{0}）',
+		};
+		assert.deepEqual(Object.keys(chinese).sort(), Object.keys(english).sort(), 'every new key has a zh-cn assertion');
+		for (const [key, value] of Object.entries(chinese)) {
+			assert.equal(t(key), value, `zh-cn value for ${key}`);
 		}
-		assert.equal(t('accountBudgets.title'), 'VS Code 中的 GitHub 帐户');
 	} finally {
 		mock.setLanguage('en');
 	}

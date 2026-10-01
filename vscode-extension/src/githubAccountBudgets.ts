@@ -168,11 +168,19 @@ export function describeAccountBudget(b: AccountBudget, labels: AccountBudgetLab
 }
 
 /**
- * Markdown bullet lines for the status bar tooltip. Empty with fewer than two accounts, since a
- * single account is already covered by the Copilot Budget gauge above it.
+ * Whether the per-account list adds anything. It is redundant only for a lone account that has a
+ * balance, because the existing Copilot Budget gauge / API balance card already shows exactly that.
+ * A lone account without a balance (no silent session, failed lookup, no metered quota) has nothing
+ * else representing it, so it is listed to explain why.
  */
+export function shouldListAccountBudgets(budgets: ReadonlyArray<Pick<AccountBudget, 'status'> & { balance?: unknown }>): boolean {
+	if (budgets.length === 0) { return false; }
+	return !(budgets.length === 1 && budgets[0].status === 'ok' && !!budgets[0].balance);
+}
+
+/** Markdown bullet lines for the status bar tooltip; empty when {@link shouldListAccountBudgets} says so. */
 export function formatAccountBudgetLines(budgets: readonly AccountBudget[], labels: AccountBudgetLabels): string[] {
-	if (budgets.length < 2) { return []; }
+	if (!shouldListAccountBudgets(budgets)) { return []; }
 	return budgets.map((b) => {
 		const plan = b.planName ? ` (${b.planName})` : '';
 		return `- **${b.label}**${plan}: ${describeAccountBudget(b, labels)}`;

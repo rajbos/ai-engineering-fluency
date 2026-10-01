@@ -5,6 +5,7 @@ import {
 	describeAccountBudget,
 	fetchAllAccountBudgets,
 	formatAccountBudgetLines,
+	shouldListAccountBudgets,
 	parseAccountBudget,
 	type AccountAuthApi,
 	type AccountBudgetLabels,
@@ -122,8 +123,14 @@ describe('tooltip formatting', () => {
 		lookupFailed: (detail) => `lookup failed (${detail})`,
 	};
 
-	test('is empty for a single account, listing only with two or more', () => {
+	test('skips only a lone account that has a balance', () => {
 		assert.deepEqual(formatAccountBudgetLines([ok], labels), []);
+		assert.equal(shouldListAccountBudgets([]), false);
+		assert.equal(shouldListAccountBudgets([ok]), false);
+		// A lone account with no balance has nothing else representing it, so it is listed.
+		assert.equal(shouldListAccountBudgets([other]), true);
+		assert.equal(shouldListAccountBudgets([{ accountId: '9', label: 'z', status: 'no-quota' }]), true);
+		assert.deepEqual(formatAccountBudgetLines([{ accountId: '9', label: 'z', status: 'unavailable', reason: 'no-session' }], labels), ['- **z**: sign in']);
 		const lines = formatAccountBudgetLines([ok, other], labels);
 		assert.equal(lines.length, 2);
 		assert.equal(lines[0], '- **alice** (Copilot Pro): $10.00 / $39.00 used · 74.4% left');

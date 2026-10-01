@@ -38,6 +38,7 @@ import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold, compute
 import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDetection';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
+import { shouldListAccountBudgets } from '../../githubAccountBudgets';
 import { applyBillingFields, sanitizeAccountBudgets, type AccountBudgetView, type CopilotApiBalance } from './billingStatsSanitizer';
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
@@ -4874,10 +4875,10 @@ function _accountBudgetRowHtml(b: AccountBudgetView): string {
 		</div>`;
 }
 
-/** Budget per GitHub account. Shown only with 2+ accounts; a single account is covered by the API balance card. */
+/** Budget per GitHub account. Omitted only for a lone account with a balance, which the API balance card already shows. */
 function buildAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): string {
 	const list = accounts ?? [];
-	if (list.length < 2) { return ''; }
+	if (!shouldListAccountBudgets(list)) { return ''; }
 	return `
 		<div style="margin-bottom:12px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(localize('accountBudgets.title'))}</div>
@@ -4890,7 +4891,7 @@ function buildAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): str
 /** Whether the AI Billing Coverage section has anything to show for these stats. */
 function billingSectionHasContent(stats: UsageAnalysisStats): boolean {
 	const groupCosts = stats.monthBillingGroupCosts;
-	return !!stats.copilotApiBalance || (stats.accountBudgets?.length ?? 0) >= 2 || (!!groupCosts && Object.keys(groupCosts).length > 0);
+	return !!stats.copilotApiBalance || shouldListAccountBudgets(stats.accountBudgets ?? []) || (!!groupCosts && Object.keys(groupCosts).length > 0);
 }
 
 function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {

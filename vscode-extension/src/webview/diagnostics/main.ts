@@ -14,6 +14,7 @@ import { getModelColor } from "../../../../src/chartDataBuilder";
 import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
 import { localize, localizeFormat } from "../shared/localization";
 import type { AccountBudgetView } from "../usage/billingStatsSanitizer";
+import { shouldListAccountBudgets } from "../../githubAccountBudgets";
 import { applyWebviewLocale } from "../shared/webviewLocale";
 
 // Constants
@@ -2751,8 +2752,8 @@ function renderAccountBudgetRowHtml(b: AccountBudgetView): string {
 }
 
 function renderAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): string {
-  // Same threshold as the other surfaces: a single account is already covered by the quota figures above.
-  if (!accounts || accounts.length < 2) { return ""; }
+  // Same rule as the other surfaces: skip only a lone account with a balance, which the quota figures above already show.
+  if (!accounts || !shouldListAccountBudgets(accounts)) { return ""; }
   return `<p><strong>${escapeHtml(localize("accountBudgets.title"))}</strong><br/>${accounts.map(renderAccountBudgetRowHtml).join("")}</p>`;
 }
 
