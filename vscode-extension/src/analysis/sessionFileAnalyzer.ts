@@ -320,16 +320,20 @@ export async function extractSessionMetadata(deps: SessionAnalyzerDeps, sessionF
 		title = scan.title; timestamps.push(...scan.timestamps); requestTimestamps.push(...scan.requestTimestamps);
 	} catch { /* file read error */ }
 
+	// Session logs are external input: one malformed timestamp used to make toISOString() throw and reject the
+	// whole session. Keep only timestamps that denote a real instant.
+	const isRealInstant = (ms: number): boolean => !Number.isNaN(new Date(ms).getTime());
+	const validTimestamps = timestamps.filter(isRealInstant);
 	let firstInteraction: string | null = null;
 	let lastInteraction: string | null = null;
-	if (timestamps.length > 0) {
-		timestamps.sort((a, b) => a - b);
-		firstInteraction = new Date(timestamps[0]).toISOString();
-		lastInteraction = new Date(timestamps[timestamps.length - 1]).toISOString();
+	if (validTimestamps.length > 0) {
+		validTimestamps.sort((a, b) => a - b);
+		firstInteraction = new Date(validTimestamps[0]).toISOString();
+		lastInteraction = new Date(validTimestamps[validTimestamps.length - 1]).toISOString();
 	}
 
 	const dailyInteractions: { [localDayKey: string]: number } = {};
-	for (const ts of requestTimestamps) {
+	for (const ts of requestTimestamps.filter(isRealInstant)) {
 		const dayKey = toLocalDayKey(new Date(ts));
 		dailyInteractions[dayKey] = (dailyInteractions[dayKey] || 0) + 1;
 	}

@@ -121,6 +121,24 @@ test('worker output is identical to the in-process analyzer', async (t) => {
 	}
 });
 
+test('one malformed timestamp in a session does not reject the session or its details', async () => {
+	// Session logs are external input. A bad timestamp used to make toISOString() throw and fail the whole file.
+	const file = path.join(scratchDir, 'bad-timestamp.json');
+	const good = Date.now() - 60_000;
+	fs.writeFileSync(file, JSON.stringify({ requests: [
+		{ requestId: 'r1', modelId: 'copilot/gpt-4o', timestamp: 'definitely not a date', message: { text: 'one', parts: [{ text: 'one', kind: 'text' }] }, response: [] },
+		{ requestId: 'r2', modelId: 'copilot/gpt-4o', timestamp: good, message: { text: 'two', parts: [{ text: 'two', kind: 'text' }] }, response: [] },
+	] }));
+	const stat = fs.statSync(file);
+	const deps = buildInProcessDeps();
+	const analyzed = await analyzeSessionFile(deps, file, stat.mtimeMs, stat.size);
+	assert.equal(analyzed.interactions, 2);
+	assert.equal(analyzed.lastInteraction, new Date(good).toISOString(), 'the valid timestamp is used');
+	const details = await computeSessionFileDetails(deps, file, stat, detailsSkeleton(file, stat));
+	assert.ok(details.cacheUpdate, 'the details pass succeeds too');
+	assert.equal(details.details.lastInteraction, new Date(good).toISOString());
+});
+
 test('an unparseable session yields the same partial details and no cache update on both sides', async () => {
 	const broken = path.join(scratchDir, 'broken-session.json');
 	fs.writeFileSync(broken, '{"requests": [ this is not json');
@@ -211,7 +229,7 @@ test('workspace customization scan: the worker finds exactly what the in-process
 		fs.writeFileSync(path.join(repo, '.github', 'prompts', 'review.prompt.md'), 'review');
 		fs.writeFileSync(path.join(repo, 'node_modules', 'dep', '.github', 'copilot-instructions.md'), 'must be excluded');
 		const multiRoot = path.join(root, 'team.code-workspace');
-		fs.writeFileSync(multiRoot, JSON.stringify({ folders: [{ path: repo }] }));
+		fs.writeFileSync(multiRoot, JSON.stringify({ folders: [{ path: 'repo' }] }));
 		const emptyDir = path.join(root, 'empty');
 		fs.mkdirSync(emptyDir);
 

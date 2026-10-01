@@ -35,7 +35,10 @@ export interface SessionDetailsResult {
 	cacheUpdate: SessionDetailsCacheUpdate | null;
 }
 
-function setDetailsTimestamps(details: SessionFileDetails, timestamps: number[], stat: SessionStatLike): void {
+function setDetailsTimestamps(details: SessionFileDetails, allTimestamps: number[], stat: SessionStatLike): void {
+	// A malformed timestamp in a session log makes toISOString() throw; ignore those and fall back to the file's
+	// mtime only when none are usable.
+	const timestamps = allTimestamps.filter((ms) => !Number.isNaN(new Date(ms).getTime()));
 	if (timestamps.length > 0) {
 		timestamps.sort((a, b) => a - b);
 		details.firstInteraction = new Date(timestamps[0]).toISOString();

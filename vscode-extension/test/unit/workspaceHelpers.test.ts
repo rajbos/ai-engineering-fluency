@@ -1926,6 +1926,21 @@ test('parseCodeWorkspaceFolders: returns folders from valid .code-workspace with
     }
 });
 
+test('parseCodeWorkspaceFolders: relative folder entries are relative to the .code-workspace file, not the process cwd', () => {
+    // The common shape: a workspace file next to the repos it lists, with paths like "repo" and ".".
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wh-pcwf-rel-'));
+    try {
+        fs.mkdirSync(path.join(tmpDir, 'repo1'), { recursive: true });
+        fs.mkdirSync(path.join(tmpDir, 'sub', 'repo2'), { recursive: true });
+        const wsFile = path.join(tmpDir, 'team.code-workspace');
+        fs.writeFileSync(wsFile, JSON.stringify({ folders: [{ path: 'repo1' }, { path: './sub/repo2' }, { path: '.' }] }), 'utf8');
+        const real = (p: string) => fs.realpathSync.native(p);
+        assert.deepEqual(parseCodeWorkspaceFolders(wsFile), [real(path.join(tmpDir, 'repo1')), real(path.join(tmpDir, 'sub', 'repo2')), real(tmpDir)]);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
 test('parseCodeWorkspaceFolders: handles file:// URI entries', () => {
     const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'wh-pcwf-'));
     try {

@@ -839,11 +839,12 @@ export async function extractRepositoryFromContentReferences(contentReferences: 
 	return undefined;
 }
 
-function _resolveCodeWorkspaceEntry(entry: unknown): string | undefined {
+function _resolveCodeWorkspaceEntry(entry: unknown, workspaceFileDir: string): string | undefined {
 	if (typeof entry !== 'object' || entry === null) { return undefined; }
 	const e = entry as { path?: unknown; uri?: unknown };
 	let folderPath: string | undefined;
-	if (typeof e.path === 'string') { folderPath = e.path; }
+	// A relative `path` is relative to the .code-workspace file, not to this process's working directory.
+	if (typeof e.path === 'string') { folderPath = path.isAbsolute(e.path) ? e.path : path.resolve(workspaceFileDir, e.path); }
 	else if (typeof e.uri === 'string' && e.uri.startsWith('file://')) { folderPath = resolveFileUri(e.uri); }
 	if (!folderPath) { return undefined; }
 	try { return fs.realpathSync.native(folderPath); } catch { return folderPath; }
@@ -865,7 +866,7 @@ export function parseCodeWorkspaceFolders(codeWorkspacePath: string): string[] {
 		}
 		const folders: string[] = [];
 		for (const entry of obj.folders) {
-			const resolved = _resolveCodeWorkspaceEntry(entry);
+			const resolved = _resolveCodeWorkspaceEntry(entry, path.dirname(codeWorkspacePath));
 			if (resolved) { folders.push(resolved); }
 		}
 		return folders;
