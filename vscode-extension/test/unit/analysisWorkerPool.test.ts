@@ -155,6 +155,27 @@ test('a request queued behind a slow neighbour gets its hang clock when the neig
 	await pool.dispose();
 });
 
+test('a neighbour that already survived one worker death is not blamed when another request is what hangs the replacement', async () => {
+	// A crash re-sends both A and B (retries = 1 each). A then hangs the replacement worker and times out.
+	// B is innocent: it must be re-sent again rather than dropped as a repeat offender.
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 250, maxRestarts: 50 });
+	const a = pool.analyze('a', 1, 1);
+	const aOutcome = a.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'));
+	const b = pool.analyze('b', 1, 1);
+	workers[0].crash();
+	await tick();
+	assert.equal(workers.length, 2, 'both requests were re-sent to a replacement worker');
+	workers[1].announceReady(); // started fine, then A hangs it
+	assert.equal(await aOutcome, 'timeout');
+	await tick();
+	assert.equal(workers.length, 3, 'B is re-sent to a third worker instead of being failed');
+	const reSent = workers[2].received.find((r) => 'path' in r && r.path === 'b');
+	assert.ok(reSent, 'B reached the third worker');
+	workers[2].reply({ type: 'result', id: reSent.id, ok: true, result: entry(9) });
+	assert.equal((await b).tokens, 9);
+	await pool.dispose();
+});
+
 test('a worker that dies before it is ready (broken bundle) sends the request to the in-process path, not to a retry', async () => {
 	const { pool, workers } = makePool({ size: 1 });
 	const promise = pool.analyze('a.json', 1, 1);

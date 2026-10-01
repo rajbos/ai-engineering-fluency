@@ -295,6 +295,9 @@ export class AnalysisWorkerPool {
 		this.noteDeath();
 		void slot.worker.terminate().catch(() => undefined);
 		const retry: Pending[] = [];
+		// A request that timed out is why this worker was killed. Its neighbours are innocent, however many
+		// earlier deaths they have been through, so they are re-sent without spending their own retry.
+		const culpritKnown = displaced.some((p) => p.timedOut);
 		for (const pending of displaced) {
 			if (pending.timer) { clearTimeout(pending.timer); }
 			pending.timer = undefined;
@@ -304,6 +307,9 @@ export class AnalysisWorkerPool {
 				// Disposed, or the worker never got as far as `ready` (its bundle failed to load): nothing was
 				// learned about this file, so the caller may analyze it in-process.
 				pending.reject(new AnalysisWorkerError(`Analysis worker stopped (${reason})`, 'unavailable'));
+			} else if (culpritKnown) {
+				if (this.isAvailable()) { retry.push(pending); }
+				else { pending.reject(new AnalysisWorkerError(`Analysis workers keep dying (${reason})`, 'unavailable')); }
 			} else if (pending.retries >= MAX_RETRIES_AFTER_WORKER_DEATH) {
 				// Two workers died under this request: it is the likely cause (OOM, native crash). Falling back
 				// to in-process analysis would repeat that failure on the host, so this is a file failure.
