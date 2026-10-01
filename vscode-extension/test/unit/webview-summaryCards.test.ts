@@ -1,9 +1,11 @@
 import { describe, test } from 'node:test';
 import * as assert from 'node:assert/strict';
 
+import { aiuToUsd } from '../../../src/hydrafusion';
 import {
 	buildMcpAndContextRefsCard,
 	formatTopListWithOther,
+	sumSessionCost,
 	type McpAndContextRefsCardStats,
 } from '../../src/webview/logviewer/summaryCards';
 
@@ -84,5 +86,27 @@ describe('buildMcpAndContextRefsCard', () => {
 		const html = buildMcpAndContextRefsCard(stats({ usageMcpTotal: 7, usageContextTotal: 9 }));
 		assert.match(html, /summary-compact-val">7</);
 		assert.match(html, /summary-compact-val">9</);
+	});
+});
+
+describe('sumSessionCost', () => {
+	test('returns 0 when no turn carries a cost', () => {
+		assert.equal(sumSessionCost({ turns: [{ toolCalls: [] }, { toolCalls: [{}] }] }), 0);
+	});
+
+	test('sums per-turn estimates and sub-agent costs for ordinary sessions', () => {
+		const total = sumSessionCost({ turns: [
+			{ estimatedCost: 0.5, toolCalls: [] },
+			{ estimatedCost: 0.25, toolCalls: [{ subAgentCost: 0.125 }, {}] },
+		] });
+		assert.equal(total, 0.875);
+	});
+
+	test('HydraFusion AIU replaces turn estimates but sub-agent costs are still added', () => {
+		const total = sumSessionCost({
+			turns: [{ estimatedCost: 99, toolCalls: [{ subAgentCost: 0.5 }] }],
+			hydraFusion: { totalAiu: 200 },
+		});
+		assert.equal(total, aiuToUsd(200) + 0.5);
 	});
 });
