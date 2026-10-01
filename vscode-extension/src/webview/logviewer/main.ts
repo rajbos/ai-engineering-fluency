@@ -824,10 +824,10 @@ function sumSessionCost(data: SessionLogData): number {
 function buildEstimatedCostCard(data: SessionLogData): string {
 	const total = sumSessionCost(data);
 	if (total <= 0) { return ''; }
-	return `<div class="summary-card" title="Estimated USD cost of this session, summed from the per-turn costs (including sub-agents). Based on model pricing; may differ from your actual bill.">
+	return `<div class="summary-card" title="${escapeHtml(localize('logviewer.summary.estimatedCostTooltip'))}">
 <div class="summary-label">💰 ${localize('logviewer.summary.estimatedCost')}</div>
 <div class="summary-value">${formatCost(total)}</div>
-<div class="summary-sub">Summed across all turns</div>
+<div class="summary-sub">${localize('logviewer.summary.estimatedCostSub')}</div>
 </div>`;
 }
 

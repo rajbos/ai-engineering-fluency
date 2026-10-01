@@ -457,6 +457,7 @@ test('l10n: log viewer summary card labels resolve in English', () => {
 		'logviewer.summary.outputTokens': 'Output Tokens',
 		'logviewer.summary.cachedInput': 'Cached Input',
 		'logviewer.summary.estimatedCost': 'Estimated Cost',
+		'logviewer.summary.estimatedCostSub': 'Summed across all turns',
 		'logviewer.summary.thinkingTokens': 'Thinking Tokens',
 		'logviewer.summary.thinkingEffort': 'Thinking Effort',
 		'logviewer.summary.subAgents': 'Sub-Agents',
