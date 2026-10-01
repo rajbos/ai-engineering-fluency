@@ -501,6 +501,37 @@ export function isSubmoduleWorktreeRemovalFailure(stderr: string): boolean {
 	return /working trees containing submodules cannot be moved or removed/i.test(stderr);
 }
 
+type WorktreeRemovalResult = { ok: boolean; stderr: string };
+
+type WorktreeForceConfirmation = (
+	message: string,
+	options: { modal: true; detail: string },
+	action: string,
+) => PromiseLike<string | undefined>;
+
+/**
+ * Requests explicit confirmation before retrying a submodule-blocked removal with --force.
+ * Keeping the destructive retry behind this injectable boundary makes the decline/confirm
+ * behavior executable in unit tests instead of relying on source-order assertions.
+ */
+export async function retrySubmoduleWorktreeRemovalWithConfirmation(
+	worktreePath: string,
+	result: WorktreeRemovalResult,
+	confirm: WorktreeForceConfirmation,
+	forceRemove: () => Promise<WorktreeRemovalResult>,
+): Promise<WorktreeRemovalResult | undefined> {
+	if (result.ok || !isSubmoduleWorktreeRemovalFailure(result.stderr)) { return result; }
+
+	const forceDelete = l10n.t('worktree.forceDelete');
+	const forceChoice = await confirm(
+		l10n.t('worktree.submoduleForcePrompt', worktreePath),
+		{ modal: true, detail: l10n.t('worktree.submoduleForceDetail') },
+		forceDelete,
+	);
+	if (forceChoice !== forceDelete) { return undefined; }
+	return forceRemove();
+}
+
 /** The computed-stat caches that carry a generation stamp. */
 export type ComputedStatsKey = 'detailed' | 'daily' | 'fullDaily' | 'usage' | 'sessionInputs' | 'memoryFiles';
 
@@ -14361,19 +14392,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       result = await this.removeGitWorktree(mainRepoRoot, worktreePath, true);
     }
 
-    if (!result.ok && isSubmoduleWorktreeRemovalFailure(result.stderr)) {
-      const forceDelete = l10n.t('worktree.forceDelete');
-      const forceChoice = await vscode.window.showWarningMessage(
-        l10n.t('worktree.submoduleForcePrompt', worktreePath),
-        {
-          modal: true,
-          detail: l10n.t('worktree.submoduleForceDetail'),
-        },
-        forceDelete,
-      );
-      if (forceChoice !== forceDelete) { return undefined; }
-      result = await this.removeGitWorktree(mainRepoRoot, worktreePath, true);
-    }
+    const submoduleRetry = await retrySubmoduleWorktreeRemovalWithConfirmation(
+      worktreePath,
+      result,
+      (message, options, action) => vscode.window.showWarningMessage(message, options, action),
+      () => this.removeGitWorktree(mainRepoRoot, worktreePath, true),
+    );
+    if (!submoduleRetry) { return undefined; }
+    result = submoduleRetry;
 
     if (!result.ok && (this.isWorktreeDirectoryRemovalFailure(result.stderr) || isSubmoduleWorktreeRemovalFailure(result.stderr))) {
       result = await this.removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath);
@@ -14538,7 +14564,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (!result.ok && /modified or untracked/i.test(result.stderr)) {
       return { status: "skipped", reason: "Has uncommitted or untracked changes." };
     }
-    if (!result.ok) {
+    if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr)) {
       result = await this.removeWorktreeDirectoryFallback(validatedMainRepoRoot, worktreePath);
     }
     if (!result.ok) {

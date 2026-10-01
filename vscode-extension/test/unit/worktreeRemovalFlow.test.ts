@@ -2,7 +2,10 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { isSubmoduleWorktreeRemovalFailure } from '../../src/extension';
+import {
+	isSubmoduleWorktreeRemovalFailure,
+	retrySubmoduleWorktreeRemovalWithConfirmation,
+} from '../../src/extension';
 import { extractBracesBlock } from './sourceStructureTestHelpers';
 
 const extensionSource = fs.readFileSync(path.join(__dirname, '../../../../src/extension.ts'), 'utf8');
@@ -15,28 +18,91 @@ function extractMethodBody(marker: string): string {
 	return extractBracesBlock(extensionSource.slice(bodyStart), '');
 }
 
-test('recognizes Git submodule worktree removal refusals', () => {
+test('recognizes only Git submodule worktree removal refusals', () => {
 	assert.equal(
 		isSubmoduleWorktreeRemovalFailure('fatal: working trees containing submodules cannot be moved or removed'),
 		true,
 	);
-	assert.equal(false, false);
+	assert.equal(
+		isSubmoduleWorktreeRemovalFailure('fatal: cannot remove a locked working tree'),
+		false,
+	);
 });
 
-test('submodule refusal requires force confirmation and retains the filesystem fallback', () => {
-	const removal = extractMethodBody('private async _removeWorktreeWithFallback(');
-	const submoduleFailureIndex = removal.indexOf('isSubmoduleWorktreeRemovalFailure(result.stderr)');
-	const promptIndex = removal.indexOf("l10n.t('worktree.submoduleForcePrompt'", submoduleFailureIndex);
-	const detailIndex = removal.indexOf("l10n.t('worktree.submoduleForceDetail')", promptIndex);
-	const confirmationIndex = removal.indexOf("l10n.t('worktree.forceDelete')", submoduleFailureIndex);
-	const forceRetryIndex = removal.indexOf('removeGitWorktree(mainRepoRoot, worktreePath, true)', confirmationIndex);
-	const fallbackIndex = removal.indexOf('removeWorktreeDirectoryFallback', forceRetryIndex);
+const submoduleFailure = {
+	ok: false,
+	stderr: 'fatal: working trees containing submodules cannot be moved or removed',
+};
 
-	assert.ok(submoduleFailureIndex >= 0, 'expected explicit handling for Git submodule removal refusals');
-	assert.ok(confirmationIndex > submoduleFailureIndex, 'expected a localized force-delete action');
-	assert.ok(promptIndex > confirmationIndex, 'expected a localized submodule confirmation prompt');
-	assert.ok(detailIndex > promptIndex, 'expected localized risk details');
-	assert.ok(forceRetryIndex > detailIndex, 'expected forced Git removal only after confirmation');
-	assert.ok(fallbackIndex > forceRetryIndex, 'expected filesystem removal and worktree pruning to remain the final fallback');
+test('declining submodule force removal makes no destructive retry', async () => {
+	let forceCalls = 0;
+	const result = await retrySubmoduleWorktreeRemovalWithConfirmation(
+		'C:\\repo\\worktree',
+		submoduleFailure,
+		async () => undefined,
+		async () => {
+			forceCalls++;
+			return { ok: true, stderr: '' };
+		},
+	);
+
+	assert.equal(result, undefined);
+	assert.equal(forceCalls, 0);
+});
+
+test('confirming submodule force removal makes exactly one destructive retry', async () => {
+	let forceCalls = 0;
+	const result = await retrySubmoduleWorktreeRemovalWithConfirmation(
+		'C:\\repo\\worktree',
+		submoduleFailure,
+		async (_message, _options, action) => action,
+		async () => {
+			forceCalls++;
+			return { ok: true, stderr: '' };
+		},
+	);
+
+	assert.deepEqual(result, { ok: true, stderr: '' });
+	assert.equal(forceCalls, 1);
+});
+
+test('unrelated Git failures are neither confirmed nor force-retried', async () => {
+	let confirmationCalls = 0;
+	let forceCalls = 0;
+	const lockedFailure = { ok: false, stderr: 'fatal: cannot remove a locked working tree' };
+	const result = await retrySubmoduleWorktreeRemovalWithConfirmation(
+		'C:\\repo\\worktree',
+		lockedFailure,
+		async () => {
+			confirmationCalls++;
+			return 'Force Delete';
+		},
+		async () => {
+			forceCalls++;
+			return { ok: true, stderr: '' };
+		},
+	);
+
+	assert.equal(result, lockedFailure);
+	assert.equal(confirmationCalls, 0);
+	assert.equal(forceCalls, 0);
+});
+
+test('bulk cleanup only uses filesystem deletion for classified OS removal failures', () => {
+	const cleanup = extractMethodBody('private async cleanupSinglePushedWorktree(');
+	assert.ok(
+		cleanup.includes('if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr))'),
+		'bulk cleanup must preserve Git safety refusals instead of force-deleting the directory',
+	);
+	assert.ok(
+		!cleanup.includes('if (!result.ok) {\n      result = await this.removeWorktreeDirectoryFallback'),
+		'bulk cleanup must not use filesystem deletion for arbitrary Git failures',
+	);
+});
+
+test('single-worktree removal retains the confirmed filesystem fallback without deinitializing submodules', () => {
+	const removal = extractMethodBody('private async _removeWorktreeWithFallback(');
+	assert.ok(removal.includes('retrySubmoduleWorktreeRemovalWithConfirmation('));
+	assert.ok(removal.includes('removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath)'));
 	assert.ok(!removal.includes('submodule", "deinit'), 'must not mutate shared submodule configuration');
 });
