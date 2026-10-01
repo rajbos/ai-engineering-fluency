@@ -137,6 +137,8 @@
   "efficiency.models.noModelsInWindow",
   "efficiency.models.noSharedModel",
   "efficiency.models.noSecondModel",
+  "efficiency.models.search.placeholder",
+  "efficiency.models.search.empty",
   "efficiency.models.controls.mode",
   "efficiency.models.controls.modelA",
   "efficiency.models.controls.modelB",

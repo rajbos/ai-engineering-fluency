@@ -590,9 +590,9 @@ function searchableSelectHtml(id: string, options: { value: string; label: strin
 	return `<div class="model-combo" data-for="${id}">
 		<button type="button" class="model-select combo-button" aria-haspopup="listbox" aria-expanded="false">${escapeHtml(current?.label ?? '')}</button>
 		<div class="combo-popup" hidden>
-			<input type="text" class="combo-search" placeholder="Search models…" aria-label="Search models" autocomplete="off" spellcheck="false">
+			<input type="text" class="combo-search" placeholder="${escapeHtml(localize('efficiency.models.search.placeholder'))}" aria-label="${escapeHtml(localize('efficiency.models.search.placeholder'))}" autocomplete="off" spellcheck="false">
 			<ul role="listbox" class="combo-list">${items}</ul>
-			<div class="combo-empty" hidden>No matching models</div>
+			<div class="combo-empty" hidden>${escapeHtml(localize('efficiency.models.search.empty'))}</div>
 		</div>
 		${selectHtml(id, options, selected).replace('class="model-select"', 'class="model-select combo-native" tabindex="-1"')}
 	</div>`;
@@ -698,15 +698,18 @@ function renderModelControls(d: EfficiencyViewData, eligible: ComparableModel[])
 		{ value: 'periods', label: localize('efficiency.models.mode.periods') },
 	], modelState.mode);
 	const caption = (key: string): string => escapeHtml(localize(`efficiency.models.controls.${key}`));
+	// Mode and window(s) share the first row; the model pickers get their own row below.
 	const body = modelState.mode === 'periods'
 		? `
-			<label>${caption('model')} ${searchableSelectHtml('model-a', models, modelState.modelA)}</label>
 			<label>${caption('baseline')} ${selectHtml('window-a', windows, modelState.windowA)}</label>
-			<label>${caption('comparedWith')} ${selectHtml('window-b', windows, modelState.windowB)}</label>`
+			<label>${caption('comparedWith')} ${selectHtml('window-b', windows, modelState.windowB)}</label>
+			<div class="model-controls-break"></div>
+			<label>${caption('model')} ${searchableSelectHtml('model-a', models, modelState.modelA)}</label>`
 		: `
+			<label>${caption('window')} ${selectHtml('window', windows, modelState.window)}</label>
+			<div class="model-controls-break"></div>
 			<label>${caption('modelA')} ${searchableSelectHtml('model-a', models, modelState.modelA)}</label>
-			<label>${caption('modelB')} ${searchableSelectHtml('model-b', modelBOptions(models), modelState.modelB)}</label>
-			<label>${caption('window')} ${selectHtml('window', windows, modelState.window)}</label>`;
+			<label>${caption('modelB')} ${searchableSelectHtml('model-b', modelBOptions(models), modelState.modelB)}</label>`;
 	return `<div class="model-controls"><label>${caption('mode')} ${modeSelect}</label>${body}</div>`;
 }
 
