@@ -2,6 +2,7 @@
 import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
+import { buildEditorLogo, syncLogoTheme } from '../shared/editorLogos';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { createPeriodSelector, PERIOD_LABELS } from '../shared/periodSelector';
 import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
@@ -467,6 +468,7 @@ function buildEditorCards(editorTotals: Record<string, number>): HTMLElement | n
 	wrap.id = 'editor-cards';
 	entries.forEach(([editor, tokens]) => {
 		const card = buildCard(`editor-${editor}`, editor, formatCompact(tokens));
+			card.prepend(buildEditorLogo(editor));
 		// JetBrains only persists user messages + assistant text in its JSONL
 		// — no API counts, no thinking tokens. Flag the caveat with an
 		// info marker on the card so users don't compare apples-to-oranges.
@@ -567,6 +569,7 @@ function wireEditorListToggle(): void {
 
 function wireInteractions(data: InitialChartData): void {
 	wireEditorListToggle();
+	syncLogoTheme();
 
 	const refresh = document.getElementById('btn-refresh');
 	refresh?.addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
