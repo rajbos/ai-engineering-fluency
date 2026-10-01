@@ -2358,6 +2358,7 @@ function handleOtelComparisonSection(message: DiagMessage): void {
 }
 
 function handleDiagnosticDataLoaded(message: DiagMessage): void {
+  if (message.accountBudgets !== undefined) { handleAccountBudgetsUpdated(message); }
   handleDiagnosticReport(message);
   handleBackendStorageSection(message);
   handleSessionFoldersSection(message);

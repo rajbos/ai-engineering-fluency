@@ -151,6 +151,9 @@ export interface AccountBudgetLabels {
 	usedLeft(used: string, budget: string, pctLeft: string): string;
 	noQuota: string;
 	unavailable: string;
+	/** Shown when no silent session exists for the account. */
+	noSession: string;
+	lookupFailed(detail: string): string;
 }
 
 /** One-line summary of an account's budget, e.g. "$12.30 / $39.00 used · 68.5% left". */
@@ -158,7 +161,10 @@ export function describeAccountBudget(b: AccountBudget, labels: AccountBudgetLab
 	if (b.status === 'ok' && b.balance) {
 		return labels.usedLeft(`$${(b.balance.usedAiCredits / 100).toFixed(2)}`, `$${b.balance.budgetUsd.toFixed(2)}`, b.balance.pctAvailable.toFixed(1));
 	}
-	return b.status === 'no-quota' ? labels.noQuota : labels.unavailable;
+	if (b.status === 'no-quota') { return labels.noQuota; }
+	if (b.reason === 'no-session') { return labels.noSession; }
+	if (b.reason === 'lookup-failed') { return labels.lookupFailed(b.detail ?? ''); }
+	return b.detail ?? labels.unavailable;
 }
 
 /**

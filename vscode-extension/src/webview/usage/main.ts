@@ -4887,11 +4887,17 @@ function buildAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): str
 		</div>`;
 }
 
+/** Whether the AI Billing Coverage section has anything to show for these stats. */
+function billingSectionHasContent(stats: UsageAnalysisStats): boolean {
+	const groupCosts = stats.monthBillingGroupCosts;
+	return !!stats.copilotApiBalance || (stats.accountBudgets?.length ?? 0) >= 2 || (!!groupCosts && Object.keys(groupCosts).length > 0);
+}
+
 function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
+	if (!billingSectionHasContent(stats)) { return ''; }
 	const api = stats.copilotApiBalance;
 	const groupCosts = stats.monthBillingGroupCosts;
 	const accountsHtml = buildAccountBudgetsHtml(stats.accountBudgets);
-	if (!api && !accountsHtml && (!groupCosts || Object.keys(groupCosts).length === 0)) { return ''; }
 
 	const copilotCostUsd = groupCosts?.['GitHub Copilot'] ?? 0;
 	const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s, v) => s + v, 0) : 0;
@@ -6081,14 +6087,19 @@ function handleUpdateStats(message: any): void {
 /** Replaces the per-account budget list in place; the next full `updateStats` carries it too. */
 function handleUpdateAccountBudgets(raw: unknown): void {
 	const accounts = sanitizeAccountBudgets(raw);
-	if (lastRenderedStats) { lastRenderedStats.accountBudgets = accounts; }
 	const container = document.getElementById('account-budgets');
-	if (container) {
-		setHtml(container, buildAccountBudgetsHtml(accounts));
-	} else if (lastRenderedStats && accounts.length >= 2) {
-		// The billing section was skipped on the last render (nothing to show then); it is eligible now.
+	if (!lastRenderedStats) {
+		if (container) { setHtml(container, buildAccountBudgetsHtml(accounts)); }
+		return;
+	}
+	const wasShown = billingSectionHasContent(lastRenderedStats);
+	lastRenderedStats.accountBudgets = accounts;
+	if (wasShown !== billingSectionHasContent(lastRenderedStats)) {
+		// The accounts alone made the section appear or disappear: re-render it, not just its list.
 		renderLayout(lastRenderedStats);
 		setupSessionsTableSort();
+	} else if (container) {
+		setHtml(container, buildAccountBudgetsHtml(accounts));
 	}
 }
 

@@ -118,6 +118,8 @@ describe('tooltip formatting', () => {
 		usedLeft: (used, budget, pct) => `${used} / ${budget} used · ${pct}% left`,
 		noQuota: 'no metered budget',
 		unavailable: 'unavailable',
+		noSession: 'sign in',
+		lookupFailed: (detail) => `lookup failed (${detail})`,
 	};
 
 	test('is empty for a single account, listing only with two or more', () => {
@@ -125,7 +127,15 @@ describe('tooltip formatting', () => {
 		const lines = formatAccountBudgetLines([ok, other], labels);
 		assert.equal(lines.length, 2);
 		assert.equal(lines[0], '- **alice** (Copilot Pro): $10.00 / $39.00 used · 74.4% left');
-		assert.equal(lines[1], '- **bob**: unavailable');
+		assert.equal(lines[1], '- **bob**: x');
+	});
+
+	test('describes each unavailable reason', () => {
+		const base = { accountId: '4', label: 'd', status: 'unavailable' } as const;
+		assert.equal(describeAccountBudget({ ...base, reason: 'no-session' }, labels), 'sign in');
+		assert.equal(describeAccountBudget({ ...base, reason: 'lookup-failed', detail: 'HTTP 404' }, labels), 'lookup failed (HTTP 404)');
+		assert.equal(describeAccountBudget({ ...base, reason: 'error', detail: 'boom' }, labels), 'boom');
+		assert.equal(describeAccountBudget(base, labels), 'unavailable');
 	});
 
 	test('describes no-quota accounts', () => {

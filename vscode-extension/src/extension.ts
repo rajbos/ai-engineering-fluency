@@ -4200,7 +4200,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Sends the per-account budgets to the open panels that show them. */
 	private pushAccountBudgetsToPanels(): void {
-		void this.analysisPanel?.webview.postMessage({ command: 'updateAccountBudgets', accountBudgets: this._accountBudgets });
+		// Through the replay buffer: a lookup that finishes before the panel's listener is ready is re-sent on readiness.
+		void this.analysisMessageReplay.publish('accountBudgets', { command: 'updateAccountBudgets', accountBudgets: this._accountBudgets });
 		void this.diagnosticsPanel?.webview.postMessage({ command: 'accountBudgetsUpdated', accountBudgets: this._accountBudgets });
 	}
 
@@ -5577,6 +5578,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			usedLeft: (used, budget, pct) => l10n.t('accountBudgets.usedLeft', used, budget, pct),
 			noQuota: l10n.t('accountBudgets.noQuota'),
 			unavailable: l10n.t('accountBudgets.unavailable'),
+			noSession: l10n.t('accountBudgets.noSession'),
+			lookupFailed: (detail) => l10n.t('accountBudgets.lookupFailed', detail),
 		});
 		if (accountLines.length > 0) {
 			tooltip.appendMarkdown(`\n---\n**${l10n.t('accountBudgets.title')}**\n\n${accountLines.join('\n')}\n`);
@@ -14923,6 +14926,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         candidatePaths,
         backendStorageInfo,
         githubAuth: githubAuthStatus,
+        accountBudgets: this._accountBudgets,
         toolCallStats: this.currentUsageAnalysisStats?.last30Days?.toolCalls ?? null,
         skillCallStats: this.currentUsageAnalysisStats?.last30Days?.skillCalls ?? null,
         skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
