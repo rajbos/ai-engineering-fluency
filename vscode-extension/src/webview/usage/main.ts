@@ -47,7 +47,7 @@ import { insightCardElementId, isInsightCardAnchor } from '../../insightAnchors'
 import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from './modelLeaderboard';
 import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
 import { sanitizeServerMemoriesAnalysis as _sanitizeServerMemoriesAnalysis, buildServerMemoriesSectionHtml } from './serverMemories';
-import { buildCorrectionsRepoSummaryHtml, buildParticipationModesCardHtml, buildRevertCellHtml, buildRevertHeaderHtml, sanitizePrOutcomeCounts, sanitizeRepoActivity } from './agenticSignals';
+import { buildCorrectionsRepoSummaryHtml, buildParticipationModesCardHtml, buildRevertCellHtml, buildRevertHeaderHtml, sanitizeRepoActivity } from './agenticSignals';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
