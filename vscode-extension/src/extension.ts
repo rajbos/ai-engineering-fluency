@@ -4198,6 +4198,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Sends the per-account budgets to the open panels that show them. */
 	private pushAccountBudgetsToPanels(): void {
 		void this.analysisPanel?.webview.postMessage({ command: 'updateAccountBudgets', accountBudgets: this._accountBudgets });
+		void this.diagnosticsPanel?.webview.postMessage({ command: 'accountBudgetsUpdated', accountBudgets: this._accountBudgets });
 	}
 
 	/** Rebuilds the status bar tooltip flyout (and its background color) from the last
@@ -5569,9 +5570,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tooltip.appendMarkdown(formatTooltipStatsTable(detailedStats, (costs) => this.sumBillingGroupCosts(costs)));
 		tooltip.appendMarkdown('\n---\n');
 		this.appendProviderCostSection(tooltip, detailedStats);
-		const accountLines = formatAccountBudgetLines(this._accountBudgets);
+		const accountLines = formatAccountBudgetLines(this._accountBudgets, {
+			usedLeft: (used, budget, pct) => l10n.t('accountBudgets.usedLeft', used, budget, pct),
+			noQuota: l10n.t('accountBudgets.noQuota'),
+			unavailable: l10n.t('accountBudgets.unavailable'),
+		});
 		if (accountLines.length > 0) {
-			tooltip.appendMarkdown(`\n---\n**GitHub accounts**\n\n${accountLines.join('\n')}\n`);
+			tooltip.appendMarkdown(`\n---\n**${l10n.t('accountBudgets.title')}**\n\n${accountLines.join('\n')}\n`);
 		}
 		return tooltip;
 	}

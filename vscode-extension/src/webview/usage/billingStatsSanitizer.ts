@@ -30,7 +30,8 @@ export type AccountBudgetView = {
 	status: 'ok' | 'no-quota' | 'unavailable';
 	planName?: string;
 	resetDate?: string;
-	error?: string;
+	reason?: 'no-session' | 'lookup-failed' | 'error';
+	detail?: string;
 	balance?: CopilotApiBalance;
 };
 
@@ -58,6 +59,7 @@ export function sanitizeCopilotApiBalance(raw: unknown): CopilotApiBalance | nul
 	};
 }
 
+const ACCOUNT_REASONS = ['no-session', 'lookup-failed', 'error'];
 const ACCOUNT_STATUSES = ['ok', 'no-quota', 'unavailable'];
 
 function optionalString(value: unknown): string | undefined {
@@ -81,7 +83,8 @@ export function sanitizeAccountBudgets(raw: unknown): AccountBudgetView[] {
 			status,
 			planName: optionalString(r.planName),
 			resetDate: optionalString(r.resetDate),
-			error: optionalString(r.error),
+			reason: ACCOUNT_REASONS.includes(r.reason as string) ? (r.reason as AccountBudgetView['reason']) : undefined,
+			detail: optionalString(r.detail),
 			...(balance ? { balance } : {}),
 		});
 	}

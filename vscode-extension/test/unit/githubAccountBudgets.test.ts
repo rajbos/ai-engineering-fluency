@@ -7,6 +7,7 @@ import {
 	formatAccountBudgetLines,
 	parseAccountBudget,
 	type AccountAuthApi,
+	type AccountBudgetLabels,
 	type AccountBudget,
 	type AccountPlanInfo,
 	type PlanFetchResult,
@@ -97,8 +98,11 @@ describe('fetchAllAccountBudgets', () => {
 		const byLabel = Object.fromEntries((await fetchAllAccountBudgets(auth, 'github', fetchPlan)).map((r) => [r.label, r]));
 		assert.equal(byLabel['ok-user'].status, 'ok');
 		assert.equal(byLabel['no-session'].status, 'unavailable');
-		assert.match(byLabel['http-fail'].error ?? '', /HTTP 404/);
-		assert.equal(byLabel['throws'].error, 'boom');
+		assert.equal(byLabel['no-session'].reason, 'no-session');
+		assert.equal(byLabel['http-fail'].reason, 'lookup-failed');
+		assert.match(byLabel['http-fail'].detail ?? '', /HTTP 404/);
+		assert.equal(byLabel['throws'].reason, 'error');
+		assert.equal(byLabel['throws'].detail, 'boom');
 	});
 
 	test('no accounts yields an empty list', async () => {
@@ -109,17 +113,22 @@ describe('fetchAllAccountBudgets', () => {
 
 describe('tooltip formatting', () => {
 	const ok: AccountBudget = { accountId: '1', label: 'alice', status: 'ok', planName: 'Copilot Pro', balance: computeApiBalance(39, 2900)! };
-	const other: AccountBudget = { accountId: '2', label: 'bob', status: 'unavailable', error: 'x' };
+	const other: AccountBudget = { accountId: '2', label: 'bob', status: 'unavailable', reason: 'error', detail: 'x' };
+	const labels: AccountBudgetLabels = {
+		usedLeft: (used, budget, pct) => `${used} / ${budget} used · ${pct}% left`,
+		noQuota: 'no metered budget',
+		unavailable: 'unavailable',
+	};
 
 	test('is empty for a single account, listing only with two or more', () => {
-		assert.deepEqual(formatAccountBudgetLines([ok]), []);
-		const lines = formatAccountBudgetLines([ok, other]);
+		assert.deepEqual(formatAccountBudgetLines([ok], labels), []);
+		const lines = formatAccountBudgetLines([ok, other], labels);
 		assert.equal(lines.length, 2);
 		assert.equal(lines[0], '- **alice** (Copilot Pro): $10.00 / $39.00 used · 74.4% left');
 		assert.equal(lines[1], '- **bob**: unavailable');
 	});
 
 	test('describes no-quota accounts', () => {
-		assert.equal(describeAccountBudget({ accountId: '3', label: 'c', status: 'no-quota' }), 'no metered budget');
+		assert.equal(describeAccountBudget({ accountId: '3', label: 'c', status: 'no-quota' }, labels), 'no metered budget');
 	});
 });

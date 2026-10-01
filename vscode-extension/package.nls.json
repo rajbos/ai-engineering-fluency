@@ -258,6 +258,8 @@
   "accountBudgets.resets": "resets {0}",
   "accountBudgets.noQuota": "No metered budget on this plan",
   "accountBudgets.unavailable": "Budget unavailable",
+  "accountBudgets.noSession": "Sign in with this account from the Accounts menu to see its budget",
+  "accountBudgets.lookupFailed": "Copilot plan lookup failed ({0})",
   "usage.sessions.contextFill.usedNearLimit": "{0} of {1} context tokens used — at or past {2}% of the window",
   "usage.sessions.contextFill.noData": "No context-window fill recorded for this session (only GitHub Copilot CLI sessions report one)",
   "usage.repoPrs.ccrCheckButton": "Check actual CCR activity",

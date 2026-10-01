@@ -4842,12 +4842,23 @@ function _billingCoverageAnalysisHtml(api: CopilotApiBalance | null | undefined,
 		</div>`;
 }
 
+/** Localized explanation for an account that has no usable budget figure. */
+function accountBudgetNote(b: AccountBudgetView): string {
+	if (b.status === 'no-quota') { return localize('accountBudgets.noQuota'); }
+	if (b.reason === 'no-session') { return localize('accountBudgets.noSession'); }
+	if (b.reason === 'lookup-failed') { return localizeFormat('accountBudgets.lookupFailed', b.detail ?? ''); }
+	return b.detail ?? localize('accountBudgets.unavailable');
+}
+
+/** The last stats handed to renderLayout(), so a live account update can re-render when no mount point exists. */
+let lastRenderedStats: UsageAnalysisStats | null = null;
+
 /** One account's row in the per-account budget list. */
 function _accountBudgetRowHtml(b: AccountBudgetView): string {
 	const plan = b.planName ? ` <span style="color:var(--text-muted);">(${escapeHtml(b.planName)})</span>` : '';
 	const name = `<span style="font-weight:600;">${escapeHtml(b.label)}</span>${plan}`;
 	if (b.status !== 'ok' || !b.balance) {
-		const note = b.status === 'no-quota' ? localize('accountBudgets.noQuota') : escapeHtml(b.error ?? localize('accountBudgets.unavailable'));
+		const note = escapeHtml(accountBudgetNote(b));
 		return `<div style="display:flex; justify-content:space-between; gap:12px; font-size:12px;"><span>${name}</span><span style="color:var(--text-muted);">${note}</span></div>`;
 	}
 	const usedPct = Math.min(100, Math.max(0, 100 - b.balance.pctAvailable));
@@ -5813,6 +5824,7 @@ function syncRenderLayoutState(stats: UsageAnalysisStats): WorkspaceCustomizatio
 }
 
 function renderLayout(stats: UsageAnalysisStats): void {
+	lastRenderedStats = stats;
 	const root = document.getElementById('root');
 	if (!root) {
 		return;
@@ -6068,8 +6080,16 @@ function handleUpdateStats(message: any): void {
 
 /** Replaces the per-account budget list in place; the next full `updateStats` carries it too. */
 function handleUpdateAccountBudgets(raw: unknown): void {
+	const accounts = sanitizeAccountBudgets(raw);
+	if (lastRenderedStats) { lastRenderedStats.accountBudgets = accounts; }
 	const container = document.getElementById('account-budgets');
-	if (container) { container.innerHTML = buildAccountBudgetsHtml(sanitizeAccountBudgets(raw)); }
+	if (container) {
+		setHtml(container, buildAccountBudgetsHtml(accounts));
+	} else if (lastRenderedStats && accounts.length >= 2) {
+		// The billing section was skipped on the last render (nothing to show then); it is eligible now.
+		renderLayout(lastRenderedStats);
+		setupSessionsTableSort();
+	}
 }
 
 function handleToolSuppressed(toolName: string): void {

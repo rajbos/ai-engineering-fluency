@@ -63,6 +63,8 @@
   "accountBudgets.resets",
   "accountBudgets.noQuota",
   "accountBudgets.unavailable",
+  "accountBudgets.noSession",
+  "accountBudgets.lookupFailed",
   "usage.sessions.contextFill.usedNearLimit",
   "usage.sessions.contextFill.noData",
   "usage.repoPrs.ccrCheckButton",

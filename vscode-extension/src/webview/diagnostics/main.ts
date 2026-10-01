@@ -2368,6 +2368,11 @@ function handleDiagnosticDataLoaded(message: DiagMessage): void {
   handleOtelComparisonSection(message);
 }
 
+function handleAccountBudgetsUpdated(message: DiagMessage): void {
+  const container = document.getElementById("diag-account-budgets");
+  if (container) { setHtml(container, renderAccountBudgetsHtml(message.accountBudgets as AccountBudgetView[] | undefined)); }
+}
+
 function handleGithubAuthUpdated(message: DiagMessage): void {
   currentGithubAuth = message.githubAuth;
   const githubTabContent = document.getElementById("tab-github");
@@ -2637,6 +2642,7 @@ const DIAG_MESSAGE_HANDLERS: Record<string, (message: DiagMessage) => void> = {
   diagnosticDataLoaded: handleDiagnosticDataLoaded,
   backendStorageInfoLoaded: handleBackendStorageSection,
   githubAuthUpdated: handleGithubAuthUpdated,
+  accountBudgetsUpdated: handleAccountBudgetsUpdated,
   diagnosticDataError: handleDiagnosticDataError,
   sessionFilesLoadProgress: handleSessionFilesLoadProgress,
   cacheCleared: handleCacheCleared,
@@ -2733,14 +2739,19 @@ function renderAccountBudgetRowHtml(b: AccountBudgetView): string {
     detail = `${escapeHtml(localizeFormat("accountBudgets.usedLeft", "$" + (b.balance.usedAiCredits / 100).toFixed(2), "$" + b.balance.budgetUsd.toFixed(2), b.balance.pctAvailable.toFixed(1)))}${reset}`;
   } else if (b.status === "no-quota") {
     detail = escapeHtml(localize("accountBudgets.noQuota"));
+  } else if (b.reason === "no-session") {
+    detail = escapeHtml(localize("accountBudgets.noSession"));
+  } else if (b.reason === "lookup-failed") {
+    detail = escapeHtml(localizeFormat("accountBudgets.lookupFailed", b.detail ?? ""));
   } else {
-    detail = escapeHtml(b.error ?? localize("accountBudgets.unavailable"));
+    detail = escapeHtml(b.detail ?? localize("accountBudgets.unavailable"));
   }
   return `<strong>${escapeHtml(b.label)}</strong>${plan}: ${detail}<br/>`;
 }
 
 function renderAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): string {
-  if (!accounts || accounts.length === 0) { return ""; }
+  // Same threshold as the other surfaces: a single account is already covered by the quota figures above.
+  if (!accounts || accounts.length < 2) { return ""; }
   return `<p><strong>${escapeHtml(localize("accountBudgets.title"))}</strong><br/>${accounts.map(renderAccountBudgetRowHtml).join("")}</p>`;
 }
 
@@ -2761,7 +2772,7 @@ ${
   return `<div class="backend-card">
 <h4>📊 API Quota Information</h4>
 ${quotaContent}
-${renderAccountBudgetsHtml(data.accountBudgets)}
+<div id="diag-account-budgets">${renderAccountBudgetsHtml(data.accountBudgets)}</div>
 </div>`;
 }
 

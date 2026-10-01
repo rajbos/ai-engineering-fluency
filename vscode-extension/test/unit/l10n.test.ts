@@ -1328,6 +1328,8 @@ test('l10n: per-account budget strings resolve in English and zh-cn', () => {
 		'accountBudgets.resets': 'resets {0}',
 		'accountBudgets.noQuota': 'No metered budget on this plan',
 		'accountBudgets.unavailable': 'Budget unavailable',
+		'accountBudgets.noSession': 'Sign in with this account from the Accounts menu to see its budget',
+		'accountBudgets.lookupFailed': 'Copilot plan lookup failed ({0})',
 	};
 	for (const [key, value] of Object.entries(english)) {
 		assert.equal(t(key), value, `English value for ${key}`);

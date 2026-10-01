@@ -80,7 +80,10 @@ export interface AccountBudget {
 	balance?: ApiBalance;
 	/** ISO date the quota resets, when the API reports it. */
 	resetDate?: string;
-	error?: string;
+	/** Why `status` is `unavailable`. A code, not prose, so each surface can localize it. */
+	reason?: 'no-session' | 'lookup-failed' | 'error';
+	/** Technical detail for the reason (e.g. "HTTP 404", or an exception message). Not localized. */
+	detail?: string;
 }
 
 /** Turns one account's plan response into an AccountBudget (without the identity fields). */
@@ -131,36 +134,41 @@ async function fetchOneAccountBudget(
 	try {
 		const session = await auth.getSession(providerId, ['read:user'], { silent: true, account });
 		if (!session) {
-			return { ...base, status: 'unavailable', error: 'No access for this account yet — sign in with it from the Accounts menu.' };
+			return { ...base, status: 'unavailable', reason: 'no-session' };
 		}
 		const { planInfo, error, statusCode } = await fetchPlan(session.accessToken);
 		if (error || !planInfo) {
-			return { ...base, status: 'unavailable', error: `Copilot plan lookup failed (HTTP ${statusCode ?? 'n/a'}): ${error ?? 'no data'}` };
+			return { ...base, status: 'unavailable', reason: 'lookup-failed', detail: error ?? (statusCode ? `HTTP ${statusCode}` : 'no data') };
 		}
 		return { ...base, ...parseAccountBudget(planInfo, planNames) };
 	} catch (err) {
-		return { ...base, status: 'unavailable', error: err instanceof Error ? err.message : String(err) };
+		return { ...base, status: 'unavailable', reason: 'error', detail: err instanceof Error ? err.message : String(err) };
 	}
 }
 
+/** Display strings for the tooltip, supplied by the caller so they can be localized. */
+export interface AccountBudgetLabels {
+	usedLeft(used: string, budget: string, pctLeft: string): string;
+	noQuota: string;
+	unavailable: string;
+}
+
 /** One-line summary of an account's budget, e.g. "$12.30 / $39.00 used · 68.5% left". */
-export function describeAccountBudget(b: AccountBudget): string {
+export function describeAccountBudget(b: AccountBudget, labels: AccountBudgetLabels): string {
 	if (b.status === 'ok' && b.balance) {
-		const usedUsd = (b.balance.usedAiCredits / 100).toFixed(2);
-		return `$${usedUsd} / $${b.balance.budgetUsd.toFixed(2)} used · ${b.balance.pctAvailable.toFixed(1)}% left`;
+		return labels.usedLeft(`$${(b.balance.usedAiCredits / 100).toFixed(2)}`, `$${b.balance.budgetUsd.toFixed(2)}`, b.balance.pctAvailable.toFixed(1));
 	}
-	if (b.status === 'no-quota') { return 'no metered budget'; }
-	return 'unavailable';
+	return b.status === 'no-quota' ? labels.noQuota : labels.unavailable;
 }
 
 /**
  * Markdown bullet lines for the status bar tooltip. Empty with fewer than two accounts, since a
  * single account is already covered by the Copilot Budget gauge above it.
  */
-export function formatAccountBudgetLines(budgets: readonly AccountBudget[]): string[] {
+export function formatAccountBudgetLines(budgets: readonly AccountBudget[], labels: AccountBudgetLabels): string[] {
 	if (budgets.length < 2) { return []; }
 	return budgets.map((b) => {
 		const plan = b.planName ? ` (${b.planName})` : '';
-		return `- **${b.label}**${plan}: ${describeAccountBudget(b)}`;
+		return `- **${b.label}**${plan}: ${describeAccountBudget(b, labels)}`;
 	});
 }
