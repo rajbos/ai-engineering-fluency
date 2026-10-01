@@ -1628,8 +1628,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Returns the first adapter that claims this session file, or null for Copilot Chat sessions. */
 	private findEcosystem(sessionFile: string): IEcosystemAdapter | null {
-		return this.ecosystems.find(e => e.handles(sessionFile)) ?? null;
+		const known = this._ecosystemByPath.get(sessionFile);
+		if (known !== undefined) { return known; }
+		const found = this.ecosystems.find(e => e.handles(sessionFile)) ?? null;
+		if (this._ecosystemByPath.size >= 50_000) { this._ecosystemByPath.clear(); }
+		this._ecosystemByPath.set(sessionFile, found);
+		return found;
 	}
+
+	/**
+	 * Which adapter owns a session path. Asked several times per file by every view (labels, details, stats), and
+	 * each ask walks all ~22 adapters' path checks on the host thread, so with thousands of files and several views
+	 * open at once that alone was a sizeable share of the host's stalls. Which adapter handles a path does not
+	 * change during a session, so it is remembered.
+	 */
+	private readonly _ecosystemByPath = new Map<string, IEcosystemAdapter | null>();
 
 	/**
 	 * Stat a session file, handling virtual paths for both OpenCode and Crush.

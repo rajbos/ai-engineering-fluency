@@ -349,6 +349,7 @@ import {
         getEditorTypeFromPath,
         detectEditorSource,
         detectClaudeCodeEditorVariant,
+        resetClaudeCodeEditorVariantCacheForTests,
         refineEditorLabelForInteractionModeSplit,
         SYNCED_INTERACTION_MODE_LABELS
 } from '../../../src/workspaceHelpers';
@@ -468,6 +469,37 @@ test('detectClaudeCodeEditorVariant: defaults to Claude Code when file is missin
                 assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code');
         } finally {
                 fs.rmSync(dir, { recursive: true, force: true });
+        }
+});
+
+test('detectClaudeCodeEditorVariant: a definitive answer is remembered, so repeated label lookups do not re-read the file', () => {
+        // Every view asks for every file's label; each ask used to open and read 64 KB synchronously on the host.
+        resetClaudeCodeEditorVariantCacheForTests();
+        const dir = fs.mkdtempSync(path.join(process.cwd(), 'claude-variant-'));
+        const file = path.join(dir, 'session.jsonl');
+        fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'cli', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+        try {
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code CLI');
+                fs.rmSync(file); // a re-read would now fall back to the default
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code CLI', 'served from memory, not from disk');
+        } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+                resetClaudeCodeEditorVariantCacheForTests();
+        }
+});
+
+test('detectClaudeCodeEditorVariant: a session with no entrypoint yet is not remembered and is detected once it gains one', () => {
+        resetClaudeCodeEditorVariantCacheForTests();
+        const dir = fs.mkdtempSync(path.join(process.cwd(), 'claude-variant-'));
+        const file = path.join(dir, 'session.jsonl');
+        fs.writeFileSync(file, JSON.stringify({ type: 'queue-operation', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+        try {
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code');
+                fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-desktop', timestamp: '2026-01-01T00:00:01.000Z' }) + '\n');
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Desktop', 'the default must not have been cached');
+        } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+                resetClaudeCodeEditorVariantCacheForTests();
         }
 });
 

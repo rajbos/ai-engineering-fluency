@@ -1076,6 +1076,32 @@ function detectCopilotFamilyFromPath(lowerPath: string): string | undefined {
  * @internal
  */
 export function detectClaudeCodeEditorVariant(filePath: string): string {
+	const known = claudeCodeVariantCache.get(filePath);
+	if (known !== undefined) { return known; }
+	const found = readClaudeCodeEditorVariant(filePath);
+	if (found !== undefined) {
+		// The entrypoint a session records never changes once written, so a definitive answer is kept. A file with
+		// no entrypoint yet is deliberately not cached: it may gain one, and must be re-read when it does.
+		if (claudeCodeVariantCache.size >= CLAUDE_CODE_VARIANT_CACHE_MAX) { claudeCodeVariantCache.clear(); }
+		claudeCodeVariantCache.set(filePath, found);
+		return found;
+	}
+	return 'Claude Code';
+}
+
+/**
+ * Called once per Claude Code session file for *every* label lookup, from several views at once. Each call used to
+ * open the file and read 64 KB synchronously on the extension host (the dominant cost of the host's longest
+ * stalls on a machine with hundreds of Claude Code sessions), so the answer is remembered per path.
+ */
+const claudeCodeVariantCache = new Map<string, string>();
+const CLAUDE_CODE_VARIANT_CACHE_MAX = 50_000;
+
+/** Test hook: forget remembered variants so a test can rewrite a file at the same path. */
+export function resetClaudeCodeEditorVariantCacheForTests(): void { claudeCodeVariantCache.clear(); }
+
+/** Reads the entrypoint from the head of a session file; `undefined` when none is recorded (or it is unreadable). */
+function readClaudeCodeEditorVariant(filePath: string): string | undefined {
 	try {
 		const fd = fs.openSync(filePath, 'r');
 		try {
@@ -1095,7 +1121,7 @@ export function detectClaudeCodeEditorVariant(filePath: string): string {
 			fs.closeSync(fd);
 		}
 	} catch { /* file unreadable — fall back to default below */ }
-	return 'Claude Code';
+	return undefined;
 }
 
 /**
