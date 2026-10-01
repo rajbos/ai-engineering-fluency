@@ -35,6 +35,8 @@ describe('computeApiBalance', () => {
 	test('treats an unknown remaining figure as fully available and never goes negative', () => {
 		assert.equal(computeApiBalance(10, undefined)?.pctAvailable, 100);
 		assert.equal(computeApiBalance(10, 5000)?.usedAiCredits, 0);
+		assert.equal(computeApiBalance(10, 5000)?.pctAvailable, 100, 'more remaining than the budget is capped at 100%');
+		assert.equal(computeApiBalance(10, -50)?.pctAvailable, 0, 'a negative remaining is floored at 0%');
 	});
 });
 

@@ -46,7 +46,7 @@ export interface ApiBalance {
 	remainingAiCredits: number;
 	/** budgetAiCredits - remainingAiCredits, never negative. */
 	usedAiCredits: number;
-	/** Percentage of the budget still available. */
+	/** Percentage of the budget still available, clamped to 0–100. */
 	pctAvailable: number;
 }
 
@@ -59,7 +59,8 @@ export function computeApiBalance(budgetUsd: number | undefined, remainingAiCred
 	const budgetAiCredits = Math.round(budgetUsd * 100);
 	const remaining = remainingAiCredits ?? budgetAiCredits;
 	const usedAiCredits = Math.max(0, budgetAiCredits - remaining);
-	const pctAvailable = budgetAiCredits > 0 ? (remaining / budgetAiCredits) * 100 : 0;
+	// Clamped: an out-of-range quota_remaining must not render as "500% left" or a negative percentage.
+	const pctAvailable = budgetAiCredits > 0 ? Math.min(100, Math.max(0, (remaining / budgetAiCredits) * 100)) : 0;
 	return { budgetUsd, budgetAiCredits, remainingAiCredits: remaining, usedAiCredits, pctAvailable };
 }
 
