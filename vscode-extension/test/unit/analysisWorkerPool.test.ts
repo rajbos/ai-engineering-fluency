@@ -22,8 +22,17 @@ class FakeWorker extends EventEmitter implements WorkerLike {
 		queueMicrotask(() => this.emit('exit', 1));
 		return Promise.resolve(1);
 	}
-	reply(message: AnalysisWorkerMessage): void { this.emit('message', message); }
-	crash(message = 'boom'): void { this.emit('error', new Error(message)); this.emit('exit', 1); }
+	private readySent = false;
+	/** A real worker announces `ready` once its bundle has initialised; tests that care about startup control it. */
+	announceReady(): void {
+		if (this.readySent) { return; }
+		this.readySent = true;
+		this.emit('message', { type: 'ready' });
+	}
+	reply(message: AnalysisWorkerMessage): void { this.announceReady(); this.emit('message', message); }
+	crash(message = 'boom'): void { this.announceReady(); this.emit('error', new Error(message)); this.emit('exit', 1); }
+	/** The bundle failed while loading: the worker dies without ever saying `ready`. */
+	crashBeforeReady(message = 'failed to load'): void { this.readySent = true; this.emit('error', new Error(message)); this.emit('exit', 1); }
 	// `on` is inherited from EventEmitter; the overloads in WorkerLike are structurally satisfied.
 }
 
@@ -112,6 +121,7 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 test('a hung analysis times out, its worker is killed, and innocent neighbours are retried', async () => {
 	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 400 });
 	const hung = pool.analyze('hung.json', 1, 1);
+	workers[0].announceReady(); // a genuinely hung worker got past startup
 	const hungOutcome = hung.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'));
 	// A second request joins the same worker later, so its own clock has not run out when the
 	// first one's does — it must survive the kill of its neighbour.
@@ -142,6 +152,40 @@ test('a request queued behind a slow neighbour gets its hang clock when the neig
 	assert.equal(workers[0].terminated, false, 'B had only been running for ~150ms; it must not be killed');
 	workers[0].reply({ type: 'result', id: workers[0].received[1].id, ok: true, result: entry(2) });
 	assert.equal((await b).tokens, 2);
+	await pool.dispose();
+});
+
+test('a worker that dies before it is ready (broken bundle) sends the request to the in-process path, not to a retry', async () => {
+	const { pool, workers } = makePool({ size: 1 });
+	const promise = pool.analyze('a.json', 1, 1);
+	workers[0].crashBeforeReady();
+	await assert.rejects(promise, (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'unavailable');
+	assert.equal(workers.length, 1, 'a worker that cannot load is not respawned for the same request');
+	await pool.dispose();
+});
+
+test('when only the pool-wide restart budget runs out, the request that happened to be there is unavailable, not failed', async () => {
+	const { pool, workers } = makePool({ size: 1, maxRestarts: 0 });
+	const promise = pool.analyze('a.json', 1, 1);
+	workers[0].crash();
+	await assert.rejects(promise, (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'unavailable');
+	assert.equal(pool.isAvailable(), false);
+	await pool.dispose();
+});
+
+test('a younger request finishing first does not restart the hang clock of the oldest', async () => {
+	// Inside a worker requests overlap, so B can finish while A is still running. A's clock must keep
+	// counting from when it started, or a hung A would be kept alive by a stream of fast neighbours.
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 300 });
+	const a = pool.analyze('a', 1, 1);
+	const aOutcome = a.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'));
+	const b = pool.analyze('b', 1, 1);
+	await sleep(200);
+	workers[0].reply({ type: 'result', id: workers[0].received[1].id, ok: true, result: entry(2) });
+	await b;
+	await sleep(250); // t≈450: past A's original deadline (300) but before a restarted one (500)
+	assert.equal(workers[0].terminated, true, 'A was never answered; its original deadline must still kill the worker');
+	assert.equal(await aOutcome, 'timeout');
 	await pool.dispose();
 });
 

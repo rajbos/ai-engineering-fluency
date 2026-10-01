@@ -33,5 +33,9 @@ export async function runOffHostThread<T>(
 			context.warn(`Analysis worker unavailable (${error.message}); analyzing in-process.`);
 		}
 	}
+	// Disposed with no usable worker (the pool is cleared on dispose): shutting down, so no full parse here.
+	if (context.isDisposed()) {
+		throw new AnalysisWorkerError('Extension disposed before the analysis could run', 'unavailable');
+	}
 	return inProcess();
 }

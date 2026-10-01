@@ -220,6 +220,9 @@ test('the host event loop stays responsive while the worker parses a large sessi
 			last = Date.now();
 			const result = await pool.analyze(bigSession, stat.mtimeMs, stat.size);
 			assert.equal(result.interactions, 20000);
+			// A parse that blocked this thread resolves before the overdue tick can run; count the stretch since
+			// the last tick that did, or such a regression would read as "never starved".
+			worstGap = Math.max(worstGap, Date.now() - last);
 		} finally {
 			clearInterval(ticker);
 		}

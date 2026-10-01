@@ -55,9 +55,9 @@ host thread is idle ~90% of the time while it runs.
 
 | kind | meaning | host behaviour |
 |---|---|---|
-| `unavailable` | the worker could not be used (never started, died twice, restart budget spent) | fall back to the in-process analyzer |
+| `unavailable` | the worker could not be used (failed before `ready`, pool-wide restart budget spent, pool disposed) | fall back to the in-process analyzer (not once the extension is disposed) |
 | `timeout` | the file hung a worker for 3 minutes (worker is killed and respawned) | reject — running it in-process would move the hang onto the host |
-| `failed` | the analysis itself threw | reject, **keeping `error.code`** (e.g. `ENOENT`) so existing handling still works |
+| `failed` | the analysis itself threw, or the request killed two workers | reject, **keeping `error.code`** (e.g. `ENOENT`) so existing handling still works |
 
 A worker death re-sends its in-flight requests once on a fresh worker; a request that kills two workers is
 rejected as `failed` (it is the likely cause — an out-of-memory kill or native crash — and must not be retried on the

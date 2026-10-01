@@ -77,6 +77,8 @@ interface Pending {
 interface Slot {
 	worker: WorkerLike;
 	pending: Map<number, Pending>;
+	/** Set when the worker posts `ready`, i.e. its bundle loaded and initialised. */
+	ready: boolean;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 3 * 60 * 1000;
@@ -224,7 +226,7 @@ export class AnalysisWorkerPool {
 			}) as unknown as WorkerLike;
 		// A worker alone must never keep the host process alive.
 		worker.unref?.();
-		const slot: Slot = { worker, pending: new Map() };
+		const slot: Slot = { worker, pending: new Map(), ready: false };
 		this.slots.push(slot);
 		worker.on('message', (message) => this.onMessage(slot, message));
 		worker.on('error', (error) => this.onWorkerGone(slot, `worker error: ${error.message}`));
@@ -235,15 +237,21 @@ export class AnalysisWorkerPool {
 
 	private onMessage(slot: Slot, message: AnalysisWorkerMessage): void {
 		if (message.type === 'warn') { this.options.warn(message.message); return; }
+		if (message.type === 'ready') { slot.ready = true; return; }
 		if (message.type !== 'result') { return; }
 		const pending = slot.pending.get(message.id);
 		if (!pending) { return; }
+		// Whether this was the request at the front of the worker's line decides below whether the next
+		// one has just started running (see restartOldestClock).
+		const wasOldest = slot.pending.values().next().value === pending;
 		slot.pending.delete(message.id);
 		if (pending.timer) { clearTimeout(pending.timer); }
 		pending.timer = undefined;
 		if (message.ok) { pending.resolve(message.result); }
 		else { pending.reject(new AnalysisWorkerError(message.error, 'failed', message.code)); }
-		this.restartOldestClock(slot);
+		// Requests run concurrently inside a worker (one's disk read overlaps another's parse), so a younger
+		// one can finish first. That says nothing about the oldest, which must keep its running clock.
+		if (wasOldest) { this.restartOldestClock(slot); }
 		this.pump();
 	}
 
@@ -292,15 +300,20 @@ export class AnalysisWorkerPool {
 			pending.timer = undefined;
 			if (pending.timedOut) {
 				pending.reject(new AnalysisWorkerError(`Analysis timed out (${reason})`, 'timeout'));
-			} else if (this.disposed) {
+			} else if (this.disposed || !slot.ready) {
+				// Disposed, or the worker never got as far as `ready` (its bundle failed to load): nothing was
+				// learned about this file, so the caller may analyze it in-process.
 				pending.reject(new AnalysisWorkerError(`Analysis worker stopped (${reason})`, 'unavailable'));
-			} else if (pending.retries < MAX_RETRIES_AFTER_WORKER_DEATH && this.isAvailable()) {
-				pending.retries++;
-				retry.push(pending);
-			} else {
+			} else if (pending.retries >= MAX_RETRIES_AFTER_WORKER_DEATH) {
 				// Two workers died under this request: it is the likely cause (OOM, native crash). Falling back
 				// to in-process analysis would repeat that failure on the host, so this is a file failure.
 				pending.reject(new AnalysisWorkerError(`Analysis worker died repeatedly (${reason})`, 'failed'));
+			} else if (!this.isAvailable()) {
+				// Only the pool-wide restart budget ran out; this request is not shown to be the culprit.
+				pending.reject(new AnalysisWorkerError(`Analysis workers keep dying (${reason})`, 'unavailable'));
+			} else {
+				pending.retries++;
+				retry.push(pending);
 			}
 		}
 		// Re-sent work goes to the front: it has already waited its turn once.

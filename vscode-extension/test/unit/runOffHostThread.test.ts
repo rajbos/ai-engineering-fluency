@@ -71,3 +71,12 @@ test('does not start an in-process parse once the extension is disposed', async 
 		(e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'unavailable',
 	);
 });
+
+test('does not start an in-process parse after dispose even when there is no pool left to reject', async () => {
+	// dispose() clears the pool, so a late call arrives with nothing to try and must not fall through to a full parse.
+	const { context } = makeContext(undefined, true);
+	await assert.rejects(
+		runOffHostThread(context, async () => 'unused', neverInProcess),
+		(e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'unavailable',
+	);
+});
