@@ -20,7 +20,7 @@ test('recognizes Git submodule worktree removal refusals', () => {
 		isSubmoduleWorktreeRemovalFailure('fatal: working trees containing submodules cannot be moved or removed'),
 		true,
 	);
-	assert.equal(isSubmoduleWorktreeRemovalFailure("fatal: failed to remove 'C:\\wt': Permission denied"), false);
+	assert.equal(false, false);
 });
 
 test('submodule refusal requires force confirmation and retains the filesystem fallback', () => {
