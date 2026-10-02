@@ -26,9 +26,21 @@ test('runs in-process when there is no pool at all (worker disabled or bundle mi
 	assert.equal(await runOffHostThread(context, async () => { throw new Error('no pool'); }, async () => 'in-process'), 'in-process');
 });
 
-test('runs in-process when the pool reports itself unavailable', async () => {
+test('a disabled pool is still asked, and runs the file in-process only when it answers unavailable — without a warning per file', async () => {
+	const { context, warnings } = makeContext(fakePool(false));
+	let asked = 0;
+	const result = await runOffHostThread(context, async () => { asked++; throw new AnalysisWorkerError('Analysis worker pool is not available', 'unavailable'); }, async () => 'in-process');
+	assert.equal(result, 'in-process');
+	assert.equal(asked, 1, 'the pool is consulted even though it is disabled');
+	assert.deepEqual(warnings, [], 'a permanently disabled pool has already said so once');
+});
+
+test('a disabled pool that rejects a file as failed (it hung or killed a worker earlier) is never retried on the host', async () => {
 	const { context } = makeContext(fakePool(false));
-	assert.equal(await runOffHostThread(context, async () => { throw new Error('no pool'); }, async () => 'in-process'), 'in-process');
+	await assert.rejects(
+		runOffHostThread(context, async () => { throw new AnalysisWorkerError('skipped until it changes', 'failed'); }, neverInProcess),
+		(e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'failed',
+	);
 });
 
 test('falls back in-process, and says so, when the worker was unavailable for this request', async () => {

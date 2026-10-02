@@ -63,6 +63,12 @@ A worker death re-sends its in-flight requests once on a fresh worker; a request
 rejected as `failed` (it is the likely cause — an out-of-memory kill or native crash — and must not be retried on the
 host). When a request times out, its neighbours on that worker are re-sent without spending their own retry.
 
+A request that timed out a worker, or killed two, is **quarantined** (keyed by file path, modified time and size) for the rest
+of the session: later requests for that version of the file are rejected as `failed` — including once the restart budget is
+spent and every other request falls back to the host. Without that, repeated deaths from a few dangerous files would disable
+the pool and the next refresh would parse those same files on the host. A file that changes gets another chance. (If a hang
+is blamed on the wrong request, see below, that request is skipped for the session too.)
+
 Workers run their requests **concurrently** (they are mostly waiting on disk or on the host). A strictly in-order
 worker was tried and reverted: one slow host lookup then froze every request queued behind it. The accepted cost is
 that if a request genuinely hangs the thread while another is in flight, the older one can be the one blamed; the

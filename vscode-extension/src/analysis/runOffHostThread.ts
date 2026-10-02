@@ -23,14 +23,17 @@ export async function runOffHostThread<T>(
 	inProcess: () => Promise<T>,
 ): Promise<T> {
 	const { pool } = context;
-	if (pool?.isAvailable()) {
+	if (pool) {
+		// Even a disabled pool is asked: it rejects a file that earlier hung or killed a worker as `failed`, which
+		// must not become an in-process parse just because the pool has since given up.
 		try {
 			return await viaWorker(pool);
 		} catch (error) {
 			if (context.isDisposed() || !(error instanceof AnalysisWorkerError) || error.kind !== 'unavailable') {
 				throw error;
 			}
-			context.warn(`Analysis worker unavailable (${error.message}); analyzing in-process.`);
+			// A pool that is permanently disabled has said so once; do not repeat it for every file.
+			if (pool.isAvailable()) { context.warn(`Analysis worker unavailable (${error.message}); analyzing in-process.`); }
 		}
 	}
 	// Disposed with no usable worker (the pool is cleared on dispose): shutting down, so no full parse here.

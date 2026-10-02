@@ -401,3 +401,43 @@ test('a request re-sent after its worker died while it waited on the host is a n
 	assert.equal(await outcome, 'timeout');
 	await pool.dispose();
 });
+
+test('a file that timed out a worker is rejected immediately next time, until the file changes', async () => {
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 60, maxRestarts: 50 });
+	const first = pool.analyze('hang.json', 100, 10);
+	workers[0].announceReady();
+	await assert.rejects(first, (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'timeout');
+	await sleep(10);
+	const workersBefore = workers.length;
+	await assert.rejects(pool.analyze('hang.json', 100, 10), (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'failed', 'same version of the file: skipped');
+	assert.equal(workers.length, workersBefore, 'and no worker was spent on it');
+	void pool.analyze('hang.json', 200, 10).catch(() => undefined); // modified file: another chance
+	assert.ok(workers.some((w) => w.received.some((r) => 'mtime' in r && r.mtime === 200)), 'a changed file is tried again');
+	await pool.dispose();
+});
+
+test('a file that proved dangerous stays rejected after the pool has given up, while other files fall back', async () => {
+	// The safety rule is that a hang or crash is never re-run on the host. Once the restart budget is spent every
+	// request bypasses the workers, which must not turn the proven-bad file into an in-process parse.
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 60, maxRestarts: 0 });
+	const bad = pool.analyze('bad.json', 1, 1);
+	workers[0].announceReady();
+	await assert.rejects(bad, (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'timeout');
+	assert.equal(pool.isAvailable(), false, 'the single death spent the budget');
+	await assert.rejects(pool.analyze('bad.json', 1, 1), (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'failed', 'the proven-bad file is still skipped');
+	await assert.rejects(pool.analyze('other.json', 1, 1), (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'unavailable', 'any other file may use the fallback');
+	await pool.dispose();
+});
+
+test('a file that killed two workers is quarantined too', async () => {
+	const { pool, workers } = makePool({ size: 1, maxRestarts: 50 });
+	const request = pool.analyze('crashy.json', 1, 1);
+	workers[0].crash();
+	await tick();
+	workers[1].crash();
+	await assert.rejects(request, (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'failed');
+	const before = workers.length;
+	await assert.rejects(pool.analyze('crashy.json', 1, 1), (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'failed');
+	assert.equal(workers.length, before, 'it does not cost another worker');
+	await pool.dispose();
+});

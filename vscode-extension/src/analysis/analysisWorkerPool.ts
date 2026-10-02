@@ -77,6 +77,20 @@ export interface AnalysisWorkerPoolOptions {
 
 type AnalysisResult = SessionFileCache | SessionDetailsResult | CustomizationFileEntry[] | QuickSessionAnalysis | null;
 
+/**
+ * Identifies the thing a request asks to be analysed, including the version of the file, so that a file proven to
+ * hang or kill a worker stays rejected until it actually changes. Undefined for requests that are not keyed on a file.
+ */
+function quarantineKey(request: AnalysisRequest): string | undefined {
+	switch (request.op) {
+		case 'analyze': return `${request.path}|${request.mtime}|${request.size}`;
+		case 'details': return `${request.path}|${request.mtimeMs}|${request.size}`;
+		case 'supplement': return `${request.path}|supplement|${request.cached.mtime}|${request.cached.size ?? ''}`;
+		case 'quick': return `${request.path}|quick|${request.content.length}`;
+		case 'customization': return `workspace|${request.workspace}`;
+	}
+}
+
 interface Pending {
 	request: AnalysisRequest;
 	resolve: (value: AnalysisResult) => void;
@@ -141,6 +155,12 @@ export class AnalysisWorkerPool {
 	private lastProgressAt = Date.now();
 	private lastStallReportAt = 0;
 	private hostLookupCooldownUntil = 0;
+	/**
+	 * Requests proven dangerous: they timed out a worker, or killed two. They are rejected as `failed` for the rest of
+	 * the session — including after the pool is disabled, when every other request falls back to the host. Running
+	 * them there would put the hang or the out-of-memory kill on the one thread that must stay responsive.
+	 */
+	private readonly quarantined = new Set<string>();
 	private stallWatch: NodeJS.Timeout | undefined;
 
 	constructor(private readonly options: AnalysisWorkerPoolOptions) {}
@@ -203,12 +223,17 @@ export class AnalysisWorkerPool {
 	// ── Submission ──────────────────────────────────────────────────────────
 
 	private submit(build: (id: number) => AnalysisRequest): Promise<AnalysisResult> {
+		const request = build(this.nextRequestId++);
+		const key = quarantineKey(request);
+		// Checked before availability: a dangerous file must stay rejected even once the pool is broken.
+		if (key !== undefined && this.quarantined.has(key)) {
+			return Promise.reject(new AnalysisWorkerError('This file hung or crashed an analysis worker earlier in this session and is skipped until it changes', 'failed'));
+		}
 		if (!this.isAvailable()) {
 			return Promise.reject(new AnalysisWorkerError('Analysis worker pool is not available', 'unavailable'));
 		}
-		const id = this.nextRequestId++;
 		return new Promise<AnalysisResult>((resolve, reject) => {
-			this.queue.push({ request: build(id), resolve, reject, timer: undefined, retries: 0, timedOut: false, hostLookups: 0, postedAt: 0 });
+			this.queue.push({ request, resolve, reject, timer: undefined, retries: 0, timedOut: false, hostLookups: 0, postedAt: 0 });
 			this.startStallWatch();
 			this.pump();
 		});
@@ -435,6 +460,7 @@ export class AnalysisWorkerPool {
 			// re-sent request would never get a hang clock or count as running.
 			pending.hostLookups = 0;
 			if (pending.timedOut) {
+				this.quarantine(pending);
 				pending.reject(new AnalysisWorkerError(`Analysis timed out (${reason})`, 'timeout'));
 			} else if (this.disposed || !slot.ready) {
 				// Disposed, or the worker never got as far as `ready` (its bundle failed to load): nothing was
@@ -446,6 +472,7 @@ export class AnalysisWorkerPool {
 			} else if (pending.retries >= MAX_RETRIES_AFTER_WORKER_DEATH) {
 				// Two workers died under this request: it is the likely cause (OOM, native crash). Falling back
 				// to in-process analysis would repeat that failure on the host, so this is a file failure.
+				this.quarantine(pending);
 				pending.reject(new AnalysisWorkerError(`Analysis worker died repeatedly (${reason})`, 'failed'));
 			} else if (!this.isAvailable()) {
 				// Only the pool-wide restart budget ran out; this request is not shown to be the culprit.
@@ -458,6 +485,11 @@ export class AnalysisWorkerPool {
 		// Re-sent work goes to the front: it has already waited its turn once.
 		this.queue.unshift(...retry);
 		this.pump();
+	}
+
+	private quarantine(pending: Pending): void {
+		const key = quarantineKey(pending.request);
+		if (key !== undefined) { this.quarantined.add(key); }
 	}
 
 	private noteDeath(): void {
