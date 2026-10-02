@@ -702,5 +702,13 @@
   "backend.syncNow.progress": "正在同步到{0}...",
   "backend.syncNow.synced": "已成功同步到{0}",
   "backend.syncNow.failed": "上传到{0}失败。有关详细信息，请查看 AI Engineering Fluency 输出通道。",
-  "backend.syncNow.nothingSent": "未向{0}上传任何数据。可能有另一个 VS Code 窗口正在同步，或者团队服务器需要登录 GitHub。有关详细信息，请查看输出通道。"
+  "backend.syncNow.nothingSent": "未向{0}上传任何数据。可能有另一个 VS Code 窗口正在同步，或者团队服务器需要登录 GitHub。有关详细信息，请查看输出通道。",
+  "efficiency.trends.bucketIntro": "{1}的{0}比率（{2}）。",
+  "efficiency.trends.bucketsDaily": "{0} 天",
+  "efficiency.trends.bucketsWeekly": "{0} 周",
+  "efficiency.trends.bucketsMonthly": "{0} 个月",
+  "efficiency.trends.badges": "徽章将窗口的近半段与前半段进行比较；绿色表示比率朝更高效的方向变化。",
+  "efficiency.trends.partialDaily": "当前这一天尚未结束。",
+  "efficiency.trends.partialWeekly": "当前这一周尚未结束。",
+  "efficiency.trends.partialMonthly": "当前这一月尚未结束。"
 }

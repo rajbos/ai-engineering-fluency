@@ -40,6 +40,7 @@ import {
 	compareModels,
 	computeModelPeriodMetrics,
 	computeSkillImpact,
+	efficiencyTodayKey,
 	filterModelsByVendor,
 	filterSessionsByEditor,
 	listComparableModels,
@@ -205,6 +206,12 @@ interface ScopedData {
 	hasSkills: boolean;
 	/** True when the range reaches further back than the session-behaviour window. */
 	behaviorGap: boolean;
+	/**
+	 * True when the range still reaches today, so its last bucket is only
+	 * partly filled. A drilled-into historical week or month ends in the past
+	 * and is complete — saying otherwise would read as missing data.
+	 */
+	includesToday: boolean;
 	/** Editor this view is scoped to, or undefined for every editor. */
 	editor: string | undefined;
 }
@@ -232,6 +239,7 @@ function computeScopedData(d: EfficiencyViewData): ScopedData {
 			hasLoc: d.hasLoc, hasDuration: d.hasDuration, hasRetry: d.hasRetry, hasApply: d.hasApply,
 			skills: d.skillTrends, skillImpact: d.skillImpact, hasSkills: d.hasSkills,
 			behaviorGap: false,
+			includesToday: true,
 			editor: undefined,
 		};
 	}
@@ -255,6 +263,7 @@ function computeScopedData(d: EfficiencyViewData): ScopedData {
 		skillImpact: computeSkillImpact(filterSessionsByEditor(inRange, editor)),
 		hasSkills: skills.totalCalls > 0,
 		behaviorGap: rangeExceedsBehaviorWindow(scope, now, d.behaviorWindowDays),
+		includesToday: range.endKey >= efficiencyTodayKey(now),
 		editor,
 	};
 }
@@ -555,13 +564,31 @@ function renderTrendsTab(d: EfficiencyViewData, s: ScopedData): string {
 	}).join('');
 	return `
 		${renderScopeToolbar(d, s)}
-		<p class="eff-section-note">${escapeHtml(bucketIntro(s))} Badges compare the recent half of the window against the earlier half; green means the ratio moved in the efficient direction. The current ${s.resolution === 'daily' ? 'day' : s.resolution === 'weekly' ? 'week' : 'month'} is partial.</p>
+		<p class="eff-section-note">${escapeHtml(trendsIntro(s))}</p>
 		<div class="trend-grid">${cards}</div>`;
+}
+
+/** Capitalized resolution suffix of the per-resolution localization keys. */
+function resolutionKeySuffix(resolution: EfficiencyBucketResolution): string {
+	return resolution.charAt(0).toUpperCase() + resolution.slice(1);
 }
 
 /** Opening sentence of a scoped chart: what is on the x-axis, and over what window. */
 function bucketIntro(s: ScopedData): string {
-	return `${resolutionLabel(s.resolution)} ratios over ${s.range.label.toLowerCase()} (${s.points.length} ${s.resolution === 'daily' ? 'days' : s.resolution === 'weekly' ? 'weeks' : 'months'}).`;
+	const buckets = localizeFormat(`efficiency.trends.buckets${resolutionKeySuffix(s.resolution)}`, s.points.length);
+	return localizeFormat('efficiency.trends.bucketIntro', resolutionLabel(s.resolution), rangeLabel(s), buckets);
+}
+
+/**
+ * The Trends tab's section note. The partial-period sentence is only true while
+ * the range still reaches today: a drilled-into past week is finished, and
+ * calling its last day partial would send the reader looking for data that was
+ * never missing.
+ */
+function trendsIntro(s: ScopedData): string {
+	const parts = [bucketIntro(s), localize('efficiency.trends.badges')];
+	if (s.includesToday) { parts.push(localize(`efficiency.trends.partial${resolutionKeySuffix(s.resolution)}`)); }
+	return parts.join(' ');
 }
 
 function renderDeltasTab(d: EfficiencyViewData): string {

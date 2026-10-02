@@ -43,6 +43,10 @@ only the trailing bucket is clipped, to today:
   see the week you are in, as long as you know it is partial. The Trends intro
   says so in words; on every scoped chart the drill-down chip and the range
   label carry the exact end date, which is today.
+- That sentence is only shown while the range still reaches today
+  (`ScopedData.includesToday`, from `efficiencyTodayKey()`). A drilled-into past
+  week or month ends before today and has no partial bucket, so claiming one
+  would send the reader looking for data that was never missing.
 
 `Auto` resolution follows the span: ≤ 31 days → daily, ≤ 200 days → weekly,
 otherwise monthly. An explicit choice the range cannot carry (daily over a year,

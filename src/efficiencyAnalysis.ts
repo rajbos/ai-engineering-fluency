@@ -226,6 +226,16 @@ export function resolveEfficiencyRange(id: EfficiencyRangeId, now: Date): Effici
 	}
 }
 
+/**
+ * The day key `now` falls on — the last day every preset range reaches.
+ *
+ * A range whose `endKey` is below this one ends in the past, so none of its
+ * buckets is still filling up.
+ */
+export function efficiencyTodayKey(now: Date): string {
+	return fmtKey(startOfDay(now));
+}
+
 /** A drill-down range: the days contained in one weekly or monthly bucket. */
 export function drillRangeForBucket(bucket: EfficiencyBucket): EfficiencyRange {
 	return { id: 'custom', label: bucket.label, startKey: bucket.startKey, endKey: bucket.endKey };

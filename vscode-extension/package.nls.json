@@ -700,5 +700,13 @@
   "backend.syncNow.progress": "Syncing to {0}...",
   "backend.syncNow.synced": "Synced to {0} successfully",
   "backend.syncNow.failed": "Upload to {0} failed. See the AI Engineering Fluency output channel for details.",
-  "backend.syncNow.nothingSent": "Nothing was uploaded to {0}. Another VS Code window may be syncing, or the Team Server needs a GitHub sign-in. See the output channel for details."
+  "backend.syncNow.nothingSent": "Nothing was uploaded to {0}. Another VS Code window may be syncing, or the Team Server needs a GitHub sign-in. See the output channel for details.",
+  "efficiency.trends.bucketIntro": "{0} ratios over {1} ({2}).",
+  "efficiency.trends.bucketsDaily": "{0} days",
+  "efficiency.trends.bucketsWeekly": "{0} weeks",
+  "efficiency.trends.bucketsMonthly": "{0} months",
+  "efficiency.trends.badges": "Badges compare the recent half of the window against the earlier half; green means the ratio moved in the efficient direction.",
+  "efficiency.trends.partialDaily": "The current day is partial.",
+  "efficiency.trends.partialWeekly": "The current week is partial.",
+  "efficiency.trends.partialMonthly": "The current month is partial."
 }

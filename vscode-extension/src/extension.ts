@@ -728,6 +728,14 @@ export function chainBuild<T>(
  * filter read, emptying recent comparisons after the first background
  * refresh. Carrying the counters forward keeps them at their last computed
  * value instead of dropping them; the next full pass recomputes them.
+ *
+ * The carried counters are therefore as old as the last full pass: a day whose
+ * sessions changed since (a new session, a re-run with a different model, a
+ * deleted log) keeps the previous pass's per-model split until that next full
+ * pass. Volume — tokens, sessions, interactions, the per-editor split — always
+ * comes from the refreshed day and is never carried. Bounded staleness on a
+ * secondary breakdown beats the empty Models tab that dropping the field
+ * produced.
  */
 function carryForwardEnrichedFields(previous: DailyTokenStats | undefined, refreshed: DailyTokenStats): DailyTokenStats {
 	if (!previous) { return refreshed; }

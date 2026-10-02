@@ -26,6 +26,7 @@ import {
 	buildModelBucketSeries,
 	buildSkillUsageSeries,
 	drillRangeForBucket,
+	efficiencyTodayKey,
 	efficiencyRangeSpanDays,
 	filterModelsByVendor,
 	listEfficiencyEditors,
@@ -868,6 +869,18 @@ test('resolveEfficiencyRange: month presets start on the first of the month', ()
 	assert.equal(resolveEfficiencyRange('last1y', NOW).startKey, '2025-08-01');
 	assert.equal(buildEfficiencyBuckets(resolveEfficiencyRange('last6m', NOW), 'monthly').length, 6);
 	assert.equal(buildEfficiencyBuckets(resolveEfficiencyRange('last1y', NOW), 'monthly').length, 12);
+});
+
+test('efficiencyTodayKey: every preset range reaches it, a drilled-into past bucket does not', () => {
+	const todayKey = efficiencyTodayKey(NOW);
+	assert.equal(todayKey, '2026-07-15');
+	for (const id of ['last30d', 'last12w', 'last6m', 'last1y'] as const) {
+		assert.ok(resolveEfficiencyRange(id, NOW).endKey >= todayKey, `${id} should still reach today`);
+	}
+	// Drilling into the current week keeps today in range; an earlier week does not.
+	const weeks = buildEfficiencyBuckets(resolveEfficiencyRange('last12w', NOW), 'weekly');
+	assert.ok(drillRangeForBucket(weeks.at(-1)!).endKey >= todayKey);
+	assert.ok(drillRangeForBucket(weeks.at(-2)!).endKey < todayKey);
 });
 
 test('resolveBucketResolution: auto picks daily/weekly/monthly by span', () => {
