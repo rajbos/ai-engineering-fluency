@@ -2929,6 +2929,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 				if (e.provider.id !== authProviderId) { return; }
 				if (this._githubSignedOutByUser) { return; }
 				const session = await vscode.authentication.getSession(authProviderId, ['read:user'], { silent: true });
+				// An explicit sign-out may have landed while getSession() was pending; don't undo it.
+				if (this._githubSignedOutByUser) { return; }
 				if (session) {
 					this.githubSession = session;
 					await this.context.globalState.update('github.authenticated', true);
@@ -4195,6 +4197,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// already authenticated the user with GitHub, without nagging users who never
 			// intend to sign in here.
 			const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+			// Same race as the session listener: a sign-out during the await must stand.
+			if (this._githubSignedOutByUser) { return; }
 			if (session) {
 				this.githubSession = session;
 				this.log(`✅ GitHub session found for ${session.account.label}`);
@@ -4228,7 +4232,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private async loadAndLogCopilotPlanInfo(): Promise<void> {
 		const session = this.githubSession;
-		if (!session) { return; }
+		// Rechecked here as the last line of defence: a continuation that began before an explicit sign-out
+		// must not start a fresh load (and a fresh generation) that repopulates the cleared budget state.
+		if (!session || this._githubSignedOutByUser) { return; }
 		// logCopilotPlanResult() only overwrites fields the response contains, so a switch to an account whose
 		// lookup fails or omits a quota would otherwise keep the previous account's budget on screen.
 		if (this._preferredPlanAccountId !== undefined && this._preferredPlanAccountId !== session.account.id) {
