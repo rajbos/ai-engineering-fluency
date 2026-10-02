@@ -44,7 +44,7 @@ host thread is idle ~90% of the time while it runs.
   `esbuild.js`. It builds its own adapter registry. `vscode` is aliased to a stub that throws, so an accidental
   import of the VS Code API fails loudly instead of at load time.
 * **`analysis/analysisWorkerPool.ts`** — the host-side client. Lazily spawns up to
-  `min(2, cores − 1)` workers, keeps a pool-side queue, hands each worker at most two requests at a time, and
+  `max(1, min(2, cores − 1))` workers (so a single-core machine still gets one), keeps a pool-side queue, hands each worker at most two requests at a time, and
   treats workers as disposable.
 * **`CopilotTokenTracker`** (`extension.ts`) calls the pool from `getSessionFileDataCached`,
   `getSessionFileDetails` and the customization-file resolver, and only does the cache write itself.
