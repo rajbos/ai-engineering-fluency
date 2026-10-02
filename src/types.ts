@@ -349,6 +349,12 @@ export interface SessionFileCache {
   modelUsage: ModelUsage;
   mtime: number; // file modification time as timestamp
   size?: number; // file size in bytes (optional for backward compatibility)
+  /**
+   * True for a placeholder written by the details-only parse (Details/Diagnostics) for a session
+   * that was never fully analyzed: tokens/usageAnalysis are not real. getSessionFileDataCached()
+   * treats it as a miss; the full analysis result replaces it (and never carries this flag).
+   */
+  detailsOnly?: true;
   usageAnalysis?: SessionUsageAnalysis; // New analysis data
   taskCategory?: TaskCategory;
   taskCategoryShares?: TaskCategoryBreakdown;

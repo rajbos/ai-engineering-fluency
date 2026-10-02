@@ -259,6 +259,7 @@ import { SessionDiscovery } from '../../src/sessionDiscovery';
 
 // --- Cache ---
 import { CacheManager } from './cacheManager';
+import { isFullCacheHit, isDetailsOnlyPlaceholder, resolveFullResultAgainstCurrent } from './detailsOnlyCache';
 import { sweepStaleWalTempFiles } from '../../src/utils/sqliteWal';
 import { HookManager } from './hookManager';
 
@@ -1057,10 +1058,16 @@ type SessionsTabPreset = { filter: 'nearContextLimit'; lookback: 'last30' };
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation.
-	// Distribute the debug-log exact Copilot cost (nano-AIU) over each session's dailyRollups:
+	// v75: legacy details-only placeholders (tokens 0, empty usage analysis, real mtime/size) were
+	// written unmarked by updateCacheWithSessionDetails() and cannot be told apart from full entries,
+	// so the whole generation is discarded; new placeholders carry `detailsOnly`.
+	// Earlier: Rebuild Mistral Vibe model usage so it carries cachedReadTokens: getSessionFileDataCached()
+	// returns an mtime/size hit without re-running getModelUsage(), so without this bump existing
+	// entries would keep billing the whole prompt at the full input rate until their file changed.
+	// v74: Distribute the debug-log exact Copilot cost (nano-AIU) over each session's dailyRollups:
 	// aggregatePeriodStats reads exact cost from rollups only, so existing entries would keep
 	// showing an estimate in Today/month/30-day totals until their file changed.
-	private static readonly CACHE_VERSION = 74;
+	private static readonly CACHE_VERSION = 75;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
@@ -3121,6 +3128,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private isUsableForInstantPaint(sessionData: SessionFileCache | undefined, cutoffMs: number): sessionData is SessionFileCache {
 		return !!sessionData
+			// A details-only placeholder carries no real tokens/usage analysis; never paint it as stats.
+			&& !sessionData.detailsOnly
 			&& Number.isFinite(sessionData.interactions) && sessionData.interactions > 0
 			&& Number.isFinite(sessionData.mtime) && sessionData.mtime >= cutoffMs;
 	}
@@ -4986,7 +4995,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const forceStartupOpenCodeLoad = this._startupOpenCodeDbMisses.has(sessionFile);
 		if (mtime < cutoffMs && !forceStartupOpenCodeLoad) { return; }
 		const cachedData = this.getCachedSessionData(sessionFile);
-		const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
+		const wasCached = isFullCacheHit(cachedData, mtime, fileSize);
 		if (forceStartupOpenCodeLoad && wasCached) {
 			this._startupOpenCodeDbMisses.delete(sessionFile);
 		}
@@ -6117,7 +6126,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const fileSize = fileStats.size;
 			if (mtime < fileLoadCutoffMs) { this.debugCrashLog(`done  [${i + 1}/${sessionFiles.length}] ${sessionFile} (too old, skipped)`); return null; }
 			const cachedData = this.getCachedSessionData(sessionFile);
-			const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
+			const wasCached = isFullCacheHit(cachedData, mtime, fileSize);
 			const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
 			if (sessionData.interactions === 0) { this.debugCrashLog(`done  [${i + 1}/${sessionFiles.length}] ${sessionFile} (0 interactions, skipped)`); return null; }
 			const details = await this.getSessionFileDetails(sessionFile);
@@ -8272,7 +8281,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Cached versions of session file reading methods
 	public async getSessionFileDataCached(sessionFilePath: string, mtime: number, fileSize: number): Promise<SessionFileCache> {
 		const cached = this.getCachedSessionData(sessionFilePath);
-		if (cached && cached.mtime === mtime && cached.size === fileSize) {
+		if (isFullCacheHit(cached, mtime, fileSize)) {
 			if (cached.debugLogInputTokens === undefined && !cached.debugLogChecked) {
 				const supplemented = await this.supplementCachedSessionWithDebugLog(cached, sessionFilePath, fileSize);
 				if (supplemented) { return supplemented; }
@@ -8283,8 +8292,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this._cacheMisses++;
 		const sessionData = await this.analyzeSessionFileOffHostThread(sessionFilePath, mtime, fileSize, cached);
-		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
-		return sessionData;
+		// Re-read: a concurrent details parse may have written a placeholder while we analyzed.
+		const toStore = resolveFullResultAgainstCurrent(sessionData, this.getCachedSessionData(sessionFilePath));
+		this.setCachedSessionData(sessionFilePath, toStore, fileSize);
+		return toStore;
 	}
 
 	/**
@@ -8506,7 +8517,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tokenResult?: { tokens: number; thinkingTokens: number; actualTokens: number },
 		modelUsage?: ModelUsage
 	): Promise<void> {
-		const existingCache = this.getCachedSessionData(sessionFile);
+		// Only inherit from an entry that still matches the file: a stale full entry would otherwise
+		// be re-stamped with the new mtime/size (unmarked) and then served as a fresh hit.
+		const cachedEntry = this.getCachedSessionData(sessionFile);
+		const existingCache = cachedEntry && cachedEntry.mtime === stat.mtime.getTime() && cachedEntry.size === stat.size ? cachedEntry : undefined;
 		const resolved = this.resolveTokensForCacheUpdate(tokenResult, existingCache);
 		details.tokens = resolved.actualTokens || resolved.tokens || 0;
 		const resolvedModelUsage = modelUsage && Object.keys(modelUsage).length > 0 ? modelUsage : (existingCache?.modelUsage || {});
@@ -8521,6 +8535,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			modelUsage: resolvedModelUsage,
 			mtime: stat.mtime.getTime(),
 			size: stat.size,
+			// Placeholder (default usage analysis) when no existing full entry backs this one, even with a token result; keeps
+			// getSessionFileDataCached() from serving it as a hit. See detailsOnlyCache.ts.
+			...(isDetailsOnlyPlaceholder(existingCache) ? { detailsOnly: true as const } : {}),
 			actualTokens: resolved.actualTokens,
 			thinkingTokens: resolved.thinkingTokens,
 			...(resolved.cacheReadTokens ? { cacheReadTokens: resolved.cacheReadTokens } : {}),
