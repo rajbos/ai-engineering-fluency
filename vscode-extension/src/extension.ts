@@ -3864,17 +3864,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 
-		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+		const session = await this.syncSilentGitHubSession();
 		if (!session) {
 			await this.publishRepoPrStats(this.buildEmptyRepoPrStatsResult(since, false));
 			return;
-		}
-
-		if (!this.githubSession) {
-			this.githubSession = session;
-			await this.context.globalState.update('github.authenticated', true);
-			await this.context.globalState.update('github.username', session.account.label);
-			this.log(`✅ GitHub session synced from existing VS Code auth: ${session.account.label}`);
 		}
 
 		await this.publishRepoPrStats(this._lastRepoPrStats ?? this.buildEmptyRepoPrStatsResult(since, true));
@@ -4087,15 +4080,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 
-		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+		const session = await this.syncSilentGitHubSession();
 		if (!session) {
 			await this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			return;
-		}
-		if (!this.githubSession) {
-			this.githubSession = session;
-			await this.context.globalState.update('github.authenticated', true);
-			await this.context.globalState.update('github.username', session.account.label);
 		}
 
 		await this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, true));
@@ -4307,6 +4295,37 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (this.currentDetailedStats) {
 		this.refreshBudgetDependentUi();
 	}
+	}
+
+	/**
+	 * Silent session lookup for the periodic PR / cloud-agent collectors. Adopts the session as the
+	 * extension's own when it has none yet (so a pre-existing VS Code sign-in is picked up), but never
+	 * undoes an explicit sign-out or overwrites a newer lookup: it returns undefined, adopting nothing,
+	 * when a sign-out ran or another session lookup started while `getSession()` was pending.
+	 *
+	 * It only *reads* `_sessionLookupSeq` — it must not bump it, or this hourly refresh would cancel the
+	 * auth listener's lookup right after an account switch.
+	 */
+	private async syncSilentGitHubSession(): Promise<vscode.AuthenticationSession | undefined> {
+		const seqAtStart = this._sessionLookupSeq;
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+		if (this._githubSignedOutByUser || seqAtStart !== this._sessionLookupSeq) { return undefined; }
+		if (session && !this.githubSession) {
+			this.githubSession = session;
+			this.log(`✅ GitHub session synced from existing VS Code auth: ${session.account.label}`);
+			await this.persistGitHubAuthState();
+		}
+		return session;
+	}
+
+	/**
+	 * Writes the signed-in flag and username from the in-memory session. The flag is issued first, so a
+	 * sign-out that lands afterwards queues its own signed-out write behind it; the username is re-read
+	 * after the first await so it reflects that sign-out rather than a stale snapshot.
+	 */
+	private async persistGitHubAuthState(): Promise<void> {
+		await this.context.globalState.update('github.authenticated', this.githubSession !== undefined);
+		await this.context.globalState.update('github.username', this.githubSession?.account.label);
 	}
 
 	/**
