@@ -1056,10 +1056,10 @@ type SessionsTabPreset = { filter: 'nearContextLimit'; lookback: 'last30' };
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation.
-	// Rebuild Mistral Vibe model usage so it carries cachedReadTokens: getSessionFileDataCached()
-	// returns an mtime/size hit without re-running getModelUsage(), so without this bump existing
-	// entries would keep billing the whole prompt at the full input rate until their file changed.
-	private static readonly CACHE_VERSION = 73;
+	// Distribute the debug-log exact Copilot cost (nano-AIU) over each session's dailyRollups:
+	// aggregatePeriodStats reads exact cost from rollups only, so existing entries would keep
+	// showing an estimate in Today/month/30-day totals until their file changed.
+	private static readonly CACHE_VERSION = 74;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
