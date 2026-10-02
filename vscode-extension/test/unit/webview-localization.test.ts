@@ -200,3 +200,12 @@ test('webview fallback: the requested-key scan finds a realistic number of call 
 	// passes vacuously.
 	assert.ok(requestedWebviewKeys().size > 50, `expected the webview's localize() call sites, got ${requestedWebviewKeys().size}`);
 });
+
+test('webview fallback: the generated JSON is what localize() and webviewLocalizationKeys() read', () => {
+	// Pins the import binding of webviewStrings.generated.json in localization.ts:
+	// the default dictionary and the exported key list must come from the same
+	// source, so a rewired or shadowed import fails here rather than rendering raw keys.
+	initializeWebviewLocalization({});
+	assert.equal(localize('usage.contextPressure.compactedLabel'), '🗜️ Sessions compacted');
+	assert.ok(webviewLocalizationKeys().includes('usage.contextPressure.compactedLabel'));
+});
