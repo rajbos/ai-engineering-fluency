@@ -934,6 +934,31 @@ test('buildEfficiencyBuckets: an inverted or malformed range produces no buckets
 	assert.deepEqual(buildEfficiencyBuckets({ id: 'custom', label: 'x', startKey: 'nonsense', endKey: '2026-07-01' }, 'daily'), []);
 });
 
+test('drillRangeForBucket: the label names the days drilled into, not the period they belong to', () => {
+	// The trailing bucket of any range is clipped to today, so its period name
+	// ("Jul 2026", "Jul 13–19") is wider than the days it actually holds.
+	const months = buildEfficiencyBuckets(resolveEfficiencyRange('last6m', NOW), 'monthly');
+	const currentMonth = months.at(-1)!;
+	assert.equal(currentMonth.label, 'Jul 2026', 'the bucket keeps its period name for the chart axis');
+	assert.equal(drillRangeForBucket(currentMonth).label, 'Jul 1–15, 2026');
+	assert.equal(drillRangeForBucket(months.at(-2)!).label, 'Jun 1–30, 2026');
+
+	const weeks = buildEfficiencyBuckets(resolveEfficiencyRange('last12w', NOW), 'weekly');
+	assert.equal(drillRangeForBucket(weeks.at(-1)!).label, 'Jul 13–15, 2026', 'the current week stops at today');
+	assert.equal(drillRangeForBucket(weeks.at(-2)!).label, 'Jul 6–12, 2026');
+	// A week that straddles two months, and one that straddles two years.
+	assert.equal(drillRangeForBucket(weeks[0]).label, 'Apr 27 – May 3, 2026');
+	assert.equal(
+		drillRangeForBucket({ key: '2025-12-29', label: 'Dec 29 – Jan 4', startKey: '2025-12-29', endKey: '2026-01-04', resolution: 'weekly' }).label,
+		'Dec 29, 2025 – Jan 4, 2026',
+	);
+	// A bucket clipped to a single day still reads as that day.
+	assert.equal(
+		drillRangeForBucket({ key: '2026-07-15', label: 'Jul 2026', startKey: '2026-07-15', endKey: '2026-07-15', resolution: 'monthly' }).label,
+		'Jul 15, 2026',
+	);
+});
+
 test('drillRangeForBucket: a weekly bucket drills into exactly the days it contains', () => {
 	const week = buildEfficiencyBuckets(resolveEfficiencyRange('last12w', NOW), 'weekly')[0];
 	const drilled = drillRangeForBucket(week);

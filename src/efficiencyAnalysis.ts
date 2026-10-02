@@ -236,9 +236,38 @@ export function efficiencyTodayKey(now: Date): string {
 	return fmtKey(startOfDay(now));
 }
 
-/** A drill-down range: the days contained in one weekly or monthly bucket. */
+/**
+ * Inclusive day span as prose: `Jul 15, 2026`, `Jul 1–15, 2026`,
+ * `Jun 29 – Jul 5, 2026`, `Dec 29, 2025 – Jan 4, 2026`.
+ */
+function fmtSpanLabel(start: Date, end: Date): string {
+	const startYear = start.getFullYear();
+	const endYear = end.getFullYear();
+	if (fmtKey(start) === fmtKey(end)) { return `${fmtDayLabel(start)}, ${endYear}`; }
+	if (startYear !== endYear) { return `${fmtDayLabel(start)}, ${startYear} – ${fmtDayLabel(end)}, ${endYear}`; }
+	if (start.getMonth() === end.getMonth()) {
+		return `${start.toLocaleDateString('en-US', { month: 'short' })} ${start.getDate()}–${end.getDate()}, ${endYear}`;
+	}
+	return `${fmtDayLabel(start)} – ${fmtDayLabel(end)}, ${endYear}`;
+}
+
+/**
+ * A drill-down range: the days contained in one weekly or monthly bucket.
+ *
+ * The label is built from the bucket's own bounds rather than reused from it.
+ * A bucket's display label names the period it belongs to (`Jul 2026`,
+ * `Jul 13–19`), which is not the same thing as the days it actually holds: the
+ * trailing bucket of any range is clipped to today, so drilling into the
+ * current month showed a chip reading `Jul 2026` over a chart of Jul 1 to Jul
+ * 15 — and the range chip is the one place the exact span is disclosed.
+ */
 export function drillRangeForBucket(bucket: EfficiencyBucket): EfficiencyRange {
-	return { id: 'custom', label: bucket.label, startKey: bucket.startKey, endKey: bucket.endKey };
+	return {
+		id: 'custom',
+		label: fmtSpanLabel(parseDayKey(bucket.startKey), parseDayKey(bucket.endKey)),
+		startKey: bucket.startKey,
+		endKey: bucket.endKey,
+	};
 }
 
 /**
