@@ -9,6 +9,7 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ### Bug Fixes
 - The desktop app now remembers whether the Chart view's "By Editor" section was collapsed (and other per-panel UI choices) instead of reopening it expanded every time
+- A session first opened in the Details/Diagnostics views (before any full analysis) is no longer frozen at 0 tokens and an empty usage analysis until its file changes: such placeholder cache entries are now flagged and always re-analyzed. The cache version was bumped so already-affected entries are rebuilt
 
 ## [0.18.3] - 2026-09-29
 

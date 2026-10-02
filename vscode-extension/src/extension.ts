@@ -248,6 +248,7 @@ import { SessionDiscovery } from '../../src/sessionDiscovery';
 
 // --- Cache ---
 import { CacheManager } from './cacheManager';
+import { isFullCacheHit, isDetailsOnlyPlaceholder } from './detailsOnlyCache';
 import { sweepStaleWalTempFiles } from '../../src/utils/sqliteWal';
 import { HookManager } from './hookManager';
 
@@ -1073,7 +1074,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Rebuild Mistral Vibe model usage so it carries cachedReadTokens: getSessionFileDataCached()
 	// returns an mtime/size hit without re-running getModelUsage(), so without this bump existing
 	// entries would keep billing the whole prompt at the full input rate until their file changed.
-	private static readonly CACHE_VERSION = 73;
+	private static readonly CACHE_VERSION = 74;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
@@ -8249,7 +8250,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Cached versions of session file reading methods
 	public async getSessionFileDataCached(sessionFilePath: string, mtime: number, fileSize: number): Promise<SessionFileCache> {
 		const cached = this.getCachedSessionData(sessionFilePath);
-		if (cached && cached.mtime === mtime && cached.size === fileSize) {
+		if (isFullCacheHit(cached, mtime, fileSize)) {
 			if (cached.debugLogInputTokens === undefined && !cached.debugLogChecked) {
 				const supplemented = await this.supplementCacheWithDebugLog(cached, sessionFilePath, fileSize);
 				if (supplemented) { return supplemented; }
@@ -8845,6 +8846,9 @@ private computeFallbackDailyRollup(
 			modelUsage: resolvedModelUsage,
 			mtime: stat.mtime.getTime(),
 			size: stat.size,
+			// Placeholder (tokens 0 / empty analysis) when nothing real backs this entry; keeps
+			// getSessionFileDataCached() from serving it as a hit. See detailsOnlyCache.ts.
+			...(isDetailsOnlyPlaceholder(existingCache, !!tokenResult) ? { detailsOnly: true as const } : {}),
 			actualTokens: resolved.actualTokens,
 			thinkingTokens: resolved.thinkingTokens,
 			...(resolved.cacheReadTokens ? { cacheReadTokens: resolved.cacheReadTokens } : {}),
