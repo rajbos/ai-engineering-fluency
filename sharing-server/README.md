@@ -21,6 +21,9 @@ the published npm package).
 [Web Browser]  ──OAuth login──►  GET /dashboard
 ```
 
+The dashboard pages are responsive: sign in from a phone browser and the header,
+stat cards, charts and upload breakdown reflow to fit the screen.
+
 **The extension already holds a GitHub OAuth session** (the same one used by Copilot
 and GitHub PR statistics). When you configure a sharing server endpoint URL, the
 extension automatically uses that token for uploads — no API keys, no copy-paste,

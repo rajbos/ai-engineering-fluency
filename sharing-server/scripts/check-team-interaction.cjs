@@ -112,10 +112,30 @@ async function main() {
 				assert.ok(contents.includes('"You","4","100","0","100"'));
 			}
 		}
+		// A page wider than a phone screen is a layout bug: only tables scroll sideways, inside their card.
+		const assertFitsPhone = async label => {
+			// Charts resize a frame after the viewport does, so wait for the layout to settle before judging it.
+			await page.waitForFunction(() => document.documentElement.scrollWidth <= window.innerWidth, null, { timeout: 5000 }).catch(() => {});
+			const overflow = await page.evaluate(() => {
+				const widest = [...document.querySelectorAll('body *')]
+					.filter(el => !el.closest('.table-scroll') && el.getBoundingClientRect().right > window.innerWidth + 1)
+					.map(el => `${el.tagName.toLowerCase()}.${el.className}`).slice(0, 5);
+				return { scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth, widest };
+			});
+			assert.ok(overflow.scrollWidth <= overflow.innerWidth,
+				`${label} is ${overflow.scrollWidth}px wide on a ${overflow.innerWidth}px screen (${overflow.widest.join(', ')})`);
+		};
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.waitForFunction(() => document.documentElement.scrollWidth <= window.innerWidth);
 		await page.getByRole('link', { name: 'Your detailed dashboard', exact: true }).click();
 		await page.waitForURL('**/dashboard');
+		await assertFitsPhone('/dashboard');
+		await page.locator('details.card > summary').click();
+		assert.equal(await page.locator('.breakdown-table tbody tr').count(), 1);
+		await assertFitsPhone('/dashboard with the detailed breakdown open');
+		await page.setViewportSize({ width: 320, height: 640 });
+		await assertFitsPhone('/dashboard on a small phone');
+		await page.setViewportSize({ width: 390, height: 844 });
 		await page.getByRole('link', { name: 'Team Insights', exact: true }).click();
 		await page.waitForURL('**/team');
 		await page.getByRole('link', { name: 'Sign out', exact: true }).click();
@@ -165,8 +185,11 @@ async function main() {
 		assert.deepEqual(adminChart, { value: 999_949_999, tooltip: '  boundary-user: 999.9M tokens' });
 		await page.locator('#admin-mode-tabs [data-admin-mode="average"]').click();
 		assert.equal(await page.evaluate(() => Chart.getChart(document.getElementById('admin-trend-chart')).data.datasets[0].data.at(-1)), (999_949_999 + 1000) / 5);
+		await assertFitsPhone('/admin');
+		await page.goto(`${baseUrl}/dashboard`);
+		await assertFitsPhone('/dashboard as an admin');
 		assert.deepEqual(errors, [], 'browser runtime errors');
-		console.log('Team interactions passed: period navigation (with/without JS), chart modes, daily table, exports, mobile layout, own dashboard, sign-out, privacy.');
+		console.log('Team interactions passed: period navigation (with/without JS), chart modes, daily table, exports, phone layout on every page, own dashboard, sign-out, privacy.');
 	} finally {
 		if (browser) await browser.close();
 		if (server) await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
