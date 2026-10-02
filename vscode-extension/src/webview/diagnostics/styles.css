@@ -1069,6 +1069,31 @@ border: 1px solid #1f6feb;
 	align-items: center;
 }
 
+.loading-status {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--link-color);
+	border: 1px solid var(--link-color);
+	border-radius: 12px;
+	padding: 4px 12px;
+	animation: loading-status-pulse 1.6s ease-in-out infinite;
+}
+
+.loading-status:empty {
+	display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.loading-status {
+		animation: none;
+	}
+}
+
+@keyframes loading-status-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.6; }
+}
+
 .folder-input {
 	flex: 1;
 	background: var(--vscode-input-background);

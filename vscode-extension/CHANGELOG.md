@@ -8,6 +8,7 @@ All notable changes to the VS Code extension will be documented in this file.
 - The Chart view's Summary → "By Editor" cards now show each tool's official logo (VS Code, Claude, Copilot, Codex, Antigravity, Kilo, Hermes, JetBrains, Cursor, Gemini, Kiro and more), falling back to the emoji for tools without one
 
 ### Bug Fixes
+- Today, month, last-30-days and last-month totals now use the exact Copilot billing cost from VS Code Copilot Chat debug logs instead of an estimate, for sessions whose exact cost only comes from a debug log
 - The desktop app now remembers whether the Chart view's "By Editor" section was collapsed (and other per-panel UI choices) instead of reopening it expanded every time
 - A session first opened in the Details/Diagnostics views (before any full analysis) is no longer frozen at 0 tokens and an empty usage analysis until its file changes: such placeholder cache entries are now flagged and always re-analyzed. The cache version was bumped so already-affected entries are rebuilt
 - The Copilot CLI OpenTelemetry usage index is now saved to disk and restored on the next start, so a multi-GB export is no longer re-read from the start in every window. Sessions that need it while it is still being built are refreshed as soon as it is ready, rather than waiting for the next refresh

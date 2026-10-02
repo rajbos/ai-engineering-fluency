@@ -12,14 +12,11 @@ export function isFullCacheHit(cached: SessionFileCache | undefined, mtime: numb
 
 /**
  * Whether a cache entry written by the details-only parse is a placeholder (true) or may be
- * treated as a full entry (false). It is a placeholder only when it is built from nothing:
- * no real token result was supplied and there was no existing full entry to inherit from.
- * An existing detailsOnly entry stays a placeholder until a full analysis replaces it.
+ * treated as a full entry (false). A token result does not make it full: the details path never
+ * runs the full usage analysis, so the entry keeps a default usageAnalysis. It is therefore a
+ * placeholder unless it inherits from an existing full entry; only a full analysis result
+ * (getSessionFileDataCached()) removes the marker. Real token fields are still preserved.
  */
-export function isDetailsOnlyPlaceholder(
-	existing: SessionFileCache | undefined,
-	tokenResultSupplied: boolean
-): boolean {
-	if (tokenResultSupplied) { return false; }
+export function isDetailsOnlyPlaceholder(existing: SessionFileCache | undefined): boolean {
 	return !existing || existing.detailsOnly === true;
 }

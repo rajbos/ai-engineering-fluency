@@ -11,6 +11,7 @@ computeSessionDurationMs,
 reconcileModelUsageToTotal,
 reconcileModelUsageToActualTokens,
 distributeModelUsageToDays,
+distributeExactCostToDays,
 sumModelUsageTokens,
 computeFallbackDailyRollup,
 type SessionAggregateInput,
@@ -1633,4 +1634,48 @@ test('computeFallbackDailyRollup: no-ops when tokens or timestamp are missing', 
 
 	computeFallbackDailyRollup(dailyRollups, '2025-03-10T09:00:00.000Z', { tokens: 0 }, {}, 1);
 	assert.equal(Object.keys(dailyRollups).length, 0, 'zero tokens means no rollup entry');
+});
+
+
+// ── distributeExactCostToDays – debug-log exact cost reaches period totals ──
+
+test('distributeExactCostToDays: splits by interactions, sums to session cost, replaces rollup cost (no double count)', () => {
+	const rollups: Record<string, DailyRollupEntry> = {
+		'2025-03-14': { tokens: 10, actualTokens: 10, thinkingTokens: 0, interactions: 1, modelUsage: {}, copilotExactCostDollars: 99 },
+		'2025-03-15': { tokens: 30, actualTokens: 30, thinkingTokens: 0, interactions: 3, modelUsage: {} },
+	};
+	const out = distributeExactCostToDays(rollups, 0.8)!;
+	assert.ok(Math.abs(out['2025-03-14'].copilotExactCostDollars! - 0.2) < 1e-12);
+	assert.ok(Math.abs(out['2025-03-15'].copilotExactCostDollars! - 0.6) < 1e-12);
+	const sum = Object.values(out).reduce((s, d) => s + (d.copilotExactCostDollars ?? 0), 0);
+	assert.ok(Math.abs(sum - 0.8) < 1e-12);
+	assert.equal(rollups['2025-03-14'].copilotExactCostDollars, 99, 'input is not mutated');
+});
+
+test('distributeExactCostToDays: no cost or no interactions leaves rollups unchanged (undefined)', () => {
+	const rollups: Record<string, DailyRollupEntry> = {
+		'2025-03-15': { tokens: 1, actualTokens: 1, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+	};
+	assert.equal(distributeExactCostToDays(rollups, 0), undefined);
+	assert.equal(distributeExactCostToDays(rollups, NaN), undefined);
+	assert.equal(distributeExactCostToDays({ d: { ...rollups['2025-03-15'], interactions: 0 } }, 1), undefined);
+});
+
+test('aggregatePeriodStats: debug-log-only exact cost appears in period totals once distributed over rollups', () => {
+	const ranges = makeRanges('2025-03-15');
+	const rollups: Record<string, DailyRollupEntry> = {
+		'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+	};
+	const build = (dailyRollups: Record<string, DailyRollupEntry>): SessionAggregateInput => ({
+		editorType: 'vscode',
+		mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+		// Session-level exact cost (as buildSessionDataObject writes it) — rollups alone decide period totals.
+		sessionData: makeSession({ dailyRollups, copilotExactCostDollars: 0.5 }),
+	});
+	// Baseline (the bug): rollups built before the debug log was read carry no exact cost.
+	assert.equal(aggregatePeriodStats([build(rollups)], ranges).todayStats.exactCopilotCostDollars, 0);
+	const fixed = aggregatePeriodStats([build(distributeExactCostToDays(rollups, 0.5)!)], ranges);
+	assert.ok(Math.abs(fixed.todayStats.exactCopilotCostDollars - 0.5) < 1e-12);
+	assert.ok(Math.abs(fixed.monthStats.exactCopilotCostDollars - 0.5) < 1e-12);
+	assert.ok(Math.abs(fixed.last30DaysStats.exactCopilotCostDollars - 0.5) < 1e-12);
 });

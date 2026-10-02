@@ -1057,13 +1057,16 @@ type SessionsTabPreset = { filter: 'nearContextLimit'; lookback: 'last30' };
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation.
-	// v74: legacy details-only placeholders (tokens 0, empty usage analysis, real mtime/size) were
+	// v75: legacy details-only placeholders (tokens 0, empty usage analysis, real mtime/size) were
 	// written unmarked by updateCacheWithSessionDetails() and cannot be told apart from full entries,
 	// so the whole generation is discarded; new placeholders carry `detailsOnly`.
-	// v73: Rebuild Mistral Vibe model usage so it carries cachedReadTokens: getSessionFileDataCached()
+	// Earlier: Rebuild Mistral Vibe model usage so it carries cachedReadTokens: getSessionFileDataCached()
 	// returns an mtime/size hit without re-running getModelUsage(), so without this bump existing
 	// entries would keep billing the whole prompt at the full input rate until their file changed.
-	private static readonly CACHE_VERSION = 74;
+	// v74: Distribute the debug-log exact Copilot cost (nano-AIU) over each session's dailyRollups:
+	// aggregatePeriodStats reads exact cost from rollups only, so existing entries would keep
+	// showing an estimate in Today/month/30-day totals until their file changed.
+	private static readonly CACHE_VERSION = 75;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
@@ -8403,9 +8406,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			modelUsage: resolvedModelUsage,
 			mtime: stat.mtime.getTime(),
 			size: stat.size,
-			// Placeholder (tokens 0 / empty analysis) when nothing real backs this entry; keeps
+			// Placeholder (default usage analysis) when no existing full entry backs this one, even with a token result; keeps
 			// getSessionFileDataCached() from serving it as a hit. See detailsOnlyCache.ts.
-			...(isDetailsOnlyPlaceholder(existingCache, !!tokenResult) ? { detailsOnly: true as const } : {}),
+			...(isDetailsOnlyPlaceholder(existingCache) ? { detailsOnly: true as const } : {}),
 			actualTokens: resolved.actualTokens,
 			thinkingTokens: resolved.thinkingTokens,
 			...(resolved.cacheReadTokens ? { cacheReadTokens: resolved.cacheReadTokens } : {}),
