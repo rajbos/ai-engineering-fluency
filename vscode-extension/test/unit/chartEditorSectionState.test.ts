@@ -136,8 +136,10 @@ test('toggling By Editor tells the extension host so it outlives the panel', asy
 test('host-persisted collapsed flag seeds a brand-new panel that has no webview state', async () => {
 	const collapsed = await bootChart({ current: undefined }, undefined, { initial: true });
 	assert.equal(isCollapsed(collapsed), true);
-	const expanded = await bootChart({ current: { editorListCollapsed: true } }, undefined, { initial: false });
-	assert.equal(isCollapsed(expanded), false, 'host value wins over stale webview state');
+	const hidden = await bootChart({ current: { editorListCollapsed: true } }, undefined, { initial: false });
+	assert.equal(isCollapsed(hidden), true, 'newer webview state wins over the stale host snapshot on hide/show');
+	const reexpanded = await bootChart({ current: { editorListCollapsed: false } }, undefined, { initial: true });
+	assert.equal(isCollapsed(reexpanded), false, 'an explicit expanded flag is respected');
 });
 
 test('editor cards show the official logo, with the emoji as fallback for tools without one', async () => {

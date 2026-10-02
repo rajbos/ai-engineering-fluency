@@ -1423,8 +1423,10 @@ function applySavedChartState(saved: ChartWebviewState): void {
 
 function restoreChartState(initialData: InitialChartData): void {
 	const saved = chartState.restore();
-	// The host value outlives the panel; webview state only survives hide/show of the same panel.
-	editorListCollapsed = initialData.initialEditorListCollapsed ?? saved.editorListCollapsed ?? false;
+	// Webview state is newest for an existing panel (the host value is a snapshot embedded when the
+	// panel was created); the host value only seeds a brand-new panel, which has no saved flag.
+	const savedFlag = (vscode.getState() as Partial<ChartWebviewState> | undefined)?.editorListCollapsed;
+	editorListCollapsed = savedFlag ?? initialData.initialEditorListCollapsed ?? false;
 	if (!vscode.getState()) {
 		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
 		if (initialData.initialTimeWindow) { currentTimeWindow = initialData.initialTimeWindow; }
