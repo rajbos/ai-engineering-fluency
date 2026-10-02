@@ -16,6 +16,7 @@ import {
 	clearCopilotCliOtelCache,
 	expireCopilotCliOtelCacheForTests,
 	readByteRange,
+	loadOtelRecordsInProcess,
 } from '../../../src/copilotCliOtel';
 
 type StoreRow = {
@@ -166,6 +167,27 @@ test('readByteRange: refuses a range past the in-process limit instead of lettin
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test('loadOtelRecordsInProcess: bounds the whole plan, not just each range, so a split multi-GB export is not read on the host', async () => {
+    // Two ranges that are each under the per-range cap but together over the budget: before the aggregate bound the
+    // fallback would have read and parsed both.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'otel-plan-'));
+    const span = (id: string) => JSON.stringify({ type: 'span', name: 'chat gpt-4o', attributes: { 'gen_ai.conversation.id': id, 'gen_ai.usage.input_tokens': 5, 'gen_ai.usage.output_tokens': 7 } }) + '\n';
+    fs.writeFileSync(path.join(dir, 'a.jsonl'), span('11111111-1111-4111-8111-111111111111'));
+    fs.writeFileSync(path.join(dir, 'b.jsonl'), span('22222222-2222-4222-8222-222222222222'));
+    const sizeA = fs.statSync(path.join(dir, 'a.jsonl')).size;
+    const sizeB = fs.statSync(path.join(dir, 'b.jsonl')).size;
+    const plan = [{ name: 'a.jsonl', start: 0, end: sizeA }, { name: 'b.jsonl', start: 0, end: sizeB }];
+    try {
+        const within = await loadOtelRecordsInProcess(dir, plan, sizeA + sizeB);
+        assert.equal(within.records.length, 2, 'a plan within the budget is parsed');
+        const over = await loadOtelRecordsInProcess(dir, plan, sizeA + sizeB - 1);
+        assert.deepEqual(over.records, [], 'a plan over the budget is not read at all');
+        assert.deepEqual(over.consumed, {}, 'and no offset advances, so it is picked up again later');
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
 });
 
 test('extractCopilotCliSessionId: matches events.jsonl paths', () => {

@@ -276,9 +276,14 @@ export async function readByteRange(file: string, start: number, end: number): P
  * the work) and as the fallback when a worker can't be spawned. Mirrors the worker's contract:
  * parse `chat <model>` candidate lines and report how far each file was consumed.
  */
-async function loadOtelRecordsInProcess(dir: string, plan: OtelReadPlanItem[]): Promise<OtelReadResult> {
+export async function loadOtelRecordsInProcess(dir: string, plan: OtelReadPlanItem[], maxBytes: number = MAX_IN_PROCESS_RANGE_BYTES): Promise<OtelReadResult> {
 	const records: OtelSpanRecord[] = [];
 	const consumed: Record<string, number> = {};
+	// The per-range cap in readByteRange() is not enough on its own: a multi-GB export spread over several ranges
+	// each just under it would still be read and parsed in full on the host. Bound the whole plan; an oversized one
+	// is left unread (offsets untouched, like an unreadable file) for the worker path to take on a later attempt.
+	const totalBytes = plan.reduce((sum, item) => sum + Math.max(0, item.end - item.start), 0);
+	if (totalBytes > maxBytes) { return { records, consumed }; }
 	for (const item of plan) {
 		try {
 			const buf = await readByteRange(path.join(dir, item.name), item.start, item.end);

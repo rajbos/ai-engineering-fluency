@@ -459,13 +459,15 @@ export class AnalysisWorkerPool {
 			// reach this request (the slot's bookkeeping is gone), so the count would stay raised for good and a
 			// re-sent request would never get a hang clock or count as running.
 			pending.hostLookups = 0;
-			if (pending.timedOut) {
+			if (this.disposed || !slot.ready) {
+				// Disposed, or the worker never got as far as `ready` (its bundle failed to load, or hung while
+				// initialising — requests are clocked from the moment they are posted, so that can surface as a timeout):
+				// nothing was learned about this file, so it is neither blamed nor quarantined, and the caller may
+				// analyze it in-process. Checked before the timeout verdict for exactly that reason.
+				pending.reject(new AnalysisWorkerError(`Analysis worker stopped (${reason})`, 'unavailable'));
+			} else if (pending.timedOut) {
 				this.quarantine(pending);
 				pending.reject(new AnalysisWorkerError(`Analysis timed out (${reason})`, 'timeout'));
-			} else if (this.disposed || !slot.ready) {
-				// Disposed, or the worker never got as far as `ready` (its bundle failed to load): nothing was
-				// learned about this file, so the caller may analyze it in-process.
-				pending.reject(new AnalysisWorkerError(`Analysis worker stopped (${reason})`, 'unavailable'));
 			} else if (culpritKnown) {
 				if (this.isAvailable()) { retry.push(pending); }
 				else { pending.reject(new AnalysisWorkerError(`Analysis workers keep dying (${reason})`, 'unavailable')); }

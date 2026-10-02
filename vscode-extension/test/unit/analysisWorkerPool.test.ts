@@ -441,3 +441,16 @@ test('a file that killed two workers is quarantined too', async () => {
 	assert.equal(workers.length, before, 'it does not cost another worker');
 	await pool.dispose();
 });
+
+test('a worker that hangs while starting up is unavailable, not a dangerous file: nothing is blamed or quarantined', async () => {
+	// Requests are clocked from the moment they are posted, which is before the worker says `ready`. A broken or hung
+	// bundle therefore shows up as a timeout, and must not be mistaken for the request having hung the worker.
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 60, maxRestarts: 50 });
+	const request = pool.analyze('innocent.json', 1, 1); // the fake worker never announces ready
+	await assert.rejects(request, (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'unavailable');
+	await sleep(10);
+	const again = pool.analyze('innocent.json', 1, 1);
+	void again.catch(() => undefined);
+	assert.ok(workers.some((w) => w.received.some((r) => 'path' in r && r.path === 'innocent.json')), 'not quarantined: the same file is simply tried again');
+	await pool.dispose();
+});
