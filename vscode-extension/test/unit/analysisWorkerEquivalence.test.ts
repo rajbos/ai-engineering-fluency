@@ -252,11 +252,12 @@ test('a Copilot CLI session keeps its App / Scout label when analysed in the wor
 	const stat = { size: 1, mtime: new Date() } as unknown as fs.Stats;
 	const pool = makePool(1);
 	try {
-		const label = async (kind?: 'app' | 'scout') =>
-			(await pool.computeDetails(dbSession, stat.mtime.getTime(), 1, detailsSkeleton(dbSession, stat), kind)).details.editorName;
+		const label = async (...kinds: Array<'app' | 'scout'>) =>
+			(await pool.computeDetails(dbSession, stat.mtime.getTime(), 1, detailsSkeleton(dbSession, stat), kinds)).details.editorName;
 		assert.equal(await label(), 'Copilot CLI');
 		assert.equal(await label('app'), 'Copilot CLI (App)');
 		assert.equal(await label('scout'), 'MS Scout (Copilot CLI)');
+		assert.equal(await label('app', 'scout'), 'MS Scout (Copilot CLI)', 'both flags travel; the label keeps Scout precedence');
 	} finally {
 		await pool.dispose();
 	}

@@ -8158,16 +8158,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * What this window's discovery learned about a Copilot CLI session (Scout / desktop app). The workers never run
 	 * discovery, so it travels with the request; see CopilotCliSessionKind.
 	 */
-	private copilotCliKindFor(sessionFile: string): 'scout' | 'app' | undefined {
+	private copilotCliKindsFor(sessionFile: string): Array<'scout' | 'app'> {
 		const adapter = this.ecosystems.find((eco) => eco.id === 'copilotcli') as CopilotCliAdapter | undefined;
-		return adapter?.getSessionKind?.(sessionFile);
+		return adapter?.getSessionKinds?.(sessionFile) ?? [];
 	}
 
 	private analyzeSessionFileOffHostThread(sessionFilePath: string, mtime: number, fileSize: number, previous: SessionFileCache | undefined): Promise<SessionFileCache> {
 		const inProcess = () => _analyzeSessionFile(this.analyzerDeps, sessionFilePath, mtime, fileSize, previous);
 		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) { return inProcess(); }
-		const kind = this.copilotCliKindFor(sessionFilePath);
-		return this.runOffHostThread((pool) => pool.analyze(sessionFilePath, mtime, fileSize, previous?.repository, kind), inProcess);
+		const kinds = this.copilotCliKindsFor(sessionFilePath);
+		return this.runOffHostThread((pool) => pool.analyze(sessionFilePath, mtime, fileSize, previous?.repository, kinds), inProcess);
 	}
 
 	private async supplementCachedSessionWithDebugLog(cached: SessionFileCache, sessionFilePath: string, fileSize: number): Promise<SessionFileCache | null> {
@@ -8490,7 +8490,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Reading and parsing the file is the expensive part, so it runs off the host thread; only
 		// the cache write (which owns host state) happens here.
 		const result = await this.runOffHostThread(
-			(pool) => pool.computeDetails(sessionFile, stat.mtime.getTime(), stat.size, details, this.copilotCliKindFor(sessionFile)),
+			(pool) => pool.computeDetails(sessionFile, stat.mtime.getTime(), stat.size, details, this.copilotCliKindsFor(sessionFile)),
 			() => _computeSessionFileDetails(this.analyzerDeps, sessionFile, stat, details),
 		);
 		if (result.cacheUpdate) {

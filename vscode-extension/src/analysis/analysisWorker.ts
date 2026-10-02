@@ -101,8 +101,8 @@ async function handle(request: AnalysisRequest): Promise<AnalysisResponse> {
 async function handleRequest(request: AnalysisRequest): Promise<AnalysisResponse> {
 	try {
 		// This registry never ran discovery, so tell it what the host's discovery learned about this session.
-		if ((request.op === 'analyze' || request.op === 'details') && request.copilotCliKind) {
-			copilotCliAdapter?.noteSessionKind(request.path, request.copilotCliKind);
+		if ((request.op === 'analyze' || request.op === 'details') && request.copilotCliKinds?.length) {
+			copilotCliAdapter?.noteSessionKinds(request.path, request.copilotCliKinds);
 		}
 		if (request.op === 'analyze') {
 			const existing = request.existingRepository !== undefined ? { repository: request.existingRepository } : undefined;

@@ -12,17 +12,17 @@ import type { SessionDetailsResult } from './sessionDetailsAnalyzer';
 import type { QuickSessionAnalysis } from './sessionFileAnalyzer';
 
 /**
- * How the host's discovery classified a Copilot CLI session (Microsoft Scout, or the Copilot desktop app). The worker
+ * How the host's discovery classified a Copilot CLI session (Microsoft Scout, the Copilot desktop app, or both). The worker
  * never runs discovery, so without this its adapter reports every database-only CLI session as plain terminal CLI:
  * the usage mode (`cli` vs `cliApp`) and the editor label would silently differ from the in-process result.
  */
 export type CopilotCliSessionKind = 'scout' | 'app';
 
 export type AnalysisRequest =
-	| { id: number; op: 'analyze'; path: string; mtime: number; size: number; existingRepository?: string; copilotCliKind?: CopilotCliSessionKind }
+	| { id: number; op: 'analyze'; path: string; mtime: number; size: number; existingRepository?: string; copilotCliKinds?: CopilotCliSessionKind[] }
 	| { id: number; op: 'supplement'; path: string; cached: SessionFileCache }
 	/** `details` is the host-prepared skeleton (path-derived fields filled); the worker fills in the rest. */
-	| { id: number; op: 'details'; path: string; mtimeMs: number; size: number; details: SessionFileDetails; copilotCliKind?: CopilotCliSessionKind }
+	| { id: number; op: 'details'; path: string; mtimeMs: number; size: number; details: SessionFileDetails; copilotCliKinds?: CopilotCliSessionKind[] }
 	/** Recursive customization-file discovery for one workspace; a slow synchronous directory walk. */
 	| { id: number; op: 'customization'; workspace: string }
 	/** Interaction count + token estimate for content the host already read (the Diagnostics folder scan). */

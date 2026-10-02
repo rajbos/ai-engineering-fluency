@@ -75,7 +75,7 @@ that if a request genuinely hangs the thread while another is in flight, the old
 other is re-sent and, if it is the culprit, times out on its own next.
 
 The hang watchdog is paused while a worker is waiting on a **host lookup** (see below) and restarted with a full window
-when the last one returns: waiting on the host is not a hung worker. Lookups are themselves bounded (2 minutes). More than five deaths in a minute
+when the last one returns: waiting on the host is not a hung worker. Lookups are themselves bounded (20 seconds). More than five deaths in a minute
 disables the pool for the session (with a warning) and everything runs in-process, as it did before this change.
 
 ### Why a queue and a small in-flight window
@@ -162,7 +162,7 @@ missing.
     file in memory, so parked requests are bounded at 32 per worker). Otherwise a few sessions waiting for the
     index take every slot and freeze all the files that never needed it.
   * Its hang clock is paused for the wait, and restarts with a full window afterwards.
-  * The wait is bounded (2 minutes). Past it the request **fails** — the analysis code tolerates many errors
+  * The wait is bounded (20 seconds, and the cooldown after a timeout ends as soon as the late lookup answers; replies that arrive together resume only as the worker has running capacity). Past it the request **fails** — the analysis code tolerates many errors
     and would otherwise cache a half-answered result as complete — and is retried on the next refresh. After a
     timeout further lookups fail at once for a minute, instead of each waiting out its own limit.
   * The pool logs `OTel usage lookup for … took Ns` for slow lookups, and `Analysis pool: no request has

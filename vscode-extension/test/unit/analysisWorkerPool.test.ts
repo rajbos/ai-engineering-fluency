@@ -467,3 +467,49 @@ test('quarantine for the folder-scan operation tells file versions apart even wh
 	assert.ok(workers.some((w) => w.received.some((r) => r.op === 'quick' && r.mtimeMs === 2_000)), 'an edited file of equal length is tried again');
 	await pool.dispose();
 });
+
+test('the cooldown after a timed-out host lookup ends as soon as that lookup finally answers', async () => {
+	let releaseFirst: () => void = () => undefined;
+	let calls = 0;
+	const resolveOtelUsage = (): Promise<null> => {
+		calls++;
+		return calls === 1 ? new Promise((resolve) => { releaseFirst = () => resolve(null); }) : Promise.resolve(null);
+	};
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 60_000, hostLookupTimeoutMs: 40, hostLookupCooldownMs: 60_000, resolveOtelUsage });
+	void pool.analyze('a.json', 1, 1).catch(() => undefined);
+	void pool.analyze('b.json', 1, 1).catch(() => undefined);
+	workers[0].announceReady();
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 1, requestId: workers[0].received[0].id, sessionFile: 'a.json' });
+	await sleep(120);
+	assert.match(workers[0].replies[0].error ?? '', /did not answer/);
+	releaseFirst(); // the index finished loading, late
+	await tick();
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 2, requestId: workers[0].received[1].id, sessionFile: 'b.json' });
+	await tick(); await tick();
+	assert.equal(calls, 2, 'the second lookup reached the host instead of failing on the cooldown');
+	assert.equal(workers[0].replies[1]?.error, undefined);
+	await pool.dispose();
+});
+
+test('requests whose host lookups finish together resume only as the worker has running capacity', async () => {
+	const releases: Array<() => void> = [];
+	const resolveOtelUsage = (): Promise<null> => new Promise((resolve) => { releases.push(() => resolve(null)); });
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 60_000, resolveOtelUsage });
+	for (const name of ['a', 'b', 'c', 'd']) { void pool.analyze(`${name}.json`, 1, 1).catch(() => undefined); }
+	workers[0].announceReady();
+	const idOf = (name: string): number => workers[0].received.find((r) => 'path' in r && r.path === `${name}.json`)!.id;
+	// a and b park on the host, which lets c and d start: the worker is running its two.
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 1, requestId: idOf('a'), sessionFile: 'a.json' });
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 2, requestId: idOf('b'), sessionFile: 'b.json' });
+	assert.equal(workers[0].received.length, 4, 'c and d took the freed slots');
+	releases.forEach((release) => release());
+	await tick(); await tick();
+	assert.equal(workers[0].replies.length, 0, 'a and b stay parked: resuming them now would run four at once');
+	workers[0].emit('message', { type: 'result', id: idOf('c'), ok: true, result: { tokens: 0 } });
+	await tick();
+	assert.equal(workers[0].replies.length, 1, 'one slot freed, one request resumed');
+	workers[0].emit('message', { type: 'result', id: idOf('d'), ok: true, result: { tokens: 0 } });
+	await tick();
+	assert.equal(workers[0].replies.length, 2);
+	await pool.dispose();
+});

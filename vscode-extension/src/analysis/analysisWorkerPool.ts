@@ -111,6 +111,8 @@ interface Slot {
 	pending: Map<number, Pending>;
 	/** Set when the worker posts `ready`, i.e. its bundle loaded and initialised. */
 	ready: boolean;
+	/** Host lookups that have finished but whose requests cannot resume yet: the worker is already running its limit. */
+	resumeQueue: Array<() => void>;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 3 * 60 * 1000;
@@ -128,7 +130,7 @@ const MAX_IN_FLIGHT_PER_WORKER = 2;
  * A host-side OTel lookup (which may have to load a multi-GB index) is given this long. Past it the request fails
  * and is retried on the next refresh; the alternative, waiting on, can leave every file behind it unprocessed.
  */
-const HOST_LOOKUP_TIMEOUT_MS = 2 * 60 * 1000;
+const HOST_LOOKUP_TIMEOUT_MS = 20 * 1000;
 /**
  * Requests parked on one worker, including those waiting on the host. Waiting requests do not count against
  * MAX_IN_FLIGHT_PER_WORKER (they are not using the worker), but each holds its file in memory, so they are bounded.
@@ -136,9 +138,10 @@ const HOST_LOOKUP_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_PENDING_PER_WORKER = 32;
 const DEFAULT_STALL_REPORT_MS = 30 * 1000;
 /**
- * After a host lookup times out the index is evidently still loading. For this long, further lookups fail at once
- * instead of each waiting out its own limit (thousands of sessions would otherwise queue up behind it, one limit
- * after another); their files are simply tried again on the next refresh.
+ * After a host lookup times out the index is evidently still loading. For this long (or until that lookup finally
+ * answers, whichever is first), further lookups fail at once instead of each waiting out its own limit (thousands of
+ * sessions would otherwise queue up behind it, one limit after another); their files are simply tried again on the
+ * next refresh.
  */
 const HOST_LOOKUP_COOLDOWN_MS = 60 * 1000;
 /** Generous: a multi-hundred-MB session file parses to a large object graph, but a runaway must not take the host with it. */
@@ -155,6 +158,8 @@ export class AnalysisWorkerPool {
 	private lastProgressAt = Date.now();
 	private lastStallReportAt = 0;
 	private hostLookupCooldownUntil = 0;
+	/** Host lookups that timed out and have not answered yet; the cooldown ends early when the last one does. */
+	private lateHostLookups = 0;
 	/**
 	 * Requests proven dangerous: they timed out a worker, or killed two. They are rejected as `failed` for the rest of
 	 * the session — including after the pool is disabled, when every other request falls back to the host. Running
@@ -170,8 +175,8 @@ export class AnalysisWorkerPool {
 		return !this.disposed && !this.broken;
 	}
 
-	analyze(path: string, mtime: number, size: number, existingRepository?: string, copilotCliKind?: CopilotCliSessionKind): Promise<SessionFileCache> {
-		return this.submit((id) => ({ id, op: 'analyze', path, mtime, size, ...(existingRepository !== undefined ? { existingRepository } : {}), ...(copilotCliKind ? { copilotCliKind } : {}) }))
+	analyze(path: string, mtime: number, size: number, existingRepository?: string, copilotCliKinds?: CopilotCliSessionKind[]): Promise<SessionFileCache> {
+		return this.submit((id) => ({ id, op: 'analyze', path, mtime, size, ...(existingRepository !== undefined ? { existingRepository } : {}), ...(copilotCliKinds?.length ? { copilotCliKinds } : {}) }))
 			.then((result) => {
 				if (!result) { throw new AnalysisWorkerError(`Worker returned no entry for ${path}`, 'failed'); }
 				return result as SessionFileCache;
@@ -184,8 +189,8 @@ export class AnalysisWorkerPool {
 	}
 
 	/** Fills in the host-prepared `details` skeleton from the session file (see sessionDetailsAnalyzer.ts). */
-	computeDetails(path: string, mtimeMs: number, size: number, details: SessionFileDetails, copilotCliKind?: CopilotCliSessionKind): Promise<SessionDetailsResult> {
-		return this.submit((id) => ({ id, op: 'details', path, mtimeMs, size, details, ...(copilotCliKind ? { copilotCliKind } : {}) }))
+	computeDetails(path: string, mtimeMs: number, size: number, details: SessionFileDetails, copilotCliKinds?: CopilotCliSessionKind[]): Promise<SessionDetailsResult> {
+		return this.submit((id) => ({ id, op: 'details', path, mtimeMs, size, details, ...(copilotCliKinds?.length ? { copilotCliKinds } : {}) }))
 			.then((result) => {
 				if (!result) { throw new AnalysisWorkerError(`Worker returned no details for ${path}`, 'failed'); }
 				return result as SessionDetailsResult;
@@ -241,6 +246,7 @@ export class AnalysisWorkerPool {
 
 	/** Hands queued requests to workers with spare capacity, growing the pool (up to `size`) when needed. */
 	private pump(): void {
+		for (const slot of this.slots) { this.drainResumes(slot); }
 		while (this.queue.length > 0) {
 			if (!this.isAvailable()) {
 				this.rejectQueued(new AnalysisWorkerError('Analysis worker pool is not available', 'unavailable'));
@@ -261,6 +267,17 @@ export class AnalysisWorkerPool {
 
 	private rejectQueued(error: Error): void {
 		for (const pending of this.queue.splice(0)) { pending.reject(error); }
+	}
+
+	/**
+	 * Lets requests whose host lookup has finished carry on, as many as the worker has running capacity for. Without this
+	 * a cold index that answers many parked lookups at once would put all of them back on one serial worker together,
+	 * though `pump` had meanwhile handed their slots to other files.
+	 */
+	private drainResumes(slot: Slot): void {
+		while (slot.resumeQueue.length > 0 && this.runningCount(slot) < MAX_IN_FLIGHT_PER_WORKER) {
+			slot.resumeQueue.shift()!();
+		}
 	}
 
 	/** Requests on this worker that are actually running there, i.e. not parked waiting on the host. */
@@ -319,7 +336,7 @@ export class AnalysisWorkerPool {
 			}) as unknown as WorkerLike;
 		// A worker alone must never keep the host process alive.
 		worker.unref?.();
-		const slot: Slot = { worker, pending: new Map(), ready: false };
+		const slot: Slot = { worker, pending: new Map(), ready: false, resumeQueue: [] };
 		this.slots.push(slot);
 		worker.on('message', (message) => this.onMessage(slot, message));
 		worker.on('error', (error) => this.onWorkerGone(slot, `worker error: ${error.message}`));
@@ -364,28 +381,52 @@ export class AnalysisWorkerPool {
 		}
 		const startedAt = Date.now();
 		let settled = false;
+		const reply = (): void => {
+			// The worker may have died while the host was looking this up; there is no one to tell then.
+			try { slot.worker.postMessage({ type: 'otelUsageReply', rpcId, usage: lastUsage, ...(lastError !== undefined ? { error: lastError } : {}) }); } catch { /* worker gone */ }
+		};
+		let lastUsage: CopilotCliOtelSessionUsage | null = null;
+		let lastError: string | undefined;
+		let timedOutLate = false;
 		const finish = (usage: CopilotCliOtelSessionUsage | null, error?: string): void => {
 			if (settled) { return; }
 			settled = true;
+			lastUsage = usage;
+			lastError = error;
 			clearTimeout(bound);
 			const tookMs = Date.now() - startedAt;
 			if (tookMs >= 5_000) { this.options.log(`OTel usage lookup for ${sessionFile} took ${(tookMs / 1000).toFixed(1)}s${error !== undefined ? ` and failed: ${error}` : ''}`); }
 			if (pending && slot.pending.get(requestId) === pending) {
-				pending.hostLookups--;
-				if (pending.hostLookups === 0) { this.armClock(slot, pending); }
+				// Hand the answer over once the worker has room to run this request again.
+				slot.resumeQueue.push(() => {
+					if (slot.pending.get(requestId) !== pending) { return; } // displaced from a dead worker meanwhile
+					pending.hostLookups--;
+					if (pending.hostLookups === 0) { this.armClock(slot, pending); }
+					reply();
+				});
+				this.drainResumes(slot);
+				return;
 			}
-			// The worker may have died while the host was looking this up; there is no one to tell then.
-			try { slot.worker.postMessage({ type: 'otelUsageReply', rpcId, usage, ...(error !== undefined ? { error } : {}) }); } catch { /* worker gone */ }
+			reply();
 		};
 		const limitMs = this.options.hostLookupTimeoutMs ?? HOST_LOOKUP_TIMEOUT_MS;
 		const bound = setTimeout(() => {
+			timedOutLate = true;
+			this.lateHostLookups++;
 			this.hostLookupCooldownUntil = Date.now() + (this.options.hostLookupCooldownMs ?? HOST_LOOKUP_COOLDOWN_MS);
 			finish(null, `the host did not answer within ${limitMs / 1000}s`);
 		}, limitMs);
 		bound.unref?.();
 		const resolve = this.options.resolveOtelUsage;
 		if (!resolve) { finish(null); return; }
-		resolve(sessionFile).then((usage) => finish(usage), (error: unknown) => finish(null, error instanceof Error ? error.message : String(error)));
+		const answered = (): void => {
+			// The index the cooldown was waiting for has loaded: lookups can succeed again.
+			if (timedOutLate && --this.lateHostLookups === 0) { this.hostLookupCooldownUntil = 0; }
+		};
+		resolve(sessionFile).then(
+			(usage) => { answered(); finish(usage); },
+			(error: unknown) => { answered(); finish(null, error instanceof Error ? error.message : String(error)); },
+		);
 	}
 
 	/**

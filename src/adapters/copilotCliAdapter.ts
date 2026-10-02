@@ -63,23 +63,25 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	}
 
 	/**
-	 * How discovery classified this session, if it did: started by Microsoft Scout, or by the Copilot desktop app.
+	 * How discovery classified this session: started by Microsoft Scout, by the Copilot desktop app, or both (the two
+	 * are independent; only the display label gives Scout precedence). Empty when it did not classify it.
 	 * Discovery runs only where the adapter was asked to discover (the extension host), so a second instance — the
-	 * analysis worker's — has to be told; see {@link noteSessionKind}.
+	 * analysis worker's — has to be told; see {@link noteSessionKinds}.
 	 */
-	getSessionKind(sessionFile: string): 'scout' | 'app' | undefined {
+	getSessionKinds(sessionFile: string): Array<'scout' | 'app'> {
 		const id = this.classificationId(sessionFile);
-		if (!id) { return undefined; }
-		if (this._scoutSessionIds.has(id)) { return 'scout'; }
-		if (this._appSessionIds.has(id)) { return 'app'; }
-		return undefined;
+		const kinds: Array<'scout' | 'app'> = [];
+		if (!id) { return kinds; }
+		if (this._scoutSessionIds.has(id)) { kinds.push('scout'); }
+		if (this._appSessionIds.has(id)) { kinds.push('app'); }
+		return kinds;
 	}
 
-	/** Records a classification made elsewhere (by discovery in another instance) for this session. */
-	noteSessionKind(sessionFile: string, kind: 'scout' | 'app'): void {
+	/** Records classifications made elsewhere (by discovery in another instance) for this session. */
+	noteSessionKinds(sessionFile: string, kinds: ReadonlyArray<'scout' | 'app'>): void {
 		const id = this.classificationId(sessionFile);
 		if (!id) { return; }
-		(kind === 'scout' ? this._scoutSessionIds : this._appSessionIds).add(id);
+		for (const kind of kinds) { (kind === 'scout' ? this._scoutSessionIds : this._appSessionIds).add(id); }
 	}
 
 	/**
