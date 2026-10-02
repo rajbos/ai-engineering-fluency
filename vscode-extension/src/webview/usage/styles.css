@@ -60,6 +60,43 @@ body {
 	box-shadow: 0 2px 6px var(--shadow-color);
 }
 
+/* Heading that opens a band of related .section cards inside one tab, so a long stack
+   reads as grouped rather than as one flat list with leftovers at the bottom. */
+.section-group-heading {
+	margin: 24px 0 10px;
+	padding-bottom: 6px;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.section-group-heading:first-child {
+	margin-top: 4px;
+}
+
+.section-group-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--text-primary);
+	letter-spacing: 0.01em;
+}
+
+.section-group-subtitle {
+	margin-top: 2px;
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+/* Sub-heading inside a section card, separating a block that answers a different question
+   from the columns above it (e.g. the 7-day compaction count under the per-period grid). */
+.ctx-window-subheading {
+	margin: 14px 0 6px;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
 .section-title {
 	font-size: 14px;
 	font-weight: 700;
@@ -215,6 +252,28 @@ body {
 	padding: 4px 8px;
 	vertical-align: middle;
 	color: var(--text-primary);
+}
+
+/* Collapsed long tail of reference kinds with no usage today or in the last 30 days.
+   Mirrors the ".model-leaderboard-other" disclosure so both long tails read the same. */
+.ctx-ref-other {
+	margin-top: 8px;
+}
+
+.ctx-ref-other > summary {
+	cursor: pointer;
+	user-select: none;
+	font-size: 12px;
+	color: var(--text-secondary);
+	padding: 4px 0;
+}
+
+.ctx-ref-other > summary:hover {
+	color: var(--link-color);
+}
+
+.ctx-ref-other[open] > summary {
+	margin-bottom: 6px;
 }
 
 
@@ -796,6 +855,47 @@ padding-bottom: 0;
 flex-wrap: wrap;
 }
 
+/* Two-level tab strip: group tabs above, the active group's leaf tabs below.
+   Mirrors the ".group-tabs" / ".leaf-tabs" pair the Diagnostics view uses. */
+.group-tabs {
+border-bottom-width: 2px;
+margin-bottom: 4px;
+}
+
+.group-tab {
+display: inline-flex;
+align-items: center;
+gap: 5px;
+background: transparent;
+border: none;
+border-bottom: 3px solid transparent;
+color: var(--text-secondary);
+padding: 8px 18px;
+font-size: 13px;
+font-weight: 700;
+cursor: pointer;
+border-radius: 4px 4px 0 0;
+transition: all 0.15s ease;
+white-space: nowrap;
+margin-bottom: -2px;
+font-family: inherit;
+}
+
+.group-tab:hover {
+color: var(--text-primary);
+background: var(--list-hover-bg);
+}
+
+.group-tab.active {
+color: var(--text-primary);
+border-bottom-color: var(--link-color);
+}
+
+/* The leaf bar is subordinate to the group bar above it, so it carries a lighter rule. */
+.leaf-tabs {
+border-bottom-width: 1px;
+}
+
 .tab-button {
 display: inline-flex;
 align-items: center;
@@ -858,24 +958,36 @@ background: var(--bg-tertiary);
 /* Recent Sessions pill filter bar (Editor / Vendor / Model / HydraFusion) */
 .session-filter-bar {
 	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 8px 12px;
+	flex-direction: column;
+	gap: 6px;
 	margin-bottom: 10px;
 }
 
+/* One row per dimension: a fixed-width label column keeps every row's pills starting on the same vertical line. */
 .session-filter-group {
 	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 6px;
+	align-items: flex-start;
+	gap: 8px;
 }
 
 .session-filter-group-label {
+	flex: 0 0 56px;
+	padding-top: 4px;
 	font-size: 11px;
 	font-weight: 600;
 	color: var(--text-secondary);
-	margin-right: 2px;
+}
+
+.session-filter-pills {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.session-filter-bar > .session-filter-pill-clear {
+	align-self: flex-start;
 }
 
 .session-filter-pill {
@@ -1270,4 +1382,404 @@ background: var(--bg-tertiary);
 	font-size: 12px;
 	padding: 4px 10px;
 	font-weight: normal;
+}
+
+.df-section .info-box {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 6px;
+	padding: 12px;
+	margin-bottom: 16px;
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.df-section .info-box-title {
+	font-weight: 600;
+	color: var(--text-primary);
+	margin-bottom: 6px;
+}
+
+.df-section-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+
+.df-section-icon {
+	font-size: 22px;
+}
+
+.df-section-title {
+	font-size: 18px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.df-section-badge {
+	font-size: 11px;
+	font-weight: 600;
+	padding: 2px 8px;
+	border-radius: 10px;
+	background: var(--badge-bg);
+	color: var(--badge-fg);
+}
+
+.df-notice {
+	font-size: 12px;
+	color: var(--text-secondary);
+	margin-bottom: 16px;
+	padding: 8px 12px;
+	border-left: 3px solid var(--border-color);
+	background: var(--bg-tertiary);
+}
+
+.df-empty, .df-error {
+	font-size: 13px;
+	color: var(--text-secondary);
+	padding: 16px;
+	background: var(--bg-tertiary);
+	border-radius: 6px;
+}
+
+.df-error {
+	border-left: 3px solid var(--error-fg);
+}
+
+.df-repo-card {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	margin-bottom: 8px;
+}
+
+.df-repo-card[open] {
+	margin-bottom: 14px;
+}
+
+.df-repo-summary {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px 16px;
+	padding: 10px 14px;
+	cursor: pointer;
+	list-style: none;
+	border-radius: 8px;
+}
+
+.df-repo-summary::-webkit-details-marker {
+	display: none;
+}
+
+.df-repo-summary::before {
+	content: '▸';
+	color: var(--text-muted);
+	font-size: 12px;
+	width: 10px;
+	transition: transform 0.15s ease;
+}
+
+.df-repo-card[open] > .df-repo-summary::before {
+	transform: rotate(90deg);
+}
+
+.df-repo-summary:hover {
+	background: var(--bg-secondary);
+}
+
+.df-repo-summary:focus-visible {
+	outline: 1px solid var(--focus-border, var(--border-color));
+	outline-offset: -1px;
+}
+
+.df-repo-head {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 10px;
+	flex: 1 1 240px;
+	min-width: 0;
+}
+
+.df-summary-stage {
+	font-size: 13px;
+	font-weight: 700;
+	color: var(--text-primary);
+	white-space: nowrap;
+}
+
+.df-dots {
+	display: inline-flex;
+	gap: 4px;
+}
+
+.df-dot {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	font-size: 10px;
+	font-weight: 700;
+	border: 1px solid var(--border-color);
+	background: var(--bg-secondary);
+}
+
+.df-counts {
+	display: inline-flex;
+	flex-wrap: wrap;
+	gap: 4px 12px;
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.df-count-missing {
+	color: var(--error-fg);
+}
+
+.df-count-findings {
+	color: var(--warning-fg);
+}
+
+.df-repo-body {
+	padding: 4px 16px 16px 38px;
+	border-top: 1px solid var(--border-color);
+	padding-top: 14px;
+}
+
+.df-overview {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: 6px 18px;
+	font-size: 12px;
+	color: var(--text-secondary);
+	margin-bottom: 10px;
+}
+
+.df-overview strong {
+	color: var(--text-primary);
+}
+
+.df-overview-hint {
+	margin-left: auto;
+	color: var(--text-muted);
+	font-size: 11px;
+}
+
+.df-disclaimer {
+	font-size: 12px;
+	color: var(--text-secondary);
+	margin-bottom: 8px;
+}
+
+.df-disclaimer strong {
+	color: var(--text-primary);
+}
+
+.df-about {
+	margin-bottom: 12px;
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.df-about > summary {
+	cursor: pointer;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.df-about-body {
+	margin-top: 8px;
+	padding: 10px 12px;
+	background: var(--bg-tertiary);
+	border-radius: 6px;
+	line-height: 1.5;
+}
+
+.df-repo-name {
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.df-repo-owner {
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.df-repo-owner-unknown {
+	font-style: italic;
+	color: var(--text-muted);
+}
+
+.df-band {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+
+.df-band-stage {
+	font-size: 20px;
+	font-weight: 800;
+	color: var(--text-primary);
+}
+
+.df-band-note {
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.df-band-complete .df-band-note {
+	color: var(--success-fg);
+}
+
+.df-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 14px;
+}
+
+.df-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 11px;
+	font-weight: 600;
+	padding: 3px 10px;
+	border-radius: 12px;
+	border: 1px solid var(--border-color);
+	color: var(--text-secondary);
+	background: var(--bg-secondary);
+}
+
+.df-chip-stage {
+	font-weight: 800;
+	color: var(--text-primary);
+}
+
+.df-verdict-attained {
+	border-color: var(--success-fg);
+	color: var(--success-fg);
+}
+
+.df-verdict-blocked {
+	border-color: var(--error-fg);
+	color: var(--error-fg);
+}
+
+.df-verdict-unverified {
+	border-color: var(--warning-fg);
+	color: var(--warning-fg);
+}
+
+.df-block {
+	margin-top: 12px;
+	padding: 10px 12px;
+	border-radius: 6px;
+	background: var(--bg-secondary);
+	border-left: 3px solid var(--error-fg);
+}
+
+.df-block-unknown {
+	border-left-color: var(--warning-fg);
+}
+
+.df-block-findings {
+	border-left-color: var(--error-fg);
+}
+
+.df-block-title {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--text-primary);
+	margin-bottom: 8px;
+}
+
+.df-control-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.df-control-list li {
+	margin-bottom: 8px;
+}
+
+.df-control-list li:last-child {
+	margin-bottom: 0;
+}
+
+.df-control-label {
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.df-finding-title {
+	font-size: 12px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.df-control-detail {
+	display: block;
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-top: 2px;
+}
+
+.df-heuristic {
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	color: var(--text-muted);
+	margin-left: 6px;
+}
+
+.df-footer {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 8px;
+}
+
+.df-control-list li.df-pickable {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+}
+
+.df-pick {
+	margin: 2px 0 0;
+	flex-shrink: 0;
+	cursor: pointer;
+}
+
+.df-item-text {
+	min-width: 0;
+}
+
+.df-action {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 10px 16px;
+	margin-top: 14px;
+	padding: 10px 12px;
+	border-radius: 6px;
+	border: 1px solid var(--border-color);
+	background: var(--bg-secondary);
+}
+
+.df-action-text {
+	flex: 1 1 260px;
+	font-size: 11px;
+	color: var(--text-secondary);
 }

@@ -1011,6 +1011,20 @@ border: 1px solid #1f6feb;
 	margin-bottom: 6px;
 }
 
+.beta-badge {
+	display: inline-block;
+	margin-left: 8px;
+	padding: 1px 6px;
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	color: var(--vscode-editorWarning-foreground, #cca700);
+	border: 1px solid var(--vscode-editorWarning-foreground, #cca700);
+	border-radius: 3px;
+	vertical-align: middle;
+}
+
 .cache-details {
 	margin-top: 16px;
 }
@@ -1053,6 +1067,31 @@ border: 1px solid #1f6feb;
 	display: flex;
 	gap: 8px;
 	align-items: center;
+}
+
+.loading-status {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--link-color);
+	border: 1px solid var(--link-color);
+	border-radius: 12px;
+	padding: 4px 12px;
+	animation: loading-status-pulse 1.6s ease-in-out infinite;
+}
+
+.loading-status:empty {
+	display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.loading-status {
+		animation: none;
+	}
+}
+
+@keyframes loading-status-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.6; }
 }
 
 .folder-input {

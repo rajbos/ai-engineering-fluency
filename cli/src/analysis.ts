@@ -7,8 +7,8 @@
  */
 import { calculateEstimatedCost } from '../../src/tokenEstimation';
 import { addModelUsage, scaleModelUsage } from '../../src/statsHelpers';
-import { normalizePathForComparison, detectClaudeCodeEditorVariant } from '../../src/workspaceHelpers';
-import { getCustomProviderGroup } from '../../src/webview/shared/modelUtils';
+import { normalizePathForComparison, detectClaudeCodeEditorVariant, detectRelocatedAgentHomeFromPath } from '../../src/workspaceHelpers';
+import { getPricingSourceForEditor, getBillingGroup } from '../../src/chartDataBuilder';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import type { ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../src/types';
 export type { PeriodStats, UsageAnalysisPeriod } from '../../src/types';
@@ -57,43 +57,14 @@ export interface DailyEntry {
 	editorModelUsage?: { [editor: string]: ModelUsage };
 }
 
-// ── Billing group helpers (mirrors chartDataBuilder.ts) ──────────────────────────────────────
-
-/** Editor display names that bill through GitHub Copilot's AI-Credit system. */
-const COPILOT_EDITOR_NAMES = new Set([
-	'VS Code', 'VS Code Insiders', 'VS Code Exploration',
-	'VS Code Server', 'VS Code Server (Insiders)', 'VSCodium',
-	'Visual Studio', 'JetBrains', 'Copilot CLI', 'Copilot CLI (App)', 'MS Scout (Copilot CLI)',
-]);
-
-const MODEL_PROVIDER_PREFIXES: Array<[string, string]> = [
-	['claude', 'Anthropic'], ['anthropic', 'Anthropic'],
-	['gemini', 'Google'], ['google', 'Google'],
-	['mistral', 'Mistral AI'], ['codestral', 'Mistral AI'], ['magistral', 'Mistral AI'],
-	['ministral', 'Mistral AI'], ['devstral', 'Mistral AI'], ['pixtral', 'Mistral AI'],
-	['gpt', 'OpenAI'], ['o1', 'OpenAI'], ['o3', 'OpenAI'], ['o4', 'OpenAI'],
-	['grok', 'xAI'], ['raptor', 'xAI'], ['goldeneye', 'xAI'],
-	['qwen', 'Alibaba'], ['mai-', 'Microsoft'],
-];
-
-function getPricingSourceForEditor(editor: string): 'provider' | 'copilot' {
-	return COPILOT_EDITOR_NAMES.has(editor) ? 'copilot' : 'provider';
-}
-
-function getModelBillingProvider(modelId: string): string {
-	const customGroup = getCustomProviderGroup(modelId);
-	if (customGroup) { return customGroup; }
-	const id = modelId.toLowerCase();
-	const match = MODEL_PROVIDER_PREFIXES.find(([prefix]) => id.startsWith(prefix));
-	return match ? match[1] : 'Other';
-}
-
-/** Custom endpoints (BYOK) bill the user's own provider, so they keep their own group on Copilot surfaces too. */
-function getBillingGroup(editor: string, modelId: string): string {
-	const customGroup = getCustomProviderGroup(modelId);
-	if (customGroup) { return customGroup; }
-	return COPILOT_EDITOR_NAMES.has(editor) ? 'GitHub Copilot' : getModelBillingProvider(modelId);
-}
+// ── Billing group helpers ────────────────────────────────────────────────────────────────────
+// These used to be a hand-maintained copy of chartDataBuilder.ts's table and helpers. The copy
+// drifted: it never gained the `glm` prefix, so GLM models (which Mistral Vibe routes to, and
+// which are priced in modelPricing.json) billed to the catch-all "Other" group in the CLI while
+// the extension grouped them under Z.ai. It also matched on the raw id rather than
+// getModelLookupCandidates(), so `copilot/`-prefixed and custom-endpoint ids fell through too.
+// Importing the shared implementation removes that whole class of drift — see AGENTS.md,
+// "CLI Must Reuse Shared Functions".
 
 // ── Pure helpers ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -106,12 +77,19 @@ export function effectiveTokens(data: SessionData): number {
 /** Determine editor source from file path, returning the same friendly display names used by the VS Code extension. */
 export function getEditorSourceFromPath(filePath: string): string {
 	const normalized = normalizePathForComparison(filePath);
+	// Eclipse Copilot conversations live in the workspace metadata; check before the
+	// generic VS Code fallthrough (the path can pass through a 'code' folder).
+	if (normalized.includes('com.microsoft.copilot.eclipse')) { return 'Eclipse'; }
 	// JetBrains must be checked before the broad /.copilot/ check (both use /.copilot/).
 	if (normalized.includes('/.copilot/jb/')) { return 'JetBrains'; }
 	// Copilot CLI: check specific sub-paths to avoid misclassifying JetBrains or other /.copilot/ entries.
 	if (normalized.includes('/.copilot/session-store.db#')) { return 'Copilot CLI'; }
 	if (normalized.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
 	if (normalized.includes('/.crush/crush.db#')) { return 'Crush'; }
+	// Hermes (<HERMES_HOME>/state.db#<id>) and Devin CLI (<...>/devin/cli/sessions.db#<id>)
+	// virtual DB session paths — mirrors detectCliAgentStoreFromPath in src/workspaceHelpers.ts.
+	if (normalized.includes('hermes/state.db#')) { return 'Hermes'; }
+	if (normalized.includes('devin/cli/sessions.db#')) { return 'Devin CLI'; }
 	// Cline task files live under <variant>/User/globalStorage/saoudrizwan.claude-dev/
 	// — must be checked before the generic /cursor/ and VS Code fallthrough below.
 	if (normalized.includes('/saoudrizwan.claude-dev/tasks/')) { return 'Cline'; }
@@ -121,6 +99,10 @@ export function getEditorSourceFromPath(filePath: string): string {
 	// OpenAI Codex CLI (~/.codex): must be checked before the generic 'code'-based
 	// fallbacks below ('codex' contains 'code' and would misclassify as VS Code).
 	if (normalized.includes('/.codex/')) { return 'Codex CLI'; }
+	// $CODEX_HOME / $VIBE_HOME / $HERMES_HOME pointing at a folder not named like the default.
+	const relocatedAgent = detectRelocatedAgentHomeFromPath(normalized);
+	if (relocatedAgent) { return relocatedAgent; }
+	if (normalized.includes('/.pi/agent/sessions/')) { return 'Pi'; }
 	// Kiro CLI (~/.kiro/sessions/cli) and Kiro IDE (kiro.kiroagent global storage) are separate editors.
 	if (normalized.includes('/.kiro/sessions/cli/')) { return 'Kiro CLI'; }
 	if (normalized.includes('/kiro.kiroagent/workspace-sessions/')) { return 'Kiro'; }
@@ -138,7 +120,13 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/vscodium/')) { return 'VSCodium'; }
 	if (normalized.includes('.vscode-server-insiders/')) { return 'VS Code Server (Insiders)'; }
 	if (normalized.includes('.vscode-server')) { return 'VS Code Server'; }
-	if (normalized.includes('/.vs/') && normalized.includes('/copilot-chat/')) { return 'Visual Studio'; }
+	// Visual Studio / SSMS Copilot Chat sessions. Mirrors isVisualStudioPath() and
+	// isSsmsPath() in src/workspaceHelpers.ts — keep the three roots and the
+	// `/sessions/` requirement in step across both.
+	if (normalized.includes('/copilot-chat/') && normalized.includes('/sessions/')) {
+		if (normalized.includes('/ssmsgithubcopilot/copilot-chat/')) { return 'SSMS'; }
+		if (normalized.includes('/.vs/') || normalized.includes('/vsgithubcopilot/copilot-chat/')) { return 'Visual Studio'; }
+	}
 	return 'VS Code';
 }
 

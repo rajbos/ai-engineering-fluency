@@ -2,7 +2,15 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import { INSIGHT_CATALOG, evaluateInsights } from '../../src/insightsEngine';
 import type { InsightContext } from '../../src/insightsEngine';
-import type { ToolCurationAnalysis, UsageAnalysisPeriod } from '../../../src/types';
+import { createTranslator } from '../../src/l10nCore';
+import type { ToolCurationAnalysis, UsageAnalysisPeriod, MemoryFilesAnalysis } from '../../../src/types';
+
+/**
+ * Real English resolution against the shipped `package.nls.json`, not a stub —
+ * so these tests fail if an insight references a key that was never added to
+ * the bundle, which a `key => key` identity stub would happily let through.
+ */
+const EN = createTranslator('en');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,6 +54,7 @@ function makeCtx(overrides?: { autoCompact?: number; manualCompact?: number }): 
 		last30Days.toolCalls.byTool['__slash__compact'] = overrides.manualCompact;
 	}
 	return {
+		translate: EN,
 		today: emptyPeriod(),
 		last30Days,
 		...(overrides?.autoCompact !== undefined ? {
@@ -189,6 +198,17 @@ test('context-window-near-limit: fires at two near-limit sessions and reports th
 	assert.doesNotMatch(insight!.body, /went past that point/);
 });
 
+test('context-window-near-limit: offers a button that opens the matching session list', () => {
+	const ctx = makePressureCtx({
+		sessionsConsidered: 12, sessionsCompacted: 0, sessionsNearLimit: 3, sessionsWithFillData: 9,
+	});
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === NEAR_LIMIT_ID);
+	assert.ok(insight, 'insight should fire');
+	assert.equal(insight!.actionCommand, 'aiEngineeringFluency.showContextPressureSessions');
+	// The label carries the same count as the body, so the button plainly leads to those sessions.
+	assert.equal(insight!.actionLabel, 'Show these 3 sessions');
+});
+
 test('context-window-near-limit: yields to auto-compaction-pattern when that already fires', () => {
 	const ctx = makePressureCtx({
 		sessionsConsidered: 12, sessionsCompacted: 4, sessionsNearLimit: 3, sessionsWithFillData: 9,
@@ -305,6 +325,7 @@ const STALE_SKILLS_ID = 'stale-skills';
 
 test('stale-skills: fires when exactly one unused skill exists', () => {
 	const ctx: InsightContext = {
+		translate: EN,
 		today: emptyPeriod(),
 		last30Days: emptyPeriod(),
 		missedPotential: [],
@@ -331,6 +352,7 @@ test('stale-skills: fires when exactly one unused skill exists', () => {
 
 test('stale-skills: does not fire when no unused skills exist', () => {
 	const ctx: InsightContext = {
+		translate: EN,
 		today: emptyPeriod(),
 		last30Days: emptyPeriod(),
 		missedPotential: [],
@@ -349,6 +371,60 @@ test('stale-skills: does not fire when no unused skills exist', () => {
 	const results = evaluateInsights(ctx, {}, 7, null);
 	const insight = results.find(i => i.id === STALE_SKILLS_ID);
 	assert.equal(insight, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// stale-memory-files insight tests
+// ---------------------------------------------------------------------------
+
+const STALE_MEMORY_FILES_ID = 'stale-memory-files';
+
+function makeMemoryFilesCtx(overrides: Partial<MemoryFilesAnalysis>): InsightContext {
+	return {
+		translate: EN,
+		today: emptyPeriod(),
+		last30Days: emptyPeriod(),
+		missedPotential: [],
+		memoryFilesAnalysis: {
+			staleDays: 90,
+			largeFileBytes: 10 * 1024,
+			files: [],
+			byWorkspace: [],
+			totalFiles: 0,
+			totalBytes: 0,
+			staleFileCount: 0,
+			largeFileCount: 0,
+			...overrides,
+		},
+	};
+}
+
+test('stale-memory-files: fires when there are stale memory files', () => {
+	const ctx = makeMemoryFilesCtx({ staleFileCount: 2, totalFiles: 2 });
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === STALE_MEMORY_FILES_ID);
+	assert.ok(insight, 'stale-memory-files should trigger with stale files present');
+});
+
+test('stale-memory-files: fires when there are unusually large memory files', () => {
+	const ctx = makeMemoryFilesCtx({ largeFileCount: 1, totalFiles: 1 });
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === STALE_MEMORY_FILES_ID);
+	assert.ok(insight, 'stale-memory-files should trigger with a large file present');
+});
+
+test('stale-memory-files: does not fire when analysis is clean', () => {
+	const ctx = makeMemoryFilesCtx({ totalFiles: 3 });
+	const insight = evaluateInsights(ctx, {}, 7, null).find(i => i.id === STALE_MEMORY_FILES_ID);
+	assert.equal(insight, undefined);
+});
+
+test('stale-memory-files: does not fire without memoryFilesAnalysis in context', () => {
+	const insight = evaluateInsights(makeCtx(), {}, 7, null).find(i => i.id === STALE_MEMORY_FILES_ID);
+	assert.equal(insight, undefined);
+});
+
+test('stale-memory-files: has category=customization', () => {
+	const def = INSIGHT_CATALOG.find(d => d.id === STALE_MEMORY_FILES_ID);
+	assert.equal(def?.category, 'customization');
 });
 
 // ---------------------------------------------------------------------------
@@ -372,6 +448,7 @@ function makeTodaySession(overrides: Partial<TodaySessionSummary>): TodaySession
 
 function makeLcCtx(sessions: TodaySessionSummary[]): InsightContext {
 	return {
+		translate: EN,
 		today: emptyPeriod(),
 		last30Days: emptyPeriod(),
 		missedPotential: [],

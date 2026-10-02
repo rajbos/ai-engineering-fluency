@@ -12,7 +12,10 @@ import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import { registerMessageHandler } from "../shared/messageHandler";
 import { getModelColor } from "../../../../src/chartDataBuilder";
 import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
-import { initializeWebviewLocalization, setCurrentLanguage } from "../shared/localization";
+import { localize, localizeFormat } from "../shared/localization";
+import type { AccountBudgetView } from "../usage/billingStatsSanitizer";
+import { shouldListAccountBudgets } from "../../githubAccountBudgets";
+import { applyWebviewLocale } from "../shared/webviewLocale";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
@@ -103,7 +106,10 @@ type TeamServerInfo = {
   isConfigured: boolean;
   endpointUrl: string;
   sharingProfile: string;
+  /** Last successful usage-rollup upload. Tracked separately from the fluency score below. */
   lastSyncTime: string | null;
+  /** Last successful fluency-score upload, which runs and fails independently of the rollup sync. */
+  fluencyLastSyncTime: string | null;
   sessionCount: number;
 };
 
@@ -179,6 +185,8 @@ type DiagnosticsData = {
   sessionFolders?: SessionFolder[];
   displaySettings?: DisplaySettings;
   quotaEntitlements?: QuotaEntitlements;
+  /** Copilot budget per GitHub account signed in to VS Code. */
+  accountBudgets?: AccountBudgetView[];
   toolCallStats?: { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } } | null;
   skillCallStats?: { total: number; byName: { [key: string]: number } } | null;
   /** Per-skill, per-editor invocation counts (skillName -> editorSource -> count), for the Skill Usage tab's editor filter. */
@@ -230,11 +238,7 @@ const vscode = acquireVsCodeApi<DiagnosticsViewState>();
 const initialData = getWindowData<DiagnosticsData & { localization?: Record<string, string> }>('__INITIAL_DIAGNOSTICS__');
 
 // Initialize localization for webview
-if (initialData?.localization) {
-	initializeWebviewLocalization(initialData.localization);
-	const language = initialData.localization['__language__'] || 'en';
-	setCurrentLanguage(language);
-}
+applyWebviewLocale(initialData);
 
 const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   activeTab: undefined,
@@ -279,6 +283,11 @@ let storedDetailedFiles: SessionFileDetails[] = [];
 let isLoading = true;
 let currentBackendInfo: BackendStorageInfo | undefined;
 let currentGithubAuth: GitHubAuthStatus | undefined;
+// A `switchTab` request (e.g. the What's New "Take me there" action) that arrived before
+// renderLayout() built the tab bar — the message listener is registered before renderLayout()
+// runs (see resolveEarlyBackendState's comment for the same race with backendStorageInfoLoaded),
+// so activateTab() below can silently no-op on first arrival. Applied once renderLayout() runs.
+let pendingSwitchTabTo: string | undefined;
 let currentModelUsageTimeRange = "all";
 
 function removeSessionFilesSection(reportText: string): string {
@@ -971,7 +980,7 @@ function renderTeamServerDetailsSection(teamInfo: TeamServerInfo): string {
   if (!teamInfo.isConfigured) {
     return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Team Server</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">Deploy the sharing server and configure its URL in the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li><li>Enter the server's base URL in the Backend configuration panel</li><li>Data syncs automatically every 5 minutes once configured</li></ul></div>`;
   }
-  return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Server URL</td><td>${escapeHtml(teamInfo.endpointUrl)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">📁 Total Sessions</div><div class="summary-value">${escapeHtml(String(teamInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">🔄 Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? formatDate(teamInfo.lastSyncTime) : "Never"}</div></div></div></div>`;
+  return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 ${escapeHtml(localize('diagnostics.teamServer.configDetails'))}</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">${escapeHtml(localize('diagnostics.teamServer.serverUrl'))}</td><td>${escapeHtml(teamInfo.endpointUrl)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 ${escapeHtml(localize('diagnostics.teamServer.localSessionStats'))}</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">📁 ${escapeHtml(localize('diagnostics.teamServer.totalSessions'))}</div><div class="summary-value">${escapeHtml(String(teamInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.localSessionFiles'))}</div></div><div class="summary-card"><div class="summary-label">🔄 ${escapeHtml(localize('diagnostics.teamServer.usageData'))}</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? formatDate(teamInfo.lastSyncTime) : escapeHtml(localize('diagnostics.teamServer.never'))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.lastRollupUpload'))}</div></div><div class="summary-card"><div class="summary-label">🎯 ${escapeHtml(localize('diagnostics.teamServer.fluencyScore'))}</div><div class="summary-value" style="font-size: 14px;">${teamInfo.fluencyLastSyncTime ? formatDate(teamInfo.fluencyLastSyncTime) : escapeHtml(localize('diagnostics.teamServer.never'))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.uploadedSeparately'))}</div></div></div></div>`;
 }
 
 function renderTeamServerPanel(teamInfo: TeamServerInfo, githubAuth?: GitHubAuthStatus): string {
@@ -980,7 +989,7 @@ function renderTeamServerPanel(teamInfo: TeamServerInfo, githubAuth?: GitHubAuth
   const authWarning = githubNotAuthenticated ? `<button id="btn-team-server-auth-warning" style="width: 100%; margin-bottom: 16px; padding: 12px 16px; background: rgba(217, 119, 6, 0.15); border: 1px solid #d97706; border-radius: 6px; display: flex; gap: 10px; align-items: center; cursor: pointer; text-align: left;" title="Click to sign in to GitHub"><span style="font-size: 18px; flex-shrink: 0;">⚠️</span><div style="flex: 1;"><div style="color: #fbbf24; font-weight: 600; font-size: 13px; margin-bottom: 4px;">GitHub Authentication Required</div><div style="color: #d4a017; font-size: 12px;">Team server sync will not run until you sign in to GitHub. <strong style="color: #fbbf24;">Click here to sign in.</strong></div></div><span style="color: #fbbf24; font-size: 18px; flex-shrink: 0;">→</span></button>` : '';
   return `<div class="info-box"><div class="info-box-title">🖥️ Team Server Backend</div><div>Sync your token usage data to a self-hosted team server for team-wide reporting.</div></div>
     ${authWarning}
-    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} Status</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div>${renderTeamServerGithubAuthCard(githubAuth, githubNotAuthenticated)}<div class="summary-card"><div class="summary-label">👥 Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(teamInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">🕒 Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : "Never"}</div></div></div>
+    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} ${escapeHtml(localize('diagnostics.teamServer.status'))}</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div>${renderTeamServerGithubAuthCard(githubAuth, githubNotAuthenticated)}<div class="summary-card"><div class="summary-label">👥 ${escapeHtml(localize('diagnostics.teamServer.sharingProfile'))}</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(teamInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">🕒 ${escapeHtml(localize('diagnostics.teamServer.usageSync'))}</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : escapeHtml(localize('diagnostics.teamServer.never'))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">${escapeHtml(localize('diagnostics.teamServer.rollupUploadOnly'))}</div></div></div>
     ${renderTeamServerDetailsSection(teamInfo)}
     <div class="button-group"><button class="button" id="btn-configure-backend-team"><span>${teamInfo.isConfigured ? "⚙️" : "🔧"}</span><span>${teamInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span></button></div>`;
 }
@@ -1203,7 +1212,7 @@ function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessi
           ${editorOptions}
         </select>
         <span id="model-usage-time-selector"></span>
-        <span id="model-usage-status" style="font-size: 12px; color: var(--text-muted);">${escapeHtml(statusText)}</span>
+        <span id="model-usage-status" class="loading-status" role="status" aria-live="polite">${escapeHtml(statusText)}</span>
       </div>
     </div>
     <div id="model-usage-results"></div>
@@ -1546,7 +1555,10 @@ function activateTab(tabId: string): boolean {
 
 /** Which group tab (Diagnostics / Research / Settings) each leaf tab lives under. */
 const TAB_GROUPS: Record<string, string[]> = {
-  diagnostics: ["report", "sessions", "cache", "path-analyzer"],
+  // Keep in step with the leaf-tab bars in renderTabBars: a tab rendered in a bar but missing
+  // here can never be picked by firstAvailableTabInGroup, and groupOfTab only resolves it by
+  // falling through to the "diagnostics" default rather than by actually knowing its group.
+  diagnostics: ["report", "sessions", "cache", "path-analyzer", "share"],
   research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta", "ttft"],
   settings: ["display", "backend", "github", "debug"],
 };
@@ -1556,6 +1568,28 @@ function groupOfTab(tabId: string): string {
     if (tabs.includes(tabId)) { return group; }
   }
   return "diagnostics";
+}
+
+function isKnownDiagnosticsTab(tabId: string): boolean {
+  return Object.values(TAB_GROUPS).some((tabs) => tabs.includes(tabId));
+}
+
+/**
+ * Requested by the extension host (e.g. the What's New "Take me there" action) to land on a
+ * specific tab, including switching its group's leaf bar into view — a plain tab-button click
+ * only ever needs activateTab() since the user is already looking at that group's leaf bar. If
+ * the tab bar doesn't exist yet (renderLayout() hasn't run — see pendingSwitchTabTo's comment),
+ * stash the request instead of silently dropping it.
+ */
+function handleSwitchTab(message: DiagMessage): void {
+  const tab = String(message.tab ?? "");
+  if (!isKnownDiagnosticsTab(tab)) { return; }
+  if (activateTab(tab)) {
+    activateGroup(groupOfTab(tab));
+    diagState.patch({ activeTab: tab });
+    return;
+  }
+  pendingSwitchTabTo = tab;
 }
 
 /** The first leaf tab in a group that actually has a rendered button (handles the conditional Debug tab). */
@@ -2328,6 +2362,7 @@ function handleOtelComparisonSection(message: DiagMessage): void {
 }
 
 function handleDiagnosticDataLoaded(message: DiagMessage): void {
+  if (message.accountBudgets !== undefined) { handleAccountBudgetsUpdated(message); }
   handleDiagnosticReport(message);
   handleBackendStorageSection(message);
   handleSessionFoldersSection(message);
@@ -2336,6 +2371,26 @@ function handleDiagnosticDataLoaded(message: DiagMessage): void {
   handleToolAnalysisSection(message);
   handleSkillUsageSection(message);
   handleOtelComparisonSection(message);
+}
+
+function handleAccountBudgetsUpdated(message: DiagMessage): void {
+  const card = document.getElementById("diag-quota-card");
+  if (card && Object.prototype.hasOwnProperty.call(message, "quotaEntitlements")) {
+    // Re-render the whole card: sign-out or a removed account clears the quota figures, not just the list.
+    const rendered = document.createElement("div");
+    setHtml(rendered, renderQuotaCardHtml({
+      quotaEntitlements: message.quotaEntitlements as QuotaEntitlements | undefined,
+      accountBudgets: message.accountBudgets as AccountBudgetView[] | undefined,
+    }));
+    const fresh = rendered.firstElementChild;
+    if (fresh) { card.replaceWith(fresh); }
+    // The Monthly Budget card's hint reads the same quota, so it must follow the card (sign-out / account switch).
+    const hint = document.getElementById("diag-api-budget-hint");
+    if (hint) { setHtml(hint, renderApiBudgetHintHtml(message.quotaEntitlements as QuotaEntitlements | undefined)); }
+    return;
+  }
+  const container = document.getElementById("diag-account-budgets");
+  if (container) { setHtml(container, renderAccountBudgetsHtml(message.accountBudgets as AccountBudgetView[] | undefined)); }
 }
 
 function handleGithubAuthUpdated(message: DiagMessage): void {
@@ -2603,33 +2658,31 @@ function handleFolderAnalysisResult(message: DiagMessage): void {
   }
 }
 
+const DIAG_MESSAGE_HANDLERS: Record<string, (message: DiagMessage) => void> = {
+  diagnosticDataLoaded: handleDiagnosticDataLoaded,
+  backendStorageInfoLoaded: handleBackendStorageSection,
+  githubAuthUpdated: handleGithubAuthUpdated,
+  accountBudgetsUpdated: handleAccountBudgetsUpdated,
+  diagnosticDataError: handleDiagnosticDataError,
+  sessionFilesLoadProgress: handleSessionFilesLoadProgress,
+  cacheCleared: handleCacheCleared,
+  cacheRefreshed: handleCacheRefreshed,
+  folderPicked: handleFolderPicked,
+  folderAnalysisResult: handleFolderAnalysisResult,
+  modelUsageResult: handleModelUsageResult,
+  ttftResult: handleTtftResult,
+  switchTab: handleSwitchTab,
+};
+
 function setupMessageHandlers(): void {
   registerMessageHandler((message: DiagMessage) => {
-    if (message.command === "diagnosticDataLoaded") {
-      handleDiagnosticDataLoaded(message);
-    } else if (message.command === "backendStorageInfoLoaded") {
-      handleBackendStorageSection(message);
-    } else if (message.command === "githubAuthUpdated") {
-      handleGithubAuthUpdated(message);
-    } else if (message.command === "diagnosticDataError") {
-      handleDiagnosticDataError(message);
-    } else if (message.command === "sessionFilesLoaded" && message.detailedSessionFiles) {
-      handleSessionFilesLoaded(message);
-    } else if (message.command === "sessionFilesLoadProgress") {
-      handleSessionFilesLoadProgress(message);
-    } else if (message.command === "cacheCleared") {
-      handleCacheCleared();
-    } else if (message.command === "cacheRefreshed") {
-      handleCacheRefreshed(message);
-    } else if (message.command === "folderPicked") {
-      handleFolderPicked(message);
-    } else if (message.command === "folderAnalysisResult") {
-      handleFolderAnalysisResult(message);
-    } else if (message.command === "modelUsageResult") {
-      handleModelUsageResult(message);
-    } else if (message.command === "ttftResult") {
-      handleTtftResult(message);
+    // Only one command carries a payload-shaped guard beyond its name, so it stays a special case
+    // rather than forcing every entry in the table above to encode its own dispatch condition.
+    if (message.command === "sessionFilesLoaded") {
+      if (message.detailedSessionFiles) { handleSessionFilesLoaded(message); }
+      return;
     }
+    DIAG_MESSAGE_HANDLERS[message.command]?.(message);
   });
 }
 
@@ -2698,7 +2751,45 @@ function sel(current: string, value: string): string {
   return current === value ? 'selected' : '';
 }
 
-function renderQuotaCardHtml(data: DiagnosticsData): string {
+function renderAccountBudgetRowHtml(b: AccountBudgetView): string {
+  const plan = b.planName ? ` (${escapeHtml(b.planName)})` : "";
+  let detail: string;
+  if (b.status === "ok" && b.balance) {
+    const reset = b.resetDate ? `, ${escapeHtml(localizeFormat("accountBudgets.resets", b.resetDate.slice(0, 10)))}` : "";
+    detail = `${escapeHtml(localizeFormat("accountBudgets.usedLeft", "$" + (b.balance.usedAiCredits / 100).toFixed(2), "$" + b.balance.budgetUsd.toFixed(2), b.balance.pctAvailable.toFixed(1)))}${reset}`;
+  } else if (b.status === "no-quota") {
+    detail = escapeHtml(localize("accountBudgets.noQuota"));
+  } else if (b.reason === "no-session") {
+    detail = escapeHtml(localize("accountBudgets.noSession"));
+  } else if (b.reason === "lookup-failed") {
+    detail = escapeHtml(localizeFormat("accountBudgets.lookupFailed", b.detail ?? ""));
+  } else {
+    detail = escapeHtml(b.detail ?? localize("accountBudgets.unavailable"));
+  }
+  return `<strong>${escapeHtml(b.label)}</strong>${plan}: ${detail}<br/>`;
+}
+
+/** Whether the quota card above already shows the budget a lone account would repeat. */
+let quotaFigureShown = false;
+
+function renderAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): string {
+  // Same rule as the other surfaces: skip only a lone account with a balance, which the quota figures above already show.
+  if (!accounts || !shouldListAccountBudgets(accounts, quotaFigureShown)) { return ""; }
+  return `<p><strong>${escapeHtml(localize("accountBudgets.title"))}</strong><br/>${accounts.map(renderAccountBudgetRowHtml).join("")}</p>`;
+}
+
+/** The "API-driven budget" hint under the Monthly Budget input; empty without a premium quota. */
+function renderApiBudgetHintHtml(quota: QuotaEntitlements | undefined): string {
+  if (!quota || !quota.premium_interactions) { return ""; }
+  // The amount is bold, so it is substituted after escaping via a sentinel the translation cannot contain.
+  const sentinel = "\u0000";
+  const body = escapeHtml(localizeFormat("diagnostics.apiBudgetHint.body", sentinel))
+    .replace(sentinel, `<strong>$${quota.premium_interactions.toFixed(2)}</strong>`);
+  return `<p class="hint" style="color: #90ee90;"><strong>${escapeHtml(localize("diagnostics.apiBudgetHint.label"))}</strong> ${body}</p>`;
+}
+
+function renderQuotaCardHtml(data: Pick<DiagnosticsData, 'quotaEntitlements' | 'accountBudgets'>): string {
+  quotaFigureShown = !!data.quotaEntitlements?.premium_interactions;
   const quotaContent = data.quotaEntitlements
     ? `<p>
 ${
@@ -2712,9 +2803,10 @@ ${
 }
     </p>`
     : `<p class="hint">No quota information available from the API yet. Sign out and back in to refresh.</p>`;
-  return `<div class="backend-card">
+  return `<div class="backend-card" id="diag-quota-card">
 <h4>📊 API Quota Information</h4>
 ${quotaContent}
+<div id="diag-account-budgets">${renderAccountBudgetsHtml(data.accountBudgets)}</div>
 </div>`;
 }
 
@@ -2785,11 +2877,7 @@ Set a monthly AI spend budget in USD to get visual alerts on the status bar. The
   <input id="input-monthly-budget" type="number" min="0" max="99999" step="0.01" value="${monthlyBudget}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
 </div>
 <p class="hint">Budget coloring uses the current calendar month's estimated cost. Set to 0 to disable.</p>
-${
-  data.quotaEntitlements && data.quotaEntitlements.premium_interactions
-    ? `<p class="hint" style="color: #90ee90;"><strong>ℹ️ API-driven budget:</strong> Your premium_interactions quota entitlement is <strong>$${data.quotaEntitlements.premium_interactions.toFixed(2)}</strong>/month. If the budget above is 0 or empty, this API value will be used as your effective budget.</p>`
-    : ''
-}
+<div id="diag-api-budget-hint">${renderApiBudgetHintHtml(data.quotaEntitlements)}</div>
 </div>
 ${renderQuotaCardHtml(data)}
 ${renderEditorDiscoveryCardHtml()}
@@ -3380,6 +3468,19 @@ function triggerTtftAnalysis(): void {
   vscode.postMessage({ command: "analyzeTtft", granularity: currentTtftGranularity, scanRange: currentTtftScanRange });
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 function setupTtftHandlers(): void {
   document.getElementById("ttft-granularity")?.addEventListener("change", (e) => {
     currentTtftGranularity = (e.target as HTMLSelectElement).value as TtftGranularity;
@@ -3615,9 +3716,23 @@ function renderLayout(data: DiagnosticsData): void {
   setupOtelDeltaPeriodHandler();
   setupTtftHandlers();
 
+  restoreActiveTabAndSubtab();
+}
+
+/**
+ * Applies whichever tab should be active on first render: a `switchTab` request that arrived
+ * before renderLayout() ran (see pendingSwitchTabTo's comment) takes priority over whatever tab
+ * was last open — it's an explicit, just-now navigation request, not stale persisted state.
+ */
+function restoreActiveTabAndSubtab(): void {
   const savedState = diagState.restore();
+  const requestedTab = pendingSwitchTabTo;
+  pendingSwitchTabTo = undefined;
   let restoredTab = "report";
-  if (savedState?.activeTab && activateTab(savedState.activeTab)) {
+  if (requestedTab && activateTab(requestedTab)) {
+    restoredTab = requestedTab;
+    diagState.patch({ activeTab: requestedTab });
+  } else if (savedState?.activeTab && activateTab(savedState.activeTab)) {
     restoredTab = savedState.activeTab;
   } else {
     activateTab("report");

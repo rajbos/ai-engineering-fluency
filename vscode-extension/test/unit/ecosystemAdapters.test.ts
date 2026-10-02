@@ -50,6 +50,8 @@ import { ClineDataAccess } from '../../../src/cline';
 import { CodexCliDataAccess } from '../../../src/codexcli';
 import { HermesDataAccess } from '../../../src/hermes';
 import { KiloDataAccess } from '../../../src/kilo';
+import { calculateEstimatedCost } from '../../../src/tokenEstimation';
+import * as modelPricing from '../../../src/modelPricing.json';
 
 // Stub functions for adapters requiring callbacks
 const noopEstimateTokens = (_text: string, _model?: string) => 0;
@@ -291,6 +293,95 @@ test('MistralVibeAdapter.handles: rejects unrelated paths', () => {
     assert.ok(!mistralVibeAdapter.handles(path.join(os.homedir(), '.claude', 'projects', 'hash', 'abc.jsonl')));
 });
 
+/** Writes a Mistral Vibe session fixture and returns its meta.json path plus a cleanup fn. */
+function writeVibeSession(stats: Record<string, unknown>, activeModel: string): { metaPath: string; cleanup: () => void } {
+    const dir = fs.mkdtempSync(path.join(process.cwd(), 'vibe-session-'));
+    const metaPath = path.join(dir, 'meta.json');
+    fs.writeFileSync(metaPath, JSON.stringify({ config: { active_model: activeModel }, stats }));
+    return { metaPath, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+test('MistralVibeDataAccess.getModelUsage: reports session_cached_tokens as cachedReadTokens', async () => {
+    // Real shape from ~/.vibe/logs/session/*/meta.json: session_prompt_tokens already
+    // INCLUDES session_cached_tokens, so the cached figure is a breakdown of the input
+    // total, never an addition to it.
+    const { metaPath, cleanup } = writeVibeSession(
+        { session_prompt_tokens: 646563, session_completion_tokens: 5161, session_cached_tokens: 598272 },
+        'mistral-medium-3.5',
+    );
+    try {
+        const usage = await mistralVibeDA.getModelUsage(metaPath);
+        assert.equal(usage['mistral-medium-3.5'].inputTokens, 646563, 'inputTokens stays the full prompt total');
+        assert.equal(usage['mistral-medium-3.5'].outputTokens, 5161);
+        assert.equal(usage['mistral-medium-3.5'].cachedReadTokens, 598272, 'cached portion is reported separately');
+    } finally {
+        cleanup();
+    }
+});
+
+test('MistralVibeDataAccess.getModelUsage: cost matches Vibe\'s own session_cost for a cache-heavy session', async () => {
+    // Guards the regression this fix closed: without cachedReadTokens the whole prompt
+    // total is billed at the full input rate, which overstated this session ~5x
+    // ($1.0086 instead of $0.2009). Expected value is the `session_cost` Vibe itself
+    // recorded for this exact session.
+    const { metaPath, cleanup } = writeVibeSession(
+        { session_prompt_tokens: 646563, session_completion_tokens: 5161, session_cached_tokens: 598272 },
+        'mistral-medium-3.5',
+    );
+    try {
+        const usage = await mistralVibeDA.getModelUsage(metaPath);
+        const cost = calculateEstimatedCost(usage, modelPricing.pricing as any);
+        assert.ok(Math.abs(cost - 0.200885) < 1e-5, `expected Vibe's reported $0.200885, got $${cost.toFixed(6)}`);
+    } finally {
+        cleanup();
+    }
+});
+
+test('MistralVibeDataAccess.getModelUsage: glm-5-2 and devstral-2 are priced rather than costing $0', async () => {
+    // Both are models Vibe routes to that had no modelPricing.json entry, so every
+    // session using them silently contributed $0 to cost totals.
+    for (const [model, prompt, completion, expected] of [
+        ['glm-5-2', 250694, 2930, 0.3638636],
+        ['devstral-2', 1_000_000, 100_000, 0.6],
+    ] as const) {
+        const { metaPath, cleanup } = writeVibeSession(
+            { session_prompt_tokens: prompt, session_completion_tokens: completion },
+            model,
+        );
+        try {
+            const cost = calculateEstimatedCost(await mistralVibeDA.getModelUsage(metaPath), modelPricing.pricing as any);
+            assert.ok(cost > 0, `${model} must be priced, got $0`);
+            assert.ok(Math.abs(cost - expected) < 1e-5, `${model}: expected $${expected}, got $${cost.toFixed(7)}`);
+        } finally {
+            cleanup();
+        }
+    }
+});
+
+test('modelPricing: every Mistral Medium 3.5 spelling carries the same cached-read rate', () => {
+    // `mistral-medium-latest`, `mistral-medium-3.5` and `mistral-medium-3-5` are the same
+    // model at the same rates. A cached rate on only some of them means a session reporting
+    // one of the others still bills cache reads at the full input rate.
+    const pricing = modelPricing.pricing as Record<string, { inputCostPerMillion: number; cachedInputCostPerMillion?: number }>;
+    for (const id of ['mistral-medium-latest', 'mistral-medium-3.5', 'mistral-medium-3-5']) {
+        assert.equal(pricing[id].inputCostPerMillion, 1.5, `${id} input rate`);
+        assert.equal(pricing[id].cachedInputCostPerMillion, 0.15, `${id} must carry the cached-read rate`);
+    }
+});
+
+test('MistralVibeDataAccess.getModelUsage: cached tokens exceeding prompt tokens are clamped', async () => {
+    const { metaPath, cleanup } = writeVibeSession(
+        { session_prompt_tokens: 100, session_completion_tokens: 10, session_cached_tokens: 5000 },
+        'mistral-medium-3.5',
+    );
+    try {
+        const usage = await mistralVibeDA.getModelUsage(metaPath);
+        assert.equal(usage['mistral-medium-3.5'].cachedReadTokens, 100, 'cached read is capped at the input total');
+    } finally {
+        cleanup();
+    }
+});
+
 test('GeminiCliAdapter.handles: recognises ~/.gemini session paths', () => {
     const p = path.join(os.homedir(), '.gemini', 'tmp', 'demo-project', 'chats', 'session-abc.jsonl');
     assert.ok(geminiCliAdapter.handles(p));
@@ -392,7 +483,20 @@ test('VisualStudioAdapter.handles: recognises SSMS SSMSGitHubCopilot session pat
     assert.ok(visualStudioAdapter.handles(p));
 });
 
+test('VisualStudioAdapter.handles: recognises VS AppData VSGitHubCopilot session paths', () => {
+    // Chats started without a solution open — no .vs folder exists (issue #2137).
+    const p = 'C:\\Users\\user\\AppData\\Local\\Microsoft\\VisualStudio\\18.0_0a408795\\VSGitHubCopilot\\copilot-chat\\b6662ded\\sessions\\80720523-4109-42b8-a24e-c5fb65fcce62';
+    assert.ok(visualStudioAdapter.handles(p));
+});
+
+test('VisualStudioAdapter.getDisplayName: returns "Visual Studio" for VSGitHubCopilot AppData paths', () => {
+    const p = 'C:\\Users\\user\\AppData\\Local\\Microsoft\\VisualStudio\\18.0_0a408795\\VSGitHubCopilot\\copilot-chat\\b6662ded\\sessions\\80720523-4109-42b8-a24e-c5fb65fcce62';
+    assert.equal(visualStudioAdapter.getDisplayName(p), 'Visual Studio');
+});
+
 test('VisualStudioAdapter.handles: rejects unrelated paths', () => {
+    // A copilot-chat/sessions path outside the three known VS roots stays unhandled.
+    assert.ok(!visualStudioAdapter.handles('C:\\some\\other\\app\\copilot-chat\\b6662ded\\sessions\\abc'));
     assert.ok(!visualStudioAdapter.handles(path.join(os.homedir(), '.claude', 'projects', 'hash', 'abc.jsonl')));
     assert.ok(!visualStudioAdapter.handles(path.join(os.homedir(), 'AppData', 'Roaming', 'Code', 'User', 'workspaceStorage', 'abc', 'chatSessions', 'session.json')));
 });
@@ -474,10 +578,11 @@ test('GeminiCliAdapter.getCandidatePaths: returns Gemini session and index paths
     assert.ok(paths.some(p => p.source === 'Gemini CLI (logs.json)'));
 });
 
-test('VisualStudioAdapter.getCandidatePaths: returns VS log dir and SSMS sessions dir', () => {
+test('VisualStudioAdapter.getCandidatePaths: returns VS log dir, VS AppData dir and SSMS sessions dir', () => {
     const paths = visualStudioAdapter.getCandidatePaths();
-    assert.equal(paths.length, 2);
+    assert.equal(paths.length, 3);
     assert.ok(paths.some(p => p.source === 'Visual Studio (log dir)'), 'Should include VS log dir');
+    assert.ok(paths.some(p => p.source === 'Visual Studio (AppData sessions dir)'), 'Should include VS AppData sessions dir');
     assert.ok(paths.some(p => p.source === 'SSMS (sessions dir)'), 'Should include SSMS sessions dir');
     assert.ok(paths.every(p => p.path.length > 0), 'All paths should be non-empty');
 });

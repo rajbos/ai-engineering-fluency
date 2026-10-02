@@ -1,4 +1,5 @@
 {
+  "readinessAvailable": true,
   "today": {
     "sessions": 24,
     "toolCalls": {
@@ -188,8 +189,12 @@
     "delegationSessions": 5,
     "contextWindow": {
       "maxRequestInputTokens": 96000,
-      "maxRequestModels": ["claude-sonnet-4.5"],
-      "tierCounts": { "default": 4 },
+      "maxRequestModels": [
+        "claude-sonnet-4.5"
+      ],
+      "tierCounts": {
+        "default": 4
+      },
       "maxReachedTokens": 118000,
       "maxReachedWindowLimit": 128000
     },
@@ -470,8 +475,13 @@
     "delegationSessions": 55,
     "contextWindow": {
       "maxRequestInputTokens": 142000,
-      "maxRequestModels": ["claude-sonnet-4.5"],
-      "tierCounts": { "default": 48, "long": 6 },
+      "maxRequestModels": [
+        "claude-sonnet-4.5"
+      ],
+      "tierCounts": {
+        "default": 48,
+        "long": 6
+      },
       "maxReachedTokens": 126500,
       "maxReachedWindowLimit": 128000
     },
@@ -483,6 +493,22 @@
       "worstFillPercent": 99
     }
   },
+  "accountBudgets": [
+    {
+      "accountId": "fixture-account-1",
+      "label": "octo-personal",
+      "status": "ok",
+      "planName": "Copilot Pro",
+      "resetDate": "2026-11-01T00:00:00.000Z",
+      "balance": { "budgetUsd": 39, "budgetAiCredits": 3900, "remainingAiCredits": 1500, "usedAiCredits": 2400, "pctAvailable": 38.5 }
+    },
+    {
+      "accountId": "fixture-account-2",
+      "label": "octo-work",
+      "status": "unavailable",
+      "reason": "no-session"
+    }
+  ],
   "month": {
     "sessions": 288,
     "toolCalls": {
@@ -955,5 +981,285 @@
         ]
       }
     ]
-  }
+  },
+  "memoryFilesAnalysis": {
+    "staleDays": 90,
+    "largeFileBytes": 10240,
+    "totalFiles": 4,
+    "totalBytes": 24576,
+    "staleFileCount": 2,
+    "largeFileCount": 1,
+    "byWorkspace": [
+      {
+        "workspaceName": "<script>alert('xss')</script> & \"my-repo\"",
+        "workspaceHash": "abc123",
+        "repoCount": 3,
+        "sessionCount": 1,
+        "userCount": 0,
+        "totalBytes": 20480,
+        "newestMtimeMs": 1710000000000,
+        "staleFileCount": 2
+      },
+      {
+        "workspaceName": "User (global)",
+        "repoCount": 0,
+        "sessionCount": 0,
+        "userCount": 1,
+        "totalBytes": 4096,
+        "newestMtimeMs": 1710500000000,
+        "staleFileCount": 0
+      }
+    ]
+  },
+  "serverMemoriesAnalysis": {
+    "repo": "rajbos/ai-engineering-fluency",
+    "enabled": true,
+    "truncated": true,
+    "totalMemories": 340,
+    "distinctSubjects": 191,
+    "documentedCount": 99,
+    "promotionCandidateCount": 231,
+    "repeatedGroupCount": 40,
+    "fullyStaleCount": 4,
+    "topPromotionGroups": [
+      {
+        "displaySubject": "snapshot identity",
+        "repeatCount": 12,
+        "representativeFact": "CacheManager shared snapshots use mtime+size plus a durable cache_<id>.seq publish generation; writers update the sidecar before the body.",
+        "citationCount": 9
+      },
+      {
+        "displaySubject": "<script>alert('xss')</script> & \"quoted\"",
+        "repeatCount": 3,
+        "representativeFact": "Escaping check: subject & fact both carry markup that must render as text, not HTML.",
+        "citationCount": 2
+      },
+      {
+        "displaySubject": "CLI versioning",
+        "repeatCount": 1,
+        "representativeFact": "The CLI's `--version` output is sourced from cli/package.json, not hard-coded in TypeScript.",
+        "citationCount": 2
+      }
+    ]
+  },
+  "repeatedTasks": {
+    "minClusterSize": 2,
+    "sessionsScanned": 42,
+    "clusters": [
+      {
+        "representativePrompt": "Bump the changelog and tag a release for the web app",
+        "sessionCount": 3,
+        "repositories": [
+          "acme/web-app"
+        ],
+        "sharedKeywords": [
+          "changelog",
+          "release",
+          "tag"
+        ],
+        "sessions": [
+          {
+            "file": "/sessions/release-notes-3.jsonl",
+            "title": "Release notes for 2.4.0",
+            "lastInteraction": "2026-03-13T16:05:00.000Z",
+            "repository": "acme/web-app"
+          },
+          {
+            "file": "/sessions/release-notes-2.jsonl",
+            "title": "Release notes for 2.3.1",
+            "lastInteraction": "2026-03-06T11:20:00.000Z",
+            "repository": "acme/web-app"
+          },
+          {
+            "file": "/sessions/release-notes-1.jsonl",
+            "title": "Release notes for 2.3.0",
+            "lastInteraction": "2026-02-27T09:45:00.000Z",
+            "repository": "acme/web-app"
+          }
+        ]
+      },
+      {
+        "representativePrompt": "Write unit tests for the new parser helper",
+        "sessionCount": 2,
+        "repositories": [
+          "acme/web-app",
+          "acme/data-tools"
+        ],
+        "sharedKeywords": [
+          "tests",
+          "parser"
+        ],
+        "sessions": [
+          {
+            "file": "/sessions/parser-tests-2.jsonl",
+            "title": "Tests for the CSV parser",
+            "lastInteraction": "2026-03-11T14:00:00.000Z",
+            "repository": "acme/data-tools"
+          },
+          {
+            "file": "/sessions/parser-tests-1.jsonl",
+            "title": "Tests for the config parser",
+            "lastInteraction": "2026-03-02T10:15:00.000Z",
+            "repository": "acme/web-app"
+          }
+        ]
+      }
+    ]
+  },
+  "claudeDesktopCoverage": {
+    "knownSessions": 145,
+    "withTranscript": 76,
+    "missingTranscript": 69
+  },
+  "todaySessions": [
+    {
+      "title": "g2g?",
+      "filePath": "C:/sessions/g2g?.jsonl",
+      "interactions": 69,
+      "toolCalls": 414,
+      "inputTokens": 41400000,
+      "outputTokens": 165600,
+      "thinkingTokens": 0,
+      "cachedTokens": 40020000,
+      "totalTokens": 41565600,
+      "estimatedCost": 15.87,
+      "editor": "Copilot CLI (App)",
+      "models": [
+        "gpt-5.6-sol"
+      ],
+      "lastActivity": "2026-03-14T08:17:00Z",
+      "workspace": "barco-repo-analysis",
+      "durationMs": 2622000,
+      "activeDurationMs": 2070000,
+      "subAgentCalls": 6
+    },
+    {
+      "title": "Refactor usage panel",
+      "filePath": "C:/sessions/Refactor_usage_panel.jsonl",
+      "interactions": 41,
+      "toolCalls": 246,
+      "inputTokens": 24600000,
+      "outputTokens": 98400,
+      "thinkingTokens": 0,
+      "cachedTokens": 23780000,
+      "totalTokens": 24698400,
+      "estimatedCost": 9.43,
+      "editor": "Claude Desktop",
+      "models": [
+        "claude-sonnet-5-5"
+      ],
+      "lastActivity": "2026-03-14T07:50:00Z",
+      "workspace": "ai-engineering-fluency",
+      "durationMs": 1558000,
+      "activeDurationMs": 1230000,
+      "subAgentCalls": 4
+    },
+    {
+      "title": "Fusion routing spike",
+      "filePath": "C:/sessions/Fusion_routing_spike.jsonl",
+      "interactions": 33,
+      "toolCalls": 198,
+      "inputTokens": 19800000,
+      "outputTokens": 79200,
+      "thinkingTokens": 0,
+      "cachedTokens": 19140000,
+      "totalTokens": 19879200,
+      "estimatedCost": 7.59,
+      "editor": "Copilot CLI (App)",
+      "models": [
+        "hydrafusion",
+        "gpt-5.6-luna"
+      ],
+      "lastActivity": "2026-03-14T07:12:00Z",
+      "workspace": "ai-engineering-fluency",
+      "durationMs": 1254000,
+      "activeDurationMs": 990000,
+      "subAgentCalls": 3
+    },
+    {
+      "title": "Pricing refresh",
+      "filePath": "C:/sessions/Pricing_refresh.jsonl",
+      "interactions": 22,
+      "toolCalls": 132,
+      "inputTokens": 13200000,
+      "outputTokens": 52800,
+      "thinkingTokens": 0,
+      "cachedTokens": 12760000,
+      "totalTokens": 13252800,
+      "estimatedCost": 5.06,
+      "editor": "Copilot CLI",
+      "models": [
+        "claude-opus-5-5"
+      ],
+      "lastActivity": "2026-03-14T06:40:00Z",
+      "workspace": "model-pricing",
+      "durationMs": 836000,
+      "activeDurationMs": 660000,
+      "subAgentCalls": 2
+    },
+    {
+      "title": "Docs pass",
+      "filePath": "C:/sessions/Docs_pass.jsonl",
+      "interactions": 14,
+      "toolCalls": 84,
+      "inputTokens": 8400000,
+      "outputTokens": 33600,
+      "thinkingTokens": 0,
+      "cachedTokens": 8120000,
+      "totalTokens": 8433600,
+      "estimatedCost": 3.22,
+      "editor": "Claude Code",
+      "models": [
+        "claude-sonnet-4-6"
+      ],
+      "lastActivity": "2026-03-14T06:05:00Z",
+      "workspace": "docs-site",
+      "durationMs": 532000,
+      "activeDurationMs": 420000,
+      "subAgentCalls": 1
+    },
+    {
+      "title": "Terra benchmark",
+      "filePath": "C:/sessions/Terra_benchmark.jsonl",
+      "interactions": 9,
+      "toolCalls": 54,
+      "inputTokens": 5400000,
+      "outputTokens": 21600,
+      "thinkingTokens": 0,
+      "cachedTokens": 5220000,
+      "totalTokens": 5421600,
+      "estimatedCost": 2.07,
+      "editor": "Copilot CLI (App)",
+      "models": [
+        "gpt-5.6-terra",
+        "kimi-k3"
+      ],
+      "lastActivity": "2026-03-14T05:30:00Z",
+      "workspace": "bench",
+      "durationMs": 342000,
+      "activeDurationMs": 270000,
+      "subAgentCalls": 0
+    },
+    {
+      "title": "Flash eval",
+      "filePath": "C:/sessions/Flash_eval.jsonl",
+      "interactions": 5,
+      "toolCalls": 30,
+      "inputTokens": 3000000,
+      "outputTokens": 12000,
+      "thinkingTokens": 0,
+      "cachedTokens": 2900000,
+      "totalTokens": 3012000,
+      "estimatedCost": 1.15,
+      "editor": "Copilot CLI",
+      "models": [
+        "mai-code-1.1-flash"
+      ],
+      "lastActivity": "2026-03-14T04:55:00Z",
+      "workspace": "evals",
+      "durationMs": 190000,
+      "activeDurationMs": 150000,
+      "subAgentCalls": 0
+    }
+  ]
 }

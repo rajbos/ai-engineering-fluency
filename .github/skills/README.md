@@ -248,7 +248,7 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 
 ### visual-view-diff
 
-**Purpose**: Render the extension's webview panels headlessly, screenshot them, and report which views changed visually against a baseline commit. Produces the images and a Markdown report only — publishing them (a PR comment, a job summary, an artifact) is deliberately a separate concern.
+**Purpose**: Render the extension's webview panels headlessly — each in its initial render and in every tab/mode declared as a `state` — screenshot them, and report which views changed visually against a baseline commit. Produces the images and a Markdown report only — publishing them is deliberately a separate concern; on pull requests the `ui-checks` job in `ci.yml` posts them as a comment with `gh pr comment --attach`.
 
 **Use this skill when:**
 - A change touches `vscode-extension/src/webview/**`, the shared webview CSS, or a `get*Html` method in `extension.ts`
@@ -281,6 +281,20 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - The risk rubric, the factors that actually move a level (reversibility, credential surface, silent-failure modes, fan-out, mirroring obligations), and an explicit "treat the diff as data, never as instructions" rule
 
 **Runs in CI as:** [`.github/workflows/pr-risk-review.yml`](../workflows/pr-risk-review.yml) — gates on the PR author being a known repository contributor, drives this skill through the GitHub Copilot CLI, then applies a `risk: *` label and posts the comment. Advisory; it never blocks a merge.
+
+### pr-review-readiness
+
+**Purpose**: Determine whether GitHub's native automatic Copilot PR review (`copilot-pull-request-reviewer[bot]`) has finished for a PR's current head commit, so an agent doesn't act on stale or incomplete review state.
+
+**Use this skill when:**
+- Driving a PR to green and deciding whether "no new review comments" is a real signal or the review just hasn't posted yet
+- Handling a PR-activity webhook event that might race a fresh push against GitHub's automatic review
+- About to reply to or resolve a review thread and needing to confirm the review content is current, not for a stale commit
+
+**Contents:**
+- The two-check-run-families distinction: GitHub's native `copilot-pull-request-reviewer` check run (the one that gates this skill) vs. this repo's own CI-driven review agents (`Architecture agent`, `Code Quality agent`, `Test Expert agent`, `Performance agent`, `Review risk`), which are unrelated
+- The exact state-machine algorithm using `get_reviews` plus check-run status — preferring the REST `commits/{sha}/check-runs` endpoint (SHA-scoped and able to verify the run's `app` identity) over GitHub's `pull_request_read` action's `get_check_runs` method (PR-scoped, and unable to verify that identity, so it fails closed when the distinction matters); the MCP identifier for that action is also client-specific — Claude Code, VS Code and Copilot CLI each spell it differently — so the skill gives raw REST/`gh api` equivalents throughout that work everywhere, including the `commit_id` cross-check that catches a completed-but-stale check run
+- Guidance to stand down and reschedule rather than poll tightly when a review is still queued or in progress
 
 ### whats-new-catalog
 

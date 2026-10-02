@@ -22,6 +22,13 @@ test('getModelBillingProvider: google prefix maps to Google', () => {
 	assert.equal(getModelBillingProvider('google-something'), 'Google');
 });
 
+test('getModelBillingProvider: glm maps to Z.ai rather than falling through to Other', () => {
+	// Mistral Vibe routes to GLM models, and they are priced in modelPricing.json — so
+	// without a prefix entry their real cost would land in the generic "Other" bucket.
+	assert.equal(getModelBillingProvider('glm-5-2'), 'Z.ai');
+	assert.equal(getModelBillingProvider('glm-4.6'), 'Z.ai');
+});
+
 test('getModelBillingProvider: mistral maps to Mistral AI', () => {
 	assert.equal(getModelBillingProvider('mistral-large'), 'Mistral AI');
 });

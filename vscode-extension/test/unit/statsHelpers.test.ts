@@ -11,6 +11,7 @@ computeSessionDurationMs,
 reconcileModelUsageToTotal,
 reconcileModelUsageToActualTokens,
 distributeModelUsageToDays,
+distributeExactCostToDays,
 sumModelUsageTokens,
 computeFallbackDailyRollup,
 type SessionAggregateInput,
@@ -21,6 +22,7 @@ import type { ModelUsage, EditorUsage, SessionFileCache, DailyRollupEntry } from
 import { scaleModelUsage, preserveAutoRouting, reconcileDebugLogModelUsage } from '../../../src/statsHelpers';
 import { calculateEstimatedCost } from '../../../src/tokenEstimation';
 import { TASK_CATEGORIES, type TaskCategory, type TaskCategoryBreakdown } from '../../../src/taskClassification';
+import { getTimeWindowStartDayKey } from '../../../src/timeWindows';
 
 /** Builds a full TaskCategoryBreakdown (all categories present) from a partial map of non-zero shares. */
 function makeShares(partial: Partial<Record<TaskCategory, number>>): TaskCategoryBreakdown {
@@ -464,24 +466,42 @@ assert.ok(fileAtWindowStart >= ranges.last30DaysStartMs,
 'mtime at window start boundary should not be excluded');
 });
 
-test('computeUtcDateRanges: last30DaysUtcStartKey is 30 local days before todayUtcKey', () => {
+test('computeUtcDateRanges: last30DaysUtcStartKey is 30 calendar dates including today', () => {
 const now = new Date(2024, 4, 15, 12, 0, 0); // local May 15
 const ranges = computeUtcDateRanges(now);
-// April 15 is 30 days before May 15
-assert.equal(ranges.last30DaysUtcStartKey, '2024-04-15');
+// April 16..May 15 inclusive is 30 calendar dates.
+assert.equal(ranges.last30DaysUtcStartKey, '2024-04-16');
 });
 
 test('computeUtcDateRanges: 30-day window crosses a month boundary correctly', () => {
 const now = new Date(2024, 2, 10, 12, 0, 0); // local March 10
 const ranges = computeUtcDateRanges(now);
-// Feb 9 is 30 days before Mar 10
-assert.equal(ranges.last30DaysUtcStartKey, '2024-02-09');
+// Feb 10..Mar 10 inclusive is 30 calendar dates (2024 is a leap year: Feb has 29 days).
+assert.equal(ranges.last30DaysUtcStartKey, '2024-02-10');
+});
+
+test('computeUtcDateRanges: last30DaysUtcStartKey always agrees with the Recent Sessions last30 lookback', () => {
+// The two used to disagree by one day (this function started the window at
+// `now - 30`, getTimeWindowStartDayKey('last30') at `now - 30 + 1`), so a
+// session active exactly on the older boundary day could be counted in a
+// "Last 30 Days" total without appearing in a same-labelled Recent Sessions
+// list. computeUtcDateRanges now derives its boundary from the same helper,
+// so this can no longer drift — this test guards that sharing.
+for (const now of [
+new Date(2024, 4, 15, 12, 0, 0),
+new Date(2024, 2, 10, 12, 0, 0),
+new Date(2025, 0, 1, 0, 0, 0),
+new Date(2026, 4, 13, 10, 0, 0),
+]) {
+const ranges = computeUtcDateRanges(now);
+assert.equal(ranges.last30DaysUtcStartKey, getTimeWindowStartDayKey('last30', now));
+}
 });
 
 test('computeUtcDateRanges: last30DaysStartMs equals the local midnight of last30DaysUtcStartKey', () => {
 const now = new Date(2024, 4, 15, 12, 0, 0); // local May 15 at noon
 const ranges = computeUtcDateRanges(now);
-// last30DaysStartKey is April 15; local midnight of April 15
+// last30DaysStartKey is April 16; local midnight of April 16
 const [year, month, day] = ranges.last30DaysUtcStartKey.split('-').map(Number);
 const expectedMs = new Date(year, month - 1, day).getTime();
 assert.equal(ranges.last30DaysStartMs, expectedMs);
@@ -497,7 +517,7 @@ assert.equal(ranges.lastMonthUtcStartKey, '2026-04-01');
 });
 
 test('computeUtcDateRanges: lastMonthStartMs is earlier than last30DaysStartMs when today is May 13', () => {
-// On May 13, last30Days starts Apr 13 but previous month starts Apr 1.
+// On May 13, last30Days starts Apr 14 but previous month starts Apr 1.
 // The file-load cutoff should be Apr 1 (lastMonthStartMs < last30DaysStartMs).
 const now = new Date(2026, 4, 13, 0, 0, 0); // local May 13, 2026
 const ranges = computeUtcDateRanges(now);
@@ -1678,4 +1698,49 @@ test('aggregatePeriodStats: two editors on one day split the turns without losin
 	assert.equal(summed, day.interactions, 'editor slices must sum back to the day total');
 	assert.equal(day.editorUsage['vscode'].interactions, 4);
 	assert.equal(day.editorUsage['Claude Code'].interactions, 6);
+});
+
+
+
+// ── distributeExactCostToDays – debug-log exact cost reaches period totals ──
+
+test('distributeExactCostToDays: splits by interactions, sums to session cost, replaces rollup cost (no double count)', () => {
+	const rollups: Record<string, DailyRollupEntry> = {
+		'2025-03-14': { tokens: 10, actualTokens: 10, thinkingTokens: 0, interactions: 1, modelUsage: {}, copilotExactCostDollars: 99 },
+		'2025-03-15': { tokens: 30, actualTokens: 30, thinkingTokens: 0, interactions: 3, modelUsage: {} },
+	};
+	const out = distributeExactCostToDays(rollups, 0.8)!;
+	assert.ok(Math.abs(out['2025-03-14'].copilotExactCostDollars! - 0.2) < 1e-12);
+	assert.ok(Math.abs(out['2025-03-15'].copilotExactCostDollars! - 0.6) < 1e-12);
+	const sum = Object.values(out).reduce((s, d) => s + (d.copilotExactCostDollars ?? 0), 0);
+	assert.ok(Math.abs(sum - 0.8) < 1e-12);
+	assert.equal(rollups['2025-03-14'].copilotExactCostDollars, 99, 'input is not mutated');
+});
+
+test('distributeExactCostToDays: no cost or no interactions leaves rollups unchanged (undefined)', () => {
+	const rollups: Record<string, DailyRollupEntry> = {
+		'2025-03-15': { tokens: 1, actualTokens: 1, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+	};
+	assert.equal(distributeExactCostToDays(rollups, 0), undefined);
+	assert.equal(distributeExactCostToDays(rollups, NaN), undefined);
+	assert.equal(distributeExactCostToDays({ d: { ...rollups['2025-03-15'], interactions: 0 } }, 1), undefined);
+});
+
+test('aggregatePeriodStats: debug-log-only exact cost appears in period totals once distributed over rollups', () => {
+	const ranges = makeRanges('2025-03-15');
+	const rollups: Record<string, DailyRollupEntry> = {
+		'2025-03-15': { tokens: 100, actualTokens: 120, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+	};
+	const build = (dailyRollups: Record<string, DailyRollupEntry>): SessionAggregateInput => ({
+		editorType: 'vscode',
+		mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+		// Session-level exact cost (as buildSessionDataObject writes it) — rollups alone decide period totals.
+		sessionData: makeSession({ dailyRollups, copilotExactCostDollars: 0.5 }),
+	});
+	// Baseline (the bug): rollups built before the debug log was read carry no exact cost.
+	assert.equal(aggregatePeriodStats([build(rollups)], ranges).todayStats.exactCopilotCostDollars, 0);
+	const fixed = aggregatePeriodStats([build(distributeExactCostToDays(rollups, 0.5)!)], ranges);
+	assert.ok(Math.abs(fixed.todayStats.exactCopilotCostDollars - 0.5) < 1e-12);
+	assert.ok(Math.abs(fixed.monthStats.exactCopilotCostDollars - 0.5) < 1e-12);
+	assert.ok(Math.abs(fixed.last30DaysStats.exactCopilotCostDollars - 0.5) < 1e-12);
 });

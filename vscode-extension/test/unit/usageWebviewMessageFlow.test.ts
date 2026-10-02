@@ -184,8 +184,18 @@ interface Harness {
 	settleScroll: () => Promise<void>;
 }
 
-/** Boots the bundled webview in jsdom. `initialData` mirrors `window.__INITIAL_USAGE__`. */
-async function bootWebview(initialData: Record<string, unknown> | null): Promise<Harness> {
+/**
+ * Boots the bundled webview in jsdom. `initialData` mirrors `window.__INITIAL_USAGE__`.
+ *
+ * `duringBootstrap` is dispatched immediately after the bundle is evaluated and
+ * before anything is awaited — i.e. while `bootstrap()` is still suspended on its
+ * dynamic import, which is exactly when the extension host's pending messages
+ * arrive in practice.
+ */
+async function bootWebview(
+	initialData: Record<string, unknown> | null,
+	duringBootstrap?: Record<string, unknown>,
+): Promise<Harness> {
 	const bundle = await bundleUsageWebview();
 	const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
 		runScripts: 'outside-only',
@@ -210,6 +220,12 @@ async function bootWebview(initialData: Record<string, unknown> | null): Promise
 	if (initialData) { window.__INITIAL_USAGE__ = initialData; }
 
 	window.eval(bundle);
+
+	if (duringBootstrap) {
+		const event = new window.MessageEvent('message', { data: duringBootstrap });
+		Object.defineProperty(event, 'source', { value: null });
+		window.dispatchEvent(event);
+	}
 
 	const settle = async (): Promise<void> => {
 		for (let i = 0; i < 20; i++) { await new Promise((resolve) => setImmediate(resolve)); }
@@ -300,6 +316,115 @@ test('repository PR results delivered before any layout exists still reach the p
 
 	const rendered = harness.text('#repos-pr-content');
 	assert.ok(rendered?.includes('ai-engineering-fluency'), `expected the repo table, got: ${rendered}`);
+});
+
+test('a switchTab to Repository PRs that lands before the layout still starts the PR fetch', async () => {
+	// The Efficiency view's "Open Repository PRs" action can reach a panel that is still in its
+	// loading state. `handleSwitchTab` then has no tab button to click, so only the persisted
+	// activeTab survives — and without an explicit kick at render time the tab would sit on
+	// "Loading…" forever because nothing ever asks the host for the PR statistics.
+	const harness = await bootWebview(null);
+	assert.equal(harness.window.document.querySelector('.tab-button[data-tab="repos"]'), null);
+
+	harness.post({ command: 'switchTab', tab: 'repos' });
+	assert.ok(
+		!harness.posted.some((m) => m.command === 'loadRepoPrStats'),
+		'nothing to fetch into yet — the request belongs to the render, not the switch',
+	);
+
+	harness.post({ command: 'updateStats', data: buildStats() });
+	await harness.settle();
+
+	assert.equal(
+		harness.posted.filter((m) => m.command === 'loadRepoPrStats').length,
+		1,
+		'the rendered layout must ask for the PR statistics exactly once',
+	);
+	const reposPanel = harness.window.document.querySelector('#tab-panel-repos');
+	assert.notEqual(reposPanel?.style.display, 'none', 'the Repository PRs tab must be the visible one');
+});
+
+test('a stats refresh does not re-fire the active tab\'s lazy fetch', async () => {
+	const harness = await bootWebview(buildStats());
+	harness.post({ command: 'switchTab', tab: 'repos' });
+	await harness.settle();
+	assert.equal(harness.posted.filter((m) => m.command === 'loadRepoPrStats').length, 1);
+
+	harness.post({ command: 'updateStats', data: buildStats() });
+	await harness.settle();
+
+	assert.equal(
+		harness.posted.filter((m) => m.command === 'loadRepoPrStats').length,
+		1,
+		're-rendering the layout must not repeat a fetch the user never asked for again',
+	);
+});
+
+test('a switchTab to Repository PRs during a refresh still starts the PR fetch', async () => {
+	// `usageRefreshing` swaps the whole root for the loading card, so the tab bar is gone again
+	// even though a layout rendered earlier. A guard that only ever fires once per webview would
+	// skip this second layout and leave the tab on its placeholder with no fetch in flight.
+	const harness = await bootWebview(buildStats());
+	harness.post({ command: 'usageRefreshing' });
+	await harness.settle();
+	assert.equal(harness.window.document.querySelector('.tab-button[data-tab="repos"]'), null);
+
+	harness.post({ command: 'switchTab', tab: 'repos' });
+	harness.post({ command: 'updateStats', data: buildStats() });
+	await harness.settle();
+
+	assert.equal(
+		harness.posted.filter((m) => m.command === 'loadRepoPrStats').length,
+		1,
+		'the layout rebuilt after the loading state must ask for the PR statistics',
+	);
+});
+
+test('AI Readiness scans only on tab visit, refreshes on demand, and survives a layout rebuild', async () => {
+	const stats = { ...buildStats(), readinessAvailable: true };
+	const harness = await bootWebview(stats);
+	assert.ok(harness.window.document.querySelector('.tab-button[data-tab="readiness"]'));
+	assert.ok(!harness.posted.some((m) => m.command === 'loadReadiness'));
+
+	harness.post({ command: 'switchTab', tab: 'readiness' });
+	await harness.settle();
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').length, 1);
+	assert.equal(harness.posted.find((m) => m.command === 'loadReadiness').requestId, 1);
+	const report = { scannedAt: '2026-03-14T09:30:00.000Z', apiSignalsIncluded: false, maxAssessableStage: 4, repos: [], skippedRepoCount: 0 };
+	harness.post({ command: 'readinessLoaded', requestId: 1, report });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /No git repositories were found/);
+
+	harness.post({ command: 'updateStats', data: stats });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /No git repositories were found/);
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').length, 1);
+
+	(harness.window.document.querySelector('#btn-refresh-readiness') as HTMLButtonElement).click();
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').at(-1)?.requestId, 2);
+	harness.post({ command: 'readinessLoaded', requestId: 1, report });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /Scanning repository controls/);
+	harness.post({ command: 'readinessScanFailed', requestId: 2 });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /Could not scan repository readiness/);
+});
+
+test('AI Readiness deep link waits for stats and ignores responses from before a full refresh', async () => {
+	const harness = await bootWebview(null);
+	harness.post({ command: 'switchTab', tab: 'readiness' });
+	harness.post({ command: 'updateStats', data: { ...buildStats(), readinessAvailable: true } });
+	await harness.settle();
+	assert.notEqual(harness.window.document.querySelector('#tab-panel-readiness')?.style.display, 'none');
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').length, 1);
+
+	harness.post({ command: 'usageRefreshing' });
+	harness.post({ command: 'updateStats', data: { ...buildStats(), readinessAvailable: true } });
+	await harness.settle();
+	assert.equal(harness.posted.filter((m) => m.command === 'loadReadiness').at(-1)?.requestId, 3);
+	harness.post({ command: 'readinessLoaded', requestId: 1, report: { repos: [] } });
+	await harness.settle();
+	assert.match(harness.text('#readiness-content')!, /Scanning repository controls/);
 });
 
 test('a layout re-render repopulates the GitHub activity panels from retained state', async () => {
@@ -657,6 +782,113 @@ test('Recent Sessions pill filters narrow the table by editor, vendor, model, an
 	assert.equal(doc.getElementById('sessions-filter-clear'), null, 'the clear button disappears once no filters are active');
 });
 
+test('the Context column reports each session\'s window fill and flags the near-limit ones', async () => {
+	const stats = buildStats();
+	const baseSession = {
+		interactions: 10, toolCalls: 5, inputTokens: 1000, outputTokens: 500, thinkingTokens: 0,
+		cachedTokens: 0, totalTokens: 1500, estimatedCost: 0.5, lastActivity: '2026-09-06T11:00:00.000Z',
+		editor: 'Copilot CLI (App)', models: ['gpt-5.6-terra'],
+	};
+	stats.todaySessions = [
+		{ ...baseSession, title: 'Near limit', filePath: 'a.jsonl', contextWindowLimit: 200000, contextReachedTokens: 190000 },
+		{ ...baseSession, title: 'Plenty of room', filePath: 'b.jsonl', contextWindowLimit: 200000, contextReachedTokens: 40000 },
+		// Compaction resets the fill a near-limit judgement would rest on, so a
+		// compacted session is shown but never flagged.
+		{ ...baseSession, title: 'Compacted', filePath: 'c.jsonl', contextWindowLimit: 200000, contextReachedTokens: 199000, truncationCount: 2 },
+		{ ...baseSession, title: 'No fill data', filePath: 'd.jsonl' },
+	];
+	const harness = await bootWebview(stats);
+	const doc = harness.window.document;
+
+	const contextCells = [...doc.querySelectorAll('.sessions-table tbody tr')].map((row: any) => {
+		const cells = [...row.cells];
+		return `${row.querySelector('.session-title-link').textContent} => ${cells[cells.length - 2].textContent.trim()}`;
+	});
+	assert.deepEqual(contextCells, [
+		'Near limit => ⚠️ 95%',
+		'Plenty of room => 20%',
+		'Compacted => 99%',
+		'No fill data => —',
+	]);
+});
+
+test('the near-limit pill and the insight\'s switchTab preset both narrow Recent Sessions to the flagged sessions', async () => {
+	const stats = buildStats();
+	const baseSession = {
+		interactions: 10, toolCalls: 5, inputTokens: 1000, outputTokens: 500, thinkingTokens: 0,
+		cachedTokens: 0, totalTokens: 1500, estimatedCost: 0.5, lastActivity: '2026-09-06T11:00:00.000Z',
+		editor: 'Copilot CLI (App)', models: ['gpt-5.6-terra'],
+	};
+	const sessions = [
+		{ ...baseSession, title: 'Near limit A', filePath: 'a.jsonl', contextWindowLimit: 200000, contextReachedTokens: 190000 },
+		{ ...baseSession, title: 'Plenty of room', filePath: 'b.jsonl', contextWindowLimit: 200000, contextReachedTokens: 40000 },
+		{ ...baseSession, title: 'Near limit B', filePath: 'c.jsonl', contextWindowLimit: 128000, contextReachedTokens: 120000 },
+	];
+	stats.todaySessions = sessions;
+	stats.recentSessions = { last7: sessions, last30: sessions, currentMonth: sessions };
+	const harness = await bootWebview(stats);
+	const doc = harness.window.document;
+	const titles = () => [...doc.querySelectorAll('.sessions-table tbody tr .session-title-link')].map((a: any) => a.textContent);
+	const pill = () => doc.querySelector('.session-filter-pill[data-filter-type="nearcontextlimit"]');
+
+	assert.equal(pill()?.textContent.replace(/\s+/g, ' ').trim(), '🧠 Near context limit 2',
+		'the pill counts only the sessions the insight counts');
+
+	pill().click();
+	assert.deepEqual(titles(), ['Near limit A', 'Near limit B']);
+	assert.equal(pill()?.getAttribute('aria-pressed'), 'true');
+
+	// Back to the unfiltered list, then take the path the insight's
+	// "Show these N sessions" button drives.
+	pill().click();
+	assert.deepEqual(titles(), ['Near limit A', 'Plenty of room', 'Near limit B']);
+
+	harness.post({ command: 'switchTab', tab: 'sessions', sessionsPreset: { filter: 'nearContextLimit', lookback: 'last30' } });
+	await harness.settle();
+
+	assert.equal(doc.querySelector('.tab-button.active')?.getAttribute('data-tab'), 'sessions');
+	assert.deepEqual(titles(), ['Near limit A', 'Near limit B']);
+	assert.equal(pill()?.getAttribute('aria-pressed'), 'true');
+	// A user who had hidden the Context column must not be left with a filtered
+	// table whose checkbox disagrees with what is on screen.
+	const checkbox = doc.querySelector('#sessions-columns-menu input[data-column="contextFill"]');
+	assert.equal(checkbox?.checked, true, 'the preset ticks the Columns menu checkbox it turned on');
+});
+
+test('a preset-forced column survives the saved column settings restored by bootstrap', async () => {
+	// bootstrap() yields on a dynamic import before it restores saved settings,
+	// while the message listener is live from module evaluation — so the host's
+	// pending switchTab preset routinely lands first and the restore replaces the
+	// whole column Set. Without re-applying, a user who had hidden the Context
+	// column lands on a near-limit-filtered table with no fill percentage on it.
+	const stats = buildStats() as any;
+	const baseSession = {
+		interactions: 10, toolCalls: 5, inputTokens: 1000, outputTokens: 500, thinkingTokens: 0,
+		cachedTokens: 0, totalTokens: 1500, estimatedCost: 0.5, lastActivity: '2026-09-06T11:00:00.000Z',
+		editor: 'Copilot CLI (App)', models: ['gpt-5.6-terra'],
+	};
+	const sessions = [
+		{ ...baseSession, title: 'Near limit', filePath: 'a.jsonl', contextWindowLimit: 200000, contextReachedTokens: 190000 },
+		{ ...baseSession, title: 'Plenty of room', filePath: 'b.jsonl', contextWindowLimit: 200000, contextReachedTokens: 40000 },
+	];
+	stats.todaySessions = sessions;
+	// The preset switches to the 30-day lookback, which renders from this cache.
+	stats.recentSessions = { last7: sessions, last30: sessions, currentMonth: sessions };
+	// Saved settings from a user who had hidden the Context column.
+	stats.sessionColumnSettings = { enabledColumns: ['interactions', 'totalTokens', 'editor', 'lastActivity'] };
+
+	const harness = await bootWebview(
+		stats,
+		{ command: 'switchTab', tab: 'sessions', sessionsPreset: { filter: 'nearContextLimit', lookback: 'last30' } },
+	);
+	const doc = harness.window.document;
+
+	assert.equal(doc.querySelector('#sessions-columns-menu input[data-column="contextFill"]')?.checked, true,
+		'the preset\'s column must survive the saved settings restored after it arrived');
+	const headers = [...doc.querySelectorAll('.sessions-table thead th')].map((th: any) => th.textContent.replace(/[▼▲]/g, '').trim());
+	assert.ok(headers.includes('Context'), `the Context column is visible; got ${headers.join(', ')}`);
+});
+
 test('renders cloud agent session results', async () => {
 	const harness = await bootWebview(buildStats());
 
@@ -728,6 +960,270 @@ test('remembers the "Other models" open state across a leaderboard re-render', a
 	const detailsAfterSort = harness.window.document.getElementById('model-leaderboard-other');
 	assert.ok(detailsAfterSort, 'expects the "Other models" group to still exist after sorting');
 	assert.equal(detailsAfterSort.open, true, 'the open state must survive the re-render');
+});
+
+/** Which leaf tab is marked active, and which panel is the only visible one. */
+function activeTabState(harness: any): { button: string | undefined; panels: string[]; group: string | undefined } {
+	const doc = harness.window.document;
+	return {
+		button: doc.querySelector('.tab-button.active')?.getAttribute('data-tab') ?? undefined,
+		panels: [...doc.querySelectorAll('.tab-panel')]
+			.filter((p: any) => p.style.display !== 'none')
+			.map((p: any) => p.id),
+		group: doc.querySelector('.group-tab.active')?.getAttribute('data-group') ?? undefined,
+	};
+}
+
+test('a deep link arriving while a rendered panel is reloading is still announced', async () => {
+	// Regression: the announcement guard used to be a lifetime boolean. renderUsageLoadingState()
+	// tears the panel down on a refresh, so a `switchTab` landing in that window could not be
+	// announced by activateUsageTab() (no panel yet) and was then suppressed by the guard when the
+	// layout came back — the host never recorded the visit, and What's New kept treating the
+	// deep-linked tab as unseen. Tracking the last announced tab reports it on the rebuilt layout.
+	const harness = await bootWebview(buildStats());
+	const opened = (): string[] => harness.posted
+		.filter((m: any) => m.command === 'viewTabOpened')
+		.map((m: any) => m.tab);
+	assert.deepEqual(opened(), ['activity'], 'the first render announces the tab it opened on');
+
+	// A refresh tears the panel down, a deep link lands while it is gone, then stats rebuild it.
+	harness.post({ command: 'usageRefreshing' });
+	harness.post({ command: 'switchTab', tab: 'worktrees' });
+	harness.post({ command: 'updateStats', data: buildStats() });
+	await harness.settle();
+
+	assert.equal(activeTabState(harness).button, 'worktrees', 'the deep link decides the rebuilt tab');
+	assert.ok(opened().includes('worktrees'), 'the host must be told the deep-linked tab was opened');
+});
+
+test('a periodic refresh does not re-announce the tab or re-request its data', async () => {
+	// Regression: setupTabs() runs after every renderLayout(), including each silent updateStats.
+	// Announcing + replaying unconditionally re-stamped the What's New visit window on every
+	// refresh, and re-posted loadRepoPrStats forever once an unauthenticated response had reset
+	// the loaded flag (refresh -> post -> unauthenticated -> flag reset -> repeat).
+	const harness = await bootWebview(null);
+	harness.post({ command: 'switchTab', tab: 'repos' });
+	harness.post({ command: 'updateStats', data: buildStats() });
+	await harness.settle();
+
+	const countOf = (command: string): number =>
+		harness.posted.filter((m: any) => m.command === command).length;
+	assert.equal(countOf('loadRepoPrStats'), 1, 'the opening render requests the data once');
+	const opensAfterFirstRender = countOf('viewTabOpened');
+
+	// An unauthenticated response resets the loaded flag, then two silent refreshes arrive.
+	harness.post({ command: 'repoPrStatsLoaded', data: null });
+	harness.post({ command: 'updateStats', data: buildStats() });
+	harness.post({ command: 'updateStats', data: buildStats() });
+	await harness.settle();
+
+	assert.equal(countOf('loadRepoPrStats'), 1, 'refreshes must not re-request while the user sits on the tab');
+	assert.equal(countOf('viewTabOpened'), opensAfterFirstRender, 'refreshes must not re-announce the same tab');
+
+	// A real switch away and back is still an explicit retry.
+	harness.window.document.querySelector('.tab-button[data-tab="activity"]').click();
+	harness.window.document.querySelector('.group-tab[data-group="github"]').click();
+	assert.equal(countOf('loadRepoPrStats'), 2, 're-entering the tab retries the load');
+});
+
+test('localization arriving with updateStats is applied when the initial payload was null', async () => {
+	// A panel opened before any stats are cached gets `__INITIAL_USAGE__ = null`, so the initial
+	// localization step never runs. Without the map on updateStats the whole view stays English.
+	const harness = await bootWebview(null);
+	harness.post({
+		command: 'updateStats',
+		data: { ...buildStats(), localization: { 'usage.group.workspace': 'WERKRUIMTE', '__language__': 'nl' } },
+	});
+	await harness.settle();
+
+	const label = [...harness.window.document.querySelectorAll('.group-tab')]
+		.find((b: any) => b.getAttribute('data-group') === 'workspace')?.textContent ?? '';
+	assert.match(label, /WERKRUIMTE/, 'the group tab must use the payload translation, not the English default');
+});
+
+test('a deep link to a lazy-loaded tab still requests its data', async () => {
+	// Regression: activateUsageTab() returns before runTabFirstVisitEffects() when no panel
+	// exists yet, which is the state a `switchTab` message arrives in during loading. Without
+	// replaying the effects at render time, Repository PRs opened via a deep link rendered its
+	// panel and then sat on the loading placeholder, because loadRepoPrStats was never posted.
+	const harness = await bootWebview(null);
+	harness.post({ command: 'switchTab', tab: 'repos' });
+	harness.post({ command: 'updateStats', data: buildStats() });
+	await harness.settle();
+
+	assert.equal(activeTabState(harness).button, 'repos', 'the deep link decides the opening tab');
+	assert.ok(
+		harness.posted.some((m: any) => m.command === 'loadRepoPrStats'),
+		'the opening tab must request its own data, not wait for the user to switch away and back',
+	);
+});
+
+test('a deep link to Insights marks its new insights as seen', async () => {
+	// Regression: setupTabs() replays the opening tab's first-visit effects, but renderLayout
+	// assigned currentInsights *after* that call, so the replay iterated an empty array and the
+	// deep-linked Insights tab never posted `seen` until the user switched tabs by hand.
+	const stats = buildStats() as any;
+	stats.insights = [
+		{ id: 'insight-a', status: 'new', title: 'A', body: 'a', severity: 'tip' },
+		{ id: 'insight-b', status: 'seen', title: 'B', body: 'b', severity: 'tip' },
+	];
+	const harness = await bootWebview(null);
+	harness.post({ command: 'switchTab', tab: 'insights' });
+	harness.post({ command: 'updateStats', data: stats });
+	await harness.settle();
+
+	assert.equal(activeTabState(harness).button, 'insights', 'the deep link decides the opening tab');
+	const seen = harness.posted
+		.filter((m: any) => m.command === 'insightAction' && m.action === 'seen')
+		.map((m: any) => m.id);
+	assert.deepEqual(seen, ['insight-a'], 'only the new insight is marked seen, and it is marked');
+});
+
+test('group tabs expose which one is selected to assistive technology', async () => {
+	const harness = await bootWebview(buildStats());
+	const pressed = (): string[] => [...harness.window.document.querySelectorAll('.group-tab')]
+		.filter((b: any) => b.getAttribute('aria-pressed') === 'true')
+		.map((b: any) => b.getAttribute('data-group'));
+
+	assert.deepEqual(pressed(), ['usage'], 'the open group is the only one marked pressed at render');
+
+	harness.window.document.querySelector('.group-tab[data-group="coaching"]').click();
+
+	assert.deepEqual(pressed(), ['coaching'], 'aria-pressed follows the group, not just the CSS class');
+	// Every group button carries the attribute, so none reads as an untoggled plain button.
+	const all = [...harness.window.document.querySelectorAll('.group-tab')];
+	assert.ok(all.every((b: any) => b.hasAttribute('aria-pressed')), 'every group tab is a toggle');
+});
+
+test('switching group tabs moves to that group and shows only its panel', async () => {
+	const harness = await bootWebview(buildStats());
+
+	assert.deepEqual(activeTabState(harness), {
+		button: 'activity', panels: ['tab-panel-activity'], group: 'usage',
+	}, 'opens on My Activity under the Usage group');
+
+	harness.window.document.querySelector('.group-tab[data-group="github"]').click();
+
+	const after = activeTabState(harness);
+	assert.equal(after.group, 'github', 'the clicked group becomes active');
+	assert.equal(after.button, 'repos', "lands on the group's first leaf when none of its tabs was active");
+	assert.deepEqual(after.panels, ['tab-panel-repos'], 'exactly one panel is visible');
+
+	// Only the active group's leaf bar is on screen.
+	const visibleBars = [...harness.window.document.querySelectorAll('.leaf-tabs')]
+		.filter((bar: any) => bar.style.display !== 'none')
+		.map((bar: any) => bar.getAttribute('data-group'));
+	assert.deepEqual(visibleBars, ['github']);
+});
+
+test('returning to a group restores the leaf tab it was left on', async () => {
+	const harness = await bootWebview(buildStats());
+	const doc = harness.window.document;
+
+	// Start on a non-first leaf of the Workspace group.
+	doc.querySelector('.group-tab[data-group="workspace"]').click();
+	doc.querySelector('.tab-button[data-tab="worktrees"]').click();
+	assert.equal(activeTabState(harness).button, 'worktrees');
+
+	// Leave for another group, then come back.
+	doc.querySelector('.group-tab[data-group="coaching"]').click();
+	assert.equal(activeTabState(harness).group, 'coaching');
+	doc.querySelector('.group-tab[data-group="workspace"]').click();
+
+	assert.deepEqual(activeTabState(harness), {
+		button: 'worktrees', panels: ['tab-panel-worktrees'], group: 'workspace',
+	}, 'the group reopens on Worktrees, not on its first tab');
+});
+
+test('a deep-linked tab is remembered by its group even though it arrived before the panels existed', async () => {
+	// Regression: `switchTab` during the loading state sets activeTab but returns before
+	// recording the group, because no panel exists yet. Without seeding lastTabPerGroup at
+	// render time, leaving the group and returning dropped the user on its first tab instead.
+	// Boot into the loading state (no initial data), deep-link, then deliver the stats — the
+	// exact order the host produces when a notification action opens the panel.
+	const harness = await bootWebview(null);
+	harness.post({ command: 'switchTab', tab: 'worktrees' });
+	harness.post({ command: 'updateStats', data: buildStats() });
+	await harness.settle();
+	const doc = harness.window.document;
+
+	assert.equal(activeTabState(harness).button, 'worktrees', 'the deep link decides the opening tab');
+
+	doc.querySelector('.group-tab[data-group="github"]').click();
+	doc.querySelector('.group-tab[data-group="workspace"]').click();
+
+	assert.equal(
+		activeTabState(harness).button, 'worktrees',
+		'returning to the group must restore the deep-linked tab, not fall back to Tools',
+	);
+});
+
+/**
+ * Context-reference counts with a clear split: #file and #selection used recently, everything
+ * else untouched. `lastMonth` activity on #clipboard checks that only today + last-30-days
+ * decide the split, matching contextRefRecentTotal().
+ */
+function buildStatsWithContextRefLongTail(): Record<string, unknown> {
+	const stats = buildStats() as any;
+	const refs = (today: number, last30: number, clipboard = 0): Record<string, unknown> => ({
+		total: today + last30, byKind: {}, byPath: {},
+		file: today, selection: last30, clipboard,
+	});
+	stats.today.contextReferences = refs(6, 0);
+	stats.last30Days.contextReferences = refs(0, 40);
+	stats.month.contextReferences = refs(0, 30);
+	stats.lastMonth.contextReferences = refs(0, 0, 9);
+	return stats;
+}
+
+test('collapses context-reference kinds with no recent usage into a closed "Other references" group', async () => {
+	const harness = await bootWebview(buildStatsWithContextRefLongTail());
+
+	const details = harness.window.document.getElementById('ctx-ref-other');
+	assert.ok(details, 'expects a collapsible "Other references" group in the DOM');
+	assert.equal(details.open, false, 'the group must be collapsed by default');
+
+	const mainRows = harness.window.document.querySelectorAll(
+		'#section-context-references > .ctx-ref-table-wrap tbody tr');
+	const mainLabels = [...mainRows].map((row) => row.textContent);
+	assert.ok(mainLabels.some((label) => label.includes('#file')), '#file was used today, so it stays visible');
+	assert.ok(mainLabels.some((label) => label.includes('#selection')), '#selection was used in the last 30 days');
+	assert.ok(
+		!mainLabels.some((label) => label.includes('#clipboard')),
+		'#clipboard was only used last month, so it belongs in the long tail, not the main table',
+	);
+
+	const otherRows = details.querySelectorAll('tbody tr');
+	assert.ok(otherRows.length > 0, 'the unused kinds must still be rendered, just collapsed');
+	assert.match(
+		details.querySelector('summary').textContent,
+		new RegExp(`Other references \\(${otherRows.length},`),
+		'the summary count must match the rows it hides',
+	);
+
+	// Every descriptor still renders somewhere: collapsing the tail must never drop a kind.
+	assert.equal(mainRows.length + otherRows.length, 21, 'expects all 21 reference kinds accounted for');
+});
+
+test('remembers the "Other references" open state across a re-render', async () => {
+	const harness = await bootWebview(buildStatsWithContextRefLongTail());
+
+	const details = harness.window.document.getElementById('ctx-ref-other');
+	assert.equal(details.open, false);
+
+	// Mirror a real click on <summary>, then dispatch the `toggle` event the webview listens
+	// for in the capture phase (`toggle` does not bubble).
+	details.open = true;
+	details.dispatchEvent(new harness.window.Event('toggle'));
+
+	// A fresh stats payload rebuilds the whole view, recreating the <details> from scratch;
+	// without the persisted flag it would snap back to collapsed.
+	harness.post({ command: 'updateStats', data: buildStatsWithContextRefLongTail() });
+	await harness.settle();
+
+	const afterRerender = harness.window.document.getElementById('ctx-ref-other');
+	assert.ok(afterRerender, 'expects the "Other references" group to still exist after a re-render');
+	assert.equal(afterRerender.open, true, 'the open state must survive the re-render');
 });
 
 test('collapses the long tail of low-activity workspaces into an "Other" row on Workspace Health', async () => {
@@ -841,6 +1337,36 @@ test('the escalating pill is a filter that narrows the list to escalated moments
 	assert.match(harness.text('#corrections-filter-status') ?? '', /Showing 1 of 2 listed correction moments/);
 	assert.match(harness.text('#corrections-filter-status') ?? '', /Escalating corrections/);
 });
+
+/** Every correction pill's leading count, e.g. "1 user corrections" → "1". */
+function correctionPillCounts(harness: Harness): string[] {
+	return [...harness.window.document.querySelectorAll('button[data-correction-filter]')]
+		.map((pill: any) => pill.textContent.trim().split(/\s+/)[0]);
+}
+
+for (const [label, boot] of [
+	['the initial payload', () => bootWebview(buildStatsWithCorrections())],
+	['an updateStats message', async () => {
+		const harness = await bootWebview(buildStats());
+		harness.post({ command: 'updateStats', data: buildStatsWithCorrections() });
+		await harness.settle();
+		return harness;
+	}],
+] as const) {
+	test(`a correction report without escalatedUserCorrections renders numeric pill counts (via ${label})`, async () => {
+		// Reports cached before the escalating count existed lack the field. It must default to 0
+		// (no pill) rather than rendering "undefined 📈 escalating".
+		const harness = await boot();
+		harness.window.document.querySelector('.tab-button[data-tab="corrections"]')?.click();
+
+		const counts = correctionPillCounts(harness);
+		assert.ok(counts.length > 0, 'expects the correction pills to render');
+		for (const count of counts) { assert.match(count, /^\d+$/, `every pill must lead with a number, got "${count}"`); }
+		assert.equal(harness.window.document.querySelector('button[data-correction-filter="escalated"]'), null,
+			'a missing escalated count is zero, so its pill is hidden');
+		assert.ok(!(harness.text('#tab-panel-corrections') ?? '').includes('undefined'));
+	});
+}
 
 // ── Insight deep-linking ───────────────────────────────────────────────────
 // A toast ("💡 <title>" → View) and the status-bar insights badge both open the Insights tab for

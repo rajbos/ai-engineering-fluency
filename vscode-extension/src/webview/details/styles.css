@@ -304,3 +304,29 @@ body {
 	font-size: 12px;
 	line-height: 1.5;
 }
+
+/* Editor logos (shared with the chart view): flat marks ship light + dark variants; syncLogoTheme() picks one. */
+.editor-logo-wrap {
+	display: inline-flex;
+	align-items: center;
+	vertical-align: middle;
+	height: 16px;
+}
+
+.editor-logo {
+	height: 16px;
+	width: 16px;
+	object-fit: contain;
+}
+
+.editor-logo-dark {
+	display: none;
+}
+
+body[data-logo-theme="dark"] .editor-logo-dark {
+	display: inline;
+}
+
+body[data-logo-theme="dark"] .editor-logo-wrap > .editor-logo-light:has(+ .editor-logo-dark) {
+	display: none;
+}

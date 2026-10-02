@@ -3,6 +3,7 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { makeWorkspaceFixtureDir } from './tmpFixtureDirs';
 
 import { ClaudeCodeDataAccess, normalizeClaudeModelId } from '../../../src/claudecode';
 import { ClaudeCodeAdapter } from '../../../src/adapters/claudeCodeAdapter';
@@ -84,7 +85,7 @@ test('getProjectPathFromHash: Windows path reversal', async () => {
 function createTempSession(events: any[]): string {
 	// Keep synthetic session files outside the OS temp directory so the secure file-read guard
 	// in src/utils/safeFileRead.ts still permits the parser to exercise actual session logic.
-	const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'claude-test-'));
+	const tmpDir = makeWorkspaceFixtureDir('claude-test-');
 	const projectDir = path.join(tmpDir, '.claude', 'projects', 'test-project');
 	fs.mkdirSync(projectDir, { recursive: true });
 	const filePath = path.join(projectDir, 'test-session.jsonl');
@@ -93,12 +94,18 @@ function createTempSession(events: any[]): string {
 	return filePath;
 }
 
-function cleanup(filePath: string) {
-	try {
-		// Walk up to the temp dir root and remove
-		const tmpRoot = filePath.split('.claude')[0];
-		fs.rmSync(tmpRoot, { recursive: true, force: true });
-	} catch { /* ignore */ }
+function cleanup(filePath: string): void {
+	// Deliberately a no-op on the path: makeWorkspaceFixtureDir registers the
+	// directory it created and removes it when the file finishes, so there is
+	// nothing to derive here.
+	//
+	// This used to be `fs.rmSync(filePath.split('.claude')[0], { recursive: true,
+	// force: true })`, which guessed the fixture root by splitting on a path
+	// segment that also occurs in the fixture's own path. A checkout whose own
+	// path contains `.claude` — a git worktree under `~/.claude/worktrees/`, say —
+	// made that expression resolve to the user's home directory and try to delete
+	// it recursively, with the failure swallowed by the surrounding catch.
+	void filePath;
 }
 
 test('getTokensFromClaudeCodeSession: counts actual API tokens', async () => {
@@ -1368,5 +1375,141 @@ test('getClaudeCodeModelUsage: does not double-count a message.id replayed in a 
 		assert.equal(totalOutput, 60, 'summed output tokens must not double-count the shared message');
 	} finally {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+// ── Synthetic (harness-injected) user turns ────────────────────────────────────────────────────
+// Claude Desktop-launched sessions interleave machine-generated `user` events with real prompts.
+// Counting those as interactions inflated the count, and could make a session's presence in the
+// Recent Sessions table depend entirely on synthetic noise (both views drop interactions === 0).
+
+test('countClaudeCodeInteractions: ignores a turn that is only a <system-reminder>', async () => {
+	const events = [
+		{
+			type: 'user',
+			isSidechain: false,
+			message: { role: 'user', content: '<system-reminder>\nYou are operating in a git worktree.\n</system-reminder>' }
+		}
+	];
+
+	const filePath = createTempSession(events);
+	try {
+		assert.equal(await claudeCode.countClaudeCodeInteractions(filePath), 0);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
+test('countClaudeCodeInteractions: ignores a turn that is only a <task-notification>', async () => {
+	const events = [
+		{
+			type: 'user',
+			isSidechain: false,
+			message: { role: 'user', content: '<task-notification>\n<task-id>bhs2oz7e1</task-id>\n</task-notification>' }
+		}
+	];
+
+	const filePath = createTempSession(events);
+	try {
+		assert.equal(await claudeCode.countClaudeCodeInteractions(filePath), 0);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
+test('countClaudeCodeInteractions: counts a real prompt prefixed by a <system-reminder>', async () => {
+	// Claude Desktop prepends a worktree notice to the first prompt of a session. The human text
+	// after the wrapper is a genuine turn and must survive stripping.
+	const events = [
+		{
+			type: 'user',
+			isSidechain: false,
+			message: {
+				role: 'user',
+				content: '<system-reminder>\nYou are operating in a git worktree.\n</system-reminder>\n\nFix the broken CLI call in pr-risk-review.yml'
+			}
+		}
+	];
+
+	const filePath = createTempSession(events);
+	try {
+		assert.equal(await claudeCode.countClaudeCodeInteractions(filePath), 1);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
+test('countClaudeCodeInteractions: strips wrappers inside text blocks too', async () => {
+	const events = [
+		{
+			type: 'user',
+			isSidechain: false,
+			message: { role: 'user', content: [{ type: 'text', text: '<system-reminder>noise</system-reminder>' }] }
+		},
+		{
+			type: 'user',
+			isSidechain: false,
+			message: { role: 'user', content: [{ type: 'text', text: '<system-reminder>noise</system-reminder>\nreal question' }] }
+		}
+	];
+
+	const filePath = createTempSession(events);
+	try {
+		assert.equal(await claudeCode.countClaudeCodeInteractions(filePath), 1);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
+test('countClaudeCodeInteractions: leaves unmatched angle brackets in prompt text alone', async () => {
+	// Only paired, known wrapper elements are stripped — a prompt mentioning a tag must still count.
+	const events = [
+		{
+			type: 'user',
+			isSidechain: false,
+			message: { role: 'user', content: 'why does <system-reminder> show up in my logs?' }
+		}
+	];
+
+	const filePath = createTempSession(events);
+	try {
+		assert.equal(await claudeCode.countClaudeCodeInteractions(filePath), 1);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
+// ── Titles ─────────────────────────────────────────────────────────────────────────────────────
+
+test('getClaudeCodeSessionMeta: reads a custom-title when there is no ai-title', async () => {
+	// Claude Desktop-started sessions often carry only `custom-title`; reading `ai-title` alone
+	// left them untitled in the Recent Sessions table.
+	const events = [
+		{ type: 'user', timestamp: '2026-09-16T07:49:59.000Z', entrypoint: 'claude-desktop' },
+		{ type: 'custom-title', sessionId: 'test', customTitle: "Fix PR risk review's broken Copilot CLI call" }
+	];
+
+	const filePath = createTempSession(events);
+	try {
+		const meta = await claudeCode.getClaudeCodeSessionMeta(filePath);
+		assert.equal(meta!.title, "Fix PR risk review's broken Copilot CLI call");
+		assert.equal(meta!.entrypoint, 'claude-desktop');
+	} finally {
+		cleanup(filePath);
+	}
+});
+
+test('getClaudeCodeSessionMeta: a custom-title outranks an ai-title', async () => {
+	const events = [
+		{ type: 'user', timestamp: '2026-09-16T07:49:59.000Z' },
+		{ type: 'ai-title', sessionId: 'test', aiTitle: 'Model-generated title' },
+		{ type: 'custom-title', sessionId: 'test', customTitle: 'Title the user chose' }
+	];
+
+	const filePath = createTempSession(events);
+	try {
+		assert.equal((await claudeCode.getClaudeCodeSessionMeta(filePath))!.title, 'Title the user chose');
+	} finally {
+		cleanup(filePath);
 	}
 });
