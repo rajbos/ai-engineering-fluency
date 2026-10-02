@@ -308,6 +308,15 @@ let indexReady = false;
 const indexEvents = new EventEmitter();
 indexEvents.setMaxListeners(0);
 const READY_EVENT = 'ready';
+let otelLog: ((message: string) => void) | undefined;
+let loadStartedAt = 0;
+
+/** Where the index reports what it did (restored, saved, ready, failed to save); unset by default. */
+export function setCopilotCliOtelLogger(log: ((message: string) => void) | undefined): void {
+	otelLog = log;
+}
+
+const formatMb = (bytes: number): string => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 /**
  * Bytes we've already consumed from each export file, keyed by filename. Lets a refresh read
  * only the newly-appended tail instead of re-reading the whole (ever-growing) file, since the
@@ -416,6 +425,7 @@ export async function loadCopilotCliOtelIndex(): Promise<Map<string, CopilotCliO
 	if (cachedIndex && now - cachedAt < CACHE_TTL_MS) { return cachedIndex; }
 	if (inFlightLoad) { return inFlightLoad; }
 
+	if (!indexReady && loadStartedAt === 0) { loadStartedAt = Date.now(); }
 	inFlightLoad = readCopilotCliOtelIndex()
 		.then((index) => {
 			cachedIndex = index;
@@ -423,6 +433,7 @@ export async function loadCopilotCliOtelIndex(): Promise<Map<string, CopilotCliO
 			void persistSnapshot();
 			if (!indexReady) {
 				indexReady = true;
+				otelLog?.(`OTel index ready after ${((Date.now() - loadStartedAt) / 1000).toFixed(1)}s (${index.size} sessions)`);
 				indexEvents.emit(READY_EVENT);
 			}
 			return index;
@@ -491,7 +502,12 @@ async function restoreSnapshot(dir: string, sizes: Map<string, number>): Promise
 		cachedIndex = index;
 		fileOffsets = offsets;
 		persistedBytes = sumOffsets(offsets);
-	} catch { /* no snapshot, or unreadable: rebuild from the export */ }
+		let totalSize = 0;
+		for (const size of sizes.values()) { totalSize += size; }
+		otelLog?.(`OTel index restored from disk (${index.size} sessions); reading ${formatMb(Math.max(0, totalSize - persistedBytes))} of new data`);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') { otelLog?.(`OTel index snapshot could not be used (${error instanceof Error ? error.message : String(error)}); rebuilding from the export`); }
+	}
 }
 
 function sumOffsets(offsets: Map<string, number>): number {
@@ -519,7 +535,11 @@ async function persistSnapshot(): Promise<void> {
 		await fs.promises.writeFile(tmp, `{"version":${SNAPSHOT_VERSION},"files":${JSON.stringify(files)},"sessions":${sessions}}`);
 		await fs.promises.rename(tmp, target);
 		persistedBytes = total;
-	} catch { /* read-only storage, a vanished file: try again after the next load */ }
+		otelLog?.(`OTel index saved to disk (${cachedIndex.size} sessions, ${formatMb(JSON.stringify(files).length + sessions.length)})`);
+	} catch (error) {
+		// Read-only storage, a vanished file: it is tried again after the next load.
+		otelLog?.(`OTel index could not be saved to disk: ${error instanceof Error ? error.message : String(error)}`);
+	}
 }
 
 // ── One reader, many subscribers ──────────────────────────────────────────
@@ -553,6 +573,7 @@ export function whenCopilotCliOtelIndexReady(timeoutMs: number): Promise<boolean
 export function clearCopilotCliOtelCache(): void {
 	cachedIndex = null;
 	indexReady = false;
+	loadStartedAt = 0;
 	persistedBytes = -1;
 	cachedAt = 0;
 	inFlightLoad = null;

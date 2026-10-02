@@ -216,7 +216,7 @@ import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { analyzeHydraFusionSession, aiuToUsd } from '../../src/hydrafusion';
 import type { HydraFusionSummary } from '../../src/hydrafusion';
-import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex, setCopilotCliOtelSnapshotPath } from '../../src/copilotCliOtel';
+import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex, setCopilotCliOtelSnapshotPath, setCopilotCliOtelLogger } from '../../src/copilotCliOtel';
 import { createWorkerOtelLookup, type WorkerOtelLookup } from './otelIndexLookup';
 import { createWakeupGate, createSemaphore, yieldToEventLoop, TimeoutError as _TimeoutError, withTimeout as _withTimeout, type Semaphore } from './utils/promises';
 import { WebviewMessageReplay } from './webviewMessageReplay';
@@ -15410,10 +15410,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
   // cached inside the module, and every consumer already awaits loadCopilotCliOtelIndex() lazily.
   // The built index is saved next to the other caches, so the next start restores it and reads only what was appended.
   setCopilotCliOtelSnapshotPath(path.join(context.globalStorageUri.fsPath, 'copilot-cli-otel-index.json'));
+  // The index starts before the tracker (and its output channel) exists, so early messages wait for it.
+  const earlyOtelMessages: string[] = [];
+  let otelLogTarget: CopilotTokenTracker | undefined;
+  setCopilotCliOtelLogger((message) => { if (otelLogTarget) { otelLogTarget.log(message); } else { earlyOtelMessages.push(message); } });
   void loadCopilotCliOtelIndex().catch(() => { /* off-by-default export; degrades to no data */ });
 
   // Create the token tracker
   const tokenTracker = new CopilotTokenTracker(context.extensionUri, context);
+  otelLogTarget = tokenTracker;
+  for (const message of earlyOtelMessages.splice(0)) { tokenTracker.log(message); }
 
   // Migrate settings from the old copilotTokenTracker namespace to aiEngineeringFluency.
   // Run before any other settings are read so the new keys are populated first.

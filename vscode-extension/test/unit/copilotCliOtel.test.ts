@@ -18,6 +18,7 @@ import {
 	readByteRange,
 	loadOtelRecordsInProcess,
 	setCopilotCliOtelSnapshotPath,
+	setCopilotCliOtelLogger,
 	isCopilotCliOtelIndexReady,
 	onCopilotCliOtelIndexReady,
 	whenCopilotCliOtelIndexReady,
@@ -444,5 +445,26 @@ test('subscribers are told once when the OTel index is ready, instead of each wa
 		expireCopilotCliOtelCacheForTests();
 		await loadCopilotCliOtelIndex(); // a refresh is not a new "ready"
 		assert.equal(told, 1);
+	});
+});
+
+test('the OTel index reports when it is ready, saved, and restored, so the output log can show it', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		const otelDir = path.join(homeDir, '.copilot', 'otel');
+		const snapshot = path.join(homeDir, 'storage', 'otel-index.json');
+		const messages: string[] = [];
+		setCopilotCliOtelLogger((m) => messages.push(m));
+		setCopilotCliOtelSnapshotPath(snapshot);
+		t.after(() => { setCopilotCliOtelSnapshotPath(undefined); setCopilotCliOtelLogger(undefined); });
+		writeOtelSpans(otelDir, [chatSpan(SESSION_ID)]);
+		await loadCopilotCliOtelIndex();
+		await waitForFile(snapshot);
+		for (let i = 0; i < 50 && !messages.some((m) => /saved to disk/.test(m)); i++) { await new Promise((r) => setTimeout(r, 20)); }
+		assert.ok(messages.some((m) => /OTel index ready after .*\(1 sessions\)/.test(m)), messages.join(' | '));
+		assert.ok(messages.some((m) => /OTel index saved to disk \(1 sessions/.test(m)), messages.join(' | '));
+
+		clearCopilotCliOtelCache();
+		await loadCopilotCliOtelIndex();
+		assert.ok(messages.some((m) => /OTel index restored from disk \(1 sessions\)/.test(m)), messages.join(' | '));
 	});
 });
