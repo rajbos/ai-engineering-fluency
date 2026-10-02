@@ -38,7 +38,6 @@ import type {
   ChartDataPayload,
   ChartTimeWindow,
   SessionFileCache,
-  DailyRollupEntry,
   CustomizationFileEntry,
   SessionUsageAnalysis,
   ToolCallUsage,
@@ -205,6 +204,7 @@ import type { ClaudeDesktopDataAccess } from '../../src/claudedesktop';
 import type { MistralVibeDataAccess } from '../../src/mistralvibe';
 import type { GeminiCliDataAccess } from '../../src/geminicli';
 import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
+import type { CopilotCliAdapter } from '../../src/adapters/copilotCliAdapter';
 import { WindsurfDataAccess } from '../../src/windsurf';
 import { getEcosystemDisplayName } from '../../src/ecosystemAdapter';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
@@ -216,9 +216,22 @@ import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { analyzeHydraFusionSession, aiuToUsd } from '../../src/hydrafusion';
 import type { HydraFusionSummary } from '../../src/hydrafusion';
-import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
+import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex, setCopilotCliOtelSnapshotPath, setCopilotCliOtelLogger } from '../../src/copilotCliOtel';
+import { createWorkerOtelLookup, type WorkerOtelLookup } from './otelIndexLookup';
 import { createWakeupGate, createSemaphore, yieldToEventLoop, TimeoutError as _TimeoutError, withTimeout as _withTimeout, type Semaphore } from './utils/promises';
 import { WebviewMessageReplay } from './webviewMessageReplay';
+import { startEventLoopMonitor, type EventLoopMonitor } from './utils/eventLoopMonitor';
+import {
+	analyzeSessionFile as _analyzeSessionFile,
+	supplementCacheWithDebugLog as _supplementCacheWithDebugLog,
+	quickAnalyzeSessionContent as _quickAnalyzeSessionContent,
+	toUsageAnalysisDeps,
+	type SessionAnalyzerDeps,
+} from './analysis/sessionFileAnalyzer';
+import { AnalysisWorkerPool } from './analysis/analysisWorkerPool';
+import { runOffHostThread as _runOffHostThread } from './analysis/runOffHostThread';
+import { computeSessionFileDetails as _computeSessionFileDetails } from './analysis/sessionDetailsAnalyzer';
+import { scanCustomizationFilesForWorkspace as _scanCustomizationFilesForWorkspace } from './analysis/workspaceCustomizationScan';
 
 // --- Session parsing & token estimation ---
 import {
@@ -238,10 +251,8 @@ import {
   reconstructJsonlStateAsync as _reconstructJsonlStateAsync,
   extractSubAgentData as _extractSubAgentData,
   buildReasoningEffortTimeline as _buildReasoningEffortTimeline,
-  extractAllTokensFromDebugLog as _extractAllTokensFromDebugLog,
   extractTtftSamplesFromDebugLog as _extractTtftSamplesFromDebugLog,
   extractResponseItemText as _extractResponseItemText,
-  NANO_AIU_TO_DOLLARS,
   type TtftSample,
 } from '../../src/tokenEstimation';
 import { SessionDiscovery } from '../../src/sessionDiscovery';
@@ -261,8 +272,6 @@ import {
   analyzeRequestContext as _analyzeRequestContext,
   calculateModelSwitching as _calculateModelSwitching,
   trackEnhancedMetrics as _trackEnhancedMetrics,
-  analyzeSessionUsage as _analyzeSessionUsage,
-  getModelUsageFromSession as _getModelUsageFromSession,
   mergeModelEfficiencyTokens as _mergeModelEfficiencyTokens,
   type UsageAnalysisDeps,
 } from '../../src/usageAnalysis';
@@ -312,8 +321,6 @@ import {
   resolveWorkspaceFolderWithFallback as _resolveWorkspaceFolderWithFallback,
   globToRegExp as _globToRegExp,
   resolveExactWorkspacePath as _resolveExactWorkspacePath,
-  scanWorkspaceCustomizationFiles as _scanWorkspaceCustomizationFiles,
-  parseCodeWorkspaceFolders as _parseCodeWorkspaceFolders,
   getModeType as _getModeType,
   extractCustomAgentName as _extractCustomAgentName,
   getEditorTypeFromPath as _getEditorTypeFromPath,
@@ -321,7 +328,6 @@ import {
   getRepoDisplayName as _getRepoDisplayName,
   detectEditorSource as _detectEditorSource,
   parseGitRemoteUrl as _parseGitRemoteUrl,
-  extractRepositoryFromContentReferences as _extractRepositoryFromContentReferences,
   resolveSessionWorkspaceName as _resolveSessionWorkspaceName,
   isMcpTool as _isMcpTool,
   normalizeMcpToolName as _normalizeMcpToolName,
@@ -330,7 +336,6 @@ import {
   normalizePathForDedup as _normalizePathForDedup,
   dedupeByNormalizedKeyKeepGreatest as _dedupeByNormalizedKeyKeepGreatest,
   normalizeToRepoRoot as _normalizeToRepoRoot,
-  getRepoNameFromWorkspacePath as _getRepoNameFromWorkspacePath,
   resolveDebugLogCandidatePaths as _resolveDebugLogCandidatePaths,
 } from '../../src/workspaceHelpers';
 import { getRepositoryUrl as _getRepositoryUrl } from './repositoryUrl';
@@ -352,11 +357,11 @@ function ttftScanRangeToMs(range: unknown): number | null {
 }
 
 // --- Task classification ---
-import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDelegationToolCalls } from '../../src/taskClassification';
+import { countDelegationToolCalls } from '../../src/taskClassification';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, computeFallbackDailyRollup as _computeFallbackDailyRollup, type SessionAggregateInput } from '../../src/statsHelpers';
-import { scaleModelUsage, reconcileDebugLogModelUsage, addTaskCategoryToDailyEntry as _addTaskCategoryToDailyEntry } from '../../src/statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, type SessionAggregateInput } from '../../src/statsHelpers';
+import { addTaskCategoryToDailyEntry as _addTaskCategoryToDailyEntry } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -957,25 +962,6 @@ function _dwbcPickWinner(
 	return (sessionCounts.get(key) || 0) >= (sessionCounts.get(canonical) || 0) ? key : canonical;
 }
 
-function _cifjlProcessEvent(event: any): number {
-	let count = 0;
-	if (event.type === 'user.message') { count++; }
-	if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
-		for (const request of event.v) {
-			if (request.requestId) { count++; }
-		}
-	}
-	return count;
-}
-
-function _scdlBuildFromBreakdown(modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>): ModelUsage {
-	const modelUsage: ModelUsage = {};
-	for (const [model, bd] of Object.entries(modelBreakdown)) {
-		modelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, sessions: 0, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
-	}
-	return modelUsage;
-}
-
 /** One Copilot CLI session where OTel export data was found, for the diagnostics "OTel Delta" tab. */
 interface CopilotCliOtelComparisonSession {
 	file: string;
@@ -1150,8 +1136,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private readonly copilotAppData = new CopilotAppDataAccess();
 
 	private get usageAnalysisDeps(): UsageAnalysisDeps {
-		return { warn: (m: string) => this.warn(m), tokenEstimators: this.tokenEstimators, modelPricing: this.modelPricing, toolNameMap: this.toolNameMap, ecosystems: this.ecosystems };
+		return toUsageAnalysisDeps(this.analyzerDeps);
 	}
+
+	/** Everything the session-analysis pipeline needs, for the in-process path (the worker builds its own). */
+	private get analyzerDeps(): SessionAnalyzerDeps {
+		return { warn: (m: string) => this.warn(m), tokenEstimators: this.tokenEstimators, modelPricing: this.modelPricing, toolNameMap: this.toolNameMap, ecosystems: this.ecosystems, windsurf: this.windsurf };
+	}
+
+	/**
+	 * Worker threads that do the CPU-heavy session parsing off this host's event loop (see
+	 * src/analysis/). Undefined when the bundled worker is missing or explicitly disabled, in
+	 * which case everything runs in-process exactly as before.
+	 */
+	private analysisPool: AnalysisWorkerPool | undefined;
+	private otelLookup: WorkerOtelLookup | undefined;
 	public sessionDiscovery!: SessionDiscovery;
 	private statusBarItem!: vscode.StatusBarItem;
 	/** Dedicated status bar item for insights — shown only when new insights exist. */
@@ -1197,6 +1196,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private _disposed = false;
 	private updateInterval: NodeJS.Timeout | undefined;
+	private _eventLoopMonitor: EventLoopMonitor | undefined;
 	private detailsPanel: vscode.WebviewPanel | undefined;
 	private chartPanel: vscode.WebviewPanel | undefined;
 	private analysisPanel: vscode.WebviewPanel | undefined;
@@ -1497,6 +1497,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Cache mapping workspaceFolderPath -> found customization files (avoid re-scanning)
 	private _customizationFilesCache: Map<string, CustomizationFileEntry[]> = new Map();
+	/** Workspaces whose customization scan has been requested but not yet run (see resolvePendingCustomizationScans). */
+	private readonly _pendingCustomizationScans = new Set<string>();
+	/** Tail of the serialized calculateUsageAnalysisStats runs. */
+	private _usageAnalysisChain: Promise<void> = Promise.resolve();
 
 	// Last computed customization matrix for usage analysis (typed)
 	private _lastCustomizationMatrix?: WorkspaceCustomizationMatrix;
@@ -1626,8 +1630,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Returns the first adapter that claims this session file, or null for Copilot Chat sessions. */
 	private findEcosystem(sessionFile: string): IEcosystemAdapter | null {
-		return this.ecosystems.find(e => e.handles(sessionFile)) ?? null;
+		const known = this._ecosystemByPath.get(sessionFile);
+		if (known !== undefined) { return known; }
+		const found = this.ecosystems.find(e => e.handles(sessionFile)) ?? null;
+		if (this._ecosystemByPath.size >= 50_000) { this._ecosystemByPath.clear(); }
+		this._ecosystemByPath.set(sessionFile, found);
+		return found;
 	}
+
+	/**
+	 * Which adapter owns a session path. Asked several times per file by every view (labels, details, stats), and
+	 * each ask walks all ~22 adapters' path checks on the host thread, so with thousands of files and several views
+	 * open at once that alone was a sizeable share of the host's stalls. Which adapter handles a path does not
+	 * change during a session, so it is remembered.
+	 */
+	private readonly _ecosystemByPath = new Map<string, IEcosystemAdapter | null>();
 
 	/**
 	 * Stat a session file, handling virtual paths for both OpenCode and Crush.
@@ -2412,6 +2429,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.extensionUri = extensionUri;
 		this.context = context;
 		this.initializeAdapters(extensionUri, context);
+		this.analysisPool = this.createAnalysisPool(extensionUri);
 		this.initializeOutputChannel(context);
 		const cacheFileLoad = this.cacheManager.loadCacheFromStorage();
 		this._cacheFileLoadPromise = cacheFileLoad.finally(() => {
@@ -2439,6 +2457,54 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.updateInterval = setInterval(() => {
 			this.updateTokenStats(true, true);
 		}, 5 * 60 * 1000);
+		// A webview click can only be delivered between event-loop ticks, so a long synchronous
+		// stretch on this thread is what the user feels as "navigation is blocked". Surface it.
+		this._eventLoopMonitor = startEventLoopMonitor({
+			onStall: (r) => this.warn(`Extension host event loop stalled: worst tick ${r.maxMs}ms (p99 ${r.p99Ms}ms) in the last ${r.windowMs}ms — webview clicks were delayed by that long.`),
+		});
+	}
+
+	private createAnalysisPool(extensionUri: vscode.Uri): AnalysisWorkerPool | undefined {
+		// Runs from the constructor, before the output channel exists, so anything worth saying is
+		// logged once construction has finished instead of here.
+		const logAfterConstruction = (message: string): void => { void Promise.resolve().then(() => this.log(message)); };
+		if (process.env.AI_FLUENCY_DISABLE_ANALYSIS_WORKER === '1') {
+			logAfterConstruction('Analysis worker disabled via AI_FLUENCY_DISABLE_ANALYSIS_WORKER; parsing runs on the extension host.');
+			return undefined;
+		}
+		const workerPath = path.join(extensionUri.fsPath, 'dist', 'analysisWorker.js');
+		if (!fs.existsSync(workerPath)) {
+			logAfterConstruction(`Analysis worker bundle not found at ${workerPath}; parsing runs on the extension host.`);
+			return undefined;
+		}
+		// Leave a core for the host and the renderer. Capped at two: every worker keeps its own in-memory copy of
+		// the SQLite stores it reads (Copilot's session-store.db and data.db are 100+ MB each on a long-lived
+		// machine), so a third thread buys little speed for a lot of memory.
+		const size = Math.max(1, Math.min(2, os.cpus().length - 1));
+		return new AnalysisWorkerPool({
+			workerPath,
+			extensionPath: extensionUri.fsPath,
+			size,
+			log: (m) => this.log(m),
+			warn: (m) => this.warn(m),
+			// One OTel index (this process's) serves every worker; see copilotCliOtel.ts. The session-store lookup stays in the workers.
+			// A question asked while the index is still being built fails at once; the sessions it failed for are refreshed
+			// when the index announces it is ready (otelIndexLookup.ts), instead of each one waiting on the build.
+			resolveOtelUsage: (sessionFile) => (this.otelLookup ??= createWorkerOtelLookup(3_000, () => void this.refreshAfterOtelIndexReady())).resolve(sessionFile),
+		});
+	}
+
+	/** The OTel index finished building after some sessions had to be skipped for want of it: parse those now. */
+	private async refreshAfterOtelIndexReady(): Promise<void> {
+		if (this._disposed) { return; }
+		this.log('The OTel index is ready; refreshing the sessions that were waiting for it');
+		await this._updateTokenStatsInFlight?.catch(() => undefined); // that run may itself have missed the index
+		await this.updateTokenStats(true).catch(() => undefined);
+	}
+
+	/** Runs `viaWorker` on a worker thread, or `inProcess` when none is usable (rules in analysis/runOffHostThread.ts). */
+	private runOffHostThread<T>(viaWorker: (pool: AnalysisWorkerPool) => Promise<T>, inProcess: () => Promise<T>): Promise<T> {
+		return _runOffHostThread({ pool: this.analysisPool, isDisposed: () => this._disposed, warn: (m) => this.warn(m) }, viaWorker, inProcess);
 	}
 
 	private initializeAdapters(extensionUri: vscode.Uri, context: vscode.ExtensionContext): void {
@@ -6434,7 +6500,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * full-year walk repopulates the raw session cache before this runs, so it passes its own
 	 * origin generation too. Only a caller with nothing older than this call may omit it.
 	 */
-	private async calculateUsageAnalysisStats(useCache = true, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<UsageAnalysisStats> {
+	/**
+	 * Runs are serialized. A run resets `_customizationFilesCache`/`_workspaceIdToFolderCache` at its start and,
+	 * since scans became asynchronous, awaits between filling and reading them; an overlapping run's reset in
+	 * that gap would hand the first run an emptied cache (every workspace showing as having no customization
+	 * files). Callers already tolerate waiting: the work is a background refresh.
+	 */
+	private calculateUsageAnalysisStats(useCache = true, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<UsageAnalysisStats> {
+		const run = this._usageAnalysisChain.then(() => this.calculateUsageAnalysisStatsExclusive(useCache, preloaded, originGeneration));
+		this._usageAnalysisChain = run.then(() => undefined, () => undefined);
+		return run;
+	}
+
+	private async calculateUsageAnalysisStatsExclusive(useCache = true, preloaded?: SessionFilePreload[], originGeneration?: number): Promise<UsageAnalysisStats> {
 		const cachedUsage = this.currentUsageAnalysisStats;
 		if (useCache && cachedUsage) {
 			this.log('🔍 [Usage Analysis] Using cached stats');
@@ -6458,6 +6536,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const unresolvedWorkspaceInteractionCounts = new Map<string, number>();
 		this._workspaceIdToFolderCache.clear();
 		this._customizationFilesCache.clear();
+		this._pendingCustomizationScans.clear();
 		this._skillCallsByEditorAccum = new Map();
 		this._skillWorkspacePathsAccum = new Map();
 		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
@@ -6478,7 +6557,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			for (const [skillName, byEditor] of this._skillCallsByEditorAccum) {
 				this._lastSkillCallsByEditor[skillName] = Object.fromEntries(byEditor);
 			}
-			this.deduplicateWorkspacePaths(workspaceSessionCounts, workspaceInteractionCounts);
+			await this.deduplicateWorkspacePathsWithScans(workspaceSessionCounts, workspaceInteractionCounts);
 			this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts);
 			await this.enrichMultiAgentParentCount(usageResults, last30DaysStats, last30DaysUtcStartKey);
 			agenticDailyTrend = await this._computeAgenticDailyTrend(usageResults, last30DaysUtcStartKey);
@@ -7521,30 +7600,43 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return _resolveSessionWorkspaceName(sessionData, sessionFile, this._workspaceIdToFolderCache);
 	}
 
-	private _mergeCodeWorkspaceCustomizationFiles(norm: string): CustomizationFileEntry[] {
-		const folders = _parseCodeWorkspaceFolders(norm);
-		const allFiles: CustomizationFileEntry[] = [];
-		const seen = new Set<string>();
-		for (const folder of folders) {
-			try {
-				for (const f of _scanWorkspaceCustomizationFiles(folder)) {
-					const key = path.normalize(f.path);
-					if (!seen.has(key)) { seen.add(key); allFiles.push(f); }
-				}
-			} catch { /* skip per-folder scan errors */ }
-		}
-		return allFiles;
-	}
-
+	/**
+	 * Asks for a workspace's customization files to be in `_customizationFilesCache` by the next
+	 * `resolvePendingCustomizationScans()`. It does not scan: the discovery is a recursive
+	 * synchronous directory walk that took over a minute across a real set of workspaces, and
+	 * this is called from the synchronous per-session aggregation loop on the host's only thread.
+	 */
 	private ensureWorkspaceCustomizationCached(norm: string): void {
 		if (this._customizationFilesCache.has(norm)) { return; }
-		try {
-			if (norm.endsWith('.code-workspace')) {
-				const merged = this._mergeCodeWorkspaceCustomizationFiles(norm);
-				if (merged.length > 0) { this._customizationFilesCache.set(norm, merged); return; }
+		this._pendingCustomizationScans.add(norm);
+	}
+
+	/**
+	 * Runs the scans queued by `ensureWorkspaceCustomizationCached()` — on the worker threads, in
+	 * parallel — and fills the cache. Must be awaited before anything reads
+	 * `_customizationFilesCache`. A scan that fails leaves its workspace uncached, which readers
+	 * already treat as "no customization files", exactly like a failed synchronous scan did.
+	 */
+	private async resolvePendingCustomizationScans(): Promise<void> {
+		if (this._pendingCustomizationScans.size === 0) { return; }
+		const workspaces = [...this._pendingCustomizationScans].filter((norm) => !this._customizationFilesCache.has(norm));
+		this._pendingCustomizationScans.clear();
+		const generation = this._cacheGeneration;
+		await Promise.all(workspaces.map(async (norm) => {
+			let files: CustomizationFileEntry[] | undefined;
+			try {
+				files = await this.runOffHostThread(
+					(pool) => pool.scanCustomizationFiles(norm),
+					async () => { await yieldToEventLoop(); return _scanCustomizationFilesForWorkspace(norm); },
+				);
+			} catch { /* ignore scan errors per workspace */ }
+			// A cache clear while this scan was away makes its answer stale; drop it. The workspace then stays
+			// uncached until the next run clears and rebuilds the cache, which is fine: the run that asked for it
+			// is itself being discarded as stale (see isRefreshSuperseded).
+			if (files && generation === this._cacheGeneration && !this._customizationFilesCache.has(norm)) {
+				this._customizationFilesCache.set(norm, files);
 			}
-			this._customizationFilesCache.set(norm, _scanWorkspaceCustomizationFiles(norm));
-		} catch (e) { /* ignore scan errors per workspace */ }
+		}));
 	}
 
 	private trackWorkspaceForSession(
@@ -7821,6 +7913,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	/**
+	 * Dedup compares the customization files of the workspaces it merges, and may name new
+	 * canonical workspaces of its own, so the queued scans are resolved on both sides of it.
+	 */
+	private async deduplicateWorkspacePathsWithScans(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): Promise<void> {
+		await this.resolvePendingCustomizationScans();
+		this.deduplicateWorkspacePaths(sessionCounts, interactionCounts);
+		await this.resolvePendingCustomizationScans();
+	}
+
 	private deduplicateWorkspacePaths(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): void {
 		this.deduplicateWorkspacesByCase(sessionCounts, interactionCounts);
 		this.deduplicateRemoteWorkspacePaths(sessionCounts, interactionCounts);
@@ -7933,44 +8035,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return _mergeUsageAnalysis(period, analysis);
 	}
 
-	private async countInteractionsInSession(sessionFile: string, preloadedContent?: string, preloadedParsedJson?: any): Promise<number> {
-		try {
-			const eco = this.findEcosystem(sessionFile);
-			if (eco) { return eco.countInteractions(sessionFile); }
 
-			// Handle Windsurf sessions - API-based with interaction count, file-based fallback
-			if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
-				const session = await this.windsurf.resolveSession(sessionFile);
-				return session?.interactions ?? 0;
-			}
-
-			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
-			if (this.isUuidPointerFile(fileContent)) { return 0; }
-
-			const isJsonlContent = sessionFile.endsWith('.jsonl') || this.isJsonlContent(fileContent);
-			if (isJsonlContent) {
-				return this.countInteractionsFromJsonlLines(fileContent.trim().split('\n'));
-			}
-
-			const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-				return sessionContent.requests.length;
-			}
-			return 0;
-		} catch (error) {
-			this.warn(`Error counting interactions in ${sessionFile}: ${error}`);
-			return 0;
-		}
-	}
-
-	private countInteractionsFromJsonlLines(lines: string[]): number {
-		let interactions = 0;
-		for (const line of lines) {
-			if (!line.trim()) { continue; }
-			try { interactions += _cifjlProcessEvent(JSON.parse(line)); } catch { /* skip malformed */ }
-		}
-		return interactions;
-	}
 
 
 	/**
@@ -8047,211 +8112,44 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * This captures automatic attachments like copilot-instructions.md via variable system.
 	 */
 
-	/**
-	 * Extract repository remote URL from file paths found in contentReferences.
-	 * Looks for .git/config file in the workspace root to get the origin remote URL.
-	 * @param contentReferences Array of content reference objects from session data
-	 * @returns The repository remote URL if found, undefined otherwise
-	 */
-	private async extractRepositoryFromContentReferences(contentReferences: any[]): Promise<string | undefined> {
-		return _extractRepositoryFromContentReferences(contentReferences);
-	}
 
-	/** Extract session metadata for a Windsurf virtual session. */
-	private async extractWindsurfSessionMetadata(sessionFile: string): Promise<{
-		title: string | undefined;
-		firstInteraction: string | null;
-		lastInteraction: string | null;
-		dailyInteractions: { [utcDayKey: string]: number };
-	}> {
-		const session = await this.windsurf.resolveSession(sessionFile);
-		const lastInteraction = session?.lastInteraction ?? null;
-		const dailyInteractions: { [utcDayKey: string]: number } = {};
-		if (lastInteraction) {
-			const d = new Date(lastInteraction);
-			if (!isNaN(d.getTime())) {
-				dailyInteractions[d.toISOString().slice(0, 10)] = Math.max(1, session?.interactions ?? 1);
-			}
-		}
-		return {
-			title: session?.title,
-			firstInteraction: session?.firstInteraction ?? null,
-			lastInteraction,
-			dailyInteractions,
-		};
-	}
 
-	private async extractSessionMetadata(sessionFile: string, preloadedContent?: string, preloadedParsedJson?: any): Promise<{
-		title: string | undefined;
-		firstInteraction: string | null;
-		lastInteraction: string | null;
-		dailyInteractions: { [localDayKey: string]: number };
-		dailyFractions?: Record<string, number>;
-		workspacePath?: string;
-	}> {
-		let title: string | undefined;
-		let workspacePath: string | undefined;
-		const timestamps: number[] = [];
-		const requestTimestamps: number[] = [];
 
-		try {
-			const eco = this.findEcosystem(sessionFile);
-			if (eco) {
-				const meta = await eco.getMeta(sessionFile);
-				const dailyFractions = eco.getDailyFractions ? await eco.getDailyFractions(sessionFile) : undefined;
-				return { ...meta, dailyInteractions: {}, ...(dailyFractions ? { dailyFractions } : {}) };
-			}
 
-			// Some adapters discover files they do not handle (e.g. Copilot CLI events.jsonl).
-			// Ask them for workspace attribution before falling back to generic parsing.
-			workspacePath = await this.findWorkspacePathForDiscoveredPath(sessionFile);
 
-			// Handle Windsurf virtual sessions
-			if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
-				return this.extractWindsurfSessionMetadata(sessionFile);
-			}
 
-			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
-			if (_isUuidPointerFile(fileContent)) {
-				return { title, firstInteraction: null, lastInteraction: null, dailyInteractions: {}, workspacePath };
-			}
 
-			const isJsonlContent = sessionFile.endsWith('.jsonl') || _isJsonlContent(fileContent);
-			if (isJsonlContent) {
-				const result = this.extractMetadataFromJsonl(fileContent.trim().split('\n'));
-				title = result.title; timestamps.push(...result.timestamps); requestTimestamps.push(...result.requestTimestamps);
-			} else {
-				const result = this.extractMetadataFromJson(fileContent, preloadedParsedJson);
-				title = result.title; timestamps.push(...result.timestamps); requestTimestamps.push(...result.requestTimestamps);
-			}
-		} catch { /* file read error */ }
 
-		let firstInteraction: string | null = null;
-		let lastInteraction: string | null = null;
-		if (timestamps.length > 0) {
-			timestamps.sort((a, b) => a - b);
-			firstInteraction = new Date(timestamps[0]).toISOString();
-			lastInteraction = new Date(timestamps[timestamps.length - 1]).toISOString();
-		}
 
-		const dailyInteractions: { [localDayKey: string]: number } = {};
-		for (const ts of requestTimestamps) {
-			const dayKey = toLocalDayKey(new Date(ts));
-			dailyInteractions[dayKey] = (dailyInteractions[dayKey] || 0) + 1;
-		}
 
-		return { title, firstInteraction, lastInteraction, dailyInteractions, workspacePath };
-	}
 
-	/**
-	 * Ask any discoverable ecosystem adapter that does *not* handle this file whether
-	 * it can still supply a workspace directory path for it. Used for files like
-	 * Copilot CLI events.jsonl that are discovered by an adapter but parsed generically.
-	 */
-	private async findWorkspacePathForDiscoveredPath(sessionFile: string): Promise<string | undefined> {
-		for (const eco of this.ecosystems) {
-			if (eco.handles(sessionFile)) { continue; }
-			if (typeof eco.getWorkspacePathForDiscoveredPath !== 'function') { continue; }
-			try {
-				const cwd = await eco.getWorkspacePathForDiscoveredPath(sessionFile);
-				if (cwd) { return cwd; }
-			} catch { /* adapter failed; try next */ }
-		}
-		return undefined;
-	}
 
-	private extractMetadataFromJsonl(lines: string[]): { title: string | undefined; timestamps: number[]; requestTimestamps: number[] } {
-		const timestamps: number[] = [];
-		const requestTimestamps: number[] = [];
-		const { loopTitle, firstUserMessage } = this._emfjlProcessLines(lines, timestamps, requestTimestamps);
-		let title = loopTitle;
-		if (!title && firstUserMessage) {
-			const trimmed = firstUserMessage.trim();
-			title = trimmed.length > 60 ? trimmed.slice(0, 60) + '…' : trimmed;
-		}
-		return { title, timestamps, requestTimestamps };
-	}
 
-	private _emfjlProcessLines(lines: string[], timestamps: number[], requestTimestamps: number[]): { loopTitle: string | undefined; firstUserMessage: string | undefined } {
-		let loopTitle: string | undefined;
-		let firstUserMessage: string | undefined;
-		for (const line of lines) {
-			if (!line.trim()) { continue; }
-			try {
-				const event = JSON.parse(line);
-				const userMsg = this.processUserMessageMetadata(event, timestamps, requestTimestamps);
-				if (userMsg && !firstUserMessage) { firstUserMessage = userMsg; }
-				const renameTitle = this.processRenameSessionTitle(event);
-				if (renameTitle) { loopTitle = renameTitle; }
-				const kind0Title = this.processKind0Metadata(event, timestamps);
-				if (kind0Title) { loopTitle = kind0Title; }
-				this.processKind2Requests(event, timestamps, requestTimestamps);
-				const kind1Title = this.processKind1TitleUpdate(event);
-				if (kind1Title) { loopTitle = kind1Title; }
-			} catch { /* skip malformed */ }
-		}
-		return { loopTitle, firstUserMessage };
-	}
 
-	private processUserMessageMetadata(event: any, timestamps: number[], requestTimestamps: number[]): string | undefined {
-		if (event.type !== 'user.message') { return undefined; }
-		const ts = event.timestamp || event.ts || event.data?.timestamp;
-		if (ts) { const ms = new Date(ts).getTime(); timestamps.push(ms); requestTimestamps.push(ms); }
-		return event.data?.content as string | undefined;
-	}
 
-	private processRenameSessionTitle(event: any): string | undefined {
-		if (event.type === 'tool.execution_start' && event.data?.toolName === 'rename_session' && event.data?.arguments?.title) {
-			return event.data.arguments.title as string;
-		}
-		return undefined;
-	}
 
-	private processKind0Metadata(event: any, timestamps: number[]): string | undefined {
-		if (event.kind !== 0 || !event.v) { return undefined; }
-		if (event.v.creationDate) { timestamps.push(event.v.creationDate); }
-		return event.v.customTitle as string | undefined;
-	}
 
-	private processKind2Requests(event: any, timestamps: number[], requestTimestamps: number[]): void {
-		if (event.kind !== 2 || event.k?.[0] !== 'requests' || !Array.isArray(event.v)) { return; }
-		for (const request of event.v) {
-			if (request.timestamp) { timestamps.push(request.timestamp); requestTimestamps.push(request.timestamp); }
-		}
-	}
 
-	private processKind1TitleUpdate(event: any): string | undefined {
-		if (event.kind === 1 && event.k?.includes('customTitle') && event.v) { return event.v as string; }
-		return undefined;
-	}
 
-	private extractMetadataFromJson(fileContent: string, preloadedParsedJson?: any): { title: string | undefined; timestamps: number[]; requestTimestamps: number[] } {
-		let title: string | undefined;
-		const timestamps: number[] = [];
-		const requestTimestamps: number[] = [];
-		try {
-			const parsed = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			if (parsed.customTitle) { title = parsed.customTitle; }
-			if (parsed.creationDate) { timestamps.push(parsed.creationDate); }
-			if (parsed.requests && Array.isArray(parsed.requests)) {
-				for (const request of parsed.requests) {
-					if (request.timestamp || request.ts || request.result?.timestamp) {
-						const ts = request.timestamp || request.ts || request.result?.timestamp;
-						const ms = new Date(ts).getTime();
-						timestamps.push(ms); requestTimestamps.push(ms);
-					}
-				}
-			}
-		} catch { /* unable to parse */ }
-		return { title, timestamps, requestTimestamps };
-	}
+
+
+
+
+
+
+
+
+
+
+
+
 
 	// Cached versions of session file reading methods
 	public async getSessionFileDataCached(sessionFilePath: string, mtime: number, fileSize: number): Promise<SessionFileCache> {
 		const cached = this.getCachedSessionData(sessionFilePath);
 		if (cached && cached.mtime === mtime && cached.size === fileSize) {
 			if (cached.debugLogInputTokens === undefined && !cached.debugLogChecked) {
-				const supplemented = await this.supplementCacheWithDebugLog(cached, sessionFilePath, fileSize);
+				const supplemented = await this.supplementCachedSessionWithDebugLog(cached, sessionFilePath, fileSize);
 				if (supplemented) { return supplemented; }
 			}
 			this._cacheHits++;
@@ -8259,401 +8157,54 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		this._cacheMisses++;
-		const { preloadedContent, preloadedParsedJson } = await this.preloadSessionFileContent(sessionFilePath);
-
-		const [tokenResult, interactions, modelUsage, usageAnalysis, sessionMeta] = await Promise.all([
-			this.estimateTokensFromSession(sessionFilePath, preloadedContent, preloadedParsedJson),
-			this.countInteractionsInSession(sessionFilePath, preloadedContent, preloadedParsedJson),
-			_getModelUsageFromSession(this.usageAnalysisDeps, sessionFilePath, preloadedContent, preloadedParsedJson),
-			_analyzeSessionUsage(this.usageAnalysisDeps, sessionFilePath, preloadedContent, preloadedParsedJson),
-			this.extractSessionMetadata(sessionFilePath, preloadedContent, preloadedParsedJson),
-		]);
-
-// Reconcile the per-model breakdown to the session total. Different sources estimate
-// these independently (e.g. event-based CLI sessions derive actualTokens from real
-// output via a ratio, while modelUsage derives input from accumulated message content),
-// which can make Input+Output exceed Total in the details view.
-// `||` (not `??`): actualTokens is 0 — never undefined — when no exact usage exists,
-// so `??` would target 0 and silently skip reconciliation for estimated sessions.
-const reconciledModelUsage = reconcileModelUsageToActualTokens(modelUsage, tokenResult.actualTokens || tokenResult.tokens);
-const { dailyRollups, totalInteractions } = this.computeDailyRollups(sessionMeta, tokenResult, reconciledModelUsage, interactions, usageAnalysis);
-const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
-const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = this.resolveAndApplyDebugLog(tokenResult, debugLogTokens, reconciledModelUsage, dailyRollups);
-
-await this.applyWindsurfBreakdown(sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
-
-const sessionData = this.buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups, cached);
-this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
-return sessionData;
+		const sessionData = await this.analyzeSessionFileOffHostThread(sessionFilePath, mtime, fileSize, cached);
+		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
+		return sessionData;
 	}
 
 	/**
-	 * Windsurf sessions are discovered via the gRPC API (not a re-parseable file), so the
-	 * data layer pre-builds a ModelUsage map and tool-call breakdown. Fold those into the
-	 * resolved model usage / daily rollups / analysis so Today's Sessions shows real
-	 * input/output/cached tokens, models and cost instead of zeros.
+	 * Parses a session file into a fresh cache entry. Windsurf's virtual sessions come from a
+	 * host-only gRPC client, so they stay in-process; everything else goes to a worker thread.
 	 */
-	private async applyWindsurfBreakdown(
-sessionFilePath: string,
-resolvedModelUsage: ModelUsage,
-dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
-usageAnalysis: SessionUsageAnalysis
-	): Promise<void> {
-if (!this.windsurf.isWindsurfSessionFile(sessionFilePath)) { return; }
-const session = await this.windsurf.resolveSession(sessionFilePath);
-if (!session) { return; }
-if (session.modelUsage && Object.keys(session.modelUsage).length > 0) {
-	for (const [model, usage] of Object.entries(session.modelUsage)) {
-		resolvedModelUsage[model] = { ...usage };
-	}
-	// Windsurf has a single activity day; mirror the model usage onto its rollup
-	// so per-day model/cost aggregation matches the session totals.
-	for (const day of Object.keys(dailyRollups)) {
-		dailyRollups[day].modelUsage = session.modelUsage;
-		if (session.cachedTokens) { dailyRollups[day].cachedReadTokens = session.cachedTokens; }
-	}
-}
-if (session.toolCalls) { usageAnalysis.toolCalls = session.toolCalls; }
+	/**
+	 * What this window's discovery learned about a Copilot CLI session (Scout / desktop app). The workers never run
+	 * discovery, so it travels with the request; see CopilotCliSessionKind.
+	 */
+	private copilotCliKindsFor(sessionFile: string): Array<'scout' | 'app'> {
+		const adapter = this.ecosystems.find((eco) => eco.id === 'copilotcli') as CopilotCliAdapter | undefined;
+		return adapter?.getSessionKinds?.(sessionFile) ?? [];
 	}
 
-	private async preloadSessionFileContent(sessionFilePath: string): Promise<{ preloadedContent: string | undefined; preloadedParsedJson: any | undefined }> {
-		const isSpecialSession = this.findEcosystem(sessionFilePath) !== null;
-		if (isSpecialSession) { return { preloadedContent: undefined, preloadedParsedJson: undefined }; }
-		// Windsurf sessions use virtual paths (windsurf://trajectory/...) — no file to read
-		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) { return { preloadedContent: undefined, preloadedParsedJson: undefined }; }
-		const preloadedContent = await fs.promises.readFile(sessionFilePath, 'utf8');
-		let preloadedParsedJson: any | undefined;
-		const isPlainJson = !sessionFilePath.endsWith('.jsonl') && !_isJsonlContent(preloadedContent) && !_isUuidPointerFile(preloadedContent);
-		if (isPlainJson) {
-			try { preloadedParsedJson = JSON.parse(preloadedContent); } catch { /* handled individually */ }
-		}
-		return { preloadedContent, preloadedParsedJson };
+	private analyzeSessionFileOffHostThread(sessionFilePath: string, mtime: number, fileSize: number, previous: SessionFileCache | undefined): Promise<SessionFileCache> {
+		const inProcess = () => _analyzeSessionFile(this.analyzerDeps, sessionFilePath, mtime, fileSize, previous);
+		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) { return inProcess(); }
+		const kinds = this.copilotCliKindsFor(sessionFilePath);
+		return this.runOffHostThread((pool) => pool.analyze(sessionFilePath, mtime, fileSize, previous?.repository, kinds), inProcess);
 	}
 
-	/** Long-context tier fields: largest per-request prompt size and CLI context tier. */
-	private buildContextTierFields(
-		tokenResult: { maxRequestInputTokens?: number; contextTier?: string },
-		debugLogTokens: { maxRequestInputTokens?: number } | null | undefined,
-	): Partial<SessionFileCache> {
-		// Debug-log per-request sizes are exact; fall back to the session-file value.
-		const maxRequestInputTokens = Math.max(debugLogTokens?.maxRequestInputTokens ?? 0, tokenResult.maxRequestInputTokens ?? 0);
-		return {
-			...(maxRequestInputTokens > 0 ? { maxRequestInputTokens } : {}),
-			...(tokenResult.contextTier ? { contextTier: tokenResult.contextTier } : {}),
-		};
-	}
-
-	private buildOptionalSessionFields(
-		tokenResult: { thinkingTokens?: number; copilotNanoAiu?: number; truncationCount?: number; messagesRemovedByTruncation?: number; maxRequestInputTokens?: number; contextTier?: string },
-		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number; maxRequestInputTokens?: number } | null | undefined,
-		finalCacheReadTokens: number | undefined,
-		copilotExactCostDollars: number | undefined,
-		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
-		usageAnalysis: SessionUsageAnalysis,
-	): Partial<SessionFileCache> {
-		const hasDebugLog = !!debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0;
-		const hasEditScope = usageAnalysis?.editScope?.linesAdded !== undefined && usageAnalysis.editScope.linesAdded > 0;
-		return {
-			thinkingTokens: tokenResult.thinkingTokens,
-			...(finalCacheReadTokens ? { cacheReadTokens: finalCacheReadTokens } : {}),
-			...(debugLogTokens?.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
-			...(hasDebugLog ? { debugLogInputTokens: debugLogTokens!.inputTokens, debugLogOutputTokens: debugLogTokens!.outputTokens } : {}),
-			dailyRollups: Object.keys(dailyRollups).length > 0 ? dailyRollups : undefined,
-			...(copilotExactCostDollars !== undefined ? { copilotExactCostDollars } : {}),
-			...(tokenResult.truncationCount ? { truncationCount: tokenResult.truncationCount, messagesRemovedByTruncation: tokenResult.messagesRemovedByTruncation } : {}),
-			...this.buildContextTierFields(tokenResult, debugLogTokens),
-			...(hasEditScope ? {
-				linesAdded: usageAnalysis!.editScope!.linesAdded,
-				linesRemoved: usageAnalysis!.editScope!.linesRemoved ?? 0,
-				...(usageAnalysis!.editScope!.languageUsage ? { languageUsage: usageAnalysis!.editScope!.languageUsage } : {}),
-			} : {}),
-		};
-	}
-
-
-	private buildSessionDataObject(
-		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; cacheReadTokens?: number; copilotNanoAiu?: number },
-		interactions: number,
-		resolvedModelUsage: ModelUsage,
-		mtime: number,
-		fileSize: number,
-		usageAnalysis: SessionUsageAnalysis,
-		sessionMeta: { title?: string; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string },
-		resolvedActualTokens: number | undefined,
-		finalCacheReadTokens: number | undefined,
-		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number } | null | undefined,
-		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
-		existingCache?: SessionFileCache
-	): SessionFileCache {
-		const copilotNanoAiu = debugLogTokens?.copilotNanoAiu ?? tokenResult.copilotNanoAiu ?? 0;
-		const copilotExactCostDollars = copilotNanoAiu > 0 ? copilotNanoAiu * NANO_AIU_TO_DOLLARS : undefined;
-		const optionals = this.buildOptionalSessionFields(tokenResult, debugLogTokens, finalCacheReadTokens, copilotExactCostDollars, dailyRollups, usageAnalysis);
-		// Classified once per session (not per-render) using tool names from usageAnalysis and the
-		// already-extracted session title — see src/taskClassification.ts for the heuristic + rationale.
-		const taskCategory = classifySessionTask(buildClassificationInputFromUsageAnalysis(usageAnalysis, sessionMeta.title));
-		// Counted once per session from the same tool-name data as the task classification;
-		// powers the sub-agent badge/counters in the sessions list, details and diagnostics views.
-		// MCP tools are included because some ecosystems spawn sub-agents via MCP
-		// (e.g. Claude Desktop's mcp__ccd_session__spawn_task).
-		const subAgentCalls = countDelegationToolCalls(usageAnalysis?.toolCalls?.byTool ?? {})
-			+ countDelegationToolCalls(usageAnalysis?.mcpTools?.byTool ?? {});
-		return {
-			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
-			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
-			lastInteraction: sessionMeta.lastInteraction, actualTokens: resolvedActualTokens,
-			taskCategory: usageAnalysis.taskClassification?.primaryCategory ?? taskCategory,
-			taskCategoryShares: usageAnalysis.taskClassification?.categoryShares,
-			...(subAgentCalls > 0 ? { subAgentCalls } : {}),
-			// Persist workspace attribution from the adapter so the Recent Sessions list can
-			// show it without requiring a separate getSessionFileDetails() parse pass.
-			...(sessionMeta.workspacePath ? { workspaceFolderPath: sessionMeta.workspacePath } : {}),
-			// Repository is discovered separately by getSessionFileDetails() (via content-reference
-			// git-root lookup) and is not recomputed here. Without preserving it, every cache-miss
-			// rebuild of this entry (e.g. an actively-edited session whose file keeps changing)
-			// would silently wipe out a previously-known repository, making it fall back to
-			// "Unknown" and disappear from all "By Repository" charts — most noticeably for the
-			// "Output" (lines of code) chart, since LOC is attributed to the most recently active
-			// day, which is exactly the day whose cache entry keeps getting rebuilt.
-			...(existingCache?.repository !== undefined ? { repository: existingCache.repository } : {}),
-			...optionals,
-		};
-	}
-
-	private async supplementCacheWithDebugLog(cached: SessionFileCache, sessionFilePath: string, fileSize: number): Promise<SessionFileCache | null> {
-		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
-		if (!debugLogTokens || (debugLogTokens.inputTokens + debugLogTokens.outputTokens) === 0) {
-			const marked = { ...cached, debugLogChecked: true as const };
-			this.setCachedSessionData(sessionFilePath, marked, fileSize);
+	private async supplementCachedSessionWithDebugLog(cached: SessionFileCache, sessionFilePath: string, fileSize: number): Promise<SessionFileCache | null> {
+		const supplemented = await this.runOffHostThread(
+			(pool) => pool.supplement(cached, sessionFilePath),
+			() => _supplementCacheWithDebugLog(cached, sessionFilePath),
+		);
+		if (!supplemented) {
+			// No usable debug log: remember that so the lookup is not repeated for this entry.
+			this.setCachedSessionData(sessionFilePath, { ...cached, debugLogChecked: true as const }, fileSize);
 			this._cacheHits++;
 			return null;
 		}
-		const breakdownUsage = Object.keys(debugLogTokens.modelBreakdown).length > 0
-			? _scdlBuildFromBreakdown(debugLogTokens.modelBreakdown)
-			: cached.modelUsage;
-		// Reconcile to the debug log's totals even when the breakdown is missing or
-		// partial (e.g. some requests lack a `model` attribute), so Input+Output
-		// never drifts from Total — see reconcileModelUsageToTotal for why.
-		const supplementModelUsage = reconcileDebugLogModelUsage(cached.modelUsage, breakdownUsage, debugLogTokens.inputTokens, debugLogTokens.outputTokens);
-		// Redistribute to days via the shared helper, which also re-syncs each day's
-		// actualTokens to the debug-log-sized usage — see distributeModelUsageToDays.
-		const supplementDailyRollups = cached.dailyRollups
-			? (distributeModelUsageToDays(cached.dailyRollups, supplementModelUsage) ?? cached.dailyRollups)
-			: cached.dailyRollups;
-		const supplemented: SessionFileCache = {
-			...cached, modelUsage: supplementModelUsage, dailyRollups: supplementDailyRollups,
-			actualTokens: debugLogTokens.inputTokens + debugLogTokens.outputTokens,
-			...(debugLogTokens.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
-			debugLogInputTokens: debugLogTokens.inputTokens,
-			debugLogOutputTokens: debugLogTokens.outputTokens,
-			...(debugLogTokens.copilotNanoAiu > 0 ? { copilotExactCostDollars: debugLogTokens.copilotNanoAiu * NANO_AIU_TO_DOLLARS } : {}),
-		};
 		this.setCachedSessionData(sessionFilePath, supplemented, fileSize);
 		this._cacheHits++;
 		return supplemented;
 	}
 
-	private buildDailyRollupEntry(
-		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
-		fraction: number,
-		interactions: number,
-		modelUsage: ModelUsage,
-		totalNanoAiu: number,
-		taskCategoryShares?: TaskCategoryBreakdown,
-		primaryTaskCategory?: TaskCategory,
-	): DailyRollupEntry {
-		const dayModelUsage = this.scaledModelUsage(modelUsage, fraction);
-		const dayExactCost = totalNanoAiu > 0 ? totalNanoAiu * NANO_AIU_TO_DOLLARS * fraction : undefined;
-		return {
-			tokens: Math.round(tokenResult.tokens * fraction),
-			actualTokens: Math.round((tokenResult.actualTokens || 0) * fraction),
-			thinkingTokens: Math.round((tokenResult.thinkingTokens || 0) * fraction),
-			cachedReadTokens: 0,
-			interactions,
-			modelUsage: dayModelUsage,
-			...(taskCategoryShares ? { taskCategoryShares } : {}),
-			...(primaryTaskCategory ? { primaryTaskCategory } : {}),
-			...(dayExactCost !== undefined ? { copilotExactCostDollars: dayExactCost } : {}),
-		};
-	}
-
-	private computeRollupsFromFractions(
-		fractions: Record<string, number>,
-		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
-		modelUsage: ModelUsage,
-		interactions: number,
-		totalNanoAiu: number,
-		taskCategoryShares?: TaskCategoryBreakdown,
-		primaryTaskCategory?: TaskCategory,
-	): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
-		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
-		const totalFracInteractions = Math.max(1, interactions);
-		for (const [dayKey, fraction] of Object.entries(fractions)) {
-			const dayInteractions = Math.max(1, Math.round(totalFracInteractions * fraction));
-			dailyRollups[dayKey] = this.buildDailyRollupEntry(tokenResult, fraction, dayInteractions, modelUsage, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
-		}
-		return { dailyRollups, totalInteractions: totalFracInteractions };
-	}
-
-	private computeRollupsFromInteractionCounts(
-		interactionMap: { [localDayKey: string]: number },
-		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
-		modelUsage: ModelUsage,
-		totalNanoAiu: number,
-		taskCategoryShares?: TaskCategoryBreakdown,
-		primaryTaskCategory?: TaskCategory,
-	): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
-		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
-		const totalInteractions = Object.values(interactionMap).reduce((a, b) => a + b, 0);
-		for (const [dayKey, dayInteractionCount] of Object.entries(interactionMap)) {
-			const fraction = dayInteractionCount / totalInteractions;
-			dailyRollups[dayKey] = this.buildDailyRollupEntry(tokenResult, fraction, dayInteractionCount, modelUsage, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
-		}
-		return { dailyRollups, totalInteractions };
-	}
-
-
-private computeDailyRollups(
-	sessionMeta: { firstInteraction: string | null; lastInteraction: string | null; dailyInteractions: { [localDayKey: string]: number }; dailyFractions?: Record<string, number> },
-	tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
-	modelUsage: ModelUsage,
-	interactions: number,
-	usageAnalysis: SessionUsageAnalysis
-): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
-	const totalNanoAiu = tokenResult.copilotNanoAiu ?? 0;
-	const taskCategoryShares = usageAnalysis.taskClassification?.categoryShares as TaskCategoryBreakdown | undefined;
-	const primaryTaskCategory = usageAnalysis.taskClassification?.primaryCategory as TaskCategory | undefined;
-
-	// Prefer pre-computed fractions from ecosystem adapters (e.g. getDailyFractions()),
-	// which have accurate per-request timestamps. Fall back to dailyInteractions counts.
-	if (sessionMeta.dailyFractions && Object.keys(sessionMeta.dailyFractions).length > 0) {
-		return this.computeRollupsFromFractions(sessionMeta.dailyFractions, tokenResult, modelUsage, interactions, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
-	}
-
-	const dailyInteractionMap = sessionMeta.dailyInteractions;
-	const totalInteractions = Object.values(dailyInteractionMap).reduce((a, b) => a + b, 0);
-	if (totalInteractions > 0) {
-		return this.computeRollupsFromInteractionCounts(dailyInteractionMap, tokenResult, modelUsage, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
-	}
-
-	// Last-resort fallback for adapters/formats with no per-request timestamps at all
-	// (e.g. Claude Desktop, which has no getDailyFractions()). Bucket the whole session
-	// under its *last* activity day, not its first: a multi-day session (started days ago,
-	// still active today) must show up as "today"'s activity, matching the mtime-based
-	// fallback the CLI uses (see extractDailyFractions) and the lastInteraction-based
-	// fallback aggregatePeriodStats itself uses when dailyRollups is absent. Using
-	// firstInteraction here silently buried all subsequent days' activity — including
-	// "today" — under the session's start date, making Today/Details show 0.
-	const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
-	this.computeFallbackDailyRollup(
-		dailyRollups,
-		sessionMeta.lastInteraction ?? sessionMeta.firstInteraction,
-		tokenResult,
-		modelUsage,
-		interactions,
-		taskCategoryShares,
-		primaryTaskCategory
-	);
-	return { dailyRollups, totalInteractions };
-}
-
-private computeFallbackDailyRollup(
-	dailyRollups: { [localDayKey: string]: DailyRollupEntry },
-	lastInteraction: string | null,
-	tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number },
-	modelUsage: ModelUsage,
-	interactions: number,
-	taskCategoryShares?: TaskCategoryBreakdown,
-	primaryTaskCategory?: TaskCategory
-): void {
-	if (!tokenResult.tokens || !lastInteraction) { return; }
-	try {
-		const interactionDate = new Date(lastInteraction);
-		if (isNaN(interactionDate.getTime())) { return; }
-		const dayKey = toLocalDayKey(interactionDate);
-		const dayModelUsage = this.scaledModelUsage(modelUsage, 1);
-		dailyRollups[dayKey] = {
-			tokens: tokenResult.tokens,
-			actualTokens: tokenResult.actualTokens || 0,
-			thinkingTokens: tokenResult.thinkingTokens || 0,
-			cachedReadTokens: 0,
-			interactions: Math.max(1, interactions),
-			modelUsage: dayModelUsage,
-			...(taskCategoryShares ? { taskCategoryShares } : {}),
-			...(primaryTaskCategory ? { primaryTaskCategory } : {}),
-		};
-	} catch { /* ignore */ }
-}
-	private scaledModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
-		return scaleModelUsage(modelUsage, fraction);
-	}
-
-	private resolveAndApplyDebugLog(
-		tokenResult: { tokens: number; actualTokens?: number; cacheReadTokens?: number },
-		debugLogTokens: { inputTokens: number; outputTokens: number; cachedTokens?: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined,
-		modelUsage: ModelUsage,
-		dailyRollups: { [utcDayKey: string]: DailyRollupEntry }
-	): { resolvedActualTokens: number | undefined; finalCacheReadTokens: number | undefined; resolvedModelUsage: ModelUsage } {
-		const resolvedActualTokens = (debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0)
-			? debugLogTokens.inputTokens + debugLogTokens.outputTokens
-			: tokenResult.actualTokens;
-
-		const debugLogCached = !tokenResult.cacheReadTokens ? (debugLogTokens?.cachedTokens ?? 0) : 0;
-		const resolvedCacheReadTokens = tokenResult.cacheReadTokens || debugLogCached || undefined;
-		const modelCachedTotal = !resolvedCacheReadTokens ? Object.values(modelUsage).reduce((sum, u) => sum + (u.cachedReadTokens ?? 0), 0) : 0;
-		const finalCacheReadTokens = resolvedCacheReadTokens || (modelCachedTotal > 0 ? modelCachedTotal : undefined);
-
-		this.backfillDailyRollupCacheTokens(dailyRollups, finalCacheReadTokens);
-
-		const resolvedModelUsage = this.applyDebugLogModelBreakdown(modelUsage, debugLogTokens, dailyRollups);
-		return { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage };
-	}
-
-	private backfillDailyRollupCacheTokens(dailyRollups: { [utcDayKey: string]: DailyRollupEntry }, finalCacheReadTokens: number | undefined): void {
-		if (!finalCacheReadTokens || Object.keys(dailyRollups).length === 0) { return; }
-		const dayKeys = Object.keys(dailyRollups);
-		if (dayKeys.length === 1) {
-			dailyRollups[dayKeys[0]].cachedReadTokens = finalCacheReadTokens;
-		} else {
-			const totalForCache = dayKeys.reduce((s, k) => s + dailyRollups[k].interactions, 0);
-			let remaining = finalCacheReadTokens;
-			dayKeys.slice(0, -1).forEach(k => {
-				const allocated = totalForCache > 0 ? Math.round(finalCacheReadTokens * dailyRollups[k].interactions / totalForCache) : 0;
-				dailyRollups[k].cachedReadTokens = allocated;
-				remaining -= allocated;
-			});
-			dailyRollups[dayKeys[dayKeys.length - 1]].cachedReadTokens = Math.max(0, remaining);
-		}
-	}
-
-	private applyDebugLogModelBreakdown(modelUsage: ModelUsage, debugLogTokens: { inputTokens: number; outputTokens: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined, dailyRollups: { [utcDayKey: string]: DailyRollupEntry }): ModelUsage {
-		if (!debugLogTokens || debugLogTokens.inputTokens + debugLogTokens.outputTokens === 0) { return modelUsage; }
-		const breakdownUsage: ModelUsage = {};
-		for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
-			breakdownUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}), sessions: 0 };
-		}
-		// Reconcile against the debug log's own totals even when the breakdown is
-		// missing or partial (e.g. some requests lack a `model` attribute), so
-		// Input+Output never drifts from Total — see reconcileModelUsageToTotal.
-		const resolvedModelUsage = reconcileDebugLogModelUsage(
-			modelUsage, breakdownUsage,
-			debugLogTokens.inputTokens,
-			debugLogTokens.outputTokens,
+	/** Interaction count + token estimate for content the caller already read; parsed off the host thread. */
+	private quickAnalyzeSessionContent(sessionFile: string, content: string, mtimeMs: number, size: number) {
+		return this.runOffHostThread(
+			(pool) => pool.quickAnalyze(sessionFile, content, mtimeMs, size),
+			() => _quickAnalyzeSessionContent(this.analyzerDeps, sessionFile, content),
 		);
-		// Redistribute to days AND re-sync each day's actualTokens — the rollups were
-		// built from the (smaller) session-file estimate, and period stats derive
-		// "Total tokens" from rollup actualTokens but "Input/Output" from rollup
-		// modelUsage. Leaving the old day totals in place makes Input exceed Total.
-		const redistributed = distributeModelUsageToDays(dailyRollups, resolvedModelUsage);
-		if (redistributed) {
-			for (const [dayKey, dayRollup] of Object.entries(redistributed)) {
-				dailyRollups[dayKey] = dayRollup;
-			}
-		}
-		return resolvedModelUsage;
 	}
-
-
-
 
 	private async getUsageAnalysisFromSessionCached(sessionFile: string, mtime: number, fileSize: number): Promise<SessionUsageAnalysis> {
 		const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
@@ -8942,38 +8493,22 @@ private computeFallbackDailyRollup(
 
 		this.enrichDetailsWithEditorInfo(sessionFile, details);
 
-		try {
-			const eco = this.findEcosystem(sessionFile);
-			if (eco) { return this.processEcosystemSessionDetails(eco, sessionFile, stat, details); }
-
-			// Handle Windsurf virtual sessions — resolve via API or .pb file metadata
-			if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
-				return this.processWindsurfSessionDetails(sessionFile, stat, details);
-			}
-
-			const fileContent = await fs.promises.readFile(sessionFile, 'utf8');
-			if (this.isUuidPointerFile(fileContent)) {
-				await this.updateCacheWithSessionDetails(sessionFile, stat, details);
-				return details;
-			}
-
-			const isJsonlContent = sessionFile.endsWith('.jsonl') || this.isJsonlContent(fileContent);
-			if (isJsonlContent) {
-				return this.processJsonlSessionDetails(sessionFile, stat, details, fileContent);
-			}
-
-			const sessionContent = JSON.parse(fileContent);
-			if (sessionContent.customTitle) { details.title = sessionContent.customTitle; }
-			if (Array.isArray(sessionContent.requests)) {
-				await this.processJsonRequestsDetails(sessionContent.requests, sessionFile, stat, details);
-			}
-			const modelUsage = await _getModelUsageFromSession(this.usageAnalysisDeps, sessionFile, fileContent, sessionContent);
-			await this.updateCacheWithSessionDetails(sessionFile, stat, details, undefined, modelUsage);
-		} catch (error) {
-			this.warn(`Error analyzing session file details for ${sessionFile}: ${error}`);
+		// Windsurf virtual sessions — resolve via API or .pb file metadata. That client is
+		// host-only, so they are the one kind of session that cannot be parsed on a worker.
+		if (!this.findEcosystem(sessionFile) && this.windsurf.isWindsurfSessionFile(sessionFile)) {
+			return this.processWindsurfSessionDetails(sessionFile, stat, details);
 		}
 
-		return details;
+		// Reading and parsing the file is the expensive part, so it runs off the host thread; only
+		// the cache write (which owns host state) happens here.
+		const result = await this.runOffHostThread(
+			(pool) => pool.computeDetails(sessionFile, stat.mtime.getTime(), stat.size, details, this.copilotCliKindsFor(sessionFile)),
+			() => _computeSessionFileDetails(this.analyzerDeps, sessionFile, stat, details),
+		);
+		if (result.cacheUpdate) {
+			await this.updateCacheWithSessionDetails(sessionFile, stat, result.details, result.cacheUpdate.tokenResult, result.cacheUpdate.modelUsage);
+		}
+		return result.details;
 	}
 
 	private async processWindsurfSessionDetails(sessionFile: string, stat: fs.Stats, details: SessionFileDetails): Promise<SessionFileDetails> {
@@ -8992,178 +8527,17 @@ private computeFallbackDailyRollup(
 		return details;
 	}
 
-	private async processEcosystemSessionDetails(eco: IEcosystemAdapter, sessionFile: string, stat: fs.Stats, details: SessionFileDetails): Promise<SessionFileDetails> {
-		const [meta, tokenResult, interactionCount, modelUsage] = await Promise.all([
-			eco.getMeta(sessionFile), eco.getTokens(sessionFile), eco.countInteractions(sessionFile), eco.getModelUsage(sessionFile)
-		]);
-		details.title = meta.title;
-		details.firstInteraction = meta.firstInteraction;
-		details.lastInteraction = meta.lastInteraction;
-		details.interactions = interactionCount;
-		details.editorRoot = eco.getEditorRoot(sessionFile);
-		details.editorName = getEcosystemDisplayName(eco, sessionFile);
-		if (meta.workspacePath) {
-			// Prefer the ecosystem's authoritative repository (e.g. Copilot CLI's DB "owner/repo"
-			// column). Only fall back to deriving a name from the path when it's absent, and use a
-			// worktree-aware derivation so app-store worktree paths resolve to the repo folder
-			// instead of the transient worktree name.
-			details.repository = meta.repository || _getRepoNameFromWorkspacePath(meta.workspacePath);
-			details.workspacePath = meta.workspacePath;
-		}
-		await this.updateCacheWithSessionDetails(sessionFile, stat, details, tokenResult, modelUsage);
-		return details;
-	}
 
-	private async processJsonlSessionDetails(sessionFile: string, stat: fs.Stats, details: SessionFileDetails, fileContent: string): Promise<SessionFileDetails> {
-		const lines = fileContent.trim().split('\n').filter(l => l.trim());
-		const timestamps: number[] = [];
-		const allContentReferences: any[] = [];
 
-		let isDeltaBased = false;
-		if (lines.length > 0) {
-			try { const firstLine = JSON.parse(lines[0]); if (firstLine && typeof firstLine.kind === 'number') { isDeltaBased = true; } } catch { /* not delta */ }
-		}
 
-		// Compute model usage via the shared function (reusing already-read fileContent to
-		// avoid a second file read) so the Diagnostics detail cache gets real per-model
-		// attribution instead of only ever carrying over whatever a separate, unrelated
-		// Usage/Charts analysis pass happened to have cached already.
-		const modelUsage = await _getModelUsageFromSession(this.usageAnalysisDeps, sessionFile, fileContent);
 
-		if (isDeltaBased) {
-			return this.processDeltaJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences, modelUsage);
-		}
-		return this.processCliJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences, modelUsage);
-	}
 
-	private async processDeltaJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[], modelUsage: ModelUsage): Promise<SessionFileDetails> {
-		const { sessionState } = await _reconstructJsonlStateAsync(lines);
-		if (sessionState.creationDate) { timestamps.push(sessionState.creationDate); }
-		if (sessionState.customTitle) { details.title = sessionState.customTitle; }
 
-		const requests = sessionState.requests || [];
-		details.interactions = requests.length;
-		for (const request of requests) {
-			if (!request) { continue; }
-			if (request.timestamp) { timestamps.push(request.timestamp); }
-			this.analyzeRequestContext(request, details.contextReferences);
-			if (request.contentReferences && Array.isArray(request.contentReferences)) {
-				allContentReferences.push(...request.contentReferences);
-			}
-		}
 
-		this.setDetailsTimestamps(details, timestamps, stat);
-		// Use '' as a "checked but not found" sentinel so warm-cache runs don't re-parse this file.
-		details.repository = allContentReferences.length > 0
-			? (await this.extractRepositoryFromContentReferences(allContentReferences) ?? '')
-			: '';
-		await this.updateCacheWithSessionDetails(sessionFile, stat, details, undefined, modelUsage);
-		return details;
-	}
 
-	private async processCliJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[], modelUsage: ModelUsage): Promise<SessionFileDetails> {
-		let firstUserMessage: string | undefined;
-		for (const line of lines) {
-			if (!line.trim()) { continue; }
-			try {
-				const event = JSON.parse(line);
-				const userMsg = this.processCliJsonlEvent(event, details, timestamps, allContentReferences);
-				if (userMsg && !firstUserMessage) { firstUserMessage = userMsg; }
-			} catch { /* skip malformed */ }
-		}
 
-		if (!details.title && firstUserMessage) {
-			const trimmed = firstUserMessage.trim();
-			details.title = trimmed.length > 60 ? trimmed.slice(0, 60) + '…' : trimmed;
-		}
-		this.setDetailsTimestamps(details, timestamps, stat);
-		details.repository = allContentReferences.length > 0
-			? (await this.extractRepositoryFromContentReferences(allContentReferences) ?? '')
-			: '';
-		await this.updateCacheWithSessionDetails(sessionFile, stat, details, undefined, modelUsage);
-		return details;
-	}
 
-	private processCliJsonlEvent(event: any, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): string | undefined {
-		if (event.type === 'user.message') { return this.processUserMessageEvent(event, details, timestamps); }
-		if (event.type === 'tool.execution_start') { this.processToolExecutionEvent(event, details, allContentReferences); }
-		return undefined;
-	}
 
-	private processUserMessageEvent(event: any, details: SessionFileDetails, timestamps: number[]): string | undefined {
-		details.interactions++;
-		if (event.timestamp || event.ts || event.data?.timestamp) {
-			timestamps.push(new Date(event.timestamp || event.ts || event.data.timestamp).getTime());
-		}
-		if (event.data?.content) {
-			this.analyzeContextReferences(event.data.content, details.contextReferences);
-			return event.data.content;
-		}
-		return undefined;
-	}
-
-	private processToolExecutionEvent(event: any, details: SessionFileDetails, allContentReferences: any[]): void {
-		if (event.data?.toolName === 'rename_session' && event.data?.arguments?.title) {
-			details.title = event.data.arguments.title;
-		}
-		if (event.data?.arguments) {
-			const args = event.data.arguments as Record<string, unknown>;
-			for (const val of Object.values(args)) {
-				if (typeof val === 'string' && val.length > 3 && (val.includes('/') || val.includes('\\'))) {
-					allContentReferences.push({ kind: 'reference', reference: { fsPath: val } });
-				}
-			}
-		}
-	}
-
-	private async processJsonRequestsDetails(requests: any[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails): Promise<void> {
-		details.interactions = requests.length;
-		const timestamps: number[] = [];
-		const allContentReferences: any[] = [];
-
-		for (const request of requests) {
-			this.processJsonRequest(request, details, timestamps, allContentReferences);
-		}
-
-		this.setDetailsTimestamps(details, timestamps, stat);
-		details.repository = allContentReferences.length > 0
-			? (await this.extractRepositoryFromContentReferences(allContentReferences) ?? '')
-			: '';
-	}
-
-	private processJsonRequest(request: any, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): void {
-		const ts = request.timestamp || request.ts || request.result?.timestamp;
-		if (ts) { timestamps.push(new Date(ts).getTime()); }
-		this.analyzeRequestContext(request, details.contextReferences);
-		this.analyzeRequestMessage(request.message, details.contextReferences);
-		if (request.contentReferences && Array.isArray(request.contentReferences)) { allContentReferences.push(...request.contentReferences); }
-		if (request.variableData) { this.processRequestVariableData(request.variableData, details.contextReferences); }
-	}
-
-	private analyzeRequestMessage(message: any, contextReferences: any): void {
-		if (!message) { return; }
-		if (message.text) { this.analyzeContextReferences(message.text, contextReferences); }
-		if (message.parts) {
-			for (const part of message.parts) { if (part.text) { this.analyzeContextReferences(part.text, contextReferences); } }
-		}
-	}
-
-	private processRequestVariableData(variableData: any, contextReferences: SessionFileDetails['contextReferences']): void {
-		const varDataStr = JSON.stringify(variableData).toLowerCase();
-		if (varDataStr.includes('workspace')) { contextReferences.workspace++; }
-		if (varDataStr.includes('terminal')) { contextReferences.terminal++; }
-		if (varDataStr.includes('vscode')) { contextReferences.vscode++; }
-	}
-
-	private setDetailsTimestamps(details: SessionFileDetails, timestamps: number[], stat: fs.Stats): void {
-		if (timestamps.length > 0) {
-			timestamps.sort((a, b) => a - b);
-			details.firstInteraction = new Date(timestamps[0]).toISOString();
-			details.lastInteraction = new Date(timestamps[timestamps.length - 1]).toISOString();
-		} else {
-			details.lastInteraction = stat.mtime.toISOString();
-		}
-	}
 
 	/**
 	 * Detect which editor the session file belongs to based on its path.
@@ -9649,120 +9023,16 @@ private computeFallbackDailyRollup(
 
 
 
-	private async estimateTokensFromSession(sessionFilePath: string, preloadedContent?: string, preloadedParsedJson?: any): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens?: number }> {
-		try {
-			const eco = this.findEcosystem(sessionFilePath);
-			if (eco) { return eco.getTokens(sessionFilePath); }
-			if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
-				const session = await this.windsurf.resolveSession(sessionFilePath);
-				const tokens = session?.tokens ?? 0;
-				return { tokens, thinkingTokens: 0, actualTokens: tokens, cacheReadTokens: session?.cachedTokens };
-			}
-			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFilePath, 'utf8');
-			if (this.isUuidPointerFile(fileContent)) { return { tokens: 0, thinkingTokens: 0, actualTokens: 0 }; }
-			if (sessionFilePath.endsWith('.jsonl') || this.isJsonlContent(fileContent)) {
-				const exactUsage = extractCopilotCliSessionId(sessionFilePath) ? await getCopilotCliExactUsage(sessionFilePath) : null;
-				return this.estimateTokensFromJsonlSession(fileContent, exactUsage);
-			}
-			const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			return this.estimateTokensFromJsonSession(sessionContent);
-		} catch (error) {
-			this.warn(`Error parsing session file ${sessionFilePath}: ${error}`);
-			return { tokens: 0, thinkingTokens: 0, actualTokens: 0 };
-		}
-	}
 
-	private estimateTokensFromJsonSession(sessionContent: any): { tokens: number; thinkingTokens: number; actualTokens: number } {
-		let totalInputTokens = 0; let totalOutputTokens = 0; let totalThinkingTokens = 0; let totalActualTokens = 0;
-		if (!sessionContent.requests || !Array.isArray(sessionContent.requests)) {
-			return { tokens: 0, thinkingTokens: 0, actualTokens: 0 };
-		}
-		for (const request of sessionContent.requests) {
-			totalInputTokens += this.estimateRequestInputTokens(request);
-			const { output, thinking } = this.estimateRequestOutputTokens(request);
-			totalOutputTokens += output; totalThinkingTokens += thinking;
-			totalActualTokens += this.extractActualTokensFromRequest(request);
-		}
-		return { tokens: totalInputTokens + totalOutputTokens + totalThinkingTokens, thinkingTokens: totalThinkingTokens, actualTokens: totalActualTokens };
-	}
 
-	private estimateRequestInputTokens(request: any): number {
-		let tokens = 0;
-		if (request.message?.parts) {
-			for (const part of request.message.parts) {
-				if (part.text) { tokens += this.estimateTokensFromText(part.text); }
-			}
-		}
-		return tokens;
-	}
 
-	private estimateRequestOutputTokens(request: any): { output: number; thinking: number } {
-		let output = 0; let thinking = 0;
-		if (!request.response || !Array.isArray(request.response)) { return { output, thinking }; }
-		const model = this.getModelFromRequest(request);
-		for (const responseItem of request.response) {
-			const subAgent = _extractSubAgentData(responseItem);
-			if (subAgent) {
-				const saModel = subAgent.modelName || model;
-				output += this.estimateSubAgentTokens(subAgent, saModel);
-				continue;
-			}
-			const { text, isThinking } = _extractResponseItemText(responseItem);
-			if (!text) { continue; }
-			if (isThinking) { thinking += this.estimateTokensFromText(text, model); }
-			else { output += this.estimateTokensFromText(text, model); }
-		}
-		return { output, thinking };
-	}
 
-	private estimateSubAgentTokens(subAgent: { prompt?: string; result?: string }, model: string): number {
-		let tokens = 0;
-		if (subAgent.prompt) { tokens += this.estimateTokensFromText(subAgent.prompt, model); }
-		if (subAgent.result) { tokens += this.estimateTokensFromText(subAgent.result, model); }
-		return tokens;
-	}
 
-	private extractActualTokensFromRequest(request: any): number {
-		if (request.result?.usage) {
-			const u = request.result.usage;
-			return (typeof u.promptTokens === 'number' ? u.promptTokens : 0) + (typeof u.completionTokens === 'number' ? u.completionTokens : 0);
-		}
-		if (typeof request.result?.promptTokens === 'number' && typeof request.result?.outputTokens === 'number') {
-			return request.result.promptTokens + request.result.outputTokens;
-		}
-		const meta = request.result?.metadata;
-		if (meta && typeof meta.promptTokens === 'number' && typeof meta.outputTokens === 'number') {
-			return meta.promptTokens + meta.outputTokens;
-		}
-		return 0;
-	}
 
 	private estimateTokensFromJsonlSession(fileContent: string, exactUsage?: Awaited<ReturnType<typeof getCopilotCliExactUsage>>): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number; truncationCount?: number; messagesRemovedByTruncation?: number; maxRequestInputTokens?: number; contextTier?: string } {
 		return _estimateTokensFromJsonlSession(fileContent, exactUsage);
 	}
 
-	/**
-	 * Read all token counts from the Copilot Chat debug log companion file for
-	 * a given chat session. The debug log lives at:
-	 *   `{workspaceStorage}/{hash}/{extension}/debug-logs/{sessionId}/main.jsonl`
-	 * where `{extension}` is one of the GitHub.copilot-chat / GitHub.copilot variants.
-	 *
-	 * Returns null when no debug log is found or it contains no `llm_request` events.
-	 * When found, sums `inputTokens`, `outputTokens`, and `cachedTokens` across every
-	 * `llm_request` event to give true totals for agent-mode multi-call sessions.
-	 */
-	private async readTokensFromDebugLog(sessionFilePath: string): Promise<{ inputTokens: number; outputTokens: number; cachedTokens: number; modelTurns: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>; copilotNanoAiu: number; maxRequestInputTokens: number } | null> {
-		const candidatePaths = _resolveDebugLogCandidatePaths(sessionFilePath);
-		if (!candidatePaths) { return null; }
-		for (const debugLogPath of candidatePaths) {
-			try {
-				const content = await fs.promises.readFile(debugLogPath, 'utf8');
-				const result = _extractAllTokensFromDebugLog(content);
-				if (result) { return result; }
-			} catch { /* file doesn't exist or can't be read — try next variant */ }
-		}
-		return null;
-	}
 
 	/** Reads and extracts TTFT samples from one session's debug log, trying each candidate path. Returns null when the session has no debug log or none of its llm_request events carry attrs.ttft. */
 	private async readTtftSamplesForSessionFile(sessionFilePath: string): Promise<TtftSample[] | null> {
@@ -15222,8 +14492,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
   /**
    * Analyze a custom folder for session files belonging to any of the supported AI tools.
    * Scans recursively up to depth 5, max 500 files.
-   * Does NOT touch the cache — reads each file once and calls countInteractionsInSession
-   * and estimateTokensFromSession directly with preloaded content.
+   * Does NOT touch the cache — reads each file once and counts its interactions and estimates its tokens
+   * from that content (off the host thread: these are arbitrary user-selected files, any of which can be large).
    */
   private async analyzeFolderPath(panel: vscode.WebviewPanel, folderPath: string, toolType: string): Promise<void> {
     const { allowJson, allowJsonl } = this.resolveFolderScanOptions(toolType);
@@ -15280,8 +14550,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions: 0, tokens: 0, actualTokens: 0 });
         return;
       }
-      const interactions = await this.countInteractionsInSession(full, content);
-      const tokenResult = await this.estimateTokensFromSession(full, content);
+      const { interactions, tokenResult } = await this.quickAnalyzeSessionContent(full, content, stat.mtimeMs, stat.size);
       ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions, tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens });
     } finally {
       await handle.close();
@@ -15615,6 +14884,12 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (this.updateInterval) {
       clearInterval(this.updateInterval);
     }
+    this._eventLoopMonitor?.dispose();
+    this._eventLoopMonitor = undefined;
+    void this.analysisPool?.dispose();
+    this.analysisPool = undefined;
+    this.otelLookup?.dispose();
+    this.otelLookup = undefined;
     // Stop any in-flight background worktree scan from doing further disk I/O once disposed.
     this.backgroundWorktreeScanId++;
     this.stopRefreshHeartbeat();
@@ -16139,10 +15414,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
   // streaming read+parse of the (100+ MB, ever-growing) export file overlaps the rest of
   // activation instead of blocking the first usage analysis. Fire-and-forget: the result is
   // cached inside the module, and every consumer already awaits loadCopilotCliOtelIndex() lazily.
+  // The built index is saved next to the other caches, so the next start restores it and reads only what was appended.
+  setCopilotCliOtelSnapshotPath(path.join(context.globalStorageUri.fsPath, 'copilot-cli-otel-index.json'));
+  // The index starts before the tracker (and its output channel) exists, so early messages wait for it.
+  const earlyOtelMessages: string[] = [];
+  let otelLogTarget: CopilotTokenTracker | undefined;
+  setCopilotCliOtelLogger((message) => { if (otelLogTarget) { otelLogTarget.log(message); } else { earlyOtelMessages.push(message); } });
   void loadCopilotCliOtelIndex().catch(() => { /* off-by-default export; degrades to no data */ });
 
   // Create the token tracker
   const tokenTracker = new CopilotTokenTracker(context.extensionUri, context);
+  otelLogTarget = tokenTracker;
+  for (const message of earlyOtelMessages.splice(0)) { tokenTracker.log(message); }
 
   // Migrate settings from the old copilotTokenTracker namespace to aiEngineeringFluency.
   // Run before any other settings are read so the new keys are populated first.
