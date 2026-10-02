@@ -4,6 +4,10 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Changed
+- The npm package page now has user-facing documentation instead of build notes, and the [CLI reference](https://github.com/rajbos/ai-engineering-fluency/blob/main/docs/cli/README.md) covers every command and option, the environment variables that change where sessions are found, the cache files, every supported data source (with which record actual token counts), troubleshooting and privacy. The stated Node.js requirement is corrected to 22.14 or later.
+- `--help` now shows the installed command name, `ai-engineering-fluency`, instead of `copilot-token-tracker`.
+
 ## [0.6.1] - 2026-09-28
 
 ### Changed

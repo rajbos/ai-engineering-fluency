@@ -23,7 +23,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { ModelUsage } from './types';
 import { isUnsafeObjectKey } from './utils/protoGuard';
-import { normalizePath } from './utils/pathUtils';
+import { normalizePathForComparison } from './utils/pathUtils';
 
 export class MistralVibeDataAccess {
 
@@ -49,11 +49,14 @@ return path.join(this.getVibeHomeDir(), 'logs', 'session');
 
 /**
  * Check if a file path belongs to a Mistral Vibe session.
- * Session files are meta.json files under ~/.vibe/logs/session/
+ * Session files are meta.json files under <VIBE_HOME>/logs/session/ — the default
+ * ~/.vibe/ or a $VIBE_HOME whose folder name differs.
  */
 isVibeSessionFile(filePath: string): boolean {
-const normalized = normalizePath(filePath);
-return normalized.includes('/.vibe/logs/session/') && normalized.endsWith('/meta.json');
+const normalized = normalizePathForComparison(filePath);
+if (!normalized.endsWith('/meta.json')) { return false; }
+if (normalized.includes('/.vibe/logs/session/')) { return true; }
+return normalized.startsWith(normalizePathForComparison(this.getSessionLogDir()) + '/');
 }
 
 /**

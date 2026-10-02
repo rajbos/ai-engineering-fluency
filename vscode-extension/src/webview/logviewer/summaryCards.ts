@@ -2,6 +2,7 @@
 // Extracted from main.ts (which has module-load side effects — DOM access,
 // dynamic imports — and so cannot itself be imported by unit tests).
 import { escapeHtml } from '../shared/formatUtils';
+import { aiuToUsd } from '../../../../src/hydrafusion';
 import { localize, localizeFormat } from '../shared/localization';
 
 /**
@@ -55,4 +56,22 @@ export function buildMcpAndContextRefsCard(stats: McpAndContextRefsCardStats): s
 </div>
 <div class="summary-sub combined-card-sub">${subContent}</div>
 </div>`;
+}
+
+/** The slice of the session payload `sumSessionCost` reads. */
+export type SessionCostInput = {
+	turns: { estimatedCost?: number; toolCalls: { subAgentCost?: number }[] }[];
+	hydraFusion?: { totalAiu: number };
+};
+
+/**
+ * Session total in USD. HydraFusion's reported AIU is the authoritative spend for the
+ * primary calls (its synthetic router model has no ordinary pricing), so it replaces the
+ * per-turn estimates there; sub-agent costs are separate calls and are always added.
+ * Returns 0 when nothing is known.
+ */
+export function sumSessionCost(data: SessionCostInput): number {
+	const subAgentTotal = data.turns.reduce((sum, t) => sum + t.toolCalls.reduce((s, tc) => s + (tc.subAgentCost ?? 0), 0), 0);
+	if (data.hydraFusion) { return aiuToUsd(data.hydraFusion.totalAiu) + subAgentTotal; }
+	return data.turns.reduce((sum, t) => sum + (t.estimatedCost ?? 0), 0) + subAgentTotal;
 }

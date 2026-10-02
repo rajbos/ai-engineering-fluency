@@ -300,7 +300,14 @@
             { "select": "#window-b", "value": "lastMonth" },
             { "select": "#model-a", "value": "claude-haiku-4.5" },
             { "select": "#window-b", "value": "prev30" },
-            { "select": "#model-mode", "value": "models" }
+            { "select": "#model-mode", "value": "models" },
+            { "click": "[data-for=\"model-a\"] .combo-button" },
+            { "type": "[data-for=\"model-a\"] .combo-search", "text": "no-such-model-zzz" },
+            { "type": "[data-for=\"model-a\"] .combo-search", "text": "" },
+            { "press": "ArrowDown" },
+            { "press": "Enter" },
+            { "click": "[data-for=\"model-b\"] .combo-button" },
+            { "press": "Escape" }
           ]
         }
       ]

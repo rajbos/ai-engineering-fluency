@@ -1144,12 +1144,12 @@ import {
     replaceGlobstars,
     replaceWildcards,
     replaceQuestionMarks,
-    getRepositoryUrl,
     resolveExactWorkspacePath,
     extractRepositoryFromContentReferences,
     resolveWorkspaceFolderFromSessionPath,
     resolveWorkspaceFolderWithFallback,
 } from '../../../src/workspaceHelpers';
+import { getRepositoryUrl } from '../../src/repositoryUrl';
 
 test('escapeRegexSpecials: escapes dot', () => {
     assert.equal(escapeRegexSpecials('.'), '\\.');

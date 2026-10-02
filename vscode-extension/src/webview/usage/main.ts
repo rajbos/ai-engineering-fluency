@@ -3,6 +3,7 @@ import { el, setHtml } from '../shared/domUtils';
 import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
+import { buildFilterPillGroupHtml, type SessionFilterOption } from './sessionFilterBar';
 import { escapeHtml, formatAbsoluteDate, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { localize, localizeFormat } from '../shared/localization';
@@ -1313,7 +1314,6 @@ function hasActiveSessionFilters(): boolean {
 		|| sessionFilterEditors.size > 0 || sessionFilterVendors.size > 0 || sessionFilterModels.size > 0;
 }
 
-type SessionFilterOption = { value: string; label: string; count: number };
 
 /** Computes the distinct editor/vendor/model values (with counts) present across the given sessions, used to render filter pills. */
 function computeSessionFilterOptions(sessions: TodaySessionSummary[]): {
@@ -1353,17 +1353,6 @@ function computeSessionFilterOptions(sessions: TodaySessionSummary[]): {
 		hydraFusionCount,
 		nearContextLimitCount,
 	};
-}
-
-/** Renders one labeled group of toggle pills (e.g. "Editor: VS Code (12) JetBrains (3)"). */
-function buildFilterPillGroupHtml(groupLabel: string, filterType: string, items: SessionFilterOption[], activeSet: Set<string>): string {
-	if (items.length === 0) { return ''; }
-	const pills = items.map(({ value, label, count }) => {
-		const isActive = activeSet.has(value);
-		const safeLabel = escapeHtml(label);
-		return `<button type="button" class="session-filter-pill${isActive ? ' active' : ''}" data-filter-type="${filterType}" data-filter-value="${escapeHtml(value)}" aria-pressed="${isActive}" title="${safeLabel}: ${count} session${count === 1 ? '' : 's'}">${safeLabel} <span class="session-filter-pill-count">${count}</span></button>`;
-	}).join('');
-	return `<div class="session-filter-group"><span class="session-filter-group-label">${escapeHtml(groupLabel)}:</span>${pills}</div>`;
 }
 
 /** Renders the pill filter bar above the Recent Sessions table (Editor / Vendor / Model / HydraFusion). */
@@ -4669,51 +4658,6 @@ function buildWorktreesTabPanelHtml(): string {
     </div>`;
 }
 
-/** Summary banner above the Recent Sessions table highlighting sub-agent usage in the selected period. */
-function buildSubAgentSummaryHtml(sessions: TodaySessionSummary[]): string {
-	const sessionsWithSubAgents = sessions.filter(s => (s.subAgentCalls ?? 0) > 0).length;
-	if (sessionsWithSubAgents === 0) { return ''; }
-	const totalCalls = sessions.reduce((sum, s) => sum + (s.subAgentCalls ?? 0), 0);
-	return `<div style="margin-top:8px; font-size:12px; color:var(--text-secondary);" title="Sessions that delegated work to sub-agents (task/read_agent/write_agent/list_agents, runSubagent, delegate_*, …)">
-		🤖 <strong>${sessionsWithSubAgents}</strong> session${sessionsWithSubAgents === 1 ? '' : 's'} used sub-agents (${formatNumber(totalCalls)} sub-agent call${totalCalls === 1 ? '' : 's'}) in this period
-	</div>`;
-}
-
-/**
- * Note below the Recent Sessions header explaining why Claude Desktop's own session list is longer
- * than this table. Claude Desktop keeps a lightweight record of every Cowork session, but the
- * transcript this extension measures lives elsewhere and does not always exist on this machine:
- * Claude Code prunes old transcripts on its own retention schedule, and cloud-run sessions never
- * write one here. Those sessions can therefore never be counted — saying so with a real number is
- * better than letting the difference read as missing data.
- *
- * Only rendered when there is actually a shortfall to explain.
- */
-function buildClaudeDesktopCoverageHtml(coverage: UsageAnalysisStats['claudeDesktopCoverage']): string {
-	if (!coverage || coverage.missingTranscript <= 0) { return ''; }
-	const { knownSessions, missingTranscript } = coverage;
-	const tooltip = localize('usage.claudeDesktopCoverage.tooltip');
-	// Three sentence shapes, because both counts drive agreement and they move independently:
-	// one-of-one keeps the noun singular, one-of-many keeps the verb singular ("has … it"),
-	// and anything above one is fully plural ("have … they"). missingTranscript > 1 implies
-	// knownSessions > 1, so there is no fourth combination to cover.
-	let summaryKey = 'usage.claudeDesktopCoverage.summary.plural';
-	if (missingTranscript === 1) {
-		summaryKey = knownSessions === 1
-			? 'usage.claudeDesktopCoverage.summary.oneOfOne'
-			: 'usage.claudeDesktopCoverage.summary.singular';
-	}
-	// Bold only the missing count. The number is substituted after escaping via a sentinel the
-	// translated text can never contain, so the emphasis never depends on the two counts differing
-	// and never re-escapes the surrounding prose.
-	const boldSlot = '\u0001';
-	const summary = escapeHtml(localizeFormat(summaryKey, boldSlot, formatNumber(knownSessions)))
-		.replace(boldSlot, `<strong>${escapeHtml(formatNumber(missingTranscript))}</strong>`);
-	return `<div style="margin-top:8px; font-size:12px; color:var(--text-secondary);">
-		<span title="${escapeHtml(tooltip)}" style="cursor:help;">🖥️ ${summary}<span style="font-size:0.75em; opacity:0.6;"> ℹ️</span></span>
-	</div>`;
-}
-
 function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 	// Guard against silent host updates that omit todaySessions (e.g. a stale payload
 	// shape): keep showing the last known sessions instead of clearing the table.
@@ -4724,7 +4668,6 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 	const bodyHtml = cachedForLookback
 		? renderTodaySessionsTable(cachedForLookback)
 		: `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}…</div>`;
-	const subAgentBanner = cachedForLookback ? buildSubAgentSummaryHtml(cachedForLookback) : '';
 	return `
 		<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
 			<div class="section">
@@ -4734,8 +4677,6 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 					${buildSessionColumnsMenuHtml()}
 				</div>
 				<div class="section-subtitle">Individual session breakdown for the selected period — sorted by number of interactions (most active first).</div>
-				${subAgentBanner}
-				${buildClaudeDesktopCoverageHtml(stats.claudeDesktopCoverage)}
 				<div id="sessions-panel-body" style="margin-top: 12px;">
 					${bodyHtml}
 				</div>

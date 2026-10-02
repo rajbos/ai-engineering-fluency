@@ -169,6 +169,32 @@ test('l10n: dialog button and insights status bar keys resolve in zh-cn', () => 
 	}
 });
 
+test('l10n: worktree force-delete dialog resolves in both languages', () => {
+	assert.equal(t('worktree.forceDelete'), 'Force Delete');
+	assert.equal(
+		t('worktree.submoduleForcePrompt', 'C:\\repo\\worktree'),
+		'"C:\\repo\\worktree" contains initialized submodules that Git cannot remove without force.',
+	);
+	assert.equal(
+		t('worktree.submoduleForceDetail'),
+		'Force-deleting will permanently remove this working copy. Uncommitted or unpushed changes in the worktree or its submodules can be lost.',
+	);
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('worktree.forceDelete'), '强制删除');
+		assert.equal(
+			t('worktree.submoduleForcePrompt', 'C:\\repo\\worktree'),
+			'“C:\\repo\\worktree”包含已初始化的子模块，Git 无法在不强制执行的情况下删除它。',
+		);
+		assert.equal(
+			t('worktree.submoduleForceDetail'),
+			'强制删除将永久移除此工作副本。工作树或其子模块中未提交或未推送的更改可能会丢失。',
+		);
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: clipboard-failure keys resolve in English', () => {
 	// Added with the `copyFailed` handler: before it existed the webview posted
 	// this and nothing on the extension side listened, so a failed copy was
@@ -430,6 +456,9 @@ test('l10n: log viewer summary card labels resolve in English', () => {
 		'logviewer.summary.inputTokens': 'Input Tokens',
 		'logviewer.summary.outputTokens': 'Output Tokens',
 		'logviewer.summary.cachedInput': 'Cached Input',
+		'logviewer.summary.estimatedCost': 'Estimated Cost',
+		'logviewer.summary.estimatedCostSub': 'Summed across all turns',
+		'logviewer.summary.estimatedCostTooltip': 'Estimated USD cost of this session, summed from the per-turn costs. Based on model pricing; may differ from your actual bill.',
 		'logviewer.summary.thinkingTokens': 'Thinking Tokens',
 		'logviewer.summary.thinkingEffort': 'Thinking Effort',
 		'logviewer.summary.subAgents': 'Sub-Agents',
@@ -533,6 +562,9 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 			'logviewer.summary.inputTokens': '输入令牌',
 			'logviewer.summary.outputTokens': '输出令牌',
 			'logviewer.summary.cachedInput': '缓存输入',
+			'logviewer.summary.estimatedCost': '预估费用',
+			'logviewer.summary.estimatedCostSub': '所有轮次合计',
+			'logviewer.summary.estimatedCostTooltip': '本会话的预估美元费用，由各轮次费用汇总而成。基于模型定价，可能与实际账单有所不同。',
 			'logviewer.summary.thinkingTokens': '思考令牌',
 			'logviewer.summary.thinkingEffort': '思考强度',
 			'logviewer.summary.subAgents': '子代理',
@@ -731,6 +763,8 @@ test('l10n: Efficiency Models tab empty states resolve in English', () => {
 		'efficiency.models.noModelsInWindow': 'No model was used in {0} ({1}). Pick a wider window.',
 		'efficiency.models.noSharedModel': 'No model was used in both {0} ({1}) and {2} ({3}), so there is no model to follow across those periods. Pick different periods, or switch to \u201cCompare two models\u201d.',
 		'efficiency.models.noSecondModel': '\u2014 no second model in this window \u2014',
+		'efficiency.models.search.placeholder': 'Search models\u2026',
+		'efficiency.models.search.empty': 'No matching models',
 	};
 	for (const [key, english] of Object.entries(expected)) {
 		assert.equal(t(key), english, `English value for ${key}`);
@@ -744,6 +778,8 @@ test('l10n: Efficiency Models tab empty states resolve in zh-cn', () => {
 			'efficiency.models.noPairInWindow': '{0}\uff08{1}\uff09\u5185\u53ea\u4f7f\u7528\u4e86\u4e00\u4e2a\u6a21\u578b\uff0c\u65e0\u6cd5\u7ec4\u6210\u5bf9\u6bd4\u3002\u8bf7\u9009\u62e9\u66f4\u5927\u7684\u65f6\u95f4\u7a97\u53e3\uff0c\u6216\u5207\u6362\u5230\u201c\u5355\u4e2a\u6a21\u578b\uff0c\u4e24\u4e2a\u65f6\u6bb5\u201d\u3002',
 			'efficiency.models.noModelsInWindow': '{0}\uff08{1}\uff09\u5185\u672a\u4f7f\u7528\u4efb\u4f55\u6a21\u578b\u3002\u8bf7\u9009\u62e9\u66f4\u5927\u7684\u65f6\u95f4\u7a97\u53e3\u3002',
 			'efficiency.models.noSecondModel': '\u2014 \u6b64\u65f6\u95f4\u7a97\u53e3\u5185\u6ca1\u6709\u7b2c\u4e8c\u4e2a\u6a21\u578b \u2014',
+			'efficiency.models.search.placeholder': '\u641c\u7d22\u6a21\u578b\u2026',
+			'efficiency.models.search.empty': '\u6ca1\u6709\u5339\u914d\u7684\u6a21\u578b',
 		};
 		for (const [key, chinese] of Object.entries(expected)) {
 			assert.equal(t(key), chinese, `zh-cn value for ${key}`);

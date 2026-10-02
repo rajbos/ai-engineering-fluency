@@ -858,24 +858,36 @@ background: var(--bg-tertiary);
 /* Recent Sessions pill filter bar (Editor / Vendor / Model / HydraFusion) */
 .session-filter-bar {
 	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 8px 12px;
+	flex-direction: column;
+	gap: 6px;
 	margin-bottom: 10px;
 }
 
+/* One row per dimension: a fixed-width label column keeps every row's pills starting on the same vertical line. */
 .session-filter-group {
 	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 6px;
+	align-items: flex-start;
+	gap: 8px;
 }
 
 .session-filter-group-label {
+	flex: 0 0 56px;
+	padding-top: 4px;
 	font-size: 11px;
 	font-weight: 600;
 	color: var(--text-secondary);
-	margin-right: 2px;
+}
+
+.session-filter-pills {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.session-filter-bar > .session-filter-pill-clear {
+	align-self: flex-start;
 }
 
 .session-filter-pill {
