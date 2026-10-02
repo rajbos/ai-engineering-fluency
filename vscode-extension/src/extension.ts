@@ -1286,6 +1286,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Full-year daily stats (up to 365 days) for the chart Week/Month period views. */
 	private lastFullDailyStats: DailyTokenStats[] | undefined;
 	/** Last period selected by the user in the chart view; restored on next open. */
+	/** globalState key for the Chart view's collapsed "By Editor" section; survives closing and reopening the panel. */
+	private static readonly CHART_EDITOR_LIST_COLLAPSED_KEY = 'chart.editorListCollapsed';
 	private lastChartPeriod: 'day' | 'week' | 'month' = 'day';
 	/** Last view selected by the user in the chart view; restored on next open. */
 	private lastChartView: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task' | 'taskCategory' = 'total';
@@ -9712,6 +9714,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (message.command === 'setPeriodPreference') { this.setChartPeriodPreference(message.period); }
 			if (message.command === 'setTimeWindowPreference') { this.setChartTimeWindowPreference(message.timeWindow); }
 			if (message.command === 'setViewPreference') { this.setChartViewPreference(message); }
+			if (message.command === 'setEditorListCollapsed' && typeof message.collapsed === 'boolean') {
+				await this.context.globalState.update(CopilotTokenTracker.CHART_EDITOR_LIST_COLLAPSED_KEY, message.collapsed);
+			}
 		});
 
 		// Render immediately; Week/Month buttons are shown as loading if full-year data isn't ready
@@ -14947,6 +14952,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       initialView: this.normalizeLegacyChartPreference(this.lastChartView, ['total', 'model', 'editor', 'repository', 'cost', 'task']) ?? 'total', 
       initialMetric: this.lastChartMetric, 
       initialSplit: this.normalizeLegacyChartPreference(this.lastChartSplit, ['total', 'model', 'editor', 'repository', 'language', 'provider', 'task']) ?? 'total', 
+      initialEditorListCollapsed: this.context.globalState.get<boolean>(CopilotTokenTracker.CHART_EDITOR_LIST_COLLAPSED_KEY, false),
       monthlyBudget: this.getEffectiveMonthlyBudget(),
       ...this.getWebviewLocaleFields()
     };
