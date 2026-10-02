@@ -82,6 +82,7 @@ Detailed documentation for individual features.
 | [features/THEMING_CHANGES.md](features/THEMING_CHANGES.md) | Light theme support implementation details |
 | [features/TOOL-CURATION.md](features/TOOL-CURATION.md) | Tool Curation — surface unused MCP servers and stale skills |
 | [features/MODEL-EFFICIENCY-COMPARISON.md](features/MODEL-EFFICIENCY-COMPARISON.md) | Models tab — compare two models, or one model across two periods |
+| [features/EFFICIENCY-TRENDS.md](features/EFFICIENCY-TRENDS.md) | Efficiency trends — time presets, drill-down, and the per-tab filter policy |
 | [features/CORRECTIONS.md](features/CORRECTIONS.md) | Corrections tab — detect moments where the agent or the user had to correct the conversation |
 | [features/REPEATED-TASKS.md](features/REPEATED-TASKS.md) | Skill Suggestions — find tasks you keep prompting for across sessions and turn them into skills |
 | [features/COPILOT-MEMORY-FILES-INSIGHT.md](features/COPILOT-MEMORY-FILES-INSIGHT.md) | Copilot memory-files hygiene: shared analysis module, insight card, CLI `memory-files` command, and a Tools-tab UI section |

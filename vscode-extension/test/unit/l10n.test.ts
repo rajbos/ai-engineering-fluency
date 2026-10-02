@@ -1480,3 +1480,101 @@ test('l10n: Diagnostics API-driven budget hint strings resolve in English and zh
 		mock.setLanguage('en');
 	}
 });
+
+// Efficiency scope toolbar (issue #1965) — the time presets, resolution,
+// drill-down and editor/vendor filters. Guards against raw keys surfacing in
+// the toolbar, and against the zh-CN bundle drifting away from the English one.
+test('l10n: efficiency scope toolbar labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'efficiency.scope.timeRangeGroup': 'Time range',
+		'efficiency.range.last30d': '30 days',
+		'efficiency.range.last12w': '12 weeks',
+		'efficiency.range.last6m': '6 months',
+		'efficiency.range.last1y': '1 year',
+		'efficiency.resolution.label': 'Resolution',
+		'efficiency.resolution.auto': 'Auto ({0})',
+		'efficiency.resolution.daily': 'Daily',
+		'efficiency.resolution.weekly': 'Weekly',
+		'efficiency.resolution.monthly': 'Monthly',
+		'efficiency.scope.editorLabel': 'Editor',
+		'efficiency.scope.allEditors': 'All editors',
+		'efficiency.scope.vendorLabel': 'Model vendor',
+		'efficiency.scope.allVendors': 'All vendors',
+		'efficiency.scope.drillLabel': 'Drill',
+		'efficiency.scope.drillPlaceholder': 'Drill into…',
+		'efficiency.scope.back': '↩ Back',
+		'efficiency.scope.backAria': 'Back to the previous range',
+		'efficiency.scope.drillHintWeekly': 'Click a week on a chart to drill into its days',
+		'efficiency.scope.drillHintMonthly': 'Click a month on a chart to drill into its days',
+		'efficiency.scope.announce': 'Showing {0}.',
+		'efficiency.scope.behaviorGap': '⚠️ Session-derived metrics (active minutes, retry rate, apply rate, skills) are only collected for the last {0} weeks, so earlier buckets in this range show gaps rather than zeros.',
+		'efficiency.scope.editorScoped': 'Scoped to {0}. Sessions whose editor could not be determined are excluded from this view.',
+		'efficiency.scope.noDataFor': 'No data for {0}',
+		'efficiency.trends.bucketIntro': '{0} ratios over {1} ({2}).',
+		'efficiency.trends.bucketsDaily': '{0} days',
+		'efficiency.trends.bucketsWeekly': '{0} weeks',
+		'efficiency.trends.bucketsMonthly': '{0} months',
+		'efficiency.trends.badges': 'Badges compare the recent half of the window against the earlier half; green means the ratio moved in the efficient direction.',
+		'efficiency.trends.partialDaily': 'The current day is partial.',
+		'efficiency.trends.partialWeekly': 'The current week is partial.',
+		'efficiency.trends.partialMonthly': 'The current month is partial.',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: efficiency scope toolbar labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'efficiency.range.last30d': '30 天',
+			'efficiency.range.last12w': '12 周',
+			'efficiency.range.last6m': '6 个月',
+			'efficiency.range.last1y': '1 年',
+			'efficiency.resolution.label': '粒度',
+			'efficiency.resolution.auto': '自动（{0}）',
+			'efficiency.resolution.daily': '按天',
+			'efficiency.resolution.weekly': '按周',
+			'efficiency.resolution.monthly': '按月',
+			'efficiency.scope.editorLabel': '编辑器',
+			'efficiency.scope.allEditors': '所有编辑器',
+			'efficiency.scope.vendorLabel': '模型厂商',
+			'efficiency.scope.allVendors': '所有厂商',
+			'efficiency.scope.drillLabel': '下钻',
+			'efficiency.scope.drillPlaceholder': '下钻到…',
+			'efficiency.scope.back': '↩ 返回',
+			'efficiency.scope.backAria': '返回上一个范围',
+			'efficiency.scope.announce': '当前显示：{0}。',
+			'efficiency.scope.timeRangeGroup': '时间范围',
+			'efficiency.scope.drillHintWeekly': '点击图表中的某一周可下钻查看其各天数据',
+			'efficiency.scope.drillHintMonthly': '点击图表中的某一月可下钻查看其各天数据',
+			'efficiency.scope.behaviorGap': '⚠️ 会话派生指标（活跃分钟数、重试率、应用率、技能）仅收集最近 {0} 周的数据，因此该范围内较早的分桶显示为缺口而非零值。',
+			'efficiency.scope.editorScoped': '已限定为 {0}。无法确定所属编辑器的会话不计入此视图。',
+			'efficiency.scope.noDataFor': '{0}（无数据）',
+			'efficiency.trends.bucketIntro': '{1}的{0}比率（{2}）。',
+			'efficiency.trends.bucketsDaily': '{0} 天',
+			'efficiency.trends.bucketsWeekly': '{0} 周',
+			'efficiency.trends.bucketsMonthly': '{0} 个月',
+			'efficiency.trends.badges': '徽章将窗口的近半段与前半段进行比较；绿色表示比率朝更高效的方向变化。',
+			'efficiency.trends.partialDaily': '当前这一天尚未结束。',
+			'efficiency.trends.partialWeekly': '当前这一周尚未结束。',
+			'efficiency.trends.partialMonthly': '当前这一月尚未结束。',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: efficiency placeholder templates keep their {0} slot for localizeFormat', () => {
+	for (const key of ['efficiency.resolution.auto', 'efficiency.scope.announce', 'efficiency.scope.behaviorGap', 'efficiency.scope.editorScoped', 'efficiency.scope.noDataFor', 'efficiency.trends.bucketsDaily', 'efficiency.trends.bucketsWeekly', 'efficiency.trends.bucketsMonthly']) {
+		assert.ok(t(key).includes('{0}'), `${key} must carry a {0} placeholder`);
+	}
+	// The trends intro fills three slots — resolution, range and bucket count.
+	for (const slot of ['{0}', '{1}', '{2}']) {
+		assert.ok(t('efficiency.trends.bucketIntro').includes(slot), `efficiency.trends.bucketIntro must carry a ${slot} placeholder`);
+	}
+});

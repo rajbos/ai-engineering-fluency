@@ -1066,7 +1066,7 @@ test('wiring: the Efficiency build threads its origin generation into both later
 		'the Efficiency usage walk must stamp with the build\'s origin generation',
 	);
 	assert.ok(
-		EXTENSION_SRC.includes('const sessionInputs = await this.collectEfficiencySessionInputs(12, !forceRecalc, originGeneration);'),
+		EXTENSION_SRC.includes('const sessionInputs = await this.collectEfficiencySessionInputs(EFFICIENCY_BEHAVIOR_WEEKS, !forceRecalc, originGeneration);'),
 		'the Efficiency session-input walk must stamp with the build\'s origin generation',
 	);
 	assert.equal(

@@ -35,6 +35,7 @@ import type {
   PeriodStats,
   DetailedStats,
   DailyTokenStats,
+  DailyModelEfficiency,
   ChartDataPayload,
   ChartTimeWindow,
   SessionFileCache,
@@ -278,8 +279,8 @@ import {
 } from '../../src/usageAnalysis';
 import { createEmptyTaskClassificationResult } from '../../src/taskClassification';
 import {
-  accumulateDailyModelTokens as _accumulateDailyModelTokens,
-  accumulateDailyModelCounters as _accumulateDailyModelCounters,
+  accumulateDayAndEditorModelTokens as _accumulateDayAndEditorModelTokens,
+  accumulateDayAndEditorModelCounters as _accumulateDayAndEditorModelCounters,
   buildSessionEfficiencyAttribution as _buildSessionEfficiencyAttribution,
 } from '../../src/modelEfficiency';
 import { calculateEnvironmentalImpact, getEnvironmentalMethodologySourceUrl } from '../../src/environmentalImpact';
@@ -292,9 +293,15 @@ import {
   computeEfficiencyDeltas as _computeEfficiencyDeltas,
   computeSkillImpact as _computeSkillImpact,
   listComparableModels as _listComparableModels,
+  listEfficiencyEditors as _listEfficiencyEditors,
+  resolveEfficiencyRange as _resolveEfficiencyRange,
+  splitModelDayByEditor as _splitModelDayByEditor,
   computeValueSignals as _computeValueSignals,
   getTrailingWindowBoundaries as _getTrailingWindowBoundaries,
   splitTrailingWindows as _splitTrailingWindows,
+  toEfficiencyDailyVolume as _toEfficiencyDailyVolume,
+  type EfficiencyDailyVolume,
+  type EfficiencyDeps,
   type EfficiencySessionInput,
   type EfficiencyViewData,
   type ModelDailyInput,
@@ -303,6 +310,14 @@ import {
   type ValueSignals,
   type ValueSignalsInput,
 } from '../../src/efficiencyAnalysis';
+
+/**
+ * Weeks of session logs walked for the Efficiency view's behavioural inputs
+ * (duration, retries, applies, skills). Shorter than the year of daily volume
+ * aggregates because it costs a full session-file scan — longer time presets
+ * therefore show behavioural gaps rather than invented values.
+ */
+const EFFICIENCY_BEHAVIOR_WEEKS = 12;
 
 import { scanDarkFactoryReadiness } from './darkFactoryService';
 
@@ -362,7 +377,7 @@ import { countDelegationToolCalls } from '../../src/taskClassification';
 
 // --- Stats helpers ---
 import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, type SessionAggregateInput } from '../../src/statsHelpers';
-import { addTaskCategoryToDailyEntry as _addTaskCategoryToDailyEntry } from '../../src/statsHelpers';
+import { preferActualTokens, addTaskCategoryToDailyEntry as _addTaskCategoryToDailyEntry } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -702,6 +717,34 @@ export function chainBuild<T>(
 }
 
 /**
+ * Keeps the per-model efficiency counters when a refreshed day replaces an
+ * enriched one.
+ *
+ * The routine refresh path builds its days through `statsHelpers`'
+ * `addToDailyEntry`, which computes volume but not `modelEfficiency` /
+ * `editorModelEfficiency` — those come only from the fuller
+ * `calculateDailyStats()` pass. Replacing the day wholesale therefore
+ * stripped the newest days of exactly the data the Models tab and its editor
+ * filter read, emptying recent comparisons after the first background
+ * refresh. Carrying the counters forward keeps them at their last computed
+ * value instead of dropping them; the next full pass recomputes them.
+ *
+ * The carried counters are therefore as old as the last full pass: a day whose
+ * sessions changed since (a new session, a re-run with a different model, a
+ * deleted log) keeps the previous pass's per-model split until that next full
+ * pass. Volume — tokens, sessions, interactions, the per-editor split — always
+ * comes from the refreshed day and is never carried. Bounded staleness on a
+ * secondary breakdown beats the empty Models tab that dropping the field
+ * produced.
+ */
+function carryForwardEnrichedFields(previous: DailyTokenStats | undefined, refreshed: DailyTokenStats): DailyTokenStats {
+	if (!previous) { return refreshed; }
+	if (!refreshed.modelEfficiency && previous.modelEfficiency) { refreshed.modelEfficiency = previous.modelEfficiency; }
+	if (!refreshed.editorModelEfficiency && previous.editorModelEfficiency) { refreshed.editorModelEfficiency = previous.editorModelEfficiency; }
+	return refreshed;
+}
+
+/**
  * Merges `incoming` day rows into the full-year `current` array, or refuses the merge.
  *
  * The destination's own stamp is not enough. `current` comes from a generation-guarded
@@ -725,7 +768,7 @@ export function mergeDailyStatsIntoFullYear(
 	if (!current) { return undefined; }
 	if (!isComputedStatsCurrent(originGeneration, currentGeneration)) { return undefined; }
 	const fullMap = new Map(current.map(d => [d.date, d]));
-	for (const day of incoming) { fullMap.set(day.date, day); }
+	for (const day of incoming) { fullMap.set(day.date, carryForwardEnrichedFields(fullMap.get(day.date), day)); }
 	return Array.from(fullMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -5590,7 +5633,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const merged = mergeDailyStatsIntoFullYear(
 			this.currentFullDailyStats, dailyStats, originGeneration, this._cacheGeneration,
 		);
-		if (merged) { this.lastFullDailyStats = merged; }
+		if (merged) { this.setFullDailyStats(merged); }
+	}
+
+	/**
+	 * Replaces the cached full daily stats, retiring the Efficiency view's
+	 * session sample with them.
+	 *
+	 * The two are charted side by side — daily aggregates supply the volume
+	 * series, the session sample the duration/retry/apply/skill series — so a
+	 * refresh that renewed only one would hand the webview a payload whose two
+	 * halves describe different moments. Assigning through one setter keeps that
+	 * impossible rather than merely remembered.
+	 */
+	private setFullDailyStats(stats: DailyTokenStats[]): void {
+		this.lastFullDailyStats = stats;
+		this.lastEfficiencySessionInputs = undefined;
 	}
 
 	private updateStatusBarAndTooltip(detailedStats: DetailedStats): void {
@@ -6509,7 +6567,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		const result = Array.from(dailyStatsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
-		this.lastFullDailyStats = result;
+		this.setFullDailyStats(result);
 		this._statsGeneration.fullDaily = startedAtGeneration;
 		return result;
 	}
@@ -6531,7 +6589,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Session-level signals (turn counters, duration, LOC) describe the whole
 			// session and cannot be split per day, so they land on the last active day —
 			// the same convention the LOC attribution below already uses.
-			this.addModelEfficiencyToDailyEntry(dailyStatsMap.get(lastDayKey)!, sessionData);
+			this.addModelEfficiencyToDailyEntry(dailyStatsMap.get(lastDayKey)!, sessionData, editorType);
 			if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
 				this.addLocToDailyEntry(dailyStatsMap.get(lastDayKey)!, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
 			}
@@ -6546,7 +6604,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (dateKey < cutoffUtcStartKey) { return; }
 		const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dateKey);
 		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategoryShares, sessionData.taskCategory);
-		this.addModelEfficiencyToDailyEntry(dailyEntry, sessionData);
+		this.addModelEfficiencyToDailyEntry(dailyEntry, sessionData, editorType);
 		if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
 			this.addLocToDailyEntry(dailyEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
 		}
@@ -6557,10 +6615,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Efficiency view can compare models over arbitrary time windows. Session-level
 	 * duration/LOC/apply counts are split across the session's models by token share.
 	 */
-	private addModelEfficiencyToDailyEntry(entry: DailyTokenStats, sessionData: SessionFileCache): void {
+	private addModelEfficiencyToDailyEntry(entry: DailyTokenStats, sessionData: SessionFileCache, editorType: string): void {
 		if (!sessionData.usageAnalysis?.modelEfficiency && Object.keys(sessionData.modelUsage).length === 0) { return; }
-		if (!entry.modelEfficiency) { entry.modelEfficiency = {}; }
-		_accumulateDailyModelCounters(entry.modelEfficiency, _buildSessionEfficiencyAttribution(sessionData));
+		_accumulateDayAndEditorModelCounters(entry, editorType, _buildSessionEfficiencyAttribution(sessionData));
 	}
 
 	private getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dateKey: string): DailyTokenStats {
@@ -6598,6 +6655,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!entry.editorUsage[editorType]) { entry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
 		entry.editorUsage[editorType].tokens += tokens;
 		entry.editorUsage[editorType].sessions += 1;
+		entry.editorUsage[editorType].interactions = (entry.editorUsage[editorType].interactions ?? 0) + interactions;
 		if (!entry.repositoryUsage[repository]) { entry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
 		entry.repositoryUsage[repository].tokens += tokens;
 		entry.repositoryUsage[repository].sessions += 1;
@@ -6605,8 +6663,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (const model of Object.keys(modelUsage)) {
 			entry.modelUsage[model]!.sessions += 1;
 		}
-		if (!entry.modelEfficiency) { entry.modelEfficiency = {}; }
-		_accumulateDailyModelTokens(entry.modelEfficiency, modelUsage, this.modelPricing);
+		_accumulateDayAndEditorModelTokens(entry, editorType, modelUsage, this.modelPricing);
 		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 		addModelUsage(entry.editorModelUsage[editorType], modelUsage);
@@ -11693,7 +11750,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	}
 
 	/** Maps one cached session to the pure-module input shape for efficiency trends. */
-	private toEfficiencySessionInput(sessionData: SessionFileCache, mtime: number): EfficiencySessionInput {
+	private toEfficiencySessionInput(sessionData: SessionFileCache, mtime: number, editor?: string): EfficiencySessionInput {
 		const dayKey = this.computeLastActivityKey(sessionData, mtime);
 		const ua = sessionData.usageAnalysis;
 		let editTurns = 0, retries = 0;
@@ -11709,8 +11766,9 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			applies: ua?.applyUsage?.totalApplies,
 			codeBlocks: ua?.applyUsage?.totalCodeBlocks,
 			interactions: sessionData.interactions,
-			totalTokens: sessionData.actualTokens ?? sessionData.tokens,
+			totalTokens: preferActualTokens(sessionData.actualTokens, sessionData.tokens),
 			skillCalls,
+			editor,
 		};
 	}
 
@@ -11738,7 +11796,10 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			const { results } = await this.loadUsageSessionFiles(undefined, cutoff.getTime());
 			for (const r of results) {
 				if (!r || r.sessionData.interactions === 0) { continue; }
-				inputs.push(this.toEfficiencySessionInput(r.sessionData, r.mtime));
+				// Must be the same resolver `calculateDailyStats` uses for `editorUsage`,
+				// or an editor filter would match the daily aggregates and miss the
+				// session-derived behaviour for the same editor.
+				inputs.push(this.toEfficiencySessionInput(r.sessionData, r.mtime, this.getEditorTypeFromPath(r.sessionFile)));
 			}
 			this.lastEfficiencySessionInputs = inputs;
 			this._statsGeneration.sessionInputs = startedAtGeneration;
@@ -11766,18 +11827,34 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 	 * without per-model data are dropped to keep the webview payload small.
 	 */
 	private buildModelDailyPayload(dailyStats: DailyTokenStats[], now: Date): ModelDailyInput[] {
-		const cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-		const cutoffKey = toLocalDayKey(cutoff);
+		// Same snapped cutoff as the volume payload: the 1-year preset starts on
+		// the first of the month, so a flat 365-day window would leave the drift
+		// chart's earliest bucket short of up to a month of data.
+		const cutoffKey = _resolveEfficiencyRange('last1y', now).startKey;
 		const payload: ModelDailyInput[] = [];
 		for (const day of dailyStats) {
 			if (day.date < cutoffKey || !day.modelEfficiency || Object.keys(day.modelEfficiency).length === 0) { continue; }
-			payload.push({
+			const split = _splitModelDayByEditor(day);
+			payload.push(...(split.length > 0 ? split : [{
 				date: day.date,
 				modelEfficiency: day.modelEfficiency,
 				...(day.taskCategoryUsage ? { taskCategoryUsage: day.taskCategoryUsage } : {}),
-			});
+			}]));
 		}
 		return payload;
+	}
+
+	/**
+	 * Compact per-day volume aggregates for the trailing year — the payload the
+	 * Efficiency view's time presets, drill-down and editor filter recompute
+	 * from. Numbers only: no session titles, paths, prompts or repositories.
+	 */
+	private buildEfficiencyDailyVolumePayload(dailyStats: DailyTokenStats[], now: Date, deps: EfficiencyDeps): EfficiencyDailyVolume[] {
+		// Cut off at the start of the widest preset rather than a flat day count:
+		// the 1-year preset snaps back to the first of the month, so a plain
+		// 365-day window would leave its earliest month half-empty.
+		const cutoffKey = _resolveEfficiencyRange('last1y', now).startKey;
+		return _toEfficiencyDailyVolume(dailyStats.filter(d => d.date >= cutoffKey), deps);
 	}
 
 	/**
@@ -11937,7 +12014,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		// inputs were gathered in, not the newer one they happen to start in.
 		const usage = await this.calculateUsageAnalysisStats(!forceRecalc, undefined, originGeneration);
 		this.postEfficiencyStep(send, stepPct.sessions, l10n.t('loading.efficiency.sessionSignals'));
-		const sessionInputs = await this.collectEfficiencySessionInputs(12, !forceRecalc, originGeneration);
+		const sessionInputs = await this.collectEfficiencySessionInputs(EFFICIENCY_BEHAVIOR_WEEKS, !forceRecalc, originGeneration);
 		this.postEfficiencyStep(send, stepPct.trends, l10n.t('loading.efficiency.buildingTrends'));
 		return { dailyStats, usage, sessionInputs };
 	}
@@ -11955,6 +12032,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		};
 		const weekly = _buildEfficiencyTrends(dailyStats, sessionInputs, deps);
 		const modelDaily = this.buildModelDailyPayload(dailyStats, now);
+		const dailyVolume = this.buildEfficiencyDailyVolumePayload(dailyStats, now, deps);
 		const skillTrends = _buildSkillUsageTrends(sessionInputs, deps);
 		const skillImpact = _computeSkillImpact(sessionInputs);
 		const { prevDays, curDays } = _splitTrailingWindows(dailyStats, now);
@@ -12001,6 +12079,10 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			hasSkills: skillTrends.totalCalls > 0,
 			modelDaily,
 			hasModelComparison: _listComparableModels(modelDaily).filter(m => m.sampleSufficient).length >= 2,
+			dailyVolume,
+			sessionSamples: sessionInputs,
+			editors: _listEfficiencyEditors(dailyVolume),
+			behaviorWindowDays: EFFICIENCY_BEHAVIOR_WEEKS * 7,
 			cacheBreakage: usage.last30Days.cacheBreakage ?? null,
 			lastUpdated: now.toISOString(),
 			backendConfigured: this.isBackendConfigured(),
