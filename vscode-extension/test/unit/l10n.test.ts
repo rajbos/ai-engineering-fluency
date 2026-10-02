@@ -1461,3 +1461,16 @@ test('l10n: per-account budget strings resolve in English and zh-cn', () => {
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: Diagnostics API-driven budget hint strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('diagnostics.apiBudgetHint.label'), "ℹ️ API-driven budget:");
+	assert.equal(t('diagnostics.apiBudgetHint.body'), "Your premium_interactions quota entitlement is {0}/month. If the budget above is 0 or empty, this API value will be used as your effective budget.");
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('diagnostics.apiBudgetHint.label'), "ℹ️ API 驱动的预算：");
+		assert.equal(t('diagnostics.apiBudgetHint.body'), "您的 premium_interactions 配额权益为 {0}/月。如果上方预算为 0 或为空，将使用此 API 值作为有效预算。");
+	} finally {
+		mock.setLanguage('en');
+	}
+});

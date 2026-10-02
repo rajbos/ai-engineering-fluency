@@ -4294,9 +4294,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/** Forgets the plan and quota snapshot of the preferred account (sign-out, or the account was removed). */
-	private clearPreferredAccountBudgetState(): void {
-		this._preferredPlanGeneration++;
-		this._preferredPlanAccountId = undefined;
+	private clearPreferredAccountBudgetState(invalidateInFlight = true): void {
+		if (invalidateInFlight) {
+			this._preferredPlanGeneration++;
+			this._preferredPlanAccountId = undefined;
+		}
 		this._copilotPlanResolved = undefined;
 		this._copilotQuotaEntitlements = {};
 	}
@@ -4413,6 +4415,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private logCopilotPlanDetails(planId: string | undefined, knownPlan: { name: string; monthlyPremiumRequests: number | null; monthlyPricePerUser: number; monthlyAiCreditsUsd: number } | undefined, planInfo: any): void {
+		// A successful response is authoritative: start from empty so a quota or plan it no longer reports
+		// (plan change, quota removed) is not carried over from the previous lookup of the same account.
+		this.clearPreferredAccountBudgetState(false);
 		this.logKnownPlanEntry(planId, knownPlan);
 		if (this._copilotPlanResolved) {
 			this._copilotPlanResolved.isMCPEnabled = typeof planInfo?.is_mcp_enabled === 'boolean' ? planInfo.is_mcp_enabled : undefined;

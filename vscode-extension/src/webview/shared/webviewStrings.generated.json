@@ -96,6 +96,8 @@
   "accountBudgets.unavailable": "Budget unavailable",
   "accountBudgets.noSession": "Sign in with this account from the Accounts menu to see its budget",
   "accountBudgets.lookupFailed": "Copilot plan lookup failed ({0})",
+  "diagnostics.apiBudgetHint.label": "ℹ️ API-driven budget:",
+  "diagnostics.apiBudgetHint.body": "Your premium_interactions quota entitlement is {0}/month. If the budget above is 0 or empty, this API value will be used as your effective budget.",
   "usage.sessions.contextFill.usedNearLimit": "{0} of {1} context tokens used — at or past {2}% of the window",
   "usage.sessions.contextFill.noData": "No context-window fill recorded for this session (only GitHub Copilot CLI sessions report one)",
   "usage.repoPrs.ccrCheckButton": "Check actual CCR activity",

@@ -96,6 +96,8 @@
   "accountBudgets.unavailable",
   "accountBudgets.noSession",
   "accountBudgets.lookupFailed",
+  "diagnostics.apiBudgetHint.label",
+  "diagnostics.apiBudgetHint.body",
   "usage.sessions.contextFill.usedNearLimit",
   "usage.sessions.contextFill.noData",
   "usage.repoPrs.ccrCheckButton",

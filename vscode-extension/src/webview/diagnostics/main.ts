@@ -2780,9 +2780,12 @@ function renderAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): st
 
 /** The "API-driven budget" hint under the Monthly Budget input; empty without a premium quota. */
 function renderApiBudgetHintHtml(quota: QuotaEntitlements | undefined): string {
-  return quota && quota.premium_interactions
-    ? `<p class="hint" style="color: #90ee90;"><strong>ℹ️ API-driven budget:</strong> Your premium_interactions quota entitlement is <strong>${quota.premium_interactions.toFixed(2)}</strong>/month. If the budget above is 0 or empty, this API value will be used as your effective budget.</p>`
-    : "";
+  if (!quota || !quota.premium_interactions) { return ""; }
+  // The amount is bold, so it is substituted after escaping via a sentinel the translation cannot contain.
+  const sentinel = "\u0000";
+  const body = escapeHtml(localizeFormat("diagnostics.apiBudgetHint.body", sentinel))
+    .replace(sentinel, `<strong>$${quota.premium_interactions.toFixed(2)}</strong>`);
+  return `<p class="hint" style="color: #90ee90;"><strong>${escapeHtml(localize("diagnostics.apiBudgetHint.label"))}</strong> ${body}</p>`;
 }
 
 function renderQuotaCardHtml(data: Pick<DiagnosticsData, 'quotaEntitlements' | 'accountBudgets'>): string {
