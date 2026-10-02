@@ -1285,9 +1285,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private lastDailyStats: DailyTokenStats[] | undefined;
 	/** Full-year daily stats (up to 365 days) for the chart Week/Month period views. */
 	private lastFullDailyStats: DailyTokenStats[] | undefined;
-	/** Last period selected by the user in the chart view; restored on next open. */
 	/** globalState key for the Chart view's collapsed "By Editor" section; survives closing and reopening the panel. */
 	private static readonly CHART_EDITOR_LIST_COLLAPSED_KEY = 'chart.editorListCollapsed';
+	/** Last period selected by the user in the chart view; restored on next open. */
 	private lastChartPeriod: 'day' | 'week' | 'month' = 'day';
 	/** Last view selected by the user in the chart view; restored on next open. */
 	private lastChartView: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task' | 'taskCategory' = 'total';
