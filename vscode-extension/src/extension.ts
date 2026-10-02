@@ -4262,6 +4262,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (isStale()) { return; }
 		}
 
+		// Publish the refreshed preferred-account quota now: the account enumeration below is best-effort and
+		// can fail, which must not leave open panels showing the quota from before this refresh.
+		this.pushAccountBudgetsToPanels();
+
 		await this.refreshAccountBudgets();
 		if (isStale()) { return; }
 
