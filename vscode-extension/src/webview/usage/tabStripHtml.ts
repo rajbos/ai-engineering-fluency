@@ -30,21 +30,31 @@ function tabBadgeHtml(count: number, rgba: string): string {
 	return ` <span style="background:${rgba};border-radius:10px;padding:1px 6px;font-size:11px;">${count}</span>`;
 }
 
-/** The leaf tab buttons, keyed by tab id, so the strip builder can lay them out by group. */
+/**
+ * The leaf tab buttons, keyed by tab id, so the strip builder can lay them out by group.
+ *
+ * Labels resolve through `localize()` on every render, like the group labels above them. They
+ * were English literals while they lived inline in main.ts, which left the two halves of the
+ * same strip disagreeing about whether a tab strip is translatable — the group row followed the
+ * display language and the leaf row under it did not.
+ *
+ * The one exception is AI Readiness, whose whole button arrives from `DarkFactoryTab`; that tab
+ * owns its own markup, so its label is localized there or not at all.
+ */
 export function usageLeafTabButtons(input: UsageTabStripInput): Record<string, string> {
-	const btn = (tab: string, icon: string, label: string, extra = ''): string =>
-		`<button class="tab-button ${input.activeTab === tab ? 'active' : ''}" data-tab="${tab}"><span class="codicon codicon-${icon}"></span> ${label}${extra}</button>`;
+	const btn = (tab: string, icon: string, extra = ''): string =>
+		`<button class="tab-button ${input.activeTab === tab ? 'active' : ''}" data-tab="${tab}"><span class="codicon codicon-${icon}"></span> ${escapeHtml(localize(`usage.tab.${tab}`))}${extra}</button>`;
 	return {
-		activity: btn('activity', 'pulse', 'My Activity'),
-		sessions: btn('sessions', 'history', 'Recent Sessions'),
-		tools: btn('tools', 'tools', 'Tools &amp; Integrations'),
-		health: btn('health', 'server-environment', 'Workspace Health'),
-		repos: btn('repos', 'git-pull-request', 'Repository PRs'),
-		agent: btn('agent', 'cloud', 'Cloud Agent'),
+		activity: btn('activity', 'pulse'),
+		sessions: btn('sessions', 'history'),
+		tools: btn('tools', 'tools'),
+		health: btn('health', 'server-environment'),
+		repos: btn('repos', 'git-pull-request'),
+		agent: btn('agent', 'cloud'),
 		readiness: input.readinessButtonHtml,
-		worktrees: btn('worktrees', 'git-branch', 'Worktrees'),
-		insights: btn('insights', 'lightbulb', 'Insights', tabBadgeHtml(input.newInsightCount, 'rgba(96,165,250,0.4)')),
-		corrections: btn('corrections', 'debug-restart', 'Corrections', tabBadgeHtml(input.correctionSessionCount, 'rgba(251,191,36,0.4)')),
+		worktrees: btn('worktrees', 'git-branch'),
+		insights: btn('insights', 'lightbulb', tabBadgeHtml(input.newInsightCount, 'rgba(96,165,250,0.4)')),
+		corrections: btn('corrections', 'debug-restart', tabBadgeHtml(input.correctionSessionCount, 'rgba(251,191,36,0.4)')),
 	};
 }
 

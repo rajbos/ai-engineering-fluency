@@ -2,6 +2,8 @@ import { describe, test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { buildTabStripHtml, usageLeafTabButtons, type UsageTabStripInput } from '../../src/webview/usage/tabStripHtml';
 import { USAGE_TAB_GROUPS, allUsageTabs, groupOfUsageTab } from '../../src/webview/usage/tabGroups';
+import { localize } from '../../src/webview/shared/localization';
+import { escapeHtml } from '../../src/webview/shared/formatUtils';
 
 // ── Coverage for the Usage Analysis tab strip's markup ───────────────────────
 //
@@ -23,6 +25,22 @@ describe('usageLeafTabButtons', () => {
 		for (const tab of allUsageTabs()) {
 			assert.ok(buttons[tab], `no button for "${tab}"`);
 			assert.match(buttons[tab], new RegExp(`data-tab="${tab}"`));
+		}
+	});
+
+	test('labels every tab from the localization dictionary, not a literal', () => {
+		const buttons = usageLeafTabButtons(input('activity'));
+		for (const tab of allUsageTabs()) {
+			// AI Readiness arrives as a prebuilt button from DarkFactoryTab, so it is not this
+			// module's string to resolve.
+			if (tab === 'readiness') { continue; }
+			assert.equal(buttons[tab].includes(`usage.tab.${tab}`), false,
+				`"${tab}" rendered its localization key, so the key is missing from the dictionary`);
+			// Escaped, not raw: "Tools & Integrations" has to reach the DOM as `&amp;`, which is
+			// the reason the label goes through escapeHtml() rather than straight into the
+			// template the way the English literal used to.
+			assert.ok(buttons[tab].includes(`</span> ${escapeHtml(localize(`usage.tab.${tab}`))}`),
+				`"${tab}" is not labelled from usage.tab.${tab}`);
 		}
 	});
 
