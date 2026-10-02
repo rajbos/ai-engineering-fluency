@@ -40,7 +40,8 @@ import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { buildTabStripHtml, type UsageTabStripInput } from './tabStripHtml';
 import { renderContextRefTable } from './contextRefTableHtml';
-import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
+import { shouldListAccountBudgets } from '../../githubAccountBudgets';
+import { applyBillingFields, sanitizeAccountBudgets, sanitizeCopilotApiBalance, type AccountBudgetView, type CopilotApiBalance } from './billingStatsSanitizer';
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { type ContextRefRow } from './contextRefRows';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
@@ -243,6 +244,8 @@ type UsageAnalysisStats = {
 	sessionColumnSettings?: { enabledColumns?: string[] };
 	/** Copilot API quota balance snapshot (available when the extension has fetched quota data). */
 	copilotApiBalance?: CopilotApiBalance | null;
+	/** Copilot budget for every GitHub account signed in to VS Code. */
+	accountBudgets?: AccountBudgetView[];
 	/** Current-month billing group costs in USD from the extension's local session tracking. */
 	monthBillingGroupCosts?: Record<string, number> | null;
 	/**
@@ -4924,10 +4927,62 @@ function _billingCoverageAnalysisHtml(api: CopilotApiBalance | null | undefined,
 		</div>`;
 }
 
+/** Localized explanation for an account that has no usable budget figure. */
+function accountBudgetNote(b: AccountBudgetView): string {
+	if (b.status === 'no-quota') { return localize('accountBudgets.noQuota'); }
+	if (b.reason === 'no-session') { return localize('accountBudgets.noSession'); }
+	if (b.reason === 'lookup-failed') { return localizeFormat('accountBudgets.lookupFailed', b.detail ?? ''); }
+	return b.detail ?? localize('accountBudgets.unavailable');
+}
+
+/** The last stats handed to renderLayout(), so a live account update can re-render when no mount point exists. */
+let lastRenderedStats: UsageAnalysisStats | null = null;
+
+/** One account's row in the per-account budget list. */
+function _accountBudgetRowHtml(b: AccountBudgetView): string {
+	const plan = b.planName ? ` <span style="color:var(--text-muted);">(${escapeHtml(b.planName)})</span>` : '';
+	const name = `<span style="font-weight:600;">${escapeHtml(b.label)}</span>${plan}`;
+	if (b.status !== 'ok' || !b.balance) {
+		const note = escapeHtml(accountBudgetNote(b));
+		return `<div style="display:flex; justify-content:space-between; gap:12px; font-size:12px;"><span>${name}</span><span style="color:var(--text-muted);">${note}</span></div>`;
+	}
+	const usedPct = Math.min(100, Math.max(0, 100 - b.balance.pctAvailable));
+	const color = usedPct > 90 ? 'var(--error-color, #f14c4c)' : usedPct > 75 ? 'var(--warning-color, #cca700)' : 'var(--accent-color, #4d9cf8)';
+	const reset = b.resetDate ? ` · ${escapeHtml(localizeFormat('accountBudgets.resets', b.resetDate.slice(0, 10)))}` : '';
+	return `
+		<div style="font-size:12px;">
+			<div style="display:flex; justify-content:space-between; gap:12px; margin-bottom:4px;">
+				<span>${name}</span>
+				<span>${escapeHtml(localizeFormat('accountBudgets.usedLeft', '$' + formatFixed(b.balance.usedAiCredits / 100, 2), '$' + formatFixed(b.balance.budgetUsd, 2), formatFixed(b.balance.pctAvailable, 1)))}${reset}</span>
+			</div>
+			<div style="height:6px; border-radius:3px; background:var(--border-subtle); overflow:hidden;"><div style="height:100%; width:${formatFixed(usedPct, 2)}%; background:${color};"></div></div>
+		</div>`;
+}
+
+/** Budget per GitHub account. Omitted only for a lone account with a balance, which the API balance card already shows. */
+function buildAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined, apiBalanceShown: boolean): string {
+	const list = accounts ?? [];
+	if (!shouldListAccountBudgets(list, apiBalanceShown)) { return ''; }
+	return `
+		<div style="margin-bottom:12px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">${escapeHtml(localize('accountBudgets.title'))}</div>
+			<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:12px 14px; display:flex; flex-direction:column; gap:10px; color:var(--text-primary);">
+				${list.map(_accountBudgetRowHtml).join('')}
+			</div>
+		</div>`;
+}
+
+/** Whether the AI Billing Coverage section has anything to show for these stats. */
+function billingSectionHasContent(stats: UsageAnalysisStats): boolean {
+	const groupCosts = stats.monthBillingGroupCosts;
+	return !!stats.copilotApiBalance || shouldListAccountBudgets(stats.accountBudgets ?? [], !!stats.copilotApiBalance) || (!!groupCosts && Object.keys(groupCosts).length > 0);
+}
+
 function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
+	if (!billingSectionHasContent(stats)) { return ''; }
 	const api = stats.copilotApiBalance;
 	const groupCosts = stats.monthBillingGroupCosts;
-	if (!api && (!groupCosts || Object.keys(groupCosts).length === 0)) { return ''; }
+	const accountsHtml = buildAccountBudgetsHtml(stats.accountBudgets, !!api);
 
 	const copilotCostUsd = groupCosts?.['GitHub Copilot'] ?? 0;
 	const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s, v) => s + v, 0) : 0;
@@ -4942,6 +4997,7 @@ function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 			<div class="section-title"><span>💳</span><span>AI Billing Coverage</span></div>
 			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs, alongside estimated costs from other AI providers.</div>
 			${apiHtml}
+			<div id="account-budgets">${accountsHtml}</div>
 			${extHtml}
 			${deltaHtml}
 		</div>`;
@@ -5836,6 +5892,7 @@ function syncRenderLayoutState(stats: UsageAnalysisStats): WorkspaceCustomizatio
 }
 
 function renderLayout(stats: UsageAnalysisStats): void {
+	lastRenderedStats = stats;
 	const root = document.getElementById('root');
 	if (!root) {
 		return;
@@ -6094,6 +6151,33 @@ function handleUpdateStats(message: any): void {
 	}
 }
 
+/** Replaces the per-account budget list in place; the next full `updateStats` carries it too. */
+function handleUpdateAccountBudgets(message: { accountBudgets?: unknown; copilotApiBalance?: unknown }): void {
+	const accounts = sanitizeAccountBudgets(message.accountBudgets);
+	const container = document.getElementById('account-budgets');
+	if (!lastRenderedStats) {
+		if (container) { setHtml(container, buildAccountBudgetsHtml(accounts, true)); }
+		return;
+	}
+	const wasShown = billingSectionHasContent(lastRenderedStats);
+	lastRenderedStats.accountBudgets = accounts;
+	// The preferred account's balance travels with the list so clearing it (sign-out, account removed)
+	// reaches this view too. Absent means "unchanged"; null means "cleared".
+	let balanceChanged = false;
+	if (Object.prototype.hasOwnProperty.call(message, 'copilotApiBalance')) {
+		const balance = sanitizeCopilotApiBalance(message.copilotApiBalance);
+		balanceChanged = JSON.stringify(balance) !== JSON.stringify(lastRenderedStats.copilotApiBalance ?? null);
+		lastRenderedStats.copilotApiBalance = balance;
+	}
+	if (balanceChanged || wasShown !== billingSectionHasContent(lastRenderedStats)) {
+		// The section appeared, disappeared or changed its balance card: re-render it, not just the list.
+		renderLayout(lastRenderedStats);
+		setupSessionsTableSort();
+	} else if (container) {
+		setHtml(container, buildAccountBudgetsHtml(accounts, !!lastRenderedStats.copilotApiBalance));
+	}
+}
+
 function handleToolSuppressed(toolName: string): void {
 	if (!toolName) { return; }
 	const section = document.getElementById('unknown-mcp-tools-section');
@@ -6219,6 +6303,8 @@ function handleExtensionMessage(message: any): void {
 			break;
 		case 'updateInsights':
 			handleUpdateInsights(message.insights); break;
+		case 'updateAccountBudgets':
+			handleUpdateAccountBudgets(message); break;
 		case 'switchTab':
 			handleSwitchTab(message); break;
 		default:

@@ -13,6 +13,8 @@ import { registerMessageHandler } from "../shared/messageHandler";
 import { getModelColor } from "../../../../src/chartDataBuilder";
 import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
 import { localize, localizeFormat } from "../shared/localization";
+import type { AccountBudgetView } from "../usage/billingStatsSanitizer";
+import { shouldListAccountBudgets } from "../../githubAccountBudgets";
 import { applyWebviewLocale } from "../shared/webviewLocale";
 
 // Constants
@@ -183,6 +185,8 @@ type DiagnosticsData = {
   sessionFolders?: SessionFolder[];
   displaySettings?: DisplaySettings;
   quotaEntitlements?: QuotaEntitlements;
+  /** Copilot budget per GitHub account signed in to VS Code. */
+  accountBudgets?: AccountBudgetView[];
   toolCallStats?: { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } } | null;
   skillCallStats?: { total: number; byName: { [key: string]: number } } | null;
   /** Per-skill, per-editor invocation counts (skillName -> editorSource -> count), for the Skill Usage tab's editor filter. */
@@ -2358,6 +2362,7 @@ function handleOtelComparisonSection(message: DiagMessage): void {
 }
 
 function handleDiagnosticDataLoaded(message: DiagMessage): void {
+  if (message.accountBudgets !== undefined) { handleAccountBudgetsUpdated(message); }
   handleDiagnosticReport(message);
   handleBackendStorageSection(message);
   handleSessionFoldersSection(message);
@@ -2366,6 +2371,26 @@ function handleDiagnosticDataLoaded(message: DiagMessage): void {
   handleToolAnalysisSection(message);
   handleSkillUsageSection(message);
   handleOtelComparisonSection(message);
+}
+
+function handleAccountBudgetsUpdated(message: DiagMessage): void {
+  const card = document.getElementById("diag-quota-card");
+  if (card && Object.prototype.hasOwnProperty.call(message, "quotaEntitlements")) {
+    // Re-render the whole card: sign-out or a removed account clears the quota figures, not just the list.
+    const rendered = document.createElement("div");
+    setHtml(rendered, renderQuotaCardHtml({
+      quotaEntitlements: message.quotaEntitlements as QuotaEntitlements | undefined,
+      accountBudgets: message.accountBudgets as AccountBudgetView[] | undefined,
+    }));
+    const fresh = rendered.firstElementChild;
+    if (fresh) { card.replaceWith(fresh); }
+    // The Monthly Budget card's hint reads the same quota, so it must follow the card (sign-out / account switch).
+    const hint = document.getElementById("diag-api-budget-hint");
+    if (hint) { setHtml(hint, renderApiBudgetHintHtml(message.quotaEntitlements as QuotaEntitlements | undefined)); }
+    return;
+  }
+  const container = document.getElementById("diag-account-budgets");
+  if (container) { setHtml(container, renderAccountBudgetsHtml(message.accountBudgets as AccountBudgetView[] | undefined)); }
 }
 
 function handleGithubAuthUpdated(message: DiagMessage): void {
@@ -2637,6 +2662,7 @@ const DIAG_MESSAGE_HANDLERS: Record<string, (message: DiagMessage) => void> = {
   diagnosticDataLoaded: handleDiagnosticDataLoaded,
   backendStorageInfoLoaded: handleBackendStorageSection,
   githubAuthUpdated: handleGithubAuthUpdated,
+  accountBudgetsUpdated: handleAccountBudgetsUpdated,
   diagnosticDataError: handleDiagnosticDataError,
   sessionFilesLoadProgress: handleSessionFilesLoadProgress,
   cacheCleared: handleCacheCleared,
@@ -2725,7 +2751,45 @@ function sel(current: string, value: string): string {
   return current === value ? 'selected' : '';
 }
 
-function renderQuotaCardHtml(data: DiagnosticsData): string {
+function renderAccountBudgetRowHtml(b: AccountBudgetView): string {
+  const plan = b.planName ? ` (${escapeHtml(b.planName)})` : "";
+  let detail: string;
+  if (b.status === "ok" && b.balance) {
+    const reset = b.resetDate ? `, ${escapeHtml(localizeFormat("accountBudgets.resets", b.resetDate.slice(0, 10)))}` : "";
+    detail = `${escapeHtml(localizeFormat("accountBudgets.usedLeft", "$" + (b.balance.usedAiCredits / 100).toFixed(2), "$" + b.balance.budgetUsd.toFixed(2), b.balance.pctAvailable.toFixed(1)))}${reset}`;
+  } else if (b.status === "no-quota") {
+    detail = escapeHtml(localize("accountBudgets.noQuota"));
+  } else if (b.reason === "no-session") {
+    detail = escapeHtml(localize("accountBudgets.noSession"));
+  } else if (b.reason === "lookup-failed") {
+    detail = escapeHtml(localizeFormat("accountBudgets.lookupFailed", b.detail ?? ""));
+  } else {
+    detail = escapeHtml(b.detail ?? localize("accountBudgets.unavailable"));
+  }
+  return `<strong>${escapeHtml(b.label)}</strong>${plan}: ${detail}<br/>`;
+}
+
+/** Whether the quota card above already shows the budget a lone account would repeat. */
+let quotaFigureShown = false;
+
+function renderAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): string {
+  // Same rule as the other surfaces: skip only a lone account with a balance, which the quota figures above already show.
+  if (!accounts || !shouldListAccountBudgets(accounts, quotaFigureShown)) { return ""; }
+  return `<p><strong>${escapeHtml(localize("accountBudgets.title"))}</strong><br/>${accounts.map(renderAccountBudgetRowHtml).join("")}</p>`;
+}
+
+/** The "API-driven budget" hint under the Monthly Budget input; empty without a premium quota. */
+function renderApiBudgetHintHtml(quota: QuotaEntitlements | undefined): string {
+  if (!quota || !quota.premium_interactions) { return ""; }
+  // The amount is bold, so it is substituted after escaping via a sentinel the translation cannot contain.
+  const sentinel = "\u0000";
+  const body = escapeHtml(localizeFormat("diagnostics.apiBudgetHint.body", sentinel))
+    .replace(sentinel, `<strong>$${quota.premium_interactions.toFixed(2)}</strong>`);
+  return `<p class="hint" style="color: #90ee90;"><strong>${escapeHtml(localize("diagnostics.apiBudgetHint.label"))}</strong> ${body}</p>`;
+}
+
+function renderQuotaCardHtml(data: Pick<DiagnosticsData, 'quotaEntitlements' | 'accountBudgets'>): string {
+  quotaFigureShown = !!data.quotaEntitlements?.premium_interactions;
   const quotaContent = data.quotaEntitlements
     ? `<p>
 ${
@@ -2739,9 +2803,10 @@ ${
 }
     </p>`
     : `<p class="hint">No quota information available from the API yet. Sign out and back in to refresh.</p>`;
-  return `<div class="backend-card">
+  return `<div class="backend-card" id="diag-quota-card">
 <h4>📊 API Quota Information</h4>
 ${quotaContent}
+<div id="diag-account-budgets">${renderAccountBudgetsHtml(data.accountBudgets)}</div>
 </div>`;
 }
 
@@ -2812,11 +2877,7 @@ Set a monthly AI spend budget in USD to get visual alerts on the status bar. The
   <input id="input-monthly-budget" type="number" min="0" max="99999" step="0.01" value="${monthlyBudget}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
 </div>
 <p class="hint">Budget coloring uses the current calendar month's estimated cost. Set to 0 to disable.</p>
-${
-  data.quotaEntitlements && data.quotaEntitlements.premium_interactions
-    ? `<p class="hint" style="color: #90ee90;"><strong>ℹ️ API-driven budget:</strong> Your premium_interactions quota entitlement is <strong>$${data.quotaEntitlements.premium_interactions.toFixed(2)}</strong>/month. If the budget above is 0 or empty, this API value will be used as your effective budget.</p>`
-    : ''
-}
+<div id="diag-api-budget-hint">${renderApiBudgetHintHtml(data.quotaEntitlements)}</div>
 </div>
 ${renderQuotaCardHtml(data)}
 ${renderEditorDiscoveryCardHtml()}

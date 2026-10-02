@@ -379,6 +379,7 @@ import {
 	type RepoPrInfo,
 	type RepoPrStatsResult,
 } from './githubPrService';
+import { computeApiBalance, fetchAllAccountBudgets, formatAccountBudgetLines, type AccountBudget } from './githubAccountBudgets';
 import { collectAgentSessions } from './agentSessionsService';
 import {
 	AGENT_TASKS_CACHE_SCHEMA_VERSION,
@@ -1568,6 +1569,27 @@ class CopilotTokenTracker implements vscode.Disposable {
 		/** Raw quota_remaining from the premium_interactions snapshot (in AI Credits). */
 		premium_interactions_remaining?: number;
 	} = {};
+	/** Copilot budget per GitHub account signed in to VS Code (not only the one this extension prefers). */
+	private _accountBudgets: AccountBudget[] = [];
+	/** Monotonic id of the latest account-budget refresh, so a slow stale lookup can't overwrite a newer one. */
+	private _accountBudgetsRefreshSeq = 0;
+	/**
+	 * Bumped whenever the preferred account's plan/quota state is cleared, and at the start of every
+	 * plan load. An in-flight loadAndLogCopilotPlanInfo() holds the value it started with and discards
+	 * its results once it no longer matches (sign-out, account removed or switched, or a newer load).
+	 */
+	private _preferredPlanGeneration = 0;
+	/** Id of the GitHub account the cached plan/quota state belongs to, so an account switch can drop it. */
+	private _preferredPlanAccountId: string | undefined;
+	/**
+	 * Monotonic id shared by every path that discovers the preferred session and assigns `githubSession`
+	 * (startup restore, the auth-session listener, explicit sign-in, sign-out). Each takes a number before
+	 * its `getSession()` await and discards its result if the number is no longer current, so an older
+	 * lookup that finishes last cannot overwrite a newer one (or an explicit sign-out) with a stale account.
+	 */
+	private _sessionLookupSeq = 0;
+	/** Counts explicit sign-outs, so an interactive sign-in that was pending across one can tell and stand down. */
+	private _signOutCount = 0;
 
 	// Cached PR stats result for the repos tab (mirrors the shared snapshot on disk)
 	private _lastRepoPrStats?: RepoPrStatsResult;
@@ -2922,7 +2944,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const authProviderId = getGitHubAuthProviderId();
 				if (e.provider.id !== authProviderId) { return; }
 				if (this._githubSignedOutByUser) { return; }
+				const lookupSeq = ++this._sessionLookupSeq;
 				const session = await vscode.authentication.getSession(authProviderId, ['read:user'], { silent: true });
+				// A sign-out, or a newer session lookup, may have landed while getSession() was pending; don't undo it.
+				if (this._githubSignedOutByUser || lookupSeq !== this._sessionLookupSeq) { return; }
 				if (session) {
 					this.githubSession = session;
 					await this.context.globalState.update('github.authenticated', true);
@@ -2933,6 +2958,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 					await this.context.globalState.update('github.authenticated', false);
 					await this.context.globalState.update('github.username', undefined);
 					this.log('GitHub session removed externally — clearing auth state');
+					// The preferred account is gone: drop its quota/plan state so no surface keeps showing its
+					// budget, then re-list whichever accounts remain.
+					this.clearPreferredAccountBudgetState();
+					this.refreshBudgetDependentUi();
+					this.pushAccountBudgetsToPanels();
+					void this.refreshAccountBudgets();
 				}
 			})
 		);
@@ -3640,12 +3671,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public async authenticateWithGitHub(): Promise<void> {
 		try {
 			this.log('Attempting GitHub authentication...');
+			const signOutCountAtStart = this._signOutCount;
 			const session = await vscode.authentication.getSession(
 				getGitHubAuthProviderId(),
 				['read:user'],
 				{ createIfNone: true }
 			);
+			// A sign-out that ran while the sign-in request / account picker was pending was the later user
+			// action and must stand; restoring the session here would silently undo it.
+			if (signOutCountAtStart !== this._signOutCount) {
+				this.log('Sign-in result discarded: the user signed out while it was pending');
+				return;
+			}
 			if (session) {
+				// Supersedes any silent lookup still in flight.
+				this._sessionLookupSeq++;
 				this.githubSession = session;
 				this._githubSignedOutByUser = false;
 				// Symmetric with sign-out: the flag that suppressed the memory fetch has just
@@ -3673,6 +3713,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('Signing out from GitHub...');
 			this.githubSession = undefined;
 			this._githubSignedOutByUser = true;
+			this._signOutCount++;
+			this._sessionLookupSeq++;
+			this._accountBudgets = [];
+			this._accountBudgetsRefreshSeq++;
+			this.clearPreferredAccountBudgetState();
+			this.pushAccountBudgetsToPanels();
+			this.refreshBudgetDependentUi();
 			await this.context.globalState.update('github.authenticated', false);
 			await this.context.globalState.update('github.username', undefined);
 			await this.context.globalState.update('github.signedOutByUser', true);
@@ -3817,17 +3864,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 
-		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+		const session = await this.syncSilentGitHubSession();
 		if (!session) {
 			await this.publishRepoPrStats(this.buildEmptyRepoPrStatsResult(since, false));
 			return;
-		}
-
-		if (!this.githubSession) {
-			this.githubSession = session;
-			await this.context.globalState.update('github.authenticated', true);
-			await this.context.globalState.update('github.username', session.account.label);
-			this.log(`✅ GitHub session synced from existing VS Code auth: ${session.account.label}`);
 		}
 
 		await this.publishRepoPrStats(this._lastRepoPrStats ?? this.buildEmptyRepoPrStatsResult(since, true));
@@ -4040,15 +4080,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 
-		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+		const session = await this.syncSilentGitHubSession();
 		if (!session) {
 			await this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			return;
-		}
-		if (!this.githubSession) {
-			this.githubSession = session;
-			await this.context.globalState.update('github.authenticated', true);
-			await this.context.globalState.update('github.username', session.account.label);
 		}
 
 		await this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, true));
@@ -4179,7 +4214,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// sign-in badge). This picks up sessions from Copilot or other extensions that
 			// already authenticated the user with GitHub, without nagging users who never
 			// intend to sign in here.
+			const lookupSeq = ++this._sessionLookupSeq;
 			const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+			// Same race as the session listener: a sign-out or a newer lookup during the await must stand.
+			if (this._githubSignedOutByUser || lookupSeq !== this._sessionLookupSeq) { return; }
 			if (session) {
 				this.githubSession = session;
 				this.log(`✅ GitHub session found for ${session.account.label}`);
@@ -4187,6 +4225,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 				await this.context.globalState.update('github.username', session.account.label);
 				void this.loadAndLogCopilotPlanInfo();
 			} else {
+				// No preferred session here, but other signed-in accounts may exist — list them anyway
+				// so each shows its "sign in" prompt instead of waiting for a later auth event.
+				void this.refreshAccountBudgets();
 				const wasAuthenticated = this.context.globalState.get<boolean>('github.authenticated', false);
 				if (wasAuthenticated) {
 					// Session was present before but is gone now — clear stored state
@@ -4209,19 +4250,43 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Best-effort: each call is independent — a failure in one does not suppress the other.
 	 */
 	private async loadAndLogCopilotPlanInfo(): Promise<void> {
-		if (!this.githubSession) { return; }
+		const session = this.githubSession;
+		// Rechecked here as the last line of defence: a continuation that began before an explicit sign-out
+		// must not start a fresh load (and a fresh generation) that repopulates the cleared budget state.
+		if (!session || this._githubSignedOutByUser) { return; }
+		// logCopilotPlanResult() only overwrites fields the response contains, so a switch to an account whose
+		// lookup fails or omits a quota would otherwise keep the previous account's budget on screen.
+		if (this._preferredPlanAccountId !== undefined && this._preferredPlanAccountId !== session.account.id) {
+			this.clearPreferredAccountBudgetState();
+			this.refreshBudgetDependentUi();
+			this.pushAccountBudgetsToPanels();
+		}
+		this._preferredPlanAccountId = session.account.id;
+		const generation = ++this._preferredPlanGeneration;
+		const isStale = (): boolean => generation !== this._preferredPlanGeneration;
 
 		const [planResult, tokenResult] = await Promise.all([
-			fetchCopilotPlanInfo(this.githubSession.accessToken).catch((err): ReturnType<typeof fetchCopilotPlanInfo> => Promise.resolve({ error: String(err) })),
-			fetchCopilotTokenEndpointInfo(this.githubSession.accessToken).catch((err): ReturnType<typeof fetchCopilotTokenEndpointInfo> => Promise.resolve({ error: String(err) })),
+			fetchCopilotPlanInfo(session.accessToken).catch((err): ReturnType<typeof fetchCopilotPlanInfo> => Promise.resolve({ error: String(err) })),
+			fetchCopilotTokenEndpointInfo(session.accessToken).catch((err): ReturnType<typeof fetchCopilotTokenEndpointInfo> => Promise.resolve({ error: String(err) })),
 		]);
+		// Applying the result writes the plan/quota caches, so a lookup that outlived a sign-out, an
+		// account removal/switch, or was superseded by a newer load must not touch them.
+		if (isStale()) { this.log('Copilot plan lookup superseded (sign-out or account change) — discarding its result'); return; }
 
 		const isOrgPlan = this.logCopilotPlanResult(planResult);
 		this.logCopilotTokenResult(tokenResult);
 
 		if (isOrgPlan) {
-			await this.loadAndLogEnterpriseInfo();
+			await this.loadAndLogEnterpriseInfo(session);
+			if (isStale()) { return; }
 		}
+
+		// Publish the refreshed preferred-account quota now: the account enumeration below is best-effort and
+		// can fail, which must not leave open panels showing the quota from before this refresh.
+		this.pushAccountBudgetsToPanels();
+
+		await this.refreshAccountBudgets();
+		if (isStale()) { return; }
 
 		// The plan info above may have populated a new Copilot plan quota / budget
 		// (via captureQuotaEntitlement). The status bar tooltip flyout is only rebuilt
@@ -4230,6 +4295,94 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (this.currentDetailedStats) {
 		this.refreshBudgetDependentUi();
 	}
+	}
+
+	/**
+	 * Silent session lookup for the periodic PR / cloud-agent collectors. Adopts the session as the
+	 * extension's own when it has none yet (so a pre-existing VS Code sign-in is picked up), but never
+	 * undoes an explicit sign-out or overwrites a newer lookup: it returns undefined, adopting nothing,
+	 * when a sign-out ran or another session lookup started while `getSession()` was pending.
+	 *
+	 * It only *reads* `_sessionLookupSeq` — it must not bump it, or this hourly refresh would cancel the
+	 * auth listener's lookup right after an account switch.
+	 */
+	private async syncSilentGitHubSession(): Promise<vscode.AuthenticationSession | undefined> {
+		const seqAtStart = this._sessionLookupSeq;
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+		if (this._githubSignedOutByUser || seqAtStart !== this._sessionLookupSeq) { return undefined; }
+		if (session && !this.githubSession) {
+			this.githubSession = session;
+			this.log(`✅ GitHub session synced from existing VS Code auth: ${session.account.label}`);
+			await this.persistGitHubAuthState();
+		}
+		return session;
+	}
+
+	/**
+	 * Writes the signed-in flag and username from the in-memory session. The flag is issued first, so a
+	 * sign-out that lands afterwards queues its own signed-out write behind it; the username is re-read
+	 * after the first await so it reflects that sign-out rather than a stale snapshot.
+	 */
+	private async persistGitHubAuthState(): Promise<void> {
+		await this.context.globalState.update('github.authenticated', this.githubSession !== undefined);
+		await this.context.globalState.update('github.username', this.githubSession?.account.label);
+	}
+
+	/**
+	 * Looks up the Copilot budget for every GitHub account signed in to VS Code, then refreshes the
+	 * tooltip and any open panels. Silent (never prompts) and best-effort: a failure leaves the
+	 * previous result in place. Skipped after an explicit sign-out from this extension.
+	 *
+	 * Scope: only the provider named by getGitHubAuthProviderId() — `github` by default, or
+	 * `github-enterprise` when `github-enterprise.uri` is set. Accounts on the other provider are not
+	 * listed because the plan lookup is bound to that one configured API host.
+	 */
+	private async refreshAccountBudgets(): Promise<void> {
+		if (this._githubSignedOutByUser) {
+			this._accountBudgets = [];
+			return;
+		}
+		const seq = ++this._accountBudgetsRefreshSeq;
+		try {
+			const plans = copilotPlansData.plans as Record<string, { name: string }>;
+			const planNames = Object.fromEntries(Object.entries(plans).map(([id, p]) => [id, p.name]));
+			const budgets = await fetchAllAccountBudgets(vscode.authentication, getGitHubAuthProviderId(), fetchCopilotPlanInfo, planNames);
+			if (seq !== this._accountBudgetsRefreshSeq) { return; }
+			this._accountBudgets = budgets;
+			this.log(`GitHub accounts in VS Code: ${budgets.length === 0 ? 'none' : budgets.map((b) => `${b.label} (${b.status})`).join(', ')}`);
+			this.refreshBudgetDependentUi();
+			this.pushAccountBudgetsToPanels();
+		} catch (error) {
+			this.warn('Failed to load per-account Copilot budgets: ' + String(error));
+		}
+	}
+
+	/** Forgets the plan and quota snapshot of the preferred account (sign-out, or the account was removed). */
+	private clearPreferredAccountBudgetState(invalidateInFlight = true): void {
+		if (invalidateInFlight) {
+			this._preferredPlanGeneration++;
+			this._preferredPlanAccountId = undefined;
+		}
+		this._copilotPlanResolved = undefined;
+		this._copilotQuotaEntitlements = {};
+	}
+
+	/**
+	 * Sends the budget state to the open panels that show it: the per-account list plus the preferred
+	 * account's balance / quota, so clearing or refreshing that state reaches every surface.
+	 */
+	private pushAccountBudgetsToPanels(): void {
+		// Through the replay buffer: a lookup that finishes before the panel's listener is ready is re-sent on readiness.
+		void this.analysisMessageReplay.publish('accountBudgets', {
+			command: 'updateAccountBudgets',
+			accountBudgets: this._accountBudgets,
+			copilotApiBalance: this._buildCopilotApiBalance(),
+		});
+		void this.diagnosticsPanel?.webview.postMessage({
+			command: 'accountBudgetsUpdated',
+			accountBudgets: this._accountBudgets,
+			quotaEntitlements: this._copilotQuotaEntitlements,
+		});
 	}
 
 	/** Rebuilds the status bar tooltip flyout (and its background color) from the last
@@ -4278,22 +4431,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Uses GraphQL viewer.enterprises and the enterprise billing/budgets endpoint.
 	 * Best-effort: requires enterprise admin or billing manager for budget data.
 	 */
-	private async loadAndLogEnterpriseInfo(): Promise<void> {
-		if (!this.githubSession) { return; }
-
-		const { enterprises, error: entError } = await fetchUserEnterprises(this.githubSession.accessToken);
+	private async loadAndLogEnterpriseInfo(session: vscode.AuthenticationSession): Promise<void> {
+		const { enterprises, error: entError } = await fetchUserEnterprises(session.accessToken);
 		if (entError || !enterprises?.length) {
 			this.warn(`Enterprise discovery unavailable: ${entError ?? 'no enterprises found'}`);
 			return;
 		}
 
-		const username = this.githubSession.account.label;
+		const username = session.account.label;
 		this.log(`  Enterprise(s): ${enterprises.map((e) => `${e.name} (${e.slug})`).join(', ')}`);
 
 		// Fetch budget for each enterprise in parallel
 		const budgetResults = await Promise.all(
 			enterprises.map((e) =>
-				fetchEnterprisePremiumBudgets(e.slug, username, this.githubSession!.accessToken)
+				fetchEnterprisePremiumBudgets(e.slug, username, session.accessToken)
 					.then((r) => ({ enterprise: e, ...r }))
 					.catch((err) => ({ enterprise: e, error: String(err) }))
 			)
@@ -4328,6 +4479,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private logCopilotPlanDetails(planId: string | undefined, knownPlan: { name: string; monthlyPremiumRequests: number | null; monthlyPricePerUser: number; monthlyAiCreditsUsd: number } | undefined, planInfo: any): void {
+		// A successful response is authoritative: start from empty so a quota or plan it no longer reports
+		// (plan change, quota removed) is not carried over from the previous lookup of the same account.
+		this.clearPreferredAccountBudgetState(false);
 		this.logKnownPlanEntry(planId, knownPlan);
 		if (this._copilotPlanResolved) {
 			this._copilotPlanResolved.isMCPEnabled = typeof planInfo?.is_mcp_enabled === 'boolean' ? planInfo.is_mcp_enabled : undefined;
@@ -5601,6 +5755,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tooltip.appendMarkdown(formatTooltipStatsTable(detailedStats, (costs) => this.sumBillingGroupCosts(costs)));
 		tooltip.appendMarkdown('\n---\n');
 		this.appendProviderCostSection(tooltip, detailedStats);
+		// A lone account's row is redundant only when the gauge both renders (local cost groups and a budget)
+		// and reflects that account's quota. A user-configured monthly budget overrides the quota, so the
+		// gauge then shows the setting rather than the account.
+		const gaugeShown = Object.keys(detailedStats.month.billingGroupCosts ?? {}).length > 0
+			&& this.getEffectiveMonthlyBudget() > 0
+			&& this.getMonthlyBudgetSetting() <= 0;
+		const accountLines = formatAccountBudgetLines(this._accountBudgets, {
+			usedLeft: (used, budget, pct) => l10n.t('accountBudgets.usedLeft', used, budget, pct),
+			noQuota: l10n.t('accountBudgets.noQuota'),
+			unavailable: l10n.t('accountBudgets.unavailable'),
+			noSession: l10n.t('accountBudgets.noSession'),
+			lookupFailed: (detail) => l10n.t('accountBudgets.lookupFailed', detail),
+		}, gaugeShown);
+		if (accountLines.length > 0) {
+			tooltip.appendMarkdown(`\n---\n**${l10n.t('accountBudgets.title')}**\n\n${accountLines.join('\n')}\n`);
+		}
 		return tooltip;
 	}
 
@@ -9907,6 +10077,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			memoryFilesAnalysis: _toMemoryFilesAnalysisView(analysisStats.memoryFilesAnalysis ?? null),
 			serverMemoriesAnalysis: this.buildServerMemoriesView(),
 			copilotApiBalance: this._buildCopilotApiBalance(),
+			accountBudgets: this._accountBudgets,
 			monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
 			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
 		};
@@ -9921,13 +10092,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Returns null when no entitlement data is available.
 	 */
 	private _buildCopilotApiBalance(): { budgetUsd: number; budgetAiCredits: number; remainingAiCredits: number; usedAiCredits: number; pctAvailable: number } | null {
-		const budgetUsd = this._copilotQuotaEntitlements.premium_interactions;
-		if (!budgetUsd) { return null; }
-		const budgetAiCredits = Math.round(budgetUsd * 100);
-		const remainingAiCredits = this._copilotQuotaEntitlements.premium_interactions_remaining ?? budgetAiCredits;
-		const usedAiCredits = Math.max(0, budgetAiCredits - remainingAiCredits);
-		const pctAvailable = budgetAiCredits > 0 ? (remainingAiCredits / budgetAiCredits) * 100 : 0;
-		return { budgetUsd, budgetAiCredits, remainingAiCredits, usedAiCredits, pctAvailable };
+		return computeApiBalance(this._copilotQuotaEntitlements.premium_interactions, this._copilotQuotaEntitlements.premium_interactions_remaining);
 	}
 
 	private async loadAnalysisStatsInBackground(panel: vscode.WebviewPanel): Promise<void> {
@@ -14166,6 +14331,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         candidatePaths,
         backendStorageInfo,
         githubAuth: githubAuthStatus,
+        accountBudgets: this._accountBudgets,
+        // Carried with the list so the webview takes its full quota-card refresh path if a direct update was missed.
+        quotaEntitlements: this._copilotQuotaEntitlements,
         toolCallStats: this.currentUsageAnalysisStats?.last30Days?.toolCalls ?? null,
         skillCallStats: this.currentUsageAnalysisStats?.last30Days?.skillCalls ?? null,
         skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
@@ -14678,6 +14846,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       backendConfigured: this.isBackendConfigured(), isDebugMode, globalStateCounters,
       displaySettings: { showTokens: this.getStatusBarShowTokensSetting(), showCost: this.getStatusBarShowCostSetting(), monthlyBudget: this.getMonthlyBudgetSetting() },
       quotaEntitlements: this._copilotQuotaEntitlements,
+      accountBudgets: this._accountBudgets,
       toolCallStats: this.currentUsageAnalysisStats?.last30Days?.toolCalls ?? null,
       skillCallStats: this.currentUsageAnalysisStats?.last30Days?.skillCalls ?? null,
       skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
@@ -14858,6 +15027,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       serverMemoriesAnalysis: this.buildServerMemoriesView(),
       sessionColumnSettings,
       copilotApiBalance: this._buildCopilotApiBalance(),
+      accountBudgets: this._accountBudgets,
       monthBillingGroupCosts: this.currentDetailedStats?.month.billingGroupCosts ?? null,
       worktreeScanRoots: this.buildInitialWorktreeRoots(),
       ...this.getWebviewLocaleFields(),

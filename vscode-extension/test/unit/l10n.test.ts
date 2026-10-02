@@ -1426,3 +1426,51 @@ test('l10n: backend Sync Now failure and nothing-sent text resolve in English an
 		mock.setLanguage('en');
 	}
 });
+
+test('l10n: per-account budget strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	const english: Record<string, string> = {
+		'accountBudgets.title': 'GitHub accounts in VS Code',
+		'accountBudgets.usedLeft': '{0} / {1} used · {2}% left',
+		'accountBudgets.resets': 'resets {0}',
+		'accountBudgets.noQuota': 'No metered budget on this plan',
+		'accountBudgets.unavailable': 'Budget unavailable',
+		'accountBudgets.noSession': 'Sign in with this account from the Accounts menu to see its budget',
+		'accountBudgets.lookupFailed': 'Copilot plan lookup failed ({0})',
+	};
+	for (const [key, value] of Object.entries(english)) {
+		assert.equal(t(key), value, `English value for ${key}`);
+	}
+
+	mock.setLanguage('zh-cn');
+	try {
+		const chinese: Record<string, string> = {
+			'accountBudgets.title': 'VS Code 中的 GitHub 帐户',
+			'accountBudgets.usedLeft': '已使用 {0} / {1} · 剩余 {2}%',
+			'accountBudgets.resets': '{0} 重置',
+			'accountBudgets.noQuota': '此计划没有计量预算',
+			'accountBudgets.unavailable': '预算不可用',
+			'accountBudgets.noSession': '请从“帐户”菜单使用此帐户登录以查看其预算',
+			'accountBudgets.lookupFailed': 'Copilot 计划查询失败（{0}）',
+		};
+		assert.deepEqual(Object.keys(chinese).sort(), Object.keys(english).sort(), 'every new key has a zh-cn assertion');
+		for (const [key, value] of Object.entries(chinese)) {
+			assert.equal(t(key), value, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: Diagnostics API-driven budget hint strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('diagnostics.apiBudgetHint.label'), "ℹ️ API-driven budget:");
+	assert.equal(t('diagnostics.apiBudgetHint.body'), "Your premium_interactions quota entitlement is {0}/month. If the budget above is 0 or empty, this API value will be used as your effective budget.");
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('diagnostics.apiBudgetHint.label'), "ℹ️ API 驱动的预算：");
+		assert.equal(t('diagnostics.apiBudgetHint.body'), "您的 premium_interactions 配额权益为 {0}/月。如果上方预算为 0 或为空，将使用此 API 值作为有效预算。");
+	} finally {
+		mock.setLanguage('en');
+	}
+});
