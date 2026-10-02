@@ -632,9 +632,11 @@ function layout(title: string, body: string): string {
     .fluency-modal { max-width: none; max-height: none; height: 100%; border: none; border-radius: 0;
       padding-bottom: env(safe-area-inset-bottom); }
     .fluency-modal-header { position: sticky; top: 0; z-index: 1; background: #161b22;
-      padding: max(12px, env(safe-area-inset-top)) 14px 10px; border-bottom: 1px solid #30363d; }
+      padding: max(12px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) 10px max(14px, env(safe-area-inset-left));
+      border-bottom: 1px solid #30363d; }
     .fluency-modal-close { min-width: 44px; min-height: 44px; margin: -6px -8px 0 0; }
-    .fluency-modal-body { padding: 14px; gap: 14px; }
+    .fluency-modal-body { gap: 14px;
+      padding: 14px max(14px, env(safe-area-inset-right)) 14px max(14px, env(safe-area-inset-left)); }
     .fluency-chart-wrap { height: 280px; }
     .fluency-categories { grid-template-columns: 1fr; }
 
@@ -910,7 +912,9 @@ function dashboardPage(c: Context, user: UserRow, uploads: UploadRow[], isAdmin:
   var canvas = document.getElementById('trend-chart');
   if (!canvas || !CHART_DATA.length) return;
   // Fewer axis labels on a phone: sixteen rotated dates leave no room for the bars.
-  var narrow = window.matchMedia('(max-width: 720px)').matches;
+  // Re-evaluated when the width crosses the breakpoint, e.g. on rotating the phone.
+  var narrowQuery = window.matchMedia('(max-width: 720px)');
+  var narrow = narrowQuery.matches;
 
   var MODEL_PALETTE  = ['#58a6ff','#3fb950','#bc8cff','#f0883e','#e3b341','#f778ba','#79c0ff','#56d364','#d2a8ff','#ffa657'];
   var CLAUDE_COLORS  = ['#bc8cff','#a371f7','#d2a8ff','#6e40c9','#8250df'];
@@ -1059,6 +1063,12 @@ function dashboardPage(c: Context, user: UserRow, uploads: UploadRow[], isAdmin:
     chart.update();
   }
 
+  narrowQuery.addEventListener('change', function(e) {
+    narrow = e.matches;
+    chart.options.scales.x.ticks.maxTicksLimit = narrow ? 6 : 16;
+    rebuildChart();
+  });
+
   document.querySelectorAll('#chart-period-tabs .tab').forEach(function(btn) {
     btn.addEventListener('click', function() {
       document.querySelectorAll('#chart-period-tabs .tab').forEach(function(b) { b.classList.remove('active'); });
@@ -1178,8 +1188,18 @@ function dashboardPage(c: Context, user: UserRow, uploads: UploadRow[], isAdmin:
   function buildRadar() {
     var FLUENCY_DATA = ${safeJson(fluencyScore.categories.map(c => ({ category: c.category, icon: c.icon, stage: c.stage })))};
     // On a phone the chart is too narrow for one-line labels: one word per line, no icon.
-    var narrow   = window.matchMedia('(max-width: 720px)').matches;
-    var labels   = FLUENCY_DATA.map(function(c) { return narrow ? c.category.split(' ') : c.icon + ' ' + c.category; });
+    var narrowQuery = window.matchMedia('(max-width: 720px)');
+    var narrow   = narrowQuery.matches;
+    function radarLabels() {
+      return FLUENCY_DATA.map(function(c) { return narrow ? c.category.split(' ') : c.icon + ' ' + c.category; });
+    }
+    var labels   = radarLabels();
+    narrowQuery.addEventListener('change', function(e) {
+      narrow = e.matches;
+      radarChart.data.labels = radarLabels();
+      radarChart.options.scales.r.ticks.display = !narrow;
+      radarChart.update();
+    });
     var values   = FLUENCY_DATA.map(function(c) { return c.stage; });
     var overallStage = ${fluencyScore.overallStage};
     var fillColor   = 'rgba(88,166,255,0.25)';
@@ -1455,7 +1475,8 @@ function adminDashboardPage(
   // ── Chart ────────────────────────────────────────────────────────────────
   var canvas = document.getElementById('admin-trend-chart');
   if (!canvas || !ADMIN_CHART_DATA.length) return;
-  var narrow = window.matchMedia('(max-width: 720px)').matches;
+  var narrowQuery = window.matchMedia('(max-width: 720px)');
+  var narrow = narrowQuery.matches;
 
   var TOP_N = 10;
   var USER_COLORS = ['#58a6ff','#3fb950','#bc8cff','#f0883e','#e3b341','#f778ba','#79c0ff','#56d364','#d2a8ff','#ffa657'];
@@ -1611,6 +1632,12 @@ function adminDashboardPage(
     chart.options.scales.y.title.text = currentMode === 'total' ? 'Tokens' : 'Avg Tokens/User';
     chart.update();
   }
+
+  narrowQuery.addEventListener('change', function(e) {
+    narrow = e.matches;
+    chart.options.scales.x.ticks.maxTicksLimit = narrow ? 6 : 20;
+    rebuildChart();
+  });
 })();`;
 
 	return layout('Admin Dashboard', `

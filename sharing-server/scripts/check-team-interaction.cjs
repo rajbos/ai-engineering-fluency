@@ -135,9 +135,11 @@ async function main() {
 		await assertFitsPhone('/dashboard with the detailed breakdown open');
 		await page.setViewportSize({ width: 320, height: 640 });
 		await assertFitsPhone('/dashboard on a small phone');
-		await page.setViewportSize({ width: 390, height: 844 });
 		await page.getByRole('link', { name: 'Team Insights', exact: true }).click();
 		await page.waitForURL('**/team');
+		await assertFitsPhone('/team on a small phone');
+		await page.setViewportSize({ width: 390, height: 844 });
+		await assertFitsPhone('/team');
 		await page.getByRole('link', { name: 'Sign out', exact: true }).click();
 		await page.waitForURL('**/dashboard');
 		await page.goto(`${baseUrl}/team`);
@@ -188,6 +190,31 @@ async function main() {
 		await assertFitsPhone('/admin');
 		await page.goto(`${baseUrl}/dashboard`);
 		await assertFitsPhone('/dashboard as an admin');
+		await page.setViewportSize({ width: 320, height: 640 });
+		await assertFitsPhone('/dashboard as an admin on a small phone');
+		await page.goto(`${baseUrl}/admin`);
+		await assertFitsPhone('/admin on a small phone');
+		// Crossing the breakpoint after load (rotating a phone) must re-tune the charts, not only resize them.
+		const adminTicks = () => page.evaluate(() => Chart.getChart(document.getElementById('admin-trend-chart')).options.scales.x.ticks.maxTicksLimit);
+		assert.equal(await adminTicks(), 6);
+		await page.setViewportSize({ width: 1440, height: 1000 });
+		await page.waitForFunction(() => Chart.getChart(document.getElementById('admin-trend-chart')).options.scales.x.ticks.maxTicksLimit === 20);
+		await page.goto(`${baseUrl}/team`);
+		const teamChart = () => page.evaluate(() => {
+			const { x, y } = Chart.getChart(document.getElementById('team-trend-chart')).options.scales;
+			return { ticks: x.ticks.maxTicksLimit, title: y.title.display };
+		});
+		assert.deepEqual(await teamChart(), { ticks: 12, title: true });
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.waitForFunction(() => Chart.getChart(document.getElementById('team-trend-chart')).options.scales.x.ticks.maxTicksLimit === 6);
+		assert.deepEqual(await teamChart(), { ticks: 6, title: false });
+		await page.goto(`${baseUrl}/dashboard`);
+		await page.waitForFunction(() => Chart.getChart(document.getElementById('trend-chart')).options.scales.x.ticks.maxTicksLimit === 6);
+		await page.setViewportSize({ width: 1440, height: 1000 });
+		await page.waitForFunction(() => {
+			const { x, y } = Chart.getChart(document.getElementById('trend-chart')).options.scales;
+			return x.ticks.maxTicksLimit === 16 && y.title.display === true;
+		});
 		assert.deepEqual(errors, [], 'browser runtime errors');
 		console.log('Team interactions passed: period navigation (with/without JS), chart modes, daily table, exports, phone layout on every page, own dashboard, sign-out, privacy.');
 	} finally {

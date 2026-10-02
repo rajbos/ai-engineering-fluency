@@ -183,7 +183,8 @@ ${stat('Your usage cohort', self.cohort ?? 'No activity')}
   var own = style.getPropertyValue('--team-own').trim();
   var muted = style.getPropertyValue('--team-muted').trim();
   var grid = style.getPropertyValue('--team-grid').trim();
-  var narrow = window.matchMedia('(max-width: 720px)').matches;
+  var narrowQuery = window.matchMedia('(max-width: 720px)');
+  var narrow = narrowQuery.matches;
   var chart = new Chart(document.getElementById('team-trend-chart'), {
     type: 'line',
     data: {
@@ -204,6 +205,13 @@ ${stat('Your usage cohort', self.cohort ?? 'No activity')}
         tooltip: { callbacks: { label: function(context) { return context.dataset.label + ': ' + context.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' tokens'; } } }
       }
     }
+  });
+  // Re-evaluated when the width crosses the breakpoint, e.g. on rotating the phone.
+  narrowQuery.addEventListener('change', function(e) {
+    narrow = e.matches;
+    chart.options.scales.x.ticks.maxTicksLimit = narrow ? 6 : 12;
+    chart.options.scales.y.title.display = !narrow;
+    chart.update();
   });
   buttons.forEach(function(button) {
     button.addEventListener('click', function() {
