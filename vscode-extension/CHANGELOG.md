@@ -4,6 +4,8 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-02
+
 ### Features
 - Copilot budget is now shown for every GitHub account signed in to VS Code for the configured GitHub host (github.com by default, or your GitHub Enterprise host when `github-enterprise.uri` is set), not just the one VS Code prefers for the extension: a "GitHub accounts" list in the status bar tooltip, the Usage view's AI Billing Coverage section and the Diagnostics quota card (a lone account that already has a balance is not repeated; never prompts to sign in)
 - The Usage Analysis view's ten tabs now sit under four group tabs — **📊 Usage** (My Activity, Recent Sessions), **📁 Workspace** (Tools & Integrations, Workspace Health, AI Readiness, Worktrees), **🐙 GitHub** (Repository PRs, Cloud Agent) and **🎓 Coaching** (Insights, Corrections) — matching the group-tab/leaf-tab strip the Diagnostics view already uses. The flat ten-tab strip wrapped onto a second row at ordinary panel widths and gave no hint that, say, Repository PRs and Cloud Agent are the same kind of thing. Re-opening a group returns you to the tab you last had open in it. Tab ids are unchanged, so "Take me there" links from What's New and the worktree notification's "Show Me" action still land on the right tab (and now open its group with them)

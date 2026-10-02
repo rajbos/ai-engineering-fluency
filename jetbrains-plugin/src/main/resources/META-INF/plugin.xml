@@ -28,6 +28,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <h3>0.5.2</h3>
+        <ul>
+            <li>Updated shared webview bundles: grouped Usage Analysis tabs, official editor logos in the Chart view, an estimated-cost card in the log viewer, and the Copilot budget for every signed-in GitHub account</li>
+            <li>The Environmental view's methodology links now open in your browser</li>
+        </ul>
         <h3>0.5.1</h3>
         <ul>
             <li>Updated shared webview bundles: removed the dead Mistral Cloud tab and fixed Mistral Vibe cost attribution in the Diagnostics view, and surfaced Copilot's server-side repository memories in the Usage view</li>
