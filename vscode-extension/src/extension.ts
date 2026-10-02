@@ -1568,6 +1568,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * its results once it no longer matches (sign-out, account removed or switched, or a newer load).
 	 */
 	private _preferredPlanGeneration = 0;
+	/** Id of the GitHub account the cached plan/quota state belongs to, so an account switch can drop it. */
+	private _preferredPlanAccountId: string | undefined;
 
 	// Cached PR stats result for the repos tab (mirrors the shared snapshot on disk)
 	private _lastRepoPrStats?: RepoPrStatsResult;
@@ -4161,6 +4163,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async loadAndLogCopilotPlanInfo(): Promise<void> {
 		const session = this.githubSession;
 		if (!session) { return; }
+		// logCopilotPlanResult() only overwrites fields the response contains, so a switch to an account whose
+		// lookup fails or omits a quota would otherwise keep the previous account's budget on screen.
+		if (this._preferredPlanAccountId !== undefined && this._preferredPlanAccountId !== session.account.id) {
+			this.clearPreferredAccountBudgetState();
+			this.refreshBudgetDependentUi();
+			this.pushAccountBudgetsToPanels();
+		}
+		this._preferredPlanAccountId = session.account.id;
 		const generation = ++this._preferredPlanGeneration;
 		const isStale = (): boolean => generation !== this._preferredPlanGeneration;
 
@@ -4220,6 +4230,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Forgets the plan and quota snapshot of the preferred account (sign-out, or the account was removed). */
 	private clearPreferredAccountBudgetState(): void {
 		this._preferredPlanGeneration++;
+		this._preferredPlanAccountId = undefined;
 		this._copilotPlanResolved = undefined;
 		this._copilotQuotaEntitlements = {};
 	}
