@@ -42,7 +42,7 @@ import { buildTabStripHtml, type UsageTabStripInput } from './tabStripHtml';
 import { renderContextRefTable } from './contextRefTableHtml';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
 import { billingExtGroupCostsHtml } from './billingCoverage';
-import { partitionContextRefRows, type ContextRefRow } from './contextRefRows';
+import { type ContextRefRow } from './contextRefRows';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
 import { USAGE_TAB_GROUPS, groupOfUsageTab } from './tabGroups';
