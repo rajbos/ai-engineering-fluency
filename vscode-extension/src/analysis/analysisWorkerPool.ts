@@ -563,7 +563,14 @@ export class AnalysisWorkerPool {
 	private async retire(slot: Slot, reason: Error): Promise<void> {
 		for (const pending of slot.pending.values()) {
 			if (pending.timer) { clearTimeout(pending.timer); }
-			pending.reject(reason);
+			if (pending.timedOut) {
+				// Its worker is already being killed for hanging on it, and the exit that would have said so is now ignored
+				// (the slot is out of `slots`). Keep the verdict: `unavailable` would have the host run the file itself.
+				this.quarantine(pending);
+				pending.reject(new AnalysisWorkerError('Analysis timed out (its worker was retired while being restarted)', 'timeout'));
+			} else {
+				pending.reject(reason);
+			}
 		}
 		slot.pending.clear();
 		try { await slot.worker.terminate(); } catch { /* already gone */ }

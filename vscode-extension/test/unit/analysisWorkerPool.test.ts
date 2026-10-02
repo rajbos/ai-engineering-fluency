@@ -513,3 +513,22 @@ test('requests whose host lookups finish together resume only as the worker has 
 	assert.equal(workers[0].replies.length, 2);
 	await pool.dispose();
 });
+
+test('a timed-out request keeps its timeout verdict when another worker exhausts the restart budget before its exit arrives', async () => {
+	// Its slot is retired with the rest, so the exit event that would have reported the timeout is ignored. Rejecting it
+	// as `unavailable` would have the caller parse the known-hanging file on the extension host.
+	const { pool, workers } = makePool({ size: 2, requestTimeoutMs: 60, maxRestarts: 0, resolveOtelUsage: () => new Promise(() => undefined) }, { exitDelayMs: 300 });
+	const hung = pool.analyze('hang.json', 1, 1);
+	const other = pool.analyze('other.json', 1, 1);
+	void other.catch(() => undefined);
+	const outcome = hung.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'));
+	workers[0].announceReady();
+	workers[1].announceReady();
+	// The neighbour waits on the host, so only the first worker's clock runs out.
+	workers[1].emit('message', { type: 'otelUsage', rpcId: 1, requestId: workers[1].received[0].id, sessionFile: 'other.json' });
+	await sleep(120); // hang.json timed out; its worker's exit is still pending
+	workers[1].crash(); // the second worker dies: the restart budget is gone and every slot is retired
+	assert.equal(await outcome, 'timeout');
+	await assert.rejects(pool.analyze('hang.json', 1, 1), (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'failed', 'and it is quarantined');
+	await pool.dispose();
+});
