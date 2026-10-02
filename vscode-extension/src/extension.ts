@@ -3107,6 +3107,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private isUsableForInstantPaint(sessionData: SessionFileCache | undefined, cutoffMs: number): sessionData is SessionFileCache {
 		return !!sessionData
+			// A details-only placeholder carries no real tokens/usage analysis; never paint it as stats.
+			&& !sessionData.detailsOnly
 			&& Number.isFinite(sessionData.interactions) && sessionData.interactions > 0
 			&& Number.isFinite(sessionData.mtime) && sessionData.mtime >= cutoffMs;
 	}

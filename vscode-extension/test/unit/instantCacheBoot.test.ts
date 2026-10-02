@@ -140,6 +140,12 @@ test('isUsableForInstantPaint() requires a finite positive interaction count, a 
 		'must reject a missing entry, a non-finite mtime (a malformed persisted record — new Date(...).toISOString() would throw on it deeper in the caller), and an entry older than cutoffMs');
 });
 
+test('isUsableForInstantPaint() rejects details-only placeholder entries', () => {
+	const body = extractBracesBlock(EXTENSION_SRC, 'private isUsableForInstantPaint(sessionData: SessionFileCache | undefined, cutoffMs: number): sessionData is SessionFileCache {');
+	assert.ok(body.includes('!sessionData.detailsOnly'),
+		'must exclude detailsOnly placeholders (tokens 0 / default usage analysis) from the cache-only startup paint');
+});
+
 test('shouldAbandonInstantPaintAfterCacheLoad() checks both sample mode and disposal', () => {
 	const body = extractBracesBlock(EXTENSION_SRC, 'private shouldAbandonInstantPaintAfterCacheLoad(): boolean {');
 	assert.ok(body.includes('return this.isSampleDataModeActive() || this._disposed;'),
