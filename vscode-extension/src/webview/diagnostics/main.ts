@@ -1208,7 +1208,7 @@ function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessi
           ${editorOptions}
         </select>
         <span id="model-usage-time-selector"></span>
-        <span id="model-usage-status" style="font-size: 12px; color: var(--text-muted);">${escapeHtml(statusText)}</span>
+        <span id="model-usage-status" class="loading-status" role="status" aria-live="polite">${escapeHtml(statusText)}</span>
       </div>
     </div>
     <div id="model-usage-results"></div>

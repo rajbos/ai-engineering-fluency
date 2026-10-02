@@ -30,6 +30,7 @@ import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDe
 import {
 	reconcileModelUsageToActualTokens,
 	distributeModelUsageToDays,
+	distributeExactCostToDays,
 	scaleModelUsage,
 	reconcileDebugLogModelUsage,
 } from '../../../src/statsHelpers';
@@ -479,13 +480,17 @@ export async function supplementCacheWithDebugLog(cached: SessionFileCache, sess
 	const supplementDailyRollups = cached.dailyRollups
 		? (distributeModelUsageToDays(cached.dailyRollups, supplementModelUsage) ?? cached.dailyRollups)
 		: cached.dailyRollups;
+	const supplementExactCost = debugLogTokens.copilotNanoAiu * NANO_AIU_TO_DOLLARS;
+	const supplementCostRollups = supplementDailyRollups
+		? (distributeExactCostToDays(supplementDailyRollups, supplementExactCost) ?? supplementDailyRollups)
+		: supplementDailyRollups;
 	return {
-		...cached, modelUsage: supplementModelUsage, dailyRollups: supplementDailyRollups,
+		...cached, modelUsage: supplementModelUsage, dailyRollups: supplementCostRollups,
 		actualTokens: debugLogTokens.inputTokens + debugLogTokens.outputTokens,
 		...(debugLogTokens.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
 		debugLogInputTokens: debugLogTokens.inputTokens,
 		debugLogOutputTokens: debugLogTokens.outputTokens,
-		...(debugLogTokens.copilotNanoAiu > 0 ? { copilotExactCostDollars: debugLogTokens.copilotNanoAiu * NANO_AIU_TO_DOLLARS } : {}),
+		...(debugLogTokens.copilotNanoAiu > 0 ? { copilotExactCostDollars: supplementExactCost } : {}),
 	};
 }
 
@@ -682,6 +687,12 @@ function resolveAndApplyDebugLog(
 	backfillDailyRollupCacheTokens(dailyRollups, finalCacheReadTokens);
 
 	const resolvedModelUsage = applyDebugLogModelBreakdown(modelUsage, debugLogTokens, dailyRollups);
+	// Rollups were built from the session file's nano-AIU only; the debug log's exact cost
+	// (which wins at session level) must reach them too or period totals stay estimated.
+	const redistributedCost = distributeExactCostToDays(dailyRollups, (debugLogTokens?.copilotNanoAiu ?? 0) * NANO_AIU_TO_DOLLARS);
+	if (redistributedCost) {
+		for (const [dayKey, dayRollup] of Object.entries(redistributedCost)) { dailyRollups[dayKey] = dayRollup; }
+	}
 	return { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage };
 }
 
