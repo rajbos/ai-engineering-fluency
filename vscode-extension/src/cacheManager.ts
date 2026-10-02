@@ -1492,7 +1492,7 @@ export class CacheManager {
 		for (const [filePath, entry] of this.sessionFileCache) {
 			const prev = merged[filePath];
 			// A details-only placeholder must not overwrite a full on-disk entry at the same mtime.
-			const placeholderOverFull = entry.detailsOnly === true && prev && !prev.detailsOnly && entry.mtime === prev.mtime;
+			const placeholderOverFull = entry.detailsOnly === true && prev && !prev.detailsOnly && entry.mtime === prev.mtime && entry.size === prev.size;
 			if (!prev || (typeof entry.mtime === 'number' && entry.mtime >= prev.mtime && !placeholderOverFull)) {
 				merged[filePath] = entry;
 			}
@@ -1642,7 +1642,7 @@ export class CacheManager {
 			const isNewerThanTombstone = tombstoneMtime === undefined || entry.mtime > tombstoneMtime;
 			// At an equal mtime a full entry must still replace a details-only placeholder,
 			// otherwise the placeholder keeps forcing a re-analysis it no longer needs.
-			const upgradesPlaceholder = existing?.detailsOnly === true && !entry.detailsOnly && entry.mtime === existing.mtime;
+			const upgradesPlaceholder = existing?.detailsOnly === true && !entry.detailsOnly && entry.mtime === existing.mtime && entry.size === existing.size;
 			if ((!existing || entry.mtime > existing.mtime || upgradesPlaceholder) && isNewerThanTombstone) {
 				this.sessionFileCache.set(filePath, entry);
 				// Must clear any tombstone this window recorded for this path, same as

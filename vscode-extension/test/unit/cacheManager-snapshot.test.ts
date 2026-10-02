@@ -2221,3 +2221,21 @@ test('writeSharedSnapshot: a details-only placeholder does not overwrite a full 
 	assert.equal(onDisk.tokens, 500);
 	assert.equal(onDisk.detailsOnly, undefined);
 });
+
+test('equal-mtime placeholder precedence requires a matching size', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', { ...entry(1000, 500), size: 10 }, 10);
+	await writer.writeSharedSnapshot();
+
+	// Local placeholder for the same mtime but a different size: the file changed, so the stale
+	// full snapshot entry must not replace it.
+	const reader = makeManager(dir);
+	reader.setCachedSessionData('/a.json', { ...entry(1000, 0), size: 20, detailsOnly: true }, 20);
+	await reader.loadSharedSnapshotIfChanged();
+	assert.equal(reader.cache.get('/a.json')?.detailsOnly, true);
+
+	// Write side: a different-size placeholder must replace the stale full on-disk entry.
+	await reader.writeSharedSnapshot();
+	assert.equal((await reader.readSharedSnapshot())!['/a.json'].detailsOnly, true);
+});
