@@ -2384,6 +2384,9 @@ function handleAccountBudgetsUpdated(message: DiagMessage): void {
     }));
     const fresh = rendered.firstElementChild;
     if (fresh) { card.replaceWith(fresh); }
+    // The Monthly Budget card's hint reads the same quota, so it must follow the card (sign-out / account switch).
+    const hint = document.getElementById("diag-api-budget-hint");
+    if (hint) { setHtml(hint, renderApiBudgetHintHtml(message.quotaEntitlements as QuotaEntitlements | undefined)); }
     return;
   }
   const container = document.getElementById("diag-account-budgets");
@@ -2775,6 +2778,13 @@ function renderAccountBudgetsHtml(accounts: AccountBudgetView[] | undefined): st
   return `<p><strong>${escapeHtml(localize("accountBudgets.title"))}</strong><br/>${accounts.map(renderAccountBudgetRowHtml).join("")}</p>`;
 }
 
+/** The "API-driven budget" hint under the Monthly Budget input; empty without a premium quota. */
+function renderApiBudgetHintHtml(quota: QuotaEntitlements | undefined): string {
+  return quota && quota.premium_interactions
+    ? `<p class="hint" style="color: #90ee90;"><strong>ℹ️ API-driven budget:</strong> Your premium_interactions quota entitlement is <strong>${quota.premium_interactions.toFixed(2)}</strong>/month. If the budget above is 0 or empty, this API value will be used as your effective budget.</p>`
+    : "";
+}
+
 function renderQuotaCardHtml(data: Pick<DiagnosticsData, 'quotaEntitlements' | 'accountBudgets'>): string {
   quotaFigureShown = !!data.quotaEntitlements?.premium_interactions;
   const quotaContent = data.quotaEntitlements
@@ -2864,11 +2874,7 @@ Set a monthly AI spend budget in USD to get visual alerts on the status bar. The
   <input id="input-monthly-budget" type="number" min="0" max="99999" step="0.01" value="${monthlyBudget}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
 </div>
 <p class="hint">Budget coloring uses the current calendar month's estimated cost. Set to 0 to disable.</p>
-${
-  data.quotaEntitlements && data.quotaEntitlements.premium_interactions
-    ? `<p class="hint" style="color: #90ee90;"><strong>ℹ️ API-driven budget:</strong> Your premium_interactions quota entitlement is <strong>$${data.quotaEntitlements.premium_interactions.toFixed(2)}</strong>/month. If the budget above is 0 or empty, this API value will be used as your effective budget.</p>`
-    : ''
-}
+<div id="diag-api-budget-hint">${renderApiBudgetHintHtml(data.quotaEntitlements)}</div>
 </div>
 ${renderQuotaCardHtml(data)}
 ${renderEditorDiscoveryCardHtml()}
