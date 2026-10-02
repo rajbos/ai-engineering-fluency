@@ -3719,6 +3719,28 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// (showEfficiency() deliberately doesn't recompute on reveal, and `retainContextWhenHidden`
 		// means revealing a hidden panel re-renders nothing).
 		await this.notifyEfficiencyValueSignals();
+		// The PR snapshot feeds the agent-PR insights, and it routinely lands after the Insights
+		// tab has rendered (cold start, or the Repos tab opened later).
+		this.republishInsights();
+	}
+
+	/**
+	 * Re-evaluates insights after an input other than the usage stats changes (the PR snapshot,
+	 * an AI Readiness rescan), so the Insights tab and the status-bar badge don't wait for the
+	 * next usage refresh to reflect it. Never throws.
+	 */
+	private republishInsights(): void {
+		const stats = this.currentUsageAnalysisStats;
+		if (!stats) { return; }
+		try {
+			const evaluated = this.buildCurrentInsights(stats);
+			this.refreshInsightBadgeFromState(new Date().toISOString(), evaluated);
+			if (this.analysisPanel && this.isPanelOpen(this.analysisPanel)) {
+				void this.analysisPanel.webview.postMessage({ command: 'updateInsights', insights: evaluated });
+			}
+		} catch (err) {
+			this.warn(`Re-evaluating insights failed: ${err}`);
+		}
 	}
 
 	/**
@@ -11545,6 +11567,8 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			if (this.analysisPanel === panel) {
 				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report });
 			}
+			// A rescan can change the review-control insights; readinessForInsights() picks it up.
+			this.republishInsights();
 		} catch (err) {
 			this.warn(`Dark Factory readiness scan failed: ${err}`);
 			if (this.analysisPanel === panel) {
