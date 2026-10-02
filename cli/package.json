@@ -1,6 +1,6 @@
 {
   "name": "@rajbos/ai-engineering-fluency",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "AI Engineering Fluency - CLI to analyze token usage, cost and fluency from local AI coding session files (GitHub Copilot, Claude Code, Gemini CLI, Codex CLI, OpenCode and more)",
   "license": "MIT",
   "author": "RobBos",

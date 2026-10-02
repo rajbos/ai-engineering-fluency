@@ -53,6 +53,9 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 	assert.equal(t('whatsNew.release.0.18.3.headline'), 'A maintenance release: the AI Readiness tab now collapses each repository to one row and can draft a Copilot Chat prompt for the controls you pick, plus friendlier MCP tool names. No new screens.');
 	assert.equal(t('whatsNew.feature.usage.readiness-tab.title'), 'AI Readiness');
 	assert.equal(t('whatsNew.feature.usage.readiness-tab.description'), "In Usage Analysis, scan each repository's delivery and governance controls to see what blocks its next stage and what could not be checked. Separate from your personal Fluency Score.");
+	assert.equal(t('whatsNew.release.0.19.0.headline'), "Usage Analysis is now organized into Usage, Workspace, GitHub and Coaching groups, with banded sections, official editor logos in the Chart view and Copilot budget for every signed-in GitHub account.");
+	assert.equal(t('whatsNew.feature.usage.group-tabs.title'), "Grouped tabs");
+	assert.equal(t('whatsNew.feature.usage.group-tabs.description'), "The ten Usage Analysis tabs now sit under four group tabs (Usage, Workspace, GitHub, Coaching), and My Activity is split into Overview, Spend & models and Context bands.");
 	mock.setLanguage('zh-cn');
 	try {
 		assert.equal(t('command.showReadiness.title'), '显示 AI 就绪度');
@@ -64,6 +67,9 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 		assert.equal(t('whatsNew.release.0.18.3.headline'), '一个维护版本：AI 就绪度标签页现在将每个仓库折叠为一行，并可为你选中的控制措施起草 Copilot Chat 提示，另外 MCP 工具名称更友好。没有新增界面。');
 		assert.equal(t('whatsNew.feature.usage.readiness-tab.title'), 'AI 就绪度');
 		assert.equal(t('whatsNew.feature.usage.readiness-tab.description'), '在使用分析中逐个扫描仓库的交付与治理控制措施，查看进入下一阶段的阻碍和无法核实的项目。与个人熟练度评分分开显示。');
+		assert.equal(t('whatsNew.release.0.19.0.headline'), "使用分析现在按“使用”“工作区”“GitHub”“辅导”分组，各部分按区块排列；图表视图显示官方编辑器图标，并为每个已登录的 GitHub 账户显示 Copilot 预算。");
+		assert.equal(t('whatsNew.feature.usage.group-tabs.title'), "分组标签页");
+		assert.equal(t('whatsNew.feature.usage.group-tabs.description'), "使用分析的十个标签页现在归入四个分组标签（使用、工作区、GitHub、辅导），“我的活动”则分为概览、支出与模型、上下文三个区块。");
 	} finally {
 		mock.setLanguage('en');
 	}
