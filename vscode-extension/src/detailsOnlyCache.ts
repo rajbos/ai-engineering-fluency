@@ -20,3 +20,18 @@ export function isFullCacheHit(cached: SessionFileCache | undefined, mtime: numb
 export function isDetailsOnlyPlaceholder(existing: SessionFileCache | undefined): boolean {
 	return !existing || existing.detailsOnly === true;
 }
+
+/**
+ * Full entry that replaces a same-version placeholder (equal mtime and size): keep the detail
+ * metadata the details path discovered (repository attribution, workspace, title) wherever the
+ * full analysis did not produce it, instead of dropping it with the placeholder.
+ */
+export function mergePlaceholderDetails(full: SessionFileCache, placeholder: SessionFileCache): SessionFileCache {
+	return {
+		...full,
+		...(full.repository === undefined && placeholder.repository !== undefined ? { repository: placeholder.repository } : {}),
+		...(!full.repositoryResolved && placeholder.repositoryResolved ? { repositoryResolved: true } : {}),
+		...(full.workspaceFolderPath === undefined && placeholder.workspaceFolderPath !== undefined ? { workspaceFolderPath: placeholder.workspaceFolderPath } : {}),
+		...(full.title === undefined && placeholder.title !== undefined ? { title: placeholder.title } : {}),
+	};
+}

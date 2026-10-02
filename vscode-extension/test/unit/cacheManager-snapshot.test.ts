@@ -2239,3 +2239,32 @@ test('equal-mtime placeholder precedence requires a matching size', async () => 
 	await reader.writeSharedSnapshot();
 	assert.equal((await reader.readSharedSnapshot())!['/a.json'].detailsOnly, true);
 });
+
+test('a full entry replacing a same-version placeholder keeps the placeholder repository metadata', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', { ...entry(1000, 500) }, 10);
+	await writer.writeSharedSnapshot();
+
+	const reader = makeManager(dir);
+	reader.setCachedSessionData('/a.json', { ...entry(1000, 0), detailsOnly: true, repository: 'https://example/repo.git', repositoryResolved: true }, 10);
+	await reader.loadSharedSnapshotIfChanged();
+	const got = reader.cache.get('/a.json');
+	assert.equal(got?.tokens, 500);
+	assert.equal(got?.detailsOnly, undefined);
+	assert.equal(got?.repository, 'https://example/repo.git');
+	assert.equal(got?.repositoryResolved, true);
+
+	// Write side: in-memory full entry over an on-disk placeholder.
+	const dir2 = tmpDir();
+	const ph = makeManager(dir2);
+	ph.setCachedSessionData('/a.json', { ...entry(1000, 0), detailsOnly: true, repository: 'r', repositoryResolved: true }, 10);
+	await ph.writeSharedSnapshot();
+	const fw = makeManager(dir2);
+	fw.setCachedSessionData('/a.json', entry(1000, 500), 10);
+	await fw.writeSharedSnapshot();
+	const onDisk = (await fw.readSharedSnapshot())!['/a.json'];
+	assert.equal(onDisk.tokens, 500);
+	assert.equal(onDisk.repository, 'r');
+	assert.equal(onDisk.repositoryResolved, true);
+});
