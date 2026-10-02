@@ -355,7 +355,7 @@ function ttftScanRangeToMs(range: unknown): number | null {
 import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDelegationToolCalls } from '../../src/taskClassification';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, computeFallbackDailyRollup as _computeFallbackDailyRollup, type SessionAggregateInput } from '../../src/statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, distributeExactCostToDays, computeFallbackDailyRollup as _computeFallbackDailyRollup, type SessionAggregateInput } from '../../src/statsHelpers';
 import { scaleModelUsage, reconcileDebugLogModelUsage, addTaskCategoryToDailyEntry as _addTaskCategoryToDailyEntry } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
@@ -1070,10 +1070,10 @@ type SessionsTabPreset = { filter: 'nearContextLimit'; lookback: 'last30' };
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation.
-	// Rebuild Mistral Vibe model usage so it carries cachedReadTokens: getSessionFileDataCached()
-	// returns an mtime/size hit without re-running getModelUsage(), so without this bump existing
-	// entries would keep billing the whole prompt at the full input rate until their file changed.
-	private static readonly CACHE_VERSION = 73;
+	// Distribute the debug-log exact Copilot cost (nano-AIU) over each session's dailyRollups:
+	// aggregatePeriodStats reads exact cost from rollups only, so existing entries would keep
+	// showing an estimate in Today/month/30-day totals until their file changed.
+	private static readonly CACHE_VERSION = 74;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
@@ -8439,13 +8439,17 @@ if (session.toolCalls) { usageAnalysis.toolCalls = session.toolCalls; }
 		const supplementDailyRollups = cached.dailyRollups
 			? (distributeModelUsageToDays(cached.dailyRollups, supplementModelUsage) ?? cached.dailyRollups)
 			: cached.dailyRollups;
+		const supplementExactCost = debugLogTokens.copilotNanoAiu * NANO_AIU_TO_DOLLARS;
+		const supplementCostRollups = supplementDailyRollups
+			? (distributeExactCostToDays(supplementDailyRollups, supplementExactCost) ?? supplementDailyRollups)
+			: supplementDailyRollups;
 		const supplemented: SessionFileCache = {
-			...cached, modelUsage: supplementModelUsage, dailyRollups: supplementDailyRollups,
+			...cached, modelUsage: supplementModelUsage, dailyRollups: supplementCostRollups,
 			actualTokens: debugLogTokens.inputTokens + debugLogTokens.outputTokens,
 			...(debugLogTokens.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
 			debugLogInputTokens: debugLogTokens.inputTokens,
 			debugLogOutputTokens: debugLogTokens.outputTokens,
-			...(debugLogTokens.copilotNanoAiu > 0 ? { copilotExactCostDollars: debugLogTokens.copilotNanoAiu * NANO_AIU_TO_DOLLARS } : {}),
+			...(debugLogTokens.copilotNanoAiu > 0 ? { copilotExactCostDollars: supplementExactCost } : {}),
 		};
 		this.setCachedSessionData(sessionFilePath, supplemented, fileSize);
 		this._cacheHits++;
@@ -8589,7 +8593,7 @@ private computeFallbackDailyRollup(
 
 	private resolveAndApplyDebugLog(
 		tokenResult: { tokens: number; actualTokens?: number; cacheReadTokens?: number },
-		debugLogTokens: { inputTokens: number; outputTokens: number; cachedTokens?: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined,
+		debugLogTokens: { inputTokens: number; outputTokens: number; cachedTokens?: number; copilotNanoAiu?: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined,
 		modelUsage: ModelUsage,
 		dailyRollups: { [utcDayKey: string]: DailyRollupEntry }
 	): { resolvedActualTokens: number | undefined; finalCacheReadTokens: number | undefined; resolvedModelUsage: ModelUsage } {
@@ -8605,6 +8609,12 @@ private computeFallbackDailyRollup(
 		this.backfillDailyRollupCacheTokens(dailyRollups, finalCacheReadTokens);
 
 		const resolvedModelUsage = this.applyDebugLogModelBreakdown(modelUsage, debugLogTokens, dailyRollups);
+		// Rollups were built from the session file's nano-AIU only; the debug log's exact cost
+		// (which wins at session level) must reach them too or period totals stay estimated.
+		const redistributedCost = distributeExactCostToDays(dailyRollups, (debugLogTokens?.copilotNanoAiu ?? 0) * NANO_AIU_TO_DOLLARS);
+		if (redistributedCost) {
+			for (const [dayKey, dayRollup] of Object.entries(redistributedCost)) { dailyRollups[dayKey] = dayRollup; }
+		}
 		return { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage };
 	}
 
