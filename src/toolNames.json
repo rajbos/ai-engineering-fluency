@@ -1347,4 +1347,5 @@
   ,"mcp__ccd_pr__bind_pr": "CCD PR: Bind PR"
   ,"mcp__ccd_pr__set_monitor": "CCD PR: Set Monitor"
   ,"get_main_session_transcript": "Get Main Session Transcript"
+  ,"mcp__ccd_session__read_widget_context": "MCP Ccd Session Read Widget Context"
 }

@@ -2172,3 +2172,52 @@ test('loadCacheFromStorage: a non-ENOENT read failure empties the cache instead 
 	assert.ok(errors.some(e => e.includes('Error loading cache from storage')),
 		'the read failure should surface through deps.error');
 });
+
+test('loadSharedSnapshotIfChanged: a full snapshot entry replaces a local details-only placeholder at equal mtime', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', entry(1000, 500), 10);
+	await writer.writeSharedSnapshot();
+
+	const reader = makeManager(dir);
+	reader.setCachedSessionData('/a.json', { ...entry(1000, 0), detailsOnly: true }, 10);
+	const merged = await reader.loadSharedSnapshotIfChanged();
+	assert.equal(merged, 1);
+	assert.equal(reader.cache.get('/a.json')?.tokens, 500);
+	assert.equal(reader.cache.get('/a.json')?.detailsOnly, undefined);
+});
+
+test('loadSharedSnapshotIfChanged: a snapshot placeholder does not replace a local full entry at equal mtime', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	writer.setCachedSessionData('/a.json', { ...entry(1000, 0), detailsOnly: true }, 10);
+	await writer.writeSharedSnapshot();
+
+	const reader = makeManager(dir);
+	reader.setCachedSessionData('/a.json', entry(1000, 500), 10);
+	await reader.loadSharedSnapshotIfChanged();
+	assert.equal(reader.cache.get('/a.json')?.tokens, 500);
+});
+
+test('writeSharedSnapshot: a details-only placeholder does not overwrite a full on-disk entry at equal mtime, and a full entry replaces a placeholder', async () => {
+	const dir = tmpDir();
+	const full = makeManager(dir);
+	full.setCachedSessionData('/a.json', entry(1000, 500), 10);
+	await full.writeSharedSnapshot();
+
+	const other = makeManager(dir);
+	other.setCachedSessionData('/a.json', { ...entry(1000, 0), detailsOnly: true }, 10);
+	await other.writeSharedSnapshot();
+	assert.equal((await other.readSharedSnapshot())!['/a.json'].tokens, 500);
+
+	const dir2 = tmpDir();
+	const ph = makeManager(dir2);
+	ph.setCachedSessionData('/a.json', { ...entry(1000, 0), detailsOnly: true }, 10);
+	await ph.writeSharedSnapshot();
+	const fullWriter = makeManager(dir2);
+	fullWriter.setCachedSessionData('/a.json', entry(1000, 500), 10);
+	await fullWriter.writeSharedSnapshot();
+	const onDisk = (await fullWriter.readSharedSnapshot())!['/a.json'];
+	assert.equal(onDisk.tokens, 500);
+	assert.equal(onDisk.detailsOnly, undefined);
+});
