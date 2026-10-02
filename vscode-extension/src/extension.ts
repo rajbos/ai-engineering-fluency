@@ -1581,6 +1581,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _preferredPlanGeneration = 0;
 	/** Id of the GitHub account the cached plan/quota state belongs to, so an account switch can drop it. */
 	private _preferredPlanAccountId: string | undefined;
+	/**
+	 * Monotonic id shared by every path that discovers the preferred session and assigns `githubSession`
+	 * (startup restore, the auth-session listener, explicit sign-in, sign-out). Each takes a number before
+	 * its `getSession()` await and discards its result if the number is no longer current, so an older
+	 * lookup that finishes last cannot overwrite a newer one (or an explicit sign-out) with a stale account.
+	 */
+	private _sessionLookupSeq = 0;
 
 	// Cached PR stats result for the repos tab (mirrors the shared snapshot on disk)
 	private _lastRepoPrStats?: RepoPrStatsResult;
@@ -2935,9 +2942,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const authProviderId = getGitHubAuthProviderId();
 				if (e.provider.id !== authProviderId) { return; }
 				if (this._githubSignedOutByUser) { return; }
+				const lookupSeq = ++this._sessionLookupSeq;
 				const session = await vscode.authentication.getSession(authProviderId, ['read:user'], { silent: true });
-				// An explicit sign-out may have landed while getSession() was pending; don't undo it.
-				if (this._githubSignedOutByUser) { return; }
+				// A sign-out, or a newer session lookup, may have landed while getSession() was pending; don't undo it.
+				if (this._githubSignedOutByUser || lookupSeq !== this._sessionLookupSeq) { return; }
 				if (session) {
 					this.githubSession = session;
 					await this.context.globalState.update('github.authenticated', true);
@@ -3667,6 +3675,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 				{ createIfNone: true }
 			);
 			if (session) {
+				// Supersedes any silent lookup still in flight.
+				this._sessionLookupSeq++;
 				this.githubSession = session;
 				this._githubSignedOutByUser = false;
 				// Symmetric with sign-out: the flag that suppressed the memory fetch has just
@@ -3694,6 +3704,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('Signing out from GitHub...');
 			this.githubSession = undefined;
 			this._githubSignedOutByUser = true;
+			this._sessionLookupSeq++;
 			this._accountBudgets = [];
 			this._accountBudgetsRefreshSeq++;
 			this.clearPreferredAccountBudgetState();
@@ -4205,9 +4216,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// sign-in badge). This picks up sessions from Copilot or other extensions that
 			// already authenticated the user with GitHub, without nagging users who never
 			// intend to sign in here.
+			const lookupSeq = ++this._sessionLookupSeq;
 			const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
-			// Same race as the session listener: a sign-out during the await must stand.
-			if (this._githubSignedOutByUser) { return; }
+			// Same race as the session listener: a sign-out or a newer lookup during the await must stand.
+			if (this._githubSignedOutByUser || lookupSeq !== this._sessionLookupSeq) { return; }
 			if (session) {
 				this.githubSession = session;
 				this.log(`✅ GitHub session found for ${session.account.label}`);
@@ -4291,6 +4303,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Looks up the Copilot budget for every GitHub account signed in to VS Code, then refreshes the
 	 * tooltip and any open panels. Silent (never prompts) and best-effort: a failure leaves the
 	 * previous result in place. Skipped after an explicit sign-out from this extension.
+	 *
+	 * Scope: only the provider named by getGitHubAuthProviderId() — `github` by default, or
+	 * `github-enterprise` when `github-enterprise.uri` is set. Accounts on the other provider are not
+	 * listed because the plan lookup is bound to that one configured API host.
 	 */
 	private async refreshAccountBudgets(): Promise<void> {
 		if (this._githubSignedOutByUser) {
