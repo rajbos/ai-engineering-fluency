@@ -86,7 +86,7 @@ function quarantineKey(request: AnalysisRequest): string | undefined {
 		case 'analyze': return `${request.path}|${request.mtime}|${request.size}`;
 		case 'details': return `${request.path}|${request.mtimeMs}|${request.size}`;
 		case 'supplement': return `${request.path}|supplement|${request.cached.mtime}|${request.cached.size ?? ''}`;
-		case 'quick': return `${request.path}|quick|${request.content.length}`;
+		case 'quick': return `${request.path}|quick|${request.mtimeMs}|${request.size}`;
 		case 'customization': return `workspace|${request.workspace}`;
 	}
 }
@@ -193,8 +193,8 @@ export class AnalysisWorkerPool {
 	}
 
 	/** Interaction count and token estimate for already-read content (see quickAnalyzeSessionContent). */
-	quickAnalyze(path: string, content: string): Promise<QuickSessionAnalysis> {
-		return this.submit((id) => ({ id, op: 'quick', path, content }))
+	quickAnalyze(path: string, content: string, mtimeMs: number, size: number): Promise<QuickSessionAnalysis> {
+		return this.submit((id) => ({ id, op: 'quick', path, content, mtimeMs, size }))
 			.then((result) => {
 				if (!result) { throw new AnalysisWorkerError(`Worker returned no analysis for ${path}`, 'failed'); }
 				return result as QuickSessionAnalysis;

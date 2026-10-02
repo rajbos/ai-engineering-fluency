@@ -26,7 +26,7 @@ export type AnalysisRequest =
 	/** Recursive customization-file discovery for one workspace; a slow synchronous directory walk. */
 	| { id: number; op: 'customization'; workspace: string }
 	/** Interaction count + token estimate for content the host already read (the Diagnostics folder scan). */
-	| { id: number; op: 'quick'; path: string; content: string };
+	| { id: number; op: 'quick'; path: string; content: string; mtimeMs: number; size: number };
 
 export type AnalysisResponse =
 	| { type: 'result'; id: number; ok: true; result: SessionFileCache | SessionDetailsResult | CustomizationFileEntry[] | QuickSessionAnalysis | null }

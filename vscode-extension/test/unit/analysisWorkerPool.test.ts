@@ -454,3 +454,16 @@ test('a worker that hangs while starting up is unavailable, not a dangerous file
 	assert.ok(workers.some((w) => w.received.some((r) => 'path' in r && r.path === 'innocent.json')), 'not quarantined: the same file is simply tried again');
 	await pool.dispose();
 });
+
+test('quarantine for the folder-scan operation tells file versions apart even when their content has the same length', async () => {
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 60, maxRestarts: 50 });
+	const content = 'x'.repeat(100);
+	const first = pool.quickAnalyze('scan.json', content, 1_000, 100);
+	workers[0].announceReady();
+	await assert.rejects(first, (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'timeout');
+	await sleep(10);
+	await assert.rejects(pool.quickAnalyze('scan.json', content, 1_000, 100), (e: unknown) => e instanceof AnalysisWorkerError && e.kind === 'failed', 'same version: skipped');
+	void pool.quickAnalyze('scan.json', 'y'.repeat(100), 2_000, 100).catch(() => undefined); // edited, same length
+	assert.ok(workers.some((w) => w.received.some((r) => r.op === 'quick' && r.mtimeMs === 2_000)), 'an edited file of equal length is tried again');
+	await pool.dispose();
+});

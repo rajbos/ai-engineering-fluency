@@ -8187,9 +8187,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/** Interaction count + token estimate for content the caller already read; parsed off the host thread. */
-	private quickAnalyzeSessionContent(sessionFile: string, content: string) {
+	private quickAnalyzeSessionContent(sessionFile: string, content: string, mtimeMs: number, size: number) {
 		return this.runOffHostThread(
-			(pool) => pool.quickAnalyze(sessionFile, content),
+			(pool) => pool.quickAnalyze(sessionFile, content, mtimeMs, size),
 			() => _quickAnalyzeSessionContent(this.analyzerDeps, sessionFile, content),
 		);
 	}
@@ -14532,7 +14532,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions: 0, tokens: 0, actualTokens: 0 });
         return;
       }
-      const { interactions, tokenResult } = await this.quickAnalyzeSessionContent(full, content);
+      const { interactions, tokenResult } = await this.quickAnalyzeSessionContent(full, content, stat.mtimeMs, stat.size);
       ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions, tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens });
     } finally {
       await handle.close();

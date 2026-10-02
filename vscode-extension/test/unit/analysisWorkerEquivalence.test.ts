@@ -205,7 +205,7 @@ test('folder-scan analysis: the worker returns exactly what the in-process analy
 		for (const file of FIXTURES.filter((f) => fs.existsSync(f))) {
 			const content = fs.readFileSync(file, 'utf8');
 			const [viaWorker, inProcess] = await Promise.all([
-				pool.quickAnalyze(file, content),
+				pool.quickAnalyze(file, content, fs.statSync(file).mtimeMs, fs.statSync(file).size),
 				quickAnalyzeSessionContent(deps, file, content),
 			]);
 			assert.deepEqual(normalize(viaWorker), normalize(inProcess), path.basename(file));
