@@ -430,6 +430,10 @@ export class AnalysisWorkerPool {
 		for (const pending of displaced) {
 			if (pending.timer) { clearTimeout(pending.timer); }
 			pending.timer = undefined;
+			// Any host lookup it was waiting on belonged to the worker that just died; its completion can no longer
+			// reach this request (the slot's bookkeeping is gone), so the count would stay raised for good and a
+			// re-sent request would never get a hang clock or count as running.
+			pending.hostLookups = 0;
 			if (pending.timedOut) {
 				pending.reject(new AnalysisWorkerError(`Analysis timed out (${reason})`, 'timeout'));
 			} else if (this.disposed || !slot.ready) {

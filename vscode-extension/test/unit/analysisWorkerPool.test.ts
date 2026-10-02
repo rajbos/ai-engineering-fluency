@@ -382,3 +382,22 @@ test('after one host lookup times out, further lookups fail at once instead of e
 	assert.ok(Date.now() - before < 50);
 	await pool.dispose();
 });
+
+test('a request re-sent after its worker died while it waited on the host is a normal running request again', async () => {
+	// Its host lookup belonged to the dead worker. If the "waiting on the host" count survived the re-send, the
+	// request would never get a hang clock and never count against the running window.
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 120, maxRestarts: 50, resolveOtelUsage: () => new Promise(() => undefined) });
+	const request = pool.analyze('a.json', 1, 1);
+	const outcome = request.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'));
+	workers[0].announceReady();
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 1, requestId: workers[0].received[0].id, sessionFile: 'a.json' });
+	workers[0].crash(); // dies while the request is parked on the host
+	await sleep(10);
+	assert.equal(workers.length, 2, 'the request was re-sent to a replacement worker');
+	workers[1].announceReady();
+	// The replacement never answers: the request must now be subject to the hang clock again.
+	await sleep(400);
+	assert.equal(workers[1].terminated, true, 'the re-sent request has a running hang clock');
+	assert.equal(await outcome, 'timeout');
+	await pool.dispose();
+});
