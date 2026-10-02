@@ -259,7 +259,7 @@ import { SessionDiscovery } from '../../src/sessionDiscovery';
 
 // --- Cache ---
 import { CacheManager } from './cacheManager';
-import { isFullCacheHit, isDetailsOnlyPlaceholder } from './detailsOnlyCache';
+import { isFullCacheHit, isDetailsOnlyPlaceholder, resolveFullResultAgainstCurrent } from './detailsOnlyCache';
 import { sweepStaleWalTempFiles } from '../../src/utils/sqliteWal';
 import { HookManager } from './hookManager';
 
@@ -8167,8 +8167,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this._cacheMisses++;
 		const sessionData = await this.analyzeSessionFileOffHostThread(sessionFilePath, mtime, fileSize, cached);
-		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
-		return sessionData;
+		// Re-read: a concurrent details parse may have written a placeholder while we analyzed.
+		const toStore = resolveFullResultAgainstCurrent(sessionData, this.getCachedSessionData(sessionFilePath));
+		this.setCachedSessionData(sessionFilePath, toStore, fileSize);
+		return toStore;
 	}
 
 	/**

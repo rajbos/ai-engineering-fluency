@@ -35,3 +35,14 @@ export function mergePlaceholderDetails(full: SessionFileCache, placeholder: Ses
 		...(full.title === undefined && placeholder.title !== undefined ? { title: placeholder.title } : {}),
 	};
 }
+
+/**
+ * Entry to store when a full analysis finishes. If a concurrent details parse wrote a placeholder
+ * for the same file version while the analysis was running, fold its detail metadata in so the
+ * full result does not overwrite it with nothing.
+ */
+export function resolveFullResultAgainstCurrent(full: SessionFileCache, current: SessionFileCache | undefined): SessionFileCache {
+	return current?.detailsOnly === true && current.mtime === full.mtime && current.size === full.size
+		? mergePlaceholderDetails(full, current)
+		: full;
+}

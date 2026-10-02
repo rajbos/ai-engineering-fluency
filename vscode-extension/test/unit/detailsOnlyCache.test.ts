@@ -1,6 +1,6 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
-import { isFullCacheHit, isDetailsOnlyPlaceholder } from '../../src/detailsOnlyCache';
+import { isFullCacheHit, isDetailsOnlyPlaceholder, resolveFullResultAgainstCurrent } from '../../src/detailsOnlyCache';
 import type { SessionFileCache } from '../../../src/types';
 
 const entry = (over: Partial<SessionFileCache> = {}): SessionFileCache => ({
@@ -25,4 +25,16 @@ test('placeholder rules: only an existing full entry avoids the marker, a token 
 	assert.equal(isDetailsOnlyPlaceholder(undefined), true);
 	assert.equal(isDetailsOnlyPlaceholder(entry({ tokens: 500 })), false);
 	assert.equal(isDetailsOnlyPlaceholder(entry({ detailsOnly: true })), true);
+});
+
+test('full analysis finishing after a concurrent details parse keeps the placeholder repository', () => {
+	const placeholder = entry({ detailsOnly: true, repository: 'r', repositoryResolved: true });
+	const stored = resolveFullResultAgainstCurrent(entry({ tokens: 500 }), placeholder);
+	assert.equal(stored.tokens, 500);
+	assert.equal(stored.detailsOnly, undefined);
+	assert.equal(stored.repository, 'r');
+	assert.equal(stored.repositoryResolved, true);
+	const full = entry({ tokens: 500 });
+	assert.equal(resolveFullResultAgainstCurrent(full, entry({ detailsOnly: true, repository: 'r', mtime: 99 })), full);
+	assert.equal(resolveFullResultAgainstCurrent(full, undefined), full);
 });
