@@ -6,7 +6,7 @@
  * host that ships these bundles has to supply that dictionary — see
  * `buildWebviewLocalization()` and docs/adr/LOCALIZATION-ARCHITECTURE.md.
  */
-import DEFAULT_LOCALIZATION_DATA from './webviewStrings.generated.json';
+import defaultLocalizationData from './webviewStrings.generated.json';
 
 /**
  * Built-in English fallback, used when the host sent no dictionary.
@@ -17,7 +17,7 @@ import DEFAULT_LOCALIZATION_DATA from './webviewStrings.generated.json';
  * (S1). Which keys belong here is the one editorial decision left, and lives
  * in `webviewKeys.json`.
  */
-const DEFAULT_LOCALIZATION: Record<string, string> = DEFAULT_LOCALIZATION_DATA;
+const DEFAULT_LOCALIZATION: Record<string, string> = defaultLocalizationData;
 
 /**
  * The keys the webviews ship a fallback for, as a real literal union.
@@ -27,7 +27,7 @@ const DEFAULT_LOCALIZATION: Record<string, string> = DEFAULT_LOCALIZATION_DATA;
  * `[key: string]: string` index signature which silently neutralized all of
  * them, letting any misspelled key type-check and then render raw at runtime.
  */
-export type WebviewKey = keyof typeof DEFAULT_LOCALIZATION_DATA;
+export type WebviewKey = keyof typeof defaultLocalizationData;
 
 /**
  * A dictionary of webview strings.
