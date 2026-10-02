@@ -1588,6 +1588,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * lookup that finishes last cannot overwrite a newer one (or an explicit sign-out) with a stale account.
 	 */
 	private _sessionLookupSeq = 0;
+	/** Counts explicit sign-outs, so an interactive sign-in that was pending across one can tell and stand down. */
+	private _signOutCount = 0;
 
 	// Cached PR stats result for the repos tab (mirrors the shared snapshot on disk)
 	private _lastRepoPrStats?: RepoPrStatsResult;
@@ -3669,11 +3671,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public async authenticateWithGitHub(): Promise<void> {
 		try {
 			this.log('Attempting GitHub authentication...');
+			const signOutCountAtStart = this._signOutCount;
 			const session = await vscode.authentication.getSession(
 				getGitHubAuthProviderId(),
 				['read:user'],
 				{ createIfNone: true }
 			);
+			// A sign-out that ran while the sign-in request / account picker was pending was the later user
+			// action and must stand; restoring the session here would silently undo it.
+			if (signOutCountAtStart !== this._signOutCount) {
+				this.log('Sign-in result discarded: the user signed out while it was pending');
+				return;
+			}
 			if (session) {
 				// Supersedes any silent lookup still in flight.
 				this._sessionLookupSeq++;
@@ -3704,6 +3713,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('Signing out from GitHub...');
 			this.githubSession = undefined;
 			this._githubSignedOutByUser = true;
+			this._signOutCount++;
 			this._sessionLookupSeq++;
 			this._accountBudgets = [];
 			this._accountBudgetsRefreshSeq++;
