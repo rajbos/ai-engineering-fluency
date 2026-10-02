@@ -8,19 +8,19 @@ import {
 	type WorkerLike,
 	type AnalysisWorkerPoolOptions,
 } from '../../src/analysis/analysisWorkerPool';
-import type { AnalysisHostMessage, AnalysisRequest, AnalysisWorkerMessage, ExactUsageReply } from '../../src/analysis/analysisProtocol';
+import type { AnalysisHostMessage, AnalysisRequest, AnalysisWorkerMessage, OtelUsageReply } from '../../src/analysis/analysisProtocol';
 import type { SessionFileCache } from '../../../src/types';
 
 /** A worker whose behaviour the test drives by hand: no threads, no timing. */
 class FakeWorker extends EventEmitter implements WorkerLike {
 	readonly received: AnalysisRequest[] = [];
 	/** What the host answered to this worker's exact-usage questions. */
-	readonly replies: ExactUsageReply[] = [];
+	readonly replies: OtelUsageReply[] = [];
 	terminated = false;
 	/** How long after terminate() the exit event is delivered; real termination is asynchronous. */
 	exitDelayMs = 0;
 	postMessage(message: AnalysisHostMessage): void {
-		if ('type' in message && message.type === 'exactUsageReply') { this.replies.push(message); }
+		if ('type' in message && message.type === 'otelUsageReply') { this.replies.push(message); }
 		else { this.received.push(message as AnalysisRequest); }
 	}
 	terminate(): Promise<number> {
@@ -246,11 +246,11 @@ test('the hang clock is paused while the worker waits on the host, and restarts 
 	// worker, and must not get the worker killed (which in practice made a refresh restart workers forever).
 	let finishLookup: () => void = () => undefined;
 	const lookup = new Promise<null>((resolve) => { finishLookup = () => resolve(null); });
-	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 200, resolveExactUsage: () => lookup });
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 200, resolveOtelUsage: () => lookup });
 	const request = pool.analyze('a.json', 1, 1);
 	const outcome = request.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'));
 	workers[0].announceReady();
-	workers[0].emit('message', { type: 'exactUsage', rpcId: 7, sessionFile: 'a.json' });
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 7, requestId: workers[0].received[0].id, sessionFile: 'a.json' });
 	await sleep(500); // well past the 200ms clock
 	assert.equal(workers[0].terminated, false, 'waiting on the host is not a hang');
 	finishLookup();
@@ -266,22 +266,22 @@ test('the hang clock is paused while the worker waits on the host, and restarts 
 });
 
 test('a host lookup that never returns is cut off and reported as an error, so the request cannot wait forever', async () => {
-	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 5_000, hostLookupTimeoutMs: 100, resolveExactUsage: () => new Promise(() => undefined) });
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 5_000, hostLookupTimeoutMs: 100, resolveOtelUsage: () => new Promise(() => undefined) });
 	const request = pool.analyze('a.json', 1, 1);
 	void request.catch(() => undefined);
 	workers[0].announceReady();
-	workers[0].emit('message', { type: 'exactUsage', rpcId: 1, sessionFile: 'a.json' });
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 1, requestId: workers[0].received[0].id, sessionFile: 'a.json' });
 	await sleep(250);
 	assert.equal(workers[0].replies.length, 1);
-	assert.match(workers[0].replies[0].error ?? '', /did not finish/);
+	assert.match(workers[0].replies[0].error ?? "", /did not answer/);
 	await pool.dispose();
 });
 
 test('a failing host lookup is relayed to the worker as an error', async () => {
-	const { pool, workers } = makePool({ size: 1, resolveExactUsage: async () => { throw new Error('index unavailable'); } });
+	const { pool, workers } = makePool({ size: 1, resolveOtelUsage: async () => { throw new Error('index unavailable'); } });
 	void pool.analyze('a.json', 1, 1).catch(() => undefined);
 	workers[0].announceReady();
-	workers[0].emit('message', { type: 'exactUsage', rpcId: 3, sessionFile: 'a.json' });
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 3, requestId: workers[0].received[0].id, sessionFile: 'a.json' });
 	await tick(); await tick();
 	assert.equal(workers[0].replies[0]?.error, 'index unavailable');
 	await pool.dispose();
@@ -319,5 +319,66 @@ test('when the restart budget trips, the workers that are still alive are retire
 	assert.deepEqual(settled, ['unavailable', 'unavailable']);
 	assert.equal(pool.isAvailable(), false);
 	assert.equal(workers[1].terminated, true, 'the surviving worker is retired, not left running');
+	await pool.dispose();
+});
+
+test('requests waiting on the host do not occupy the worker, so files that need no lookup keep flowing', async () => {
+	// A few Copilot CLI sessions waiting on the OTel index used to take every running slot and hold up everything
+	// else, which on a real history left a refresh sitting at a few percent.
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 60_000, resolveOtelUsage: () => new Promise(() => undefined) });
+	const requests = ['a', 'b', 'c', 'd', 'e'].map((n) => pool.analyze(`${n}.json`, 1, 1));
+	requests.forEach((r) => void r.catch(() => undefined));
+	assert.equal(workers[0].received.length, 2, 'two run at a time to begin with');
+	workers[0].announceReady();
+	for (const request of workers[0].received.slice(0, 2)) {
+		workers[0].emit('message', { type: 'otelUsage', rpcId: request.id, requestId: request.id, sessionFile: 'x' });
+	}
+	assert.equal(workers[0].received.length, 4, 'with both parked on the host, the next two are admitted');
+	const third = workers[0].received[2];
+	workers[0].reply({ type: 'result', id: third.id, ok: true, result: entry(3) });
+	assert.equal(workers[0].received.length, 5, 'and a completion admits the one after');
+	await pool.dispose();
+});
+
+test('a worker with a request waiting on the host is not killed for it, but another request still has its own clock', async () => {
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 150, resolveOtelUsage: () => new Promise(() => undefined) });
+	const waiting = pool.analyze('waiting.json', 1, 1);
+	const busy = pool.analyze('busy.json', 1, 1);
+	void waiting.catch(() => undefined);
+	const busyOutcome = busy.then(() => 'resolved', (e: unknown) => (e instanceof AnalysisWorkerError ? e.kind : 'other'));
+	workers[0].announceReady();
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 1, requestId: workers[0].received[0].id, sessionFile: 'x' });
+	await sleep(400);
+	assert.equal(await busyOutcome, 'timeout', 'the request that is not waiting on the host is still subject to the hang clock');
+	await pool.dispose();
+});
+
+test('a silent pipeline reports what it is waiting on', async () => {
+	const { pool, workers, warnings } = makePool({ size: 1, requestTimeoutMs: 60_000, stallReportMs: 40, resolveOtelUsage: () => new Promise(() => undefined) });
+	const request = pool.analyze('slow-session.jsonl', 1, 1);
+	void request.catch(() => undefined);
+	workers[0].announceReady();
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 1, requestId: workers[0].received[0].id, sessionFile: 'slow-session.jsonl' });
+	await sleep(200);
+	const report = warnings.find((w) => /no request has completed/.test(w));
+	assert.ok(report, 'a stall report is logged');
+	assert.match(report, /1 on workers \(1 waiting on the host\)/);
+	assert.match(report, /slow-session\.jsonl/);
+	await pool.dispose();
+});
+
+test('after one host lookup times out, further lookups fail at once instead of each waiting out its own limit', async () => {
+	const { pool, workers } = makePool({ size: 1, requestTimeoutMs: 60_000, hostLookupTimeoutMs: 60, hostLookupCooldownMs: 5_000, resolveOtelUsage: () => new Promise(() => undefined) });
+	void pool.analyze('a.json', 1, 1).catch(() => undefined);
+	void pool.analyze('b.json', 1, 1).catch(() => undefined);
+	workers[0].announceReady();
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 1, requestId: workers[0].received[0].id, sessionFile: 'a.json' });
+	await sleep(150); // the first lookup has timed out
+	assert.match(workers[0].replies[0].error ?? '', /did not answer/);
+	const before = Date.now();
+	workers[0].emit('message', { type: 'otelUsage', rpcId: 2, requestId: workers[0].received[1].id, sessionFile: 'b.json' });
+	assert.equal(workers[0].replies.length, 2, 'answered immediately, not after another 60ms');
+	assert.match(workers[0].replies[1].error ?? '', /still loading/);
+	assert.ok(Date.now() - before < 50);
 	await pool.dispose();
 });

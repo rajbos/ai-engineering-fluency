@@ -430,6 +430,22 @@ export function expireCopilotCliOtelCacheForTests(): void {
 	inFlightLoad = null;
 }
 
+type OtelUsageResolver = (sessionFile: string) => Promise<CopilotCliOtelSessionUsage | null>;
+let otelUsageResolver: OtelUsageResolver | undefined;
+
+/**
+ * Routes OTel-export lookups somewhere else, or back to the local index when given `undefined`.
+ *
+ * The OTel index lives in this module's state, so a second thread that imports it builds its own — and the
+ * export is append-only and can be multi-GB. The extension's analysis workers install a resolver that asks the
+ * host, so there is one index however many threads are parsing. Only this fallback goes through the hook: the
+ * session-store database lookup (the common case, and one that must not run on the host thread) stays local.
+ * Unset everywhere else (CLI, tests, the host itself).
+ */
+export function setCopilotCliOtelUsageResolver(resolver: OtelUsageResolver | undefined): void {
+	otelUsageResolver = resolver;
+}
+
 /**
  * Looks up exact OTel-derived usage for a Copilot CLI session file, or null when the
  * path isn't a Copilot CLI session or no matching OTel export data was found.
@@ -437,6 +453,7 @@ export function expireCopilotCliOtelCacheForTests(): void {
 export async function getCopilotCliOtelUsage(sessionFile: string): Promise<CopilotCliOtelSessionUsage | null> {
 	const sessionId = extractCopilotCliSessionId(sessionFile);
 	if (!sessionId) { return null; }
+	if (otelUsageResolver) { return otelUsageResolver(sessionFile); }
 	const index = await loadCopilotCliOtelIndex();
 	return index.get(sessionId) ?? null;
 }
@@ -467,20 +484,6 @@ export async function getCopilotCliStoreUsage(
 	return usage;
 }
 
-type ExactUsageResolver = (sessionFile: string) => Promise<CopilotCliOtelSessionUsage | null>;
-let exactUsageResolver: ExactUsageResolver | undefined;
-
-/**
- * Routes `getCopilotCliExactUsage` somewhere else, or back to the local lookup when given `undefined`.
- *
- * The OTel index and the session-store SQLite copy live in this module's state, so a second thread that
- * imports it gets its own — and the OTel export is append-only and can be multi-GB. The extension's analysis
- * workers install a resolver that asks the host, so there is one index and one database copy however many
- * threads are parsing. Unset everywhere else (CLI, tests, the host itself).
- */
-export function setCopilotCliExactUsageResolver(resolver: ExactUsageResolver | undefined): void {
-	exactUsageResolver = resolver;
-}
 
 /**
  * Returns the most authoritative exact usage data available for a Copilot CLI session.
@@ -492,7 +495,6 @@ export async function getCopilotCliExactUsage(
 	sessionFile: string,
 	storeAccess: CopilotCliStoreAccess = cliStoreAccess,
 ): Promise<CopilotCliOtelSessionUsage | null> {
-	if (exactUsageResolver && storeAccess === cliStoreAccess) { return exactUsageResolver(sessionFile); }
 	const storeUsage = await getCopilotCliStoreUsage(sessionFile, storeAccess);
 	if (storeUsage) { return storeUsage; }
 	return getCopilotCliOtelUsage(sessionFile);

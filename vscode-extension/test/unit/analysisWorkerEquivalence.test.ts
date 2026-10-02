@@ -32,11 +32,18 @@ const FIXTURES = [
 
 let scratchDir: string;
 let workerPath: string;
+const savedHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
 
 before(async () => {
 	// eslint-disable-next-line @typescript-eslint/no-require-imports
 	const esbuild = require('esbuild') as typeof import('esbuild');
 	scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'analysis-worker-'));
+	// The worker looks Copilot CLI usage up in the session-store database under the user's home. Point home at an
+	// empty directory so these tests never read (or depend on) the developer's real ~/.copilot.
+	const emptyHome = path.join(scratchDir, 'home');
+	fs.mkdirSync(emptyHome, { recursive: true });
+	process.env.HOME = emptyHome;
+	process.env.USERPROFILE = emptyHome;
 	workerPath = path.join(scratchDir, 'analysisWorker.js');
 	await esbuild.build({
 		entryPoints: [path.join(EXTENSION_ROOT, 'src', 'analysis', 'analysisWorker.ts')],
@@ -53,11 +60,14 @@ before(async () => {
 });
 
 after(() => {
+	for (const key of ['HOME', 'USERPROFILE'] as const) {
+		if (savedHome[key] === undefined) { delete process.env[key]; } else { process.env[key] = savedHome[key]; }
+	}
 	if (scratchDir) { fs.rmSync(scratchDir, { recursive: true, force: true }); }
 });
 
-function makePool(size = 2, resolveExactUsage?: (sessionFile: string) => Promise<CopilotCliOtelSessionUsage | null>): AnalysisWorkerPool {
-	return new AnalysisWorkerPool({ workerPath, extensionPath: EXTENSION_ROOT, size, log: () => undefined, warn: () => undefined, resolveExactUsage });
+function makePool(size = 2, resolveOtelUsage?: (sessionFile: string) => Promise<CopilotCliOtelSessionUsage | null>): AnalysisWorkerPool {
+	return new AnalysisWorkerPool({ workerPath, extensionPath: EXTENSION_ROOT, size, log: () => undefined, warn: () => undefined, resolveOtelUsage });
 }
 
 function buildInProcessDeps(): SessionAnalyzerDeps {
@@ -156,7 +166,7 @@ test('an unparseable session yields the same partial details and no cache update
 	}
 });
 
-test('a Copilot CLI exact-usage lookup is answered by the host, so workers never scan the OTel export themselves', async () => {
+test('a Copilot CLI OTel lookup is answered by the host, so workers never scan the OTel export themselves', async () => {
 	// A worker has its own module state, so left alone it would build its own copy of the (potentially multi-GB)
 	// OTel index. The host answers instead; here a spy stands in for the host and returns a distinctive usage.
 	const sessionId = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
@@ -170,16 +180,19 @@ test('a Copilot CLI exact-usage lookup is answered by the host, so workers never
 	const pool = makePool(1, async (sessionFile) => { asked.push(sessionFile); return null; });
 	try {
 		await pool.analyze(eventsFile, stat.mtimeMs, stat.size);
-		assert.ok(asked.includes(eventsFile), 'the worker asked the host for the exact usage of this session');
+		assert.ok(asked.includes(eventsFile), 'the worker asked the host about the OTel usage of this session');
 	} finally {
 		await pool.dispose();
 	}
 
-	// A lookup that fails on the host surfaces as the analysis failing, not as a hang.
+	// A lookup that fails on the host must fail the request. The analysis code tolerates many errors (an unreadable
+	// file yields zeros), and without this the half-answered result would be cached as if it were complete.
 	const failing = makePool(1, async () => { throw new Error('index unavailable'); });
 	try {
-		const outcome = await failing.analyze(eventsFile, stat.mtimeMs, stat.size).then(() => 'resolved', (e: Error) => e.message);
-		assert.ok(outcome === 'resolved' || /index unavailable/.test(outcome), `unexpected outcome: ${outcome}`);
+		await assert.rejects(
+			failing.analyze(eventsFile, stat.mtimeMs, stat.size),
+			(e: unknown) => /index unavailable/.test(String((e as Error).message)) && (e as { code?: string }).code === 'EOTELLOOKUP',
+		);
 	} finally {
 		await failing.dispose();
 	}
@@ -202,7 +215,7 @@ test('folder-scan analysis: the worker returns exactly what the in-process analy
 	}
 });
 
-test('exact usage returned by the host reaches the worker analysis result', async () => {
+test('OTel usage returned by the host reaches the worker analysis result', async () => {
 	// The positive half of the host round trip: not just that the worker asks, but that a non-null answer is
 	// delivered intact and used (it overrides the ratio-based estimate, exactly as it does in-process).
 	const sessionId = '7a8b9c0d-1e2f-4a3b-9c4d-5e6f7a8b9c0d';

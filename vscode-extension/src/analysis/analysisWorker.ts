@@ -7,6 +7,7 @@
  * own caches), answers requests from `analysisProtocol.ts`, and holds no state the host
  * depends on: killing and respawning it is always safe.
  */
+import { AsyncLocalStorage } from 'async_hooks';
 import { parentPort, workerData } from 'worker_threads';
 
 import tokenEstimatorsData from '../../../src/tokenEstimators.json';
@@ -15,12 +16,12 @@ import toolNamesData from '../../../src/toolNames.json';
 import type { ModelPricing, TokenEstimator } from '../../../src/types';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../../src/adapters';
 import { estimateTokensFromText } from '../../../src/tokenEstimation';
-import { setCopilotCliExactUsageResolver, type CopilotCliOtelSessionUsage } from '../../../src/copilotCliOtel';
+import { setCopilotCliOtelUsageResolver, type CopilotCliOtelSessionUsage } from '../../../src/copilotCliOtel';
 import { isMcpTool, extractMcpServerName } from '../../../src/workspaceHelpers';
 import { analyzeSessionFile, quickAnalyzeSessionContent, supplementCacheWithDebugLog, type SessionAnalyzerDeps } from './sessionFileAnalyzer';
 import { computeSessionFileDetails } from './sessionDetailsAnalyzer';
 import { scanCustomizationFilesForWorkspace } from './workspaceCustomizationScan';
-import type { AnalysisHostMessage, AnalysisRequest, AnalysisResponse, AnalysisWorkerData, AnalysisWorkerMessage, ExactUsageReply } from './analysisProtocol';
+import type { AnalysisHostMessage, AnalysisRequest, AnalysisResponse, AnalysisWorkerData, AnalysisWorkerMessage, OtelUsageReply } from './analysisProtocol';
 
 if (!parentPort) {
 	throw new Error('analysisWorker must be started as a worker thread');
@@ -30,19 +31,30 @@ const data = workerData as AnalysisWorkerData;
 
 const post = (message: AnalysisWorkerMessage): void => port.postMessage(message);
 
-// Exact-usage lookups for Copilot CLI sessions are answered by the host (see setCopilotCliExactUsageResolver).
-const exactUsageWaiters = new Map<number, { resolve: (usage: CopilotCliOtelSessionUsage | null) => void; reject: (error: Error) => void }>();
+/**
+ * Which request the code currently running belongs to. A lookup that goes to the host is tagged with it (so the pool
+ * knows that request is waiting on the host, not busy here), and a failed lookup is recorded on it.
+ */
+interface RequestContext { requestId: number; lookupError?: string }
+const requestContext = new AsyncLocalStorage<RequestContext>();
+
+// OTel-export lookups for Copilot CLI sessions are answered by the host (see setCopilotCliOtelUsageResolver).
+const otelWaiters = new Map<number, { resolve: (usage: CopilotCliOtelSessionUsage | null) => void; reject: (error: Error) => void }>();
 let nextRpcId = 1;
-setCopilotCliExactUsageResolver((sessionFile) => new Promise((resolve, reject) => {
+setCopilotCliOtelUsageResolver((sessionFile) => new Promise((resolve, reject) => {
+	const context = requestContext.getStore();
 	const rpcId = nextRpcId++;
-	exactUsageWaiters.set(rpcId, { resolve, reject });
-	post({ type: 'exactUsage', rpcId, sessionFile });
+	otelWaiters.set(rpcId, {
+		resolve,
+		reject: (error) => { if (context) { context.lookupError = error.message; } reject(error); },
+	});
+	post({ type: 'otelUsage', rpcId, requestId: context?.requestId ?? -1, sessionFile });
 }));
 
-function onExactUsageReply(reply: ExactUsageReply): void {
-	const waiter = exactUsageWaiters.get(reply.rpcId);
+function onOtelUsageReply(reply: OtelUsageReply): void {
+	const waiter = otelWaiters.get(reply.rpcId);
 	if (!waiter) { return; }
-	exactUsageWaiters.delete(reply.rpcId);
+	otelWaiters.delete(reply.rpcId);
 	if (reply.error !== undefined) { waiter.reject(new Error(reply.error)); }
 	else { waiter.resolve(reply.usage); }
 }
@@ -68,7 +80,22 @@ const deps: SessionAnalyzerDeps = {
 	// No `windsurf`: its sessions are virtual (gRPC-backed) and the host keeps them in-process.
 };
 
+/**
+ * Runs one request. The analysis code deliberately tolerates many failures (an unreadable file yields zeros, not an
+ * exception), which is right for the data but wrong for a lookup that merely could not be answered *right now*: the
+ * result would be cached as if it were complete. So if a host lookup failed during this request, the request fails
+ * instead, and the file is simply tried again on the next refresh.
+ */
 async function handle(request: AnalysisRequest): Promise<AnalysisResponse> {
+	const context: RequestContext = { requestId: request.id };
+	const response = await requestContext.run(context, () => handleRequest(request));
+	if (context.lookupError !== undefined && response.ok) {
+		return { type: 'result', id: request.id, ok: false, error: `Copilot CLI usage lookup failed: ${context.lookupError}`, code: 'EOTELLOOKUP' };
+	}
+	return response;
+}
+
+async function handleRequest(request: AnalysisRequest): Promise<AnalysisResponse> {
 	try {
 		if (request.op === 'analyze') {
 			const existing = request.existingRepository !== undefined ? { repository: request.existingRepository } : undefined;
@@ -107,7 +134,7 @@ function respond(response: AnalysisResponse): void {
  * the worker, and a whole refresh sat at a few percent.) CPU work still serializes on this thread by itself.
  */
 port.on('message', (message: AnalysisHostMessage) => {
-	if ('type' in message && message.type === 'exactUsageReply') { onExactUsageReply(message); return; }
+	if ('type' in message && message.type === 'otelUsageReply') { onOtelUsageReply(message); return; }
 	void handle(message as AnalysisRequest).then(respond);
 });
 

@@ -142,11 +142,26 @@ missing.
   measured machine (23 MB, 6.7k entries) that is ~0.1 s to parse and ~0.2 s to stringify per checkpoint — not a
   user-visible stall — and moving it would mean reworking its clear-epoch race fences. Revisit if the cache
   grows by an order of magnitude; the lag monitor will show it.
-* **Copilot CLI exact usage is answered by the host.** `getCopilotCliExactUsage` (session-store billing rows, then
-  the OTel export) keeps its index and SQLite copy in module state, so a worker would build its own — and the OTel
-  export is append-only and was 9.8 GB on the measured machine. Workers install
-  `setCopilotCliExactUsageResolver` and ask the host over the worker channel (`exactUsage` / `exactUsageReply`), so
-  one index and one database copy serve every worker. The hook is unset everywhere else (CLI, tests, the host).
+* **The Copilot CLI OTel index is the host's; the session-store lookup is the worker's.** For a Copilot CLI
+  session, exact usage comes from the `session-store.db` billing table first and from the OTel file export only
+  when the table has no rows. The export is append-only and was 9.8 GB on the measured machine, and its index
+  lives in module state, so each worker would build its own. Workers therefore install
+  `setCopilotCliOtelUsageResolver` and ask the host for *that fallback only* (`otelUsage` / `otelUsageReply`);
+  the database lookup — frequent, and the database is reloaded whenever the CLI writes to it — stays in the
+  worker, so the host thread never parses that 85 MB database. The hook is unset everywhere else (CLI, tests, the
+  host itself).
+
+  Waiting on the host has its own rules, learned from a real run that sat at 9% for ten minutes:
+  * A request parked on a host lookup **does not count against the worker's running window** (each holds its
+    file in memory, so parked requests are bounded at 32 per worker). Otherwise a few sessions waiting for the
+    index take every slot and freeze all the files that never needed it.
+  * Its hang clock is paused for the wait, and restarts with a full window afterwards.
+  * The wait is bounded (2 minutes). Past it the request **fails** — the analysis code tolerates many errors
+    and would otherwise cache a half-answered result as complete — and is retried on the next refresh. After a
+    timeout further lookups fail at once for a minute, instead of each waiting out its own limit.
+  * The pool logs `OTel usage lookup for … took Ns` for slow lookups, and `Analysis pool: no request has
+    completed for Ns — …` (queued, running, parked on the host, longest-running request) when nothing finishes
+    for 30 s. If a refresh looks stuck, that line says why.
 * **Remaining per-worker memory.** Adapters that read other SQLite stores (for example Copilot's `data.db`, 127 MB
   on the measured machine) still hold one in-memory copy per worker, which is why the pool is capped at two
   workers rather than scaled to the core count.

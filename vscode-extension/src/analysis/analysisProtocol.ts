@@ -26,19 +26,21 @@ export type AnalysisResponse =
 	| { type: 'result'; id: number; ok: false; error: string; /** Node error code (e.g. ENOENT) so callers can keep branching on it. */ code?: string };
 
 /**
- * Out-of-band messages the worker sends that are not answers to a request. `exactUsage` asks the host for a
- * Copilot CLI session's exact usage, so the host's single OTel index / session-store copy serves every worker.
+ * Out-of-band messages the worker sends that are not answers to a request. `otelUsage` asks the host for a
+ * Copilot CLI session's usage from the OTel export, so the host's single (possibly multi-GB) index serves every
+ * worker. It names the request it belongs to, so the pool can tell a request that is waiting on the host from one
+ * that is busy in the worker.
  */
 export type AnalysisWorkerEvent =
 	| { type: 'ready' }
 	| { type: 'warn'; message: string }
-	| { type: 'exactUsage'; rpcId: number; sessionFile: string };
+	| { type: 'otelUsage'; rpcId: number; requestId: number; sessionFile: string };
 
 export type AnalysisWorkerMessage = AnalysisResponse | AnalysisWorkerEvent;
 
-/** The host's answer to an `exactUsage` ask. */
-export interface ExactUsageReply {
-	type: 'exactUsageReply';
+/** The host's answer to an `otelUsage` ask. */
+export interface OtelUsageReply {
+	type: 'otelUsageReply';
 	rpcId: number;
 	usage: CopilotCliOtelSessionUsage | null;
 	/** Set when the host-side lookup threw; the worker rethrows it where it asked. */
@@ -46,7 +48,7 @@ export interface ExactUsageReply {
 }
 
 /** Everything the host can post to a worker. */
-export type AnalysisHostMessage = AnalysisRequest | ExactUsageReply;
+export type AnalysisHostMessage = AnalysisRequest | OtelUsageReply;
 
 /** What the host passes via `workerData` so the worker can build its own adapter registry. */
 export interface AnalysisWorkerData {
