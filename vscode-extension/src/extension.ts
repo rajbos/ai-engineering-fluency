@@ -5691,9 +5691,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tooltip.appendMarkdown(formatTooltipStatsTable(detailedStats, (costs) => this.sumBillingGroupCosts(costs)));
 		tooltip.appendMarkdown('\n---\n');
 		this.appendProviderCostSection(tooltip, detailedStats);
-		// The Copilot Budget gauge only renders with local cost groups and a budget; a lone account's row
-		// is redundant only when that gauge is actually there.
-		const gaugeShown = Object.keys(detailedStats.month.billingGroupCosts ?? {}).length > 0 && this.getEffectiveMonthlyBudget() > 0;
+		// A lone account's row is redundant only when the gauge both renders (local cost groups and a budget)
+		// and reflects that account's quota. A user-configured monthly budget overrides the quota, so the
+		// gauge then shows the setting rather than the account.
+		const gaugeShown = Object.keys(detailedStats.month.billingGroupCosts ?? {}).length > 0
+			&& this.getEffectiveMonthlyBudget() > 0
+			&& this.getMonthlyBudgetSetting() <= 0;
 		const accountLines = formatAccountBudgetLines(this._accountBudgets, {
 			usedLeft: (used, budget, pct) => l10n.t('accountBudgets.usedLeft', used, budget, pct),
 			noQuota: l10n.t('accountBudgets.noQuota'),
@@ -14257,6 +14260,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
         backendStorageInfo,
         githubAuth: githubAuthStatus,
         accountBudgets: this._accountBudgets,
+        // Carried with the list so the webview takes its full quota-card refresh path if a direct update was missed.
+        quotaEntitlements: this._copilotQuotaEntitlements,
         toolCallStats: this.currentUsageAnalysisStats?.last30Days?.toolCalls ?? null,
         skillCallStats: this.currentUsageAnalysisStats?.last30Days?.skillCalls ?? null,
         skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
