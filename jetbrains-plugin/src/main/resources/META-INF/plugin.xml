@@ -30,7 +30,7 @@
     <change-notes><![CDATA[
         <h3>0.5.2</h3>
         <ul>
-            <li>Updated shared webview bundles: grouped Usage Analysis tabs, official editor logos in the Chart view, an estimated-cost card in the log viewer, and the Copilot budget for every signed-in GitHub account</li>
+            <li>Updated shared webview bundles: grouped Usage Analysis tabs, official editor logos in the Chart view</li>
             <li>The Environmental view's methodology links now open in your browser</li>
         </ul>
         <h3>0.5.1</h3>

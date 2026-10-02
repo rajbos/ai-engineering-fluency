@@ -7,7 +7,7 @@ All notable changes to the Visual Studio extension will be documented in this fi
 ## [1.4.2] - 2026-10-02
 
 ### ✨ Features & Improvements
-- Updated webview bundles with the latest shared-view changes: grouped Usage Analysis tabs, official editor logos in the Chart view, an estimated-cost card in the log viewer, and more accurate exact-cost totals from debug logs
+- Updated webview bundles with the latest shared-view changes: grouped Usage Analysis tabs, official editor logos in the Chart view, and more accurate exact-cost totals from debug logs
 - The Environmental view's methodology links now open in your browser
 
 ## [1.4.1] - 2026-09-21
