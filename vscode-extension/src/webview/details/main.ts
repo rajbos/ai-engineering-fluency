@@ -251,7 +251,7 @@ return { thead, updateHeaders };
 
 function render(stats: DetailedStats): void {
 setCompactNumbers(stats.compactNumbers !== false);
-syncLogoTheme(); // Ensure logo theme is correctly set based on user preference and display official logo for known editors, and emoji for unknown editors.
+syncLogoTheme();
 lastStats = stats;
 const root = document.getElementById('root');
 if (!root) { return; }

@@ -293,6 +293,107 @@ test('l10n: usage context-pressure keys resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: usage tab-group, band and context-reference keys resolve in English', () => {
+	// These back the Usage view's group tab strip, the Activity tab's band headings, and the
+	// collapsed context-reference long tail. A missing key renders the raw key as a tab label
+	// or section heading.
+	const expected: Record<string, string> = {
+		'usage.group.usage': 'Usage',
+		'usage.group.workspace': 'Workspace',
+		'usage.group.github': 'GitHub',
+		'usage.group.coaching': 'Coaching',
+		// The leaf tab labels. They render through `localize()` on every strip render, so a
+		// missing key shows up as a tab titled "usage.tab.repos".
+		'usage.tab.activity': 'My Activity',
+		'usage.tab.sessions': 'Recent Sessions',
+		'usage.tab.tools': 'Tools & Integrations',
+		'usage.tab.health': 'Workspace Health',
+		'usage.tab.repos': 'Repository PRs',
+		'usage.tab.agent': 'Cloud Agent',
+		'usage.tab.worktrees': 'Worktrees',
+		'usage.tab.insights': 'Insights',
+		'usage.tab.corrections': 'Corrections',
+		'usage.band.overview.title': 'Overview',
+		'usage.band.spend.title': 'Spend & models',
+		'usage.band.context.title': 'Context',
+		'usage.contextWindow.compactionHeading': 'Context compaction',
+		'usage.contextRefs.noneRecent': 'No context references recorded today or in the last 30 days.',
+		'usage.contextRefs.totalTooltip': 'Total across the reference kinds (#file, #selection, @workspace, instructions files and so on). The Images, Prompt Files, Custom Prompts and Code Lines rows are separate metrics and are not included in this total.',
+		// The table's own head and footer labels. They render through `localize()` on every
+		// render rather than from a module constant, so a missing key shows up as a column
+		// titled "usage.contextRefs.colToday".
+		'usage.contextRefs.colReference': 'Reference',
+		'usage.contextRefs.colToday': 'Today',
+		'usage.contextRefs.colThisMonth': 'This Month',
+		'usage.contextRefs.colLastMonth': 'Last Month',
+		'usage.contextRefs.colLast30': 'Last 30 Days',
+		'usage.contextRefs.colTrend': 'Trend',
+		'usage.contextRefs.colTrendTooltip': 'Trend: Last Month → This Month → Today',
+		'usage.contextRefs.totalRow': '📊 Total References',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+	assert.match(t('usage.band.overview.subtitle'), /interaction modes/);
+	assert.match(t('usage.band.spend.subtitle'), /how hard they were asked to think/);
+	assert.match(t('usage.band.context.subtitle'), /what gets compacted away/);
+	// The count is a placeholder, not concatenated, so a locale can reposition it.
+	assert.equal(
+		t('usage.contextRefs.otherSummary', '4'),
+		'Other references (4, no usage today or in the last 30 days)',
+	);
+});
+
+test('l10n: usage tab-group, band and context-reference keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'usage.group.usage': '使用情况',
+			'usage.group.workspace': '工作区',
+			'usage.group.coaching': '改进建议',
+			'usage.tab.activity': '我的活动',
+			'usage.tab.sessions': '最近会话',
+			'usage.tab.tools': '工具与集成',
+			'usage.tab.health': '工作区健康度',
+			'usage.tab.repos': '仓库 PR',
+			'usage.tab.agent': '云端代理',
+			'usage.tab.worktrees': '工作树',
+			'usage.tab.insights': '洞察',
+			'usage.tab.corrections': '纠正',
+			'usage.band.overview.title': '概览',
+			'usage.band.spend.title': '花费与模型',
+			'usage.band.context.title': '上下文',
+			'usage.contextWindow.compactionHeading': '上下文压缩',
+			'usage.contextRefs.colReference': '引用',
+			'usage.contextRefs.colToday': '今天',
+			'usage.contextRefs.colThisMonth': '本月',
+			'usage.contextRefs.colLastMonth': '上月',
+			'usage.contextRefs.colLast30': '最近 30 天',
+			'usage.contextRefs.colTrend': '趋势',
+			'usage.contextRefs.colTrendTooltip': '趋势：上月 → 本月 → 今天',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+		// "GitHub" is a proper noun and stays untranslated — asserted so a future bulk
+		// translation pass doesn't quietly localize a product name.
+		assert.equal(t('usage.group.github'), 'GitHub');
+		assert.equal(t('usage.contextRefs.otherSummary', '4'), '其他引用（4 个，今天和最近 30 天均未使用）');
+		// The band subtitles and the two context-reference strings are the longest prose in this
+		// set, so they are the likeliest to be dropped or half-translated in a bulk edit.
+		assert.equal(t('usage.band.overview.subtitle'), "你使用 AI 助手的总量，以及使用了哪些交互模式。", 'zh-cn value for usage.band.overview.subtitle');
+		assert.equal(t('usage.band.spend.subtitle'), "这些使用产生的成本、运行在哪些模型上，以及它们被要求思考的深度。", 'zh-cn value for usage.band.spend.subtitle');
+		assert.equal(t('usage.band.context.subtitle'), "你提供给模型的内容：附加的引用、请求与窗口上限的接近程度，以及被压缩掉的部分。", 'zh-cn value for usage.band.context.subtitle');
+		assert.equal(t('usage.contextRefs.noneRecent'), "今天和最近 30 天均未记录到上下文引用。", 'zh-cn value for usage.contextRefs.noneRecent');
+		assert.equal(t('usage.contextRefs.totalTooltip'), "各引用类型的合计（#file、#selection、@workspace、说明文件等）。图片、提示文件、自定义提示和代码行数这几行属于独立指标，不计入此合计。", 'zh-cn value for usage.contextRefs.totalTooltip');
+		// The emoji is part of the label, not decoration added at render time, so it has to
+		// survive translation along with the words after it.
+		assert.equal(t('usage.contextRefs.totalRow'), "📊 引用合计", 'zh-cn value for usage.contextRefs.totalRow');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: efficiency Value empty-state keys resolve in English', () => {
 	// These back the Value tab's empty state: the explanation and the "Open Repository PRs"
 	// button beside it. A missing key would render a raw `efficiency.value.*` in the panel.
@@ -1321,6 +1422,54 @@ test('l10n: backend Sync Now failure and nothing-sent text resolve in English an
 	try {
 		assert.equal(t('backend.syncNow.failed', '团队服务器'), '上传到团队服务器失败。有关详细信息，请查看 AI Engineering Fluency 输出通道。');
 		assert.equal(t('backend.syncNow.nothingSent', '团队服务器'), '未向团队服务器上传任何数据。可能有另一个 VS Code 窗口正在同步，或者团队服务器需要登录 GitHub。有关详细信息，请查看输出通道。');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: per-account budget strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	const english: Record<string, string> = {
+		'accountBudgets.title': 'GitHub accounts in VS Code',
+		'accountBudgets.usedLeft': '{0} / {1} used · {2}% left',
+		'accountBudgets.resets': 'resets {0}',
+		'accountBudgets.noQuota': 'No metered budget on this plan',
+		'accountBudgets.unavailable': 'Budget unavailable',
+		'accountBudgets.noSession': 'Sign in with this account from the Accounts menu to see its budget',
+		'accountBudgets.lookupFailed': 'Copilot plan lookup failed ({0})',
+	};
+	for (const [key, value] of Object.entries(english)) {
+		assert.equal(t(key), value, `English value for ${key}`);
+	}
+
+	mock.setLanguage('zh-cn');
+	try {
+		const chinese: Record<string, string> = {
+			'accountBudgets.title': 'VS Code 中的 GitHub 帐户',
+			'accountBudgets.usedLeft': '已使用 {0} / {1} · 剩余 {2}%',
+			'accountBudgets.resets': '{0} 重置',
+			'accountBudgets.noQuota': '此计划没有计量预算',
+			'accountBudgets.unavailable': '预算不可用',
+			'accountBudgets.noSession': '请从“帐户”菜单使用此帐户登录以查看其预算',
+			'accountBudgets.lookupFailed': 'Copilot 计划查询失败（{0}）',
+		};
+		assert.deepEqual(Object.keys(chinese).sort(), Object.keys(english).sort(), 'every new key has a zh-cn assertion');
+		for (const [key, value] of Object.entries(chinese)) {
+			assert.equal(t(key), value, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: Diagnostics API-driven budget hint strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('diagnostics.apiBudgetHint.label'), "ℹ️ API-driven budget:");
+	assert.equal(t('diagnostics.apiBudgetHint.body'), "Your premium_interactions quota entitlement is {0}/month. If the budget above is 0 or empty, this API value will be used as your effective budget.");
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('diagnostics.apiBudgetHint.label'), "ℹ️ API 驱动的预算：");
+		assert.equal(t('diagnostics.apiBudgetHint.body'), "您的 premium_interactions 配额权益为 {0}/月。如果上方预算为 0 或为空，将使用此 API 值作为有效预算。");
 	} finally {
 		mock.setLanguage('en');
 	}

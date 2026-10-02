@@ -198,7 +198,7 @@ test('visible panel: a saved exclusion for a provider with no card is ignored in
 	assert.ok(hasRow(models, 'gemini-2.5-pro'), `Gemini model should stay listed, got ${JSON.stringify(models)}`);
 });
 
-test('Usage by Editor rows show the official logo, falling back to the emoji for unknown editors and ensure syncLogoTheme() is called correctly', async () => {
+test('Usage by Editor rows show the official logo, falling back to the emoji for unknown editors', async () => {
 	const doc = await renderDetails(detailsData({
 		today: { 'GitHub Copilot': 3 }, last30Days: { 'GitHub Copilot': 30 },
 		month: { 'GitHub Copilot': 35 }, lastMonth: { 'GitHub Copilot': 5 },

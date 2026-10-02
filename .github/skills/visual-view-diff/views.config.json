@@ -86,7 +86,12 @@
       "global": "__INITIAL_USAGE__",
       "fixture": "usage.json",
       "$statesComment": [
-        "Every tab of the usage panel; 'activity' is the initial render."
+        "Every tab of the usage panel; 'activity' is the initial render. The",
+        "Workspace, GitHub and Coaching leaf bars stay hidden until their group tab",
+        "is clicked, so those states click the group first — the same two-step shape",
+        "the diagnostics states below use. A state that clicks straight at a hidden",
+        "leaf button fails to render at all, which takes the visual diff, the CI",
+        "screenshots and the release video's shot of that tab down with it."
       ],
       "states": [
         {
@@ -97,19 +102,19 @@
         },
         {
           "id": "tools",
-          "title": "Tools & Integrations tab",
-          "steps": [{ "click": ".tab-button[data-tab=\"tools\"]" }],
+          "title": "Workspace › Tools & Integrations tab",
+          "steps": [{ "click": ".group-tab[data-group=\"workspace\"]" }, { "click": ".tab-button[data-tab=\"tools\"]" }],
           "expect": "#tab-panel-tools"
         },
         {
           "id": "health",
-          "title": "Workspace Health tab",
-          "steps": [{ "click": ".tab-button[data-tab=\"health\"]" }],
+          "title": "Workspace › Workspace Health tab",
+          "steps": [{ "click": ".group-tab[data-group=\"workspace\"]" }, { "click": ".tab-button[data-tab=\"health\"]" }],
           "expect": "#tab-panel-health"
         },
         {
           "id": "repos",
-          "title": "Repository PRs tab",
+          "title": "GitHub › Repository PRs tab",
           "$comment": [
             "Opening the tab asks the host for PR statistics and shows a placeholder",
             "until they arrive. The `post` step plays the host so the loaded table is",
@@ -117,6 +122,7 @@
             "nothing on the panel depends on the wall clock."
           ],
           "steps": [
+            { "click": ".group-tab[data-group=\"github\"]" },
             { "click": ".tab-button[data-tab=\"repos\"]" },
             { "post": {"command": "repoPrStatsLoaded", "data": {"authenticated": true, "since": "2026-02-13T00:00:00.000Z", "repos": [{"owner": "rajbos", "repo": "ai-engineering-fluency", "repoUrl": "https://github.com/rajbos/ai-engineering-fluency", "totalPrs": 99, "aiAuthoredPrs": 7, "aiReviewRequestedPrs": 3, "userAuthoredPrs": 40, "userMergedPrs": 38, "aiDetails": [{"number": 2094, "title": "Copilot memory-files hygiene", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2094", "aiType": "copilot", "role": "author"}, {"number": 2071, "title": "Improve Cost Attribution model-mix table", "url": "https://github.com/rajbos/ai-engineering-fluency/pull/2071", "aiType": "claude", "role": "reviewer-requested"}]}, {"owner": "xebia", "repo": "xms-techradar", "repoUrl": "https://github.com/xebia/xms-techradar", "totalPrs": 0, "aiAuthoredPrs": 0, "aiReviewRequestedPrs": 0, "userAuthoredPrs": 0, "userMergedPrs": 0, "aiDetails": [], "error": "Repo not found or not accessible with current token"}]}} }
           ],
@@ -124,8 +130,9 @@
         },
         {
           "id": "readiness",
-          "title": "AI Readiness tab",
+          "title": "Workspace › AI Readiness tab",
           "steps": [
+            { "click": ".group-tab[data-group=\"workspace\"]" },
             { "click": ".tab-button[data-tab=\"readiness\"]" },
             { "post": { "command": "readinessLoaded", "requestId": 1, "report": {
               "scannedAt": "2026-03-14T09:30:00.000Z",
@@ -156,8 +163,9 @@
         },
         {
           "id": "readiness-expanded",
-          "title": "AI Readiness tab — repository expanded",
+          "title": "Workspace › AI Readiness tab — repository expanded",
           "steps": [
+            { "click": ".group-tab[data-group=\"workspace\"]" },
             { "click": ".tab-button[data-tab=\"readiness\"]" },
             { "post": { "command": "readinessLoaded", "requestId": 1, "report": {
               "scannedAt": "2026-03-14T09:30:00.000Z",
@@ -189,12 +197,13 @@
         },
         {
           "id": "agent",
-          "title": "Cloud Agent tab",
+          "title": "GitHub › Cloud Agent tab",
           "$comment": [
             "Same as the Repository PRs tab: the host answer is declared here. Omitting",
             "`fetchedAt` keeps the 'updated n minutes ago' line off the screenshot."
           ],
           "steps": [
+            { "click": ".group-tab[data-group=\"github\"]" },
             { "click": ".tab-button[data-tab=\"agent\"]" },
             { "post": {"command": "agentSessionsLoaded", "data": {"authenticated": true, "since": "2026-02-13T00:00:00.000Z", "totalTasks": 6, "totalSessions": 9, "totalCredits": 42, "totalPremiumRequests": 12, "accountTasksAvailable": true, "partial": false, "repos": [{"owner": "rajbos", "repo": "ai-engineering-fluency", "totalTasks": 4, "totalSessions": 6, "totalCredits": 30, "totalPremiumRequests": 8, "tasksScanned": 4, "tasksTotal": 4, "partial": false, "discovery": "both", "unassigned": false}, {"owner": "xebia", "repo": "xms-techradar", "totalTasks": 2, "totalSessions": 3, "totalCredits": 12, "totalPremiumRequests": 4, "tasksScanned": 2, "tasksTotal": 2, "partial": false, "discovery": "account", "unassigned": false}]}} }
           ],
@@ -202,20 +211,20 @@
         },
         {
           "id": "worktrees",
-          "title": "Worktrees tab",
-          "steps": [{ "click": ".tab-button[data-tab=\"worktrees\"]" }],
+          "title": "Workspace › Worktrees tab",
+          "steps": [{ "click": ".group-tab[data-group=\"workspace\"]" }, { "click": ".tab-button[data-tab=\"worktrees\"]" }],
           "expect": "#tab-panel-worktrees"
         },
         {
           "id": "insights",
-          "title": "Insights tab",
-          "steps": [{ "click": ".tab-button[data-tab=\"insights\"]" }],
+          "title": "Coaching › Insights tab",
+          "steps": [{ "click": ".group-tab[data-group=\"coaching\"]" }, { "click": ".tab-button[data-tab=\"insights\"]" }],
           "expect": "#tab-panel-insights"
         },
         {
           "id": "corrections",
-          "title": "Corrections tab",
-          "steps": [{ "click": ".tab-button[data-tab=\"corrections\"]" }],
+          "title": "Coaching › Corrections tab",
+          "steps": [{ "click": ".group-tab[data-group=\"coaching\"]" }, { "click": ".tab-button[data-tab=\"corrections\"]" }],
           "expect": "#tab-panel-corrections"
         }
       ]
