@@ -216,7 +216,8 @@ import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { analyzeHydraFusionSession, aiuToUsd } from '../../src/hydrafusion';
 import type { HydraFusionSummary } from '../../src/hydrafusion';
-import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
+import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex, setCopilotCliOtelSnapshotPath } from '../../src/copilotCliOtel';
+import { createWorkerOtelLookup, type WorkerOtelLookup } from './otelIndexLookup';
 import { createWakeupGate, createSemaphore, yieldToEventLoop, TimeoutError as _TimeoutError, withTimeout as _withTimeout, type Semaphore } from './utils/promises';
 import { WebviewMessageReplay } from './webviewMessageReplay';
 import { startEventLoopMonitor, type EventLoopMonitor } from './utils/eventLoopMonitor';
@@ -1149,6 +1150,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * which case everything runs in-process exactly as before.
 	 */
 	private analysisPool: AnalysisWorkerPool | undefined;
+	private otelLookup: WorkerOtelLookup | undefined;
 	public sessionDiscovery!: SessionDiscovery;
 	private statusBarItem!: vscode.StatusBarItem;
 	/** Dedicated status bar item for insights — shown only when new insights exist. */
@@ -2486,8 +2488,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 			log: (m) => this.log(m),
 			warn: (m) => this.warn(m),
 			// One OTel index (this process's) serves every worker; see copilotCliOtel.ts. The session-store lookup stays in the workers.
-			resolveOtelUsage: (sessionFile) => getCopilotCliOtelUsage(sessionFile),
+			// A question asked while the index is still being built fails at once; the sessions it failed for are refreshed
+			// when the index announces it is ready (otelIndexLookup.ts), instead of each one waiting on the build.
+			resolveOtelUsage: (sessionFile) => (this.otelLookup ??= createWorkerOtelLookup(3_000, () => void this.refreshAfterOtelIndexReady())).resolve(sessionFile),
 		});
+	}
+
+	/** The OTel index finished building after some sessions had to be skipped for want of it: parse those now. */
+	private async refreshAfterOtelIndexReady(): Promise<void> {
+		if (this._disposed) { return; }
+		this.log('The OTel index is ready; refreshing the sessions that were waiting for it');
+		await this._updateTokenStatsInFlight?.catch(() => undefined); // that run may itself have missed the index
+		await this.updateTokenStats(true).catch(() => undefined);
 	}
 
 	/** Runs `viaWorker` on a worker thread, or `inProcess` when none is usable (rules in analysis/runOffHostThread.ts). */
@@ -14870,6 +14882,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     this._eventLoopMonitor = undefined;
     void this.analysisPool?.dispose();
     this.analysisPool = undefined;
+    this.otelLookup?.dispose();
+    this.otelLookup = undefined;
     // Stop any in-flight background worktree scan from doing further disk I/O once disposed.
     this.backgroundWorktreeScanId++;
     this.stopRefreshHeartbeat();
@@ -15394,6 +15408,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
   // streaming read+parse of the (100+ MB, ever-growing) export file overlaps the rest of
   // activation instead of blocking the first usage analysis. Fire-and-forget: the result is
   // cached inside the module, and every consumer already awaits loadCopilotCliOtelIndex() lazily.
+  // The built index is saved next to the other caches, so the next start restores it and reads only what was appended.
+  setCopilotCliOtelSnapshotPath(path.join(context.globalStorageUri.fsPath, 'copilot-cli-otel-index.json'));
   void loadCopilotCliOtelIndex().catch(() => { /* off-by-default export; degrades to no data */ });
 
   // Create the token tracker

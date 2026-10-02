@@ -148,6 +148,12 @@ missing.
   measured machine (23 MB, 6.7k entries) that is ~0.1 s to parse and ~0.2 s to stringify per checkpoint — not a
   user-visible stall — and moving it would mean reworking its clear-epoch race fences. Revisit if the cache
   grows by an order of magnitude; the lag monitor will show it.
+* **The OTel index is built once, saved to disk, and announced.** `copilotCliOtel.ts` saves the consolidated index
+  and each file's consumed offset (plus a hash of the file's first 4 KB, to notice a replaced file) to
+  `globalStorage/copilot-cli-otel-index.json`; the next start restores it and reads only the appended tail instead of
+  re-parsing the whole export. Consumers do not read or wait on it one by one: `onCopilotCliOtelIndexReady` /
+  `whenCopilotCliOtelIndexReady` announce when it is built. A worker question (`otelIndexLookup.ts`) waits briefly for
+  that, otherwise fails at once and remembers it; when the index is ready the host refreshes those sessions once.
 * **The Copilot CLI OTel index is the host's; the session-store lookup is the worker's.** For a Copilot CLI
   session, exact usage comes from the `session-store.db` billing table first and from the OTel file export only
   when the table has no rows. The export is append-only and was 9.8 GB on the measured machine, and its index
