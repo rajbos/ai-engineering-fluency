@@ -1212,7 +1212,7 @@ function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessi
           ${editorOptions}
         </select>
         <span id="model-usage-time-selector"></span>
-        <span id="model-usage-status" style="font-size: 12px; color: var(--text-muted);">${escapeHtml(statusText)}</span>
+        <span id="model-usage-status" class="loading-status" role="status" aria-live="polite">${escapeHtml(statusText)}</span>
       </div>
     </div>
     <div id="model-usage-results"></div>
@@ -1555,7 +1555,10 @@ function activateTab(tabId: string): boolean {
 
 /** Which group tab (Diagnostics / Research / Settings) each leaf tab lives under. */
 const TAB_GROUPS: Record<string, string[]> = {
-  diagnostics: ["report", "sessions", "cache", "path-analyzer"],
+  // Keep in step with the leaf-tab bars in renderTabBars: a tab rendered in a bar but missing
+  // here can never be picked by firstAvailableTabInGroup, and groupOfTab only resolves it by
+  // falling through to the "diagnostics" default rather than by actually knowing its group.
+  diagnostics: ["report", "sessions", "cache", "path-analyzer", "share"],
   research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta", "ttft"],
   settings: ["display", "backend", "github", "debug"],
 };

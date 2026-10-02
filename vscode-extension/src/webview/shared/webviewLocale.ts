@@ -32,6 +32,23 @@ export interface WebviewLocaleFields {
  * Apply a payload's localization dictionary, display language and formatting
  * locale in one call. Safe to call with `undefined` or a payload missing any
  * of them.
+ *
+ * **Each field is applied only when the payload actually carries it**, because
+ * this runs on refresh payloads as well as initial ones. A webview is told its
+ * locale once, by whichever payload got there first, and a later refresh that
+ * simply does not mention the subject must not be read as "revert to the
+ * default".
+ *
+ * That is the normal refresh shape for the JetBrains host: its initial HTML
+ * injects the localization dictionary, but `TokenTrackerPanel.pushStatsToWebview()`
+ * then dispatches stats plus settings with no `locale`, `language` or
+ * `localization` at all. Resetting on absence turned every one of those
+ * refreshes into "back to English, back to the runtime number format".
+ *
+ * Skipping a field costs nothing on a first call: `currentLanguage` already
+ * starts at `'en'` and `currentLocale` already starts undefined, so an initial
+ * payload that omits them lands on exactly the values the old unconditional
+ * version would have written.
  */
 export function applyWebviewLocale(data: WebviewLocaleFields | undefined | null): void {
 	if (!data) { return; }
@@ -44,10 +61,12 @@ export function applyWebviewLocale(data: WebviewLocaleFields | undefined | null)
 	// receive the dictionary as a prebuilt JSON sidecar and have no separate
 	// field to put the language in, so it rides inside the dictionary for them.
 	// A real `language` field always wins.
-	setCurrentLanguage(data.language ?? data.localization?.['__language__'] ?? 'en');
+	const language = data.language ?? data.localization?.['__language__'];
+	if (language) {
+		setCurrentLanguage(language);
+	}
 
-	// Passing undefined restores the runtime default, which is what the ten
-	// bundles that never called this were already doing — so bundles that do not
-	// send a locale keep their current behaviour rather than silently changing.
-	setFormatLocale(data.locale);
+	if (data.locale) {
+		setFormatLocale(data.locale);
+	}
 }

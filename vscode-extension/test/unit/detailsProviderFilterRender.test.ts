@@ -37,7 +37,7 @@ function bundleDetailsWebview(): Promise<string> {
 		platform: 'browser',
 		target: 'es2020',
 		nodePaths: [path.join(EXT_ROOT, 'node_modules')],
-		loader: { '.css': 'text' },
+		loader: { '.css': 'text', '.svg': 'dataurl', '.png': 'dataurl' },
 		logLevel: 'silent',
 	}).then((result) => result.outputFiles[0].text);
 	return bundlePromise;
@@ -196,4 +196,23 @@ test('visible panel: a saved exclusion for a provider with no card is ignored in
 	assert.ok(hasRow(editors, 'Gemini CLI'), `Gemini CLI should stay listed, got ${JSON.stringify(editors)}`);
 	const models = sectionRowLabels(doc, 'Model Usage');
 	assert.ok(hasRow(models, 'gemini-2.5-pro'), `Gemini model should stay listed, got ${JSON.stringify(models)}`);
+});
+
+test('Usage by Editor rows show the official logo, falling back to the emoji for unknown editors', async () => {
+	const doc = await renderDetails(detailsData({
+		today: { 'GitHub Copilot': 3 }, last30Days: { 'GitHub Copilot': 30 },
+		month: { 'GitHub Copilot': 35 }, lastMonth: { 'GitHub Copilot': 5 },
+	}, [], { 'VS Code': 'gpt-5', 'Claude Code': 'claude-sonnet-4', 'Totally Unknown Editor': 'gpt-5' }));
+
+	const h3 = Array.from(doc.querySelectorAll('h3')).find(h => (h.textContent ?? '').includes('Usage by Editor'));
+	const rows = Array.from(h3?.closest('.section')?.querySelectorAll('table tbody tr') ?? []);
+	const rowFor = (name: string) => rows.find(tr => (tr.querySelector('td')?.textContent ?? '').includes(name));
+
+	const vscodeRow = rowFor('VS Code');
+	assert.match(vscodeRow?.querySelector('img.editor-logo')?.getAttribute('src') ?? '', /^data:image\/svg\+xml/);
+	assert.ok(rowFor('Claude Code')?.querySelector('img.editor-logo'));
+	const unknown = rowFor('Totally Unknown Editor');
+	assert.equal(unknown?.querySelector('img.editor-logo'), null);
+	assert.ok(unknown?.querySelector('.editor-logo-emoji'), 'unknown editor keeps its emoji');
+	assert.ok(doc.body.getAttribute('data-logo-theme'), 'logo theme marker is set for the dark/light variants');
 });

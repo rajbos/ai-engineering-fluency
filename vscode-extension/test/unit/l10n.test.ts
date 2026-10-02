@@ -293,6 +293,107 @@ test('l10n: usage context-pressure keys resolve in zh-cn', () => {
 	}
 });
 
+test('l10n: usage tab-group, band and context-reference keys resolve in English', () => {
+	// These back the Usage view's group tab strip, the Activity tab's band headings, and the
+	// collapsed context-reference long tail. A missing key renders the raw key as a tab label
+	// or section heading.
+	const expected: Record<string, string> = {
+		'usage.group.usage': 'Usage',
+		'usage.group.workspace': 'Workspace',
+		'usage.group.github': 'GitHub',
+		'usage.group.coaching': 'Coaching',
+		// The leaf tab labels. They render through `localize()` on every strip render, so a
+		// missing key shows up as a tab titled "usage.tab.repos".
+		'usage.tab.activity': 'My Activity',
+		'usage.tab.sessions': 'Recent Sessions',
+		'usage.tab.tools': 'Tools & Integrations',
+		'usage.tab.health': 'Workspace Health',
+		'usage.tab.repos': 'Repository PRs',
+		'usage.tab.agent': 'Cloud Agent',
+		'usage.tab.worktrees': 'Worktrees',
+		'usage.tab.insights': 'Insights',
+		'usage.tab.corrections': 'Corrections',
+		'usage.band.overview.title': 'Overview',
+		'usage.band.spend.title': 'Spend & models',
+		'usage.band.context.title': 'Context',
+		'usage.contextWindow.compactionHeading': 'Context compaction',
+		'usage.contextRefs.noneRecent': 'No context references recorded today or in the last 30 days.',
+		'usage.contextRefs.totalTooltip': 'Total across the reference kinds (#file, #selection, @workspace, instructions files and so on). The Images, Prompt Files, Custom Prompts and Code Lines rows are separate metrics and are not included in this total.',
+		// The table's own head and footer labels. They render through `localize()` on every
+		// render rather than from a module constant, so a missing key shows up as a column
+		// titled "usage.contextRefs.colToday".
+		'usage.contextRefs.colReference': 'Reference',
+		'usage.contextRefs.colToday': 'Today',
+		'usage.contextRefs.colThisMonth': 'This Month',
+		'usage.contextRefs.colLastMonth': 'Last Month',
+		'usage.contextRefs.colLast30': 'Last 30 Days',
+		'usage.contextRefs.colTrend': 'Trend',
+		'usage.contextRefs.colTrendTooltip': 'Trend: Last Month → This Month → Today',
+		'usage.contextRefs.totalRow': '📊 Total References',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+	assert.match(t('usage.band.overview.subtitle'), /interaction modes/);
+	assert.match(t('usage.band.spend.subtitle'), /how hard they were asked to think/);
+	assert.match(t('usage.band.context.subtitle'), /what gets compacted away/);
+	// The count is a placeholder, not concatenated, so a locale can reposition it.
+	assert.equal(
+		t('usage.contextRefs.otherSummary', '4'),
+		'Other references (4, no usage today or in the last 30 days)',
+	);
+});
+
+test('l10n: usage tab-group, band and context-reference keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'usage.group.usage': '使用情况',
+			'usage.group.workspace': '工作区',
+			'usage.group.coaching': '改进建议',
+			'usage.tab.activity': '我的活动',
+			'usage.tab.sessions': '最近会话',
+			'usage.tab.tools': '工具与集成',
+			'usage.tab.health': '工作区健康度',
+			'usage.tab.repos': '仓库 PR',
+			'usage.tab.agent': '云端代理',
+			'usage.tab.worktrees': '工作树',
+			'usage.tab.insights': '洞察',
+			'usage.tab.corrections': '纠正',
+			'usage.band.overview.title': '概览',
+			'usage.band.spend.title': '花费与模型',
+			'usage.band.context.title': '上下文',
+			'usage.contextWindow.compactionHeading': '上下文压缩',
+			'usage.contextRefs.colReference': '引用',
+			'usage.contextRefs.colToday': '今天',
+			'usage.contextRefs.colThisMonth': '本月',
+			'usage.contextRefs.colLastMonth': '上月',
+			'usage.contextRefs.colLast30': '最近 30 天',
+			'usage.contextRefs.colTrend': '趋势',
+			'usage.contextRefs.colTrendTooltip': '趋势：上月 → 本月 → 今天',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+		// "GitHub" is a proper noun and stays untranslated — asserted so a future bulk
+		// translation pass doesn't quietly localize a product name.
+		assert.equal(t('usage.group.github'), 'GitHub');
+		assert.equal(t('usage.contextRefs.otherSummary', '4'), '其他引用（4 个，今天和最近 30 天均未使用）');
+		// The band subtitles and the two context-reference strings are the longest prose in this
+		// set, so they are the likeliest to be dropped or half-translated in a bulk edit.
+		assert.equal(t('usage.band.overview.subtitle'), "你使用 AI 助手的总量，以及使用了哪些交互模式。", 'zh-cn value for usage.band.overview.subtitle');
+		assert.equal(t('usage.band.spend.subtitle'), "这些使用产生的成本、运行在哪些模型上，以及它们被要求思考的深度。", 'zh-cn value for usage.band.spend.subtitle');
+		assert.equal(t('usage.band.context.subtitle'), "你提供给模型的内容：附加的引用、请求与窗口上限的接近程度，以及被压缩掉的部分。", 'zh-cn value for usage.band.context.subtitle');
+		assert.equal(t('usage.contextRefs.noneRecent'), "今天和最近 30 天均未记录到上下文引用。", 'zh-cn value for usage.contextRefs.noneRecent');
+		assert.equal(t('usage.contextRefs.totalTooltip'), "各引用类型的合计（#file、#selection、@workspace、说明文件等）。图片、提示文件、自定义提示和代码行数这几行属于独立指标，不计入此合计。", 'zh-cn value for usage.contextRefs.totalTooltip');
+		// The emoji is part of the label, not decoration added at render time, so it has to
+		// survive translation along with the words after it.
+		assert.equal(t('usage.contextRefs.totalRow'), "📊 引用合计", 'zh-cn value for usage.contextRefs.totalRow');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: efficiency Value empty-state keys resolve in English', () => {
 	// These back the Value tab's empty state: the explanation and the "Open Repository PRs"
 	// button beside it. A missing key would render a raw `efficiency.value.*` in the panel.
@@ -456,6 +557,9 @@ test('l10n: log viewer summary card labels resolve in English', () => {
 		'logviewer.summary.inputTokens': 'Input Tokens',
 		'logviewer.summary.outputTokens': 'Output Tokens',
 		'logviewer.summary.cachedInput': 'Cached Input',
+		'logviewer.summary.estimatedCost': 'Estimated Cost',
+		'logviewer.summary.estimatedCostSub': 'Summed across all turns',
+		'logviewer.summary.estimatedCostTooltip': 'Estimated USD cost of this session, summed from the per-turn costs. Based on model pricing; may differ from your actual bill.',
 		'logviewer.summary.thinkingTokens': 'Thinking Tokens',
 		'logviewer.summary.thinkingEffort': 'Thinking Effort',
 		'logviewer.summary.subAgents': 'Sub-Agents',
@@ -559,6 +663,9 @@ test('l10n: log viewer summary card labels resolve in zh-cn', () => {
 			'logviewer.summary.inputTokens': '输入令牌',
 			'logviewer.summary.outputTokens': '输出令牌',
 			'logviewer.summary.cachedInput': '缓存输入',
+			'logviewer.summary.estimatedCost': '预估费用',
+			'logviewer.summary.estimatedCostSub': '所有轮次合计',
+			'logviewer.summary.estimatedCostTooltip': '本会话的预估美元费用，由各轮次费用汇总而成。基于模型定价，可能与实际账单有所不同。',
 			'logviewer.summary.thinkingTokens': '思考令牌',
 			'logviewer.summary.thinkingEffort': '思考强度',
 			'logviewer.summary.subAgents': '子代理',

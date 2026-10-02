@@ -304,6 +304,32 @@ export function distributeModelUsageToDays(
 }
 
 /**
+ * Distributes a session-level exact Copilot cost (from a debug log's nano-AIU) across
+ * the session's daily rollups, weighted by each day's interaction count — the same
+ * weighting `distributeModelUsageToDays` uses. Any `copilotExactCostDollars` already
+ * on a rollup (derived from the session file) is replaced, not added to, so the
+ * debug-log value wins without double counting; the per-day values sum to
+ * `exactCostDollars`. `aggregatePeriodStats` reads exact cost from rollups only, so
+ * without this a debug-log-only exact cost never reaches the period totals.
+ *
+ * Returns undefined when there is no positive cost or no interactions to weight by
+ * (callers should keep their existing rollups in that case).
+ */
+export function distributeExactCostToDays(
+	dailyRollups: Record<string, DailyRollupEntry>,
+	exactCostDollars: number,
+): Record<string, DailyRollupEntry> | undefined {
+	if (!(exactCostDollars > 0)) { return undefined; }
+	const totalInteractions = Object.values(dailyRollups).reduce((s, dr) => s + dr.interactions, 0);
+	if (totalInteractions <= 0) { return undefined; }
+	const result: Record<string, DailyRollupEntry> = {};
+	for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
+		result[dayKey] = { ...dayRollup, copilotExactCostDollars: exactCostDollars * (dayRollup.interactions / totalInteractions) };
+	}
+	return result;
+}
+
+/**
  * Merges `source` language usage into `target` (in-place).
  */
 export function addLanguageUsage(target: LanguageUsage, source: LanguageUsage): void {

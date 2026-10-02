@@ -6,7 +6,7 @@ import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 import { buildTurnOverviewRows, hashModelToHue, type TurnOverviewRow } from './turnsOverview';
 import { renderHydraFusionSection, renderLegsTable, formatFusionCost } from './hydraFusionSection';
-import { buildMcpAndContextRefsCard, formatTopListWithOther } from './summaryCards';
+import { buildMcpAndContextRefsCard, formatTopListWithOther, sumSessionCost } from './summaryCards';
 import { matchHydraFusionTurnsToChatTurns } from '../../../../src/hydrafusion';
 import type { HydraFusionSummary, HydraFusionTurn } from '../../../../src/hydrafusion';
 // CSS imported as text via esbuild
@@ -815,6 +815,16 @@ function buildCachedTokensCard(data: SessionLogData): string {
 </div>`;
 }
 
+function buildEstimatedCostCard(data: SessionLogData): string {
+	const total = sumSessionCost(data);
+	if (total <= 0) { return ''; }
+	return `<div class="summary-card" title="${escapeHtml(localize('logviewer.summary.estimatedCostTooltip'))}">
+<div class="summary-label">💰 ${localize('logviewer.summary.estimatedCost')}</div>
+<div class="summary-value">${formatCost(total)}</div>
+<div class="summary-sub">${localize('logviewer.summary.estimatedCostSub')}</div>
+</div>`;
+}
+
 function buildThinkingTokensCard(data: SessionLogData, stats: SummaryStats): string {
 	if (stats.totalThinkingTokens <= 0) { return ''; }
 	return `<div class="summary-card">
@@ -933,6 +943,7 @@ ${buildActualTokensCard(data, stats)}
 ${buildModelTurnsCard(data)}
 ${buildDebugTokenCards(data)}
 ${buildCachedTokensCard(data)}
+${buildEstimatedCostCard(data)}
 ${buildThinkingTokensCard(data, stats)}
 ${buildEffortCard(stats)}
 ${buildSubAgentsCard(data, stats)}
