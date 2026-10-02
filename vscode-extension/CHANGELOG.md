@@ -9,6 +9,9 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ### Bug Fixes
 - The desktop app now remembers whether the Chart view's "By Editor" section was collapsed (and other per-panel UI choices) instead of reopening it expanded every time
+- The Copilot CLI OpenTelemetry usage index is now saved to disk and restored on the next start, so a multi-GB export is no longer re-read from the start in every window. Sessions that need it while it is still being built are refreshed as soon as it is ready, rather than waiting for the next refresh
+- Clicking around the extension's views no longer freezes while data refreshes. Reading and parsing session files, and scanning workspaces for customization files, now run on background worker threads instead of the extension host's single thread. On one real 30-day history a cold refresh used to block the host for up to ~90 seconds in one stretch; it now blocks it for under a second and finishes sooner. If a stall does happen, the *AI Engineering Fluency* output channel now says so (`Extension host event loop stalled: ...`). See [docs/adr/ANALYSIS-WORKER.md](../docs/adr/ANALYSIS-WORKER.md)
+- A very large Copilot CLI OpenTelemetry export (`~/.copilot/otel`, multi-GB on long-lived machines) can no longer crash the extension host if its background reader fails; it is skipped for that refresh instead
 
 ## [0.18.3] - 2026-09-29
 
