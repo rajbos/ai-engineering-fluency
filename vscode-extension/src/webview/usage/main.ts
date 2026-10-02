@@ -38,10 +38,14 @@ import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold, compute
 import { buildCorrectionImprovementPrompt } from '../../../../src/correctionDetection';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
+import { buildTabStripHtml, type UsageTabStripInput } from './tabStripHtml';
+import { renderContextRefTable } from './contextRefTableHtml';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
 import { billingExtGroupCostsHtml } from './billingCoverage';
+import { type ContextRefRow } from './contextRefRows';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
+import { USAGE_TAB_GROUPS, groupOfUsageTab } from './tabGroups';
 import { DarkFactoryTab } from './darkFactoryTab';
 import { insightCardElementId, isInsightCardAnchor } from '../../insightAnchors';
 import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from './modelLeaderboard';
@@ -2548,15 +2552,20 @@ function handleWorktreeMessage(message: any): void {
  * announcer can stay quiet about tabs they already found. Fire-and-forget.
  */
 function reportTabOpened(tab: string): void {
+	// Recorded here rather than at each call site so every announcement path — a click, a
+	// `switchTab` message, the unknown-tools banner, or setupTabs on a fresh layout — keeps
+	// lastAnnouncedTab in step without having to remember to.
+	lastAnnouncedTab = tab;
 	vscode.postMessage({ command: 'viewTabOpened', view: 'usage', tab });
 }
 
 /**
- * Starts a tab's one-time data fetch. Called on a tab click and, once, for whichever tab the
- * layout first renders on: a tab the host requested while the tab bar did not exist yet (see
- * `handleSwitchTab`) has no button to click, so nothing else would ever start its fetch.
+ * Work a tab's first visit does once: fetching data it needs, or clearing its badge. Also run,
+ * once, for whichever tab the layout first renders on: a tab the host requested while the tab bar
+ * did not exist yet (see `handleSwitchTab`) has no button to click, so nothing else would ever
+ * start its fetch.
  */
-function startLazyTabLoad(tab: string): void {
+function runTabFirstVisitEffects(tab: string): void {
 	if (tab === 'readiness') { darkFactoryTab.startIfNeeded(); }
 	// Lazy-load repo PR stats on first visit to the tab
 	if (tab === 'repos' && !repoPrStatsLoaded) {
@@ -2568,43 +2577,132 @@ function startLazyTabLoad(tab: string): void {
 		agentSessionsLoaded = true;
 		vscode.postMessage({ command: 'loadAgentSessions' });
 	}
+	// Mark new insights as seen when visiting the Insights tab
+	if (tab === 'insights') {
+		currentInsights
+			.filter(i => i.status === 'new')
+			.forEach(i => vscode.postMessage({ command: 'insightAction', id: i.id, action: 'seen' }));
+	}
 }
 
+/**
+ * The leaf tab each group was last left on, so re-opening a group returns the user to where they
+ * were instead of resetting them to its first tab. Lives only in memory, like `activeTab` itself
+ * — neither is written to `vscode.setState()` (`UsageWebviewState` holds only `aboutCollapsed`),
+ * so a panel that is disposed and recreated legitimately starts over at the default tab.
+ */
+const lastTabPerGroup: Record<string, string> = {};
+
+/** Shows one group's leaf tab bar and marks its group button active. Does not change which leaf is active. */
+function activateUsageGroup(groupId: string): void {
+	document.querySelectorAll<HTMLElement>('.group-tab').forEach(btn => {
+		const selected = btn.getAttribute('data-group') === groupId;
+		btn.classList.toggle('active', selected);
+		// The `active` class is a paint-only signal. Without aria-pressed a screen reader hears
+		// four identical buttons and cannot tell which group is open.
+		btn.setAttribute('aria-pressed', String(selected));
+	});
+	document.querySelectorAll<HTMLElement>('.leaf-tabs').forEach(bar => {
+		bar.style.display = bar.getAttribute('data-group') === groupId ? 'flex' : 'none';
+	});
+}
+
+/**
+ * The single path that switches tabs, whether the user clicked a tab, the host sent a
+ * `switchTab` message, or an unknown-tool banner jumped here. Everything a tab switch has to
+ * get right — revealing the owning group, the active markers, the panel, telemetry, first-visit
+ * loads — lives here once, so a new entry point cannot forget half of it.
+ *
+ * Returns false when the tab has no rendered panel (e.g. the webview is still in its loading
+ * state), leaving `activeTab` set so the eventual render lands on it.
+ */
+function activateUsageTab(tab: string): boolean {
+	activeTab = tab;
+	const panel = document.getElementById(`tab-panel-${tab}`);
+	if (!panel) { return false; }
+	const group = groupOfUsageTab(tab);
+	lastTabPerGroup[group] = tab;
+	activateUsageGroup(group);
+	document.querySelectorAll<HTMLElement>('.tab-button').forEach(btn => {
+		btn.classList.toggle('active', btn.getAttribute('data-tab') === tab);
+	});
+	document.querySelectorAll<HTMLElement>('.tab-panel').forEach(p => { p.style.display = 'none'; });
+	panel.style.display = 'block';
+	reportTabOpened(tab);
+	runTabFirstVisitEffects(tab);
+	return true;
+}
+
+/**
+ * The leaf tab most recently reported to the host as opened, or null before the first report.
+ *
+ * setupTabs() runs after *every* renderLayout(), including each periodic silent `updateStats`
+ * refresh — not just the first. Announcing unconditionally re-stamped the What's New visit window
+ * on every refresh even though the user never moved.
+ *
+ * This tracks the tab rather than a bare "have we announced yet" flag because the panel can return
+ * to the loading state and rebuild (renderUsageLoadingState on a refresh). A `switchTab` deep link
+ * arriving in that window cannot be announced by activateUsageTab() — there is no panel yet — so a
+ * lifetime boolean would suppress the announcement for the rebuilt layout too, and the host would
+ * never record that leaf visit. Comparing against the last announced tab reports the new one and
+ * still stays quiet when a refresh rebuilds the same tab.
+ */
+let lastAnnouncedTab: string | null = null;
+
 function setupTabs(): void {
-	const tabButtons = document.querySelectorAll<HTMLElement>('.tab-button');
-	// The tab that is already on screen counts as opened — the user is reading it
-	// right now, whether or not they clicked anything to get here.
-	reportTabOpened(activeTab);
-	// Once per rendered layout, so a stats refresh that rebuilds the same layout does not
-	// re-fire a fetch the user never asked for again, while a layout rebuilt after the
-	// loading state still starts the tab it lands on.
+	// Seed the remembered-leaf map from whatever tab this render opened on. activateUsageTab()
+	// records it on every later switch, but it bails before recording when no panel exists yet —
+	// which is exactly the case for a `switchTab` deep link that arrives while the view is still
+	// loading. Without this, opening on a deep-linked tab (the worktree notification's "Show Me",
+	// say), leaving its group and coming back would drop the user on the group's first tab.
+	lastTabPerGroup[groupOfUsageTab(activeTab)] = activeTab;
+	if (lastAnnouncedTab !== activeTab) {
+		// The tab that is already on screen counts as opened — the user is reading it
+		// right now, whether or not they clicked anything to get here.
+		reportTabOpened(activeTab);
+	}
+	// …and it counts as a first visit. activateUsageTab() bails before reaching these effects
+	// when no panel exists yet, so a `switchTab` deep link to Repository PRs or Cloud Agent
+	// would render its panel and then sit on the loading placeholder forever, because nothing
+	// ever posted loadRepoPrStats/loadAgentSessions. Once per rendered layout (not per panel): a
+	// layout rebuilt after the loading state still starts the tab it lands on, while a stats
+	// refresh that rebuilds the same layout does not re-fire a fetch the user never asked for.
 	if (!layoutLazyTabLoadStarted) {
 		layoutLazyTabLoadStarted = true;
-		startLazyTabLoad(activeTab);
+		runTabFirstVisitEffects(activeTab);
 	}
-	tabButtons.forEach(button => {
+	document.querySelectorAll<HTMLElement>('.tab-button').forEach(button => {
 		button.addEventListener('click', () => {
 			const tab = button.getAttribute('data-tab');
 			if (!tab) { return; }
-			activeTab = tab;
 			// The user chose where to look. Drop any pending insight deep link right here rather
 			// than waiting for a re-render to notice: clicking away and straight back would leave
 			// the old anchor live and yank them to that card on the next update.
 			clearFocusedInsightAnchor();
-			reportTabOpened(tab);
-			tabButtons.forEach(btn => btn.classList.toggle('active', btn.getAttribute('data-tab') === tab));
-			document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
-				panel.style.display = 'none';
-			});
-			const activePanel = document.getElementById(`tab-panel-${tab}`);
-			if (activePanel) { activePanel.style.display = 'block'; }
-			startLazyTabLoad(tab);
-			// Mark new insights as seen when visiting the Insights tab
-			if (tab === 'insights') {
-				currentInsights
-					.filter(i => i.status === 'new')
-					.forEach(i => vscode.postMessage({ command: 'insightAction', id: i.id, action: 'seen' }));
-			}
+			activateUsageTab(tab);
+		});
+	});
+	setupGroupTabs();
+}
+
+/**
+ * Clicking a group tab reveals its leaf bar. It only moves the user to a different tab when the
+ * group they opened does not already contain the active one — so returning to the group you came
+ * from puts you back where you were, rather than resetting you to its first tab.
+ */
+function setupGroupTabs(): void {
+	document.querySelectorAll<HTMLElement>('.group-tab').forEach(button => {
+		button.addEventListener('click', () => {
+			const groupId = button.getAttribute('data-group');
+			const group = USAGE_TAB_GROUPS.find(g => g.id === groupId);
+			if (!group) { return; }
+			clearFocusedInsightAnchor();
+			activateUsageGroup(group.id);
+			if (group.tabs.includes(activeTab)) { return; }
+			const remembered = lastTabPerGroup[group.id];
+			const candidates = remembered ? [remembered, ...group.tabs] : group.tabs;
+			const nextTab = candidates.find(tab => document.getElementById(`tab-panel-${tab}`));
+			if (nextTab) { activateUsageTab(nextTab); }
 		});
 	});
 }
@@ -3783,17 +3881,14 @@ function buildInsightsTabPanelHtml(insights: EvaluatedInsight[]): string {
 		</div>`;
 }
 
-// ── Corrections tab ─────────────────────────────────────────────────────────
-
-/** Badge with the number of sessions carrying correction moments (empty when none). */
-function correctionsCountBadgeHtml(report: CorrectionReport | null | undefined): string {
-	if (!report || report.sessionsWithMoments === 0) { return ''; }
-	return ` <span style="background:rgba(251,191,36,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${report.sessionsWithMoments}</span>`;
-}
-
-/** Corrections tab-bar button (extracted to keep buildUsageRootHtml under the complexity limit). */
-function correctionsTabButtonHtml(report: CorrectionReport | null | undefined): string {
-	return `<button class="tab-button ${activeTab === 'corrections' ? 'active' : ''}" data-tab="corrections"><span class="codicon codicon-debug-restart"></span> Corrections${correctionsCountBadgeHtml(report)}</button>`;
+/** Gathers what the tab strip needs out of module state and the current stats. */
+function usageTabStripInput(stats: UsageAnalysisStats): UsageTabStripInput {
+	return {
+		activeTab,
+		newInsightCount: (stats.insights ?? []).filter(i => i.status === 'new').length,
+		correctionSessionCount: stats.correctionReport?.sessionsWithMoments ?? 0,
+		readinessButtonHtml: darkFactoryTab.button(activeTab),
+	};
 }
 
 // ── Skill suggestions (repeated tasks) ──────────────────────────────────────
@@ -4273,18 +4368,7 @@ function buildUsageRootHtml(
 				</div>
 			</div>
 
-			<div class="tab-bar">
-				<button class="tab-button ${activeTab === 'activity' ? 'active' : ''}" data-tab="activity"><span class="codicon codicon-pulse"></span> My Activity</button>
-				<button class="tab-button ${activeTab === 'sessions' ? 'active' : ''}" data-tab="sessions"><span class="codicon codicon-history"></span> Recent Sessions</button>
-				<button class="tab-button ${activeTab === 'tools' ? 'active' : ''}" data-tab="tools"><span class="codicon codicon-tools"></span> Tools &amp; Integrations</button>
-				<button class="tab-button ${activeTab === 'health' ? 'active' : ''}" data-tab="health"><span class="codicon codicon-server-environment"></span> Workspace Health</button>
-				<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos"><span class="codicon codicon-git-pull-request"></span> Repository PRs</button>
-				${darkFactoryTab.button(activeTab)}
-				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent"><span class="codicon codicon-cloud"></span> Cloud Agent</button>
-				<button class="tab-button ${activeTab === 'worktrees' ? 'active' : ''}" data-tab="worktrees"><span class="codicon codicon-git-branch"></span> Worktrees</button>
-				<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insights ?? []).filter(i => i.status === 'new').length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter(i => i.status === 'new').length}</span>` : ''}</button>
-				${correctionsTabButtonHtml(stats.correctionReport)}
-			</div>
+			${buildTabStripHtml(usageTabStripInput(stats))}
 
 			${safeSectionHtml('Recent Sessions', () => buildSessionsTabPanelHtml(stats))}
 			${safeSectionHtml('My Activity', () => buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs))}
@@ -4863,6 +4947,28 @@ function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 		</div>`;
 }
 
+/**
+ * Heading that opens a band of related sections within a tab.
+ *
+ * A tab with nine sibling `.section` cards reads as one flat list, so a section's position in
+ * it carries no meaning and anything near the bottom looks like leftovers. These headings give
+ * the stack its groups back without splitting the tab or changing any section's own markup.
+ *
+ * Labels arrive as localization keys and are escaped after resolution, so a translated label
+ * containing `&` or a quote renders as text rather than as markup.
+ *
+ * `role="heading"` + `aria-level` rather than a bare `<div>`: the grouping is the point of this
+ * element, and a screen reader that cannot navigate to it still sees an ungrouped run of cards.
+ * The level is 3 — below the panel's own heading, above each section title.
+ */
+function sectionGroupHeadingHtml(icon: string, titleKey: string, subtitleKey: string): string {
+	return `
+		<div class="section-group-heading">
+			<div class="section-group-title" role="heading" aria-level="3"><span aria-hidden="true">${icon}</span><span>${escapeHtml(localize(titleKey))}</span></div>
+			<div class="section-group-subtitle">${escapeHtml(localize(subtitleKey))}</div>
+		</div>`;
+}
+
 function buildActivityTabPanelHtml(
 	stats: UsageAnalysisStats,
 	multiModelHtml: string,
@@ -4888,17 +4994,26 @@ function buildActivityTabPanelHtml(
 	const contextRefsHtml = safeSectionHtml('Context References', () => buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs));
 	const modelEfficiencyHtml = safeSectionHtml('Model Efficiency', () => buildModelEfficiencySectionHtml(stats));
 	const contextWindowHtml = safeSectionHtml('Context Window', () => buildContextWindowSectionHtml(stats));
+	// Three bands, in the order the questions get asked: what did I do, what did it cost,
+	// and how much context did it take. Before this grouping, Thinking Effort and Context
+	// Window trailed off the bottom of an undifferentiated stack of nine sections with no
+	// signal that they answered a different question from the cost sections above them.
 	return `
 		<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
+			${sectionGroupHeadingHtml('📊', 'usage.band.overview.title', 'usage.band.overview.subtitle')}
 			${sessionsSummaryHtml}
-			${billingComparisonHtml}
 			<!-- Mode Usage Section -->
 			${modeUsageHtml}
-			${contextRefsHtml}
-			${multiModelHtml}
+
+			${sectionGroupHeadingHtml('💵', 'usage.band.spend.title', 'usage.band.spend.subtitle')}
+			${billingComparisonHtml}
 			${modelCostHtml}
+			${multiModelHtml}
 			${modelEfficiencyHtml}
 			${thinkingEffortHtml}
+
+			${sectionGroupHeadingHtml('🧠', 'usage.band.context.title', 'usage.band.context.subtitle')}
+			${contextRefsHtml}
 			${contextWindowHtml}
 		</div>`;
 }
@@ -5030,6 +5145,7 @@ function renderAutomaticCompactions(stats: AutomaticCompactionStats | undefined)
 		? entries.join(', ')
 		: 'No automatic compactions detected';
 	return `
+		<h4 class="ctx-window-subheading">${escapeHtml(localize('usage.contextWindow.compactionHeading'))}</h4>
 		<div class="automatic-compactions-card"
 			title="Automatic compactions remove earlier messages to fit the context window and can affect response quality.">
 			<div>
@@ -5041,8 +5157,9 @@ function renderAutomaticCompactions(stats: AutomaticCompactionStats | undefined)
 }
 
 /**
- * Bottom-of-tab section: largest request per period vs the long-context
- * pricing threshold, fullest CLI window, and context tiers used.
+ * Context band section: largest request per period vs the long-context pricing threshold,
+ * fullest CLI window, context tiers used, and the automatic compactions that context pressure
+ * forced over the last 7 days.
  */
 function buildContextWindowSectionHtml(stats: UsageAnalysisStats): string {
 	const cw30 = stats.last30Days.contextWindow;
@@ -5066,8 +5183,8 @@ function buildContextWindowSectionHtml(stats: UsageAnalysisStats): string {
 					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow, stats.lastMonth.contextPressure)}
 				</div>
 			</div>
-			${renderAutomaticCompactions(stats.autoCompactionsLast7Days)}
 			${bar}
+			${renderAutomaticCompactions(stats.autoCompactionsLast7Days)}
 		</div>`;
 }
 
@@ -5077,81 +5194,8 @@ interface ContextRefDescriptor {
 	get: (cr: ContextReferenceUsage) => number;
 }
 
-interface ContextRefRow {
-	label: string;
-	title?: string;
-	last30: number;
-	month: number;
-	lastMonth: number;
-	today: number;
-}
-
-function numCell(value: number, extraClass = ''): string {
-	const zeroClass = value > 0 ? '' : ' ctx-ref-zero';
-	const cls = `ctx-ref-num${extraClass ? ' ' + extraClass : ''}${zeroClass}`;
-	return `<td class="${cls}">${value}</td>`;
-}
-
-function sparklineCell(lastMonth: number, month: number, today: number): string {
-	const W = 60, H = 20, PAD = 2;
-	const values = [lastMonth, month, today];
-	const max = Math.max(...values);
-	// Flat line at the bottom when all zeros
-	const points = values.map((v, i) => {
-		const x = PAD + i * ((W - PAD * 2) / (values.length - 1));
-		const y = max === 0 ? H - PAD : PAD + (1 - v / max) * (H - PAD * 2);
-		return `${x.toFixed(1)},${y.toFixed(1)}`;
-	}).join(' ');
-	const isFlat = max === 0;
-	const color = isFlat ? 'var(--text-muted)' : today >= month && month >= lastMonth ? 'var(--link-color)' : today <= month && month <= lastMonth ? '#f87171' : 'var(--text-secondary)';
-	return `<td class="ctx-ref-spark"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>${values.map((v, i) => {
-		const x = PAD + i * ((W - PAD * 2) / (values.length - 1));
-		const y = max === 0 ? H - PAD : PAD + (1 - v / max) * (H - PAD * 2);
-		return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2" fill="${color}"/>`;
-	}).join('')}</svg></td>`;
-}
-
-function renderContextRefTable(
-	rows: ContextRefRow[],
-	totals: { last30: number; month: number; lastMonth: number; today: number },
-): string {
-	const bodyRows = rows
-		.slice()
-		.sort((a, b) => b.last30 - a.last30)
-		.map((row) => {
-			const titleAttr = row.title ? ` title="${escapeHtml(row.title)}"` : '';
-			return `<tr${titleAttr}><td class="ctx-ref-name">${row.label}</td>${numCell(row.today, row.today > 0 ? 'ctx-ref-today-active' : '')}${numCell(row.month)}${numCell(row.lastMonth)}${numCell(row.last30)}${sparklineCell(row.lastMonth, row.month, row.today)}</tr>`;
-		})
-		.join('');
-	return `
-		<div class="ctx-ref-table-wrap">
-			<table class="ctx-ref-table">
-				<thead>
-					<tr>
-						<th class="ctx-ref-name">Reference</th>
-						<th class="ctx-ref-num">Today</th>
-						<th class="ctx-ref-num">This Month</th>
-						<th class="ctx-ref-num">Last Month</th>
-						<th class="ctx-ref-num">Last 30 Days</th>
-						<th class="ctx-ref-spark" title="Trend: Last Month → This Month → Today">Trend</th>
-					</tr>
-				</thead>
-				<tbody>
-					${bodyRows}
-				</tbody>
-				<tfoot>
-					<tr class="ctx-ref-total">
-						<td class="ctx-ref-name">📊 Total References</td>
-						<td class="ctx-ref-num">${totals.today}</td>
-						<td class="ctx-ref-num">${totals.month}</td>
-						<td class="ctx-ref-num">${totals.lastMonth}</td>
-						<td class="ctx-ref-num">${totals.last30}</td>
-						<td class="ctx-ref-spark">${sparklineCell(totals.lastMonth, totals.month, totals.today).replace(/^<td[^>]*>/, '').replace(/<\/td>$/, '')}</td>
-					</tr>
-				</tfoot>
-			</table>
-		</div>`;
-}
+/** Whether the collapsed "Other references" long-tail group is expanded. Persists across re-renders. */
+let contextRefOtherOpen = false;
 
 function buildContextRefCardsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
 	const c = (v: number | undefined): number => v || 0;
@@ -5195,7 +5239,7 @@ function buildContextRefCardsHtml(stats: UsageAnalysisStats, todayTotalRefs: num
 		month: getTotalContextRefs(m),
 		lastMonth: getTotalContextRefs(lm),
 		today: todayTotalRefs,
-	});
+	}, contextRefOtherOpen);
 }
 
 function buildContextRefsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
@@ -5225,7 +5269,7 @@ function buildContextRefsHtml(stats: UsageAnalysisStats, todayTotalRefs: number,
 	` : '';
 	return `
 		<!-- Context References Section -->
-		<div class="section">
+		<div class="section" id="section-context-references">
 			<div class="section-title"><span>🔗</span><span>Context References</span></div>
 			<div class="section-subtitle">How often you reference files, selections, symbols, and workspace context</div>
 			${buildContextRefCardsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
@@ -5621,6 +5665,23 @@ function handleEfficiencySortClick(th: HTMLElement): void {
 	rerenderModelEfficiencyContent();
 }
 
+/**
+ * Remembers whether the "Other references" disclosure is open.
+ *
+ * The <details> is recreated on every re-render, which would otherwise snap it back to
+ * collapsed the moment new stats arrive. `toggle` doesn't bubble, so listen in the capture phase.
+ */
+function setupContextRefSection(): void {
+	const section = document.getElementById('section-context-references');
+	if (!section) { return; }
+	section.addEventListener('toggle', (event) => {
+		const target = event.target as HTMLElement;
+		if (target.id === 'ctx-ref-other') {
+			contextRefOtherOpen = (target as HTMLDetailsElement).open;
+		}
+	}, true);
+}
+
 /** Wires sortable headers, chart controls, and the low-usage filter. */
 function setupModelEfficiencySection(): void {
 	const section = document.getElementById('section-model-efficiency');
@@ -5826,16 +5887,20 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	wireRepositoryButtons();
 	wireCurationButtons();
 	renderRepositoryHygienePanels();
+	// Before setupTabs(): its first-visit replay marks new insights as seen when the render opens
+	// on the Insights tab (a deep link can), and that reads currentInsights. Assigned after, the
+	// replay would iterate an empty array and silently mark nothing.
+	currentInsights = stats.insights ?? [];
 	setupTabs();
 	darkFactoryTab.attach();
 	setupModelEfficiencySection();
+	setupContextRefSection();
 	renderModelEfficiencyPeriodSelector();
 	renderSessionsLookbackSelector();
 	setupWorktreesHandlers();
 	wireCopyButtons();
 	wireCorrectionInteractions();
-	// Initialize currentInsights from the stats and wire card buttons
-	currentInsights = stats.insights ?? [];
+	// currentInsights is assigned above, before setupTabs(); this only wires the card buttons.
 	wireInsightCardButtons();
 	scrollToPendingTabAnchor();
 	// A full layout rebuild — e.g. a background stats refresh landing mid-navigation — destroys
@@ -5993,9 +6058,10 @@ function wireCopyButtons(): void {
 
 function handleUpdateStats(message: any): void {
 	clearLoadingTimeout();
-	if (message.data?.locale) {
-		setFormatLocale(message.data.locale);
-	}
+	// The initial payload is `null` for a panel opened before any stats were cached, so this is
+	// the first chance to localize. applyWebviewLocale ignores unresolved keys, and
+	// re-applying the same map is a no-op, so this is safe to run on every update.
+	applyWebviewLocale(message.data);
 	if (typeof message.data?.use24HourTime === 'boolean') {
 		use24HourTime = message.data.use24HourTime;
 	}
@@ -6043,16 +6109,8 @@ function handleToolSuppressed(toolName: string): void {
 }
 
 function handleHighlightUnknownTools(): void {
-	activeTab = 'tools';
 	clearFocusedInsightAnchor();
-	document.querySelectorAll<HTMLElement>('.tab-button').forEach(btn => {
-		btn.classList.toggle('active', btn.getAttribute('data-tab') === 'tools');
-	});
-	document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
-		panel.style.display = 'none';
-	});
-	const toolsPanel = document.getElementById('tab-panel-tools');
-	if (toolsPanel) { toolsPanel.style.display = 'block'; }
+	activateUsageTab('tools');
 	const el = document.getElementById('unknown-mcp-tools-section');
 	if (el) {
 		el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -6228,23 +6286,21 @@ function handleSwitchTab(message: any): void {
 	// its loading state the tab bar doesn't exist, so btn.click() below silently no-ops and
 	// the later renderLayout would land on the default tab — swallowing e.g. the worktree
 	// notification's "Show Me" action. With activeTab set, the eventual render honors it.
-	activeTab = tab;
-	const requestedAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
-	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${tab}"]`);
-	btn?.click();
+	pendingTabAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
+	// activateUsageTab sets activeTab even when it finds no panel, so a switch that arrives
+	// during the loading state is still honored by the render that follows.
+	activateUsageTab(tab);
 	if (tab === 'sessions' && message.sessionsPreset) {
-		// The tab-button click re-renders from cached state; re-render the body so the
-		// preset's lookback is fetched and its filter is reflected in the pill bar.
+		// Re-render the body so the preset's lookback is fetched and its filter is reflected in
+		// the pill bar.
 		renderSessionsLookbackSelector();
 		refreshSessionsPanelBody();
 	}
-	// Both anchors are set after the click, not before: the click runs the same handler that drops
-	// an insight deep link on user-driven navigation, and this navigation is the host's, not the
-	// user's. A card anchor also has to outlive the re-renders that follow; a static section
-	// anchor is stable and needs no such window.
-	pendingTabAnchor = requestedAnchor;
-	focusedInsightAnchor = requestedAnchor && isInsightCardAnchor(requestedAnchor)
-		? { anchor: requestedAnchor, until: Date.now() + INSIGHT_FOCUS_WINDOW_MS }
+	// A card anchor has to outlive the re-renders that follow this navigation; a static section
+	// anchor is stable and needs no such window. (User-driven tab clicks drop any pending insight
+	// deep link in their click handlers; this navigation is the host's, not the user's.)
+	focusedInsightAnchor = pendingTabAnchor && isInsightCardAnchor(pendingTabAnchor)
+		? { anchor: pendingTabAnchor, until: Date.now() + INSIGHT_FOCUS_WINDOW_MS }
 		: null;
 	scrollToPendingTabAnchor();
 }
