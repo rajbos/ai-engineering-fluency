@@ -292,8 +292,11 @@ Playwright installation and its Chromium browser, resolved through
 `.github/skills/visual-view-diff/lib/browser.js`; no new dependencies are added.
 Against an isolated temporary-fixture server, it clicks period links, team-total
 and daily-average trend modes, raw daily-total expansion, CSV/JSON downloads and
-personal-dashboard navigation. It never launches an editor or IDE and does not
-use production data or live GitHub.
+personal-dashboard navigation. It also loads the personal dashboard, Team
+Insights and the admin dashboard at phone widths (390px and 320px) and fails if
+any of them is wider than the screen; only tables may scroll sideways, inside
+their own card. It never launches an editor or IDE and does not use production
+data or live GitHub.
 
 The root test entry point is:
 
