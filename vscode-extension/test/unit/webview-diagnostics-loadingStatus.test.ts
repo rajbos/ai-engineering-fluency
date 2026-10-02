@@ -22,6 +22,10 @@ test('diagnostics: .loading-status is a bordered, bold pill in the link color', 
 	assert.match(rule, /border-radius:/);
 });
 
+test('diagnostics: .loading-status pulse is disabled for prefers-reduced-motion', () => {
+	assert.match(css, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.loading-status\s*\{\s*animation:\s*none;?\s*\}\s*\}/);
+});
+
 test('diagnostics: .loading-status is hidden when empty so no empty pill shows after loading', () => {
 	assert.match(css, /\.loading-status:empty\s*\{\s*display:\s*none;?\s*\}/);
 });

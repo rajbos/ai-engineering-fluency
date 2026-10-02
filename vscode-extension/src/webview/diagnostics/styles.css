@@ -1083,6 +1083,12 @@ border: 1px solid #1f6feb;
 	display: none;
 }
 
+@media (prefers-reduced-motion: reduce) {
+	.loading-status {
+		animation: none;
+	}
+}
+
 @keyframes loading-status-pulse {
 	0%, 100% { opacity: 1; }
 	50% { opacity: 0.6; }
