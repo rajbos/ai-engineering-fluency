@@ -18,6 +18,7 @@ import { buildAdapterRegistry, createDataAccessInstances } from '../../../src/ad
 import { estimateTokensFromText } from '../../../src/tokenEstimation';
 import { setCopilotCliOtelUsageResolver, type CopilotCliOtelSessionUsage } from '../../../src/copilotCliOtel';
 import { isMcpTool, extractMcpServerName } from '../../../src/workspaceHelpers';
+import type { CopilotCliAdapter } from '../../../src/adapters/copilotCliAdapter';
 import { analyzeSessionFile, quickAnalyzeSessionContent, supplementCacheWithDebugLog, type SessionAnalyzerDeps } from './sessionFileAnalyzer';
 import { computeSessionFileDetails } from './sessionDetailsAnalyzer';
 import { scanCustomizationFilesForWorkspace } from './workspaceCustomizationScan';
@@ -71,6 +72,8 @@ const ecosystems = buildAdapterRegistry({
 	extractMcpServerName: (tool) => extractMcpServerName(tool, toolNameMap),
 });
 
+const copilotCliAdapter = ecosystems.find((adapter) => adapter.id === 'copilotcli') as CopilotCliAdapter | undefined;
+
 const deps: SessionAnalyzerDeps = {
 	warn: (message) => post({ type: 'warn', message }),
 	ecosystems,
@@ -97,6 +100,10 @@ async function handle(request: AnalysisRequest): Promise<AnalysisResponse> {
 
 async function handleRequest(request: AnalysisRequest): Promise<AnalysisResponse> {
 	try {
+		// This registry never ran discovery, so tell it what the host's discovery learned about this session.
+		if ((request.op === 'analyze' || request.op === 'details') && request.copilotCliKind) {
+			copilotCliAdapter?.noteSessionKind(request.path, request.copilotCliKind);
+		}
 		if (request.op === 'analyze') {
 			const existing = request.existingRepository !== undefined ? { repository: request.existingRepository } : undefined;
 			return { type: 'result', id: request.id, ok: true, result: await analyzeSessionFile(deps, request.path, request.mtime, request.size, existing) };

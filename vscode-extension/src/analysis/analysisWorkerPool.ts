@@ -25,7 +25,7 @@ import type { CustomizationFileEntry, SessionFileCache, SessionFileDetails } fro
 import type { SessionDetailsResult } from './sessionDetailsAnalyzer';
 import type { QuickSessionAnalysis } from './sessionFileAnalyzer';
 import type { CopilotCliOtelSessionUsage } from '../../../src/copilotCliOtel';
-import type { AnalysisHostMessage, AnalysisRequest, AnalysisWorkerData, AnalysisWorkerMessage } from './analysisProtocol';
+import type { AnalysisHostMessage, AnalysisRequest, AnalysisWorkerData, AnalysisWorkerMessage, CopilotCliSessionKind } from './analysisProtocol';
 
 export type AnalysisFailureKind = 'unavailable' | 'timeout' | 'failed';
 
@@ -150,8 +150,8 @@ export class AnalysisWorkerPool {
 		return !this.disposed && !this.broken;
 	}
 
-	analyze(path: string, mtime: number, size: number, existingRepository?: string): Promise<SessionFileCache> {
-		return this.submit((id) => ({ id, op: 'analyze', path, mtime, size, ...(existingRepository !== undefined ? { existingRepository } : {}) }))
+	analyze(path: string, mtime: number, size: number, existingRepository?: string, copilotCliKind?: CopilotCliSessionKind): Promise<SessionFileCache> {
+		return this.submit((id) => ({ id, op: 'analyze', path, mtime, size, ...(existingRepository !== undefined ? { existingRepository } : {}), ...(copilotCliKind ? { copilotCliKind } : {}) }))
 			.then((result) => {
 				if (!result) { throw new AnalysisWorkerError(`Worker returned no entry for ${path}`, 'failed'); }
 				return result as SessionFileCache;
@@ -164,8 +164,8 @@ export class AnalysisWorkerPool {
 	}
 
 	/** Fills in the host-prepared `details` skeleton from the session file (see sessionDetailsAnalyzer.ts). */
-	computeDetails(path: string, mtimeMs: number, size: number, details: SessionFileDetails): Promise<SessionDetailsResult> {
-		return this.submit((id) => ({ id, op: 'details', path, mtimeMs, size, details }))
+	computeDetails(path: string, mtimeMs: number, size: number, details: SessionFileDetails, copilotCliKind?: CopilotCliSessionKind): Promise<SessionDetailsResult> {
+		return this.submit((id) => ({ id, op: 'details', path, mtimeMs, size, details, ...(copilotCliKind ? { copilotCliKind } : {}) }))
 			.then((result) => {
 				if (!result) { throw new AnalysisWorkerError(`Worker returned no details for ${path}`, 'failed'); }
 				return result as SessionDetailsResult;

@@ -40,6 +40,29 @@ test('CopilotCliAdapter.getDisplayName: returns MS Scout label for tracked Scout
     }
 });
 
+test('CopilotCliAdapter.getSessionKind / noteSessionKind: a classification made by discovery in one instance can be applied to another', () => {
+    // The analysis worker has its own adapter that never ran discovery; the host passes it what discovery learned.
+    const host = new CopilotCliAdapter();
+    const worker = new CopilotCliAdapter();
+    const appId = '55555555-5555-5555-5555-555555555555';
+    const scoutId = '66666666-6666-6666-6666-666666666666';
+    const dbPath = (id: string) => path.join(os.homedir(), '.copilot', `session-store.db#${id}`);
+    const eventsPath = (id: string) => path.join(os.homedir(), '.copilot', 'session-state', id, 'events.jsonl');
+    (host as unknown as { _appSessionIds: Set<string> })._appSessionIds.add(appId);
+    (host as unknown as { _scoutSessionIds: Set<string> })._scoutSessionIds.add(scoutId);
+
+    assert.equal(host.getSessionKind(dbPath(appId)), 'app');
+    assert.equal(host.getSessionKind(eventsPath(scoutId)), 'scout');
+    assert.equal(host.getSessionKind(dbPath('77777777-7777-7777-7777-777777777777')), undefined);
+
+    assert.equal(worker.getDisplayName(dbPath(appId)), 'Copilot CLI', 'a fresh instance knows nothing');
+    worker.noteSessionKind(dbPath(appId), 'app');
+    worker.noteSessionKind(dbPath(scoutId), 'scout');
+    assert.equal(worker.getDisplayName(dbPath(appId)), 'Copilot CLI (App)');
+    assert.equal(worker.getDisplayName(dbPath(scoutId)), 'MS Scout (Copilot CLI)');
+    assert.equal(worker.getSessionKind(dbPath(appId)), 'app');
+});
+
 test('CopilotCliAdapter.getDisplayNameForDiscoveredPath: returns Scout label for tracked UUID, undefined otherwise', () => {
     const scoutUuid = '33333333-3333-3333-3333-333333333333';
     const eventsPath = path.join(os.homedir(), '.copilot', 'session-state', scoutUuid, 'events.jsonl');

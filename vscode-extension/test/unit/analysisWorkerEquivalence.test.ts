@@ -244,6 +244,24 @@ test('OTel usage returned by the host reaches the worker analysis result', async
 	}
 });
 
+test('a Copilot CLI session keeps its App / Scout label when analysed in the worker, because the host passes what discovery learned', async () => {
+	// Discovery runs only on the host. The worker's adapter never sees it, so without the hint every database-only
+	// CLI session would come back labelled as plain terminal CLI (and counted as `cli`, not `cliApp`, usage).
+	const sessionId = '8a9b0c1d-2e3f-4a5b-8c6d-7e8f9a0b1c2d';
+	const dbSession = path.join(process.env.HOME as string, '.copilot', `session-store.db#${sessionId}`);
+	const stat = { size: 1, mtime: new Date() } as unknown as fs.Stats;
+	const pool = makePool(1);
+	try {
+		const label = async (kind?: 'app' | 'scout') =>
+			(await pool.computeDetails(dbSession, stat.mtime.getTime(), 1, detailsSkeleton(dbSession, stat), kind)).details.editorName;
+		assert.equal(await label(), 'Copilot CLI');
+		assert.equal(await label('app'), 'Copilot CLI (App)');
+		assert.equal(await label('scout'), 'MS Scout (Copilot CLI)');
+	} finally {
+		await pool.dispose();
+	}
+});
+
 test('a missing file rejects through the worker with the original ENOENT code', async () => {
 	const pool = makePool(1);
 	try {

@@ -69,7 +69,7 @@ that if a request genuinely hangs the thread while another is in flight, the old
 other is re-sent and, if it is the culprit, times out on its own next.
 
 The hang watchdog is paused while a worker is waiting on a **host lookup** (see below) and restarted with a full window
-when the last one returns: waiting on the host is not a hung worker. Lookups are themselves bounded (10 minutes). More than five deaths in a minute
+when the last one returns: waiting on the host is not a hung worker. Lookups are themselves bounded (2 minutes). More than five deaths in a minute
 disables the pool for the session (with a warning) and everything runs in-process, as it did before this change.
 
 ### Why a queue and a small in-flight window

@@ -57,6 +57,31 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	 */
 	private readonly _appSessionIds = new Set<string>();
 
+	/** The id the classification sets are keyed by: the DB session id, or the session-state directory name. */
+	private classificationId(sessionFile: string): string {
+		return this.store.getSessionId(sessionFile) ?? path.basename(path.dirname(sessionFile));
+	}
+
+	/**
+	 * How discovery classified this session, if it did: started by Microsoft Scout, or by the Copilot desktop app.
+	 * Discovery runs only where the adapter was asked to discover (the extension host), so a second instance — the
+	 * analysis worker's — has to be told; see {@link noteSessionKind}.
+	 */
+	getSessionKind(sessionFile: string): 'scout' | 'app' | undefined {
+		const id = this.classificationId(sessionFile);
+		if (!id) { return undefined; }
+		if (this._scoutSessionIds.has(id)) { return 'scout'; }
+		if (this._appSessionIds.has(id)) { return 'app'; }
+		return undefined;
+	}
+
+	/** Records a classification made elsewhere (by discovery in another instance) for this session. */
+	noteSessionKind(sessionFile: string, kind: 'scout' | 'app'): void {
+		const id = this.classificationId(sessionFile);
+		if (!id) { return; }
+		(kind === 'scout' ? this._scoutSessionIds : this._appSessionIds).add(id);
+	}
+
 	/**
 	 * Returns the per-session display name.
 	 * Sessions whose cwd is under Documents\Microsoft Scout are shown as

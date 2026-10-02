@@ -204,6 +204,7 @@ import type { ClaudeDesktopDataAccess } from '../../src/claudedesktop';
 import type { MistralVibeDataAccess } from '../../src/mistralvibe';
 import type { GeminiCliDataAccess } from '../../src/geminicli';
 import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
+import type { CopilotCliAdapter } from '../../src/adapters/copilotCliAdapter';
 import { WindsurfDataAccess } from '../../src/windsurf';
 import { getEcosystemDisplayName } from '../../src/ecosystemAdapter';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
@@ -8153,10 +8154,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Parses a session file into a fresh cache entry. Windsurf's virtual sessions come from a
 	 * host-only gRPC client, so they stay in-process; everything else goes to a worker thread.
 	 */
+	/**
+	 * What this window's discovery learned about a Copilot CLI session (Scout / desktop app). The workers never run
+	 * discovery, so it travels with the request; see CopilotCliSessionKind.
+	 */
+	private copilotCliKindFor(sessionFile: string): 'scout' | 'app' | undefined {
+		const adapter = this.ecosystems.find((eco) => eco.id === 'copilotcli') as CopilotCliAdapter | undefined;
+		return adapter?.getSessionKind?.(sessionFile);
+	}
+
 	private analyzeSessionFileOffHostThread(sessionFilePath: string, mtime: number, fileSize: number, previous: SessionFileCache | undefined): Promise<SessionFileCache> {
 		const inProcess = () => _analyzeSessionFile(this.analyzerDeps, sessionFilePath, mtime, fileSize, previous);
 		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) { return inProcess(); }
-		return this.runOffHostThread((pool) => pool.analyze(sessionFilePath, mtime, fileSize, previous?.repository), inProcess);
+		const kind = this.copilotCliKindFor(sessionFilePath);
+		return this.runOffHostThread((pool) => pool.analyze(sessionFilePath, mtime, fileSize, previous?.repository, kind), inProcess);
 	}
 
 	private async supplementCachedSessionWithDebugLog(cached: SessionFileCache, sessionFilePath: string, fileSize: number): Promise<SessionFileCache | null> {
@@ -8479,7 +8490,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Reading and parsing the file is the expensive part, so it runs off the host thread; only
 		// the cache write (which owns host state) happens here.
 		const result = await this.runOffHostThread(
-			(pool) => pool.computeDetails(sessionFile, stat.mtime.getTime(), stat.size, details),
+			(pool) => pool.computeDetails(sessionFile, stat.mtime.getTime(), stat.size, details, this.copilotCliKindFor(sessionFile)),
 			() => _computeSessionFileDetails(this.analyzerDeps, sessionFile, stat, details),
 		);
 		if (result.cacheUpdate) {
