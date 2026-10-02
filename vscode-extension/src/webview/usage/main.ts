@@ -3715,7 +3715,7 @@ function buildInsightsTabPanelHtml(insights: EvaluatedInsight[]): string {
 					${allSection}
 				</div>
 			</div>
-			${safeSectionHtml('Participation modes', () => buildParticipationModesCardHtml(currentRepoActivity))}
+			${safeSectionHtml(localize('agentic.modes.title'), () => buildParticipationModesCardHtml(currentRepoActivity))}
 		</div>`;
 }
 
@@ -3936,7 +3936,7 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null | undefine
 		</div>`;
 	}
 
-	const repoSummary = safeSectionHtml('Rework per repository', () => buildCorrectionsRepoSummaryHtml(currentRepoActivity));
+	const repoSummary = safeSectionHtml(localize('agentic.repoSummary.title'), () => buildCorrectionsRepoSummaryHtml(currentRepoActivity));
 	if (!report || report.repos.length === 0) {
 		return `
 		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>

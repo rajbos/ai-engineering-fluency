@@ -123,3 +123,10 @@ test('buildCohortComparisonHtml: not enough data, a zero baseline and a real com
 
 	assert.match(buildCohortComparisonHtml(activityReport([...withFiles(5), ...without(10)])), /needed 50% fewer corrections per session/);
 });
+
+test('buildCorrectionsRepoSummaryHtml: every repository with turn detail gets a row, none silently dropped', () => {
+	const repos = Array.from({ length: 20 }, (_, i) => repoRow(`o/r${i}`, { sessions: 30 - i, sessionsWithTurnDetail: 2 }));
+	const html = buildCorrectionsRepoSummaryHtml(activityReport([...repos, repoRow('o/no-detail', { sessions: 1, sessionsWithTurnDetail: 0 })]));
+	for (let i = 0; i < 20; i++) { assert.match(html, new RegExp(`<td>o/r${i}[ <]`), `o/r${i}`); }
+	assert.ok(!html.includes('o/no-detail'), 'repositories without turn detail have no rates to show');
+});

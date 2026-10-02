@@ -205,3 +205,15 @@ test('buildRepoAgentActivity and buildActivityTrend: Copilot CLI slugs join the 
     ], now);
     assert.equal(trend.repos?.['owner/repo'].current.sessions, 2);
 });
+
+test('summarizeActivity: a cache with correction moments but no counts still counts its corrections', () => {
+    const moment = (type: string) => ({ type, turnNumber: 2, timestamp: null, snippet: '' });
+    const s = session({ agent: true, firstPrompt: 'fix it' });
+    s.usageAnalysis!.correctionMoments = [moment('user-correction'), moment('user-correction'), moment('tool-error')] as any;
+    const totals = summarizeActivity([s]);
+    assert.equal(totals.correctionMoments, 3);
+    assert.equal(totals.userCorrections, 2);
+    assert.equal(totals.toolErrors, 1);
+    assert.equal(totals.sessionsWithCorrections, 1);
+    assert.equal(totals.scoping.underScopedCorrected, 1, 'the scoping check reads the derived counts too');
+});

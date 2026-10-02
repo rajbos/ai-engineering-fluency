@@ -24,6 +24,7 @@ import { DEFAULT_GITHUB_HOSTS, repoDisplayFromSession } from './repoKey';
 import { cliTotal } from './maturityScoring';
 import { addModeCounts, countParticipationModes, createEmptyModeCounts } from './participationModes';
 import { classifySessionScoping, CORRECTED_SESSION_MIN_USER_CORRECTIONS } from './promptScoping';
+import { summarizeCorrectionMoments } from './correctionDetection';
 
 /** One cached session, reduced to what the aggregation reads. */
 export interface ActivitySessionInput {
@@ -102,6 +103,15 @@ export function addSessionToTotals(totals: AgentActivityTotals, input: ActivityS
 	if (agentic) { addScoping(totals, analysis); }
 }
 
+/**
+ * A session's correction counters. Older or partially populated caches carry the moments but not
+ * the counts; derive them the same way the Corrections report does rather than reading them as zero.
+ */
+function sessionCorrectionCounts(analysis: SessionUsageAnalysis): CorrectionCounts | undefined {
+	return analysis.correctionCounts
+		?? (analysis.correctionMoments?.length ? summarizeCorrectionMoments(analysis.correctionMoments) : undefined);
+}
+
 /** Per-turn rework counters for a session that carries turn detail. */
 function addReworkCounters(totals: AgentActivityTotals, analysis: SessionUsageAnalysis): void {
 	totals.sessionsWithTurnDetail++;
@@ -112,7 +122,7 @@ function addReworkCounters(totals: AgentActivityTotals, analysis: SessionUsageAn
 		totals.selfCorrections += counters.selfCorrections || 0;
 		totals.toolCalls += counters.toolCalls || 0;
 	}
-	const counts = analysis.correctionCounts;
+	const counts = sessionCorrectionCounts(analysis);
 	const moments = totalCorrectionMoments(counts);
 	if (moments > 0) { totals.sessionsWithCorrections++; }
 	totals.correctionMoments += moments;
@@ -124,7 +134,7 @@ function addReworkCounters(totals: AgentActivityTotals, analysis: SessionUsageAn
 function addScoping(totals: AgentActivityTotals, analysis: SessionUsageAnalysis): void {
 	const scoping = classifySessionScoping(analysis.firstUserPrompt, analysis.taskClassification?.turnCategories);
 	if (!scoping) { return; }
-	const corrected = (analysis.correctionCounts?.userCorrections ?? 0) >= CORRECTED_SESSION_MIN_USER_CORRECTIONS;
+	const corrected = (sessionCorrectionCounts(analysis)?.userCorrections ?? 0) >= CORRECTED_SESSION_MIN_USER_CORRECTIONS;
 	if (scoping === 'under-scoped') {
 		totals.scoping.underScoped++;
 		if (corrected) { totals.scoping.underScopedCorrected++; }

@@ -125,9 +125,12 @@ function knowledgeCell(row: RepoAgentActivity): string {
 // Corrections tab: rework per repository
 // ---------------------------------------------------------------------------
 
-/** Rows to show: repositories with any turn-detail session, most sessions first. */
+/**
+ * Rows to show: every repository with a turn-detail session, most sessions first. All of them, so a
+ * repository driving rework is never hidden while the cohort comparison below still counts it.
+ */
 function summaryRows(report: RepoAgentActivityReport): RepoAgentActivity[] {
-	return report.repos.filter(r => r.sessionsWithTurnDetail > 0).slice(0, 15);
+	return report.repos.filter(r => r.sessionsWithTurnDetail > 0);
 }
 
 function repoSummaryRowHtml(row: RepoAgentActivity): string {
