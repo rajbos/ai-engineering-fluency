@@ -209,9 +209,11 @@ jobs:
           # `npm ci --ignore-scripts` above. --require-hashes makes pip reject
           # any wheel whose sha256 is not in the requirements file, so a
           # re-published or substituted release cannot slip in under the same
-          # version number (Scorecard Pinned-Dependencies). The file pins the
-          # whole graphifyy 0.9.61 closure for this interpreter; see its header
-          # for how to regenerate it when bumping the version.
+          # version number (Scorecard Pinned-Dependencies). The file is the
+          # pip-compile lock of graphify.in for this interpreter; see
+          # graphify.in for how to regenerate it. check-pip-requirements.yml
+          # runs this exact install, without continue-on-error, on every PR
+          # that touches it, so a stale hash fails that PR instead of here.
           pip install --require-hashes --only-binary :all:             -r .github/requirements/graphify.txt
 
           # setup-python only puts its bin dir on PATH for later workflow steps,
@@ -219,6 +221,18 @@ jobs:
           # /usr/local/bin so the agent can just run `graphify`.
           sudo ln -sf "$(command -v graphify)" /usr/local/bin/graphify
           graphify --version
+
+      - name: Warn that graphify is unavailable
+        # continue-on-error leaves the job green when the steps above fail, and
+        # a red step inside a green job is easy to miss - that is how a stale
+        # hash pin went unnoticed for over a week. Surface it as a warning
+        # annotation on the run instead. Still non-blocking: this step passes.
+        if: steps.graphify-python.outcome == 'failure' || steps.graphify-install.outcome == 'failure'
+        run: |
+          msg="graphify could not be installed (setup-python: ${{ steps.graphify-python.outcome }}, install: ${{ steps.graphify-install.outcome }}) - no .graphify-agent/graph.json this run; the agent falls back to plain file search. A hash mismatch means .github/requirements/graphify.txt needs regenerating (see graphify.in)."
+          echo "::warning title=graphify unavailable::$msg"
+          echo "> [!WARNING]" >> "$GITHUB_STEP_SUMMARY"
+          echo "> $msg" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build code knowledge graph
         # Only run if the install step got as far as succeeding. Without this,
