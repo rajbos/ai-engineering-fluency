@@ -526,11 +526,14 @@ jobs:
     #     half). Without the secret (or if gh fails) the comment is still
     #     posted with GITHUB_TOKEN, minus the inline images, pointing at the
     #     artifact and saying why the images are missing.
-    #   - Fork PRs get a read-only token and no secrets, so they are skipped
-    #     here; their screenshots stay in the artifact.
-    # The three publishing steps are report-only, like the diff they publish:
-    # a GitHub API hiccup or a failed upload must not turn the required UI
-    # gate red. Each one warns and lets the job continue.
+    #   - Fork and Dependabot PRs get a read-only token and no secrets, so the
+    #     posting step is skipped for them; their screenshots stay in the
+    #     artifact.
+    # Rendering the comment and preparing gh are report-only, like the diff
+    # they publish: a failure there warns and lets the job continue. The
+    # posting step is NOT: it fails the required UI gate (and so CI result)
+    # on an API error, or when a configured GH_PAT cannot deliver the images
+    # that were due. Only an unset GH_PAT stays non-fatal.
     - name: Render the screenshot comment
       id: visual-comment
       if: always() && github.event.pull_request.head.repo.full_name == github.repository
