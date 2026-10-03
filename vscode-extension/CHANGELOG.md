@@ -4,6 +4,14 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- **See whether your agent use is outrunning the quality of your work**, following GitHub's [Agentic Engineering System](https://github.com/resources/insights/agentic-engineering-system). Everything here stays on your machine; none of it is uploaded or shared. See [docs/features/AGENTIC-ENGINEERING-SIGNALS.md](../docs/features/AGENTIC-ENGINEERING-SIGNALS.md)
+  - **Corrections → Rework per repository:** corrections per session, corrected sessions, one-shot edits and tool calls per edit for every repository, over all sessions with per-turn detail — not only those with corrections — next to its agent instruction files, plus a with/without instruction files comparison once there is enough data.
+  - **Fluency Score → Quality alongside adoption:** agent sessions per day next to corrections per session and one-shot edits, this month against last month. It never changes your score and is not part of any export.
+  - **Repository PRs → Cloud agent PRs reverted:** reverted / merged for cloud-agent PRs, with everyone else's revert rate as the baseline. Found in the PR list already fetched, so no extra GitHub API calls; a lower bound.
+  - **Insights → How you work with agents:** your turns split into director, performer and assessor, flagging heavy delegation with little checking.
+  - Four new insights: more agent use with more rework, agent sessions started without a stated goal needing more corrections, agent PRs without confirmed human review, and rising cloud-agent PR load with reverts or rework. The "add instructions" insight now cites your own with/without numbers when they qualify.
+
 ## [0.19.0] - 2026-10-02
 
 ### Features

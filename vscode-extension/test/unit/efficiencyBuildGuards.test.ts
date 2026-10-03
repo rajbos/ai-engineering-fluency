@@ -1190,3 +1190,39 @@ test('wiring: every webview document that renders localized text declares the vi
 		'and no other spelling of the lang attribute may survive',
 	);
 });
+
+test('wiring: insights are re-evaluated when the PR snapshot or a readiness rescan lands', () => {
+	// The agent-PR and review-control insights read the PR snapshot and the readiness scan, which
+	// routinely arrive after the Insights tab has rendered. Without a re-evaluation they would stay
+	// absent until the next usage refresh.
+	const republish = methodBody('private republishInsights(');
+	assert.ok(republish.includes('this.buildCurrentInsights(stats)'), 'it must re-evaluate from the current stats');
+	assert.ok(republish.includes('this.refreshInsightBadgeFromState('), 'the status-bar badge must follow');
+	assert.ok(republish.includes("command: 'updateInsights'"), 'the open Insights tab must be updated');
+	const publish = methodBody('private async publishRepoPrStats(');
+	assert.ok(
+		publish.indexOf('this._lastRepoPrStats = stamped;') < publish.indexOf('this.republishInsights();'),
+		'publishing a PR snapshot must re-evaluate insights after storing it',
+	);
+	const rescan = methodBody('private loadReadinessForUsage(');
+	assert.ok(
+		rescan.indexOf('this.rememberReadinessScan(report);') < rescan.indexOf('this.republishInsights();'),
+		'a readiness rescan must re-evaluate insights after storing it',
+	);
+	// readinessForInsights() runs inside buildCurrentInsights(), so re-evaluating from there would recurse.
+	assert.ok(!methodBody('private readinessForInsights(').includes('republishInsights'));
+});
+
+test('wiring: per-repository instruction files are joined after the queued scans run and before dedup', () => {
+	// Workspace customization scans are queued during aggregation and only run when awaited. Joining
+	// before that marks every repository "not scanned"; joining after the dedup misses workspaces the
+	// dedup merged away, because it deletes them from the cache.
+	const run = methodBody('private async calculateUsageAnalysisStatsExclusive(');
+	const resolved = run.indexOf('await this.resolvePendingCustomizationScans();');
+	const joined = run.indexOf('this.buildAgentActivity(usageResults, now, last30DaysStartMs)');
+	const deduped = run.indexOf('await this.deduplicateWorkspacePathsWithScans(');
+	assert.ok(resolved !== -1 && joined !== -1 && deduped !== -1, 'all three steps must be in the usage run');
+	assert.ok(run.indexOf('this.aggregateUsageFileResults(') < resolved, 'the scans are queued by the aggregation, so they resolve after it');
+	assert.ok(resolved < joined, 'the activity report must read resolved scans');
+	assert.ok(joined < deduped, 'the activity report must read the cache before the dedup prunes it');
+});
