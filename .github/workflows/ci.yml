@@ -586,8 +586,10 @@ jobs:
       # failure, so an expired GH_PAT left the job green and the PR without
       # screenshots for days. A configured-but-unusable PAT, a failed upload
       # and an API error now fail the job; only a PAT that is not configured
-      # at all (Dependabot runs never receive secrets) stays a notice.
-      if: always() && github.event.pull_request.head.repo.full_name == github.repository
+      # at all stays a notice. Dependabot runs are skipped outright: they get
+      # neither secrets nor a writable GITHUB_TOKEN, so the image-free fallback
+      # could not post either; their screenshots stay in the artifact.
+      if: always() && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # User token for the uploads; see the note above. Optional.
