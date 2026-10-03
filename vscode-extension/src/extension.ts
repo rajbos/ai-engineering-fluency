@@ -6857,6 +6857,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
 			recentSessions = this.buildRecentSessionBuckets(usageResults, now);
 			autoCompactionsLast7Days = this.buildAutoCompactionStats(usageResults, now);
+			// The per-repository activity joins each session's workspace to its customization scan, so the
+			// scans queued by the aggregation above must have run first. It also has to run before the
+			// workspace dedup below, which drops merged-away workspaces from the cache.
+			await this.resolvePendingCustomizationScans();
 			sessionReports = {
 				correctionReport: this.buildCorrectionReport(usageResults),
 				repeatedTasks: this.buildRepeatedTaskReport(usageResults),
@@ -7859,8 +7863,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/**
 	 * Record the instruction files of the local checkout a session ran in, keyed by repository.
-	 * Reads only the customization scan `trackWorkspaceForSession` already cached, so it never
-	 * touches the filesystem itself; a repository whose checkout was not scanned stays unknown.
+	 * Reads only the customization scans `trackWorkspaceForSession` queued, so it never touches the
+	 * filesystem itself; the caller must have awaited `resolvePendingCustomizationScans()`. A
+	 * repository whose checkout was not scanned stays unknown.
 	 */
 	private collectRepoKnowledge(
 		sessionFile: string,

@@ -1212,3 +1212,17 @@ test('wiring: insights are re-evaluated when the PR snapshot or a readiness resc
 	// readinessForInsights() runs inside buildCurrentInsights(), so re-evaluating from there would recurse.
 	assert.ok(!methodBody('private readinessForInsights(').includes('republishInsights'));
 });
+
+test('wiring: per-repository instruction files are joined after the queued scans run and before dedup', () => {
+	// Workspace customization scans are queued during aggregation and only run when awaited. Joining
+	// before that marks every repository "not scanned"; joining after the dedup misses workspaces the
+	// dedup merged away, because it deletes them from the cache.
+	const run = methodBody('private async calculateUsageAnalysisStatsExclusive(');
+	const resolved = run.indexOf('await this.resolvePendingCustomizationScans();');
+	const joined = run.indexOf('this.buildAgentActivity(usageResults, now, last30DaysStartMs)');
+	const deduped = run.indexOf('await this.deduplicateWorkspacePathsWithScans(');
+	assert.ok(resolved !== -1 && joined !== -1 && deduped !== -1, 'all three steps must be in the usage run');
+	assert.ok(run.indexOf('this.aggregateUsageFileResults(') < resolved, 'the scans are queued by the aggregation, so they resolve after it');
+	assert.ok(resolved < joined, 'the activity report must read resolved scans');
+	assert.ok(joined < deduped, 'the activity report must read the cache before the dedup prunes it');
+});
