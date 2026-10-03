@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
 import type { SessionFileCache } from '../../src/types';
+import { mergePlaceholderDetails } from './detailsOnlyCache';
 import { type CachePolicy, VsCodeCachePolicy } from '../../src/cachePolicy';
 
 export interface CacheManagerDeps {
@@ -1491,8 +1492,11 @@ export class CacheManager {
 		}
 		for (const [filePath, entry] of this.sessionFileCache) {
 			const prev = merged[filePath];
-			if (!prev || (typeof entry.mtime === 'number' && entry.mtime >= prev.mtime)) {
-				merged[filePath] = entry;
+			// A details-only placeholder must not overwrite a full on-disk entry at the same mtime.
+			const placeholderOverFull = entry.detailsOnly === true && prev && !prev.detailsOnly && entry.mtime === prev.mtime && entry.size === prev.size;
+			if (!prev || (typeof entry.mtime === 'number' && entry.mtime >= prev.mtime && !placeholderOverFull)) {
+				// A full entry replacing a same-version placeholder keeps the placeholder's detail metadata.
+				merged[filePath] = prev?.detailsOnly === true && !entry.detailsOnly && entry.mtime === prev.mtime && entry.size === prev.size ? mergePlaceholderDetails(entry, prev) : entry;
 			}
 		}
 		const keys = Object.keys(merged);
@@ -1638,8 +1642,11 @@ export class CacheManager {
 			const existing = this.sessionFileCache.get(filePath);
 			const tombstoneMtime = this.deletedFilePaths.get(filePath);
 			const isNewerThanTombstone = tombstoneMtime === undefined || entry.mtime > tombstoneMtime;
-			if ((!existing || entry.mtime > existing.mtime) && isNewerThanTombstone) {
-				this.sessionFileCache.set(filePath, entry);
+			// At an equal mtime a full entry must still replace a details-only placeholder,
+			// otherwise the placeholder keeps forcing a re-analysis it no longer needs.
+			const upgradesPlaceholder = existing?.detailsOnly === true && !entry.detailsOnly && entry.mtime === existing.mtime && entry.size === existing.size;
+			if ((!existing || entry.mtime > existing.mtime || upgradesPlaceholder) && isNewerThanTombstone) {
+				this.sessionFileCache.set(filePath, upgradesPlaceholder && existing ? mergePlaceholderDetails(entry, existing) : entry);
 				// Must clear any tombstone this window recorded for this path, same as
 				// setCachedSessionData() does — buildMergedSnapshotEntries()'s mtime comparison
 				// already protects a newer disk entry on its own, but clearing here keeps this

@@ -88,6 +88,8 @@ type InitialChartData = {
 	initialView?: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task' | 'taskCategory';
 	initialMetric?: 'tokens' | 'output' | 'cost' | 'sessions';
 	initialSplit?: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' | 'taskCategory';
+	/** Host-persisted collapsed state of "By Editor"; outlives the panel, unlike webview state. */
+	initialEditorListCollapsed?: boolean;
 	monthlyBudget?: number;
 	periods?: {
 		day: ChartPeriodData;
@@ -564,6 +566,7 @@ function wireEditorListToggle(): void {
 		toggle.title = editorListCollapsed ? 'Show per-editor breakdown' : 'Hide per-editor breakdown';
 		if (chevron) { chevron.textContent = editorListCollapsed ? '▸' : '▾'; }
 		chartState.patch({ editorListCollapsed });
+		vscode.postMessage({ command: 'setEditorListCollapsed', collapsed: editorListCollapsed });
 	});
 }
 
@@ -1420,6 +1423,10 @@ function applySavedChartState(saved: ChartWebviewState): void {
 
 function restoreChartState(initialData: InitialChartData): void {
 	const saved = chartState.restore();
+	// Webview state is newest for an existing panel (the host value is a snapshot embedded when the
+	// panel was created); the host value only seeds a brand-new panel, which has no saved flag.
+	const savedFlag = (vscode.getState() as Partial<ChartWebviewState> | undefined)?.editorListCollapsed;
+	editorListCollapsed = savedFlag ?? initialData.initialEditorListCollapsed ?? false;
 	if (!vscode.getState()) {
 		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
 		if (initialData.initialTimeWindow) { currentTimeWindow = initialData.initialTimeWindow; }
@@ -1435,7 +1442,6 @@ function restoreChartState(initialData: InitialChartData): void {
 	currentPeriod = saved.period ?? 'day';
 	currentTimeWindow = saved.timeWindow ?? 'last30';
 	currentDisplayMode = saved.displayMode ?? 'actual';
-	editorListCollapsed = saved.editorListCollapsed ?? false;
 	if (saved.view && !saved.metric) {
 		const m = migrateViewKey(saved.view);
 		currentMetric = m.metric;

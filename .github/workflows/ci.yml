@@ -526,11 +526,14 @@ jobs:
     #     half). Without the secret (or if gh fails) the comment is still
     #     posted with GITHUB_TOKEN, minus the inline images, pointing at the
     #     artifact and saying why the images are missing.
-    #   - Fork PRs get a read-only token and no secrets, so they are skipped
-    #     here; their screenshots stay in the artifact.
-    # The three publishing steps are report-only, like the diff they publish:
-    # a GitHub API hiccup or a failed upload must not turn the required UI
-    # gate red. Each one warns and lets the job continue.
+    #   - Fork and Dependabot PRs get a read-only token and no secrets, so the
+    #     posting step is skipped for them; their screenshots stay in the
+    #     artifact.
+    # Rendering the comment and preparing gh are report-only, like the diff
+    # they publish: a failure there warns and lets the job continue. The
+    # posting step is NOT: it fails the required UI gate (and so CI result)
+    # on an API error, or when a configured GH_PAT cannot deliver the images
+    # that were due. Only an unset GH_PAT stays non-fatal.
     - name: Render the screenshot comment
       id: visual-comment
       if: always() && github.event.pull_request.head.repo.full_name == github.repository
@@ -581,8 +584,15 @@ jobs:
       # Runs without a report too (the render or the diff failed on this
       # push): an earlier push's screenshot comment would otherwise stay up,
       # showing before/after images that no longer describe this head.
-      if: always() && github.event.pull_request.head.repo.full_name == github.repository
-      continue-on-error: true
+      #
+      # Deliberately NOT continue-on-error: this step used to swallow every
+      # failure, so an expired GH_PAT left the job green and the PR without
+      # screenshots for days. A configured-but-unusable PAT, a failed upload
+      # and an API error now fail the job; only a PAT that is not configured
+      # at all stays a notice. Dependabot runs are skipped outright: they get
+      # neither secrets nor a writable GITHUB_TOKEN, so the image-free fallback
+      # could not post either; their screenshots stay in the artifact.
+      if: always() && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # User token for the uploads; see the note above. Optional.
@@ -623,16 +633,27 @@ jobs:
         # can be a bad token or just a GitHub/network hiccup, so this keeps
         # gh's own words rather than guessing which.
         pat_error=""
+        # Set when images were due and a configured token could not deliver
+        # them. The comment is still posted (without images), then the step
+        # fails so the problem is a red check rather than a silent gap.
+        images_failed=""
         if [ -n "${GH_ATTACH_TOKEN:-}" ]; then
           pat_err_file="$(mktemp)"
-          pat_login="$(GH_TOKEN="$GH_ATTACH_TOKEN" gh api user --jq .login 2>"$pat_err_file" || true)"
-          if [ -z "$pat_login" ]; then
-            pat_error="$(head -n1 "$pat_err_file")"
-            pat_error="${pat_error:-gh gave no reason}"
-            echo "::warning::GH_PAT is set but could not be authenticated with 'gh api user' ($(cmd_escape "$pat_error")); posting without inline images."
-            GH_ATTACH_TOKEN=""
-          else
+          # Judge by gh's exit status, never by whether it printed something:
+          # for an HTTP error gh writes the JSON error body to STDOUT, so a
+          # revoked token used to yield a non-empty "login" that was spliced
+          # into the jq program below and crashed it. The login is also
+          # checked against GitHub's username shape before it is trusted.
+          if pat_login="$(GH_TOKEN="$GH_ATTACH_TOKEN" gh api user --jq .login 2>"$pat_err_file")" \
+            && [[ "$pat_login" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,38})$ ]]; then
             posters="${posters},\"${pat_login}\""
+          else
+            pat_error="$(head -n1 "$pat_err_file")"
+            [ -n "$pat_error" ] || pat_error="$(printf '%s' "$pat_login" | tr '\n' ' ' | cut -c1-200)"
+            pat_error="${pat_error:-gh gave no reason}"
+            echo "::error::GH_PAT is set but could not be authenticated with 'gh api user' ($(cmd_escape "$pat_error")); posting without inline images. Rotate the secret."
+            GH_ATTACH_TOKEN=""
+            if [ "${ATTACHMENTS:-0}" -gt 0 ]; then images_failed=1; fi
           fi
         fi
 
@@ -749,7 +770,8 @@ jobs:
             esac
             # Not "uploading failed": gh uploads and then comments, and either
             # half can be the one that failed; gh's reason says which.
-            echo "::warning::gh pr comment --attach failed; posting the comment without inline images. $(cmd_escape "${reason:-gh gave no reason}").${hint}"
+            echo "::error::gh pr comment --attach failed; posting the comment without inline images. $(cmd_escape "${reason:-gh gave no reason}").${hint}"
+            images_failed=1
             why="\`gh pr comment --attach\` failed: \`$(comment_safe "${reason:-gh gave no reason}")\`.${hint}"
           fi
           if [ -n "$why" ]; then
@@ -776,6 +798,11 @@ jobs:
             && echo "Removed the previous screenshot comment ${id}." \
             || echo "::warning::Could not remove the previous screenshot comment ${id}."
         done
+
+        if [ -n "$images_failed" ]; then
+          echo "::error::The screenshot comment was posted without inline images (see the annotations above); failing the step so the broken GH_PAT or its scopes get fixed."
+          exit 1
+        fi
 
   # Stable required-check anchor for this workflow. Require "CI result" in
   # branch protection rather than the individual jobs: it is the only name that

@@ -51,7 +51,11 @@ function bundleChartWebview(): Promise<string> {
 }
 
 /** Boots the chart webview; `state` is what `getState()` returns, like a restored VS Code panel. */
-async function bootChart(state: { current: unknown }, editorTotalsMap?: Record<string, number>): Promise<any> {
+async function bootChart(
+	state: { current: unknown },
+	editorTotalsMap?: Record<string, number>,
+	host?: { initial?: boolean; posted?: any[] },
+): Promise<any> {
 	const bundle = await bundleChartWebview();
 	const data = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
 	const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>', {
@@ -61,7 +65,7 @@ async function bootChart(state: { current: unknown }, editorTotalsMap?: Record<s
 	});
 	const window = dom.window as any;
 	window.acquireVsCodeApi = () => ({
-		postMessage: () => undefined,
+		postMessage: (message: unknown) => { host?.posted?.push(message); },
 		getState: () => state.current,
 		setState: (next: unknown) => { state.current = next; },
 	});
@@ -69,6 +73,7 @@ async function bootChart(state: { current: unknown }, editorTotalsMap?: Record<s
 		setFormValue() { /* no-op */ }, setValidity() { /* no-op */ }, form: null, states: new Set(), role: null,
 	});
 	if (editorTotalsMap) { data.editorTotalsMap = editorTotalsMap; }
+	if (host?.initial !== undefined) { data.initialEditorListCollapsed = host.initial; }
 	window.__INITIAL_CHART__ = data;
 	window.eval(bundle);
 	for (let i = 0; i < 20; i++) { await new Promise((resolve) => setImmediate(resolve)); }
@@ -119,6 +124,22 @@ test('expanding again is persisted too', async () => {
 	assert.equal(state.current?.editorListCollapsed, false);
 	const second = await bootChart(state);
 	assert.equal(isCollapsed(second), false);
+});
+
+test('toggling By Editor tells the extension host so it outlives the panel', async () => {
+	const posted: any[] = [];
+	const w = await bootChart({ current: undefined }, undefined, { posted });
+	w.document.getElementById('editor-list-toggle').dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+	assert.ok(posted.some((m) => m.command === 'setEditorListCollapsed' && m.collapsed === true));
+});
+
+test('host-persisted collapsed flag seeds a brand-new panel that has no webview state', async () => {
+	const collapsed = await bootChart({ current: undefined }, undefined, { initial: true });
+	assert.equal(isCollapsed(collapsed), true);
+	const hidden = await bootChart({ current: { editorListCollapsed: true } }, undefined, { initial: false });
+	assert.equal(isCollapsed(hidden), true, 'newer webview state wins over the stale host snapshot on hide/show');
+	const reexpanded = await bootChart({ current: { editorListCollapsed: false } }, undefined, { initial: true });
+	assert.equal(isCollapsed(reexpanded), false, 'an explicit expanded flag is respected');
 });
 
 test('editor cards show the official logo, with the emoji as fallback for tools without one', async () => {

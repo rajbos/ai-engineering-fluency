@@ -493,6 +493,22 @@
       "worstFillPercent": 99
     }
   },
+  "accountBudgets": [
+    {
+      "accountId": "fixture-account-1",
+      "label": "octo-personal",
+      "status": "ok",
+      "planName": "Copilot Pro",
+      "resetDate": "2026-11-01T00:00:00.000Z",
+      "balance": { "budgetUsd": 39, "budgetAiCredits": 3900, "remainingAiCredits": 1500, "usedAiCredits": 2400, "pctAvailable": 38.5 }
+    },
+    {
+      "accountId": "fixture-account-2",
+      "label": "octo-work",
+      "status": "unavailable",
+      "reason": "no-session"
+    }
+  ],
   "month": {
     "sessions": 288,
     "toolCalls": {

@@ -53,6 +53,37 @@ test('localize: the context-pressure defaults are present without any payload', 
 		'usage.contextPressure.compactedTooltip',
 		'usage.contextPressure.nearLimitLabel',
 		'usage.contextPressure.nearLimitTooltip',
+		'usage.group.usage',
+		'usage.group.workspace',
+		'usage.group.github',
+		'usage.group.coaching',
+		'usage.tab.activity',
+		'usage.tab.sessions',
+		'usage.tab.tools',
+		'usage.tab.health',
+		'usage.tab.repos',
+		'usage.tab.agent',
+		'usage.tab.worktrees',
+		'usage.tab.insights',
+		'usage.tab.corrections',
+		'usage.band.overview.title',
+		'usage.band.overview.subtitle',
+		'usage.band.spend.title',
+		'usage.band.spend.subtitle',
+		'usage.band.context.title',
+		'usage.band.context.subtitle',
+		'usage.contextRefs.otherSummary',
+		'usage.contextRefs.noneRecent',
+		'usage.contextWindow.compactionHeading',
+		'usage.contextRefs.totalTooltip',
+		'usage.contextRefs.colReference',
+		'usage.contextRefs.colToday',
+		'usage.contextRefs.colThisMonth',
+		'usage.contextRefs.colLastMonth',
+		'usage.contextRefs.colLast30',
+		'usage.contextRefs.colTrend',
+		'usage.contextRefs.colTrendTooltip',
+		'usage.contextRefs.totalRow',
 		'usage.sessions.contextFill.columnLabel',
 		'usage.sessions.contextFill.nearLimitFilter',
 		'usage.sessions.contextFill.nearLimitFilterTooltip',
@@ -199,4 +230,13 @@ test('webview fallback: the requested-key scan finds a realistic number of call 
 	// Same guard as above: if the scan silently stops matching, the test above
 	// passes vacuously.
 	assert.ok(requestedWebviewKeys().size > 50, `expected the webview's localize() call sites, got ${requestedWebviewKeys().size}`);
+});
+
+test('webview fallback: the generated JSON is what localize() and webviewLocalizationKeys() read', () => {
+	// Pins the import binding of webviewStrings.generated.json in localization.ts:
+	// the default dictionary and the exported key list must come from the same
+	// source, so a rewired or shadowed import fails here rather than rendering raw keys.
+	initializeWebviewLocalization({});
+	assert.equal(localize('usage.contextPressure.compactedLabel'), '🗜️ Sessions compacted');
+	assert.ok(webviewLocalizationKeys().includes('usage.contextPressure.compactedLabel'));
 });

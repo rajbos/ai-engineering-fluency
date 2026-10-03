@@ -24,6 +24,19 @@ export const COPILOT_EDITOR_NAMES = new Set([
 ]);
 
 /**
+ * The token count to trust for a session: the exact, API-reported count when
+ * there is one, otherwise the character-based estimate.
+ *
+ * `actualTokens` is `0` (or absent) rather than undefined when a session has no
+ * exact data, so a `??` fallback would treat that zero as authoritative and
+ * silently drop the estimate. This is the repository's canonical form of that
+ * check — see AGENTS.md, "CLI Must Reuse Shared Functions".
+ */
+export function preferActualTokens(actualTokens: number | undefined, estimatedTokens: number): number {
+	return actualTokens !== undefined && actualTokens > 0 ? actualTokens : estimatedTokens;
+}
+
+/**
  * Computes a session's total token count from input, output, and thinking tokens.
  *
  * Cached (cache-read) tokens are deliberately excluded: they are already a
@@ -299,6 +312,32 @@ export function distributeModelUsageToDays(
 		const fraction = dayRollup.interactions / totalInteractions;
 		const dayModelUsage = scaleModelUsage(sessionModelUsage, fraction);
 		result[dayKey] = { ...dayRollup, modelUsage: dayModelUsage, actualTokens: sumModelUsageTokens(dayModelUsage) };
+	}
+	return result;
+}
+
+/**
+ * Distributes a session-level exact Copilot cost (from a debug log's nano-AIU) across
+ * the session's daily rollups, weighted by each day's interaction count — the same
+ * weighting `distributeModelUsageToDays` uses. Any `copilotExactCostDollars` already
+ * on a rollup (derived from the session file) is replaced, not added to, so the
+ * debug-log value wins without double counting; the per-day values sum to
+ * `exactCostDollars`. `aggregatePeriodStats` reads exact cost from rollups only, so
+ * without this a debug-log-only exact cost never reaches the period totals.
+ *
+ * Returns undefined when there is no positive cost or no interactions to weight by
+ * (callers should keep their existing rollups in that case).
+ */
+export function distributeExactCostToDays(
+	dailyRollups: Record<string, DailyRollupEntry>,
+	exactCostDollars: number,
+): Record<string, DailyRollupEntry> | undefined {
+	if (!(exactCostDollars > 0)) { return undefined; }
+	const totalInteractions = Object.values(dailyRollups).reduce((s, dr) => s + dr.interactions, 0);
+	if (totalInteractions <= 0) { return undefined; }
+	const result: Record<string, DailyRollupEntry> = {};
+	for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
+		result[dayKey] = { ...dayRollup, copilotExactCostDollars: exactCostDollars * (dayRollup.interactions / totalInteractions) };
 	}
 	return result;
 }
@@ -712,6 +751,10 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 	entry.tokens += tokens; entry.sessions += 1; entry.interactions += interactions;
 	if (!entry.editorUsage[editorType]) { entry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
 	entry.editorUsage[editorType].tokens += tokens; entry.editorUsage[editorType].sessions += 1;
+	// Keep the per-editor turn count in step with the day total. The Efficiency
+	// view's editor filter divides by it, so a path that updated the day but not
+	// the editor slice would silently read as "0 turns" for that editor.
+	entry.editorUsage[editorType].interactions = (entry.editorUsage[editorType].interactions ?? 0) + interactions;
 	if (!entry.repositoryUsage[repository]) { entry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
 	entry.repositoryUsage[repository].tokens += tokens; entry.repositoryUsage[repository].sessions += 1;
 	addModelUsage(entry.modelUsage, modelUsage);

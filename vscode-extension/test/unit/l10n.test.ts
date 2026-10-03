@@ -53,6 +53,9 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 	assert.equal(t('whatsNew.release.0.18.3.headline'), 'A maintenance release: the AI Readiness tab now collapses each repository to one row and can draft a Copilot Chat prompt for the controls you pick, plus friendlier MCP tool names. No new screens.');
 	assert.equal(t('whatsNew.feature.usage.readiness-tab.title'), 'AI Readiness');
 	assert.equal(t('whatsNew.feature.usage.readiness-tab.description'), "In Usage Analysis, scan each repository's delivery and governance controls to see what blocks its next stage and what could not be checked. Separate from your personal Fluency Score.");
+	assert.equal(t('whatsNew.release.0.19.0.headline'), "Usage Analysis is now organized into Usage, Workspace, GitHub and Coaching groups, with banded sections, official editor logos in the Chart view and Copilot budget for every signed-in GitHub account.");
+	assert.equal(t('whatsNew.feature.usage.group-tabs.title'), "Grouped tabs");
+	assert.equal(t('whatsNew.feature.usage.group-tabs.description'), "The ten Usage Analysis tabs now sit under four group tabs (Usage, Workspace, GitHub, Coaching), and My Activity is split into Overview, Spend & models and Context bands.");
 	mock.setLanguage('zh-cn');
 	try {
 		assert.equal(t('command.showReadiness.title'), '显示 AI 就绪度');
@@ -64,6 +67,9 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 		assert.equal(t('whatsNew.release.0.18.3.headline'), '一个维护版本：AI 就绪度标签页现在将每个仓库折叠为一行，并可为你选中的控制措施起草 Copilot Chat 提示，另外 MCP 工具名称更友好。没有新增界面。');
 		assert.equal(t('whatsNew.feature.usage.readiness-tab.title'), 'AI 就绪度');
 		assert.equal(t('whatsNew.feature.usage.readiness-tab.description'), '在使用分析中逐个扫描仓库的交付与治理控制措施，查看进入下一阶段的阻碍和无法核实的项目。与个人熟练度评分分开显示。');
+		assert.equal(t('whatsNew.release.0.19.0.headline'), "使用分析现在按“使用”“工作区”“GitHub”“辅导”分组，各部分按区块排列；图表视图显示官方编辑器图标，并为每个已登录的 GitHub 账户显示 Copilot 预算。");
+		assert.equal(t('whatsNew.feature.usage.group-tabs.title'), "分组标签页");
+		assert.equal(t('whatsNew.feature.usage.group-tabs.description'), "使用分析的十个标签页现在归入四个分组标签（使用、工作区、GitHub、辅导），“我的活动”则分为概览、支出与模型、上下文三个区块。");
 	} finally {
 		mock.setLanguage('en');
 	}
@@ -288,6 +294,107 @@ test('l10n: usage context-pressure keys resolve in zh-cn', () => {
 		// would silently produce "3 个中的 12 个".
 		assert.equal(t('usage.contextPressure.ofCount', '3', '12'), '12 个中的 3 个');
 		assert.equal(t('usage.contextPressure.worstFill', '94'), '最满的会话达到了其窗口的 94%');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: usage tab-group, band and context-reference keys resolve in English', () => {
+	// These back the Usage view's group tab strip, the Activity tab's band headings, and the
+	// collapsed context-reference long tail. A missing key renders the raw key as a tab label
+	// or section heading.
+	const expected: Record<string, string> = {
+		'usage.group.usage': 'Usage',
+		'usage.group.workspace': 'Workspace',
+		'usage.group.github': 'GitHub',
+		'usage.group.coaching': 'Coaching',
+		// The leaf tab labels. They render through `localize()` on every strip render, so a
+		// missing key shows up as a tab titled "usage.tab.repos".
+		'usage.tab.activity': 'My Activity',
+		'usage.tab.sessions': 'Recent Sessions',
+		'usage.tab.tools': 'Tools & Integrations',
+		'usage.tab.health': 'Workspace Health',
+		'usage.tab.repos': 'Repository PRs',
+		'usage.tab.agent': 'Cloud Agent',
+		'usage.tab.worktrees': 'Worktrees',
+		'usage.tab.insights': 'Insights',
+		'usage.tab.corrections': 'Corrections',
+		'usage.band.overview.title': 'Overview',
+		'usage.band.spend.title': 'Spend & models',
+		'usage.band.context.title': 'Context',
+		'usage.contextWindow.compactionHeading': 'Context compaction',
+		'usage.contextRefs.noneRecent': 'No context references recorded today or in the last 30 days.',
+		'usage.contextRefs.totalTooltip': 'Total across the reference kinds (#file, #selection, @workspace, instructions files and so on). The Images, Prompt Files, Custom Prompts and Code Lines rows are separate metrics and are not included in this total.',
+		// The table's own head and footer labels. They render through `localize()` on every
+		// render rather than from a module constant, so a missing key shows up as a column
+		// titled "usage.contextRefs.colToday".
+		'usage.contextRefs.colReference': 'Reference',
+		'usage.contextRefs.colToday': 'Today',
+		'usage.contextRefs.colThisMonth': 'This Month',
+		'usage.contextRefs.colLastMonth': 'Last Month',
+		'usage.contextRefs.colLast30': 'Last 30 Days',
+		'usage.contextRefs.colTrend': 'Trend',
+		'usage.contextRefs.colTrendTooltip': 'Trend: Last Month → This Month → Today',
+		'usage.contextRefs.totalRow': '📊 Total References',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+	assert.match(t('usage.band.overview.subtitle'), /interaction modes/);
+	assert.match(t('usage.band.spend.subtitle'), /how hard they were asked to think/);
+	assert.match(t('usage.band.context.subtitle'), /what gets compacted away/);
+	// The count is a placeholder, not concatenated, so a locale can reposition it.
+	assert.equal(
+		t('usage.contextRefs.otherSummary', '4'),
+		'Other references (4, no usage today or in the last 30 days)',
+	);
+});
+
+test('l10n: usage tab-group, band and context-reference keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'usage.group.usage': '使用情况',
+			'usage.group.workspace': '工作区',
+			'usage.group.coaching': '改进建议',
+			'usage.tab.activity': '我的活动',
+			'usage.tab.sessions': '最近会话',
+			'usage.tab.tools': '工具与集成',
+			'usage.tab.health': '工作区健康度',
+			'usage.tab.repos': '仓库 PR',
+			'usage.tab.agent': '云端代理',
+			'usage.tab.worktrees': '工作树',
+			'usage.tab.insights': '洞察',
+			'usage.tab.corrections': '纠正',
+			'usage.band.overview.title': '概览',
+			'usage.band.spend.title': '花费与模型',
+			'usage.band.context.title': '上下文',
+			'usage.contextWindow.compactionHeading': '上下文压缩',
+			'usage.contextRefs.colReference': '引用',
+			'usage.contextRefs.colToday': '今天',
+			'usage.contextRefs.colThisMonth': '本月',
+			'usage.contextRefs.colLastMonth': '上月',
+			'usage.contextRefs.colLast30': '最近 30 天',
+			'usage.contextRefs.colTrend': '趋势',
+			'usage.contextRefs.colTrendTooltip': '趋势：上月 → 本月 → 今天',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+		// "GitHub" is a proper noun and stays untranslated — asserted so a future bulk
+		// translation pass doesn't quietly localize a product name.
+		assert.equal(t('usage.group.github'), 'GitHub');
+		assert.equal(t('usage.contextRefs.otherSummary', '4'), '其他引用（4 个，今天和最近 30 天均未使用）');
+		// The band subtitles and the two context-reference strings are the longest prose in this
+		// set, so they are the likeliest to be dropped or half-translated in a bulk edit.
+		assert.equal(t('usage.band.overview.subtitle'), "你使用 AI 助手的总量，以及使用了哪些交互模式。", 'zh-cn value for usage.band.overview.subtitle');
+		assert.equal(t('usage.band.spend.subtitle'), "这些使用产生的成本、运行在哪些模型上，以及它们被要求思考的深度。", 'zh-cn value for usage.band.spend.subtitle');
+		assert.equal(t('usage.band.context.subtitle'), "你提供给模型的内容：附加的引用、请求与窗口上限的接近程度，以及被压缩掉的部分。", 'zh-cn value for usage.band.context.subtitle');
+		assert.equal(t('usage.contextRefs.noneRecent'), "今天和最近 30 天均未记录到上下文引用。", 'zh-cn value for usage.contextRefs.noneRecent');
+		assert.equal(t('usage.contextRefs.totalTooltip'), "各引用类型的合计（#file、#selection、@workspace、说明文件等）。图片、提示文件、自定义提示和代码行数这几行属于独立指标，不计入此合计。", 'zh-cn value for usage.contextRefs.totalTooltip');
+		// The emoji is part of the label, not decoration added at render time, so it has to
+		// survive translation along with the words after it.
+		assert.equal(t('usage.contextRefs.totalRow'), "📊 引用合计", 'zh-cn value for usage.contextRefs.totalRow');
 	} finally {
 		mock.setLanguage('en');
 	}
@@ -1348,6 +1455,41 @@ test('l10n: agentic engineering system labels resolve in both languages', () => 
 	}
 });
 
+test('l10n: per-account budget strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	const english: Record<string, string> = {
+		'accountBudgets.title': 'GitHub accounts in VS Code',
+		'accountBudgets.usedLeft': '{0} / {1} used · {2}% left',
+		'accountBudgets.resets': 'resets {0}',
+		'accountBudgets.noQuota': 'No metered budget on this plan',
+		'accountBudgets.unavailable': 'Budget unavailable',
+		'accountBudgets.noSession': 'Sign in with this account from the Accounts menu to see its budget',
+		'accountBudgets.lookupFailed': 'Copilot plan lookup failed ({0})',
+	};
+	for (const [key, value] of Object.entries(english)) {
+		assert.equal(t(key), value, `English value for ${key}`);
+	}
+
+	mock.setLanguage('zh-cn');
+	try {
+		const chinese: Record<string, string> = {
+			'accountBudgets.title': 'VS Code 中的 GitHub 帐户',
+			'accountBudgets.usedLeft': '已使用 {0} / {1} · 剩余 {2}%',
+			'accountBudgets.resets': '{0} 重置',
+			'accountBudgets.noQuota': '此计划没有计量预算',
+			'accountBudgets.unavailable': '预算不可用',
+			'accountBudgets.noSession': '请从“帐户”菜单使用此帐户登录以查看其预算',
+			'accountBudgets.lookupFailed': 'Copilot 计划查询失败（{0}）',
+		};
+		assert.deepEqual(Object.keys(chinese).sort(), Object.keys(english).sort(), 'every new key has a zh-cn assertion');
+		for (const [key, value] of Object.entries(chinese)) {
+			assert.equal(t(key), value, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: every agentic engineering system key has a zh-CN translation and the webviews ship the UI ones', () => {
 	const zh = JSON.parse(readFileSync(join(__dirname, '../../../../package.nls.zh-cn.json'), 'utf8')) as Record<string, string>;
 	const webviewKeys = JSON.parse(readFileSync(join(__dirname, '../../../../src/webview/shared/webviewKeys.json'), 'utf8')) as string[];
@@ -1355,4 +1497,115 @@ test('l10n: every agentic engineering system key has a zh-CN translation and the
 	assert.ok(agenticKeys.length > 40, `expected the agentic.* keys, found ${agenticKeys.length}`);
 	assert.deepEqual(agenticKeys.filter(key => !zh[key]), [], 'agentic.* keys without a zh-CN translation');
 	assert.deepEqual(agenticKeys.filter(key => !webviewKeys.includes(key)), [], 'agentic.* keys missing from webviewKeys.json');
+});
+
+test('l10n: Diagnostics API-driven budget hint strings resolve in English and zh-cn', () => {
+	mock.setLanguage('en');
+	assert.equal(t('diagnostics.apiBudgetHint.label'), "ℹ️ API-driven budget:");
+	assert.equal(t('diagnostics.apiBudgetHint.body'), "Your premium_interactions quota entitlement is {0}/month. If the budget above is 0 or empty, this API value will be used as your effective budget.");
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('diagnostics.apiBudgetHint.label'), "ℹ️ API 驱动的预算：");
+		assert.equal(t('diagnostics.apiBudgetHint.body'), "您的 premium_interactions 配额权益为 {0}/月。如果上方预算为 0 或为空，将使用此 API 值作为有效预算。");
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+// Efficiency scope toolbar (issue #1965) — the time presets, resolution,
+// drill-down and editor/vendor filters. Guards against raw keys surfacing in
+// the toolbar, and against the zh-CN bundle drifting away from the English one.
+test('l10n: efficiency scope toolbar labels resolve in English', () => {
+	const expected: Record<string, string> = {
+		'efficiency.scope.timeRangeGroup': 'Time range',
+		'efficiency.range.last30d': '30 days',
+		'efficiency.range.last12w': '12 weeks',
+		'efficiency.range.last6m': '6 months',
+		'efficiency.range.last1y': '1 year',
+		'efficiency.resolution.label': 'Resolution',
+		'efficiency.resolution.auto': 'Auto ({0})',
+		'efficiency.resolution.daily': 'Daily',
+		'efficiency.resolution.weekly': 'Weekly',
+		'efficiency.resolution.monthly': 'Monthly',
+		'efficiency.scope.editorLabel': 'Editor',
+		'efficiency.scope.allEditors': 'All editors',
+		'efficiency.scope.vendorLabel': 'Model vendor',
+		'efficiency.scope.allVendors': 'All vendors',
+		'efficiency.scope.drillLabel': 'Drill',
+		'efficiency.scope.drillPlaceholder': 'Drill into…',
+		'efficiency.scope.back': '↩ Back',
+		'efficiency.scope.backAria': 'Back to the previous range',
+		'efficiency.scope.drillHintWeekly': 'Click a week on a chart to drill into its days',
+		'efficiency.scope.drillHintMonthly': 'Click a month on a chart to drill into its days',
+		'efficiency.scope.announce': 'Showing {0}.',
+		'efficiency.scope.behaviorGap': '⚠️ Session-derived metrics (active minutes, retry rate, apply rate, skills) are only collected for the last {0} weeks, so earlier buckets in this range show gaps rather than zeros.',
+		'efficiency.scope.editorScoped': 'Scoped to {0}. Sessions whose editor could not be determined are excluded from this view.',
+		'efficiency.scope.noDataFor': 'No data for {0}',
+		'efficiency.trends.bucketIntro': '{0} ratios over {1} ({2}).',
+		'efficiency.trends.bucketsDaily': '{0} days',
+		'efficiency.trends.bucketsWeekly': '{0} weeks',
+		'efficiency.trends.bucketsMonthly': '{0} months',
+		'efficiency.trends.badges': 'Badges compare the recent half of the window against the earlier half; green means the ratio moved in the efficient direction.',
+		'efficiency.trends.partialDaily': 'The current day is partial.',
+		'efficiency.trends.partialWeekly': 'The current week is partial.',
+		'efficiency.trends.partialMonthly': 'The current month is partial.',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: efficiency scope toolbar labels resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'efficiency.range.last30d': '30 天',
+			'efficiency.range.last12w': '12 周',
+			'efficiency.range.last6m': '6 个月',
+			'efficiency.range.last1y': '1 年',
+			'efficiency.resolution.label': '粒度',
+			'efficiency.resolution.auto': '自动（{0}）',
+			'efficiency.resolution.daily': '按天',
+			'efficiency.resolution.weekly': '按周',
+			'efficiency.resolution.monthly': '按月',
+			'efficiency.scope.editorLabel': '编辑器',
+			'efficiency.scope.allEditors': '所有编辑器',
+			'efficiency.scope.vendorLabel': '模型厂商',
+			'efficiency.scope.allVendors': '所有厂商',
+			'efficiency.scope.drillLabel': '下钻',
+			'efficiency.scope.drillPlaceholder': '下钻到…',
+			'efficiency.scope.back': '↩ 返回',
+			'efficiency.scope.backAria': '返回上一个范围',
+			'efficiency.scope.announce': '当前显示：{0}。',
+			'efficiency.scope.timeRangeGroup': '时间范围',
+			'efficiency.scope.drillHintWeekly': '点击图表中的某一周可下钻查看其各天数据',
+			'efficiency.scope.drillHintMonthly': '点击图表中的某一月可下钻查看其各天数据',
+			'efficiency.scope.behaviorGap': '⚠️ 会话派生指标（活跃分钟数、重试率、应用率、技能）仅收集最近 {0} 周的数据，因此该范围内较早的分桶显示为缺口而非零值。',
+			'efficiency.scope.editorScoped': '已限定为 {0}。无法确定所属编辑器的会话不计入此视图。',
+			'efficiency.scope.noDataFor': '{0}（无数据）',
+			'efficiency.trends.bucketIntro': '{1}的{0}比率（{2}）。',
+			'efficiency.trends.bucketsDaily': '{0} 天',
+			'efficiency.trends.bucketsWeekly': '{0} 周',
+			'efficiency.trends.bucketsMonthly': '{0} 个月',
+			'efficiency.trends.badges': '徽章将窗口的近半段与前半段进行比较；绿色表示比率朝更高效的方向变化。',
+			'efficiency.trends.partialDaily': '当前这一天尚未结束。',
+			'efficiency.trends.partialWeekly': '当前这一周尚未结束。',
+			'efficiency.trends.partialMonthly': '当前这一月尚未结束。',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: efficiency placeholder templates keep their {0} slot for localizeFormat', () => {
+	for (const key of ['efficiency.resolution.auto', 'efficiency.scope.announce', 'efficiency.scope.behaviorGap', 'efficiency.scope.editorScoped', 'efficiency.scope.noDataFor', 'efficiency.trends.bucketsDaily', 'efficiency.trends.bucketsWeekly', 'efficiency.trends.bucketsMonthly']) {
+		assert.ok(t(key).includes('{0}'), `${key} must carry a {0} placeholder`);
+	}
+	// The trends intro fills three slots — resolution, range and bucket count.
+	for (const slot of ['{0}', '{1}', '{2}']) {
+		assert.ok(t('efficiency.trends.bucketIntro').includes(slot), `efficiency.trends.bucketIntro must carry a ${slot} placeholder`);
+	}
 });
