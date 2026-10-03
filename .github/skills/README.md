@@ -313,6 +313,16 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - Exit codes: `0` consistent · `1` mechanical drift · `2` config error · `3` no entry for the current version (needs written prose)
 - The editorial guidance for writing an entry: user-facing prose rather than changelog shorthand, ordering by importance because the cap truncates, and never reusing a feature `id` (they are persisted per user to remember what has been announced)
 
+### create-issue
+
+**Purpose**: Describe how issues are created in this repo — guidance only, no scripts.
+
+**Use this skill when:**
+- Asked to create, file or write up an issue (feature, bug, tech debt)
+
+**Contents:**
+- Steps: clarify what/where with the user, investigate the codebase, define the places and approach to change, list tests to update, check for cross-surface gaps (e.g. data added to a VS Code view but not available in the shared modules/npm package), then file with `gh issue create`
+
 ## Using Agent Skills
 
 ### In VS Code
