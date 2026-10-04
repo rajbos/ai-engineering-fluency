@@ -9,6 +9,7 @@ import {
     calculateUsageAnalysisStats,
     buildChartPayload,
     getDiagnosticPaths,
+    getSessionBackingPath,
     loadCache,
     saveCache,
 } from '../../cli/src/helpers';
@@ -71,6 +72,9 @@ let cachedUsageStats: UsageAnalysisStats | null = null;
 let cachedChartPayload: object | null = null;
 let lastDiagnosticReport = '';
 let isRefreshing = false;
+// Bumped whenever a refresh replaces the session-file list. A computation that
+// started against an older list must not cache its result over the newer data.
+let dataGeneration = 0;
 
 // ---------------------------------------------------------------------------
 // Static asset path
@@ -229,10 +233,27 @@ body {
 // ---------------------------------------------------------------------------
 
 async function getSessionFiles(): Promise<string[]> {
-    if (!cachedSessionFiles) {
-        cachedSessionFiles = await discoverSessionFiles();
+    while (!cachedSessionFiles) {
+        const generation = dataGeneration;
+        const files = await discoverSessionFiles();
+        // A refresh that landed meanwhile already stored a newer list; keep that one.
+        if (generation === dataGeneration && !cachedSessionFiles) { cachedSessionFiles = files; }
     }
     return cachedSessionFiles;
+}
+
+/**
+ * Runs `compute` over the current session files and returns its result, retrying
+ * if a refresh replaced the file list while it was running. The caller caches the
+ * returned value, so a slow computation over an outdated list can never be stored
+ * after — and over — the data from a newer one.
+ */
+async function computeForCurrentFiles<T>(compute: (files: string[]) => Promise<T>): Promise<T> {
+    for (;;) {
+        const generation = dataGeneration;
+        const result = await compute(await getSessionFiles());
+        if (generation === dataGeneration) { return result; }
+    }
 }
 
 /** Post a progress message to the loading screen (bridged to window messages by the preload). */
@@ -287,16 +308,18 @@ function buildLoadingProgressCallback(editors: { icon: string; name: string }[])
 async function getStats(): Promise<DetailedStats> {
     if (!cachedStats) {
         sendLoadingMessage({ command: 'loadingStep', step: 'discovering' });
-        const files = await getSessionFiles();
-        cachedStats = await calculateDetailedStats(files, buildLoadingProgressCallback(detectLoadingEditors(files)));
+        const stats = await computeForCurrentFiles(files =>
+            calculateDetailedStats(files, buildLoadingProgressCallback(detectLoadingEditors(files))));
+        // A refresh may have stored fresher stats while this ran; prefer those.
+        cachedStats ??= stats;
     }
     return cachedStats;
 }
 
 async function getUsageStats(): Promise<UsageAnalysisStats> {
     if (!cachedUsageStats) {
-        const files = await getSessionFiles();
-        cachedUsageStats = await calculateUsageAnalysisStats(files);
+        const usageStats = await computeForCurrentFiles(files => calculateUsageAnalysisStats(files));
+        cachedUsageStats ??= usageStats;
     }
     return cachedUsageStats;
 }
@@ -308,9 +331,11 @@ async function getUsageStats(): Promise<UsageAnalysisStats> {
  */
 async function getChartPayload(): Promise<object> {
     if (!cachedChartPayload) {
-        const files = await getSessionFiles();
-        const { labels, days, allDaysMap } = await calculateDailyStats(files);
-        cachedChartPayload = buildChartPayload(labels, days, allDaysMap);
+        const payload = await computeForCurrentFiles(async (files) => {
+            const { labels, days, allDaysMap } = await calculateDailyStats(files);
+            return buildChartPayload(labels, days, allDaysMap);
+        });
+        cachedChartPayload ??= payload;
     }
     return cachedChartPayload;
 }
@@ -359,8 +384,13 @@ async function refreshStats(): Promise<void> {
     if (isRefreshing) { return; }
     isRefreshing = true;
     try {
-        cachedSessionFiles = await discoverSessionFiles();
-        cachedStats = await calculateDetailedStats(cachedSessionFiles);
+        const files = await discoverSessionFiles();
+        const stats = await calculateDetailedStats(files);
+        // Swap everything in one synchronous step, so no reader can pair the new
+        // file list with stats, usage or chart data computed from the old one.
+        dataGeneration++;
+        cachedSessionFiles = files;
+        cachedStats = stats;
         cachedUsageStats = null; // reset so it recomputes on next access
         cachedChartPayload = null;
         await saveCache();
@@ -495,7 +525,8 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
         const diagnosticPaths = getDiagnosticPaths();
         const sessionFiles = await Promise.all(files.map(async (f) => {
             try {
-                const s = await fs.promises.stat(f);
+                // Stat the backing file: DB-backed sessions use virtual paths.
+                const s = await fs.promises.stat(getSessionBackingPath(f));
                 return { file: f, size: s.size, modified: s.mtime.toISOString() };
             } catch {
                 return { file: f, size: 0, modified: new Date().toISOString() };
@@ -852,9 +883,13 @@ function registerIpcHandlers(): void {
             case 'openSessionFile':
             case 'revealPath': {
                 // Reveal rather than open: the path comes from the page, and
-                // showing it in Explorer never executes anything.
-                const target = message.command === 'openSessionFile' ? message.file : message.path;
-                if (typeof target === 'string' && target && fs.existsSync(target)) {
+                // showing it in Explorer never executes anything. Session entries
+                // from DB-backed editors are virtual paths (`opencode.db#<id>`),
+                // so resolve to the file that actually exists on disk first.
+                const requested = message.command === 'openSessionFile' ? message.file : message.path;
+                if (typeof requested !== 'string' || !requested) { break; }
+                const target = getSessionBackingPath(requested);
+                if (fs.existsSync(target)) {
                     shell.showItemInFolder(target);
                 }
                 break;

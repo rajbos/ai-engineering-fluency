@@ -3,7 +3,8 @@ name: Desktop - Build & Publish Windows installer
 # Tag push (desktop/v*): build the NSIS installer and publish it as a GitHub
 # release, then point the auto-update feed at it.
 # Manual run: build only — the installer is attached to the run as an artifact
-# and nothing is released. Use it to try an installer before tagging.
+# and nothing is released, even when the run is dispatched against a tag. Use
+# it to try an installer before tagging.
 
 on:
   workflow_dispatch:
@@ -24,6 +25,11 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write # create the GitHub release and upload its assets
+    # One desktop publish at a time, never cancelled midway: two versions must
+    # not race each other to the shared update feed.
+    concurrency:
+      group: desktop-publish
+      cancel-in-progress: false
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -92,7 +98,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub release
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         working-directory: desktop
         env:
           GH_TOKEN: ${{ github.token }}
@@ -124,8 +130,10 @@ jobs:
       # the rolling `desktop-latest` release holds one latest.yml whose URLs
       # point at the versioned release's installer. Updated last, so installed
       # apps only see a version whose installer is already downloadable.
+      # The feed only ever moves forward: a re-run of an older tag republishes
+      # that release's assets but must not point installed apps back at it.
       - name: Update auto-update feed (desktop-latest)
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         working-directory: desktop
         env:
           GH_TOKEN: ${{ github.token }}
@@ -142,6 +150,21 @@ jobs:
           gh release view desktop-latest | Out-Null
           $feedExists = $LASTEXITCODE -eq 0
           $global:LASTEXITCODE = 0
+
+          if ($feedExists) {
+            gh release download desktop-latest --pattern latest.yml --dir release/published --clobber
+            $hasPublishedFeed = $LASTEXITCODE -eq 0
+            $global:LASTEXITCODE = 0
+            if ($hasPublishedFeed) {
+              $published = Get-Content release/published/latest.yml -Raw
+              if ($published -notmatch '(?m)^version:\s*(\S+)\s*$') { throw "Published update feed has no version line" }
+              $publishedVersion = [System.Management.Automation.SemanticVersion]$Matches[1]
+              if ($publishedVersion -gt [System.Management.Automation.SemanticVersion]$env:VERSION) {
+                Write-Host "Update feed already points at $publishedVersion, newer than $env:VERSION - leaving it unchanged."
+                exit 0
+              }
+            }
+          }
 
           if (-not $feedExists) {
             gh release create desktop-latest --target $env:GITHUB_SHA --latest=false `

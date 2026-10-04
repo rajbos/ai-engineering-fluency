@@ -203,6 +203,16 @@ function resolveModel(request: any): string {
 }
 
 /**
+ * The real file behind a discovered session path. DB-backed editors (OpenCode,
+ * Crush, ...) report virtual paths like `opencode.db#<id>`, which do not exist
+ * on disk; ordinary session files are returned unchanged.
+ */
+export function getSessionBackingPath(filePath: string): string {
+	const eco = getEcosystems().find(e => e.handles(filePath));
+	return eco ? eco.getBackingPath(filePath) : filePath;
+}
+
+/**
  * Stat a session file, handling DB virtual paths (OpenCode and Crush).
  * Virtual DB paths are resolved to the actual DB file.
  */
