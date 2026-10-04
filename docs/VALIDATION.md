@@ -256,7 +256,13 @@ Two things to know about that comment:
   may be a bad token or a transient GitHub/network failure), or, when gh got
   as far as the upload, gh's error from `gh pr comment --attach` with a
   permission hint. A missing permission therefore shows up on the PR rather
-  than only on the checks page.
+  than only on the checks page. That step also **fails the job** when images
+  were due and a configured `GH_PAT` could not deliver them (rejected token,
+  failed upload): the comment is still posted without images, then the step
+  exits non-zero so an expired or under-scoped token is a red check instead of
+  a silent gap. Only an unset `GH_PAT` stays a notice. Dependabot runs skip the
+  step entirely (no secrets and a read-only `GITHUB_TOKEN`, so not even the
+  image-free comment can post); their screenshots stay in the artifact.
 - Fork PRs get a read-only token and no secrets, so they only get the artifact.
 - Only a comment authored by one of the workflow's own identities (the Actions
   bot, the PAT's user) **and** whose body *starts* with the marker is ever
@@ -277,6 +283,26 @@ Two things to know about that comment:
 - **A dead control that is already the selected option** is reported as
   `noop-selected`, not as a finding. That is the trade for not carrying three
   standing false positives on the chart view's segmented controls.
+
+## VS Code extension release provenance
+
+Every VS Code extension VSIX built by `release.yml` and the nightly pre-release
+workflow ships with SPDX JSON SBOMs and Sigstore-backed GitHub attestations
+(build provenance and SBOM). The shared logic is the composite action
+`.github/actions/vsix-attest`. In both workflows a separate `attest` job attests
+the VSIX workflow artifact, and the `publish` job re-verifies the same artifact
+before it publishes to the Marketplace or Open VSX. The job that builds the VSIX
+can neither sign nor publish it. SBOMs are attached to the
+GitHub release (nightlies keep them as the `vsix-sbom` workflow artifact).
+
+To verify a downloaded VSIX (needs the [GitHub CLI](https://cli.github.com/)):
+
+```sh
+gh attestation verify <file>.vsix --repo rajbos/ai-engineering-fluency
+```
+
+This proves the file was built by this repository's GitHub Actions workflows from
+the recorded commit. It does not cover the Visual Studio, JetBrains or CLI releases.
 
 ## Sharing server
 

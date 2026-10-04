@@ -39,12 +39,11 @@ look like "review" but answer different questions:
    timeline UI, "Review requested due to automatic review settings" is this
    check being queued, and "Copilot started reviewing... [View session]" is it
    running — that link is this same check run's own Actions job URL.
-2. **This repository's own CI-driven review agents** — separate check runs
-   from this repo's own GitHub Actions workflows: `Architecture agent`,
-   `Code Quality agent`, `Test Expert agent`, `Performance agent`, and
-   `Review risk` (the `pr-risk-review` skill). These are unrelated to #1 and
-   never answer "is the automatic review done" — `pr-risk-review` in
-   particular is explicitly advisory-only and never blocks merge.
+2. **This repository's own CI-driven review** — a separate check run from
+   this repo's own GitHub Actions workflows: `Review risk` (the
+   `pr-risk-review` skill). It is unrelated to #1 and never answers "is the
+   automatic review done" — it is explicitly advisory-only and never blocks
+   merge.
 
 Only check run #1 (`copilot-pull-request-reviewer`) answers the question this
 skill is about.

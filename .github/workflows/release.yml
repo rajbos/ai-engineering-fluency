@@ -340,13 +340,62 @@ jobs:
           exit 1
         fi
 
-  publish:
+  attest:
     needs: release
+    name: SBOM and Provenance Attestation
+    # Runs after the VSIX is packaged and before any marketplace publish. The publish job
+    # needs this job, so a failed attestation or verification blocks publishing.
+    if: inputs.vs_only != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # attach SBOMs to the GitHub release
+      id-token: write       # Sigstore keyless signing for the attestations
+      attestations: write   # store the attestations
+
+    steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+      with:
+        egress-policy: audit
+
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    # The exact artifact uploaded by the release job; no re-packaging happens here.
+    - name: Download VSIX workflow artifact
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: vsix-package
+        path: dist
+
+    - name: Generate SBOMs, attest, and verify
+      uses: ./.github/actions/vsix-attest
+      with:
+        vsix-path: dist/${{ needs.release.outputs.vsix_file }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Attach SBOMs to the GitHub release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        VSIX="${{ needs.release.outputs.vsix_file }}"
+        cp sbom/vsix.spdx.json "sbom/${VSIX}.spdx.json"
+        cp sbom/dependencies.spdx.json "sbom/${VSIX%.vsix}-dependencies.spdx.json"
+        gh release upload "${{ needs.release.outputs.tag_name }}" \
+          "sbom/${VSIX}.spdx.json" \
+          "sbom/${VSIX%.vsix}-dependencies.spdx.json" \
+          --repo "${{ github.repository }}" --clobber
+
+  publish:
+    needs: [release, attest]
     name: Publish VS Code Extension
     if: github.event_name == 'workflow_dispatch' && inputs.publish_marketplace && inputs.vs_only != true
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      attestations: read    # gh attestation verify before publishing
     
     steps:
     - name: Harden the runner (Audit all outbound calls)
@@ -396,21 +445,28 @@ jobs:
       working-directory: vscode-extension
       run: npm ci --ignore-scripts
 
-    - name: Download VSIXs from release
+    # Publish the exact bytes the attest job attested: take the VSIX from the workflow
+    # artifact (not a re-package), and verify the attestation again right before publishing.
+    - name: Download VSIX workflow artifact
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: vsix-package
+        path: .
+
+    - name: Verify VSIX attestation before publishing
       id: download_vsix
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        TAG_NAME="${{ needs.release.outputs.tag_name }}"
-        echo "Downloading VSIXs from release $TAG_NAME..."
-        gh release download "$TAG_NAME" \
-          --repo "${{ github.repository }}" \
-          --pattern "*.vsix" \
-          --dir .
         PRIMARY_VSIX=$(find . -maxdepth 1 -name "ai-engineering-fluency-*.vsix" -exec basename {} \; | head -n 1)
         # LEGACY_VSIX=$(find . -maxdepth 1 -name "copilot-token-tracker-*.vsix" -exec basename {} \; | head -n 1)  # legacy disabled
+        if [ -z "$PRIMARY_VSIX" ]; then
+          echo "❌ No VSIX found in the vsix-package artifact."
+          exit 1
+        fi
         echo "Primary VSIX: $PRIMARY_VSIX"
-        # echo "Legacy VSIX:  $LEGACY_VSIX"  # legacy disabled
+        gh attestation verify "$PRIMARY_VSIX" --repo "${{ github.repository }}" \
+          --predicate-type https://slsa.dev/provenance/v1
         echo "vsix_file=$PRIMARY_VSIX" >> "$GITHUB_OUTPUT"
         # echo "legacy_vsix_file=$LEGACY_VSIX" >> "$GITHUB_OUTPUT"  # legacy disabled
 
