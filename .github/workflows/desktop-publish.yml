@@ -1,0 +1,153 @@
+name: Desktop - Build & Publish Windows installer
+
+# Tag push (desktop/v*): build the NSIS installer and publish it as a GitHub
+# release, then point the auto-update feed at it.
+# Manual run: build only — the installer is attached to the run as an artifact
+# and nothing is released. Use it to try an installer before tagging.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'desktop/v*'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  build:
+    name: Build Windows installer
+    runs-on: windows-latest
+    permissions:
+      contents: write # create the GitHub release and upload its assets
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+          cache-dependency-path: |
+            vscode-extension/package-lock.json
+            cli/package-lock.json
+            desktop/package-lock.json
+
+      - name: Read version
+        id: version
+        working-directory: desktop
+        run: |
+          $version = node -p "require('./package.json').version"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "desktop/v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match desktop/package.json version (desktop/v$version)"
+          }
+
+      # The desktop app bundles the extension's webview bundles and imports the
+      # CLI's stats logic from source, so all three packages need dependencies.
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: npm ci --ignore-scripts
+
+      - name: Install CLI dependencies
+        working-directory: cli
+        run: npm ci --ignore-scripts
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci --ignore-scripts
+
+      # Build the extension explicitly in production mode. Left to the desktop
+      # build's own fallback, the webview bundles would ship unminified.
+      - name: Build extension webview bundles (production)
+        working-directory: vscode-extension
+        run: node esbuild.js --production
+
+      - name: Type-check desktop app
+        working-directory: desktop
+        run: npm run check-types
+
+      - name: Build installer
+        working-directory: desktop
+        run: npm run dist
+
+      - name: Upload installer as workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-windows-installer
+          path: |
+            desktop/release/AI-Engineering-Fluency-Setup-*.exe
+            desktop/release/AI-Engineering-Fluency-Setup-*.exe.blockmap
+            desktop/release/latest.yml
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $tag = "desktop/v$env:VERSION"
+          $assets = @(
+            "release/AI-Engineering-Fluency-Setup-$env:VERSION.exe"
+            "release/AI-Engineering-Fluency-Setup-$env:VERSION.exe.blockmap"
+            "release/latest.yml"
+          )
+
+          gh release view $tag | Out-Null
+          $releaseExists = $LASTEXITCODE -eq 0
+          $global:LASTEXITCODE = 0
+
+          if ($releaseExists) {
+            gh release upload $tag $assets --clobber
+          } else {
+            # --latest=false: this repo ships several products; the desktop app
+            # must not take the repo-wide "Latest release" badge from them.
+            gh release create $tag $assets --verify-tag --generate-notes --latest=false --title "Desktop App v$env:VERSION"
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Publishing release $tag failed" }
+
+      # electron-updater's GitHub provider follows the repo's "latest release",
+      # which here is usually another product (VS Code extension, CLI, JetBrains)
+      # with no latest.yml. So the app reads its feed from a fixed place instead:
+      # the rolling `desktop-latest` release holds one latest.yml whose URLs
+      # point at the versioned release's installer. Updated last, so installed
+      # apps only see a version whose installer is already downloadable.
+      - name: Update auto-update feed (desktop-latest)
+        if: github.ref_type == 'tag'
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $installer = "AI-Engineering-Fluency-Setup-$env:VERSION.exe"
+          $downloadUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/desktop/v$env:VERSION/$installer"
+
+          $feed = Get-Content release/latest.yml -Raw
+          if (-not $feed.Contains($installer)) { throw "release/latest.yml does not reference $installer" }
+          New-Item -ItemType Directory -Force release/feed | Out-Null
+          [System.IO.File]::WriteAllText("$PWD/release/feed/latest.yml", $feed.Replace($installer, $downloadUrl))
+
+          gh release view desktop-latest | Out-Null
+          $feedExists = $LASTEXITCODE -eq 0
+          $global:LASTEXITCODE = 0
+
+          if (-not $feedExists) {
+            gh release create desktop-latest --target $env:GITHUB_SHA --latest=false `
+              --title "Desktop App auto-update feed" `
+              --notes "Update feed read by installed copies of the desktop app. Nothing to download here: get the installer from the newest **Desktop App vX.Y.Z** release."
+            if ($LASTEXITCODE -ne 0) { throw "Creating the desktop-latest release failed" }
+          }
+          gh release upload desktop-latest release/feed/latest.yml --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Uploading the update feed failed" }

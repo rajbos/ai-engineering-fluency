@@ -1,7 +1,7 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeTheme, protocol, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, clipboard, ipcMain, nativeTheme, protocol, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { autoUpdater } from 'electron-updater';
+import { checkForUpdates, getUpdateState, installUpdate, startUpdateChecks } from './updater';
 import {
     discoverSessionFiles,
     calculateDetailedStats,
@@ -68,6 +68,8 @@ let currentPanel: PanelId = 'details';
 let cachedStats: DetailedStats | null = null;
 let cachedSessionFiles: string[] | null = null;
 let cachedUsageStats: UsageAnalysisStats | null = null;
+let cachedChartPayload: object | null = null;
+let lastDiagnosticReport = '';
 let isRefreshing = false;
 
 // ---------------------------------------------------------------------------
@@ -129,6 +131,27 @@ const VSCODE_DARK_VARS = `
     --vscode-editorWarning-foreground: #cca700;
     --vscode-terminal-ansiGreen: #4ec94c;
     --vscode-contrastBorder: #6fc3df;
+    --vscode-foreground: #cccccc;
+    --vscode-editor-font-family: Consolas, 'Courier New', monospace;
+    --vscode-button-border: transparent;
+    --vscode-dropdown-background: #313131;
+    --vscode-dropdown-foreground: #cccccc;
+    --vscode-dropdown-border: #3c3c3c;
+    --vscode-textBlockQuote-background: #2b2b2b;
+    --vscode-editorInfo-foreground: #3794ff;
+    --vscode-inputValidation-infoBackground: #063b49;
+    --vscode-inputValidation-infoBorder: #1a85ff;
+    --vscode-inputValidation-warningBackground: #352a05;
+    --vscode-inputValidation-warningBorder: #b89500;
+    --vscode-inputValidation-errorBackground: #5a1d1d;
+    --vscode-inputValidation-errorBorder: #be1100;
+    --vscode-charts-blue: #4daafc;
+    --vscode-charts-green: #89d185;
+    --vscode-charts-orange: #d18616;
+    --vscode-charts-purple: #b180d7;
+    --vscode-charts-red: #f14c4c;
+    --vscode-charts-yellow: #cca700;
+    --vscode-terminal-ansiCyan: #11a8cd;
 }
 `;
 
@@ -165,6 +188,24 @@ const VSCODE_LIGHT_VARS = `
         --vscode-editorWarning-foreground: #b89500;
         --vscode-terminal-ansiGreen: #00bc00;
         --vscode-contrastBorder: #6fc3df;
+        --vscode-foreground: #3b3b3b;
+        --vscode-dropdown-background: #ffffff;
+        --vscode-dropdown-foreground: #3b3b3b;
+        --vscode-dropdown-border: #cecece;
+        --vscode-textBlockQuote-background: #f8f8f8;
+        --vscode-editorInfo-foreground: #1a85ff;
+        --vscode-inputValidation-infoBackground: #d6ecf2;
+        --vscode-inputValidation-infoBorder: #007acc;
+        --vscode-inputValidation-warningBackground: #f6f5d2;
+        --vscode-inputValidation-warningBorder: #b89500;
+        --vscode-inputValidation-errorBackground: #f2dede;
+        --vscode-inputValidation-errorBorder: #be1100;
+        --vscode-charts-blue: #1a85ff;
+        --vscode-charts-green: #388a34;
+        --vscode-charts-purple: #652d90;
+        --vscode-charts-red: #e51400;
+        --vscode-charts-yellow: #bf8803;
+        --vscode-terminal-ansiCyan: #0598bc;
     }
 }
 `;
@@ -178,6 +219,9 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     font-size: 13px;
 }
+/* Views the desktop app cannot open yet. The nav row is rendered by the shared
+   webview bundles, so the only host-side way to avoid a dead button is to hide it. */
+#btn-efficiency { display: none; }
 `;
 
 // ---------------------------------------------------------------------------
@@ -257,6 +301,60 @@ async function getUsageStats(): Promise<UsageAnalysisStats> {
     return cachedUsageStats;
 }
 
+/**
+ * Chart payload, computed once and reused. Building it walks every session file,
+ * which on a large history blocks the main process for a long time — doing that
+ * on every open of the Chart view left the window black until it finished.
+ */
+async function getChartPayload(): Promise<object> {
+    if (!cachedChartPayload) {
+        const files = await getSessionFiles();
+        const { labels, days, allDaysMap } = await calculateDailyStats(files);
+        cachedChartPayload = buildChartPayload(labels, days, allDaysMap);
+    }
+    return cachedChartPayload;
+}
+
+/** Whether a panel can render straight away, i.e. without a long computation first. */
+function isPanelDataReady(panel: PanelId): boolean {
+    switch (panel) {
+        case 'details':
+        case 'environmental':
+            return cachedStats !== null;
+        case 'chart':
+            return cachedChartPayload !== null;
+        case 'usage':
+        case 'maturity':
+            return cachedUsageStats !== null;
+        case 'diagnostics':
+            return cachedSessionFiles !== null;
+        default:
+            return true;
+    }
+}
+
+/** Runs the computation a panel depends on, so the panel request itself returns quickly. */
+async function loadPanelData(panel: PanelId): Promise<void> {
+    switch (panel) {
+        case 'details':
+        case 'environmental':
+            await getStats();
+            break;
+        case 'chart':
+            await getChartPayload();
+            break;
+        case 'usage':
+        case 'maturity':
+            await getUsageStats();
+            break;
+        case 'diagnostics':
+            await getSessionFiles();
+            break;
+        default:
+            break;
+    }
+}
+
 async function refreshStats(): Promise<void> {
     if (isRefreshing) { return; }
     isRefreshing = true;
@@ -264,6 +362,7 @@ async function refreshStats(): Promise<void> {
         cachedSessionFiles = await discoverSessionFiles();
         cachedStats = await calculateDetailedStats(cachedSessionFiles);
         cachedUsageStats = null; // reset so it recomputes on next access
+        cachedChartPayload = null;
         await saveCache();
     } finally {
         isRefreshing = false;
@@ -356,9 +455,7 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
 
     } else if (panel === 'chart') {
         title = 'Token Usage Chart';
-        const files = await getSessionFiles();
-        const { labels, days, allDaysMap } = await calculateDailyStats(files);
-        const chartPayload = buildChartPayload(labels, days, allDaysMap);
+        const chartPayload = await getChartPayload();
         const chartData = {
             ...chartPayload,
             initialPeriod: 'day',
@@ -405,8 +502,9 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
             }
         }));
         const toolFamilies = getToolFamilies();
+        lastDiagnosticReport = `AI Engineering Fluency — Desktop Diagnostic Report\n${'='.repeat(50)}\n\nVersion: ${app.getVersion()}\nSession files found: ${files.length}\nTimestamp: ${new Date().toISOString()}`;
         const diagData = {
-            report: `AI Engineering Fluency — Desktop Diagnostic Report\n${'='.repeat(50)}\n\nSession files found: ${files.length}\nTimestamp: ${new Date().toISOString()}`,
+            report: lastDiagnosticReport,
             sessionFiles,
             detailedSessionFiles: sessionFiles.map(f => ({ ...f, interactions: 0, tokens: undefined })),
             sessionFolders: [],
@@ -447,7 +545,8 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline' app://static; img-src data: app://static blob:; font-src app://static data:;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' app://static; script-src 'unsafe-inline' app://static; img-src data: app://static blob:; font-src app://static data:;" />
+    <link id="vscode-codicon-stylesheet" rel="stylesheet" href="app://static/codicons/codicon.css" />
     <title>${title}</title>
     <style>${VSCODE_DARK_VARS}${VSCODE_LIGHT_VARS}${BASE_BODY_STYLE}</style>
 </head>
@@ -521,6 +620,12 @@ function buildErrorHtml(panel: string, err: unknown): string {
 // Protocol handler
 // ---------------------------------------------------------------------------
 
+const STATIC_MIME_TYPES: Record<string, string> = {
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.ttf': 'font/ttf',
+};
+
 function registerProtocol(): void {
     protocol.handle('app', async (request) => {
         const url = new URL(request.url);
@@ -545,7 +650,7 @@ function registerProtocol(): void {
             const filePath = path.join(getWebviewDir(), filename);
             try {
                 const content = await fs.promises.readFile(filePath);
-                const mimeType = filename.endsWith('.js') ? 'text/javascript' : 'application/octet-stream';
+                const mimeType = STATIC_MIME_TYPES[path.extname(filename)] ?? 'application/octet-stream';
                 return new Response(content, { headers: { 'Content-Type': mimeType } });
             } catch {
                 return new Response('Not Found', { status: 404 });
@@ -608,9 +713,40 @@ function createWindow(): BrowserWindow {
 function showPanel(panel: PanelId): void {
     currentPanel = panel;
     if (!mainWindow) { return; }
-    mainWindow.loadURL(`app://panel/${panel}`);
-    mainWindow.show();
-    mainWindow.focus();
+    const win = mainWindow;
+    win.show();
+    win.focus();
+    if (isPanelDataReady(panel)) {
+        win.loadURL(`app://panel/${panel}`);
+        return;
+    }
+    // The data behind this panel is still being computed, which can take a while
+    // and keeps the main process busy. Put the loading screen up first — and let
+    // it paint — so the window is never left blank while that runs.
+    void win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(buildLoadingHtml()))
+        .catch(() => { /* superseded by a later navigation */ })
+        .then(() => loadPanelData(panel))
+        .catch(() => { /* surfaced by the panel's own error page below */ })
+        .then(() => {
+            if (currentPanel === panel && !win.isDestroyed()) {
+                win.loadURL(`app://panel/${panel}`);
+            }
+        });
+}
+
+/** Panels in the order they appear in the tray and Go menus. */
+const PANEL_MENU: { label: string; panel: PanelId }[] = [
+    { label: 'Details', panel: 'details' },
+    { label: 'Environmental Impact', panel: 'environmental' },
+    { label: 'Token Usage Chart', panel: 'chart' },
+    { label: 'Usage Analysis', panel: 'usage' },
+    { label: 'Fluency Score', panel: 'maturity' },
+    { label: 'Scoring Guide', panel: 'fluency-level-viewer' },
+    { label: 'Diagnostics', panel: 'diagnostics' },
+];
+
+function panelMenuItems(): Electron.MenuItemConstructorOptions[] {
+    return PANEL_MENU.map(({ label, panel }) => ({ label, click: () => showPanel(panel) }));
 }
 
 // ---------------------------------------------------------------------------
@@ -626,16 +762,26 @@ function createTray(): Tray {
     return t;
 }
 
+/** Tray item reflecting the updater state: a ready update stays one click away until installed. */
+function updateMenuItem(): Electron.MenuItemConstructorOptions {
+    const state = getUpdateState();
+    switch (state.status) {
+        case 'checking':
+            return { label: 'Checking for updates…', enabled: false };
+        case 'downloading':
+            return { label: `Downloading ${state.version}… ${state.percent}%`, enabled: false };
+        case 'downloaded':
+            return { label: `Restart to install ${state.version}`, click: () => installUpdate() };
+        case 'error':
+            return { label: 'Update check failed — retry', click: () => { void checkForUpdates(true); } };
+        default:
+            return { label: 'Check for updates', click: () => { void checkForUpdates(true); } };
+    }
+}
+
 function updateTrayMenu(t: Tray): void {
     const menu = Menu.buildFromTemplate([
-        { label: 'Details', click: () => showPanel('details') },
-        { label: 'Environmental Impact', click: () => showPanel('environmental') },
-        { label: 'Token Usage Chart', click: () => showPanel('chart') },
-        { label: 'Usage Analysis', click: () => showPanel('usage') },
-        { label: 'Fluency Score', click: () => showPanel('maturity') },
-        { label: 'Scoring Guide', click: () => showPanel('fluency-level-viewer') },
-        // Diagnostics is hidden for now — its panel renders without the in-app
-        // navigation, leaving no way back out.
+        ...panelMenuItems(),
         { type: 'separator' },
         {
             label: 'Refresh',
@@ -656,6 +802,9 @@ function updateTrayMenu(t: Tray): void {
                 updateTrayMenu(t);
             },
         },
+        { type: 'separator' },
+        { label: `Version ${app.getVersion()}`, enabled: false },
+        updateMenuItem(),
         { type: 'separator' },
         {
             label: 'Quit',
@@ -697,8 +846,26 @@ function registerIpcHandlers(): void {
                 break;
 
             case 'showDiagnostics':
-                // Hidden for now: the Diagnostics panel has no in-app navigation
-                // back out, so ignore requests to open it from panel buttons.
+                showPanel('diagnostics');
+                break;
+
+            case 'openSessionFile':
+            case 'revealPath': {
+                // Reveal rather than open: the path comes from the page, and
+                // showing it in Explorer never executes anything.
+                const target = message.command === 'openSessionFile' ? message.file : message.path;
+                if (typeof target === 'string' && target && fs.existsSync(target)) {
+                    shell.showItemInFolder(target);
+                }
+                break;
+            }
+
+            case 'copyText':
+                if (typeof message.text === 'string') { clipboard.writeText(message.text); }
+                break;
+
+            case 'copyReport':
+                clipboard.writeText(lastDiagnosticReport);
                 break;
 
             case 'showMaturity':
@@ -734,15 +901,6 @@ function registerIpcHandlers(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Auto-updater
-// ---------------------------------------------------------------------------
-
-function setupAutoUpdater(): void {
-    if (!app.isPackaged) { return; }
-    autoUpdater.checkForUpdatesAndNotify().catch(() => {});
-}
-
-// ---------------------------------------------------------------------------
 // Application menu
 // ---------------------------------------------------------------------------
 
@@ -773,6 +931,18 @@ function buildAppMenu(): Menu {
                 { label: 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => { isQuitting = true; app.quit(); } },
             ],
         },
+        {
+            // Always-available way back to a known view, independent of the
+            // in-page buttons — the way out if a panel fails to render.
+            label: 'Go',
+            submenu: [
+                { label: 'Home', accelerator: 'Alt+Home', click: () => showPanel('details') },
+                { type: 'separator' },
+                ...panelMenuItems(),
+                { type: 'separator' },
+                { label: 'Reload View', accelerator: 'F5', click: () => showPanel(currentPanel) },
+            ],
+        },
         { label: 'View', submenu: viewSubmenu },
         { role: 'windowMenu' },
     ]);
@@ -784,7 +954,20 @@ function buildAppMenu(): Menu {
 
 let isQuitting = false;
 
+// A tray app must be single-instance: a second launch (Start menu, launch at
+// startup racing a manual start) would otherwise add a second tray icon and a
+// second process parsing the same session files.
+const hasInstanceLock = app.requestSingleInstanceLock();
+if (!hasInstanceLock) {
+    app.quit();
+}
+app.on('second-instance', () => {
+    if (mainWindow) { showPanel(currentPanel); }
+});
+
 app.whenReady().then(async () => {
+    if (!hasInstanceLock) { return; }
+
     // Set the AppUserModelID early so Windows shows our taskbar icon/identity.
     if (process.platform === 'win32') {
         app.setAppUserModelId(APP_ID);
@@ -810,11 +993,16 @@ app.whenReady().then(async () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.loadURL(`app://panel/${currentPanel}`);
         }
-        // Continue warming usage stats so those panels open instantly too.
-        return getUsageStats();
+        // Continue warming the chart and usage data so those panels open instantly too.
+        return getChartPayload().then(() => getUsageStats());
     }).catch(() => { /* surfaced per-panel via the error page */ });
 
-    setupAutoUpdater();
+    startUpdateChecks({
+        onStateChange: () => { if (tray) { updateTrayMenu(tray); } },
+        // The window's 'close' handler hides to tray; flag a real quit so the
+        // updater can actually close the app and run the installer.
+        beforeInstall: () => { isQuitting = true; },
+    });
 
     // Listen for system theme changes and reload the current panel
     nativeTheme.on('updated', () => {
