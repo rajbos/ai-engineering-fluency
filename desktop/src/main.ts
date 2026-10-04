@@ -243,16 +243,22 @@ async function getSessionFiles(): Promise<string[]> {
 }
 
 /**
- * Runs `compute` over the current session files and returns its result, retrying
- * if a refresh replaced the file list while it was running. The caller caches the
- * returned value, so a slow computation over an outdated list can never be stored
- * after — and over — the data from a newer one.
+ * Runs `compute` over the current session files and hands the result to `commit`,
+ * retrying if a refresh replaced the file list while it was running.
+ *
+ * The generation check and `commit` run in the same synchronous step on purpose:
+ * returning the result for the caller to cache would resume the caller a tick
+ * later, and a refresh landing in that gap would have its newer data overwritten
+ * by this older result.
  */
-async function computeForCurrentFiles<T>(compute: (files: string[]) => Promise<T>): Promise<T> {
+async function computeForCurrentFiles<T>(compute: (files: string[]) => Promise<T>, commit: (result: T) => void): Promise<void> {
     for (;;) {
         const generation = dataGeneration;
         const result = await compute(await getSessionFiles());
-        if (generation === dataGeneration) { return result; }
+        if (generation === dataGeneration) {
+            commit(result);
+            return;
+        }
     }
 }
 
@@ -306,20 +312,25 @@ function buildLoadingProgressCallback(editors: { icon: string; name: string }[])
 }
 
 async function getStats(): Promise<DetailedStats> {
-    if (!cachedStats) {
+    while (!cachedStats) {
         sendLoadingMessage({ command: 'loadingStep', step: 'discovering' });
-        const stats = await computeForCurrentFiles(files =>
-            calculateDetailedStats(files, buildLoadingProgressCallback(detectLoadingEditors(files))));
-        // A refresh may have stored fresher stats while this ran; prefer those.
-        cachedStats ??= stats;
+        await computeForCurrentFiles(
+            files => calculateDetailedStats(files, buildLoadingProgressCallback(detectLoadingEditors(files))),
+            // A refresh may have stored fresher stats while this ran; prefer those.
+            (stats) => { cachedStats ??= stats; },
+        );
     }
     return cachedStats;
 }
 
 async function getUsageStats(): Promise<UsageAnalysisStats> {
-    if (!cachedUsageStats) {
-        const usageStats = await computeForCurrentFiles(files => calculateUsageAnalysisStats(files));
-        cachedUsageStats ??= usageStats;
+    // Loops because a refresh can clear the cache again between the commit and
+    // this function resuming; the next pass then computes against the new data.
+    while (!cachedUsageStats) {
+        await computeForCurrentFiles(
+            files => calculateUsageAnalysisStats(files),
+            (usageStats) => { cachedUsageStats ??= usageStats; },
+        );
     }
     return cachedUsageStats;
 }
@@ -330,12 +341,14 @@ async function getUsageStats(): Promise<UsageAnalysisStats> {
  * on every open of the Chart view left the window black until it finished.
  */
 async function getChartPayload(): Promise<object> {
-    if (!cachedChartPayload) {
-        const payload = await computeForCurrentFiles(async (files) => {
-            const { labels, days, allDaysMap } = await calculateDailyStats(files);
-            return buildChartPayload(labels, days, allDaysMap);
-        });
-        cachedChartPayload ??= payload;
+    while (!cachedChartPayload) {
+        await computeForCurrentFiles(
+            async (files) => {
+                const { labels, days, allDaysMap } = await calculateDailyStats(files);
+                return buildChartPayload(labels, days, allDaysMap);
+            },
+            (payload) => { cachedChartPayload ??= payload; },
+        );
     }
     return cachedChartPayload;
 }

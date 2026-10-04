@@ -152,10 +152,15 @@ jobs:
           $global:LASTEXITCODE = 0
 
           if ($feedExists) {
-            gh release download desktop-latest --pattern latest.yml --dir release/published --clobber
-            $hasPublishedFeed = $LASTEXITCODE -eq 0
-            $global:LASTEXITCODE = 0
-            if ($hasPublishedFeed) {
+            # Ask which assets exist rather than inferring it from a failed
+            # download: only a release that truly has no latest.yml yet (a first
+            # run that died before its upload) may skip the version check. Any
+            # failure to read an existing feed aborts instead of overwriting it.
+            $assetNames = gh release view desktop-latest --json assets --jq '.assets[].name'
+            if ($LASTEXITCODE -ne 0) { throw "Could not list the assets of the desktop-latest release" }
+            if (@($assetNames) -contains 'latest.yml') {
+              gh release download desktop-latest --pattern latest.yml --dir release/published --clobber
+              if ($LASTEXITCODE -ne 0) { throw "Could not download the published update feed; refusing to overwrite it unchecked" }
               $published = Get-Content release/published/latest.yml -Raw
               if ($published -notmatch '(?m)^version:\s*(\S+)\s*$') { throw "Published update feed has no version line" }
               $publishedVersion = [System.Management.Automation.SemanticVersion]$Matches[1]
