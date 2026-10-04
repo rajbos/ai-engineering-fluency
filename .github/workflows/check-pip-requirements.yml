@@ -13,11 +13,15 @@ on:
     paths:
       - '.github/requirements/**'
       - '.github/workflows/check-pip-requirements.yml'
+      # The interpreter and install flags this gate mirrors live here.
+      - '.github/workflows/copilot-setup-steps.yml'
   push:
     branches: [main]
     paths:
       - '.github/requirements/**'
       - '.github/workflows/check-pip-requirements.yml'
+      # The interpreter and install flags this gate mirrors live here.
+      - '.github/workflows/copilot-setup-steps.yml'
   workflow_dispatch:
 
 permissions:
@@ -61,15 +65,29 @@ jobs:
           #  3. The pip-compile command recorded in a lock's header is
           #     replayable: pip-tools under click >= 8.2 records a spurious
           #     --no-index, which cuts the replay off from PyPI entirely.
+          #  4. copilot-setup-steps.yml still uses the interpreter and the pip
+          #     flags this gate tests with. Otherwise a change there could break
+          #     the (non-blocking) install while this gate stays green.
           import pathlib, re, sys
 
           pin = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+)")
           comment_pin = re.compile(r"#.*\b[A-Za-z0-9][A-Za-z0-9._-]*==[0-9]")
           errors = []
+
+          version = re.compile(r"""^\s*python-version:\s*['"]?([^'"\s#]+)""", re.M)
+          gate = pathlib.Path(".github/workflows/check-pip-requirements.yml").read_text(encoding="utf-8")
+          setup_path = ".github/workflows/copilot-setup-steps.yml"
+          setup = pathlib.Path(setup_path).read_text(encoding="utf-8")
+          gate_versions, setup_versions = set(version.findall(gate)), set(version.findall(setup))
+          if setup_versions != gate_versions:
+              errors.append(f"{setup_path} sets up Python {sorted(setup_versions)} but this gate tests on {sorted(gate_versions)} - keep them in step")
+          install = re.compile(r"pip install\s+--require-hashes\s+--only-binary\s+:all:\s+-r\s+\.github/requirements/\S+\.txt")
+          if not install.search(setup):
+              errors.append(f"{setup_path} no longer runs 'pip install --require-hashes --only-binary :all: -r .github/requirements/<file>.txt' - update this gate to install the same way")
           root = pathlib.Path(".github/requirements")
 
           for f in sorted([*root.glob("*.in"), *root.glob("*.txt")]):
-              for n, line in enumerate(f.read_text().splitlines(), 1):
+              for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
                   if comment_pin.search(line):
                       errors.append(f"{f}:{n}: comment quotes a pinned requirement - Dependabot mistakes it for the real one: {line.strip()}")
                   if re.match(r"#\s+pip-compile\s", line) and re.search(r"\s--no-index(\s|$)", line) and "--find-links" not in line:
@@ -81,8 +99,8 @@ jobs:
                   errors.append(f"{src}: no generated {lock.name} next to it")
                   continue
               locked = {m.group(1).lower().replace("_", "-"): m.group(2)
-                        for m in map(pin.match, lock.read_text().splitlines()) if m}
-              for line in src.read_text().splitlines():
+                        for m in map(pin.match, lock.read_text(encoding="utf-8").splitlines()) if m}
+              for line in src.read_text(encoding="utf-8").splitlines():
                   m = pin.match(line.split("#", 1)[0].strip())
                   if not m:
                       continue
