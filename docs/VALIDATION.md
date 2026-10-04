@@ -289,9 +289,10 @@ Two things to know about that comment:
 Every VS Code extension VSIX built by `release.yml` and the nightly pre-release
 workflow ships with SPDX JSON SBOMs and Sigstore-backed GitHub attestations
 (build provenance and SBOM). The shared logic is the composite action
-`.github/actions/vsix-attest`. In `release.yml` a separate `attest` job attests
+`.github/actions/vsix-attest`. In both workflows a separate `attest` job attests
 the VSIX workflow artifact, and the `publish` job re-verifies the same artifact
-before it publishes to the Marketplace or Open VSX. SBOMs are attached to the
+before it publishes to the Marketplace or Open VSX. The job that builds the VSIX
+can neither sign nor publish it. SBOMs are attached to the
 GitHub release (nightlies keep them as the `vsix-sbom` workflow artifact).
 
 To verify a downloaded VSIX (needs the [GitHub CLI](https://cli.github.com/)):
