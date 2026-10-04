@@ -24,8 +24,7 @@ scripts, so the mechanical half of the review is identical everywhere.
 
 This skill answers *how much could this hurt*. It does **not** hunt for bugs,
 style problems, or missing tests — the agents under `.github/agents/` (code
-quality, tests, architecture, performance) do that, and the **Agent Review**
-workflow runs them.
+quality, tests, architecture, performance) do that.
 
 ## Step 1 — Collect the changeset (script, not judgement)
 
