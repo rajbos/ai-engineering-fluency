@@ -7,7 +7,7 @@
 # this job fails.
 #
 # Inputs (env):
-#   BASE_SHA  — PR base sha (falls back to HEAD^ like compute-diff.sh)
+#   BASE_SHA  — PR base sha (falls back to HEAD^)
 #   HEAD_SHA  — PR head sha (falls back to HEAD)
 #   PR_BODY   — PR body text; if it contains the marker [skip-test-check] the
 #               check passes with a warning (documented escape hatch for
