@@ -224,9 +224,28 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     font-size: 13px;
 }
-/* Views the desktop app cannot open yet. The nav row is rendered by the shared
-   webview bundles, so the only host-side way to avoid a dead button is to hide it. */
-#btn-efficiency { display: none; }
+/* Controls the desktop app cannot act on yet. They are rendered by the shared
+   webview bundles, so the only host-side way to avoid a dead control is to hide
+   it. Remove a selector here when its message gets a handler in registerIpcHandlers. */
+#btn-efficiency,
+/* Diagnostics: formatted-file viewer, editor-path reporting, GitHub sign-in,
+   backend/team-server setup, VS Code settings, folder analysis, cache reset,
+   social sharing. */
+.view-formatted-link,
+.report-editor-link,
+#btn-authenticate-github,
+#btn-sign-out-github,
+#btn-team-server-auth-warning,
+#btn-configure-backend,
+#btn-configure-backend-team,
+#btn-open-settings,
+#btn-open-display-settings,
+#btn-open-tool-families-settings,
+#btn-browse-folder,
+#btn-analyze-folder,
+#btn-clear-cache,
+#btn-reset-debug-counters,
+.share-btn { display: none !important; }
 `;
 
 // ---------------------------------------------------------------------------
@@ -246,7 +265,11 @@ function shareInFlight<T>(key: string, run: () => Promise<T>): Promise<T> {
     return started;
 }
 
-function getSessionFiles(): Promise<string[]> {
+async function getSessionFiles(): Promise<string[]> {
+    // Read the committed list first. Joining an in-flight discovery when a list
+    // is already cached could hand back the list that promise was started for,
+    // which a refresh may have replaced since.
+    if (cachedSessionFiles) { return cachedSessionFiles; }
     return shareInFlight('sessionFiles', loadSessionFiles);
 }
 
@@ -272,8 +295,12 @@ async function loadSessionFiles(): Promise<string[]> {
 async function computeForCurrentFiles<T>(compute: (files: string[]) => Promise<T>, commit: (result: T) => void): Promise<void> {
     for (;;) {
         const generation = dataGeneration;
-        const result = await compute(await getSessionFiles());
-        if (generation === dataGeneration) {
+        const files = await getSessionFiles();
+        // The list itself must be the committed one, not just the generation:
+        // a refresh can commit while the list was being awaited.
+        if (files !== cachedSessionFiles) { continue; }
+        const result = await compute(files);
+        if (generation === dataGeneration && files === cachedSessionFiles) {
             commit(result);
             return;
         }
@@ -960,6 +987,11 @@ function registerIpcHandlers(): void {
 
             case 'copyReport':
                 clipboard.writeText(lastDiagnosticReport);
+                break;
+
+            case 'openIssue':
+                // Fixed address: the page never supplies the URL.
+                void shell.openExternal('https://github.com/rajbos/ai-engineering-fluency/issues/new');
                 break;
 
             case 'showMaturity':
