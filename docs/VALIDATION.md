@@ -284,6 +284,25 @@ Two things to know about that comment:
   `noop-selected`, not as a finding. That is the trade for not carrying three
   standing false positives on the chart view's segmented controls.
 
+## VS Code extension release provenance
+
+Every VS Code extension VSIX built by `release.yml` and the nightly pre-release
+workflow ships with SPDX JSON SBOMs and Sigstore-backed GitHub attestations
+(build provenance and SBOM). The shared logic is the composite action
+`.github/actions/vsix-attest`. In `release.yml` a separate `attest` job attests
+the VSIX workflow artifact, and the `publish` job re-verifies the same artifact
+before it publishes to the Marketplace or Open VSX. SBOMs are attached to the
+GitHub release (nightlies keep them as the `vsix-sbom` workflow artifact).
+
+To verify a downloaded VSIX (needs the [GitHub CLI](https://cli.github.com/)):
+
+```sh
+gh attestation verify <file>.vsix --repo rajbos/ai-engineering-fluency
+```
+
+This proves the file was built by this repository's GitHub Actions workflows from
+the recorded commit. It does not cover the Visual Studio, JetBrains or CLI releases.
+
 ## Sharing server
 
 The extension preflight above does not validate the sharing server. Server coding
