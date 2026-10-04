@@ -78,7 +78,10 @@ is a valid outcome, not something to hide.
 
 ## Output contract
 
-You **must not modify any files**. Report findings using exactly this structure:
+You **must not modify any tracked repository files**. The benchmark JSON and the
+`perf_compare.py` report are scratch output: write them to a temporary directory outside the
+working tree (set `OUTPUT_FILE`, `PERF_BASE_FILE` and `PERF_HEAD_FILE` accordingly), never into
+the repo. Report findings using exactly this structure:
 
 ```markdown
 # Performance Review
