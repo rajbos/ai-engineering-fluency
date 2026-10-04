@@ -58,6 +58,9 @@ jobs:
           #     is what broke Dependabot last time: its parser matched the pin
           #     in the header comment, bumped the version string everywhere
           #     and never rewrote the real line's hash.
+          #  3. The pip-compile command recorded in a lock's header is
+          #     replayable: pip-tools under click >= 8.2 records a spurious
+          #     --no-index, which cuts the replay off from PyPI entirely.
           import pathlib, re, sys
 
           pin = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==(\S+)")
@@ -69,6 +72,8 @@ jobs:
               for n, line in enumerate(f.read_text().splitlines(), 1):
                   if comment_pin.search(line):
                       errors.append(f"{f}:{n}: comment quotes a pinned requirement - Dependabot mistakes it for the real one: {line.strip()}")
+                  if re.match(r"#\s+pip-compile\s", line) and re.search(r"\s--no-index(\s|$)", line) and "--find-links" not in line:
+                      errors.append(f"{f}:{n}: recorded pip-compile command has --no-index and no --find-links, so it cannot resolve - regenerate with click<8.2 (see the .in header)")
 
           for src in sorted(root.glob("*.in")):
               lock = src.with_suffix(".txt")
