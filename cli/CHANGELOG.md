@@ -29,15 +29,6 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 ## [0.6.0] - 2026-09-18
 
 ### Features
-- `memory-files --server` also fetches the repository's server-side Copilot memories (the per-repository store GitHub keeps for the coding agent; needs network and the GitHub CLI), with `--repo`, `--limit`, and `--promote` to print promotion candidates as a Markdown block for `AGENTS.md` (#2134)
-
-### Bug Fixes
-- Mistral Vibe sessions no longer overstate cost: cached input tokens are priced separately, and `glm-5-2` / `devstral-2` usage is no longer counted as free (#2152)
-- Recognise Visual Studio Copilot sessions stored in Visual Studio's AppData folder (chats started without a solution open) (#2139)
-
-## [0.6.0] - 2026-09-18
-
-### Features
 - Group models from user-configured custom endpoints (BYOK) under their own provider group (e.g. `Mistral (Custom)`) in the provider cost chart data
 - Add `--json` flag to `segment` command, so oh-my-posh/prompt hooks can get structured per-period token data from the fast, cached `segment` path instead of the uncached `usage --json` command
 - New `memory-files` command reporting on the GitHub Copilot agent memory files on this machine: counts, staleness and size (`--stale-days`, `--large-kb`, `--json`) (#2094)
