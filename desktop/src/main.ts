@@ -662,8 +662,8 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' app://static; script-src 'unsafe-inline' app://static; img-src data: app://static blob:; font-src app://static data:;" />
-    <link id="vscode-codicon-stylesheet" rel="stylesheet" href="app://static/codicons/codicon.css" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' app://panel; script-src 'unsafe-inline' app://static; img-src data: app://static blob:; font-src app://panel data:;" />
+    <link id="vscode-codicon-stylesheet" rel="stylesheet" href="app://panel/${PANEL_ASSET_PREFIX}codicons/codicon.css" />
     <title>${title}</title>
     <style>${VSCODE_DARK_VARS}${VSCODE_LIGHT_VARS}${BASE_BODY_STYLE}</style>
 </head>
@@ -743,9 +743,37 @@ const STATIC_MIME_TYPES: Record<string, string> = {
     '.ttf': 'font/ttf',
 };
 
+/**
+ * Path prefix under which static files are also served from the panels' own
+ * origin (app://panel). Web fonts are fetched in CORS mode, and the `app` scheme
+ * has CORS disabled, so the codicon font cannot be loaded from app://static by
+ * a page on app://panel — it has to be same-origin.
+ */
+const PANEL_ASSET_PREFIX = 'assets/';
+
+async function serveStaticFile(filename: string): Promise<Response> {
+    const webviewDir = getWebviewDir();
+    const filePath = path.join(webviewDir, filename);
+    // Never serve anything outside the bundled webview directory.
+    if (!filePath.startsWith(webviewDir + path.sep)) {
+        return new Response('Not Found', { status: 404 });
+    }
+    try {
+        const content = await fs.promises.readFile(filePath);
+        const mimeType = STATIC_MIME_TYPES[path.extname(filename)] ?? 'application/octet-stream';
+        return new Response(content, { headers: { 'Content-Type': mimeType } });
+    } catch {
+        return new Response('Not Found', { status: 404 });
+    }
+}
+
 function registerProtocol(): void {
     protocol.handle('app', async (request) => {
         const url = new URL(request.url);
+
+        if (url.host === 'panel' && url.pathname.startsWith('/' + PANEL_ASSET_PREFIX)) {
+            return serveStaticFile(decodeURIComponent(url.pathname.slice(1 + PANEL_ASSET_PREFIX.length)));
+        }
 
         if (url.host === 'panel') {
             const panel = url.pathname.slice(1) as PanelId;
@@ -763,15 +791,7 @@ function registerProtocol(): void {
         }
 
         if (url.host === 'static') {
-            const filename = url.pathname.slice(1);
-            const filePath = path.join(getWebviewDir(), filename);
-            try {
-                const content = await fs.promises.readFile(filePath);
-                const mimeType = STATIC_MIME_TYPES[path.extname(filename)] ?? 'application/octet-stream';
-                return new Response(content, { headers: { 'Content-Type': mimeType } });
-            } catch {
-                return new Response('Not Found', { status: 404 });
-            }
+            return serveStaticFile(decodeURIComponent(url.pathname.slice(1)));
         }
 
         return new Response('Not Found', { status: 404 });
