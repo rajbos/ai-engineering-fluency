@@ -16,6 +16,7 @@ import {
 import { getEditorSourceFromPath } from '../../cli/src/analysis';
 import type { DetailedStats, UsageAnalysisStats } from '../../src/types';
 import { getEnvironmentalMethodologySourceUrl } from '../../src/environmentalImpact';
+import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import {
     calculateMaturityScores,
     getFluencyLevelData,
@@ -232,7 +233,24 @@ body {
 // Stats loading
 // ---------------------------------------------------------------------------
 
-async function getSessionFiles(): Promise<string[]> {
+// Computations currently running, by name. These walk the whole session history,
+// so a second caller (opening Chart while startup is still pre-warming it, or
+// reloading a view) must join the run in progress instead of starting another.
+const inFlight = new Map<string, Promise<unknown>>();
+
+function shareInFlight<T>(key: string, run: () => Promise<T>): Promise<T> {
+    const running = inFlight.get(key) as Promise<T> | undefined;
+    if (running) { return running; }
+    const started = run().finally(() => { inFlight.delete(key); });
+    inFlight.set(key, started);
+    return started;
+}
+
+function getSessionFiles(): Promise<string[]> {
+    return shareInFlight('sessionFiles', loadSessionFiles);
+}
+
+async function loadSessionFiles(): Promise<string[]> {
     while (!cachedSessionFiles) {
         const generation = dataGeneration;
         const files = await discoverSessionFiles();
@@ -269,6 +287,13 @@ function sendLoadingMessage(message: Record<string, unknown>): void {
     }
 }
 
+/** Editor display name for a session path: the CLI's detector, then the shared path detector. */
+function sessionEditorName(file: string): string {
+    const editor = getEditorSourceFromPath(file);
+    if (editor && editor !== 'Unknown') { return editor; }
+    return detectEditorSource(file) || 'Unknown';
+}
+
 /**
  * Map discovered session file paths to the editor pills shown by the loading
  * screen. Uses the CLI's detector first — the same labels that end up in the
@@ -278,9 +303,8 @@ function sendLoadingMessage(message: Record<string, unknown>): void {
 function detectLoadingEditors(files: string[]): { icon: string; name: string }[] {
     const editorSet = new Set<string>();
     for (const file of files) {
-        let editor = getEditorSourceFromPath(file);
-        if (!editor || editor === 'Unknown') { editor = detectEditorSource(file); }
-        if (editor && editor !== 'Unknown') { editorSet.add(editor); }
+        const editor = sessionEditorName(file);
+        if (editor !== 'Unknown') { editorSet.add(editor); }
     }
     return [...editorSet].map(name => ({ icon: getEditorIconByName(name), name }));
 }
@@ -311,7 +335,11 @@ function buildLoadingProgressCallback(editors: { icon: string; name: string }[])
     };
 }
 
-async function getStats(): Promise<DetailedStats> {
+function getStats(): Promise<DetailedStats> {
+    return shareInFlight('stats', loadStats);
+}
+
+async function loadStats(): Promise<DetailedStats> {
     while (!cachedStats) {
         sendLoadingMessage({ command: 'loadingStep', step: 'discovering' });
         await computeForCurrentFiles(
@@ -323,7 +351,11 @@ async function getStats(): Promise<DetailedStats> {
     return cachedStats;
 }
 
-async function getUsageStats(): Promise<UsageAnalysisStats> {
+function getUsageStats(): Promise<UsageAnalysisStats> {
+    return shareInFlight('usage', loadUsageStats);
+}
+
+async function loadUsageStats(): Promise<UsageAnalysisStats> {
     // Loops because a refresh can clear the cache again between the commit and
     // this function resuming; the next pass then computes against the new data.
     while (!cachedUsageStats) {
@@ -340,7 +372,11 @@ async function getUsageStats(): Promise<UsageAnalysisStats> {
  * which on a large history blocks the main process for a long time — doing that
  * on every open of the Chart view left the window black until it finished.
  */
-async function getChartPayload(): Promise<object> {
+function getChartPayload(): Promise<object> {
+    return shareInFlight('chart', loadChartPayload);
+}
+
+async function loadChartPayload(): Promise<object> {
     while (!cachedChartPayload) {
         await computeForCurrentFiles(
             async (files) => {
@@ -550,7 +586,17 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
         const diagData = {
             report: lastDiagnosticReport,
             sessionFiles,
-            detailedSessionFiles: sessionFiles.map(f => ({ ...f, interactions: 0, tokens: undefined })),
+            // The session table reads every one of these fields while rendering;
+            // a missing `contextReferences` throws and leaves the whole panel blank.
+            detailedSessionFiles: sessionFiles.map(f => ({
+                ...f,
+                interactions: 0,
+                tokens: undefined,
+                contextReferences: createEmptyContextRefs(),
+                firstInteraction: null,
+                lastInteraction: null,
+                editorSource: sessionEditorName(f.file),
+            })),
             sessionFolders: [],
             cacheInfo: { size: 0, sizeInMB: 0, lastUpdated: null, location: 'Desktop (in-memory)', storagePath: null },
             backendStorageInfo: null,

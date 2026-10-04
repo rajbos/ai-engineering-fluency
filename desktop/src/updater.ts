@@ -70,6 +70,7 @@ function registerListeners(): void {
     });
 
     autoUpdater.on('update-available', (info) => {
+        if (state.status === 'downloaded') { return; }
         setState({ status: 'downloading', version: info.version, percent: 0 });
     });
 
@@ -113,6 +114,11 @@ export async function checkForUpdates(manual = false): Promise<void> {
         }
         return;
     }
+
+    // An update that is downloaded and waiting to be installed is final until the
+    // restart. Checking again could restart a download, and if that one failed the
+    // tray would lose its "Restart to install" item for an update that is ready.
+    if (state.status === 'downloaded') { return; }
 
     registerListeners();
     if (manual) { manualCheckInFlight = true; }
