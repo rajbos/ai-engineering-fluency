@@ -28,7 +28,7 @@ const SCHEMA_VERSION = 1;
 const SCRIPT_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts', '.ps1', '.sh', '.py']);
 // Never descended into: dependencies, VCS data, and test directories.
 const SKIPPED_DIRS = new Set(['node_modules', '.git', 'tests']);
-const TEST_FILE = /\.(test|spec)\.[^.]+$/i;
+const TEST_FILE = /\.(test|spec)\./i;
 
 /** The sections of the lightweight SECURITY.md template. Keep in step with AGENTS.md. */
 const REQUIRED_HEADINGS = [

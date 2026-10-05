@@ -51,14 +51,15 @@ jobs:
             HEAD=${{ github.event.after }}
           fi
 
-          # Find changed files in .github/skills and extract skill directories
+          # Find changed files in .github/skills and extract skill directories.
+          # Filtered in jq, not grep: grep exits 1 on no match, which under
+          # pipefail fails the job when no skill directory changed.
           SKILLS=$(git diff --name-only $BASE $HEAD | \
-            grep '^\.github/skills/' | \
-            grep -v '^\.github/skills/README\.md$' | \
-            grep -v '^\.github/skills/skill-security-classification\.json$' | \
-            cut -d'/' -f1-3 | \
-            sort -u | \
-            jq -R -s -c 'split("\n") | map(select(length > 0))')
+            jq -R -s -c '[split("\n")[]
+              | select(startswith(".github/skills/"))
+              | select(. != ".github/skills/README.md"
+                  and . != ".github/skills/skill-security-classification.json")
+              | split("/")[0:3] | join("/")] | unique')
 
           echo "skills=$SKILLS" >> "$GITHUB_OUTPUT"
           echo "Changed skills: $SKILLS"

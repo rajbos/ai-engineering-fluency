@@ -57,6 +57,9 @@ Recorded, not fixed here.
   repository remote URLs go into the chat transcript, and from there into whatever the
   transcript is shared with. The script does not strip URL userinfo or paths.
   `--last 99999` prints the entire cache.
-- `--last` falls back to 10 on a non-numeric value but accepts any positive integer.
+- `--last` is not validated as a positive limit. It is read with `parseInt(value, 10) || 10`
+  (line 30), so any positive integer is accepted, a partially numeric value such as `5abc`
+  is read as `5`, and a negative value is passed to `slice(0, lastCount)` (line 294):
+  `--last -1` emits every entry except the oldest one.
 - The temp-directory and working-directory candidates mean a file planted there is
   trusted as "the cache" (see "Untrusted inputs").

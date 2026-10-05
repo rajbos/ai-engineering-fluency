@@ -179,6 +179,7 @@ test('test files and test directories do not count as shipped scripts', () => {
 			'SKILL.md': 'x',
 			'thing.test.js': '',
 			'thing.spec.ts': '',
+			'thing.test.integration.js': '',
 			'tests/helper.js': '',
 			'node_modules/dep/index.js': '',
 			'README.md': 'x',
