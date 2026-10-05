@@ -29,10 +29,6 @@
       "status": "exempt",
       "reason": "Repo-only. Regex-scans vscode-extension/src/webview/** and extension.ts, prints to stdout and writes one Markdown report to its declared location (default hardcoded-strings-report.md, overridable with --out); no network, no child processes, no home-directory data."
     },
-    "sync-host-views": {
-      "status": "exempt",
-      "reason": "Repo-only. Regex-reads vscode-extension/esbuild.js, the Visual Studio .csproj and jetbrains-plugin/build.gradle.kts, lists dist/webview, and prints a report to stdout; no network, no child processes, no writes, no home-directory data. CI runs it over PR content but only as text parsing."
-    },
     "whats-new-catalog": {
       "status": "exempt",
       "reason": "Repo-only. Reads repo files and prints to stdout; no network, no child processes, no writes, no home-directory data. It transpiles vscode-extension/src/whatsNew/catalog.ts with the checked-out TypeScript and runs the result in a node:vm context (not a security boundary), so run it on a trusted checkout only."

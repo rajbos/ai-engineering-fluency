@@ -150,6 +150,12 @@ test('fails a SECURITY.md with an empty required section', () => {
 	});
 });
 
+test('a section holding only an HTML comment counts as empty', () => {
+	const commented = VALID_SECURITY_MD.replace('## Known gaps\n\nSomething true.\n', '## Known gaps\n\n<!-- TODO\nlater -->\n');
+	assert.notEqual(commented, VALID_SECURITY_MD);
+	assert.match(validateSkillSecurity(makeAndRun({ 'SECURITY.md': commented })).join('\n'), /"## Known gaps" is empty/);
+});
+
 test('headings match case-insensitively, and a heading inside a code fence does not count', () => {
 	const shouty = VALID_SECURITY_MD.replace('## Known gaps', '## KNOWN GAPS');
 	assert.deepEqual(validateSkillSecurity(makeAndRun({ 'SECURITY.md': shouty })), []);

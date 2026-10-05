@@ -95,7 +95,7 @@ function validateSecurityMd(skill, content) {
 		const body = sections.get(heading.toLowerCase());
 		if (body === undefined) {
 			errors.push(`${skill}: SECURITY.md is missing the required heading "## ${heading}"`);
-		} else if (body.trim() === '') {
+		} else if (body.replace(/<!--[\s\S]*?-->/g, '').trim() === '') {
 			errors.push(`${skill}: SECURITY.md section "## ${heading}" is empty (write "None." if it genuinely does not apply)`);
 		}
 	}
