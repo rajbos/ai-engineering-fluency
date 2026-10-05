@@ -71,7 +71,6 @@ let cachedStats: DetailedStats | null = null;
 let cachedSessionFiles: string[] | null = null;
 let cachedUsageStats: UsageAnalysisStats | null = null;
 let cachedChartPayload: object | null = null;
-let lastDiagnosticReport = '';
 let isRefreshing = false;
 // Bumped whenever a refresh replaces the session-file list. A computation that
 // started against an older list must not cache its result over the newer data.
@@ -532,6 +531,11 @@ function panelPayloadScript(windowKey: string, data: object): string {
     return `window.${windowKey}=${JSON.stringify(payload).replace(/</g, '\\u003c')};`;
 }
 
+/** Plain-text diagnostic report, shown in the Diagnostics view and copied by "Copy report". */
+function buildDiagnosticReport(sessionFileCount: number): string {
+    return `AI Engineering Fluency — Desktop Diagnostic Report\n${'='.repeat(50)}\n\nVersion: ${app.getVersion()}\nSession files found: ${sessionFileCount}\nTimestamp: ${new Date().toISOString()}`;
+}
+
 async function buildPanelHtml(panel: PanelId): Promise<string> {
     const isDark = nativeTheme.shouldUseDarkColors;
     const themeKind = isDark ? 'vscode-dark' : 'vscode-light';
@@ -609,9 +613,8 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
             }
         }));
         const toolFamilies = getToolFamilies();
-        lastDiagnosticReport = `AI Engineering Fluency — Desktop Diagnostic Report\n${'='.repeat(50)}\n\nVersion: ${app.getVersion()}\nSession files found: ${files.length}\nTimestamp: ${new Date().toISOString()}`;
         const diagData = {
-            report: lastDiagnosticReport,
+            report: buildDiagnosticReport(files.length),
             sessionFiles,
             // The session table reads every one of these fields while rendering;
             // a missing `contextReferences` throws and leaves the whole panel blank.
@@ -752,10 +755,13 @@ const STATIC_MIME_TYPES: Record<string, string> = {
 const PANEL_ASSET_PREFIX = 'assets/';
 
 async function serveStaticFile(filename: string): Promise<Response> {
-    const webviewDir = getWebviewDir();
-    const filePath = path.join(webviewDir, filename);
-    // Never serve anything outside the bundled webview directory.
-    if (!filePath.startsWith(webviewDir + path.sep)) {
+    const webviewDir = path.resolve(getWebviewDir());
+    const filePath = path.resolve(webviewDir, filename);
+    // Never serve anything outside the bundled webview directory. Compared as a
+    // relative path rather than a string prefix, so case and separator
+    // differences cannot slip a path past the check.
+    const relative = path.relative(webviewDir, filePath);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
         return new Response('Not Found', { status: 404 });
     }
     try {
@@ -1006,7 +1012,8 @@ function registerIpcHandlers(): void {
                 break;
 
             case 'copyReport':
-                clipboard.writeText(lastDiagnosticReport);
+                // Built on demand, so the copy never depends on which views were opened first.
+                clipboard.writeText(buildDiagnosticReport((await getSessionFiles()).length));
                 break;
 
             case 'openIssue':

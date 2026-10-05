@@ -64,7 +64,7 @@
     },
     "publish": {
       "provider": "generic",
-      "url": "https://github.com/rajbos/ai-engineering-fluency/releases/download/desktop-latest"
+      "url": "https://github.com/rajbos/ai-engineering-fluency/releases/download/desktop-latest/"
     }
   },
   "allowScripts": {
