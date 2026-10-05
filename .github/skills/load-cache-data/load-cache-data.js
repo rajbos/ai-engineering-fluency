@@ -10,11 +10,12 @@
  * tests may write to disk in a known location for inspection.
  * 
  * Usage:
- *   node .github/skills/load-cache-data/load-cache-data.js [--last N] [--json]
+ *   node .github/skills/load-cache-data/load-cache-data.js [--last N] [--json] [--include-sensitive]
  * 
  * Options:
- *   --last N     Show only the last N cache entries (default: 10)
+ *   --last N     Show only the last N cache entries (default: 10, maximum: 100)
  *   --json       Output as JSON
+ *   --include-sensitive  Include session titles, paths, and repository URLs
  *   --help       Show this help message
  */
 
@@ -22,17 +23,34 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+const DEFAULT_LAST_COUNT = 10;
+const MAX_LAST_COUNT = 100;
+
 // Parse command line arguments
 const args = process.argv.slice(2);
-const lastCount = (() => {
-    const lastIndex = args.indexOf('--last');
-    if (lastIndex !== -1 && args[lastIndex + 1]) {
-        return parseInt(args[lastIndex + 1], 10) || 10;
-    }
-    return 10;
-})();
-const jsonOutput = args.includes('--json');
+const includeSensitive = args.includes('--include-sensitive');
 const showHelp = args.includes('--help');
+
+function parseLastCount() {
+    for (let index = 0; index < args.length; index++) {
+        if (args[index] !== '--last') {
+            continue;
+        }
+
+        const value = args[index + 1];
+        if (!value || !/^\d+$/.test(value)) {
+            throw new Error('--last must be a positive integer.');
+        }
+
+        const count = Number(value);
+        if (!Number.isSafeInteger(count) || count < 1) {
+            throw new Error('--last must be a positive integer.');
+        }
+
+        return Math.min(count, MAX_LAST_COUNT);
+    }
+    return DEFAULT_LAST_COUNT;
+}
 
 if (showHelp) {
     console.log(`
@@ -51,20 +69,23 @@ CACHE STRUCTURE:
   - usageAnalysis: detailed usage statistics (optional)
 
 CACHE FILE LOCATIONS:
-  This script looks for cache export files in the following locations:
-  1. VS Code globalStorage: %APPDATA%\\Code\\User\\globalStorage\\rajbos.copilot-token-tracker\\cache.json
-  2. Temp directory: %TEMP%\\copilot-token-tracker-cache.json
-  3. Current directory: ./cache-export.json
+  This script looks only in VS Code globalStorage for Code, Insiders,
+  Exploration, VSCodium, and Cursor. It does not trust files in temp or
+  current-working directories.
+
+  Session titles, workspace paths, repository URLs, and cache file paths are
+  omitted by default. Use --include-sensitive only when you intend to expose them.
 
   To create a cache export for testing or inspection, the extension or tests
-  can write the cache data to one of these locations.
+  can write session-cache.json to the extension's globalStorage directory.
 
 USAGE:
-  node .github/skills/load-cache-data/load-cache-data.js [--last N] [--json]
+  node .github/skills/load-cache-data/load-cache-data.js [--last N] [--json] [--include-sensitive]
 
 OPTIONS:
-  --last N     Show only the last N cache entries (default: 10)
+  --last N     Show only the last N cache entries (default: 10, maximum: 100)
   --json       Output as JSON format
+  --include-sensitive  Include session titles, paths, and repository URLs
   --help       Show this help message
 
 EXAMPLES:
@@ -74,8 +95,8 @@ EXAMPLES:
   # Show last 5 cache entries as JSON
   node .github/skills/load-cache-data/load-cache-data.js --last 5 --json
 
-  # Show all cache entries
-  node .github/skills/load-cache-data/load-cache-data.js --last 99999
+  # Include session-identifying fields only when explicitly needed
+  node .github/skills/load-cache-data/load-cache-data.js --include-sensitive --json
 
 FOR DEVELOPERS:
   To access the cache programmatically within the extension:
@@ -103,6 +124,14 @@ FOR DEVELOPERS:
     process.exit(0);
 }
 
+let lastCount;
+try {
+    lastCount = parseLastCount();
+} catch (error) {
+    console.error(error.message);
+    process.exit(2);
+}
+
 /**
  * Get possible cache file locations
  * Returns array of paths where cache export files might be located
@@ -127,10 +156,6 @@ function getCacheFilePaths() {
                 paths.push(path.join(appDataPath, variant, 'User', 'globalStorage', extensionId, fileName));
             }
         }
-        // Also check temp directory for common export names
-        const tempPath = process.env.TEMP || process.env.TMP || path.join(homedir, 'AppData', 'Local', 'Temp');
-        paths.push(path.join(tempPath, 'copilot-token-tracker-cache.json'));
-        paths.push(path.join(tempPath, 'session-cache.json'));
     } else if (platform === 'darwin') {
         // macOS: ~/Library/Application Support/<variant>/User/globalStorage/<extensionId>/<cacheFile>
         for (const variant of vscodeVariants) {
@@ -138,9 +163,6 @@ function getCacheFilePaths() {
                 paths.push(path.join(homedir, 'Library', 'Application Support', variant, 'User', 'globalStorage', extensionId, fileName));
             }
         }
-        // Also check temp directory
-        paths.push(path.join(os.tmpdir(), 'copilot-token-tracker-cache.json'));
-        paths.push(path.join(os.tmpdir(), 'session-cache.json'));
     } else {
         // Linux: ~/.config/Code/User/globalStorage/extensionId/cache.json
         const xdgConfigHome = process.env.XDG_CONFIG_HOME || path.join(homedir, '.config');
@@ -149,16 +171,28 @@ function getCacheFilePaths() {
                 paths.push(path.join(xdgConfigHome, variant, 'User', 'globalStorage', extensionId, fileName));
             }
         }
-        // Also check temp directory
-        paths.push(path.join(os.tmpdir(), 'copilot-token-tracker-cache.json'));
-        paths.push(path.join(os.tmpdir(), 'session-cache.json'));
     }
-
-    // Also check current directory and common export names
-    paths.push(path.join(process.cwd(), 'cache-export.json'));
-    paths.push(path.join(process.cwd(), 'session-cache.json'));
     
     return paths;
+}
+
+const SAFE_CACHE_ENTRY_FIELDS = new Set([
+    'tokens', 'interactions', 'modelUsage', 'mtime', 'size', 'detailsOnly',
+    'usageAnalysis', 'taskCategory', 'taskCategoryShares', 'firstInteraction',
+    'lastInteraction', 'repositoryResolved', 'thinkingTokens', 'actualTokens',
+    'cacheReadTokens', 'modelTurns', 'debugLogInputTokens', 'debugLogOutputTokens',
+    'debugLogChecked', 'subAgentCalls', 'copilotExactCostDollars', 'truncationCount',
+    'messagesRemovedByTruncation', 'maxRequestInputTokens', 'contextTier',
+    'dailyRollups', 'linesAdded', 'linesRemoved', 'languageUsage'
+]);
+
+function sanitizeCacheEntry(cacheEntry) {
+    if (!cacheEntry || typeof cacheEntry !== 'object' || Array.isArray(cacheEntry)) {
+        return {};
+    }
+    return Object.fromEntries(
+        Object.entries(cacheEntry).filter(([key]) => SAFE_CACHE_ENTRY_FIELDS.has(key))
+    );
 }
 
 /**
@@ -170,7 +204,7 @@ function readCacheFile() {
     
     for (const filePath of possiblePaths) {
         try {
-            if (fs.existsSync(filePath)) {
+            if (fs.lstatSync(filePath).isFile()) {
                 const content = fs.readFileSync(filePath, 'utf8');
                 const data = JSON.parse(content);
                 return { success: true, data, filePath };
@@ -180,11 +214,11 @@ function readCacheFile() {
             continue;
         }
     }
-    
-    return { 
-        success: false, 
+
+    return {
+        success: false,
         error: 'No cache file found',
-        searchedPaths: possiblePaths 
+        searchedPaths: possiblePaths
     };
 }
 
@@ -288,14 +322,16 @@ function displayNoCacheFound(searchedPaths) {
     const cacheResult = readCacheFile();
 
     if (cacheResult.success) {
-        // Return raw cache data (limit to last N entries) as JSON only
         const entries = Object.entries(cacheResult.data || {});
-        entries.sort((a, b) => (b[1].mtime || 0) - (a[1].mtime || 0));
+        entries.sort((a, b) => ((b[1] && b[1].mtime) || 0) - ((a[1] && a[1].mtime) || 0));
         const limited = entries.slice(0, lastCount);
-        const limitedObj = Object.fromEntries(limited);
+        const limitedObj = Object.fromEntries(limited.map(([filePath, cacheEntry], index) => [
+            includeSensitive ? filePath : `session-${index + 1}`,
+            includeSensitive ? cacheEntry : sanitizeCacheEntry(cacheEntry)
+        ]));
 
         const output = {
-            cacheFile: cacheResult.filePath,
+            ...(includeSensitive ? { cacheFile: cacheResult.filePath } : {}),
             requestedCount: lastCount,
             totalCacheEntries: Object.keys(cacheResult.data || {}).length,
             entries: limitedObj
@@ -308,8 +344,7 @@ function displayNoCacheFound(searchedPaths) {
     // No cache found: output JSON error
     const errorOut = {
         cacheFound: false,
-        error: cacheResult.error,
-        searchedPaths: cacheResult.searchedPaths
+        error: cacheResult.error
     };
     console.log(JSON.stringify(errorOut));
     process.exit(1);

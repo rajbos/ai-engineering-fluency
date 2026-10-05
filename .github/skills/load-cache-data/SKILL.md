@@ -1,11 +1,11 @@
 ---
 name: load-cache-data
-description: Load and display the last 10 cache entries as raw JSON output. DO NOT create extra files or pretty-print the data - output raw JSON only. Use when you need to understand cached session statistics, debug cache behavior, or work with actual cached data.
+description: Load the last 10 cache entries as JSON with session-identifying fields omitted by default. Use --include-sensitive only when full entries are explicitly needed.
 ---
 
 # Load Cache Data Skill
 
-Use `--json` for output; don't pretty-print or write extra files — this data feeds analysis, not display.
+Use `--json` for output; don't pretty-print or write extra files. The default output omits session titles, workspace paths, repository URLs, and cache file paths. Never use `--include-sensitive` unless the task explicitly requires those fields.
 
 This skill helps you access and inspect the AI Engineering Fluency's local session file cache. The cache stores pre-computed statistics for session files to avoid re-processing unchanged files.
 
@@ -82,9 +82,8 @@ const last10 = cacheEntries
   .slice(0, 10);
 
 // Display cache entries
-for (const [filePath, cacheEntry] of last10) {
+for (const [, cacheEntry] of last10) {
   console.log({
-    file: filePath,
     tokens: cacheEntry.tokens,
     interactions: cacheEntry.interactions,
     modelUsage: cacheEntry.modelUsage,
@@ -107,26 +106,28 @@ node .github/skills/load-cache-data/load-cache-data.js --json
 # Show last N entries as JSON (default is 10)
 node .github/skills/load-cache-data/load-cache-data.js --last 5 --json
 
+# Include full entries only when explicitly needed
+node .github/skills/load-cache-data/load-cache-data.js --include-sensitive --json
+
 # Show help
 node .github/skills/load-cache-data/load-cache-data.js --help
 ```
 
-**Note**: The script supports human-readable output without `--json`, but for LLM skills, always use `--json` to get structured data.
+`--last` is capped at 100 entries. The script searches only VS Code globalStorage; it does not trust files in temporary or current-working directories. Default entry keys are anonymous (`session-1`, etc.), and unrecognized fields are omitted.
 
 **What it does:**
 - Searches for cache export files in known locations
 - Reads actual cache data if a file exists
-- Displays cache entries sorted by most recent modification
+- Displays cache entries sorted by most recent modification, with identifying fields omitted by default
 - Shows detailed token counts, model usage, and usage analysis
 
 **Cache File Locations:**
 
 The script searches for cache export files in these locations:
 
-1. **VS Code globalStorage**: `%APPDATA%\Code\User\globalStorage\rajbos.copilot-token-tracker\cache.json` (Windows)
-   - Also checks other VS Code variants (Insiders, Cursor, VSCodium, etc.)
-2. **Temp directory**: `%TEMP%\copilot-token-tracker-cache.json`
-3. **Current directory**: `./cache-export.json`
+1. **VS Code globalStorage**: `<VS Code user data>\User\globalStorage\robbos.copilot-token-tracker\session-cache.json`
+   - The Windows, macOS, and Linux locations are derived from the VS Code user-data directory.
+   - Also checks other VS Code variants (Insiders, Cursor, VSCodium, etc.).
 
 **Creating Cache Export Files:**
 
@@ -140,7 +141,7 @@ Since the extension stores cache in VS Code's globalState (internal SQLite datab
 - `0`: Cache file found and displayed successfully
 - `1`: No cache file found
 
-**Note**: If no cache file is found, the script will display the searched locations and instructions for exporting cache data.
+**Note**: If no cache file is found, the script reports that no cache file was found without printing local filesystem paths.
 
 ## Cache Management Methods
 
