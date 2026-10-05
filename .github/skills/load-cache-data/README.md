@@ -11,6 +11,9 @@ node .github/skills/load-cache-data/load-cache-data.js
 # Show last 5 entries
 node .github/skills/load-cache-data/load-cache-data.js --last 5
 
+# Include session-identifying fields only when explicitly needed
+node .github/skills/load-cache-data/load-cache-data.js --include-sensitive --json
+
 # Output as JSON
 node .github/skills/load-cache-data/load-cache-data.js --json
 
@@ -21,30 +24,21 @@ node .github/skills/load-cache-data/load-cache-data.js --help
 ## What This Skill Does
 
 1. **Reads actual cache data** - Loads real cache data from export files on disk
-2. **Multiple search locations** - Checks VS Code globalStorage, temp directory, and current directory
+2. **Scoped search locations** - Checks only VS Code globalStorage, not temp or current directories
 3. **Helps debugging** - Inspect what's being cached and when
 4. **Supports development** - Iterate with real data structures when building features
 
+By default, output omits session titles, prompt excerpts, correction snippets, workspace paths, repository URLs, cache file paths, and unknown entry fields. `--include-sensitive` opts into full entries and their local paths. `--last` is capped at 100 entries.
+
 ## Cache File Locations
 
-The script searches for cache export files in these locations (in order):
+The script checks for `session-cache.json` under each supported VS Code variant's globalStorage directory:
 
-**Windows:**
-- `%APPDATA%\Code\User\globalStorage\rajbos.copilot-token-tracker\cache.json`
-- `%TEMP%\copilot-token-tracker-cache.json`
-- `.\cache-export.json`
+- **Windows:** `%APPDATA%\<variant>\User\globalStorage\robbos.copilot-token-tracker\`
+- **macOS:** `~/Library/Application Support/<variant>/User/globalStorage/robbos.copilot-token-tracker/`
+- **Linux:** `${XDG_CONFIG_HOME:-~/.config}/<variant>/User/globalStorage/robbos.copilot-token-tracker/`
 
-**macOS:**
-- `~/Library/Application Support/Code/User/globalStorage/rajbos.copilot-token-tracker/cache.json`
-- `/tmp/copilot-token-tracker-cache.json`
-- `./cache-export.json`
-
-**Linux:**
-- `~/.config/Code/User/globalStorage/rajbos.copilot-token-tracker/cache.json`
-- `/tmp/copilot-token-tracker-cache.json`
-- `./cache-export.json`
-
-*Note: Also checks other VS Code variants (Insiders, Cursor, VSCodium, Code - Exploration)*
+Supported variants include Code, Insiders, Code - Exploration, VSCodium, and Cursor. Temporary and current-working directories are not trusted as cache sources.
 
 ## Important Note
 

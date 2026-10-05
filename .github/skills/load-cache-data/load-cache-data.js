@@ -15,7 +15,7 @@
  * Options:
  *   --last N     Show only the last N cache entries (default: 10, maximum: 100)
  *   --json       Output as JSON
- *   --include-sensitive  Include session titles, paths, and repository URLs
+ *   --include-sensitive  Include session titles, prompts, paths, and repository URLs
  *   --help       Show this help message
  */
 
@@ -43,7 +43,7 @@ function parseLastCount() {
         }
 
         const count = Number(value);
-        if (!Number.isSafeInteger(count) || count < 1) {
+        if (Number.isNaN(count) || count < 1) {
             throw new Error('--last must be a positive integer.');
         }
 
@@ -73,8 +73,9 @@ CACHE FILE LOCATIONS:
   Exploration, VSCodium, and Cursor. It does not trust files in temp or
   current-working directories.
 
-  Session titles, workspace paths, repository URLs, and cache file paths are
-  omitted by default. Use --include-sensitive only when you intend to expose them.
+  Session titles, prompts, correction excerpts, workspace paths, repository URLs,
+  and cache file paths are omitted by default. Use --include-sensitive only when
+  you intend to expose them.
 
   To create a cache export for testing or inspection, the extension or tests
   can write session-cache.json to the extension's globalStorage directory.
@@ -85,7 +86,7 @@ USAGE:
 OPTIONS:
   --last N     Show only the last N cache entries (default: 10, maximum: 100)
   --json       Output as JSON format
-  --include-sensitive  Include session titles, paths, and repository URLs
+  --include-sensitive  Include session titles, prompts, paths, and repository URLs
   --help       Show this help message
 
 EXAMPLES:
@@ -111,9 +112,9 @@ FOR DEVELOPERS:
     .slice(0, 10);
 
   // Display cache entries
-  for (const [filePath, cacheEntry] of last10) {
+  for (const [index, [, cacheEntry]] of last10.entries()) {
     console.log({
-      file: filePath,
+      session: \`session-\${index + 1}\`,
       tokens: cacheEntry.tokens,
       interactions: cacheEntry.interactions,
       modelUsage: cacheEntry.modelUsage,
@@ -190,9 +191,29 @@ function sanitizeCacheEntry(cacheEntry) {
     if (!cacheEntry || typeof cacheEntry !== 'object' || Array.isArray(cacheEntry)) {
         return {};
     }
-    return Object.fromEntries(
+    const safeEntry = Object.fromEntries(
         Object.entries(cacheEntry).filter(([key]) => SAFE_CACHE_ENTRY_FIELDS.has(key))
     );
+
+    const usageAnalysis = safeEntry.usageAnalysis;
+    if (usageAnalysis && typeof usageAnalysis === 'object' && !Array.isArray(usageAnalysis)) {
+        const safeUsageAnalysis = { ...usageAnalysis };
+        delete safeUsageAnalysis.firstUserPrompt;
+        if (Array.isArray(safeUsageAnalysis.correctionMoments)) {
+            safeUsageAnalysis.correctionMoments = safeUsageAnalysis.correctionMoments.map(moment => {
+                if (!moment || typeof moment !== 'object' || Array.isArray(moment)) {
+                    return moment;
+                }
+                const safeMoment = { ...moment };
+                delete safeMoment.snippet;
+                delete safeMoment.file;
+                return safeMoment;
+            });
+        }
+        safeEntry.usageAnalysis = safeUsageAnalysis;
+    }
+
+    return safeEntry;
 }
 
 /**
@@ -217,103 +238,8 @@ function readCacheFile() {
 
     return {
         success: false,
-        error: 'No cache file found',
-        searchedPaths: possiblePaths
+        error: 'No cache file found'
     };
-}
-
-/**
- * Format cache data for display
- */
-function formatCacheEntries(cacheData, limit = 10) {
-    const entries = Object.entries(cacheData);
-    
-    // Sort by modification time (most recent first)
-    entries.sort((a, b) => (b[1].mtime || 0) - (a[1].mtime || 0));
-    
-    // Take last N entries
-    const limitedEntries = entries.slice(0, limit);
-    
-    return limitedEntries.map(([filePath, cacheEntry]) => ({
-        file: path.basename(filePath),
-        fullPath: filePath,
-        tokens: cacheEntry.tokens,
-        interactions: cacheEntry.interactions,
-        modelUsage: cacheEntry.modelUsage,
-        lastModified: cacheEntry.mtime ? new Date(cacheEntry.mtime).toISOString() : 'unknown',
-        usageAnalysis: cacheEntry.usageAnalysis
-    }));
-}
-
-/**
- * Display cache entries in human-readable format
- */
-function displayCacheEntries(entries, sourceFile) {
-    console.log('='.repeat(80));
-    console.log('GitHub Copilot Token Tracker - Local Cache Data');
-    console.log('='.repeat(80));
-    console.log('');
-    
-    if (sourceFile) {
-        console.log(`Cache file: ${sourceFile}`);
-        console.log('');
-    }
-    
-    console.log(`Showing ${entries.length} cache entries (sorted by most recent):`);
-    console.log('');
-    
-    entries.forEach((entry, index) => {
-        console.log(`${index + 1}. ${entry.file}`);
-        console.log(`   Path: ${entry.fullPath}`);
-        console.log(`   Tokens: ${entry.tokens.toLocaleString()}`);
-        console.log(`   Interactions: ${entry.interactions}`);
-        console.log(`   Last Modified: ${entry.lastModified}`);
-        console.log(`   Model Usage:`);
-        
-        for (const [model, usage] of Object.entries(entry.modelUsage)) {
-            console.log(`     - ${model}:`);
-            console.log(`       Input: ${usage.inputTokens.toLocaleString()} tokens`);
-            console.log(`       Output: ${usage.outputTokens.toLocaleString()} tokens`);
-        }
-        
-        if (entry.usageAnalysis) {
-            console.log(`   Usage Analysis:`);
-            console.log(`     Tool Calls: ${entry.usageAnalysis.toolCalls.total}`);
-            console.log(`     Mode Usage: Ask=${entry.usageAnalysis.modeUsage.ask}, Edit=${entry.usageAnalysis.modeUsage.edit}, Agent=${entry.usageAnalysis.modeUsage.agent}`);
-            const contextRefs = entry.usageAnalysis.contextReferences;
-            const totalRefs = Object.values(contextRefs).reduce((sum, val) => sum + val, 0);
-            console.log(`     Context References: ${totalRefs} total`);
-        }
-        
-        console.log('');
-    });
-    
-    console.log('='.repeat(80));
-}
-
-/**
- * Display message when no cache file is found
- */
-function displayNoCacheFound(searchedPaths) {
-    console.log('='.repeat(80));
-    console.log('GitHub Copilot Token Tracker - Local Cache Data');
-    console.log('='.repeat(80));
-    console.log('');
-    console.log('NO CACHE FILE FOUND');
-    console.log('');
-    console.log('This script looks for cache export files in the following locations:');
-    searchedPaths.forEach(p => console.log(`  - ${p}`));
-    console.log('');
-    console.log('The extension stores its cache in VS Code\'s internal globalState,');
-    console.log('which is not directly accessible from external scripts.');
-    console.log('');
-    console.log('To export cache data for inspection:');
-    console.log('  1. The extension can be modified to write cache to disk');
-    console.log('  2. Tests can export cache data to one of the above locations');
-    console.log('  3. Use the extension\'s API to access cache at runtime');
-    console.log('');
-    console.log('See --help for more information on cache structure and access patterns.');
-    console.log('='.repeat(80));
 }
 
 // Main execution

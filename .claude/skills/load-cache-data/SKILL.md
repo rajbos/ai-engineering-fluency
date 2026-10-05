@@ -1,11 +1,11 @@
 ---
 name: load-cache-data
-description: Load the last 10 cache entries as JSON with session-identifying fields omitted by default. Use --include-sensitive only when full entries are explicitly needed.
+description: Load the last 10 cache entries as JSON with session titles, prompt excerpts, paths, and repository URLs omitted by default. Use --include-sensitive only when full entries are explicitly needed.
 ---
 
 # Load Cache Data Skill
 
-Use `--json` for output; don't pretty-print or write extra files. The default output omits session titles, workspace paths, repository URLs, and cache file paths. Never use `--include-sensitive` unless the task explicitly requires those fields.
+Use `--json` for output; don't pretty-print or write extra files. The default output omits session titles, prompt excerpts, workspace paths, repository URLs, and cache file paths. Never use `--include-sensitive` unless the task explicitly requires those fields.
 
 This skill helps you access and inspect the AI Engineering Fluency's local session file cache. The cache stores pre-computed statistics for session files to avoid re-processing unchanged files.
 
