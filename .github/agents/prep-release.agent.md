@@ -7,7 +7,7 @@ tools: ["execute/runInTerminal", "execute/getTerminalOutput", "read/terminalLast
 # Prep Release Agent
 
 Automates the version-bump PR needed before publishing a new release.
-Detects which of the four releasable components have changed, bumps their version numbers, writes their changelog sections, opens a release-prep branch and PR, and tells the user exactly which GitHub Actions workflows to trigger after merging.
+Detects which of the five releasable components have changed, bumps their version numbers, writes their changelog sections, opens a release-prep branch and PR, and tells the user exactly which GitHub Actions workflows to trigger after merging.
 
 ## Releasable Components
 
@@ -16,6 +16,7 @@ Detects which of the four releasable components have changed, bumps their versio
 | **VS Code extension** | `vscode-extension/package.json` → `version` | `vscode/v` | `release.yml` (Actions → _Extensions - Release_ → Run workflow) |
 | **CLI** | `cli/package.json` → `version` | `cli/v` | `cli-publish.yml` (Actions → _CLI - Publish to npm and GitHub_ → Run workflow) |
 | **Visual Studio extension** | `visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest` → `Identity.Version` | `vs/v` | `visualstudio-build.yml` (Actions → _Visual Studio Extension - Build & Package_ → Run workflow, set `publish_marketplace: true`) |
+| **JetBrains plugin** | `jetbrains-plugin/gradle.properties` → `pluginVersion` | `jetbrains/v` | `jetbrains-publish.yml` — triggered by pushing a `jetbrains/vX.Y.Z` tag (see Step 11) |
 | **Desktop app** | `desktop/package.json` → `version` | `desktop/v` | `desktop-publish.yml` — triggered by pushing a `desktop/vX.Y.Z` tag (see Step 11); a manual run only builds an installer and releases nothing |
 
 ---
@@ -33,12 +34,13 @@ Individual overrides per component are also valid (e.g. "minor for vscode, patch
 
 ### Step 2 — Find last release tags for each component
 
-Run these four commands to find the most recent release tag for each component:
+Run these five commands to find the most recent release tag for each component:
 
 ```bash
 git tag --sort=-version:refname | grep '^vscode/v' | head -1
 git tag --sort=-version:refname | grep '^cli/v' | head -1
 git tag --sort=-version:refname | grep '^vs/v' | head -1
+git tag --sort=-version:refname | grep '^jetbrains/v' | head -1
 git tag --sort=-version:refname | grep '^desktop/v' | head -1
 ```
 
@@ -58,6 +60,9 @@ git diff --name-only <last-cli-tag>...HEAD -- cli/
 # Visual Studio extension
 git diff --name-only <last-vs-tag>...HEAD -- visualstudio-extension/
 
+# JetBrains plugin (its own code plus the webview bundles and CLI it packages)
+git diff --name-only <last-jetbrains-tag>...HEAD -- jetbrains-plugin/ vscode-extension/src/webview/ cli/src/ src/
+
 # Desktop app (its own code plus everything it bundles)
 git diff --name-only <last-desktop-tag>...HEAD -- desktop/ vscode-extension/src/webview/ cli/src/ src/
 ```
@@ -72,6 +77,8 @@ A component **has changes** if the diff output is non-empty.
 
 Also note: changes to shared `src/` files (e.g. `tokenEstimators.json`, `modelPricing.json`, `toolNames.json`) are relevant to the VS Code extension. The VS extension build also depends on changes to `cli/` and shared `src/*.ts` files — if those changed since the last VS tag, include the VS extension in the bump.
 
+The JetBrains plugin packages the VS Code extension's webview bundles and the CLI binaries (see `jetbrains-publish.yml`), so the same reasoning as for the desktop app below applies to it.
+
 The desktop app ships the VS Code extension's webview bundles and imports the CLI's stats logic and the shared `src/` modules from source, so a change to any of those changes what the desktop app shows. That is why its diff above covers `vscode-extension/src/webview/`, `cli/src/` and `src/` as well as `desktop/`: whenever the VS Code extension is bumped for a webview change, the desktop app normally needs a bump too, or its users stay on the old views.
 
 If no `desktop/v` tag exists yet, the desktop app has never been released: release the version already in `desktop/package.json` as-is (do not bump it), and list it in the plan as a first release.
@@ -84,6 +91,12 @@ If no `desktop/v` tag exists yet, the desktop app has never been released: relea
 node -p "require('./vscode-extension/package.json').version"
 node -p "require('./cli/package.json').version"
 node -p "require('./desktop/package.json').version"
+```
+
+For the JetBrains plugin, read `pluginVersion` from `jetbrains-plugin/gradle.properties`:
+
+```bash
+grep '^pluginVersion' jetbrains-plugin/gradle.properties
 ```
 
 For the VS extension, read the `Version` attribute from the `<Identity>` element in `visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest`.
@@ -100,6 +113,7 @@ Before making any changes, summarize the plan:
 | VS Code extension | vscode/v0.0.27 | 0.0.27 | 0.0.28 (patch) | ✅ yes |
 | CLI | cli/v0.0.7 | 0.0.7 | 0.0.8 (patch) | ✅ yes |
 | Visual Studio extension | vs/v1.0.4 | 1.0.4 | — | ❌ no changes |
+| JetBrains plugin | jetbrains/v0.5.2 | 0.5.2 | 0.5.3 (patch) | ✅ yes (webview changes) |
 | Desktop app | desktop/v0.1.0 | 0.1.0 | 0.1.1 (patch) | ✅ yes (webview changes) |
 
 Branch: release/prep-2026-04-09
@@ -123,6 +137,11 @@ npm version <bump-type> --no-git-tag-version
 cd ..
 ```
 
+For JetBrains plugin (if changed), edit two files with the `edit` tool:
+
+- `jetbrains-plugin/gradle.properties` — set `pluginVersion = <new-version>`. `jetbrains-publish.yml` fails when this does not match the pushed tag.
+- `jetbrains-plugin/src/main/resources/META-INF/plugin.xml` — add a `<h3><new-version></h3>` block with a short `<ul>` of user-facing changes at the top of the change notes, above the previous version's block. This is what the JetBrains Marketplace shows as "What's New".
+
 For Desktop app (if changed):
 ```bash
 cd desktop
@@ -136,7 +155,7 @@ For Visual Studio extension (if changed), update the `Version` attribute in the 
 
 The changelog *is* the release notes. Each release workflow copies the `## [<version>]` section of its component's `CHANGELOG.md` into the GitHub release: `release.yml` (VS Code) **refuses to release** (before tagging) when that section is missing, and `cli-publish.yml` / `visualstudio-publish.yml` fall back to GitHub's generated PR list with a warning. So it must be written in this PR, where it reaches `main` together with the version bump. Nothing else writes it.
 
-The desktop app is the exception: it has no `CHANGELOG.md`, and `desktop-publish.yml` uses GitHub's generated notes. Skip this step for it.
+Two components are exceptions and skip this step: the desktop app has no `CHANGELOG.md` (`desktop-publish.yml` uses GitHub's generated notes), and the JetBrains plugin keeps its release notes in `plugin.xml` (written in Step 6).
 
 For each other bumped component — `<component>` is `vscode-extension`, `cli` or `visualstudio-extension`, and `<new-version>` is *that component's* new version:
 
@@ -166,6 +185,7 @@ Stage only the version and changelog files:
 git add vscode-extension/package.json vscode-extension/package-lock.json   # if VS Code changed
 git add cli/package.json cli/package-lock.json                              # if CLI changed
 git add visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest  # if VS changed
+git add jetbrains-plugin/gradle.properties jetbrains-plugin/src/main/resources/META-INF/plugin.xml  # if JetBrains changed
 git add desktop/package.json desktop/package-lock.json                      # if Desktop changed
 git add <component>/CHANGELOG.md   # for each component promoted in Step 6b
 ```
@@ -233,7 +253,11 @@ After the PR is created, output a clear summary:
 - Go to **Actions → Visual Studio Extension - Build & Package → Run workflow** (on `main`)
 - Set `publish_marketplace: true` to publish to the Visual Studio Marketplace
 
-#### 4. Desktop app (if bumped)
+#### 4. JetBrains plugin (if bumped)
+- Push a `jetbrains/vX.X.X` tag on `main` (see Step 11)
+- This publishes JetBrains plugin **vX.X.X** to the JetBrains Marketplace and creates its GitHub release
+
+#### 5. Desktop app (if bumped)
 - Push a `desktop/vX.X.X` tag on `main` (see Step 11) — do not use Run workflow, which only builds
 - This publishes the **Desktop App vX.X.X** installer and moves the auto-update feed, so installed apps update themselves
 ```
@@ -273,6 +297,18 @@ gh workflow run "Extensions - Release" --ref main \
 
 Only set `vscode_only=false` when the Visual Studio extension was *also* bumped in this release and should be published too.
 
+#### JetBrains plugin — push a tag
+
+`jetbrains-publish.yml` publishes to the JetBrains Marketplace and creates the GitHub release on a `jetbrains/v*` tag push, after checking the tag against `pluginVersion` in `gradle.properties`:
+
+```bash
+git fetch origin main
+git tag -a jetbrains/vX.Y.Z origin/main -m "Release jetbrains/vX.Y.Z"
+git push origin jetbrains/vX.Y.Z
+```
+
+A manual run can also publish to the Marketplace (`publish_marketplace`), but it creates no tag and no GitHub release, so prefer the tag.
+
 #### Desktop app — push a tag; `workflow_dispatch` publishes nothing
 
 `desktop-publish.yml` only releases on a tag **push**. Running it manually (even against a tag) builds the installer as a workflow artifact and stops there — useful for trying an installer, useless for releasing. Push a tag matching the already-merged `desktop/package.json` version; the workflow fails loudly if the two differ:
@@ -299,7 +335,8 @@ This creates the **Desktop App vX.Y.Z** GitHub release with the installer and th
 - After `npm version`, also stage the `package-lock.json` — npm updates both files.
 - **Never trigger the CLI publish workflow via `workflow_dispatch` right after merging a release-prep PR** — it re-bumps the version itself and will publish a version one patch ahead of the one just merged. Push a `cli/vX.Y.Z` tag instead (see Step 11).
 - **Release the desktop app by tag push only** (`desktop/vX.Y.Z`, see Step 11) — a manual run of `desktop-publish.yml` never publishes.
-- **Bump the desktop app when what it bundles changed**, not only when `desktop/` did: webview, `cli/src/` and shared `src/` changes all reach its users only through a new desktop release.
+- **Bump the desktop app and the JetBrains plugin when what they bundle changed**, not only when `desktop/` or `jetbrains-plugin/` did: webview, `cli/src/` and shared `src/` changes reach their users only through a new release of each.
+- **A JetBrains bump is two files**: `pluginVersion` in `gradle.properties` and a new change-notes block in `plugin.xml`.
 - **Always pass `vscode_only=true`** to the `Extensions - Release` workflow when only the VS Code extension changed — otherwise it also rebuilds/republishes the unchanged Visual Studio extension.
 
 ## Error Handling
