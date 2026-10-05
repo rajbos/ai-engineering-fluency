@@ -70,10 +70,12 @@ function parseSections(markdown) {
 	let current = null;
 	let fence = null;
 	for (const line of markdown.split(/\r?\n/)) {
-		const fenceMatch = /^\s*(`{3,}|~{3,})/.exec(line);
+		const fenceMatch = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
 		if (fenceMatch) {
-			if (!fence) { fence = fenceMatch[1][0]; }
-			else if (fenceMatch[1][0] === fence) { fence = null; }
+			const marker = fenceMatch[1];
+			if (!fence) { fence = marker; }
+			// A fence closes only on the same character, at least as long, with nothing after it.
+			else if (marker[0] === fence[0] && marker.length >= fence.length && fenceMatch[2].trim() === '') { fence = null; }
 		}
 		const heading = !fence && /^##\s+(.+?)\s*#*\s*$/.exec(line);
 		if (heading) {

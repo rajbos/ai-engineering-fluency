@@ -229,6 +229,15 @@ test('parseSections maps level-2 headings to their bodies', () => {
 	assert.equal(sections.get('two').trim(), 'c');
 });
 
+test('parseSections closes a fence only on a marker of the same character and at least the same length', () => {
+	// A shorter or different-character marker inside a longer fence does not close it.
+	const longer = parseSections('## One\n````\n```\n## Hidden\n~~~~\n````\n## Two\nc\n');
+	assert.deepEqual([...longer.keys()], ['one', 'two']);
+	// A longer marker closes a shorter fence; an info string does not.
+	const shorter = parseSections('## One\n```\n```js\n## Hidden\n````\n## Two\nc\n');
+	assert.deepEqual([...shorter.keys()], ['one', 'two']);
+});
+
 test('CLI exits 1 with a readable message on violations and 0 when clean', () => {
 	withSkillsDir({ bare: { 'SKILL.md': 'x', 'run.js': '' } }, classification({}), (dir) => {
 		const result = spawnSync(process.execPath, [SCRIPT, '--skills-dir', dir], { encoding: 'utf8' });
