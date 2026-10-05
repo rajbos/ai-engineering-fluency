@@ -216,3 +216,18 @@ test('Usage by Editor rows show the official logo, falling back to the emoji for
 	assert.ok(unknown?.querySelector('.editor-logo-emoji'), 'unknown editor keeps its emoji');
 	assert.ok(doc.body.getAttribute('data-logo-theme'), 'logo theme marker is set for the dark/light variants');
 });
+
+test('header does not render the Copilot plan badge even when the host sends a plan', async () => {
+	const doc = await renderDetails({
+		...detailsData({
+			today: { 'GitHub Copilot': 3 }, last30Days: { 'GitHub Copilot': 30 },
+			month: { 'GitHub Copilot': 35 }, lastMonth: { 'GitHub Copilot': 5 },
+		}, []),
+		copilotPlan: { planId: 'individual_max', planName: 'individual_max', monthlyAiCreditsUsd: 0, monthlyPremiumRequests: null },
+	});
+
+	const headerLeft = doc.querySelector('.header-left');
+	assert.ok(headerLeft, 'header should render');
+	assert.equal(doc.querySelector('.plan-badge'), null);
+	assert.doesNotMatch(headerLeft.textContent ?? '', /individual_max|credits/);
+});
