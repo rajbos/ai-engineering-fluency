@@ -8,6 +8,7 @@ type McpServerEntry = ToolCurationAnalysis['underusedMcpServers'][number];
 export type CurationTableId = 'mcp' | 'builtin' | 'skills';
 
 const curationLinkStyle = 'background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;';
+const defaultMcpConfigLink = '<code>.vscode/mcp.json</code>'; // i18n-exempt: configuration filename, not translatable prose.
 
 export function estimateToolOverheadTokens(name: string, description: string | undefined): number {
 	return Math.round((name.length + (description?.length ?? 0) + 10) / 4);
@@ -205,7 +206,7 @@ export function buildUnusedMcpHtml(
 		?? servers.filter(server => !server.extensionId).flatMap(server => server.configFiles ?? [])[0];
 	const configLink = mcpJsonLink
 		? `<button class="curation-file-btn" data-command="openFile" data-path="${escapeHtml(mcpJsonLink)}" style="${curationLinkStyle}" title="${escapeHtml(mcpJsonLink)}">${escapeHtml(mcpJsonLink.replace(/\\/g, '/').split('/').slice(-3).join('/'))}</button>`
-		: '<code>.vscode/mcp.json</code>'; // i18n-exempt: this is a configuration filename, not translatable prose.
+		: defaultMcpConfigLink;
 	const unusedCount = servers.filter(server => server.usedToolCount === 0).length;
 	const usedCount = servers.length - unusedCount;
 	const state = getPagedTableState('mcp', 'default', 'asc', { hideWithUsage: true });

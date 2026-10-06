@@ -144,3 +144,12 @@ test('toolCurationTables: built-in helper and MCP link retain expected labels', 
 	);
 	assert.match(mcp, /workspace\/\.vscode\/mcp\.json/);
 });
+
+test('toolCurationTables: MCP without config files retains the literal configuration filename', () => {
+	const html = buildUnusedMcpHtml(
+		[{ server: 'settings', availableToolCount: 1, usedToolCount: 0 }],
+		{ totalTokens: 0, byServer: {} },
+		30,
+	);
+	assert.match(html, /<code>\.vscode\/mcp\.json<\/code>/);
+});
