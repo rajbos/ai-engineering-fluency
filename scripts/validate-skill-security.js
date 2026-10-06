@@ -64,7 +64,11 @@ function findShippedScripts(skillDir) {
 	return found.sort();
 }
 
-/** Level-2 headings of a markdown document mapped to their body text; fenced code is ignored. */
+/**
+ * Level-2 headings of a markdown document mapped to their body text. A heading
+ * inside fenced code does not start a section; the fenced lines themselves stay
+ * part of the current section's body, so a section holding only a code block counts as written.
+ */
 function parseSections(markdown) {
 	const sections = new Map();
 	let current = null;
@@ -153,10 +157,11 @@ function validateSkillSecurity(skillsDir) {
 		.map((d) => d.name)
 		.sort();
 
+	const skillNameSet = new Set(skillNames);
 	for (const name of Object.keys(entries)) {
-		if (!skillNames.includes(name)) {
-			errors.push(`${name}: classification entry names a skill directory that does not exist`);
-		}
+		if (skillNameSet.has(name)) continue;
+		const exists = fs.existsSync(path.join(skillsDir, name));
+		errors.push(`${name}: classification entry names a skill directory that ${exists ? 'exists but is not a directory' : 'does not exist'}`);
 	}
 
 	for (const skill of skillNames) {
