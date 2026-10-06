@@ -5,6 +5,7 @@ import { randomBytes } from 'crypto';
 import { checkForUpdates, getUpdateState, installUpdate, startUpdateChecks } from './updater';
 import {
     discoverSessionFiles,
+    effectiveTokens,
     calculateDetailedStats,
     calculateDailyStats,
     calculateUsageAnalysisStats,
@@ -626,7 +627,8 @@ async function buildDetailedSessionFiles(sessionFiles: { file: string; size: num
         return {
             ...f,
             interactions: data?.interactions ?? 0,
-            tokens: data ? data.tokens : undefined,
+            // Same choice the stats make: the actual count when the session has one.
+            tokens: data ? effectiveTokens(data) : undefined,
             modelUsage,
             // Adapters that know the session title provide it; otherwise name an
             // active session after its file so it is not labelled "(Empty session)".
