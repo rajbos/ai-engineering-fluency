@@ -11,6 +11,7 @@ import {
     buildChartPayload,
     getDiagnosticPaths,
     getSessionBackingPath,
+    getSessionLastActivity,
     getSessionMeta,
     processSessionFile,
     loadCache,
@@ -589,20 +590,23 @@ async function buildDetailedSessionFiles(sessionFiles: { file: string; size: num
     // each session's own last activity. Virtual (DB-backed) sessions skip it:
     // SQLite can hold recent writes in its WAL while the .db file's mtime stays
     // old, so the mtime says nothing about a session's recency.
-    const cutoffDay = toLocalDayKey(new Date(cutoff));
-    // Stage 1 — pick the newest sessions from cheap data only. The parser result
-    // is cached from the startup walk; its per-day activity map gives a last
-    // activity day for virtual sessions, whose database mtime says nothing.
+    // Stage 1 — pick the newest sessions from cheap signals only: the file's
+    // mtime, or for virtual (DB-backed) sessions the adapter's single-row
+    // last-activity lookup, since the database mtime says nothing about one
+    // session. A virtual session whose adapter cannot answer falls back to the
+    // full metadata read rather than to the mtime, so it is never dropped
+    // unseen. The parser result is cached from the startup walk.
     const preselected = await runWithConcurrency(sessionFiles, async (f) => {
         const virtual = getSessionBackingPath(f.file) !== f.file;
-        if (!virtual && Date.parse(f.modified) < cutoff) { return undefined; }
-        const data = await processSessionFile(f.file).catch(() => null);
         let activity = f.modified;
         if (virtual) {
-            const lastDay = Object.keys(data?.dailyFractions ?? {}).sort().at(-1);
-            if (!lastDay || lastDay < cutoffDay) { return undefined; }
-            activity = `${lastDay}T23:59:59.999`; // day-granular: sorts with, not above, same-day files
+            const last = await getSessionLastActivity(f.file)
+                ?? await getSessionMeta(f.file).then(m => (m?.lastInteraction ? new Date(m.lastInteraction) : null));
+            if (!last) { return undefined; }
+            activity = last.toISOString();
         }
+        if (Date.parse(activity) < cutoff) { return undefined; }
+        const data = await processSessionFile(f.file).catch(() => null);
         return { f, data, activity };
     });
     const selected = preselected

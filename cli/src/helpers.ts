@@ -232,6 +232,20 @@ export async function getSessionMeta(filePath: string): Promise<SessionMeta | nu
 }
 
 /**
+ * Cheap per-session last-activity time from the owning adapter, or null when the
+ * adapter has no such lookup (then the file's own mtime is the right signal).
+ */
+export async function getSessionLastActivity(filePath: string): Promise<Date | null> {
+	const eco = getEcosystems().find(e => e.handles(filePath));
+	if (!eco?.getLastActivity) { return null; }
+	try {
+		return await eco.getLastActivity(filePath);
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Stat a session file, handling DB virtual paths (OpenCode and Crush).
  * Virtual DB paths are resolved to the actual DB file.
  */
