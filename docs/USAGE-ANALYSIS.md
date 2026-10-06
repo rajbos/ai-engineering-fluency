@@ -109,7 +109,7 @@ The **Tools** tab includes a curation analysis section that compares the tools a
 - **Disable MCP server** — shown when no tools from an MCP server were called in the window, with an estimated token saving
 - **Refine skill** — shown when a skill file was never invoked in the window
 
-The look-back window is configurable via **`aiEngineeringFluency.curation.timeWindowDays`** (7 / 30 / 90 days).
+The look-back window is configurable via **`aiEngineeringFluency.curation.timeWindowDays`** (7 / 30 / 90 days). The MCP Servers, Built-in VS Code Tools and Unused Skills lists are sortable and page ten rows at a time; the MCP usage filter is applied before paging. See [Tool Curation](features/TOOL-CURATION.md#browsing-the-tables) for details.
 
 See [features/TOOL-CURATION.md](features/TOOL-CURATION.md) for the full reference.
 

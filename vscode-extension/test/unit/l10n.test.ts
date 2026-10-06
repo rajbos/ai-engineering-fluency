@@ -43,6 +43,88 @@ test('l10n: resolves zh-cn strings when the display language is zh-cn', () => {
 	mock.setLanguage('en');
 });
 
+test('l10n: paged curation table controls resolve in English and zh-cn', () => {
+	assert.equal(t('usage.pagedTable.previous'), 'Previous');
+	assert.equal(t('usage.pagedTable.next'), 'Next');
+	assert.equal(t('usage.pagedTable.page', 2, 3, 11, 20, 25), 'Page 2 of 3 · Showing 11–20 of 25');
+	assert.equal(t('usage.pagedTable.showing', 1, 10, 10), 'Showing 1–10 of 10');
+	assert.equal(t('usage.pagedTable.sortBy', 'Server'), 'Sort by Server');
+	assert.equal(t('usage.pagedTable.sortedAscending'), 'Sorted ascending');
+	assert.equal(t('usage.pagedTable.sortedDescending'), 'Sorted descending');
+	assert.equal(t('usage.pagedTable.noRows'), 'No rows to display.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.pagedTable.previous'), '上一页');
+		assert.equal(t('usage.pagedTable.page', 2, 3, 11, 20, 25), '第 2/3 页 · 显示 11–20 条，共 25 条');
+		assert.equal(t('usage.pagedTable.sortBy', 'Server'), '按Server排序');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
+test('l10n: tool curation UI strings resolve in English and zh-cn', () => {
+	const translations: Array<[string, string, string]> = [
+		['usage.toolCuration.column.server', 'Server', '服务器'],
+		['usage.toolCuration.column.source', 'Source', '来源'],
+		['usage.toolCuration.column.available', 'Tools Available', '可用工具'],
+		['usage.toolCuration.column.used', 'Tools Used', '已使用工具'],
+		['usage.toolCuration.column.overhead', 'Est. Overhead', '估算开销'],
+		['usage.toolCuration.column.action', 'Action', '操作'],
+		['usage.toolCuration.column.skill', 'Skill', '技能'],
+		['usage.toolCuration.column.description', 'Description', '描述'],
+		['usage.toolCuration.column.view', 'View', '查看'],
+		['usage.toolCuration.column.tool', 'Tool', '工具'],
+		['usage.toolCuration.aria.mcp', 'MCP servers', 'MCP 服务器'],
+		['usage.toolCuration.aria.skills', 'Unused skills', '未使用的技能'],
+		['usage.toolCuration.aria.builtin', 'Built-in VS Code tools', '内置 VS Code 工具'],
+		['usage.toolCuration.source.plugin', 'Plugin: {0}', '插件：{0}'],
+		['usage.toolCuration.source.workspaceGithub', 'Workspace (.github)', '工作区 (.github)'],
+		['usage.toolCuration.source.workspaceClaude', 'Workspace (.claude)', '工作区 (.claude)'],
+		['usage.toolCuration.source.workspaceAgents', 'Workspace (.agents)', '工作区 (.agents)'],
+		['usage.toolCuration.source.user', 'User (~)', '用户 (~)'],
+		['usage.toolCuration.source.extension', 'Extension', '扩展'],
+		['usage.toolCuration.source.settings', 'Settings', '设置'],
+		['usage.toolCuration.source.workspace', 'Workspace', '工作区'],
+		['usage.toolCuration.source.workspaceVisualStudio', 'Workspace (VS)', '工作区 (VS)'],
+		['usage.toolCuration.source.workspaceCursor', 'Workspace (Cursor)', '工作区 (Cursor)'],
+		['usage.toolCuration.source.configFile', 'Config file', '配置文件'],
+		['usage.toolCuration.action.open', 'open', '打开'],
+		['usage.toolCuration.action.openFileTitle', 'Open {0}', '打开 {0}'],
+		['usage.toolCuration.action.openExtensionsFor', 'Open Extensions view for {0}', '打开适用于 {0} 的扩展视图'],
+		['usage.toolCuration.action.browseMcp', 'Browse MCP extensions in the marketplace', '在市场中浏览 MCP 扩展'],
+		['usage.toolCuration.action.manageExtensionTitle', 'Open the Extensions view for {0} (disable or uninstall to reclaim prompt budget)', '打开 {0} 的扩展视图（禁用或卸载以回收提示词预算）'],
+		['usage.toolCuration.action.manageExtension', 'Manage Extension', '管理扩展'],
+		['usage.toolCuration.action.openToolPickerTitle', 'Open VS Code tool selection menu', '打开 VS Code 工具选择菜单'],
+		['usage.toolCuration.action.changeTools', 'Change Tools', '更改工具'],
+		['usage.toolCuration.action.definedInFiles', 'Defined in {0} config files', '定义于 {0} 个配置文件'],
+		['usage.toolCuration.action.managePluginsTitle', 'Open Extensions view filtered to agent plugins', '打开按智能体插件筛选的扩展视图'],
+		['usage.toolCuration.action.manage', 'manage', '管理'],
+		['usage.toolCuration.action.viewSkill', 'View skill', '查看技能'],
+		['usage.toolCuration.status.notConnected', 'not connected', '未连接'],
+		['usage.toolCuration.summary.mcp', '🔌 MCP Servers in Last {0} Days ({1})', '🔌 MCP 服务器（最近 {0} 天）（{1}）'],
+		['usage.toolCuration.filter.hideServersWithUsage', 'Hide servers with usage', '隐藏有使用记录的服务器'],
+		['usage.toolCuration.summary.mcpCounts', '{0} with no usage · {1} with usage', '{0} 个无使用记录 · {1} 个有使用记录'],
+		['usage.toolCuration.help.mcp', '💡 Open {0} to disable file-configured servers, or use <em>{1}</em> to disable or uninstall an MCP-providing extension. (VS Code does not expose per-server picker state to extensions, so servers you disabled in the chat tool picker may still appear here.)', '💡 打开 {0} 以禁用由文件配置的服务器，或使用 <em>{1}</em> 禁用或卸载提供 MCP 的扩展。（VS Code 不会向扩展公开每个服务器的工具选择器状态，因此你在聊天工具选择器中禁用的服务器仍可能显示在此处。）'],
+		['usage.toolCuration.summary.unusedSkills', '📚 Unused Skills ({0})', '📚 未使用的技能（{0}）'],
+		['usage.toolCuration.help.unusedSkills', '💡 Est. overhead is per agent interaction. For plugin skills, click <em>{0}</em> to open the agent plugins view where you can uninstall the plugin. For workspace skills, update the description or remove the SKILL.md.', '💡 估算开销按每次智能体交互计算。对于插件技能，点击 <em>{0}</em> 打开智能体插件视图并卸载插件。对于工作区技能，请更新说明或移除 SKILL.md。'],
+		['usage.toolCuration.summary.builtin', '🔧 Built-in VS Code Tools ({0}) — {1} tokens overhead, not actionable', '🔧 内置 VS Code 工具（{0}）— {1} 个令牌开销，不可操作'],
+		['usage.toolCuration.help.builtin', '💡 These tools are provided by VS Code itself and cannot be disabled. They are excluded from the actionable overhead total above.', '💡 这些工具由 VS Code 自身提供，无法禁用。它们不计入上方可操作的开销总量。'],
+	];
+	for (const [key, english, chinese] of translations) {
+		assert.equal(t(key), english, `${key} English`);
+	}
+	mock.setLanguage('zh-cn');
+	try {
+		for (const [key, , chinese] of translations) {
+			assert.equal(t(key), chinese, `${key} zh-cn`);
+		}
+		assert.equal(t('usage.toolCuration.source.plugin', 'demo'), '插件：demo');
+		assert.equal(t('usage.toolCuration.summary.mcp', 30, 3), '🔌 MCP 服务器（最近 30 天）（3）');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
+
 test('l10n: AI Readiness command and navigation labels resolve in both languages', () => {
 	assert.equal(t('command.showReadiness.title'), 'Show AI Readiness');
 	assert.equal(t('nav.btnReadiness'), 'AI Readiness');
