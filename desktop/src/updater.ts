@@ -28,6 +28,7 @@ interface UpdaterHooks {
 let state: UpdateState = { status: 'idle' };
 let hooks: UpdaterHooks | null = null;
 let manualCheckInFlight = false;
+let checkInFlight = false;
 let listenersRegistered = false;
 let initialCheckTimer: NodeJS.Timeout | null = null;
 let periodicCheckTimer: NodeJS.Timeout | null = null;
@@ -120,6 +121,12 @@ export async function checkForUpdates(manual = false): Promise<void> {
     // tray would lose its "Restart to install" item for an update that is ready.
     if (state.status === 'downloaded') { return; }
 
+    // One check at a time. The periodic timer can fire during a manual check, and
+    // a check that found an update is still downloading it; a second
+    // checkForUpdates() on top of either duplicates events and flaps the state.
+    if (checkInFlight || state.status === 'checking' || state.status === 'downloading') { return; }
+    checkInFlight = true;
+
     registerListeners();
     if (manual) { manualCheckInFlight = true; }
 
@@ -130,6 +137,8 @@ export async function checkForUpdates(manual = false): Promise<void> {
         // (e.g. a missing publish config) only reject this promise — surface those
         // too instead of leaving the tray stuck on "Checking…".
         reportFailure(error);
+    } finally {
+        checkInFlight = false;
     }
 }
 

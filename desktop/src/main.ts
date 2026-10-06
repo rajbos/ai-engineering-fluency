@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Tray, Menu, clipboard, ipcMain, nativeTheme, protocol, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import { randomBytes } from 'crypto';
 import { checkForUpdates, getUpdateState, installUpdate, startUpdateChecks } from './updater';
 import {
     discoverSessionFiles,
@@ -10,6 +11,7 @@ import {
     buildChartPayload,
     getDiagnosticPaths,
     getSessionBackingPath,
+    processSessionFile,
     loadCache,
     saveCache,
 } from '../../cli/src/helpers';
@@ -536,6 +538,49 @@ function buildDiagnosticReport(sessionFileCount: number): string {
     return `AI Engineering Fluency — Desktop Diagnostic Report\n${'='.repeat(50)}\n\nVersion: ${app.getVersion()}\nSession files found: ${sessionFileCount}\nTimestamp: ${new Date().toISOString()}`;
 }
 
+/** Same bounds the extension applies to the Diagnostics session table. */
+const DIAGNOSTICS_SESSION_DAYS = 14;
+const DIAGNOSTICS_SESSION_LIMIT = 500;
+
+/**
+ * Rows for the Diagnostics session table: the newest sessions of the last two
+ * weeks, with the token and interaction counts the CLI's session parser
+ * produces. The parser result is cached from the startup stats walk, so this is
+ * cheap. The table reads every field here while rendering — a missing
+ * `contextReferences` throws and leaves the whole panel blank — so the fields
+ * the desktop cannot fill are set to their explicit "unknown" values, not left out.
+ */
+async function buildDetailedSessionFiles(sessionFiles: { file: string; size: number; modified: string }[]) {
+    const cutoff = Date.now() - DIAGNOSTICS_SESSION_DAYS * 24 * 60 * 60 * 1000;
+    const recent = sessionFiles
+        .filter(f => Date.parse(f.modified) >= cutoff)
+        .sort((a, b) => b.modified.localeCompare(a.modified))
+        .slice(0, DIAGNOSTICS_SESSION_LIMIT);
+    return Promise.all(recent.map(async (f) => {
+        const data = await processSessionFile(f.file).catch(() => null);
+        const modelUsage: { [model: string]: { inputTokens: number; outputTokens: number } } = {};
+        for (const [model, usage] of Object.entries(data?.modelUsage ?? {})) {
+            modelUsage[model] = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
+        }
+        return {
+            ...f,
+            interactions: data?.interactions ?? 0,
+            tokens: data ? data.tokens : undefined,
+            modelUsage,
+            // Session titles come from the extension's own parser; the CLI's does not
+            // extract them. Name the session after its file so a session with real
+            // activity is not labelled "(Empty session)".
+            title: data && data.interactions > 0 ? path.basename(f.file) : undefined,
+            // Context references and first-interaction time are not tracked by the
+            // CLI parser: reported as zero / unknown rather than guessed.
+            contextReferences: createEmptyContextRefs(),
+            firstInteraction: null,
+            lastInteraction: data ? data.lastModified.toISOString() : null,
+            editorSource: data?.editorSource || sessionEditorName(f.file),
+        };
+    }));
+}
+
 async function buildPanelHtml(panel: PanelId): Promise<string> {
     const isDark = nativeTheme.shouldUseDarkColors;
     const themeKind = isDark ? 'vscode-dark' : 'vscode-light';
@@ -616,17 +661,7 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
         const diagData = {
             report: buildDiagnosticReport(files.length),
             sessionFiles,
-            // The session table reads every one of these fields while rendering;
-            // a missing `contextReferences` throws and leaves the whole panel blank.
-            detailedSessionFiles: sessionFiles.map(f => ({
-                ...f,
-                interactions: 0,
-                tokens: undefined,
-                contextReferences: createEmptyContextRefs(),
-                firstInteraction: null,
-                lastInteraction: null,
-                editorSource: sessionEditorName(f.file),
-            })),
+            detailedSessionFiles: await buildDetailedSessionFiles(sessionFiles),
             sessionFolders: [],
             cacheInfo: { size: 0, sizeInMB: 0, lastUpdated: null, location: 'Desktop (in-memory)', storagePath: null },
             backendStorageInfo: null,
@@ -657,6 +692,10 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
         initialDataScript = panelPayloadScript('__INITIAL_FLUENCY_LEVEL_DATA__', fluencyData);
     }
 
+    // Inline scripts run only with this per-page nonce, like the extension's own
+    // webview CSP, so markup that ends up in the page cannot execute as script.
+    const nonce = randomBytes(16).toString('base64');
+
     // Set data-vscode-theme-kind on the body so the existing CSS selectors in theme.css work
     const themeScript = `document.body.setAttribute('data-vscode-theme-kind','${themeKind}');`;
 
@@ -665,15 +704,15 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' app://panel; script-src 'unsafe-inline' app://static; img-src data: app://static blob:; font-src app://panel data:;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' app://panel; script-src 'nonce-${nonce}' app://static; img-src data: app://static blob:; font-src app://panel data:;" />
     <link id="vscode-codicon-stylesheet" rel="stylesheet" href="app://panel/${PANEL_ASSET_PREFIX}codicons/codicon.css" />
     <title>${title}</title>
     <style>${VSCODE_DARK_VARS}${VSCODE_LIGHT_VARS}${BASE_BODY_STYLE}</style>
 </head>
 <body>
     <div id="root"></div>
-    <script>${themeScript}${initialDataScript}${JSON_CONFIG_SCRIPT}</script>
-    <script src="app://static/${scriptFile}"></script>
+    <script nonce="${nonce}">${themeScript}${initialDataScript}${JSON_CONFIG_SCRIPT}</script>
+    <script nonce="${nonce}" src="app://static/${scriptFile}"></script>
 </body>
 </html>`;
 }
@@ -695,12 +734,13 @@ function getLoadingIconDataUri(): string | undefined {
  * the preload, so the shared script works exactly as it does in VS Code.
  */
 function buildLoadingHtml(): string {
+    const nonce = randomBytes(16).toString('base64');
     return `<!DOCTYPE html>
 <html lang="${resolvedLocale(app.getLocale())}">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src data:;" />
     <title>AI Engineering Fluency — Loading</title>
     <style>
 ${VSCODE_DARK_VARS}${VSCODE_LIGHT_VARS}
@@ -708,7 +748,7 @@ ${getLoadingHtmlCssBase()}
 ${getLoadingHtmlCssSteps()}
     </style>
 </head>
-${getLoadingHtmlBody('', getLoadingIconDataUri())}
+${getLoadingHtmlBody(nonce, getLoadingIconDataUri())}
 </html>`;
 }
 
@@ -754,7 +794,14 @@ const STATIC_MIME_TYPES: Record<string, string> = {
  */
 const PANEL_ASSET_PREFIX = 'assets/';
 
-async function serveStaticFile(filename: string): Promise<Response> {
+async function serveStaticFile(encodedFilename: string): Promise<Response> {
+    let filename: string;
+    try {
+        filename = decodeURIComponent(encodedFilename);
+    } catch {
+        // Malformed percent-encoding: an ordinary bad request, not a handler failure.
+        return new Response('Not Found', { status: 404 });
+    }
     const webviewDir = path.resolve(getWebviewDir());
     const filePath = path.resolve(webviewDir, filename);
     // Never serve anything outside the bundled webview directory. Compared as a
@@ -778,7 +825,7 @@ function registerProtocol(): void {
         const url = new URL(request.url);
 
         if (url.host === 'panel' && url.pathname.startsWith('/' + PANEL_ASSET_PREFIX)) {
-            return serveStaticFile(decodeURIComponent(url.pathname.slice(1 + PANEL_ASSET_PREFIX.length)));
+            return serveStaticFile(url.pathname.slice(1 + PANEL_ASSET_PREFIX.length));
         }
 
         if (url.host === 'panel') {
@@ -797,7 +844,7 @@ function registerProtocol(): void {
         }
 
         if (url.host === 'static') {
-            return serveStaticFile(decodeURIComponent(url.pathname.slice(1)));
+            return serveStaticFile(url.pathname.slice(1));
         }
 
         return new Response('Not Found', { status: 404 });

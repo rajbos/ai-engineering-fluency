@@ -145,7 +145,14 @@ jobs:
           $feed = Get-Content release/latest.yml -Raw
           if (-not $feed.Contains($installer)) { throw "release/latest.yml does not reference $installer" }
           New-Item -ItemType Directory -Force release/feed | Out-Null
-          [System.IO.File]::WriteAllText("$PWD/release/feed/latest.yml", $feed.Replace($installer, $downloadUrl))
+          $rewritten = $feed.Replace($installer, $downloadUrl)
+          # The feed release holds nothing but latest.yml, so every file it
+          # references must be an absolute URL into the versioned release. The
+          # .blockmap is not listed here: the updater derives it from the
+          # installer URL. Fail rather than publish a feed with a relative entry.
+          $relative = [regex]::Matches($rewritten, '(?m)^\s*(?:-\s*)?(?:url|path):\s*(?!https://)\S.*$')
+          if ($relative.Count -gt 0) { throw "Update feed still has relative entries: $($relative.Value -join '; ')" }
+          [System.IO.File]::WriteAllText("$PWD/release/feed/latest.yml", $rewritten)
 
           gh release view desktop-latest | Out-Null
           $feedExists = $LASTEXITCODE -eq 0
