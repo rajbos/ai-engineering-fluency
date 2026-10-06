@@ -16,7 +16,7 @@ import {
     loadCache,
     saveCache,
 } from '../../cli/src/helpers';
-import { getEditorSourceFromPath } from '../../cli/src/analysis';
+import { getEditorSourceFromPath, runWithConcurrency } from '../../cli/src/analysis';
 import type { DetailedStats, UsageAnalysisStats } from '../../src/types';
 import { getEnvironmentalMethodologySourceUrl } from '../../src/environmentalImpact';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
@@ -589,13 +589,31 @@ async function buildDetailedSessionFiles(sessionFiles: { file: string; size: num
     // each session's own last activity. Virtual (DB-backed) sessions skip it:
     // SQLite can hold recent writes in its WAL while the .db file's mtime stays
     // old, so the mtime says nothing about a session's recency.
-    const candidates = sessionFiles.filter(f =>
-        getSessionBackingPath(f.file) !== f.file || Date.parse(f.modified) >= cutoff);
-    const rows = await Promise.all(candidates.map(async (f) => {
-        const [data, meta] = await Promise.all([
-            processSessionFile(f.file).catch(() => null),
-            getSessionMeta(f.file),
-        ]);
+    const cutoffDay = toLocalDayKey(new Date(cutoff));
+    // Stage 1 — pick the newest sessions from cheap data only. The parser result
+    // is cached from the startup walk; its per-day activity map gives a last
+    // activity day for virtual sessions, whose database mtime says nothing.
+    const preselected = await runWithConcurrency(sessionFiles, async (f) => {
+        const virtual = getSessionBackingPath(f.file) !== f.file;
+        if (!virtual && Date.parse(f.modified) < cutoff) { return undefined; }
+        const data = await processSessionFile(f.file).catch(() => null);
+        let activity = f.modified;
+        if (virtual) {
+            const lastDay = Object.keys(data?.dailyFractions ?? {}).sort().at(-1);
+            if (!lastDay || lastDay < cutoffDay) { return undefined; }
+            activity = `${lastDay}T23:59:59.999`; // day-granular: sorts with, not above, same-day files
+        }
+        return { f, data, activity };
+    });
+    const selected = preselected
+        .filter((p): p is NonNullable<typeof p> => p !== undefined)
+        .sort((a, b) => b.activity.localeCompare(a.activity))
+        .slice(0, DIAGNOSTICS_SESSION_LIMIT);
+    // Stage 2 — adapter metadata (title, exact interaction times) for the
+    // selected rows only. getMeta re-reads a session's messages, so this is the
+    // expensive part and runs with bounded concurrency.
+    const rows = await runWithConcurrency(selected, async ({ f, data }) => {
+        const meta = await getSessionMeta(f.file);
         const modelUsage: { [model: string]: { inputTokens: number; outputTokens: number } } = {};
         for (const [model, usage] of Object.entries(data?.modelUsage ?? {})) {
             modelUsage[model] = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
@@ -616,8 +634,9 @@ async function buildDetailedSessionFiles(sessionFiles: { file: string; size: num
             lastInteraction,
             editorSource: data?.editorSource || sessionEditorName(f.file),
         };
-    }));
+    }, 8);
     return rows
+        .filter((r): r is NonNullable<typeof r> => r !== undefined)
         .filter(r => r.lastInteraction !== null && Date.parse(r.lastInteraction) >= cutoff)
         .sort((a, b) => Date.parse(b.lastInteraction!) - Date.parse(a.lastInteraction!))
         .slice(0, DIAGNOSTICS_SESSION_LIMIT);
@@ -700,10 +719,19 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
             }
         }));
         const toolFamilies = getToolFamilies();
+        const detailedSessionFiles = await buildDetailedSessionFiles(sessionFiles);
+        if (detailedSessionFiles.length === 0 && mainWindow && !mainWindow.isDestroyed()) {
+            // The shared view reads an empty initial list as "still loading" and
+            // waits for the host's completion message; without it the Session
+            // Files tab spins forever. Send it once this page has loaded.
+            mainWindow.webContents.once('did-finish-load', () => {
+                sendLoadingMessage({ command: 'sessionFilesLoaded', detailedSessionFiles: [] });
+            });
+        }
         const diagData = {
             report: buildDiagnosticReport(files.length),
             sessionFiles,
-            detailedSessionFiles: await buildDetailedSessionFiles(sessionFiles),
+            detailedSessionFiles,
             sessionFolders: [],
             cacheInfo: { size: 0, sizeInMB: 0, lastUpdated: null, location: 'Desktop (in-memory)', storagePath: null },
             backendStorageInfo: null,
