@@ -63,8 +63,8 @@ git diff --name-only <last-vs-tag>...HEAD -- visualstudio-extension/
 # JetBrains plugin (its own code plus the webview bundles and CLI it packages)
 git diff --name-only <last-jetbrains-tag>...HEAD -- jetbrains-plugin/ vscode-extension/src/webview/ cli/src/ src/
 
-# Desktop app (its own code plus everything it bundles)
-git diff --name-only <last-desktop-tag>...HEAD -- desktop/ vscode-extension/src/webview/ cli/src/ src/
+# Desktop app (its own code plus everything it bundles or imports — see note below)
+git diff --name-only <last-desktop-tag>...HEAD -- desktop/ vscode-extension/src/ cli/src/ src/
 ```
 
 If **no tag** exists, use:
@@ -79,7 +79,7 @@ Also note: changes to shared `src/` files (e.g. `tokenEstimators.json`, `modelPr
 
 The JetBrains plugin packages the VS Code extension's webview bundles and the CLI binaries (see `jetbrains-publish.yml`), so the same reasoning as for the desktop app below applies to it.
 
-The desktop app ships the VS Code extension's webview bundles and imports the CLI's stats logic and the shared `src/` modules from source, so a change to any of those changes what the desktop app shows. That is why its diff above covers `vscode-extension/src/webview/`, `cli/src/` and `src/` as well as `desktop/`: whenever the VS Code extension is bumped for a webview change, the desktop app normally needs a bump too, or its users stay on the old views.
+The desktop app ships the VS Code extension's webview bundles and imports the CLI's stats logic and the shared `src/` modules from source, so a change to any of those changes what the desktop app shows. It also imports non-webview extension modules directly (`desktop/src/main.ts` pulls in `toolFamilies.ts`, `loadingHtml.ts`, `editorIcons.ts`, `webviewLocalization.ts`, `l10nCore.ts` from `vscode-extension/src/`), which is why its diff above covers all of `vscode-extension/src/` rather than only `webview/` — that over-reports slightly (an `extension.ts`-only change is a false positive), but a missed input ships stale code, which is worse. Whenever the VS Code extension is bumped for a webview change, the desktop app normally needs a bump too, or its users stay on the old views.
 
 If no `desktop/v` tag exists yet, the desktop app has never been released: release the version already in `desktop/package.json` as-is (do not bump it), and list it in the plan as a first release.
 
