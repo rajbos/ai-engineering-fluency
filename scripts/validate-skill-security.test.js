@@ -97,7 +97,7 @@ test('fails an entry that names a skill directory that does not exist', () => {
 test('fails an entry that names a plain file rather than a skill directory', () => {
 	withSkillsDir({}, classification({ 'README.md': exempt }), (dir) => {
 		fs.writeFileSync(path.join(dir, 'README.md'), 'x');
-		assert.match(validateSkillSecurity(dir).join('\n'), /README\.md: .*does not exist/);
+		assert.match(validateSkillSecurity(dir).join('\n'), /README\.md: .*exists but is not a directory/);
 	});
 });
 
