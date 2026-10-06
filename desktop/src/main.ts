@@ -438,6 +438,9 @@ function expireCachesOnDateChange(): void {
         cachedStats = null;
         cachedUsageStats = null;
         cachedChartPayload = null;
+        // A calculation that started yesterday must not cache yesterday's
+        // totals under today's day: make its generation check fail so it retries.
+        dataGeneration++;
     }
     cachedDataDay = today;
 }
@@ -493,7 +496,10 @@ async function refreshStats(): Promise<void> {
         dataGeneration++;
         cachedSessionFiles = files;
         cachedStats = stats;
-        cachedDataDay = toLocalDayKey(new Date());
+        // The day these stats describe is the one their period boundaries were
+        // built from, not the day the refresh finished — they can differ when a
+        // refresh spans midnight, and the next read must then expire them.
+        cachedDataDay = toLocalDayKey(stats.lastUpdated);
         cachedUsageStats = null; // reset so it recomputes on next access
         cachedChartPayload = null;
         await saveCache();
@@ -578,11 +584,13 @@ const DIAGNOSTICS_SESSION_LIMIT = 500;
  */
 async function buildDetailedSessionFiles(sessionFiles: { file: string; size: number; modified: string }[]) {
     const cutoff = Date.now() - DIAGNOSTICS_SESSION_DAYS * 24 * 60 * 60 * 1000;
-    // `modified` is the backing file's mtime. For DB-backed editors that file
-    // holds many sessions, so this is only a superset of the recent ones; the
-    // real filter below uses each session's own last activity. The pre-filter
-    // keeps the per-session parsing bounded on large histories.
-    const candidates = sessionFiles.filter(f => Date.parse(f.modified) >= cutoff);
+    // `modified` is the backing file's mtime. It is only a pre-filter that keeps
+    // per-session parsing bounded on large histories; the real filter below uses
+    // each session's own last activity. Virtual (DB-backed) sessions skip it:
+    // SQLite can hold recent writes in its WAL while the .db file's mtime stays
+    // old, so the mtime says nothing about a session's recency.
+    const candidates = sessionFiles.filter(f =>
+        getSessionBackingPath(f.file) !== f.file || Date.parse(f.modified) >= cutoff);
     const rows = await Promise.all(candidates.map(async (f) => {
         const [data, meta] = await Promise.all([
             processSessionFile(f.file).catch(() => null),
