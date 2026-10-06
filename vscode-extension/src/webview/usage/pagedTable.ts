@@ -178,9 +178,9 @@ export function renderPagedTable<Row>(options: RenderPagedTableOptions<Row>): st
 		: '';
 	const pager = page.pageCount > 1
 		? `<nav class="paged-table-pager" aria-label="${escapeHtml(options.ariaLabel)}" style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:8px;font-size:11px;color:var(--text-secondary);">
-			<button type="button" data-paged-table="${escapeHtml(options.tableId)}" data-paged-page="${page.page - 1}"${page.page <= 1 ? ' disabled' : ''} style="background:var(--button-secondaryBackground);color:var(--button-secondaryForeground);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.previous'))}</button>
+			<button type="button" data-paged-table="${escapeHtml(options.tableId)}" data-paged-page="${page.page - 1}"${page.page <= 1 ? ' disabled' : ''} style="background:var(--button-secondary-bg);color:var(--button-secondary-fg);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.previous'))}</button>
 			<span>${escapeHtml(localizeFormat('usage.pagedTable.page', page.page, page.pageCount, page.firstRow, page.lastRow, page.filteredCount))}</span>
-			<button type="button" data-paged-table="${escapeHtml(options.tableId)}" data-paged-page="${page.page + 1}"${page.page >= page.pageCount ? ' disabled' : ''} style="background:var(--button-secondaryBackground);color:var(--button-secondaryForeground);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.next'))}</button>
+			<button type="button" data-paged-table="${escapeHtml(options.tableId)}" data-paged-page="${page.page + 1}"${page.page >= page.pageCount ? ' disabled' : ''} style="background:var(--button-secondary-bg);color:var(--button-secondary-fg);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.next'))}</button>
 		</nav>`
 		: summary;
 	return `<div id="paged-table-root-${escapeHtml(options.tableId)}" class="paged-table-root">

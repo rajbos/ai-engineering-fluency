@@ -65,6 +65,9 @@ test('pagedTable: slices empty, one-row, full, and multi-page tables at ten rows
 			emptyMessage: 'Empty',
 		});
 		assert.equal(html.includes('paged-table-pager'), length > 10);
+		if (length > 10) {
+			assert.equal((html.match(/background:var\(--button-secondary-bg\);color:var\(--button-secondary-fg\)/g) ?? []).length, 2);
+		}
 	}
 });
 

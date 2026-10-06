@@ -525,6 +525,23 @@ body {
 	font-size: 11px;
 }
 
+.paged-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.paged-table thead th {
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.paged-table-truncate {
+	display: block;
+	max-width: 320px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .model-leaderboard-table-wrap {
 	overflow-x: auto;
 	border: 1px solid var(--border-color);
