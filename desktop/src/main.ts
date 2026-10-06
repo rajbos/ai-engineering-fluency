@@ -11,6 +11,7 @@ import {
     buildChartPayload,
     getDiagnosticPaths,
     getSessionBackingPath,
+    getSessionMeta,
     processSessionFile,
     loadCache,
     saveCache,
@@ -19,6 +20,7 @@ import { getEditorSourceFromPath } from '../../cli/src/analysis';
 import type { DetailedStats, UsageAnalysisStats } from '../../src/types';
 import { getEnvironmentalMethodologySourceUrl } from '../../src/environmentalImpact';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
+import { toLocalDayKey } from '../../src/utils/dayKeys';
 import {
     calculateMaturityScores,
     getFluencyLevelData,
@@ -73,6 +75,10 @@ let cachedStats: DetailedStats | null = null;
 let cachedSessionFiles: string[] | null = null;
 let cachedUsageStats: UsageAnalysisStats | null = null;
 let cachedChartPayload: object | null = null;
+// Local day the cached stats, usage and chart data were computed for. All three
+// have "today" / "this month" windows baked in, so a tray app left running
+// overnight must rebuild them rather than keep showing yesterday as today.
+let cachedDataDay = '';
 let isRefreshing = false;
 // Bumped whenever a refresh replaces the session-file list. A computation that
 // started against an older list must not cache its result over the newer data.
@@ -368,6 +374,7 @@ function getStats(): Promise<DetailedStats> {
 }
 
 async function loadStats(): Promise<DetailedStats> {
+    expireCachesOnDateChange();
     while (!cachedStats) {
         sendLoadingMessage({ command: 'loadingStep', step: 'discovering' });
         await computeForCurrentFiles(
@@ -384,6 +391,7 @@ function getUsageStats(): Promise<UsageAnalysisStats> {
 }
 
 async function loadUsageStats(): Promise<UsageAnalysisStats> {
+    expireCachesOnDateChange();
     // Loops because a refresh can clear the cache again between the commit and
     // this function resuming; the next pass then computes against the new data.
     while (!cachedUsageStats) {
@@ -405,6 +413,7 @@ function getChartPayload(): Promise<object> {
 }
 
 async function loadChartPayload(): Promise<object> {
+    expireCachesOnDateChange();
     while (!cachedChartPayload) {
         await computeForCurrentFiles(
             async (files) => {
@@ -418,7 +427,23 @@ async function loadChartPayload(): Promise<object> {
 }
 
 /** Whether a panel can render straight away, i.e. without a long computation first. */
+/**
+ * Drops the day-scoped caches when the local date has changed since they were
+ * built. Called before every read, so the next getter recomputes.
+ */
+function expireCachesOnDateChange(): void {
+    const today = toLocalDayKey(new Date());
+    if (cachedDataDay === today) { return; }
+    if (cachedDataDay !== '') {
+        cachedStats = null;
+        cachedUsageStats = null;
+        cachedChartPayload = null;
+    }
+    cachedDataDay = today;
+}
+
 function isPanelDataReady(panel: PanelId): boolean {
+    expireCachesOnDateChange();
     switch (panel) {
         case 'details':
         case 'environmental':
@@ -468,6 +493,7 @@ async function refreshStats(): Promise<void> {
         dataGeneration++;
         cachedSessionFiles = files;
         cachedStats = stats;
+        cachedDataDay = toLocalDayKey(new Date());
         cachedUsageStats = null; // reset so it recomputes on next access
         cachedChartPayload = null;
         await saveCache();
@@ -552,33 +578,41 @@ const DIAGNOSTICS_SESSION_LIMIT = 500;
  */
 async function buildDetailedSessionFiles(sessionFiles: { file: string; size: number; modified: string }[]) {
     const cutoff = Date.now() - DIAGNOSTICS_SESSION_DAYS * 24 * 60 * 60 * 1000;
-    const recent = sessionFiles
-        .filter(f => Date.parse(f.modified) >= cutoff)
-        .sort((a, b) => b.modified.localeCompare(a.modified))
-        .slice(0, DIAGNOSTICS_SESSION_LIMIT);
-    return Promise.all(recent.map(async (f) => {
-        const data = await processSessionFile(f.file).catch(() => null);
+    // `modified` is the backing file's mtime. For DB-backed editors that file
+    // holds many sessions, so this is only a superset of the recent ones; the
+    // real filter below uses each session's own last activity. The pre-filter
+    // keeps the per-session parsing bounded on large histories.
+    const candidates = sessionFiles.filter(f => Date.parse(f.modified) >= cutoff);
+    const rows = await Promise.all(candidates.map(async (f) => {
+        const [data, meta] = await Promise.all([
+            processSessionFile(f.file).catch(() => null),
+            getSessionMeta(f.file),
+        ]);
         const modelUsage: { [model: string]: { inputTokens: number; outputTokens: number } } = {};
         for (const [model, usage] of Object.entries(data?.modelUsage ?? {})) {
             modelUsage[model] = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
         }
+        const lastInteraction = meta?.lastInteraction ?? (data ? data.lastModified.toISOString() : null);
         return {
             ...f,
             interactions: data?.interactions ?? 0,
             tokens: data ? data.tokens : undefined,
             modelUsage,
-            // Session titles come from the extension's own parser; the CLI's does not
-            // extract them. Name the session after its file so a session with real
-            // activity is not labelled "(Empty session)".
-            title: data && data.interactions > 0 ? path.basename(f.file) : undefined,
-            // Context references and first-interaction time are not tracked by the
-            // CLI parser: reported as zero / unknown rather than guessed.
+            // Adapters that know the session title provide it; otherwise name an
+            // active session after its file so it is not labelled "(Empty session)".
+            title: meta?.title || (data && data.interactions > 0 ? path.basename(f.file) : undefined),
+            repository: meta?.workspacePath,
+            // Context references are not tracked by the CLI parser: zero, not guessed.
             contextReferences: createEmptyContextRefs(),
-            firstInteraction: null,
-            lastInteraction: data ? data.lastModified.toISOString() : null,
+            firstInteraction: meta?.firstInteraction ?? null,
+            lastInteraction,
             editorSource: data?.editorSource || sessionEditorName(f.file),
         };
     }));
+    return rows
+        .filter(r => r.lastInteraction !== null && Date.parse(r.lastInteraction) >= cutoff)
+        .sort((a, b) => Date.parse(b.lastInteraction!) - Date.parse(a.lastInteraction!))
+        .slice(0, DIAGNOSTICS_SESSION_LIMIT);
 }
 
 async function buildPanelHtml(panel: PanelId): Promise<string> {
