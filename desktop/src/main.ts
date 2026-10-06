@@ -596,7 +596,7 @@ async function buildDetailedSessionFiles(sessionFiles: { file: string; size: num
     // last-activity lookup, since the database mtime says nothing about one
     // session. A virtual session whose adapter cannot answer falls back to the
     // full metadata read rather than to the mtime, so it is never dropped
-    // unseen. The parser result is cached from the startup walk.
+    // unseen. Nothing is parsed here: only the path and the timestamp are needed.
     const preselected = await runWithConcurrency(sessionFiles, async (f) => {
         const virtual = getSessionBackingPath(f.file) !== f.file;
         let activity = f.modified;
@@ -607,18 +607,20 @@ async function buildDetailedSessionFiles(sessionFiles: { file: string; size: num
             activity = last.toISOString();
         }
         if (Date.parse(activity) < cutoff) { return undefined; }
-        const data = await processSessionFile(f.file).catch(() => null);
-        return { f, data, activity };
+        return { f, activity };
     });
     const selected = preselected
         .filter((p): p is NonNullable<typeof p> => p !== undefined)
         .sort((a, b) => b.activity.localeCompare(a.activity))
         .slice(0, DIAGNOSTICS_SESSION_LIMIT);
-    // Stage 2 — adapter metadata (title, exact interaction times) for the
-    // selected rows only. getMeta re-reads a session's messages, so this is the
-    // expensive part and runs with bounded concurrency.
-    const rows = await runWithConcurrency(selected, async ({ f, data }) => {
-        const meta = await getSessionMeta(f.file);
+    // Stage 2 — parse and read adapter metadata (title, exact interaction
+    // times) for the selected rows only. Both can read a session's messages,
+    // so this is the expensive part and runs with bounded concurrency.
+    const rows = await runWithConcurrency(selected, async ({ f }) => {
+        const [data, meta] = await Promise.all([
+            processSessionFile(f.file).catch(() => null),
+            getSessionMeta(f.file),
+        ]);
         const modelUsage: { [model: string]: { inputTokens: number; outputTokens: number } } = {};
         for (const [model, usage] of Object.entries(data?.modelUsage ?? {})) {
             modelUsage[model] = { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens };
