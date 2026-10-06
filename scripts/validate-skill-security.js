@@ -92,6 +92,16 @@ function parseSections(markdown) {
 	return sections;
 }
 
+/** Removes HTML comments, repeating until none remain so nested markers such as `<!<!---->--` cannot survive. */
+function stripHtmlComments(text) {
+	let previous;
+	do {
+		previous = text;
+		text = text.replace(/<!--[\s\S]*?-->/g, '');
+	} while (text !== previous);
+	return text;
+}
+
 function validateSecurityMd(skill, content) {
 	const errors = [];
 	const sections = parseSections(content);
@@ -99,7 +109,7 @@ function validateSecurityMd(skill, content) {
 		const body = sections.get(heading.toLowerCase());
 		if (body === undefined) {
 			errors.push(`${skill}: SECURITY.md is missing the required heading "## ${heading}"`);
-		} else if (body.replace(/<!--[\s\S]*?-->/g, '').trim() === '') {
+		} else if (stripHtmlComments(body).trim() === '') {
 			errors.push(`${skill}: SECURITY.md section "## ${heading}" is empty (write "None." if it genuinely does not apply)`);
 		}
 	}
