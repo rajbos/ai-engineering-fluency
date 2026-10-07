@@ -65,7 +65,7 @@ go to an *unattributed* bucket whose size is shown. A second pass groups this mo
 all of last month, overall and per repository, for the trend.
 
 - **Agentic session:** any agent, custom-agent or CLI-agent interaction, on every CLI surface (terminal, the Copilot desktop app, Claude Desktop, Claude in an IDE).
-- **Delegation session:** task category `Delegation`, or at least one sub-agent call.
+- **Delegation session:** at least one turn classified `Delegation` (not only the primary category), or at least one sub-agent call.
 
 ### Not included: an adoption × foundations score
 

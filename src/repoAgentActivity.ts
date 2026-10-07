@@ -80,10 +80,12 @@ export function isAgenticSession(analysis: SessionUsageAnalysis | undefined): bo
 	return !!modes && (modes.agent + modes.customAgent + cliTotal(modes)) > 0;
 }
 
-/** True when the session handed work to another agent. */
+/** True when the session handed work to another agent: a sub-agent call or any Delegation turn. */
 export function isDelegationSession(input: ActivitySessionInput): boolean {
+	const classification = input.usageAnalysis?.taskClassification;
 	return (input.subAgentCalls ?? 0) > 0
-		|| input.usageAnalysis?.taskClassification?.primaryCategory === 'Delegation';
+		|| classification?.primaryCategory === 'Delegation'
+		|| (classification?.turnCategories?.includes('Delegation') ?? false);
 }
 
 /** Add one session to a running total. */

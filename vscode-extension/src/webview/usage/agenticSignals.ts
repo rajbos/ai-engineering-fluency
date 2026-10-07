@@ -177,15 +177,24 @@ export function buildCohortComparisonHtml(report: RepoAgentActivityReport): stri
 export function buildCorrectionsRepoSummaryHtml(report: RepoAgentActivityReport | null | undefined): string {
 	if (!report) { return ''; }
 	const rows = summaryRows(report);
-	if (rows.length === 0) { return ''; }
 	const unattributed = report.unattributed.sessions > 0
 		? `<div class="agentic-muted" style="margin-top:6px;">${escapeHtml(localizeFormat(
 			'agentic.repoSummary.unattributed', report.unattributed.sessions, report.totals.sessions,
 		))}</div>`
 		: '';
+	if (rows.length === 0 && !unattributed) { return ''; }
+	const heading = `<div class="section-subtitle" style="margin-top:4px;"><strong>${escapeHtml(localize('agentic.repoSummary.title'))}</strong> —
+			${escapeHtml(localizeFormat('agentic.repoSummary.subtitle', report.windowDays))}</div>`;
+	// No repository to show a rate for, but sessions were left out: say how many, so an empty
+	// table is not read as "no data".
+	if (rows.length === 0) {
+		return `<div class="agentic-repo-summary" id="corrections-repo-summary">
+		${heading}
+		${unattributed}
+	</div>`;
+	}
 	return `<div class="agentic-repo-summary" id="corrections-repo-summary">
-		<div class="section-subtitle" style="margin-top:4px;"><strong>${escapeHtml(localize('agentic.repoSummary.title'))}</strong> —
-			${escapeHtml(localizeFormat('agentic.repoSummary.subtitle', report.windowDays))}</div>
+		${heading}
 		<div class="customization-matrix-container" style="margin-top:8px;">
 			<table class="customization-matrix agentic-table">
 				<thead><tr>

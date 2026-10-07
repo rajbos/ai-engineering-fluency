@@ -10,6 +10,7 @@ import {
 	makeLivePanelSink,
 	mergeDailyStatsIntoFullYear,
 	planEfficiencyRebuild,
+	readinessPrStatsKey,
 	webviewDocumentLanguage,
 	type PostablePanel,
 } from '../../src/extension';
@@ -1210,7 +1211,7 @@ test('wiring: insights are re-evaluated when the PR snapshot or a readiness resc
 		'a readiness rescan must re-evaluate insights after storing it',
 	);
 	// readinessForInsights() runs inside buildCurrentInsights(), so re-evaluating from there would recurse.
-	assert.ok(!methodBody('private readinessForInsights(').includes('republishInsights'));
+	assert.ok(!readinessForInsightsBody().includes('republishInsights'));
 });
 
 test('wiring: per-repository instruction files are joined after the queued scans run and before dedup', () => {
@@ -1226,3 +1227,38 @@ test('wiring: per-repository instruction files are joined after the queued scans
 	assert.ok(resolved < joined, 'the activity report must read resolved scans');
 	assert.ok(joined < deduped, 'the activity report must read the cache before the dedup prunes it');
 });
+
+test('readinessPrStatsKey: changes on a refetch or sign-out, not on a republish of the same snapshot', () => {
+	const snapshot = { authenticated: true, since: '2026-09-01', fetchedAt: '2026-10-07T10:00:00Z', repos: [{}, {}] as never[] };
+	const key = readinessPrStatsKey(snapshot);
+	assert.equal(readinessPrStatsKey({ ...snapshot, repos: [...snapshot.repos] }), key, 'the same snapshot served again keeps its key');
+	assert.notEqual(readinessPrStatsKey({ ...snapshot, fetchedAt: '2026-10-07T11:00:00Z' }), key, 'a refetch');
+	assert.notEqual(readinessPrStatsKey({ ...snapshot, authenticated: false, repos: [] }), key, 'a sign-out');
+	assert.notEqual(readinessPrStatsKey(undefined), key, 'no snapshot yet');
+});
+
+test('wiring: a cached readiness scan is reused only for the PR snapshot it was built from', () => {
+	// The scan reads agent-authored PRs from the PR snapshot, so a scan cached before the snapshot
+	// arrived (or before a sign-out) would keep the review-control insights stale for up to an hour.
+	assert.ok(methodBody('private rememberReadinessScan(').includes('prStatsKey: readinessPrStatsKey(this._lastRepoPrStats)'));
+	assert.ok(
+		readinessForInsightsBody().includes('cached.prStatsKey === readinessPrStatsKey(this._lastRepoPrStats)'),
+		'the insight path must reject a scan built from a different PR snapshot',
+	);
+});
+
+/**
+ * `readinessForInsights()` returns an object type, so `methodBody()` — which starts at the first
+ * `{` after the marker — would stop at the end of that type instead of the method. Start from the
+ * body's own opening brace instead.
+ */
+function readinessForInsightsBody(): string {
+	const start = EXTENSION_SRC.indexOf('private readinessForInsights(');
+	assert.notEqual(start, -1);
+	const body = EXTENSION_SRC.indexOf(' | null {', start);
+	assert.notEqual(body, -1);
+	const end = EXTENSION_SRC.indexOf('\n\t}\n', body);
+	const text = EXTENSION_SRC.slice(start, end);
+	assert.ok(text.includes('this.runDarkFactoryScan()'), 'the slice must cover the method body');
+	return text;
+}

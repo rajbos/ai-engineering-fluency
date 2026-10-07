@@ -130,3 +130,13 @@ test('buildCorrectionsRepoSummaryHtml: every repository with turn detail gets a 
 	for (let i = 0; i < 20; i++) { assert.match(html, new RegExp(`<td>o/r${i}[ <]`), `o/r${i}`); }
 	assert.ok(!html.includes('o/no-detail'), 'repositories without turn detail have no rates to show');
 });
+
+test('buildCorrectionsRepoSummaryHtml: shows the unattributed count when no repository has a row', () => {
+	const report = activityReport([], { unattributed: totals({ sessions: 4 }) });
+	report.totals.sessions = 4;
+	const html = buildCorrectionsRepoSummaryHtml(report);
+	assert.match(html, /id="corrections-repo-summary"/);
+	assert.match(html, /4 of 4 sessions/);
+	assert.doesNotMatch(html, /<table/, 'no table without repository rows');
+	assert.equal(buildCorrectionsRepoSummaryHtml(activityReport([])), '', 'nothing to show at all');
+});

@@ -590,6 +590,16 @@ export async function retrySubmoduleWorktreeRemovalWithConfirmation(
 export type ComputedStatsKey = 'detailed' | 'daily' | 'fullDaily' | 'usage' | 'sessionInputs' | 'memoryFiles';
 
 /**
+ * Identifies the PR snapshot a readiness scan was built from. It changes when the snapshot is
+ * refetched or the user signs out, and stays the same when an unchanged snapshot is published
+ * again (opening the Repos tab re-serves it), so republishing never forces a rescan.
+ */
+export function readinessPrStatsKey(stats: Pick<RepoPrStatsResult, 'authenticated' | 'since' | 'fetchedAt' | 'repos'> | undefined): string {
+	if (!stats) { return 'none'; }
+	return `${stats.authenticated ? 'auth' : 'anon'}|${stats.since}|${stats.fetchedAt ?? ''}|${stats.repos.length}`;
+}
+
+/**
  * Whether a computed-stat cache stamped at `stampedGeneration` may still be read.
  *
  * The stamp is the cache generation in effect when the computation that produced the value
@@ -1565,7 +1575,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Cache mapping workspaceFolderPath -> found customization files (avoid re-scanning)
 	private _customizationFilesCache: Map<string, CustomizationFileEntry[]> = new Map();
 	/** Latest AI Readiness scan, kept so insights can read it without re-scanning (see rememberReadinessScan). */
-	private _lastReadinessScan: { report: DarkFactoryReport; scannedAt: number } | undefined;
+	private _lastReadinessScan: { report: DarkFactoryReport; scannedAt: number; prStatsKey: string } | undefined;
 	/** Workspaces whose customization scan has been requested but not yet run (see resolvePendingCustomizationScans). */
 	private readonly _pendingCustomizationScans = new Set<string>();
 	/** Tail of the serialized calculateUsageAnalysisStats runs. */
@@ -11040,20 +11050,27 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		});
 	}
 
-	/** Keep the latest readiness scan so insights can use it without re-scanning. */
+	/**
+	 * Keep the latest readiness scan so insights can use it without re-scanning. It records which
+	 * PR snapshot it was built from, since the scan reads agent-authored PRs from that snapshot.
+	 */
 	private rememberReadinessScan(report: DarkFactoryReport): void {
-		this._lastReadinessScan = { report, scannedAt: Date.now() };
+		this._lastReadinessScan = { report, scannedAt: Date.now(), prStatsKey: readinessPrStatsKey(this._lastRepoPrStats) };
 	}
 
 	/**
 	 * The latest readiness scan for insight evaluation. Re-scans (filesystem only, bounded) when
-	 * none is cached or it is over an hour old. Never throws: a failed scan simply leaves the
+	 * none is cached, it is over an hour old, or the PR snapshot it was built from has since been
+	 * replaced (a refetch or a sign-out). Never throws: a failed scan simply leaves the
 	 * scan-based insights silent.
 	 */
 	private readinessForInsights(): { report: DarkFactoryReport } | null {
 		try {
 			const cached = this._lastReadinessScan;
-			if (cached && Date.now() - cached.scannedAt < 60 * 60 * 1000) { return { report: cached.report }; }
+			if (cached && Date.now() - cached.scannedAt < 60 * 60 * 1000
+				&& cached.prStatsKey === readinessPrStatsKey(this._lastRepoPrStats)) {
+				return { report: cached.report };
+			}
 			const report = this.runDarkFactoryScan();
 			this.rememberReadinessScan(report);
 			return { report };

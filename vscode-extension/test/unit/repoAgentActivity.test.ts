@@ -114,10 +114,11 @@ test('summarizeActivity: agentic and delegation sessions', () => {
         session({ agent: true }),
         session({ agent: false, subAgentCalls: 2 }),
         session({ agent: false, primary: 'Delegation' }),
+        session({ agent: false, turns: ['Coding', 'Delegation', 'Testing'] }),
         session({ agent: false }),
     ]);
     assert.equal(totals.agenticSessions, 1);
-    assert.equal(totals.delegationSessions, 2);
+    assert.equal(totals.delegationSessions, 3, 'a Delegation turn counts even when it is not the primary category');
 });
 
 test('summarizeActivity: scoping is judged on agentic turn-detail sessions only', () => {
