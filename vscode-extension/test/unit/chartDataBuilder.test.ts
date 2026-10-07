@@ -77,12 +77,17 @@ test('getModelBillingProvider: mai- maps to Microsoft', () => {
 	assert.equal(getModelBillingProvider('mai-ds-r1'), 'Microsoft');
 });
 
-test('getModelBillingProvider: Copilot routers belong to GitHub Copilot, not to any model vendor', () => {
-	// The models behind hydrafusion/auto vary per turn, so the only honest
-	// provider is the one running the router — and the Efficiency view's vendor
-	// filter must not file them under "Other".
+test('getModelBillingProvider: HydraFusion belongs to GitHub Copilot, not to any model vendor', () => {
+	// The models behind hydrafusion vary per turn, so the only honest provider is
+	// the one running the router — and the Efficiency view's vendor filter must
+	// not file it under "Other".
 	assert.equal(getModelBillingProvider('hydrafusion'), 'GitHub Copilot');
-	assert.equal(getModelBillingProvider('auto'), 'GitHub Copilot');
+});
+
+test('getModelBillingProvider: the bare auto id is not claimed for Copilot', () => {
+	// Kiro CLI records every session under `auto` as well; without editor
+	// context this helper cannot tell the two apart, so it stays unclassified.
+	assert.equal(getModelBillingProvider('auto'), 'Other');
 });
 
 test('getModelBillingProvider: unknown model maps to Other', () => {

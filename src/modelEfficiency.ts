@@ -356,16 +356,22 @@ export const SYNTHETIC_ROUTER_MODELS: ReadonlySet<string> = new Set(['hydrafusio
  * with edit turns but zero sessions, tokens and cost, while the real models
  * absorb its tokens and cost without the matching edit turns — distorting
  * both sides. Returns `undefined` when the session was not routed, or when its
- * usage is already keyed by the router (VS Code Chat records Auto that way).
+ * usage is already keyed by the router (VS Code Chat and Kiro CLI record Auto
+ * that way), or when turns ran under *both* routers: the shutdown metrics
+ * cannot be partitioned between them, so neither is re-keyed rather than
+ * crediting one router with the other's tokens.
  */
 export function findRoutedSessionModel(
 	modelUsage: ModelUsage | undefined,
 	modelEfficiency: ModelEfficiencyUsage | undefined,
 ): string | undefined {
+	let router: string | undefined;
 	for (const model of Object.keys(modelEfficiency ?? {})) {
-		if (SYNTHETIC_ROUTER_MODELS.has(model) && !modelUsage?.[model]) { return model; }
+		if (!SYNTHETIC_ROUTER_MODELS.has(model) || modelUsage?.[model]) { continue; }
+		if (router !== undefined) { return undefined; }
+		router = model;
 	}
-	return undefined;
+	return router;
 }
 
 /**

@@ -640,6 +640,22 @@ test('findRoutedSessionModel: a session whose usage is already keyed by the rout
     assert.equal(findRoutedSessionModel(usage, { auto: counters({ calls: 1 }) }), undefined);
 });
 
+test('findRoutedSessionModel: turns under both routers cannot be partitioned, so nothing is re-keyed', () => {
+    // A CLI session can switch hydrafusion -> auto; the shutdown metrics are one
+    // pool, so crediting either router with all of it would be wrong.
+    const both = { hydrafusion: counters({ calls: 2 }), auto: counters({ calls: 1 }) };
+    assert.equal(findRoutedSessionModel(ROUTED_USAGE, both), undefined);
+    assert.equal(attributeRoutedModelUsage(ROUTED_USAGE, both), ROUTED_USAGE);
+    const daily: DailyModelEfficiency = {};
+    accumulateDailyModelTokens(daily, ROUTED_USAGE, ROUTED_PRICING, both);
+    assert.deepEqual(Object.keys(daily).sort(), ['claude-opus-5', 'gpt-5.6-sol']);
+});
+
+test('findRoutedSessionModel: a Kiro CLI session keyed `auto` on both sides is not routed', () => {
+    const usage: ModelUsage = { auto: { inputTokens: 500, outputTokens: 50, sessions: 1 } };
+    assert.equal(findRoutedSessionModel(usage, { auto: counters({ calls: 4 }) }), undefined);
+});
+
 test('findRoutedSessionModel: plain sessions and missing inputs are not routed', () => {
     assert.equal(findRoutedSessionModel(ROUTED_USAGE, { 'gpt-5.6-sol': counters({ calls: 1 }) }), undefined);
     assert.equal(findRoutedSessionModel(undefined, undefined), undefined);
