@@ -1475,6 +1475,89 @@ test('analyzeSessionUsage: CLI JSONL session produces model efficiency counters 
     assert.equal(c.editToolCalls, 3);
 });
 
+test('analyzeSessionUsage: CLI JSONL records per-tool failures and start→complete latency, including MCP per-server mirrors', async () => {
+    const t = (offsetMs: number) => new Date(Date.UTC(2026, 4, 1, 10, 0, 0, offsetMs)).toISOString();
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-4.6' }, timestamp: t(0) },
+        { type: 'user.message', data: { text: 'do things' }, timestamp: t(1) },
+        // view: 40 ms, success
+        { type: 'tool.execution_start', data: { toolCallId: 'v1', toolName: 'view', arguments: { path: '/a' } }, timestamp: t(100) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'v1', success: true, result: { content: 'ok' } }, timestamp: t(140) },
+        // powershell: 3000 ms, explicit failure
+        { type: 'tool.execution_start', data: { toolCallId: 'p1', toolName: 'powershell', arguments: { command: 'x' } }, timestamp: t(200) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'p1', success: false, error: { message: 'boom', code: 1 } }, timestamp: t(3200) },
+        // powershell: 0 ms, success → counted in bucket 0, not dropped
+        { type: 'tool.execution_start', data: { toolCallId: 'p2', toolName: 'powershell', arguments: { command: 'y' } }, timestamp: t(4000) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'p2', success: true }, timestamp: t(4000) },
+        // MCP call: 1500 ms, failure, server name on the start event (Copilot CLI shape)
+        { type: 'tool.execution_start', data: { toolCallId: 'm1', toolName: 'github-mcp-server-get_file_contents', mcpServerName: 'github-mcp-server', mcpToolName: 'get_file_contents', arguments: {} }, timestamp: t(5000) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'm1', success: false, error: { message: 'nope', code: 2 } }, timestamp: t(6500) },
+        // missing success flag (older schema) → not a failure
+        { type: 'tool.execution_start', data: { toolCallId: 'g1', toolName: 'grep', arguments: {} }, timestamp: t(7000) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'g1' }, timestamp: t(7010) },
+        // complete without a timestamp → failure counted, no latency sample
+        { type: 'tool.execution_start', data: { toolCallId: 'e1', toolName: 'edit', arguments: { path: '/b', old_str: 'a', new_str: 'b' } }, timestamp: t(8000) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'e1', success: false } },
+        // start with no complete (aborted) → nothing recorded
+        { type: 'tool.execution_start', data: { toolCallId: 'orphan', toolName: 'web_fetch', arguments: {} }, timestamp: t(9000) },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const result = await analyzeSessionUsage(makeMockDeps(), '/home/user/.copilot/session-state/abc/events.jsonl', content);
+
+    assert.deepEqual(result.toolCalls.failuresByTool, { powershell: 1, 'github-mcp-server-get_file_contents': 1, edit: 1 });
+    assert.deepEqual(result.mcpTools.failuresByServer, { 'github-mcp-server': 1 });
+
+    const lat = result.toolCalls.latencyByTool!;
+    assert.equal(lat.view.count, 1);
+    assert.equal(lat.view.sumMs, 40);
+    assert.equal(lat.view.buckets[5], 1);
+    assert.equal(lat.powershell.count, 2);
+    assert.equal(lat.powershell.sumMs, 3000);
+    assert.equal(lat.powershell.buckets[0], 1);
+    assert.equal(lat.powershell.buckets[11], 1);
+    assert.equal(lat.grep.count, 1);
+    assert.equal(lat.grep.sumMs, 10);
+    assert.equal(lat.edit, undefined, 'no latency sample without a complete timestamp');
+    assert.equal(lat.web_fetch, undefined, 'orphaned start must not produce a sample');
+    assert.equal(result.mcpTools.latencyByServer!['github-mcp-server'].sumMs, 1500);
+    assert.equal(result.mcpTools.latencyByServer!['github-mcp-server'].count, 1);
+
+    // Existing counters are untouched by the new bookkeeping.
+    assert.equal(result.toolCalls.byTool.powershell, 2);
+    assert.equal(result.toolCalls.byTool.web_fetch, 1);
+});
+
+test('mergeUsageAnalysis: failure counts and latency histograms are summed across sessions and absent fields are skipped', () => {
+    const period = emptyPeriod();
+    const a = emptyAnalysis();
+    a.toolCalls.failuresByTool = { view: 1 };
+    a.toolCalls.latencyByTool = { view: { count: 2, sumMs: 60, buckets: [0, 0, 0, 0, 1, 1] } };
+    a.mcpTools.failuresByServer = { gh: 1 };
+    a.mcpTools.latencyByServer = { gh: { count: 1, sumMs: 1500, buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] } };
+    const b = emptyAnalysis();
+    b.toolCalls.failuresByTool = { view: 2, edit: 1 };
+    b.toolCalls.latencyByTool = { view: { count: 1, sumMs: 5000, buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] } };
+    const c = emptyAnalysis(); // no new fields at all (old cache entry)
+
+    mergeUsageAnalysis(period, a);
+    mergeUsageAnalysis(period, b);
+    mergeUsageAnalysis(period, c);
+
+    assert.deepEqual(period.toolCalls.failuresByTool, { view: 3, edit: 1 });
+    assert.equal(period.toolCalls.latencyByTool!.view.count, 3);
+    assert.equal(period.toolCalls.latencyByTool!.view.sumMs, 5060);
+    assert.equal(period.toolCalls.latencyByTool!.view.buckets[4], 1);
+    assert.equal(period.toolCalls.latencyByTool!.view.buckets[12], 1);
+    assert.deepEqual(period.mcpTools.failuresByServer, { gh: 1 });
+    assert.equal(period.mcpTools.latencyByServer!.gh.sumMs, 1500);
+
+    const untouched = emptyPeriod();
+    mergeUsageAnalysis(untouched, c);
+    assert.equal(untouched.toolCalls.failuresByTool, undefined);
+    assert.equal(untouched.toolCalls.latencyByTool, undefined);
+    assert.equal(untouched.mcpTools.failuresByServer, undefined);
+});
+
 test('analyzeSessionUsage: JSON session produces model efficiency counters from textEditGroup responses', async () => {
     const content = JSON.stringify({
         requests: [

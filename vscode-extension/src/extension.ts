@@ -1101,6 +1101,10 @@ type SessionsTabPreset = { filter: 'nearContextLimit'; lookback: 'last30' };
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation.
+	// v76: per-tool failure counts and latency histograms (toolCalls.failuresByTool/latencyByTool,
+	// mcpTools.failuresByServer/latencyByServer) are now recorded from Copilot CLI/JetBrains
+	// tool.execution_start/complete pairs; an mtime/size hit skips re-analysis, so existing
+	// entries would never gain the fields without a bump.
 	// v75: legacy details-only placeholders (tokens 0, empty usage analysis, real mtime/size) were
 	// written unmarked by updateCacheWithSessionDetails() and cannot be told apart from full entries,
 	// so the whole generation is discarded; new placeholders carry `detailsOnly`.
@@ -1110,7 +1114,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// v74: Distribute the debug-log exact Copilot cost (nano-AIU) over each session's dailyRollups:
 	// aggregatePeriodStats reads exact cost from rollups only, so existing entries would keep
 	// showing an estimate in Today/month/30-day totals until their file changed.
-	private static readonly CACHE_VERSION = 75;
+	private static readonly CACHE_VERSION = 76;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**

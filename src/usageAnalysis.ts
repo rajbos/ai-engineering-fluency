@@ -21,6 +21,7 @@ import type {
 	ModelPricing,
 	TokenEstimator,
 	LanguageUsage,
+	LatencyHistogram,
 } from './types';
 import {
 	classifySessionTurns,
@@ -76,6 +77,7 @@ import { detectJetBrainsModeFromContent, type JetBrainsMode } from './jetbrains'
 import type { IEcosystemAdapter } from './ecosystemAdapter';
 import { isAnalyzable } from './ecosystemAdapter';
 import { isUnsafeObjectKey } from './utils/protoGuard';
+import { createLatencyHistogram, mergeLatencyHistogram, recordLatencyMs } from './latencyHistogram';
 
 
 // ---------------------------------------------------------------------------
@@ -489,6 +491,48 @@ function recordToolOrMcpInvocation(
 		analysis.toolCalls.total++;
 		analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
 	}
+}
+
+/**
+ * Record the outcome of one completed tool call: an explicit failure flag and/or
+ * an observed start→complete duration. The only writer of `failuresByTool`,
+ * `latencyByTool` and their MCP per-server mirrors, so every session format that
+ * gains a success flag or timestamps funnels through the same bookkeeping.
+ *
+ * `mcpServer` is the server name when the call is known to be an MCP call
+ * (Copilot CLI reports it on the start event; other formats derive it from the
+ * tool-name prefix). Unpaired or timestamp-less calls pass `undefined` for
+ * `durationMs` and only the failure flag is recorded.
+ */
+export function recordToolOutcome(
+	analysis: SessionUsageAnalysis,
+	toolName: string,
+	mcpServer: string | undefined,
+	success: boolean,
+	durationMs: number | undefined,
+): void {
+	if (!toolName || isUnsafeObjectKey(toolName)) { return; }
+	const server = mcpServer && !isUnsafeObjectKey(mcpServer) ? mcpServer : undefined;
+	if (!success) { _rtoRecordFailure(analysis, toolName, server); }
+	if (durationMs !== undefined && Number.isFinite(durationMs) && durationMs >= 0) {
+		_rtoRecordLatency(analysis, toolName, server, durationMs);
+	}
+}
+
+function _rtoRecordFailure(analysis: SessionUsageAnalysis, toolName: string, mcpServer: string | undefined): void {
+	const failuresByTool = analysis.toolCalls.failuresByTool ??= {};
+	failuresByTool[toolName] = (failuresByTool[toolName] || 0) + 1;
+	if (!mcpServer) { return; }
+	const failuresByServer = analysis.mcpTools.failuresByServer ??= {};
+	failuresByServer[mcpServer] = (failuresByServer[mcpServer] || 0) + 1;
+}
+
+function _rtoRecordLatency(analysis: SessionUsageAnalysis, toolName: string, mcpServer: string | undefined, durationMs: number): void {
+	const latencyByTool = analysis.toolCalls.latencyByTool ??= {};
+	recordLatencyMs(latencyByTool[toolName] ??= createLatencyHistogram(), durationMs);
+	if (!mcpServer) { return; }
+	const latencyByServer = analysis.mcpTools.latencyByServer ??= {};
+	recordLatencyMs(latencyByServer[mcpServer] ??= createLatencyHistogram(), durationMs);
 }
 
 /** Timing metrics extracted from a single request */
@@ -1337,6 +1381,7 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 			period.toolCalls.outputTokensByTool[tool] = (period.toolCalls.outputTokensByTool[tool] || 0) + tokens;
 		}
 	}
+	_muaMergeToolOutcomes(period, analysis);
 	_muaMergeModeUsage(period, analysis);
 	_muaMergeContextRefs(period, analysis);
 	period.mcpTools.total += analysis.mcpTools.total;
@@ -1358,6 +1403,44 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	_muaMergeTaskCategories(period, analysis);
 	_muaMergeCorrections(period, analysis);
 	_muaMergeCacheBreakage(period, analysis);
+}
+
+/** Fold per-tool / per-MCP-server failure counts and latency histograms into the period (all optional, all additive). */
+function _muaMergeToolOutcomes(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	const { toolCalls, mcpTools } = analysis;
+	if (toolCalls.failuresByTool) {
+		period.toolCalls.failuresByTool = _muaSumCounts(period.toolCalls.failuresByTool, toolCalls.failuresByTool);
+	}
+	if (toolCalls.latencyByTool) {
+		period.toolCalls.latencyByTool = _muaMergeHistograms(period.toolCalls.latencyByTool, toolCalls.latencyByTool);
+	}
+	if (mcpTools.failuresByServer) {
+		period.mcpTools.failuresByServer = _muaSumCounts(period.mcpTools.failuresByServer, mcpTools.failuresByServer);
+	}
+	if (mcpTools.latencyByServer) {
+		period.mcpTools.latencyByServer = _muaMergeHistograms(period.mcpTools.latencyByServer, mcpTools.latencyByServer);
+	}
+}
+
+/** Add a per-key count map into an (optional) period map, creating it on first use. */
+function _muaSumCounts(into: { [key: string]: number } | undefined, from: { [key: string]: number }): { [key: string]: number } {
+	const target = into ?? {};
+	for (const [key, count] of Object.entries(from)) {
+		target[key] = (target[key] || 0) + count;
+	}
+	return target;
+}
+
+/** Merge a per-key latency histogram map into an (optional) period map, creating it on first use. */
+function _muaMergeHistograms(
+	into: { [key: string]: LatencyHistogram } | undefined,
+	from: { [key: string]: LatencyHistogram },
+): { [key: string]: LatencyHistogram } {
+	const target = into ?? {};
+	for (const [key, histogram] of Object.entries(from)) {
+		mergeLatencyHistogram(target[key] ??= createLatencyHistogram(), histogram);
+	}
+	return target;
 }
 
 /** Fold a session's cache-breakage result into the period's aggregated stats. */
@@ -2112,13 +2195,24 @@ export function createEmptySessionUsageAnalysis(): SessionUsageAnalysis {
 
 /** Mutable mode state passed through JSONL event handlers. */
 type AsuModeState = { sessionMode: string };
+/** A tool call seen on tool.execution_start and awaiting its tool.execution_complete. */
+type AsuPendingToolCall = {
+	toolName: string;
+	args: Record<string, string>;
+	effCall?: EfficiencyTurn['toolCalls'][number];
+	/** MCP server name reported on the start event (`data.mcpServerName`), if any. */
+	mcpServer?: string;
+	/** Epoch ms of the start event, or undefined when the event had no parseable timestamp. */
+	startedAt?: number;
+};
+
 /** Mutable CLI tracking state passed through JSONL event handlers. */
 type AsuCliState = {
 	defaultModel: string;
 	defaultEffort: string | null;
 	requestCount: number;
 	effortByRequest: { [effort: string]: number };
-	pendingToolCalls: Map<string, { toolName: string; args: Record<string, string>; effCall?: EfficiencyTurn['toolCalls'][number] }>;
+	pendingToolCalls: Map<string, AsuPendingToolCall>;
 	editedFilePaths: Set<string>;
 	/** Per-user-turn tool-call sequences for model efficiency metrics (issue #1649). */
 	efficiencyTurns: EfficiencyTurn[];
@@ -2437,11 +2531,27 @@ function _asuEnsureEditScope(analysis: SessionUsageAnalysis): void {
 
 /** Handle tool.execution_start — stores pending tool call info for all tools (LOC + output token tracking). */
 function _asuHandleToolStart(event: any, cliState: AsuCliState): void {
-	const { toolCallId, toolName, arguments: args } = event.data ?? {};
+	const { toolCallId, toolName, arguments: args, mcpServerName } = event.data ?? {};
 	if (toolCallId && toolName) {
 		const effCall = _asuAppendEfficiencyToolCall(cliState, toolName, args);
-		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {}, effCall });
+		const startedAt = _asuEventEpochMs(event);
+		const mcpServer = typeof mcpServerName === 'string' && mcpServerName ? mcpServerName : undefined;
+		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {}, effCall, mcpServer, startedAt });
 	}
+}
+
+/** Parse an event's ISO timestamp to epoch ms, or undefined when absent/invalid. */
+function _asuEventEpochMs(event: any): number | undefined {
+	const ts = typeof event?.timestamp === 'string' ? Date.parse(event.timestamp) : NaN;
+	return Number.isNaN(ts) ? undefined : ts;
+}
+
+/** Observed start→complete duration for a pending call, or undefined when either timestamp is missing. */
+function _asuToolDurationMs(pending: AsuPendingToolCall, completeEvent: any): number | undefined {
+	const completedAt = _asuEventEpochMs(completeEvent);
+	if (pending.startedAt === undefined || completedAt === undefined) { return undefined; }
+	const delta = completedAt - pending.startedAt;
+	return delta >= 0 ? delta : undefined;
 }
 
 /** Extract LOC counts from a completed CLI tool call and update editScope. */
@@ -2481,6 +2591,8 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 	if (toolCallId) { cliState.pendingToolCalls.delete(toolCallId); }
 	if (!pending) { return; }
 	_asuMarkEffCallError(pending, success);
+	// Only an explicit `false` is a failure; a missing flag (older schemas) is not evidence either way.
+	recordToolOutcome(analysis, pending.toolName, pending.mcpServer, success !== false, _asuToolDurationMs(pending, event));
 	if (success && (pending.toolName === 'edit' || pending.toolName === 'create')) {
 		_asuApplyToolLoc(pending, cliState, analysis);
 	}
@@ -2493,7 +2605,7 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 }
 
 /** Mark the efficiency tool call of a completed call as failed (correction detection). */
-function _asuMarkEffCallError(pending: { toolName: string; args: Record<string, string>; effCall?: EfficiencyTurn['toolCalls'][number] }, success: unknown): void {
+function _asuMarkEffCallError(pending: AsuPendingToolCall, success: unknown): void {
 	if (success === false && pending.effCall) { pending.effCall.isError = true; }
 }
 

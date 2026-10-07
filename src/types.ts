@@ -496,10 +496,33 @@ export interface SessionUsageAnalysis {
   firstUserPrompt?: string;
 }
 
+/**
+ * Additive, log-spaced latency histogram (see src/latencyHistogram.ts).
+ * `buckets[i]` counts durations in `[2^i, 2^(i+1))` ms; the last bucket is overflow.
+ * Stored as counts + sum (never averages) so it merges correctly across sessions,
+ * cache entries and backend rollups.
+ */
+export interface LatencyHistogram {
+  count: number;
+  sumMs: number;
+  buckets: number[];
+}
+
 export interface ToolCallUsage {
   total: number;
   byTool: { [toolName: string]: number };
   outputTokensByTool?: { [toolName: string]: number };
+  /**
+   * Calls whose session log explicitly flagged them as failed (Copilot CLI/JetBrains
+   * `tool.execution_complete.success === false`). Absent when the format has no flag.
+   */
+  failuresByTool?: { [toolName: string]: number };
+  /**
+   * Observed execution duration per tool, from the start→complete timestamp delta.
+   * This includes permission-prompt and queueing time, not just tool runtime.
+   * Absent when the format carries no per-call timestamps.
+   */
+  latencyByTool?: { [toolName: string]: LatencyHistogram };
 }
 
 export interface ModeUsage {
@@ -542,6 +565,10 @@ export interface McpToolUsage {
   total: number;
   byServer: { [serverName: string]: number };
   byTool: { [toolName: string]: number };
+  /** Failed MCP calls per server; same source and caveats as {@link ToolCallUsage.failuresByTool}. */
+  failuresByServer?: { [serverName: string]: number };
+  /** Observed MCP call duration per server; same source and caveats as {@link ToolCallUsage.latencyByTool}. */
+  latencyByServer?: { [serverName: string]: LatencyHistogram };
 }
 
 /**
