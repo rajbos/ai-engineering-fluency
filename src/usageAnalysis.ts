@@ -2600,11 +2600,16 @@ function _asuEnsureEditScope(analysis: SessionUsageAnalysis): void {
 }
 
 /** Handle tool.execution_start — stores pending tool call info for all tools (LOC + output token tracking). */
-function _asuHandleToolStart(event: any, cliState: AsuCliState): void {
+function _asuHandleToolStart(event: any, cliState: AsuCliState, toolNameMap: { [key: string]: string }): void {
 	const { toolCallId, toolName, arguments: args } = event.data ?? {};
 	if (toolCallId && toolName) {
 		const effCall = _asuAppendEfficiencyToolCall(cliState, toolName, args);
-		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {}, mcpServerName: _asuEventMcpServerName(event), effCall, startedAt: _asuEventEpochMs(event) });
+		// An untagged start whose name isMcpTool() recognises (JetBrains, older Copilot CLI) was
+		// counted under mcpTools by recordToolOrMcpInvocation; derive the same server here so its
+		// completion is recorded against that server rather than under toolCalls.
+		const mcpServerName = _asuEventMcpServerName(event)
+			?? (isMcpTool(toolName) ? extractMcpServerName(toolName, toolNameMap) : undefined);
+		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {}, mcpServerName, effCall, startedAt: _asuEventEpochMs(event) });
 	}
 }
 
@@ -2701,8 +2706,8 @@ function _asuMarkEffCallError(pending: AsuPendingToolCall, success: unknown): vo
 }
 
 /** Handle tool.execution_start / tool.execution_complete for CLI LOC tracking. */
-function _asuHandleCliLocEvent(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
-	if (event.type === 'tool.execution_start') { _asuHandleToolStart(event, cliState); }
+function _asuHandleCliLocEvent(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
+	if (event.type === 'tool.execution_start') { _asuHandleToolStart(event, cliState, toolNameMap); }
 	else if (event.type === 'tool.execution_complete') { _asuHandleToolComplete(event, cliState, analysis); }
 }
 /** Finalize editScope file counts from accumulated CLI tool LOC state. */
@@ -2724,7 +2729,7 @@ function _asuProcessJsonlEvent(event: any, analysis: SessionUsageAnalysis, modeS
 	_asuHandleKind2Event(event, analysis, modeState, toolNameMap);
 	_asuProcessCliEvents(event, cliState, analysis, jetBrainsMode);
 	_asuHandleToolAndMcpEvents(event, analysis, toolNameMap);
-	_asuHandleCliLocEvent(event, cliState, analysis);
+	_asuHandleCliLocEvent(event, cliState, analysis, toolNameMap);
 }
 
 /** Store CLI thinking effort data from the accumulated CLI state. */

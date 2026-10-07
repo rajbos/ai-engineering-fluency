@@ -3788,3 +3788,22 @@ test('analyzeSessionUsage: tool result text is sized from detailedContent (Copil
     assert.equal(out.glob, undefined);
     assert.deepEqual(result.toolCalls.completedByTool, { view: 1, read_file: 1, glob: 1 });
 });
+
+test('analyzeSessionUsage: an untagged MCP start (name-recognised, no mcpServerName) keeps its outcome under mcpTools', async () => {
+    const t = (offsetMs: number) => new Date(Date.UTC(2026, 4, 1, 10, 0, 0, offsetMs)).toISOString();
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-4.6' }, timestamp: t(0) },
+        // JetBrains / older Copilot CLI shape: the tool name carries the MCP prefix, the start event carries no server tag.
+        { type: 'tool.execution_start', data: { toolCallId: 'm1', toolName: 'mcp_io_github_git_get_file_contents', arguments: {} }, timestamp: t(100) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'm1', success: false, error: { message: 'nope', code: 1 } }, timestamp: t(1600) },
+    ];
+    const result = await analyzeSessionUsage(makeMockDeps(), '/home/user/.copilot/session-state/abc/events.jsonl', events.map(e => JSON.stringify(e)).join('\n'));
+    const server = Object.keys(result.mcpTools.byServer)[0];
+    assert.ok(server, 'the start was counted under mcpTools');
+    assert.deepEqual(result.mcpTools.completedByServer, { [server]: 1 });
+    assert.deepEqual(result.mcpTools.failuresByServer, { [server]: 1 });
+    assert.equal(result.mcpTools.latencyByServer?.[server].sumMs, 1500);
+    assert.equal(result.toolCalls.completedByTool, undefined, 'nothing leaks into the per-tool maps');
+    assert.equal(result.toolCalls.failuresByTool, undefined);
+    assert.equal(result.toolCalls.latencyByTool, undefined);
+});

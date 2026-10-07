@@ -6,16 +6,22 @@
  * render their empty state after the first refresh even though the host sent
  * the data (docs/adr/TOOL-EXECUTION-STATS.md).
  *
- * Only well-formed entries survive: finite numbers for counts, and histograms
- * with a finite `count`/`sumMs` and an all-numeric `buckets` array.
+ * Only well-formed entries survive: finite, non-negative numbers for counts, and
+ * histograms with a finite non-negative `count`/`sumMs` and an all-numeric,
+ * non-negative `buckets` array — a negative count would render as extra successes
+ * or a negative failure rate.
  */
 import type { LatencyHistogram, McpToolUsage, ToolCallUsage } from '../shared/types';
+
+function isCount(value: unknown): value is number {
+	return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
 
 function sanitizeCountMap(value: unknown): { [key: string]: number } | undefined {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) { return undefined; }
 	const out: { [key: string]: number } = {};
 	for (const [key, count] of Object.entries(value as Record<string, unknown>)) {
-		if (typeof count === 'number' && Number.isFinite(count)) { out[key] = count; }
+		if (isCount(count)) { out[key] = count; }
 	}
 	return out;
 }
@@ -23,9 +29,9 @@ function sanitizeCountMap(value: unknown): { [key: string]: number } | undefined
 function sanitizeHistogram(value: unknown): LatencyHistogram | undefined {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) { return undefined; }
 	const h = value as Record<string, unknown>;
-	if (typeof h.count !== 'number' || !Number.isFinite(h.count) || !Array.isArray(h.buckets)) { return undefined; }
-	if (!h.buckets.every(b => typeof b === 'number' && Number.isFinite(b))) { return undefined; }
-	const sumMs = typeof h.sumMs === 'number' && Number.isFinite(h.sumMs) ? h.sumMs : 0;
+	if (!isCount(h.count) || !Array.isArray(h.buckets)) { return undefined; }
+	if (!h.buckets.every(isCount)) { return undefined; }
+	const sumMs = isCount(h.sumMs) ? h.sumMs : 0;
 	return { count: h.count, sumMs, buckets: [...(h.buckets as number[])] };
 }
 

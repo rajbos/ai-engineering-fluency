@@ -515,12 +515,15 @@ export interface ToolCallUsage {
   byTool: { [toolName: string]: number };
   outputTokensByTool?: { [toolName: string]: number };
   /**
-   * Calls whose session log recorded an outcome — a completion/result event matched to
-   * its start. This is the population `failuresByTool`, `latencyByTool` and
-   * `outputTokensByTool` are drawn from; unlike `byTool` it excludes orphaned starts,
-   * streaming re-logs and editors whose format carries no completion events. Absent
-   * when no format contributed outcomes. MCP calls are counted under
-   * {@link McpToolUsage.completedByServer} instead.
+   * Calls whose session log recorded an explicit verdict (success or failure) on a
+   * completion/result event matched to its start. This is the denominator for
+   * `failuresByTool` and `outputTokensByTool`, which are only ever recorded for such
+   * calls; unlike `byTool` it excludes orphaned starts, streaming re-logs, editors whose
+   * format carries no completion events, and verdict-less completions (older Copilot CLI
+   * schemas). `latencyByTool` is a *different* population — any matched completion with
+   * usable timestamps, verdict or not — so its `count` may differ from this in either
+   * direction; never divide one by the other. Absent when no format contributed
+   * verdicts. MCP calls are counted under {@link McpToolUsage.completedByServer} instead.
    */
   completedByTool?: { [toolName: string]: number };
   /**
@@ -531,8 +534,10 @@ export interface ToolCallUsage {
   failuresByTool?: { [toolName: string]: number };
   /**
    * Observed execution duration per tool, from the start→complete timestamp delta.
-   * This includes permission-prompt and queueing time, not just tool runtime.
-   * Absent when the format carries no per-call timestamps.
+   * This includes permission-prompt and queueing time, not just tool runtime. Sampled
+   * from every matched completion with usable timestamps, including verdict-less ones,
+   * so `count` is its own population (see {@link completedByTool}). Absent when the
+   * format carries no per-call timestamps.
    */
   latencyByTool?: { [toolName: string]: LatencyHistogram };
 }

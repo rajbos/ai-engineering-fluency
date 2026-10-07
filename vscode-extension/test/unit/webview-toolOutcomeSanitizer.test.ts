@@ -27,7 +27,7 @@ test('sanitizeToolOutcomeMaps: absent maps stay absent (no present-but-undefined
 
 test('sanitizeToolOutcomeMaps: drops malformed entries instead of letting them reach the renderer', () => {
     const out = sanitizeToolOutcomeMaps({
-        completedByTool: { ok: 2, nan: Number.NaN, str: '3', inf: Infinity },
+        completedByTool: { ok: 2, nan: Number.NaN, str: '3', inf: Infinity, negative: -1 },
         failuresByTool: 'nope',
         latencyByTool: {
             good: { count: 1, sumMs: 5, buckets: [0, 0, 1] },
@@ -35,9 +35,11 @@ test('sanitizeToolOutcomeMaps: drops malformed entries instead of letting them r
             badBuckets: { count: 1, sumMs: 1, buckets: [1, 'x'] },
             notArray: { count: 1, sumMs: 1, buckets: 'x' },
             missingCount: { sumMs: 1, buckets: [1] },
+            negativeCount: { count: -1, sumMs: 1, buckets: [1] },
+            negativeBucket: { count: 1, sumMs: 1, buckets: [1, -1] },
         },
     });
-    assert.deepEqual(out.completedByTool, { ok: 2 });
+    assert.deepEqual(out.completedByTool, { ok: 2 }, 'NaN, string, Infinity and negative counts are dropped');
     assert.equal(out.failuresByTool, undefined);
     assert.deepEqual(Object.keys(out.latencyByTool!), ['good', 'noSum']);
     assert.deepEqual(out.latencyByTool!.noSum, { count: 1, sumMs: 0, buckets: [1] });
