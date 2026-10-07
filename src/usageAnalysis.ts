@@ -22,6 +22,7 @@ import type {
 	TokenEstimator,
 	LanguageUsage,
 } from './types';
+import { mergeAutonomyUsage, recordAutonomy } from './autonomy';
 import {
 	classifySessionTurns,
 	createEmptyTaskClassificationResult,
@@ -1305,6 +1306,7 @@ function _muaMergeModeUsage(period: UsageAnalysisPeriod, analysis: SessionUsageA
 	period.modeUsage.cliApp = (period.modeUsage.cliApp ?? 0) + (analysis.modeUsage.cliApp ?? 0);
 	period.modeUsage.claudeDesktop = (period.modeUsage.claudeDesktop ?? 0) + (analysis.modeUsage.claudeDesktop ?? 0);
 	period.modeUsage.claudeVsCode = (period.modeUsage.claudeVsCode ?? 0) + (analysis.modeUsage.claudeVsCode ?? 0);
+	mergeAutonomyUsage(period, analysis.autonomyUsage);
 }
 
 /**
@@ -2152,13 +2154,30 @@ function _asuReconstructAndProcessDeltaState(
 	analysis: SessionUsageAnalysis
 ): void {
 	let sessionState: DeltaSessionState = {};
+	let permissionLevel: string | undefined;
+	// permissionLevel (autopilot vs default) can be toggled mid-session, so remember the value in
+	// force when each request first appeared rather than only the final one.
+	const levelByRequest: (string | undefined)[] = [];
 	for (const line of lines) {
 		try {
 			const delta = JSON.parse(line);
 			sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
+			permissionLevel = _asuReadPermissionLevel(delta) ?? permissionLevel;
+			const requestCount = Array.isArray(sessionState.requests) ? sessionState.requests.length : 0;
+			while (levelByRequest.length < requestCount) { levelByRequest.push(permissionLevel); }
 		} catch { /* skip invalid lines */ }
 	}
 	processDeltaSessionAnalysis(deps, sessionState, lines, analysis);
+	if (Array.isArray(sessionState.requests)) {
+		(sessionState.requests as SessionRequestRaw[]).forEach((req, i) => { if (req?.requestId) { recordAutonomy(analysis, levelByRequest[i]); } });
+	}
+}
+
+/** Read a VS Code `inputState.permissionLevel` value from a kind-0 (header) or kind-1 (patch) delta event. */
+function _asuReadPermissionLevel(delta: any): string | undefined {
+	if (delta?.kind === 0 && typeof delta.v?.inputState?.permissionLevel === 'string') { return delta.v.inputState.permissionLevel; }
+	if (delta?.kind === 1 && delta.k?.[0] === 'inputState' && delta.k?.[1] === 'permissionLevel' && typeof delta.v === 'string') { return delta.v; }
+	return undefined;
 }
 
 /** Check if a selection range represents an actual selection (not just cursor position). */
@@ -2186,8 +2205,7 @@ function _asuHandleKind0Event(event: any, analysis: SessionUsageAnalysis, modeSt
  
 function _asuHandleKind1Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState): void {
 	if (event.kind !== 1) { return; }
-	if (event.k?.includes('mode') && event.v) { modeState.sessionMode = getModeType(event.v); }
-	if (event.k?.includes('selections') && Array.isArray(event.v)) {
+	if (event.k?.includes('mode') && event.v) { modeState.sessionMode = getModeType(event.v); }	if (event.k?.includes('selections') && Array.isArray(event.v)) {
 		_asuCheckImplicitSelection(event.v, analysis.contextReferences);
 	}
 	if (event.k?.includes('contentReferences') && Array.isArray(event.v)) {
@@ -2334,6 +2352,7 @@ function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: Sessi
 		cliState.efficiencyTurns.push(_asuCreateEfficiencyTurn(event, cliState));
 		analyzeCliAttachments(event.data?.attachments, analysis.contextReferences);
 		_asuHandleUserMessageMode(jetBrainsMode, analysis);
+		recordAutonomy(analysis, event.data?.agentMode);
 		const skillName = extractInvokedSkillNameFromPlainText(event.data?.content);
 		if (skillName) { addSkillCall(analysis, skillName); }
 	}

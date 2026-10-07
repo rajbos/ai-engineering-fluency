@@ -795,6 +795,21 @@ test('getClaudeCodeModelUsage: crashed session contributes partial tokens per mo
 
 const adapterCtx = { modelPricing: {}, toolNameMap: {} };
 
+test('ClaudeCodeAdapter.analyzeUsage: counts permissionMode per human user prompt as autonomyUsage', async () => {
+const user = (mode: string | undefined, id: string) => ({
+type: 'user', uuid: id, message: { role: 'user', content: 'hi' }, timestamp: '2026-10-04T09:00:00.000Z',
+...(mode ? { permissionMode: mode } : {}),
+});
+const events = [user('default', 'a'), user('auto', 'b'), user('auto', 'c'), user('acceptEdits', 'd'), user(undefined, 'e')];
+const filePath = createTempSession(events);
+try {
+const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+assert.deepEqual(result.autonomyUsage, { autonomous: 2, supervised: 2, plan: 0, other: 0 });
+} finally {
+cleanup(filePath);
+}
+});
+
 test('ClaudeCodeAdapter.analyzeUsage: increments __auto_compact__ for trigger=auto', async () => {
 const events = [
 {
