@@ -16,6 +16,15 @@ for (const [modelId, pricing] of Object.entries((_pricingData?.pricing ?? {}) as
     }
 }
 
+/**
+ * Display names for Copilot's synthetic routers, which have no pricing entry
+ * (each turn is billed at the rate of whichever real model served it).
+ */
+const ROUTER_DISPLAY_NAMES: Record<string, string> = Object.assign(Object.create(null), {
+    hydrafusion: 'HydraFusion',
+    auto: 'Auto',
+});
+
 /** Suffix appended to the user-chosen provider name so custom endpoints are recognizable as such. */
 const CUSTOM_PROVIDER_SUFFIX = ' (Custom)';
 
@@ -130,6 +139,7 @@ export function isCustomProviderGroup(group: string): boolean {
  * with known prefix forms (custom endpoint, org UUID) stripped.
  */
 export function getModelDisplayName(model: string): string {
+    if (ROUTER_DISPLAY_NAMES[model]) { return ROUTER_DISPLAY_NAMES[model]; }
     for (const candidate of getModelLookupCandidates(model)) {
     	const name = _modelNames[candidate];
     	if (typeof name === 'string' && name) { return name; }

@@ -28,6 +28,7 @@ import * as loadingHtml from './loadingHtml';
 import type {
   TokenUsageStats,
   ModelUsage,
+  ModelEfficiencyUsage,
   ModelId,
   ModelPricing,
   EditorUsage,
@@ -6586,7 +6587,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Falls back to the session's overall category (rather than silently dropping to
 			// "Conversation") for a day rollup that predates per-day task classification.
 			const primaryTaskCategory = dayRollup.primaryTaskCategory ?? sessionData.taskCategory;
-			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, dayRollup.taskCategoryShares, primaryTaskCategory);
+			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, dayRollup.taskCategoryShares, primaryTaskCategory, sessionData.usageAnalysis?.modelEfficiency);
 			if (!lastDayKey || dayKey > lastDayKey) { lastDayKey = dayKey; }
 		}
 		if (lastDayKey) {
@@ -6607,7 +6608,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const dateKey = toLocalDayKey(lastActivity);
 		if (dateKey < cutoffUtcStartKey) { return; }
 		const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dateKey);
-		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategoryShares, sessionData.taskCategory);
+		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategoryShares, sessionData.taskCategory, sessionData.usageAnalysis?.modelEfficiency);
 		this.addModelEfficiencyToDailyEntry(dailyEntry, sessionData, editorType);
 		if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
 			this.addLocToDailyEntry(dailyEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
@@ -6651,7 +6652,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		repository: string,
 		modelUsage: any,
 		taskCategoryShares?: TaskCategoryBreakdown,
-		primaryTaskCategory?: TaskCategory
+		primaryTaskCategory?: TaskCategory,
+		/** The session's per-model turn counters; lets routed (hydrafusion/auto) sessions be re-keyed for the efficiency aggregate. */
+		modelEfficiency?: ModelEfficiencyUsage
 	): void {
 		entry.tokens += tokens;
 		entry.sessions += 1;
@@ -6667,7 +6670,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (const model of Object.keys(modelUsage)) {
 			entry.modelUsage[model]!.sessions += 1;
 		}
-		_accumulateDayAndEditorModelTokens(entry, editorType, modelUsage, this.modelPricing);
+		_accumulateDayAndEditorModelTokens(entry, editorType, modelUsage, this.modelPricing, modelEfficiency);
 		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 		addModelUsage(entry.editorModelUsage[editorType], modelUsage);

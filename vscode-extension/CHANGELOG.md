@@ -6,6 +6,10 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ### Features
 - Tool Curation's MCP server, built-in tool and unused-skill tables can now be sorted and browsed in 10-row pages; the MCP usage filter is applied before pagination, and table controls keep working after refreshes (#2303, #2285)
+- The Efficiency view's Models tab can now compare Copilot CLI's **HydraFusion** and **Auto** routers against ordinary models. The CLI keys a routed session's turn counters by the router you picked but its token metrics by the real models that served each leg, so the router showed up as "0 sessions, low sample" with every per-session ratio blank, while the real models were charged the router's tokens and cost without the matching edit turns. Routed sessions are now attributed to the router (priced at each leg's own model rate; a model you also picked by name during the session keeps its own usage), HydraFusion is filed under the GitHub Copilot vendor instead of "Other" (the bare `auto` id is left unclassified, since Kiro CLI records its sessions under `auto` too), and they display as "HydraFusion" / "Auto". A session that switched between the two routers is left as-is, since its token metrics cannot be split between them. The Usage view and the Session Log Viewer's HydraFusion Routing section still show the real models behind each leg
+
+### Bug Fixes
+- Efficiency → Models no longer inflates the cost per edit turn and cost per session of models that served HydraFusion or Auto legs (see the HydraFusion comparison feature above)
 
 ## [0.19.0] - 2026-10-02
 
