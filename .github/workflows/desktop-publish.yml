@@ -111,12 +111,33 @@ jobs:
             "release/latest.yml"
           )
 
-          gh release view $tag | Out-Null
+          $installer = "AI-Engineering-Fluency-Setup-$env:VERSION.exe"
+          $published = gh release view $tag --json assets --jq '.assets[].name' 2>$null
           $releaseExists = $LASTEXITCODE -eq 0
           $global:LASTEXITCODE = 0
 
           if ($releaseExists) {
-            gh release upload $tag $assets --clobber
+            # A published installer is immutable. Builds are not byte-for-byte
+            # reproducible, and the live update feed advertises the sha512 of
+            # the bytes that were published; replacing them would make every
+            # update download fail verification. On a re-run, keep what is
+            # there, upload only what is missing, and carry the *published*
+            # metadata forward so the feed step describes the real asset.
+            if (@($published) -contains $installer) {
+              if (@($published) -notcontains 'latest.yml') {
+                throw "Release $tag has the installer but no latest.yml, so its checksum cannot be recovered. Delete the release's assets and re-run to publish a fresh, consistent set."
+              }
+              Write-Host "Installer already published for $tag - keeping it and reusing its metadata."
+              gh release download $tag --pattern latest.yml --dir release --clobber
+              if ($LASTEXITCODE -ne 0) { throw "Could not download the published latest.yml for $tag" }
+              # Nothing else is uploaded either: a blockmap from this rebuild
+              # would not describe the published bytes. If one is missing the
+              # updater simply falls back to a full download.
+              $assets = @()
+            } else {
+              $assets = @($assets | Where-Object { @($published) -notcontains (Split-Path $_ -Leaf) })
+            }
+            if ($assets.Count -gt 0) { gh release upload $tag $assets }
           } else {
             # --latest=false: this repo ships several products; the desktop app
             # must not take the repo-wide "Latest release" badge from them.
