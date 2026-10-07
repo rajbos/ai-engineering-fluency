@@ -36,6 +36,7 @@ new_repo renreexp;  git mv src/oldName.ts src/newName.ts; echo "export { q } fro
 new_repo renfresh;  git mv src/oldName.ts src/newName.ts; echo "import './sideEffect';" >> src/newName.ts; commit; expect "rename + fresh side-effect import" 1
 new_repo importfresh; git mv src/oldName.ts src/newName.ts; echo "import { n } from './newName';" >> src/user.ts; commit; expect "importer gains a fresh import" 1
 new_repo moveIn;    mkdir -p examples; git mv src/oldName.ts examples/oldName.ts; commit; git mv examples/oldName.ts src/moved.ts; commit; expect "move from outside src/ into src/" 1
+new_repo samebase;  mkdir -p src/first src/second; echo 'export const T = 1;' > src/first/types.ts; echo 'export const T = 2;' > src/second/types.ts; echo "import { T } from './first/types';" > src/use.ts; git add -A; git commit -qm more; sed -i "s#./first/types#./second/types#" src/use.ts; commit; expect "same-basename module swap" 1
 new_repo importer;  git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./newName#" src/user.ts; commit; expect "rename + importer path update" 0
 new_repo importbad; git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./elsewhere#" src/user.ts; commit; expect "import swapped to non-renamed module" 1
 new_repo plain;     echo 'export const x = 1;' >> src/a.ts; commit;                     expect "plain source change, no test" 1

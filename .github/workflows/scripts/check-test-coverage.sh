@@ -31,8 +31,8 @@
 #     file in from outside the source trees (examples/, tests) needs a test.
 #   - Import-path update: a modified file whose added lines are all imports.
 #   An added import line is exempt only if it is the twin of a removed import
-#   line once module specifiers are reduced to their extension-less basename
-#   and a renamed file's new name is mapped back to its old one. A brand-new
+#   line once module specifiers are resolved to extension-less repo paths
+#   and a renamed file's new path is mapped back to its old one. A brand-new
 #   import, or one re-pointed at a different module, needs a test.
 #   Limit: only static single-line import / 'export ... from' / require
 #   statements are recognised; a reformatted multi-line import block counts as
@@ -114,41 +114,66 @@ diff_lines() {
   git diff -M -U0 --no-ext-diff "${RANGE[@]}" -- ${2:+"$2"} "$3"     | grep "^[$sign]" | grep -Ev "^[$sign]{3} " || true
 }
 
-# "<new basename> <old basename>" (no extension) for each file renamed in this PR.
+# strip_ext <path>: drop a trailing extension from the last path segment.
+strip_ext() {
+  if [[ "${1##*/}" == *.* ]]; then printf '%s' "${1%.*}"; else printf '%s' "$1"; fi
+}
+
+# collapse_path <path>: resolve "." and ".." segments lexically.
+collapse_path() {
+  local seg out=() IFS=/
+  for seg in $1; do
+    case "$seg" in
+      ""|.) ;;
+      ..) [ "${#out[@]}" -gt 0 ] && unset 'out[${#out[@]}-1]' ;;
+      *) out+=("$seg") ;;
+    esac
+  done
+  printf '%s' "${out[*]}"
+}
+
+# "<new path> <old path>" (no extension) for each file renamed in this PR.
 RENAME_MAP=""
 for i in "${!REC_PATH[@]}"; do
   if [ -n "${REC_OLD[$i]}" ]; then
-    nb="$(basename "${REC_PATH[$i]}")"; ob="$(basename "${REC_OLD[$i]}")"
-    RENAME_MAP="${RENAME_MAP}${nb%.*} ${ob%.*}"$'\n'
+    RENAME_MAP="${RENAME_MAP}$(strip_ext "${REC_PATH[$i]}") $(strip_ext "${REC_OLD[$i]}")"$'\n'
   fi
 done
 
-# norm_import <line>: an import line reduced to its statement with the module
-# specifier replaced by its extension-less basename, mapping a renamed file's
-# new basename back to its old one, so a rename-driven path update normalises
-# to the same string as the line it replaced. Leading +/- is dropped.
+# norm_import <line> <dir>: an import line with its module specifier resolved
+# to a repo-relative, extension-less path (relative to <dir>, the directory the
+# importing file lived in at that side of the diff), mapping a renamed file's
+# new path back to its old one. A rename-driven path update therefore
+# normalises to the same string as the line it replaced, while two different
+# modules that merely share a basename (./first/types vs ./second/types) stay
+# distinct. Bare package specifiers are kept as written. Leading +/- dropped.
 norm_import() {
-  local line="${1:1}" spec base old
+  local line="${1:1}" spec resolved old
   spec="$(printf '%s' "$line" | grep -oE "${Q}[^'\"]+${Q}" | tail -1 | tr -d "'\"")"
-  base="$(basename "$spec")"; base="${base%.*}"
-  old="$(printf '%s' "$RENAME_MAP" | awk -v b="$base" '$1==b {print $2; exit}')"
-  printf '%s' "${line/"$spec"/"${old:-$base}"}" | tr -s '[:space:]' ' '
+  resolved="$spec"
+  if [[ "$spec" == .* ]]; then
+    resolved="$(strip_ext "$(collapse_path "$2/$spec")")"
+    old="$(printf '%s' "$RENAME_MAP" | awk -v p="$resolved" '$1==p {print $2; exit}')"
+    resolved="${old:-$resolved}"
+  fi
+  printf '%s' "${line/"$spec"/"$resolved"}" | tr -s '[:space:]' ' '
 }
 
-# only_imports <added-lines> <removed-lines>: every added line is an import
-# statement AND is the rename-normalised twin of a distinct removed import
-# line, i.e. an existing import re-pointed at a renamed file. A brand-new
-# import, or one re-pointed at a different module, has no twin and fails.
+# only_imports <added-lines> <removed-lines> <added-dir> <removed-dir>: every
+# added line is an import statement AND is the rename-normalised twin of a
+# distinct removed import line, i.e. an existing import re-pointed at a renamed
+# file. A brand-new import, or one re-pointed at a different module, has no
+# twin and fails.
 only_imports() {
   local line removed="" r
   while IFS= read -r r; do
     [ -z "$r" ] && continue
-    [[ "+${r:1}" =~ $IMPORT_LINE_RE ]] && removed="${removed}$(norm_import "$r")"$'\n'
+    [[ "+${r:1}" =~ $IMPORT_LINE_RE ]] && removed="${removed}$(norm_import "$r" "$4")"$'\n'
   done <<< "$2"
   while IFS= read -r line; do
     [ -z "$line" ] && continue
     [[ "$line" =~ $IMPORT_LINE_RE ]] || return 1
-    r="$(norm_import "$line")"
+    r="$(norm_import "$line" "$3")"
     printf '%s' "$removed" | grep -qxF -- "$r" || return 1
     removed="$(printf '%s' "$removed" | awk -v r="$r" '!d && $0==r {d=1; next} {print}')"$'\n'
   done <<< "$1"
@@ -170,9 +195,9 @@ for i in "${!REC_PATH[@]}"; do
     # A rename only counts as a pure source rename when the old path was
     # already production source; moving a file in from examples/ or a test
     # directory introduces new production code.
-    elif [ -n "$old" ] && is_source_file "$old" && { [ "$added" = "0" ] || only_imports "$(diff_lines + "$old" "$file")" "$(diff_lines - "$old" "$file")"; }; then
+    elif [ -n "$old" ] && is_source_file "$old" && { [ "$added" = "0" ] || only_imports "$(diff_lines + "$old" "$file")" "$(diff_lines - "$old" "$file")" "$(dirname "$file")" "$(dirname "$old")"; }; then
       RENAME_ONLY_FILES="${RENAME_ONLY_FILES}${old} -> ${file}"$'\n'
-    elif [ -z "$old" ] && [ "$added" != "-" ] && only_imports "$(diff_lines + "" "$file")" "$(diff_lines - "" "$file")"; then
+    elif [ -z "$old" ] && [ "$added" != "-" ] && only_imports "$(diff_lines + "" "$file")" "$(diff_lines - "" "$file")" "$(dirname "$file")" "$(dirname "$file")"; then
       IMPORT_ONLY_FILES="${IMPORT_ONLY_FILES}${file}"$'\n'
     else
       SOURCE_FILES="${SOURCE_FILES}${file}"$'\n'
