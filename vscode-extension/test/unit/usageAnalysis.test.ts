@@ -25,6 +25,7 @@ import {
 } from '../../../src/usageAnalysis';
 import { createEmptyTaskClassificationResult } from '../../../src/taskClassification';
 import { calculateEstimatedCost } from '../../../src/tokenEstimation';
+import { normalizeMcpToolName } from '../../../src/workspaceHelpers';
 import type {
     UsageAnalysisPeriod,
     SessionUsageAnalysis,
@@ -1403,6 +1404,46 @@ test('analyzeSessionUsage: Copilot CLI autonomous "skill" tool call populates sk
     assert.equal(result.skillCalls?.total, 1);
     // Additive: the raw "skill" wrapper tool call is still counted as-is, unchanged.
     assert.equal(result.toolCalls.byTool['skill'], 1);
+});
+
+test('analyzeSessionUsage: Copilot CLI MCP tool.execution_start (data.mcpServerName) lands in mcpTools, not toolCalls', async () => {
+    // Copilot CLI never writes data.mcpServer; its MCP tool.execution_start events carry
+    // data.mcpServerName / data.mcpToolName, and toolName is `<server>-<tool>`, which
+    // isMcpTool() does not match. The server tag must route the call to mcpTools only.
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-5' }, timestamp: '2026-05-01T10:00:00Z' },
+        { type: 'user.message', data: { content: 'read the readme' } },
+        {
+            type: 'tool.execution_start',
+            data: {
+                toolCallId: 'c1',
+                toolName: 'github-mcp-server-get_file_contents',
+                mcpServerName: 'github-mcp-server',
+                mcpToolName: 'get_file_contents',
+                arguments: { owner: 'o', repo: 'r', path: 'README.md' },
+            },
+        },
+        {
+            type: 'tool.execution_complete',
+            data: { toolCallId: 'c1', success: true, result: { content: 'x'.repeat(400) } },
+        },
+        { type: 'tool.execution_start', data: { toolCallId: 'c2', toolName: 'view', arguments: { path: 'a.ts' } } },
+        { type: 'tool.execution_complete', data: { toolCallId: 'c2', success: true, result: { content: 'y'.repeat(400) } } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    assert.equal(result.mcpTools.total, 1);
+    assert.equal(result.mcpTools.byServer['github-mcp-server'], 1);
+    assert.equal(result.mcpTools.byTool[normalizeMcpToolName('github-mcp-server-get_file_contents')], 1);
+    assert.equal(result.mcpTools.byTool['mcp_io_github_git_get_file_contents'], 1);
+    // Not double-counted as a regular tool call.
+    assert.equal(result.toolCalls.byTool['github-mcp-server-get_file_contents'], undefined);
+    assert.equal(result.toolCalls.total, 1);
+    assert.equal(result.toolCalls.byTool['view'], 1);
+    // Output-token bookkeeping skips MCP results, like it does for prefix-matched MCP names.
+    assert.equal(result.toolCalls.outputTokensByTool?.['github-mcp-server-get_file_contents'], undefined);
+    assert.ok((result.toolCalls.outputTokensByTool?.['view'] ?? 0) > 0);
 });
 
 test('analyzeSessionUsage: Copilot CLI user-typed slash invocation (plain text, no wrapper) populates skillCalls', async () => {
