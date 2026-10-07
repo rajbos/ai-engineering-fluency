@@ -285,7 +285,7 @@ Three new insights in `insightsEngine.ts`, each a pure predicate over existing o
 |---|---|---|---|
 | `delegation-without-objective` | Delegating execution without defining objectives | Agent or delegation sessions whose `firstUserPrompt` is under N characters (for example 80), with no planning turn before the first edit, that go on to have ≥ 2 user corrections. Compare to the user's longer-prompt sessions. | ≥ 5 such sessions in 30 days **and** a correction rate ≥ 1.5× the long-prompt baseline |
 | `unreviewed-agent-merges` | Green checks treated as review | Repos with `agent-authored-pull-requests` present and `human-review-enforced` absent (from the readiness scan) | any; wording differs when the control is `unknown` ("could not verify") |
-| `review-burden-rising` | Rising review burden means poor scoping / weak knowledge | `aiReviewRequestedPrs` month-over-month ↑ together with correction rate ↑ in the same repo | both ↑ beyond tolerance, ≥ 5 PRs |
+| `review-burden-rising` | Rising review burden means poor scoping / weak knowledge | Cloud-agent PRs opened in the recent half of the PR window against the earlier half, together with reverted agent PRs or a rising correction rate in that repository's own sessions (see *Status: implemented* above for why not `aiReviewRequestedPrs`) | ≥ 5 recent agent PRs, recent ≥ 1.5× earlier, and reverts > 0 or rework ↑ |
 
 Each insight names the repo(s) and links to the tab that shows the evidence (Item 1 or 2
 sections). The first-prompt heuristic sits in `src/promptScoping.ts` with its own tests.
