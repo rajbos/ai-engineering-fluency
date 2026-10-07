@@ -436,6 +436,8 @@ export interface ThinkingEffortUsage {
 export interface SessionUsageAnalysis {
   toolCalls: ToolCallUsage;
   modeUsage: ModeUsage;
+  /** Per-interaction autonomy level (autopilot/auto vs supervised). Absent when no surface reported one. */
+  autonomyUsage?: AutonomyUsage;
   contextReferences: ContextReferenceUsage;
   mcpTools: McpToolUsage;
   /** Agent-skill invocation counts for this session. See {@link SkillCallUsage}. */
@@ -512,6 +514,18 @@ export interface ModeUsage {
   cliApp?: number; // Subset of CLI interactions: Copilot CLI sessions started via the Copilot desktop app (client_name: github/autopilot), broken out from `cli`
   claudeDesktop?: number; // Claude Code sessions launched from the standalone Claude Desktop app (entrypoint: 'claude-desktop'), broken out of `cli` so terminal usage isn't inflated by desktop-app usage
   claudeVsCode?: number; // Claude Code sessions running inside an IDE, e.g. the VS Code extension (entrypoint: 'claude-vscode' or any non-CLI/non-desktop value), broken out of `cli` for the same reason
+}
+
+/**
+ * How much autonomy the user granted per interaction, independent of the chat mode (ask/edit/agent).
+ * Sources: Copilot CLI `agentMode` on user.message, VS Code Copilot Chat `inputState.permissionLevel`,
+ * Claude Code `permissionMode` on human user entries.
+ */
+export interface AutonomyUsage {
+  autonomous: number; // Copilot "autopilot" / Claude Code "auto"
+  supervised: number; // Copilot "interactive" / "default", Claude Code "default" / "acceptEdits"
+  plan: number; // Plan mode
+  other: number; // Recognised-but-unclassified values (e.g. Claude "bypassPermissions")
 }
 
 export interface ContextReferenceUsage {
@@ -1101,6 +1115,8 @@ export interface UsageAnalysisPeriod {
   sessions: number;
   toolCalls: ToolCallUsage;
   modeUsage: ModeUsage;
+  /** Aggregated per-interaction autonomy level across the period's sessions. */
+  autonomyUsage?: AutonomyUsage;
   contextReferences: ContextReferenceUsage;
   mcpTools: McpToolUsage;
   /** Aggregated agent-skill invocation counts across the period's sessions. See {@link SkillCallUsage}. */
