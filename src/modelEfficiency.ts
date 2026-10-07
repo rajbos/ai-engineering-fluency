@@ -24,6 +24,7 @@
  */
 import type { DailyModelEfficiency, DailyModelEfficiencyEntry, DailyTokenStats, ModelEfficiencyCounters, ModelEfficiencyUsage, ModelPricing, ModelUsage, SessionFileCache } from './types';
 import { calculateEstimatedCost } from './tokenEstimation';
+import { addModelUsage } from './statsHelpers';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 
 // ---------------------------------------------------------------------------
@@ -389,10 +390,10 @@ function efficiencyModelKey(model: string, router: string | undefined, modelEffi
  * be compared as a model in its own right. Returns `modelUsage` unchanged when
  * the session was not routed. Pure: never mutates its input.
  *
- * Token counters are summed; `autoRouting` is deliberately not carried over —
- * it describes Copilot Chat's Auto sub-usage of a *real* model, which has no
- * meaning on a router entry, and this folded map only feeds the token-share
- * weights in {@link computeModelTokenShares}.
+ * Token fields are merged through the shared `addModelUsage` helper, so a new
+ * `ModelUsage` field is picked up here automatically. Per-session usage marks
+ * each model with `sessions` 0 or 1; the folded router entry keeps that
+ * meaning (one session, not one per real model) rather than the helper's sum.
  */
 export function attributeRoutedModelUsage(
 	modelUsage: ModelUsage | undefined,
@@ -401,18 +402,13 @@ export function attributeRoutedModelUsage(
 	const router = findRoutedSessionModel(modelUsage, modelEfficiency);
 	if (!router || !modelUsage) { return modelUsage; }
 	const result: ModelUsage = {};
+	let routerSessions = 0;
 	for (const [model, usage] of Object.entries(modelUsage)) {
 		const key = efficiencyModelKey(model, router, modelEfficiency);
-		if (isUnsafeObjectKey(key)) { continue; }
-		const entry = result[key] ?? (result[key] = { inputTokens: 0, outputTokens: 0, sessions: 0 });
-		entry.inputTokens += usage.inputTokens || 0;
-		entry.outputTokens += usage.outputTokens || 0;
-		if (usage.cachedReadTokens) { entry.cachedReadTokens = (entry.cachedReadTokens ?? 0) + usage.cachedReadTokens; }
-		if (usage.cacheCreationTokens) { entry.cacheCreationTokens = (entry.cacheCreationTokens ?? 0) + usage.cacheCreationTokens; }
-		if (usage.cacheCreation1hTokens) { entry.cacheCreation1hTokens = (entry.cacheCreation1hTokens ?? 0) + usage.cacheCreation1hTokens; }
-		if (usage.thinkingTokens) { entry.thinkingTokens = (entry.thinkingTokens ?? 0) + usage.thinkingTokens; }
-		entry.sessions = Math.max(entry.sessions, usage.sessions || 0);
+		addModelUsage(result, { [key]: usage });
+		if (key === router) { routerSessions = Math.max(routerSessions, usage.sessions || 0); }
 	}
+	if (result[router]) { result[router].sessions = routerSessions; }
 	return result;
 }
 
