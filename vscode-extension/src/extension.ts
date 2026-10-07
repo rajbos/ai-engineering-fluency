@@ -930,7 +930,7 @@ export interface CopilotBudgetGauge {
 	barCell: string;
 	/** Indented sub-row labels, from buildCopilotBudgetSubRowLabels(). */
 	subRowLabels: string[];
-	/** Where the budget figure came from, named in the table's footnote. */
+	/** Where the budget figure came from (not currently rendered in the tooltip). */
 	source: string;
 }
 
@@ -5840,8 +5840,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Builds and appends the cost sections: a GitHub Copilot budget gauge on top (spend vs.
 	 *  budget, health-colored), then a spend breakdown where every provider's bar is its share
-	 *  of total monthly spend (so those bars sum to 100%), and one combined footnote explaining
-	 *  the bar scales and where the budget value comes from. */
+	 *  of total monthly spend (so those bars sum to 100%). */
 	private appendProviderCostSection(tooltip: vscode.MarkdownString, detailedStats: DetailedStats): void {
 		const monthCosts = detailedStats.month.billingGroupCosts ?? {};
 		if (Object.keys(monthCosts).length === 0) { return; }
