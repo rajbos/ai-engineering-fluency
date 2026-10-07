@@ -167,6 +167,8 @@ Tracks:
 Detected from:
 - Response items with `kind: "mcpServersStarting"` and `didStartServerIds`
 - JSONL events with `type: "mcp.tool.call"` or containing `mcpServer` in data
+- Copilot CLI `tool.execution_start` events tagged with `data.mcpServerName` (counted as MCP
+  usage only, not as regular tool calls)
 
 Tracks:
 - Total MCP invocations
