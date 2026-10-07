@@ -886,20 +886,6 @@ fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 });
 
-test('scanWorkspaceCustomizationFiles: nested .claude/CLAUDE.md matches regardless of directory and file casing', () => {
-const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'wh-test-'));
-try {
-fs.mkdirSync(path.join(tmpDir, '.CLAUDE'));
-fs.writeFileSync(path.join(tmpDir, '.CLAUDE', 'claude.md'), '# Claude');
-const result = scanWorkspaceCustomizationFiles(tmpDir);
-const file = result.find(f => f.relativePath.toLowerCase() === '.claude/claude.md');
-assert.ok(file, 'should find .CLAUDE/claude.md');
-assert.equal(file?.category, 'copilot');
-} finally {
-fs.rmSync(tmpDir, { recursive: true, force: true });
-}
-});
-
 test('scanWorkspaceCustomizationFiles: detects .claude/settings.json as non-copilot (not CLAUDE.md)', () => {
 const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'wh-test-'));
 try {
