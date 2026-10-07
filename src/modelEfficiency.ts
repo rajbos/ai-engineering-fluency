@@ -388,6 +388,11 @@ function efficiencyModelKey(model: string, router: string | undefined, modelEffi
  * Re-keys a routed session's token usage onto the router id so the router can
  * be compared as a model in its own right. Returns `modelUsage` unchanged when
  * the session was not routed. Pure: never mutates its input.
+ *
+ * Token counters are summed; `autoRouting` is deliberately not carried over —
+ * it describes Copilot Chat's Auto sub-usage of a *real* model, which has no
+ * meaning on a router entry, and this folded map only feeds the token-share
+ * weights in {@link computeModelTokenShares}.
  */
 export function attributeRoutedModelUsage(
 	modelUsage: ModelUsage | undefined,
@@ -404,6 +409,7 @@ export function attributeRoutedModelUsage(
 		entry.outputTokens += usage.outputTokens || 0;
 		if (usage.cachedReadTokens) { entry.cachedReadTokens = (entry.cachedReadTokens ?? 0) + usage.cachedReadTokens; }
 		if (usage.cacheCreationTokens) { entry.cacheCreationTokens = (entry.cacheCreationTokens ?? 0) + usage.cacheCreationTokens; }
+		if (usage.cacheCreation1hTokens) { entry.cacheCreation1hTokens = (entry.cacheCreation1hTokens ?? 0) + usage.cacheCreation1hTokens; }
 		if (usage.thinkingTokens) { entry.thinkingTokens = (entry.thinkingTokens ?? 0) + usage.thinkingTokens; }
 		entry.sessions = Math.max(entry.sessions, usage.sessions || 0);
 	}

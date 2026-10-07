@@ -671,6 +671,16 @@ test('attributeRoutedModelUsage: folds the real models onto the router without m
     assert.equal(JSON.stringify(ROUTED_USAGE), before);
 });
 
+test('attributeRoutedModelUsage: sums every token counter, including cache writes and thinking', () => {
+    const usage: ModelUsage = {
+        a: { inputTokens: 10, outputTokens: 1, cachedReadTokens: 2, cacheCreationTokens: 3, cacheCreation1hTokens: 1, thinkingTokens: 4, sessions: 1 },
+        b: { inputTokens: 20, outputTokens: 2, cachedReadTokens: 4, cacheCreationTokens: 6, cacheCreation1hTokens: 2, thinkingTokens: 8, sessions: 1 },
+    };
+    assert.deepEqual(attributeRoutedModelUsage(usage, { hydrafusion: counters({ calls: 1 }) }), {
+        hydrafusion: { inputTokens: 30, outputTokens: 3, cachedReadTokens: 6, cacheCreationTokens: 9, cacheCreation1hTokens: 3, thinkingTokens: 12, sessions: 1 },
+    });
+});
+
 test('attributeRoutedModelUsage: a model also picked by name keeps its own usage', () => {
     // The user ran part of the session on claude-opus-5 directly, then switched
     // to hydrafusion: opus's usage stays its own, the other leg models fold.
