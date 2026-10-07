@@ -19,6 +19,7 @@ import { ContinueAdapter } from '../../../src/adapters/continueAdapter';
 import { EclipseAdapter } from '../../../src/adapters/eclipseAdapter';
 import { ClaudeCodeAdapter } from '../../../src/adapters/claudeCodeAdapter';
 import { ClaudeDesktopAdapter } from '../../../src/adapters/claudeDesktopAdapter';
+import { isMcpTool, extractMcpServerName } from '../../../src/workspaceHelpers';
 import { VisualStudioAdapter } from '../../../src/adapters/visualStudioAdapter';
 import { MistralVibeAdapter } from '../../../src/adapters/mistralVibeAdapter';
 import { GeminiCliAdapter } from '../../../src/adapters/geminiCliAdapter';
@@ -979,6 +980,36 @@ test('ClaudeDesktopAdapter.analyzeUsage: pairs tool_result with tool_use to reco
         assert.equal(result.toolCalls.latencyByTool?.Read.count, 1);
         assert.equal(result.toolCalls.byTool.Bash, 1);
         assert.equal(result.toolCalls.total, 2);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('ClaudeDesktopAdapter.analyzeUsage: MCP tool_use lands under mcpTools, consistent with where its outcome is recorded', async () => {
+    const adapter = new ClaudeDesktopAdapter(claudeDesktopDA, isMcpTool, extractMcpServerName, noopEstimateTokens);
+    const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'cowork-test-'));
+    const sessionFile = path.join(tmpDir, 'session.jsonl');
+    try {
+        const t = (offsetMs: number) => new Date(Date.UTC(2026, 4, 1, 10, 0, 0, offsetMs)).toISOString();
+        const events = [
+            { type: 'assistant', timestamp: t(0), message: { role: 'assistant', model: 'claude-sonnet-4-6', content: [{ type: 'tool_use', id: 'toolu_1', name: 'mcp__github__create_issue', input: {} }] } },
+            { type: 'user', timestamp: t(1500), parentUuid: 'x', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', is_error: true, content: 'nope' }] } },
+            { type: 'assistant', timestamp: t(2000), message: { role: 'assistant', model: 'claude-sonnet-4-6', content: [{ type: 'tool_use', id: 'toolu_2', name: 'Read', input: {} }] } },
+            { type: 'user', timestamp: t(2040), parentUuid: 'x', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_2', content: 'ok' }] } },
+        ];
+        fs.writeFileSync(sessionFile, events.map(e => JSON.stringify(e)).join('\n'));
+
+        const result = await adapter.analyzeUsage(sessionFile, desktopAdapterCtx);
+        assert.equal(result.toolCalls.total, 1, 'only the non-MCP call counts as a regular tool call');
+        assert.deepEqual(result.toolCalls.byTool, { Read: 1 });
+        assert.equal(result.mcpTools.total, 1);
+        assert.deepEqual(result.mcpTools.byServer, { github: 1 });
+        assert.deepEqual(result.mcpTools.byTool, { mcp__github__create_issue: 1 });
+        assert.deepEqual(result.mcpTools.completedByServer, { github: 1 });
+        assert.deepEqual(result.mcpTools.failuresByServer, { github: 1 });
+        assert.equal(result.mcpTools.latencyByServer?.github.sumMs, 1500);
+        assert.deepEqual(result.toolCalls.completedByTool, { Read: 1 });
+        assert.equal(result.toolCalls.failuresByTool, undefined);
     } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }

@@ -173,8 +173,17 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 		for (const c of content) {
 			if (c?.type !== 'tool_use') { continue; }
 			outcomes.noteToolUse(event, c);
-			analysis.toolCalls.total++;
 			const toolName = String(c.name || 'tool');
+			// Same split as ClaudeCodeAdapter.processAssistantEvent, so an `mcp__server__tool`
+			// start lands under the server its completion/latency is recorded against.
+			if (this.isMcpToolFn(toolName)) {
+				const server = this.extractMcpServerNameFn(toolName);
+				analysis.mcpTools.total++;
+				analysis.mcpTools.byServer[server] = (analysis.mcpTools.byServer[server] || 0) + 1;
+				analysis.mcpTools.byTool[toolName] = (analysis.mcpTools.byTool[toolName] || 0) + 1;
+				continue;
+			}
+			analysis.toolCalls.total++;
 			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
 			recordSkillCall(analysis, toolName, c.input);
 		}

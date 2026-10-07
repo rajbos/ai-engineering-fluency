@@ -3765,3 +3765,26 @@ test('analyzeSessionUsage: plan mode biases primary category to Planning', async
     const result = await analyzeSessionUsage(deps, '/fake-sessions/test.jsonl', line0);
     assert.equal(result.taskClassification.primaryCategory, 'Planning');
 });
+
+test('analyzeSessionUsage: tool result text is sized from detailedContent (Copilot CLI) and result[].value (JetBrains) shapes', async () => {
+    const t = (offsetMs: number) => new Date(Date.UTC(2026, 4, 1, 10, 0, 0, offsetMs)).toISOString();
+    const big = 'x'.repeat(4000);
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-4.6' }, timestamp: t(0) },
+        // Copilot CLI: detailedContent is the full output, content a trimmed preview -> the full output wins.
+        { type: 'tool.execution_start', data: { toolCallId: 'a', toolName: 'view', arguments: {} }, timestamp: t(100) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'a', success: true, result: { content: 'short', detailedContent: big } }, timestamp: t(150) },
+        // JetBrains: typed blocks under result.result with `value`.
+        { type: 'tool.execution_start', data: { toolCallId: 'b', toolName: 'read_file', arguments: {} }, timestamp: t(200) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'b', success: true, result: { result: [{ type: 'text', value: big }, { type: 'text', value: big }] } }, timestamp: t(260) },
+        // No text in any supported field -> nothing sized, call still completed.
+        { type: 'tool.execution_start', data: { toolCallId: 'c', toolName: 'glob', arguments: {} }, timestamp: t(300) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'c', success: true, result: {} }, timestamp: t(310) },
+    ];
+    const result = await analyzeSessionUsage(makeMockDeps(), '/home/user/.copilot/session-state/abc/events.jsonl', events.map(e => JSON.stringify(e)).join('\n'));
+    const out = result.toolCalls.outputTokensByTool!;
+    assert.ok(out.view > 500, `detailedContent should be sized, got ${out.view}`);
+    assert.ok(out.read_file > out.view, 'two JetBrains blocks should size larger than one detailedContent');
+    assert.equal(out.glob, undefined);
+    assert.deepEqual(result.toolCalls.completedByTool, { view: 1, read_file: 1, glob: 1 });
+});

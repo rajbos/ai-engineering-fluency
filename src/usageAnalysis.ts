@@ -2648,12 +2648,28 @@ function _asuApplyToolLoc(pending: { toolName: string; args: Record<string, stri
 export function extractToolResultText(content: unknown): string {
 	if (typeof content === 'string') { return content; }
 	if (Array.isArray(content)) {
+		// Claude / Copilot CLI blocks carry `text`; JetBrains result blocks carry `value`.
 		return content
-			.filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
-			.map((b: any) => b.text as string)
+			.filter((b: any) => b?.type === 'text' && (typeof b.text === 'string' || typeof b.value === 'string'))
+			.map((b: any) => (typeof b.text === 'string' ? b.text : b.value) as string)
 			.join('');
 	}
 	return '';
+}
+
+/**
+ * Text of a `tool.execution_complete` result across the shapes the CLI family writes:
+ * Copilot CLI's full output lives in `result.detailedContent` (preferred, as the token
+ * estimator does) with `result.content` as the trimmed fallback; JetBrains puts typed
+ * blocks in `result.result[]` with a `value` field. Empty string when none apply.
+ */
+export function extractToolExecutionResultText(result: unknown): string {
+	if (!result || typeof result !== 'object') { return ''; }
+	const r = result as Record<string, unknown>;
+	if (typeof r.detailedContent === 'string' && r.detailedContent) { return r.detailedContent; }
+	const fromContent = extractToolResultText(r.content);
+	if (fromContent) { return fromContent; }
+	return extractToolResultText(r.result);
 }
 
 /** Handle tool.execution_complete — applies LOC tracking for edit/create and counts output tokens for all non-MCP tools. */
@@ -2671,8 +2687,8 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 	}
 	// Size result text only for calls with an explicit verdict: outputTokensByTool is divided by
 	// completedByTool (cost-vs-speed map), so a verdict-less result must not join the numerator either.
-	if (typeof success !== 'boolean' || !result?.content || pending.mcpServerName || isMcpTool(pending.toolName)) { return; }
-	const resultText = extractToolResultText(result.content);
+	if (typeof success !== 'boolean' || pending.mcpServerName || isMcpTool(pending.toolName)) { return; }
+	const resultText = extractToolExecutionResultText(result);
 	if (!resultText) { return; }
 	const tokens = estimateTokensFromText(resultText);
 	if (!analysis.toolCalls.outputTokensByTool) { analysis.toolCalls.outputTokensByTool = {}; }
