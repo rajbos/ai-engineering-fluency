@@ -1535,7 +1535,17 @@ function renderLayout(data: SessionLogData): void {
 	const actualStats = aggregateActualUsageStats(data);
 	const modeStats = aggregateModeStats(data);
 
-	const summaryStats: SummaryStats = {
+	const summaryStats = _buildSummaryStats(tokenStats, actualStats, modeStats);
+
+	_renderLayoutBody(root, data, summaryStats, tokenStats.totalTokens, actualStats);
+}
+
+function _buildSummaryStats(
+	tokenStats: ReturnType<typeof aggregateTokenStats>,
+	actualStats: ReturnType<typeof aggregateActualUsageStats>,
+	modeStats: ReturnType<typeof aggregateModeStats>,
+): SummaryStats {
+	return {
 		totalTokens: tokenStats.totalTokens,
 		totalThinkingTokens: tokenStats.totalThinkingTokens,
 		totalSubAgentCalls: tokenStats.totalSubAgentCalls,
@@ -1561,7 +1571,15 @@ function renderLayout(data: SessionLogData): void {
 		primaryModeLabel: modeStats.primaryModeLabel,
 		modeSubLabel: modeStats.modeSubLabel,
 	};
+}
 
+function _renderLayoutBody(
+	root: HTMLElement,
+	data: SessionLogData,
+	summaryStats: SummaryStats,
+	totalTokens: number,
+	actualStats: ReturnType<typeof aggregateActualUsageStats>,
+): void {
 	// Computed once and shared by both renderers below so the HydraFusion section's
 	// "jump to step" links and the Session Steps Overview table's expandable legs
 	// agree on which turn is which. `undefined` for the overwhelming majority of
@@ -1578,7 +1596,7 @@ ${renderEditorInfoPanel(data)}
 ${renderSummaryCards(data, summaryStats)}
 
 ${renderSessionActualUsage(
-	data, tokenStats.totalTokens, actualStats.turnsWithActual,
+	data, totalTokens, actualStats.turnsWithActual,
 	actualStats.actualPromptTotal, actualStats.actualCompletionTotal, actualStats.actualTotal,
 	actualStats.aggregatedBreakdown,
 )}
