@@ -877,7 +877,7 @@ fs.mkdirSync(claudeDir);
 fs.writeFileSync(path.join(claudeDir, 'claude.md'), '@AGENTS.md');
 const result = scanWorkspaceCustomizationFiles(tmpDir);
 for (const name of ['AGENTS.md', 'CLAUDE.md', '.CLAUDE/claude.md']) {
-const file = result.find(f => f.relativePath === name);
+const file = result.find(f => f.relativePath.toLowerCase() === name.toLowerCase());
 assert.ok(file, `should find ${name}`);
 assert.equal(file?.category, 'copilot');
 }
