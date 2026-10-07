@@ -60,8 +60,8 @@ git diff --name-only <last-cli-tag>...HEAD -- cli/
 # Visual Studio extension
 git diff --name-only <last-vs-tag>...HEAD -- visualstudio-extension/
 
-# JetBrains plugin (its own code plus the webview bundles and CLI it packages)
-git diff --name-only <last-jetbrains-tag>...HEAD -- jetbrains-plugin/ vscode-extension/src/webview/ cli/src/ src/
+# JetBrains plugin (its own code plus the webview bundles, their localization sidecars, and the CLI it packages)
+git diff --name-only <last-jetbrains-tag>...HEAD -- jetbrains-plugin/ vscode-extension/src/webview/ vscode-extension/package.nls.json vscode-extension/package.nls.zh-cn.json cli/src/ src/
 
 # Desktop app (its own code plus everything it bundles or imports — see note below)
 git diff --name-only <last-desktop-tag>...HEAD -- desktop/ vscode-extension/src/ vscode-extension/package.nls.json vscode-extension/package.nls.zh-cn.json cli/src/ src/
