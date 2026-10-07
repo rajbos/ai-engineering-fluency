@@ -320,7 +320,7 @@ test('formatProviderCostTable: the budget gauge, its sub-rows and the share head
 	const headingIndex = markdown.indexOf('| **Share of total spend** |  |  |');
 	assert.ok(headingIndex > subRows[2], 'the share heading follows the sub-rows');
 	assert.ok(headingIndex < markdown.indexOf('| GitHub Copilot'), 'the share heading precedes the providers');
-	assert.ok(markdown.trimEnd().endsWith('*Budget from Copilot plan quota*'), 'expected the budget-source footnote');
+	assert.ok(!markdown.includes('Budget from'), 'the budget-source footnote is no longer rendered');
 });
 
 test('formatProviderCostTable: with no budget there is no gauge, share heading or footnote', () => {

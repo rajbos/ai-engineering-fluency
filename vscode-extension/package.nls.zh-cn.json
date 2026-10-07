@@ -135,7 +135,6 @@
   "tooltip.waterLabel": "水资源估算",
   "tooltip.costsByProvider": "按提供商的成本 —— 当前月",
   "tooltip.shareOfTotalSpend": "总支出占比",
-  "tooltip.budgetFromSource": "预算来自 {0}",
   "tooltip.copilotBudgetLabel": "Copilot 预算",
   "tooltip.budgetRemaining": "剩余 {0}",
   "tooltip.budgetOverBy": "超出 {0}",

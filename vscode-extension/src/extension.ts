@@ -930,14 +930,14 @@ export interface CopilotBudgetGauge {
 	barCell: string;
 	/** Indented sub-row labels, from buildCopilotBudgetSubRowLabels(). */
 	subRowLabels: string[];
-	/** Where the budget figure came from, named in the table's footnote. */
+	/** Where the budget figure came from (not currently rendered in the tooltip). */
 	source: string;
 }
 
 /**
  * Formats the "💰 Costs by Provider" table for the status bar hover tooltip: the Copilot Budget
  * gauge and its sub-rows on top (when a budget is set), then every provider's share of total
- * monthly spend, then the footnote naming the budget's source.
+ * monthly spend.
  *
  * The section title doubles as the table's header row. A title line above an empty `|  |  |  |`
  * header left a blank band between the two, wasting vertical space in a popup narrow enough that
@@ -967,9 +967,6 @@ export function formatProviderCostTable(
 	for (const provider of providers) {
 		const cost = monthCosts[provider] ?? 0;
 		markdown += `| ${pad(provider)} | ${pad(`$${cost.toFixed(2)}`)} | ${shareBarCell(totalCost > 0 ? cost / totalCost : 0)} |\n`;
-	}
-	if (gauge) {
-		markdown += `\n*${l10n.t('tooltip.budgetFromSource', gauge.source)}*\n`;
 	}
 	return markdown;
 }
@@ -5847,8 +5844,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Builds and appends the cost sections: a GitHub Copilot budget gauge on top (spend vs.
 	 *  budget, health-colored), then a spend breakdown where every provider's bar is its share
-	 *  of total monthly spend (so those bars sum to 100%), and one combined footnote explaining
-	 *  the bar scales and where the budget value comes from. */
+	 *  of total monthly spend (so those bars sum to 100%). */
 	private appendProviderCostSection(tooltip: vscode.MarkdownString, detailedStats: DetailedStats): void {
 		const monthCosts = detailedStats.month.billingGroupCosts ?? {};
 		if (Object.keys(monthCosts).length === 0) { return; }
