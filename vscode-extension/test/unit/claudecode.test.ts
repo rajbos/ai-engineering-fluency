@@ -800,7 +800,9 @@ const user = (mode: string | undefined, id: string) => ({
 type: 'user', uuid: id, message: { role: 'user', content: 'hi' }, timestamp: '2026-10-04T09:00:00.000Z',
 ...(mode ? { permissionMode: mode } : {}),
 });
-const events = [user('default', 'a'), user('auto', 'b'), user('auto', 'c'), user('acceptEdits', 'd'), user(undefined, 'e')];
+const toolResult = { type: 'user', uuid: 'tr', permissionMode: 'auto', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] }, timestamp: '2026-10-04T09:00:00.000Z' };
+const synthetic = { type: 'user', uuid: 'sy', permissionMode: 'auto', message: { role: 'user', content: '<system-reminder>generated</system-reminder>' }, timestamp: '2026-10-04T09:00:00.000Z' };
+const events = [user('default', 'a'), user('auto', 'b'), toolResult, synthetic, user('auto', 'c'), user('acceptEdits', 'd'), user(undefined, 'e')];
 const filePath = createTempSession(events);
 try {
 const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);

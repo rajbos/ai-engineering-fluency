@@ -1110,7 +1110,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// v74: Distribute the debug-log exact Copilot cost (nano-AIU) over each session's dailyRollups:
 	// aggregatePeriodStats reads exact cost from rollups only, so existing entries would keep
 	// showing an estimate in Today/month/30-day totals until their file changed.
-	private static readonly CACHE_VERSION = 75;
+	// v76: Add per-session autonomyUsage (autopilot/auto vs supervised) to usageAnalysis: cache hits
+	// skip re-analysis, so existing entries would lack the metric until their file changed.
+	private static readonly CACHE_VERSION = 76;
 	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
 	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	/**
