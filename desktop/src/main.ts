@@ -266,7 +266,11 @@ body {
 // reloading a view) must join the run in progress instead of starting another.
 const inFlight = new Map<string, Promise<unknown>>();
 
-function shareInFlight<T>(key: string, run: () => Promise<T>): Promise<T> {
+function shareInFlight<T>(name: string, run: () => Promise<T>): Promise<T> {
+    // Keyed by data generation as well as name: a reader that starts after a
+    // refresh has committed must not join a promise from before it, which may
+    // already hold the old result and be waiting only for its cleanup to run.
+    const key = `${name}:${dataGeneration}`;
     const running = inFlight.get(key) as Promise<T> | undefined;
     if (running) { return running; }
     const started = run().finally(() => { inFlight.delete(key); });
