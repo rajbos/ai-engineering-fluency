@@ -1,6 +1,6 @@
 import type { DailyTokenStats, ChartDataPayload, ModelUsage, LanguageUsage } from './types';
 import { addModelUsage, COPILOT_EDITOR_NAMES } from './statsHelpers';
-import { mergeDailyModelEfficiency } from './modelEfficiency';
+import { mergeDailyModelEfficiency, SYNTHETIC_ROUTER_MODELS } from './modelEfficiency';
 import { getModelDisplayName, getCustomProviderGroup, getModelLookupCandidates } from './webview/shared/modelUtils';
 import { TASK_CATEGORIES, type TaskCategory } from './taskClassification';
 
@@ -46,6 +46,9 @@ const MODEL_PROVIDER_PREFIXES: Array<[string, string]> = [
 export function getModelBillingProvider(modelId: string): string {
 	const customGroup = getCustomProviderGroup(modelId);
 	if (customGroup) { return customGroup; }
+	// Copilot's own routers are not any vendor's model: the real models behind
+	// them vary per turn, so the only honest provider is the one running the router.
+	if (SYNTHETIC_ROUTER_MODELS.has(modelId)) { return 'GitHub Copilot'; }
 	const match = getModelLookupCandidates(modelId)
 		.flatMap(candidate => MODEL_PROVIDER_PREFIXES.filter(([prefix]) => candidate.toLowerCase().startsWith(prefix)))
 		.at(0);

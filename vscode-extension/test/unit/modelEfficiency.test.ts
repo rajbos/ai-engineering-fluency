@@ -14,13 +14,16 @@ import {
     computeModelTokenShares,
     accumulateDailyModelTokens,
     accumulateDailyModelCounters,
+    findRoutedSessionModel,
+    attributeRoutedModelUsage,
+    buildSessionEfficiencyAttribution,
     accumulateDayAndEditorModelTokens,
     accumulateDayAndEditorModelCounters,
     mergeDailyModelEfficiency,
     type EfficiencyTurn,
     type SessionEfficiencyAttribution,
 } from '../../../src/modelEfficiency';
-import type { DailyModelEfficiency, DailyModelEfficiencyEntry, DailyTokenStats, ModelEfficiencyCounters, ModelEfficiencyUsage, ModelPricing, ModelUsage } from '../../../src/types';
+import type { DailyModelEfficiency, DailyModelEfficiencyEntry, DailyTokenStats, ModelEfficiencyCounters, ModelEfficiencyUsage, ModelPricing, ModelUsage, SessionFileCache } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -607,4 +610,122 @@ test('accumulateDayAndEditorModelCounters: a prototype-polluting model id is dro
 	assert.equal((({}) as Record<string, unknown>).calls, undefined, 'Object.prototype must not gain counters');
 	assert.equal(Object.prototype.hasOwnProperty.call(entry.modelEfficiency ?? {}, '__proto__'), false);
 	assert.equal(Object.prototype.hasOwnProperty.call(entry.editorModelEfficiency?.['VS Code'] ?? {}, '__proto__'), false);
+});
+
+// ── Routed sessions: hydrafusion / auto (Copilot CLI) ─────────────────────────
+//
+// The CLI keys a routed session's turn counters by the id the user picked
+// (`hydrafusion`, `auto`) but its shutdown token metrics by the real models
+// that served each leg. Both halves have to land on one key for the router to
+// be comparable — and for the real models not to be charged for turns they
+// never ran under their own name.
+
+const ROUTED_USAGE: ModelUsage = {
+    'gpt-5.6-sol': { inputTokens: 800, outputTokens: 100, cachedReadTokens: 300, sessions: 1 },
+    'claude-opus-5': { inputTokens: 200, outputTokens: 100, sessions: 1 },
+};
+const ROUTED_PRICING: { [k: string]: ModelPricing } = {
+    'gpt-5.6-sol': { inputCostPerMillion: 1, outputCostPerMillion: 2 } as ModelPricing,
+    'claude-opus-5': { inputCostPerMillion: 10, outputCostPerMillion: 20 } as ModelPricing,
+};
+
+test('findRoutedSessionModel: detects a router whose turns ran on other models', () => {
+    assert.equal(findRoutedSessionModel(ROUTED_USAGE, { hydrafusion: counters({ calls: 3 }) }), 'hydrafusion');
+    assert.equal(findRoutedSessionModel(ROUTED_USAGE, { auto: counters({ calls: 3 }) }), 'auto');
+});
+
+test('findRoutedSessionModel: a session whose usage is already keyed by the router is not routed', () => {
+    // VS Code Chat records Auto under `auto` on both sides — nothing to re-key.
+    const usage: ModelUsage = { auto: { inputTokens: 100, outputTokens: 10, sessions: 1 } };
+    assert.equal(findRoutedSessionModel(usage, { auto: counters({ calls: 1 }) }), undefined);
+});
+
+test('findRoutedSessionModel: plain sessions and missing inputs are not routed', () => {
+    assert.equal(findRoutedSessionModel(ROUTED_USAGE, { 'gpt-5.6-sol': counters({ calls: 1 }) }), undefined);
+    assert.equal(findRoutedSessionModel(undefined, undefined), undefined);
+    assert.equal(findRoutedSessionModel(ROUTED_USAGE, undefined), undefined);
+});
+
+test('attributeRoutedModelUsage: folds the real models onto the router without mutating the input', () => {
+    const before = JSON.stringify(ROUTED_USAGE);
+    const out = attributeRoutedModelUsage(ROUTED_USAGE, { hydrafusion: counters({ calls: 3, editTurns: 2 }) });
+    assert.deepEqual(out, {
+        hydrafusion: { inputTokens: 1000, outputTokens: 200, cachedReadTokens: 300, sessions: 1 },
+    });
+    assert.equal(JSON.stringify(ROUTED_USAGE), before);
+});
+
+test('attributeRoutedModelUsage: a model also picked by name keeps its own usage', () => {
+    // The user ran part of the session on claude-opus-5 directly, then switched
+    // to hydrafusion: opus's usage stays its own, the other leg models fold.
+    const out = attributeRoutedModelUsage(ROUTED_USAGE, {
+        hydrafusion: counters({ calls: 2 }),
+        'claude-opus-5': counters({ calls: 1 }),
+    });
+    assert.deepEqual(Object.keys(out ?? {}).sort(), ['claude-opus-5', 'hydrafusion']);
+    assert.equal(out?.['hydrafusion'].inputTokens, 800);
+    assert.equal(out?.['claude-opus-5'].inputTokens, 200);
+});
+
+test('attributeRoutedModelUsage: returns the input untouched for an unrouted session', () => {
+    assert.equal(attributeRoutedModelUsage(ROUTED_USAGE, { 'gpt-5.6-sol': counters({ calls: 1 }) }), ROUTED_USAGE);
+    assert.equal(attributeRoutedModelUsage(undefined, { hydrafusion: counters({ calls: 1 }) }), undefined);
+});
+
+test('accumulateDailyModelTokens: a routed session lands on the router, priced at each real model\'s rate', () => {
+    const daily: DailyModelEfficiency = {};
+    accumulateDailyModelTokens(daily, ROUTED_USAGE, ROUTED_PRICING, { hydrafusion: counters({ calls: 3, editTurns: 2 }) });
+    assert.deepEqual(Object.keys(daily), ['hydrafusion']);
+    assert.equal(daily['hydrafusion'].inputTokens, 1000);
+    assert.equal(daily['hydrafusion'].outputTokens, 200);
+    assert.equal(daily['hydrafusion'].cachedReadTokens, 300);
+    // One session, not one per real model the router spread it over.
+    assert.equal(daily['hydrafusion'].sessions, 1);
+    // sol: 800e-6*1 + 100e-6*2 = 0.001; opus: 200e-6*10 + 100e-6*20 = 0.004
+    assert.ok(Math.abs(daily['hydrafusion'].cost - 0.005) < 1e-9, `cost ${daily['hydrafusion'].cost}`);
+});
+
+test('accumulateDailyModelTokens: `auto` is re-keyed the same way as hydrafusion', () => {
+    const daily: DailyModelEfficiency = {};
+    accumulateDailyModelTokens(daily, ROUTED_USAGE, ROUTED_PRICING, { auto: counters({ calls: 1 }) });
+    assert.deepEqual(Object.keys(daily), ['auto']);
+    assert.equal(daily['auto'].sessions, 1);
+});
+
+test('accumulateDailyModelTokens: without turn counters nothing is re-keyed', () => {
+    const daily: DailyModelEfficiency = {};
+    accumulateDailyModelTokens(daily, ROUTED_USAGE, ROUTED_PRICING);
+    assert.deepEqual(Object.keys(daily).sort(), ['claude-opus-5', 'gpt-5.6-sol']);
+});
+
+test('accumulateDailyModelCounters: a routed session\'s session share and LOC follow its turn counters', () => {
+    const daily: DailyModelEfficiency = {};
+    const input: SessionEfficiencyAttribution = {
+        modelUsage: attributeRoutedModelUsage(ROUTED_USAGE, { hydrafusion: counters({ calls: 3, editTurns: 2, oneShotEditTurns: 1 }) }),
+        modelEfficiency: { hydrafusion: counters({ calls: 3, editTurns: 2, oneShotEditTurns: 1 }) },
+        activeDurationMs: 120_000, linesAdded: 40, linesRemoved: 10, applies: 0, codeBlocks: 0,
+    };
+    accumulateDailyModelCounters(daily, input);
+    assert.deepEqual(Object.keys(daily), ['hydrafusion']);
+    assert.equal(daily['hydrafusion'].sessionShare, 1);
+    assert.equal(daily['hydrafusion'].editTurns, 2);
+    assert.equal(daily['hydrafusion'].activeDurationMs, 120_000);
+    assert.equal(daily['hydrafusion'].linesAdded, 40);
+});
+
+test('buildSessionEfficiencyAttribution: re-keys a routed session cache entry', () => {
+    const attribution = buildSessionEfficiencyAttribution({
+        modelUsage: ROUTED_USAGE,
+        usageAnalysis: { modelEfficiency: { hydrafusion: counters({ calls: 2 }) } },
+    } as unknown as SessionFileCache);
+    assert.deepEqual(Object.keys(attribution.modelUsage ?? {}), ['hydrafusion']);
+    assert.equal(attribution.modelUsage?.['hydrafusion'].inputTokens, 1000);
+});
+
+test('accumulateDayAndEditorModelTokens: a routed session is re-keyed in both the day total and the editor slice', () => {
+    const entry = emptyDay();
+    accumulateDayAndEditorModelTokens(entry, 'Copilot CLI', ROUTED_USAGE, ROUTED_PRICING, { hydrafusion: counters({ calls: 1 }) });
+    assert.deepEqual(Object.keys(entry.modelEfficiency ?? {}), ['hydrafusion']);
+    assert.deepEqual(Object.keys(entry.editorModelEfficiency?.['Copilot CLI'] ?? {}), ['hydrafusion']);
+    assert.deepEqual(mergedEditorSlices(entry), entry.modelEfficiency);
 });

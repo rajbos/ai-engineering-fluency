@@ -339,27 +339,102 @@ export function computeModelTokenShares(input: SessionEfficiencyAttribution): Ma
 	return weights;
 }
 
+
+/**
+ * Synthetic model ids the Copilot CLI offers in its model picker. Neither is a
+ * model: each turn is routed to one or more real models, and the CLI's
+ * `session.shutdown` metrics are keyed by the models that actually ran — while
+ * the session's turn counters are keyed by the id the user picked.
+ */
+export const SYNTHETIC_ROUTER_MODELS: ReadonlySet<string> = new Set(['hydrafusion', 'auto']);
+
+/**
+ * The synthetic router a session ran under, when its token usage is keyed by
+ * the real models that served the router's turns.
+ *
+ * Without this the router shows up in the Efficiency view's model comparison
+ * with edit turns but zero sessions, tokens and cost, while the real models
+ * absorb its tokens and cost without the matching edit turns — distorting
+ * both sides. Returns `undefined` when the session was not routed, or when its
+ * usage is already keyed by the router (VS Code Chat records Auto that way).
+ */
+export function findRoutedSessionModel(
+	modelUsage: ModelUsage | undefined,
+	modelEfficiency: ModelEfficiencyUsage | undefined,
+): string | undefined {
+	for (const model of Object.keys(modelEfficiency ?? {})) {
+		if (SYNTHETIC_ROUTER_MODELS.has(model) && !modelUsage?.[model]) { return model; }
+	}
+	return undefined;
+}
+
+/**
+ * The key a usage entry lands on for efficiency attribution: the router when
+ * the session was routed and this model only served the router's turns, else
+ * the model itself. A model that also ran turns under its own name (picked
+ * directly for part of the session) keeps its own usage.
+ */
+function efficiencyModelKey(model: string, router: string | undefined, modelEfficiency: ModelEfficiencyUsage | undefined): string {
+	return router && !modelEfficiency?.[model] ? router : model;
+}
+
+/**
+ * Re-keys a routed session's token usage onto the router id so the router can
+ * be compared as a model in its own right. Returns `modelUsage` unchanged when
+ * the session was not routed. Pure: never mutates its input.
+ */
+export function attributeRoutedModelUsage(
+	modelUsage: ModelUsage | undefined,
+	modelEfficiency: ModelEfficiencyUsage | undefined,
+): ModelUsage | undefined {
+	const router = findRoutedSessionModel(modelUsage, modelEfficiency);
+	if (!router || !modelUsage) { return modelUsage; }
+	const result: ModelUsage = {};
+	for (const [model, usage] of Object.entries(modelUsage)) {
+		const key = efficiencyModelKey(model, router, modelEfficiency);
+		if (isUnsafeObjectKey(key)) { continue; }
+		const entry = result[key] ?? (result[key] = { inputTokens: 0, outputTokens: 0, sessions: 0 });
+		entry.inputTokens += usage.inputTokens || 0;
+		entry.outputTokens += usage.outputTokens || 0;
+		if (usage.cachedReadTokens) { entry.cachedReadTokens = (entry.cachedReadTokens ?? 0) + usage.cachedReadTokens; }
+		if (usage.cacheCreationTokens) { entry.cacheCreationTokens = (entry.cacheCreationTokens ?? 0) + usage.cacheCreationTokens; }
+		if (usage.thinkingTokens) { entry.thinkingTokens = (entry.thinkingTokens ?? 0) + usage.thinkingTokens; }
+		entry.sessions = Math.max(entry.sessions, usage.sessions || 0);
+	}
+	return result;
+}
+
 /**
  * Folds one day's per-model token usage (and its estimated provider cost) into a
  * daily efficiency aggregate, incrementing the per-model session count.
  *
  * Call this once per session *per day* it was active, so token and cost totals
  * line up with the day's other token series.
+ *
+ * `modelEfficiency` is the session's turn counters. When they show the session
+ * ran under a synthetic router (see {@link findRoutedSessionModel}), the usage
+ * of the real models that served it lands on the router's entry instead — priced
+ * at each real model's own rate, since the router has no price of its own.
  */
 export function accumulateDailyModelTokens(
 	target: DailyModelEfficiency,
 	modelUsage: ModelUsage | undefined,
-	modelPricing: { [key: string]: ModelPricing } = {}
+	modelPricing: { [key: string]: ModelPricing } = {},
+	modelEfficiency?: ModelEfficiencyUsage,
 ): void {
 	if (!modelUsage) { return; }
+	const router = findRoutedSessionModel(modelUsage, modelEfficiency);
+	const counted = new Set<string>();
 	for (const [model, usage] of Object.entries(modelUsage)) {
-		const entry = ensureDailyEntry(target, model);
+		const key = efficiencyModelKey(model, router, modelEfficiency);
+		const entry = ensureDailyEntry(target, key);
 		if (!entry) { continue; }
 		entry.inputTokens += usage.inputTokens || 0;
 		entry.outputTokens += usage.outputTokens || 0;
 		entry.cachedReadTokens += usage.cachedReadTokens || 0;
 		entry.cost += calculateEstimatedCost({ [model]: usage }, modelPricing);
-		entry.sessions += 1;
+		// One session, however many real models the router spread it over.
+		if (!counted.has(key)) { entry.sessions += 1; counted.add(key); }
 	}
 }
 
@@ -411,7 +486,9 @@ export function accumulateDailyModelCounters(target: DailyModelEfficiency, input
 export function buildSessionEfficiencyAttribution(sessionData: SessionFileCache): SessionEfficiencyAttribution {
 	const analysis = sessionData.usageAnalysis;
 	return {
-		modelUsage: sessionData.modelUsage,
+		// Routed sessions are re-keyed so the router's token share lands on the
+		// same entry as its turn counters (see findRoutedSessionModel).
+		modelUsage: attributeRoutedModelUsage(sessionData.modelUsage, analysis?.modelEfficiency),
 		modelEfficiency: analysis?.modelEfficiency,
 		activeDurationMs: analysis?.sessionDuration?.activeDurationMs,
 		linesAdded: sessionData.linesAdded ?? analysis?.editScope?.linesAdded,
@@ -556,16 +633,19 @@ function getOrCreateEditorSlice(entry: DailyTokenStats, editor: string): DailyMo
 /**
  * Folds a session's token/cost usage into both the day total and the editor
  * slice. See {@link getOrCreateEditorSlice} for why these are not separate calls.
+ * `modelEfficiency` is the session's turn counters, used to re-key routed
+ * sessions (see {@link accumulateDailyModelTokens}).
  */
 export function accumulateDayAndEditorModelTokens(
 	entry: DailyTokenStats,
 	editor: string,
 	modelUsage: ModelUsage,
 	pricing: { [model: string]: ModelPricing },
+	modelEfficiency?: ModelEfficiencyUsage,
 ): void {
 	const slice = getOrCreateEditorSlice(entry, editor);
-	accumulateDailyModelTokens(entry.modelEfficiency!, modelUsage, pricing);
-	accumulateDailyModelTokens(slice, modelUsage, pricing);
+	accumulateDailyModelTokens(entry.modelEfficiency!, modelUsage, pricing, modelEfficiency);
+	accumulateDailyModelTokens(slice, modelUsage, pricing, modelEfficiency);
 }
 
 /**
