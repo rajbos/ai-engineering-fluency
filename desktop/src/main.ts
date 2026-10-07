@@ -655,6 +655,10 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
     const themeKind = isDark ? 'vscode-dark' : 'vscode-light';
 
     let initialDataScript = '';
+    // Inline script appended after the view bundle, for messages the page must
+    // receive once its own listener exists. Part of this page's markup, so it
+    // can never reach a different navigation.
+    let afterBundleScript = '';
     let scriptFile = `${panel}.js`;
     let title = 'AI Engineering Fluency';
 
@@ -728,13 +732,12 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
         }));
         const toolFamilies = getToolFamilies();
         const detailedSessionFiles = await buildDetailedSessionFiles(sessionFiles);
-        if (detailedSessionFiles.length === 0 && mainWindow && !mainWindow.isDestroyed()) {
+        if (detailedSessionFiles.length === 0) {
             // The shared view reads an empty initial list as "still loading" and
             // waits for the host's completion message; without it the Session
-            // Files tab spins forever. Send it once this page has loaded.
-            mainWindow.webContents.once('did-finish-load', () => {
-                sendLoadingMessage({ command: 'sessionFilesLoaded', detailedSessionFiles: [] });
-            });
+            // Files tab spins forever. Post it from the page itself, right after
+            // the bundle has registered its listener.
+            afterBundleScript = `window.postMessage(${JSON.stringify({ command: 'sessionFilesLoaded', detailedSessionFiles: [] })}, '*');`;
         }
         const diagData = {
             report: buildDiagnosticReport(files.length),
@@ -790,7 +793,8 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
 <body>
     <div id="root"></div>
     <script nonce="${nonce}">${themeScript}${initialDataScript}${JSON_CONFIG_SCRIPT}</script>
-    <script nonce="${nonce}" src="app://static/${scriptFile}"></script>
+    <script nonce="${nonce}" src="app://static/${scriptFile}"></script>${afterBundleScript ? `
+    <script nonce="${nonce}">${afterBundleScript}</script>` : ''}
 </body>
 </html>`;
 }
