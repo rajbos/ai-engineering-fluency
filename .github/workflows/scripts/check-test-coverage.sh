@@ -31,7 +31,7 @@
 #     file in from outside the source trees (examples/, tests) needs a test.
 #   - Import-path update: a modified file whose added lines are all imports.
 #   An added import line is exempt only if it is the twin of a removed import
-#   line once module specifiers are resolved to extension-less repo paths
+#   line once module specifiers are resolved to repo paths (explicit extensions preserved)
 #   and a renamed file's new path is mapped back to its old one. A brand-new
 #   import, or one re-pointed at a different module, needs a test.
 #   Limit: only static single-line import / 'export ... from' / require
@@ -132,16 +132,19 @@ collapse_path() {
   printf '%s' "${out[*]}"
 }
 
-# "<new path> <old path>" (no extension) for each file renamed in this PR.
+# "<new path> <old path>" for each file renamed in this PR, both with the
+# extension (explicit imports) and without it (extensionless imports).
 RENAME_MAP=""
 for i in "${!REC_PATH[@]}"; do
   if [ -n "${REC_OLD[$i]}" ]; then
+    RENAME_MAP="${RENAME_MAP}${REC_PATH[$i]} ${REC_OLD[$i]}"$'\n'
     RENAME_MAP="${RENAME_MAP}$(strip_ext "${REC_PATH[$i]}") $(strip_ext "${REC_OLD[$i]}")"$'\n'
   fi
 done
 
 # norm_import <line> <dir>: an import line with its module specifier resolved
-# to a repo-relative, extension-less path (relative to <dir>, the directory the
+# to a repo-relative path (explicit extensions kept, so ./mod.js and ./mod.ts
+# stay distinct; relative to <dir>, the directory the
 # importing file lived in at that side of the diff), mapping a renamed file's
 # new path back to its old one. A rename-driven path update therefore
 # normalises to the same string as the line it replaced, while two different
@@ -152,7 +155,7 @@ norm_import() {
   spec="$(printf '%s' "$line" | grep -oE "${Q}[^'\"]+${Q}" | tail -1 | tr -d "'\"")"
   resolved="$spec"
   if [[ "$spec" == .* ]]; then
-    resolved="$(strip_ext "$(collapse_path "$2/$spec")")"
+    resolved="$(collapse_path "$2/$spec")"
     old="$(printf '%s' "$RENAME_MAP" | awk -v p="$resolved" '$1==p {print $2; exit}')"
     resolved="${old:-$resolved}"
   fi
