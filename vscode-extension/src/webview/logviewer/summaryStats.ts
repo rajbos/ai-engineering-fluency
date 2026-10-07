@@ -4,9 +4,12 @@
 import { ContextReferenceUsage, getTotalContextRefs, getImplicitContextRefs, getExplicitContextRefs } from '../shared/contextRefUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 
+/** The modes `aggregateModeStats` initializes counters for (excludes ModeUsage's optional content-derived keys). */
+export type AggregatedMode = 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent' | 'cli';
+
 /** The subset of a chat turn that stats aggregation reads. */
 export type SummaryStatsTurn = {
-	mode: keyof ModeUsage;
+	mode: AggregatedMode;
 	toolCalls: { isSubAgent?: boolean }[];
 	mcpTools: unknown[];
 	inputTokensEstimate: number;
