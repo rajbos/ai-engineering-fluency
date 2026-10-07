@@ -20,11 +20,20 @@
 #   TEST:   any path containing /test/, /tests/ or /__tests__/, or a filename
 #           containing .test. or .spec. — in any directory of the repo.
 #
-# Deletion-only source files (0 added lines: removed dead code or unused
-# imports, or a file deleted outright) add no new logic, so they need no test
-# companion. A PR whose source changes are all deletion-only passes; the
-# existing suite (type-check, lint, tests) still has to pass. Renames count
-# as delete + add (--no-renames), so a moved file still needs a test change.
+# Changes that add no new logic need no test companion (the existing suite —
+# type-check, lint, tests — still has to pass). Decisions key on added-line
+# counts and content, never on a rename alone, so a rename cannot hide an edit:
+#   - Deletion-only: a source file with 0 added lines (removed dead code or an
+#     unused import, or a file deleted outright).
+#   - Pure rename: a rename (git -M, >=50% similar) whose added lines are all
+#     import/require/export-from statements (0 added lines = 100% similar).
+#     A rename that adds any other line still needs a test change.
+#   - Import-path update: a modified (non-renamed) source file whose added
+#     lines are all import/require lines that point at a file renamed in this
+#     same PR (matched by new file basename). Anything else needs a test.
+#     Limit: only single-line import statements are recognised; a multi-line
+#     import block that is reformatted counts as real logic. Use
+#     [skip-test-check] for such cases.
 set -euo pipefail
 
 BASE_SHA="${BASE_SHA:-}"
@@ -44,11 +53,27 @@ if [ -z "$BASE_SHA" ]; then
   exit 0
 fi
 
-# "<added>\t<deleted>\t<path>" per changed file.
-NUMSTAT="$(git diff --numstat --no-renames "${BASE_SHA}...${HEAD_SHA}" \
-  || git diff --numstat --no-renames "${BASE_SHA}" "${HEAD_SHA}")"
+if git merge-base "$BASE_SHA" "$HEAD_SHA" >/dev/null 2>&1; then
+  RANGE=("${BASE_SHA}...${HEAD_SHA}")
+else
+  RANGE=("${BASE_SHA}" "${HEAD_SHA}")
+fi
 
-if [ -z "$NUMSTAT" ]; then
+# NUL-delimited numstat with rename detection. Records are
+# "<added>\t<deleted>\t<path>\0" or, for renames,
+# "<added>\t<deleted>\t\0<old>\0<new>\0".
+REC_ADDED=(); REC_OLD=(); REC_PATH=()
+while IFS= read -r -d '' rec <&3; do
+  IFS=$'\t' read -r added _deleted file <<< "$rec"
+  old=""
+  if [ -z "$file" ]; then
+    IFS= read -r -d '' old <&3
+    IFS= read -r -d '' file <&3
+  fi
+  REC_ADDED+=("$added"); REC_OLD+=("$old"); REC_PATH+=("$file")
+done 3< <(git diff -M --numstat -z "${RANGE[@]}")
+
+if [ "${#REC_PATH[@]}" -eq 0 ]; then
   echo "Empty changeset; nothing to check. PASS."
   exit 0
 fi
@@ -74,27 +99,75 @@ is_source_file() {
   return 1
 }
 
+# One added diff line that is purely a single-line import / export-from /
+# require statement.
+Q="['\"]"
+IMPORT_LINE_RE="^\+[[:space:]]*((import|export)[^;]*${Q}[^'\"]+${Q}|\}[[:space:]]*from[[:space:]]*${Q}[^'\"]+${Q}|(const|let|var)[^=;]+=[[:space:]]*require\([[:space:]]*${Q}[^'\"]+${Q}[[:space:]]*\))[[:space:]]*;?[[:space:]]*(//.*)?$"
+
+# added_lines <old-or-empty> <path>: the added lines of one file's diff.
+added_lines() {
+  git diff -M -U0 --no-ext-diff "${RANGE[@]}" -- ${1:+"$1"} "$2" | grep '^+' | grep -v '^+++' || true
+}
+
+# Basenames (no extension) of files renamed within this PR.
+RENAMED_BASENAMES=""
+for i in "${!REC_PATH[@]}"; do
+  if [ -n "${REC_OLD[$i]}" ]; then
+    b="$(basename "${REC_PATH[$i]}")"
+    RENAMED_BASENAMES="${RENAMED_BASENAMES}${b%.*}"$'\n'
+  fi
+done
+
+# only_imports <lines> [renamed]: every line is an import statement; with
+# "renamed", each must also point at a file renamed in this PR.
+only_imports() {
+  local line target base
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    [[ "$line" =~ $IMPORT_LINE_RE ]] || return 1
+    if [ "${2:-}" = "renamed" ]; then
+      target="$(printf '%s' "$line" | grep -oE "${Q}[^'\"]+${Q}" | tail -1 | tr -d "'\"")"
+      base="$(basename "$target")"; base="${base%.*}"
+      printf '%s' "$RENAMED_BASENAMES" | grep -qxF "$base" || return 1
+    fi
+  done <<< "$1"
+  return 0
+}
+
 SOURCE_FILES=""
 DELETION_ONLY_FILES=""
+RENAME_ONLY_FILES=""
+IMPORT_ONLY_FILES=""
 TEST_FILES=""
-while IFS=$'\t' read -r added _deleted file; do
-  [ -z "$file" ] && continue
+for i in "${!REC_PATH[@]}"; do
+  file="${REC_PATH[$i]}"; old="${REC_OLD[$i]}"; added="${REC_ADDED[$i]}"
   if is_test_file "$file"; then
     TEST_FILES="${TEST_FILES}${file}"$'\n'
   elif is_source_file "$file"; then
-    if [ "$added" = "0" ]; then
+    if [ "$added" = "0" ] && [ -z "$old" ]; then
       DELETION_ONLY_FILES="${DELETION_ONLY_FILES}${file}"$'\n'
+    elif [ -n "$old" ] && { [ "$added" = "0" ] || only_imports "$(added_lines "$old" "$file")"; }; then
+      RENAME_ONLY_FILES="${RENAME_ONLY_FILES}${old} -> ${file}"$'\n'
+    elif [ -z "$old" ] && [ "$added" != "-" ] && only_imports "$(added_lines "" "$file")" renamed; then
+      IMPORT_ONLY_FILES="${IMPORT_ONLY_FILES}${file}"$'\n'
     else
       SOURCE_FILES="${SOURCE_FILES}${file}"$'\n'
     fi
   fi
-done <<< "$NUMSTAT"
+done
 
 if [ -z "$SOURCE_FILES" ]; then
-  if [ -n "$DELETION_ONLY_FILES" ]; then
-    echo "Source changes only remove code; no test companion needed. PASS."
-    echo "Deletion-only source files:"
-    printf '%s' "$DELETION_ONLY_FILES" | sed 's/^/  - /'
+  if [ -n "${DELETION_ONLY_FILES}${RENAME_ONLY_FILES}${IMPORT_ONLY_FILES}" ]; then
+    echo "Source changes add no new logic (deletions, pure renames, import-path updates); no test companion needed. PASS."
+    if [ -n "$DELETION_ONLY_FILES" ]; then
+      echo "Deletion-only source files:"; printf '%s' "$DELETION_ONLY_FILES" | sed 's/^/  - /'
+    fi
+    if [ -n "$RENAME_ONLY_FILES" ]; then
+      echo "Pure renames:"; printf '%s' "$RENAME_ONLY_FILES" | sed 's/^/  - /'
+    fi
+    if [ -n "$IMPORT_ONLY_FILES" ]; then
+      echo "Import-path updates for renamed files:"; printf '%s' "$IMPORT_ONLY_FILES" | sed 's/^/  - /'
+    fi
   else
     echo "No production source files changed. PASS."
   fi
@@ -118,6 +191,10 @@ cat <<EOF
 
 Source files without a test-file companion change:
 $(printf '%s' "$SOURCE_FILES" | sed 's/^/  - /')
+
+Deletion-only changes, pure renames (import-path edits only) and import-path
+updates for files renamed in the same PR are exempt automatically; the files
+above add other lines.
 
 Add or update tests covering this change, or — if the change genuinely cannot
 be unit-tested — add the marker [skip-test-check] to the PR body explaining why.

@@ -88,7 +88,7 @@ jobs:
   # class of finding the Test Expert agent would otherwise have to
   # catch with an LLM. Fails the PR when production source under
   # vscode-extension/src/, cli/src/ or src/ changes without any test file
-  # changing too. Escape hatch: put [skip-test-check] in the PR body.
+  # changing too (deletion-only changes and pure renames are exempt). Escape hatch: put [skip-test-check] in the PR body.
   test-coverage-check:
     name: Test coverage companion check
     runs-on: ubuntu-latest
