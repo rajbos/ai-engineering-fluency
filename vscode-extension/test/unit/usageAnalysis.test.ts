@@ -1446,6 +1446,23 @@ test('analyzeSessionUsage: Copilot CLI MCP tool.execution_start (data.mcpServerN
     assert.ok((result.toolCalls.outputTokensByTool?.['view'] ?? 0) > 0);
 });
 
+test('analyzeSessionUsage: blank data.mcpServer does not mask a valid data.mcpServerName', async () => {
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-5' }, timestamp: '2026-05-01T10:00:00Z' },
+        {
+            type: 'tool.execution_start',
+            data: { toolCallId: 'c1', toolName: 'github-mcp-server-get_file_contents', mcpServer: '  ', mcpServerName: 'github-mcp-server', arguments: {} },
+        },
+        { type: 'tool.execution_complete', data: { toolCallId: 'c1', success: true, result: { content: 'x'.repeat(400) } } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const result = await analyzeSessionUsage(makeMockDeps(), '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    assert.equal(result.mcpTools.byServer['github-mcp-server'], 1);
+    assert.equal(result.toolCalls.total, 0);
+    assert.equal(result.toolCalls.byTool['github-mcp-server-get_file_contents'], undefined);
+    assert.equal(result.toolCalls.outputTokensByTool?.['github-mcp-server-get_file_contents'], undefined);
+});
+
 test('analyzeSessionUsage: Copilot CLI user-typed slash invocation (plain text, no wrapper) populates skillCalls', async () => {
     // Unlike Claude Code's <command-message>/<command-name> tags, Copilot CLI's explicit
     // slash invocation is just the literal user-typed text, e.g. "/graphify".

@@ -2432,8 +2432,11 @@ function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, too
  * does not recognise — so the server tag is the only reliable MCP signal there.
  */
 function _asuEventMcpServerName(event: any): string | undefined {
-	const name = event?.data?.mcpServer ?? event?.data?.mcpServerName;
-	return typeof name === 'string' && name.trim() ? name.trim() : undefined;
+	// First non-empty tag wins: a blank `mcpServer` must not mask a valid `mcpServerName`.
+	for (const candidate of [event?.data?.mcpServer, event?.data?.mcpServerName]) {
+		if (typeof candidate === 'string' && candidate.trim()) { return candidate.trim(); }
+	}
+	return undefined;
 }
 
 /** Handle mcp.tool.call events and events with data.mcpServer / data.mcpServerName set. */
