@@ -62,6 +62,16 @@ else
   RANGE=("${BASE_SHA}" "${HEAD_SHA}")
 fi
 
+# Materialise the numstat in a checked command (NUL bytes cannot live in a
+# shell variable, and process substitution would hide git's exit status): an
+# unreadable diff must fail closed, not look like an empty passing changeset.
+NUMSTAT_FILE="$(mktemp)"
+trap 'rm -f "$NUMSTAT_FILE"' EXIT
+if ! git diff -M --numstat -z "${RANGE[@]}" > "$NUMSTAT_FILE"; then
+  echo "::error::git diff failed for ${RANGE[*]}; cannot determine the changeset, so the coverage check fails closed."
+  exit 1
+fi
+
 # NUL-delimited numstat with rename detection. Records are
 # "<added>\t<deleted>\t<path>\0" or, for renames,
 # "<added>\t<deleted>\t\0<old>\0<new>\0".
@@ -74,7 +84,7 @@ while IFS= read -r -d '' rec <&3; do
     IFS= read -r -d '' file <&3
   fi
   REC_ADDED+=("$added"); REC_OLD+=("$old"); REC_PATH+=("$file")
-done 3< <(git diff -M --numstat -z "${RANGE[@]}")
+done 3< "$NUMSTAT_FILE"
 
 if [ "${#REC_PATH[@]}" -eq 0 ]; then
   echo "Empty changeset; nothing to check. PASS."
@@ -144,8 +154,12 @@ collapse_path() {
 # other file competes for the same stem (old.ts vs old.js, adapters.ts vs
 # adapters/index.ts): module resolution order is then ambiguous, so the
 # exemption is declined and a test is required.
-STEMS="$( { git ls-tree -r --name-only "$BASE_SHA"; git ls-tree -r --name-only "$HEAD_SHA"; } 2>/dev/null \
-  | sort -u | awk '{ s=$0; if (s ~ /\.[^.\/]*$/) sub(/\.[^.\/]*$/, "", s); printf "%s\t%s\n", s, $0 }' || true )"
+if ! BASE_TREE="$(git ls-tree -r --name-only "$BASE_SHA")" || ! HEAD_TREE="$(git ls-tree -r --name-only "$HEAD_SHA")"; then
+  echo "::error::git ls-tree failed; cannot inspect the repository trees, so the coverage check fails closed."
+  exit 1
+fi
+STEMS="$(printf '%s\n%s\n' "$BASE_TREE" "$HEAD_TREE" | sort -u \
+  | awk '{ s=$0; if (s ~ /\.[^.\/]*$/) sub(/\.[^.\/]*$/, "", s); printf "%s\t%s\n", s, $0 }')"
 # stem_is_unique <stem> <path>: no file other than <path> has this stem.
 stem_is_unique() {
   ! printf '%s\n' "$STEMS" | awk -F'\t' -v s="$1" -v x="$2" '$1==s && $2!=x {f=1} END {exit !f}'

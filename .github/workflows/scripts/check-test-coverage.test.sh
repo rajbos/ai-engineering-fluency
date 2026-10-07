@@ -49,6 +49,8 @@ new_repo idxrename; mkdir src/adapters; printf "%s" "$LOGIC" > src/adapters/inde
 new_repo plusplus;  printf '++ /* c */ counter;\n' >> src/user.ts; commit; expect "added line that looks like a +++ header" 1
 new_repo stemclash; echo 'export const o = 1;' > src/old.ts; echo 'export const o = 2;' > src/old.js; printf "import { o } from './old';\n" > src/user.ts; git add -A; git commit -qm more; git mv src/old.js src/new.js; sed -i "s#'./old'#'./new'#" src/user.ts; commit; expect "extensionless import with competing stem" 1
 new_repo wsswap;    printf "import { w } from './foo  bar';\n" > src/user.ts; git add -A; git commit -qm more; sed -i "s#'./foo  bar'#'./foo bar'#" src/user.ts; commit; expect "specifier whitespace change" 1
+new_repo baddiff;   echo 'export const x = 1;' >> src/a.ts; commit
+if BASE_SHA=0000000000000000000000000000000000000001 HEAD_SHA="$(git rev-parse HEAD)" bash "$SCRIPT" >/dev/null 2>&1; then echo "FAIL - unreadable diff must fail closed"; FAILS=$((FAILS+1)); else echo "ok   - unreadable diff fails closed"; fi
 new_repo importer;  git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./newName#" src/user.ts; commit; expect "rename + importer path update" 0
 new_repo importbad; git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./elsewhere#" src/user.ts; commit; expect "import swapped to non-renamed module" 1
 new_repo plain;     echo 'export const x = 1;' >> src/a.ts; commit;                     expect "plain source change, no test" 1
