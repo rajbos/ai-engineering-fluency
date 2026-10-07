@@ -10,7 +10,7 @@ import { environmentalCommand } from './commands/environmental';
 import { fluencyCommand } from './commands/fluency';
 import { diagnosticsCommand } from './commands/diagnostics';
 import { chartCommand } from './commands/chart';
-import { usageAnalysisCommand } from './commands/usage-analysis';
+import { usageAnalysisCommand } from './commands/usageAnalysis';
 import { allCommand } from './commands/all';
 import { segmentCommand } from './commands/segment';
 import { curationCommand } from './commands/curation';
