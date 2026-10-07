@@ -55,8 +55,13 @@ test('l10n: paged curation table controls resolve in English and zh-cn', () => {
 	mock.setLanguage('zh-cn');
 	try {
 		assert.equal(t('usage.pagedTable.previous'), '上一页');
+		assert.equal(t('usage.pagedTable.next'), '下一页');
 		assert.equal(t('usage.pagedTable.page', 2, 3, 11, 20, 25), '第 2/3 页 · 显示 11–20 条，共 25 条');
+		assert.equal(t('usage.pagedTable.showing', 1, 10, 10), '显示 1–10 条，共 10 条');
 		assert.equal(t('usage.pagedTable.sortBy', 'Server'), '按Server排序');
+		assert.equal(t('usage.pagedTable.sortedAscending'), '当前按升序排列');
+		assert.equal(t('usage.pagedTable.sortedDescending'), '当前按降序排列');
+		assert.equal(t('usage.pagedTable.noRows'), '没有可显示的行。');
 	} finally {
 		mock.setLanguage('en');
 	}

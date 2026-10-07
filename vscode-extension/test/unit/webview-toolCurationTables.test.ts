@@ -3,7 +3,7 @@ import * as assert from 'node:assert/strict';
 
 import type { AvailableToolEntry, ToolCurationAnalysis } from '../../../src/types';
 import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
-import { getPagedTablePage, type PagedTableColumn } from '../../src/webview/usage/pagedTable';
+import { getPagedTablePage, setPagedTableFilter, type PagedTableColumn } from '../../src/webview/usage/pagedTable';
 import {
 	buildBuiltinToolsHtml,
 	buildUnusedMcpHtml,
@@ -40,13 +40,16 @@ test('toolCurationTables: MCP default order preserves the zero, partial, full us
 		{ server: 'full', availableToolCount: 2, usedToolCount: 2 },
 		{ server: 'not-connected', availableToolCount: 0, usedToolCount: 0 },
 	];
+	buildUnusedMcpHtml(servers, { totalTokens: 0, byServer: {} }, 30);
+	setPagedTableFilter('mcp', 'hideWithUsage', false);
 	const html = buildUnusedMcpHtml(servers, { totalTokens: 0, byServer: {} }, 30);
-	const order = ['zero-b', 'zero-a', 'not-connected'].map(name => html.indexOf(`>${name}</td>`));
+	const order = ['zero-b', 'zero-a', 'not-connected', 'partial', 'full'].map(name => html.indexOf(`>${name}</td>`));
 	assert.ok(order.every(index => index >= 0));
 	assert.deepEqual(order, [...order].sort((a, b) => a - b));
 	assert.match(html, /MCP Servers in Last 30 Days \(5\)/);
 	assert.match(html, /3 with no usage · 2 with usage/);
-	assert.match(html, /data-paged-table-filter="hideWithUsage" checked/);
+	assert.match(html, /data-paged-table-filter="hideWithUsage"/);
+	assert.doesNotMatch(html, /data-paged-table-filter="hideWithUsage" checked/);
 });
 
 test('toolCurationTables: disconnected numeric values remain last in either sort direction', () => {
