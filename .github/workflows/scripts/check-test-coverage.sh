@@ -137,12 +137,17 @@ collapse_path() {
 }
 
 # "<new path> <old path>" for each file renamed in this PR, both with the
-# extension (explicit imports) and without it (extensionless imports).
+# extension (explicit imports) and without it (extensionless imports), plus the
+# directory itself for renamed index modules (directory imports).
 RENAME_MAP=""
 for i in "${!REC_PATH[@]}"; do
   if [ -n "${REC_OLD[$i]}" ]; then
     RENAME_MAP="${RENAME_MAP}${REC_PATH[$i]} ${REC_OLD[$i]}"$'\n'
     RENAME_MAP="${RENAME_MAP}$(strip_ext "${REC_PATH[$i]}") $(strip_ext "${REC_OLD[$i]}")"$'\n'
+    # A renamed index module is also what a directory import resolves to.
+    if [[ "$(strip_ext "$(basename "${REC_PATH[$i]}")")" == index && "$(strip_ext "$(basename "${REC_OLD[$i]}")")" == index ]]; then
+      RENAME_MAP="${RENAME_MAP}$(dirname "${REC_PATH[$i]}") $(dirname "${REC_OLD[$i]}")"$'\n'
+    fi
   fi
 done
 
@@ -202,7 +207,7 @@ for i in "${!REC_PATH[@]}"; do
     # A rename only counts as a pure source rename when the old path was
     # already production source; moving a file in from examples/ or a test
     # directory introduces new production code.
-    elif [ -n "$old" ] && is_source_file "$old" && { [ "$added" = "0" ] || only_imports "$(diff_lines + "$old" "$file")" "$(diff_lines - "$old" "$file")" "$(dirname "$file")" "$(dirname "$old")"; }; then
+    elif [ -n "$old" ] && [ "$added" != "-" ] && is_source_file "$old" && { [ "$added" = "0" ] || only_imports "$(diff_lines + "$old" "$file")" "$(diff_lines - "$old" "$file")" "$(dirname "$file")" "$(dirname "$old")"; }; then
       RENAME_ONLY_FILES="${RENAME_ONLY_FILES}${old} -> ${file}"$'\n'
     elif [ -z "$old" ] && [ "$added" != "-" ] && only_imports "$(diff_lines + "" "$file")" "$(diff_lines - "" "$file")" "$(dirname "$file")" "$(dirname "$file")"; then
       IMPORT_ONLY_FILES="${IMPORT_ONLY_FILES}${file}"$'\n'
