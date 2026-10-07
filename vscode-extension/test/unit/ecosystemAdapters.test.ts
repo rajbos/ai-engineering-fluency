@@ -957,3 +957,28 @@ test('ClaudeDesktopAdapter.analyzeUsage: does not record skillCalls for non-Skil
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }
 });
+
+test('ClaudeDesktopAdapter.analyzeUsage: pairs tool_result with tool_use to record failures and observed latency', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(process.cwd(), 'cowork-test-'));
+    const sessionFile = path.join(tmpDir, 'session.jsonl');
+    try {
+        const t = (offsetMs: number) => new Date(Date.UTC(2026, 4, 1, 10, 0, 0, offsetMs)).toISOString();
+        const events = [
+            { type: 'assistant', timestamp: t(0), message: { role: 'assistant', model: 'claude-sonnet-4-6', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }] } },
+            { type: 'user', timestamp: t(250), parentUuid: 'x', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', is_error: true, content: 'denied' }] } },
+            { type: 'assistant', timestamp: t(1000), message: { role: 'assistant', model: 'claude-sonnet-4-6', content: [{ type: 'tool_use', id: 'toolu_2', name: 'Read', input: {} }] } },
+            { type: 'user', timestamp: t(1030), parentUuid: 'x', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_2', content: 'ok' }] } },
+        ];
+        fs.writeFileSync(sessionFile, events.map(e => JSON.stringify(e)).join('\n'));
+
+        const result = await claudeDesktopAdapter.analyzeUsage(sessionFile, desktopAdapterCtx);
+        assert.deepEqual(result.toolCalls.failuresByTool, { Bash: 1 });
+        assert.equal(result.toolCalls.latencyByTool?.Bash.sumMs, 250);
+        assert.equal(result.toolCalls.latencyByTool?.Read.sumMs, 30);
+        assert.equal(result.toolCalls.latencyByTool?.Read.count, 1);
+        assert.equal(result.toolCalls.byTool.Bash, 1);
+        assert.equal(result.toolCalls.total, 2);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});

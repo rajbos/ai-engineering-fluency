@@ -2572,8 +2572,12 @@ function _asuApplyToolLoc(pending: { toolName: string; args: Record<string, stri
 	analysis.editScope!.languageUsage[ext].linesRemoved += linesRemoved;
 }
 
-/** Extract plain text from a tool result content value (string or content-block array). */
-function _asuExtractToolResultText(content: unknown): string {
+/**
+ * Extract plain text from a tool result content value (string or content-block array).
+ * Shared by the Copilot CLI path and the Claude-family adapters, whose `tool_result`
+ * blocks use the same `string | {type:'text', text}[]` shape.
+ */
+export function extractToolResultText(content: unknown): string {
 	if (typeof content === 'string') { return content; }
 	if (Array.isArray(content)) {
 		return content
@@ -2597,7 +2601,7 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 		_asuApplyToolLoc(pending, cliState, analysis);
 	}
 	if (!result?.content || isMcpTool(pending.toolName)) { return; }
-	const resultText = _asuExtractToolResultText(result.content);
+	const resultText = extractToolResultText(result.content);
 	if (!resultText) { return; }
 	const tokens = estimateTokensFromText(resultText);
 	if (!analysis.toolCalls.outputTokensByTool) { analysis.toolCalls.outputTokensByTool = {}; }

@@ -99,13 +99,19 @@ never gain the new fields.
 Verified against local logs via the CLI: 88 tools with latency samples, 43 with
 failures, two MCP servers with per-server counts.
 
-### Phase 2 — Claude Code / Claude Desktop adapters
+### Phase 2 — Claude Code / Claude Desktop adapters (done)
 
-In `claudeCodeAdapter.ts` (and `claudeDesktopAdapter.ts`), keep a
-`Map<tool_use.id, {name, startedAt}>` while iterating messages; on a
-`tool_result` block call `recordToolOutcome(…, !is_error, msgTimestamp −
-startedAt)`, deriving the server from the `mcp__server__tool` prefix. Extend
-`outputTokensByTool` here too so the cost-vs-speed map is not Copilot-only.
+`ClaudeToolOutcomeTracker` in `src/adapters/claudeCodeAdapter.ts` is shared by
+both adapters. It remembers each `tool_use` block's id, name, MCP server (from
+the `mcp__server__tool` prefix) and event timestamp — first sighting wins,
+because Claude Code re-logs streaming fragments of the same assistant message —
+and on the matching `tool_result` block (a harness-replayed `user` event, matched
+by `tool_use_id`, sidechain events included) calls `recordToolOutcome(…,
+!is_error, resultTimestamp − startedAt)`. Non-MCP result text is sized with
+`estimateTokensFromText` into `outputTokensByTool`, so the cost-vs-speed map is
+no longer Copilot-only. The ~0.5 % of results carrying
+`toolUseResult.durationMs` are deliberately ignored in favour of one consistent
+source.
 
 ### Phase 3 — UI
 

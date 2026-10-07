@@ -5,7 +5,7 @@ import { ClaudeDesktopDataAccess } from '../claudedesktop';
 import { buildClaudeChatTurns, type ClaudeAssistantTurnData } from './claudeTurns';
 import { readClaudeCodeEventsForAnalysis, createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
 import { normalizeClaudeModelId } from '../claudecode';
-import { extractClaudeSlashCommand, recordSkillCall, recordInvokedSkillCall } from './claudeCodeAdapter';
+import { extractClaudeSlashCommand, recordSkillCall, recordInvokedSkillCall, ClaudeToolOutcomeTracker } from './claudeCodeAdapter';
 
 export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'claudedesktop';
@@ -141,11 +141,13 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 		const analysis = createEmptySessionUsageAnalysis();
 		const events = await readClaudeCodeEventsForAnalysis(sessionFile);
 		const models: string[] = [];
+		const outcomes = new ClaudeToolOutcomeTracker(name => this.isMcpToolFn(name) ? this.extractMcpServerNameFn(name) : undefined);
 		for (const event of events) {
+			if (event.type === 'user') { outcomes.noteToolResults(event, analysis); }
 			if (event.type === 'user' && event.message?.role === 'user' && !event.isSidechain) {
 				this.processDesktopUserEvent(event, analysis);
 			} else if (event.type === 'assistant') {
-				this.processDesktopAssistantEvent(event, analysis, models);
+				this.processDesktopAssistantEvent(event, analysis, models, outcomes);
 			}
 		}
 		this.applyDesktopModelSwitchingStats(models, analysis);
@@ -164,12 +166,13 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 		recordInvokedSkillCall(analysis, event.message?.content);
 	}
 
-	private processDesktopAssistantEvent(event: any, analysis: import('../types').SessionUsageAnalysis, models: string[]): void {
+	private processDesktopAssistantEvent(event: any, analysis: import('../types').SessionUsageAnalysis, models: string[], outcomes: ClaudeToolOutcomeTracker): void {
 		const model = normalizeClaudeModelId(event.message?.model || 'unknown');
 		models.push(model);
 		const content: any[] = Array.isArray(event.message?.content) ? event.message.content : [];
 		for (const c of content) {
 			if (c?.type !== 'tool_use') { continue; }
+			outcomes.noteToolUse(event, c);
 			analysis.toolCalls.total++;
 			const toolName = String(c.name || 'tool');
 			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
