@@ -2205,7 +2205,8 @@ function _asuHandleKind0Event(event: any, analysis: SessionUsageAnalysis, modeSt
  
 function _asuHandleKind1Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState): void {
 	if (event.kind !== 1) { return; }
-	if (event.k?.includes('mode') && event.v) { modeState.sessionMode = getModeType(event.v); }	if (event.k?.includes('selections') && Array.isArray(event.v)) {
+	if (event.k?.includes('mode') && event.v) { modeState.sessionMode = getModeType(event.v); }
+	if (event.k?.includes('selections') && Array.isArray(event.v)) {
 		_asuCheckImplicitSelection(event.v, analysis.contextReferences);
 	}
 	if (event.k?.includes('contentReferences') && Array.isArray(event.v)) {
