@@ -99,10 +99,11 @@ is_source_file() {
   return 1
 }
 
-# One added diff line that is purely a single-line import / export-from /
-# require statement.
+# One added diff line that is purely a static single-line import,
+# `export ... from` re-export or `const x = require(...)`. A plain
+# `export const x = "..."` is deliberately NOT matched: it adds data/logic.
 Q="['\"]"
-IMPORT_LINE_RE="^\+[[:space:]]*((import|export)[^;]*${Q}[^'\"]+${Q}|\}[[:space:]]*from[[:space:]]*${Q}[^'\"]+${Q}|(const|let|var)[^=;]+=[[:space:]]*require\([[:space:]]*${Q}[^'\"]+${Q}[[:space:]]*\))[[:space:]]*;?[[:space:]]*(//.*)?$"
+IMPORT_LINE_RE="^\+[[:space:]]*(import[[:space:]]+(type[[:space:]]+)?([^;='\"]+[[:space:]]+from[[:space:]]*)?${Q}[^'\"]+${Q}|export[[:space:]]+(type[[:space:]]+)?(\*([[:space:]]+as[[:space:]]+[A-Za-z_\$][A-Za-z0-9_\$]*)?|\{[^}]*\})[[:space:]]*from[[:space:]]*${Q}[^'\"]+${Q}|\}[[:space:]]*from[[:space:]]*${Q}[^'\"]+${Q}|(const|let|var)[[:space:]]+[A-Za-z_\$][A-Za-z0-9_\$]*[[:space:]]*=[[:space:]]*require\([[:space:]]*${Q}[^'\"]+${Q}[[:space:]]*\))[[:space:]]*;?[[:space:]]*(//.*)?$"
 
 # added_lines <old-or-empty> <path>: the added lines of one file's diff.
 added_lines() {

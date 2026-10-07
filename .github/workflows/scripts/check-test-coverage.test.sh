@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Scenario tests for check-test-coverage.sh using isolated temp git repos.
-# Run: bash .github/workflows/scripts/check-test-coverage.test.sh
+# Run by the test-coverage-check job in ci.yml. Locally: bash .github/workflows/scripts/check-test-coverage.test.sh
 set -uo pipefail
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-test-coverage.sh"
 TMP="$(mktemp -d)"
@@ -31,6 +31,9 @@ new_repo del2;      printf "%s" "$LOGIC" > src/a.ts; commit;                    
 new_repo ren100;    git mv src/oldName.ts src/newName.ts; commit;                       expect "100% rename" 0
 new_repo renimp;    git mv src/oldName.ts src/newName.ts; sed -i '1i import { q } from "./other";' src/newName.ts; commit; expect "rename + import-only edit" 0
 new_repo renlogic;  git mv src/oldName.ts src/newName.ts; echo 'export const sneaky = () => fetch("x");' >> src/newName.ts; commit; expect "rename + logic edit" 1
+new_repo renexport; git mv src/oldName.ts src/newName.ts; echo 'export const mode = "new";' >> src/newName.ts; commit; expect "rename + exported string constant" 1
+new_repo renreexp;  git mv src/oldName.ts src/newName.ts; echo "export { q } from './other';" >> src/newName.ts; commit; expect "rename + static re-export" 0
+new_repo renreq;    git mv src/oldName.ts src/newName.ts; echo "const q = require('./other');" >> src/newName.ts; commit; expect "rename + require" 0
 new_repo importer;  git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./newName#" src/user.ts; commit; expect "rename + importer path update" 0
 new_repo importbad; git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./elsewhere#" src/user.ts; commit; expect "import swapped to non-renamed module" 1
 new_repo plain;     echo 'export const x = 1;' >> src/a.ts; commit;                     expect "plain source change, no test" 1
