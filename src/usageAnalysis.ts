@@ -2669,7 +2669,9 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 	if (success && (pending.toolName === 'edit' || pending.toolName === 'create')) {
 		_asuApplyToolLoc(pending, cliState, analysis);
 	}
-	if (!result?.content || pending.mcpServerName || isMcpTool(pending.toolName)) { return; }
+	// Size result text only for calls with an explicit verdict: outputTokensByTool is divided by
+	// completedByTool (cost-vs-speed map), so a verdict-less result must not join the numerator either.
+	if (typeof success !== 'boolean' || !result?.content || pending.mcpServerName || isMcpTool(pending.toolName)) { return; }
 	const resultText = extractToolResultText(result.content);
 	if (!resultText) { return; }
 	const tokens = estimateTokensFromText(resultText);

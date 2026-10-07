@@ -696,7 +696,7 @@
   "insight.repeatedTaskSkillCandidate.body": "你用相似的提示开启了 {0} 个会话：“{1}”。把这类重复任务做成技能或提示文件，可以省去反复解释，并让结果更加一致。{2}",
 
   "//": "── Personalized Insights catalog (insightsEngine.ts) — see issue #2081 ──",
-  "whatsNew.release.0.19.1.headline": "工具与集成标签页现在可以显示每个工具的可靠性和速度、哪些 MCP 服务器会失败，以及所有工具的成本与速度图。",
+  "whatsNew.release.0.19.1.headline": "工具与集成标签页现在可以显示每个工具的可靠性和速度、哪些 MCP 服务器会失败，以及内置、子代理与技能工具的成本与速度图。",
   "whatsNew.feature.usage.tool-execution-stats.title": "工具可靠性、延迟与 MCP 健康度",
   "whatsNew.feature.usage.tool-execution-stats.description": "工具与集成标签页新增四个部分，基于会话日志已记录的每次调用结果：各工具的成功与失败、各工具的 p50/p95 观测时长、各 MCP 服务器的调用次数与失败占比，以及内置、子代理与技能工具的成本与速度图（延迟 × 每次调用令牌数，气泡大小 = 调用次数）。数据来自 Copilot CLI、JetBrains 和 Claude Code 会话。",
   "whatsNew.release.0.19.0.headline": "使用分析现在按“使用”“工作区”“GitHub”“辅导”分组，各部分按区块排列；图表视图显示官方编辑器图标，并为每个已登录的 GitHub 账户显示 Copilot 预算。",

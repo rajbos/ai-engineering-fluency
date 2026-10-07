@@ -1550,9 +1550,9 @@ test('analyzeSessionUsage: CLI JSONL records per-tool failures and start→compl
         // MCP call: 1500 ms, failure, server name on the start event (Copilot CLI shape)
         { type: 'tool.execution_start', data: { toolCallId: 'm1', toolName: 'github-mcp-server-get_file_contents', mcpServerName: 'github-mcp-server', mcpToolName: 'get_file_contents', arguments: {} }, timestamp: t(5000) },
         { type: 'tool.execution_complete', data: { toolCallId: 'm1', success: false, error: { message: 'nope', code: 2 } }, timestamp: t(6500) },
-        // missing success flag (older schema) → not a failure
+        // missing success flag (older schema) → neither completed nor failed; result text must not be sized either
         { type: 'tool.execution_start', data: { toolCallId: 'g1', toolName: 'grep', arguments: {} }, timestamp: t(7000) },
-        { type: 'tool.execution_complete', data: { toolCallId: 'g1' }, timestamp: t(7010) },
+        { type: 'tool.execution_complete', data: { toolCallId: 'g1', result: { content: 'match '.repeat(50) } }, timestamp: t(7010) },
         // complete without a timestamp → failure counted, no latency sample
         { type: 'tool.execution_start', data: { toolCallId: 'e1', toolName: 'edit', arguments: { path: '/b', old_str: 'a', new_str: 'b' } }, timestamp: t(8000) },
         { type: 'tool.execution_complete', data: { toolCallId: 'e1', success: false } },
@@ -1577,6 +1577,8 @@ test('analyzeSessionUsage: CLI JSONL records per-tool failures and start→compl
     assert.equal(lat.powershell.buckets[11], 1);
     assert.equal(lat.grep.count, 1, 'verdict-less completion still contributes latency');
     assert.equal(lat.grep.sumMs, 10);
+    assert.equal(result.toolCalls.outputTokensByTool?.grep, undefined, 'verdict-less result text is not sized: it has no completed call to divide by');
+    assert.ok((result.toolCalls.outputTokensByTool?.view ?? 0) > 0, 'explicit-success result text is sized');
     assert.equal(lat.edit, undefined, 'no latency sample without a complete timestamp');
     assert.equal(lat.web_fetch, undefined, 'orphaned start must not produce a sample');
     assert.equal(lat['github-mcp-server-get_file_contents'], undefined, 'MCP latency lives under mcpTools only');

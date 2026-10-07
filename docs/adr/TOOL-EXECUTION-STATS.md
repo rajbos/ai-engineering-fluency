@@ -157,11 +157,13 @@ screenshots show populated charts. `isMcpTool` moved to
 `src/utils/toolUtils.ts` (re-exported from `workspaceHelpers`) so `toolKind.ts`
 is importable from a webview bundle without pulling in `vscode`.
 
-A What's New catalog entry is deliberately not added here: the catalog test
-requires an unreleased entry to match the `package.json` version, which the
-release-prep step bumps. The CHANGELOG `Unreleased` bullet carries the text to
-lift into the entry at that point (view `usage`, tab `tools`, anchor
-`section-tool-reliability`).
+What's New: `vscode-extension/src/whatsNew/catalog.ts` carries a `0.19.1`
+entry (`date: null` until release prep sets it) with one `section` feature,
+`usage.tool-execution-stats`, whose surface is view `usage`, tab `tools`,
+anchor `section-tool-reliability`. The catalog test requires an unreleased
+entry to match `package.json`, so the extension version is bumped to 0.19.1
+in the same change; headline and feature strings exist in English and zh-CN
+and are asserted in `l10n.test.ts`.
 
 ### Phase 4 — VS Code Copilot Chat debug logs, other adapters
 
@@ -194,8 +196,6 @@ Write that definition down before building.
   and no skill `SECURITY.md` changes.
 - The CLI's `usage-analysis --json` output gains the six optional keys; the
   Visual Studio and JetBrains hosts ignore unknown keys.
-- Known pre-existing gap, out of scope here: `_asuHandleMcpToolEvent` keys on
-  `data.mcpServer`, but Copilot CLI writes `data.mcpServerName`, so Copilot CLI
-  MCP calls are counted under `toolCalls.byTool` rather than `mcpTools.byServer`.
-  The new `failuresByServer` / `latencyByServer` read `mcpServerName` directly
-  and are correct regardless.
+- Copilot CLI tags MCP starts with `data.mcpServerName` (older events used
+  `data.mcpServer`); `_asuEventMcpServerName` reads both, so those calls land
+  in `mcpTools.byServer` and the per-server outcome maps key on the same name.
