@@ -135,7 +135,14 @@ jobs:
               # updater simply falls back to a full download.
               $assets = @()
             } else {
-              $assets = @($assets | Where-Object { @($published) -notcontains (Split-Path $_ -Leaf) })
+              # No installer yet. Any metadata already there came from a
+              # different build and must not be paired with this one: a later
+              # re-run would read that checksum as the installer's. Refuse
+              # instead of mixing assets from two builds.
+              $leftovers = @($published) | Where-Object { $_ -in @('latest.yml', "$installer.blockmap") }
+              if ($leftovers.Count -gt 0) {
+                throw "Release $tag has $($leftovers -join ', ') from an earlier build but no installer. Delete the release's assets and re-run to publish a fresh, consistent set."
+              }
             }
             if ($assets.Count -gt 0) { gh release upload $tag $assets }
           } else {
