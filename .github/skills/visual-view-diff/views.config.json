@@ -107,6 +107,16 @@
           "expect": "#tab-panel-tools"
         },
         {
+          "id": "tools-curation-expanded",
+          "title": "Workspace tools with built-in curation table expanded",
+          "steps": [
+            { "click": ".group-tab[data-group=\"workspace\"]" },
+            { "click": ".tab-button[data-tab=\"tools\"]" },
+            { "click": "#builtin-tools-details > summary" }
+          ],
+          "expect": "#paged-table-root-builtin"
+        },
+        {
           "id": "health",
           "title": "Workspace › Workspace Health tab",
           "steps": [{ "click": ".group-tab[data-group=\"workspace\"]" }, { "click": ".tab-button[data-tab=\"health\"]" }],
