@@ -8,7 +8,7 @@
  * tools in the Claude Code and Copilot CLI parsers); this is the single place
  * that combines them.
  */
-import { isMcpTool } from './workspaceHelpers';
+import { isMcpTool } from './utils/toolUtils';
 import { DELEGATION_TOOL_PATTERN } from './taskClassification';
 
 export type ToolKind = 'builtin' | 'mcp' | 'subagent' | 'skill';

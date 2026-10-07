@@ -113,15 +113,32 @@ no longer Copilot-only. The ~0.5 % of results carrying
 `toolUseResult.durationMs` are deliberately ignored in favour of one consistent
 source.
 
-### Phase 3 — UI
+### Phase 3 — UI (done)
 
-Usage Analysis › Tools & Integrations (`vscode-extension/src/webview/usage/main.ts`,
-`#tab-panel-tools`). Four sections, top-N tools by calls, rendered with the
-lazily imported Chart.js already used by the Efficiency view (log-scale bar +
-bubble are built in), with a plain table fallback when the maps are absent.
-Register a `state` per section in `.github/skills/visual-view-diff/views.config.json`,
-add l10n keys + `l10n.test.ts` assertions, run `check:contract`,
-`check:interaction` and `visual:diff`, and add a What's New catalog entry.
+Usage Analysis › Workspace › Tools & Integrations, directly below the Tool
+Usage tables, as four sections built by
+`vscode-extension/src/webview/usage/toolExecutionHtml.ts` from the Last 30 Days
+period: `#section-tool-reliability` (stacked success/failure bars),
+`#section-tool-latency` (log x-axis, p50 bar + p95 marker),
+`#section-mcp-health` (calls with "N · x% fail" labels) and
+`#section-tool-cost-speed` (log/log bubble map, size = calls, colour =
+`classifyToolKind`). Hand-written SVG rather than Chart.js: `main.ts` already
+sits past the 6000-line `max-lines` ceiling and has an SVG precedent in the
+efficiency frontier chart, so the sections live in their own module and the
+usage bundle stays chart-library-free. The automatic-tool filter the tables
+honour applies here too. Each section renders an explanatory empty state when
+its map is absent, so an old cache or an editor without the data never shows a
+blank chart. Strings are `usage.toolExec.*` webview keys (en + zh-cn, covered
+in `l10n.test.ts`); the visual-diff fixture carries sample histograms so the CI
+screenshots show populated charts. `isMcpTool` moved to
+`src/utils/toolUtils.ts` (re-exported from `workspaceHelpers`) so `toolKind.ts`
+is importable from a webview bundle without pulling in `vscode`.
+
+A What's New catalog entry is deliberately not added here: the catalog test
+requires an unreleased entry to match the `package.json` version, which the
+release-prep step bumps. The CHANGELOG `Unreleased` bullet carries the text to
+lift into the entry at that point (view `usage`, tab `tools`, anchor
+`section-tool-reliability`).
 
 ### Phase 4 — VS Code Copilot Chat debug logs, other adapters
 

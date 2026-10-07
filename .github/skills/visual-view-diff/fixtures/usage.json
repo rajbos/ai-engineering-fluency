@@ -225,6 +225,21 @@
         "grep_search": 176000,
         "semantic_search": 319000,
         "create_file": 55000
+      },
+      "failuresByTool": {
+        "read_file": 9,
+        "run_in_terminal": 38,
+        "apply_patch": 41,
+        "grep_search": 4,
+        "create_file": 2
+      },
+      "latencyByTool": {
+        "read_file": { "count": 572, "sumMs": 68640, "buckets": [0, 0, 0, 20, 120, 250, 100, 40, 15, 10, 7, 6, 3, 1] },
+        "run_in_terminal": { "count": 451, "sumMs": 4059000, "buckets": [0, 0, 0, 0, 0, 5, 10, 20, 30, 40, 60, 90, 70, 50, 35, 25, 12, 4] },
+        "apply_patch": { "count": 363, "sumMs": 108900, "buckets": [0, 0, 0, 0, 5, 20, 60, 90, 80, 50, 30, 15, 8, 4, 1] },
+        "grep_search": { "count": 308, "sumMs": 46200, "buckets": [0, 0, 0, 10, 40, 80, 70, 50, 30, 15, 8, 4, 1] },
+        "semantic_search": { "count": 220, "sumMs": 198000, "buckets": [0, 0, 0, 0, 0, 0, 0, 10, 30, 60, 60, 35, 15, 7, 3] },
+        "create_file": { "count": 132, "sumMs": 15840, "buckets": [0, 0, 0, 0, 10, 30, 40, 25, 15, 8, 3, 1] }
       }
     },
     "modeUsage": {
@@ -279,6 +294,14 @@
         "github/create_issue": 55,
         "github/list_prs": 44,
         "playwright/navigate": 55
+      },
+      "failuresByServer": {
+        "github": 6,
+        "playwright": 11
+      },
+      "latencyByServer": {
+        "github": { "count": 99, "sumMs": 247500, "buckets": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20, 45, 25, 9] },
+        "playwright": { "count": 55, "sumMs": 82500, "buckets": [0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 15, 20, 10, 5] }
       }
     },
     "skillCalls": {

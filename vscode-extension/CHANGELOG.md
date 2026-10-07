@@ -4,6 +4,9 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- Usage Analysis → Workspace → Tools & Integrations gains four sections built from per-tool execution data that was already in the session logs but never kept: **Tool execution reliability** (success vs. failure volume per tool), **Tool latency profile** (p50 bar + p95 marker of the observed start→result duration per tool, including permission-prompt and queueing time), **MCP server health** (calls and error share per connected server), and a **Cost vs speed map** (p50 latency × tokens per call, bubble size = calls, colour = builtin/MCP/subagent/skill). Recorded from Copilot CLI and JetBrains (`tool.execution_start`/`complete`) and Claude Code / Claude Desktop (`tool_use`/`tool_result`) sessions; other editors show an explanatory empty state. Session cache version bumped so existing entries are re-analysed. See `docs/adr/TOOL-EXECUTION-STATS.md`.
+
 ## [0.19.0] - 2026-10-02
 
 ### Features

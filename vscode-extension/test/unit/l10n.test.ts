@@ -1578,3 +1578,25 @@ test('l10n: efficiency placeholder templates keep their {0} slot for localizeFor
 		assert.ok(t('efficiency.trends.bucketIntro').includes(slot), `efficiency.trends.bucketIntro must carry a ${slot} placeholder`);
 	}
 });
+
+test('l10n: Tools & Integrations tool-execution section strings resolve in both languages', () => {
+	assert.equal(t('usage.toolExec.reliability.title'), 'Tool execution reliability');
+	assert.equal(t('usage.toolExec.latency.title'), 'Tool latency profile');
+	assert.equal(t('usage.toolExec.mcp.title'), 'MCP server health');
+	assert.equal(t('usage.toolExec.costSpeed.title'), 'Cost vs speed map');
+	assert.equal(t('usage.toolExec.costSpeed.hint'), 'top-right = heavy & slow');
+	assert.equal(t('usage.toolExec.mcpLabel', '1,211', '6%'), '1,211 · 6% fail');
+	assert.equal(t('usage.toolExec.legend.failure'), 'Failure');
+	assert.equal(t('usage.toolExec.empty.mcp'), 'No MCP server calls in this period.');
+	mock.setLanguage('zh-cn');
+	try {
+		assert.equal(t('usage.toolExec.reliability.title'), '工具执行可靠性');
+		assert.equal(t('usage.toolExec.latency.title'), '工具延迟分布');
+		assert.equal(t('usage.toolExec.mcp.title'), 'MCP 服务器健康度');
+		assert.equal(t('usage.toolExec.costSpeed.title'), '成本与速度图');
+		assert.equal(t('usage.toolExec.mcpLabel', '1,211', '6%'), '1,211 · 6% 失败');
+		assert.equal(t('usage.toolExec.legend.failure'), '失败');
+	} finally {
+		mock.setLanguage('en');
+	}
+});
