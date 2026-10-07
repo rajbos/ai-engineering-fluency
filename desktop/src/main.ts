@@ -635,7 +635,9 @@ async function buildDetailedSessionFiles(sessionFiles: { file: string; size: num
             // Adapters that know the session title provide it; otherwise name an
             // active session after its file so it is not labelled "(Empty session)".
             title: meta?.title || (data && data.interactions > 0 ? path.basename(f.file) : undefined),
-            repository: meta?.workspacePath,
+            // The adapter's own repository id when it records one (Copilot CLI does),
+            // else the workspace directory the view derives a name from.
+            repository: meta?.repository ?? meta?.workspacePath,
             // Context references are not tracked by the CLI parser: zero, not guessed.
             contextReferences: createEmptyContextRefs(),
             firstInteraction: meta?.firstInteraction ?? null,
