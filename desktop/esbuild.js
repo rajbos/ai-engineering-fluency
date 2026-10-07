@@ -145,6 +145,16 @@ function copyStaticAssets(distDir, webviewDir) {
     console.log(`Copied ${bundle}`);
   }
 
+  // Codicon icon font — the nav buttons in the shared bundles render
+  // `.codicon-*` glyphs, which VS Code webviews get from this stylesheet.
+  const codiconsSrcDir = path.join(__dirname, '..', 'vscode-extension', 'node_modules', '@vscode', 'codicons', 'dist');
+  const codiconsDstDir = path.join(webviewDir, 'codicons');
+  fs.mkdirSync(codiconsDstDir, { recursive: true });
+  for (const file of ['codicon.css', 'codicon.ttf']) {
+    fs.copyFileSync(path.join(codiconsSrcDir, file), path.join(codiconsDstDir, file));
+  }
+  console.log('Copied codicons');
+
   const wasmSrc = fs.existsSync(path.join(__dirname, '..', 'cli', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'))
     ? path.join(__dirname, '..', 'cli', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')
     : path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');

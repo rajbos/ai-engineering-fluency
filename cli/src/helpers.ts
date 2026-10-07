@@ -203,6 +203,49 @@ function resolveModel(request: any): string {
 }
 
 /**
+ * The real file behind a discovered session path. DB-backed editors (OpenCode,
+ * Crush, ...) report virtual paths like `opencode.db#<id>`, which do not exist
+ * on disk; ordinary session files are returned unchanged.
+ */
+export function getSessionBackingPath(filePath: string): string {
+	const eco = getEcosystems().find(e => e.handles(filePath));
+	return eco ? eco.getBackingPath(filePath) : filePath;
+}
+
+/** What an adapter knows about one session beyond its token counts. */
+export type SessionMeta = Awaited<ReturnType<IEcosystemAdapter['getMeta']>>;
+
+/**
+ * Per-session title and first/last interaction times from the owning adapter,
+ * or null for sessions no adapter handles. For DB-backed editors this is the
+ * only per-session timestamp: the backing database's mtime moves whenever any
+ * session in it changes.
+ */
+export async function getSessionMeta(filePath: string): Promise<SessionMeta | null> {
+	const eco = getEcosystems().find(e => e.handles(filePath));
+	if (!eco) { return null; }
+	try {
+		return await eco.getMeta(filePath);
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Cheap per-session last-activity time from the owning adapter, or null when the
+ * adapter has no such lookup (then the file's own mtime is the right signal).
+ */
+export async function getSessionLastActivity(filePath: string): Promise<Date | null> {
+	const eco = getEcosystems().find(e => e.handles(filePath));
+	if (!eco?.getLastActivity) { return null; }
+	try {
+		return await eco.getLastActivity(filePath);
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Stat a session file, handling DB virtual paths (OpenCode and Crush).
  * Virtual DB paths are resolved to the actual DB file.
  */

@@ -4,6 +4,21 @@ A lightweight Electron tray app that surfaces the same dashboards as the VS Code
 extension (Details, Environmental Impact, Token Usage Chart, Usage Analysis,
 Fluency Score, Scoring Guide, Diagnostics) outside of VS Code.
 
+## Install
+
+Download `AI-Engineering-Fluency-Setup-<version>.exe` from the newest
+**Desktop App** release on the
+[releases page](https://github.com/rajbos/ai-engineering-fluency/releases) and
+run it. Windows x64 only for now.
+
+The installer is not code-signed, so Windows SmartScreen shows "Windows
+protected your PC" on first run — choose **More info → Run anyway**.
+
+The app lives in the system tray. It checks for a new version shortly after
+launch and every six hours, downloads it in the background, and offers
+**Restart to install** in the tray menu (it also installs on the next quit).
+**Check for updates** in the same menu checks on demand.
+
 ## How it works
 
 The desktop app does **not** reimplement the UI. It reuses the existing
@@ -51,7 +66,7 @@ cd ../vscode-extension && npm install && npm run compile
 | `npm run dev`           | Watch mode: rebuild on change and relaunch Electron.           |
 | `npm start`             | Build then launch Electron once.                               |
 | `npm run pack`          | Production build + `electron-builder --dir` (unpacked app).    |
-| `npm run dist`          | Production build + installers (NSIS + APPX) → `release/`.      |
+| `npm run dist`          | Production build + NSIS installer → `release/` (never publishes). |
 | `npm run check-types`   | `tsc --noEmit`. See the caveat below.                          |
 
 In development the app writes its Electron profile to `.dev-profile/` (kept out
@@ -62,7 +77,27 @@ of `%APPDATA%` so hot-reload restarts don't fight over a shared, locked cache).
 
 Installer config lives under `build` in [`package.json`](package.json).
 Installers are written to `release/` (separate from the esbuild `dist/` output so
-they are never re-packaged into the next build). Targets: NSIS and APPX (x64).
+they are never re-packaged into the next build). Target: NSIS (x64).
+
+## Releasing
+
+1. Bump `version` in `package.json` (and `package-lock.json`) and merge that.
+2. Tag the merge commit `desktop/v<version>` and push the tag.
+
+[`desktop-publish.yml`](../.github/workflows/desktop-publish.yml) then builds
+the installer, creates the **Desktop App v<version>** release, and updates the
+auto-update feed. Running that workflow manually builds the installer as a
+workflow artifact without releasing anything.
+
+### Why the update feed is a separate release
+
+`electron-updater`'s GitHub provider reads `latest.yml` from the repository's
+"latest release". This repo ships several products, so that is usually a VS Code
+extension, CLI or JetBrains release with no `latest.yml` in it. The app
+therefore uses the `generic` provider against a fixed URL: the rolling
+`desktop-latest` release, which holds a single `latest.yml` whose download URLs
+point at the installer in the versioned release. Do not delete that release or
+tag — installed apps stop finding updates without it.
 
 ## Icons
 
