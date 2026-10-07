@@ -11,6 +11,11 @@ import {
 } from '../../src/webview/usage/toolExecutionHtml';
 import type { LatencyHistogram } from '../../src/webview/shared/types';
 
+/** Mirrors formatUtils.escapeHtml for the one assertion that needs the escaped form of an id. */
+function escapeHtmlForTest(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 /** Histogram with `n` samples all in bucket `i` (durations in [2^i, 2^(i+1)) ms). */
 function hist(i: number, n: number, sumMs = n * 2 ** i): LatencyHistogram {
     const buckets = new Array<number>(23).fill(0);
@@ -134,8 +139,10 @@ test('all sections: tool ids are HTML-escaped and the four sections render in or
         },
     });
     const html = buildToolExecutionSectionsHtml(input);
-    assert.doesNotMatch(html, /<script>/);
-    assert.match(html, /&lt;script&gt;/);
+    // Plain substring checks on purpose: this asserts that escapeHtml ran on the id, it is not an HTML filter.
+    const rawId = '<script>x</script>';
+    assert.equal(html.includes(rawId), false, 'raw tool id must not reach the markup');
+    assert.equal(html.includes(escapeHtmlForTest(rawId)), true, 'tool id must be rendered escaped');
     const order = ['section-tool-reliability', 'section-tool-latency', 'section-mcp-health', 'section-tool-cost-speed'].map(id => html.indexOf(`id="${id}"`));
     assert.ok(order.every((pos, i) => pos >= 0 && (i === 0 || pos > order[i - 1])), `sections out of order: ${order.join(',')}`);
 });
