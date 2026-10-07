@@ -718,6 +718,7 @@
   "usage.pagedTable.sortBy": "按{0}排序",
   "usage.pagedTable.sortedAscending": "当前按升序排列",
   "usage.pagedTable.sortedDescending": "当前按降序排列",
+  "usage.pagedTable.announcement.sort": "{0}：{1}",
   "usage.pagedTable.noRows": "没有可显示的行。",
   "usage.toolCuration.column.server": "服务器",
   "usage.toolCuration.column.source": "来源",

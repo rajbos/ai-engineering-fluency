@@ -1,12 +1,16 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
 
 import { initializeWebviewLocalization } from '../../src/webview/shared/localization';
 import {
 	DEFAULT_PAGED_TABLE_PAGE_SIZE,
+	getPagedTableAnnouncement,
+	getPagedTableFocusTarget,
 	getPagedTablePage,
 	getPagedTableState,
 	renderPagedTable,
+	restorePagedTableFocus,
 	setPagedTableFilter,
 	setPagedTablePage,
 	setPagedTableSort,
@@ -134,4 +138,65 @@ test('pagedTable: escapes plain cell content and localized labels', () => {
 	assert.doesNotMatch(html, /<img/);
 	assert.match(html, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
 	assert.match(html, /aria-label="&lt;table&gt;"/);
+});
+
+test('pagedTable: preserves control focus and announces sorted and paged updates', () => {
+	initializeWebviewLocalization({});
+	const tableId = 'test-focus-and-announcements';
+	const dom = new JSDOM(`<div id="host">${renderPagedTable({
+		tableId,
+		ariaLabel: 'test rows',
+		rows: rows(25),
+		columns,
+		initialSortColumn: 'count',
+		initialSortDirection: 'desc',
+		emptyMessage: 'Empty',
+	})}</div>`, { pretendToBeVisual: true });
+	const host = dom.window.document.getElementById('host');
+	assert.ok(host);
+	const replaceTable = (): HTMLElement => {
+		const root = host.querySelector(`#paged-table-root-${tableId}`) as HTMLElement | null;
+		assert.ok(root);
+		const target = getPagedTableFocusTarget(root, dom.window.document.activeElement);
+		const staging = dom.window.document.createElement('div');
+		staging.innerHTML = renderPagedTable({
+			tableId,
+			ariaLabel: 'test rows',
+			rows: rows(25),
+			columns,
+			initialSortColumn: 'count',
+			initialSortDirection: 'desc',
+			emptyMessage: 'Empty',
+		});
+		const replacement = staging.firstElementChild;
+		assert.ok(replacement instanceof dom.window.HTMLElement);
+		root.replaceWith(replacement);
+		assert.equal(restorePagedTableFocus(replacement, target), true);
+		return replacement;
+	};
+
+	const sortButton = host.querySelector('[data-paged-sort="name"]') as HTMLButtonElement | null;
+	assert.ok(sortButton);
+	sortButton.focus();
+	setPagedTableSort(tableId, 'name');
+	let replacement = replaceTable();
+	assert.equal(dom.window.document.activeElement?.getAttribute('data-paged-sort'), 'name');
+	assert.equal(getPagedTableAnnouncement(replacement, true), 'Name: Sorted ascending');
+
+	const nextButton = host.querySelector('[data-paged-direction="next"]') as HTMLButtonElement | null;
+	assert.ok(nextButton);
+	nextButton.focus();
+	setPagedTablePage(tableId, 2);
+	replacement = replaceTable();
+	assert.equal(dom.window.document.activeElement?.getAttribute('data-paged-direction'), 'next');
+	assert.equal(getPagedTableAnnouncement(replacement, false), 'Page 2 of 3 · Showing 11–20 of 25');
+
+	const previousButton = host.querySelector('[data-paged-direction="previous"]') as HTMLButtonElement | null;
+	assert.ok(previousButton);
+	previousButton.focus();
+	setPagedTablePage(tableId, 1);
+	replacement = replaceTable();
+	assert.equal(dom.window.document.activeElement?.getAttribute('data-paged-direction'), 'next');
+	assert.equal(replacement.querySelector('[data-paged-direction="previous"]')?.hasAttribute('disabled'), true);
+	dom.window.close();
 });

@@ -716,6 +716,7 @@
   "usage.pagedTable.sortBy": "Sort by {0}",
   "usage.pagedTable.sortedAscending": "Sorted ascending",
   "usage.pagedTable.sortedDescending": "Sorted descending",
+  "usage.pagedTable.announcement.sort": "{0}: {1}",
   "usage.pagedTable.noRows": "No rows to display.",
   "usage.toolCuration.column.server": "Server",
   "usage.toolCuration.column.source": "Source",

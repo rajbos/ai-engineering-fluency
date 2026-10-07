@@ -60,6 +60,18 @@ body {
 	box-shadow: 0 2px 6px var(--shadow-color);
 }
 
+.paged-table-status {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
 /* Heading that opens a band of related .section cards inside one tab, so a long stack
    reads as grouped rather than as one flat list with leftovers at the bottom. */
 .section-group-heading {

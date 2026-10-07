@@ -23,6 +23,11 @@ export interface PagedTableState {
 	filters: Record<string, boolean>;
 }
 
+export type PagedTableFocusTarget =
+	| { kind: 'sort'; columnId: string }
+	| { kind: 'page'; direction: 'previous' | 'next' }
+	| { kind: 'filter'; filterId: string };
+
 export interface PagedTablePage<Row> {
 	rows: Row[];
 	filteredCount: number;
@@ -92,6 +97,58 @@ export function setPagedTableFilter(tableId: string, filterId: string, value: bo
 		filters: { ...state.filters, [filterId]: value },
 		page: 1,
 	});
+}
+
+export function getPagedTableFocusTarget(root: HTMLElement, activeElement: Element | null): PagedTableFocusTarget | undefined {
+	if (!activeElement || !root.contains(activeElement)) { return undefined; }
+	const sortButton = activeElement.closest<HTMLButtonElement>('[data-paged-sort]');
+	if (sortButton) {
+		const columnId = sortButton.getAttribute('data-paged-sort');
+		if (columnId) { return { kind: 'sort', columnId }; }
+	}
+	const pageButton = activeElement.closest<HTMLButtonElement>('[data-paged-direction]');
+	if (pageButton) {
+		const direction = pageButton.getAttribute('data-paged-direction');
+		if (direction === 'previous' || direction === 'next') { return { kind: 'page', direction }; }
+	}
+	const filterInput = activeElement.closest<HTMLInputElement>('[data-paged-table-filter]');
+	if (filterInput) {
+		const filterId = filterInput.getAttribute('data-paged-table-filter');
+		if (filterId) { return { kind: 'filter', filterId }; }
+	}
+	return undefined;
+}
+
+export function restorePagedTableFocus(root: HTMLElement, target: PagedTableFocusTarget | undefined): boolean {
+	if (!target) { return false; }
+	let control: HTMLElement | undefined;
+	if (target.kind === 'sort') {
+		control = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-paged-sort]'))
+			.find(button => button.getAttribute('data-paged-sort') === target.columnId);
+	} else if (target.kind === 'page') {
+		const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>('[data-paged-direction]'));
+		control = buttons.find(button => button.getAttribute('data-paged-direction') === target.direction && !button.disabled)
+			?? buttons.find(button => !button.disabled);
+	} else {
+		control = Array.from(root.querySelectorAll<HTMLInputElement>('[data-paged-table-filter]'))
+			.find(input => input.getAttribute('data-paged-table-filter') === target.filterId);
+	}
+	if (!control) { return false; }
+	control.focus();
+	return true;
+}
+
+export function getPagedTableAnnouncement(root: HTMLElement, sorted: boolean): string {
+	if (sorted) {
+		const header = root.querySelector<HTMLTableCellElement>('th[aria-sort="ascending"], th[aria-sort="descending"]');
+		const button = header?.querySelector<HTMLButtonElement>('.paged-table-sort');
+		if (button) {
+			const label = (button.textContent ?? '').replace(/\s*[↑↓]\s*$/, '').trim();
+			return localizeFormat('usage.pagedTable.announcement.sort', label, button.title);
+		}
+	}
+	const status = root.querySelector<HTMLElement>('.paged-table-pager span, .paged-table-summary');
+	return status?.textContent?.trim() ?? '';
 }
 
 function compareSortValues(a: PagedTableSortValue, b: PagedTableSortValue): number {
@@ -178,9 +235,9 @@ export function renderPagedTable<Row>(options: RenderPagedTableOptions<Row>): st
 		: '';
 	const pager = page.pageCount > 1
 		? `<nav class="paged-table-pager" aria-label="${escapeHtml(options.ariaLabel)}" style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:8px;font-size:11px;color:var(--text-secondary);">
-			<button type="button" data-paged-table="${escapeHtml(options.tableId)}" data-paged-page="${page.page - 1}"${page.page <= 1 ? ' disabled' : ''} style="background:var(--button-secondary-bg);color:var(--button-secondary-fg);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.previous'))}</button>
+			<button type="button" data-paged-table="${escapeHtml(options.tableId)}" data-paged-direction="previous" data-paged-page="${page.page - 1}"${page.page <= 1 ? ' disabled' : ''} style="background:var(--button-secondary-bg);color:var(--button-secondary-fg);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.previous'))}</button>
 			<span>${escapeHtml(localizeFormat('usage.pagedTable.page', page.page, page.pageCount, page.firstRow, page.lastRow, page.filteredCount))}</span>
-			<button type="button" data-paged-table="${escapeHtml(options.tableId)}" data-paged-page="${page.page + 1}"${page.page >= page.pageCount ? ' disabled' : ''} style="background:var(--button-secondary-bg);color:var(--button-secondary-fg);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.next'))}</button>
+			<button type="button" data-paged-table="${escapeHtml(options.tableId)}" data-paged-direction="next" data-paged-page="${page.page + 1}"${page.page >= page.pageCount ? ' disabled' : ''} style="background:var(--button-secondary-bg);color:var(--button-secondary-fg);border:1px solid var(--border-color);border-radius:3px;padding:2px 8px;cursor:pointer;">${escapeHtml(localize('usage.pagedTable.next'))}</button>
 		</nav>`
 		: summary;
 	return `<div id="paged-table-root-${escapeHtml(options.tableId)}" class="paged-table-root">

@@ -53,7 +53,7 @@ import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from 
 import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
 import { sanitizeServerMemoriesAnalysis as _sanitizeServerMemoriesAnalysis, buildServerMemoriesSectionHtml } from './serverMemories';
 import { buildBuiltinToolsHtml, buildUnusedMcpHtml, buildUnusedSkillsHtml, renderCurationTable, type CurationTableId } from './toolCurationTables';
-import { setPagedTableFilter, setPagedTablePage, setPagedTableSort } from './pagedTable';
+import { getPagedTableAnnouncement, getPagedTableFocusTarget, restorePagedTableFocus, setPagedTableFilter, setPagedTablePage, setPagedTableSort } from './pagedTable';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -3490,6 +3490,7 @@ function buildCurationSectionHtml(curation: ToolCurationAnalysis | null | undefi
 			<div id="section-tool-curation" class="section">
 				<div class="section-title"><span>✂️</span><span>Tool Curation</span></div>
 				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Compare available tools against actual usage to reduce prompt overhead (last ${windowDays} days)</div>
+				<span id="curation-table-status" class="paged-table-status" role="status" aria-live="polite" aria-atomic="true"></span>
 				${buildCurationSummaryHtml(availableTools, unusedTools, estimatedPromptBloat)}
 				${buildUnusedMcpHtml(underusedMcpServers, estimatedPromptBloat, windowDays)}
 				${buildUnderusedAgentPluginsHtml(underusedAgentPlugins, windowDays)}
@@ -4070,10 +4071,18 @@ function rerenderCurationTable(tableId: CurationTableId, section: HTMLElement): 
 	if (!currentCurationAnalysis) { return; }
 	const root = section.querySelector<HTMLElement>(`#paged-table-root-${tableId}`);
 	if (!root) { return; }
+	const focusTarget = getPagedTableFocusTarget(root, document.activeElement);
 	const staging = document.createElement('div');
 	setHtml(staging, renderCurationTable(tableId, currentCurationAnalysis));
 	const replacement = staging.firstElementChild;
-	if (replacement) { root.replaceWith(replacement); }
+	if (replacement instanceof HTMLElement) {
+		const sorted = Boolean(focusTarget?.kind === 'sort');
+		const announcement = getPagedTableAnnouncement(replacement, sorted);
+		root.replaceWith(replacement);
+		restorePagedTableFocus(replacement, focusTarget);
+		const status = section.querySelector<HTMLElement>('#curation-table-status');
+		if (status) { status.textContent = announcement; }
+	}
 }
 
 function handleCurationSort(target: Element, section: HTMLElement): boolean {

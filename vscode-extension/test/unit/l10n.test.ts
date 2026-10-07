@@ -51,6 +51,7 @@ test('l10n: paged curation table controls resolve in English and zh-cn', () => {
 	assert.equal(t('usage.pagedTable.sortBy', 'Server'), 'Sort by Server');
 	assert.equal(t('usage.pagedTable.sortedAscending'), 'Sorted ascending');
 	assert.equal(t('usage.pagedTable.sortedDescending'), 'Sorted descending');
+	assert.equal(t('usage.pagedTable.announcement.sort', 'Server', 'Sorted ascending'), 'Server: Sorted ascending');
 	assert.equal(t('usage.pagedTable.noRows'), 'No rows to display.');
 	mock.setLanguage('zh-cn');
 	try {
@@ -61,6 +62,7 @@ test('l10n: paged curation table controls resolve in English and zh-cn', () => {
 		assert.equal(t('usage.pagedTable.sortBy', 'Server'), '按Server排序');
 		assert.equal(t('usage.pagedTable.sortedAscending'), '当前按升序排列');
 		assert.equal(t('usage.pagedTable.sortedDescending'), '当前按降序排列');
+		assert.equal(t('usage.pagedTable.announcement.sort', '服务器', '当前按升序排列'), '服务器：当前按升序排列');
 		assert.equal(t('usage.pagedTable.noRows'), '没有可显示的行。');
 	} finally {
 		mock.setLanguage('en');
