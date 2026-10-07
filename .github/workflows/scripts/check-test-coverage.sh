@@ -186,7 +186,11 @@ norm_import() {
     old="$(printf '%s' "$RENAME_MAP" | awk -v p="$resolved" '$1==p {print $2; exit}')"
     resolved="${old:-$resolved}"
   fi
-  printf '%s' "${line/"$spec"/"$resolved"}" | tr -s '[:space:]' ' '
+  # Collapse whitespace around the specifier only; the specifier itself stays
+  # verbatim so './foo  bar' and './foo bar' remain distinct modules.
+  line="${line/"$spec"/@@SPEC@@}"
+  line="$(printf '%s' "$line" | tr -s '[:space:]' ' ')"
+  printf '%s' "${line/@@SPEC@@/"$resolved"}"
 }
 
 # only_imports <added-lines> <removed-lines> <added-dir> <removed-dir>: every
