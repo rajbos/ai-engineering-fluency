@@ -44,12 +44,17 @@ test('l10n: resolves zh-cn strings when the display language is zh-cn', () => {
 });
 
 test('l10n: missing-instructions insight is tool-neutral in English and zh-cn', () => {
+	const enOne = "1 active workspace (repo) uses other AI tools but has no shared agent instructions file (`AGENTS.md`, `CLAUDE.md` or `.github/copilot-instructions.md`). `AGENTS.md` is the open standard read by most coding agents, including Copilot; adding one gives them project-specific context, reducing back-and-forth and improving response quality.";
+	const enOther = "2 active workspaces (a, b) use other AI tools but have no shared agent instructions file (`AGENTS.md`, `CLAUDE.md` or `.github/copilot-instructions.md`). `AGENTS.md` is the open standard read by most coding agents, including Copilot; adding one gives them project-specific context, reducing back-and-forth and improving response quality.";
+	const zhOne = '有 1 个活跃工作区（repo）使用了其他 AI 工具，但没有共享的智能体说明文件（`AGENTS.md`、`CLAUDE.md` 或 `.github/copilot-instructions.md`）。`AGENTS.md` 是大多数编码智能体（包括 Copilot）都支持的开放标准，添加后可提供项目专属上下文，减少反复沟通并提升回答质量。';
+	const zhOther = '有 2 个活跃工作区（a, b）使用了其他 AI 工具，但没有共享的智能体说明文件（`AGENTS.md`、`CLAUDE.md` 或 `.github/copilot-instructions.md`）。`AGENTS.md` 是大多数编码智能体（包括 Copilot）都支持的开放标准，添加后可提供项目专属上下文，减少反复沟通并提升回答质量。';
 	assert.equal(t('insight.missingInstructions.title'), '🗒️ Add an AGENTS.md to your repos');
-	assert.ok(t('insight.missingInstructions.body.one', 1, 'repo', '').includes('`AGENTS.md`'));
-	assert.ok(t('insight.missingInstructions.body.other', 2, 'a, b', '').includes('`CLAUDE.md`'));
+	assert.equal(t('insight.missingInstructions.body.one', 1, 'repo', ''), enOne);
+	assert.equal(t('insight.missingInstructions.body.other', 2, 'a, b', ''), enOther);
 	mock.setLanguage('zh-cn');
 	assert.equal(t('insight.missingInstructions.title'), '🗒️ 为你的仓库添加 AGENTS.md');
-	assert.ok(t('insight.missingInstructions.body.one', 1, 'repo', '').includes('`AGENTS.md`'));
+	assert.equal(t('insight.missingInstructions.body.one', 1, 'repo', ''), zhOne);
+	assert.equal(t('insight.missingInstructions.body.other', 2, 'a, b', ''), zhOther);
 	mock.setLanguage('en');
 });
 

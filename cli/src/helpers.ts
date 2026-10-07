@@ -9,7 +9,7 @@ import chalk from 'chalk';
 import { SessionDiscovery } from '../../src/sessionDiscovery';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
-import { isMcpTool, extractMcpServerName, resolveDebugLogCandidatePaths } from '../../src/workspaceHelpers';
+import { isMcpTool, extractMcpServerName, resolveDebugLogCandidatePaths, resolveExactWorkspacePath } from '../../src/workspaceHelpers';
 import { resolveFileUri } from '../../src/workspacePathResolver';
 import { parseSessionFileContent } from '../../src/sessionParser';
 import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost, extractAllTokensFromDebugLog } from '../../src/tokenEstimation';
@@ -161,17 +161,15 @@ export async function buildCustomizationMatrix(sessionFiles: string[]): Promise<
 	for (const wsPath of workspacePaths) {
 		const hasIssues = await withErrorRecovery(
 			async () => {
-				const exists = (...segments: string[]) =>
-					fs.promises.access(path.join(wsPath, ...segments)).then(() => true).catch(() => false);
-				// AGENTS.md is the cross-tool standard; also match lowercase for case-sensitive filesystems.
-				const found = await Promise.all([
-					exists('.github', 'copilot-instructions.md'),
-					exists('AGENTS.md'),
-					exists('agents.md'),
-					exists('CLAUDE.md'),
-					exists('.claude', 'CLAUDE.md'),
-				]);
-				return !found.some(Boolean);
+				// Same case-insensitive resolution as the shared customization scanner, so the CLI
+				// accepts every spelling the extension does (including on case-sensitive filesystems).
+				const instructionPaths = [
+					'.github/copilot-instructions.md',
+					'AGENTS.md',
+					'CLAUDE.md',
+					'.claude/CLAUDE.md',
+				];
+				return !instructionPaths.some(p => resolveExactWorkspacePath(wsPath, p, true) !== undefined);
 			},
 			true,
 			`buildCustomizationMatrix workspace check(${wsPath})`
