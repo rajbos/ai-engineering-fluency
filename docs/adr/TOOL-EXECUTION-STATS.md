@@ -50,11 +50,14 @@ permission prompts, queueing and user wait time (`read_powershell` has a p50 of
 ~30 s locally for exactly this reason). UI labels must say "observed execution
 duration", not "tool speed".
 
-**Only an explicit flag is a failure.** `success === false` (Copilot CLI /
-JetBrains) and `is_error === true` (Claude Code). A missing flag — older schema
-versions — is not evidence either way. Starts with no matching complete event
-(aborted sessions) record nothing; they are the raw material for an
-"abandoned" outcome later, not failures.
+**Outcomes are tri-state.** `success === false` (Copilot CLI / JetBrains) and
+`is_error === true` (Claude Code) are failures; an explicit `true` (or a Claude
+result without `is_error`) is a success; a result with no verdict at all —
+older Copilot CLI schemas omit `success` — is *unknown* and stays out of
+`completedBy*` so it cannot masquerade as a success, while its latency is still
+recorded. Starts with no matching complete event (aborted sessions) record
+nothing; they are the raw material for an "abandoned" outcome later, not
+failures.
 
 **Fields are optional extensions of the existing types** (`ToolCallUsage.
 completedByTool` / `failuresByTool` / `latencyByTool`, `McpToolUsage.
@@ -77,7 +80,7 @@ with a known server to the `mcpTools` maps and everything else to `toolCalls`,
 mirroring how `recordToolOrMcpInvocation` keeps MCP calls out of `toolCalls`.
 
 **One writer.** `recordToolOutcome()` in `src/usageAnalysis.ts` is the only
-function that touches the four maps, so every session format that gains a flag
+function that touches the six maps, so every session format that gains a flag
 or timestamps funnels through the same bookkeeping and `__proto__`-style key
 guard.
 
@@ -88,7 +91,9 @@ names in `taskClassification.DELEGATION_TOOL_PATTERN`, the `Skill` / `skill` /
 `__slash__` wrappers in the Claude Code and Copilot CLI parsers, and Copilot
 CLI's `<server>-mcp-server-<tool>` naming that `isMcpTool` does not match.
 
-**Cache version bump.** `CopilotTokenTracker.CACHE_VERSION` 75 → 76. A
+**Cache version bump.** `CopilotTokenTracker.CACHE_VERSION` 77 → 78 (the branch
+started at 75 → 76; `main` took 76 and 77 for autonomy usage and the Copilot CLI
+MCP routing while this was in review). A
 mtime/size hit skips re-analysis, so without the bump existing entries would
 never gain the new fields.
 
@@ -97,13 +102,14 @@ never gain the new fields.
 ### Phase 1 — model, histogram, Copilot CLI / JetBrains (done)
 
 - `src/latencyHistogram.ts`, `src/toolKind.ts` (new).
-- `src/types.ts`: `LatencyHistogram`, the four optional fields; mirrored in
+- `src/types.ts`: `LatencyHistogram`, the six optional fields (three on
+  `ToolCallUsage`, three on `McpToolUsage`); mirrored in
   `vscode-extension/src/webview/shared/types.ts`.
 - `src/usageAnalysis.ts`: `recordToolOutcome()`; the Copilot CLI pending-call
   map now keeps `startedAt` and `mcpServer` from the start event;
   `_asuHandleToolComplete` records outcome before the existing LOC / output-token
   logic; `mergeUsageAnalysis` sums the new maps via `_muaMergeToolOutcomes`.
-- `vscode-extension/src/extension.ts`: cache version 76.
+- `vscode-extension/src/extension.ts`: cache version bump (78 after the merge).
 - Tests: `latencyHistogram.test.ts`, `toolKind.test.ts`, two new cases in
   `usageAnalysis.test.ts` (synthetic JSONL covering success, explicit failure,
   zero-delta, MCP server attribution, missing flag, missing timestamp, orphaned
@@ -137,7 +143,9 @@ period: `#section-tool-reliability` (stacked success/failure bars),
 `#section-tool-latency` (log x-axis, p50 bar + p95 marker),
 `#section-mcp-health` (calls with "N · x% fail" labels) and
 `#section-tool-cost-speed` (log/log bubble map, size = calls, colour =
-`classifyToolKind`). Hand-written SVG rather than Chart.js: `main.ts` already
+`classifyToolKind` over builtin / subagent / skill — MCP is excluded because MCP
+outcomes live per server and MCP result tokens are not sized, so an MCP bubble
+would have no y value). Hand-written SVG rather than Chart.js: `main.ts` already
 sits past the 6000-line `max-lines` ceiling and has an SVG precedent in the
 efficiency frontier chart, so the sections live in their own module and the
 usage bundle stays chart-library-free. The automatic-tool filter the tables
@@ -173,13 +181,18 @@ Write that definition down before building.
 
 ## Consequences
 
-- Sync payloads grow by ~25 integers per distinct tool per session
-  (`syncService.ts` serialises `toolCalls` wholesale into `toolCallsJson`);
-  check row size against the storage limit once Phase 2 widens coverage.
+- Sync payloads: `syncService.ts` serialises `toolCalls` / `mcpTools` into
+  `toolCallsJson` / `mcpToolsJson`, and an Azure Table string property is capped
+  at 64 KiB while a day's rollup keeps the union of every tool. The latency
+  histograms (~25 integers per tool) are therefore stripped from the uploaded
+  JSON (`stripLatencyHistograms`) — nothing server-side reads them — and only
+  the count maps travel, so the payload stays bounded by distinct tools × a few
+  counters. `mergeNestedObject` in the rollups still sums histograms element-wise
+  should they ever be uploaded.
 - All new fields are counts and durations keyed by tool / server name. No prompt
   or result text is stored, so the sharing-server data contract is unaffected
   and no skill `SECURITY.md` changes.
-- The CLI's `usage-analysis --json` output gains the four optional keys; the
+- The CLI's `usage-analysis --json` output gains the six optional keys; the
   Visual Studio and JetBrains hosts ignore unknown keys.
 - Known pre-existing gap, out of scope here: `_asuHandleMcpToolEvent` keys on
   `data.mcpServer`, but Copilot CLI writes `data.mcpServerName`, so Copilot CLI

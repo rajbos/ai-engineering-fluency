@@ -33,7 +33,7 @@
   "usage.toolExec.mcp.title": "MCP server health",
   "usage.toolExec.mcp.subtitle": "Calls with a recorded outcome and the share that failed, by connected MCP server, last 30 days.",
   "usage.toolExec.costSpeed.title": "Cost vs speed map",
-  "usage.toolExec.costSpeed.subtitle": "p50 latency × result tokens per completed call for each tool, last 30 days. Bubble size is the number of completed calls; colour is the tool kind.",
+  "usage.toolExec.costSpeed.subtitle": "p50 latency × result tokens per completed call for each built-in, subagent or skill tool, last 30 days. Bubble size is the number of completed calls; colour is the tool kind. MCP calls are tracked per server in MCP server health and are not plotted here.",
   "usage.toolExec.costSpeed.hint": "top-right = heavy & slow",
   "usage.toolExec.axis.latency": "p50 latency",
   "usage.toolExec.axis.tokens": "tokens / call",

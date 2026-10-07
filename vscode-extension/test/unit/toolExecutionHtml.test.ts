@@ -53,6 +53,17 @@ test('formatLatencyMs: ms / s / m ranges', () => {
     assert.equal(formatLatencyMs(1500), '1.5s');
     assert.equal(formatLatencyMs(12_400), '12s');
     assert.equal(formatLatencyMs(90_000), '1.5m');
+    assert.equal(formatLatencyMs(7_200_000), '2.0h');
+});
+
+test('latency axis: values past one hour get their own tick instead of clamping to the 1h edge', () => {
+    // bucket 22 is the overflow bucket (>= 2^22 ms ≈ 70 min)
+    const input = sampleInput({ toolCalls: { total: 1, byTool: { slow: 1 }, completedByTool: { slow: 1 }, latencyByTool: { slow: hist(22, 4) } } });
+    const html = buildToolLatencySectionHtml(input);
+    assert.match(html, />2\.0h</, 'a 2h tick is rendered');
+    const bar = html.match(/tool-exec-marker-p95" x1="([\d.]+)"/);
+    const oneHour = html.match(/<text x="([\d.]+)" y="\d+" text-anchor="middle">1\.0h<\/text>/);
+    assert.ok(bar && oneHour && Number(bar[1]) > Number(oneHour[1]), 'p95 marker sits to the right of the 1h tick');
 });
 
 test('reliability section: bars and table come from completed calls, not byTool starts', () => {

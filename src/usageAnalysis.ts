@@ -505,23 +505,30 @@ function recordToolOrMcpInvocation(
  * (Copilot CLI tags the start event; other formats derive it from the tool-name
  * prefix). MCP calls are recorded per server under `mcpTools` only, mirroring how
  * `recordToolOrMcpInvocation` keeps MCP calls out of `toolCalls`; everything else
- * is recorded per tool under `toolCalls`. Unpaired or timestamp-less calls pass
- * `undefined` for `durationMs` and only the completion/failure counts move.
+ * is recorded per tool under `toolCalls`.
+ *
+ * `success` is tri-state: `true` / `false` are explicit outcomes and count toward
+ * `completedBy*` (and `failuresBy*`); `undefined` means the log recorded a result
+ * but no verdict (older Copilot CLI schemas omit `success`), so the call stays out
+ * of the reliability denominator entirely and only its latency is kept.
+ * Unpaired or timestamp-less calls pass `undefined` for `durationMs`.
  */
 export function recordToolOutcome(
 	analysis: SessionUsageAnalysis,
 	toolName: string,
 	mcpServer: string | undefined,
-	success: boolean,
+	success: boolean | undefined,
 	durationMs: number | undefined,
 ): void {
 	if (!toolName || isUnsafeObjectKey(toolName)) { return; }
 	const server = mcpServer && !isUnsafeObjectKey(mcpServer) ? mcpServer : undefined;
 	const maps = server ? _rtoMcpMaps(analysis.mcpTools) : _rtoToolMaps(analysis.toolCalls);
 	const key = server ?? toolName;
-	const completed = maps.completed();
-	completed[key] = (completed[key] || 0) + 1;
-	if (!success) {
+	if (success !== undefined) {
+		const completed = maps.completed();
+		completed[key] = (completed[key] || 0) + 1;
+	}
+	if (success === false) {
 		const failures = maps.failures();
 		failures[key] = (failures[key] || 0) + 1;
 	}
@@ -2656,8 +2663,9 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 	if (toolCallId) { cliState.pendingToolCalls.delete(toolCallId); }
 	if (!pending) { return; }
 	_asuMarkEffCallError(pending, success);
-	// Only an explicit `false` is a failure; a missing flag (older schemas) is not evidence either way.
-	recordToolOutcome(analysis, pending.toolName, pending.mcpServerName, success !== false, _asuToolDurationMs(pending, event));
+	// Only an explicit boolean is an outcome; a missing flag (older schemas) keeps the call out of the
+	// reliability denominator while its latency is still recorded.
+	recordToolOutcome(analysis, pending.toolName, pending.mcpServerName, typeof success === 'boolean' ? success : undefined, _asuToolDurationMs(pending, event));
 	if (success && (pending.toolName === 'edit' || pending.toolName === 'create')) {
 		_asuApplyToolLoc(pending, cliState, analysis);
 	}

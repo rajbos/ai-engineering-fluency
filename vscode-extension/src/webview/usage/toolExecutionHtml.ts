@@ -37,11 +37,12 @@ const ROW_H = 26;
 const TOP_PAD = 14;
 const BOTTOM_PAD = 30;
 
-/** Format milliseconds the way a latency axis reads: 40ms · 1.5s · 12s · 2.0m. */
+/** Format milliseconds the way a latency axis reads: 40ms · 1.5s · 12s · 2.0m · 1.5h. */
 export function formatLatencyMs(ms: number): string {
 	if (ms < 1000) { return `${Math.round(ms)}ms`; }
 	if (ms < 60_000) { return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`; }
-	return `${(ms / 60_000).toFixed(1)}m`;
+	if (ms < 3_600_000) { return `${(ms / 60_000).toFixed(1)}m`; }
+	return `${(ms / 3_600_000).toFixed(1)}h`;
 }
 
 /** Failure share as the chart prints it: one decimal under 10 %, whole numbers above. */
@@ -50,8 +51,13 @@ function formatFailShare(failures: number, completed: number): string {
 	return `${pct.toFixed(pct > 0 && pct < 10 ? 1 : 0)}%`;
 }
 
-/** Axis tick candidates on a log latency scale (ms). */
-const LATENCY_TICKS = [1, 10, 100, 1000, 10_000, 60_000, 600_000, 3_600_000];
+/**
+ * Axis tick candidates on a log latency scale (ms). The last tick must sit above
+ * the histogram's largest possible estimate: its overflow bucket starts at 2^22 ms
+ * (~70 min) and log-interpolation inside it can reach ~140 min, so the list runs
+ * to 4 h rather than clamping everything past one hour onto the right edge.
+ */
+const LATENCY_TICKS = [1, 10, 100, 1000, 10_000, 60_000, 600_000, 3_600_000, 7_200_000, 14_400_000];
 
 function logPos(value: number, min: number, max: number, left: number, right: number): number {
 	const v = Math.max(min, Math.min(max, value));
@@ -318,9 +324,16 @@ function costSpeedTable(rows: CostSpeedRow[]): string {
 	);
 }
 
+/**
+ * Kinds the cost-vs-speed map can show. MCP is deliberately absent: MCP outcomes
+ * are recorded per server (MCP server health) and MCP result tokens are not sized,
+ * so an MCP bubble has no y value — the legend and copy say builtin / subagent / skill.
+ */
+const COST_SPEED_KINDS = ['builtin', 'subagent', 'skill'] as const;
+
 export function buildCostSpeedSectionHtml(input: ToolExecutionSectionsInput): string {
 	const rows = costSpeedRows(input);
-	const kinds = (['builtin', 'subagent', 'mcp', 'skill'] as const).filter(k => rows.some(r => r.kind === k));
+	const kinds = COST_SPEED_KINDS.filter(k => rows.some(r => r.kind === k));
 	const legend = `<div class="tool-exec-legend">${kinds.map(k => legendSwatch(`tool-exec-kind-${k}`, localize(`usage.toolExec.kind.${k}`))).join('')}</div>`;
 	const body = rows.length > 0 ? legend + buildCostSpeedChart(rows) + costSpeedTable(rows) : emptyHtml('usage.toolExec.empty.costSpeed');
 	return sectionHtml('section-tool-cost-speed', '🗺️', 'usage.toolExec.costSpeed.title', 'usage.toolExec.costSpeed.subtitle', body);

@@ -1562,7 +1562,7 @@ test('analyzeSessionUsage: CLI JSONL records per-tool failures and start→compl
     const content = events.map(e => JSON.stringify(e)).join('\n');
     const result = await analyzeSessionUsage(makeMockDeps(), '/home/user/.copilot/session-state/abc/events.jsonl', content);
 
-    assert.deepEqual(result.toolCalls.completedByTool, { view: 1, powershell: 2, grep: 1, edit: 1 }, 'orphaned start is not completed; MCP call is counted per server');
+    assert.deepEqual(result.toolCalls.completedByTool, { view: 1, powershell: 2, edit: 1 }, 'orphaned start and the verdict-less grep are not completed; MCP call is counted per server');
     assert.deepEqual(result.toolCalls.failuresByTool, { powershell: 1, edit: 1 });
     assert.deepEqual(result.mcpTools.completedByServer, { 'github-mcp-server': 1 });
     assert.deepEqual(result.mcpTools.failuresByServer, { 'github-mcp-server': 1 });
@@ -1575,7 +1575,7 @@ test('analyzeSessionUsage: CLI JSONL records per-tool failures and start→compl
     assert.equal(lat.powershell.sumMs, 3000);
     assert.equal(lat.powershell.buckets[0], 1);
     assert.equal(lat.powershell.buckets[11], 1);
-    assert.equal(lat.grep.count, 1);
+    assert.equal(lat.grep.count, 1, 'verdict-less completion still contributes latency');
     assert.equal(lat.grep.sumMs, 10);
     assert.equal(lat.edit, undefined, 'no latency sample without a complete timestamp');
     assert.equal(lat.web_fetch, undefined, 'orphaned start must not produce a sample');

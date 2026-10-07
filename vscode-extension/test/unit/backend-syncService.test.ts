@@ -2593,3 +2593,34 @@ test('syncToBackendStore passes editor type map to blob upload service', async (
 		tmpFile.cleanup();
 	}
 });
+
+test('extractFluencyMetricsFromCache strips latency histograms from toolCallsJson/mcpToolsJson and keeps the payload bounded', () => {
+	const svc = makeService();
+	const histogram = { count: 3, sumMs: 120, buckets: new Array(23).fill(0) };
+	// 400 distinct tools with histograms: ~10× a busy real day, each ~130 bytes serialized.
+	const byTool: Record<string, number> = {};
+	const completedByTool: Record<string, number> = {};
+	const latencyByTool: Record<string, typeof histogram> = {};
+	for (let i = 0; i < 400; i++) {
+		byTool[`tool_${i}`] = 3;
+		completedByTool[`tool_${i}`] = 3;
+		latencyByTool[`tool_${i}`] = histogram;
+	}
+	const cached = { usageAnalysis: {
+		toolCalls: { total: 1200, byTool, completedByTool, failuresByTool: { tool_1: 1 }, latencyByTool },
+		mcpTools: { total: 3, byServer: { github: 3 }, byTool: { x: 3 }, completedByServer: { github: 3 }, failuresByServer: { github: 1 }, latencyByServer: { github: histogram } },
+	} };
+	const result = (svc as any).extractFluencyMetricsFromCache(cached, 1);
+	const toolCalls = JSON.parse(result.toolCallsJson);
+	const mcpTools = JSON.parse(result.mcpToolsJson);
+	assert.equal(toolCalls.latencyByTool, undefined);
+	assert.equal(mcpTools.latencyByServer, undefined);
+	assert.deepEqual(toolCalls.failuresByTool, { tool_1: 1 });
+	assert.equal(Object.keys(toolCalls.completedByTool).length, 400);
+	assert.deepEqual(mcpTools.completedByServer, { github: 3 });
+	assert.deepEqual(mcpTools.failuresByServer, { github: 1 });
+	// Azure Table caps a string property at 64 KiB; the stripped payload stays well under it.
+	assert.ok(result.toolCallsJson.length < 32 * 1024, `toolCallsJson is ${result.toolCallsJson.length} bytes`);
+	// The original cache object is left intact for the local dashboard.
+	assert.ok(cached.usageAnalysis.toolCalls.latencyByTool.tool_0);
+});
