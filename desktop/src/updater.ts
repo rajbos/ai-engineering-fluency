@@ -131,7 +131,11 @@ export async function checkForUpdates(manual = false): Promise<void> {
     if (manual) { manualCheckInFlight = true; }
 
     try {
-        await autoUpdater.checkForUpdates();
+        const result = await autoUpdater.checkForUpdates();
+        // The automatic download is a separate promise. Await it so a failed
+        // download reaches this catch instead of being an unhandled rejection,
+        // and so the in-flight flag covers the download as well as the check.
+        await result?.downloadPromise;
     } catch (error) {
         // electron-updater usually reports failures via the 'error' event, but some
         // (e.g. a missing publish config) only reject this promise — surface those
