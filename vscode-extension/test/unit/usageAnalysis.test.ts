@@ -25,6 +25,7 @@ import {
 } from '../../../src/usageAnalysis';
 import { createEmptyTaskClassificationResult } from '../../../src/taskClassification';
 import { calculateEstimatedCost } from '../../../src/tokenEstimation';
+import { normalizeMcpToolName } from '../../../src/workspaceHelpers';
 import type {
     UsageAnalysisPeriod,
     SessionUsageAnalysis,
@@ -1405,6 +1406,63 @@ test('analyzeSessionUsage: Copilot CLI autonomous "skill" tool call populates sk
     assert.equal(result.toolCalls.byTool['skill'], 1);
 });
 
+test('analyzeSessionUsage: Copilot CLI MCP tool.execution_start (data.mcpServerName) lands in mcpTools, not toolCalls', async () => {
+    // Copilot CLI never writes data.mcpServer; its MCP tool.execution_start events carry
+    // data.mcpServerName / data.mcpToolName, and toolName is `<server>-<tool>`, which
+    // isMcpTool() does not match. The server tag must route the call to mcpTools only.
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-5' }, timestamp: '2026-05-01T10:00:00Z' },
+        { type: 'user.message', data: { content: 'read the readme' } },
+        {
+            type: 'tool.execution_start',
+            data: {
+                toolCallId: 'c1',
+                toolName: 'github-mcp-server-get_file_contents',
+                mcpServerName: 'github-mcp-server',
+                mcpToolName: 'get_file_contents',
+                arguments: { owner: 'o', repo: 'r', path: 'README.md' },
+            },
+        },
+        {
+            type: 'tool.execution_complete',
+            data: { toolCallId: 'c1', success: true, result: { content: 'x'.repeat(400) } },
+        },
+        { type: 'tool.execution_start', data: { toolCallId: 'c2', toolName: 'view', arguments: { path: 'a.ts' } } },
+        { type: 'tool.execution_complete', data: { toolCallId: 'c2', success: true, result: { content: 'y'.repeat(400) } } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    assert.equal(result.mcpTools.total, 1);
+    assert.equal(result.mcpTools.byServer['github-mcp-server'], 1);
+    assert.equal(result.mcpTools.byTool[normalizeMcpToolName('github-mcp-server-get_file_contents')], 1);
+    assert.equal(result.mcpTools.byTool['mcp_io_github_git_get_file_contents'], 1);
+    // Not double-counted as a regular tool call.
+    assert.equal(result.toolCalls.byTool['github-mcp-server-get_file_contents'], undefined);
+    assert.equal(result.toolCalls.total, 1);
+    assert.equal(result.toolCalls.byTool['view'], 1);
+    // Output-token bookkeeping skips MCP results, like it does for prefix-matched MCP names.
+    assert.equal(result.toolCalls.outputTokensByTool?.['github-mcp-server-get_file_contents'], undefined);
+    assert.ok((result.toolCalls.outputTokensByTool?.['view'] ?? 0) > 0);
+});
+
+test('analyzeSessionUsage: blank data.mcpServer does not mask a valid data.mcpServerName', async () => {
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-5' }, timestamp: '2026-05-01T10:00:00Z' },
+        {
+            type: 'tool.execution_start',
+            data: { toolCallId: 'c1', toolName: 'github-mcp-server-get_file_contents', mcpServer: '  ', mcpServerName: 'github-mcp-server', arguments: {} },
+        },
+        { type: 'tool.execution_complete', data: { toolCallId: 'c1', success: true, result: { content: 'x'.repeat(400) } } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const result = await analyzeSessionUsage(makeMockDeps(), '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    assert.equal(result.mcpTools.byServer['github-mcp-server'], 1);
+    assert.equal(result.toolCalls.total, 0);
+    assert.equal(result.toolCalls.byTool['github-mcp-server-get_file_contents'], undefined);
+    assert.equal(result.toolCalls.outputTokensByTool?.['github-mcp-server-get_file_contents'], undefined);
+});
+
 test('analyzeSessionUsage: Copilot CLI user-typed slash invocation (plain text, no wrapper) populates skillCalls', async () => {
     // Unlike Claude Code's <command-message>/<command-name> tags, Copilot CLI's explicit
     // slash invocation is just the literal user-typed text, e.g. "/graphify".
@@ -1504,7 +1562,9 @@ test('analyzeSessionUsage: CLI JSONL records per-tool failures and start→compl
     const content = events.map(e => JSON.stringify(e)).join('\n');
     const result = await analyzeSessionUsage(makeMockDeps(), '/home/user/.copilot/session-state/abc/events.jsonl', content);
 
-    assert.deepEqual(result.toolCalls.failuresByTool, { powershell: 1, 'github-mcp-server-get_file_contents': 1, edit: 1 });
+    assert.deepEqual(result.toolCalls.completedByTool, { view: 1, powershell: 2, grep: 1, edit: 1 }, 'orphaned start is not completed; MCP call is counted per server');
+    assert.deepEqual(result.toolCalls.failuresByTool, { powershell: 1, edit: 1 });
+    assert.deepEqual(result.mcpTools.completedByServer, { 'github-mcp-server': 1 });
     assert.deepEqual(result.mcpTools.failuresByServer, { 'github-mcp-server': 1 });
 
     const lat = result.toolCalls.latencyByTool!;
@@ -1519,6 +1579,7 @@ test('analyzeSessionUsage: CLI JSONL records per-tool failures and start→compl
     assert.equal(lat.grep.sumMs, 10);
     assert.equal(lat.edit, undefined, 'no latency sample without a complete timestamp');
     assert.equal(lat.web_fetch, undefined, 'orphaned start must not produce a sample');
+    assert.equal(lat['github-mcp-server-get_file_contents'], undefined, 'MCP latency lives under mcpTools only');
     assert.equal(result.mcpTools.latencyByServer!['github-mcp-server'].sumMs, 1500);
     assert.equal(result.mcpTools.latencyByServer!['github-mcp-server'].count, 1);
 
@@ -1530,11 +1591,14 @@ test('analyzeSessionUsage: CLI JSONL records per-tool failures and start→compl
 test('mergeUsageAnalysis: failure counts and latency histograms are summed across sessions and absent fields are skipped', () => {
     const period = emptyPeriod();
     const a = emptyAnalysis();
+    a.toolCalls.completedByTool = { view: 2 };
+    a.mcpTools.completedByServer = { gh: 1 };
     a.toolCalls.failuresByTool = { view: 1 };
     a.toolCalls.latencyByTool = { view: { count: 2, sumMs: 60, buckets: [0, 0, 0, 0, 1, 1] } };
     a.mcpTools.failuresByServer = { gh: 1 };
     a.mcpTools.latencyByServer = { gh: { count: 1, sumMs: 1500, buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] } };
     const b = emptyAnalysis();
+    b.toolCalls.completedByTool = { view: 1, edit: 1 };
     b.toolCalls.failuresByTool = { view: 2, edit: 1 };
     b.toolCalls.latencyByTool = { view: { count: 1, sumMs: 5000, buckets: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] } };
     const c = emptyAnalysis(); // no new fields at all (old cache entry)
@@ -1543,6 +1607,8 @@ test('mergeUsageAnalysis: failure counts and latency histograms are summed acros
     mergeUsageAnalysis(period, b);
     mergeUsageAnalysis(period, c);
 
+    assert.deepEqual(period.toolCalls.completedByTool, { view: 3, edit: 1 });
+    assert.deepEqual(period.mcpTools.completedByServer, { gh: 1 });
     assert.deepEqual(period.toolCalls.failuresByTool, { view: 3, edit: 1 });
     assert.equal(period.toolCalls.latencyByTool!.view.count, 3);
     assert.equal(period.toolCalls.latencyByTool!.view.sumMs, 5060);
@@ -1553,6 +1619,7 @@ test('mergeUsageAnalysis: failure counts and latency histograms are summed acros
 
     const untouched = emptyPeriod();
     mergeUsageAnalysis(untouched, c);
+    assert.equal(untouched.toolCalls.completedByTool, undefined);
     assert.equal(untouched.toolCalls.failuresByTool, undefined);
     assert.equal(untouched.toolCalls.latencyByTool, undefined);
     assert.equal(untouched.mcpTools.failuresByServer, undefined);

@@ -11,7 +11,7 @@
     "dev": "node esbuild.js --watch",
     "start": "npm run build && electron .",
     "pack": "npm run build:production && electron-builder --dir",
-    "dist": "npm run build:production && electron-builder",
+    "dist": "npm run build:production && electron-builder --win nsis --publish never",
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
@@ -37,6 +37,7 @@
   "build": {
     "appId": "com.rajbos.ai-engineering-fluency",
     "productName": "AI Engineering Fluency",
+    "artifactName": "AI-Engineering-Fluency-Setup-${version}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -52,12 +53,6 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "appx",
-          "arch": [
-            "x64"
-          ]
         }
       ]
     },
@@ -67,15 +62,9 @@
       "createDesktopShortcut": false,
       "runAfterFinish": true
     },
-    "appx": {
-      "applicationId": "RajBos.AIEngineeringFluency",
-      "displayName": "AI Engineering Fluency",
-      "identityName": "RajBos.AIEngineeringFluency"
-    },
     "publish": {
-      "provider": "github",
-      "owner": "rajbos",
-      "repo": "ai-engineering-fluency"
+      "provider": "generic",
+      "url": "https://github.com/rajbos/ai-engineering-fluency/releases/download/desktop-latest/"
     }
   },
   "allowScripts": {

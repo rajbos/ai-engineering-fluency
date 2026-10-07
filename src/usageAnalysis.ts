@@ -23,6 +23,7 @@ import type {
 	LanguageUsage,
 	LatencyHistogram,
 } from './types';
+import { mergeAutonomyUsage, recordAutonomy } from './autonomy';
 import {
 	classifySessionTurns,
 	createEmptyTaskClassificationResult,
@@ -494,15 +495,18 @@ function recordToolOrMcpInvocation(
 }
 
 /**
- * Record the outcome of one completed tool call: an explicit failure flag and/or
- * an observed start→complete duration. The only writer of `failuresByTool`,
- * `latencyByTool` and their MCP per-server mirrors, so every session format that
- * gains a success flag or timestamps funnels through the same bookkeeping.
+ * Record the outcome of one completed tool call: it is counted as completed, an
+ * explicit failure flag increments the failure count, and an observed
+ * start→complete duration feeds the latency histogram. The only writer of the
+ * `completedBy*`, `failuresBy*` and `latencyBy*` maps, so every session format
+ * that gains a success flag or timestamps funnels through the same bookkeeping.
  *
  * `mcpServer` is the server name when the call is known to be an MCP call
- * (Copilot CLI reports it on the start event; other formats derive it from the
- * tool-name prefix). Unpaired or timestamp-less calls pass `undefined` for
- * `durationMs` and only the failure flag is recorded.
+ * (Copilot CLI tags the start event; other formats derive it from the tool-name
+ * prefix). MCP calls are recorded per server under `mcpTools` only, mirroring how
+ * `recordToolOrMcpInvocation` keeps MCP calls out of `toolCalls`; everything else
+ * is recorded per tool under `toolCalls`. Unpaired or timestamp-less calls pass
+ * `undefined` for `durationMs` and only the completion/failure counts move.
  */
 export function recordToolOutcome(
 	analysis: SessionUsageAnalysis,
@@ -513,26 +517,41 @@ export function recordToolOutcome(
 ): void {
 	if (!toolName || isUnsafeObjectKey(toolName)) { return; }
 	const server = mcpServer && !isUnsafeObjectKey(mcpServer) ? mcpServer : undefined;
-	if (!success) { _rtoRecordFailure(analysis, toolName, server); }
+	const maps = server ? _rtoMcpMaps(analysis.mcpTools) : _rtoToolMaps(analysis.toolCalls);
+	const key = server ?? toolName;
+	const completed = maps.completed();
+	completed[key] = (completed[key] || 0) + 1;
+	if (!success) {
+		const failures = maps.failures();
+		failures[key] = (failures[key] || 0) + 1;
+	}
 	if (durationMs !== undefined && Number.isFinite(durationMs) && durationMs >= 0) {
-		_rtoRecordLatency(analysis, toolName, server, durationMs);
+		const latency = maps.latency();
+		recordLatencyMs(latency[key] ??= createLatencyHistogram(), durationMs);
 	}
 }
 
-function _rtoRecordFailure(analysis: SessionUsageAnalysis, toolName: string, mcpServer: string | undefined): void {
-	const failuresByTool = analysis.toolCalls.failuresByTool ??= {};
-	failuresByTool[toolName] = (failuresByTool[toolName] || 0) + 1;
-	if (!mcpServer) { return; }
-	const failuresByServer = analysis.mcpTools.failuresByServer ??= {};
-	failuresByServer[mcpServer] = (failuresByServer[mcpServer] || 0) + 1;
+/** Lazy accessors for the three outcome maps, so an absent map stays absent until it has a value. */
+type RtoOutcomeMaps = {
+	completed: () => { [key: string]: number };
+	failures: () => { [key: string]: number };
+	latency: () => { [key: string]: LatencyHistogram };
+};
+
+function _rtoToolMaps(tools: ToolCallUsage): RtoOutcomeMaps {
+	return {
+		completed: () => tools.completedByTool ??= {},
+		failures: () => tools.failuresByTool ??= {},
+		latency: () => tools.latencyByTool ??= {},
+	};
 }
 
-function _rtoRecordLatency(analysis: SessionUsageAnalysis, toolName: string, mcpServer: string | undefined, durationMs: number): void {
-	const latencyByTool = analysis.toolCalls.latencyByTool ??= {};
-	recordLatencyMs(latencyByTool[toolName] ??= createLatencyHistogram(), durationMs);
-	if (!mcpServer) { return; }
-	const latencyByServer = analysis.mcpTools.latencyByServer ??= {};
-	recordLatencyMs(latencyByServer[mcpServer] ??= createLatencyHistogram(), durationMs);
+function _rtoMcpMaps(mcp: McpToolUsage): RtoOutcomeMaps {
+	return {
+		completed: () => mcp.completedByServer ??= {},
+		failures: () => mcp.failuresByServer ??= {},
+		latency: () => mcp.latencyByServer ??= {},
+	};
 }
 
 /** Timing metrics extracted from a single request */
@@ -1349,6 +1368,7 @@ function _muaMergeModeUsage(period: UsageAnalysisPeriod, analysis: SessionUsageA
 	period.modeUsage.cliApp = (period.modeUsage.cliApp ?? 0) + (analysis.modeUsage.cliApp ?? 0);
 	period.modeUsage.claudeDesktop = (period.modeUsage.claudeDesktop ?? 0) + (analysis.modeUsage.claudeDesktop ?? 0);
 	period.modeUsage.claudeVsCode = (period.modeUsage.claudeVsCode ?? 0) + (analysis.modeUsage.claudeVsCode ?? 0);
+	mergeAutonomyUsage(period, analysis.autonomyUsage);
 }
 
 /**
@@ -1408,6 +1428,12 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 /** Fold per-tool / per-MCP-server failure counts and latency histograms into the period (all optional, all additive). */
 function _muaMergeToolOutcomes(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
 	const { toolCalls, mcpTools } = analysis;
+	if (toolCalls.completedByTool) {
+		period.toolCalls.completedByTool = _muaSumCounts(period.toolCalls.completedByTool, toolCalls.completedByTool);
+	}
+	if (mcpTools.completedByServer) {
+		period.mcpTools.completedByServer = _muaSumCounts(period.mcpTools.completedByServer, mcpTools.completedByServer);
+	}
 	if (toolCalls.failuresByTool) {
 		period.toolCalls.failuresByTool = _muaSumCounts(period.toolCalls.failuresByTool, toolCalls.failuresByTool);
 	}
@@ -2200,8 +2226,8 @@ type AsuPendingToolCall = {
 	toolName: string;
 	args: Record<string, string>;
 	effCall?: EfficiencyTurn['toolCalls'][number];
-	/** MCP server name reported on the start event (`data.mcpServerName`), if any. */
-	mcpServer?: string;
+	/** MCP server name tagged on the start event (`data.mcpServerName` / `data.mcpServer`), if any. */
+	mcpServerName?: string;
 	/** Epoch ms of the start event, or undefined when the event had no parseable timestamp. */
 	startedAt?: number;
 };
@@ -2246,13 +2272,30 @@ function _asuReconstructAndProcessDeltaState(
 	analysis: SessionUsageAnalysis
 ): void {
 	let sessionState: DeltaSessionState = {};
+	let permissionLevel: string | undefined;
+	// permissionLevel (autopilot vs default) can be toggled mid-session, so remember the value in
+	// force when each request first appeared rather than only the final one.
+	const levelByRequest: (string | undefined)[] = [];
 	for (const line of lines) {
 		try {
 			const delta = JSON.parse(line);
 			sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
+			permissionLevel = _asuReadPermissionLevel(delta) ?? permissionLevel;
+			const requestCount = Array.isArray(sessionState.requests) ? sessionState.requests.length : 0;
+			while (levelByRequest.length < requestCount) { levelByRequest.push(permissionLevel); }
 		} catch { /* skip invalid lines */ }
 	}
 	processDeltaSessionAnalysis(deps, sessionState, lines, analysis);
+	if (Array.isArray(sessionState.requests)) {
+		(sessionState.requests as SessionRequestRaw[]).forEach((req, i) => { if (req?.requestId) { recordAutonomy(analysis, levelByRequest[i]); } });
+	}
+}
+
+/** Read a VS Code `inputState.permissionLevel` value from a kind-0 (header) or kind-1 (patch) delta event. */
+function _asuReadPermissionLevel(delta: any): string | undefined {
+	if (delta?.kind === 0 && typeof delta.v?.inputState?.permissionLevel === 'string') { return delta.v.inputState.permissionLevel; }
+	if (delta?.kind === 1 && delta.k?.[0] === 'inputState' && delta.k?.[1] === 'permissionLevel' && typeof delta.v === 'string') { return delta.v; }
+	return undefined;
 }
 
 /** Check if a selection range represents an actual selection (not just cursor position). */
@@ -2428,6 +2471,7 @@ function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: Sessi
 		cliState.efficiencyTurns.push(_asuCreateEfficiencyTurn(event, cliState));
 		analyzeCliAttachments(event.data?.attachments, analysis.contextReferences);
 		_asuHandleUserMessageMode(jetBrainsMode, analysis);
+		recordAutonomy(analysis, event.data?.agentMode);
 		const skillName = extractInvokedSkillNameFromPlainText(event.data?.content);
 		if (skillName) { addSkillCall(analysis, skillName); }
 	}
@@ -2483,6 +2527,9 @@ function _asuCollectTaskTurnFromEvent(event: any, currentTurn: TaskTurnSignal | 
 
 function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
 	if (event.type !== 'tool.call' && event.type !== 'tool.result' && event.type !== 'tool.execution_start') { return; }
+	// Events tagged with an MCP server are counted by _asuHandleMcpToolEvent only — never
+	// here as well, otherwise one MCP call would land in both toolCalls and mcpTools.
+	if (_asuEventMcpServerName(event)) { return; }
 	const toolName = event.data?.toolName || event.toolName || 'unknown';
 	recordToolOrMcpInvocation(toolName, analysis, toolNameMap);
 	// Copilot CLI wraps autonomous skill invocations behind a generic "skill" tool call
@@ -2495,12 +2542,28 @@ function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, too
 	}
 }
 
-/** Handle mcp.tool.call events and events with data.mcpServer set. */
+/**
+ * MCP server name an event is tagged with, or undefined for a non-MCP event.
+ * Copilot CLI's `tool.execution_start` events for MCP tools carry `data.mcpServerName`
+ * (plus `data.mcpToolName`) rather than `data.mcpServer`, and their `toolName` is
+ * `<server>-<tool>` (e.g. `github-mcp-server-get_file_contents`), which `isMcpTool()`
+ * does not recognise — so the server tag is the only reliable MCP signal there.
+ */
+function _asuEventMcpServerName(event: any): string | undefined {
+	// First non-empty tag wins: a blank `mcpServer` must not mask a valid `mcpServerName`.
+	for (const candidate of [event?.data?.mcpServer, event?.data?.mcpServerName]) {
+		if (typeof candidate === 'string' && candidate.trim()) { return candidate.trim(); }
+	}
+	return undefined;
+}
+
+/** Handle mcp.tool.call events and events with data.mcpServer / data.mcpServerName set. */
  
 function _asuHandleMcpToolEvent(event: any, analysis: SessionUsageAnalysis): void {
-	if (event.type !== 'mcp.tool.call' && !event.data?.mcpServer) { return; }
+	const taggedServer = _asuEventMcpServerName(event);
+	if (event.type !== 'mcp.tool.call' && !taggedServer) { return; }
 	analysis.mcpTools.total++;
-	const serverName = event.data?.mcpServer || 'unknown';
+	const serverName = taggedServer || 'unknown';
 	const mcpToolName = event.data?.toolName || event.toolName || 'unknown';
 	analysis.mcpTools.byServer[serverName] = (analysis.mcpTools.byServer[serverName] || 0) + 1;
 	const normalizedMcpTool = normalizeMcpToolName(mcpToolName);
@@ -2531,12 +2594,10 @@ function _asuEnsureEditScope(analysis: SessionUsageAnalysis): void {
 
 /** Handle tool.execution_start — stores pending tool call info for all tools (LOC + output token tracking). */
 function _asuHandleToolStart(event: any, cliState: AsuCliState): void {
-	const { toolCallId, toolName, arguments: args, mcpServerName } = event.data ?? {};
+	const { toolCallId, toolName, arguments: args } = event.data ?? {};
 	if (toolCallId && toolName) {
 		const effCall = _asuAppendEfficiencyToolCall(cliState, toolName, args);
-		const startedAt = _asuEventEpochMs(event);
-		const mcpServer = typeof mcpServerName === 'string' && mcpServerName ? mcpServerName : undefined;
-		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {}, effCall, mcpServer, startedAt });
+		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {}, mcpServerName: _asuEventMcpServerName(event), effCall, startedAt: _asuEventEpochMs(event) });
 	}
 }
 
@@ -2596,11 +2657,11 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 	if (!pending) { return; }
 	_asuMarkEffCallError(pending, success);
 	// Only an explicit `false` is a failure; a missing flag (older schemas) is not evidence either way.
-	recordToolOutcome(analysis, pending.toolName, pending.mcpServer, success !== false, _asuToolDurationMs(pending, event));
+	recordToolOutcome(analysis, pending.toolName, pending.mcpServerName, success !== false, _asuToolDurationMs(pending, event));
 	if (success && (pending.toolName === 'edit' || pending.toolName === 'create')) {
 		_asuApplyToolLoc(pending, cliState, analysis);
 	}
-	if (!result?.content || isMcpTool(pending.toolName)) { return; }
+	if (!result?.content || pending.mcpServerName || isMcpTool(pending.toolName)) { return; }
 	const resultText = extractToolResultText(result.content);
 	if (!resultText) { return; }
 	const tokens = estimateTokensFromText(resultText);

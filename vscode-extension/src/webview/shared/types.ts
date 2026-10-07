@@ -41,6 +41,7 @@ export type ToolCallUsage = {
 	total: number;
 	byTool: { [key: string]: number };
 	outputTokensByTool?: { [key: string]: number };
+	completedByTool?: { [key: string]: number };
 	failuresByTool?: { [key: string]: number };
 	latencyByTool?: { [key: string]: LatencyHistogram };
 };
@@ -48,6 +49,7 @@ export type McpToolUsage = {
 	total: number;
 	byServer: { [key: string]: number };
 	byTool: { [key: string]: number };
+	completedByServer?: { [key: string]: number };
 	failuresByServer?: { [key: string]: number };
 	latencyByServer?: { [key: string]: LatencyHistogram };
 };

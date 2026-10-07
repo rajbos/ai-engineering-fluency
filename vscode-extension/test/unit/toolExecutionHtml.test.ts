@@ -21,16 +21,19 @@ function hist(i: number, n: number, sumMs = n * 2 ** i): LatencyHistogram {
 function sampleInput(overrides: Partial<ToolExecutionSectionsInput> = {}): ToolExecutionSectionsInput {
     return {
         toolCalls: {
-            total: 160,
-            byTool: { view: 100, powershell: 40, 'mcp__github__get_file_contents': 12, task: 5, report_intent: 3, __slash__commit: 2 },
-            failuresByTool: { powershell: 10, 'mcp__github__get_file_contents': 3 },
-            latencyByTool: { view: hist(5, 100), powershell: hist(11, 40), 'mcp__github__get_file_contents': hist(10, 12), task: hist(14, 5) },
+            total: 170,
+            // byTool deliberately over-counts (orphaned starts, re-logs): charts must not use it.
+            byTool: { view: 130, powershell: 60, task: 9, report_intent: 3, __slash__commit: 2 },
+            completedByTool: { view: 100, powershell: 40, task: 5, report_intent: 3 },
+            failuresByTool: { powershell: 10 },
+            latencyByTool: { view: hist(5, 100), powershell: hist(11, 40), task: hist(14, 5) },
             outputTokensByTool: { view: 100_000, powershell: 8_000, task: 5_000 },
         },
         mcpTools: {
-            total: 12,
-            byServer: { github: 12 },
-            byTool: { get_file_contents: 12 },
+            total: 20,
+            byServer: { github: 20 },
+            byTool: { get_file_contents: 20 },
+            completedByServer: { github: 12 },
             failuresByServer: { github: 3 },
             latencyByServer: { github: hist(10, 12) },
         },
@@ -47,35 +50,48 @@ test('formatLatencyMs: ms / s / m ranges', () => {
     assert.equal(formatLatencyMs(90_000), '1.5m');
 });
 
-test('reliability section: stacked success/failure bars, friendly names, failure share label', () => {
+test('reliability section: bars and table come from completed calls, not byTool starts', () => {
     const html = buildToolReliabilitySectionHtml(sampleInput());
     assert.match(html, /id="section-tool-reliability"/);
     assert.match(html, /Tool execution reliability/);
     assert.match(html, /View File/);
     assert.match(html, /tool-exec-bar-failure/);
-    assert.match(html, />40 · 25%</, 'powershell: 40 calls, 10 failures');
+    assert.match(html, />40 · 25%</, 'powershell: 40 completed, 10 failures — not the 60 starts in byTool');
     assert.match(html, />100</, 'view has no failures so no share suffix');
+    assert.match(html, /<title>powershell: 30 succeeded, 10 failed<\/title>/, 'tooltip is a localized template');
     assert.doesNotMatch(html, /__slash__/, 'slash markers are not tool calls');
+    // Accessible data table with the same numbers.
+    assert.match(html, /<details class="tool-exec-table"><summary>Show as table<\/summary>/);
+    assert.match(html, /<th>Tool<\/th><th>Completed calls<\/th><th>Failed<\/th><th>Failure rate<\/th>/);
+    assert.match(html, /<td>powershell<\/td><td class="tool-exec-num">40<\/td><td class="tool-exec-num">10<\/td><td class="tool-exec-num">25%<\/td>/);
 });
 
-test('reliability section: empty state when no editor recorded a failure flag', () => {
-    const input = sampleInput();
-    delete input.toolCalls.failuresByTool;
-    const html = buildToolReliabilitySectionHtml(input);
-    assert.match(html, /tool-exec-empty/);
-    assert.match(html, /No tool outcome data yet/);
-    assert.doesNotMatch(html, /<svg/);
+test('reliability section: all-success periods render bars; only missing completion data is the empty state', () => {
+    const allOk = sampleInput();
+    delete allOk.toolCalls.failuresByTool;
+    const html = buildToolReliabilitySectionHtml(allOk);
+    assert.match(html, /<svg/);
+    assert.match(html, />100</);
+    assert.doesNotMatch(html, /tool-exec-empty/);
+
+    const noOutcomes = sampleInput();
+    delete noOutcomes.toolCalls.completedByTool;
+    const empty = buildToolReliabilitySectionHtml(noOutcomes);
+    assert.match(empty, /tool-exec-empty/);
+    assert.match(empty, /No tool outcome data yet/);
+    assert.doesNotMatch(empty, /<svg/);
 });
 
-test('latency section: p50 bar, p95 marker, log axis ticks and per-row readout', () => {
+test('latency section: p50 bar, p95 marker, log axis ticks, localized tooltip and table', () => {
     const html = buildToolLatencySectionHtml(sampleInput());
     assert.match(html, /id="section-tool-latency"/);
     assert.match(html, /tool-exec-marker-p95/);
     assert.match(html, />1ms</);
     assert.match(html, />1\.0s</);
     // powershell: all samples in [2048, 4096) → p50 and p95 land in that bucket
-    assert.match(html, /powershell: p50 [23]\.\ds, p95 [34]\.\ds, 40 calls/);
-    assert.match(html, /View File: p50 \d+ms/);
+    assert.match(html, /<title>powershell: p50 [23]\.\ds, p95 [34]\.\ds, 40 calls<\/title>/);
+    assert.match(html, /<title>View File: p50 \d+ms/);
+    assert.match(html, /<th>Tool<\/th><th>Completed calls<\/th><th>p50<\/th><th>p95<\/th>/);
 });
 
 test('latency section: empty state and hidden automatic tools', () => {
@@ -85,28 +101,25 @@ test('latency section: empty state and hidden automatic tools', () => {
     assert.match(html, /powershell/);
 });
 
-test('MCP health section: calls and failure share per server, falling back to histogram counts', () => {
+test('MCP health section: failure share over completed calls, not byServer starts', () => {
     const html = buildMcpHealthSectionHtml(sampleInput());
     assert.match(html, /id="section-mcp-health"/);
-    assert.match(html, /12 · 25% fail/);
-    // A server only present in the outcome maps (Copilot CLI naming gap) is still listed.
+    assert.match(html, /12 · 25% fail/, '3 of 12 completed — not 3 of the 20 starts in byServer');
+    assert.match(html, /<th>Server<\/th><th>Completed calls<\/th><th>Failed<\/th><th>Failure rate<\/th>/);
     const input = sampleInput();
-    input.mcpTools.byServer = {};
-    assert.match(buildMcpHealthSectionHtml(input), /github/);
-    input.mcpTools.latencyByServer = {};
-    input.mcpTools.failuresByServer = {};
-    assert.match(buildMcpHealthSectionHtml(input), /No MCP server calls/);
+    delete input.mcpTools.completedByServer;
+    assert.match(buildMcpHealthSectionHtml(input), /No MCP server calls with a recorded outcome/);
 });
 
-test('cost vs speed section: only tools with latency and output tokens, coloured by kind', () => {
+test('cost vs speed section: tokens per completed call, coloured by kind, with table', () => {
     const html = buildCostSpeedSectionHtml(sampleInput());
     assert.match(html, /id="section-tool-cost-speed"/);
     assert.match(html, /tool-exec-kind-builtin/);
     assert.match(html, /tool-exec-kind-subagent/, 'task is a delegation tool');
-    assert.doesNotMatch(html, /tool-exec-kind-mcp"/, 'MCP tool has no output tokens so it is not plotted');
-    assert.match(html, /View File \(builtin\): p50 \d+ms, 1,000 tokens\/call, 100 calls/);
+    assert.match(html, /<title>View File \(builtin\): p50 \d+ms, 1,000 tokens per call, 100 calls<\/title>/, '100,000 tokens over 100 completed calls, not 130 starts');
     assert.match(html, /top-right = heavy &amp; slow/);
-    assert.match(buildCostSpeedSectionHtml(sampleInput({ toolCalls: { total: 1, byTool: { view: 1 } } })), /No tools have both latency/);
+    assert.match(html, /<th>Tool<\/th><th>Kind<\/th><th>Completed calls<\/th><th>p50<\/th><th>Tokens \/ call<\/th>/);
+    assert.match(buildCostSpeedSectionHtml(sampleInput({ toolCalls: { total: 1, byTool: { view: 1 }, completedByTool: { view: 1 } } })), /No tools have both latency/);
 });
 
 test('all sections: tool ids are HTML-escaped and the four sections render in order', () => {
@@ -114,6 +127,7 @@ test('all sections: tool ids are HTML-escaped and the four sections render in or
         toolCalls: {
             total: 1,
             byTool: { '<script>x</script>': 1 },
+            completedByTool: { '<script>x</script>': 1 },
             failuresByTool: { '<script>x</script>': 1 },
             latencyByTool: { '<script>x</script>': hist(3, 1) },
             outputTokensByTool: { '<script>x</script>': 50 },

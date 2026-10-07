@@ -60,6 +60,18 @@ body {
 	box-shadow: 0 2px 6px var(--shadow-color);
 }
 
+.paged-table-status {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
 /* Heading that opens a band of related .section cards inside one tab, so a long stack
    reads as grouped rather than as one flat list with leftovers at the bottom. */
 .section-group-heading {
@@ -523,6 +535,23 @@ body {
 .model-leaderboard-filter-note {
 	color: var(--text-muted);
 	font-size: 11px;
+}
+
+.paged-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.paged-table thead th {
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.paged-table-truncate {
+	display: block;
+	max-width: 320px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .model-leaderboard-table-wrap {
@@ -1867,4 +1896,42 @@ background: var(--bg-tertiary);
 	color: var(--text-muted);
 	font-size: 12px;
 	padding: 6px 2px;
+}
+
+.tool-exec-table {
+	margin: 6px 2px 2px;
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.tool-exec-table summary {
+	cursor: pointer;
+	user-select: none;
+}
+
+.tool-exec-table table {
+	width: 100%;
+	border-collapse: collapse;
+	margin-top: 6px;
+}
+
+.tool-exec-table th,
+.tool-exec-table td {
+	padding: 4px 8px;
+	border-bottom: 1px solid var(--border-subtle);
+	text-align: left;
+}
+
+.tool-exec-table th {
+	color: var(--text-secondary);
+	font-weight: 600;
+}
+
+.tool-exec-table td {
+	color: var(--text-primary);
+}
+
+.tool-exec-table .tool-exec-num {
+	text-align: right;
+	white-space: nowrap;
 }

@@ -972,6 +972,7 @@ test('ClaudeDesktopAdapter.analyzeUsage: pairs tool_result with tool_use to reco
         fs.writeFileSync(sessionFile, events.map(e => JSON.stringify(e)).join('\n'));
 
         const result = await claudeDesktopAdapter.analyzeUsage(sessionFile, desktopAdapterCtx);
+        assert.deepEqual(result.toolCalls.completedByTool, { Bash: 1, Read: 1 });
         assert.deepEqual(result.toolCalls.failuresByTool, { Bash: 1 });
         assert.equal(result.toolCalls.latencyByTool?.Bash.sumMs, 250);
         assert.equal(result.toolCalls.latencyByTool?.Read.sumMs, 30);

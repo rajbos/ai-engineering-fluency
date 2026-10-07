@@ -57,9 +57,24 @@ versions — is not evidence either way. Starts with no matching complete event
 "abandoned" outcome later, not failures.
 
 **Fields are optional extensions of the existing types** (`ToolCallUsage.
-failuresByTool` / `latencyByTool`, `McpToolUsage.failuresByServer` /
-`latencyByServer`). Old cache entries, and editors whose format has no flag or
-timestamps, simply lack them; readers must treat absence as "no data", not zero.
+completedByTool` / `failuresByTool` / `latencyByTool`, `McpToolUsage.
+completedByServer` / `failuresByServer` / `latencyByServer`). Old cache entries,
+and editors whose format has no flag or timestamps, simply lack them; readers
+must treat absence as "no data", not zero.
+
+**`completedBy*` is the denominator, never `byTool` / `byServer`.** `byTool`
+counts *starts* from every editor — including formats with no completion events,
+orphaned starts and Claude Code's streaming re-logs of the same `tool_use` — so
+dividing outcome-bearing numbers (failures, result tokens) by it understates
+failure rates and tokens per call. `completedBy*` counts exactly the matched
+completions the other maps are drawn from, so the reliability bars, the MCP
+failure share and the cost-vs-speed map all use it. It also makes "every call
+succeeded" distinguishable from "no outcome data": the former has
+`completedByTool` and no `failuresByTool`.
+
+**MCP outcomes are recorded per server only.** `recordToolOutcome` routes a call
+with a known server to the `mcpTools` maps and everything else to `toolCalls`,
+mirroring how `recordToolOrMcpInvocation` keeps MCP calls out of `toolCalls`.
 
 **One writer.** `recordToolOutcome()` in `src/usageAnalysis.ts` is the only
 function that touches the four maps, so every session format that gains a flag

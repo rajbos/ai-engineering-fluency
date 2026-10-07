@@ -795,6 +795,23 @@ test('getClaudeCodeModelUsage: crashed session contributes partial tokens per mo
 
 const adapterCtx = { modelPricing: {}, toolNameMap: {} };
 
+test('ClaudeCodeAdapter.analyzeUsage: counts permissionMode per human user prompt as autonomyUsage', async () => {
+const user = (mode: string | undefined, id: string) => ({
+type: 'user', uuid: id, message: { role: 'user', content: 'hi' }, timestamp: '2026-10-04T09:00:00.000Z',
+...(mode ? { permissionMode: mode } : {}),
+});
+const toolResult = { type: 'user', uuid: 'tr', permissionMode: 'auto', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] }, timestamp: '2026-10-04T09:00:00.000Z' };
+const synthetic = { type: 'user', uuid: 'sy', permissionMode: 'auto', message: { role: 'user', content: '<system-reminder>generated</system-reminder>' }, timestamp: '2026-10-04T09:00:00.000Z' };
+const events = [user('default', 'a'), user('auto', 'b'), toolResult, synthetic, user('auto', 'c'), user('acceptEdits', 'd'), user(undefined, 'e')];
+const filePath = createTempSession(events);
+try {
+const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+assert.deepEqual(result.autonomyUsage, { autonomous: 2, supervised: 2, plan: 0, other: 0 });
+} finally {
+cleanup(filePath);
+}
+});
+
 test('ClaudeCodeAdapter.analyzeUsage: increments __auto_compact__ for trigger=auto', async () => {
 const events = [
 {
@@ -1553,7 +1570,9 @@ test('ClaudeCodeAdapter.analyzeUsage: pairs tool_result with tool_use to record 
 	try {
 		const analysis = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
 
-		assert.deepEqual(analysis.toolCalls.failuresByTool, { Bash: 1, mcp__github__create_issue: 1, Edit: 1 });
+		assert.deepEqual(analysis.toolCalls.completedByTool, { Bash: 1, Read: 1, Grep: 1, Edit: 1 }, 'one completion per matched result; re-logged and orphaned tool_use blocks do not count');
+		assert.deepEqual(analysis.toolCalls.failuresByTool, { Bash: 1, Edit: 1 });
+		assert.deepEqual(analysis.mcpTools.completedByServer, { github: 1 });
 		assert.deepEqual(analysis.mcpTools.failuresByServer, { github: 1 });
 
 		const lat = analysis.toolCalls.latencyByTool!;
@@ -1562,7 +1581,7 @@ test('ClaudeCodeAdapter.analyzeUsage: pairs tool_result with tool_use to record 
 		assert.equal(lat.Read.count, 1);
 		assert.equal(lat.Read.sumMs, 40);
 		assert.equal(lat.Grep.sumMs, 200);
-		assert.equal(lat.mcp__github__create_issue.sumMs, 1500);
+		assert.equal(lat.mcp__github__create_issue, undefined, 'MCP latency lives under mcpTools only');
 		assert.equal(lat.Edit, undefined, 'no latency sample without a result timestamp');
 		assert.equal(lat.WebFetch, undefined, 'orphaned tool_use must not produce a sample');
 		assert.equal(analysis.mcpTools.latencyByServer!.github.sumMs, 1500);

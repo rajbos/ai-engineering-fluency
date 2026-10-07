@@ -5,9 +5,14 @@
  * per-tool stats described in docs/adr/TOOL-EXECUTION-STATS.md.
  *
  * Hand-written SVG, like the efficiency-frontier chart in main.ts, so the usage
- * bundle stays chart-library-free. Every section degrades to an explanatory
- * empty state when its map is absent (old cache entry, or an editor whose log
- * format carries no success flag / timestamps).
+ * bundle stays chart-library-free. Every chart is followed by a collapsed data
+ * table carrying the same numbers, so the values are reachable without hover
+ * and by assistive technology (the SVG itself is a single `role="img"`).
+ *
+ * All denominators are the `completedBy*` maps — calls whose log recorded an
+ * outcome — never `byTool` / `byServer`, which also count starts from editors
+ * without completion events, orphaned starts and streaming re-logs. Every
+ * section degrades to an explanatory empty state when its map is absent.
  */
 import { escapeHtml, formatNumber, formatCompact } from '../shared/formatUtils';
 import { localize, localizeFormat } from '../shared/localization';
@@ -37,6 +42,12 @@ export function formatLatencyMs(ms: number): string {
 	if (ms < 1000) { return `${Math.round(ms)}ms`; }
 	if (ms < 60_000) { return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`; }
 	return `${(ms / 60_000).toFixed(1)}m`;
+}
+
+/** Failure share as the chart prints it: one decimal under 10 %, whole numbers above. */
+function formatFailShare(failures: number, completed: number): string {
+	const pct = completed > 0 ? (100 * failures) / completed : 0;
+	return `${pct.toFixed(pct > 0 && pct < 10 ? 1 : 0)}%`;
 }
 
 /** Axis tick candidates on a log latency scale (ms). */
@@ -83,22 +94,29 @@ function legendSwatch(cssClass: string, label: string): string {
 	return `<span><svg width="12" height="12" aria-hidden="true"><rect class="${cssClass}" width="12" height="12" rx="2"/></svg>${escapeHtml(label)}</span>`;
 }
 
+/** The collapsed data table that accompanies every chart; `columns` are localization keys, cells are pre-escaped. */
+function dataTableHtml(columnKeys: readonly string[], rows: readonly (readonly string[])[]): string {
+	const head = columnKeys.map(key => `<th>${escapeHtml(localize(key))}</th>`).join('');
+	const body = rows.map(cells => `<tr>${cells.map((cell, i) => `<td${i === 0 ? '' : ' class="tool-exec-num"'}>${cell}</td>`).join('')}</tr>`).join('');
+	return `<details class="tool-exec-table"><summary>${escapeHtml(localize('usage.toolExec.table.show'))}</summary><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></details>`;
+}
+
 // ── Reliability ────────────────────────────────────────────────────────────────
 
-interface ReliabilityRow { id: string; name: string; calls: number; failures: number; }
+interface ReliabilityRow { id: string; name: string; completed: number; failures: number; }
 
 function reliabilityRows(input: ToolExecutionSectionsInput): ReliabilityRow[] {
 	const failures = input.toolCalls.failuresByTool ?? {};
-	return Object.entries(input.toolCalls.byTool)
-		.filter(([id]) => isReportableTool(id, input.hiddenTools))
-		.map(([id, calls]) => ({ id, name: input.resolveToolName(id), calls, failures: Math.min(calls, failures[id] ?? 0) }))
-		.sort((a, b) => b.calls - a.calls)
+	return Object.entries(input.toolCalls.completedByTool ?? {})
+		.filter(([id, completed]) => completed > 0 && isReportableTool(id, input.hiddenTools))
+		.map(([id, completed]) => ({ id, name: input.resolveToolName(id), completed, failures: Math.min(completed, failures[id] ?? 0) }))
+		.sort((a, b) => b.completed - a.completed)
 		.slice(0, TOP_N);
 }
 
 function buildReliabilityChart(rows: ReliabilityRow[]): string {
 	const plotRight = WIDTH - 90;
-	const max = Math.max(1, ...rows.map(r => r.calls));
+	const max = Math.max(1, ...rows.map(r => r.completed));
 	const height = TOP_PAD + rows.length * ROW_H + BOTTOM_PAD;
 	const x = (v: number) => PLOT_LEFT + (v / max) * (plotRight - PLOT_LEFT);
 	const grid = [0.25, 0.5, 0.75, 1].map(f => {
@@ -107,23 +125,29 @@ function buildReliabilityChart(rows: ReliabilityRow[]): string {
 	}).join('');
 	const bars = rows.map((r, i) => {
 		const y = TOP_PAD + i * ROW_H + ROW_H / 2;
-		const okW = Math.max(0, x(r.calls - r.failures) - PLOT_LEFT);
-		const failW = Math.max(0, x(r.calls) - x(r.calls - r.failures));
-		const failPct = r.calls > 0 ? (100 * r.failures) / r.calls : 0;
-		const label = r.failures > 0 ? `${formatNumber(r.calls)} · ${failPct.toFixed(failPct < 10 ? 1 : 0)}%` : formatNumber(r.calls);
+		const okW = Math.max(0, x(r.completed - r.failures) - PLOT_LEFT);
+		const failW = Math.max(0, x(r.completed) - x(r.completed - r.failures));
+		const label = r.failures > 0 ? `${formatNumber(r.completed)} · ${formatFailShare(r.failures, r.completed)}` : formatNumber(r.completed);
+		const tip = escapeHtml(localizeFormat('usage.toolExec.tip.reliability', r.name, formatNumber(r.completed - r.failures), formatNumber(r.failures)));
 		return `${rowLabel(y, r.id, r.name)}
-			<rect class="tool-exec-bar-success" x="${PLOT_LEFT}" y="${y - 8}" width="${okW}" height="16" rx="3"><title>${escapeHtml(r.name)}: ${formatNumber(r.calls - r.failures)} ok</title></rect>
-			<rect class="tool-exec-bar-failure" x="${PLOT_LEFT + okW}" y="${y - 8}" width="${failW}" height="16" rx="3"><title>${escapeHtml(r.name)}: ${formatNumber(r.failures)} failed</title></rect>
+			<rect class="tool-exec-bar-success" x="${PLOT_LEFT}" y="${y - 8}" width="${okW}" height="16" rx="3"><title>${tip}</title></rect>
+			<rect class="tool-exec-bar-failure" x="${PLOT_LEFT + okW}" y="${y - 8}" width="${failW}" height="16" rx="3"><title>${tip}</title></rect>
 			<text x="${plotRight + 8}" y="${y + 4}">${label}</text>`;
 	}).join('');
 	return `${svgOpen(height, localize('usage.toolExec.reliability.title'))}<g class="tool-exec-grid">${grid}</g>${bars}</svg></div>`;
 }
 
+function reliabilityTable(rows: ReliabilityRow[]): string {
+	return dataTableHtml(
+		['usage.toolExec.col.tool', 'usage.toolExec.col.completed', 'usage.toolExec.col.failed', 'usage.toolExec.col.failRate'],
+		rows.map(r => [escapeHtml(r.name), formatNumber(r.completed), formatNumber(r.failures), formatFailShare(r.failures, r.completed)]),
+	);
+}
+
 export function buildToolReliabilitySectionHtml(input: ToolExecutionSectionsInput): string {
-	const hasData = Boolean(input.toolCalls.failuresByTool);
-	const rows = hasData ? reliabilityRows(input) : [];
+	const rows = reliabilityRows(input);
 	const legend = `<div class="tool-exec-legend">${legendSwatch('tool-exec-bar-success', localize('usage.toolExec.legend.success'))}${legendSwatch('tool-exec-bar-failure', localize('usage.toolExec.legend.failure'))}</div>`;
-	const body = rows.length > 0 ? legend + buildReliabilityChart(rows) : emptyHtml('usage.toolExec.empty.reliability');
+	const body = rows.length > 0 ? legend + buildReliabilityChart(rows) + reliabilityTable(rows) : emptyHtml('usage.toolExec.empty.reliability');
 	return sectionHtml('section-tool-reliability', '🛡️', 'usage.toolExec.reliability.title', 'usage.toolExec.reliability.subtitle', body);
 }
 
@@ -160,42 +184,46 @@ function buildLatencyChart(rows: LatencyRow[]): string {
 		const y = TOP_PAD + i * ROW_H + ROW_H / 2;
 		const x50 = logPos(r.p50, min, max, PLOT_LEFT, plotRight);
 		const x95 = logPos(r.p95, min, max, PLOT_LEFT, plotRight);
+		const tip = escapeHtml(localizeFormat('usage.toolExec.tip.latency', r.name, formatLatencyMs(r.p50), formatLatencyMs(r.p95), formatNumber(r.count)));
 		return `${rowLabel(y, r.id, r.name)}
 			<rect class="tool-exec-bar-p95" x="${x50}" y="${y - 6}" width="${Math.max(0, x95 - x50)}" height="12" rx="2"/>
-			<rect class="tool-exec-bar-p50" x="${PLOT_LEFT}" y="${y - 8}" width="${Math.max(1, x50 - PLOT_LEFT)}" height="16" rx="3"><title>${escapeHtml(r.name)}: p50 ${formatLatencyMs(r.p50)}, p95 ${formatLatencyMs(r.p95)}, ${formatNumber(r.count)} calls</title></rect>
+			<rect class="tool-exec-bar-p50" x="${PLOT_LEFT}" y="${y - 8}" width="${Math.max(1, x50 - PLOT_LEFT)}" height="16" rx="3"><title>${tip}</title></rect>
 			<line class="tool-exec-marker-p95" x1="${x95}" y1="${y - 9}" x2="${x95}" y2="${y + 9}"/>
 			<text x="${plotRight + 8}" y="${y + 4}">${formatLatencyMs(r.p50)} · ${formatLatencyMs(r.p95)}</text>`;
 	}).join('');
 	return `${svgOpen(height, localize('usage.toolExec.latency.title'))}<g class="tool-exec-grid">${latencyAxis(min, max, plotRight, height)}</g>${bars}</svg></div>`;
 }
 
+function latencyTable(rows: LatencyRow[]): string {
+	return dataTableHtml(
+		['usage.toolExec.col.tool', 'usage.toolExec.col.completed', 'usage.toolExec.col.p50', 'usage.toolExec.col.p95'],
+		rows.map(r => [escapeHtml(r.name), formatNumber(r.count), formatLatencyMs(r.p50), formatLatencyMs(r.p95)]),
+	);
+}
+
 export function buildToolLatencySectionHtml(input: ToolExecutionSectionsInput): string {
 	const rows = latencyRows(input.toolCalls.latencyByTool, input);
 	const legend = `<div class="tool-exec-legend">${legendSwatch('tool-exec-bar-p50', 'p50')}${legendSwatch('tool-exec-bar-p95', 'p95')}</div>`;
-	const body = rows.length > 0 ? legend + buildLatencyChart(rows) : emptyHtml('usage.toolExec.empty.latency');
+	const body = rows.length > 0 ? legend + buildLatencyChart(rows) + latencyTable(rows) : emptyHtml('usage.toolExec.empty.latency');
 	return sectionHtml('section-tool-latency', '⏱️', 'usage.toolExec.latency.title', 'usage.toolExec.latency.subtitle', body);
 }
 
 // ── MCP server health ──────────────────────────────────────────────────────────
 
-interface McpRow { server: string; calls: number; failures: number; }
+interface McpRow { server: string; completed: number; failures: number; }
 
 function mcpRows(mcp: McpToolUsage): McpRow[] {
-	const servers = new Set([...Object.keys(mcp.byServer), ...Object.keys(mcp.failuresByServer ?? {}), ...Object.keys(mcp.latencyByServer ?? {})]);
-	const rows: McpRow[] = [];
-	for (const server of servers) {
-		// byServer is the call count; Copilot CLI MCP calls that only reached the
-		// outcome maps still show up through their histogram count.
-		const calls = mcp.byServer[server] ?? mcp.latencyByServer?.[server]?.count ?? 0;
-		if (calls <= 0) { continue; }
-		rows.push({ server, calls, failures: Math.min(calls, mcp.failuresByServer?.[server] ?? 0) });
-	}
-	return rows.sort((a, b) => b.calls - a.calls).slice(0, TOP_N);
+	const failures = mcp.failuresByServer ?? {};
+	return Object.entries(mcp.completedByServer ?? {})
+		.filter(([, completed]) => completed > 0)
+		.map(([server, completed]) => ({ server, completed, failures: Math.min(completed, failures[server] ?? 0) }))
+		.sort((a, b) => b.completed - a.completed)
+		.slice(0, TOP_N);
 }
 
 function buildMcpHealthChart(rows: McpRow[]): string {
 	const plotRight = WIDTH - 150;
-	const max = Math.max(1, ...rows.map(r => r.calls));
+	const max = Math.max(1, ...rows.map(r => r.completed));
 	const height = TOP_PAD + rows.length * ROW_H + BOTTOM_PAD;
 	const x = (v: number) => PLOT_LEFT + (v / max) * (plotRight - PLOT_LEFT);
 	const grid = [0.5, 1].map(f => {
@@ -204,38 +232,44 @@ function buildMcpHealthChart(rows: McpRow[]): string {
 	}).join('');
 	const bars = rows.map((r, i) => {
 		const y = TOP_PAD + i * ROW_H + ROW_H / 2;
-		const failPct = (100 * r.failures) / r.calls;
-		const label = localizeFormat('usage.toolExec.mcpLabel', formatNumber(r.calls), `${failPct.toFixed(failPct > 0 && failPct < 10 ? 1 : 0)}%`);
+		const label = escapeHtml(localizeFormat('usage.toolExec.mcpLabel', formatNumber(r.completed), formatFailShare(r.failures, r.completed)));
 		return `${rowLabel(y, r.server, r.server)}
-			<rect class="tool-exec-bar-mcp" x="${PLOT_LEFT}" y="${y - 8}" width="${Math.max(1, x(r.calls) - PLOT_LEFT)}" height="16" rx="3"><title>${escapeHtml(r.server)}: ${label}</title></rect>
-			<text x="${x(r.calls) + 8}" y="${y + 4}">${label}</text>`;
+			<rect class="tool-exec-bar-mcp" x="${PLOT_LEFT}" y="${y - 8}" width="${Math.max(1, x(r.completed) - PLOT_LEFT)}" height="16" rx="3"><title>${escapeHtml(r.server)}: ${label}</title></rect>
+			<text x="${x(r.completed) + 8}" y="${y + 4}">${label}</text>`;
 	}).join('');
 	return `${svgOpen(height, localize('usage.toolExec.mcp.title'))}<g class="tool-exec-grid">${grid}</g>${bars}</svg></div>`;
 }
 
+function mcpTable(rows: McpRow[]): string {
+	return dataTableHtml(
+		['usage.toolExec.col.server', 'usage.toolExec.col.completed', 'usage.toolExec.col.failed', 'usage.toolExec.col.failRate'],
+		rows.map(r => [escapeHtml(r.server), formatNumber(r.completed), formatNumber(r.failures), formatFailShare(r.failures, r.completed)]),
+	);
+}
+
 export function buildMcpHealthSectionHtml(input: ToolExecutionSectionsInput): string {
 	const rows = mcpRows(input.mcpTools);
-	const body = rows.length > 0 ? buildMcpHealthChart(rows) : emptyHtml('usage.toolExec.empty.mcp');
+	const body = rows.length > 0 ? buildMcpHealthChart(rows) + mcpTable(rows) : emptyHtml('usage.toolExec.empty.mcp');
 	return sectionHtml('section-mcp-health', '🩺', 'usage.toolExec.mcp.title', 'usage.toolExec.mcp.subtitle', body);
 }
 
 // ── Cost vs speed ──────────────────────────────────────────────────────────────
 
-interface CostSpeedRow { id: string; name: string; calls: number; p50: number; tokensPerCall: number; kind: ToolKind; }
+interface CostSpeedRow { id: string; name: string; completed: number; p50: number; tokensPerCall: number; kind: ToolKind; }
 
 function costSpeedRows(input: ToolExecutionSectionsInput): CostSpeedRow[] {
 	const latency = input.toolCalls.latencyByTool ?? {};
 	const tokens = input.toolCalls.outputTokensByTool ?? {};
 	const rows: CostSpeedRow[] = [];
-	for (const [id, calls] of Object.entries(input.toolCalls.byTool)) {
+	for (const [id, completed] of Object.entries(input.toolCalls.completedByTool ?? {})) {
 		const h = latency[id];
 		const out = tokens[id] ?? 0;
-		if (!isReportableTool(id, input.hiddenTools) || !h || h.count <= 0 || out <= 0 || calls <= 0) { continue; }
+		if (!isReportableTool(id, input.hiddenTools) || !h || h.count <= 0 || out <= 0 || completed <= 0) { continue; }
 		const p50 = latencyPercentileMs(h, 0.5);
 		if (p50 === null) { continue; }
-		rows.push({ id, name: input.resolveToolName(id), calls, p50: Math.max(1, p50), tokensPerCall: Math.max(1, out / calls), kind: classifyToolKind(id) });
+		rows.push({ id, name: input.resolveToolName(id), completed, p50: Math.max(1, p50), tokensPerCall: Math.max(1, out / completed), kind: classifyToolKind(id) });
 	}
-	return rows.sort((a, b) => b.calls - a.calls);
+	return rows.sort((a, b) => b.completed - a.completed);
 }
 
 const CS = { w: WIDTH, h: 380, left: 80, right: 40, top: 24, bottom: 46 } as const;
@@ -263,24 +297,32 @@ function buildCostSpeedChart(rows: CostSpeedRow[]): string {
 	const xMax = ceilToTick(Math.max(10, ...rows.map(r => r.p50)), LATENCY_TICKS);
 	const yMin = 10 ** Math.floor(Math.log10(Math.min(...rows.map(r => r.tokensPerCall))));
 	const yMax = 10 ** Math.ceil(Math.log10(Math.max(10, ...rows.map(r => r.tokensPerCall))));
-	const maxCalls = Math.max(1, ...rows.map(r => r.calls));
+	const maxCalls = Math.max(1, ...rows.map(r => r.completed));
 	const plotBottom = CS.h - CS.bottom;
-	// Largest bubbles first so small ones stay clickable/hoverable on top.
-	const bubbles = [...rows].sort((a, b) => b.calls - a.calls).map(r => {
+	// Largest bubbles first so small ones stay hoverable on top.
+	const bubbles = [...rows].sort((a, b) => b.completed - a.completed).map(r => {
 		const cx = logPos(r.p50, xMin, xMax, CS.left, CS.w - CS.right);
 		const cy = plotBottom - logPos(r.tokensPerCall, yMin, yMax, 0, plotBottom - CS.top);
-		const radius = 4 + 20 * Math.sqrt(r.calls / maxCalls);
-		return `<g><circle class="tool-exec-bubble tool-exec-kind-${r.kind}" cx="${cx}" cy="${cy}" r="${radius.toFixed(1)}"><title>${escapeHtml(r.name)} (${r.kind}): p50 ${formatLatencyMs(r.p50)}, ${formatNumber(Math.round(r.tokensPerCall))} tokens/call, ${formatNumber(r.calls)} calls</title></circle>
+		const radius = 4 + 20 * Math.sqrt(r.completed / maxCalls);
+		const tip = escapeHtml(localizeFormat('usage.toolExec.tip.costSpeed', r.name, localize(`usage.toolExec.kind.${r.kind}`), formatLatencyMs(r.p50), formatNumber(Math.round(r.tokensPerCall)), formatNumber(r.completed)));
+		return `<g><circle class="tool-exec-bubble tool-exec-kind-${r.kind}" cx="${cx}" cy="${cy}" r="${radius.toFixed(1)}"><title>${tip}</title></circle>
 			<text class="tool-exec-bubble-label" x="${(cx + radius + 4).toFixed(1)}" y="${(cy + 3.5).toFixed(1)}">${escapeHtml(r.name)}</text></g>`;
 	}).join('');
 	return `${svgOpen(CS.h, localize('usage.toolExec.costSpeed.title'))}${costSpeedAxes(xMin, xMax, yMin, yMax)}${bubbles}</svg></div>`;
+}
+
+function costSpeedTable(rows: CostSpeedRow[]): string {
+	return dataTableHtml(
+		['usage.toolExec.col.tool', 'usage.toolExec.col.kind', 'usage.toolExec.col.completed', 'usage.toolExec.col.p50', 'usage.toolExec.col.tokensPerCall'],
+		rows.map(r => [escapeHtml(r.name), escapeHtml(localize(`usage.toolExec.kind.${r.kind}`)), formatNumber(r.completed), formatLatencyMs(r.p50), formatNumber(Math.round(r.tokensPerCall))]),
+	);
 }
 
 export function buildCostSpeedSectionHtml(input: ToolExecutionSectionsInput): string {
 	const rows = costSpeedRows(input);
 	const kinds = (['builtin', 'subagent', 'mcp', 'skill'] as const).filter(k => rows.some(r => r.kind === k));
 	const legend = `<div class="tool-exec-legend">${kinds.map(k => legendSwatch(`tool-exec-kind-${k}`, localize(`usage.toolExec.kind.${k}`))).join('')}</div>`;
-	const body = rows.length > 0 ? legend + buildCostSpeedChart(rows) : emptyHtml('usage.toolExec.empty.costSpeed');
+	const body = rows.length > 0 ? legend + buildCostSpeedChart(rows) + costSpeedTable(rows) : emptyHtml('usage.toolExec.empty.costSpeed');
 	return sectionHtml('section-tool-cost-speed', '🗺️', 'usage.toolExec.costSpeed.title', 'usage.toolExec.costSpeed.subtitle', body);
 }
 
