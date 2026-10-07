@@ -165,19 +165,19 @@ stem_is_unique() {
   ! printf '%s\n' "$STEMS" | awk -F'\t' -v s="$1" -v x="$2" '$1==s && $2!=x {f=1} END {exit !f}'
 }
 
-# "<new path> <old path>" for each file renamed in this PR: with the extension
+# "<new path>TAB<old path>" (tab-delimited: paths may contain spaces) for each file renamed in this PR: with the extension
 # (explicit imports), without it (extensionless imports) and, for renamed index
 # modules, the directory itself (directory imports).
 RENAME_MAP=""
 for i in "${!REC_PATH[@]}"; do
   if [ -n "${REC_OLD[$i]}" ]; then
     np="${REC_PATH[$i]}"; op="${REC_OLD[$i]}"
-    RENAME_MAP="${RENAME_MAP}${np} ${op}"$'\n'
+    RENAME_MAP="${RENAME_MAP}${np}"$'	'"${op}"$'\n'
     if stem_is_unique "$(strip_ext "$np")" "$np" && stem_is_unique "$(strip_ext "$op")" "$op"; then
-      RENAME_MAP="${RENAME_MAP}$(strip_ext "$np") $(strip_ext "$op")"$'\n'
+      RENAME_MAP="${RENAME_MAP}$(strip_ext "$np")"$'	'"$(strip_ext "$op")"$'\n'
       if [[ "$(strip_ext "$(basename "$np")")" == index && "$(strip_ext "$(basename "$op")")" == index ]] \
          && stem_is_unique "$(dirname "$np")" "" && stem_is_unique "$(dirname "$op")" ""; then
-        RENAME_MAP="${RENAME_MAP}$(dirname "$np") $(dirname "$op")"$'\n'
+        RENAME_MAP="${RENAME_MAP}$(dirname "$np")"$'	'"$(dirname "$op")"$'\n'
       fi
     fi
   fi
@@ -197,7 +197,7 @@ norm_import() {
   resolved="$spec"
   if [[ "$spec" == .* ]]; then
     resolved="$(collapse_path "$2/$spec")"
-    old="$(printf '%s' "$RENAME_MAP" | awk -v p="$resolved" '$1==p {print $2; exit}')"
+    old="$(printf '%s' "$RENAME_MAP" | awk -F'	' -v p="$resolved" '$1==p {print $2; exit}')"
     resolved="${old:-$resolved}"
   fi
   # Collapse whitespace around the specifier only; the specifier itself stays

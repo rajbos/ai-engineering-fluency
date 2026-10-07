@@ -51,6 +51,8 @@ new_repo stemclash; echo 'export const o = 1;' > src/old.ts; echo 'export const 
 new_repo wsswap;    printf "import { w } from './foo  bar';\n" > src/user.ts; git add -A; git commit -qm more; sed -i "s#'./foo  bar'#'./foo bar'#" src/user.ts; commit; expect "specifier whitespace change" 1
 new_repo baddiff;   echo 'export const x = 1;' >> src/a.ts; commit
 if BASE_SHA=0000000000000000000000000000000000000001 HEAD_SHA="$(git rev-parse HEAD)" bash "$SCRIPT" >/dev/null 2>&1; then echo "FAIL - unreadable diff must fail closed"; FAILS=$((FAILS+1)); else echo "ok   - unreadable diff fails closed"; fi
+new_repo spaces;    printf "import { s } from 'd.ts';\n" > src/user.ts; printf '%s' "$LOGIC" > "src/a b.ts"; git add -A; git commit -qm more; git mv "src/a b.ts" "src/c d.ts"; sed -i "s#'d.ts'#'./c'#" src/user.ts; commit; expect "renamed path with spaces does not alias a bare import" 1
+new_repo spaces2;   printf "import { s } from './a b';\n" > src/user.ts; printf '%s' "$LOGIC" > "src/a b.ts"; git add -A; git commit -qm more; git mv "src/a b.ts" "src/c d.ts"; sed -i "s#'./a b'#'./c d'#" src/user.ts; commit; expect "path with spaces: genuine rename + importer" 0
 new_repo importer;  git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./newName#" src/user.ts; commit; expect "rename + importer path update" 0
 new_repo importbad; git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./elsewhere#" src/user.ts; commit; expect "import swapped to non-renamed module" 1
 new_repo plain;     echo 'export const x = 1;' >> src/a.ts; commit;                     expect "plain source change, no test" 1
