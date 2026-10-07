@@ -25,15 +25,18 @@
 # counts and content, never on a rename alone, so a rename cannot hide an edit:
 #   - Deletion-only: a source file with 0 added lines (removed dead code or an
 #     unused import, or a file deleted outright).
-#   - Pure rename: a rename (git -M, >=50% similar) whose added lines are all
-#     import/require/export-from statements (0 added lines = 100% similar).
-#     A rename that adds any other line still needs a test change.
-#   - Import-path update: a modified (non-renamed) source file whose added
-#     lines are all import/require lines that point at a file renamed in this
-#     same PR (matched by new file basename). Anything else needs a test.
-#     Limit: only single-line import statements are recognised; a multi-line
-#     import block that is reformatted counts as real logic. Use
-#     [skip-test-check] for such cases.
+#   - Pure rename: a rename (git -M, >=50% similar) of a file that was already
+#     production source, with 0 added lines (100% similar) or whose added lines
+#     are all existing imports re-pointed by the rename (see below). Moving a
+#     file in from outside the source trees (examples/, tests) needs a test.
+#   - Import-path update: a modified file whose added lines are all imports.
+#   An added import line is exempt only if it is the twin of a removed import
+#   line once module specifiers are reduced to their extension-less basename
+#   and a renamed file's new name is mapped back to its old one. A brand-new
+#   import, or one re-pointed at a different module, needs a test.
+#   Limit: only static single-line import / 'export ... from' / require
+#   statements are recognised; a reformatted multi-line import block counts as
+#   real logic. Use [skip-test-check] for such cases.
 set -euo pipefail
 
 BASE_SHA="${BASE_SHA:-}"
@@ -105,32 +108,49 @@ is_source_file() {
 Q="['\"]"
 IMPORT_LINE_RE="^\+[[:space:]]*(import[[:space:]]+(type[[:space:]]+)?([^;='\"]+[[:space:]]+from[[:space:]]*)?${Q}[^'\"]+${Q}|export[[:space:]]+(type[[:space:]]+)?(\*([[:space:]]+as[[:space:]]+[A-Za-z_\$][A-Za-z0-9_\$]*)?|\{[^}]*\})[[:space:]]*from[[:space:]]*${Q}[^'\"]+${Q}|\}[[:space:]]*from[[:space:]]*${Q}[^'\"]+${Q}|(const|let|var)[[:space:]]+[A-Za-z_\$][A-Za-z0-9_\$]*[[:space:]]*=[[:space:]]*require\([[:space:]]*${Q}[^'\"]+${Q}[[:space:]]*\))[[:space:]]*;?[[:space:]]*(//.*)?$"
 
-# added_lines <old-or-empty> <path>: the added lines of one file's diff.
-added_lines() {
-  git diff -M -U0 --no-ext-diff "${RANGE[@]}" -- ${1:+"$1"} "$2" | grep '^+' | grep -v '^+++' || true
+# diff_lines <+|-> <old-or-empty> <path>: added or removed lines of one file's diff.
+diff_lines() {
+  local sign="$1"
+  git diff -M -U0 --no-ext-diff "${RANGE[@]}" -- ${2:+"$2"} "$3"     | grep "^[$sign]" | grep -Ev "^[$sign]{3} " || true
 }
 
-# Basenames (no extension) of files renamed within this PR.
-RENAMED_BASENAMES=""
+# "<new basename> <old basename>" (no extension) for each file renamed in this PR.
+RENAME_MAP=""
 for i in "${!REC_PATH[@]}"; do
   if [ -n "${REC_OLD[$i]}" ]; then
-    b="$(basename "${REC_PATH[$i]}")"
-    RENAMED_BASENAMES="${RENAMED_BASENAMES}${b%.*}"$'\n'
+    nb="$(basename "${REC_PATH[$i]}")"; ob="$(basename "${REC_OLD[$i]}")"
+    RENAME_MAP="${RENAME_MAP}${nb%.*} ${ob%.*}"$'\n'
   fi
 done
 
-# only_imports <lines> [renamed]: every line is an import statement; with
-# "renamed", each must also point at a file renamed in this PR.
+# norm_import <line>: an import line reduced to its statement with the module
+# specifier replaced by its extension-less basename, mapping a renamed file's
+# new basename back to its old one, so a rename-driven path update normalises
+# to the same string as the line it replaced. Leading +/- is dropped.
+norm_import() {
+  local line="${1:1}" spec base old
+  spec="$(printf '%s' "$line" | grep -oE "${Q}[^'\"]+${Q}" | tail -1 | tr -d "'\"")"
+  base="$(basename "$spec")"; base="${base%.*}"
+  old="$(printf '%s' "$RENAME_MAP" | awk -v b="$base" '$1==b {print $2; exit}')"
+  printf '%s' "${line/"$spec"/"${old:-$base}"}" | tr -s '[:space:]' ' '
+}
+
+# only_imports <added-lines> <removed-lines>: every added line is an import
+# statement AND is the rename-normalised twin of a distinct removed import
+# line, i.e. an existing import re-pointed at a renamed file. A brand-new
+# import, or one re-pointed at a different module, has no twin and fails.
 only_imports() {
-  local line target base
+  local line removed="" r
+  while IFS= read -r r; do
+    [ -z "$r" ] && continue
+    [[ "+${r:1}" =~ $IMPORT_LINE_RE ]] && removed="${removed}$(norm_import "$r")"$'\n'
+  done <<< "$2"
   while IFS= read -r line; do
     [ -z "$line" ] && continue
     [[ "$line" =~ $IMPORT_LINE_RE ]] || return 1
-    if [ "${2:-}" = "renamed" ]; then
-      target="$(printf '%s' "$line" | grep -oE "${Q}[^'\"]+${Q}" | tail -1 | tr -d "'\"")"
-      base="$(basename "$target")"; base="${base%.*}"
-      printf '%s' "$RENAMED_BASENAMES" | grep -qxF "$base" || return 1
-    fi
+    r="$(norm_import "$line")"
+    printf '%s' "$removed" | grep -qxF -- "$r" || return 1
+    removed="$(printf '%s' "$removed" | awk -v r="$r" '!d && $0==r {d=1; next} {print}')"$'\n'
   done <<< "$1"
   return 0
 }
@@ -147,9 +167,12 @@ for i in "${!REC_PATH[@]}"; do
   elif is_source_file "$file"; then
     if [ "$added" = "0" ] && [ -z "$old" ]; then
       DELETION_ONLY_FILES="${DELETION_ONLY_FILES}${file}"$'\n'
-    elif [ -n "$old" ] && { [ "$added" = "0" ] || only_imports "$(added_lines "$old" "$file")"; }; then
+    # A rename only counts as a pure source rename when the old path was
+    # already production source; moving a file in from examples/ or a test
+    # directory introduces new production code.
+    elif [ -n "$old" ] && is_source_file "$old" && { [ "$added" = "0" ] || only_imports "$(diff_lines + "$old" "$file")" "$(diff_lines - "$old" "$file")"; }; then
       RENAME_ONLY_FILES="${RENAME_ONLY_FILES}${old} -> ${file}"$'\n'
-    elif [ -z "$old" ] && [ "$added" != "-" ] && only_imports "$(added_lines "" "$file")" renamed; then
+    elif [ -z "$old" ] && [ "$added" != "-" ] && only_imports "$(diff_lines + "" "$file")" "$(diff_lines - "" "$file")"; then
       IMPORT_ONLY_FILES="${IMPORT_ONLY_FILES}${file}"$'\n'
     else
       SOURCE_FILES="${SOURCE_FILES}${file}"$'\n'

@@ -29,11 +29,13 @@ commit() { git add -A && git commit -qm change; }
 new_repo del;       git rm -q src/oldName.ts; commit;                                   expect "deletion-only" 0
 new_repo del2;      printf "%s" "$LOGIC" > src/a.ts; commit;                            expect "deleted import line only" 0
 new_repo ren100;    git mv src/oldName.ts src/newName.ts; commit;                       expect "100% rename" 0
-new_repo renimp;    git mv src/oldName.ts src/newName.ts; sed -i '1i import { q } from "./other";' src/newName.ts; commit; expect "rename + import-only edit" 0
 new_repo renlogic;  git mv src/oldName.ts src/newName.ts; echo 'export const sneaky = () => fetch("x");' >> src/newName.ts; commit; expect "rename + logic edit" 1
 new_repo renexport; git mv src/oldName.ts src/newName.ts; echo 'export const mode = "new";' >> src/newName.ts; commit; expect "rename + exported string constant" 1
-new_repo renreexp;  git mv src/oldName.ts src/newName.ts; echo "export { q } from './other';" >> src/newName.ts; commit; expect "rename + static re-export" 0
-new_repo renreq;    git mv src/oldName.ts src/newName.ts; echo "const q = require('./other');" >> src/newName.ts; commit; expect "rename + require" 0
+new_repo renimp;    mkdir -p src/sub; git mv src/a.ts src/sub/a.ts; sed -i "s#'./oldName'#'../oldName'#" src/sub/a.ts; commit; expect "rename moving dir + re-pointed import" 0
+new_repo renreexp;  git mv src/oldName.ts src/newName.ts; echo "export { q } from './other';" >> src/newName.ts; commit; expect "rename + fresh re-export" 1
+new_repo renfresh;  git mv src/oldName.ts src/newName.ts; echo "import './sideEffect';" >> src/newName.ts; commit; expect "rename + fresh side-effect import" 1
+new_repo importfresh; git mv src/oldName.ts src/newName.ts; echo "import { n } from './newName';" >> src/user.ts; commit; expect "importer gains a fresh import" 1
+new_repo moveIn;    mkdir -p examples; git mv src/oldName.ts examples/oldName.ts; commit; git mv examples/oldName.ts src/moved.ts; commit; expect "move from outside src/ into src/" 1
 new_repo importer;  git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./newName#" src/user.ts; commit; expect "rename + importer path update" 0
 new_repo importbad; git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./elsewhere#" src/user.ts; commit; expect "import swapped to non-renamed module" 1
 new_repo plain;     echo 'export const x = 1;' >> src/a.ts; commit;                     expect "plain source change, no test" 1
