@@ -253,6 +253,10 @@ body {
 #btn-browse-folder,
 #btn-analyze-folder,
 #btn-clear-cache,
+#btn-clear-cache-tab,
+#btn-reset-insights,
+#btn-reset-insights-tab,
+#btn-reset-discovered-editors,
 #btn-reset-debug-counters,
 .share-btn { display: none !important; }
 `;
