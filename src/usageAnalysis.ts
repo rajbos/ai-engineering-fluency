@@ -2120,7 +2120,7 @@ type AsuCliState = {
 	defaultEffort: string | null;
 	requestCount: number;
 	effortByRequest: { [effort: string]: number };
-	pendingToolCalls: Map<string, { toolName: string; args: Record<string, string>; effCall?: EfficiencyTurn['toolCalls'][number] }>;
+	pendingToolCalls: Map<string, { toolName: string; args: Record<string, string>; mcpServerName?: string; effCall?: EfficiencyTurn['toolCalls'][number] }>;
 	editedFilePaths: Set<string>;
 	/** Per-user-turn tool-call sequences for model efficiency metrics (issue #1649). */
 	efficiencyTurns: EfficiencyTurn[];
@@ -2409,6 +2409,9 @@ function _asuCollectTaskTurnFromEvent(event: any, currentTurn: TaskTurnSignal | 
 
 function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
 	if (event.type !== 'tool.call' && event.type !== 'tool.result' && event.type !== 'tool.execution_start') { return; }
+	// Events tagged with an MCP server are counted by _asuHandleMcpToolEvent only — never
+	// here as well, otherwise one MCP call would land in both toolCalls and mcpTools.
+	if (_asuEventMcpServerName(event)) { return; }
 	const toolName = event.data?.toolName || event.toolName || 'unknown';
 	recordToolOrMcpInvocation(toolName, analysis, toolNameMap);
 	// Copilot CLI wraps autonomous skill invocations behind a generic "skill" tool call
@@ -2421,12 +2424,28 @@ function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, too
 	}
 }
 
-/** Handle mcp.tool.call events and events with data.mcpServer set. */
+/**
+ * MCP server name an event is tagged with, or undefined for a non-MCP event.
+ * Copilot CLI's `tool.execution_start` events for MCP tools carry `data.mcpServerName`
+ * (plus `data.mcpToolName`) rather than `data.mcpServer`, and their `toolName` is
+ * `<server>-<tool>` (e.g. `github-mcp-server-get_file_contents`), which `isMcpTool()`
+ * does not recognise — so the server tag is the only reliable MCP signal there.
+ */
+function _asuEventMcpServerName(event: any): string | undefined {
+	// First non-empty tag wins: a blank `mcpServer` must not mask a valid `mcpServerName`.
+	for (const candidate of [event?.data?.mcpServer, event?.data?.mcpServerName]) {
+		if (typeof candidate === 'string' && candidate.trim()) { return candidate.trim(); }
+	}
+	return undefined;
+}
+
+/** Handle mcp.tool.call events and events with data.mcpServer / data.mcpServerName set. */
  
 function _asuHandleMcpToolEvent(event: any, analysis: SessionUsageAnalysis): void {
-	if (event.type !== 'mcp.tool.call' && !event.data?.mcpServer) { return; }
+	const taggedServer = _asuEventMcpServerName(event);
+	if (event.type !== 'mcp.tool.call' && !taggedServer) { return; }
 	analysis.mcpTools.total++;
-	const serverName = event.data?.mcpServer || 'unknown';
+	const serverName = taggedServer || 'unknown';
 	const mcpToolName = event.data?.toolName || event.toolName || 'unknown';
 	analysis.mcpTools.byServer[serverName] = (analysis.mcpTools.byServer[serverName] || 0) + 1;
 	const normalizedMcpTool = normalizeMcpToolName(mcpToolName);
@@ -2460,7 +2479,7 @@ function _asuHandleToolStart(event: any, cliState: AsuCliState): void {
 	const { toolCallId, toolName, arguments: args } = event.data ?? {};
 	if (toolCallId && toolName) {
 		const effCall = _asuAppendEfficiencyToolCall(cliState, toolName, args);
-		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {}, effCall });
+		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {}, mcpServerName: _asuEventMcpServerName(event), effCall });
 	}
 }
 
@@ -2504,7 +2523,7 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 	if (success && (pending.toolName === 'edit' || pending.toolName === 'create')) {
 		_asuApplyToolLoc(pending, cliState, analysis);
 	}
-	if (!result?.content || isMcpTool(pending.toolName)) { return; }
+	if (!result?.content || pending.mcpServerName || isMcpTool(pending.toolName)) { return; }
 	const resultText = _asuExtractToolResultText(result.content);
 	if (!resultText) { return; }
 	const tokens = estimateTokensFromText(resultText);
