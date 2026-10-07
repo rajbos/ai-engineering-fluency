@@ -108,7 +108,7 @@ export async function discoverSessionFiles(): Promise<string[]> {
  * Builds a WorkspaceCustomizationMatrix from session file paths.
  *
  * - For VS Code sessions: derives workspace folder from workspaceStorage/<hash>/workspace.json,
- *   then checks for .github/copilot-instructions.md, agents.md, or CLAUDE.md.
+ *   then checks for AGENTS.md, CLAUDE.md, or .github/copilot-instructions.md.
  * - For Claude Code sessions (~/.claude/projects/<hash>/): reads the JSONL to extract the
  *   `cwd` workspace path, then checks for CLAUDE.md there.
  */
@@ -161,12 +161,17 @@ export async function buildCustomizationMatrix(sessionFiles: string[]): Promise<
 	for (const wsPath of workspacePaths) {
 		const hasIssues = await withErrorRecovery(
 			async () => {
-				const [hasInstructions, hasAgentsMd, hasClaudeMd] = await Promise.all([
-					fs.promises.access(path.join(wsPath, '.github', 'copilot-instructions.md')).then(() => true).catch(() => false),
-					fs.promises.access(path.join(wsPath, 'agents.md')).then(() => true).catch(() => false),
-					fs.promises.access(path.join(wsPath, 'CLAUDE.md')).then(() => true).catch(() => false),
+				const exists = (...segments: string[]) =>
+					fs.promises.access(path.join(wsPath, ...segments)).then(() => true).catch(() => false);
+				// AGENTS.md is the cross-tool standard; also match lowercase for case-sensitive filesystems.
+				const found = await Promise.all([
+					exists('.github', 'copilot-instructions.md'),
+					exists('AGENTS.md'),
+					exists('agents.md'),
+					exists('CLAUDE.md'),
+					exists('.claude', 'CLAUDE.md'),
 				]);
-				return !hasInstructions && !hasAgentsMd && !hasClaudeMd;
+				return !found.some(Boolean);
 			},
 			true,
 			`buildCustomizationMatrix workspace check(${wsPath})`

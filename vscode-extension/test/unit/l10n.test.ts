@@ -43,6 +43,16 @@ test('l10n: resolves zh-cn strings when the display language is zh-cn', () => {
 	mock.setLanguage('en');
 });
 
+test('l10n: missing-instructions insight is tool-neutral in English and zh-cn', () => {
+	assert.equal(t('insight.missingInstructions.title'), '🗒️ Add an AGENTS.md to your repos');
+	assert.ok(t('insight.missingInstructions.body.one', 1, 'repo', '').includes('`AGENTS.md`'));
+	assert.ok(t('insight.missingInstructions.body.other', 2, 'a, b', '').includes('`CLAUDE.md`'));
+	mock.setLanguage('zh-cn');
+	assert.equal(t('insight.missingInstructions.title'), '🗒️ 为你的仓库添加 AGENTS.md');
+	assert.ok(t('insight.missingInstructions.body.one', 1, 'repo', '').includes('`AGENTS.md`'));
+	mock.setLanguage('en');
+});
+
 test('l10n: paged curation table controls resolve in English and zh-cn', () => {
 	assert.equal(t('usage.pagedTable.previous'), 'Previous');
 	assert.equal(t('usage.pagedTable.next'), 'Next');
