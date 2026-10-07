@@ -219,6 +219,7 @@ can trust. The CI job checks out with `fetch-depth: 0` for the same reason.
 |---|---|
 | `build` | types, lint, json, l10n, compile, **contract**, unit tests |
 | `ui-checks` (PRs only) | **interaction smoke**, **visual view diff vs the merge base** |
+| `validate-skills` / `security-classification` | **every skill that ships scripts has a `SECURITY.md` or an exempt/pending entry** (`node scripts/validate-skill-security.js`, over all skills) |
 
 `ui-checks` renders every view in its initial state and in each tab/mode it
 declares as a `state` in `views.config.json`, then **posts the before/after/diff

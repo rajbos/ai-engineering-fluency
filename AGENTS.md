@@ -229,6 +229,23 @@ updating this file's structure diagram and title in the same PR.** Concretely:
 - A product rename → update the H1 and any other name references here, the way
   `README.md`'s title and "Previously known as" line do.
 
+## Skill security classification
+
+Every skill under `.github/skills/<name>/` that ships scripts (`.js .mjs .cjs .ts .ps1 .sh .py`, excluding `tests/` directories and `*.test.*`/`*.spec.*` files) must be classified. It either carries a one-page `SECURITY.md` next to its `SKILL.md`, or it is declared `exempt` (with a reason) or `pending` (with a tracking issue number) in `.github/skills/skill-security-classification.json`. Never both. `scripts/validate-skill-security.js` enforces this over all skills in CI (`validate-skills.yml`) and fails the build otherwise.
+
+A skill needs a `SECURITY.md` when any shipped script:
+
+1. makes network requests;
+2. reads, stores or sends credentials, tokens or keys;
+3. parses content from outside the operator's control (downloads, PR diffs from forks, another repo's content);
+4. writes anywhere other than stdout or its declared output location;
+5. runs an external program with arguments or input derived from any of the above;
+6. emits content read from the user's AI session logs or home-directory data in a way that can carry private prompt text into a chat transcript, CI log, PR comment or tracked file. Output limited to counts, field paths, model IDs and file metadata, with values only behind an explicit opt-in flag, is exempt with the privacy note in the reason. Printing or persisting session-derived free text (titles, prompts, example values) by default is not.
+
+The `SECURITY.md` template is deliberately short. Required `##` sections: *What the scripts do and talk to*, *Credentials used and where they come from*, *Untrusted inputs parsed*, *What it writes and where*, *External programs run*, *Mitigations in the code*, *Known gaps*. Derive every statement from reading the scripts; write `None.` where a section does not apply. Do not invent threats or mitigations.
+
+When you add or change a skill script, classify it in the same PR. A change that adds or alters a trigger surface (a new network call, credential, output location, spawned program, or a new way session data reaches output) updates that skill's `SECURITY.md`, or moves it between exempt and modelled, in the same PR. `SECURITY.md` and the classification file live only under `.github/skills/`; they are not mirrored to `.claude/skills/`.
+
 ## DevContainer Terminal Behavior
 
 This repository uses a devcontainer (`.devcontainer/devcontainer.json`). When working inside the devcontainer, **terminal output capture is unreliable** — commands execute successfully but the `run_in_terminal` tool often returns empty or truncated output. This is a known limitation of the remote filesystem layer.

@@ -4,6 +4,9 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- Tool Curation's MCP server, built-in tool and unused-skill tables can now be sorted and browsed in 10-row pages; the MCP usage filter is applied before pagination, and table controls keep working after refreshes (#2303, #2285)
+
 ## [0.19.0] - 2026-10-02
 
 ### Features
