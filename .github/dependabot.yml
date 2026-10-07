@@ -130,8 +130,11 @@ updates:
           - "patch"
 
   # Hash-pinned Python requirements installed by copilot-setup-steps.yml
-  # (.github/requirements/*.txt). Dependabot rewrites the --hash lines when it
-  # bumps a version, so the pins stay installable under --require-hashes.
+  # (.github/requirements/*.txt). Each .txt is a pip-compile --generate-hashes
+  # lock of the matching .in file, so on a bump Dependabot re-runs pip-compile
+  # and re-resolves every hash and transitive pin together. (When the .txt was
+  # hand-written it only rewrote one line, and twice left a stale hash behind.)
+  # check-pip-requirements.yml installs the result on every such PR.
   - package-ecosystem: "pip"
     directory: "/.github/requirements"
     schedule:

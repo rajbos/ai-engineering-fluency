@@ -4,6 +4,7 @@ import { setHtml } from '../shared/domUtils';
 import { escapeHtml, formatCompact, formatCost, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
+import { aggregateTokenStats, aggregateActualUsageStats, aggregateModeStats, buildSummaryStats, getEffortDisplayName, getModeIcon, getTopEntries, MODE_LABELS, type ActualUsageStats, type BreakdownEntry, type SummaryStats, type ThinkingEffortUsage } from './summaryStats';
 import { buildTurnOverviewRows, hashModelToHue, type TurnOverviewRow } from './turnsOverview';
 import { renderHydraFusionSection, renderLegsTable, formatFusionCost } from './hydraFusionSection';
 import { buildMcpAndContextRefsCard, formatTopListWithOther, sumSessionCost } from './summaryCards';
@@ -61,7 +62,6 @@ thinkingEffort?: string;
 estimatedCost?: number;
 };
 
-type ThinkingEffortUsage = { byEffort: { [effort: string]: number }; switchCount: number; defaultEffort: string | null };
 type SessionUsageAnalysis = {
 toolCalls: ToolCallUsage;
 modeUsage: ModeUsage;
@@ -112,15 +112,6 @@ hydraFusion?: HydraFusionSummary;
 compactNumbers?: boolean;
 };
 
-/** Aggregated prompt-breakdown entry accumulated across all turns in a session. */
-type BreakdownEntry = {
-category: string;
-label: string;
-totalTokens: number;
-totalPct: number;
-count: number;
-};
-
 /**
  * A single row for `renderUsageComparisonTable`.
  * When `delta` is `undefined` the Delta column is omitted.
@@ -131,34 +122,6 @@ estimated: number;
 actual: number;
 delta?: number;
 isTotal?: boolean;
-};
-
-/** Pre-computed statistics passed to `renderSummaryCards`. */
-type SummaryStats = {
-totalTokens: number;
-totalThinkingTokens: number;
-totalSubAgentCalls: number;
-turnsWithThinking: number;
-hasAnyActualUsage: boolean;
-hasSessionActualOnly: boolean;
-actualTotal: number;
-actualPromptTotal: number;
-actualCompletionTotal: number;
-sessionActualTokens: number;
-usageToolTotal: number;
-usageTopTools: { key: string; value: number }[];
-usageMcpTotal: number;
-usageTopMcpTools: { key: string; value: number }[];
-usageContextTotal: number;
-usageContextImplicit: number;
-usageContextExplicit: number;
-sessionEffort: ThinkingEffortUsage | undefined;
-effortDefaultLabel: string;
-effortSummary: string;
-modeEntries: [keyof ModeUsage, number][];
-totalModeTurns: number;
-primaryModeLabel: string;
-modeSubLabel: string;
 };
 
 // ── VS Code API bootstrap ────────────────────────────────────────────────────
@@ -186,15 +149,6 @@ const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<str
 
 // ── Module-level constants ────────────────────────────────────────────────────
 
-const EFFORT_DISPLAY_NAMES: Record<string, string> = {
-xhigh: 'Extra High',
-};
-
-/** Human-readable labels for each editor mode. */
-const MODE_LABELS: Record<string, string> = {
-ask: 'Ask', edit: 'Edit', agent: 'Agent', plan: 'Plan', customAgent: 'Custom Agent', cli: 'CLI'
-};
-
 // ── Utility helpers ──────────────────────────────────────────────────────────
 
 function lookupToolName(id: string): string {
@@ -202,10 +156,6 @@ if (!TOOL_NAME_MAP) {
 return id;
 }
 return lookupKnownToolName(id, TOOL_NAME_MAP) ?? resolveGuidMcpToolName(id) ?? resolveMcpFamilyToolName(id) ?? id;
-}
-
-function getEffortDisplayName(level: string): string {
-return EFFORT_DISPLAY_NAMES[level] ?? level;
 }
 
 function formatDate(isoString: string | null): string {
@@ -313,25 +263,6 @@ ${tableRows}
 </tbody>
 </table>
 `;
-}
-
-function getTopEntries(map: { [key: string]: number } = {}, limit = 3): { key: string; value: number }[] {
-return Object.entries(map)
-.sort((a, b) => b[1] - a[1])
-.slice(0, limit)
-.map(([key, value]) => ({ key, value }));
-}
-
-function getModeIcon(mode: string): string {
-switch (mode) {
-case 'ask': return '💬';
-case 'edit': return '✏️';
-case 'agent': return '🤖';
-case 'plan': return '📋';
-case 'customAgent': return '⚡';
-case 'cli': return '🖥️';
-default: return '❓';
-}
 }
 
 function getModeColor(mode: string): string {
@@ -1413,119 +1344,6 @@ ${actualUsageHtml}
 `;
 }
 
-type TokenStats = {
-	totalTokens: number;
-	totalThinkingTokens: number;
-	totalSubAgentCalls: number;
-	turnsWithThinking: number;
-	usageToolTotal: number;
-	usageTopTools: { key: string; value: number }[];
-	usageMcpTotal: number;
-	usageTopMcpTools: { key: string; value: number }[];
-	usageContextTotal: number;
-	usageContextImplicit: number;
-	usageContextExplicit: number;
-	sessionEffort: ThinkingEffortUsage | undefined;
-	effortDefaultLabel: string;
-	effortSummary: string;
-};
-
-function resolveSessionEffort(sessionEffort: any): { effortDefaultLabel: string; effortSummary: string } {
-	const effortDefault = sessionEffort?.defaultEffort ?? (sessionEffort ? Object.keys(sessionEffort.byEffort)[0] : undefined);
-	const effortDefaultLabel = effortDefault ? getEffortDisplayName(effortDefault) : '—';
-	const effortSummary = sessionEffort
-		? Object.entries(sessionEffort.byEffort).map(([k, v]) => `${getEffortDisplayName(k)}: ${v}`).join(', ')
-		: '';
-	return { effortDefaultLabel, effortSummary };
-}
-
-function aggregateTokenStats(data: SessionLogData): TokenStats {
-	const totalTokens = data.turns.reduce((sum, t) => sum + t.inputTokensEstimate + t.outputTokensEstimate + t.thinkingTokensEstimate, 0);
-	const totalThinkingTokens = data.turns.reduce((sum, t) => sum + t.thinkingTokensEstimate, 0);
-	const totalToolCalls = data.turns.reduce((sum, t) => sum + t.toolCalls.filter(tc => !tc.isSubAgent).length, 0);
-	const totalSubAgentCalls = data.turns.reduce((sum, t) => sum + t.toolCalls.filter(tc => tc.isSubAgent).length, 0);
-	const totalMcpTools = data.turns.reduce((sum, t) => sum + t.mcpTools.length, 0);
-	const turnsWithThinking = data.turns.filter(t => t.thinkingTokensEstimate > 0).length;
-	const usage = data.usageAnalysis;
-	const sessionEffort = usage?.thinkingEffort;
-	const usageToolTotal = usage?.toolCalls?.total ?? totalToolCalls;
-	const usageTopTools = usage ? getTopEntries(usage.toolCalls.byTool, 3) : [];
-	const usageMcpTotal = usage?.mcpTools?.total ?? totalMcpTools;
-	const usageTopMcpTools = usage ? getTopEntries(usage.mcpTools.byTool, 3) : [];
-	const usageContextRefs = usage?.contextReferences || data.contextReferences;
-	const usageContextTotal = getTotalContextRefs(usageContextRefs);
-	const usageContextImplicit = getImplicitContextRefs(usageContextRefs);
-	const usageContextExplicit = getExplicitContextRefs(usageContextRefs);
-	const { effortDefaultLabel, effortSummary } = resolveSessionEffort(sessionEffort);
-	return {
-		totalTokens, totalThinkingTokens, totalSubAgentCalls, turnsWithThinking,
-		usageToolTotal, usageTopTools, usageMcpTotal, usageTopMcpTools,
-		usageContextTotal, usageContextImplicit, usageContextExplicit,
-		sessionEffort, effortDefaultLabel, effortSummary,
-	};
-}
-
-type ActualUsageStats = {
-	turnsWithActual: ChatTurn[];
-	hasAnyActualUsage: boolean;
-	actualPromptTotal: number;
-	actualCompletionTotal: number;
-	actualTotal: number;
-	sessionActualTokens: number;
-	hasSessionActualOnly: boolean;
-	aggregatedBreakdown: { [key: string]: BreakdownEntry };
-};
-
-function aggregateActualUsageStats(data: SessionLogData): ActualUsageStats {
-	const turnsWithActual = data.turns.filter(t => t.actualUsage);
-	const hasAnyActualUsage = turnsWithActual.length > 0;
-	const actualPromptTotal = turnsWithActual.reduce((s, t) => s + (t.actualUsage?.promptTokens || 0), 0);
-	const actualCompletionTotal = turnsWithActual.reduce((s, t) => s + (t.actualUsage?.completionTokens || 0), 0);
-	const actualTotal = actualPromptTotal + actualCompletionTotal;
-	const sessionActualTokens = data.actualTokens || 0;
-	const hasSessionActualOnly = !hasAnyActualUsage && sessionActualTokens > 0;
-	const aggregatedBreakdown: { [key: string]: BreakdownEntry } = {};
-	for (const turn of turnsWithActual) {
-		if (turn.actualUsage?.promptTokenDetails) {
-			for (const detail of turn.actualUsage.promptTokenDetails) {
-				const key = `${detail.category}|${detail.label}`;
-				if (!aggregatedBreakdown[key]) {
-					aggregatedBreakdown[key] = { category: detail.category, label: detail.label, totalTokens: 0, totalPct: 0, count: 0 };
-				}
-				const deducedTokens = Math.round((turn.actualUsage?.promptTokens || 0) * detail.percentageOfPrompt / 100);
-				aggregatedBreakdown[key].totalTokens += deducedTokens;
-				aggregatedBreakdown[key].totalPct += detail.percentageOfPrompt;
-				aggregatedBreakdown[key].count++;
-			}
-		}
-	}
-	return { turnsWithActual, hasAnyActualUsage, actualPromptTotal, actualCompletionTotal, actualTotal, sessionActualTokens, hasSessionActualOnly, aggregatedBreakdown };
-}
-
-type ModeStats = {
-	modeEntries: [keyof ModeUsage, number][];
-	totalModeTurns: number;
-	primaryModeLabel: string;
-	modeSubLabel: string;
-};
-
-function aggregateModeStats(data: SessionLogData): ModeStats {
-	const modeUsage: ModeUsage = { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 };
-	for (const turn of data.turns) {
-		modeUsage[turn.mode]++;
-	}
-	const modeEntries = (Object.entries(modeUsage) as [keyof typeof modeUsage, number][])
-		.filter(([, n]) => n > 0)
-		.sort((a, b) => b[1] - a[1]);
-	const totalModeTurns = modeEntries.reduce((s, [, n]) => s + n, 0);
-	const primaryMode = modeEntries[0];
-	const primaryModeLabel = primaryMode ? `${getModeIcon(primaryMode[0])} ${MODE_LABELS[primaryMode[0]]}` : '—';
-	const modeSubLabel = modeEntries.length <= 1
-		? (totalModeTurns === 1 ? '1 turn' : `${totalModeTurns} turns`)
-		: `mixed across ${totalModeTurns} turns`;
-	return { modeEntries, totalModeTurns, primaryModeLabel, modeSubLabel };
-}
-
 function renderLayout(data: SessionLogData): void {
 	setCompactNumbers(data.compactNumbers !== false);
 	const root = document.getElementById('root');
@@ -1535,33 +1353,18 @@ function renderLayout(data: SessionLogData): void {
 	const actualStats = aggregateActualUsageStats(data);
 	const modeStats = aggregateModeStats(data);
 
-	const summaryStats: SummaryStats = {
-		totalTokens: tokenStats.totalTokens,
-		totalThinkingTokens: tokenStats.totalThinkingTokens,
-		totalSubAgentCalls: tokenStats.totalSubAgentCalls,
-		turnsWithThinking: tokenStats.turnsWithThinking,
-		usageToolTotal: tokenStats.usageToolTotal,
-		usageTopTools: tokenStats.usageTopTools,
-		usageMcpTotal: tokenStats.usageMcpTotal,
-		usageTopMcpTools: tokenStats.usageTopMcpTools,
-		usageContextTotal: tokenStats.usageContextTotal,
-		usageContextImplicit: tokenStats.usageContextImplicit,
-		usageContextExplicit: tokenStats.usageContextExplicit,
-		sessionEffort: tokenStats.sessionEffort,
-		effortDefaultLabel: tokenStats.effortDefaultLabel,
-		effortSummary: tokenStats.effortSummary,
-		hasAnyActualUsage: actualStats.hasAnyActualUsage,
-		hasSessionActualOnly: actualStats.hasSessionActualOnly,
-		actualTotal: actualStats.actualTotal,
-		actualPromptTotal: actualStats.actualPromptTotal,
-		actualCompletionTotal: actualStats.actualCompletionTotal,
-		sessionActualTokens: actualStats.sessionActualTokens,
-		modeEntries: modeStats.modeEntries,
-		totalModeTurns: modeStats.totalModeTurns,
-		primaryModeLabel: modeStats.primaryModeLabel,
-		modeSubLabel: modeStats.modeSubLabel,
-	};
+	const summaryStats = buildSummaryStats(tokenStats, actualStats, modeStats);
 
+	_renderLayoutBody(root, data, summaryStats, tokenStats.totalTokens, actualStats);
+}
+
+function _renderLayoutBody(
+	root: HTMLElement,
+	data: SessionLogData,
+	summaryStats: SummaryStats,
+	totalTokens: number,
+	actualStats: ActualUsageStats<ChatTurn>,
+): void {
 	// Computed once and shared by both renderers below so the HydraFusion section's
 	// "jump to step" links and the Session Steps Overview table's expandable legs
 	// agree on which turn is which. `undefined` for the overwhelming majority of
@@ -1578,7 +1381,7 @@ ${renderEditorInfoPanel(data)}
 ${renderSummaryCards(data, summaryStats)}
 
 ${renderSessionActualUsage(
-	data, tokenStats.totalTokens, actualStats.turnsWithActual,
+	data, totalTokens, actualStats.turnsWithActual,
 	actualStats.actualPromptTotal, actualStats.actualCompletionTotal, actualStats.actualTotal,
 	actualStats.aggregatedBreakdown,
 )}

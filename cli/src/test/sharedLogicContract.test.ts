@@ -254,6 +254,22 @@ test('CLI daily, history, weekly, monthly and billing aggregates retain Auto dis
 	assert.deepEqual(days, originalDays);
 });
 
+test('CLI chart payload carries sortable period keys for every period', () => {
+	// The chart webview filters each period by time window on `periodKeys` and throws
+	// on load without them, which left the desktop app's Chart view blank.
+	const now = new Date();
+	const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+	const entry: DailyEntry = { tokens: 10, sessions: 1, modelUsage: {}, editorUsage: {} };
+	const payload = buildChartPayload([key], [entry]) as unknown as { periods: Record<string, { labels: string[]; periodKeys: string[] }> };
+	for (const period of Object.values(payload.periods)) {
+		assert.equal(period.periodKeys.length, period.labels.length);
+		assert.deepEqual(period.periodKeys, [...period.periodKeys].sort());
+	}
+	assert.deepEqual(payload.periods.day.periodKeys, [key]);
+	assert.match(payload.periods.week.periodKeys[0], /^\d{4}-\d{2}-\d{2}$/);
+	assert.equal(payload.periods.month.periodKeys.at(-1), key.slice(0, 7));
+});
+
 test('CLI groups GLM sessions under Z.ai, matching the shared billing helper', () => {
 	// The CLI used to keep its own copy of chartDataBuilder's provider-prefix table, which
 	// never gained `glm` — so a Mistral Vibe session routed to GLM billed to "Other" here

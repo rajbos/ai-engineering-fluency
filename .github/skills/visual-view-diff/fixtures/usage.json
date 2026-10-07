@@ -1420,5 +1420,1039 @@
       "activeDurationMs": 150000,
       "subAgentCalls": 0
     }
-  ]
+  ],
+  "curationAnalysis": {
+    "windowDays": 30,
+    "availableTools": [
+      {
+        "name": "builtin-tool-01",
+        "description": "Built-in tool 1 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-tool-02",
+        "description": "Built-in tool 2 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-tool-03",
+        "description": "Built-in tool 3 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-tool-04",
+        "description": "Built-in tool 4 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-tool-05",
+        "description": "Built-in tool 5 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-tool-06",
+        "description": "Built-in tool 6 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-tool-07",
+        "description": "Built-in tool 7 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-tool-08",
+        "description": "Built-in tool 8 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-tool-09",
+        "description": "Built-in tool 9 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-tool-10",
+        "description": "Built-in tool 10 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-tool-11",
+        "description": "Built-in tool 11 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "builtin-tool-12",
+        "description": "Built-in tool 12 provides a description long enough to demonstrate estimated prompt overhead and sorting.",
+        "source": "builtin"
+      },
+      {
+        "name": "unused-skill-01",
+        "description": "A representative workspace or user skill description number 1, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": ".github/skills/sample/SKILL.md",
+        "configFiles": [
+          ".github/skills/sample/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-02",
+        "description": "A representative workspace or user skill description number 2, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": ".claude/skills/sample/SKILL.md",
+        "configFiles": [
+          ".claude/skills/sample/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-03",
+        "description": "A representative workspace or user skill description number 3, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": ".agents/skills/sample/SKILL.md",
+        "configFiles": [
+          ".agents/skills/sample/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-04",
+        "description": "A representative workspace or user skill description number 4, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-4/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-4/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-05",
+        "description": "A representative workspace or user skill description number 5, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-5/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-5/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-06",
+        "description": "A representative workspace or user skill description number 6, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-6/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-6/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-07",
+        "description": "A representative workspace or user skill description number 7, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-7/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-7/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-08",
+        "description": "A representative workspace or user skill description number 8, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-8/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-8/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-09",
+        "description": "A representative workspace or user skill description number 9, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-9/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-9/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-10",
+        "description": "A representative workspace or user skill description number 10, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-10/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-10/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-11",
+        "description": "A representative workspace or user skill description number 11, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-11/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-11/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-12",
+        "description": "A representative workspace or user skill description number 12, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-12/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-12/SKILL.md"
+        ],
+        "pluginName": "sample-agent-plugin"
+      },
+      {
+        "name": "mcp__zero-usage-01__tool-1",
+        "description": "Tool 1 from zero-usage-01",
+        "source": "mcp",
+        "server": "zero-usage-01",
+        "configFiles": [
+          "workspace-1/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-02__tool-1",
+        "description": "Tool 1 from zero-usage-02",
+        "source": "mcp",
+        "server": "zero-usage-02",
+        "extensionId": "sample.extension-2"
+      },
+      {
+        "name": "mcp__zero-usage-02__tool-2",
+        "description": "Tool 2 from zero-usage-02",
+        "source": "mcp",
+        "server": "zero-usage-02",
+        "extensionId": "sample.extension-2"
+      },
+      {
+        "name": "mcp__zero-usage-03__tool-1",
+        "description": "Tool 1 from zero-usage-03",
+        "source": "mcp",
+        "server": "zero-usage-03",
+        "configFiles": [
+          "workspace-3/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-03__tool-2",
+        "description": "Tool 2 from zero-usage-03",
+        "source": "mcp",
+        "server": "zero-usage-03",
+        "configFiles": [
+          "workspace-3/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-03__tool-3",
+        "description": "Tool 3 from zero-usage-03",
+        "source": "mcp",
+        "server": "zero-usage-03",
+        "configFiles": [
+          "workspace-3/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-04__tool-1",
+        "description": "Tool 1 from zero-usage-04",
+        "source": "mcp",
+        "server": "zero-usage-04",
+        "extensionId": "sample.extension-4"
+      },
+      {
+        "name": "mcp__zero-usage-04__tool-2",
+        "description": "Tool 2 from zero-usage-04",
+        "source": "mcp",
+        "server": "zero-usage-04",
+        "extensionId": "sample.extension-4"
+      },
+      {
+        "name": "mcp__zero-usage-04__tool-3",
+        "description": "Tool 3 from zero-usage-04",
+        "source": "mcp",
+        "server": "zero-usage-04",
+        "extensionId": "sample.extension-4"
+      },
+      {
+        "name": "mcp__zero-usage-04__tool-4",
+        "description": "Tool 4 from zero-usage-04",
+        "source": "mcp",
+        "server": "zero-usage-04",
+        "extensionId": "sample.extension-4"
+      },
+      {
+        "name": "mcp__zero-usage-05__tool-1",
+        "description": "Tool 1 from zero-usage-05",
+        "source": "mcp",
+        "server": "zero-usage-05",
+        "configFiles": [
+          "workspace-5/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-05__tool-2",
+        "description": "Tool 2 from zero-usage-05",
+        "source": "mcp",
+        "server": "zero-usage-05",
+        "configFiles": [
+          "workspace-5/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-05__tool-3",
+        "description": "Tool 3 from zero-usage-05",
+        "source": "mcp",
+        "server": "zero-usage-05",
+        "configFiles": [
+          "workspace-5/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-05__tool-4",
+        "description": "Tool 4 from zero-usage-05",
+        "source": "mcp",
+        "server": "zero-usage-05",
+        "configFiles": [
+          "workspace-5/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-05__tool-5",
+        "description": "Tool 5 from zero-usage-05",
+        "source": "mcp",
+        "server": "zero-usage-05",
+        "configFiles": [
+          "workspace-5/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-06__tool-1",
+        "description": "Tool 1 from zero-usage-06",
+        "source": "mcp",
+        "server": "zero-usage-06",
+        "extensionId": "sample.extension-6"
+      },
+      {
+        "name": "mcp__zero-usage-06__tool-2",
+        "description": "Tool 2 from zero-usage-06",
+        "source": "mcp",
+        "server": "zero-usage-06",
+        "extensionId": "sample.extension-6"
+      },
+      {
+        "name": "mcp__zero-usage-06__tool-3",
+        "description": "Tool 3 from zero-usage-06",
+        "source": "mcp",
+        "server": "zero-usage-06",
+        "extensionId": "sample.extension-6"
+      },
+      {
+        "name": "mcp__zero-usage-06__tool-4",
+        "description": "Tool 4 from zero-usage-06",
+        "source": "mcp",
+        "server": "zero-usage-06",
+        "extensionId": "sample.extension-6"
+      },
+      {
+        "name": "mcp__zero-usage-06__tool-5",
+        "description": "Tool 5 from zero-usage-06",
+        "source": "mcp",
+        "server": "zero-usage-06",
+        "extensionId": "sample.extension-6"
+      },
+      {
+        "name": "mcp__zero-usage-06__tool-6",
+        "description": "Tool 6 from zero-usage-06",
+        "source": "mcp",
+        "server": "zero-usage-06",
+        "extensionId": "sample.extension-6"
+      },
+      {
+        "name": "mcp__zero-usage-07__tool-1",
+        "description": "Tool 1 from zero-usage-07",
+        "source": "mcp",
+        "server": "zero-usage-07",
+        "configFiles": [
+          "workspace-7/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-07__tool-2",
+        "description": "Tool 2 from zero-usage-07",
+        "source": "mcp",
+        "server": "zero-usage-07",
+        "configFiles": [
+          "workspace-7/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-07__tool-3",
+        "description": "Tool 3 from zero-usage-07",
+        "source": "mcp",
+        "server": "zero-usage-07",
+        "configFiles": [
+          "workspace-7/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-07__tool-4",
+        "description": "Tool 4 from zero-usage-07",
+        "source": "mcp",
+        "server": "zero-usage-07",
+        "configFiles": [
+          "workspace-7/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-07__tool-5",
+        "description": "Tool 5 from zero-usage-07",
+        "source": "mcp",
+        "server": "zero-usage-07",
+        "configFiles": [
+          "workspace-7/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-07__tool-6",
+        "description": "Tool 6 from zero-usage-07",
+        "source": "mcp",
+        "server": "zero-usage-07",
+        "configFiles": [
+          "workspace-7/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-07__tool-7",
+        "description": "Tool 7 from zero-usage-07",
+        "source": "mcp",
+        "server": "zero-usage-07",
+        "configFiles": [
+          "workspace-7/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-08__tool-1",
+        "description": "Tool 1 from zero-usage-08",
+        "source": "mcp",
+        "server": "zero-usage-08",
+        "extensionId": "sample.extension-8"
+      },
+      {
+        "name": "mcp__zero-usage-08__tool-2",
+        "description": "Tool 2 from zero-usage-08",
+        "source": "mcp",
+        "server": "zero-usage-08",
+        "extensionId": "sample.extension-8"
+      },
+      {
+        "name": "mcp__zero-usage-08__tool-3",
+        "description": "Tool 3 from zero-usage-08",
+        "source": "mcp",
+        "server": "zero-usage-08",
+        "extensionId": "sample.extension-8"
+      },
+      {
+        "name": "mcp__zero-usage-08__tool-4",
+        "description": "Tool 4 from zero-usage-08",
+        "source": "mcp",
+        "server": "zero-usage-08",
+        "extensionId": "sample.extension-8"
+      },
+      {
+        "name": "mcp__zero-usage-08__tool-5",
+        "description": "Tool 5 from zero-usage-08",
+        "source": "mcp",
+        "server": "zero-usage-08",
+        "extensionId": "sample.extension-8"
+      },
+      {
+        "name": "mcp__zero-usage-08__tool-6",
+        "description": "Tool 6 from zero-usage-08",
+        "source": "mcp",
+        "server": "zero-usage-08",
+        "extensionId": "sample.extension-8"
+      },
+      {
+        "name": "mcp__zero-usage-08__tool-7",
+        "description": "Tool 7 from zero-usage-08",
+        "source": "mcp",
+        "server": "zero-usage-08",
+        "extensionId": "sample.extension-8"
+      },
+      {
+        "name": "mcp__zero-usage-08__tool-8",
+        "description": "Tool 8 from zero-usage-08",
+        "source": "mcp",
+        "server": "zero-usage-08",
+        "extensionId": "sample.extension-8"
+      },
+      {
+        "name": "mcp__zero-usage-09__tool-1",
+        "description": "Tool 1 from zero-usage-09",
+        "source": "mcp",
+        "server": "zero-usage-09",
+        "configFiles": [
+          "workspace-9/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-09__tool-2",
+        "description": "Tool 2 from zero-usage-09",
+        "source": "mcp",
+        "server": "zero-usage-09",
+        "configFiles": [
+          "workspace-9/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-09__tool-3",
+        "description": "Tool 3 from zero-usage-09",
+        "source": "mcp",
+        "server": "zero-usage-09",
+        "configFiles": [
+          "workspace-9/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-09__tool-4",
+        "description": "Tool 4 from zero-usage-09",
+        "source": "mcp",
+        "server": "zero-usage-09",
+        "configFiles": [
+          "workspace-9/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-09__tool-5",
+        "description": "Tool 5 from zero-usage-09",
+        "source": "mcp",
+        "server": "zero-usage-09",
+        "configFiles": [
+          "workspace-9/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-09__tool-6",
+        "description": "Tool 6 from zero-usage-09",
+        "source": "mcp",
+        "server": "zero-usage-09",
+        "configFiles": [
+          "workspace-9/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-09__tool-7",
+        "description": "Tool 7 from zero-usage-09",
+        "source": "mcp",
+        "server": "zero-usage-09",
+        "configFiles": [
+          "workspace-9/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-09__tool-8",
+        "description": "Tool 8 from zero-usage-09",
+        "source": "mcp",
+        "server": "zero-usage-09",
+        "configFiles": [
+          "workspace-9/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-09__tool-9",
+        "description": "Tool 9 from zero-usage-09",
+        "source": "mcp",
+        "server": "zero-usage-09",
+        "configFiles": [
+          "workspace-9/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-10__tool-1",
+        "description": "Tool 1 from zero-usage-10",
+        "source": "mcp",
+        "server": "zero-usage-10",
+        "extensionId": "sample.extension-10"
+      },
+      {
+        "name": "mcp__zero-usage-10__tool-2",
+        "description": "Tool 2 from zero-usage-10",
+        "source": "mcp",
+        "server": "zero-usage-10",
+        "extensionId": "sample.extension-10"
+      },
+      {
+        "name": "mcp__zero-usage-10__tool-3",
+        "description": "Tool 3 from zero-usage-10",
+        "source": "mcp",
+        "server": "zero-usage-10",
+        "extensionId": "sample.extension-10"
+      },
+      {
+        "name": "mcp__zero-usage-10__tool-4",
+        "description": "Tool 4 from zero-usage-10",
+        "source": "mcp",
+        "server": "zero-usage-10",
+        "extensionId": "sample.extension-10"
+      },
+      {
+        "name": "mcp__zero-usage-10__tool-5",
+        "description": "Tool 5 from zero-usage-10",
+        "source": "mcp",
+        "server": "zero-usage-10",
+        "extensionId": "sample.extension-10"
+      },
+      {
+        "name": "mcp__zero-usage-10__tool-6",
+        "description": "Tool 6 from zero-usage-10",
+        "source": "mcp",
+        "server": "zero-usage-10",
+        "extensionId": "sample.extension-10"
+      },
+      {
+        "name": "mcp__zero-usage-10__tool-7",
+        "description": "Tool 7 from zero-usage-10",
+        "source": "mcp",
+        "server": "zero-usage-10",
+        "extensionId": "sample.extension-10"
+      },
+      {
+        "name": "mcp__zero-usage-10__tool-8",
+        "description": "Tool 8 from zero-usage-10",
+        "source": "mcp",
+        "server": "zero-usage-10",
+        "extensionId": "sample.extension-10"
+      },
+      {
+        "name": "mcp__zero-usage-10__tool-9",
+        "description": "Tool 9 from zero-usage-10",
+        "source": "mcp",
+        "server": "zero-usage-10",
+        "extensionId": "sample.extension-10"
+      },
+      {
+        "name": "mcp__zero-usage-10__tool-10",
+        "description": "Tool 10 from zero-usage-10",
+        "source": "mcp",
+        "server": "zero-usage-10",
+        "extensionId": "sample.extension-10"
+      },
+      {
+        "name": "mcp__zero-usage-11__tool-1",
+        "description": "Tool 1 from zero-usage-11",
+        "source": "mcp",
+        "server": "zero-usage-11",
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-11__tool-2",
+        "description": "Tool 2 from zero-usage-11",
+        "source": "mcp",
+        "server": "zero-usage-11",
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-11__tool-3",
+        "description": "Tool 3 from zero-usage-11",
+        "source": "mcp",
+        "server": "zero-usage-11",
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-11__tool-4",
+        "description": "Tool 4 from zero-usage-11",
+        "source": "mcp",
+        "server": "zero-usage-11",
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-11__tool-5",
+        "description": "Tool 5 from zero-usage-11",
+        "source": "mcp",
+        "server": "zero-usage-11",
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-11__tool-6",
+        "description": "Tool 6 from zero-usage-11",
+        "source": "mcp",
+        "server": "zero-usage-11",
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-11__tool-7",
+        "description": "Tool 7 from zero-usage-11",
+        "source": "mcp",
+        "server": "zero-usage-11",
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-11__tool-8",
+        "description": "Tool 8 from zero-usage-11",
+        "source": "mcp",
+        "server": "zero-usage-11",
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-11__tool-9",
+        "description": "Tool 9 from zero-usage-11",
+        "source": "mcp",
+        "server": "zero-usage-11",
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-11__tool-10",
+        "description": "Tool 10 from zero-usage-11",
+        "source": "mcp",
+        "server": "zero-usage-11",
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__zero-usage-11__tool-11",
+        "description": "Tool 11 from zero-usage-11",
+        "source": "mcp",
+        "server": "zero-usage-11",
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__partly-used-config__tool-1",
+        "description": "Tool 1 from partly-used-config",
+        "source": "mcp",
+        "server": "partly-used-config",
+        "configFiles": [
+          "workspace/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__partly-used-config__tool-2",
+        "description": "Tool 2 from partly-used-config",
+        "source": "mcp",
+        "server": "partly-used-config",
+        "configFiles": [
+          "workspace/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__partly-used-config__tool-3",
+        "description": "Tool 3 from partly-used-config",
+        "source": "mcp",
+        "server": "partly-used-config",
+        "configFiles": [
+          "workspace/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__partly-used-config__tool-4",
+        "description": "Tool 4 from partly-used-config",
+        "source": "mcp",
+        "server": "partly-used-config",
+        "configFiles": [
+          "workspace/.vscode/mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__partly-used-extension__tool-1",
+        "description": "Tool 1 from partly-used-extension",
+        "source": "mcp",
+        "server": "partly-used-extension",
+        "extensionId": "sample.partial-mcp"
+      },
+      {
+        "name": "mcp__partly-used-extension__tool-2",
+        "description": "Tool 2 from partly-used-extension",
+        "source": "mcp",
+        "server": "partly-used-extension",
+        "extensionId": "sample.partial-mcp"
+      },
+      {
+        "name": "mcp__partly-used-extension__tool-3",
+        "description": "Tool 3 from partly-used-extension",
+        "source": "mcp",
+        "server": "partly-used-extension",
+        "extensionId": "sample.partial-mcp"
+      },
+      {
+        "name": "mcp__fully-used-config__tool-1",
+        "description": "Tool 1 from fully-used-config",
+        "source": "mcp",
+        "server": "fully-used-config",
+        "configFiles": [
+          "workspace/.mcp.json"
+        ]
+      },
+      {
+        "name": "mcp__fully-used-config__tool-2",
+        "description": "Tool 2 from fully-used-config",
+        "source": "mcp",
+        "server": "fully-used-config",
+        "configFiles": [
+          "workspace/.mcp.json"
+        ]
+      }
+    ],
+    "usedTools": [],
+    "unusedTools": [
+      {
+        "name": "unused-skill-01",
+        "description": "A representative workspace or user skill description number 1, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": ".github/skills/sample/SKILL.md",
+        "configFiles": [
+          ".github/skills/sample/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-02",
+        "description": "A representative workspace or user skill description number 2, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": ".claude/skills/sample/SKILL.md",
+        "configFiles": [
+          ".claude/skills/sample/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-03",
+        "description": "A representative workspace or user skill description number 3, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": ".agents/skills/sample/SKILL.md",
+        "configFiles": [
+          ".agents/skills/sample/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-04",
+        "description": "A representative workspace or user skill description number 4, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-4/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-4/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-05",
+        "description": "A representative workspace or user skill description number 5, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-5/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-5/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-06",
+        "description": "A representative workspace or user skill description number 6, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-6/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-6/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-07",
+        "description": "A representative workspace or user skill description number 7, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-7/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-7/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-08",
+        "description": "A representative workspace or user skill description number 8, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-8/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-8/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-09",
+        "description": "A representative workspace or user skill description number 9, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-9/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-9/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-10",
+        "description": "A representative workspace or user skill description number 10, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-10/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-10/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-11",
+        "description": "A representative workspace or user skill description number 11, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-11/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-11/SKILL.md"
+        ]
+      },
+      {
+        "name": "unused-skill-12",
+        "description": "A representative workspace or user skill description number 12, used by the visual table fixture.",
+        "source": "skill",
+        "skillPath": "~/.copilot/skills/sample-12/SKILL.md",
+        "configFiles": [
+          "C:/Users/sample/.copilot/skills/sample-12/SKILL.md"
+        ],
+        "pluginName": "sample-agent-plugin"
+      }
+    ],
+    "underusedMcpServers": [
+      {
+        "server": "zero-usage-01",
+        "availableToolCount": 1,
+        "usedToolCount": 0,
+        "configFiles": [
+          "workspace-1/.vscode/mcp.json"
+        ]
+      },
+      {
+        "server": "zero-usage-02",
+        "availableToolCount": 2,
+        "usedToolCount": 0,
+        "extensionId": "sample.extension-2"
+      },
+      {
+        "server": "zero-usage-03",
+        "availableToolCount": 3,
+        "usedToolCount": 0,
+        "configFiles": [
+          "workspace-3/.vscode/mcp.json"
+        ]
+      },
+      {
+        "server": "zero-usage-04",
+        "availableToolCount": 4,
+        "usedToolCount": 0,
+        "extensionId": "sample.extension-4"
+      },
+      {
+        "server": "zero-usage-05",
+        "availableToolCount": 5,
+        "usedToolCount": 0,
+        "configFiles": [
+          "workspace-5/.vscode/mcp.json"
+        ]
+      },
+      {
+        "server": "zero-usage-06",
+        "availableToolCount": 6,
+        "usedToolCount": 0,
+        "extensionId": "sample.extension-6"
+      },
+      {
+        "server": "zero-usage-07",
+        "availableToolCount": 7,
+        "usedToolCount": 0,
+        "configFiles": [
+          "workspace-7/.vscode/mcp.json"
+        ]
+      },
+      {
+        "server": "zero-usage-08",
+        "availableToolCount": 8,
+        "usedToolCount": 0,
+        "extensionId": "sample.extension-8"
+      },
+      {
+        "server": "zero-usage-09",
+        "availableToolCount": 9,
+        "usedToolCount": 0,
+        "configFiles": [
+          "workspace-9/.vscode/mcp.json"
+        ]
+      },
+      {
+        "server": "zero-usage-10",
+        "availableToolCount": 10,
+        "usedToolCount": 0,
+        "extensionId": "sample.extension-10"
+      },
+      {
+        "server": "zero-usage-11",
+        "availableToolCount": 11,
+        "usedToolCount": 0,
+        "configFiles": [
+          "workspace-11/.vscode/mcp.json"
+        ]
+      },
+      {
+        "server": "zero-usage-12",
+        "availableToolCount": 0,
+        "usedToolCount": 0,
+        "extensionId": "sample.extension-12"
+      },
+      {
+        "server": "partly-used-config",
+        "availableToolCount": 4,
+        "usedToolCount": 1,
+        "configFiles": [
+          "workspace/.vscode/mcp.json"
+        ]
+      },
+      {
+        "server": "partly-used-extension",
+        "availableToolCount": 3,
+        "usedToolCount": 2,
+        "extensionId": "sample.partial-mcp"
+      },
+      {
+        "server": "fully-used-config",
+        "availableToolCount": 2,
+        "usedToolCount": 2,
+        "configFiles": [
+          "workspace/.mcp.json"
+        ]
+      }
+    ],
+    "underusedAgentPlugins": [
+      {
+        "pluginName": "sample-agent-plugin",
+        "availableSkillCount": 1,
+        "usedSkillCount": 0
+      }
+    ],
+    "estimatedPromptBloat": {
+      "totalTokens": 3240,
+      "byServer": {
+        "builtin": 980,
+        "skill": 720,
+        "zero-usage-01": 30,
+        "zero-usage-02": 60,
+        "zero-usage-03": 90,
+        "zero-usage-04": 120,
+        "zero-usage-05": 150,
+        "zero-usage-06": 180,
+        "zero-usage-07": 210,
+        "zero-usage-08": 240,
+        "zero-usage-09": 270,
+        "zero-usage-10": 300,
+        "zero-usage-11": 330,
+        "zero-usage-12": 360,
+        "partly-used-config": 390,
+        "partly-used-extension": 420,
+        "fully-used-config": 450
+      }
+    },
+    "recommendations": []
+  }
+
 }

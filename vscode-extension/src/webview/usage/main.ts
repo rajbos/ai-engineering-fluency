@@ -19,7 +19,7 @@ import {
 // Imported from the shared contract rather than re-declared locally, so a shape
 // change in src/types.ts surfaces here as a type error instead of silently
 // drifting out of sync with what the extension host actually sends.
-import type { AutomaticCompactionStats, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysisView, ServerMemoriesAnalysisView, RepoAgentActivityReport } from '../../../../src/types';
+import type { AutomaticCompactionStats, AvailableToolEntry, ContextPressureStats, ContextWindowStats, MemoryFilesAnalysisView, ServerMemoriesAnalysisView, RepoAgentActivityReport, ToolCurationAnalysis } from '../../../../src/types';
 import { CONTEXT_NEAR_LIMIT_RATIO } from '../../../../src/types';
 import { getSessionContextFillPercent, isSessionNearContextLimit } from '../../../../src/utils/contextFill';
 
@@ -54,6 +54,8 @@ import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from 
 import { createUsageWebviewReadyNotifier, restoreGitHubActivityPanels } from './readiness';
 import { sanitizeServerMemoriesAnalysis as _sanitizeServerMemoriesAnalysis, buildServerMemoriesSectionHtml } from './serverMemories';
 import { buildCorrectionsRepoSummaryHtml, buildParticipationModesCardHtml, buildRevertCellHtml, buildRevertHeaderHtml, sanitizeRepoActivity } from './agenticSignals';
+import { buildBuiltinToolsHtml, buildUnusedMcpHtml, buildUnusedSkillsHtml, renderCurationTable, type CurationTableId } from './toolCurationTables';
+import { getPagedTableAnnouncement, getPagedTableFocusTarget, restorePagedTableFocus, setPagedTableFilter, setPagedTablePage, setPagedTableSort } from './pagedTable';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -259,44 +261,6 @@ type UsageAnalysisStats = {
 	 */
 	claudeDesktopCoverage?: { knownSessions: number; withTranscript: number; missingTranscript: number } | null;
 };
-
-// ── Tool Curation types ──────────────────────────────────────────────────────
-// These mirror the interfaces in vscode-extension/src/types.ts.
-// They must be kept in sync manually because the webview bundle cannot import
-// extension-side TypeScript modules directly.
-
-type AvailableToolSource = 'builtin' | 'mcp' | 'extension' | 'skill';
-
-interface AvailableToolEntry {
-	name: string;
-	description: string;
-	source: AvailableToolSource;
-	server?: string;
-	extensionId?: string;
-	skillPath?: string;
-	pluginName?: string;
-	configFiles?: string[];
-	enabled?: boolean;
-	extensionActive?: boolean;
-}
-
-interface ToolCurationRecommendation {
-	type: 'disable-mcp-server' | 'disable-extension' | 'refine-skill' | 'remove-skill';
-	target: string;
-	reason: string;
-	estimatedTokenSavings?: number;
-}
-
-interface ToolCurationAnalysis {
-	windowDays: number;
-	availableTools: AvailableToolEntry[];
-	usedTools: { name: string; count: number }[];
-	unusedTools: AvailableToolEntry[];
-	underusedMcpServers: { server: string; availableToolCount: number; usedToolCount: number; configFiles?: string[]; extensionId?: string; enabled?: boolean; extensionActive?: boolean }[];
-	underusedAgentPlugins: { pluginName: string; availableSkillCount: number; usedSkillCount: number }[];
-	estimatedPromptBloat: { totalTokens: number; byServer: Record<string, number> };
-	recommendations: ToolCurationRecommendation[];
-}
 
 declare function acquireVsCodeApi<TState = unknown>(): {
 	postMessage: (message: unknown) => void;
@@ -3331,165 +3295,6 @@ function buildCurationSummaryHtml(availableTools: AvailableToolEntry[], unusedTo
 	</div>`;
 }
 
-type McpServerEntry = ToolCurationAnalysis['underusedMcpServers'][number];
-
-function _mcpSourceLabel(s: McpServerEntry): string {
-	if (s.extensionId) { return 'Extension'; }
-	if (!s.configFiles || s.configFiles.length === 0) { return 'Settings'; }
-	const labels = new Set<string>();
-	for (const f of s.configFiles) {
-		const p = f.replace(/\\/g, '/');
-		if (p.includes('/.vscode/')) { labels.add('Workspace'); }
-		else if (p.includes('/.vs/')) { labels.add('Workspace (VS)'); }
-		else if (p.includes('/.cursor/')) { labels.add('Workspace (Cursor)'); }
-		else if (p.endsWith('/.mcp.json')) { labels.add(p.split('/').slice(-2).join('/')); }
-		else { labels.add('Config file'); }
-	}
-	return [...labels].join(', ');
-}
-
-function _buildMcpSourceOpenBtn(s: McpServerEntry, sourceTip: string): string {
-	if (s.configFiles && s.configFiles.length === 1) {
-		return ` <button class="curation-file-btn" data-command="openFile" data-path="${escapeHtml(s.configFiles[0])}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open ${escapeHtml(s.configFiles[0])}">open</button>`;
-	}
-	if (s.configFiles && s.configFiles.length > 1) {
-		return ` <button class="curation-file-btn" data-command="openFileFromList" data-paths="${escapeHtml(JSON.stringify(s.configFiles))}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="${escapeHtml(sourceTip)}">open</button>`;
-	}
-	if (s.extensionId) {
-		return ` <button class="curation-file-btn" data-command="manageExtension" data-extension-id="${escapeHtml(s.extensionId)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open Extensions view for ${escapeHtml(s.extensionId)}">open</button>`;
-	}
-	return ` <button class="curation-file-btn" data-command="searchMcpExtensions" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Browse MCP extensions in the marketplace">open</button>`;
-}
-
-function _buildMcpActionCell(s: McpServerEntry): string {
-	if (s.extensionId) {
-		return `<button class="curation-file-btn" data-command="manageExtension" data-extension-id="${escapeHtml(s.extensionId)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open the Extensions view for ${escapeHtml(s.extensionId)} (disable or uninstall to reclaim prompt budget)">Manage Extension</button>`;
-	}
-	if (!s.configFiles || s.configFiles.length === 0) {
-		return `<button class="curation-file-btn" data-command="openToolPicker" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open VS Code tool selection menu">Change Tools</button>`;
-	}
-	if (s.configFiles.length === 1) {
-		return `<button class="curation-file-btn" data-command="openFile" data-path="${escapeHtml(s.configFiles[0])}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open ${escapeHtml(s.configFiles[0])}">Change Tools</button>`;
-	}
-	return `<button class="curation-file-btn" data-command="openFileFromList" data-paths="${escapeHtml(JSON.stringify(s.configFiles))}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Defined in ${s.configFiles.length} config files">Change Tools</button>`;
-}
-
-function _buildMcpServerRowHtml(s: McpServerEntry, bloat: ToolCurationAnalysis['estimatedPromptBloat']): string {
-	const b = bloat.byServer[s.server] ?? 0;
-	const sourceLabel = _mcpSourceLabel(s);
-	const sourceTip = s.configFiles?.join('\n') ?? s.extensionId ?? '';
-	const sourceOpenBtn = _buildMcpSourceOpenBtn(s, sourceTip);
-	const actionCell = _buildMcpActionCell(s);
-	const notConnected = s.availableToolCount === 0;
-	return `<tr class="${s.usedToolCount > 0 ? 'mcp-has-usage' : ''}">
-		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${escapeHtml(s.server)}</td>
-		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;" title="${escapeHtml(sourceTip)}">${escapeHtml(sourceLabel)}${sourceOpenBtn}</td>
-		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${notConnected ? '<em style="color:var(--text-secondary)">not connected</em>' : s.availableToolCount}</td>
-		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${notConnected ? '—' : s.usedToolCount}</td>
-		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${b > 0 ? `~${b.toLocaleString()} tokens` : '—'}</td>
-		<td style="padding:5px 8px; font-size:12px;">${actionCell}</td>
-	</tr>`;
-}
-
-function _buildMcpJsonLink(allServers: McpServerEntry[]): string {
-	const allConfigFiles = [...new Set(
-		allServers.filter(s => !s.extensionId).flatMap(s => s.configFiles ?? [])
-	)];
-	const preferredFile = allConfigFiles.find(f => f.replace(/\\/g, '/').endsWith('.vscode/mcp.json')) ?? allConfigFiles[0];
-	if (!preferredFile) { return `<code>.vscode/mcp.json</code>`; }
-	const displayName = preferredFile.replace(/\\/g, '/').split('/').slice(-3).join('/');
-	return `<button class="curation-file-btn" data-command="openFile" data-path="${escapeHtml(preferredFile)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="${escapeHtml(preferredFile)}">${escapeHtml(displayName)}</button>`;
-}
-
-function buildUnusedMcpHtml(underusedMcpServers: ToolCurationAnalysis['underusedMcpServers'], bloat: ToolCurationAnalysis['estimatedPromptBloat'], windowDays: number): string {
-	// Show all servers, zero-usage first, then partially used, then fully used.
-	const allServers = [...underusedMcpServers].sort((a, b) => {
-		const aKey = a.usedToolCount === 0 ? 0 : a.usedToolCount < a.availableToolCount ? 1 : 2;
-		const bKey = b.usedToolCount === 0 ? 0 : b.usedToolCount < b.availableToolCount ? 1 : 2;
-		return aKey !== bKey ? aKey - bKey : a.usedToolCount - b.usedToolCount;
-	});
-	if (allServers.length === 0) { return ''; }
-	const rows = allServers.map(s => _buildMcpServerRowHtml(s, bloat)).join('');
-	const mcpJsonLink = _buildMcpJsonLink(allServers);
-	const usedCount = allServers.filter(s => s.usedToolCount > 0).length;
-	const unusedCount = allServers.length - usedCount;
-	// Pure CSS checkbox trick: input and .mcp-table-wrap are siblings inside <details>;
-	// the :checked ~ sibling combinator works without any JS (inline handlers are CSP-blocked).
-	return `<details style="margin-top:12px;" open>
-		<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;">
-			🔌 MCP Servers in Last ${windowDays} Days (${allServers.length})
-		</summary>
-		<style>#mcp-hide-toggle:checked ~ .mcp-table-wrap .mcp-has-usage { display: none; }</style>
-		<div style="display:flex; align-items:center; gap:6px; margin:6px 0;">
-			<input type="checkbox" id="mcp-hide-toggle" checked style="margin:0; cursor:pointer; flex-shrink:0;">
-			<label for="mcp-hide-toggle" style="font-size:12px; color:var(--text-primary); cursor:pointer; user-select:none;">Hide servers with usage</label>
-			<span style="font-size:11px; color:var(--text-secondary);">${unusedCount} with no usage · ${usedCount} with usage</span>
-		</div>
-		<div class="mcp-table-wrap" style="margin-top:8px; overflow-x:auto;">
-			<table style="width:100%; border-collapse:collapse; font-size:12px;">
-				<thead><tr style="border-bottom:1px solid var(--border-color);">
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Server</th>
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Source</th>
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Tools Available</th>
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Tools Used</th>
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Est. Overhead</th>
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Action</th>
-				</tr></thead>
-				<tbody>${rows}</tbody>
-			</table>
-			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">💡 Open ${mcpJsonLink} to disable file-configured servers, or use <em>Manage Extension</em> to disable or uninstall an MCP-providing extension. (VS Code does not expose per-server picker state to extensions, so servers you disabled in the chat tool picker may still appear here.)</div>
-		</div>
-	</details>`;
-}
-
-function buildUnusedSkillsHtml(unusedSkills: AvailableToolEntry[]): string {
-	if (unusedSkills.length === 0) { return ''; }
-	const rows = unusedSkills.map(s => {
-		const skillFile = s.configFiles?.[0];
-		const viewLink = skillFile
-			? `<button class="curation-file-btn" data-command="openFile" data-path="${escapeHtml(skillFile)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:12px;text-decoration:underline;" title="Open ${escapeHtml(skillFile)}">View skill</button>`
-			: '—';
-		// Derive a human-readable source label. Plugin skills show the plugin name.
-		let sourceLabel = '—';
-		let manageBtn = '';
-		if (s.pluginName) {
-			sourceLabel = `Plugin: ${s.pluginName}`;
-			manageBtn = ` <button class="curation-file-btn" data-command="openAgentPlugins" data-plugin-name="${escapeHtml(s.pluginName)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open Extensions view filtered to agent plugins">manage</button>`;
-		} else if (s.skillPath) {
-			if (s.skillPath.startsWith('.github/skills')) { sourceLabel = 'Workspace (.github)'; }
-			else if (s.skillPath.startsWith('.claude/skills')) { sourceLabel = 'Workspace (.claude)'; }
-			else if (s.skillPath.startsWith('.agents/skills')) { sourceLabel = 'Workspace (.agents)'; }
-			else { sourceLabel = 'User (~)'; }
-		}
-		const estTokens = Math.round((s.name.length + s.description.length + 10) / 4);
-		return `<tr>
-		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${escapeHtml(s.name)}</td>
-		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${escapeHtml(sourceLabel)}${manageBtn}</td>
-		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(s.description)}">${escapeHtml(s.description)}</td>
-		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">~${estTokens.toLocaleString()} tokens</td>
-		<td style="padding:5px 8px; font-size:12px; white-space:nowrap;">${viewLink}</td>
-	</tr>`;
-	}).join('');
-	return `<details style="margin-top:8px;" open>
-		<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;">
-			📚 Unused Skills (${unusedSkills.length})
-		</summary>
-		<div style="margin-top:8px; overflow-x:auto;">
-			<table style="width:100%; border-collapse:collapse; font-size:12px;">
-				<thead><tr style="border-bottom:1px solid var(--border-color);">
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Skill</th>
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Source</th>
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Description</th>
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Est. Overhead</th>
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">View</th>
-				</tr></thead>
-				<tbody>${rows}</tbody>
-			</table>
-			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">💡 Est. overhead is per agent interaction. For plugin skills, click <em>manage</em> to open the agent plugins view where you can uninstall the plugin. For workspace skills, update the description or remove the SKILL.md.</div>
-		</div>
-	</details>`;
-}
-
 function buildUnderusedAgentPluginsHtml(underusedAgentPlugins: ToolCurationAnalysis['underusedAgentPlugins'], windowDays: number): string {
 	if (underusedAgentPlugins.length === 0) { return ''; }
 	const rows = underusedAgentPlugins.map(p => {
@@ -3525,36 +3330,6 @@ function buildUnderusedAgentPluginsHtml(underusedAgentPlugins: ToolCurationAnaly
 				<tbody>${rows}</tbody>
 			</table>
 			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">💡 Click <em>Manage Plugin</em> to open the Extensions view filtered to <code>@agentPlugins</code> where you can uninstall unused plugins to reclaim prompt budget.</div>
-		</div>
-	</details>`;
-}
-
-function buildBuiltinToolsHtml(builtinTools: AvailableToolEntry[], bloat: ToolCurationAnalysis['estimatedPromptBloat']): string {
-	if (builtinTools.length === 0) { return ''; }
-	const builtinBloat = bloat.byServer['builtin'] ?? 0;
-	const rows = builtinTools.map(t => {
-		const overhead = Math.round((t.name.length + (t.description?.length ?? 0) + 10) / 4);
-		return `<tr>
-			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${escapeHtml(t.name)}</td>
-			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(t.description ?? '')}">${escapeHtml(t.description ?? '—')}</td>
-			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">~${overhead} tokens</td>
-		</tr>`;
-	}).join('');
-	const fmt = (n: number) => n >= 1000 ? `~${Math.round(n / 1000)}K` : `~${n}`;
-	return `<details style="margin-top:12px;">
-		<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;">
-			🔧 Built-in VS Code Tools (${builtinTools.length}) — ${fmt(builtinBloat)} tokens overhead, not actionable
-		</summary>
-		<div style="margin-top:8px; overflow-x:auto;">
-			<table style="width:100%; border-collapse:collapse; font-size:12px;">
-				<thead><tr style="border-bottom:1px solid var(--border-color);">
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Tool</th>
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Description</th>
-					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Est. Overhead</th>
-				</tr></thead>
-				<tbody>${rows}</tbody>
-			</table>
-			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">💡 These tools are provided by VS Code itself and cannot be disabled. They are excluded from the actionable overhead total above.</div>
 		</div>
 	</details>`;
 }
@@ -3650,6 +3425,7 @@ function buildCurationSectionHtml(curation: ToolCurationAnalysis | null | undefi
 			<div id="section-tool-curation" class="section">
 				<div class="section-title"><span>✂️</span><span>Tool Curation</span></div>
 				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Compare available tools against actual usage to reduce prompt overhead (last ${windowDays} days)</div>
+				<span id="curation-table-status" class="paged-table-status" role="status" aria-live="polite" aria-atomic="true"></span>
 				${buildCurationSummaryHtml(availableTools, unusedTools, estimatedPromptBloat)}
 				${buildUnusedMcpHtml(underusedMcpServers, estimatedPromptBloat, windowDays)}
 				${buildUnderusedAgentPluginsHtml(underusedAgentPlugins, windowDays)}
@@ -4226,6 +4002,72 @@ function _handleCurationBtnClick(btn: HTMLButtonElement): void {
 	}
 }
 
+function isCurationTableId(value: string | null): value is CurationTableId {
+	return value === 'mcp' || value === 'builtin' || value === 'skills';
+}
+
+function rerenderCurationTable(tableId: CurationTableId, section: HTMLElement): void {
+	if (!currentCurationAnalysis) { return; }
+	const root = section.querySelector<HTMLElement>(`#paged-table-root-${tableId}`);
+	if (!root) { return; }
+	const focusTarget = getPagedTableFocusTarget(root, document.activeElement);
+	const staging = document.createElement('div');
+	setHtml(staging, renderCurationTable(tableId, currentCurationAnalysis));
+	const replacement = staging.firstElementChild;
+	if (replacement instanceof HTMLElement) {
+		const sorted = Boolean(focusTarget?.kind === 'sort');
+		const announcement = getPagedTableAnnouncement(replacement, sorted);
+		root.replaceWith(replacement);
+		restorePagedTableFocus(replacement, focusTarget);
+		const status = section.querySelector<HTMLElement>('#curation-table-status');
+		if (status) { status.textContent = announcement; }
+	}
+}
+
+function handleCurationSort(target: Element, section: HTMLElement): boolean {
+	const button = target.closest<HTMLButtonElement>('[data-paged-sort]');
+	if (!button) { return false; }
+	const tableId = button.getAttribute('data-paged-table');
+	const columnId = button.getAttribute('data-paged-sort');
+	if (isCurationTableId(tableId) && columnId) {
+		setPagedTableSort(tableId, columnId);
+		rerenderCurationTable(tableId, section);
+	}
+	return true;
+}
+
+function handleCurationPage(target: Element, section: HTMLElement): boolean {
+	const button = target.closest<HTMLButtonElement>('[data-paged-page]');
+	if (!button) { return false; }
+	const tableId = button.getAttribute('data-paged-table');
+	const page = Number(button.getAttribute('data-paged-page'));
+	if (isCurationTableId(tableId) && Number.isFinite(page)) {
+		setPagedTablePage(tableId, page);
+		rerenderCurationTable(tableId, section);
+	}
+	return true;
+}
+
+function handleCurationFilter(target: Element, section: HTMLElement): boolean {
+	const input = target.closest<HTMLInputElement>('[data-paged-table-filter]');
+	if (!input) { return false; }
+	const tableId = input.getAttribute('data-paged-table');
+	const filterId = input.getAttribute('data-paged-table-filter');
+	if (isCurationTableId(tableId) && filterId) {
+		setPagedTableFilter(tableId, filterId, input.checked);
+		rerenderCurationTable(tableId, section);
+	}
+	return true;
+}
+
+function handleCurationClick(event: Event, section: HTMLElement): void {
+	const target = event.target;
+	if (!(target instanceof Element)) { return; }
+	if (handleCurationSort(target, section) || handleCurationPage(target, section) || handleCurationFilter(target, section)) { return; }
+	const button = target.closest<HTMLButtonElement>('.curation-file-btn');
+	if (button) { _handleCurationBtnClick(button); }
+}
+
 function wireCurationButtons(): void {
 	try {
 		const section = document.getElementById('section-tool-curation');
@@ -4233,16 +4075,15 @@ function wireCurationButtons(): void {
 			traceCurationOnce('wire-no-section', 'wireCurationButtons.noSection');
 			return;
 		}
-		const buttons = section.querySelectorAll<HTMLButtonElement>('.curation-file-btn');
-		traceCuration('wireCurationButtons.bind', { buttons: buttons.length });
-		buttons.forEach(btn => {
-			btn.addEventListener('click', () => {
-				try {
-					_handleCurationBtnClick(btn);
-				} catch (error) {
-					traceCuration('wireCurationButtons.clickError', { error: error instanceof Error ? error.message : String(error) });
-				}
-			});
+		if (section.dataset.curationInteractionsWired === 'true') { return; }
+		section.dataset.curationInteractionsWired = 'true';
+		traceCuration('wireCurationButtons.bind', { buttons: section.querySelectorAll('.curation-file-btn').length });
+		section.addEventListener('click', event => {
+			try {
+				handleCurationClick(event, section);
+			} catch (error) {
+				traceCuration('wireCurationButtons.clickError', { error: error instanceof Error ? error.message : String(error) });
+			}
 		});
 	} catch (error) {
 		traceCuration('wireCurationButtons.error', { error: error instanceof Error ? error.message : String(error) });

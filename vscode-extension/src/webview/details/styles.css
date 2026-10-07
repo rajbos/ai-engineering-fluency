@@ -37,20 +37,6 @@ body {
 	color: var(--text-primary);
 }
 
-.plan-badge {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	align-self: flex-start;
-	background: var(--bg-tertiary);
-	border: 1px solid var(--border-subtle);
-	border-radius: 999px;
-	padding: 2px 10px;
-	font-size: 11px;
-	color: var(--text-secondary);
-	cursor: help;
-}
-
 .provider-panel-hint {
 	color: var(--text-secondary);
 	font-size: 11px;

@@ -298,9 +298,12 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 	}
 	const fmtKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-	const buildPeriodFromEntries = (buckets: Array<{ label: string; entry: DailyEntry }>) => {
+	const buildPeriodFromEntries = (buckets: Array<{ label: string; key: string; entry: DailyEntry }>) => {
 		const entries = buckets.map(b => b.entry);
 		const bLabels = buckets.map(b => b.label);
+		// Sortable bucket keys (YYYY-MM-DD day / week-start, YYYY-MM month). The chart webview
+		// filters each period by time window on these, and throws without them.
+		const periodKeys = buckets.map(b => b.key);
 		const tokensData = entries.map(e => e.tokens);
 		const sessionsData = entries.map(e => e.sessions);
 
@@ -383,7 +386,7 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 			};
 		});
 
-		return { labels: bLabels, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets: [], periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod, editorCostDatasets, billingGroupCostDatasets };
+		return { labels: bLabels, periodKeys, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets: [], periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod, editorCostDatasets, billingGroupCostDatasets };
 	};
 
 	const mergeEntry = (target: DailyEntry, src: DailyEntry) => {
@@ -409,7 +412,7 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 	const now = new Date();
 
 	// ── Daily period: the existing 30-day data ──────────────────────────
-	const dailyBuckets = labels.map((l, i) => ({ label: l, entry: days[i] }));
+	const dailyBuckets = labels.map((l, i) => ({ label: l, key: l, entry: days[i] }));
 	const dailyPeriod = buildPeriodFromEntries(dailyBuckets);
 
 	// ── Weekly period: last 6 calendar weeks ───────────────────────────
@@ -427,11 +430,11 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 		return `${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${sunday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 	};
 	const thisMonday = getMondayOfWeek(now);
-	const weekBucketMap = new Map<string, { label: string; entry: DailyEntry }>();
+	const weekBucketMap = new Map<string, { label: string; key: string; entry: DailyEntry }>();
 	for (let w = 5; w >= 0; w--) {
 		const monday = new Date(thisMonday); monday.setDate(thisMonday.getDate() - w * 7);
 		const key = fmtKey(monday);
-		weekBucketMap.set(key, { label: fmtWeekLabel(monday), entry: emptyEntry() });
+		weekBucketMap.set(key, { label: fmtWeekLabel(monday), key, entry: emptyEntry() });
 	}
 	const sourceMap = allDaysMap || new Map(labels.map((l, i) => [l, days[i]]));
 	for (const [dateKey, entry] of sourceMap.entries()) {
@@ -443,12 +446,12 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 	const weeklyPeriod = buildPeriodFromEntries(weeklyBuckets);
 
 	// ── Monthly period: last 12 calendar months ────────────────────────
-	const monthBucketMap = new Map<string, { label: string; entry: DailyEntry }>();
+	const monthBucketMap = new Map<string, { label: string; key: string; entry: DailyEntry }>();
 	for (let m = 11; m >= 0; m--) {
 		const monthDate = new Date(now.getFullYear(), now.getMonth() - m, 1);
 		const key = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
 		const label = monthDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-		monthBucketMap.set(key, { label, entry: emptyEntry() });
+		monthBucketMap.set(key, { label, key, entry: emptyEntry() });
 	}
 	for (const [dateKey, entry] of sourceMap.entries()) {
 		const monthKey = dateKey.slice(0, 7);

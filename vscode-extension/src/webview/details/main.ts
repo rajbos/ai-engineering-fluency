@@ -56,12 +56,6 @@ last30Days: PeriodStats;
 lastUpdated: string | Date;
 backendConfigured?: boolean;
 compactNumbers?: boolean;
-copilotPlan?: {
-planId: string;
-planName: string;
-monthlyAiCreditsUsd: number;
-monthlyPremiumRequests: number | null;
-};
 sortSettings?: {
 editor?: { key?: string; dir?: string };
 model?: { key?: string; dir?: string };
@@ -305,10 +299,6 @@ const container = el('div', 'container');
 const header = el('div', 'header');
 const headerLeft = el('div', 'header-left');
 headerLeft.append(el('div', 'title', 'AI Engineering Fluency'));
-const planBadge = buildPlanBadge(stats);
-if (planBadge) {
-headerLeft.append(planBadge);
-}
 const buttonRow = el('div', 'button-row');
 
 buttonRow.append(...getNavButtons('btn-details', !!stats.backendConfigured).map(config => createButton(config)));
@@ -384,19 +374,6 @@ function buildCachedTokenRow(stats: DetailedStats): MetricRow[] {
 		return [];
 	}
 	return [{ label: 'Cached tokens', labelTooltip: 'Cache-read tokens — already included in "Input tokens" above, shown separately because they are billed at a lower rate.', icon: '⚡', color: '#34d399', today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), month: formatCompact(stats.month.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: '—' }];
-}
-
-/**
- * Renders the active Copilot plan as a small badge shown under the header
- * title (plan name + monthly credits) instead of a metrics-table row.
- */
-function buildPlanBadge(stats: DetailedStats): HTMLElement | null {
-	if (!stats.copilotPlan) { return null; }
-	const plan = stats.copilotPlan;
-	const credits = plan.monthlyAiCreditsUsd > 0 ? `$${plan.monthlyAiCreditsUsd} credits/month` : 'no credits';
-	const badge = el('div', 'plan-badge', `🏷️ ${plan.planName} · ${credits}`);
-	badge.title = `Your active GitHub Copilot subscription plan (ID: ${plan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`;
-	return badge;
 }
 
 type MetricGroup = { heading: string; rows: MetricRow[] };

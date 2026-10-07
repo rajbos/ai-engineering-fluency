@@ -11,6 +11,7 @@ All notable changes to the VS Code extension will be documented in this file.
   - **Repository PRs → Cloud agent PRs reverted:** reverted / merged for cloud-agent PRs, with everyone else's revert rate as the baseline. Found in the PR list already fetched, so no extra GitHub API calls; a lower bound.
   - **Insights → How you work with agents:** your turns split into director, performer and assessor, flagging heavy delegation with little checking.
   - Four new insights: more agent use with more rework, agent sessions started without a stated goal needing more corrections, agent PRs without confirmed human review, and rising cloud-agent PR load with reverts or rework. The "add instructions" insight now cites your own with/without numbers when they qualify.
+- Tool Curation's MCP server, built-in tool and unused-skill tables can now be sorted and browsed in 10-row pages; the MCP usage filter is applied before pagination, and table controls keep working after refreshes (#2303, #2285)
 
 ## [0.19.0] - 2026-10-02
 
