@@ -38,6 +38,12 @@ new_repo importfresh; git mv src/oldName.ts src/newName.ts; echo "import { n } f
 new_repo moveIn;    mkdir -p examples; git mv src/oldName.ts examples/oldName.ts; commit; git mv examples/oldName.ts src/moved.ts; commit; expect "move from outside src/ into src/" 1
 new_repo samebase;  mkdir -p src/first src/second; echo 'export const T = 1;' > src/first/types.ts; echo 'export const T = 2;' > src/second/types.ts; echo "import { T } from './first/types';" > src/use.ts; git add -A; git commit -qm more; sed -i "s#./first/types#./second/types#" src/use.ts; commit; expect "same-basename module swap" 1
 new_repo extswap;   echo 'export const T = 1;' > src/mod.js; echo 'export const T = 2;' > src/mod.ts; echo "import { T } from './mod.js';" > src/use.ts; git add -A; git commit -qm more; sed -i "s#./mod.js#./mod.ts#" src/use.ts; commit; expect "explicit extension swap .js -> .ts" 1
+new_repo posexp;    printf "export { a } from './oldName';
+" > src/user.ts; git add -A; git commit -qm more; git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./newName#" src/user.ts; commit; expect "export-from path update after rename" 0
+new_repo posreq;    printf "const o = require('./oldName');
+" > src/user.ts; git add -A; git commit -qm more; git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./newName#" src/user.ts; commit; expect "require path update after rename" 0
+new_repo aboveroot; printf "import { s } from '../../shared';
+" > src/user.ts; git add -A; git commit -qm more; sed -i "s#../../shared#../../../shared#" src/user.ts; commit; expect "parent path beyond repo root" 1
 new_repo importer;  git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./newName#" src/user.ts; commit; expect "rename + importer path update" 0
 new_repo importbad; git mv src/oldName.ts src/newName.ts; sed -i "s#./oldName#./elsewhere#" src/user.ts; commit; expect "import swapped to non-renamed module" 1
 new_repo plain;     echo 'export const x = 1;' >> src/a.ts; commit;                     expect "plain source change, no test" 1

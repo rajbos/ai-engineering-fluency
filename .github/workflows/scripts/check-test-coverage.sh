@@ -125,7 +125,11 @@ collapse_path() {
   for seg in $1; do
     case "$seg" in
       ""|.) ;;
-      ..) [ "${#out[@]}" -gt 0 ] && unset 'out[${#out[@]}-1]' ;;
+      ..) if [ "${#out[@]}" -gt 0 ] && [ "${out[${#out[@]}-1]}" != ".." ]; then
+           unset 'out[${#out[@]}-1]'
+         else
+           out+=("..")   # keep parents above the repo root so they stay distinct
+         fi ;;
       *) out+=("$seg") ;;
     esac
   done
