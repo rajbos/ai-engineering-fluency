@@ -111,7 +111,10 @@ IMPORT_LINE_RE="^\+[[:space:]]*(import[[:space:]]+(type[[:space:]]+)?([^;='\"]+[
 # diff_lines <+|-> <old-or-empty> <path>: added or removed lines of one file's diff.
 diff_lines() {
   local sign="$1"
-  git diff -M -U0 --no-ext-diff "${RANGE[@]}" -- ${2:+"$2"} "$3"     | grep "^[$sign]" | grep -Ev "^[$sign]{3} " || true
+  # Only records inside @@ hunks: a content line that merely starts with "++ "
+  # or "-- " (shown as "+++ "/"--- ") must not be mistaken for a file header.
+  git diff -M -U0 --no-ext-diff "${RANGE[@]}" -- ${2:+"$2"} "$3" \
+    | awk -v s="$sign" '/^@@/ {h=1; next} h && substr($0,1,1)==s {print}'
 }
 
 # strip_ext <path>: drop a trailing extension from the last path segment.
@@ -136,17 +139,32 @@ collapse_path() {
   printf '%s' "${out[*]}"
 }
 
-# "<new path> <old path>" for each file renamed in this PR, both with the
-# extension (explicit imports) and without it (extensionless imports), plus the
-# directory itself for renamed index modules (directory imports).
+# Every "<path-without-extension> <path>" in the base and head trees. An
+# extensionless or directory import is only mapped through a rename when no
+# other file competes for the same stem (old.ts vs old.js, adapters.ts vs
+# adapters/index.ts): module resolution order is then ambiguous, so the
+# exemption is declined and a test is required.
+STEMS="$( { git ls-tree -r --name-only "$BASE_SHA"; git ls-tree -r --name-only "$HEAD_SHA"; } 2>/dev/null \
+  | sort -u | awk '{ s=$0; if (s ~ /\.[^.\/]*$/) sub(/\.[^.\/]*$/, "", s); printf "%s\t%s\n", s, $0 }' || true )"
+# stem_is_unique <stem> <path>: no file other than <path> has this stem.
+stem_is_unique() {
+  ! printf '%s\n' "$STEMS" | awk -F'\t' -v s="$1" -v x="$2" '$1==s && $2!=x {f=1} END {exit !f}'
+}
+
+# "<new path> <old path>" for each file renamed in this PR: with the extension
+# (explicit imports), without it (extensionless imports) and, for renamed index
+# modules, the directory itself (directory imports).
 RENAME_MAP=""
 for i in "${!REC_PATH[@]}"; do
   if [ -n "${REC_OLD[$i]}" ]; then
-    RENAME_MAP="${RENAME_MAP}${REC_PATH[$i]} ${REC_OLD[$i]}"$'\n'
-    RENAME_MAP="${RENAME_MAP}$(strip_ext "${REC_PATH[$i]}") $(strip_ext "${REC_OLD[$i]}")"$'\n'
-    # A renamed index module is also what a directory import resolves to.
-    if [[ "$(strip_ext "$(basename "${REC_PATH[$i]}")")" == index && "$(strip_ext "$(basename "${REC_OLD[$i]}")")" == index ]]; then
-      RENAME_MAP="${RENAME_MAP}$(dirname "${REC_PATH[$i]}") $(dirname "${REC_OLD[$i]}")"$'\n'
+    np="${REC_PATH[$i]}"; op="${REC_OLD[$i]}"
+    RENAME_MAP="${RENAME_MAP}${np} ${op}"$'\n'
+    if stem_is_unique "$(strip_ext "$np")" "$np" && stem_is_unique "$(strip_ext "$op")" "$op"; then
+      RENAME_MAP="${RENAME_MAP}$(strip_ext "$np") $(strip_ext "$op")"$'\n'
+      if [[ "$(strip_ext "$(basename "$np")")" == index && "$(strip_ext "$(basename "$op")")" == index ]] \
+         && stem_is_unique "$(dirname "$np")" "" && stem_is_unique "$(dirname "$op")" ""; then
+        RENAME_MAP="${RENAME_MAP}$(dirname "$np") $(dirname "$op")"$'\n'
+      fi
     fi
   fi
 done
