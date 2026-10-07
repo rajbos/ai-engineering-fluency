@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import type { ModelUsage, ChatTurn } from '../types';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
 import { ClaudeCodeDataAccess, normalizeClaudeModelId } from '../claudecode';
+import { recordAutonomy } from '../autonomy';
+import { isHumanUserTurn } from '../utils/claudeUserTurns';
 import { readClaudeCodeEventsForAnalysis, createEmptySessionUsageAnalysis, applyModelTierClassification, addSkillCall } from '../usageAnalysis';
 import { isMcpTool, extractMcpServerName, detectClaudeCodeEditorVariant } from '../workspaceHelpers';
 import { detectCacheBreakage, type CacheTurn } from '../cacheBreakage';
@@ -327,6 +329,8 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		} else {
 			analysis.modeUsage[modeBucket] = (analysis.modeUsage[modeBucket] ?? 0) + 1;
 		}
+		// Only real human prompts count; tool results and synthetic wrapper events also carry permissionMode.
+		if (isHumanUserTurn(event)) { recordAutonomy(analysis, event.permissionMode); }
 		const cmd = extractClaudeSlashCommand(event.message?.content);
 		if (cmd) {
 			const key = `__slash__${cmd}`;
