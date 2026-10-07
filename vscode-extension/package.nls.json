@@ -135,7 +135,6 @@
   "tooltip.waterLabel": "Water estimated",
   "tooltip.costsByProvider": "Costs by Provider — Current Month",
   "tooltip.shareOfTotalSpend": "Share of total spend",
-  "tooltip.budgetFromSource": "Budget from {0}",
   "tooltip.copilotBudgetLabel": "Copilot Budget",
   "tooltip.budgetRemaining": "{0} left",
   "tooltip.budgetOverBy": "{0} over",

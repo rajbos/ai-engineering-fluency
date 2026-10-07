@@ -937,7 +937,7 @@ export interface CopilotBudgetGauge {
 /**
  * Formats the "💰 Costs by Provider" table for the status bar hover tooltip: the Copilot Budget
  * gauge and its sub-rows on top (when a budget is set), then every provider's share of total
- * monthly spend, then the footnote naming the budget's source.
+ * monthly spend.
  *
  * The section title doubles as the table's header row. A title line above an empty `|  |  |  |`
  * header left a blank band between the two, wasting vertical space in a popup narrow enough that
@@ -967,9 +967,6 @@ export function formatProviderCostTable(
 	for (const provider of providers) {
 		const cost = monthCosts[provider] ?? 0;
 		markdown += `| ${pad(provider)} | ${pad(`$${cost.toFixed(2)}`)} | ${shareBarCell(totalCost > 0 ? cost / totalCost : 0)} |\n`;
-	}
-	if (gauge) {
-		markdown += `\n*${l10n.t('tooltip.budgetFromSource', gauge.source)}*\n`;
 	}
 	return markdown;
 }
