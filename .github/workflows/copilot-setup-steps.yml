@@ -304,14 +304,14 @@ jobs:
 
           echo "Listing blobs in container: $AZURE_STORAGE_CONTAINER, dataset: $AZURE_DATASET_ID"
 
-          # Blob layout: {dataset}/{machine-id}/{date}/{session}.json.gz
+          # Blob layout: {dataset}/{machine-id}/{date}/{session}.{json,jsonl}.gz (newer uploads are .jsonl)
           # List once (with metadata, for the editor-type manifest) so only the
           # date folders inside the window are downloaded, not the whole history.
           if ! az storage blob list \
             --account-name "$AZURE_STORAGE_ACCOUNT" \
             --container-name "$AZURE_STORAGE_CONTAINER" \
             --prefix "${AZURE_DATASET_ID}/" \
-            --include metadata \
+            --include m \
             --num-results '*' \
             --auth-mode "$AUTH_MODE" \
             --only-show-errors \
@@ -329,7 +329,7 @@ jobs:
             const { START_DATE, END_DATE } = process.env;
             const selected = blobs.filter(b => {
               const parts = b.name.split('/');
-              return parts.length === 4 && b.name.endsWith('.json.gz') && parts[2] >= START_DATE && parts[2] <= END_DATE;
+              return parts.length === 4 && b.name.endsWith('.gz') && parts[2] >= START_DATE && parts[2] <= END_DATE;
             });
             const manifest = {};
             for (const b of selected) {
@@ -348,14 +348,14 @@ jobs:
               --account-name "$AZURE_STORAGE_ACCOUNT" \
               --source "$AZURE_STORAGE_CONTAINER" \
               --destination ./session-logs \
-              --pattern "${AZURE_DATASET_ID}/*/${DAY}/*.json.gz" \
+              --pattern "${AZURE_DATASET_ID}/*/${DAY}/*.gz" \
               --auth-mode "$AUTH_MODE" \
               --no-progress --only-show-errors > /dev/null || \
               echo "::warning::Failed to download session logs for $DAY, continuing"
           done
 
           # Count downloaded files
-          FILE_COUNT=$(find ./session-logs -name "*.json.gz" | wc -l)
+          FILE_COUNT=$(find ./session-logs -name "*.gz" | wc -l)
           echo "✅ Downloaded $FILE_COUNT session log files"
           if [ "$FILE_COUNT" -eq 0 ]; then
             echo "::warning::No session logs for dataset '$AZURE_DATASET_ID' between $START_DATE and $END_DATE - check COPILOT_DATASET_ID"
@@ -373,7 +373,7 @@ jobs:
         run: |
           if [ -d ./session-logs ]; then
             echo "📊 Session log summary:"
-            echo "Total files: $(find ./session-logs -name "*.json" ! -name ".editor-types.json" | wc -l)"
+            echo "Total files: $(find ./session-logs -type f ! -name ".editor-types.json" | wc -l)"
             if [ -f ./session-logs/.editor-types.json ]; then
               echo "Editor types: $(node -e "const m=require('./session-logs/.editor-types.json'); const counts={}; for(const v of Object.values(m)) counts[v]=(counts[v]||0)+1; console.log(Object.entries(counts).map(([k,v])=>k+': '+v).join(', '))")"
             fi
