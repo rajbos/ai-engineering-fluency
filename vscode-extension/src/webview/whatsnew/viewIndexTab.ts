@@ -81,10 +81,10 @@ function buildNode(node: ViewIndexNode, depth: number, ctx: RenderContext): HTML
 	// While searching everything on the path to a match is open; otherwise honour the user's toggles.
 	const expanded = ctx.visible ? true : state.toggled[node.id] ?? isExpandedByDefault(node, depth);
 
+	// Nested lists with disclosure buttons rather than role="tree": a tree promises
+	// arrow-key navigation, while plain buttons work with Tab like everything else.
 	const item = el('li', `index-item depth-${Math.min(depth, 3)}`);
-	item.setAttribute('role', 'treeitem');
 	item.dataset.entryId = node.id;
-	if (hasChildren) { item.setAttribute('aria-expanded', String(expanded)); }
 	if (ctx.visible && !ctx.matched.has(node.id)) { item.classList.add('index-context'); }
 
 	const row = el('div', 'index-row');
@@ -93,6 +93,7 @@ function buildNode(node: ViewIndexNode, depth: number, ctx: RenderContext): HTML
 	if (hasChildren) {
 		toggle.append(el('span', `codicon codicon-chevron-${expanded ? 'down' : 'right'}`));
 		toggle.setAttribute('aria-label', localizeFormat(expanded ? 'viewIndex.collapse' : 'viewIndex.expand', node.title));
+		toggle.setAttribute('aria-expanded', String(expanded));
 		toggle.addEventListener('click', () => {
 			state.toggled[node.id] = !expanded;
 			saveState();
@@ -124,7 +125,8 @@ function buildNode(node: ViewIndexNode, depth: number, ctx: RenderContext): HTML
 
 	if (hasChildren && expanded) {
 		const list = el('ul', 'index-children');
-		list.setAttribute('role', 'group');
+		list.id = `index-children-${node.id}`;
+		toggle.setAttribute('aria-controls', list.id);
 		list.append(...children);
 		item.append(list);
 	}
@@ -160,7 +162,6 @@ function renderTree(container: HTMLElement, status: HTMLElement, post: PostMessa
 	};
 
 	const tree = el('ul', 'index-tree');
-	tree.setAttribute('role', 'tree');
 	tree.setAttribute('aria-label', localize('viewIndex.treeLabel'));
 	VIEW_INDEX.forEach((view) => {
 		const node = buildNode(view, 0, ctx);
