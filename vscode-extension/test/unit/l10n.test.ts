@@ -1726,3 +1726,10 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 		mock.setLanguage('en');
 	}
 });
+
+test('worktree cleanup delete-feedback keys resolve to their English text', () => {
+	assert.equal(t('usage.worktreeCleanup.deleted'), '✅ Deleted');
+	assert.equal(t('usage.worktreeCleanup.sizeChip'), 'Size: {0}');
+	assert.equal(t('usage.worktreeCleanup.deleteFailed'), '❌ Delete failed: {0}');
+	assert.equal(t('usage.worktreeCleanup.revealMissing'), '"{0}" no longer exists on disk.');
+});

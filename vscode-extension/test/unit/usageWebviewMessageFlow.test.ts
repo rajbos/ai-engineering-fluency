@@ -668,7 +668,7 @@ test('clicking "Open in VS Code" asks the host to open that worktree folder', as
 
 test('"Delete anyway" shows size, then progress, then the final state on the row', async () => {
 	const harness = await bootWebview(buildStats());
-	const worktreePath = 'C:\wt\big';
+	const worktreePath = 'C:\\wt\\big';
 
 	harness.post({ command: 'cleanupStarted', total: 1 });
 	harness.post({
@@ -691,6 +691,27 @@ test('"Delete anyway" shows size, then progress, then the final state on the row
 
 	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'deleted' });
 	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Deleted'), 'expected the final deleted state');
+});
+
+test('a new cleanup run does not inherit the previous run\'s "Delete anyway" state', async () => {
+	const harness = await bootWebview(buildStats());
+	const worktreePath = 'C:\\wt\\again';
+	const result = {
+		command: 'cleanupWorktreeResult', path: worktreePath, branch: 'again', repoLabel: 'repo',
+		status: 'error', reason: 'Could not delete worktree.', processed: 1, total: 1,
+	};
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post(result);
+	harness.post({ command: 'cleanupComplete' });
+	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'deleted' });
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Deleted'));
+
+	harness.post({ command: 'cleanupStarted', total: 1 });
+	harness.post(result);
+	harness.post({ command: 'cleanupComplete' });
+	assert.ok(!harness.text('.worktree-cleanup-log')?.includes('✅ Deleted'), 'stale deleted state leaked into the new run');
+	assert.ok(harness.window.document.querySelector('.worktree-delete-btn'), 'the fresh row offers Delete anyway again');
 });
 
 test('accepts payloads relayed the way VS Code actually delivers them', async () => {

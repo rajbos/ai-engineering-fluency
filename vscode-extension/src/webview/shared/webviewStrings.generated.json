@@ -356,5 +356,11 @@
   "usage.toolCuration.summary.unusedSkills": "📚 Unused Skills ({0})",
   "usage.toolCuration.help.unusedSkills": "💡 Est. overhead is per agent interaction. For plugin skills, click <em>{0}</em> to open the agent plugins view where you can uninstall the plugin. For workspace skills, update the description or remove the SKILL.md.",
   "usage.toolCuration.summary.builtin": "🔧 Built-in VS Code Tools ({0}) — {1} tokens overhead, not actionable",
-  "usage.toolCuration.help.builtin": "💡 These tools are provided by VS Code itself and cannot be disabled. They are excluded from the actionable overhead total above."
+  "usage.toolCuration.help.builtin": "💡 These tools are provided by VS Code itself and cannot be disabled. They are excluded from the actionable overhead total above.",
+  "usage.worktreeCleanup.sizeChip": "Size: {0}",
+  "usage.worktreeCleanup.sizeChipTitle": "{0} bytes on disk",
+  "usage.worktreeCleanup.deleting": "⏳ Deleting worktree{0}…",
+  "usage.worktreeCleanup.deleted": "✅ Deleted",
+  "usage.worktreeCleanup.deleteFailed": "❌ Delete failed: {0}",
+  "usage.worktreeCleanup.unknownError": "unknown error"
 }

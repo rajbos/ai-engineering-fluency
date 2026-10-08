@@ -13089,7 +13089,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       try {
         await fsModule.promises.stat(normalized);
       } catch {
-        vscode.window.showWarningMessage(`"${normalized}" no longer exists on disk.`);
+        vscode.window.showWarningMessage(l10n.t('usage.worktreeCleanup.revealMissing', normalized));
         return;
       }
       // revealFileInOS works for folders and files alike; openExternal on a folder URI is
