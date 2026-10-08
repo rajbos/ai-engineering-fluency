@@ -820,5 +820,12 @@
   "usage.toolCuration.summary.unusedSkills": "📚 未使用的技能（{0}）",
   "usage.toolCuration.help.unusedSkills": "💡 估算开销按每次智能体交互计算。对于插件技能，点击 <em>{0}</em> 打开智能体插件视图并卸载插件。对于工作区技能，请更新说明或移除 SKILL.md。",
   "usage.toolCuration.summary.builtin": "🔧 内置 VS Code 工具（{0}）— {1} 个令牌开销，不可操作",
-  "usage.toolCuration.help.builtin": "💡 这些工具由 VS Code 自身提供，无法禁用。它们不计入上方可操作的开销总量。"
+  "usage.toolCuration.help.builtin": "💡 这些工具由 VS Code 自身提供，无法禁用。它们不计入上方可操作的开销总量。",
+  "usage.worktreeCleanup.sizeChip": "大小：{0}",
+  "usage.worktreeCleanup.sizeChipTitle": "磁盘占用 {0} 字节",
+  "usage.worktreeCleanup.deleting": "⏳ 正在删除工作树{0}…",
+  "usage.worktreeCleanup.deleted": "✅ 已删除",
+  "usage.worktreeCleanup.deleteFailed": "❌ 删除失败：{0}",
+  "usage.worktreeCleanup.unknownError": "未知错误",
+  "usage.worktreeCleanup.revealMissing": "“{0}”在磁盘上已不存在。"
 }
