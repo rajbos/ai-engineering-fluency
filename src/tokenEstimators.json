@@ -100,6 +100,7 @@
     "gpt-6-sol": 0.25,
     "claude-opus-5.5": 0.24,
     "claude-sonnet-5.5": 0.24,
-    "gpt-6.1-sol": 0.25
+    "gpt-6.1-sol": 0.25,
+    "claude-haiku-5.5": 0.24
   }
 }
