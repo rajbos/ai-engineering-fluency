@@ -936,6 +936,12 @@ last30Days: UsageAnalysisPeriod;
 month: UsageAnalysisPeriod;
 /** Previous calendar month (full month). */
 lastMonth: UsageAnalysisPeriod;
+/**
+ * Per-tool, per-editor call counts for the last 30 days (tool name -> editor display name -> calls).
+ * Covers general tools, MCP tools and MCP server names; used to tell maintainers which editor an
+ * unknown tool was seen in when reporting it.
+ */
+toolCallsByEditor?: { [toolName: string]: { [editorSource: string]: number } };
 locale?: string;
 lastUpdated: Date;
 customizationMatrix?: WorkspaceCustomizationMatrix;

@@ -151,6 +151,7 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 	assert.equal(t('command.showReadiness.title'), 'Show AI Readiness');
 	assert.equal(t('nav.btnReadiness'), 'AI Readiness');
 	assert.equal(t('readiness.loading'), 'Scanning repository controls…');
+	assert.equal(t('readiness.refreshing'), 'Showing the last scan while a fresh one runs…');
 	assert.equal(t('readiness.scanFailed'), 'Could not scan repository readiness. Check the AI Engineering Fluency output for details, then try Refresh.');
 	assert.equal(t('whatsNew.release.0.18.1.headline'), 'A maintenance release: friendly tool names, localization groundwork, and a Mistral Vibe cost-attribution fix. No new screens.');
 	assert.equal(t('whatsNew.release.0.18.2.headline'), 'See which repository controls are in place, and which still need evidence, in the new AI Readiness tab.');
@@ -165,6 +166,7 @@ test('l10n: AI Readiness command and navigation labels resolve in both languages
 		assert.equal(t('command.showReadiness.title'), '显示 AI 就绪度');
 		assert.equal(t('nav.btnReadiness'), 'AI 就绪度');
 		assert.equal(t('readiness.loading'), '正在扫描仓库控制措施…');
+		assert.equal(t('readiness.refreshing'), '正在显示上次扫描结果，同时重新扫描…');
 		assert.equal(t('readiness.scanFailed'), '无法扫描仓库就绪度。请查看 AI 工程熟练度输出中的详细信息，然后重试刷新。');
 		assert.equal(t('whatsNew.release.0.18.1.headline'), '一个维护版本：友好的工具名称、本地化基础工作，以及一个 Mistral Vibe 成本归因修复。没有新增界面。');
 		assert.equal(t('whatsNew.release.0.18.2.headline'), '在新的 AI 就绪度标签页中，查看仓库已具备的控制措施以及仍需核实的证据。');
@@ -189,8 +191,8 @@ test('l10n: Dark Factory Readiness overview and Copilot action strings resolve i
 	assert.equal(t('readiness.overview.atStage', 2, 0), '2 at Stage 0');
 	assert.equal(t('readiness.overview.withAntiPatterns', 1), '1 with anti-patterns');
 	assert.equal(t('readiness.overview.hint'), 'Click a repository to see what blocks its next stage.');
-	assert.equal(t('readiness.disclaimer.headline'), 'It never tells you that you are ready to go dark.');
-	assert.equal(t('readiness.disclaimer.body'), 'It reports which governance and evidence controls each repository actually has — Stage 5 (a bounded dark factory) is never awarded.');
+	assert.equal(t('readiness.disclaimer.headline'), 'A checklist, not a green light.');
+	assert.equal(t('readiness.disclaimer.body'), 'For each repository this shows which safeguards are already in place (reviews, CI checks, agent instructions) and what is still missing for the next stage. It never says a repo is ready to run without people watching, so Stage 5 is never given out.');
 	assert.equal(t('readiness.about.title'), '📋 What this measures');
 	assert.equal(t('readiness.about.weakEvidence'), 'A green build from an unbounded agent is weak evidence.');
 	assert.equal(t('readiness.about.stage5'), 'Stage 5 is never awarded: its defining evidence is not machine-detectable.');
@@ -207,7 +209,7 @@ test('l10n: Dark Factory Readiness overview and Copilot action strings resolve i
 		assert.equal(t('readiness.overview.atStage', 2, 0), '2 个处于第 0 阶段');
 		assert.equal(t('readiness.overview.withAntiPatterns', 1), '1 个存在反模式');
 		assert.equal(t('readiness.overview.hint'), '点击仓库，查看阻碍其进入下一阶段的因素。');
-		assert.equal(t('readiness.disclaimer.headline'), '它从不告诉你已经可以“无人值守”运行。');
+		assert.equal(t('readiness.disclaimer.headline'), '这是一份检查清单，而不是绿灯。');
 		assert.equal(t('readiness.about.title'), '📋 衡量内容');
 		assert.equal(t('readiness.about.stage5'), '第 5 阶段永远不会被授予：其决定性证据无法由机器检测。');
 		assert.equal(t('readiness.action.draft'), '🤖 起草 Copilot Chat 提示词');

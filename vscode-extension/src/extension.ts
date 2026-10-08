@@ -320,7 +320,7 @@ import {
  */
 const EFFICIENCY_BEHAVIOR_WEEKS = 12;
 
-import { scanDarkFactoryReadiness } from './darkFactoryService';
+import { DARK_FACTORY_CACHE_KEY, isReportStale, parseCacheEntry, readinessScopeKey, scanDarkFactoryReadiness } from './darkFactoryService';
 
 // --- Maturity & fluency scoring ---
 import {
@@ -468,6 +468,7 @@ import {
 	type WhatsNewState,
 } from './whatsNew/announcer';
 import { hasVisitedSince, recordVisit, sanitizeVisits, type ViewVisitMap } from './whatsNew/visits';
+import { toolCallsByEditorToRecord } from './webview/usage/toolEditors';
 
 type LocalViewRegressionProbeResult = {
   pass: boolean;
@@ -1570,6 +1571,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Accumulated per session in aggregateSessionFileIntoStats, reset at the top of each refresh.
 	private _skillCallsByEditorAccum: Map<string, Map<string, number>> = new Map();
 	private _lastSkillCallsByEditor?: Record<string, Record<string, number>>;
+	// Per-tool, per-editor call counts for the last-30-days window, so the "Report Unknown Tools"
+	// issue can say which editor each unknown tool was seen in. Reset at the top of each refresh.
+	private _toolCallsByEditorAccum: Map<string, Map<string, number>> = new Map();
 	// Distinct workspace folder paths each skill was invoked from (last 30 days), used to
 	// backfill descriptions for skills whose repo isn't the one currently open (see
 	// findSkillDescriptionInWorkspaces).
@@ -6785,6 +6789,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._customizationFilesCache.clear();
 		this._pendingCustomizationScans.clear();
 		this._skillCallsByEditorAccum = new Map();
+		this._toolCallsByEditorAccum = new Map();
 		this._skillWorkspacePathsAccum = new Map();
 		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
 		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
@@ -6834,6 +6839,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			autoCompactionsLast7Days,
 			memoryFilesAnalysis: this.computeMemoryFilesAnalysis(startedAtGeneration),
 			claudeDesktopCoverage: await this.computeClaudeDesktopCoverage(),
+			toolCallsByEditor: this._buildToolCallsByEditor(),
 		};
 		this.lastUsageAnalysisStats = stats;
 		this._statsGeneration.usage = startedAtGeneration;
@@ -7947,6 +7953,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	/** Plain-object snapshot of `_toolCallsByEditorAccum` for the stats payload. */
+	private _buildToolCallsByEditor(): Record<string, Record<string, number>> {
+		return toolCallsByEditorToRecord(this._toolCallsByEditorAccum);
+	}
+
+	/**
+	 * Accumulate this session's tool calls (general tools, MCP tools and MCP servers) into
+	 * `_toolCallsByEditorAccum` (toolName -> editorSource -> count).
+	 */
+	private _accumulateToolCallsByEditor(sessionFile: string, analysis: SessionUsageAnalysis): void {
+		const sources = [analysis.toolCalls.byTool, analysis.mcpTools.byTool, analysis.mcpTools.byServer];
+		if (sources.every(s => Object.keys(s).length === 0)) { return; }
+		const editorSource = this.detectEditorSource(sessionFile);
+		// 'Unknown' means no editor could be identified; leave it out so reports fall back to the no-editor format.
+		if (editorSource === 'Unknown') { return; }
+		for (const source of sources) {
+			for (const [name, count] of Object.entries(source)) {
+				let byEditor = this._toolCallsByEditorAccum.get(name);
+				if (!byEditor) { byEditor = new Map(); this._toolCallsByEditorAccum.set(name, byEditor); }
+				byEditor.set(editorSource, (byEditor.get(editorSource) || 0) + count);
+			}
+		}
+	}
+
 	/**
 	 * Skill name -> description, for the Skill Usage tab. Three tiers, in order:
 	 * 1. `curationAnalysis.availableTools` (populated by `discoverSkillEntries()`, scoped to
@@ -8003,6 +8033,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts,
 				sessionData.workspaceFolderPath);
 			this._accumulateSkillCallsByEditor(sessionFile, analysis, sessionData.workspaceFolderPath);
+			this._accumulateToolCallsByEditor(sessionFile, analysis);
 		}
 		if (lastActivityUtcKey >= periods.monthUtcStartKey) {
 			periods.monthStats.sessions++;
@@ -10017,7 +10048,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				return toolName ? this._handleSuppressUnknownTool(toolName) : undefined;
 			},
 			loadRepoPrStats: () => this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats()),
-			loadReadiness: (message) => this.dispatch('loadReadiness:analysis', () => this.loadReadinessForUsage(message.requestId)),
+			loadReadiness: (message) => this.dispatch('loadReadiness:analysis', () => this.loadReadinessForUsage(message.requestId, message.force)),
 			checkCcrActivity: (message) => {
 				const owner = typeof message.owner === 'string' ? message.owner : '';
 				const repo = typeof message.repo === 'string' ? message.repo : '';
@@ -10133,6 +10164,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			backendConfigured: this.isBackendConfigured(),
 			readinessAvailable: true,
 			currentWorkspacePaths: workspacePaths,
+			toolCallsByEditor: analysisStats.toolCallsByEditor ?? {},
 			todaySessions: analysisStats.todaySessions || [],
 			claudeDesktopCoverage: analysisStats.claudeDesktopCoverage ?? null,
 			insights: this.buildCurrentInsights(analysisStats),
@@ -10902,10 +10934,9 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 * Filesystem-only plus the pull-request statistics the Usage Analysis view has
 	 * already fetched, so opening AI Readiness issues no extra GitHub calls.
 	 */
-	private runDarkFactoryScan(): DarkFactoryReport {
-		const openFolders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+	private runDarkFactoryScan(workspacePaths: readonly string[]): DarkFactoryReport {
 		return scanDarkFactoryReadiness({
-			workspacePaths: [...openFolders, ...this._buildWorkspacePaths()],
+			workspacePaths,
 			prStats: this._lastRepoPrStats,
 			enterpriseUri: getConfiguredGitHubEnterpriseUri(),
 		});
@@ -10916,17 +10947,45 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		await this.showUsageAnalysisOnTab('readiness');
 	}
 
-	private loadReadinessForUsage(requestId: unknown): void {
+	/**
+	 * Serve the readiness report, cache-first.
+	 *
+	 * A cached report is posted immediately so the tab is usable at once; a fresh scan
+	 * then runs in the background only when that cache is over a day old, or when the
+	 * user asked for one (`force`). With no cache the scan runs straight away.
+	 */
+	/** Open folders first, then every workspace path the usage matrix knows about. */
+	private darkFactoryCandidatePaths(): string[] {
+		const openFolders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+		return [...openFolders, ...this._buildWorkspacePaths()];
+	}
+
+	private loadReadinessForUsage(requestId: unknown, force: unknown): void {
 		const panel = this.analysisPanel;
 		if (!panel) { return; }
 		if (typeof requestId !== 'number' || !Number.isSafeInteger(requestId) || requestId < 1) {
 			this.warn('AI Readiness: received an invalid scan request id');
 			return;
 		}
+		const workspacePaths = this.darkFactoryCandidatePaths();
+		const scopeKey = readinessScopeKey(workspacePaths);
+		const cached = parseCacheEntry(this.context.globalState.get(DARK_FACTORY_CACHE_KEY), scopeKey, this.githubSession !== undefined);
+		const needsScan = force === true || !cached || isReportStale(cached);
+		if (cached && force !== true) {
+			void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report: cached, refreshing: needsScan });
+		}
+		if (!needsScan) { return; }
+		// Deferred so the cached report above paints before the synchronous scan blocks the host.
+		setTimeout(() => this.scanReadinessAndPost(panel, requestId, workspacePaths, scopeKey), 0);
+	}
+
+	private scanReadinessAndPost(panel: vscode.WebviewPanel, requestId: number, workspacePaths: readonly string[], scopeKey: string): void {
 		try {
-			const report = this.runDarkFactoryScan();
+			const report = this.runDarkFactoryScan(workspacePaths);
+			Promise.resolve(this.context.globalState.update(DARK_FACTORY_CACHE_KEY, { scopeKey, report }))
+				.catch(err => this.warn(`Dark Factory readiness cache could not be saved: ${err}`));
 			if (this.analysisPanel === panel) {
-				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report });
+				void panel.webview.postMessage({ command: 'readinessLoaded', requestId, report, refreshing: false });
 			}
 		} catch (err) {
 			this.warn(`Dark Factory readiness scan failed: ${err}`);
@@ -15113,6 +15172,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
       readinessAvailable: true,
       currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
       suppressedUnknownTools,
+      toolCallsByEditor: stats.toolCallsByEditor ?? {},
       todaySessions: stats.todaySessions || [],
       claudeDesktopCoverage: stats.claudeDesktopCoverage ?? null,
       use24HourTime: this.getUse24HourTimeSetting(),
