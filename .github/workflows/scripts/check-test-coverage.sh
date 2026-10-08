@@ -127,9 +127,14 @@ diff_lines() {
     | awk -v s="$sign" '/^@@/ {h=1; next} h && substr($0,1,1)==s {print}'
 }
 
-# strip_ext <path>: drop a trailing extension from the last path segment.
+# strip_ext <path>: drop a trailing extension from the last path segment;
+# declaration files (.d.ts/.d.mts/.d.cts) lose the compound extension.
 strip_ext() {
-  if [[ "${1##*/}" == *.* ]]; then printf '%s' "${1%.*}"; else printf '%s' "$1"; fi
+  case "${1##*/}" in
+    *.d.ts|*.d.mts|*.d.cts) printf '%s' "$1" | sed -E 's/\.d\.[mc]?ts$//' ;;
+    *.*) printf '%s' "${1%.*}" ;;
+    *) printf '%s' "$1" ;;
+  esac
 }
 
 # collapse_path <path>: resolve "." and ".." segments lexically.
@@ -159,7 +164,7 @@ if ! BASE_TREE="$(git ls-tree -r --name-only "$BASE_SHA")" || ! HEAD_TREE="$(git
   exit 1
 fi
 STEMS="$(printf '%s\n%s\n' "$BASE_TREE" "$HEAD_TREE" | sort -u \
-  | awk '{ s=$0; if (s ~ /\.[^.\/]*$/) sub(/\.[^.\/]*$/, "", s); printf "%s\t%s\n", s, $0 }')"
+  | awk '{ s=$0; if (s ~ /\.d\.[mc]?ts$/) sub(/\.d\.[mc]?ts$/, "", s); else if (s ~ /\.[^.\/]*$/) sub(/\.[^.\/]*$/, "", s); printf "%s\t%s\n", s, $0 }')"
 # stem_is_unique <stem> <path>: no file other than <path> has this stem.
 stem_is_unique() {
   ! printf '%s\n' "$STEMS" | awk -F'\t' -v s="$1" -v x="$2" '$1==s && $2!=x {f=1} END {exit !f}'
