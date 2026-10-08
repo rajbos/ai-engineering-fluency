@@ -57,13 +57,27 @@ function cssString(value: string): string {
 		: value.replace(/["\\]/g, '\\$&');
 }
 
-/** Resolves with the first element `find` returns, polling until it appears or the timeout passes. */
-export function waitForElement<T extends Element>(find: () => T | null, timeoutMs: number): Promise<T | null> {
+/**
+ * Resolves with the first element `find` returns, polling until it appears,
+ * the timeout passes, or `isAbandoned` reports that nobody needs the answer
+ * any more — so a superseded or cancelled reveal stops polling straight away
+ * instead of running out its whole budget.
+ */
+export function waitForElement<T extends Element>(
+	find: () => T | null,
+	timeoutMs: number,
+	isAbandoned: () => boolean = () => false,
+): Promise<T | null> {
 	const first = find();
 	if (first) { return Promise.resolve(first); }
 	return new Promise((resolve) => {
 		const started = Date.now();
 		const timer = setInterval(() => {
+			if (isAbandoned()) {
+				clearInterval(timer);
+				resolve(null);
+				return;
+			}
 			const found = find();
 			if (found || Date.now() - started >= timeoutMs) {
 				clearInterval(timer);
@@ -150,7 +164,7 @@ export async function revealSurface(request: SurfaceRevealRequest, budgetMs = RE
 	const superseded = (): boolean => generation !== revealGeneration;
 	const tab = request.tab;
 	if (tab) {
-		const tabButton = await waitForElement(() => findTabButton(tab), remaining());
+		const tabButton = await waitForElement(() => findTabButton(tab), remaining(), superseded);
 		if (!tabButton || superseded()) { return false; }
 		openGroupOf(tabButton);
 		tabButton.click();
@@ -158,13 +172,13 @@ export async function revealSurface(request: SurfaceRevealRequest, budgetMs = RE
 	const subtabId = request.subtab;
 	if (subtabId) {
 		const subtab = await waitForElement(() =>
-			document.querySelector<HTMLElement>(`.subtab[data-subtab="${cssString(subtabId)}"]`), remaining());
+			document.querySelector<HTMLElement>(`.subtab[data-subtab="${cssString(subtabId)}"]`), remaining(), superseded);
 		if (!subtab || superseded()) { return false; }
 		subtab.click();
 	}
 	const find = targetFinder(request);
 	if (!find) { return true; }
-	const found = await waitForElement(find, remaining());
+	const found = await waitForElement(find, remaining(), superseded);
 	if (!found || superseded()) { return false; }
 	revealHiddenAncestors(found);
 	// Let the tab switch paint before scrolling, or the scroll measures the old
@@ -173,7 +187,7 @@ export async function revealSurface(request: SurfaceRevealRequest, budgetMs = RE
 	// leave `found` detached and the scroll landing nowhere.
 	await new Promise((resolve) => setTimeout(resolve, PAINT_DELAY_MS));
 	if (superseded()) { return false; }
-	const target = found.isConnected ? found : await waitForElement(find, remaining());
+	const target = found.isConnected ? found : await waitForElement(find, remaining(), superseded);
 	if (!target || superseded()) { return false; }
 	revealHiddenAncestors(target);
 	target.scrollIntoView({ behavior: 'smooth', block: 'start' });

@@ -270,3 +270,17 @@ test('installSurfaceNavigation: a cancelReveal message abandons the waiting reve
 	assert.deepEqual(posted, [{ command: 'surfaceNavReady', view: 'dashboard' }]);
 	assert.deepEqual(scrolled, []);
 });
+
+test('revealSurface: a cancelled or superseded reveal stops polling at once instead of running out its budget', async () => {
+	installDom('<div id="root"></div>');
+	const started = Date.now();
+	const cancelled = revealSurface({ command: 'revealSurface', anchor: 'never' }, 10_000);
+	await sleep(50);
+	cancelReveal();
+	assert.equal(await cancelled, false);
+	const superseded = revealSurface({ command: 'revealSurface', anchor: 'never-either' }, 10_000);
+	await sleep(50);
+	void revealSurface({ command: 'revealSurface' }, 10_000);
+	assert.equal(await superseded, false);
+	assert.ok(Date.now() - started < 1_000, 'both waits ended within a poll interval of being abandoned');
+});
