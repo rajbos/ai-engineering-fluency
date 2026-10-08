@@ -1,5 +1,6 @@
 // View index tab of the What's New panel: a searchable tree of every view, tab and section.
 import { el } from '../shared/domUtils';
+import { localize, localizeFormat } from '../shared/localization';
 import { VIEW_INDEX, flattenViewIndex, type ViewIndexNode } from '../../whatsNew/viewIndex';
 import { highlightRanges, searchViewIndex } from './viewIndexSearch';
 
@@ -35,7 +36,7 @@ function appendHighlighted(target: HTMLElement, text: string, query: string): vo
 }
 
 function buildOpenButton(node: ViewIndexNode, post: PostMessage): HTMLButtonElement {
-	const label = `Open ${PATH_BY_ID.get(node.id)?.join(' › ') ?? node.title}`;
+	const label = localizeFormat('viewIndex.open', PATH_BY_ID.get(node.id)?.join(' › ') ?? node.title);
 	const button = el('button', 'index-open');
 	button.type = 'button';
 	button.id = `index-open-${node.id}`;
@@ -78,7 +79,7 @@ function buildNode(node: ViewIndexNode, depth: number, ctx: RenderContext): HTML
 	toggle.type = 'button';
 	if (hasChildren) {
 		toggle.append(el('span', `codicon codicon-chevron-${expanded ? 'down' : 'right'}`));
-		toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} ${node.title}`);
+		toggle.setAttribute('aria-label', localizeFormat(expanded ? 'viewIndex.collapse' : 'viewIndex.expand', node.title));
 		toggle.addEventListener('click', () => {
 			state.toggled.set(node.id, !expanded);
 			ctx.rerender();
@@ -146,20 +147,20 @@ function renderTree(container: HTMLElement, status: HTMLElement, post: PostMessa
 
 	const tree = el('ul', 'index-tree');
 	tree.setAttribute('role', 'tree');
-	tree.setAttribute('aria-label', 'View index');
+	tree.setAttribute('aria-label', localize('viewIndex.treeLabel'));
 	VIEW_INDEX.forEach((view) => {
 		const node = buildNode(view, 0, ctx);
 		if (node) { tree.append(node); }
 	});
 
 	if (result && result.matchedIds.length === 0) {
-		status.textContent = `Nothing matches “${query}”. Try fewer or shorter words.`;
-		container.replaceChildren(el('div', 'index-empty', 'No matching views, tabs or sections.'));
+		status.textContent = localizeFormat('viewIndex.noMatchStatus', query);
+		container.replaceChildren(el('div', 'index-empty', localize('viewIndex.noMatch')));
 		return;
 	}
 	status.textContent = result
-		? `${result.matchedIds.length} match${result.matchedIds.length === 1 ? '' : 'es'}`
-		: `${ENTRIES.length} entries across ${VIEW_INDEX.length} views`;
+		? (result.matchedIds.length === 1 ? localize('viewIndex.matchOne') : localizeFormat('viewIndex.matchMany', result.matchedIds.length))
+		: localizeFormat('viewIndex.summary', ENTRIES.length, VIEW_INDEX.length);
 	container.replaceChildren(tree);
 }
 
@@ -167,9 +168,7 @@ function renderTree(container: HTMLElement, status: HTMLElement, post: PostMessa
 export function buildViewIndexTab(post: PostMessage): HTMLElement {
 	const panel = el('div', 'index-panel');
 
-	panel.append(el('div', 'intro',
-		'Every view, tab and section in the extension. Search by name, by what it shows, or by a word you remember — the search is forgiving about typos and word order. ' +
-		'Use the open button on a line to go straight there.'));
+	panel.append(el('div', 'intro', localize('viewIndex.intro')));
 
 	const searchRow = el('div', 'index-search-row');
 	const icon = el('span', 'codicon codicon-search index-search-icon');
@@ -177,8 +176,8 @@ export function buildViewIndexTab(post: PostMessage): HTMLElement {
 	const input = el('input', 'index-search');
 	input.id = 'view-index-search';
 	input.type = 'search';
-	input.placeholder = 'Search views, tabs and sections…';
-	input.setAttribute('aria-label', 'Search the view index');
+	input.placeholder = localize('viewIndex.searchPlaceholder');
+	input.setAttribute('aria-label', localize('viewIndex.searchLabel'));
 	input.autocomplete = 'off';
 	input.spellcheck = false;
 	input.value = state.query;

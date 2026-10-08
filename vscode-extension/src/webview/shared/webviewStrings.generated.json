@@ -357,5 +357,21 @@
   "usage.toolCuration.summary.unusedSkills": "📚 Unused Skills ({0})",
   "usage.toolCuration.help.unusedSkills": "💡 Est. overhead is per agent interaction. For plugin skills, click <em>{0}</em> to open the agent plugins view where you can uninstall the plugin. For workspace skills, update the description or remove the SKILL.md.",
   "usage.toolCuration.summary.builtin": "🔧 Built-in VS Code Tools ({0}) — {1} tokens overhead, not actionable",
-  "usage.toolCuration.help.builtin": "💡 These tools are provided by VS Code itself and cannot be disabled. They are excluded from the actionable overhead total above."
+  "usage.toolCuration.help.builtin": "💡 These tools are provided by VS Code itself and cannot be disabled. They are excluded from the actionable overhead total above.",
+  "whatsNew.tabs.label": "What's New sections",
+  "whatsNew.tab.releases": "📣 Releases",
+  "whatsNew.tab.index": "🧭 View index",
+  "whatsNew.footer": "Running version {0}. The full changelog, including fixes, ships with the extension.",
+  "viewIndex.intro": "Every view, tab and section in the extension. Search by name, by what it shows, or by a word you remember — the search is forgiving about typos and word order. Use the open button on a line to go straight there.",
+  "viewIndex.searchPlaceholder": "Search views, tabs and sections…",
+  "viewIndex.searchLabel": "Search the view index",
+  "viewIndex.treeLabel": "View index",
+  "viewIndex.expand": "Expand {0}",
+  "viewIndex.collapse": "Collapse {0}",
+  "viewIndex.open": "Open {0}",
+  "viewIndex.summary": "{0} entries across {1} views",
+  "viewIndex.matchOne": "1 match",
+  "viewIndex.matchMany": "{0} matches",
+  "viewIndex.noMatchStatus": "Nothing matches “{0}”. Try fewer or shorter words.",
+  "viewIndex.noMatch": "No matching views, tabs or sections."
 }

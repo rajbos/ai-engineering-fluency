@@ -1718,6 +1718,11 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 	assert.ok(t('whatsNew.feature.usage.tool-execution-stats.description').includes('cost-vs-speed map'));
 	assert.equal(t('whatsNew.feature.whatsnew.view-index.title'), 'View index');
 	assert.ok(t('whatsNew.feature.whatsnew.view-index.description').startsWith('A searchable map of every view, tab and section'));
+	assert.equal(t('whatsNew.footer', '0.19.1'), 'Running version 0.19.1. The full changelog, including fixes, ships with the extension.');
+	assert.equal(t('viewIndex.summary', '97', '10'), '97 entries across 10 views');
+	assert.equal(t('viewIndex.matchMany', '3'), '3 matches');
+	assert.equal(t('viewIndex.noMatchStatus', 'xyz'), 'Nothing matches “xyz”. Try fewer or shorter words.');
+	assert.equal(t('viewIndex.searchPlaceholder'), 'Search views, tabs and sections…');
 	mock.setLanguage('zh-cn');
 	try {
 		assert.equal(t('usage.toolExec.tip.reliability', 'View', '30', '10'), 'View：成功 30 次，失败 10 次');
@@ -1726,6 +1731,9 @@ test('l10n: tool-execution tooltips, table headers and the 0.19.1 What\'s New en
 		assert.equal(t('usage.toolExec.empty.latency'), '暂无工具延迟数据。该数据来自 Copilot CLI、JetBrains、Claude Code 和 Claude Desktop 会话。');
 		assert.equal(t('whatsNew.feature.usage.tool-execution-stats.title'), '工具可靠性、延迟与 MCP 健康度');
 		assert.equal(t('whatsNew.feature.whatsnew.view-index.title'), '视图索引');
+		assert.equal(t('viewIndex.summary', '97', '10'), '10 个视图中共 97 个条目');
+		assert.equal(t('viewIndex.matchMany', '3'), '3 个匹配项');
+		assert.equal(t('whatsNew.tab.index'), '🧭 视图索引');
 		assert.equal(t('whatsNew.release.0.19.1.headline'), '工具与集成标签页现在可以显示每个工具的可靠性和速度、哪些 MCP 服务器会失败，以及内置、子代理与技能工具的成本与速度图。');
 	} finally {
 		mock.setLanguage('en');

@@ -357,5 +357,21 @@
   "usage.toolCuration.summary.unusedSkills",
   "usage.toolCuration.help.unusedSkills",
   "usage.toolCuration.summary.builtin",
-  "usage.toolCuration.help.builtin"
+  "usage.toolCuration.help.builtin",
+  "whatsNew.tabs.label",
+  "whatsNew.tab.releases",
+  "whatsNew.tab.index",
+  "whatsNew.footer",
+  "viewIndex.intro",
+  "viewIndex.searchPlaceholder",
+  "viewIndex.searchLabel",
+  "viewIndex.treeLabel",
+  "viewIndex.expand",
+  "viewIndex.collapse",
+  "viewIndex.open",
+  "viewIndex.summary",
+  "viewIndex.matchOne",
+  "viewIndex.matchMany",
+  "viewIndex.noMatchStatus",
+  "viewIndex.noMatch"
 ]

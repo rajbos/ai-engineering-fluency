@@ -9,6 +9,7 @@ import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { applyWebviewLocale } from '../shared/webviewLocale';
 import { registerMessageHandler } from '../shared/messageHandler';
 import { buildViewIndexTab } from './viewIndexTab';
+import { localize, localizeFormat } from '../shared/localization';
 import { installSurfaceNavigation } from '../shared/surfaceNavigation';
 
 /** One feature as the host projects it for rendering. Mirrors `WhatsNewFeature` plus view state. */
@@ -55,9 +56,9 @@ const initialData = getWindowData<WhatsNewViewData>('__INITIAL_WHATSNEW__');
 
 applyWebviewLocale(initialData);
 
-const TABS: ReadonlyArray<{ id: WhatsNewTab; label: string }> = [
-	{ id: 'releases', label: '📣 Releases' },
-	{ id: 'index', label: '🧭 View index' },
+const TABS: ReadonlyArray<{ id: WhatsNewTab; labelKey: string }> = [
+	{ id: 'releases', labelKey: 'whatsNew.tab.releases' },
+	{ id: 'index', labelKey: 'whatsNew.tab.index' },
 ];
 
 let activeTab: WhatsNewTab = vscode.getState()?.activeTab === 'index' ? 'index' : 'releases';
@@ -83,9 +84,9 @@ function activateTab(tab: WhatsNewTab): void {
 function buildTabBar(): HTMLElement {
 	const bar = el('div', 'wn-tabs');
 	bar.setAttribute('role', 'tablist');
-	bar.setAttribute('aria-label', "What's New sections");
-	TABS.forEach(({ id, label }, index) => {
-		const button = el('button', 'wn-tab', label);
+	bar.setAttribute('aria-label', localize('whatsNew.tabs.label'));
+	TABS.forEach(({ id, labelKey }, index) => {
+		const button = el('button', 'wn-tab', localize(labelKey));
 		button.type = 'button';
 		button.id = `wn-tab-${id}`;
 		button.dataset.tab = id;
@@ -214,7 +215,7 @@ function render(data: WhatsNewViewData): void {
 	);
 	const releases = el('div', 'releases');
 	data.releases.forEach((release) => releases.append(buildRelease(release)));
-	const footer = el('div', 'footer', `Running version ${data.currentVersion}. The full changelog, including fixes, ships with the extension.`);
+	const footer = el('div', 'footer', localizeFormat('whatsNew.footer', data.currentVersion));
 	container.append(buildTabPanel('releases', intro, releases, footer));
 	container.append(buildTabPanel('index', buildViewIndexTab((message) => vscode.postMessage(message))));
 
