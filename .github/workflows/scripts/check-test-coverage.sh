@@ -247,8 +247,9 @@ for i in "${!REC_PATH[@]}"; do
       DELETION_ONLY_FILES="${DELETION_ONLY_FILES}${file}"$'\n'
     # A rename only counts as a pure source rename when the old path was
     # already production source; moving a file in from examples/ or a test
-    # directory introduces new production code.
-    elif [ -n "$old" ] && [ "$added" != "-" ] && is_source_file "$old" && { [ "$added" = "0" ] || only_imports "$(diff_lines + "$old" "$file")" "$(diff_lines - "$old" "$file")" "$(dirname "$file")" "$(dirname "$old")"; }; then
+    # directory, or promoting a test file (src/test/x.ts -> src/x.ts), introduces
+    # new production code.
+    elif [ -n "$old" ] && [ "$added" != "-" ] && is_source_file "$old" && ! is_test_file "$old" && { [ "$added" = "0" ] || only_imports "$(diff_lines + "$old" "$file")" "$(diff_lines - "$old" "$file")" "$(dirname "$file")" "$(dirname "$old")"; }; then
       RENAME_ONLY_FILES="${RENAME_ONLY_FILES}${old} -> ${file}"$'\n'
     elif [ -z "$old" ] && [ "$added" != "-" ] && only_imports "$(diff_lines + "" "$file")" "$(diff_lines - "" "$file")" "$(dirname "$file")" "$(dirname "$file")"; then
       IMPORT_ONLY_FILES="${IMPORT_ONLY_FILES}${file}"$'\n'
