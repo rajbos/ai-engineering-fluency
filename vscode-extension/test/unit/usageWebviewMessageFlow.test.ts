@@ -694,6 +694,8 @@ test('"Delete anyway" shows size, then progress, then the final state on the row
 	harness.post({ command: 'worktreeDeleteResult', path: worktreePath, status: 'deleted' });
 	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Deleted'), 'expected the final deleted state');
 	assert.ok(!harness.text('.worktree-cleanup-log')?.includes('Could not delete worktree.'), 'a successful retry must not keep the old failure text');
+	assert.ok(harness.text('.worktree-cleanup-log')?.includes('Deleted') && harness.window.document.body.textContent?.includes('1 deleted'), 'the summary must count the retried worktree as deleted');
+	assert.ok(harness.window.document.body.textContent?.includes('0 errors'), 'the summary must not keep the original error count');
 });
 
 test('the size chip reuses the scanned worktree size instead of a second disk walk', async () => {

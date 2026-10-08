@@ -4650,9 +4650,11 @@ function renderWorktreeCleanupStatus(): string {
     </div>${renderWorktreeCleanupLog()}`;
 	}
 	if (worktreeCleanupLog.length === 0) { return ""; }
-	const deleted = worktreeCleanupLog.filter((e) => e.status === "deleted").length;
-	const skipped = worktreeCleanupLog.filter((e) => e.status === "skipped").length;
-	const errors = worktreeCleanupLog.filter((e) => e.status === "error").length;
+	// A row the user later removed with "Delete anyway…" counts as deleted, not as its original outcome.
+	const retried = (e: WorktreeCleanupLogEntry) => worktreeRetryState.get(e.path)?.status === "deleted";
+	const deleted = worktreeCleanupLog.filter((e) => e.status === "deleted" || retried(e)).length;
+	const skipped = worktreeCleanupLog.filter((e) => e.status === "skipped" && !retried(e)).length;
+	const errors = worktreeCleanupLog.filter((e) => e.status === "error" && !retried(e)).length;
 	return `<div class="info-box" style="margin-top: 12px;">
     <div class="info-box-title">🧹 Cleanup finished</div>
     <div>✅ ${deleted} deleted · ⏭️ ${skipped} skipped (uncommitted/unpushed) · ${errors > 0 ? `❌ ${errors} error${errors === 1 ? "" : "s"}` : "0 errors"}</div>
