@@ -403,10 +403,27 @@ export function readGitOriginUrl(repoRoot: string): string | undefined {
  */
 export function resolveRepoIdentity(repoRoot: string): { key: string; mainRoot?: string } {
 	const configDir = resolveGitConfigDir(repoRoot);
-	if (!configDir) { return { key: path.resolve(repoRoot) }; }
-	const key = path.resolve(configDir);
-	const mainRoot = path.basename(key) === '.git' ? path.dirname(key) : undefined;
+	if (!configDir) { return { key: canonicalPath(repoRoot) }; }
+	// Canonical, so a checkout reached through a symlink and a worktree whose gitdir
+	// points at the physical path still share one key.
+	const key = canonicalPath(configDir);
+	const mainRoot = path.basename(key) === '.git' && !isBareRepository(key) ? path.dirname(key) : undefined;
 	return { key, mainRoot };
+}
+
+/** `realpath` when the path exists, otherwise the plain resolved path. */
+function canonicalPath(target: string): string {
+	try {
+		return fs.realpathSync.native(target);
+	} catch {
+		return path.resolve(target);
+	}
+}
+
+/** A bare repository (even one that happens to be named `.git`) has no working checkout beside it. */
+function isBareRepository(gitDir: string): boolean {
+	const config = readPointerFile(path.join(gitDir, 'config'));
+	return config !== undefined && /^\s*bare\s*=\s*true\s*$/im.test(config);
 }
 
 /** Markdown files under `.github/agents/` that are documentation, not agent definitions. */

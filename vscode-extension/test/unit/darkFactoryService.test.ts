@@ -132,6 +132,29 @@ test('selectRepoRoots: falls back to the first worktree when the main checkout i
 	assert.deepEqual(selectRepoRoots([wtA, wtB]).roots, [wtA]);
 });
 
+test('selectRepoRoots: a bare repository named .git is not mistaken for a main checkout', () => {
+	const container = makeRepo({});
+	fs.writeFileSync(path.join(container, '.git', 'config'), '[core]\n\tbare = true\n', 'utf8');
+	const wt = makeWorktree(container, 'a');
+	assert.deepEqual(selectRepoRoots([wt]).roots, [wt]);
+});
+
+test('selectRepoRoots: a symlinked main checkout and its worktree are one repository', (t) => {
+	const main = makeRepo({});
+	const wt = makeWorktree(main, 'a');
+	const alias = path.join(os.tmpdir(), `df-alias-${process.pid}-${Date.now()}`);
+	try {
+		fs.symlinkSync(main, alias, 'junction');
+	} catch {
+		t.skip('cannot create symlinks here');
+		return;
+	}
+	TEMP_ROOTS.push(alias);
+	const { roots, skipped } = selectRepoRoots([alias, wt]);
+	assert.equal(roots.length, 1);
+	assert.equal(skipped, 0);
+});
+
 test('selectRepoRoots: caps the scan and reports how many repositories it skipped', () => {
 	const repos = Array.from({ length: MAX_SCANNED_REPOS + 3 }, () => makeRepo({}));
 	const { roots, skipped } = selectRepoRoots(repos);
