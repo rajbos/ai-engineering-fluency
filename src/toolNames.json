@@ -1481,4 +1481,8 @@
   ,"tavily-tavily_map": "Tavily Tavily Map"
   ,"workiq-fetch": "Worki Fetch"
   ,"reply_to_review_thread": "Reply to review thread"
+  ,"mcp_pylance_mcp_s_pylanceLSP": "Pylance: LSP"
+  ,"mcp_pylance_mcp_s_pylanceTypeAuthoring": "Pylance: Type Authoring"
+  ,"pylance": "Pylance"
+  ,"request_user_input_async": "Request User Input Async"
 }
